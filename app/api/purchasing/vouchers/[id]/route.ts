@@ -30,11 +30,11 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
 
 type PatchBody = {
   header?: {
-    voucher_date?: string; currency?: string; fx_rate?: unknown; ship_method?: string; ship_rate?: unknown; ship_manual_total?: unknown; note?: string | null; seller_name?: string;
+    voucher_date?: string; currency?: string; fx_rate?: unknown; ship_method?: string; ship_rate?: unknown; ship_rate_cube?: unknown; ship_rate_kg?: unknown; ship_manual_total?: unknown; note?: string | null; seller_name?: string;
     carrier_id?: string | null; carrier_name?: string | null; tracking_no?: string | null;
     shipping_bill_id?: string | null; shipping_payment_status?: string; shipping_paid_date?: string | null;
   };
-  lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown }[];
+  lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown; ship_method?: string | null }[];
 };
 
 export async function PATCH(request: NextRequest, { params }: Params): Promise<NextResponse> {
@@ -72,6 +72,8 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       patch.ship_method = h.ship_method;
     }
     if (h.ship_rate !== undefined) patch.ship_rate = optNum(h.ship_rate);
+    if (h.ship_rate_cube !== undefined) patch.ship_rate_cube = optNum(h.ship_rate_cube);
+    if (h.ship_rate_kg !== undefined) patch.ship_rate_kg = optNum(h.ship_rate_kg);
     if (h.ship_manual_total !== undefined) patch.ship_manual_total = optNum(h.ship_manual_total);
     if (h.note !== undefined) patch.note = h.note ? String(h.note) : null;
     if (h.seller_name !== undefined) patch.seller_name = String(h.seller_name ?? "").trim() || null;
@@ -92,6 +94,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       }
       if (l.cbm_per_unit !== undefined) patch.cbm_per_unit = optNum(l.cbm_per_unit);
       if (l.kg_per_unit !== undefined) patch.kg_per_unit = optNum(l.kg_per_unit);
+      if (l.ship_method !== undefined) patch.ship_method = l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : null;
       if (Object.keys(patch).length) {
         const { error } = await admin.from("purchase_voucher_lines_v2").update(patch).eq("id", String(l.id)).eq("voucher_id", id);
         if (error) return NextResponse.json({ error: "บันทึกรายการไม่สำเร็จ: " + error.message }, { status: 400 });

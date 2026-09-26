@@ -24,6 +24,7 @@ export type VoucherHeader = {
   seller_name: string | null; seller_partner_id: string | null;
   currency: string; fx_rate: number | null;
   ship_method: ShipMethod; ship_rate: number | null; ship_manual_total: number | null; ship_total_thb: number;
+  ship_rate_cube: number | null; ship_rate_kg: number | null;   // 2 เรท (บรรทัดเลือกวิธีคิดเองได้)
   total_cbm: number | null; total_kg: number | null;
   subtotal_foreign: number; subtotal_thb: number; grand_total_thb: number;
   note: string | null; created_by: string | null; confirmed_by: string | null; confirmed_at: string | null;
@@ -42,6 +43,7 @@ export type VoucherLine = {
   po_no: string | null; gr_no: string | null; item_sku_id: string | null; item_name: string; uom: string | null;
   qty: number; unit_price: number | null; unit_price_thb: number | null; line_total_thb: number | null;
   cbm_per_unit: number | null; kg_per_unit: number | null; ship_alloc_thb: number; landed_unit_thb: number | null;
+  ship_method: ShipMethod | null;   // วิธีคิดเฉพาะบรรทัด (null = ตามใบ) — มาจากใบส่งของ (BOX=คิว, CLOTH BLOCK=กก.)
   price_source: string | null; sort_order: number;
   code: string; image_url: string | null;
   parent_cbm: number | null; parent_kg: number | null;   // ค่าจาก Parent SKU (ไว้ปุ่ม "ใช้ค่าจากตัวแม่")
@@ -59,6 +61,7 @@ const toHeader = (v: Row, grNos: string[], poNos: string[], poPayments: PoPaymen
   currency: String(v.currency ?? "THB"), fx_rate: v.fx_rate == null ? null : num(v.fx_rate),
   ship_method: (SHIP_METHODS.includes(v.ship_method as ShipMethod) ? v.ship_method : "none") as ShipMethod,
   ship_rate: v.ship_rate == null ? null : num(v.ship_rate), ship_manual_total: v.ship_manual_total == null ? null : num(v.ship_manual_total),
+  ship_rate_cube: v.ship_rate_cube == null ? null : num(v.ship_rate_cube), ship_rate_kg: v.ship_rate_kg == null ? null : num(v.ship_rate_kg),
   ship_total_thb: num(v.ship_total_thb), total_cbm: v.total_cbm == null ? null : num(v.total_cbm), total_kg: v.total_kg == null ? null : num(v.total_kg),
   subtotal_foreign: num(v.subtotal_foreign), subtotal_thb: num(v.subtotal_thb), grand_total_thb: num(v.grand_total_thb),
   note: (v.note as string) ?? null, created_by: (v.created_by as string) ?? null, confirmed_by: (v.confirmed_by as string) ?? null,
@@ -165,7 +168,8 @@ export async function prefillFromGrs(admin: Admin, grIds: string[], actorName: s
   const { data: created, error: cErr } = await admin.from("purchase_vouchers_v2").insert({
     status: "draft", voucher_date: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
     seller_name: sellerName || null, seller_partner_id: sellerPartnerId, currency, fx_rate: fx,
-    ship_method: carrier?.method ?? "none", ship_rate: carrier?.rate ?? null, carrier_id: carrier?.id ?? null, carrier_name: carrier?.name ?? null,
+    ship_method: carrier?.method ?? "none", ship_rate: carrier?.rate ?? null, ship_rate_cube: carrier?.rate_cube ?? null, ship_rate_kg: carrier?.rate_kg ?? null,
+    carrier_id: carrier?.id ?? null, carrier_name: carrier?.name ?? null,
     created_by: actorName,
   }).select("id").single();
   if (cErr || !created) throw new Error("สร้างใบสำคัญไม่สำเร็จ: " + (cErr?.message ?? ""));
@@ -208,11 +212,19 @@ export async function recomputeVoucher(admin: Admin, voucherId: string): Promise
   const { data: v } = await admin.from("purchase_vouchers_v2").select("*").eq("id", voucherId).maybeSingle();
   if (!v) return;
   const h = v as Row;
-  const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("id, qty, unit_price, cbm_per_unit, kg_per_unit").eq("voucher_id", voucherId).not("is_active", "is", false).order("sort_order");
+  const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("id, qty, unit_price, cbm_per_unit, kg_per_unit, ship_method").eq("voucher_id", voucherId).not("is_active", "is", false).order("sort_order");
   const lines = (ls ?? []) as Row[];
   const calc = computeVoucher(
-    { currency: String(h.currency ?? "THB"), fx_rate: h.fx_rate == null ? null : num(h.fx_rate), ship_method: (h.ship_method as ShipMethod) ?? "none", ship_rate: h.ship_rate == null ? null : num(h.ship_rate), ship_manual_total: h.ship_manual_total == null ? null : num(h.ship_manual_total) },
-    lines.map((l) => ({ qty: num(l.qty), unit_price: l.unit_price == null ? null : num(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? null : num(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? null : num(l.kg_per_unit) })),
+    {
+      currency: String(h.currency ?? "THB"), fx_rate: h.fx_rate == null ? null : num(h.fx_rate), ship_method: (h.ship_method as ShipMethod) ?? "none",
+      ship_rate: h.ship_rate == null ? null : num(h.ship_rate),
+      ship_rate_cube: h.ship_rate_cube == null ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg == null ? null : num(h.ship_rate_kg),
+      ship_manual_total: h.ship_manual_total == null ? null : num(h.ship_manual_total),
+    },
+    lines.map((l) => ({
+      qty: num(l.qty), unit_price: l.unit_price == null ? null : num(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? null : num(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? null : num(l.kg_per_unit),
+      ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : null,
+    })),
   );
   for (let i = 0; i < lines.length; i++) {
     const c = calc.lines[i];
@@ -245,6 +257,7 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
       po_no: (l.po_no as string) ?? null, gr_no: (l.gr_no as string) ?? null, item_sku_id: (l.item_sku_id as string) ?? null, item_name: str(l.item_name), uom: (l.uom as string) ?? null,
       qty: num(l.qty), unit_price: nn("unit_price"), unit_price_thb: nn("unit_price_thb"), line_total_thb: nn("line_total_thb"),
       cbm_per_unit: nn("cbm_per_unit"), kg_per_unit: nn("kg_per_unit"), ship_alloc_thb: num(l.ship_alloc_thb), landed_unit_thb: nn("landed_unit_thb"),
+      ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : null,
       price_source: (l.price_source as string) ?? null, sort_order: num(l.sort_order),
       code: sku ? String(sku.code ?? "") : "", image_url: coverUrl(resolveSkuCover(sku).key),
       parent_cbm: basis.cbm, parent_kg: basis.kg,
@@ -274,10 +287,13 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
 }
 
 /** ร้านขนส่งหลัก (is_default) — ใบสำคัญใหม่ใช้เป็นค่าเริ่มต้นของวิธีคิด + เรท */
-export async function defaultCarrier(admin: Admin): Promise<{ id: string; name: string; method: ShipMethod; rate: number } | null> {
-  const { data } = await admin.from("freight_carriers").select("id, name, method, rate_thb, is_default, sort_order").not("is_active", "is", false).order("is_default", { ascending: false }).order("sort_order").limit(1);
+export async function defaultCarrier(admin: Admin): Promise<{ id: string; name: string; method: ShipMethod; rate: number; rate_cube: number | null; rate_kg: number | null } | null> {
+  const { data } = await admin.from("freight_carriers").select("id, name, method, rate_thb, rate_cube_thb, rate_kg_thb, is_default, sort_order").not("is_active", "is", false).order("is_default", { ascending: false }).order("sort_order").limit(1);
   const r = (data ?? [])[0] as Row | undefined;
   if (!r) return null;
   const method = (SHIP_METHODS.includes(r.method as ShipMethod) ? r.method : "cube") as ShipMethod;
-  return { id: String(r.id), name: String(r.name ?? ""), method: method === "none" ? "cube" : method, rate: num(r.rate_thb) };
+  const m: ShipMethod = method === "none" ? "cube" : method;
+  const rateCube = r.rate_cube_thb != null ? num(r.rate_cube_thb) : m === "cube" ? num(r.rate_thb) : null;
+  const rateKg = r.rate_kg_thb != null ? num(r.rate_kg_thb) : m === "weight" ? num(r.rate_thb) : null;
+  return { id: String(r.id), name: String(r.name ?? ""), method: m, rate: (m === "cube" ? rateCube : rateKg) ?? 0, rate_cube: rateCube, rate_kg: rateKg };
 }

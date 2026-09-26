@@ -23,8 +23,19 @@ export type DeliveryBillLine = {
   qty: number | null;
   weight_kg: number | null;
   m3: number | null;
+  method?: "cube" | "weight" | null;   // คิดค่าส่งกล่องนี้จากคิวหรือน้ำหนัก (auto จากกฎ Description · แก้ได้)
   voucher_line_ids: string[];    // สินค้าในใบสำคัญที่จับคู่กับบรรทัดนี้ (เลือกได้หลายตัว)
 };
+
+/** กฎ "คำใน Description → วิธีคิด" จากตั้งค่ากลาง (/m/freight-description-rules) · เรียงตาม sort_order กฎแรกที่เข้าชนะ */
+export async function loadDescriptionRules(admin: Admin): Promise<{ keyword: string; method: "cube" | "weight" }[]> {
+  const { data } = await admin.from("freight_description_rules").select("keyword, method, sort_order, is_active").not("is_active", "is", false).order("sort_order");
+  return ((data ?? []) as Row[]).map((r) => ({ keyword: str(r.keyword).toUpperCase(), method: r.method === "weight" ? "weight" as const : "cube" as const })).filter((r) => r.keyword);
+}
+export function methodForDescription(desc: string | null | undefined, rules: { keyword: string; method: "cube" | "weight" }[]): "cube" | "weight" | null {
+  const d = str(desc).toUpperCase(); if (!d) return null;
+  return rules.find((r) => d.includes(r.keyword))?.method ?? null;
+}
 export type DeliveryBillParsed = {
   tracking_no: string | null;    // EK-########
   bill_date: string | null;      // YYYY-MM-DD
@@ -70,7 +81,7 @@ export async function parseDeliveryBillImage(r2Key: string): Promise<{ parsed: D
     .map((l) => ({
       stock: str(l.stock) || null, po_no: str(l.po_no) || null, description: str(l.description) || null,
       pack: num(l.pack), package: str(l.package) || null, qty: num(l.qty), weight_kg: num(l.weight_kg), m3: num(l.m3),
-      voucher_line_ids: [],
+      method: null, voucher_line_ids: [],
     }))
     // กันแถว EK-/Total ที่ AI เผลอใส่มา
     .filter((l) => !(l.stock && /^EK-?\d+/i.test(l.stock) && !l.qty && !l.weight_kg) && !/^(total|sub-?total)$/i.test(str(l.description)));
@@ -115,14 +126,15 @@ export async function applyDeliveryBill(admin: Admin, voucherId: string, bill: {
   const { data: vls } = await admin.from("purchase_voucher_lines_v2").select("id, qty").eq("voucher_id", voucherId).not("is_active", "is", false);
   const qtyOf = new Map(((vls ?? []) as Row[]).map((r) => [String(r.id), Number(r.qty) || 0]));
   // สินค้าตัวหนึ่งอาจถูกจับคู่กับหลายบรรทัดในใบส่งของ (เช่น แยกกล่อง) → รวมค่าต่อชิ้น
-  const acc = new Map<string, { kg: number; cbm: number; hasKg: boolean; hasCbm: boolean }>();
+  const acc = new Map<string, { kg: number; cbm: number; hasKg: boolean; hasCbm: boolean; method: "cube" | "weight" | null }>();
   for (const l of bill.lines) {
     const targets = (l.voucher_line_ids ?? []).filter((id) => qtyOf.has(id)).map((id) => ({ id, qty: qtyOf.get(id) ?? 0 }));
     if (targets.length === 0) continue;
     for (const s of splitBillLineToVoucherLines(l, targets)) {
-      const a = acc.get(s.id) ?? { kg: 0, cbm: 0, hasKg: false, hasCbm: false };
+      const a = acc.get(s.id) ?? { kg: 0, cbm: 0, hasKg: false, hasCbm: false, method: null };
       if (s.kg_per_unit != null) { a.kg += s.kg_per_unit; a.hasKg = true; }
       if (s.cbm_per_unit != null) { a.cbm += s.cbm_per_unit; a.hasCbm = true; }
+      if (l.method === "cube" || l.method === "weight") a.method = l.method;   // วิธีคิดของกล่อง (BOX=คิว, CLOTH BLOCK=กก.) ติดไปที่สินค้า
       acc.set(s.id, a);
     }
   }
@@ -131,6 +143,7 @@ export async function applyDeliveryBill(admin: Admin, voucherId: string, bill: {
     const patch: Row = {};
     if (a.hasKg) patch.kg_per_unit = Math.round(a.kg * 1_000_000) / 1_000_000;
     if (a.hasCbm) patch.cbm_per_unit = Math.round(a.cbm * 1_000_000) / 1_000_000;
+    if (a.method) patch.ship_method = a.method;
     if (Object.keys(patch).length === 0) continue;
     const { error } = await admin.from("purchase_voucher_lines_v2").update(patch).eq("id", id).eq("voucher_id", voucherId);
     if (!error) n++;

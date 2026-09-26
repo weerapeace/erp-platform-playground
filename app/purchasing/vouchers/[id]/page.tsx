@@ -42,20 +42,27 @@ export default function PurchaseVoucherFormPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // ค่าที่กำลังแก้ (ยังไม่บันทึก)
-  const [h, setH] = useState<{ voucher_date: string; fx_rate: string; ship_method: ShipMethod; ship_rate: string; ship_manual_total: string; note: string; carrier_id: string; carrier_name: string }>({ voucher_date: "", fx_rate: "", ship_method: "none", ship_rate: "", ship_manual_total: "", note: "", carrier_id: "", carrier_name: "" });
-  // ร้านขนส่ง/เรทค่าส่ง จากตั้งค่ากลาง (/m/freight-carriers) — เลือกแล้วได้วิธีคิด + เรททันที
-  const [carriers, setCarriers] = useState<{ id: string; name: string; method: ShipMethod; rate_thb: number }[]>([]);
+  // หัวใบ: 2 เรท (฿/คิว, ฿/กก.) · ship_method = วิธีคิดเริ่มต้นของบรรทัดที่ไม่ระบุเอง
+  const [h, setH] = useState<{ voucher_date: string; fx_rate: string; ship_method: ShipMethod; ship_rate_cube: string; ship_rate_kg: string; ship_manual_total: string; note: string; carrier_id: string; carrier_name: string }>({ voucher_date: "", fx_rate: "", ship_method: "none", ship_rate_cube: "", ship_rate_kg: "", ship_manual_total: "", note: "", carrier_id: "", carrier_name: "" });
+  // ร้านขนส่ง/เรทค่าส่ง จากตั้งค่ากลาง (/m/freight-carriers) — เลือกแล้วได้วิธีคิดเริ่มต้น + 2 เรททันที
+  const [carriers, setCarriers] = useState<{ id: string; name: string; method: ShipMethod; rate_cube: number | null; rate_kg: number | null }[]>([]);
   useEffect(() => {
     apiFetch("/api/master-v2/freight-carriers?limit=100").then((r) => r.json()).then((j) => {
       const rows = ((j.data ?? []) as Record<string, unknown>[]).filter((c) => c.is_active !== false)
-        .map((c) => ({ id: String(c.id), name: String(c.name ?? ""), method: (c.method === "weight" ? "weight" : "cube") as ShipMethod, rate_thb: Number(c.rate_thb) || 0 }));
+        .map((c) => {
+          const method = (c.method === "weight" ? "weight" : "cube") as ShipMethod;
+          const legacy = Number(c.rate_thb) || 0;
+          return { id: String(c.id), name: String(c.name ?? ""), method,
+            rate_cube: c.rate_cube_thb != null ? Number(c.rate_cube_thb) : method === "cube" ? legacy : null,
+            rate_kg: c.rate_kg_thb != null ? Number(c.rate_kg_thb) : method === "weight" ? legacy : null };
+        });
       setCarriers(rows);
     }).catch(() => setCarriers([]));
   }, []);
   // บิลค่าส่งจากแอปโอนเงินจีน (china_bills.is_shipping) — ไว้ผูกกับใบสำคัญตอนจ่ายค่าส่ง
   const [shipBills, setShipBills] = useState<{ id: string; label: string }[]>([]);
   const [payBusy, setPayBusy] = useState(false);
-  const [ln, setLn] = useState<Record<string, { unit_price: string; cbm_per_unit: string; kg_per_unit: string }>>({});
+  const [ln, setLn] = useState<Record<string, { unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight" }>>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -64,9 +71,13 @@ export default function PurchaseVoucherFormPage() {
 
   const applyData = useCallback((d: Detail) => {
     setData(d);
-    setH({ voucher_date: d.header.voucher_date, fx_rate: d.header.fx_rate == null ? "" : String(d.header.fx_rate), ship_method: d.header.ship_method, ship_rate: d.header.ship_rate == null ? "" : String(d.header.ship_rate), ship_manual_total: d.header.ship_manual_total == null ? "" : String(d.header.ship_manual_total), note: d.header.note ?? "", carrier_id: d.header.carrier_id ?? "", carrier_name: d.header.carrier_name ?? "" });
+    const hd0 = d.header;
+    // ข้อมูลเก่ามีเรทตัวเดียว (ship_rate) → ใส่ให้ช่องของวิธีคิดเดิม
+    const rateCube = hd0.ship_rate_cube ?? (hd0.ship_method === "cube" ? hd0.ship_rate : null);
+    const rateKg = hd0.ship_rate_kg ?? (hd0.ship_method === "weight" ? hd0.ship_rate : null);
+    setH({ voucher_date: hd0.voucher_date, fx_rate: hd0.fx_rate == null ? "" : String(hd0.fx_rate), ship_method: hd0.ship_method, ship_rate_cube: rateCube == null ? "" : String(rateCube), ship_rate_kg: rateKg == null ? "" : String(rateKg), ship_manual_total: hd0.ship_manual_total == null ? "" : String(hd0.ship_manual_total), note: hd0.note ?? "", carrier_id: hd0.carrier_id ?? "", carrier_name: hd0.carrier_name ?? "" });
     const m: typeof ln = {};
-    for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit) };
+    for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit), ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : "" };
     setLn(m); setDirty(false);
   }, []);
 
@@ -91,21 +102,27 @@ export default function PurchaseVoucherFormPage() {
   const calc = useMemo(() => {
     if (!data) return null;
     return computeVoucher(
-      { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate: h.ship_rate === "" ? null : num(h.ship_rate), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total) },
-      data.lines.map((l) => { const e = ln[l.id]; return { qty: l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null }; }),
+      { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total) },
+      data.lines.map((l) => { const e = ln[l.id]; return { qty: l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null }; }),
     );
   }, [data, h, ln, currency]);
 
   const setHeader = (patch: Partial<typeof h>) => { setH((p) => ({ ...p, ...patch })); setDirty(true); };
-  const setLine = (lid: string, patch: Partial<{ unit_price: string; cbm_per_unit: string; kg_per_unit: string }>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
+  const setLine = (lid: string, patch: Partial<{ unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight" }>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
 
   const save = async (): Promise<boolean> => {
     if (!data) return false;
     setSaving(true);
     try {
       const body = {
-        header: { voucher_date: h.voucher_date, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate: h.ship_rate === "" ? null : num(h.ship_rate), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total), note: h.note || null, carrier_id: h.carrier_id || null, carrier_name: h.carrier_name || null },
-        lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit) }; }),
+        header: {
+          voucher_date: h.voucher_date, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method,
+          ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg),
+          // เรทเดิมตัวเดียว = เรทของวิธีคิดเริ่มต้น (ให้ของเก่าที่ยังอ่านช่องนี้ใช้ได้)
+          ship_rate: h.ship_method === "cube" ? (h.ship_rate_cube === "" ? null : num(h.ship_rate_cube)) : h.ship_method === "weight" ? (h.ship_rate_kg === "" ? null : num(h.ship_rate_kg)) : null,
+          ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total), note: h.note || null, carrier_id: h.carrier_id || null, carrier_name: h.carrier_name || null,
+        },
+        lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit), ship_method: e?.ship_method || null }; }),
       };
       const res = await apiFetch(`/api/purchasing/vouchers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json().catch(() => ({}));
@@ -182,7 +199,8 @@ export default function PurchaseVoucherFormPage() {
   const hd = data?.header;
   const grIds = [...new Set((data?.lines ?? []).map((l) => l.gr_id ?? "").filter(Boolean))];
   const t = calc?.totals;
-  const basisLabel = h.ship_method === "cube" ? "คิว/ชิ้น" : "กก./ชิ้น";
+  // มีค่าส่งให้คิดไหม = ค่าเริ่มต้นของใบไม่ใช่ "ไม่คิด" หรือมีบรรทัดที่ระบุวิธีคิดเอง
+  const anyShip = h.ship_method !== "none" || (data?.lines ?? []).some((l) => !!ln[l.id]?.ship_method);
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
 
   return (
@@ -239,33 +257,45 @@ export default function PurchaseVoucherFormPage() {
                     <span className="text-sm font-semibold text-slate-700">🚚 ค่าส่ง</span>
                     {/* ร้านขนส่งจากตั้งค่ากลาง — เลือกแล้วตั้งวิธีคิด + เรทให้ · เพิ่ม/แก้เรทที่เมนู ร้านขนส่ง */}
                     <select value={h.carrier_id} disabled={readonly}
-                      onChange={(e) => { const c = carriers.find((x) => x.id === e.target.value); if (!c) { setHeader({ carrier_id: "", carrier_name: "" }); return; } setHeader({ carrier_id: c.id, carrier_name: c.name, ship_method: c.method, ship_rate: String(c.rate_thb) }); }}
-                      className={`${inputCls} max-w-[16rem]`} title="ร้านขนส่ง / เรทค่าส่ง">
+                      onChange={(e) => { const c = carriers.find((x) => x.id === e.target.value); if (!c) { setHeader({ carrier_id: "", carrier_name: "" }); return; } setHeader({ carrier_id: c.id, carrier_name: c.name, ship_method: c.method, ship_rate_cube: c.rate_cube == null ? "" : String(c.rate_cube), ship_rate_kg: c.rate_kg == null ? "" : String(c.rate_kg) }); }}
+                      className={`${inputCls} max-w-[18rem]`} title="ร้านขนส่ง / เรทค่าส่ง">
                       <option value="">— ร้านขนส่ง (ไม่ระบุ) —</option>
-                      {carriers.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.method === "cube" ? `฿${fmtMoney(c.rate_thb, 0)}/คิว` : `฿${fmtMoney(c.rate_thb, 0)}/กก.`}</option>)}
+                      {carriers.map((c) => <option key={c.id} value={c.id}>{c.name} · {[c.rate_cube != null ? `฿${fmtMoney(c.rate_cube, 0)}/คิว` : null, c.rate_kg != null ? `฿${fmtMoney(c.rate_kg, 0)}/กก.` : null].filter(Boolean).join(" · ") || "ยังไม่ตั้งเรท"}</option>)}
                       {h.carrier_id && !carriers.some((c) => c.id === h.carrier_id) && <option value={h.carrier_id}>{h.carrier_name || "ร้านขนส่ง (ปิดใช้แล้ว)"}</option>}
                     </select>
                     {!readonly && <a href="/m/freight-carriers" target="_blank" rel="noreferrer" className="text-[11px] text-slate-400 hover:text-blue-600">⚙ ตั้งค่าร้านขนส่ง</a>}
                     <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs">
                       {(["none", "cube", "weight"] as ShipMethod[]).map((m, i) => (
-                        <button key={m} type="button" disabled={readonly} onClick={() => setHeader({ ship_method: m, ship_rate: h.ship_rate || (m === "cube" ? "3500" : m === "weight" ? "45" : "") })}
+                        <button key={m} type="button" disabled={readonly} onClick={() => setHeader({ ship_method: m })} title="วิธีคิดเริ่มต้น — บรรทัดที่ไม่ได้ระบุเอง (จากใบส่งของ) จะใช้แบบนี้"
                           className={`h-8 px-3 ${i > 0 ? "border-l border-slate-200" : ""} ${h.ship_method === m ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-70`}>{SHIP_LABEL[m]}</button>
                       ))}
                     </div>
-                    {h.ship_method !== "none" && (
+                    {anyShip && (
                       <>
-                        <label className="text-xs text-slate-500 flex items-center gap-1.5">เรท ฿/{h.ship_method === "cube" ? "คิว" : "กก."}
-                          <MoneyInput value={h.ship_rate} disabled={readonly} onChange={(v) => setHeader({ ship_rate: v })} className={`${inputCls} w-24 text-right`} />
+                        <label className="text-xs text-slate-500 flex items-center gap-1.5">฿/คิว
+                          <MoneyInput value={h.ship_rate_cube} disabled={readonly} onChange={(v) => setHeader({ ship_rate_cube: v })} className={`${inputCls} w-20 text-right ${(t?.charged_cbm ?? 0) > 0 && !num(h.ship_rate_cube) ? "border-amber-300" : ""}`} />
                         </label>
-                        <span className="text-xs text-slate-500">× {h.ship_method === "cube" ? `${(t?.total_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว` : `${(t?.total_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก.`} = <b className="text-slate-700">฿{fmtMoney(t?.ship_from_rate_thb)}</b></span>
+                        <label className="text-xs text-slate-500 flex items-center gap-1.5">฿/กก.
+                          <MoneyInput value={h.ship_rate_kg} disabled={readonly} onChange={(v) => setHeader({ ship_rate_kg: v })} className={`${inputCls} w-20 text-right ${(t?.charged_kg ?? 0) > 0 && !num(h.ship_rate_kg) ? "border-amber-300" : ""}`} />
+                        </label>
+                        <span className="text-xs text-slate-500">
+                          {(t?.charged_cbm ?? 0) > 0 && <>{(t?.charged_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × {fmtMoney(num(h.ship_rate_cube), 0)}</>}
+                          {(t?.charged_cbm ?? 0) > 0 && (t?.charged_kg ?? 0) > 0 && " + "}
+                          {(t?.charged_kg ?? 0) > 0 && <>{(t?.charged_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × {fmtMoney(num(h.ship_rate_kg), 0)}</>}
+                          {" = "}<b className="text-slate-700">฿{fmtMoney(t?.ship_from_rate_thb)}</b>
+                        </span>
                         <label className="text-xs text-slate-500 flex items-center gap-1.5 ml-2">ยอดจริงจากบิลขนส่ง (ทับ)
                           <MoneyInput value={h.ship_manual_total} disabled={readonly} onChange={(v) => setHeader({ ship_manual_total: v })} className={`${inputCls} w-28 text-right`} placeholder="ว่าง = ใช้เรท" />
                         </label>
                       </>
                     )}
                   </div>
-                  {h.ship_method !== "none" && (t?.missing_basis_count ?? 0) > 0 && (
-                    <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_basis_count} รายการยังไม่มี{basisLabel} (ไม่ได้ตั้งขนาด/น้ำหนักที่ Parent SKU) → รายการนั้นจะไม่ได้รับค่าส่งเฉลี่ย ใส่เองในตารางได้</div>
+                  <div className="mt-1.5 text-[11px] text-slate-400">แต่ละบรรทัดเลือกคิดจาก คิว หรือ น้ำหนัก ได้เอง (คอลัมน์ "คิดจาก") · อ่านใบส่งของแล้วระบบเลือกให้ตามกฎ Description (BOX = คิว, CLOTH BLOCK = น้ำหนัก) <a href="/m/freight-description-rules" target="_blank" rel="noreferrer" className="hover:text-blue-600 underline decoration-dotted">⚙ แก้กฎ</a></div>
+                  {anyShip && (t?.missing_basis_count ?? 0) > 0 && (
+                    <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_basis_count} รายการยังไม่มีคิว/กก. ตามวิธีที่เลือก (ไม่ได้ตั้งขนาด/น้ำหนักที่ Parent SKU และยังไม่ได้อ่านจากใบส่งของ) → รายการนั้นจะไม่ได้รับค่าส่ง ใส่เองในตารางได้</div>
+                  )}
+                  {anyShip && (t?.missing_rate_count ?? 0) > 0 && (
+                    <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_rate_count} รายการมีปริมาณแต่ยังไม่มีเรทของวิธีนั้น (ใส่ ฿/คิว หรือ ฿/กก. ให้ครบ)</div>
                   )}
                 </div>
 
@@ -287,18 +317,20 @@ export default function PurchaseVoucherFormPage() {
                           <th className="text-right px-2 py-2 font-medium">ราคา/หน่วย ({sym.trim()})</th>
                           {foreign && <th className="text-right px-2 py-2 font-medium">ราคา/หน่วย ฿</th>}
                           <th className="text-right px-2 py-2 font-medium">ค่าสินค้า ฿</th>
-                          {h.ship_method !== "none" && <th className="text-right px-2 py-2 font-medium">{basisLabel}</th>}
-                          {h.ship_method !== "none" && <th className="text-right px-2 py-2 font-medium">ค่าส่ง ฿</th>}
-                          {h.ship_method !== "none" && <th className="text-right px-2 py-2 font-medium">ถึงมือ/ชิ้น ฿</th>}
+                          {anyShip && <th className="text-left px-2 py-2 font-medium">คิดจาก</th>}
+                          {anyShip && <th className="text-right px-2 py-2 font-medium">คิว หรือ กก. /ชิ้น</th>}
+                          {anyShip && <th className="text-right px-2 py-2 font-medium">ค่าส่ง ฿</th>}
+                          {anyShip && <th className="text-right px-2 py-2 font-medium">ถึงมือ/ชิ้น ฿</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {data.lines.map((l, i) => {
-                          const e = ln[l.id] ?? { unit_price: "", cbm_per_unit: "", kg_per_unit: "" };
+                          const e = ln[l.id] ?? { unit_price: "", cbm_per_unit: "", kg_per_unit: "", ship_method: "" as const };
                           const c = calc.lines[i];
                           const src = SOURCE_BADGE[e.unit_price ? (l.price_source ?? "manual") : "none"];
-                          const basisKey = h.ship_method === "cube" ? "cbm_per_unit" : "kg_per_unit";
-                          const parentVal = h.ship_method === "cube" ? l.parent_cbm : l.parent_kg;
+                          const lineMethod = c.method;   // วิธีคิดที่ใช้จริงกับบรรทัดนี้ (ระบุเอง หรือตามใบ)
+                          const basisKey = lineMethod === "weight" ? "kg_per_unit" : "cbm_per_unit";
+                          const parentVal = lineMethod === "weight" ? l.parent_kg : l.parent_cbm;
                           return (
                             <tr key={l.id} className={!c.has_price ? "bg-amber-50/40" : ""}>
                               <td className="px-2 py-2">
@@ -319,17 +351,35 @@ export default function PurchaseVoucherFormPage() {
                               </td>
                               {foreign && <td className="px-2 py-2 text-right tabular-nums text-slate-600">{c.has_price ? fmtMoney(c.unit_price_thb) : "—"}</td>}
                               <td className="px-2 py-2 text-right tabular-nums text-slate-800">{c.has_price ? fmtMoney(c.line_total_thb) : "—"}</td>
-                              {h.ship_method !== "none" && (
+                              {anyShip && (
+                                <td className="px-2 py-2 whitespace-nowrap">
+                                  {/* วิธีคิดเฉพาะบรรทัด — ว่าง = ตามค่าเริ่มต้นของใบ · มาจากใบส่งของ (BOX=คิว, CLOTH BLOCK=กก.) หรือเลือกเอง */}
+                                  <select value={e.ship_method} disabled={readonly} onChange={(ev) => setLine(l.id, { ship_method: ev.target.value as "" | "cube" | "weight" })}
+                                    className={`${inputCls} w-28 text-xs ${e.ship_method ? "border-indigo-300 bg-indigo-50" : ""}`} title="คิดค่าส่งบรรทัดนี้จากอะไร">
+                                    <option value="">ตามใบ ({h.ship_method === "cube" ? "คิว" : h.ship_method === "weight" ? "กก." : "ไม่คิด"})</option>
+                                    <option value="cube">📦 คิว (M3)</option>
+                                    <option value="weight">⚖️ น้ำหนัก (kg)</option>
+                                  </select>
+                                </td>
+                              )}
+                              {anyShip && (
                                 <td className="px-2 py-2 text-right whitespace-nowrap">
-                                  <input type="number" inputMode="decimal" step="any" min={0} value={e[basisKey]} disabled={readonly} onChange={(ev) => setLine(l.id, { [basisKey]: ev.target.value })}
-                                    className={`${inputCls} w-24 text-right tabular-nums ${!e[basisKey] ? "border-amber-300" : ""}`} placeholder={h.ship_method === "cube" ? "0.0000" : "0.000"} />
-                                  {parentVal != null && String(parentVal) !== e[basisKey] && !readonly && (
-                                    <button onClick={() => setLine(l.id, { [basisKey]: String(parentVal) })} title="ใช้ค่าจากขนาด/น้ำหนักที่ตั้งไว้ที่ Parent SKU" className="block ml-auto text-[10px] text-indigo-600 hover:underline">ใช้ค่าตัวแม่ {parentVal}</button>
+                                  {lineMethod === "none" ? <span className="text-slate-300 text-xs">—</span> : (
+                                    <>
+                                      <div className="flex items-center justify-end gap-1">
+                                        <input type="number" inputMode="decimal" step="any" min={0} value={e[basisKey]} disabled={readonly} onChange={(ev) => setLine(l.id, { [basisKey]: ev.target.value })}
+                                          className={`${inputCls} w-24 text-right tabular-nums ${!e[basisKey] ? "border-amber-300" : ""}`} placeholder={lineMethod === "cube" ? "0.0000" : "0.000"} />
+                                        <span className="text-[10px] text-slate-400 w-6">{lineMethod === "cube" ? "คิว" : "กก."}</span>
+                                      </div>
+                                      {parentVal != null && String(parentVal) !== e[basisKey] && !readonly && (
+                                        <button onClick={() => setLine(l.id, { [basisKey]: String(parentVal) })} title="ใช้ค่าจากขนาด/น้ำหนักที่ตั้งไว้ที่ Parent SKU" className="block ml-auto text-[10px] text-indigo-600 hover:underline">ใช้ค่าตัวแม่ {parentVal}</button>
+                                      )}
+                                    </>
                                   )}
                                 </td>
                               )}
-                              {h.ship_method !== "none" && <td className="px-2 py-2 text-right tabular-nums text-orange-700">{c.ship_alloc_thb > 0 ? fmtMoney(c.ship_alloc_thb) : <span className="text-slate-300">-</span>}</td>}
-                              {h.ship_method !== "none" && <td className="px-2 py-2 text-right tabular-nums font-medium text-slate-800">{c.has_price ? fmtMoney(c.landed_unit_thb) : "—"}</td>}
+                              {anyShip && <td className="px-2 py-2 text-right tabular-nums text-orange-700">{c.ship_alloc_thb > 0 ? fmtMoney(c.ship_alloc_thb) : <span className="text-slate-300">-</span>}</td>}
+                              {anyShip && <td className="px-2 py-2 text-right tabular-nums font-medium text-slate-800">{c.has_price ? fmtMoney(c.landed_unit_thb) : "—"}</td>}
                             </tr>
                           );
                         })}
@@ -399,7 +449,8 @@ export default function PurchaseVoucherFormPage() {
                     {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {h.fx_rate || "—"}</dd></div>}
                     <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า (฿)</dt><dd className="tabular-nums font-medium">฿{fmtMoney(t?.subtotal_thb)}</dd></div>
                     <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง (฿) <span className="text-[10px] text-slate-400">แยก ไม่รวมในราคาสินค้า</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t?.ship_total_thb)}</dd></div>
-                    {h.ship_method !== "none" && <div className="flex justify-between text-xs"><dt className="text-slate-400">{h.ship_method === "cube" ? "คิวรวม" : "น้ำหนักรวม"}</dt><dd className="tabular-nums text-slate-500">{h.ship_method === "cube" ? `${(t?.total_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว` : `${(t?.total_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก.`}</dd></div>}
+                    {anyShip && (t?.charged_cbm ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามคิว</dt><dd className="tabular-nums text-slate-500">{(t?.charged_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × ฿{fmtMoney(num(h.ship_rate_cube), 0)}</dd></div>}
+                    {anyShip && (t?.charged_kg ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามน้ำหนัก</dt><dd className="tabular-nums text-slate-500">{(t?.charged_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × ฿{fmtMoney(num(h.ship_rate_kg), 0)}</dd></div>}
                     <div className="flex justify-between border-t border-slate-200 pt-2 mt-2"><dt className="text-slate-700 font-semibold">รวมทั้งสิ้น (฿)</dt><dd className="tabular-nums font-bold text-slate-900 text-base">฿{fmtMoney(t?.grand_total_thb)}</dd></div>
                   </dl>
                   {(t?.missing_price_count ?? 0) > 0 && <div className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ ยังไม่มีราคา {t?.missing_price_count} รายการ — ต้องใส่ให้ครบก่อนยืนยัน</div>}

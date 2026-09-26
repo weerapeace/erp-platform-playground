@@ -85,7 +85,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
   };
   const setLine = (billId: string, idx: number, patch: Partial<DeliveryBillLine>) =>
     setDraft((p) => { const d = p[billId]; if (!d) return p; const ls = d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)); return { ...p, [billId]: { ...d, lines: ls } }; });
-  const addLine = (billId: string) => setDraft((p) => { const d = p[billId]; if (!d) return p; return { ...p, [billId]: { ...d, lines: [...d.lines, { stock: null, po_no: null, description: null, pack: null, package: null, qty: null, weight_kg: null, m3: null, voucher_line_ids: [] }] } }; });
+  const addLine = (billId: string) => setDraft((p) => { const d = p[billId]; if (!d) return p; return { ...p, [billId]: { ...d, lines: [...d.lines, { stock: null, po_no: null, description: null, pack: null, package: null, qty: null, weight_kg: null, m3: null, method: null, voucher_line_ids: [] }] } }; });
   const delLine = (billId: string, idx: number) => setDraft((p) => { const d = p[billId]; if (!d) return p; return { ...p, [billId]: { ...d, lines: d.lines.filter((_, i) => i !== idx) } }; });
 
   const mapLine = mapFor ? draft[mapFor.billId]?.lines[mapFor.idx] : null;
@@ -95,7 +95,8 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
     <div className="bg-white border border-slate-200 rounded-xl p-4">
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={() => setOpen((v) => !v)} className="text-sm font-semibold text-slate-700">{open ? "▾" : "▸"} 📄 ใบส่งของจากขนส่ง (Delivery Bill) {bills.length > 0 && <span className="font-normal text-slate-400">· {bills.length} ใบ</span>}</button>
-        <span className="text-[11px] text-slate-400">อัปโหลดรูป → AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริงแทนค่าประเมิน</span>
+        <span className="text-[11px] text-slate-400">อัปโหลดรูป → AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → เลือกคิดจากคิว/กก. ตามกฎ Description → จับคู่สินค้า → ใช้ค่าจริงแทนค่าประเมิน</span>
+        <a href="/m/freight-description-rules" target="_blank" rel="noreferrer" className="text-[11px] text-slate-400 hover:text-blue-600">⚙ กฎ Description</a>
       </div>
       {open && (
         <div className="mt-3 space-y-4">
@@ -144,6 +145,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                         <th className="text-right px-2 py-1.5 font-medium">Qty</th>
                         <th className="text-right px-2 py-1.5 font-medium">Weight (กก.)</th>
                         <th className="text-right px-2 py-1.5 font-medium">M3 (คิว)</th>
+                        <th className="text-left px-2 py-1.5 font-medium" title="เลือกอัตโนมัติจากกฎ Description (BOX = คิว, CLOTH BLOCK = น้ำหนัก) แก้ได้">คิดค่าส่งจาก</th>
                         <th className="text-left px-2 py-1.5 font-medium">สินค้าที่จับคู่</th>
                         <th className="w-8"></th>
                       </tr>
@@ -161,6 +163,14 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                             <td className="px-2 py-1"><input type="number" step="any" value={l.qty ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { qty: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-16 text-right`} /></td>
                             <td className="px-2 py-1"><input type="number" step="any" value={l.weight_kg ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { weight_kg: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-20 text-right`} /></td>
                             <td className="px-2 py-1"><input type="number" step="any" value={l.m3 ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { m3: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-20 text-right`} /></td>
+                            <td className="px-2 py-1">
+                              <select value={l.method ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { method: (e.target.value || null) as "cube" | "weight" | null })}
+                                className={`${inp} w-28 ${l.method === "cube" ? "bg-sky-50 border-sky-200" : l.method === "weight" ? "bg-violet-50 border-violet-200" : "border-amber-300"}`}>
+                                <option value="">ตามใบ</option>
+                                <option value="cube">📦 คิว (M3)</option>
+                                <option value="weight">⚖️ น้ำหนัก (kg)</option>
+                              </select>
+                            </td>
                             <td className="px-2 py-1">
                               <button disabled={readonly} onClick={() => setMapFor({ billId: b.id, idx: i })} className={`h-8 px-2 rounded-md border text-left max-w-[16rem] truncate ${names.length ? "border-blue-200 bg-blue-50 text-blue-700" : "border-amber-300 bg-amber-50 text-amber-700"} disabled:opacity-70`} title={names.map((n) => `${n.code || ""} ${stripCode(n.item_name)}`).join("\n") || "ยังไม่ได้จับคู่"}>
                                 {names.length === 0 ? "＋ เลือกสินค้าในกล่องนี้" : `${names.length} ตัว: ${names.map((n) => n.code || stripCode(n.item_name)).join(", ")}`}

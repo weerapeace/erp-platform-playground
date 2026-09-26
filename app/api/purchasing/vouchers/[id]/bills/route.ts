@@ -10,7 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { parseDeliveryBillImage, applyDeliveryBill, normDate, type DeliveryBillLine } from "@/lib/delivery-bill";
+import { parseDeliveryBillImage, applyDeliveryBill, normDate, loadDescriptionRules, methodForDescription, type DeliveryBillLine } from "@/lib/delivery-bill";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,6 +56,9 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
   try {
     const { parsed, raw } = await parseDeliveryBillImage(r2Key);
+    // เลือกวิธีคิดค่าส่งของแต่ละกล่องจากกฎ Description (BOX → คิว, CLOTH BLOCK → น้ำหนัก) — แก้ทีหลังได้
+    const rules = await loadDescriptionRules(admin);
+    for (const l of parsed.lines) l.method = methodForDescription(l.description, rules);
     const { data: ins, error } = await admin.from("purchase_delivery_bills").insert({
       voucher_id: id, gr_id: body.gr_id || null, r2_key: r2Key,
       tracking_no: parsed.tracking_no, bill_date: parsed.bill_date, marking: parsed.marking, delivery_area: parsed.delivery_area, carrier_text: parsed.carrier_text,
@@ -92,6 +95,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     lines = (body.lines as Row[]).map((l) => ({
       stock: str(l.stock) || null, po_no: str(l.po_no) || null, description: str(l.description) || null,
       pack: optNum(l.pack), package: str(l.package) || null, qty: optNum(l.qty), weight_kg: optNum(l.weight_kg), m3: optNum(l.m3),
+      method: l.method === "cube" || l.method === "weight" ? l.method : null,
       voucher_line_ids: Array.isArray(l.voucher_line_ids) ? (l.voucher_line_ids as unknown[]).map(String).filter(Boolean) : [],
     }));
     patch.lines = lines;

@@ -60,7 +60,15 @@ export default function PrintPurchaseVoucherPage() {
     if (!data || !template || !h) return "";
     const foreign = isForeignCurrency(h.currency);
     const sym = curSymbol(h.currency).trim();
-    const basis = h.ship_method === "cube" ? `${(h.total_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว` : h.ship_method === "weight" ? `${(h.total_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก.` : "";
+    // แต่ละบรรทัดคิดจากคิวหรือน้ำหนักได้ → สรุปปริมาณที่ถูกคิดจริงแยกตามวิธี
+    const methodOf = (l: VoucherLine) => l.ship_method ?? h.ship_method;
+    const chargedCbm = data.lines.filter((l) => methodOf(l) === "cube").reduce((a, l) => a + (l.cbm_per_unit ?? 0) * l.qty, 0);
+    const chargedKg = data.lines.filter((l) => methodOf(l) === "weight").reduce((a, l) => a + (l.kg_per_unit ?? 0) * l.qty, 0);
+    const parts: string[] = [];
+    if (chargedCbm > 0) parts.push(`${chargedCbm.toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × ${fmtMoney(h.ship_rate_cube ?? (h.ship_method === "cube" ? h.ship_rate : 0), 0)}`);
+    if (chargedKg > 0) parts.push(`${chargedKg.toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × ${fmtMoney(h.ship_rate_kg ?? (h.ship_method === "weight" ? h.ship_rate : 0), 0)}`);
+    const basis = parts.join(" + ");
+    const mixed = chargedCbm > 0 && chargedKg > 0;
     const draftMark = h.status !== "confirmed" ? `<div style="position:fixed;top:40%;left:0;right:0;text-align:center;font-size:72px;color:rgba(220,38,38,.12);font-weight:700;transform:rotate(-20deg);pointer-events:none">ร่าง</div>` : "";
     return buildReportHtml({ ...template, header_html: draftMark + template.header_html }, {
       pv_number: h.pv_no ?? "(ร่าง)", voucher_date_th: thaiDate(h.voucher_date), supplier_name: h.seller_name ?? "—",
@@ -69,8 +77,8 @@ export default function PrintPurchaseVoucherPage() {
       fx_rate: h.fx_rate != null ? String(h.fx_rate) : "",
       subtotal_foreign: fmtMoney(h.subtotal_foreign), subtotal_thb: fmtMoney(h.subtotal_thb),
       has_shipping: h.ship_method !== "none" && h.ship_total_thb > 0 ? "1" : "",
-      ship_method_label: `${SHIP_LABEL[h.ship_method] ?? h.ship_method}${h.carrier_name ? ` · ${h.carrier_name}` : ""}`, ship_basis_label: basis,
-      ship_rate: h.ship_manual_total != null ? "(ยอดจริง)" : fmtMoney(h.ship_rate),
+      ship_method_label: `${mixed ? "คิว + น้ำหนัก" : chargedKg > 0 && chargedCbm === 0 ? SHIP_LABEL.weight : SHIP_LABEL[h.ship_method] ?? h.ship_method}${h.carrier_name ? ` · ${h.carrier_name}` : ""}`, ship_basis_label: basis,
+      ship_rate: h.ship_manual_total != null ? "(ยอดจริงจากบิลขนส่ง)" : "",
       ship_total_thb: fmtMoney(h.ship_total_thb), grand_total_thb: fmtMoney(h.grand_total_thb),
       grand_total_text: thaiBahtText(h.grand_total_thb), note: h.note ?? "", confirmed_by: h.confirmed_by ?? "",
       lines: data.lines.map((l, i) => ({
