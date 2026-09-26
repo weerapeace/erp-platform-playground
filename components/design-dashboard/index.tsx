@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import { createPortal } from "react-dom";
@@ -19,7 +20,7 @@ import { wfIconSlotId } from "@/lib/brand-theme";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
-import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame } from "@/components/device-view";
+import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 
 const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
@@ -253,7 +254,13 @@ export function DesignDashboard() {
     const id = new URLSearchParams(window.location.search).get("open");
     if (id) setOpenSheetId(id);   // เปิดด้วยลิงก์ ?open=ID (refresh/copy link แล้วยังเปิดงานเดิม)
   }, []);
+  const router = useRouter();
   const openDetail = (id: string | null) => {
+    // แท็บเล็ต/มือถือ: เปิดใบงานเป็น "หน้าเต็ม" (design-sheet-mobile) ไม่ใช่ป๊อปอัปจอคอม · จำโหมดจอที่เลือกไว้ไปด้วย
+    if (id && !isDesktop) {
+      router.push(`/master/design-dashboard/sheet/${encodeURIComponent(id)}${deviceMode === "auto" ? "" : `?${DEVICE_PARAM}=${deviceMode}`}`);
+      return;
+    }
     setOpenSheetId(id);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
