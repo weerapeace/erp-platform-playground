@@ -875,7 +875,7 @@ export function DesignDashboard() {
                                   onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
                                   aria-busy={isMoving}
                                   title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : isDesktop ? "ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด" : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
-                                  className={`relative block overflow-hidden rounded-lg border bg-white p-2.5 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
+                                  className={`relative block overflow-hidden rounded-lg border bg-white p-2.5 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
                                 >
                                   {pickMode && <PickBadge checked={picked} />}
                                   <BrandSlot theme={brandTheme} id="task_corner" />
