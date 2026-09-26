@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { QrCode } from "@/components/qr-code";
+import { cachedGetJson } from "@/lib/shell-cache";
 
 export type DeviceLayout = "desktop" | "tablet" | "phone";
 export type DeviceMode = "auto" | DeviceLayout;
@@ -104,21 +105,103 @@ export function DeviceModeToggle({ mode, viewport, onChange, compact = false, cl
   );
 }
 
-/** แผง QR + ลิงก์ (ของกลาง) — สแกนแล้วเปิดหน้านี้บนเครื่องจริงในโหมดเดียวกัน */
+type AppLite = { key: string; label: string; icon: string | null };
+
+/**
+ * แอปเดี่ยว (PWA) ที่มีหน้าปัจจุบันอยู่ในเมนู — จาก /api/menu + /api/menu/apps (แคชร่วมกับเชลล์ ไม่ยิงซ้ำ)
+ * ใช้ทำ QR "ติดตั้งเป็นแอป": สแกน → /app/<key>?go=<หน้านี้> → กด 📲 ติดตั้งแอปที่หัวแอป
+ */
+export function useAppsForCurrentPage(): { apps: AppLite[]; preferred: string | null } {
+  const [apps, setApps] = useState<AppLite[]>([]);
+  const [preferred, setPreferred] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let alive = true;
+    const path = window.location.pathname;
+    // ถ้าเปิดอยู่ในกรอบของแอปเดี่ยวอยู่แล้ว (/app/<key> ครอบ iframe) → เสนอแอปนั้นก่อน
+    try { const m = window.top && window.top !== window ? window.top.location.pathname.match(/^\/app\/([^/?#]+)/) : null; if (m) setPreferred(m[1]); } catch { /* cross-origin */ }
+    Promise.all([
+      cachedGetJson<{ data?: { href: string; app_keys?: string[] | null; is_active?: boolean }[] }>("/api/menu"),
+      cachedGetJson<{ data?: { key: string; label: string; icon?: string | null; is_active?: boolean }[] }>("/api/menu/apps"),
+    ]).then(([mj, aj]) => {
+      if (!alive) return;
+      const base = (h: string) => h.split("?")[0];
+      const rows = (mj.data ?? []).filter((m) => m.is_active !== false && base(m.href) !== "/" && path.startsWith(base(m.href)));
+      rows.sort((a, b) => base(b.href).length - base(a.href).length);   // ตรงที่สุด (ยาวสุด) มาก่อน
+      const keys = new Set(rows[0]?.app_keys ?? []);
+      setApps((aj.data ?? []).filter((a) => a.is_active !== false && keys.has(a.key)).map((a) => ({ key: a.key, label: a.label, icon: a.icon ?? null })));
+    }).catch(() => { /* ไม่มีเมนู = ไม่มีปุ่มติดตั้ง */ });
+    return () => { alive = false; };
+  }, []);
+  return { apps, preferred };
+}
+
+/** ลิงก์ติดตั้งเป็นแอป: เปิดเชลล์แอปเดี่ยวแล้วเด้งมาหน้านี้ (?go=) — ในเชลล์มีปุ่ม 📲 ติดตั้งแอป */
+export function installAppUrl(appKey: string): string {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}/app/${encodeURIComponent(appKey)}?go=${encodeURIComponent(window.location.pathname)}`;
+}
+
+/** แผง QR + ลิงก์ (ของกลาง) — แท็บ 1: สแกนเปิดหน้านี้บนเครื่องจริง · แท็บ 2: สแกนเพื่อติดตั้งเป็นแอป (PWA) บนเครื่อง */
 export function DeviceQrPanel({ layout, className = "" }: { layout: DeviceLayout; className?: string }) {
-  const [url, setUrl] = useState("");
+  const [tab, setTab] = useState<"open" | "install">("open");
+  const [openUrl, setOpenUrl] = useState("");
   const [copied, setCopied] = useState(false);
-  useEffect(() => { setUrl(deviceShareUrl(layout)); }, [layout]);
+  const { apps, preferred } = useAppsForCurrentPage();
+  const [appKey, setAppKey] = useState<string | null>(null);
+  useEffect(() => { setOpenUrl(deviceShareUrl(layout)); }, [layout]);
+  useEffect(() => {
+    if (apps.length === 0) { setAppKey(null); return; }
+    setAppKey((k) => (k && apps.some((a) => a.key === k) ? k : (preferred && apps.some((a) => a.key === preferred) ? preferred : apps[0].key)));
+  }, [apps, preferred]);
+  const app = apps.find((a) => a.key === appKey) ?? null;
+  const url = tab === "open" ? openUrl : (appKey ? installAppUrl(appKey) : "");
   const copy = async () => {
     try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard ไม่พร้อม */ }
   };
   return (
     <div className={`flex flex-col items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-center shadow-sm ${className}`}>
-      <div className="text-sm font-semibold text-slate-800">{DEVICE_ICON[layout]} เปิดบน{DEVICE_LABEL[layout]}</div>
-      <QrCode text={url} size={168} className="border border-slate-100" alt={`QR เปิดหน้านี้บน${DEVICE_LABEL[layout]}`} />
-      <div className="text-[11px] leading-snug text-slate-500">สแกน QR ด้วยกล้อง{DEVICE_LABEL[layout]}<br />จะเปิดหน้านี้ในโหมด{DEVICE_LABEL[layout]}ทันที</div>
-      <div className="max-w-[200px] truncate font-mono text-[10px] text-slate-400" title={url}>{url.replace(/^https?:\/\//, "")}</div>
-      <button type="button" onClick={copy} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
+      <div className="flex w-full items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5">
+        {([["open", `${DEVICE_ICON[layout]} เปิดหน้านี้`], ["install", "📲 ติดตั้งเป็นแอป"]] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setTab(k)}
+            className={`h-7 flex-1 rounded text-[11px] font-medium transition ${tab === k ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{l}</button>
+        ))}
+      </div>
+
+      {tab === "open" ? (
+        <>
+          <QrCode text={url} size={168} className="border border-slate-100" alt={`QR เปิดหน้านี้บน${DEVICE_LABEL[layout]}`} />
+          <div className="text-[11px] leading-snug text-slate-500">สแกน QR ด้วยกล้อง{DEVICE_LABEL[layout]}<br />จะเปิดหน้านี้ในโหมด{DEVICE_LABEL[layout]}ทันที</div>
+        </>
+      ) : apps.length === 0 ? (
+        <div className="flex h-[168px] w-[168px] items-center justify-center rounded-lg border border-dashed border-slate-200 p-3 text-[11px] leading-snug text-slate-400">
+          หน้านี้ยังไม่อยู่ในแอปเดี่ยวใด<br />(ตั้งได้ที่ จัดการเมนู → ใส่หน้านี้ในแอป)
+        </div>
+      ) : (
+        <>
+          {apps.length > 1 && (
+            <div className="flex flex-wrap justify-center gap-1">
+              {apps.map((a) => (
+                <button key={a.key} type="button" onClick={() => setAppKey(a.key)}
+                  className={`h-7 rounded-full border px-2.5 text-[11px] font-medium ${appKey === a.key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+                  {a.icon ? `${a.icon} ` : ""}{a.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <QrCode text={url} size={168} className="border border-slate-100" alt={`QR ติดตั้งแอป ${app?.label ?? ""}`} />
+          <div className="text-left text-[11px] leading-snug text-slate-500">
+            <div className="mb-0.5 text-center font-semibold text-slate-700">ติดตั้งแอป &ldquo;{app?.label}&rdquo; บนเครื่อง</div>
+            1. สแกน QR → เปิดในเบราว์เซอร์{DEVICE_LABEL[layout]}<br />
+            2. กดปุ่ม <b>📲 ติดตั้งแอป</b> ที่หัวแอป<br />
+            &nbsp;&nbsp;&nbsp;(iPhone/iPad: ปุ่มแชร์ → &ldquo;เพิ่มไปยังหน้าจอโฮม&rdquo;)<br />
+            3. ไอคอนแอปโผล่บนหน้าจอ เปิดแล้วมาหน้านี้ได้เลย
+          </div>
+        </>
+      )}
+
+      <div className="max-w-[210px] truncate font-mono text-[10px] text-slate-400" title={url}>{url.replace(/^https?:\/\//, "")}</div>
+      <button type="button" onClick={copy} disabled={!url} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
         {copied ? "✓ คัดลอกแล้ว" : "🔗 คัดลอกลิงก์"}
       </button>
     </div>
@@ -129,7 +212,7 @@ export function DeviceQrPanel({ layout, className = "" }: { layout: DeviceLayout
  * กรอบจำลองเครื่อง — โชว์เฉพาะตอน "โหมดที่เลือกแคบกว่าจอจริง" (เช่น เปิดบนจอคอมแล้วเลือกดูแบบมือถือ)
  * ถ้าเปิดบนมือถือจริงในโหมดมือถือ → ไม่มีกรอบ ไม่มี QR (เรนเดอร์ children ตรง ๆ)
  */
-export function DevicePreviewFrame({ layout, viewport, children }: { layout: DeviceLayout; viewport: DeviceLayout; children: ReactNode }) {
+export function DevicePreviewFrame({ layout, viewport, children, onExitPreview }: { layout: DeviceLayout; viewport: DeviceLayout; children: ReactNode; onExitPreview?: () => void }) {
   const rank: Record<DeviceLayout, number> = { phone: 0, tablet: 1, desktop: 2 };
   const preview = rank[layout] < rank[viewport];
   const width = DEVICE_FRAME_WIDTH[layout];
@@ -143,7 +226,15 @@ export function DevicePreviewFrame({ layout, viewport, children }: { layout: Dev
           {children}
         </div>
       </div>
-      <DeviceQrPanel layout={layout} className="w-[232px] shrink-0 lg:sticky lg:top-20" />
+      <div className="flex w-[232px] shrink-0 flex-col gap-2 lg:sticky lg:top-20">
+        <DeviceQrPanel layout={layout} />
+        {/* กลับมุมมองจอคอม — เผื่อหน้าที่ไม่มีปุ่มสลับจอในตัว (เช่น หน้ารายละเอียดแบบมือถือ) */}
+        {onExitPreview && (
+          <button type="button" onClick={onExitPreview} className="h-9 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+            {DEVICE_ICON[viewport]} กลับมุมมอง{DEVICE_LABEL[viewport]}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

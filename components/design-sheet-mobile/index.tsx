@@ -18,7 +18,7 @@ import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/r
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import { apiFetch } from "@/lib/api";
-import { buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { buildStatusMeta, QUOTE_STATUS, QUOTE_STATUS_OPTS, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -27,6 +27,20 @@ import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } fr
 
 // ป๊อปอัปเต็ม (ของกลางเดิม) โหลดเฉพาะตอนกด "แก้ไขเต็ม"
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
+// drawer ดู SKU / Parent SKU (ของกลาง master-crud) โหลดเฉพาะตอนแตะ
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+
+type CostExtra = { label: string; amount: number };
+// ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย) เก็บได้ 2 แบบ: array (เดิม = ทั่วไป) หรือ object แยกตาม Parent — แปลงเป็น map เหมือนป๊อปอัปเต็ม
+function parseCostExtra(raw: unknown): Record<string, CostExtra[]> {
+  const norm = (a: unknown): CostExtra[] => (Array.isArray(a) ? a : []).map((c) => ({ label: String((c as CostExtra)?.label ?? ""), amount: Number((c as CostExtra)?.amount) || 0 }));
+  if (raw && !Array.isArray(raw) && typeof raw === "object") {
+    const out: Record<string, CostExtra[]> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) out[k] = norm(v);
+    return out;
+  }
+  return { "": norm(raw) };
+}
 
 type Sheet = {
   id: string; code: string; name: string; status: string;
@@ -36,6 +50,7 @@ type Sheet = {
   parent_sku_refs: { code: string; id: string }[]; parent_sku_drafts?: string[] | null;
   linked_skus: { id: string; code: string; name_th: string | null; color: string | null; image_key: string | null; is_active: boolean; parent_code: string | null; from_sheet: boolean }[];
   updated_at: string;
+  cost_extra?: unknown;   // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย) — array หรือ map ต่อ Parent
 };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -96,6 +111,11 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const [commentDate, setCommentDate] = useState(todayStr());
   const [editOpen, setEditOpen] = useState(false);         // ป๊อปอัปเต็ม
   const stripRef = useRef<HTMLDivElement>(null);
+  const [openSec, setOpenSec] = useState<"cost" | "quote" | "sku" | null>(null);   // ส่วนที่กางอยู่ (ตีราคา/เสนอราคา/SKU)
+  const [costParent, setCostParent] = useState("");                                // ตีราคา: แท็บ Parent ที่ดูอยู่ ("" = ทั่วไป)
+  const [skuDrawer, setSkuDrawer] = useState<{ moduleKey: string; id: string } | null>(null);   // drawer ดู SKU/Parent
+  const [quoteForm, setQuoteForm] = useState(false);
+  const [newQ, setNewQ] = useState({ offered: "", qty: "", status: "pending", note: "", date: todayStr() });
 
   // โหลดข้อมูล: ชุดหลักก่อน (ใบงาน+สถานะ+รูป) แล้วค่อยชุดรอง (comment/ตีราคา/เสนอราคา) — ไม่ยิงพร้อมกัน 6 เส้น
   useEffect(() => {
@@ -127,7 +147,6 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const statusColor = sheet ? (statusMeta.colorHex[sheet.status] ?? "#94a3b8") : "#94a3b8";
   const statusLabel = sheet ? (statusMeta.map[sheet.status]?.label ?? sheet.status) : "";
   const brandColor = sheet?.brand?.color && /^#[0-9a-fA-F]{6}$/.test(sheet.brand.color) ? sheet.brand.color : "#94a3b8";
-  const costTotal = costLines.reduce((n, l) => n + (Number(l.amount) || 0), 0);
   const latestQuote = quotes.length ? quotes[quotes.length - 1] : null;
   const lightboxImages = images.map((im) => ({ url: im.url, label: im.source_label }));
 
@@ -161,6 +180,24 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       setComments(Array.isArray(cm.data) ? cm.data : []);
       toast.success("เพิ่ม comment แล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึก comment ไม่สำเร็จ"); }
+    finally { setSaving(null); }
+  }
+
+  async function sendQuote() {
+    if (!sheet) return;
+    const offered = newQ.offered.replace(/,/g, "").trim();
+    if (!offered || !Number.isFinite(Number(offered))) { toast.warning("กรุณาใส่ราคาที่เสนอ"); return; }
+    setSaving("quote");
+    try {
+      const r = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_date: newQ.date, price: grandTotal || null, offered_price: Number(offered), qty: newQ.qty.trim() ? Number(newQ.qty) : null, status: newQ.status, note: newQ.note, parent_code: costParent || null }) });
+      const j = await r.json() as { error?: string | null };
+      if (!r.ok || j.error) throw new Error(j.error || "บันทึกเสนอราคาไม่สำเร็จ");
+      const qt = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/quotes`).then((x) => x.json() as Promise<{ data: DesignSheetQuote[] }>);
+      setQuotes(Array.isArray(qt.data) ? qt.data : []);
+      setNewQ({ offered: "", qty: "", status: "pending", note: "", date: todayStr() }); setQuoteForm(false);
+      toast.success("เพิ่มรอบเสนอราคาแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกเสนอราคาไม่สำเร็จ"); }
     finally { setSaving(null); }
   }
 
@@ -202,6 +239,156 @@ export function DesignSheetMobileView({ id }: { id: string }) {
 
   const sectionCls = "rounded-xl border border-slate-200 bg-white p-3 shadow-sm";
   const dl = sheet ? deadlineChip(sheet.deadline, finished) : null;
+
+  // ── ตีราคา (อ่านอย่างเดียวบนมือถือ — แก้บรรทัด/เลือกวัสดุทำในป๊อปอัปเต็ม) ──
+  const costExtraMap = useMemo(() => parseCostExtra(sheet?.cost_extra), [sheet?.cost_extra]);
+  const costParents = useMemo(() => {   // แท็บ Parent ที่มีข้อมูล ("" = ทั่วไป มาก่อน)
+    const s = new Set<string>([""]);
+    for (const l of costLines) s.add(l.parent_code ?? "");
+    for (const k of Object.keys(costExtraMap)) s.add(k);
+    return Array.from(s);
+  }, [costLines, costExtraMap]);
+  const curLines = costLines.filter((l) => (l.parent_code ?? "") === costParent);
+  const curExtra = costExtraMap[costParent] ?? [];
+  const curMaterial = curLines.reduce((n, l) => n + (Number(l.amount) || 0), 0);
+  const curExtraTotal = curExtra.reduce((n, c) => n + (Number(c.amount) || 0), 0);
+  const grandTotal = curMaterial + curExtraTotal;
+  const editFullBtn = (label: string) => (
+    <button type="button" onClick={() => setEditOpen(true)} className="mt-2 inline-flex h-9 w-full items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 text-xs font-medium text-blue-700">✏️ {label}</button>
+  );
+  const parentChips = (list: string[], value: string, onPick: (k: string) => void) => list.length > 1 && (
+    <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
+      {list.map((k) => (
+        <button key={k || "__general"} type="button" onClick={() => onPick(k)}
+          className={`h-7 shrink-0 rounded-full border px-2.5 text-[11px] font-medium ${value === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{k || "ทั่วไป"}</button>
+      ))}
+    </div>
+  );
+  const costSection = (
+    <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
+      {parentChips(costParents, costParent, setCostParent)}
+      {curLines.length === 0 && curExtra.every((c) => !c.amount) ? (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">ยังไม่ตีราคา{costParent ? ` (${costParent})` : ""}</div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">วัสดุ {curLines.length} รายการ</div>
+          {curLines.map((l, i) => (
+            <div key={l.id ?? i} className="flex items-start gap-2 border-b border-slate-100 px-2.5 py-2 last:border-0">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-slate-800">{l.item_name || l.group_name || l.item_sku_code || "—"}</div>
+                <div className="text-[11px] text-slate-400">
+                  {l.qty != null ? `${Number(l.qty).toLocaleString("th-TH", { maximumFractionDigits: 3 })} ${l.uom ?? ""}` : "—"}
+                  {l.unit_price != null && <> × {money(l.unit_price)}</>}
+                  {l.note && <span className="ml-1 text-slate-300">· {l.note}</span>}
+                </div>
+              </div>
+              <div className="shrink-0 text-sm font-medium tabular-nums text-slate-800">{money(l.amount)}</div>
+            </div>
+          ))}
+          <div className="flex justify-between bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600"><span>รวมวัสดุ</span><span className="tabular-nums">{money(curMaterial)}</span></div>
+          {curExtra.filter((c) => c.amount || c.label).map((c, i) => (
+            <div key={i} className="flex justify-between border-t border-slate-100 px-2.5 py-1.5 text-xs text-slate-600"><span className="truncate">{c.label || "ค่าใช้จ่ายเพิ่ม"}</span><span className="tabular-nums">{money(c.amount)}</span></div>
+          ))}
+          <div className="flex justify-between border-t border-slate-200 bg-amber-50 px-2.5 py-2 text-sm font-semibold text-slate-900"><span>ต้นทุนรวม</span><span className="tabular-nums">{money(grandTotal)}</span></div>
+        </div>
+      )}
+      {canEdit && editFullBtn("แก้ตีราคา / เลือกวัสดุ (หน้าเต็ม)")}
+    </div>
+  );
+
+  // ── เสนอราคา: ไทม์ไลน์รอบ + เพิ่มรอบใหม่ได้จากมือถือ (ราคา/จำนวน/ผล/โน้ต) ──
+  const quoteSection = (
+    <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
+      {quotes.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">ยังไม่เคยเสนอราคา</div>
+      ) : (
+        <div className="space-y-1.5">
+          {[...quotes].reverse().map((q) => {
+            const st = QUOTE_STATUS[q.status] ?? QUOTE_STATUS.pending;
+            return (
+              <div key={q.id} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">รอบ {q.round}</span>
+                  <span className="text-[11px] text-slate-400">{fmtDate(q.quote_date)}{q.parent_code ? ` · ${q.parent_code}` : ""}</span>
+                  <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[11px] font-medium ${st.cls}`}>{st.label}</span>
+                </div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-lg font-semibold tabular-nums text-slate-900">{money(q.offered_price ?? q.price)}</span>
+                  {q.qty != null && <span className="text-[11px] text-slate-400">ที่ {Number(q.qty).toLocaleString("th-TH")} ชิ้น</span>}
+                  {q.price != null && q.offered_price != null && q.price !== q.offered_price && <span className="text-[11px] text-slate-400">ต้นทุน {money(q.price)}</span>}
+                </div>
+                {q.note && <div className="mt-0.5 text-xs text-slate-500">{q.note}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {canEdit && !quoteForm && (
+        <button type="button" onClick={() => setQuoteForm(true)} className="mt-2 inline-flex h-9 w-full items-center justify-center rounded-lg bg-slate-900 text-xs font-medium text-white">＋ เพิ่มรอบเสนอราคา</button>
+      )}
+      {canEdit && quoteForm && (
+        <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
+          {parentChips(costParents, costParent, setCostParent)}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-[11px] text-slate-500">ราคาที่เสนอ (บาท)</span>
+              <input inputMode="decimal" value={newQ.offered} onChange={(e) => setNewQ({ ...newQ, offered: e.target.value })} placeholder={grandTotal ? `ต้นทุน ${money(grandTotal)}` : "0"} className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-2.5 text-base tabular-nums" /></label>
+            <label className="block"><span className="text-[11px] text-slate-500">จำนวน (ชิ้น)</span>
+              <input inputMode="numeric" value={newQ.qty} onChange={(e) => setNewQ({ ...newQ, qty: e.target.value })} placeholder="ไม่ระบุ" className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-2.5 text-base tabular-nums" /></label>
+            <label className="block"><span className="text-[11px] text-slate-500">ผล</span>
+              <select value={newQ.status} onChange={(e) => setNewQ({ ...newQ, status: e.target.value })} className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select></label>
+            <label className="block"><span className="text-[11px] text-slate-500">วันที่</span>
+              <input type="date" value={newQ.date} onChange={(e) => setNewQ({ ...newQ, date: e.target.value })} className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-2 text-sm" /></label>
+          </div>
+          <input value={newQ.note} onChange={(e) => setNewQ({ ...newQ, note: e.target.value })} placeholder="โน้ต เช่น ลูกค้าขอต่อรอง…" className="h-10 w-full rounded-lg border border-slate-200 px-2.5 text-sm" />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setQuoteForm(false)} className="h-10 flex-1 rounded-lg border border-slate-200 text-sm text-slate-600">ยกเลิก</button>
+            <button type="button" onClick={() => void sendQuote()} disabled={saving === "quote"} className="h-10 flex-1 rounded-lg bg-blue-600 text-sm font-medium text-white disabled:opacity-50">{saving === "quote" ? "กำลังบันทึก…" : "บันทึกรอบนี้"}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── SKU ที่เชื่อม: Parent เป็นชิป (แตะดู) · SKU เป็นการ์ดรูป 2 ต่อแถว (แตะดูใน drawer กลาง) ──
+  const skuSection = sheet && (
+    <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
+      {sheet.parent_sku_refs.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1">
+          {sheet.parent_sku_refs.map((p) => (
+            <button key={p.id} type="button" onClick={() => setSkuDrawer({ moduleKey: "parent-skus-v2", id: p.id })}
+              className="inline-flex h-7 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-mono text-[11px] font-medium text-emerald-700">📦 {p.code}</button>
+          ))}
+        </div>
+      )}
+      {sheet.linked_skus.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">ยังไม่มี SKU จากใบงานนี้</div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {sheet.linked_skus.map((s) => (
+            <button key={s.id} type="button" onClick={() => setSkuDrawer({ moduleKey: "skus-v2", id: s.id })}
+              className={`overflow-hidden rounded-lg border bg-white text-left ${s.from_sheet ? "border-slate-200" : "border-slate-100 opacity-70"}`}>
+              {s.image_key ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={withImageWidth(`/api/r2-image?key=${encodeURIComponent(s.image_key)}`, 300) ?? ""} alt={s.code} loading="lazy" className="aspect-square w-full bg-slate-50 object-contain" />
+              ) : <div className="flex aspect-square w-full items-center justify-center bg-slate-50 text-2xl">🏷️</div>}
+              <div className="p-2">
+                <div className="truncate font-mono text-[11px] text-slate-500">{s.code}</div>
+                <div className="line-clamp-2 text-xs font-medium text-slate-800">{s.name_th ?? "—"}</div>
+                <div className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
+                  {s.color && <span className="truncate">{s.color}</span>}
+                  {!s.is_active && <span className="rounded bg-slate-100 px-1 text-slate-500">ปิดใช้</span>}
+                  {!s.from_sheet && <span className="rounded bg-slate-100 px-1 text-slate-500">ของเดิม</span>}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {canEdit && editFullBtn("ตั้ง Parent / สร้าง SKU (หน้าเต็ม)")}
+    </div>
+  );
 
   const content = sheet && (
     <div className="space-y-3">
@@ -273,22 +460,30 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         </div>
       )}
 
-      {/* ความคืบหน้า: ตีราคา / เสนอราคา / SKU — สรุปสั้น แตะ = ไปป๊อปอัปเต็ม */}
+      {/* ความคืบหน้า: ตีราคา / เสนอราคา / SKU — แถวสรุป แตะ = กางดูรายละเอียดแบบมือถือ (งานแก้หนักส่งไปป๊อปอัปเต็ม) */}
       <div className={`${sectionCls} divide-y divide-slate-100 !p-0`}>
-        {[
-          { icon: "🧮", label: "ตีราคา", value: costLines.length ? `${costLines.length} รายการ · รวม ${money(costTotal)}` : "ยังไม่ตีราคา", done: costLines.length > 0 },
-          { icon: "💰", label: "เสนอราคา", value: latestQuote ? `รอบ ${latestQuote.round} · ${money(latestQuote.offered_price ?? latestQuote.price)}${latestQuote.status ? ` · ${latestQuote.status}` : ""}` : "ยังไม่เสนอราคา", done: !!latestQuote },
-          { icon: "🏷️", label: "SKU ที่เชื่อม", value: sheet.linked_skus.length ? `${sheet.linked_skus.length} ตัว` : "ยังไม่มี SKU", done: sheet.linked_skus.length > 0 },
-        ].map((row) => (
-          <button key={row.label} type="button" onClick={() => setEditOpen(true)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
-            <span className="text-lg">{row.icon}</span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-xs text-slate-400">{row.label}</span>
-              <span className={`block truncate text-sm ${row.done ? "text-slate-800" : "text-slate-400"}`}>{row.value}</span>
-            </span>
-            <span className="text-slate-300">›</span>
-          </button>
-        ))}
+        {([
+          { key: "cost", icon: "🧮", label: "ตีราคา", value: costLines.length ? `${costLines.length} รายการ · ต้นทุน ${money(grandTotal)}` : "ยังไม่ตีราคา", done: costLines.length > 0 },
+          { key: "quote", icon: "💰", label: "เสนอราคา", value: latestQuote ? `รอบ ${latestQuote.round} · ${money(latestQuote.offered_price ?? latestQuote.price)} · ${QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status}` : "ยังไม่เสนอราคา", done: !!latestQuote },
+          { key: "sku", icon: "🏷️", label: "SKU ที่เชื่อม", value: sheet.linked_skus.length ? `${sheet.linked_skus.length} ตัว${sheet.parent_sku_refs.length ? ` · ${sheet.parent_sku_refs.length} Parent` : ""}` : "ยังไม่มี SKU", done: sheet.linked_skus.length > 0 },
+        ] as const).map((row) => {
+          const open = openSec === row.key;
+          return (
+            <div key={row.key}>
+              <button type="button" onClick={() => setOpenSec(open ? null : row.key)} className={`flex w-full items-center gap-3 px-3 py-2.5 text-left ${open ? "bg-slate-50" : ""}`}>
+                <span className="text-lg">{row.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs text-slate-400">{row.label}</span>
+                  <span className={`block truncate text-sm ${row.done ? "text-slate-800" : "text-slate-400"}`}>{row.value}</span>
+                </span>
+                <span className={`text-slate-300 transition ${open ? "rotate-90" : ""}`}>›</span>
+              </button>
+              {open && row.key === "cost" && costSection}
+              {open && row.key === "quote" && quoteSection}
+              {open && row.key === "sku" && skuSection}
+            </div>
+          );
+        })}
       </div>
 
       {/* Comment ลูกค้า — ไทม์ไลน์ + พิมพ์เพิ่ม */}
@@ -397,6 +592,9 @@ export function DesignSheetMobileView({ id }: { id: string }) {
 
       <ImageLightbox images={lightboxImages} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />
 
+      {/* drawer ดู SKU / Parent SKU (ของกลาง) */}
+      {skuDrawer && <MasterRecordDrawer moduleKey={skuDrawer.moduleKey} recordId={skuDrawer.id} onClose={() => setSkuDrawer(null)} />}
+
       {/* ป๊อปอัปเต็ม (ของกลางเดิม) — ปิดแล้วโหลดหน้าใหม่ให้เห็นค่าที่แก้ */}
       {editOpen && sheet && (
         <DesignSheetDetail detailOnly openId={sheet.id} onDetailClose={() => { setEditOpen(false); setReloadKey((k) => k + 1); }} />
@@ -404,5 +602,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     </div>
   );
 
-  return <DevicePreviewFrame layout={layout} viewport={viewport}>{page}</DevicePreviewFrame>;
+  // "กลับมุมมองจอคอม" (ปุ่มข้าง QR ตอนพรีวิว) = กลับไปบอร์ดแล้วเปิดใบนี้เป็นป๊อปอัปแบบจอคอม
+  const exitPreview = () => router.push(`/master/design-dashboard?open=${encodeURIComponent(id)}`);
+  return <DevicePreviewFrame layout={layout} viewport={viewport} onExitPreview={exitPreview}>{page}</DevicePreviewFrame>;
 }

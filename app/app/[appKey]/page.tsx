@@ -76,7 +76,17 @@ export default function StandaloneApp() {
         const saved = (() => { try { return sessionStorage.getItem(`appdeep:${appKey}`); } catch { return null; } })();
         const base = (h: string) => h.split("?")[0];
         const deepIdx = saved ? its.findIndex((m) => base(saved).startsWith(base(m.href))) : -1;
-        if (saved && deepIdx >= 0) { setActive(deepIdx); setDeepSrc(saved); lastSavedRef.current = saved; }
+        // ลิงก์ลึกจาก URL `/app/<key>?go=/path` (เช่น QR "ติดตั้งเป็นแอป" ของ device-view) → เปิดเมนูที่ตรงกับ path นั้น (ตัวที่ href ยาวสุด = ตรงที่สุด)
+        // มาก่อนหน้าที่จำไว้ · ล้าง ?go ออกจาก URL หลังใช้ (refresh แล้วไม่เด้งซ้ำ)
+        const go = (() => { try { const g = new URLSearchParams(window.location.search).get("go"); return g && g.startsWith("/") && !g.startsWith("//") ? g : null; } catch { return null; } })();
+        let goIdx = -1;
+        if (go) its.forEach((m, i) => { const b = base(m.href); if (b !== "/" && base(go).startsWith(b) && (goIdx < 0 || b.length > base(its[goIdx].href).length)) goIdx = i; });
+        if (go && goIdx >= 0) {
+          setActive(goIdx); setDeepSrc(go); lastSavedRef.current = go;
+          try { sessionStorage.setItem(`appdeep:${appKey}`, go); } catch { /* noop */ }
+          try { window.history.replaceState(null, "", `/app/${appKey}`); } catch { /* noop */ }
+        }
+        else if (saved && deepIdx >= 0) { setActive(deepIdx); setDeepSrc(saved); lastSavedRef.current = saved; }
         else if (ag?.default_href) { const i = its.findIndex((m) => m.href === ag.default_href); if (i >= 0) setActive(i); }
       }
       initedRef.current = true;

@@ -1115,7 +1115,7 @@ export function DesignDashboard() {
 
   return (
     <BrandThemedShell theme={brandTheme}>
-      <DevicePreviewFrame layout={layout} viewport={viewport}>{body}</DevicePreviewFrame>
+      <DevicePreviewFrame layout={layout} viewport={viewport} onExitPreview={() => setDeviceMode("auto")}>{body}</DevicePreviewFrame>
 
       {/* แถบล่าง "เลือกไว้ N ใบ" (Bulk action bar) — โผล่เฉพาะโหมดเลือก */}
       {pickMode && createPortal(
