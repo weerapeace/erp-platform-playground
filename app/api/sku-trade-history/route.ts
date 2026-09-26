@@ -22,6 +22,9 @@ export type TradeRow = {
   doc_id: string | null;      // id ของใบ (ไว้เปิดใบ)
   kind: "po" | "pr" | "so" | "quote";
   doc_no: string | null;
+  /** ใบสำคัญรับ (ใบซื้อ) ที่ราคาบรรทัดนี้มาจาก — เฉพาะฝั่งซื้อ */
+  pv_id?: string | null;
+  pv_no?: string | null;
   date: string | null;        // วันที่ใบ (ISO date)
   partner: string | null;     // ร้าน / ลูกค้า
   qty: number | null;
@@ -102,12 +105,26 @@ export async function GET(request: NextRequest) {
   const soMap = new Map(((soRes.data ?? []) as So[]).map((s) => [s.id, s]));
   const qMap = new Map(((qRes.data ?? []) as Quote[]).map((q) => [q.id, q]));
 
+  // ใบสำคัญรับ (ใบซื้อ) ต่อบรรทัด PO — ราคาซื้อจริงหลังรับของ
+  const pvByLine = new Map<string, { id: string; pv_no: string | null }>();
+  if (poLines.length) {
+    const { data: vl } = await admin.from("purchase_voucher_lines_v2").select("po_line_id, voucher_id").in("po_line_id", poLines.map((l) => l.id)).not("is_active", "is", false);
+    const vids = [...new Set(((vl ?? []) as Record<string, unknown>[]).map((r) => String(r.voucher_id)))];
+    const vh = new Map<string, string | null>();
+    if (vids.length) {
+      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no").in("id", vids).not("is_active", "is", false);
+      for (const v of (vs ?? []) as Record<string, unknown>[]) vh.set(String(v.id), (v.pv_no as string) ?? null);
+    }
+    for (const r of (vl ?? []) as Record<string, unknown>[]) { const vid = String(r.voucher_id); if (vh.has(vid)) pvByLine.set(String(r.po_line_id), { id: vid, pv_no: vh.get(vid) ?? null }); }
+  }
+
   const purchases: TradeRow[] = [
     ...poLines.map((l): TradeRow => {
       const h = l.po_id ? poMap.get(l.po_id) : undefined;
       const rec = num(l.qty_received);
+      const pv = pvByLine.get(l.id);
       return {
-        id: l.id, doc_id: l.po_id, kind: "po", doc_no: h?.po_no ?? null, date: h?.order_date ?? l.created_at.slice(0, 10),
+        id: l.id, doc_id: l.po_id, kind: "po", doc_no: h?.po_no ?? null, pv_id: pv?.id ?? null, pv_no: pv?.pv_no ?? null, date: h?.order_date ?? l.created_at.slice(0, 10),
         partner: h?.seller_name ?? null, qty: num(l.qty), uom: l.uom,
         price: canCost ? num(l.price_est) : null, total: canCost ? num(l.line_total) : null, currency: l.currency ?? h?.currency ?? null,
         status: h?.status ?? l.line_status ?? null, extra: rec && rec > 0 ? `รับแล้ว ${rec.toLocaleString("th-TH")}` : null,

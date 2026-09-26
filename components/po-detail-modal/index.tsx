@@ -312,6 +312,18 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
               : <div className="text-rose-600 font-medium">● ยังไม่จ่าย{d.payment_due_date ? ` · ครบกำหนด ${thDate(d.payment_due_date)}` : ""}</div>}
             {d.expected_date && <div><span className="text-slate-400">ของเข้า </span>{thDate(d.expected_date)}</div>}
             <div><span className="text-slate-400">รายการ </span>{d.lines.length}</div>
+            {/* ใบสำคัญรับ (ใบซื้อ) ที่ครอบใบนี้ — จัดซื้อใส่ราคา+ค่าส่งหลังรับของ · ไม่มี = ยังไม่ออก */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-slate-400">ใบสำคัญรับ </span>
+              {(d.vouchers ?? []).length === 0
+                ? <a href="/purchasing/vouchers" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-blue-600 underline decoration-dotted">ยังไม่ออก</a>
+                : (d.vouchers ?? []).map((v) => (
+                  <a key={v.id} href={`/purchasing/vouchers/${v.id}`} target="_blank" rel="noopener noreferrer" title={`ค่าสินค้า+ค่าส่ง ฿${baht(v.grand_total_thb)}`}
+                    className={`text-[11px] px-1.5 py-0.5 rounded border ${v.status === "confirmed" ? "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100" : "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200"}`}>
+                    🧾 {v.pv_no ?? "ร่าง"}{v.ship_total_thb > 0 ? ` · ค่าส่ง ฿${baht(v.ship_total_thb)}` : ""}
+                  </a>
+                ))}
+            </div>
           </div>
           {d.note && <div className="text-xs text-slate-500 px-1">📝 {d.note}</div>}
           <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">

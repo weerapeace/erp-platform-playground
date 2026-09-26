@@ -29,7 +29,13 @@ export type VoucherHeader = {
   note: string | null; created_by: string | null; confirmed_by: string | null; confirmed_at: string | null;
   created_at: string;
   gr_nos: string[]; po_nos: string[];
+  // ร้านขนส่ง (freight_carriers) + การจ่ายค่าส่ง (ผูกบิลค่าส่งในแอปโอนเงินจีนได้)
+  carrier_id: string | null; carrier_name: string | null;
+  shipping_bill_id: string | null; shipping_payment_status: "unpaid" | "paid"; shipping_paid_date: string | null;
+  /** สถานะจ่ายค่าสินค้าของแต่ละใบ PO ในใบสำคัญนี้ — ยอดค้างจ่ายอ้างจากราคาในใบสำคัญ (goods_thb) */
+  po_payments: PoPayment[];
 };
+export type PoPayment = { po_id: string; po_no: string; currency: string; payment_status: string; paid_date: string | null; paid_amount_thb: number | null; goods_thb: number; goods_foreign: number; grand_total: number };
 export type VoucherLine = {
   id: string; gr_id: string | null; gr_line_id: string | null; po_id: string | null; po_line_id: string | null;
   po_no: string | null; gr_no: string | null; item_sku_id: string | null; item_name: string; uom: string | null;
@@ -40,7 +46,12 @@ export type VoucherLine = {
   parent_cbm: number | null; parent_kg: number | null;   // ค่าจาก Parent SKU (ไว้ปุ่ม "ใช้ค่าจากตัวแม่")
 };
 
-const toHeader = (v: Row, grNos: string[], poNos: string[]): VoucherHeader => ({
+const toHeader = (v: Row, grNos: string[], poNos: string[], poPayments: PoPayment[] = []): VoucherHeader => ({
+  carrier_id: (v.carrier_id as string) ?? null, carrier_name: (v.carrier_name as string) ?? null,
+  shipping_bill_id: (v.shipping_bill_id as string) ?? null,
+  shipping_payment_status: v.shipping_payment_status === "paid" ? "paid" : "unpaid",
+  shipping_paid_date: (v.shipping_paid_date as string) ?? null,
+  po_payments: poPayments,
   id: String(v.id), pv_no: (v.pv_no as string) ?? null, status: String(v.status ?? "draft"), voucher_date: String(v.voucher_date ?? ""),
   seller_name: (v.seller_name as string) ?? null, seller_partner_id: (v.seller_partner_id as string) ?? null,
   currency: String(v.currency ?? "THB"), fx_rate: v.fx_rate == null ? null : num(v.fx_rate),
@@ -147,10 +158,13 @@ export async function prefillFromGrs(admin: Admin, grIds: string[], actorName: s
   const receiveDates = grRows.map((g) => str(g.receive_date)).filter(Boolean).sort();
   const fx = isForeignCurrency(currency) ? await fxRateForDate(admin, receiveDates[receiveDates.length - 1] ?? null) : null;
 
+  // ร้านขนส่งหลักจากตั้งค่า → วิธีคิด + เรท เริ่มต้น (ไม่มี = ไม่คิดค่าส่ง)
+  const carrier = await defaultCarrier(admin);
   const { data: created, error: cErr } = await admin.from("purchase_vouchers_v2").insert({
     status: "draft", voucher_date: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10),
     seller_name: sellerName || null, seller_partner_id: sellerPartnerId, currency, fx_rate: fx,
-    ship_method: "none", ship_rate: null, created_by: actorName,
+    ship_method: carrier?.method ?? "none", ship_rate: carrier?.rate ?? null, carrier_id: carrier?.id ?? null, carrier_name: carrier?.name ?? null,
+    created_by: actorName,
   }).select("id").single();
   if (cErr || !created) throw new Error("สร้างใบสำคัญไม่สำเร็จ: " + (cErr?.message ?? ""));
   const voucherId = String((created as Row).id);
@@ -236,5 +250,32 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
   });
   const grNos = [...new Set(lines.map((l) => l.gr_no ?? "").filter(Boolean))];
   const poNos = [...new Set(lines.map((l) => l.po_no ?? "").filter(Boolean))];
-  return { header: toHeader(v as Row, grNos, poNos), lines };
+
+  // สถานะจ่ายค่าสินค้าต่อใบ PO — ยอดที่ควรจ่ายอ้างจากราคาในใบสำคัญ (ไม่รวมค่าส่ง)
+  const poIds = [...new Set(lines.map((l) => l.po_id ?? "").filter(Boolean))];
+  const poPayments: PoPayment[] = [];
+  if (poIds.length) {
+    const { data: pos } = await admin.from("purchase_orders_v2").select("id, po_no, currency, payment_status, paid_date, paid_amount_thb, grand_total").in("id", poIds);
+    for (const p of (pos ?? []) as Row[]) {
+      const mine = lines.filter((l) => l.po_id === String(p.id));
+      poPayments.push({
+        po_id: String(p.id), po_no: String(p.po_no ?? ""), currency: String(p.currency ?? "THB").toUpperCase(),
+        payment_status: String(p.payment_status ?? "unpaid"), paid_date: (p.paid_date as string) ?? null,
+        paid_amount_thb: p.paid_amount_thb == null ? null : num(p.paid_amount_thb), grand_total: num(p.grand_total),
+        goods_thb: Math.round(mine.reduce((a, l) => a + num(l.line_total_thb), 0) * 100) / 100,
+        goods_foreign: Math.round(mine.reduce((a, l) => a + num(l.unit_price) * num(l.qty), 0) * 100) / 100,
+      });
+    }
+    poPayments.sort((a, b) => a.po_no.localeCompare(b.po_no));
+  }
+  return { header: toHeader(v as Row, grNos, poNos, poPayments), lines };
+}
+
+/** ร้านขนส่งหลัก (is_default) — ใบสำคัญใหม่ใช้เป็นค่าเริ่มต้นของวิธีคิด + เรท */
+export async function defaultCarrier(admin: Admin): Promise<{ id: string; name: string; method: ShipMethod; rate: number } | null> {
+  const { data } = await admin.from("freight_carriers").select("id, name, method, rate_thb, is_default, sort_order").not("is_active", "is", false).order("is_default", { ascending: false }).order("sort_order").limit(1);
+  const r = (data ?? [])[0] as Row | undefined;
+  if (!r) return null;
+  const method = (SHIP_METHODS.includes(r.method as ShipMethod) ? r.method : "cube") as ShipMethod;
+  return { id: String(r.id), name: String(r.name ?? ""), method: method === "none" ? "cube" : method, rate: num(r.rate_thb) };
 }

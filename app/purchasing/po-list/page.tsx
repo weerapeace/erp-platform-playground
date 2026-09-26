@@ -130,6 +130,22 @@ export default function PoListPage() {
         : <span className="text-xs font-medium text-rose-600">● ยังไม่จ่าย</span>),
     },
     {
+      id: "vouchers", header: "ใบสำคัญรับ", size: 130,
+      accessorFn: (r) => r.vouchers.map((v) => v.pv_no ?? "ร่าง").join(", "),
+      cell: ({ row }) => {
+        const vs = row.original.vouchers ?? [];
+        if (vs.length === 0) return <span className="text-[11px] text-slate-300">—</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {vs.map((v) => (
+              <a key={v.id} href={`/purchasing/vouchers/${v.id}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="เปิดใบสำคัญรับ (ใบซื้อ)"
+                className={`text-[10px] px-1.5 py-0.5 rounded border ${v.status === "confirmed" ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-slate-100 text-slate-600 border-slate-200"}`}>🧾 {v.pv_no ?? "ร่าง"}</a>
+            ))}
+          </div>
+        );
+      },
+    },
+    {
       accessorKey: "grand_total", header: "ยอดรวม", size: 130, meta: { filterType: "number" },
       cell: ({ getValue, row }) => (
         <div className="text-right">

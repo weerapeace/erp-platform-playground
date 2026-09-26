@@ -40,6 +40,8 @@ export type PoListRow = {
   expected_date: string | null;
   line_count: number;
   received_lines: number;
+  /** ใบสำคัญรับ (ใบซื้อ) ที่ครอบใบนี้ — เลข PV หรือ "ร่าง" */
+  vouchers: { id: string; pv_no: string | null; status: string }[];
   note: string | null;
 };
 
@@ -92,6 +94,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // ใบสำคัญรับ (ใบซื้อ) ต่อใบ PO — ผ่านบรรทัดใบสำคัญ (po_id) → หัวใบ (pv_no/status)
+  const voucherByPo = new Map<string, { id: string; pv_no: string | null; status: string }[]>();
+  {
+    const { data: vl } = await admin.from("purchase_voucher_lines_v2").select("voucher_id, po_id").not("is_active", "is", false);
+    const pairs = ((vl ?? []) as Record<string, unknown>[]).filter((r) => r.po_id);
+    const vids = [...new Set(pairs.map((r) => String(r.voucher_id)))];
+    const vh = new Map<string, { id: string; pv_no: string | null; status: string }>();
+    for (let i = 0; i < vids.length; i += 300) {
+      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no, status").in("id", vids.slice(i, i + 300)).not("is_active", "is", false);
+      for (const v of (vs ?? []) as Record<string, unknown>[]) vh.set(String(v.id), { id: String(v.id), pv_no: (v.pv_no as string) ?? null, status: String(v.status ?? "draft") });
+    }
+    for (const r of pairs) {
+      const v = vh.get(String(r.voucher_id)); if (!v) continue;
+      const k = String(r.po_id); const arr = voucherByPo.get(k) ?? [];
+      if (!arr.some((x) => x.id === v.id)) arr.push(v);
+      voucherByPo.set(k, arr);
+    }
+  }
+
   // เครดิตร้าน — จับคู่ด้วยของกลาง (po ไม่มี FK เสมอไป จึงต้องจับจากชื่อด้วย)
   const partners = (partnerRes.data ?? []) as Record<string, unknown>[];
   const matcher = buildPartnerMatcher(partners as unknown as PartnerLike[]);
@@ -128,6 +149,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       expected_date: (p.expected_date as string) ?? null,
       line_count: lc,
       received_lines: dc,
+      vouchers: voucherByPo.get(id) ?? [],
       note: (p.note as string) ?? null,
     };
   });

@@ -58,10 +58,13 @@ export type PoDetail = {
   subtotal: number;
   vat_amount: number;
   last_receipt: PoLastReceipt | null;
+  /** ใบสำคัญรับ (ใบซื้อ) ที่มีรายการของใบนี้ — จัดซื้อใส่ราคา+ค่าส่งหลังรับของ */
+  vouchers: PoVoucherRef[];
   seller_info: PoSellerInfo | null;
   note: string | null;
   lines: PoDetailLine[];
 };
+export type PoVoucherRef = { id: string; pv_no: string | null; status: string; grand_total_thb: number; ship_total_thb: number };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
@@ -106,6 +109,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .select("gr_no, receiver, receive_date").eq("po_id", id)
     .order("receive_date", { ascending: false }).limit(1);
   const lastGr = ((grs ?? []) as Record<string, unknown>[])[0] ?? null;
+
+  // ใบสำคัญรับ (ใบซื้อ) ที่ครอบใบนี้ — ผ่านบรรทัดใบสำคัญ (po_id) → หัวใบ
+  const vouchers: PoVoucherRef[] = [];
+  {
+    const { data: vl } = await admin.from("purchase_voucher_lines_v2").select("voucher_id").eq("po_id", id).not("is_active", "is", false);
+    const vids = [...new Set(((vl ?? []) as Record<string, unknown>[]).map((r) => String(r.voucher_id)))];
+    if (vids.length) {
+      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no, status, grand_total_thb, ship_total_thb").in("id", vids).not("is_active", "is", false).order("created_at", { ascending: false });
+      for (const v of (vs ?? []) as Record<string, unknown>[]) vouchers.push({ id: String(v.id), pv_no: (v.pv_no as string) ?? null, status: String(v.status ?? "draft"), grand_total_thb: num(v.grand_total_thb), ship_total_thb: num(v.ship_total_thb) });
+    }
+  }
 
   // ข้อมูลผู้จำหน่ายสำหรับหัวเอกสาร — ผูกจาก id ก่อน ถ้าไม่มีค่อยจับจากชื่อ (ของกลาง lib/partner-match)
   let sellerInfo: PoSellerInfo | null = null;
@@ -161,6 +175,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     last_receipt: lastGr
       ? { gr_no: String(lastGr.gr_no ?? ""), receiver: (lastGr.receiver as string) ?? null, receive_date: (lastGr.receive_date as string) ?? null }
       : null,
+    vouchers,
     lines: rows.map((l) => {
       const sid = l.item_sku_id ? String(l.item_sku_id) : null;
       const key = sid ? coverMap.get(sid) : null;

@@ -41,7 +41,19 @@ export default function PurchaseVoucherFormPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // ค่าที่กำลังแก้ (ยังไม่บันทึก)
-  const [h, setH] = useState<{ voucher_date: string; fx_rate: string; ship_method: ShipMethod; ship_rate: string; ship_manual_total: string; note: string }>({ voucher_date: "", fx_rate: "", ship_method: "none", ship_rate: "", ship_manual_total: "", note: "" });
+  const [h, setH] = useState<{ voucher_date: string; fx_rate: string; ship_method: ShipMethod; ship_rate: string; ship_manual_total: string; note: string; carrier_id: string; carrier_name: string }>({ voucher_date: "", fx_rate: "", ship_method: "none", ship_rate: "", ship_manual_total: "", note: "", carrier_id: "", carrier_name: "" });
+  // ร้านขนส่ง/เรทค่าส่ง จากตั้งค่ากลาง (/m/freight-carriers) — เลือกแล้วได้วิธีคิด + เรททันที
+  const [carriers, setCarriers] = useState<{ id: string; name: string; method: ShipMethod; rate_thb: number }[]>([]);
+  useEffect(() => {
+    apiFetch("/api/master-v2/freight-carriers?limit=100").then((r) => r.json()).then((j) => {
+      const rows = ((j.data ?? []) as Record<string, unknown>[]).filter((c) => c.is_active !== false)
+        .map((c) => ({ id: String(c.id), name: String(c.name ?? ""), method: (c.method === "weight" ? "weight" : "cube") as ShipMethod, rate_thb: Number(c.rate_thb) || 0 }));
+      setCarriers(rows);
+    }).catch(() => setCarriers([]));
+  }, []);
+  // บิลค่าส่งจากแอปโอนเงินจีน (china_bills.is_shipping) — ไว้ผูกกับใบสำคัญตอนจ่ายค่าส่ง
+  const [shipBills, setShipBills] = useState<{ id: string; label: string }[]>([]);
+  const [payBusy, setPayBusy] = useState(false);
   const [ln, setLn] = useState<Record<string, { unit_price: string; cbm_per_unit: string; kg_per_unit: string }>>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -51,7 +63,7 @@ export default function PurchaseVoucherFormPage() {
 
   const applyData = useCallback((d: Detail) => {
     setData(d);
-    setH({ voucher_date: d.header.voucher_date, fx_rate: d.header.fx_rate == null ? "" : String(d.header.fx_rate), ship_method: d.header.ship_method, ship_rate: d.header.ship_rate == null ? "" : String(d.header.ship_rate), ship_manual_total: d.header.ship_manual_total == null ? "" : String(d.header.ship_manual_total), note: d.header.note ?? "" });
+    setH({ voucher_date: d.header.voucher_date, fx_rate: d.header.fx_rate == null ? "" : String(d.header.fx_rate), ship_method: d.header.ship_method, ship_rate: d.header.ship_rate == null ? "" : String(d.header.ship_rate), ship_manual_total: d.header.ship_manual_total == null ? "" : String(d.header.ship_manual_total), note: d.header.note ?? "", carrier_id: d.header.carrier_id ?? "", carrier_name: d.header.carrier_name ?? "" });
     const m: typeof ln = {};
     for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit) };
     setLn(m); setDirty(false);
@@ -91,7 +103,7 @@ export default function PurchaseVoucherFormPage() {
     setSaving(true);
     try {
       const body = {
-        header: { voucher_date: h.voucher_date, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate: h.ship_rate === "" ? null : num(h.ship_rate), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total), note: h.note || null },
+        header: { voucher_date: h.voucher_date, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate: h.ship_rate === "" ? null : num(h.ship_rate), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total), note: h.note || null, carrier_id: h.carrier_id || null, carrier_name: h.carrier_name || null },
         lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit) }; }),
       };
       const res = await apiFetch(`/api/purchasing/vouchers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -115,6 +127,43 @@ export default function PurchaseVoucherFormPage() {
       await load();
     } catch (e) { toast.error("ยืนยันไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setConfirming(false); }
+  };
+
+  // ── การจ่ายเงิน (หลังยืนยัน) ──
+  // ค่าสินค้า: มาร์คที่ใบ PO ผ่าน API กลาง mark-paid · ยอดที่จ่าย = ค่าสินค้าของใบนั้นตามราคาในใบสำคัญ (ไม่รวมค่าส่ง)
+  const markPoPaid = async (po: { po_id: string; po_no: string; goods_thb: number }, paid: boolean) => {
+    setPayBusy(true);
+    try {
+      const res = await apiFetch("/api/purchasing/mark-paid", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(paid ? { id: po.po_id, paid: true, paid_date: new Date().toISOString().slice(0, 10), paid_amount_thb: po.goods_thb } : { id: po.po_id, paid: false }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      toast.success(paid ? `มาร์คจ่ายค่าสินค้าแล้ว — ${po.po_no}` : `ยกเลิกจ่าย — ${po.po_no}`);
+      await load();
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setPayBusy(false); }
+  };
+  // ค่าส่ง: เก็บที่ใบสำคัญ (+ ผูกบิลค่าส่งในแอปโอนเงินจีนได้)
+  const setShippingPaid = async (paid: boolean, billId?: string | null) => {
+    setPayBusy(true);
+    try {
+      const body = { header: { shipping_payment_status: paid ? "paid" : "unpaid", shipping_paid_date: paid ? new Date().toISOString().slice(0, 10) : null, ...(billId !== undefined ? { shipping_bill_id: billId } : {}) } };
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      applyData(j.data as Detail);
+      toast.success(paid ? "มาร์คจ่ายค่าส่งแล้ว" : "ยกเลิกจ่ายค่าส่ง");
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setPayBusy(false); }
+  };
+  const loadShipBills = async () => {
+    try {
+      const res = await apiFetch("/api/master-v2/china-bills?limit=100");
+      const j = await res.json();
+      const rows = ((j.data ?? []) as Record<string, unknown>[]).filter((b) => b.is_shipping && b.is_active !== false)
+        .map((b) => ({ id: String(b.id), label: `${b.bill_date ? formatDate(String(b.bill_date)) : "—"} · ฿${fmtMoney(Number(b.amount_thb) || 0)}${b.note ? ` · ${String(b.note).slice(0, 30)}` : ""}` }));
+      setShipBills(rows);
+    } catch { setShipBills([]); }
   };
 
   const cancelDraft = async () => {
@@ -187,6 +236,15 @@ export default function PurchaseVoucherFormPage() {
                 <div className="bg-white border border-slate-200 rounded-xl p-4">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-slate-700">🚚 ค่าส่ง</span>
+                    {/* ร้านขนส่งจากตั้งค่ากลาง — เลือกแล้วตั้งวิธีคิด + เรทให้ · เพิ่ม/แก้เรทที่เมนู ร้านขนส่ง */}
+                    <select value={h.carrier_id} disabled={readonly}
+                      onChange={(e) => { const c = carriers.find((x) => x.id === e.target.value); if (!c) { setHeader({ carrier_id: "", carrier_name: "" }); return; } setHeader({ carrier_id: c.id, carrier_name: c.name, ship_method: c.method, ship_rate: String(c.rate_thb) }); }}
+                      className={`${inputCls} max-w-[16rem]`} title="ร้านขนส่ง / เรทค่าส่ง">
+                      <option value="">— ร้านขนส่ง (ไม่ระบุ) —</option>
+                      {carriers.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.method === "cube" ? `฿${fmtMoney(c.rate_thb, 0)}/คิว` : `฿${fmtMoney(c.rate_thb, 0)}/กก.`}</option>)}
+                      {h.carrier_id && !carriers.some((c) => c.id === h.carrier_id) && <option value={h.carrier_id}>{h.carrier_name || "ร้านขนส่ง (ปิดใช้แล้ว)"}</option>}
+                    </select>
+                    {!readonly && <a href="/m/freight-carriers" target="_blank" rel="noreferrer" className="text-[11px] text-slate-400 hover:text-blue-600">⚙ ตั้งค่าร้านขนส่ง</a>}
                     <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs">
                       {(["none", "cube", "weight"] as ShipMethod[]).map((m, i) => (
                         <button key={m} type="button" disabled={readonly} onClick={() => setHeader({ ship_method: m, ship_rate: h.ship_rate || (m === "cube" ? "3500" : m === "weight" ? "45" : "") })}
@@ -275,8 +333,59 @@ export default function PurchaseVoucherFormPage() {
                 </div>
               </div>
 
-              {/* ขวา: สรุปยอด (ค่าส่งแยกบรรทัด ไม่รวมในราคาสินค้า) */}
+              {/* ขวา: สรุปยอด (ค่าส่งแยกบรรทัด ไม่รวมในราคาสินค้า) + การจ่ายเงิน (หลังยืนยัน) */}
               <aside className="space-y-3">
+                {hd.status === "confirmed" && (
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div className="text-sm font-semibold text-slate-700 mb-2">💳 การจ่ายเงิน</div>
+                    <div className="text-[11px] text-slate-400 mb-2">ยอดค่าสินค้าอ้างจากราคาในใบสำคัญนี้ · มาร์คแล้วไปขึ้นที่ใบ PO / แดชบอร์ด / กระแสเงินสด</div>
+                    <div className="space-y-2">
+                      {hd.po_payments.map((p) => (
+                        <div key={p.po_id} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs text-slate-600">{p.po_no}</span>
+                            <span className="tabular-nums font-medium text-slate-800">฿{fmtMoney(p.goods_thb)}{foreign ? <span className="text-[11px] text-slate-400 font-normal"> ({sym}{fmtMoney(p.goods_foreign)})</span> : null}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 mt-1">
+                            {p.payment_status === "paid"
+                              ? <span className="text-xs text-emerald-700">🟢 จ่ายแล้ว {p.paid_date ? formatDate(p.paid_date) : ""}{p.paid_amount_thb ? ` · ฿${fmtMoney(p.paid_amount_thb)}` : ""}</span>
+                              : <span className="text-xs text-amber-700">🟡 ค่าสินค้า รอจ่าย</span>}
+                            {canEdit && (p.payment_status === "paid"
+                              ? <button onClick={() => void markPoPaid(p, false)} disabled={payBusy} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">↩ ยกเลิกจ่าย</button>
+                              : <button onClick={() => void markPoPaid(p, true)} disabled={payBusy} className="h-7 px-2.5 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50">💰 จ่ายค่าสินค้าแล้ว</button>)}
+                          </div>
+                        </div>
+                      ))}
+                      {hd.ship_total_thb > 0 && (
+                        <div className="border border-orange-200 bg-orange-50/40 rounded-lg px-3 py-2 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-slate-600">🚚 ค่าส่ง {hd.carrier_name ? `· ${hd.carrier_name}` : ""}</span>
+                            <span className="tabular-nums font-medium text-orange-700">฿{fmtMoney(hd.ship_total_thb)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 mt-1">
+                            {hd.shipping_payment_status === "paid"
+                              ? <span className="text-xs text-emerald-700">🟢 จ่ายแล้ว {hd.shipping_paid_date ? formatDate(hd.shipping_paid_date) : ""}</span>
+                              : <span className="text-xs text-amber-700">🟡 ค่าส่ง รอจ่าย</span>}
+                            {canEdit && (hd.shipping_payment_status === "paid"
+                              ? <button onClick={() => void setShippingPaid(false)} disabled={payBusy} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">↩ ยกเลิกจ่าย</button>
+                              : <button onClick={() => void setShippingPaid(true)} disabled={payBusy} className="h-7 px-2.5 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50">💰 จ่ายค่าส่งแล้ว</button>)}
+                          </div>
+                          {canEdit && (
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <select value={hd.shipping_bill_id ?? ""} onFocus={() => { if (shipBills.length === 0) void loadShipBills(); }} disabled={payBusy}
+                                onChange={(e) => void setShippingPaid(hd.shipping_payment_status === "paid", e.target.value || null)}
+                                className={`${inputCls} h-7 text-[11px] flex-1 min-w-0`} title="ผูกบิลค่าส่งจากแอปโอนเงินจีน (บิลที่ติ๊ก ค่าส่ง)">
+                                <option value="">— ผูกบิลค่าส่ง (แอปโอนเงินจีน) —</option>
+                                {hd.shipping_bill_id && !shipBills.some((b) => b.id === hd.shipping_bill_id) && <option value={hd.shipping_bill_id}>บิลที่ผูกไว้</option>}
+                                {shipBills.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="bg-white border border-slate-200 rounded-xl p-4 xl:sticky xl:top-4">
                   <div className="text-sm font-semibold text-slate-700 mb-2">สรุปยอด</div>
                   <dl className="text-sm space-y-1.5">

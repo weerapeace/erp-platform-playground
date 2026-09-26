@@ -66,6 +66,11 @@ export function SkuTradeHistory({ skuId }: { skuId: string }) {
         {href
           ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-[12.5px] font-medium text-blue-600 hover:underline truncate" title="เปิดใบนี้ (แท็บใหม่)">{r.doc_no ?? "—"} ↗</a>
           : <span className="text-[12.5px] font-medium text-slate-700 truncate">{r.doc_no ?? "—"}</span>}
+        {/* ใบสำคัญรับ (ใบซื้อ) — ราคาซื้อจริงหลังรับของ · ร่าง = ยังไม่ออกเลข */}
+        {r.pv_id && (
+          <a href={`/purchasing/vouchers/${r.pv_id}`} target="_blank" rel="noopener noreferrer" title="เปิดใบสำคัญรับ (ใบซื้อ)"
+            className="text-[10px] px-1.5 py-0.5 rounded border shrink-0 bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100">🧾 {r.pv_no ?? "ร่าง"}</a>
+        )}
       </div>
     );
   };

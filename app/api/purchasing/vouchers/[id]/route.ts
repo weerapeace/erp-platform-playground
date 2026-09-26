@@ -29,7 +29,11 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
 }
 
 type PatchBody = {
-  header?: { voucher_date?: string; currency?: string; fx_rate?: unknown; ship_method?: string; ship_rate?: unknown; ship_manual_total?: unknown; note?: string | null; seller_name?: string };
+  header?: {
+    voucher_date?: string; currency?: string; fx_rate?: unknown; ship_method?: string; ship_rate?: unknown; ship_manual_total?: unknown; note?: string | null; seller_name?: string;
+    carrier_id?: string | null; carrier_name?: string | null;
+    shipping_bill_id?: string | null; shipping_payment_status?: string; shipping_paid_date?: string | null;
+  };
   lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown }[];
 };
 
@@ -39,13 +43,26 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const admin = supabaseAdmin();
   const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status").eq("id", id).maybeSingle();
   if (!cur) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
-  if ((cur as { status: string }).status !== "draft") return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว แก้ไม่ได้" }, { status: 400 });
+  const isDraft = (cur as { status: string }).status === "draft";
 
   let body: PatchBody;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
+  // ใบที่ยืนยันแล้ว: แก้ได้เฉพาะ "การจ่ายค่าส่ง" + หมายเหตุ (ราคาถูกเขียนกลับระบบไปแล้ว)
+  const PAY_KEYS = new Set(["shipping_payment_status", "shipping_paid_date", "shipping_bill_id", "note"]);
+  if (!isDraft) {
+    const keys = Object.keys(body.header ?? {});
+    if (Array.isArray(body.lines) && body.lines.length) return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว แก้รายการไม่ได้" }, { status: 400 });
+    if (keys.some((k) => !PAY_KEYS.has(k))) return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว แก้ได้เฉพาะสถานะจ่ายค่าส่ง/หมายเหตุ" }, { status: 400 });
+  }
+
   if (body.header) {
     const h = body.header; const patch: Record<string, unknown> = {};
+    if (h.carrier_id !== undefined) patch.carrier_id = h.carrier_id ? String(h.carrier_id) : null;
+    if (h.carrier_name !== undefined) patch.carrier_name = h.carrier_name ? String(h.carrier_name) : null;
+    if (h.shipping_bill_id !== undefined) patch.shipping_bill_id = h.shipping_bill_id ? String(h.shipping_bill_id) : null;
+    if (h.shipping_payment_status !== undefined) patch.shipping_payment_status = h.shipping_payment_status === "paid" ? "paid" : "unpaid";
+    if (h.shipping_paid_date !== undefined) patch.shipping_paid_date = h.shipping_paid_date ? String(h.shipping_paid_date) : null;
     if (h.voucher_date !== undefined && h.voucher_date) patch.voucher_date = h.voucher_date;
     if (h.currency !== undefined && h.currency) patch.currency = String(h.currency).toUpperCase();
     if (h.fx_rate !== undefined) patch.fx_rate = optNum(h.fx_rate);
@@ -80,7 +97,11 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       }
     }
   }
-  await recomputeVoucher(admin, id);
+  if (isDraft) await recomputeVoucher(admin, id);   // ยืนยันแล้วยอดล็อก ไม่คิดใหม่
+  else {
+    const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+    await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { shipping_payment: body.header ?? null } });
+  }
   const v = await fetchVoucher(admin, id);
   return NextResponse.json({ ok: true, data: v, error: null });
 }
