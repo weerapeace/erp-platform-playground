@@ -24,6 +24,7 @@ export type SkuCard = {
   variant_count?: number | null;     // จำนวน SKU ลูก (เฉพาะ Parent SKU — แทนราคา/สต๊อก)
   extra?: Record<string, unknown>;   // ฟิลด์เพิ่มที่เลือกโชว์บนการ์ด (จาก Field Registry — ไม่ hardcode)
   buy_price?: BuyPrice | null;       // ราคาซื้อล่าสุด — ส่งเฉพาะคนที่มีสิทธิ์ products.cost.view (บังคับฝั่ง server)
+  parent?: { id: string; code: string; name: string } | null;   // Parent SKU ของ SKU นี้ (เฉพาะ entity=skus) — กดแล้วเปิด drawer Parent
 };
 /** ราคาซื้อล่าสุดของ SKU — ลำดับแหล่ง: ใบ PO ล่าสุด → ราคาร้าน (supplier_items) ที่อัปเดตล่าสุด → ต้นทุนมาตรฐานใน SKU */
 export type BuyPrice = {
@@ -116,7 +117,7 @@ export async function GET(request: NextRequest) {
       extraCols = reqFields.filter((f) => allowed.has(f));
     }
   }
-  const baseCols = "id, code, name_th, cover_image_r2_key, is_active" + (ENT.hasPrice ? ", list_price" : "")
+  const baseCols = "id, code, name_th, cover_image_r2_key, is_active" + (ENT.hasPrice ? ", list_price, parent_sku_id" : "")
     + (ENT.hasPrice && canCost ? ", standard_price, rmb_cost" : "");   // ต้นทุนมาตรฐาน = แหล่งสำรองของ "ราคาซื้อล่าสุด"
   const effSort = (!ENT.hasPrice && sortBy === "list_price") ? "code" : sortBy;   // parent ไม่มี list_price
   const sel = baseCols + (extraCols.length ? ", " + extraCols.join(", ") : "");
@@ -159,6 +160,14 @@ export async function GET(request: NextRequest) {
   const variant = new Map<string, number>();   // จำนวน SKU ลูก ต่อ Parent
   const childCover = new Map<string, string>();   // รูปปกของ SKU ลูกตัวแรก (fallback ตอน Parent ไม่มีรูป)
   const buyMap = new Map<string, BuyPrice>();     // ราคาซื้อล่าสุด ต่อ SKU (เฉพาะ canCost)
+  const parentMap = new Map<string, { id: string; code: string; name: string }>();   // Parent ของ SKU ในหน้านี้ (ดึงรอบเดียว)
+  if (ENT.hasPrice) {
+    const pids = [...new Set(rows.map((r) => r.parent_sku_id).filter((x): x is string => typeof x === "string" && !!x))];
+    if (pids.length) {
+      const { data: ps } = await admin.from("parent_skus_v2").select("id, code, name_th").in("id", pids);
+      for (const p of (ps ?? []) as { id: string; code: string; name_th: string | null }[]) parentMap.set(p.id, { id: p.id, code: p.code, name: p.name_th ?? "" });
+    }
+  }
 
   if (ids.length) {
     let linkData: { src_id: string; tgt_id: string }[] = [];
@@ -260,6 +269,7 @@ export async function GET(request: NextRequest) {
     is_active: r.is_active, tags: tagMap.get(r.id) ?? [], has_bom: ENT.hasPrice ? bomSet.has(r.code) : false,
     extra: extraCols.length ? Object.fromEntries(extraCols.map((col) => [col, r[col] ?? null])) : undefined,
     buy_price: canCost && ENT.hasPrice ? (buyMap.get(r.id) ?? null) : undefined,
+    parent: ENT.hasPrice ? (typeof r.parent_sku_id === "string" ? (parentMap.get(r.parent_sku_id) ?? null) : null) : undefined,
     };
   });
   return NextResponse.json({ cards, total, cost_allowed: canCost && ENT.hasPrice, error: null });

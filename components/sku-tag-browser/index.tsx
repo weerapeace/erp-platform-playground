@@ -204,6 +204,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const [missingOpen, setMissingOpen] = useState(false);       // ตรวจรูปที่ไฟล์หายจากที่เก็บ
   const [copyPending, setCopyPending] = useState<{ id: string; code: string } | null>(null);  // ยืนยันก่อนคัดลอก
   const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → drawer เก่าตัวจริง (ของกลาง: ดู/แก้ทุกฟิลด์)
+  const [parentPeekId, setParentPeekId] = useState<string | null>(null);   // กดชิป "📦 Parent" บนการ์ด/แถว SKU → drawer Parent (ของกลางตัวเดียวกัน)
 
   // ชุดฟิลด์การ์ด (ครั้งเดียว)
   useEffect(() => {
@@ -555,13 +556,13 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">{t("หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉", "Nothing incomplete on this page 🎉")}</div>
               : view === "table"
-                ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode} showCost={costAllowed}
+                ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode} showCost={costAllowed} onOpenParent={(id) => setParentPeekId(id)}
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
                     onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }}
                     sortKey={sortKey} onSort={(k) => { setSortKey(k); setPage(0); patchNav({ page: 0 }); }} />
                 : <div className="grid gap-3 select-none" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
                     {shown.map((c) => (
-                      <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs}
+                      <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs} onOpenParent={(id) => setParentPeekId(id)}
                         // pick: ติ๊กตามที่ผู้เรียกเลือกไว้ · manage: ติ๊กตามระบบ bulk
                         selected={pick ? pickedSet.has(c.id) : selected.has(c.id)} selectMode={pick ? true : selectMode}
                         onClick={() => { if (justDragged.current) return; if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } if (selectMode) return; setPeekId(c.id); }}
@@ -682,13 +683,28 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           />
         );
       })()}
+      {/* 📦 drawer Parent SKU — เปิดจากชิป Parent บนการ์ด/แถว SKU (ของกลาง MasterRecordDrawer ตัวเดียวกับหน้า Parent) */}
+      {parentPeekId && (
+        <MasterRecordDrawer
+          key={"parent-" + parentPeekId}
+          moduleKey="parent-skus-v2"
+          apiPath="parent-skus"
+          title="Parent SKUs"
+          mediaGallery={{ entityType: "parent_skus_v2", title: "รูปภาพเพิ่มเติม", maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }}
+          recordId={parentPeekId}
+          onClose={() => setParentPeekId(null)}
+          onChanged={() => void reloadFirst()}
+        />
+      )}
     </div>
   );
 }
 
-function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPointerDownCard, onPointerDownHandle, onPointerEnter }: {
+function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPointerDownCard, onPointerDownHandle, onPointerEnter, onOpenParent }: {
   c: SkuCard; fields: string[]; extraDefs: FieldDef[]; selected: boolean; selectMode: boolean;
   onClick: () => void; onPointerDownCard: () => void; onPointerDownHandle: () => void; onPointerEnter: () => void;
+  /** กดชิป "📦 Parent" → เปิด drawer Parent (ไม่เปิดการ์ด SKU) */
+  onOpenParent?: (parentId: string) => void;
 }) {
   const has = (k: string) => fields.includes(k);
   const showTopRow = has("code") || has("status");
@@ -728,6 +744,14 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
         )}
         {/* การ์ดจำกัด 2 บรรทัดเพื่อให้สูงเท่ากัน — ชี้ที่ชื่อเพื่อดูเต็ม (มุมมองตารางแสดงเต็มอยู่แล้ว) */}
         {has("name") && <p title={c.name || ""} className="text-[12px] text-slate-700 mt-1" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.4em" }}>{c.name || "—"}</p>}
+        {/* 📦 Parent SKU ของตัวนี้ — กดเปิด drawer Parent (stopPropagation ไม่ให้เปิดการ์ด SKU) */}
+        {c.parent && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onOpenParent?.(c.parent!.id); }} onPointerDown={(e) => e.stopPropagation()}
+            title={`Parent SKU: ${c.parent.code} · ${c.parent.name || ""} — กดเพื่อเปิด`}
+            className="mt-1 inline-flex items-center gap-1 max-w-full text-[10px] px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100">
+            <span className="shrink-0">📦</span><span className="font-mono truncate">{c.parent.code}</span>
+          </button>
+        )}
         {c.variant_count != null ? (
           <div className="mt-1.5 text-[12px] text-indigo-600">📦 {c.variant_count.toLocaleString("th-TH")} ตัวลูก (SKU)</div>
         ) : showPriceRow ? (
@@ -773,11 +797,13 @@ function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left", class
   );
 }
 
-function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false }: {
+function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false, onOpenParent }: {
   rows: SkuCard[]; selected: Set<string>; selectMode: boolean; onToggle: (id: string) => void; onOpen: (id: string) => void;
   sortKey: string; onSort: (col: string) => void;
   showCost?: boolean;   // มีสิทธิ์ดูต้นทุน → เพิ่มคอลัมน์ "ราคาซื้อ (ล่าสุด)"
+  onOpenParent?: (parentId: string) => void;   // กด Parent ในแถว → เปิด drawer Parent
 }) {
+  const showParent = rows.some((r) => r.parent !== undefined);   // เฉพาะโหมด SKU (Parent เองไม่มีคอลัมน์นี้)
   return (
     <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
       <table className="w-full text-sm">
@@ -787,6 +813,7 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
             <th className="px-2 py-2 w-12">รูป</th>
             <SortTh label="รหัส" ascKey="code" descKey="code_desc" sortKey={sortKey} onSort={onSort} />
             <SortTh label="ชื่อ" ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} className="w-full" />
+            {showParent && <th className="px-3 py-2 font-medium whitespace-nowrap" title="Parent SKU ของแถวนี้ — กดเพื่อเปิด">Parent</th>}
             <SortTh label="ราคาขาย" ascKey="price_asc" descKey="price_desc" sortKey={sortKey} onSort={onSort} align="right" />
             {showCost && <th className="px-3 py-2 font-medium text-right whitespace-nowrap" title="ราคาซื้อล่าสุด — จากใบ PO ล่าสุด ถ้าไม่มีใช้ราคาร้าน ถ้าไม่มีอีกใช้ต้นทุนมาตรฐานใน SKU (ชี้ที่ตัวเลขเพื่อดูที่มา)">ราคาซื้อ</th>}
             <th className="px-3 py-2 font-medium text-right">สต๊อก</th>
@@ -812,6 +839,14 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
                 </td>
                 <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">{c.code}</td>
                 <td className="px-3 py-1.5"><span className="block whitespace-normal break-words leading-snug min-w-[16rem]">{c.name || <span className="text-slate-300">—</span>}</span></td>
+                {showParent && (
+                  <td className="px-3 py-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                    {c.parent
+                      ? <button type="button" onClick={() => onOpenParent?.(c.parent!.id)} title={`${c.parent.code} · ${c.parent.name || ""} — กดเพื่อเปิด Parent`}
+                          className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100">📦 {c.parent.code}</button>
+                      : <span className="text-slate-300 text-[11px]">—</span>}
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"}</td>
                 {showCost && (
                   <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap" title={c.buy_price?.label ?? "ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)"}>
