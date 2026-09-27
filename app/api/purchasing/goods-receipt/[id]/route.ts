@@ -89,12 +89,28 @@ function nextLineStatus(old: string | null, ordered: number, received: number, c
   return old && !["received", "partial"].includes(old) ? old : "pending";
 }
 
+type EditBody = { receive_date?: string | null; receiver?: string | null; note?: string | null; lines?: LineIn[]; add_lines?: LineIn[]; actor?: string };
+
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
-  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const { id } = await params;
-  let body: { receive_date?: string | null; receiver?: string | null; note?: string | null; lines?: LineIn[]; add_lines?: LineIn[]; actor?: string };
+  let body: EditBody;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  return editGoodsReceipt(request, id, body, {});
+}
+
+/**
+ * DELETE /api/purchasing/goods-receipt/<id> — ลบใบรับทั้งใบ (soft delete)
+ * = ตั้งทุกบรรทัดเป็น 0 ผ่านตัวคิดส่วนต่างเดียวกับการแก้ไข (คืน PO/สต๊อก/ใบสำคัญร่าง) แล้วปิดใบ · ใบสำคัญยืนยันแล้ว = ลบไม่ได้
+ */
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const { id } = await params;
+  return editGoodsReceipt(request, id, {}, { deleteWhole: true });
+}
+
+async function editGoodsReceipt(request: NextRequest, id: string, body: EditBody, opts: { deleteWhole?: boolean }): Promise<NextResponse> {
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const actor = String(body.actor ?? "") || (user?.user_metadata?.name as string) || user?.email || "system";
   const admin = supabaseAdmin();
 
@@ -115,6 +131,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   ]);
   const grLines = new Map(((gls ?? []) as Row[]).map((l) => [String(l.id), l]));
   const poLines = new Map(((pls ?? []) as Row[]).map((l) => [String(l.id), l]));
+  // ลบทั้งใบ = ทุกบรรทัดเป็น 0 (ส่วนต่างติดลบ → คืน PO + ตัดสต๊อกกลับ)
+  if (opts.deleteWhole) body = { ...body, lines: [...grLines.values()].map((l) => ({ id: String(l.id), qty_received: 0, qty_defective: 0 })), add_lines: [] };
   // คลังที่ของเข้าตอนรับ (จาก ledger) → ไม่มี = คลังวัตถุดิบ WH-RAW
   let whId = String(((mv ?? [])[0] as Row | undefined)?.to_warehouse_id ?? "") || null;
   if (!whId) { const { data: w } = await admin.from("erp_playground_warehouses").select("id").eq("code", "WH-RAW").maybeSingle(); whId = (w as Row | null)?.id ? String((w as Row).id) : null; }
@@ -196,6 +214,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (body.receive_date !== undefined && body.receive_date) hp.receive_date = body.receive_date;
     if (body.receiver !== undefined) hp.receiver = String(body.receiver ?? "").trim() || null;
     if (body.note !== undefined) hp.note = body.note ? String(body.note) : null;
+    if (opts.deleteWhole) { hp.is_active = false; hp.status = "cancelled"; hp.voucher_id = null; }   // ปิดใบ + ปล่อยจากใบสำคัญร่าง
     await admin.from("goods_receipts_v2").update(hp).eq("id", grId);
     // 4) สถานะ PO รวม (สูตรเดียวกับตอนรับของ)
     if (g.po_id) {
@@ -211,6 +230,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: String((e as Error).message ?? e), stock_warnings: stockWarnings }, { status: 400 });
   }
 
-  await writeAudit(admin, { action: "update", entityType: "goods_receipts_v2", entityId: grId, actorId: user?.id ?? null, actorName: actor, metadata: { gr_no: g.gr_no, header: { receive_date: body.receive_date, receiver: body.receiver, note: body.note }, changes, stock_warnings: stockWarnings } });
-  return NextResponse.json({ ok: true, changes: changes.length, stock_warnings: stockWarnings, error: null });
+  await writeAudit(admin, { action: opts.deleteWhole ? "delete" : "update", entityType: "goods_receipts_v2", entityId: grId, actorId: user?.id ?? null, actorName: actor, metadata: { gr_no: g.gr_no, po_no: g.po_no, header: { receive_date: body.receive_date, receiver: body.receiver, note: body.note }, changes, stock_warnings: stockWarnings, snapshot: opts.deleteWhole ? { header: g, lines: [...grLines.values()] } : undefined } });
+  return NextResponse.json({ ok: true, deleted: !!opts.deleteWhole, changes: changes.length, stock_warnings: stockWarnings, error: null });
 }

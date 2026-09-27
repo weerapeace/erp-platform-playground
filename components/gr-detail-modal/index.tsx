@@ -39,6 +39,24 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
   const [le, setLe] = useState<Record<string, LineEdit>>({});
   const [adds, setAdds] = useState<AddRow[]>([]);
   const [addOpen, setAddOpen] = useState(false);
+  const [delOpen, setDelOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // ลบทั้งใบ — คืนใบ PO/สต๊อกให้เหมือนไม่เคยรับ (soft delete เก็บประวัติ)
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/api/purchasing/goods-receipt/${encodeURIComponent(grId)}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      const warn = (j.stock_warnings ?? []) as string[];
+      toast.success(`ลบใบรับแล้ว — คืนใบสั่งซื้อ/สต๊อกให้แล้ว${warn.length ? ` · ⚠ สต๊อก: ${warn.join("; ")}` : ""}`);
+      setDelOpen(false);
+      await onSaved?.();
+      onClose();
+    } catch (e) { toast.error("ลบไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setDeleting(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -112,6 +130,10 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
         <button onClick={() => void save()} disabled={saving || !dirty} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
       </>) : (<>
         {d && <a href={`/print/goods-receipt/${d.id}`} target="_blank" rel="noreferrer" className="mr-auto h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🖨 พิมพ์ใบรับ</a>}
+        {d && canEdit && (
+          <button onClick={() => setDelOpen(true)} disabled={locked} title={locked ? `ออกใบสำคัญ ${d.pv_no} และยืนยันแล้ว ลบไม่ได้` : "ลบใบรับทั้งใบ (คืนใบสั่งซื้อ/สต๊อก)"}
+            className="h-9 px-3 text-sm border border-red-200 rounded-lg text-red-600 bg-white hover:bg-red-50 disabled:opacity-40">🗑 ลบใบรับ</button>
+        )}
         {d && canEdit && (
           <button onClick={startEdit} disabled={locked} title={locked ? `ออกใบสำคัญ ${d.pv_no} และยืนยันแล้ว แก้ไม่ได้` : "แก้จำนวน/วันที่/ผู้รับ หรือเพิ่มรายการที่ลืมลง"}
             className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40">✎ แก้ไข</button>
@@ -239,6 +261,24 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
           </div>
           {editing && <p className="text-[11px] text-slate-400">ลดจำนวนรับ = ตัดสต๊อกกลับตามส่วนต่าง · เพิ่มจำนวน = บวกสต๊อกเพิ่ม · ทุกครั้งเก็บประวัติเดิม/ใหม่ไว้ในระบบ</p>}
         </div>
+      )}
+
+      {/* ยืนยันลบทั้งใบ — dangerous action ต้องกดยืนยันชัดเจน */}
+      {delOpen && d && (
+        <ERPModal open onClose={() => !deleting && setDelOpen(false)} size="sm" storageKey="gr-delete"
+          title="🗑 ลบใบรับสินค้า" description={`${d.gr_no} · ${d.seller_name || "—"}`}
+          footer={<>
+            <button onClick={() => setDelOpen(false)} disabled={deleting} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ไม่ลบ</button>
+            <button onClick={() => void remove()} disabled={deleting} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{deleting ? "กำลังลบ…" : "ยืนยันลบใบรับ"}</button>
+          </>}>
+          <div className="text-sm text-slate-700">ลบใบรับนี้ทั้งใบ ({d.lines.length} รายการ รับรวม {totalRecv.toLocaleString()})</div>
+          <ul className="mt-2 text-xs text-slate-500 list-disc pl-5 space-y-0.5">
+            <li>ใบสั่งซื้อ {d.po_no || "—"} จะกลับไป &quot;รอรับของ&quot; ตามจำนวนที่คืน</li>
+            <li>สต๊อกที่บวกเข้าไปตอนรับจะถูกตัดกลับ</li>
+            {d.voucher_id && !locked && <li>ใบสำคัญร่าง {d.pv_no ?? ""} จะไม่มีรายการของใบนี้แล้ว</li>}
+            <li>ใบไม่หายจากประวัติ (เก็บเป็นยกเลิก + บันทึกว่าใครลบ)</li>
+          </ul>
+        </ERPModal>
       )}
     </ERPModal>
   );
