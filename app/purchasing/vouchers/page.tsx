@@ -171,7 +171,7 @@ export default function PurchaseVouchersPage() {
 
       {/* ป๊อปรายละเอียดใบรับ (ของกลาง) + ปุ่มออกใบสำคัญจากใบนี้ใบเดียว */}
       {detailGr && (
-        <GrDetailModal grId={detailGr.id} onClose={() => setDetailGr(null)}
+        <GrDetailModal grId={detailGr.id} onClose={() => setDetailGr(null)} onSaved={load}
           footer={canEdit ? (
             <button onClick={() => { const g = detailGr; setDetailGr(null); void createVoucher([g.id]); }} disabled={creating}
               className="h-9 px-4 text-sm font-medium rounded-lg border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-40">🧾 ออกใบสำคัญจากใบนี้</button>
