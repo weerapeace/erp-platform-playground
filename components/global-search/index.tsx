@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useRecentPicks, RECENT_KEYS } from "@/lib/recent-picks";
+import { announceParams } from "@/lib/open-param";
 import { matchCommands } from "@/lib/search-commands";
 import type { SearchHit, GlobalSearchResponse } from "@/app/api/global-search/route";
 
@@ -132,6 +133,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
     remember(hit);            // จำไว้โชว์ตอนเปิดครั้งหน้า
     onClose();
     router.push(hit.link_url);
+    announceParams(hit.link_url);   // อยู่หน้านั้นอยู่แล้ว → บอกให้เปิดใบ/ฟอร์มทันที (URL เปลี่ยนแค่ query หน้าไม่ mount ใหม่)
   }, [onClose, router, remember]);
 
   const onKey = (e: React.KeyboardEvent) => {

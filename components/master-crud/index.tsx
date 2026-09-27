@@ -17,7 +17,7 @@ import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { useNewParam } from "@/lib/open-param";
+import { useNewParam, useOpenParam } from "@/lib/open-param";
 import { CopyFromRecordButton } from "./copy-from-record";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { cachedJson, primeCache } from "@/lib/client-cache";
@@ -1290,18 +1290,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       })
       .catch(() => { /* keep partial — ดีกว่าค้าง */ });
   };
-  // เปิด record อัตโนมัติจาก ?open=<id> (เช่นกด "เปิดหน้าเต็ม" จาก popup relation)
-  // อ่านจาก window.location เพื่อเลี่ยง useSearchParams ที่ต้องมี Suspense (พังตอน prerender)
-  const autoOpenedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!canView || typeof window === "undefined") return;
-    const openParam = new URLSearchParams(window.location.search).get("open");
-    if (!openParam || autoOpenedRef.current === openParam) return;
-    autoOpenedRef.current = openParam;
-    setDrawerMode("view");
-    openEdit({ id: openParam } as Row);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canView]);
+  // เปิด record อัตโนมัติจาก ?open=<id> (เช่นกด "เปิดหน้าเต็ม" จาก popup relation / ผลจาก Global Search)
+  // ของกลาง useOpenParam: อ่านจาก URL ตอน mount + ฟัง event ตอนอยู่หน้าเดิมแล้วมีคนสั่งเปิดใบอื่น
+  useOpenParam(canView, (id) => { setDrawerMode("view"); openEdit({ id } as Row); });
 
   // โหมด embedded (drawer-only): เปิด record/สร้างใหม่ทันทีหลัง registry พร้อม + ป้อนรายการ nav
   const embeddedOpenedRef = useRef(false);

@@ -11,6 +11,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { useOpenParam } from "@/lib/open-param";
 import { withImageWidth } from "@/lib/r2-image";
 import { formatAmount } from "@/lib/money";
 import { useToast } from "@/components/toast";
@@ -205,6 +206,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const [copyPending, setCopyPending] = useState<{ id: string; code: string } | null>(null);  // ยืนยันก่อนคัดลอก
   const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → drawer เก่าตัวจริง (ของกลาง: ดู/แก้ทุกฟิลด์)
   const [parentPeekId, setParentPeekId] = useState<string | null>(null);   // กดชิป "📦 Parent" บนการ์ด/แถว SKU → drawer Parent (ของกลางตัวเดียวกัน)
+  // ลิงก์ตรงถึงสินค้า `?open=<id>` (จาก Global Search / หน้าอื่น) — หน้า SKU เปิดแท็บ "เลือกดูตามแท็ก" เป็นค่าเริ่มต้น
+  // ตารางกลางไม่ได้ mount → ต้องเปิด drawer จากตรงนี้เอง (เฉพาะโหมดจัดการ ไม่ใช่ตอนถูกฝังเป็น picker)
+  useOpenParam(mode === "manage", (id) => setPeekId(id));
 
   // ชุดฟิลด์การ์ด (ครั้งเดียว)
   useEffect(() => {
