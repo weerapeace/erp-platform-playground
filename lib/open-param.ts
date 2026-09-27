@@ -32,6 +32,25 @@ export function useOpenParam(ready: boolean, open: (id: string) => void): void {
   }, [ready]);
 }
 
+/**
+ * ของกลาง — เปิด "ฟอร์มสร้างใหม่" อัตโนมัติจาก `?new=1` บน URL
+ * ใช้ทำ "คำสั่งลัด" จาก Global Search (เช่น พิมพ์ "สร้าง PO") → เด้งมาหน้านั้นพร้อมเปิดฟอร์มให้เลย
+ * @param ready  พร้อมไหม (เช่น มีสิทธิ์สร้าง + โหลดค่าตั้งต้นเสร็จ)
+ * @param openCreate ฟังก์ชันเปิดฟอร์มสร้างใหม่ของหน้านั้น
+ */
+export function useNewParam(ready: boolean, openCreate: () => void): void {
+  const doneRef = useRef(false);
+  const fnRef = useRef(openCreate);
+  fnRef.current = openCreate;
+  useEffect(() => {
+    if (!ready || doneRef.current || typeof window === "undefined") return;
+    const v = new URLSearchParams(window.location.search).get("new");
+    if (!v || v === "0") return;
+    doneRef.current = true;
+    fnRef.current();
+  }, [ready]);
+}
+
 /** สร้างลิงก์ตรงถึงใบ — ตัวจริงอยู่ lib/open-link.ts (server-safe) · re-export ให้หน้าจอที่ import จากที่นี่อยู่แล้ว
  *  ⚠️ API route ห้าม import จากไฟล์นี้ (เป็น "use client") — ให้ import จาก @/lib/open-link แทน */
 export { openLink } from "./open-link";

@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
-import { useOpenParam } from "@/lib/open-param";
+import { useOpenParam, useNewParam } from "@/lib/open-param";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { Spinner } from "@/components/spinner";
@@ -135,6 +135,7 @@ export function PartnerManager() {
     setSel({ id: "", default_currency: "THB", is_customer: tab === "customer", is_supplier: tab === "supplier" || tab === "china", is_company: true } as Partner);
     setMode("create");
   };
+  useNewParam(canCreate && !loading, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
   const afterSave = (saved: Partner) => {
     setAll((rows) => { const i = rows.findIndex((r) => r.id === saved.id); if (i < 0) return [saved, ...rows]; const c = [...rows]; c[i] = saved; return c; });
     setSel(saved); setMode("view");

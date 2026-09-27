@@ -14,6 +14,7 @@ import type { CustomerPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { useNewParam } from "@/lib/open-param";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
 import { SOLineEditor, emptyLine, type EditorLine } from "@/components/sales-line-items";
@@ -99,6 +100,7 @@ export default function DeliveryNotesPage() {
     setEditingId(null); setCustomer(null); setDeliveryDate(new Date().toISOString().slice(0, 10));
     setNote(""); setLines([emptyLine()]); setSrcSo([]); setFormErr(null); setModalOpen(true);
   };
+  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   const openDetail = async (id: string) => {
     setDetailOpen(true); setDetailLoading(true); setDetail(null);

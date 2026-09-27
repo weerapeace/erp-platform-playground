@@ -15,7 +15,7 @@ import { DataTable, type RowAction } from "@/components/data-table";
 import { PoDetailModal } from "@/components/po-detail-modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { useOpenParam } from "@/lib/open-param";
+import { useOpenParam, useNewParam } from "@/lib/open-param";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { PoListRow } from "@/app/api/purchasing/po-list/route";
 import { PoCreateModal } from "./create-modal";
@@ -50,6 +50,7 @@ export default function PoListPage() {
   const [error, setError] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  useNewParam(true, () => setCreateOpen(true));   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดป๊อป "เปิด PO ใหม่"
 
   // ลิงก์ตรงถึงใบ: /purchasing/po-list?open=<id> (เช่นกดจากกระดานเงินสด)
   useOpenParam(true, setDetailId);

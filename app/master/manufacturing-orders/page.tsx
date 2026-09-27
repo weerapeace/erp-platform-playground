@@ -14,6 +14,7 @@ import type { LayLayout } from "@/lib/mo-fabric-lay";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { useNewParam } from "@/lib/open-param";
 import { BomRefreshButton } from "@/components/bom-refresh";
 import { ComponentPicker } from "../bom/line-editor";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
@@ -208,6 +209,7 @@ export default function MoWorkspacePage() {
 
   // สร้างใบใหม่ = ป๊อปของกลาง MoCreateModal (ตัวเดียวกับที่บอร์ดจ่ายงานใช้) · ฟอร์มใหญ่ด้านล่างไว้ "แก้" ใบที่มีแล้ว
   const openCreate = () => setCreateOpen(true);
+  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   const openEdit = async (row: MoListItem) => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setVersions([]); setWoList([]);

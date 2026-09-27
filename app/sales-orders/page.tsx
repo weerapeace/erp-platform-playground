@@ -13,7 +13,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
-import { useOpenParam } from "@/lib/open-param";
+import { useOpenParam, useNewParam } from "@/lib/open-param";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
 import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
@@ -279,6 +279,7 @@ export default function SalesOrdersPage() {
     const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", warehouse: defaultWarehouse, company_id: defaultCompanyId, lines: [emptyLine()] };
     setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setPulledQuotes([]); setFormErr(null); setModalOpen(true);
   };
+  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   // ---- ดึงจากเอกสารต้นทาง ----
   const handlePicked = async (rows: SourceDocRow[]) => {

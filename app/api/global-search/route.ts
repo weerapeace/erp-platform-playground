@@ -6,6 +6,7 @@ import { tokenize, scoreRow, ilikeOr } from "@/lib/search-score";
 // ---- Types ----
 
 export type SearchEntity =
+  | "command"            // คำสั่งลัด (จับคู่ฝั่ง UI จาก lib/search-commands — API ไม่ส่งชนิดนี้)
   | "page" | "guide"
   | "sku" | "partner"
   | "po" | "pv"

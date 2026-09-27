@@ -28,6 +28,7 @@ import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
 import { AssigneeStack } from "./assignee-avatar";
 import { apiFetch } from "@/lib/api";
+import { useNewParam } from "@/lib/open-param";
 import { applyTaskTransition } from "./task-actions";
 import { OverviewDashboard } from "./overview-dashboard";
 import { ConnectionError } from "@/components/connection-error";
@@ -216,6 +217,7 @@ export default function TasksPage() {
 
   // ---- create ----
   const openCreate = () => setCreateOpen(true);
+  useNewParam(can("tasks.create" as Parameters<typeof can>[0]), openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   // ---- workflow (เส้นทาง + ชนิด อ่านจาก DB) — ใช้ของกลาง applyTaskTransition ----
   const applyMove = useCallback(async (task: CreativeTask, toKey: string, force?: boolean) => {

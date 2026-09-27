@@ -11,7 +11,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
-import { useOpenParam } from "@/lib/open-param";
+import { useOpenParam, useNewParam } from "@/lib/open-param";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { BillingNoteListItem, BillingNoteDetail } from "@/app/api/billing-notes/route";
@@ -80,6 +80,7 @@ export default function BillingNotesPage() {
     setCustomer(null); setBillDate(new Date().toISOString().slice(0, 10)); setDueDate("");
     setNote(""); setPicked([]); setFormErr(null); setModalOpen(true);
   };
+  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   // แก้ไข (ร่างเท่านั้น) → เติมฟอร์มจากรายละเอียด
   const openEdit = (d: BillingNoteDetail) => {

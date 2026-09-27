@@ -21,7 +21,7 @@ import { DateInput } from "@/components/date-input";
 import { MoneyInput } from "@/components/money-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { useOpenParam } from "@/lib/open-param";
+import { useOpenParam, useNewParam } from "@/lib/open-param";
 import { formatDate } from "@/lib/date";
 import { computeCreditNote, validateBeforeIssue, type CreditNoteLine } from "@/lib/credit-note";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -151,6 +151,7 @@ export default function CreditNotesPage() {
       company_id: def?.id ?? "", company_code: def?.company_code ?? "" });
     setFormErr(null); setModalOpen(true);
   };
+  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   const openEdit = (d: CreditNoteDetail) => {
     setEditingId(d.id);

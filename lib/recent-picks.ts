@@ -31,6 +31,7 @@ export const RECENT_KEYS = {
   skus:       "erp-recent-skus",
   parentSkus: "erp-recent-parent-skus",
   materials:  "erp-recent-materials",
+  globalSearch: "erp-recent-global-search",   // Global Search (Ctrl+K) — ผลที่เพิ่งเปิด
 } as const;
 
 type WithId = { id: string };

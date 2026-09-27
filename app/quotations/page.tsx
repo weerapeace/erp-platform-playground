@@ -10,6 +10,7 @@ import type { CustomerPickerValue, EmployeePickerValue } from "@/components/pick
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { useNewParam } from "@/lib/open-param";
 import { formatDate } from "@/lib/date";
 import { QUOTATION_ROW_ACTIONS } from "@/components/data-table/row-actions";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -220,6 +221,7 @@ export default function QuotationsPage() {
   const openCreate = () => {
     setEditingId(null); setForm(makeEmpty(user?.name ?? "")); setFormErr(null); setModalOpen(true);
   };
+  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   const openPrint = useCallback((id: string) => {
     window.open(`/print/quotation/${id}`, "_blank", "noopener,noreferrer");

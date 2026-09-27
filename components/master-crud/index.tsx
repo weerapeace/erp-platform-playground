@@ -17,6 +17,7 @@ import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { useNewParam } from "@/lib/open-param";
 import { CopyFromRecordButton } from "./copy-from-record";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { cachedJson, primeCache } from "@/lib/client-cache";
@@ -1220,6 +1221,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     setDrawerMode("edit");   // F24: กดเพิ่ม → เข้าฟอร์มกรอกเลย (ไม่ใช่ view)
     setModalOpen(true);
   };
+  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
   // F10a: open edit drawer — fetch full row จาก /[id] เพื่อได้ทุก field
   // (sync wrapper เพื่อให้ rowActions/onRowClick type ตรง — fetch ผ่าน .then ภายใน)
   const openEdit = (r: Row) => {
