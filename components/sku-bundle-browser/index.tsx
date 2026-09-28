@@ -207,7 +207,7 @@ function BundleDrawer({ b, onClose, onChanged, onDeleted }: { b: Bundle; onClose
       toast.success("ลบ bundle แล้ว (SKU ข้างในไม่ถูกลบ)"); onDeleted();
     } finally { setBusy(false); setConfirmDel(false); }
   };
-  const behind = !!skuDrawer;   // เปิดหน้า SKU ซ้อน → ถอย drawer นี้ไปข้างหลัง
+  const behind = !!skuDrawer || pickerOpen || confirmDel;   // เปิดหน้า SKU ซ้อน → ถอย drawer นี้ไปข้างหลัง
 
   return createPortal(
     <>
@@ -259,7 +259,7 @@ function BundleDrawer({ b, onClose, onChanged, onDeleted }: { b: Bundle; onClose
         onConfirm={async (skus) => { setPickerOpen(false); if (skus.length) await patch({ add_sku_ids: skus.map((s) => s.id) }, `เพิ่ม ${skus.length} SKU แล้ว`); }} />
       <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={() => void del()} loading={busy} variant="danger"
         title="ลบ bundle นี้?" message={`"${bundleTitle(b)}" จะถูกลบออกจากรายการ bundle — SKU ${b.items.length} ตัวข้างในยังอยู่ตามเดิม ไม่ถูกลบ`} confirmText="ลบ bundle" />
-      {skuDrawer && <MasterRecordDrawer moduleKey="skus" recordId={skuDrawer} onClose={() => setSkuDrawer(null)} onChanged={onChanged} />}
+      {skuDrawer && <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" title="SKU" recordId={skuDrawer} onClose={() => setSkuDrawer(null)} onChanged={onChanged} />}
     </>,
     document.body,
   );
