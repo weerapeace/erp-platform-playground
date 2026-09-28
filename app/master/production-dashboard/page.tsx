@@ -2,8 +2,9 @@
 
 /**
  * Dashboard ผลิต — หน้าแรกแอปผลิต/จ่ายงาน · รวมงานผลิตทุกสถานะ (MO-centric)
- * แถบ filter ซ้าย (5 กลุ่ม + ตัวเลขนับ) · DataTable กลาง (สลับ ตาราง/การ์ด + ค้นหา) · ปฏิทิน=เฟส 2
- * ของกลาง: DataTable, HoverImage, getStatusStyle, PlaygroundShell (ผ่าน /master/layout)
+ * แถบ filter ซ้าย (5 กลุ่ม + ตัวเลขนับ) · DataTable กลาง (สลับ ตาราง/การ์ด + ค้นหา) · ปฏิทิน (ScheduleBoard)
+ * ดูได้ 3 แบบ: จอคอม / แท็บเล็ต / มือถือ (ของกลาง device-view — ตัดสินด้วย `layout` ไม่ใช้ sm:/lg:)
+ * ของกลาง: DataTable, HoverImage, getStatusStyle, ScheduleBoard, device-view, PlaygroundShell (ผ่าน /master/layout)
  */
 import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -18,6 +19,7 @@ import type { ProductionJob, ProductionDashboardResponse, ProdJobCategory } from
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
 import { MoStatusModal } from "@/components/mo-status-modal";
 import { MO_STATUS_TONE_CLASS, type MoStatusTone } from "@/lib/mo-status";
+import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, type DeviceLayout } from "@/components/device-view";
 
 type CatKey = "all" | ProdJobCategory;
 const CATS: { key: CatKey; label: string; icon: string }[] = [
@@ -53,7 +55,8 @@ const STATUS_LEGEND: { tone: MoStatusTone; label: string; logic: string }[] = [
   { tone: "green",  label: "ส่งครบ",        logic: "รับคืนครบจำนวน (จบงาน)" },
 ];
 
-function StatusLegend() {
+// floating = มือถือ: ป๊อปลอยเต็มความกว้างจอ (ไม่ล้นขอบ) + ปุ่มเหลือแค่ไอคอน
+function StatusLegend({ floating = false }: { floating?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -65,9 +68,9 @@ function StatusLegend() {
   return (
     <div ref={ref} className="relative">
       <button onClick={() => setOpen((o) => !o)} title="ความหมาย/logic ของสถานะงาน"
-        className="h-9 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center gap-1 text-sm">ℹ️ <span className="hidden sm:inline">สถานะ</span></button>
+        className="h-9 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center gap-1 text-sm shrink-0">ℹ️ {!floating && <span>สถานะ</span>}</button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-30 w-[19rem] bg-white border border-slate-200 rounded-xl shadow-xl p-3">
+        <div className={`z-30 bg-white border border-slate-200 rounded-xl shadow-xl p-3 ${floating ? "fixed inset-x-2 top-14" : "absolute right-0 top-full mt-1 w-[19rem]"}`}>
           <div className="text-sm font-semibold text-slate-700 mb-2">สถานะงาน 9 ขั้น — คิดจากอะไร</div>
           <div className="space-y-1.5 max-h-[70vh] overflow-y-auto">
             {STATUS_LEGEND.map((it, i) => (
@@ -145,8 +148,9 @@ function JobCard({ j, onClick, vertical }: { j: ProductionJob; onClick?: () => v
 }
 
 // ── ปฏิทิน — งานตามกำหนดส่ง + ลากวางตั้งวัน (ใช้ ScheduleBoard ของกลาง) ──
-function CalendarView({ jobs, onJobClick, onSchedule, onToggleDelivery }: {
+function CalendarView({ jobs, onJobClick, onSchedule, onToggleDelivery, layout }: {
   jobs: ProductionJob[];
+  layout: DeviceLayout;
   onJobClick: (j: ProductionJob) => void;
   onSchedule: (j: ProductionJob, date: string | null) => void;
   onToggleDelivery: (j: ProductionJob) => void;
@@ -167,7 +171,11 @@ function CalendarView({ jobs, onJobClick, onSchedule, onToggleDelivery }: {
       getFilter={(j) => j.brand ?? undefined}
       getSearchText={(j) => `${j.product_sku ?? ""} ${j.product_name ?? ""} ${j.mo_no} ${j.brand ?? ""}`}
       backlogTitle="ยังไม่ลงวันที่ส่ง"
-      hint="ลากการ์ดจากกล่องขวา → วางบนวัน = ตั้งวันกำหนดส่ง · ลากกลับกล่อง = เอาวันออก · กดปุ่มในการ์ด = ยืนยันนัดส่งลูกค้า (สีแดง)"
+      layout={layout}
+      getDotColor={(j) => (j.delivery_confirmed ? "#ef4444" : j.brand_color || "#94a3b8")}
+      hint={layout === "desktop"
+        ? "ลากการ์ดจากกล่องขวา → วางบนวัน = ตั้งวันกำหนดส่ง · ลากกลับกล่อง = เอาวันออก · กดปุ่มในการ์ด = ยืนยันนัดส่งลูกค้า (สีแดง)"
+        : "แตะวันที่ = ดูงานของวันนั้น · ตั้ง/เปลี่ยนวันกำหนดส่งที่ช่อง 📅 ใต้การ์ด · สีแดง = นัดส่งลูกค้าแล้ว"}
       dayFooter={(items) => {
         const total = items.reduce((a, j) => a + j.qty, 0);
         const hasDeliv = items.some((j) => j.delivery_confirmed);
@@ -200,98 +208,6 @@ function CalendarView({ jobs, onJobClick, onSchedule, onToggleDelivery }: {
   );
 }
 
-// ── โหมด 🏰 เกม — รูปพื้นหลังแฟนตาซี + ข้อมูลจริงวางทับ ──
-function GameSign({ x, y, label, value, sub, w }: { x: number; y: number; label: string; value: React.ReactNode; sub?: string; w?: number }) {
-  return (
-    <div style={{ position: "absolute", left: `${x}%`, top: `${y}%`, transform: "translate(-50%,-50%)", textAlign: "center", width: w ? `${w}%` : undefined, textShadow: "0 1px 4px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.6)" }}>
-      <div style={{ fontSize: "clamp(9px,1.25vw,15px)", color: "#fcd34d", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
-      <div style={{ fontSize: "clamp(15px,2.6vw,32px)", color: "#fff", fontWeight: 800, lineHeight: 1.05 }}>{value}</div>
-      {sub && <div style={{ fontSize: "clamp(8px,1vw,12px)", color: "#e2e8f0" }}>{sub}</div>}
-    </div>
-  );
-}
-function GameView({ jobs, counts }: { jobs: ProductionJob[]; counts: ProductionDashboardResponse["counts"] }) {
-  const [bgKey, setBgKey] = useState<string | null | undefined>(undefined);
-  const [now, setNow] = useState(() => new Date());
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    apiFetch("/api/ui-config?key=production_game").then((r) => r.json()).then((j) => setBgKey((j.value?.bg_key as string) ?? null)).catch(() => setBgKey(null));
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const bgUrl = bgKey ? `/api/r2-image?key=${encodeURIComponent(bgKey)}` : null;
-  const totalQty = jobs.reduce((a, j) => a + j.qty, 0);
-  const eff = jobs.length ? Math.round(jobs.reduce((a, j) => a + j.progress_pct, 0) / jobs.length) : 0;
-  const deptCount = new Map<string, number>();
-  for (const j of jobs) if (j.categories.includes("in_production") && j.dept_names) for (const d of j.dept_names.split(", ")) deptCount.set(d, (deptCount.get(d) ?? 0) + 1);
-  const benches = [...deptCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-  const latest = jobs.slice(0, 5);
-  const upload = async (file: File) => {
-    setUploading(true);
-    try {
-      const fd = new FormData(); fd.append("file", file); fd.append("folder", "game-bg");
-      const r = await apiFetch("/api/admin/upload", { method: "POST", body: fd }); const j = await r.json();
-      if (j.error) throw new Error(j.error);
-      await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "production_game", value: { bg_key: j.r2_key } }) });
-      setBgKey(j.r2_key);
-    } catch (e) { alert(String((e as Error).message)); }
-    finally { setUploading(false); }
-  };
-  const pick = () => fileRef.current?.click();
-  const hidden = <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />;
-
-  if (bgKey === undefined) return <div className="py-16 text-center text-slate-400">กำลังโหลด…</div>;
-  if (!bgUrl) return (
-    <div className="py-16 text-center">
-      <p className="text-slate-500 mb-1">ยังไม่ได้ตั้งรูปพื้นหลังเกม</p>
-      <p className="text-[11px] text-slate-400 mb-3">อัปรูปฉากแฟนตาซี (ป้ายว่าง) → ระบบจะวางข้อมูลจริงทับให้</p>
-      <button onClick={pick} disabled={uploading} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{uploading ? "กำลังอัป…" : "📷 อัปรูปพื้นหลัง"}</button>
-      {hidden}
-    </div>
-  );
-  const stats: [string, React.ReactNode][] = [
-    ["วันที่", now.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" })],
-    ["เวลา", now.toLocaleTimeString("th-TH", { hour12: false })],
-    ["ออเดอร์", counts.all],
-    ["กำลังผลิต", counts.in_production],
-    ["เสร็จ", counts.done_waiting],
-    ["ชิ้นรวม", fmt(totalQty)],
-    ["ประสิทธิภาพ", `${eff}%`],
-  ];
-  return (
-    <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: `#0b1220 url(${bgUrl}) center/cover no-repeat`, borderRadius: 12, overflow: "hidden" }}>
-      {/* แถบสถิติบน */}
-      <div style={{ position: "absolute", top: "1.5%", left: "8%", right: "13%", display: "flex", justifyContent: "space-between" }}>
-        {stats.map(([l, v]) => (
-          <div key={l} style={{ textAlign: "center", textShadow: "0 1px 3px rgba(0,0,0,.9)" }}>
-            <div style={{ fontSize: "clamp(7px,0.85vw,11px)", color: "#cbd5e1" }}>{l}</div>
-            <div style={{ fontSize: "clamp(10px,1.4vw,17px)", color: "#fde68a", fontWeight: 700, lineHeight: 1.1 }}>{v}</div>
-          </div>
-        ))}
-      </div>
-      {/* ป้ายโซน */}
-      <GameSign x={17} y={22} label="🪧 รอจ่าย" value={counts.unassigned} sub="งานยังไม่จ่าย" />
-      <GameSign x={47} y={15.5} label="🔨 ช่างโต๊ะ" value={counts.in_production} sub="กำลังผลิต" />
-      {benches.map((b, i) => <GameSign key={i} x={36 + i * 10.5} y={27.5} label={b[0]} value={`${b[1]}`} sub="งาน" />)}
-      <GameSign x={82} y={20} label="🧵 ช่างเหมา" value={counts.piecework} sub="งานเหมา" />
-      <GameSign x={50} y={50} label="🔮 QC / เสร็จรอส่ง" value={counts.done_waiting} sub="รอตรวจ/ส่ง" />
-      {/* ออเดอร์ล่าสุด (แผงล่างซ้าย-กลาง) */}
-      <div style={{ position: "absolute", left: "33%", bottom: "2.5%", width: "32%", color: "#e8eefc", textShadow: "0 1px 2px rgba(0,0,0,.9)" }}>
-        <div style={{ fontSize: "clamp(8px,1vw,12px)", color: "#fcd34d", fontWeight: 700, marginBottom: 2 }}>ออเดอร์ล่าสุด</div>
-        {latest.map((j) => (
-          <div key={j.id} style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: "clamp(7px,0.9vw,11px)", lineHeight: 1.5 }}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.product_sku ?? j.mo_no}</span>
-            <span style={{ color: isOverdue(j.due_date) ? "#fca5a5" : "#cbd5e1", flexShrink: 0 }}>{j.progress_pct}%</span>
-          </div>
-        ))}
-      </div>
-      <button onClick={pick} disabled={uploading} style={{ position: "absolute", top: 8, right: 8, fontSize: 12, padding: "4px 10px", borderRadius: 8, background: "rgba(15,23,42,.7)", color: "#fde68a", border: "1px solid rgba(252,211,77,.4)", cursor: "pointer" }}>{uploading ? "อัป…" : "📷 เปลี่ยนรูป"}</button>
-      {hidden}
-    </div>
-  );
-}
-
 const COLUMNS: ColumnDef<ProductionJob>[] = [
   { id: "image", header: "", size: 56, enableSorting: false, cell: ({ row }) => <HoverImage url={row.original.image_url} size={36} previewSize={240} /> },
   { accessorKey: "product_sku", header: "SKU", size: 130, cell: ({ getValue }) => <span className="font-mono text-xs text-slate-700">{(getValue() as string) || "—"}</span> },
@@ -319,7 +235,12 @@ function ProductionDashboardInner() {
   const [groupField, setGroupField] = useState<GroupField>("brand");
   const [gSearch, setGSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // กลุ่มที่พับอยู่
-  const [view, setView] = useState<"list" | "calendar" | "game">(() => { const v = sp.get("view"); return v === "calendar" || v === "game" ? v : "list"; });
+  const [view, setView] = useState<"list" | "calendar">(() => (sp.get("view") === "calendar" ? "calendar" : "list"));
+  // รูปแบบจอ (ของกลาง device-view): อัตโนมัติตามจอจริง หรือเลือกเอง (?device=) → เลือกแคบกว่าจอจริง = กรอบพรีวิว + QR
+  const viewport = useViewportLayout();
+  const { mode: deviceMode, setMode: setDeviceMode, layout } = useDeviceMode(viewport);
+  const isDesktop = layout === "desktop";
+  const isPhone = layout === "phone";
   const [cardDir, setCardDir] = useState<"h" | "v">("h");   // การ์ดแนวนอน/แนวตั้ง (โหมดจัดกลุ่ม)
   const [statusMoId, setStatusMoId] = useState<string | null>(null);   // Popup สถานะงาน
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
@@ -388,59 +309,109 @@ function ProductionDashboardInner() {
   // กดการ์ด → Popup สถานะงาน (มีปุ่มไปเช็กลิสต์เต็มในป๊อปอัป)
   const openJob = (j: ProductionJob) => setStatusMoId(j.id);
 
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">📊 Dashboard ผลิต</h1>
-          <p className="text-sm text-slate-500 mt-0.5">งานผลิตทุกสถานะ — กรองซ้าย · สลับ ตาราง/การ์ด · ค้นหาได้</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <PendingDataButton scope="production" />
-          <StatusLegend />
-          <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
-            <button onClick={() => setView("list")} className={`h-9 px-3 font-medium ${view === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 รายการ</button>
-            <button onClick={() => setView("calendar")} className={`h-9 px-3 font-medium border-l border-slate-200 ${view === "calendar" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 ปฏิทิน</button>
-            <button onClick={() => setView("game")} className={`h-9 px-3 font-medium border-l border-slate-200 ${view === "game" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🏰 เกม</button>
+  const viewBtn = (v: "list" | "calendar", label: string, first: boolean) => (
+    <button key={v} onClick={() => setView(v)}
+      className={`${isPhone ? "h-10 flex-1" : "h-9 px-3"} font-medium ${first ? "" : "border-l border-slate-200"} ${view === v ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+  );
+  const viewSwitch = (
+    <div className={`flex border border-slate-200 rounded-lg overflow-hidden text-sm ${isPhone ? "w-full" : "shrink-0"}`}>
+      {viewBtn("list", "📋 รายการ", true)}
+      {viewBtn("calendar", "📅 ปฏิทิน", false)}
+    </div>
+  );
+  const boardBtn = (
+    <button onClick={() => router.push("/master/work-board")}
+      className={`h-9 font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 whitespace-nowrap ${isPhone ? "flex-1 px-2 text-xs" : "px-4 text-sm shrink-0"}`}>🗂 ไปบอร์ดจ่ายงาน</button>
+  );
+  const kpis = [
+    { label: "งานในมุมมองนี้", short: "งาน", value: fmt(kpi.total), icon: "📋", tone: "text-slate-700" },
+    { label: "ชิ้นรวม", short: "ชิ้นรวม", value: fmt(kpi.qty), icon: "🔢", tone: "text-slate-700" },
+    { label: "เหลือจ่าย (ชิ้น)", short: "เหลือจ่าย", value: fmt(kpi.remaining), icon: "📥", tone: "text-indigo-600" },
+    { label: "เลยกำหนดส่ง", short: "เลยกำหนด", value: fmt(kpi.overdue), icon: "⚠️", tone: kpi.overdue > 0 ? "text-red-600" : "text-slate-400" },
+  ];
+
+  const body = (
+    <div className={`${layout === viewport ? "min-h-screen" : "min-h-[82vh]"} bg-slate-50 flex flex-col`}>
+      {isPhone ? (
+        // มือถือ: หัวสั้น + ปุ่มสลับมุมมองเต็มแถว + ปุ่มรองแถวล่าง
+        <div className="bg-white border-b border-slate-200 px-3 py-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="text-base font-bold text-slate-900 truncate">📊 Dashboard ผลิต</h1>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <StatusLegend floating />
+              <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
+            </div>
           </div>
-          <button onClick={() => router.push("/master/work-board")} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🗂 ไปบอร์ดจ่ายงาน</button>
+          {viewSwitch}
+          <div className="flex items-center gap-1.5">
+            <PendingDataButton scope="production"
+              className="h-9 flex-1 px-2 text-xs font-medium border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 inline-flex items-center justify-center gap-1 whitespace-nowrap" />
+            {boardBtn}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className={`bg-white border-b border-slate-200 flex items-center justify-between gap-3 ${isDesktop ? "px-6 py-4" : "px-4 py-3 flex-wrap"}`}>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-slate-900">📊 Dashboard ผลิต</h1>
+            {isDesktop && <p className="text-sm text-slate-500 mt-0.5">งานผลิตทุกสถานะ — กรองซ้าย · สลับ ตาราง/การ์ด · ค้นหาได้</p>}
+          </div>
+          <div className={`flex items-center gap-2 ${isDesktop ? "" : "flex-wrap"}`}>
+            <PendingDataButton scope="production" />
+            <StatusLegend />
+            <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
+            {viewSwitch}
+            {boardBtn}
+          </div>
+        </div>
+      )}
 
       {/* การ์ดสรุปเลข (ตาม filter ปัจจุบัน) */}
-      <div className="px-4 pt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {([
-          { label: "งานในมุมมองนี้", value: fmt(kpi.total), icon: "📋", tone: "text-slate-700" },
-          { label: "ชิ้นรวม", value: fmt(kpi.qty), icon: "🔢", tone: "text-slate-700" },
-          { label: "เหลือจ่าย (ชิ้น)", value: fmt(kpi.remaining), icon: "📥", tone: "text-indigo-600" },
-          { label: "เลยกำหนดส่ง", value: fmt(kpi.overdue), icon: "⚠️", tone: kpi.overdue > 0 ? "text-red-600" : "text-slate-400" },
-        ]).map((k) => (
-          <div key={k.label} className="bg-white rounded-xl border border-slate-200 px-3 py-2.5">
-            <div className="text-[11px] text-slate-400">{k.icon} {k.label}</div>
-            <div className={`text-xl font-bold tabular-nums ${k.tone}`}>{k.value}</div>
+      <div className={`grid grid-cols-4 ${isPhone ? "px-2 pt-2 gap-1.5" : "px-4 pt-4 gap-3"}`}>
+        {kpis.map((k) => (
+          <div key={k.label} className={`bg-white rounded-xl border border-slate-200 min-w-0 ${isPhone ? "px-1.5 py-1.5 text-center" : "px-3 py-2.5"}`}>
+            <div className={`text-slate-400 truncate ${isPhone ? "text-[10px]" : "text-[11px]"}`}>{isPhone ? k.short : <>{k.icon} {k.label}</>}</div>
+            <div className={`font-bold tabular-nums ${isPhone ? "text-sm" : "text-xl"} ${k.tone}`}>{k.value}</div>
           </div>
         ))}
       </div>
 
-      <div className="flex-1 flex gap-4 p-4 min-h-0">
-        {/* แถบ filter ซ้าย */}
-        <aside className="w-44 shrink-0 space-y-1.5">
+      {/* แท็บเล็ต/มือถือ: ตัวกรองกลุ่มงานเป็นชิปเลื่อนแนวนอน (แทนแถบซ้าย) */}
+      {!isDesktop && (
+        <div className={`flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] ${isPhone ? "px-2 pt-2" : "px-4 pt-3"}`}>
           {CATS.map((c) => {
-            const n = counts[c.key];
             const on = cat === c.key;
             return (
               <button key={c.key} onClick={() => setCat(c.key)}
-                className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-sm transition-colors ${on ? "bg-blue-600 text-white border-blue-600 font-medium" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
-                <span className="flex items-center gap-2 min-w-0"><span>{c.icon}</span><span className="truncate">{c.label}</span></span>
-                <span className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded-full ${on ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{n}</span>
+                className={`h-9 shrink-0 inline-flex items-center gap-1.5 px-3 rounded-full border text-sm whitespace-nowrap transition-colors ${on ? "bg-blue-600 text-white border-blue-600 font-medium" : "bg-white text-slate-600 border-slate-200"}`}>
+                <span>{c.icon}</span><span>{c.label}</span>
+                <span className={`text-xs tabular-nums px-1.5 py-0.5 rounded-full ${on ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{counts[c.key]}</span>
               </button>
             );
           })}
-        </aside>
+        </div>
+      )}
+
+      <div className={`flex-1 flex gap-4 min-h-0 ${isPhone ? "p-2" : isDesktop ? "p-4" : "px-4 py-3"}`}>
+        {/* แถบ filter ซ้าย (จอคอม) */}
+        {isDesktop && (
+          <aside className="w-44 shrink-0 space-y-1.5">
+            {CATS.map((c) => {
+              const n = counts[c.key];
+              const on = cat === c.key;
+              return (
+                <button key={c.key} onClick={() => setCat(c.key)}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-sm transition-colors ${on ? "bg-blue-600 text-white border-blue-600 font-medium" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                  <span className="flex items-center gap-2 min-w-0"><span>{c.icon}</span><span className="truncate">{c.label}</span></span>
+                  <span className={`shrink-0 text-xs tabular-nums px-1.5 py-0.5 rounded-full ${on ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{n}</span>
+                </button>
+              );
+            })}
+          </aside>
+        )}
 
         {/* เนื้อหา */}
-        <main className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-3">
-          {view === "game" ? <GameView jobs={jobs} counts={counts} /> : view === "calendar" ? <CalendarView jobs={shown} onJobClick={openJob} onSchedule={setDue} onToggleDelivery={toggleDelivery} /> : <>
+        <main className={`flex-1 min-w-0 bg-white rounded-xl border border-slate-200 ${isPhone ? "p-2" : "p-3"}`}>
+          {view === "calendar" ? <CalendarView jobs={shown} onJobClick={openJob} onSchedule={setDue} onToggleDelivery={toggleDelivery} layout={layout} /> : <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="w-4 h-4 accent-blue-600" /> จัดกลุ่ม
@@ -451,7 +422,7 @@ function ProductionDashboardInner() {
               <select value={groupField} onChange={(e) => setGroupField(e.target.value as GroupField)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
                 {GROUP_FIELDS.map((g) => <option key={g.key} value={g.key}>ตาม{g.label}</option>)}
               </select>
-              <input value={gSearch} onChange={(e) => setGSearch(e.target.value)} placeholder="🔍 ค้นหา SKU / ชื่อ / ใบสั่งผลิต" className="h-8 px-3 text-sm border border-slate-200 rounded-lg flex-1 min-w-[160px] max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input value={gSearch} onChange={(e) => setGSearch(e.target.value)} placeholder="🔍 ค้นหา SKU / ชื่อ / ใบสั่งผลิต" className={`px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${isPhone ? "h-9 w-full order-last" : "h-8 flex-1 min-w-[160px] max-w-xs"}`} />
               {groups.length > 0 && (() => { const allC = collapsed.size >= groups.length; return (
                 <button onClick={() => setCollapsed(allC ? new Set() : new Set(groups.map(([l]) => l)))} className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 shrink-0">{allC ? "▾ กางทั้งหมด" : "▸ พับทั้งหมด"}</button>
               ); })()}
@@ -548,6 +519,9 @@ function ProductionDashboardInner() {
       </ERPModal>
     </div>
   );
+
+  // เปิดบนเครื่องจริง = เรนเดอร์ตรง ๆ · เลือกโหมดที่แคบกว่าจอจริง = กรอบเครื่อง + QR สแกนเปิดบนเครื่อง
+  return <DevicePreviewFrame layout={layout} viewport={viewport} onExitPreview={() => setDeviceMode("auto")}>{body}</DevicePreviewFrame>;
 }
 
 // useSearchParams ต้องอยู่ใน Suspense (Next.js) — เปิดโหมดปฏิทินได้ผ่าน ?view=calendar (ใช้ฝังในหน้าผู้บริหาร)

@@ -46,7 +46,16 @@ export function useViewportLayout(): DeviceLayout {
     const apply = () => setLayout(layoutOfWidth(window.innerWidth));
     apply();
     window.addEventListener("resize", apply);
-    return () => window.removeEventListener("resize", apply);
+    // กันพลาด: บางเครื่อง/บางกรอบ (iframe, โหมดจำลองมือถือ) ความกว้างเปลี่ยนหลังโหลดโดยไม่ยิง resize
+    // → ฟังจุดตัดจอด้วย matchMedia อีกชั้น + เช็กซ้ำหลังหน้าโหลดนิ่ง
+    const mqs = [window.matchMedia(`(max-width: ${PHONE_MAX}px)`), window.matchMedia(`(max-width: ${TABLET_MAX}px)`)];
+    mqs.forEach((m) => m.addEventListener("change", apply));
+    const t = window.setTimeout(apply, 400);
+    return () => {
+      window.removeEventListener("resize", apply);
+      mqs.forEach((m) => m.removeEventListener("change", apply));
+      window.clearTimeout(t);
+    };
   }, []);
   return layout;
 }
