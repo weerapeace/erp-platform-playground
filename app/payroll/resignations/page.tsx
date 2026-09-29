@@ -40,7 +40,7 @@ type FormState = {
 
 type PendingAction = {
   row: ResignationRow;
-  action: "approve" | "reject" | "cancel";
+  action: "approve" | "reject" | "cancel" | "revert";
 };
 
 const STATUS_META: Record<ResignationStatus, { label: string; className: string }> = {
@@ -90,6 +90,7 @@ export default function PayrollResignationsPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);   // ✏️ แก้คำขอที่ยังรอตรวจ (ใช้ฟอร์มเดียวกับตอนเพิ่ม)
   const [form, setForm] = useState<FormState>({
     employee_id: "",
     notice_date: todayIso(),
@@ -163,18 +164,35 @@ export default function PayrollResignationsPage() {
     setForm({ employee_id: "", notice_date: todayIso(), last_working_date: "", reason: "", handover_note: "" });
   };
 
+  const openEdit = (row: ResignationRow) => {
+    setDetailRow(null);
+    setEditId(row.id);
+    setForm({ employee_id: row.employee_id, notice_date: row.notice_date, last_working_date: row.last_working_date, reason: row.reason ?? "", handover_note: row.handover_note ?? "" });
+    setCreateOpen(true);
+  };
+  const closeForm = () => { setCreateOpen(false); if (editId) { setEditId(null); resetForm(); } };
+
   const submitCreate = async () => {
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      await readJson(await apiFetch("/api/payroll/resignations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, actor: user?.name ?? null }),
-      }));
-      setSuccess("สร้างคำขอแจ้งลาออกแล้ว");
+      if (editId) {
+        await readJson(await apiFetch(`/api/payroll/resignations/${editId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "edit", ...form, actor: user?.name ?? null }),
+        }));
+      } else {
+        await readJson(await apiFetch("/api/payroll/resignations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...form, actor: user?.name ?? null }),
+        }));
+      }
+      setSuccess(editId ? "บันทึกการแก้ไขคำขอแล้ว" : "สร้างคำขอแจ้งลาออกแล้ว");
       setCreateOpen(false);
+      setEditId(null);
       resetForm();
       await loadRows();
     } catch (e) {
@@ -217,11 +235,14 @@ export default function PayrollResignationsPage() {
     return [
       { label: "อนุมัติ", icon: "✓", onClick: (row) => openAction(row, "approve"), show: (row) => row.status === "pending" },
       { label: "ปฏิเสธ", icon: "×", variant: "danger", onClick: (row) => openAction(row, "reject"), show: (row) => row.status === "pending" },
+      { label: "แก้ไขคำขอ", icon: "✏️", onClick: (row) => openEdit(row), show: (row) => row.status === "pending" },
       { label: "ยกเลิก", icon: "–", variant: "danger", onClick: (row) => openAction(row, "cancel"), show: (row) => row.status === "pending" },
+      { label: "ย้อนการอนุมัติ", icon: "↩", variant: "danger", onClick: (row) => openAction(row, "revert"), show: (row) => row.status === "approved" },
     ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEdit]);
 
-  const isCreateDirty = form.employee_id !== "" ||
+  const isCreateDirty = !!editId || form.employee_id !== "" ||
     form.last_working_date !== "" ||
     form.reason.trim() !== "" ||
     form.handover_note.trim() !== "" ||
@@ -298,8 +319,12 @@ export default function PayrollResignationsPage() {
               <>
                 <button type="button" onClick={() => openAction(detailRow, "approve")} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">อนุมัติ</button>
                 <button type="button" onClick={() => openAction(detailRow, "reject")} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">ปฏิเสธ</button>
+                <button type="button" onClick={() => openEdit(detailRow)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">✏️ แก้ไขคำขอ</button>
                 <button type="button" onClick={() => openAction(detailRow, "cancel")} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">ยกเลิกคำขอ</button>
               </>
+            )}
+            {detailRow?.status === "approved" && canEdit && (
+              <button type="button" onClick={() => openAction(detailRow, "revert")} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">↩ ย้อนการอนุมัติ</button>
             )}
           </>
         )}
@@ -330,15 +355,15 @@ export default function PayrollResignationsPage() {
 
       <ERPModal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="เพิ่มคำขอแจ้งลาออก"
-        description="คำขอจะยังไม่เปลี่ยนสถานะพนักงาน จนกว่าจะกดอนุมัติ"
+        onClose={closeForm}
+        title={editId ? "✏️ แก้ไขคำขอแจ้งลาออก" : "เพิ่มคำขอแจ้งลาออก"}
+        description={editId ? "แก้ได้เฉพาะคำขอที่ยังรอตรวจ — เปลี่ยนตัวพนักงานไม่ได้ (ถ้าผิดคนให้ยกเลิกแล้วสร้างใหม่)" : "คำขอจะยังไม่เปลี่ยนสถานะพนักงาน จนกว่าจะกดอนุมัติ"}
         size="lg"
         hasUnsavedChanges={isCreateDirty}
         footer={(
           <>
-            <button type="button" onClick={() => setCreateOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-            <button type="button" onClick={() => setConfirmOpen(true)} disabled={saving || !canEdit} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300">บันทึกคำขอ</button>
+            <button type="button" onClick={closeForm} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+            <button type="button" onClick={() => { if (editId) void submitCreate(); else setConfirmOpen(true); }} disabled={saving || !canEdit} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300">{editId ? "บันทึกการแก้ไข" : "บันทึกคำขอ"}</button>
           </>
         )}
       >
@@ -347,6 +372,7 @@ export default function PayrollResignationsPage() {
             <span className="text-sm font-medium text-slate-700">พนักงาน</span>
             <SearchableSelect
               value={form.employee_id}
+              disabled={!!editId}
               onChange={(employee_id) => setForm((f) => ({ ...f, employee_id }))}
               options={employeeOptions}
               placeholder="เลือกพนักงาน"
@@ -415,7 +441,8 @@ export default function PayrollResignationsPage() {
             <button
               type="button"
               onClick={submitAction}
-              disabled={saving}
+              disabled={saving || (pendingAction?.action === "revert" && !reviewNote.trim())}
+              title={pendingAction?.action === "revert" && !reviewNote.trim() ? "ต้องใส่เหตุผลที่ย้อนการอนุมัติในช่องหมายเหตุก่อน" : undefined}
               className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300 ${actionCopy?.destructive ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
             >
               {actionCopy?.confirmText ?? "ยืนยัน"}

@@ -165,6 +165,24 @@ export default function CostCalculatorPage() {
     return [...g.values()];
   }, [inputs]);
 
+  // เอาต้นทุนที่บันทึกไว้ออก (บันทึกผิดตัว / ไม่อยากให้ SKU นี้ใช้ต้นทุนแยกแล้ว) — ถามยืนยันในแถว
+  const [removeAsk, setRemoveAsk] = useState<"sku" | "parent" | null>(null);
+  const removeSaved = async (type: "sku" | "parent") => {
+    if (!inputs) return;
+    const code = type === "parent" ? inputs.parent_code : inputs.product_sku;
+    if (!code) return;
+    setSaving(true);
+    try {
+      const j = await apiFetch(`/api/product-costings?target_type=${type}&target_code=${encodeURIComponent(code)}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      toast.success(type === "sku" ? `เอาต้นทุนเฉพาะ SKU ${code} ออกแล้ว — กลับไปใช้ต้นทุนของรุ่น` : `เอาต้นทุนมาตรฐานของรุ่น ${code} ออกแล้ว`);
+      setRemoveAsk(null);
+      if (sku?.code) void load(sku.code);
+      void loadRecent();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เอาออกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
   const save = async () => {
     if (!inputs || !d) return;
     const targetCode = target === "parent" ? inputs.parent_code : inputs.product_sku;
@@ -658,8 +676,20 @@ export default function CostCalculatorPage() {
 
             {(savedParent || savedSku) && (
               <div className="text-[11px] text-slate-400 space-y-0.5">
-                {savedParent && <div>✓ มีต้นทุนมาตรฐานของรุ่น ({inputs.parent_code}) แล้ว · โดย {savedParent.created_by_name?.split("@")[0] ?? "—"}</div>}
-                {savedSku && <div>✓ มีต้นทุนเฉพาะ SKU นี้ (override) แล้ว · โดย {savedSku.created_by_name?.split("@")[0] ?? "—"}</div>}
+                {([["parent", savedParent, `มีต้นทุนมาตรฐานของรุ่น (${inputs.parent_code ?? ""}) แล้ว`], ["sku", savedSku, "มีต้นทุนเฉพาะ SKU นี้ (override) แล้ว"]] as const).map(([type, saved, label]) => saved && (
+                  <div key={type} className="flex flex-wrap items-center gap-1.5">
+                    <span>✓ {label} · โดย {saved.created_by_name?.split("@")[0] ?? "—"}</span>
+                    {canEdit && (removeAsk === type ? (
+                      <>
+                        <span className="text-slate-500">{type === "sku" ? "เอาออก? SKU นี้จะกลับไปใช้ต้นทุนของรุ่น" : "เอาออก? รุ่นนี้จะไม่มีต้นทุนมาตรฐาน"}</span>
+                        <button onClick={() => void removeSaved(type)} disabled={saving} className="h-5 px-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">ยืนยัน</button>
+                        <button onClick={() => setRemoveAsk(null)} className="h-5 px-1.5 rounded border border-slate-200 text-slate-500">ไม่</button>
+                      </>
+                    ) : (
+                      <button onClick={() => setRemoveAsk(type)} className="text-slate-400 hover:text-rose-600 hover:underline">🗑 เอาออก</button>
+                    ))}
+                  </div>
+                ))}
               </div>
             )}
             </div>{/* ปิดคอลัมน์ขวา */}

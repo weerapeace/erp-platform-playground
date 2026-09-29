@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardPayroll } from "@/lib/payroll-auth";
-import { transitionResignation } from "@/lib/payroll-resignations-db";
+import { transitionResignation, updateResignationDraft, revertResignationApproval } from "@/lib/payroll-resignations-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,12 +19,21 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 
   const action = String(body.action ?? "");
-  if (!["approve", "reject", "cancel"].includes(action)) {
+  // action: approve / reject / cancel (คำขอรอตรวจ) · edit (แก้คำขอรอตรวจ) · revert (ย้อนการอนุมัติ)
+  if (!["approve", "reject", "cancel", "edit", "revert"].includes(action)) {
     return NextResponse.json({ error: "action ไม่ถูกต้อง" }, { status: 400 });
   }
 
   try {
     const { id } = await ctx.params;
+    if (action === "edit") {
+      const row = await updateResignationDraft(id, body);
+      return NextResponse.json({ data: row, error: null });
+    }
+    if (action === "revert") {
+      const row = await revertResignationApproval(id, { review_note: body.review_note, actor: body.actor });
+      return NextResponse.json({ data: row, error: null });
+    }
     const row = await transitionResignation(id, {
       action: action as "approve" | "reject" | "cancel",
       review_note: body.review_note,

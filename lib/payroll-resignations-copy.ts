@@ -1,4 +1,6 @@
 export type ResignationAction = "approve" | "reject" | "cancel";
+/** ย้อนการอนุมัติ (อนุมัติผิดคน / พนักงานเปลี่ยนใจ) — แยกจาก action ปกติ เพราะใช้กับคำขอที่ "อนุมัติแล้ว" */
+export type ResignationPageAction = ResignationAction | "revert";
 
 export type ResignationTransitionCopy = {
   title: string;
@@ -9,7 +11,23 @@ export type ResignationTransitionCopy = {
   destructive: boolean;
 };
 
-export function getResignationTransitionCopy(action: ResignationAction): ResignationTransitionCopy {
+export function getResignationTransitionCopy(action: ResignationPageAction): ResignationTransitionCopy {
+  if (action === "revert") {
+    return {
+      title: "ย้อนการอนุมัติลาออก",
+      confirmText: "ย้อนการอนุมัติ",
+      successMessage: "ย้อนการอนุมัติแล้ว — พนักงานกลับมาเป็นสถานะทำงาน",
+      description: "ใช้เมื่ออนุมัติผิดคน หรือพนักงานเปลี่ยนใจไม่ลาออก",
+      impactItems: [
+        "เปลี่ยนสถานะพนักงานกลับเป็นทำงาน และล้างวันลาออก",
+        "เปิดสัญญาจ้างที่ถูกปิดตอนอนุมัติ กลับมาใช้ต่อ",
+        "บัญชีเข้าระบบของพนักงานไม่ถูกเปิดคืนอัตโนมัติ — แอดมินต้องเปิดเองที่หน้าผู้ใช้",
+        "คำขอนี้จะถูกปิดเป็นยกเลิก และบันทึกประวัติไว้ใน audit log",
+      ],
+      destructive: true,
+    };
+  }
+
   if (action === "approve") {
     return {
       title: "อนุมัติการลาออก",

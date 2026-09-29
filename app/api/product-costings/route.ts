@@ -3,6 +3,8 @@
  *
  * GET  ?sku=<child sku>   → cost inputs (จาก BOM + ราคา) + ต้นทุนที่บันทึกไว้ (parent default + sku override) + ประวัติ
  * POST { target_type, target_code, qty_basis, scenario, summary, note }  → บันทึกเวอร์ชันใหม่ (ตัวก่อนเป็นประวัติ)
+ * DELETE ?target_type=sku|parent&target_code=  → เอาต้นทุนที่บันทึกไว้ออก (เลิกใช้ตัวปัจจุบัน เก็บเป็นประวัติ)
+ *        เอา "ต้นทุนเฉพาะ SKU" ออก = SKU นั้นกลับไปใช้ต้นทุนมาตรฐานของรุ่น
  *
  * BOM ผูกที่ SKU ลูก → module เลือก SKU ลูกเพื่อดึงวัตถุดิบ/ราคา · บันทึกได้เป็น Parent(ทุกสี) หรือ SKU นี้
  * ของกลาง: guardApi + supabaseAdmin + writeAudit · สูตรคิดใช้ lib/cost-calc ฝั่งหน้า
@@ -190,4 +192,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     metadata: { target_type: targetType, target_code: targetCode },
   });
   return NextResponse.json({ error: null, id: (ins as { id: string }).id });
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const sp = new URL(request.url).searchParams;
+  const targetType = sp.get("target_type") === "sku" ? "sku" : "parent";
+  const targetCode = (sp.get("target_code") ?? "").trim();
+  if (!targetCode) return NextResponse.json({ error: "ระบุสินค้าปลายทาง" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  const cur = await currentCosting(admin, targetType, targetCode);
+  if (!cur) return NextResponse.json({ error: "ไม่มีต้นทุนที่บันทึกไว้ให้เอาออก" }, { status: 404 });
+
+  // เลิกใช้ตัวปัจจุบัน (ยังอยู่ในประวัติ) — ไม่ลบจริง
+  const { error } = await admin.from("product_costings").update({ is_current: false })
+    .eq("target_type", targetType).eq("target_code", targetCode).eq("is_current", true);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  await writeAudit(admin, {
+    action: "remove", entityType: "product_costing", entityId: cur.id,
+    actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { target_type: targetType, target_code: targetCode, summary: cur.summary, saved_by: cur.created_by_name, saved_at: cur.created_at },
+  });
+  return NextResponse.json({ error: null, removed: cur.id });
 }
