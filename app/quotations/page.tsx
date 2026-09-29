@@ -5,6 +5,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { AttachmentPanel } from "@/components/attachment-panel";
 import { ERPModal } from "@/components/modal";
+import { DeleteDraftButton } from "@/components/delete-draft-doc";
 import { CustomerPicker, EmployeePicker, RecordPeekLink } from "@/components/pickers";
 import type { CustomerPickerValue, EmployeePickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
@@ -653,6 +654,13 @@ export default function QuotationsPage() {
                   <button onClick={() => transition(detail.id, "cancel")} disabled={wfLoading}
                     className="h-9 px-4 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">⊘ ยกเลิก</button>
                 )}
+                {/* ใบร่างลบได้เลย (ของกลาง) — ใบที่ส่งแล้วใช้ ยกเลิก */}
+                <DeleteDraftButton apiPath="/api/quotations" id={detail.id} docLabel="ใบเสนอราคา" number={detail.quote_number} disabled={wfLoading}
+                  onDeleted={(msg) => {
+                    flash(msg); setDetailOpen(false);
+                    setExpandedDetails(prev => { const next = { ...prev }; delete next[detail.id]; return next; });
+                    void fetchList();
+                  }} />
               </>
             )}
 

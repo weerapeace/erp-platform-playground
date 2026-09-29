@@ -6,6 +6,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable, type BulkAction } from "@/components/data-table";
 import { AttachmentPanel } from "@/components/attachment-panel";
 import { ERPModal } from "@/components/modal";
+import { DeleteDraftButton } from "@/components/delete-draft-doc";
 import { CustomerPicker, WarehousePicker, EmployeePicker, RecordPeekLink } from "@/components/pickers";
 import type { CustomerPickerValue, WarehousePickerValue, EmployeePickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
@@ -672,6 +673,11 @@ export default function SalesOrdersPage() {
             {(detail.status === "draft" || detail.status === "confirmed") && canCancel && (
               <button onClick={() => setCancelTarget(detail)} disabled={wfLoading}
                 className="h-9 px-4 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">⊘ ยกเลิก</button>
+            )}
+            {/* ใบร่างลบได้เลย (ของกลาง) — ใบที่ยืนยันแล้วใช้ ยกเลิก */}
+            {detail.status === "draft" && (
+              <DeleteDraftButton apiPath="/api/sales-orders" id={detail.id} docLabel="ใบขาย" number={detail.so_number} disabled={wfLoading}
+                onDeleted={(msg) => { flash(msg); setDetailOpen(false); void fetchList(); }} />
             )}
           </>
         ) : null}>

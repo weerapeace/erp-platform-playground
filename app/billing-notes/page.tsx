@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { ERPModal } from "@/components/modal";
+import { DeleteDraftButton } from "@/components/delete-draft-doc";
 import { CustomerPicker, RecordPeekLink } from "@/components/pickers";
 import type { CustomerPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
@@ -379,6 +380,11 @@ export default function BillingNotesPage() {
             )}
             {(detail.status === "draft" || detail.status === "issued") && (
               <button onClick={() => transition(detail.id, "cancel")} disabled={wfLoading} className="h-9 px-4 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">⊘ ยกเลิก</button>
+            )}
+            {/* ใบร่างลบได้เลย (ของกลาง) — ใบที่วางบิลแล้วใช้ ยกเลิก */}
+            {detail.status === "draft" && (
+              <DeleteDraftButton apiPath="/api/billing-notes" id={detail.id} docLabel="ใบวางบิล" number={detail.bill_number} disabled={wfLoading}
+                onDeleted={(msg) => { flash(msg); setDetailOpen(false); void fetchList(); }} />
             )}
             {(detail.status === "issued" || detail.status === "paid" || detail.status === "cancelled") && (
               <button onClick={() => { if (confirm("ย้อนสถานะกลับหนึ่งขั้น?")) transition(detail.id, "revert"); }} disabled={wfLoading}

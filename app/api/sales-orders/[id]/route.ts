@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { guardApi } from "@/lib/api-auth";
+import { deleteDraftSalesDoc } from "@/lib/sales-doc-delete";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
 import type { SOLine } from "../route";
@@ -94,4 +96,19 @@ export async function PATCH(
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ id: data, error: null });
+}
+
+/**
+ * DELETE — ลบใบขาย "ฉบับร่าง" ออกจากระบบ (ของกลาง lib/sales-doc-delete)
+ *   สิทธิ์: so.delete (แอดมิน + ผู้จัดการ · ปรับได้ที่ /admin/role-board)
+ *   ลบได้เฉพาะใบร่างที่ไม่มีเอกสารอื่นอ้างถึง — ใบที่ยืนยัน/ส่งแล้วให้ใช้ "ยกเลิก" · เก็บสำเนาลง audit log ก่อนลบ
+ */
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await guardApi(request, "so.delete"); if (denied) return denied;
+  const { id } = await params;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const actorName = new URL(request.url).searchParams.get("actor") || (user?.user_metadata?.name as string) || user?.email || null;
+  const r = await deleteDraftSalesDoc(supabaseAdmin(), "sales_order", id, { id: user?.id ?? null, name: actorName });
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+  return NextResponse.json({ deleted: true, number: r.number, error: null });
 }
