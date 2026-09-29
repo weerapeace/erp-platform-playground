@@ -14,6 +14,10 @@
  *   - ปุ่มภาษี: ไม่มี VAT / VAT 7% (แยก "ราคารวม VAT แล้ว" กับ "ยังไม่รวม")
  *   บันทึกผ่าน PATCH /api/purchasing/po-edit (คิดยอดด้วยของกลาง lib/po-total + กันแก้ของที่รับมาแล้ว)
  *
+ * ยกเลิกทั้งใบ (2026-09-29): ปุ่ม "❌ ยกเลิกใบสั่งซื้อ" → ปิดทุกรายการที่ยังค้างรับ ผ่าน API กลาง /api/purchasing/cancel-line
+ *   ยังไม่เคยรับของเลย = ใบเป็น "ยกเลิก" · รับมาแล้วบางส่วน = ของที่รับแล้วคงเดิม ปิดเฉพาะส่วนที่ค้าง
+ *   (เป็น "ยกเลิก" ไม่ใช่ลบทิ้ง เพราะใบขอซื้อ/ใบรับ/ใบสำคัญ อ้างถึงใบนี้ · เปิดกลับได้ที่หน้ารับของ แท็บ "รับครบแล้ว")
+ *
  * ใช้ที่: /purchasing/dashboard (กดแถวในรายการ) · /purchasing/po-list (กดแถวในตาราง)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,6 +25,7 @@ import { ERPModal } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
 import { SkuPicker } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
+import { useAuth, usePermission } from "@/components/auth";
 import { computePoTotals } from "@/lib/po-total";
 import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
 
@@ -56,6 +61,14 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // ---- ยกเลิกทั้งใบ ----
+  const { user } = useAuth();
+  const canCancel = usePermission("products.edit");
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelErr, setCancelErr] = useState<string | null>(null);
+
   // ---- ฟอร์มแก้ไข ----
   const [seller, setSeller] = useState("");
   const [orderDate, setOrderDate] = useState("");
@@ -76,6 +89,26 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
   }, [poId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // รายการที่ยังค้างรับ (ยังไม่ปิด) — มีอย่างน้อย 1 = ยกเลิกใบได้
+  const openLines = useMemo(() => (d?.lines ?? []).filter((l) => !l.done), [d]);
+  const receivedAny = useMemo(() => (d?.lines ?? []).some((l) => l.received > 0), [d]);
+  const cancelPo = async () => {
+    if (!d || openLines.length === 0) return;
+    setCancelling(true); setCancelErr(null);
+    try {
+      const res = await apiFetch("/api/purchasing/cancel-line", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ po_line_ids: openLines.map((l) => l.id), reason: cancelReason.trim() || "ยกเลิกใบสั่งซื้อ", actor: user?.name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setCancelErr(j.error ?? `ยกเลิกไม่สำเร็จ (HTTP ${res.status})`); return; }
+      setCancelOpen(false); setCancelReason("");
+      await load();
+      onSaved?.();
+    } catch { setCancelErr("ยกเลิกไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setCancelling(false); }
+  };
 
   /** เปิดโหมดแก้ไข → ถ่ายค่าปัจจุบันลงฟอร์ม */
   const startEdit = useCallback(() => {
@@ -187,6 +220,13 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
               </>
             ) : (
               <>
+                {d && canCancel && openLines.length > 0 && (
+                  <button onClick={() => { setCancelErr(null); setCancelOpen(true); }}
+                    title={receivedAny ? "ปิดรายการที่ยังค้างรับ (ของที่รับแล้วคงเดิม)" : "ยกเลิกใบสั่งซื้อทั้งใบ"}
+                    className="h-9 px-4 rounded-lg border border-red-200 bg-white text-red-600 text-sm hover:bg-red-50">
+                    ❌ {receivedAny ? "ปิดยอดที่ค้าง" : "ยกเลิกใบสั่งซื้อ"}
+                  </button>
+                )}
                 {d && (
                   <button onClick={startEdit}
                     className="h-9 px-4 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-50">
@@ -347,6 +387,32 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
             ))}
           </div>
         </div>
+      )}
+
+      {/* ยืนยันยกเลิกทั้งใบ — dangerous action ต้องกดยืนยันชัดเจน + ใส่เหตุผลได้ */}
+      {cancelOpen && d && (
+        <ERPModal open onClose={() => !cancelling && setCancelOpen(false)} size="sm" storageKey="po-cancel" closeOnBackdrop={false}
+          title={receivedAny ? "❌ ปิดยอดที่ค้างรับ" : "❌ ยกเลิกใบสั่งซื้อ"} description={`${d.po_no} · ${d.seller || "—"}`}
+          footer={<>
+            <button onClick={() => setCancelOpen(false)} disabled={cancelling} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ไม่ยกเลิก</button>
+            <button onClick={() => void cancelPo()} disabled={cancelling} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{cancelling ? "กำลังยกเลิก…" : receivedAny ? "ยืนยันปิดยอด" : "ยืนยันยกเลิกใบ"}</button>
+          </>}>
+          <div className="text-sm text-slate-700">
+            {receivedAny
+              ? <>ปิดรายการที่ยังค้างรับ <b>{openLines.length}</b> รายการ — ไม่รอของส่วนที่เหลือแล้ว</>
+              : <>ยกเลิกใบสั่งซื้อนี้ทั้งใบ (<b>{openLines.length}</b> รายการ)</>}
+          </div>
+          <ul className="mt-2 text-xs text-slate-500 list-disc pl-5 space-y-0.5">
+            {receivedAny && <li>ของที่รับเข้ามาแล้วยังอยู่เหมือนเดิม (สต๊อกไม่เปลี่ยน)</li>}
+            <li>ใบไม่หายจากระบบ — เก็บเป็น{receivedAny ? "ปิดยอด" : "ยกเลิก"} พร้อมเหตุผลและชื่อคนทำ</li>
+            <li>เปลี่ยนใจได้: หน้ารับของ → แท็บ &quot;รับครบแล้ว&quot; → กดรายการ → ↩ เปิดกลับมารอรับ</li>
+          </ul>
+          <label className="block mt-3 text-[11px] text-slate-500">เหตุผล
+            <input value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="เช่น ร้านไม่มีของ / สั่งซ้ำ / เปลี่ยนร้าน"
+              className="mt-0.5 w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg" />
+          </label>
+          {cancelErr && <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {cancelErr}</div>}
+        </ERPModal>
       )}
     </ERPModal>
   );
