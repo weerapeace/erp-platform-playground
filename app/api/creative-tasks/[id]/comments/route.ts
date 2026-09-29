@@ -2,6 +2,8 @@
  * Creative Task — คอมเมนต์ + @mention
  * GET  /api/creative-tasks/[id]/comments
  * POST /api/creative-tasks/[id]/comments   body = { body, mentions?: string[] (employee ids) }
+ * PATCH  { comment_id, body }   → แก้คอมเมนต์ "ของตัวเอง" (พิมพ์ผิด)
+ * DELETE ?comment_id=           → ลบคอมเมนต์ของตัวเอง · แอดมิน/ผู้จัดการลบของคนอื่นได้ (ข้อความเดิมเก็บในประวัติ)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -50,4 +52,58 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
   return NextResponse.json({ data: row, error: null });
+}
+
+/** ผู้ใช้ปัจจุบัน + เป็นแอดมิน/ผู้จัดการไหม */
+async function whoAmI(request: NextRequest): Promise<{ id: string | null; email: string | null; isManager: boolean }> {
+  const client = supabaseFromRequest(request);
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) return { id: null, email: null, isManager: false };
+  const { data } = await client.rpc("erp_current_user");
+  const p = data as { role?: string | null; active?: boolean | null } | null;
+  const role = String(p?.role ?? "");
+  return { id: user.id, email: user.email ?? null, isManager: p?.active !== false && (role === "admin" || role === "manager") };
+}
+
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const { id } = await params;
+  let body: { comment_id?: string; body?: string };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const commentId = String(body.comment_id ?? "").trim();
+  const text = (body.body ?? "").trim();
+  if (!commentId) return NextResponse.json({ error: "ต้องระบุคอมเมนต์" }, { status: 400 });
+  if (!text) return NextResponse.json({ error: "ข้อความห้ามว่าง — ถ้าไม่ต้องการแล้วให้กดลบ" }, { status: 400 });
+
+  const me = await whoAmI(request);
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("erp_creative_comments").select("id, task_id, author_id, body").eq("id", commentId).eq("task_id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบคอมเมนต์นี้" }, { status: 404 });
+  const c = cur as { author_id: string | null; body: string };
+  if (!me.id || c.author_id !== me.id) return NextResponse.json({ error: "แก้ได้เฉพาะคอมเมนต์ของตัวเอง" }, { status: 403 });
+  if (c.body === text) return NextResponse.json({ data: cur, error: null });
+
+  const { data: row, error } = await admin.from("erp_creative_comments").update({ body: text }).eq("id", commentId).select("*").single();
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAudit(admin, { action: "comment_edit", entityType: "creative_task", entityId: id, actorId: me.id, actorName: me.email, metadata: { comment_id: commentId, old: c.body, new: text } });
+  return NextResponse.json({ data: row, error: null });
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const { id } = await params;
+  const commentId = (new URL(request.url).searchParams.get("comment_id") ?? "").trim();
+  if (!commentId) return NextResponse.json({ error: "ต้องระบุคอมเมนต์" }, { status: 400 });
+
+  const me = await whoAmI(request);
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("erp_creative_comments").select("id, task_id, author_id, author_name, body, created_at").eq("id", commentId).eq("task_id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบคอมเมนต์นี้" }, { status: 404 });
+  const c = cur as { author_id: string | null };
+  if (!me.id || (c.author_id !== me.id && !me.isManager)) return NextResponse.json({ error: "ลบได้เฉพาะคอมเมนต์ของตัวเอง (แอดมิน/ผู้จัดการลบของคนอื่นได้)" }, { status: 403 });
+
+  const { error } = await admin.from("erp_creative_comments").delete().eq("id", commentId);
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAudit(admin, { action: "comment_delete", entityType: "creative_task", entityId: id, actorId: me.id, actorName: me.email, metadata: { comment_id: commentId, snapshot: cur } });
+  return NextResponse.json({ success: true, error: null });
 }

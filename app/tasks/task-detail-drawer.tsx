@@ -39,7 +39,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
-  getTask, updateTask, transitionTask, addComment, addAttachment, deleteAttachment, syncTaskDrive,
+  getTask, updateTask, transitionTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
@@ -148,6 +148,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [linkDel, setLinkDel] = useState<{ id: string; name: string } | null>(null);   // ลิงก์แนบที่กำลังจะลบ (ถามยืนยันก่อน)
+  const [cmtEdit, setCmtEdit] = useState<{ id: string; body: string } | null>(null);   // คอมเมนต์ที่กำลังแก้
+  const [cmtDelAsk, setCmtDelAsk] = useState<string | null>(null);                      // คอมเมนต์ที่ถามยืนยันลบ
+  const [cmtBusy, setCmtBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);   // ยืนยันก่อนลบงาน
@@ -220,6 +223,18 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
   // admin: บังคับตั้งสถานะใดก็ได้ (force ข้ามกฎ workflow) — บันทึก audit ฝั่ง server
   const handleForceStatus = async (toKey: string) => { setBusy(true); try { await transitionTask(d.id, toKey, undefined, true); await refresh(); pushToast("success", t("เปลี่ยนสถานะแล้ว", "Status changed")); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  // แก้/ลบคอมเมนต์ — แก้ได้เฉพาะของตัวเอง · ลบได้ของตัวเอง (แอดมิน/ผู้จัดการลบของคนอื่นได้)
+  const saveCommentEdit = async () => {
+    if (!cmtEdit || !cmtEdit.body.trim()) return;
+    setCmtBusy(true);
+    try { await updateComment(d.id, cmtEdit.id, cmtEdit.body.trim()); setCmtEdit(null); await load(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setCmtBusy(false); }
+  };
+  const removeComment = async (commentId: string) => {
+    setCmtBusy(true);
+    try { await deleteComment(d.id, commentId); setCmtDelAsk(null); await load(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setCmtBusy(false); }
+  };
   const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(d.id, commentText.trim(), mentionUsers.map((u) => u.id)); setCommentText(""); setMentionUsers([]); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(d.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); if ((detail?.subtasks?.length ?? 0) === 0) setSubmitNudge(true); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -580,12 +595,44 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           <div className="border-t border-slate-100 px-5 py-4" style={{ borderColor: dividerColorOf(dth) }}>
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
             <div className="space-y-2 mb-3">
-              {d.comments.map((c) => (
-                <div key={c.id} className="bg-white border border-slate-100 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
-                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
-                </div>
-              ))}
+              {d.comments.map((c) => {
+                const mine = !!user?.id && c.author_id === user.id;
+                return (
+                  <div key={c.id} className="bg-white border border-slate-100 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span>
+                      {cmtEdit?.id !== c.id && (mine || isManager) && (
+                        <span className="ml-auto flex items-center gap-1.5 text-xs">
+                          {cmtDelAsk === c.id ? (
+                            <>
+                              <button onClick={() => void removeComment(c.id)} disabled={cmtBusy} className="h-6 px-2 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{t("ยืนยันลบ", "Delete")}</button>
+                              <button onClick={() => setCmtDelAsk(null)} disabled={cmtBusy} className="h-6 px-2 rounded border border-slate-200 text-slate-500">{t("ไม่ลบ", "Cancel")}</button>
+                            </>
+                          ) : (
+                            <>
+                              {mine && <button onClick={() => { setCmtDelAsk(null); setCmtEdit({ id: c.id, body: c.body }); }} title={t("แก้ไข", "Edit")} className="text-slate-300 hover:text-blue-600">✏️</button>}
+                              <button onClick={() => setCmtDelAsk(c.id)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-rose-600">🗑</button>
+                            </>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    {cmtEdit?.id === c.id ? (
+                      <div className="space-y-1.5">
+                        <textarea value={cmtEdit.body} autoFocus rows={2} onChange={(e) => setCmtEdit({ ...cmtEdit, body: e.target.value })}
+                          onKeyDown={(e) => { if (e.key === "Escape") setCmtEdit(null); }}
+                          className="w-full px-2 py-1.5 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                        <div className="flex justify-end gap-1.5">
+                          <button onClick={() => setCmtEdit(null)} disabled={cmtBusy} className="h-7 px-2.5 text-xs border border-slate-200 rounded-lg text-slate-600">{t("ยกเลิก", "Cancel")}</button>
+                          <button onClick={() => void saveCommentEdit()} disabled={cmtBusy || !cmtEdit.body.trim()} className="h-7 px-2.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{t("บันทึก", "Save")}</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
+                    )}
+                  </div>
+                );
+              })}
               {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
             </div>
             <div className="flex gap-2">

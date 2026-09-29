@@ -258,6 +258,14 @@ export async function addComment(taskId: string, body: string, mentions: string[
   return j.data as CreativeComment;
 }
 
+export async function updateComment(taskId: string, commentId: string, body: string): Promise<CreativeComment> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/comments`, { method: "PATCH", body: JSON.stringify({ comment_id: commentId, body }) }));
+  return j.data as CreativeComment;
+}
+export async function deleteComment(taskId: string, commentId: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/comments?comment_id=${commentId}`, { method: "DELETE" }));
+}
+
 // ---- Attachments ----
 export async function addAttachment(taskId: string, body: { kind?: string; label?: string; url?: string; r2_key?: string; file_name?: string; content_type?: string; size_bytes?: number; subtask_id?: string }): Promise<CreativeAttachment> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/attachments`, { method: "POST", body: JSON.stringify(body) }));
