@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
     const vids = [...new Set(((vl ?? []) as Record<string, unknown>[]).map((r) => String(r.voucher_id)))];
     const vh = new Map<string, string | null>();
     if (vids.length) {
-      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no").in("id", vids).not("is_active", "is", false);
+      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no").in("id", vids).not("is_active", "is", false).neq("status", "cancelled");
       for (const v of (vs ?? []) as Record<string, unknown>[]) vh.set(String(v.id), (v.pv_no as string) ?? null);
     }
     for (const r of (vl ?? []) as Record<string, unknown>[]) { const vid = String(r.voucher_id); if (vh.has(vid)) pvByLine.set(String(r.po_line_id), { id: vid, pv_no: vh.get(vid) ?? null }); }

@@ -116,7 +116,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: vl } = await admin.from("purchase_voucher_lines_v2").select("voucher_id").eq("po_id", id).not("is_active", "is", false);
     const vids = [...new Set(((vl ?? []) as Record<string, unknown>[]).map((r) => String(r.voucher_id)))];
     if (vids.length) {
-      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no, status, grand_total_thb, ship_total_thb").in("id", vids).not("is_active", "is", false).order("created_at", { ascending: false });
+      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no, status, grand_total_thb, ship_total_thb").in("id", vids).not("is_active", "is", false).neq("status", "cancelled").order("created_at", { ascending: false });
       for (const v of (vs ?? []) as Record<string, unknown>[]) vouchers.push({ id: String(v.id), pv_no: (v.pv_no as string) ?? null, status: String(v.status ?? "draft"), grand_total_thb: num(v.grand_total_thb), ship_total_thb: num(v.ship_total_thb) });
     }
   }

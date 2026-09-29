@@ -102,7 +102,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const vids = [...new Set(pairs.map((r) => String(r.voucher_id)))];
     const vh = new Map<string, { id: string; pv_no: string | null; status: string }>();
     for (let i = 0; i < vids.length; i += 300) {
-      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no, status").in("id", vids.slice(i, i + 300)).not("is_active", "is", false);
+      const { data: vs } = await admin.from("purchase_vouchers_v2").select("id, pv_no, status").in("id", vids.slice(i, i + 300)).not("is_active", "is", false).neq("status", "cancelled");
       for (const v of (vs ?? []) as Record<string, unknown>[]) vh.set(String(v.id), { id: String(v.id), pv_no: (v.pv_no as string) ?? null, status: String(v.status ?? "draft") });
     }
     for (const r of pairs) {

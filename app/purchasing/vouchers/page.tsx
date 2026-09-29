@@ -42,7 +42,7 @@ export default function PurchaseVouchersPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
-  const [vStatus, setVStatus] = useState<"all" | "draft" | "confirmed">("all");
+  const [vStatus, setVStatus] = useState<"all" | "draft" | "confirmed" | "cancelled">("all");
   const [detailGr, setDetailGr] = useState<PendingGr | null>(null);   // ป๊อปรายละเอียดใบรับ (ของกลาง GrDetailModal)
   // ป๊อป "＋ ออกใบสำคัญรับ": จากใบรับที่รอ หรือสร้างเปล่า
   const [addOpen, setAddOpen] = useState(false);
@@ -206,9 +206,9 @@ export default function PurchaseVouchersPage() {
         ) : (
           <>
             <div className="flex items-center gap-2 mb-3 text-xs">
-              {(["all", "draft", "confirmed"] as const).map((s) => (
+              {(["all", "draft", "confirmed", "cancelled"] as const).map((s) => (
                 <button key={s} onClick={() => setVStatus(s)} className={`h-8 px-3 rounded-md border ${vStatus === s ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
-                  {s === "all" ? "ทั้งหมด" : s === "draft" ? "ร่าง" : "ยืนยันแล้ว"}
+                  {s === "all" ? "ทั้งหมด" : s === "draft" ? "ร่าง" : s === "confirmed" ? "ยืนยันแล้ว" : "ยกเลิก"}
                 </button>
               ))}
               <span className="text-slate-400">แก้ไข = กดเปิดใบ · ลบ = ปุ่ม &quot;ยกเลิกใบร่าง&quot; ในใบ (ใบที่ยืนยันแล้วลบไม่ได้ เพราะราคาถูกเขียนกลับระบบแล้ว)</span>

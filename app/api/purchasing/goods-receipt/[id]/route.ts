@@ -181,10 +181,10 @@ async function editGoodsReceipt(request: NextRequest, id: string, body: EditBody
       const pl = gl.po_line_id ? poLines.get(String(gl.po_line_id)) : undefined;
       if (nR <= 0 && nD <= 0) {
         await admin.from("goods_receipt_lines_v2").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", String(gl.id));
-        if (voucherDraft) await admin.from("purchase_voucher_lines_v2").update({ is_active: false }).eq("gr_line_id", String(gl.id));
+        if (voucherDraft) await admin.from("purchase_voucher_lines_v2").update({ is_active: false }).eq("gr_line_id", String(gl.id)).eq("voucher_id", voucherDraft);
       } else {
         await admin.from("goods_receipt_lines_v2").update({ qty_received: nR, qty_defective: nD, ...(caseType ? { case_type: caseType } : {}), updated_at: new Date().toISOString() }).eq("id", String(gl.id));
-        if (voucherDraft) await admin.from("purchase_voucher_lines_v2").update({ qty: nR }).eq("gr_line_id", String(gl.id));
+        if (voucherDraft) await admin.from("purchase_voucher_lines_v2").update({ qty: nR }).eq("gr_line_id", String(gl.id)).eq("voucher_id", voucherDraft);
       }
       if (pl) { await applyPoDelta(pl, nR - oR, nD - oD, caseType); await postStock(pl, nR - oR, `แก้ใบรับ ${g.gr_no}: รับ ${oR} → ${nR}`); }
       changes.push({ gr_line_id: gl.id, item_name: gl.item_name, old: { qty_received: oR, qty_defective: oD }, new: { qty_received: nR, qty_defective: nD }, removed: nR <= 0 && nD <= 0 });

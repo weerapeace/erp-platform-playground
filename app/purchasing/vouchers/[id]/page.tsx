@@ -74,6 +74,10 @@ export default function PurchaseVoucherFormPage() {
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  // ยกเลิกใบที่ยืนยันแล้ว (ใส่ราคา/ค่าส่งผิด) — ต้องมีเหตุผล
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
+  const [voiding, setVoiding] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
   const applyData = useCallback((d: Detail) => {
@@ -223,6 +227,22 @@ export default function PurchaseVoucherFormPage() {
     } catch { setShipBills([]); }
   };
 
+  const voidConfirmed = async () => {
+    if (!voidReason.trim()) { toast.error("ต้องระบุเหตุผลที่ยกเลิก"); return; }
+    setVoiding(true);
+    try {
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}/void`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: voidReason.trim() }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      const kept = (j.price_kept ?? []) as string[];
+      toast.success(`ยกเลิกใบแล้ว — ใบรับ ${j.released_gr ?? 0} ใบกลับไปรอออกใบสำคัญใหม่`
+        + (j.no_snapshot ? " · ใบนี้ไม่มีข้อมูลราคาเดิม ราคาในระบบคงไว้ตามเดิม" : kept.length ? ` · ราคา ${kept.length} รายการถูกแก้ทีหลัง จึงคงไว้ (${kept.slice(0, 2).join(", ")}${kept.length > 2 ? " …" : ""})` : " · คืนราคาเดิมครบ"));
+      setVoidOpen(false); setVoidReason("");
+      await load();
+    } catch (e) { toast.error("ยกเลิกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setVoiding(false); }
+  };
+
   const cancelDraft = async () => {
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${id}`, { method: "DELETE" });
@@ -254,6 +274,7 @@ export default function PurchaseVoucherFormPage() {
               <div>
                 <button onClick={() => router.push("/purchasing/vouchers")} className="text-xs text-slate-400 hover:text-blue-600">← กลับรายการใบสำคัญรับ</button>
                 <h1 className="text-xl font-semibold text-slate-800 mt-1">🧾 ใบสำคัญรับ {hd.pv_no ? <span className="font-mono">{hd.pv_no}</span> : <span className="text-slate-400 text-base">(ร่าง — ยังไม่ออกเลข)</span>}
+                  {hd.status === "cancelled" && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-red-50 text-red-700 border-red-200 align-middle">❌ ยกเลิกแล้ว</span>}
                   {hd.status === "confirmed" && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 align-middle">✅ ยืนยันแล้ว {hd.confirmed_at ? formatDate(hd.confirmed_at) : ""} {hd.confirmed_by ? `· ${hd.confirmed_by}` : ""}</span>}
                 </h1>
                 <div className="text-sm text-slate-500 mt-0.5">🏪 {hd.seller_name ?? "—"} · ใบรับ {hd.gr_nos.join(", ") || "—"} · PO {hd.po_nos.join(", ") || "—"}{hd.tracking_no && <span className="ml-2 font-mono text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="รหัสขนส่ง (จากใบส่งของ)">🚚 {hd.tracking_no}</span>}</div>
@@ -265,6 +286,7 @@ export default function PurchaseVoucherFormPage() {
                 })}
                 <a href={`/print/purchase-voucher/${id}`} target="_blank" rel="noreferrer" className={`h-9 px-3 text-xs rounded-md border inline-flex items-center ${hd.status === "confirmed" ? "border-slate-800 bg-slate-800 text-white hover:bg-slate-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>🖨 ใบซื้อ (ใบสำคัญรับ)</a>
                 {!readonly && <button onClick={() => setCancelOpen(true)} className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบร่าง</button>}
+                {canEdit && hd.status === "confirmed" && <button onClick={() => setVoidOpen(true)} title="ใส่ราคา/ค่าส่งผิด → ยกเลิกใบนี้ แล้วออกใบใหม่" className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบนี้</button>}
                 {!readonly && <button onClick={() => void save()} disabled={saving || !dirty} className="h-9 px-4 text-sm rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40">{saving ? "กำลังบันทึก…" : "💾 บันทึกร่าง"}</button>}
                 {!readonly && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
               </div>
@@ -548,6 +570,27 @@ export default function PurchaseVoucherFormPage() {
             <button onClick={() => void removeLine()} disabled={addBusy} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{addBusy ? "กำลังลบ…" : "ยืนยันลบ"}</button>
           </>}>
           <p className="text-sm text-slate-600">ลบรายการนี้ออกจากใบสำคัญ ({delLine.qty.toLocaleString()} {delLine.uom ?? ""}) — ยอดรวมและค่าส่งเฉลี่ยจะคิดใหม่</p>
+        </ERPModal>
+      )}
+      {/* ยกเลิกใบที่ยืนยันแล้ว */}
+      {voidOpen && hd && (
+        <ERPModal open onClose={() => !voiding && setVoidOpen(false)} size="sm" storageKey="pv-void" closeOnBackdrop={false}
+          title={`❌ ยกเลิกใบสำคัญรับ ${hd.pv_no ?? ""}`} description="ใช้เมื่อใส่ราคา/ค่าส่งผิด แล้วต้องออกใบใหม่"
+          footer={<>
+            <button onClick={() => setVoidOpen(false)} disabled={voiding} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ไม่ยกเลิก</button>
+            <button onClick={() => void voidConfirmed()} disabled={voiding || !voidReason.trim()} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{voiding ? "กำลังยกเลิก…" : "ยืนยันยกเลิกใบ"}</button>
+          </>}>
+          <div className="space-y-3 text-sm text-slate-600">
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li>ราคาที่ใบนี้เขียนลงระบบ (ใบสั่งซื้อ · ราคาต่อร้าน · ราคาบนสินค้า) จะ<b>กลับเป็นราคาเดิม</b> — ยกเว้นจุดที่มีคนแก้ราคาทีหลังแล้ว ระบบจะไม่ไปทับ</li>
+              <li>ใบรับ {hd.gr_nos.join(", ") || "—"} จะกลับไปรอออกใบสำคัญใหม่</li>
+              <li>ใบนี้ยังเก็บไว้ดูย้อนหลังในสถานะ “ยกเลิก” (เลขที่ไม่ถูกใช้ซ้ำ)</li>
+              <li>สถานะ “จ่ายค่าสินค้า” ของใบสั่งซื้อไม่ถูกแตะ — ถ้ายอดที่จ่ายเปลี่ยน ให้แก้ที่ใบสั่งซื้อเอง</li>
+            </ul>
+            <label className="block text-xs font-medium text-slate-600">เหตุผลที่ยกเลิก <span className="text-red-500">*</span>
+              <textarea value={voidReason} onChange={(e) => setVoidReason(e.target.value)} rows={2} autoFocus placeholder="เช่น ใส่ราคาผิดบรรทัด / ค่าส่งผิดร้าน"
+                className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400" /></label>
+          </div>
         </ERPModal>
       )}
       {/* ยกเลิกใบร่าง */}

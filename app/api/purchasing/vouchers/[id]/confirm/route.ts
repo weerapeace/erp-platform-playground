@@ -3,7 +3,7 @@
  *   1. ตรวจ: ทุกรายการมีราคา · สกุลต่างประเทศต้องมีเรท
  *   2. ออกเลข PV-{YYYY}-{00000} (erp_next_number 'pv')
  *   3. เขียนราคากลับ (ของกลาง lib/po-line-price): บรรทัด PO + ยอดรวมใบ · ราคาต่อร้านของ SKU · ราคาบน SKU (ไม่รวมค่าส่ง)
- *   4. สถานะ confirmed + audit log
+ *   4. สถานะ confirmed + audit log (จด "ราคาก่อนเขียนทับ" ไว้ด้วย → ใช้ย้อนราคาเมื่อยกเลิกใบ: POST .../void)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -11,8 +11,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { fetchVoucher, recomputeVoucher } from "@/lib/purchase-voucher-server";
-import { applyPoLinePrice, loadPartnerMatcher, writeBackSkuPrice, upsertSupplierPrice } from "@/lib/po-line-price";
-import { isForeignCurrency } from "@/lib/landed-cost";
+import { applyPoLinePrice, loadPartnerMatcher, writeBackSkuPrice, upsertSupplierPrice, snapshotLinePrice, type PriceSnapshot } from "@/lib/po-line-price";
+import { isForeignCurrency, isCNY } from "@/lib/landed-cost";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,9 +43,13 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   const matcher = await loadPartnerMatcher(admin);
   const sellerPartner = v.header.seller_name ? (matcher.match(v.header.seller_name) as Record<string, unknown> | undefined) : undefined;
   const results: { line: string; po: boolean; price_list: boolean; sku: boolean; error?: string }[] = [];
+  const before: PriceSnapshot[] = [];   // ราคาก่อนเขียนทับ — เก็บลงประวัติ ใช้ย้อนตอนยกเลิกใบ
   for (const l of v.lines) {
     const price = Number(l.unit_price);
     const r = { line: l.item_name, po: false, price_list: false, sku: false } as (typeof results)[number];
+    let snap: PriceSnapshot | null = null;
+    try { snap = await snapshotLinePrice(admin, { itemName: l.item_name, poLineId: l.po_line_id ?? null, skuId: l.item_sku_id ?? null, fallbackPartnerId: sellerPartner ? String(sellerPartner.id) : null, matcher }); }
+    catch { snap = null; }
     try {
       if (l.po_line_id) {
         const a = await applyPoLinePrice(admin, { lineId: l.po_line_id, price, actorId: user?.id ?? null, actorName, matcher, skipAudit: true });
@@ -58,6 +62,16 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
         r.sku = await writeBackSkuPrice(admin, { skuId: l.item_sku_id, currency: v.header.currency, unitPrice: price, unitPriceThb: Number(l.unit_price_thb ?? 0), actorId: user?.id ?? null, actorName, refLabel: String(pvNo) });
       }
     } catch (e) { r.error = String((e as Error).message ?? e); }
+    if (snap) {
+      const thb = Number(l.unit_price_thb ?? 0);
+      snap.written = {
+        po_price: r.po ? price : null,
+        supplier_price: r.price_list ? price : null,
+        rmb_cost: r.sku && isCNY(v.header.currency) && price > 0 ? price : null,
+        standard_price: r.sku && thb > 0 ? thb : null,
+      };
+      before.push(snap);
+    }
     results.push(r);
   }
 
@@ -68,7 +82,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
   await writeAudit(admin, {
     action: "confirm", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,
-    metadata: { pv_no: pvNo, currency: v.header.currency, fx_rate: v.header.fx_rate, ship_method: v.header.ship_method, ship_total_thb: v.header.ship_total_thb, subtotal_thb: v.header.subtotal_thb, grand_total_thb: v.header.grand_total_thb, lines: results.length, write_back: results },
+    metadata: { pv_no: pvNo, currency: v.header.currency, fx_rate: v.header.fx_rate, ship_method: v.header.ship_method, ship_total_thb: v.header.ship_total_thb, subtotal_thb: v.header.subtotal_thb, grand_total_thb: v.header.grand_total_thb, lines: results.length, write_back: results, price_before: before },
   });
   const failed = results.filter((r) => r.error);
   return NextResponse.json({ ok: true, pv_no: pvNo, write_back: results, failed: failed.length, error: null });
