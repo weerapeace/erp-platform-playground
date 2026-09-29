@@ -5,7 +5,8 @@
 // แสดงขั้นบันไดของเป้าหมายเป็น stepper แนวตั้ง
 //  ✅ เสร็จ (เขียว) · 🔵 กำลังทำ (ฟ้า + แถบ%) · ⚪ ยังไม่เริ่ม (เทา) · ⊘ ข้าม
 // reusable: โมดูลอื่น (แคมเปญ/โปรเจกต์/ผลิต) เอาไปใช้ซ้ำได้
-//  <GoalRoadmap steps={steps} onToggleStep={fn} onAddStep={fn} onCreateTask={fn} />
+//  <GoalRoadmap steps={steps} onToggleStep={fn} onAddStep={fn} onEditStep={fn} onDeleteStep={fn} onCreateTask={fn} />
+//  เพิ่ม = onAddStep · แก้ = onEditStep (✏️) · ลบ = onDeleteStep (🗑) — ส่งมาเฉพาะตัวที่หน้านั้นรองรับ
 // ============================================================
 
 import React from "react";
@@ -59,6 +60,8 @@ export function GoalRoadmap({
   editable = false,
   onToggleStep,
   onAddStep,
+  onEditStep,
+  onDeleteStep,
   onCreateTask,
 }: {
   steps: RoadmapStep[];
@@ -66,6 +69,10 @@ export function GoalRoadmap({
   /** คลิกวงกลม → สลับสถานะเสร็จ/ยังไม่เสร็จ */
   onToggleStep?: (id: string) => void;
   onAddStep?: () => void;
+  /** ✏️ แก้ชื่อ/วันกำหนดของขั้น */
+  onEditStep?: (step: RoadmapStep) => void;
+  /** 🗑 ลบขั้น (หน้าที่เรียกเป็นคนถามยืนยัน) */
+  onDeleteStep?: (step: RoadmapStep) => void;
   onCreateTask?: (step: RoadmapStep) => void;
 }) {
   const ordered = [...steps];
@@ -106,8 +113,22 @@ export function GoalRoadmap({
 
             {/* เนื้อหาแต่ละขั้น */}
             <div className={`flex-1 ${isLast ? "pb-0" : "pb-5"}`}>
-              <div className={`font-medium ${done || active ? "text-slate-900" : "text-slate-500"} ${skipped ? "line-through text-slate-400" : ""}`}>
-                {i + 1}. {step.title}
+              <div className="flex items-start gap-2">
+                <div className={`flex-1 min-w-0 font-medium ${done || active ? "text-slate-900" : "text-slate-500"} ${skipped ? "line-through text-slate-400" : ""}`}>
+                  {i + 1}. {step.title}
+                </div>
+                {editable && (onEditStep || onDeleteStep) && (
+                  <div className="flex shrink-0 gap-0.5">
+                    {onEditStep && (
+                      <button type="button" onClick={() => onEditStep(step)} title="แก้ชื่อ / วันกำหนดของขั้นนี้" aria-label="แก้ขั้นบันได"
+                        className="w-7 h-7 rounded text-xs text-slate-300 hover:text-blue-600 hover:bg-blue-50">✏️</button>
+                    )}
+                    {onDeleteStep && (
+                      <button type="button" onClick={() => onDeleteStep(step)} title="ลบขั้นนี้" aria-label="ลบขั้นบันได"
+                        className="w-7 h-7 rounded text-xs text-slate-300 hover:text-red-600 hover:bg-red-50">🗑</button>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
                 <span

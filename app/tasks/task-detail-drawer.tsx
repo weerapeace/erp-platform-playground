@@ -147,6 +147,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);   // เลือกรูปจากคลังไฟล์กลาง (DAM)
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [linkDel, setLinkDel] = useState<{ id: string; name: string } | null>(null);   // ลิงก์แนบที่กำลังจะลบ (ถามยืนยันก่อน)
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);   // ยืนยันก่อนลบงาน
@@ -428,9 +429,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์แนบ", "Attachments")} ({d.attachments.filter((a) => a.kind !== "image").length})</p>
                 <div className="space-y-1.5 mb-2">
                   {d.attachments.filter((a) => a.kind !== "image").map((a) => (
-                    <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm text-violet-700 hover:bg-violet-50">
-                      🔗 <span className="truncate">{a.label || a.url}</span>
-                    </a>
+                    <div key={a.id} className="flex items-center gap-1 border border-slate-200 rounded-lg pr-1 hover:bg-violet-50">
+                      <a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-sm text-violet-700">
+                        🔗 <span className="truncate">{a.label || a.url}</span>
+                      </a>
+                      <button type="button" onClick={() => setLinkDel({ id: a.id, name: a.label || a.url || "" })}
+                        title={t("ลบลิงก์นี้", "Remove this link")} aria-label={t("ลบลิงก์นี้", "Remove this link")}
+                        className="shrink-0 w-7 h-7 rounded text-slate-300 hover:text-red-600 hover:bg-red-50">✕</button>
+                    </div>
                   ))}
                   {d.attachments.filter((a) => a.kind !== "image").length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีลิงก์แนบ", "No attachments yet")}</p>}
                 </div>
@@ -657,6 +663,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         </div>
       </div>
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
+      <ConfirmDialog open={!!linkDel} onClose={() => setLinkDel(null)} variant="danger"
+        onConfirm={async () => { const x = linkDel; setLinkDel(null); if (!x) return; try { await deleteAttachment(d.id, x.id); await load(); pushToast("success", t("ลบลิงก์แล้ว", "Link removed")); } catch (e) { pushToast("error", (e as Error).message); } }}
+        title={t("ลบลิงก์แนบนี้?", "Remove this link?")} message={t(`ลิงก์ "${linkDel?.name ?? ""}" จะถูกเอาออกจากงานนี้ (ไฟล์ปลายทางไม่ถูกลบ)`, `"${linkDel?.name ?? ""}" will be removed from this task (the file itself is not deleted).`)}
+        confirmText={t("ลบลิงก์", "Remove")} cancelText={t("ไม่ลบ", "Keep")} />
       <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={() => { setConfirmDel(false); onDelete(d.id); }} variant="danger" title={t("ลบงานนี้?", "Delete this task?")} message={t(`ลบงาน "${d.title}" — รวมงานย่อย/คอนเทนต์ที่ผูกอยู่ และกู้คืนไม่ได้`, `Delete "${d.title}" including its subtasks/content. This cannot be undone.`)} confirmText={t("ลบ", "Delete")} cancelText={t("ยกเลิก", "Cancel")} />
       {publishToKey && <PublishModal taskId={d.id} parents={parentList} parentFallback={d.parent_sku_code} taskPlatforms={d.platforms ?? []} onClose={() => setPublishToKey(null)} onConfirm={async () => { const to = publishToKey; setPublishToKey(null); if (to) await handleMove(to); }} pushToast={pushToast} />}
     </>

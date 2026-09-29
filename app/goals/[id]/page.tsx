@@ -1,11 +1,13 @@
 "use client";
 
 // หน้ารายละเอียดเป้าหมาย (เฟส 2a) — ดึง/บันทึกผ่าน /api/goals จริง
+// เพิ่ม/แก้/ลบ: เป้าหมาย = ปุ่ม ✏️ แก้ไขเป้าหมาย / 🗑 ลบเป้าหมาย · ขั้นบันได = + เพิ่มขั้นบันได / ✏️ / 🗑 ในเส้นทาง
 // พระเอก: "เส้นทางสู่ความสำเร็จ" (GoalRoadmap) + ลูกเล่นเกม (เหรียญเด้ง) ยังใช้ player-store (localStorage) รอเฟส 2b
 import { useMemo, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ERPModal } from "@/components/modal";
+import { useParams, useRouter } from "next/navigation";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { DateInput } from "@/components/date-input";
 import { SearchableSelect } from "@/components/searchable-select";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
@@ -14,7 +16,8 @@ import {
   goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
   type Goal, type GoalHealth, type GoalStatus, type GoalPlan,
 } from "../mock-data";
-import { fetchGoal, updateStep, addCheckin, updateGoal, addExercise, addProgress } from "../api";
+import { fetchGoal, updateStep, addStep, deleteStep, deleteGoal, addCheckin, updateGoal, addExercise, addProgress } from "../api";
+import { GoalFormModal } from "../goal-form-modal";
 import { GoalStatusBadge, GoalHealthBadge, ProgressRing } from "../goal-badges";
 import { GameBar } from "../game-bar";
 import { useCoinFx } from "../coin-fx";
@@ -59,6 +62,14 @@ export default function GoalDetailPage() {
   const [workoutOpen, setWorkoutOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
   const { fx, burst } = useCoinFx();
+  const router = useRouter();
+  // แก้ไข / ลบ เป้าหมาย + เพิ่ม / แก้ / ลบ ขั้นบันได
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmDelGoal, setConfirmDelGoal] = useState(false);
+  const [deletingGoal, setDeletingGoal] = useState(false);
+  const [stepForm, setStepForm] = useState<{ id: string | null; title: string; target_date: string } | null>(null);   // id null = เพิ่มขั้นใหม่
+  const [stepSaving, setStepSaving] = useState(false);
+  const [stepDel, setStepDel] = useState<RoadmapStep | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -94,6 +105,58 @@ export default function GoalDetailPage() {
   const showMetric = g.measure_type !== "boolean" && g.target_value != null;
   const plan = (g.plan ?? {}) as GoalPlan;
   const isFinancial = plan.kind === "house" || plan.kind === "lump" || plan.kind === "dividend";
+
+  async function saveGoalEdit(patch: Record<string, unknown>): Promise<boolean> {
+    try {
+      setGoal(await updateGoal(g.id, patch));
+      setEditOpen(false);
+      toast.success("บันทึกการแก้ไขเป้าหมายแล้ว");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      return false;
+    }
+  }
+
+  async function removeGoal() {
+    setDeletingGoal(true);
+    try {
+      await deleteGoal(g.id);
+      toast.success(`ลบเป้าหมาย "${g.title}" แล้ว`);
+      router.push("/goals");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ลบเป้าหมายไม่สำเร็จ");
+      setDeletingGoal(false); setConfirmDelGoal(false);
+    }
+  }
+
+  async function saveStep() {
+    if (!stepForm) return;
+    const title = stepForm.title.trim();
+    if (!title) { toast.error("ต้องใส่ชื่อขั้นบันได"); return; }
+    setStepSaving(true);
+    try {
+      const updated = stepForm.id
+        ? await updateStep(g.id, stepForm.id, { title, target_date: stepForm.target_date || null })
+        : await addStep(g.id, { title, target_date: stepForm.target_date || undefined });
+      setGoal(updated);
+      toast.success(stepForm.id ? "แก้ขั้นบันไดแล้ว" : "เพิ่มขั้นบันไดแล้ว");
+      setStepForm(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกขั้นบันไดไม่สำเร็จ");
+    } finally { setStepSaving(false); }
+  }
+
+  async function removeStep() {
+    const st = stepDel; setStepDel(null);
+    if (!st) return;
+    try {
+      setGoal(await deleteStep(g.id, st.id));
+      toast.success("ลบขั้นบันไดแล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ลบขั้นบันไดไม่สำเร็จ");
+    }
+  }
 
   async function toggleStep(stepId: string) {
     const step = g.steps.find((s) => s.id === stepId);
@@ -275,12 +338,21 @@ export default function GoalDetailPage() {
             <span className="text-xs text-slate-400">แตะวงกลมเพื่อสลับเสร็จ/ยังไม่เสร็จ</span>
           </div>
           {g.steps.length === 0 ? (
-            <p className="text-sm text-slate-400">ยังไม่มีขั้นบันได</p>
+            <div>
+              <p className="text-sm text-slate-400">ยังไม่มีขั้นบันได</p>
+              {canEdit && (
+                <button type="button" onClick={() => setStepForm({ id: null, title: "", target_date: "" })}
+                  className="mt-2 text-sm text-slate-500 hover:text-blue-600 border border-dashed border-slate-300 hover:border-blue-300 rounded-lg px-3 py-1.5">+ เพิ่มขั้นบันได</button>
+              )}
+            </div>
           ) : (
             <GoalRoadmap
               steps={g.steps as RoadmapStep[]}
               editable={canEdit}
               onToggleStep={toggleStep}
+              onAddStep={() => setStepForm({ id: null, title: "", target_date: "" })}
+              onEditStep={(st) => setStepForm({ id: st.id, title: st.title, target_date: st.target_date ?? "" })}
+              onDeleteStep={(st) => setStepDel(st)}
               onCreateTask={(st) => toast.success(`เฟส 3: จะสร้างงาน "${st.title}" ใน Task Manager แล้วผูกกลับมา`)}
             />
           )}
@@ -304,6 +376,12 @@ export default function GoalDetailPage() {
             </button>
             <button onClick={() => setStatusOpen(true)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
               ↻ เปลี่ยนสถานะ
+            </button>
+            <button onClick={() => setEditOpen(true)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
+              ✏️ แก้ไขเป้าหมาย
+            </button>
+            <button onClick={() => setConfirmDelGoal(true)} className="h-9 px-4 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 sm:ml-auto">
+              🗑 ลบเป้าหมาย
             </button>
           </div>
         )}
@@ -338,6 +416,43 @@ export default function GoalDetailPage() {
       <StatusModal open={statusOpen} onClose={() => setStatusOpen(false)} current={g.status} onPick={changeStatus} />
       <WorkoutModal open={workoutOpen} onClose={() => setWorkoutOpen(false)} onSave={handleWorkout} />
       <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} onSave={handleDeposit} />
+
+      {/* แก้ไขเป้าหมาย (ฟอร์มเดียวกับตอนสร้าง) */}
+      <GoalFormModal open={editOpen} onClose={() => setEditOpen(false)} editing={g} onSave={saveGoalEdit} />
+
+      {/* ลบเป้าหมาย */}
+      <ConfirmDialog open={confirmDelGoal} onClose={() => { if (!deletingGoal) setConfirmDelGoal(false); }} onConfirm={() => void removeGoal()} loading={deletingGoal}
+        variant="danger" title="ลบเป้าหมายนี้?" confirmText="ลบเป้าหมาย" cancelText="ไม่ลบ"
+        message={`"${g.title}" จะถูกลบพร้อมขั้นบันได ${g.steps.length} ขั้น และประวัติอัปเดต ${g.checkins.length} ครั้ง — ลบแล้วเรียกคืนไม่ได้ (ถ้าแค่เลิกทำ ให้ใช้ “เปลี่ยนสถานะ → ยกเลิก” แทน)`} />
+
+      {/* เพิ่ม / แก้ ขั้นบันได */}
+      <ERPModal open={stepForm !== null} onClose={() => { if (!stepSaving) setStepForm(null); }} size="sm"
+        title={stepForm?.id ? "แก้ขั้นบันได" : "เพิ่มขั้นบันได"}
+        footer={<>
+          <button onClick={() => setStepForm(null)} disabled={stepSaving} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+          <button onClick={() => void saveStep()} disabled={stepSaving || !stepForm?.title.trim()} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{stepSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
+        </>}>
+        {stepForm && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">ชื่อขั้นบันได <span className="text-red-500">*</span></label>
+              <input value={stepForm.title} autoFocus onChange={(e) => setStepForm({ ...stepForm, title: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveStep(); }}
+                placeholder="เช่น หาลูกค้าใหม่ 10 ราย"
+                className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">วันกำหนด (ไม่บังคับ)</label>
+              <DateInput value={stepForm.target_date} onChange={(v) => setStepForm({ ...stepForm, target_date: v })} placeholder="เลือกวันที่" />
+            </div>
+          </div>
+        )}
+      </ERPModal>
+
+      {/* ลบขั้นบันได */}
+      <ConfirmDialog open={stepDel !== null} onClose={() => setStepDel(null)} onConfirm={() => void removeStep()}
+        variant="danger" title="ลบขั้นบันไดนี้?" confirmText="ลบขั้นนี้" cancelText="ไม่ลบ"
+        message={`"${stepDel?.title ?? ""}" จะถูกเอาออกจากเส้นทาง — ความคืบหน้าของเป้าจะคิดใหม่จากขั้นที่เหลือ`} />
     </div>
   );
 }

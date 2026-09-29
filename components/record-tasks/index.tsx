@@ -69,6 +69,19 @@ export function RecordTasksButton({ moduleKey, recordId = null, label = "📝 �
     } catch { setItems((p) => p.map((x) => x.id === it.id ? { ...x, status: it.status } : x)); toast.error("อัปเดตไม่สำเร็จ"); }
   };
 
+  // แก้ข้อความ: กด ✏️ → พิมพ์ → Enter (ข้อความยาวต้องเห็นครบ จึงไม่ใช้ InlineEdit ที่ตัดข้อความบรรทัดเดียว) — ว่างเปล่า = ไม่บันทึก
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const commitEdit = () => { const e = editing; setEditing(null); if (e) { const it = items.find((x) => x.id === e.id); if (it) void rename(it, e.text); } };
+  const rename = async (it: RecordTask, title: string) => {
+    const t = title.trim();
+    if (!t || t === it.title) return;
+    setItems((p) => p.map((x) => x.id === it.id ? { ...x, title: t } : x));   // optimistic
+    try {
+      const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: t, actor: user?.name }) });
+      if (!r.ok) throw new Error();
+    } catch { setItems((p) => p.map((x) => x.id === it.id ? { ...x, title: it.title } : x)); toast.error("แก้ข้อความไม่สำเร็จ"); }
+  };
+
   const del = async (it: RecordTask) => {
     setItems((p) => p.filter((x) => x.id !== it.id));
     try { const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "DELETE" }); if (!r.ok) throw new Error(); }
@@ -85,9 +98,20 @@ export function RecordTasksButton({ moduleKey, recordId = null, label = "📝 �
         <button type="button" onClick={() => canEdit && void toggle(it)} disabled={!canEdit} title={done ? "ทำเครื่องหมายว่ายังค้าง" : "ทำเครื่องหมายว่าเสร็จ"}
           className={`mt-0.5 w-5 h-5 shrink-0 rounded border flex items-center justify-center text-xs ${done ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 text-transparent hover:border-emerald-400"}`}>✓</button>
         <div className="min-w-0 flex-1">
-          <div className={`text-sm break-words ${done ? "line-through text-slate-400" : "text-slate-700"}`}>{it.title}</div>
+          {editing?.id === it.id ? (
+            <input value={editing.text} autoFocus aria-label="ข้อความรายการ"
+              onChange={(e) => setEditing({ id: it.id, text: e.target.value })} onBlur={commitEdit}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitEdit(); } if (e.key === "Escape") setEditing(null); }}
+              className="w-full h-8 px-2 text-sm border border-blue-400 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          ) : (
+            <div className={`text-sm break-words ${done ? "line-through text-slate-400" : "text-slate-700"}`}>{it.title}</div>
+          )}
           <div className="text-[10px] text-slate-400">{it.created_by ?? "—"} · {relTime(it.created_at)}</div>
         </div>
+        {canEdit && editing?.id !== it.id && (
+          <button type="button" onClick={() => setEditing({ id: it.id, text: it.title })} title="แก้ข้อความ"
+            className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-300 hover:text-blue-600 text-xs shrink-0 mt-0.5">✏️</button>
+        )}
         {canEdit && (
           <button type="button" onClick={() => void del(it)} title="ลบ"
             className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-rose-500 text-xs shrink-0 mt-0.5">🗑</button>

@@ -1,14 +1,16 @@
 "use client";
 
-// ป๊อปอัปตั้งเป้าหมายใหม่ (เฟส 1 mock) — ใช้ ERPModal + SearchableSelect + DateInput กลาง
-// + ตัวช่วยแตกขั้นบันได (Step Builder): เพิ่ม/ลบ/เลื่อนลำดับ
+// ป๊อปอัปตั้งเป้าหมายใหม่ / แก้ไขเป้าหมาย — ใช้ ERPModal + SearchableSelect + DateInput กลาง
+// + ตัวช่วยแตกขั้นบันได (Step Builder): เพิ่ม/ลบ/เลื่อนลำดับ (เฉพาะตอนสร้าง — แก้ขั้นบันไดของเป้าเดิมทำในหน้ารายละเอียด)
+// โหมดแก้ไข: ส่ง editing={goal} + onSave → เติมค่าเดิมให้ แล้วบันทึกเฉพาะข้อมูลหัวเป้า
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { SearchableSelect } from "@/components/searchable-select";
 import { DateInput } from "@/components/date-input";
 import {
   CATEGORY_LABEL,
+  type Goal,
   type GoalDraft,
   type MeasureType,
 } from "./mock-data";
@@ -34,12 +36,19 @@ export function GoalFormModal({
   open,
   onClose,
   onCreate,
+  editing,
+  onSave,
 }: {
   open: boolean;
   onClose: () => void;
   /** สร้างเป้า (เรียก API) — คืน true ถ้าสำเร็จ (ป๊อปอัปจะรีเซ็ต/ปิด) */
-  onCreate: (draft: GoalDraft) => Promise<boolean>;
+  onCreate?: (draft: GoalDraft) => Promise<boolean>;
+  /** โหมดแก้ไข: เป้าที่กำลังแก้ */
+  editing?: Goal | null;
+  /** โหมดแก้ไข: บันทึกข้อมูลหัวเป้า — คืน true ถ้าสำเร็จ */
+  onSave?: (patch: Record<string, unknown>) => Promise<boolean>;
 }) {
+  const isEdit = !!editing;
   const [title, setTitle] = useState("");
   const [why, setWhy] = useState("");
   const [category, setCategory] = useState("sales");
@@ -55,10 +64,27 @@ export function GoalFormModal({
   const [showError, setShowError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // โหมดแก้ไข: เปิดป๊อปอัป = เติมค่าเดิมของเป้า
+  useEffect(() => {
+    if (!open || !editing) return;
+    const str = (v: number | undefined | null) => (v == null ? "" : String(v));
+    setTitle(editing.title ?? ""); setWhy(editing.why ?? ""); setCategory(editing.category || "sales");
+    setLevel(editing.level || "team"); setDepartment(editing.department || "ฝ่ายขาย");
+    setTargetDate(editing.target_date ?? ""); setMeasureType(editing.measure_type); setUnit(editing.measure_unit ?? "");
+    setStartValue(str(editing.start_value)); setTargetValue(str(editing.target_value)); setCurrentValue(str(editing.current_value));
+    setShowError(false);
+  }, [open, editing]);
+
   const isNumeric = measureType === "currency" || measureType === "number" || measureType === "percent";
   const dirty = useMemo(
-    () => title.trim() !== "" || why.trim() !== "" || steps.some((s) => s.title.trim() !== ""),
-    [title, why, steps],
+    () => isEdit
+      ? !!editing && (title.trim() !== (editing.title ?? "") || why.trim() !== (editing.why ?? "") || category !== editing.category
+        || targetDate !== (editing.target_date ?? "") || unit !== (editing.measure_unit ?? "")
+        || startValue !== (editing.start_value == null ? "" : String(editing.start_value))
+        || targetValue !== (editing.target_value == null ? "" : String(editing.target_value))
+        || currentValue !== (editing.current_value == null ? "" : String(editing.current_value)))
+      : title.trim() !== "" || why.trim() !== "" || steps.some((s) => s.title.trim() !== ""),
+    [isEdit, editing, title, why, category, targetDate, unit, startValue, targetValue, currentValue, steps],
   );
 
   function reset() {
@@ -106,7 +132,21 @@ export function GoalFormModal({
       steps: steps.filter((st) => st.title.trim() !== "").map((st) => ({ title: st.title.trim(), target_date: st.target_date || undefined })),
     };
     setSubmitting(true);
-    const ok = await onCreate(draft);
+    if (isEdit) {
+      // แก้ไข: ส่งเฉพาะข้อมูลหัวเป้า (ขั้นบันไดแก้ในหน้ารายละเอียด) · ค่าที่ลบออก = null
+      const nul = (v: string) => (v.trim() === "" ? null : Number(v));
+      const ok = await onSave?.({
+        title: draft.title, why: why.trim() || null, category, level,
+        department: level === "personal" ? null : department,
+        target_date: targetDate || null, measure_type: measureType, measure_unit: unit.trim() || null,
+        start_value: isNumeric ? nul(startValue) : null, target_value: isNumeric ? nul(targetValue) : null,
+        current_value: isNumeric ? nul(currentValue) : null,
+      });
+      setSubmitting(false);
+      if (ok) reset();
+      return;
+    }
+    const ok = await onCreate?.(draft);
     setSubmitting(false);
     if (ok) reset();
   }
@@ -115,8 +155,8 @@ export function GoalFormModal({
     <ERPModal
       open={open}
       onClose={close}
-      title="ตั้งเป้าหมายใหม่"
-      description="ตั้งปลายทาง แล้วแตกเป็นขั้นบันไดสู่ความสำเร็จ"
+      title={isEdit ? `แก้ไขเป้าหมาย ${editing?.goal_no ?? ""}` : "ตั้งเป้าหมายใหม่"}
+      description={isEdit ? "แก้ชื่อ เส้นตาย หรือตัวเลขเป้า — ขั้นบันไดแก้ได้ในหน้ารายละเอียด" : "ตั้งปลายทาง แล้วแตกเป็นขั้นบันไดสู่ความสำเร็จ"}
       size="lg"
       storageKey="goal-form"
       hasUnsavedChanges={dirty}
@@ -126,7 +166,7 @@ export function GoalFormModal({
             ยกเลิก
           </button>
           <button onClick={submit} disabled={submitting} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">
-            {submitting ? "กำลังบันทึก..." : "สร้างเป้าหมาย"}
+            {submitting ? "กำลังบันทึก..." : isEdit ? "✓ บันทึกการแก้ไข" : "สร้างเป้าหมาย"}
           </button>
         </>
       }
@@ -173,8 +213,8 @@ export function GoalFormModal({
           </div>
         )}
 
-        {/* Step Builder */}
-        <div>
+        {/* Step Builder (เฉพาะตอนสร้างใหม่) */}
+        {!isEdit && <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-medium text-slate-700">🛤️ ขั้นบันไดสู่ความสำเร็จ (เรียงลำดับ)</label>
             <button onClick={addStep} type="button" className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:bg-violet-50 rounded-lg px-2.5 py-1">
@@ -200,7 +240,7 @@ export function GoalFormModal({
               </div>
             ))}
           </div>
-        </div>
+        </div>}
       </div>
     </ERPModal>
   );

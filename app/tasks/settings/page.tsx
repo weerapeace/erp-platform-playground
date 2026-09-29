@@ -477,16 +477,19 @@ function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
               <span className="font-medium text-slate-700">{labelOf(tr.to_key)}</span>
               <span className="text-xs bg-slate-50 border border-slate-200 rounded px-1.5 text-slate-500">{tr.label}</span>
               <span className="text-[11px] text-violet-600">{KINDS.find((k) => k.value === tr.kind)?.label()}</span>
-              <button onClick={() => remove(tr)} className="ml-auto text-slate-300 hover:text-red-500">✕</button>
+              <button onClick={() => { setToKey(tr.to_key); setKind(tr.kind ?? "normal"); setLabel(tr.label ?? ""); }}
+                title={t("แก้ป้ายปุ่ม / ชนิด ของเส้นทางนี้", "Edit this transition's label / type")}
+                className="ml-auto text-slate-300 hover:text-violet-600">✎</button>
+              <button onClick={() => remove(tr)} title={t("ลบเส้นทางนี้", "Remove this transition")} className="text-slate-300 hover:text-red-500">✕</button>
             </div>
           ))}
         </div>
         <div className="border-t border-slate-100 pt-3 flex gap-2 flex-wrap items-center">
-          <span className="text-xs text-slate-400">{t("เพิ่มเส้นทาง →", "Add transition →")}</span>
+          <span className="text-xs text-slate-400">{fromTransitions.some((x) => x.to_key === toKey) ? t("แก้เส้นทาง →", "Edit transition →") : t("เพิ่มเส้นทาง →", "Add transition →")}</span>
           <select value={toKey} onChange={(e) => setToKey(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm"><option value="">{t("ปลายทาง...", "Destination...")}</option>{statuses.filter((s) => s.key !== from).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
           <select value={kind} onChange={(e) => setKind(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm">{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label()}</option>)}</select>
           <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("ป้ายปุ่ม (เช่น 📤 ส่งตรวจ)", "Button label (e.g. 📤 Submit for review)")} className="flex-1 min-w-[140px] h-8 border border-slate-200 rounded-md px-2 text-sm" />
-          <button onClick={add} className="h-8 px-3 bg-violet-600 text-white text-sm rounded-md hover:bg-violet-700">{t("เพิ่ม", "Add")}</button>
+          <button onClick={add} className="h-8 px-3 bg-violet-600 text-white text-sm rounded-md hover:bg-violet-700">{fromTransitions.some((x) => x.to_key === toKey) ? t("บันทึกการแก้ไข", "Save changes") : t("เพิ่ม", "Add")}</button>
         </div>
       </div>
     </div>

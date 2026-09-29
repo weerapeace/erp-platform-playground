@@ -41,6 +41,11 @@ export async function updateStep(goalId: string, stepId: string, patch: Record<s
   return j.data as Goal;
 }
 
+export async function deleteStep(goalId: string, stepId: string): Promise<Goal> {
+  const j = await unwrap(await apiFetch(`/api/goals/${goalId}/steps?stepId=${encodeURIComponent(stepId)}`, { method: "DELETE" }));
+  return j.data as Goal;
+}
+
 export async function addStep(goalId: string, input: { title: string; target_date?: string }): Promise<Goal> {
   const j = await unwrap(await apiFetch(`/api/goals/${goalId}/steps`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }));
   return j.data as Goal;

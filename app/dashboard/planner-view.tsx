@@ -108,12 +108,20 @@ function PlanCardBody({ item, apps, dragging }: { item: PlanItem; apps: { key: s
   );
 }
 
-function PlanCard({ item, apps, onToggle, onOpen, onRemove, busy }: {
+function PlanCard({ item, apps, onToggle, onOpen, onRemove, onRename, busy }: {
   item: PlanItem; apps: { key: string; label: string }[];
-  onToggle: () => void; onOpen: () => void; onRemove: () => void; busy: boolean;
+  onToggle: () => void; onOpen: () => void; onRemove: () => void; onRename: (title: string) => void; busy: boolean;
 }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({ id: item.id });
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: `slot:${item.id}` });
+  // แก้ชื่องาน: ระหว่างแก้ ถอดตัวจับลากออก (ไม่งั้นคลิกในช่องพิมพ์ = เริ่มลากการ์ด)
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.title);
+  const commit = () => {
+    setEditing(false);
+    const t = draft.trim();
+    if (t && t !== item.title) onRename(t); else setDraft(item.title);
+  };
   return (
     <div ref={dropRef} className={`group rounded-lg border bg-white p-2 transition-colors
       ${isOver ? "border-blue-300 ring-2 ring-blue-100" : "border-slate-200"} ${isDragging ? "opacity-40" : ""} ${busy ? "opacity-60" : ""}`}>
@@ -123,6 +131,12 @@ function PlanCard({ item, apps, onToggle, onOpen, onRemove, busy }: {
             ${item.done_at ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-emerald-400"}`}>
           {item.done_at ? "✓" : ""}
         </button>
+        {editing ? (
+          <input value={draft} autoFocus disabled={busy} aria-label="ชื่องาน"
+            onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { setDraft(item.title); setEditing(false); } }}
+            className="flex-1 min-w-0 h-7 px-1.5 text-[13px] border border-blue-400 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        ) : (
         <div ref={dragRef} {...listeners} {...attributes} className="flex-1 min-w-0 cursor-grab active:cursor-grabbing touch-none">
           <PlanCardBody item={item} apps={apps} />
           <div className="flex items-center gap-1.5 flex-wrap mt-1">
@@ -132,7 +146,10 @@ function PlanCard({ item, apps, onToggle, onOpen, onRemove, busy }: {
             )}
           </div>
         </div>
+        )}
         <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <button type="button" onClick={() => { setDraft(item.title); setEditing(true); }} disabled={busy} title="แก้ชื่องาน" aria-label="แก้ชื่องาน"
+            className="text-[11px] text-slate-300 hover:text-blue-600 px-1 disabled:opacity-50">✏️</button>
           {item.link && (
             <button type="button" onClick={onOpen} title="เปิดหน้างาน" aria-label="เปิดหน้างาน"
               className="text-[11px] text-slate-400 hover:text-blue-600 px-1">↗</button>
@@ -145,9 +162,10 @@ function PlanCard({ item, apps, onToggle, onOpen, onRemove, busy }: {
   );
 }
 
-function BucketColumn({ bucket, items, apps, onToggle, onOpen, onRemove, busyIds }: {
+function BucketColumn({ bucket, items, apps, onToggle, onOpen, onRemove, onRename, busyIds }: {
   bucket: typeof PLAN_BUCKETS[number]; items: PlanItem[]; apps: { key: string; label: string }[];
-  onToggle: (it: PlanItem) => void; onOpen: (it: PlanItem) => void; onRemove: (it: PlanItem) => void; busyIds: Set<string>;
+  onToggle: (it: PlanItem) => void; onOpen: (it: PlanItem) => void; onRemove: (it: PlanItem) => void;
+  onRename: (it: PlanItem, title: string) => void; busyIds: Set<string>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: bucket.key });
   const done = items.filter((i) => i.done_at).length;
@@ -161,7 +179,8 @@ function BucketColumn({ bucket, items, apps, onToggle, onOpen, onRemove, busyIds
         className={`flex-1 min-h-[110px] space-y-2 p-2 rounded-b-xl border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-blue-50" : "bg-slate-50/60"}`}>
         {items.map((it) => (
           <PlanCard key={it.id} item={it} apps={apps} busy={busyIds.has(it.id)}
-            onToggle={() => onToggle(it)} onOpen={() => onOpen(it)} onRemove={() => onRemove(it)} />
+            onToggle={() => onToggle(it)} onOpen={() => onOpen(it)} onRemove={() => onRemove(it)}
+            onRename={(title) => onRename(it, title)} />
         ))}
         {items.length === 0 && (
           <div className="h-16 flex items-center justify-center text-[11px] text-slate-300 border-2 border-dashed border-slate-200 rounded-lg px-2 text-center">
@@ -300,6 +319,17 @@ export function PlannerView({ notifications, apps, onOpenLink }: {
     catch (e) {
       setPlan((prev) => prev.map((x) => (x.id === it.id ? { ...x, done_at: it.done_at } : x)));
       say(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally { mark(it.id, false); }
+  }, [say]);
+
+  // ---- แก้ชื่องาน (พิมพ์ผิด/เปลี่ยนใจ ไม่ต้องลบแล้วเพิ่มใหม่) ----
+  const renameItem = useCallback(async (it: PlanItem, title: string) => {
+    setPlan((prev) => prev.map((x) => (x.id === it.id ? { ...x, title } : x)));
+    mark(it.id, true);
+    try { await patchPlanItem(it.id, { title }); }
+    catch (e) {
+      setPlan((prev) => prev.map((x) => (x.id === it.id ? { ...x, title: it.title } : x)));
+      say(e instanceof Error ? e.message : "แก้ชื่องานไม่สำเร็จ");
     } finally { mark(it.id, false); }
   }, [say]);
 
@@ -480,7 +510,7 @@ export function PlannerView({ notifications, apps, onOpenLink }: {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {PLAN_BUCKETS.map((b) => (
               <BucketColumn key={b.key} bucket={b} items={grouped[b.key]} apps={apps} busyIds={busyIds}
-                onToggle={toggleDone} onRemove={removeItem}
+                onToggle={toggleDone} onRemove={removeItem} onRename={renameItem}
                 onOpen={(it) => { if (it.link) onOpenLink(it.link, it.title); }} />
             ))}
           </div>
