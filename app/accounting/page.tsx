@@ -54,6 +54,12 @@ export default function AccountingPage() {
   const [jLines, setJLines]     = useState<EditLine[]>([emptyLine(), emptyLine()]);
   const [jSaving, setJSaving]   = useState(false);
   const [jErr, setJErr]         = useState<string | null>(null);
+  const [jEditId, setJEditId]   = useState<string | null>(null);   // null = สร้างใหม่ · มีค่า = แก้ใบร่างใบนี้
+  const [jEditNo, setJEditNo]   = useState<string>("");
+  // ยกเลิกร่าง / กลับรายการใบที่ผ่านแล้ว
+  const [voidTarget, setVoidTarget] = useState<Journal | null>(null);
+  const [revTarget, setRevTarget]   = useState<Journal | null>(null);
+  const [actBusy, setActBusy]       = useState(false);
 
   // journal detail + post
   const [detail, setDetail]     = useState<{ header: Journal; lines: Array<JournalLineInput & { account_name: string; line_no: number }> } | null>(null);
@@ -99,8 +105,23 @@ export default function AccountingPage() {
   }, [jLines]);
 
   const openJournal = () => {
+    setJEditId(null); setJEditNo("");
     setJDate(""); setJDesc(""); setJRef("");
     setJLines([emptyLine(), emptyLine()]); setJErr(null); setJOpen(true);
+  };
+  /** ✏️ แก้ใบร่าง — เปิดฟอร์มเดียวกับตอนสร้าง เติมค่าเดิม */
+  const openEdit = async (j: Journal) => {
+    try {
+      const res = await apiFetch(`/api/accounting/journals/${j.id}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      const d = json.data as { header: Journal; lines: Array<JournalLineInput> };
+      setJEditId(j.id); setJEditNo(d.header.entry_number ?? "");
+      setJDate(String(d.header.entry_date ?? "").slice(0, 10)); setJDesc(d.header.description ?? ""); setJRef(d.header.reference ?? "");
+      const ls = d.lines.map((l) => ({ account_code: l.account_code, description: l.description ?? "", debit: l.debit ? String(l.debit) : "", credit: l.credit ? String(l.credit) : "" }));
+      setJLines(ls.length >= 2 ? ls : [...ls, emptyLine(), emptyLine()].slice(0, 2));
+      setJErr(null); setDetail(null); setJOpen(true);
+    } catch (err) { setError(err instanceof Error ? err.message : "เปิดใบไม่สำเร็จ"); }
   };
   const setLine = (i: number, patch: Partial<EditLine>) =>
     setJLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -116,13 +137,13 @@ export default function AccountingPage() {
     if (lines.length < 2) { setJErr("ต้องมีอย่างน้อย 2 บรรทัดที่มีบัญชี + จำนวน"); return; }
     setJSaving(true); setJErr(null);
     try {
-      const res = await apiFetch("/api/accounting/journals", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const res = await apiFetch(jEditId ? `/api/accounting/journals/${jEditId}` : "/api/accounting/journals", {
+        method: jEditId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entry_date: jDate || undefined, description: jDesc, reference: jRef, lines, actor: user?.name }),
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash(`สร้าง ${json.data?.entry_number ?? "สมุดรายวัน"} แล้ว`);
+      flash(jEditId ? `บันทึกการแก้ไข ${jEditNo} แล้ว` : `สร้าง ${json.data?.entry_number ?? "สมุดรายวัน"} แล้ว`);
       setJOpen(false);
       await fetchData();
     } catch (err) { setJErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
@@ -149,6 +170,44 @@ export default function AccountingPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "post ไม่สำเร็จ"); }
     finally { setPostTarget(null); }
   };
+
+  const doVoid = async () => {
+    const j = voidTarget; if (!j) return;
+    setActBusy(true);
+    try {
+      const res = await apiFetch(`/api/accounting/journals/${j.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash(`ยกเลิกใบร่าง ${j.entry_number ?? ""} แล้ว`);
+      setDetail(null);
+      await fetchData();
+    } catch (err) { setError(err instanceof Error ? err.message : "ยกเลิกไม่สำเร็จ"); }
+    finally { setActBusy(false); setVoidTarget(null); }
+  };
+
+  const doReverse = async () => {
+    const j = revTarget; if (!j) return;
+    setActBusy(true);
+    try {
+      const res = await apiFetch(`/api/accounting/journals/${j.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reverse", actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash(`กลับรายการแล้ว — ใบใหม่ ${json.data?.entry_number ?? ""}`);
+      setDetail(null);
+      await fetchData();
+    } catch (err) { setError(err instanceof Error ? err.message : "กลับรายการไม่สำเร็จ"); }
+    finally { setActBusy(false); setRevTarget(null); }
+  };
+
+  /** ใบที่ถูกกลับรายการไปแล้ว (ดูจากใบกลับที่อ้างเลขใบเดิม) */
+  const reversedNos = useMemo(
+    () => new Set(journals.filter((j) => j.status !== "void" && (j.reference ?? "").startsWith("กลับรายการ ")).map((j) => (j.reference ?? "").replace("กลับรายการ ", ""))),
+    [journals],
+  );
+  const canReverseJ = (j: Journal) => canPost && j.status === "posted" && !(j.reference ?? "").startsWith("กลับรายการ ") && !reversedNos.has(j.entry_number ?? "");
 
   // ---- columns ----
   const accountColumns = useMemo<ColumnDef<Account>[]>(() => [
@@ -240,7 +299,12 @@ export default function AccountingPage() {
             onRowClick={(j) => openDetail(j)}
             rowActions={[
               { label: "ดูรายละเอียด", icon: "👁", onClick: (j) => openDetail(j) },
-              ...(canPost ? [{ label: "ผ่านรายการ (post)", icon: "✅", onClick: (j: Journal) => { if (j.status === "draft") setPostTarget(j); } }] : []),
+              ...(canPost ? [{ label: "ผ่านรายการ (post)", icon: "✅", onClick: (j: Journal) => { if (j.status === "draft") setPostTarget(j); }, show: (j: Journal) => j.status === "draft" }] : []),
+              ...(canManage ? [
+                { label: "แก้ไข (ใบร่าง)", icon: "✏️", onClick: (j: Journal) => void openEdit(j), show: (j: Journal) => j.status === "draft" },
+                { label: "ยกเลิกใบร่าง", icon: "🗑", variant: "danger" as const, onClick: (j: Journal) => setVoidTarget(j), show: (j: Journal) => j.status === "draft" },
+              ] : []),
+              ...(canPost ? [{ label: "กลับรายการ (ลงผิด)", icon: "↩", variant: "danger" as const, onClick: (j: Journal) => setRevTarget(j), show: (j: Journal) => canReverseJ(j) }] : []),
             ]}
             exportFilename="journals" exportEntityType="erp_playground_journal"
             canCheck={(p) => can(p as Parameters<typeof can>[0])} pageSize={30} />
@@ -268,13 +332,13 @@ export default function AccountingPage() {
       </div>
 
       {/* Journal create modal */}
-      <ERPModal open={jOpen} onClose={() => !jSaving && setJOpen(false)} size="xl" title="📓 บันทึกรายการสมุดรายวัน"
+      <ERPModal open={jOpen} onClose={() => !jSaving && setJOpen(false)} size="xl" title={jEditId ? `✏️ แก้ไขใบร่าง ${jEditNo}` : "📓 บันทึกรายการสมุดรายวัน"}
         footer={
           <>
             <button onClick={() => setJOpen(false)} disabled={jSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
             <button onClick={saveJournal} disabled={jSaving || !jTotals.balanced}
               className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-              {jSaving ? "..." : "บันทึก (ร่าง)"}
+              {jSaving ? "..." : jEditId ? "บันทึกการแก้ไข" : "บันทึก (ร่าง)"}
             </button>
           </>
         }>
@@ -333,8 +397,8 @@ export default function AccountingPage() {
                 <div className="text-slate-700">{detail.header.description}</div>
                 <div className="text-xs text-slate-400">{formatDate(detail.header.entry_date)} {detail.header.reference && `· ${detail.header.reference}`}</div>
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded ${detail.header.status === "posted" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                {detail.header.status === "posted" ? "ผ่านแล้ว" : "ร่าง"}</span>
+              <span className={`text-xs px-2 py-0.5 rounded ${detail.header.status === "posted" ? "bg-emerald-50 text-emerald-700" : detail.header.status === "void" ? "bg-slate-100 text-slate-500" : "bg-amber-50 text-amber-700"}`}>
+                {detail.header.status === "posted" ? "ผ่านแล้ว" : detail.header.status === "void" ? "ยกเลิก" : "ร่าง"}</span>
             </div>
             <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
               <thead className="bg-slate-50 text-xs text-slate-500"><tr>
@@ -360,12 +424,35 @@ export default function AccountingPage() {
             {detail.header.status === "draft" && canPost && (
               <button onClick={() => setPostTarget(detail.header)}
                 className="w-full h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
-                ✅ ผ่านรายการ (Post) — ลงบัญชีจริง ย้อนไม่ได้
+                ✅ ผ่านรายการ (Post) — ลงบัญชีจริง แก้ไม่ได้ (ลงผิดต้องกลับรายการ)
               </button>
+            )}
+            {detail.header.status === "draft" && canManage && (
+              <div className="flex gap-2">
+                <button onClick={() => void openEdit(detail.header)} className="flex-1 h-9 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">✏️ แก้ไขใบร่าง</button>
+                <button onClick={() => setVoidTarget(detail.header)} className="flex-1 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">🗑 ยกเลิกใบร่าง</button>
+              </div>
+            )}
+            {detail.header.status === "posted" && canPost && (
+              canReverseJ(detail.header)
+                ? <button onClick={() => setRevTarget(detail.header)} className="w-full h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">↩ กลับรายการ (ลงผิด)</button>
+                : <p className="text-[11px] text-slate-400 text-center">{(detail.header.reference ?? "").startsWith("กลับรายการ ") ? "ใบนี้คือใบกลับรายการ" : "ใบนี้ถูกกลับรายการไปแล้ว"}</p>
             )}
           </div>
         )}
       </ERPModal>
+
+      <ConfirmDialog open={voidTarget !== null} onClose={() => { if (!actBusy) setVoidTarget(null); }} loading={actBusy}
+        variant="danger" title="ยกเลิกใบร่างนี้?"
+        message={`${voidTarget?.entry_number ?? ""} ${voidTarget?.description ?? ""} — ใบจะเปลี่ยนเป็นสถานะ “ยกเลิก” (ยังไม่เคยลงบัญชี จึงไม่กระทบงบทดลอง) เลขที่ใบนี้จะไม่ถูกใช้ซ้ำ`}
+        confirmText="ยกเลิกใบร่าง" cancelText="ไม่ยกเลิก"
+        onConfirm={() => void doVoid()} />
+
+      <ConfirmDialog open={revTarget !== null} onClose={() => { if (!actBusy) setRevTarget(null); }} loading={actBusy}
+        variant="danger" title="กลับรายการใบนี้?"
+        message={`${revTarget?.entry_number ?? ""} ${revTarget?.description ?? ""} — ระบบจะออกใบใหม่ที่สลับเดบิต/เครดิต ลงวันที่วันนี้ แล้วผ่านรายการทันที ยอดในงบทดลองจะหักล้างกัน · ใบเดิมยังอยู่ครบในประวัติ`}
+        confirmText="↩ กลับรายการ" cancelText="ไม่กลับ"
+        onConfirm={() => void doReverse()} />
 
       <ConfirmDialog open={postTarget !== null} onClose={() => setPostTarget(null)}
         title="ผ่านรายการ (Post)"
