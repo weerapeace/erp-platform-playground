@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 import { apiFetch } from "@/lib/api";
 import { paymentLineGroup, type PaymentLineGroup } from "@/lib/payroll-payments";
@@ -446,6 +446,41 @@ export default function PayrollPaymentsPage() {
     }
   }
 
+  // เอาพนักงานออกจากรอบจ่าย (รอบร่าง)
+  async function removeLine(lineId: string) {
+    if (!detail) return;
+    setErr(null);
+    setMsg(null);
+    const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/line?line_id=${encodeURIComponent(lineId)}`, { method: "DELETE" }).then((res) => res.json());
+    if (json.error) throw new Error(json.error);
+    setMsg("เอาออกจากรอบจ่ายแล้ว");
+    await Promise.all([loadDetail(detail.batch.id), loadBatches(periodId), refreshPeriods()]);
+  }
+
+  // แก้หัวรอบจ่าย (รอบร่าง): วันที่จ่าย / หมายเหตุ
+  const [headerEdit, setHeaderEdit] = useState<{ payment_date: string; note: string } | null>(null);
+  async function saveHeader() {
+    if (!detail || !headerEdit) return;
+    setBusy("header");
+    setErr(null);
+    setMsg(null);
+    try {
+      const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(headerEdit),
+      }).then((res) => res.json());
+      if (json.error) throw new Error(json.error);
+      setMsg("แก้วันที่จ่าย/หมายเหตุของรอบแล้ว");
+      setHeaderEdit(null);
+      await Promise.all([loadDetail(detail.batch.id), loadBatches(periodId)]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "แก้รอบจ่ายไม่สำเร็จ");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function saveLine(lineId: string, patch: Record<string, unknown>) {
     if (!detail) return;
     setErr(null);
@@ -708,6 +743,15 @@ export default function PayrollPaymentsPage() {
               <div>
                 <div className="font-semibold text-slate-900">{BATCH_TYPE[detail.batch.batch_type] ?? detail.batch.batch_type} - {detail.batch.batch_no}</div>
                 <div className="text-xs text-slate-500">{detail.batch.period_name} · {detail.lines.length} รายการ · ยอดรวม {baht(detailTotal)}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span>📅 วันที่จ่าย {String(detail.batch.payment_date ?? "—")}</span>
+                  {String(detail.batch.note ?? "") && <span>· 📝 {String(detail.batch.note)}</span>}
+                  {detail.batch.status === "draft" && (
+                    <button type="button" title="แก้วันที่จ่าย / หมายเหตุ ของรอบนี้"
+                      onClick={() => setHeaderEdit({ payment_date: String(detail.batch.payment_date ?? "").slice(0, 10), note: String(detail.batch.note ?? "") })}
+                      className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50">✏️ แก้</button>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {badge(detail.batch.status)}
@@ -785,6 +829,8 @@ export default function PayrollPaymentsPage() {
               onSaveLine={saveLine}
               onSaveAmount={saveLineAmount}
               onReorder={saveOrder}
+              onRemoveLine={removeLine}
+              isMonthEnd={detail.batch.batch_type === "month_end"}
             />
           </>
         )}
@@ -1066,7 +1112,41 @@ export default function PayrollPaymentsPage() {
           )}
         </div>
       </ERPModal>
+
+      <HeaderEditModal value={headerEdit} busy={busy === "header"} onChange={setHeaderEdit} onClose={() => setHeaderEdit(null)} onSave={() => void saveHeader()} />
     </div>
+  );
+}
+
+function HeaderEditModal({ value, busy, onChange, onClose, onSave }: {
+  value: { payment_date: string; note: string } | null;
+  busy: boolean;
+  onChange: (next: { payment_date: string; note: string }) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <ERPModal open={!!value} onClose={() => { if (!busy) onClose(); }} size="sm" title="แก้รอบจ่าย (รอบร่าง)"
+      description="แก้ได้เฉพาะวันที่จ่ายและหมายเหตุ — ประเภทรอบแก้ไม่ได้ เพราะรายชื่อและยอดคิดตามประเภท"
+      footer={
+        <div className="flex w-full items-center justify-between">
+          <button onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">ยกเลิก</button>
+          <button onClick={onSave} disabled={busy || !value?.payment_date} className="h-9 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
+        </div>
+      }>
+      {value && (
+        <div className="space-y-3">
+          <LineEditField label="วันที่จ่าย">
+            <input type="date" value={value.payment_date} onChange={(e) => onChange({ ...value, payment_date: e.target.value })}
+              className="h-9 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+          </LineEditField>
+          <LineEditField label="หมายเหตุ">
+            <input value={value.note} onChange={(e) => onChange({ ...value, note: e.target.value })}
+              className="h-9 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+          </LineEditField>
+        </div>
+      )}
+    </ERPModal>
   );
 }
 
@@ -1107,6 +1187,8 @@ function PaymentLinesTable({
   onSaveLine,
   onSaveAmount,
   onReorder,
+  onRemoveLine,
+  isMonthEnd = false,
 }: {
   lines: BatchLine[];
   columns: Array<{ key: PaymentReportColumn; label: string }>;
@@ -1116,7 +1198,21 @@ function PaymentLinesTable({
   onSaveLine?: (lineId: string, patch: Record<string, unknown>) => Promise<void>;
   onSaveAmount?: (lineId: string, amount: number) => Promise<void>;
   onReorder?: (orderedIds: string[]) => Promise<void>;
+  /** เอาพนักงานออกจากรอบ (รอบร่าง) */
+  onRemoveLine?: (lineId: string) => Promise<void>;
+  isMonthEnd?: boolean;
 }) {
+  // เอาออกจากรอบ — ถามยืนยันก่อน
+  const [removeTarget, setRemoveTarget] = useState<BatchLine | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeErr, setRemoveErr] = useState<string | null>(null);
+  const confirmRemove = async () => {
+    if (!removeTarget?.id || !onRemoveLine) return;
+    setRemoving(true); setRemoveErr(null);
+    try { await onRemoveLine(removeTarget.id); setRemoveTarget(null); }
+    catch (e) { setRemoveErr(e instanceof Error ? e.message : "เอาออกไม่สำเร็จ"); }
+    finally { setRemoving(false); }
+  };
   const headerAlign = (column: PaymentReportColumn) => {
     if (column === "amount") return "text-right";
     if (column === "status") return "text-center";
@@ -1316,7 +1412,12 @@ function PaymentLinesTable({
                 {editable && (
                   <td className="px-2 py-2 text-center">
                     {line.id ? (
-                      <button type="button" onClick={() => openEdit(line)} className="rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50" title="แก้บรรทัดนี้">✏️</button>
+                      <span className="inline-flex gap-1">
+                        <button type="button" onClick={() => openEdit(line)} className="rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50" title="แก้บรรทัดนี้">✏️</button>
+                        {onRemoveLine && (
+                          <button type="button" onClick={() => { setRemoveErr(null); setRemoveTarget(line); }} className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50" title="เอาคนนี้ออกจากรอบจ่าย">🗑</button>
+                        )}
+                      </span>
                     ) : <span className="text-slate-300">-</span>}
                   </td>
                 )}
@@ -1326,6 +1427,18 @@ function PaymentLinesTable({
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog open={!!removeTarget} onClose={() => { if (!removing) setRemoveTarget(null); }} onConfirm={() => void confirmRemove()} loading={removing}
+        variant="danger" title="เอาออกจากรอบจ่ายนี้?" confirmText="เอาออก" cancelText="ไม่เอาออก"
+        message={
+          <div className="space-y-2">
+            <p>{removeTarget?.employee_name} ({baht(removeTarget?.paid_amount)}) จะไม่อยู่ในรอบจ่ายนี้ — ข้อมูลพนักงานไม่ถูกแตะ</p>
+            <p className="text-xs text-slate-500">{isMonthEnd
+              ? "สลิปของคนนี้จะกลับไปรอเข้ารอบจ่ายใหม่ · ถ้ากด “อัปเดตยอดจากคำนวณล่าสุด” ระบบจะดึงคนนี้กลับเข้ารอบให้อีก"
+              : "เพิ่มกลับได้จากปุ่ม “➕ เพิ่มพนักงาน”"}</p>
+            {removeErr && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">⚠ {removeErr}</p>}
+          </div>
+        } />
 
       <ERPModal
         open={!!editLine}

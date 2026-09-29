@@ -808,6 +808,62 @@ export async function updatePaymentBatchLine(
   return getPaymentBatchDetail(batchId);
 }
 
+// เอาพนักงานออกจากรอบจ่าย (เฉพาะรอบ "ร่าง") — เพิ่มผิดคน/ไม่จ่ายคนนี้รอบนี้
+//  - รอบสิ้นเดือน: ปลดสลิปของคนนั้นออกจากรอบ (สลิปกลับไปรอเข้ารอบจ่ายใหม่ได้)
+//  - ต้องเหลืออย่างน้อย 1 คน (ไม่ใช้รอบนี้แล้ว = ยกเลิกรอบจ่ายแทน)
+export async function removePaymentBatchLine(batchId: string, lineId: string, actor: Actor = {}) {
+  const admin = supabaseAdmin();
+  const detail = await getPaymentBatchDetail(batchId);
+  if (text(detail.batch.status) !== "draft") throw new Error("เอาออกได้เฉพาะรอบจ่ายที่เป็นร่าง");
+  const line = (detail.lines as Row[]).find((l) => text(l.id) === lineId);
+  if (!line) throw new Error("ไม่พบบรรทัดนี้ในรอบจ่าย");
+  if (detail.lines.length <= 1) throw new Error("รอบจ่ายต้องมีอย่างน้อย 1 คน — ถ้าไม่ใช้รอบนี้แล้วให้กด “ยกเลิกรอบจ่าย” แทน");
+  const now = new Date().toISOString();
+
+  if (text(detail.batch.batch_type) === "month_end") {
+    const slipId = text(line.payslip_id);
+    if (slipId) {
+      const { error } = await admin.from("payroll_payslips").update({ payment_batch_id: null, updated_at: now }).eq("id", slipId).eq("payment_batch_id", batchId);
+      if (error) throw new Error(error.message);
+    }
+  }
+  const { error: delErr } = await admin.from("payment_batch_lines").delete().eq("id", lineId).eq("payment_batch_id", batchId);
+  if (delErr) throw new Error(delErr.message);
+
+  await writeAudit(admin, {
+    action: "remove_payment_batch_line", entityType: "payment_batch_lines", entityId: lineId,
+    actorId: actor.actorId, actorName: actor.actorName,
+    metadata: {
+      batch_id: batchId, batch_no: detail.batch.batch_no, employee_id: line.employee_id, employee_name: line.employee_name,
+      paid_amount: line.paid_amount, payslip_id: text(line.payslip_id) || null,
+    },
+  });
+  return getPaymentBatchDetail(batchId);
+}
+
+// แก้หัวรอบจ่าย (เฉพาะรอบ "ร่าง") — วันที่จ่าย / หมายเหตุ · ประเภทรอบแก้ไม่ได้ (รายชื่อและยอดคิดตามประเภท)
+export async function updatePaymentBatchHeader(batchId: string, patch: { payment_date?: string | null; note?: string | null }, actor: Actor = {}) {
+  const admin = supabaseAdmin();
+  const detail = await getPaymentBatchDetail(batchId);
+  if (text(detail.batch.status) !== "draft") throw new Error("แก้ได้เฉพาะรอบจ่ายที่เป็นร่าง");
+  const upd: Record<string, unknown> = {};
+  if (patch.payment_date !== undefined) {
+    const d = text(patch.payment_date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error("วันที่จ่ายไม่ถูกต้อง");
+    upd.payment_date = d;
+  }
+  if (patch.note !== undefined) upd.note = text(patch.note) || null;
+  if (!Object.keys(upd).length) throw new Error("ไม่มีข้อมูลให้แก้");
+  const { error } = await admin.from("payment_batches").update({ ...upd, updated_at: new Date().toISOString() }).eq("id", batchId);
+  if (error) throw new Error(error.message);
+  await writeAudit(admin, {
+    action: "update_payment_batch", entityType: "payment_batches", entityId: batchId,
+    actorId: actor.actorId, actorName: actor.actorName,
+    metadata: { batch_no: detail.batch.batch_no, before: { payment_date: detail.batch.payment_date, note: detail.batch.note }, after: upd },
+  });
+  return getPaymentBatchDetail(batchId);
+}
+
 // บันทึกลำดับที่ลากเรียง (sort_order) — ให้ทุกคนเห็นเหมือนกัน
 export async function reorderPaymentBatchLines(batchId: string, orderedIds: string[], actor: Actor = {}) {
   const admin = supabaseAdmin();

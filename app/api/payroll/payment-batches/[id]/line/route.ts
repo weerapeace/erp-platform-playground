@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardPayroll } from "@/lib/payroll-auth";
-import { addPaymentBatchLines, updatePaymentBatchLine } from "@/lib/payroll-payments-db";
+import { addPaymentBatchLines, removePaymentBatchLine, updatePaymentBatchLine } from "@/lib/payroll-payments-db";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export const dynamic = "force-dynamic";
@@ -50,5 +50,21 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     return NextResponse.json({ data, error: null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "แก้บรรทัดไม่สำเร็จ" }, { status: 500 });
+  }
+}
+
+// DELETE /api/payroll/payment-batches/[id]/line?line_id= — เอาพนักงานออกจากรอบ (เฉพาะรอบร่าง)
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const denied = await guardPayroll(req, "employees.edit");
+  if (denied) return denied;
+  try {
+    const { id } = await ctx.params;
+    const lineId = String(req.nextUrl.searchParams.get("line_id") ?? "");
+    if (!lineId) return NextResponse.json({ error: "ต้องระบุ line_id" }, { status: 400 });
+    const { data: u } = await supabaseFromRequest(req).auth.getUser();
+    const data = await removePaymentBatchLine(id, lineId, { actorId: u.user?.id ?? null, actorName: u.user?.email ?? null });
+    return NextResponse.json({ data, error: null });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "เอาออกจากรอบจ่ายไม่สำเร็จ" }, { status: 500 });
   }
 }
