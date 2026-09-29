@@ -1788,7 +1788,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">↗ เปิด</a>}
                 </div>
               </label>
-              {/* เฟส 5: ตั้ง Parent SKU ได้หลายตัว (chips) + เช็ครหัสสด (ซ้ำ=แดง ห้ามเพิ่ม · ข้ามเลข=เตือนแต่เพิ่มได้) */}
+              {/* เฟส 5: ตั้ง Parent SKU ได้หลายตัว (chips) + เช็ครหัสสด (ซ้ำ=แดง ห้ามเพิ่ม · ข้ามเลข=เตือนแต่เพิ่มได้)
+                  ช่องนี้ (และร่าง Parent) เป็น "ช่อง quick" = เพิ่ม/เอาออกได้ในโหมดดูเลย ไม่ต้องกด ✏️ แก้ไขก่อน
+                  (เดิมผูก fullEdit → โหมดดูเห็นแค่หัวข้อเปล่า ๆ ไม่มีช่องให้พิมพ์ เจ้าของแจ้งว่า "ใช้ไม่ได้") · มีผลจริงตอนกดบันทึก */}
               <div className="block">
                 <span className="text-[11px] text-slate-500">Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)</span>
                 {form.parent_sku_codes.length > 0 && (
@@ -1800,13 +1802,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                           {pid
                             ? <RecordPeekLink moduleKey="parent-skus-v2" recordId={pid} label={c} />
                             : <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-mono text-blue-700">{c}</span>}
-                          {fullEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
+                          {canEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
                         </span>
                       );
                     })}
                   </div>
                 )}
-                {fullEdit && (
+                {canEdit && (
                   <div className="flex gap-1 mt-1">
                     <input value={skuInput} onChange={(e) => setSkuInput(e.target.value.toUpperCase())}
                       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentCode(); } }}
@@ -1863,12 +1865,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       {form.parent_sku_drafts.map((d) => (
                         <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 border border-dashed border-amber-300 text-amber-700 rounded">
                           ✎ {d}
-                          {fullEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
+                          {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
                         </span>
                       ))}
                     </div>
                   )}
-                  {fullEdit && (
+                  {canEdit && (
                     <div className="flex gap-1 mt-1">
                       <input value={draftInput} onChange={(e) => setDraftInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentDraft(); } }}
