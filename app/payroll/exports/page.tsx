@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { DEFAULT_PND3_RANDOM_SPREAD_PERCENT, applyPnd3AllocationToPreviewRows, defaultPnd3ShownSelectionIds, distributePnd3Allocation, equalizePnd3Allocation, filterPnd3OutputRows, pnd3GrossUpFromNet, pnd3SelectedSourcePoolNetAmount, pnd3SourceSelectionIds, randomizePnd3Allocation, randomizePnd3AllocationSelection, type Pnd3AllocationPreview, type Pnd3AllocationTarget } from "@/lib/payroll-pnd3-allocation";
 
@@ -162,6 +162,10 @@ export default function PayrollExportsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [pnd3Draft, setPnd3Draft] = useState<Pnd3Draft>(BLANK_PND3);
   const [registerDraft, setRegisterDraft] = useState<RegisterRecurringDraft>(BLANK_REGISTER_RECURRING);
+  // แก้รายการประจำ "ตัวแม่" (ชื่อ/เลขบัตร/ที่อยู่/ยอดตั้งต้น) — ใช้ช่องกรอกชุดเดียวกับตอนเพิ่ม · null = กำลังเพิ่มใหม่
+  const [pnd3EditId, setPnd3EditId] = useState<string | null>(null);
+  const [registerEditId, setRegisterEditId] = useState<string | null>(null);
+  const [recurringRev, setRecurringRev] = useState(0);   // +1 = รายชื่อรายการประจำเปลี่ยน ให้ตัวจัดการโหลดใหม่
   const [allocation, setAllocation] = useState<Pnd3AllocationPreview | null>(null);
   const [selectedPnd3SourceIds, setSelectedPnd3SourceIds] = useState<Set<string>>(() => new Set());
   const [randomSpreadPercent, setRandomSpreadPercent] = useState(DEFAULT_PND3_RANDOM_SPREAD_PERCENT);
@@ -308,17 +312,42 @@ export default function PayrollExportsPage() {
     setErr(null);
     setMsg(null);
     try {
-      const json = await apiFetch("/api/payroll/pnd3-recurring", {
-        method: "POST",
+      const json = await apiFetch(pnd3EditId ? `/api/payroll/pnd3-recurring/${encodeURIComponent(pnd3EditId)}` : "/api/payroll/pnd3-recurring", {
+        method: pnd3EditId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pnd3Payload(pnd3Draft)),
       }).then((res) => res.json());
       if (json.error) throw new Error(json.error);
       setPnd3Draft(BLANK_PND3);
-      setMsg("เพิ่มรายการประจำ ภ.ง.ด.3 แล้ว");
+      setMsg(pnd3EditId ? "แก้รายการประจำ ภ.ง.ด.3 แล้ว" : "เพิ่มรายการประจำ ภ.ง.ด.3 แล้ว");
+      setPnd3EditId(null);
+      setRecurringRev((n) => n + 1);
       await loadPreview();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "เพิ่มรายการประจำไม่สำเร็จ");
+      setErr(e instanceof Error ? e.message : pnd3EditId ? "แก้รายการประจำไม่สำเร็จ" : "เพิ่มรายการประจำไม่สำเร็จ");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // เปิด/ปิดใช้งาน รายการประจำ (ทั้ง ภ.ง.ด.3 และ ทะเบียนเงินเดือน) จากตัวจัดการรายการ
+  async function setRecurringStatus(kind: RecurringKind, id: string, name: string, active: boolean) {
+    const base = kind === "pnd3" ? "/api/payroll/pnd3-recurring" : "/api/payroll/register-recurring";
+    setBusy(`recurring-status-${id}`);
+    setErr(null);
+    setMsg(null);
+    try {
+      const json = await apiFetch(`${base}/${encodeURIComponent(id)}`, active
+        ? { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "active" }) }
+        : { method: "DELETE" }).then((res) => res.json());
+      if (json.error) throw new Error(json.error);
+      setMsg(active ? `เปิดใช้งาน ${name} อีกครั้งแล้ว` : `ปิดใช้งาน ${name} แล้ว`);
+      if (!active && kind === "pnd3" && pnd3EditId === id) { setPnd3EditId(null); setPnd3Draft(BLANK_PND3); }
+      if (!active && kind === "register" && registerEditId === id) { setRegisterEditId(null); setRegisterDraft(BLANK_REGISTER_RECURRING); }
+      setRecurringRev((n) => n + 1);
+      await loadPreview();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ");
     } finally {
       setBusy(null);
     }
@@ -355,6 +384,7 @@ export default function PayrollExportsPage() {
       const json = await apiFetch(`/api/payroll/pnd3-recurring/${encodeURIComponent(row.source_id)}`, { method: "DELETE" }).then((res) => res.json());
       if (json.error) throw new Error(json.error);
       setMsg("ปิดใช้งานรายการประจำแล้ว");
+      setRecurringRev((n) => n + 1);
       await loadPreview();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "ปิดใช้งานรายการประจำไม่สำเร็จ");
@@ -368,17 +398,19 @@ export default function PayrollExportsPage() {
     setErr(null);
     setMsg(null);
     try {
-      const json = await apiFetch("/api/payroll/register-recurring", {
-        method: "POST",
+      const json = await apiFetch(registerEditId ? `/api/payroll/register-recurring/${encodeURIComponent(registerEditId)}` : "/api/payroll/register-recurring", {
+        method: registerEditId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(registerPayload(registerDraft)),
       }).then((res) => res.json());
       if (json.error) throw new Error(json.error);
       setRegisterDraft(BLANK_REGISTER_RECURRING);
-      setMsg("เพิ่มคนนอกประจำทะเบียนเงินเดือนแล้ว");
+      setMsg(registerEditId ? "แก้คนนอกประจำทะเบียนเงินเดือนแล้ว" : "เพิ่มคนนอกประจำทะเบียนเงินเดือนแล้ว");
+      setRegisterEditId(null);
+      setRecurringRev((n) => n + 1);
       await loadPreview();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "เพิ่มคนนอกประจำทะเบียนเงินเดือนไม่สำเร็จ");
+      setErr(e instanceof Error ? e.message : registerEditId ? "แก้คนนอกประจำทะเบียนเงินเดือนไม่สำเร็จ" : "เพิ่มคนนอกประจำทะเบียนเงินเดือนไม่สำเร็จ");
     } finally {
       setBusy(null);
     }
@@ -394,6 +426,7 @@ export default function PayrollExportsPage() {
       const json = await apiFetch(`/api/payroll/register-recurring/${encodeURIComponent(row.source_id)}`, { method: "DELETE" }).then((res) => res.json());
       if (json.error) throw new Error(json.error);
       setMsg("ปิดใช้งานคนนอกประจำทะเบียนเงินเดือนแล้ว");
+      setRecurringRev((n) => n + 1);
       await loadPreview();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "ปิดใช้งานคนนอกประจำทะเบียนเงินเดือนไม่สำเร็จ");
@@ -789,7 +822,21 @@ export default function PayrollExportsPage() {
           busy={busy === "pnd3-create"}
           onCreate={createPnd3Recurring}
           recurringCount={recurringCount}
-        />
+          editing={pnd3EditId !== null}
+          onCancelEdit={() => { setPnd3EditId(null); setPnd3Draft(BLANK_PND3); }}
+        >
+          <RecurringManager kind="pnd3" rev={recurringRev} editId={pnd3EditId} busyId={busy}
+            onEdit={(it) => {
+              setPnd3EditId(it.id);
+              setPnd3Draft({
+                recipient_name: String(it.recipient_name ?? ""), tax_id: String(it.tax_id ?? ""), address: String(it.address ?? ""),
+                income_type: String(it.income_type ?? "") || "ค่าจ้าง",
+                default_net_amount: Number(it.default_net_amount) > 0 ? String(it.default_net_amount) : "",
+                tax_rate: String(it.tax_rate ?? "3"),
+              });
+            }}
+            onSetActive={(it, active) => void setRecurringStatus("pnd3", it.id, String(it.recipient_name ?? ""), active)} />
+        </Pnd3RecurringPanel>
       )}
 
       {type === "payroll_register" && (
@@ -799,7 +846,24 @@ export default function PayrollExportsPage() {
           busy={busy === "register-recurring-create"}
           onCreate={createRegisterRecurring}
           recurringCount={registerRecurringCount}
-        />
+          editing={registerEditId !== null}
+          onCancelEdit={() => { setRegisterEditId(null); setRegisterDraft(BLANK_REGISTER_RECURRING); }}
+        >
+          <RecurringManager kind="register" rev={recurringRev} editId={registerEditId} busyId={busy}
+            onEdit={(it) => {
+              const n = (k: string) => (Number(it[k]) ? String(it[k]) : "");
+              setRegisterEditId(it.id);
+              setRegisterDraft({
+                recipient_name: String(it.recipient_name ?? ""), nickname: String(it.nickname ?? ""), nationality: String(it.nationality ?? ""),
+                national_id: String(it.national_id ?? "").replace(/\D/g, ""), passport_no: String(it.passport_no ?? ""),
+                register_base_salary: n("register_base_salary"), register_mid_month_paid: n("register_mid_month_paid"),
+                register_month_end_pay: n("register_month_end_pay"), register_transfer_net_pay: n("register_transfer_net_pay"),
+                register_overtime_amount: n("register_overtime_amount"), register_cash_pay: n("register_cash_pay"),
+                register_social_security: n("register_social_security"), register_balance: n("register_balance"),
+              });
+            }}
+            onSetActive={(it, active) => void setRecurringStatus("register", it.id, String(it.recipient_name ?? ""), active)} />
+        </PayrollRegisterRecurringPanel>
       )}
 
       {type === "pnd3" && allocation && (
@@ -900,16 +964,100 @@ export default function PayrollExportsPage() {
   );
 }
 
-function Pnd3RecurringPanel({ draft, setDraft, busy, onCreate, recurringCount }: {
+// ============================================================
+// ตัวจัดการรายการประจำ (ใช้ร่วม ภ.ง.ด.3 + ทะเบียนเงินเดือน)
+//   ดูรายชื่อทั้งหมด (รวมที่ปิดใช้งาน) · ✏️ แก้ = เติมค่าลงช่องกรอกด้านบน · ปิดใช้งาน / เปิดใช้งานอีกครั้ง
+//   โหลดรายชื่อเฉพาะตอนกดกาง (ไม่ถ่วงหน้าตอนเปิด)
+// ============================================================
+type RecurringKind = "pnd3" | "register";
+type RecurringItem = { id: string; status?: string } & Record<string, unknown>;
+
+function RecurringManager({ kind, rev, editId, busyId, onEdit, onSetActive }: {
+  kind: RecurringKind;
+  rev: number;
+  editId: string | null;
+  busyId: string | null;
+  onEdit: (item: RecurringItem) => void;
+  onSetActive: (item: RecurringItem, active: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<RecurringItem[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [offTarget, setOffTarget] = useState<RecurringItem | null>(null);
+  const base = kind === "pnd3" ? "/api/payroll/pnd3-recurring" : "/api/payroll/register-recurring";
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setLoadErr(null);
+    apiFetch(`${base}?include_inactive=true`).then((res) => res.json())
+      .then((j) => { if (!alive) return; if (j.error) setLoadErr(j.error); else setItems((j.data ?? []) as RecurringItem[]); })
+      .catch(() => { if (alive) setLoadErr("โหลดรายการไม่สำเร็จ"); });
+    return () => { alive = false; };
+  }, [open, rev, base]);
+
+  const detail = (it: RecurringItem) => kind === "pnd3"
+    ? [it.tax_id && `เลข ${it.tax_id}`, it.income_type, Number(it.default_net_amount) > 0 && `สุทธิ ${Number(it.default_net_amount).toLocaleString("th-TH")}`, `ภาษี ${it.tax_rate ?? 3}%`]
+    : [it.nickname, it.nationality, (it.national_id || it.passport_no) && `เลข ${it.national_id || it.passport_no}`, Number(it.register_transfer_net_pay) > 0 && `สุทธิจ่าย ${Number(it.register_transfer_net_pay).toLocaleString("th-TH")}`];
+
+  return (
+    <div className="mt-3 border-t border-slate-200/70 pt-2">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold text-slate-600 hover:text-slate-900">
+        {open ? "▾" : "▸"} จัดการรายการที่บันทึกไว้ (แก้ไข / ปิดใช้งาน)
+      </button>
+      {open && (
+        <div className="mt-2 rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+          {loadErr ? <div className="px-3 py-3 text-sm text-red-600">⚠ {loadErr}</div>
+            : items === null ? <div className="px-3 py-3 text-sm text-slate-400">กำลังโหลด…</div>
+            : items.length === 0 ? <div className="px-3 py-3 text-sm text-slate-400">ยังไม่มีรายการ — เพิ่มจากช่องด้านบน</div>
+            : items.map((it) => {
+              const off = it.status === "inactive";
+              const working = busyId === `recurring-status-${it.id}`;
+              return (
+                <div key={it.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 text-sm ${editId === it.id ? "bg-blue-50/70" : ""} ${off ? "opacity-60" : ""}`}>
+                  <div className="min-w-0 flex-1">
+                    <span className="font-medium text-slate-800">{String(it.recipient_name ?? "—")}</span>
+                    {off && <span className="ml-1.5 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">ปิดใช้งาน</span>}
+                    <div className="text-xs text-slate-500 truncate">{detail(it).filter(Boolean).join(" · ")}</div>
+                  </div>
+                  {!off && (
+                    <button type="button" onClick={() => onEdit(it)} disabled={working}
+                      className="h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40">✏️ แก้ไข</button>
+                  )}
+                  {off ? (
+                    <button type="button" onClick={() => onSetActive(it, true)} disabled={working}
+                      className="h-8 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">↩ เปิดใช้งาน</button>
+                  ) : (
+                    <button type="button" onClick={() => setOffTarget(it)} disabled={working}
+                      className="h-8 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40">ปิดใช้งาน</button>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      )}
+      <ConfirmDialog open={!!offTarget} onClose={() => setOffTarget(null)} variant="danger"
+        onConfirm={() => { const it = offTarget; setOffTarget(null); if (it) onSetActive(it, false); }}
+        title="ปิดใช้งานรายการประจำนี้?"
+        message={`"${String(offTarget?.recipient_name ?? "")}" จะไม่ถูกดึงเข้างวดถัดไป — ข้อมูลยังเก็บไว้ และเปิดใช้งานอีกครั้งได้จากรายการนี้`}
+        confirmText="ปิดใช้งาน" cancelText="ไม่ปิด" />
+    </div>
+  );
+}
+
+function Pnd3RecurringPanel({ draft, setDraft, busy, onCreate, recurringCount, editing, onCancelEdit, children }: {
   draft: Pnd3Draft;
   setDraft: (next: Pnd3Draft) => void;
   busy: boolean;
   onCreate: () => void;
   recurringCount: number;
+  editing: boolean;
+  onCancelEdit: () => void;
+  children?: React.ReactNode;
 }) {
   const set = (key: keyof Pnd3Draft, value: string) => setDraft({ ...draft, [key]: value });
   return (
-    <section className="mb-4 rounded-xl border border-sky-100 bg-sky-50/60 p-4">
+    <section className={`mb-4 rounded-xl border p-4 ${editing ? "border-blue-300 bg-blue-50/60" : "border-sky-100 bg-sky-50/60"}`}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="font-bold text-slate-900">รายการประจำ ภ.ง.ด.3</div>
@@ -925,23 +1073,33 @@ function Pnd3RecurringPanel({ draft, setDraft, busy, onCreate, recurringCount }:
         <input type="number" value={draft.default_net_amount} onChange={(e) => set("default_net_amount", e.target.value)} placeholder="ยอดสุทธิประจำ" className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm" />
         <input type="number" value={draft.tax_rate} onChange={(e) => set("tax_rate", e.target.value)} placeholder="%" className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm" />
         <button onClick={onCreate} disabled={busy} className="h-10 rounded-lg bg-sky-700 px-4 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-40">
-          {busy ? "กำลังเพิ่ม..." : "+ เพิ่ม"}
+          {busy ? "กำลังบันทึก..." : editing ? "✓ บันทึกการแก้ไข" : "+ เพิ่ม"}
         </button>
       </div>
+      {editing && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-blue-700">
+          ✏️ กำลังแก้รายการเดิม — มีผลกับงวดถัดไปและงวดนี้ที่ยังไม่ได้บันทึก
+          <button type="button" onClick={onCancelEdit} disabled={busy} className="h-7 rounded border border-slate-300 bg-white px-2 text-slate-600 hover:bg-slate-50">ยกเลิกการแก้</button>
+        </div>
+      )}
+      {children}
     </section>
   );
 }
 
-function PayrollRegisterRecurringPanel({ draft, setDraft, busy, onCreate, recurringCount }: {
+function PayrollRegisterRecurringPanel({ draft, setDraft, busy, onCreate, recurringCount, editing, onCancelEdit, children }: {
   draft: RegisterRecurringDraft;
   setDraft: (next: RegisterRecurringDraft) => void;
   busy: boolean;
   onCreate: () => void;
   recurringCount: number;
+  editing: boolean;
+  onCancelEdit: () => void;
+  children?: React.ReactNode;
 }) {
   const set = (key: keyof RegisterRecurringDraft, value: string) => setDraft({ ...draft, [key]: value });
   return (
-    <section className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+    <section className={`mb-4 rounded-xl border p-4 ${editing ? "border-blue-300 bg-blue-50/60" : "border-emerald-100 bg-emerald-50/60"}`}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="font-bold text-slate-900">คนนอกประจำทะเบียนเงินเดือน</div>
@@ -968,10 +1126,17 @@ function PayrollRegisterRecurringPanel({ draft, setDraft, busy, onCreate, recurr
         <input type="number" value={draft.register_transfer_net_pay} onChange={(e) => set("register_transfer_net_pay", e.target.value)} placeholder="สุทธิจ่าย" className="h-10 rounded-lg border border-emerald-300 bg-white px-3 text-sm font-semibold text-emerald-800" />
         <input type="number" value={draft.register_balance} onChange={(e) => set("register_balance", e.target.value)} placeholder="ยอดคงเหลือ" className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm" />
         <button onClick={onCreate} disabled={busy} className="h-10 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-40">
-          {busy ? "กำลังบันทึก..." : "+ เพิ่ม"}
+          {busy ? "กำลังบันทึก..." : editing ? "✓ บันทึกการแก้ไข" : "+ เพิ่ม"}
         </button>
       </div>
+      {editing && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-blue-700">
+          ✏️ กำลังแก้รายการเดิม — มีผลกับงวดถัดไปและงวดนี้ที่ยังไม่ได้บันทึก
+          <button type="button" onClick={onCancelEdit} disabled={busy} className="h-7 rounded border border-slate-300 bg-white px-2 text-slate-600 hover:bg-slate-50">ยกเลิกการแก้</button>
+        </div>
+      )}
       <div className="mt-2 text-xs text-slate-500">ช่องเลขบัตร/Passport ใช้แทนกันได้ ถ้าไม่มีเลขบัตรไทย ระบบจะแสดง Passport ในทะเบียนเงินเดือนและไฟล์ Excel</div>
+      {children}
     </section>
   );
 }

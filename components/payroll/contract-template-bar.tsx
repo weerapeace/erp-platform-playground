@@ -5,6 +5,7 @@
  *
  * - "ใช้แม่แบบ": เลือกแม่แบบที่บันทึกไว้ → เติมค่าทุกช่องให้ (ยกเว้นพนักงาน/เลขสัญญา/วันที่)
  * - "บันทึกเป็นแม่แบบ": เก็บค่าปัจจุบันเป็นแม่แบบใหม่ (ตั้งชื่อ)
+ * - "บันทึกทับแม่แบบนี้": เลือกแม่แบบ → ปรับค่าในฟอร์ม → เก็บค่าปัจจุบันทับแม่แบบเดิม (แก้แม่แบบ ไม่ต้องลบแล้วสร้างใหม่)
  *
  * เก็บแม่แบบในตารางกลาง erp_lookups (lookup_type='payroll_contract_template', metadata=ค่าฟิลด์)
  * → จัดการ/ลบได้ที่ /admin/lookups
@@ -65,15 +66,46 @@ export function ContractTemplateBar({
     }
   };
 
-  const saveTemplate = async () => {
-    const name = window.prompt("ตั้งชื่อแม่แบบ (เช่น พนักงานรายเดือนทั่วไป)");
-    if (!name || !name.trim()) return;
+  // ค่าปัจจุบันในฟอร์ม → ชุดค่าที่เก็บลงแม่แบบ (ตัดฟิลด์เฉพาะตัวพนักงาน/ค่าว่างออก)
+  const currentMetadata = () => {
     const metadata: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(values)) {
       if (excludeKeys.includes(k)) continue;
       if (v === "" || v == null) continue;
       metadata[k] = v;
     }
+    return metadata;
+  };
+
+  // บันทึกทับแม่แบบที่เลือกอยู่ (ถามยืนยัน 2 จังหวะ: กดครั้งแรก = ถาม · กดยืนยัน = บันทึก)
+  const [confirmOver, setConfirmOver] = useState(false);
+  const overwriteTemplate = async () => {
+    const t = templates.find((x) => x.id === sel);
+    setConfirmOver(false);
+    if (!t) return;
+    setSaving(true);
+    setMsg(null);
+    try {
+      const r = await apiFetch(`/api/lookups/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata: currentMetadata() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || "บันทึกทับแม่แบบไม่สำเร็จ");
+      setMsg(`บันทึกค่าปัจจุบันทับแม่แบบ "${t.name}" แล้ว`);
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "บันทึกทับแม่แบบไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveTemplate = async () => {
+    const name = window.prompt("ตั้งชื่อแม่แบบ (เช่น พนักงานรายเดือนทั่วไป)");
+    if (!name || !name.trim()) return;
+    const metadata = currentMetadata();
     setSaving(true);
     setMsg(null);
     try {
@@ -118,7 +150,21 @@ export function ContractTemplateBar({
         >
           {saving ? "กำลังบันทึก..." : "💾 บันทึกค่าปัจจุบันเป็นแม่แบบ"}
         </button>
+        {sel && !confirmOver && (
+          <button type="button" onClick={() => setConfirmOver(true)} disabled={saving}
+            title="ปรับค่าในฟอร์มแล้วเก็บทับแม่แบบที่เลือกอยู่"
+            className="h-9 whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60">
+            ✏️ บันทึกทับแม่แบบนี้
+          </button>
+        )}
       </div>
+      {sel && confirmOver && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <span className="flex-1">เก็บค่าในฟอร์มตอนนี้ทับแม่แบบ “{templates.find((x) => x.id === sel)?.name}” ? (ค่าเดิมในแม่แบบจะถูกแทนที่)</span>
+          <button type="button" onClick={() => void overwriteTemplate()} disabled={saving} className="h-8 rounded-md bg-amber-600 px-3 font-medium text-white hover:bg-amber-700 disabled:opacity-50">ยืนยันบันทึกทับ</button>
+          <button type="button" onClick={() => setConfirmOver(false)} disabled={saving} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-slate-600">ยกเลิก</button>
+        </div>
+      )}
       {msg && <div className="mt-2 text-[11px] text-blue-700">{msg}</div>}
     </div>
   );
