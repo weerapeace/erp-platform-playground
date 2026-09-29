@@ -10,6 +10,7 @@ import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { RecordPaymentModal } from "./record-modal";
 import { paymentSplitCheck } from "./split-check";
+import { LoanPaymentLinesSection } from "./lines-section";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -47,6 +48,14 @@ const CONFIG: MasterCRUDConfig = {
   },
   // ตรวจก่อนบันทึกในโหมด "เพิ่มหลายรายการ" — กฎอยู่ที่ ./split-check (ใช้ร่วมกับแผงในหน้าสัญญา)
   inlineRowCheck: paymentSplitCheck,
+  // รายการย่อยที่แยกไว้ตอนบันทึกการจ่าย (ค่าธรรมเนียม/รายการเพิ่มเติม) — ดู + แก้ + เอาออก (ของกลาง recordSections)
+  recordSections: [
+    {
+      key: "loan-payment-lines",
+      title: "🧾 รายการย่อยของใบจ่าย",
+      render: ({ recordId, refresh }) => <LoanPaymentLinesSection paymentId={recordId} onChanged={refresh} />,
+    },
+  ],
   customCreate: {
     label: "+ บันทึกการจ่าย",
     render: ({ open, onClose, onCreated }) => (
