@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SkuPicker, WarehousePicker } from "@/components/pickers";
 import type { SkuPickerValue, WarehousePickerValue } from "@/components/pickers";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -88,6 +88,17 @@ export default function InventoryPage() {
   const [refDetail, setRefDetail] = useState<RefDetail | null>(null);
   const [balHist, setBalHist] = useState<StockBalance | null>(null);         // คลิก balance → ประวัติ
   const [balMoves, setBalMoves] = useState<StockMovement[]>([]);
+
+  // ↩ กลับรายการที่ลงผิด (สต๊อกห้ามแก้/ลบประวัติ → ลงรายการตรงข้ามแทน)
+  const [revTarget, setRevTarget] = useState<StockMovement | null>(null);
+  const [revBusy, setRevBusy] = useState(false);
+  const reversedIds = useMemo(
+    () => new Set(moves.filter((m) => m.reference_type === "reversal" && m.reference_id).map((m) => m.reference_id as string)),
+    [moves],
+  );
+  /** กลับได้เฉพาะรายการที่ลงมือเอง (ไม่มีเอกสารอ้างอิง) · ไม่ใช่ปรับยอด · ยังไม่เคยถูกกลับ */
+  const canReverse = (m: StockMovement) =>
+    canCreate && !m.reference_type && m.movement_type !== "adjust" && !reversedIds.has(m.id);
 
   // toast
   const [toast, setToast] = useState<string | null>(null);
@@ -258,6 +269,26 @@ export default function InventoryPage() {
       await fetchData();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
+  };
+
+  const doReverse = async () => {
+    const m = revTarget;
+    if (!m) return;
+    setRevBusy(true);
+    try {
+      const res = await apiFetch("/api/inventory/movements", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reverse", id: m.id, actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash(`กลับรายการ ${m.movement_number ?? ""} แล้ว`);
+      setRevTarget(null); setMoveDetail(null);
+      await fetchData();
+    } catch (err) {
+      setRevTarget(null);
+      setError(err instanceof Error ? err.message : "กลับรายการไม่สำเร็จ");
+    } finally { setRevBusy(false); }
   };
 
   // ---- Columns: movements ----
@@ -493,6 +524,12 @@ export default function InventoryPage() {
             exportFilename="stock-movements"
             exportEntityType="erp_playground_stock_movement"
             canCheck={(p) => can(p as Parameters<typeof can>[0])}
+            rowActions={[
+              { label: "ดูรายละเอียด", icon: "📜", onClick: (m: StockMovement) => setMoveDetail(m) },
+              ...(canCreate ? [
+                { label: "กลับรายการ (ลงผิด)", icon: "↩", onClick: (m: StockMovement) => setRevTarget(m), show: (m: StockMovement) => canReverse(m) },
+              ] : []),
+            ]}
             pageSize={20}
           />
         ) : tab === "stock" ? (
@@ -723,9 +760,29 @@ export default function InventoryPage() {
                 <div className="bg-slate-50 rounded-lg px-2.5 py-1.5">{String((refDetail.gr).gr_no ?? "")} · PO {String((refDetail.gr).po_no ?? "")} · {String((refDetail.gr).seller_name ?? "")}</div>
               </div>
             )}
+            {/* ↩ ลงผิด → กลับรายการ (สต๊อกไม่ให้แก้/ลบประวัติ) */}
+            {canCreate && (
+              <div className="border-t border-slate-100 pt-3">
+                {canReverse(moveDetail) ? (
+                  <button onClick={() => setRevTarget(moveDetail)}
+                    className="h-8 px-3 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50">↩ กลับรายการนี้ (ลงผิด)</button>
+                ) : (
+                  <p className="text-[11px] text-slate-400">
+                    {moveDetail.reference_type === "reversal" ? "รายการนี้คือรายการกลับของรายการที่ลงผิด"
+                      : reversedIds.has(moveDetail.id) ? "รายการนี้ถูกกลับไปแล้ว"
+                      : moveDetail.movement_type === "adjust" && !moveDetail.reference_type ? "รายการปรับยอดกลับอัตโนมัติไม่ได้ — ถ้าปรับผิด ให้กด “ปรับยอด” อีกครั้งแล้วใส่ยอดที่ถูก"
+                      : "รายการนี้มาจากเอกสารอื่น — ถ้าผิดต้องแก้ที่เอกสารต้นทาง (ใบรับของ / ใบสั่งผลิต / ใบนับสต๊อก)"}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </ERPModal>
+
+      <ConfirmDialog open={revTarget !== null} onClose={() => { if (!revBusy) setRevTarget(null); }} onConfirm={() => void doReverse()} loading={revBusy}
+        variant="danger" title="กลับรายการนี้?" confirmText="↩ กลับรายการ" cancelText="ไม่กลับ"
+        message={revTarget ? `${revTarget.movement_number ?? ""} · ${MOVE_TYPE[revTarget.movement_type]?.label ?? ""} ${revTarget.product_sku ?? ""} จำนวน ${fmtQty(revTarget.qty)} — ระบบจะลงรายการตรงข้ามให้ยอดสต๊อกกลับเท่าเดิม รายการเดิมยังอยู่ในประวัติ (ไม่ถูกลบ)` : ""} />
 
       {/* ประวัติ/ที่มาของยอดคงเหลือ (คลิก balance) */}
       <ERPModal open={balHist !== null} onClose={() => setBalHist(null)} size="lg"
