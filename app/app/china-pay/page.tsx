@@ -816,6 +816,12 @@ function Center({ children }: { children: React.ReactNode }) {
 type BalAdj = { id: string; kind: string; amount_rmb: number; amount_thb: number; note: string | null; actor: string | null; created_at: string };
 function ChinaBalanceCard() {
   const toast = useToast();
+  const { user } = useAuth();
+  const canManage = user?.role === "admin" || user?.role === "manager";   // ตรงกับ canManage ของแอป · เซิร์ฟเวอร์เช็กซ้ำ
+  // แก้หมายเหตุ / กลับรายการที่บันทึกผิด (แอดมิน + ผู้จัดการ)
+  const [editNote, setEditNote] = useState<{ id: string; text: string } | null>(null);
+  const [reverseId, setReverseId] = useState<string | null>(null);   // รอยืนยันกลับรายการ
+  const noRef = (s: string | null) => String(s ?? "").replace(/\[ref:[^\]]+\]/g, "").trim();
   const [bal, setBal] = useState<{ rmb: number; thb: number }>({ rmb: 0, thb: 0 });
   const [hist, setHist] = useState<BalAdj[]>([]);
   const [open, setOpen] = useState(false);
@@ -855,6 +861,29 @@ function ChinaBalanceCard() {
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   };
+
+  const saveNote = async () => {
+    const e = editNote; if (!e) return;
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/china-pay/balance", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: e.id, note: e.text }) }).then(r => r.json());
+      if (j.error) { toast.error(j.error); return; }
+      toast.success("แก้หมายเหตุแล้ว"); setEditNote(null); load();
+    } catch (err) { toast.error(String((err as Error).message ?? err)); }
+    finally { setBusy(false); }
+  };
+  const reverse = async (id: string) => {
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/china-pay/balance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reverse", id }) }).then(r => r.json());
+      if (j.error) { toast.error(j.error); return; }
+      setBal({ rmb: num(j.rmb), thb: num(j.thb) });
+      toast.success("กลับรายการแล้ว — ยอดคงเหลือถูกปรับคืน"); setReverseId(null); load();
+    } catch (err) { toast.error(String((err as Error).message ?? err)); }
+    finally { setBusy(false); }
+  };
+  // รายการที่ถูกกลับไปแล้ว / เป็นรายการกลับเอง = กลับซ้ำไม่ได้
+  const reversedIds = new Set(hist.flatMap(h => [...String(h.note ?? "").matchAll(/\[ref:([^\]]+)\]/g)].map(m => m[1])));
 
   const kindLabel: Record<string, string> = { set: "ตั้งยอด", topup: "เติมเงิน", adjust: "ปรับยอด" };
 
@@ -918,13 +947,45 @@ function ChinaBalanceCard() {
                 <div className="pt-2 border-t border-slate-100">
                   <div className="text-xs text-slate-400 mb-1">ประวัติปรับยอดล่าสุด</div>
                   <div className="space-y-1">
-                    {hist.slice(0, 8).map(h => (
-                      <div key={h.id} className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500">{kindLabel[h.kind] ?? h.kind} · {String(h.created_at).slice(0, 10)}{h.note ? ` · ${h.note}` : ""}</span>
-                        <span className={`font-medium ${num(h.amount_rmb) < 0 ? "text-red-500" : "text-emerald-700"}`}>{num(h.amount_rmb) > 0 ? "+" : ""}¥{fmt(num(h.amount_rmb))}</span>
-                      </div>
-                    ))}
+                    {hist.slice(0, 8).map(h => {
+                      const isReversal = String(h.note ?? "").includes("[ref:");
+                      const wasReversed = reversedIds.has(h.id);
+                      return (
+                        <div key={h.id} className={`text-xs ${wasReversed ? "opacity-50" : ""}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-slate-500 min-w-0 truncate ${wasReversed ? "line-through" : ""}`}>{kindLabel[h.kind] ?? h.kind} · {String(h.created_at).slice(0, 10)}{noRef(h.note) ? ` · ${noRef(h.note)}` : ""}</span>
+                            <span className={`font-medium shrink-0 ${num(h.amount_rmb) < 0 ? "text-red-500" : "text-emerald-700"}`}>{num(h.amount_rmb) > 0 ? "+" : ""}¥{fmt(num(h.amount_rmb))}</span>
+                          </div>
+                          {canManage && (
+                            editNote?.id === h.id ? (
+                              <div className="mt-1 flex gap-1">
+                                <input value={editNote.text} autoFocus onChange={e => setEditNote({ id: h.id, text: e.target.value })}
+                                  onKeyDown={e => { if (e.key === "Enter") void saveNote(); if (e.key === "Escape") setEditNote(null); }}
+                                  placeholder="หมายเหตุ" className="flex-1 h-8 px-2 text-xs border border-blue-400 rounded-lg" />
+                                <button onClick={() => void saveNote()} disabled={busy} className="h-8 px-2.5 rounded-lg bg-blue-600 text-white disabled:opacity-50">บันทึก</button>
+                                <button onClick={() => setEditNote(null)} disabled={busy} className="h-8 px-2 rounded-lg border border-slate-200 text-slate-500">ยกเลิก</button>
+                              </div>
+                            ) : reverseId === h.id ? (
+                              <div className="mt-1 flex items-center gap-1 rounded-lg bg-rose-50 border border-rose-200 px-2 py-1 text-rose-800">
+                                <span className="flex-1">กลับรายการนี้? ยอดคงเหลือจะ{num(h.amount_rmb) > 0 ? "ลด" : "เพิ่ม"} ¥{fmt(Math.abs(num(h.amount_rmb)))}</span>
+                                <button onClick={() => void reverse(h.id)} disabled={busy} className="h-7 px-2.5 rounded-md bg-rose-600 text-white disabled:opacity-50">ยืนยัน</button>
+                                <button onClick={() => setReverseId(null)} disabled={busy} className="h-7 px-2 rounded-md border border-slate-200 bg-white text-slate-600">ไม่กลับ</button>
+                              </div>
+                            ) : (
+                              <div className="mt-0.5 flex gap-2 text-[11px]">
+                                <button onClick={() => { setReverseId(null); setEditNote({ id: h.id, text: noRef(h.note) }); }} className="text-slate-400 hover:text-blue-600">✏️ แก้หมายเหตุ</button>
+                                {!isReversal && !wasReversed && num(h.amount_rmb) !== 0 && (
+                                  <button onClick={() => { setEditNote(null); setReverseId(h.id); }} className="text-slate-400 hover:text-rose-600">↩ กลับรายการ (บันทึกผิด)</button>
+                                )}
+                                {wasReversed && <span className="text-slate-400">กลับรายการแล้ว</span>}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
+                  {canManage && <p className="text-[10px] text-slate-400 mt-1.5">ยอดเงินแก้ย้อนหลังไม่ได้ (เป็นสมุดบัญชี) — บันทึกผิดให้กด “กลับรายการ” แล้วบันทึกใหม่ให้ถูก</p>}
                 </div>
               )}
             </div>
