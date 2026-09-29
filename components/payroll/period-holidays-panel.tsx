@@ -77,6 +77,9 @@ export function PeriodHolidaysPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // ✏️ กดที่วันหยุด → ค่าลงช่องด้านล่าง แล้ว "บันทึกการแก้ไข" (editKey = id ของรายการ หรือ วันที่เดิมในโหมดร่าง)
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [editOldDate, setEditOldDate] = useState("");
 
   const start = isoDate(periodStart);
   const end = isoDate(periodEnd);
@@ -108,6 +111,44 @@ export function PeriodHolidaysPanel({
     if (!inRange(targetDate, start, end)) return "วันหยุดต้องอยู่ในช่วงของงวด";
     return null;
   };
+
+  function startEdit(h: { id: string; holiday_date: string; holiday_name: string | null }) {
+    setErr(null); setMessage(null);
+    setEditKey(h.id); setEditOldDate(h.holiday_date);
+    setDate(isoDate(h.holiday_date)); setName(h.holiday_name ?? "");
+  }
+  function cancelEdit() { setEditKey(null); setEditOldDate(""); setDate(""); setName(""); setErr(null); }
+
+  async function saveEdit() {
+    setErr(null);
+    setMessage(null);
+    const problem = validateDate(date);
+    if (problem) { setErr(problem); return; }
+    if (draftMode) {
+      if (date !== editOldDate && drafts.some((h) => h.holiday_date === date)) { setErr("มีวันหยุดนี้อยู่แล้ว"); return; }
+      updateDrafts(drafts.map((h) => (h.holiday_date === editOldDate ? { holiday_date: date, holiday_name: name.trim() || null } : h)));
+      cancelEdit();
+      return;
+    }
+    setBusy(true);
+    try {
+      const j = await apiFetch(`/api/payroll/holidays/${editKey}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ holiday_date: date, holiday_name: name.trim() || null }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else {
+        cancelEdit();
+        await reload();
+        onChanged?.();
+      }
+    } catch {
+      setErr("แก้ไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function add() {
     setErr(null);
@@ -232,10 +273,19 @@ export function PeriodHolidaysPanel({
       <div className="mt-3 flex flex-wrap gap-2">
         {shown.length === 0 && <span className="py-1 text-xs text-slate-400">ยังไม่มีวันหยุดในงวดนี้</span>}
         {shown.map((h) => (
-          <span key={h.id} className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3 py-1 text-xs text-rose-700">
-            <span className="font-medium">{formatDate(h.holiday_date)}</span>
-            {h.holiday_name ? <span className="max-w-[180px] truncate">· {h.holiday_name}</span> : null}
-            {editable && (
+          <span key={h.id} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-rose-700 ${editKey === h.id ? "border-blue-400 bg-blue-50" : "border-rose-200 bg-white"}`}>
+            {editable ? (
+              <button type="button" onClick={() => startEdit(h)} disabled={busy} title="กดเพื่อแก้วันที่/ชื่อ" className="inline-flex items-center gap-1.5 hover:underline decoration-dotted">
+                <span className="font-medium">{formatDate(h.holiday_date)}</span>
+                {h.holiday_name ? <span className="max-w-[180px] truncate">· {h.holiday_name}</span> : null}
+              </button>
+            ) : (
+              <>
+                <span className="font-medium">{formatDate(h.holiday_date)}</span>
+                {h.holiday_name ? <span className="max-w-[180px] truncate">· {h.holiday_name}</span> : null}
+              </>
+            )}
+            {editable && editKey !== h.id && (
               <button type="button" onClick={() => void del(h.id, h.holiday_date)} disabled={busy}
                 className="text-rose-300 hover:text-rose-600" title="ลบวันหยุด">
                 x
@@ -254,10 +304,23 @@ export function PeriodHolidaysPanel({
             placeholder="ชื่อวันหยุด เช่น ปีใหม่"
             className="h-9 min-w-[180px] flex-1 rounded-lg border border-slate-300 bg-white px-3 text-sm"
           />
-          <button type="button" onClick={() => void add()} disabled={busy}
-            className="h-9 rounded-lg bg-rose-600 px-4 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50">
-            + เพิ่มวันหยุด
-          </button>
+          {editKey ? (
+            <>
+              <button type="button" onClick={() => void saveEdit()} disabled={busy}
+                className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                บันทึกการแก้ไข
+              </button>
+              <button type="button" onClick={cancelEdit} disabled={busy}
+                className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                ยกเลิก
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={() => void add()} disabled={busy}
+              className="h-9 rounded-lg bg-rose-600 px-4 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50">
+              + เพิ่มวันหยุด
+            </button>
+          )}
         </div>
       )}
     </div>

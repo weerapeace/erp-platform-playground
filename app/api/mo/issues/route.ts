@@ -2,6 +2,7 @@
  * ปัญหา/ของเสียของใบสั่งผลิต (defect_logs) — /api/mo/issues
  * GET ?mo_no=   → รายการปัญหาที่ผูกกับงานนี้ (ใหม่→เก่า)
  * POST { mo_no, defect_type, severity?, qty?, cause? } → ลงปัญหาใหม่
+ * PATCH { id, defect_type?, severity?, qty?, cause? } → แก้ปัญหาที่ลงผิด
  * DELETE ?id=   → ลบ (soft: is_active=false)
  * ของกลาง: guardApi(products.view/edit) + supabaseAdmin + audit
  */
@@ -56,6 +57,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "create", entityType: "defect_log", entityId: (data as { id: string }).id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { mo_no: moNo, defect_type: dtype, severity: b.severity } });
   return NextResponse.json({ id: (data as { id: string }).id, defect_no: defectNo || null, error: null });
+}
+
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  let b: PostBody & { id?: string }; try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const id = String(b.id ?? "").trim();
+  if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("defect_logs").select("id, defect_type, severity, qty, cause, is_active").eq("id", id).maybeSingle();
+  if (!cur || (cur as { is_active?: boolean }).is_active === false) return NextResponse.json({ error: "ไม่พบรายการปัญหานี้" }, { status: 404 });
+
+  const patch: Record<string, unknown> = {};
+  if (b.defect_type !== undefined) {
+    const t = String(b.defect_type ?? "").trim();
+    if (!t) return NextResponse.json({ error: "กรุณาระบุปัญหาที่เจอ" }, { status: 400 });
+    patch.defect_type = t;
+  }
+  if (b.severity !== undefined) patch.severity = String(b.severity ?? "").trim() || "medium";
+  if (b.qty !== undefined) {
+    const q = b.qty != null && b.qty !== "" ? Number(b.qty) : null;
+    if (q != null && (!isFinite(q) || q < 0)) return NextResponse.json({ error: "จำนวนไม่ถูกต้อง" }, { status: 400 });
+    patch.qty = q;
+  }
+  if (b.cause !== undefined) patch.cause = String(b.cause ?? "").trim() || null;
+  if (Object.keys(patch).length === 0) return NextResponse.json({ data: { updated: false }, error: null });
+
+  const { error } = await admin.from("defect_logs").update(patch).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const c = cur as Record<string, unknown>;
+  await writeAudit(admin, { action: "update", entityType: "defect_log", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { old: { defect_type: c.defect_type, severity: c.severity, qty: c.qty, cause: c.cause }, new: patch } });
+  return NextResponse.json({ data: { updated: true }, error: null });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {

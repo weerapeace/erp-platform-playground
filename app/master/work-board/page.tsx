@@ -1085,6 +1085,17 @@ function WorkBoardPageInner() {
       setIssType(""); setIssQty(""); toast.success("ลงปัญหาแล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
   }, [canEdit, checklistMO, issType, issSev, issQty, toast]);
+  // แก้ปัญหาที่ลงผิด (ข้อความ / ความรุนแรง / จำนวน)
+  const editIssue = useCallback(async (id: string, patch: { defect_type: string; severity: string; qty: string }): Promise<boolean> => {
+    try {
+      const res = await apiFetch(`/api/mo/issues`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, defect_type: patch.defect_type, severity: patch.severity, qty: patch.qty === "" ? null : patch.qty }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setClIssues((rs) => (rs ?? []).map((x) => x.id === id ? { ...x, defect_type: patch.defect_type.trim(), severity: patch.severity, qty: patch.qty === "" ? null : Number(patch.qty) } : x));
+      toast.success("แก้ปัญหาแล้ว");
+      return true;
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); return false; }
+  }, [toast]);
   const delIssue = useCallback(async (id: string) => {
     try { const res = await apiFetch(`/api/mo/issues?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setClIssues((rs) => (rs ?? []).filter((x) => x.id !== id)); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
@@ -2473,7 +2484,7 @@ function WorkBoardPageInner() {
                     ) : clTab === "purch" ? (
                       <PurchTab rows={clPurch} />
                     ) : clTab === "issue" ? (
-                      <IssueTab issues={clIssues} canEdit={canEdit} issType={issType} setIssType={setIssType} issSev={issSev} setIssSev={setIssSev} issQty={issQty} setIssQty={setIssQty} onAdd={addIssue} onDel={delIssue} />
+                      <IssueTab issues={clIssues} canEdit={canEdit} issType={issType} setIssType={setIssType} issSev={issSev} setIssSev={setIssSev} issQty={issQty} setIssQty={setIssQty} onAdd={addIssue} onDel={delIssue} onEdit={editIssue} />
                     ) : (
                       <HistTab rows={clHist} />
                     )}
@@ -2948,9 +2959,19 @@ function PurchTab({ rows }: { rows: PurchaseStatusRow[] | null }) {
 // ---- เฟส 4: ปัญหา QC (ลง/ดู/ลบ) ----
 const SEV_OPT: [string, string][] = [["low", "เล็กน้อย"], ["medium", "ปานกลาง"], ["high", "รุนแรง"]];
 const SEV_BADGE: Record<string, string> = { low: "bg-slate-100 text-slate-600", medium: "bg-amber-50 text-amber-700", high: "bg-rose-50 text-rose-700" };
-function IssueTab({ issues, canEdit, issType, setIssType, issSev, setIssSev, issQty, setIssQty, onAdd, onDel }: {
+function IssueTab({ issues, canEdit, issType, setIssType, issSev, setIssSev, issQty, setIssQty, onAdd, onDel, onEdit }: {
   issues: MoIssue[] | null; canEdit: boolean; issType: string; setIssType: (v: string) => void; issSev: string; setIssSev: (v: string) => void; issQty: string; setIssQty: (v: string) => void; onAdd: () => void; onDel: (id: string) => void;
+  onEdit: (id: string, patch: { defect_type: string; severity: string; qty: string }) => Promise<boolean>;
 }) {
+  // ✏️ แก้ในแถว · 🗑 ลบต้องกดยืนยันอีกครั้ง (กันมือลั่น)
+  const [ed, setEd] = useState<{ id: string; defect_type: string; severity: string; qty: string } | null>(null);
+  const [edBusy, setEdBusy] = useState(false);
+  const [delAsk, setDelAsk] = useState<string | null>(null);
+  const saveEd = async () => {
+    if (!ed || !ed.defect_type.trim()) return;
+    setEdBusy(true);
+    try { if (await onEdit(ed.id, ed)) setEd(null); } finally { setEdBusy(false); }
+  };
   return (
     <div className="space-y-2">
       {canEdit && (
@@ -2969,14 +2990,32 @@ function IssueTab({ issues, canEdit, issType, setIssType, issSev, setIssSev, iss
           : (
             <div className="border border-slate-100 rounded-lg overflow-hidden">
               <div className="divide-y divide-slate-50 max-h-[40vh] overflow-y-auto">
-                {issues.map((i) => (
+                {issues.map((i) => ed?.id === i.id ? (
+                  <div key={i.id} className="flex gap-1.5 items-center px-3 py-2 bg-blue-50/40">
+                    <input value={ed.defect_type} autoFocus onChange={(e) => setEd({ ...ed, defect_type: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveEd(); if (e.key === "Escape") setEd(null); }}
+                      className="flex-1 min-w-0 h-8 px-2 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                    <select value={ed.severity} onChange={(e) => setEd({ ...ed, severity: e.target.value })} className="h-8 px-1.5 text-xs border border-slate-200 rounded-lg bg-white">
+                      {SEV_OPT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                    <input value={ed.qty} onChange={(e) => setEd({ ...ed, qty: e.target.value })} type="number" inputMode="numeric" placeholder="จำนวน" className="w-16 h-8 px-2 text-sm text-center border border-slate-200 rounded-lg" />
+                    <button onClick={() => void saveEd()} disabled={edBusy || !ed.defect_type.trim()} className="h-8 px-2.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{edBusy ? "…" : "บันทึก"}</button>
+                    <button onClick={() => setEd(null)} disabled={edBusy} className="h-8 px-2 text-xs border border-slate-200 rounded-lg text-slate-500">ยกเลิก</button>
+                  </div>
+                ) : (
                   <div key={i.id} className="flex items-center gap-2 px-3 py-2">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm text-slate-800 truncate">{i.defect_type}</p>
                       <p className="text-[10px] text-slate-400">{i.qty != null ? `${fmt(i.qty)} ชิ้น · ` : ""}{_dt(i.created_at)}{i.cause ? ` · ${i.cause}` : ""}</p>
                     </div>
                     <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${SEV_BADGE[i.severity ?? "medium"] ?? SEV_BADGE.medium}`}>{(SEV_OPT.find(([v]) => v === i.severity)?.[1]) ?? i.severity}</span>
-                    {canEdit && <button onClick={() => onDel(i.id)} className="shrink-0 text-slate-300 hover:text-rose-600 text-xs">🗑</button>}
+                    {canEdit && delAsk !== i.id && <button onClick={() => { setDelAsk(null); setEd({ id: i.id, defect_type: i.defect_type ?? "", severity: i.severity ?? "medium", qty: i.qty != null ? String(i.qty) : "" }); }} title="แก้ไข" className="shrink-0 text-slate-300 hover:text-blue-600 text-xs">✏️</button>}
+                    {canEdit && (delAsk === i.id ? (
+                      <span className="shrink-0 flex items-center gap-1">
+                        <button onClick={() => { setDelAsk(null); onDel(i.id); }} className="h-6 px-2 text-[11px] bg-rose-600 text-white rounded-md hover:bg-rose-700">ยืนยันลบ</button>
+                        <button onClick={() => setDelAsk(null)} className="h-6 px-1.5 text-[11px] border border-slate-200 rounded-md text-slate-500">ไม่ลบ</button>
+                      </span>
+                    ) : <button onClick={() => setDelAsk(i.id)} title="ลบ" className="shrink-0 text-slate-300 hover:text-rose-600 text-xs">🗑</button>)}
                   </div>
                 ))}
               </div>

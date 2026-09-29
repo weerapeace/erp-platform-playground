@@ -484,6 +484,10 @@ export async function createHashtag(body: { text: string; brand_id?: string | nu
   const j = await jsonOrThrow(await apiFetch("/api/creative-hashtags", { method: "POST", body: JSON.stringify(body) }));
   return j.data as Hashtag;
 }
+export async function updateHashtag(id: string, text: string): Promise<Hashtag> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-hashtags", { method: "PATCH", body: JSON.stringify({ id, text }) }));
+  return j.data as Hashtag;
+}
 export async function deleteHashtag(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-hashtags?id=${id}`, { method: "DELETE" }));
 }

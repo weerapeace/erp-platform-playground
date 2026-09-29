@@ -5,7 +5,7 @@
  *
  * ของกลาง วางได้ทุกจุด: ป๊อป QC (รายละเอียด/ส่งงาน/รับเข้า) · หน้า Parent SKU · ใบสั่งผลิต
  * ส่ง sku (ตัวลูก) หรือ parentSkuId ก็ได้ — API หา parent ให้เอง
- * editable=true → เพิ่ม/ลบได้ (เลือกจากสาเหตุกลาง หรือพิมพ์เอง)
+ * editable=true → เพิ่ม/แก้/ลบได้ (เลือกจากสาเหตุกลาง หรือพิมพ์เอง) · ปัญหาที่มาจาก QC แก้ข้อความไม่ได้ (ลบได้)
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -26,6 +26,8 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
   const [loading, setLoading] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [ed, setEd] = useState<{ id: string; text: string } | null>(null);   // ✏️ แก้ในแถว
+  const [delAsk, setDelAsk] = useState<string | null>(null);                 // 🗑 ถามยืนยันในแถว (ไม่ใช้ป๊อปซ้อน — แผงนี้อยู่ในป๊อปหลายชั้น)
 
   const q = parentSkuId ? `parent_sku_id=${encodeURIComponent(parentSkuId)}` : sku ? `sku=${encodeURIComponent(sku)}` : "";
 
@@ -58,8 +60,21 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
     finally { setSaving(false); }
   };
 
+  const saveEdit = async () => {
+    if (!ed || !ed.text.trim()) return;
+    setSaving(true);
+    try {
+      const j = await apiFetch("/api/parent-sku-issues", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: ed.id, problem_text: ed.text.trim() }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      toast.success("แก้ปัญหาแล้ว");
+      setEd(null);
+      await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
   const remove = async (id: string) => {
-    if (!confirm("ลบปัญหานี้ออกจากรายการ?")) return;
+    setDelAsk(null);
     try {
       const j = await apiFetch(`/api/parent-sku-issues?id=${id}`, { method: "DELETE" }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
@@ -75,12 +90,26 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
       {items.length === 0 && !loading && <div className="text-[11px] text-slate-300 mb-1">— ยังไม่มีปัญหาที่บันทึกไว้ —</div>}
       {items.length > 0 && (
         <div className="space-y-1 max-h-40 overflow-auto">
-          {items.map((it) => (
+          {items.map((it) => ed?.id === it.id ? (
+            <div key={it.id} className="flex items-center gap-1 rounded-md bg-blue-50/60 border border-blue-200 px-1.5 py-1">
+              <input value={ed.text} autoFocus onChange={(e) => setEd({ ...ed, text: e.target.value })} disabled={saving}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") setEd(null); }}
+                className="flex-1 min-w-0 h-6 px-1.5 text-[12px] border border-blue-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              <button onClick={() => void saveEdit()} disabled={saving || !ed.text.trim()} className="h-6 px-2 text-[11px] bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 shrink-0">บันทึก</button>
+              <button onClick={() => setEd(null)} disabled={saving} className="h-6 px-1.5 text-[11px] border border-slate-200 bg-white rounded text-slate-500 shrink-0">ยกเลิก</button>
+            </div>
+          ) : (
             <div key={it.id} className="text-[12px] flex items-center justify-between gap-2 rounded-md bg-amber-50/60 border border-amber-100 px-2 py-1">
               <span className="text-amber-800 truncate">⚠️ {it.problem_text}{it.source === "qc" ? <span className="text-[10px] text-amber-500"> · จาก QC</span> : null}</span>
               <span className="flex items-center gap-1.5 shrink-0">
-                {it.created_by_name && <span className="text-[10px] text-slate-400 whitespace-nowrap">{it.created_by_name.split("@")[0]}</span>}
-                {editable && <button onClick={() => void remove(it.id)} title="ลบ" className="text-slate-300 hover:text-rose-500 text-xs leading-none">✕</button>}
+                {it.created_by_name && delAsk !== it.id && <span className="text-[10px] text-slate-400 whitespace-nowrap">{it.created_by_name.split("@")[0]}</span>}
+                {editable && it.source !== "qc" && delAsk !== it.id && <button onClick={() => setEd({ id: it.id, text: it.problem_text })} title="แก้ข้อความ" className="text-slate-300 hover:text-blue-600 text-xs leading-none">✏️</button>}
+                {editable && (delAsk === it.id ? (
+                  <>
+                    <button onClick={() => void remove(it.id)} className="h-5 px-1.5 text-[10px] bg-rose-600 text-white rounded hover:bg-rose-700">ยืนยันลบ</button>
+                    <button onClick={() => setDelAsk(null)} className="h-5 px-1.5 text-[10px] border border-slate-200 bg-white rounded text-slate-500">ไม่ลบ</button>
+                  </>
+                ) : <button onClick={() => setDelAsk(it.id)} title="ลบ" className="text-slate-300 hover:text-rose-500 text-xs leading-none">✕</button>)}
               </span>
             </div>
           ))}

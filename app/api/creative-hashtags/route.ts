@@ -4,6 +4,7 @@
  * GET    /api/creative-hashtags?search=&brand_id=&platform=&category=
  *          → คืน hashtag ของแบรนด์ที่ระบุ + ของกลาง (brand_id null) เรียงตามถูกใช้บ่อย
  * POST   /api/creative-hashtags  { text, brand_id?, category?, platform? }  (อัปเซิร์ตตาม text)
+ * PATCH  /api/creative-hashtags  { id, text }   → แก้ข้อความที่พิมพ์ผิด (จำนวนครั้งที่ถูกใช้ไม่หาย)
  * DELETE /api/creative-hashtags?id=...
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -63,6 +64,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }).select("*").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "create", entityType: "creative_hashtag", entityId: data.id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { text } });
+  return NextResponse.json({ data, error: null });
+}
+
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  let body: { id?: string; text?: string };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const id = String(body.id ?? "").trim();
+  const text = normalizeTag(body.text ?? "");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  if (!text || text === "#") return NextResponse.json({ error: "กรุณาใส่ hashtag" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("erp_creative_hashtags").select("id, text").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบแฮชแท็กนี้" }, { status: 404 });
+  if ((cur as { text: string }).text === text) return NextResponse.json({ data: cur, error: null });
+  const { data: dup } = await admin.from("erp_creative_hashtags").select("id").eq("text", text).neq("id", id).maybeSingle();
+  if (dup) return NextResponse.json({ error: `มี ${text} อยู่ในคลังแล้ว` }, { status: 400 });
+
+  const { data, error } = await admin.from("erp_creative_hashtags").update({ text }).eq("id", id).select("*").single();
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAudit(admin, { action: "update", entityType: "creative_hashtag", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { old: (cur as { text: string }).text, new: text } });
   return NextResponse.json({ data, error: null });
 }
 

@@ -20,7 +20,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import {
   CONTENT_STATUS_META, contentStatusLabel, postTypeLabel,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent, bulkDeleteContent,
-  listCampaigns, listBrands, listHashtags, createHashtag, deleteHashtag, getTask, listSubtasks,
+  listCampaigns, listBrands, listHashtags, createHashtag, updateHashtag, deleteHashtag, getTask, listSubtasks,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors, getParentSkuChildren, type ParentSkuChild,
   getRecommendedTimes, saveRecommendedTimes, type RecommendedTimes,
   listContentAttachments, addContentAttachment, deleteContentAttachment,
@@ -1657,7 +1657,7 @@ function RowMenu({ items }: { items: { label: string; onClick: () => void }[] })
 }
 
 // ตั้งค่าต่อแพลตฟอร์ม (ค่ากลาง): แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์ / โน้ตบอกคนทำงาน
-// โมดอลจัดการ "คลังแฮชแท็ก" — ดู/เพิ่ม/ลบ/ค้นหา · แฮชแท็กในคลังจะขึ้น typeahead ในช่อง #hashtag
+// โมดอลจัดการ "คลังแฮชแท็ก" — ดู/เพิ่ม/แก้ (กดที่ข้อความ)/ลบ/ค้นหา · แฮชแท็กในคลังจะขึ้น typeahead ในช่อง #hashtag
 function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string | null; onClose: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [tags, setTags] = useState<Hashtag[]>([]);
@@ -1679,6 +1679,15 @@ function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string 
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
   const remove = async (h: Hashtag) => { if (!window.confirm(`${t("ลบ", "Delete")} ${h.text}?`)) return; try { await deleteHashtag(h.id); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
+  // ✏️ กดที่ข้อความเพื่อแก้ (พิมพ์ผิด) — Enter = บันทึก · Esc = ยกเลิก
+  const [ed, setEd] = useState<{ id: string; text: string } | null>(null);
+  const saveEd = async () => {
+    if (!ed) return;
+    const raw = ed.text.trim().replace(/^#/, ""); if (!raw) { setEd(null); return; }
+    setBusy(true);
+    try { await updateHashtag(ed.id, "#" + raw); setEd(null); await load(); pushToast("success", t("แก้แฮชแท็กแล้ว", "Hashtag updated")); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
   return (
     <ERPModal open onClose={onClose} size="md" title={t("คลังแฮชแท็ก", "Hashtag library")}>
       <div className="space-y-3">
@@ -1699,15 +1708,23 @@ function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string 
           : tags.length === 0 ? <p className="text-sm text-slate-400 py-6 text-center italic">{t("ยังไม่มีแฮชแท็กในคลัง — พิมพ์เพิ่มด้านบน", "No hashtags yet — add above")}</p>
           : (
             <div className="flex flex-wrap gap-1.5 max-h-72 overflow-y-auto">
-              {tags.map((h) => (
+              {tags.map((h) => ed?.id === h.id ? (
+                <span key={h.id} className="inline-flex items-center gap-1 text-xs bg-violet-50 border border-violet-300 rounded-full pl-2 pr-1 py-0.5">
+                  <input value={ed.text} autoFocus disabled={busy} onChange={(e) => setEd({ ...ed, text: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") void saveEd(); if (e.key === "Escape") setEd(null); }}
+                    className="w-36 h-6 px-1 text-xs bg-white border border-violet-200 rounded focus:outline-none" />
+                  <button onClick={() => void saveEd()} disabled={busy} title={t("บันทึก", "Save")} className="text-violet-600 hover:text-violet-800 w-5 h-5 flex items-center justify-center">✓</button>
+                  <button onClick={() => setEd(null)} disabled={busy} title={t("ยกเลิก", "Cancel")} className="text-slate-400 hover:text-slate-600 w-5 h-5 flex items-center justify-center">✕</button>
+                </span>
+              ) : (
                 <span key={h.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-700 rounded-full pl-2.5 pr-1 py-1">
-                  {h.text}<span className="text-[10px] text-slate-400">·{h.usage_count}</span>
+                  <button type="button" onClick={() => setEd({ id: h.id, text: h.text })} title={t("กดเพื่อแก้ข้อความ", "Click to edit")} className="hover:text-violet-700 hover:underline decoration-dotted">{h.text}</button><span className="text-[10px] text-slate-400">·{h.usage_count}</span>
                   <button onClick={() => remove(h)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-red-500 w-4 h-4 flex items-center justify-center">✕</button>
                 </span>
               ))}
             </div>
           )}
-        <p className="text-[11px] text-slate-400">{t("แฮชแท็กในคลังจะขึ้นให้เลือกอัตโนมัติเมื่อพิมพ์ในช่อง #hashtag ของแต่ละแพลตฟอร์ม", "Library hashtags autocomplete in each platform's #hashtag field")}</p>
+        <p className="text-[11px] text-slate-400">{t("แฮชแท็กในคลังจะขึ้นให้เลือกอัตโนมัติเมื่อพิมพ์ในช่อง #hashtag ของแต่ละแพลตฟอร์ม · กดที่ข้อความเพื่อแก้", "Library hashtags autocomplete in each platform's #hashtag field · click a tag to edit")}</p>
         <div className="flex justify-end"><button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button></div>
       </div>
     </ERPModal>
