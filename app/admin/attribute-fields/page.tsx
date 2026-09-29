@@ -5,6 +5,7 @@
  * เพิ่ม/แก้/ลบ/เรียง ฟิลด์ (สเปกร่วม=model / รายสี=sku) · ชนิดฟิลด์ · ตัวเลือก many2one · กรองแท็กของ sku-ref
  * ใช้กับหน้า "แก้รายละเอียดสั่งงาน" (work-instruction)
  */
+import { InlineEdit } from "@/components/inline-edit";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ERPModal } from "@/components/modal";
@@ -178,6 +179,16 @@ function FieldEditor({ initial, tags, lookupTables, onClose, onSave, onReload, c
       setOptions((o) => [...o, { id: j.id, label: lab, value: lab, display_order: o.length + 1 }]); setNewOpt(""); onReload();
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มตัวเลือกไม่สำเร็จ"); }
   };
+  // เปลี่ยนชื่อตัวเลือก (แก้เฉพาะ "ป้ายที่โชว์" — ค่าที่เก็บในสินค้าไม่ถูกแตะ จึงไม่กระทบสินค้าที่เลือกตัวเลือกนี้ไว้)
+  // ดีกว่าลบแล้วเพิ่มใหม่ ซึ่งทำให้ค่าที่สินค้าเลือกไว้หลุด
+  const renameOption = async (id: string, label: string) => {
+    const lab = label.trim(); if (!lab) return;
+    try {
+      const res = await apiFetch("/api/admin/attribute-options", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, label: lab }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setOptions((o) => o.map((x) => (x.id === id ? { ...x, label: lab } : x))); onReload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เปลี่ยนชื่อไม่สำเร็จ"); }
+  };
   const delOption = async (id: string) => {
     try { const res = await apiFetch(`/api/admin/attribute-options?id=${id}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setOptions((o) => o.filter((x) => x.id !== id)); onReload(); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
@@ -221,8 +232,12 @@ function FieldEditor({ initial, tags, lookupTables, onClose, onSave, onReload, c
                 <div className="space-y-1 mb-2">
                   {options.map((o) => (
                     <div key={o.id} className="flex items-center gap-2 text-sm">
-                      <span className="flex-1 text-slate-700">{o.label}</span>
-                      <button onClick={() => delOption(o.id)} className="h-6 w-6 flex items-center justify-center text-slate-300 hover:text-rose-600 rounded">✕</button>
+                      <span className="flex-1 min-w-0">
+                        {canEdit
+                          ? <InlineEdit type="text" value={o.label} onSave={(v) => renameOption(o.id, v)} className="text-sm text-slate-700" />
+                          : <span className="text-slate-700">{o.label}</span>}
+                      </span>
+                      <button onClick={() => delOption(o.id)} title="ลบตัวเลือกนี้" className="h-6 w-6 flex items-center justify-center text-slate-300 hover:text-rose-600 rounded">✕</button>
                     </div>
                   ))}
                   {options.length === 0 && <p className="text-[11px] text-slate-300">ยังไม่มีตัวเลือก</p>}

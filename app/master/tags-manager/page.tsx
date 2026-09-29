@@ -11,6 +11,7 @@
  * ใช้ของกลาง: API master-v2 (list) + m2m-links (ผูก/ดึงแท็ก bulk)
  */
 
+import { TagOrganizerModal } from "@/components/tag-organizer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
@@ -167,6 +168,8 @@ export default function TagsManagerPage() {
   useEffect(() => { loadTags(); }, [loadTags]);
   // โหลดกลุ่มแท็ก (จัด palette + filter ตามกลุ่ม)
   const [groupMgr, setGroupMgr] = useState(false);
+  // จัดการแท็ก (แก้ชื่อ / ลบ / ย้ายกลุ่ม) — ของกลาง TagOrganizerModal ตัวเดียวกับในช่องแท็กของ drawer สินค้า
+  const [tagMgr, setTagMgr] = useState(false);
   const [prefixMgr, setPrefixMgr] = useState(false);   // จัดการรหัสนำหน้า SKU ต่อแท็ก
   const loadGroups = useCallback(() => {
     apiFetch(`/api/master-v2/product_family_groups?limit=500`).then((r) => r.json())
@@ -464,6 +467,7 @@ export default function TagsManagerPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <FamilyNavTabs active="tags" />
       {groupMgr && <GroupManager groups={groups} onClose={() => setGroupMgr(false)} onChanged={loadGroups} />}
+      {tagMgr && <TagOrganizerModal moduleKey="product_families" labelField="name" onClose={() => setTagMgr(false)} onChanged={() => { loadTags(); loadGroups(); }} />}
       {prefixMgr && <SkuPrefixManager onClose={() => setPrefixMgr(false)} />}
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-wrap gap-3">
@@ -491,7 +495,10 @@ export default function TagsManagerPage() {
           <div className="flex-1 min-w-[280px]">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-slate-500">คลังแท็ก — กดหรือลากเพื่อเพิ่มเข้าชุดแท็ก</span>
-              <button onClick={() => setGroupMgr(true)} className="text-xs px-2 py-0.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">⚙️ จัดการกลุ่ม</button>
+              <span className="flex items-center gap-1.5">
+                <button onClick={() => setTagMgr(true)} title="แก้ชื่อแท็ก / ลบแท็ก / ย้ายกลุ่ม" className="text-xs px-2 py-0.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">🗂️ จัดการแท็ก (แก้ชื่อ / ลบ)</button>
+                <button onClick={() => setGroupMgr(true)} className="text-xs px-2 py-0.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">⚙️ จัดการกลุ่ม</button>
+              </span>
             </div>
             <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
               {/* โชว์ทุกกลุ่ม (รวมกลุ่มว่าง) · ลากแท็กมาวางที่กลุ่ม = ย้ายเข้ากลุ่ม */}

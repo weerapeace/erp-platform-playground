@@ -109,6 +109,20 @@ export function PlatformCategoryMapper() {
       setNewCat(""); setCats((c) => [...c, j.data as Cat]); toast.success("เพิ่มหมวดกลางแล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); } finally { setAddingCat(false); }
   };
+  // เปลี่ยนชื่อหมวดกลาง (พิมพ์ผิด) — ไม่ต้องลบแล้วสร้างใหม่ ซึ่งจะทำให้การจับคู่ของทุกร้านหาย
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const renameCat = async () => {
+    const r = renaming; setRenaming(null);
+    if (!r) return;
+    const name = r.name.trim();
+    const old = cats.find((c) => c.id === r.id)?.name ?? "";
+    if (!name || name === old) return;
+    try {
+      const res = await apiFetch("/api/platform-central-categories", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, name }) });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "เปลี่ยนชื่อไม่สำเร็จ");
+      setCats((c) => c.map((x) => (x.id === r.id ? { ...x, name } : x))); toast.success("เปลี่ยนชื่อหมวดแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เปลี่ยนชื่อไม่สำเร็จ"); }
+  };
   const delCat = async (id: string, name: string) => {
     if (!window.confirm(`ลบหมวดกลาง “${name}”? (การจับคู่ของหมวดนี้จะถูกลบด้วย)`)) return;
     try {
@@ -224,10 +238,21 @@ export function PlatformCategoryMapper() {
                 const active = sel === c.id;
                 return (
                   <div key={c.id} className={`group flex items-center gap-2 px-3 py-2 border-b border-slate-50 cursor-pointer ${active ? "bg-indigo-50" : "hover:bg-slate-50"}`} onClick={() => pick(c.id)}>
-                    <span className={`flex-1 text-sm truncate ${active ? "text-indigo-700 font-medium" : "text-slate-700"}`}>{c.name}</span>
+                    {renaming?.id === c.id ? (
+                      <input value={renaming.name} autoFocus aria-label="ชื่อหมวดกลาง"
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setRenaming({ id: c.id, name: e.target.value })}
+                        onBlur={() => void renameCat()}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void renameCat(); } if (e.key === "Escape") setRenaming(null); }}
+                        className="flex-1 min-w-0 h-7 px-1.5 text-sm border border-indigo-400 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                    ) : (
+                      <span className={`flex-1 text-sm truncate ${active ? "text-indigo-700 font-medium" : "text-slate-700"}`}>{c.name}</span>
+                    )}
                     {n > 0
                       ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">{n}/{platforms.length}</span>
                       : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 whitespace-nowrap">ยังไม่จับ</span>}
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setRenaming({ id: c.id, name: c.name }); }} title="เปลี่ยนชื่อหมวดกลาง"
+                      className="w-5 h-5 rounded text-slate-300 hover:text-indigo-600 opacity-0 group-hover:opacity-100">✎</button>
                     <button type="button" onClick={(e) => { e.stopPropagation(); void delCat(c.id, c.name); }} title="ลบหมวดกลาง"
                       className="w-5 h-5 rounded text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100">✕</button>
                   </div>

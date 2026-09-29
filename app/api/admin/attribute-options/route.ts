@@ -39,7 +39,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   let b: Body; try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!b.id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
   const patch: Record<string, unknown> = {};
-  if (typeof b.label === "string") patch.label = b.label.trim();
+  if (typeof b.label === "string") {
+    if (!b.label.trim()) return NextResponse.json({ error: "ชื่อตัวเลือกว่างไม่ได้" }, { status: 400 });
+    patch.label = b.label.trim();
+  }
   if (typeof b.value === "string") patch.value = b.value.trim();
   if (typeof b.display_order === "number") patch.display_order = b.display_order;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });

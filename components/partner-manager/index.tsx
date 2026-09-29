@@ -246,7 +246,8 @@ export function PartnerManager() {
       )}
 
       {sel && <PartnerDrawer partner={sel} mode={mode} canEdit={canEdit} others={all.filter((p) => p.id !== sel.id)}
-        onMode={setMode} onClose={() => setSel(null)} onSaved={afterSave} />}
+        onMode={setMode} onClose={() => setSel(null)} onSaved={afterSave}
+        onRemoved={() => { setSel(null); void load(); }} />}
 
       <DuplicateScanModal open={dupOpen} onClose={() => setDupOpen(false)}
         onOpenPartner={(id) => { const p = all.find((r) => r.id === id); if (p) { setDupOpen(false); openView(p); } }} />
@@ -269,11 +270,28 @@ function KV({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
-function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSaved }: {
+function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSaved, onRemoved }: {
   partner: Partner; mode: Mode; canEdit: boolean; others: Partner[];
   onMode: (m: Mode) => void; onClose: () => void; onSaved: (p: Partner) => void;
+  /** ปิดใช้งานสำเร็จ → หน้าแม่ปิดป๊อป + โหลดรายชื่อใหม่ */
+  onRemoved: () => void;
 }) {
   const toast = useToast();
+  // ปิดใช้งาน (ไม่ลบทิ้ง — ใบสั่งซื้อ/ใบขาย/ราคาซัพพลายเออร์ ยังอ้างถึงคู่ค้านี้) · กู้คืนได้ที่หน้า ผู้จำหน่าย / ลูกค้า
+  const [confirmOff, setConfirmOff] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const deactivate = async () => {
+    setRemoving(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/partners/${partner.id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || "ปิดใช้งานไม่สำเร็จ");
+      toast.success("ปิดใช้งานแล้ว — เอกสารเก่ายังอ้างถึงได้ตามเดิม");
+      setConfirmOff(false);
+      onRemoved();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ปิดใช้งานไม่สำเร็จ"); }
+    finally { setRemoving(false); }
+  };
   const { width, startResize } = useDrawerResize("partnerDrawerWidth", 560);   // ของกลาง: ลากขอบซ้ายปรับกว้าง + จำค่า
   const [form, setForm] = useState<Partner>(partner);
   const [tab, setTab] = useState<"info" | "rel">("info");
@@ -351,7 +369,9 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
             {!editing && quick.map(([label, href]) => (
               <a key={label} href={href || undefined} className="h-[34px] px-3 text-[12.5px] font-semibold rounded-[9px] border border-slate-200 bg-slate-50 text-slate-700 flex items-center hover:border-indigo-300 hover:text-indigo-700 no-underline">{label}</a>
             ))}
-            {!editing && canEdit && <button onClick={() => onMode("edit")} className="h-[34px] px-3 text-[12.5px] font-semibold rounded-[9px] bg-indigo-50 text-indigo-700 ml-auto">✏️ แก้ไข</button>}
+            {!editing && canEdit && <button onClick={() => setConfirmOff(true)} title="เลิกใช้คู่ค้านี้ (ไม่ลบทิ้ง เอกสารเก่ายังอ้างถึงได้)"
+              className="h-[34px] px-3 text-[12.5px] font-semibold rounded-[9px] border border-red-200 text-red-600 bg-white hover:bg-red-50 ml-auto">🗑 ปิดใช้งาน</button>}
+            {!editing && canEdit && <button onClick={() => onMode("edit")} className="h-[34px] px-3 text-[12.5px] font-semibold rounded-[9px] bg-indigo-50 text-indigo-700">✏️ แก้ไข</button>}
           </div>
         </div>
 
@@ -377,6 +397,9 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
           </div>
         )}
       </aside>
+      <ConfirmDialog open={confirmOff} onClose={() => { if (!removing) setConfirmOff(false); }} onConfirm={() => void deactivate()} loading={removing}
+        variant="danger" title="ปิดใช้งานคู่ค้านี้?" confirmText="ปิดใช้งาน" cancelText="ไม่ปิด"
+        message={`"${nameOf(form)}" จะหายจากรายชื่อและตัวเลือกคู่ค้า — เอกสารเก่าที่อ้างถึงยังดูได้ตามเดิม · กู้คืนได้ที่หน้า ผู้จำหน่าย / ลูกค้า (เปิดดูรายการที่ลบ แล้วกด ↩ กู้คืน)`} />
       <ConfirmDialog open={confirmClose} onClose={() => setConfirmClose(false)} onConfirm={() => { setConfirmClose(false); onClose(); }}
         title="ออกโดยไม่บันทึก?" message="คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกหรือไม่?" confirmText="ออกโดยไม่บันทึก" variant="danger" />
     </>

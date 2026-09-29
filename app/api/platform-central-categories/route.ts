@@ -33,7 +33,11 @@ export async function PATCH(request: NextRequest) {
   let b: { id?: string; name?: string; sort_order?: number }; try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!b.id) return NextResponse.json({ error: "ต้องมี id" }, { status: 400 });
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (b.name != null) patch.name = String(b.name).trim();
+  if (b.name != null) {
+    const name = String(b.name).trim();
+    if (!name) return NextResponse.json({ error: "ชื่อหมวดว่างไม่ได้" }, { status: 400 });
+    patch.name = name;
+  }
   if (b.sort_order != null) patch.sort_order = b.sort_order;
   const { error } = await supabaseAdmin().from("platform_central_categories").update(patch).eq("id", b.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
