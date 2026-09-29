@@ -15,8 +15,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { usePermission } from "@/components/auth";
-import { ERPModal } from "@/components/modal";
+import { useAuth, usePermission } from "@/components/auth";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { BomLineEditor, emptyLine, type EditorLine } from "@/app/master/bom/line-editor";
 import { ComponentPicker } from "@/components/material-picker";
 import type { BomChangeRequest, BomReqLine } from "@/app/api/bom/change-requests/route";
@@ -215,6 +215,10 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<BomChangeRequest | null>(null);
   const [reason, setReason] = useState("");
+  // ผู้ขอถอนคำขอของตัวเองได้ (ขอผิด/ขอซ้ำ) — เซิร์ฟเวอร์เช็กซ้ำว่าเป็นเจ้าของคำขอจริง
+  const { user } = useAuth();
+  const [cancelling, setCancelling] = useState<BomChangeRequest | null>(null);
+  const isMine = (r: BomChangeRequest) => !!user?.email && r.requested_by_name === user.email;
   /**
    * บรรทัด "พิมพ์ชื่อเอง" ที่ผู้อนุมัติจับคู่กับวัตถุดิบจริงแล้ว — เก็บชั่วคราวในหน้าจอนี้ (คีย์ `reqId:index`)
    * ไม่ได้บันทึกลงคำขอ เพราะจับคู่เสร็จก็กดอนุมัติต่อเลย · ปิดป๊อปก่อนกดอนุมัติ = ต้องจับคู่ใหม่
@@ -294,6 +298,18 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
       if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
       toast.success("ไม่อนุมัติแล้ว"); load(); onChanged?.();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
+
+  const cancelOwn = async (r: BomChangeRequest) => {
+    try {
+      const res = await apiFetch("/api/bom/change-requests", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: r.id, action: "cancel" }),
+      });
+      const j = await res.json();
+      if (!res.ok || j?.error) throw new Error(j?.error || "ยกเลิกไม่สำเร็จ");
+      toast.success("ยกเลิกคำขอแล้ว"); load(); onChanged?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
 
   const STATUS: Record<string, { label: string; cls: string }> = {
@@ -407,8 +423,16 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
                           </div>
                         </div>
 
+                        {r.status === "pending" && !canReview && isMine(r) && (
+                          <button onClick={() => setCancelling(r)}
+                            className="shrink-0 h-7 px-2.5 text-[11px] border border-red-200 text-red-600 rounded hover:bg-red-50 whitespace-nowrap">ยกเลิกคำขอ</button>
+                        )}
                         {r.status === "pending" && canReview && (
                           <div className="shrink-0 flex flex-col gap-1">
+                            {isMine(r) && (
+                              <button onClick={() => setCancelling(r)}
+                                className="h-7 px-2.5 text-[11px] border border-red-200 text-red-600 rounded hover:bg-red-50 whitespace-nowrap">ยกเลิกคำขอ</button>
+                            )}
                             <button onClick={() => void approve(r)} disabled={busy === r.id || unresolvedCount(r) > 0}
                               title={unresolvedCount(r) > 0 ? `ยังมี ${unresolvedCount(r)} รายการที่ยังไม่ได้ระบุวัตถุดิบจริง` : "เขียนลงสูตรจริงทันที"}
                               className="h-7 px-2.5 text-[11px] font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-40 whitespace-nowrap">
@@ -430,6 +454,13 @@ export function BomChangeRequestQueue({ open, onClose, onChanged }: {
           </p>
         </div>
       </ERPModal>
+
+      {/* ผู้ขอยกเลิกคำขอของตัวเอง */}
+      <ConfirmDialog open={!!cancelling} onClose={() => setCancelling(null)} variant="danger"
+        onConfirm={() => { const r = cancelling; setCancelling(null); if (r) void cancelOwn(r); }}
+        title="ยกเลิกคำขอแก้สูตรนี้?"
+        message={cancelling ? `คำขอแก้สูตรของ ${cancelling.product_sku ?? cancelling.bom_code ?? "สินค้านี้"} จะถูกยกเลิก (สูตรจริงไม่ถูกแตะ) — ยังเห็นในแท็บ "ทั้งหมด" เป็นประวัติ ถ้ายังต้องการให้ส่งคำขอใหม่` : ""}
+        confirmText="ยกเลิกคำขอ" cancelText="ไม่ยกเลิก" />
 
       <ERPModal open={!!rejecting} onClose={() => setRejecting(null)} size="sm" title="ไม่อนุมัติคำขอแก้สูตร"
         footer={<>

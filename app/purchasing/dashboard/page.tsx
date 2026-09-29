@@ -996,6 +996,16 @@ function LineGroupModal({ open, onClose }: { open: boolean; onClose: () => void 
       else { setCurrent(gid); setMsg({ ok: true, text: "บันทึกกลุ่มขอซื้อแล้ว ✅ ทุกใบขอซื้อจะเด้งเข้ากลุ่มนี้" }); }
     } finally { setBusy(false); }
   };
+  // เอากลุ่มออก = หยุดแจ้งเตือนขอซื้อเข้า LINE (ตั้งกลุ่มใหม่ได้ทุกเมื่อ)
+  const [confirmClear, setConfirmClear] = useState(false);
+  const clear = async () => {
+    setConfirmClear(false); setBusy(true); setMsg(null);
+    try {
+      const j = await apiFetch("/api/purchasing/line-group", { method: "DELETE" }).then(r => r.json());
+      if (j.error) setMsg({ ok: false, text: j.error });
+      else { setCurrent(""); setInput(""); setMsg({ ok: true, text: "เอากลุ่มออกแล้ว — ใบขอซื้อจะไม่เด้งเข้า LINE จนกว่าจะตั้งกลุ่มใหม่" }); }
+    } finally { setBusy(false); }
+  };
   const test = async () => {
     setBusy(true); setMsg(null);
     try {
@@ -1030,6 +1040,17 @@ function LineGroupModal({ open, onClose }: { open: boolean; onClose: () => void 
           <button onClick={save} disabled={busy || !input.trim()} className="flex-1 h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">บันทึกกลุ่มขอซื้อ</button>
           <button onClick={test} disabled={busy || !current} className="h-10 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">ทดสอบส่ง</button>
         </div>
+        {current && (
+          confirmClear ? (
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
+              <span className="flex-1">หยุดแจ้งเตือนขอซื้อเข้ากลุ่มนี้? (ตั้งกลุ่มใหม่ได้ทุกเมื่อ)</span>
+              <button onClick={() => void clear()} disabled={busy} className="h-8 px-3 font-medium bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50">ยืนยัน</button>
+              <button onClick={() => setConfirmClear(false)} disabled={busy} className="h-8 px-3 border border-slate-200 bg-white text-slate-600 rounded-md">ไม่เอาออก</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmClear(true)} disabled={busy} className="text-xs text-rose-600 hover:underline disabled:opacity-50">🗑 เอากลุ่มนี้ออก (หยุดแจ้งเตือนขอซื้อเข้า LINE)</button>
+          )
+        )}
       </div>
     </ERPModal>
   );

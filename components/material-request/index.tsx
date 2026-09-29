@@ -13,8 +13,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { usePermission } from "@/components/auth";
-import { ERPModal } from "@/components/modal";
+import { useAuth, usePermission } from "@/components/auth";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ImageAttachKeys } from "@/components/image-attach";
 import { UomPicker } from "@/components/uom-picker";
 import { SupplierPicker, type SupplierPickerValue } from "@/components/pickers";
@@ -164,6 +164,10 @@ export function MaterialRequestQueue({ open, onClose, onChanged }: {
   const [approving, setApproving] = useState<MaterialRequest | null>(null);   // เปิด SkuWizard ให้สร้างจริง
   const [rejecting, setRejecting] = useState<MaterialRequest | null>(null);
   const [reason, setReason] = useState("");
+  // ผู้ขอถอนคำขอของตัวเองได้ (ขอผิด/ขอซ้ำ) — เซิร์ฟเวอร์เช็กซ้ำว่าเป็นเจ้าของคำขอจริง
+  const { user } = useAuth();
+  const [cancelling, setCancelling] = useState<MaterialRequest | null>(null);
+  const isMine = (r: MaterialRequest) => !!user?.email && r.requested_by_name === user.email;
 
   const load = useCallback(() => {
     apiFetch(`/api/master/material-requests?status=${tab}`).then((r) => r.json())
@@ -171,7 +175,7 @@ export function MaterialRequestQueue({ open, onClose, onChanged }: {
   }, [tab]);
   useEffect(() => { if (open) load(); }, [open, load]);
 
-  const finish = async (r: MaterialRequest, action: "approve" | "reject", extra: Record<string, unknown> = {}) => {
+  const finish = async (r: MaterialRequest, action: "approve" | "reject" | "cancel", extra: Record<string, unknown> = {}) => {
     try {
       const res = await apiFetch("/api/master/material-requests", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -179,7 +183,7 @@ export function MaterialRequestQueue({ open, onClose, onChanged }: {
       });
       const j = await res.json();
       if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
-      toast.success(action === "approve" ? "อนุมัติแล้ว" : "ไม่อนุมัติแล้ว");
+      toast.success(action === "approve" ? "อนุมัติแล้ว" : action === "cancel" ? "ยกเลิกคำขอแล้ว" : "ไม่อนุมัติแล้ว");
       load(); onChanged?.();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
   };
@@ -235,8 +239,16 @@ export function MaterialRequestQueue({ open, onClose, onChanged }: {
                             {r.status === "rejected" && r.reject_reason && <span className="text-slate-500"> · {r.reject_reason}</span>}
                           </div>
                         </div>
+                        {r.status === "pending" && !canReview && isMine(r) && (
+                          <button onClick={() => setCancelling(r)}
+                            className="shrink-0 h-7 px-2.5 text-[11px] border border-red-200 text-red-600 rounded hover:bg-red-50 whitespace-nowrap">ยกเลิกคำขอ</button>
+                        )}
                         {r.status === "pending" && canReview && (
                           <div className="shrink-0 flex flex-col gap-1">
+                            {isMine(r) && (
+                              <button onClick={() => setCancelling(r)}
+                                className="h-7 px-2.5 text-[11px] border border-red-200 text-red-600 rounded hover:bg-red-50 whitespace-nowrap">ยกเลิกคำขอ</button>
+                            )}
                             <button onClick={() => setApproving(r)}
                               className="h-7 px-2.5 text-[11px] font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 whitespace-nowrap">✓ อนุมัติ → สร้าง</button>
                             <button onClick={() => { setRejecting(r); setReason(""); }}
@@ -264,6 +276,13 @@ export function MaterialRequestQueue({ open, onClose, onChanged }: {
             setApproving(null);
           }} />
       )}
+
+      {/* ผู้ขอยกเลิกคำขอของตัวเอง */}
+      <ConfirmDialog open={!!cancelling} onClose={() => setCancelling(null)} variant="danger"
+        onConfirm={() => { const r = cancelling; setCancelling(null); if (r) void finish(r, "cancel"); }}
+        title="ยกเลิกคำขอนี้?"
+        message={cancelling ? `คำขอเพิ่ม "${String(cancelling.values?.name_th ?? cancelling.values?.code ?? "วัตถุดิบ")}" จะถูกยกเลิก — ยังเห็นในแท็บ "ทั้งหมด" เป็นประวัติ ถ้ายังต้องการให้ส่งคำขอใหม่` : ""}
+        confirmText="ยกเลิกคำขอ" cancelText="ไม่ยกเลิก" />
 
       {/* ไม่อนุมัติ */}
       <ERPModal open={!!rejecting} onClose={() => setRejecting(null)} size="sm" title="ไม่อนุมัติคำขอ"

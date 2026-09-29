@@ -4,12 +4,15 @@
  * GET  → { captured, captured_at, current, has_token }   // group id ล่าสุดที่บอทจับได้ + กลุ่มขอซื้อปัจจุบัน
  * POST { group_id } → บันทึกเป็นกลุ่มขอซื้อ (merge groups.purchase_request ไม่ทับ config อื่น)
  * POST { test: true } → ส่งข้อความทดสอบเข้ากลุ่มขอซื้อ
+ * DELETE → เอากลุ่มขอซื้อออก (หยุดแจ้งเตือนขอซื้อเข้า LINE) — ไม่แตะโทเคน/กลุ่มอื่น
  *
  * ใช้บอท/โทเคนเดิมจาก china_app_settings.line_config · webhook (line-webhook) เขียน group_id ให้อัตโนมัติ
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -61,4 +64,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (id) await admin.from("china_app_settings").update({ sval: next }).eq("id", id);
   else await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
   return NextResponse.json({ ok: true, saved: gid, error: null });
+}
+
+// เอากลุ่มขอซื้อออก = หยุดแจ้งเตือนขอซื้อเข้า LINE (ตั้งใหม่ได้ทุกเมื่อ) — เดิมตั้งแล้วเปลี่ยนได้อย่างเดียว ปิดไม่ได้
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const admin = supabaseAdmin();
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const { id, cfg } = await readCfg(admin);
+  const old = cfg.groups?.purchase_request ?? "";
+  if (!id || !old) return NextResponse.json({ ok: true, cleared: false, error: null });
+
+  const groups = { ...(cfg.groups ?? {}) };
+  delete groups.purchase_request;
+  const { error } = await admin.from("china_app_settings").update({ sval: { ...cfg, groups } }).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await writeAudit(admin, {
+    action: "update", entityType: "china_app_settings", entityId: id,
+    actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { setting: "line_config.groups.purchase_request", old, new: null },
+  });
+  return NextResponse.json({ ok: true, cleared: true, error: null });
 }
