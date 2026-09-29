@@ -4,8 +4,10 @@
 // มุมมองผู้บริหาร (Executive Command Center) — เห็นสุขภาพธุรกิจทั้งบริษัทในหน้าเดียว
 // self-contained: โหลด /api/dashboard/executive เอง (gate admin ที่ server)
 // ป้ายสถานะข้อมูล: 🟢 = ข้อมูลจริงพร้อม · 🟡 = ต้องเชื่อมเพิ่ม/ชุดตัวอย่าง
+// รวม "การ์ดระบบ" เข้ามาแล้ว: งานค้าง (แจ้งเตือน) ของ 6 แผนกอยู่ในแท็บแผนก · ระบบอื่นอยู่ท้ายหน้า
+// หน้าตา 3 แบบ (จอคอม/แท็บเล็ต/มือถือ) ตัดสินด้วย prop `layout` (ของกลาง device-view)
 // ============================================================
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -14,6 +16,11 @@ import type { DeptOverview } from "@/app/api/dashboard/dept-overview/route";
 import type { DeptItemGroup } from "@/app/api/dashboard/dept-items/route";
 import { ResizableModal } from "@/components/resizable-modal";
 import { LineConsole } from "@/components/line-console";
+import type { DeviceLayout } from "@/components/device-view";
+import type { Notification } from "@/app/api/notifications/route";
+import type { DashboardPanel } from "@/lib/dashboard-systems";
+import { SystemCards, pendingBySystem, type SystemApp } from "./system-cards";
+import { DeptTabs, type DeptDef, type DeptStat } from "./dept-tabs";
 
 const baht  = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
 const bahtC = (n: number) => {
@@ -34,7 +41,27 @@ function Dot({ real }: { real: boolean }) {
   );
 }
 
-export function ExecutiveView() {
+// งานค้าง (แจ้งเตือน) ต่อระบบ — ส่งมาจากหน้า dashboard (ชุดเดียวกับที่ "การ์ดระบบ" ใช้)
+export type ExecutiveSystems = {
+  apps: SystemApp[];
+  list: Notification[];
+  panels: Map<string, DashboardPanel>;
+  metrics?: Record<string, number>;
+  team?: boolean;
+  onOpen: (n: Notification) => void;
+  onDone?: (n: Notification) => void;
+  onSeeAll?: (appKey: string) => void;
+  onConfig?: (appKey: string) => void;
+};
+
+const DEPT_KEYS = ["production", "purchasing", "sales", "qc", "design", "tasks"];
+
+export function ExecutiveView({ layout = "desktop", systems }: { layout?: DeviceLayout; systems?: ExecutiveSystems }) {
+  const isPhone = layout === "phone";
+  const isDesktop = layout === "desktop";
+  const cols4 = isPhone ? "grid-cols-2" : "grid-cols-4";   // การ์ดตัวเลข: มือถือ 2 ต่อแถว · ที่เหลือ 4
+  const gap = isPhone ? "gap-2" : "gap-3";
+  const [activeDept, setActiveDept] = useState(DEPT_KEYS[0]);
   const [data, setData]       = useState<ExecutiveSummary | null>(null);
   const [dept, setDept]       = useState<DeptOverview | null>(null);   // สรุปต่อแผนก (ของกลาง)
   const [loading, setLoading] = useState(true);
@@ -57,52 +84,73 @@ export function ExecutiveView() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // งานค้างต่อระบบ (ของกลางเดียวกับการ์ดระบบ) + ระบบนอก 6 แผนกที่ยังมีงานค้าง
+  const pending = useMemo(
+    () => (systems ? pendingBySystem(systems.list, systems.panels) : new Map<string, Notification[]>()),
+    [systems],
+  );
+  const otherApps = useMemo(
+    () => (systems?.apps ?? []).filter((a) => !DEPT_KEYS.includes(a.key) && (pending.get(a.key)?.length ?? 0) > 0),
+    [systems, pending],
+  );
+  const systemCards = (apps: SystemApp[], hideEmpty: boolean) => systems && (
+    <SystemCards apps={apps} list={systems.list} panels={systems.panels} metrics={systems.metrics} team={systems.team} isAdmin
+      layout={layout} hideEmpty={hideEmpty}
+      onOpen={systems.onOpen} onDone={systems.onDone} onConfig={systems.onConfig} onSeeAll={systems.onSeeAll} />
+  );
+
   if (loading && !data) {
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={`grid ${cols4} ${gap}`}>
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-white rounded-xl border border-slate-200 animate-pulse" />)}
         </div>
         <div className="h-40 bg-white rounded-xl border border-slate-200 animate-pulse" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={`grid ${cols4} ${gap}`}>
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-white rounded-xl border border-slate-200 animate-pulse" />)}
         </div>
       </div>
     );
   }
-  if (err) {
+  if (err || !data) {
+    // โหลดตัวเลขผู้บริหารไม่ได้ → ยังต้องเห็นงานค้างตามระบบ (การ์ดระบบเดิม) ไม่ให้หน้าว่าง
     return (
-      <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-        <div className="text-3xl mb-2 opacity-60">🔒</div>
-        <p className="text-sm text-red-700">{err}</p>
-        <button onClick={load} className="mt-3 text-xs text-red-600 underline">ลองใหม่</button>
+      <div className="space-y-4">
+        {err && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+            <p className="text-sm text-red-700">{err}</p>
+            <button onClick={load} className="mt-2 text-xs text-red-600 underline">ลองใหม่</button>
+          </div>
+        )}
+        {systems && systemCards(systems.apps, false)}
       </div>
     );
   }
-  if (!data) return null;
 
   const f = data.finance, s = data.sales, o = data.ops;
   const odPct = data.finance.od_limit > 0 ? Math.min(100, Math.round((f.od_used / f.od_limit) * 100)) : 0;
 
+  const depts = buildDepts(s, f, o, dept);
+  const asOf = `อัปเดต ${new Date(data.as_of).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} · เรต ¥1 = ฿${data.fx_rate}`;
+
   return (
-    <div className="space-y-5">
+    <div className={isPhone ? "space-y-4" : "space-y-5"}>
       {/* legend + ปุ่มศูนย์ LINE */}
-      <div className="flex items-center gap-4 text-xs text-slate-500">
+      <div className={`flex items-center text-xs text-slate-500 ${isPhone ? "gap-x-3 gap-y-1.5 flex-wrap" : "gap-4"}`}>
         <span className="inline-flex items-center gap-1.5"><Dot real /> ข้อมูลจริงพร้อม</span>
-        <span className="inline-flex items-center gap-1.5"><Dot real={false} /> ต้องเชื่อมข้อมูลเพิ่ม / ชุดตัวอย่าง</span>
-        <div className="ml-auto flex items-center gap-3">
+        <span className="inline-flex items-center gap-1.5"><Dot real={false} /> {isPhone ? "ประมาณ / ชุดตัวอย่าง" : "ต้องเชื่อมข้อมูลเพิ่ม / ชุดตัวอย่าง"}</span>
+        <div className={`flex items-center gap-3 ${isPhone ? "w-full justify-between" : "ml-auto"}`}>
+          {isPhone && <span className="text-slate-400">{asOf}</span>}
           <button onClick={() => setLineOpen(true)}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors">
             🔔 ศูนย์ LINE
           </button>
-          <span className="text-slate-400 hidden sm:inline">
-            อัปเดต {new Date(data.as_of).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} · เรต ¥1 = ฿{data.fx_rate}
-          </span>
+          {!isPhone && <span className="text-slate-400">{asOf}</span>}
         </div>
       </div>
 
       {/* ---- KPI ผลประกอบการ ---- */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={`grid ${cols4} ${gap}`}>
         <Kpi icon="💰" label="ยอดขายวันนี้"      value={bahtC(s.today)} real={false} hint="ทุกช่องทางรวมกัน" />
         <Kpi icon="📈" label="ยอดขายเดือนนี้"     value={bahtC(s.month)} real={false}
              hint={`ภายใน ${bahtC(s.internal_month)} · ออนไลน์ ${bahtC(s.marketplace_month)}`} />
@@ -112,14 +160,21 @@ export function ExecutiveView() {
              hint="เงินกู้ + OD ที่ใช้ไป" />
       </div>
 
-      {/* ---- แยกตามแผนก (ตัวเลขสำคัญ + กดเจาะเข้าดู) ---- */}
+      {/* ---- แยกตามแผนก (แท็บ): ตัวเลขสำคัญ + งานค้างของแผนก + เปิดแดชบอร์ดแผนก ---- */}
       <SectionLabel>แยกตามแผนก</SectionLabel>
-      <p className="text-[11px] text-slate-400 -mt-1 px-0.5">กดที่การ์ดเพื่อเปิดแดชบอร์ดของแผนกนั้นในหน้าต่าง · หรือ &ldquo;ดูทั้งหมด →&rdquo; เพื่อเปิดหน้าเต็ม</p>
-      <DeptGrid s={s} f={f} o={o} dept={dept} onOpen={(d) => setOpenDept(d)} />
+      <p className="text-[11px] text-slate-400 -mt-1 px-0.5">
+        {isDesktop
+          ? <>กดแท็บเพื่อดูตัวเลขและงานค้างของแผนก · &ldquo;⤢ เปิดในหน้าต่าง&rdquo; = ดูแดชบอร์ดแผนกโดยไม่ออกจากหน้านี้</>
+          : "แตะแท็บเพื่อดูตัวเลขและงานค้างของแผนก"}
+      </p>
+      <DeptTabs depts={depts} layout={layout} active={activeDept} onActive={setActiveDept}
+        pending={pending} team={systems?.team}
+        onOpenDashboard={(d) => setOpenDept({ key: d.key, label: d.label, icon: d.icon, stats: d.stats, embedUrl: d.href })}
+        onOpen={systems?.onOpen} onDone={systems?.onDone} onSeeAll={systems?.onSeeAll} onConfig={systems?.onConfig} />
 
       {/* ---- การเงิน ---- */}
       <SectionLabel>การเงิน</SectionLabel>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={`grid ${cols4} ${gap}`}>
         <FinCard icon="🔺" iconTone="text-red-500" title="เจ้าหนี้ค้างจ่าย" real
           value={baht(f.ap_unpaid)} sub={`${f.ap_count} ใบ · จ่ายซัพพลายเออร์`} href="/purchasing/dashboard" />
         <FinCard icon="🔻" iconTone="text-emerald-500" title="ลูกหนี้ค้างเก็บ" real={false}
@@ -138,7 +193,7 @@ export function ExecutiveView() {
 
       {/* ---- คลัง · ผลิต · จัดซื้อ ---- */}
       <SectionLabel>คลัง · ผลิต · จัดซื้อ</SectionLabel>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={`grid ${cols4} ${gap}`}>
         <FinCard icon="📦" title="มูลค่าสต๊อก" real={false}
           value={bahtC(data.stock.value)}
           sub={data.stock.low > 0 ? `⚠️ ของใกล้หมด ${data.stock.low} รายการ` : "สต๊อกปกติ"}
@@ -155,8 +210,16 @@ export function ExecutiveView() {
           subTone={o.qc_defect > 0 ? "text-amber-600" : undefined} href="/master/qc-warehouse" />
       </div>
 
+      {/* ---- ระบบอื่น ๆ (นอก 6 แผนก) ที่ยังมีงานค้าง — การ์ดระบบเดิม ---- */}
+      {otherApps.length > 0 && (
+        <>
+          <SectionLabel>ระบบอื่น ๆ ที่มีงานค้าง</SectionLabel>
+          {systemCards(otherApps, true)}
+        </>
+      )}
+
       <p className="text-[11px] text-slate-400 pt-1">
-        🟡 = ค่าประมาณหรือชุดตัวอย่าง (ยอดขาย/กำไร/ลูกหนี้/OD/สต๊อก) — จะแม่นขึ้นเมื่อป้อนข้อมูลจริงครบ · เฉพาะแอดมินเห็นหน้านี้
+        🟡 = ค่าประมาณหรือชุดตัวอย่าง (ยอดขาย/กำไร/ลูกหนี้/OD/สต๊อก) — จะแม่นขึ้นเมื่อป้อนข้อมูลจริงครบ · เฉพาะแอดมินเห็นตัวเลขส่วนนี้
       </p>
 
       {openDept && <DeptItemsModal dept={openDept} onClose={() => setOpenDept(null)} />}
@@ -207,83 +270,57 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-[13px] font-semibold text-slate-500 -mb-1 px-0.5">{children}</div>;
 }
 
-// ---- การ์ดแผนก (ของกลาง): หัวข้อ + ปุ่มเจาะเข้าดู + ตัวเลขสำคัญ ----
-type DeptStat = { v: React.ReactNode; l: string; tone?: "danger" | "warning" };
-type DeptDrill = { key: string; label: string; icon: string; stats: DeptStat[]; embedUrl?: string };   // ข้อมูลเปิด Popup (KPI+รายการ หรือ ฝังหน้าเต็ม)
+// ---- ข้อมูลเปิด Popup แดชบอร์ดแผนก (KPI+รายการ หรือ ฝังหน้าเต็ม) ----
+type DeptDrill = { key: string; label: string; icon: string; stats: DeptStat[]; embedUrl?: string };
 const statTone = (t?: DeptStat["tone"]) =>
   t === "danger" ? "text-red-600" : t === "warning" ? "text-amber-600" : "text-slate-800";
 
-function DeptCard({ icon, title, href, dept, onOpen, stats, embed }: {
-  icon: string; title: string; href: string; dept: string;
-  onOpen: (d: DeptDrill) => void; stats: DeptStat[]; embed?: boolean;
-}) {
-  return (
-    <div onClick={() => onOpen({ key: dept, label: title, icon, stats, embedUrl: embed ? href : undefined })}
-      className="block bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-300 hover:shadow-sm transition-all cursor-pointer">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-lg leading-none">{icon}</span>
-        <span className="text-sm font-semibold text-slate-800 flex-1 truncate">{title}</span>
-        <Link href={href} onClick={(e) => e.stopPropagation()} className="text-xs text-blue-600 shrink-0 hover:underline">ดูทั้งหมด →</Link>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        {stats.map((st, i) => (
-          <div key={i}>
-            <div className={`text-xl font-bold tabular-nums ${statTone(st.tone)}`}>{st.v}</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">{st.l}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---- 6 การ์ดแผนก: ผลิต / ซื้อ / ขาย / QC / Design / จัดการงาน ----
-function DeptGrid({ s, f, o, dept, onOpen }: {
-  s: ExecutiveSummary["sales"]; f: ExecutiveSummary["finance"]; o: ExecutiveSummary["ops"];
-  dept: DeptOverview | null;
-  onOpen: (d: DeptDrill) => void;
-}) {
+// ---- 6 แผนก: ผลิต / ซื้อ / ขาย / QC / Design / จัดการงาน (ตัวเลขสำคัญต่อแผนก) ----
+function buildDepts(
+  s: ExecutiveSummary["sales"], f: ExecutiveSummary["finance"], o: ExecutiveSummary["ops"], dept: DeptOverview | null,
+): DeptDef[] {
   const p = dept?.production, pu = dept?.purchasing, sa = dept?.sales, q = dept?.qc, d = dept?.design, t = dept?.tasks;
-  const n  = (x?: number) => (x ?? 0).toLocaleString("th-TH");
-  const gt0 = (x?: number) => (x ?? 0) > 0;
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <DeptCard icon="🏭" title="ผลิต" href="/master/production-dashboard" dept="production" onOpen={onOpen} embed stats={[
-        { v: n(p?.in_production), l: "กำลังผลิต (ใบ)" },
-        { v: n(p?.unassigned),   l: "ยังไม่แจกงาน" },
-        { v: n(o.mo_overdue),    l: "เลยกำหนด", tone: gt0(o.mo_overdue) ? "danger" : undefined },
-        { v: bahtC(p?.labor_month ?? 0), l: "ค่าแรงเดือนนี้" },
-      ]} />
-      <DeptCard icon="🛒" title="ซื้อ (จัดซื้อ)" href="/purchasing/dashboard" dept="purchasing" onOpen={onOpen} embed stats={[
-        { v: n(o.pr_waiting),       l: "ขอซื้อรออนุมัติ", tone: gt0(o.pr_waiting) ? "warning" : undefined },
-        { v: n(pu?.awaiting_goods), l: "รอของเข้า" },
-        { v: bahtC(f.ap_unpaid),    l: "ค้างจ่าย", tone: gt0(f.ap_unpaid) ? "danger" : undefined },
-        { v: bahtC(pu?.spend_month ?? 0), l: "ยอดซื้อเดือนนี้" },
-      ]} />
-      <DeptCard icon="💰" title="ขาย" href="/sales-orders" dept="sales" onOpen={onOpen} embed stats={[
-        { v: bahtC(s.internal_month), l: "ยอดขายเดือนนี้" },
-        { v: n(f.ar_count),           l: "ใบวางบิลค้าง", tone: gt0(f.ar_count) ? "warning" : undefined },
-        { v: n(sa?.orders_month),     l: "ออเดอร์เดือนนี้" },
-        { v: bahtC(f.ar_due),         l: "ลูกหนี้ค้างเก็บ" },
-      ]} />
-      <DeptCard icon="✅" title="QC" href="/master/qc-warehouse" dept="qc" onOpen={onOpen} embed stats={[
-        { v: n(o.qc_defect),      l: "ของเสียค้าง", tone: gt0(o.qc_defect) ? "danger" : undefined },
-        { v: n(q?.pending_check), l: "งานรอตรวจ", tone: gt0(q?.pending_check) ? "warning" : undefined },
-      ]} />
-      <DeptCard icon="🎨" title="Design (ออกแบบ)" href="/master/design-dashboard" dept="design" onOpen={onOpen} embed stats={[
-        { v: n(d?.due_soon),  l: "ใกล้ครบกำหนด", tone: gt0(d?.due_soon) ? "danger" : undefined },
-        { v: n(d?.designing), l: "กำลังออกแบบ" },
-        { v: n(d?.quoted),    l: "รอส่งลูกค้า" },
-        { v: n(d?.revising),  l: "กำลังแก้ไข" },
-      ]} />
-      <DeptCard icon="🗂️" title="จัดการงาน" href="/tasks" dept="tasks" onOpen={onOpen} embed stats={[
-        { v: n(t?.total_active),   l: "งานทั้งหมด" },
-        { v: n(t?.review_pending), l: "รอตรวจ/อนุมัติ", tone: gt0(t?.review_pending) ? "warning" : undefined },
-        { v: n(t?.overdue),        l: "เกินกำหนด", tone: gt0(t?.overdue) ? "danger" : undefined },
-        { v: n(t?.done_month),     l: "เสร็จเดือนนี้" },
-      ]} />
-    </div>
-  );
+  // tone (แดง/เหลือง) ติดเฉพาะเมื่อค่ามากกว่า 0
+  const stat = (x: number | undefined, v: string, l: string, tone?: DeptStat["tone"]): DeptStat =>
+    ({ v, l, n: x ?? 0, tone: (x ?? 0) > 0 ? tone : undefined });
+  const num   = (x: number | undefined, l: string, tone?: DeptStat["tone"]) => stat(x, (x ?? 0).toLocaleString("th-TH"), l, tone);
+  const money = (x: number | undefined, l: string, tone?: DeptStat["tone"]) => stat(x, bahtC(x ?? 0), l, tone);
+  return [
+    { key: "production", icon: "🏭", label: "ผลิต", short: "ผลิต", href: "/master/production-dashboard", stats: [
+      num(p?.in_production, "กำลังผลิต (ใบ)"),
+      num(p?.unassigned, "ยังไม่แจกงาน"),
+      num(o.mo_overdue, "เลยกำหนด", "danger"),
+      money(p?.labor_month, "ค่าแรงเดือนนี้"),
+    ] },
+    { key: "purchasing", icon: "🛒", label: "ซื้อ (จัดซื้อ)", short: "จัดซื้อ", href: "/purchasing/dashboard", stats: [
+      num(o.pr_waiting, "ขอซื้อรออนุมัติ", "warning"),
+      num(pu?.awaiting_goods, "รอของเข้า"),
+      money(f.ap_unpaid, "ค้างจ่าย", "danger"),
+      money(pu?.spend_month, "ยอดซื้อเดือนนี้"),
+    ] },
+    { key: "sales", icon: "💰", label: "ขาย", short: "ขาย", href: "/sales-orders", stats: [
+      money(s.internal_month, "ยอดขายเดือนนี้"),
+      num(f.ar_count, "ใบวางบิลค้าง", "warning"),
+      num(sa?.orders_month, "ออเดอร์เดือนนี้"),
+      money(f.ar_due, "ลูกหนี้ค้างเก็บ"),
+    ] },
+    { key: "qc", icon: "✅", label: "QC", short: "QC", href: "/master/qc-warehouse", stats: [
+      num(o.qc_defect, "ของเสียค้าง", "danger"),
+      num(q?.pending_check, "งานรอตรวจ", "warning"),
+    ] },
+    { key: "design", icon: "🎨", label: "Design (ออกแบบ)", short: "ออกแบบ", href: "/master/design-dashboard", stats: [
+      num(d?.due_soon, "ใกล้ครบกำหนด", "danger"),
+      num(d?.designing, "กำลังออกแบบ"),
+      num(d?.quoted, "รอส่งลูกค้า"),
+      num(d?.revising, "กำลังแก้ไข"),
+    ] },
+    { key: "tasks", icon: "🗂️", label: "จัดการงาน", short: "จัดการงาน", tiny: "งาน", href: "/tasks", stats: [
+      num(t?.total_active, "งานทั้งหมด"),
+      num(t?.review_pending, "รอตรวจ/อนุมัติ", "warning"),
+      num(t?.overdue, "เกินกำหนด", "danger"),
+      num(t?.done_month, "เสร็จเดือนนี้"),
+    ] },
+  ];
 }
 
 // ---- Popup: รายการที่ต้องจัดการ ต่อแผนก (กดจากการ์ด) ----

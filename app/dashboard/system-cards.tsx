@@ -7,6 +7,7 @@
 // ============================================================
 import { systemForEvent, eventEnabled, colorForSystem, METRIC_LABEL, type DashboardPanel } from "@/lib/dashboard-systems";
 import type { Notification, TeamNotification } from "@/app/api/notifications/route";
+import type { DeviceLayout } from "@/components/device-view";
 
 export type SystemApp = { key: string; label: string; icon: string | null; icon_url?: string | null };
 
@@ -32,6 +33,47 @@ function dueLabel(iso: string): string {
   return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
 }
 
+// จัดกลุ่ม "งานค้าง" (ยังไม่อ่าน + ไม่ได้เลื่อน) → ระบบ · เรียงด่วนก่อน
+// ใช้ร่วมกัน: การ์ดระบบ (หน้านี้) + แท็บแผนกในหน้าภาพรวม (dept-tabs)
+export function pendingBySystem(list: Notification[], panels: Map<string, DashboardPanel>): Map<string, Notification[]> {
+  const bySystem = new Map<string, Notification[]>();
+  for (const n of list) {
+    if (!isActionable(n)) continue;
+    const key = systemForEvent(n.event_type);
+    if (!eventEnabled(panels.get(key), n.event_type)) continue;
+    (bySystem.get(key) ?? bySystem.set(key, []).get(key)!).push(n);
+  }
+  for (const arr of bySystem.values()) arr.sort((a, b) => urgency(b) - urgency(a));
+  return bySystem;
+}
+export const countOverdue = (items: Notification[]) => items.filter(isOverdue).length;
+
+// แถวงานค้าง 1 รายการ (กดเปิด + ✓ ปิดงาน) — ใช้ร่วมกันระหว่างการ์ดระบบ กับ แท็บแผนก
+export function SystemItemRow({ n, team, onOpen, onDone }: {
+  n: Notification; team?: boolean; onOpen: (n: Notification) => void; onDone?: (n: Notification) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-lg hover:bg-slate-50">
+      <button onClick={() => onOpen(n)} className="flex-1 min-w-0 flex items-center gap-2 text-left px-2 py-1.5">
+        <span className="text-sm shrink-0">{n.pinned_at ? "📌" : "•"}</span>
+        <span className="flex-1 min-w-0 text-[13px] text-slate-700 truncate">
+          {n.title}
+          {team && (n as TeamNotification).recipient_name && (
+            <span className="text-slate-400"> · {(n as TeamNotification).recipient_name}</span>
+          )}
+        </span>
+        {n.due_at && (
+          <span className={`text-[11px] shrink-0 ${isOverdue(n) ? "text-red-600 font-medium" : "text-slate-400"}`}>{dueLabel(n.due_at)}</span>
+        )}
+      </button>
+      {onDone && (
+        <button onClick={() => onDone(n)} title="ทำเสร็จแล้ว (เอาออกจากงานค้าง)"
+          className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-emerald-100 hover:text-emerald-600">✓</button>
+      )}
+    </div>
+  );
+}
+
 // ไอคอนต่อระบบ (รูปอัปโหลด > emoji)
 function AppIco({ app, size = 20 }: { app: SystemApp; size?: number }) {
   if (app.icon_url) {
@@ -52,25 +94,23 @@ type Props = {
   onDone?: (n: Notification) => void;  // ✓ ปิดงาน (mark read) — เฉพาะงานของฉัน
   onConfig?: (appKey: string) => void;
   onSeeAll?: (appKey: string) => void;
+  layout?: DeviceLayout;          // รูปแบบจอ (ของกลาง device-view) — ไม่ส่ง = ดูความกว้างจอจริงแบบเดิม
+  hideEmpty?: boolean;            // ไม่มีงานค้าง = ไม่แสดงอะไรเลย + ไม่โชว์แถว "เคลียร์แล้ว" (ใช้ตอนฝังในหน้าภาพรวม)
 };
 
-export function SystemCards({ apps, list, panels, metrics, team, isAdmin, onOpen, onDone, onConfig, onSeeAll }: Props) {
+export function SystemCards({ apps, list, panels, metrics, team, isAdmin, onOpen, onDone, onConfig, onSeeAll, layout, hideEmpty }: Props) {
   // จัดกลุ่มแจ้งเตือน (เฉพาะงานค้าง) → ระบบ
-  const bySystem = new Map<string, Notification[]>();
-  for (const n of list) {
-    if (!isActionable(n)) continue;
-    const key = systemForEvent(n.event_type);
-    if (!eventEnabled(panels.get(key), n.event_type)) continue;
-    (bySystem.get(key) ?? bySystem.set(key, []).get(key)!).push(n);
-  }
+  const bySystem = pendingBySystem(list, panels);
 
   const withItems = apps
-    .map((app) => ({ app, items: (bySystem.get(app.key) ?? []).sort((a, b) => urgency(b) - urgency(a)) }))
+    .map((app) => ({ app, items: bySystem.get(app.key) ?? [] }))
     .filter((x) => x.items.length > 0)
     .sort((a, b) => b.items.length - a.items.length);
-  const cleared = apps.filter((app) => !(bySystem.get(app.key)?.length));
+  const cleared = hideEmpty ? [] : apps.filter((app) => !(bySystem.get(app.key)?.length));
+  const gridCols = layout ? (layout === "phone" ? "grid-cols-1" : "grid-cols-2") : "grid-cols-1 md:grid-cols-2";
 
   if (withItems.length === 0) {
+    if (hideEmpty) return null;
     return (
       <div className="text-center py-14 bg-white border border-slate-200 rounded-2xl">
         <div className="text-4xl mb-2">🎉</div>
@@ -82,9 +122,9 @@ export function SystemCards({ apps, list, panels, metrics, team, isAdmin, onOpen
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className={`grid ${gridCols} gap-3`}>
         {withItems.map(({ app, items }) => {
-          const overdue = items.filter(isOverdue).length;
+          const overdue = countOverdue(items);
           const top = items.slice(0, 3);
           return (
             <div key={app.key} className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-sm transition-shadow flex flex-col">
@@ -112,26 +152,7 @@ export function SystemCards({ apps, list, panels, metrics, team, isAdmin, onOpen
                 )}
               </div>
               <div className="space-y-1 flex-1">
-                {top.map((n) => (
-                  <div key={n.id} className="flex items-center gap-1 rounded-lg hover:bg-slate-50">
-                    <button onClick={() => onOpen(n)} className="flex-1 min-w-0 flex items-center gap-2 text-left px-2 py-1.5">
-                      <span className="text-sm shrink-0">{n.pinned_at ? "📌" : "•"}</span>
-                      <span className="flex-1 min-w-0 text-[13px] text-slate-700 truncate">
-                        {n.title}
-                        {team && (n as TeamNotification).recipient_name && (
-                          <span className="text-slate-400"> · {(n as TeamNotification).recipient_name}</span>
-                        )}
-                      </span>
-                      {n.due_at && (
-                        <span className={`text-[11px] shrink-0 ${isOverdue(n) ? "text-red-600 font-medium" : "text-slate-400"}`}>{dueLabel(n.due_at)}</span>
-                      )}
-                    </button>
-                    {onDone && (
-                      <button onClick={() => onDone(n)} title="ทำเสร็จแล้ว (เอาออกจากงานค้าง)"
-                        className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-emerald-100 hover:text-emerald-600">✓</button>
-                    )}
-                  </div>
-                ))}
+                {top.map((n) => <SystemItemRow key={n.id} n={n} team={team} onOpen={onOpen} onDone={onDone} />)}
               </div>
               {onSeeAll && (
                 <button onClick={() => onSeeAll(app.key)} className="text-xs text-blue-600 hover:underline mt-2 self-end">

@@ -24,6 +24,7 @@ import { SortTh, sortRows, type SortState } from "@/components/sort-th";
 import { PinnedWidget, RecentWidget, AgendaWidget, FinanceWidget, ActivityWidget, TeamWidget, ShortcutsWidget, StatWidget, SalesChartWidget, PlanWidget } from "./widgets";
 import { PlannerView } from "./planner-view";
 import { layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
+import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame } from "@/components/device-view";
 
 // ---- Event type → icon (ครอบคลุม event ที่ไหลเข้ามาจริง) ----
 const EVENT_ICON: Record<string, string> = {
@@ -83,6 +84,12 @@ type Tab = "unread" | "pinned" | "all" | "snoozed" | "team";
 
 export default function DashboardPage() {
   const { user, can } = useAuth();
+
+  // รูปแบบจอ (ของกลาง device-view): อัตโนมัติตามจอจริง หรือเลือกเอง (?device=) → เลือกแคบกว่าจอจริง = กรอบพรีวิว + QR
+  const viewport = useViewportLayout();
+  const { mode: deviceMode, setMode: setDeviceMode, layout } = useDeviceMode(viewport);
+  const isPhone = layout === "phone";
+  const isDesktop = layout === "desktop";
 
   // ---- แดชบอร์ดรวมทุกระบบ: view + scope + ระบบ + ตั้งค่าการ์ด ----
   const [view, setView]   = useState<DashboardView>("systems");
@@ -305,78 +312,89 @@ export default function DashboardPage() {
   const myLayout = useMemo(() => layoutForRole(layouts, user?.role), [layouts, user]);
   useEffect(() => {
     if (viewInitRef.current || !user || !layoutsLoaded) return;
-    setView(myLayout.default_view);
+    // "executive" (ผู้บริหาร) ถูกรวมเข้ากับ "systems" (การ์ดระบบ) เป็นแท็บเดียวแล้ว
+    setView(myLayout.default_view === "executive" ? "systems" : myLayout.default_view);
     viewInitRef.current = true;
   }, [user, layoutsLoaded, myLayout]);
 
-  return (
-    <PlaygroundShell>
+  // แท็บแรก = "ภาพรวม": แอดมินเห็นตัวเลขผู้บริหาร + งานค้างตามแผนก/ระบบ ในหน้าเดียว · คนอื่นเห็นการ์ดระบบ
+  const overviewExec = isAdmin && view === "systems";
+  const padX = isPhone ? "px-3" : isDesktop ? "px-8" : "px-5";
+  const maxW = wideView ? "max-w-7xl" : "max-w-4xl";
+  const segBtn = (on: boolean) =>
+    `${isPhone ? "text-xs px-2 flex-1" : "text-sm px-3"} py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
+  const seeAllOf = (k: string) => { setView("list"); setListMode("notif"); setListFilter(k); setTab("all"); };
+
+  // ---- widget เสริม (เรียง/เปิด-ปิด ตามหน้าแดชบอร์ดของตำแหน่ง — เฟส 3) ----
+  const widgetStrip = myLayout.widgets.map((w) => {
+    if (w === "goals") return <GoalsEntryCard key="goals" />;
+    if (w === "kpi") return <KpiStrip key="kpi" unread={unread} metrics={metrics} apps={visibleApps} />;
+    if (w === "focus") return (scope === "mine" && view === "systems" && focusItems.length > 0)
+      ? <FocusBand key="focus" items={focusItems} onOpen={openItem} /> : null;
+    // แผนวันนี้: มุมมองแผนงานมีบอร์ดเต็มอยู่แล้ว ไม่ต้องโชว์การ์ดสรุปซ้ำ
+    if (w === "plan") return (scope === "mine" && view !== "planner")
+      ? <PlanWidget key="plan" onOpenPlanner={() => setView("planner")} /> : null;
+    if (w === "pinned") return <PinnedWidget key="pinned" items={items} onOpen={openItem} />;
+    if (w === "recent") return <RecentWidget key="recent" items={items} onOpen={openItem} />;
+    if (w === "agenda") return <AgendaWidget key="agenda" items={items} onOpen={openItem} />;
+    if (w === "finance") return <FinanceWidget key="finance" items={items} onOpen={openItem} />;
+    if (w === "activity") return <ActivityWidget key="activity" activity={activity} />;
+    if (w === "team") return teamAllowed ? <TeamWidget key="team" teamItems={teamItems} /> : null;
+    if (w === "shortcuts") return <ShortcutsWidget key="shortcuts" apps={visibleApps} />;
+    if (w === "lowstock") return <StatWidget key="lowstock" icon="📦" title="สต๊อกใกล้หมด" value={stats?.products_low_stock ?? 0} unit="รายการ" href="/inventory" hint="สินค้าต่ำกว่าขั้นต่ำ" />;
+    if (w === "production") return <StatWidget key="production" icon="🏭" title="สถานะผลิต" value={metrics.production ?? 0} unit="งานยังไม่เสร็จ" href="/master/manufacturing-orders" />;
+    if (w === "saleschart") return <SalesChartWidget key="saleschart" data={salesTrend} />;
+    return null;
+  });
+
+  const body = (
+    <div className={layout === viewport ? "" : "min-h-[82vh] bg-slate-50"}>
       {/* ---- Header ---- */}
-      <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
-        <div className={`mx-auto w-full flex flex-wrap items-start justify-between gap-3 ${wideView ? "max-w-7xl" : "max-w-4xl"}`}>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
+      <div className={`bg-white border-b border-slate-200 ${padX} ${isPhone ? "py-3" : "py-5"}`}>
+        <div className={`mx-auto w-full flex items-start justify-between gap-3 ${isPhone ? "" : "flex-wrap"} ${maxW}`}>
+          <div className="min-w-0">
+            <h1 className={`font-bold text-slate-900 truncate ${isPhone ? "text-lg" : "text-2xl"}`}>
               สวัสดี {firstName || "ผู้ใช้"} 👋
             </h1>
-            <p className="text-sm text-slate-500 mt-1">
+            <p className={`text-slate-500 ${isPhone ? "text-xs mt-0.5" : "text-sm mt-1"}`}>
               {unread > 0
-                ? <>คุณมีงานค้าง <span className="font-semibold text-slate-700">{unread}</span> รายการ</>
+                ? <>{isPhone ? "งานค้าง" : "คุณมีงานค้าง"} <span className="font-semibold text-slate-700">{unread}</span> รายการ</>
                 : "ไม่มีงานค้าง เยี่ยมมาก! 🎉"}
-              {user && <span className="text-slate-400"> · บทบาท {roleLabel(user.role)}</span>}
+              {user && <span className="text-slate-400"> · {isPhone ? "" : "บทบาท "}{roleLabel(user.role)}</span>}
             </p>
           </div>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            {lastRefreshed && <span className="hidden sm:inline">อัปเดต {lastRefreshed.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}</span>}
-            <button onClick={() => { loadNotifications(); loadTeam(); }} disabled={loadingN}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-              <span className={loadingN ? "animate-spin" : ""}>🔄</span> รีเฟรช
+          <div className="flex items-center gap-2 text-xs text-slate-400 shrink-0">
+            {isDesktop && lastRefreshed && <span>อัปเดต {lastRefreshed.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}</span>}
+            <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
+            <button onClick={() => { loadNotifications(); loadTeam(); }} disabled={loadingN} title="รีเฟรช"
+              className={`inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 ${isPhone ? "w-9 h-9" : "px-2.5 py-1.5"}`}>
+              <span className={loadingN ? "animate-spin" : ""}>🔄</span>{!isPhone && " รีเฟรช"}
             </button>
           </div>
         </div>
       </div>
 
-      <div className={`px-4 sm:px-8 py-5 space-y-5 mx-auto w-full ${wideView ? "max-w-7xl" : "max-w-4xl"}`}>
+      <div className={`${padX} ${isPhone ? "py-3 space-y-3" : "py-5 space-y-5"} mx-auto w-full ${maxW}`}>
         {/* 🚚 เตือนงวดส่งที่เลยกำหนด/ต้องส่งวันนี้ แต่ยังไม่ได้ติ๊กว่าส่งแล้ว (ไม่มีของค้าง = ไม่ขึ้น) */}
         <DeliveryAlert />
-        {/* ---- widget เสริม (เรียง/เปิด-ปิด ตามหน้าแดชบอร์ดของตำแหน่ง — เฟส 3) ---- */}
-        {/* มุมมองผู้บริหารเป็นหน้าเต็มของตัวเอง ไม่โชว์ widget strip ซ้ำ */}
-        {view !== "executive" && myLayout.widgets.map((w) => {
-          if (w === "goals") return <GoalsEntryCard key="goals" />;
-          if (w === "kpi") return <KpiStrip key="kpi" unread={unread} metrics={metrics} apps={visibleApps} />;
-          if (w === "focus") return (scope === "mine" && view === "systems" && focusItems.length > 0)
-            ? <FocusBand key="focus" items={focusItems} onOpen={openItem} /> : null;
-          // แผนวันนี้: มุมมองแผนงานมีบอร์ดเต็มอยู่แล้ว ไม่ต้องโชว์การ์ดสรุปซ้ำ
-          if (w === "plan") return (scope === "mine" && view !== "planner")
-            ? <PlanWidget key="plan" onOpenPlanner={() => setView("planner")} /> : null;
-          if (w === "pinned") return <PinnedWidget key="pinned" items={items} onOpen={openItem} />;
-          if (w === "recent") return <RecentWidget key="recent" items={items} onOpen={openItem} />;
-          if (w === "agenda") return <AgendaWidget key="agenda" items={items} onOpen={openItem} />;
-          if (w === "finance") return <FinanceWidget key="finance" items={items} onOpen={openItem} />;
-          if (w === "activity") return <ActivityWidget key="activity" activity={activity} />;
-          if (w === "team") return teamAllowed ? <TeamWidget key="team" teamItems={teamItems} /> : null;
-          if (w === "shortcuts") return <ShortcutsWidget key="shortcuts" apps={visibleApps} />;
-          if (w === "lowstock") return <StatWidget key="lowstock" icon="📦" title="สต๊อกใกล้หมด" value={stats?.products_low_stock ?? 0} unit="รายการ" href="/inventory" hint="สินค้าต่ำกว่าขั้นต่ำ" />;
-          if (w === "production") return <StatWidget key="production" icon="🏭" title="สถานะผลิต" value={metrics.production ?? 0} unit="งานยังไม่เสร็จ" href="/master/manufacturing-orders" />;
-          if (w === "saleschart") return <SalesChartWidget key="saleschart" data={salesTrend} />;
-          return null;
-        })}
+        {/* widget เสริม: หน้าภาพรวมของแอดมินย้ายไปไว้ใต้ตัวเลขผู้บริหาร (ตัวเลขธุรกิจต้องเห็นก่อน) */}
+        {!overviewExec && widgetStrip}
 
-        {/* ---- view switcher + สลับของฉัน/ทีม ---- */}
+        {/* ---- view switcher + สลับของฉัน/ทีม (มือถือ: แถบมุมมองเต็มแถว · ของฉัน/ทีม ลงแถวถัดไป) ---- */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+          <div className={`bg-slate-100 rounded-lg p-0.5 ${isPhone ? "flex w-full" : "inline-flex"}`}>
             {([
-              ...(isAdmin ? [["executive", "👔 ผู้บริหาร"]] : []),
-              ["systems", "🗂️ การ์ดระบบ"], ["planner", "🗒️ แผนงาน"], ["calendar", "📅 ปฏิทิน"], ["list", "📋 รายการ"],
+              ["systems", isAdmin ? "👔 ภาพรวม" : "🗂️ การ์ดระบบ"], ["planner", "🗒️ แผนงาน"], ["calendar", "📅 ปฏิทิน"], ["list", "📋 รายการ"],
             ] as [DashboardView, string][]).map(([v, l]) => (
               <button key={v} onClick={() => { setView(v); if (v !== "list") setListFilter(null); }}
-                className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
+                className={segBtn(view === v)}>{l}</button>
             ))}
           </div>
           {/* แผนงานเป็นของส่วนตัวล้วน (ไม่มีมุมมองทีม) → ซ่อนปุ่มสลับ ของฉัน/ทีม */}
           {teamAllowed && view !== "planner" && (
             <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
-              <button onClick={() => setScope("mine")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${scope === "mine" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🙋 ของฉัน</button>
-              <button onClick={() => setScope("team")} className={`text-xs sm:text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${scope === "team" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>👥 ทีม</button>
+              <button onClick={() => setScope("mine")} className={segBtn(scope === "mine")}>🙋 ของฉัน</button>
+              <button onClick={() => setScope("team")} className={segBtn(scope === "team")}>👥 ทีม</button>
             </div>
           )}
           <div className="flex-1" />
@@ -386,14 +404,25 @@ export default function DashboardPage() {
         </div>
 
         {/* ---- เนื้อหาตามโหมด ---- */}
-        {view === "executive" ? (
-          <ExecutiveView />
-        ) : view === "systems" ? (
+        {overviewExec ? (
+          // ภาพรวม (แอดมิน) = ผู้บริหาร + การ์ดระบบ รวมกัน: ตัวเลขธุรกิจ → แท็บแผนก (ตัวเลข+งานค้าง) → ระบบอื่นที่มีงานค้าง
+          <>
+            <ExecutiveView layout={layout} systems={{
+              apps: visibleApps, list: scopeList, panels: panelMap, metrics, team: scope === "team",
+              onOpen: openAny,
+              onDone: scope === "mine" ? markDone : undefined,
+              onConfig: (k) => setConfigApp(visibleApps.find(a => a.key === k) ?? null),
+              onSeeAll: seeAllOf,
+            }} />
+            {widgetStrip}
+          </>
+        ) : view === "systems" || view === "executive" ? (
           <SystemCards apps={visibleApps} list={scopeList} panels={panelMap} metrics={metrics} team={scope === "team"} isAdmin={isAdmin}
+            layout={layout}
             onOpen={openAny}
             onDone={scope === "mine" ? markDone : undefined}
             onConfig={isAdmin ? (k) => setConfigApp(visibleApps.find(a => a.key === k) ?? null) : undefined}
-            onSeeAll={(k) => { setView("list"); setListFilter(k); setTab("all"); }} />
+            onSeeAll={seeAllOf} />
         ) : view === "planner" ? (
           <PlannerView notifications={items} apps={visibleApps}
             onOpenLink={(url, title) => setLinkModal({ url, title })} />
@@ -470,8 +499,8 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* ---- ภาพรวมระบบ (ของเดิม พับเก็บได้) — ซ่อนในมุมมองผู้บริหาร ---- */}
-        {view !== "executive" && <div className="pt-2">
+        {/* ---- ภาพรวมระบบ (ของเดิม พับเก็บได้) — ซ่อนในหน้าภาพรวมของแอดมิน (มีตัวเลขจริงครบกว่าอยู่แล้ว) ---- */}
+        {!overviewExec && <div className="pt-2">
           <button onClick={() => setShowOverview(s => !s)}
             className="w-full flex items-center justify-between px-4 py-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
             <span className="text-sm font-semibold text-slate-700">📊 ภาพรวมระบบ (สินค้า / ใบขอซื้อ)</span>
@@ -484,7 +513,14 @@ export default function DashboardPage() {
           )}
         </div>}
       </div>
+    </div>
+  );
 
+  return (
+    <PlaygroundShell>
+      <DevicePreviewFrame layout={layout} viewport={viewport} onExitPreview={() => setDeviceMode("auto")}>{body}</DevicePreviewFrame>
+
+      {/* หน้าต่างเด้งอยู่นอกกรอบพรีวิว → เต็มจอจริงเสมอ */}
       {/* ⚙️ ตั้งค่าการ์ดระบบ (แอดมิน) */}
       {configApp && (
         <PanelConfigModal app={configApp} panel={panelMap.get(configApp.key)}
