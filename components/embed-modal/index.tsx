@@ -20,12 +20,13 @@ export function embedUrl(u: string): string {
 }
 
 export function EmbedFrame({ url, title, height = "80vh", minHeight = 560, className = "" }: {
-  url: string; title: string; height?: number | string; minHeight?: number; className?: string;
+  /** height = null → ให้ className เป็นคนกำหนดความสูง (เช่น h-[calc(100dvh-88px)]) */
+  url: string; title: string; height?: number | string | null; minHeight?: number; className?: string;
 }) {
   const [loaded, setLoaded] = useState(false);
   useEffect(() => { setLoaded(false); }, [url]);
   return (
-    <div className={`relative bg-slate-50 ${className}`} style={{ height, minHeight }}>
+    <div className={`relative bg-slate-50 ${className}`} style={{ height: height ?? undefined, minHeight }}>
       {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-slate-400 pointer-events-none">
           <span className="animate-spin">⏳</span> กำลังโหลด {title}…
