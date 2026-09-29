@@ -29,8 +29,11 @@ export type ParentSkuInfo = {
 };
 /** SKU ลูกที่มีอยู่แล้วใต้ Parent (โชว์ว่า "ถึงไหนแล้ว") */
 export type ParentSkuChild = {
+  id: string;   // ใช้แก้ SKU เดิมจากหน้าสร้าง SKU (PATCH ผ่าน API กลาง master-v2/skus-v2)
   code: string; name_th: string | null; color: string | null;
-  standard_price: number | null; image_key: string | null; is_active: boolean;
+  standard_price: number | null;
+  list_price: number | null;   // ราคาขาย (Sale Price) — ตัวที่โชว์/แก้ในคอลัมน์ "ราคาขาย"
+  image_key: string | null; is_active: boolean;
 };
 
 export type ParentSkuCheck = {
@@ -112,13 +115,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (pRow) {
       parent = pRow as ParentSkuInfo;
       const { data: kids } = await admin.from("skus_v2")
-        .select("code, name_th, color, standard_price, cover_image_r2_key, is_active")
+        .select("id, code, name_th, color, standard_price, list_price, cover_image_r2_key, is_active")
         .eq("parent_sku_id", parent.id).order("code", { ascending: true }).limit(300);
-      children = ((kids ?? []) as Array<{ code: string | null; name_th: string | null; color: string | null; standard_price: number | null; cover_image_r2_key: string | null; is_active: boolean | null }>)
+      children = ((kids ?? []) as Array<{ id: string; code: string | null; name_th: string | null; color: string | null; standard_price: number | null; list_price: number | null; cover_image_r2_key: string | null; is_active: boolean | null }>)
         .filter((k) => (k.code ?? "").trim())
         .map((k) => ({
-          code: k.code as string, name_th: k.name_th, color: k.color,
+          id: String(k.id), code: k.code as string, name_th: k.name_th, color: k.color,
           standard_price: k.standard_price == null ? null : Number(k.standard_price),
+          list_price: k.list_price == null ? null : Number(k.list_price),
           image_key: k.cover_image_r2_key, is_active: k.is_active !== false,
         }));
       childNext = nextChildCode(parent.code, children.map((c) => c.code));

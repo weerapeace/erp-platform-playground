@@ -10,14 +10,74 @@
 // ราคาเริ่มต้น = ราคาที่เสนอ (แก้ได้)
 // ============================================================
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { ImageThumbnail } from "@/components/image-manager";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
-import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
+import { FloatingDropdown } from "@/components/floating-dropdown";
+import { MoneyInput } from "@/components/money-input";
+import { usePermission, useAuth } from "@/components/auth";
+import { QUOTE_STATUS } from "@/lib/design-sheets-meta";
+import type { ParentSkuCheck, ParentSkuChild } from "@/app/api/design-sheets/parent-sku-check/route";
+import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
+
+const fmtMoney = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 }));
+const fmtDay = (d: string | null | undefined) => {
+  if (!d) return "";
+  const t = new Date(`${d}T00:00:00`);
+  return Number.isNaN(t.getTime()) ? d : new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "2-digit" }).format(t);
+};
+
+/**
+ * ปุ่ม 💰▾ ข้างช่องราคาขาย — เลือกราคาจาก "รอบเสนอราคา" ของใบงาน (โชว์ผล รอผล/ผ่าน/ไม่ผ่าน + จำนวน + ไซส์/แท็บ)
+ * ใช้ FloatingDropdown ของกลาง (ลอยออกนอกโมดอล ไม่โดนกรอบตัด)
+ */
+function QuotePricePick({ quotes, current, onPick }: { quotes: DesignSheetQuote[]; current: string; onPick: (price: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const list = [...quotes].sort((a, b) => b.round - a.round);   // รอบล่าสุดขึ้นก่อน
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button type="button" onClick={() => setOpen((o) => !o)} title="เลือกจากราคาที่เสนอ (รอบเสนอราคาของใบงานนี้)"
+        className={`h-8 rounded border px-1.5 text-xs ${open ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}>💰▾</button>
+      <FloatingDropdown anchorRef={ref} open={open} onClose={() => setOpen(false)} minWidth={320} maxWidth={380}>
+        <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
+          <div className="px-2 py-1 text-[11px] font-medium text-slate-500">เลือกจากราคาที่เสนอ</div>
+          {list.length === 0 ? (
+            <div className="px-2 py-3 text-center text-xs text-slate-400">ใบงานนี้ยังไม่มีรอบเสนอราคา<br />(เพิ่มได้ที่แท็บ 💰 เสนอราคา)</div>
+          ) : list.map((q) => {
+            const price = q.offered_price ?? q.price;
+            const st = QUOTE_STATUS[q.status] ?? QUOTE_STATUS.pending;
+            const on = price != null && current !== "" && Number(current) === Number(price);
+            return (
+              <button key={q.id} type="button" disabled={price == null}
+                onClick={() => { if (price != null) { onPick(Number(price)); setOpen(false); } }}
+                className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-blue-50 disabled:opacity-40 ${on ? "bg-blue-50" : ""}`}>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">รอบ {q.round}</span>
+                    <span className={`rounded px-1.5 py-0.5 font-medium ${st.cls}`}>{st.label}</span>
+                    {q.parent_code && <span className="font-mono text-slate-500">{q.parent_code}</span>}
+                    <span className="text-slate-400">{fmtDay(q.quote_date)}</span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                    {q.qty != null ? `ที่ ${Number(q.qty).toLocaleString("th-TH")} ชิ้น` : "ไม่ระบุจำนวน"}{q.note ? ` · ${q.note}` : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{fmtMoney(price)}{on && <span className="ml-1 text-blue-600">✓</span>}</span>
+              </button>
+            );
+          })}
+        </div>
+      </FloatingDropdown>
+    </div>
+  );
+}
+
+type KidEdit = { color: string; name: string; price: string };
 
 const FAMILIES: [string, string][] = [
   ["general", "ทั่วไป"], ["bag", "กระเป๋า"], ["belt", "เข็มขัด"], ["jewelry", "เครื่องประดับ"], ["spare", "อะไหล่"],
@@ -84,9 +144,61 @@ export function SkuWizard({
   const [picked, setPicked] = useState<ParentSkuPickerValue | null>(null);   // Parent เดิมที่เลือกจากช่องค้นหา (โชว์ในตัวเลือก)
   const [showKids, setShowKids] = useState(false);                   // กาง/พับ รายการ SKU ลูกที่มีอยู่แล้ว
   const prefilledRef = useRef<string | null>(null);                  // id ของ Parent ที่ดึงข้อมูลมาเติมแล้ว (กันเติมซ้ำทับที่ผู้ใช้แก้)
+  const canEdit = usePermission("products.edit");                    // แก้ SKU เดิมได้ไหม (ด่านจริงอยู่ที่ API กลาง)
+  const { user } = useAuth();
+  const [quotes, setQuotes] = useState<DesignSheetQuote[]>([]);      // รอบเสนอราคาของใบงาน → ตัวเลือกราคาขาย
+  const [kidEdits, setKidEdits] = useState<Record<string, KidEdit>>({});   // ค่าที่กำลังแก้ของ SKU เดิม (ตาม id) — ยังไม่บันทึก
+  const [kidSaving, setKidSaving] = useState<string | null>(null);   // id ที่กำลังบันทึก ("*" = ทั้งหมด)
 
   const parentInfo = check?.exists ? check.parent : null;            // ใช้ Parent เดิม (ข้อมูลด้านล่างมาจากตัวจริงใน DB)
   const kids = parentInfo ? (check?.children ?? []) : [];
+
+  // ── แก้ SKU เดิมในตาราง "SKU ที่มีอยู่แล้ว" (สี/แบบ · ชื่อ · ราคาขาย) → บันทึกผ่าน API กลาง master-v2/skus-v2 (สิทธิ์+ประวัติครบ) ──
+  const kidPrice = (k: ParentSkuChild) => k.list_price ?? k.standard_price;   // ราคาขาย = list_price (ตัวเก่าที่ยังไม่มี → โชว์ standard_price)
+  const kidOrig = (k: ParentSkuChild): KidEdit => ({ color: k.color ?? "", name: k.name_th ?? "", price: kidPrice(k) == null ? "" : String(kidPrice(k)) });
+  const kidVal = (k: ParentSkuChild): KidEdit => kidEdits[k.id] ?? kidOrig(k);
+  const kidDirty = (k: ParentSkuChild): boolean => {
+    const e = kidEdits[k.id]; if (!e) return false;
+    const o = kidOrig(k);
+    return e.color.trim() !== o.color.trim() || e.name.trim() !== o.name.trim() || (e.price === "" ? null : Number(e.price)) !== (o.price === "" ? null : Number(o.price));
+  };
+  const setKid = (k: ParentSkuChild, p: Partial<KidEdit>) => setKidEdits((m) => ({ ...m, [k.id]: { ...(m[k.id] ?? kidOrig(k)), ...p } }));
+  const dirtyKids = kids.filter(kidDirty);
+  const saveKid = async (k: ParentSkuChild, override?: Partial<KidEdit>): Promise<boolean> => {
+    const e = { ...kidVal(k), ...override };
+    const o = kidOrig(k);
+    if (!e.name.trim()) { toast.error(`${k.code}: กรุณาใส่ชื่อ`); return false; }
+    if (e.price !== "" && (!Number.isFinite(Number(e.price)) || Number(e.price) < 0)) { toast.error(`${k.code}: ราคาขายต้องเป็นตัวเลขและไม่ติดลบ`); return false; }
+    const patch: Record<string, unknown> = {};
+    if (e.color.trim() !== o.color.trim()) patch.color = e.color.trim() || null;
+    if (e.name.trim() !== o.name.trim()) patch.name_th = e.name.trim();
+    const np = e.price === "" ? null : Number(e.price);
+    if (np !== (o.price === "" ? null : Number(o.price))) patch.list_price = np;
+    if (Object.keys(patch).length === 0) { setKidEdits((m) => { const n = { ...m }; delete n[k.id]; return n; }); return true; }
+    try {
+      const r = await apiFetch(`/api/master-v2/skus-v2/${encodeURIComponent(k.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...patch, actor: user?.name ?? user?.email ?? undefined }) });
+      const j = await r.json() as { error?: string | null };
+      if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      // อัปเดตแถวในหน้าจอให้ตรงกับที่บันทึก (ไม่ต้องโหลดใหม่ทั้งชุด)
+      setCheck((c) => (c ? { ...c, children: c.children.map((x) => (x.id === k.id
+        ? { ...x, color: e.color.trim() || null, name_th: e.name.trim(), list_price: "list_price" in patch ? np : x.list_price }
+        : x)) } : c));
+      setKidEdits((m) => { const n = { ...m }; delete n[k.id]; return n; });
+      return true;
+    } catch (err) {
+      toast.error(`${k.code}: ${err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"}`);
+      return false;
+    }
+  };
+  const saveKidRow = async (k: ParentSkuChild) => { setKidSaving(k.id); const ok = await saveKid(k); setKidSaving(null); if (ok) toast.success(`บันทึก ${k.code} แล้ว`); };
+  const saveAllKids = async () => {
+    setKidSaving("*");
+    let ok = 0;
+    for (const k of dirtyKids) if (await saveKid(k)) ok++;   // ทีละตัว (ไม่ยิงพร้อมกัน)
+    setKidSaving(null);
+    if (ok) toast.success(`บันทึก SKU เดิม ${ok} ตัวแล้ว`);
+  };
 
   // เปิดหน้าต่าง = เซ็ตค่าเริ่มต้นจากใบงาน
   useEffect(() => {
@@ -96,8 +208,19 @@ export function SkuWizard({
     setPNameEn(""); setFamily("general");
     setBId(brandId ?? ""); setCheck(null); setCodeOpen(false); setPImgs([]); setPickOpen(null);
     setPicked(null); setShowKids(false); prefilledRef.current = null;
+    setKidEdits({}); setKidSaving(null);
     setRows([{ code: "", color: "", name: sheetName || "", price: defaultPrice != null ? String(defaultPrice) : "", imgs: [] }]);
   }, [open, parentCodeDefault, sheetName, defaultPrice, brandId]);
+
+  // โหลดรอบเสนอราคาของใบงาน → ให้เลือกเป็นราคาขาย (ปุ่ม 💰▾ ข้างช่องราคา)
+  useEffect(() => {
+    if (!open || !sheetId) return;
+    let alive = true;
+    apiFetch(`/api/design-sheets/${encodeURIComponent(sheetId)}/quotes`).then((r) => r.json())
+      .then((j) => { if (alive) setQuotes(Array.isArray(j.data) ? (j.data as DesignSheetQuote[]) : []); })
+      .catch(() => { if (alive) setQuotes([]); });
+    return () => { alive = false; };
+  }, [open, sheetId]);
 
   // โหลดรายชื่อแบรนด์ (ให้เลือก/เปลี่ยนได้ในหน้านี้)
   useEffect(() => {
@@ -314,6 +437,8 @@ export function SkuWizard({
     if (dupKid) { toast.error(`รหัส ${dupKid.code.trim()} มีอยู่แล้วใน ${pCode.trim()} — เปลี่ยนเป็นเลขถัดไป`); return; }
     setSaving(true);
     try {
+      // มี SKU เดิมที่แก้ค้างไว้ → บันทึกให้ก่อน (ไม่งั้นปิดหน้าต่างแล้วที่แก้หาย) · ตัวไหนพลาดให้หยุด ไม่สร้างต่อ
+      for (const k of dirtyKids) { if (!(await saveKid(k))) return; }
       const res = await apiFetch(`/api/design-sheets/${sheetId}/create-skus`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -426,35 +551,90 @@ export function SkuWizard({
               <div className="flex items-center gap-2 text-[11px] text-emerald-800">
                 <span className="font-medium">SKU ที่มีอยู่แล้วใน {parentInfo.code}: {kids.length} ตัว</span>
                 {check?.child_next && <span className="text-emerald-700">· รหัสถัดไป <b className="font-mono">{check.child_next}</b></span>}
-                {kids.length > 0 && (
-                  <button type="button" onClick={() => setShowKids((v) => !v)} className="ml-auto text-emerald-700 hover:underline">
-                    {showKids ? "ซ่อนรายการ" : "ดูรายการ"}
-                  </button>
-                )}
+                <span className="ml-auto flex items-center gap-2">
+                  {dirtyKids.length > 0 && (
+                    <>
+                      <span className="text-amber-700">แก้ไว้ {dirtyKids.length} ตัว ยังไม่บันทึก</span>
+                      <button type="button" onClick={() => void saveAllKids()} disabled={!!kidSaving}
+                        className="h-6 rounded bg-emerald-600 px-2 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50">{kidSaving === "*" ? "กำลังบันทึก…" : "💾 บันทึกที่แก้"}</button>
+                    </>
+                  )}
+                  {kids.length > 0 && (
+                    <button type="button" onClick={() => setShowKids((v) => !v)} className="text-emerald-700 hover:underline">
+                      {showKids ? "ซ่อนรายการ" : "ดูรายการ"}
+                    </button>
+                  )}
+                </span>
               </div>
               {kids.length === 0 ? (
                 <div className="text-[11px] text-slate-500">ยังไม่มี SKU ลูก — สร้างตัวแรกได้เลย</div>
               ) : showKids && (
-                <div className="max-h-36 overflow-auto rounded border border-emerald-100 bg-white">
-                  <table className="w-full text-[11px]">
+                /* ตาราง SKU เดิม: มีหัวตาราง + แก้ สี/แบบ · ชื่อ · ราคาขาย ได้ในแถว (รหัสแก้ไม่ได้ — เปลี่ยนรหัสใช้หน้า SKU) */
+                <div className="max-h-56 overflow-auto rounded border border-emerald-100 bg-white">
+                  <table className="w-full border-collapse text-xs">
+                    <thead className="sticky top-0 z-[1]">
+                      <tr className="bg-slate-50 text-[11px] text-slate-500">
+                        <th className="w-10 border-b border-slate-200 px-1 py-1 text-center font-medium">รูป</th>
+                        <th className="w-32 border-b border-slate-200 px-2 py-1 text-left font-medium">รหัส SKU</th>
+                        <th className="w-36 border-b border-slate-200 px-2 py-1 text-left font-medium">สี / แบบ</th>
+                        <th className="border-b border-slate-200 px-2 py-1 text-left font-medium">ชื่อ</th>
+                        <th className="w-40 border-b border-slate-200 px-2 py-1 text-right font-medium">ราคาขาย</th>
+                        <th className="w-16 border-b border-slate-200 px-1 py-1 text-center font-medium">สถานะ</th>
+                        {canEdit && <th className="w-16 border-b border-slate-200 px-1 py-1" />}
+                      </tr>
+                    </thead>
                     <tbody>
-                      {kids.map((k) => (
-                        <tr key={k.code} className={`border-b border-slate-100 last:border-0 ${k.is_active ? "" : "text-slate-400"}`}>
-                          <td className="w-8 px-1 py-0.5">
-                            {k.image_key ? <ImageThumbnail url={imgUrlOf(k.image_key)} size={22} /> : <span className="text-slate-300">—</span>}
-                          </td>
-                          <td className="px-1 py-0.5 font-mono text-slate-700">{k.code}</td>
-                          <td className="px-1 py-0.5 text-slate-500 truncate max-w-[110px]" title={k.color ?? ""}>{k.color || "—"}</td>
-                          <td className="px-1 py-0.5 text-slate-500 truncate max-w-[200px]" title={k.name_th ?? ""}>{k.name_th || ""}</td>
-                          <td className="px-1 py-0.5 text-right text-slate-500">{k.standard_price != null ? k.standard_price.toLocaleString("th-TH") : ""}</td>
-                          <td className="px-1 py-0.5 text-right text-[10px] text-slate-400">{k.is_active ? "" : "ปิดใช้"}</td>
-                        </tr>
-                      ))}
+                      {kids.map((k) => {
+                        const v = kidVal(k); const dirty = kidDirty(k); const busy = kidSaving === k.id || kidSaving === "*";
+                        const inputCls = `h-7 w-full rounded border px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 ${dirty ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`;
+                        const onEnter = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter" && dirty) { e.preventDefault(); void saveKidRow(k); } };
+                        return (
+                          <tr key={k.id} className={`border-b border-slate-100 last:border-0 ${k.is_active ? "" : "text-slate-400"}`}>
+                            <td className="px-1 py-1 text-center">
+                              {k.image_key ? <ImageThumbnail url={imgUrlOf(k.image_key)} size={24} /> : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-2 py-1 font-mono text-slate-700">{k.code}</td>
+                            {canEdit ? (
+                              <>
+                                <td className="px-1 py-1"><input value={v.color} onChange={(e) => setKid(k, { color: e.target.value })} onKeyDown={onEnter} disabled={busy} placeholder="—" className={inputCls} /></td>
+                                <td className="px-1 py-1"><input value={v.name} onChange={(e) => setKid(k, { name: e.target.value })} onKeyDown={onEnter} disabled={busy} className={inputCls} /></td>
+                                <td className="px-1 py-1">
+                                  <div className="flex items-center gap-1">
+                                    <MoneyInput value={v.price} onChange={(raw) => setKid(k, { price: raw })} onKeyDown={onEnter} disabled={busy} className={`${inputCls} text-right tabular-nums`} />
+                                    <QuotePricePick quotes={quotes} current={v.price} onPick={(p) => setKid(k, { price: String(p) })} />
+                                  </div>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="px-2 py-1 text-slate-500">{k.color || "—"}</td>
+                                <td className="px-2 py-1 text-slate-500">{k.name_th || ""}</td>
+                                <td className="px-2 py-1 text-right tabular-nums text-slate-500">{fmtMoney(kidPrice(k))}</td>
+                              </>
+                            )}
+                            <td className="px-1 py-1 text-center text-[10px]">
+                              {k.is_active ? <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">ใช้งาน</span> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">ปิดใช้</span>}
+                            </td>
+                            {canEdit && (
+                              <td className="px-1 py-1 text-center">
+                                {dirty && (
+                                  <span className="inline-flex items-center gap-0.5">
+                                    <button type="button" onClick={() => void saveKidRow(k)} disabled={busy} title="บันทึกแถวนี้ (หรือกด Enter)"
+                                      className="h-7 rounded bg-emerald-600 px-1.5 text-[11px] text-white hover:bg-emerald-700 disabled:opacity-50">{busy ? "…" : "💾"}</button>
+                                    <button type="button" onClick={() => setKidEdits((m) => { const n = { ...m }; delete n[k.id]; return n; })} disabled={busy} title="ยกเลิกที่แก้"
+                                      className="h-7 rounded px-1 text-[11px] text-slate-400 hover:bg-slate-100">↩</button>
+                                  </span>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               )}
-              <div className="text-[10px] text-slate-500">ข้อมูลด้านล่างดึงจากสินค้าเดิม (แก้ได้ที่หน้า Parent SKU) — ที่สร้างรอบนี้คือ SKU ลูกเท่านั้น</div>
+              <div className="text-[10px] text-slate-500">ข้อมูลสินค้าหลักด้านล่างดึงจากสินค้าเดิม (แก้ได้ที่หน้า Parent SKU) · SKU เดิมในตารางนี้แก้ สี/แบบ · ชื่อ · ราคาขาย ได้เลย แล้วกด 💾</div>
             </div>
           )}
 
@@ -507,7 +687,7 @@ export function SkuWizard({
                 <th className="border border-slate-200 px-2 py-1.5 text-left">รหัส SKU *</th>
                 <th className="border border-slate-200 px-2 py-1.5 text-left w-32">สี / แบบ</th>
                 <th className="border border-slate-200 px-2 py-1.5 text-left">ชื่อ</th>
-                <th className="border border-slate-200 px-2 py-1.5 text-right w-28">ราคาขาย</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-right w-40">ราคาขาย <span className="font-normal text-slate-400">(💰 = เลือกจากที่เสนอ)</span></th>
                 <th className="border border-slate-200 px-1 py-1.5 w-10"></th>
               </tr>
             </thead>
@@ -536,8 +716,12 @@ export function SkuWizard({
                       className="w-full h-8 px-2 text-sm border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </td>
                   <td className="border border-slate-200 px-1 py-1">
-                    <input type="number" min={0} step="any" value={r.price} onChange={(e) => setRow(i, { price: e.target.value })}
-                      className="w-full h-8 px-2 text-sm text-right border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    {/* ช่องเงินของกลาง (มีลูกน้ำ) + เลือกจากรอบเสนอราคา */}
+                    <div className="flex items-center gap-1">
+                      <MoneyInput value={r.price} onChange={(raw) => setRow(i, { price: raw })}
+                        className="w-full h-8 px-2 text-sm text-right tabular-nums border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <QuotePricePick quotes={quotes} current={r.price} onPick={(p) => setRow(i, { price: String(p) })} />
+                    </div>
                   </td>
                   <td className="border border-slate-200 px-1 py-1 text-center">
                     <button onClick={() => removeRow(i)} disabled={rows.length <= 1} title="ลบแถว"
