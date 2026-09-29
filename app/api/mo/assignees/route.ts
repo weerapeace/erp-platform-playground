@@ -2,6 +2,9 @@
  * รายชื่อผู้รับงาน (สำหรับใบจ่ายงาน + ไอคอนพนักงานบนบอร์ด) — ช่าง (พนักงาน) + แผนก
  * GET /api/mo/assignees  → { craftsmen, departments, dept_wages }
  * POST /api/mo/assignees { name, nickname?, code?, department_id, is_subcontract? } → เพิ่มช่างใหม่จากหน้าบอร์ด (ช่างเหมาที่เพิ่งรับเข้ามา ไม่ต้องวิ่งไปหน้า HR)
+ * PATCH  { id, name?, nickname? }  → แก้ชื่อช่างที่ "เพิ่มจากบอร์ด" (พิมพ์ผิด)
+ * DELETE ?id=                       → ปิดใช้งานช่างที่ "เพิ่มจากบอร์ด" (เพิ่มผิด/ซ้ำ) — ไม่ลบ แค่ไม่ขึ้นให้เลือก
+ *   ทั้งสองอย่างทำได้เฉพาะคนที่เพิ่มจากบอร์ด (craftsmen[].from_board) — พนักงานที่ HR สร้าง ต้องแก้ที่หน้าพนักงาน
  * อ่าน employees ผ่าน service role (ตาราง employees มี RLS เข้ม— ผู้ใช้บอร์ดทั่วไปอ่านไม่ได้)
  * ความเป็นส่วนตัว: ไม่ส่งเงินเดือนรายคนออกไป — ส่งเฉพาะ "ผลรวมค่าแรงต่อแผนก" (dept_wages)
  */
@@ -15,11 +18,22 @@ import { nextEmployeeCode, bumpCode } from "@/lib/employee-code";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type Assignee = { id: string; name: string; nickname?: string | null; code: string | null; department_id?: string | null; photo?: string | null };
+export type Assignee = { id: string; name: string; nickname?: string | null; code: string | null; department_id?: string | null; photo?: string | null;
+  /** เพิ่มจากหน้าบอร์ด → แก้ชื่อ/ปิดใช้งานจากบอร์ดได้ */
+  from_board?: boolean };
+
+/** id พนักงานที่ถูกเพิ่มจากหน้าบอร์ด (ดูจากประวัติการสร้าง) */
+async function boardCreatedIds(admin: ReturnType<typeof supabaseAdmin>, onlyId?: string): Promise<Set<string>> {
+  let q = admin.from("audit_logs").select("entity_id").eq("entity_type", "employees").eq("action", "create").eq("metadata->>from", "work-board").limit(2000);
+  if (onlyId) q = q.eq("entity_id", onlyId);
+  const { data } = await q;
+  return new Set(((data ?? []) as { entity_id: string | null }[]).map((r) => String(r.entity_id ?? "")).filter(Boolean));
+}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
+  const fromBoard = await boardCreatedIds(admin);
   const [{ data: emps }, { data: deps }] = await Promise.all([
     admin.from("employees")
       .select("id, employee_code, nickname, first_name_th, last_name_th, first_name, last_name, resign_date, department_id, payroll_register_base_salary, profile_photo_key")
@@ -36,6 +50,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       id: String(e.id), name, nickname: nick || null, code: (e.employee_code as string) ?? null, department_id: (e.department_id as string) ?? null,
       photo: photoKey ? `/api/r2-image?key=${encodeURIComponent(photoKey)}` : null,
+      ...(fromBoard.has(String(e.id)) ? { from_board: true } : {}),
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "th"));
 
@@ -113,10 +128,81 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const assignee: Assignee = {
     id: String(row.id), name: [th, nick && `(${nick})`].filter(Boolean).join(" ") || code,
     nickname: nick || null, code: (row.employee_code as string) ?? null,
-    department_id: (row.department_id as string) ?? null, photo: null,
+    department_id: (row.department_id as string) ?? null, photo: null, from_board: true,
   };
   await writeAudit(admin, { action: "create", entityType: "employees", entityId: assignee.id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { from: "work-board", code, department: dept?.name ?? null, is_subcontract: isSub } });
   return NextResponse.json({ data: assignee, error: null });
+}
+
+const NOT_BOARD = "พนักงานคนนี้ไม่ได้เพิ่มจากหน้าบอร์ด — แก้/ปิดใช้งานได้ที่หน้า “พนักงาน” (HR)";
+
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  let b: { id?: string; name?: string; nickname?: string | null };
+  try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const id = (b.id ?? "").trim();
+  if (!id) return NextResponse.json({ error: "ต้องระบุช่าง" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  if (!(await boardCreatedIds(admin, id)).has(id)) return NextResponse.json({ error: NOT_BOARD }, { status: 403 });
+  const { data: cur } = await admin.from("employees").select("id, employee_code, first_name, last_name, first_name_th, last_name_th, nickname, department_id").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบช่างคนนี้" }, { status: 404 });
+
+  const patch: Record<string, unknown> = {};
+  if (b.name !== undefined) {
+    const full = String(b.name ?? "").trim().replace(/\s+/g, " ");
+    if (!full) return NextResponse.json({ error: "ต้องใส่ชื่อช่าง" }, { status: 400 });
+    const [firstName, ...rest] = full.split(" ");
+    const lastName = rest.join(" ");
+    Object.assign(patch, { first_name: firstName, last_name: lastName, first_name_th: firstName, last_name_th: lastName });
+  }
+  if (b.nickname !== undefined) patch.nickname = String(b.nickname ?? "").trim() || null;
+  if (Object.keys(patch).length === 0) return NextResponse.json({ data: null, error: null });
+
+  const { data, error } = await admin.from("employees").update(patch).eq("id", id)
+    .select("id, employee_code, nickname, first_name_th, last_name_th, department_id").single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const row = data as Record<string, unknown>;
+  const th = [row.first_name_th, row.last_name_th].filter(Boolean).join(" ").trim();
+  const nick = (row.nickname as string) || "";
+  const assignee: Assignee = {
+    id: String(row.id), name: [th, nick && `(${nick})`].filter(Boolean).join(" ") || String(row.employee_code ?? ""),
+    nickname: nick || null, code: (row.employee_code as string) ?? null, department_id: (row.department_id as string) ?? null, photo: null, from_board: true,
+  };
+  const c = cur as Record<string, unknown>;
+  await writeAudit(admin, { action: "update", entityType: "employees", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { from: "work-board-edit", old: { first_name_th: c.first_name_th, last_name_th: c.last_name_th, nickname: c.nickname }, new: patch } });
+  return NextResponse.json({ data: assignee, error: null });
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const id = (new URL(request.url).searchParams.get("id") ?? "").trim();
+  if (!id) return NextResponse.json({ error: "ต้องระบุช่าง" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  if (!(await boardCreatedIds(admin, id)).has(id)) return NextResponse.json({ error: NOT_BOARD }, { status: 403 });
+  const { data: cur } = await admin.from("employees").select("id, employee_code, first_name_th, last_name_th, nickname, employment_status").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบช่างคนนี้" }, { status: 404 });
+
+  // มีงานค้างอยู่ → ปิดไม่ได้ (ต้องรับงานคืน/ย้ายช่างก่อน)
+  const OPEN = ["dispatched", "in_progress", "partial_return"];
+  const [{ count: solo }, { count: team }] = await Promise.all([
+    admin.from("mo_work_orders").select("id", { count: "exact", head: true }).eq("assignee_id", id).in("status", OPEN),
+    admin.from("mo_work_orders").select("id", { count: "exact", head: true }).contains("assignees", [{ id }]).in("status", OPEN),
+  ]);
+  const open = Math.max(solo ?? 0, team ?? 0);
+  if (open > 0) return NextResponse.json({ error: `ช่างคนนี้มีใบจ่ายงานค้างอยู่ ${open} ใบ — รับงานคืนหรือเปลี่ยนช่างในใบงานก่อน แล้วค่อยปิดใช้งาน` }, { status: 400 });
+
+  const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);   // วันที่ตามเวลาไทย
+  const { error } = await admin.from("employees").update({ employment_status: "inactive", resign_date: today }).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const c = cur as Record<string, unknown>;
+  await writeAudit(admin, { action: "deactivate", entityType: "employees", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { from: "work-board", code: c.employee_code, name: [c.first_name_th, c.last_name_th].filter(Boolean).join(" "), was: c.employment_status } });
+  return NextResponse.json({ data: { id }, error: null });
 }

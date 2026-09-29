@@ -18,7 +18,7 @@ type DeptLite = { id: string; name: string };
 type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean; brand?: string | null; due_date?: string | null; internal_due_date?: string | null };
 type PieceLite = { id: string; mo_no: string; job_name: string; rate: number; qty_per: number; qty: number; product_sku: string | null; product_name: string | null; image_url?: string | null };
 type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number }; brand?: string | null; due_date?: string | null };
-type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
+type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null; nickname?: string | null; from_board?: boolean };
 type DefectMap = Record<string, { count: number } | undefined>;
 
 // drawer ข้อมูลใบสั่งผลิต (ของกลางตัวเดียวกับหน้า master) — โหลดตอนกดชื่อบนการ์ดเท่านั้น (ตัวนี้หนัก)
@@ -170,6 +170,11 @@ export function DispatchPlanBoard({
   const [assignSaving, setAssignSaving] = useState(false);
   // ➕ เพิ่มช่างใหม่จากป๊อปเลือกช่าง (ช่างเหมาที่เพิ่งรับเข้ามา ไม่ต้องวิ่งไปหน้าพนักงาน)
   const [newCrafts, setNewCrafts] = useState<CraftLite[]>([]);   // คนที่เพิ่งเพิ่ม (หน้าแม่ยังโหลดรายชื่อใหม่ไม่ทัน)
+  // ✏️/🗑 ช่างที่เพิ่มจากบอร์ด (เพิ่มผิด/พิมพ์ชื่อผิด) — แก้ชื่อ + ปิดใช้งานได้จากป๊อปเลือกช่าง
+  const [craftEdit, setCraftEdit] = useState<{ id: string; name: string; nickname: string } | null>(null);
+  const [craftOffAsk, setCraftOffAsk] = useState<string | null>(null);
+  const [craftBusy, setCraftBusy] = useState(false);
+  const [craftPatch, setCraftPatch] = useState<Record<string, CraftLite | null>>({});   // แก้แล้ว/ปิดแล้ว (null) ระหว่างรอหน้าแม่โหลดใหม่
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState("");
   const [addNick, setAddNick] = useState("");
@@ -178,7 +183,9 @@ export function DispatchPlanBoard({
   const [assignSearch, setAssignSearch] = useState("");   // ค้นหาช่างในป๊อปเลือกช่าง
   // เปิด/บันทึก ตัวเลือกช่างหลายคน
   // รายชื่อช่างที่ใช้จริง = ของหน้าแม่ + คนที่เพิ่งเพิ่มจากป๊อป (กันเลือกไม่ได้เพราะหน้าแม่ยังโหลดไม่เสร็จ)
-  const allCrafts = useMemo(() => [...craftsmen, ...newCrafts.filter((n) => !craftsmen.some((c) => c.id === n.id))], [craftsmen, newCrafts]);
+  const allCrafts = useMemo(() => [...craftsmen, ...newCrafts.filter((n) => !craftsmen.some((c) => c.id === n.id))]
+    .filter((c) => craftPatch[c.id] !== null)
+    .map((c) => (craftPatch[c.id] ? { ...c, ...craftPatch[c.id] } as CraftLite : c)), [craftsmen, newCrafts, craftPatch]);
   const craftsOfDept = useCallback((dept: DeptLite) => /เหมา/.test(dept.name) ? allCrafts : allCrafts.filter((c) => c.department_id === dept.id), [allCrafts]);
   const openAssign = (w: WOLite, dept: DeptLite) => {
     const cur = new Set<string>();
@@ -209,6 +216,34 @@ export function DispatchPlanBoard({
       onStaffMoved?.();                                   // ให้หน้าแม่โหลดรายชื่อใหม่
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มช่างไม่สำเร็จ"); }
     finally { setAddSaving(false); }
+  };
+
+  const saveCraftEdit = async () => {
+    if (!craftEdit || !craftEdit.name.trim()) return;
+    setCraftBusy(true);
+    try {
+      const res = await apiFetch("/api/mo/assignees", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: craftEdit.id, name: craftEdit.name.trim(), nickname: craftEdit.nickname.trim() || null }) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "แก้ชื่อไม่สำเร็จ");
+      if (j.data) setCraftPatch((p) => ({ ...p, [craftEdit.id]: j.data as CraftLite }));
+      setCraftEdit(null);
+      toast.success("แก้ชื่อช่างแล้ว");
+      onStaffMoved?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ชื่อไม่สำเร็จ"); }
+    finally { setCraftBusy(false); }
+  };
+  const deactivateCraft = async (c: CraftLite) => {
+    setCraftBusy(true);
+    try {
+      const res = await apiFetch(`/api/mo/assignees?id=${c.id}`, { method: "DELETE" });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "ปิดใช้งานไม่สำเร็จ");
+      setCraftPatch((p) => ({ ...p, [c.id]: null }));
+      setAssignSel((prev) => { const n = new Set(prev); n.delete(c.id); return n; });
+      setCraftOffAsk(null);
+      toast.success(`ปิดใช้งานช่าง ${c.name} แล้ว`);
+      onStaffMoved?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ปิดใช้งานไม่สำเร็จ"); }
+    finally { setCraftBusy(false); }
   };
 
   const saveAssign = async () => {
@@ -912,7 +947,27 @@ export function DispatchPlanBoard({
                 const groups = [...byDept.entries()].sort((a, b) =>
                   a[0] === assignPopup.dept.name ? -1 : b[0] === assignPopup.dept.name ? 1 : a[0].localeCompare(b[0], "th"));
 
-                const line = (c: CraftLite) => (
+                const line = (c: CraftLite) => craftEdit?.id === c.id ? (
+                  <div key={c.id} className="rounded-lg border border-blue-200 bg-blue-50/50 p-2 my-0.5 space-y-1.5">
+                    <div className="flex gap-1.5">
+                      <input autoFocus value={craftEdit.name} onChange={(e) => setCraftEdit({ ...craftEdit, name: e.target.value })} placeholder="ชื่อ-นามสกุล *"
+                        onKeyDown={(e) => { if (e.key === "Enter" && !craftBusy) void saveCraftEdit(); if (e.key === "Escape") setCraftEdit(null); }}
+                        className="flex-[2] min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <input value={craftEdit.nickname} onChange={(e) => setCraftEdit({ ...craftEdit, nickname: e.target.value })} placeholder="ชื่อเล่น"
+                        className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button disabled={craftBusy || !craftEdit.name.trim()} onClick={() => void saveCraftEdit()} className="h-7 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{craftBusy ? "กำลังบันทึก…" : "บันทึกชื่อ"}</button>
+                      <button onClick={() => setCraftEdit(null)} disabled={craftBusy} className="h-7 px-2 text-xs text-slate-500 hover:text-slate-700">ยกเลิก</button>
+                    </div>
+                  </div>
+                ) : craftOffAsk === c.id ? (
+                  <div key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded bg-rose-50/70 text-xs">
+                    <span className="flex-1 truncate text-slate-700">ปิดใช้งาน {c.name}? (ไม่ขึ้นให้เลือกอีก)</span>
+                    <button disabled={craftBusy} onClick={() => void deactivateCraft(c)} className="h-6 px-2 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">ยืนยัน</button>
+                    <button disabled={craftBusy} onClick={() => setCraftOffAsk(null)} className="h-6 px-2 rounded border border-slate-200 bg-white text-slate-500">ไม่</button>
+                  </div>
+                ) : (
                   <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer text-sm">
                     <input type={assignPopup.line ? "radio" : "checkbox"} checked={assignSel.has(c.id)}
                       onChange={() => setAssignSel((prev) => {
@@ -921,6 +976,13 @@ export function DispatchPlanBoard({
                       })} className="w-4 h-4 accent-violet-600" />
                     <span className="flex-1 truncate text-slate-700">{c.code ? `[${c.code}] ` : ""}{c.name}</span>
                     {(() => { const df = defectOf(c.name); return df ? <span className="text-[10px] text-amber-600 shrink-0" title={`เคยมีงานเสีย ${df.count} ครั้ง`}>⚠️ {df.count}</span> : null; })()}
+                    {/* แก้ชื่อ/ปิดใช้งาน — เฉพาะช่างที่เพิ่มจากบอร์ด (พนักงานของ HR แก้ที่หน้าพนักงาน) */}
+                    {editable && c.from_board && (
+                      <span className="flex items-center gap-1 shrink-0">
+                        <button type="button" title="แก้ชื่อช่าง" onClick={(e) => { e.preventDefault(); setCraftOffAsk(null); setCraftEdit({ id: c.id, name: c.name.replace(/\s*\([^)]*\)\s*$/, ""), nickname: c.nickname ?? "" }); }} className="text-slate-300 hover:text-blue-600 text-xs">✏️</button>
+                        <button type="button" title="ปิดใช้งานช่างคนนี้ (เพิ่มผิด/ซ้ำ)" onClick={(e) => { e.preventDefault(); setCraftEdit(null); setCraftOffAsk(c.id); }} className="text-slate-300 hover:text-rose-600 text-xs">🗑</button>
+                      </span>
+                    )}
                   </label>
                 );
                 // แผนกเดียว (โต๊ะปกติ) → ไม่ต้องมีหัวกลุ่มให้รก
