@@ -14,6 +14,7 @@ import { ImageInput } from "@/components/image-input";
 import { CopyButton } from "@/components/copy-button";
 import { TagOrganizerModal } from "@/components/tag-organizer";
 import { useToast } from "@/components/toast";
+import { BomEditorModal } from "@/components/bom-editor-modal";
 import { useAuth } from "@/components/auth";
 import { downscaleImageWidth } from "@/lib/image-resize";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
@@ -1799,6 +1800,9 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
   const [selId, setSelId] = useState<string | null>(null);
   const [detailCfg, setDetailCfg] = useState<RelConfig | null>(null);
   const [creating, setCreating] = useState(false);
+  // ใบชั้น 1 เป็น "สูตรผลิต (BOM)" → ปุ่มเพิ่ม เปิดตัวทำ BOM ตัวจริง (หัวสูตร+วัตถุดิบ+ค่าแรงในจอเดียว) แทนฟอร์มหัวสูตรเปล่า
+  const isBom = l1ModuleKey === "bom-headers" && l1Fk === "product_sku";
+  const [bomEditor, setBomEditor] = useState(false);
 
   const matchCond = l1MatchField === "id"
     ? { type: "text", value: String(l1MatchValue ?? "") }
@@ -1853,7 +1857,8 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
           );
         })}
         {canAdd && (
-          <button type="button" onClick={() => setCreating(true)}
+          <button type="button" onClick={() => (isBom ? setBomEditor(true) : setCreating(true))}
+            title={isBom ? (headers.length > 0 ? "เปิดตัวทำ BOM เพื่อเพิ่มเวอร์ชั่นใหม่ (คัดลอกจากเวอร์ชั่นเดิมได้)" : "เปิดตัวทำ BOM เพื่อสร้างสูตรแรกของสินค้านี้") : undefined}
             className="px-2.5 py-1 text-xs rounded-lg border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50">+ เพิ่ม version</button>
         )}
       </div>
@@ -1869,6 +1874,11 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
       ) : null}
 
       {/* เพิ่มใบใหม่ (version) */}
+      {bomEditor && isBom && (
+        <BomEditorModal sku={String(l1MatchValue)} newVersion={headers.length > 0}
+          productName={typeof parentValues?.name_th === "string" ? parentValues.name_th : null}
+          onClose={(changed) => { setBomEditor(false); if (changed) loadHeaders(); }} />
+      )}
       {creating && (
         <MasterRecordDrawer moduleKey={l1ModuleKey} recordId={null}
           createDefaults={{ [l1Fk]: l1MatchValue, is_active: true }}

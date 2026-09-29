@@ -105,6 +105,12 @@ export default function BomWorkspacePage() {
   useEffect(() => { apiFetch("/api/admin/size-templates").then((r) => r.json()).then((j) => setSizeTemplates((j.data ?? []) as SizeTemplate[])).catch(() => {}); }, []);
 
   // เปิดในกรอบแอปอื่น (iframe เช่นปุ่ม ✎ BOM ใน WorkInstruction) → ฟอร์มเต็มกรอบ ไม่ซ้อน modal + ซ่อน list
+  // ถูกฝังในป๊อปของหน้าอื่น (ของกลาง components/bom-editor-modal) → แจ้งสถานะ "ยังไม่บันทึก/บันทึกแล้ว" ให้กรอบนอก
+  const tellHost = (msg: { dirty?: boolean; saved?: boolean }) => {
+    try { if (window.parent !== window) window.parent.postMessage({ type: "erp-bom-editor", ...msg }, window.location.origin); } catch { /* ignore */ }
+  };
+  useEffect(() => { tellHost({ dirty }); }, [dirty]);
+
   const [embed, setEmbed] = useState(false);
   useEffect(() => { try { setEmbed(new URLSearchParams(window.location.search).get("embed") === "1"); } catch { /* ignore */ } }, []);
 
@@ -205,25 +211,28 @@ export default function BomWorkspacePage() {
   };
 
   // เปิดสูตรของ SKU อัตโนมัติ (ใช้ตอนเปิดหน้านี้ใน popup จากแผงรายละเอียดสั่งงาน: ?open=<sku>)
-  const openBySku = async (sku: string) => {
+  const openBySku = async (sku: string, thenNewVersion = false, skuName = "") => {
     setLoadingForm(true); setFormErr(null); setForm(emptyForm()); setVersions([]);
     try {
       const vers = await fetchVersions(sku);
       const target = vers.find((v) => v.is_default) ?? vers[0];
       if (!target) {
         // ยังไม่มีสูตร → เปิดฟอร์มสร้างใหม่ที่เติม "สินค้าที่ผลิต" + รหัสสูตรมาให้แล้ว (ไม่ปล่อยช่องว่าง)
-        setForm({ ...emptyForm(), product_sku: sku, bom_code: verCode(sku, 1) });
+        setForm({ ...emptyForm(), product_sku: sku, product_name: skuName, bom_code: verCode(sku, 1) });
         setFormErr(`ยังไม่มีสูตร (BOM) ของ ${sku} — กรอกวัตถุดิบแล้วกดบันทึกเพื่อสร้างสูตรใหม่ได้เลย`);
         return;
       }
       const f = await loadFormById(target.id);
       setForm(f); setDirty(false);
+      // มาจากปุ่ม "+ เพิ่ม version" (?newver=1) และสินค้ามีสูตรอยู่แล้ว → ถามเลยว่าจะคัดลอกจากเวอร์ชั่นไหน/เริ่มว่าง
+      if (thenNewVersion) setNewVerOpen(true);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดสูตรไม่ได้"); }
     finally { setLoadingForm(false); }
   };
   useEffect(() => {
-    const sku = new URLSearchParams(window.location.search).get("open");
-    if (sku) void openBySku(sku);
+    const sp = new URLSearchParams(window.location.search);
+    const sku = sp.get("open");
+    if (sku) void openBySku(sku, sp.get("newver") === "1", sp.get("name") ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -269,7 +278,7 @@ export default function BomWorkspacePage() {
     try {
       const res = await apiFetch(`/api/bom/${form.id}`, { method: "DELETE" });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("ลบเวอร์ชั่นแล้ว");
+      toast.success("ลบเวอร์ชั่นแล้ว"); tellHost({ saved: true });
       const remain = await fetchVersions(form.product_sku);
       const other = remain.find((v) => v.id !== form.id);
       if (other) { await switchVersion(other.id); } else { setForm(null); }
@@ -283,7 +292,7 @@ export default function BomWorkspacePage() {
     try {
       const res = await apiFetch(`/api/bom/${form.id}/set-default`, { method: "POST" });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("ตั้งเป็นเวอร์ชั่นหลัก (default) แล้ว");
+      toast.success("ตั้งเป็นเวอร์ชั่นหลัก (default) แล้ว"); tellHost({ saved: true });
       await fetchVersions(form.product_sku);
     } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้ง default ไม่สำเร็จ"); }
   };
@@ -333,7 +342,7 @@ export default function BomWorkspacePage() {
         if (lbj?.error) throw new Error("ค่าแรงผลิต: " + lbj.error);
       } catch (e) { toast.error("บันทึก BOM แล้ว แต่บันทึกค่าแรง/งานเหมาไม่สำเร็จ — " + (e instanceof Error ? e.message : "")); }
       toast.success(form.id ? "บันทึกสูตรแล้ว" : "สร้างสูตรใหม่แล้ว");
-      setDirty(false);
+      setDirty(false); tellHost({ saved: true, dirty: false });
       refresh();
       // ไม่ปิดหน้าต่าง — โหลดข้อมูลล่าสุดมาแสดงต่อ (รองรับสร้างใหม่ → เข้าสู่โหมดแก้)
       const savedId = form.id ?? (json.id as string | undefined);
