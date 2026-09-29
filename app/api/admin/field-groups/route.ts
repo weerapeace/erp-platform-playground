@@ -8,6 +8,7 @@
  *   body: { module_key, action: "upsert"|"rename", key, new?, label?, icon?, actor? }
  *   - upsert : ตั้ง/แก้ label+icon ของกลุ่ม
  *   - rename : เปลี่ยน key (ย้าย group_key ของทุกฟิลด์ old → new) + ย้าย meta
+ *   - delete : ลบกลุ่มที่สร้างเอง — ฟิลด์ในกลุ่มย้ายไป move_to ก่อน (ฟิลด์ไม่หาย) · { key, move_to }
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -30,7 +31,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await requireAdmin(request);
   if (denied) return NextResponse.json({ error: denied }, { status: 403 });
 
-  let b: { module_key?: string; action?: string; key?: string; new?: string; label?: string; icon?: string; actor?: string };
+  let b: { module_key?: string; action?: string; key?: string; new?: string; label?: string; icon?: string; actor?: string; move_to?: string };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const moduleKey = String(b.module_key ?? "").trim();
   const action = b.action ?? "upsert";
@@ -46,7 +47,18 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const config = { ...((mod.config ?? {}) as Record<string, unknown>) };
   const groups: Record<string, GMeta> = { ...((config.field_groups ?? {}) as Record<string, GMeta>) };
 
-  if (action === "rename") {
+  let movedFields = 0;
+  if (action === "delete") {
+    const { count } = await admin.from("erp_module_fields").select("id", { count: "exact", head: true }).eq("module_id", mod.id).eq("group_key", key);
+    movedFields = count ?? 0;
+    if (movedFields > 0) {
+      const moveTo = String(b.move_to ?? "").trim();
+      if (!moveTo || moveTo === key) return NextResponse.json({ error: `กลุ่มนี้มี ${movedFields} ฟิลด์ — ต้องเลือกกลุ่มปลายทางที่จะย้ายฟิลด์ไป` }, { status: 400 });
+      const { error: e1 } = await admin.from("erp_module_fields").update({ group_key: moveTo }).eq("module_id", mod.id).eq("group_key", key);
+      if (e1) return NextResponse.json({ error: "ย้ายฟิลด์ไม่สำเร็จ: " + e1.message }, { status: 500 });
+    }
+    delete groups[key];
+  } else if (action === "rename") {
     const newKey = String(b.new ?? "").trim();
     if (!newKey) return NextResponse.json({ error: "ต้องระบุชื่อกลุ่มใหม่" }, { status: 400 });
     if (newKey !== key) {
@@ -73,7 +85,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   await writeAudit(admin, {
     action: "field_group.update", entityType: "erp_modules", entityId: mod.id,
     actorId: user?.id ?? null, actorName: b.actor ?? user?.email ?? null,
-    metadata: { module: moduleKey, action, key, new: b.new ?? null, icon: b.icon ?? null },
+    metadata: { module: moduleKey, action, key, new: b.new ?? null, icon: b.icon ?? null, ...(action === "delete" ? { move_to: b.move_to ?? null, moved_fields: movedFields } : {}) },
   });
 
   return NextResponse.json({ ok: true, field_groups: groups });

@@ -2,6 +2,8 @@
  * บัญชีธนาคารพนักงาน + ประวัติบัญชีเดิม
  * GET  /api/payroll/employee-bank-accounts?employee_id=...  → บัญชีหลัก + บัญชีเดิมทั้งหมด
  * POST /api/payroll/employee-bank-accounts                  → ตั้งบัญชีใหม่เป็นบัญชีหลัก
+ * DELETE /api/payroll/employee-bank-accounts?id=...          → แถว "บัญชีเดิม" = ลบทิ้ง (พิมพ์ผิด ไม่เคยใช้จริง)
+ *                                                              แถว "บัญชีหลัก" = เลิกใช้ (ย้ายไปเป็นบัญชีเดิม พนักงานไม่มีบัญชีรับโอน)
  *
  * เปลี่ยนบัญชี = ไม่ทับของเดิม — ปลดบัญชีเดิมเป็น "บัญชีเก่า" (is_primary=false + replaced_at)
  * แล้วเพิ่มแถวใหม่เป็นบัญชีหลัก → ย้อนดูได้ว่าเคยใช้บัญชีอะไร เปลี่ยนเมื่อไหร่ ใครเปลี่ยน
@@ -127,5 +129,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ data: data?.[0] ?? null, error: null, changed: true, kept_old: !!primary }, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "บันทึกบัญชีไม่สำเร็จ" }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;
+  const id = s(req.nextUrl.searchParams.get("id"));
+  if (!id) return NextResponse.json({ error: "ต้องระบุบัญชี" }, { status: 400 });
+
+  let actorId: string | null = null, actorName: string | null = null;
+  try { const { data } = await supabaseFromRequest(req).auth.getUser(); actorId = data.user?.id ?? null; actorName = data.user?.email ?? null; } catch { /* */ }
+
+  try {
+    const admin = supabaseAdmin();
+    const { data: rows } = await admin.from("employee_bank_accounts").select(SELECT).eq("id", id).limit(1);
+    const row = rows?.[0];
+    if (!row) return NextResponse.json({ error: "ไม่พบบัญชีนี้" }, { status: 404 });
+
+    if (row.is_primary) {
+      // บัญชีหลัก: ไม่ลบ — เลิกใช้แล้วเก็บเป็นประวัติ + ล้างช่องสำรองในตารางพนักงาน
+      const now = new Date().toISOString();
+      const { error } = await admin.from("employee_bank_accounts").update({ is_primary: false, replaced_at: now, updated_at: now }).eq("id", id);
+      if (error) throw new Error(error.message);
+      await admin.from("employees").update({ bank_name: null, bank_account_no: null, bank_account_name: null, bank_branch: null }).eq("id", row.employee_id);
+      await writeAudit(admin, { action: "clear_bank_account", entityType: "employee_bank_accounts", entityId: id, actorId, actorName,
+        metadata: { employee_id: row.employee_id, bank: row.bank_name, account_no: row.account_no, account_name: row.account_name } });
+      return NextResponse.json({ data: { id, cleared: true }, error: null });
+    }
+
+    const { error } = await admin.from("employee_bank_accounts").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    await writeAudit(admin, { action: "delete", entityType: "employee_bank_accounts", entityId: id, actorId, actorName,
+      metadata: { employee_id: row.employee_id, snapshot: row } });
+    return NextResponse.json({ data: { id, deleted: true }, error: null });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "ลบบัญชีไม่สำเร็จ" }, { status: 500 });
   }
 }

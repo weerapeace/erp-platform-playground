@@ -98,6 +98,7 @@ export async function GET(req: NextRequest) {
         .from("employee_bank_accounts")
         .select("employee_id, bank_name, bank_branch, account_no, account_name, is_primary")
         .in("employee_id", empIds)
+        .is("replaced_at", null)   // ไม่เอาบัญชีเดิมที่เลิกใช้แล้ว
         .order("is_primary", { ascending: false });
       (bankRows ?? []).forEach((bank) => {
         const row = bank as Row;

@@ -209,6 +209,9 @@ export default function EmployeeProfilePage() {
   const [opts, setOpts] = useState<Options | null>(null);
   const [showGaps, setShowGaps] = useState(false);                   // ไฮไลต์ช่องที่ยังว่าง
   const [bankHistory, setBankHistory] = useState<BankAccountRow[]>([]);   // บัญชีเดิมที่เคยใช้
+  const [bankPrimaryId, setBankPrimaryId] = useState<string | null>(null);
+  const [bankAsk, setBankAsk] = useState<string | null>(null);            // ถามยืนยันในแถว (id ของบัญชี)
+  const [bankBusy, setBankBusy] = useState(false);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -224,9 +227,20 @@ export default function EmployeeProfilePage() {
   const loadBankHistory = useCallback(async () => {
     try {
       const j = await apiFetch(`/api/payroll/employee-bank-accounts?employee_id=${id}`).then((r) => r.json());
-      if (!j.error) setBankHistory((j.data?.history ?? []) as BankAccountRow[]);
+      if (!j.error) { setBankHistory((j.data?.history ?? []) as BankAccountRow[]); setBankPrimaryId(j.data?.primary?.id ? String(j.data.primary.id) : null); }
     } catch { /* ไม่มีประวัติก็ไม่เป็นไร */ }
   }, [id]);
+
+  /** ลบบัญชีเดิมที่พิมพ์ผิด / เลิกใช้บัญชีหลัก (พนักงานไม่มีบัญชีรับโอน) */
+  const removeBank = async (bankId: string) => {
+    setBankBusy(true); setErr(null);
+    try {
+      const j = await apiFetch(`/api/payroll/employee-bank-accounts?id=${bankId}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) { setErr(j.error); return; }
+      await Promise.all([load(), loadBankHistory()]);
+    } catch { setErr("ลบบัญชีไม่สำเร็จ"); }
+    finally { setBankBusy(false); setBankAsk(null); }
+  };
   useEffect(() => { if (id) void loadBankHistory(); }, [id, loadBankHistory]);
 
   // ตัวเลือก (แผนก/ตำแหน่ง/หัวหน้า) — โหลดครั้งเดียวตอนกดแก้ครั้งแรก
@@ -443,12 +457,36 @@ export default function EmployeeProfilePage() {
                 showGaps={showGaps} isGap={isGap}
                 onEdit={() => void startEdit(sec)} onCancel={() => setEditKey(null)} onSave={() => void saveSection()} />
               {/* บัญชีเดิมที่เคยใช้ — โผล่ใต้การ์ดค่าจ้าง/ธนาคาร เมื่อเคยเปลี่ยนบัญชี */}
+              {/* เลิกใช้บัญชีหลัก — เช่น พนักงานเปลี่ยนไปรับเงินสด / กรอกบัญชีผิดคน */}
+              {sec.key === "pay" && bankPrimaryId && editKey !== "pay" && (
+                <div className="flex flex-wrap items-center justify-end gap-2 px-1 text-xs">
+                  {bankAsk === bankPrimaryId ? (
+                    <>
+                      <span className="text-slate-500">เลิกใช้บัญชีธนาคารนี้? พนักงานจะไม่มีบัญชีรับโอน (บัญชีย้ายไปอยู่ใน “บัญชีเดิม”)</span>
+                      <button onClick={() => void removeBank(bankPrimaryId)} disabled={bankBusy} className="h-7 rounded-md bg-rose-600 px-2.5 text-white hover:bg-rose-700 disabled:opacity-50">{bankBusy ? "กำลังบันทึก…" : "ยืนยันเลิกใช้"}</button>
+                      <button onClick={() => setBankAsk(null)} disabled={bankBusy} className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-slate-600">ไม่</button>
+                    </>
+                  ) : (
+                    <button onClick={() => setBankAsk(bankPrimaryId)} className="text-slate-400 hover:text-rose-600 hover:underline">🗑 เลิกใช้บัญชีธนาคารนี้</button>
+                  )}
+                </div>
+              )}
               {sec.key === "pay" && bankHistory.length > 0 && (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <h3 className="mb-2 text-[13px] font-semibold text-slate-600">🕘 บัญชีเดิมที่เคยใช้ ({bankHistory.length})</h3>
                   <div className="space-y-2">
                     {bankHistory.map((b) => (
                       <div key={b.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                        <div className="float-right">
+                          {bankAsk === b.id ? (
+                            <span className="flex items-center gap-1">
+                              <button onClick={() => void removeBank(b.id)} disabled={bankBusy} className="h-6 rounded bg-rose-600 px-2 text-[11px] text-white hover:bg-rose-700 disabled:opacity-50">ยืนยันลบ</button>
+                              <button onClick={() => setBankAsk(null)} disabled={bankBusy} className="h-6 rounded border border-slate-200 px-2 text-[11px] text-slate-500">ไม่ลบ</button>
+                            </span>
+                          ) : (
+                            <button onClick={() => setBankAsk(b.id)} title="ลบแถวนี้ (ใช้เมื่อพิมพ์ผิด ไม่เคยใช้บัญชีนี้จริง)" className="text-slate-300 hover:text-rose-600">🗑</button>
+                          )}
+                        </div>
                         <div className="font-medium text-slate-700">{b.bank_name}</div>
                         <div className="font-mono text-slate-600">{b.account_no}</div>
                         <div className="text-slate-400">
@@ -459,7 +497,7 @@ export default function EmployeeProfilePage() {
                       </div>
                     ))}
                   </div>
-                  <p className="mt-2 text-[11px] text-slate-400">เก็บไว้อ้างอิงเท่านั้น — การโอนเงินใช้บัญชีหลักด้านบน</p>
+                  <p className="mt-2 text-[11px] text-slate-400">เก็บไว้อ้างอิงเท่านั้น — การโอนเงินใช้บัญชีหลักด้านบน · 🗑 ใช้ลบแถวที่พิมพ์ผิดเท่านั้น (ลบแล้วเรียกคืนไม่ได้)</p>
                 </div>
               )}
             </div>

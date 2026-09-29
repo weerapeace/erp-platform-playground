@@ -376,6 +376,29 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
   const [groupModal, setGroupModal] = useState<{ mode: "create" | "edit"; origKey: string; name: string; icon: string } | null>(null);
   const [groupMgr, setGroupMgr] = useState(false);
   const [groupSaving, setGroupSaving] = useState(false);
+  // 🗑 ลบกลุ่ม — ฟิลด์ในกลุ่มต้องย้ายไปกลุ่มอื่นก่อน (เลือกปลายทางในแถว)
+  const [groupDel, setGroupDel] = useState<{ key: string; moveTo: string } | null>(null);
+  const fieldCountOf = (key: string) => (data?.registry ?? []).filter((f) => f.group_key === key).length;
+  const isBuiltinGroup = (key: string) => GROUP_OPTIONS.some((g) => g.value === key);
+
+  const deleteGroup = async () => {
+    if (!groupDel) return;
+    const n = fieldCountOf(groupDel.key);
+    if (n > 0 && !groupDel.moveTo) { flash("❌ เลือกกลุ่มปลายทางก่อน"); return; }
+    setGroupSaving(true);
+    try {
+      const res = await apiFetch("/api/admin/field-groups", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ module_key: moduleKey, action: "delete", key: groupDel.key, move_to: groupDel.moveTo || undefined }),
+      });
+      const j = await res.json(); if (j.error) { flash("❌ " + j.error); return; }
+      setCustomGroups((p) => p.filter((g) => g !== groupDel.key));
+      setGroupDel(null);
+      flash(n > 0 ? `✓ ลบกลุ่มแล้ว · ย้าย ${n} ฟิลด์ไปกลุ่มใหม่` : "✓ ลบกลุ่มแล้ว");
+      await load();
+    } catch (e) { flash("❌ " + (e instanceof Error ? e.message : "ไม่สำเร็จ")); }
+    finally { setGroupSaving(false); }
+  };
 
   const saveGroupModal = async () => {
     if (!groupModal) return;
@@ -942,12 +965,30 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                 <button onClick={() => { setGroupMgr(false); addGroup(); }} className="text-xs px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700">➕ เพิ่มกลุ่ม</button>
               </div>
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-                {groupOptions.map((g) => (
+                {groupOptions.map((g) => groupDel?.key === g.value ? (
+                  <div key={g.value} className="px-4 py-2 text-sm bg-red-50/60 space-y-1.5">
+                    <div className="text-slate-700">ลบกลุ่ม <b>{gMeta(g.value).label}</b>?{fieldCountOf(g.value) > 0 ? ` มี ${fieldCountOf(g.value)} ฟิลด์ — ย้ายไปกลุ่ม:` : " (ไม่มีฟิลด์ในกลุ่ม)"}</div>
+                    {fieldCountOf(g.value) > 0 && (
+                      <select value={groupDel.moveTo} onChange={(e) => setGroupDel({ ...groupDel, moveTo: e.target.value })}
+                        className="w-full h-8 px-2 text-xs border border-slate-300 rounded-md bg-white">
+                        <option value="">— เลือกกลุ่มปลายทาง —</option>
+                        {groupOptions.filter((o) => o.value !== g.value).map((o) => <option key={o.value} value={o.value}>{gMeta(o.value).icon} {gMeta(o.value).label}</option>)}
+                      </select>
+                    )}
+                    <div className="flex justify-end gap-1.5">
+                      <button onClick={() => setGroupDel(null)} disabled={groupSaving} className="h-7 px-2.5 text-xs border border-slate-200 bg-white rounded-md text-slate-600">ไม่ลบ</button>
+                      <button onClick={() => void deleteGroup()} disabled={groupSaving || (fieldCountOf(g.value) > 0 && !groupDel.moveTo)}
+                        className="h-7 px-2.5 text-xs bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-40">{groupSaving ? "กำลังลบ…" : "ยืนยันลบกลุ่ม"}</button>
+                    </div>
+                  </div>
+                ) : (
                   <div key={g.value} className="flex items-center gap-2 px-4 py-2 text-sm">
                     <span className="text-lg">{gMeta(g.value).icon}</span>
                     <span className="flex-1 min-w-0 truncate">{gMeta(g.value).label} <code className="text-[10px] text-slate-400">{g.value}</code></span>
                     <button onClick={() => { setGroupMgr(false); setGroupModal({ mode: "edit", origKey: g.value, name: gMeta(g.value).label, icon: gMeta(g.value).icon }); }}
                       className="text-xs text-blue-600 hover:underline">แก้ไข</button>
+                    {/* กลุ่มมาตรฐานของระบบลบไม่ได้ (ทุกโมดูลใช้ร่วมกัน) */}
+                    {!isBuiltinGroup(g.value) && <button onClick={() => setGroupDel({ key: g.value, moveTo: "" })} className="text-xs text-red-600 hover:underline">ลบ</button>}
                   </div>
                 ))}
               </div>

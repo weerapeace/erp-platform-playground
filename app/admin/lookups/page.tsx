@@ -8,11 +8,12 @@
  * - dropdown เลือก lookup_type (มาจาก erp_lookup_types)
  * - list values ของ type นั้น (name + code + sort_order + active)
  * - +/-/edit ค่า + ปุ่มสร้าง type ใหม่
+ * - type: ✏️ เปลี่ยนชื่อ/ไอคอน · 🗑 ลบ (เฉพาะ type ที่สร้างเอง ไม่มีค่าข้างใน ไม่มีฟิลด์ใช้อยู่)
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { useBackdropDismiss } from "@/components/modal";
+import { useBackdropDismiss, ConfirmDialog } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import type { LookupRow } from "@/app/api/lookups/route";
 import type { LookupType } from "@/app/api/lookups/types/route";
@@ -33,6 +34,10 @@ export default function LookupsAdminPage() {
 
   // new-type modal
   const [newTypeOpen, setNewTypeOpen] = useState(false);
+  // แก้ / ลบ type
+  const [typeEdit, setTypeEdit] = useState<{ label: string; icon: string } | null>(null);
+  const [typeBusy, setTypeBusy] = useState(false);
+  const [typeDel, setTypeDel] = useState<LookupType | null>(null);
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
@@ -114,6 +119,35 @@ export default function LookupsAdminPage() {
 
   const activeType = types.find((t) => t.lookup_type === active);
 
+  const saveType = async () => {
+    if (!typeEdit || !activeType || !typeEdit.label.trim()) return;
+    setTypeBusy(true);
+    try {
+      const res = await apiFetch("/api/lookups/types", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lookup_type: activeType.lookup_type, label: typeEdit.label.trim(), icon: typeEdit.icon.trim() || null }),
+      });
+      const json = await res.json();
+      if (json.error) { flash("❌ " + json.error); return; }
+      setTypeEdit(null);
+      flash("✓ บันทึกชื่อ type แล้ว");
+      await loadTypes();
+    } finally { setTypeBusy(false); }
+  };
+
+  const removeType = async () => {
+    const t = typeDel; if (!t) return;
+    setTypeBusy(true);
+    try {
+      const res = await apiFetch(`/api/lookups/types?type=${encodeURIComponent(t.lookup_type)}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.error) { flash("❌ " + json.error); return; }
+      flash(`✓ ลบ type ${t.label} แล้ว`);
+      setActive("");
+      await loadTypes();
+    } finally { setTypeBusy(false); setTypeDel(null); }
+  };
+
   return (
     <PlaygroundShell>
       <div className="min-h-screen bg-slate-50">
@@ -159,9 +193,29 @@ export default function LookupsAdminPage() {
           ) : (
             <>
               <div className="mb-4 flex flex-wrap items-center gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">
-                  {activeType.icon} {activeType.label}
-                </h2>
+                {typeEdit ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <input value={typeEdit.icon} onChange={(e) => setTypeEdit({ ...typeEdit, icon: e.target.value })} maxLength={4} title="ไอคอน (emoji)"
+                      className="w-12 h-9 px-2 text-center text-base border border-slate-300 rounded-md" />
+                    <input value={typeEdit.label} autoFocus onChange={(e) => setTypeEdit({ ...typeEdit, label: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveType(); if (e.key === "Escape") setTypeEdit(null); }}
+                      className="h-9 px-3 text-sm border border-orange-400 rounded-md focus:outline-none focus:ring-1 focus:ring-orange-500" />
+                    <button onClick={() => void saveType()} disabled={typeBusy || !typeEdit.label.trim()} className="h-9 px-3 text-sm text-white bg-orange-500 rounded-md hover:bg-orange-600 disabled:opacity-50">บันทึก</button>
+                    <button onClick={() => setTypeEdit(null)} disabled={typeBusy} className="h-9 px-3 text-sm text-slate-600 border border-slate-300 rounded-md">ยกเลิก</button>
+                  </span>
+                ) : (
+                  <>
+                    <h2 className="text-lg font-semibold text-slate-900">
+                      {activeType.icon} {activeType.label}
+                    </h2>
+                    <button onClick={() => setTypeEdit({ label: activeType.label, icon: activeType.icon ?? "" })} title="เปลี่ยนชื่อ / ไอคอน ของ type นี้"
+                      className="h-7 px-2 text-xs text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50">✏️ แก้ชื่อ</button>
+                    {!activeType.is_system && (
+                      <button onClick={() => setTypeDel(activeType)} title="ลบ type ที่สร้างผิด"
+                        className="h-7 px-2 text-xs text-red-600 border border-red-200 rounded-md hover:bg-red-50">🗑 ลบ type</button>
+                    )}
+                  </>
+                )}
                 {activeType.description && (
                   <p className="text-xs text-slate-500">— {activeType.description}</p>
                 )}
@@ -251,6 +305,9 @@ export default function LookupsAdminPage() {
         {/* Hidden: ensure unused-var ไม่ warn */}
         {editing && null}
       </div>
+    <ConfirmDialog open={typeDel !== null} onClose={() => { if (!typeBusy) setTypeDel(null); }} onConfirm={() => void removeType()} loading={typeBusy}
+        variant="danger" title="ลบ type นี้?" confirmText="ลบ type" cancelText="ไม่ลบ"
+        message={`${typeDel?.icon ?? ""} ${typeDel?.label ?? ""} (${typeDel?.lookup_type ?? ""}) — ลบได้เฉพาะ type ที่ไม่มีค่าข้างใน และไม่มีฟิลด์ไหนใช้อยู่ · ลบแล้วเรียกคืนไม่ได้ ต้องสร้างใหม่`} />
     </PlaygroundShell>
   );
 }

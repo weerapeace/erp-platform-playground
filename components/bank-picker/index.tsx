@@ -9,9 +9,12 @@
  * ทำไมต้องมี: ข้อมูลเดิมมี "ธนาคารไทยพาณิชย์ (SCB)" กับ "SCB" ปนกัน → ทำไฟล์ส่งธนาคารแยกกลุ่มไม่ตรง
  *
  * onChange คืน (ชื่อธนาคาร, จำนวนหลักเลขบัญชีของธนาคารนั้น) เพื่อให้ช่องเลขบัญชีรู้ว่ากรอกครบยัง
+ *
+ * เพิ่ม/แก้/ปิดใช้งาน: เพิ่ม = พิมพ์ชื่อแล้วกด ➕ · แก้/ปิด = "⚙️ จัดการทะเบียนธนาคาร" ท้ายรายการ (BankRegistryModal)
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { BankRegistryModal } from "./registry-modal";
 
 export type BankOption = { id: string; name: string; code?: string | null; account_digits?: number | null };
 
@@ -60,7 +63,16 @@ export function BankPicker({
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [manage, setManage] = useState(false);   // หน้าต่างจัดการทะเบียนธนาคาร
   const boxRef = useRef<HTMLDivElement | null>(null);
+
+  const reloadBanks = async () => {
+    try {
+      const j = await apiFetch(`/api/payroll/banks?country=${encodeURIComponent(country)}`).then((r) => r.json());
+      const rows = (j?.data ?? []) as BankOption[];
+      cache = rows; setBanks(rows);
+    } catch { /* ใช้รายชื่อเดิมต่อ */ }
+  };
 
   useEffect(() => {
     if (cache) { setBanks(cache); return; }
@@ -181,9 +193,18 @@ export function BankPicker({
               {busy ? "กำลังเพิ่ม…" : `➕ เพิ่ม “${query.trim()}” เข้าทะเบียนธนาคาร`}
             </button>
           )}
+          {allowCreate && (
+            <button
+              type="button" onClick={() => { setOpen(false); setManage(true); }}
+              className="w-full border-t border-slate-100 px-3 py-1.5 text-left text-[11px] text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            >
+              ⚙️ จัดการทะเบียนธนาคาร (แก้ชื่อ / ปิดใช้งาน)
+            </button>
+          )}
           {err && <div className="border-t border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700">{err}</div>}
         </div>
       )}
+      {manage && <BankRegistryModal country={country} onClose={(changed) => { setManage(false); if (changed) void reloadBanks(); }} />}
     </div>
   );
 }

@@ -98,7 +98,8 @@ type BankInfo = { bank: string; branch: string; account_no: string; account_name
 async function bankMap(): Promise<Record<string, BankInfo>> {
   const { data } = await supabaseAdmin()
     .from("employee_bank_accounts")
-    .select("employee_id, bank_name, bank_branch, account_no, account_name, is_primary");
+    .select("employee_id, bank_name, bank_branch, account_no, account_name, is_primary")
+    .is("replaced_at", null);   // บัญชีเดิมที่เลิกใช้แล้ว ไม่นับเป็นบัญชีรับโอน
   const m: Record<string, BankInfo> = {};
   (data ?? []).forEach((b) => {
     const r = b as { employee_id: string; bank_name: string; bank_branch: string | null; account_no: string; account_name: string; is_primary: boolean };

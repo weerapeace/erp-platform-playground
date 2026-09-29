@@ -127,7 +127,7 @@ async function employeeAndBankMaps(employeeIds: string[]) {
       ? admin.from("employees").select("id, employee_code, first_name, last_name, nickname, national_id, passport_no").in("id", employeeIds)
       : Promise.resolve({ data: [], error: null }),
     employeeIds.length
-      ? admin.from("employee_bank_accounts").select("employee_id, bank_name, account_no, account_name, is_primary").in("employee_id", employeeIds).order("is_primary", { ascending: false })
+      ? admin.from("employee_bank_accounts").select("employee_id, bank_name, account_no, account_name, is_primary").in("employee_id", employeeIds).is("replaced_at", null).order("is_primary", { ascending: false })   // ไม่เอา "บัญชีเดิม" ที่เลิกใช้แล้วมาจ่ายเงิน
       : Promise.resolve({ data: [], error: null }),
     employeeIds.length
       ? admin.from("employee_contracts").select("employee_id, contract_type, wage_type, is_current, status").in("employee_id", employeeIds).eq("is_current", true).eq("status", "active")
