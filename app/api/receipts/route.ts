@@ -3,6 +3,8 @@
  *
  *   GET    ?status=&from=&to=&customer_id=   → รายการใบรับชำระ (พร้อมบรรทัดที่ตัดยอด)
  *   GET    ?open_docs=1&customer_id=         → ใบขาย/ใบวางบิลที่ยังค้างรับของลูกค้ารายนั้น (ใช้ตอนสร้างใบ)
+ *          &for_receipt=<id>                 → ใช้ตอน "แก้ใบรับชำระ": ยอดค้างคิดแบบยังไม่นับใบที่กำลังแก้
+ *                                              + รวมใบที่ใบนี้เคยตัดไว้ แม้จะเก็บเงินครบไปแล้ว
  *   POST   { customer_id, amount, lines[] }  → สร้างใบ + ตัดยอดค้างรับ
  *   PATCH  { id, ... }                       → แก้ใบ (ยกเลิกใช้ status: "cancelled")
  *
@@ -171,6 +173,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const customerId = uuidOrNull(sp.get("customer_id"));
     const search = str(sp.get("q")).toLowerCase();
 
+    // โหมดแก้ใบ: ยอดที่ใบนี้ตัดไว้ ต้อง "บวกคืน" ก่อน ไม่งั้นใบที่ตัดครบแล้วจะหายไปจากรายการ แก้ไม่ได้
+    const forReceipt = uuidOrNull(sp.get("for_receipt"));
+    const addBack = new Map<string, number>();   // key: "so:<id>" / "bn:<id>"
+    if (forReceipt) {
+      const [{ data: head }, { data: own }] = await Promise.all([
+        admin.from("customer_receipts").select("status, is_active").eq("id", forReceipt).maybeSingle(),
+        admin.from("customer_receipt_lines").select("so_id, billing_note_id, amount").eq("receipt_id", forReceipt).limit(500),
+      ]);
+      // ใบที่ยังไม่นับเป็นเงินรับ (ร่าง/ยกเลิก) ไม่ได้ลดยอดค้างอยู่แล้ว → ไม่ต้องบวกคืน แต่ยังต้องโชว์ใบที่เคยเลือกไว้
+      const counted = !!head?.is_active && isReceiptPaid(head?.status as string);
+      for (const l of own ?? []) {
+        const key = l.so_id ? `so:${l.so_id}` : l.billing_note_id ? `bn:${l.billing_note_id}` : "";
+        if (key) addBack.set(key, (addBack.get(key) ?? 0) + (counted ? money(l.amount) : 0));
+      }
+    }
+
     let soQuery = admin
       .from("erp_playground_sales_orders")
       .select("id, so_number, order_date, customer_id, customer_name, grand_total, amount_due")
@@ -199,8 +217,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const docs: OpenDoc[] = [];
     for (const b of bnRes.data ?? []) {
       const total = money(b.grand_total);
-      const left = money(b.amount_due);
-      if (left <= 0) continue;
+      const own = addBack.has(`bn:${b.id}`);
+      const left = Math.min(total, money(money(b.amount_due) + (addBack.get(`bn:${b.id}`) ?? 0)));
+      if (left <= 0 && !own) continue;
       docs.push({
         kind: "bn", id: String(b.id), number: str(b.bill_number) || "(ไม่มีเลข)",
         date: str(b.bill_date), customer_id: b.customer_id as string | null,
@@ -209,10 +228,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       });
     }
     for (const s of soRes.data ?? []) {
-      if (soInBn.has(String(s.id))) continue;
+      const own = addBack.has(`so:${s.id}`);
+      if (soInBn.has(String(s.id)) && !own) continue;
       const total = money(s.grand_total);
-      const left = money(s.amount_due);
-      if (left <= 0) continue;
+      const left = Math.min(total, money(money(s.amount_due) + (addBack.get(`so:${s.id}`) ?? 0)));
+      if (left <= 0 && !own) continue;
       docs.push({
         kind: "so", id: String(s.id), number: str(s.so_number) || "(ไม่มีเลข)",
         date: str(s.order_date), customer_id: s.customer_id as string | null,

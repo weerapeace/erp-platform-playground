@@ -5,6 +5,7 @@
  * URL: /receipts
  *
  * บันทึกว่า "ลูกค้าจ่ายเงินมาแล้ว" → ตัดยอดค้างรับของใบขาย/ใบวางบิลให้ลดลงจริง
+ * เพิ่ม = ปุ่ม "+ บันทึกรับชำระ" · แก้ = ✏️ แก้ไข (ฟอร์มเดียวกัน) · ลบ = "ยกเลิกใบนี้" (เอกสารมีเลขที่ → ยกเลิก ไม่ลบทิ้ง)
  * นี่คือสิ่งที่ทำให้หน้ากระแสเงินสด (/cashflow) เปลี่ยนจาก "ประมาณการ" เป็นตัวเลขจริง
  *
  * ใช้ของกลาง: ตารางกลาง DataTable · ERPModal/ConfirmDialog · CustomerPicker · MoneyInput · DateInput
@@ -35,6 +36,7 @@ type DraftLine = OpenDoc & { pay: string };
 export default function ReceiptsPage() {
   const canView = usePermission("receipts.view");
   const canCreate = usePermission("receipts.create");
+  const canEdit = usePermission("receipts.edit");
   const canCancel = usePermission("receipts.cancel");
   const { permsReady } = useAuth();
 
@@ -42,6 +44,7 @@ export default function ReceiptsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Receipt | null>(null);   // ใบที่กำลังแก้ (null = บันทึกใบใหม่)
   const [cancelTarget, setCancelTarget] = useState<Receipt | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [openTotal, setOpenTotal] = useState<number | null>(null);
@@ -154,7 +157,7 @@ export default function ReceiptsPage() {
           </p>
         </div>
         {canCreate && (
-          <button onClick={() => setFormOpen(true)}
+          <button onClick={() => { setEditTarget(null); setFormOpen(true); }}
                   className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
             + บันทึกรับชำระ
           </button>
@@ -206,16 +209,23 @@ export default function ReceiptsPage() {
           selectable
           pageSize={50}
           onRetry={load}
-          rowActions={canCancel ? [{
-            label: "ยกเลิกใบนี้",
-            onClick: (row) => setCancelTarget(row),
-            variant: "danger",
-            show: (row) => row.status !== "cancelled",
-          }] : undefined}
+          rowActions={(canEdit || canCancel) ? [
+            ...(canEdit ? [{
+              label: "✏️ แก้ไข",
+              onClick: (row: Receipt) => { setEditTarget(row); setFormOpen(true); },
+              show: (row: Receipt) => row.status !== "cancelled",
+            }] : []),
+            ...(canCancel ? [{
+              label: "ยกเลิกใบนี้",
+              onClick: (row: Receipt) => setCancelTarget(row),
+              variant: "danger" as const,
+              show: (row: Receipt) => row.status !== "cancelled",
+            }] : []),
+          ] : undefined}
         />
       </div>
 
-      <ReceiptFormModal open={formOpen} onClose={() => setFormOpen(false)} onSaved={() => { setFormOpen(false); load(); }} />
+      <ReceiptFormModal open={formOpen} editing={editTarget} onClose={() => setFormOpen(false)} onSaved={() => { setFormOpen(false); load(); }} />
 
       <ConfirmDialog
         open={!!cancelTarget}
@@ -234,9 +244,10 @@ export default function ReceiptsPage() {
 }
 
 // ============================================================
-// ฟอร์มบันทึกรับชำระ
+// ฟอร์มบันทึกรับชำระ (ใช้ร่วม: บันทึกใบใหม่ + แก้ใบเดิม)
+//   แก้ใบเดิม: เติมค่าเดิมให้ · ใบที่เคยตัดไว้ขึ้นมาพร้อมยอดเดิม · บันทึก = PATCH แล้วระบบคิดยอดค้างรับใหม่ให้เอง
 // ============================================================
-function ReceiptFormModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+function ReceiptFormModal({ open, editing, onClose, onSaved }: { open: boolean; editing?: Receipt | null; onClose: () => void; onSaved: () => void }) {
   const [customer, setCustomer] = useState<CustomerPickerValue | null>(null);
   const [date, setDate] = useState(todayISO());
   const [amount, setAmount] = useState("");
@@ -250,26 +261,41 @@ function ReceiptFormModal({ open, onClose, onSaved }: { open: boolean; onClose: 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // เปิดฟอร์มใหม่ = ล้างของเก่าทิ้ง
+  // เปิดฟอร์ม: ใบใหม่ = ล้างของเก่าทิ้ง · แก้ใบเดิม = เติมค่าเดิม
   useEffect(() => {
     if (!open) return;
-    setCustomer(null); setDate(todayISO()); setAmount(""); setWht(""); setFee("");
-    setMethod("transfer"); setReference(""); setNote(""); setDocs([]); setErr(null);
-  }, [open]);
+    setDocs([]); setErr(null);
+    if (editing) {
+      setCustomer(editing.customer_id ? { id: editing.customer_id, code: null, name: editing.customer_name ?? "" } : null);
+      setDate(editing.receipt_date || todayISO());
+      setAmount(editing.amount ? String(editing.amount) : ""); setWht(editing.wht_amount ? String(editing.wht_amount) : "");
+      setFee(editing.fee_amount ? String(editing.fee_amount) : "");
+      setMethod((editing.method in RECEIPT_METHOD ? editing.method : "transfer") as ReceiptMethod);
+      setReference(editing.reference_no ?? ""); setNote(editing.note ?? "");
+    } else {
+      setCustomer(null); setDate(todayISO()); setAmount(""); setWht(""); setFee("");
+      setMethod("transfer"); setReference(""); setNote("");
+    }
+  }, [open, editing]);
 
   // เลือกลูกค้า → ดึงใบที่ยังค้างรับของลูกค้ารายนั้น
+  // แก้ใบเดิม (ลูกค้าคนเดิม): ขอแบบ for_receipt → ยอดค้างยังไม่นับใบนี้ + เติม "ตัดครั้งนี้" ตามที่เคยตัดไว้
   useEffect(() => {
     if (!open || !customer?.id) { setDocs([]); return; }
+    const own = editing && editing.customer_id === customer.id ? editing : null;
     setLoadingDocs(true); setErr(null);
-    apiFetch(`/api/receipts?open_docs=1&customer_id=${customer.id}`)
+    apiFetch(`/api/receipts?open_docs=1&customer_id=${customer.id}${own ? `&for_receipt=${own.id}` : ""}`)
       .then((r) => r.json())
       .then((j) => {
         if (j?.error) { setErr(j.error); return; }
-        setDocs(((j.data ?? []) as OpenDoc[]).map((d) => ({ ...d, pay: "" })));
+        const paidOf = (d: OpenDoc) => (own?.lines ?? [])
+          .filter((l) => (d.kind === "so" ? l.so_id : l.billing_note_id) === d.id)
+          .reduce((sum, l) => sum + l.amount, 0);
+        setDocs(((j.data ?? []) as OpenDoc[]).map((d) => { const v = paidOf(d); return { ...d, pay: v > 0 ? String(Math.round(v * 100) / 100) : "" }; }));
       })
       .catch(() => setErr("โหลดใบค้างรับไม่สำเร็จ"))
       .finally(() => setLoadingDocs(false));
-  }, [open, customer?.id]);
+  }, [open, customer?.id, editing]);
 
   const settled = settledAmount(Number(amount || 0), Number(wht || 0));
   const allocated = docs.reduce((s, d) => s + Number(d.pay || 0), 0);
@@ -309,9 +335,10 @@ function ReceiptFormModal({ open, onClose, onSaved }: { open: boolean; onClose: 
     setSaving(true); setErr(null);
     try {
       const res = await apiFetch("/api/receipts", {
-        method: "POST",
+        method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(editing ? { id: editing.id } : {}),
           receipt_date: date,
           customer_id: customer?.id ?? null,
           customer_name: customer?.name ?? null,
@@ -328,14 +355,19 @@ function ReceiptFormModal({ open, onClose, onSaved }: { open: boolean; onClose: 
     finally { setSaving(false); }
   };
 
-  const dirty = !!customer || !!amount || docs.some((d) => d.pay);
+  const dirty = editing
+    ? (date !== editing.receipt_date || Number(amount || 0) !== editing.amount || Number(wht || 0) !== editing.wht_amount
+      || Number(fee || 0) !== editing.fee_amount || method !== editing.method || reference !== (editing.reference_no ?? "")
+      || note !== (editing.note ?? "") || (customer?.id ?? null) !== editing.customer_id
+      || Math.abs(allocated - editing.lines.reduce((sum, l) => sum + l.amount, 0)) > 0.005)
+    : (!!customer || !!amount || docs.some((d) => d.pay));
 
   return (
     <ERPModal
       open={open}
       onClose={onClose}
-      title="💵 บันทึกรับชำระจากลูกค้า"
-      description="เลือกลูกค้า → ใส่ยอดที่ได้รับ → เลือกว่าจะตัดใบไหนบ้าง"
+      title={editing ? `✏️ แก้ใบรับชำระ ${editing.receipt_no}` : "💵 บันทึกรับชำระจากลูกค้า"}
+      description={editing ? "แก้แล้วกดบันทึก — ยอดค้างรับของใบขาย/ใบวางบิลจะคิดใหม่ให้อัตโนมัติ" : "เลือกลูกค้า → ใส่ยอดที่ได้รับ → เลือกว่าจะตัดใบไหนบ้าง"}
       size="xl"
       storageKey="receipt-form"
       hasUnsavedChanges={dirty && !saving}
@@ -354,7 +386,7 @@ function ReceiptFormModal({ open, onClose, onSaved }: { open: boolean; onClose: 
             </button>
             <button onClick={save} disabled={saving || settled <= 0}
                     className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {saving ? "กำลังบันทึก…" : "บันทึกรับชำระ"}
+              {saving ? "กำลังบันทึก…" : editing ? "✓ บันทึกการแก้ไข" : "บันทึกรับชำระ"}
             </button>
           </div>
         </div>
