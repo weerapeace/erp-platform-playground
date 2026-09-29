@@ -320,7 +320,8 @@ export default function DashboardPage() {
   // แท็บแรก = "ภาพรวม": แอดมินเห็นตัวเลขผู้บริหาร + งานค้างตามแผนก/ระบบ ในหน้าเดียว · คนอื่นเห็นการ์ดระบบ
   const overviewExec = isAdmin && view === "systems";
   const padX = isPhone ? "px-3" : isDesktop ? "px-8" : "px-5";
-  const maxW = wideView ? "max-w-7xl" : "max-w-4xl";
+  // ภาพรวมผู้บริหาร: ฝังแดชบอร์ดเต็มของแผนกไว้ใต้แท็บ → ต้องกว้างสุด (ไม่งั้นหน้าที่ฝังถูกบีบเป็นหน้าตาแท็บเล็ต)
+  const maxW = overviewExec ? "max-w-screen-2xl" : wideView ? "max-w-7xl" : "max-w-4xl";
   const segBtn = (on: boolean) =>
     `${isPhone ? "text-xs px-2 flex-1" : "text-sm px-3"} py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
   const seeAllOf = (k: string) => { setView("list"); setListMode("notif"); setListFilter(k); setTab("all"); };

@@ -164,8 +164,8 @@ export function ExecutiveView({ layout = "desktop", systems }: { layout?: Device
       <SectionLabel>แยกตามแผนก</SectionLabel>
       <p className="text-[11px] text-slate-400 -mt-1 px-0.5">
         {isDesktop
-          ? <>กดแท็บเพื่อดูตัวเลขและงานค้างของแผนก · &ldquo;⤢ เปิดในหน้าต่าง&rdquo; = ดูแดชบอร์ดแผนกโดยไม่ออกจากหน้านี้</>
-          : "แตะแท็บเพื่อดูตัวเลขและงานค้างของแผนก"}
+          ? <>กดแท็บ = เปิดแดชบอร์ดเต็มของแผนกนั้นในหน้านี้เลย · &ldquo;⤢ เปิดในหน้าต่าง&rdquo; = ขยายเป็นหน้าต่างใหญ่</>
+          : isPhone ? "แตะแท็บเพื่อดูตัวเลขและงานค้างของแผนก" : "แตะแท็บ = เปิดแดชบอร์ดเต็มของแผนกนั้นในหน้านี้เลย"}
       </p>
       <DeptTabs depts={depts} layout={layout} active={activeDept} onActive={setActiveDept}
         pending={pending} team={systems?.team}
@@ -298,7 +298,7 @@ function buildDepts(
       money(f.ap_unpaid, "ค้างจ่าย", "danger"),
       money(pu?.spend_month, "ยอดซื้อเดือนนี้"),
     ] },
-    { key: "sales", icon: "💰", label: "ขาย", short: "ขาย", href: "/sales-orders", stats: [
+    { key: "sales", icon: "💰", label: "ขาย", short: "ขาย", href: "/sales/dashboard", stats: [
       money(s.internal_month, "ยอดขายเดือนนี้"),
       num(f.ar_count, "ใบวางบิลค้าง", "warning"),
       num(sa?.orders_month, "ออเดอร์เดือนนี้"),
