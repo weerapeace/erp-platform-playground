@@ -86,6 +86,15 @@ function ReportForm() {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mine, setMine] = useState<Report[]>([]);
+  // ✏️ แก้ใบที่แจ้งไปแล้ว (เฉพาะใบที่ทีมงานยังไม่รับเรื่อง) — ใช้ฟอร์มด้านบนตัวเดียวกัน
+  const [editId, setEditId] = useState<string | null>(null);
+  const [withdrawAsk, setWithdrawAsk] = useState<string | null>(null);
+  const resetForm = () => { setEditId(null); setDescription(""); setImages([]); setAppId(""); setPriority("medium"); };
+  const startEdit = (r: Report) => {
+    setEditId(r.id); setDescription(r.description ?? ""); setImages(Array.isArray(r.images) ? r.images : []);
+    setAppId(r.app_id ?? ""); setPriority(r.priority ?? "medium"); setWithdrawAsk(null);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const loadMine = useCallback(async () => {
     const j = await apiFetch("/api/issue-reports").then((r) => r.json());
@@ -111,15 +120,25 @@ function ReportForm() {
     if (!description.trim()) { alert("กรุณาอธิบายปัญหา"); return; }
     setSaving(true);
     const app = apps.find((a) => a.id === appId);
-    const j = await apiFetch("/api/issue-reports", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+    const j = await apiFetch(editId ? `/api/issue-reports/${editId}` : "/api/issue-reports", {
+      method: editId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ app_id: appId || null, app_name: app?.name ?? null, description, images, priority, reporterName: user?.name ?? null }),
     }).then((r) => r.json());
     setSaving(false);
-    if (j.error) { alert("ส่งไม่สำเร็จ: " + j.error); return; }
-    setDescription(""); setImages([]); setAppId(""); setPriority("medium");
+    if (j.error) { alert((editId ? "บันทึกไม่สำเร็จ: " : "ส่งไม่สำเร็จ: ") + j.error); return; }
+    const wasEdit = !!editId;
+    resetForm();
     loadMine();
-    alert("ส่งใบแจ้งปัญหาแล้ว ขอบคุณครับ 🌸");
+    alert(wasEdit ? "บันทึกการแก้ไขแล้ว" : "ส่งใบแจ้งปัญหาแล้ว ขอบคุณครับ 🌸");
+  };
+
+  const withdraw = async (id: string) => {
+    setSaving(true);
+    const j = await apiFetch(`/api/issue-reports/${id}`, { method: "DELETE" }).then((r) => r.json()).catch(() => ({ error: "เชื่อมต่อไม่ได้" }));
+    setSaving(false); setWithdrawAsk(null);
+    if (j.error) { alert("ถอนเรื่องไม่สำเร็จ: " + j.error); return; }
+    if (editId === id) resetForm();
+    loadMine();
   };
 
   return (
@@ -171,10 +190,12 @@ function ReportForm() {
           </div>
         </div>
 
-        <div className="text-right">
+        <div className="flex items-center justify-end gap-2">
+          {editId && <span className="mr-auto text-xs text-blue-600">✏️ กำลังแก้ใบที่แจ้งไปแล้ว</span>}
+          {editId && <button onClick={resetForm} disabled={saving} className="h-11 px-5 rounded-full border border-pink-200 bg-white text-slate-500 text-sm hover:bg-pink-50">ยกเลิกการแก้</button>}
           <button onClick={submit} disabled={saving || uploading}
             className="h-11 px-6 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold shadow-lg shadow-pink-200 hover:from-pink-600 hover:to-rose-600 disabled:opacity-50">
-            {saving ? "กำลังส่ง…" : "📨 ส่งแจ้งปัญหา"}
+            {saving ? "กำลังส่ง…" : editId ? "💾 บันทึกการแก้ไข" : "📨 ส่งแจ้งปัญหา"}
           </button>
         </div>
       </div>
@@ -196,6 +217,23 @@ function ReportForm() {
                 <div className="text-sm text-slate-700 line-clamp-2">{r.description}</div>
                 {r.admin_note && <div className="text-xs text-emerald-600 mt-1">ทีมงาน: {r.admin_note}</div>}
                 <div className="text-[11px] text-slate-400 mt-1">{new Date(r.created_at).toLocaleString("th-TH")}</div>
+                {/* แก้/ถอนได้เฉพาะใบที่ทีมงานยังไม่รับเรื่อง */}
+                {r.status === "open" && (
+                  <div className="mt-1.5 flex items-center gap-2 text-xs">
+                    {withdrawAsk === r.id ? (
+                      <>
+                        <span className="text-slate-500">ถอนเรื่องนี้? (ใบจะถูกปิด)</span>
+                        <button onClick={() => void withdraw(r.id)} disabled={saving} className="h-6 px-2 rounded-full bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-50">ยืนยันถอน</button>
+                        <button onClick={() => setWithdrawAsk(null)} className="h-6 px-2 rounded-full border border-pink-200 text-slate-500">ไม่ถอน</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => startEdit(r)} className="text-blue-600 hover:underline">✏️ แก้ไข</button>
+                        <button onClick={() => setWithdrawAsk(r.id)} className="text-rose-500 hover:underline">↩ ถอนเรื่อง</button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               {r.images?.[0] && <img src={imgUrl(r.images[0])} alt="" className="w-12 h-12 rounded-lg object-cover border border-pink-100 flex-shrink-0" />}
             </div>

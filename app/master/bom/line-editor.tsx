@@ -234,10 +234,36 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
   const [cCode, setCCode] = useState("");
   const [cW, setCW] = useState(0);
   const [cL, setCL] = useState(0);
+  const [editId, setEditId] = useState<string | null>(null);   // ✏️ กำลังแก้บล็อกที่สร้างเอง (ใช้ช่องชุดเดียวกับ "เพิ่มบล็อกใหม่")
+  const [delAsk, setDelAsk] = useState<string | null>(null);   // 🗑 ถามยืนยันในแถว
+  const [msg, setMsg] = useState<string | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
   // เปิดตัวเลือก → เติมกว้าง/ยาวจากบรรทัดให้ (กดสร้างได้เลย)
-  useEffect(() => { if (open) { setCCode(""); setCW(width); setCL(length); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setCCode(""); setCW(width); setCL(length); setEditId(null); setDelAsk(null); setMsg(null); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveBlockEdit = async () => {
+    const c = cCode.trim();
+    if (!editId || !c || !(cW > 0) || !(cL > 0)) return;
+    setCreating(true); setMsg(null);
+    try {
+      const res = await apiFetch("/api/bom/cutting-blocks", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editId, code: c, width: cW, length: cL }) });
+      const j = await res.json();
+      if (j.error) { setMsg(j.error); return; }
+      setEditId(null); setCCode(""); setMsg("แก้บล็อกแล้ว");
+      await load(search);
+    } finally { setCreating(false); }
+  };
+  const archiveBlock = async (id: string) => {
+    setCreating(true); setMsg(null);
+    try {
+      const res = await apiFetch(`/api/bom/cutting-blocks?id=${id}`, { method: "DELETE" });
+      const j = await res.json();
+      if (j.error) { setMsg(j.error); return; }
+      setDelAsk(null); setMsg(j.data?.used ? `เลิกใช้บล็อกแล้ว (สูตรเดิม ${j.data.used} บรรทัดที่ใช้อยู่ไม่กระทบ)` : "เลิกใช้บล็อกแล้ว");
+      await load(search);
+    } finally { setCreating(false); }
+  };
 
   const createBlock = async () => {
     const code = cCode.trim();
@@ -247,6 +273,7 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
       const res = await apiFetch("/api/bom/cutting-blocks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, width: cW, length: cL }) });
       const j = await res.json();
       if (j.data) { onPick(j.data as CuttingBlock); setOpen(false); }
+      else if (j.error) setMsg(j.error);
     } finally { setCreating(false); }
   };
   const load = useCallback(async (q: string) => {
@@ -270,21 +297,39 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
           <div className="max-h-64 overflow-auto py-1">
             {loading && <div className="px-3 py-2 text-xs text-slate-400">กำลังค้นหา...</div>}
             {!loading && options.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ไม่พบบล็อก</div>}
-            {options.map((b) => (
-              <button key={b.id} type="button" onClick={() => { onPick(b); setOpen(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-blue-50 flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2 min-w-0">
-                  <code className="text-xs text-slate-700 shrink-0">{b.code}</code>
-                  <span className="text-[11px] text-slate-400 truncate">{b.type}</span>
-                  {b.source === "manual" && <span className="text-[9px] px-1 rounded bg-blue-50 text-blue-600 shrink-0">ใหม่</span>}
+            {options.map((b) => delAsk === b.id ? (
+              <div key={b.id} className="px-3 py-1.5 bg-rose-50/60 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-slate-600 truncate">เลิกใช้บล็อก <code>{b.code}</code>?</span>
+                <span className="flex items-center gap-1 shrink-0">
+                  <button type="button" disabled={creating} onClick={() => void archiveBlock(b.id)} className="h-6 px-2 text-[11px] rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">ยืนยัน</button>
+                  <button type="button" onClick={() => setDelAsk(null)} className="h-6 px-2 text-[11px] rounded border border-slate-200 bg-white text-slate-500">ไม่</button>
                 </span>
-                <span className="text-xs text-slate-500 shrink-0 tabular-nums">{b.width}×{b.length}</span>
-              </button>
+              </div>
+            ) : (
+              <div key={b.id} className={`flex items-center hover:bg-blue-50 ${editId === b.id ? "bg-blue-50" : ""}`}>
+                <button type="button" onClick={() => { onPick(b); setOpen(false); }}
+                  className="flex-1 min-w-0 px-3 py-1.5 text-left flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <code className="text-xs text-slate-700 shrink-0">{b.code}</code>
+                    <span className="text-[11px] text-slate-400 truncate">{b.type}</span>
+                    {b.source === "manual" && <span className="text-[9px] px-1 rounded bg-blue-50 text-blue-600 shrink-0">ใหม่</span>}
+                  </span>
+                  <span className="text-xs text-slate-500 shrink-0 tabular-nums">{b.width}×{b.length}</span>
+                </button>
+                {/* แก้/เลิกใช้ ได้เฉพาะบล็อกที่สร้างเอง (ของ Odoo เป็นสำเนา) */}
+                {b.source === "manual" && (
+                  <span className="flex items-center gap-1 pr-2 shrink-0">
+                    <button type="button" title="แก้บล็อกนี้" onClick={() => { setEditId(b.id); setCCode(b.code); setCW(Number(b.width) || 0); setCL(Number(b.length) || 0); setMsg(null); }} className="text-slate-300 hover:text-blue-600 text-xs">✏️</button>
+                    <button type="button" title="เลิกใช้บล็อกนี้" onClick={() => setDelAsk(b.id)} className="text-slate-300 hover:text-rose-600 text-xs">🗑</button>
+                  </span>
+                )}
+              </div>
             ))}
           </div>
           {/* เพิ่มบล็อกใหม่ — จากขนาดในบรรทัด หรือกรอกเอง */}
           <div className="border-t border-slate-100 p-2 space-y-1.5">
-            <div className="text-[10px] font-medium text-slate-400">เพิ่มบล็อกใหม่</div>
+            <div className="text-[10px] font-medium text-slate-400">{editId ? "✏️ แก้บล็อกที่สร้างเอง" : "เพิ่มบล็อกใหม่"}</div>
+            {msg && <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1">{msg}</div>}
             <div className="flex items-center gap-1">
               <input value={cCode} onChange={(e) => setCCode(e.target.value)} placeholder="รหัสบล็อก เช่น A-4-18"
                 className="flex-1 h-8 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -299,10 +344,21 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
                 <button type="button" onClick={() => { setCW(width); setCL(length); }} title="ดึงกว้าง/ยาวจากบรรทัด"
                   className="h-7 px-2 text-[11px] rounded bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">↧ ใช้ขนาดในบรรทัด ({width}×{length})</button>
               )}
-              <button type="button" disabled={creating || !cCode.trim() || !(cW > 0) || !(cL > 0)} onClick={createBlock}
-                className="flex-1 h-7 px-2 text-[11px] rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
-                {creating ? "กำลังสร้าง…" : "＋ สร้างบล็อก"}
-              </button>
+              {editId ? (
+                <>
+                  <button type="button" disabled={creating || !cCode.trim() || !(cW > 0) || !(cL > 0)} onClick={() => void saveBlockEdit()}
+                    className="flex-1 h-7 px-2 text-[11px] rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                    {creating ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
+                  </button>
+                  <button type="button" onClick={() => { setEditId(null); setCCode(""); setCW(width); setCL(length); }}
+                    className="h-7 px-2 text-[11px] rounded border border-slate-200 text-slate-500 hover:bg-slate-50">ยกเลิก</button>
+                </>
+              ) : (
+                <button type="button" disabled={creating || !cCode.trim() || !(cW > 0) || !(cL > 0)} onClick={createBlock}
+                  className="flex-1 h-7 px-2 text-[11px] rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                  {creating ? "กำลังสร้าง…" : "＋ สร้างบล็อก"}
+                </button>
+              )}
             </div>
           </div>
         </div>
