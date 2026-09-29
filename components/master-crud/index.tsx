@@ -58,6 +58,7 @@ const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").t
 const SkuTaobaoSource = dynamic(() => import("@/components/sku-taobao-source").then((m) => m.SkuTaobaoSource), { ssr: false });
 // "ย้อน BOM" — สินค้าชิ้นนี้ถูกใช้เป็นวัตถุดิบในสูตรของสินค้าตัวไหนบ้าง (แปะในแท็บ BOM)
 const BomWhereUsed = dynamic(() => import("@/components/bom-where-used").then((m) => m.BomWhereUsed), { ssr: false });
+const SkuSwatchLinks = dynamic(() => import("@/components/sku-swatch-links").then((m) => m.SkuSwatchLinks), { ssr: false });
 const SkuTradeHistory = dynamic(() => import("@/components/sku-trade-history").then((m) => m.SkuTradeHistory), { ssr: false });
 const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detail").then((m) => m.AiProductDetailModal), { ssr: false });
 // หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
@@ -3244,6 +3245,10 @@ export function MasterRecordDrawer({
             // ฝังท้ายแท็บ "BOM (สูตรผลิต)" — ย้อนกลับว่าของชิ้นนี้ไปอยู่ในสูตรของใครบ้าง
             { key: "bom_where_used", label: tr("ใช้ในสูตรของสินค้าอื่น", "Used in other products' BOM"), icon: "🔎", inTab: "bom", render: ({ recordId }) => recordId
               ? <div className="pt-1"><BomWhereUsed skuId={recordId} /></div>
+              : null },
+            // 🎨 ชิ้นนี้อยู่บนแผ่น Swatch ไหน — แปะท้ายแท็บ "ความสัมพันธ์" (ไม่มี = ไม่โชว์)
+            { key: "swatch_links", label: tr("อยู่บนแผ่น Swatch", "On swatch sheets"), icon: "🎨", inTab: "relations", render: ({ recordId }) => recordId
+              ? <div className="pt-2"><SkuSwatchLinks skuId={recordId} /></div>
               : null },
             // 📜 ประวัติซื้อ-ขาย — แท็บของตัวเอง (PO/ใบขอซื้อ + ใบขาย/ใบเสนอราคา ของ SKU นี้)
             { key: "trade_history", label: tr("ประวัติซื้อ-ขาย-ผลิต", "Buy / sell / production history"), icon: "📜", render: ({ recordId }) => recordId

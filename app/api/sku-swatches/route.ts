@@ -4,6 +4,7 @@
  *
  *   GET    ?search=&family_ids=&limit=&offset=   → รายการแผ่น (รูปย่อ + จำนวนจุด + จำนวนที่ผูกแล้ว + ชื่อแท็ก)
  *   GET    ?id=<uuid>                             → แผ่นเดียว + จุดทั้งหมด + ข้อมูล SKU ของแต่ละจุด
+ *   GET    ?sku_id=<uuid>                         → SKU นี้อยู่บนแผ่นไหน ตรงไหน (ลิงก์ย้อนกลับในหน้า SKU)
  *   POST   { name?, note?, image_key, image_w?, image_h?, family_tag_ids? }   → สร้างแผ่นใหม่
  *   PATCH  { id, name?, note?, image_key?, image_w?, image_h?, family_tag_ids?, spots? }
  *          spots = ชุดจุด "ทั้งแผ่น" หลังแก้ (มี id = แก้ของเดิม · ไม่มี id = เพิ่มใหม่ · id เดิมที่ไม่ส่งมา = ลบ)
@@ -34,6 +35,8 @@ export type SwatchCard = {
   created_at: string; updated_at: string;
 };
 export type SwatchDetail = SwatchCard & { spots: SwatchSpot[] };
+/** ตำแหน่งของ SKU บนแผ่น swatch (1 แถว = 1 จุด) */
+export type SkuSwatchLink = { swatch_id: string; swatch_name: string; image_key: string | null; spot_id: string; label: string | null; x: number; y: number; w: number; h: number };
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type SwatchRow = { id: string; name: string | null; note: string | null; image_key: string | null; image_w: number | null; image_h: number | null; family_tag_ids: unknown; created_at: string; updated_at: string };
@@ -70,6 +73,29 @@ export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const admin = supabaseAdmin();
   const id = (sp.get("id") ?? "").trim();
+
+  // ───── SKU นี้อยู่บนแผ่นไหนบ้าง ─────
+  const bySku = (sp.get("sku_id") ?? "").trim();
+  if (bySku) {
+    if (!UUID.test(bySku)) return NextResponse.json({ data: [], error: "sku_id ไม่ถูกต้อง" }, { status: 400 });
+    const { data: spotRows, error: spErr } = await admin.from("sku_swatch_spots").select(SPOT_COLS).eq("sku_id", bySku).order("created_at");
+    if (spErr) return NextResponse.json({ data: [], error: spErr.message }, { status: 500 });
+    const spots = (spotRows ?? []) as unknown as SpotRow[];
+    if (spots.length === 0) return NextResponse.json({ data: [], error: null });
+    const [{ data: heads }, seq] = await Promise.all([
+      admin.from("sku_swatches").select("id, name, image_key").in("id", [...new Set(spots.map((p) => p.swatch_id))]).eq("is_active", true),
+      seqMap(admin),
+    ]);
+    const headMap = new Map(((heads ?? []) as { id: string; name: string | null; image_key: string | null }[]).map((h) => [h.id, h]));
+    const data: SkuSwatchLink[] = spots.filter((p) => headMap.has(p.swatch_id)).map((p) => {
+      const h = headMap.get(p.swatch_id)!;
+      return {
+        swatch_id: h.id, swatch_name: h.name?.trim() || `Swatch #${seq.get(h.id) ?? ""}`, image_key: h.image_key,
+        spot_id: p.id, label: p.label, x: Number(p.x), y: Number(p.y), w: Number(p.w), h: Number(p.h),
+      };
+    });
+    return NextResponse.json({ data, error: null });
+  }
 
   // ───── แผ่นเดียว + จุด ─────
   if (id) {

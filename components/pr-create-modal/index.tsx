@@ -28,7 +28,8 @@ export type PrCreateItem = {
   image_key?: string | null;   // R2 key (เก็บลงใบขอซื้อ)
   uom?: string | null;
 };
-type Row = PrCreateItem & { qty: number };
+// ownReason = เปิดช่อง "เหตุผลเฉพาะรายการนี้" · ไม่ได้ตั้ง = ใช้เหตุผลรวมของใบ
+type Row = PrCreateItem & { qty: number; ownReason?: boolean; reasonId?: string | null; reasonText?: string };
 
 export function PrCreateModal({ items, sourceNote, onClose, onCreated }: {
   items: PrCreateItem[];
@@ -61,9 +62,14 @@ export function PrCreateModal({ items, sourceNote, onClose, onCreated }: {
   const setQty = (id: string, q: number) => setRows((p) => p.map((r) => (r.sku_id === id ? { ...r, qty: Math.max(0, Math.round(q * 100) / 100) } : r)));
   /** ปุ่ม −/+ : คิดจากค่าล่าสุดใน state (กดรัว ๆ แล้วไม่นับตก) */
   const bump = (id: string, d: number) => setRows((p) => p.map((r) => (r.sku_id === id ? { ...r, qty: Math.max(0, Math.round(((Number(r.qty) || 0) + d) * 100) / 100) } : r)));
+  const patchRow = (id: string, p: Partial<Row>) => setRows((prev) => prev.map((r) => (r.sku_id === id ? { ...r, ...p } : r)));
+  /** เหตุผลที่ใช้จริงของรายการ: เหตุผลเฉพาะรายการ (ถ้าตั้ง) → ไม่งั้นใช้เหตุผลรวม */
+  const reasonOf = (r: Row) => (r.ownReason && r.reasonText ? r.reasonText : reasonText);
   const badQty = rows.some((r) => !(r.qty > 0));
-  const valid = canCreate && rows.length > 0 && !badQty && !!reasonText;
-  const dirty = !!reasonText || !!note || urgent || rows.some((r) => r.qty !== 1) || rows.length !== items.length;
+  const missingReason = rows.filter((r) => !reasonOf(r)).length;
+  const allOwn = rows.length > 0 && rows.every((r) => r.ownReason && !!r.reasonText);   // ทุกรายการมีเหตุผลของตัวเอง → เหตุผลรวมไม่บังคับ
+  const valid = canCreate && rows.length > 0 && !badQty && missingReason === 0;
+  const dirty = !!reasonText || !!note || urgent || rows.some((r) => r.qty !== 1 || !!r.reasonText) || rows.length !== items.length;
 
   const save = async () => {
     if (!valid || saving) return;
@@ -76,7 +82,7 @@ export function PrCreateModal({ items, sourceNote, onClose, onCreated }: {
           actor: user?.name,
           items: rows.map((r) => ({
             sku_id: r.sku_id, item_name: r.name || r.code, qty: r.qty, uom: r.uom ?? null,
-            image_key: r.image_key ?? null, note: fullNote, reason: reasonText,
+            image_key: r.image_key ?? null, note: fullNote, reason: reasonOf(r),
             is_urgent: urgent, needed_date: urgent && useDate ? useDate : null,
           })),
         }),
@@ -99,7 +105,7 @@ export function PrCreateModal({ items, sourceNote, onClose, onCreated }: {
           <a href="/purchasing" target="_blank" rel="noopener noreferrer" className="mr-auto text-xs text-blue-600 hover:underline">เปิดหน้าขอซื้อ ↗</a>
           <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
           <button onClick={() => void save()} disabled={!valid || saving}
-            title={!canCreate ? "คุณไม่มีสิทธิ์สร้างใบขอซื้อ" : !reasonText ? "กรุณาเลือกเหตุผลที่ขอซื้อก่อน" : badQty ? "จำนวนต้องมากกว่า 0" : undefined}
+            title={!canCreate ? "คุณไม่มีสิทธิ์สร้างใบขอซื้อ" : missingReason > 0 ? `ยังไม่ได้เลือกเหตุผลที่ขอซื้อ (${missingReason} รายการ)` : badQty ? "จำนวนต้องมากกว่า 0" : undefined}
             className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
             {saving ? "กำลังบันทึก…" : `สร้างใบขอซื้อ ${rows.length} ใบ`}
           </button>
@@ -112,7 +118,8 @@ export function PrCreateModal({ items, sourceNote, onClose, onCreated }: {
         {/* รายการ + จำนวน */}
         <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg max-h-[42vh] overflow-y-auto">
           {rows.map((r) => (
-            <li key={r.sku_id} className="flex items-center gap-2 px-2.5 py-2">
+            <li key={r.sku_id} className="px-2.5 py-2">
+             <div className="flex items-center gap-2">
               <HoverImage url={r.image ?? null} size={40} rounded="rounded-lg" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -135,6 +142,27 @@ export function PrCreateModal({ items, sourceNote, onClose, onCreated }: {
                 <button type="button" onClick={() => setRows((p) => p.filter((x) => x.sku_id !== r.sku_id))} disabled={saving}
                   className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 shrink-0" title="เอารายการนี้ออก">✕</button>
               )}
+             </div>
+              {/* เหตุผลเฉพาะรายการ (ไม่บังคับ) — มีเมื่อขอซื้อหลายรายการ · ไม่ตั้ง = ใช้เหตุผลรวมด้านล่าง */}
+              {rows.length > 1 && (
+                <div className="mt-1.5 pl-12">
+                  {r.ownReason ? (
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex-1 min-w-0">
+                        <RelationPicker value={r.reasonId ?? null}
+                          onChange={(id, opt) => patchRow(r.sku_id, { reasonId: id, reasonText: opt?.label ?? "" })}
+                          config={{ target_table: "erp_lookups", target_label_field: "name", lookup_type: "pr_reason" }}
+                          placeholder="เหตุผลของรายการนี้" disabled={saving} />
+                      </div>
+                      <button type="button" onClick={() => patchRow(r.sku_id, { ownReason: false, reasonId: null, reasonText: "" })} disabled={saving}
+                        className="h-8 px-2 text-[11px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 shrink-0" title="กลับไปใช้เหตุผลรวม">ใช้เหตุผลรวม</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => patchRow(r.sku_id, { ownReason: true })} disabled={saving}
+                      className="text-[11px] text-blue-600 hover:underline">✎ ตั้งเหตุผลเฉพาะรายการนี้</button>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -144,11 +172,12 @@ export function PrCreateModal({ items, sourceNote, onClose, onCreated }: {
 
         {/* เหตุผล (บังคับ) */}
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">เหตุผลที่ขอซื้อ <span className="text-rose-500">*</span> <span className="font-normal text-slate-400">(ใช้กับทุกรายการในใบนี้)</span></label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">เหตุผลที่ขอซื้อ {!allOwn && <span className="text-rose-500">*</span>} <span className="font-normal text-slate-400">{rows.length > 1 ? "(ใช้กับทุกรายการที่ไม่ได้ตั้งเหตุผลเฉพาะ)" : ""}</span></label>
           <RelationPicker value={reasonId}
             onChange={(id, opt) => { setReasonId(id); setReasonText(opt?.label ?? ""); }}
             config={{ target_table: "erp_lookups", target_label_field: "name", lookup_type: "pr_reason" }}
-            placeholder="เลือกเหตุผล (พิมพ์เพื่อเพิ่มใหม่)" required hasError={!reasonText} />
+            placeholder="เลือกเหตุผล (พิมพ์เพื่อเพิ่มใหม่)" required={!allOwn} hasError={missingReason > 0 && !reasonText} />
+          {missingReason > 0 && <p className="mt-1 text-[11px] text-rose-500">* ยังมี {missingReason} รายการที่ไม่มีเหตุผล — เลือกเหตุผลรวมตรงนี้ หรือตั้งเหตุผลเฉพาะที่รายการนั้น</p>}
         </div>
 
         <div>

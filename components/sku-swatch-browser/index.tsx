@@ -27,6 +27,7 @@ import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { uploadResizedImage } from "@/components/image-attach";
 import { ImageRegions } from "@/components/image-regions";
 import { PrCreateModal, type PrCreateItem } from "@/components/pr-create-modal";
+import { BundleAddModal, type BundleAddItem } from "@/components/bundle-add-modal";
 import type { SwatchCard, SwatchDetail, SwatchSpot } from "@/app/api/sku-swatches/route";
 
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -52,7 +53,12 @@ async function uploadSwatchImage(file: File) {
   return { image_key: up.r2_key, image_w: size.w, image_h: size.h };
 }
 
-export function SwatchBrowser() {
+export function SwatchBrowser({ openId, focusSpotId }: {
+  /** เปิดแผ่นนี้ทันที (มาจากลิงก์ในหน้า SKU) */
+  openId?: string | null;
+  /** ชี้ตำแหน่งจุดนี้บนแผ่นที่เปิด (วงกะพริบชั่วคราว) */
+  focusSpotId?: string | null;
+} = {}) {
   const toast = useToast();
   const canEdit = usePermission("products.edit");
   const [rows, setRows] = useState<SwatchCard[]>([]);
@@ -62,7 +68,9 @@ export function SwatchBrowser() {
   const [q, setQ] = useState("");
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);
   const [createOpen, setCreateOpen] = useState(false);
-  const [open, setOpen] = useState<{ id: string; edit: boolean } | null>(null);
+  const [open, setOpen] = useState<{ id: string; edit: boolean; spotId?: string | null } | null>(openId ? { id: openId, edit: false, spotId: focusSpotId ?? null } : null);
+  // ลิงก์มาถึงหลังหน้าโหลดแล้ว (พารามิเตอร์อ่านใน effect ของหน้าแม่) → เปิดตาม
+  useEffect(() => { if (openId) setOpen({ id: openId, edit: false, spotId: focusSpotId ?? null }); }, [openId, focusSpotId]);
 
   useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 250); return () => clearTimeout(t); }, [search]);
 
@@ -157,7 +165,7 @@ export function SwatchBrowser() {
 
       {createOpen && <CreateSwatchModal onClose={() => setCreateOpen(false)} onCreated={(id) => { setCreateOpen(false); void load(false); setOpen({ id, edit: true }); }} />}
       {open && (
-        <SwatchViewer key={open.id} id={open.id} startEdit={open.edit} canEdit={canEdit}
+        <SwatchViewer key={open.id} id={open.id} startEdit={open.edit} canEdit={canEdit} focusSpotId={open.spotId ?? null}
           onClose={() => setOpen(null)} onChanged={() => void load(false)} onDeleted={() => { setOpen(null); void load(false); }} />
       )}
     </div>
@@ -242,8 +250,8 @@ function CreateSwatchModal({ onClose, onCreated }: { onClose: () => void; onCrea
 type EditSpot = SwatchSpot;
 let tempSeq = 0;
 
-function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }: {
-  id: string; startEdit: boolean; canEdit: boolean; onClose: () => void; onChanged: () => void; onDeleted: () => void;
+function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged, onDeleted }: {
+  id: string; startEdit: boolean; canEdit: boolean; focusSpotId?: string | null; onClose: () => void; onChanged: () => void; onDeleted: () => void;
 }) {
   const toast = useToast();
   const [data, setData] = useState<SwatchDetail | null>(null);
@@ -256,6 +264,7 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
   const [selecting, setSelecting] = useState(false);                 // โหมดติ๊กเลือกหลายชิ้น
   const [checked, setChecked] = useState<Set<string>>(new Set());    // id ของจุดที่ติ๊ก
   const [prItems, setPrItems] = useState<PrCreateItem[] | null>(null);   // เปิดฟอร์มสร้างใบขอซื้อ
+  const [bundleItems, setBundleItems] = useState<BundleAddItem[] | null>(null);   // เปิดป๊อปส่งเข้า Bundle
   const stopSelecting = () => { setSelecting(false); setChecked(new Set()); };
   // ── สถานะโหมดตั้งค่า ──
   const [spots, setSpots] = useState<EditSpot[]>([]);
@@ -295,7 +304,7 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
   // ปุ่มลัด: Esc ปิด/ออกจากโหมดตั้งค่า · Delete ลบจุดที่เลือก (ตอนไม่ได้พิมพ์อยู่)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (skuDrawer || confirm || prItems) return;
+      if (skuDrawer || confirm || prItems || bundleItems) return;
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName ?? "");
       if (e.key === "Escape" && !typing) { if (mode === "edit") tryLeaveEdit(); else if (selecting) stopSelecting(); else onClose(); }
       if ((e.key === "Delete" || e.key === "Backspace") && mode === "edit" && selId && !typing) { e.preventDefault(); removeSpot(selId); }
@@ -303,7 +312,7 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selId, dirty, skuDrawer, confirm, prItems, selecting]);
+  }, [mode, selId, dirty, skuDrawer, confirm, prItems, bundleItems, selecting]);
 
   const save = async () => {
     if (!data || saving) return;
@@ -346,7 +355,7 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
 
   // Drawer SKU และป๊อปยืนยันของกลางอยู่ชั้น z-50 (ต่ำกว่าหน้านี้) → ถอยหน้านี้ไปข้างหลังตอนมีอย่างใดอย่างหนึ่งเปิด
   // (เดิมถอยเฉพาะตอนมีป๊อปยืนยัน → กดชิ้นบนรูปแล้ว Drawer เปิดจริงแต่ถูกหน้านี้บังมิด)
-  const behind = !!confirm || !!skuDrawer || !!prItems;
+  const behind = !!confirm || !!skuDrawer || !!prItems || !!bundleItems;
   const viewSpots = useMemo(() => (data?.spots ?? []).filter((s) => !!s.sku), [data]);
   /** จุดบนแผ่น → รายการสำหรับฟอร์มขอซื้อ (SKU เดียวกันหลายจุด นับครั้งเดียว) */
   const toPrItems = (list: SwatchSpot[]): PrCreateItem[] => {
@@ -415,7 +424,7 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
                 {mode === "view" ? (
                   <ImageRegions<SwatchSpot> src={src} alt={titleOf(data)} className="w-full shadow-lg rounded-md overflow-visible" mode="view" regions={viewSpots}
                     regionLabel={(r) => r.sku?.code ?? null}
-                    selecting={selecting} checkedIds={checked}
+                    selecting={selecting} checkedIds={checked} pulseId={focusSpotId ?? null}
                     onToggleCheck={(r) => setChecked((p) => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })}
                     renderMenu={(r, close) => r.sku ? (
                       <div className="w-56 rounded-xl bg-white border border-slate-200 shadow-2xl overflow-hidden text-left">
@@ -555,6 +564,9 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
             <button onClick={() => setPrItems(checkedItems)} disabled={checkedItems.length === 0 || !canPr}
               title={!canPr ? "คุณไม่มีสิทธิ์สร้างใบขอซื้อ" : checkedItems.length === 0 ? "กดที่ชิ้นบนรูปเพื่อเลือกก่อน" : undefined}
               className="h-8 px-4 text-[13px] font-medium rounded-full bg-blue-500 hover:bg-blue-400 disabled:opacity-40 disabled:hover:bg-blue-500 whitespace-nowrap">🛒 สร้างใบขอซื้อ</button>
+            <button onClick={() => setBundleItems(checkedItems.map((i) => ({ sku_id: i.sku_id, code: i.code, name: i.name, image: i.image })))} disabled={checkedItems.length === 0 || !canEdit}
+              title={!canEdit ? "คุณไม่มีสิทธิ์แก้ไขสินค้า" : checkedItems.length === 0 ? "กดที่ชิ้นบนรูปเพื่อเลือกก่อน" : "สร้าง Bundle ใหม่ หรือเพิ่มเข้า Bundle ที่มีอยู่"}
+              className="h-8 px-4 text-[13px] font-medium rounded-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 whitespace-nowrap">📦 เข้า Bundle</button>
             <button onClick={stopSelecting} className="h-8 px-3 text-[12px] rounded-full hover:bg-white/10 whitespace-nowrap">ยกเลิก</button>
           </div>
         )}
@@ -572,6 +584,9 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
       {prItems && prItems.length > 0 && data && (
         <PrCreateModal items={prItems} sourceNote={`จาก Swatch: ${titleOf(data)}`}
           onClose={() => setPrItems(null)} onCreated={() => stopSelecting()} />
+      )}
+      {bundleItems && bundleItems.length > 0 && (
+        <BundleAddModal items={bundleItems} onClose={() => setBundleItems(null)} onDone={() => stopSelecting()} />
       )}
     </>,
     document.body,

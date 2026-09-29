@@ -18,6 +18,7 @@ import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { SkuTaobaoSource } from "@/components/sku-taobao-source";
 import { BomWhereUsed } from "@/components/bom-where-used";
 import { SkuTradeHistory } from "@/components/sku-trade-history";
+import { SkuSwatchLinks } from "@/components/sku-swatch-links";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
@@ -136,6 +137,10 @@ export default function SkusV2Page() {
       // ย้อน BOM: ของชิ้นนี้ถูกใช้ในสูตรของสินค้าตัวไหนบ้าง (แปะท้ายแท็บ BOM)
       key: "bom_where_used", label: "ใช้ในสูตรของสินค้าอื่น", icon: "🔎", inTab: "bom",
       render: ({ recordId }) => recordId ? <div className="pt-1"><BomWhereUsed skuId={recordId} /></div> : null,
+    }, {
+      // 🎨 ชิ้นนี้อยู่บนแผ่น Swatch ไหน (แปะท้ายแท็บ "ความสัมพันธ์" · ไม่มี = ไม่โชว์)
+      key: "swatch_links", label: "อยู่บนแผ่น Swatch", icon: "🎨", inTab: "relations",
+      render: ({ recordId }) => recordId ? <div className="pt-2"><SkuSwatchLinks skuId={recordId} /></div> : null,
     }, {
       // 📜 ประวัติซื้อ-ขาย ของ SKU นี้ (ใบสั่งซื้อ/ใบขอซื้อ + ใบขาย/ใบเสนอราคา)
       key: "trade_history", label: "ประวัติซื้อ-ขาย-ผลิต", icon: "📜",

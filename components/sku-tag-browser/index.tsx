@@ -167,6 +167,14 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   useEffect(() => { if (entityProp && entityProp !== entity) setEntity(entityProp); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [entityProp]);
   const entityRef = useRef(entity); entityRef.current = entity;   // ให้ pushNav อ่านค่าล่าสุดโดยไม่ต้องผูก dep
   const [taobao, setTaobao] = useState(false);   // 🛒 โหมดกล่องพัก "สินค้าจาก Taobao" (ไม่ใช้แท็ก/กลุ่ม — คนละชุดข้อมูล)
+  // มาจากลิงก์ "อยู่บนแผ่น Swatch" ในหน้า SKU: /master/skus?swatch=<id>&spot=<id>
+  const [swatchOpen, setSwatchOpen] = useState<{ id: string; spotId: string | null } | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const sid = sp.get("swatch");
+    if (!sid) return;
+    setSwatch(true); setSwatchOpen({ id: sid, spotId: sp.get("spot") });
+  }, []);
   const [swatch, setSwatch] = useState(false);   // 🎨 โหมด Swatch (รูปแผ่นตัวอย่าง — คนละชุดข้อมูล)
   const [bundle, setBundle] = useState(false);   // 📦 โหมด Bundle (กลุ่ม SKU ที่จับรวมกัน — คนละชุดข้อมูล)
   // มาจากลิงก์ "ดูในกล่องพัก" ในหน้า SKU: /master/skus?taobao=1&focus=<id>&tb_status=matched
@@ -492,7 +500,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           confirmText={t("คัดลอก", "Duplicate")} onConfirm={() => { const id = copyPending.id; setCopyPending(null); void doCopy(id); }} />
       )}
       {/* 🛒 กล่องพักสินค้าจาก Taobao — โหมดแยก (ไม่ใช้แท็ก/กลุ่ม) */}
-      {taobao ? <TaobaoBrowser focusId={taobaoOpen?.focusId ?? null} initialStatus={taobaoOpen?.status} /> : bundle ? <BundleBrowser /> : swatch ? <SwatchBrowser /> : (<>
+      {taobao ? <TaobaoBrowser focusId={taobaoOpen?.focusId ?? null} initialStatus={taobaoOpen?.status} /> : bundle ? <BundleBrowser /> : swatch ? <SwatchBrowser openId={swatchOpen?.id ?? null} focusSpotId={swatchOpen?.spotId ?? null} /> : (<>
 
       {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
       <div className="flex items-center gap-2 mb-3">

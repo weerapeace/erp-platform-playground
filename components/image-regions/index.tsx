@@ -29,7 +29,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
 
 export function ImageRegions<T extends Region>({
   src, alt = "", regions, mode, selectedId, onSelect, onChange, onCreate, onRegionClick, renderTooltip, regionLabel, isMuted, className = "",
-  renderMenu, selecting = false, checkedIds, onToggleCheck,
+  renderMenu, selecting = false, checkedIds, onToggleCheck, pulseId,
 }: {
   src: string;
   alt?: string;
@@ -51,6 +51,8 @@ export function ImageRegions<T extends Region>({
   selecting?: boolean;
   checkedIds?: Set<string>;
   onToggleCheck?: (region: T) => void;
+  /** (view) ชี้ตำแหน่งจุดนี้ด้วยวงกะพริบชั่วคราว ~6 วิ + เลื่อนจอไปหา (ใช้ตอนเปิดจากลิงก์ "อยู่บนแผ่นไหน") */
+  pulseId?: string | null;
   /** (edit) ข้อความสั้นบนกรอบ เช่น รหัส SKU */
   regionLabel?: (region: T) => string | null;
   /** (edit) กรอบที่ยังไม่สมบูรณ์ (เช่น ยังไม่ผูกข้อมูล) → เส้นประสีส้ม */
@@ -74,6 +76,18 @@ export function ImageRegions<T extends Region>({
     return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey, true); };
   }, [menu]);
   useEffect(() => { if (mode !== "view" || selecting) setMenu(null); }, [mode, selecting]);
+
+  // จุดกะพริบบอกตำแหน่ง — โชว์ ~6 วิ แล้วหายเอง (ตอนดูปกติต้องไม่มีอะไรบังรูป)
+  const [pulseOn, setPulseOn] = useState(false);
+  const pulseRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!pulseId) { setPulseOn(false); return; }
+    setPulseOn(true);
+    const t1 = setTimeout(() => { try { pulseRef.current?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" }); } catch { /* ignore */ } }, 250);
+    const t2 = setTimeout(() => setPulseOn(false), 6000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [pulseId]);
+  const pulseRegion = mode === "view" && pulseOn && pulseId ? regions.find((r) => r.id === pulseId) ?? null : null;
 
   /** ตำแหน่งเมาส์ → % ของรูป */
   const pct = useCallback((e: { clientX: number; clientY: number }) => {
@@ -196,6 +210,15 @@ export function ImageRegions<T extends Region>({
       {drawing && drawing.w > 0 && drawing.h > 0 && (
         <div className="absolute border-2 border-dashed border-indigo-500 bg-indigo-400/15 pointer-events-none z-[3]"
           style={{ left: `${drawing.x}%`, top: `${drawing.y}%`, width: `${drawing.w}%`, height: `${drawing.h}%` }} />
+      )}
+
+      {/* จุดกะพริบบอกตำแหน่ง (ชั่วคราว) */}
+      {pulseRegion && (
+        <span ref={pulseRef} className="absolute z-[4] pointer-events-none flex items-center justify-center"
+          style={{ left: `${pulseRegion.x + pulseRegion.w / 2}%`, top: `${pulseRegion.y + pulseRegion.h / 2}%`, width: 0, height: 0 }}>
+          <span className="absolute w-10 h-10 rounded-full bg-pink-500/60 animate-ping" />
+          <span className="absolute w-4 h-4 rounded-full bg-pink-500 ring-2 ring-white shadow-lg" />
+        </span>
       )}
 
       {/* เมนูเล็กตอนกดที่จุด (โหมดดู) — ลอยตรงจุดที่กด · ชิดขอบขวา/ล่างจะพลิกไปอีกด้าน */}
