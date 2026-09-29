@@ -799,6 +799,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ManualItem | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);   // รายการที่กำลังแก้ (null = เพิ่มใหม่) — ใช้ฟอร์มเดียวกัน
 
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
@@ -819,13 +820,26 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
 
   useEffect(load, [load]);
 
+  const resetForm = () => { setEditId(null); setLabel(""); setAmount(""); };
+  // ✏️ แก้ไข = เอาค่าเดิมมาใส่ฟอร์มด้านล่าง แล้วบันทึกทับรายการเดิม (ค่าเช่าขึ้น ไม่ต้องลบแล้วเพิ่มใหม่)
+  const startEdit = (i: ManualItem) => {
+    setErr(null); setEditId(i.id);
+    setLabel(i.label ?? ""); setAmount(String(Number(i.amount || 0)));
+    setDirection(i.direction === "in" ? "in" : "out");
+    setCategory(i.category && MANUAL_CATEGORIES.includes(i.category) ? i.category : MANUAL_CATEGORIES[0]);
+    setRepeatKind(i.repeat_kind === "once" ? "once" : "monthly");
+    setDayOfMonth(i.day_of_month != null ? String(i.day_of_month) : "1");
+    setOnceDate(i.once_date || todayISO());
+  };
+
   const add = async () => {
     setSaving(true); setErr(null);
     try {
       const res = await apiFetch("/api/cashflow/manual-items", {
-        method: "POST",
+        method: editId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(editId ? { id: editId } : {}),
           label, amount: Number(amount || 0), direction, category,
           repeat_kind: repeatKind,
           day_of_month: repeatKind === "monthly" ? Number(dayOfMonth) : null,
@@ -834,7 +848,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
       });
       const j = await res.json();
       if (j?.error) { setErr(j.error); return; }
-      setLabel(""); setAmount("");
+      resetForm();
       load(); onChanged();
     } catch { setErr("บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
@@ -847,6 +861,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
       const j = await res.json();
       if (j?.error) { setErr(j.error); return; }
       setRemoveTarget(null);
+      if (editId === item.id) resetForm();
       load(); onChanged();
     } catch { setErr("ลบไม่สำเร็จ"); }
   };
@@ -878,7 +893,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
       {items.length > 0 && (
         <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
           {items.map((i) => (
-            <div key={i.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+            <div key={i.id} className={`flex items-center gap-2 px-3 py-2 text-sm ${editId === i.id ? "bg-blue-50/60" : ""}`}>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
                 i.direction === "in" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
                 {i.direction === "in" ? "เข้า" : "ออก"}
@@ -895,6 +910,12 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
                 {THB(Number(i.amount || 0))}
               </span>
               {canManage && (
+                <button onClick={() => startEdit(i)}
+                        className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded shrink-0" title="แก้ไข (ชื่อ / จำนวนเงิน / รอบ)">
+                  ✏️
+                </button>
+              )}
+              {canManage && (
                 <button onClick={() => setRemoveTarget(i)}
                         className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded shrink-0" title="เอาออก">
                   🗑
@@ -906,7 +927,8 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
       )}
 
       {canManage && (
-        <div className="mt-3 grid sm:grid-cols-2 gap-2 items-end">
+        <div className={`mt-3 grid sm:grid-cols-2 gap-2 items-end ${editId ? "p-3 rounded-lg border border-blue-200 bg-blue-50/40" : ""}`}>
+          {editId && <div className="sm:col-span-2 text-xs font-medium text-blue-700">✏️ กำลังแก้รายการเดิม — แก้แล้วกด “บันทึกการแก้ไข”</div>}
           <div className="sm:col-span-2">
             <label className="block text-xs text-slate-500 mb-1">ชื่อรายการ</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)}
@@ -957,11 +979,17 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
               )}
             </div>
           </div>
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 flex items-center gap-2">
             <button onClick={add} disabled={saving || !label.trim() || Number(amount || 0) <= 0}
                     className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {saving ? "กำลังเพิ่ม…" : "+ เพิ่มรายการประจำ"}
+              {saving ? "กำลังบันทึก…" : editId ? "✓ บันทึกการแก้ไข" : "+ เพิ่มรายการประจำ"}
             </button>
+            {editId && (
+              <button onClick={resetForm} disabled={saving}
+                      className="h-9 px-4 text-sm text-slate-700 border border-slate-200 bg-white rounded-lg hover:bg-slate-50 disabled:opacity-50">
+                ยกเลิกการแก้
+              </button>
+            )}
           </div>
         </div>
       )}

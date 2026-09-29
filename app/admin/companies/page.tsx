@@ -6,12 +6,14 @@
  * เดิมหัวบิลถูก "พิมพ์ฝังตาย" อยู่ในแม่แบบเอกสาร → ขายในนามบริษัทอื่นไม่ได้
  * หน้านี้ทำให้เพิ่มบริษัทที่ 3, 4 ได้เองจากเว็บ ไม่ต้องแก้โค้ด (กฎ CLAUDE.md ข้อ 35)
  *
+ * เพิ่ม = "+ เพิ่มบริษัท" · แก้ = เลือกบริษัทแล้วแก้ในฟอร์ม · ลบ = "ปิดใช้งาน" (ไม่ลบทิ้ง เพราะใบขายเก่าอ้างถึง · เปิดกลับได้)
  * มีตัวอย่างหัวบิลให้ดูสด ๆ ระหว่างกรอก — จะได้เห็นว่าพิมพ์ออกมาหน้าตาแบบไหน
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ImageAttachKeys } from "@/components/image-attach";
 import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
 import type { Company } from "@/app/api/admin/companies/route";
@@ -31,6 +33,8 @@ export default function CompaniesPage() {
   const [form, setForm] = useState<Partial<Company>>(BLANK);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [offTarget, setOffTarget] = useState<Company | null>(null);   // บริษัทที่กำลังจะปิดใช้งาน
+  const [toggling, setToggling] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +81,23 @@ export default function CompaniesPage() {
     await load();
   }, [toast, load]);
 
+  // ปิดใช้งาน (ไม่ลบทิ้ง — ใบขายเก่ายังอ้างถึง) / เปิดใช้งานอีกครั้ง
+  const setActive = useCallback(async (c: Company, on: boolean) => {
+    setToggling(true);
+    try {
+      const r = on
+        ? await apiFetch("/api/admin/companies", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, status: "active" }) })
+        : await apiFetch(`/api/admin/companies?id=${encodeURIComponent(c.id)}`, { method: "DELETE" });
+      const j = (await r.json().catch(() => ({}))) as { error?: string | null };
+      if (!r.ok || j.error) { toast.error(j.error ?? "ทำรายการไม่สำเร็จ"); return; }
+      toast.success(on ? `เปิดใช้งาน "${c.name}" อีกครั้งแล้ว` : `ปิดใช้งาน "${c.name}" แล้ว`);
+      setOffTarget(null);
+      setForm((f) => (f.id === c.id ? { ...f, status: on ? "active" : "inactive" } : f));
+      await load();
+    } catch { toast.error("ทำรายการไม่สำเร็จ"); }
+    finally { setToggling(false); }
+  }, [toast, load]);
+
   // ตัวอย่างหัวบิล — ให้เห็นสด ๆ ว่าพิมพ์ออกมาหน้าตาแบบไหน
   const preview = useMemo(() => ({
     th: form.name_th || form.name || "(ยังไม่ใส่ชื่อ)",
@@ -119,6 +140,7 @@ export default function CompaniesPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{c.company_code}</span>
                     {c.is_default && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">ตั้งต้น</span>}
+                    {c.status === "inactive" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">ปิดใช้งาน</span>}
                   {c.vat_registered === false && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">ไม่มี VAT</span>}
                   </div>
                   <div className="text-sm text-slate-800 mt-1 leading-snug">{c.name_th || c.name}</div>
@@ -214,6 +236,22 @@ export default function CompaniesPage() {
                     ตั้งเป็นบริษัทตั้งต้น
                   </button>
                 )}
+                {!creating && selId && (() => {
+                  const c = rows.find((x) => x.id === selId);
+                  if (!c) return null;
+                  return c.status === "inactive" ? (
+                    <button onClick={() => void setActive(c, true)} disabled={toggling}
+                      className="h-10 px-4 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm disabled:opacity-50">
+                      ↩ เปิดใช้งานอีกครั้ง
+                    </button>
+                  ) : (
+                    <button onClick={() => setOffTarget(c)} disabled={toggling || c.is_default}
+                      title={c.is_default ? "บริษัทตั้งต้นปิดไม่ได้ — ตั้งบริษัทอื่นเป็นตัวตั้งต้นก่อน" : "เลิกใช้บริษัทนี้ (เอกสารเก่ายังดูได้ปกติ)"}
+                      className="h-10 px-4 rounded-lg border border-red-200 bg-white text-red-600 text-sm hover:bg-red-50 disabled:opacity-40">
+                      ปิดใช้งาน
+                    </button>
+                  );
+                })()}
                 <div className="text-[11px] text-slate-400 ml-auto">
                   แก้รูปแบบเลขเอกสาร = ใบใหม่ใช้รูปแบบใหม่ · เลขที่ออกไปแล้วไม่เปลี่ยน
                 </div>
@@ -226,6 +264,15 @@ export default function CompaniesPage() {
           )}
         </div>
       </div>
+      <ConfirmDialog
+        open={!!offTarget}
+        onClose={() => { if (!toggling) setOffTarget(null); }}
+        onConfirm={() => { if (offTarget) void setActive(offTarget, false); }}
+        loading={toggling}
+        title="ปิดใช้งานบริษัทนี้?"
+        message={offTarget ? `"${offTarget.name_th || offTarget.name}" จะไม่ถูกใช้กับเอกสารใหม่ — เอกสารเก่าที่ออกในนามบริษัทนี้ยังดูและพิมพ์ได้ตามเดิม และเปิดใช้งานอีกครั้งได้ภายหลัง` : ""}
+        confirmText="ปิดใช้งาน" cancelText="ไม่ปิด" variant="danger"
+      />
     </PlaygroundShell>
   );
 }

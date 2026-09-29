@@ -17,6 +17,7 @@ import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/modal";
 import { formatAmount } from "@/lib/money";
 
 type Fee = { id: string; label: string; amount: number; fee_date: string | null; note: string };
@@ -37,6 +38,8 @@ export function LoanFeesSection({ contractId, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [draft, setDraft] = useState<{ label: string; amount: string; fee_date: string }>({ label: "", amount: "", fee_date: "" });
+  const [editId, setEditId] = useState<string | null>(null);       // รายการที่กำลังแก้ (null = เพิ่มใหม่) — ใช้ช่องกรอกชุดเดียวกัน
+  const [removeTarget, setRemoveTarget] = useState<Fee | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -74,15 +77,22 @@ export function LoanFeesSection({ contractId, onChanged }: {
     if (amount <= 0) { setErr("ใส่จำนวนเงินก่อน"); return; }
     setBusy(true); setErr("");
     try {
-      const res = await apiFetch("/api/master-v2/loan-contract-fees", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loan_contract_id: contractId, label, amount, fee_date: draft.fee_date || null }),
-      });
+      const res = editId
+        ? await apiFetch(`/api/master-v2/loan-contract-fees/${editId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label, amount, fee_date: draft.fee_date || null }),
+          })
+        : await apiFetch("/api/master-v2/loan-contract-fees", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ loan_contract_id: contractId, label, amount, fee_date: draft.fee_date || null }),
+          });
       const j = await res.json();
-      if (!res.ok || j?.error) { setErr(j?.error || "เพิ่มรายการไม่สำเร็จ"); setBusy(false); return; }
+      if (!res.ok || j?.error) { setErr(j?.error || (editId ? "บันทึกการแก้ไขไม่สำเร็จ" : "เพิ่มรายการไม่สำเร็จ")); setBusy(false); return; }
       setDraft({ label: "", amount: "", fee_date: "" });
-      toast.success(`เพิ่ม “${label}” แล้ว`);
+      toast.success(editId ? `แก้ “${label}” แล้ว` : `เพิ่ม “${label}” แล้ว`);
+      setEditId(null);
       await load();
       await onChanged?.();
     } catch { setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ"); }
@@ -96,6 +106,8 @@ export function LoanFeesSection({ contractId, onChanged }: {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j?.error) { setErr(j?.error || "ลบไม่สำเร็จ"); setBusy(false); return; }
       toast.success("ลบรายการแล้ว");
+      setRemoveTarget(null);
+      if (editId === id) { setEditId(null); setDraft({ label: "", amount: "", fee_date: "" }); }
       await load();
       await onChanged?.();
     } catch { setErr("เกิดข้อผิดพลาดในการเชื่อมต่อ"); }
@@ -113,24 +125,34 @@ export function LoanFeesSection({ contractId, onChanged }: {
       ) : (
         <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
           {rows.map((f) => (
-            <div key={f.id} className="flex items-center gap-2 px-3 py-2">
+            <div key={f.id} className={`flex items-center gap-2 px-3 py-2 ${editId === f.id ? "bg-blue-50/60" : ""}`}>
               <span className="flex-1 text-sm text-slate-700 truncate">{f.label}</span>
               {f.fee_date && <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{f.fee_date}</span>}
               <span className="text-sm font-medium tabular-nums text-slate-800 shrink-0">{formatAmount(f.amount)}</span>
-              <button type="button" onClick={() => remove(f.id)} disabled={busy} title="ลบรายการนี้"
+              <button type="button" disabled={busy} title="แก้ไขรายการนี้ (ชื่อ / จำนวนเงิน / วันที่)"
+                onClick={() => { setErr(""); setEditId(f.id); setDraft({ label: f.label, amount: String(f.amount), fee_date: f.fee_date ?? "" }); }}
+                className="w-6 h-6 rounded text-slate-300 hover:text-blue-600 hover:bg-blue-50 shrink-0 disabled:opacity-40">✏️</button>
+              <button type="button" onClick={() => setRemoveTarget(f)} disabled={busy} title="ลบรายการนี้"
                 className="w-6 h-6 rounded text-slate-300 hover:text-red-600 hover:bg-red-50 shrink-0 disabled:opacity-40">🗑</button>
             </div>
           ))}
           <div className="flex items-center gap-2 px-3 py-2 bg-slate-50">
             <span className="flex-1 text-xs font-semibold text-slate-600">รวมค่าธรรมเนียมของสัญญา</span>
             <span className="text-sm font-bold tabular-nums text-slate-800">{formatAmount(total)}</span>
-            <span className="w-6 shrink-0" />
+            <span className="w-14 shrink-0" />
           </div>
         </div>
       )}
 
-      {/* เพิ่มรายการใหม่ */}
-      <div className="rounded-lg border border-dashed border-slate-300 p-3 space-y-2">
+      {/* เพิ่มรายการใหม่ / แก้รายการเดิม (ช่องกรอกชุดเดียวกัน) */}
+      <div className={`rounded-lg border p-3 space-y-2 ${editId ? "border-blue-300 bg-blue-50/40" : "border-dashed border-slate-300"}`}>
+        {editId && (
+          <div className="flex items-center gap-2 text-xs font-medium text-blue-700">
+            ✏️ กำลังแก้รายการเดิม
+            <button type="button" disabled={busy} onClick={() => { setEditId(null); setDraft({ label: "", amount: "", fee_date: "" }); setErr(""); }}
+              className="ml-auto h-6 px-2 text-[11px] font-normal rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">ยกเลิกการแก้</button>
+          </div>
+        )}
         <div className="grid grid-cols-12 gap-2">
           <div className="col-span-5">
             <input value={draft.label} onChange={(e) => setDraft((p) => ({ ...p, label: e.target.value }))}
@@ -146,7 +168,7 @@ export function LoanFeesSection({ contractId, onChanged }: {
           <div className="col-span-1">
             <button type="button" onClick={add} disabled={busy}
               className="w-full h-8 text-xs font-medium rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
-              เพิ่ม
+              {editId ? "บันทึก" : "เพิ่ม"}
             </button>
           </div>
         </div>
@@ -170,6 +192,16 @@ export function LoanFeesSection({ contractId, onChanged }: {
         ใส่แล้วระบบคิด “ค่าธรรมเนียมรวม” และ “ได้รับเงินจริง (สุทธิ)” ในหมวดเงินต้น &amp; ดอกเบี้ยให้อัตโนมัติ ·
         ค่าธรรมเนียมที่กรอกไว้ในใบเบิกเงิน ระบบนับรวมให้แล้ว ไม่ต้องกรอกซ้ำ
       </p>
+
+      <ConfirmDialog
+        open={!!removeTarget}
+        onClose={() => { if (!busy) setRemoveTarget(null); }}
+        onConfirm={() => { if (removeTarget) void remove(removeTarget.id); }}
+        loading={busy}
+        title="ลบค่าธรรมเนียมรายการนี้?"
+        message={removeTarget ? `“${removeTarget.label}” ${formatAmount(removeTarget.amount)} จะถูกเอาออก — ค่าธรรมเนียมรวมและยอดรับเงินจริงของสัญญาจะคิดใหม่` : ""}
+        confirmText="ลบรายการ" cancelText="ไม่ลบ" variant="danger"
+      />
     </div>
   );
 }

@@ -146,6 +146,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
   if (!patch.name && body.name !== undefined) return NextResponse.json({ error: "ชื่อบริษัทว่างไม่ได้" }, { status: 400 });
 
+  // เปิดใช้งานอีกครั้ง (ปิดใช้งาน = DELETE ด้านล่าง ซึ่งเช็กเงื่อนไขบริษัทตั้งต้นให้)
+  if (body.status === "active") patch.status = "active";
+
   // ตั้งเป็นบริษัทตั้งต้น → ปลดตัวเดิมก่อน (ได้ตัวเดียว)
   if (body.is_default === true) {
     await admin.from("companies").update({ is_default: false }).neq("id", id);
@@ -166,12 +169,22 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const id = str(new URL(request.url).searchParams.get("id"));
   if (!id) return NextResponse.json({ error: "ไม่ระบุบริษัท" }, { status: 400 });
 
   const admin = supabaseAdmin();
+  const { data: before } = await admin.from("companies").select("company_code, name, status, is_default").eq("id", id).maybeSingle();
+  if (!before) return NextResponse.json({ error: "ไม่พบบริษัทนี้" }, { status: 404 });
+  // บริษัทตั้งต้น = ตัวที่เอกสารใหม่ใช้อัตโนมัติ ปิดไปแล้วเอกสารใหม่จะไม่มีหัวบิล → ต้องย้ายตัวตั้งต้นก่อน
+  if (before.is_default) return NextResponse.json({ error: "บริษัทนี้เป็นบริษัทตั้งต้น — ตั้งบริษัทอื่นเป็นตัวตั้งต้นก่อน แล้วค่อยปิดใช้งาน" }, { status: 400 });
+
   // ปิดใช้งานแทนการลบ — ใบขายเก่ายังอ้างถึงบริษัทนี้อยู่
-  const { error } = await admin.from("companies").update({ status: "inactive", is_default: false }).eq("id", id);
+  const { error } = await admin.from("companies").update({ status: "inactive", is_default: false, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAudit(admin, {
+    action: "deactivate", entityType: "companies", entityId: id,
+    actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { company_code: before.company_code, name: before.name, from: before.status },
+  });
   return NextResponse.json({ ok: true, error: null });
 }
