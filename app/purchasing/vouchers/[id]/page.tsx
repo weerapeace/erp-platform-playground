@@ -18,6 +18,7 @@ import { MoneyInput } from "@/components/money-input";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 
@@ -62,7 +63,13 @@ export default function PurchaseVoucherFormPage() {
   // บิลค่าส่งจากแอปโอนเงินจีน (china_bills.is_shipping) — ไว้ผูกกับใบสำคัญตอนจ่ายค่าส่ง
   const [shipBills, setShipBills] = useState<{ id: string; label: string }[]>([]);
   const [payBusy, setPayBusy] = useState(false);
-  const [ln, setLn] = useState<Record<string, { unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight" }>>({});
+  const [ln, setLn] = useState<Record<string, { unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight"; qty: string }>>({});
+  // เพิ่ม/ลบรายการที่ "เพิ่มเอง" (ไม่ได้มาจากใบรับ)
+  const [addSku, setAddSku] = useState<SkuPickerValue | null>(null);
+  const [addName, setAddName] = useState("");
+  const [addQty, setAddQty] = useState("1");
+  const [addBusy, setAddBusy] = useState(false);
+  const [delLine, setDelLine] = useState<VoucherLine | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -77,7 +84,7 @@ export default function PurchaseVoucherFormPage() {
     const rateKg = hd0.ship_rate_kg ?? (hd0.ship_method === "weight" ? hd0.ship_rate : null);
     setH({ voucher_date: hd0.voucher_date, fx_rate: hd0.fx_rate == null ? "" : String(hd0.fx_rate), ship_method: hd0.ship_method, ship_rate_cube: rateCube == null ? "" : String(rateCube), ship_rate_kg: rateKg == null ? "" : String(rateKg), ship_manual_total: hd0.ship_manual_total == null ? "" : String(hd0.ship_manual_total), note: hd0.note ?? "", carrier_id: hd0.carrier_id ?? "", carrier_name: hd0.carrier_name ?? "" });
     const m: typeof ln = {};
-    for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit), ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : "" };
+    for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit), ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : "", qty: String(l.qty) };
     setLn(m); setDirty(false);
   }, []);
 
@@ -103,12 +110,12 @@ export default function PurchaseVoucherFormPage() {
     if (!data) return null;
     return computeVoucher(
       { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total) },
-      data.lines.map((l) => { const e = ln[l.id]; return { qty: l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null }; }),
+      data.lines.map((l) => { const e = ln[l.id]; return { qty: !l.gr_line_id && e?.qty ? num(e.qty) : l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null }; }),
     );
   }, [data, h, ln, currency]);
 
   const setHeader = (patch: Partial<typeof h>) => { setH((p) => ({ ...p, ...patch })); setDirty(true); };
-  const setLine = (lid: string, patch: Partial<{ unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight" }>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
+  const setLine = (lid: string, patch: Partial<{ unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight"; qty: string }>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
 
   const save = async (): Promise<boolean> => {
     if (!data) return false;
@@ -122,7 +129,7 @@ export default function PurchaseVoucherFormPage() {
           ship_rate: h.ship_method === "cube" ? (h.ship_rate_cube === "" ? null : num(h.ship_rate_cube)) : h.ship_method === "weight" ? (h.ship_rate_kg === "" ? null : num(h.ship_rate_kg)) : null,
           ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total), note: h.note || null, carrier_id: h.carrier_id || null, carrier_name: h.carrier_name || null,
         },
-        lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit), ship_method: e?.ship_method || null }; }),
+        lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, ...(!l.gr_line_id && num(e?.qty) > 0 ? { qty: num(e?.qty) } : {}), unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit), ship_method: e?.ship_method || null }; }),
       };
       const res = await apiFetch(`/api/purchasing/vouchers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json().catch(() => ({}));
@@ -145,6 +152,38 @@ export default function PurchaseVoucherFormPage() {
       await load();
     } catch (e) { toast.error("ยืนยันไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setConfirming(false); }
+  };
+
+  // ── เพิ่ม/ลบรายการที่เพิ่มเอง (ใบร่างเท่านั้น) — มีงานค้างให้บันทึกก่อน กันค่าที่พิมพ์ไว้หาย ──
+  const addLine = async () => {
+    if (!addSku && !addName.trim()) { toast.error("เลือกสินค้าจากคลัง หรือพิมพ์ชื่อรายการก่อน"); return; }
+    if (!(num(addQty) > 0)) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    setAddBusy(true);
+    try {
+      if (dirty && !(await save())) return;
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}/lines`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item_sku_id: addSku?.id ?? null, item_name: addName.trim() || (addSku ? `[${addSku.code}] ${addSku.name}` : ""), qty: num(addQty), uom: addSku?.uom_name ?? null }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      applyData(j.data as Detail);
+      setAddSku(null); setAddName(""); setAddQty("1");
+      toast.success("เพิ่มรายการแล้ว");
+    } catch (e) { toast.error("เพิ่มไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setAddBusy(false); }
+  };
+  const removeLine = async () => {
+    if (!delLine) return;
+    setAddBusy(true);
+    try {
+      if (dirty && !(await save())) return;
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}/lines?line_id=${delLine.id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      applyData(j.data as Detail);
+      setDelLine(null);
+      toast.success("ลบรายการแล้ว");
+    } catch (e) { toast.error("ลบไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setAddBusy(false); }
   };
 
   // ── การจ่ายเงิน (หลังยืนยัน) ──
@@ -325,7 +364,8 @@ export default function PurchaseVoucherFormPage() {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {data.lines.map((l, i) => {
-                          const e = ln[l.id] ?? { unit_price: "", cbm_per_unit: "", kg_per_unit: "", ship_method: "" as const };
+                          const e = ln[l.id] ?? { unit_price: "", cbm_per_unit: "", kg_per_unit: "", ship_method: "" as const, qty: String(l.qty) };
+                          const manual = !l.gr_line_id;   // รายการที่เพิ่มเอง → แก้จำนวน/ลบได้ที่นี่
                           const c = calc.lines[i];
                           const src = SOURCE_BADGE[e.unit_price ? (l.price_source ?? "manual") : "none"];
                           const lineMethod = c.method;   // วิธีคิดที่ใช้จริงกับบรรทัดนี้ (ระบุเอง หรือตามใบ)
@@ -344,8 +384,13 @@ export default function PurchaseVoucherFormPage() {
                                 <div className="text-slate-800 flex items-center gap-1">{l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "")}<CopyButton value={l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "")} title="คัดลอกชื่อ" /></div>
                                 <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1">{l.code || "—"}{l.code && <CopyButton value={l.code} title="คัดลอกรหัส" />}<span className={`ml-1 text-[10px] px-1 py-0.5 rounded border font-sans ${src.cls}`}>{src.text}</span></div>
                               </td>
-                              <td className="px-2 py-2 text-[11px] text-slate-500 whitespace-nowrap"><div>{l.gr_no}</div><div>{l.po_no}</div></td>
-                              <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap font-medium text-slate-800">{l.qty.toLocaleString()} <span className="text-xs font-normal text-slate-400">{l.uom}</span></td>
+                              <td className="px-2 py-2 text-[11px] text-slate-500 whitespace-nowrap">{manual ? <span className="text-[10px] px-1 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200" title="รายการที่เพิ่มเอง ไม่ได้มาจากใบรับ (ไม่ผูกสต๊อก/ใบสั่งซื้อ)">เพิ่มเอง</span> : <><div>{l.gr_no}</div><div>{l.po_no}</div></>}</td>
+                              <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
+                                {manual && !readonly
+                                  ? <input type="number" inputMode="decimal" step="any" min={0} value={e.qty} onChange={(ev) => setLine(l.id, { qty: ev.target.value })} onFocus={(ev) => ev.target.select()} className={`${inputCls} w-20 text-right tabular-nums`} />
+                                  : l.qty.toLocaleString()} <span className="text-xs font-normal text-slate-400">{l.uom}</span>
+                                {manual && !readonly && <button onClick={() => setDelLine(l)} title="ลบรายการนี้" className="ml-1 text-slate-300 hover:text-red-600 font-normal">🗑</button>}
+                              </td>
                               <td className="px-2 py-2 text-right">
                                 <MoneyInput value={e.unit_price} disabled={readonly} onChange={(v) => setLine(l.id, { unit_price: v })} className={`${inputCls} w-24 text-right ${!c.has_price ? "border-amber-300" : ""}`} placeholder="0.00" />
                               </td>
@@ -383,9 +428,20 @@ export default function PurchaseVoucherFormPage() {
                             </tr>
                           );
                         })}
+                        {data.lines.length === 0 && <tr><td colSpan={12} className="px-3 py-8 text-center text-xs text-slate-300">— ยังไม่มีรายการ — เพิ่มจากแถบด้านล่าง</td></tr>}
                       </tbody>
                     </table>
                   </div>
+                  {/* ＋ เพิ่มรายการเอง (ของที่ไม่ได้อยู่ในใบรับ / ใบที่สร้างเปล่า) · รายการจากใบรับ แก้จำนวน/ลบที่ใบรับ */}
+                  {!readonly && (
+                    <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2 flex items-end gap-2 flex-wrap">
+                      <div className="w-64"><label className="block text-[11px] text-slate-500 mb-0.5">＋ เพิ่มรายการ — เลือกจากคลังสินค้า</label><SkuPicker value={addSku} onChange={(p) => { setAddSku(p); if (p) setAddName(""); }} placeholder="ค้นหารหัส / ชื่อสินค้า…" /></div>
+                      <div className="flex-1 min-w-[10rem]"><label className="block text-[11px] text-slate-500 mb-0.5">หรือพิมพ์ชื่อเอง (เช่น ค่ากล่อง, ของแถม)</label><input value={addName} onChange={(e) => setAddName(e.target.value)} className={`${inputCls} w-full`} placeholder={addSku ? `[${addSku.code}] ${addSku.name}` : "ชื่อรายการ"} /></div>
+                      <div><label className="block text-[11px] text-slate-500 mb-0.5">จำนวน</label><input type="number" inputMode="decimal" step="any" min={0} value={addQty} onChange={(e) => setAddQty(e.target.value)} onFocus={(e) => e.target.select()} onKeyDown={(e) => { if (e.key === "Enter") void addLine(); }} className={`${inputCls} w-24 text-right tabular-nums`} /></div>
+                      <button onClick={() => void addLine()} disabled={addBusy || (!addSku && !addName.trim())} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{addBusy ? "กำลังเพิ่ม…" : "＋ เพิ่ม"}</button>
+                      <span className="text-[11px] text-slate-400 basis-full">รายการจากใบรับ แก้จำนวนหรือลบต้องทำที่ใบรับ (จำนวนต้องตรงกับของที่รับจริงและสต๊อก) · รายการที่เพิ่มเองแก้จำนวนในตารางและกด 🗑 ลบได้</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -481,6 +537,17 @@ export default function PurchaseVoucherFormPage() {
           </div>
           {calc.totals.missing_price_count > 0 && <p className="text-xs text-red-600 mt-2">ยังไม่มีราคา {calc.totals.missing_price_count} รายการ ยืนยันไม่ได้</p>}
           <p className="text-[11px] text-slate-400 mt-3">หลังยืนยัน แก้ราคาในใบนี้ไม่ได้อีก (ราคาถูกเขียนกลับระบบแล้ว) · ถ้าผิดให้ออกใบใหม่จากใบรับเดิมไม่ได้ ต้องแก้ราคาที่ใบสั่งซื้อ/สินค้าโดยตรง</p>
+        </ERPModal>
+      )}
+      {/* ยืนยันลบรายการที่เพิ่มเอง */}
+      {delLine && (
+        <ERPModal open onClose={() => !addBusy && setDelLine(null)} size="sm" storageKey="pv-line-del"
+          title="🗑 ลบรายการ" description={delLine.item_name.replace(/^\s*\[[^\]]*\]\s*/, "")}
+          footer={<>
+            <button onClick={() => setDelLine(null)} disabled={addBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ไม่ลบ</button>
+            <button onClick={() => void removeLine()} disabled={addBusy} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{addBusy ? "กำลังลบ…" : "ยืนยันลบ"}</button>
+          </>}>
+          <p className="text-sm text-slate-600">ลบรายการนี้ออกจากใบสำคัญ ({delLine.qty.toLocaleString()} {delLine.uom ?? ""}) — ยอดรวมและค่าส่งเฉลี่ยจะคิดใหม่</p>
         </ERPModal>
       )}
       {/* ยกเลิกใบร่าง */}

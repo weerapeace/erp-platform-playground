@@ -10,7 +10,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { prefillFromGrs } from "@/lib/purchase-voucher-server";
+import { prefillFromGrs, defaultCarrier, fxRateForDate } from "@/lib/purchase-voucher-server";
+import { isForeignCurrency } from "@/lib/landed-cost";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -77,11 +78,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { gr_ids?: unknown; actor?: string };
+  let body: { gr_ids?: unknown; actor?: string; manual?: { seller_name?: string; seller_partner_id?: string | null; currency?: string; note?: string | null } };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const grIds = Array.isArray(body.gr_ids) ? body.gr_ids.map(String) : [];
   const actor = String(body.actor ?? "") || (user?.user_metadata?.name as string) || user?.email || null;
   const admin = supabaseAdmin();
+
+  // สร้างใบเปล่า (ไม่มีใบรับ) — ซื้อที่ไม่ได้ผ่านใบสั่งซื้อ/ใบรับ · รายการเพิ่มเองที่หน้าฟอร์ม
+  if (body.manual) {
+    const seller = String(body.manual.seller_name ?? "").trim();
+    if (!seller) return NextResponse.json({ error: "ต้องระบุร้าน / ผู้ขาย" }, { status: 400 });
+    const cur = String(body.manual.currency ?? "THB").toUpperCase() || "THB";
+    const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+    const [carrier, fx] = await Promise.all([defaultCarrier(admin), isForeignCurrency(cur) ? fxRateForDate(admin, today) : Promise.resolve(null)]);
+    const { data: ins, error } = await admin.from("purchase_vouchers_v2").insert({
+      status: "draft", voucher_date: today, seller_name: seller, seller_partner_id: body.manual.seller_partner_id || null, currency: cur, fx_rate: fx,
+      ship_method: carrier?.method ?? "none", ship_rate: carrier?.rate ?? null, ship_rate_cube: carrier?.rate_cube ?? null, ship_rate_kg: carrier?.rate_kg ?? null,
+      carrier_id: carrier?.id ?? null, carrier_name: carrier?.name ?? null, note: body.manual.note ?? null, created_by: actor,
+    }).select("id").single();
+    if (error || !ins) return NextResponse.json({ error: "สร้างใบสำคัญไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
+    const id = String((ins as Row).id);
+    await writeAudit(admin, { action: "create", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: actor, metadata: { manual: true, seller_name: seller, currency: cur } });
+    return NextResponse.json({ ok: true, id, error: null });
+  }
+
   try {
     const id = await prefillFromGrs(admin, grIds, actor);
     await writeAudit(admin, { action: "create", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: actor, metadata: { gr_ids: grIds } });

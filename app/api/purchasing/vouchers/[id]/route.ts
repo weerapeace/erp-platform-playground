@@ -34,7 +34,8 @@ type PatchBody = {
     carrier_id?: string | null; carrier_name?: string | null; tracking_no?: string | null;
     shipping_bill_id?: string | null; shipping_payment_status?: string; shipping_paid_date?: string | null;
   };
-  lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown; ship_method?: string | null }[];
+  /** qty / item_name / uom แก้ได้เฉพาะรายการที่ "เพิ่มเอง" (ไม่มี gr_line_id) — รายการจากใบรับต้องแก้ที่ใบรับ */
+  lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown; ship_method?: string | null; qty?: unknown; item_name?: string; uom?: string | null }[];
 };
 
 export async function PATCH(request: NextRequest, { params }: Params): Promise<NextResponse> {
@@ -95,6 +96,14 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       if (l.cbm_per_unit !== undefined) patch.cbm_per_unit = optNum(l.cbm_per_unit);
       if (l.kg_per_unit !== undefined) patch.kg_per_unit = optNum(l.kg_per_unit);
       if (l.ship_method !== undefined) patch.ship_method = l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : null;
+      if (l.qty !== undefined || l.item_name !== undefined || l.uom !== undefined) {
+        const { data: row } = await admin.from("purchase_voucher_lines_v2").select("gr_line_id").eq("id", String(l.id)).eq("voucher_id", id).maybeSingle();
+        if (row && !(row as { gr_line_id?: string | null }).gr_line_id) {   // เฉพาะรายการที่เพิ่มเอง
+          if (l.qty !== undefined) { const q = optNum(l.qty); if (q == null || q <= 0) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 }); patch.qty = q; }
+          if (l.item_name !== undefined && String(l.item_name).trim()) patch.item_name = String(l.item_name).trim();
+          if (l.uom !== undefined) patch.uom = l.uom ? String(l.uom) : null;
+        }
+      }
       if (Object.keys(patch).length) {
         const { error } = await admin.from("purchase_voucher_lines_v2").update(patch).eq("id", String(l.id)).eq("voucher_id", id);
         if (error) return NextResponse.json({ error: "บันทึกรายการไม่สำเร็จ: " + error.message }, { status: 400 });
