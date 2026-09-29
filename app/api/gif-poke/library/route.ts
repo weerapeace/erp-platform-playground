@@ -3,7 +3,8 @@
  * GET   → รายการ GIF ที่เปิดใช้งาน (ทุกคน) · ?all=1 → รวมที่ซ่อนด้วย (เฉพาะแอดมิน จัดการคลัง)
  * POST  multipart {file,title?} → อัปโหลด GIF เข้า R2 (ทุกคน) · หรือ JSON {gif_url,title?,category?} → เพิ่มลิงก์ (แอดมิน)
  * PATCH {id, title?, category?, is_active?, sort_order?} → แก้ไข (แอดมิน)
- * DELETE ?id= → ลบออกจากคลัง + ย้ายไฟล์ R2 เข้าถังขยะ (แอดมิน)
+ * DELETE ?id= → ลบออกจากคลัง + ย้ายไฟล์ R2 เข้าถังขยะ (แอดมิน · หรือคนที่อัปโหลด GIF นั้นเอง)
+ * GET คืน mine=true ให้ GIF ที่ผู้ใช้อัปโหลดเอง (หน้าจอใช้โชว์ปุ่มลบ)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -38,10 +39,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (all && !(await isManager(admin, me.id))) return NextResponse.json({ error: "เฉพาะแอดมิน", data: [] }, { status: 403 });
 
   let q = admin.from("erp_gif_library")
-    .select(all ? "id, gif_url, gif_key, title, category, is_active, sort_order, default_message" : "id, gif_url, gif_key, title, category, default_message");
+    .select(all ? "id, gif_url, gif_key, title, category, is_active, sort_order, default_message, uploaded_by" : "id, gif_url, gif_key, title, category, default_message, uploaded_by");
   if (!all) q = q.eq("is_active", true);
   const { data } = await q.order("sort_order", { ascending: true }).order("created_at", { ascending: false }).limit(500);
-  return NextResponse.json({ data: data ?? [], error: null });
+  // ไม่ส่ง uploaded_by ออกไป — ส่งแค่ "ของฉันไหม"
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map(({ uploaded_by, ...rest }) => ({ ...rest, mine: uploaded_by === me.id }));
+  return NextResponse.json({ data: rows, error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .insert({ gif_url: url, title: String(body.title ?? "").slice(0, 80).trim() || "GIF", category: String(body.category ?? "").slice(0, 40).trim() || "ทั่วไป", default_message: String(body.default_message ?? "").slice(0, 500).trim() || null, uploaded_by: me.id, sort_order: 50 })
       .select("id, gif_url, gif_key, title, category, is_active, sort_order, default_message").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ data, error: null });
+    return NextResponse.json({ data: { ...data, mine: true }, error: null });
   }
 
   // อัปโหลดไฟล์ (ทุกคน) — multipart
@@ -83,7 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .insert({ gif_key: key, title: title || "GIF ของฉัน", category: "อัปโหลด", uploaded_by: me.id, sort_order: 100 })
     .select("id, gif_url, gif_key, title, category, is_active, sort_order, default_message").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data, error: null });
+  return NextResponse.json({ data: { ...data, mine: true }, error: null });
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
@@ -112,10 +115,13 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const me = await meFromReq(request);
   if (!me) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ" }, { status: 401 });
   const admin = supabaseAdmin();
-  if (!(await isManager(admin, me.id))) return NextResponse.json({ error: "เฉพาะแอดมิน" }, { status: 403 });
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-  const { data: row } = await admin.from("erp_gif_library").select("gif_key").eq("id", id).maybeSingle();
+  const { data: row } = await admin.from("erp_gif_library").select("gif_key, uploaded_by").eq("id", id).maybeSingle();
+  if (!row) return NextResponse.json({ error: "ไม่พบ GIF นี้" }, { status: 404 });
+  // แอดมิน/ผู้จัดการลบได้ทุกอัน · คนอื่นลบได้เฉพาะที่ตัวเองอัปโหลด
+  const own = (row as { uploaded_by?: string | null }).uploaded_by === me.id;
+  if (!own && !(await isManager(admin, me.id))) return NextResponse.json({ error: "ลบได้เฉพาะ GIF ที่ตัวเองอัปโหลด" }, { status: 403 });
   const key = (row as { gif_key?: string | null } | null)?.gif_key;
   if (key) { try { await r2MoveToTrash(key); } catch { /* best-effort */ } }
   const { error } = await admin.from("erp_gif_library").delete().eq("id", id);

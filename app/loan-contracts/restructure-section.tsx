@@ -52,6 +52,21 @@ export function LoanRestructureSection({
   const [open, setOpen] = useState(false);
   const [revert, setRevert] = useState<{ id: string; force: boolean; count: number } | null>(null);
   const [reverting, setReverting] = useState(false);
+  // ✏️ แก้เหตุผล/หมายเหตุของรายการ (ข้อความเท่านั้น — ตัวเลขต้องย้อนกลับแล้วทำใหม่)
+  const [noteEdit, setNoteEdit] = useState<{ id: string; reason: string } | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const saveNote = async () => {
+    if (!noteEdit) return;
+    setNoteBusy(true);
+    try {
+      const r = await apiFetch("/api/loan-restructure", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: noteEdit.id, reason: noteEdit.reason }) });
+      const j = await r.json();
+      if (!r.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setNoteEdit(null);
+      await load();
+    } catch { /* แสดงผ่านการโหลดใหม่ — ช่องยังเปิดค้างให้ลองอีกครั้ง */ }
+    finally { setNoteBusy(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -147,7 +162,21 @@ export function LoanRestructureSection({
                   {num(it.fee_amount) > 0 && <> · ค่าธรรมเนียม {formatAmount(num(it.fee_amount))} (จ่ายแยก)</>}
                   {num(n.total_interest) > 0 && <> · ดอกเบี้ยรวมที่เหลือ {formatAmount(num(n.total_interest))}</>}
                 </div>
-                {it.reason && <div className="text-xs text-slate-500 mt-1 whitespace-pre-line">💬 {it.reason}</div>}
+                {noteEdit?.id === it.id ? (
+                  <div className="mt-1 space-y-1">
+                    <textarea value={noteEdit.reason} autoFocus rows={2} onChange={(e) => setNoteEdit({ ...noteEdit, reason: e.target.value })}
+                      placeholder="เหตุผล / หมายเหตุ" className="w-full px-2 py-1.5 text-xs border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    <div className="flex gap-1.5">
+                      <button type="button" onClick={() => void saveNote()} disabled={noteBusy} className="h-7 px-2.5 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{noteBusy ? "กำลังบันทึก…" : "บันทึก"}</button>
+                      <button type="button" onClick={() => setNoteEdit(null)} disabled={noteBusy} className="h-7 px-2.5 text-[11px] rounded-md border border-slate-200 text-slate-600">ยกเลิก</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 mt-1 whitespace-pre-line">
+                    {it.reason ? <>💬 {String(it.reason)}</> : null}
+                    {canDo && <button type="button" onClick={() => setNoteEdit({ id: String(it.id), reason: String(it.reason ?? "") })} className="ml-1 text-slate-300 hover:text-blue-600" title="แก้เหตุผล/หมายเหตุ (ข้อความเท่านั้น)">✏️{it.reason ? "" : " เพิ่มหมายเหตุ"}</button>}
+                  </div>
+                )}
                 {canDo && !reverted && latestApplied?.id === it.id && (
                   <button type="button" onClick={() => setRevert({ id: it.id, force: false, count: 0 })}
                     className="mt-1.5 h-7 px-2.5 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200">

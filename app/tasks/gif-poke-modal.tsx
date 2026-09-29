@@ -16,7 +16,7 @@ import { useT } from "@/components/i18n";
 import { GifPokeSettings } from "./gif-poke-settings";
 import { GifPokeAdmin } from "./gif-poke-admin";
 
-type GifItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; default_message?: string | null };
+type GifItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; default_message?: string | null; mine?: boolean };
 
 // GIF ไม่ใส่ &w= (ย่อจะทำอนิเมชั่นหาย) — url ภายนอกใช้ตรง, R2 key ผ่าน proxy
 export const gifItemSrc = (g: { gif_url?: string | null; gif_key?: string | null }): string | null =>
@@ -45,6 +45,19 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
   const [adminOpen, setAdminOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");   // เพิ่ม GIF ด้วยลิงก์
   const [addingLink, setAddingLink] = useState(false);
+  const [delAsk, setDelAsk] = useState<string | null>(null);   // 🗑 ลบ GIF ที่ตัวเองอัปโหลด (ถามยืนยันบนรูป)
+  const [deleting, setDeleting] = useState(false);
+  const removeMine = async (g: GifItem) => {
+    setDeleting(true); setErr("");
+    try {
+      const res = await apiFetch(`/api/gif-poke/library?id=${g.id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setErr(j.error || "ลบไม่สำเร็จ"); return; }
+      setLib((prev) => prev.filter((x) => x.id !== g.id));
+      if (selId === g.id) setSelId(null);
+    } catch { setErr("ลบไม่สำเร็จ — เชื่อมต่อไม่ได้"); }
+    finally { setDeleting(false); setDelAsk(null); }
+  };
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const loadLib = useCallback(() => {
@@ -205,12 +218,24 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
                 const src = gifItemSrc(g);
                 const on = g.id === selId;
                 return (
-                  <button key={g.id} onClick={() => pickGif(g)} title={g.title ?? ""}
-                    className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-2 ring-violet-200" : "border-slate-200 hover:border-slate-300"}`}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {src && <img src={src} alt={g.title ?? ""} className="w-full h-full object-cover" loading="lazy" />}
-                    {on && <span className="absolute top-1 right-1 bg-violet-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center shadow">✓</span>}
-                  </button>
+                  <div key={g.id} className="relative">
+                    <button onClick={() => pickGif(g)} title={g.title ?? ""}
+                      className={`relative block w-full aspect-square rounded-xl overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-2 ring-violet-200" : "border-slate-200 hover:border-slate-300"}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {src && <img src={src} alt={g.title ?? ""} className="w-full h-full object-cover" loading="lazy" />}
+                      {on && <span className="absolute top-1 right-1 bg-violet-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center shadow">✓</span>}
+                    </button>
+                    {/* GIF ที่ตัวเองอัปโหลด → ลบเองได้ (แอดมินลบได้ทุกอันที่ "จัดการคลัง") */}
+                    {g.mine && (delAsk === g.id ? (
+                      <div className="absolute inset-x-1 bottom-1 flex items-center justify-center gap-1 rounded-lg bg-white/95 p-1 shadow">
+                        <button onClick={() => void removeMine(g)} disabled={deleting} className="h-6 px-2 text-[10px] rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{t("ลบ", "Delete")}</button>
+                        <button onClick={() => setDelAsk(null)} disabled={deleting} className="h-6 px-2 text-[10px] rounded border border-slate-200 text-slate-500">{t("ไม่", "No")}</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setDelAsk(g.id)} title={t("ลบ GIF ที่ฉันอัปโหลด", "Delete my GIF")}
+                        className="absolute bottom-1 left-1 w-5 h-5 rounded-full bg-white/90 text-[10px] text-slate-500 shadow hover:text-rose-600">🗑</button>
+                    ))}
+                  </div>
                 );
               })}
             </div>

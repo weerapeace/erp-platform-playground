@@ -57,6 +57,7 @@ export function MaterialDemandPanel({
   const [alloc, setAlloc] = useState<Record<string, string>>({});   // summary_id → จำนวนที่จะแบ่ง
   const [saving, setSaving] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
+  const [undoAsk, setUndoAsk] = useState<string | null>(null);   // ถามยืนยันก่อนยกเลิกการแบ่ง (กันมือลั่น)
 
   const load = useCallback(() => {
     if (!code) { setD(null); return; }
@@ -124,6 +125,7 @@ export function MaterialDemandPanel({
   };
 
   const undo = async (a: Allocation) => {
+    setUndoAsk(null);
     try {
       const res = await apiFetch("/api/mo/material-allocations", {
         method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id }),
@@ -253,7 +255,12 @@ export function MaterialDemandPanel({
                       {a.ref_label && <span className="text-slate-400">· {a.ref_label}</span>}
                       <span className="text-slate-300">· {new Date(a.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span>
                       <div className="flex-1" />
-                      {canEdit && <button type="button" onClick={() => void undo(a)} className="text-rose-400 hover:text-rose-600">ยกเลิก</button>}
+                      {canEdit && (undoAsk === a.id ? (
+                        <span className="flex items-center gap-1">
+                          <button type="button" onClick={() => void undo(a)} className="h-5 px-1.5 rounded bg-rose-600 text-white hover:bg-rose-700">ยืนยันยกเลิก</button>
+                          <button type="button" onClick={() => setUndoAsk(null)} className="h-5 px-1.5 rounded border border-slate-200 text-slate-500">ไม่</button>
+                        </span>
+                      ) : <button type="button" onClick={() => setUndoAsk(a.id)} title="แบ่งผิดจำนวน/ผิดใบ → ยกเลิกแล้วแบ่งใหม่" className="text-rose-400 hover:text-rose-600">ยกเลิก</button>)}
                     </div>
                   ))}
                 </div>
@@ -262,6 +269,7 @@ export function MaterialDemandPanel({
           )}
 
           <p className="text-[10px] text-slate-400 px-1">
+            แบ่งผิดจำนวน/ผิดใบ → กด “ยกเลิก” ในประวัติการแบ่ง แล้วแบ่งใหม่ (ไม่มีแก้ตัวเลขย้อนหลัง — เป็นบัญชีของวัตถุดิบ) ·
             เรียงใบที่ใกล้ครบกำหนดก่อน (ใบที่ยังไม่ตั้งวันครบกำหนด = เรียงใบเก่าก่อน) · “ขาด” = ต้องใช้ − จำนวนที่มีในใบนั้น ·
             {showAllocate ? " แบ่งแล้วยอดจะไปเพิ่มที่ “จำนวนที่มี” ของใบนั้นทันที (ยกเลิกย้อนได้)" : " รับของเสร็จอย่าลืมไปติ๊ก “เตรียมแล้ว” ให้ใบที่ได้ของ"}
           </p>

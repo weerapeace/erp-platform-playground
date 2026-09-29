@@ -154,3 +154,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({ data, error: null });
 }
+
+/**
+ * PATCH /api/loan-restructure  { id, reason?, bank_ref? }
+ * แก้ได้เฉพาะ "ข้อความ" (เหตุผล / เลขอ้างอิงธนาคาร) — ตัวเลขเงื่อนไขแก้ไม่ได้ ต้อง "ย้อนกลับ" แล้วทำใหม่
+ */
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "loan_contracts.restructure");
+  if (denied) return denied;
+  let body: { id?: string; reason?: string; bank_ref?: string };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const id = String(body.id ?? "");
+  if (!UUID_RE.test(id)) return NextResponse.json({ error: "ไม่ระบุรายการ" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("loan_restructurings").select("id, loan_contract_id, seq_no, reason, bank_ref").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบรายการปรับโครงสร้างนี้" }, { status: 404 });
+  const c = cur as Record<string, unknown>;
+
+  const patch: Record<string, unknown> = {};
+  if (typeof body.reason === "string" && body.reason.slice(0, 2000) !== String(c.reason ?? "")) patch.reason = body.reason.slice(0, 2000);
+  if (typeof body.bank_ref === "string" && body.bank_ref.slice(0, 200).trim() !== String(c.bank_ref ?? "")) patch.bank_ref = body.bank_ref.slice(0, 200).trim();
+  if (Object.keys(patch).length === 0) return NextResponse.json({ data: { id }, error: null });
+
+  const { error } = await admin.from("loan_restructurings").update(patch).eq("id", id);
+  if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  await writeAudit(admin, {
+    action: "update", entityType: "loan_restructurings", entityId: id,
+    actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { loan_contract_id: c.loan_contract_id, seq_no: c.seq_no, old: { reason: c.reason ?? null, bank_ref: c.bank_ref ?? null }, new: patch },
+  });
+  return NextResponse.json({ data: { id }, error: null });
+}

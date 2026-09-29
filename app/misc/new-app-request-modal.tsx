@@ -212,6 +212,7 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
   const [draftLoaded, setDraftLoaded] = useState(false); // โหลดร่างเสร็จแล้วหรือยัง (กัน autosave เขียนทับตอนกำลังโหลด)
   const [hasDraft, setHasDraft] = useState(false);       // มีร่างอยู่ → โชว์แถบ "บันทึกร่างอัตโนมัติ · ล้างร่าง"
   const [ideas, setIdeas] = useState<AppIdea[]>([]);     // คลังไอเดียแอปที่เก็บไว้
+  const [loadedIdeaId, setLoadedIdeaId] = useState<string | null>(null);   // ไอเดียที่เปิดมาแก้อยู่ → "บันทึกทับ" ได้ (ไม่งั้นบันทึกซ้ำจะกลายเป็นตัวใหม่)
   const [showIdeas, setShowIdeas] = useState(false);     // เปิด/ปิดลิสต์ไอเดีย
 
   // รวมค่าฟอร์มปัจจุบันเป็นก้อนร่าง
@@ -287,6 +288,7 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
     setIcon("🧩"); setIconImg(null); setName(""); setPurpose(""); setSelRoles([]); setUsersText("");
     setDataFields([]); setFeatures([]); setExample(""); setSelModules([]); setNotes(""); setGenerated("");
     setHasDraft(false);
+    setLoadedIdeaId(null);
     toast.success("ล้างร่างแล้ว");
   };
 
@@ -303,8 +305,19 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
     const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
     const idea: AppIdea = { id, title: name.trim(), icon, iconImg, savedAt: new Date().toISOString(), data: draftValue() };
     await persistIdeas([idea, ...ideas]);
+    setLoadedIdeaId(id);
     setShowIdeas(true);
     toast.success(`เก็บไอเดีย “${idea.title}” แล้ว (มี ${ideas.length + 1} รายการ)`);
+  };
+
+  // บันทึกทับไอเดียที่เปิดมาแก้ (ไม่สร้างตัวใหม่)
+  const saveOverIdea = async () => {
+    if (!loadedIdeaId) return;
+    if (!name.trim()) { toast.error("ใส่ชื่อแอปก่อนบันทึก"); return; }
+    await persistIdeas(ideas.map((x) => x.id === loadedIdeaId
+      ? { ...x, title: name.trim(), icon, iconImg, savedAt: new Date().toISOString(), data: draftValue() }
+      : x));
+    toast.success(`บันทึกทับไอเดีย “${name.trim()}” แล้ว`);
   };
 
   // เปิดไอเดียกลับมาแก้ / สร้าง Prompt ต่อ
@@ -314,10 +327,11 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
     setSelRoles(v.selRoles ?? []); setUsersText(v.usersText ?? ""); setDataFields(v.dataFields ?? []);
     setFeatures(v.features ?? []); setExample(v.example ?? ""); setSelModules(v.selModules ?? []); setNotes(v.notes ?? "");
     setGenerated(""); setShowIdeas(false);
+    setLoadedIdeaId(it.id);
     toast.success(`เปิดไอเดีย “${it.title}” — แก้ต่อหรือกดสร้าง Prompt ได้เลย`);
   };
 
-  const deleteIdea = async (id: string) => { await persistIdeas(ideas.filter((x) => x.id !== id)); toast.success("ลบไอเดียแล้ว"); };
+  const deleteIdea = async (id: string) => { await persistIdeas(ideas.filter((x) => x.id !== id)); if (loadedIdeaId === id) setLoadedIdeaId(null); toast.success("ลบไอเดียแล้ว"); };
 
   const build = () => {
     if (!name.trim()) { toast.error("ใส่ชื่อแอปก่อน"); return; }
@@ -366,7 +380,10 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
       footer={<>
         <button onClick={onClose} className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">ปิด</button>
         <button onClick={() => void saveDraft()} className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">💾 บันทึกร่าง</button>
-        <button onClick={() => void saveAsIdea()} className="h-9 px-3 text-sm rounded-lg border border-indigo-300 text-indigo-600 hover:bg-indigo-50">💡 เก็บเป็นไอเดีย</button>
+        {loadedIdeaId && ideas.some((x) => x.id === loadedIdeaId) && (
+          <button onClick={() => void saveOverIdea()} title="บันทึกทับไอเดียที่เปิดมาแก้ (ไม่สร้างตัวใหม่)" className="h-9 px-3 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">💾 บันทึกทับไอเดียนี้</button>
+        )}
+        <button onClick={() => void saveAsIdea()} className="h-9 px-3 text-sm rounded-lg border border-indigo-300 text-indigo-600 hover:bg-indigo-50">{loadedIdeaId && ideas.some((x) => x.id === loadedIdeaId) ? "💡 เก็บเป็นไอเดียใหม่" : "💡 เก็บเป็นไอเดีย"}</button>
         <button onClick={build} className="h-9 px-5 text-sm font-medium rounded-lg bg-rose-500 text-white hover:bg-rose-600">✨ สร้าง Prompt</button>
       </>}>
       <div className="space-y-3">
