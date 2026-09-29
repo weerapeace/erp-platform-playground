@@ -84,6 +84,7 @@ export function AssetLibrary() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
+  const [metaMgr, setMetaMgr] = useState<"albums" | "tags" | null>(null);   // หน้าต่างจัดการ อัลบั้ม / แท็ก (เปลี่ยนชื่อ + ลบ)
   const [artworkAddOpen, setArtworkAddOpen] = useState(false);
   const [massOpen, setMassOpen] = useState(false);   // โหมด MASS: เพิ่ม Artwork หลายรายการแบบตาราง inline
   const [pendingFile, setPendingFile] = useState<File | null>(null);    // ลาก 1 รูปมาวาง → เปิด Artwork พร้อมรูป
@@ -429,7 +430,10 @@ export function AssetLibrary() {
           </div>
           <div className="flex items-center justify-between mb-1.5">
             <p className="text-[11px] font-medium text-slate-400">{t("อัลบั้ม", "Albums")}</p>
-            <button onClick={() => setNewColOpen(true)} className="text-[11px] text-indigo-600 hover:underline">{t("＋ ใหม่", "＋ New")}</button>
+            <span className="flex items-center gap-2">
+              {can("assets.manage") && collections.length > 0 && <button onClick={() => setMetaMgr("albums")} title={t("เปลี่ยนชื่อ / ลบ อัลบั้ม", "Rename / delete albums")} className="text-[11px] text-slate-400 hover:text-indigo-600 hover:underline">⚙️ {t("จัดการ", "Manage")}</button>}
+              <button onClick={() => setNewColOpen(true)} className="text-[11px] text-indigo-600 hover:underline">{t("＋ ใหม่", "＋ New")}</button>
+            </span>
           </div>
           <div className="flex flex-col gap-0.5 mb-4">
             <SideItem active={collectionId === null} onClick={() => setCollectionId(null)} label={t("ทั้งหมด", "All")} />
@@ -441,7 +445,10 @@ export function AssetLibrary() {
           </div>
           {tags.length > 0 && (
             <>
-              <p className="text-[11px] font-medium text-slate-400 mb-1.5">{t("แท็ก", "Tags")}</p>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[11px] font-medium text-slate-400">{t("แท็ก", "Tags")}</p>
+                {can("assets.manage") && <button onClick={() => setMetaMgr("tags")} title={t("เปลี่ยนชื่อ / ลบ แท็ก", "Rename / delete tags")} className="text-[11px] text-slate-400 hover:text-indigo-600 hover:underline">⚙️ {t("จัดการ", "Manage")}</button>}
+              </div>
               <div className="flex flex-wrap gap-1.5">
                 {tags.map((t) => (
                   <button key={t.id} onClick={() => setTag(tag === t.id ? null : t.id)}
@@ -614,6 +621,15 @@ export function AssetLibrary() {
       {newColOpen && (
         <NewCollectionModal onClose={() => setNewColOpen(false)}
           onDone={async () => { setNewColOpen(false); await loadMeta(); }} />
+      )}
+      {metaMgr && (
+        <ManageMetaModal kind={metaMgr} items={metaMgr === "albums" ? collections : tags}
+          onClose={() => setMetaMgr(null)}
+          onChanged={async (deletedId) => {
+            if (deletedId && metaMgr === "albums" && collectionId === deletedId) setCollectionId(null);
+            if (deletedId && metaMgr === "tags" && tag === deletedId) setTag(null);
+            await loadMeta(); await load();
+          }} />
       )}
       <ConfirmDialog
         open={bulkTrashOpen} onClose={() => setBulkTrashOpen(false)} onConfirm={bulkTrash}
@@ -1439,6 +1455,77 @@ function UsageList({ usages }: { usages: AssetUsage[] }) {
 }
 
 // ── สร้างอัลบั้มใหม่ ──
+/** จัดการ อัลบั้ม / แท็ก — เปลี่ยนชื่อ + ลบ (ไฟล์ข้างในไม่ถูกลบ) */
+function ManageMetaModal({ kind, items, onClose, onChanged }: {
+  kind: "albums" | "tags"; items: { id: string; name: string; count: number }[];
+  onClose: () => void; onChanged: (deletedId?: string) => void | Promise<void>;
+}) {
+  const toast = useToast();
+  const t = useT();
+  const api = kind === "albums" ? "/api/assets/collections" : "/api/assets/tags";
+  const noun = kind === "albums" ? t("อัลบั้ม", "album") : t("แท็ก", "tag");
+  const [ed, setEd] = useState<{ id: string; name: string } | null>(null);
+  const [delAsk, setDelAsk] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const rename = async () => {
+    if (!ed || !ed.name.trim()) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(api, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: ed.id, name: ed.name.trim() }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(t("เปลี่ยนชื่อแล้ว", "Renamed")); setEd(null);
+      await onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
+    finally { setBusy(false); }
+  };
+  const remove = async (id: string) => {
+    setBusy(true);
+    try {
+      const res = await apiFetch(`${api}?id=${id}`, { method: "DELETE" });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(`${t("ลบ", "Deleted ")}${noun}${t("แล้ว", "")}`); setDelAsk(null);
+      await onChanged(id);
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} size="sm" title={kind === "albums" ? t("⚙️ จัดการอัลบั้ม", "⚙️ Manage albums") : t("⚙️ จัดการแท็ก", "⚙️ Manage tags")}
+      description={t("เปลี่ยนชื่อ หรือลบ — ไฟล์ข้างในไม่ถูกลบ", "Rename or delete — files are kept")}
+      footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button></div>}>
+      {items.length === 0 ? <p className="py-8 text-center text-sm text-slate-400">{t("ยังไม่มีรายการ", "Nothing here yet")}</p> : (
+        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 max-h-[55vh] overflow-auto">
+          {items.map((it) => ed?.id === it.id ? (
+            <div key={it.id} className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50/40">
+              <input value={ed.name} autoFocus disabled={busy} onChange={(e) => setEd({ ...ed, name: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") void rename(); if (e.key === "Escape") setEd(null); }}
+                className="flex-1 min-w-0 h-8 px-2 text-sm border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+              <button onClick={() => void rename()} disabled={busy || !ed.name.trim()} className="h-8 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">{t("บันทึก", "Save")}</button>
+              <button onClick={() => setEd(null)} disabled={busy} className="h-8 px-2.5 text-xs border border-slate-200 bg-white rounded-lg text-slate-600">{t("ยกเลิก", "Cancel")}</button>
+            </div>
+          ) : delAsk === it.id ? (
+            <div key={it.id} className="px-3 py-2 bg-rose-50/60 space-y-1.5">
+              <p className="text-[13px] text-slate-700">{t("ลบ", "Delete ")}{noun} <b>{it.name}</b>? {it.count > 0 ? `${it.count} ${t("ไฟล์จะหลุดจาก", "files will leave this ")}${noun}${t("นี้ (ไฟล์ยังอยู่ในคลัง)", " (files stay in the library)")}` : ""}</p>
+              <div className="flex justify-end gap-1.5">
+                <button onClick={() => setDelAsk(null)} disabled={busy} className="h-7 px-2.5 text-xs border border-slate-200 bg-white rounded-md text-slate-600">{t("ไม่ลบ", "Cancel")}</button>
+                <button onClick={() => void remove(it.id)} disabled={busy} className="h-7 px-2.5 text-xs bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50">{busy ? "…" : t("ยืนยันลบ", "Delete")}</button>
+              </div>
+            </div>
+          ) : (
+            <div key={it.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <span className="flex-1 min-w-0 truncate text-slate-700">{kind === "albums" ? "📁 " : "🏷️ "}{it.name}</span>
+              <span className="shrink-0 text-[11px] text-slate-400">{it.count} {t("ไฟล์", "files")}</span>
+              <button onClick={() => { setDelAsk(null); setEd({ id: it.id, name: it.name }); }} className="shrink-0 text-xs text-indigo-600 hover:underline">✏️ {t("เปลี่ยนชื่อ", "Rename")}</button>
+              <button onClick={() => { setEd(null); setDelAsk(it.id); }} className="shrink-0 text-xs text-rose-600 hover:underline">🗑 {t("ลบ", "Delete")}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </ERPModal>
+  );
+}
+
 function NewCollectionModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const t = useT();

@@ -1,6 +1,8 @@
 /**
  * GET  /api/assets/collections  — รายการอัลบั้ม + จำนวนไฟล์ในอัลบั้ม
  * POST /api/assets/collections  — สร้างอัลบั้มใหม่ ({ name, description? })
+ * PATCH  { id, name?, description? }  — เปลี่ยนชื่ออัลบั้ม
+ * DELETE ?id=                          — ลบอัลบั้ม (ไฟล์ข้างในไม่ถูกลบ แค่ไม่อยู่ในอัลบั้มนี้แล้ว)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
@@ -53,4 +55,51 @@ export async function POST(request: NextRequest) {
 
   await writeAudit(admin, { action: "create", entityType: "asset_collection", entityId: data?.id as string, actorId: await actorId(request), metadata: { name } });
   return NextResponse.json({ data, error: null });
+}
+
+export async function PATCH(request: NextRequest) {
+  const denied = await guardApi(request, "assets.manage");
+  if (denied) return denied;
+
+  let body: { id?: string; name?: string; description?: string | null };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const id = String(body.id ?? "").trim();
+  if (!id) return NextResponse.json({ error: "ต้องระบุอัลบั้ม" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("asset_collections").select("id, name, description").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบอัลบั้มนี้" }, { status: 404 });
+
+  const patch: Record<string, unknown> = {};
+  if (body.name !== undefined) {
+    const name = String(body.name ?? "").trim();
+    if (!name) return NextResponse.json({ error: "ต้องมีชื่ออัลบั้ม" }, { status: 400 });
+    patch.name = name;
+  }
+  if (body.description !== undefined) patch.description = String(body.description ?? "").trim() || null;
+  if (Object.keys(patch).length === 0) return NextResponse.json({ data: cur, error: null });
+
+  const { data, error } = await admin.from("asset_collections").update(patch).eq("id", id).select("id, name, description").maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await writeAudit(admin, { action: "update", entityType: "asset_collection", entityId: id, actorId: await actorId(request), metadata: { old: cur, new: patch } });
+  return NextResponse.json({ data, error: null });
+}
+
+export async function DELETE(request: NextRequest) {
+  const denied = await guardApi(request, "assets.manage");
+  if (denied) return denied;
+  const id = (new URL(request.url).searchParams.get("id") ?? "").trim();
+  if (!id) return NextResponse.json({ error: "ต้องระบุอัลบั้ม" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("asset_collections").select("id, name, description").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบอัลบั้มนี้" }, { status: 404 });
+  // เก็บรายชื่อไฟล์ที่เคยอยู่ในอัลบั้มไว้ในประวัติ (เผื่อต้องสร้างคืน)
+  const { data: maps } = await admin.from("asset_collection_map").select("asset_id").eq("collection_id", id);
+  const assetIds = ((maps ?? []) as { asset_id: string }[]).map((m) => m.asset_id);
+
+  const { error } = await admin.from("asset_collections").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await writeAudit(admin, { action: "delete", entityType: "asset_collection", entityId: id, actorId: await actorId(request), metadata: { snapshot: cur, files: assetIds.length, asset_ids: assetIds.slice(0, 500) } });
+  return NextResponse.json({ data: { id, files: assetIds.length }, error: null });
 }
