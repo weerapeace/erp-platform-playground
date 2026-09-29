@@ -37,6 +37,7 @@ export function PlatformCategoryMapper() {
   const [importPf, setImportPf] = useState("");
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [clearAsk, setClearAsk] = useState(false);   // 🗑 ล้างหมวดที่นำเข้าของร้านที่เลือก (ถามยืนยันในหน้าต่างเดียวกัน)
   const fileRef = useRef<HTMLInputElement>(null);
   const [pfOpen, setPfOpen] = useState(false);          // โมดัลตั้งค่าร้านที่แสดง
   const [allPfs, setAllPfs] = useState<PfRow[]>([]);
@@ -198,6 +199,19 @@ export function PlatformCategoryMapper() {
   };
   const importPfCode = platforms.find((p) => p.id === importPf)?.code ?? "";
 
+  // ล้างหมวดที่นำเข้าของร้าน (นำเข้าผิดไฟล์/ผิดร้าน) — การจับคู่ที่ทำไว้ไม่ถูกลบ
+  const clearImported = async () => {
+    if (!importPf) return;
+    setImporting(true); setImportMsg("กำลังล้างหมวดที่นำเข้า…");
+    try {
+      const res = await apiFetch(`/api/platform-category-options?platform_id=${importPf}`, { method: "DELETE" });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ล้างไม่สำเร็จ");
+      setImportMsg(`🗑 ล้างแล้ว ${j.deleted} หมวด — นำเข้าไฟล์ที่ถูกต้องใหม่ได้เลย`);
+      toast.success(`ล้างหมวดของ ${platforms.find((p) => p.id === importPf)?.name_th ?? ""} แล้ว`);
+    } catch (e) { setImportMsg("ผิดพลาด: " + (e instanceof Error ? e.message : "")); }
+    finally { setImporting(false); setClearAsk(false); }
+  };
+
   const selCat = cats.find((c) => c.id === sel) ?? null;
 
   return (
@@ -323,6 +337,22 @@ export function PlatformCategoryMapper() {
                 </>
               )}
               {importMsg && <div className="text-xs text-slate-600">{importMsg}</div>}
+              {/* นำเข้าผิดไฟล์/ผิดร้าน → ล้างแล้วนำเข้าใหม่ */}
+              {importPf && (
+                <div className="pt-2 border-t border-slate-100">
+                  {clearAsk ? (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-2.5 space-y-1.5">
+                      <p className="text-xs text-slate-700">ล้างหมวดที่นำเข้าทั้งหมดของ <b>{platforms.find((p) => p.id === importPf)?.name_th}</b>? ช่องเลือกหมวดของร้านนี้จะว่างจนกว่าจะนำเข้าใหม่ (การจับคู่ที่ทำไว้ไม่หาย)</p>
+                      <div className="flex justify-end gap-1.5">
+                        <button type="button" onClick={() => setClearAsk(false)} disabled={importing} className="h-7 px-2.5 text-xs border border-slate-200 bg-white rounded-md text-slate-600">ไม่ล้าง</button>
+                        <button type="button" onClick={() => void clearImported()} disabled={importing} className="h-7 px-2.5 text-xs bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50">{importing ? "กำลังล้าง…" : "ยืนยันล้าง"}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setClearAsk(true)} disabled={importing} className="text-[11px] text-slate-400 hover:text-rose-600 hover:underline disabled:opacity-40">🗑 นำเข้าผิดไฟล์? ล้างหมวดที่นำเข้าของร้านนี้</button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

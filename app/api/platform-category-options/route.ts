@@ -2,6 +2,9 @@
  * รายการหมวดหมู่ให้เลือกของแพลตฟอร์ม — /api/platform-category-options
  *  GET  ?platform_id=&search=&limit=  (products.platforms.view) → หมวด (ค้นหา path ไทย/อังกฤษ/รหัส)
  *  POST { platform_id, rows:[{id,en,th}] }  (products.platforms.edit) → นำเข้า/อัปเดตจากไฟล์
+ *  DELETE ?platform_id=            → ล้างหมวดที่นำเข้าของร้านนั้นทั้งหมด (นำเข้าผิดไฟล์/ผิดร้าน) แล้วนำเข้าใหม่
+ *         ?platform_id=&external_id= → ลบหมวดเดียว
+ *         การจับคู่หมวดกลาง→หมวดร้านที่ทำไว้ไม่ถูกลบ (เก็บเป็นรหัส) นำเข้าไฟล์ที่ถูกแล้วชื่อจะกลับมา
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -54,4 +57,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "import", entityType: "platform_category_options", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platform_id, count: clean.length } });
   return NextResponse.json({ ok: true, imported: clean.length, error: null });
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const sp = new URL(request.url).searchParams;
+  const platformId = (sp.get("platform_id") ?? "").trim();
+  const externalId = (sp.get("external_id") ?? "").trim();
+  if (!platformId) return NextResponse.json({ error: "ต้องระบุร้าน" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  let cq = admin.from("platform_category_options").select("id", { count: "exact", head: true }).eq("platform_id", platformId);
+  if (externalId) cq = cq.eq("external_id", externalId);
+  const count = (await cq).count ?? 0;
+  if (count === 0) return NextResponse.json({ error: "ไม่มีหมวดที่นำเข้าไว้ให้ลบ" }, { status: 404 });
+
+  // เก็บตัวอย่างไว้ในประวัติ (ของจริงกู้ได้ด้วยการนำเข้าไฟล์เดิมอีกครั้ง)
+  let sq = admin.from("platform_category_options").select("external_id, name_th, name_en").eq("platform_id", platformId).order("external_id").limit(20);
+  if (externalId) sq = sq.eq("external_id", externalId);
+  const { data: sample } = await sq;
+
+  let dq = admin.from("platform_category_options").delete().eq("platform_id", platformId);
+  if (externalId) dq = dq.eq("external_id", externalId);
+  const { error } = await dq;
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAudit(admin, { action: "delete", entityType: "platform_category_options", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { platform_id: platformId, external_id: externalId || null, deleted: count, sample: sample ?? [] } });
+  return NextResponse.json({ ok: true, deleted: count, error: null });
 }

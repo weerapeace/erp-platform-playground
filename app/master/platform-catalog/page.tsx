@@ -38,6 +38,8 @@ export default function PlatformCatalogPage() {
   const [showHelp, setShowHelp] = useState(false);
   // แถวสินค้าที่กดเปิด (drawer แก้ไข/จับคู่มือ) + ค่าที่กำลังเลือกจับคู่
   const [openListing, setOpenListing] = useState<Listing | null>(null);
+  const [delAsk, setDelAsk] = useState(false);       // 🗑 ถามยืนยันลบรายการที่เปิดอยู่
+  const [deleting, setDeleting] = useState(false);
   const [matchDraft, setMatchDraft] = useState<ParentSkuPickerValue | null>(null);
   const [savingMatch, setSavingMatch] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -148,7 +150,22 @@ export default function PlatformCatalogPage() {
   const removeFromQueue = (id: number) => setQueue((q) => q.filter((it) => it.id !== id));
 
   // เปิดแถวสินค้า (drawer แก้ไข/จับคู่มือ) — ตั้งค่าจับคู่เริ่มจากที่มีอยู่
+  // ลบรายการที่นำเข้าผิด (สำเนาในระบบเรา — ของบนร้านจริงไม่ถูกแตะ)
+  const deleteListing = async () => {
+    if (!openListing) return;
+    setDeleting(true);
+    try {
+      const r = await apiFetch(`/api/platform-catalog?id=${openListing.id}`, { method: "DELETE" });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setNote(`ลบรายการ “${openListing.title || openListing.external_product_id || ""}” แล้ว`);
+      setOpenListing(null); setDelAsk(false);
+      await load();
+    } catch (e) { setNote("ลบไม่สำเร็จ: " + (e as Error).message); }
+    finally { setDeleting(false); }
+  };
+
   const openRow = (l: Listing) => {
+    setDelAsk(false);
     setOpenListing(l);
     setPushMsg(null);
     setMatchDraft(l.matched_parent_sku_id ? { id: l.matched_parent_sku_id, code: l.matched_code ?? "", name: l.matched_name ?? l.matched_code ?? "" } : null);
@@ -450,6 +467,23 @@ export default function PlatformCatalogPage() {
                   </div>
                   {pushMsg && <p className="text-xs text-slate-700">{pushMsg}</p>}
                   <p className="text-[11px] text-slate-400">ราคาเอาจากราคาขาย (list_price) ใน ERP · ไม่ตั้งส่วนลด · แนะนำทดสอบตัวนี้ก่อนกด “ส่งทั้งหมด”</p>
+                </div>
+              )}
+
+              {/* ลบรายการที่นำเข้าผิด */}
+              {canEdit && (
+                <div className="pt-1">
+                  {delAsk ? (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-2.5 space-y-1.5">
+                      <p className="text-xs text-slate-700">ลบรายการนี้ออกจากระบบ? {openListing.matched_parent_sku_id ? "การจับคู่กับสินค้า ERP จะหายไปด้วย · " : ""}ของบนร้านจริงไม่ถูกแตะ — ถ้ายังอยู่ในไฟล์ export รอบหน้าจะกลับมาเอง</p>
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={() => setDelAsk(false)} disabled={deleting} className="h-7 px-2.5 text-xs border border-slate-200 bg-white rounded-md text-slate-600">ไม่ลบ</button>
+                        <button onClick={() => void deleteListing()} disabled={deleting} className="h-7 px-2.5 text-xs bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-50">{deleting ? "กำลังลบ…" : "ยืนยันลบ"}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => setDelAsk(true)} className="text-[11px] text-slate-400 hover:text-rose-600 hover:underline">🗑 นำเข้าผิด? ลบรายการนี้</button>
+                  )}
                 </div>
               )}
             </div>

@@ -3,10 +3,14 @@
  * GET ?platform_id=&brand_id=  (products.platforms.view)
  *   → fields (ฟิลด์ของแพลตฟอร์มนั้น), listings (สินค้าบนร้าน), summary {total, matched}
  * การนำเข้าจริง (อัปไฟล์ export / ต่อ API) มาเฟสถัดไป — โครงตาราง+หน้าพร้อมแล้ว
+ * DELETE ?id=  (products.platforms.edit) → ลบรายการที่นำเข้าผิด (เป็นสำเนาข้อมูลจากร้าน — ของบนร้านจริงไม่ถูกแตะ)
+ *   ถ้าสินค้านั้นยังอยู่ในไฟล์ export รอบหน้า จะกลับมาเอง (ต้องจับคู่ใหม่)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,4 +50,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     summary: { total: rows.length, matched: rows.filter((r) => !!r.matched_parent_sku_id).length },
     error: null,
   });
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const id = (new URL(request.url).searchParams.get("id") ?? "").trim();
+  if (!id) return NextResponse.json({ error: "ต้องระบุรายการ" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  const { data: cur } = await admin.from("platform_catalog_listings")
+    .select("id, platform_id, brand_id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบรายการนี้" }, { status: 404 });
+
+  const { error } = await admin.from("platform_catalog_listings").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAudit(admin, { action: "delete", entityType: "platform_catalog_listing", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { snapshot: cur } });
+  return NextResponse.json({ ok: true, error: null });
 }
