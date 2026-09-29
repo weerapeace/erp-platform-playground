@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api";
 import type { ProductionJob, ProductionDashboardResponse, ProdJobCategory } from "@/app/api/mo/production-dashboard/route";
 import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
 import { MoStatusModal } from "@/components/mo-status-modal";
+import { MissingBrandModal } from "@/components/missing-brand-modal";
 import { MO_STATUS_TONE_CLASS, type MoStatusTone } from "@/lib/mo-status";
 import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, type DeviceLayout } from "@/components/device-view";
 
@@ -92,9 +93,10 @@ type GroupField = "mo_group" | "brand" | "category" | "desk" | "status" | "due_m
 const GROUP_FIELDS: { key: GroupField; label: string }[] = [
   { key: "mo_group", label: "ใบสั่งงาน (ชุด)" }, { key: "brand", label: "แบรนด์" }, { key: "category", label: "หมวดสินค้า (ประเภท)" }, { key: "desk", label: "โต๊ะที่ผลิต" }, { key: "status", label: "สถานะ" }, { key: "due_month", label: "เดือนกำหนดส่ง" },
 ];
+const NO_BRAND = "— ไม่มีแบรนด์ —";   // หัวกลุ่มของงานที่สินค้ายังไม่มีแบรนด์ (มีปุ่ม 🏷️ ใส่แบรนด์)
 const groupValueOf = (j: ProductionJob, f: GroupField): string =>
   f === "mo_group" ? (j.mo_group || "— ยังไม่จับชุด —")
-  : f === "brand" ? (j.brand || "— ไม่มีแบรนด์ —")
+  : f === "brand" ? (j.brand || NO_BRAND)
   : f === "category" ? (j.category || "— ไม่มีหมวด —")
   : f === "desk" ? (j.dept_names || j.worker_names || "— ยังไม่มีโต๊ะ —")
   : f === "status" ? (j.status ? getStatusStyle(j.status).label : "—")
@@ -244,6 +246,7 @@ function ProductionDashboardInner() {
   const [cardDir, setCardDir] = useState<"h" | "v">("h");   // การ์ดแนวนอน/แนวตั้ง (โหมดจัดกลุ่ม)
   const [statusMoId, setStatusMoId] = useState<string | null>(null);   // Popup สถานะงาน
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
+  const [brandOpen, setBrandOpen] = useState(false);                    // ป๊อปอัปใส่แบรนด์ให้สินค้าที่ยังไม่มี
 
   useEffect(() => {
     let alive = true;
@@ -449,12 +452,21 @@ function ProductionDashboardInner() {
                   const open = !collapsed.has(label);
                   return (
                   <div key={label}>
-                    <button type="button" onClick={() => setCollapsed((s) => { const n = new Set(s); n.has(label) ? n.delete(label) : n.add(label); return n; })}
-                      className="w-full flex items-center gap-2 mb-1.5 text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 sticky top-0 bg-white z-[1]">
-                      <span className="text-[10px] w-3 shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>
-                      <h3 className="text-sm font-bold text-slate-700 truncate">{label}</h3>
-                      <span className="text-xs text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{items.length}</span>
-                    </button>
+                    <div className="flex items-center gap-2 mb-1.5 sticky top-0 bg-white z-[1]">
+                      <button type="button" onClick={() => setCollapsed((s) => { const n = new Set(s); n.has(label) ? n.delete(label) : n.add(label); return n; })}
+                        className="flex-1 min-w-0 flex items-center gap-2 text-left px-2 py-1.5 rounded-lg hover:bg-slate-50">
+                        <span className="text-[10px] w-3 shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>
+                        <h3 className="text-sm font-bold text-slate-700 truncate">{label}</h3>
+                        <span className="text-xs text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{items.length}</span>
+                      </button>
+                      {/* กลุ่ม "ไม่มีแบรนด์" → ปุ่มเปิดป๊อปอัปใส่แบรนด์ (โชว์เฉพาะสินค้าที่ยังไม่มี) */}
+                      {groupField === "brand" && label === NO_BRAND && (
+                        <button type="button" onClick={() => setBrandOpen(true)}
+                          className="h-8 px-3 shrink-0 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs font-medium hover:bg-amber-100 whitespace-nowrap">
+                          🏷️ ใส่แบรนด์
+                        </button>
+                      )}
+                    </div>
                     {open && (
                       <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardDir === "v" ? "150px" : "260px"}, 1fr))` }}>
                         {items.map((j) => <JobCard key={j.id} j={j} onClick={() => openJob(j)} vertical={cardDir === "v"} />)}
@@ -489,6 +501,9 @@ function ProductionDashboardInner() {
       {statusMoId && (
         <MoStatusModal moId={statusMoId} onClose={() => setStatusMoId(null)} onChanged={reloadQuiet} />
       )}
+
+      {/* ป๊อปอัปใส่แบรนด์ให้สินค้าที่ยังไม่มี — บันทึกแล้วโหลดการ์ดใหม่ (ย้ายไปอยู่ใต้แบรนด์ของตัวเอง) */}
+      <MissingBrandModal open={brandOpen} onClose={() => setBrandOpen(false)} onChanged={reloadQuiet} />
 
       {/* ป๊อปอัปรายละเอียดงาน */}
       <ERPModal open={selectedJob !== null} onClose={() => setSelectedJob(null)} size="md" title={selectedJob ? `🧰 ${selectedJob.product_sku ?? selectedJob.mo_no}` : ""}>
