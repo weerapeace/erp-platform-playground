@@ -23,6 +23,7 @@ import { Pager } from "@/components/pager";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
+import { GrDetailModal } from "@/components/gr-detail-modal";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
 type PoCard = PO & { pendCount: number };
@@ -168,6 +169,9 @@ export default function ReceiveGoodsPage() {
   });
   const [history, setHistory] = useState<HistRow[]>([]);
   const [histLoading, setHistLoading] = useState(false);
+  const [histRev, setHistRev] = useState(0);                     // +1 = โหลดประวัติใหม่ (หลังแก้/ลบใบรับ)
+  // ใบรับ (GR) ที่เปิดดู/แก้/ลบ จากหน้านี้ — ของกลาง GrDetailModal (คืนยอด PO/สต๊อกให้ครบ)
+  const [grOpen, setGrOpen] = useState<string | null>(null);
 
   // โหลดประวัติการรับเมื่อเปิดป๊อปกรอกจำนวน
   useEffect(() => {
@@ -180,7 +184,7 @@ export default function ReceiveGoodsPage() {
       .catch(() => { if (alive) setHistory([]); })
       .finally(() => { if (alive) setHistLoading(false); });
     return () => { alive = false; };
-  }, [qtyEdit?.id]);
+  }, [qtyEdit?.id, histRev]);
 
   // โหลดค่า view/cols/sort/group ที่จำไว้
   useEffect(() => {
@@ -653,11 +657,15 @@ export default function ReceiveGoodsPage() {
 
         {done && (
           <div className="mb-4 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 flex items-center gap-2 flex-wrap">
-            <span>{done} — <a href="/m/goods-receipts-v2" className="underline">ดูใบรับสินค้า</a></span>
-            {/* พิมพ์ใบรับ (ไม่มีราคา) ทันที · ราคา/ค่าส่งไปทำที่ใบสำคัญรับ (จัดซื้อ) */}
+            <span>{done}</span>
+            {/* ลงผิด? เปิดใบรับเพื่อแก้/ลบได้ทันที · พิมพ์ใบรับ (ไม่มีราคา) · ราคา/ค่าส่งไปทำที่ใบสำคัญรับ (จัดซื้อ) */}
             {doneGrs.map((no) => (
-              <a key={no} href={`/print/goods-receipt/${encodeURIComponent(no)}`} target="_blank" rel="noreferrer"
-                className="h-7 px-2.5 inline-flex items-center text-xs rounded-md border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100">🖨 พิมพ์ใบรับ {no}</a>
+              <Fragment key={no}>
+                <button type="button" onClick={() => setGrOpen(no)}
+                  className="h-7 px-2.5 inline-flex items-center text-xs rounded-md border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100">✎ ดู / แก้ใบรับ {no}</button>
+                <a href={`/print/goods-receipt/${encodeURIComponent(no)}`} target="_blank" rel="noreferrer"
+                  className="h-7 px-2.5 inline-flex items-center text-xs rounded-md border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100">🖨 พิมพ์</a>
+              </Fragment>
             ))}
             <a href="/purchasing/vouchers" className="h-7 px-2.5 inline-flex items-center text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">🧾 ไปออกใบสำคัญรับ (ใส่ราคา)</a>
           </div>
@@ -1184,7 +1192,7 @@ export default function ReceiveGoodsPage() {
                         <td className="px-2.5 py-1.5 text-slate-600">{h.receiver || "—"}</td>
                         <td className="px-2.5 py-1.5 text-right tabular-nums text-slate-700">{h.qty_received.toLocaleString()}</td>
                         <td className="px-2.5 py-1.5 text-right tabular-nums text-slate-500">{h.qty_defective ? h.qty_defective.toLocaleString() : "-"}</td>
-                        <td className="px-2.5 py-1.5 text-slate-500">{CASE_LABEL[h.case_type] ?? h.case_type}{h.gr_no ? <a href={`/print/goods-receipt/${encodeURIComponent(h.gr_no)}`} target="_blank" rel="noreferrer" title="พิมพ์ใบรับ" className="text-slate-400 hover:text-blue-600 ml-1">🖨 {h.gr_no}</a> : ""}</td>
+                        <td className="px-2.5 py-1.5 text-slate-500">{CASE_LABEL[h.case_type] ?? h.case_type}{h.gr_no ? <><button type="button" onClick={() => setGrOpen(h.gr_no)} title="เปิดใบรับ — ดู / แก้จำนวน / ลบใบรับ" className="text-blue-600 hover:underline ml-1">✎ {h.gr_no}</button><a href={`/print/goods-receipt/${encodeURIComponent(h.gr_no)}`} target="_blank" rel="noreferrer" title="พิมพ์ใบรับ" className="text-slate-400 hover:text-blue-600 ml-1">🖨</a></> : ""}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1202,7 +1210,10 @@ export default function ReceiveGoodsPage() {
               title="ประวัติ / แก้ไขรายการรับ"
               description={`🏪 ${it.seller_name} · ${it.po_no}`}
               footer={<>
-                <a href="/m/goods-receipts-v2" className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🔗 ไปที่ใบรับ (GR)</a>
+                {history[0]?.gr_no && (
+                  <button type="button" onClick={() => setGrOpen(history[0].gr_no)} title="เปิดใบรับล่าสุด — แก้จำนวน / ลบใบรับ (ระบบคืนยอดใบสั่งซื้อและสต๊อกให้)"
+                    className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">✎ แก้ / ลบใบรับ {history[0].gr_no}</button>
+                )}
                 {it.remaining > 0 && (
                   <button onClick={() => void reopenLine(it)} disabled={reopening}
                     className="px-4 h-9 text-sm font-medium border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 disabled:opacity-50">
@@ -1225,7 +1236,7 @@ export default function ReceiveGoodsPage() {
               <div className="mt-3 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
                 {it.remaining > 0
                   ? <>รายการนี้ปิดยอดทั้งที่ยังขาด {it.remaining.toLocaleString()} {it.uom} — ถ้าของมาเพิ่ม กด <b>↩ เปิดกลับมารอรับ</b> เพื่อรับต่อได้</>
-                  : <>รับครบจำนวนแล้ว — ถ้าตัวเลขผิด (เช่น บันทึกเกินจริง) ให้แก้ที่เอกสารใบรับ (GR) เพื่อให้หลักฐานตรงกัน</>}
+                  : <>รับครบจำนวนแล้ว — ถ้าตัวเลขผิด (เช่น บันทึกเกินจริง) กด <b>✎ เลขใบรับ</b> ในประวัติด้านล่างเพื่อแก้หรือลบใบรับได้เลย</>}
               </div>
               {historyBlock}
             </ERPModal>
@@ -1521,6 +1532,12 @@ export default function ReceiveGoodsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ใบรับ (GR) — ดู / แก้ / ลบ จากหน้ารับของได้เลย · แก้แล้วโหลดรายการ+ประวัติใหม่ (ตัวเลขเดิมบนจอจะไม่ตรง) */}
+      {grOpen && (
+        <GrDetailModal grId={grOpen} onClose={() => setGrOpen(null)}
+          onSaved={async () => { setQtyEdit(null); setHistRev((n) => n + 1); await loadPending(doneMode ? "done" : "pending"); }} />
       )}
     </PlaygroundShell>
   );

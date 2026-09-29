@@ -70,8 +70,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 /**
- * PATCH /api/purchasing/goods-receipt/<id> — แก้ใบรับที่ลงผิด (วันที่/ผู้รับ/จำนวนรับ/เสีย · ลบบรรทัด · เพิ่มบรรทัดที่ลืมลง)
- * body: { receive_date?, receiver?, note?, lines?: [{ id, qty_received, qty_defective, case_type? }], add_lines?: [{ po_line_id, qty_received, qty_defective, case_type? }] }
+ * PATCH /api/purchasing/goods-receipt/<id> — แก้ใบรับที่ลงผิด (วันที่/ผู้รับ/จำนวนรับ/เสีย · ลบบรรทัด · เพิ่มบรรทัดที่ลืมลง · เปลี่ยนไฟล์แนบ)
+ * body: { receive_date?, receiver?, note?, receipt_doc_r2_key?, bill_doc_r2_key?, lines?: [{ id, qty_received, qty_defective, case_type? }], add_lines?: [{ po_line_id, qty_received, qty_defective, case_type? }] }
+ *   ไฟล์แนบ (ใบรับของ / บิล) = เปลี่ยนเป็นไฟล์ใหม่ได้ แต่เอาออกให้ว่างไม่ได้ (เป็นเอกสารบังคับตอนรับของ)
  * ทำให้ครบทุกที่ที่ตอนรับของเขียนไว้ (ไม่งั้นตัวเลขไม่ตรงกัน):
  *   1. บรรทัด GR   2. บรรทัด PO (qty_received/qty_defective/line_status ตามส่วนต่าง)   3. สถานะ PO รวม
  *   4. สต๊อก: โพสต์ส่วนต่างเป็น in/out ลงคลังเดิมของใบรับ (ledger กลาง erp_stock_post_internal)
@@ -89,7 +90,7 @@ function nextLineStatus(old: string | null, ordered: number, received: number, c
   return old && !["received", "partial"].includes(old) ? old : "pending";
 }
 
-type EditBody = { receive_date?: string | null; receiver?: string | null; note?: string | null; lines?: LineIn[]; add_lines?: LineIn[]; actor?: string };
+type EditBody = { receive_date?: string | null; receiver?: string | null; note?: string | null; receipt_doc_r2_key?: string | null; bill_doc_r2_key?: string | null; lines?: LineIn[]; add_lines?: LineIn[]; actor?: string };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -214,6 +215,11 @@ async function editGoodsReceipt(request: NextRequest, id: string, body: EditBody
     if (body.receive_date !== undefined && body.receive_date) hp.receive_date = body.receive_date;
     if (body.receiver !== undefined) hp.receiver = String(body.receiver ?? "").trim() || null;
     if (body.note !== undefined) hp.note = body.note ? String(body.note) : null;
+    // ไฟล์แนบ: รับเฉพาะ "เปลี่ยนเป็นไฟล์ใหม่" (ค่าว่าง = ไม่แตะของเดิม)
+    for (const k of ["receipt_doc_r2_key", "bill_doc_r2_key"] as const) {
+      const v = typeof body[k] === "string" ? String(body[k]).trim() : "";
+      if (v && v !== String(g[k] ?? "")) { hp[k] = v; changes.push({ field: k, old: g[k] ?? null, new: v }); }
+    }
     if (opts.deleteWhole) { hp.is_active = false; hp.status = "cancelled"; hp.voucher_id = null; }   // ปิดใบ + ปล่อยจากใบสำคัญร่าง
     await admin.from("goods_receipts_v2").update(hp).eq("id", grId);
     // 4) สถานะ PO รวม (สูตรเดียวกับตอนรับของ)

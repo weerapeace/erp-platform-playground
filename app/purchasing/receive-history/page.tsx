@@ -3,6 +3,7 @@
 /**
  * หน้าประวัติการรับสินค้า — /purchasing/receive-history
  * ตารางกลาง (DataTable) แสดงทุกครั้งที่เคยรับของ (รายบรรทัด)
+ * กดแถว = เปิดใบรับ (ของกลาง GrDetailModal) → ดู / แก้จำนวน / เปลี่ยนไฟล์แนบ / ลบใบรับ
  * ค้นหาชื่อ/รหัสสินค้าเพื่อดูประวัติของสินค้าตัวใดตัวหนึ่ง · เรียง/กรอง/Export ได้จากตารางกลาง
  */
 import { useCallback, useEffect, useState } from "react";
@@ -11,6 +12,7 @@ import { DataTable } from "@/components/data-table";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
+import { GrDetailModal } from "@/components/gr-detail-modal";
 import type { ColumnDef } from "@tanstack/react-table";
 
 type Row = {
@@ -47,6 +49,7 @@ export default function ReceiveHistoryPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [grOpen, setGrOpen] = useState<string | null>(null);   // ใบรับที่เปิดดู/แก้/ลบ
 
   const fetchRows = useCallback(async () => {
     setLoading(true); setError(null);
@@ -67,7 +70,7 @@ export default function ReceiveHistoryPage() {
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <h1 className="text-xl font-bold text-slate-900">📜 ประวัติการรับสินค้า</h1>
-            <p className="text-sm text-slate-500 mt-0.5">ทุกครั้งที่เคยรับของ · ค้นหาชื่อ/รหัสสินค้าเพื่อดูประวัติของสินค้าตัวนั้น</p>
+            <p className="text-sm text-slate-500 mt-0.5">ทุกครั้งที่เคยรับของ · กดแถวเพื่อเปิดใบรับ (แก้ / ลบได้) · ค้นหาชื่อ/รหัสสินค้าเพื่อดูประวัติของสินค้าตัวนั้น</p>
           </div>
           <div className="flex items-center gap-2">
             <a href="/purchasing/receive" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📥 ไปหน้ารับของ</a>
@@ -81,6 +84,7 @@ export default function ReceiveHistoryPage() {
           searchPlaceholder="ค้นหา สินค้า / รหัส / PO / ร้าน / ผู้รับ..."
           searchableKeys={["item_name", "code", "po_no", "seller_name", "gr_no", "receiver"]}
           tableId="receive-history" exportFilename="ประวัติการรับสินค้า"
+          onRowClick={(r) => { if (r.gr_no) setGrOpen(r.gr_no); }}
           views={[
             { id: "all", label: "ทั้งหมด" },
             { id: "short", label: "รับไม่ครบ", filter: (r) => (r as Row).case_type === "partial_wait" || (r as Row).case_type === "partial_close" },
@@ -88,6 +92,8 @@ export default function ReceiveHistoryPage() {
           ]}
         />
       </div>
+
+      {grOpen && <GrDetailModal grId={grOpen} onClose={() => setGrOpen(null)} onSaved={fetchRows} />}
     </PlaygroundShell>
   );
 }

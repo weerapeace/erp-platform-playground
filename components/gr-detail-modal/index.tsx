@@ -4,6 +4,7 @@
  * GrDetailModal (ของกลาง) — ป๊อปรายละเอียดใบรับสินค้า GR 1 ใบ + โหมดแก้ไข
  *   ดู: หัวใบ (เลข GR / PO / ร้าน / วันที่รับ / ผู้รับ) · รายการ (รูป รหัส ชื่อ สั่ง/รับ/เสีย หน่วย) · ไฟล์แนบ · ปุ่มพิมพ์
  *   แก้ (สิทธิ์ products.edit): วันที่/ผู้รับ/หมายเหตุ · จำนวนรับ/เสีย · ลบบรรทัด (ตั้ง 0) · เพิ่มรายการที่ลืมลงจาก PO เดียวกัน
+ *     · เปลี่ยนไฟล์แนบ (ใบรับของ / บิล) ที่แนบผิด — เปลี่ยนได้ เอาออกให้ว่างไม่ได้ (เอกสารบังคับ)
  *     → PATCH /api/purchasing/goods-receipt/<id> ปรับ PO/สต๊อก/ใบสำคัญร่าง ให้ตามส่วนต่าง · ใบสำคัญยืนยันแล้ว = แก้ไม่ได้
  * ใช้: <GrDetailModal grId onClose footer? onSaved? />
  */
@@ -15,6 +16,7 @@ import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
+import { FileInput } from "@/components/file-input";
 import type { GrDetail } from "@/app/api/purchasing/goods-receipt/[id]/route";
 
 const CASE_LABEL: Record<string, string> = { full: "รับครบ", full_defective: "รับครบ (มีเสีย)", partial_wait: "รับบางส่วน รอของ", partial_close: "ปิดยอด (ขาด)" };
@@ -36,6 +38,7 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hdr, setHdr] = useState({ receive_date: "", receiver: "", note: "" });
+  const [docs, setDocs] = useState<{ receipt: string | null; bill: string | null }>({ receipt: null, bill: null });
   const [le, setLe] = useState<Record<string, LineEdit>>({});
   const [adds, setAdds] = useState<AddRow[]>([]);
   const [addOpen, setAddOpen] = useState(false);
@@ -71,6 +74,7 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
   const startEdit = () => {
     if (!d) return;
     setHdr({ receive_date: d.receive_date ?? "", receiver: d.receiver ?? "", note: d.note ?? "" });
+    setDocs({ receipt: d.receipt_doc_r2_key, bill: d.bill_doc_r2_key });
     const m: Record<string, LineEdit> = {};
     for (const l of d.lines) m[l.id] = { recv: String(l.qty_received), def: String(l.qty_defective) };
     setLe(m); setAdds([]); setAddOpen(false); setEditing(true);
@@ -84,12 +88,15 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
     return d.po_lines.filter((p) => !inGr.has(p.id) && !adds.some((a) => a.po_line_id === p.id));
   }, [d, adds]);
 
+  // ไฟล์แนบเป็นเอกสารบังคับ → เปลี่ยนได้ แต่ถ้าเดิมมีไฟล์อยู่ จะเอาออกให้ว่างไม่ได้
+  const docMissing = !!d && editing && ((!!d.receipt_doc_r2_key && !docs.receipt) || (!!d.bill_doc_r2_key && !docs.bill));
   const dirty = useMemo(() => {
     if (!d || !editing) return false;
     if (hdr.receive_date !== (d.receive_date ?? "") || hdr.receiver !== (d.receiver ?? "") || hdr.note !== (d.note ?? "")) return true;
+    if (docs.receipt !== d.receipt_doc_r2_key || docs.bill !== d.bill_doc_r2_key) return true;
     if (d.lines.some((l) => num(le[l.id]?.recv) !== l.qty_received || num(le[l.id]?.def) !== l.qty_defective)) return true;
     return adds.some((a) => num(a.recv) > 0 || num(a.def) > 0);
-  }, [d, editing, hdr, le, adds]);
+  }, [d, editing, hdr, docs, le, adds]);
 
   const save = async () => {
     if (!d) return;
@@ -97,6 +104,8 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
     try {
       const body = {
         receive_date: hdr.receive_date || null, receiver: hdr.receiver, note: hdr.note || null,
+        ...(docs.receipt && docs.receipt !== d.receipt_doc_r2_key ? { receipt_doc_r2_key: docs.receipt } : {}),
+        ...(docs.bill && docs.bill !== d.bill_doc_r2_key ? { bill_doc_r2_key: docs.bill } : {}),
         lines: d.lines.filter((l) => num(le[l.id]?.recv) !== l.qty_received || num(le[l.id]?.def) !== l.qty_defective).map((l) => ({ id: l.id, qty_received: num(le[l.id]?.recv), qty_defective: num(le[l.id]?.def) })),
         add_lines: adds.filter((a) => num(a.recv) > 0 || num(a.def) > 0).map((a) => ({ po_line_id: a.po_line_id, qty_received: num(a.recv), qty_defective: num(a.def) })),
       };
@@ -127,7 +136,7 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
       footer={editing ? (<>
         <span className="mr-auto text-[11px] text-slate-400">บันทึกแล้ว ระบบปรับใบสั่งซื้อ / สต๊อก / ใบสำคัญร่าง ตามส่วนต่างให้อัตโนมัติ</span>
         <button onClick={() => setEditing(false)} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-        <button onClick={() => void save()} disabled={saving || !dirty} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
+        <button onClick={() => void save()} disabled={saving || !dirty || docMissing} title={docMissing ? "ต้องแนบไฟล์ใหม่ก่อน (เอกสารบังคับ เอาออกให้ว่างไม่ได้)" : undefined} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
       </>) : (<>
         {d && <a href={`/print/goods-receipt/${d.id}`} target="_blank" rel="noreferrer" className="mr-auto h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🖨 พิมพ์ใบรับ</a>}
         {d && canEdit && (
@@ -163,7 +172,17 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
             </div>
           )}
 
-          {attachments.length > 0 && (
+          {editing ? (
+            <div>
+              <div className="grid grid-cols-2 gap-3">
+                <FileInput label="📄 ใบรับของ / ใบส่งของขนส่ง" value={docs.receipt} onChange={(k) => setDocs((p) => ({ ...p, receipt: k }))} folder="goods-receipts" hasError={!!d.receipt_doc_r2_key && !docs.receipt} />
+                <FileInput label="🧾 บิล / ใบเสร็จ" value={docs.bill} onChange={(k) => setDocs((p) => ({ ...p, bill: k }))} folder="goods-receipts" hasError={!!d.bill_doc_r2_key && !docs.bill} />
+              </div>
+              <p className={`text-[11px] mt-1 ${docMissing ? "text-red-600" : "text-slate-400"}`}>
+                {docMissing ? "⚠ เอาไฟล์เดิมออกแล้ว ต้องแนบไฟล์ใหม่แทนก่อนบันทึก (เอกสารบังคับ)" : "แนบผิดไฟล์? กดเอาไฟล์เดิมออกแล้วแนบไฟล์ใหม่แทนได้เลย"}
+              </p>
+            </div>
+          ) : attachments.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap text-xs">
               <span className="text-slate-400">ไฟล์แนบ</span>
               {attachments.map((a) => (
