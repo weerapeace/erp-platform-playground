@@ -134,7 +134,7 @@ export function ImageRegions<T extends Region>({
         if (mode === "view") {
           // โหมดดู: ไม่มีเส้นกรอบ ไม่มีพื้นหลัง — เห็นแต่รูป (ชี้แล้วมีป้ายข้อมูล)
           return (
-            <button key={r.id} type="button" style={style} aria-label={regionLabel?.(r) ?? "จุดบนรูป"}
+            <button key={r.id} type="button" style={{ ...style, outline: "none", boxShadow: "none" }} aria-label={regionLabel?.(r) ?? "จุดบนรูป"}
               onClick={() => onRegionClick?.(r)}
               onPointerEnter={() => setHoverId(r.id)} onPointerLeave={() => setHoverId((h) => (h === r.id ? null : h))}
               onFocus={() => setHoverId(r.id)} onBlur={() => setHoverId((h) => (h === r.id ? null : h))}

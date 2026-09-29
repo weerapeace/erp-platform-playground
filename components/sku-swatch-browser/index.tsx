@@ -336,15 +336,16 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
     finally { setSaving(false); setConfirm(null); }
   };
 
-  // ป๊อปยืนยัน (z-50) อยู่ต่ำกว่าหน้านี้ → ถอยหน้านี้ไปข้างหลังชั่วคราวตอนมีป๊อป
-  const behind = !!confirm;
+  // Drawer SKU และป๊อปยืนยันของกลางอยู่ชั้น z-50 (ต่ำกว่าหน้านี้) → ถอยหน้านี้ไปข้างหลังตอนมีอย่างใดอย่างหนึ่งเปิด
+  // (เดิมถอยเฉพาะตอนมีป๊อปยืนยัน → กดชิ้นบนรูปแล้ว Drawer เปิดจริงแต่ถูกหน้านี้บังมิด)
+  const behind = !!confirm || !!skuDrawer;
   const viewSpots = useMemo(() => (data?.spots ?? []).filter((s) => !!s.sku), [data]);
   const src = data?.image_key ? r2ImageUrl(data.image_key, zoom > 1.5 ? 2400 : 1600) ?? "" : "";
   const dupOf = (s: EditSpot) => !!s.sku_id && spots.some((o) => o.id !== s.id && o.sku_id === s.sku_id);
 
   return createPortal(
     <>
-      <div className={`fixed inset-0 flex flex-col bg-white ${behind ? "z-[40] pointer-events-none" : "z-[140]"}`}>
+      <div className={`fixed inset-0 flex flex-col bg-white ${behind ? "z-[45] pointer-events-none" : "z-[140]"}`}>
         {/* หัว */}
         <div className="flex items-center gap-2 px-4 h-14 border-b border-slate-200 shrink-0">
           <span className="text-xl">🎨</span>
