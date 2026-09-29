@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,25 @@ export type CountLine = {
 };
 
 type Admin = ReturnType<typeof supabaseAdmin>;
+
+/**
+ * รอบนับที่ "ยังนับอยู่" เท่านั้นที่แก้ได้ (สแกน/เพิ่ม/ลบรายการ/กรอกจำนวน/ยืนยันปรับ)
+ * ฟังก์ชันในฐานข้อมูลกันแค่รอบที่ปรับแล้ว ไม่รู้จัก "ยกเลิก" → ต้องกันที่ชั้นนี้ ไม่งั้นรอบที่ยกเลิกยังปรับสต๊อกได้
+ * คืนข้อความ error (ภาษาคน) หรือ null = แก้ได้
+ */
+async function lockedReason(admin: Admin, countId: unknown): Promise<string | null> {
+  if (!countId) return "ไม่พบรอบนับ";
+  const { data } = await admin.from("erp_stock_counts").select("status, count_no").eq("id", String(countId)).maybeSingle();
+  if (!data) return "ไม่พบรอบนับ";
+  if (data.status === "cancelled") return `รอบนับ ${data.count_no ?? ""} ถูกยกเลิกแล้ว — ถ้าจะนับต่อ กด "เปิดกลับมานับต่อ" ก่อน`;
+  if (data.status === "applied") return `รอบนับ ${data.count_no ?? ""} ปรับสต๊อกไปแล้ว แก้ไม่ได้`;
+  return null;
+}
+async function countIdOfLine(admin: Admin, lineId: unknown): Promise<string | null> {
+  if (!lineId) return null;
+  const { data } = await admin.from("erp_stock_count_lines").select("count_id").eq("id", String(lineId)).maybeSingle();
+  return data?.count_id ? String(data.count_id) : null;
+}
 async function whMap(admin: Admin, ids: (string | null)[]) {
   const uniq = [...new Set(ids.filter(Boolean))] as string[];
   if (!uniq.length) return new Map<string, { code: string; name: string }>();
@@ -52,7 +72,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ sessions, error: null });
 }
 
-// POST { action: open | save | apply }
+// POST { action: open | save | apply | scan | add_line | add_needed | delete_line | cancel | reopen }
 export async function POST(request: NextRequest) {
   let body: Record<string, unknown>;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -72,6 +92,8 @@ export async function POST(request: NextRequest) {
   if (action === "save") {
     const denied = await guardApi(request, "stock.view"); if (denied) return denied;
     if (!body.line_id) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 400 });
+    const locked = await lockedReason(admin, await countIdOfLine(admin, body.line_id));
+    if (locked) return NextResponse.json({ error: locked }, { status: 400 });
     const val = body.counted_qty === null || body.counted_qty === "" ? null : Number(body.counted_qty);
     const { error } = await admin.from("erp_stock_count_lines").update({ counted_qty: val }).eq("id", body.line_id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -81,6 +103,8 @@ export async function POST(request: NextRequest) {
   if (action === "apply") {
     const denied = await guardApi(request, "stock.adjust"); if (denied) return denied;
     if (!body.count_id) return NextResponse.json({ error: "ไม่พบรอบนับ" }, { status: 400 });
+    const locked = await lockedReason(admin, body.count_id);
+    if (locked) return NextResponse.json({ error: locked }, { status: 400 });
     const { data, error } = await admin.rpc("erp_stock_count_apply", { p_count_id: body.count_id, p_actor: actor });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ adjusted: data, error: null });
@@ -90,6 +114,8 @@ export async function POST(request: NextRequest) {
   if (action === "scan") {
     const denied = await guardApi(request, "stock.view"); if (denied) return denied;
     if (!body.count_id || !body.code) return NextResponse.json({ error: "ต้องมี count_id + code" }, { status: 400 });
+    const locked = await lockedReason(admin, body.count_id);
+    if (locked) return NextResponse.json({ error: locked }, { status: 400 });
     const { data, error } = await admin.rpc("erp_stock_count_scan", { p_count_id: body.count_id, p_code: String(body.code).trim() });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
@@ -102,6 +128,8 @@ export async function POST(request: NextRequest) {
     const denied = await guardApi(request, "stock.view"); if (denied) return denied;
     const count_id = body.count_id as string | undefined, product_id = body.product_id as string | undefined;
     if (!count_id || !product_id) return NextResponse.json({ error: "ต้องมี count_id + product_id" }, { status: 400 });
+    const locked = await lockedReason(admin, count_id);
+    if (locked) return NextResponse.json({ error: locked }, { status: 400 });
     const { data: exist } = await admin.from("erp_stock_count_lines").select("id, product_sku, product_name, system_qty, counted_qty").eq("count_id", count_id).eq("product_id", product_id).maybeSingle();
     if (exist) return NextResponse.json({ line: exist, error: null });
     const { data: sku } = await admin.from("skus_v2").select("code, name_th").eq("id", product_id).maybeSingle();
@@ -127,7 +155,9 @@ export async function POST(request: NextRequest) {
     const { data: c } = await admin.from("erp_stock_counts").select("warehouse_id, status").eq("id", count_id).maybeSingle();
     const cnt = c as { warehouse_id?: string; status?: string } | null;
     if (!cnt) return NextResponse.json({ error: "ไม่พบรอบนับ" }, { status: 404 });
-    if (cnt.status && cnt.status !== "open") return NextResponse.json({ error: "รอบนับนี้ปิดแล้ว" }, { status: 400 });
+    // สถานะจริงของรอบที่กำลังนับ = "counting" (ตั้งโดย erp_stock_count_open) — เดิมเช็ก "open" ทำให้ปุ่มนี้ใช้ไม่ได้เลย
+    const locked = await lockedReason(admin, count_id);
+    if (locked) return NextResponse.json({ error: locked }, { status: 400 });
 
     // รหัสวัตถุดิบที่ใบสั่งผลิต (ยังไม่จบ) ต้องใช้
     const { data: mos } = await admin.from("manufacturing_orders").select("mo_no")
@@ -180,9 +210,41 @@ export async function POST(request: NextRequest) {
   if (action === "delete_line") {
     const denied = await guardApi(request, "stock.view"); if (denied) return denied;
     if (!body.line_id) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 400 });
+    const locked = await lockedReason(admin, await countIdOfLine(admin, body.line_id));
+    if (locked) return NextResponse.json({ error: locked }, { status: 400 });
     const { error } = await admin.from("erp_stock_count_lines").delete().eq("id", body.line_id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ error: null });
+  }
+
+  // ยกเลิกรอบนับ (เปิดผิดคลัง / เปิดซ้ำ) · เปิดกลับมานับต่อ — เป็น "ยกเลิก" ไม่ลบทิ้ง (เลขรอบรันจากจำนวนแถว + เก็บประวัติ)
+  // ใครทำได้: คนที่เปิดรอบนั้นเอง หรือคนมีสิทธิ์ปรับสต๊อก (stock.adjust) · รอบที่ปรับสต๊อกไปแล้วยกเลิกไม่ได้
+  if (action === "cancel" || action === "reopen") {
+    const denied = await guardApi(request, "stock.view"); if (denied) return denied;
+    if (!body.count_id) return NextResponse.json({ error: "ไม่พบรอบนับ" }, { status: 400 });
+    const { data: c } = await admin.from("erp_stock_counts").select("*").eq("id", String(body.count_id)).maybeSingle();
+    if (!c) return NextResponse.json({ error: "ไม่พบรอบนับ" }, { status: 404 });
+    const mine = !!actor && String(c.actor ?? "") === actor;
+    if (!mine && !(await apiCan(request, "stock.adjust"))) {
+      return NextResponse.json({ error: "ยกเลิก/เปิดกลับได้เฉพาะคนที่เปิดรอบนี้ หรือคนที่มีสิทธิ์ปรับสต๊อก" }, { status: 403 });
+    }
+    if (c.status === "applied") return NextResponse.json({ error: "รอบนี้ปรับสต๊อกไปแล้ว ยกเลิกไม่ได้ — ถ้ายอดผิดให้เปิดรอบนับใหม่แล้วปรับอีกครั้ง" }, { status: 400 });
+    const next = action === "cancel" ? "cancelled" : "counting";
+    if (c.status === next) return NextResponse.json({ status: next, error: null });
+    if (action === "reopen" && c.status !== "cancelled") return NextResponse.json({ error: "เปิดกลับได้เฉพาะรอบที่ยกเลิกไว้" }, { status: 400 });
+
+    const reason = String(body.reason ?? "").trim();
+    const stamp = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);   // วันที่ไทย
+    const mark = action === "cancel" ? `❌ ยกเลิก ${stamp}${reason ? `: ${reason}` : ""} (โดย ${actor ?? "—"})` : `↩ เปิดกลับ ${stamp} (โดย ${actor ?? "—"})`;
+    const note = [String(c.note ?? "").trim(), mark].filter(Boolean).join("\n");
+    const { error } = await admin.from("erp_stock_counts").update({ status: next, note, updated_at: new Date().toISOString() }).eq("id", c.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await writeAudit(admin, {
+      action: action === "cancel" ? "cancel" : "reopen", entityType: "erp_stock_counts", entityId: String(c.id),
+      actorId: user?.id ?? null, actorName: actor,
+      metadata: { count_no: c.count_no, from: c.status, to: next, reason: reason || null },
+    });
+    return NextResponse.json({ status: next, error: null });
   }
 
   return NextResponse.json({ error: "ไม่รู้จัก action" }, { status: 400 });

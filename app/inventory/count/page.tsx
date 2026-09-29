@@ -1,6 +1,7 @@
 "use client";
 
 /**
+ * เพิ่ม = เปิดรอบนับ · แก้ = กรอก/สแกน/เพิ่ม-ลบรายการ · ลบ = "ยกเลิกรอบนับ" (ไม่ลบทิ้ง เก็บประวัติ · เปิดกลับมานับต่อได้)
  * นับสต๊อก (/inventory/count) — เปิดรอบนับ → ถ่ายยอดปัจจุบัน → กรอกจำนวนจริง → เทียบส่วนต่าง → ปรับอัตโนมัติ
  */
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -42,6 +43,9 @@ export default function CountPage() {
   const [scanCode, setScanCode] = useState("");
   const [addKey, setAddKey] = useState(0);
   const [addingNeeded, setAddingNeeded] = useState(false);
+  // ยกเลิกรอบนับ / เปิดกลับ
+  const [cancelTarget, setCancelTarget] = useState<CountSession | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const loadSessions = useCallback(async () => {
@@ -99,6 +103,21 @@ export default function CountPage() {
       await openSession(active.session.id);
     } catch (e) { setError(e instanceof Error ? e.message : "ปรับไม่สำเร็จ"); }
     finally { setApplying(false); }
+  };
+
+  // ยกเลิกรอบนับ (เปิดผิด/เปิดซ้ำ) หรือเปิดรอบที่ยกเลิกกลับมานับต่อ
+  const setSessionStatus = async (s: CountSession, action: "cancel" | "reopen") => {
+    setStatusBusy(true); setError(null);
+    try {
+      const res = await apiFetch("/api/inventory/count", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, count_id: s.id }) });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      flash(action === "cancel" ? `ยกเลิกรอบนับ ${s.count_no ?? ""} แล้ว` : `เปิดรอบนับ ${s.count_no ?? ""} กลับมานับต่อแล้ว`);
+      setCancelTarget(null);
+      await loadSessions();
+      if (active?.session.id === s.id) await openSession(s.id);
+    } catch (e) { setError(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); setCancelTarget(null); }
+    finally { setStatusBusy(false); }
   };
 
   const upsertLine = (line: CountLine) => {
@@ -161,7 +180,9 @@ export default function CountPage() {
 
   // ส่วนต่างของรอบที่กำลังดู
   const diffCount = active ? active.lines.filter((l) => { const c = counted[l.id]; return c !== "" && c != null && Number(c) !== l.system_qty; }).length : 0;
-  const isApplied = active?.session.status === "applied";
+  // ล็อกการแก้ไขเมื่อรอบ "ปรับแล้ว" หรือ "ยกเลิก" (ชื่อตัวแปรเดิม isApplied = แก้ไม่ได้แล้ว)
+  const isApplied = !!active && active.session.status !== "counting";
+  const isCancelled = active?.session.status === "cancelled";
 
   return (
     <PlaygroundShell>
@@ -218,9 +239,19 @@ export default function CountPage() {
                         <td className="px-3 py-2"><span className={`text-[11px] px-2 py-0.5 rounded border ${st.cls}`}>{st.label}</span></td>
                         <td className="px-3 py-2 text-xs text-slate-500">{s.created_at?.slice(0, 10)}</td>
                         <td className="px-3 py-2 text-right">
-                          <button onClick={() => openSession(s.id)} className="text-xs px-2.5 py-1 rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50">
-                            {s.status === "applied" ? "ดู" : "นับต่อ"}
-                          </button>
+                          <span className="inline-flex items-center gap-1.5">
+                            {s.status === "counting" && (
+                              <button onClick={() => setCancelTarget(s)} disabled={statusBusy} title="เปิดผิดคลัง / เปิดซ้ำ — ยกเลิกรอบนี้ (ไม่กระทบสต๊อก)"
+                                className="text-xs px-2.5 py-1 rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">ยกเลิกรอบ</button>
+                            )}
+                            {s.status === "cancelled" && (
+                              <button onClick={() => void setSessionStatus(s, "reopen")} disabled={statusBusy}
+                                className="text-xs px-2.5 py-1 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-50">↩ เปิดกลับ</button>
+                            )}
+                            <button onClick={() => openSession(s.id)} className="text-xs px-2.5 py-1 rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50">
+                              {s.status === "counting" ? "นับต่อ" : "ดู"}
+                            </button>
+                          </span>
                         </td>
                       </tr>
                     );
@@ -234,6 +265,15 @@ export default function CountPage() {
             {/* หัวรอบนับ */}
             <div className="flex items-center justify-between mb-3">
               <button onClick={() => { setActive(null); loadSessions(); }} className="text-sm text-slate-500 hover:text-slate-700">← กลับรายการรอบนับ</button>
+              <span className="flex-1" />
+              {!isApplied && (
+                <button onClick={() => setCancelTarget(active.session)} disabled={statusBusy}
+                  className="h-9 px-3 mr-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">ยกเลิกรอบนับ</button>
+              )}
+              {isCancelled && (
+                <button onClick={() => void setSessionStatus(active.session, "reopen")} disabled={statusBusy}
+                  className="h-9 px-3 text-sm font-medium border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 disabled:opacity-50">↩ เปิดกลับมานับต่อ</button>
+              )}
               {!isApplied && canAdjust && (
                 <button onClick={() => setConfirmApply(true)} disabled={diffCount === 0}
                   className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">
@@ -328,6 +368,12 @@ export default function CountPage() {
         title="ยืนยันปรับสต๊อกตามที่นับ?"
         message={`ระบบจะปรับยอดคงเหลือให้ตรงกับที่นับ เฉพาะ ${diffCount} รายการที่ต่างจากระบบ · การกระทำนี้จะสร้างประวัติการปรับ (ย้อนกลับได้ด้วยการปรับใหม่)`}
         confirmText="ยืนยันปรับ" variant="default" />
+
+      <ConfirmDialog open={cancelTarget !== null} onClose={() => { if (!statusBusy) setCancelTarget(null); }} loading={statusBusy}
+        onConfirm={() => { if (cancelTarget) void setSessionStatus(cancelTarget, "cancel"); }}
+        title="ยกเลิกรอบนับนี้?"
+        message={`รอบนับ ${cancelTarget?.count_no ?? ""} · คลัง ${cancelTarget?.warehouse_name ?? cancelTarget?.warehouse_code ?? "—"} จะถูกยกเลิก — ไม่กระทบยอดสต๊อก จำนวนที่นับไว้ยังเก็บอยู่ และเปิดกลับมานับต่อได้ภายหลัง`}
+        confirmText="ยกเลิกรอบนับ" cancelText="ไม่ยกเลิก" variant="danger" />
     </PlaygroundShell>
   );
 }
