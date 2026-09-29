@@ -61,7 +61,7 @@ export default function WorkSubmissionsPage() {
       const r = await apiFetch("/api/mo/submissions", { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: fillRow.id, submitted_at: fillDate || undefined, wage, info_pending: false }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      toast.success(`เติมข้อมูลแล้ว · ค่าแรงรวม ฿${fmt(wage)}`);
+      toast.success(`${fillRow.info_pending ? "เติมข้อมูลแล้ว" : "แก้ข้อมูลแล้ว"} · ค่าแรงรวม ฿${fmt(wage)}`);
       setFillRow(null); await load();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setFillSaving(false); }
@@ -133,6 +133,16 @@ export default function WorkSubmissionsPage() {
                     <button onClick={() => { setFillRow(r); setFillDate(r.submitted_at || todayStr()); setFillRate(""); }}
                       className="text-[12px] px-2 py-1 mr-1 rounded-md bg-amber-500 text-white hover:bg-amber-600">✏️ เติมข้อมูล</button>
                   )}
+                  {/* รายการที่ลงครบแล้ว ก็แก้วันที่/ค่าแรงได้ (ลงผิด ไม่ต้องย้อนกลับแล้วส่งใหม่) */}
+                  {canEdit && !r.info_pending && (
+                    <button title="แก้วันที่ส่ง / ค่าแรง ที่ลงผิด"
+                      onClick={() => {
+                        const q = Number(r.qty) || 0;
+                        setFillRow(r); setFillDate(String(r.submitted_at || todayStr()).slice(0, 10));
+                        setFillRate(r.wage != null && q > 0 ? String(Math.round((Number(r.wage) / q) * 100) / 100) : "");
+                      }}
+                      className="text-[12px] px-2 py-1 mr-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">✏️ แก้</button>
+                  )}
                   {canEdit && <button onClick={() => setUndoRow(r)} className="text-[12px] px-2 py-1 rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50">↩️ ย้อนกลับ</button>}
                 </td>
               </tr>
@@ -142,7 +152,7 @@ export default function WorkSubmissionsPage() {
       </div>
 
       {/* ✏️ เติมข้อมูลที่ค้าง (วันที่ + ค่าแรงต่อใบ) */}
-      <ERPModal open={fillRow !== null} onClose={() => !fillSaving && setFillRow(null)} size="sm" title="✏️ เติมวันที่ + ค่าแรง"
+      <ERPModal open={fillRow !== null} onClose={() => !fillSaving && setFillRow(null)} size="sm" title={fillRow && !fillRow.info_pending ? "✏️ แก้วันที่ + ค่าแรง" : "✏️ เติมวันที่ + ค่าแรง"}
         footer={<>
           <button onClick={() => setFillRow(null)} disabled={fillSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
           <button onClick={() => void saveFill()} disabled={fillSaving || !(Number(fillRate) > 0)} className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50">{fillSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
@@ -167,6 +177,7 @@ export default function WorkSubmissionsPage() {
               <span className="text-emerald-800">ค่าแรงรวมที่จะบันทึก</span>
               <b className="text-emerald-700 tabular-nums">{fmt(Number(fillRow.qty))} × ฿{fmt(Number(fillRate) || 0)} = ฿{fmt(Math.round((Number(fillRate) || 0) * Number(fillRow.qty) * 100) / 100)}</b>
             </div>
+            {!fillRow.info_pending && <p className="text-[11px] text-slate-500">จำนวนที่ส่งแก้ตรงนี้ไม่ได้ (ยอดผูกกับใบจ่ายงานและโกดัง QC) — ส่งผิดจำนวนให้กด “↩️ ย้อนกลับ” แล้วส่งใหม่</p>}
             <p className="text-[11px] text-slate-400">บันทึกแล้วรายการจะหลุดจากแท็บ “ยังไม่ครบ” และค่าแรงจะไปอัปเดตที่ใบจ่ายงานให้ด้วย</p>
           </div>
         )}

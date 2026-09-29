@@ -325,6 +325,19 @@ export default function QcWarehousePage() {
   const submitFromRepair = async () => { if (!fromRepair) return; if (await act("/api/qc-warehouse/items", { action: "repair_receive", item_id: fromRepair.id, good: num(frGood), scrap: num(frScrap), shelf_id: frShelf })) { toast.success("รับจากซ่อมแล้ว"); setFromRepair(null); } };
   const returnQueue = async (item: QcItem) => { if (await act("/api/qc-warehouse/items", { action: "return_queue", item_id: item.id })) { toast.success("ย้ายกลับงานรอ QC แล้ว"); setDetail(null); } };
 
+  /** ✏️ แก้ของที่ใส่เข้าชั้นเอง (ลงจำนวน/รหัสผิด) — ของจากใบจ่ายงานแก้ไม่ได้ ต้องย้ายกลับงานรอ QC */
+  const [editItem, setEditItem] = useState<{ id: string; qty: string; sku: string; source: string } | null>(null);
+  const [editItemBusy, setEditItemBusy] = useState(false);
+  const saveEditItem = async () => {
+    if (!editItem) return;
+    setEditItemBusy(true);
+    try {
+      if (await act("/api/qc-warehouse/items", { action: "update_item", item_id: editItem.id, qty: num(editItem.qty), sku: editItem.sku.trim(), source: editItem.source })) {
+        toast.success("แก้รายการแล้ว"); setEditItem(null); setDetail(null);
+      }
+    } finally { setEditItemBusy(false); }
+  };
+
   /** 🗑 ลบรายการใน QC ทิ้งถาวร (แอดมินเท่านั้น) — ใช้กับของทดสอบ/ลงผิด */
   const deleteQcItem = async (item: QcItem) => {
     if (!isAdmin) return;
@@ -1213,6 +1226,41 @@ export default function QcWarehousePage() {
                     {storeShelves.map((s) => (<button key={s.id} onClick={() => { const card = detail.card; setDetail(null); openReceive(card, s); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">🗄️ {s.name}</button>))}
                     {storeShelves.length === 0 && <span className="text-[11px] text-rose-500">ยังไม่มีชั้นเก็บ</span>}
                   </div></div>
+              )}
+              {/* ✏️ แก้ของที่ใส่เข้าชั้นเอง (ไม่ได้มาจากใบจ่ายงาน) */}
+              {detail.kind === "item" && detail.shelf.kind === "store" && !detail.item.wo_id && detail.item.status === "good" && (
+                <div className="pt-1 border-t border-slate-100">
+                  {editItem?.id === detail.item.id ? (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 px-2.5 py-2 space-y-2">
+                      <div className="text-[12px] font-medium text-blue-800">✏️ แก้รายการ (ของที่ใส่เข้าชั้นเอง)</div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <label className="text-[11px] text-slate-500">จำนวน (ชิ้น)
+                          <input type="number" min={1} value={editItem.qty} onChange={(e) => setEditItem({ ...editItem, qty: e.target.value })}
+                            className="mt-0.5 w-full h-8 px-2 text-sm text-right border border-slate-300 rounded-lg bg-white" /></label>
+                        <label className="text-[11px] text-slate-500">รหัสสินค้า (SKU)
+                          <input value={editItem.sku} onChange={(e) => setEditItem({ ...editItem, sku: e.target.value })}
+                            className="mt-0.5 w-full h-8 px-2 text-sm font-mono border border-slate-300 rounded-lg bg-white" /></label>
+                        <label className="text-[11px] text-slate-500 col-span-2">แหล่งที่มา
+                          <select value={editItem.source} onChange={(e) => setEditItem({ ...editItem, source: e.target.value })}
+                            className="mt-0.5 w-full h-8 px-2 text-sm border border-slate-300 rounded-lg bg-white">
+                            {!sources.some((o) => o.name === editItem.source) && <option value={editItem.source}>{editItem.source || "—"}</option>}
+                            {sources.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                          </select></label>
+                      </div>
+                      <div className="flex justify-end gap-1.5">
+                        <button disabled={editItemBusy} onClick={() => setEditItem(null)} className="h-8 px-3 text-xs border border-slate-200 bg-white rounded-lg text-slate-600">ยกเลิก</button>
+                        <button disabled={editItemBusy || !(num(editItem.qty) > 0) || !editItem.sku.trim()} onClick={() => void saveEditItem()}
+                          className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{editItemBusy ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => setEditItem({ id: detail.item.id, qty: String(detail.item.qty), sku: detail.item.sku ?? "", source: detail.item.source ?? "" })}
+                      className="w-full text-[12px] px-2.5 py-1.5 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50">✏️ แก้จำนวน / รหัสสินค้า (ลงผิด)</button>
+                  )}
+                </div>
+              )}
+              {detail.kind === "item" && detail.shelf.kind === "store" && !!detail.item.wo_id && (
+                <p className="text-[10px] text-slate-400">ของชิ้นนี้รับมาจากใบจ่ายงาน — ถ้ารับผิดจำนวน กด “ย้ายกลับไปงานรอ QC” แล้วรับเข้าใหม่</p>
               )}
               {/* 🗑 ลบทิ้งถาวร — เฉพาะแอดมิน (ของทดสอบ/ลงผิด) */}
               {detail.kind === "item" && isAdmin && (

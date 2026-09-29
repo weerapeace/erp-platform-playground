@@ -9,6 +9,8 @@
  *   repair_cancel { item_id }                                     → ยกเลิกซ่อม
  *   repair_receive{ item_id, good, scrap, shelf_id }              → รับจากซ่อม (ดี→ชั้น, เสีย→ทิ้ง)
  *   return_queue  { item_id }                                     → ย้ายกลับงานรอ QC (คืน qc_pulled_qty)
+ *   update_item   { item_id, qty?, sku?, source? }                → แก้ของที่ "ใส่เข้าชั้นเอง" (ลงจำนวน/รหัสผิด)
+ *                                                                    ของที่มาจากใบจ่ายงานแก้ตรงนี้ไม่ได้ (ยอดผูกกับใบจ่ายงาน → ใช้ return_queue แล้วรับเข้าใหม่)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -25,7 +27,7 @@ const num = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
 const PERM: Record<string, string> = {
   receive: "qc.receive", move: "qc.move", ship: "qc.ship", to_defect: "qc.defect",
   repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move",
-  add_manual: "qc.receive", add_bulk: "qc.receive",
+  add_manual: "qc.receive", add_bulk: "qc.receive", update_item: "qc.receive",
   // ลบทิ้งถาวร (ของทดสอบ/ลงผิด) — ล็อกไว้ที่ "แอดมิน" เท่านั้น เพราะลบแล้วหายจริง
   delete_item: "admin.users",
 };
@@ -231,6 +233,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await writeAudit(admin, { action: "qc.delete", entityType: "qc_warehouse_items", entityId: item_id, ...actor,
         metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, qty: item.qty, status: item.status, reason: body.reason ?? null } });
       return NextResponse.json({ error: null });
+    }
+
+    // ── ✏️ แก้ของที่ใส่เข้าชั้นเอง (ลงจำนวน/รหัสสินค้า/แหล่งที่มา ผิด) ──
+    if (action === "update_item") {
+      const item_id = String(body.item_id ?? "");
+      const item = await getItem(admin, item_id);
+      if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
+      if (item.wo_id) return NextResponse.json({ error: "ของที่รับมาจากใบจ่ายงานแก้จำนวนตรงนี้ไม่ได้ (ยอดผูกกับใบจ่ายงาน) — กด “ย้ายกลับไปงานรอ QC” แล้วรับเข้าใหม่" }, { status: 400 });
+      if (item.status !== "good") return NextResponse.json({ error: "แก้ได้เฉพาะของดีบนชั้นเก็บ" }, { status: 400 });
+
+      const patch: Record<string, unknown> = {};
+      if (body.qty !== undefined) {
+        const qty = num(body.qty);
+        if (qty < 1) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0 (ถ้าไม่มีของแล้วให้ส่งออก หรือให้แอดมินลบรายการ)" }, { status: 400 });
+        if (qty !== Number(item.qty)) patch.qty = qty;
+      }
+      if (body.sku !== undefined) {
+        const code = String(body.sku ?? "").trim();
+        if (!code) return NextResponse.json({ error: "ต้องระบุรหัสสินค้า" }, { status: 400 });
+        if (code !== String(item.sku ?? "")) {
+          const { data: sk } = await admin.from("skus_v2").select("code, name_th").eq("code", code).maybeSingle();
+          if (!sk) return NextResponse.json({ error: `ไม่พบรหัสสินค้า “${code}” ในระบบ` }, { status: 400 });
+          patch.sku = sk.code; patch.sku_name = (sk.name_th as string) || sk.code;
+        }
+      }
+      if (body.source !== undefined) {
+        const source = String(body.source ?? "").trim() || "stock";
+        if (source !== String(item.source ?? "")) patch.source = source;
+      }
+      if (Object.keys(patch).length === 0) return NextResponse.json({ error: null, changed: 0 });
+
+      const { error } = await admin.from("qc_warehouse_items").update(patch).eq("id", item_id);
+      if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+      await writeAudit(admin, { action: "qc.update_item", entityType: "qc_warehouse_items", entityId: item_id, ...actor,
+        metadata: { before: { sku: item.sku, qty: item.qty, source: item.source }, after: patch } });
+      return NextResponse.json({ error: null, changed: Object.keys(patch).length });
     }
 
     // ── ใส่ของเข้าชั้นเอง (ยอดยกมา / ไม่ได้มาจากผลิต) ──
