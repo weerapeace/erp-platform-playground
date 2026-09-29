@@ -444,10 +444,33 @@ export async function notify(
   } catch { /* เงียบ */ }
 }
 
+// ============================================================
+// ด่านกลาง "คนที่ปิดบัญชีแล้ว (ลาออก) รับงานไม่ได้" — user_profiles.active = false
+// ปัญหาที่แก้ (2026-09-29): พนักงานลาออกแล้วแต่ชื่อยังค้างในแม่แบบงาน → งานใหม่ทุกใบถูกมอบให้คนที่ไม่อยู่แล้ว
+// - เขียน: setSubtaskAssignees / setTaskAssignees / setTaskReviewers กรองคนปิดบัญชีทิ้งก่อนบันทึก
+// - อ่าน:  ผู้รับผิดชอบงานหลัก/ผู้ตรวจ ไม่โชว์คนปิดบัญชี · งานย่อยโชว์เฉพาะงานที่ "ทำจบแล้ว" (เก็บไว้เป็นประวัติว่าใครทำ)
+// ============================================================
+/** id ของผู้ใช้ที่ปิดบัญชีแล้ว (ในชุดที่ส่งมา) */
+export async function inactiveUserIdSet(admin: Admin, ids: (string | null | undefined)[]): Promise<Set<string>> {
+  const uniq = [...new Set(ids.filter(Boolean).map(String))];
+  if (!uniq.length) return new Set();
+  const { data } = await admin.from("user_profiles").select("id").in("id", uniq).eq("active", false);
+  return new Set(((data ?? []) as { id: string }[]).map((r) => String(r.id)));
+}
+/** ตัดคนที่ปิดบัญชีแล้วออก (คงลำดับเดิม + ตัดซ้ำ) */
+export async function onlyActiveUserIds(admin: Admin, ids: (string | null | undefined)[]): Promise<string[]> {
+  const uniq = [...new Set(ids.filter(Boolean).map(String))];
+  if (!uniq.length) return [];
+  const off = await inactiveUserIdSet(admin, uniq);
+  return off.size ? uniq.filter((id) => !off.has(id)) : uniq;
+}
+/** สถานะงานย่อยที่ยัง "ไม่จบ" — คนปิดบัญชีต้องไม่ค้างเป็นผู้รับผิดชอบ */
+const SUBTASK_OPEN_STATUSES = new Set(["todo", "in_progress"]);
+
 /** ตั้งผู้รับผิดชอบ subtask (m2m) แบบแทนที่ทั้งชุด — เก็บ user_id */
 export async function setSubtaskAssignees(admin: Admin, subtaskId: string, userIds: (string | null | undefined)[]): Promise<void> {
   await admin.from("erp_creative_subtask_assignees").delete().eq("subtask_id", subtaskId);
-  const clean = [...new Set(userIds.filter(Boolean).map(String))];
+  const clean = await onlyActiveUserIds(admin, userIds);
   if (clean.length) await admin.from("erp_creative_subtask_assignees").insert(clean.map((user_id) => ({ subtask_id: subtaskId, user_id })));
 }
 
@@ -456,7 +479,15 @@ export async function subtaskAssigneesMap(admin: Admin, subtaskIds: string[]): P
   const map = new Map<string, { id: string; label: string; color: string | null; avatar_url: string | null }[]>();
   if (subtaskIds.length === 0) return map;
   const { data } = await admin.from("erp_creative_subtask_assignees").select("subtask_id, user_id").in("subtask_id", subtaskIds);
-  const rows = (data ?? []) as { subtask_id: string; user_id: string }[];
+  let rows = (data ?? []) as { subtask_id: string; user_id: string }[];
+  // คนปิดบัญชีแล้ว: ซ่อนจากงานย่อยที่ยังไม่จบ (งานที่ทำจบแล้วยังโชว์ = ประวัติว่าใครทำ) · ปกติไม่มี → ไม่ยิง query เพิ่ม
+  const off = await inactiveUserIdSet(admin, rows.map((r) => r.user_id));
+  if (off.size) {
+    const hitSubs = [...new Set(rows.filter((r) => off.has(String(r.user_id))).map((r) => String(r.subtask_id)))];
+    const { data: st } = await admin.from("erp_creative_subtasks").select("id, status").in("id", hitSubs);
+    const openSubs = new Set(((st ?? []) as { id: string; status: string }[]).filter((x) => SUBTASK_OPEN_STATUSES.has(x.status)).map((x) => String(x.id)));
+    rows = rows.filter((r) => !(off.has(String(r.user_id)) && openSubs.has(String(r.subtask_id))));
+  }
   const userIds = rows.map((r) => r.user_id);
   const labels = await userLabelMap(admin, userIds);
   // ธีมพนักงาน (user_profiles.color) + รูป (avatar_url) — ใช้ระบาย/แสดง avatar
@@ -497,7 +528,7 @@ async function usersInfo(admin: Admin, ids: (string | null | undefined)[]): Prom
 /** ตั้งผู้รับผิดชอบงานหลัก (explicit) แบบแทนที่ทั้งชุด */
 export async function setTaskAssignees(admin: Admin, taskId: string, userIds: (string | null | undefined)[]): Promise<void> {
   await admin.from("erp_creative_task_assignees").delete().eq("task_id", taskId);
-  const clean = [...new Set(userIds.filter(Boolean).map(String))];
+  const clean = await onlyActiveUserIds(admin, userIds);
   if (clean.length) await admin.from("erp_creative_task_assignees").insert(clean.map((user_id) => ({ task_id: taskId, user_id })));
 }
 
@@ -545,15 +576,16 @@ export async function taskAssigneesMap(admin: Admin, taskIds: string[]): Promise
     for (const r of (sa ?? []) as { subtask_id: string; user_id: string }[]) { const tid = subToTask.get(String(r.subtask_id)); if (tid) add(tid, String(r.user_id)); }
   }
   const allIds = [...new Set([...byTask.values()].flatMap((s) => [...s]))];
-  const info = await usersInfo(admin, allIds);
-  for (const [tid, set] of byTask) map.set(tid, [...set].map((uid) => info.get(uid) ?? { id: uid, label: "", color: null, avatar_url: null }));
+  const [info, off] = await Promise.all([usersInfo(admin, allIds), inactiveUserIdSet(admin, allIds)]);
+  // "ผู้รับผิดชอบงานหลัก" ไม่โชว์คนที่ปิดบัญชีแล้ว (ประวัติว่าใครทำยังดูได้ที่งานย่อยที่จบแล้ว)
+  for (const [tid, set] of byTask) map.set(tid, [...set].filter((uid) => !off.has(uid)).map((uid) => info.get(uid) ?? { id: uid, label: "", color: null, avatar_url: null }));
   return map;
 }
 
 /** ตั้งผู้ตรวจ/อนุมัติงานหลัก (หลายคน) แบบแทนที่ทั้งชุด — junction erp_creative_task_reviewers */
 export async function setTaskReviewers(admin: Admin, taskId: string, userIds: (string | null | undefined)[]): Promise<void> {
   await admin.from("erp_creative_task_reviewers").delete().eq("task_id", taskId);
-  const clean = [...new Set(userIds.filter(Boolean).map(String))];
+  const clean = await onlyActiveUserIds(admin, userIds);
   if (clean.length) await admin.from("erp_creative_task_reviewers").insert(clean.map((user_id) => ({ task_id: taskId, user_id })));
 }
 
@@ -565,8 +597,9 @@ export async function taskReviewersMap(admin: Admin, taskIds: string[]): Promise
   const { data } = await admin.from("erp_creative_task_reviewers").select("task_id, user_id").in("task_id", ids);
   const byTask = new Map<string, string[]>();
   for (const r of (data ?? []) as { task_id: string; user_id: string }[]) { const tid = String(r.task_id); const arr = byTask.get(tid) ?? []; arr.push(String(r.user_id)); byTask.set(tid, arr); }
-  const info = await usersInfo(admin, [...new Set([...byTask.values()].flat())]);
-  for (const [tid, arr] of byTask) map.set(tid, arr.map((uid) => info.get(uid) ?? { id: uid, label: "", color: null, avatar_url: null }));
+  const revIds = [...new Set([...byTask.values()].flat())];
+  const [info, off] = await Promise.all([usersInfo(admin, revIds), inactiveUserIdSet(admin, revIds)]);
+  for (const [tid, arr] of byTask) map.set(tid, arr.filter((uid) => !off.has(uid)).map((uid) => info.get(uid) ?? { id: uid, label: "", color: null, avatar_url: null }));
   return map;
 }
 

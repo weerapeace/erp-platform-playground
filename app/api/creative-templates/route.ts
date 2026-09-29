@@ -10,7 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
-import { employeeLabelMap } from "@/lib/creative-tasks-server";
+import { employeeLabelMap, inactiveUserIdSet } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,17 +35,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ...(Array.isArray(r.content_items) ? (r.content_items as { assignee_id?: string | null; assignee_ids?: string[] }[]) : []).flatMap((c) => c.assignee_ids ?? (c.assignee_id ? [c.assignee_id] : [])).filter(Boolean) as string[],
     ...revIdsOf(r),
   ]);
-  const empMap = await employeeLabelMap(admin, allIds);
+  // คนที่ปิดบัญชีแล้ว (ลาออก) ต้องไม่ถูกส่งออกไปกับแม่แบบ — ไม่งั้นงานใหม่ทุกใบถูกมอบให้คนที่ไม่อยู่แล้ว
+  const [empMap, off] = await Promise.all([employeeLabelMap(admin, allIds), inactiveUserIdSet(admin, allIds)]);
+  const live = (ids: (string | null | undefined)[]): string[] => ids.filter(Boolean).map(String).filter((id) => !off.has(id));
   const items = rows.map((r) => {
     const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
-    const steps = (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).map((s) => ({ ...s, assignee_labels: (s.assignee_ids ?? []).map((id) => empMap.get(String(id)) ?? "") }));
+    const steps = (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).map((s) => { const ids = live(s.assignee_ids ?? []); return { ...s, assignee_ids: ids, assignee_labels: ids.map((id) => empMap.get(String(id)) ?? "") }; });
     const content_items = (Array.isArray(r.content_items) ? (r.content_items as Record<string, unknown>[]) : []).map((c) => {
-      const ids = (c.assignee_ids as string[]) ?? (c.assignee_id ? [c.assignee_id as string] : []);
-      return { ...c, assignee_ids: ids, assignee_labels: ids.map((id) => empMap.get(String(id)) ?? ""), assignee_label: ids[0] ? (empMap.get(String(ids[0])) ?? null) : null };
+      const ids = live((c.assignee_ids as string[]) ?? (c.assignee_id ? [c.assignee_id as string] : []));
+      return { ...c, assignee_id: ids[0] ?? null, assignee_ids: ids, assignee_labels: ids.map((id) => empMap.get(String(id)) ?? ""), assignee_label: ids[0] ? (empMap.get(String(ids[0])) ?? null) : null };
     });
-    const revIds = revIdsOf(r);
+    const revIds = live(revIdsOf(r));
     const out: Record<string, unknown> = { ...r, steps, content_items, brand_label: b?.name ?? null, brand_color: b?.color ?? null,
       default_reviewer_label: revIds.length ? (empMap.get(revIds[0]) ?? null) : null,
+      default_reviewer_id: revIds[0] ?? null,
       default_reviewer_ids: revIds,
       default_reviewers: revIds.map((id) => ({ id, label: empMap.get(id) ?? "" })),
     }; delete out.brand; return out;
