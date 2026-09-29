@@ -67,3 +67,15 @@ export async function addProgress(goalId: string, amount: number, note: string):
   const j = await unwrap(await apiFetch(`/api/goals/${goalId}/progress`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ amount, note }) }));
   return j.data as Goal;
 }
+
+/** แก้ข้อความ/สถานะของรายการอัปเดต */
+export async function editCheckin(goalId: string, checkinId: string, patch: { note?: string; health?: string }): Promise<Goal> {
+  const j = await unwrap(await apiFetch(`/api/goals/${goalId}/checkins`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ checkin_id: checkinId, ...patch }) }));
+  return j.data as Goal;
+}
+
+/** ยกเลิกรายการล่าสุด (check-in / ฝากเงิน / ออกกำลังกาย) — คืนยอดสะสมของเป้า */
+export async function undoCheckin(goalId: string, checkinId: string): Promise<{ goal: Goal; coinsBack: number }> {
+  const j = await unwrap(await apiFetch(`/api/goals/${goalId}/checkins?checkin_id=${encodeURIComponent(checkinId)}`, { method: "DELETE" })) as { data?: unknown; coins_back?: number };
+  return { goal: j.data as Goal, coinsBack: Number(j.coins_back) || 0 };
+}

@@ -277,3 +277,91 @@ export async function addProgress(goalId: string, amount: number, note: string, 
   await writeAudit(admin, { action: "deposit", entityType: "goals", entityId: goalId, actorId: user.id, actorName: user.name, metadata: { amount: Number(amount) || 0 } });
   return getGoal(goalId);
 }
+
+// ---- แก้ / ยกเลิก รายการอัปเดตความคืบหน้า (check-in · ฝากเงิน · ออกกำลังกาย) ----
+// ยอดของเป้าเป็น "ยอดสะสม" → ยกเลิกได้เฉพาะรายการล่าสุด (ย้อนทีละรายการ) ไม่งั้นยอดสะสมของรายการถัดไปจะเพี้ยน
+// รายการเก่ากว่านั้นแก้ได้แค่ข้อความ
+
+async function loadCheckinCtx(goalId: string, checkinId: string) {
+  const admin = supabaseAdmin();
+  const [{ data: gRow }, { data: list }] = await Promise.all([
+    admin.from("erp_goals").select("id, title, owner_id, current_value, start_value, health").eq("id", goalId).maybeSingle(),
+    admin.from("erp_goal_checkins").select("*").eq("goal_id", goalId).order("created_at", { ascending: false }),
+  ]);
+  if (!gRow) throw new Error("ไม่พบเป้าหมาย");
+  const rows = (list ?? []) as Row[];
+  const idx = rows.findIndex((r) => s(r.id) === checkinId);
+  if (idx < 0) throw new Error("ไม่พบรายการนี้");
+  return { admin, goal: gRow as Row, rows, idx, row: rows[idx] };
+}
+
+const canTouchCheckin = (row: Row, goal: Row, actor: Actor) => s(row.author) === actor.name || (!!actor.id && s(goal.owner_id) === actor.id);
+
+/** ✏️ แก้ข้อความ (ทุกรายการ) · แก้สถานะสุขภาพ (เฉพาะรายการล่าสุด — เป้าจะเปลี่ยนตาม) */
+export async function updateCheckin(goalId: string, checkinId: string, input: { note?: string; health?: string }, actor: Actor) {
+  const { admin, goal, idx, row } = await loadCheckinCtx(goalId, checkinId);
+  if (!canTouchCheckin(row, goal, actor)) throw new Error("แก้ได้เฉพาะรายการที่ตัวเองบันทึก (หรือเจ้าของเป้า)");
+  const patch: Row = {};
+  if (input.note !== undefined) patch.note = String(input.note ?? "").trim() || null;
+  if (input.health !== undefined && input.health && input.health !== s(row.health)) {
+    if (idx !== 0) throw new Error("แก้สถานะได้เฉพาะรายการล่าสุด");
+    patch.health = input.health;
+  }
+  if (Object.keys(patch).length === 0) return getGoal(goalId);
+  const { error } = await admin.from("erp_goal_checkins").update(patch).eq("id", checkinId);
+  if (error) throw error;
+  if (patch.health) await admin.from("erp_goals").update({ health: patch.health, updated_at: new Date().toISOString() }).eq("id", goalId);
+  await writeAudit(admin, { action: "checkin_edit", entityType: "goals", entityId: goalId, actorId: actor.id, actorName: actor.name,
+    metadata: { checkin_id: checkinId, old: { note: row.note ?? null, health: row.health ?? null }, new: patch } });
+  return getGoal(goalId);
+}
+
+/** ↩ ยกเลิกรายการล่าสุด — คืนยอดสะสม/สุขภาพของเป้าเป็นค่าก่อนหน้า + ลบบันทึกออกกำลังกายคู่กัน + หักเหรียญที่ได้จากรายการนี้คืน */
+export async function undoLatestCheckin(goalId: string, checkinId: string, actor: Actor) {
+  const { admin, goal, rows, idx, row } = await loadCheckinCtx(goalId, checkinId);
+  if (idx !== 0) throw new Error("ยกเลิกได้เฉพาะรายการล่าสุด — ยอดของเป้าเป็นยอดสะสม ต้องย้อนทีละรายการจากล่าสุด");
+  if (!canTouchCheckin(row, goal, actor)) throw new Error("ยกเลิกได้เฉพาะรายการที่ตัวเองบันทึก (หรือเจ้าของเป้า)");
+
+  // ค่าก่อนหน้า = รายการถัดไปในลิสต์ (เก่ากว่า) ที่มีค่า · ไม่มี = ค่าเริ่มต้นของเป้า
+  const prev = rows.slice(1);
+  const prevVal = prev.find((r) => r.current_value != null)?.current_value ?? goal.start_value ?? null;
+  const prevHealth = prev.find((r) => r.health)?.health ?? null;
+  const goalUpd: Row = { updated_at: new Date().toISOString() };
+  if (row.current_value != null) goalUpd.current_value = prevVal;
+  if (prevHealth) goalUpd.health = prevHealth;
+
+  const at = new Date(s(row.created_at)).getTime();
+  const lo = new Date(at - 30_000).toISOString(), hi = new Date(at + 60_000).toISOString();
+
+  // บันทึกออกกำลังกายที่ลงพร้อมกัน
+  let exerciseRemoved = 0;
+  if (s(row.note).startsWith("🏃")) {
+    const { data: ex } = await admin.from("erp_exercise_logs").select("id").eq("goal_id", goalId).gte("created_at", lo).lte("created_at", hi);
+    const ids = ((ex ?? []) as Row[]).map((r) => s(r.id));
+    if (ids.length) { await admin.from("erp_exercise_logs").delete().in("id", ids); exerciseRemoved = ids.length; }
+  }
+
+  // เหรียญที่ได้จากรายการนี้ (แจกหลังบันทึกไม่กี่วินาที) → หักคืน กันปั๊มเหรียญด้วยการบันทึกแล้วยกเลิก
+  let coinsBack = 0;
+  if (actor.id) {
+    const { data: led } = await admin.from("erp_goal_coin_ledger").select("coins, reason, created_at")
+      .eq("user_id", actor.id).gt("coins", 0).gte("created_at", lo).lte("created_at", hi).ilike("reason", `%${s(goal.title)}%`);
+    coinsBack = ((led ?? []) as Row[]).reduce((t, r) => t + (Number(r.coins) || 0), 0);
+    if (coinsBack > 0) {
+      const { data: pl } = await admin.from("erp_goal_players").select("coins, xp").eq("user_id", actor.id).maybeSingle();
+      if (pl) {
+        await admin.from("erp_goal_players").update({
+          coins: Math.max(0, (Number((pl as Row).coins) || 0) - coinsBack), xp: Math.max(0, (Number((pl as Row).xp) || 0) - coinsBack), updated_at: new Date().toISOString(),
+        }).eq("user_id", actor.id);
+        await admin.from("erp_goal_coin_ledger").insert({ user_id: actor.id, coins: -coinsBack, reason: `ยกเลิกรายการ · ${s(goal.title)}` });
+      }
+    }
+  }
+
+  const { error } = await admin.from("erp_goal_checkins").delete().eq("id", checkinId);
+  if (error) throw error;
+  await admin.from("erp_goals").update(goalUpd).eq("id", goalId);
+  await writeAudit(admin, { action: "checkin_undo", entityType: "goals", entityId: goalId, actorId: actor.id, actorName: actor.name,
+    metadata: { snapshot: row, restored: goalUpd, exercise_removed: exerciseRemoved, coins_back: coinsBack } });
+  return { goal: await getGoal(goalId), coins_back: coinsBack };
+}

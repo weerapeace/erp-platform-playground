@@ -16,7 +16,8 @@ import {
   goalProgress, daysLeft, CATEGORY_LABEL, HEALTH_META, DEFAULT_REWARD,
   type Goal, type GoalHealth, type GoalStatus, type GoalPlan,
 } from "../mock-data";
-import { fetchGoal, updateStep, addStep, deleteStep, deleteGoal, addCheckin, updateGoal, addExercise, addProgress } from "../api";
+import { fetchGoal, updateStep, addStep, deleteStep, deleteGoal, addCheckin, updateGoal, addExercise, addProgress, editCheckin, undoCheckin } from "../api";
+import { refreshPlayer } from "../player-store";
 import { GoalFormModal } from "../goal-form-modal";
 import { GoalStatusBadge, GoalHealthBadge, ProgressRing } from "../goal-badges";
 import { GameBar } from "../game-bar";
@@ -70,6 +71,10 @@ export default function GoalDetailPage() {
   const [stepForm, setStepForm] = useState<{ id: string | null; title: string; target_date: string } | null>(null);   // id null = เพิ่มขั้นใหม่
   const [stepSaving, setStepSaving] = useState(false);
   const [stepDel, setStepDel] = useState<RoadmapStep | null>(null);
+  // แก้ข้อความ / ยกเลิกรายการอัปเดต (check-in · ฝากเงิน · ออกกำลังกาย)
+  const [ckEdit, setCkEdit] = useState<{ id: string; note: string } | null>(null);
+  const [ckUndoAsk, setCkUndoAsk] = useState<string | null>(null);
+  const [ckBusy, setCkBusy] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -105,6 +110,29 @@ export default function GoalDetailPage() {
   const showMetric = g.measure_type !== "boolean" && g.target_value != null;
   const plan = (g.plan ?? {}) as GoalPlan;
   const isFinancial = plan.kind === "house" || plan.kind === "lump" || plan.kind === "dividend";
+
+  async function saveCheckinNote() {
+    if (!ckEdit) return;
+    setCkBusy(true);
+    try {
+      setGoal(await editCheckin(g.id, ckEdit.id, { note: ckEdit.note }));
+      setCkEdit(null);
+      toast.success("แก้ข้อความแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+    finally { setCkBusy(false); }
+  }
+
+  async function undoLatest(checkinId: string) {
+    setCkBusy(true);
+    try {
+      const out = await undoCheckin(g.id, checkinId);
+      setGoal(out.goal);
+      setCkUndoAsk(null);
+      toast.success(out.coinsBack > 0 ? `ยกเลิกรายการแล้ว · หักเหรียญคืน ${out.coinsBack}` : "ยกเลิกรายการแล้ว — ยอดของเป้ากลับเป็นค่าก่อนหน้า");
+      void refreshPlayer();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
+    finally { setCkBusy(false); }
+  }
 
   async function saveGoalEdit(patch: Record<string, unknown>): Promise<boolean> {
     try {
@@ -393,17 +421,45 @@ export default function GoalDetailPage() {
             <p className="text-sm text-slate-400">ยังไม่มีการอัปเดต — กด “อัปเดตความคืบหน้า” เพื่อบันทึกครั้งแรก</p>
           ) : (
             <div className="space-y-3">
-              {g.checkins.map((c) => (
+              {g.checkins.map((c, ci) => (
                 <div key={c.id} className="flex gap-3">
                   <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${HEALTH_META[c.health].dot}`} />
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="text-sm">
                       <span className="font-medium text-slate-900">{c.author}</span>
                       <span className="text-slate-400"> · {fmtDate(c.checkin_date)} · </span>
                       <span className={HEALTH_META[c.health].cls.split(" ").find((x) => x.startsWith("text-"))}>{HEALTH_META[c.health].label}</span>
                       {c.current_value != null && <span className="text-slate-400"> · {fmtNum(c.current_value)}{g.measure_unit ?? ""}</span>}
                     </div>
-                    <div className="text-sm text-slate-600 mt-0.5">{c.note}</div>
+                    {ckEdit?.id === c.id ? (
+                      <div className="mt-1 space-y-1.5">
+                        <textarea value={ckEdit.note} autoFocus rows={2} onChange={(e) => setCkEdit({ ...ckEdit, note: e.target.value })}
+                          className="w-full px-2 py-1.5 text-sm border border-violet-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                        <div className="flex gap-1.5">
+                          <button onClick={() => void saveCheckinNote()} disabled={ckBusy} className="h-7 px-3 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">บันทึก</button>
+                          <button onClick={() => setCkEdit(null)} disabled={ckBusy} className="h-7 px-2.5 text-xs text-slate-600 border border-slate-200 rounded-lg">ยกเลิก</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-600 mt-0.5">{c.note}</div>
+                    )}
+                    {/* แก้ข้อความได้ทุกรายการ · ยกเลิกได้เฉพาะรายการล่าสุด (ยอดเป็นยอดสะสม ต้องย้อนทีละรายการ) */}
+                    {canEdit && ckEdit?.id !== c.id && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        {ckUndoAsk === c.id ? (
+                          <>
+                            <span className="text-slate-500">ยกเลิกรายการนี้? ยอดของเป้าจะกลับเป็นค่าก่อนหน้า{" "}(เหรียญที่ได้จากรายการนี้จะถูกหักคืน)</span>
+                            <button onClick={() => void undoLatest(c.id)} disabled={ckBusy} className="h-6 px-2 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">ยืนยัน</button>
+                            <button onClick={() => setCkUndoAsk(null)} disabled={ckBusy} className="h-6 px-2 rounded border border-slate-200 text-slate-500">ไม่</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setCkUndoAsk(null); setCkEdit({ id: c.id, note: c.note ?? "" }); }} className="text-slate-400 hover:text-violet-600 hover:underline">✏️ แก้ข้อความ</button>
+                            {ci === 0 && <button onClick={() => setCkUndoAsk(c.id)} className="text-slate-400 hover:text-rose-600 hover:underline">↩ ยกเลิกรายการนี้</button>}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
