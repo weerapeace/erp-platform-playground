@@ -4,7 +4,8 @@
  * SwatchBrowser — แท็บ 🎨 Swatch ในหน้า /master/skus (ข้าง 📦 Bundle)
  *
  * Swatch = รูปแผ่นตัวอย่างจริง (การ์ดสีผ้า / ด้าย / อะไหล่) ที่ "กดบนรูปแล้วเปิด SKU ของชิ้นนั้น"
- *   โหมดดู    — เห็นแต่รูป ไม่มีเส้นกรอบ · ชี้ที่ชิ้น = ป้ายรหัส/ชื่อ/สต๊อก · กด = เปิด Drawer SKU
+ *   โหมดดู    — เห็นแต่รูป ไม่มีเส้นกรอบ · ชี้ที่ชิ้น = ป้ายรหัส/ชื่อ/สต๊อก
+ *               · กด = เมนูเล็ก: 🛒 ขอซื้อ / 🔍 ดูรายละเอียด (Drawer SKU) / ☑ เลือกหลายรายการ (แล้วสร้างใบขอซื้อรวดเดียว)
  *   โหมดตั้งค่า — ลากสี่เหลี่ยมบนรูป → ตัวเลือก SKU เด้งให้ผูกทันที (1 กรอบ = 1 SKU) · ย้าย/ปรับขนาด/ลบได้
  * จัดหมวดด้วยแท็กกลาง (product_families) ชุดเดียวกับหน้า SKU
  *
@@ -25,6 +26,7 @@ import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { uploadResizedImage } from "@/components/image-attach";
 import { ImageRegions } from "@/components/image-regions";
+import { PrCreateModal, type PrCreateItem } from "@/components/pr-create-modal";
 import type { SwatchCard, SwatchDetail, SwatchSpot } from "@/app/api/sku-swatches/route";
 
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -249,6 +251,12 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
   const [mode, setMode] = useState<"view" | "edit">(startEdit && canEdit ? "edit" : "view");
   const [zoom, setZoom] = useState(1);
   const [skuDrawer, setSkuDrawer] = useState<string | null>(null);
+  // ── โหมดดู: ขอซื้อ / เลือกหลายรายการ ──
+  const canPr = usePermission("pr.create");
+  const [selecting, setSelecting] = useState(false);                 // โหมดติ๊กเลือกหลายชิ้น
+  const [checked, setChecked] = useState<Set<string>>(new Set());    // id ของจุดที่ติ๊ก
+  const [prItems, setPrItems] = useState<PrCreateItem[] | null>(null);   // เปิดฟอร์มสร้างใบขอซื้อ
+  const stopSelecting = () => { setSelecting(false); setChecked(new Set()); };
   // ── สถานะโหมดตั้งค่า ──
   const [spots, setSpots] = useState<EditSpot[]>([]);
   const [selId, setSelId] = useState<string | null>(null);
@@ -287,15 +295,15 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
   // ปุ่มลัด: Esc ปิด/ออกจากโหมดตั้งค่า · Delete ลบจุดที่เลือก (ตอนไม่ได้พิมพ์อยู่)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (skuDrawer || confirm) return;
+      if (skuDrawer || confirm || prItems) return;
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName ?? "");
-      if (e.key === "Escape" && !typing) { if (mode === "edit") tryLeaveEdit(); else onClose(); }
+      if (e.key === "Escape" && !typing) { if (mode === "edit") tryLeaveEdit(); else if (selecting) stopSelecting(); else onClose(); }
       if ((e.key === "Delete" || e.key === "Backspace") && mode === "edit" && selId && !typing) { e.preventDefault(); removeSpot(selId); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selId, dirty, skuDrawer, confirm]);
+  }, [mode, selId, dirty, skuDrawer, confirm, prItems, selecting]);
 
   const save = async () => {
     if (!data || saving) return;
@@ -338,8 +346,19 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
 
   // Drawer SKU และป๊อปยืนยันของกลางอยู่ชั้น z-50 (ต่ำกว่าหน้านี้) → ถอยหน้านี้ไปข้างหลังตอนมีอย่างใดอย่างหนึ่งเปิด
   // (เดิมถอยเฉพาะตอนมีป๊อปยืนยัน → กดชิ้นบนรูปแล้ว Drawer เปิดจริงแต่ถูกหน้านี้บังมิด)
-  const behind = !!confirm || !!skuDrawer;
+  const behind = !!confirm || !!skuDrawer || !!prItems;
   const viewSpots = useMemo(() => (data?.spots ?? []).filter((s) => !!s.sku), [data]);
+  /** จุดบนแผ่น → รายการสำหรับฟอร์มขอซื้อ (SKU เดียวกันหลายจุด นับครั้งเดียว) */
+  const toPrItems = (list: SwatchSpot[]): PrCreateItem[] => {
+    const seen = new Set<string>(); const out: PrCreateItem[] = [];
+    for (const s of list) {
+      if (!s.sku || seen.has(s.sku.id)) continue;
+      seen.add(s.sku.id);
+      out.push({ sku_id: s.sku.id, code: s.sku.code, name: s.sku.name, image: s.sku.image, image_key: s.sku.image_key, uom: s.sku.uom });
+    }
+    return out;
+  };
+  const checkedItems = toPrItems(viewSpots.filter((s) => checked.has(s.id)));
   const src = data?.image_key ? r2ImageUrl(data.image_key, zoom > 1.5 ? 2400 : 1600) ?? "" : "";
   const dupOf = (s: EditSpot) => !!s.sku_id && spots.some((o) => o.id !== s.id && o.sku_id === s.sku_id);
 
@@ -353,7 +372,7 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
             <div className="text-[15px] font-semibold text-slate-800 truncate">{data ? titleOf(mode === "edit" ? { name, seq: data.seq } : data) : "กำลังโหลด…"}</div>
             {data && (
               <div className="text-[11px] text-slate-400 truncate">
-                {mode === "edit" ? `โหมดตั้งค่า · ${spots.length} จุด · ผูกแล้ว ${spots.filter((s) => s.sku_id).length}` : `${viewSpots.length} ชิ้น · กดที่ชิ้นบนรูปเพื่อเปิด SKU`}
+                {mode === "edit" ? `โหมดตั้งค่า · ${spots.length} จุด · ผูกแล้ว ${spots.filter((s) => s.sku_id).length}` : selecting ? `โหมดเลือกหลายรายการ · กดที่ชิ้นบนรูปเพื่อติ๊กเลือก` : `${viewSpots.length} ชิ้น · กดที่ชิ้นบนรูปเพื่อขอซื้อ / ดูรายละเอียด`}
                 {mode === "view" && data.tags.length > 0 && <> · {data.tags.map((t) => t.name).join(", ")}</>}
               </div>
             )}
@@ -364,7 +383,13 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
             <span className="w-12 text-center text-[12px] text-slate-500 tabular-nums">{Math.round(zoom * 100)}%</span>
             <button onClick={() => setZoom((z) => ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + 1)])} disabled={zoom === ZOOMS[ZOOMS.length - 1]} className="w-8 h-8 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ซูมเข้า">+</button>
           </div>
-          {mode === "view" && canEdit && data && (
+          {mode === "view" && data && viewSpots.length > 0 && (
+            <button onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+              className={`h-9 px-3 text-sm rounded-lg border ${selecting ? "border-indigo-400 bg-indigo-600 text-white hover:bg-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+              {selecting ? "✕ เลิกเลือก" : "☑ เลือกหลายรายการ"}
+            </button>
+          )}
+          {mode === "view" && canEdit && data && !selecting && (
             <button onClick={() => { resetEdit(data); setMode("edit"); }} className="h-9 px-3 text-sm rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">✏️ ตั้งค่าจุด</button>
           )}
           {mode === "edit" && (
@@ -390,7 +415,30 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
                 {mode === "view" ? (
                   <ImageRegions<SwatchSpot> src={src} alt={titleOf(data)} className="w-full shadow-lg rounded-md overflow-visible" mode="view" regions={viewSpots}
                     regionLabel={(r) => r.sku?.code ?? null}
-                    onRegionClick={(r) => { if (r.sku) setSkuDrawer(r.sku.id); }}
+                    selecting={selecting} checkedIds={checked}
+                    onToggleCheck={(r) => setChecked((p) => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })}
+                    renderMenu={(r, close) => r.sku ? (
+                      <div className="w-56 rounded-xl bg-white border border-slate-200 shadow-2xl overflow-hidden text-left">
+                        <div className="px-3 py-2 border-b border-slate-100 bg-slate-50">
+                          <div className="font-mono text-[11px] text-slate-500 truncate">{r.sku.code}{r.label ? ` · ${r.label}` : ""}</div>
+                          <div className="text-[12.5px] text-slate-800 truncate" title={r.sku.name}>{r.sku.name || "—"}</div>
+                        </div>
+                        <button type="button" role="menuitem" disabled={!canPr}
+                          title={canPr ? "สร้างใบขอซื้อของชิ้นนี้" : "คุณไม่มีสิทธิ์สร้างใบขอซื้อ"}
+                          onClick={() => { close(); setPrItems(toPrItems([r])); }}
+                          className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50 disabled:opacity-40 disabled:hover:bg-white">
+                          <span>🛒</span><span className="flex-1">ขอซื้อ</span>{!canPr && <span className="text-[10px] text-slate-400">ไม่มีสิทธิ์</span>}
+                        </button>
+                        <button type="button" role="menuitem" onClick={() => { close(); setSkuDrawer(r.sku!.id); }}
+                          className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50">
+                          <span>🔍</span><span className="flex-1">ดูรายละเอียด</span>
+                        </button>
+                        <button type="button" role="menuitem" onClick={() => { close(); setChecked(new Set([r.id])); setSelecting(true); }}
+                          className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50 border-t border-slate-100">
+                          <span>☑</span><span className="flex-1">เลือกหลายรายการ</span>
+                        </button>
+                      </div>
+                    ) : null}
                     renderTooltip={(r) => r.sku ? (
                       <div className="flex items-center gap-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -438,7 +486,7 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
                         value={selected.sku ? ({ id: selected.sku.id, code: selected.sku.code, name: selected.sku.name, image_url: selected.sku.image } as SkuPickerValue) : null}
                         placeholder="เลือก SKU ของชิ้นนี้"
                         onChange={(v) => patchSpot(selected.id, v
-                          ? { sku_id: v.id, sku: { id: v.id, code: v.code, name: v.name, image: v.image_url ?? (v.image_key ? r2ImageUrl(v.image_key) : null), color: v.color ?? null, qty_on_hand: null, is_active: true } }
+                          ? { sku_id: v.id, sku: { id: v.id, code: v.code, name: v.name, image: v.image_url ?? (v.image_key ? r2ImageUrl(v.image_key) : null), image_key: v.image_key ?? null, uom: v.uom_name ?? null, color: v.color ?? null, qty_on_hand: null, is_active: true } }
                           : { sku_id: null, sku: null })} />
                     </div>
                     {dupOf(selected) && <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">⚠ SKU นี้ถูกผูกกับอีกจุดในแผ่นนี้แล้ว</p>}
@@ -497,6 +545,19 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
             </aside>
           )}
         </div>
+
+        {/* แถบเลือกหลายรายการ (โหมดดู) — ลอยด้านล่าง */}
+        {mode === "view" && selecting && (
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-4 z-[7] max-w-[94vw] flex items-center gap-2 px-3 h-12 rounded-full bg-slate-900 text-white shadow-2xl">
+            <span className="text-sm whitespace-nowrap">เลือก <b className="tabular-nums">{checkedItems.length}</b> รายการ</span>
+            <button onClick={() => setChecked(checked.size === viewSpots.length ? new Set() : new Set(viewSpots.map((s) => s.id)))}
+              className="h-8 px-3 text-[12px] rounded-full bg-white/10 hover:bg-white/20 whitespace-nowrap">{checked.size === viewSpots.length ? "ไม่เลือกเลย" : "เลือกทั้งแผ่น"}</button>
+            <button onClick={() => setPrItems(checkedItems)} disabled={checkedItems.length === 0 || !canPr}
+              title={!canPr ? "คุณไม่มีสิทธิ์สร้างใบขอซื้อ" : checkedItems.length === 0 ? "กดที่ชิ้นบนรูปเพื่อเลือกก่อน" : undefined}
+              className="h-8 px-4 text-[13px] font-medium rounded-full bg-blue-500 hover:bg-blue-400 disabled:opacity-40 disabled:hover:bg-blue-500 whitespace-nowrap">🛒 สร้างใบขอซื้อ</button>
+            <button onClick={stopSelecting} className="h-8 px-3 text-[12px] rounded-full hover:bg-white/10 whitespace-nowrap">ยกเลิก</button>
+          </div>
+        )}
       </div>
 
       <ConfirmDialog open={confirm === "leave" || confirm === "close"} onClose={() => setConfirm(null)} variant="danger"
@@ -508,6 +569,10 @@ function SwatchViewer({ id, startEdit, canEdit, onClose, onChanged, onDeleted }:
         title="เปลี่ยนรูปของแผ่นนี้?" message={`แผ่นนี้มี ${spots.length} จุดที่ตั้งตำแหน่งตามรูปเดิม ถ้ารูปใหม่จัดวางไม่เหมือนเดิม กรอบจะไม่ตรงชิ้น ต้องลากปรับใหม่`} confirmText="เปลี่ยนรูป"
         onConfirm={() => { setConfirm(null); if (pendingFile) void replaceImage(pendingFile); }} />
       {skuDrawer && <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" title="SKU" recordId={skuDrawer} onClose={() => setSkuDrawer(null)} onChanged={() => void load()} />}
+      {prItems && prItems.length > 0 && data && (
+        <PrCreateModal items={prItems} sourceNote={`จาก Swatch: ${titleOf(data)}`}
+          onClose={() => setPrItems(null)} onCreated={() => stopSelecting()} />
+      )}
     </>,
     document.body,
   );

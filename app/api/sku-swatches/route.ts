@@ -24,7 +24,7 @@ export const revalidate = 0;
 export type SwatchSpot = {
   id: string; x: number; y: number; w: number; h: number; label: string | null; sort_order: number;
   sku_id: string | null;
-  sku: { id: string; code: string; name: string; image: string | null; color: string | null; qty_on_hand: number | null; is_active: boolean } | null;
+  sku: { id: string; code: string; name: string; image: string | null; image_key: string | null; uom: string | null; color: string | null; qty_on_hand: number | null; is_active: boolean } | null;
 };
 export type SwatchCard = {
   id: string; name: string | null; note: string | null; seq: number;
@@ -83,14 +83,16 @@ export async function GET(request: NextRequest) {
     const skuMap = new Map<string, NonNullable<SwatchSpot["sku"]>>();
     if (skuIds.length) {
       const [skuRes, balRes] = await Promise.all([
-        admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key, color, is_active").in("id", skuIds),
+        admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key, color, is_active, uom:uoms!uom_id(name)").in("id", skuIds),
         admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", skuIds),
       ]);
       const stock = new Map<string, number>();
       for (const b of (balRes.data ?? []) as { sku_id: string; qty_on_hand: number | string | null }[]) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
-      for (const k of (skuRes.data ?? []) as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; color: string | null; is_active: boolean | null }[]) {
+      for (const k of (skuRes.data ?? []) as unknown as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; color: string | null; is_active: boolean | null; uom: { name: string | null } | { name: string | null }[] | null }[]) {
+        const uomRow = Array.isArray(k.uom) ? k.uom[0] : k.uom;
         skuMap.set(k.id, {
           id: k.id, code: k.code, name: k.name_th ?? "", color: k.color ?? null, is_active: k.is_active !== false,
+          image_key: k.cover_image_r2_key ?? null, uom: uomRow?.name ?? null,
           image: k.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(k.cover_image_r2_key)}` : null,
           qty_on_hand: stock.has(k.id) ? (stock.get(k.id) as number) : null,
         });

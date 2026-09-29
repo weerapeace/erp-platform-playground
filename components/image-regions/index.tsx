@@ -5,6 +5,7 @@
  *
  * 2 โหมด:
  *   view — ซ่อนเส้นกรอบทั้งหมด (เห็นแต่รูป) · ชี้ที่จุด = ป้ายข้อมูลลอยขึ้น · กด = onRegionClick
+ *          · ใส่ renderMenu = กดแล้วมี "เมนูเล็ก" ลอยตรงจุดที่กด (ไม่ใช่ป๊อปอัป) · selecting = โหมดติ๊กเลือกหลายจุด
  *   edit — เห็นกรอบ · ลากบนที่ว่าง = วาดกรอบใหม่ · ลากกรอบ = ย้าย · ลากมุม = ปรับขนาด · กด = เลือก
  *
  * พิกัดทุกตัวเป็น "เปอร์เซ็นต์ของรูป" (0-100) → ตรงตำแหน่งทุกขนาดจอ/ทุกระดับซูม
@@ -13,7 +14,7 @@
  * ห้ามเขียนตัวลากกรอบเองในหน้าโมดูล — ใช้ตัวนี้
  */
 
-import { useCallback, useRef, useState, type ReactNode, type PointerEvent as RPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type PointerEvent as RPointerEvent } from "react";
 
 export type Region = { id: string; x: number; y: number; w: number; h: number };
 type Corner = "nw" | "ne" | "sw" | "se";
@@ -28,6 +29,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
 
 export function ImageRegions<T extends Region>({
   src, alt = "", regions, mode, selectedId, onSelect, onChange, onCreate, onRegionClick, renderTooltip, regionLabel, isMuted, className = "",
+  renderMenu, selecting = false, checkedIds, onToggleCheck,
 }: {
   src: string;
   alt?: string;
@@ -43,6 +45,12 @@ export function ImageRegions<T extends Region>({
   onRegionClick?: (region: T) => void;
   /** (view) ป้ายข้อมูลตอนชี้ที่จุด */
   renderTooltip?: (region: T) => ReactNode;
+  /** (view) เมนูเล็กตอนกดที่จุด — ใส่แล้ว "กด = เปิดเมนู" แทน onRegionClick · เรียก close() เมื่อเลือกรายการแล้ว */
+  renderMenu?: (region: T, close: () => void) => ReactNode;
+  /** (view) โหมดเลือกหลายจุด — กด = ติ๊ก/เอาออก (ไม่เปิดเมนู) · โชว์วงกลมติ๊กบนทุกจุด */
+  selecting?: boolean;
+  checkedIds?: Set<string>;
+  onToggleCheck?: (region: T) => void;
   /** (edit) ข้อความสั้นบนกรอบ เช่น รหัส SKU */
   regionLabel?: (region: T) => string | null;
   /** (edit) กรอบที่ยังไม่สมบูรณ์ (เช่น ยังไม่ผูกข้อมูล) → เส้นประสีส้ม */
@@ -52,6 +60,20 @@ export function ImageRegions<T extends Region>({
   const boxRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);   // เมนูเล็ก (ตำแหน่ง = จุดที่กด เป็น % ของรูป)
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  // ปิดเมนู: กดนอกเมนู / กด Esc (จับก่อนหน้าที่ครอบอยู่ ไม่ให้ Esc ปิดทั้งหน้า) / ออกจากโหมดดู / เข้าโหมดเลือกหลายจุด
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); setMenu(null); } };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey, true); };
+  }, [menu]);
+  useEffect(() => { if (mode !== "view" || selecting) setMenu(null); }, [mode, selecting]);
 
   /** ตำแหน่งเมาส์ → % ของรูป */
   const pct = useCallback((e: { clientX: number; clientY: number }) => {
@@ -119,7 +141,15 @@ export function ImageRegions<T extends Region>({
   const drawing = drag?.kind === "draw" ? {
     x: Math.min(drag.sx, drag.cx), y: Math.min(drag.sy, drag.cy), w: Math.abs(drag.cx - drag.sx), h: Math.abs(drag.cy - drag.sy),
   } : null;
-  const hovered = mode === "view" && hoverId ? regions.find((r) => r.id === hoverId) ?? null : null;
+  const hovered = mode === "view" && hoverId && !menu ? regions.find((r) => r.id === hoverId) ?? null : null;
+  const menuRegion = mode === "view" && menu ? regions.find((r) => r.id === menu.id) ?? null : null;
+  const onViewClick = (e: { clientX: number; clientY: number }, r: T) => {
+    if (selecting) { onToggleCheck?.(r); return; }
+    if (!renderMenu) { onRegionClick?.(r); return; }
+    // กดด้วยคีย์บอร์ด (Enter/Space) ไม่มีพิกัดเมาส์ → ใช้กลางจุดแทน
+    const p = e.clientX === 0 && e.clientY === 0 ? { x: r.x + r.w / 2, y: r.y + r.h / 2 } : pct(e);
+    setMenu((m) => (m && m.id === r.id ? null : { id: r.id, x: p.x, y: p.y }));
+  };
 
   return (
     <div ref={boxRef}
@@ -135,10 +165,16 @@ export function ImageRegions<T extends Region>({
           // โหมดดู: ไม่มีเส้นกรอบ ไม่มีพื้นหลัง — เห็นแต่รูป (ชี้แล้วมีป้ายข้อมูล)
           return (
             <button key={r.id} type="button" style={{ ...style, outline: "none", boxShadow: "none" }} aria-label={regionLabel?.(r) ?? "จุดบนรูป"}
-              onClick={() => onRegionClick?.(r)}
+              onClick={(e) => onViewClick(e, r)}
+              aria-pressed={selecting ? !!checkedIds?.has(r.id) : undefined}
               onPointerEnter={() => setHoverId(r.id)} onPointerLeave={() => setHoverId((h) => (h === r.id ? null : h))}
               onFocus={() => setHoverId(r.id)} onBlur={() => setHoverId((h) => (h === r.id ? null : h))}
-              className="absolute bg-transparent border-0 p-0 m-0 cursor-pointer outline-none" />
+              className="absolute bg-transparent border-0 p-0 m-0 cursor-pointer outline-none">
+              {/* โหมดเลือกหลายจุด: วงกลมติ๊กมุมซ้ายบน (ไม่ใช่เส้นกรอบ) — ว่าง = ยังไม่เลือก · ✓ = เลือกแล้ว */}
+              {selecting && (
+                <span className={`absolute left-1 top-1 w-5 h-5 rounded-full flex items-center justify-center text-[11px] leading-none shadow-md ${checkedIds?.has(r.id) ? "bg-indigo-600 text-white ring-2 ring-white" : "bg-white/85 text-transparent ring-1 ring-slate-400"}`}>✓</span>
+              )}
+            </button>
           );
         }
         const sel = r.id === selectedId;
@@ -160,6 +196,15 @@ export function ImageRegions<T extends Region>({
       {drawing && drawing.w > 0 && drawing.h > 0 && (
         <div className="absolute border-2 border-dashed border-indigo-500 bg-indigo-400/15 pointer-events-none z-[3]"
           style={{ left: `${drawing.x}%`, top: `${drawing.y}%`, width: `${drawing.w}%`, height: `${drawing.h}%` }} />
+      )}
+
+      {/* เมนูเล็กตอนกดที่จุด (โหมดดู) — ลอยตรงจุดที่กด · ชิดขอบขวา/ล่างจะพลิกไปอีกด้าน */}
+      {menuRegion && menu && renderMenu && (
+        <div ref={menuRef} role="menu" className="absolute z-[6]"
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{ left: `${menu.x}%`, top: `${menu.y}%`, transform: `translate(${menu.x > 62 ? "calc(-100% - 6px)" : "6px"}, ${menu.y > 68 ? "calc(-100% - 6px)" : "6px"})` }}>
+          {renderMenu(menuRegion, closeMenu)}
+        </div>
       )}
 
       {/* ป้ายข้อมูลตอนชี้ (โหมดดู) — อยู่เหนือจุด ถ้าชิดขอบบนให้ลงไปอยู่ใต้จุด */}
