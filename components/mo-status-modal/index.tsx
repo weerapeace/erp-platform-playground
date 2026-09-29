@@ -4,10 +4,17 @@
 // MoStatusModal (ของกลาง) — Popup "สถานะงานผลิต" ของใบสั่งผลิต 1 ใบ
 // โชว์สถานะ 9 ขั้น + รายละเอียดเฉพาะขั้นนั้น + กล่องงานเหมา (ถ้ามี)
 // ดึงจาก /api/mo/[id]/status (คำนวณจากหลังบ้านครั้งเดียว)
+//
+// ปุ่ม "เปิดเช็กลิสต์เตรียม/ตัด" = สลับเนื้อหาในป๊อปอัปใบเดิม (ไม่ย้ายหน้า)
+//   จอ 1 สถานะ  ⇄  จอ 2 เช็กลิสต์ตัวจริงของบอร์ดจ่ายงาน (ฝังผ่าน lib/mo-checklist-embed)
+//   ย้อนกลับได้ 3 ทาง: ปุ่ม "← กลับไปหน้าสถานะ" · ปุ่ม "เสร็จ" ในเช็กลิสต์ · ปุ่ม back ของเบราว์เซอร์/มือถือ
+//   กลับมาแล้วโหลดสถานะใหม่ (ตัวเลขเตรียม/ตัดอาจเปลี่ยน) + เรียก onChanged ให้หน้าแม่รีเฟรช
 // ============================================================
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
+import { useBackClose } from "@/lib/use-back-close";
+import { moChecklistEmbedUrl, readMoChecklistEvent } from "@/lib/mo-checklist-embed";
 import type { MoStatus } from "@/app/api/mo/[id]/status/route";
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
@@ -56,12 +63,20 @@ function Sec({ title, children }: { title: string; children: React.ReactNode }) 
   );
 }
 
-export function MoStatusModal({ moId, onClose, onOpenChecklist }: {
-  moId: string; onClose: () => void; onOpenChecklist?: (moId: string) => void;
+export function MoStatusModal({ moId, onClose, onChanged, checklist = true }: {
+  moId: string; onClose: () => void;
+  /** เรียกเมื่อกลับจากเช็กลิสต์ / ใบถูกลบ — ให้หน้าแม่โหลดข้อมูลใหม่ */
+  onChanged?: () => void;
+  /** false = ซ่อนปุ่มเปิดเช็กลิสต์ (หน้าที่ให้ดูสถานะอย่างเดียว) */
+  checklist?: boolean;
 }) {
   const [d, setD] = useState<MoStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [page, setPage] = useState<"status" | "checklist">("status");   // จอที่กำลังแสดงในป๊อปอัปใบนี้
+  const [frameReady, setFrameReady] = useState(false);
+  const [rev, setRev] = useState(0);                                     // +1 = โหลดสถานะใหม่
+  const touched = useRef(false);                                         // เคยเข้าเช็กลิสต์แล้ว → ตอนปิดให้หน้าแม่รีเฟรช
 
   useEffect(() => {
     setLoading(true); setErr(null);
@@ -70,13 +85,57 @@ export function MoStatusModal({ moId, onClose, onOpenChecklist }: {
       .then((j) => { if (j.error) setErr(j.error); else setD(j.data as MoStatus); })
       .catch(() => setErr("โหลดสถานะไม่ได้"))
       .finally(() => setLoading(false));
-  }, [moId]);
+  }, [moId, rev]);
+  useEffect(() => { setPage("status"); }, [moId]);
 
-  const title = d ? `📊 สถานะ · ${d.product_sku ?? d.mo_no}` : "📊 สถานะงาน";
+  const openChecklist = () => { touched.current = true; setFrameReady(false); setPage("checklist"); };
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const backToStatus = useCallback(() => {
+    if (pageRef.current !== "checklist") return;   // กันยิงซ้ำ (ปุ่ม "เสร็จ" + back มาพร้อมกัน)
+    pageRef.current = "status";
+    setPage("status"); setRev((r) => r + 1); onChanged?.();
+  }, [onChanged]);
+  const closeAll = useCallback(() => { if (touched.current) onChanged?.(); onClose(); }, [onChanged, onClose]);
+
+  // ปุ่ม back ของเบราว์เซอร์/มือถือ ตอนอยู่จอเช็กลิสต์ = ถอยกลับมาจอสถานะ (ไม่หลุดออกจากหน้า)
+  useBackClose(page === "checklist", backToStatus, "mo-checklist");
+
+  // ข้อความจากเช็กลิสต์ใน iframe: กด "เสร็จ" → กลับจอสถานะ · ลบใบ → ปิดป๊อปอัปทั้งใบ
+  useEffect(() => {
+    if (page !== "checklist") return;
+    const onMsg = (e: MessageEvent) => {
+      const ev = readMoChecklistEvent(e);
+      if (ev === "close") backToStatus();
+      else if (ev === "deleted") { setPage("status"); onChanged?.(); onClose(); }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [page, backToStatus, onChanged, onClose]);
+
+  const name = d ? (d.product_sku ?? d.mo_no) : "";
+  const title = page === "checklist" ? `📋 เช็กลิสต์เตรียม/ตัด · ${d?.mo_no ?? name}`
+    : d ? `📊 สถานะ · ${name}` : "📊 สถานะงาน";
 
   return (
-    <ERPModal open onClose={onClose} size="md" title={title}>
-      {loading ? (
+    <ERPModal open onClose={closeAll} size={page === "checklist" ? "xl" : "md"} title={title}>
+      {page === "checklist" ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={backToStatus}
+              className="h-9 px-3 text-sm font-medium rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+              ← กลับไปหน้าสถานะ
+            </button>
+            {d && <span className="text-xs text-slate-400 truncate">{d.product_name || d.product_sku} · {fmt(d.qty)} ชิ้น</span>}
+          </div>
+          <div className="relative rounded-lg border border-slate-200 overflow-hidden bg-white" style={{ height: "calc(90vh - 180px)", minHeight: 360 }}>
+            {!frameReady && (
+              <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400 bg-white">กำลังเปิดเช็กลิสต์…</div>
+            )}
+            <iframe src={moChecklistEmbedUrl(moId)} title={title} onLoad={() => setFrameReady(true)} className="w-full h-full border-0" />
+          </div>
+        </div>
+      ) : loading ? (
         <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 bg-slate-50 rounded-lg animate-pulse" />)}</div>
       ) : err ? (
         <div className="text-sm text-red-600 py-6 text-center">{err}</div>
@@ -200,9 +259,9 @@ export function MoStatusModal({ moId, onClose, onOpenChecklist }: {
             </Sec>
           )}
 
-          {/* ปุ่มไปเช็กลิสต์เต็ม */}
-          {onOpenChecklist && (
-            <button onClick={() => onOpenChecklist(moId)}
+          {/* ปุ่มไปเช็กลิสต์เต็ม — สลับจอในป๊อปอัปใบนี้ */}
+          {checklist && (
+            <button onClick={openChecklist}
               className="w-full h-9 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
               📋 เปิดเช็กลิสต์เตรียม/ตัด เต็ม →
             </button>

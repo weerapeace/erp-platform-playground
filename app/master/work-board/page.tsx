@@ -9,6 +9,7 @@
  */
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense, type PointerEvent as RPE } from "react";
 import { useSearchParams } from "next/navigation";
+import { postMoChecklistEvent } from "@/lib/mo-checklist-embed";
 import dynamicImport from "next/dynamic";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -1271,24 +1272,35 @@ function WorkBoardPageInner() {
     if (r.ok) { setClWO({ ...clWO, due_date: value || null }); await load(true); }
   }, [clWO, toast, load]);
 
-  const closeChecklist = useCallback(() => { setChecklistMO(null); setClWO(null); setDelArmed(false); void load(true); }, [load]);
-
   // เปิดเช็กลิสต์งานจาก URL (?mo=<id>) — ใช้ตอนกดการ์ดจากหน้า Dashboard ผลิต (เปิด modal ตัวจริงตัวเดียวกัน)
   const searchParams = useSearchParams();
+  // โหมด "เช็กลิสต์อย่างเดียว": หน้าอื่นฝังหน้านี้ใน iframe (?embed=1&mo=<id> — ของกลาง lib/mo-checklist-embed)
+  // → เช็กลิสต์เต็มกรอบ ไม่โชว์บอร์ด · ปิด/ลบแล้วแจ้งหน้าแม่ให้ถอยกลับเอง
+  const popupOnly = searchParams.get("embed") === "1" && !!searchParams.get("mo");
+  const [urlOpened, setUrlOpened] = useState(false);   // เปิดเช็กลิสต์จาก URL ไปแล้ว (ใช้เลือกข้อความบนฉากบังบอร์ด)
+
+  const closeChecklist = useCallback(() => {
+    setChecklistMO(null); setClWO(null); setDelArmed(false); void load(true);
+    if (popupOnly) postMoChecklistEvent("close");
+  }, [load, popupOnly]);
+
   const openedFromUrlRef = useRef<string | null>(null);
   useEffect(() => {
     const moId = searchParams.get("mo");
     if (!moId || openedFromUrlRef.current === moId) return;
-    const mo = board.pending.find((x) => x.id === moId);
-    if (mo) { openedFromUrlRef.current = moId; setClWO(null); setChecklistMO(mo); }
-  }, [searchParams, board.pending]);
+    // ใบที่จ่ายงานครบแล้ว (ไม่อยู่ในรอจ่าย) ก็เปิดเช็กลิสต์ได้ — เหมือนตอนกดจากปฏิทิน
+    const mo = board.pending.find((x) => x.id === moId) ?? board.dispatchedMos.find((x) => x.id === moId);
+    if (mo) { openedFromUrlRef.current = moId; setClWO(null); setChecklistMO(mo); setUrlOpened(true); }
+  }, [searchParams, board.pending, board.dispatchedMos]);
   const deleteMO = useCallback(async (mo: PendingMO) => {
     try {
       const res = await apiFetch(`/api/mo/${mo.id}`, { method: "DELETE" });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("ลบงานแล้ว"); setChecklistMO(null); setDelArmed(false); await load(true);
+      toast.success("ลบงานแล้ว"); setChecklistMO(null); setDelArmed(false);
+      if (popupOnly) postMoChecklistEvent("deleted");
+      await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
-  }, [toast, load]);
+  }, [toast, load, popupOnly]);
 
   // ---- จัดการแผนก (popup ตั้งค่าแผนก) ----
   const loadDepts = useCallback(async () => {
@@ -1917,7 +1929,16 @@ function WorkBoardPageInner() {
           </button>
         </div>
       </ERPModal>
-      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="xl" storageKey="wb-checklist" title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
+      {/* โหมดเช็กลิสต์อย่างเดียว: บังบอร์ดไว้ระหว่างรอเปิด/หลังปิด (หน้าแม่เป็นคนสลับจอ) */}
+      {popupOnly && !checklistMO && (
+        <div className="fixed inset-0 z-50 bg-white flex items-center justify-center px-6 text-center text-sm text-slate-400">
+          {urlOpened ? "กำลังกลับ…"
+            : loading ? "กำลังเปิดเช็กลิสต์…"
+            : loadError ? "โหลดข้อมูลบอร์ดจ่ายงานไม่สำเร็จ กรุณาปิดแล้วเปิดใหม่"
+            : "ไม่พบใบสั่งผลิตนี้ในบอร์ดจ่ายงาน (อาจปิดงาน ยกเลิก หรือถูกลบไปแล้ว)"}
+        </div>
+      )}
+      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="xl" storageKey="wb-checklist" embedded={popupOnly} title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
         footer={<>
           {checklistMO && !clWO && canEdit && (delArmed
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>

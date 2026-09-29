@@ -6,7 +6,7 @@
  * ดูได้ 3 แบบ: จอคอม / แท็บเล็ต / มือถือ (ของกลาง device-view — ตัดสินด้วย `layout` ไม่ใช้ sm:/lg:)
  * ของกลาง: DataTable, HoverImage, getStatusStyle, ScheduleBoard, device-view, PlaygroundShell (ผ่าน /master/layout)
  */
-import { useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table";
@@ -255,6 +255,13 @@ function ProductionDashboardInner() {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // โหลดเงียบ ๆ หลังแก้ในเช็กลิสต์ (ไม่โชว์สปินเนอร์ · พลาดก็ใช้ข้อมูลเดิมต่อ)
+  const reloadQuiet = useCallback(() => {
+    apiFetch("/api/mo/production-dashboard").then((r) => r.json()).then((j: ProductionDashboardResponse) => {
+      if (j.error) return;
+      setJobs(j.jobs ?? []); setCounts((c) => j.counts ?? c);
+    }).catch(() => { /* ใช้ข้อมูลเดิม */ });
+  }, []);
 
   const shown = useMemo(() => cat === "all" ? jobs : jobs.filter((j) => j.categories.includes(cat)), [jobs, cat]);
   // การ์ดสรุปเลข (ตาม filter ปัจจุบัน)
@@ -480,8 +487,7 @@ function ProductionDashboardInner() {
 
       {/* Popup สถานะงาน (กดจากการ์ด/แถว/ปฏิทิน) */}
       {statusMoId && (
-        <MoStatusModal moId={statusMoId} onClose={() => setStatusMoId(null)}
-          onOpenChecklist={(id) => { setStatusMoId(null); router.push(`/master/work-board?mo=${id}`); }} />
+        <MoStatusModal moId={statusMoId} onClose={() => setStatusMoId(null)} onChanged={reloadQuiet} />
       )}
 
       {/* ป๊อปอัปรายละเอียดงาน */}
