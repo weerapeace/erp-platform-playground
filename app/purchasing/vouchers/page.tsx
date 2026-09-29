@@ -17,7 +17,9 @@ import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
-import { SupplierPicker, type SupplierPickerValue } from "@/components/pickers";
+// ⚠️ ต้องใช้ตัวนี้ (อ่านร้านจริงจาก partners_v2) — SupplierPicker ใน components/pickers อ่านตารางระบบจัดซื้อชุดเก่า (แทบว่าง)
+import { SupplierPicker } from "@/components/supplier-picker";
+import { SupplierWizard } from "@/components/supplier-wizard";
 import { fmtMoney, curSymbol } from "@/lib/landed-cost";
 import { GrDetailModal } from "@/components/gr-detail-modal";
 
@@ -47,9 +49,26 @@ export default function PurchaseVouchersPage() {
   // ป๊อป "＋ ออกใบสำคัญรับ": จากใบรับที่รอ หรือสร้างเปล่า
   const [addOpen, setAddOpen] = useState(false);
   const [addMode, setAddMode] = useState<"gr" | "manual">("gr");
-  const [mSeller, setMSeller] = useState<SupplierPickerValue | null>(null);
+  const [mSeller, setMSeller] = useState<{ id: string; name: string } | null>(null);
   const [mSellerText, setMSellerText] = useState("");
   const [mCur, setMCur] = useState<"THB" | "RMB">("THB");
+  // ร้านจริงจากทะเบียน (partners_v2) — โหลดตอนเปิดป๊อปครั้งแรก · ไม่กรอง is_supplier เพราะหลายร้านไม่ได้ติ๊กไว้
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string; cn?: boolean }[]>([]);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  useEffect(() => {
+    if (!addOpen || suppliers.length > 0) return;
+    void apiFetch("/api/master-v2/partners?limit=2000").then((r) => r.json()).then((j) => {
+      const data = (j.data ?? []) as Record<string, unknown>[];
+      const nm = (p: Record<string, unknown>) => String(p.name_th ?? p.display_name ?? p.code ?? "");
+      const isCn = (p: Record<string, unknown>) => p.is_taobao === true || /จีน|china/i.test(String(p.shop_country ?? "")) || String(p.default_currency ?? "") === "RMB";
+      setSuppliers(data.filter((p) => p.is_active !== false).map((p) => ({ id: String(p.id), name: nm(p), cn: isCn(p) })).filter((s) => s.name).sort((a, b) => a.name.localeCompare(b.name, "th")));
+    }).catch(() => {});
+  }, [addOpen, suppliers.length]);
+  // เลือกร้านจีน → ตั้งสกุลเป็นหยวนให้ (แก้เองได้)
+  const pickSeller = (sid: string, name: string) => {
+    setMSeller(sid ? { id: sid, name } : null); setMSellerText("");
+    const s = suppliers.find((x) => x.id === sid); if (s) setMCur(s.cn ? "RMB" : "THB");
+  };
   // แก้วันที่รับของใบรับจากแถว
   const [dateEdit, setDateEdit] = useState<{ gr: PendingGr; value: string } | null>(null);
   const [dateSaving, setDateSaving] = useState(false);
@@ -268,7 +287,7 @@ export default function PurchaseVouchersPage() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน / ผู้ขาย</label>
-                <SupplierPicker value={mSeller} onChange={(v) => { setMSeller(v); if (v) setMSellerText(""); }} placeholder="เลือกร้านจากทะเบียน…" />
+                <SupplierPicker value={mSeller?.id ?? ""} suppliers={suppliers} onChange={pickSeller} onAddNew={() => setWizardOpen(true)} placeholder="— เลือกร้านจากทะเบียน —" />
                 <input value={mSellerText} onChange={(e) => { setMSellerText(e.target.value); if (e.target.value) setMSeller(null); }} placeholder="หรือพิมพ์ชื่อร้านเอง (ร้านที่ยังไม่อยู่ในทะเบียน)"
                   className="mt-1.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
               </div>
@@ -283,6 +302,15 @@ export default function PurchaseVouchersPage() {
             </div>
           )}
         </ERPModal>
+      )}
+
+      {/* เพิ่มร้านใหม่จากป๊อปออกใบสำคัญ (ของกลาง SupplierWizard) */}
+      {wizardOpen && (
+        <SupplierWizard onClose={() => setWizardOpen(false)}
+          onCreated={(s: { id: string; name: string }) => {
+            setSuppliers((arr) => [...arr, { id: s.id, name: s.name }].sort((a, b) => a.name.localeCompare(b.name, "th")));
+            setMSeller({ id: s.id, name: s.name }); setMSellerText(""); setWizardOpen(false);
+          }} />
       )}
 
       {/* แก้วันที่รับ */}
