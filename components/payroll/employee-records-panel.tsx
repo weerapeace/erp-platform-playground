@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { contractValidationError } from "@/lib/payroll-contract-rules";
 import { ConfirmDialog } from "@/components/modal";
 
 type Row = Record<string, unknown>;
@@ -280,6 +281,10 @@ export function EmployeeRecordsPanel({
     if (!editing) return;
     const missing = cfg.fields.find((f) => f.required && (f.showIf ? f.showIf(editing.form) : true) && !s(editing.form[f.key]).trim());
     if (missing) { setErr(`กรอก “${missing.label}” ก่อนนะครับ`); return; }
+    if (cfg.key === "contracts") {
+      const invalid = contractValidationError(editing.form);
+      if (invalid) { setErr(invalid); return; }
+    }
     setBusy(true); setErr(null);
     try {
       const body: Row = { ...editing.form };

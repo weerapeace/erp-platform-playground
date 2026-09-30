@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { contractValidationError } from "@/lib/payroll-contract-rules";
 import { LookupSelect } from "@/components/lookup-select";
 import { ContractTemplateBar } from "@/components/payroll/contract-template-bar";
 
@@ -306,6 +307,10 @@ export function ContractPeekCell({
     e.stopPropagation();
     if (!draft) return;
     if (!creating && !editingId) return;
+    {
+      const invalid = contractValidationError(draft);
+      if (invalid) { setErr(invalid); return; }
+    }
     setSaving(true);
     setSaveMsg(null);
     setErr(null);

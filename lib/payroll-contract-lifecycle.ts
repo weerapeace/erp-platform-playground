@@ -64,7 +64,9 @@ export async function resignEmployeesWithoutActiveCurrentContract(
 
   let resignedCount = 0;
   for (const employeeId of employeesToResign) {
-    const resignDate = String(employeeResignDates[employeeId] ?? todayBangkokISO()).slice(0, 10);
+    // ค่าว่าง "" ไม่ใช่ null → `??` ไม่ทำงาน เดิมส่ง "" ลง DB แล้วพัง "invalid input syntax for type date"
+    const rawDate = String(employeeResignDates[employeeId] ?? "").slice(0, 10);
+    const resignDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : todayBangkokISO();
     const { error: employeeError } = await admin
       .from("employees")
       .update({ employment_status: "resigned", resign_date: resignDate })

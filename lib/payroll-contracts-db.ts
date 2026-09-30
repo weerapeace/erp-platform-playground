@@ -9,6 +9,7 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { nullifyEmpty } from "@/lib/payroll-coerce";
+import { contractValidationError } from "@/lib/payroll-contract-rules";
 import {
   applyContractLifecycle,
   closeEmployeesWithoutActiveCurrentContract,
@@ -157,6 +158,11 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     status:        cols.status ?? "active",
     ...cols,
   };
+  {
+    // เตือนเป็นภาษาคนก่อนเขียน DB (สถานะสิ้นสุดต้องมีวันสิ้นสุด)
+    const invalid = contractValidationError(baseInsert);
+    if (invalid) throw new Error(invalid);
+  }
 
   // ── บริษัทของสัญญา (สำคัญมาก) ──────────────────────────────────────────
   // ฟอร์ม "เพิ่มสัญญา" ไม่มีช่องบริษัท → สัญญาที่สร้างจากฟอร์มจะได้ company_id = null
@@ -251,6 +257,9 @@ export async function updateContract(id: string, body: Record<string, unknown>):
   const previous = existing?.[0] as Record<string, unknown> | undefined;
   const merged = { ...previous, ...cols };
   const update = applyContractLifecycle(merged);
+  // เตือนเป็นภาษาคนก่อนเขียน DB (เช่น สถานะสิ้นสุดแต่ไม่มีวันสิ้นสุด → เดิมพัง "invalid input syntax for type date")
+  const invalid = contractValidationError(update);
+  if (invalid) throw new Error(invalid);
   const { data, error } = await admin.from(TABLE).update(update).eq("id", id).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
