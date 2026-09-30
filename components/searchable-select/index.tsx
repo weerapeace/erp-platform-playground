@@ -41,9 +41,11 @@ export function SearchableSelect({
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return options;
+    // value ที่เป็น uuid ไม่เอามาค้น — hex + "-" ทำให้คำสั้น ๆ (เช่น "C-") จับติดทุกแถว
+    const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
     return options.filter((o) =>
       o.label.toLowerCase().includes(s) ||
-      o.value.toLowerCase().includes(s) ||
+      (!isUuid(o.value) && o.value.toLowerCase().includes(s)) ||
       (o.sub ?? "").toLowerCase().includes(s) ||
       (o.searchText ?? "").toLowerCase().includes(s));
   }, [q, options]);

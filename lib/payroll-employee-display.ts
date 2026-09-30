@@ -48,8 +48,8 @@ export function payrollWageTypeLabel(value: unknown): string {
 }
 
 export function payrollEmployeeSearchText(row: PayrollEmployeeDisplayRow): string {
+  // ไม่ใส่ row.id (uuid) — ตัวอักษร hex + "-" ทำให้คำค้นสั้น ๆ เช่น "C-" ไปจับ uuid ของคนอื่นทั้งลิสต์
   return [
-    row.id,
     row.employee_code,
     row.full_name,
     row.first_name,

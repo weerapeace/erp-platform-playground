@@ -28,7 +28,9 @@ type ResignationRow = Record<string, unknown> & {
   created_at?: string | null;
 };
 
-type EmployeeOption = PayrollEmployeeDisplayRow;
+type EmployeeOption = PayrollEmployeeDisplayRow & { active?: boolean; employment_status?: string | null; resign_date?: string | null };
+
+const dmy = (iso: unknown) => { const s = String(iso ?? "").slice(0, 10); const [y, m, d] = s.split("-"); return y && m && d ? `${d}/${m}/${y}` : ""; };
 
 type FormState = {
   employee_id: string;
@@ -116,7 +118,7 @@ export default function PayrollResignationsPage() {
   const loadEmployees = useCallback(async () => {
     if (!canView) return;
     try {
-      const json = await readJson<{ data: EmployeeOption[] }>(await apiFetch("/api/payroll/core/employees?include_inactive=false"));
+      const json = await readJson<{ data: EmployeeOption[] }>(await apiFetch("/api/payroll/core/employees?include_inactive=true"));
       setEmployees(json.data ?? []);
     } catch {
       setEmployees([]);
@@ -144,10 +146,21 @@ export default function PayrollResignationsPage() {
     { id: "cancelled", label: `ยกเลิก (${counts.cancelled})`, filter: (row: Record<string, unknown>) => row.status === "cancelled" },
   ], [counts]);
 
-  const employeeOptions = useMemo(() => employees.map((employee) => ({
-    ...buildPayrollEmployeeSelectOption(employee),
-    searchText: payrollEmployeeSearchText(employee),
-  })), [employees]);
+  // รวมคนที่ลาออก/ปิดใช้งานแล้วด้วย (ติดป้ายบอก · เรียงไว้ท้าย) — เผื่อบันทึกคำขอย้อนหลังให้คนที่ถูกปิดสัญญาไปก่อน
+  // ตัวเลือกจากตัวเลือกหมวด "employees" ของกลาง (มี include_inactive) ไม่ได้ query เอง
+  const employeeOptions = useMemo(() => {
+    const isActive = (e: EmployeeOption) => e.active !== false && (e.employment_status ?? "active") === "active";
+    return [...employees]
+      .sort((a, b) => Number(isActive(b)) - Number(isActive(a)))
+      .map((employee) => {
+        const base = buildPayrollEmployeeSelectOption(employee);
+        const status = String(employee.employment_status ?? "");
+        const badge = isActive(employee) ? base.badge
+          : status === "resigned" ? `(ลาออกแล้ว${employee.resign_date ? " " + dmy(employee.resign_date) : ""})`
+          : "(ปิดใช้งานแล้ว)";
+        return { ...base, badge, searchText: payrollEmployeeSearchText(employee) };
+      });
+  }, [employees]);
 
   const columns: ColumnDef<ResignationRow>[] = useMemo(() => [
     { accessorKey: "employee_label", header: "พนักงาน", size: 220 },

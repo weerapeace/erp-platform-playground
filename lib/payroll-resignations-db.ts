@@ -362,9 +362,10 @@ export async function revertResignationApproval(id: string, input: { review_note
     contractRestored = true;
   }
 
+  // คืนสถานะตามที่จดไว้ก่อนอนุมัติ — ถ้าก่อนอนุมัติเขา "ลาออก" อยู่แล้ว (ปิดสัญญาไปก่อนยื่นคำขอ) ต้องคงลาออกไว้ ไม่เปิดกลับมาทำงาน
   const prevStatus = text(before?.employee?.employment_status) || "active";
   const { error: eErr } = await admin.from("employees")
-    .update({ employment_status: prevStatus === "resigned" ? "active" : prevStatus, resign_date: before?.employee?.resign_date ?? null })
+    .update({ employment_status: prevStatus, resign_date: before?.employee?.resign_date ?? null })
     .eq("id", employeeId);
   if (eErr) throw new Error("คืนสถานะพนักงานไม่สำเร็จ: " + eErr.message);
 
