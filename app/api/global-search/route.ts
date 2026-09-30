@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { tokenize, scoreRow, ilikeOr } from "@/lib/search-score";
+import { getSearchScope, type SearchScope } from "@/lib/search-scopes";
 
 // ---- Types ----
 
@@ -13,6 +14,7 @@ export type SearchEntity =
   | "mo"
   | "invoice" | "quotation" | "billing" | "delivery" | "cn"
   | "task" | "employee"
+  | "contract" | "period"
   | "user" | "asset";
 
 export type SearchHit = {
@@ -84,7 +86,7 @@ async function loadMyAccess(sb: ReturnType<typeof supabaseFromRequest>, userId: 
 
 // ---- 📄 หน้า/เมนู — จากทะเบียนเมนูกลาง (erp_menu_items) ----
 
-async function searchPages(q: string, can: CanFn, limit: number): Promise<SearchHit[]> {
+async function searchPages(q: string, can: CanFn, limit: number, scope: SearchScope | null): Promise<SearchHit[]> {
   const toks = tokensOf(q);
   if (toks.length === 0) return [];
   const { rows, apps } = await loadMenuRegistry();
@@ -96,6 +98,8 @@ async function searchPages(q: string, can: CanFn, limit: number): Promise<Search
   for (const r of rows) {
     if (!r.is_active || !r.href || !r.label) continue;
     if (!can(r.permission_key)) continue;
+    // ค้นในแอปเดี่ยว → เฉพาะเมนูที่สังกัดแอปนั้น (หรือ href อยู่ใต้แอป)
+    if (scope && !(r.app_keys ?? []).includes(scope.appKey) && !r.href.startsWith(scope.hrefPrefix)) continue;
     // แอปที่เมนูนี้สังกัด + คนนี้เข้าได้ (ถ้าเมนูไม่สังกัดแอปไหน = เห็นได้ถ้าสิทธิ์เมนูผ่าน)
     const myApps = (r.app_keys ?? []).map((k) => appByKey.get(k)).filter((a): a is AppGroupLite => !!a && a.is_active && can(a.permission_key));
     if ((r.app_keys ?? []).length > 0 && myApps.length === 0) continue;
@@ -142,12 +146,17 @@ async function searchPages(q: string, can: CanFn, limit: number): Promise<Search
 type GuideRow = { id: string; title: string; description: string | null; category: string | null; icon: string | null };
 type StepRow  = { guide_id: string; title: string | null; body: string | null; step_no: number };
 
-async function searchGuides(q: string, limit: number): Promise<SearchHit[]> {
+async function searchGuides(q: string, limit: number, scope: SearchScope | null): Promise<SearchHit[]> {
   const toks = tokensOf(q);
   if (toks.length === 0) return [];
   const admin = supabaseAdmin();
   const { data: guides } = await admin.from("erp_help_guides").select("id, title, description, category, icon").eq("is_active", true);
-  const list = (guides ?? []) as GuideRow[];
+  // ค้นในแอปเดี่ยว → เฉพาะคู่มือที่ชื่อ/หมวด/คำอธิบายมีคำของแอปนั้น
+  const list = ((guides ?? []) as GuideRow[]).filter((g) => {
+    if (!scope) return true;
+    const text = norm(`${g.title} ${g.description ?? ""} ${g.category ?? ""}`);
+    return scope.guideKeywords.some((k) => text.includes(norm(k)));
+  });
   if (list.length === 0) return [];
   const { data: steps } = await admin.from("erp_help_guide_steps").select("guide_id, title, body, step_no").in("guide_id", list.map((g) => g.id));
   const stepsBy = new Map<string, StepRow[]>();
@@ -207,8 +216,8 @@ type Source = {
   select: string;
   /** คอลัมน์ที่ค้นด้วย ilike (token-AND) */
   cols: string[];
-  /** กรองเพิ่ม (ตัดที่ยกเลิก/พักใช้) */
-  filter?: (q: QB) => QB;
+  /** กรองเพิ่ม (ตัดที่ยกเลิก/พักใช้) — รับ scope เผื่อค้นในแอปเดี่ยวอยากเห็นกว้างกว่า (เช่น พนักงานที่ลาออกแล้ว) */
+  filter?: (q: QB, scope: SearchScope | null) => QB;
   /** รหัส/เลขเอกสาร (ตรงเป๊ะ = ขึ้นบนสุด) */
   code: (r: Row) => string | null;
   /** ข้อความอื่นที่นับเป็น match */
@@ -334,11 +343,33 @@ const SOURCES: Source[] = [
     entity: "employee", table: "employees", perms: ["app.payroll", "employees.view"],
     select: "id, employee_code, nickname, first_name, last_name, first_name_th, last_name_th, phone, employment_status",
     cols: ["employee_code", "nickname", "first_name", "last_name", "first_name_th", "last_name_th", "phone"],
-    filter: (q) => q.eq("employment_status", "active"),
+    // ค้นรวม = เฉพาะคนทำงานอยู่ · ค้นในแอป Payroll = รวมคนลาออก/ปิดใช้งาน (มีป้ายบอก) เพราะ HR ต้องหาย้อนหลัง
+    filter: (q, scope) => (scope?.entities.includes("employee") ? q : q.eq("employment_status", "active")),
     code: (r) => s(r, "employee_code"), texts: (r) => [s(r, "nickname"), `${s(r, "first_name_th") || s(r, "first_name")} ${s(r, "last_name_th") || s(r, "last_name")}`, s(r, "phone")],
     label: (r) => join(s(r, "nickname") && `${s(r, "nickname")}`, `${s(r, "first_name_th") || s(r, "first_name")} ${s(r, "last_name_th") || s(r, "last_name")}`.trim()) || s(r, "employee_code"),
-    sublabel: (r) => join(s(r, "employee_code"), s(r, "phone")),
+    sublabel: (r) => join(s(r, "employee_code"), s(r, "phone"), s(r, "employment_status") === "resigned" ? "🔴 ลาออกแล้ว" : s(r, "employment_status") && s(r, "employment_status") !== "active" ? "⚪ ปิดใช้งาน" : ""),
     link: (r) => `/payroll/employees/${s(r, "id")}`, perEntity: 4,
+  },
+  {
+    // สัญญาจ้าง — เฉพาะค้นในแอป Payroll (ดู scope.entities) · ค้นด้วยเลขที่สัญญา
+    entity: "contract", table: "employee_contracts", perms: ["app.payroll", "employees.view"],
+    select: "id, contract_no, contract_type, wage_type, status, start_date, end_date, is_current, employees(employee_code, nickname, first_name, last_name)",
+    cols: ["contract_no"],
+    filter: (q) => q.neq("status", "cancelled"),
+    code: (r) => s(r, "contract_no"), texts: (r) => { const e = (r.employees ?? {}) as Row; return [s(e, "employee_code"), s(e, "nickname"), `${s(e, "first_name")} ${s(e, "last_name")}`]; },
+    label: (r) => s(r, "contract_no") || "(สัญญา)",
+    sublabel: (r) => { const e = (r.employees ?? {}) as Row; const ct: Record<string, string> = { permanent: "ประจำ", regular_external: "ประจำนอกระบบ", daily: "รายวัน", contractor: "งานเหมา", hourly: "รายชั่วโมง" }; return join(join(s(e, "employee_code"), s(e, "nickname") || `${s(e, "first_name")} ${s(e, "last_name")}`.trim()), ct[s(r, "contract_type")] ?? s(r, "contract_type"), s(r, "status") === "ended" ? `สิ้นสุด ${s(r, "end_date")}` : r.is_current ? "ฉบับปัจจุบัน" : st(r.status)); },
+    link: (r) => `/payroll/contracts?open=${s(r, "id")}`, perEntity: 4,
+  },
+  {
+    // งวดเงินเดือน — เฉพาะค้นในแอป Payroll · เปิดหน้าข้อมูลคำนวณของงวดนั้น (period-context อ่าน ?period_id=)
+    entity: "period", table: "payroll_periods", perms: ["app.payroll", "employees.view"],
+    select: "id, period_name, status, start_date, end_date, payment_date",
+    cols: ["period_name"],
+    code: () => null, texts: (r) => [s(r, "period_name")],
+    label: (r) => s(r, "period_name") || "(งวด)",
+    sublabel: (r) => join(`${s(r, "start_date")} → ${s(r, "end_date")}`, ({ draft: "ร่าง", calculated: "คำนวณแล้ว", approved: "อนุมัติแล้ว", paid: "จ่ายแล้ว", cancelled: "ยกเลิก", locked: "ล็อก" } as Record<string, string>)[s(r, "status")] ?? s(r, "status")),
+    link: (r) => `/payroll/manual-input?period_id=${s(r, "id")}`, perEntity: 3,
   },
   {
     entity: "user", table: "user_profiles", perms: ["admin.users"],
@@ -354,11 +385,15 @@ const SOURCES: Source[] = [
 
 const CANDIDATES = 40;   // ดึงผู้สมัครต่อชนิดแล้วค่อยจัดอันดับใน JS (ตามมาตรฐาน picker)
 
-async function searchSource(src: Source, q: string, toks: string[], can: CanFn): Promise<SearchHit[]> {
+/** ชนิดที่โชว์เฉพาะตอนค้นในแอปเดี่ยว (ค้นรวมไม่โชว์ กันรก) */
+const SCOPE_ONLY_ENTITIES: SearchEntity[] = ["contract", "period"];
+
+async function searchSource(src: Source, q: string, toks: string[], can: CanFn, scope: SearchScope | null): Promise<SearchHit[]> {
   if (!src.perms.every((p) => can(p))) return [];
+  if (scope ? !scope.entities.includes(src.entity) : SCOPE_ONLY_ENTITIES.includes(src.entity)) return [];
   const admin = supabaseAdmin();
   let query = admin.from(src.table).select(src.select) as unknown as QB;
-  if (src.filter) query = src.filter(query);
+  if (src.filter) query = src.filter(query, scope);
   for (const t of toks) query = query.or(ilikeOr(src.cols, t));   // token-AND
   const { data, error } = await query.limit(CANDIDATES);
   if (error || !Array.isArray(data)) return [];
@@ -376,10 +411,10 @@ async function searchSource(src: Source, q: string, toks: string[], can: CanFn):
 }
 
 /** ค้นทุกชนิดพร้อมกัน (เฉพาะที่มีสิทธิ์) → คงลำดับกลุ่มตามทะเบียน */
-async function searchData(q: string, can: CanFn): Promise<SearchHit[]> {
+async function searchData(q: string, can: CanFn, scope: SearchScope | null): Promise<SearchHit[]> {
   const toks = tokenize(q);
   if (toks.length === 0) return [];
-  const results = await Promise.all(SOURCES.map((src) => searchSource(src, q, toks, can).catch(() => [] as SearchHit[])));
+  const results = await Promise.all(SOURCES.map((src) => searchSource(src, q, toks, can, scope).catch(() => [] as SearchHit[])));
   return results.flat();
 }
 
@@ -408,6 +443,8 @@ async function searchAssets(q: string): Promise<SearchHit[]> {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get("q") ?? "").trim();
+  // ?scope=payroll → ค้นเฉพาะของแอปนั้น (ทะเบียน lib/search-scopes) · ไม่ส่ง/ไม่รู้จัก = ค้นรวมทุกโมดูล
+  const scope = getSearchScope(searchParams.get("scope"));
 
   if (!q) return NextResponse.json({ data: [], error: null } satisfies GlobalSearchResponse);
 
@@ -419,10 +456,10 @@ export async function GET(request: NextRequest) {
 
   // ยิงพร้อมกัน: หน้า/เมนู · คู่มือ · ข้อมูลธุรกิจ (ทุกโมดูลที่มีสิทธิ์) · ไฟล์ — ตัวไหนพังไม่กระทบตัวอื่น
   const [pageHits, guideHits, dataHits, assetHits] = await Promise.all([
-    searchPages(q, access.can, 6).catch(() => [] as SearchHit[]),
-    searchGuides(q, 3).catch(() => [] as SearchHit[]),
-    searchData(q, access.can).catch(() => [] as SearchHit[]),
-    searchAssets(q).catch(() => [] as SearchHit[]),
+    searchPages(q, access.can, 6, scope).catch(() => [] as SearchHit[]),
+    searchGuides(q, 3, scope).catch(() => [] as SearchHit[]),
+    searchData(q, access.can, scope).catch(() => [] as SearchHit[]),
+    scope ? Promise.resolve([] as SearchHit[]) : searchAssets(q).catch(() => [] as SearchHit[]),   // ไฟล์กลางไม่เกี่ยวกับแอปเดี่ยว
   ]);
 
   // ลำดับกลุ่ม: หน้า/เมนู → วิธีใช้งาน → ข้อมูล (SKU/คู่ค้า/PO/…/พนักงาน/ผู้ใช้) → ไฟล์

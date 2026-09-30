@@ -8,6 +8,7 @@ import { useAuth } from "@/components/auth";
 import { useRecentPicks, RECENT_KEYS } from "@/lib/recent-picks";
 import { announceParams } from "@/lib/open-param";
 import { matchCommands } from "@/lib/search-commands";
+import { getSearchScope } from "@/lib/search-scopes";
 import type { SearchHit, GlobalSearchResponse } from "@/app/api/global-search/route";
 
 // ---- Entity icon/label config ----
@@ -28,6 +29,8 @@ const ENTITY: Record<SearchHit["entity_type"], { icon: string; label: string; co
   cn:        { icon: "➖", label: "ใบลดหนี้",           color: "text-violet-700"  },
   task:      { icon: "🎨", label: "งาน Creative",       color: "text-pink-700"    },
   employee:  { icon: "🧑‍💼", label: "พนักงาน",           color: "text-cyan-700"    },
+  contract:  { icon: "📄", label: "สัญญาจ้าง",          color: "text-cyan-800"    },
+  period:    { icon: "📅", label: "งวดเงินเดือน",        color: "text-emerald-800" },
   user:      { icon: "👤", label: "ผู้ใช้ระบบ",         color: "text-purple-700"  },
   asset:     { icon: "🖼️", label: "ไฟล์/คลัง",          color: "text-indigo-700"  },
 };
@@ -57,9 +60,15 @@ type Section = { key: string; title: string; hits: SearchHit[]; removable?: bool
 // GlobalSearch — Cmd+K modal
 // ============================================================
 
-export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * @param scope ขอบเขตค้นหา (key ใน lib/search-scopes เช่น "payroll") — ไม่ส่ง = ค้นรวมทุกโมดูล
+ *              แอปเดี่ยวส่งมาเพื่อให้ค้นเฉพาะของแอปนั้น + มีกล่อง "วิธีค้นหา" เฉพาะทาง
+ */
+export function GlobalSearch({ open, onClose, scope: scopeKey }: { open: boolean; onClose: () => void; scope?: string }) {
   const router = useRouter();
   const { can } = useAuth();
+  const scope = getSearchScope(scopeKey);
+  const [showHelp, setShowHelp] = useState(false);   // ❓ วิธีค้นหา (เฉพาะ scope ที่มี tips)
   const [query,   setQuery]   = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,7 +82,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
   // reset เมื่อเปิดใหม่
   useEffect(() => {
     if (open) {
-      setQuery(""); setResults([]); setActiveIdx(0);
+      setQuery(""); setResults([]); setActiveIdx(0); setShowHelp(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
@@ -87,7 +96,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await apiFetch(`/api/global-search?q=${encodeURIComponent(q)}&limit=8`);
+        const res = await apiFetch(`/api/global-search?q=${encodeURIComponent(q)}&limit=8${scope ? `&scope=${encodeURIComponent(scope.key)}` : ""}`);
         const json: GlobalSearchResponse = await res.json();
         if (!cancelled) {
           setResults(json.data);
@@ -97,18 +106,18 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
       finally { if (!cancelled) setLoading(false); }
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [query, open]);
+  }, [query, open, scope]);
 
   // ⚡ คำสั่งลัด — จับคู่ฝั่งเครื่องทันที (ไม่ต้องรอ API) เฉพาะที่มีสิทธิ์
   const commandHits = useMemo<SearchHit[]>(() => {
     const q = query.trim();
     if (!q) return [];
-    return matchCommands(q, (p) => !p || can(p as Parameters<typeof can>[0])).map(({ cmd, score }) => ({
+    return matchCommands(q, (p) => !p || can(p as Parameters<typeof can>[0]), scope?.key).map(({ cmd, score }) => ({
       entity_type: "command", id: cmd.id, label: `${cmd.icon} ${cmd.label}`,
       sublabel: cmd.href.includes("new=1") ? "เปิดฟอร์มสร้างใหม่ให้ทันที" : "ไปที่หน้านั้น",
       link_url: cmd.href, score,
     }));
-  }, [query, can]);
+  }, [query, can, scope]);
 
   // จัดกลุ่มผล: ไม่มีคำค้น → "เพิ่งเปิดล่าสุด" · มีคำค้น → คำสั่งลัด แล้วตามด้วยกลุ่มจาก API (คงลำดับ)
   const sections = useMemo<Section[]>(() => {
@@ -173,15 +182,50 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="ค้นหน้า/เมนู, SKU, ชื่อร้าน/ลูกค้า, เลข PO / ใบขาย / MO, งาน, พนักงาน, วิธีใช้ · หรือสั่ง “สร้าง PO”"
+            placeholder={scope?.placeholder ?? "ค้นหน้า/เมนู, SKU, ชื่อร้าน/ลูกค้า, เลข PO / ใบขาย / MO, งาน, พนักงาน, วิธีใช้ · หรือสั่ง “สร้าง PO”"}
             className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-slate-800 placeholder-slate-400" />
+          {scope && (
+            <button type="button" onClick={() => setShowHelp((v) => !v)} title="วิธีค้นหา"
+              className={`text-[11px] px-2 py-0.5 rounded-full border ${showHelp ? "bg-teal-50 border-teal-200 text-teal-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+              ❓ วิธีค้นหา
+            </button>
+          )}
           <kbd className="text-[10px] font-mono text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">ESC</kbd>
         </div>
+
+        {/* ❓ วิธีค้นหา — เฉพาะ scope ที่ประกาศ tips ไว้ (lib/search-scopes) */}
+        {scope && showHelp && (
+          <div className="px-4 py-3 bg-teal-50/60 border-b border-teal-100 text-xs text-slate-700">
+            <div className="font-semibold text-teal-800 mb-1.5">พิมพ์อะไรได้บ้าง</div>
+            <ul className="space-y-1">
+              {scope.tips.map((t) => (
+                <li key={t.what} className="flex gap-2">
+                  <span className="flex-shrink-0">{t.icon}</span>
+                  <span className="min-w-0">{t.what} <span className="text-slate-400">— เช่น</span> <button type="button" onClick={() => { setQuery(t.example.split(" หรือ ")[0].split(" · ")[0]); setShowHelp(false); }} className="font-mono text-teal-700 hover:underline">{t.example}</button></span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 text-[11px] text-slate-400">ใช้ <kbd className="bg-white border border-slate-200 px-1 rounded">↑↓</kbd> เลือก · <kbd className="bg-white border border-slate-200 px-1 rounded">↵</kbd> เปิด · <kbd className="bg-white border border-slate-200 px-1 rounded">ESC</kbd> ปิด · เปิดเร็วด้วย <kbd className="bg-white border border-slate-200 px-1 rounded">Ctrl+K</kbd></div>
+          </div>
+        )}
 
         {/* Results */}
         <div ref={listRef} className="max-h-[60vh] overflow-y-auto">
           {loading && results.length === 0 && commandHits.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-slate-400">กำลังค้นหา...</div>
+          ) : sections.length === 0 && !hasQuery && scope ? (
+            <div className="px-4 py-8 text-center">
+              <div className="text-3xl mb-2 opacity-30">🔍</div>
+              <p className="text-sm text-slate-500">ค้นเฉพาะข้อมูลของ {scope.label.replace("ค้นเฉพาะ ", "")}</p>
+              <p className="text-xs text-slate-400 mt-1">ค้นได้: {scope.tips.slice(0, 4).map((t) => `${t.icon} ${t.what.split(" — ")[0]}`).join(" · ")}</p>
+              <p className="text-xs text-slate-400 mt-1">ไม่แน่ใจว่าพิมพ์อะไร กด <button type="button" onClick={() => setShowHelp(true)} className="text-teal-700 underline">❓ วิธีค้นหา</button> ด้านบน</p>
+              <div className="flex flex-wrap justify-center gap-1.5 mt-3">
+                {scope.examples.map((s) => (
+                  <button key={s} type="button" onClick={() => setQuery(s)}
+                    className="text-xs px-2 py-0.5 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50">{s}</button>
+                ))}
+              </div>
+            </div>
           ) : sections.length === 0 && !hasQuery ? (
             <div className="px-4 py-10 text-center">
               <div className="text-3xl mb-2 opacity-30">🔍</div>
@@ -197,8 +241,12 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             </div>
           ) : sections.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-slate-400">
-              <p>ไม่พบผลลัพธ์ที่ตรงกับ &quot;{query}&quot;</p>
-              <p className="text-xs mt-2 text-slate-400">ถ้าเป็นชื่อหน้า: ลองคำอื่น หรือให้แอดมินเพิ่ม “คำค้นเพิ่ม” ให้เมนูนั้นที่ จัดการเมนู</p>
+              <p>ไม่พบผลลัพธ์ที่ตรงกับ &quot;{query}&quot;{scope ? ` ใน ${scope.label.replace("ค้นเฉพาะ ", "")}` : ""}</p>
+              {scope ? (
+                <p className="text-xs mt-2 text-slate-400">ลองพิมพ์สั้นลง (เช่น แค่รหัสหรือชื่อเล่น) หรือกด <button type="button" onClick={() => setShowHelp(true)} className="text-teal-700 underline">❓ วิธีค้นหา</button> · ถ้าเป็นของโมดูลอื่น ให้ค้นจากหน้า ERP เต็ม</p>
+              ) : (
+                <p className="text-xs mt-2 text-slate-400">ถ้าเป็นชื่อหน้า: ลองคำอื่น หรือให้แอดมินเพิ่ม “คำค้นเพิ่ม” ให้เมนูนั้นที่ จัดการเมนู</p>
+              )}
             </div>
           ) : (
             <>
@@ -250,7 +298,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <kbd className="bg-white border border-slate-200 px-1 rounded">↵</kbd>{" "}
             <kbd className="bg-white border border-slate-200 px-1 rounded">ESC</kbd>
           </span>
-          <span>Global Search · ค้นข้ามโมดูล</span>
+          <span>{scope ? `${scope.label} · Ctrl+K` : "Global Search · ค้นข้ามโมดูล"}</span>
         </div>
       </div>
     </div>,
