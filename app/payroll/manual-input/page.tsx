@@ -20,6 +20,7 @@ type Row = {
   contract_type?: string | null; employment_type?: string | null; wage_type?: string | null;
   scanner_employee_code?: string | null; work_schedule_id?: string | null; attendance_scan_exempt?: boolean | null;
   contract_start_date?: string | null; contract_end_date?: string | null;
+  employment_status?: string | null; resign_date?: string | null;
   hours_per_day?: number; paid_minutes?: number; base_pay_minutes?: number; deducted_pay_minutes?: number;
   late_baht: number; late_minutes: number; absence_baht: number; absence_days: number; absence_hours: number;
   leave_baht: number; leave_days: number; leave_hours: number; ot_baht: number; ot_hours: number;
@@ -115,6 +116,7 @@ type GridCell = {
 type GridRow = {
   employee_id: string; employee_code: string; employee_name: string; contract_type?: string | null; wage_type?: string | null; net_estimate: number; manual_days: number; cells: GridCell[];
   contract_start?: string | null; contract_end?: string | null;
+  employment_status?: string | null; resign_date?: string | null;
 };
 type GridData = { days: GridDay[]; rows: GridRow[]; period?: { default_hours_per_day?: number } };
 type ManualInputPeriodMeta = {
@@ -273,12 +275,25 @@ function summaryGroupLabel(row: Row, groupBy: SummaryGroupBy) {
   return "ทั้งหมด";
 }
 
-function EmployeeIdentity({ code, name, contractType, wageType }: { code: string; name: string; contractType?: string | null; wageType?: string | null }) {
+/** ป้ายสถานะพนักงานที่ไม่ได้ทำงานแล้ว (ลาออก/ปิดใช้งาน) — โชว์ข้างชื่อให้รู้ทันทีว่าทำไมวันในงวดไม่เต็ม */
+function EmploymentBadge({ status, resignDate }: { status?: string | null; resignDate?: string | null }) {
+  const st = String(status ?? "active");
+  if (st === "active") return null;
+  const label = st === "resigned" ? `ลาออกแล้ว${resignDate ? ` ${formatDate(resignDate)}` : ""}` : "ปิดใช้งานแล้ว";
+  return (
+    <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-rose-600" title={st === "resigned" ? "พนักงานลาออกแล้ว — นับวันถึงวันลาออกเท่านั้น" : "พนักงานถูกปิดใช้งาน"}>
+      {label}
+    </span>
+  );
+}
+
+function EmployeeIdentity({ code, name, contractType, wageType, employmentStatus, resignDate }: { code: string; name: string; contractType?: string | null; wageType?: string | null; employmentStatus?: string | null; resignDate?: string | null }) {
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         <span className="font-mono text-xs text-slate-400">{code}</span>
         <span className="truncate font-medium text-slate-800">{name || "-"}</span>
+        <EmploymentBadge status={employmentStatus} resignDate={resignDate} />
       </div>
       <div className="mt-1">
         <ContractBadge contractType={contractType} wageType={wageType} />
@@ -615,7 +630,7 @@ export default function ManualInputPage() {
                 return (
                   <tr key={r.id} className={`border-t border-slate-100 hover:bg-slate-50 ${r.has_manual ? "bg-amber-50/30" : ""}`}>
                     <td className="px-3 py-2">
-                      <EmployeeIdentity code={r.employee_code} name={r.employee_name} contractType={r.contract_type} wageType={r.wage_type} />
+                      <EmployeeIdentity code={r.employee_code} name={r.employee_name} contractType={r.contract_type} wageType={r.wage_type} employmentStatus={r.employment_status} resignDate={r.resign_date} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <WorkDaysCell row={r} />
@@ -2141,7 +2156,7 @@ function AttendanceGrid({
             {rows.map((row) => (
               <tr key={row.employee_id} className="group">
                 <td className="sticky left-0 z-10 w-[240px] min-w-[240px] border-b border-r border-slate-200 bg-white px-3 py-2 group-hover:bg-slate-50">
-                  <EmployeeIdentity code={row.employee_code} name={row.employee_name} contractType={row.contract_type} wageType={row.wage_type} />
+                  <EmployeeIdentity code={row.employee_code} name={row.employee_name} contractType={row.contract_type} wageType={row.wage_type} employmentStatus={row.employment_status} resignDate={row.resign_date} />
                   <div className="text-[11px] text-slate-400">
                     {row.manual_days ? `มีรายการในงวดนี้ ${row.manual_days} วัน` : "ทำงานปกติทั้งงวด"}
                   </div>

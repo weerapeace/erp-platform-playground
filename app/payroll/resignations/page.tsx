@@ -92,7 +92,8 @@ export default function PayrollResignationsPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);   // ✏️ แก้คำขอที่ยังรอตรวจ (ใช้ฟอร์มเดียวกับตอนเพิ่ม)
+  const [editId, setEditId] = useState<string | null>(null);   // ✏️ แก้คำขอ (ใช้ฟอร์มเดียวกับตอนเพิ่ม)
+  const [editApproved, setEditApproved] = useState(false);      // แก้คำขอที่อนุมัติแล้ว → ล็อกวันทำงานวันสุดท้าย
   const [form, setForm] = useState<FormState>({
     employee_id: "",
     notice_date: todayIso(),
@@ -180,10 +181,11 @@ export default function PayrollResignationsPage() {
   const openEdit = (row: ResignationRow) => {
     setDetailRow(null);
     setEditId(row.id);
+    setEditApproved(row.status === "approved");
     setForm({ employee_id: row.employee_id, notice_date: row.notice_date, last_working_date: row.last_working_date, reason: row.reason ?? "", handover_note: row.handover_note ?? "" });
     setCreateOpen(true);
   };
-  const closeForm = () => { setCreateOpen(false); if (editId) { setEditId(null); resetForm(); } };
+  const closeForm = () => { setCreateOpen(false); if (editId) { setEditId(null); setEditApproved(false); resetForm(); } };
 
   const submitCreate = async () => {
     setSaving(true);
@@ -248,7 +250,7 @@ export default function PayrollResignationsPage() {
     return [
       { label: "อนุมัติ", icon: "✓", onClick: (row) => openAction(row, "approve"), show: (row) => row.status === "pending" },
       { label: "ปฏิเสธ", icon: "×", variant: "danger", onClick: (row) => openAction(row, "reject"), show: (row) => row.status === "pending" },
-      { label: "แก้ไขคำขอ", icon: "✏️", onClick: (row) => openEdit(row), show: (row) => row.status === "pending" },
+      { label: "แก้ไขคำขอ", icon: "✏️", onClick: (row) => openEdit(row), show: (row) => row.status === "pending" || row.status === "approved" },
       { label: "ยกเลิก", icon: "–", variant: "danger", onClick: (row) => openAction(row, "cancel"), show: (row) => row.status === "pending" },
       { label: "ย้อนการอนุมัติ", icon: "↩", variant: "danger", onClick: (row) => openAction(row, "revert"), show: (row) => row.status === "approved" },
     ];
@@ -337,7 +339,10 @@ export default function PayrollResignationsPage() {
               </>
             )}
             {detailRow?.status === "approved" && canEdit && (
-              <button type="button" onClick={() => openAction(detailRow, "revert")} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">↩ ย้อนการอนุมัติ</button>
+              <>
+                <button type="button" onClick={() => openEdit(detailRow)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" title="ใส่เหตุผล/ส่งมอบงานย้อนหลังได้ (วันทำงานวันสุดท้ายแก้ไม่ได้ ต้องย้อนการอนุมัติก่อน)">✏️ แก้เหตุผล/ส่งมอบงาน</button>
+                <button type="button" onClick={() => openAction(detailRow, "revert")} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">↩ ย้อนการอนุมัติ</button>
+              </>
             )}
           </>
         )}
@@ -406,9 +411,12 @@ export default function PayrollResignationsPage() {
             <input
               type="date"
               value={form.last_working_date}
+              disabled={editApproved}
+              title={editApproved ? "อนุมัติแล้ว — เปลี่ยนวันไม่ได้ ต้องย้อนการอนุมัติก่อน" : undefined}
               onChange={(e) => setForm((f) => ({ ...f, last_working_date: e.target.value }))}
-              className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+              className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50 disabled:text-slate-400"
             />
+            {editApproved && <span className="mt-1 block text-[11px] text-slate-400">อนุมัติแล้ว วันนี้ผูกกับสัญญา/วันลาออก — แก้ได้เฉพาะวันที่แจ้ง เหตุผล ส่งมอบงาน</span>}
           </label>
           <label className="sm:col-span-2">
             <span className="text-sm font-medium text-slate-700">เหตุผล</span>

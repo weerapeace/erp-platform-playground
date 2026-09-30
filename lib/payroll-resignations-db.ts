@@ -287,11 +287,20 @@ async function loadResignationRow(id: string): Promise<Record<string, unknown>> 
   return row;
 }
 
-/** ✏️ แก้คำขอที่ยัง "รอตรวจ" (ลงวันที่/เหตุผลผิด) — อนุมัติแล้วแก้ไม่ได้ ต้องย้อนการอนุมัติก่อน */
+/** คำขอที่อนุมัติแล้ว: แก้ "วันทำงานวันสุดท้าย" ไม่ได้ (ผูกกับสัญญา/วันลาออกที่เขียนไปแล้ว) — ต้องย้อนการอนุมัติก่อน */
+export function resignationEditError(status: string, oldLastWorkingDate: string, newLastWorkingDate: string): string | null {
+  if (status === "pending") return null;
+  if (status !== "approved") return "แก้ได้เฉพาะคำขอที่รอตรวจหรืออนุมัติแล้ว";
+  if (String(newLastWorkingDate).slice(0, 10) !== String(oldLastWorkingDate).slice(0, 10)) {
+    return "คำขอนี้อนุมัติแล้ว — เปลี่ยนวันทำงานวันสุดท้ายไม่ได้ (ผูกกับสัญญา/วันลาออกแล้ว) ถ้าต้องเปลี่ยน ให้ย้อนการอนุมัติก่อน · เหตุผลและส่งมอบงานแก้ได้";
+  }
+  return null;
+}
+
+/** ✏️ แก้คำขอ — รอตรวจ: แก้ได้ทุกช่อง · อนุมัติแล้ว: แก้ได้เฉพาะ วันที่แจ้ง/เหตุผล/ส่งมอบงาน (ใส่ย้อนหลังได้) */
 export async function updateResignationDraft(id: string, input: DraftInput & { actor?: unknown }): Promise<ResignationRow> {
   const admin = supabaseAdmin();
   const row = await loadResignationRow(id);
-  if (text(row.status) !== "pending") throw new Error("แก้ได้เฉพาะคำขอที่ยังรอตรวจ");
   const old = payloadFromRow(row);
   const next = normalizeResignationPayload({
     notice_date: input.notice_date ?? old.notice_date,
@@ -299,6 +308,8 @@ export async function updateResignationDraft(id: string, input: DraftInput & { a
     reason: input.reason ?? old.reason,
     handover_note: input.handover_note ?? old.handover_note,
   });
+  const editError = resignationEditError(text(row.status), old.last_working_date, next.last_working_date);
+  if (editError) throw new Error(editError);
   const validation = validateResignationDraft({ employee_id: row.employee_id, ...next });
   if (validation) throw new Error(validation);
 

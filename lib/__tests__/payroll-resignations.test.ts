@@ -5,6 +5,7 @@ import {
   canTransitionResignation,
   getResignationTransitionCopy,
   normalizeResignationPayload,
+  resignationEditError,
   validateResignationDraft,
 } from "@/lib/payroll-resignations-db";
 
@@ -71,5 +72,13 @@ describe("payroll-resignations", () => {
   it("explains that rejecting or cancelling does not touch employee master data", () => {
     expect(getResignationTransitionCopy("reject").impactItems).toContain("ไม่เปลี่ยนสถานะพนักงานหรือสัญญาจ้าง");
     expect(getResignationTransitionCopy("cancel").impactItems).toContain("ไม่เปลี่ยนสถานะพนักงานหรือสัญญาจ้าง");
+  });
+
+  it("อนุมัติแล้ว: แก้เหตุผล/ส่งมอบงานย้อนหลังได้ แต่เปลี่ยนวันทำงานวันสุดท้ายไม่ได้", () => {
+    expect(resignationEditError("pending", "2026-09-15", "2026-09-20")).toBeNull();
+    expect(resignationEditError("approved", "2026-09-15", "2026-09-15")).toBeNull();
+    expect(resignationEditError("approved", "2026-09-15", "2026-09-20")).toContain("ย้อนการอนุมัติ");
+    expect(resignationEditError("rejected", "2026-09-15", "2026-09-15")).not.toBeNull();
+    expect(resignationEditError("cancelled", "2026-09-15", "2026-09-15")).not.toBeNull();
   });
 });

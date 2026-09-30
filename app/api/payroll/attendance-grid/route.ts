@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
     const empIds = lines.map((l) => String(l.employee_id)).filter(Boolean);
     const [empRes, attRes, leaveRes, otRes] = await Promise.all([
       empIds.length
-        ? a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds)
+        ? a.from("employees").select("id, first_name, last_name, nickname, employment_status, resign_date").in("id", empIds)
         : Promise.resolve({ data: [] as Row[] }),
       a.from("attendance_entries").select("employee_id, work_date, late_minutes, late_deduction, absence_hours, absence_deduction, status, note").eq("payroll_period_id", periodId),
       a.from("leave_entries").select("employee_id, leave_date, days, hours, unpaid_leave_deduction, status, note").eq("payroll_period_id", periodId),
@@ -101,9 +101,11 @@ export async function GET(req: NextRequest) {
     ]);
 
     const employeeName = new Map<string, string>();
+    const employmentBy = new Map<string, { employment_status: string | null; resign_date: string | null }>();
     for (const e of (empRes.data ?? []) as Row[]) {
       const name = `${String(e.first_name ?? "")} ${String(e.last_name ?? "")}`.trim();
       employeeName.set(String(e.id), name + (e.nickname ? ` (${String(e.nickname)})` : ""));
+      employmentBy.set(String(e.id), { employment_status: e.employment_status ? String(e.employment_status) : null, resign_date: e.resign_date ? String(e.resign_date).slice(0, 10) : null });
     }
     // สัญญาชุดเดียวกับที่ตัวคำนวณใช้ (รวมคนลาออกกลางเดือน — ช่องหลังวันลาออกจะขึ้น "—" เอง)
     const contractBy = contracts;
@@ -248,6 +250,8 @@ export async function GET(req: NextRequest) {
           employee_id: employeeId,
           employee_code: line.employee_code,
           employee_name: employeeName.get(employeeId) ?? "",
+          employment_status: employmentBy.get(employeeId)?.employment_status ?? null,
+          resign_date: employmentBy.get(employeeId)?.resign_date ?? null,
           contract_type: line.contract_type ?? contract.contract_type ?? null,
           contract_start: validDate(cStart) ? cStart : null,   // โชว์ใต้ชื่อ + ใช้อธิบายช่องว่าง
           contract_end: validDate(cEnd) ? cEnd : null,

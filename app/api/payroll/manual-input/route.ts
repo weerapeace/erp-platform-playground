@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { computePeriodPreview, payableWorkDays } from "@/lib/payroll-calc-engine";
+import { loadPeriodContractMap } from "@/lib/payroll-period-contracts-db";
 import { shouldReceivePaidPeriodHoliday } from "@/lib/payroll-attendance-rules";
 import { money } from "@/lib/payroll-calc";
 
@@ -82,32 +83,30 @@ export async function GET(req: NextRequest) {
     const scannerCodeBy: Record<string, string | null> = {};
     const contractMetaBy: Record<string, Record<string, unknown>> = {};
     const companyPaidTaxBy: Record<string, boolean> = {};
+    // สถานะพนักงาน (ลาออกแล้ว/วันลาออก) → โชว์ป้ายข้างชื่อ
+    const employmentBy: Record<string, { employment_status: string | null; resign_date: string | null }> = {};
     if (empIds.length) {
-      let contractQuery = a.from("employee_contracts")
-        .select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, work_time_profile_id, attendance_scan_exempt, start_date, end_date")
-        .in("employee_id", empIds)
-        .eq("is_current", true)
-        .eq("status", "active");
-      if (period.company_id) contractQuery = contractQuery.eq("company_id", period.company_id);
-      const [empsRes, settingsRes, contractsRes] = await Promise.all([
-        a.from("employees").select("id, first_name, last_name, nickname, scanner_employee_code").in("id", empIds),
+      const [empsRes, settingsRes, contractMap] = await Promise.all([
+        a.from("employees").select("id, first_name, last_name, nickname, scanner_employee_code, employment_status, resign_date").in("id", empIds),
         a.from("employee_payroll_settings").select("employee_id, withholding_tax_company_paid").in("employee_id", empIds),
-        contractQuery,
+        // สัญญาที่ "อยู่ในงวด" (รวมคนลาออกกลางเดือน) — กฎเดียวกับตัวคำนวณ ไม่ใช่ is_current/active ตอนนี้
+        loadPeriodContractMap(a, period as unknown as Record<string, unknown>, {
+          companyId: period.company_id ?? null, employeeIds: empIds,
+          select: "employee_id, contract_type, employment_type, wage_type, work_schedule_id, work_time_profile_id, attendance_scan_exempt, status, is_current, start_date, end_date",
+        }),
       ]);
       const emps = empsRes.data;
       (emps ?? []).forEach((e) => {
-        const r = e as { id: string; first_name: string; last_name: string | null; nickname: string | null; scanner_employee_code?: string | null };
+        const r = e as { id: string; first_name: string; last_name: string | null; nickname: string | null; scanner_employee_code?: string | null; employment_status?: string | null; resign_date?: string | null };
         nameBy[r.id] = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() + (r.nickname ? ` (${r.nickname})` : "");
         scannerCodeBy[r.id] = r.scanner_employee_code ?? null;
+        employmentBy[r.id] = { employment_status: r.employment_status ?? null, resign_date: r.resign_date ? String(r.resign_date).slice(0, 10) : null };
       });
       (settingsRes.data ?? []).forEach((s) => {
         const r = s as { employee_id: string; withholding_tax_company_paid: boolean | null };
         companyPaidTaxBy[r.employee_id] = r.withholding_tax_company_paid === true;
       });
-      (contractsRes.data ?? []).forEach((c) => {
-        const r = c as Record<string, unknown> & { employee_id: string };
-        contractMetaBy[r.employee_id] = r;
-      });
+      contractMap.forEach((c, employeeId) => { contractMetaBy[employeeId] = c; });
       // โปรไฟล์เวลาทำงาน (เข้า/พักเที่ยง/เลิกงาน) → ให้การคิดมาสายใช้เวลาเข้าตามโปรไฟล์ของแต่ละคน
       // (ออฟฟิศ 08:00 / โรงงาน 07:50) แทนค่ากลางตัวเดียว
       const profileIds = [...new Set(Object.values(contractMetaBy)
@@ -158,6 +157,8 @@ export async function GET(req: NextRequest) {
         attendance_scan_exempt: contractMetaBy[id]?.attendance_scan_exempt === true,
         contract_start_date: contractMetaBy[id]?.start_date ?? null,
         contract_end_date: contractMetaBy[id]?.end_date ?? null,
+        employment_status: employmentBy[id]?.employment_status ?? null,
+        resign_date: employmentBy[id]?.resign_date ?? null,
         work_days: money(l.attendance_days),
         hours_per_day: hoursPerDay,
         paid_minutes: paidMinutes,
