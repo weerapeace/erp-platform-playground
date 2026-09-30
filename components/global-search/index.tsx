@@ -9,6 +9,7 @@ import { useRecentPicks, RECENT_KEYS } from "@/lib/recent-picks";
 import { announceParams } from "@/lib/open-param";
 import { matchCommands } from "@/lib/search-commands";
 import { getSearchScope } from "@/lib/search-scopes";
+import { HelpGuideModal } from "@/components/help-guides";
 import type { SearchHit, GlobalSearchResponse } from "@/app/api/global-search/route";
 
 // ---- Entity icon/label config ----
@@ -73,6 +74,8 @@ export function GlobalSearch({ open, onClose, scope: scopeKey }: { open: boolean
   const { can } = useAuth();
   const scope = getSearchScope(scopeKey);
   const [showHelp, setShowHelp] = useState(false);   // ❓ วิธีค้นหา (เฉพาะ scope ที่มี tips)
+  // 📖 คู่มือที่กดจากผลค้นหา → เปิดป๊อปอัปทับหน้าเดิม (ไม่พาไปหน้า /master/help-guides — ปิดแล้วอยู่ที่เดิม)
+  const [guideId, setGuideId] = useState<string | null>(null);
   const [query,   setQuery]   = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -145,6 +148,7 @@ export function GlobalSearch({ open, onClose, scope: scopeKey }: { open: boolean
   const goTo = useCallback((hit: SearchHit) => {
     remember(hit);            // จำไว้โชว์ตอนเปิดครั้งหน้า
     onClose();
+    if (hit.entity_type === "guide") { setGuideId(hit.id); return; }   // คู่มือ = ป๊อปอัป ไม่ย้ายหน้า
     router.push(hit.link_url);
     announceParams(hit.link_url);   // อยู่หน้านั้นอยู่แล้ว → บอกให้เปิดใบ/ฟอร์มทันที (URL เปลี่ยนแค่ query หน้าไม่ mount ใหม่)
   }, [onClose, router, remember]);
@@ -171,7 +175,9 @@ export function GlobalSearch({ open, onClose, scope: scopeKey }: { open: boolean
     el?.scrollIntoView({ block: "nearest" });
   }, [activeIdx]);
 
-  if (typeof window === "undefined" || !open) return null;
+  if (typeof window === "undefined") return null;
+  // ป๊อปอัปคู่มืออยู่นอกเงื่อนไข open — กล่องค้นหาปิดไปแล้วแต่คู่มือยังต้องโชว์อยู่
+  if (!open) return guideId ? <HelpGuideModal guideId={guideId} onClose={() => setGuideId(null)} /> : null;
 
   const hasQuery = !!query.trim();
 

@@ -17,26 +17,62 @@ type StepDraft = { title: string; body: string; image_r2_key: string; link_url: 
 const toDraft = (s: HelpStep): StepDraft => ({ title: s.title, body: s.body ?? "", image_r2_key: s.image_r2_key ?? "", link_url: s.link_url ?? "" });
 const imgUrl = (k?: string | null) => (k ? `/api/r2-image?key=${encodeURIComponent(k)}` : null);
 
-// ── อ่านคู่มือ (read-only) ──
-function GuideReader({ guide }: { guide: HelpGuide }) {
-  if (!guide.steps.length) return <p className="text-[13px] text-slate-400 py-6 text-center">คู่มือนี้ยังไม่มีขั้นตอน</p>;
+// ── อ่านคู่มือ (read-only) — การ์ดทีละขั้น คอลัมน์กลางจอ (อ่านง่ายแม้ป๊อปอัปเปิดเต็มจอ) ──
+/** เนื้อหาขั้นตอน: แยกบรรทัดที่คั่นด้วย " · " เป็นหัวข้อย่อย (bullet) ให้กวาดตาง่าย · บรรทัดเดียวไม่มีตัวคั่น = ย่อหน้าธรรมดา */
+function StepBody({ text }: { text: string }) {
+  const parts = text.split(/\s·\s/).map((t) => t.trim()).filter(Boolean);
+  if (parts.length <= 1) return <p className="text-[14px] leading-relaxed text-slate-600 whitespace-pre-wrap">{text}</p>;
   return (
-    <ol className="space-y-3">
-      {guide.steps.map((s, i) => (
-        <li key={s.id} className="flex gap-3">
-          <span className="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-[12px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-[13px] font-medium text-slate-800">{s.title}</p>
-            {s.body && <p className="text-[12px] text-slate-600 whitespace-pre-wrap mt-0.5">{s.body}</p>}
-            {imgUrl(s.image_r2_key) && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imgUrl(s.image_r2_key)!} alt="" className="mt-1.5 max-w-full rounded-lg border border-slate-200" />
-            )}
-            {s.link_url && <a href={s.link_url} target="_blank" rel="noreferrer" className="inline-block mt-1 text-[12px] text-indigo-600 hover:underline">↗ เปิดลิงก์</a>}
-          </div>
+    <ul className="space-y-1.5">
+      {parts.map((p, i) => (
+        <li key={i} className="flex gap-2 text-[14px] leading-relaxed text-slate-600">
+          <span className="shrink-0 mt-[9px] w-1.5 h-1.5 rounded-full bg-indigo-300" />
+          <span className="min-w-0 whitespace-pre-wrap">{p}</span>
         </li>
       ))}
-    </ol>
+    </ul>
+  );
+}
+
+const isInternalLink = (u: string) => u.startsWith("/");
+
+export function GuideReader({ guide }: { guide: HelpGuide }) {
+  if (!guide.steps.length) return <p className="text-[13px] text-slate-400 py-6 text-center">คู่มือนี้ยังไม่มีขั้นตอน</p>;
+  const total = guide.steps.length;
+  return (
+    <div className="mx-auto w-full max-w-2xl">
+      {guide.description && (
+        <div className="mb-4 rounded-2xl bg-indigo-50/70 border border-indigo-100 px-4 py-3 text-[14px] leading-relaxed text-indigo-900">
+          {guide.description}
+        </div>
+      )}
+      <p className="mb-2 text-[12px] text-slate-400">{total} ขั้นตอน · ทำตามลำดับจากบนลงล่าง</p>
+      <ol className="relative space-y-3">
+        {guide.steps.map((s, i) => (
+          <li key={s.id} className="relative rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-4 sm:px-5">
+            <div className="flex gap-3.5">
+              <span className="shrink-0 w-9 h-9 rounded-full bg-indigo-600 text-white text-[15px] font-bold flex items-center justify-center shadow-sm">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[15px] font-semibold text-slate-900 leading-snug">{s.title}</p>
+                {s.body && <div className="mt-1.5"><StepBody text={s.body} /></div>}
+                {imgUrl(s.image_r2_key) && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={imgUrl(s.image_r2_key)!} alt="" className="mt-3 max-w-full rounded-xl border border-slate-200" />
+                )}
+                {s.link_url && (
+                  // ลิงก์ในระบบ (ขึ้นต้น /) เปิดแท็บเดิม · ลิงก์นอก เปิดแท็บใหม่
+                  <a href={s.link_url} {...(isInternalLink(s.link_url) ? {} : { target: "_blank", rel: "noreferrer" })}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[13px] font-medium text-indigo-700 hover:bg-indigo-100">
+                    {isInternalLink(s.link_url) ? "ไปหน้านี้" : "เปิดลิงก์"} <span aria-hidden>→</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-4 text-center text-[12px] text-slate-400">จบคู่มือ · ถ้าขั้นไหนไม่ตรงกับหน้าจอจริง แจ้งแอดมินแก้ได้ที่ปุ่ม ✏️ แก้คู่มือ</p>
+    </div>
   );
 }
 
@@ -125,13 +161,13 @@ export function HelpGuideModal({ guideKey, guideId, onClose }: { guideKey?: stri
   useEffect(() => { void load(); }, [load]);
 
   return (
-    <ERPModal open onClose={onClose} size="lg"
+    <ERPModal open onClose={onClose} size="lg" storageKey="help-guide"
       title={guide ? `${guide.icon ? `${guide.icon} ` : "📖 "}${guide.title}` : "📖 วิธีใช้งาน"}
-      description={guide?.description ?? undefined}
+      description={editing ? guide?.description ?? undefined : undefined}
       footer={
         <div className="flex items-center justify-between w-full">
           {canEdit && guide && !editing ? <button onClick={() => setEditing(true)} className="text-[12px] text-indigo-600 hover:underline">✏️ แก้คู่มือ</button> : <span />}
-          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
+          <button onClick={onClose} className="h-9 px-5 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700">ปิดคู่มือ</button>
         </div>
       }>
       {loading ? <p className="text-[13px] text-slate-400 py-8 text-center">กำลังโหลด…</p>
