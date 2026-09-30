@@ -10,6 +10,7 @@ import {
   uniquePayslipIds,
 } from "@/lib/payroll-payslip-print";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadPeriodContractMap } from "@/lib/payroll-period-contracts-db";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export const dynamic = "force-dynamic";
@@ -115,14 +116,15 @@ export async function GET(req: NextRequest) {
     const lateMinBy: Record<string, number> = {}, absHoursBy: Record<string, number> = {};
     const leaveDaysBy: Record<string, number> = {}, leaveHoursBy: Record<string, number> = {}, otHoursBy: Record<string, number> = {};
     if (empIds.length) {
-      const [conRes, attRes, lvRes, otRes] = await Promise.all([
-        admin.from("employee_contracts").select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, start_date, end_date").in("employee_id", empIds).eq("is_current", true).eq("status", "active"),
+      const [conMap, attRes, lvRes, otRes] = await Promise.all([
+        // สัญญาที่ "อยู่ในงวด" (รวมคนลาออกกลางเดือน) — กฎเดียวกับตัวคำนวณ
+        loadPeriodContractMap(admin, period, { employeeIds: empIds, select: "employee_id, contract_type, employment_type, wage_type, work_schedule_id, status, is_current, start_date, end_date" }),
         admin.from("attendance_entries").select("employee_id, late_minutes, absence_hours").eq("payroll_period_id", periodId),
         admin.from("leave_entries").select("employee_id, days, hours").eq("payroll_period_id", periodId),
         admin.from("overtime_entries").select("employee_id, hours").eq("payroll_period_id", periodId),
       ]);
       const conBy: Record<string, Row> = {};
-      (conRes.data ?? []).forEach((c) => { conBy[text((c as Row).employee_id)] = c as Row; });
+      conMap.forEach((c, id) => { conBy[id] = c; });
       const lvBy: Record<string, number> = {};
       (attRes.data ?? []).forEach((r) => { const id = text((r as Row).employee_id); lateMinBy[id] = (lateMinBy[id] ?? 0) + money((r as Row).late_minutes); absHoursBy[id] = (absHoursBy[id] ?? 0) + money((r as Row).absence_hours); });
       (lvRes.data ?? []).forEach((r) => {

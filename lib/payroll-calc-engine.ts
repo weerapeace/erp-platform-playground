@@ -8,6 +8,8 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { money, roundMoney } from "@/lib/payroll-calc";
 import { isPayrollContractor, isPayrollDailyLike } from "@/lib/payroll-attendance-rules";
+import { capContractByResignDate, employeeInPeriod } from "@/lib/payroll-period-contracts";
+import { loadPeriodContractMap } from "@/lib/payroll-period-contracts-db";
 
 type Row = Record<string, unknown>;
 const MANUAL_STATUSES = new Set(["approved", "review", "draft"]);
@@ -285,16 +287,19 @@ const mergeMoney = (saved: Row = {}, manual: Row = {}) => {
 };
 
 /** คำนวณงวด (ไม่เขียน DB) — คืนบรรทัดที่คำนวณได้ */
-export async function computePeriodPreview(periodId: string): Promise<{ lines: Row[]; period: Row; recurring_items: Row[] }> {
+export async function computePeriodPreview(periodId: string): Promise<{ lines: Row[]; period: Row; recurring_items: Row[]; contracts: Map<string, Row> }> {
   const a = supabaseAdmin();
   const periodRes = await a.from("payroll_periods").select("*, payroll_period_holidays(*)").eq("id", periodId).limit(1);
   const period = (periodRes.data?.[0] as Row) ?? null;
   if (!period) throw new Error("ไม่พบงวด");
 
   const companyId = period.company_id as string | null;
-  const [empRes, conRes, setRes, attRes, leaveRes, otRes, advRes, adjRes, recRes, batchRes] = await Promise.all([
-    a.from("employees").select("*").eq("employment_status", "active"),
-    (() => { let q = a.from("employee_contracts").select("*").eq("is_current", true).eq("status", "active"); if (companyId) q = q.eq("company_id", companyId); return q; })(),
+  // ใครอยู่ในงวด = สัญญาที่ "ซ้อนกับช่วงงวด" (รวมคนลาออกกลางเดือน) ไม่ใช่แค่ is_current/active ตอนนี้
+  // กฎอยู่ที่ lib/payroll-period-contracts.ts · ช่วงวันที่นับจริงให้ effectiveRange ตัด (งวด ∩ สัญญา)
+  const contractBy = await loadPeriodContractMap(a, period, { companyId });
+  const periodEmpIds = [...contractBy.keys()];
+  const [empRes, setRes, attRes, leaveRes, otRes, advRes, adjRes, recRes, batchRes] = await Promise.all([
+    periodEmpIds.length ? a.from("employees").select("*").in("id", periodEmpIds) : Promise.resolve({ data: [] as Row[] }),
     a.from("employee_payroll_settings").select("*"),
     a.from("attendance_entries").select("*").eq("payroll_period_id", periodId),
     a.from("leave_entries").select("*").eq("payroll_period_id", periodId),
@@ -305,7 +310,6 @@ export async function computePeriodPreview(periodId: string): Promise<{ lines: R
     a.from("payment_batches").select("*, payment_batch_lines(*)").eq("payroll_period_id", periodId),
   ]);
 
-  const contractBy = new Map<string, Row>((conRes.data ?? []).map((c) => [String((c as Row).employee_id), c as Row]));
   const settingBy = new Map<string, Row>((setRes.data ?? []).map((s) => [String((s as Row).employee_id), s as Row]));
   const savedManual = aggregateManual({
     attendance: (attRes.data ?? []) as Row[], leave: (leaveRes.data ?? []) as Row[],
@@ -317,8 +321,11 @@ export async function computePeriodPreview(periodId: string): Promise<{ lines: R
 
   const lines: Row[] = [];
   for (const employee of (empRes.data ?? []) as Row[]) {
-    const contract = contractBy.get(String(employee.id));
-    if (!contract) continue;
+    if (!employeeInPeriod(employee, period)) continue;   // ลาออกก่อนงวดเริ่ม
+    const rawContract = contractBy.get(String(employee.id));
+    if (!rawContract) continue;
+    const contract = capContractByResignDate(rawContract, employee);   // วันลาออกมาก่อนสิ้นสุดสัญญา → นับถึงวันลาออก
+    contractBy.set(String(employee.id), contract);
     const setting = settingBy.get(String(employee.id)) ?? {};
     const manual = mergeMoney(savedManual.get(String(employee.id)), adjustments.get(String(employee.id)));
     const recItems = recurring.get(String(employee.id)) ?? [];
@@ -330,5 +337,5 @@ export async function computePeriodPreview(periodId: string): Promise<{ lines: R
     manual.mid_month_paid = money(manual.mid_month_paid) + money(midMonth.get(String(employee.id)));
     lines.push(buildLine(period, employee, contract, setting, manual));
   }
-  return { lines, period, recurring_items: Array.from(recurring.values()).flat() };
+  return { lines, period, recurring_items: Array.from(recurring.values()).flat(), contracts: contractBy };
 }

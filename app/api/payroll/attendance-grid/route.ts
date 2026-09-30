@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const a = supabaseAdmin();
-    const { lines, period } = await computePeriodPreview(periodId);
+    const { lines, period, contracts } = await computePeriodPreview(periodId);
     const start = String(period.start_date);
     const end = String(period.end_date);
     const hoursPerDay = money(period.default_hours_per_day) || 8;
@@ -91,12 +91,9 @@ export async function GET(req: NextRequest) {
     }));
 
     const empIds = lines.map((l) => String(l.employee_id)).filter(Boolean);
-    const [empRes, contractRes, attRes, leaveRes, otRes] = await Promise.all([
+    const [empRes, attRes, leaveRes, otRes] = await Promise.all([
       empIds.length
         ? a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds)
-        : Promise.resolve({ data: [] as Row[] }),
-      empIds.length
-        ? a.from("employee_contracts").select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, attendance_scan_exempt, status, is_current, start_date, end_date").in("employee_id", empIds).eq("is_current", true).eq("status", "active")
         : Promise.resolve({ data: [] as Row[] }),
       a.from("attendance_entries").select("employee_id, work_date, late_minutes, late_deduction, absence_hours, absence_deduction, status, note").eq("payroll_period_id", periodId),
       a.from("leave_entries").select("employee_id, leave_date, days, hours, unpaid_leave_deduction, status, note").eq("payroll_period_id", periodId),
@@ -108,8 +105,8 @@ export async function GET(req: NextRequest) {
       const name = `${String(e.first_name ?? "")} ${String(e.last_name ?? "")}`.trim();
       employeeName.set(String(e.id), name + (e.nickname ? ` (${String(e.nickname)})` : ""));
     }
-    const contractBy = new Map<string, Row>();
-    for (const c of (contractRes.data ?? []) as Row[]) contractBy.set(String(c.employee_id), c);
+    // สัญญาชุดเดียวกับที่ตัวคำนวณใช้ (รวมคนลาออกกลางเดือน — ช่องหลังวันลาออกจะขึ้น "—" เอง)
+    const contractBy = contracts;
 
     const inputByCell = new Map<string, Row>();
     for (const r of (attRes.data ?? []) as Row[]) if (MANUAL.has(String(r.status ?? "approved"))) {
