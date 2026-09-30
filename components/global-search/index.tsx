@@ -31,6 +31,10 @@ const ENTITY: Record<SearchHit["entity_type"], { icon: string; label: string; co
   employee:  { icon: "🧑‍💼", label: "พนักงาน",           color: "text-cyan-700"    },
   contract:  { icon: "📄", label: "สัญญาจ้าง",          color: "text-cyan-800"    },
   period:    { icon: "📅", label: "งวดเงินเดือน",        color: "text-emerald-800" },
+  china_transfer: { icon: "💸", label: "ใบสรุปการโอน",   color: "text-orange-700"  },
+  china_bill:     { icon: "🧾", label: "บิลร้านจีน",      color: "text-orange-700"  },
+  ctw_bill:       { icon: "🏦", label: "บิล CTW",         color: "text-orange-800"  },
+  subscription:   { icon: "📝", label: "Subscription",    color: "text-violet-700"  },
   user:      { icon: "👤", label: "ผู้ใช้ระบบ",         color: "text-purple-700"  },
   asset:     { icon: "🖼️", label: "ไฟล์/คลัง",          color: "text-indigo-700"  },
 };
@@ -205,7 +209,7 @@ export function GlobalSearch({ open, onClose, scope: scopeKey }: { open: boolean
                 </li>
               ))}
             </ul>
-            <div className="mt-2 text-[11px] text-slate-400">ใช้ <kbd className="bg-white border border-slate-200 px-1 rounded">↑↓</kbd> เลือก · <kbd className="bg-white border border-slate-200 px-1 rounded">↵</kbd> เปิด · <kbd className="bg-white border border-slate-200 px-1 rounded">ESC</kbd> ปิด · เปิดเร็วด้วย <kbd className="bg-white border border-slate-200 px-1 rounded">Ctrl+K</kbd></div>
+            <div className="mt-2 text-[11px] text-slate-400">ใช้ <kbd className="bg-white border border-slate-200 px-1 rounded">↑↓</kbd> เลือก · <kbd className="bg-white border border-slate-200 px-1 rounded">↵</kbd> เปิด · <kbd className="bg-white border border-slate-200 px-1 rounded">ESC</kbd> ปิด · เปิดเร็วด้วย <kbd className="bg-white border border-slate-200 px-1 rounded">Ctrl+K</kbd> หรือกด <kbd className="bg-white border border-slate-200 px-1 rounded">/</kbd> ตอนไม่ได้พิมพ์ในช่องไหน (ถ้าเบราว์เซอร์แย่ง Ctrl+K)</div>
           </div>
         )}
 

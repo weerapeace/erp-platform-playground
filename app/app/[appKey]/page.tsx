@@ -6,7 +6,7 @@
  * reuse หน้า master กลาง (MasterPage) ผ่าน ShellPresentContext (ไม่ซ้อน sidebar)
  * หมายเหตุ: /app/china-pay มีหน้า custom เฉพาะ (route นั้นชนะ dynamic นี้)
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -18,6 +18,9 @@ import { NotificationBell } from "@/components/notification-bell";
 import { LangToggle } from "@/components/i18n";
 import { AccountMenu } from "@/components/account-menu";
 import { appHeaderStyle } from "@/lib/app-header-theme";
+import { GlobalSearch } from "@/components/global-search";
+import { getSearchScope } from "@/lib/search-scopes";
+import { useSearchHotkey } from "@/lib/search-hotkey";
 
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
@@ -44,6 +47,10 @@ function AppIcon({ app, size = 22 }: { app: AppGroup | null; size?: number }) {
 
 export default function StandaloneApp() {
   const appKey = String(useParams().appKey ?? "");
+  // 🔍 ค้นหา — ถ้าแอปนี้ประกาศ scope ไว้ (lib/search-scopes) จะค้นเฉพาะของแอป ไม่งั้นค้นรวม · "/" หรือ Ctrl+K
+  const [searchOpen, setSearchOpen] = useState(false);
+  useSearchHotkey(useCallback((open?: boolean) => setSearchOpen((v) => (open === undefined ? !v : open)), []));
+  const searchScope = getSearchScope(appKey)?.key;
   const { user, ready, can } = useAuth();
   const [app, setApp] = useState<AppGroup | null>(null);
   const [items, setItems] = useState<MenuItem[]>([]);
@@ -181,6 +188,7 @@ export default function StandaloneApp() {
   return (
     // h-dvh + flex column: header บน · เนื้อหาเต็มกว้าง · เมนูแบบพับ-ขยาย (iPad: ☰ drawer ซ้าย · มือถือ: แถบล่าง)
     <div className="h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} scope={searchScope} />
       <header className="relative flex-shrink-0 z-20 text-white px-3 sm:px-4"
         style={{ ...appHeaderStyle(app ?? {}), paddingTop: "env(safe-area-inset-top)" }}>
         <div className="py-2.5 flex items-center gap-2 w-full min-w-0">
@@ -218,6 +226,11 @@ export default function StandaloneApp() {
           )}
 
           <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+            <button type="button" onClick={() => setSearchOpen(true)} aria-label="ค้นหา" title={searchScope ? "ค้นหาในแอปนี้ — กด / หรือ Ctrl+K" : "ค้นหา — กด / หรือ Ctrl+K"}
+              className="h-9 px-2 flex items-center gap-1 rounded-lg hover:bg-white/15 text-white/90">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+              <kbd className="hidden md:inline text-[10px] font-mono border border-white/40 px-1 rounded">/</kbd>
+            </button>
             <PwaInstallButton />
             <div className="text-white"><LangToggle /></div>
             <div className="text-white"><NotificationBell /></div>

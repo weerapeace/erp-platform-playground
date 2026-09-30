@@ -16,6 +16,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
+import { useOpenParam, useNewParam } from "@/lib/open-param";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   CYCLE_LABEL, TYPE_LABEL, monthlyTHB, yearlyTHB, daysUntil, nextRenewal, fmtCost, fmtBaht, subStatusLabel,
@@ -119,6 +120,9 @@ export default function SubscriptionsPage() {
   const openCreate = useCallback(() => { setEditing(null); setCreateDefaults(null); setFormOpen(true); }, []);
   const openCreateWishlist = useCallback(() => { setEditing(null); setCreateDefaults({ want_to_buy: true, active: false }); setFormOpen(true); }, []);
   const openEdit = useCallback((s: Subscription) => { setEditing(s); setCreateDefaults(null); setFormOpen(true); }, []);
+  // ลิงก์จากค้นหากลาง: ?open=<id> เปิดฟอร์มรายการนั้น · ?new=1 เปิดฟอร์มเพิ่ม (ของกลาง lib/open-param)
+  useOpenParam(rows.length > 0, useCallback((id: string) => { const s = rows.find((r) => String(r.id) === id); if (s) openEdit(s); }, [rows, openEdit]));
+  useNewParam(canEdit, openCreate);
   const openInvoices = useCallback((s: Subscription) => setInvTarget(s), []);
   const askDelete = useCallback((s: Subscription) => setDelTarget(s), []);
 

@@ -8,11 +8,12 @@
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
+import { useSearchHotkey } from "@/lib/search-hotkey";
 import { AppAccessGate } from "@/components/app-access-gate";
 import { PayrollPeriodProvider, usePayrollPeriod, isFinishedPeriod } from "@/components/payroll/payroll-period-context";
 import { cachedGetJson } from "@/lib/shell-cache";
@@ -105,15 +106,9 @@ function PayrollShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  // 🔍 ค้นหากลาง แต่จำกัดเฉพาะ Payroll (scope ใน lib/search-scopes) · Ctrl+K / ⌘K
+  // 🔍 ค้นหากลาง แต่จำกัดเฉพาะ Payroll (scope ใน lib/search-scopes) · Ctrl+K / ⌘K หรือ "/" (lib/search-hotkey)
   const [searchOpen, setSearchOpen] = useState(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearchOpen((v) => !v); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useSearchHotkey(useCallback((open?: boolean) => setSearchOpen((v) => (open === undefined ? !v : open)), []));
   // เมนูจริงดึงจากระบบกลาง (/admin/menu) — แก้ไอคอน/ลำดับ/หมวด/ซ่อน-แสดง ได้เองที่นั่น
   const [nav, setNav] = useState<NavGroup[]>(FALLBACK_NAV);
   useEffect(() => {
@@ -187,11 +182,11 @@ function PayrollShellInner({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={() => setSearchOpen(true)} title="ค้นหาใน Payroll (Ctrl+K)" aria-label="ค้นหา"
+            <button type="button" onClick={() => setSearchOpen(true)} title="ค้นหาใน Payroll — กด / หรือ Ctrl+K" aria-label="ค้นหา"
               className="h-9 px-2.5 flex items-center gap-1.5 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
               <span className="hidden md:inline">ค้นหา</span>
-              <kbd className="hidden md:inline text-[10px] font-mono text-slate-400 border border-slate-200 px-1 rounded">Ctrl K</kbd>
+              <kbd className="hidden md:inline text-[10px] font-mono text-slate-400 border border-slate-200 px-1 rounded">/</kbd>
             </button>
             <PayrollPeriodSwitcher />
             <NotificationBell />

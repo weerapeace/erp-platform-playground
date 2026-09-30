@@ -46,6 +46,8 @@ export const COMMANDS: SearchCommand[] = [
   { id: "go-calc",        icon: "🧮", label: "ไปคำนวณงวดเงินเดือน",              aliases: ["คำนวณ", "คำนวณงวด", "คิดเงินเดือน", "calc"],                 href: "/payroll/calc-run",          perm: "payroll.calculate", scope: "payroll" },
   { id: "go-manual",      icon: "📝", label: "ไปหน้าข้อมูลคำนวณ (สาย/ขาด/OT)",   aliases: ["ข้อมูลคำนวณ", "สาย", "ขาด", "ot", "ตารางเข้างาน", "โอที"],   href: "/payroll/manual-input",      perm: "employees.view",   scope: "payroll" },
   { id: "go-payslip",     icon: "🧾", label: "ไปหน้าสลิปเงินเดือน",               aliases: ["สลิป", "payslip", "slip"],                                   href: "/payroll/payslips",          perm: "employees.view",   scope: "payroll" },
+  // ---- 📝 App Subscription (scope "subscriptions") ----
+  { id: "new-subscription", icon: "📝", label: "เพิ่ม subscription ใหม่",          aliases: ["subscription", "สมาชิก", "แอป", "บริการ", "sub"],             href: "/subscriptions?new=1",       perm: "subscriptions.edit", scope: "subscriptions" },
 ];
 
 const norm = (s: string) => s.toLowerCase().trim();

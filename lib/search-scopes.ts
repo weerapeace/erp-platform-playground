@@ -48,6 +48,41 @@ export const SEARCH_SCOPES: Record<string, SearchScope> = {
     ],
     examples: ["ISG-131", "CON-2026", "กันยายน", "สลิป", "เพิ่มพนักงาน", "แจ้งลาออก"],
   },
+  "china-pay": {
+    key: "china-pay",
+    label: "ค้นเฉพาะ โอนเงินจีน",
+    appKey: "china-pay",
+    hrefPrefix: "/app/china-pay",
+    entities: ["china_transfer", "china_bill", "ctw_bill", "partner"],
+    guideKeywords: ["โอนเงินจีน", "china", "โอนจีน", "บิลจีน", "เรท", "ctw", "หยวน"],
+    placeholder: "ค้นเลขใบโอน (TF-…), ร้านจีน, บิล CTW (เลขเอกสาร/บริษัท), เมนู",
+    tips: [
+      { icon: "💸", what: "ใบสรุปการโอน — เลขที่ใบโอน หรือเลขอ้างอิง (พิมพ์แค่เลขท้ายก็เจอ) เปิดใบสรุปให้เลย", example: "TF-2026-0018 หรือ 0018" },
+      { icon: "🧾", what: "บิลร้านจีน — ชื่อร้าน หรือหมายเหตุในบิล เปิดรายละเอียดบิลในแอป", example: "ชื่อร้าน" },
+      { icon: "🏢", what: "ร้านค้าจีน — ชื่อร้าน/รหัส/เบอร์ (ข้อมูลร้านใน Master Data)", example: "ชื่อร้าน หรือ รหัสร้าน" },
+      { icon: "🏦", what: "บิล CTW — เลขเอกสาร หรือชื่อบริษัท", example: "เลขเอกสาร" },
+      { icon: "📋", what: "หน้า/เมนูของแอปโอนเงินจีน", example: "Dashboard · เรท · ร้านค้า" },
+      { icon: "💡", what: "พิมพ์หลายคำเว้นวรรค = ต้องเจอทุกคำ", example: "TF 0018" },
+    ],
+    examples: ["TF-2026", "Dashboard", "เรท", "CTW"],
+  },
+  subscriptions: {
+    key: "subscriptions",
+    label: "ค้นเฉพาะ App Subscription",
+    appKey: "subscriptions",
+    hrefPrefix: "/subscriptions",
+    entities: ["subscription"],
+    guideKeywords: ["subscription", "สมาชิก", "รายเดือน", "ต่ออายุ", "invoice", "ใบแจ้งหนี้"],
+    placeholder: "ค้นชื่อแอป/บริการ, หมวด, อีเมลบัญชี, ชื่อในใบแจ้งหนี้ · หรือสั่ง “เพิ่ม subscription”",
+    tips: [
+      { icon: "📝", what: "บริการที่สมัครไว้ — ชื่อแอป/บริการ (เปิดฟอร์มรายการนั้นให้เลย)", example: "ChatGPT หรือ CLO3D" },
+      { icon: "🗂️", what: "หมวด — เช่น Design, Productivity, Entertainment", example: "Design" },
+      { icon: "📧", what: "อีเมลบัญชีที่ใช้สมัคร หรือชื่อที่ขึ้นในใบแจ้งหนี้/บัตร", example: "louis หรือ gmail" },
+      { icon: "⚡", what: "สั่งงานลัด — เพิ่มรายการใหม่", example: "เพิ่ม subscription" },
+      { icon: "💡", what: "พิมพ์หลายคำเว้นวรรค = ต้องเจอทุกคำ", example: "design adobe" },
+    ],
+    examples: ["ChatGPT", "Design", "gmail", "เพิ่ม subscription"],
+  },
 };
 
 export const getSearchScope = (key?: string | null): SearchScope | null => (key ? SEARCH_SCOPES[key] ?? null : null);

@@ -13,6 +13,8 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { FileMultiInput } from "@/components/file-multi-input";
+import { GlobalSearch } from "@/components/global-search";
+import { useSearchHotkey } from "@/lib/search-hotkey";
 
 const SUPPLIER_CFG: RelationConfig = {
   target_table: "partners_v2", target_module_key: "partners-v2",
@@ -346,6 +348,9 @@ export default function ChinaPayApp() {
   const [acctOpen, setAcctOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
+  // 🔍 ค้นหาเฉพาะแอปโอนเงินจีน (scope "china-pay" ใน lib/search-scopes) · "/" หรือ Ctrl+K
+  const [searchOpen, setSearchOpen] = useState(false);
+  useSearchHotkey(useCallback((open?: boolean) => setSearchOpen((v) => (open === undefined ? !v : open)), []));
   const [menuCfg, setMenuCfg] = useState<Record<string, string[]>>({});
   const [preselect, setPreselect] = useState<string[]>([]);   // บิลจีนที่เลือกจากหน้า "ทั้งหมด" → ส่งไปหน้าโอน
   const [deepBill, setDeepBill] = useState<Record<string, unknown> | null>(null);   // เปิดบิลจากลิงก์ ?bill=id
@@ -472,6 +477,10 @@ export default function ChinaPayApp() {
             <button onClick={() => setMenuOpen(true)} aria-label="เมนู"
               className="w-10 h-10 flex items-center justify-center rounded-2xl bg-white/20 hover:bg-white/30 text-xl active:scale-95 transition">☰</button>
             <div className="font-bold text-lg flex-1 truncate">{current ? `${current.icon} ${current.label}` : "💸 โอนเงินจีน"}</div>
+            <button onClick={() => setSearchOpen(true)} aria-label="ค้นหา" title="ค้นหาในแอป — กด / หรือ Ctrl+K"
+              className="w-10 h-10 flex items-center justify-center rounded-2xl bg-white/20 hover:bg-white/30 active:scale-95 transition">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+            </button>
             <button onClick={() => setAcctOpen(true)}
               className="flex items-center gap-2 bg-white/20 hover:bg-white/30 active:scale-95 transition rounded-full pl-1 pr-3 py-1 text-xs">
               <span className="w-6 h-6 rounded-full bg-white text-orange-600 flex items-center justify-center font-bold">{(user.name || "?").slice(0, 1).toUpperCase()}</span>
@@ -479,6 +488,8 @@ export default function ChinaPayApp() {
             </button>
           </div>
         </header>
+
+        <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} scope="china-pay" />
 
         {/* Content */}
         <main id="cp-main" key={renderTab} className="cp-anim relative z-10 flex-1 overflow-y-auto p-4 pb-28">

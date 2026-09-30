@@ -15,6 +15,8 @@ export type SearchEntity =
   | "invoice" | "quotation" | "billing" | "delivery" | "cn"
   | "task" | "employee"
   | "contract" | "period"
+  | "china_transfer" | "china_bill" | "ctw_bill"
+  | "subscription"
   | "user" | "asset";
 
 export type SearchHit = {
@@ -372,6 +374,50 @@ const SOURCES: Source[] = [
     link: (r) => `/payroll/manual-input?period_id=${s(r, "id")}`, perEntity: 3,
   },
   {
+    // 💸 ใบสรุปการโอนเงินจีน — เฉพาะค้นในแอปโอนเงินจีน · แอปมือถือรับ ?transfer=<id> เปิดใบสรุป
+    entity: "china_transfer", table: "china_transfers", perms: ["app.china_pay"],
+    select: "id, transfer_no, ref_no, transfer_date, bills_total_thb, amount_transferred_thb, rate, note, is_active",
+    cols: ["transfer_no", "ref_no", "note"],
+    filter: (q) => q.not("is_active", "is", false),
+    code: (r) => s(r, "transfer_no") || s(r, "ref_no"), texts: (r) => [s(r, "ref_no"), s(r, "note")],
+    label: (r) => s(r, "transfer_no") || s(r, "ref_no") || "(ใบโอน)",
+    sublabel: (r) => join(s(r, "transfer_date"), money(r.amount_transferred_thb) && `โอน ${money(r.amount_transferred_thb)}`, r.rate ? `เรท ${s(r, "rate")}` : "", s(r, "note")),
+    link: (r) => `/app/china-pay?transfer=${s(r, "id")}`, perEntity: 4,
+  },
+  {
+    // 🧾 บิลร้านจีน — ค้นด้วยชื่อร้าน (join partners_v2) / หมายเหตุ · แอปมือถือรับ ?bill=<id>
+    entity: "china_bill", table: "china_bills", perms: ["app.china_pay"],
+    select: "id, bill_date, amount_rmb, amount_thb, status, note, is_active, partners_v2!china_bills_supplier_id_fkey(display_name, name_th, code)",
+    cols: ["note"],
+    filter: (q) => q.not("is_active", "is", false),
+    code: () => null,
+    texts: (r) => { const p = (r.partners_v2 ?? {}) as Row; return [s(p, "display_name"), s(p, "name_th"), s(p, "code"), s(r, "note")]; },
+    label: (r) => { const p = (r.partners_v2 ?? {}) as Row; return join(s(p, "display_name") || s(p, "name_th") || "(บิล)", s(r, "bill_date")); },
+    sublabel: (r) => join(r.amount_rmb ? `¥${Number(r.amount_rmb).toLocaleString("th-TH")}` : "", money(r.amount_thb), st(r.status) || s(r, "status"), s(r, "note")),
+    link: (r) => `/app/china-pay?bill=${s(r, "id")}`, perEntity: 4,
+  },
+  {
+    // 🏦 บิล CTW — เลขเอกสาร / ชื่อบริษัท · เปิดในตารางกลาง /m/ctw-bills
+    entity: "ctw_bill", table: "ctw_bills", perms: ["app.china_pay"],
+    select: "id, doc_number, company_name, doc_date, net_amount, cleared_at, is_active",
+    cols: ["doc_number", "company_name"],
+    filter: (q) => q.not("is_active", "is", false),
+    code: (r) => s(r, "doc_number"), texts: (r) => [s(r, "company_name")],
+    label: (r) => s(r, "doc_number") || s(r, "company_name") || "(บิล CTW)",
+    sublabel: (r) => join(s(r, "company_name"), s(r, "doc_date"), money(r.net_amount), r.cleared_at ? "เคลียร์แล้ว" : "ยังไม่เคลียร์"),
+    link: (r) => `/m/ctw-bills?open=${s(r, "id")}`, perEntity: 3,
+  },
+  {
+    // 📝 App Subscription — ชื่อ/หมวด/อีเมล/ชื่อในใบแจ้งหนี้ · หน้า /subscriptions รับ ?open=<id>
+    entity: "subscription", table: "subscriptions", perms: ["subscriptions.view"],
+    select: "id, name, category, billing_cycle, cost, currency, billing_date, account_email, card_statement_name, active, want_to_buy",
+    cols: ["name", "category", "account_email", "card_statement_name", "notes"],
+    code: (r) => s(r, "name"), texts: (r) => [s(r, "category"), s(r, "account_email"), s(r, "card_statement_name")],
+    label: (r) => s(r, "name") || "(subscription)",
+    sublabel: (r) => join(s(r, "category"), r.cost ? `${Number(r.cost).toLocaleString("th-TH")} ${s(r, "currency")}/${s(r, "billing_cycle")}` : "", s(r, "account_email"), r.want_to_buy ? "อยากซื้อ" : r.active === false ? "ยกเลิกแล้ว" : ""),
+    link: (r) => `/subscriptions?open=${s(r, "id")}`, perEntity: 5,
+  },
+  {
     entity: "user", table: "user_profiles", perms: ["admin.users"],
     select: "id, display_name, email, username, role, active",
     cols: ["display_name", "email", "username"],
@@ -386,7 +432,7 @@ const SOURCES: Source[] = [
 const CANDIDATES = 40;   // ดึงผู้สมัครต่อชนิดแล้วค่อยจัดอันดับใน JS (ตามมาตรฐาน picker)
 
 /** ชนิดที่โชว์เฉพาะตอนค้นในแอปเดี่ยว (ค้นรวมไม่โชว์ กันรก) */
-const SCOPE_ONLY_ENTITIES: SearchEntity[] = ["contract", "period"];
+const SCOPE_ONLY_ENTITIES: SearchEntity[] = ["contract", "period", "china_transfer", "china_bill", "ctw_bill", "subscription"];
 
 async function searchSource(src: Source, q: string, toks: string[], can: CanFn, scope: SearchScope | null): Promise<SearchHit[]> {
   if (!src.perms.every((p) => can(p))) return [];
