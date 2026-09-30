@@ -51,7 +51,11 @@ describe("payroll-period-contracts: ใครอยู่ในงวด", () =>
     expect(employeeInPeriod({ employment_status: "resigned", resign_date: "2026-08-31" }, sep)).toBe(false);
     expect(employeeInPeriod({ employment_status: "resigned", resign_date: "2026-09-15" }, sep)).toBe(true);
     expect(employeeInPeriod({ employment_status: "active", resign_date: null }, sep)).toBe(true);
-    expect(employeeInPeriod({ employment_status: "inactive", resign_date: null }, sep)).toBe(true);
+    // ปิดใช้งานแต่ไม่มีวันลาออก → ใช้วันสิ้นสุดสัญญาแทน · ไม่มีทั้งคู่ (สัญญาค้างเปิด) → ไม่นับ กันจ่ายซ้ำ
+    expect(employeeInPeriod({ employment_status: "inactive", resign_date: null }, sep, { end_date: "2026-09-10" })).toBe(true);
+    expect(employeeInPeriod({ employment_status: "inactive", resign_date: null }, sep, { end_date: "2026-08-10" })).toBe(false);
+    expect(employeeInPeriod({ employment_status: "inactive", resign_date: null }, sep, { end_date: null })).toBe(false);
+    expect(employeeInPeriod({ employment_status: "inactive", resign_date: null }, sep)).toBe(false);
   });
 
   it("วันลาออกมาก่อนวันสิ้นสุดสัญญา → ตัดสัญญาที่วันลาออก", () => {

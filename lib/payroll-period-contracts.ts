@@ -63,11 +63,20 @@ export function contractMapForPeriod(contracts: Row[], period: Row): Map<string,
   return out;
 }
 
-/** พนักงานคนนี้ยังอยู่ในงวดไหม (ลาออกก่อนงวดเริ่ม = ไม่อยู่) */
-export function employeeInPeriod(employee: Row, period: Row): boolean {
-  const rd = d10(employee.resign_date), ps = d10(period.start_date);
-  if (String(employee.employment_status ?? "active") !== "active" && isISODate(rd) && isISODate(ps) && rd < ps) return false;
-  return true;
+/**
+ * พนักงานคนนี้ยังอยู่ในงวดไหม
+ * - ทำงานอยู่ → อยู่
+ * - ไม่ได้ทำงานแล้ว (resigned/inactive) → ต้องมี "วันลาออก" หรือ "วันสิ้นสุดสัญญา" ที่ >= วันเริ่มงวด ถึงจะนับ
+ *   ถ้าไม่มีทั้งคู่ = ถูกปิดใช้งานทั้งที่สัญญายังค้างเปิด (ข้อมูลไม่ครบ เช่น ISG-048 ซ้ำกับ ISG-130) → ไม่นับ กันจ่ายซ้ำ
+ */
+export function employeeInPeriod(employee: Row, period: Row, contract?: Row): boolean {
+  if (String(employee.employment_status ?? "active") === "active") return true;
+  const ps = d10(period.start_date);
+  const rd = d10(employee.resign_date);
+  if (isISODate(rd)) return !isISODate(ps) || rd >= ps;
+  const ce = d10(contract?.end_date);
+  if (isISODate(ce)) return !isISODate(ps) || ce >= ps;
+  return false;
 }
 
 /** ถ้าวันลาออกของพนักงานมาก่อนวันสิ้นสุดสัญญา ให้ตัดสัญญาที่วันลาออก (นับวันไม่เกินวันที่ทำจริง) */

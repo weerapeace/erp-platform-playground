@@ -321,9 +321,9 @@ export async function computePeriodPreview(periodId: string): Promise<{ lines: R
 
   const lines: Row[] = [];
   for (const employee of (empRes.data ?? []) as Row[]) {
-    if (!employeeInPeriod(employee, period)) continue;   // ลาออกก่อนงวดเริ่ม
     const rawContract = contractBy.get(String(employee.id));
     if (!rawContract) continue;
+    if (!employeeInPeriod(employee, period, rawContract)) { contractBy.delete(String(employee.id)); continue; }   // ลาออกก่อนงวดเริ่ม / ปิดใช้งานแบบไม่มีวัน
     const contract = capContractByResignDate(rawContract, employee);   // วันลาออกมาก่อนสิ้นสุดสัญญา → นับถึงวันลาออก
     contractBy.set(String(employee.id), contract);
     const setting = settingBy.get(String(employee.id)) ?? {};
