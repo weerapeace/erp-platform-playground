@@ -47,6 +47,9 @@ import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
 import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
+import dynamic from "next/dynamic";
+// แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
+const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null };
 type CostExtra = { label: string; amount: number };
@@ -422,8 +425,11 @@ function CopyFromSheetModal({ open, excludeId, onClose, onApply }: {
 // onCreated = แจ้งหน้าแม่ทันทีที่ "สร้างใบงานใหม่" สำเร็จ (ป๊อปอัปยังค้างอยู่ให้แนบรูปต่อได้)
 // ใช้โดยกระดานแคมเปญ: สร้างใบงานจากบนกระดาน → วางการ์ดให้เลย
 // hideSendToBoard = ซ่อนปุ่ม "ส่งขึ้นกระดาน" (ส่งมาจากหน้ากระดานแคมเปญเอง — การ์ดอยู่บนกระดานแล้ว ปุ่มนี้ซ้ำซ้อน)
-export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, hideSendToBoard = false, onDetailClose, onCreated }:
-  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; hideSendToBoard?: boolean; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void } = {}) {
+export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, hideSendToBoard = false, onDetailClose, onCreated, onOpenPresentation }:
+  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; hideSendToBoard?: boolean; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void;
+    /** เปิดแผง "📄 ใบนำเสนอ A4" ที่หน้าแม่ (เช่น Dashboard — แผงอยู่ต่อได้แม้ปิดป๊อปอัป) · ไม่ส่ง = ป๊อปอัปเปิดแผงเอง */
+    onOpenPresentation?: (sheetId: string) => void } = {}) {
+  const [presentOpen, setPresentOpen] = useState(false);   // แผงใบนำเสนอ (กรณีหน้าแม่ไม่รับไปทำเอง)
   const canSendToBoard = useCanSendToBoard();
   const [boardPick, setBoardPick] = useState(false);   // ป๊อปอัปเลือกแคมเปญปลายทาง
   const canView = usePermission("products.view");
@@ -1677,6 +1683,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   title="เลือกแคมเปญ แล้วไปวางการ์ดใบงานนี้บนกระดานวางแผน"
                   className="h-9 px-3 inline-flex items-center text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">🎨 ส่งขึ้นกระดาน</button>
               )}
+              {/* ใบนำเสนอ A4 (เสนอลูกค้า) — แผงลอย จัดรูป/ข้อความ 1-2 หน้า แล้วพิมพ์ (ของกลาง design-sheet-present) */}
+              <button type="button" onClick={() => { if (!form.id) return; if (onOpenPresentation) onOpenPresentation(form.id); else setPresentOpen(true); }}
+                title="จัดใบนำเสนอ A4 สำหรับเสนอลูกค้า (เลือกรูป + ข้อความ 1-2 หน้า แล้วพิมพ์/PDF)"
+                className="h-9 px-3 inline-flex items-center text-sm border border-amber-300 rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100">📄 ใบนำเสนอ A4</button>
               <a href={`/print/design-sheet/${form.id}`} target="_blank" rel="noreferrer"
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบสั่งตัวอย่าง</a>
               <a href={`/print/design-sheet-quote/${form.id}`} target="_blank" rel="noreferrer"
@@ -2285,6 +2295,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         entityType="design_sheet" actor={user?.email ?? null} onChanged={reloadStatuses} />
 
       {/* Wizard สร้าง Parent SKU + SKU ลูก จากใบงาน */}
+        {presentOpen && form?.id && <DesignSheetPresentPanel sheetId={form.id} open={presentOpen} onClose={() => setPresentOpen(false)} />}
       {form?.id && (
         <SkuWizard open={skuWizard} onClose={() => setSkuWizard(false)}
           sheetId={form.id} sheetName={form.name} brandId={form.brand_id || null}

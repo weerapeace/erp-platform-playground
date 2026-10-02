@@ -1,4 +1,5 @@
 import type { ReportTemplateRow } from "@/app/api/admin/report-templates/route";
+import { DS_PRESENT_SAMPLE_DATA } from "@/lib/design-sheet-present";
 
 export type ReportFieldDef = {
   key: string;
@@ -150,6 +151,24 @@ const woLineColumns: ReportTableColumnDef[] = [
 ];
 
 export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
+  // ใบนำเสนอ A4 ของใบงานออกแบบ (เสนอลูกค้า) — เทมเพลตเริ่มต้น + ตัวแปรอยู่ที่ lib/design-sheet-present (ไม่มีฟิลด์ต้นทุนให้ใช้)
+  ds_present: {
+    key: "ds_present",
+    label: "ใบนำเสนอ A4 (ใบงานออกแบบ)",
+    fields: [
+      { key: "code", label: "เลขใบงาน", group: "ใบงาน", sample: "DS-2026-0001" },
+      { key: "name", label: "ชื่องาน", group: "ใบงาน", sample: "กระเป๋าผ้าแคนวาส" },
+      { key: "brand_name", label: "แบรนด์", group: "ใบงาน", sample: "Good Goods" },
+      { key: "brand_logo_html", label: "โลโก้แบรนด์ (HTML)", group: "ใบงาน", sample: "" },
+      { key: "order_date_th", label: "วันที่สั่ง", group: "ใบงาน", sample: "1 ต.ค. 2569" },
+      { key: "deadline_th", label: "กำหนดส่ง", group: "ใบงาน", sample: "15 ต.ค. 2569" },
+      { key: "offered_price", label: "ราคาเสนอ", group: "ราคา", sample: "255" },
+      { key: "page_count", label: "จำนวนหน้า", group: "หน้า", sample: "2" },
+      { key: "pages", label: "หน้า (loop: heading/images_html/bullets[{text}]/text_html/show_price/colors_text/sizes_text)", group: "หน้า", sample: "" },
+    ],
+    tables: [],
+    sampleData: DS_PRESENT_SAMPLE_DATA,
+  },
   qt: {
     key: "qt",
     label: "ใบเสนอราคา",

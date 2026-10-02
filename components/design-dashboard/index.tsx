@@ -28,6 +28,8 @@ const WorkflowStatusManager = dynamic(
 );
 // popup รายละเอียดงาน = ของกลาง design-sheet-detail โหมด "เฉพาะ popup" (โหลดเฉพาะตอนเปิดการ์ด ไม่ถ่วงบอร์ด)
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
+// แผงลอย "📄 ใบนำเสนอ A4" — mount ที่ระดับบอร์ด (ปิดป๊อปอัปใบงานแล้วแผงยังอยู่ ดูบอร์ดไปจัดใบไป)
+const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 
 type Tone = "danger" | "warn" | "good" | "done" | "normal";
 
@@ -191,6 +193,7 @@ export function DesignDashboard() {
   const [moveMessage, setMoveMessage] = useState<MoveMessage | null>(null);
   const [search, setSearch] = useState("");
   const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
+  const [presentId, setPresentId] = useState<string | null>(null);       // แผงใบนำเสนอ A4 ของใบไหน (null = ปิด)
   const [createOpen, setCreateOpen] = useState(false);                   // เปิด popup สร้างงานใหม่
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   const [viewMode, setViewMode] = useState<"board" | "gallery">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี)
@@ -1161,8 +1164,10 @@ export function DesignDashboard() {
 
       {/* popup รายละเอียดงาน "ในตัวบอร์ด" (reuse popup ของ Design Sheets) — ปิดแล้วรีเฟรชบอร์ดให้เห็นการเปลี่ยน */}
       {openSheetId && (
-        <DesignSheetDetail detailOnly openId={openSheetId} onDetailClose={() => { openDetail(null); silentRefresh(); }} />
+        <DesignSheetDetail detailOnly openId={openSheetId} onDetailClose={() => { openDetail(null); silentRefresh(); }} onOpenPresentation={(id) => setPresentId(id)} />
       )}
+
+      {presentId && <DesignSheetPresentPanel sheetId={presentId} open={!!presentId} onClose={() => setPresentId(null)} />}
 
       {/* popup สร้างงานใหม่ (reuse ฟอร์มเดิม) — default แบรนด์ = แบรนด์ที่เลือกอยู่ในแถบซ้าย · ปิดแล้ว refresh เงียบ */}
       {createOpen && (

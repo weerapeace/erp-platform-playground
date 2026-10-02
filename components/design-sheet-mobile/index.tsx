@@ -29,6 +29,8 @@ import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } fr
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
 // drawer ดู SKU / Parent SKU (ของกลาง master-crud) โหลดเฉพาะตอนแตะ
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// แผงใบนำเสนอ A4 (มือถือ = เต็มจอ)
+const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 
 type CostExtra = { label: string; amount: number };
 // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย) เก็บได้ 2 แบบ: array (เดิม = ทั่วไป) หรือ object แยกตาม Parent — แปลงเป็น map เหมือนป๊อปอัปเต็ม
@@ -110,6 +112,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const [newComment, setNewComment] = useState("");
   const [commentDate, setCommentDate] = useState(todayStr());
   const [editOpen, setEditOpen] = useState(false);         // ป๊อปอัปเต็ม
+  const [presentOpen, setPresentOpen] = useState(false);   // แผงใบนำเสนอ A4
   const stripRef = useRef<HTMLDivElement>(null);
   const [openSec, setOpenSec] = useState<"cost" | "quote" | "sku" | null>(null);   // ส่วนที่กางอยู่ (ตีราคา/เสนอราคา/SKU)
   const [costParent, setCostParent] = useState("");                                // ตีราคา: แท็บ Parent ที่ดูอยู่ ("" = ทั่วไป)
@@ -534,6 +537,9 @@ export function DesignSheetMobileView({ id }: { id: string }) {
           <div className="truncate font-mono text-xs text-slate-500">{sheet?.code ?? "…"}</div>
           <div className="truncate text-sm font-semibold text-slate-800">{sheet?.name ?? (loading ? "กำลังโหลด…" : "")}</div>
         </div>
+        {sheet && (
+          <button type="button" onClick={() => setPresentOpen(true)} title="ใบนำเสนอ A4" aria-label="ใบนำเสนอ A4" className="h-8 shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 text-xs font-medium text-amber-800">📄</button>
+        )}
         {sheet && canEdit && (
           <button type="button" onClick={() => setEditOpen(true)} className="h-8 shrink-0 rounded-md border border-blue-200 bg-white px-2.5 text-xs font-medium text-blue-700">✏️ แก้ไขเต็ม</button>
         )}
@@ -591,6 +597,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       )}
 
       <ImageLightbox images={lightboxImages} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />
+
+      {presentOpen && sheet && <DesignSheetPresentPanel sheetId={sheet.id} open={presentOpen} onClose={() => setPresentOpen(false)} />}
 
       {/* drawer ดู SKU / Parent SKU (ของกลาง) */}
       {skuDrawer && <MasterRecordDrawer moduleKey={skuDrawer.moduleKey} recordId={skuDrawer.id} onClose={() => setSkuDrawer(null)} />}
