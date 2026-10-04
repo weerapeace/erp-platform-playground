@@ -17,7 +17,7 @@ import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { CAMPAIGN_STATUS, CampaignDrawer } from "./campaign-drawer";
 import {
-  listCampaigns, createCampaign, deleteCampaign, listBrands,
+  listCampaigns, createCampaign, updateCampaign, deleteCampaign, listBrands,
   type Campaign,
 } from "../data";
 import { listOptions, createOption, type Option } from "../use-options";
@@ -46,6 +46,12 @@ export default function CampaignsPage() {
   const [newCatOpen, setNewCatOpen] = useState(false);          // เพิ่มหมวดใหม่จากในฟอร์มสร้างแคมเปญ
   const [newCatLabel, setNewCatLabel] = useState("");
   const [catBusy, setCatBusy] = useState(false);
+  // โหมด "🗂 จัดหมวด": ติ๊กเลือกหลายแคมเปญ → ย้ายเข้าหมวดทีเดียว · หรือเปลี่ยนหมวดรายใบจาก dropdown บนการ์ด
+  const [manage, setManage] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkCat, setBulkCat] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [movingId, setMovingId] = useState<string | null>(null);
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random();
@@ -85,6 +91,32 @@ export default function CampaignsPage() {
     catch (e) { pushToast("error", (e as Error).message); } finally { setCatBusy(false); }
   };
 
+  // สร้างหมวดใหม่จากแถบย้าย (ไม่เลือกเข้าฟอร์ม) → คืน id
+  const createCatQuick = async (): Promise<string | null> => {
+    const label = window.prompt(t("ชื่อหมวดใหม่", "New category name")) ?? "";
+    if (!label.trim()) return null;
+    try { const o = await createOption("campaign_category", label.trim()); await catsSWR.revalidate(true); pushToast("success", t("เพิ่มหมวดแล้ว", "Category added")); return o.id; }
+    catch (e) { pushToast("error", (e as Error).message); return null; }
+  };
+  // เปลี่ยนหมวดรายใบ (จาก dropdown บนการ์ด) — บันทึกทันที
+  const moveOne = async (c: Campaign, categoryId: string) => {
+    setMovingId(c.id);
+    try { await updateCampaign(c.id, { category_id: categoryId || null }); await load(); pushToast("success", t("ย้ายหมวดแล้ว", "Moved")); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setMovingId(null); }
+  };
+  // ย้ายหลายใบที่ติ๊กไว้ → หมวดเดียวกัน (ทีละใบ ไม่ยิงพร้อมกัน)
+  const moveSelected = async () => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    let ok = 0;
+    for (const id of selected) { try { await updateCampaign(id, { category_id: bulkCat || null }); ok++; } catch (e) { pushToast("error", (e as Error).message); } }
+    setBulkBusy(false); setSelected(new Set());
+    await load();
+    if (ok) pushToast("success", t(`ย้าย ${ok} แคมเปญแล้ว`, `Moved ${ok} campaigns`));
+  };
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const exitManage = () => { setManage(false); setSelected(new Set()); };
+
   // จัดกลุ่มแคมเปญตามหมวด (เรียงตามลำดับหมวด · "ยังไม่จัดหมวด" ท้ายสุด) + ตัวกรอง
   const groups = useMemo(() => {
     const byCat = new Map<string, Campaign[]>();
@@ -110,12 +142,14 @@ export default function CampaignsPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งานทั้งหมด", "All tasks")}</a>
+            <button onClick={() => (manage ? exitManage() : setManage(true))} title={t("ติ๊กเลือกแคมเปญแล้วย้ายเข้าหมวด / เปลี่ยนหมวดรายใบ", "Select campaigns and move them into a category")}
+              className={`h-10 px-4 inline-flex items-center text-sm font-medium rounded-lg border ${manage ? "bg-violet-100 border-violet-300 text-violet-800" : "border-violet-200 text-violet-700 hover:bg-violet-50"}`}>{manage ? `✕ ${t("เสร็จแล้ว", "Done")}` : `🗂 ${t("จัดหมวด", "Organize")}`}</button>
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแคมเปญ", "Create campaign")}</button>
           </div>
         </div>
       </div>
 
-      <div className="px-8 py-6">
+      <div className={`px-8 py-6 ${manage ? "pb-28" : ""}`}>
         {loading ? (
           <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
         ) : campaignsSWR.error && campaigns.length === 0 ? (
@@ -158,9 +192,11 @@ export default function CampaignsPage() {
             {g.items.map((c) => {
               const st = CSTATUS[c.status] ?? CAMPAIGN_STATUS[1];
               return (
-                <div key={c.id} onClick={() => router.push(`/tasks/campaigns/${c.id}`)} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 hover:shadow cursor-pointer transition-colors">
+                <div key={c.id} onClick={() => (manage ? toggleSel(c.id) : router.push(`/tasks/campaigns/${c.id}`))}
+                  className={`bg-white rounded-xl border p-4 shadow-sm hover:shadow cursor-pointer transition-colors ${manage && selected.has(c.id) ? "border-violet-500 ring-2 ring-violet-200" : "border-slate-200 hover:border-violet-300"}`}>
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-1.5">
+                      {manage && <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 accent-violet-600" />}
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${st.cls}`}>{st.label()}</span>
                       {c.visibility === "private" && <span title={t("ส่วนตัว — เห็นเฉพาะเจ้าของ", "Private")} className="text-xs">🔒</span>}
                       {c.visibility === "shared" && <span title={t("แชร์เฉพาะคนที่เลือก", "Shared")} className="text-xs">🔗</span>}
@@ -175,8 +211,23 @@ export default function CampaignsPage() {
                     {c.owner_label && <span>· 👤 {c.owner_label}</span>}
                   </div>
                   <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("ดูรายละเอียด", "View details")}</button>
-                    <button onClick={(e) => { e.stopPropagation(); router.push(`/tasks/campaigns/${c.id}`); }} className="text-xs font-medium text-slate-500 hover:text-violet-700">🟪 {t("เข้ากระดาน", "Open board")}</button>
+                    {manage ? (
+                      /* โหมดจัดหมวด: เปลี่ยนหมวดรายใบได้เลย */
+                      <label className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-slate-500" onClick={(e) => e.stopPropagation()}>
+                        <span className="shrink-0">📁</span>
+                        <select value={c.category_id ?? ""} disabled={movingId === c.id} onChange={(e) => void moveOne(c, e.target.value)}
+                          className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 disabled:opacity-50">
+                          <option value="">{t("— ยังไม่จัดหมวด —", "— Uncategorized —")}</option>
+                          {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.icon ? `${cat.icon} ` : ""}{cat.label}</option>)}
+                        </select>
+                        {movingId === c.id && <span className="text-[10px] text-slate-400">…</span>}
+                      </label>
+                    ) : (
+                      <>
+                        <button onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("ดูรายละเอียด", "View details")}</button>
+                        <button onClick={(e) => { e.stopPropagation(); router.push(`/tasks/campaigns/${c.id}`); }} className="text-xs font-medium text-slate-500 hover:text-violet-700">🟪 {t("เข้ากระดาน", "Open board")}</button>
+                      </>
+                    )}
                   </div>
                 </div>
               );
@@ -187,6 +238,27 @@ export default function CampaignsPage() {
           </div>
         )}
       </div>
+
+      {/* แถบย้ายหลายใบ (โหมดจัดหมวด) */}
+      {manage && (
+        <div className="fixed inset-x-0 bottom-0 z-[60] border-t border-violet-200 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_rgba(15,23,42,0.10)] backdrop-blur">
+          <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-slate-800">🗂 {t("เลือกไว้", "Selected")} {selected.size} {t("แคมเปญ", "campaigns")}</span>
+            <span className="text-xs text-slate-400">{t("กดการ์ดเพื่อเลือก · หรือเปลี่ยนหมวดรายใบจากช่องบนการ์ด", "Click cards to select, or change per card")}</span>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button onClick={() => setSelected(new Set(groups.flatMap((g) => g.items.map((c) => c.id))))} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">{t("เลือกทั้งหมดที่เห็น", "Select all visible")}</button>
+              <button onClick={() => setSelected(new Set())} disabled={selected.size === 0} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">{t("ล้าง", "Clear")}</button>
+              <select value={bulkCat} onChange={(e) => setBulkCat(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm">
+                <option value="">{t("— ยังไม่จัดหมวด —", "— Uncategorized —")}</option>
+                {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.icon ? `${cat.icon} ` : ""}{cat.label}</option>)}
+              </select>
+              <button onClick={() => void createCatQuick().then((id) => { if (id) setBulkCat(id); })} className="h-9 rounded-md border border-violet-200 bg-violet-50 px-3 text-xs font-medium text-violet-700 hover:bg-violet-100">＋ {t("หมวดใหม่", "New category")}</button>
+              <button onClick={() => void moveSelected()} disabled={selected.size === 0 || bulkBusy} className="h-9 rounded-md bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40">{bulkBusy ? t("กำลังย้าย…", "Moving…") : `${t("ย้ายเข้าหมวด", "Move to category")} →`}</button>
+              <button onClick={exitManage} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">{t("เสร็จแล้ว", "Done")}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* create modal */}
       <ERPModal open={modalOpen} onClose={() => setModalOpen(false)} title={t("สร้างแคมเปญใหม่", "Create new campaign")} size="lg" hasUnsavedChanges={dirty}
