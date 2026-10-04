@@ -15,6 +15,7 @@ export const revalidate = 0;
 const TABLES: { table: string; kind: string }[] = [
   { table: "erp_task_types", kind: "task_type" },
   { table: "erp_platforms", kind: "platform" },
+  { table: "erp_campaign_categories", kind: "campaign_category" },
 ];
 const mapRow = (r: Record<string, unknown>, kind: string) => ({ id: r.id, kind, key: r.code, label: r.name_th, color: r.color ?? null, icon: r.icon ?? null, icon_key: r.icon_key ?? null, sort_order: r.sort_order, is_active: r.is_active });
 

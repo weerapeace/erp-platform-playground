@@ -17,7 +17,8 @@ export const revalidate = 0;
 // ----- map ชนิด → ตารางจริง (Phase A) -----
 // คงรูป response เดิม { id, kind, key, label, sort_order, is_active } (key=code, label=name_th)
 // เพื่อให้ use-options / หน้า settings เดิมใช้งานต่อได้โดยไม่ต้องแก้
-const KIND_TABLE: Record<string, string> = { task_type: "erp_task_types", platform: "erp_platforms" };
+// campaign_category = หมวดแคมเปญ Creative (จัดกลุ่มหน้ารายการแคมเปญ · ผู้ใช้เพิ่มเองได้)
+const KIND_TABLE: Record<string, string> = { task_type: "erp_task_types", platform: "erp_platforms", campaign_category: "erp_campaign_categories" };
 const KINDS = new Set(Object.keys(KIND_TABLE));
 // color/icon = สี + ไอคอน emoji (มีทั้ง 2 ตาราง) · icon_key = รูปไอคอนอัปโหลด (เฉพาะ erp_platforms)
 const mapRow = (r: Record<string, unknown>, kind: string) => ({ id: r.id, kind, key: r.code, label: r.name_th, label_en: r.name_en ?? null, color: r.color ?? null, icon: r.icon ?? null, icon_key: r.icon_key ?? null, sort_order: r.sort_order, is_active: r.is_active });

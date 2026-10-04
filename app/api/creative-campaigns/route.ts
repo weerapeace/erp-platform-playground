@@ -32,7 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const isManager = ["admin", "manager"].includes((prof as { role?: string } | null)?.role ?? "");
 
   let q = admin.from("erp_creative_campaigns")
-    .select("id, name, brand_id, objective, status, start_date, end_date, owner_id, note, is_active, updated_at, visibility, brand:brands!brand_id(name, color)", { count: "exact" })
+    .select("id, name, brand_id, objective, status, start_date, end_date, owner_id, note, is_active, updated_at, visibility, category_id, brand:brands!brand_id(name, color), category:erp_campaign_categories!category_id(name_th, color, icon)", { count: "exact" })
     .order("updated_at", { ascending: false })
     .limit(500);
   if (!includeInactive) q = q.eq("is_active", true);
@@ -47,9 +47,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const ownerMap = await employeeLabelMap(admin, rows.map((r) => r.owner_id as string | null));
   const items = rows.map((r) => {
     const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
+    const cat = (Array.isArray(r.category) ? r.category[0] : r.category) as { name_th?: string; color?: string | null; icon?: string | null } | null;
     return {
       id: String(r.id), name: String(r.name),
       brand_id: (r.brand_id as string) ?? null, brand_label: b?.name ?? null, brand_color: b?.color ?? null,
+      category_id: (r.category_id as string) ?? null, category_label: cat?.name_th ?? null, category_color: cat?.color ?? null, category_icon: cat?.icon ?? null,
       objective: (r.objective as string) ?? null, status: String(r.status ?? "active"),
       start_date: (r.start_date as string) ?? null, end_date: (r.end_date as string) ?? null,
       owner_id: (r.owner_id as string) ?? null, owner_label: ownerMap.get(String(r.owner_id)) ?? null,
@@ -65,6 +67,7 @@ type CreateBody = {
   status?: string; start_date?: string | null; end_date?: string | null;
   owner_id?: string | null; note?: string | null;
   visibility?: string; shared_user_ids?: string[];
+  category_id?: string | null;   // หมวดแคมเปญ
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -78,7 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: row, error } = await admin.from("erp_creative_campaigns").insert({
-    name, brand_id: body.brand_id || null, objective: body.objective?.trim() || null,
+    name, brand_id: body.brand_id || null, category_id: body.category_id || null, objective: body.objective?.trim() || null,
     status: body.status || "active", start_date: body.start_date || null, end_date: body.end_date || null,
     owner_id: body.owner_id || null, note: body.note?.trim() || null, created_by: user?.id ?? null,
     visibility: ["private", "shared", "team"].includes(body.visibility ?? "") ? body.visibility : "team",

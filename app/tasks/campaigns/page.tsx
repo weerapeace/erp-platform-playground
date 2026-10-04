@@ -6,7 +6,7 @@
 // ข้อมูลจาก /api/creative-campaigns (ดู app/tasks/data.ts)
 // ============================================================
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useT } from "@/components/i18n";
 import { useSWRLite } from "@/lib/swr-lite";
@@ -20,13 +20,16 @@ import {
   listCampaigns, createCampaign, deleteCampaign, listBrands,
   type Campaign,
 } from "../data";
+import { listOptions, createOption, type Option } from "../use-options";
+
+const NO_CAT = "__none__";   // ตัวกรอง/กลุ่ม "ยังไม่จัดหมวด"
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
-type FormState = { name: string; brand_id: string; objective: string; owner: UserPickerValue | null; start_date: string; end_date: string; note: string };
-const EMPTY: FormState = { name: "", brand_id: "", objective: "", owner: null, start_date: "", end_date: "", note: "" };
+type FormState = { name: string; brand_id: string; category_id: string; objective: string; owner: UserPickerValue | null; start_date: string; end_date: string; note: string };
+const EMPTY: FormState = { name: "", brand_id: "", category_id: "", objective: "", owner: null, start_date: "", end_date: "", note: "" };
 
 export default function CampaignsPage() {
   const router = useRouter();
@@ -39,6 +42,10 @@ export default function CampaignsPage() {
   const [formErr, setFormErr] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<Campaign | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [catFilter, setCatFilter] = useState<string>("");      // "" = ทุกหมวด · NO_CAT = ยังไม่จัดหมวด · id = หมวดนั้น
+  const [newCatOpen, setNewCatOpen] = useState(false);          // เพิ่มหมวดใหม่จากในฟอร์มสร้างแคมเปญ
+  const [newCatLabel, setNewCatLabel] = useState("");
+  const [catBusy, setCatBusy] = useState(false);
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random();
@@ -49,6 +56,9 @@ export default function CampaignsPage() {
   // ใช้ SWR คีย์เดียวกับหน้างาน → สลับ /tasks ↔ แคมเปญ ใช้ข้อมูลซ้ำ เห็นทันที
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
+  // หมวดแคมเปญ (ของกลาง creative-options kind=campaign_category · เพิ่ม/แก้/เรียงที่ /tasks/settings → 📁 หมวดแคมเปญ)
+  const catsSWR = useSWRLite("creative:campaign_categories", () => listOptions("campaign_category"));
+  const categories: Option[] = useMemo(() => (catsSWR.data ?? []).filter((o) => o.is_active !== false).sort((a, b) => a.sort_order - b.sort_order), [catsSWR.data]);
   const campaigns = campaignsSWR.data ?? [];
   const brands = brandsSWR.data ?? [];
   const loading = campaignsSWR.loading;
@@ -61,11 +71,32 @@ export default function CampaignsPage() {
     if (!form.name.trim()) { setFormErr(t("กรุณากรอกชื่อแคมเปญ", "Please enter a campaign name")); return; }
     setSaving(true); setFormErr(null);
     try {
-      await createCampaign({ name: form.name.trim(), brand_id: form.brand_id || null, objective: form.objective.trim() || null, owner_id: form.owner?.id ?? null, start_date: form.start_date || null, end_date: form.end_date || null, note: form.note.trim() || null });
+      await createCampaign({ name: form.name.trim(), brand_id: form.brand_id || null, category_id: form.category_id || null, objective: form.objective.trim() || null, owner_id: form.owner?.id ?? null, start_date: form.start_date || null, end_date: form.end_date || null, note: form.note.trim() || null });
       setModalOpen(false); setDirty(false); pushToast("success", t("สร้างแคมเปญแล้ว", "Campaign created")); await load();
     } catch (e) { setFormErr((e as Error).message); }
     finally { setSaving(false); }
   };
+
+  // เพิ่มหมวดใหม่จากในฟอร์ม (ไม่ต้องไปหน้า settings) → เลือกให้ทันที
+  const addCategory = async () => {
+    const label = newCatLabel.trim(); if (!label) return;
+    setCatBusy(true);
+    try { const o = await createOption("campaign_category", label); await catsSWR.revalidate(true); update({ category_id: o.id }); setNewCatLabel(""); setNewCatOpen(false); pushToast("success", t("เพิ่มหมวดแล้ว", "Category added")); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setCatBusy(false); }
+  };
+
+  // จัดกลุ่มแคมเปญตามหมวด (เรียงตามลำดับหมวด · "ยังไม่จัดหมวด" ท้ายสุด) + ตัวกรอง
+  const groups = useMemo(() => {
+    const byCat = new Map<string, Campaign[]>();
+    for (const c of campaigns) { const k = c.category_id ?? NO_CAT; const arr = byCat.get(k) ?? []; arr.push(c); byCat.set(k, arr); }
+    const out: { key: string; label: string; icon: string | null; color: string | null; items: Campaign[] }[] = [];
+    for (const cat of categories) { const items = byCat.get(cat.id) ?? []; if (items.length) out.push({ key: cat.id, label: cat.label, icon: cat.icon ?? null, color: cat.color ?? null, items }); byCat.delete(cat.id); }
+    // หมวดที่ถูกปิดใช้แล้วแต่ยังมีแคมเปญค้าง → โชว์ด้วยชื่อจากแคมเปญ (ไม่หาย)
+    for (const [k, items] of byCat) if (k !== NO_CAT) out.push({ key: k, label: items[0].category_label ?? t("หมวดเดิม", "Former category"), icon: items[0].category_icon ?? null, color: items[0].category_color ?? null, items });
+    const none = byCat.get(NO_CAT) ?? [];
+    if (none.length) out.push({ key: NO_CAT, label: t("ยังไม่จัดหมวด", "Uncategorized"), icon: null, color: null, items: none });
+    return catFilter ? out.filter((g) => g.key === catFilter) : out;
+  }, [campaigns, categories, catFilter, t]);
 
   const onDelete = async () => { if (!delTarget) return; try { await deleteCampaign(delTarget.id); pushToast("info", t("ลบแคมเปญแล้ว", "Campaign deleted")); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
 
@@ -102,8 +133,29 @@ export default function CampaignsPage() {
             <button onClick={openCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแคมเปญ", "Create campaign")}</button>
           </div>
         ) : (
+          <div className="space-y-6">
+            {/* ตัวกรองหมวด */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button type="button" onClick={() => setCatFilter("")} className={`h-8 rounded-full border px-3 text-xs font-medium ${catFilter === "" ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{t("ทุกหมวด", "All")} <span className="opacity-60">{campaigns.length}</span></button>
+              {categories.map((cat) => { const n = campaigns.filter((c) => c.category_id === cat.id).length; return (
+                <button key={cat.id} type="button" onClick={() => setCatFilter(catFilter === cat.id ? "" : cat.id)} className={`h-8 rounded-full border px-3 text-xs font-medium ${catFilter === cat.id ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  {cat.icon ? `${cat.icon} ` : ""}{cat.label} <span className="opacity-60">{n}</span></button>); })}
+              {campaigns.some((c) => !c.category_id) && (
+                <button type="button" onClick={() => setCatFilter(catFilter === NO_CAT ? "" : NO_CAT)} className={`h-8 rounded-full border border-dashed px-3 text-xs font-medium ${catFilter === NO_CAT ? "border-violet-600 bg-violet-600 text-white" : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"}`}>{t("ยังไม่จัดหมวด", "Uncategorized")} <span className="opacity-60">{campaigns.filter((c) => !c.category_id).length}</span></button>
+              )}
+              <a href="/tasks/settings" className="ml-auto text-xs text-violet-700 hover:underline">⚙️ {t("จัดการหมวด", "Manage categories")}</a>
+            </div>
+
+            {groups.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">{t("ไม่มีแคมเปญในหมวดนี้", "No campaigns in this category")}</div>}
+            {groups.map((g) => (
+            <section key={g.key}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full" style={{ background: g.color || "#cbd5e1" }} />
+                <h2 className="text-sm font-semibold text-slate-800">{g.icon ? `${g.icon} ` : ""}{g.label}</h2>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">{g.items.length}</span>
+              </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {campaigns.map((c) => {
+            {g.items.map((c) => {
               const st = CSTATUS[c.status] ?? CAMPAIGN_STATUS[1];
               return (
                 <div key={c.id} onClick={() => router.push(`/tasks/campaigns/${c.id}`)} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 hover:shadow cursor-pointer transition-colors">
@@ -130,6 +182,9 @@ export default function CampaignsPage() {
               );
             })}
           </div>
+            </section>
+            ))}
+          </div>
         )}
       </div>
 
@@ -143,6 +198,18 @@ export default function CampaignsPage() {
         <ERPFormSection title={t("ข้อมูลแคมเปญ", "Campaign details")} columns={2}>
           <ERPFormField label={t("ชื่อแคมเปญ", "Campaign name")} required span={2}><ERPInput value={form.name} onChange={(e) => update({ name: e.target.value })} placeholder={t("เช่น Shopee 7.7 / เปิดตัว Heart Bag", "e.g. Shopee 7.7 / Heart Bag launch")} /></ERPFormField>
           <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => update({ brand_id: e.target.value })} /></ERPFormField>
+          <ERPFormField label={t("หมวดแคมเปญ", "Category")}>
+            <div className="flex items-center gap-1.5">
+              <div className="min-w-0 flex-1"><ERPSelect value={form.category_id} options={[{ value: "", label: t("— ยังไม่จัดหมวด —", "— Uncategorized —") }, ...categories.map((c) => ({ value: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.label}` }))]} onChange={(e) => update({ category_id: e.target.value })} /></div>
+              <button type="button" onClick={() => setNewCatOpen((o) => !o)} title={t("เพิ่มหมวดใหม่", "Add category")} className="h-9 shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 hover:bg-violet-100">＋ {t("หมวดใหม่", "New")}</button>
+            </div>
+            {newCatOpen && (
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <input value={newCatLabel} onChange={(e) => setNewCatLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void addCategory(); } }} placeholder={t("ชื่อหมวด เช่น โปรโมชัน / เปิดตัวสินค้า", "Category name")} className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 text-sm" autoFocus />
+                <button type="button" onClick={() => void addCategory()} disabled={catBusy || !newCatLabel.trim()} className="h-9 rounded-lg bg-violet-600 px-3 text-xs font-medium text-white disabled:opacity-40">{catBusy ? "…" : t("เพิ่ม", "Add")}</button>
+              </div>
+            )}
+          </ERPFormField>
           <ERPFormField label={t("ผู้ดูแลแคมเปญ", "Campaign owner")}><UserPicker value={form.owner} onChange={(v) => update({ owner: v })} disableCreate /></ERPFormField>
           <ERPFormField label={t("เริ่ม", "Start")}><ERPInput type="date" value={form.start_date} onChange={(e) => update({ start_date: e.target.value })} /></ERPFormField>
           <ERPFormField label={t("สิ้นสุด", "End")}><ERPInput type="date" value={form.end_date} onChange={(e) => update({ end_date: e.target.value })} /></ERPFormField>

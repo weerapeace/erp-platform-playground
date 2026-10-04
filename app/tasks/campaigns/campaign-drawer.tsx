@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { STATUS_META, statusLabelFb, getCampaign, updateCampaign, deleteTask, listBrands, type CampaignDetail, type CreativeStatus, type CreativeTask, type BrandOption } from "../data";
+import { listOptions, type Option } from "../use-options";
 import { TaskDetailDrawer } from "../task-detail-drawer";
 import { applyTaskTransition } from "../task-actions";
 import { useRefetchOnFocus } from "@/lib/use-refetch-on-focus";
@@ -32,8 +33,10 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null); // งานที่กดเปิด (งานเต็มทับขึ้นมา)
   const [editing, setEditing] = useState(false);
-  const [ef, setEf] = useState<{ name: string; brand_id: string; owner: UserPickerValue | null; start_date: string; end_date: string; objective: string; detail_html: string; visibility: string; sharedUsers: UserPickerValue[] } | null>(null);
+  const [ef, setEf] = useState<{ name: string; brand_id: string; category_id: string; owner: UserPickerValue | null; start_date: string; end_date: string; objective: string; detail_html: string; visibility: string; sharedUsers: UserPickerValue[] } | null>(null);
   const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [categories, setCategories] = useState<Option[]>([]);   // หมวดแคมเปญ (ของกลาง creative-options)
+  useEffect(() => { listOptions("campaign_category").then((o) => setCategories(o.filter((x) => x.is_active !== false).sort((a, b) => a.sort_order - b.sort_order))).catch(() => setCategories([])); }, []);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { setDetail(await getCampaign(campaignId)); } catch (e) { pushToast("error", (e as Error).message); } }, [campaignId, pushToast]);
   useEffect(() => { load(); }, [load]);
@@ -42,12 +45,12 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
   const startEdit = async () => {
     const c = detail?.campaign; if (!c) return;
     if (!brands.length) { try { setBrands(await listBrands()); } catch { /* ignore */ } }
-    setEf({ name: c.name, brand_id: c.brand_id ?? "", owner: c.owner_id ? ({ id: c.owner_id, name: c.owner_label ?? "" } as UserPickerValue) : null, start_date: c.start_date ?? "", end_date: c.end_date ?? "", objective: c.objective ?? "", detail_html: c.detail_html ?? "", visibility: c.visibility ?? "team", sharedUsers: (c.shared_users ?? []).map((u) => ({ id: u.id, code: null, name: u.name })) });
+    setEf({ name: c.name, brand_id: c.brand_id ?? "", category_id: c.category_id ?? "", owner: c.owner_id ? ({ id: c.owner_id, name: c.owner_label ?? "" } as UserPickerValue) : null, start_date: c.start_date ?? "", end_date: c.end_date ?? "", objective: c.objective ?? "", detail_html: c.detail_html ?? "", visibility: c.visibility ?? "team", sharedUsers: (c.shared_users ?? []).map((u) => ({ id: u.id, code: null, name: u.name })) });
     setEditing(true);
   };
   const saveEdit = async () => {
     if (!ef) return; setBusy(true);
-    try { await updateCampaign(campaignId, { name: ef.name.trim(), brand_id: ef.brand_id || null, owner_id: ef.owner?.id ?? null, start_date: ef.start_date || null, end_date: ef.end_date || null, objective: ef.objective.trim() || null, detail_html: ef.detail_html || null, visibility: ef.visibility, shared_user_ids: ef.visibility === "shared" ? ef.sharedUsers.map((u) => u.id) : [] }); setEditing(false); await load(); onChanged?.(); pushToast("success", t("บันทึกแล้ว", "Saved")); }
+    try { await updateCampaign(campaignId, { name: ef.name.trim(), brand_id: ef.brand_id || null, category_id: ef.category_id || null, owner_id: ef.owner?.id ?? null, start_date: ef.start_date || null, end_date: ef.end_date || null, objective: ef.objective.trim() || null, detail_html: ef.detail_html || null, visibility: ef.visibility, shared_user_ids: ef.visibility === "shared" ? ef.sharedUsers.map((u) => u.id) : [] }); setEditing(false); await load(); onChanged?.(); pushToast("success", t("บันทึกแล้ว", "Saved")); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
 
@@ -92,6 +95,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} placeholder={t("— ไม่ระบุ —", "— None —")} options={brands.map((b) => ({ value: b.id, label: b.name }))} /></div>
                     <div><label className="text-xs text-slate-400">{t("ผู้ดูแล", "Owner")}</label><UserPicker value={ef.owner} onChange={(v) => setEf({ ...ef, owner: v })} disableCreate /></div>
+                    <div><label className="text-xs text-slate-400">{t("หมวดแคมเปญ", "Category")}</label><ERPSelect value={ef.category_id} onChange={(e) => setEf({ ...ef, category_id: e.target.value })} placeholder={t("— ยังไม่จัดหมวด —", "— Uncategorized —")} options={categories.map((c) => ({ value: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.label}` }))} /></div>
                     <div><label className="text-xs text-slate-400">{t("เริ่ม", "Start")}</label><ERPInput type="date" value={ef.start_date} onChange={(e) => setEf({ ...ef, start_date: e.target.value })} /></div>
                     <div><label className="text-xs text-slate-400">{t("สิ้นสุด", "End")}</label><ERPInput type="date" value={ef.end_date} onChange={(e) => setEf({ ...ef, end_date: e.target.value })} /></div>
                   </div>

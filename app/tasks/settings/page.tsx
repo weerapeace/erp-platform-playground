@@ -32,7 +32,7 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
-type Tab = "perm" | "task_type" | "platform" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive" | "ai_prompt";
+type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive" | "ai_prompt";
 const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive", "ai_prompt"];
 
 export default function TaskSettingsPage() {
@@ -62,6 +62,7 @@ export default function TaskSettingsPage() {
             <TabBtn active={tab === "perm"} onClick={() => setTab("perm")}>🔑 {t("สิทธิ์", "Permissions")}</TabBtn>
             <TabBtn active={tab === "task_type"} onClick={() => setTab("task_type")}>🏷️ {t("ประเภทงาน", "Task Types")}</TabBtn>
             <TabBtn active={tab === "platform"} onClick={() => setTab("platform")}>📱 {t("แพลตฟอร์ม", "Platforms")}</TabBtn>
+            <TabBtn active={tab === "campaign_category"} onClick={() => setTab("campaign_category")}>📁 {t("หมวดแคมเปญ", "Campaign categories")}</TabBtn>
             <TabBtn active={tab === "subtype"} onClick={() => setTab("subtype")}>🧩 {t("ชนิดงานย่อย", "Subtask types")}</TabBtn>
             <TabBtn active={tab === "status"} onClick={() => setTab("status")}>🚦 {t("สถานะ", "Status")}</TabBtn>
             <TabBtn active={tab === "transition"} onClick={() => setTab("transition")}>🔀 {t("เส้นทาง", "Transitions")}</TabBtn>
@@ -110,7 +111,7 @@ export default function TaskSettingsPage() {
             </div>
           )
           : tab === "brand_drive" ? <BrandDriveFolders />
-          : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
+          : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : tab === "campaign_category" ? t("หมวดแคมเปญ", "Campaign categories") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
       </div>
 
       {toast && <div className="fixed bottom-6 right-6 z-[70] px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white bg-slate-800">{toast}</div>}

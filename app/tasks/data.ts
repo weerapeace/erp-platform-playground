@@ -94,6 +94,7 @@ export type TaskDetail = CreativeTask & {
 
 export type Campaign = {
   id: string; name: string; brand_id: string | null; brand_label: string | null; brand_color: string | null;
+  category_id?: string | null; category_label?: string | null; category_color?: string | null; category_icon?: string | null;   // หมวดแคมเปญ
   objective: string | null; status: string; start_date: string | null; end_date: string | null;
   owner_id: string | null; owner_label: string | null; note: string | null; detail_html?: string | null;
   visibility?: string;   // team | private | shared
@@ -291,7 +292,7 @@ export async function getCampaign(id: string): Promise<CampaignDetail> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-campaigns/${id}`));
   return j.data as CampaignDetail;
 }
-export async function createCampaign(body: { name: string; brand_id?: string | null; objective?: string | null; start_date?: string | null; end_date?: string | null; owner_id?: string | null; note?: string | null }): Promise<{ id: string }> {
+export async function createCampaign(body: { name: string; brand_id?: string | null; category_id?: string | null; objective?: string | null; start_date?: string | null; end_date?: string | null; owner_id?: string | null; note?: string | null }): Promise<{ id: string }> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-campaigns", { method: "POST", body: JSON.stringify(body) }));
   return { id: j.id as string };
 }
