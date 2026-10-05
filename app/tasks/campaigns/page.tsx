@@ -9,7 +9,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useT } from "@/components/i18n";
-import { useSWRLite } from "@/lib/swr-lite";
+import { useSWRLite, mutateSWR } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
@@ -87,7 +87,14 @@ export default function CampaignsPage() {
   const addCategory = async () => {
     const label = newCatLabel.trim(); if (!label) return;
     setCatBusy(true);
-    try { const o = await createOption("campaign_category", label); await catsSWR.revalidate(true); update({ category_id: o.id }); setNewCatLabel(""); setNewCatOpen(false); pushToast("success", t("เพิ่มหมวดแล้ว", "Category added")); }
+    try {
+      const o = await createOption("campaign_category", label);
+      // ใส่เข้า cache ทันที (ไม่รอโหลดใหม่) → dropdown เห็นหมวดใหม่และเลือกให้เลย · แล้วค่อยโหลดสดเบื้องหลัง
+      mutateSWR<Option[]>("creative:campaign_categories", [...(catsSWR.data ?? []).filter((x) => x.id !== o.id), o]);
+      update({ category_id: o.id }); setNewCatLabel(""); setNewCatOpen(false);
+      pushToast("success", t(`เพิ่มหมวด "${o.label}" แล้ว`, `Category "${o.label}" added`));
+      void catsSWR.revalidate(true);
+    }
     catch (e) { pushToast("error", (e as Error).message); } finally { setCatBusy(false); }
   };
 
@@ -95,7 +102,12 @@ export default function CampaignsPage() {
   const createCatQuick = async (): Promise<string | null> => {
     const label = window.prompt(t("ชื่อหมวดใหม่", "New category name")) ?? "";
     if (!label.trim()) return null;
-    try { const o = await createOption("campaign_category", label.trim()); await catsSWR.revalidate(true); pushToast("success", t("เพิ่มหมวดแล้ว", "Category added")); return o.id; }
+    try {
+      const o = await createOption("campaign_category", label.trim());
+      mutateSWR<Option[]>("creative:campaign_categories", [...(catsSWR.data ?? []).filter((x) => x.id !== o.id), o]);
+      void catsSWR.revalidate(true);
+      pushToast("success", t(`เพิ่มหมวด "${o.label}" แล้ว`, `Category "${o.label}" added`)); return o.id;
+    }
     catch (e) { pushToast("error", (e as Error).message); return null; }
   };
   // เปลี่ยนหมวดรายใบ (จาก dropdown บนการ์ด) — บันทึกทันที
@@ -272,7 +284,7 @@ export default function CampaignsPage() {
           <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => update({ brand_id: e.target.value })} /></ERPFormField>
           <ERPFormField label={t("หมวดแคมเปญ", "Category")}>
             <div className="flex items-center gap-1.5">
-              <div className="min-w-0 flex-1"><ERPSelect value={form.category_id} options={[{ value: "", label: t("— ยังไม่จัดหมวด —", "— Uncategorized —") }, ...categories.map((c) => ({ value: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.label}` }))]} onChange={(e) => update({ category_id: e.target.value })} /></div>
+              <div className="min-w-0 flex-1"><ERPSelect value={form.category_id} options={[{ value: "", label: t("— ยังไม่จัดหมวด —", "— Uncategorized —") }, ...categories.map((c) => ({ value: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.label}` })), ...(form.category_id && !categories.some((c) => c.id === form.category_id) ? [{ value: form.category_id, label: t("(หมวดใหม่)", "(new category)") }] : [])]} onChange={(e) => update({ category_id: e.target.value })} /></div>
               <button type="button" onClick={() => setNewCatOpen((o) => !o)} title={t("เพิ่มหมวดใหม่", "Add category")} className="h-9 shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 hover:bg-violet-100">＋ {t("หมวดใหม่", "New")}</button>
             </div>
             {newCatOpen && (
