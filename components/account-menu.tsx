@@ -14,6 +14,7 @@ import { SecurityDevices } from "@/components/security-devices";
 import { ERPModal } from "@/components/modal";
 import { getTheme, setTheme } from "@/lib/theme";
 import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
+import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT } from "@/components/pwa-install-button";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
 export type AccountMenuDevice = { mode: DeviceMode; viewport: DeviceLayout; onChange: (m: DeviceMode) => void; qr?: DeviceQrOpts };
@@ -29,6 +30,8 @@ export function AccountMenu({ onDark = false, device }: { onDark?: boolean; devi
   const [cur, setCur] = useState<string | null>(getTheme());
   const [qrOpen, setQrOpen] = useState(false);                       // ป๊อป QR เปิดบนแท็บเล็ต/มือถือ
   const [qrLayout, setQrLayout] = useState<DeviceLayout>("tablet");  // QR สำหรับเครื่องแบบไหน
+  const pwa = usePwaInstall();                                        // ติดตั้งแอปนี้บนเครื่องที่กำลังใช้อยู่ (แท็บเล็ต/มือถือไม่มีปุ่มที่หัว)
+  const [installHint, setInstallHint] = useState<string | null>(null);
   if (!user) return null;
 
   const pick = (c: string | null) => { setTheme(c); setCur(getTheme()); };
@@ -85,8 +88,15 @@ export function AccountMenu({ onDark = false, device }: { onDark?: boolean; devi
               <div className="px-3 py-2 border-t border-slate-100">
                 <div className="text-[11px] text-slate-500 mb-1.5">📟 มุมมองอุปกรณ์ <span className="text-slate-400">(ดูแบบแท็บเล็ต/มือถือบนจอนี้)</span></div>
                 <DeviceModeToggle mode={device.mode} viewport={device.viewport} onChange={(m) => { device.onChange(m); setOpen(false); }} className="w-full [&>button]:flex-1" />
+                {/* ติดตั้งแอปบนเครื่องนี้ — Android/Chrome เด้งกล่องติดตั้ง · iPad/iPhone บอกวิธี แชร์ → เพิ่มไปหน้าจอโฮม */}
+                <button type="button"
+                  onClick={async () => { const r = await pwa.install(); setInstallHint(r === "ios" ? IOS_INSTALL_HINT : r === "unsupported" ? UNSUPPORTED_INSTALL_HINT : r === "installed" ? "✓ เปิดในโหมดแอปอยู่แล้ว" : null); }}
+                  className={`mt-1.5 w-full h-8 rounded-md border text-xs font-medium ${pwa.installed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100"}`}>
+                  {pwa.installed ? "✓ ติดตั้งแอปนี้แล้ว (โหมดแอป)" : "📲 ติดตั้งแอปนี้บนเครื่องนี้"}
+                </button>
+                {installHint && <p className="mt-1 text-[11px] leading-snug text-slate-500 bg-slate-50 border border-slate-100 rounded-md px-2 py-1.5">{installHint}</p>}
                 <button type="button" onClick={() => { setOpen(false); setQrOpen(true); }}
-                  className="mt-1.5 w-full h-8 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50">📷 QR เปิด/ติดตั้งบนแท็บเล็ต-มือถือ</button>
+                  className="mt-1.5 w-full h-8 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50">📷 QR เปิด/ติดตั้งบนเครื่องอื่น</button>
               </div>
             )}
 

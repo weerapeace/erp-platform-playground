@@ -39,6 +39,7 @@ import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useBackClose } from "@/lib/use-back-close";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
@@ -413,6 +414,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [postModal, setPostModal] = useState<{ platform: string; captionText: string } | null>(null);   // ป๊อปอัปยืนยันก่อนโพสต์
   const [assignees, setAssignees] = useState<UserPickerValue[]>([]);   // ผู้รับผิดชอบคอนเทนต์ (หลายคน m2m)
   const [saving, setSaving] = useState(false);
+  // ปุ่มย้อนกลับ (เบราว์เซอร์/ปัดบนแท็บเล็ต-มือถือ) = ปิด drawer นี้ ไม่หลุดออกจากหน้า (ของกลาง)
+  useBackClose(true, onClose, "content-drawer");
   // แม่แบบ + ส่วนลด
   const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
   const [shopChannels, setShopChannels] = useState<ShopChannel[]>([]);

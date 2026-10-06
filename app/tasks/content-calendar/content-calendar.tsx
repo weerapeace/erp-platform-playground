@@ -10,8 +10,9 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { useSWRLite } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
+import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
-import { listContent, listBrands, listCampaigns, listContentTemplates, listBrandCalStyles, updateContent, CONTENT_STATUS_META, contentStatusLabel, type ContentItem, type BrandCalStyle, type ContentStatus } from "../data";
+import { listContent, listBrands, listCampaigns, listContentTemplates, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes, CONTENT_STATUS_META, contentStatusLabel, type ContentItem, type BrandCalStyle, type ContentStatus } from "../data";
 import { ContentDrawer } from "../content/content";
 import { ContentCreateModal } from "../content/content-create-modal";
 import { BrandStyleModal } from "./brand-style-modal";
@@ -148,6 +149,13 @@ export function ContentCalendarView() {
   const startDrag = (c: ContentItem) => { dragRef.current = { id: c.id, time: c.scheduled_at ? c.scheduled_at.slice(11, 16) : null }; };
 
   const openCreate = (date: string | null) => { setCreateDate(date); setCreateOpen(true); };
+  // กดช่องวัน → ป๊อปให้เลือก: สร้างคอนเทนต์ใหม่วันนี้ หรือ หยิบจาก "ยังไม่ลงวันที่" มาลงวันนี้ (เวลา = เวลาแนะนำของวันนั้น ไม่มีก็ 10:00)
+  const [dayPick, setDayPick] = useState<string | null>(null);
+  const [recTimes, setRecTimes] = useState<RecommendedTimes>({});
+  useEffect(() => { getRecommendedTimes().then(setRecTimes).catch(() => {}); }, []);
+  const defaultTimeFor = (dayKey: string) => { const day = new Date(`${dayKey}T00:00:00`).getDay(); return (recTimes[String(day)] ?? [])[0]?.time || "10:00"; };
+  const pickIntoDay = (c: ContentItem, dayKey: string) => { setDayPick(null); void reschedule(c.id, `${dayKey}T${defaultTimeFor(dayKey)}`); };
+  const dayPickLabel = dayPick ? new Date(`${dayPick}T00:00:00`).toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "long", year: "numeric" }) : "";
 
   const tabCls = (active: boolean) =>
     `inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium border transition-colors ${
@@ -291,7 +299,7 @@ export function ContentCalendarView() {
                 const isToday = key === todayKey;
                 const isOver = overKey === key;
                 return (
-                  <div key={day} onClick={() => openCreate(key)}
+                  <div key={day} onClick={() => setDayPick(key)}
                     onDragOver={(e) => { e.preventDefault(); if (overKey !== key) setOverKey(key); }}
                     onDragLeave={() => setOverKey((k) => (k === key ? null : k))}
                     onDrop={() => onDropDay(key)}
@@ -352,6 +360,45 @@ export function ContentCalendarView() {
         </div>
         </>)}
       </div>
+
+      {/* ป๊อปเลือกว่าจะทำอะไรกับวันที่กด */}
+      <ERPModal open={!!dayPick} onClose={() => setDayPick(null)} size="sm" title={`🗓 ${dayPickLabel}`}>
+        {dayPick && (
+          <div className="space-y-3">
+            <button type="button" onClick={() => { const k = dayPick; setDayPick(null); openCreate(k); }}
+              className="w-full h-11 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 flex items-center justify-center gap-2">＋ {t("สร้างคอนเทนต์ใหม่ลงวันนี้", "Create new content on this day")}</button>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-slate-600">📥 {t("หรือหยิบจาก “ยังไม่ลงวันที่”", "Or pick from “Unscheduled”")}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{unscheduled.length}</span>
+              </div>
+              {unscheduled.length === 0 ? (
+                <p className="text-xs text-slate-300 text-center py-4">{t("ไม่มีงานค้าง 🎉", "All scheduled 🎉")}</p>
+              ) : (
+                <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-0.5">
+                  {unscheduled.map((c) => {
+                    const meta = [c.parent_sku_code || c.sku_code || null, c.brand_label].filter(Boolean).join(" · ");
+                    return (
+                      <button key={c.id} type="button" onClick={() => pickIntoDay(c, dayPick)} title={t("กดเพื่อลงวันนี้", "Click to schedule on this day")}
+                        className="w-full text-left bg-white border border-slate-200 rounded-lg p-2 hover:border-violet-400 hover:bg-violet-50 flex items-center gap-2">
+                        {c.task_cover_url
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={c.task_cover_url} alt="" className="h-9 w-9 rounded object-cover border border-slate-200 shrink-0" />
+                          : <span className="h-9 w-9 rounded bg-slate-100 flex items-center justify-center shrink-0"><span className="h-2.5 w-2.5 rounded-full" style={{ background: brandColor(c.brand_id) }} /></span>}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-medium text-slate-700 truncate">{c.title}</div>
+                          {meta && <div className="text-[10px] text-slate-400 truncate">{meta}</div>}
+                        </div>
+                        <span className="text-[11px] text-violet-700 shrink-0">{t("ลงวันนี้", "Schedule")} {defaultTimeFor(dayPick)} →</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </ERPModal>
 
       {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={reload} pushToast={pushToast} />}
 
