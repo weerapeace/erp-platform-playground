@@ -967,7 +967,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 <div className="space-y-2">
                   {!hasProduct && <p className="text-[11px] text-slate-400">{t("เลือก SKU (สีเดียว) หรือ Parent SKU (รวมทุกสี) → ระบบเติมแบรนด์ สี และราคาให้", "Pick a SKU (single color) or Parent SKU (all colors) → brand, colors and price fill in")}</p>}
                   <div className="grid grid-cols-2 gap-2 items-start">
-                    <div><label className="text-[11px] text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
+                    <div><label className="text-[11px] text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label>
+                      <SkuPicker value={sku} onChange={(v) => { setSku(v); if (v?.parent_sku_id && parent?.id !== v.parent_sku_id) setParent({ id: v.parent_sku_id, code: v.parent_code ?? "", name: v.parent_name ?? "" }); }} /></div>
                     <div><label className="text-[11px] text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
                   </div>
                   <div>
@@ -979,6 +980,22 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                         {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                     </div>
+                  </div>
+                </div>
+              )}
+              {/* เลือก Parent แล้ว → ชิป SKU ลูกให้กดเลือกสีเดียว (หรือ "ทุกสี" = ใช้ Parent ทั้งชุด) */}
+              {parent && children.length > 0 && (
+                <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                  <div className="text-[11px] text-slate-400 mb-1">{t("SKU ลูกของ", "Child SKUs of")} <span className="font-mono">{parent.code}</span> · {t("เลือกสีเดียว หรือใช้ทุกสี", "pick one color or use all")}</div>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-0.5">
+                    <button type="button" onClick={() => setSku(null)} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!sku ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All colors")} ({children.length})</button>
+                    {children.map((c) => { const on = sku?.id === c.id; const col = (colorSource === "en" ? c.color_en : c.color_th) ?? c.color_th ?? c.color_en; return (
+                      <button key={c.id} type="button" title={c.code}
+                        onClick={() => setSku({ id: c.id, code: c.code, name: c.name, color: c.color_th ?? c.color_en ?? null, list_price: c.list_price, fake_price: c.fake_price, image_key: c.image_key, image_url: r2ImageUrl(c.image_key ?? "", 80), parent_sku_id: parent.id, parent_code: parent.code, parent_name: parent.name })}
+                        className={`h-7 px-2.5 rounded-full border text-[11px] ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
+                        {col || c.code}{col && <span className={`ml-1 font-mono ${on ? "text-violet-200" : "text-slate-400"}`}>{c.code.replace(`${parent.code}-`, "")}</span>}
+                      </button>
+                    ); })}
                   </div>
                 </div>
               )}
@@ -1125,7 +1142,17 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-1.5">
-                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined} postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
+                  connInfo={c.platform === "facebook"
+                    ? (metaStatus.facebook?.connected
+                      ? { connected: true, label: t(`เชื่อมเพจแล้ว: ${metaStatus.facebook.page_name ?? "-"} — กดโพสต์ขึ้นเพจนี้ได้เลย`, `Connected page: ${metaStatus.facebook.page_name ?? "-"}`), href: "/admin/platform-accounts" }
+                      : { connected: false, label: brandId ? t("ยังไม่เชื่อมเพจ Facebook ของแบรนด์นี้ — ปุ่มโพสต์จะเป็นโหมดมือ (คัดลอก+เปิดหน้า)", "Facebook page not connected for this brand — manual mode") : t("เลือกแบรนด์ก่อน ระบบถึงจะรู้ว่าเชื่อมเพจไหน", "Pick a brand first"), href: "/admin/platform-accounts" })
+                    : c.platform === "instagram"
+                      ? (metaStatus.instagram?.connected
+                        ? { connected: true, label: t(`เชื่อม Instagram แล้ว (ผ่านเพจ ${metaStatus.facebook?.page_name ?? "-"})`, `Instagram connected (via page ${metaStatus.facebook?.page_name ?? "-"})`), href: "/admin/platform-accounts" }
+                        : { connected: false, label: t("ยังไม่เชื่อม Instagram — ต้องเชื่อมเพจ Facebook ที่ผูกบัญชี IG ธุรกิจ", "Instagram not connected — link an FB page with an IG business account"), href: "/admin/platform-accounts" })
+                      : undefined}
+                  postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -1452,7 +1479,7 @@ export function postFormatLabel(platform: string, key: string | undefined, t: (t
 }
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, connInfo, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; connInfo?: { connected: boolean; label: string; href: string }; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
   // ปุ่ม ✨ ของช่องนี้ = เปิดป๊อป "AI เขียนแคปชั่น" ของ drawer (ใส่คำสั่งเพิ่มได้) — ใช้เส้นทางเดียวกับปุ่มเขียนทั้งหมด
@@ -1513,6 +1540,14 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
 
       {open && (
         <div className="px-2.5 pb-2.5 space-y-2">
+          {/* สถานะเชื่อมบัญชี (Facebook/Instagram): เชื่อมแล้วโพสต์จริงได้ · ยังไม่เชื่อม = โพสต์มือ + ลิงก์ไปตั้งค่า */}
+          {connInfo && (
+            <div className={`flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1 border ${connInfo.connected ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
+              <span>{connInfo.connected ? "🔗" : "⚠️"}</span>
+              <span className="flex-1 min-w-0 truncate">{connInfo.label}</span>
+              <a href={connInfo.href} target="_blank" rel="noreferrer" className="shrink-0 underline hover:no-underline">{connInfo.connected ? t("เปลี่ยน", "Change") : t("เชื่อมบัญชี", "Connect")} ↗</a>
+            </div>
+          )}
           {/* แม่แบบ — เปลี่ยนเป็นช่องเลือกเล็ก ๆ (เดิมเป็นชิปกางเต็มแถว) */}
           {(POST_FORMATS[cap.platform] ?? []).length > 0 && (
             <div className="flex items-center gap-1.5">

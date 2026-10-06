@@ -17,8 +17,8 @@ type SkuPickerRow = {
   is_active: boolean | null;
   uom: { name: string | null } | { name: string | null }[] | null;
   parent_skus_v2:
-    | { cover_image_r2_key: string | null; product_categories: { name: string | null } | { name: string | null }[] | null }
-    | { cover_image_r2_key: string | null; product_categories: { name: string | null } | { name: string | null }[] | null }[]
+    | { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null; product_categories: { name: string | null } | { name: string | null }[] | null }
+    | { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null; product_categories: { name: string | null } | { name: string | null }[] | null }[]
     | null;
 };
 
@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
       cover_image_r2_key,
       sale_ok,
       is_active,
-      parent_skus_v2 ( cover_image_r2_key, product_categories ( name ) ),
+      parent_skus_v2 ( id, code, name_th, cover_image_r2_key, product_categories ( name ) ),
       uom:uoms!uom_id ( name )
     `, { count: "exact" })
     .eq("is_active", true);
@@ -171,6 +171,10 @@ export async function GET(request: NextRequest) {
       fake_price: row.fake_price,
       image_key: imageKey,
       sale_ok: row.sale_ok,
+      // Parent ของ SKU นี้ — ให้หน้าคอนเทนต์เติม Parent SKU อัตโนมัติเมื่อเลือก SKU
+      parent_sku_id: row.parent_sku_id ?? parent?.id ?? null,
+      parent_code: parent?.code ?? null,
+      parent_name: parent?.name_th ?? null,
     };
   });
 

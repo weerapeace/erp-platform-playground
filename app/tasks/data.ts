@@ -416,12 +416,12 @@ export async function getParentSkuColors(parentId: string): Promise<string[]> {
 }
 
 // ลูก SKU ของ Parent (รหัส/สี 2 ภาษา/ราคา) — ใช้ทำ dropdown เลือกราคา + สลับภาษาสีในคอนเทนต์
-export type ParentSkuChild = { id: string; code: string; color_en: string | null; color_th: string | null; list_price: number | null; fake_price: number | null };
+export type ParentSkuChild = { id: string; code: string; name: string; color_en: string | null; color_th: string | null; list_price: number | null; fake_price: number | null; image_key: string | null };
 export async function getParentSkuChildren(parentId: string): Promise<ParentSkuChild[]> {
   const res = await apiFetch(`/api/pickers/skus?parent_sku_id=${parentId}&limit=100`);
   const j = await res.json().catch(() => ({}));
-  const rows = (j.data as { id: string; code?: string | null; color_en?: string | null; color_th?: string | null; list_price?: number | null; fake_price?: number | null }[]) ?? [];
-  return rows.map((r) => ({ id: r.id, code: r.code ?? "", color_en: r.color_en ?? null, color_th: r.color_th ?? null, list_price: r.list_price ?? null, fake_price: r.fake_price ?? null }));
+  const rows = (j.data as { id: string; code?: string | null; name?: string | null; color_en?: string | null; color_th?: string | null; list_price?: number | null; fake_price?: number | null; image_key?: string | null }[]) ?? [];
+  return rows.map((r) => ({ id: r.id, code: r.code ?? "", name: r.name ?? r.code ?? "", color_en: r.color_en ?? null, color_th: r.color_th ?? null, list_price: r.list_price ?? null, fake_price: r.fake_price ?? null, image_key: r.image_key ?? null }));
 }
 
 // ---- แม่แบบแคปชั่น + ช่องทางร้าน ----

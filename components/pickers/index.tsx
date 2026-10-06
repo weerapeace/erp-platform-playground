@@ -362,6 +362,10 @@ export type SkuPickerValue = {
   image_url?: string | null;
   image_key?: string | null;
   sale_ok?: boolean | null;
+  // Parent ของ SKU (จาก /api/pickers/skus) — ใช้เติม Parent SKU ให้อัตโนมัติ
+  parent_sku_id?: string | null;
+  parent_code?: string | null;
+  parent_name?: string | null;
 };
 
 export interface SkuPickerProps {
@@ -391,6 +395,9 @@ function mapSkuRow(row: Record<string, unknown>): SkuPickerValue {
     image_key: imageKey == null ? null : String(imageKey),
     image_url: skuImageUrl(imageKey),
     sale_ok: typeof row.sale_ok === "boolean" ? row.sale_ok : null,
+    parent_sku_id: row.parent_sku_id == null ? null : String(row.parent_sku_id),
+    parent_code: row.parent_code == null ? null : String(row.parent_code),
+    parent_name: row.parent_name == null ? null : String(row.parent_name),
   };
 }
 
