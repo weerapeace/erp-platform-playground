@@ -90,15 +90,6 @@ export function ContentCalendarView() {
     [items, brandFilter, platformFilter, statusFilter],
   );
 
-  // ตัวเลขบนชิปตัวกรอง: แบรนด์นับจากทั้งหมด · แพลตฟอร์ม/สถานะนับในแบรนด์ที่เลือก (เลขจะได้สอดคล้องกับที่เห็น)
-  const counts = useMemo(() => {
-    const all = items.filter((c) => !c.is_template);
-    const inBrand = all.filter((c) => brandFilter === "all" || c.brand_id === brandFilter);
-    const brand: Record<string, number> = {}; const plat: Record<string, number> = {}; const stat: Record<string, number> = {};
-    for (const c of all) { const k = c.brand_id ?? "_"; brand[k] = (brand[k] ?? 0) + 1; }
-    for (const c of inBrand) { for (const p of (c.platforms ?? [])) plat[p] = (plat[p] ?? 0) + 1; stat[c.status] = (stat[c.status] ?? 0) + 1; }
-    return { total: all.length, inBrand: inBrand.length, brand, plat, stat };
-  }, [items, brandFilter]);
   const hasFilter = brandFilter !== "all" || platformFilter !== "all" || statusFilter !== "all";
 
   // เดือนที่กำลังดู
@@ -109,6 +100,15 @@ export function ContentCalendarView() {
   const ym = `${year}-${String(month + 1).padStart(2, "0")}`;
   const monthName = base.toLocaleDateString(t("th-TH", "en-US"), { month: "long", year: "numeric" });
   const todayKey = new Date().toISOString().slice(0, 10);
+  // ตัวเลขบนชิปตัวกรอง: นับเฉพาะคอนเทนต์ "ของเดือนที่เปิดอยู่" (ตามวันตั้งโพสต์) — แบรนด์นับทั้งเดือน · แพลตฟอร์ม/สถานะนับในแบรนด์ที่เลือก
+  const counts = useMemo(() => {
+    const all = items.filter((c) => !c.is_template && c.scheduled_at && c.scheduled_at.slice(0, 7) === ym);
+    const inBrand = all.filter((c) => brandFilter === "all" || c.brand_id === brandFilter);
+    const brand: Record<string, number> = {}; const plat: Record<string, number> = {}; const stat: Record<string, number> = {};
+    for (const c of all) { const k = c.brand_id ?? "_"; brand[k] = (brand[k] ?? 0) + 1; }
+    for (const c of inBrand) { for (const p of (c.platforms ?? [])) plat[p] = (plat[p] ?? 0) + 1; stat[c.status] = (stat[c.status] ?? 0) + 1; }
+    return { total: all.length, inBrand: inBrand.length, brand, plat, stat };
+  }, [items, brandFilter, ym]);
 
   // จัดคอนเทนต์เข้าแต่ละวัน (ตามวันตั้งโพสต์) + กล่องยังไม่ลงวันที่
   const byDay = useMemo(() => {
@@ -118,15 +118,25 @@ export function ContentCalendarView() {
     return map;
   }, [filtered]);
   const unscheduled = useMemo(
-    () => filtered.filter((c) => !c.scheduled_at).sort((a, b) => {
+    () => filtered.filter((c) => !c.scheduled_at && (statusFilter === "cancelled" || c.status !== "cancelled")).sort((a, b) => {
       // เรียงตามชื่องาน (task) — งานเดียวกันอยู่ติดกัน, ไม่มีงานไว้ท้ายสุด, เลข-ในรหัสเรียงแบบธรรมชาติ (PIX9 ก่อน PIX33)
       const ta = (a.task_label ?? "").trim(), tb = (b.task_label ?? "").trim();
       if (!ta !== !tb) return ta ? -1 : 1;
       const byTask = ta.localeCompare(tb, "th", { numeric: true });
       return byTask !== 0 ? byTask : (a.title ?? "").localeCompare(b.title ?? "", "th", { numeric: true });
     }),
-    [filtered],
+    [filtered, statusFilter],
   );
+  // ปุ่ม ✕ "ไม่โพสต์" บนการ์ดค้าง — เคลียร์งานเก่า: ยืนยันในการ์ดก่อน แล้วเปลี่ยนสถานะเป็น "ยกเลิก" (หายจากกล่อง · ยังเปิดดู/คืนสถานะใน drawer ได้)
+  const [cancelAsk, setCancelAsk] = useState<string | null>(null);
+  const cancelContent = useCallback(async (id: string) => {
+    setCancelAsk(null);
+    const cur = items;
+    itemsSWR.mutate(cur.map((c) => c.id === id ? { ...c, status: "cancelled" as ContentStatus } : c));
+    try { await updateContent(id, { status: "cancelled" }); pushToast("success", t("ยกเลิกแล้ว — ไม่โพสต์คอนเทนต์นี้ (ดูได้ที่ตัวกรองสถานะ “ยกเลิก”)", "Cancelled — won't be posted (see status filter “Cancelled”)")); }
+    catch (e) { itemsSWR.mutate(cur); pushToast("error", (e as Error).message); }
+    finally { void itemsSWR.revalidate(true); }
+  }, [items, itemsSWR, pushToast, t]);
   const scheduledThisMonth = useMemo(
     () => filtered.filter((c) => c.scheduled_at && c.scheduled_at.slice(0, 7) === ym).length,
     [filtered, ym],
@@ -268,7 +278,7 @@ export function ContentCalendarView() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
-            <span>{t("แสดง", "Showing")} <b className="text-slate-700 tabular-nums">{filtered.length}</b> / {counts.total} {t("รายการ", "items")}</span>
+            <span title={t("นับเฉพาะคอนเทนต์ที่ตั้งวันโพสต์ในเดือนนี้ (ไม่รวมกล่องยังไม่ลงวันที่)", "Only content scheduled in this month (unscheduled box not counted)")}>{t("เดือนนี้แสดง", "This month showing")} <b className="text-slate-700 tabular-nums">{scheduledThisMonth}</b> / {counts.total} {t("รายการ", "items")}</span>
             {hasFilter && (
               <button onClick={() => { setBrandFilter("all"); setPlatformFilter("all"); setStatusFilter("all"); }} className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-100">✕ {t("ล้างตัวกรอง", "Clear")}</button>
             )}
@@ -361,7 +371,7 @@ export function ContentCalendarView() {
               <span className="text-sm font-semibold text-slate-700">📥 {t("ยังไม่ลงวันที่", "Unscheduled")}</span>
               <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{unscheduled.length}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mb-2">{t("ลากการ์ดไปวางในวันที่ต้องการโพสต์ · หรือลากการ์ดจากปฏิทินมาที่นี่เพื่อเอาวันออก", "Drag a card onto a day · or drop here to clear its date")}</p>
+            <p className="text-[11px] text-slate-400 mb-2">{t("ลากการ์ดไปวางในวันที่ต้องการโพสต์ · ลากจากปฏิทินมาที่นี่เพื่อเอาวันออก · กด ✕ = ไม่โพสต์แล้ว (เคลียร์งานเก่า)", "Drag a card onto a day · or drop here to clear its date")}</p>
             {unscheduled.length === 0 ? (
               <div className="text-center text-xs text-slate-300 py-6">{t("ไม่มีงานค้าง 🎉", "All scheduled 🎉")}</div>
             ) : (
@@ -381,7 +391,18 @@ export function ContentCalendarView() {
                         <div className="text-xs font-medium text-slate-700 truncate">{c.title}</div>
                         {c.task_label && <div className="text-[10px] text-violet-500 truncate">📋 {c.task_label}</div>}
                         {meta && <div className="text-[10px] text-slate-400 truncate">{meta}</div>}
+                        {cancelAsk === c.id && (
+                          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                            <span className="text-[11px] text-rose-700">{t("ไม่โพสต์คอนเทนต์นี้แล้ว?", "Cancel this content?")}</span>
+                            <button type="button" onClick={() => void cancelContent(c.id)} className="h-6 px-2 rounded-md bg-rose-600 text-white text-[11px] font-medium hover:bg-rose-700">{t("ใช่ ยกเลิก", "Yes, cancel")}</button>
+                            <button type="button" onClick={() => setCancelAsk(null)} className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("กลับ", "Back")}</button>
+                          </div>
+                        )}
                       </div>
+                      {c.status !== "cancelled" && cancelAsk !== c.id && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setCancelAsk(c.id); }} title={t("ไม่โพสต์แล้ว (ยกเลิก) — เคลียร์งานเก่า", "Won't post (cancel) — clear old items")}
+                          className="h-7 w-7 shrink-0 rounded-md text-slate-300 hover:text-rose-600 hover:bg-rose-50 text-sm leading-none">✕</button>
+                      )}
                     </div>
                   );
                 })}
