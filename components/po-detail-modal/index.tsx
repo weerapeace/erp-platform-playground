@@ -77,6 +77,9 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
   const [vatRate, setVatRate] = useState(0);
   const [vatIncluded, setVatIncluded] = useState(false);
   const [lines, setLines] = useState<EditLine[]>([]);
+  // สกุลของใบ (สลับ ฿/¥ ได้) + เรทแปลงบาท (ว่าง = ใช้เรทรายวันล่าสุด)
+  const [currency, setCurrency] = useState<"THB" | "RMB">("THB");
+  const [fxRate, setFxRate] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,6 +122,8 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
     setNote(d.note ?? "");
     setVatRate(d.vat_rate ?? 0);
     setVatIncluded(!!d.vat_included);
+    setCurrency(isCNY(d.currency) ? "RMB" : "THB");
+    setFxRate(d.fx_source === "po" && d.fx_rate ? String(d.fx_rate) : "");
     setLines(d.lines.map((l) => ({
       key: newKey(), id: l.id, name: l.name, qty: String(l.qty),
       uom: l.uom ?? "", price: String(l.price || ""), received: l.received,
@@ -128,7 +133,9 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
     setEditing(true);
   }, [d]);
 
-  const sym = d && isCNY(d.currency) ? "¥" : "฿";
+  const sym = (editing ? currency === "RMB" : !!d && isCNY(d.currency)) ? "¥" : "฿";
+  // เรทที่ใช้โชว์ค่าแปลงตอนแก้: ที่พิมพ์ → ไม่พิมพ์ใช้เรทที่ API บอกมา (เรทใบ/เรทรายวัน)
+  const editFx = currency === "RMB" ? (n2(fxRate) > 0 ? n2(fxRate) : (d?.fx_rate ?? 0)) : 1;
   const setLine = (key: string, patch: Partial<EditLine>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
@@ -171,6 +178,8 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
             note: note.trim() || null,
             vat_rate: vatRate,
             vat_included: vatIncluded,
+            currency,
+            fx_rate: currency === "RMB" && n2(fxRate) > 0 ? n2(fxRate) : null,
           },
           lines: lines.filter((l) => l.name.trim() && n2(l.qty) > 0).map((l) => ({
             id: l.id, item_name: l.name.trim(), qty: n2(l.qty),
@@ -187,7 +196,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
       onSaved?.();
     } catch { setErr("บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง"); }
     finally { setSaving(false); }
-  }, [d, seller, orderDate, expectedDate, note, vatRate, vatIncluded, lines, load, onSaved]);
+  }, [d, seller, orderDate, expectedDate, note, vatRate, vatIncluded, currency, fxRate, lines, load, onSaved]);
 
   const inp = "h-8 px-2 text-sm border border-slate-200 rounded-md";
   const lbl = "block text-[11px] font-medium text-slate-500 mb-0.5";
@@ -204,6 +213,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
             {editing && (
               <span className="text-slate-600">
                 รวม <b className="tabular-nums text-slate-900">{sym}{fmt(totals.total)}</b>
+                {currency === "RMB" && editFx > 0 && <span className="text-slate-500"> ≈ {baht(totals.total * editFx)} <span className="text-[11px] text-slate-400">(เรท {editFx})</span></span>}
                 {vatRate > 0 && <span className="text-slate-400"> (ก่อนภาษี {sym}{fmt(totals.subtotal)} + VAT {sym}{fmt(totals.vat)})</span>}
               </span>
             )}
@@ -252,6 +262,25 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
               <input type="date" value={orderDate ? orderDate.slice(0, 10) : ""} onChange={(e) => setOrderDate(e.target.value)} className={inp + " w-full"} /></div>
             <div><label className={lbl}>กำหนดของเข้า</label>
               <input type="date" value={expectedDate ? expectedDate.slice(0, 10) : ""} onChange={(e) => setExpectedDate(e.target.value)} className={inp + " w-full"} /></div>
+          </div>
+
+          {/* สกุลเงิน + เรท — บางใบคิดเป็นบาท บางใบเป็นหยวน สลับได้ · สลับแล้ว "ไม่แปลงตัวเลขราคาให้" ต้องใส่ราคาตามสกุลใหม่เอง */}
+          <div className="border border-slate-200 rounded-lg p-2.5 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium text-slate-500">สกุลราคาในใบ</span>
+            <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-sm">
+              <button type="button" onClick={() => setCurrency("THB")} className={`h-8 px-3 ${currency === "THB" ? "bg-blue-50 text-blue-700 font-medium" : "bg-white text-slate-500 hover:bg-slate-50"}`}>฿ บาท</button>
+              <button type="button" onClick={() => setCurrency("RMB")} className={`h-8 px-3 border-l border-slate-200 ${currency === "RMB" ? "bg-blue-50 text-blue-700 font-medium" : "bg-white text-slate-500 hover:bg-slate-50"}`}>¥ หยวน</button>
+            </div>
+            {currency === "RMB" && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-500">เรท ฿ ต่อ ¥
+                <input type="number" inputMode="decimal" step="0.001" min={0} value={fxRate} onChange={(e) => setFxRate(e.target.value)}
+                  placeholder={d.fx_rate ? `${d.fx_rate} (เรทรายวัน)` : "เช่น 5.20"} className={inp + " w-28 text-right tabular-nums"} />
+                <span className="text-slate-400">{n2(fxRate) > 0 ? "ล็อกเรทนี้ไว้ที่ใบ" : `ว่าง = ใช้เรทรายวันล่าสุด${d.fx_rate ? ` (${d.fx_rate})` : ""}`}</span>
+              </label>
+            )}
+            {d && (isCNY(d.currency) ? "RMB" : "THB") !== currency && (
+              <span className="basis-full text-[11px] text-amber-700">⚠ สลับสกุลแล้ว ตัวเลขราคา/หน่วยในตารางยังเป็นตัวเดิม — ใส่ราคาใหม่ตามสกุล {currency === "RMB" ? "หยวน" : "บาท"} ก่อนบันทึก</span>
+            )}
           </div>
 
           {/* ภาษี */}
@@ -313,7 +342,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                     className={inp + " w-full"} placeholder="หน่วย" />
                   <input type="number" step="any" value={l.price} onChange={(e) => setLine(l.key, { price: e.target.value })}
                     className={inp + " w-full text-right tabular-nums"} placeholder="0" />
-                  <div className="text-sm text-right tabular-nums text-slate-700">{sym}{fmt(n2(l.qty) * n2(l.price))}</div>
+                  <div className="text-sm text-right tabular-nums text-slate-700">{sym}{fmt(n2(l.qty) * n2(l.price))}{currency === "RMB" && editFx > 0 && n2(l.price) > 0 && <div className="text-[10px] text-slate-400 font-normal">≈ {baht(n2(l.qty) * n2(l.price) * editFx)}</div>}</div>
                   <button type="button" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
                     disabled={l.received > 0} title={l.received > 0 ? `รับของมาแล้ว ${l.received} — ลบไม่ได้` : "ลบรายการ"}
                     className="h-7 w-7 rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-25 disabled:hover:bg-transparent">🗑</button>
@@ -338,7 +367,16 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
         // ---------------- โหมดดู ----------------
         <div className="space-y-3">
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm bg-slate-50 rounded-lg px-3 py-2">
-            <div><span className="text-slate-400">ยอดรวม (บาท) </span><b className="tabular-nums text-slate-800">{baht(d.amount_thb)}</b></div>
+            {isCNY(d.currency) ? (
+              // ใบหยวน: โชว์ทั้งยอดหยวน ยอดแปลงบาท และเรทที่ใช้ (เรทใบ / เรทรายวัน) — แก้เรทได้ที่ ✎ แก้ไข
+              <div title={d.fx_source === "po" ? "เรทล็อกไว้ที่ใบนี้ (แก้ได้ที่ ✎ แก้ไข)" : `เรทรายวันล่าสุด${d.fx_rate_date ? ` วันที่ ${thDate(d.fx_rate_date)}` : ""} — ยังไม่ได้ล็อกเรทที่ใบ (ตั้งได้ที่ ✎ แก้ไข)`}>
+                <span className="text-slate-400">ยอดรวม </span><b className="tabular-nums text-slate-800">¥{fmt(d.subtotal + d.vat_amount)}</b>
+                <span className="text-slate-500"> ≈ <b className="tabular-nums text-slate-800">{baht(d.amount_thb)}</b></span>
+                <span className="text-[11px] text-slate-400"> · เรท {d.fx_rate ?? "—"} {d.fx_source === "po" ? "🔒 ล็อกที่ใบ" : `(เรทรายวัน${d.fx_rate_date ? ` ${thDate(d.fx_rate_date)}` : ""})`}</span>
+              </div>
+            ) : (
+              <div><span className="text-slate-400">ยอดรวม (บาท) </span><b className="tabular-nums text-slate-800">{baht(d.amount_thb)}</b></div>
+            )}
             {d.vat_rate > 0 && (
               <div className="text-slate-600">
                 <span className="text-slate-400">ภาษี </span>VAT {d.vat_rate}%
@@ -380,8 +418,9 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                     {l.done ? <span className="text-emerald-600"> · ✓ รับครบ</span> : <span className="text-amber-600"> · ค้างรับ</span>}
                   </div>
                 </div>
-                <div className="text-sm tabular-nums text-slate-600 shrink-0">
+                <div className="text-sm tabular-nums text-slate-600 shrink-0 text-right">
                   {l.total > 0 ? `${sym}${Math.round(l.total).toLocaleString("th-TH")}` : <span className="text-amber-600 text-xs">⚠ ยังไม่มีราคา</span>}
+                  {l.total > 0 && isCNY(d.currency) && d.fx_rate && <div className="text-[10px] text-slate-400">≈ {baht(l.total * d.fx_rate)}</div>}
                 </div>
               </div>
             ))}

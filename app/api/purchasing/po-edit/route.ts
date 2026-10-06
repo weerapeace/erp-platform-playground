@@ -32,6 +32,8 @@ type InHeader = {
   seller_name?: string; seller_partner_id?: string | null;
   order_date?: string | null; expected_date?: string | null; note?: string | null;
   currency?: string; vat_rate?: number; vat_included?: boolean;
+  /** เรท ฿ ต่อ 1 หยวน ล็อกไว้ที่ใบ (null = ใช้เรทรายวันล่าสุด) */
+  fx_rate?: number | null;
 };
 type Body = { po_id?: string; header?: InHeader; lines?: InLine[]; line_qty?: { id?: string; qty?: number }[] };
 // สถานะบรรทัดที่ถือว่า "ปิดแล้ว" (สะกดเดียวกับ cancel-line / receivable)
@@ -81,6 +83,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (h.expected_date !== undefined) patch.expected_date = str(h.expected_date) || null;
   if (h.note !== undefined) patch.note = str(h.note) || null;
   if (h.currency !== undefined && str(h.currency)) patch.currency = str(h.currency).toUpperCase();
+  if (h.fx_rate !== undefined) {
+    const r = h.fx_rate === null || h.fx_rate === ("" as unknown) ? 0 : num(h.fx_rate);
+    if (r < 0) return NextResponse.json({ error: "เรทติดลบไม่ได้" }, { status: 400 });
+    patch.fx_rate = r > 0 ? r : null;
+  }
+  // ใบบาทไม่มีเรท — สลับกลับเป็นบาทให้ล้างเรททิ้ง
+  if (patch.currency === "THB") patch.fx_rate = null;
   if (h.vat_rate !== undefined) {
     const r = num(h.vat_rate);
     if (r < 0 || r > 100) return NextResponse.json({ error: "อัตราภาษีต้องอยู่ระหว่าง 0–100" }, { status: 400 });

@@ -66,7 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [poRes, lineRes, partnerRes, rateRes] = await Promise.all([
     admin.from("purchase_orders_v2")
-      .select("id, po_no, seller_name, seller_partner_id, order_date, currency, grand_total, status, payment_status, paid_date, payment_due_date, expected_date, note")
+      .select("id, po_no, seller_name, seller_partner_id, order_date, currency, fx_rate, grand_total, status, payment_status, paid_date, payment_due_date, expected_date, note")
       .order("order_date", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(limit),
@@ -124,6 +124,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const lc = lineCount.get(id) ?? 0;
     const dc = doneCount.get(id) ?? 0;
     const total = num(p.grand_total);
+    // ยอดบาท: เรทที่ล็อกไว้ที่ใบก่อน → ไม่มีใช้เรทรายวันล่าสุด (สูตรเดียวกับ po-detail)
+    const fx = isCNY(p.currency) ? (num(p.fx_rate) > 0 ? num(p.fx_rate) : rmb) : 1;
 
     const partnerId = (p.seller_partner_id as string) ?? matcher.match(String(p.seller_name ?? ""))?.id ?? null;
     const term = partnerId ? termById.get(partnerId) ?? null : null;
@@ -139,7 +141,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       order_date: (p.order_date as string) ?? null,
       currency: (p.currency as string) ?? null,
       grand_total: total,
-      amount_thb: Math.round(total * (isCNY(p.currency) ? rmb : 1)),
+      amount_thb: Math.round(total * fx),
       status: (p.status as string) ?? null,
       receive_label: receiveLabel((p.status as string) ?? null, lc, dc),
       payment_status: (p.payment_status as string) ?? null,

@@ -47,6 +47,8 @@ export type PoSellerInfo = {
 export type PoDetail = {
   id: string; po_no: string; seller: string | null; order_date: string | null;
   currency: string | null; amount_thb: number;
+  /** เรทที่ใช้แปลงเป็นบาท (บาท ต่อ 1 หยวน) · po = ล็อกไว้ที่ใบ · daily = เรทรายวันล่าสุด · none = ใบบาท */
+  fx_rate: number | null; fx_source: "po" | "daily" | "none"; fx_rate_date: string | null;
   payment_status: string | null; paid_date: string | null; paid_amount_thb: number | null;
   payment_due_date: string | null; expected_date: string | null;
   /** สถานะรับของรวมทั้งใบ: confirmed | partial | received | ... */
@@ -72,11 +74,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const rateRes = await admin.from("daily_rates").select("rate").order("rate_date", { ascending: false }).limit(1).maybeSingle();
-  const rmb = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
+  const rateRes = await admin.from("daily_rates").select("rate, rate_date").not("is_active", "is", false).order("rate_date", { ascending: false }).limit(1).maybeSingle();
+  const dailyRate = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
+  const dailyRateDate = ((rateRes.data as { rate_date?: string } | null)?.rate_date) ?? null;
 
   const { data: po, error } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note, vat_rate, vat_included")
+    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, fx_rate, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note, vat_rate, vat_included")
     .eq("id", id).single();
   if (error || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
 
@@ -156,10 +159,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     sumActiveLines(rows as { line_total?: number | null; is_active?: boolean | null }[]),
     num(p.vat_rate), !!p.vat_included,
   );
+  // เรทแปลงบาท: เรทที่ล็อกไว้ที่ใบ → ไม่มี = เรทรายวันล่าสุด (บอกที่มาให้หน้าจอโชว์ว่า "แปลงจากเรทอะไร")
+  const foreign = isCNY(p.currency);
+  const poRate = num(p.fx_rate);
+  const rmb = foreign ? (poRate > 0 ? poRate : dailyRate) : 1;
   const detail: PoDetail = {
     id: String(p.id), po_no: String(p.po_no ?? "—"), seller: (p.seller_name as string) ?? null,
     order_date: (p.order_date as string) ?? null, currency: (p.currency as string) ?? null,
-    amount_thb: Math.round(num(p.grand_total) * (isCNY(p.currency) ? rmb : 1)),
+    amount_thb: Math.round(num(p.grand_total) * rmb),
+    fx_rate: foreign ? rmb : null,
+    fx_source: !foreign ? "none" : poRate > 0 ? "po" : "daily",
+    fx_rate_date: foreign && !(poRate > 0) ? dailyRateDate : null,
     payment_status: (p.payment_status as string) ?? null,
     paid_date: (p.paid_date as string) ?? null,
     paid_amount_thb: p.paid_amount_thb == null ? null : num(p.paid_amount_thb),
