@@ -14,13 +14,14 @@ import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
 import {
-  createContent, getContent, getRecommendedTimes, CONTENT_STATUS_META, POST_TYPES, contentStatusLabel, postTypeLabel,
+  createContent, getContent, getRecommendedTimes, POST_TYPES, postTypeLabel, splitPostTypes, joinPostTypes,
   type ContentItem, type ContentCaption, type ContentStatus, type BrandOption, type RecommendedTimes,
 } from "../data";
 
 type CampaignOpt = { id: string; name: string };
-type Form = { title: string; post_type: string; status: ContentStatus; brand_id: string; campaign_id: string; scheduled_at: string; product: SkuPickerValue | null; platforms: string[]; note: string };
-const emptyForm = (): Form => ({ title: "", post_type: "image", status: "draft", brand_id: "", campaign_id: "", scheduled_at: "", product: null, platforms: [], note: "" });
+// post_types = เลือกได้หลายประเภท (เก็บลง DB เป็น text คั่น "," ผ่าน joinPostTypes) · สถานะตอนสร้าง = ร่างเสมอ (ไม่โชว์ให้เลือก)
+type Form = { title: string; post_types: string[]; status: ContentStatus; brand_id: string; campaign_id: string; scheduled_at: string; product: SkuPickerValue | null; platforms: string[]; note: string };
+const emptyForm = (): Form => ({ title: "", post_types: ["image"], status: "draft", brand_id: "", campaign_id: "", scheduled_at: "", product: null, platforms: [], note: "" });
 
 export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, templates, defaultBrandId, defaultDate, pushToast }: {
   open: boolean;
@@ -64,6 +65,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
 
   const upd = (patch: Partial<Form>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   const togglePlatform = (v: string) => upd({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
+  const togglePostType = (v: string) => upd({ post_types: form.post_types.includes(v) ? form.post_types.filter((x) => x !== v) : [...form.post_types, v] });
   // เลือกแบรนด์ → ติ๊กแพลตฟอร์มตามที่ตั้งไว้ของแบรนด์นั้น (ยังไม่ตั้ง = ไม่ยุ่ง) · ถ้าติ๊กไว้แล้ว = ตัดตัวที่แบรนด์นี้ไม่ลงออก
   const pickBrand = (brandId: string) => {
     const allow = bpMap[brandId];
@@ -89,7 +91,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
     setTplId(tid);
     if (!tid) { setTplCaptions([]); return; }
     try { const d = await getContent(tid); const bid = d.brand_id ?? form.brand_id ?? ""; const allow = bpMap[bid]; const tplPlats = d.platforms ?? [];
-           upd({ post_type: d.post_type ?? "image", platforms: allow ? tplPlats.filter((x: string) => allow.includes(x)) : tplPlats, brand_id: bid, note: d.note ?? "" }); setTplCaptions(d.captions ?? []); }
+           upd({ post_types: splitPostTypes(d.post_type).length ? splitPostTypes(d.post_type) : ["image"], platforms: allow ? tplPlats.filter((x: string) => allow.includes(x)) : tplPlats, brand_id: bid, note: d.note ?? "" }); setTplCaptions(d.captions ?? []); }
     catch (e) { pushToast("error", (e as Error).message); }
   };
 
@@ -99,7 +101,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
     try {
       const r = await createContent({
         title: form.title.trim(), campaign_id: form.campaign_id || null, brand_id: form.brand_id || null,
-        sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null, post_type: form.post_type || null,
+        sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null, post_type: joinPostTypes(form.post_types),
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
         platform_formats: Object.fromEntries(Object.entries(bpFmt[form.brand_id] ?? {}).filter(([p]) => form.platforms.includes(p))),
@@ -142,12 +144,23 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         </div>
       )}
       <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
-        <ERPFormField label={t("ชื่อคอนเทนต์", "Content Title")} required span={2}><ERPInput value={form.title} onChange={(e) => upd({ title: e.target.value })} placeholder={t("เช่น โปรโมต Heart Bag สีชมพู 7.7", "e.g. Promote Heart Bag Pink 7.7")} /></ERPFormField>
-        <ERPFormField label={t("ประเภทโพสต์", "Post Type")}><ERPSelect value={form.post_type} options={POST_TYPES.map((p) => ({ value: p.value, label: postTypeLabel(p.value) }))} onChange={(e) => upd({ post_type: e.target.value })} /></ERPFormField>
-        <ERPFormField label={t("สถานะ", "Status")}><ERPSelect value={form.status} options={Object.keys(CONTENT_STATUS_META).map((v) => ({ value: v, label: contentStatusLabel(v as ContentStatus) }))} onChange={(e) => upd({ status: e.target.value as ContentStatus })} /></ERPFormField>
+        {/* ชื่อคอนเทนต์ — ช่องใหญ่/เด่น ให้เห็นชัดว่าต้องกรอกอะไรก่อน */}
+        <ERPFormField label={t("ชื่อคอนเทนต์", "Content Title")} required span={2}>
+          <ERPInput autoFocus value={form.title} onChange={(e) => upd({ title: e.target.value })} placeholder={t("เช่น โปรโมต Heart Bag สีชมพู 7.7", "e.g. Promote Heart Bag Pink 7.7")}
+            className="!h-12 !text-lg font-semibold !border-2 !border-violet-300 focus:!ring-violet-400 placeholder:font-normal placeholder:text-slate-300 shadow-sm" />
+        </ERPFormField>
+        {/* ประเภทโพสต์ — ปุ่มกดเลือกได้หลายอย่าง (เช่น รูปภาพ + วิดีโอ) */}
+        <ERPFormField label={t("ประเภทโพสต์", "Post Type")} span={2} hint={form.post_types.length > 1 ? t(`เลือกไว้ ${form.post_types.length} ประเภท: ${postTypeLabel(joinPostTypes(form.post_types))}`, `${form.post_types.length} selected: ${postTypeLabel(joinPostTypes(form.post_types))}`) : t("กดเลือกได้มากกว่า 1 ประเภท", "Pick one or more")}>
+          <div className="flex flex-wrap gap-2">{POST_TYPES.map((p) => { const onSel = form.post_types.includes(p.value); return (
+            <button key={p.value} type="button" onClick={() => togglePostType(p.value)} aria-pressed={onSel}
+              className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-sm font-medium transition-colors ${onSel ? "bg-violet-600 text-white border-violet-600 shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:bg-violet-50"}`}>
+              <span className="text-base leading-none">{p.icon}</span>{postTypeLabel(p.value)}{onSel && <span className="text-[10px] opacity-80">✓</span>}
+            </button>
+          ); })}</div>
+        </ERPFormField>
         <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => pickBrand(e.target.value)} /></ERPFormField>
         <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
-        <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")}>
+        <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")} span={2}>
           <ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} />
           {schedRec && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -158,7 +171,8 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
             </div>
           )}
         </ERPFormField>
-        <ERPFormField label={t("สินค้า/SKU (ถ้ามี)", "Product/SKU (if any)")}><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
+        {/* สินค้า/SKU — เต็มความกว้าง ให้เห็นรหัส+ชื่อสินค้ายาว ๆ ไม่ถูกตัด */}
+        <ERPFormField label={t("สินค้า/SKU (ถ้ามี)", "Product/SKU (if any)")} span={2}><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
         <ERPFormField label={t("แพลตฟอร์ม", "Platforms")} span={2}>
           <div className="flex items-center justify-between gap-2 mb-1">
             <span className="text-[11px] text-slate-400">

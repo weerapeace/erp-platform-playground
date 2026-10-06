@@ -15,11 +15,10 @@ import { useCreativeOptions, platformLabel } from "./use-options";
 import {
   CONTENT_STATUS_META, POST_TYPES, contentStatusLabel,
   listContent, createContent, updateContent,
-  type ContentItem, type ContentStatus, type BrandOption,
+  type ContentItem, type ContentStatus, type BrandOption, postTypeLabel,
 } from "./data";
 
 const ContentDrawer = dynamic(() => import("./content/content").then((m) => m.ContentDrawer), { ssr: false });
-const POST_TYPE_LABEL = Object.fromEntries(POST_TYPES.map((p) => [p.value, p.label]));
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 
 function StatusChip({ status }: { status: ContentStatus }) {
@@ -96,7 +95,7 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast }: {
                     <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{c.title}</p>
                     <div className="flex flex-wrap items-center gap-1 mt-1.5">
                       {(c.platforms ?? []).map((p) => <span key={p} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}
-                      {c.post_type && <span className="text-[10px] text-slate-400">· {POST_TYPE_LABEL[c.post_type] ?? c.post_type}</span>}
+                      {c.post_type && <span className="text-[10px] text-slate-400">· {postTypeLabel(c.post_type)}</span>}
                       {c.scheduled_at && <span className="text-[10px] text-slate-400">· 🗓 {String(c.scheduled_at).slice(0, 16).replace("T", " ")}</span>}
                     </div>
                   </button>

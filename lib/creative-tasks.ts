@@ -149,15 +149,19 @@ export const CONTENT_STATUS_META: Record<ContentStatus, { label: string; label_e
 };
 export const contentStatusLabel = (k: ContentStatus) => { const m = CONTENT_STATUS_META[k]; return m ? tr(m.label, m.label_en) : k; };
 
-export const POST_TYPES: { value: string; label: string; label_en: string }[] = [
-  { value: "image",  label: "รูปภาพ",    label_en: "Image" },
-  { value: "album",  label: "อัลบั้มรูป", label_en: "Album" },
-  { value: "video",  label: "วิดีโอ",    label_en: "Video" },
-  { value: "reel",   label: "Reel/Short", label_en: "Reel/Short" },
-  { value: "story",  label: "Story",      label_en: "Story" },
-  { value: "live",   label: "ไลฟ์",      label_en: "Live" },
+export const POST_TYPES: { value: string; label: string; label_en: string; icon: string }[] = [
+  { value: "image",  label: "รูปภาพ",    label_en: "Image",      icon: "🖼️" },
+  { value: "album",  label: "อัลบั้มรูป", label_en: "Album",      icon: "🗂️" },
+  { value: "video",  label: "วิดีโอ",    label_en: "Video",      icon: "🎬" },
+  { value: "reel",   label: "Reel/Short", label_en: "Reel/Short", icon: "🎞️" },
+  { value: "story",  label: "Story",      label_en: "Story",      icon: "📱" },
+  { value: "live",   label: "ไลฟ์",      label_en: "Live",       icon: "🔴" },
 ];
-export const postTypeLabel = (v?: string | null) => { const o = POST_TYPES.find((x) => x.value === v); return o ? tr(o.label, o.label_en) : (v ?? ""); };
+// post_type เก็บเป็น text — เลือกได้หลายประเภท (คั่นด้วย ",") เช่น "image,video" · ค่าเดิมค่าเดียวยังอ่านได้ปกติ
+export const splitPostTypes = (v?: string | null): string[] => (v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+export const joinPostTypes = (vs: string[]): string | null => { const u = Array.from(new Set(vs.map((x) => x.trim()).filter(Boolean))); return u.length ? u.join(",") : null; };
+const onePostTypeLabel = (v: string) => { const o = POST_TYPES.find((x) => x.value === v); return o ? tr(o.label, o.label_en) : v; };
+export const postTypeLabel = (v?: string | null) => splitPostTypes(v).map(onePostTypeLabel).join(" · ");
 
 export const HASHTAG_CATEGORIES: { value: string; label: string; label_en: string }[] = [
   { value: "brand",    label: "แบรนด์",        label_en: "Brand" },

@@ -7,6 +7,7 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
+import { postTypeLabel } from "@/lib/creative-tasks";
 import { PlatformIcon } from "@/components/platform-icon";
 import { ERPModal } from "@/components/modal";
 import type { CreativeTaskItem, CreativeContentItem } from "@/app/api/parent-skus/[id]/creative-items/route";
@@ -73,7 +74,7 @@ function CreativeItemsModal({ parentId, onClose }: { parentId: string; onClose: 
             </section>
             <section>
               <div className="text-xs font-medium text-slate-500 mb-1.5">📝 คอนเทนต์ ({data.content.length})</div>
-              {List(data.content, (ct) => ct.post_type, "— ยังไม่มีคอนเทนต์ —")}
+              {List(data.content, (ct) => postTypeLabel(ct.post_type) || null, "— ยังไม่มีคอนเทนต์ —")}
             </section>
           </div>
         )}
