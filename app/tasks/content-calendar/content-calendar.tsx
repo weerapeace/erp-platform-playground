@@ -90,6 +90,17 @@ export function ContentCalendarView() {
     [items, brandFilter, platformFilter, statusFilter],
   );
 
+  // ตัวเลขบนชิปตัวกรอง: แบรนด์นับจากทั้งหมด · แพลตฟอร์ม/สถานะนับในแบรนด์ที่เลือก (เลขจะได้สอดคล้องกับที่เห็น)
+  const counts = useMemo(() => {
+    const all = items.filter((c) => !c.is_template);
+    const inBrand = all.filter((c) => brandFilter === "all" || c.brand_id === brandFilter);
+    const brand: Record<string, number> = {}; const plat: Record<string, number> = {}; const stat: Record<string, number> = {};
+    for (const c of all) { const k = c.brand_id ?? "_"; brand[k] = (brand[k] ?? 0) + 1; }
+    for (const c of inBrand) { for (const p of (c.platforms ?? [])) plat[p] = (plat[p] ?? 0) + 1; stat[c.status] = (stat[c.status] ?? 0) + 1; }
+    return { total: all.length, inBrand: inBrand.length, brand, plat, stat };
+  }, [items, brandFilter]);
+  const hasFilter = brandFilter !== "all" || platformFilter !== "all" || statusFilter !== "all";
+
   // เดือนที่กำลังดู
   const base = useMemo(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + offset, 1); }, [offset]);
   const year = base.getFullYear(), month = base.getMonth();
@@ -158,13 +169,16 @@ export function ContentCalendarView() {
   const dayPickLabel = dayPick ? new Date(`${dayPick}T00:00:00`).toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "long", year: "numeric" }) : "";
 
   const tabCls = (active: boolean) =>
-    `inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-sm font-medium border transition-colors ${
-      active ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
+    `inline-flex items-center gap-2 h-9 pl-3 pr-2 rounded-full text-sm font-medium border transition-colors ${
+      active ? "bg-violet-600 text-white border-violet-600 shadow-sm" : "bg-white text-slate-700 border-slate-200 hover:border-violet-300 hover:bg-violet-50"
     }`;
-  const platCls = (active: boolean) =>
-    `inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-xs font-medium border transition-colors ${
-      active ? "bg-slate-700 text-white border-slate-700" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
+  const segCls = (active: boolean) =>
+    `inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+      active ? "bg-slate-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
     }`;
+  const countBadge = (n: number | undefined, active: boolean) => (
+    <span className={`min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full text-[10px] tabular-nums ${active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"}`}>{n ?? 0}</span>
+  );
 
   // การ์ดคอนเทนต์ (ใช้ทั้งในปฏิทินและกล่องค้าง)
   const Chip = ({ c, showTime }: { c: ContentItem; showTime?: boolean }) => {
@@ -198,9 +212,9 @@ export function ContentCalendarView() {
           </div>
         </div>
 
-        {/* แท็บแยกแบรนด์ (สี = ที่แต่งไว้ต่อแบรนด์) */}
-        <div className="flex items-center gap-2 flex-wrap mt-4">
-          <button onClick={() => setBrandFilter("all")} className={tabCls(brandFilter === "all")}>{t("ทั้งหมด", "All")}</button>
+        {/* ───── แถวแบรนด์: แท็บใหญ่ + จำนวน (สี = ที่แต่งไว้ต่อแบรนด์) ───── */}
+        <div className="flex items-center gap-2 flex-wrap mt-5">
+          <button onClick={() => setBrandFilter("all")} className={tabCls(brandFilter === "all")}>{t("ทุกแบรนด์", "All brands")}{countBadge(counts.total, brandFilter === "all")}</button>
           {brands.map((b) => {
             const st = styleMap[b.id];
             const active = brandFilter === b.id;
@@ -208,40 +222,57 @@ export function ContentCalendarView() {
             return (
               <button key={b.id} onClick={() => setBrandFilter(b.id)} className={tabCls(active)}
                 style={active && st?.accent_color ? { background: st.accent_color, borderColor: st.accent_color, color: "#fff" } : undefined}>
-                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: active ? "#fff" : accent }} />
-                {b.name}
+                <span className="h-2.5 w-2.5 rounded-full shrink-0 ring-2 ring-white/70" style={{ background: active ? "#fff" : accent }} />
+                {b.name}{countBadge(counts.brand[b.id], active)}
               </button>
             );
           })}
           {brandFilter !== "all" && !(activeStyle?.accent_color || activeStyle?.bg_image_key) && (
-            <button onClick={() => setStyleBrandId(brandFilter)} className="inline-flex items-center gap-1 h-8 px-3 rounded-full text-sm text-slate-400 border border-dashed border-slate-300 hover:border-violet-300 hover:text-violet-700">🎨 {t("แต่งหน้าแท็บนี้", "Style this tab")}</button>
+            <button onClick={() => setStyleBrandId(brandFilter)} className="inline-flex items-center gap-1 h-9 px-3 rounded-full text-sm text-slate-400 border border-dashed border-slate-300 hover:border-violet-300 hover:text-violet-700">🎨 {t("แต่งหน้าแบรนด์", "Style")}</button>
           )}
         </div>
 
-        {/* กรองแพลตฟอร์ม (โลโก้) — ใช้ร่วมกับแท็บแบรนด์ได้ */}
-        <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
-          <span className="text-xs text-slate-400 mr-0.5">{t("แพลตฟอร์ม", "Platform")}:</span>
-          <button onClick={() => setPlatformFilter("all")} className={platCls(platformFilter === "all")}>{t("ทั้งหมด", "All")}</button>
-          {platforms.map((p) => {
-            const img = p.icon_key ? r2ImageUrl(p.icon_key, 32) : null;
-            return (
-              <button key={p.value} onClick={() => setPlatformFilter(p.value)} className={platCls(platformFilter === p.value)} title={p.label}>
-                {img ? <img src={img} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : p.icon ? <span className="leading-none">{p.icon}</span> : null}
-                {p.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* กรองสถานะคอนเทนต์ */}
-        <div className="flex items-center gap-1.5 flex-wrap mt-2">
-          <span className="text-xs text-slate-400 mr-0.5">{t("สถานะ", "Status")}:</span>
-          <button onClick={() => setStatusFilter("all")} className={platCls(statusFilter === "all")}>{t("ทั้งหมด", "All")}</button>
-          {(Object.keys(CONTENT_STATUS_META) as ContentStatus[]).map((s) => (
-            <button key={s} onClick={() => setStatusFilter(s)} className={platCls(statusFilter === s)}>
-              <span className={`h-2 w-2 rounded-full ${CONTENT_STATUS_META[s].dot}`} />{contentStatusLabel(s)}
-            </button>
-          ))}
+        {/* ───── แถวตัวกรอง: แพลตฟอร์ม | สถานะ อยู่ในกล่องเดียว แบ่งส่วนชัด + ตัวเลข + ปุ่มล้าง ───── */}
+        <div className="mt-3 flex items-center gap-x-4 gap-y-2 flex-wrap rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide shrink-0">{t("แพลตฟอร์ม", "Platform")}</span>
+            <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 flex-wrap">
+              <button onClick={() => setPlatformFilter("all")} className={segCls(platformFilter === "all")}>{t("ทั้งหมด", "All")}</button>
+              {platforms.map((p) => {
+                const img = p.icon_key ? r2ImageUrl(p.icon_key, 32) : null;
+                const active = platformFilter === p.value;
+                return (
+                  <button key={p.value} onClick={() => setPlatformFilter(active ? "all" : p.value)} className={segCls(active)} title={`${p.label} · ${counts.plat[p.value] ?? 0} ${t("รายการ", "items")}`}>
+                    {img ? <img src={img} alt="" className="h-4 w-4 rounded-sm object-contain" /> : p.icon ? <span className="leading-none text-sm">{p.icon}</span> : null}
+                    <span className="hidden md:inline">{p.label}</span>
+                    {(counts.plat[p.value] ?? 0) > 0 && <span className={`text-[10px] tabular-nums ${active ? "text-white/80" : "text-slate-400"}`}>{counts.plat[p.value]}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="hidden sm:block h-6 w-px bg-slate-200" />
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide shrink-0">{t("สถานะ", "Status")}</span>
+            <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 flex-wrap">
+              <button onClick={() => setStatusFilter("all")} className={segCls(statusFilter === "all")}>{t("ทั้งหมด", "All")}</button>
+              {(Object.keys(CONTENT_STATUS_META) as ContentStatus[]).map((st) => {
+                const active = statusFilter === st;
+                return (
+                  <button key={st} onClick={() => setStatusFilter(active ? "all" : st)} className={segCls(active)} title={`${contentStatusLabel(st)} · ${counts.stat[st] ?? 0} ${t("รายการ", "items")}`}>
+                    <span className={`h-2 w-2 rounded-full ${CONTENT_STATUS_META[st].dot} ${active ? "ring-2 ring-white/60" : ""}`} />{contentStatusLabel(st)}
+                    {(counts.stat[st] ?? 0) > 0 && <span className={`text-[10px] tabular-nums ${active ? "text-white/80" : "text-slate-400"}`}>{counts.stat[st]}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+            <span>{t("แสดง", "Showing")} <b className="text-slate-700 tabular-nums">{filtered.length}</b> / {counts.total} {t("รายการ", "items")}</span>
+            {hasFilter && (
+              <button onClick={() => { setBrandFilter("all"); setPlatformFilter("all"); setStatusFilter("all"); }} className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-100">✕ {t("ล้างตัวกรอง", "Clear")}</button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -365,6 +396,29 @@ export function ContentCalendarView() {
       <ERPModal open={!!dayPick} onClose={() => setDayPick(null)} size="sm" title={`🗓 ${dayPickLabel}`}>
         {dayPick && (
           <div className="space-y-3">
+            {(byDay[dayPick] ?? []).length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-slate-600">📌 {t("มีอยู่แล้วในวันนี้", "Already on this day")}</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">{(byDay[dayPick] ?? []).length}</span>
+                </div>
+                <div className="space-y-1.5 max-h-[30vh] overflow-y-auto pr-0.5">
+                  {(byDay[dayPick] ?? []).map((c) => {
+                    const m = CONTENT_STATUS_META[c.status] ?? CONTENT_STATUS_META.draft;
+                    return (
+                      <button key={c.id} type="button" onClick={() => { setDayPick(null); setDetailId(c.id); }} title={t("กดเพื่อเปิดดู/แก้", "Open")}
+                        className="w-full text-left bg-white border border-slate-200 rounded-lg p-2 hover:border-violet-400 hover:bg-violet-50 flex items-center gap-2">
+                        <span className="text-[11px] font-mono text-slate-500 shrink-0 w-11">{c.scheduled_at?.slice(11, 16)}</span>
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: brandColor(c.brand_id) }} />
+                        <span className="min-w-0 flex-1 text-xs font-medium text-slate-700 truncate">{c.title}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 ${m.cls}`}>{contentStatusLabel(c.status)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="border-t border-slate-100 mt-3" />
+              </div>
+            )}
             <button type="button" onClick={() => { const k = dayPick; setDayPick(null); openCreate(k); }}
               className="w-full h-11 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 flex items-center justify-center gap-2">＋ {t("สร้างคอนเทนต์ใหม่ลงวันนี้", "Create new content on this day")}</button>
             <div>
