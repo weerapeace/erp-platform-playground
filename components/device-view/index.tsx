@@ -146,25 +146,36 @@ export function useAppsForCurrentPage(): { apps: AppLite[]; preferred: string | 
 }
 
 /** ลิงก์ติดตั้งเป็นแอป: เปิดเชลล์แอปเดี่ยวแล้วเด้งมาหน้านี้ (?go=) — ในเชลล์มีปุ่ม 📲 ติดตั้งแอป */
-export function installAppUrl(appKey: string): string {
+export function installAppUrl(appKey: string, goPath?: string): string {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}/app/${encodeURIComponent(appKey)}?go=${encodeURIComponent(window.location.pathname)}`;
+  return `${window.location.origin}/app/${encodeURIComponent(appKey)}?go=${encodeURIComponent(goPath ?? window.location.pathname)}`;
 }
 
+/** ตัวเลือก QR เมื่อเรียกจากที่ที่รู้ลิงก์/แอปอยู่แล้ว (เช่น เชลล์แอปเดี่ยว /app/<key> ที่หน้าในอยู่ใน iframe) */
+export type DeviceQrOpts = {
+  openUrl?: string;      // ลิงก์ "เปิดหน้านี้" (ไม่ส่ง = เอาจาก URL ปัจจุบัน + ?device=)
+  appKey?: string;       // บังคับแอปสำหรับ "ติดตั้งเป็นแอป" (ไม่ส่ง = หาจากเมนูที่มีหน้านี้)
+  appLabel?: string;
+  installGo?: string;    // path ที่จะเปิดหลังติดตั้ง (ไม่ส่ง = path ปัจจุบัน)
+};
+
 /** แผง QR + ลิงก์ (ของกลาง) — แท็บ 1: สแกนเปิดหน้านี้บนเครื่องจริง · แท็บ 2: สแกนเพื่อติดตั้งเป็นแอป (PWA) บนเครื่อง */
-export function DeviceQrPanel({ layout, className = "" }: { layout: DeviceLayout; className?: string }) {
+export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, appKey: appKeyProp, appLabel, installGo }: { layout: DeviceLayout; className?: string } & DeviceQrOpts) {
   const [tab, setTab] = useState<"open" | "install">("open");
   const [openUrl, setOpenUrl] = useState("");
   const [copied, setCopied] = useState(false);
-  const { apps, preferred } = useAppsForCurrentPage();
+  const { apps: foundApps, preferred: foundPreferred } = useAppsForCurrentPage();
+  // แอปที่ส่งมาบังคับ (จากเชลล์) ขึ้นก่อน แล้วค่อยแอปที่หาเจอจากเมนู
+  const apps = useMemo<AppLite[]>(() => (appKeyProp && !foundApps.some((a) => a.key === appKeyProp) ? [{ key: appKeyProp, label: appLabel ?? appKeyProp, icon: null }, ...foundApps] : foundApps), [foundApps, appKeyProp, appLabel]);
+  const preferred = appKeyProp ?? foundPreferred;
   const [appKey, setAppKey] = useState<string | null>(null);
-  useEffect(() => { setOpenUrl(deviceShareUrl(layout)); }, [layout]);
+  useEffect(() => { setOpenUrl(openUrlProp ?? deviceShareUrl(layout)); }, [layout, openUrlProp]);
   useEffect(() => {
     if (apps.length === 0) { setAppKey(null); return; }
     setAppKey((k) => (k && apps.some((a) => a.key === k) ? k : (preferred && apps.some((a) => a.key === preferred) ? preferred : apps[0].key)));
   }, [apps, preferred]);
   const app = apps.find((a) => a.key === appKey) ?? null;
-  const url = tab === "open" ? openUrl : (appKey ? installAppUrl(appKey) : "");
+  const url = tab === "open" ? openUrl : (appKey ? installAppUrl(appKey, installGo) : "");
   const copy = async () => {
     try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard ไม่พร้อม */ }
   };
@@ -221,7 +232,7 @@ export function DeviceQrPanel({ layout, className = "" }: { layout: DeviceLayout
  * กรอบจำลองเครื่อง — โชว์เฉพาะตอน "โหมดที่เลือกแคบกว่าจอจริง" (เช่น เปิดบนจอคอมแล้วเลือกดูแบบมือถือ)
  * ถ้าเปิดบนมือถือจริงในโหมดมือถือ → ไม่มีกรอบ ไม่มี QR (เรนเดอร์ children ตรง ๆ)
  */
-export function DevicePreviewFrame({ layout, viewport, children, onExitPreview }: { layout: DeviceLayout; viewport: DeviceLayout; children: ReactNode; onExitPreview?: () => void }) {
+export function DevicePreviewFrame({ layout, viewport, children, onExitPreview, qr }: { layout: DeviceLayout; viewport: DeviceLayout; children: ReactNode; onExitPreview?: () => void; qr?: DeviceQrOpts }) {
   const rank: Record<DeviceLayout, number> = { phone: 0, tablet: 1, desktop: 2 };
   const preview = rank[layout] < rank[viewport];
   const width = DEVICE_FRAME_WIDTH[layout];
@@ -236,7 +247,7 @@ export function DevicePreviewFrame({ layout, viewport, children, onExitPreview }
         </div>
       </div>
       <div className="flex w-[232px] shrink-0 flex-col gap-2 lg:sticky lg:top-20">
-        <DeviceQrPanel layout={layout} />
+        <DeviceQrPanel layout={layout} {...qr} />
         {/* กลับมุมมองจอคอม — เผื่อหน้าที่ไม่มีปุ่มสลับจอในตัว (เช่น หน้ารายละเอียดแบบมือถือ) */}
         {onExitPreview && (
           <button type="button" onClick={onExitPreview} className="h-9 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">

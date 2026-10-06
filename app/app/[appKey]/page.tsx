@@ -21,6 +21,7 @@ import { appHeaderStyle } from "@/lib/app-header-theme";
 import { GlobalSearch } from "@/components/global-search";
 import { getSearchScope } from "@/lib/search-scopes";
 import { useSearchHotkey } from "@/lib/search-hotkey";
+import { useViewportLayout, useDeviceMode, DevicePreviewFrame, type DeviceLayout } from "@/components/device-view";
 
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
@@ -63,6 +64,12 @@ export default function StandaloneApp() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const lastSavedRef = useRef<string>("");
   const stripEmbed = (p: string) => p.replace(/([?&])embed=1(&?)/, (_m, p1, p2) => (p2 ? p1 : "")).replace(/[?&]$/, "");
+  // มุมมองอุปกรณ์ (เมนูผู้ใช้ → 📟): เลือกแท็บเล็ต/มือถือบนจอคอม = ครอบเนื้อหาด้วยกรอบจำลอง (ของกลาง device-view, ผูก ?device=)
+  // หน้าในอยู่ใน iframe กว้าง 834/400px → media query ของหน้านั้นทำงานเหมือนเครื่องจริง
+  const viewport = useViewportLayout();
+  const { mode: devMode, setMode: setDevMode, layout: devLayout } = useDeviceMode(viewport);
+  const devRank: Record<DeviceLayout, number> = { phone: 0, tablet: 1, desktop: 2 };
+  const devPreview = devRank[devLayout] < devRank[viewport];
 
   useEffect(() => {
     let alive = true;
@@ -234,7 +241,14 @@ export default function StandaloneApp() {
             <PwaInstallButton />
             <div className="text-white"><LangToggle /></div>
             <div className="text-white"><NotificationBell /></div>
-            <AccountMenu onDark />
+            <AccountMenu onDark device={{
+              mode: devMode, viewport, onChange: setDevMode,
+              // QR: เปิดแอปนี้บนเครื่องจริง + พาไปหน้าที่กำลังดูอยู่ (?go=) · ติดตั้งเป็นแอป = แอปนี้เอง
+              qr: typeof window === "undefined" ? undefined : (() => {
+                const goPath = items[active] ? stripEmbed(deepSrc ?? items[active].href) : "";
+                return { appKey, appLabel: app?.label ?? appKey, installGo: goPath || undefined, openUrl: `${window.location.origin}/app/${encodeURIComponent(appKey)}${goPath ? `?go=${encodeURIComponent(goPath)}` : ""}` };
+              })(),
+            }} />
           </div>
         </div>
 
@@ -267,6 +281,8 @@ export default function StandaloneApp() {
 
       {/* เนื้อหาเต็มกว้าง */}
       <main className="flex-1 min-w-0 flex flex-col min-h-0">
+        {(() => {
+          const content = (<>
         {moduleKey ? (
           <div className="flex-1 overflow-y-auto">
             <ShellPresentContext.Provider value={true}>
@@ -286,6 +302,18 @@ export default function StandaloneApp() {
             )}
           </div>
         )}
+          </>);
+          if (!devPreview) return content;
+          // โหมดแท็บเล็ต/มือถือบนจอคอม → กรอบจำลอง + QR ข้างกรอบ (ของกลาง) · กำหนดสูงให้ iframe/ตารางมีพื้นที่
+          return (
+            <div className="flex-1 min-h-0 overflow-y-auto bg-slate-100">
+              <DevicePreviewFrame layout={devLayout} viewport={viewport} onExitPreview={() => setDevMode("auto")}
+                qr={{ appKey, appLabel: app?.label ?? appKey, installGo: items[active] ? stripEmbed(deepSrc ?? items[active].href) : undefined }}>
+                <div className="flex flex-col bg-white" style={{ height: "80vh" }}>{content}</div>
+              </DevicePreviewFrame>
+            </div>
+          );
+        })()}
       </main>
 
       {/* มือถือ: แถบเมนูล่าง (iPad ซ่อน เพราะใช้ ☰ drawer แทน) · เมนูแม่แตะ = เปิด drawer เลือกลูก */}

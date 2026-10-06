@@ -34,6 +34,25 @@ export function ContentCalendarView() {
   // ลากวาง: จำ id + เวลาเดิมของการ์ดที่กำลังลาก + ช่องที่เมาส์ลอยอยู่
   const dragRef = useRef<{ id: string; time: string | null } | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
+  // หมุนลูกกลิ้งเมาส์บนตารางปฏิทิน = เปลี่ยนเดือน (ลง = เดือนถัดไป · ขึ้น = เดือนก่อน)
+  // ใช้ listener แบบ passive:false เพื่อกันหน้าเลื่อนตาม · หน่วง 500ms + สะสม delta กันกระโดดทีละหลายเดือน (ทัชแพดยิงถี่)
+  // ใช้ callback ref เพราะการ์ดปฏิทินโผล่หลังโหลดเสร็จ (useEffect ครั้งแรก ref ยังว่าง → ไม่เคยผูก listener)
+  const calWheelCleanup = useRef<(() => void) | null>(null);
+  const calRef = useCallback((el: HTMLDivElement | null) => {
+    calWheelCleanup.current?.(); calWheelCleanup.current = null;
+    if (!el) return;
+    let acc = 0; let lockUntil = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // ปัดแนวนอน ไม่เกี่ยว
+      e.preventDefault();
+      const now = Date.now(); if (now < lockUntil) return;
+      acc += e.deltaY;
+      if (Math.abs(acc) < 40) return;
+      setOffset((o) => o + (acc > 0 ? 1 : -1)); acc = 0; lockUntil = now + 500;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    calWheelCleanup.current = () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random();
@@ -249,16 +268,17 @@ export function ContentCalendarView() {
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <div className="flex items-center gap-2">
             <button onClick={() => setOffset((o) => o - 1)} aria-label={t("เดือนก่อน", "Previous month")} className="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">‹</button>
-            <h2 className="text-lg font-semibold text-slate-800 min-w-[150px] text-center">{monthName}</h2>
+            <h2 title={t("หมุนลูกกลิ้งเมาส์บนปฏิทินเพื่อเปลี่ยนเดือน", "Scroll the mouse wheel over the calendar to change month")} className="text-lg font-semibold text-slate-800 min-w-[150px] text-center">{monthName}</h2>
             <button onClick={() => setOffset((o) => o + 1)} aria-label={t("เดือนถัดไป", "Next month")} className="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">›</button>
             {offset !== 0 && <button onClick={() => setOffset(0)} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">{t("วันนี้", "Today")}</button>}
+            <span className="hidden lg:inline text-[11px] text-slate-300 ml-1">🖱 {t("หมุนลูกกลิ้งบนปฏิทิน = เปลี่ยนเดือน", "Wheel over calendar = change month")}</span>
           </div>
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 text-xs">🗓 {t("เดือนนี้", "This month")} {scheduledThisMonth}</span>
         </div>
 
         <div className="flex gap-4 items-start flex-col lg:flex-row">
           {/* ตารางปฏิทิน */}
-          <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4">
+          <div ref={calRef} className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4">
             <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-medium text-slate-400 mb-1.5">
               {weekdays.map((d) => <div key={d} className="py-1">{d}</div>)}
             </div>
