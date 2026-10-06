@@ -465,14 +465,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [pset, setPset] = useState<PlatformSettings>({});
   // รูป/ลิงก์ที่ "ส่งมาแล้ว" จากงานย่อยที่อนุมัติแล้ว (ของงานที่ผูกไว้) — ไว้หยิบไปโพสต์
   const [taskMedia, setTaskMedia] = useState<{ images: { key: string; label: string | null; status: string }[]; links: { label: string | null; url: string | null }[] }>({ images: [], links: [] });
-  const [tmLb, setTmLb] = useState(-1);   // ดูรูปจากงานเต็มจอ
+  const [tmLb, setTmLb] = useState(-1);   // ดูรูปเต็มจอ (คลังรูปรวม)
+  const [prodEdit, setProdEdit] = useState(false);   // การ์ดสินค้า: โหมดแก้ (ปกติโชว์สรุปสั้น ๆ)
+  const [mediaAdd, setMediaAdd] = useState(false);   // การ์ดรูป: กางตัวเพิ่ม/จัดการไฟล์
   // แบ่ง 2 ฝั่ง ปรับขนาดได้ (ลากเส้นกลาง) — จำสัดส่วนใน localStorage
   const isWide = useMediaQuery("(min-width: 1024px)");   // จอกว้าง → 2 ฝั่ง · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
   const { theme: dth, update: dthUpdate } = useDrawerTheme("content");   // ธีม drawer คอนเทนต์ (ต่อคน)
+  // แบบ A (2026-10): ฝั่งซ้ายเหลือการ์ด 3 ใบ — สินค้า (รวมแบรนด์/สี/ราคา) · รูป/วิดีโอ (รวมรูปจากงาน+อัปเอง) · ลิงก์สินค้า
   const CONTENT_SECTIONS = [
-    { key: "task_media", label: t("รูปจากงาน", "From task") }, { key: "product", label: t("สินค้า", "Product") },
-    { key: "price", label: t("ราคา/ส่วนลด", "Price") }, { key: "attach", label: t("แนบเพิ่มเอง", "Attach") },
-    { key: "links", label: t("ลิงก์สินค้า", "Links") }, { key: "platform_notes", label: t("หมายเหตุแพลตฟอร์ม", "Platform notes") },
+    { key: "product", label: t("สินค้า", "Product") }, { key: "media", label: t("รูป / วิดีโอ", "Media") }, { key: "links", label: t("ลิงก์สินค้า", "Links") },
   ];
   const cSecOrder = orderedKeys(dth, CONTENT_SECTIONS.map((s) => s.key));
   const cOrderOf = (k: string) => cSecOrder.indexOf(k);   // ลำดับส่วน (CSS order) ตามที่ผู้ใช้จัด
@@ -484,8 +485,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     : s === "revision_requested" ? { label: t("ตีกลับ", "Revise"), cls: "bg-orange-500" }
     : { label: t("ร่าง", "Draft"), cls: "bg-slate-400" };
   const bodyRef = useRef<HTMLDivElement>(null);
-  const leftPctRef = useRef(46);
-  const [leftPct, setLeftPctState] = useState(46);
+  const leftPctRef = useRef(38);
+  const [leftPct, setLeftPctState] = useState(38);
   const setLeftPct = useCallback((v: number) => { leftPctRef.current = v; setLeftPctState(v); }, []);
   const draggingRef = useRef(false);
 
@@ -552,11 +553,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // ปรับสัดส่วน 2 ฝั่งด้วยการลากเส้นแบ่ง
   useEffect(() => {
-    try { const s = Number(localStorage.getItem("content_drawer_left_pct")); if (s >= 30 && s <= 68) setLeftPct(s); } catch { /* ไม่มีค่าเก็บไว้ */ }
+    try { const s = Number(localStorage.getItem("content_drawer_left_pct")); if (s >= 28 && s <= 60) setLeftPct(s); } catch { /* ไม่มีค่าเก็บไว้ */ }
     const move = (e: MouseEvent) => {
       if (!draggingRef.current || !bodyRef.current) return;
       const rect = bodyRef.current.getBoundingClientRect();
-      const pct = Math.max(30, Math.min(68, ((e.clientX - rect.left) / rect.width) * 100));
+      const pct = Math.max(28, Math.min(60, ((e.clientX - rect.left) / rect.width) * 100));
       setLeftPct(pct);
     };
     const up = () => { if (!draggingRef.current) return; draggingRef.current = false; document.body.style.userSelect = ""; try { localStorage.setItem("content_drawer_left_pct", String(Math.round(leftPctRef.current))); } catch { /* noop */ } };
@@ -843,36 +844,17 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   const contentPlatforms = d.platforms ?? [];
   const brandLabel = brands.find((b) => b.id === brandId)?.name ?? null;   // ชื่อแบรนด์ที่เลือกสด ๆ (ให้โมดอลตั้งค่าแคปชั่น/แฮชแท็กตามแบรนด์นี้)
-  // จอกว้าง → แยก "รูปจากงาน" เป็นคอลัมน์ซ้ายสุด (3 คอลัมน์: รูป | ข้อมูล | แคปชั่น) · มือถือ = เป็น section ในสแต็ก
-  const imagesInLeftPane = isWide && !!d.task_id && !isHidden(dth, "task_media");
-  const taskImagesGallery = (cols: string) => (
-    taskMedia.images.length === 0 && taskMedia.links.length === 0 ? (
-      <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป/ลิงก์จากงานย่อย", "No media from subtasks yet")}</p>
-    ) : (
-      <>
-        {taskMedia.images.length > 0 && (
-          <div className={`grid ${cols} gap-2`}>
-            {taskMedia.images.map((im, i) => { const bd = tmBadge(im.status); return (
-              <div key={im.key} className="relative group">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={r2ImageUrl(im.key, 320) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(i)} title={`${im.label ?? ""} · ${bd.label}`} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-                <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${bd.cls}`}>{bd.label}</span>
-                <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
-                  <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>
-                  <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>
-                </div>
-              </div>
-            ); })}
-          </div>
-        )}
-        {taskMedia.links.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {taskMedia.links.map((l, i) => <a key={i} href={l.url ?? "#"} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 hover:underline truncate">🔗 {l.label || l.url}</a>)}
-          </div>
-        )}
-      </>
-    )
-  );
+  // ความคืบหน้าการโพสต์ (หัว drawer): โพสต์แล้ว/ตั้งเวลาแล้ว ÷ แพลตฟอร์มที่ไม่ได้ข้าม
+  const doneCount = caps.filter((c) => ["posted", "scheduled"].includes(postStatus[c.platform] ?? "todo")).length;
+  const totalCount = caps.filter((c) => (postStatus[c.platform] ?? "todo") !== "skip").length;
+  const schedLabel = scheduledAt ? `${new Date(scheduledAt).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} · ${scheduledAt.slice(11, 16)}` : null;
+  const hasProduct = !!(sku || parent);
+  const productCover = sku?.image_url ?? parent?.image_url ?? d.cover_image_url ?? null;
+  const discountPctLabel = discountAmt != null && fakeVal ? Math.round((discountAmt / fakeVal) * 100) : null;
+  const taskKeySet = new Set(taskMedia.images.map((im) => im.key));
+  const lbImages = postImages.filter((m) => m.type === "image");   // รูปที่กดดูเต็มจอได้ (ไม่รวมวิดีโอ)
+  const ownFiles = attachments.filter((a) => a.kind !== "link").length;
+  const linkFiles = attachments.filter((a) => a.kind === "link").length;
 
   return (
     <>
@@ -898,36 +880,39 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 }}
                 className="text-base font-semibold text-slate-900 border-b-2 border-violet-400 outline-none bg-transparent w-full px-1 -mx-1" />
             )}
-            <span className="font-mono text-xs text-slate-500">{d.content_no}</span>
-            {/* ผูกกับงานอยู่ → กดไปดูงานนั้นได้เลย (เปิดแท็บใหม่ ไม่หลุดจากคอนเทนต์ที่กำลังแก้) */}
-            {d.task_id && (
-              <a href={`/tasks?task=${d.task_id}`} target="_blank" rel="noreferrer"
-                title={t("เปิดงานที่ผูกกับคอนเทนต์นี้ (แท็บใหม่)", "Open the linked task (new tab)")}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-100 whitespace-nowrap">
-                👁 {t("ดูงาน", "View task")} ↗
-              </a>
-            )}
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              <span className="font-mono text-[11px] text-slate-500 border border-slate-200 rounded-full px-2 py-0.5">{d.content_no}</span>
+              <span className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${brandLabel ? "bg-violet-50 text-violet-800 border-violet-200" : "text-slate-400 border-slate-200"}`} title={t("แบรนด์ (แก้ที่การ์ดสินค้า)", "Brand (edit in product card)")}>
+                <span className="h-2 w-2 rounded-full" style={{ background: (brands.find((b) => b.id === brandId)?.color) || "#cbd5e1" }} />{brandLabel ?? t("ยังไม่ระบุแบรนด์", "No brand")}
+              </span>
+              <span className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${schedLabel ? "text-slate-600 border-slate-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>🗓 {schedLabel ?? t("ยังไม่ตั้งเวลา", "Not scheduled")}</span>
+              {/* ผูกกับงานอยู่ → กดไปดูงานนั้นได้เลย (เปิดแท็บใหม่ ไม่หลุดจากคอนเทนต์ที่กำลังแก้) */}
+              {d.task_id && (
+                <a href={`/tasks?task=${d.task_id}`} target="_blank" rel="noreferrer" title={t("เปิดงานที่ผูกกับคอนเทนต์นี้ (แท็บใหม่)", "Open the linked task (new tab)")}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 hover:underline whitespace-nowrap">👁 {t("ดูงาน", "View task")} ↗</a>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <DrawerThemeButton theme={dth} update={dthUpdate} sections={CONTENT_SECTIONS} />
-            {onDelete && <button onClick={() => onDelete(d)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>}
-            <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+          <div className="flex items-center gap-3 shrink-0">
+            {/* ความคืบหน้า: โพสต์ไปแล้วกี่แพลตฟอร์ม */}
+            {caps.length > 0 && (
+              <div className="hidden sm:block text-right" title={t("โพสต์แล้ว/ตั้งเวลาแล้ว ÷ แพลตฟอร์มที่ไม่ได้ข้าม", "Posted or scheduled ÷ platforms not skipped")}>
+                <div className="text-[10px] text-slate-400">{t("ความคืบหน้า", "Progress")}</div>
+                <div className="flex items-center gap-2">
+                  <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${totalCount ? Math.round((doneCount / totalCount) * 100) : 0}%` }} /></div>
+                  <span className="text-xs font-semibold text-slate-700 tabular-nums">{t("โพสต์แล้ว", "Posted")} {doneCount}/{totalCount}</span>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center gap-1">
+              <DrawerThemeButton theme={dth} update={dthUpdate} sections={CONTENT_SECTIONS} />
+              <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+            </div>
           </div>
         </div>
 
         {/* ===== จอกว้าง: 3 คอลัมน์ (รูปจากงาน | ข้อมูล | แคปชั่น) ปรับขนาดได้ · มือถือ: เรียงบน-ล่าง ===== */}
         <div className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size) }}>
-          {/* ───── คอลัมน์ซ้ายสุด: รูปจากงาน (เฉพาะจอกว้าง) ───── */}
-          {imagesInLeftPane && (
-            <div className="w-[210px] shrink-0 overflow-y-auto px-3 py-3 bg-slate-50/40 border-r border-slate-200">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[11px] font-semibold text-slate-500 tracking-wide">🖼️ {cLabelOf("task_media")}</p>
-                <span className="text-[10px] text-slate-400 bg-white border border-slate-200 rounded-full px-1.5">{taskMedia.images.length}</span>
-              </div>
-              {taskImagesGallery("grid-cols-2")}
-              <p className="text-[10px] text-slate-300 mt-2 leading-tight">{t("กดรูป=ดูเต็มจอ · ⬇ ดาวน์โหลดไปโพสต์", "Click=view · ⬇ download to post")}</p>
-            </div>
-          )}
           {/* กลุ่ม ข้อมูล | เส้นแบ่ง | แคปชั่น — ตัวลากปรับขนาดทำงานในนี้ (รูปอยู่นอกกลุ่ม จะได้ลากแม่น) */}
           <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0 min-w-0" : "contents"} style={isWide && dth.swap ? { flexDirection: "row-reverse" } : undefined}>
           {/* ───── ฝั่งกลาง: ข้อมูล + แนบงาน ───── */}
@@ -950,77 +935,146 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               )}
             </div>
 
-            {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
+            {/* ───── การ์ดสินค้า: สรุปสั้น (รูป + รหัส + ชื่อ + แบรนด์ + สี + ราคาบรรทัดเดียว) · กด ✏️ เพื่อแก้ ───── */}
             {!isHidden(dth, "product") && (
-            <CSection title={cLabelOf("product")} order={cOrderOf("product")} collapsed={coll("product")} onToggle={() => toggleColl("product")}
-              right={d.task_id ? <button onClick={(e) => { e.stopPropagation(); pullFromTask(); }} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button> : undefined}>
-              {/* แบรนด์ — ดึงจากสินค้าอัตโนมัติ (เมื่อยังว่าง) แก้เองได้ */}
-              <div className="mb-3">
-                <label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label>
-                <div className="flex items-center gap-2">
-                  <span className="h-3.5 w-3.5 rounded-full border border-slate-200 shrink-0" style={{ background: (brands.find((b) => b.id === brandId)?.color) || "#e2e8f0" }} />
-                  <select value={brandId ?? ""} onChange={(e) => { setBrandTouched(true); setBrandId(e.target.value || null); }} className="flex-1 h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white">
-                    <option value="">{t("— เดาจากสินค้าอัตโนมัติ —", "— Auto from product —")}</option>
-                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-                <p className="text-[11px] text-slate-300 mt-1">{t("เลือก SKU/Parent SKU แล้วระบบเติมแบรนด์ให้ · แก้เองได้", "Pick a SKU/Parent SKU and the brand fills in · editable")}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3 items-start">
-                <div>
-                  <div className="flex items-center justify-between h-5"><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label></div>
-                  <SkuPicker value={sku} onChange={setSku} />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between h-5">
-                    <label className="text-xs text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label>
-                    {parent?.id && <button onClick={() => setOpenParentId(parent.id)} className="text-[11px] text-violet-700 hover:underline">↗ {t("เปิดดูสินค้า", "Open")}</button>}
-                  </div>
-                  <ParentSkuPicker value={parent} onChange={setParent} />
+            <div style={{ order: cOrderOf("product") }} className="border border-slate-200 rounded-xl bg-white p-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-sm font-semibold text-slate-700">🛍 {cLabelOf("product")}</span>
+                <div className="flex items-center gap-3">
+                  {d.task_id && <button onClick={pullFromTask} disabled={pullBusy} className="text-[11px] text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงจากงาน", "⬇ Pull from task")}</button>}
+                  {hasProduct && <button onClick={() => setProdEdit((v) => !v)} className="text-xs font-medium text-violet-700 hover:underline">{prodEdit ? `✓ ${t("เสร็จ", "Done")}` : `✏️ ${t("แก้ไข", "Edit")}`}</button>}
                 </div>
               </div>
-              <div className="mt-2">
-                <div className="flex items-center justify-between h-5">
-                  <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
-                  <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-[11px]" title={t("เลือกภาษาที่ใช้แสดงสีใน {color}", "Language for {color}")}>
-                    <button type="button" onClick={() => setColorSource("th")} className={`px-2 h-6 ${colorSource === "th" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("ไทย", "TH")}</button>
-                    <button type="button" onClick={() => setColorSource("en")} className={`px-2 h-6 border-l border-slate-200 ${colorSource === "en" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>Eng</button>
+              {/* โหมดดู */}
+              {hasProduct && !prodEdit && (
+                <div className="flex gap-3 items-start">
+                  {productCover
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={productCover} alt="" className="h-14 w-14 rounded-lg object-cover border border-slate-200 shrink-0" />
+                    : <div className="h-14 w-14 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 text-xl shrink-0">🛍</div>}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[11px] text-slate-500 truncate">{sku?.code ?? parent?.code}{sku && parent ? <span className="text-slate-300"> · Parent {parent.code}</span> : null}</div>
+                    <div className="text-sm text-slate-800 leading-snug line-clamp-2">{sku?.name ?? parent?.name}</div>
+                    <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 flex-wrap">
+                      {sku ? <span>{t("SKU สีเดี่ยว", "Single SKU")}</span> : <span>{t("Parent SKU ทุกสี", "Parent (all colors)")}</span>}
+                      {parent && <button onClick={() => setOpenParentId(parent.id)} className="text-violet-700 hover:underline">↗ {t("เปิดดูสินค้า", "Open product")}</button>}
+                    </div>
                   </div>
                 </div>
-                <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">{t("— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)", "— Select SKU (single color) or Parent SKU (all child colors)")}</span>}</div>
-              </div>
-            </CSection>)}
-
-            {/* ราคา / ส่วนลด — ซ่อนถ้ายังไม่เลือก SKU/Parent SKU */}
-            {!isHidden(dth, "price") && (sku || parent) && (
-            <CSection title={cLabelOf("price")} order={cOrderOf("price")} collapsed={coll("price")} onToggle={() => toggleColl("price")}>
-              <div className="flex items-end gap-2 flex-wrap">
-                {!sku && children.length > 0 && (
-                  <div><label className="text-xs text-slate-400">{t("ราคาจาก SKU", "Price from SKU")}</label>
-                    <select value={priceSkuId} onChange={(e) => setPriceSkuId(e.target.value)} className="h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white max-w-[190px]">
-                      {children.map((c) => <option key={c.id} value={c.id}>{c.code}{c.list_price != null ? ` · ${Number(c.list_price).toLocaleString("th-TH")}฿` : ""}</option>)}
-                    </select>
+              )}
+              {/* โหมดแก้ (หรือยังไม่เลือกสินค้า) */}
+              {(prodEdit || !hasProduct) && (
+                <div className="space-y-2">
+                  {!hasProduct && <p className="text-[11px] text-slate-400">{t("เลือก SKU (สีเดียว) หรือ Parent SKU (รวมทุกสี) → ระบบเติมแบรนด์ สี และราคาให้", "Pick a SKU (single color) or Parent SKU (all colors) → brand, colors and price fill in")}</p>}
+                  <div className="grid grid-cols-2 gap-2 items-start">
+                    <div><label className="text-[11px] text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
+                    <div><label className="text-[11px] text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
                   </div>
-                )}
-                <div><label className="text-xs text-slate-400">{t("ราคาปลอม (จาก SKU)", "Fake price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-500 line-through bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakeVal != null ? `${Number(fakeVal).toLocaleString("th-TH")} ฿` : "—"}</div></div>
-                <div><label className="text-xs text-slate-400">{t("ราคาขายจริง (จาก SKU)", "Selling price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realSelling != null ? `${Number(realSelling).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
-                <div><label className="text-xs text-slate-400">{t("ส่วนลด (ปลอม−จริง)", "Discount (fake−real)")}</label><div className="h-9 px-3 flex items-center text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg min-w-24">{discountAmt != null ? `${Number(discountAmt).toLocaleString("th-TH")} ฿` : "—"}</div></div>
+                  <div>
+                    <label className="text-[11px] text-slate-400">{t("แบรนด์", "Brand")}</label>
+                    <div className="flex items-center gap-2">
+                      <span className="h-3 w-3 rounded-full border border-slate-200 shrink-0" style={{ background: (brands.find((b) => b.id === brandId)?.color) || "#e2e8f0" }} />
+                      <select value={brandId ?? ""} onChange={(e) => { setBrandTouched(true); setBrandId(e.target.value || null); }} className="flex-1 h-8 border border-slate-200 rounded-lg px-2 text-xs bg-white">
+                        <option value="">{t("— เดาจากสินค้าอัตโนมัติ —", "— Auto from product —")}</option>
+                        {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* สี + ราคา — บรรทัดละเรื่อง (เดิมเป็นกล่องใหญ่ 3 ใบ) */}
+              {hasProduct && (
+                <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 shrink-0 w-10">{t("สี", "Color")}</span>
+                    <span className="flex-1 min-w-0 truncate text-slate-700" title={colorText ?? ""}>{colorText || <span className="text-slate-300">—</span>}</span>
+                    <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-[10px] shrink-0" title={t("ภาษาที่ใช้แสดงสีใน {color}", "Language for {color}")}>
+                      <button type="button" onClick={() => setColorSource("th")} className={`px-1.5 h-5 ${colorSource === "th" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("ไทย", "TH")}</button>
+                      <button type="button" onClick={() => setColorSource("en")} className={`px-1.5 h-5 border-l border-slate-200 ${colorSource === "en" ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>Eng</button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-slate-400 shrink-0 w-10">{t("ราคา", "Price")}</span>
+                    {!sku && children.length > 1 && (
+                      <select value={priceSkuId} onChange={(e) => setPriceSkuId(e.target.value)} title={t("ราคาจาก SKU ลูกตัวไหน", "Price from which child SKU")} className="h-6 border border-slate-200 rounded-md px-1 text-[11px] bg-white max-w-[150px]">
+                        {children.map((c) => <option key={c.id} value={c.id}>{c.code}</option>)}
+                      </select>
+                    )}
+                    <span className="flex items-center gap-1.5">
+                      {fakeVal != null && discountAmt != null && <s className="text-slate-400">฿{Number(fakeVal).toLocaleString("th-TH")}</s>}
+                      <span className="text-sm font-semibold text-emerald-700">{realSelling != null ? `฿${Number(realSelling).toLocaleString("th-TH")}` : t("— ยังไม่มีราคา", "— no price")}</span>
+                      {discountPctLabel != null && <span className="px-1.5 py-px rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px]">-{discountPctLabel}%</span>}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>)}
+
+            {/* ───── การ์ดรูป/วิดีโอ: คลังเดียว (รูปจากงาน + อัปเอง + วิดีโอ) · กด ＋ เพื่อเพิ่ม/จัดการ ───── */}
+            {!isHidden(dth, "media") && (
+            <div style={{ order: cOrderOf("media") }} className="border border-slate-200 rounded-xl bg-white p-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <button onClick={() => toggleColl("media")} className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 min-w-0">
+                  <span className="text-[10px] text-slate-300">{coll("media") ? "▸" : "▾"}</span>🖼 {cLabelOf("media")}
+                  <span className="text-[11px] font-normal text-slate-400">{postImages.length} {t("ไฟล์", "files")}</span>
+                </button>
+                <button onClick={() => { setMediaAdd((v) => !v); if (coll("media")) toggleColl("media"); }} className="text-xs font-medium text-violet-700 hover:underline shrink-0">{mediaAdd ? `✓ ${t("เสร็จ", "Done")}` : `＋ ${t("เพิ่ม / จัดการ", "Add / manage")}`}</button>
               </div>
-            </CSection>)}
-
-            {/* รูป/ลิงก์จากงาน — มือถือ/จอแคบ: เป็น section ในสแต็ก (จอกว้างแยกเป็นคอลัมน์ซ้ายสุด) */}
-            {!imagesInLeftPane && d.task_id && !isHidden(dth, "task_media") && (
-              <CSection title={cLabelOf("task_media")} order={cOrderOf("task_media")} collapsed={coll("task_media")} onToggle={() => toggleColl("task_media")}
-                right={<span className="text-[11px] text-slate-400">{taskMedia.images.length} {t("รูป", "img")}</span>}>
-                {taskImagesGallery("grid-cols-4")}
-                <p className="text-[11px] text-slate-300 mt-1">{t("รูปจากงานย่อย (ป้ายบอกสถานะ) · กดรูป=ดูเต็มจอ · 🔗 ก๊อปลิงก์ · ⬇ ดาวน์โหลด", "Subtask images (status badge) · click=view · 🔗 copy · ⬇ download")}</p>
-              </CSection>
-            )}
-
+              {!coll("media") && (
+                <>
+                  {postImages.length === 0 && !mediaAdd ? (
+                    <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป — กด ＋ เพิ่ม หรือผูกงานที่มีรูปส่งมาแล้ว", "No media yet — click ＋ or link a task that has images")}</p>
+                  ) : postImages.length > 0 && (
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {postImages.slice(0, mediaAdd ? postImages.length : 8).map((im) => {
+                        const src = taskMedia.images.find((x) => x.key === im.key); const isTask = taskKeySet.has(im.key); const bd = src ? tmBadge(src.status) : null;
+                        const usedBy = Object.values(platformImages).filter((arr) => arr.includes(im.key)).length;
+                        const lbIdx = lbImages.findIndex((x) => x.key === im.key);
+                        return (
+                          <div key={im.key} className="relative group aspect-square">
+                            {im.type === "video"
+                              ? <div className="w-full h-full rounded-lg border border-slate-200 bg-slate-800 text-white flex items-center justify-center text-lg" title={im.label ?? ""}>🎬</div>
+                              // eslint-disable-next-line @next/next/no-img-element
+                              : <img src={r2ImageUrl(im.key, 240) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(lbIdx)} title={`${im.label ?? ""}${bd ? ` · ${bd.label}` : ""}`} className="w-full h-full object-cover rounded-lg border border-slate-200 cursor-zoom-in" />}
+                            <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${isTask ? (bd?.cls ?? "bg-slate-400") : "bg-violet-500"}`}>{isTask ? t("งาน", "task") : t("อัปเอง", "own")}</span>
+                            {usedBy > 0 && <span className="absolute bottom-0.5 right-0.5 text-[8px] bg-emerald-600 text-white px-1 py-px rounded" title={t(`เลือกใช้ใน ${usedBy} แพลตฟอร์ม`, `Used by ${usedBy} platform(s)`)}>✓{usedBy}</span>}
+                            {im.type !== "video" && (
+                              <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
+                                <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>
+                                <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>
+                              </div>
+                            )}
+                          </div>
+                        ); })}
+                      {!mediaAdd && postImages.length > 8 && (
+                        <button onClick={() => setMediaAdd(true)} className="aspect-square rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:border-violet-300 hover:text-violet-700">+{postImages.length - 8}</button>
+                      )}
+                    </div>
+                  )}
+                  {taskMedia.links.length > 0 && (
+                    <div className="mt-2 space-y-0.5">
+                      {taskMedia.links.map((l, i) => <a key={i} href={l.url ?? "#"} target="_blank" rel="noreferrer" className="block text-[11px] text-violet-700 hover:underline truncate">🔗 {l.label || l.url}</a>)}
+                    </div>
+                  )}
+                  <div className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-500 flex-wrap">
+                    <span className="bg-slate-100 rounded-full px-2 py-0.5">{t("จากงาน", "From task")} {taskMedia.images.length}</span>
+                    <span className="bg-slate-100 rounded-full px-2 py-0.5">{t("อัปเอง", "Own")} {ownFiles}</span>
+                    {linkFiles > 0 && <span className="bg-slate-100 rounded-full px-2 py-0.5">{t("ลิงก์", "Links")} {linkFiles}</span>}
+                    <span className="ml-auto text-slate-300">{t("เลือกรูปที่จะลงแต่ละแพลตฟอร์มได้ที่การ์ดฝั่งขวา", "Pick images per platform on the right")}</span>
+                  </div>
+                  {mediaAdd && (
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onDelete={onDelAttachment} pushToast={pushToast} />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>)}
 
             {/* ลิงก์สินค้า (ปลายทางขาย) */}
             {!isHidden(dth, "links") && (
-            <CSection title={cLabelOf("links")} order={cOrderOf("links")} collapsed={coll("links")} onToggle={() => toggleColl("links")}>
+            <CSection title={cLabelOf("links")} order={cOrderOf("links")} collapsed={coll("links")} onToggle={() => toggleColl("links")}
+              right={links.length > 0 ? <span className="text-[11px] text-slate-400">{links.length}</span> : undefined}>
               <div className="space-y-2">
                 {links.map((l, i) => (
                   <div key={i} className="flex gap-2">
@@ -1033,13 +1087,6 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 ))}
                 <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
               </div>
-            </CSection>)}
-
-            {/* แนบเพิ่มเอง: รูป/วิดีโอ/ลิงก์ ของคอนเทนต์เอง (แยกจาก "รูปจากงาน") — รูปที่แนบจะขึ้นบนการ์ดกระดานด้วย */}
-            {!isHidden(dth, "attach") && (
-            <CSection title={cLabelOf("attach")} order={cOrderOf("attach")} collapsed={coll("attach")} onToggle={() => toggleColl("attach")}
-              right={<span className="text-[11px] text-slate-400">{attachments.length} {t("ไฟล์", "files")}</span>}>
-              <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onDelete={onDelAttachment} pushToast={pushToast} />
             </CSection>)}
 
 
@@ -1057,7 +1104,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           {/* ───── ฝั่งขวา: แคปชั่นแยกแพลตฟอร์ม ───── */}
           <div className={isWide ? `flex-1 overflow-y-auto ${densityCls(dth.density)} min-w-0 bg-slate-50/40` : `${densityCls(dth.density)} bg-slate-50/40 border-t border-slate-200`}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
+              <p className="text-sm font-semibold text-slate-700">{t("แพลตฟอร์ม", "Platforms")} <span className="text-[11px] font-normal text-slate-400">{caps.length} {t("ช่อง", "channels")} · {t("โพสต์แล้ว", "posted")} {doneCount}/{totalCount}</span></p>
               <CaptionToolbar pinned={pinnedTools} onSavePinned={savePinnedTools} actions={[
                 ...(canAiCaption && caps.length > 0 ? [{
                   key: "ai", primary: true,
@@ -1086,8 +1133,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         </div>
 
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
-          {!onDelete && <button onClick={() => setConfirmDel(true)} disabled={deleting} className="h-9 px-3 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50">🗑 {t("ลบ", "Delete")}</button>}
-          {!d.is_template && <button onClick={saveAsTemplate} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">💾 {t("บันทึกเป็นเทมเพลต", "Save as Template")}</button>}
+          <RowMenu up label={`⋯ ${t("เพิ่มเติม", "More")}`} items={[
+            ...(!d.is_template ? [{ label: `💾 ${t("บันทึกเป็นเทมเพลต", "Save as template")}`, onClick: saveAsTemplate }] : []),
+            { label: `🗑 ${t("ลบคอนเทนต์นี้", "Delete this content")}`, onClick: () => (onDelete ? onDelete(d) : setConfirmDel(true)) },
+          ]} />
           <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={saving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </div>
@@ -1135,7 +1184,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           </div>
         </ERPModal>
       )}
-      <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
+      <ImageLightbox images={lbImages.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
       <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={doDelete}
         title={t("ลบคอนเทนต์", "Delete Content")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{d.title}</span> {t("ใช่ไหม? (ลบแล้วกู้คืนไม่ได้)", "? (cannot be undone)")}</span>} confirmText={deleting ? "..." : t("ลบ", "Delete")} variant="danger" />
@@ -1418,13 +1467,7 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
     ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", ...sharedVars })
     : `${useCaption ? (cap.caption ?? "") : ""}\n\n${useHashtags ? (cap.hashtags ?? "") : ""}`.trim();
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
-  // แถบสถานะโพสต์ต่อแพลตฟอร์ม (เฟส 1 = โพสต์มือ) · ยังไม่โพสต์ / โพสต์แล้ว / ข้าม
-  const POST_STATES: { key: string; label: string; onCls: string }[] = [
-    { key: "todo", label: t("ยังไม่โพสต์", "Not posted"), onCls: "bg-slate-200 text-slate-700 border-slate-300" },
-    { key: "posted", label: `✅ ${t("โพสต์แล้ว", "Posted")}`, onCls: "bg-emerald-50 text-emerald-700 border-emerald-300" },
-    { key: "skip", label: `⊘ ${t("ข้าม", "Skip")}`, onCls: "bg-rose-50 text-rose-700 border-rose-300" },
-  ];
-  // "โพสต์เลย" (มือ) — คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มให้ในคลิกเดียว แล้วให้ผู้ใช้มากด ✅
+  // สถานะโพสต์ต่อแพลตฟอร์ม: ป้ายบนหัวการ์ด + ปุ่ม ✅ โพสต์แล้ว (กดสลับ) · "ข้าม" อยู่ในเมนู ⋯ (นาน ๆ ใช้ที)
 
   // ตัวอย่างที่ประกอบจากแม่แบบ — โชว์เฉพาะตอนแม่แบบ "เติมข้อความเพิ่ม" จริง ๆ
   // (ถ้าแม่แบบมีแค่ {caption}/{hashtags} ก็ไม่ต้องโชว์ เพราะซ้ำกับช่องด้านบน = ต้นตอความรกเดิม)
@@ -1440,6 +1483,11 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
   else if (onOpenSettings) menuItems.push({ label: `🔗 ${t("ตั้งลิงก์ไปหน้าโพสต์", "Set post link")}`, onClick: onOpenSettings });
   if (onApplyAll) menuItems.push({ label: `⇊ ${t("ใช้แคปชั่นนี้กับแพลตฟอร์มอื่น", "Apply to other platforms")}`, onClick: () => onApplyAll(cap.platform) });
   if (onOpenSettings) menuItems.push({ label: `⚙️ ${t("ตั้งค่าแพลตฟอร์มนี้", "Platform settings")}`, onClick: onOpenSettings });
+  if (onSetStatus) {
+    if (postStatus === "skip") menuItems.push({ label: `↺ ${t("เลิกข้าม (กลับเป็นยังไม่โพสต์)", "Un-skip")}`, onClick: () => onSetStatus("todo") });
+    else menuItems.push({ label: `⊘ ${t("ข้ามแพลตฟอร์มนี้", "Skip this platform")}`, onClick: () => onSetStatus("skip") });
+    if (postStatus === "posted") menuItems.push({ label: `↺ ${t("ยกเลิก “โพสต์แล้ว”", "Mark as not posted")}`, onClick: () => onSetStatus("todo") });
+  }
 
   return (
     <div className={`border rounded-lg bg-white ${open ? "border-violet-200 shadow-sm" : "border-slate-200"}`}>
@@ -1455,20 +1503,12 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
               </span>
               {format && <span className="text-[10px] text-slate-500 bg-slate-100 rounded-full px-1.5 shrink-0" title={t("รูปแบบโพสต์", "Post format")}>{postFormatLabel(cap.platform, format, t)}</span>}
               {selectedImages.length > 0 && <span className="text-[11px] text-slate-400 shrink-0" title={t("รูปที่เลือกไว้", "Selected images")}>🖼 {selectedImages.length}</span>}
-              <span className={`text-[11px] px-1.5 py-0.5 rounded-full border shrink-0 ${stBadge.cls}`}>{stBadge.label}</span>
             </>
           )}
+          {open && <span className="flex-1" />}
+          <span className={`text-[11px] px-1.5 py-0.5 rounded-full border shrink-0 ${stBadge.cls}`}>{stBadge.label}</span>
         </button>
-        {open && (
-          <div className="flex items-center gap-2 shrink-0">
-            {canAi && useCaption && contentId && (
-              <button onClick={onAiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
-                className="text-xs font-medium text-fuchsia-700 hover:underline disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนให้", "✨ AI write")}</button>
-            )}
-            <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
-            {menuItems.length > 0 && <RowMenu items={menuItems} />}
-          </div>
-        )}
+        {open && menuItems.length > 0 && <div className="shrink-0"><RowMenu items={menuItems} /></div>}
       </div>
 
       {open && (
@@ -1550,11 +1590,19 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap">
-              {POST_STATES.map((st) => { const on = postStatus === st.key; return (
-                <button key={st.key} onClick={() => onSetStatus?.(st.key)} className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on ? st.onCls : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{st.label}</button>
-              ); })}
-              {postStatus === "scheduled" && <span className="text-[11px] px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-300">⏰ {t("ตั้งเวลาแล้ว", "Scheduled")}</span>}
-              <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์", "Copy caption + open post page")} className={`ml-auto inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 py-1 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}` : `📤 ${t("โพสต์เลย", "Post now")}`}</button>
+              {canAi && useCaption && contentId && (
+                <button onClick={onAiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
+                  className="h-7 px-2.5 text-xs font-medium text-fuchsia-700 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50 disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียน", "✨ AI write")}</button>
+              )}
+              <button onClick={copy} className="h-7 px-2.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50">📋 {t("คัดลอกทั้งหมด", "Copy all")}</button>
+              <span className="flex-1" />
+              {postStatus !== "skip" && (
+                <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มนี้", "Copy caption + open this platform's post page")} className={`h-7 inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}` : `📤 ${t("ไปโพสต์ที่", "Post on")} ${platformLabel(cap.platform)}`}</button>
+              )}
+              {onSetStatus && postStatus !== "skip" && postStatus !== "scheduled" && (
+                <button onClick={() => onSetStatus(postStatus === "posted" ? "todo" : "posted")} title={postStatus === "posted" ? t("กดอีกครั้ง = ยกเลิก", "Click again to undo") : t("โพสต์ด้วยมือเสร็จแล้ว → ติ๊กที่นี่", "Posted manually → tick here")}
+                  className={`h-7 px-2.5 text-xs font-medium rounded-md border ${postStatus === "posted" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50"}`}>✅ {t("โพสต์แล้ว", "Posted")}</button>
+              )}
             </div>
             {(postStatus === "posted" || postStatus === "scheduled") && (
               <div className="flex items-center gap-1.5">
@@ -1633,7 +1681,7 @@ function AiCaptionModal({ platformLabels, filledCount, contentCount = 1, busy, o
 }
 
 // เมนู ⋯ เล็ก ๆ ท้ายหัวการ์ด (ของที่ไม่ได้ใช้ทุกครั้ง) · กดที่อื่นแล้วปิดเอง
-function RowMenu({ items }: { items: { label: string; onClick: () => void }[] }) {
+function RowMenu({ items, label, up = false }: { items: { label: string; onClick: () => void }[]; label?: string; up?: boolean }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1644,11 +1692,13 @@ function RowMenu({ items }: { items: { label: string; onClick: () => void }[] })
   }, [open]);
   return (
     <div ref={boxRef} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} title="เพิ่มเติม" className="text-slate-400 hover:text-violet-700 px-1 leading-none text-base">⋯</button>
+      {label
+        ? <button type="button" onClick={() => setOpen((o) => !o)} className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{label}</button>
+        : <button type="button" onClick={() => setOpen((o) => !o)} title="เพิ่มเติม" className="text-slate-400 hover:text-violet-700 px-1 leading-none text-base">⋯</button>}
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-20 min-w-[200px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+        <div className={`absolute z-20 min-w-[200px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 ${up ? "left-0 bottom-full mb-1" : "right-0 top-full mt-1"}`}>
           {items.map((it) => (
-            <button key={it.label} type="button" onClick={() => { setOpen(false); it.onClick(); }} className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">{it.label}</button>
+            <button key={it.label} type="button" onClick={() => { setOpen(false); it.onClick(); }} className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 ${label ? "text-sm text-slate-700" : "text-xs text-slate-700"}`}>{it.label}</button>
           ))}
         </div>
       )}
