@@ -1,10 +1,12 @@
 "use client";
 
 // ============================================================
-// ปฏิทินคอนเทนต์ (หน้าแยก) — ดูคอนเทนต์ทั้งหมดตามวันโพสต์ + แท็บแยกแบรนด์
-// ของกลาง: StandaloneShell, ContentDrawer, ContentCreateModal, listContent, listBrands
+// ปฏิทินคอนเทนต์ + ปฏิทินงาน (หน้าเดียว สลับโหมดได้)
+// ของกลาง: StandaloneShell, ERPModal, ContentDrawer, ContentCreateModal, TaskDetailDrawer, CreateTaskModal, listContent/listTasks, listBrands
 // เฟส 2: ปฏิทินรายเดือน + แท็บแบรนด์ (สีแบรนด์) + คลิกการ์ดเปิด drawer
-// เฟส 3: คลิกช่องวัน=สร้างงาน (เติมวัน+แบรนด์) · กล่อง "ยังไม่ลงวันที่" · ลากวางเปลี่ยนวัน
+// เฟส 3: คลิกช่องวัน=ป๊อปเลือก (สร้างใหม่/หยิบจากค้าง) · กล่อง "ยังไม่ลงวันที่" · ลากวางเปลี่ยนวัน
+// เฟส 4 (2026-10-07): โหมด "งาน" — ปฏิทินเดียวกัน ใช้กำหนดส่ง (due_date) · การ์ดมีรูปปก · ลากเปลี่ยนกำหนดส่ง
+//   ทุกอย่างทำงานบน CalEntry (รูปกลาง) → แผงปฏิทิน/กล่องค้าง/ป๊อปวัน ใช้โค้ดชุดเดียวทั้ง 2 โหมด
 // ============================================================
 
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
@@ -12,25 +14,55 @@ import { useSWRLite } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
-import { listContent, listBrands, listCampaigns, listContentTemplates, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes, CONTENT_STATUS_META, contentStatusLabel, type ContentItem, type BrandCalStyle, type ContentStatus } from "../data";
+import {
+  listContent, listBrands, listCampaigns, listContentTemplates, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes,
+  CONTENT_STATUS_META, contentStatusLabel, type BrandCalStyle, type ContentStatus,
+  listTasks, updateTask, deleteTask, isOverdue, type CreativeTask,
+} from "../data";
 import { ContentDrawer } from "../content/content";
 import { ContentCreateModal } from "../content/content-create-modal";
+import { TaskDetailDrawer } from "../task-detail-drawer";
+import { CreateTaskModal } from "../create-task-modal";
+import { applyTaskTransition } from "../task-actions";
+import { statusMeta, statusLabel, isTerminal, useCreativeStatuses } from "../use-statuses";
 import { BrandStyleModal } from "./brand-style-modal";
 import { platformLabel, useCreativeOptions } from "../use-options";
 import { r2ImageUrl } from "@/lib/r2-image";
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
+type CalMode = "content" | "task";
+/** รายการบนปฏิทิน (รูปกลางของทั้งคอนเทนต์และงาน) — แผงปฏิทินไม่ต้องรู้ว่าเป็นชนิดไหน */
+type CalEntry = {
+  id: string; kind: CalMode; title: string;
+  dateKey: string | null;      // YYYY-MM-DD (คอนเทนต์ = วันตั้งโพสต์ · งาน = กำหนดส่ง)
+  time: string | null;         // HH:MM (เฉพาะคอนเทนต์)
+  brand_id: string | null; brand_label: string | null;
+  status: string; statusLabel: string; statusCls: string; statusDot: string;
+  thumb: string | null;        // รูปเล็ก (ปกงาน / รูปสินค้า)
+  sub: string | null;          // บรรทัดรอง (ชื่องานที่ผูก / เลขงาน)
+  meta: string | null;         // บรรทัดสาม (รหัสสินค้า · แบรนด์ / ผู้รับผิดชอบ)
+  platforms: string[]; overdue: boolean;
+  hideInBacklog: boolean;      // ยกเลิก/จบแล้ว → ไม่โชว์ในกล่องค้าง (เว้นแต่กรองสถานะนั้นอยู่)
+};
 
 export function ContentCalendarView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const { statuses: taskStatuses } = useCreativeStatuses();
+  // โหมดปฏิทิน: คอนเทนต์ (วันตั้งโพสต์) / งาน (กำหนดส่ง) — จำใน URL ?cal=task
+  const [mode, setModeState] = useState<CalMode>("content");
+  const setMode = (m: CalMode) => {
+    setModeState(m); setStatusFilter("all"); setCancelAsk(null);
+    try { const u = new URL(window.location.href); if (m === "task") u.searchParams.set("cal", "task"); else u.searchParams.delete("cal"); window.history.replaceState(null, "", u.toString()); } catch { /* noop */ }
+  };
+  const [detail, setDetail] = useState<{ kind: CalMode; id: string } | null>(null);
   const [brandFilter, setBrandFilter] = useState<string>("all");   // "all" | brandId
   const [platformFilter, setPlatformFilter] = useState<string>("all");   // "all" | platform value
-  const [statusFilter, setStatusFilter] = useState<string>("all");   // "all" | สถานะคอนเทนต์
+  const [statusFilter, setStatusFilter] = useState<string>("all");   // "all" | สถานะ (ตามโหมด)
   const [offset, setOffset] = useState(0);                          // เลื่อนเดือน (0 = เดือนนี้)
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [taskCreateOpen, setTaskCreateOpen] = useState(false);
   const [createDate, setCreateDate] = useState<string | null>(null);   // วันตั้งโพสต์ prefill (จากช่องที่คลิก)
   // ลากวาง: จำ id + เวลาเดิมของการ์ดที่กำลังลาก + ช่องที่เมาส์ลอยอยู่
   const dragRef = useRef<{ id: string; time: string | null } | null>(null);
@@ -61,35 +93,72 @@ export function ContentCalendarView() {
     setTimeout(() => setToasts((p) => p.filter((x) => x.id !== id)), 3500);
   }, []);
 
-  // ใช้ cache ร่วมกับหน้าคอนเทนต์ (key เดียวกัน) — เข้าหน้านี้เห็นทันที
+  // ใช้ cache ร่วมกับหน้าคอนเทนต์/หน้างาน (key เดียวกัน) — เข้าหน้านี้เห็นทันที · งานโหลดเฉพาะตอนอยู่โหมดงาน
   const itemsSWR = useSWRLite("creative:content", () => listContent());
+  const tasksSWR = useSWRLite(mode === "task" ? "creative:tasks:all" : null, () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000, timeoutMs: 15000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
   const templatesSWR = useSWRLite("creative:content-templates", () => listContentTemplates());
   const stylesSWR = useSWRLite("creative:brand-cal-styles", () => listBrandCalStyles());
-  const items = itemsSWR.data ?? [];
+  const items = useMemo(() => itemsSWR.data ?? [], [itemsSWR.data]);
+  const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
   const brands = brandsSWR.data ?? [];
   const campaigns = campaignsSWR.data ?? [];
   const templates = templatesSWR.data ?? [];
   const styleMap = useMemo(() => Object.fromEntries((stylesSWR.data ?? []).map((s) => [s.brand_id, s])) as Record<string, BrandCalStyle>, [stylesSWR.data]);
-  const loading = itemsSWR.loading;
-  const loadError = !!itemsSWR.error && items.length === 0;   // โหลดพลาด + ไม่มีข้อมูลเก่า → โชว์หน้าผิดพลาด
+  const loading = mode === "content" ? itemsSWR.loading : tasksSWR.loading;
+  const loadError = mode === "content" ? (!!itemsSWR.error && items.length === 0) : (!!tasksSWR.error && tasks.length === 0);   // โหลดพลาด + ไม่มีข้อมูลเก่า → โชว์หน้าผิดพลาด
   const [styleBrandId, setStyleBrandId] = useState<string | null>(null);   // แบรนด์ที่กำลังแต่งหน้า
-  const reload = useCallback(() => { void itemsSWR.revalidate(true); }, [itemsSWR]);
-  // เปิด drawer จากลิงก์ ?content=<id>
-  useEffect(() => { const cid = new URLSearchParams(window.location.search).get("content"); if (cid) setDetailId(cid); }, []);
+  const reload = useCallback(() => { void itemsSWR.revalidate(true); if (mode === "task") void tasksSWR.revalidate(true); }, [itemsSWR, tasksSWR, mode]);
+  // เปิด drawer จากลิงก์ ?content=<id> / ?task=<id> · โหมดจาก ?cal=task
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const cid = sp.get("content"); const tid = sp.get("task");
+    if (sp.get("cal") === "task" || tid) setModeState("task");
+    if (cid) setDetail({ kind: "content", id: cid }); else if (tid) setDetail({ kind: "task", id: tid });
+  }, []);
 
-  // กรองตามแบรนด์ + แพลตฟอร์ม + สถานะที่เลือก (ไม่รวมแม่แบบ)
+  // ───── แปลงเป็นรูปกลาง (CalEntry) ─────
+  const entries = useMemo<CalEntry[]>(() => {
+    if (mode === "content") {
+      return items.filter((c) => !c.is_template).map((c) => {
+        const m = CONTENT_STATUS_META[c.status] ?? CONTENT_STATUS_META.draft;
+        return {
+          id: c.id, kind: "content" as const, title: c.title ?? "",
+          dateKey: c.scheduled_at ? c.scheduled_at.slice(0, 10) : null, time: c.scheduled_at ? c.scheduled_at.slice(11, 16) : null,
+          brand_id: c.brand_id ?? null, brand_label: c.brand_label ?? null,
+          status: c.status, statusLabel: contentStatusLabel(c.status), statusCls: m.cls, statusDot: m.dot,
+          thumb: c.task_cover_url ?? null, sub: c.task_label ? `📋 ${c.task_label}` : null,
+          meta: [c.parent_sku_code || c.sku_code || null, c.brand_label].filter(Boolean).join(" · ") || null,
+          platforms: c.platforms ?? [], overdue: false, hideInBacklog: c.status === "cancelled",
+        };
+      });
+    }
+    return tasks.filter((tk) => tk.is_active !== false).map((tk) => {
+      const m = statusMeta(tk.status);
+      const key = tk.cover_image_r2_key ?? tk.sku_image_key ?? tk.parent_sku_image_key ?? null;
+      const who = (tk.assignees && tk.assignees.length ? tk.assignees.map((a) => a.label).join(", ") : tk.assignee_label) || null;
+      return {
+        id: tk.id, kind: "task" as const, title: tk.title,
+        dateKey: tk.due_date ? String(tk.due_date).slice(0, 10) : null, time: null,
+        brand_id: tk.brand_id, brand_label: tk.brand_label,
+        status: tk.status, statusLabel: m.label, statusCls: m.cls, statusDot: m.dot,
+        thumb: key ? r2ImageUrl(key, 96) : null, sub: tk.task_no ? `#${tk.task_no}${tk.sku_code ? ` · ${tk.parent_sku_code || tk.sku_code}` : ""}` : null,
+        meta: [who ? `👤 ${who}` : null, tk.brand_label].filter(Boolean).join(" · ") || null,
+        platforms: tk.platforms ?? [], overdue: isOverdue(tk), hideInBacklog: isTerminal(tk.status),
+      };
+    });
+  }, [mode, items, tasks]);
+
+  // กรองตามแบรนด์ + แพลตฟอร์ม + สถานะที่เลือก
   const filtered = useMemo(
-    () => items.filter((c) =>
-      !c.is_template
-      && (brandFilter === "all" || c.brand_id === brandFilter)
-      && (platformFilter === "all" || (c.platforms ?? []).includes(platformFilter))
-      && (statusFilter === "all" || c.status === statusFilter),
+    () => entries.filter((e) =>
+      (brandFilter === "all" || e.brand_id === brandFilter)
+      && (platformFilter === "all" || e.platforms.includes(platformFilter))
+      && (statusFilter === "all" || e.status === statusFilter),
     ),
-    [items, brandFilter, platformFilter, statusFilter],
+    [entries, brandFilter, platformFilter, statusFilter],
   );
-
   const hasFilter = brandFilter !== "all" || platformFilter !== "all" || statusFilter !== "all";
 
   // เดือนที่กำลังดู
@@ -100,83 +169,131 @@ export function ContentCalendarView() {
   const ym = `${year}-${String(month + 1).padStart(2, "0")}`;
   const monthName = base.toLocaleDateString(t("th-TH", "en-US"), { month: "long", year: "numeric" });
   const todayKey = new Date().toISOString().slice(0, 10);
-  // ตัวเลขบนชิปตัวกรอง: นับเฉพาะคอนเทนต์ "ของเดือนที่เปิดอยู่" (ตามวันตั้งโพสต์) — แบรนด์นับทั้งเดือน · แพลตฟอร์ม/สถานะนับในแบรนด์ที่เลือก
+  // ตัวเลขบนชิปตัวกรอง: นับเฉพาะรายการ "ของเดือนที่เปิดอยู่" — แบรนด์นับทั้งเดือน · แพลตฟอร์ม/สถานะนับในแบรนด์ที่เลือก
   const counts = useMemo(() => {
-    const all = items.filter((c) => !c.is_template && c.scheduled_at && c.scheduled_at.slice(0, 7) === ym);
-    const inBrand = all.filter((c) => brandFilter === "all" || c.brand_id === brandFilter);
+    const all = entries.filter((e) => e.dateKey && e.dateKey.slice(0, 7) === ym);
+    const inBrand = all.filter((e) => brandFilter === "all" || e.brand_id === brandFilter);
     const brand: Record<string, number> = {}; const plat: Record<string, number> = {}; const stat: Record<string, number> = {};
-    for (const c of all) { const k = c.brand_id ?? "_"; brand[k] = (brand[k] ?? 0) + 1; }
-    for (const c of inBrand) { for (const p of (c.platforms ?? [])) plat[p] = (plat[p] ?? 0) + 1; stat[c.status] = (stat[c.status] ?? 0) + 1; }
+    for (const e of all) { const k = e.brand_id ?? "_"; brand[k] = (brand[k] ?? 0) + 1; }
+    for (const e of inBrand) { for (const p of e.platforms) plat[p] = (plat[p] ?? 0) + 1; stat[e.status] = (stat[e.status] ?? 0) + 1; }
     return { total: all.length, inBrand: inBrand.length, brand, plat, stat };
-  }, [items, brandFilter, ym]);
+  }, [entries, brandFilter, ym]);
 
-  // จัดคอนเทนต์เข้าแต่ละวัน (ตามวันตั้งโพสต์) + กล่องยังไม่ลงวันที่
+  // จัดเข้าแต่ละวัน + กล่องค้าง (ยังไม่ลงวันที่ / ยังไม่กำหนดส่ง)
   const byDay = useMemo(() => {
-    const map: Record<string, ContentItem[]> = {};
-    for (const c of filtered) { if (!c.scheduled_at) continue; const d = c.scheduled_at.slice(0, 10); (map[d] ??= []).push(c); }
-    for (const k of Object.keys(map)) map[k].sort((a, b) => (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? ""));
+    const map: Record<string, CalEntry[]> = {};
+    for (const e of filtered) { if (!e.dateKey) continue; (map[e.dateKey] ??= []).push(e); }
+    for (const k of Object.keys(map)) map[k].sort((a, b) => (a.time ?? "").localeCompare(b.time ?? "") || a.title.localeCompare(b.title, "th", { numeric: true }));
     return map;
   }, [filtered]);
   const unscheduled = useMemo(
-    () => filtered.filter((c) => !c.scheduled_at && (statusFilter === "cancelled" || c.status !== "cancelled")).sort((a, b) => {
-      // เรียงตามชื่องาน (task) — งานเดียวกันอยู่ติดกัน, ไม่มีงานไว้ท้ายสุด, เลข-ในรหัสเรียงแบบธรรมชาติ (PIX9 ก่อน PIX33)
-      const ta = (a.task_label ?? "").trim(), tb = (b.task_label ?? "").trim();
+    () => filtered.filter((e) => !e.dateKey && (statusFilter !== "all" || !e.hideInBacklog)).sort((a, b) => {
+      // เรียงตามบรรทัดรอง (ชื่องานที่ผูก/เลขงาน) — งานเดียวกันอยู่ติดกัน, ไม่มีไว้ท้ายสุด, เลขเรียงแบบธรรมชาติ
+      const ta = (a.sub ?? "").trim(), tb = (b.sub ?? "").trim();
       if (!ta !== !tb) return ta ? -1 : 1;
-      const byTask = ta.localeCompare(tb, "th", { numeric: true });
-      return byTask !== 0 ? byTask : (a.title ?? "").localeCompare(b.title ?? "", "th", { numeric: true });
+      const bySub = ta.localeCompare(tb, "th", { numeric: true });
+      return bySub !== 0 ? bySub : a.title.localeCompare(b.title, "th", { numeric: true });
     }),
     [filtered, statusFilter],
   );
-  // ปุ่ม ✕ "ไม่โพสต์" บนการ์ดค้าง — เคลียร์งานเก่า: ยืนยันในการ์ดก่อน แล้วเปลี่ยนสถานะเป็น "ยกเลิก" (หายจากกล่อง · ยังเปิดดู/คืนสถานะใน drawer ได้)
+  const scheduledThisMonth = useMemo(() => filtered.filter((e) => e.dateKey && e.dateKey.slice(0, 7) === ym).length, [filtered, ym]);
+
+  // รายการสถานะสำหรับตัวกรอง (ตามโหมด)
+  const statusChips = useMemo<{ key: string; label: string; dot: string }[]>(() =>
+    mode === "content"
+      ? (Object.keys(CONTENT_STATUS_META) as ContentStatus[]).map((k) => ({ key: k, label: contentStatusLabel(k), dot: CONTENT_STATUS_META[k].dot }))
+      : taskStatuses.map((s) => ({ key: s.key, label: statusLabel(s.key), dot: statusMeta(s.key).dot })),
+  [mode, taskStatuses]);
+
+  // ───── เปลี่ยนวัน (ลากวาง / หยิบจากค้าง) — optimistic แล้วบันทึกจริง · error = คืนค่าเดิม ─────
+  const reschedule = useCallback(async (entry: CalEntry, dayKey: string | null, time?: string | null) => {
+    if (entry.kind === "content") {
+      const newAt = dayKey ? `${dayKey}T${time || "10:00"}` : null;
+      const cur = items;
+      itemsSWR.mutate(cur.map((c) => c.id === entry.id ? { ...c, scheduled_at: newAt } : c));
+      try { await updateContent(entry.id, { scheduled_at: newAt }); pushToast("success", newAt ? t("ย้ายวันโพสต์แล้ว", "Rescheduled") : t("ย้ายไปกล่องยังไม่ลงวันที่แล้ว", "Moved to backlog")); }
+      catch (e) { itemsSWR.mutate(cur); pushToast("error", (e as Error).message); }
+      finally { void itemsSWR.revalidate(true); }
+    } else {
+      const cur = tasks;
+      tasksSWR.mutate(cur.map((tk) => tk.id === entry.id ? { ...tk, due_date: dayKey } : tk));
+      try { await updateTask(entry.id, { due_date: dayKey }); pushToast("success", dayKey ? t("เปลี่ยนกำหนดส่งแล้ว", "Due date changed") : t("เอากำหนดส่งออกแล้ว", "Due date cleared")); }
+      catch (e) { tasksSWR.mutate(cur); pushToast("error", (e as Error).message); }
+      finally { void tasksSWR.revalidate(true); }
+    }
+  }, [items, itemsSWR, tasks, tasksSWR, pushToast, t]);
+
+  // ปุ่ม ✕ บนการ์ดค้าง — เคลียร์งานเก่า: ยืนยันในการ์ดก่อน · คอนเทนต์ = สถานะ "ยกเลิก" · งาน = เดินสถานะไป "ยกเลิก" ผ่านของกลาง applyTaskTransition
   const [cancelAsk, setCancelAsk] = useState<string | null>(null);
-  const cancelContent = useCallback(async (id: string) => {
+  const cancelEntry = useCallback(async (entry: CalEntry) => {
     setCancelAsk(null);
-    const cur = items;
-    itemsSWR.mutate(cur.map((c) => c.id === id ? { ...c, status: "cancelled" as ContentStatus } : c));
-    try { await updateContent(id, { status: "cancelled" }); pushToast("success", t("ยกเลิกแล้ว — ไม่โพสต์คอนเทนต์นี้ (ดูได้ที่ตัวกรองสถานะ “ยกเลิก”)", "Cancelled — won't be posted (see status filter “Cancelled”)")); }
-    catch (e) { itemsSWR.mutate(cur); pushToast("error", (e as Error).message); }
-    finally { void itemsSWR.revalidate(true); }
-  }, [items, itemsSWR, pushToast, t]);
-  const scheduledThisMonth = useMemo(
-    () => filtered.filter((c) => c.scheduled_at && c.scheduled_at.slice(0, 7) === ym).length,
-    [filtered, ym],
-  );
+    if (entry.kind === "content") {
+      const cur = items;
+      itemsSWR.mutate(cur.map((c) => c.id === entry.id ? { ...c, status: "cancelled" as ContentStatus } : c));
+      try { await updateContent(entry.id, { status: "cancelled" }); pushToast("success", t("ยกเลิกแล้ว — ไม่โพสต์คอนเทนต์นี้ (ดูได้ที่ตัวกรองสถานะ “ยกเลิก”)", "Cancelled — won't be posted (see status filter “Cancelled”)")); }
+      catch (e) { itemsSWR.mutate(cur); pushToast("error", (e as Error).message); }
+      finally { void itemsSWR.revalidate(true); }
+    } else {
+      const task = tasks.find((x) => x.id === entry.id); if (!task) return;
+      const ok = await applyTaskTransition(task, "cancelled", { pushToast });
+      if (ok) { pushToast("success", t("ยกเลิกงานแล้ว", "Task cancelled")); void tasksSWR.revalidate(true); }
+    }
+  }, [items, itemsSWR, tasks, tasksSWR, pushToast, t]);
 
   const brandColor = (id: string | null | undefined) => brands.find((b) => b.id === id)?.color || "#cbd5e1";
   const activeStyle = brandFilter !== "all" ? (styleMap[brandFilter] ?? null) : null;   // สไตล์ของแบรนด์ที่เลือก (แบนเนอร์)
   const weekdays = [t("อา", "Sun"), t("จ", "Mon"), t("อ", "Tue"), t("พ", "Wed"), t("พฤ", "Thu"), t("ศ", "Fri"), t("ส", "Sat")];
-
-  // ย้ายวัน (ลากวาง) — optimistic แล้วบันทึกจริง · error = คืนค่าเดิม
-  const reschedule = useCallback(async (id: string, newAt: string | null) => {
-    const cur = items;
-    itemsSWR.mutate(cur.map((c) => c.id === id ? { ...c, scheduled_at: newAt } : c));
-    try { await updateContent(id, { scheduled_at: newAt }); pushToast("success", newAt ? t("ย้ายวันโพสต์แล้ว", "Rescheduled") : t("ย้ายไปกล่องยังไม่ลงวันที่แล้ว", "Moved to backlog")); }
-    catch (e) { itemsSWR.mutate(cur); pushToast("error", (e as Error).message); }
-    finally { void itemsSWR.revalidate(true); }
-  }, [items, itemsSWR, pushToast, t]);
+  const entryById = (id: string) => filtered.find((e) => e.id === id) ?? entries.find((e) => e.id === id) ?? null;
 
   const onDropDay = (dayKey: string) => {
     setOverKey(null);
     const d = dragRef.current; dragRef.current = null;
     if (!d) return;
-    const time = d.time || "10:00";
-    reschedule(d.id, `${dayKey}T${time}`);
+    const e = entryById(d.id); if (!e) return;
+    void reschedule(e, dayKey, d.time || defaultTimeFor(dayKey));
   };
   const onDropBacklog = () => {
     setOverKey(null);
     const d = dragRef.current; dragRef.current = null;
-    if (d) reschedule(d.id, null);
+    if (!d) return;
+    const e = entryById(d.id); if (e) void reschedule(e, null);
   };
-  const startDrag = (c: ContentItem) => { dragRef.current = { id: c.id, time: c.scheduled_at ? c.scheduled_at.slice(11, 16) : null }; };
+  const startDrag = (e: CalEntry) => { dragRef.current = { id: e.id, time: e.time }; };
 
-  const openCreate = (date: string | null) => { setCreateDate(date); setCreateOpen(true); };
-  // กดช่องวัน → ป๊อปให้เลือก: สร้างคอนเทนต์ใหม่วันนี้ หรือ หยิบจาก "ยังไม่ลงวันที่" มาลงวันนี้ (เวลา = เวลาแนะนำของวันนั้น ไม่มีก็ 10:00)
+  // สร้างใหม่ (ตามโหมด) — คอนเทนต์เติมวันให้ · งานเปิดฟอร์มงาน (ใส่กำหนดส่งในฟอร์ม)
+  const openCreate = (date: string | null) => {
+    if (mode === "content") { setCreateDate(date); setCreateOpen(true); return; }
+    setTaskCreateOpen(true);
+    if (date) pushToast("info", t(`ตั้งกำหนดส่งในฟอร์มเป็น ${new Date(`${date}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}`, `Set due date to ${date} in the form`));
+  };
+  // กดช่องวัน → ป๊อปให้เลือก: สร้างใหม่วันนี้ หรือ หยิบจากกล่องค้างมาลงวันนี้ (คอนเทนต์: เวลา = เวลาแนะนำของวันนั้น ไม่มีก็ 10:00)
   const [dayPick, setDayPick] = useState<string | null>(null);
   const [recTimes, setRecTimes] = useState<RecommendedTimes>({});
   useEffect(() => { getRecommendedTimes().then(setRecTimes).catch(() => {}); }, []);
   const defaultTimeFor = (dayKey: string) => { const day = new Date(`${dayKey}T00:00:00`).getDay(); return (recTimes[String(day)] ?? [])[0]?.time || "10:00"; };
-  const pickIntoDay = (c: ContentItem, dayKey: string) => { setDayPick(null); void reschedule(c.id, `${dayKey}T${defaultTimeFor(dayKey)}`); };
+  const pickIntoDay = (e: CalEntry, dayKey: string) => { setDayPick(null); void reschedule(e, dayKey, defaultTimeFor(dayKey)); };
   const dayPickLabel = dayPick ? new Date(`${dayPick}T00:00:00`).toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "long", year: "numeric" }) : "";
+
+  // ป้ายคำตามโหมด
+  const L = mode === "content" ? {
+    title: t("ปฏิทินคอนเทนต์", "Content Calendar"), icon: "🗓️",
+    desc: t("คอนเทนต์ทุกแบรนด์รวมที่เดียว · เรียงตามวันตั้งโพสต์ · ลากวางเปลี่ยนวันได้", "All content in one place · by scheduled date · drag to reschedule"),
+    backlog: t("ยังไม่ลงวันที่", "Unscheduled"), backlogHint: t("ลากการ์ดไปวางในวันที่ต้องการโพสต์ · ลากจากปฏิทินมาที่นี่เพื่อเอาวันออก · กด ✕ = ไม่โพสต์แล้ว (เคลียร์งานเก่า)", "Drag a card onto a day · drop here to clear its date · ✕ = cancel"),
+    create: t("สร้างคอนเทนต์", "Create content"), createDay: t("สร้างคอนเทนต์ใหม่ลงวันนี้", "Create new content on this day"),
+    cancelQ: t("ไม่โพสต์คอนเทนต์นี้แล้ว?", "Cancel this content?"), cancelTip: t("ไม่โพสต์แล้ว (ยกเลิก) — เคลียร์งานเก่า", "Won't post (cancel)"),
+    pick: t("หรือหยิบจาก “ยังไม่ลงวันที่”", "Or pick from “Unscheduled”"), addTip: t("เพิ่มคอนเทนต์วันนี้", "Add content"),
+    legend: t("คลิกช่องวัน = เพิ่ม/หยิบจากค้าง · ลากการ์ดข้ามวัน = เปลี่ยนวัน · จุดสี = แบรนด์", "Click a day = add/pick · drag a card = reschedule · color dot = brand"),
+    countTip: t("นับเฉพาะคอนเทนต์ที่ตั้งวันโพสต์ในเดือนนี้ (ไม่รวมกล่องยังไม่ลงวันที่)", "Only content scheduled in this month"),
+  } : {
+    title: t("ปฏิทินงาน", "Task Calendar"), icon: "📋",
+    desc: t("งาน Creative ทุกแบรนด์ · เรียงตามกำหนดส่ง · ลากวางเปลี่ยนกำหนดส่งได้ · สีแดง = เลยกำหนด", "All creative tasks · by due date · drag to change due date · red = overdue"),
+    backlog: t("ยังไม่กำหนดส่ง", "No due date"), backlogHint: t("ลากการ์ดไปวางในวันกำหนดส่ง · ลากจากปฏิทินมาที่นี่เพื่อเอากำหนดส่งออก · กด ✕ = ยกเลิกงาน", "Drag a card onto a due day · drop here to clear · ✕ = cancel task"),
+    create: t("สร้างงาน", "Create task"), createDay: t("สร้างงานใหม่ (กำหนดส่งวันนี้)", "Create new task due this day"),
+    cancelQ: t("ยกเลิกงานนี้?", "Cancel this task?"), cancelTip: t("ยกเลิกงาน — เคลียร์งานเก่า", "Cancel task"),
+    pick: t("หรือหยิบจาก “ยังไม่กำหนดส่ง”", "Or pick from “No due date”"), addTip: t("เพิ่มงานกำหนดส่งวันนี้", "Add task"),
+    legend: t("คลิกช่องวัน = เพิ่ม/หยิบจากค้าง · ลากการ์ดข้ามวัน = เปลี่ยนกำหนดส่ง · ขอบแดง = เลยกำหนด · รูป = ปกงาน", "Click a day = add/pick · drag = change due · red = overdue"),
+    countTip: t("นับเฉพาะงานที่กำหนดส่งในเดือนนี้ (ไม่รวมงานที่ยังไม่กำหนดส่ง)", "Only tasks due in this month"),
+  };
 
   const tabCls = (active: boolean) =>
     `inline-flex items-center gap-2 h-9 pl-3 pr-2 rounded-full text-sm font-medium border transition-colors ${
@@ -190,35 +307,50 @@ export function ContentCalendarView() {
     <span className={`min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full text-[10px] tabular-nums ${active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"}`}>{n ?? 0}</span>
   );
 
-  // การ์ดคอนเทนต์ (ใช้ทั้งในปฏิทินและกล่องค้าง)
-  const Chip = ({ c, showTime }: { c: ContentItem; showTime?: boolean }) => {
-    const m = CONTENT_STATUS_META[c.status] ?? CONTENT_STATUS_META.draft;
-    const plats = (c.platforms ?? []).slice(0, 3).map((p) => platformLabel(p)).join(" · ");
-    const skuTxt = c.parent_sku_code || c.sku_code || "";
-    const tip = [c.title, c.task_label && `📋 ${c.task_label}`, skuTxt, plats].filter(Boolean).join(" · ");
+  // รูปเล็กของรายการ (ปกงาน/รูปสินค้า) · ไม่มี = จุดสีแบรนด์
+  const Thumb = ({ e, size }: { e: CalEntry; size: "xs" | "sm" }) => {
+    const cls = size === "xs" ? "h-5 w-5 rounded" : "h-9 w-9 rounded";
+    return e.thumb
+      // eslint-disable-next-line @next/next/no-img-element
+      ? <img src={e.thumb} alt="" className={`${cls} object-cover border border-slate-200 shrink-0`} />
+      : size === "xs"
+        ? <span className="h-2 w-2 rounded-full shrink-0" style={{ background: brandColor(e.brand_id) }} />
+        : <span className={`${cls} bg-slate-100 flex items-center justify-center shrink-0`}><span className="h-2.5 w-2.5 rounded-full" style={{ background: brandColor(e.brand_id) }} /></span>;
+  };
+
+  // การ์ดในช่องวัน (ใช้ร่วม 2 โหมด) — งาน: มีรูปปก + ขอบแดงถ้าเลยกำหนด
+  const Chip = ({ e }: { e: CalEntry }) => {
+    const tip = [e.title, e.sub, e.meta, e.platforms.slice(0, 3).map((p) => platformLabel(p)).join(" · "), e.statusLabel].filter(Boolean).join(" · ");
     return (
-      <button draggable onDragStart={() => startDrag(c)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
-        onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} title={tip}
-        className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1 cursor-pointer ${m.cls}`}>
-        {c.task_cover_url
-          ? <img src={c.task_cover_url} alt="" className="h-3.5 w-3.5 rounded object-cover shrink-0" />
-          : <span className="h-2 w-2 rounded-full shrink-0" style={{ background: brandColor(c.brand_id) }} />}
-        <span className="truncate">{showTime && c.scheduled_at ? `${c.scheduled_at.slice(11, 16)} ` : ""}{c.title}</span>
+      <button draggable onDragStart={() => startDrag(e)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
+        onClick={(ev) => { ev.stopPropagation(); setDetail({ kind: e.kind, id: e.id }); }} title={tip}
+        className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1.5 cursor-pointer ${e.overdue ? "bg-red-50 border-red-300 text-red-700" : e.statusCls}`}>
+        <Thumb e={e} size="xs" />
+        <span className="truncate">{e.time ? `${e.time} ` : ""}{e.title}</span>
       </button>
     );
   };
 
   return (
-    <StandaloneShell title={t("ปฏิทินคอนเทนต์", "Content Calendar")} icon="🗓️" accent="violet">
+    <StandaloneShell title={L.title} icon={L.icon} accent="violet">
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">🗓️ {t("ปฏิทินคอนเทนต์", "Content Calendar")}</h1>
-            <p className="text-slate-500 mt-1">{t("คอนเทนต์ทุกแบรนด์รวมที่เดียว · เรียงตามวันตั้งโพสต์ · ลากวางเปลี่ยนวันได้", "All content in one place · by scheduled date · drag to reschedule")}</p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold text-slate-900">{L.icon} {L.title}</h1>
+              {/* สลับโหมด คอนเทนต์ ⇄ งาน (ปฏิทินเดียวกัน) */}
+              <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label={t("เลือกปฏิทิน", "Choose calendar")}>
+                <button onClick={() => setMode("content")} className={`h-8 px-3 rounded-md text-sm font-medium transition ${mode === "content" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🗓️ {t("คอนเทนต์", "Content")}</button>
+                <button onClick={() => setMode("task")} className={`h-8 px-3 rounded-md text-sm font-medium transition ${mode === "task" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>📋 {t("งาน", "Tasks")}</button>
+              </div>
+            </div>
+            <p className="text-slate-500 mt-1">{L.desc}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("รายการคอนเทนต์", "Content list")}</a>
-            <button onClick={() => openCreate(null)} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "Create Content")}</button>
+            {mode === "content"
+              ? <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("รายการคอนเทนต์", "Content list")}</a>
+              : <a href="/tasks?view=kanban" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 {t("บอร์ดงาน", "Task board")}</a>}
+            <button onClick={() => openCreate(null)} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {L.create}</button>
           </div>
         </div>
 
@@ -266,19 +398,19 @@ export function ContentCalendarView() {
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide shrink-0">{t("สถานะ", "Status")}</span>
             <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 flex-wrap">
               <button onClick={() => setStatusFilter("all")} className={segCls(statusFilter === "all")}>{t("ทั้งหมด", "All")}</button>
-              {(Object.keys(CONTENT_STATUS_META) as ContentStatus[]).map((st) => {
-                const active = statusFilter === st;
+              {statusChips.map((st) => {
+                const active = statusFilter === st.key;
                 return (
-                  <button key={st} onClick={() => setStatusFilter(active ? "all" : st)} className={segCls(active)} title={`${contentStatusLabel(st)} · ${counts.stat[st] ?? 0} ${t("รายการ", "items")}`}>
-                    <span className={`h-2 w-2 rounded-full ${CONTENT_STATUS_META[st].dot} ${active ? "ring-2 ring-white/60" : ""}`} />{contentStatusLabel(st)}
-                    {(counts.stat[st] ?? 0) > 0 && <span className={`text-[10px] tabular-nums ${active ? "text-white/80" : "text-slate-400"}`}>{counts.stat[st]}</span>}
+                  <button key={st.key} onClick={() => setStatusFilter(active ? "all" : st.key)} className={segCls(active)} title={`${st.label} · ${counts.stat[st.key] ?? 0} ${t("รายการ", "items")}`}>
+                    <span className={`h-2 w-2 rounded-full ${st.dot} ${active ? "ring-2 ring-white/60" : ""}`} />{st.label}
+                    {(counts.stat[st.key] ?? 0) > 0 && <span className={`text-[10px] tabular-nums ${active ? "text-white/80" : "text-slate-400"}`}>{counts.stat[st.key]}</span>}
                   </button>
                 );
               })}
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
-            <span title={t("นับเฉพาะคอนเทนต์ที่ตั้งวันโพสต์ในเดือนนี้ (ไม่รวมกล่องยังไม่ลงวันที่)", "Only content scheduled in this month (unscheduled box not counted)")}>{t("เดือนนี้แสดง", "This month showing")} <b className="text-slate-700 tabular-nums">{scheduledThisMonth}</b> / {counts.total} {t("รายการ", "items")}</span>
+            <span title={L.countTip}>{t("เดือนนี้แสดง", "This month showing")} <b className="text-slate-700 tabular-nums">{scheduledThisMonth}</b> / {counts.total} {t("รายการ", "items")}</span>
             {hasFilter && (
               <button onClick={() => { setBrandFilter("all"); setPlatformFilter("all"); setStatusFilter("all"); }} className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-100">✕ {t("ล้างตัวกรอง", "Clear")}</button>
             )}
@@ -294,7 +426,7 @@ export function ContentCalendarView() {
             <div className="text-4xl mb-3">⚠️</div>
             <p className="text-slate-700 font-medium">{t("โหลดข้อมูลไม่สำเร็จ", "Failed to load")}</p>
             <p className="text-slate-400 text-sm mt-1">{t("เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Connection or network problem")}</p>
-            <button onClick={() => void itemsSWR.revalidate(true)} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
+            <button onClick={reload} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
           </div>
         )}
         {!loading && !loadError && (<>
@@ -322,7 +454,7 @@ export function ContentCalendarView() {
             {offset !== 0 && <button onClick={() => setOffset(0)} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">{t("วันนี้", "Today")}</button>}
             <span className="hidden lg:inline text-[11px] text-slate-300 ml-1">🖱 {t("หมุนลูกกลิ้งบนปฏิทิน = เปลี่ยนเดือน", "Wheel over calendar = change month")}</span>
           </div>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 text-xs">🗓 {t("เดือนนี้", "This month")} {scheduledThisMonth}</span>
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 text-xs">{L.icon} {t("เดือนนี้", "This month")} {scheduledThisMonth}</span>
         </div>
 
         <div className="flex gap-4 items-start flex-col lg:flex-row">
@@ -349,63 +481,57 @@ export function ContentCalendarView() {
                       <span className={`text-xs px-0.5 ${isToday ? "font-semibold text-violet-700" : "text-slate-400"}`}>
                         {isToday ? <span className="inline-flex items-center justify-center h-5 min-w-5 px-1 rounded-full bg-violet-600 text-white">{day}</span> : day}
                       </span>
-                      <span className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-violet-600 text-sm leading-none" title={t("เพิ่มคอนเทนต์วันนี้", "Add content")}>＋</span>
+                      <span className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-violet-600 text-sm leading-none" title={L.addTip}>＋</span>
                     </div>
                     <div className="space-y-1">
-                      {list.slice(0, 4).map((c) => <Chip key={c.id} c={c} showTime />)}
+                      {list.slice(0, 4).map((e) => <Chip key={e.id} e={e} />)}
                       {list.length > 4 && <div className="text-[10px] text-slate-400 pl-0.5">+{list.length - 4} {t("อื่น ๆ", "more")}</div>}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <p className="text-[11px] text-slate-400 mt-2">💡 {t("คลิกช่องวันว่าง = เพิ่มงาน · ลากการ์ดข้ามวัน = เปลี่ยนวัน · จุดสี = แบรนด์", "Click a day = add · drag a card = reschedule · color dot = brand")}</p>
+            <p className="text-[11px] text-slate-400 mt-2">💡 {L.legend}</p>
           </div>
 
-          {/* กล่อง "ยังไม่ลงวันที่" — ลากไปวางในวันได้ */}
+          {/* กล่องค้าง "ยังไม่ลงวันที่ / ยังไม่กำหนดส่ง" — ลากไปวางในวันได้ */}
           <div onDragOver={(e) => { e.preventDefault(); if (overKey !== "backlog") setOverKey("backlog"); }}
             onDragLeave={() => setOverKey((k) => (k === "backlog" ? null : k))}
             onDrop={onDropBacklog}
             className={`w-full lg:w-[260px] shrink-0 rounded-xl border p-3 ${overKey === "backlog" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300" : "border-slate-200 bg-slate-50"}`}>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-sm font-semibold text-slate-700">📥 {t("ยังไม่ลงวันที่", "Unscheduled")}</span>
+              <span className="text-sm font-semibold text-slate-700">📥 {L.backlog}</span>
               <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{unscheduled.length}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mb-2">{t("ลากการ์ดไปวางในวันที่ต้องการโพสต์ · ลากจากปฏิทินมาที่นี่เพื่อเอาวันออก · กด ✕ = ไม่โพสต์แล้ว (เคลียร์งานเก่า)", "Drag a card onto a day · or drop here to clear its date")}</p>
+            <p className="text-[11px] text-slate-400 mb-2">{L.backlogHint}</p>
             {unscheduled.length === 0 ? (
               <div className="text-center text-xs text-slate-300 py-6">{t("ไม่มีงานค้าง 🎉", "All scheduled 🎉")}</div>
             ) : (
               <div className="space-y-1.5 max-h-[560px] overflow-y-auto pr-0.5">
-                {unscheduled.map((c) => {
-                  const skuTxt = c.parent_sku_code || c.sku_code || null;
-                  const meta = [skuTxt, c.brand_label].filter(Boolean).join(" · ");
-                  return (
-                    <div key={c.id} draggable onDragStart={() => startDrag(c)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
-                      onClick={() => setDetailId(c.id)}
-                      className="bg-white border border-slate-200 rounded-lg p-1.5 cursor-pointer hover:border-violet-300 flex items-center gap-2">
-                      <span className="text-slate-300 shrink-0" title={t("ลากเพื่อจัดวัน", "Drag to schedule")}>⠿</span>
-                      {c.task_cover_url
-                        ? <img src={c.task_cover_url} alt="" className="h-9 w-9 rounded object-cover border border-slate-200 shrink-0" />
-                        : <span className="h-9 w-9 rounded bg-slate-100 flex items-center justify-center shrink-0"><span className="h-2.5 w-2.5 rounded-full" style={{ background: brandColor(c.brand_id) }} /></span>}
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-medium text-slate-700 truncate">{c.title}</div>
-                        {c.task_label && <div className="text-[10px] text-violet-500 truncate">📋 {c.task_label}</div>}
-                        {meta && <div className="text-[10px] text-slate-400 truncate">{meta}</div>}
-                        {cancelAsk === c.id && (
-                          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                            <span className="text-[11px] text-rose-700">{t("ไม่โพสต์คอนเทนต์นี้แล้ว?", "Cancel this content?")}</span>
-                            <button type="button" onClick={() => void cancelContent(c.id)} className="h-6 px-2 rounded-md bg-rose-600 text-white text-[11px] font-medium hover:bg-rose-700">{t("ใช่ ยกเลิก", "Yes, cancel")}</button>
-                            <button type="button" onClick={() => setCancelAsk(null)} className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("กลับ", "Back")}</button>
-                          </div>
-                        )}
-                      </div>
-                      {c.status !== "cancelled" && cancelAsk !== c.id && (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setCancelAsk(c.id); }} title={t("ไม่โพสต์แล้ว (ยกเลิก) — เคลียร์งานเก่า", "Won't post (cancel) — clear old items")}
-                          className="h-7 w-7 shrink-0 rounded-md text-slate-300 hover:text-rose-600 hover:bg-rose-50 text-sm leading-none">✕</button>
+                {unscheduled.map((e) => (
+                  <div key={e.id} draggable onDragStart={() => startDrag(e)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
+                    onClick={() => setDetail({ kind: e.kind, id: e.id })}
+                    className={`bg-white border rounded-lg p-1.5 cursor-pointer hover:border-violet-300 flex items-center gap-2 ${e.overdue ? "border-red-200" : "border-slate-200"}`}>
+                    <span className="text-slate-300 shrink-0" title={t("ลากเพื่อจัดวัน", "Drag to schedule")}>⠿</span>
+                    <Thumb e={e} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium text-slate-700 truncate">{e.title}</div>
+                      {e.sub && <div className="text-[10px] text-violet-500 truncate">{e.sub}</div>}
+                      {e.meta && <div className="text-[10px] text-slate-400 truncate">{e.meta}</div>}
+                      {cancelAsk === e.id && (
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" onClick={(ev) => ev.stopPropagation()}>
+                          <span className="text-[11px] text-rose-700">{L.cancelQ}</span>
+                          <button type="button" onClick={() => void cancelEntry(e)} className="h-6 px-2 rounded-md bg-rose-600 text-white text-[11px] font-medium hover:bg-rose-700">{t("ใช่ ยกเลิก", "Yes, cancel")}</button>
+                          <button type="button" onClick={() => setCancelAsk(null)} className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("กลับ", "Back")}</button>
+                        </div>
                       )}
                     </div>
-                  );
-                })}
+                    {!e.hideInBacklog && cancelAsk !== e.id && (
+                      <button type="button" onClick={(ev) => { ev.stopPropagation(); setCancelAsk(e.id); }} title={L.cancelTip}
+                        className="h-7 w-7 shrink-0 rounded-md text-slate-300 hover:text-rose-600 hover:bg-rose-50 text-sm leading-none">✕</button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -414,7 +540,7 @@ export function ContentCalendarView() {
       </div>
 
       {/* ป๊อปเลือกว่าจะทำอะไรกับวันที่กด */}
-      <ERPModal open={!!dayPick} onClose={() => setDayPick(null)} size="sm" title={`🗓 ${dayPickLabel}`}>
+      <ERPModal open={!!dayPick} onClose={() => setDayPick(null)} size="sm" title={`${L.icon} ${dayPickLabel}`}>
         {dayPick && (
           <div className="space-y-3">
             {(byDay[dayPick] ?? []).length > 0 && (
@@ -424,50 +550,41 @@ export function ContentCalendarView() {
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">{(byDay[dayPick] ?? []).length}</span>
                 </div>
                 <div className="space-y-1.5 max-h-[30vh] overflow-y-auto pr-0.5">
-                  {(byDay[dayPick] ?? []).map((c) => {
-                    const m = CONTENT_STATUS_META[c.status] ?? CONTENT_STATUS_META.draft;
-                    return (
-                      <button key={c.id} type="button" onClick={() => { setDayPick(null); setDetailId(c.id); }} title={t("กดเพื่อเปิดดู/แก้", "Open")}
-                        className="w-full text-left bg-white border border-slate-200 rounded-lg p-2 hover:border-violet-400 hover:bg-violet-50 flex items-center gap-2">
-                        <span className="text-[11px] font-mono text-slate-500 shrink-0 w-11">{c.scheduled_at?.slice(11, 16)}</span>
-                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: brandColor(c.brand_id) }} />
-                        <span className="min-w-0 flex-1 text-xs font-medium text-slate-700 truncate">{c.title}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 ${m.cls}`}>{contentStatusLabel(c.status)}</span>
-                      </button>
-                    );
-                  })}
+                  {(byDay[dayPick] ?? []).map((e) => (
+                    <button key={e.id} type="button" onClick={() => { setDayPick(null); setDetail({ kind: e.kind, id: e.id }); }} title={t("กดเพื่อเปิดดู/แก้", "Open")}
+                      className="w-full text-left bg-white border border-slate-200 rounded-lg p-2 hover:border-violet-400 hover:bg-violet-50 flex items-center gap-2">
+                      {e.time ? <span className="text-[11px] font-mono text-slate-500 shrink-0 w-11">{e.time}</span> : null}
+                      <Thumb e={e} size="xs" />
+                      <span className="min-w-0 flex-1 text-xs font-medium text-slate-700 truncate">{e.title}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 ${e.overdue ? "bg-red-50 text-red-700 border-red-200" : e.statusCls}`}>{e.overdue ? t("เลยกำหนด", "Overdue") : e.statusLabel}</span>
+                    </button>
+                  ))}
                 </div>
                 <div className="border-t border-slate-100 mt-3" />
               </div>
             )}
             <button type="button" onClick={() => { const k = dayPick; setDayPick(null); openCreate(k); }}
-              className="w-full h-11 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 flex items-center justify-center gap-2">＋ {t("สร้างคอนเทนต์ใหม่ลงวันนี้", "Create new content on this day")}</button>
+              className="w-full h-11 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 flex items-center justify-center gap-2">＋ {L.createDay}</button>
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-slate-600">📥 {t("หรือหยิบจาก “ยังไม่ลงวันที่”", "Or pick from “Unscheduled”")}</span>
+                <span className="text-xs font-semibold text-slate-600">📥 {L.pick}</span>
                 <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{unscheduled.length}</span>
               </div>
               {unscheduled.length === 0 ? (
                 <p className="text-xs text-slate-300 text-center py-4">{t("ไม่มีงานค้าง 🎉", "All scheduled 🎉")}</p>
               ) : (
                 <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-0.5">
-                  {unscheduled.map((c) => {
-                    const meta = [c.parent_sku_code || c.sku_code || null, c.brand_label].filter(Boolean).join(" · ");
-                    return (
-                      <button key={c.id} type="button" onClick={() => pickIntoDay(c, dayPick)} title={t("กดเพื่อลงวันนี้", "Click to schedule on this day")}
-                        className="w-full text-left bg-white border border-slate-200 rounded-lg p-2 hover:border-violet-400 hover:bg-violet-50 flex items-center gap-2">
-                        {c.task_cover_url
-                          // eslint-disable-next-line @next/next/no-img-element
-                          ? <img src={c.task_cover_url} alt="" className="h-9 w-9 rounded object-cover border border-slate-200 shrink-0" />
-                          : <span className="h-9 w-9 rounded bg-slate-100 flex items-center justify-center shrink-0"><span className="h-2.5 w-2.5 rounded-full" style={{ background: brandColor(c.brand_id) }} /></span>}
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-medium text-slate-700 truncate">{c.title}</div>
-                          {meta && <div className="text-[10px] text-slate-400 truncate">{meta}</div>}
-                        </div>
-                        <span className="text-[11px] text-violet-700 shrink-0">{t("ลงวันนี้", "Schedule")} {defaultTimeFor(dayPick)} →</span>
-                      </button>
-                    );
-                  })}
+                  {unscheduled.map((e) => (
+                    <button key={e.id} type="button" onClick={() => pickIntoDay(e, dayPick)} title={t("กดเพื่อลงวันนี้", "Click to schedule on this day")}
+                      className="w-full text-left bg-white border border-slate-200 rounded-lg p-2 hover:border-violet-400 hover:bg-violet-50 flex items-center gap-2">
+                      <Thumb e={e} size="sm" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-slate-700 truncate">{e.title}</div>
+                        {(e.sub || e.meta) && <div className="text-[10px] text-slate-400 truncate">{[e.sub, e.meta].filter(Boolean).join(" · ")}</div>}
+                      </div>
+                      <span className="text-[11px] text-violet-700 shrink-0">{t("ลงวันนี้", "Schedule")}{mode === "content" ? ` ${defaultTimeFor(dayPick)}` : ""} →</span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -475,11 +592,18 @@ export function ContentCalendarView() {
         )}
       </ERPModal>
 
-      {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={reload} pushToast={pushToast} />}
+      {detail?.kind === "content" && <ContentDrawer contentId={detail.id} brands={brands} onClose={() => setDetail(null)} onChanged={reload} pushToast={pushToast} />}
+      {detail?.kind === "task" && (
+        <TaskDetailDrawer taskId={detail.id} brands={brands} campaigns={campaigns} onClose={() => setDetail(null)} onChanged={() => tasksSWR.revalidate(true)}
+          onMove={async (task, toKey) => { const ok = await applyTaskTransition(task, toKey, { pushToast }); if (ok) await tasksSWR.revalidate(true); }}
+          onDelete={async (id) => { try { await deleteTask(id); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setDetail(null); await tasksSWR.revalidate(true); } catch (e) { pushToast("error", (e as Error).message); } }}
+          pushToast={pushToast} />
+      )}
 
       <ContentCreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); reload(); }}
         brands={brands} campaigns={campaigns} templates={templates}
         defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultDate={createDate} pushToast={pushToast} />
+      <CreateTaskModal open={taskCreateOpen} onClose={() => setTaskCreateOpen(false)} onCreated={() => { setTaskCreateOpen(false); void tasksSWR.revalidate(true); }} pushToast={pushToast} />
 
       {styleBrandId && (() => {
         const b = brands.find((x) => x.id === styleBrandId);
