@@ -56,6 +56,8 @@ type StatusColumn = {
 };
 
 const DEFAULT_BRAND_COLOR = "#94a3b8";
+// คอลัมน์สถานะที่ "ซ่อนเป็นค่าเริ่มต้น" บนบอร์ด (เจ้าของขอ: ยกเลิก + ทำตัวอย่างใบเดียว) — ผู้ใช้เปิดกลับได้ จำรายคน
+const DEFAULT_HIDDEN_COLS = ["cancelled", "state_8"];
 const DASHBOARD_LIMIT = 500;
 
 async function readApi<T extends { error: string | null }>(response: Response, fallbackMessage: string): Promise<T> {
@@ -248,6 +250,20 @@ export function DesignDashboard() {
       .then((j) => { const v = j?.value; if (v === "board" || v === "gallery") setViewMode(v); })
       .catch(() => {});
   }, []);
+  // คอลัมน์สถานะที่ซ่อนบนบอร์ด — จำรายคน (user_ui_prefs) · ยังไม่เคยตั้ง = ค่าเริ่มต้น DEFAULT_HIDDEN_COLS
+  const [hiddenCols, setHiddenCols] = useState<string[]>(DEFAULT_HIDDEN_COLS);
+  const [hideColsOpen, setHideColsOpen] = useState(false);
+  const hideColsAnchorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_hidden_cols").then((r) => r.json())
+      .then((j) => { const v = j?.value; if (Array.isArray(v)) setHiddenCols(v.map(String)); })
+      .catch(() => {});
+  }, []);
+  const saveHiddenCols = (next: string[]) => {
+    setHiddenCols(next);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_hidden_cols", value: next }) }).catch(() => {});
+  };
+  const toggleHiddenCol = (key: string) => saveHiddenCols(hiddenCols.includes(key) ? hiddenCols.filter((k) => k !== key) : [...hiddenCols, key]);
   const changeViewMode = (mode: "board" | "gallery") => {
     setViewMode(mode);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_view_mode", value: mode }) }).catch(() => {});
@@ -415,10 +431,14 @@ export function DesignDashboard() {
   const visibleTotal = selectedBrand ? selectedBrand.total : total;
   const loadedLimitNote = total > sheets.length ? `แสดงล่าสุด ${sheets.length.toLocaleString("th-TH")} จาก ${total.toLocaleString("th-TH")} งาน` : "ข้อมูลจากระบบจริง";
 
-  const boardColumns = statusColumns.map((column) => ({
+  const allBoardColumns = statusColumns.map((column) => ({
     ...column,
     sheets: filteredSheets.filter((sheet) => sheet.status === column.key),
   }));
+  // บอร์ด/แท็บสถานะมือถือ ใช้เฉพาะคอลัมน์ที่ไม่ได้ซ่อน · ที่ซ่อนไว้เปิดกลับได้จากปุ่ม 👁 (สถิติด้านบนยังนับทุกสถานะ)
+  const hiddenSet = new Set(hiddenCols);
+  const boardColumns = allBoardColumns.filter((c) => !hiddenSet.has(c.key));
+  const hiddenBoardColumns = allBoardColumns.filter((c) => hiddenSet.has(c.key));
   // ป้ายสถานะสำหรับมุมมองการ์ด (ไม่มีคอลัมน์ → โชว์สถานะเป็น badge บนการ์ด)
   const statusInfo = useMemo(() => {
     const m = new Map<string, { label: string; color: string }>();
@@ -886,6 +906,33 @@ export function DesignDashboard() {
                 {viewMode === "gallery" && !isPhone && (
                   <GalleryColumnsControl cols={galleryCols} onChange={setGalleryCols} className="ml-auto" />
                 )}
+                {/* ซ่อน/โชว์คอลัมน์สถานะบนบอร์ด (จำรายคน) — ค่าเริ่มต้นซ่อน ยกเลิก + ทำตัวอย่างใบเดียว */}
+                {viewMode === "board" && (
+                  <div className="relative" ref={hideColsAnchorRef}>
+                    <button type="button" onClick={() => setHideColsOpen((o) => !o)}
+                      title={hiddenBoardColumns.length ? `ซ่อนอยู่: ${hiddenBoardColumns.map((c) => c.label).join(", ")}` : "เลือกคอลัมน์สถานะที่จะโชว์บนบอร์ด"}
+                      className={`h-9 rounded-md border px-3 text-xs font-medium transition ${hiddenBoardColumns.length ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                      👁 {hiddenBoardColumns.length ? `ซ่อน ${hiddenBoardColumns.length} คอลัมน์` : "คอลัมน์"} ▾
+                    </button>
+                    <FloatingDropdown anchorRef={hideColsAnchorRef} open={hideColsOpen} onClose={() => setHideColsOpen(false)} minWidth={260} maxWidth={320}>
+                      <div className="rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xl">
+                        <div className="px-2 py-1 text-[11px] font-medium text-slate-500">คอลัมน์สถานะบนบอร์ด (ติ๊ก = โชว์)</div>
+                        {allBoardColumns.map((c) => (
+                          <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                            <input type="checkbox" checked={!hiddenSet.has(c.key)} onChange={() => toggleHiddenCol(c.key)} className="h-4 w-4" />
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+                            <span className="min-w-0 flex-1 truncate">{c.label}</span>
+                            <span className="text-[11px] text-slate-400">{c.sheets.length}</span>
+                          </label>
+                        ))}
+                        <div className="mt-1 flex gap-1 border-t border-slate-100 pt-1.5">
+                          <button type="button" onClick={() => saveHiddenCols([])} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">แสดงทั้งหมด</button>
+                          <button type="button" onClick={() => saveHiddenCols(DEFAULT_HIDDEN_COLS)} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">ค่าเริ่มต้น</button>
+                        </div>
+                      </div>
+                    </FloatingDropdown>
+                  </div>
+                )}
                 {/* สลับมุมมอง: บอร์ด Kanban ↔ การ์ดรูปใหญ่ (แกลเลอรี) — จำค่ารายคน */}
                 <div className={`flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 ${viewMode === "gallery" ? "" : "ml-auto"}`}>
                   {([["board", "🗂️ บอร์ด"], ["gallery", "🖼️ การ์ดรูปใหญ่"]] as const).map(([key, label]) => (
@@ -978,6 +1025,10 @@ export function DesignDashboard() {
                         >
                           <div data-gg-column-header className={`${isDesktop ? "sticky top-16 z-10" : ""} mb-3 rounded-lg border px-2 py-2 text-center shadow-sm`} style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%), #ffffff` }}>
                             <BrandSlot theme={brandTheme} id={wfIconSlotId(column.key)} w={96} size="w-7 h-7" className="absolute left-1 top-1" />
+                            {isDesktop && (
+                              <button type="button" onClick={() => toggleHiddenCol(column.key)} title={`ซ่อนคอลัมน์ "${column.label}" (เปิดกลับได้ที่ปุ่ม 👁)`}
+                                className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded text-[11px] text-slate-300 hover:bg-slate-100 hover:text-slate-600">✕</button>
+                            )}
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
                             <div className="text-[11px] text-slate-400">{column.sheets.length} งาน</div>
