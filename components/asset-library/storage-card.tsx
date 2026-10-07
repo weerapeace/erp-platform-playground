@@ -9,6 +9,7 @@ import { apiFetch } from "@/lib/api";
 import { formatBytes } from "@/lib/assets";
 import { useT } from "@/components/i18n";
 import { runBackgroundTask } from "@/lib/background-tasks";
+import { CanvasCleanupModal } from "./canvas-cleanup-modal";
 
 type Usage = {
   bucket: string;
@@ -28,6 +29,8 @@ const FOLDER_LABEL: Record<string, [string, string]> = {
   avatars: ["รูปโปรไฟล์", "Avatars"],
   "app-icons": ["ไอคอนแอป", "App icons"],
   "platform-icons": ["ไอคอนแพลตฟอร์ม", "Platform icons"],
+  canvassketch: ["รูปกระดาน (แคมเปญ/เทรนด์/บอร์ด)", "Board images"],
+  library: ["คลังกลาง (อัปโหลดเอง)", "Library uploads"],
   trash: ["ถังขยะ", "Trash"],
   "(root)": ["ไม่อยู่โฟลเดอร์", "No folder"],
 };
@@ -37,6 +40,7 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
   const [usage, setUsage] = useState<Usage | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);   // กางรายละเอียดรายโฟลเดอร์
+  const [cleanupOpen, setCleanupOpen] = useState(false);   // ป๊อปล้างรูปกระดานที่ไม่ได้ใช้
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,7 +84,13 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
         ) : (
           <span className="text-[11px] text-slate-400">{t("ยังไม่เคยนับ", "Not counted yet")}</span>
         )}
-        {canManage && <button type="button" onClick={recount} className="ml-auto text-[11px] text-slate-500 hover:text-violet-700 border border-slate-200 rounded px-2 py-0.5">🔄 {t("นับใหม่", "Recount")}</button>}
+        {canManage && (
+          <span className="ml-auto flex items-center gap-1.5">
+            <button type="button" onClick={() => setCleanupOpen(true)} title={t("รูปที่เคยวางบนกระดานแล้วลบออก ไฟล์ยังค้างใน R2 — ตรวจแล้วย้ายเข้าถังขยะ", "Images removed from boards still in R2 — check and move to trash")}
+              className="text-[11px] text-rose-600 hover:text-rose-700 border border-rose-200 bg-rose-50 rounded px-2 py-0.5">🧹 {t("ล้างรูปกระดานที่ไม่ได้ใช้", "Clean unused board images")}</button>
+            <button type="button" onClick={recount} className="text-[11px] text-slate-500 hover:text-violet-700 border border-slate-200 rounded px-2 py-0.5">🔄 {t("นับใหม่", "Recount")}</button>
+          </span>
+        )}
       </div>
       {usage?.truncated && <p className="mt-1 text-[10px] text-amber-600">⚠ {t("ไฟล์เยอะมาก — ตัวเลขนี้ยังนับไม่ครบทั้งหมด", "Very many files — this total is not complete")}</p>}
       {open && usage && (
@@ -95,6 +105,7 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
           ))}
         </div>
       )}
+      {cleanupOpen && <CanvasCleanupModal onClose={() => { setCleanupOpen(false); void load(); }} pushToast={pushToast} />}
     </div>
   );
 }

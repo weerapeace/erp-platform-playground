@@ -46,3 +46,28 @@ export async function r2KeyStillReferenced(
   }
   return false;
 }
+
+/**
+ * แบบหลายคีย์ทีเดียว (ใช้ตอนไล่หาไฟล์กำพร้าทั้งโฟลเดอร์) — คืนชุดคีย์ที่ "ยังมีคนอ้างอิง"
+ * @param opts.skipTables ตารางที่ไม่ต้องนับ (เช่น "assets" เมื่อผู้เรียกจะตรวจคลังกลางแยกเองว่ามีที่ใช้จริงไหม)
+ */
+export async function r2KeysReferencedBatch(
+  admin: Admin,
+  keys: string[],
+  opts?: { skipTables?: string[] },
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const list = Array.from(new Set(keys.map((k) => (k ?? "").trim()).filter(Boolean)));
+  if (!list.length) return out;
+  const skip = new Set(opts?.skipTables ?? []);
+  for (const ref of REF_COLUMNS) {
+    if (skip.has(ref.table)) continue;
+    for (let i = 0; i < list.length; i += 150) {
+      const chunk = list.slice(i, i + 150);
+      const { data, error } = await admin.from(ref.table).select(ref.column).in(ref.column, chunk);
+      if (error) break;                  // ตารางไม่มี/สิทธิ์ไม่ถึง → ข้ามตารางนี้
+      for (const row of (data ?? []) as unknown as Record<string, unknown>[]) { const v = row[ref.column]; if (typeof v === "string") out.add(v); }
+    }
+  }
+  return out;
+}
