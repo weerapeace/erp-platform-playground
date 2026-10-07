@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenContent, attachAssignees, validateContentFields } from "../shared";
+import { SELECT, flattenContent, attachAssignees, validateContentFields, PARENT_LINK_PLATFORMS } from "../shared";
 import { r2ImageUrl } from "@/lib/r2-image";
 
 // รูปหน้าปกของคอนเทนต์ (ให้การ์ดบนกระดานแคมเปญโชว์รูป) — ลำดับ: สื่อที่แนบ(รูป) → รูป SKU → รูปงานที่ผูก
@@ -58,7 +58,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const admin = supabaseAdmin();
   // ── ล็อกคอนเทนต์ที่ "เผยแพร่แล้ว" — แก้เนื้อหาหลักไม่ได้ (แก้ได้เฉพาะสถานะโพสต์/ลิงก์/โน้ต) จนกว่าจะย้อนสถานะ ──
   const LOCKED_WHEN_PUBLISHED = ["title", "brand_id", "campaign_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "discount_value", "discount_is_percent", "captions", "color_source"];
-  const { data: curC } = await admin.from("erp_creative_content").select("status").eq("id", id).maybeSingle();
+  const { data: curC } = await admin.from("erp_creative_content").select("status, parent_sku_id").eq("id", id).maybeSingle();
   const curStatus = (curC as { status?: string } | null)?.status ?? "";
   const unlocking = "status" in body && body.status !== "published";   // กำลังย้อนสถานะออกจากเผยแพร่ = ปลดล็อก
   if (curStatus === "published" && !unlocking) {
@@ -80,6 +80,30 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   }
 
+  // ลิงก์สินค้า → บันทึกกลับ Parent SKU (parent_skus_v2.shopee_url/lazada_url/tiktok_url) ให้คอนเทนต์ครั้งหน้าของสินค้าเดิมมีลิงก์ทันที
+  // เขียนเฉพาะแพลตฟอร์มที่คอนเทนต์นี้มีลิงก์ (ไม่ล้างค่าเดิมของแพลตฟอร์มที่ไม่ได้ส่งมา) · ค่าเท่าเดิมไม่เขียนซ้ำ
+  let parentLinksSynced: string[] = [];
+  if (Array.isArray(body.product_links)) {
+    const parentId = (typeof body.parent_sku_id === "string" && body.parent_sku_id) ? body.parent_sku_id : ((curC as { parent_sku_id?: string | null } | null)?.parent_sku_id ?? null);
+    if (parentId) {
+      const want: Record<string, string> = {};
+      for (const l of body.product_links) { const pf = String(l?.platform ?? "").toLowerCase(); const url = String(l?.url ?? "").trim(); if (url && (PARENT_LINK_PLATFORMS as readonly string[]).includes(pf) && !want[pf]) want[pf] = url; }
+      if (Object.keys(want).length) {
+        const { data: pr } = await admin.from("parent_skus_v2").select("shopee_url, lazada_url, tiktok_url").eq("id", parentId).maybeSingle();
+        const cur = (pr ?? {}) as Record<string, string | null>;
+        const upd: Record<string, string> = {};
+        for (const [pf, url] of Object.entries(want)) if ((cur[`${pf}_url`] ?? "") !== url) upd[`${pf}_url`] = url;
+        if (Object.keys(upd).length) {
+          const { error: pErr } = await admin.from("parent_skus_v2").update(upd).eq("id", parentId);
+          if (!pErr) {
+            parentLinksSynced = Object.keys(upd);
+            await writeAudit(admin, { action: "update", entityType: "parent_skus_v2", entityId: parentId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { changes: parentLinksSynced, source: "creative_content", content_id: id } });
+          }
+        }
+      }
+    }
+  }
+
   // แทนที่ captions ทั้งชุด (ถ้าส่งมา)
   if (Array.isArray(body.captions)) {
     await admin.from("erp_creative_content_captions").delete().eq("content_id", id);
@@ -91,7 +115,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const { data: fresh } = await admin.from("erp_creative_content").select(SELECT).eq("id", id).maybeSingle();
   const { data: caps2 } = await admin.from("erp_creative_content_captions").select("*").eq("content_id", id).order("sort_order", { ascending: true });
-  return NextResponse.json({ data: fresh ? { ...flattenContent(fresh as Record<string, unknown>), captions: caps2 ?? [] } : null, error: null });
+  return NextResponse.json({ data: fresh ? { ...flattenContent(fresh as Record<string, unknown>), captions: caps2 ?? [] } : null, parent_links_synced: parentLinksSynced, error: null });
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {

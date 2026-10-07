@@ -499,7 +499,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setD(detail); setStatus(detail.status); setScheduledAt(detail.scheduled_at ? detail.scheduled_at.slice(0, 16) : ""); setPublishedUrl(detail.published_url ?? "");
       setPostStatus(detail.post_status ?? {}); setPostedLinks(detail.posted_links ?? {}); setPlatformImages(detail.platform_images ?? {}); setPlatformFormats(detail.platform_formats ?? {});
       setAssignees((detail.assignees && detail.assignees.length ? detail.assignees : (detail.assignee_id ? [{ id: detail.assignee_id, name: detail.assignee_label ?? "" }] : [])).map((a) => ({ id: a.id, name: a.name } as UserPickerValue)));
-      setLinks(Array.isArray(detail.product_links) ? detail.product_links : []);
+      // ลิงก์สินค้า: ของคอนเทนต์เอง · ยังไม่มี → เติมจากที่เก็บไว้ที่ Parent SKU (บันทึกครั้งหน้าจะเขียนกลับ Parent ด้วย)
+      setLinks(Array.isArray(detail.product_links) && detail.product_links.length ? detail.product_links : (detail.parent_links ?? []));
       setDiscountValue(detail.discount_value != null ? String(detail.discount_value) : "");
       setDiscountPct(!!detail.discount_is_percent);
       setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price, fake_price: detail.sku_fake_price ?? null } : null);
@@ -972,7 +973,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   <div className="grid grid-cols-2 gap-2 items-start">
                     <div><label className="text-[11px] text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label>
                       <SkuPicker value={sku} onChange={(v) => { setSku(v); if (v?.parent_sku_id && parent?.id !== v.parent_sku_id) setParent({ id: v.parent_sku_id, code: v.parent_code ?? "", name: v.parent_name ?? "" }); }} /></div>
-                    <div><label className="text-[11px] text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
+                    <div>
+                      <div className="flex items-center justify-between h-4">
+                        <label className="text-[11px] text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label>
+                        {parent?.id && <button type="button" onClick={() => setOpenParentId(parent.id)} className="text-[11px] text-violet-700 hover:underline">↗ {t("เปิด drawer Parent", "Open Parent")}</button>}
+                      </div>
+                      <ParentSkuPicker value={parent} onChange={setParent} />
+                    </div>
                   </div>
                   <div>
                     <label className="text-[11px] text-slate-400">{t("แบรนด์", "Brand")}</label>
@@ -1106,6 +1113,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   </div>
                 ))}
                 <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
+                {parent && <p className="text-[11px] text-slate-400">🔗 {t(`ลิงก์ Shopee / Lazada / TikTok จะบันทึกกลับไปที่ Parent ${parent.code} ด้วย — คอนเทนต์ครั้งหน้าของสินค้านี้มีลิงก์ให้ทันที`, `Shopee / Lazada / TikTok links are saved back to Parent ${parent.code} — future content gets them automatically`)}</p>}
               </div>
             </CSection>)}
 

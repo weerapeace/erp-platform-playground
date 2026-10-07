@@ -18,6 +18,9 @@ export function validateContentFields(body: Record<string, unknown>): string | n
   return null;
 }
 
+/** แพลตฟอร์มที่ Parent SKU มีคอลัมน์เก็บลิงก์ร้าน (parent_skus_v2.<platform>_url) — ลิงก์สินค้าในคอนเทนต์จะบันทึกกลับเฉพาะชุดนี้ */
+export const PARENT_LINK_PLATFORMS = ["shopee", "lazada", "tiktok"] as const;
+
 export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, platform_formats, note,
   discount_value, discount_is_percent, color_source,
@@ -25,7 +28,7 @@ export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sk
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price),
-  parent:parent_skus_v2!parent_sku_id(code, name_th),
+  parent:parent_skus_v2!parent_sku_id(code, name_th, shopee_url, lazada_url, tiktok_url),
   task:erp_creative_tasks!task_id(title, task_no, cover_image_r2_key),
   assignee:user_profiles!assignee_id(display_name, username, email)`;
 
@@ -33,7 +36,7 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null; shop_channels?: { label: string; value: string }[] } | null;
   const c = (Array.isArray(r.campaign) ? r.campaign[0] : r.campaign) as { name?: string } | null;
   const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string; color?: string | null; color_th?: string | null; list_price?: number | null; fake_price?: number | null } | null;
-  const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string } | null;
+  const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string; shopee_url?: string | null; lazada_url?: string | null; tiktok_url?: string | null } | null;
   const tk = (Array.isArray(r.task) ? r.task[0] : r.task) as { title?: string; task_no?: string; cover_image_r2_key?: string | null } | null;
   const asg = (Array.isArray(r.assignee) ? r.assignee[0] : r.assignee) as { display_name?: string | null; username?: string | null; email?: string | null } | null;
   const out: Record<string, unknown> = { ...r };
@@ -47,6 +50,8 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   out.brand_shop_channels = b?.shop_channels ?? [];
   out.parent_sku_code = par?.code ?? null;
   out.parent_sku_name = par?.name_th ?? null;
+  // ลิงก์ร้านที่เก็บไว้ที่ Parent SKU (คอลัมน์ shopee_url/lazada_url/tiktok_url) — drawer ใช้เติม "ลิงก์สินค้า" ให้เมื่อคอนเทนต์ยังไม่มี
+  out.parent_links = par ? PARENT_LINK_PLATFORMS.map((pf) => ({ platform: pf, url: (par[`${pf}_url` as "shopee_url"] ?? "").trim() })).filter((l) => l.url) : [];
   out.campaign_label = c?.name ?? null;
   out.sku_code = s?.code ?? null;
   out.sku_name = s?.name_th ?? null;
