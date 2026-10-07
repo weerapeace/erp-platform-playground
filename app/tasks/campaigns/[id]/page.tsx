@@ -15,7 +15,7 @@ import { StandaloneShell } from "@/components/standalone-shell";
 import { apiFetch } from "@/lib/api";
 import { suppressUnload } from "@/lib/canvas-unload-guard";
 import { ERPModal } from "@/components/modal";
-import { ERPInput } from "@/components/form";
+import { ERPInput, ERPDateTime24 } from "@/components/form";
 import { useAuth, usePermission } from "@/components/auth";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
@@ -999,7 +999,7 @@ export default function CampaignCanvasPage() {
           <div><label className="text-xs text-slate-400">{t("ชื่อคอนเทนต์", "Content title")}</label><input value={cForm.title} onChange={(e) => setCForm((f) => ({ ...f, title: e.target.value }))} placeholder={t("เช่น โพสต์เปิดตัวสินค้าใหม่", "e.g. New product launch post")} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs text-slate-400">{t("ประเภทโพสต์", "Post type")}</label><select value={cForm.post_type} onChange={(e) => setCForm((f) => ({ ...f, post_type: e.target.value }))} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm">{POST_TYPES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}</select></div>
-            <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Scheduled time")}</label><input type="datetime-local" value={cForm.scheduled_at} onChange={(e) => setCForm((f) => ({ ...f, scheduled_at: e.target.value }))} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" /></div>
+            <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Scheduled time")}</label><ERPDateTime24 value={cForm.scheduled_at} onChange={(v) => setCForm((f) => ({ ...f, scheduled_at: v }))} /></div>
           </div>
           <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platforms")}</label>
             <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = cForm.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setCForm((f) => ({ ...f, platforms: on ? f.platforms.filter((x) => x !== p.value) : [...f.platforms, p.value] }))} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>

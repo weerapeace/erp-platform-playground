@@ -8,14 +8,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
  * <InfoHint>เนื้อหาอธิบาย (รองรับ JSX)</InfoHint>
  *   side="left"  → popup ชิดซ้าย (ค่าเริ่มต้น)  | side="right" → ชิดขวา (กันล้นขอบเมื่อปุ่มอยู่ทางขวา)
  */
-export function InfoHint({ children, label, side = "left", className = "" }: {
+export function InfoHint({ children, label, side = "left", className = "", hover = true, icon }: {
   children: ReactNode;
   label?: string;
   side?: "left" | "right";
   className?: string;
+  hover?: boolean;      // เอาเมาส์ชี้แล้วเปิด (ค่าเริ่มต้น) · มือถือ/ทัชใช้แตะเหมือนเดิม
+  icon?: ReactNode;     // ไอคอนปุ่ม (ค่าเริ่มต้น "i")
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onEnter = () => { if (!hover) return; if (hoverTimer.current) clearTimeout(hoverTimer.current); setOpen(true); };
+  const onLeave = () => { if (!hover) return; hoverTimer.current = setTimeout(() => setOpen(false), 150); };   // หน่วงนิดให้เลื่อนเมาส์เข้า popup ได้
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
@@ -25,11 +30,11 @@ export function InfoHint({ children, label, side = "left", className = "" }: {
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [open]);
   return (
-    <span ref={ref} className={`relative inline-flex align-middle ${className}`}>
+    <span ref={ref} className={`relative inline-flex align-middle ${className}`} onMouseEnter={onEnter} onMouseLeave={onLeave}>
       <button type="button" aria-label={label || "ข้อมูลเพิ่มเติม"} aria-expanded={open}
         onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen((o) => !o); }}
         className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none transition-colors ${open ? "border-violet-400 bg-violet-50 text-violet-600" : "border-slate-300 text-slate-400 hover:text-violet-600 hover:border-violet-300"}`}>
-        i
+        {icon ?? "i"}
       </button>
       {open && (
         <span onClick={(e) => e.stopPropagation()}

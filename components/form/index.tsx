@@ -126,6 +126,51 @@ export function ERPInput({ error, leftIcon, className = "", ...props }: ERPInput
   );
 }
 
+// ---- DateTime (24 ชม.) ----
+// <input type="datetime-local"> โชว์ AM/PM ตามภาษาของเบราว์เซอร์ บังคับไม่ได้ → แยกเป็น วันที่ + ช่องเวลา HH:MM (24 ชม.)
+// ค่าเข้า/ออกยังเป็น "YYYY-MM-DDTHH:mm" เหมือนเดิม (เปลี่ยนตัวกรอกอย่างเดียว) · พิมพ์ 1800 / 18.00 / 18:0 → 18:00 ให้เอง
+export function ERPDateTime24({ value, onChange, defaultTime = "10:00", className = "", disabled }: {
+  value: string; onChange: (v: string) => void; defaultTime?: string; className?: string; disabled?: boolean;
+}) {
+  const date = (value ?? "").slice(0, 10);
+  const time = (value ?? "").length >= 16 ? value.slice(11, 16) : "";
+  const [timeText, setTimeText] = useState(time);
+  useEffect(() => { setTimeText(time); }, [time]);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const commitTime = (raw: string) => {
+    const txt = raw.trim();
+    if (!txt) { setTimeText(time); return; }
+    // รับทั้ง "18:00" "18.00" "1800" "930" "9" → 18:00 / 09:30 / 09:00
+    let h = -1, mi = -1;
+    if (/^\d+$/.test(txt)) {
+      if (txt.length <= 2) { h = Number(txt); mi = 0; }
+      else if (txt.length === 3) { h = Number(txt[0]); mi = Number(txt.slice(1)); }
+      else if (txt.length === 4) { h = Number(txt.slice(0, 2)); mi = Number(txt.slice(2)); }
+    } else {
+      const m = /^(\d{1,2})[:.](\d{1,2})$/.exec(txt);
+      if (m) { h = Number(m[1]); mi = Number(m[2]); }
+    }
+    if (h < 0 || mi < 0) { setTimeText(time); return; }
+    if (h > 23 || mi > 59) { setTimeText(time); return; }
+    const t = `${pad(h)}:${pad(mi)}`;
+    setTimeText(t);
+    if (date) onChange(`${date}T${t}`);
+  };
+  return (
+    <div className={`flex items-center gap-2 ${className}`}>
+      <input type="date" value={date} disabled={disabled}
+        onChange={(e) => onChange(e.target.value ? `${e.target.value}T${time || defaultTime}` : "")}
+        className="flex-1 min-w-0 h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400" />
+      <input type="text" inputMode="numeric" value={timeText} disabled={disabled || !date} placeholder="HH:MM"
+        onChange={(e) => setTimeText(e.target.value)} onBlur={(e) => commitTime(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+        title="เวลา 24 ชั่วโมง เช่น 18:00"
+        className="w-[76px] h-9 px-2 text-sm text-center tabular-nums border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400" />
+      <span className="text-xs text-slate-400 shrink-0">น.</span>
+    </div>
+  );
+}
+
 // ---- Textarea ----
 
 export interface ERPTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {

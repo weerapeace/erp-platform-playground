@@ -11,7 +11,8 @@ import { useSWRLite } from "@/lib/swr-lite";
 import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from "@/lib/caption-template";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
-import { ERPInput, ERPTextarea } from "@/components/form";
+import { ERPInput, ERPTextarea, ERPDateTime24 } from "@/components/form";
+import { InfoHint } from "@/components/info-hint";
 import { SkuPicker, ParentSkuPicker, UserPicker } from "@/components/pickers";
 import type { SkuPickerValue, ParentSkuPickerValue, UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
@@ -952,7 +953,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">🗓 {t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
                 <button type="button" onClick={() => setRecOpen(true)} className="text-[11px] text-violet-700 hover:underline">⚙️ {t("เวลาแนะนำ", "Suggested times")}</button>
               </div>
-              <div className="mt-1.5"><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
+              <div className="mt-1.5"><ERPDateTime24 value={scheduledAt} onChange={setScheduledAt} /></div>
               {schedRec && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
@@ -1608,9 +1609,19 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
     <div className={`border rounded-lg bg-white ${open ? "border-violet-200 shadow-sm" : "border-slate-200"}`}>
       {/* ── หัวแถว: กดเพื่อกาง/พับ · ตอนพับเห็นครบว่าเขียนแล้วยัง มีรูปกี่รูป โพสต์แล้วยัง ── */}
       <div className="flex items-center gap-2 px-2.5 py-2">
-        <button type="button" onClick={onToggle} className="flex items-center gap-2 min-w-0 flex-1 text-left">
+        <button type="button" onClick={onToggle} className="flex items-center gap-2 shrink-0 text-left">
           <span className="text-[10px] text-slate-400 w-3 shrink-0">{open ? "▲" : "▼"}</span>
           <PlatformChip code={cap.platform} />
+        </button>
+        {/* ⓘ คำแนะนำประจำแพลตฟอร์ม (เอาเมาส์ชี้/แตะ) — ข้อความตั้งที่ ⚙️ ตั้งค่าแพลตฟอร์ม → "คำแนะนำ" */}
+        <InfoHint label={t("คำแนะนำสำหรับแพลตฟอร์มนี้", "Tips for this platform")} className="shrink-0 -ml-1 mr-1">
+          {(setting?.note ?? "").trim()
+            ? <span className="whitespace-pre-wrap">💡 <b className="text-slate-700">{platformLabel(cap.platform)}</b><br />{setting?.note}</span>
+            : <span>{t("ยังไม่ได้ตั้งคำแนะนำสำหรับ", "No tips set for")} {platformLabel(cap.platform)}<br />
+                {onOpenSettings && <button type="button" onClick={onOpenSettings} className="mt-1 text-violet-700 hover:underline">⚙️ {t("ตั้งคำแนะนำ (ตั้งค่าแพลตฟอร์ม)", "Set tips (platform settings)")}</button>}
+              </span>}
+        </InfoHint>
+        <button type="button" onClick={onToggle} className="flex items-center gap-2 min-w-0 flex-1 text-left">
           {!open && (
             <>
               <span className={`text-xs truncate min-w-0 flex-1 ${snippet ? "text-slate-600" : "text-slate-300 italic"}`}>
@@ -2000,7 +2011,7 @@ function PlatformSettingsModal({ platforms, templates, settings, onClose, onSave
               <label className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" checked={s.use_caption !== false} onChange={(e) => setP(p.value, { use_caption: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("ใช้แคปชั่น", "Use caption")}</label>
               <label className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" checked={s.use_hashtags !== false} onChange={(e) => setP(p.value, { use_hashtags: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("ใช้แฮชแท็ก", "Use hashtags")}</label>
             </div>
-            <label className="text-xs text-slate-500 block mt-2">{t("โน้ตบอกคนทำงาน", "Note for the worker")}
+            <label className="text-xs text-slate-500 block mt-2">💡 {t("คำแนะนำ/ข้อควรระวัง — โชว์เป็นปุ่ม ⓘ บนการ์ดแพลตฟอร์ม (เอาเมาส์ชี้)", "Tips — shown as ⓘ on the platform card (hover)")}
               <textarea value={s.note ?? ""} onChange={(e) => setP(p.value, { note: e.target.value })} rows={2} placeholder={t("เช่น ใส่รูป 1:1 อย่างน้อย 5 รูป + วิดีโอ 15 วิ", "e.g. 5+ square images + 15s video")} className="mt-0.5 w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
             </label>
           </div>

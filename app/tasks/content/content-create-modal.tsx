@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
-import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
+import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea, ERPDateTime24 } from "@/components/form";
 import { SkuPicker, ParentSkuPicker, type SkuPickerValue, type ParentSkuPickerValue } from "@/components/pickers";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
@@ -191,7 +191,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => pickBrand(e.target.value, true)} /></ERPFormField>
         <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
         <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")} span={2}>
-          <ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} />
+          <ERPDateTime24 value={form.scheduled_at} onChange={(v) => upd({ scheduled_at: v })} />
           {schedRec && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
