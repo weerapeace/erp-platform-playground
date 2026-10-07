@@ -21,6 +21,7 @@ import { resolveEntity, applyListFilters, friendlyDbError, type ColFilter } from
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { getFieldAccess } from "@/lib/field-permissions";
+import { isGeneratedColumn, generatedHint } from "@/lib/generated-columns";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,10 +58,19 @@ export async function POST(
   const { readonlyCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
   const readonlySet = new Set(readonlyCols);
 
+  // คอลัมน์ที่ DB คำนวณเอง (เช่น color_platform_en) ส่งไป Postgres จะปฏิเสธทั้งคำสั่ง → ตัดออก + จำไว้บอกผู้ใช้
+  const droppedGenerated = new Set<string>();
   const sanitize = (obj: Record<string, unknown>) => {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj ?? {})) if (SAFE.test(k) && !BLOCKED_KEYS.has(k) && !readonlySet.has(k)) out[k] = v;
+    for (const [k, v] of Object.entries(obj ?? {})) {
+      if (isGeneratedColumn(k)) { droppedGenerated.add(k); continue; }
+      if (SAFE.test(k) && !BLOCKED_KEYS.has(k) && !readonlySet.has(k)) out[k] = v;
+    }
     return out;
+  };
+  const generatedOnlyError = () => {
+    const col = [...droppedGenerated][0];
+    return NextResponse.json({ error: `แก้ช่อง "${col}" ตรงนี้ไม่ได้ — ${generatedHint(col)}` }, { status: 400 });
   };
 
   // ---- โหมด batch ราย id: รับ edits[] (แต่ละแถวมีค่าของตัวเอง) → จัดกลุ่มแถวที่ค่าเหมือนกัน → UPDATE ทีละกลุ่ม ----
@@ -80,6 +90,7 @@ export async function POST(
       g.ids.push(String(e.id));
       groups.set(key, g);
     }
+    if (groups.size === 0 && droppedGenerated.size > 0) return generatedOnlyError();
     let affected2 = 0;
     for (const g of groups.values()) {
       for (let i = 0; i < g.ids.length; i += 500) {
@@ -98,10 +109,8 @@ export async function POST(
   }
 
   // sanitize changes (กัน key อันตราย + คอลัมน์ที่ไม่มีสิทธิ์แก้)
-  const changes: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(body.changes ?? {})) {
-    if (SAFE.test(k) && !BLOCKED_KEYS.has(k) && !readonlySet.has(k)) changes[k] = v;
-  }
+  const changes: Record<string, unknown> = sanitize(body.changes ?? {});
+  if (Object.keys(changes).length === 0 && droppedGenerated.size > 0) return generatedOnlyError();
   if (Object.keys(changes).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลที่จะแก้ (หรือคุณไม่มีสิทธิ์แก้ฟิลด์ที่เลือก)" }, { status: 400 });
 
   const admin = supabaseAdmin();

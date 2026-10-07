@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback, useRef, useMemo, type ReactNode } fro
 import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { isGeneratedColumn, generatedHint } from "@/lib/generated-columns";
 import { tr } from "@/lib/lang";
 import { ImageInput } from "@/components/image-input";
 import { CopyButton } from "@/components/copy-button";
@@ -995,7 +996,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   // ---- inline edit + flash fill (ตารางลูก) ----
   const canEditRows = !!configurable;
-  const isEditableCol = (f: string) => canEditRows && !relCfgByField[f] && ["text", "number", "currency"].includes(typeByField[f] ?? "text");
+  // ช่องที่ DB คำนวณให้เอง (เช่น Color Platform [TH]/[EN]) แก้ตรงไม่ได้ — ปล่อยเป็นอ่านอย่างเดียว + tooltip บอกให้แก้ที่ต้นทาง
+  const isEditableCol = (f: string) => canEditRows && !relCfgByField[f] && !isGeneratedColumn(f) && ["text", "number", "currency"].includes(typeByField[f] ?? "text");
 
   // ลากรูปวางที่แถวลูก → อัปเข้าคลังรูปของลูกตัวนั้น (entity_type = ตารางจริง เช่น skus_v2) + ตั้งรูปปกถ้ายังว่าง
   // เปิดเฉพาะโหมดแก้ไข + ลูกมีฟิลด์รูป (imageField) เท่านั้น
@@ -1571,7 +1573,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           return (
             <td key={f}
               onClick={editable ? (e) => { e.stopPropagation(); setEditCell({ rowId: String(r.id), field: f }); setEditVal(r[f] == null ? "" : String(r[f])); } : undefined}
-              className={`py-1.5 text-slate-600 ${isNumCol(f) ? "px-1.5" : "px-2"} whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
+              title={isGeneratedColumn(f) ? `🔒 ${generatedHint(f)}` : undefined}
+              className={`py-1.5 text-slate-600 ${isNumCol(f) ? "px-1.5" : "px-2"} whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : isGeneratedColumn(f) && canEditRows ? "cursor-help text-slate-400" : ""}`}>
               {/* ปุ่มคัดลอกในทุกช่องข้อความที่มีค่า (เดิม hardcode เฉพาะ color_th → ช่องคำนวณอย่าง
                    Color Platform [TH]/[EN] ที่ตั้งเพิ่มทีหลังจึงไม่มีปุ่มให้ก๊อป) · ช่องตัวเลข/relation ไม่ต้อง */}
               {!isNumCol(f) && !isRel && cellValue(r, f) != null && String(cellValue(r, f) ?? "") !== ""

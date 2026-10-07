@@ -97,21 +97,9 @@ export function friendlyDbError(msg: string): string {
  * (เคสจริง: ก๊อป SKU แล้วเด้ง 'cannot insert a non-DEFAULT value into column "color_platform_th"')
  * ของกลาง: ตัดออกทุกครั้งก่อน insert/update ทุกโมดูล
  */
-const GENERATED_COLS = new Set([
-  "color_platform_th", "color_platform_en",   // skus_v2 — คำนวณจาก color/color_th + รหัส
-  "price_thb",                                 // parent_sku_supply_data — คำนวณจากราคาหยวน
-  "owner_key", "search_vector",
-]);
-
-/** ตัดคอลัมน์คำนวณอัตโนมัติออกจาก payload (ถ้ามี) */
-export function stripGenerated(payload: Record<string, unknown>): Record<string, unknown> {
-  let hit = false;
-  for (const k of Object.keys(payload)) if (GENERATED_COLS.has(k)) { hit = true; break; }
-  if (!hit) return payload;
-  const clean: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(payload)) if (!GENERATED_COLS.has(k)) clean[k] = v;
-  return clean;
-}
+// รายชื่อคอลัมน์ย้ายไปของกลาง lib/generated-columns (หน้าจอใช้ร่วมได้) — คง export ชื่อเดิมไว้ให้ไฟล์ที่ import อยู่
+import { stripGenerated } from "@/lib/generated-columns";
+export { stripGenerated };
 
 /**
  * เผื่อมีคอลัมน์คำนวณตัวใหม่ที่ยังไม่อยู่ในรายการข้างบน — อ่านชื่อคอลัมน์จากข้อความ error
