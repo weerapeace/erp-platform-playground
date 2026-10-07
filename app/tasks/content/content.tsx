@@ -39,7 +39,9 @@ import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useBackClose } from "@/lib/use-back-close";
+import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
+import { useDragReorder, moveItem } from "@/components/sortable-list";
+import { getBrandPlatforms } from "./brand-platforms-modal";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
@@ -414,8 +416,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [postModal, setPostModal] = useState<{ platform: string; captionText: string } | null>(null);   // ป๊อปอัปยืนยันก่อนโพสต์
   const [assignees, setAssignees] = useState<UserPickerValue[]>([]);   // ผู้รับผิดชอบคอนเทนต์ (หลายคน m2m)
   const [saving, setSaving] = useState(false);
-  // ปุ่มย้อนกลับ (เบราว์เซอร์/ปัดบนแท็บเล็ต-มือถือ) = ปิด drawer นี้ ไม่หลุดออกจากหน้า (ของกลาง)
-  useBackClose(true, onClose, "content-drawer");
+  // ปุ่มย้อนกลับ (เบราว์เซอร์/ปัดบนแท็บเล็ต) = ปิด "ชั้นบนสุด" ทีละชั้น — ใช้สแต็กกลาง lib/drawer-history ร่วมกับ MasterRecordDrawer
+  // (เดิมใช้ useBackClose ที่ฟัง popstate แยกต่างหาก → เปิด drawer สินค้าซ้อนแล้วปิด = คอนเทนต์ปิดตามไปด้วย)
+  const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
+  const histRef = useRef<DrawerHistoryHandle | null>(null);
+  useEffect(() => { const h = pushDrawerHistory(() => onCloseRef.current()); histRef.current = h; return () => h.dispose(); }, []);
+  const requestClose = useCallback(() => { if (histRef.current) histRef.current.requestClose(); else onCloseRef.current(); }, []);
+  // ป๊อปเพิ่ม/ลบแพลตฟอร์มของคอนเทนต์นี้
+  const [platOpen, setPlatOpen] = useState(false);
+  const [platSel, setPlatSel] = useState<string[]>([]);
+  const [platSaving, setPlatSaving] = useState(false);
+  // ลบไฟล์ที่อัปเองจากคลังรูป (ยืนยันก่อน)
+  const [delAtt, setDelAtt] = useState<{ id: string; label: string } | null>(null);
   // แม่แบบ + ส่วนลด
   const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
   const [shopChannels, setShopChannels] = useState<ShopChannel[]>([]);
@@ -614,6 +626,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     for (const im of taskMedia.images) if (im.key && !seen.has(im.key)) { seen.add(im.key); out.push({ key: im.key, label: im.label ?? null, type: "image" }); }
     return out;
   })();
+  // ลำดับรูปในคลัง (ลากสลับ) — เก็บใน platform_images ภายใต้คีย์พิเศษ "_order" (ไม่ใช่รหัสแพลตฟอร์ม ตัวอ่านรายแพลตฟอร์มไม่เห็น) → ไม่ต้องเพิ่มคอลัมน์
+  const mediaOrder = (platformImages._order as string[] | undefined) ?? [];
+  if (mediaOrder.length) postImages.sort((a, b) => { const ia = mediaOrder.indexOf(a.key), ib = mediaOrder.indexOf(b.key); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
+  const reorderMedia = (from: number, to: number) => {
+    const keys = moveItem(postImages.map((m) => m.key), from, to);
+    setPlatformImages((prev) => { const next = { ...prev, _order: keys }; void updateContent(contentId, { platform_images: next }).catch((e) => pushToast("error", (e as Error).message)); return next; });
+  };
+  const mediaDrag = useDragReorder(reorderMedia);
+  const platformImageEntries = Object.entries(platformImages).filter(([k]) => k !== "_order");   // ใช้นับว่ารูปถูกเลือกกี่แพลตฟอร์ม
   const mediaTypeOf = (k: string): "image" | "video" => postImages.find((m) => m.key === k)?.type ?? "image";
   const contentImageKeys = attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => a.r2_key as string);
 
@@ -839,12 +860,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [deleting, setDeleting] = useState(false);
   const doDelete = async () => {
     setDeleting(true);
-    try { await deleteContent(contentId); pushToast("success", t("ลบคอนเทนต์แล้ว", "Content deleted")); onDeleted?.(contentId); onChanged(); onClose(); }
+    try { await deleteContent(contentId); pushToast("success", t("ลบคอนเทนต์แล้ว", "Content deleted")); onDeleted?.(contentId); onChanged(); requestClose(); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setDeleting(false); setConfirmDel(false); }
   };
 
-  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
+  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={requestClose} /><div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
 
   const contentPlatforms = d.platforms ?? [];
   const brandLabel = brands.find((b) => b.id === brandId)?.name ?? null;   // ชื่อแบรนด์ที่เลือกสด ๆ (ให้โมดอลตั้งค่าแคปชั่น/แฮชแท็กตามแบรนด์นี้)
@@ -853,7 +874,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const totalCount = caps.filter((c) => (postStatus[c.platform] ?? "todo") !== "skip").length;
   const schedLabel = scheduledAt ? `${new Date(scheduledAt).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} · ${scheduledAt.slice(11, 16)}` : null;
   const hasProduct = !!(sku || parent);
-  const productCover = sku?.image_url ?? parent?.image_url ?? d.cover_image_url ?? null;
+  const productCover = sku?.image_url ?? parent?.image_url ?? d.parent_sku_image_url ?? d.cover_image_url ?? null;
   const discountPctLabel = discountAmt != null && fakeVal ? Math.round((discountAmt / fakeVal) * 100) : null;
   const taskKeySet = new Set(taskMedia.images.map((im) => im.key));
   const lbImages = postImages.filter((m) => m.type === "image");   // รูปที่กดดูเต็มจอได้ (ไม่รวมวิดีโอ)
@@ -862,15 +883,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/20 z-40" onClick={requestClose} />
       <div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         <div className="h-1 shrink-0" style={{ background: accentCss(dth) }} />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0">
             {/* ดับเบิลคลิกชื่อ = แก้ชื่อได้ทันที (Enter/คลิกนอกช่อง = บันทึก · Esc = ยกเลิก) */}
             {titleEdit === null ? (
-              <h3 onDoubleClick={() => setTitleEdit(d.title ?? "")} title={t("ดับเบิลคลิกเพื่อแก้ชื่อ", "Double-click to rename")}
-                className="text-base font-semibold text-slate-900 truncate cursor-text hover:bg-slate-50 rounded px-1 -mx-1">{d.title}</h3>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <h3 onDoubleClick={() => setTitleEdit(d.title ?? "")} title={t("ดับเบิลคลิกเพื่อแก้ชื่อ", "Double-click to rename")}
+                  className="text-base font-semibold text-slate-900 truncate cursor-text hover:bg-slate-50 rounded px-1 -mx-1">{d.title}</h3>
+                <button type="button" onClick={() => setTitleEdit(d.title ?? "")} title={t("แก้ชื่อคอนเทนต์", "Rename")} className="shrink-0 h-6 w-6 rounded text-slate-400 hover:text-violet-700 hover:bg-violet-50 text-xs">✏️</button>
+              </div>
             ) : (
               <input autoFocus value={titleEdit} onChange={(e) => setTitleEdit(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } if (e.key === "Escape") { e.preventDefault(); setTitleEdit(null); } }}
@@ -910,7 +934,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             )}
             <div className="flex items-center gap-1">
               <DrawerThemeButton theme={dth} update={dthUpdate} sections={CONTENT_SECTIONS} />
-              <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+              <button onClick={requestClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
             </div>
           </div>
         </div>
@@ -1055,22 +1079,24 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     <div className="grid grid-cols-4 gap-1.5">
                       {postImages.slice(0, mediaAdd ? postImages.length : 8).map((im) => {
                         const src = taskMedia.images.find((x) => x.key === im.key); const isTask = taskKeySet.has(im.key); const bd = src ? tmBadge(src.status) : null;
-                        const usedBy = Object.values(platformImages).filter((arr) => arr.includes(im.key)).length;
+                        const usedBy = platformImageEntries.filter(([, arr]) => arr.includes(im.key)).length;
                         const lbIdx = lbImages.findIndex((x) => x.key === im.key);
+                        const ownAtt = attachments.find((a) => a.r2_key === im.key || a.url === im.key);   // ไฟล์ที่อัปเอง = ลบได้
+                        const gi = postImages.indexOf(im);
                         return (
-                          <div key={im.key} className="relative group aspect-square">
+                          <div key={im.key} {...mediaDrag.rowProps(gi)} {...mediaDrag.handleProps(gi)} title={t("ลากเพื่อสลับตำแหน่ง", "Drag to reorder")}
+                            className={`relative group aspect-square cursor-grab active:cursor-grabbing ${mediaDrag.rowCls(gi)}`}>
                             {im.type === "video"
                               ? <div className="w-full h-full rounded-lg border border-slate-200 bg-slate-800 text-white flex items-center justify-center text-lg" title={im.label ?? ""}>🎬</div>
                               // eslint-disable-next-line @next/next/no-img-element
                               : <img src={r2ImageUrl(im.key, 240) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(lbIdx)} title={`${im.label ?? ""}${bd ? ` · ${bd.label}` : ""}`} className="w-full h-full object-cover rounded-lg border border-slate-200 cursor-zoom-in" />}
                             <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${isTask ? (bd?.cls ?? "bg-slate-400") : "bg-violet-500"}`}>{isTask ? t("งาน", "task") : t("อัปเอง", "own")}</span>
                             {usedBy > 0 && <span className="absolute bottom-0.5 right-0.5 text-[8px] bg-emerald-600 text-white px-1 py-px rounded" title={t(`เลือกใช้ใน ${usedBy} แพลตฟอร์ม`, `Used by ${usedBy} platform(s)`)}>✓{usedBy}</span>}
-                            {im.type !== "video" && (
-                              <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
-                                <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>
-                                <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>
-                              </div>
-                            )}
+                            <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
+                              {im.type !== "video" && <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>}
+                              {im.type !== "video" && <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>}
+                              {ownAtt && <button onClick={(e) => { e.stopPropagation(); setDelAtt({ id: ownAtt.id, label: ownAtt.file_name ?? ownAtt.label ?? im.key }); }} title={t("ลบไฟล์นี้ (เฉพาะที่อัปเอง)", "Delete this file (own uploads only)")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-rose-600 text-[10px] shadow hover:bg-rose-50">✕</button>}
+                            </div>
                           </div>
                         ); })}
                       {!mediaAdd && postImages.length > 8 && (
@@ -1091,7 +1117,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   </div>
                   {mediaAdd && (
                     <div className="mt-3 pt-3 border-t border-slate-100">
-                      <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onDelete={onDelAttachment} pushToast={pushToast} />
+                      <ContentAttachments attachments={attachments} hideImageList onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onDelete={onDelAttachment} pushToast={pushToast} />
                     </div>
                   )}
                 </>
@@ -1144,6 +1170,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   label: openPlats.size === caps.length ? t("⊟ พับทั้งหมด", "⊟ Collapse all") : t("⊞ กางทั้งหมด", "⊞ Expand all"),
                   onClick: () => setOpenPlats(openPlats.size === caps.length ? new Set() : new Set(caps.map((c) => c.platform))),
                 }] : []),
+                { key: "platforms_edit", label: `🏬 ${t("เพิ่ม/ลบแพลตฟอร์ม", "Add/remove platforms")}`, onClick: () => { setPlatSel(contentPlatforms); setPlatOpen(true); } },
                 { key: "copy_prompt", label: `📋 ${t("คัดลอกพรอมต์", "Copy prompt")}`, onClick: copyPrompt },
                 { key: "prompt_cfg", label: `✍️ ${t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}`, onClick: () => setCfgOpen(true) },
                 { key: "platform_cfg", label: `⚙️ ${t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}`, onClick: () => setPsOpen(true) },
@@ -1151,7 +1178,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 { key: "hashtags", label: `🏷 ${t("คลังแฮชแท็ก", "Hashtag library")}`, onClick: () => setHashOpen(true) },
               ]} />
             </div>
-            {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
+            {caps.length === 0 ? (
+              <div className="text-sm text-slate-400 italic flex items-center gap-2 flex-wrap">{t("ยังไม่ได้เลือกแพลตฟอร์ม", "No platforms selected")}
+                <button type="button" onClick={() => { setPlatSel(contentPlatforms); setPlatOpen(true); }} className="not-italic h-8 px-3 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">🏬 {t("เลือกแพลตฟอร์ม", "Choose platforms")}</button>
+              </div>
+            ) : (
               <div className="space-y-1.5">
                 {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
                   connInfo={c.platform === "facebook"
@@ -1175,11 +1206,56 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             ...(!d.is_template ? [{ label: `💾 ${t("บันทึกเป็นเทมเพลต", "Save as template")}`, onClick: saveAsTemplate }] : []),
             { label: `🗑 ${t("ลบคอนเทนต์นี้", "Delete this content")}`, onClick: () => (onDelete ? onDelete(d) : setConfirmDel(true)) },
           ]} />
-          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
+          <button onClick={requestClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={saving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </div>
       </div>
 
+      {/* เพิ่ม/ลบแพลตฟอร์มของคอนเทนต์นี้ — เพิ่ม = สร้างช่องแคปชั่น (เติมแฮชแท็กเริ่มต้น) · ลบ = เอาช่องแคปชั่นออก (เตือนถ้ามีข้อความแล้ว) */}
+      {platOpen && (() => {
+        const removed = contentPlatforms.filter((p) => !platSel.includes(p));
+        const removedWithText = removed.filter((p) => { const c = caps.find((x) => x.platform === p); return !!(c?.caption?.trim() || c?.hashtags?.trim()); });
+        const added = platSel.filter((p) => !contentPlatforms.includes(p));
+        const savePlatforms = async () => {
+          setPlatSaving(true);
+          try {
+            const nextCaps = platSel.map((p) => caps.find((c) => c.platform === p) ?? { platform: p, caption: "", hashtags: defaultHashtags(capCfg, brandId, p) });
+            await updateContent(contentId, { platforms: platSel, captions: nextCaps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })) });
+            setCaps(nextCaps); setD((x) => (x ? { ...x, platforms: platSel } : x));
+            setOpenPlats((s) => { const n = new Set(s); for (const p of added) n.add(p); for (const p of removed) n.delete(p); return n; });
+            pushToast("success", t(`อัปเดตแพลตฟอร์มแล้ว (${platSel.length})`, `Platforms updated (${platSel.length})`)); setPlatOpen(false); onChanged();
+          } catch (e) { pushToast("error", (e as Error).message); } finally { setPlatSaving(false); }
+        };
+        return (
+          <ERPModal open onClose={() => setPlatOpen(false)} size="sm" title={`🏬 ${t("แพลตฟอร์มของคอนเทนต์นี้", "Platforms for this content")}`}
+            footer={<div className="flex items-center gap-2 w-full">
+              <button type="button" onClick={async () => { if (!brandId) { pushToast("info", t("เลือกแบรนด์ก่อน", "Pick a brand first")); return; } const r = await getBrandPlatforms(); const allow = r.map[brandId]; if (!allow) { pushToast("info", t("แบรนด์นี้ยังไม่ได้ตั้งค่าแพลตฟอร์ม (⚙️ ตั้งค่าต่อแบรนด์ ในฟอร์มสร้าง)", "No default platforms for this brand yet")); return; } setPlatSel([...allow]); }}
+                className="h-8 px-2.5 text-xs border border-slate-200 rounded-md hover:bg-slate-50">✨ {t("ติ๊กตามแบรนด์", "Use brand defaults")}</button>
+              <span className="flex-1" />
+              <button type="button" onClick={() => setPlatOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+              <button type="button" onClick={() => void savePlatforms()} disabled={platSaving || platSel.length === 0} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{platSaving ? "..." : t("บันทึก", "Save")}</button>
+            </div>}>
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-1.5">
+                {platforms.map((p) => { const on = platSel.includes(p.value); return (
+                  <button key={p.value} type="button" onClick={() => setPlatSel((s) => on ? s.filter((x) => x !== p.value) : [...s, p.value])}
+                    className={`h-8 px-3 rounded-full text-xs font-medium border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{on ? "✓ " : ""}{p.label}</button>
+                ); })}
+              </div>
+              {added.length > 0 && <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2.5 py-1.5">＋ {t("จะเพิ่มช่องแคปชั่นให้", "Will add caption cards for")}: {added.map((p) => platformLabel(p)).join(", ")}</p>}
+              {removed.length > 0 && (
+                <p className={`text-[11px] rounded-md px-2.5 py-1.5 border ${removedWithText.length ? "text-rose-700 bg-rose-50 border-rose-200" : "text-slate-600 bg-slate-50 border-slate-200"}`}>
+                  − {t("จะเอาออก", "Will remove")}: {removed.map((p) => platformLabel(p)).join(", ")}
+                  {removedWithText.length > 0 && <><br />⚠️ {t(`แคปชั่นที่เขียนไว้ของ ${removedWithText.map((p) => platformLabel(p)).join(", ")} จะถูกลบด้วย`, `Captions already written for ${removedWithText.map((p) => platformLabel(p)).join(", ")} will be deleted`)}</>}
+                </p>
+              )}
+              <p className="text-[11px] text-slate-400">{t("เพิ่มแพลตฟอร์มใหม่ให้ทั้งระบบ: ปุ่ม ⚙️ ตั้งค่าต่อแบรนด์ ในฟอร์มสร้างคอนเทนต์ หรือ /tasks/settings แท็บแพลตฟอร์ม", "New platforms for the whole system: ⚙️ in the create form or /tasks/settings → Platforms")}</p>
+            </div>
+          </ERPModal>
+        );
+      })()}
+      <ConfirmDialog open={!!delAtt} onClose={() => setDelAtt(null)} onConfirm={async () => { if (!delAtt) return; const id = delAtt.id; setDelAtt(null); try { await onDelAttachment(id); pushToast("success", t("ลบไฟล์แล้ว", "File deleted")); } catch (e) { pushToast("error", (e as Error).message); } }}
+        title={t("ลบไฟล์ออกจากคอนเทนต์", "Remove file")} message={<span>{t("ลบ", "Delete")} <span className="font-medium">{delAtt?.label}</span> {t("ออกจากคอนเทนต์นี้? (รูปจากงานไม่ได้รับผลกระทบ)", "from this content? (task images are unaffected)")}</span>} confirmText={t("ลบ", "Delete")} variant="danger" />
       {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={brandId} brandLabel={brandLabel} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
       {tplSettingsOpen && <CaptionTemplateSettings brandId={brandId} brandLabel={brandLabel} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
@@ -1235,8 +1311,9 @@ type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: 
 // ============================================================
 // ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)
 // ============================================================
-function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onAddDriveVideo, onDelete, pushToast }: {
+function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onAddDriveVideo, onDelete, pushToast, hideImageList = false }: {
   attachments: ContentAttachment[];
+  hideImageList?: boolean;   // คลังรูปด้านบนโชว์รูปอยู่แล้ว → ตรงนี้เหลือแค่ช่องอัปโหลด
   onAttachImage: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
   onUploadVideo: (f: File) => Promise<void>;
   onAddLink: (url: string) => Promise<void>;
@@ -1269,7 +1346,7 @@ function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLi
       {/* รูปภาพ */}
       <div>
         <p className="text-xs text-slate-500 mb-1">🖼 {t("รูปภาพ", "Images")}</p>
-        <ImageAttach images={images.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))} onAttach={onAttachImage} onDelete={onDelete} pushToast={pushToast} />
+        <ImageAttach images={images.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))} onAttach={onAttachImage} onDelete={onDelete} pushToast={pushToast} hideList={hideImageList} />
       </div>
       {/* วิดีโอ */}
       <div>

@@ -40,12 +40,13 @@ export async function uploadResizedImage(file: File, opts?: { folder?: string; m
   return { r2_key: j.r2_key as string, file_name: file.name, content_type: (j.content_type as string) || type, size_bytes: (j.size as number) ?? blob.size };
 }
 
-export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1600 }: {
+export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1600, hideList = false }: {
   images: Img[];
   onAttach: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   pushToast: ToastFn;
   maxSize?: number;   // ด้านยาวสุดที่ย่อก่อนอัป (ดีฟอลต์ 1600)
+  hideList?: boolean; // true = โชว์แค่ช่องอัปโหลด (รูปไปโชว์ที่อื่นแล้ว เช่น คลังรูปของคอนเทนต์ — กันโชว์ซ้ำ)
 }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
@@ -86,7 +87,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
         {busy ? t("⏳ กำลังอัปโหลด...", "⏳ Uploading...") : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
       </div>
-      {images.length > 0 && (
+      {!hideList && images.length > 0 && (
         <div className="grid grid-cols-4 gap-2 mt-2">
           {images.map((im, i) => (
             <div key={im.id} className="relative group">
