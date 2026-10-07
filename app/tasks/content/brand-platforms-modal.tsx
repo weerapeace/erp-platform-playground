@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
-import { useCreativeOptions } from "../use-options";
+import { useCreativeOptions, createOption } from "../use-options";
 
 export type BrandPlatformMap = Record<string, string[]>;
 export type BrandFormatMap = Record<string, Record<string, string>>;   // brand → platform → รูปแบบโพสต์
@@ -37,8 +37,21 @@ export function BrandPlatformsModal({ brands, initial, initialFormats, onClose, 
   pushToast: (type: "success" | "error" | "info", m: string) => void;
 }) {
   const t = useT();
-  const { platforms } = useCreativeOptions();
+  const { platforms, reload: reloadOptions } = useCreativeOptions();
   const [map, setMap] = useState<BrandPlatformMap>(initial ?? {});
+  // เพิ่มแพลตฟอร์มใหม่จากตรงนี้ได้เลย (เช่น Instagram) — เก็บเป็นตัวเลือกกลาง (creative-options kind=platform) ทุกหน้าเห็นทันที
+  const [newPlat, setNewPlat] = useState("");
+  const [adding, setAdding] = useState(false);
+  const addPlatform = async () => {
+    const name = newPlat.trim(); if (!name) return;
+    if (platforms.some((p) => p.label.toLowerCase() === name.toLowerCase() || p.value.toLowerCase() === name.toLowerCase())) { pushToast("info", t(`มี “${name}” อยู่แล้ว`, `“${name}” already exists`)); return; }
+    setAdding(true);
+    try { await createOption("platform", name); await reloadOptions(); setNewPlat(""); pushToast("success", t(`เพิ่มแพลตฟอร์ม “${name}” แล้ว — ตั้งไอคอน/สีได้ที่ ⚙️ จัดการแพลตฟอร์ม`, `Added “${name}” — set icon/color in settings`)); }
+    catch (e) { pushToast("error", (e as Error).message); }
+    finally { setAdding(false); }
+  };
+  // นับเฉพาะแพลตฟอร์มที่ยังมีอยู่จริง (ค่าเก่าที่ถูกลบ/ปิดไปแล้วไม่นับ — เดิมโชว์ 6/5, 9/5)
+  const setCount = (bid: string) => (map[bid] ?? []).filter((k) => platforms.some((p) => p.value === k)).length;
   const [fmt, setFmt] = useState<BrandFormatMap>(initialFormats ?? {});
   const [loading, setLoading] = useState(!initial);
   const [saving, setSaving] = useState(false);
@@ -77,13 +90,23 @@ export function BrandPlatformsModal({ brands, initial, initialFormats, onClose, 
         </div>}>
       {loading ? <p className="py-8 text-center text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+          {/* แถบจัดการแพลตฟอร์ม: เพิ่มใหม่ตรงนี้ + ลิงก์ไปตั้งไอคอน/สี/ลำดับ */}
+          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-dashed border-violet-200 bg-violet-50/40 px-3 py-2">
+            <span className="text-xs font-medium text-slate-600">📱 {t("แพลตฟอร์มที่มี", "Platforms")} <span className="text-slate-400">({platforms.length})</span></span>
+            <div className="flex items-center gap-1.5 ml-auto">
+              <input value={newPlat} onChange={(e) => setNewPlat(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addPlatform(); }}
+                placeholder={t("เพิ่มแพลตฟอร์มใหม่ เช่น Instagram", "New platform, e.g. Instagram")} className="h-8 w-56 max-w-full border border-slate-200 rounded-md px-2 text-xs bg-white" />
+              <button type="button" onClick={() => void addPlatform()} disabled={adding || !newPlat.trim()} className="h-8 px-3 rounded-md bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">{adding ? "..." : `＋ ${t("เพิ่ม", "Add")}`}</button>
+              <a href="/tasks/settings?tab=platform" target="_blank" rel="noreferrer" className="h-8 px-2.5 inline-flex items-center rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50" title={t("ตั้งไอคอน สี ลำดับ หรือปิดใช้แพลตฟอร์ม", "Icon, color, order, enable/disable")}>⚙️ {t("จัดการแพลตฟอร์ม", "Manage")} ↗</a>
+            </div>
+          </div>
           {brands.map((b) => (
             <div key={b.id} className="border border-slate-200 rounded-lg px-3 py-2">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="text-sm font-medium text-slate-800">{b.name}</span>
                 {isSet(b.id)
                   ? <>
-                      <span className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2">{t("ตั้งไว้", "Custom")} {map[b.id].length}/{platforms.length}</span>
+                      <span className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2">{t("ตั้งไว้", "Custom")} {setCount(b.id)}/{platforms.length}</span>
                       <button onClick={() => reset(b.id)} className="ml-auto text-[11px] text-slate-400 hover:text-violet-700">{t("ล้างค่า (ลงทุกที่)", "Reset (all)")}</button>
                     </>
                   : <span className="text-[11px] text-slate-400">{t("ยังไม่ตั้ง = ลงได้ทุกแพลตฟอร์ม", "Not set = all platforms")}</span>}

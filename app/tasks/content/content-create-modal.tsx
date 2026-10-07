@@ -9,19 +9,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import { SkuPicker, ParentSkuPicker, type SkuPickerValue, type ParentSkuPickerValue } from "@/components/pickers";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
 import {
   createContent, getContent, getRecommendedTimes, POST_TYPES, postTypeLabel, splitPostTypes, joinPostTypes,
+  getParentSkuChildren, resolveBrandFromProduct, type ParentSkuChild,
   type ContentItem, type ContentCaption, type ContentStatus, type BrandOption, type RecommendedTimes,
 } from "../data";
 
 type CampaignOpt = { id: string; name: string };
 // post_types = เลือกได้หลายประเภท (เก็บลง DB เป็น text คั่น "," ผ่าน joinPostTypes) · สถานะตอนสร้าง = ร่างเสมอ (ไม่โชว์ให้เลือก)
-type Form = { title: string; post_types: string[]; status: ContentStatus; brand_id: string; campaign_id: string; scheduled_at: string; product: SkuPickerValue | null; platforms: string[]; note: string };
-const emptyForm = (): Form => ({ title: "", post_types: ["image"], status: "draft", brand_id: "", campaign_id: "", scheduled_at: "", product: null, platforms: [], note: "" });
+// product = SKU สีเดียว · parent = Parent SKU (ทุกสี) — กฎเดียวกับการ์ดสินค้าใน drawer: เลือก SKU → เติม Parent ให้ · เลือก Parent → เลือกสีลูกได้ · เดาแบรนด์จากสินค้า
+type Form = { title: string; post_types: string[]; status: ContentStatus; brand_id: string; campaign_id: string; scheduled_at: string; product: SkuPickerValue | null; parent: ParentSkuPickerValue | null; platforms: string[]; note: string };
+const emptyForm = (): Form => ({ title: "", post_types: ["image"], status: "draft", brand_id: "", campaign_id: "", scheduled_at: "", product: null, parent: null, platforms: [], note: "" });
 
 export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, templates, defaultBrandId, defaultDate, pushToast }: {
   open: boolean;
@@ -60,14 +63,41 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       sched = `${sched}T${rec || "10:00"}`;
     }
     setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched });
-    setTplId(""); setTplCaptions([]); setDirty(false); setFormErr(null);
+    setTplId(""); setTplCaptions([]); setDirty(false); setFormErr(null); setChildren([]); brandTouchedRef.current = !!defaultBrandId;
   }, [open, defaultBrandId, defaultDate]);
 
   const upd = (patch: Partial<Form>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
+  // ลูก SKU ของ Parent ที่เลือก (ชิปสีให้กดเลือกสีเดียว หรือใช้ทุกสี)
+  const [children, setChildren] = useState<ParentSkuChild[]>([]);
+  useEffect(() => { if (!form.parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(form.parent.id).then((cs) => { if (live) setChildren(cs); }).catch(() => {}); return () => { live = false; }; }, [form.parent?.id]);
+  // เลือก SKU จาก picker → เติม Parent ให้ (เปลี่ยนเองได้)
+  const pickSku = (v: SkuPickerValue | null) => {
+    const patch: Partial<Form> = { product: v };
+    if (v?.parent_sku_id && form.parent?.id !== v.parent_sku_id) patch.parent = { id: v.parent_sku_id, code: v.parent_code ?? "", name: v.parent_name ?? "" };
+    upd(patch);
+  };
+  // เปลี่ยน Parent → ถ้า SKU เดิมไม่ใช่ลูกของ Parent ใหม่ ให้ล้าง SKU
+  const pickParent = (v: ParentSkuPickerValue | null) => upd({ parent: v, ...(v && form.product?.parent_sku_id && form.product.parent_sku_id !== v.id ? { product: null } : {}) });
+  const pickChild = (c: ParentSkuChild | null) => {
+    if (!c || !form.parent) { upd({ product: null }); return; }
+    upd({ product: { id: c.id, code: c.code, name: c.name, color: c.color_th ?? c.color_en ?? null, list_price: c.list_price, fake_price: c.fake_price, image_key: c.image_key, image_url: r2ImageUrl(c.image_key ?? "", 80), parent_sku_id: form.parent.id, parent_code: form.parent.code, parent_name: form.parent.name } });
+  };
+  // เลือกสินค้าแล้วยังไม่มีแบรนด์ → เดาแบรนด์จากสินค้า (ติ๊กแพลตฟอร์มตามแบรนด์ให้ด้วย)
+  const brandTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!open || brandTouchedRef.current || form.brand_id) return;
+    const pid = form.parent?.id ?? null; const sid = form.product?.id ?? null;
+    if (!pid && !sid) return;
+    let live = true;
+    resolveBrandFromProduct({ parentSkuId: pid, skuId: sid }).then((bid) => { if (live && bid) pickBrand(bid); }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, form.parent?.id, form.product?.id]);
   const togglePlatform = (v: string) => upd({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
   const togglePostType = (v: string) => upd({ post_types: form.post_types.includes(v) ? form.post_types.filter((x) => x !== v) : [...form.post_types, v] });
   // เลือกแบรนด์ → ติ๊กแพลตฟอร์มตามที่ตั้งไว้ของแบรนด์นั้น (ยังไม่ตั้ง = ไม่ยุ่ง) · ถ้าติ๊กไว้แล้ว = ตัดตัวที่แบรนด์นี้ไม่ลงออก
-  const pickBrand = (brandId: string) => {
+  const pickBrand = (brandId: string, byUser = false) => {
+    if (byUser) brandTouchedRef.current = true;
     const allow = bpMap[brandId];
     if (!allow) { upd({ brand_id: brandId }); return; }
     const kept = form.platforms.filter((p) => allow.includes(p));
@@ -101,7 +131,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
     try {
       const r = await createContent({
         title: form.title.trim(), campaign_id: form.campaign_id || null, brand_id: form.brand_id || null,
-        sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null, post_type: joinPostTypes(form.post_types),
+        sku_id: form.product?.id ?? null, parent_sku_id: form.parent?.id ?? null, product_name: form.product?.name ?? form.parent?.name ?? null, post_type: joinPostTypes(form.post_types),
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
         platform_formats: Object.fromEntries(Object.entries(bpFmt[form.brand_id] ?? {}).filter(([p]) => form.platforms.includes(p))),
@@ -158,7 +188,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
             </button>
           ); })}</div>
         </ERPFormField>
-        <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => pickBrand(e.target.value)} /></ERPFormField>
+        <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => pickBrand(e.target.value, true)} /></ERPFormField>
         <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
         <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")} span={2}>
           <ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} />
@@ -171,8 +201,23 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
             </div>
           )}
         </ERPFormField>
-        {/* สินค้า/SKU — เต็มความกว้าง ให้เห็นรหัส+ชื่อสินค้ายาว ๆ ไม่ถูกตัด */}
-        <ERPFormField label={t("สินค้า/SKU (ถ้ามี)", "Product/SKU (if any)")} span={2}><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
+        {/* สินค้า: SKU สีเดียว | Parent SKU ทุกสี (กฎเดียวกับ drawer) */}
+        <ERPFormField label={t("สินค้า SKU (สีเดียว)", "SKU (single color)")} hint={t("เลือก SKU แล้วระบบเติม Parent + แบรนด์ให้", "Picking a SKU fills Parent + brand")}><SkuPicker value={form.product} onChange={pickSku} /></ERPFormField>
+        <ERPFormField label={t("Parent SKU (ทุกสี)", "Parent SKU (all colors)")} hint={form.parent && children.length > 0 ? t("กดเลือกสีด้านล่าง หรือปล่อยว่าง = ใช้ทุกสี", "Pick a color below, or leave = all colors") : undefined}><ParentSkuPicker value={form.parent} onChange={pickParent} /></ERPFormField>
+        {form.parent && children.length > 0 && (
+          <div className="col-span-2 -mt-2">
+            <div className="text-[11px] text-slate-400 mb-1">{t("SKU ลูกของ", "Child SKUs of")} <span className="font-mono">{form.parent.code}</span></div>
+            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-0.5">
+              <button type="button" onClick={() => pickChild(null)} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!form.product ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All colors")} ({children.length})</button>
+              {children.map((c) => { const on = form.product?.id === c.id; const col = c.color_th ?? c.color_en; const parentCode = form.parent?.code ?? ""; return (
+                <button key={c.id} type="button" title={c.code} onClick={() => pickChild(c)}
+                  className={`h-7 px-2.5 rounded-full border text-[11px] ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
+                  {col || c.code}{col && <span className={`ml-1 font-mono ${on ? "text-violet-200" : "text-slate-400"}`}>{c.code.replace(`${parentCode}-`, "")}</span>}
+                </button>
+              ); })}
+            </div>
+          </div>
+        )}
         <ERPFormField label={t("แพลตฟอร์ม", "Platforms")} span={2}>
           <div className="flex items-center justify-between gap-2 mb-1">
             <span className="text-[11px] text-slate-400">
