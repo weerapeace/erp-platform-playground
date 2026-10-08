@@ -455,9 +455,11 @@ export function BomLineEditor({
   };
   const methodOf  = (l: EditorLine) => groupOf(l.material_type)?.calc_method ?? "manual";
   const lineCalc  = (l: EditorLine) => calcLine(l, groupOf(l.material_type));   // calcLine ส่ง sheet_width/length ต่อให้แล้ว
-  const isArea    = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100"; };
+  // "คิดจากพื้นที่" = ผ้าม้วน (area_face) · หนัง (area_100) · ผ้า/ของที่ขายเป็นผืน (area_sheet) — ทั้งสามต้องกรอกกว้าง×ยาว×ชิ้น เหมือนกัน
+  // ต่างกันแค่ตัวหาร (หน้ากว้าง / 100 / พื้นที่ผืนเต็ม) — เจ้าของสั่ง 2026-10-08: "ผ้า (ชิ้น)" ต้องใส่กว้าง-ยาวได้
+  const isArea    = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100" || m === "area_sheet"; };
   const usesWidth  = (l: EditorLine) => isArea(l);
-  const usesLength = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100" || m === "length"; };
+  const usesLength = (l: EditorLine) => isArea(l) || methodOf(l) === "length";
   const usesFace   = (l: EditorLine) => methodOf(l) === "area_face";
   // ผ้า/ของที่ขายเป็น "ผืน/ชิ้น" — ปริมาณ = พื้นที่ที่ตัด ÷ พื้นที่ผืนเต็ม (ต้องรู้ขนาดผืน)
   const usesSheet  = (l: EditorLine) => methodOf(l) === "area_sheet";
