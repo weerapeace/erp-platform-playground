@@ -425,6 +425,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const requestClose = useCallback(() => { if (histRef.current) histRef.current.requestClose(); else onCloseRef.current(); }, []);
   // ป๊อปเพิ่ม/ลบแพลตฟอร์มของคอนเทนต์นี้
   const [platOpen, setPlatOpen] = useState(false);
+  const [platFocus, setPlatFocus] = useState<string | null>(null);   // กดเลือกแพลตฟอร์มที่จะโพสต์ → โชว์เฉพาะการ์ดนั้น (null = ทั้งหมด)
   const [platSel, setPlatSel] = useState<string[]>([]);
   const [platSaving, setPlatSaving] = useState(false);
   // ลบไฟล์ที่อัปเองจากคลังรูป (ยืนยันก่อน)
@@ -1179,13 +1180,28 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 { key: "hashtags", label: `🏷 ${t("คลังแฮชแท็ก", "Hashtag library")}`, onClick: () => setHashOpen(true) },
               ]} />
             </div>
+            {/* เลือกว่าจะโพสต์ตัวไหน → โชว์เฉพาะการ์ดนั้น (กดซ้ำ = กลับมาโชว์ทั้งหมด) · จุดเขียว = โพสต์แล้ว */}
+            {caps.length > 1 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button type="button" onClick={() => setPlatFocus(null)} className={`h-8 px-3 rounded-full text-xs font-medium border ${!platFocus ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>{t("ทั้งหมด", "All")} ({caps.length})</button>
+                {caps.map((c) => { const on = platFocus === c.platform; const st = postStatus[c.platform] ?? "todo"; return (
+                  <button key={c.platform} type="button" onClick={() => { if (on) { setPlatFocus(null); return; } setPlatFocus(c.platform); setOpenPlats(new Set([c.platform])); }}
+                    title={on ? t("กดซ้ำ = โชว์ทั้งหมด", "Click again = show all") : t(`โชว์เฉพาะ ${platformLabel(c.platform)}`, `Show only ${platformLabel(c.platform)}`)}
+                    className={`h-8 pl-1.5 pr-2.5 rounded-full border inline-flex items-center gap-1.5 text-xs font-medium ${on ? "bg-violet-600 text-white border-violet-600 shadow-sm" : "bg-white text-slate-700 border-slate-200 hover:border-violet-300"}`}>
+                    <PlatformChip code={c.platform} iconOnly />
+                    {platformLabel(c.platform)}
+                    <span className={`h-2 w-2 rounded-full ${st === "posted" || st === "scheduled" ? "bg-emerald-500" : st === "skip" ? "bg-slate-300" : "bg-amber-400"}`} title={st === "posted" ? t("โพสต์แล้ว", "Posted") : st === "scheduled" ? t("ตั้งเวลาแล้ว", "Scheduled") : st === "skip" ? t("ข้าม", "Skipped") : t("ยังไม่โพสต์", "Not posted")} />
+                  </button>
+                ); })}
+              </div>
+            )}
             {caps.length === 0 ? (
               <div className="text-sm text-slate-400 italic flex items-center gap-2 flex-wrap">{t("ยังไม่ได้เลือกแพลตฟอร์ม", "No platforms selected")}
                 <button type="button" onClick={() => { setPlatSel(contentPlatforms); setPlatOpen(true); }} className="not-italic h-8 px-3 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">🏬 {t("เลือกแพลตฟอร์ม", "Choose platforms")}</button>
               </div>
             ) : (
               <div className="space-y-1.5">
-                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
+                {caps.filter((c) => !platFocus || c.platform === platFocus).map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
                   connInfo={c.platform === "facebook"
                     ? (metaStatus.facebook?.connected
                       ? { connected: true, label: t(`เชื่อมเพจแล้ว: ${metaStatus.facebook.page_name ?? "-"} — กดโพสต์ขึ้นเพจนี้ได้เลย`, `Connected page: ${metaStatus.facebook.page_name ?? "-"}`), href: "/admin/platform-accounts" }
