@@ -423,11 +423,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const histRef = useRef<DrawerHistoryHandle | null>(null);
   useEffect(() => { const h = pushDrawerHistory(() => onCloseRef.current()); histRef.current = h; return () => h.dispose(); }, []);
   const requestClose = useCallback(() => { if (histRef.current) histRef.current.requestClose(); else onCloseRef.current(); }, []);
-  // ป๊อปเพิ่ม/ลบแพลตฟอร์มของคอนเทนต์นี้
-  const [platOpen, setPlatOpen] = useState(false);
-  const [platFocus, setPlatFocus] = useState<string | null>(null);   // กดเลือกแพลตฟอร์มที่จะโพสต์ → โชว์เฉพาะการ์ดนั้น (null = ทั้งหมด)
-  const [platSel, setPlatSel] = useState<string[]>([]);
-  const [platSaving, setPlatSaving] = useState(false);
+  // แถวติ๊กแพลตฟอร์ม (ทุกตัวในระบบ) — ติ๊ก = ลงที่นี่ (มีการ์ดแคปชั่น) · บันทึกทันทีที่กด
+  const [bpMap, setBpMap] = useState<Record<string, string[]>>({});   // แพลตฟอร์มประจำของแต่ละแบรนด์ (เรียงขึ้นก่อน + ปุ่มติ๊กตามแบรนด์)
+  useEffect(() => { getBrandPlatforms().then((r) => setBpMap(r.map)).catch(() => {}); }, []);
+  const [platRemoveAsk, setPlatRemoveAsk] = useState<string | null>(null);   // ถามก่อนเอาแพลตฟอร์มที่มีแคปชั่นแล้วออก
+  const [platBusy, setPlatBusy] = useState(false);
   // ลบไฟล์ที่อัปเองจากคลังรูป (ยืนยันก่อน)
   const [delAtt, setDelAtt] = useState<{ id: string; label: string } | null>(null);
   // แม่แบบ + ส่วนลด
@@ -835,6 +835,32 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     } catch (e) { pushToast("error", (e as Error).message); } finally { setAiAllBusy(false); }
   };
 
+  // เปลี่ยนชุดแพลตฟอร์มของคอนเทนต์ (บันทึกทันที): เพิ่ม = สร้างช่องแคปชั่น+แฮชแท็กเริ่มต้น · เอาออก = ลบช่องแคปชั่น
+  const applyPlatforms = async (next: string[]) => {
+    if (!d) return;
+    const cur = d.platforms ?? [];
+    const added = next.filter((p) => !cur.includes(p)); const removed = cur.filter((p) => !next.includes(p));
+    setPlatBusy(true);
+    try {
+      const nextCaps = next.map((p) => caps.find((c) => c.platform === p) ?? { platform: p, caption: "", hashtags: defaultHashtags(capCfg, brandId, p) });
+      await updateContent(contentId, { platforms: next, captions: nextCaps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })) });
+      setCaps(nextCaps); setD((x) => (x ? { ...x, platforms: next } : x));
+      setOpenPlats((st) => { const n = new Set(st); for (const p of added) n.add(p); for (const p of removed) n.delete(p); return n; });
+      if (added.length === 1 && removed.length === 0) pushToast("success", t(`เพิ่ม ${platformLabel(added[0])} แล้ว`, `Added ${platformLabel(added[0])}`));
+      else if (removed.length === 1 && added.length === 0) pushToast("success", t(`เอา ${platformLabel(removed[0])} ออกแล้ว`, `Removed ${platformLabel(removed[0])}`));
+      else pushToast("success", t(`อัปเดตแพลตฟอร์มแล้ว (${next.length})`, `Platforms updated (${next.length})`));
+      onChanged();
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setPlatBusy(false); }
+  };
+  const togglePlatform = (p: string) => {
+    if (platBusy || !d) return;
+    const cur = d.platforms ?? [];
+    if (!cur.includes(p)) { void applyPlatforms([...cur, p]); return; }
+    const c = caps.find((x) => x.platform === p);
+    if (c?.caption?.trim() || (postStatus[p] ?? "todo") !== "todo") { setPlatRemoveAsk(p); return; }   // มีแคปชั่น/มีสถานะแล้ว → ถามก่อน
+    void applyPlatforms(cur.filter((x) => x !== p));
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -1172,7 +1198,6 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   label: openPlats.size === caps.length ? t("⊟ พับทั้งหมด", "⊟ Collapse all") : t("⊞ กางทั้งหมด", "⊞ Expand all"),
                   onClick: () => setOpenPlats(openPlats.size === caps.length ? new Set() : new Set(caps.map((c) => c.platform))),
                 }] : []),
-                { key: "platforms_edit", label: `🏬 ${t("เพิ่ม/ลบแพลตฟอร์ม", "Add/remove platforms")}`, onClick: () => { setPlatSel(contentPlatforms); setPlatOpen(true); } },
                 { key: "copy_prompt", label: `📋 ${t("คัดลอกพรอมต์", "Copy prompt")}`, onClick: copyPrompt },
                 { key: "prompt_cfg", label: `✍️ ${t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}`, onClick: () => setCfgOpen(true) },
                 { key: "platform_cfg", label: `⚙️ ${t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}`, onClick: () => setPsOpen(true) },
@@ -1180,28 +1205,44 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 { key: "hashtags", label: `🏷 ${t("คลังแฮชแท็ก", "Hashtag library")}`, onClick: () => setHashOpen(true) },
               ]} />
             </div>
-            {/* เลือกว่าจะโพสต์ตัวไหน → โชว์เฉพาะการ์ดนั้น (กดซ้ำ = กลับมาโชว์ทั้งหมด) · จุดเขียว = โพสต์แล้ว */}
-            {caps.length > 1 && (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button type="button" onClick={() => setPlatFocus(null)} className={`h-8 px-3 rounded-full text-xs font-medium border ${!platFocus ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>{t("ทั้งหมด", "All")} ({caps.length})</button>
-                {caps.map((c) => { const on = platFocus === c.platform; const st = postStatus[c.platform] ?? "todo"; return (
-                  <button key={c.platform} type="button" onClick={() => { if (on) { setPlatFocus(null); return; } setPlatFocus(c.platform); setOpenPlats(new Set([c.platform])); }}
-                    title={on ? t("กดซ้ำ = โชว์ทั้งหมด", "Click again = show all") : t(`โชว์เฉพาะ ${platformLabel(c.platform)}`, `Show only ${platformLabel(c.platform)}`)}
-                    className={`h-8 pl-1.5 pr-2.5 rounded-full border inline-flex items-center gap-1.5 text-xs font-medium ${on ? "bg-violet-600 text-white border-violet-600 shadow-sm" : "bg-white text-slate-700 border-slate-200 hover:border-violet-300"}`}>
-                    <PlatformChip code={c.platform} iconOnly />
-                    {platformLabel(c.platform)}
-                    <span className={`h-2 w-2 rounded-full ${st === "posted" || st === "scheduled" ? "bg-emerald-500" : st === "skip" ? "bg-slate-300" : "bg-amber-400"}`} title={st === "posted" ? t("โพสต์แล้ว", "Posted") : st === "scheduled" ? t("ตั้งเวลาแล้ว", "Scheduled") : st === "skip" ? t("ข้าม", "Skipped") : t("ยังไม่โพสต์", "Not posted")} />
-                  </button>
-                ); })}
-              </div>
-            )}
+            {/* ติ๊กว่าจะลงที่ไหนบ้าง — โชว์ทุกแพลตฟอร์มในระบบ (ของแบรนด์นี้ขึ้นก่อน) · ม่วง = ลง (มีการ์ดด้านล่าง) · ขาว = ไม่ลง · บันทึกทันทีที่กด */}
+            {(() => {
+              const brandAllow = brandId ? bpMap[brandId] : undefined;
+              const ordered = [...platforms].sort((a, b) => {
+                const ra = contentPlatforms.includes(a.value) ? 0 : brandAllow?.includes(a.value) ? 1 : 2;
+                const rb = contentPlatforms.includes(b.value) ? 0 : brandAllow?.includes(b.value) ? 1 : 2;
+                return ra - rb;
+              });
+              return (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-slate-400 mr-0.5">{t("ลงที่:", "Post to:")}</span>
+                  {ordered.map((p) => {
+                    const on = contentPlatforms.includes(p.value); const st = postStatus[p.value] ?? "todo"; const isBrand = !!brandAllow?.includes(p.value);
+                    return (
+                      <button key={p.value} type="button" disabled={platBusy} onClick={() => togglePlatform(p.value)}
+                        title={on ? t("กดเพื่อเอาออก (ไม่ลงที่นี่)", "Click to remove") : t(`กดเพื่อลงที่ ${p.label}${isBrand ? " (แบรนด์นี้ลงประจำ)" : ""}`, `Click to add ${p.label}`)}
+                        className={`h-8 pl-1.5 pr-2.5 rounded-full border inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${on ? "bg-violet-600 text-white border-violet-600 shadow-sm" : isBrand ? "bg-white text-slate-700 border-violet-200 hover:border-violet-400" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"}`}>
+                        {(p.icon_key || p.icon) && <PlatformChip code={p.value} iconOnly />}
+                        {p.label}
+                        {on
+                          ? <span className={`h-2 w-2 rounded-full ${st === "posted" || st === "scheduled" ? "bg-emerald-400" : st === "skip" ? "bg-slate-300" : "bg-amber-300"}`} title={st === "posted" ? t("โพสต์แล้ว", "Posted") : st === "scheduled" ? t("ตั้งเวลาแล้ว", "Scheduled") : st === "skip" ? t("ข้าม", "Skipped") : t("ยังไม่โพสต์", "Not posted")} />
+                          : <span className="text-[10px] text-slate-300">＋</span>}
+                      </button>
+                    );
+                  })}
+                  {brandAllow && brandAllow.length > 0 && (
+                    <button type="button" disabled={platBusy} onClick={() => void applyPlatforms([...new Set([...brandAllow, ...contentPlatforms.filter((p) => caps.find((c) => c.platform === p)?.caption?.trim())])])}
+                      title={t("ติ๊กแพลตฟอร์มประจำของแบรนด์นี้ (ตัวที่มีแคปชั่นแล้วคงไว้)", "Select this brand's default platforms (keeps ones with captions)")}
+                      className="h-8 px-2.5 rounded-full text-[11px] text-violet-700 border border-dashed border-violet-300 hover:bg-violet-50 disabled:opacity-60">✨ {t("ติ๊กตามแบรนด์", "Brand defaults")}</button>
+                  )}
+                </div>
+              );
+            })()}
             {caps.length === 0 ? (
-              <div className="text-sm text-slate-400 italic flex items-center gap-2 flex-wrap">{t("ยังไม่ได้เลือกแพลตฟอร์ม", "No platforms selected")}
-                <button type="button" onClick={() => { setPlatSel(contentPlatforms); setPlatOpen(true); }} className="not-italic h-8 px-3 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">🏬 {t("เลือกแพลตฟอร์ม", "Choose platforms")}</button>
-              </div>
+              <div className="text-sm text-slate-400 italic rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center">☝️ {t("ยังไม่ได้เลือกว่าจะลงที่ไหน — กดปุ่มแพลตฟอร์มด้านบนเพื่อเพิ่มการ์ดแคปชั่น", "Nothing selected yet — click a platform above to add its caption card")}</div>
             ) : (
               <div className="space-y-1.5">
-                {caps.filter((c) => !platFocus || c.platform === platFocus).map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
+                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
                   connInfo={c.platform === "facebook"
                     ? (metaStatus.facebook?.connected
                       ? { connected: true, label: t(`เชื่อมเพจแล้ว: ${metaStatus.facebook.page_name ?? "-"} — กดโพสต์ขึ้นเพจนี้ได้เลย`, `Connected page: ${metaStatus.facebook.page_name ?? "-"}`), href: "/admin/platform-accounts" }
@@ -1228,49 +1269,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         </div>
       </div>
 
-      {/* เพิ่ม/ลบแพลตฟอร์มของคอนเทนต์นี้ — เพิ่ม = สร้างช่องแคปชั่น (เติมแฮชแท็กเริ่มต้น) · ลบ = เอาช่องแคปชั่นออก (เตือนถ้ามีข้อความแล้ว) */}
-      {platOpen && (() => {
-        const removed = contentPlatforms.filter((p) => !platSel.includes(p));
-        const removedWithText = removed.filter((p) => { const c = caps.find((x) => x.platform === p); return !!(c?.caption?.trim() || c?.hashtags?.trim()); });
-        const added = platSel.filter((p) => !contentPlatforms.includes(p));
-        const savePlatforms = async () => {
-          setPlatSaving(true);
-          try {
-            const nextCaps = platSel.map((p) => caps.find((c) => c.platform === p) ?? { platform: p, caption: "", hashtags: defaultHashtags(capCfg, brandId, p) });
-            await updateContent(contentId, { platforms: platSel, captions: nextCaps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })) });
-            setCaps(nextCaps); setD((x) => (x ? { ...x, platforms: platSel } : x));
-            setOpenPlats((s) => { const n = new Set(s); for (const p of added) n.add(p); for (const p of removed) n.delete(p); return n; });
-            pushToast("success", t(`อัปเดตแพลตฟอร์มแล้ว (${platSel.length})`, `Platforms updated (${platSel.length})`)); setPlatOpen(false); onChanged();
-          } catch (e) { pushToast("error", (e as Error).message); } finally { setPlatSaving(false); }
-        };
-        return (
-          <ERPModal open onClose={() => setPlatOpen(false)} size="sm" title={`🏬 ${t("แพลตฟอร์มของคอนเทนต์นี้", "Platforms for this content")}`}
-            footer={<div className="flex items-center gap-2 w-full">
-              <button type="button" onClick={async () => { if (!brandId) { pushToast("info", t("เลือกแบรนด์ก่อน", "Pick a brand first")); return; } const r = await getBrandPlatforms(); const allow = r.map[brandId]; if (!allow) { pushToast("info", t("แบรนด์นี้ยังไม่ได้ตั้งค่าแพลตฟอร์ม (⚙️ ตั้งค่าต่อแบรนด์ ในฟอร์มสร้าง)", "No default platforms for this brand yet")); return; } setPlatSel([...allow]); }}
-                className="h-8 px-2.5 text-xs border border-slate-200 rounded-md hover:bg-slate-50">✨ {t("ติ๊กตามแบรนด์", "Use brand defaults")}</button>
-              <span className="flex-1" />
-              <button type="button" onClick={() => setPlatOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-              <button type="button" onClick={() => void savePlatforms()} disabled={platSaving || platSel.length === 0} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{platSaving ? "..." : t("บันทึก", "Save")}</button>
-            </div>}>
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-1.5">
-                {platforms.map((p) => { const on = platSel.includes(p.value); return (
-                  <button key={p.value} type="button" onClick={() => setPlatSel((s) => on ? s.filter((x) => x !== p.value) : [...s, p.value])}
-                    className={`h-8 px-3 rounded-full text-xs font-medium border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{on ? "✓ " : ""}{p.label}</button>
-                ); })}
-              </div>
-              {added.length > 0 && <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2.5 py-1.5">＋ {t("จะเพิ่มช่องแคปชั่นให้", "Will add caption cards for")}: {added.map((p) => platformLabel(p)).join(", ")}</p>}
-              {removed.length > 0 && (
-                <p className={`text-[11px] rounded-md px-2.5 py-1.5 border ${removedWithText.length ? "text-rose-700 bg-rose-50 border-rose-200" : "text-slate-600 bg-slate-50 border-slate-200"}`}>
-                  − {t("จะเอาออก", "Will remove")}: {removed.map((p) => platformLabel(p)).join(", ")}
-                  {removedWithText.length > 0 && <><br />⚠️ {t(`แคปชั่นที่เขียนไว้ของ ${removedWithText.map((p) => platformLabel(p)).join(", ")} จะถูกลบด้วย`, `Captions already written for ${removedWithText.map((p) => platformLabel(p)).join(", ")} will be deleted`)}</>}
-                </p>
-              )}
-              <p className="text-[11px] text-slate-400">{t("เพิ่มแพลตฟอร์มใหม่ให้ทั้งระบบ: ปุ่ม ⚙️ ตั้งค่าต่อแบรนด์ ในฟอร์มสร้างคอนเทนต์ หรือ /tasks/settings แท็บแพลตฟอร์ม", "New platforms for the whole system: ⚙️ in the create form or /tasks/settings → Platforms")}</p>
-            </div>
-          </ERPModal>
-        );
-      })()}
+      <ConfirmDialog open={!!platRemoveAsk} onClose={() => setPlatRemoveAsk(null)} variant="danger"
+        onConfirm={() => { const p = platRemoveAsk; setPlatRemoveAsk(null); if (p && d) void applyPlatforms((d.platforms ?? []).filter((x) => x !== p)); }}
+        title={t(`เอา ${platRemoveAsk ? platformLabel(platRemoveAsk) : ""} ออกจากคอนเทนต์นี้`, `Remove ${platRemoveAsk ? platformLabel(platRemoveAsk) : ""}`)}
+        message={<span>{t("แพลตฟอร์มนี้มีแคปชั่น/สถานะโพสต์อยู่แล้ว — ถ้าเอาออก แคปชั่นที่เขียนไว้จะถูกลบด้วย (เพิ่มกลับได้ แต่ต้องเขียนใหม่)", "This platform already has a caption or post status — removing it deletes the caption (you can re-add, but will need to rewrite)")}</span>}
+        confirmText={t("เอาออก", "Remove")} />
       <ConfirmDialog open={!!delAtt} onClose={() => setDelAtt(null)} onConfirm={async () => { if (!delAtt) return; const id = delAtt.id; setDelAtt(null); try { await onDelAttachment(id); pushToast("success", t("ลบไฟล์แล้ว", "File deleted")); } catch (e) { pushToast("error", (e as Error).message); } }}
         title={t("ลบไฟล์ออกจากคอนเทนต์", "Remove file")} message={<span>{t("ลบ", "Delete")} <span className="font-medium">{delAtt?.label}</span> {t("ออกจากคอนเทนต์นี้? (รูปจากงานไม่ได้รับผลกระทบ)", "from this content? (task images are unaffected)")}</span>} confirmText={t("ลบ", "Delete")} variant="danger" />
       {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={brandId} brandLabel={brandLabel} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
