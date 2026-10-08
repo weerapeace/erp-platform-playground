@@ -3,7 +3,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { layFabric, type LayBlock, type LayLayout } from "@/lib/mo-fabric-lay";
-import { fabricQty, effectiveCalcMethod } from "@/lib/bom-calc";
+import { fabricQty, effectiveCalcMethod, resolveSupplyForm, sheetUnitFor } from "@/lib/bom-calc";
 
 export type SizeQty = { label: string; qty: number };
 /** วิธีคิดผ้าต่อใบ: lay = วางผ้าให้คุ้มที่สุด (ค่าเริ่มต้น) · classic = สูตรเดิม พื้นที่ + เผื่อเสีย% */
@@ -39,11 +39,11 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   const codes = [...new Set(rows.map((l) => l.component_sku).filter(Boolean) as string[])];
   const typeMap = new Map<string, string>();
   // ข้อมูลไว้ "วางผ้าให้คุ้มที่สุด": กฎคิดของกลุ่ม + หน้ากว้าง/ขนาดผืนของผ้าตัวนั้น
-  type SkuCalc = { calc: string; divisor: number; loss: number; face: number; sheetW: number; sheetL: number };
+  type SkuCalc = { calc: string; divisor: number; loss: number; face: number; sheetW: number; sheetL: number; form: string | null; grp: string | null };
   const calcMap = new Map<string, SkuCalc>();
   if (codes.length > 0) {
     const { data: skus } = await admin.from("skus_v2")
-      .select("code, fabric_width_cm, sheet_width_cm, sheet_length_cm, grp:material_groups!material_group_id ( name, calc_method, divisor, loss_percent )")
+      .select("code, fabric_width_cm, sheet_width_cm, sheet_length_cm, supply_form, grp:material_groups!material_group_id ( name, calc_method, divisor, loss_percent )")
       .in("code", codes).eq("is_active", true);
     for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
       const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string; calc_method?: string; divisor?: number; loss_percent?: number } | null;
@@ -51,9 +51,15 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       calcMap.set(String(s.code), {
         calc: g?.calc_method ?? "manual", divisor: Number(g?.divisor) || 90, loss: Number(g?.loss_percent) || 0,
         face: Number(s.fabric_width_cm) || 0, sheetW: Number(s.sheet_width_cm) || 0, sheetL: Number(s.sheet_length_cm) || 0,
+        form: (s.supply_form as string) ?? null, grp: g?.name ?? null,
       });
     }
   }
+  // "มาเป็น" ที่ใช้จริงของบรรทัด (ม้วน/ผืน) — ของบรรทัดก่อน ไม่มีใช้ค่าตั้งต้น SKU ไม่มีอีกให้ระบบเลือก (กฎกลาง lib/bom-calc)
+  const formOfLine = (l: Record<string, unknown>, c: SkuCalc | undefined) => c ? resolveSupplyForm({
+    calc_method: c.calc, supply_form: (l.supply_form as string) || c.form,
+    face_width_cm: Number(l.face_width_cm) || c.face, sheet_width: Number(l.sheet_width) || c.sheetW, sheet_length: Number(l.sheet_length) || c.sheetL,
+  }) : null;
   // บรรทัดสูตรที่เก็บจำนวนต่อชุดเป็น 0 ทั้งที่มีขนาดตัด (ตอนทำสูตรยังไม่มีหน้ากว้าง/ขนาดผืน หรือเพิ่งมาใส่ที่ SKU ทีหลัง)
   // → คิดใหม่ตรงนี้ด้วยกฎกลาง lib/bom-calc โดยเอาหน้ากว้าง/ขนาดผืนจากบรรทัด ถ้าไม่มีใช้ของ SKU · คิดไม่ได้จริง ๆ ค่อยปล่อย 0
   const fallbackQtyPer = (l: Record<string, unknown>): number => {
@@ -62,7 +68,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     const w = Number(l.cut_width) || 0, h = Number(l.cut_length) || 0;
     if (w <= 0 || h <= 0) return 0;
     const q = fabricQty({
-      calc_method: c.calc, divisor: c.divisor,
+      calc_method: c.calc, divisor: c.divisor, supply_form: (l.supply_form as string) || c.form,
       waste_percent: l.waste_percent != null ? Number(l.waste_percent) : c.loss,
       pieces: Number(l.pieces) || 1, cut_width: w, cut_length: h,
       face_width_cm: Number(l.face_width_cm) || c.face,
@@ -80,12 +86,15 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   for (const l of rows) {
     const qtyPer = (Number(l.qty) || 0) > 0 ? Number(l.qty) : fallbackQtyPer(l);
     const sku = (l.component_sku as string) ?? null;
+    const skuCalc = sku ? calcMap.get(sku) : undefined;
+    const form = formOfLine(l, skuCalc);
     const base: Record<string, unknown> = {
       mo_no: moNo,
       component_sku:  sku,
       component_name: (l.component_name as string) ?? null,
       material_type:  (sku && typeMap.get(sku)) || (l.material_type as string) || null,
-      uom:            (l.uom as string) ?? null,
+      // มาเป็นผืน → หน่วยเป็น ผืน/แผ่น (ตามกลุ่ม) ไม่ใช่หลาของม้วน
+      uom:            form === "sheet" ? sheetUnitFor(skuCalc?.grp ?? (l.material_type as string)) : ((l.uom as string) ?? null),
       cut_block_code: (l.cut_block_code as string) ?? null,
       cut_width:      l.cut_width != null ? Number(l.cut_width) : null,
       cut_length:     l.cut_length != null ? Number(l.cut_length) : null,
@@ -95,7 +104,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     };
     // ข้อมูลชั่วคราวไว้วางผ้า (ลบก่อน insert): จำนวนที่คูณของแถว + ห้ามหมุน + หน้ากว้าง/ผืนของบรรทัด
     const lay = {
-      no_rotate: !!l.no_rotate,
+      no_rotate: !!l.no_rotate, form,
       face: Number(l.face_width_cm) || 0,
       sheetW: Number(l.sheet_width) || 0, sheetL: Number(l.sheet_length) || 0,
     };
@@ -123,7 +132,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   // ผ้า/ลายพิมพ์/PU/ตัวเสริม (คิดตามหน้ากว้าง) และผ้าผืน: เอาทุกบล็อกของผ้าตัวเดียวกันมาวางรวมกันบนหน้าผ้าจริง
   // ตามจำนวนที่สั่ง → ได้ความยาวที่ต้องใช้จริง ไม่บวกเผื่อเสีย (ทับค่าที่คิดจากสูตรต่อชุด)
   // บรรทัดที่ข้อมูลไม่พอ (ไม่มีขนาดตัด/ไม่รู้หน้ากว้าง) → คงสูตรเดิม
-  type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; face: number; sheetW: number; sheetL: number; rowQty: number }; __layQty?: number; __classicQty?: number };
+  type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; form: string | null; face: number; sheetW: number; sheetL: number; rowQty: number }; __layQty?: number; __classicQty?: number };
   const layNoteOf = new Map<string, { note: string; length_cm: number; eff: number }>();   // ต่อ component_sku (ไว้ใส่แถวสรุป)
   const layLayoutOf = new Map<string, LayLayout[]>();   // ผังการวางต่อ component_sku (ป๊อป "ดูผังการวาง")
   {   // คิดแบบวางผ้า "เสมอ" เพื่อเก็บตัวเลขทั้ง 2 วิธีคู่กัน (เจ้าของขอโชว์เทียบ) · ตัวที่ใช้จริงเลือกตาม fabricMode
@@ -134,8 +143,8 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       const w = Number(m.cut_width) || 0, h = Number(m.cut_length) || 0;
       if (w <= 0 || h <= 0 || L.rowQty <= 0) continue;
       let face = 0, sheetL: number | null = null;
-      // กลุ่มตั้ง "คิดตามหน้ากว้าง" แต่ตัวนี้ไม่มีหน้ากว้าง มีแต่ขนาดผืน → วางแบบผืน (กฎเดียวกับ lib/bom-calc)
-      const calc = effectiveCalcMethod({ calc_method: c.calc, face_width_cm: L.face > 0 ? L.face : c.face,
+      // วางแบบม้วนหรือผืน ตาม "มาเป็น" ของบรรทัด (กฎเดียวกับ lib/bom-calc)
+      const calc = effectiveCalcMethod({ calc_method: c.calc, supply_form: L.form, face_width_cm: L.face > 0 ? L.face : c.face,
         sheet_width: L.sheetW > 0 ? L.sheetW : c.sheetW, sheet_length: L.sheetL > 0 ? L.sheetL : c.sheetL });
       if (calc === "area_face") { face = L.face > 0 ? L.face : c.face; }
       else if (calc === "area_sheet") { face = L.sheetW > 0 ? L.sheetW : c.sheetW; sheetL = L.sheetL > 0 ? L.sheetL : c.sheetL; if (!sheetL) continue; }

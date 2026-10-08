@@ -26,7 +26,7 @@ import { useToast } from "@/components/toast";
 import { apiSave } from "@/lib/save-toast";
 import { ComponentPicker } from "@/components/material-picker";
 import { FreeTextPicker } from "@/components/free-text-picker";
-import { fabricQty } from "@/lib/bom-calc";
+import { fabricQty, resolveSupplyForm, sheetUnitFor, type SupplyForm } from "@/lib/bom-calc";
 
 export type EditorLine = {
   key:            string;
@@ -61,6 +61,8 @@ export type EditorLine = {
   size_values:    Record<string, number>;     // { "40\"": 100 } คีย์ = ชื่อไซส์
   /** ห้ามหมุนชิ้นตอนวางผ้า (ผ้าลาย/ตามเกรน) — ใบสั่งผลิตใช้ตอน "วางผ้าให้คุ้มที่สุด" */
   no_rotate?:     boolean;
+  /** มาเป็น ม้วน/ผืน — null = ให้ระบบเลือกเอง (มีหน้ากว้าง = ม้วน · มีแค่ขนาดผืน = ผืน) */
+  supply_form?:   SupplyForm | null;
 };
 export const SIZE_DIMS: [string, string][] = [["cut_length", "ยาว"], ["cut_width", "กว้าง"], ["pieces", "ชิ้น"], ["qty", "จำนวน"]];
 // คอลัมน์ที่โชว์ในมุมมอง BASIC (ที่เหลือซ่อน: ช่อง/สถานะ/บล็อกตัด/หน้ากว้าง/%เผื่อเสีย/พื้นที่/ทางเลือก/ผันไซส์)
@@ -73,7 +75,7 @@ export function emptyLine(): EditorLine {
     key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
     material_group_id: null, material_type: "", qty: 0, uom: "หลา", uom_id: null, waste_percent: 0, is_optional: false,
     cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, sheet_width: 0, sheet_length: 0, slot_code: null,
-    size_variant: false, size_dim: "cut_length", size_values: {}, no_rotate: false,
+    size_variant: false, size_dim: "cut_length", size_values: {}, no_rotate: false, supply_form: null,
   };
 }
 
@@ -112,6 +114,7 @@ function calcLine(l: EditorLine, g: GroupInfo | undefined): number | null {
     cut_length:    l.cut_length,
     face_width_cm: l.face_width_cm,
     sheet_width: l.sheet_width || null, sheet_length: l.sheet_length || null,
+    supply_form: l.supply_form ?? null,
   });
 }
 
@@ -160,6 +163,7 @@ function replacePatch(c: BomComponent): Partial<EditorLine> {
     material_group_id: c.material_group_id, material_type: c.material_type ?? "",
     face_width_cm: c.fabric_width_cm ?? 0, waste_percent: c.loss_percent ?? 0,
     sheet_width: c.sheet_width_cm ?? 0, sheet_length: c.sheet_length_cm ?? 0,
+    supply_form: c.supply_form ?? null,
     uom: c.uom_name ?? "", uom_id: c.uom_id ?? null,
   };
 }
@@ -460,16 +464,27 @@ export function BomLineEditor({
   const isArea    = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100" || m === "area_sheet"; };
   const usesWidth  = (l: EditorLine) => isArea(l);
   const usesLength = (l: EditorLine) => isArea(l) || methodOf(l) === "length";
-  const usesFace   = (l: EditorLine) => methodOf(l) === "area_face";
+  // กลุ่มผ้า (ม้วน/ผืน) — ผ้า, PU, ตัวเสริม, ลายพิมพ์, ผ้า (ชิ้น): ของชิ้นเดียวกันอาจมาเป็นม้วนหรือเป็นผืนก็ได้ ต่างกันแค่วิธีคิด
+  const isFabric   = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_sheet"; };
+  // "มาเป็น" ที่ใช้จริง: ระบุเอง > มีหน้ากว้าง = ม้วน > มีแค่ขนาดผืน = ผืน > ตามกลุ่ม (กฎกลาง lib/bom-calc)
+  const formOf     = (l: EditorLine) => resolveSupplyForm({ calc_method: methodOf(l), supply_form: l.supply_form ?? null, face_width_cm: l.face_width_cm, sheet_width: l.sheet_width, sheet_length: l.sheet_length });
+  const usesFace   = (l: EditorLine) => formOf(l) === "roll";
   // ผ้า/ของที่ขายเป็น "ผืน/ชิ้น" — ปริมาณ = พื้นที่ที่ตัด ÷ พื้นที่ผืนเต็ม (ต้องรู้ขนาดผืน)
-  const usesSheet  = (l: EditorLine) => methodOf(l) === "area_sheet";
+  const usesSheet  = (l: EditorLine) => formOf(l) === "sheet";
   const needSheet  = (l: EditorLine) => usesSheet(l) && (l.cut_width > 0 || l.cut_length > 0) && !(l.sheet_width > 0 && l.sheet_length > 0);
   const showStatus = (l: EditorLine) => isArea(l);
-  // ไม่มีหน้ากว้าง แต่มีขนาดผืนเต็ม → กฎกลางคิดแบบผืนให้แทนได้ ไม่ต้องขึ้นแดง
-  const needFace   = (l: EditorLine) => methodOf(l) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm && !(l.sheet_width > 0 && l.sheet_length > 0);
+  const needFace   = (l: EditorLine) => usesFace(l) && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm;
 
-  // คิดปริมาณใหม่ทุกครั้งที่แก้ (เว้นกลุ่ม manual ที่พิมพ์เอง)
-  const recalc = (l: EditorLine): EditorLine => { const c = lineCalc(l); return c == null ? l : { ...l, qty: c }; };
+  // คิดปริมาณใหม่ทุกครั้งที่แก้ (เว้นกลุ่ม manual ที่พิมพ์เอง) · หน่วยตาม "มาเป็น": ผืน → ผืน/แผ่น · กลับเป็นม้วน → หลา
+  const recalc = (l: EditorLine): EditorLine => {
+    const c = lineCalc(l);
+    const f = formOf(l);
+    let uom = l.uom;
+    if (f === "sheet") uom = sheetUnitFor(l.material_type);
+    else if (f === "roll" && (l.uom === "ผืน" || l.uom === "แผ่น")) uom = "หลา";
+    const next = uom !== l.uom ? { ...l, uom } : l;
+    return c == null ? next : { ...next, qty: c };
+  };
   // ทุกการเปลี่ยนผ่านตาราง → บันทึก undo + คิดปริมาณใหม่
   const handleGridChange = (rows: EditorLine[]) => {
     setUndoStack((u) => [...u, lines].slice(-50));
@@ -489,6 +504,7 @@ export function BomLineEditor({
     material_group_id: c.material_group_id, material_type: c.material_type ?? "",
     face_width_cm: c.fabric_width_cm ?? l.face_width_cm,
     sheet_width: c.sheet_width_cm ?? l.sheet_width, sheet_length: c.sheet_length_cm ?? l.sheet_length,
+    supply_form: c.supply_form ?? l.supply_form ?? null,
     waste_percent: c.loss_percent ?? l.waste_percent,
     uom: c.uom_name ?? l.uom, uom_id: c.uom_id ?? l.uom_id,
   });
@@ -543,6 +559,15 @@ export function BomLineEditor({
     await apiSave(toast, "/api/bom/components",
       { body: { sku_id: skuId, sheet_width_cm: l.sheet_width || null, sheet_length_cm: l.sheet_length || null } },
       { ok: `บันทึกขนาดผืน ${l.sheet_width || "—"}×${l.sheet_length || "—"} ซม. กลับเข้า ${l.component_sku} แล้ว`, fail: "บันทึกขนาดผืนไม่สำเร็จ" });
+  };
+
+  /** บันทึก "มาเป็น ม้วน/ผืน" เป็นค่าตั้งต้นของ SKU — ครั้งหน้าเลือกวัตถุดิบนี้จะได้แบบนี้เลย */
+  const saveFormToSku = async (l: EditorLine) => {
+    const skuId = await resolveSkuId(l);
+    if (!skuId) { toast.error(noSkuMsg); return; }
+    const lbl = l.supply_form === "sheet" ? "ผืน/แผ่น" : l.supply_form === "roll" ? "ม้วน" : "อัตโนมัติ";
+    await apiSave(toast, "/api/bom/components", { body: { sku_id: skuId, supply_form: l.supply_form ?? null } },
+      { ok: `ตั้งค่าตั้งต้นของ ${l.component_sku} เป็น "${lbl}" แล้ว`, fail: "บันทึกค่าตั้งต้นไม่สำเร็จ" });
   };
 
   // เลือกชนิดให้ SKU (บันทึก material_group_id ที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
@@ -711,9 +736,12 @@ export function BomLineEditor({
     {
       key: "calc", header: "คำนวณ", width: 84, align: "right",
       getValue: (l) => lineCalc(l) ?? 0,
-      render: (l) => { const c = lineCalc(l); return c == null
-        ? <span className="text-slate-300 text-xs">—</span>
-        : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{c}</span>; },
+      render: (l) => {
+        const c = lineCalc(l); const f = formOf(l);
+        const badge = f ? <span className={`ml-1 text-[9px] px-1 rounded align-middle ${f === "sheet" ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-500"}`} title={f === "sheet" ? "คิดแบบผืน (พื้นที่ ÷ ผืนเต็ม)" : "คิดแบบม้วน (พื้นที่ ÷ หน้ากว้าง ÷ ตัวหาร)"}>{f === "sheet" ? "ผืน" : "ม้วน"}</span> : null;
+        return c == null
+          ? <span className="text-slate-300 text-xs">—{badge}</span>
+          : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{c}{badge}</span>; },
     },
     {
       key: "qty", header: "ปริมาณ", width: 86, align: "right", sortable: true, summable: true,
@@ -877,7 +905,25 @@ export function BomLineEditor({
                     )}
                   </div>
 
-                  {usesSheet(d) && (
+                  {isFabric(d) && (
+                    <div className={rowCls}>
+                      <span className={labCls}>มาเป็น:</span>
+                      <select value={d.supply_form ?? ""} disabled={readonly}
+                        onChange={(e) => u({ supply_form: (e.target.value === "roll" || e.target.value === "sheet") ? e.target.value : null })}
+                        className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white"
+                        title="ม้วน = คิดตามหน้ากว้าง (ได้หลา) · ผืน/แผ่น = คิดจากพื้นที่ผืนเต็ม (ได้กี่ผืน/แผ่น)">
+                        <option value="">อัตโนมัติ → {formOf(d) === "sheet" ? "ผืน/แผ่น" : "ม้วน"}</option>
+                        <option value="roll">ม้วน — คิดตามหน้ากว้าง</option>
+                        <option value="sheet">ผืน/แผ่น — คิดจากพื้นที่ผืนเต็ม</option>
+                      </select>
+                      {!readonly && (
+                        <button type="button" title="ครั้งหน้าเลือกวัตถุดิบนี้ ให้มาเป็นแบบนี้เลย (บันทึกที่ SKU)"
+                          onClick={() => saveFormToSku(d)}
+                          className="h-7 px-2 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50">💾 ตั้งเป็นค่าตั้งต้น SKU</button>
+                      )}
+                    </div>
+                  )}
+                  {isFabric(d) && (
                     <div className={rowCls}>
                       <span className={labCls}>ขนาดผืนเต็ม:</span>
                       <input type="number" min={0} step="any" value={d.sheet_width} disabled={readonly}
@@ -899,7 +945,7 @@ export function BomLineEditor({
                       {needSheet(d) && <span className="block text-amber-600">⚠ ยังไม่ได้ใส่ขนาดผืนเต็ม — ปริมาณจะยังคำนวณไม่ได้</span>}
                     </div>
                   )}
-                  {usesFace(d) && (
+                  {isFabric(d) && (
                     <div className={rowCls}>
                       <span className={labCls}>หน้ากว้างผ้า:</span>
                       <input type="number" min={0} step="any" value={d.face_width_cm} disabled={readonly}

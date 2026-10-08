@@ -56,11 +56,11 @@ export async function GET(
   // เติมข้อมูลจาก SKU (ชนิด/หน้ากว้าง/รูป/loss) ให้แต่ละบรรทัด — ดึงสดตอนเปิดสูตร
   const rawLines = (lines ?? []) as Array<Record<string, unknown>>;
   const codes = [...new Set(rawLines.map((l) => l.component_sku).filter(Boolean) as string[])];
-  const skuMap = new Map<string, { id: string; material_type: string | null; face: number | null; loss: number | null; image: string | null; uom_id: string | null; uom_name: string | null; sheet_w: number | null; sheet_l: number | null }>();
+  const skuMap = new Map<string, { id: string; material_type: string | null; face: number | null; loss: number | null; image: string | null; uom_id: string | null; uom_name: string | null; sheet_w: number | null; sheet_l: number | null; supply_form: string | null }>();
   if (codes.length > 0) {
     const { data: skus } = await supabase
       .from("skus_v2")
-      .select("id, code, fabric_width_cm, cover_image_r2_key, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name ), sheet_width_cm, sheet_length_cm")
+      .select("id, code, fabric_width_cm, cover_image_r2_key, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name ), sheet_width_cm, sheet_length_cm, supply_form")
       .in("code", codes);
     for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
       const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string; loss_percent?: number } | null;
@@ -71,6 +71,7 @@ export async function GET(
         face: s.fabric_width_cm != null ? Number(s.fabric_width_cm) : null,
         sheet_w: s.sheet_width_cm != null ? Number(s.sheet_width_cm) : null,
         sheet_l: s.sheet_length_cm != null ? Number(s.sheet_length_cm) : null,
+        supply_form: (s.supply_form as string) ?? null,
         loss: g?.loss_percent != null ? Number(g.loss_percent) : null,
         image: (s.cover_image_r2_key as string) ?? null,
         uom_id: (s.uom_id as string) ?? null,
@@ -92,6 +93,8 @@ export async function GET(
       // ขนาดผืนเต็ม: ใช้ของบรรทัดก่อน ไม่มีก็ใช้ของ SKU
       sheet_width:  Number(l.sheet_width) > 0 ? Number(l.sheet_width) : (sku.sheet_w ?? null),
       sheet_length: Number(l.sheet_length) > 0 ? Number(l.sheet_length) : (sku.sheet_l ?? null),
+      // มาเป็น ม้วน/ผืน: ของบรรทัดก่อน ไม่มีก็ใช้ค่าตั้งต้นของ SKU (ไม่มีทั้งคู่ = ระบบเลือกเอง)
+      supply_form:  (l.supply_form as string) || sku.supply_form || null,
       waste_percent: lineWaste > 0 ? lineWaste : (sku.loss ?? lineWaste),
       uom:           lineUom || sku.uom_name || "",
       uom_id:        sku.uom_id,

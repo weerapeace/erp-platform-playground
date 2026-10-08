@@ -22,6 +22,7 @@ export type BomComponent = {
   fabric_width_cm: number | null;
   sheet_width_cm?: number | null;    // ขนาดผืนเต็ม (วัตถุดิบที่ขายเป็นผืน/ชิ้น)
   sheet_length_cm?: number | null;
+  supply_form?: "roll" | "sheet" | null;   // ค่าตั้งต้น มาเป็น ม้วน/ผืน (null = อัตโนมัติ)
   uom_id: string | null;
   uom_name: string | null;
   image_key: string | null;         // cover_image_r2_key (โชว์ thumbnail)
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6)
     : [];
 
-  const SELECT = "id, code, name_th, fabric_width_cm, sheet_width_cm, sheet_length_cm, cover_image_r2_key, standard_price, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )";
+  const SELECT = "id, code, name_th, fabric_width_cm, sheet_width_cm, sheet_length_cm, supply_form, cover_image_r2_key, standard_price, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )";
   const mapRow = (r: Record<string, unknown>): BomComponent => {
     const g = (Array.isArray(r.grp) ? r.grp[0] : r.grp) as GroupEmbed;
     const u = (Array.isArray(r.uom) ? r.uom[0] : r.uom) as UomEmbed;
@@ -75,6 +76,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       material_type: g?.name ?? null, loss_percent: g?.loss_percent != null ? Number(g.loss_percent) : null,
       fabric_width_cm: r.fabric_width_cm != null ? Number(r.fabric_width_cm) : null,
       sheet_width_cm: r.sheet_width_cm != null ? Number(r.sheet_width_cm) : null,
+      supply_form: r.supply_form === "roll" || r.supply_form === "sheet" ? r.supply_form : null,
       sheet_length_cm: r.sheet_length_cm != null ? Number(r.sheet_length_cm) : null,
       uom_id: (r.uom_id as string) ?? null, uom_name: u?.name ?? null, image_key: (r.cover_image_r2_key as string) ?? null,
       standard_price: r.standard_price != null ? Number(r.standard_price) : null,
@@ -149,7 +151,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
   let body: { sku_id?: string; material_group_id?: string | null; fabric_width_cm?: number | null; uom_id?: string | null;
-    sheet_width_cm?: number | null; sheet_length_cm?: number | null };
+    sheet_width_cm?: number | null; sheet_length_cm?: number | null; supply_form?: "roll" | "sheet" | null };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.sku_id) return NextResponse.json({ error: "ต้องระบุ sku_id" }, { status: 400 });
@@ -160,6 +162,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("uom_id" in body)            patch.uom_id = body.uom_id ?? null;
   if ("sheet_width_cm" in body)    patch.sheet_width_cm = body.sheet_width_cm ?? null;
   if ("sheet_length_cm" in body)   patch.sheet_length_cm = body.sheet_length_cm ?? null;
+  if ("supply_form" in body)       patch.supply_form = body.supply_form === "roll" || body.supply_form === "sheet" ? body.supply_form : null;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });
 
   const admin = supabaseAdmin();

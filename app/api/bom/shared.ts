@@ -38,6 +38,7 @@ export function lineToRow(l: BomLine, bomCode: string, idx: number): Record<stri
     size_dim:         l.size_dim || "cut_length",
     size_values:      l.size_values && typeof l.size_values === "object" ? l.size_values : {},
     no_rotate:        !!l.no_rotate,
+    supply_form:      l.supply_form === "roll" || l.supply_form === "sheet" ? l.supply_form : null,
     is_active:        true,
   };
 }

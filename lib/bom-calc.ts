@@ -7,6 +7,8 @@
  */
 
 export type FabricCalcMethod = "count" | "length" | "area_100" | "area_face" | "area_sheet" | "manual";
+/** "มาเป็น" ของวัตถุดิบที่คิดจากพื้นที่: roll = ม้วน (คิดตามหน้ากว้าง → หลา) · sheet = ผืน/แผ่น (คิดจากพื้นที่ผืนเต็ม → กี่ผืน) */
+export type SupplyForm = "roll" | "sheet";
 
 export type FabricCalcInput = {
   calc_method:   FabricCalcMethod | string;
@@ -18,19 +20,40 @@ export type FabricCalcInput = {
   face_width_cm: number | null | undefined;    // หน้ากว้างผ้า (ซม.)
   sheet_width?:  number | null | undefined;    // ขนาดผืนเต็ม กว้าง (ซม.) — area_sheet
   sheet_length?: number | null | undefined;    // ขนาดผืนเต็ม ยาว (ซม.) — area_sheet
+  supply_form?:  SupplyForm | string | null;   // มาเป็น ม้วน/ผืน (null = ให้ระบบเลือกเอง)
 };
 
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
+type FormInput = Pick<FabricCalcInput, "calc_method" | "face_width_cm" | "sheet_width" | "sheet_length" | "supply_form">;
+
 /**
- * วิธีคิด "ที่ใช้จริง" ของบรรทัดนี้ — กลุ่มตั้ง area_face (คิดตามหน้ากว้าง) แต่ตัววัตถุดิบไม่มีหน้ากว้าง
- * ทว่ามีขนาดผืนเต็ม (เช่น ผ้าขาวม้าขายเป็นผืน 100×140 / กระดาษแผ่น 79×109) → คิดแบบผืน (area_sheet) ให้แทน
- * ไม่งั้นระบบจะเงียบ ๆ ได้ 0 ทั้งที่ข้อมูลพอคิด (เจ้าของเจอ 2026-10-08: ใบสั่งผลิต "รวมต้องใช้" ขึ้น 0 ทุกแถว)
+ * "มาเป็น" ที่ใช้จริงของบรรทัดนี้ (เฉพาะกลุ่มที่คิดจากพื้นที่ผ้า: area_face / area_sheet — กลุ่มอื่นคืน null)
+ * เจ้าของสั่ง 2026-10-08: ผ้า/PU/ตัวเสริม บางทีมาเป็นม้วน บางทีมาเป็นผืน (เช่น 110×80) ต้องใส่ได้ทั้ง 2 แบบ
+ * - ระบุไว้ (roll/sheet) → ตามนั้น
+ * - ไม่ระบุ → มีหน้ากว้าง = ม้วน (มีทั้งคู่ก็ม้วน — เจ้าของเลือก) · มีแค่ขนาดผืน = ผืน · ไม่มีเลย = ตามวิธีของกลุ่ม
  */
-export function effectiveCalcMethod(i: Pick<FabricCalcInput, "calc_method" | "face_width_cm" | "sheet_width" | "sheet_length">): FabricCalcMethod | string {
+export function resolveSupplyForm(i: FormInput): SupplyForm | null {
   const m = i.calc_method ?? "manual";
-  if (m === "area_face" && !(Number(i.face_width_cm) > 0) && Number(i.sheet_width) > 0 && Number(i.sheet_length) > 0) return "area_sheet";
-  return m;
+  if (m !== "area_face" && m !== "area_sheet") return null;
+  if (i.supply_form === "roll" || i.supply_form === "sheet") return i.supply_form;
+  if (Number(i.face_width_cm) > 0) return "roll";
+  if (Number(i.sheet_width) > 0 && Number(i.sheet_length) > 0) return "sheet";
+  return m === "area_sheet" ? "sheet" : "roll";
+}
+
+/** วิธีคิด "ที่ใช้จริง" — ม้วน → area_face · ผืน → area_sheet · กลุ่มอื่นคงเดิม */
+export function effectiveCalcMethod(i: FormInput): FabricCalcMethod | string {
+  const f = resolveSupplyForm(i);
+  if (f === "roll") return "area_face";
+  if (f === "sheet") return "area_sheet";
+  return i.calc_method ?? "manual";
+}
+
+/** หน่วยของแบบผืน แยกตามกลุ่ม (เจ้าของเลือก 2026-10-08): ผ้า/ลายพิมพ์ = "ผืน" · ตัวเสริม/PU/อื่น ๆ = "แผ่น" */
+export function sheetUnitFor(groupName: string | null | undefined): string {
+  const g = (groupName ?? "").trim();
+  return g.startsWith("ผ้า") || g === "ลายพิมพ์" ? "ผืน" : "แผ่น";
 }
 
 /** พื้นที่ตัด = กว้าง × ยาว × จำนวนชิ้น */

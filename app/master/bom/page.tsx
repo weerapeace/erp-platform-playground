@@ -31,6 +31,7 @@ type BomListItem = {
 };
 type BomLineRow = {
   no_rotate?: boolean | null;   // ห้ามหมุนชิ้นตอนวางผ้า
+  supply_form?: "roll" | "sheet" | null;   // มาเป็น ม้วน/ผืน (null = อัตโนมัติ)
   id: string; slot_code: string | null; component_sku: string | null; component_name: string | null;
   qty: number; uom: string | null; waste_percent: number | null; is_optional: boolean;
   sequence: number | null; source: string | null; odoo_bom_line_id: number | null;
@@ -138,6 +139,7 @@ export default function BomWorkspacePage() {
     source: l.source, odoo_bom_line_id: l.odoo_bom_line_id,
     size_variant: !!l.size_variant, size_dim: l.size_dim ?? "cut_length", size_values: (l.size_values ?? {}) as Record<string, number>,
     no_rotate: !!l.no_rotate,
+    supply_form: l.supply_form === "roll" || l.supply_form === "sheet" ? l.supply_form : null,
   }));
 
   const loadFormById = async (id: string, bomCode?: string): Promise<FormState> => {
@@ -323,6 +325,7 @@ export default function BomWorkspacePage() {
         material_type: l.material_type || null,
         size_variant: l.size_variant, size_dim: l.size_dim, size_values: l.size_values,
         no_rotate: !!l.no_rotate,
+        supply_form: l.supply_form ?? null,
       })),
       sizes: form.sizes,
     };
