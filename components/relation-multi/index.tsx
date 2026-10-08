@@ -17,6 +17,8 @@ import { TagOrganizerModal } from "@/components/tag-organizer";
 import { useToast } from "@/components/toast";
 import { BomEditorModal } from "@/components/bom-editor-modal";
 import { useAuth } from "@/components/auth";
+import { ConfirmDialog } from "@/components/modal";
+import type { SkuUsage } from "@/lib/sku-usage";
 import { downscaleImageWidth } from "@/lib/image-resize";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน (master-crud import ไฟล์นี้อยู่)
@@ -996,6 +998,74 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   // ---- inline edit + flash fill (ตารางลูก) ----
   const canEditRows = !!configurable;
+
+  // ── ลบรายการลูกจากตาราง (เจ้าของขอ "ปุ่มลบ SKU ที่ไม่ใช้") — ของกลาง ใช้กับ one2many ทุกโมดูล ──
+  // skus-v2: เช็กก่อนว่า SKU ถูกใช้ที่ไหนไหม (lib/sku-usage) · ใช้แล้ว = ห้ามลบถาวร ให้ "ปิดใช้" (soft) แทน · ไม่ใช้ = ลบถาวร
+  // โมดูลอื่น: ลบถาวรผ่าน API กลาง (DB กันถ้ามี FK) · ไม่มีสิทธิ์ลบถาวร → ปิดใช้แทน
+  const [delTarget, setDelTarget] = useState<{ row: Record<string, unknown>; usage: SkuUsage | null; checking: boolean } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const requestDelete = async (r: Record<string, unknown>) => {
+    const isSku = moduleKey === "skus-v2";
+    setDelTarget({ row: r, usage: null, checking: isSku });
+    if (!isSku) return;
+    try {
+      const j = await apiFetch(`/api/skus/usage?id=${encodeURIComponent(String(r.id))}`).then((x) => x.json());
+      setDelTarget((d) => (d && String(d.row.id) === String(r.id) ? { ...d, usage: (j.data as SkuUsage | null) ?? null, checking: false } : d));
+    } catch {
+      setDelTarget((d) => (d && String(d.row.id) === String(r.id) ? { ...d, checking: false } : d));
+    }
+  };
+  const confirmDelete = async () => {
+    if (!delTarget) return;
+    const id = String(delTarget.row.id);
+    const label = String(delTarget.row[titleField] ?? delTarget.row.id);
+    const mustSoft = !!delTarget.usage?.used || (moduleKey === "skus-v2" && !delTarget.usage);   // เช็กไม่ได้ = ไม่เสี่ยง ลบถาวรไม่ให้
+    setDeleting(true);
+    try {
+      let res = await apiFetch(`/api/master-v2/${moduleKey}/${encodeURIComponent(id)}${mustSoft ? "" : "?hard=1"}`, { method: "DELETE" });
+      let j = await res.json().catch(() => ({}));
+      if (!mustSoft && (res.status === 401 || res.status === 403)) {
+        // ไม่มีสิทธิ์ลบถาวร → ปิดใช้แทน (กู้คืนได้ที่หน้า SKU)
+        res = await apiFetch(`/api/master-v2/${moduleKey}/${encodeURIComponent(id)}`, { method: "DELETE" });
+        j = await res.json().catch(() => ({}));
+        if (res.ok && !j.error) toast.info(`ไม่มีสิทธิ์ลบถาวร — ปิดใช้ ${label} แทนแล้ว`);
+      }
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      toast.success(mustSoft ? `ปิดใช้ ${label} แล้ว (กู้คืนได้ที่หน้า SKU)` : `ลบ ${label} ถาวรแล้ว`);
+      setDelTarget(null);
+      load();
+    } catch (e) { toast.error(`ลบไม่สำเร็จ: ${e instanceof Error ? e.message : "network"}`); }
+    finally { setDeleting(false); }
+  };
+  const deleteDialog = delTarget ? (() => {
+    const label = String(delTarget.row[titleField] ?? delTarget.row.id);
+    const u = delTarget.usage;
+    const isSku = moduleKey === "skus-v2";
+    const soft = !!u?.used || (isSku && !u);
+    return (
+      <ConfirmDialog open onClose={() => !deleting && setDelTarget(null)} onConfirm={() => void confirmDelete()}
+        title={delTarget.checking ? `กำลังตรวจว่า ${label} ถูกใช้ที่ไหนบ้าง…` : soft ? `ปิดใช้ ${label}` : `ลบ ${label} ถาวร`}
+        variant={soft ? "default" : "danger"}
+        confirmText={delTarget.checking ? "กำลังตรวจ…" : deleting ? "กำลังลบ…" : soft ? "ปิดใช้" : "ลบถาวร"}
+        message={delTarget.checking ? <span className="text-sm text-slate-500">เช็กสต๊อก / ใบสั่งซื้อ / ใบขาย / ใบสั่งผลิต ฯลฯ</span> : (
+          <div className="space-y-2 text-sm">
+            {u?.used ? (
+              <>
+                <div className="text-slate-700">SKU นี้ <b>ถูกใช้อยู่</b> ลบถาวรไม่ได้ (เอกสารจะอ้างอิงไม่เจอ) — ระบบจะ <b>ปิดใช้</b> แทน: หายจากรายการ แต่เอกสารเดิมยังเปิดดูได้ และกู้คืนได้ที่หน้า SKU</div>
+                <ul className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {u.stock_qty !== 0 && <li>สต๊อกคงเหลือ {u.stock_qty.toLocaleString("th-TH")}</li>}
+                  {u.refs.map((r) => <li key={r.label}>{r.label} {r.count.toLocaleString("th-TH")} รายการ</li>)}
+                </ul>
+              </>
+            ) : isSku && !u ? (
+              <div className="text-slate-700">ตรวจการใช้งานไม่ได้ในตอนนี้ — เพื่อความปลอดภัยจะ <b>ปิดใช้</b> แทนการลบถาวร (กู้คืนได้)</div>
+            ) : (
+              <div className="text-slate-700">{isSku ? "SKU นี้ยังไม่ถูกใช้ในเอกสารใด" : "รายการนี้"} จะถูก <b className="text-rose-600">ลบออกถาวร</b> กู้คืนไม่ได้ (รูป/ไฟล์แนบของรายการนี้ถูกลบตามไปด้วย)</div>
+            )}
+          </div>
+        )} />
+    );
+  })() : null;
   // ช่องที่ DB คำนวณให้เอง (เช่น Color Platform [TH]/[EN]) แก้ตรงไม่ได้ — ปล่อยเป็นอ่านอย่างเดียว + tooltip บอกให้แก้ที่ต้นทาง
   const isEditableCol = (f: string) => canEditRows && !relCfgByField[f] && !isGeneratedColumn(f) && ["text", "number", "currency"].includes(typeByField[f] ?? "text");
 
@@ -1452,7 +1522,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         {peek && moduleKey && (
           <MasterRecordDrawer moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
-        {pickerModal}{createModal}{attachModal}
+        {pickerModal}{createModal}{deleteDialog}{attachModal}
       </>
     );
   }
@@ -1491,13 +1561,13 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         {peek && moduleKey && (
           <MasterRecordDrawer moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
-        {pickerModal}{createModal}{attachModal}
+        {pickerModal}{createModal}{deleteDialog}{attachModal}
       </>
     );
   }
 
   // ว่าง + เพิ่ม inline ไม่ได้ → โชว์ข้อความ; ถ้าเพิ่ม inline ได้ → ตกลงไปเรนเดอร์ตาราง (มีแถวว่างให้พิมพ์)
-  if (rows.length === 0 && !showInlineAdd) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}{createModal}</>;
+  if (rows.length === 0 && !showInlineAdd) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}{createModal}{deleteDialog}</>;
 
   const list = !rich ? (
     <ul className="space-y-1">
@@ -1583,9 +1653,14 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             </td>
           );
         })}
-        <td className="px-2 py-1.5 text-right">
+        <td className="px-2 py-1.5 text-right whitespace-nowrap">
           <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
             className="w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
+          {canEditRows && (
+            <button type="button" title={moduleKey === "skus-v2" ? "ลบ SKU นี้ (ยังไม่ถูกใช้ = ลบถาวร · ถูกใช้แล้ว = ปิดใช้)" : "ลบรายการนี้"}
+              onClick={(e) => { e.stopPropagation(); void requestDelete(r); }}
+              className="w-6 h-6 rounded text-xs text-slate-400 hover:text-rose-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">🗑</button>
+          )}
         </td>
       </tr>
       );
@@ -1776,7 +1851,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           onClose={() => setVariantBases(null)}
           onDone={(ok, skip) => { setVariantBases(null); if (ok) { toast.success(`สร้าง ${ok} รายการ${skip ? ` · ข้าม ${skip} (ซ้ำ/พลาด)` : ""}`); load(); } else toast.error("ไม่ได้สร้าง (ซ้ำ/พลาด/ว่าง)"); }} />
       )}
-      {createModal}
+      {createModal}{deleteDialog}
       {attachModal}
     </>
   );
