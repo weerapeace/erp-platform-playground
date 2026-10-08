@@ -304,7 +304,7 @@ export function ContentPageView() {
       </div>
 
       <ContentCreateModal open={open} onClose={() => setOpen(false)} onCreated={() => { setOpen(false); load(); }}
-        brands={brands} campaigns={campaigns} templates={templates} pushToast={pushToast} />
+        brands={brands} campaigns={campaigns} pushToast={pushToast} />
 
       <ERPModal open={!!iconEditId} onClose={() => setIconEditId(null)} title={t("เลือกไอคอนแม่แบบ", "Pick template icon")} size="sm"
         footer={<button onClick={() => setIconEditId(null)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>}>

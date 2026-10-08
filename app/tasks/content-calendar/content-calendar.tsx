@@ -15,7 +15,7 @@ import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
 import {
-  listContent, listBrands, listCampaigns, listContentTemplates, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes,
+  listContent, listBrands, listCampaigns, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes,
   CONTENT_STATUS_META, contentStatusLabel, type BrandCalStyle, type ContentStatus,
   listTasks, updateTask, deleteTask, isOverdue, type CreativeTask,
 } from "../data";
@@ -98,13 +98,11 @@ export function ContentCalendarView() {
   const tasksSWR = useSWRLite(mode === "task" ? "creative:tasks:all" : null, () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000, timeoutMs: 15000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
-  const templatesSWR = useSWRLite("creative:content-templates", () => listContentTemplates());
   const stylesSWR = useSWRLite("creative:brand-cal-styles", () => listBrandCalStyles());
   const items = useMemo(() => itemsSWR.data ?? [], [itemsSWR.data]);
   const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
   const brands = brandsSWR.data ?? [];
   const campaigns = campaignsSWR.data ?? [];
-  const templates = templatesSWR.data ?? [];
   const styleMap = useMemo(() => Object.fromEntries((stylesSWR.data ?? []).map((s) => [s.brand_id, s])) as Record<string, BrandCalStyle>, [stylesSWR.data]);
   const loading = mode === "content" ? itemsSWR.loading : tasksSWR.loading;
   const loadError = mode === "content" ? (!!itemsSWR.error && items.length === 0) : (!!tasksSWR.error && tasks.length === 0);   // โหลดพลาด + ไม่มีข้อมูลเก่า → โชว์หน้าผิดพลาด
@@ -601,7 +599,7 @@ export function ContentCalendarView() {
       )}
 
       <ContentCreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); reload(); }}
-        brands={brands} campaigns={campaigns} templates={templates}
+        brands={brands} campaigns={campaigns}
         defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultDate={createDate} pushToast={pushToast} />
       <CreateTaskModal open={taskCreateOpen} onClose={() => setTaskCreateOpen(false)} onCreated={() => { setTaskCreateOpen(false); void tasksSWR.revalidate(true); }} pushToast={pushToast} />
 

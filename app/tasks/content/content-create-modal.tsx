@@ -15,9 +15,9 @@ import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
 import {
-  createContent, getContent, getRecommendedTimes, POST_TYPES, postTypeLabel, splitPostTypes, joinPostTypes,
+  createContent, getRecommendedTimes, POST_TYPES, postTypeLabel, joinPostTypes,
   getParentSkuChildren, resolveBrandFromProduct, type ParentSkuChild,
-  type ContentItem, type ContentCaption, type ContentStatus, type BrandOption, type RecommendedTimes,
+  type ContentStatus, type BrandOption, type RecommendedTimes,
 } from "../data";
 
 type CampaignOpt = { id: string; name: string };
@@ -26,13 +26,12 @@ type CampaignOpt = { id: string; name: string };
 type Form = { title: string; post_types: string[]; status: ContentStatus; brand_id: string; campaign_id: string; scheduled_at: string; product: SkuPickerValue | null; parent: ParentSkuPickerValue | null; platforms: string[]; note: string };
 const emptyForm = (): Form => ({ title: "", post_types: ["image"], status: "draft", brand_id: "", campaign_id: "", scheduled_at: "", product: null, parent: null, platforms: [], note: "" });
 
-export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, templates, defaultBrandId, defaultDate, pushToast }: {
+export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, defaultBrandId, defaultDate, pushToast }: {
   open: boolean;
   onClose: () => void;
   onCreated: (r: { id: string; content_no: string }) => void;
   brands: BrandOption[];
   campaigns: CampaignOpt[];
-  templates: ContentItem[];
   defaultBrandId?: string | null;   // เติมแบรนด์ให้ (เช่น แท็บแบรนด์ที่เลือกในปฏิทิน)
   defaultDate?: string | null;       // เติมวันตั้งโพสต์ให้ (YYYY-MM-DDTHH:mm) — เช่น คลิกช่องวัน
   pushToast: (type: "success" | "error" | "info", m: string) => void;
@@ -40,8 +39,6 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
   const t = useT();
   const { platforms } = useCreativeOptions();
   const [form, setForm] = useState<Form>(emptyForm());
-  const [tplId, setTplId] = useState("");
-  const [tplCaptions, setTplCaptions] = useState<ContentCaption[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
@@ -63,7 +60,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       sched = `${sched}T${rec || "10:00"}`;
     }
     setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched });
-    setTplId(""); setTplCaptions([]); setDirty(false); setFormErr(null); setChildren([]); brandTouchedRef.current = !!defaultBrandId;
+    setDirty(false); setFormErr(null); setChildren([]); brandTouchedRef.current = !!defaultBrandId;
   }, [open, defaultBrandId, defaultDate]);
 
   const upd = (patch: Partial<Form>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
@@ -117,14 +114,6 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
     return { items, label: labels[day] };
   }, [form.scheduled_at, recTimes, t]);
   const applyRecTime = (tm: string) => { const d = form.scheduled_at.slice(0, 10) || new Date().toISOString().slice(0, 10); upd({ scheduled_at: `${d}T${tm}` }); };
-  const applyTemplate = async (tid: string) => {
-    setTplId(tid);
-    if (!tid) { setTplCaptions([]); return; }
-    try { const d = await getContent(tid); const bid = d.brand_id ?? form.brand_id ?? ""; const allow = bpMap[bid]; const tplPlats = d.platforms ?? [];
-           upd({ post_types: splitPostTypes(d.post_type).length ? splitPostTypes(d.post_type) : ["image"], platforms: allow ? tplPlats.filter((x: string) => allow.includes(x)) : tplPlats, brand_id: bid, note: d.note ?? "" }); setTplCaptions(d.captions ?? []); }
-    catch (e) { pushToast("error", (e as Error).message); }
-  };
-
   const save = async () => {
     if (!form.title.trim()) { setFormErr(t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
     setSaving(true); setFormErr(null);
@@ -135,7 +124,6 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
         platform_formats: Object.fromEntries(Object.entries(bpFmt[form.brand_id] ?? {}).filter(([p]) => form.platforms.includes(p))),
-        captions: tplCaptions.length ? form.platforms.map((p) => { const c = tplCaptions.find((x) => x.platform === p); return { platform: p, caption: c?.caption ?? null, hashtags: c?.hashtags ?? null, caption_type: c?.caption_type ?? "short" }; }) : undefined,
       });
       setDirty(false);
       pushToast("success", t(`สร้างคอนเทนต์ ${r.content_no} แล้ว`, `Content ${r.content_no} created`));
@@ -151,28 +139,6 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง", "Create")}</button>
       </>}>
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
-      {templates.length > 0 && (
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-sm text-slate-600">📋 {t("เริ่มจากเทมเพลต:", "Start from template:")}</span>
-            <a href="/tasks/content?view=templates" className="text-xs text-violet-600 hover:underline">⚙️ {t("จัดการ/ตั้งไอคอนแม่แบบ", "Manage templates")}</a>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <button type="button" onClick={() => applyTemplate("")}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left ${tplId === "" ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:border-violet-300"}`}>
-              <span className="text-lg shrink-0">🚫</span>
-              <span className="truncate text-slate-500">{t("ไม่ใช้เทมเพลต", "No template")}</span>
-            </button>
-            {templates.map((tp) => (
-              <button key={tp.id} type="button" onClick={() => applyTemplate(tp.id)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left ${tplId === tp.id ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:border-violet-300"}`}>
-                <span className="text-lg shrink-0">{tp.template_icon || "🧩"}</span>
-                <span className="truncate font-medium text-slate-700">{tp.title}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
         {/* ชื่อคอนเทนต์ — ช่องใหญ่/เด่น ให้เห็นชัดว่าต้องกรอกอะไรก่อน */}
         <ERPFormField label={t("ชื่อคอนเทนต์", "Content Title")} required span={2}>

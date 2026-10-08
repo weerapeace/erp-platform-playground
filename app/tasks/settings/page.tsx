@@ -337,15 +337,17 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                 const dirty = isDirty(o);
                 const iconImg = o.icon_key ? r2ImageUrl(o.icon_key, 48) : null;
                 const hex = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
+                const active = o.is_active !== false;   // ปิดใช้งาน = ไม่โผล่ในฟอร์ม/ป๊อปเลือกแพลตฟอร์ม (ข้อมูลเก่ายังอ่านชื่อได้)
                 return (
-                <div key={o.id} {...rowProps(i)} className={`flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 transition-colors ${rowCls(i)}`}>
+                <div key={o.id} {...rowProps(i)} className={`flex items-center gap-2 border rounded-lg px-3 py-2 transition-colors ${active ? "border-slate-200" : "border-dashed border-slate-200 bg-slate-50/70"} ${rowCls(i)}`}>
                   <DragHandle {...handleProps(i)} title={t("ลากเพื่อจัดลำดับ", "Drag to reorder")} />
                   {/* พรีวิวชิปจริง — รูปไอคอน > สี+emoji > slate */}
                   <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[140px]" style={hex && !iconImg ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined}
                     title={t("ตัวอย่างชิป", "Chip preview")}>
                     {iconImg ? <img src={iconImg} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : icon ? <span className="leading-none">{icon}</span> : null}
-                    <span className="truncate">{label || o.label}</span>
+                    <span className={`truncate ${active ? "" : "line-through opacity-60"}`}>{label || o.label}</span>
                   </span>
+                  {!active && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600" title={t("ไม่โผล่ให้เลือกในฟอร์ม/ป๊อปแพลตฟอร์ม — กดปุ่ม 🚫 ด้านขวาเพื่อเปิดใช้", "Hidden from pickers — click 🚫 to enable")}>{t("ปิดอยู่", "Off")}</span>}
                   <input value={label} onChange={(e) => setField(o, { label: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && dirty) saveRow(o); }} className="flex-1 min-w-[80px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* สีประเภท (มีทั้งประเภทงาน + แพลตฟอร์ม) */}
@@ -363,6 +365,9 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                   </div>
                   {dirty && <button onClick={() => saveRow(o)} title={t("บันทึกแถวนี้", "Save this row")} className="h-7 px-2 text-[11px] font-medium text-white bg-violet-600 rounded hover:bg-violet-700 shrink-0">💾 {t("บันทึก", "Save")}</button>}
                   <span className="text-[10px] text-slate-300 font-mono">{o.key}</span>
+                  {/* เปิด/ปิดใช้งาน — ปิด = ซ่อนจากฟอร์มสร้าง/ป๊อปแบรนด์/แถวติ๊กใน drawer แต่ไม่ลบ (งานเก่ายังโชว์ชื่อได้) */}
+                  <button onClick={() => patchMeta(o, { is_active: !active })} title={active ? t("เปิดใช้อยู่ — กดเพื่อปิด (ซ่อนจากตัวเลือก ไม่ลบ)", "Enabled — click to disable") : t("ปิดอยู่ — กดเพื่อเปิดใช้", "Disabled — click to enable")}
+                    className={`h-7 w-7 inline-flex items-center justify-center rounded border text-xs ${active ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border-slate-300 bg-white text-slate-500 hover:bg-slate-100"}`}>{active ? "✓" : "🚫"}</button>
                   <button onClick={() => remove(o)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>
                 </div>
                 );
