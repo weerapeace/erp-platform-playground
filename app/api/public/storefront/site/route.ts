@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeFieldMap } from "@/lib/website-field-map";
+import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,6 +59,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     field_map: unknown;
   };
 
+  // ข้อมูลร้าน (คำโปรย/ติดต่อ/ค่าส่ง/ช่องทางจ่าย) — ส่งเฉพาะชุดสาธารณะ
+  const info = publicSiteInfo(await readSiteInfo(sb, s.id));
+
   const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
   const layoutSource = preview && s.home_layout_draft != null ? s.home_layout_draft : s.home_layout;
 
@@ -74,5 +78,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      * เว็บร้านต้องวาดเมนูหมวดจากรายการนี้ ห้ามฝังไว้ในโค้ดเว็บ ไม่งั้นเพิ่มหมวดแล้วไม่ขึ้น
      */
     categories: normalizeFieldMap(s.field_map).categories,
+    /**
+     * ข้อมูลร้าน — เว็บร้านใช้วาด footer/หน้าติดต่อ/เงื่อนไขค่าส่ง (แก้ได้ที่แท็บ "🏪 ข้อมูลร้าน")
+     * เว็บรุ่นเก่าที่ยังไม่รู้จักฟิลด์นี้จะข้ามไปเอง
+     */
+    info,
   });
 }

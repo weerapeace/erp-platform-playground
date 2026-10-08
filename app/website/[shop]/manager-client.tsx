@@ -17,6 +17,8 @@ import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
 import { WebsiteThemePanel } from "@/components/website-theme-panel";
 import { WebsiteLayoutPanel } from "@/components/website-layout-panel";
 import { WebsitePagesPanel } from "@/components/website-pages-panel";
+import { WebsiteInfoPanel } from "@/components/website-info-panel";
+import { WebsiteOrdersPanel } from "@/components/website-orders-panel";
 
 type Shop = { id: string; name: string; slug: string; isDefault: boolean };
 
@@ -94,7 +96,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [tab, setTab] = useState<"listings" | "fieldmap" | "design" | "layout" | "pages">("listings");
+  const [tab, setTab] = useState<"listings" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders">("listings");
 
   // แผงเพิ่มสินค้า
   const [showAdd, setShowAdd] = useState(false);
@@ -289,6 +291,8 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               { k: "design", l: "🎨 ดีไซน์" },
               { k: "layout", l: "🧱 หน้าแรก" },
               { k: "pages", l: "📄 หน้าเว็บ" },
+              { k: "info", l: "🏪 ข้อมูลร้าน" },
+              { k: "orders", l: "🧾 ออเดอร์" },
             ] as const).map((t) => (
               <button
                 key={t.k}
@@ -318,6 +322,12 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
 
         {/* แท็บหน้าเว็บอื่น ๆ */}
         {tab === "pages" && shop && <WebsitePagesPanel shopSlug={shop.slug} shopId={shop.id} />}
+
+        {/* แท็บข้อมูลร้าน (คำโปรย/ติดต่อ/ค่าส่ง/ช่องทางจ่าย) */}
+        {tab === "info" && shop && <WebsiteInfoPanel shopSlug={shop.slug} shopId={shop.id} />}
+
+        {/* แท็บออเดอร์จากเว็บ */}
+        {tab === "orders" && shop && <WebsiteOrdersPanel shopSlug={shop.slug} shopId={shop.id} />}
 
         {/* แถบสรุป + ปุ่มเพิ่ม */}
         {tab === "listings" && shop && (
