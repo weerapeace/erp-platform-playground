@@ -13,7 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { nextContentNo } from "@/lib/creative-tasks-server";
-import { SELECT, flattenContent, attachAssignees, validateContentFields } from "./shared";
+import { SELECT, flattenContent, attachAssignees, validateContentFields, attachProducts, normalizeProducts, replaceContentProducts } from "./shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -48,6 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ data: [], total: 0, error: friendlyDbError(error.message) }, { status: 500 });
   const items = ((data ?? []) as Record<string, unknown>[]).map(flattenContent);
   await attachAssignees(admin, items);
+  await attachProducts(admin, items);   // สินค้าทุกตัวในโพสต์ (การ์ด/ปฏิทินโชว์ +N ได้)
   return NextResponse.json({ data: items, total: count ?? items.length, error: null });
 }
 
@@ -57,6 +58,7 @@ type CreateBody = {
   post_type?: string | null; platforms?: string[]; platform_formats?: Record<string, string>; status?: string; scheduled_at?: string | null;
   product_links?: { platform: string; url: string }[]; note?: string | null; captions?: Caption[]; is_template?: boolean; template_icon?: string | null;
   discount_value?: number | null; discount_is_percent?: boolean; assignee_id?: string | null; assignee_ids?: string[];
+  products?: { parent_sku_id?: string | null; sku_id?: string | null }[];   // สินค้าหลายตัว — แถวแรก = ตัวหลัก (ทับ sku_id/parent_sku_id)
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -70,9 +72,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (vErr) return NextResponse.json({ error: vErr }, { status: 400 });
 
   const admin = supabaseAdmin();
+  // สินค้าหลายตัว: แถวแรก = ตัวหลัก → ลงคอลัมน์เดิมด้วย (ของเดิมทุกจุดอ่านคอลัมน์นี้)
+  const prods = normalizeProducts(body.products);
+  const prim = prods?.[0] ?? null;
+  const primarySku = prim ? prim.sku_id : (body.sku_id || null);
+  const primaryParent = prim ? prim.parent_sku_id : (body.parent_sku_id || null);
   const row = (no: string) => ({
     content_no: no, title, task_id: body.task_id || null, campaign_id: body.campaign_id || null, brand_id: body.brand_id || null,
-    sku_id: body.sku_id || null, parent_sku_id: body.parent_sku_id || null, product_name: body.product_name?.trim() || null, post_type: body.post_type || null,
+    sku_id: primarySku, parent_sku_id: primaryParent, product_name: body.product_name?.trim() || null, post_type: body.post_type || null,
     platforms: body.platforms ?? [], status: body.status || "draft", scheduled_at: body.scheduled_at || null,
     platform_formats: body.platform_formats ?? {},   // รูปแบบโพสต์ต่อแพลตฟอร์ม (มาจากค่าเริ่มต้นของแบรนด์)
     product_links: body.product_links ?? [], note: body.note?.trim() || null, is_template: !!body.is_template, template_icon: body.template_icon || null, created_by: user?.id ?? null,
@@ -88,6 +95,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ({ data: created, error } = await admin.from("erp_creative_content").insert(row(no)).select("id, content_no").single());
   }
   if (error || !created) return NextResponse.json({ error: friendlyDbError(error?.message ?? "insert failed") }, { status: 400 });
+
+  // รายการสินค้าในโพสต์ (ตัวหลัก + เพิ่มเติม) — ไม่ได้ส่ง products มา แต่มีสินค้าหลัก → ลง 1 แถวให้ตารางตรงกัน
+  const productRows = prods ?? ((primaryParent || primarySku) ? [{ parent_sku_id: primaryParent, sku_id: primarySku }] : []);
+  if (productRows.length) await replaceContentProducts(admin, created.id, productRows);
 
   // captions เริ่มต้น (ถ้าส่งมา)
   if (Array.isArray(body.captions) && body.captions.length > 0) {

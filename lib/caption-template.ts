@@ -23,16 +23,16 @@ export type CaptionVars = {
   caption?: string | null;
   hashtags?: string | null;
   shop?: ShopChannel[] | null;
-  fake_price?: number | null;
-  real_price?: number | null;
-  price?: number | null;
+  fake_price?: number | string | null;   // ตัวเลข = ราคาเดียว · ข้อความ = หลายสินค้า (บรรทัดละ "ชื่อ: ราคา") ประกอบมาแล้ว
+  real_price?: number | string | null;
+  price?: number | string | null;
   color?: string | null;
   sku?: string | null;
   product?: string | null;
   link?: string | null;
 };
 
-const money = (n: number | null | undefined) => (n == null ? "" : Number(n).toLocaleString("th-TH"));
+const money = (n: number | string | null | undefined) => (n == null ? "" : typeof n === "string" ? n : Number(n).toLocaleString("th-TH"));
 
 /** แปลง vars → map ของ string (ค่าที่จะแทนใน {...}) */
 function toMap(v: CaptionVars): Record<string, string> {

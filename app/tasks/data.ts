@@ -376,6 +376,12 @@ export async function saveBrandCalStyle(s: BrandCalStyle): Promise<void> {
 // Content / Social
 // ============================================================
 export type ContentCaption = { id?: string; platform: string; caption: string | null; hashtags: string | null; caption_type?: string; sort_order?: number };
+/** สินค้าในคอนเทนต์ (หลายตัวต่อโพสต์ — erp_creative_content_products) · แถว is_primary = ตัวหลัก (ตรงกับ sku_id/parent_sku_id ของคอนเทนต์) */
+export type ContentProduct = {
+  id?: string; parent_sku_id: string | null; sku_id: string | null; sort_order?: number; is_primary?: boolean;
+  parent_code?: string | null; parent_name?: string | null; parent_image_url?: string | null; parent_links?: { platform: string; url: string }[];
+  sku_code?: string | null; sku_name?: string | null; sku_color_th?: string | null; sku_color_en?: string | null; sku_price?: number | null; sku_fake_price?: number | null;
+};
 export type ContentItem = {
   [key: string]: unknown;
   id: string; content_no: string | null; title: string;
@@ -387,6 +393,7 @@ export type ContentItem = {
   parent_sku_id?: string | null; parent_sku_code?: string | null; parent_sku_name?: string | null;
   parent_links?: { platform: string; url: string }[];
   parent_sku_image_url?: string | null;   // รูปปก Parent SKU   // ลิงก์ร้านที่เก็บไว้ที่ Parent SKU (shopee/lazada/tiktok) — ใช้เติมลิงก์สินค้าให้
+  products?: ContentProduct[];   // สินค้าทุกตัวในโพสต์ (ตัวหลัก + เพิ่มเติม) — ว่าง/ไม่มี = ใช้ sku_id/parent_sku_id ตามเดิม
   cover_image_url?: string | null;   // รูปหน้าปก (resolve จากสื่อแนบ/SKU/งาน) — ใช้โชว์บนการ์ดกระดานแคมเปญ
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;

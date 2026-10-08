@@ -43,6 +43,7 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { getBrandPlatforms } from "./brand-platforms-modal";
+import { ExtraProductsEditor, extrasFromDetail, extraToPayload, childToSkuValue, skuValueToChild, multiProductVars, type ExtraProduct } from "./content-products-editor";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
@@ -471,6 +472,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
   const [children, setChildren] = useState<ParentSkuChild[]>([]);   // ลูก SKU ของ Parent (สี 2 ภาษา + ราคา)
+  const [extras, setExtras] = useState<ExtraProduct[]>([]);   // สินค้าเพิ่มเติมในโพสต์ (นอกจากตัวหลัก sku/parent) — erp_creative_content_products
   const [colorSource, setColorSource] = useState<"th" | "en">("th");   // {color} ใช้ไทย/อังกฤษ (จำต่อคอนเทนต์)
   const [priceSkuId, setPriceSkuId] = useState<string>("");   // เลือกราคาจาก SKU ลูกตัวไหน (Parent)
   const [recTimes, setRecTimes] = useState<RecommendedTimes>({});   // เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์)
@@ -519,6 +521,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setDiscountPct(!!detail.discount_is_percent);
       setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price, fake_price: detail.sku_fake_price ?? null } : null);
       setParent(detail.parent_sku_id ? { id: detail.parent_sku_id, code: detail.parent_sku_code ?? "", name: detail.parent_sku_name ?? "" } : null);
+      setExtras(extrasFromDetail(detail.products));
       setBrandId(detail.brand_id ?? null); setBrandTouched(false);
       setColorSource(detail.color_source === "en" ? "en" : "th");
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์ — แพลตฟอร์มที่ยังไม่มีแคปชั่น เติมแฮชแท็กเริ่มต้นให้
@@ -809,12 +812,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   }, [scheduledAt, recTimes, t]);
   const applyRecommendedTime = (tm: string) => setScheduledAt(`${scheduledAt.slice(0, 10)}T${tm}`);
   // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
+  // หลายสินค้าในโพสต์ → {product}/{color}/{price}/{link} แยกเป็นบรรทัดต่อสินค้า (สินค้าเดียว = null → ใช้ค่าเดิม หน้าตาเหมือนเดิมเป๊ะ)
+  const multiVars = useMemo(() => multiProductVars({ code: sku?.code ?? parent?.code ?? null, name: sku?.name ?? parent?.name ?? d?.product_name ?? null, color: colorText, price: realSelling, fake: fakeVal, links: links.filter((l) => l.url.trim()) }, extras, colorSource),
+    [sku?.code, sku?.name, parent?.code, parent?.name, d?.product_name, colorText, realSelling, fakeVal, links, extras, colorSource]);
   const sharedVars = useMemo(() => ({
     shop: shopChannels, fake_price: fakeVal, real_price: realSelling,
     price: realSelling, color: colorText, sku: sku?.code ?? null, product: sku?.name ?? d?.product_name ?? null,
     // {link} = ลิงก์สินค้าทุกแพลตฟอร์มเป็นบล็อก (เช่น "Shopee: TEST1\nLazada: TEST2")
     link: links.filter((l) => l.url.trim()).map((l) => `${platformLabel(l.platform)}: ${l.url.trim()}`).join("\n") || null,
-  }), [shopChannels, fakeVal, realSelling, colorText, sku?.code, sku?.name, d?.product_name, links]);
+    ...(multiVars ?? {}),
+  }), [shopChannels, fakeVal, realSelling, colorText, sku?.code, sku?.name, d?.product_name, links, multiVars]);
 
   // คัดลอกพรอมต์ตั้งต้น (เติมตัวแปรสินค้าให้แล้ว) ไปวางใน AI เขียนแคปชั่นต่อ
   const copyPrompt = async () => {
@@ -886,6 +893,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null, assignee_ids: assignees.map((a) => a.id), color_source: colorSource,
         post_status: postStatus, posted_links: postedLinks, platform_images: platformImages, platform_formats: platformFormats,
         brand_id: brandId || null, sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
+        // สินค้าทุกตัวในโพสต์ — ตัวหลักขึ้นก่อน (API ทับ sku_id/parent_sku_id จากแถวแรกให้ตรงกัน)
+        products: [...((parent || sku) ? [{ parent_sku_id: parent?.id ?? sku?.parent_sku_id ?? null, sku_id: sku?.id ?? null }] : []), ...extras.map(extraToPayload)],
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
       });
@@ -920,6 +929,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const totalCount = caps.filter((c) => (postStatus[c.platform] ?? "todo") !== "skip").length;
   const schedLabel = scheduledAt ? `${new Date(scheduledAt).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} · ${scheduledAt.slice(11, 16)}` : null;
   const hasProduct = !!(sku || parent);
+  // ⭐ สลับสินค้าเพิ่มเติมขึ้นเป็นตัวหลัก: ตัวหลักเดิม (พร้อม SKU ลูก + ลิงก์ที่กรอกไว้) ถอยไปหัวรายการเพิ่มเติม · ลิงก์สินค้าเปลี่ยนเป็นของ Parent ใหม่
+  const makePrimary = (i: number) => {
+    const e = extras[i]; if (!e || (!e.parent && !e.sku)) return;
+    const oldParent = parent ?? (sku?.parent_sku_id ? { id: sku.parent_sku_id, code: sku.parent_code ?? "", name: sku.parent_name ?? "" } : null);
+    const old: ExtraProduct | null = hasProduct ? { key: `old-${Date.now()}`, parent: oldParent, sku: sku ? skuValueToChild(sku) : null, children: parent ? children : [], childrenLoaded: !!parent, links: links.filter((l) => l.url.trim()) } : null;
+    setParent(e.parent); setSku(e.sku ? childToSkuValue(e.sku, e.parent) : null); setPriceSkuId("");
+    setLinks(e.links.length ? e.links.map((l) => ({ ...l })) : []);
+    setExtras((xs) => { const rest = xs.filter((_, j) => j !== i); return old ? [old, ...rest] : rest; });
+  };
   const productCover = sku?.image_url ?? parent?.image_url ?? d.parent_sku_image_url ?? d.cover_image_url ?? null;
   const discountPctLabel = discountAmt != null && fakeVal ? Math.round((discountAmt / fakeVal) * 100) : null;
   const taskKeySet = new Set(taskMedia.images.map((im) => im.key));
@@ -1077,6 +1095,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                       </button>
                     ); })}
                   </div>
+                </div>
+              )}
+              {/* สินค้าเพิ่มเติมในโพสต์ — โปรโมทหลายตัว (⭐ สลับขึ้นเป็นตัวหลัก · ↗ เปิด Parent · ลากสลับลำดับ) */}
+              {hasProduct && (
+                <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                  <ExtraProductsEditor items={extras} onChange={setExtras} colorSource={colorSource} onMakePrimary={makePrimary} onOpenParent={(id) => setOpenParentId(id)}
+                    excludeParentIds={[parent?.id, sku?.parent_sku_id]} onDuplicate={() => pushToast("info", t("สินค้านี้อยู่ในโพสต์แล้ว", "Already in this post"))}
+                    hint={extras.length > 0 ? t("แคปชั่น: {color} {price} {link} จะแยกเป็นบรรทัดต่อสินค้า · กดบันทึกเพื่อเก็บ", "Captions list colors/prices/links per product · Save to keep") : undefined} />
                 </div>
               )}
               {/* สี + ราคา — บรรทัดละเรื่อง (เดิมเป็นกล่องใหญ่ 3 ใบ) */}
@@ -1345,7 +1371,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   );
 }
 
-type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: number | null; price: number | null; color: string | null; sku: string | null; product: string | null; link: string | null };
+// ราคาเป็นข้อความได้เมื่อมีหลายสินค้า (บรรทัดละ "ชื่อ: ราคา" — ดู multiProductVars)
+type SharedVars = { shop: ShopChannel[]; fake_price: number | string | null; real_price: number | string | null; price: number | string | null; color: string | null; sku: string | null; product: string | null; link: string | null };
 
 // ============================================================
 // ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)

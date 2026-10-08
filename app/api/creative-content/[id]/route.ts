@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenContent, attachAssignees, validateContentFields, PARENT_LINK_PLATFORMS } from "../shared";
+import { SELECT, flattenContent, attachAssignees, validateContentFields, PARENT_LINK_PLATFORMS, loadContentProducts, normalizeProducts, replaceContentProducts, syncPrimaryProduct } from "../shared";
 import { r2ImageUrl } from "@/lib/r2-image";
 
 // รูปหน้าปกของคอนเทนต์ (ให้การ์ดบนกระดานแคมเปญโชว์รูป) — ลำดับ: สื่อที่แนบ(รูป) → รูป SKU → รูปงานที่ผูก
@@ -42,11 +42,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const flat = flattenContent(data as Record<string, unknown>);
   await attachAssignees(admin, [flat]);
   const cover_image_url = await resolveContentCover(admin, id, flat);
-  return NextResponse.json({ data: { ...flat, captions: caps ?? [], cover_image_url }, error: null });
+  const products = (await loadContentProducts(admin, [id])).get(id) ?? [];   // สินค้าทุกตัวในโพสต์ (ตัวหลัก + เพิ่มเติม)
+  return NextResponse.json({ data: { ...flat, captions: caps ?? [], cover_image_url, products }, error: null });
 }
 
 type Caption = { platform: string; caption?: string | null; hashtags?: string | null; caption_type?: string | null };
-type PatchBody = Record<string, unknown> & { captions?: Caption[]; product_links?: { platform: string; url: string }[] };
+type PatchBody = Record<string, unknown> & { captions?: Caption[]; product_links?: { platform: string; url: string }[]; products?: { parent_sku_id?: string | null; sku_id?: string | null }[] };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
@@ -57,7 +58,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const admin = supabaseAdmin();
   // ── ล็อกคอนเทนต์ที่ "เผยแพร่แล้ว" — แก้เนื้อหาหลักไม่ได้ (แก้ได้เฉพาะสถานะโพสต์/ลิงก์/โน้ต) จนกว่าจะย้อนสถานะ ──
-  const LOCKED_WHEN_PUBLISHED = ["title", "brand_id", "campaign_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "discount_value", "discount_is_percent", "captions", "color_source"];
+  const LOCKED_WHEN_PUBLISHED = ["title", "brand_id", "campaign_id", "sku_id", "parent_sku_id", "product_name", "products", "post_type", "platforms", "discount_value", "discount_is_percent", "captions", "color_source"];
   const { data: curC } = await admin.from("erp_creative_content").select("status, parent_sku_id").eq("id", id).maybeSingle();
   const curStatus = (curC as { status?: string } | null)?.status ?? "";
   const unlocking = "status" in body && body.status !== "published";   // กำลังย้อนสถานะออกจากเผยแพร่ = ปลดล็อก
@@ -71,6 +72,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
   if (Array.isArray(body.product_links)) patch.product_links = body.product_links;
+  // สินค้าหลายตัว: แถวแรก = ตัวหลัก → ทับคอลัมน์ sku_id/parent_sku_id ให้ตรงกันเสมอ
+  const prods = normalizeProducts(body.products);
+  if (prods) { patch.parent_sku_id = prods[0]?.parent_sku_id ?? null; patch.sku_id = prods[0]?.sku_id ?? null; }
   // m2m ผู้รับผิดชอบ: ตั้ง assignee_id (เดี่ยว) = คนแรก ให้ back-compat
   if (Array.isArray((body as { assignee_ids?: string[] }).assignee_ids)) { const arr = (body as { assignee_ids: string[] }).assignee_ids; patch.assignee_ids = arr; patch.assignee_id = arr[0] ?? null; }
   if (patch.status === "published" && !("published_url" in patch && !patch.published_url)) patch.published_at = new Date().toISOString();
@@ -84,7 +88,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // เขียนเฉพาะแพลตฟอร์มที่คอนเทนต์นี้มีลิงก์ (ไม่ล้างค่าเดิมของแพลตฟอร์มที่ไม่ได้ส่งมา) · ค่าเท่าเดิมไม่เขียนซ้ำ
   let parentLinksSynced: string[] = [];
   if (Array.isArray(body.product_links)) {
-    const parentId = (typeof body.parent_sku_id === "string" && body.parent_sku_id) ? body.parent_sku_id : ((curC as { parent_sku_id?: string | null } | null)?.parent_sku_id ?? null);
+    const parentId = (typeof patch.parent_sku_id === "string" && patch.parent_sku_id) ? patch.parent_sku_id : ((curC as { parent_sku_id?: string | null } | null)?.parent_sku_id ?? null);
     if (parentId) {
       const want: Record<string, string> = {};
       for (const l of body.product_links) { const pf = String(l?.platform ?? "").toLowerCase(); const url = String(l?.url ?? "").trim(); if (url && (PARENT_LINK_PLATFORMS as readonly string[]).includes(pf) && !want[pf]) want[pf] = url; }
@@ -113,9 +117,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   await writeAudit(admin, { action: "update", entityType: "creative_content", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { changes: Object.keys(patch).filter((k) => k !== "updated_at") } });
 
+  // รายการสินค้าในโพสต์: ส่ง products มา = แทนที่ทั้งชุด · ส่งแค่ sku_id/parent_sku_id = อัปเดตเฉพาะตัวหลัก (ไม่แตะสินค้าเพิ่มเติม)
+  if (prods) await replaceContentProducts(admin, id, prods);
+  else if ("sku_id" in body || "parent_sku_id" in body) {
+    const { data: cur2 } = await admin.from("erp_creative_content").select("parent_sku_id, sku_id").eq("id", id).maybeSingle();
+    const c2 = (cur2 ?? {}) as { parent_sku_id?: string | null; sku_id?: string | null };
+    await syncPrimaryProduct(admin, id, c2.parent_sku_id ?? null, c2.sku_id ?? null);
+  }
+
   const { data: fresh } = await admin.from("erp_creative_content").select(SELECT).eq("id", id).maybeSingle();
   const { data: caps2 } = await admin.from("erp_creative_content_captions").select("*").eq("content_id", id).order("sort_order", { ascending: true });
-  return NextResponse.json({ data: fresh ? { ...flattenContent(fresh as Record<string, unknown>), captions: caps2 ?? [] } : null, parent_links_synced: parentLinksSynced, error: null });
+  const products = (await loadContentProducts(admin, [id])).get(id) ?? [];
+  return NextResponse.json({ data: fresh ? { ...flattenContent(fresh as Record<string, unknown>), captions: caps2 ?? [], products } : null, parent_links_synced: parentLinksSynced, error: null });
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {

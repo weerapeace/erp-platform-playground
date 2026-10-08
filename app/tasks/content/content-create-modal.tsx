@@ -14,6 +14,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
+import { ExtraProductsEditor, extraToPayload, childToSkuValue, skuValueToChild, type ExtraProduct } from "./content-products-editor";
 import {
   createContent, getRecommendedTimes, POST_TYPES, postTypeLabel, joinPostTypes,
   getParentSkuChildren, resolveBrandFromProduct, type ParentSkuChild,
@@ -60,12 +61,22 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       sched = `${sched}T${rec || "10:00"}`;
     }
     setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched });
-    setDirty(false); setFormErr(null); setChildren([]); brandTouchedRef.current = !!defaultBrandId;
+    setDirty(false); setFormErr(null); setChildren([]); setExtras([]); brandTouchedRef.current = !!defaultBrandId;
   }, [open, defaultBrandId, defaultDate]);
 
   const upd = (patch: Partial<Form>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   // ลูก SKU ของ Parent ที่เลือก (ชิปสีให้กดเลือกสีเดียว หรือใช้ทุกสี)
   const [children, setChildren] = useState<ParentSkuChild[]>([]);
+  // สินค้าเพิ่มเติมในโพสต์ (นอกจากตัวหลักในช่อง SKU/Parent) — 1 โพสต์โปรโมทได้หลายตัว
+  const [extras, setExtras] = useState<ExtraProduct[]>([]);
+  // ⭐ สลับสินค้าเพิ่มเติมขึ้นเป็นตัวหลัก (ตัวหลักเดิมถอยไปอยู่หัวรายการเพิ่มเติม)
+  const makePrimary = (i: number) => {
+    const e = extras[i]; if (!e || (!e.parent && !e.sku)) return;
+    const oldParent = form.parent ?? (form.product?.parent_sku_id ? { id: form.product.parent_sku_id, code: form.product.parent_code ?? "", name: form.product.parent_name ?? "" } : null);
+    const old: ExtraProduct | null = (form.parent || form.product) ? { key: `old-${Date.now()}`, parent: oldParent, sku: form.product ? skuValueToChild(form.product) : null, children: form.parent ? children : [], childrenLoaded: !!form.parent, links: [] } : null;
+    upd({ parent: e.parent, product: e.sku ? childToSkuValue(e.sku, e.parent) : null });
+    setExtras((xs) => { const rest = xs.filter((_, j) => j !== i); return old ? [old, ...rest] : rest; });
+  };
   useEffect(() => { if (!form.parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(form.parent.id).then((cs) => { if (live) setChildren(cs); }).catch(() => {}); return () => { live = false; }; }, [form.parent?.id]);
   // เลือก SKU จาก picker → เติม Parent ให้ (เปลี่ยนเองได้)
   const pickSku = (v: SkuPickerValue | null) => {
@@ -122,6 +133,8 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         title: form.title.trim(), campaign_id: form.campaign_id || null, brand_id: form.brand_id || null,
         sku_id: form.product?.id ?? null, parent_sku_id: form.parent?.id ?? null, product_name: form.product?.name ?? form.parent?.name ?? null, post_type: joinPostTypes(form.post_types),
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
+        // สินค้าทุกตัวในโพสต์: ตัวหลัก (ช่อง SKU/Parent) ขึ้นก่อน แล้วตามด้วยสินค้าเพิ่มเติม
+        products: [...((form.parent || form.product) ? [{ parent_sku_id: form.parent?.id ?? form.product?.parent_sku_id ?? null, sku_id: form.product?.id ?? null }] : []), ...extras.map(extraToPayload)],
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
         platform_formats: Object.fromEntries(Object.entries(bpFmt[form.brand_id] ?? {}).filter(([p]) => form.platforms.includes(p))),
       });
@@ -184,6 +197,12 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
             </div>
           </div>
         )}
+        {/* สินค้าเพิ่มเติม — โปรโมทหลายตัวในโพสต์เดียว (⭐ สลับขึ้นเป็นตัวหลักได้) */}
+        <div className="col-span-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-3 py-2">
+          <ExtraProductsEditor items={extras} onChange={(xs) => { setExtras(xs); setDirty(true); }} onMakePrimary={(form.parent || form.product) ? makePrimary : undefined}
+            excludeParentIds={[form.parent?.id, form.product?.parent_sku_id]} onDuplicate={() => pushToast("info", t("สินค้านี้อยู่ในโพสต์แล้ว", "Already in this post"))}
+            hint={t("ตัวหลัก = ช่อง SKU/Parent ด้านบน (ใช้สี/ราคา/ลิงก์ในแคปชั่น) · มีหลายตัว → แคปชั่นจะแยกสี/ราคา/ลิงก์เป็นบรรทัดต่อสินค้า", "Primary = SKU/Parent above · with several products, captions list colors/prices/links per product")} />
+        </div>
         <ERPFormField label={t("แพลตฟอร์ม", "Platforms")} span={2}>
           <div className="flex items-center justify-between gap-2 mb-1">
             <span className="text-[11px] text-slate-400">
