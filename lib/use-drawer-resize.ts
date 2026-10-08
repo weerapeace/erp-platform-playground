@@ -4,7 +4,8 @@
 // useDrawerResize (ของกลาง) — ลากขอบซ้ายของ drawer ชิดขวาเพื่อปรับความกว้าง + จำค่าไว้ (localStorage)
 // ใช้: const { width, startResize } = useDrawerResize("taskDrawerWidth", 640)
 //   <div style={{ width }} className="fixed right-0 ... max-w-[97vw]">
-//     <div onMouseDown={startResize} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize ..." />
+//     <div onMouseDown={startResize} onDoubleClick={resetWidth} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize ..." />
+// ดับเบิลคลิกหูจับ = กลับความกว้างเริ่มต้น (resetWidth)
 // ============================================================
 
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
@@ -27,5 +28,8 @@ export function useDrawerResize(storageKey: string, defaultWidth = 640, min = 48
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   };
 
-  return { width, startResize };
+  // กลับความกว้างเริ่มต้น + ล้างค่าที่จำไว้
+  const resetWidth = () => { setWidth(defaultWidth); try { localStorage.removeItem(storageKey); } catch { /* ignore */ } };
+
+  return { width, startResize, resetWidth };
 }

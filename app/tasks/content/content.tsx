@@ -40,6 +40,7 @@ import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { getBrandPlatforms } from "./brand-platforms-modal";
@@ -488,7 +489,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [prodEdit, setProdEdit] = useState(false);   // การ์ดสินค้า: โหมดแก้ (ปกติโชว์สรุปสั้น ๆ)
   const [mediaAdd, setMediaAdd] = useState(false);   // การ์ดรูป: กางตัวเพิ่ม/จัดการไฟล์
   // แบ่ง 2 ฝั่ง ปรับขนาดได้ (ลากเส้นกลาง) — จำสัดส่วนใน localStorage
-  const isWide = useMediaQuery("(min-width: 1024px)");   // จอกว้าง → 2 ฝั่ง · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
+  // ลากขอบซ้ายปรับความกว้าง drawer (ของกลาง · จำค่าต่อเครื่อง · ดับเบิลคลิกหูจับ = กลับค่าเริ่มต้น)
+  const { width: drawerW, startResize, resetWidth } = useDrawerResize("contentDrawerWidth", 1180, 640);
+  const wideScreen = useMediaQuery("(min-width: 1024px)");
+  const isWide = wideScreen && drawerW >= 900;   // จอกว้าง + drawer กว้างพอ → 2 ฝั่ง · แคบ (มือถือ/ลากให้แคบ) → เรียงบน-ล่าง
   const { theme: dth, update: dthUpdate } = useDrawerTheme("content");   // ธีม drawer คอนเทนต์ (ต่อคน)
   // แบบ A (2026-10): ฝั่งซ้ายเหลือการ์ด 3 ใบ — สินค้า (รวมแบรนด์/สี/ราคา) · รูป/วิดีโอ (รวมรูปจากงาน+อัปเอง) · ลิงก์สินค้า
   const CONTENT_SECTIONS = [
@@ -920,7 +924,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     finally { setDeleting(false); setConfirmDel(false); }
   };
 
-  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={requestClose} /><div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
+  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={requestClose} /><div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
 
   const contentPlatforms = d.platforms ?? [];
   const brandLabel = brands.find((b) => b.id === brandId)?.name ?? null;   // ชื่อแบรนด์ที่เลือกสด ๆ (ให้โมดอลตั้งค่าแคปชั่น/แฮชแท็กตามแบรนด์นี้)
@@ -948,7 +952,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={requestClose} />
-      <div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+        {/* หูจับขอบซ้าย — ลากปรับความกว้าง · ดับเบิลคลิก = กลับค่าเริ่มต้น */}
+        {wideScreen && <div onMouseDown={startResize} onDoubleClick={resetWidth} title={t("ลากเพื่อปรับความกว้าง · ดับเบิลคลิก = ค่าเริ่มต้น", "Drag to resize · double-click to reset")}
+          className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />}
         <div className="h-1 shrink-0" style={{ background: accentCss(dth) }} />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0">
