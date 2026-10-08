@@ -3,6 +3,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { layFabric, type LayBlock, type LayLayout } from "@/lib/mo-fabric-lay";
+import { fabricQty, effectiveCalcMethod } from "@/lib/bom-calc";
 
 export type SizeQty = { label: string; qty: number };
 /** วิธีคิดผ้าต่อใบ: lay = วางผ้าให้คุ้มที่สุด (ค่าเริ่มต้น) · classic = สูตรเดิม พื้นที่ + เผื่อเสีย% */
@@ -38,21 +39,37 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   const codes = [...new Set(rows.map((l) => l.component_sku).filter(Boolean) as string[])];
   const typeMap = new Map<string, string>();
   // ข้อมูลไว้ "วางผ้าให้คุ้มที่สุด": กฎคิดของกลุ่ม + หน้ากว้าง/ขนาดผืนของผ้าตัวนั้น
-  type SkuCalc = { calc: string; divisor: number; face: number; sheetW: number; sheetL: number };
+  type SkuCalc = { calc: string; divisor: number; loss: number; face: number; sheetW: number; sheetL: number };
   const calcMap = new Map<string, SkuCalc>();
   if (codes.length > 0) {
     const { data: skus } = await admin.from("skus_v2")
-      .select("code, fabric_width_cm, sheet_width_cm, sheet_length_cm, grp:material_groups!material_group_id ( name, calc_method, divisor )")
+      .select("code, fabric_width_cm, sheet_width_cm, sheet_length_cm, grp:material_groups!material_group_id ( name, calc_method, divisor, loss_percent )")
       .in("code", codes).eq("is_active", true);
     for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
-      const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string; calc_method?: string; divisor?: number } | null;
+      const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string; calc_method?: string; divisor?: number; loss_percent?: number } | null;
       if (g?.name) typeMap.set(String(s.code), g.name);
       calcMap.set(String(s.code), {
-        calc: g?.calc_method ?? "manual", divisor: Number(g?.divisor) || 90,
+        calc: g?.calc_method ?? "manual", divisor: Number(g?.divisor) || 90, loss: Number(g?.loss_percent) || 0,
         face: Number(s.fabric_width_cm) || 0, sheetW: Number(s.sheet_width_cm) || 0, sheetL: Number(s.sheet_length_cm) || 0,
       });
     }
   }
+  // บรรทัดสูตรที่เก็บจำนวนต่อชุดเป็น 0 ทั้งที่มีขนาดตัด (ตอนทำสูตรยังไม่มีหน้ากว้าง/ขนาดผืน หรือเพิ่งมาใส่ที่ SKU ทีหลัง)
+  // → คิดใหม่ตรงนี้ด้วยกฎกลาง lib/bom-calc โดยเอาหน้ากว้าง/ขนาดผืนจากบรรทัด ถ้าไม่มีใช้ของ SKU · คิดไม่ได้จริง ๆ ค่อยปล่อย 0
+  const fallbackQtyPer = (l: Record<string, unknown>): number => {
+    const sku = (l.component_sku as string) ?? null; const c = sku ? calcMap.get(sku) : undefined;
+    if (!c) return 0;
+    const w = Number(l.cut_width) || 0, h = Number(l.cut_length) || 0;
+    if (w <= 0 || h <= 0) return 0;
+    const q = fabricQty({
+      calc_method: c.calc, divisor: c.divisor,
+      waste_percent: l.waste_percent != null ? Number(l.waste_percent) : c.loss,
+      pieces: Number(l.pieces) || 1, cut_width: w, cut_length: h,
+      face_width_cm: Number(l.face_width_cm) || c.face,
+      sheet_width: Number(l.sheet_width) || c.sheetW, sheet_length: Number(l.sheet_length) || c.sheetL,
+    });
+    return q != null && q > 0 ? q : 0;
+  };
 
   const r4 = (n: number) => Math.round(n * 10000) / 10000;
   const sizes = (sizeBreakdown ?? []).filter((s) => s && s.label != null && (Number(s.qty) || 0) > 0);
@@ -61,7 +78,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   const mats: Array<Record<string, unknown>> = [];
   let seq = 0;
   for (const l of rows) {
-    const qtyPer = Number(l.qty) || 0;
+    const qtyPer = (Number(l.qty) || 0) > 0 ? Number(l.qty) : fallbackQtyPer(l);
     const sku = (l.component_sku as string) ?? null;
     const base: Record<string, unknown> = {
       mo_no: moNo,
@@ -117,8 +134,11 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       const w = Number(m.cut_width) || 0, h = Number(m.cut_length) || 0;
       if (w <= 0 || h <= 0 || L.rowQty <= 0) continue;
       let face = 0, sheetL: number | null = null;
-      if (c.calc === "area_face") { face = L.face > 0 ? L.face : c.face; }
-      else if (c.calc === "area_sheet") { face = L.sheetW > 0 ? L.sheetW : c.sheetW; sheetL = L.sheetL > 0 ? L.sheetL : c.sheetL; if (!sheetL) continue; }
+      // กลุ่มตั้ง "คิดตามหน้ากว้าง" แต่ตัวนี้ไม่มีหน้ากว้าง มีแต่ขนาดผืน → วางแบบผืน (กฎเดียวกับ lib/bom-calc)
+      const calc = effectiveCalcMethod({ calc_method: c.calc, face_width_cm: L.face > 0 ? L.face : c.face,
+        sheet_width: L.sheetW > 0 ? L.sheetW : c.sheetW, sheet_length: L.sheetL > 0 ? L.sheetL : c.sheetL });
+      if (calc === "area_face") { face = L.face > 0 ? L.face : c.face; }
+      else if (calc === "area_sheet") { face = L.sheetW > 0 ? L.sheetW : c.sheetW; sheetL = L.sheetL > 0 ? L.sheetL : c.sheetL; if (!sheetL) continue; }
       else continue;
       if (face <= 0) continue;
       const key = `${sku}|${face}|${sheetL ?? ""}`;

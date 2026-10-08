@@ -84,7 +84,12 @@ export function MoMaterialsTable({
     ),
   };
   const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
-  const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required, render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };
+  // มีขนาดตัดแต่ยอดเป็น 0 = ระบบคิดไม่ได้ (วัตถุดิบไม่มีหน้ากว้าง/ขนาดผืนเต็ม) → บอกตรง ๆ ดีกว่าโชว์ 0 เฉย ๆ
+  const cannotCalc = (r: MatRow) => r.required <= 0 && (r.cut_width ?? 0) > 0 && (r.cut_length ?? 0) > 0;
+  const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required,
+    render: (r) => cannotCalc(r)
+      ? <span className="block px-1 text-right text-[11px] text-amber-700 whitespace-nowrap" title="คิดปริมาณไม่ได้ — วัตถุดิบนี้ยังไม่มี 'หน้ากว้าง' หรือ 'ขนาดผืนเต็ม' ไปใส่ที่ SKU แล้วกดอัพเดตวัตถุดิบตาม BOM">⚠ คิดไม่ได้</span>
+      : <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };
   const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 60, getValue: (r) => r.uom };
   const onhandCol: LineColumn<MatRow> = { key: "on_hand_qty", header: "จำนวนที่มี", width: 92, align: "right", getValue: (r) => r.on_hand_qty,
     render: (r, u) => <input type="number" min={0} step="any" value={r.on_hand_qty} onChange={(e) => u({ on_hand_qty: Number(e.target.value) })} className={numCls} /> };

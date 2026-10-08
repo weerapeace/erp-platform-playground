@@ -22,6 +22,17 @@ export type FabricCalcInput = {
 
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
+/**
+ * วิธีคิด "ที่ใช้จริง" ของบรรทัดนี้ — กลุ่มตั้ง area_face (คิดตามหน้ากว้าง) แต่ตัววัตถุดิบไม่มีหน้ากว้าง
+ * ทว่ามีขนาดผืนเต็ม (เช่น ผ้าขาวม้าขายเป็นผืน 100×140 / กระดาษแผ่น 79×109) → คิดแบบผืน (area_sheet) ให้แทน
+ * ไม่งั้นระบบจะเงียบ ๆ ได้ 0 ทั้งที่ข้อมูลพอคิด (เจ้าของเจอ 2026-10-08: ใบสั่งผลิต "รวมต้องใช้" ขึ้น 0 ทุกแถว)
+ */
+export function effectiveCalcMethod(i: Pick<FabricCalcInput, "calc_method" | "face_width_cm" | "sheet_width" | "sheet_length">): FabricCalcMethod | string {
+  const m = i.calc_method ?? "manual";
+  if (m === "area_face" && !(Number(i.face_width_cm) > 0) && Number(i.sheet_width) > 0 && Number(i.sheet_length) > 0) return "area_sheet";
+  return m;
+}
+
 /** พื้นที่ตัด = กว้าง × ยาว × จำนวนชิ้น */
 export function lineArea(i: Pick<FabricCalcInput, "cut_width" | "cut_length" | "pieces">): number {
   return (i.cut_width || 0) * (i.cut_length || 0) * (i.pieces || 1);
@@ -37,7 +48,7 @@ export function lineArea(i: Pick<FabricCalcInput, "cut_width" | "cut_length" | "
  * - manual:    null (พิมพ์เอง)
  */
 export function fabricQty(i: FabricCalcInput): number | null {
-  const m = i.calc_method ?? "manual";
+  const m = effectiveCalcMethod(i);
   const d = i.divisor || 90;
   const k = 1 + (i.waste_percent || 0) / 100;
   if (m === "count")     return i.pieces || 0;

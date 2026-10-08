@@ -463,7 +463,8 @@ export function BomLineEditor({
   const usesSheet  = (l: EditorLine) => methodOf(l) === "area_sheet";
   const needSheet  = (l: EditorLine) => usesSheet(l) && (l.cut_width > 0 || l.cut_length > 0) && !(l.sheet_width > 0 && l.sheet_length > 0);
   const showStatus = (l: EditorLine) => isArea(l);
-  const needFace   = (l: EditorLine) => methodOf(l) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm;
+  // ไม่มีหน้ากว้าง แต่มีขนาดผืนเต็ม → กฎกลางคิดแบบผืนให้แทนได้ ไม่ต้องขึ้นแดง
+  const needFace   = (l: EditorLine) => methodOf(l) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm && !(l.sheet_width > 0 && l.sheet_length > 0);
 
   // คิดปริมาณใหม่ทุกครั้งที่แก้ (เว้นกลุ่ม manual ที่พิมพ์เอง)
   const recalc = (l: EditorLine): EditorLine => { const c = lineCalc(l); return c == null ? l : { ...l, qty: c }; };
