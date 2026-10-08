@@ -14,6 +14,7 @@ import type { LayLayout } from "@/lib/mo-fabric-lay";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { useViewPref } from "@/lib/use-view-pref";
 import { useNewParam } from "@/lib/open-param";
 import { BomRefreshButton } from "@/components/bom-refresh";
 import { ComponentPicker } from "../bom/line-editor";
@@ -103,6 +104,8 @@ export default function MoWorkspacePage() {
   const [archiveTarget, setArchiveTarget] = useState<MoListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
+  const layNotePref = useViewPref("mo_lay_note", ["hide", "show"] as const, "hide");   // บรรทัด ✂ วิธีวางผ้า: ซ่อนเป็นค่าเริ่มต้น (กดปุ่มค่อยโชว์ · จำต่อคน)
+  const showLayNote = layNotePref.view === "show";
   const [editBuy, setEditBuy] = useState<Set<string>>(new Set());
   // ปุ่ม "อัพเดตวัตถุดิบตาม BOM" ย้ายไปของกลาง <BomRefreshButton> (components/bom-refresh)
   // popup สร้างใบขอซื้อ
@@ -641,7 +644,7 @@ export default function MoWorkspacePage() {
                 key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
                 getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
                 render: (r) => <span className="block min-w-0"><span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>
-                  {r.lay_note && <span className="flex items-center gap-1 min-w-0">
+                  {showLayNote && r.lay_note && <span className="flex items-center gap-1 min-w-0">
                     <span className="truncate text-[10px] text-indigo-600" title={r.lay_note}>✂ {r.lay_note}</span>
                     {r.lay_layout && r.lay_layout.length > 0 && (
                       <button type="button" onClick={(e) => { e.stopPropagation(); setLayView({ name: `${r.component_sku ?? ""} ${r.component_name ?? ""}`.trim(), layouts: r.lay_layout! }); }}
@@ -712,9 +715,19 @@ export default function MoWorkspacePage() {
               return (
                 <div className="pt-2 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center">
                     <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
                       <button type="button" onClick={() => setMatTab("sum")} className={`h-7 px-3 ${matTab === "sum" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>วัตถุดิบที่ต้องใช้</button>
                       <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
+                    </div>
+                    {/* โชว์/ซ่อนบรรทัด ✂ วิธีวางผ้า (สีน้ำเงินใต้ชื่อวัตถุดิบ) — ซ่อนเป็นค่าเริ่มต้น · จำการตั้งค่าต่อคน */}
+                    {(matTab === "sum" ? sumRows : blockRows).some((r) => !!r.lay_note) && (
+                      <button type="button" onClick={() => { const v = showLayNote ? "hide" : "show"; layNotePref.setView(v); void layNotePref.saveDefault(v); }}
+                        title={showLayNote ? "ซ่อนบรรทัดวิธีวางผ้า (ยาว/ความคุ้ม/ผัง) ใต้ชื่อวัตถุดิบ" : "โชว์บรรทัดวิธีวางผ้า (ยาว/ความคุ้ม/ปุ่มดูผัง) ใต้ชื่อวัตถุดิบ"}
+                        className={`ml-2 h-7 px-2.5 rounded-lg border text-xs ${showLayNote ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                        ✂ {showLayNote ? "ซ่อนวิธีวาง" : "โชว์วิธีวาง"}
+                      </button>
+                    )}
                     </div>
                     <div className="flex items-center gap-2">
                       {form.id && form.bom_code && (
