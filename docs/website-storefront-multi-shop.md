@@ -1,0 +1,57 @@
+# เว็บหน้าร้าน (Storefront) — โค้ดชุดเดียว ใช้ได้หลายร้าน
+
+> อัปเดต 2026-10-08 · เริ่มจากเว็บ IG International แล้วปรับให้ตั้งเป็นร้านไหนก็ได้ · ร้านที่ 2 = **Louis Montini**
+
+## ภาพรวม
+
+```txt
+ERP (/website/<slug>)  ──API สาธารณะ──▶  เว็บหน้าร้าน (Next.js, repo แยก)  ──▶ ลูกค้า
+   สินค้าบนเว็บ · จับคู่ฟิลด์ · ดีไซน์ · หน้าแรก · หน้าเว็บ · 🏪 ข้อมูลร้าน · 🧾 ออเดอร์
+```
+
+- **1 ร้าน = 1 deploy** บน Vercel จากโค้ดชุดเดียวกัน ต่างกันแค่ env 2 ตัว
+- โค้ดเว็บหน้าร้านอยู่ที่ `C:\Users\Gogo\Documents\Claude\Projects\Program App\ig-international` (มี git แล้ว branch `main`)
+- ทุกอย่างที่เป็น "ของร้าน" มาจาก ERP ทั้งหมด: ชื่อ โลโก้ สี ฟอนต์ เมนู หน้าแรก หน้าเพิ่ม หมวดสินค้า ค่าส่ง ช่องทางจ่าย ช่องทางติดต่อ
+- ร้าน IG International เป็นร้านแรก มีหน้าเฉพาะฝังในโค้ด (รับผลิต/ผลงาน/ขอใบเสนอราคา/เกี่ยวกับเรา) — ร้านอื่นหน้าพวกนี้เป็น 404 (ดู `src/lib/shop-profile.ts`)
+
+## env ต่อร้าน
+
+| ตัวแปร | IG International | Louis Montini |
+|---|---|---|
+| `NEXT_PUBLIC_SHOP_SLUG` | `ig-international` | `louismontini` |
+| `NEXT_PUBLIC_ERP_BASE_URL` | `https://erp-platform-playground.vercel.app` | เหมือนกัน |
+
+ค่า `NEXT_PUBLIC_*` ถูกฝังตอน build → เปลี่ยน env แล้วต้อง build/deploy ใหม่
+
+## API สาธารณะที่เว็บร้านใช้ (ไม่มี guardApi โดยเจตนา + CORS)
+
+| เส้น | ใช้ทำอะไร |
+|---|---|
+| `GET /api/public/storefront/site?shop=` | ธีม · โครงหน้าแรก · หมวด · **info** (คำโปรย/ติดต่อ/ค่าส่ง/ช่องทางจ่าย) |
+| `GET /api/public/storefront/products?shop=` | สินค้าที่เผยแพร่ (ราคาเป็นบาท) |
+| `GET /api/public/storefront/page?shop=[&page=]` | หน้าที่สร้างจาก ERP |
+| `POST /api/public/storefront/orders` | **ลูกค้ากดสั่งซื้อ** — ราคาคิดใหม่ฝั่งเซิร์ฟเวอร์เสมอ (`lib/website-orders.ts`) |
+| `GET /api/public/storefront/orders?shop=&no=&phone=` | ลูกค้าตามออเดอร์ (ต้องรู้ทั้งเลขที่และเบอร์) |
+
+เลขที่ออเดอร์ = `<ตัวย่อ>-<พ.ศ.><เดือน>-<ลำดับ 5 หลัก>` เช่น `LM-256910-00001` · ตัวย่อตั้งในแท็บข้อมูลร้าน
+
+## ของกลางฝั่ง ERP
+
+- `lib/website-site-info.ts` — นิยามฟิลด์ "ข้อมูลร้าน" ที่เดียว (เพิ่มช่องที่นี่ หน้าจอ+API ขึ้นเอง) เก็บใน `store_settings`
+- `lib/website-orders.ts` — สร้าง/อ่านออเดอร์ · จับคู่รหัสตัวเลือก `sku-xxxxxxxx` / `opt2-xxxxxxxx` กลับเป็น SKU ลูก
+- `components/website-info-panel.tsx` · `components/website-orders-panel.tsx` — 2 แท็บใหม่ใน `/website/<slug>`
+- เทสต์ `lib/__tests__/website-site-info.test.ts`
+
+## เปิดร้านใหม่ (เช็กลิสต์)
+
+1. ERP: สร้างแถว `shops` (slug) + เพิ่มสินค้าในแท็บ "สินค้าบนเว็บ" + ตั้งหมวดในแท็บ "จับคู่ฟิลด์" + ธีม + จัดหน้าแรก + กรอก "ข้อมูลร้าน"
+2. Vercel: สร้าง project ใหม่จาก repo เว็บหน้าร้าน ตั้ง env 2 ตัวตามตาราง → deploy
+3. ERP: เพิ่มโดเมนในตาราง `shop_domains` ให้ตรงกับ URL จริง (พรีวิวในแท็บหน้าแรก/ดีไซน์ใช้ตัวนี้)
+4. ทดสอบสั่งซื้อ 1 ออเดอร์แล้วดูที่แท็บ "🧾 ออเดอร์"
+
+## ข้อจำกัดที่รู้อยู่
+
+- ยังไม่มีสลิปอัปโหลด — ลูกค้าโอนแล้วส่งสลิปทางช่องทางติดต่อ แล้วพนักงานกด "ชำระแล้ว" ในแท็บออเดอร์
+- ยังไม่มีคูปอง/สมาชิกบนเว็บหน้าร้านชุดนี้ (ของเดิมมีเฉพาะเว็บ Pixiedustie)
+- หน้า `/about` `/oem` `/gallery` `/quote` เป็น route ที่ฝังในโค้ด → ร้านอื่นสร้างหน้าชื่อซ้ำพวกนี้จาก ERP ไม่ได้ (ERP กันไว้ใน RESERVED แล้ว)
+- รายการหน้าในพรีวิวแท็บดีไซน์ (`PAGES` ใน website-theme-panel) ยังเป็นชุดของ IG
