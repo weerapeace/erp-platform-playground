@@ -652,6 +652,10 @@ export default function MoWorkspacePage() {
               const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
               const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required,
                 render: (r) => {
+                  // มีขนาดตัดแต่ยอดเป็น 0 = ระบบคิดไม่ได้ (วัตถุดิบไม่มีหน้ากว้าง/ขนาดผืนเต็ม) → บอกตรง ๆ ดีกว่าโชว์ 0 เฉย ๆ (กฎเดียวกับ components/mo-materials)
+                  if (r.required <= 0 && (r.cut_width ?? 0) > 0 && (r.cut_length ?? 0) > 0) {
+                    return <span className="block px-1 text-right text-[11px] text-amber-700 whitespace-nowrap" title="คิดปริมาณไม่ได้ — วัตถุดิบนี้ยังไม่มี 'หน้ากว้าง' หรือ 'ขนาดผืนเต็ม' ไปใส่ที่ SKU แล้วกด 🔄 อัพเดตวัตถุดิบตาม BOM">⚠ คิดไม่ได้</span>;
+                  }
                   // ตัวเลขเล็กใต้ค่าจริง = "อีกวิธี" (เจ้าของขอเทียบโดยไม่ต้องกดสลับ) — โชว์เฉพาะผ้าที่คิดได้ทั้ง 2 แบบ
                   const isLay = form.fabric_calc_mode === "lay";
                   const other = isLay ? r.required_classic : r.required_lay;
