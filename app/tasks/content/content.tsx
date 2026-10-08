@@ -32,7 +32,7 @@ import {
   type BrandOption, type Hashtag, type CaptionTemplate, type CaptionConfig,
   type ContentAttachment, type PlatformSettings, type PlatformSetting, type LinkPreview,
 } from "../data";
-import { useCreativeOptions, platformLabel } from "../use-options";
+import { useCreativeOptions, platformLabel, platformMeta } from "../use-options";
 import { PlatformChip } from "../platform-chip";
 import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
 import { ContentCreateModal } from "./content-create-modal";
@@ -1252,7 +1252,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {/* ติ๊กว่าจะลงที่ไหนบ้าง — โชว์ทุกแพลตฟอร์มในระบบ (ของแบรนด์นี้ขึ้นก่อน) · ม่วง = ลง (มีการ์ดด้านล่าง) · ขาว = ไม่ลง · บันทึกทันทีที่กด */}
             {(() => {
               const brandAllow = brandId ? bpMap[brandId] : undefined;
-              const ordered = [...platforms].sort((a, b) => {
+              // แพลตฟอร์มที่คอนเทนต์นี้ "ลงอยู่แล้ว" แต่ถูกปิดใช้ในตั้งค่า (เช่น Instagram/X/Pinterest) ต้องยังโผล่ในแถวนี้ ไม่งั้นมีการ์ดแต่กดเอาออกไม่ได้
+              const inUseHidden = contentPlatforms.filter((v) => !platforms.some((p) => p.value === v)).map((v) => { const m = platformMeta(v); return { value: v, label: platformLabel(v), color: m?.color ?? null, icon: m?.icon ?? null, icon_key: m?.icon_key ?? null, inactive: true }; });
+              const ordered = [...platforms.map((p) => ({ ...p, inactive: false })), ...inUseHidden].sort((a, b) => {
                 const ra = contentPlatforms.includes(a.value) ? 0 : brandAllow?.includes(a.value) ? 1 : 2;
                 const rb = contentPlatforms.includes(b.value) ? 0 : brandAllow?.includes(b.value) ? 1 : 2;
                 return ra - rb;
@@ -1264,10 +1266,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     const on = contentPlatforms.includes(p.value); const st = postStatus[p.value] ?? "todo"; const isBrand = !!brandAllow?.includes(p.value);
                     return (
                       <button key={p.value} type="button" disabled={platBusy} onClick={() => togglePlatform(p.value)}
-                        title={on ? t("กดเพื่อเอาออก (ไม่ลงที่นี่)", "Click to remove") : t(`กดเพื่อลงที่ ${p.label}${isBrand ? " (แบรนด์นี้ลงประจำ)" : ""}`, `Click to add ${p.label}`)}
+                        title={p.inactive ? t(`${p.label} ถูกปิดใช้ในตั้งค่าแพลตฟอร์ม — ยังเอาออกจากคอนเทนต์นี้ได้ · เปิดใช้ที่ ⚙️ ตั้งค่า → แพลตฟอร์ม`, `${p.label} is disabled in settings — you can still remove it here`) : on ? t("กดเพื่อเอาออก (ไม่ลงที่นี่)", "Click to remove") : t(`กดเพื่อลงที่ ${p.label}${isBrand ? " (แบรนด์นี้ลงประจำ)" : ""}`, `Click to add ${p.label}`)}
                         className={`h-8 pl-1.5 pr-2.5 rounded-full border inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${on ? "bg-violet-600 text-white border-violet-600 shadow-sm" : isBrand ? "bg-white text-slate-700 border-violet-200 hover:border-violet-400" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"}`}>
                         {(p.icon_key || p.icon) && <PlatformChip code={p.value} iconOnly />}
-                        {p.label}
+                        {p.label}{p.inactive && <span className="text-[9px] opacity-70">({t("ปิดใช้", "off")})</span>}
                         {on
                           ? <span className={`h-2 w-2 rounded-full ${st === "posted" || st === "scheduled" ? "bg-emerald-400" : st === "skip" ? "bg-slate-300" : "bg-amber-300"}`} title={st === "posted" ? t("โพสต์แล้ว", "Posted") : st === "scheduled" ? t("ตั้งเวลาแล้ว", "Scheduled") : st === "skip" ? t("ข้าม", "Skipped") : t("ยังไม่โพสต์", "Not posted")} />
                           : <span className="text-[10px] text-slate-300">＋</span>}
