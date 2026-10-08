@@ -192,6 +192,7 @@ function QuickAddFromBomPicker({ lines, onPick }: { lines: EditorLine[]; onPick:
       distinct.push({
         id: l.component_id ?? "", code: l.component_sku, name: l.component_name,
         material_group_id: l.material_group_id, material_type: l.material_type,
+        standard_price: null,
         loss_percent: l.waste_percent, fabric_width_cm: l.face_width_cm,
         uom_id: l.uom_id, uom_name: l.uom, image_key: l.image_key ?? null,
       });
@@ -518,6 +519,65 @@ export function BomLineEditor({
     onChange([...lines, line]);
   };
 
+  // ───── Update BOM ตาม SKU: ดึงค่า "คุณสมบัติวัตถุดิบ" ล่าสุดจาก SKU มาทับบรรทัดในสูตร แล้วคิดปริมาณใหม่ ─────
+  // ทับเฉพาะ มาเป็น/หน้ากว้าง/ขนาดผืน/%เผื่อเสีย/หน่วย/ชนิด (ค่าของวัตถุดิบ) · ไม่แตะ กว้าง×ยาว×ชิ้น/บล็อกตัด (ค่าของสูตร)
+  // SKU ไม่มีค่า (ว่าง) = ไม่ลบค่าเดิมของบรรทัด · โชว์สรุปก่อนทับ · ย้อนได้ด้วย Ctrl+Z · ยังต้องกด "บันทึกสูตร" เหมือนเดิม
+  type SyncChange = { field: keyof EditorLine; label: string; from: string; to: string; value: unknown };
+  type SyncTarget = { key: string; code: string; name: string; changes: SyncChange[] };
+  const [syncPreview, setSyncPreview] = useState<{ targets: SyncTarget[]; same: number; unresolved: number; scope: string } | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const formLabel = (f: unknown) => (f === "roll" ? "ม้วน" : f === "sheet" ? "ผืน" : "อัตโนมัติ");
+  const prepareSync = async (targets: EditorLine[], scope: string) => {
+    const usable = targets.filter((l) => !l.free_text && (l.component_id || l.component_sku));
+    if (!usable.length) { toast.error("ไม่มีบรรทัดที่ผูกกับ SKU ให้ดึงค่า"); return; }
+    setSyncBusy(true);
+    try {
+      // หา sku id ให้ครบ (บรรทัดเก่าบางแถวมีแต่รหัส)
+      const idOf = new Map<string, string>();
+      for (const l of usable) { const id = await resolveSkuId(l); if (id) idOf.set(l.key, id); }
+      const ids = [...new Set(idOf.values())];
+      if (!ids.length) { toast.error(noSkuMsg); return; }
+      const res = await apiFetch(`/api/bom/components?ids=${ids.join(",")}`); const j = await res.json();
+      const masters = new Map(((j.data ?? []) as BomComponent[]).map((c) => [c.id, c]));
+      const out: SyncTarget[] = []; let same = 0; let unresolved = 0;
+      for (const l of usable) {
+        const id = idOf.get(l.key); const m = id ? masters.get(id) : undefined;
+        if (!m) { unresolved++; continue; }
+        const ch: SyncChange[] = [];
+        const num = (a: number, b: number | null | undefined, field: keyof EditorLine, label: string, unit = "") => { if (b != null && Number(b) !== Number(a)) ch.push({ field, label, from: a ? `${a}${unit}` : "—", to: `${b}${unit}`, value: Number(b) }); };
+        num(l.face_width_cm, m.fabric_width_cm, "face_width_cm", "หน้ากว้าง", " ซม.");
+        num(l.sheet_width, m.sheet_width_cm, "sheet_width", "ผืนกว้าง", " ซม.");
+        num(l.sheet_length, m.sheet_length_cm, "sheet_length", "ผืนยาว", " ซม.");
+        num(l.waste_percent, m.loss_percent, "waste_percent", "% เผื่อเสีย", "%");
+        if (m.supply_form != null && (l.supply_form ?? null) !== m.supply_form) ch.push({ field: "supply_form", label: "มาเป็น", from: formLabel(l.supply_form ?? null), to: formLabel(m.supply_form), value: m.supply_form });
+        if (m.uom_id && m.uom_id !== l.uom_id) ch.push({ field: "uom_id", label: "หน่วย", from: l.uom || "—", to: m.uom_name ?? "", value: m.uom_id });
+        if (m.material_group_id && m.material_group_id !== l.material_group_id) ch.push({ field: "material_group_id", label: "ชนิด", from: l.material_type || "—", to: m.material_type ?? "", value: m.material_group_id });
+        if (ch.length) out.push({ key: l.key, code: l.component_sku, name: l.component_name, changes: ch }); else same++;
+      }
+      if (!out.length) { toast.success(`ทุกบรรทัด${scope ? ` (${scope})` : ""}ตรงกับค่าใน SKU อยู่แล้ว — ไม่มีอะไรต้องอัปเดต`); return; }
+      setSyncPreview({ targets: out, same, unresolved, scope });
+    } catch (e) { toast.error("ดึงค่าจาก SKU ไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    finally { setSyncBusy(false); }
+  };
+  const applySync = () => {
+    if (!syncPreview) return;
+    const byKey = new Map(syncPreview.targets.map((t) => [t.key, t]));
+    setUndoStack((u) => [...u, lines].slice(-50)); setRedoStack([]);
+    onChange(lines.map((l) => {
+      const t = byKey.get(l.key); if (!t) return l;
+      const patch: Partial<EditorLine> = {};
+      for (const c of t.changes) {
+        if (c.field === "uom_id") { patch.uom_id = c.value as string; patch.uom = c.to; }
+        else if (c.field === "material_group_id") { patch.material_group_id = c.value as string; patch.material_type = c.to; }
+        else (patch as Record<string, unknown>)[c.field as string] = c.value;
+      }
+      return recalc({ ...l, ...patch });
+    }));
+    toast.success(`อัปเดต ${syncPreview.targets.length} บรรทัดตามค่า SKU แล้ว — อย่าลืมกด "บันทึกสูตร"`);
+    setSyncPreview(null);
+  };
+  const linesOfSameSku = (d: EditorLine) => lines.filter((l) => !l.free_text && ((d.component_id && l.component_id === d.component_id) || (!!d.component_sku && l.component_sku === d.component_sku)));
+
   const resolveSkuId = async (l: EditorLine): Promise<string | null> => {
     if (l.component_id) return l.component_id;
     if (!l.component_sku) return null;
@@ -805,6 +865,9 @@ export function BomLineEditor({
         </div>
         {!readonly && (
           <div className="flex items-center gap-1">
+            <button type="button" onClick={() => void prepareSync(lines, "ทั้งสูตร")} disabled={syncBusy || !lines.length}
+              title="ดึงค่าล่าสุดของวัตถุดิบจาก SKU (มาเป็น/หน้ากว้าง/ขนาดผืน/เผื่อเสีย/หน่วย/ชนิด) มาทับทุกบรรทัดในสูตร แล้วคิดปริมาณใหม่ — โชว์สรุปก่อนทับ"
+              className="h-7 px-2.5 text-xs border border-emerald-200 text-emerald-700 rounded-lg disabled:opacity-40 hover:bg-emerald-50 mr-1">{syncBusy ? "⏳ กำลังเทียบ…" : "🔄 Update BOM ตาม SKU"}</button>
             <button type="button" onClick={undo} disabled={!undoStack.length} title="ย้อนกลับ (Ctrl+Z)"
               className="h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">↶ ย้อน</button>
             <button type="button" onClick={redo} disabled={!redoStack.length} title="ทำซ้ำ (Ctrl+Shift+Z)"
@@ -868,6 +931,29 @@ export function BomLineEditor({
         </div>
       )}
 
+      {/* สรุปก่อน Update BOM ตาม SKU — เห็นว่าจะแตะกี่บรรทัด ค่าไหนเปลี่ยนจากอะไรเป็นอะไร */}
+      {syncPreview && (
+        <ERPModal open onClose={() => setSyncPreview(null)} size="md" title={`🔄 Update BOM ตาม SKU${syncPreview.scope ? ` — ${syncPreview.scope}` : ""}`}
+          footer={<div className="flex items-center gap-2 w-full">
+            <span className="text-[11px] text-slate-400">{syncPreview.same > 0 ? `ตรงอยู่แล้ว ${syncPreview.same} บรรทัด` : ""}{syncPreview.unresolved > 0 ? ` · หา SKU ไม่เจอ ${syncPreview.unresolved} บรรทัด (ข้าม)` : ""}</span>
+            <span className="flex-1" />
+            <button type="button" onClick={() => setSyncPreview(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button type="button" onClick={applySync} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">✓ อัปเดต {syncPreview.targets.length} บรรทัด</button>
+          </div>}>
+          <p className="text-xs text-slate-500 mb-2">จะทับเฉพาะค่าของวัตถุดิบ (มาเป็น · หน้ากว้าง · ขนาดผืน · % เผื่อเสีย · หน่วย · ชนิด) แล้วคิดปริมาณใหม่ · ไม่แตะ กว้าง×ยาว×ชิ้น และบล็อกตัด · ย้อนได้ด้วย Ctrl+Z · ต้องกด <b>บันทึกสูตร</b> ถึงจะมีผลจริง</p>
+          <div className="space-y-1.5 max-h-[55vh] overflow-y-auto pr-0.5">
+            {syncPreview.targets.map((t) => (
+              <div key={t.key} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <div className="flex items-center gap-2 min-w-0"><code className="text-xs text-slate-600 shrink-0">{t.code}</code><span className="truncate text-slate-700">{t.name}</span></div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
+                  {t.changes.map((c) => <span key={String(c.field)}><span className="text-slate-400">{c.label}:</span> <s className="text-slate-400">{c.from}</s> → <b className="text-emerald-700">{c.to}</b></span>)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </ERPModal>
+      )}
+
       {/* รายละเอียดวัตถุดิบของบรรทัดนี้ — แก้ได้ในตัว (ค่าที่แก้ = ค่าเดียวกับในตาราง แก้ที่ไหนก็ได้ ยัง undo ได้)
           ปริมาณ: กลุ่มที่มีสูตรคำนวณ = ระบบคิดให้อัตโนมัติ · กลุ่มที่ไม่มีสูตร = พิมพ์เอง */}
       {(() => {
@@ -878,7 +964,15 @@ export function BomLineEditor({
         const labCls = "text-slate-400 w-28 shrink-0";
         return (
           <ERPModal open={d !== null} onClose={() => setDetailKey(null)} size="md" title="รายละเอียดวัตถุดิบ"
-            footer={<button onClick={() => setDetailKey(null)} className="h-9 px-4 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จแล้ว</button>}>
+            footer={<div className="flex items-center gap-2 w-full">
+              {!readonly && d && (() => { const n = linesOfSameSku(d).length; return (
+                <button type="button" disabled={syncBusy} onClick={() => void prepareSync(linesOfSameSku(d), d.component_sku || "วัตถุดิบนี้")}
+                  title={`หลังกด "บันทึกกลับ SKU" แล้ว กดปุ่มนี้เพื่อเอาค่าล่าสุดของ SKU ไปใส่ทุกบรรทัดในสูตรที่ใช้ ${d.component_sku} (${n} บรรทัด) แล้วคิดปริมาณใหม่ — โชว์สรุปก่อนทับ`}
+                  className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">{syncBusy ? "⏳ กำลังเทียบ…" : `🔄 Update BOM — ทุกบรรทัดที่ใช้ ${d.component_sku || "ตัวนี้"} (${n})`}</button>
+              ); })()}
+              <span className="flex-1" />
+              <button onClick={() => setDetailKey(null)} className="h-9 px-4 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จแล้ว</button>
+            </div>}>
             {d && (
               <div className="flex gap-3 text-sm">
                 <Thumb k={d.image_key} size={96} />

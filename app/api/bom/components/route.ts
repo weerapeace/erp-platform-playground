@@ -83,6 +83,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
   };
 
+  // ?ids=<uuid,uuid> → คืนเฉพาะตัวที่ขอ (รวมที่ปิดใช้แล้ว เพราะสูตรเก่าอาจยังอ้างอยู่) — ใช้ซิงก์ค่าจาก SKU เข้าบรรทัด BOM
+  const ids = (sp.get("ids") ?? "").split(",").map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 200);
+  if (ids.length) {
+    const { data: byId, error: idErr } = await supabase.from("skus_v2").select(SELECT).in("id", ids);
+    if (idErr) return NextResponse.json({ data: [], error: idErr.message }, { status: 500 });
+    return NextResponse.json({ data: (byId ?? []).map((r) => mapRow(r as Record<string, unknown>)), error: null });
+  }
+
   const searching = tokens.length > 0;
   let q = supabase.from("skus_v2").select(SELECT).eq("is_active", true);
   if (tagSkuIds) q = q.in("id", tagSkuIds);
