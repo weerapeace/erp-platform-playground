@@ -712,6 +712,24 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
   useEffect(() => { if (!parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(parent.id).then((cs) => { if (live) { setChildren(cs); setPriceSkuId((prev) => prev || cs[0]?.id || ""); } }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
+  // รีเฟรชข้อมูลสินค้า (ราคา/สี/รูป) หลังแก้ใน drawer Parent/SKU — เจ้าของขอ: แก้ราคาหรือสีแล้ว หน้านี้ + ตัวอย่างแคปชั่นต้องเปลี่ยนตามทันที
+  const reloadProduct = useCallback(async () => {
+    try {
+      if (parent?.id) {
+        const cs = await getParentSkuChildren(parent.id);
+        setChildren(cs);
+        setSku((cur) => {
+          if (!cur) return cur;
+          const c = cs.find((x) => x.id === cur.id);
+          return c ? { ...cur, code: c.code, name: c.name, color: c.color_th ?? c.color_en ?? cur.color, list_price: c.list_price, fake_price: c.fake_price, image_key: c.image_key ?? cur.image_key, image_url: c.image_key ? r2ImageUrl(c.image_key, 80) : cur.image_url } : cur;
+        });
+      } else if (sku?.id) {
+        const j = await apiFetch(`/api/master-v2/skus-v2/${encodeURIComponent(sku.id)}`).then((r) => r.json());
+        const row = (j?.data ?? null) as Record<string, unknown> | null;
+        if (row) setSku((cur) => (cur ? { ...cur, list_price: row.list_price == null ? null : Number(row.list_price), fake_price: row.fake_price == null ? null : Number(row.fake_price), color: (row.color_th as string | null) ?? (row.color as string | null) ?? cur.color } : cur));
+      }
+    } catch { /* เงียบ — ข้อมูลเดิมยังอยู่ */ }
+  }, [parent?.id, sku?.id]);
 
   // เลือกสินค้า → เดาแบรนด์ให้อัตโนมัติ (เฉพาะตอนยังไม่มีแบรนด์ + ผู้ใช้ยังไม่ได้เลือกเอง)
   useEffect(() => {
@@ -1319,7 +1337,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         </ERPModal>
       )}
       <ImageLightbox images={lbImages.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
-      {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
+      {/* แก้สินค้าใน drawer แล้ว → โหลดราคา/สี/รูปใหม่ทั้งตอนบันทึกและตอนปิด (เผื่อแก้ SKU ลูกใน drawer ซ้อน) */}
+      {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => { setOpenParentId(null); void reloadProduct(); }} onChanged={() => void reloadProduct()} />}
       <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={doDelete}
         title={t("ลบคอนเทนต์", "Delete Content")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{d.title}</span> {t("ใช่ไหม? (ลบแล้วกู้คืนไม่ได้)", "? (cannot be undone)")}</span>} confirmText={deleting ? "..." : t("ลบ", "Delete")} variant="danger" />
     </>
