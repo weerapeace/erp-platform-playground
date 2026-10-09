@@ -15,7 +15,8 @@ import { WebsiteBuilder, type Selection } from "@/components/website-builder";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 
-const AUTOSAVE_MS = 20000;
+/** บันทึกร่างเงียบ ๆ หลังหยุดแก้ 1.5 วิ → พรีวิวโหลดใหม่เอง */
+const AUTOSAVE_MS = 1500;
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const timeStr = (d: Date) => d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
 
@@ -41,6 +42,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const [autoSave, setAutoSave] = useState(true);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState(0);
 
   const undoStack = useRef<Block[][]>([]);
   const redoStack = useRef<Block[][]>([]);
@@ -147,6 +149,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
         if (j.ok) {
           setHadDraft(true);
           setSavedAt(new Date());
+          setPreviewVersion((v) => v + 1);
           if (!silent) toast.success("บันทึกร่างแล้ว — เว็บจริงยังไม่เปลี่ยน");
         } else if (!silent) toast.error(j.error ?? "บันทึกไม่สำเร็จ");
       } catch {
@@ -187,7 +190,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       setNeverSet(false);
       setHadDraft(false);
       toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บอัปเดตใน ~1 นาที`);
-      setTimeout(() => iframeRef.current?.contentWindow?.location.reload(), 400);
+      setPreviewVersion((v) => v + 1);
     } catch {
       toast.error("เชื่อมต่อไม่ได้");
     } finally {
@@ -256,7 +259,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
         <span className="text-[11px] text-slate-400">{saving ? "กำลังบันทึกร่าง…" : savedAt ? `บันทึกร่างล่าสุด ${timeStr(savedAt)}` : ""}</span>
 
         <div className="ml-auto flex items-center gap-1">
-          <label className="flex items-center gap-1.5 text-[11px] text-slate-500 mr-2 cursor-pointer" title="บันทึกร่างให้อัตโนมัติทุก 20 วินาที">
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-500 mr-2 cursor-pointer" title="บันทึกร่างให้อัตโนมัติหลังหยุดแก้ 1.5 วินาที แล้วพรีวิวอัปเดตเอง">
             <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={autoSave} onChange={(e) => setAutoSave(e.target.checked)} />
             บันทึกอัตโนมัติ
           </label>
@@ -300,7 +303,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
         </div>
       )}
 
-      <WebsiteBuilder blocks={blocks} onChange={apply} types={types} ctx={ctx} previewSrc={previewSrc} iframeRef={iframeRef} selection={selection} onSelect={setSelection} />
+      <WebsiteBuilder blocks={blocks} onChange={apply} types={types} ctx={ctx} previewSrc={previewSrc} iframeRef={iframeRef} selection={selection} onSelect={setSelection} previewVersion={previewVersion} />
 
       {/* แถบปุ่มล่าง */}
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">

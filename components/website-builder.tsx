@@ -58,6 +58,7 @@ export function WebsiteBuilder({
   selection,
   onSelect,
   previewHeight = "72vh",
+  previewVersion = 0,
 }: {
   blocks: Block[];
   onChange: (next: Block[]) => void;
@@ -69,6 +70,8 @@ export function WebsiteBuilder({
   selection: Selection | null;
   onSelect: (s: Selection | null) => void;
   previewHeight?: string;
+  /** ตัวที่เรียกใช้บวกเลขนี้เมื่อบันทึกร่าง/เผยแพร่แล้ว → พรีวิวโหลดใหม่เอง (แล้วเลื่อนกลับไปที่เดิม) */
+  previewVersion?: number;
 }) {
   const localIframe = useRef<HTMLIFrameElement>(null);
   const iframeRef = iframeRefProp ?? localIframe;
@@ -91,6 +94,17 @@ export function WebsiteBuilder({
   const [childOver, setChildOver] = useState<{ blockId: string; idx: number } | null>(null);
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(600);
+  /** โหลดพรีวิวใหม่ด้วยการเปลี่ยน src (iframe ต่างโดเมน สั่ง reload ตรง ๆ ไม่ได้) */
+  const [nonce, setNonce] = useState(0);
+  const lastScrollY = useRef(0);
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  useEffect(() => {
+    setNonce((n) => n + 1);
+  }, [previewVersion]);
+  const reloadPreview = () => setNonce((n) => n + 1);
 
   useEffect(() => {
     const el = previewBoxRef.current;
@@ -104,15 +118,52 @@ export function WebsiteBuilder({
   /* ── พรีวิว ↔ ตัวจัดหน้า ── */
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      const d = e.data as { type?: string; blockId?: string; childId?: string } | null;
-      if (d?.type !== "storefront-block-click" || !d.blockId) return;
-      onSelect({ blockId: d.blockId, childId: d.childId ?? null });
-      if (d.childId) setExpanded((s) => new Set(s).add(d.blockId!));
-      document.getElementById(`blk-${d.childId ?? d.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const d = e.data as { type?: string; blockId?: string; childId?: string; y?: number; data?: string; beforeId?: string | null } | null;
+      if (!d?.type) return;
+      if (d.type === "storefront-block-click" && d.blockId) {
+        onSelect({ blockId: d.blockId, childId: d.childId ?? null });
+        if (d.childId) setExpanded((s) => new Set(s).add(d.blockId!));
+        document.getElementById(`blk-${d.childId ?? d.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (d.type === "storefront-scroll") {
+        lastScrollY.current = Number(d.y) || 0;
+        return;
+      }
+      if (d.type === "storefront-preview-loaded") {
+        // พรีวิวโหลดใหม่ → ไฮไลต์+เลื่อนไปที่ที่เลือกอยู่ หรือคืนตำแหน่งเลื่อนเดิม
+        const sel = selectionRef.current;
+        const win = iframeRef.current?.contentWindow;
+        if (sel) win?.postMessage({ type: "storefront-select-block", blockId: sel.blockId, childId: sel.childId ?? null }, "*");
+        else if (lastScrollY.current > 0) win?.postMessage({ type: "storefront-restore-scroll", y: lastScrollY.current }, "*");
+        return;
+      }
+      if (d.type === "storefront-drop" && typeof d.data === "string") {
+        // วางของที่ลากมาจากคลัง/ต้นไม้/หูจับในพรีวิว ลง "ก่อนหน้า" Section ที่ beforeId (null = ท้ายสุด)
+        const cur = blocksRef.current;
+        const at = d.beforeId ? cur.findIndex((b) => b.id === d.beforeId) : cur.length;
+        const idx = at < 0 ? cur.length : at;
+        if (d.data.startsWith("website-new:")) {
+          const type = d.data.slice("website-new:".length) as BlockType;
+          if (SECTION_SCHEMAS[type]) addSection(type, idx);
+        } else if (d.data.startsWith("website-move:")) {
+          const id = d.data.slice("website-move:".length);
+          const from = cur.findIndex((b) => b.id === id);
+          if (from < 0) return;
+          const next = [...cur];
+          const [moved] = next.splice(from, 1);
+          next.splice(idx > from ? idx - 1 : idx, 0, moved);
+          onChange(next);
+          onSelect({ blockId: id });
+        }
+        setDrag(null);
+        return;
+      }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [onSelect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSelect, onChange, iframeRef]);
 
   useEffect(() => {
     iframeRef.current?.contentWindow?.postMessage(
@@ -354,7 +405,7 @@ export function WebsiteBuilder({
         <option value="1">100%</option>
       </select>
       <button onClick={() => setFullscreen((v) => !v)} title="เต็มจอ (Esc เพื่อออก)" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">{fullscreen ? "⤡" : "⤢"}</button>
-      <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} title="โหลดใหม่ (ดูผลหลังบันทึกร่าง)" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
+      <button onClick={reloadPreview} title="โหลดพรีวิวใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
       {previewSrc && (
         <a href={previewSrc} target="_blank" rel="noreferrer" title="เปิดแท็บใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↗</a>
       )}
@@ -369,7 +420,7 @@ export function WebsiteBuilder({
           <div style={{ width: dev.w * scale, height: dev.h * scale, margin: "0 auto", overflow: "hidden" }}>
             <iframe
               ref={iframeRef}
-              src={previewSrc}
+              src={`${previewSrc}&_r=${nonce}`}
               title="พรีวิวหน้าเว็บ"
               className="bg-white border-0 shadow-sm"
               style={{ width: dev.w, height: dev.h, transform: `scale(${scale})`, transformOrigin: "top left", flexShrink: 0, display: "block" }}
@@ -377,7 +428,7 @@ export function WebsiteBuilder({
           </div>
         </div>
       ) : (
-        <div className="h-full flex flex-col items-center justify-center text-sm text-slate-400 px-6 text-center gap-1">
+        <div className="h-full flex flex-col items-center justify-center text-sm text-slate-400 px-6 text-center gap-1" onDragOver={(e) => e.preventDefault()}>
           <span>ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้</span>
           <span className="text-[11px]">เมื่อเว็บร้านขึ้น Vercel แล้ว ใส่โดเมนในตาราง shop_domains พรีวิวจะขึ้นที่นี่</span>
         </div>
@@ -459,7 +510,11 @@ export function WebsiteBuilder({
                     <button
                       key={t.type}
                       draggable
-                      onDragStart={() => setDrag({ kind: "new", type: t.type })}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", `website-new:${t.type}`);
+                        e.dataTransfer.effectAllowed = "copyMove";
+                        setDrag({ kind: "new", type: t.type });
+                      }}
                       onDragEnd={endDrag}
                       onClick={() => { addSection(t.type); setLibQuery(""); }}
                       title={`${t.label} — ลากไปวางในโครง หรือกดเพื่อเพิ่มต่อท้าย`}
@@ -492,7 +547,11 @@ export function WebsiteBuilder({
               <li
                 id={`blk-${b.id}`}
                 draggable
-                onDragStart={() => setDrag({ kind: "move", id: b.id })}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/plain", `website-move:${b.id}`);
+                  e.dataTransfer.effectAllowed = "move";
+                  setDrag({ kind: "move", id: b.id });
+                }}
                 onDragEnd={endDrag}
                 onDragOver={(e) => overBlock(e, i)}
                 onDrop={(e) => { if (drag?.kind === "child") return; e.preventDefault(); dropAt(overIdx ?? i); }}
@@ -666,7 +725,7 @@ export function WebsiteBuilder({
         <div className="min-w-0 lg:sticky lg:top-4 space-y-2">
           {previewToolbar}
           {previewFrame(previewHeight)}
-          <p className="text-[10px] text-slate-400 text-center">คลิก Section/Block ในพรีวิวเพื่อเลือก · บันทึกร่างแล้วกด ↻ เพื่อดูผลเต็ม</p>
+          <p className="text-[10px] text-slate-400 text-center">คลิก Section/Block ในพรีวิวเพื่อเลือก · ลากจากคลังมาวางในพรีวิวได้ · แก้แล้วพรีวิวอัปเดตเองใน ~2 วิ</p>
         </div>
         {/* ขวา */}
         <aside className="min-w-0 xl:sticky xl:top-4 max-h-[80vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 lg:col-span-2 xl:col-span-1">{props}</aside>

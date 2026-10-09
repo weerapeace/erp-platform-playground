@@ -48,6 +48,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showSeo, setShowSeo] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const undoStack = useRef<Block[][]>([]);
   const redoStack = useRef<Block[][]>([]);
   const [, tick] = useState(0);
@@ -150,6 +151,30 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   }, [editId, undo, redo]);
 
   const dirty = editId !== null && !eq(blocks, savedBlocks);
+
+  // บันทึกร่างเงียบ ๆ หลังหยุดแก้ 1.5 วิ → พรีวิวโหลดใหม่เอง (เหมือนแท็บหน้าแรก)
+  useEffect(() => {
+    if (!editId || !dirty || busy) return;
+    const t = setTimeout(async () => {
+      try {
+        const r = await apiFetch("/api/website/pages", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pageId: editId, blocks, mode: "draft" }),
+        });
+        const j = await r.json();
+        if (j.ok) {
+          setSavedBlocks(blocks);
+          setHasDraft(true);
+          setPreviewVersion((v) => v + 1);
+        }
+      } catch {
+        /* เงียบ — ผู้ใช้ยังกดบันทึกเองได้ */
+      }
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, editId, dirty, busy]);
   useEffect(() => {
     if (!dirty) return;
     const h = (e: BeforeUnloadEvent) => {
@@ -222,7 +247,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       if (mode === "publish") {
         setHasDraft(false);
         toast.success("เผยแพร่หน้านี้แล้ว — เว็บอัปเดตใน ~1 นาที");
-        setTimeout(() => iframeRef.current?.contentWindow?.location.reload(), 400);
+        setPreviewVersion((v) => v + 1);
       } else {
         setHasDraft(true);
         toast.success("บันทึกร่างแล้ว — เว็บจริงยังไม่เปลี่ยน");
@@ -298,7 +323,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
           </div>
         )}
 
-        <WebsiteBuilder blocks={blocks} onChange={apply} types={types} ctx={ctx} previewSrc={previewSrc} iframeRef={iframeRef} selection={selection} onSelect={setSelection} />
+        <WebsiteBuilder blocks={blocks} onChange={apply} types={types} ctx={ctx} previewSrc={previewSrc} iframeRef={iframeRef} selection={selection} onSelect={setSelection} previewVersion={previewVersion} />
 
         <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
           <span className="text-xs text-slate-500">{blocks.length} Section ในหน้านี้{dirty ? " · มีการแก้ที่ยังไม่บันทึก" : ""}</span>
