@@ -53,57 +53,32 @@
 
 ---
 
-## เพิ่ม widget ใหม่ — เช็กลิสต์
+## เพิ่ม widget ใหม่ — เช็กลิสต์ (ตั้งแต่ 2026-10-09: Schema-Driven)
 
-### ฝั่ง ERP (`C:/erp-local/assets-verify`)
+> ตัวจัดหน้าใน ERP เป็นแบบ **Page → Section → Block → Settings** (คล้าย Shopify Online Store 2.0)
+> ฟอร์มตั้งค่า/ค่าเริ่มต้น/การตรวจ "วาดเองจาก Schema" — เพิ่มชนิดใหม่ **ไม่ต้องเขียนฟอร์ม** อีกแล้ว
 
-1. `lib/website-blocks.ts`
-   - เพิ่มชื่อใน `BlockType`
-   - เพิ่ม `interface XxxBlock extends BlockBase` แล้วต่อเข้า union `Block`
-   - เพิ่มรายการใน `BLOCK_META` (ชื่อไทย/ไอคอน/คำอธิบาย/กลุ่ม)
-   - เพิ่ม `case` ใน `newBlock()` (ค่าตั้งต้น)
-   - เพิ่ม `case` ใน `normalizeBlocks()` — **ต้อง sanitize ทุกฟิลด์** (`str`/`num`/`imgKey`/`link`)
-   - เพิ่มกฎเตือนใน `validateBlocks()` ถ้ามีช่องที่ปล่อยว่างแล้วพัง
-2. `components/website-block-editor.tsx`
-   - เพิ่ม `case` ใน `blockSummary()` (ข้อความสรุปในรายการ)
-   - เพิ่ม `case` ใน `BlockEditor()` (ฟอร์มกรอก)
-   - **ห้ามประกาศชนิดหรือค่าตั้งต้นซ้ำในไฟล์นี้**
-3. `lib/__tests__/website-blocks.test.ts` — รันเทสต์ ต้องเขียว
-   (มีเทสต์ที่ไล่ทุกชนิดใน `BLOCK_META` อยู่แล้ว ถ้าลืมทำค่าตั้งต้นจะแดงเอง)
+### ฝั่ง ERP (`C:/erp-local/wt-subs`)
 
-### ฝั่งเว็บร้าน (เช่น `Program App/ig-international`)
+1. `lib/website-schema.ts` — เพิ่มก้อนเดียวใน `SECTION_SCHEMAS`:
+   - `meta` (ชื่อไทย/ไอคอน/คำอธิบาย/กลุ่ม) · `fields` (ช่องตั้งค่า: key/label/type/default/max/options/required/showIf)
+   - `children` ถ้ามี Block ย่อย (key ของ array · itemLabel · max · fields ของแต่ละชิ้น · summary)
+   - `summary` (ข้อความสรุปในต้นไม้) · `validate` (กฎตรวจเพิ่มจาก required)
+   - ชนิดช่องที่ใช้ได้: text textarea number range select toggle image link href color list emoji video map products category
+2. `lib/website-blocks.ts` — เพิ่มชื่อใน `BlockType` + interface ของชนิดนั้น (ให้ TypeScript รู้จัก) แล้วต่อเข้า union `Block`
+3. `npx vitest run lib/__tests__/website-schema.test.ts` — ต้องเขียว (เทสต์ไล่ทุกชนิดอัตโนมัติ: newBlock→normalize ต้องได้ค่าเดิม, ค่าเริ่มต้นห้ามมีข้อความร้าน IG)
 
-4. `src/lib/blocks.ts` — เพิ่มชนิดให้ตรงกับ ERP
-5. `src/components/home/BlockRenderer.tsx`
-   - เพิ่มชื่อไทยใน `BLOCK_LABEL`
-   - เพิ่ม `case` ใน `renderOne()` + เขียน component แสดงผล
-6. `npm run build` ต้องผ่าน แล้ว deploy
+**ไม่ต้องแตะ:** `components/website-schema-form.tsx` (ฟอร์มวาดจาก fields) · `components/website-builder.tsx` (ต้นไม้/พรีวิว/แผงคุณสมบัติ) · API layout/pages (normalize จาก schema)
 
-> ถ้าทำถึงข้อ 3 แล้วหยุด: widget จะโผล่ใน ERP แต่**ไม่ขึ้นบนเว็บ**
-> โหมดพรีวิวจะขึ้นป้าย "ยังแสดง widget นี้บนเว็บไม่ได้" ให้เห็น (ลูกค้าไม่เห็นอะไร)
+### ฝั่งเว็บร้าน (repo `weerapeace/storefront`)
 
----
+4. `src/lib/blocks.ts` — เพิ่มชนิด + interface ให้ตรงกับ ERP (ชื่อฟิลด์ต้องเหมือนกันเป๊ะ)
+5. เขียน component แสดงผล แล้วเพิ่ม 1 บรรทัดใน `REGISTRY` + `BLOCK_LABEL` ของ `src/components/home/BlockRenderer.tsx`
+   - ถ้ามี Block ย่อย: ใส่ `{...childAttrs(item, i, 'ชื่อชิ้น')}` ที่ element นอกสุดของแต่ละชิ้น → คลิกเลือกจากพรีวิวใน ERP ได้ + ซ่อนตามอุปกรณ์ได้
+6. `npm run check-schema` (เทียบกับ `/api/public/storefront/schema` ของ ERP) → `npm run build` → deploy
 
-## ข้อควรรู้เรื่องหลายร้าน
-
-- ตอนนี้ระบบบล็อกชุดนี้มี **เว็บ IG International ใช้อยู่ร้านเดียว**
-- Pixiedustie ใช้บล็อกคนละชุด (`hero`, `product-grid`) ที่มาจากระบบเดิม
-  → `normalizeBlocks` **เก็บบล็อกที่ไม่รู้จักไว้เฉย ๆ ห้ามทิ้ง** ไม่งั้นกดเผยแพร่ครั้งเดียวหน้าเว็บร้านนั้นหาย
-- ยังไม่จำเป็นต้องทำ "ตัวแสดงผลกลาง" ใช้ร่วมหลายร้าน เพราะแต่ละร้านหน้าตาคนละแนวโดยตั้งใจ
-  (จะคุ้มก็ต่อเมื่อมีร้านที่ 2 มาใช้บล็อกชุดนี้จริง)
-
----
-
-## เว็บร้านที่ยังไม่ผูก Git
-
-`ig-international` **ไม่ได้ผูก Git** ต้องสั่ง deploy เองจากเครื่อง:
-
-```bash
-cd "C:/Users/Gogo/Documents/Claude/Projects/Program App/ig-international"
-npx vercel --prod
-```
-
-ผูก Git แล้วจะ deploy อัตโนมัติเหมือน ERP — ขั้นตอน (เจ้าของทำเอง):
-1. สร้าง repo เปล่าบน GitHub
-2. ในโฟลเดอร์เว็บ: `git init` → `git add .` → `git commit` → `git remote add origin <url>` → `git push -u origin main`
-3. Vercel → โปรเจกต์ `ig-international` → Settings → Git → เชื่อม repo นั้น
+### กติกาข้อมูล
+- ค่าตั้งค่าเก็บ "ระดับบน" ของบล็อก (ไม่ซ้อนใน settings) เหมือนเดิม → ข้อมูลเก่าใช้ได้ไม่ต้องย้าย
+- Block ย่อยทุกชิ้นมี `id` / `enabled` / `visibility` (ERP เติมให้ตอน normalize · เว็บร้าน `parseBlocks` ตัดชิ้นที่ `enabled=false`)
+- `style.mobile` = ค่าทับเฉพาะจอ < 768px (ระยะห่างบน/ล่าง/จัดข้อความ) · เว็บร้านแปลงเป็น `data-*-m` + CSS ท้าย globals.css
+- API สาธารณะ `site`/`page` ส่งโครงที่ผ่าน normalize แล้ว (id ชิ้นย่อยตรงกับที่ตัวจัดหน้าเห็น)
