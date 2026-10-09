@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { WebsiteBuilder, type Selection } from "@/components/website-builder";
+import { summarizeChanges } from "@/components/website-layout-panel";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks } from "@/lib/website-blocks";
 
@@ -44,7 +45,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [seo, setSeo] = useState<{ title: string; description: string }>({ title: "", description: "" });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [savedBlocks, setSavedBlocks] = useState<Block[]>([]);
+  const [publishedBlocks, setPublishedBlocks] = useState<Block[]>([]);
   const [hasDraft, setHasDraft] = useState(false);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showSeo, setShowSeo] = useState(false);
@@ -100,7 +103,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       setSeo({ title: p.seo?.title ?? "", description: p.seo?.description ?? "" });
       setBlocks(initial);
       setSavedBlocks(initial);
+      setPublishedBlocks(p.published ?? []);
       setHasDraft(Boolean(p.hasDraft));
+      setSavedAt(null);
       setSelection(null);
       undoStack.current = [];
       redoStack.current = [];
@@ -166,6 +171,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
         if (j.ok) {
           setSavedBlocks(blocks);
           setHasDraft(true);
+          setSavedAt(new Date());
           setPreviewVersion((v) => v + 1);
         }
       } catch {
@@ -244,7 +250,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
         return;
       }
       setSavedBlocks(blocks);
+      setSavedAt(new Date());
       if (mode === "publish") {
+        setPublishedBlocks(blocks);
         setHasDraft(false);
         toast.success("เผยแพร่หน้านี้แล้ว — เว็บอัปเดตใน ~1 นาที");
         setPreviewVersion((v) => v + 1);
@@ -268,32 +276,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   if (editId) {
     const previewSrc = siteUrl ? `${siteUrl}/${editSlug}?preview=1` : null;
     const issues = validateBlocks(blocks as never);
-    const errors = issues.filter((i) => i.level === "error");
+    const unpublished = hasDraft || dirty || !eq(blocks, publishedBlocks);
     return (
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
-          <button
-            onClick={() => {
-              if (dirty && !confirm("มีการแก้ที่ยังไม่บันทึก ออกโดยไม่บันทึก?")) return;
-              setEditId(null);
-            }}
-            className="text-xs text-slate-500 hover:text-blue-600"
-          >
-            ← รายการหน้าทั้งหมด
-          </button>
-          <span className="text-sm font-medium text-slate-800">{editTitle}</span>
-          <span className="text-xs text-slate-400">/{editSlug}</span>
-          {hasDraft && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">มีร่างที่ยังไม่เผยแพร่</span>}
-          {dirty && <span className="text-[11px] text-amber-600">● ยังไม่บันทึก</span>}
-          <div className="ml-auto flex items-center gap-1">
-            <button onClick={() => setShowSeo((v) => !v)} className={`px-2.5 py-1.5 rounded-lg border text-xs ${showSeo ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
-              🔎 ชื่อหน้า & SEO
-            </button>
-            <button onClick={undo} disabled={!undoStack.current.length} title="ย้อนกลับ (Ctrl+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↶</button>
-            <button onClick={redo} disabled={!redoStack.current.length} title="ทำซ้ำ" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
-          </div>
-        </div>
-
         {showSeo && (
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -317,25 +302,51 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
           </div>
         )}
 
-        {errors.length > 0 && (
-          <div className="rounded-xl border border-red-200 bg-red-50/60 px-4 py-2 text-xs text-slate-700">
-            ⚠️ ควรแก้ก่อนเผยแพร่ {errors.length} จุด: {errors.map((e) => e.message).join(" · ")}
-          </div>
-        )}
-
-        <WebsiteBuilder blocks={blocks} onChange={apply} types={types} ctx={ctx} previewSrc={previewSrc} iframeRef={iframeRef} selection={selection} onSelect={setSelection} previewVersion={previewVersion} />
-
-        <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
-          <span className="text-xs text-slate-500">{blocks.length} Section ในหน้านี้{dirty ? " · มีการแก้ที่ยังไม่บันทึก" : ""}</span>
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={() => void save("draft")} disabled={busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50">
-              {busy === "draft" ? "กำลังบันทึก…" : "บันทึกร่าง"}
-            </button>
-            <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-              {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่หน้านี้"}
-            </button>
-          </div>
-        </div>
+        <WebsiteBuilder
+          blocks={blocks}
+          onChange={apply}
+          types={types}
+          ctx={ctx}
+          previewSrc={previewSrc}
+          iframeRef={iframeRef}
+          selection={selection}
+          onSelect={setSelection}
+          previewVersion={previewVersion}
+          toolbar={{
+            leading: (
+              <>
+                <button
+                  onClick={() => {
+                    if (dirty && !confirm("มีการแก้ที่ยังไม่บันทึก ออกโดยไม่บันทึก?")) return;
+                    setEditId(null);
+                  }}
+                  className="text-xs text-slate-500 hover:text-blue-600 mr-1"
+                  title="กลับไปรายการหน้าทั้งหมด"
+                >
+                  ← หน้าทั้งหมด
+                </button>
+                <span className="text-sm font-medium text-slate-800 truncate max-w-[180px]" title={`/${editSlug}`}>{editTitle}</span>
+                <button onClick={() => setShowSeo((v) => !v)} className={`h-7 px-2 rounded-lg border text-[11px] ${showSeo ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`} title="ชื่อหน้า & SEO">
+                  🔎 SEO
+                </button>
+              </>
+            ),
+            dirty: unpublished,
+            statusNote: `${blocks.length} Section`,
+            savedText: savedAt ? `บันทึกร่าง ${savedAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}` : "",
+            saving: busy === "draft",
+            issues,
+            changes: summarizeChanges(blocks, publishedBlocks, types),
+            canUndo: undoStack.current.length > 0,
+            canRedo: redoStack.current.length > 0,
+            onUndo: undo,
+            onRedo: redo,
+            onSaveDraft: () => void save("draft"),
+            onPublish: () => void save("publish"),
+            publishLabel: "เผยแพร่หน้านี้",
+            busy: busy === "publish",
+          }}
+        />
       </div>
     );
   }

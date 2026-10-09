@@ -3,25 +3,27 @@
 /**
  * WebsiteBuilder — ตัวจัดหน้าเว็บแบบ 3 แผง (ของกลาง ใช้ทั้งแท็บ "หน้าแรก" และ "หน้าเว็บ")
  *
- *   ซ้าย   = โครงหน้า: Section → Block ย่อย (ลากเรียง · เพิ่ม · ทำสำเนา · ซ่อน · ลบ · คลังเพิ่ม Section)
- *   กลาง   = พรีวิวเว็บจริงใน iframe (คลิก Section/Block ในพรีวิวเพื่อเลือก · สลับ คอม/แท็บเล็ต/มือถือ)
- *   ขวา    = คุณสมบัติของสิ่งที่เลือก: ฟอร์มจาก Schema + แสดงบนอุปกรณ์ + รูปลักษณ์ (ทุกจอ/มือถือ)
+ *   แถบบน  = สถานะ · จุดที่ควรแก้ · ย้อน/ทำซ้ำ · สลับจอ/ซูม/โหลดใหม่ · ประวัติ · บันทึกร่าง · เผยแพร่ (ข้อมูล/ปุ่มมาจาก prop toolbar)
+ *   ซ้าย   = โครงหน้า: Section → Block ย่อย (กะทัดรัด · ลากเรียง · คลิกขวา · ปุ่มโผล่ตอนชี้) + คลัง Section แบบเลื่อนออก + ให้ AI ช่วย
+ *   กลาง   = พรีวิวเว็บจริงใน iframe (คลิก/ลากวาง/หูจับ · โหลดใหม่เองเมื่อ previewVersion เปลี่ยน)
+ *   ขวา    = คุณสมบัติของสิ่งที่เลือก แบ่งแท็บ เนื้อหา / รูปลักษณ์ / ลูกเล่น
+ *   จอแคบ (< lg) = สลับแท็บ โครง / พรีวิว / ตั้งค่า
  *
+ * คีย์ลัด: Delete ลบที่เลือก · Ctrl+D ทำสำเนา · ↑/↓ เลือก Section ก่อน/ถัดไป (เมื่อไม่ได้พิมพ์ในช่อง) · Esc ปิดคลัง/เมนู/เต็มจอ
  * ไฟล์นี้ "ไม่รู้" ว่าชนิดบล็อกมีอะไรบ้าง — ทุกอย่างอ่านจาก lib/website-schema.ts
- * ข้อมูล/บันทึก/เผยแพร่ เป็นหน้าที่ของตัวที่เรียกใช้ (layout panel / pages panel) — ส่ง blocks + onChange มา
+ * ข้อมูล/บันทึก/เผยแพร่ เป็นหน้าที่ของตัวที่เรียกใช้ (layout panel / pages panel) — ส่ง blocks + onChange + toolbar มา
  *
  * คุยกับพรีวิว (เว็บร้านต้องมี PreviewBridge):
- *   เว็บ → ERP : { type: "storefront-block-click", blockId, childId? }
- *   ERP → เว็บ : { type: "storefront-select-block", blockId, childId? }
+ *   เว็บ → ERP : storefront-block-click {blockId, childId?} · storefront-drop {data, beforeId} · storefront-preview-loaded · storefront-scroll {y}
+ *   ERP → เว็บ : storefront-select-block {blockId, childId?} · storefront-restore-scroll {y}
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, type ChildSpec } from "@/lib/website-schema";
-import { blockSummary } from "@/lib/website-blocks";
-import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
-import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
-import { DEFAULT_BLOCK_STYLE, normalizeBlocks, type BlockStyle, type BlockType } from "@/lib/website-blocks";
+import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, type BlockStyle, type BlockType, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
+import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
+import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
 
 export interface Selection {
   blockId: string;
@@ -37,6 +39,38 @@ export const DEVICES: { k: Device; w: number; h: number; icon: string; label: st
   { k: "mobile", w: 390, h: 844, icon: "📲", label: "มือถือ" },
 ];
 
+/** สรุปว่าร่างต่างจากที่เผยแพร่ตรงไหน (เป็นชื่อ Section ที่อ่านออก — ตัวที่เรียกใช้คำนวณให้) */
+export interface ChangeSummary {
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+
+/** แถบเครื่องมือด้านบน — ข้อมูล/ปุ่มมาจากตัวที่เรียกใช้ (layout panel / pages panel) */
+export interface BuilderToolbar {
+  /** true = มีการแก้ที่ยังไม่เผยแพร่ */
+  dirty: boolean;
+  statusNote?: string;
+  savedText?: string;
+  saving?: boolean;
+  issues: ValidationIssue[];
+  changes?: ChangeSummary;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  autoSave?: boolean;
+  onAutoSave?: (v: boolean) => void;
+  onHistory?: () => void;
+  onDiscard?: () => void;
+  onSaveDraft: () => void;
+  onPublish: () => void;
+  publishLabel?: string;
+  busy?: boolean;
+  /** ของเพิ่มด้านซ้ายสุด เช่น ปุ่มกลับ/ชื่อหน้า (แท็บหน้าเว็บ) */
+  leading?: ReactNode;
+}
+
 const uidCopy = (type: string) => `${type}-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
 const deepCopy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const childrenOf = (b: Block): { spec: ChildSpec; list: ChildBlock[] } | null => {
@@ -45,8 +79,22 @@ const childrenOf = (b: Block): { spec: ChildSpec; list: ChildBlock[] } | null =>
   const list = Array.isArray(b[spec.key]) ? (b[spec.key] as ChildBlock[]) : [];
   return { spec, list };
 };
+const inInput = (el: EventTarget | null) => {
+  const t = el as HTMLElement | null;
+  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+};
+const DEVICE_OPTS = [
+  { k: "desktop" as const, l: "🖥️ คอม" },
+  { k: "tablet" as const, l: "📱 แท็บเล็ต" },
+  { k: "mobile" as const, l: "📲 มือถือ" },
+];
 
 type Drag = { kind: "move"; id: string } | { kind: "new"; type: BlockType } | { kind: "child"; blockId: string; childId: string };
+type Pane = "tree" | "preview" | "props";
+type PropTab = "content" | "style" | "motion";
+
+const iconBtn = "inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-400 disabled:opacity-40 text-sm";
+const miniBtn = "w-6 h-6 rounded text-[12px] text-slate-400 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-30";
 
 export function WebsiteBuilder({
   blocks,
@@ -57,8 +105,9 @@ export function WebsiteBuilder({
   iframeRef: iframeRefProp,
   selection,
   onSelect,
-  previewHeight = "72vh",
+  previewHeight = "calc(100vh - 170px)",
   previewVersion = 0,
+  toolbar,
 }: {
   blocks: Block[];
   onChange: (next: Block[]) => void;
@@ -72,6 +121,7 @@ export function WebsiteBuilder({
   previewHeight?: string;
   /** ตัวที่เรียกใช้บวกเลขนี้เมื่อบันทึกร่าง/เผยแพร่แล้ว → พรีวิวโหลดใหม่เอง (แล้วเลื่อนกลับไปที่เดิม) */
   previewVersion?: number;
+  toolbar?: BuilderToolbar;
 }) {
   const localIframe = useRef<HTMLIFrameElement>(null);
   const iframeRef = iframeRefProp ?? localIframe;
@@ -80,15 +130,19 @@ export function WebsiteBuilder({
   const [device, setDevice] = useState<Device>("desktop");
   const [zoom, setZoom] = useState<Zoom>("fit");
   const [fullscreen, setFullscreen] = useState(false);
+  const [pane, setPane] = useState<Pane>("tree");
+  const [propTab, setPropTab] = useState<PropTab>("content");
   const [showLib, setShowLib] = useState(false);
+  const [libQuery, setLibQuery] = useState("");
   const [showAi, setShowAi] = useState(false);
   const [aiBrief, setAiBrief] = useState("");
   const [aiJson, setAiJson] = useState("");
   const [aiError, setAiError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [libQuery, setLibQuery] = useState("");
+  const [showIssues, setShowIssues] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [menuId, setMenuId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
   const [childOver, setChildOver] = useState<{ blockId: string; idx: number } | null>(null);
@@ -101,6 +155,7 @@ export function WebsiteBuilder({
   blocksRef.current = blocks;
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+
   useEffect(() => {
     setNonce((n) => n + 1);
   }, [previewVersion]);
@@ -113,7 +168,124 @@ export function WebsiteBuilder({
     ro.observe(el);
     setBoxW(el.clientWidth);
     return () => ro.disconnect();
-  }, [fullscreen]);
+  }, [fullscreen, pane]);
+
+  /* ── แก้ไขโครง ── */
+  const patchBlock = useCallback((id: string, p: Record<string, unknown>) => onChange(blocksRef.current.map((b) => (b.id === id ? { ...b, ...p } : b))), [onChange]);
+
+  const patchChild = (blockId: string, childId: string, p: Record<string, unknown>) => {
+    const b = blocks.find((x) => x.id === blockId);
+    const c = b && childrenOf(b);
+    if (!b || !c) return;
+    patchBlock(blockId, { [c.spec.key]: c.list.map((it) => (it.id === childId ? { ...it, ...p } : it)) });
+  };
+
+  const addSection = useCallback(
+    (type: BlockType, at?: number) => {
+      const cur = blocksRef.current;
+      const fresh = makeBlock(type, cur.length + 1);
+      const next = [...cur];
+      next.splice(at ?? cur.length, 0, fresh);
+      onChange(next);
+      onSelect({ blockId: fresh.id });
+      setPropTab("content");
+      setExpanded((s) => new Set(s).add(fresh.id));
+      setShowLib(false);
+      setLibQuery("");
+    },
+    [onChange, onSelect]
+  );
+
+  const duplicateSection = useCallback(
+    (id: string) => {
+      const cur = blocksRef.current;
+      const i = cur.findIndex((b) => b.id === id);
+      if (i < 0) return;
+      const copy = deepCopy(cur[i]);
+      copy.id = uidCopy(copy.type);
+      const c = childrenOf(copy);
+      if (c) copy[c.spec.key] = c.list.map((it) => ({ ...it, id: newChildId(c.spec.key) }));
+      const next = [...cur];
+      next.splice(i + 1, 0, copy);
+      onChange(next);
+      onSelect({ blockId: copy.id });
+    },
+    [onChange, onSelect]
+  );
+
+  const removeSection = useCallback(
+    (id: string) => {
+      const cur = blocksRef.current;
+      const b = cur.find((x) => x.id === id);
+      const label = types.find((t) => t.type === b?.type)?.label ?? "บล็อก";
+      if (!confirm(`ลบ "${label}" ออกจากหน้า?`)) return;
+      onChange(cur.filter((x) => x.id !== id));
+      if (selectionRef.current?.blockId === id) onSelect(null);
+    },
+    [onChange, onSelect, types]
+  );
+
+  const moveSection = useCallback(
+    (id: string, dir: -1 | 1) => {
+      const cur = blocksRef.current;
+      const i = cur.findIndex((b) => b.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= cur.length) return;
+      const next = [...cur];
+      [next[i], next[j]] = [next[j], next[i]];
+      onChange(next);
+    },
+    [onChange]
+  );
+
+  const setVis = (id: string, key: keyof Visibility, value: boolean) => {
+    const b = blocks.find((x) => x.id === id);
+    if (!b) return;
+    patchBlock(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
+  };
+
+  const addChild = (blockId: string) => {
+    const b = blocks.find((x) => x.id === blockId);
+    const c = b && childrenOf(b);
+    if (!b || !c || c.list.length >= c.spec.max) return;
+    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(c.spec) };
+    patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
+    setExpanded((s) => new Set(s).add(blockId));
+    onSelect({ blockId, childId: item.id });
+    setPropTab("content");
+  };
+
+  const duplicateChild = (blockId: string, childId: string) => {
+    const b = blocks.find((x) => x.id === blockId);
+    const c = b && childrenOf(b);
+    if (!b || !c || c.list.length >= c.spec.max) return;
+    const i = c.list.findIndex((it) => it.id === childId);
+    const copy = { ...deepCopy(c.list[i]), id: newChildId(c.spec.key) };
+    const next = [...c.list];
+    next.splice(i + 1, 0, copy);
+    patchBlock(blockId, { [c.spec.key]: next });
+    onSelect({ blockId, childId: copy.id });
+  };
+
+  const removeChild = (blockId: string, childId: string) => {
+    const b = blocks.find((x) => x.id === blockId);
+    const c = b && childrenOf(b);
+    if (!b || !c) return;
+    patchBlock(blockId, { [c.spec.key]: c.list.filter((it) => it.id !== childId) });
+    if (selection?.childId === childId) onSelect({ blockId });
+  };
+
+  const moveChildTo = (blockId: string, childId: string, idx: number) => {
+    const b = blocks.find((x) => x.id === blockId);
+    const c = b && childrenOf(b);
+    if (!b || !c) return;
+    const from = c.list.findIndex((it) => it.id === childId);
+    if (from < 0) return;
+    const next = [...c.list];
+    const [moved] = next.splice(from, 1);
+    next.splice(idx > from ? idx - 1 : idx, 0, moved);
+    patchBlock(blockId, { [c.spec.key]: next });
+  };
 
   /* ── พรีวิว ↔ ตัวจัดหน้า ── */
   useEffect(() => {
@@ -122,6 +294,7 @@ export function WebsiteBuilder({
       if (!d?.type) return;
       if (d.type === "storefront-block-click" && d.blockId) {
         onSelect({ blockId: d.blockId, childId: d.childId ?? null });
+        setPropTab("content");
         if (d.childId) setExpanded((s) => new Set(s).add(d.blockId!));
         document.getElementById(`blk-${d.childId ?? d.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
         return;
@@ -157,131 +330,54 @@ export function WebsiteBuilder({
           onSelect({ blockId: id });
         }
         setDrag(null);
-        return;
       }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onSelect, onChange, iframeRef]);
+  }, [onSelect, onChange, iframeRef, addSection]);
 
   useEffect(() => {
-    iframeRef.current?.contentWindow?.postMessage(
-      { type: "storefront-select-block", blockId: selection?.blockId ?? null, childId: selection?.childId ?? null },
-      "*"
-    );
+    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-select-block", blockId: selection?.blockId ?? null, childId: selection?.childId ?? null }, "*");
   }, [selection, iframeRef]);
 
+  /* ── คีย์ลัด ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (fullscreen) setFullscreen(false);
-        setMenuId(null);
+        setMenu(null);
+        setShowLib(false);
+        setShowIssues(false);
+        setShowChanges(false);
+        return;
+      }
+      if (inInput(e.target) || showAi) return;
+      const sel = selectionRef.current;
+      const cur = blocksRef.current;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && sel) {
+        e.preventDefault();
+        if (sel.childId) duplicateChild(sel.blockId, sel.childId);
+        else duplicateSection(sel.blockId);
+        return;
+      }
+      if (e.key === "Delete" && sel) {
+        e.preventDefault();
+        if (sel.childId) removeChild(sel.blockId, sel.childId);
+        else removeSection(sel.blockId);
+        return;
+      }
+      if ((e.key === "ArrowUp" || e.key === "ArrowDown") && cur.length && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const i = sel ? cur.findIndex((b) => b.id === sel.blockId) : -1;
+        const j = e.key === "ArrowUp" ? Math.max(0, i - 1) : Math.min(cur.length - 1, i + 1);
+        onSelect({ blockId: cur[j].id });
+        document.getElementById(`blk-${cur[j].id}`)?.scrollIntoView({ block: "nearest" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen]);
-
-  /* ── แก้ไขโครง ── */
-  const patchBlock = useCallback((id: string, p: Record<string, unknown>) => onChange(blocks.map((b) => (b.id === id ? { ...b, ...p } : b))), [blocks, onChange]);
-
-  const patchChild = (blockId: string, childId: string, p: Record<string, unknown>) => {
-    const b = blocks.find((x) => x.id === blockId);
-    const c = b && childrenOf(b);
-    if (!b || !c) return;
-    patchBlock(blockId, { [c.spec.key]: c.list.map((it) => (it.id === childId ? { ...it, ...p } : it)) });
-  };
-
-  const addSection = (type: BlockType, at?: number) => {
-    const fresh = makeBlock(type, blocks.length + 1);
-    const next = [...blocks];
-    next.splice(at ?? blocks.length, 0, fresh);
-    onChange(next);
-    onSelect({ blockId: fresh.id });
-    setExpanded((s) => new Set(s).add(fresh.id));
-  };
-
-  const duplicateSection = (id: string) => {
-    const i = blocks.findIndex((b) => b.id === id);
-    if (i < 0) return;
-    const src = blocks[i];
-    const copy = deepCopy(src);
-    copy.id = uidCopy(src.type);
-    const c = childrenOf(copy);
-    if (c) copy[c.spec.key] = c.list.map((it) => ({ ...it, id: newChildId(c.spec.key) }));
-    const next = [...blocks];
-    next.splice(i + 1, 0, copy);
-    onChange(next);
-    setMenuId(null);
-    onSelect({ blockId: copy.id });
-  };
-
-  const removeSection = (id: string) => {
-    const b = blocks.find((x) => x.id === id);
-    const label = types.find((t) => t.type === b?.type)?.label ?? "บล็อก";
-    if (!confirm(`ลบ "${label}" ออกจากหน้า?`)) return;
-    onChange(blocks.filter((x) => x.id !== id));
-    if (selection?.blockId === id) onSelect(null);
-    setMenuId(null);
-  };
-
-  const moveSection = (id: string, dir: -1 | 1) => {
-    const i = blocks.findIndex((b) => b.id === id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= blocks.length) return;
-    const next = [...blocks];
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  };
-
-  const setVis = (id: string, key: keyof Visibility, value: boolean) => {
-    const b = blocks.find((x) => x.id === id);
-    if (!b) return;
-    patchBlock(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
-  };
-
-  const addChild = (blockId: string) => {
-    const b = blocks.find((x) => x.id === blockId);
-    const c = b && childrenOf(b);
-    if (!b || !c || c.list.length >= c.spec.max) return;
-    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(c.spec) };
-    patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
-    setExpanded((s) => new Set(s).add(blockId));
-    onSelect({ blockId, childId: item.id });
-  };
-
-  const duplicateChild = (blockId: string, childId: string) => {
-    const b = blocks.find((x) => x.id === blockId);
-    const c = b && childrenOf(b);
-    if (!b || !c || c.list.length >= c.spec.max) return;
-    const i = c.list.findIndex((it) => it.id === childId);
-    const copy = { ...deepCopy(c.list[i]), id: newChildId(c.spec.key) };
-    const next = [...c.list];
-    next.splice(i + 1, 0, copy);
-    patchBlock(blockId, { [c.spec.key]: next });
-    onSelect({ blockId, childId: copy.id });
-  };
-
-  const removeChild = (blockId: string, childId: string) => {
-    const b = blocks.find((x) => x.id === blockId);
-    const c = b && childrenOf(b);
-    if (!b || !c) return;
-    patchBlock(blockId, { [c.spec.key]: c.list.filter((it) => it.id !== childId) });
-    if (selection?.childId === childId) onSelect({ blockId });
-  };
-
-  const moveChildTo = (blockId: string, childId: string, idx: number) => {
-    const b = blocks.find((x) => x.id === blockId);
-    const c = b && childrenOf(b);
-    if (!b || !c) return;
-    const from = c.list.findIndex((it) => it.id === childId);
-    if (from < 0) return;
-    const next = [...c.list];
-    const [moved] = next.splice(from, 1);
-    next.splice(idx > from ? idx - 1 : idx, 0, moved);
-    patchBlock(blockId, { [c.spec.key]: next });
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen, showAi, duplicateSection, removeSection, onSelect]);
 
   /* ── ลากวาง Section ── */
   const endDrag = () => {
@@ -309,7 +405,7 @@ export function WebsiteBuilder({
     const r = e.currentTarget.getBoundingClientRect();
     setOverIdx(e.clientY < r.top + r.height / 2 ? i : i + 1);
   };
-  /** เส้นบอกตำแหน่ง — ต้องเป็นฟังก์ชันคืน JSX (component ย่อยจะสร้าง DOM ใหม่ทุกครั้งที่ขยับเมาส์แล้ว dragleave ยิงรัว) */
+  /** เส้นบอกตำแหน่ง — เป็นฟังก์ชันคืน JSX (component ย่อยจะสร้าง DOM ใหม่ทุกครั้งที่ขยับเมาส์ → dragleave ยิงรัว) */
   const dropLine = (idx: number) => {
     if (!drag || drag.kind === "child") return null;
     const active = overIdx === idx;
@@ -317,14 +413,14 @@ export function WebsiteBuilder({
       <li
         onDragOver={(e) => { e.preventDefault(); setOverIdx(idx); }}
         onDrop={(e) => { e.preventDefault(); dropAt(idx); }}
-        className={`rounded-lg transition-all ${active ? "h-9 border-2 border-dashed border-blue-500 bg-blue-50 flex items-center justify-center" : "h-2 border-2 border-dashed border-transparent"}`}
+        className={`rounded transition-all ${active ? "h-7 border-2 border-dashed border-blue-500 bg-blue-50 flex items-center justify-center" : "h-1.5 border border-dashed border-transparent"}`}
       >
-        {active && <span className="text-[11px] font-medium text-blue-600">วางตรงนี้</span>}
+        {active && <span className="text-[10px] font-medium text-blue-600">วางตรงนี้</span>}
       </li>
     );
   };
 
-  /* ── ให้ AI ช่วย: คัดลอกคำสั่ง → วาง JSON กลับมา ── */
+  /* ── ให้ AI ช่วย ── */
   const aiPrompt = useMemo(() => buildAiPrompt({ shopName: ctx.shopName ?? ctx.shopSlug, categories: ctx.categories, brief: aiBrief.trim() || undefined }), [ctx, aiBrief]);
   const copyPrompt = async () => {
     try {
@@ -332,13 +428,12 @@ export function WebsiteBuilder({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      /* เบราว์เซอร์ไม่ให้ก๊อป — ผู้ใช้เลือกข้อความเองได้ */
+      /* ผู้ใช้เลือกข้อความเองได้ */
     }
   };
   const importAiJson = () => {
     setAiError(null);
     let raw = aiJson.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-    // บางครั้ง AI ห่อมาเป็น object หรือใส่ข้อความนำหน้า — หา [ ... ] ก้อนแรก
     const start = raw.indexOf("[");
     const end = raw.lastIndexOf("]");
     if (start >= 0 && end > start) raw = raw.slice(start, end + 1);
@@ -386,33 +481,127 @@ export function WebsiteBuilder({
   const selBlock = selection ? blocks.find((b) => b.id === selection.blockId) ?? null : null;
   const selChild = selBlock && selection?.childId ? childrenOf(selBlock)?.list.find((it) => it.id === selection.childId) ?? null : null;
   const selSchema = selBlock ? SECTION_SCHEMAS[selBlock.type] : null;
+  const errors = (toolbar?.issues ?? []).filter((i) => i.level === "error");
+  const warnings = (toolbar?.issues ?? []).filter((i) => i.level === "warning");
+  const hasChanges = !!toolbar?.changes && (toolbar.changes.added.length > 0 || toolbar.changes.removed.length > 0 || toolbar.changes.changed.length > 0);
 
   const dev = DEVICES.find((d) => d.k === device)!;
   const scale = zoom === "fit" ? Math.min(1, (boxW - 16) / dev.w) : zoom;
 
-  /* ── พรีวิว ── */
-  const previewToolbar = (
-    <div className="flex flex-wrap items-center gap-1.5">
+  /* ── แถบเครื่องมือ ── */
+  const topbar = (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2">
+      {toolbar?.leading}
+      {toolbar && (
+        <div className="relative">
+          <button
+            onClick={() => setShowChanges((v) => !v)}
+            className={`text-xs px-2.5 py-1 rounded-full font-medium border ${toolbar.dirty ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
+            title={toolbar.dirty ? "กดดูว่าเปลี่ยนอะไรไปบ้าง" : "ตรงกับเว็บจริงแล้ว"}
+          >
+            {toolbar.dirty ? "● ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
+          </button>
+          {showChanges && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowChanges(false)} />
+              <div className="absolute left-0 top-8 z-20 w-72 rounded-xl border border-slate-200 bg-white shadow-lg p-3 text-xs space-y-1.5">
+                <p className="font-medium text-slate-800">{toolbar.dirty ? "สิ่งที่ต่างจากเว็บจริง" : "ตรงกับเว็บจริงแล้ว"}</p>
+                {hasChanges ? (
+                  <>
+                    {toolbar.changes!.added.length > 0 && <p className="text-emerald-700">+ เพิ่ม: {toolbar.changes!.added.join(", ")}</p>}
+                    {toolbar.changes!.removed.length > 0 && <p className="text-red-600">− ลบ: {toolbar.changes!.removed.join(", ")}</p>}
+                    {toolbar.changes!.changed.length > 0 && <p className="text-blue-700">✎ แก้: {toolbar.changes!.changed.join(", ")}</p>}
+                  </>
+                ) : (
+                  <p className="text-slate-500">{toolbar.dirty ? "มีร่างที่บันทึกไว้ (เนื้อหาเหมือนที่เผยแพร่)" : "ไม่มีการเปลี่ยนแปลงค้างอยู่"}</p>
+                )}
+                {toolbar.dirty && <p className="text-slate-400 pt-1">กด &quot;เผยแพร่&quot; เพื่อให้ขึ้นเว็บจริง</p>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {toolbar?.statusNote && <span className="hidden md:inline text-[11px] text-slate-400">{toolbar.statusNote}</span>}
+      {toolbar && <span className="text-[11px] text-slate-400">{toolbar.saving ? "กำลังบันทึก…" : toolbar.savedText ?? ""}</span>}
+      {toolbar && (errors.length > 0 || warnings.length > 0) && (
+        <div className="relative">
+          <button onClick={() => setShowIssues((v) => !v)} className={`text-[11px] px-2 py-1 rounded-full border ${errors.length ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`} title="กดดูรายละเอียด">
+            {errors.length ? `⚠️ ควรแก้ ${errors.length} จุด` : `💡 แนะนำ ${warnings.length}`}
+            {errors.length > 0 && warnings.length > 0 && ` · เตือน ${warnings.length}`}
+          </button>
+          {showIssues && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowIssues(false)} />
+              <ul className="absolute left-0 top-8 z-20 w-80 rounded-xl border border-slate-200 bg-white shadow-lg p-2 space-y-1 max-h-72 overflow-y-auto">
+                {toolbar.issues.map((it, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs px-1 py-1">
+                    <span className={it.level === "error" ? "text-red-600" : "text-amber-600"}>{it.level === "error" ? "✕" : "!"}</span>
+                    <span className="flex-1 text-slate-700">{it.message}</span>
+                    {it.blockId && (
+                      <button
+                        onClick={() => {
+                          onSelect({ blockId: it.blockId! });
+                          setShowIssues(false);
+                          setPane("props");
+                          document.getElementById(`blk-${it.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }}
+                        className="text-blue-600 hover:underline whitespace-nowrap"
+                      >
+                        ไปที่
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
+      <span className="flex-1" />
+
+      {toolbar && (
+        <>
+          <button onClick={toolbar.onUndo} disabled={!toolbar.canUndo} title="ย้อนกลับ (Ctrl+Z)" className={iconBtn}>↶</button>
+          <button onClick={toolbar.onRedo} disabled={!toolbar.canRedo} title="ทำซ้ำ (Ctrl+Shift+Z)" className={iconBtn}>↷</button>
+          <span className="w-px h-5 bg-slate-200 mx-0.5" />
+        </>
+      )}
       {DEVICES.map((d) => (
-        <button key={d.k} onClick={() => setDevice(d.k)} title={`${d.label} ${d.w}×${d.h}`} className={`px-2.5 py-1 rounded-lg border text-xs ${device === d.k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+        <button key={d.k} onClick={() => { setDevice(d.k); setPane("preview"); }} title={`${d.label} ${d.w}×${d.h}`} className={`${iconBtn} ${device === d.k ? "!bg-slate-900 !text-white !border-slate-900" : ""}`}>
           {d.icon}
         </button>
       ))}
-      <select value={String(zoom)} onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : (Number(e.target.value) as Zoom))} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700">
-        <option value="fit">พอดีจอ</option>
+      <select value={String(zoom)} onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : (Number(e.target.value) as Zoom))} className="h-8 rounded-lg border border-slate-200 px-1.5 text-xs text-slate-700" title="ซูมพรีวิว">
+        <option value="fit">พอดี</option>
         <option value="0.5">50%</option>
         <option value="0.75">75%</option>
         <option value="1">100%</option>
       </select>
-      <button onClick={() => setFullscreen((v) => !v)} title="เต็มจอ (Esc เพื่อออก)" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">{fullscreen ? "⤡" : "⤢"}</button>
-      <button onClick={reloadPreview} title="โหลดพรีวิวใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
-      {previewSrc && (
-        <a href={previewSrc} target="_blank" rel="noreferrer" title="เปิดแท็บใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↗</a>
+      <button onClick={reloadPreview} title="โหลดพรีวิวใหม่" className={iconBtn}>↻</button>
+      <button onClick={() => setFullscreen(true)} title="พรีวิวเต็มจอ (Esc ออก)" className={iconBtn}>⤢</button>
+      {previewSrc && <a href={previewSrc} target="_blank" rel="noreferrer" title="เปิดพรีวิวในแท็บใหม่" className={iconBtn}>↗</a>}
+      {toolbar && (
+        <>
+          <span className="w-px h-5 bg-slate-200 mx-0.5" />
+          {toolbar.onHistory && <button onClick={toolbar.onHistory} title="ประวัติเวอร์ชันที่เผยแพร่" className={iconBtn}>🕘</button>}
+          {toolbar.onAutoSave && (
+            <label className="hidden xl:flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer" title="บันทึกร่างอัตโนมัติหลังหยุดแก้ 1.5 วิ แล้วพรีวิวอัปเดตเอง">
+              <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={toolbar.autoSave} onChange={(e) => toolbar.onAutoSave?.(e.target.checked)} />
+              อัตโนมัติ
+            </label>
+          )}
+          {toolbar.onDiscard && toolbar.dirty && <button onClick={toolbar.onDiscard} className="px-2.5 h-8 rounded-lg text-xs text-slate-500 hover:text-slate-800" title="ละทิ้งการเปลี่ยนแปลงทั้งหมด กลับไปใช้ที่เผยแพร่อยู่">ละทิ้ง</button>}
+          <button onClick={toolbar.onSaveDraft} disabled={toolbar.saving || toolbar.busy} className="px-3 h-8 rounded-lg border border-slate-300 text-xs text-slate-700 hover:border-slate-500 disabled:opacity-50">บันทึกร่าง</button>
+          <button onClick={toolbar.onPublish} disabled={toolbar.busy} className="px-4 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
+            {toolbar.busy ? "กำลังเผยแพร่…" : toolbar.publishLabel ?? "เผยแพร่"}
+          </button>
+        </>
       )}
-      <span className="text-[10px] text-slate-400 ml-auto">{dev.w}×{dev.h} · {Math.round(scale * 100)}%</span>
     </div>
   );
 
+  /* ── พรีวิว ── */
   const previewFrame = (heightCss: string) => (
     <div ref={previewBoxRef} className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: heightCss }}>
       {previewSrc ? (
@@ -443,7 +632,7 @@ export function WebsiteBuilder({
     const over = childOver?.blockId === b.id && childOver.idx === idx && drag?.kind === "child" && drag.blockId === b.id;
     return (
       <Fragment key={it.id}>
-        {over && <li className="h-1.5 rounded bg-blue-500 mx-6" />}
+        {over && <li className="h-1 rounded bg-blue-500 ml-7 mr-1" />}
         <li
           id={`blk-${it.id}`}
           draggable
@@ -463,159 +652,94 @@ export function WebsiteBuilder({
             moveChildTo(b.id, drag.childId, childOver?.idx ?? idx);
             endDrag();
           }}
-          className={`ml-6 flex items-center gap-1.5 rounded-lg border px-2 py-1.5 bg-white ${dragging ? "opacity-40" : ""} ${isSel ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200"}`}
+          onClick={() => { onSelect({ blockId: b.id, childId: it.id }); setPropTab("content"); setPane("props"); }}
+          className={`group ml-7 mr-1 flex items-center gap-1.5 rounded-md px-1.5 py-1 cursor-pointer text-[11px] ${dragging ? "opacity-40" : ""} ${isSel ? "bg-orange-50 text-orange-800 ring-1 ring-orange-200" : "text-slate-600 hover:bg-slate-50"}`}
         >
-          <span className="cursor-grab text-slate-300 select-none text-xs">⠿</span>
-          <span className="text-sm">{c.spec.icon}</span>
-          <button onClick={() => onSelect({ blockId: b.id, childId: it.id })} className="flex-1 min-w-0 text-left">
-            <span className={`block text-xs truncate ${it.enabled === false ? "text-slate-400 line-through" : "text-slate-700"}`}>
-              {c.spec.summary(it) || c.spec.itemLabel}
-            </span>
-          </button>
-          <button onClick={() => patchChild(b.id, it.id, { enabled: it.enabled === false })} title={it.enabled === false ? "แสดง" : "ซ่อน"} className="text-[11px] text-slate-400 hover:text-slate-800 px-1">
-            {it.enabled === false ? "👁️‍🗨️" : "👁️"}
-          </button>
-          <button onClick={() => duplicateChild(b.id, it.id)} disabled={c.list.length >= c.spec.max} title="ทำสำเนา" className="text-[11px] text-slate-400 hover:text-slate-800 px-1 disabled:opacity-30">📑</button>
-          <button onClick={() => removeChild(b.id, it.id)} title="ลบ" className="text-[11px] text-slate-400 hover:text-red-500 px-1">🗑️</button>
+          <span className="cursor-grab text-slate-300 select-none">⠿</span>
+          <span className={`flex-1 truncate ${it.enabled === false ? "line-through text-slate-400" : ""}`}>{c.spec.summary(it) || c.spec.itemLabel}</span>
+          <span className="hidden group-hover:flex items-center">
+            <button onClick={(e) => { e.stopPropagation(); patchChild(b.id, it.id, { enabled: it.enabled === false }); }} title={it.enabled === false ? "แสดง" : "ซ่อน"} className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800">{it.enabled === false ? "🚫" : "👁️"}</button>
+            <button onClick={(e) => { e.stopPropagation(); duplicateChild(b.id, it.id); }} disabled={c.list.length >= c.spec.max} title="ทำสำเนา" className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800 disabled:opacity-30">📑</button>
+            <button onClick={(e) => { e.stopPropagation(); removeChild(b.id, it.id); }} title="ลบ" className="w-5 h-5 text-[10px] text-slate-400 hover:text-red-500">🗑️</button>
+          </span>
         </li>
       </Fragment>
     );
   };
 
   const tree = (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-slate-500">{drag ? "ปล่อยตรงเส้นน้ำเงินเพื่อวาง" : "คลิกชื่อเพื่อแก้ · ลากเพื่อสลับลำดับ"}</p>
-        <div className="flex items-center gap-1.5">
-          <button onClick={() => setShowAi(true)} title="คัดลอกคำสั่งไปให้ AI ออกแบบ แล้ววาง JSON กลับมา" className="px-2.5 py-1.5 rounded-lg border border-violet-300 bg-violet-50 text-violet-700 text-xs font-medium hover:bg-violet-100">
-            🤖 ให้ AI ช่วย
-          </button>
-          <button onClick={() => setShowLib((v) => !v)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
-            {showLib ? "ปิดคลัง" : "+ เพิ่ม Section"}
-          </button>
-        </div>
+    <div className="relative h-full flex flex-col">
+      <div className="flex items-center gap-1 mb-2">
+        <button onClick={() => setShowLib(true)} className="flex-1 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">+ เพิ่ม Section</button>
+        <button onClick={() => setShowAi(true)} title="ให้ AI ช่วยออกแบบ แล้ววาง JSON กลับมา" className={`${iconBtn} !border-violet-200 !bg-violet-50 !text-violet-700 hover:!bg-violet-100`}>🤖</button>
       </div>
 
-      {showLib && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
-          <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder="ค้นหา เช่น รูป, สินค้า, คำถาม" autoFocus />
-          {grouped.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">ไม่พบ Section ที่ค้นหา</p>
-          ) : (
-            grouped.map(([group, list]) => (
-              <div key={group}>
-                <p className="text-[11px] font-medium text-slate-500 mb-1.5">{group}</p>
-                <div className="grid gap-1.5">
-                  {list.map((t) => (
-                    <button
-                      key={t.type}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData("text/plain", `website-new:${t.type}`);
-                        e.dataTransfer.effectAllowed = "copyMove";
-                        setDrag({ kind: "new", type: t.type });
-                      }}
-                      onDragEnd={endDrag}
-                      onClick={() => { addSection(t.type); setLibQuery(""); }}
-                      title={`${t.label} — ลากไปวางในโครง หรือกดเพื่อเพิ่มต่อท้าย`}
-                      className={`flex items-start gap-2 bg-white rounded-lg border px-2.5 py-2 text-left cursor-grab active:cursor-grabbing hover:border-blue-400 ${drag?.kind === "new" && drag.type === t.type ? "border-blue-500 opacity-50" : "border-slate-200"}`}
-                    >
-                      <span className="text-base leading-none">{t.icon}</span>
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium text-slate-800">{t.label}</span>
-                        <span className="block text-[10px] text-slate-400 truncate">{t.hint}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      <ul className={drag && drag.kind !== "child" ? "space-y-0" : "space-y-1.5"}>
+      <ul className={`flex-1 overflow-y-auto pr-0.5 ${drag && drag.kind !== "child" ? "space-y-0" : "space-y-0.5"}`}>
         {blocks.map((b, i) => {
           const info = types.find((t) => t.type === b.type);
           const schema = SECTION_SCHEMAS[b.type];
           const c = childrenOf(b);
           const isSel = selection?.blockId === b.id && !selection.childId;
           const isOpen = expanded.has(b.id);
+          const hasIssue = errors.some((x) => x.blockId === b.id);
           return (
             <Fragment key={b.id}>
               {dropLine(i)}
               <li
                 id={`blk-${b.id}`}
                 draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData("text/plain", `website-move:${b.id}`);
-                  e.dataTransfer.effectAllowed = "move";
-                  setDrag({ kind: "move", id: b.id });
-                }}
+                onDragStart={(e) => { e.dataTransfer.setData("text/plain", `website-move:${b.id}`); e.dataTransfer.effectAllowed = "move"; setDrag({ kind: "move", id: b.id }); }}
                 onDragEnd={endDrag}
                 onDragOver={(e) => overBlock(e, i)}
                 onDrop={(e) => { if (drag?.kind === "child") return; e.preventDefault(); dropAt(overIdx ?? i); }}
-                className={`rounded-xl border bg-white transition ${drag?.kind === "move" && drag.id === b.id ? "border-blue-400 opacity-50" : isSel ? "border-blue-500 ring-2 ring-blue-100" : selection?.blockId === b.id ? "border-blue-300" : "border-slate-200"}`}
+                onContextMenu={(e) => { e.preventDefault(); onSelect({ blockId: b.id }); setMenu({ id: b.id, x: e.clientX, y: e.clientY }); }}
+                className={`rounded-lg transition ${drag?.kind === "move" && drag.id === b.id ? "opacity-40" : ""}`}
               >
-                <div className="flex items-center gap-1.5 px-2 py-2">
-                  <span className="cursor-grab text-slate-300 select-none" title="ลากเพื่อย้าย">⠿</span>
+                <div
+                  onClick={() => { onSelect({ blockId: b.id }); setPropTab("content"); setPane("props"); }}
+                  className={`group flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 cursor-pointer ${isSel ? "bg-blue-50 ring-1 ring-blue-200" : selection?.blockId === b.id ? "bg-blue-50/40" : "hover:bg-slate-50"}`}
+                >
+                  <span className="cursor-grab text-slate-300 select-none text-xs" title="ลากเพื่อย้าย">⠿</span>
                   {c ? (
-                    <button onClick={() => setExpanded((s) => { const n = new Set(s); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n; })} className="w-4 text-[10px] text-slate-400 hover:text-slate-800" title={isOpen ? "พับ" : "ดู Block ย่อย"}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n; }); }}
+                      className="w-3.5 text-[9px] text-slate-400 hover:text-slate-800"
+                      title={isOpen ? "พับ" : `ดู${c.spec.label}`}
+                    >
                       {isOpen ? "▾" : "▸"}
                     </button>
                   ) : (
-                    <span className="w-4" />
+                    <span className="w-3.5" />
                   )}
-                  <span className="text-base">{info?.icon ?? "🧩"}</span>
-                  <button onClick={() => onSelect({ blockId: b.id })} className="flex-1 min-w-0 text-left">
-                    <span className={`block text-xs font-medium truncate ${b.enabled ? "text-slate-800" : "text-slate-400 line-through"}`}>
-                      {info?.label ?? b.type}
-                      {visibilityLabel(b.visibility) && <span className="ml-1.5 text-[9px] font-normal px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">{visibilityLabel(b.visibility)}</span>}
+                  <span className="text-sm leading-none">{info?.icon ?? "🧩"}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-xs truncate ${b.enabled ? "text-slate-800" : "text-slate-400 line-through"} ${isSel ? "font-medium" : ""}`}>{info?.label ?? b.type}</span>
+                    <span className="block text-[10px] text-slate-400 truncate">
+                      {schema ? blockSummary(b) : "บล็อกของระบบเดิม"}
+                      {c && !isOpen && ` · ${c.spec.itemLabel} ${c.list.length}`}
+                      {visibilityLabel(b.visibility) && ` · ${visibilityLabel(b.visibility)}`}
                     </span>
-                    <span className="block text-[10px] text-slate-400 truncate">{schema ? blockSummary(b) : "บล็อกของระบบเดิม — แก้ที่นี่ไม่ได้"}</span>
-                  </button>
-                  <button onClick={() => patchBlock(b.id, { enabled: !b.enabled })} title={b.enabled ? "ซ่อน Section นี้" : "แสดง Section นี้"} className={`shrink-0 w-8 h-4 rounded-full transition relative ${b.enabled ? "bg-emerald-500" : "bg-slate-300"}`}>
-                    <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${b.enabled ? "left-[18px]" : "left-0.5"}`} />
-                  </button>
-                  <div className="relative shrink-0">
-                    <button onClick={() => setMenuId(menuId === b.id ? null : b.id)} className="w-6 h-6 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-400 text-xs" title="เพิ่มเติม">⋯</button>
-                    {menuId === b.id && (
-                      <>
-                        <div className="fixed inset-0 z-10" onClick={() => setMenuId(null)} />
-                        <div className="absolute right-0 top-7 z-20 w-52 rounded-xl border border-slate-200 bg-white shadow-lg py-1.5">
-                          <button onClick={() => duplicateSection(b.id)} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">📑 ทำสำเนา</button>
-                          <button onClick={() => { moveSection(b.id, -1); setMenuId(null); }} disabled={i === 0} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-30">▲ เลื่อนขึ้น</button>
-                          <button onClick={() => { moveSection(b.id, 1); setMenuId(null); }} disabled={i === blocks.length - 1} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-30">▼ เลื่อนลง</button>
-                          <div className="border-t border-slate-100 my-1" />
-                          <p className="px-3 py-1 text-[11px] text-slate-400">แสดงบนอุปกรณ์</p>
-                          {([{ k: "desktop" as const, l: "🖥️ คอมพิวเตอร์" }, { k: "tablet" as const, l: "📱 แท็บเล็ต" }, { k: "mobile" as const, l: "📲 มือถือ" }]).map((d) => {
-                            const on = { ...ALL_VISIBLE, ...b.visibility }[d.k];
-                            return (
-                              <label key={d.k} className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={on} onChange={(e) => setVis(b.id, d.k, e.target.checked)} />
-                                {d.l}
-                              </label>
-                            );
-                          })}
-                          <div className="border-t border-slate-100 my-1" />
-                          <button onClick={() => removeSection(b.id)} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50">🗑️ ลบ Section นี้</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  </span>
+                  {hasIssue && <span className="text-[10px] text-red-500" title="มีจุดที่ควรแก้">●</span>}
+                  <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); patchBlock(b.id, { enabled: !b.enabled }); }} title={b.enabled ? "ซ่อน" : "แสดง"} className={miniBtn}>{b.enabled ? "👁️" : "🚫"}</button>
+                    <button onClick={(e) => { e.stopPropagation(); duplicateSection(b.id); }} title="ทำสำเนา (Ctrl+D)" className={miniBtn}>📑</button>
+                    <button onClick={(e) => { e.stopPropagation(); onSelect({ blockId: b.id }); setMenu({ id: b.id, x: e.clientX, y: e.clientY }); }} title="เพิ่มเติม" className={miniBtn}>⋯</button>
+                  </span>
+                  <span className={`group-hover:hidden w-1.5 h-1.5 rounded-full shrink-0 ${b.enabled ? "bg-emerald-500" : "bg-slate-300"}`} title={b.enabled ? "แสดงอยู่" : "ซ่อนอยู่"} />
                 </div>
 
                 {c && isOpen && (
-                  <ul className="pb-2 pr-2 space-y-1" onDragOver={(e) => { if (drag?.kind === "child" && drag.blockId === b.id) e.preventDefault(); }}>
+                  <ul className="pb-1 space-y-0.5" onDragOver={(e) => { if (drag?.kind === "child" && drag.blockId === b.id) e.preventDefault(); }}>
                     {c.list.map((it, idx) => childRow(b, c, it, idx))}
-                    {drag?.kind === "child" && drag.blockId === b.id && childOver?.blockId === b.id && childOver.idx === c.list.length && <li className="h-1.5 rounded bg-blue-500 mx-6" />}
+                    {drag?.kind === "child" && drag.blockId === b.id && childOver?.blockId === b.id && childOver.idx === c.list.length && <li className="h-1 rounded bg-blue-500 ml-7 mr-1" />}
                     <li
-                      className="ml-6"
+                      className="ml-7"
                       onDragOver={(e) => { if (drag?.kind === "child" && drag.blockId === b.id) { e.preventDefault(); setChildOver({ blockId: b.id, idx: c.list.length }); } }}
                       onDrop={(e) => { if (drag?.kind !== "child") return; e.preventDefault(); moveChildTo(b.id, drag.childId, c.list.length); endDrag(); }}
                     >
-                      <button onClick={() => addChild(b.id)} disabled={c.list.length >= c.spec.max} className="text-[11px] text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">
-                        + เพิ่ม{c.spec.itemLabel} {c.list.length >= c.spec.max ? `(ครบ ${c.spec.max} แล้ว)` : `(${c.list.length}/${c.spec.max})`}
+                      <button onClick={() => addChild(b.id)} disabled={c.list.length >= c.spec.max} className="text-[10px] text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">
+                        + เพิ่ม{c.spec.itemLabel} ({c.list.length}/{c.spec.max})
                       </button>
                     </li>
                   </ul>
@@ -625,111 +749,200 @@ export function WebsiteBuilder({
           );
         })}
         {dropLine(blocks.length)}
+        {!blocks.length && (
+          <li
+            onDragOver={(e) => { if (drag && drag.kind !== "child") { e.preventDefault(); setOverIdx(0); } }}
+            onDrop={(e) => { e.preventDefault(); dropAt(0); }}
+            className={`rounded-xl border-2 border-dashed py-10 text-center text-xs transition ${drag ? "border-blue-500 bg-blue-50 text-blue-600" : "border-slate-300 text-slate-400"}`}
+          >
+            {drag ? "วางตรงนี้เพื่อเริ่มจัดหน้า" : 'ยังไม่มี Section — กด "+ เพิ่ม Section"'}
+          </li>
+        )}
       </ul>
+      <p className="mt-1 text-[10px] text-slate-400 leading-snug">ลากเรียง · คลิกขวาเปิดเมนู · Delete ลบ · Ctrl+D สำเนา</p>
 
-      {!blocks.length && (
-        <div
-          onDragOver={(e) => { if (drag && drag.kind !== "child") { e.preventDefault(); setOverIdx(0); } }}
-          onDrop={(e) => { e.preventDefault(); dropAt(0); }}
-          className={`rounded-xl border-2 border-dashed py-10 text-center text-sm transition ${drag ? "border-blue-500 bg-blue-50 text-blue-600" : "border-slate-300 text-slate-400"}`}
-        >
-          {drag ? "วางตรงนี้เพื่อเริ่มจัดหน้า" : 'ยังไม่มี Section — กด "+ เพิ่ม Section" หรือลากจากคลังมาวาง'}
+      {/* คลัง Section — เลื่อนออกมาทับแผงซ้าย */}
+      {showLib && (
+        <div className="absolute inset-0 z-20 rounded-xl border border-blue-200 bg-white shadow-xl flex flex-col p-2.5">
+          <div className="flex items-center gap-1.5 mb-2">
+            <input className="flex-1 min-w-0 h-8 rounded-lg border border-slate-200 px-2.5 text-xs" value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder="ค้นหา เช่น รูป สินค้า คำถาม" autoFocus />
+            <button onClick={() => { setShowLib(false); setLibQuery(""); }} className={iconBtn} title="ปิด (Esc)">✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-3 pr-0.5">
+            {grouped.length === 0 ? (
+              <p className="py-6 text-center text-xs text-slate-400">ไม่พบ Section ที่ค้นหา</p>
+            ) : (
+              grouped.map(([group, list]) => (
+                <div key={group}>
+                  <p className="text-[10px] font-medium text-slate-500 mb-1">{group}</p>
+                  <div className="grid gap-1">
+                    {list.map((t) => (
+                      <button
+                        key={t.type}
+                        draggable
+                        onDragStart={(e) => { e.dataTransfer.setData("text/plain", `website-new:${t.type}`); e.dataTransfer.effectAllowed = "copyMove"; setDrag({ kind: "new", type: t.type }); }}
+                        onDragEnd={endDrag}
+                        onClick={() => addSection(t.type)}
+                        title={`${t.label} — ${t.hint}\nกดเพื่อเพิ่มต่อท้าย หรือลากไปวางในพรีวิว`}
+                        className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-blue-50/40 ${drag?.kind === "new" && drag.type === t.type ? "border-blue-500 opacity-50" : "border-slate-200"}`}
+                      >
+                        <span className="text-base leading-none">{t.icon}</span>
+                        <span className="min-w-0">
+                          <span className="block text-xs text-slate-800">{t.label}</span>
+                          <span className="block text-[10px] text-slate-400 truncate">{t.hint}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <p className="mt-2 text-[10px] text-slate-400 leading-snug">กด = เพิ่มต่อท้าย · ลากไปวางในพรีวิวได้</p>
         </div>
       )}
     </div>
   );
 
+  /* ── เมนูคลิกขวา ── */
+  const menuBlock = menu ? blocks.find((x) => x.id === menu.id) ?? null : null;
+  const menuIdx = menuBlock ? blocks.findIndex((x) => x.id === menuBlock.id) : -1;
+  const menuItem = "w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-30 flex items-center gap-2";
+  const contextMenu = menu && menuBlock && (
+    <>
+      <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+      <div className="fixed z-50 w-52 rounded-xl border border-slate-200 bg-white shadow-lg py-1" style={{ left: Math.max(4, Math.min(menu.x, window.innerWidth - 220)), top: Math.max(4, Math.min(menu.y, window.innerHeight - 330)) }}>
+        <button className={menuItem} onClick={() => { duplicateSection(menuBlock.id); setMenu(null); }}>📑 ทำสำเนา <span className="ml-auto text-slate-400">Ctrl+D</span></button>
+        <button className={menuItem} onClick={() => { patchBlock(menuBlock.id, { enabled: !menuBlock.enabled }); setMenu(null); }}>{menuBlock.enabled ? "🚫 ซ่อน Section" : "👁️ แสดง Section"}</button>
+        <button className={menuItem} disabled={menuIdx <= 0} onClick={() => { moveSection(menuBlock.id, -1); setMenu(null); }}>▲ เลื่อนขึ้น</button>
+        <button className={menuItem} disabled={menuIdx >= blocks.length - 1} onClick={() => { moveSection(menuBlock.id, 1); setMenu(null); }}>▼ เลื่อนลง</button>
+        <div className="border-t border-slate-100 my-1" />
+        <p className="px-3 py-0.5 text-[10px] text-slate-400">แสดงบนอุปกรณ์</p>
+        {DEVICE_OPTS.map((d) => (
+          <label key={d.k} className="flex items-center gap-2 px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer">
+            <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={{ ...ALL_VISIBLE, ...menuBlock.visibility }[d.k]} onChange={(e) => setVis(menuBlock.id, d.k, e.target.checked)} />
+            {d.l}
+          </label>
+        ))}
+        <div className="border-t border-slate-100 my-1" />
+        <button className={`${menuItem} !text-red-600 hover:!bg-red-50`} onClick={() => { setMenu(null); removeSection(menuBlock.id); }}>🗑️ ลบ Section <span className="ml-auto text-red-300">Delete</span></button>
+      </div>
+    </>
+  );
+
   /* ── แผงขวา: คุณสมบัติ ── */
+  const styleOf = (b: Block): BlockStyle => ({ ...DEFAULT_BLOCK_STYLE, ...((b.style as Partial<BlockStyle>) ?? {}) });
+  const styleTouched = (st: BlockStyle) => JSON.stringify({ ...st, motion: undefined }) !== JSON.stringify({ ...DEFAULT_BLOCK_STYLE, motion: undefined });
+  const motionTouched = (st: BlockStyle) => JSON.stringify({ ...DEFAULT_MOTION, ...(st.motion ?? {}) }) !== JSON.stringify(DEFAULT_MOTION);
+  const tabBtn = (k: PropTab, l: string, dot?: boolean) => (
+    <button onClick={() => setPropTab(k)} className={`flex-1 py-2 text-xs border-b-2 -mb-px ${propTab === k ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+      {l}
+      {dot && <span className="ml-1 text-[8px] text-blue-500 align-middle" title="ปรับแล้ว">●</span>}
+    </button>
+  );
+  const visibilityRow = (v: Visibility | undefined, onChangeVis: (k: keyof Visibility, val: boolean) => void) => (
+    <div className="pt-3 border-t border-slate-200">
+      <p className="text-[11px] font-medium text-slate-500 mb-1.5">แสดงบนอุปกรณ์</p>
+      <div className="flex flex-wrap gap-3">
+        {DEVICE_OPTS.map((d) => (
+          <label key={d.k} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={{ ...ALL_VISIBLE, ...v }[d.k]} onChange={(e) => onChangeVis(d.k, e.target.checked)} />
+            {d.l}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+
   const props = !selBlock ? (
-    <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
-      <p>เลือก Section หรือ Block ทางซ้าย</p>
-      <p className="text-[11px] mt-1">หรือคลิกส่วนที่ต้องการแก้ในพรีวิวตรงกลาง</p>
+    <div className="h-full flex flex-col items-center justify-center text-center text-sm text-slate-400 px-6 gap-1">
+      <span className="text-3xl">👆</span>
+      <p>เลือก Section ทางซ้าย หรือคลิกในพรีวิว</p>
+      <p className="text-[11px]">ค่าต่าง ๆ ของสิ่งที่เลือกจะมาอยู่ตรงนี้</p>
     </div>
   ) : !selSchema ? (
-    <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-800">
+    <div className="m-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-800">
       บล็อกชนิด <code>{selBlock.type}</code> เป็นของระบบเดิม แก้ในตัวจัดหน้านี้ไม่ได้ (ยังอยู่บนเว็บตามเดิม)
     </div>
   ) : selChild ? (
-    <div className="space-y-4">
-      <div>
+    <div className="flex flex-col h-full">
+      <div className="px-3 py-2.5 border-b border-slate-200">
         <button onClick={() => onSelect({ blockId: selBlock.id })} className="text-[11px] text-slate-500 hover:text-blue-600">← {selSchema.meta.icon} {selSchema.meta.label}</button>
-        <h3 className="text-sm font-semibold text-slate-800 mt-0.5">
-          {selSchema.children!.icon} {selSchema.children!.itemLabel}: {selSchema.children!.summary(selChild) || "—"}
-        </h3>
-      </div>
-      <SchemaForm fields={selSchema.children!.fields} value={selChild} onChange={(p) => patchChild(selBlock.id, selChild.id, p)} ctx={ctx} compact />
-      <div className="pt-3 border-t border-slate-200 space-y-2">
-        <p className="text-[11px] font-medium text-slate-500">แสดงบนอุปกรณ์</p>
-        <div className="flex flex-wrap gap-3">
-          {([{ k: "desktop" as const, l: "🖥️ คอม" }, { k: "tablet" as const, l: "📱 แท็บเล็ต" }, { k: "mobile" as const, l: "📲 มือถือ" }]).map((d) => {
-            const on = { ...ALL_VISIBLE, ...selChild.visibility }[d.k];
-            return (
-              <label key={d.k} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={on} onChange={(e) => patchChild(selBlock.id, selChild.id, { visibility: { ...ALL_VISIBLE, ...selChild.visibility, [d.k]: e.target.checked } })} />
-                {d.l}
-              </label>
-            );
-          })}
+        <div className="flex items-center gap-1 mt-0.5">
+          <span className="text-base">{selSchema.children!.icon}</span>
+          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate">{selSchema.children!.itemLabel}: {selSchema.children!.summary(selChild) || "—"}</span>
+          <button onClick={() => patchChild(selBlock.id, selChild.id, { enabled: selChild.enabled === false })} title={selChild.enabled === false ? "แสดง" : "ซ่อน"} className={iconBtn}>{selChild.enabled === false ? "🚫" : "👁️"}</button>
+          <button onClick={() => duplicateChild(selBlock.id, selChild.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
+          <button onClick={() => removeChild(selBlock.id, selChild.id)} title="ลบ (Delete)" className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={selChild.enabled !== false} onChange={(e) => patchChild(selBlock.id, selChild.id, { enabled: e.target.checked })} />
-          เปิดใช้ {selSchema.children!.itemLabel}นี้
-        </label>
       </div>
-      <div className="flex justify-between pt-3 border-t border-slate-200">
-        <button onClick={() => duplicateChild(selBlock.id, selChild.id)} className="text-xs text-slate-600 hover:text-blue-600">📑 ทำสำเนา</button>
-        <button onClick={() => removeChild(selBlock.id, selChild.id)} className="text-xs text-red-500 hover:underline">ลบ{selSchema.children!.itemLabel}นี้</button>
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        <SchemaForm fields={selSchema.children!.fields} value={selChild} onChange={(p) => patchChild(selBlock.id, selChild.id, p)} ctx={ctx} />
+        {visibilityRow(selChild.visibility, (k, val) => patchChild(selBlock.id, selChild.id, { visibility: { ...ALL_VISIBLE, ...selChild.visibility, [k]: val } }))}
       </div>
     </div>
   ) : (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold text-slate-800">{selSchema.meta.icon} {selSchema.meta.label}</h3>
-        <p className="text-[11px] text-slate-400">{selSchema.meta.hint}</p>
-      </div>
-      <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={ctx} />
-      {selSchema.children && (
-        <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
-          {selSchema.children.icon} {selSchema.children.label}: {childrenOf(selBlock)?.list.length ?? 0} รายการ — แก้ทีละชิ้นได้จากต้นไม้ทางซ้าย (กด ▸ หน้าชื่อ Section)
-          <button onClick={() => addChild(selBlock.id)} className="ml-2 text-blue-600 hover:underline">+ เพิ่ม{selSchema.children.itemLabel}</button>
+    <div className="flex flex-col h-full">
+      <div className="px-3 pt-2.5 border-b border-slate-200">
+        <div className="flex items-center gap-1">
+          <span className="text-base">{selSchema.meta.icon}</span>
+          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate" title={selSchema.meta.hint}>{selSchema.meta.label}</span>
+          <button onClick={() => patchBlock(selBlock.id, { enabled: !selBlock.enabled })} title={selBlock.enabled ? "ซ่อน Section" : "แสดง Section"} className={iconBtn}>{selBlock.enabled ? "👁️" : "🚫"}</button>
+          <button onClick={() => duplicateSection(selBlock.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
+          <button onClick={() => removeSection(selBlock.id)} title="ลบ (Delete)" className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
         </div>
-      )}
-      <StylePanel value={{ ...DEFAULT_BLOCK_STYLE, ...((selBlock.style as Partial<BlockStyle>) ?? {}) }} onChange={(style) => patchBlock(selBlock.id, { style })} />
-      <div className="pt-3 border-t border-slate-200">
-        <p className="text-[11px] font-medium text-slate-500 mb-1.5">แสดงบนอุปกรณ์</p>
-        <div className="flex flex-wrap gap-3">
-          {([{ k: "desktop" as const, l: "🖥️ คอม" }, { k: "tablet" as const, l: "📱 แท็บเล็ต" }, { k: "mobile" as const, l: "📲 มือถือ" }]).map((d) => {
-            const on = { ...ALL_VISIBLE, ...selBlock.visibility }[d.k];
-            return (
-              <label key={d.k} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={on} onChange={(e) => setVis(selBlock.id, d.k, e.target.checked)} />
-                {d.l}
-              </label>
-            );
-          })}
+        {!selBlock.enabled && <p className="mt-1 text-[11px] text-amber-600">Section นี้ซ่อนอยู่ — ไม่แสดงบนเว็บ</p>}
+        <div className="flex mt-1.5">
+          {tabBtn("content", "เนื้อหา")}
+          {tabBtn("style", "รูปลักษณ์", styleTouched(styleOf(selBlock)))}
+          {tabBtn("motion", "ลูกเล่น", motionTouched(styleOf(selBlock)))}
         </div>
       </div>
-      <div className="flex justify-between pt-3 border-t border-slate-200">
-        <button onClick={() => duplicateSection(selBlock.id)} className="text-xs text-slate-600 hover:text-blue-600">📑 ทำสำเนา Section</button>
-        <button onClick={() => removeSection(selBlock.id)} className="text-xs text-red-500 hover:underline">ลบ Section นี้</button>
+      <div className="flex-1 overflow-y-auto p-3">
+        {propTab === "content" && (
+          <div className="space-y-4">
+            <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={ctx} />
+            {selSchema.children && (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
+                {selSchema.children.icon} {selSchema.children.label}: {childrenOf(selBlock)?.list.length ?? 0} รายการ — แก้ทีละชิ้นจากต้นไม้ทางซ้าย (กด ▸)
+                <button onClick={() => addChild(selBlock.id)} className="ml-2 text-blue-600 hover:underline">+ เพิ่ม{selSchema.children.itemLabel}</button>
+              </div>
+            )}
+          </div>
+        )}
+        {propTab === "style" && (
+          <div className="space-y-4">
+            <StylePanel value={styleOf(selBlock)} onChange={(style) => patchBlock(selBlock.id, { style })} mode="style" />
+            {visibilityRow(selBlock.visibility, (k, val) => setVis(selBlock.id, k, val))}
+          </div>
+        )}
+        {propTab === "motion" && <StylePanel value={styleOf(selBlock)} onChange={(style) => patchBlock(selBlock.id, { style })} mode="motion" />}
       </div>
     </div>
+  );
+
+  const paneBtn = (k: Pane, l: string) => (
+    <button onClick={() => setPane(k)} className={`flex-1 py-1.5 text-xs rounded-lg ${pane === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{l}</button>
   );
 
   return (
     <>
-      <div className="grid gap-3 xl:grid-cols-[300px_minmax(0,1fr)_360px] lg:grid-cols-[280px_minmax(0,1fr)] items-start">
-        {/* ซ้าย */}
-        <aside className="min-w-0 lg:sticky lg:top-4 max-h-[80vh] overflow-y-auto pr-1">{tree}</aside>
-        {/* กลาง */}
-        <div className="min-w-0 lg:sticky lg:top-4 space-y-2">
-          {previewToolbar}
-          {previewFrame(previewHeight)}
-          <p className="text-[10px] text-slate-400 text-center">คลิก Section/Block ในพรีวิวเพื่อเลือก · ลากจากคลังมาวางในพรีวิวได้ · แก้แล้วพรีวิวอัปเดตเองใน ~2 วิ</p>
+      <div className="space-y-2">
+        {topbar}
+        {/* จอแคบ: สลับแผง */}
+        <div className="lg:hidden flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
+          {paneBtn("tree", "โครง")}
+          {paneBtn("preview", "พรีวิว")}
+          {paneBtn("props", "ตั้งค่า")}
         </div>
-        {/* ขวา */}
-        <aside className="min-w-0 xl:sticky xl:top-4 max-h-[80vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 lg:col-span-2 xl:col-span-1">{props}</aside>
+        <div className="grid gap-2 lg:grid-cols-[230px_minmax(0,1fr)_330px] items-stretch">
+          <aside className={`${pane === "tree" ? "" : "hidden"} lg:block min-w-0 rounded-xl border border-slate-200 bg-white p-2`} style={{ height: previewHeight }}>{tree}</aside>
+          <div className={`${pane === "preview" ? "" : "hidden"} lg:block min-w-0`}>{previewFrame(previewHeight)}</div>
+          <aside className={`${pane === "props" ? "" : "hidden"} lg:block min-w-0 rounded-xl border border-slate-200 bg-white overflow-hidden`} style={{ height: previewHeight }}>{props}</aside>
+        </div>
       </div>
+
+      {contextMenu}
 
       <ERPModal open={showAi} onClose={() => setShowAi(false)} title="🤖 ให้ AI ช่วยออกแบบ Section" size="lg">
         <div className="space-y-4 text-sm">
@@ -745,9 +958,7 @@ export function WebsiteBuilder({
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-medium text-slate-500">คำสั่งสำหรับ AI (สร้างจากรายการ Section ที่ระบบรู้จัก)</span>
-              <button onClick={() => void copyPrompt()} className="px-3 py-1 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">
-                {copied ? "✓ คัดลอกแล้ว" : "คัดลอกคำสั่ง"}
-              </button>
+              <button onClick={() => void copyPrompt()} className="px-3 py-1 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">{copied ? "✓ คัดลอกแล้ว" : "คัดลอกคำสั่ง"}</button>
             </div>
             <textarea readOnly className="w-full h-28 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-[11px] text-slate-600" value={aiPrompt} onFocus={(e) => e.currentTarget.select()} />
           </div>
@@ -758,16 +969,21 @@ export function WebsiteBuilder({
           </div>
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowAi(false)} className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">ปิด</button>
-            <button onClick={importAiJson} disabled={!aiJson.trim()} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
-              เพิ่มลงหน้า
-            </button>
+            <button onClick={importAiJson} disabled={!aiJson.trim()} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">เพิ่มลงหน้า</button>
           </div>
         </div>
       </ERPModal>
 
       {fullscreen && (
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm p-4 flex flex-col gap-3">
-          <div className="bg-white rounded-xl px-4 py-2.5">{previewToolbar}</div>
+          <div className="bg-white rounded-xl px-4 py-2 flex items-center gap-1.5">
+            {DEVICES.map((d) => (
+              <button key={d.k} onClick={() => setDevice(d.k)} className={`${iconBtn} ${device === d.k ? "!bg-slate-900 !text-white !border-slate-900" : ""}`}>{d.icon}</button>
+            ))}
+            <button onClick={reloadPreview} className={iconBtn} title="โหลดใหม่">↻</button>
+            <span className="flex-1" />
+            <button onClick={() => setFullscreen(false)} className={iconBtn} title="ออกจากเต็มจอ (Esc)">✕</button>
+          </div>
           <div className="flex-1 min-h-0">{previewFrame("100%")}</div>
         </div>
       )}

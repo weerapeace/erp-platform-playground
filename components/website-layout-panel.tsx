@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { WebsiteBuilder, type Selection } from "@/components/website-builder";
+import { WebsiteBuilder, type Selection, type ChangeSummary } from "@/components/website-builder";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 
@@ -19,6 +19,18 @@ import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 const AUTOSAVE_MS = 1500;
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const timeStr = (d: Date) => d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+
+/** เทียบร่างกับที่เผยแพร่ → รายชื่อ Section ที่เพิ่ม/ลบ/แก้ (ใช้ร่วมแท็บหน้าเว็บ) */
+export function summarizeChanges(draft: Block[], live: Block[], types: BlockTypeInfo[]): ChangeSummary {
+  const label = (b: Block) => types.find((t) => t.type === b.type)?.label ?? b.type;
+  const liveMap = new Map(live.map((b) => [b.id, b]));
+  const draftIds = new Set(draft.map((b) => b.id));
+  return {
+    added: draft.filter((b) => !liveMap.has(b.id)).map(label),
+    removed: live.filter((b) => !draftIds.has(b.id)).map(label),
+    changed: draft.filter((b) => liveMap.has(b.id) && !eq(b, liveMap.get(b.id))).map(label),
+  };
+}
 
 export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
@@ -35,7 +47,6 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [showIssues, setShowIssues] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; actor: string | null; blocks: number }[]>([]);
 
@@ -124,7 +135,9 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const isDirty = !eq(blocks, published) || hadDraft;
   const issues: ValidationIssue[] = useMemo(() => validateBlocks(blocks as never), [blocks]);
   const errors = issues.filter((i) => i.level === "error");
-  const warnings = issues.filter((i) => i.level === "warning");
+
+  // สรุปว่าร่างต่างจากที่เผยแพร่ตรงไหน (ชื่อ Section อ่านออก) — โชว์ตอนกดป้าย "ยังไม่เผยแพร่"
+  const changes: ChangeSummary = useMemo(() => summarizeChanges(blocks, published, types), [blocks, published, types]);
 
   useEffect(() => {
     if (!isDirty) return;
@@ -247,80 +260,36 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
 
   return (
     <div className="space-y-3">
-      {/* แถบสถานะ */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
-        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${isDirty ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
-          {isDirty ? "● ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
-        </span>
-        <span className="text-[11px] text-slate-400">
-          {blocks.length} Section · เปิดใช้ {blocks.filter((b) => b.enabled).length}
-          {neverSet && " · ยังไม่เคยจัดหน้า (โครงเริ่มต้น)"}
-        </span>
-        <span className="text-[11px] text-slate-400">{saving ? "กำลังบันทึกร่าง…" : savedAt ? `บันทึกร่างล่าสุด ${timeStr(savedAt)}` : ""}</span>
-
-        <div className="ml-auto flex items-center gap-1">
-          <label className="flex items-center gap-1.5 text-[11px] text-slate-500 mr-2 cursor-pointer" title="บันทึกร่างให้อัตโนมัติหลังหยุดแก้ 1.5 วินาที แล้วพรีวิวอัปเดตเอง">
-            <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={autoSave} onChange={(e) => setAutoSave(e.target.checked)} />
-            บันทึกอัตโนมัติ
-          </label>
-          <button onClick={() => void loadVersions()} title="ประวัติเวอร์ชัน" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">🕘</button>
-          <button onClick={undo} disabled={!undoStack.current.length} title="ย้อนกลับ (Ctrl+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↶</button>
-          <button onClick={redo} disabled={!redoStack.current.length} title="ทำซ้ำ (Ctrl+Shift+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
-        </div>
-      </div>
-
-      {/* ผลตรวจ */}
-      {(errors.length > 0 || warnings.length > 0) && (
-        <div className={`rounded-xl border px-4 py-2.5 ${errors.length ? "bg-red-50/60 border-red-200" : "bg-amber-50/60 border-amber-200"}`}>
-          <button onClick={() => setShowIssues((v) => !v)} className="w-full flex items-center gap-2 text-left">
-            <span className="text-sm text-slate-700">
-              {errors.length > 0 ? `⚠️ ควรแก้ก่อนเผยแพร่ ${errors.length} จุด` : `💡 มีข้อแนะนำ ${warnings.length} จุด`}
-              {errors.length > 0 && warnings.length > 0 && ` · คำเตือนอีก ${warnings.length}`}
-            </span>
-            <span className="ml-auto text-xs text-slate-500">{showIssues ? "ซ่อน" : "ดูรายละเอียด"}</span>
-          </button>
-          {showIssues && (
-            <ul className="mt-2 space-y-1">
-              {issues.map((it, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs">
-                  <span className={it.level === "error" ? "text-red-600" : "text-amber-600"}>{it.level === "error" ? "✕" : "!"}</span>
-                  <span className="flex-1 text-slate-700">{it.message}</span>
-                  {it.blockId && (
-                    <button
-                      onClick={() => {
-                        setSelection({ blockId: it.blockId! });
-                        document.getElementById(`blk-${it.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-                      }}
-                      className="text-blue-600 hover:underline whitespace-nowrap"
-                    >
-                      ไปที่บล็อก
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      <WebsiteBuilder blocks={blocks} onChange={apply} types={types} ctx={ctx} previewSrc={previewSrc} iframeRef={iframeRef} selection={selection} onSelect={setSelection} previewVersion={previewVersion} />
-
-      {/* แถบปุ่มล่าง */}
-      <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
-        <span className="text-xs text-slate-500">
-          {isDirty ? "มีการเปลี่ยนแปลงที่ยังไม่เผยแพร่" : "ไม่มีการเปลี่ยนแปลง"}
-          {errors.length > 0 && <span className="text-red-600"> · ควรแก้ {errors.length} จุด</span>}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => void discard()} disabled={!isDirty} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40">ละทิ้งการเปลี่ยนแปลง</button>
-          <button onClick={() => void saveDraft(false)} disabled={saving || busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50">
-            {saving ? "กำลังบันทึก…" : "บันทึกร่าง"}
-          </button>
-          <button onClick={() => void publish()} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-            {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
-          </button>
-        </div>
-      </div>
+      <WebsiteBuilder
+        blocks={blocks}
+        onChange={apply}
+        types={types}
+        ctx={ctx}
+        previewSrc={previewSrc}
+        iframeRef={iframeRef}
+        selection={selection}
+        onSelect={setSelection}
+        previewVersion={previewVersion}
+        toolbar={{
+          dirty: isDirty,
+          statusNote: `${blocks.length} Section · เปิดใช้ ${blocks.filter((b) => b.enabled).length}${neverSet ? " · ยังไม่เคยจัดหน้า (โครงเริ่มต้น)" : ""}`,
+          savedText: savedAt ? `บันทึกร่าง ${timeStr(savedAt)}` : "",
+          saving,
+          issues,
+          changes,
+          canUndo: undoStack.current.length > 0,
+          canRedo: redoStack.current.length > 0,
+          onUndo: undo,
+          onRedo: redo,
+          autoSave,
+          onAutoSave: setAutoSave,
+          onHistory: () => void loadVersions(),
+          onDiscard: () => void discard(),
+          onSaveDraft: () => void saveDraft(false),
+          onPublish: () => void publish(),
+          busy: busy === "publish",
+        }}
+      />
 
       {/* ประวัติเวอร์ชัน */}
       {showVersions && (

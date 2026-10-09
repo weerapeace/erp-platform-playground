@@ -98,10 +98,15 @@ const ALIGN = [
  * แผง "รูปลักษณ์" — มีเหมือนกันทุกชนิด Section (แยกจากฟอร์มเนื้อหา)
  * เก็บเป็นชื่อขนาด/ชื่อสีจากธีม ไม่ใช่ค่า pixel หรือรหัสสีตรง ๆ → เว็บแต่ละร้านแปลงเป็นสเกลของตัวเอง
  * แท็บ "มือถือ" = ตั้งทับเฉพาะจอเล็ก (auto = ใช้ค่าเดียวกับคอม)
+ *
+ * mode: "all" = หัวพับได้ + 3 แท็บ (แบบเดิม) · "style" = เฉพาะ ทุกจอ/มือถือ ไม่มีหัว · "motion" = เฉพาะลูกเล่น ไม่มีหัว
+ * (ตัวจัดหน้าใหม่แยก "รูปลักษณ์" กับ "ลูกเล่น" เป็นแท็บของแผงขวาเอง จึงเรียกทีละโหมด)
  */
-export function StylePanel({ value, onChange, defaultOpen = true }: { value: BlockStyle; onChange: (s: BlockStyle) => void; defaultOpen?: boolean }) {
+export function StylePanel({ value, onChange, defaultOpen = true, mode = "all" }: { value: BlockStyle; onChange: (s: BlockStyle) => void; defaultOpen?: boolean; mode?: "all" | "style" | "motion" }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [tab, setTab] = useState<"all" | "mobile" | "motion">("all");
+  const [tab, setTab] = useState<"all" | "mobile" | "motion">(mode === "motion" ? "motion" : "all");
+  const bare = mode !== "all";
+  const showTab = tab === "motion" ? mode !== "style" : mode !== "motion";
   const s: BlockStyle = {
     ...DEFAULT_BLOCK_STYLE,
     ...(value ?? {}),
@@ -115,22 +120,28 @@ export function StylePanel({ value, onChange, defaultOpen = true }: { value: Blo
   const isDefault = JSON.stringify(s) === JSON.stringify(DEFAULT_BLOCK_STYLE);
   const mobileTouched = JSON.stringify(s.mobile) !== JSON.stringify(DEFAULT_BLOCK_STYLE.mobile);
 
-  return (
-    <div className="pt-3 border-t border-slate-200">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900">
-        <span>{open ? "▾" : "▸"}</span>
-        🎨 รูปลักษณ์
-        {!isDefault && <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] border border-blue-200">ปรับแล้ว</span>}
-      </button>
+  const tabs = [
+    { k: "all" as const, l: "🖥️ ทุกจอ" },
+    { k: "mobile" as const, l: `📲 มือถือ${mobileTouched ? " •" : ""}` },
+    { k: "motion" as const, l: `✨ ลูกเล่น${motionTouched ? " •" : ""}` },
+  ].filter((t) => (mode === "style" ? t.k !== "motion" : mode === "motion" ? t.k === "motion" : true));
+  void showTab;
 
-      {open && (
-        <div className="mt-3 space-y-3">
+  return (
+    <div className={bare ? "" : "pt-3 border-t border-slate-200"}>
+      {!bare && (
+        <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900">
+          <span>{open ? "▾" : "▸"}</span>
+          🎨 รูปลักษณ์
+          {!isDefault && <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] border border-blue-200">ปรับแล้ว</span>}
+        </button>
+      )}
+
+      {(open || bare) && (
+        <div className={bare ? "space-y-3" : "mt-3 space-y-3"}>
+          {tabs.length > 1 && (
           <div className="flex items-center gap-1 text-[11px]">
-            {([
-              { k: "all" as const, l: "🖥️ ทุกจอ" },
-              { k: "mobile" as const, l: `📲 มือถือ${mobileTouched ? " •" : ""}` },
-              { k: "motion" as const, l: `✨ ลูกเล่น${motionTouched ? " •" : ""}` },
-            ]).map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t.k}
                 type="button"
@@ -142,6 +153,7 @@ export function StylePanel({ value, onChange, defaultOpen = true }: { value: Blo
             ))}
             {tab === "mobile" && <span className="text-slate-400 ml-1">ตั้งทับเฉพาะจอเล็ก · &quot;ตามเดิม&quot; = ใช้ค่าเดียวกับคอม</span>}
           </div>
+          )}
 
           {tab === "motion" ? (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -174,7 +186,7 @@ export function StylePanel({ value, onChange, defaultOpen = true }: { value: Blo
                 </Field>
               </div>
               <p className="sm:col-span-2 text-[11px] text-slate-400">
-                ขยับไม่เกิน 0.6 วิ · คนที่ตั้งเครื่องว่า &quot;ลดการเคลื่อนไหว&quot; จะไม่เห็นลูกเล่น (ระบบปิดให้เอง) · ดูผลจริงในพรีวิวหลังบันทึกร่างแล้วกด ↻
+                ขยับไม่เกิน 0.6 วิ · คนที่ตั้งเครื่องว่า &quot;ลดการเคลื่อนไหว&quot; จะไม่เห็นลูกเล่น (ระบบปิดให้เอง) · ดูผลจริงในพรีวิว (อัปเดตเองใน ~2 วิ)
               </p>
             </div>
           ) : tab === "all" ? (
@@ -216,10 +228,24 @@ export function StylePanel({ value, onChange, defaultOpen = true }: { value: Blo
             </div>
           )}
 
-          {!isDefault && (
-            <button type="button" onClick={() => onChange({ ...DEFAULT_BLOCK_STYLE, mobile: { ...DEFAULT_BLOCK_STYLE.mobile }, motion: { ...DEFAULT_MOTION } })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">
-              คืนค่าเริ่มต้นทั้งหมด
-            </button>
+          {mode === "motion" ? (
+            motionTouched && (
+              <button type="button" onClick={() => onChange({ ...s, motion: { ...DEFAULT_MOTION } })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">
+                คืนค่าเริ่มต้นของลูกเล่น
+              </button>
+            )
+          ) : mode === "style" ? (
+            JSON.stringify({ ...s, motion: undefined }) !== JSON.stringify({ ...DEFAULT_BLOCK_STYLE, motion: undefined }) && (
+              <button type="button" onClick={() => onChange({ ...DEFAULT_BLOCK_STYLE, mobile: { ...DEFAULT_BLOCK_STYLE.mobile }, motion: { ...s.motion } })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">
+                คืนค่าเริ่มต้นของรูปลักษณ์
+              </button>
+            )
+          ) : (
+            !isDefault && (
+              <button type="button" onClick={() => onChange({ ...DEFAULT_BLOCK_STYLE, mobile: { ...DEFAULT_BLOCK_STYLE.mobile }, motion: { ...DEFAULT_MOTION } })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">
+                คืนค่าเริ่มต้นทั้งหมด
+              </button>
+            )
           )}
         </div>
       )}
