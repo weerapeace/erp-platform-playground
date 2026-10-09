@@ -17,11 +17,17 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { useViewPref } from "@/lib/use-view-pref";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import {
   BRAND_ALL, BRAND_NONE, LABEL_ALL, LABEL_NONE, countBy,
   type MarketingSkuItem, type MarketingSkuLabel, type MarketingSkuListData,
 } from "@/lib/marketing/sku-list";
 import { LabelBadge, LabelManagerModal } from "./label-manager";
+import { MarketingSkuGrid } from "./grid-view";
+
+const VIEWS = ["table", "grid"] as const;
+type View = (typeof VIEWS)[number];
 
 const TAB_KEY = "marketing-skus:brand-tab";
 const readTab = () => { try { return localStorage.getItem(TAB_KEY) || BRAND_ALL; } catch { return BRAND_ALL; } };
@@ -49,6 +55,12 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const [noteEdit, setNoteEdit] = useState<{ item: MarketingSkuItem; text: string } | null>(null);
   const [labelMgrOpen, setLabelMgrOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");                                   // คำค้นใช้ร่วมกันทั้งตาราง/การ์ด
+  const [gridSort, setGridSort] = useState<"recent" | "code">("recent");
+  // มุมมอง ตาราง/การ์ด — สลับแล้วจำเป็นค่าเริ่มต้นของฉัน (ของกลาง useViewPref)
+  const { view, setView, saveDefault } = useViewPref<View>("marketing_skus_view", VIEWS, "table");
+  const pickView = (v: View) => { setView(v); void saveDefault(v); };
+  const { cols, setCols } = useGalleryColumns("marketing-skus", 5);
 
   useEffect(() => { setBrandTab(readTab()); }, []);
 
@@ -89,6 +101,12 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const inBrand = useMemo(() => (brandTab === BRAND_ALL ? items : items.filter((it) => brandKey(it) === brandTab)), [items, brandTab, brandKey]);
   const labelCounts = useMemo(() => countBy(inBrand, labelKey), [inBrand, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => (labelFilter === LABEL_ALL ? inBrand : inBrand.filter((it) => labelKey(it) === labelFilter)), [inBrand, labelFilter, labelMap]); // eslint-disable-line react-hooks/exhaustive-deps
+  // มุมมองการ์ด: กรองด้วยคำค้น + เรียงเอง (ตารางทำในตัว MiniTable)
+  const gridRows = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const hit = t ? rows.filter((it) => `${it.code} ${it.name} ${it.note ?? ""}`.toLowerCase().includes(t)) : rows;
+    return gridSort === "code" ? [...hit].sort((a, b) => a.code.localeCompare(b.code, "th", { numeric: true })) : hit;
+  }, [rows, q, gridSort]);
 
   // เปลี่ยนแท็บ/ตัวกรอง → ล้างที่ติ๊กไว้ (กันเผลอทำกับแถวที่มองไม่เห็น)
   useEffect(() => { setSelected(new Set()); }, [brandTab, labelFilter]);
@@ -286,8 +304,9 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               })}
             </div>
 
-            {/* ชิปกรองป้าย */}
-            <div className="flex flex-wrap gap-1.5">
+            {/* ชิปกรองป้าย + สลับมุมมอง */}
+            <div className="flex flex-wrap items-start gap-2">
+            <div className="flex flex-1 flex-wrap gap-1.5">
               {[{ key: LABEL_ALL, l: undefined as MarketingSkuLabel | undefined, text: "ทั้งหมด", n: inBrand.length },
                 ...labels.map((l) => ({ key: l.id, l, text: l.name, n: labelCounts.get(l.id) ?? 0 })),
                 { key: LABEL_NONE, l: undefined, text: "ยังไม่มีป้าย", n: labelCounts.get(LABEL_NONE) ?? 0 },
@@ -303,6 +322,13 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                   </button>
                 );
               })}
+            </div>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label="มุมมอง">
+              {([["table", "☰ ตาราง"], ["grid", "▦ การ์ด"]] as const).map(([v, text]) => (
+                <button key={v} type="button" onClick={() => pickView(v)} aria-pressed={view === v}
+                  className={`h-7 rounded-md px-2.5 text-xs font-medium transition ${view === v ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{text}</button>
+              ))}
+            </div>
             </div>
 
             {/* แถบทำหลายรายการ */}
@@ -320,8 +346,36 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               </div>
             )}
 
+            {view === "grid" ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหารหัส / ชื่อรุ่น / หมายเหตุ…"
+                    className="h-9 w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <select value={gridSort} onChange={(e) => setGridSort(e.target.value as "recent" | "code")}
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">
+                    <option value="recent">เรียง: เพิ่มล่าสุดก่อน</option>
+                    <option value="code">เรียง: รหัส A→Z</option>
+                  </select>
+                  <span className="text-xs text-slate-400">{gridRows.length} รุ่น</span>
+                  <GalleryColumnsControl cols={cols} onChange={setCols} className="ml-auto hidden sm:inline-flex" />
+                </div>
+                <MarketingSkuGrid
+                  rows={gridRows} cols={cols} labels={labels} labelMap={labelMap} brandMap={brandMap} showBrand={brandTab === BRAND_ALL}
+                  canManage={canManage} busy={busy} labelOptions={labelOptions} selected={selected} onSelectedChange={setSelected}
+                  onSetLabel={(ids, lb) => void setLabel(ids, lb)} onEditNote={(it) => setNoteEdit({ item: it, text: it.note ?? "" })}
+                  onRemove={(ids) => setRemoveIds(ids)}
+                  emptyText={
+                    <div className="py-8 text-center">
+                      <div className="text-sm text-slate-500">{q.trim() ? `ไม่พบรุ่นที่ตรงกับ "${q.trim()}" ลองเปลี่ยนคำค้นหา` : "ยังไม่มีสินค้าในกลุ่มนี้"}</div>
+                      {canManage && !q.trim() && <button type="button" onClick={openPicker} className="mt-2 text-sm text-blue-600 hover:underline">＋ เลือกสินค้าเพิ่ม</button>}
+                    </div>
+                  } />
+              </>
+            ) : (
             <MiniTable<MarketingSkuItem>
               rows={rows}
+              searchValue={q}
+              onSearchChange={setQ}
               columns={columns}
               rowKey={(it) => it.id}
               searchText={(it) => `${it.code} ${it.name} ${it.note ?? ""} ${labelMap.get(it.label_id ?? "")?.name ?? ""}`}
@@ -341,8 +395,9 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                   {canManage && <button type="button" onClick={openPicker} className="mt-2 text-sm text-blue-600 hover:underline">＋ เลือกสินค้าเพิ่ม</button>}
                 </div>
               }
-              noMatchText={(q) => `ไม่พบรุ่นที่ตรงกับ "${q}" ลองเปลี่ยนคำค้นหา`}
+              noMatchText={(t) => `ไม่พบรุ่นที่ตรงกับ "${t}" ลองเปลี่ยนคำค้นหา`}
             />
+            )}
           </>
         )}
       </div>
