@@ -16,7 +16,7 @@ import { VariantCount } from "./variant-count";
 
 export function MarketingSkuGrid({
   rows, cols, grouped, labels, labelMap, brandMap, showBrand, canManage, busy, labelOptions,
-  selected, onSelectedChange, onSetLabel, onEditNote, emptyText,
+  selected, onSelectedChange, onSetLabel, onEditNote, onActiveChange, emptyText,
 }: {
   rows: MarketingSkuItem[];
   cols: number;
@@ -32,6 +32,7 @@ export function MarketingSkuGrid({
   onSelectedChange: (next: Set<string>) => void;
   onSetLabel: (ids: string[], labelId: string | null) => void;
   onEditNote: (item: MarketingSkuItem) => void;
+  onActiveChange: (parentId: string, active: number) => void;
   emptyText: React.ReactNode;
 }) {
   if (rows.length === 0) return <div className="rounded-xl border border-slate-200 bg-white">{emptyText}</div>;
@@ -97,7 +98,7 @@ export function MarketingSkuGrid({
                         )}
                       </div>
                       <div className="line-clamp-2 min-h-[2rem] text-xs leading-4 text-slate-500" title={it.name}>{it.name}</div>
-                      <div><VariantCount parentId={it.parent_sku_id} active={it.sku_active} total={it.sku_total} compact /></div>
+                      <div><VariantCount parentId={it.parent_sku_id} active={it.sku_active} total={it.sku_total} compact canManage={canManage} onActiveChange={onActiveChange} /></div>
                       <div className="mt-auto">
                         {canManage ? (
                           <SearchableSelect value={it.label_id && labelMap.has(it.label_id) ? it.label_id : ""} options={labelOptions}

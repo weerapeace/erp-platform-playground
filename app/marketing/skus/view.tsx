@@ -152,6 +152,11 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
     else void applyLabel(ids, labelId);
   };
 
+  // เปิด/ปิดสี (เฉพาะการตลาด) ในป๊อป → อัปเดตตัวเลข "SKU ที่เหลือ" ของรุ่นนั้นบนจอทันที
+  const onActiveChange = useCallback((parentId: string, active: number) => {
+    setData((d) => d && { ...d, items: d.items.map((it) => (it.parent_sku_id === parentId ? { ...it, sku_active: active } : it)) });
+  }, []);
+
   const saveNote = async () => {
     if (!noteEdit) return;
     setBusy(true);
@@ -194,7 +199,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
         ) : <span className="text-xs text-slate-400">ไม่มีแบรนด์</span>;
       },
     }] : []),
-    { key: "variants", header: "SKU ที่เหลือ", width: "8rem", cell: (it) => <VariantCount parentId={it.parent_sku_id} active={it.sku_active} total={it.sku_total} /> },
+    { key: "variants", header: "SKU ที่เหลือ", width: "8rem", cell: (it) => <VariantCount parentId={it.parent_sku_id} active={it.sku_active} total={it.sku_total} canManage={canManage} onActiveChange={onActiveChange} /> },
     {
       key: "label", header: "ป้าย", width: "minmax(10rem,1.3fr)",
       cell: (it) => canManage ? (
@@ -332,7 +337,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               <MarketingSkuGrid
                 rows={pageRows} cols={cols} grouped={sort === "label"} labels={labels} labelMap={labelMap} brandMap={brandMap} showBrand={brandTab === BRAND_ALL}
                 canManage={canManage} busy={busy} labelOptions={labelOptions} selected={selected} onSelectedChange={setSelected}
-                onSetLabel={setLabel} onEditNote={(it) => setNoteEdit({ item: it, text: it.note ?? "" })} emptyText={emptyText} />
+                onSetLabel={setLabel} onEditNote={(it) => setNoteEdit({ item: it, text: it.note ?? "" })} onActiveChange={onActiveChange} emptyText={emptyText} />
             ) : (
               <MiniTable<MarketingSkuItem>
                 rows={pageRows}

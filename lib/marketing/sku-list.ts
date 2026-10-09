@@ -19,8 +19,9 @@ export type MarketingSkuLabel = {
 
 export type MarketingBrand = { id: string; name: string; color: string | null };
 
-/** SKU ย่อย (สี/แบบ) ของรุ่น — ใช้นับ "SKU ที่เหลือ" (ยังเปิดขาย = is_active) */
-export type MarketingSkuVariant = { code: string; color: string | null; is_active: boolean; image_key: string | null };
+/** SKU ย่อย (สี/แบบ) ของรุ่น — "SKU ที่เหลือ" = เปิดในระบบ (is_active) และการตลาดไม่ได้ปิด (mk_off)
+ *  mk_off = ทีมการตลาดปิดสีนี้เฉพาะหน้าการตลาด (สียังขาย/สั่งซื้อ/ผลิตได้ปกติ) */
+export type MarketingSkuVariant = { id?: string; code: string; color: string | null; is_active: boolean; image_key: string | null; mk_off?: boolean };
 
 export type MarketingSkuItem = {
   parent_sku_id: string;
@@ -66,7 +67,7 @@ export function cleanColor(v: unknown): string {
 
 /** สรุปจำนวน SKU ย่อย: ยังเปิดขาย / ทั้งหมด */
 export function variantSummary(variants: MarketingSkuVariant[]): { active: number; total: number } {
-  return { active: variants.filter((v) => v.is_active).length, total: variants.length };
+  return { active: variants.filter((v) => v.is_active && !v.mk_off).length, total: variants.length };
 }
 
 export type MarketingSkuSort = "label" | "code" | "sku_low" | "updated";

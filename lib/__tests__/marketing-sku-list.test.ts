@@ -32,6 +32,8 @@ describe("marketing sku-list helpers", () => {
     const v = (is_active: boolean) => ({ code: "x", color: null, is_active, image_key: null });
     expect(variantSummary([v(true), v(false), v(true)])).toEqual({ active: 2, total: 3 });
     expect(variantSummary([])).toEqual({ active: 0, total: 0 });
+    // ปิดเฉพาะการตลาด = ไม่นับว่าเหลือ
+    expect(variantSummary([v(true), { ...v(true), mk_off: true }])).toEqual({ active: 1, total: 2 });
   });
 
   it("sortMarketingSkus: ตามป้าย (ไม่มีป้ายท้าย) / รหัสแบบเลข / SKU เหลือน้อยก่อน / แก้ล่าสุด", () => {
