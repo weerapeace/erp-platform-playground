@@ -11,7 +11,7 @@
  */
 import { useState } from "react";
 import { ColorInput } from "@/components/color-picker";
-import { DEFAULT_BLOCK_STYLE, newBlock, type BlockStyle, type BlockType, type Visibility } from "@/lib/website-blocks";
+import { DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, newBlock, type BlockMotion, type BlockStyle, type BlockType, type Visibility } from "@/lib/website-blocks";
 
 export type { BlockType, Visibility };
 
@@ -101,10 +101,17 @@ const ALIGN = [
  */
 export function StylePanel({ value, onChange, defaultOpen = true }: { value: BlockStyle; onChange: (s: BlockStyle) => void; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [tab, setTab] = useState<"all" | "mobile">("all");
-  const s: BlockStyle = { ...DEFAULT_BLOCK_STYLE, ...(value ?? {}), mobile: { ...DEFAULT_BLOCK_STYLE.mobile, ...(value?.mobile ?? {}) } };
+  const [tab, setTab] = useState<"all" | "mobile" | "motion">("all");
+  const s: BlockStyle = {
+    ...DEFAULT_BLOCK_STYLE,
+    ...(value ?? {}),
+    mobile: { ...DEFAULT_BLOCK_STYLE.mobile, ...(value?.mobile ?? {}) },
+    motion: { ...DEFAULT_MOTION, ...(value?.motion ?? {}) },
+  };
   const set = (p: Partial<BlockStyle>) => onChange({ ...s, ...p });
   const setM = (p: Partial<BlockStyle["mobile"]>) => onChange({ ...s, mobile: { ...s.mobile, ...p } });
+  const setMo = (p: Partial<BlockMotion>) => onChange({ ...s, motion: { ...s.motion, ...p } });
+  const motionTouched = JSON.stringify(s.motion) !== JSON.stringify(DEFAULT_MOTION);
   const isDefault = JSON.stringify(s) === JSON.stringify(DEFAULT_BLOCK_STYLE);
   const mobileTouched = JSON.stringify(s.mobile) !== JSON.stringify(DEFAULT_BLOCK_STYLE.mobile);
 
@@ -122,6 +129,7 @@ export function StylePanel({ value, onChange, defaultOpen = true }: { value: Blo
             {([
               { k: "all" as const, l: "🖥️ ทุกจอ" },
               { k: "mobile" as const, l: `📲 มือถือ${mobileTouched ? " •" : ""}` },
+              { k: "motion" as const, l: `✨ ลูกเล่น${motionTouched ? " •" : ""}` },
             ]).map((t) => (
               <button
                 key={t.k}
@@ -135,7 +143,41 @@ export function StylePanel({ value, onChange, defaultOpen = true }: { value: Blo
             {tab === "mobile" && <span className="text-slate-400 ml-1">ตั้งทับเฉพาะจอเล็ก · &quot;ตามเดิม&quot; = ใช้ค่าเดียวกับคอม</span>}
           </div>
 
-          {tab === "all" ? (
+          {tab === "motion" ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Field label="โผล่ตอนเลื่อนมาถึง (Entrance)">
+                  <Seg
+                    value={s.motion.entrance}
+                    onChange={(v) => setMo({ entrance: v })}
+                    options={[
+                      { v: "none", l: "ไม่มี" },
+                      { v: "fade-up", l: "ลอยขึ้น" },
+                      { v: "fade-in", l: "จางเข้า" },
+                      { v: "slide-left", l: "จากขวา" },
+                      { v: "slide-right", l: "จากซ้าย" },
+                      { v: "zoom", l: "ซูม" },
+                    ]}
+                  />
+                </Field>
+              </div>
+              <Field label="ความเร็ว">
+                <Seg value={s.motion.speed} onChange={(v) => setMo({ speed: v })} options={[{ v: "fast", l: "เร็ว" }, { v: "normal", l: "ปกติ" }, { v: "slow", l: "ช้า" }]} />
+              </Field>
+              <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer self-end pb-2">
+                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={s.motion.stagger} disabled={s.motion.entrance === "none"} onChange={(e) => setMo({ stagger: e.target.checked })} />
+                การ์ด/ชิ้นย่อยโผล่ไล่กันทีละชิ้น
+              </label>
+              <div className="sm:col-span-2">
+                <Field label="ตอนชี้เมาส์ (Hover) — มีผลกับการ์ดและรูปใน Section นี้">
+                  <Seg value={s.motion.hover} onChange={(v) => setMo({ hover: v })} options={[{ v: "none", l: "ไม่มี" }, { v: "lift", l: "ยกตัว" }, { v: "zoom", l: "ซูมรูป" }, { v: "glow", l: "เรืองแสง" }]} />
+                </Field>
+              </div>
+              <p className="sm:col-span-2 text-[11px] text-slate-400">
+                ขยับไม่เกิน 0.6 วิ · คนที่ตั้งเครื่องว่า &quot;ลดการเคลื่อนไหว&quot; จะไม่เห็นลูกเล่น (ระบบปิดให้เอง) · ดูผลจริงในพรีวิวหลังบันทึกร่างแล้วกด ↻
+              </p>
+            </div>
+          ) : tab === "all" ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="ระยะห่างด้านบน"><Seg value={s.padTop} onChange={(v) => set({ padTop: v })} options={SPACE} /></Field>
               <Field label="ระยะห่างด้านล่าง"><Seg value={s.padBottom} onChange={(v) => set({ padBottom: v })} options={SPACE} /></Field>
@@ -175,7 +217,7 @@ export function StylePanel({ value, onChange, defaultOpen = true }: { value: Blo
           )}
 
           {!isDefault && (
-            <button type="button" onClick={() => onChange({ ...DEFAULT_BLOCK_STYLE, mobile: { ...DEFAULT_BLOCK_STYLE.mobile } })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">
+            <button type="button" onClick={() => onChange({ ...DEFAULT_BLOCK_STYLE, mobile: { ...DEFAULT_BLOCK_STYLE.mobile }, motion: { ...DEFAULT_MOTION } })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">
               คืนค่าเริ่มต้นทั้งหมด
             </button>
           )}

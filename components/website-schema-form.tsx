@@ -18,6 +18,8 @@ import { FIELD_GROUP_LABEL, type FieldDef, type FieldGroup } from "@/lib/website
 export interface SchemaFormContext {
   shopSlug: string;
   shopId: string;
+  /** ชื่อร้าน (ใช้ในคำสั่งแนะนำ AI) */
+  shopName?: string;
   /** หมวดสินค้าบนเว็บของร้าน (จากแท็บจับคู่ฟิลด์) */
   categories: { key: string; label: string }[];
 }
@@ -90,6 +92,23 @@ export function SchemaField({
       return (
         <Field label={fd.label} hint={fd.hint} wide={fd.wide || fd.type === "video" || fd.type === "map"}>
           <input className={inputCls} value={s} placeholder={fd.placeholder} maxLength={fd.max} onChange={(e) => onChange(e.target.value)} />
+        </Field>
+      );
+    case "code":
+      return (
+        <Field label={fd.label} hint={fd.hint} wide>
+          <textarea
+            className={`${inputCls} font-mono text-xs leading-relaxed`}
+            rows={14}
+            spellCheck={false}
+            value={s}
+            placeholder={fd.placeholder ?? "<style>\n  .promo { padding: 40px; text-align: center; }\n</style>\n<section class=\"promo\">\n  <h2>หัวข้อ</h2>\n</section>"}
+            maxLength={fd.max}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            {s.length.toLocaleString()} / {(fd.max ?? 40000).toLocaleString()} ตัวอักษร · script/iframe/onclick จะถูกถอดอัตโนมัติตอนบันทึก
+          </p>
         </Field>
       );
     case "textarea":

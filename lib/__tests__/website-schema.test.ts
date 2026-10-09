@@ -23,7 +23,10 @@ function stripAdded(v: unknown): unknown {
   if (v && typeof v === "object") {
     const o = { ...(v as Record<string, unknown>) };
     // style.mobile เป็นของใหม่ (ไม่ใช่ visibility.mobile ซึ่งเป็น boolean เดิม)
-    if ("padTop" in o) delete o.mobile;
+    if ("padTop" in o) {
+      delete o.mobile;
+      delete o.motion;
+    }
     return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, stripAdded(x)]));
   }
   return v;

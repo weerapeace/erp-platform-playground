@@ -27,6 +27,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
   const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
+  const [shopName, setShopName] = useState<string>("");
   const [neverSet, setNeverSet] = useState(false);
   const [hadDraft, setHadDraft] = useState(false);
 
@@ -60,6 +61,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       setTypes(j.blockTypes ?? []);
       setCategories(j.categories ?? []);
       setSiteUrl(j.shop?.siteUrl ?? null);
+      setShopName(j.shop?.name ?? "");
       setNeverSet(Boolean(j.neverSet));
       setHadDraft(Boolean(j.hasDraft));
       undoStack.current = [];
@@ -236,7 +238,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   };
 
   const previewSrc = siteUrl ? `${siteUrl}/?preview=1` : null;
-  const ctx = useMemo(() => ({ shopSlug, shopId, categories }), [shopSlug, shopId, categories]);
+  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories }), [shopSlug, shopId, shopName, categories]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
 

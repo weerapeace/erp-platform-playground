@@ -21,6 +21,7 @@ import {
   type SectionMeta,
   type ValidationIssue,
 } from "@/lib/website-schema";
+import { sanitizeCustomHtml } from "@/lib/website-html";
 
 export type { ValidationIssue };
 
@@ -45,7 +46,10 @@ export type BlockType =
   | "video"
   | "steps"
   | "reviews"
-  | "map";
+  | "map"
+  | "custom-html"
+  | "spotlight"
+  | "stats";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -77,6 +81,22 @@ export interface BlockStyleMobile {
   align: BlockAlign;
 }
 
+/** ลูกเล่น — โผล่ตอนเลื่อนถึง / ตอนชี้เมาส์ · "none" = ไม่มี (ค่าเริ่มต้น หน้าเว็บเหมือนเดิม) */
+export type MotionEntrance = "none" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom";
+export type MotionHover = "none" | "lift" | "zoom" | "glow";
+export type MotionSpeed = "normal" | "slow" | "fast";
+export const MOTION_ENTRANCES: readonly MotionEntrance[] = ["none", "fade-up", "fade-in", "slide-left", "slide-right", "zoom"];
+export const MOTION_HOVERS: readonly MotionHover[] = ["none", "lift", "zoom", "glow"];
+export const MOTION_SPEEDS: readonly MotionSpeed[] = ["normal", "slow", "fast"];
+export interface BlockMotion {
+  entrance: MotionEntrance;
+  /** ชิ้นย่อย/การ์ดโผล่ไล่กันทีละชิ้น */
+  stagger: boolean;
+  hover: MotionHover;
+  speed: MotionSpeed;
+}
+export const DEFAULT_MOTION: BlockMotion = { entrance: "none", stagger: false, hover: "none", speed: "normal" };
+
 /** หน้าตาของบล็อก — แยกจาก "เนื้อหา" ทุกชนิดบล็อกมีชุดนี้เหมือนกัน */
 export interface BlockStyle {
   padTop: BlockSpacing;
@@ -88,6 +108,8 @@ export interface BlockStyle {
   align: BlockAlign;
   /** ตั้งทับเฉพาะจอมือถือ (< 768px) */
   mobile: BlockStyleMobile;
+  /** ลูกเล่น (แผง "✨ ลูกเล่น") */
+  motion: BlockMotion;
 }
 
 export const DEFAULT_BLOCK_STYLE: BlockStyle = {
@@ -98,6 +120,7 @@ export const DEFAULT_BLOCK_STYLE: BlockStyle = {
   width: "auto",
   align: "auto",
   mobile: { padTop: "auto", padBottom: "auto", align: "auto" },
+  motion: { ...DEFAULT_MOTION },
 };
 
 export interface BlockBase {
@@ -124,6 +147,8 @@ export interface CtaLink {
 export interface AnnouncementBlock extends BlockBase {
   type: "announcement";
   messages: string[];
+  /** วิ่งต่อเนื่องแทนสลับทีละข้อความ */
+  marquee: boolean;
 }
 
 export type HeroHeight = "auto" | "tall" | "full";
@@ -142,6 +167,9 @@ export interface HeroBlock extends BlockBase {
   imageAlt: string;
   /** ความทึบของสีดำที่ทับรูป 0–90 (%) */
   overlay: number;
+  /** วิดีโอพื้นหลัง (mp4/webm) — ว่าง = ใช้รูป */
+  videoUrl: string;
+  parallax: boolean;
   height: HeroHeight;
 }
 
@@ -318,6 +346,36 @@ export interface ReviewsBlock extends BlockBase {
   items: (ChildBase & { name: string; text: string; role: string })[];
 }
 
+/** HTML+CSS ที่วางเอง (ล้างแล้ว ไม่มี script) */
+export interface CustomHtmlBlock extends BlockBase {
+  type: "custom-html";
+  html: string;
+  note: string;
+}
+
+/** โชว์สินค้าเด่น — รูปใหญ่ + ตัวอักษรยักษ์ + สลับสินค้า/สี */
+export interface SpotlightBlock extends BlockBase {
+  type: "spotlight";
+  eyebrow: string;
+  bigText: string;
+  codes: string[];
+  showColors: boolean;
+  showPrice: boolean;
+  primary: CtaLink;
+  bgMode: "tint" | "surface" | "custom";
+  bgColor: string;
+  autoplay: boolean;
+  interval: number;
+}
+
+/** ตัวเลขเด่น นับขึ้นตอนเลื่อนถึง */
+export interface StatsBlock extends BlockBase {
+  type: "stats";
+  eyebrow: string;
+  title: string;
+  items: (ChildBase & { value: number; prefix: string; suffix: string; label: string })[];
+}
+
 /** แผนที่ร้าน — รับเฉพาะลิงก์ฝังของ Google Maps */
 export interface MapBlock extends BlockBase {
   type: "map";
@@ -347,7 +405,10 @@ export type Block =
   | VideoBlock
   | StepsBlock
   | ReviewsBlock
-  | MapBlock;
+  | MapBlock
+  | CustomHtmlBlock
+  | SpotlightBlock
+  | StatsBlock;
 
 /** ชื่อ/ไอคอน/คำอธิบาย/กลุ่ม ของทุกชนิด — มาจาก schema */
 export const BLOCK_META: Record<BlockType, SectionMeta> = Object.fromEntries(
@@ -484,6 +545,8 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
     case "category":
       return codeStr(v, 40).toLowerCase();
+    case "code":
+      return sanitizeCustomHtml(v, fd.max ?? 40000);
   }
 }
 
@@ -509,6 +572,7 @@ export function sanitizeStyle(v: unknown): BlockStyle {
   const bgColor = typeof o.bgColor === "string" && HEX6.test(o.bgColor.trim()) ? o.bgColor.trim().toLowerCase() : "";
   const bg = pickOne(o.bg, BLOCK_BGS, d.bg);
   const m = (o.mobile ?? {}) as Record<string, unknown>;
+  const mo = (o.motion ?? {}) as Record<string, unknown>;
   return {
     padTop: pickOne(o.padTop, BLOCK_SPACINGS, d.padTop),
     padBottom: pickOne(o.padBottom, BLOCK_SPACINGS, d.padBottom),
@@ -521,6 +585,12 @@ export function sanitizeStyle(v: unknown): BlockStyle {
       padTop: pickOne(m.padTop, BLOCK_SPACINGS, "auto"),
       padBottom: pickOne(m.padBottom, BLOCK_SPACINGS, "auto"),
       align: pickOne(m.align, BLOCK_ALIGNS, "auto"),
+    },
+    motion: {
+      entrance: pickOne(mo.entrance, MOTION_ENTRANCES, "none"),
+      stagger: mo.stagger === true,
+      hover: pickOne(mo.hover, MOTION_HOVERS, "none"),
+      speed: pickOne(mo.speed, MOTION_SPEEDS, "normal"),
     },
   };
 }

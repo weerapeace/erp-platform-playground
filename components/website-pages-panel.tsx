@@ -34,6 +34,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
   const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
+  const [shopName, setShopName] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
   // หน้าที่กำลังแก้
@@ -70,6 +71,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       setTypes(j.blockTypes ?? []);
       setCategories(j.categories ?? []);
       setSiteUrl(j.shop?.siteUrl ?? null);
+      setShopName(j.shop?.name ?? "");
     } catch {
       toast.error("โหลดรายการหน้าไม่สำเร็จ");
     } finally {
@@ -233,7 +235,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     }
   };
 
-  const ctx = useMemo(() => ({ shopSlug, shopId, categories }), [shopSlug, shopId, categories]);
+  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories }), [shopSlug, shopId, shopName, categories]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
 

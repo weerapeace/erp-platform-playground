@@ -38,7 +38,8 @@ export type FieldType =
   | "video" // ลิงก์ YouTube/Vimeo (กรองโฮสต์)
   | "map" // ลิงก์ฝัง Google Maps (กรองโฮสต์)
   | "products" // เลือกสินค้าหลายตัว (เก็บรหัสรุ่น code[])
-  | "category"; // หมวดสินค้าบนเว็บของร้าน (key)
+  | "category" // หมวดสินค้าบนเว็บของร้าน (key)
+  | "code"; // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
 
 export type FieldGroup = "content" | "media" | "action" | "layout" | "products";
 
@@ -159,6 +160,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         required: true,
         requiredMessage: "ยังไม่มีข้อความ",
       }),
+      f("marquee", "ให้ข้อความวิ่งต่อเนื่อง (แทนการสลับทีละข้อความ)", "toggle", { group: "layout", default: false }),
     ],
     summary: (b) => (b.messages as string[])?.filter(Boolean).join(" · ").slice(0, 70) || "ยังไม่มีข้อความ",
   },
@@ -176,6 +178,14 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       image("imageKey", "รูปพื้นหลัง", { hint: "แนะนำกว้าง 1600px+ · ไม่ใส่ = พื้นหลังไล่สีจากธีม" }),
       text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, hint: "มีผลกับ SEO" }),
       f("overlay", "ความทึบของสีทับรูป (%)", "range", { group: "media", default: 45, min: 0, numMax: 90, step: 5 }),
+      f("videoUrl", "วิดีโอพื้นหลัง (ลิงก์ .mp4 / .webm)", "href", {
+        group: "media",
+        default: "",
+        wide: true,
+        placeholder: "https://…/clip.mp4",
+        hint: "ใส่แล้วจะเล่นวนเงียบ ๆ แทนรูป (รูปใช้โชว์ระหว่างโหลด) · แนะนำไม่เกิน 5 MB",
+      }),
+      f("parallax", "พื้นหลังเลื่อนช้ากว่าเนื้อหา (Parallax)", "toggle", { group: "layout", default: false }),
       f("height", "ความสูง", "select", {
         group: "layout",
         default: "auto",
@@ -535,6 +545,73 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     summary: (b) => s(b.title) || "สมัครรับข่าวสาร",
   },
 
+  "custom-html": {
+    type: "custom-html",
+    meta: { label: "Custom HTML", icon: "🧩", hint: "วาง HTML + CSS ที่ให้ AI ทำมา (ไม่รัน JavaScript)", group: "ขั้นสูง" },
+    fields: [
+      f("html", "HTML + CSS", "code", {
+        default: "",
+        wide: true,
+        max: 40000,
+        required: true,
+        requiredMessage: "ยังไม่ได้วางโค้ด",
+        hint: "ใช้ <style> ธรรมดาได้ CSS จะมีผลเฉพาะใน Section นี้ · ห้าม <script> · ห้าม Tailwind class · ใช้สีร้านได้ด้วย var(--color-brand) ฯลฯ",
+      }),
+      text("note", "บันทึกช่วยจำ (ไม่แสดงบนเว็บ)", { default: "", max: 120, wide: true, placeholder: "เช่น แบนเนอร์โปรปีใหม่ จาก ChatGPT" }),
+    ],
+    summary: (b) => s(b.note) || (s(b.html) ? `${s(b.html).length.toLocaleString()} ตัวอักษร` : "ยังไม่ได้วางโค้ด"),
+  },
+
+  spotlight: {
+    type: "spotlight",
+    meta: { label: "โชว์สินค้าเด่น (Spotlight)", icon: "💎", hint: "รูปสินค้าใหญ่ + ตัวอักษรยักษ์ด้านหลัง + จุดสี กดสลับสินค้าได้", group: "สินค้า" },
+    fields: [
+      text("eyebrow", "คำโปรยเล็ก", { default: "คอลเลกชันเด่น", max: 80 }),
+      text("bigText", "ตัวอักษรยักษ์ด้านหลัง", { default: "", max: 24, placeholder: "ว่าง = ใช้ชื่อรุ่น", hint: "สั้น ๆ 1–2 คำ จะดูดีที่สุด" }),
+      f("codes", "สินค้าที่จะโชว์ (สลับได้)", "products", { group: "products", default: [], max: 6, wide: true, required: true, requiredMessage: "ยังไม่ได้เลือกสินค้า" }),
+      f("showColors", "โชว์ตัวเลือกสี/แบบ ให้กดสลับรูป", "toggle", { group: "products", default: true }),
+      f("showPrice", "โชว์ราคา", "toggle", { group: "products", default: true }),
+      link("primary", "ปุ่มหลัก", "ดูรายละเอียด", "", { hint: "เว้นลิงก์ว่าง = ไปหน้าสินค้ารุ่นที่กำลังโชว์" }),
+      f("bgMode", "พื้นหลัง", "select", {
+        group: "layout",
+        default: "tint",
+        options: [
+          { v: "tint", l: "พาสเทลจากสีแบรนด์" },
+          { v: "surface", l: "ขาว/พื้นการ์ด" },
+          { v: "custom", l: "เลือกสีเอง" },
+        ],
+      }),
+      f("bgColor", "สีพื้นหลัง", "color", { group: "layout", default: "", showIf: { key: "bgMode", eq: "custom" } }),
+      f("autoplay", "สลับสินค้าอัตโนมัติ", "toggle", { group: "layout", default: true }),
+      f("interval", "เวลาต่อสินค้า (วินาที)", "number", { group: "layout", default: 6, min: 3, numMax: 30 }),
+    ],
+    summary: (b) => `${count((b.codes as unknown[])?.length ?? 0, "รุ่น")}${s(b.bigText) ? ` · ${s(b.bigText)}` : ""}`,
+  },
+
+  stats: {
+    type: "stats",
+    meta: { label: "ตัวเลขเด่น", icon: "🔢", hint: "ตัวเลขนับขึ้นตอนเลื่อนถึง เช่น ขายแล้ว 10,000 ใบ", group: "เนื้อหา" },
+    fields: headFields({ eyebrow: "", title: "" }),
+    children: {
+      key: "items",
+      label: "ตัวเลข",
+      itemLabel: "ตัวเลข",
+      icon: "🔢",
+      min: 1,
+      max: 6,
+      fields: [
+        f("value", "ตัวเลข", "number", { default: 100, min: 0, numMax: 999999999 }),
+        text("prefix", "ข้อความหน้าตัวเลข", { default: "", max: 10, placeholder: "เช่น ฿ หรือ +" }),
+        text("suffix", "ข้อความหลังตัวเลข", { default: "", max: 10, placeholder: "เช่น ใบ, ปี, %" }),
+        text("label", "คำอธิบาย", { default: "", max: 60, wide: true, placeholder: "เช่น ลูกค้าที่ไว้ใจเรา" }),
+      ],
+      summary: (it) => `${s(it.prefix)}${Number(it.value ?? 0).toLocaleString()}${s(it.suffix)} ${s(it.label)}`.trim() || "ตัวเลข",
+      blank: () => ({ value: 100, prefix: "", suffix: "", label: "" }),
+    },
+    summary: (b) => count(arr(b.items).length, "ตัวเลข"),
+    validate: (b, label) => (!arr(b.items).some((i) => s(i.label)) ? [{ level: "warning", message: `${label}: ยังไม่ได้ใส่คำอธิบายตัวเลข` }] : []),
+  },
+
   map: {
     type: "map",
     meta: { label: "แผนที่ร้าน", icon: "📍", hint: "ฝังแผนที่ Google Maps + ที่อยู่", group: "เนื้อหา" },
@@ -618,7 +695,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
 export const SECTION_TYPES = Object.keys(SECTION_SCHEMAS);
 
 /** ลำดับกลุ่มในคลัง Section */
-export const SECTION_GROUP_ORDER = ["พื้นฐาน", "สินค้า", "เนื้อหา"];
+export const SECTION_GROUP_ORDER = ["พื้นฐาน", "สินค้า", "เนื้อหา", "ขั้นสูง"];
 
 /** ชิ้นย่อยเปล่าตาม schema (ใช้ตอนกด "+ เพิ่ม" ในต้นไม้) */
 export function blankChild(spec: ChildSpec): Record<string, unknown> {

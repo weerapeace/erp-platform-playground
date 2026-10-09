@@ -19,7 +19,9 @@ import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, type Chil
 import { blockSummary } from "@/lib/website-blocks";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
-import { DEFAULT_BLOCK_STYLE, type BlockStyle, type BlockType } from "@/lib/website-blocks";
+import { DEFAULT_BLOCK_STYLE, normalizeBlocks, type BlockStyle, type BlockType } from "@/lib/website-blocks";
+import { buildAiPrompt } from "@/lib/website-ai-prompt";
+import { ERPModal } from "@/components/modal";
 
 export interface Selection {
   blockId: string;
@@ -76,6 +78,11 @@ export function WebsiteBuilder({
   const [zoom, setZoom] = useState<Zoom>("fit");
   const [fullscreen, setFullscreen] = useState(false);
   const [showLib, setShowLib] = useState(false);
+  const [showAi, setShowAi] = useState(false);
+  const [aiBrief, setAiBrief] = useState("");
+  const [aiJson, setAiJson] = useState("");
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [libQuery, setLibQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [menuId, setMenuId] = useState<string | null>(null);
@@ -266,6 +273,51 @@ export function WebsiteBuilder({
     );
   };
 
+  /* ── ให้ AI ช่วย: คัดลอกคำสั่ง → วาง JSON กลับมา ── */
+  const aiPrompt = useMemo(() => buildAiPrompt({ shopName: ctx.shopName ?? ctx.shopSlug, categories: ctx.categories, brief: aiBrief.trim() || undefined }), [ctx, aiBrief]);
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(aiPrompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* เบราว์เซอร์ไม่ให้ก๊อป — ผู้ใช้เลือกข้อความเองได้ */
+    }
+  };
+  const importAiJson = () => {
+    setAiError(null);
+    let raw = aiJson.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    // บางครั้ง AI ห่อมาเป็น object หรือใส่ข้อความนำหน้า — หา [ ... ] ก้อนแรก
+    const start = raw.indexOf("[");
+    const end = raw.lastIndexOf("]");
+    if (start >= 0 && end > start) raw = raw.slice(start, end + 1);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      setAiError("อ่าน JSON ไม่ออก — ให้ AI ตอบเป็น JSON array ล้วน ๆ (เริ่มด้วย [ จบด้วย ])");
+      return;
+    }
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    const known = list.filter((b) => b && typeof b === "object" && SECTION_SCHEMAS[String((b as { type?: string }).type)]);
+    if (!known.length) {
+      setAiError("ไม่พบ Section ชนิดที่ระบบรู้จักใน JSON นี้ (ดูรายการชนิดในคำสั่ง)");
+      return;
+    }
+    const fresh = normalizeBlocks(known).map((b) => {
+      const copy = deepCopy(b as unknown as Block);
+      copy.id = uidCopy(copy.type);
+      const c = childrenOf(copy);
+      if (c) copy[c.spec.key] = c.list.map((it) => ({ ...it, id: newChildId(c.spec.key) }));
+      return copy;
+    });
+    onChange([...blocks, ...fresh]);
+    onSelect({ blockId: fresh[0].id });
+    setShowAi(false);
+    setAiJson("");
+    if (known.length < list.length) alert(`เพิ่ม ${fresh.length} Section แล้ว · ข้าม ${list.length - known.length} ก้อนที่ระบบไม่รู้จัก`);
+  };
+
   /* ── คลัง Section ── */
   const grouped = useMemo(() => {
     const q = libQuery.trim().toLowerCase();
@@ -383,9 +435,14 @@ export function WebsiteBuilder({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-slate-500">{drag ? "ปล่อยตรงเส้นน้ำเงินเพื่อวาง" : "คลิกชื่อเพื่อแก้ · ลากเพื่อสลับลำดับ"}</p>
-        <button onClick={() => setShowLib((v) => !v)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
-          {showLib ? "ปิดคลัง" : "+ เพิ่ม Section"}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setShowAi(true)} title="คัดลอกคำสั่งไปให้ AI ออกแบบ แล้ววาง JSON กลับมา" className="px-2.5 py-1.5 rounded-lg border border-violet-300 bg-violet-50 text-violet-700 text-xs font-medium hover:bg-violet-100">
+            🤖 ให้ AI ช่วย
+          </button>
+          <button onClick={() => setShowLib((v) => !v)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
+            {showLib ? "ปิดคลัง" : "+ เพิ่ม Section"}
+          </button>
+        </div>
       </div>
 
       {showLib && (
@@ -614,6 +671,40 @@ export function WebsiteBuilder({
         {/* ขวา */}
         <aside className="min-w-0 xl:sticky xl:top-4 max-h-[80vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 lg:col-span-2 xl:col-span-1">{props}</aside>
       </div>
+
+      <ERPModal open={showAi} onClose={() => setShowAi(false)} title="🤖 ให้ AI ช่วยออกแบบ Section" size="lg">
+        <div className="space-y-4 text-sm">
+          <ol className="list-decimal pl-5 text-slate-600 space-y-1 text-xs">
+            <li>บอกโจทย์สั้น ๆ (ไม่บังคับ) แล้วกด &quot;คัดลอกคำสั่ง&quot;</li>
+            <li>ไปวางใน ChatGPT / Claude / Gemini แล้วรอคำตอบ</li>
+            <li>ก๊อปคำตอบ (JSON) มาวางในช่องล่าง กด &quot;เพิ่มลงหน้า&quot; — ทุกช่องแก้ต่อได้ในแผงขวา</li>
+          </ol>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">โจทย์ที่อยากได้ (ไม่บังคับ)</label>
+            <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={aiBrief} onChange={(e) => setAiBrief(e.target.value)} placeholder="เช่น หน้าแรกร้านกระเป๋าหนัง เน้นงานไทย โทนหรู มี FAQ และรีวิว" />
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium text-slate-500">คำสั่งสำหรับ AI (สร้างจากรายการ Section ที่ระบบรู้จัก)</span>
+              <button onClick={() => void copyPrompt()} className="px-3 py-1 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">
+                {copied ? "✓ คัดลอกแล้ว" : "คัดลอกคำสั่ง"}
+              </button>
+            </div>
+            <textarea readOnly className="w-full h-28 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-[11px] text-slate-600" value={aiPrompt} onFocus={(e) => e.currentTarget.select()} />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">วาง JSON ที่ AI ตอบกลับมา</label>
+            <textarea className="w-full h-36 rounded-lg border border-slate-200 px-2.5 py-1.5 font-mono text-xs" value={aiJson} onChange={(e) => setAiJson(e.target.value)} placeholder='[ { "type": "hero", ... } ]' spellCheck={false} />
+            {aiError && <p className="mt-1 text-xs text-red-600">{aiError}</p>}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowAi(false)} className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">ปิด</button>
+            <button onClick={importAiJson} disabled={!aiJson.trim()} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
+              เพิ่มลงหน้า
+            </button>
+          </div>
+        </div>
+      </ERPModal>
 
       {fullscreen && (
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm p-4 flex flex-col gap-3">
