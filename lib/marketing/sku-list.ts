@@ -2,7 +2,8 @@
  * SKU การตลาด — type + ตัวช่วยที่ใช้ร่วมกันระหว่างหน้า /marketing/skus กับ API
  * (ไฟล์ pure ห้ามใส่ "use client" — API route import ได้)
  *
- * แนวคิด: ทีมการตลาดเลือก "รุ่น" (Parent SKU) ที่จะทำตลาด → แยกดูตามแบรนด์ → ติดป้ายได้ 1 ป้ายต่อรุ่น
+ * แนวคิด: แสดง "ทุกรุ่น" (Parent SKU ที่เปิดใช้งาน) แยกแท็บตามแบรนด์ → ติดป้ายได้ 1 ป้ายต่อรุ่น + หมายเหตุ
+ *   (ข้อมูลมาจาก view marketing_sku_overview · ค่าการตลาดเก็บใน marketing_skus สร้างแถวเมื่อติดป้าย/หมายเหตุ)
  */
 
 export type MarketingSkuLabel = {
@@ -22,7 +23,6 @@ export type MarketingBrand = { id: string; name: string; color: string | null };
 export type MarketingSkuVariant = { code: string; color: string | null; is_active: boolean; image_key: string | null };
 
 export type MarketingSkuItem = {
-  id: string;
   parent_sku_id: string;
   code: string;
   name: string;
@@ -30,10 +30,11 @@ export type MarketingSkuItem = {
   brand_id: string | null;
   label_id: string | null;
   note: string | null;
-  is_active: boolean;
-  variants: MarketingSkuVariant[];
-  created_at: string;
-  updated_at: string;
+  /** SKU ย่อย (สี/แบบ) ทั้งหมด / ที่ยังเปิดใช้งาน */
+  sku_total: number;
+  sku_active: number;
+  /** แก้ป้าย/หมายเหตุล่าสุด (null = ยังไม่เคยแก้) */
+  updated_at: string | null;
 };
 
 export type MarketingSkuListData = {
@@ -66,6 +67,19 @@ export function cleanColor(v: unknown): string {
 /** สรุปจำนวน SKU ย่อย: ยังเปิดขาย / ทั้งหมด */
 export function variantSummary(variants: MarketingSkuVariant[]): { active: number; total: number } {
   return { active: variants.filter((v) => v.is_active).length, total: variants.length };
+}
+
+export type MarketingSkuSort = "label" | "code" | "sku_low" | "updated";
+
+/** เรียงรายการ (ใช้ร่วมตาราง/การ์ด): label = ตามลำดับป้าย (ไม่มีป้ายท้าย) แล้วรหัส */
+export function sortMarketingSkus(rows: MarketingSkuItem[], sort: MarketingSkuSort, labelOrder: Map<string, number>): MarketingSkuItem[] {
+  const byCode = (a: MarketingSkuItem, b: MarketingSkuItem) => a.code.localeCompare(b.code, "th", { numeric: true });
+  const lo = (r: MarketingSkuItem) => (r.label_id ? labelOrder.get(r.label_id) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+  const out = [...rows];
+  if (sort === "code") return out.sort(byCode);
+  if (sort === "sku_low") return out.sort((a, b) => a.sku_active - b.sku_active || a.sku_total - b.sku_total || byCode(a, b));
+  if (sort === "updated") return out.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || byCode(a, b));
+  return out.sort((a, b) => lo(a) - lo(b) || byCode(a, b));
 }
 
 /** นับจำนวนตามแบรนด์ / ป้าย (ใช้ทำตัวเลขบนแท็บ/ชิป) */
