@@ -25,10 +25,14 @@ export async function OPTIONS(): Promise<NextResponse> {
   return new NextResponse(null, { status: 204, headers: CORS });
 }
 
-const json = (body: unknown, status = 200) =>
+/**
+ * แคช 60 วิที่ edge เฉพาะของจริง — โหมดพรีวิว (ร่าง) ต้อง no-store
+ * ⚠️ เคยพลาด: Vercel edge แคช preview=1 ไว้ 60 วิ → บันทึกร่างแล้วพรีวิวยังโชว์ของเก่า
+ */
+const json = (body: unknown, status = 200, noStore = false) =>
   NextResponse.json(body, {
     status,
-    headers: { ...CORS, "Cache-Control": "public, max-age=60, stale-while-revalidate=300" },
+    headers: { ...CORS, "Cache-Control": noStore ? "no-store" : "public, max-age=60, stale-while-revalidate=300" },
   });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -55,7 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data } = preview ? await q : await q.eq("status", "published");
     return json({
       pages: ((data ?? []) as { slug: string; title: string }[]).map((p) => ({ slug: p.slug, title: p.title })),
-    });
+    }, 200, preview);
   }
 
   const { data: p } = await sb
@@ -85,5 +89,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     title: row.title,
     seo: (row.seo ?? {}) as Record<string, string>,
     layout: normalizeBlocks(layout),
-  });
+  }, 200, preview);
 }

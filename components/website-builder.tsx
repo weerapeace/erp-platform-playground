@@ -9,6 +9,10 @@
  *   ขวา    = คุณสมบัติของสิ่งที่เลือก แบ่งแท็บ เนื้อหา / รูปลักษณ์ / ลูกเล่น
  *   จอแคบ (< lg) = สลับแท็บ โครง / พรีวิว / ตั้งค่า
  *
+ * ลากวาง = Pointer Events ของเราเอง (ไม่ใช้ HTML5 drag&drop ที่เอาแน่ไม่ได้กับ iframe/ปุ่ม/มือถือ):
+ *   กดค้างที่แถว/การ์ดแล้วลาก → ป้ายลอยตามเมาส์ → ปล่อยในต้นไม้ (เส้นฟ้าบอกตำแหน่ง) หรือปล่อยบนพรีวิว
+ *   ตอนลากจะมีแผ่นใสทับพรีวิว (iframe กินเหตุการณ์เมาส์ไม่ได้) แล้วส่งพิกัดให้ PreviewBridge วาดเส้น/หาตำแหน่ง
+ *
  * คีย์ลัด: Delete ลบที่เลือก · Ctrl+D ทำสำเนา · ↑/↓ เลือก Section ก่อน/ถัดไป (เมื่อไม่ได้พิมพ์ในช่อง) · Esc ปิดคลัง/เมนู/เต็มจอ
  * ไฟล์นี้ "ไม่รู้" ว่าชนิดบล็อกมีอะไรบ้าง — ทุกอย่างอ่านจาก lib/website-schema.ts
  * ข้อมูล/บันทึก/เผยแพร่ เป็นหน้าที่ของตัวที่เรียกใช้ (layout panel / pages panel) — ส่ง blocks + onChange + toolbar มา
@@ -16,6 +20,7 @@
  * คุยกับพรีวิว (เว็บร้านต้องมี PreviewBridge):
  *   เว็บ → ERP : storefront-block-click {blockId, childId?} · storefront-drop {data, beforeId} · storefront-preview-loaded · storefront-scroll {y}
  *   ERP → เว็บ : storefront-select-block {blockId, childId?} · storefront-restore-scroll {y}
+ *                storefront-drag-at {x,y} · storefront-drag-leave · storefront-drag-drop {data}   (ลากด้วย pointer)
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, type ChildSpec } from "@/lib/website-schema";
@@ -89,7 +94,12 @@ const DEVICE_OPTS = [
   { k: "mobile" as const, l: "📲 มือถือ" },
 ];
 
-type Drag = { kind: "move"; id: string } | { kind: "new"; type: BlockType } | { kind: "child"; blockId: string; childId: string };
+type Drag =
+  | { kind: "move"; id: string; label: string; icon: string }
+  | { kind: "new"; type: BlockType; label: string; icon: string }
+  | { kind: "child"; blockId: string; childId: string; label: string; icon: string };
+/** เป้าหมายที่เมาส์อยู่ตอนลาก */
+type DropTarget = { tree?: number; child?: { blockId: string; idx: number }; preview?: boolean };
 type Pane = "tree" | "preview" | "props";
 type PropTab = "content" | "style" | "motion";
 
@@ -143,9 +153,17 @@ export function WebsiteBuilder({
   const [showChanges, setShowChanges] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  /* ลากวาง */
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [ghost, setGhost] = useState({ x: 0, y: 0 });
   const [overIdx, setOverIdx] = useState<number | null>(null);
   const [childOver, setChildOver] = useState<{ blockId: string; idx: number } | null>(null);
+  const [overPreview, setOverPreview] = useState(false);
+  const targetRef = useRef<DropTarget>({});
+  const didDragRef = useRef(false);
+  const treeListRef = useRef<HTMLUListElement>(null);
+  const scaleRef = useRef(1);
+
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(600);
   /** โหลดพรีวิวใหม่ด้วยการเปลี่ยน src (iframe ต่างโดเมน สั่ง reload ตรง ๆ ไม่ได้) */
@@ -174,7 +192,7 @@ export function WebsiteBuilder({
   const patchBlock = useCallback((id: string, p: Record<string, unknown>) => onChange(blocksRef.current.map((b) => (b.id === id ? { ...b, ...p } : b))), [onChange]);
 
   const patchChild = (blockId: string, childId: string, p: Record<string, unknown>) => {
-    const b = blocks.find((x) => x.id === blockId);
+    const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c) return;
     patchBlock(blockId, { [c.spec.key]: c.list.map((it) => (it.id === childId ? { ...it, ...p } : it)) });
@@ -192,6 +210,20 @@ export function WebsiteBuilder({
       setExpanded((s) => new Set(s).add(fresh.id));
       setShowLib(false);
       setLibQuery("");
+    },
+    [onChange, onSelect]
+  );
+
+  const moveSectionTo = useCallback(
+    (id: string, idx: number) => {
+      const cur = blocksRef.current;
+      const from = cur.findIndex((b) => b.id === id);
+      if (from < 0 || from === idx || from + 1 === idx) return;
+      const next = [...cur];
+      const [moved] = next.splice(from, 1);
+      next.splice(idx > from ? idx - 1 : idx, 0, moved);
+      onChange(next);
+      onSelect({ blockId: id });
     },
     [onChange, onSelect]
   );
@@ -239,13 +271,13 @@ export function WebsiteBuilder({
   );
 
   const setVis = (id: string, key: keyof Visibility, value: boolean) => {
-    const b = blocks.find((x) => x.id === id);
+    const b = blocksRef.current.find((x) => x.id === id);
     if (!b) return;
     patchBlock(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
   };
 
   const addChild = (blockId: string) => {
-    const b = blocks.find((x) => x.id === blockId);
+    const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
     const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(c.spec) };
@@ -256,7 +288,7 @@ export function WebsiteBuilder({
   };
 
   const duplicateChild = (blockId: string, childId: string) => {
-    const b = blocks.find((x) => x.id === blockId);
+    const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
     const i = c.list.findIndex((it) => it.id === childId);
@@ -268,19 +300,19 @@ export function WebsiteBuilder({
   };
 
   const removeChild = (blockId: string, childId: string) => {
-    const b = blocks.find((x) => x.id === blockId);
+    const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c) return;
     patchBlock(blockId, { [c.spec.key]: c.list.filter((it) => it.id !== childId) });
-    if (selection?.childId === childId) onSelect({ blockId });
+    if (selectionRef.current?.childId === childId) onSelect({ blockId });
   };
 
   const moveChildTo = (blockId: string, childId: string, idx: number) => {
-    const b = blocks.find((x) => x.id === blockId);
+    const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c) return;
     const from = c.list.findIndex((it) => it.id === childId);
-    if (from < 0) return;
+    if (from < 0 || from === idx || from + 1 === idx) return;
     const next = [...c.list];
     const [moved] = next.splice(from, 1);
     next.splice(idx > from ? idx - 1 : idx, 0, moved);
@@ -320,21 +352,13 @@ export function WebsiteBuilder({
           const type = d.data.slice("website-new:".length) as BlockType;
           if (SECTION_SCHEMAS[type]) addSection(type, idx);
         } else if (d.data.startsWith("website-move:")) {
-          const id = d.data.slice("website-move:".length);
-          const from = cur.findIndex((b) => b.id === id);
-          if (from < 0) return;
-          const next = [...cur];
-          const [moved] = next.splice(from, 1);
-          next.splice(idx > from ? idx - 1 : idx, 0, moved);
-          onChange(next);
-          onSelect({ blockId: id });
+          moveSectionTo(d.data.slice("website-move:".length), idx);
         }
-        setDrag(null);
       }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [onSelect, onChange, iframeRef, addSection]);
+  }, [onSelect, iframeRef, addSection, moveSectionTo]);
 
   useEffect(() => {
     iframeRef.current?.contentWindow?.postMessage({ type: "storefront-select-block", blockId: selection?.blockId ?? null, childId: selection?.childId ?? null }, "*");
@@ -379,42 +403,110 @@ export function WebsiteBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullscreen, showAi, duplicateSection, removeSection, onSelect]);
 
-  /* ── ลากวาง Section ── */
+  /* ── ลากวางด้วย pointer ── */
   const endDrag = () => {
     setDrag(null);
     setOverIdx(null);
     setChildOver(null);
+    setOverPreview(false);
+    targetRef.current = {};
   };
-  const dropAt = (idx: number) => {
-    if (!drag || drag.kind === "child") return endDrag();
-    if (drag.kind === "new") addSection(drag.type, idx);
-    else {
-      const from = blocks.findIndex((b) => b.id === drag.id);
-      if (from >= 0) {
-        const next = [...blocks];
-        const [moved] = next.splice(from, 1);
-        next.splice(idx > from ? idx - 1 : idx, 0, moved);
-        onChange(next);
+
+  /** เริ่มจับลาก (กดค้างแล้วขยับเกิน 5px ถึงถือว่าลาก — กดเฉย ๆ ยังเป็นคลิกปกติ) */
+  const startDrag = (e: React.PointerEvent, d: Drag) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button,input,select,textarea,a")) return;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let active = false;
+    let wasOverPreview = false;
+    const post = (msg: Record<string, unknown>) => iframeRef.current?.contentWindow?.postMessage(msg, "*");
+    const inRect = (x: number, y: number, r?: DOMRect) => !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    const indexAt = (rows: HTMLElement[], y: number) => {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i].getBoundingClientRect();
+        if (y < r.top + r.height / 2) return i;
       }
-    }
-    endDrag();
+      return rows.length;
+    };
+
+    const move = (ev: PointerEvent) => {
+      if (!active) {
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+        active = true;
+        didDragRef.current = true;
+        setDrag(d);
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "grabbing";
+      }
+      ev.preventDefault();
+      const x = ev.clientX;
+      const y = ev.clientY;
+      setGhost({ x, y });
+      const t: DropTarget = {};
+      const list = treeListRef.current;
+      if (list && inRect(x, y, list.getBoundingClientRect())) {
+        const r = list.getBoundingClientRect();
+        if (y < r.top + 28) list.scrollTop -= 10;
+        else if (y > r.bottom - 28) list.scrollTop += 10;
+        if (d.kind === "child") {
+          const rows = [...list.querySelectorAll<HTMLElement>(`[data-child-of="${d.blockId}"]`)];
+          if (rows.length) t.child = { blockId: d.blockId, idx: indexAt(rows, y) };
+        } else {
+          t.tree = indexAt([...list.querySelectorAll<HTMLElement>("[data-row]")], y);
+        }
+      } else if (d.kind !== "child" && previewSrc && inRect(x, y, previewBoxRef.current?.getBoundingClientRect())) {
+        const fr = iframeRef.current?.getBoundingClientRect();
+        if (fr) {
+          t.preview = true;
+          post({ type: "storefront-drag-at", x: (x - fr.left) / scaleRef.current, y: (y - fr.top) / scaleRef.current });
+        }
+      }
+      if (wasOverPreview && !t.preview) post({ type: "storefront-drag-leave" });
+      wasOverPreview = !!t.preview;
+      targetRef.current = t;
+      setOverIdx(t.tree ?? null);
+      setChildOver(t.child ?? null);
+      setOverPreview(!!t.preview);
+    };
+
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      if (!active) return;
+      const t = targetRef.current;
+      if (d.kind === "child") {
+        if (t.child) moveChildTo(d.blockId, d.childId, t.child.idx);
+      } else if (t.tree != null) {
+        if (d.kind === "new") addSection(d.type, t.tree);
+        else moveSectionTo(d.id, t.tree);
+      } else if (t.preview) {
+        post({ type: "storefront-drag-drop", data: d.kind === "new" ? `website-new:${d.type}` : `website-move:${d.id}` });
+        if (d.kind === "new") {
+          setShowLib(false);
+          setLibQuery("");
+        }
+      }
+      endDrag();
+      setTimeout(() => {
+        didDragRef.current = false;
+      }, 0);
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
-  const overBlock = (e: React.DragEvent, i: number) => {
-    if (!drag || drag.kind === "child") return;
-    e.preventDefault();
-    const r = e.currentTarget.getBoundingClientRect();
-    setOverIdx(e.clientY < r.top + r.height / 2 ? i : i + 1);
-  };
-  /** เส้นบอกตำแหน่ง — เป็นฟังก์ชันคืน JSX (component ย่อยจะสร้าง DOM ใหม่ทุกครั้งที่ขยับเมาส์ → dragleave ยิงรัว) */
+
+  /** เส้นบอกตำแหน่งวางในต้นไม้ (เฉพาะตอนลาก Section) */
   const dropLine = (idx: number) => {
     if (!drag || drag.kind === "child") return null;
     const active = overIdx === idx;
     return (
-      <li
-        onDragOver={(e) => { e.preventDefault(); setOverIdx(idx); }}
-        onDrop={(e) => { e.preventDefault(); dropAt(idx); }}
-        className={`rounded transition-all ${active ? "h-7 border-2 border-dashed border-blue-500 bg-blue-50 flex items-center justify-center" : "h-1.5 border border-dashed border-transparent"}`}
-      >
+      <li className={`rounded transition-all ${active ? "h-7 border-2 border-dashed border-blue-500 bg-blue-50 flex items-center justify-center" : "h-1.5"}`}>
         {active && <span className="text-[10px] font-medium text-blue-600">วางตรงนี้</span>}
       </li>
     );
@@ -487,6 +579,7 @@ export function WebsiteBuilder({
 
   const dev = DEVICES.find((d) => d.k === device)!;
   const scale = zoom === "fit" ? Math.min(1, (boxW - 16) / dev.w) : zoom;
+  scaleRef.current = scale;
 
   /* ── แถบเครื่องมือ ── */
   const topbar = (
@@ -603,7 +696,7 @@ export function WebsiteBuilder({
 
   /* ── พรีวิว ── */
   const previewFrame = (heightCss: string) => (
-    <div ref={previewBoxRef} className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: heightCss }}>
+    <div ref={previewBoxRef} className="relative rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: heightCss }}>
       {previewSrc ? (
         <div className="w-full h-full overflow-auto py-2">
           <div style={{ width: dev.w * scale, height: dev.h * scale, margin: "0 auto", overflow: "hidden" }}>
@@ -617,9 +710,15 @@ export function WebsiteBuilder({
           </div>
         </div>
       ) : (
-        <div className="h-full flex flex-col items-center justify-center text-sm text-slate-400 px-6 text-center gap-1" onDragOver={(e) => e.preventDefault()}>
+        <div className="h-full flex flex-col items-center justify-center text-sm text-slate-400 px-6 text-center gap-1">
           <span>ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้</span>
           <span className="text-[11px]">เมื่อเว็บร้านขึ้น Vercel แล้ว ใส่โดเมนในตาราง shop_domains พรีวิวจะขึ้นที่นี่</span>
+        </div>
+      )}
+      {/* แผ่นใสทับพรีวิวตอนลาก — iframe รับเหตุการณ์เมาส์เองไม่ได้ ต้องให้แผ่นนี้รับแทนแล้วส่งพิกัดเข้าไป */}
+      {drag && drag.kind !== "child" && previewSrc && (
+        <div className={`absolute inset-0 z-10 ${overPreview ? "ring-4 ring-inset ring-blue-500/70 bg-blue-500/5" : ""}`}>
+          {overPreview && <span className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-blue-600 text-white text-xs shadow">ปล่อยเพื่อวาง {drag.label} ตรงเส้นฟ้า</span>}
         </div>
       )}
     </div>
@@ -629,34 +728,20 @@ export function WebsiteBuilder({
   const childRow = (b: Block, c: { spec: ChildSpec; list: ChildBlock[] }, it: ChildBlock, idx: number) => {
     const isSel = selection?.blockId === b.id && selection?.childId === it.id;
     const dragging = drag?.kind === "child" && drag.childId === it.id;
-    const over = childOver?.blockId === b.id && childOver.idx === idx && drag?.kind === "child" && drag.blockId === b.id;
+    const over = drag?.kind === "child" && drag.blockId === b.id && childOver?.blockId === b.id && childOver.idx === idx;
+    const label = c.spec.summary(it) || c.spec.itemLabel;
     return (
       <Fragment key={it.id}>
         {over && <li className="h-1 rounded bg-blue-500 ml-7 mr-1" />}
         <li
           id={`blk-${it.id}`}
-          draggable
-          onDragStart={(e) => { e.stopPropagation(); setDrag({ kind: "child", blockId: b.id, childId: it.id }); }}
-          onDragEnd={endDrag}
-          onDragOver={(e) => {
-            if (drag?.kind !== "child" || drag.blockId !== b.id) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const r = e.currentTarget.getBoundingClientRect();
-            setChildOver({ blockId: b.id, idx: e.clientY < r.top + r.height / 2 ? idx : idx + 1 });
-          }}
-          onDrop={(e) => {
-            if (drag?.kind !== "child") return;
-            e.preventDefault();
-            e.stopPropagation();
-            moveChildTo(b.id, drag.childId, childOver?.idx ?? idx);
-            endDrag();
-          }}
-          onClick={() => { onSelect({ blockId: b.id, childId: it.id }); setPropTab("content"); setPane("props"); }}
+          data-child-of={b.id}
+          onPointerDown={(e) => startDrag(e, { kind: "child", blockId: b.id, childId: it.id, label, icon: c.spec.icon })}
+          onClick={() => { if (didDragRef.current) return; onSelect({ blockId: b.id, childId: it.id }); setPropTab("content"); setPane("props"); }}
           className={`group ml-7 mr-1 flex items-center gap-1.5 rounded-md px-1.5 py-1 cursor-pointer text-[11px] ${dragging ? "opacity-40" : ""} ${isSel ? "bg-orange-50 text-orange-800 ring-1 ring-orange-200" : "text-slate-600 hover:bg-slate-50"}`}
         >
-          <span className="cursor-grab text-slate-300 select-none">⠿</span>
-          <span className={`flex-1 truncate ${it.enabled === false ? "line-through text-slate-400" : ""}`}>{c.spec.summary(it) || c.spec.itemLabel}</span>
+          <span className="cursor-grab text-slate-300 select-none" style={{ touchAction: "none" }} title="ลากเพื่อเรียง">⠿</span>
+          <span className={`flex-1 truncate ${it.enabled === false ? "line-through text-slate-400" : ""}`}>{label}</span>
           <span className="hidden group-hover:flex items-center">
             <button onClick={(e) => { e.stopPropagation(); patchChild(b.id, it.id, { enabled: it.enabled === false }); }} title={it.enabled === false ? "แสดง" : "ซ่อน"} className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800">{it.enabled === false ? "🚫" : "👁️"}</button>
             <button onClick={(e) => { e.stopPropagation(); duplicateChild(b.id, it.id); }} disabled={c.list.length >= c.spec.max} title="ทำสำเนา" className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800 disabled:opacity-30">📑</button>
@@ -674,7 +759,7 @@ export function WebsiteBuilder({
         <button onClick={() => setShowAi(true)} title="ให้ AI ช่วยออกแบบ แล้ววาง JSON กลับมา" className={`${iconBtn} !border-violet-200 !bg-violet-50 !text-violet-700 hover:!bg-violet-100`}>🤖</button>
       </div>
 
-      <ul className={`flex-1 overflow-y-auto pr-0.5 ${drag && drag.kind !== "child" ? "space-y-0" : "space-y-0.5"}`}>
+      <ul ref={treeListRef} className={`flex-1 overflow-y-auto pr-0.5 ${drag && drag.kind !== "child" ? "space-y-0" : "space-y-0.5"}`}>
         {blocks.map((b, i) => {
           const info = types.find((t) => t.type === b.type);
           const schema = SECTION_SCHEMAS[b.type];
@@ -682,24 +767,23 @@ export function WebsiteBuilder({
           const isSel = selection?.blockId === b.id && !selection.childId;
           const isOpen = expanded.has(b.id);
           const hasIssue = errors.some((x) => x.blockId === b.id);
+          const label = info?.label ?? b.type;
+          const icon = info?.icon ?? "🧩";
           return (
             <Fragment key={b.id}>
               {dropLine(i)}
               <li
                 id={`blk-${b.id}`}
-                draggable
-                onDragStart={(e) => { e.dataTransfer.setData("text/plain", `website-move:${b.id}`); e.dataTransfer.effectAllowed = "move"; setDrag({ kind: "move", id: b.id }); }}
-                onDragEnd={endDrag}
-                onDragOver={(e) => overBlock(e, i)}
-                onDrop={(e) => { if (drag?.kind === "child") return; e.preventDefault(); dropAt(overIdx ?? i); }}
                 onContextMenu={(e) => { e.preventDefault(); onSelect({ blockId: b.id }); setMenu({ id: b.id, x: e.clientX, y: e.clientY }); }}
                 className={`rounded-lg transition ${drag?.kind === "move" && drag.id === b.id ? "opacity-40" : ""}`}
               >
                 <div
-                  onClick={() => { onSelect({ blockId: b.id }); setPropTab("content"); setPane("props"); }}
+                  data-row={i}
+                  onPointerDown={(e) => startDrag(e, { kind: "move", id: b.id, label, icon })}
+                  onClick={() => { if (didDragRef.current) return; onSelect({ blockId: b.id }); setPropTab("content"); setPane("props"); }}
                   className={`group flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 cursor-pointer ${isSel ? "bg-blue-50 ring-1 ring-blue-200" : selection?.blockId === b.id ? "bg-blue-50/40" : "hover:bg-slate-50"}`}
                 >
-                  <span className="cursor-grab text-slate-300 select-none text-xs" title="ลากเพื่อย้าย">⠿</span>
+                  <span className="cursor-grab text-slate-300 select-none text-xs" style={{ touchAction: "none" }} title="ลากเพื่อย้าย">⠿</span>
                   {c ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n; }); }}
@@ -711,9 +795,9 @@ export function WebsiteBuilder({
                   ) : (
                     <span className="w-3.5" />
                   )}
-                  <span className="text-sm leading-none">{info?.icon ?? "🧩"}</span>
+                  <span className="text-sm leading-none">{icon}</span>
                   <span className="flex-1 min-w-0">
-                    <span className={`block text-xs truncate ${b.enabled ? "text-slate-800" : "text-slate-400 line-through"} ${isSel ? "font-medium" : ""}`}>{info?.label ?? b.type}</span>
+                    <span className={`block text-xs truncate ${b.enabled ? "text-slate-800" : "text-slate-400 line-through"} ${isSel ? "font-medium" : ""}`}>{label}</span>
                     <span className="block text-[10px] text-slate-400 truncate">
                       {schema ? blockSummary(b) : "บล็อกของระบบเดิม"}
                       {c && !isOpen && ` · ${c.spec.itemLabel} ${c.list.length}`}
@@ -730,14 +814,10 @@ export function WebsiteBuilder({
                 </div>
 
                 {c && isOpen && (
-                  <ul className="pb-1 space-y-0.5" onDragOver={(e) => { if (drag?.kind === "child" && drag.blockId === b.id) e.preventDefault(); }}>
+                  <ul className="pb-1 space-y-0.5">
                     {c.list.map((it, idx) => childRow(b, c, it, idx))}
                     {drag?.kind === "child" && drag.blockId === b.id && childOver?.blockId === b.id && childOver.idx === c.list.length && <li className="h-1 rounded bg-blue-500 ml-7 mr-1" />}
-                    <li
-                      className="ml-7"
-                      onDragOver={(e) => { if (drag?.kind === "child" && drag.blockId === b.id) { e.preventDefault(); setChildOver({ blockId: b.id, idx: c.list.length }); } }}
-                      onDrop={(e) => { if (drag?.kind !== "child") return; e.preventDefault(); moveChildTo(b.id, drag.childId, c.list.length); endDrag(); }}
-                    >
+                    <li className="ml-7">
                       <button onClick={() => addChild(b.id)} disabled={c.list.length >= c.spec.max} className="text-[10px] text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">
                         + เพิ่ม{c.spec.itemLabel} ({c.list.length}/{c.spec.max})
                       </button>
@@ -750,16 +830,12 @@ export function WebsiteBuilder({
         })}
         {dropLine(blocks.length)}
         {!blocks.length && (
-          <li
-            onDragOver={(e) => { if (drag && drag.kind !== "child") { e.preventDefault(); setOverIdx(0); } }}
-            onDrop={(e) => { e.preventDefault(); dropAt(0); }}
-            className={`rounded-xl border-2 border-dashed py-10 text-center text-xs transition ${drag ? "border-blue-500 bg-blue-50 text-blue-600" : "border-slate-300 text-slate-400"}`}
-          >
+          <li className={`rounded-xl border-2 border-dashed py-10 text-center text-xs transition ${drag && overIdx === 0 ? "border-blue-500 bg-blue-50 text-blue-600" : "border-slate-300 text-slate-400"}`}>
             {drag ? "วางตรงนี้เพื่อเริ่มจัดหน้า" : 'ยังไม่มี Section — กด "+ เพิ่ม Section"'}
           </li>
         )}
       </ul>
-      <p className="mt-1 text-[10px] text-slate-400 leading-snug">ลากเรียง · คลิกขวาเปิดเมนู · Delete ลบ · Ctrl+D สำเนา</p>
+      <p className="mt-1 text-[10px] text-slate-400 leading-snug">กดค้างแล้วลากเพื่อเรียง · คลิกขวาเปิดเมนู · Delete ลบ · Ctrl+D สำเนา</p>
 
       {/* คลัง Section — เลื่อนออกมาทับแผงซ้าย */}
       {showLib && (
@@ -777,28 +853,30 @@ export function WebsiteBuilder({
                   <p className="text-[10px] font-medium text-slate-500 mb-1">{group}</p>
                   <div className="grid gap-1">
                     {list.map((t) => (
-                      <button
+                      <div
                         key={t.type}
-                        draggable
-                        onDragStart={(e) => { e.dataTransfer.setData("text/plain", `website-new:${t.type}`); e.dataTransfer.effectAllowed = "copyMove"; setDrag({ kind: "new", type: t.type }); }}
-                        onDragEnd={endDrag}
-                        onClick={() => addSection(t.type)}
-                        title={`${t.label} — ${t.hint}\nกดเพื่อเพิ่มต่อท้าย หรือลากไปวางในพรีวิว`}
-                        className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-blue-50/40 ${drag?.kind === "new" && drag.type === t.type ? "border-blue-500 opacity-50" : "border-slate-200"}`}
+                        role="button"
+                        tabIndex={0}
+                        onPointerDown={(e) => startDrag(e, { kind: "new", type: t.type, label: t.label, icon: t.icon })}
+                        onClick={() => { if (!didDragRef.current) addSection(t.type); }}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addSection(t.type); } }}
+                        title={`${t.label} — ${t.hint}\nกดเพื่อเพิ่มต่อท้าย หรือกดค้างแล้วลากไปวางในโครง/พรีวิว`}
+                        className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left cursor-grab active:cursor-grabbing select-none hover:border-blue-400 hover:bg-blue-50/40 ${drag?.kind === "new" && drag.type === t.type ? "border-blue-500 opacity-50" : "border-slate-200"}`}
+                        style={{ touchAction: "none" }}
                       >
                         <span className="text-base leading-none">{t.icon}</span>
                         <span className="min-w-0">
                           <span className="block text-xs text-slate-800">{t.label}</span>
                           <span className="block text-[10px] text-slate-400 truncate">{t.hint}</span>
                         </span>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 </div>
               ))
             )}
           </div>
-          <p className="mt-2 text-[10px] text-slate-400 leading-snug">กด = เพิ่มต่อท้าย · ลากไปวางในพรีวิวได้</p>
+          <p className="mt-2 text-[10px] text-slate-400 leading-snug">กด = เพิ่มต่อท้าย · กดค้างแล้วลากไปวางในพรีวิวได้</p>
         </div>
       )}
     </div>
@@ -941,6 +1019,14 @@ export function WebsiteBuilder({
           <aside className={`${pane === "props" ? "" : "hidden"} lg:block min-w-0 rounded-xl border border-slate-200 bg-white overflow-hidden`} style={{ height: previewHeight }}>{props}</aside>
         </div>
       </div>
+
+      {/* ป้ายลอยตามเมาส์ตอนลาก */}
+      {drag && (
+        <div className="fixed z-[70] pointer-events-none flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs shadow-xl" style={{ left: ghost.x + 14, top: ghost.y + 10 }}>
+          <span>{drag.icon}</span>
+          <span>{drag.label}</span>
+        </div>
+      )}
 
       {contextMenu}
 
