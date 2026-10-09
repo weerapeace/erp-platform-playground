@@ -6,8 +6,12 @@
  *   (ข้อมูลมาจาก view marketing_sku_overview · ค่าการตลาดเก็บใน marketing_skus สร้างแถวเมื่อติดป้าย/หมายเหตุ)
  */
 
+/** ชนิดป้าย: status = ป้ายหลัก (1 ป้าย/รุ่น เช่น Hero/Clearance) · badge = ป้ายเสริม (หลายป้าย/รุ่น โชว์บนรูป) */
+export type MarketingLabelKind = "status" | "badge";
+
 export type MarketingSkuLabel = {
   id: string;
+  kind?: MarketingLabelKind;
   name: string;
   icon: string | null;
   color: string;
@@ -36,11 +40,15 @@ export type MarketingSkuItem = {
   sku_active: number;
   /** แก้ป้าย/หมายเหตุล่าสุด (null = ยังไม่เคยแก้) */
   updated_at: string | null;
+  /** ป้ายเสริมที่ติดไว้ (เรียงตามลำดับที่ติด) */
+  badge_ids: string[];
 };
 
 export type MarketingSkuListData = {
   items: MarketingSkuItem[];
   labels: MarketingSkuLabel[];
+  /** ป้ายเสริม (kind = badge) */
+  badges: MarketingSkuLabel[];
   brands: MarketingBrand[];
 };
 

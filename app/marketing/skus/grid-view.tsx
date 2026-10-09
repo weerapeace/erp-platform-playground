@@ -13,10 +13,11 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import type { MarketingBrand, MarketingSkuItem, MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { LabelBadge } from "./label-manager";
 import { VariantCount } from "./variant-count";
+import { BadgeEditor } from "./badge-editor";
 
 export function MarketingSkuGrid({
   rows, cols, grouped, labels, labelMap, brandMap, showBrand, canManage, busy, labelOptions,
-  selected, onSelectedChange, onSetLabel, onEditNote, onActiveChange, emptyText,
+  selected, onSelectedChange, onSetLabel, onEditNote, onActiveChange, badges, onBadgesSaved, onBadgeCreated, emptyText,
 }: {
   rows: MarketingSkuItem[];
   cols: number;
@@ -33,6 +34,10 @@ export function MarketingSkuGrid({
   onSetLabel: (ids: string[], labelId: string | null) => void;
   onEditNote: (item: MarketingSkuItem) => void;
   onActiveChange: (parentId: string, active: number) => void;
+  /** ป้ายเสริม — โชว์เป็นชิปทับด้านบนของรูป */
+  badges: MarketingSkuLabel[];
+  onBadgesSaved: (parentId: string, badgeIds: string[]) => void;
+  onBadgeCreated: (badge: MarketingSkuLabel) => void;
   emptyText: React.ReactNode;
 }) {
   if (rows.length === 0) return <div className="rounded-xl border border-slate-200 bg-white">{emptyText}</div>;
@@ -83,6 +88,11 @@ export function MarketingSkuGrid({
                           <input type="checkbox" checked={on} onChange={(e) => toggle([it.parent_sku_id], e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
                         </label>
                       )}
+                      {/* ป้ายเสริม — ชิปทับด้านบนของรูป (เว้นที่ให้ช่องติ๊กมุมซ้าย) */}
+                      <div className={`absolute right-2 top-2 flex justify-end ${canManage ? "left-11" : "left-2"}`}>
+                        <BadgeEditor variant="overlay" parentId={it.parent_sku_id} value={it.badge_ids} badges={badges}
+                          canManage={canManage} onSaved={onBadgesSaved} onCreated={onBadgeCreated} />
+                      </div>
                     </div>
 
                     {/* ข้อมูล */}

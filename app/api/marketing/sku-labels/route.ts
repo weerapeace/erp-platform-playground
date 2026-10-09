@@ -7,7 +7,9 @@ import { cleanColor, cleanIds, isUuid } from "@/lib/marketing/sku-list";
 
 export const dynamic = "force-dynamic";
 
-// ป้ายกลุ่มสินค้าการตลาด (Hero / Clearance / …) — อ่านได้ทุกคนที่ดู SKU การตลาด · แก้ได้เฉพาะ marketing.label.manage
+// ป้ายการตลาด 2 ชนิด (kind): status = ป้ายหลัก (Hero / Clearance …) · badge = ป้ายเสริม (ชิปบนรูป หลายป้าย/รุ่น)
+// อ่านได้ทุกคนที่ดู SKU การตลาด · แก้/ลบ/เรียง = marketing.label.manage
+// สร้างใหม่: ป้ายหลัก = marketing.label.manage · ป้ายเสริม = marketing.sku.manage (ทีมพิมพ์คำใหม่เพิ่มเองได้ตอนติดป้าย)
 
 async function actor(request: NextRequest) {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -16,6 +18,7 @@ async function actor(request: NextRequest) {
 
 const dupMsg = (e: { code?: string; message: string }) =>
   e.code === "23505" ? "มีป้ายชื่อนี้อยู่แล้ว" : "บันทึกไม่สำเร็จ: " + e.message;
+const toKind = (v: unknown): "status" | "badge" => (v === "badge" ? "badge" : "status");
 
 type LabelInput = { name?: unknown; icon?: unknown; color?: unknown; description?: unknown; is_active?: unknown };
 
@@ -37,26 +40,29 @@ function pickFields(b: LabelInput, requireName: boolean): { fields: Record<strin
 export async function GET(request: NextRequest) {
   const denied = await guardApi(request, "marketing.sku.view");
   if (denied) return denied;
-  const { data, error } = await supabaseAdmin().from("marketing_sku_labels")
-    .select("id, name, icon, color, description, sort_order, is_active").order("sort_order").order("name");
+  const kind = new URL(request.url).searchParams.get("kind");
+  let q = supabaseAdmin().from("marketing_sku_labels").select("id, kind, name, icon, color, description, sort_order, is_active");
+  if (kind === "status" || kind === "badge") q = q.eq("kind", kind);
+  const { data, error } = await q.order("sort_order").order("name");
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
   return NextResponse.json({ data: data ?? [], error: null });
 }
 
-// POST { name, icon?, color?, description? } → เพิ่มป้าย (ต่อท้ายลำดับ)
+// POST { kind?, name, icon?, color?, description? } → เพิ่มป้าย (ต่อท้ายลำดับของชนิดนั้น)
 export async function POST(request: NextRequest) {
-  const denied = await guardApi(request, "marketing.label.manage");
-  if (denied) return denied;
-  let body: LabelInput;
+  let body: LabelInput & { kind?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ data: null, error: "invalid JSON" }, { status: 400 }); }
+  const kind = toKind(body.kind);
+  const denied = await guardApi(request, kind === "badge" ? "marketing.sku.manage" : "marketing.label.manage");
+  if (denied) return denied;
   const { fields, error: vErr } = pickFields(body, true);
   if (vErr) return NextResponse.json({ data: null, error: vErr }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: last } = await admin.from("marketing_sku_labels").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
+  const { data: last } = await admin.from("marketing_sku_labels").select("sort_order").eq("kind", kind).order("sort_order", { ascending: false }).limit(1).maybeSingle();
   const { data, error } = await admin.from("marketing_sku_labels")
-    .insert({ color: "#64748b", ...fields, sort_order: (Number(last?.sort_order) || 0) + 10 })
-    .select("id, name, icon, color, description, sort_order, is_active").single();
+    .insert({ color: "#64748b", ...fields, kind, sort_order: (Number(last?.sort_order) || 0) + 10 })
+    .select("id, kind, name, icon, color, description, sort_order, is_active").single();
   if (error) return NextResponse.json({ data: null, error: dupMsg(error) }, { status: 400 });
 
   const { actorId, actorName } = await actor(request);
@@ -94,14 +100,14 @@ export async function PATCH(request: NextRequest) {
   if (!before) return NextResponse.json({ data: null, error: "ไม่พบป้าย (อาจถูกลบไปแล้ว)" }, { status: 404 });
   const { data, error } = await admin.from("marketing_sku_labels")
     .update({ ...fields, updated_at: new Date().toISOString() }).eq("id", body.id)
-    .select("id, name, icon, color, description, sort_order, is_active").single();
+    .select("id, kind, name, icon, color, description, sort_order, is_active").single();
   if (error) return NextResponse.json({ data: null, error: dupMsg(error) }, { status: 400 });
 
   await writeAudit(admin, { action: "marketing.label.update", entityType: "marketing_sku_labels", entityId: body.id, actorId, actorName, metadata: { before, after: fields } });
   return NextResponse.json({ data, error: null });
 }
 
-// DELETE ?id= → ลบป้าย · สินค้าที่ติดป้ายนี้จะกลายเป็น "ไม่มีป้าย" (ไม่ถูกเอาออกจากรายการ)
+// DELETE ?id= → ลบป้าย · ป้ายหลัก: รุ่นที่ติดอยู่กลายเป็น "ไม่มีป้าย" · ป้ายเสริม: หลุดออกจากทุกรุ่น (ตัวสินค้าไม่ถูกแตะ)
 export async function DELETE(request: NextRequest) {
   const denied = await guardApi(request, "marketing.label.manage");
   if (denied) return denied;
@@ -109,9 +115,11 @@ export async function DELETE(request: NextRequest) {
   if (!isUuid(id)) return NextResponse.json({ data: null, error: "ไม่พบป้าย" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: before } = await admin.from("marketing_sku_labels").select("id, name, icon, color").eq("id", id).maybeSingle();
+  const { data: before } = await admin.from("marketing_sku_labels").select("id, kind, name, icon, color").eq("id", id).maybeSingle();
   if (!before) return NextResponse.json({ data: null, error: "ไม่พบป้าย (อาจถูกลบไปแล้ว)" }, { status: 404 });
-  const { count } = await admin.from("marketing_skus").select("id", { count: "exact", head: true }).eq("label_id", id);
+  const { count } = before.kind === "badge"
+    ? await admin.from("marketing_sku_badge_map").select("badge_id", { count: "exact", head: true }).eq("badge_id", id)
+    : await admin.from("marketing_skus").select("id", { count: "exact", head: true }).eq("label_id", id);
   const { error } = await admin.from("marketing_sku_labels").delete().eq("id", id);
   if (error) return NextResponse.json({ data: null, error: "ลบไม่สำเร็จ: " + error.message }, { status: 500 });
 

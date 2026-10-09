@@ -27,6 +27,7 @@ import {
 import { LabelBadge, LabelManagerModal } from "./label-manager";
 import { MarketingSkuGrid } from "./grid-view";
 import { VariantCount } from "./variant-count";
+import { BadgeEditor } from "./badge-editor";
 
 const VIEWS = ["table", "grid"] as const;
 type View = (typeof VIEWS)[number];
@@ -61,6 +62,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<MarketingSkuSort>("label");
+  const [badgeFilter, setBadgeFilter] = useState<string>("");   // "" = ทุกป้ายเสริม · "__none" = ยังไม่มีป้ายเสริม · id
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
   // มุมมอง ตาราง/การ์ด — สลับแล้วจำเป็นค่าเริ่มต้นของฉัน (ของกลาง useViewPref)
@@ -90,6 +92,11 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const labels = useMemo(() => data?.labels ?? [], [data]);
   const brandMap = useMemo(() => new Map((data?.brands ?? []).map((b) => [b.id, b])), [data]);
   const labelMap = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels]);
+  const badges = useMemo(() => data?.badges ?? [], [data]);
+  const badgeMap = useMemo(() => new Map(badges.map((b) => [b.id, b])), [badges]);
+  // นับป้ายเสริมจากข้อมูลบนจอ (อัปเดตทันทีหลังติด/เอาออก ไม่ต้องรอโหลดใหม่)
+  const badgeUsage = useMemo(() => { const m = new Map<string, number>(); for (const it of items) for (const b of it.badge_ids) m.set(b, (m.get(b) ?? 0) + 1); return m; }, [items]);
+  const badgesWithUsage = useMemo(() => badges.map((b) => ({ ...b, usage_count: badgeUsage.get(b.id) ?? 0 })), [badges, badgeUsage]);
   const labelOrder = useMemo(() => new Map(labels.map((l) => [l.id, l.sort_order])), [labels]);
   const brandKey = useCallback((it: MarketingSkuItem) => (it.brand_id && brandMap.has(it.brand_id) ? it.brand_id : BRAND_NONE), [brandMap]);
   const labelKey = useCallback((it: MarketingSkuItem) => (it.label_id && labelMap.has(it.label_id) ? it.label_id : LABEL_NONE), [labelMap]);
@@ -111,13 +118,17 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const filtered = useMemo(() => {
     const byLabel = labelFilter === LABEL_ALL ? inBrand : inBrand.filter((it) => labelKey(it) === labelFilter);
     const t = q.trim().toLowerCase();
-    const hit = t ? byLabel.filter((it) => `${it.code} ${it.name} ${it.note ?? ""}`.toLowerCase().includes(t)) : byLabel;
+    const byBadge = !badgeFilter ? byLabel
+      : badgeFilter === "__none" ? byLabel.filter((it) => it.badge_ids.length === 0)
+      : byLabel.filter((it) => it.badge_ids.includes(badgeFilter));
+    const text = (it: MarketingSkuItem) => `${it.code} ${it.name} ${it.note ?? ""} ${it.badge_ids.map((b) => badgeMap.get(b)?.name ?? "").join(" ")}`.toLowerCase();
+    const hit = t ? byBadge.filter((it) => text(it).includes(t)) : byBadge;
     return sortMarketingSkus(hit, sort, labelOrder);
-  }, [inBrand, labelFilter, labelKey, q, sort, labelOrder]);
+  }, [inBrand, labelFilter, labelKey, q, sort, labelOrder, badgeFilter, badgeMap]);
   const pageRows = useMemo(() => filtered.slice(page * pageSize, (page + 1) * pageSize), [filtered, page, pageSize]);
 
   // เปลี่ยนแท็บ/ตัวกรอง → ล้างที่ติ๊ก (กันเผลอทำกับแถวที่มองไม่เห็น) · กลับหน้าแรก
-  useEffect(() => { setSelected(new Set()); setPage(0); }, [brandTab, labelFilter]);
+  useEffect(() => { setSelected(new Set()); setPage(0); }, [brandTab, labelFilter, badgeFilter]);
   useEffect(() => { setPage(0); }, [q, sort, pageSize]);
   const pickTab = (k: string) => { setBrandTab(k); saveTab(k); };
 
@@ -154,6 +165,34 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   };
 
   // เปิด/ปิดสี (เฉพาะการตลาด) ในป๊อป → อัปเดตตัวเลข "SKU ที่เหลือ" ของรุ่นนั้นบนจอทันที
+  // ป้ายเสริม: บันทึกแล้ว → อัปเดตรุ่นนั้นบนจอ · สร้างป้ายใหม่ → เพิ่มเข้า list
+  const onBadgesSaved = useCallback((parentId: string, badgeIds: string[]) => {
+    setData((d) => d && { ...d, items: d.items.map((it) => (it.parent_sku_id === parentId ? { ...it, badge_ids: badgeIds } : it)) });
+  }, []);
+  const onBadgeCreated = useCallback((badge: MarketingSkuLabel) => {
+    setData((d) => d && (d.badges.some((b) => b.id === badge.id) ? d : { ...d, badges: [...d.badges, { ...badge, usage_count: 0 }] }));
+  }, []);
+  // เพิ่มป้ายเสริมให้หลายรุ่น (ของเดิมไม่หาย)
+  const addBadgeBulk = async (ids: string[], badgeId: string) => {
+    setBusy(true);
+    let done = 0;
+    try {
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const r = await apiFetch("/api/marketing/skus/badges", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_sku_ids: ids.slice(i, i + CHUNK), badge_ids: [badgeId], mode: "add" }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+        done += Number(j.data?.updated) || 0;
+      }
+      toast.success(`ติดป้ายเสริม "${badgeMap.get(badgeId)?.name ?? ""}" ให้ ${done} รุ่นแล้ว`);
+      setSelected(new Set());
+    } catch (e) {
+      toast.error(`${e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"}${done ? ` (สำเร็จไปแล้ว ${done} รุ่น)` : ""}`);
+    } finally {
+      setBusy(false);
+      void load(true);
+    }
+  };
+
   const onActiveChange = useCallback((parentId: string, active: number) => {
     setData((d) => d && { ...d, items: d.items.map((it) => (it.parent_sku_id === parentId ? { ...it, sku_active: active } : it)) });
   }, []);
@@ -210,6 +249,10 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
             disabled={busy} className="w-full" />
         </div>
       ) : <LabelBadge label={it.label_id ? labelMap.get(it.label_id) : undefined} />,
+    },
+    {
+      key: "badges", header: "ป้ายเสริม", width: "minmax(8rem,1.2fr)",
+      cell: (it) => <BadgeEditor parentId={it.parent_sku_id} value={it.badge_ids} badges={badges} canManage={canManage} onSaved={onBadgesSaved} onCreated={onBadgeCreated} />,
     },
     {
       key: "note", header: "หมายเหตุ", width: "minmax(8rem,1.5fr)",
@@ -313,6 +356,14 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">
                 {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
+              {badges.length > 0 && (
+                <select value={badgeFilter} onChange={(e) => setBadgeFilter(e.target.value)} aria-label="กรองป้ายเสริม"
+                  className={`h-9 rounded-lg border px-2 text-sm ${badgeFilter ? "border-blue-400 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700"}`}>
+                  <option value="">ป้ายเสริม: ทั้งหมด</option>
+                  {badges.map((b) => <option key={b.id} value={b.id}>{b.icon ? `${b.icon} ` : ""}{b.name} ({badgeUsage.get(b.id) ?? 0})</option>)}
+                  <option value="__none">ยังไม่มีป้ายเสริม</option>
+                </select>
+              )}
               <span className="text-xs text-slate-400">{filtered.length.toLocaleString("th-TH")} รุ่น</span>
               {view === "grid" && <GalleryColumnsControl cols={cols} onChange={setCols} className="ml-auto hidden sm:inline-flex" />}
             </div>
@@ -321,7 +372,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               <MarketingSkuGrid
                 rows={pageRows} cols={cols} grouped={sort === "label"} labels={labels} labelMap={labelMap} brandMap={brandMap} showBrand={brandTab === BRAND_ALL}
                 canManage={canManage} busy={busy} labelOptions={labelOptions} selected={selected} onSelectedChange={setSelected}
-                onSetLabel={setLabel} onEditNote={(it) => setNoteEdit({ item: it, text: it.note ?? "" })} onActiveChange={onActiveChange} emptyText={emptyText} />
+                onSetLabel={setLabel} onEditNote={(it) => setNoteEdit({ item: it, text: it.note ?? "" })} onActiveChange={onActiveChange} badges={badges} onBadgesSaved={onBadgesSaved} onBadgeCreated={onBadgeCreated} emptyText={emptyText} />
             ) : (
               <MiniTable<MarketingSkuItem>
                 rows={pageRows}
@@ -357,6 +408,13 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                   <SearchableSelect value="__pick" options={[{ value: "__pick", label: "— เลือกป้าย —" }, ...labelOptions]}
                     onChange={(v) => { if (v !== "__pick") setLabel(selIds, v || null); }} disabled={busy} />
                 </div>
+                {badges.length > 0 && (
+                  <div className="w-44 text-slate-800">
+                    <SearchableSelect value="__pick" disabled={busy}
+                      options={[{ value: "__pick", label: "＋ ติดป้ายเสริม" }, ...badges.filter((b) => b.is_active).map((b) => ({ value: b.id, label: b.name, badge: b.icon ?? undefined }))]}
+                      onChange={(v) => { if (v !== "__pick") void addBadgeBulk(selIds, v); }} />
+                  </div>
+                )}
               </BulkActionBar>
             )}
           </>
@@ -387,7 +445,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
         message={`ทุกรุ่นที่เลือกจะถูกตั้งป้ายเป็น "${bulkLabelName}" (ป้ายเดิมจะถูกแทนที่ · มีประวัติให้ย้อนดูได้)`}
         confirmText="เปลี่ยนป้าย" />
 
-      <LabelManagerModal open={labelMgrOpen} onClose={() => setLabelMgrOpen(false)} labels={labels} canEdit={canLabels}
+      <LabelManagerModal open={labelMgrOpen} onClose={() => setLabelMgrOpen(false)} labels={labels} badges={badgesWithUsage} canEdit={canLabels}
         onChanged={() => load(true)} />
     </>
   );

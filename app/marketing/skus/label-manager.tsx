@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * ตั้งค่าป้ายกลุ่มสินค้าการตลาด (Hero / Clearance / Accessories …)
+ * ตั้งค่าป้ายการตลาด 2 แท็บ: ป้ายหลัก (Hero / Clearance … 1 ป้าย/รุ่น) · ป้ายเสริม (ชิปบนรูป หลายป้าย/รุ่น)
  *   เพิ่ม · แก้ (ชื่อ/ไอคอน/สี/คำอธิบาย) · ลากเรียงลำดับ · ลบ (รุ่นที่ติดป้ายนั้นกลายเป็น "ยังไม่มีป้าย")
  * ของกลาง: ERPModal · ConfirmDialog · ColorInput · useDragReorder/DragHandle · Toast
  */
@@ -28,14 +28,18 @@ const toDraft = (l: MarketingSkuLabel): Draft => ({ name: l.name, icon: l.icon ?
 const EMPTY: Draft = { name: "", icon: "", color: "#0ea5e9", description: "" };
 const same = (a: Draft, b: Draft) => a.name === b.name && a.icon === b.icon && a.color === b.color && a.description === b.description;
 
-export function LabelManagerModal({ open, onClose, labels, canEdit, onChanged }: {
+export function LabelManagerModal({ open, onClose, labels, badges = [], canEdit, onChanged }: {
   open: boolean;
   onClose: () => void;
   labels: MarketingSkuLabel[];
+  /** ป้ายเสริม (kind = badge) — แท็บที่ 2 */
+  badges?: MarketingSkuLabel[];
   canEdit: boolean;
   onChanged: () => void;
 }) {
   const toast = useToast();
+  const [tab, setTab] = useState<"status" | "badge">("status");
+  const source = tab === "badge" ? badges : labels;
   const [list, setList] = useState<MarketingSkuLabel[]>(labels);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft>(EMPTY);
@@ -44,9 +48,10 @@ export function LabelManagerModal({ open, onClose, labels, canEdit, onChanged }:
 
   useEffect(() => {
     if (!open) return;
-    setList(labels);
-    setDrafts(Object.fromEntries(labels.map((l) => [l.id, toDraft(l)])));
-  }, [open, labels]);
+    setList(source);
+    setDrafts(Object.fromEntries(source.map((l) => [l.id, toDraft(l)])));
+  }, [open, source]);
+  useEffect(() => { setAdding(EMPTY); }, [tab]);
   useEffect(() => { if (!open) setAdding(EMPTY); }, [open]);
 
   const send = async (method: "POST" | "PATCH" | "DELETE", url: string, body?: unknown) => {
@@ -68,7 +73,7 @@ export function LabelManagerModal({ open, onClose, labels, canEdit, onChanged }:
 
   const addRow = async () => {
     if (!adding.name.trim()) { toast.warning("ต้องใส่ชื่อป้าย"); return; }
-    if (await send("POST", "/api/marketing/sku-labels", adding)) { toast.success("เพิ่มป้ายแล้ว"); setAdding(EMPTY); onChanged(); }
+    if (await send("POST", "/api/marketing/sku-labels", { ...adding, kind: tab })) { toast.success("เพิ่มป้ายแล้ว"); setAdding(EMPTY); onChanged(); }
   };
 
   const doDelete = async () => {
@@ -89,8 +94,16 @@ export function LabelManagerModal({ open, onClose, labels, canEdit, onChanged }:
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title="🏷️ ป้ายกลุ่มสินค้าการตลาด" size="lg" hasUnsavedChanges={dirty}
-        description={canEdit ? "1 รุ่นติดได้ 1 ป้าย · ลาก ⋮⋮ เพื่อเรียงลำดับ (ลำดับนี้ใช้ทั้งชิปกรองและเมนูเลือกป้าย)" : "คุณดูได้อย่างเดียว — การแก้ป้ายต้องมีสิทธิ์ \"ตั้งค่าป้าย SKU การตลาด\""}>
+      <ERPModal open={open} onClose={onClose} title="🏷️ ป้ายการตลาด" size="lg" hasUnsavedChanges={dirty}
+        description={!canEdit ? "คุณดูได้อย่างเดียว — การแก้ป้ายต้องมีสิทธิ์ \"ตั้งค่าป้าย SKU การตลาด\""
+          : tab === "badge" ? "ป้ายเสริม = ชิปบนรูป ติดได้หลายป้ายต่อรุ่น · ลาก ⋮⋮ เพื่อเรียงลำดับ"
+          : "ป้ายหลัก = 1 ป้ายต่อรุ่น · ลาก ⋮⋮ เพื่อเรียงลำดับ (ลำดับนี้ใช้ทั้งชิปกรองและเมนูเลือกป้าย)"}>
+        <div className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist">
+          {([["status", `ป้ายหลัก (${labels.length})`], ["badge", `ป้ายเสริม (${badges.length})`]] as const).map(([k, t]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} disabled={dirty && tab !== k} title={dirty && tab !== k ? "บันทึกหรือยกเลิกการแก้ก่อนสลับแท็บ" : undefined}
+              className={`h-8 rounded-md px-3 text-sm font-medium disabled:opacity-40 ${tab === k ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{t}</button>
+          ))}
+        </div>
         <div className="space-y-2">
           {list.length === 0 && <div className="py-6 text-center text-sm text-slate-400">ยังไม่มีป้าย เพิ่มป้ายแรกด้านล่าง</div>}
           {list.map((l, i) => {
@@ -148,7 +161,9 @@ export function LabelManagerModal({ open, onClose, labels, canEdit, onChanged }:
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={doDelete} loading={busy} variant="danger"
         title={`ลบป้าย "${delTarget?.name ?? ""}"?`}
         message={(delTarget?.usage_count ?? 0) > 0
-          ? `มี ${delTarget?.usage_count} รุ่นที่ติดป้ายนี้อยู่ — รุ่นเหล่านั้นจะยังอยู่ในรายการ แต่จะกลายเป็น "ยังไม่มีป้าย"`
+          ? (delTarget?.kind === "badge"
+            ? `มี ${delTarget?.usage_count} รุ่นที่ติดป้ายเสริมนี้อยู่ — ป้ายนี้จะหลุดออกจากรุ่นเหล่านั้น (ตัวสินค้าไม่ถูกแตะ)`
+            : `มี ${delTarget?.usage_count} รุ่นที่ติดป้ายนี้อยู่ — รุ่นเหล่านั้นจะยังอยู่ในรายการ แต่จะกลายเป็น "ยังไม่มีป้าย"`)
           : "ยังไม่มีรุ่นไหนใช้ป้ายนี้ ลบได้เลย"}
         confirmText="ลบป้าย" />
     </>
