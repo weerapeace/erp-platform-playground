@@ -15,6 +15,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SearchableSelect } from "@/components/searchable-select";
 import { HoverImage } from "@/components/hover-image";
 import { Pager } from "@/components/pager";
+import { BulkActionBar } from "@/components/bulk-action-bar";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useViewPref } from "@/lib/use-view-pref";
@@ -316,23 +317,6 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               {view === "grid" && <GalleryColumnsControl cols={cols} onChange={setCols} className="ml-auto hidden sm:inline-flex" />}
             </div>
 
-            {/* แถบทำหลายรายการ */}
-            {canManage && selIds.length > 0 && (
-              <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 shadow-sm">
-                <span className="text-sm font-medium text-blue-800">เลือกไว้ {selIds.length.toLocaleString("th-TH")} รุ่น</span>
-                {!allFilteredSelected && filtered.length > selIds.length && (
-                  <button type="button" onClick={() => setSelected(new Set(filtered.map((it) => it.parent_sku_id)))}
-                    className="text-xs text-blue-700 underline hover:text-blue-900">เลือกทั้งหมด {filtered.length.toLocaleString("th-TH")} รุ่นที่กรองอยู่</button>
-                )}
-                <span className="text-xs text-blue-700/70">เปลี่ยนป้ายเป็น</span>
-                <div className="w-52">
-                  <SearchableSelect value="__pick" options={[{ value: "__pick", label: "— เลือกป้าย —" }, ...labelOptions]}
-                    onChange={(v) => { if (v !== "__pick") setLabel(selIds, v || null); }} disabled={busy} />
-                </div>
-                <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-xs text-blue-700 hover:underline">ล้างที่เลือก</button>
-              </div>
-            )}
-
             {view === "grid" ? (
               <MarketingSkuGrid
                 rows={pageRows} cols={cols} grouped={sort === "label"} labels={labels} labelMap={labelMap} brandMap={brandMap} showBrand={brandTab === BRAND_ALL}
@@ -359,6 +343,21 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
             {filtered.length > PAGE_SIZES[0] && (
               <Pager page={page} pageSize={pageSize} total={filtered.length} onPage={(p) => { setPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                 unitLabel="รุ่น" onPageSize={setPageSize} pageSizes={PAGE_SIZES} />
+            )}
+
+            {/* แถบคำสั่งหลายรายการ — ลอยติดขอบล่างจอ (ของกลาง) */}
+            {canManage && (
+              <BulkActionBar count={selIds.length} unit="รุ่น" onClear={() => setSelected(new Set())}
+                extra={!allFilteredSelected && filtered.length > selIds.length ? (
+                  <button type="button" onClick={() => setSelected(new Set(filtered.map((it) => it.parent_sku_id)))}
+                    className="underline underline-offset-2 hover:text-white">เลือกทั้งหมด {filtered.length.toLocaleString("th-TH")} รุ่นที่กรองอยู่</button>
+                ) : null}>
+                <span className="text-xs text-slate-300">เปลี่ยนป้ายเป็น</span>
+                <div className="w-52 text-slate-800">
+                  <SearchableSelect value="__pick" options={[{ value: "__pick", label: "— เลือกป้าย —" }, ...labelOptions]}
+                    onChange={(v) => { if (v !== "__pick") setLabel(selIds, v || null); }} disabled={busy} />
+                </div>
+              </BulkActionBar>
             )}
           </>
         )}
