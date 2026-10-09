@@ -8,6 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeBlocks } from "@/lib/website-blocks";
 import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
@@ -72,7 +73,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     preview,
     theme: normalizeTheme(themeSource),
     /** โครงหน้าแรก — [] = ยังไม่เคยตั้ง ให้เว็บใช้โครงเริ่มต้นของตัวเอง */
-    layout: Array.isArray(layoutSource) ? layoutSource : [],
+    // normalize ก่อนส่ง: เติม id ให้ Block ย่อยเหมือนที่ตัวจัดหน้าเห็น (บล็อกชนิดเก่าของร้านอื่นถูกเก็บไว้ทั้งก้อน)
+    layout: normalizeBlocks(layoutSource),
     /**
      * หมวดสินค้าของร้าน [{key,label,icon}] — เจ้าของเพิ่ม/แก้เองได้ในแท็บจับคู่ฟิลด์
      * เว็บร้านต้องวาดเมนูหมวดจากรายการนี้ ห้ามฝังไว้ในโค้ดเว็บ ไม่งั้นเพิ่มหมวดแล้วไม่ขึ้น

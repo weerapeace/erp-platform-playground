@@ -232,8 +232,7 @@ function SubscribersCard({ shopSlug }: { shopSlug: string }) {
 
   const copyAll = async () => {
     try {
-      await navigator.clipboard.writeText(rows.map((r) => r.email).join("
-"));
+      await navigator.clipboard.writeText(rows.map((r) => r.email).join("\n"));
       toast.success(`คัดลอก ${rows.length} อีเมลแล้ว`);
     } catch {
       toast.error("คัดลอกไม่สำเร็จ");

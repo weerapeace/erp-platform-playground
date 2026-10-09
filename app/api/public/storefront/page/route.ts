@@ -9,6 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeBlocks } from "@/lib/website-blocks";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -83,6 +84,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     slug: row.slug,
     title: row.title,
     seo: (row.seo ?? {}) as Record<string, string>,
-    layout: Array.isArray(layout) ? layout : [],
+    layout: normalizeBlocks(layout),
   });
 }
