@@ -18,6 +18,9 @@ export type MarketingSkuLabel = {
 
 export type MarketingBrand = { id: string; name: string; color: string | null };
 
+/** SKU ย่อย (สี/แบบ) ของรุ่น — ใช้นับ "SKU ที่เหลือ" (ยังเปิดขาย = is_active) */
+export type MarketingSkuVariant = { code: string; color: string | null; is_active: boolean; image_key: string | null };
+
 export type MarketingSkuItem = {
   id: string;
   parent_sku_id: string;
@@ -28,6 +31,7 @@ export type MarketingSkuItem = {
   label_id: string | null;
   note: string | null;
   is_active: boolean;
+  variants: MarketingSkuVariant[];
   created_at: string;
   updated_at: string;
 };
@@ -57,6 +61,11 @@ export function cleanIds(raw: unknown, max = 500): string[] {
 export function cleanColor(v: unknown): string {
   const s = String(v ?? "").trim();
   return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(s) ? s : "#64748b";
+}
+
+/** สรุปจำนวน SKU ย่อย: ยังเปิดขาย / ทั้งหมด */
+export function variantSummary(variants: MarketingSkuVariant[]): { active: number; total: number } {
+  return { active: variants.filter((v) => v.is_active).length, total: variants.length };
 }
 
 /** นับจำนวนตามแบรนด์ / ป้าย (ใช้ทำตัวเลขบนแท็บ/ชิป) */

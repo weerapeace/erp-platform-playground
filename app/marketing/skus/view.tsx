@@ -21,10 +21,11 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import {
   BRAND_ALL, BRAND_NONE, LABEL_ALL, LABEL_NONE, countBy,
-  type MarketingSkuItem, type MarketingSkuLabel, type MarketingSkuListData,
+  variantSummary, type MarketingSkuItem, type MarketingSkuLabel, type MarketingSkuListData,
 } from "@/lib/marketing/sku-list";
 import { LabelBadge, LabelManagerModal } from "./label-manager";
 import { MarketingSkuGrid } from "./grid-view";
+import { VariantCount } from "./variant-count";
 
 const VIEWS = ["table", "grid"] as const;
 type View = (typeof VIEWS)[number];
@@ -209,6 +210,11 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
         ) : <span className="text-xs text-slate-400">ไม่มีแบรนด์</span>;
       },
     }] : []),
+    {
+      key: "variants", header: "SKU ที่เหลือ", width: "7.5rem", sortLabel: "SKU ที่เหลือ (น้อย→มาก)",
+      sortValue: (it) => { const s = variantSummary(it.variants); return s.active * 1000 + s.total; },
+      cell: (it) => <VariantCount variants={it.variants} />,
+    },
     {
       key: "label", header: "ป้าย", width: "minmax(10rem,1.3fr)",
       sortValue: (it) => labelMap.get(it.label_id ?? "")?.sort_order ?? 99999,

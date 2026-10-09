@@ -3,11 +3,12 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { cleanIds, isUuid, type MarketingSkuItem, type MarketingSkuLabel, type MarketingBrand } from "@/lib/marketing/sku-list";
+import { cleanIds, isUuid, type MarketingSkuItem, type MarketingSkuLabel, type MarketingBrand, type MarketingSkuVariant } from "@/lib/marketing/sku-list";
 
 export const dynamic = "force-dynamic";
 
 type ParentRow = { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null; brand_id: string | null; is_active: boolean | null };
+type VariantRow = { parent_sku_id: string; code: string | null; color_th: string | null; color: string | null; is_active: boolean | null; cover_image_r2_key: string | null };
 type Row = { id: string; parent_sku_id: string; label_id: string | null; note: string | null; created_at: string; updated_at: string; parent: ParentRow | null };
 
 async function actor(request: NextRequest) {
@@ -32,7 +33,24 @@ export async function GET(request: NextRequest) {
   const err = itemsRes.error || labelsRes.error || brandsRes.error;
   if (err) return NextResponse.json({ data: null, error: "โหลดรายการไม่สำเร็จ: " + err.message }, { status: 500 });
 
-  const items: MarketingSkuItem[] = ((itemsRes.data ?? []) as unknown as Row[]).map((r) => ({
+  const rows = (itemsRes.data ?? []) as unknown as Row[];
+
+  // SKU ย่อย (สี/แบบ) ของทุกรุ่นในรายการ → นับ "SKU ที่เหลือ" (ยังเปิดขาย) · ดึงเป็นก้อนกัน URL ยาวเกิน
+  const parentIds = rows.map((r) => r.parent_sku_id);
+  const variantsByParent = new Map<string, MarketingSkuVariant[]>();
+  for (let i = 0; i < parentIds.length; i += 150) {
+    const { data: vs, error: vErr } = await admin.from("skus_v2")
+      .select("parent_sku_id, code, color_th, color, is_active, cover_image_r2_key")
+      .in("parent_sku_id", parentIds.slice(i, i + 150)).order("code").limit(10000);
+    if (vErr) return NextResponse.json({ data: null, error: "โหลด SKU ย่อยไม่สำเร็จ: " + vErr.message }, { status: 500 });
+    for (const v of (vs ?? []) as VariantRow[]) {
+      const list = variantsByParent.get(v.parent_sku_id) ?? [];
+      list.push({ code: v.code ?? "", color: v.color_th || v.color || null, is_active: v.is_active !== false, image_key: v.cover_image_r2_key });
+      variantsByParent.set(v.parent_sku_id, list);
+    }
+  }
+
+  const items: MarketingSkuItem[] = rows.map((r) => ({
     id: r.id,
     parent_sku_id: r.parent_sku_id,
     code: r.parent?.code ?? "",
@@ -42,6 +60,7 @@ export async function GET(request: NextRequest) {
     label_id: r.label_id,
     note: r.note,
     is_active: r.parent?.is_active !== false,
+    variants: variantsByParent.get(r.parent_sku_id) ?? [],
     created_at: r.created_at,
     updated_at: r.updated_at,
   }));

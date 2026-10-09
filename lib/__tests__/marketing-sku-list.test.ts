@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cleanIds, cleanColor, countBy, isUuid } from "@/lib/marketing/sku-list";
+import { cleanIds, cleanColor, countBy, isUuid, variantSummary } from "@/lib/marketing/sku-list";
 
 const A = "fd8d1b12-51cb-489f-a37a-352fb87f1278";
 const B = "337b58c8-7952-47ab-a671-185224ea7e6f";
@@ -26,6 +26,12 @@ describe("marketing sku-list helpers", () => {
     expect(cleanColor("#abc")).toBe("#abc");
     expect(cleanColor("red")).toBe("#64748b");
     expect(cleanColor("url(javascript:1)")).toBe("#64748b");
+  });
+
+  it("variantSummary นับ SKU ย่อยที่ยังเปิดขาย / ทั้งหมด", () => {
+    const v = (is_active: boolean) => ({ code: "x", color: null, is_active, image_key: null });
+    expect(variantSummary([v(true), v(false), v(true)])).toEqual({ active: 2, total: 3 });
+    expect(variantSummary([])).toEqual({ active: 0, total: 0 });
   });
 
   it("countBy นับตามคีย์", () => {

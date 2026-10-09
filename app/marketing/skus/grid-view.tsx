@@ -11,6 +11,7 @@ import { SearchableSelect, type SelectOption } from "@/components/searchable-sel
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { MarketingBrand, MarketingSkuItem, MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { LabelBadge } from "./label-manager";
+import { VariantCount } from "./variant-count";
 
 export function MarketingSkuGrid({
   rows, cols, labels, labelMap, brandMap, showBrand, canManage, busy, labelOptions,
@@ -100,6 +101,7 @@ export function MarketingSkuGrid({
                         )}
                       </div>
                       <div className="line-clamp-2 min-h-[2rem] text-xs leading-4 text-slate-500" title={it.name}>{it.name}</div>
+                      <div><VariantCount variants={it.variants} compact /></div>
                       <div className="mt-auto">
                         {canManage ? (
                           <SearchableSelect value={it.label_id && labelMap.has(it.label_id) ? it.label_id : ""} options={labelOptions}
