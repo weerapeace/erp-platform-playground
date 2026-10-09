@@ -3,7 +3,7 @@
 /**
  * "SKU ที่เหลือ" ของรุ่น = สี/แบบที่ยังเหลือ / ทั้งหมด (ตัวเลขมากับรายการ — DB นับให้)
  *   ยังเหลือ = เปิดในระบบ (หน้า SKU) และทีมการตลาดไม่ได้ปิด
- *   กดแล้วเด้งรายการสี → สวิตช์ เปิด/ปิด ทีละสี "เฉพาะการตลาด" (สียังขาย/สั่งซื้อ/ผลิตได้ปกติ)
+ *   กดแล้วเด้งรายการสี → สวิตช์ เปิด/ปิด ทีละสี หรือปุ่ม เปิดทั้งหมด/ปิดทั้งหมด "เฉพาะการตลาด" (สียังขาย/สั่งซื้อ/ผลิตได้ปกติ)
  *   สีที่ปิดในระบบอยู่แล้ว = ล็อก (เปิดได้ที่หน้า SKU เท่านั้น)
  *   สีปุ่ม: ครบ = เทา · เหลือบางแบบ = เหลือง · ไม่เหลือเลย = แดง
  */
@@ -48,7 +48,7 @@ function VariantList({ parentId, canManage, onActiveChange }: {
   const toast = useToast();
   const [variants, setVariants] = useState<MarketingSkuVariant[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [saving, setSaving] = useState<string | null>(null);   // sku id ที่กำลังบันทึก
+  const [saving, setSaving] = useState<string | null>(null);   // sku id ที่กำลังบันทึก ("__all" = ทั้งรุ่น)
 
   useEffect(() => {
     let cancel = false;
@@ -77,13 +77,50 @@ function VariantList({ parentId, canManage, onActiveChange }: {
     }
   };
 
+  // เปิด/ปิด ทุกสีของรุ่น (ข้ามสีที่ 🔒 ปิดในระบบ)
+  const flipAll = async (open: boolean) => {
+    if (saving || !variants) return;
+    const before = variants;
+    setSaving("__all");
+    setVariants((list) => list && list.map((x) => (x.is_active ? { ...x, mk_off: !open } : x)));
+    try {
+      const r = await apiFetch("/api/marketing/skus/variants", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_id: parentId, all: true, open }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      setVariants(j.data.variants as MarketingSkuVariant[]);
+      onActiveChange?.(parentId, Number(j.data.summary?.active) || 0);
+    } catch (e) {
+      setVariants(before);
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(null);
+    }
+  };
+
   const left = variants ? variants.filter((v) => v.is_active && !v.mk_off).length : 0;
+  const toggleable = variants ? variants.filter((v) => v.is_active) : [];
+  const allOn = toggleable.length > 0 && toggleable.every((v) => !v.mk_off);
+  const allOff = toggleable.length > 0 && toggleable.every((v) => v.mk_off);
 
   return (
     <div onClick={(e) => e.stopPropagation()}>
-      <div className="mb-1.5 flex items-center justify-between px-1 text-xs">
-        <span className="font-semibold text-slate-700">สี/แบบของรุ่นนี้</span>
-        {variants && <span className="text-slate-400">เหลือ {left} จาก {variants.length}</span>}
+      <div className="sticky -top-2 z-10 -mx-2 -mt-2 mb-1.5 border-b border-slate-100 bg-white px-3 pb-2 pt-2">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-semibold text-slate-700">สี/แบบของรุ่นนี้</span>
+          {variants && <span className="text-slate-400">เหลือ {left} จาก {variants.length}</span>}
+        </div>
+        {canManage && toggleable.length > 1 && (
+          <div className="mt-1.5 flex gap-1.5">
+            <button type="button" onClick={() => void flipAll(true)} disabled={!!saving || allOn}
+              className="h-7 flex-1 rounded-md border border-emerald-200 bg-emerald-50 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">
+              {saving === "__all" ? "…" : "✓ เปิดทั้งหมด"}
+            </button>
+            <button type="button" onClick={() => void flipAll(false)} disabled={!!saving || allOff}
+              className="h-7 flex-1 rounded-md border border-slate-200 bg-white text-[11px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+              {saving === "__all" ? "…" : "✕ ปิดทั้งหมด"}
+            </button>
+          </div>
+        )}
       </div>
       {err ? <div className="px-1 py-3 text-center text-xs text-red-600">{err}</div>
         : !variants ? <div className="space-y-1">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-10 animate-pulse rounded-lg bg-slate-100" />)}</div>
