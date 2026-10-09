@@ -4,6 +4,7 @@
  *   - ค้นผ่าน /api/pickers/parent-skus (ของกลาง, เป๊ะ-first) · ไม่พิมพ์ก็ไล่ดูได้ทั้งหมด
  *   - แบ่งหน้าด้วย Pager ของกลาง → "ดูเพิ่ม" ได้ (เดิม picker เขียนเองตัดที่ 40 แล้วจบ)
  *   - ติ๊กข้ามหน้าได้ (จำที่เลือกไว้) · excludeCodes = ตัวที่มีอยู่แล้ว (ติ๊กไม่ได้)
+ *   - brandId (ไม่บังคับ) = โชว์เฉพาะรุ่นของแบรนด์นั้น · "none" = รุ่นที่ยังไม่มีแบรนด์
  */
 import { useCallback, useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -16,12 +17,13 @@ export type ParentSkuPick = { id: string; code: string; name: string; image_key?
 const PAGE = 24;
 const imgUrl = (key?: string | null) => (key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null);
 
-export function ParentSkuMultiPickerModal({ open, onClose, onConfirm, excludeCodes = [], title = "เลือก Parent SKU" }: {
+export function ParentSkuMultiPickerModal({ open, onClose, onConfirm, excludeCodes = [], title = "เลือก Parent SKU", brandId }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (items: ParentSkuPick[]) => void;
   excludeCodes?: string[];
   title?: string;
+  brandId?: string | null;
 }) {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<ParentSkuPick[]>([]);
@@ -35,12 +37,13 @@ export function ParentSkuMultiPickerModal({ open, onClose, onConfirm, excludeCod
     setLoading(true);
     try {
       const sp = new URLSearchParams({ search: term, limit: String(PAGE), offset: String(p * PAGE) });
+      if (brandId) sp.set("brand_id", brandId);
       const j = await apiFetch(`/api/pickers/parent-skus?${sp.toString()}`).then((r) => r.json());
       setRows((j.data ?? []) as ParentSkuPick[]);
       setTotal(Number(j.total ?? 0));
     } catch { setRows([]); setTotal(0); }
     finally { setLoading(false); }
-  }, []);
+  }, [brandId]);
 
   // พิมพ์ค้น → debounce แล้วตั้งคำค้นจริง + กลับหน้าแรกพร้อมกัน (batch เดียว ไม่ยิงซ้ำ)
   const [term, setTerm] = useState("");

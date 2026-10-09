@@ -52,6 +52,8 @@ export type MiniTableProps<T> = {
   groupBy?: (row: T) => string;
   groupLabel?: string;
   defaultGrouped?: boolean;
+  /** ลำดับกลุ่ม (ไม่ใส่ = เรียงตามชื่อ) — คืนเลขน้อยขึ้นก่อน เช่น ตามลำดับป้าย, "ไม่มีป้าย" ไว้ท้าย */
+  groupOrder?: (groupName: string) => number;
 
   // เลือกหลายแถว (controlled)
   selectable?: boolean;
@@ -86,7 +88,7 @@ type Dir = "asc" | "desc";
 export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder = "ค้นหา…", searchValue, onSearchChange,
-    groupBy, groupLabel = "จัดกลุ่ม", defaultGrouped = true,
+    groupBy, groupLabel = "จัดกลุ่ม", defaultGrouped = true, groupOrder,
     selectable, selected, onSelectedChange, onRowClick,
     title, actions, countUnit = "รายการ",
     emptyText = "ไม่มีข้อมูล", noMatchText,
@@ -158,8 +160,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     if (!groupBy || !grouped) return [{ name: "", rows: sorted }];
     const map = new Map<string, T[]>();
     for (const r of sorted) { const g = groupBy(r) || "ไม่ระบุ"; (map.get(g) ?? map.set(g, []).get(g)!).push(r); }
-    return [...map.entries()].map(([name, rs]) => ({ name, rows: rs })).sort((a, b) => a.name.localeCompare(b.name, "th"));
-  }, [sorted, groupBy, grouped]);
+    return [...map.entries()].map(([name, rs]) => ({ name, rows: rs }))
+      .sort((a, b) => (groupOrder ? groupOrder(a.name) - groupOrder(b.name) : 0) || a.name.localeCompare(b.name, "th"));
+  }, [sorted, groupBy, grouped, groupOrder]);
 
   // คลิกหัวคอลัมน์เพื่อเรียง (เฉพาะคอลัมน์ที่มี sortValue) — สลับ asc/desc
   const toggleSort = (key: string) => {

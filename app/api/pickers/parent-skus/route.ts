@@ -14,17 +14,25 @@ export async function GET(request: NextRequest) {
   const search = (searchParams.get("search") ?? "").trim();
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "24", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));   // แบ่งหน้า (ดูเพิ่มได้)
+  // กรองแบรนด์ (ไม่บังคับ): brand_id=<uuid> | brand_id=none (ยังไม่มีแบรนด์)
+  const brandParam = (searchParams.get("brand_id") ?? "").trim();
+  const brandFilter = brandParam === "none" ? "none" : /^[0-9a-f-]{36}$/i.test(brandParam) ? brandParam : null;
   const tokens = search ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6) : [];
   const searching = tokens.length > 0;
   const RANK_WINDOW = 500;   // ค้นหา: ดึงมาจัดอันดับก่อน (เป๊ะ-first) แล้วค่อยตัดหน้า
 
   const db = supabaseFromRequest(request);
-  const base = () => db.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key").eq("is_active", true);
+  const base = () => {
+    const q = db.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key").eq("is_active", true);
+    return brandFilter === "none" ? q.is("brand_id", null) : brandFilter ? q.eq("brand_id", brandFilter) : q;
+  };
   const toRow = (r: Row) => ({ id: r.id, code: r.code ?? "", name: r.name_th ?? r.code ?? "", image_key: r.cover_image_r2_key ?? null });
 
   if (!searching) {
     // ไม่ได้ค้น → เรียงตามรหัส + แบ่งหน้าที่ DB (มี total จริง)
     let q = db.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key", { count: "exact" }).eq("is_active", true);
+    if (brandFilter === "none") q = q.is("brand_id", null);
+    else if (brandFilter) q = q.eq("brand_id", brandFilter);
     q = q.order("code", { ascending: true }).range(offset, offset + limit - 1);
     const { data, count, error } = await q;
     if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
