@@ -1,11 +1,28 @@
 /**
- * ของกลาง — นิยาม "บล็อก" ของหน้าเว็บร้าน (เก็บที่ shops.home_layout / store_pages.layout)
+ * ของกลาง — นิยาม "บล็อก" (Section) ของหน้าเว็บร้าน (เก็บที่ shops.home_layout / store_pages.layout)
  *
- * โครงเดิมในระบบเป็น array ของ { type, ...props } อยู่แล้ว (ร้าน Pixiedustie ใช้ hero/product-grid)
- * ไฟล์นี้เพิ่มชนิดบล็อกสำหรับเว็บร้านวัสดุ โดย "ไม่แตะ" ชนิดเดิมของร้านอื่น
+ * ตั้งแต่เฟส Schema-Driven: ชนิดบล็อก ค่าเริ่มต้น การทำความสะอาดข้อมูล และการตรวจก่อนเผยแพร่
+ * ทั้งหมด "อ่านจาก lib/website-schema.ts" — ไฟล์นี้เหลือแค่ชนิดข้อมูล (TypeScript) + ตัวแปลงที่ใช้ schema
+ *
+ * โครงเดิมในระบบเป็น array ของ { type, ...props } (ร้าน Pixiedustie ใช้ hero/product-grid ชุดเก่า)
+ * บล็อกชนิดที่ schema ไม่รู้จักจะถูก "เก็บไว้ทั้งก้อนแบบไม่แตะ" เสมอ
  *
  * ใช้ที่: /api/website/layout · /api/website/pages · /api/public/storefront/* · UI ตัวจัดหน้า
  */
+import {
+  SECTION_SCHEMAS,
+  SECTION_TYPES,
+  blankChild,
+  defaultForType,
+  newChildId,
+  structuredCloneSafe,
+  type ChildSpec,
+  type FieldDef,
+  type SectionMeta,
+  type ValidationIssue,
+} from "@/lib/website-schema";
+
+export type { ValidationIssue };
 
 export type BlockType =
   | "announcement"
@@ -13,10 +30,15 @@ export type BlockType =
   | "two-tracks"
   | "categories"
   | "featured"
+  | "products"
   | "faq"
   | "cta"
   | "rich-text"
   | "image"
+  | "image-text"
+  | "multicolumn"
+  | "slideshow"
+  | "newsletter"
   | "gallery"
   | "button"
   | "divider"
@@ -48,6 +70,13 @@ export const BLOCK_WIDTHS: readonly BlockWidth[] = ["auto", "narrow", "full"];
 export const BLOCK_ALIGNS: readonly BlockAlign[] = ["auto", "left", "center", "right"];
 export const BLOCK_BGS: readonly BlockBg[] = ["auto", "page", "surface", "brand", "ink", "custom"];
 
+/** ค่าที่ตั้งทับเฉพาะมือถือ — "auto" = ใช้ค่าเดียวกับคอม */
+export interface BlockStyleMobile {
+  padTop: BlockSpacing;
+  padBottom: BlockSpacing;
+  align: BlockAlign;
+}
+
 /** หน้าตาของบล็อก — แยกจาก "เนื้อหา" ทุกชนิดบล็อกมีชุดนี้เหมือนกัน */
 export interface BlockStyle {
   padTop: BlockSpacing;
@@ -57,6 +86,8 @@ export interface BlockStyle {
   bgColor: string;
   width: BlockWidth;
   align: BlockAlign;
+  /** ตั้งทับเฉพาะจอมือถือ (< 768px) */
+  mobile: BlockStyleMobile;
 }
 
 export const DEFAULT_BLOCK_STYLE: BlockStyle = {
@@ -66,6 +97,7 @@ export const DEFAULT_BLOCK_STYLE: BlockStyle = {
   bgColor: "",
   width: "auto",
   align: "auto",
+  mobile: { padTop: "auto", padBottom: "auto", align: "auto" },
 };
 
 export interface BlockBase {
@@ -75,6 +107,13 @@ export interface BlockBase {
   enabled: boolean;
   visibility: Visibility;
   style: BlockStyle;
+}
+
+/** ชิ้นย่อย (Block ใน Section) — มีรหัส + เปิด/ปิด + ซ่อนตามจอ ได้เหมือนบล็อกระดับบน */
+export interface ChildBase {
+  id?: string;
+  enabled?: boolean;
+  visibility?: Visibility;
 }
 
 export interface CtaLink {
@@ -97,7 +136,7 @@ export interface HeroBlock extends BlockBase {
   subtitle: string;
   primary: CtaLink;
   secondary: CtaLink;
-  features: { title: string; desc: string }[];
+  features: (ChildBase & { title: string; desc: string })[];
   /** รูปพื้นหลัง (r2 key) — ว่าง = ใช้พื้นหลังไล่สีเดิม */
   imageKey: string | null;
   imageAlt: string;
@@ -111,7 +150,7 @@ export interface TwoTracksBlock extends BlockBase {
   eyebrow: string;
   title: string;
   subtitle: string;
-  cards: {
+  cards: (ChildBase & {
     emoji: string;
     title: string;
     desc: string;
@@ -119,7 +158,7 @@ export interface TwoTracksBlock extends BlockBase {
     primary: CtaLink;
     secondary: CtaLink;
     dark: boolean;
-  }[];
+  })[];
 }
 
 export interface CategoriesBlock extends BlockBase {
@@ -135,12 +174,27 @@ export interface FeaturedBlock extends BlockBase {
   limit: number;
 }
 
+/** ตารางสินค้า / คอลเลกชัน — เลือกเอง (codes) · ทั้งหมวด · ที่ติ๊กแนะนำ · ทั้งหมด */
+export interface ProductsBlock extends BlockBase {
+  type: "products";
+  eyebrow: string;
+  title: string;
+  source: "manual" | "category" | "featured" | "all";
+  /** รหัสรุ่น (parent code) ที่เลือกเอง */
+  codes: string[];
+  category: string;
+  limit: number;
+  layout: "grid" | "carousel";
+  columns: number;
+  more: CtaLink;
+}
+
 export interface FaqBlock extends BlockBase {
   type: "faq";
   eyebrow: string;
   title: string;
   subtitle: string;
-  items: { q: string; a: string }[];
+  items: (ChildBase & { q: string; a: string })[];
 }
 
 export interface CtaBlock extends BlockBase {
@@ -170,12 +224,59 @@ export interface ImageBlock extends BlockBase {
   href: string;
 }
 
+export interface ImageTextBlock extends BlockBase {
+  type: "image-text";
+  imageKey: string | null;
+  imageAlt: string;
+  eyebrow: string;
+  title: string;
+  body: string;
+  primary: CtaLink;
+  secondary: CtaLink;
+  imagePosition: "left" | "right";
+}
+
+export interface MulticolumnBlock extends BlockBase {
+  type: "multicolumn";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  columns: number;
+  cardStyle: "card" | "plain";
+  items: (ChildBase & { emoji: string; imageKey: string | null; title: string; text: string; link: CtaLink })[];
+}
+
+export interface SlideshowBlock extends BlockBase {
+  type: "slideshow";
+  autoplay: boolean;
+  interval: number;
+  height: "short" | "medium" | "tall";
+  slides: (ChildBase & {
+    imageKey: string | null;
+    alt: string;
+    eyebrow: string;
+    title: string;
+    subtitle: string;
+    link: CtaLink;
+    align: "left" | "center";
+    overlay: number;
+  })[];
+}
+
+export interface NewsletterBlock extends BlockBase {
+  type: "newsletter";
+  title: string;
+  subtitle: string;
+  buttonText: string;
+  successText: string;
+}
+
 export interface GalleryBlock extends BlockBase {
   type: "gallery";
   eyebrow: string;
   title: string;
   columns: number;
-  items: { imageKey: string | null; alt: string; caption: string }[];
+  items: (ChildBase & { imageKey: string | null; alt: string; caption: string })[];
 }
 
 /** ปุ่มเดี่ยว — วางคั่นระหว่างเนื้อหาได้ทุกจุด */
@@ -202,21 +303,19 @@ export interface VideoBlock extends BlockBase {
   caption: string;
 }
 
-/** ขั้นตอนการทำงาน — เหมาะกับงานรับผลิต (OEM) ที่ต้องอธิบายว่าสั่งแล้วเกิดอะไรขึ้นบ้าง */
 export interface StepsBlock extends BlockBase {
   type: "steps";
   eyebrow: string;
   title: string;
   subtitle: string;
-  items: { title: string; desc: string }[];
+  items: (ChildBase & { title: string; desc: string })[];
 }
 
-/** รีวิวลูกค้า */
 export interface ReviewsBlock extends BlockBase {
   type: "reviews";
   eyebrow: string;
   title: string;
-  items: { name: string; text: string; role: string }[];
+  items: (ChildBase & { name: string; text: string; role: string })[];
 }
 
 /** แผนที่ร้าน — รับเฉพาะลิงก์ฝังของ Google Maps */
@@ -233,10 +332,15 @@ export type Block =
   | TwoTracksBlock
   | CategoriesBlock
   | FeaturedBlock
+  | ProductsBlock
   | FaqBlock
   | CtaBlock
   | RichTextBlock
   | ImageBlock
+  | ImageTextBlock
+  | MulticolumnBlock
+  | SlideshowBlock
+  | NewsletterBlock
   | GalleryBlock
   | ButtonBlock
   | DividerBlock
@@ -245,27 +349,21 @@ export type Block =
   | ReviewsBlock
   | MapBlock;
 
-export const BLOCK_META: Record<BlockType, { label: string; icon: string; hint: string; group: string }> = {
-  announcement: { label: "แถบประกาศ", icon: "🎗️", hint: "ข้อความเลื่อนบนสุดของเว็บ", group: "พื้นฐาน" },
-  hero: { label: "แบนเนอร์หลัก (Hero)", icon: "🖼️", hint: "หัวเรื่องใหญ่ + รูปพื้นหลัง + ปุ่ม", group: "พื้นฐาน" },
-  "rich-text": { label: "ข้อความอิสระ", icon: "📝", hint: "หัวข้อ + ย่อหน้าอิสระ", group: "พื้นฐาน" },
-  image: { label: "รูปภาพ", icon: "🏞️", hint: "รูปเดี่ยว + คำบรรยาย", group: "พื้นฐาน" },
-  gallery: { label: "แกลเลอรีรูป", icon: "🖼️", hint: "หลายรูปเรียงเป็นตาราง", group: "พื้นฐาน" },
-  "two-tracks": { label: "สองบริการ", icon: "⚖️", hint: "การ์ดเปรียบเทียบ 2 บริการ", group: "เนื้อหา" },
-  categories: { label: "หมวดสินค้า", icon: "📂", hint: "ปุ่มลัดไปแต่ละหมวด", group: "สินค้า" },
-  featured: { label: "สินค้าแนะนำ", icon: "⭐", hint: "ดึงสินค้าที่ติ๊กแนะนำมาแสดง", group: "สินค้า" },
-  faq: { label: "คำถามที่พบบ่อย", icon: "❓", hint: "รายการถาม-ตอบแบบพับได้", group: "เนื้อหา" },
-  cta: { label: "แถบชวนติดต่อ", icon: "📣", hint: "กล่องสีเน้น + ปุ่ม", group: "เนื้อหา" },
-  button: { label: "ปุ่ม", icon: "🔘", hint: "ปุ่มเดี่ยว วางคั่นตรงไหนก็ได้", group: "พื้นฐาน" },
-  divider: { label: "เส้นคั่น / เว้นระยะ", icon: "➖", hint: "แบ่งช่วงเนื้อหาให้อ่านง่าย", group: "พื้นฐาน" },
-  video: { label: "วิดีโอ", icon: "🎬", hint: "ฝังคลิปจาก YouTube หรือ Vimeo", group: "พื้นฐาน" },
-  steps: { label: "ขั้นตอนการทำงาน", icon: "🪜", hint: "อธิบายเป็นสเต็ป 1-2-3 เหมาะกับงานรับผลิต", group: "เนื้อหา" },
-  reviews: { label: "รีวิวลูกค้า", icon: "💬", hint: "คำชมจากลูกค้าจริง สร้างความเชื่อมั่น", group: "เนื้อหา" },
-  map: { label: "แผนที่ร้าน", icon: "📍", hint: "ฝังแผนที่ Google Maps + ที่อยู่", group: "เนื้อหา" },
-};
+/** ชื่อ/ไอคอน/คำอธิบาย/กลุ่ม ของทุกชนิด — มาจาก schema */
+export const BLOCK_META: Record<BlockType, SectionMeta> = Object.fromEntries(
+  SECTION_TYPES.map((t) => [t, SECTION_SCHEMAS[t].meta])
+) as Record<BlockType, SectionMeta>;
 
 const uid = (t: string, n: number) => `${t}-${n}`;
 const ALL_VISIBLE: Visibility = { desktop: true, tablet: true, mobile: true };
+
+/* ─────────── ค่าเริ่มต้นจาก schema ─────────── */
+
+function defaultsFromFields(fields: FieldDef[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const fd of fields) out[fd.key] = structuredCloneSafe(fd.default ?? defaultForType(fd.type));
+  return out;
+}
 
 /**
  * บล็อกเปล่า — โรงงานผลิตบล็อกที่เดียวของทั้งระบบ (ทั้งฝั่งเซิร์ฟเวอร์และหน้าจอ)
@@ -277,123 +375,54 @@ const ALL_VISIBLE: Visibility = { desktop: true, tablet: true, mobile: true };
  *   true = เติมเลขสุ่มท้าย — ใช้ตอนผู้ใช้กดเพิ่มบล็อกเอง กันรหัสชนกับบล็อกที่มีอยู่
  */
 export function newBlock(type: BlockType, seq: number, opts?: { uniqueId?: boolean }): Block {
+  const schema = SECTION_SCHEMAS[type];
+  if (!schema) throw new Error(`ไม่รู้จักชนิดบล็อก "${type}"`);
   const id = opts?.uniqueId ? `${uid(type, seq)}-${Math.floor(Math.random() * 1000)}` : uid(type, seq);
-  const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE }, style: { ...DEFAULT_BLOCK_STYLE } };
-  switch (type) {
-    case "announcement":
-      return { ...base, type, messages: ["ข้อความประกาศของร้าน"] };
-    case "hero":
-      return {
-        ...base,
-        type,
-        eyebrow: "รับผลิตเครื่องหนัง & วัสดุงานหนัง",
-        title: "งานหนังคุณภาพ",
-        titleAccent: "ครบ จบ ที่เดียว",
-        subtitle: "รับผลิตกระเป๋าและเข็มขัดหนังแท้สำหรับแบรนด์ของคุณ พร้อมจำหน่ายวัสดุงานหนังครบวงจร",
-        primary: { text: "ขอใบเสนอราคา", href: "/quote" },
-        secondary: { text: "เข้าร้านวัสดุ", href: "/shop" },
-        features: [
-          { title: "หนังแท้", desc: "คัดเกรดทุกผืน" },
-          { title: "งานเย็บมือ", desc: "ประณีตทุกตะเข็บ" },
-        ],
-        imageKey: null,
-        imageAlt: "",
-        overlay: 45,
-        height: "auto",
-      };
-    case "two-tracks":
-      return {
-        ...base,
-        type,
-        eyebrow: "บริการของเรา",
-        title: "สองบริการหลัก",
-        subtitle: "",
-        cards: [
-          { emoji: "🏭", title: "รับผลิต (OEM)", desc: "", bullets: [], primary: { text: "ขอใบเสนอราคา", href: "/quote" }, secondary: { text: "ดูผลงาน", href: "/gallery" }, dark: true },
-          { emoji: "🛒", title: "ร้านวัสดุ", desc: "", bullets: [], primary: { text: "เข้าร้าน", href: "/shop" }, secondary: { text: "", href: "" }, dark: false },
-        ],
-      };
-    case "categories":
-      return { ...base, type, eyebrow: "ร้านวัสดุ", title: "เลือกซื้อตามหมวด" };
-    case "featured":
-      return { ...base, type, eyebrow: "ขายดี", title: "วัสดุแนะนำ", limit: 4 };
-    case "faq":
-      return { ...base, type, eyebrow: "คำถามที่พบบ่อย", title: "เรื่องที่ลูกค้าถามบ่อย", subtitle: "", items: [{ q: "คำถาม", a: "คำตอบ" }] };
-    case "cta":
-      return { ...base, type, title: "มีแบบในใจแล้ว?", subtitle: "", primary: { text: "ขอใบเสนอราคา", href: "/quote" }, secondary: { text: "ติดต่อเรา", href: "/contact" } };
-    case "rich-text":
-      return { ...base, type, eyebrow: "", title: "หัวข้อ", body: "เนื้อหา" };
-    case "button":
-      return { ...base, type, text: "ขอใบเสนอราคา", href: "/quote", variant: "brand" };
-    case "divider":
-      return { ...base, type, variant: "line" };
-    case "video":
-      return { ...base, type, url: "", title: "", caption: "" };
-    case "steps":
-      return {
-        ...base,
-        type,
-        eyebrow: "ขั้นตอนการทำงาน",
-        title: "สั่งผลิตกับเรา ทำงานยังไง",
-        subtitle: "",
-        items: [
-          { title: "คุยแบบ & ตีราคา", desc: "ส่งแบบหรือตัวอย่างมา เราประเมินราคาและระยะเวลาให้" },
-          { title: "ทำแพตเทิร์น & ตัวอย่าง", desc: "ขึ้นตัวอย่างให้ตรวจก่อนเดินสายผลิตจริง" },
-          { title: "ผลิต & ส่งมอบ", desc: "ผลิตตามจำนวนที่ตกลง ตรวจคุณภาพก่อนส่ง" },
-        ],
-      };
-    case "reviews":
-      return {
-        ...base,
-        type,
-        eyebrow: "ลูกค้าของเรา",
-        title: "เสียงจากลูกค้า",
-        items: [{ name: "", text: "", role: "" }],
-      };
-    case "map":
-      return { ...base, type, title: "แผนที่ร้าน", address: "", embedUrl: "" };
-    case "image":
-      return { ...base, type, imageKey: null, alt: "", caption: "", width: "wide", href: "" };
-    case "gallery":
-      return { ...base, type, eyebrow: "", title: "แกลเลอรี", columns: 3, items: [] };
+  const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE }, style: structuredCloneSafe(DEFAULT_BLOCK_STYLE) };
+  const body = defaultsFromFields(schema.fields);
+  if (schema.children) {
+    const n = schema.children.min ?? (schema.children.key === "features" ? 0 : 1);
+    body[schema.children.key] = Array.from({ length: n }, (_, i) => ({
+      id: opts?.uniqueId ? newChildId(schema.children!.key) : `${id}-${schema.children!.key}-${i + 1}`,
+      enabled: true,
+      ...blankChild(schema.children!),
+    }));
   }
+  return { ...base, ...body } as Block;
 }
 
-/** โครงหน้าแรกเริ่มต้น (ตรงกับหน้าเว็บปัจจุบัน) */
+/** โครงหน้าแรกเริ่มต้นสำหรับร้านที่ยังไม่เคยจัดหน้า */
 export function defaultLayout(): Block[] {
-  return [
-    newBlock("announcement", 1),
-    newBlock("hero", 2),
-    newBlock("two-tracks", 3),
-    newBlock("categories", 4),
-    newBlock("featured", 5),
-    newBlock("faq", 6),
-    newBlock("cta", 7),
-  ];
+  return [newBlock("announcement", 1), newBlock("hero", 2), newBlock("categories", 3), newBlock("featured", 4), newBlock("faq", 5), newBlock("cta", 6)];
 }
+
+/* ─────────── ทำความสะอาดข้อมูลตาม schema ─────────── */
 
 const R2_KEY = /^[a-zA-Z0-9._/-]+$/;
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
 const str = (v: unknown, fb = "", max = 2000) => (typeof v === "string" ? v.slice(0, max) : fb);
 const strArr = (v: unknown, max = 20) =>
-  Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, max).map((s) => (s as string).slice(0, 300)) : [];
+  Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, max).map((x) => (x as string).slice(0, 300)) : [];
 const imgKey = (v: unknown): string | null =>
   typeof v === "string" && v.trim() && R2_KEY.test(v.trim()) ? v.trim().slice(0, 300) : null;
 const num = (v: unknown, fb: number, min: number, max: number) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fb;
 };
-const link = (v: unknown, fbText = "", fbHref = "/"): CtaLink => {
+const linkVal = (v: unknown, fb: CtaLink): CtaLink => {
   const o = (v ?? {}) as Record<string, unknown>;
-  return { text: str(o.text, fbText, 60), href: str(o.href, fbHref, 200) };
+  return { text: str(o.text, fb.text, 60), href: str(o.href, fb.href, 200) };
 };
 const vis = (v: unknown): Visibility => {
   const o = (v ?? {}) as Record<string, unknown>;
   return { desktop: o.desktop !== false, tablet: o.tablet !== false, mobile: o.mobile !== false };
 };
+const pickOne = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T =>
+  typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb;
 
 /** โฮสต์วิดีโอที่ยอมให้ฝัง — กันใส่ลิงก์มั่วแล้วโดนยัดสคริปต์เข้าเว็บ */
 const VIDEO_HOSTS = ["youtube.com", "www.youtube.com", "youtu.be", "vimeo.com", "player.vimeo.com"];
-const videoUrl = (v: unknown): string => {
+export const videoUrl = (v: unknown): string => {
   const raw = String(v ?? "").trim().slice(0, 300);
   if (!raw) return "";
   try {
@@ -406,7 +435,7 @@ const videoUrl = (v: unknown): string => {
 };
 
 /** ลิงก์ฝังแผนที่ — รับเฉพาะของ Google Maps ที่เป็น /maps/embed (ลิงก์อื่นยัดอะไรเข้าเว็บก็ได้) */
-const mapUrl = (v: unknown): string => {
+export const mapUrl = (v: unknown): string => {
   const raw = String(v ?? "").trim().slice(0, 600);
   if (!raw) return "";
   try {
@@ -418,16 +447,68 @@ const mapUrl = (v: unknown): string => {
   }
 };
 
-const HEX6 = /^#[0-9a-fA-F]{6}$/;
-const pickOne = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T =>
-  typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb;
+/** รหัสหมวด/รหัสสินค้า — ตัวอักษร ตัวเลข ขีด จุด เท่านั้น */
+const codeStr = (v: unknown, max = 60) => String(v ?? "").trim().replace(/[^A-Za-z0-9._-]/g, "").slice(0, max);
+
+/** ทำความสะอาดค่า 1 ช่องตามชนิดใน schema */
+export function sanitizeField(fd: FieldDef, v: unknown): unknown {
+  const fb = fd.default ?? defaultForType(fd.type);
+  switch (fd.type) {
+    case "text":
+    case "emoji":
+      return str(v, fb as string, fd.max ?? (fd.type === "emoji" ? 4 : 160));
+    case "textarea":
+      return str(v, fb as string, fd.max ?? 600);
+    case "href":
+      return str(v, fb as string, 200);
+    case "number":
+    case "range":
+      return num(v, fb as number, fd.min ?? 0, fd.numMax ?? 999999);
+    case "select":
+      return pickOne(v, (fd.options ?? []).map((o) => o.v), fb as string);
+    case "toggle":
+      return typeof v === "boolean" ? v : Boolean(fb);
+    case "image":
+      return imgKey(v);
+    case "link":
+      return linkVal(v, fb as CtaLink);
+    case "color":
+      return typeof v === "string" && HEX6.test(v.trim()) ? v.trim().toLowerCase() : "";
+    case "list":
+      return strArr(v, fd.max ?? 20);
+    case "video":
+      return videoUrl(v);
+    case "map":
+      return mapUrl(v);
+    case "products":
+      return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
+    case "category":
+      return codeStr(v, 40).toLowerCase();
+  }
+}
+
+/** ชิ้นย่อยใน Section — เติม id/enabled ให้ครบ (ข้อมูลเก่าที่ไม่มี id จะได้รหัสนิ่งจากลำดับ) */
+function sanitizeChildren(spec: ChildSpec, raw: unknown, parentId: string): Record<string, unknown>[] {
+  const list = Array.isArray(raw) ? (raw as unknown[]) : [];
+  return list.slice(0, spec.max).map((item, i) => {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const out: Record<string, unknown> = {
+      id: str(o.id, "", 80) || `${parentId}-${spec.key}-${i + 1}`,
+      enabled: o.enabled !== false,
+    };
+    if (o.visibility && typeof o.visibility === "object") out.visibility = vis(o.visibility);
+    for (const fd of spec.fields) out[fd.key] = sanitizeField(fd, o[fd.key]);
+    return out;
+  });
+}
 
 /** หน้าตาของบล็อก — บล็อกเก่าที่ยังไม่มี style จะได้ค่าเริ่มต้นเสมอ (เว็บแสดงผลเหมือนเดิม) */
-const sty = (v: unknown): BlockStyle => {
+export function sanitizeStyle(v: unknown): BlockStyle {
   const o = (v ?? {}) as Record<string, unknown>;
   const d = DEFAULT_BLOCK_STYLE;
   const bgColor = typeof o.bgColor === "string" && HEX6.test(o.bgColor.trim()) ? o.bgColor.trim().toLowerCase() : "";
   const bg = pickOne(o.bg, BLOCK_BGS, d.bg);
+  const m = (o.mobile ?? {}) as Record<string, unknown>;
   return {
     padTop: pickOne(o.padTop, BLOCK_SPACINGS, d.padTop),
     padBottom: pickOne(o.padBottom, BLOCK_SPACINGS, d.padBottom),
@@ -436,12 +517,17 @@ const sty = (v: unknown): BlockStyle => {
     bgColor,
     width: pickOne(o.width, BLOCK_WIDTHS, d.width),
     align: pickOne(o.align, BLOCK_ALIGNS, d.align),
+    mobile: {
+      padTop: pickOne(m.padTop, BLOCK_SPACINGS, "auto"),
+      padBottom: pickOne(m.padBottom, BLOCK_SPACINGS, "auto"),
+      align: pickOne(m.align, BLOCK_ALIGNS, "auto"),
+    },
   };
-};
+}
 
 /**
- * ทำให้ข้อมูลที่มาจาก DB/ฟอร์มปลอดภัยและครบเสมอ
- * บล็อกชนิดที่ไม่รู้จัก (เช่นของร้านอื่น) จะถูกข้ามไป ไม่แก้ไข
+ * ทำให้ข้อมูลที่มาจาก DB/ฟอร์มปลอดภัยและครบเสมอ (อ่านกติกาจาก schema)
+ * บล็อกชนิดที่ไม่รู้จัก (เช่นของร้านอื่น) จะถูกเก็บไว้ทั้งก้อน ไม่แก้ไข
  */
 export function normalizeBlocks(raw: unknown): Block[] {
   if (!Array.isArray(raw)) return [];
@@ -450,7 +536,8 @@ export function normalizeBlocks(raw: unknown): Block[] {
   raw.slice(0, 60).forEach((item, i) => {
     const b = (item ?? {}) as Record<string, unknown>;
     const type = str(b.type) as BlockType;
-    if (!BLOCK_META[type]) {
+    const schema = SECTION_SCHEMAS[type];
+    if (!schema) {
       // ชนิดที่ระบบนี้ไม่รู้จัก = ของร้านที่ใช้ระบบเดิม (เช่น Pixiedustie ใช้ "product-grid")
       // ⚠️ ต้องเก็บไว้ทั้งก้อนแบบไม่แตะ — เดิมทิ้งทันที ทำให้กด "เผยแพร่" ครั้งเดียว
       // บล็อกของร้านนั้นหายจากเว็บจริง (ตัวจัดหน้าจะโชว์เป็น 🧩 แก้ไม่ได้ แต่ไม่หาย)
@@ -458,165 +545,17 @@ export function normalizeBlocks(raw: unknown): Block[] {
       return;
     }
 
-    const base = {
-      id: str(b.id, uid(type, i + 1), 60),
+    const id = str(b.id, uid(type, i + 1), 60);
+    const block: Record<string, unknown> = {
+      id,
       type,
       enabled: b.enabled !== false,
       visibility: vis(b.visibility),
-      style: sty(b.style),
+      style: sanitizeStyle(b.style),
     };
-
-    switch (type) {
-      case "announcement":
-        out.push({ ...base, type, messages: strArr(b.messages, 10) });
-        break;
-      case "hero":
-        out.push({
-          ...base,
-          type,
-          eyebrow: str(b.eyebrow, "", 120),
-          title: str(b.title, "", 120),
-          titleAccent: str(b.titleAccent, "", 120),
-          subtitle: str(b.subtitle, "", 600),
-          primary: link(b.primary, "ขอใบเสนอราคา", "/quote"),
-          secondary: link(b.secondary, "เข้าร้านวัสดุ", "/shop"),
-          features: Array.isArray(b.features)
-            ? (b.features as Record<string, unknown>[]).slice(0, 6).map((f) => ({ title: str(f?.title, "", 60), desc: str(f?.desc, "", 120) }))
-            : [],
-          imageKey: imgKey(b.imageKey),
-          imageAlt: str(b.imageAlt, "", 200),
-          overlay: num(b.overlay, 45, 0, 90),
-          height: (["auto", "tall", "full"] as const).includes(b.height as HeroHeight) ? (b.height as HeroHeight) : "auto",
-        });
-        break;
-      case "two-tracks":
-        out.push({
-          ...base,
-          type,
-          eyebrow: str(b.eyebrow, "", 120),
-          title: str(b.title, "", 120),
-          subtitle: str(b.subtitle, "", 400),
-          cards: Array.isArray(b.cards)
-            ? (b.cards as Record<string, unknown>[]).slice(0, 2).map((c) => ({
-                emoji: str(c?.emoji, "📦", 4),
-                title: str(c?.title, "", 80),
-                desc: str(c?.desc, "", 400),
-                bullets: strArr(c?.bullets, 8),
-                primary: link(c?.primary),
-                secondary: link(c?.secondary),
-                dark: Boolean(c?.dark),
-              }))
-            : [],
-        });
-        break;
-      case "categories":
-        out.push({ ...base, type, eyebrow: str(b.eyebrow, "", 120), title: str(b.title, "", 120) });
-        break;
-      case "featured":
-        out.push({ ...base, type, eyebrow: str(b.eyebrow, "", 120), title: str(b.title, "", 120), limit: num(b.limit, 4, 2, 12) });
-        break;
-      case "faq":
-        out.push({
-          ...base,
-          type,
-          eyebrow: str(b.eyebrow, "", 120),
-          title: str(b.title, "", 120),
-          subtitle: str(b.subtitle, "", 400),
-          items: Array.isArray(b.items)
-            ? (b.items as Record<string, unknown>[]).slice(0, 20).map((it) => ({ q: str(it?.q, "", 200), a: str(it?.a, "", 1500) })).filter((it) => it.q)
-            : [],
-        });
-        break;
-      case "cta":
-        out.push({
-          ...base,
-          type,
-          title: str(b.title, "", 160),
-          subtitle: str(b.subtitle, "", 400),
-          primary: link(b.primary),
-          secondary: link(b.secondary),
-        });
-        break;
-      case "rich-text":
-        out.push({ ...base, type, eyebrow: str(b.eyebrow, "", 120), title: str(b.title, "", 160), body: str(b.body, "", 3000) });
-        break;
-      case "button":
-        out.push({
-          ...base,
-          type,
-          text: str(b.text, "", 60),
-          href: str(b.href, "", 200),
-          variant: pickOne(b.variant, ["brand", "outline"] as const, "brand"),
-        });
-        break;
-      case "divider":
-        out.push({ ...base, type, variant: pickOne(b.variant, ["line", "dots", "space"] as const, "line") });
-        break;
-      case "video":
-        out.push({ ...base, type, url: videoUrl(b.url), title: str(b.title, "", 160), caption: str(b.caption, "", 300) });
-        break;
-      case "steps":
-        out.push({
-          ...base,
-          type,
-          eyebrow: str(b.eyebrow, "", 120),
-          title: str(b.title, "", 160),
-          subtitle: str(b.subtitle, "", 300),
-          items: (Array.isArray(b.items) ? b.items : []).slice(0, 12).map((it) => {
-            const o = (it ?? {}) as Record<string, unknown>;
-            return { title: str(o.title, "", 120), desc: str(o.desc, "", 400) };
-          }),
-        });
-        break;
-      case "reviews":
-        out.push({
-          ...base,
-          type,
-          eyebrow: str(b.eyebrow, "", 120),
-          title: str(b.title, "", 160),
-          items: (Array.isArray(b.items) ? b.items : []).slice(0, 12).map((it) => {
-            const o = (it ?? {}) as Record<string, unknown>;
-            return { name: str(o.name, "", 80), text: str(o.text, "", 600), role: str(o.role, "", 80) };
-          }),
-        });
-        break;
-      case "map":
-        out.push({
-          ...base,
-          type,
-          title: str(b.title, "", 160),
-          address: str(b.address, "", 300),
-          embedUrl: mapUrl(b.embedUrl),
-        });
-        break;
-      case "image":
-        out.push({
-          ...base,
-          type,
-          imageKey: imgKey(b.imageKey),
-          alt: str(b.alt, "", 200),
-          caption: str(b.caption, "", 300),
-          width: (["full", "wide", "narrow"] as const).includes(b.width as ImageWidth) ? (b.width as ImageWidth) : "wide",
-          href: str(b.href, "", 200),
-        });
-        break;
-      case "gallery":
-        out.push({
-          ...base,
-          type,
-          eyebrow: str(b.eyebrow, "", 120),
-          title: str(b.title, "", 160),
-          columns: num(b.columns, 3, 2, 4),
-          items: Array.isArray(b.items)
-            ? (b.items as Record<string, unknown>[]).slice(0, 24).map((it) => ({
-                imageKey: imgKey(it?.imageKey),
-                alt: str(it?.alt, "", 200),
-                caption: str(it?.caption, "", 200),
-              }))
-            : [],
-        });
-        break;
-    }
+    for (const fd of schema.fields) block[fd.key] = sanitizeField(fd, b[fd.key]);
+    if (schema.children) block[schema.children.key] = sanitizeChildren(schema.children, b[schema.children.key], id);
+    out.push(block as unknown as Block);
   });
 
   return out;
@@ -624,11 +563,12 @@ export function normalizeBlocks(raw: unknown): Block[] {
 
 /* ─────────── ตรวจก่อนเผยแพร่ ─────────── */
 
-export interface ValidationIssue {
-  blockId: string | null;
-  level: "error" | "warning";
-  message: string;
-}
+const isEmptyValue = (fd: FieldDef, v: unknown): boolean => {
+  if (fd.type === "list" || fd.type === "products") return !Array.isArray(v) || !v.filter((x) => (typeof x === "string" ? x.trim() : x)).length;
+  if (fd.type === "image") return !v;
+  if (fd.type === "link") return !String((v as CtaLink | undefined)?.text ?? "").trim();
+  return !String(v ?? "").trim();
+};
 
 /** ตรวจปัญหาที่พบบ่อยก่อนเผยแพร่ (ไม่บังคับ — แค่เตือน) */
 export function validateBlocks(blocks: Block[]): ValidationIssue[] {
@@ -642,71 +582,37 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
   if (heroes.length > 1) issues.push({ blockId: null, level: "warning", message: `มีแบนเนอร์หลัก ${heroes.length} อัน — ควรมีอันเดียวเพื่อ SEO` });
 
   for (const b of active) {
-    // บล็อกชนิดที่ไม่รู้จัก (ของร้านระบบเดิม) ไม่มีใน BLOCK_META — ข้ามไป อย่าตรวจ อย่าพัง
-    if (!BLOCK_META[b.type]) continue;
-    const label = BLOCK_META[b.type].label;
+    const schema = SECTION_SCHEMAS[b.type];
+    // บล็อกชนิดที่ไม่รู้จัก (ของร้านระบบเดิม) ไม่มี schema — ข้ามไป อย่าตรวจ อย่าพัง
+    if (!schema) continue;
+    const label = schema.meta.label;
+    const rec = b as unknown as Record<string, unknown>;
 
     const v = b.visibility;
     if (v && !v.desktop && !v.tablet && !v.mobile)
       issues.push({ blockId: b.id, level: "warning", message: `${label}: ซ่อนทุกอุปกรณ์ — จะไม่แสดงที่ไหนเลย` });
 
-    if (b.type === "hero") {
-      if (!b.title.trim()) issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่ได้ใส่หัวเรื่อง` });
-      if (b.imageKey && !b.imageAlt.trim())
-        issues.push({ blockId: b.id, level: "warning", message: `${label}: รูปพื้นหลังยังไม่มีคำบรรยาย (Alt) — มีผลกับ SEO` });
-      if (b.primary.text.trim() && !b.primary.href.trim())
-        issues.push({ blockId: b.id, level: "error", message: `${label}: ปุ่มหลักยังไม่มีลิงก์` });
+    // ช่องที่ schema บอกว่าต้องกรอก (ข้ามช่องที่ซ่อนอยู่เพราะ showIf ไม่ตรง)
+    for (const fd of schema.fields) {
+      if (!fd.required) continue;
+      if (fd.showIf && rec[fd.showIf.key] !== fd.showIf.eq) continue;
+      if (isEmptyValue(fd, rec[fd.key]))
+        issues.push({ blockId: b.id, level: "error", message: `${label}: ${fd.requiredMessage ?? `ยังไม่ได้กรอก "${fd.label}"`}` });
     }
 
-    if (b.type === "image") {
-      if (!b.imageKey) issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่ได้เลือกรูป` });
-      else if (!b.alt.trim()) issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่มีคำบรรยายรูป (Alt)` });
-    }
-
-    if (b.type === "gallery") {
-      const withImg = b.items.filter((i) => i.imageKey);
-      if (!withImg.length) issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่มีรูปในแกลเลอรี` });
-      else if (withImg.some((i) => !i.alt.trim()))
-        issues.push({ blockId: b.id, level: "warning", message: `${label}: บางรูปยังไม่มีคำบรรยาย (Alt)` });
-    }
-
-    if (b.type === "announcement" && !b.messages.filter((m) => m.trim()).length)
-      issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่มีข้อความ` });
-
-    if (b.type === "faq" && !b.items.length)
-      issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่มีคำถาม` });
-
-    if (b.type === "cta") {
-      if (b.primary.text.trim() && !b.primary.href.trim())
-        issues.push({ blockId: b.id, level: "error", message: `${label}: ปุ่มหลักยังไม่มีลิงก์` });
-      if (!b.title.trim()) issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่มีหัวข้อ` });
-    }
-
-    if (b.type === "rich-text" && !b.title.trim() && !b.body.trim())
-      issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่มีเนื้อหา` });
-
-    if (b.type === "button") {
-      if (!b.text.trim()) issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่ได้ใส่ข้อความบนปุ่ม` });
-      if (!b.href.trim()) issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่ได้ใส่ลิงก์ปลายทาง` });
-    }
-
-    // url ว่างแปลว่ากรอกลิงก์ที่ไม่ใช่ YouTube/Vimeo แล้วโดนปัดตก — ต้องบอก ไม่งั้นงงว่าทำไมไม่ขึ้น
-    if (b.type === "video" && !b.url)
-      issues.push({ blockId: b.id, level: "error", message: `${label}: ยังไม่มีลิงก์คลิป (รับเฉพาะ YouTube และ Vimeo)` });
-
-    if (b.type === "map" && !b.embedUrl)
-      issues.push({
-        blockId: b.id,
-        level: "error",
-        message: `${label}: ยังไม่มีลิงก์แผนที่ — ใน Google Maps กด "แชร์" → "ฝังแผนที่" แล้วเอาลิงก์ใน src มาวาง`,
-      });
-
-    if (b.type === "steps" && !b.items.some((i) => i.title.trim()))
-      issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่ได้ใส่ขั้นตอน` });
-
-    if (b.type === "reviews" && !b.items.some((i) => i.text.trim()))
-      issues.push({ blockId: b.id, level: "warning", message: `${label}: ยังไม่ได้ใส่รีวิว` });
+    for (const extra of schema.validate?.(rec, label) ?? []) issues.push({ blockId: b.id, ...extra });
   }
 
   return issues;
+}
+
+/** ข้อความสรุปของบล็อก (ใช้ในต้นไม้ด้านซ้ายของตัวจัดหน้า) */
+export function blockSummary(b: Record<string, unknown>): string {
+  const schema = SECTION_SCHEMAS[String(b.type)];
+  if (!schema) return String(b.title ?? "") || "บล็อกของระบบเดิม";
+  try {
+    return schema.summary(b) || "—";
+  } catch {
+    return "—";
+  }
 }

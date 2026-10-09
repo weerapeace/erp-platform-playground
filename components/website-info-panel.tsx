@@ -8,6 +8,7 @@
  * ข้อมูล: /api/website/settings (guardApi + audit)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { MiniTable } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 
@@ -118,6 +119,8 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
         </div>
       </div>
 
+      <SubscribersCard shopSlug={shopSlug} />
+
       <div className="grid gap-4 lg:grid-cols-2">
         {groups.map((g) => {
           const list = fields.filter((f) => f.group === g.key);
@@ -189,5 +192,94 @@ function Field({
       )}
       {f.hint && <p className="text-[11px] text-slate-400 mt-1">{f.hint}</p>}
     </div>
+  );
+}
+
+type Subscriber = { id: string; email: string; source: string; created_at: string };
+
+/** รายชื่อสมัครรับข่าวสาร (จากบล็อก "สมัครรับข่าวสาร" บนเว็บ) — ดู/ลบ/ก๊อปอีเมล */
+function SubscribersCard({ shopSlug }: { shopSlug: string }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<Subscriber[]>([]);
+  const [total, setTotal] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await apiFetch(`/api/website/subscribers?shop=${encodeURIComponent(shopSlug)}`);
+      const j = await r.json();
+      setRows(j.subscribers ?? []);
+      setTotal(j.total ?? 0);
+      setNote(j.error ?? null);
+    } catch {
+      setNote("โหลดรายชื่อไม่สำเร็จ");
+    }
+  }, [shopSlug]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const remove = async (s: Subscriber) => {
+    if (!confirm(`ลบ ${s.email} ออกจากรายชื่อรับข่าวสาร?`)) return;
+    const r = await apiFetch(`/api/website/subscribers?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
+    const j = await r.json();
+    if (!j.ok) return toast.error(j.error ?? "ลบไม่สำเร็จ");
+    toast.success("ลบแล้ว");
+    void load();
+  };
+
+  const copyAll = async () => {
+    try {
+      await navigator.clipboard.writeText(rows.map((r) => r.email).join("
+"));
+      toast.success(`คัดลอก ${rows.length} อีเมลแล้ว`);
+    } catch {
+      toast.error("คัดลอกไม่สำเร็จ");
+    }
+  };
+
+  return (
+    <section className={cardCls}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold text-slate-800">📬 รายชื่อรับข่าวสาร</h3>
+        <span className="text-xs text-slate-500">{total} รายชื่อ (จากบล็อก &quot;สมัครรับข่าวสาร&quot; บนเว็บ)</span>
+        <div className="ml-auto flex gap-2">
+          {rows.length > 0 && (
+            <button onClick={copyAll} className="px-3 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">คัดลอกอีเมลทั้งหมด</button>
+          )}
+          <button onClick={() => setOpen((v) => !v)} className="px-3 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
+            {open ? "ซ่อน" : "ดูรายชื่อ"}
+          </button>
+        </div>
+      </div>
+      {note && <p className="text-[11px] text-amber-600 mt-1">{note}</p>}
+      {open && (
+        <div className="mt-3">
+          <MiniTable<Subscriber>
+            rows={rows}
+            rowKey={(r) => r.id}
+            dense
+            countUnit="รายชื่อ"
+            emptyText="ยังไม่มีใครสมัคร — เพิ่มบล็อก 'สมัครรับข่าวสาร' ในหน้าแรกได้ที่แท็บหน้าแรก"
+            searchText={(r) => r.email}
+            maxHeightClass="max-h-80"
+            columns={[
+              { key: "email", header: "อีเมล", width: "1fr", cell: (r) => <span className="text-sm">{r.email}</span>, sortValue: (r) => r.email },
+              { key: "src", header: "ที่มา", width: "6rem", cell: (r) => <span className="text-xs text-slate-500">{r.source}</span> },
+              {
+                key: "at",
+                header: "สมัครเมื่อ",
+                width: "9rem",
+                cell: (r) => <span className="text-xs text-slate-500">{new Date(r.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>,
+                sortValue: (r) => r.created_at,
+              },
+              { key: "del", header: "", width: "3rem", cell: (r) => <button onClick={() => void remove(r)} className="text-xs text-red-500 hover:underline">ลบ</button> },
+            ]}
+          />
+        </div>
+      )}
+    </section>
   );
 }

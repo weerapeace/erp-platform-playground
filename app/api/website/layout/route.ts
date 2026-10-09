@@ -16,6 +16,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeBlocks, defaultLayout, BLOCK_META } from "@/lib/website-blocks";
+import { normalizeFieldMap } from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, home_layout, home_layout_draft")
+    .select("id, name, slug, home_layout, home_layout_draft, field_map")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     slug: string;
     home_layout: unknown;
     home_layout_draft: unknown;
+    field_map?: unknown;
   };
 
   const { data: dom } = await sb.from("shop_domains").select("domain").eq("shop_id", s.id).limit(1).maybeSingle();
@@ -57,6 +59,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     draft: hasDraft ? normalizeBlocks(s.home_layout_draft) : null,
     hasDraft,
     blockTypes: Object.entries(BLOCK_META).map(([type, m]) => ({ type, ...m })),
+    /** หมวดสินค้าบนเว็บของร้าน — ช่อง "หมวด" ในบล็อกสินค้าใช้เลือก */
+    categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label })),
   });
 }
 

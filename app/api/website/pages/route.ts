@@ -16,6 +16,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeBlocks, BLOCK_META } from "@/lib/website-blocks";
+import { normalizeFieldMap } from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -49,9 +50,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const pageId = (url.searchParams.get("pageId") ?? "").trim();
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, name, slug").eq("slug", shopSlug).maybeSingle();
+  const { data: shop } = await sb.from("shops").select("id, name, slug, field_map").eq("slug", shopSlug).maybeSingle();
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
-  const s = shop as { id: string; name: string; slug: string };
+  const s = shop as { id: string; name: string; slug: string; field_map?: unknown };
+  const categories = normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label }));
 
   const { data: dom } = await sb.from("shop_domains").select("domain").eq("shop_id", s.id).limit(1).maybeSingle();
   const rawDomain = (dom as { domain: string } | null)?.domain ?? null;
@@ -82,6 +84,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         updatedAt: row.updated_at,
       },
       blockTypes: Object.entries(BLOCK_META).map(([type, m]) => ({ type, ...m })),
+      categories,
     });
   }
 

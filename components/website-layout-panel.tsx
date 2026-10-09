@@ -3,26 +3,17 @@
 /**
  * WebsiteLayoutPanel — แท็บ "🧱 หน้าแรก" ในหน้า /website/<slug>
  *
- * จัดโครงหน้าแรกเป็นบล็อก: เพิ่ม/ลบ/ทำสำเนา/ลากเรียง/เปิด-ปิด/ซ่อนตามอุปกรณ์
- * พรีวิว = เว็บจริง (iframe) — คลิกบล็อกในพรีวิวแล้วเปิดฟอร์มทางซ้ายได้
- * ปลอดภัย: บันทึกร่างอัตโนมัติ · ประวัติเวอร์ชัน · ตรวจก่อนเผยแพร่
+ * ตัวจัดหน้า 3 แผง (components/website-builder.tsx): โครงหน้า · พรีวิวเว็บจริง · คุณสมบัติจาก Schema
+ * ไฟล์นี้ดูแล "ข้อมูล": โหลด/บันทึกร่างอัตโนมัติ/เผยแพร่/ละทิ้ง/ประวัติเวอร์ชัน/undo-redo/ตรวจก่อนเผยแพร่
  *
  * ข้อมูล: /api/website/layout · /api/website/layout/versions
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { BlockListEditor, type Block, type BlockTypeInfo } from "@/components/website-block-editor";
+import { WebsiteBuilder, type Selection } from "@/components/website-builder";
+import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
-
-type Device = "desktop" | "tablet" | "mobile";
-type Zoom = "fit" | 0.5 | 0.75 | 1;
-
-const DEVICES: { k: Device; w: number; h: number; icon: string; label: string }[] = [
-  { k: "desktop", w: 1440, h: 900, icon: "🖥️", label: "คอมพิวเตอร์" },
-  { k: "tablet", w: 768, h: 1024, icon: "📱", label: "แท็บเล็ต" },
-  { k: "mobile", w: 390, h: 844, icon: "📲", label: "มือถือ" },
-];
 
 const AUTOSAVE_MS = 20000;
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -34,21 +25,18 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [published, setPublished] = useState<Block[]>([]);
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
+  const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
   const [neverSet, setNeverSet] = useState(false);
   const [hadDraft, setHadDraft] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
-  const [device, setDevice] = useState<Device>("desktop");
-  const [zoom, setZoom] = useState<Zoom>("fit");
-  const [fullscreen, setFullscreen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [showIssues, setShowIssues] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; actor: string | null; blocks: number }[]>([]);
 
-  // auto-save
   const [autoSave, setAutoSave] = useState(true);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
@@ -57,8 +45,6 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const redoStack = useRef<Block[][]>([]);
   const [, tick] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const previewBoxRef = useRef<HTMLDivElement>(null);
-  const [boxW, setBoxW] = useState(420);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,6 +58,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       setBlocks(j.draft ?? j.published ?? []);
       setPublished(j.published ?? []);
       setTypes(j.blockTypes ?? []);
+      setCategories(j.categories ?? []);
       setSiteUrl(j.shop?.siteUrl ?? null);
       setNeverSet(Boolean(j.neverSet));
       setHadDraft(Boolean(j.hasDraft));
@@ -87,16 +74,6 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   useEffect(() => {
     void load();
   }, [load]);
-
-  // วัดความกว้างกล่องพรีวิวเพื่อคำนวณ "พอดีจอ"
-  useEffect(() => {
-    const el = previewBoxRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setBoxW(el.clientWidth));
-    ro.observe(el);
-    setBoxW(el.clientWidth);
-    return () => ro.disconnect();
-  }, [fullscreen, loading]);
 
   const apply = useCallback((next: Block[]) => {
     setBlocks((prev) => {
@@ -129,17 +106,16 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && fullscreen) setFullscreen(false);
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
       const el = e.target as HTMLElement;
-      if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return;
+      if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable) return;
       e.preventDefault();
       if (e.shiftKey) redo();
       else undo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, fullscreen]);
+  }, [undo, redo]);
 
   const isDirty = !eq(blocks, published) || hadDraft;
   const issues: ValidationIssue[] = useMemo(() => validateBlocks(blocks as never), [blocks]);
@@ -180,7 +156,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
     [blocks, shopId, toast]
   );
 
-  // บันทึกร่างอัตโนมัติเมื่อมีการเปลี่ยนแปลง
+  // บันทึกร่างอัตโนมัติเมื่อมีการเปลี่ยนแปลง (กันข้อมูลหายระหว่างแก้)
   useEffect(() => {
     if (!autoSave || loading || !blocks.length) return;
     if (eq(blocks, published) && !hadDraft) return;
@@ -205,6 +181,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
         return;
       }
       setPublished(j.blocks);
+      setBlocks(j.blocks);
       setNeverSet(false);
       setHadDraft(false);
       toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บอัปเดตใน ~1 นาที`);
@@ -258,130 +235,32 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
     }
   };
 
-  // คลิกบล็อกในพรีวิว → เปิดฟอร์มทางซ้าย
-  useEffect(() => {
-    const onMsg = (e: MessageEvent) => {
-      const d = e.data as { type?: string; blockId?: string } | null;
-      if (d?.type !== "storefront-block-click" || !d.blockId) return;
-      setSelectedId(d.blockId);
-      document.getElementById(`blk-${d.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    };
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
-  }, []);
-
-  // เลือกบล็อกทางซ้าย → ไฮไลต์ในพรีวิว
-  useEffect(() => {
-    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-select-block", blockId: selectedId }, "*");
-  }, [selectedId]);
-
-  const dev = DEVICES.find((d) => d.k === device)!;
   const previewSrc = siteUrl ? `${siteUrl}/?preview=1` : null;
-  const scale = zoom === "fit" ? Math.min(1, (boxW - 16) / dev.w) : zoom;
+  const ctx = useMemo(() => ({ shopSlug, shopId, categories }), [shopSlug, shopId, categories]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
-
-  /* ── กล่องพรีวิว (ใช้ซ้ำทั้งปกติและเต็มจอ) ── */
-  const previewToolbar = (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {DEVICES.map((d) => (
-        <button
-          key={d.k}
-          onClick={() => setDevice(d.k)}
-          title={`${d.label} ${d.w}×${d.h}`}
-          className={`px-2.5 py-1 rounded-lg border text-xs ${device === d.k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
-        >
-          {d.icon}
-        </button>
-      ))}
-      <select
-        value={String(zoom)}
-        onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : (Number(e.target.value) as Zoom))}
-        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700"
-      >
-        <option value="fit">พอดีจอ</option>
-        <option value="0.5">50%</option>
-        <option value="0.75">75%</option>
-        <option value="1">100%</option>
-      </select>
-      <button onClick={() => setFullscreen((v) => !v)} title="เต็มจอ (Esc เพื่อออก)" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
-        {fullscreen ? "⤡" : "⤢"}
-      </button>
-      <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
-        ↻
-      </button>
-      {previewSrc && (
-        <a href={previewSrc} target="_blank" rel="noreferrer" title="เปิดแท็บใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
-          ↗
-        </a>
-      )}
-      <span className="text-[10px] text-slate-400 ml-auto">
-        {dev.w}×{dev.h} · {Math.round(scale * 100)}%
-      </span>
-    </div>
-  );
-
-  const previewFrame = (heightCss: string) => (
-    <div ref={previewBoxRef} className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: heightCss }}>
-      {previewSrc ? (
-        <div className="w-full h-full overflow-auto py-2">
-          {/* กล่องนอกกว้างเท่า "ขนาดหลังย่อ" — transform ไม่ย่อกล่อง layout ถ้าไม่ครอบจะเหลือที่ว่าง+ต้องเลื่อนหา */}
-          <div style={{ width: dev.w * scale, height: dev.h * scale, margin: "0 auto", overflow: "hidden" }}>
-            <iframe
-              ref={iframeRef}
-              src={previewSrc}
-              title="พรีวิวหน้าแรก"
-              className="bg-white border-0 shadow-sm"
-              style={{
-                width: dev.w,
-                height: dev.h,
-                transform: `scale(${scale})`,
-                transformOrigin: "top left",
-                flexShrink: 0,
-                display: "block",
-              }}
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 px-6 text-center">
-          ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div className="space-y-3">
       {/* แถบสถานะ */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
-        <span
-          className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-            isDirty ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-          }`}
-        >
+        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${isDirty ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
           {isDirty ? "● ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
         </span>
         <span className="text-[11px] text-slate-400">
-          {blocks.length} บล็อก · เปิดใช้ {blocks.filter((b) => b.enabled).length}
+          {blocks.length} Section · เปิดใช้ {blocks.filter((b) => b.enabled).length}
           {neverSet && " · ยังไม่เคยจัดหน้า (โครงเริ่มต้น)"}
         </span>
-
-        {/* สถานะบันทึกอัตโนมัติ */}
-        <span className="text-[11px] text-slate-400">
-          {saving ? "กำลังบันทึกร่าง…" : savedAt ? `บันทึกร่างล่าสุด ${timeStr(savedAt)}` : ""}
-        </span>
+        <span className="text-[11px] text-slate-400">{saving ? "กำลังบันทึกร่าง…" : savedAt ? `บันทึกร่างล่าสุด ${timeStr(savedAt)}` : ""}</span>
 
         <div className="ml-auto flex items-center gap-1">
           <label className="flex items-center gap-1.5 text-[11px] text-slate-500 mr-2 cursor-pointer" title="บันทึกร่างให้อัตโนมัติทุก 20 วินาที">
             <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={autoSave} onChange={(e) => setAutoSave(e.target.checked)} />
             บันทึกอัตโนมัติ
           </label>
-          <button onClick={() => void loadVersions()} title="ประวัติเวอร์ชัน" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
-            🕘
-          </button>
+          <button onClick={() => void loadVersions()} title="ประวัติเวอร์ชัน" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">🕘</button>
           <button onClick={undo} disabled={!undoStack.current.length} title="ย้อนกลับ (Ctrl+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↶</button>
-          <button onClick={redo} disabled={!redoStack.current.length} title="ทำซ้ำ" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
+          <button onClick={redo} disabled={!redoStack.current.length} title="ทำซ้ำ (Ctrl+Shift+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
         </div>
       </div>
 
@@ -404,7 +283,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
                   {it.blockId && (
                     <button
                       onClick={() => {
-                        setSelectedId(it.blockId);
+                        setSelection({ blockId: it.blockId! });
                         document.getElementById(`blk-${it.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
                       }}
                       className="text-blue-600 hover:underline whitespace-nowrap"
@@ -419,20 +298,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,42%)] items-start">
-        <div className="min-w-0">
-          <BlockListEditor blocks={blocks} types={types} onChange={apply} selectedId={selectedId} onSelect={setSelectedId} />
-        </div>
-
-        {/* พรีวิว */}
-        <div className="lg:sticky lg:top-4 min-w-0 space-y-2">
-          {previewToolbar}
-          {previewFrame("74vh")}
-          <p className="text-[10px] text-slate-400 text-center">
-            คลิกบล็อกในพรีวิวเพื่อเปิดฟอร์มทางซ้าย · บันทึกร่างแล้วกด ↻ เพื่อดูผลเต็ม
-          </p>
-        </div>
-      </div>
+      <WebsiteBuilder blocks={blocks} onChange={apply} types={types} ctx={ctx} previewSrc={previewSrc} iframeRef={iframeRef} selection={selection} onSelect={setSelection} />
 
       {/* แถบปุ่มล่าง */}
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
@@ -441,9 +307,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
           {errors.length > 0 && <span className="text-red-600"> · ควรแก้ {errors.length} จุด</span>}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => void discard()} disabled={!isDirty} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40">
-            ละทิ้งการเปลี่ยนแปลง
-          </button>
+          <button onClick={() => void discard()} disabled={!isDirty} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40">ละทิ้งการเปลี่ยนแปลง</button>
           <button onClick={() => void saveDraft(false)} disabled={saving || busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50">
             {saving ? "กำลังบันทึก…" : "บันทึกร่าง"}
           </button>
@@ -452,14 +316,6 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
           </button>
         </div>
       </div>
-
-      {/* เต็มจอ */}
-      {fullscreen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm p-4 flex flex-col gap-3">
-          <div className="bg-white rounded-xl px-4 py-2.5">{previewToolbar}</div>
-          <div className="flex-1 min-h-0">{previewFrame("100%")}</div>
-        </div>
-      )}
 
       {/* ประวัติเวอร์ชัน */}
       {showVersions && (
@@ -479,15 +335,13 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
                     <li key={v.versionNo} className="flex items-center gap-3 py-3">
                       <span className="text-xs text-slate-400 w-10">#{v.versionNo}</span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-slate-700">{v.blocks} บล็อก</p>
+                        <p className="text-sm text-slate-700">{v.blocks} Section</p>
                         <p className="text-[11px] text-slate-400 truncate">
                           {new Date(v.createdAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })}
                           {v.actor && ` · ${v.actor}`}
                         </p>
                       </div>
-                      <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline whitespace-nowrap">
-                        กู้คืนเป็นร่าง
-                      </button>
+                      <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline whitespace-nowrap">กู้คืนเป็นร่าง</button>
                     </li>
                   ))}
                 </ul>
