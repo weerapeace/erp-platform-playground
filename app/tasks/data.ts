@@ -402,6 +402,8 @@ export type ContentItem = {
   brand_shop_channels?: { label: string; value: string }[];
   assignee_id?: string | null; assignee_label?: string | null;   // ผู้รับผิดชอบคอนเทนต์ (เดี่ยว = back-compat)
   assignee_ids?: string[] | null; assignees?: { id: string; name: string }[];   // ผู้รับผิดชอบหลายคน (m2m)
+  // ฝั่งวางแผน (หน้า /marketing/content-plan): แนวคอนเทนต์ (marketing_sku_labels kind=pillar) · เป้าหมาย · บรีฟ · รูปอ้างอิง
+  pillar_id?: string | null; goal?: string | null; brief?: string | null; ref_image_keys?: string[]; ref_image_urls?: string[];
 };
 
 // หาแบรนด์จากสินค้าที่เลือก (Parent SKU หรือ SKU เดี่ยว) — ให้ฟอร์มคอนเทนต์เติมแบรนด์อัตโนมัติ

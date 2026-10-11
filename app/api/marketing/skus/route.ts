@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     for (const b of it.badge_ids) usage.set(b, (usage.get(b) ?? 0) + 1);
   }
   const all: MarketingSkuLabel[] = ((labelsRes.data ?? []) as MarketingSkuLabel[]).map((l) => ({ ...l, usage_count: usage.get(l.id) ?? 0 }));
-  const labels = all.filter((l) => l.kind !== "badge");
+  const labels = all.filter((l) => !l.kind || l.kind === "status");   // ป้ายหลักเท่านั้น (ไม่ปน badge/pillar)
   const badges = all.filter((l) => l.kind === "badge");
 
   return NextResponse.json({ data: { items, labels, badges, brands: (brandsRes.data ?? []) as MarketingBrand[] }, error: null });
@@ -89,7 +89,7 @@ export async function PATCH(request: NextRequest) {
 
   const admin = supabaseAdmin();
   if (patch.label_id) {
-    const { data: lb } = await admin.from("marketing_sku_labels").select("id").eq("id", patch.label_id as string).maybeSingle();
+    const { data: lb } = await admin.from("marketing_sku_labels").select("id").eq("id", patch.label_id as string).eq("kind", "status").maybeSingle();
     if (!lb) return NextResponse.json({ data: null, error: "ไม่พบป้ายที่เลือก (อาจถูกลบไปแล้ว)" }, { status: 400 });
   }
   // กันรหัสมั่ว: ต้องเป็น Parent SKU ที่มีอยู่จริง

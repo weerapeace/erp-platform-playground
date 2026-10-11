@@ -4,6 +4,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 
 // ── ตรวจข้อมูลคอนเทนต์ก่อนบันทึก (ใช้ทั้ง POST/PATCH) — คืนข้อความ error หรือ null ──
 const CONTENT_STATUSES = new Set(["draft", "ready", "scheduled", "published", "cancelled"]);
+const CONTENT_GOALS = new Set(["awareness", "sales", "education", "engagement"]);
 export function validateContentFields(body: Record<string, unknown>): string | null {
   if (body.status != null && body.status !== "" && !CONTENT_STATUSES.has(String(body.status)))
     return "สถานะคอนเทนต์ไม่ถูกต้อง";
@@ -15,6 +16,16 @@ export function validateContentFields(body: Record<string, unknown>): string | n
   }
   if (body.title != null && typeof body.title === "string" && body.title.length > 500)
     return "ชื่อคอนเทนต์ยาวเกินไป (ไม่เกิน 500 ตัวอักษร)";
+  // ── ช่องฝั่งวางแผน (หน้า /marketing/content-plan) ──
+  if (body.goal != null && body.goal !== "" && !CONTENT_GOALS.has(String(body.goal)))
+    return "เป้าหมายคอนเทนต์ไม่ถูกต้อง";
+  if (body.brief != null && typeof body.brief === "string" && body.brief.length > 3000)
+    return "บรีฟยาวเกินไป (ไม่เกิน 3,000 ตัวอักษร)";
+  if (body.ref_image_keys != null) {
+    if (!Array.isArray(body.ref_image_keys) || body.ref_image_keys.some((k) => typeof k !== "string" || !k || k.length > 500))
+      return "รูปอ้างอิงไม่ถูกต้อง";
+    if (body.ref_image_keys.length > 12) return "รูปอ้างอิงได้สูงสุด 12 รูป";
+  }
   return null;
 }
 
@@ -25,6 +36,7 @@ export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sk
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, platform_formats, note,
   discount_value, discount_is_percent, color_source,
   is_template, template_icon, is_active, created_at, updated_at, assignee_id, assignee_ids,
+  pillar_id, goal, brief, ref_image_keys,
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price),
@@ -54,6 +66,7 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   // ลิงก์ร้านที่เก็บไว้ที่ Parent SKU (คอลัมน์ shopee_url/lazada_url/tiktok_url) — drawer ใช้เติม "ลิงก์สินค้า" ให้เมื่อคอนเทนต์ยังไม่มี
   out.parent_links = par ? PARENT_LINK_PLATFORMS.map((pf) => ({ platform: pf, url: (par[`${pf}_url` as "shopee_url"] ?? "").trim() })).filter((l) => l.url) : [];
   out.campaign_label = c?.name ?? null;
+  out.ref_image_urls = Array.isArray(r.ref_image_keys) ? (r.ref_image_keys as string[]).map((k) => r2ImageUrl(String(k), 480)) : [];   // รูปอ้างอิง (บรีฟ)
   out.sku_code = s?.code ?? null;
   out.sku_name = s?.name_th ?? null;
   out.sku_color = (s?.color_th as string) ?? (s?.color as string) ?? null;

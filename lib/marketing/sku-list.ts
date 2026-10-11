@@ -6,8 +6,9 @@
  *   (ข้อมูลมาจาก view marketing_sku_overview · ค่าการตลาดเก็บใน marketing_skus สร้างแถวเมื่อติดป้าย/หมายเหตุ)
  */
 
-/** ชนิดป้าย: status = ป้ายหลัก (1 ป้าย/รุ่น เช่น Hero/Clearance) · badge = ป้ายเสริม (หลายป้าย/รุ่น โชว์บนรูป) */
-export type MarketingLabelKind = "status" | "badge";
+/** ชนิดป้าย: status = ป้ายหลัก (1 ป้าย/รุ่น เช่น Hero/Clearance) · badge = ป้ายเสริม (หลายป้าย/รุ่น โชว์บนรูป)
+ *  · pillar = แนวคอนเทนต์ (หน้าวางแผนคอนเทนต์ — ผูกกับ erp_creative_content.pillar_id) */
+export type MarketingLabelKind = "status" | "badge" | "pillar";
 
 export type MarketingSkuLabel = {
   id: string;

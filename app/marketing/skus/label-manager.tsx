@@ -28,18 +28,30 @@ const toDraft = (l: MarketingSkuLabel): Draft => ({ name: l.name, icon: l.icon ?
 const EMPTY: Draft = { name: "", icon: "", color: "#0ea5e9", description: "" };
 const same = (a: Draft, b: Draft) => a.name === b.name && a.icon === b.icon && a.color === b.color && a.description === b.description;
 
-export function LabelManagerModal({ open, onClose, labels, badges = [], canEdit, onChanged }: {
+type Kind = "status" | "badge" | "pillar";
+const KIND_TEXT: Record<Kind, { tab: string; desc: string }> = {
+  status: { tab: "ป้ายหลัก", desc: "ป้ายหลัก = 1 ป้ายต่อรุ่น · ลาก ⋮⋮ เพื่อเรียงลำดับ (ลำดับนี้ใช้ทั้งชิปกรองและเมนูเลือกป้าย)" },
+  badge: { tab: "ป้ายเสริม", desc: "ป้ายเสริม = ชิปบนรูป ติดได้หลายป้ายต่อรุ่น · ลาก ⋮⋮ เพื่อเรียงลำดับ" },
+  pillar: { tab: "แนวคอนเทนต์", desc: "แนวคอนเทนต์ = ใช้ติดไอเดียในหน้าวางแผนคอนเทนต์ (1 แนว/ชิ้น) · ลาก ⋮⋮ เพื่อเรียงลำดับ" },
+};
+
+export function LabelManagerModal({ open, onClose, labels = [], badges = [], pillars = [], kinds = ["status", "badge"], title = "🏷️ ป้ายการตลาด", canEdit, onChanged }: {
   open: boolean;
   onClose: () => void;
-  labels: MarketingSkuLabel[];
-  /** ป้ายเสริม (kind = badge) — แท็บที่ 2 */
+  labels?: MarketingSkuLabel[];
+  /** ป้ายเสริม (kind = badge) */
   badges?: MarketingSkuLabel[];
+  /** แนวคอนเทนต์ (kind = pillar) — หน้าวางแผนคอนเทนต์ */
+  pillars?: MarketingSkuLabel[];
+  /** แท็บที่จะแสดง (ตามลำดับ) — 1 ชนิด = ไม่โชว์แถบแท็บ */
+  kinds?: Kind[];
+  title?: string;
   canEdit: boolean;
   onChanged: () => void;
 }) {
   const toast = useToast();
-  const [tab, setTab] = useState<"status" | "badge">("status");
-  const source = tab === "badge" ? badges : labels;
+  const [tab, setTab] = useState<Kind>(kinds[0]);
+  const source = tab === "badge" ? badges : tab === "pillar" ? pillars : labels;
   const [list, setList] = useState<MarketingSkuLabel[]>(labels);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft>(EMPTY);
@@ -94,16 +106,14 @@ export function LabelManagerModal({ open, onClose, labels, badges = [], canEdit,
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title="🏷️ ป้ายการตลาด" size="lg" hasUnsavedChanges={dirty}
-        description={!canEdit ? "คุณดูได้อย่างเดียว — การแก้ป้ายต้องมีสิทธิ์ \"ตั้งค่าป้าย SKU การตลาด\""
-          : tab === "badge" ? "ป้ายเสริม = ชิปบนรูป ติดได้หลายป้ายต่อรุ่น · ลาก ⋮⋮ เพื่อเรียงลำดับ"
-          : "ป้ายหลัก = 1 ป้ายต่อรุ่น · ลาก ⋮⋮ เพื่อเรียงลำดับ (ลำดับนี้ใช้ทั้งชิปกรองและเมนูเลือกป้าย)"}>
-        <div className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist">
-          {([["status", `ป้ายหลัก (${labels.length})`], ["badge", `ป้ายเสริม (${badges.length})`]] as const).map(([k, t]) => (
+      <ERPModal open={open} onClose={onClose} title={title} size="lg" hasUnsavedChanges={dirty}
+        description={!canEdit ? "คุณดูได้อย่างเดียว — การแก้ต้องมีสิทธิ์ \"ตั้งค่าป้าย SKU การตลาด\"" : KIND_TEXT[tab].desc}>
+        {kinds.length > 1 && <div className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist">
+          {kinds.map((k) => [k, `${KIND_TEXT[k].tab} (${(k === "badge" ? badges : k === "pillar" ? pillars : labels).length})`] as const).map(([k, t]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} disabled={dirty && tab !== k} title={dirty && tab !== k ? "บันทึกหรือยกเลิกการแก้ก่อนสลับแท็บ" : undefined}
               className={`h-8 rounded-md px-3 text-sm font-medium disabled:opacity-40 ${tab === k ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{t}</button>
           ))}
-        </div>
+        </div>}
         <div className="space-y-2">
           {list.length === 0 && <div className="py-6 text-center text-sm text-slate-400">ยังไม่มีป้าย เพิ่มป้ายแรกด้านล่าง</div>}
           {list.map((l, i) => {
@@ -120,7 +130,7 @@ export function LabelManagerModal({ open, onClose, labels, badges = [], canEdit,
                   <input value={d.name} onChange={(e) => set({ name: e.target.value })} disabled={!canEdit} maxLength={60} placeholder="ชื่อป้าย"
                     className={`${input} flex-1 min-w-[10rem]`} />
                   <div className="w-36">{canEdit ? <ColorInput value={d.color} onChange={(c) => set({ color: c })} /> : <span className="inline-block w-6 h-6 rounded-md border border-slate-200" style={{ background: d.color }} />}</div>
-                  <span className="text-xs text-slate-400 w-16 text-right">{l.usage_count ?? 0} รุ่น</span>
+                  <span className="text-xs text-slate-400 w-16 text-right">{l.usage_count ?? 0} {tab === "pillar" ? "ชิ้น" : "รุ่น"}</span>
                   {canEdit && (
                     <>
                       <button type="button" onClick={() => saveRow(l)} disabled={!changed || busy}
@@ -161,7 +171,9 @@ export function LabelManagerModal({ open, onClose, labels, badges = [], canEdit,
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={doDelete} loading={busy} variant="danger"
         title={`ลบป้าย "${delTarget?.name ?? ""}"?`}
         message={(delTarget?.usage_count ?? 0) > 0
-          ? (delTarget?.kind === "badge"
+          ? (delTarget?.kind === "pillar"
+            ? `มี ${delTarget?.usage_count} ชิ้นคอนเทนต์ที่ใช้แนวนี้ — จะกลายเป็น "ไม่ระบุแนว" (ตัวคอนเทนต์ไม่ถูกลบ)`
+            : delTarget?.kind === "badge"
             ? `มี ${delTarget?.usage_count} รุ่นที่ติดป้ายเสริมนี้อยู่ — ป้ายนี้จะหลุดออกจากรุ่นเหล่านั้น (ตัวสินค้าไม่ถูกแตะ)`
             : `มี ${delTarget?.usage_count} รุ่นที่ติดป้ายนี้อยู่ — รุ่นเหล่านั้นจะยังอยู่ในรายการ แต่จะกลายเป็น "ยังไม่มีป้าย"`)
           : "ยังไม่มีรุ่นไหนใช้ป้ายนี้ ลบได้เลย"}

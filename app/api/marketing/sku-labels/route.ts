@@ -18,7 +18,7 @@ async function actor(request: NextRequest) {
 
 const dupMsg = (e: { code?: string; message: string }) =>
   e.code === "23505" ? "มีป้ายชื่อนี้อยู่แล้ว" : "บันทึกไม่สำเร็จ: " + e.message;
-const toKind = (v: unknown): "status" | "badge" => (v === "badge" ? "badge" : "status");
+const toKind = (v: unknown): "status" | "badge" | "pillar" => (v === "badge" ? "badge" : v === "pillar" ? "pillar" : "status");
 
 type LabelInput = { name?: unknown; icon?: unknown; color?: unknown; description?: unknown; is_active?: unknown };
 
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
   if (denied) return denied;
   const kind = new URL(request.url).searchParams.get("kind");
   let q = supabaseAdmin().from("marketing_sku_labels").select("id, kind, name, icon, color, description, sort_order, is_active");
-  if (kind === "status" || kind === "badge") q = q.eq("kind", kind);
+  if (kind === "status" || kind === "badge" || kind === "pillar") q = q.eq("kind", kind);
   const { data, error } = await q.order("sort_order").order("name");
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
   return NextResponse.json({ data: data ?? [], error: null });
@@ -119,7 +119,9 @@ export async function DELETE(request: NextRequest) {
   if (!before) return NextResponse.json({ data: null, error: "ไม่พบป้าย (อาจถูกลบไปแล้ว)" }, { status: 404 });
   const { count } = before.kind === "badge"
     ? await admin.from("marketing_sku_badge_map").select("badge_id", { count: "exact", head: true }).eq("badge_id", id)
-    : await admin.from("marketing_skus").select("id", { count: "exact", head: true }).eq("label_id", id);
+    : before.kind === "pillar"
+      ? await admin.from("erp_creative_content").select("id", { count: "exact", head: true }).eq("pillar_id", id)   // คอนเทนต์ที่ใช้แนวนี้ → กลายเป็นไม่ระบุแนว
+      : await admin.from("marketing_skus").select("id", { count: "exact", head: true }).eq("label_id", id);
   const { error } = await admin.from("marketing_sku_labels").delete().eq("id", id);
   if (error) return NextResponse.json({ data: null, error: "ลบไม่สำเร็จ: " + error.message }, { status: 500 });
 
