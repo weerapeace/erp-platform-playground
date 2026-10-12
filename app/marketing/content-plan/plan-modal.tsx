@@ -243,7 +243,20 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
             <div className="space-y-1">
               {placementRows.map(({ t, opts }) => (
                 <div key={t.key} className="flex flex-wrap items-center gap-1">
-                  <span className="w-20 flex-shrink-0 truncate text-xs text-slate-500" title={t.label}>{t.icon ? `${t.icon} ` : ""}{t.label}</span>
+                  {(() => {
+                    // กดชื่อประเภท = เลือกทุกช่องทางของประเภทนั้น · ถ้าเลือกครบอยู่แล้ว = เอาออกทั้งหมด
+                    const ids = opts.map((p) => placementId(t.key, p.value));
+                    const n = ids.filter((id) => d.placements.includes(id)).length;
+                    const all = n === ids.length;
+                    return (
+                      <button type="button" disabled={ro || locked} title={all ? `เอา ${t.label} ออกทั้งหมด` : `เลือก ${t.label} ทุกช่องทาง`}
+                        onClick={() => setD((x) => ({ ...x, placements: all ? x.placements.filter((id) => !ids.includes(id)) : [...x.placements, ...ids.filter((id) => !x.placements.includes(id))] }))}
+                        className={`w-24 flex-shrink-0 truncate rounded-md px-1.5 py-1 text-left text-xs transition-colors enabled:hover:bg-slate-100 ${all ? "font-semibold text-slate-900" : n > 0 ? "font-medium text-slate-700" : "text-slate-500"}`}>
+                        <span className={`mr-1 inline-block h-3 w-3 rounded-[3px] border align-[-1px] ${all ? "border-slate-900 bg-slate-900" : n > 0 ? "border-slate-500 bg-slate-300" : "border-slate-300"}`} />
+                        {t.icon ? `${t.icon} ` : ""}{t.label}
+                      </button>
+                    );
+                  })()}
                   {opts.map((p) => {
                     const id = placementId(t.key, p.value);
                     return (
@@ -256,7 +269,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
               ))}
               {showLoose && (
                 <div className="flex flex-wrap items-center gap-1">
-                  {placementRows.length > 0 && <span className="w-20 flex-shrink-0 text-xs text-slate-400" title="ช่องทางที่เลือกไว้แบบไม่ระบุประเภท (ข้อมูลเดิม)">ไม่ระบุประเภท</span>}
+                  {placementRows.length > 0 && <span className="w-24 flex-shrink-0 px-1.5 text-xs text-slate-400" title="ช่องทางที่เลือกไว้แบบไม่ระบุประเภท (ข้อมูลเดิม)">ไม่ระบุประเภท</span>}
                   {(placementRows.length > 0 ? platformChoices.filter((p) => d.platforms.includes(p.value)) : platformChoices).map((p) => (
                     <button key={p.value} type="button" disabled={ro || locked} onClick={() => set({ platforms: toggle(d.platforms, p.value) })} className={toggleCls(d.platforms.includes(p.value))}>
                       <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={14} />{p.label}
