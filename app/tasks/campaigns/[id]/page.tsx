@@ -1415,13 +1415,20 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
                     {s.image_url
                       ? <img src={`${s.image_url}&w=400`} alt="" loading="lazy" className="aspect-square w-full bg-slate-50 object-contain" />
                       : <span className="flex aspect-square w-full items-center justify-center bg-slate-50 text-3xl text-slate-300">🎯</span>}
-                    <span className="flex flex-1 flex-col gap-0.5 p-2">
-                      <span className="font-mono text-[10px] text-slate-500">{s.code}</span>
-                      <span className="line-clamp-2 text-xs font-medium leading-snug text-slate-800">{s.name}</span>
-                      <span className="mt-auto flex items-center justify-between gap-1 pt-0.5 text-[10px] text-slate-500">
-                        <span>🎨 {s.sku_active}/{s.sku_total}</span>
-                        {s.badges.length > 0 && <span className="truncate text-slate-400" title={s.badges.join(", ")}>{s.badges.join(" · ")}</span>}
+                    <span className="flex flex-1 flex-col gap-1 p-2">
+                      <span className="flex items-center justify-between gap-1">
+                        <span className="font-mono text-[10px] text-slate-500">{s.code}</span>
+                        <span className="text-[10px] text-slate-500">🎨 {s.sku_active}/{s.sku_total}</span>
                       </span>
+                      <span className="line-clamp-2 text-xs font-medium leading-snug text-slate-800">{s.name}</span>
+                      {/* ป้ายเสริม (ป้ายเล็ก) เป็นชิป — เห็นครบไม่ต้องชี้ */}
+                      {s.badges.length > 0 && (
+                        <span className="flex flex-wrap gap-1">
+                          {s.badges.map((b) => <span key={b} className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] leading-tight text-slate-600">{b}</span>)}
+                        </span>
+                      )}
+                      {/* หมายเหตุการตลาด */}
+                      {s.note && <span className="line-clamp-2 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-snug text-amber-800" title={s.note}>📝 {s.note}</span>}
                     </span>
                   </button>
                 ); })}
@@ -1438,9 +1445,16 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
               <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-orange-600 pointer-events-none" />
               {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">🎯</span>}
               <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-slate-700">{s.name}</span>
+                {(s.badges.length > 0 || s.note) && (
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1">
+                    {s.badges.map((b) => <span key={b} className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] leading-tight text-slate-600">{b}</span>)}
+                    {s.note && <span className="truncate text-[10px] text-amber-800" title={s.note}>📝 {s.note}</span>}
+                  </span>
+                )}
+              </span>
               {s.label && <span className="text-[10px] rounded px-1.5 py-0.5 text-white shrink-0" style={{ backgroundColor: s.label_color || "#ea580c" }}>{s.label}</span>}
-              {s.badges.length > 0 && <span className="text-[10px] text-slate-400 shrink-0" title={s.badges.join(", ")}>+{s.badges.length}</span>}
               <span className="text-[11px] text-slate-500 shrink-0">🎨 {s.sku_active}/{s.sku_total}</span>
             </button>
           ); })}
