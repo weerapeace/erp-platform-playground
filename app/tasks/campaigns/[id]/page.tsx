@@ -1344,7 +1344,9 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
   const [query, setQuery] = useState("");
   const [brandId, setBrandId] = useState("");
   const [labelId, setLabelId] = useState("");
-  const [items, setItems] = useState<(MktSkuVal & { brand_id: string | null; label_id: string | null })[]>([]);
+  const [items, setItems] = useState<(MktSkuVal & { brand_id: string | null; label_id: string | null; badge_ids: string[] })[]>([]);
+  const [badgeList, setBadgeList] = useState<MktApiLabel[]>([]);   // ป้ายเสริม (ป้ายเล็ก) ไว้กรอง เช่น Stock เยอะ / ขายดี
+  const [badgeIds, setBadgeIds] = useState<string[]>([]);           // กรองป้ายเสริม (เลือกได้หลายป้าย = มีป้ายใดป้ายหนึ่ง)
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const [labels, setLabels] = useState<MktApiLabel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1360,7 +1362,7 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
       if (!alive) return;
       const d = j.data as { items: MktApiItem[]; labels: MktApiLabel[]; badges: MktApiLabel[]; brands: { id: string; name: string }[] };
       const lab = new Map<string, MktApiLabel>(); for (const l of [...(d.labels ?? []), ...(d.badges ?? [])]) lab.set(l.id, l);
-      setLabels(d.labels ?? []); setBrands(d.brands ?? []);
+      setLabels(d.labels ?? []); setBrands(d.brands ?? []); setBadgeList(d.badges ?? []);
       setItems((d.items ?? []).map((it) => ({
         id: it.parent_sku_id, code: it.code, name: it.name,
         image_url: it.image_key ? `/api/r2-image?key=${encodeURIComponent(it.image_key)}` : null,
@@ -1368,13 +1370,13 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
         label_color: it.label_id ? (lab.get(it.label_id)?.color ?? null) : null,
         badges: (it.badge_ids ?? []).map((b) => lab.get(b)?.name ?? "").filter(Boolean),
         sku_active: it.sku_active, sku_total: it.sku_total, note: it.note,
-        brand_id: it.brand_id, label_id: it.label_id,
+        brand_id: it.brand_id, label_id: it.label_id, badge_ids: it.badge_ids ?? [],
       })));
     }).catch((e) => { if (alive) setError(e instanceof Error ? e.message : "โหลดไม่ได้"); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [t]);
   const q = query.trim().toLowerCase();
-  const shown = items.filter((it) => (!brandId || it.brand_id === brandId) && (!labelId || it.label_id === labelId) && (!q || `${it.code} ${it.name} ${it.label ?? ""} ${it.badges.join(" ")}`.toLowerCase().includes(q))).slice(0, 300);
+  const shown = items.filter((it) => (!brandId || it.brand_id === brandId) && (!labelId || it.label_id === labelId) && (badgeIds.length === 0 || badgeIds.some((b) => it.badge_ids.includes(b))) && (!q || `${it.code} ${it.name} ${it.label ?? ""} ${it.badges.join(" ")}`.toLowerCase().includes(q))).slice(0, 300);
   const toggle = (s: MktSkuVal) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
   return (
     <div className="space-y-2">
@@ -1387,6 +1389,18 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
         <div className="flex flex-wrap gap-1">
           <button type="button" onClick={() => setLabelId("")} className={`h-7 rounded-full border px-2.5 text-[11px] ${!labelId ? "bg-orange-600 text-white border-orange-600" : "bg-white text-slate-600 border-slate-200"}`}>{t("ทุกป้าย", "All labels")}</button>
           {labels.map((l) => <button key={l.id} type="button" onClick={() => setLabelId(labelId === l.id ? "" : l.id)} className={`h-7 rounded-full border px-2.5 text-[11px] ${labelId === l.id ? "text-white" : "bg-white text-slate-600 border-slate-200"}`} style={labelId === l.id ? { backgroundColor: l.color, borderColor: l.color } : undefined}>{l.icon ? `${l.icon} ` : ""}{l.name}</button>)}
+        </div>
+      )}
+      {badgeList.length > 0 && (
+        /* กรองป้ายเสริม (ป้ายเล็ก) เช่น Stock เยอะ / ขายดี — เลือกได้หลายป้าย (มีป้ายใดป้ายหนึ่ง) · ใช้ร่วมกับป้ายหลักได้ */
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[11px] text-slate-400">{t("ป้ายเสริม:", "Badges:")}</span>
+          {badgeList.map((b) => { const on = badgeIds.includes(b.id); return (
+            <button key={b.id} type="button" onClick={() => setBadgeIds((cur) => (on ? cur.filter((x) => x !== b.id) : [...cur, b.id]))}
+              className={`h-7 rounded-full border border-dashed px-2.5 text-[11px] ${on ? "text-white border-solid" : "bg-white text-slate-600 border-slate-300"}`}
+              style={on ? { backgroundColor: b.color, borderColor: b.color } : undefined}>{b.icon ? `${b.icon} ` : ""}{b.name}</button>
+          ); })}
+          {badgeIds.length > 0 && <button type="button" onClick={() => setBadgeIds([])} className="h-7 px-2 text-[11px] text-slate-400 hover:text-slate-600">✕ {t("ล้าง", "clear")}</button>}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
