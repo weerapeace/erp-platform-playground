@@ -108,17 +108,34 @@ function parentSkuCardSkeleton(s: ParentSkuVal): Record<string, unknown>[] {
   return els;
 }
 
+// รายละเอียดที่โชว์บนการ์ด SKU การตลาด — ผู้ใช้ติ๊กเลือกได้ตอนวาง (จำรายคน user-prefs `campaign_mkt_card_fields`)
+type MktFieldKey = "image" | "code" | "name" | "label" | "badges" | "colors" | "note";
+const MKT_FIELD_OPTS: { key: MktFieldKey; labelTh: string; labelEn: string }[] = [
+  { key: "image", labelTh: "รูปสินค้า", labelEn: "Image" },
+  { key: "code", labelTh: "รหัสรุ่น", labelEn: "Model code" },
+  { key: "name", labelTh: "ชื่อรุ่น", labelEn: "Name" },
+  { key: "label", labelTh: "ป้ายหลัก (Hero/Clearance…)", labelEn: "Main label" },
+  { key: "badges", labelTh: "ป้ายเสริม (Stock เยอะ/ขายดี…)", labelEn: "Badges" },
+  { key: "colors", labelTh: "สีที่เหลือ a/n", labelEn: "Colors left" },
+  { key: "note", labelTh: "หมายเหตุการตลาด", labelEn: "Marketing note" },
+];
+const MKT_FIELDS_ALL: MktFieldKey[] = MKT_FIELD_OPTS.map((o) => o.key);
+
 // การ์ด SKU การตลาด บน Excalidraw (ขอบ = สีป้ายการตลาด · ไม่มีป้าย = ส้ม) — ดับเบิลคลิกเปิดตัวแก้สินค้ากลาง (Parent)
-function marketingSkuCardSkeleton(s: MktSkuVal): Record<string, unknown>[] {
+function marketingSkuCardSkeleton(s: MktSkuVal, fields: MktFieldKey[] = MKT_FIELDS_ALL): Record<string, unknown>[] {
   const gid = `marketing_sku-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
   const data = { kind: "marketing_sku", id: s.id, code: s.code, name: s.name, image_url: s.image_url ?? null, label: s.label, badges: s.badges, sku_active: s.sku_active, sku_total: s.sku_total };
-  const hasImg = !!s.image_url;
-  const tags = [s.label ? `🏷 ${s.label}` : null, ...s.badges.map((b) => `· ${b}`)].filter(Boolean).join(" ");
+  const has = (k: MktFieldKey) => fields.includes(k);
+  const hasImg = has("image") && !!s.image_url;
+  // ป้ายหลัก + ป้ายเสริม: ตัดบรรทัดตามความกว้างการ์ด (เดิมยาวทะลุขอบ)
+  const tags = [has("label") && s.label ? `🏷 ${s.label}` : null, ...(has("badges") ? s.badges.map((b) => `· ${b}`) : [])].filter(Boolean).join(" ");
   const text = [
-    `🎯 ${s.code}`, wrapCardText(s.name, 24, 2), tags || null,
-    `🎨 ${tt("สีที่เหลือ", "Colors left")} ${s.sku_active}/${s.sku_total}`,
-    s.note ? wrapCardText(`📝 ${s.note}`, 26, 2) : null,
-  ].filter(Boolean).join("\n");
+    has("code") ? `🎯 ${s.code}` : null,
+    has("name") ? wrapCardText(s.name, 24, 2) : null,
+    tags ? wrapCardText(tags, 26, 3) : null,
+    has("colors") ? `🎨 ${tt("สีที่เหลือ", "Colors left")} ${s.sku_active}/${s.sku_total}` : null,
+    has("note") && s.note ? wrapCardText(`📝 ${s.note}`, 26, 2) : null,
+  ].filter(Boolean).join("\n") || `🎯 ${s.code}`;
   const lineCount = text.split("\n").length;
   const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = txtY + lineCount * 20 + 12;
   const stroke = s.label_color && /^#[0-9a-fA-F]{6}$/.test(s.label_color) ? s.label_color : "#ea580c";
@@ -428,6 +445,18 @@ export default function CampaignCanvasPage() {
   const [parentSel, setParentSel] = useState<ParentSkuVal[]>([]);
   const [mktOpen, setMktOpen] = useState(false);        // modal การ์ด SKU การตลาด
   const [mktSel, setMktSel] = useState<MktSkuVal[]>([]);
+  const [mktOptOpen, setMktOptOpen] = useState(false);  // กล่องเลือกรายละเอียดที่จะโชว์บนการ์ด (หลังเลือกรุ่น)
+  const [mktFields, setMktFields] = useState<MktFieldKey[]>(MKT_FIELDS_ALL);
+  useEffect(() => {   // จำค่าที่เคยติ๊กไว้ (รายคน)
+    apiFetch("/api/user-prefs?key=campaign_mkt_card_fields").then((r) => r.json())
+      .then((j) => { const v = j?.value; if (Array.isArray(v) && v.length) setMktFields(v.filter((k: unknown): k is MktFieldKey => MKT_FIELDS_ALL.includes(k as MktFieldKey))); })
+      .catch(() => {});
+  }, []);
+  const toggleMktField = (k: MktFieldKey) => setMktFields((f) => {
+    const next = f.includes(k) ? f.filter((x) => x !== k) : [...f, k];
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "campaign_mkt_card_fields", value: next }) }).catch(() => {});
+    return next;
+  });
   // โหมดเลือกแบบ "การ์ดใหญ่ ตามแท็ก" (ของกลาง SkuTagBrowser) — จำค่าไว้ต่อคน
   const [bigPick, setBigPick] = useState(false);
   useEffect(() => { try { setBigPick(localStorage.getItem("campaign-bigpick") === "1"); } catch { /* ignore */ } }, []);
@@ -512,12 +541,16 @@ export default function CampaignCanvasPage() {
     void sketchRef.current.insert(all);
     setParentOpen(false); setParentSel([]);
   };
-  const confirmMkt = () => {
+  // เลือกรุ่นเสร็จ → ถามว่าจะโชว์รายละเอียดอะไรบนการ์ด (จำค่าไว้ ครั้งหน้ากดวางได้เลย)
+  const confirmMkt = () => { if (!mktSel.length) return; setMktOpen(false); setMktOptOpen(true); };
+  const placeMktCards = () => {
     if (!mktSel.length || !sketchRef.current) return;
     const all: Record<string, unknown>[] = [];
-    mktSel.forEach((s, i) => { const dx = i * 270; for (const el of marketingSkuCardSkeleton(s)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+    mktSel.forEach((s, i) => { const dx = i * 270; for (const el of marketingSkuCardSkeleton(s, mktFields)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
     void sketchRef.current.insert(all);
-    setMktOpen(false); setMktSel([]);
+    const n = mktSel.length;
+    setMktOptOpen(false); setMktSel([]);
+    pushToast("success", t(`วางการ์ด SKU การตลาด ${n} ใบแล้ว`, `Placed ${n} marketing SKU card(s)`));
   };
   // เลือกรูปจากคลังเสร็จ → เด้งกล่องถามว่าจะดึงข้อมูลอะไรมาด้วย
   const onAssetPicked = (assets: AssetRow[]) => { setAssetSel(assets); setAssetOpen(false); setAssetOptOpen(true); };
@@ -880,6 +913,36 @@ export default function CampaignCanvasPage() {
           <button onClick={confirmMkt} disabled={!mktSel.length} className="h-9 px-4 text-sm text-white bg-orange-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{mktSel.length ? ` (${mktSel.length})` : ""}</button>
         </>}>
         <MarketingSkuMultiPick selected={mktSel} onChange={setMktSel} />
+      </ERPModal>
+
+      {/* รายละเอียดที่จะโชว์บนการ์ด SKU การตลาด — ติ๊กเลือก (จำรายคน) */}
+      <ERPModal open={mktOptOpen} onClose={() => setMktOptOpen(false)} title={t("จะโชว์รายละเอียดอะไรบนการ์ด", "What details to show on the card")} size="sm"
+        footer={<div className="flex justify-end gap-2">
+          <button onClick={() => { setMktOptOpen(false); setMktOpen(true); }} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("← เลือกรุ่นใหม่", "← Re-pick")}</button>
+          <button onClick={placeMktCards} disabled={!mktSel.length} className="h-9 px-4 text-sm text-white bg-orange-600 rounded-lg disabled:opacity-50">🎯 {t("วางการ์ด", "Place cards")}{mktSel.length ? ` (${mktSel.length})` : ""}</button>
+        </div>}>
+        <div className="space-y-3">
+          <p className="text-xs text-slate-400">{t("เลือกแล้ว", "Selected")} {mktSel.length} {t("รุ่น — ติ๊กรายละเอียดที่จะโชว์บนการ์ด (ระบบจำค่านี้ให้ครั้งหน้า)", "model(s) — tick what to show on each card (remembered for next time)")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {mktSel.slice(0, 8).map((m) => m.image_url
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img key={m.id} src={`${m.image_url}&w=80`} alt="" className="h-12 w-12 rounded object-cover border border-slate-200" />
+              : <span key={m.id} className="h-12 w-12 rounded border border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] font-mono text-slate-500">{m.code}</span>)}
+            {mktSel.length > 8 && <span className="h-12 px-2 flex items-center text-xs text-slate-400">+{mktSel.length - 8}</span>}
+          </div>
+          <div className="grid grid-cols-1 gap-1.5 border-t border-slate-100 pt-3">
+            {MKT_FIELD_OPTS.map((o) => { const on = mktFields.includes(o.key); return (
+              <label key={o.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${on ? "border-orange-300 bg-orange-50/60" : "border-slate-200 hover:bg-slate-50"}`}>
+                <input type="checkbox" checked={on} onChange={() => toggleMktField(o.key)} className="h-4 w-4 accent-orange-600" />
+                <span className="text-slate-700">{t(o.labelTh, o.labelEn)}</span>
+              </label>
+            ); })}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { setMktFields(MKT_FIELDS_ALL); void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "campaign_mkt_card_fields", value: MKT_FIELDS_ALL }) }).catch(() => {}); }} className="h-8 flex-1 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">{t("โชว์ทั้งหมด", "Show all")}</button>
+            <button type="button" onClick={() => { const v: MktFieldKey[] = ["image", "code", "name"]; setMktFields(v); void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "campaign_mkt_card_fields", value: v }) }).catch(() => {}); }} className="h-8 flex-1 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">{t("แบบย่อ (รูป+รหัส+ชื่อ)", "Minimal")}</button>
+          </div>
+        </div>
       </ERPModal>
 
       {/* เลือกใบงานออกแบบ (จาก Design Dashboard) หลายใบ → วางการ์ด · หรือกดสร้างใบงานใหม่จากบนกระดาน */}
