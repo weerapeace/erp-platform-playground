@@ -5,6 +5,7 @@
  *   📱 ช่องทาง: เลือกช่องทางที่โชว์ (แถวในมุมมองสัปดาห์ + ตัวเลือกในการ์ด) · ลากเรียงลำดับ · เพิ่มช่องทางใหม่ (เข้ารายการกลาง creative-options)
  *        + ลัดไป "แบรนด์ลงช่องทางไหน" (BrandPlatformsModal ของโมดูลคอนเทนต์ — ตอนเลือกแท็บแบรนด์ แถวจะเหลือเฉพาะช่องทางของแบรนด์นั้น)
  *   🧭 แนวคอนเทนต์: LabelListEditor (kind = pillar)
+ *   🎯 เป้ารายเดือน / 🗓️ สล็อตประจำสัปดาห์: ต่อแบรนด์ (plan-targets-slots.tsx)
  * ของกลาง: ERPModal · useDragReorder/DragHandle · PlatformIcon · createOption · BrandPlatformsModal · LabelListEditor · Toast
  */
 import { useEffect, useState } from "react";
@@ -19,10 +20,11 @@ import type { BrandOption } from "@/app/tasks/data";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { LabelListEditor } from "../skus/label-manager";
 import type { PlatformOpt } from "./plan-modal";
+import { BrandSelect, TargetsEditor, SlotsEditor } from "./plan-targets-slots";
 
-export type PlanSettingsTab = "platforms" | "pillars";
+export type PlanSettingsTab = "platforms" | "pillars" | "targets" | "slots";
 
-export function PlanSettingsModal({ open, onClose, initialTab = "platforms", allPlatforms, planPlatforms, pillars, brands, canEdit, canEditBrands, onPlatformsSaved, onPillarsChanged, onOptionsChanged, onBrandPlatformsSaved }: {
+export function PlanSettingsModal({ open, onClose, initialTab = "platforms", allPlatforms, planPlatforms, pillars, brands, defaultBrandId, canEdit, canEditBrands, onPlatformsSaved, onPillarsChanged, onOptionsChanged, onBrandPlatformsSaved, onTargetsChanged }: {
   open: boolean;
   onClose: () => void;
   initialTab?: PlanSettingsTab;
@@ -32,6 +34,8 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   planPlatforms: string[] | null;
   pillars: MarketingSkuLabel[];
   brands: BrandOption[];
+  /** แบรนด์เริ่มต้นของแท็บเป้า/สล็อต (แท็บแบรนด์ที่เปิดอยู่) */
+  defaultBrandId?: string | null;
   canEdit: boolean;
   /** แก้ "แบรนด์ลงช่องทางไหน" ได้ (สิทธิ์ของโมดูลคอนเทนต์ tasks.edit) */
   canEditBrands: boolean;
@@ -40,6 +44,8 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   /** เพิ่มช่องทางใหม่แล้ว → ให้หน้าโหลดรายการกลางใหม่ */
   onOptionsChanged: () => Promise<void> | void;
   onBrandPlatformsSaved: (map: BrandPlatformMap) => void;
+  /** เป้า/สล็อตเปลี่ยน → ให้หน้าแผนโหลดเป้าใหม่ */
+  onTargetsChanged: () => void;
 }) {
   const toast = useToast();
   const [tab, setTab] = useState<PlanSettingsTab>(initialTab);
@@ -49,6 +55,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   const [newName, setNewName] = useState("");
   const [pillarDirty, setPillarDirty] = useState(false);
   const [brandModal, setBrandModal] = useState<{ map: BrandPlatformMap; formats: BrandFormatMap } | null>(null);
+  const [brandId, setBrandId] = useState("");   // แบรนด์ของแท็บเป้า/สล็อต
 
   // เปิดใหม่ทุกครั้ง → ตั้งจากค่าล่าสุด: ที่เลือกไว้ (ตามลำดับ) ก่อน แล้วต่อด้วยช่องทางที่เหลือ
   const resetFrom = () => {
@@ -57,7 +64,10 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
     setOrder([...sel, ...keys.filter((k) => !sel.includes(k))]);
     setChosen(new Set(sel));
   };
-  useEffect(() => { if (open) { setTab(initialTab); resetFrom(); setNewName(""); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setTab(initialTab); resetFrom(); setNewName(""); setBrandId(defaultBrandId || brands[0]?.id || ""); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open && !brandId && brands[0]) setBrandId(brands[0].id); }, [open, brands, brandId]);
+  // ช่องทางสำหรับเป้า/สล็อต = ที่ตั้งให้โชว์ในหน้านี้ (เรียงแล้ว)
+  const planPlatformOpts = (planPlatforms ? planPlatforms : allPlatforms.map((p) => p.value)).map((k) => allPlatforms.find((p) => p.value === k)).filter((p): p is PlatformOpt => !!p);
   useEffect(() => { if (open) setOrder((o) => [...o, ...allPlatforms.map((p) => p.value).filter((k) => !o.includes(k))]); }, [allPlatforms, open]);
 
   const byKey = new Map(allPlatforms.map((p) => [p.value, p]));
@@ -104,7 +114,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title="⚙️ ตั้งค่าหน้าวางแผนคอนเทนต์" size="lg" defaultExpanded={false} hasUnsavedChanges={dirty}
+      <ERPModal open={open} onClose={onClose} title="⚙️ ตั้งค่าหน้าวางแผนคอนเทนต์" size="xl" defaultExpanded={false} hasUnsavedChanges={dirty}
         description={canEdit ? "ตั้งครั้งเดียว ใช้ทั้งทีม" : "คุณดูได้อย่างเดียว — การแก้ต้องมีสิทธิ์ \"ตั้งค่าป้าย SKU การตลาด\""}
         footer={tab === "platforms" && canEdit ? (
           <div className="flex w-full justify-end gap-2">
@@ -117,6 +127,8 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
           <button type="button" role="tab" aria-selected={tab === "platforms"} disabled={pillarDirty} onClick={() => setTab("platforms")} className={seg(tab === "platforms")}>📱 ช่องทาง ({curSel.length})</button>
           <button type="button" role="tab" aria-selected={tab === "pillars"} disabled={platformsDirty && canEdit} title={platformsDirty ? "บันทึกช่องทางก่อนสลับแท็บ" : undefined}
             onClick={() => setTab("pillars")} className={seg(tab === "pillars")}>🧭 แนวคอนเทนต์ ({pillars.length})</button>
+          <button type="button" role="tab" aria-selected={tab === "targets"} disabled={(platformsDirty && canEdit) || pillarDirty} onClick={() => setTab("targets")} className={seg(tab === "targets")}>🎯 เป้ารายเดือน</button>
+          <button type="button" role="tab" aria-selected={tab === "slots"} disabled={(platformsDirty && canEdit) || pillarDirty} onClick={() => setTab("slots")} className={seg(tab === "slots")}>🗓️ สล็อตประจำสัปดาห์</button>
         </div>
 
         {tab === "platforms" ? (
@@ -158,8 +170,15 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
               <span className="mt-1 block text-slate-400">ไอคอน/สีของช่องทาง ตั้งได้ที่ /tasks/settings แท็บแพลตฟอร์ม</span>
             </div>
           </div>
-        ) : (
+        ) : tab === "pillars" ? (
           <LabelListEditor kind="pillar" items={pillars} canEdit={canEdit} onChanged={onPillarsChanged} onDirtyChange={setPillarDirty} />
+        ) : (
+          <div className="space-y-3">
+            <BrandSelect brands={brands} value={brandId} onChange={setBrandId} />
+            {brandId && (tab === "targets"
+              ? <TargetsEditor key={`t-${brandId}`} brandId={brandId} platforms={planPlatformOpts} canEdit={canEdit} onChanged={onTargetsChanged} />
+              : <SlotsEditor key={`s-${brandId}`} brandId={brandId} platforms={planPlatformOpts} pillars={pillars} canEdit={canEdit} onChanged={onTargetsChanged} />)}
+          </div>
         )}
       </ERPModal>
 

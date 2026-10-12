@@ -93,3 +93,71 @@ export function dowLabel(key: string): string { return TH_DOW[parseDateKey(key).
 export function shortThaiDate(key: string): string {
   return parseDateKey(key).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
 }
+
+// ═══════════════ ก้อน 2: เป้ารายเดือน + สล็อตประจำสัปดาห์ ═══════════════
+
+export const WEEKDAYS_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];   // index 0 = จันทร์ (ตรงกับ content_plan_slots.weekday)
+
+export type PlanTarget = { id: string; brand_id: string; platform: string; post_type: string | null; monthly_count: number; sort_order?: number };
+export type PlanSlot = {
+  id: string; brand_id: string; weekday: number; post_time: string; platform: string; post_type: string | null;
+  pillar_id: string | null; title: string; is_active: boolean; sort_order?: number;
+};
+export type SlotDraft = { slot_id: string; date: string; time: string; title: string; platform: string; post_type: string | null; pillar_id: string | null };
+
+// ── เวลาไทย ฝั่งเซิร์ฟเวอร์ (เครื่องเป็น UTC) — คิดด้วย offset +07:00 ตรง ๆ ไม่พึ่ง timezone ของเครื่อง ──
+const BKK_OFFSET_MS = 7 * 60 * 60 * 1000;
+/** ISO (UTC) → "YYYY-MM-DD" ตามเวลาไทย (ใช้ได้ทั้ง client/server) */
+export function bangkokDateKey(iso: string | Date): string {
+  const t = (typeof iso === "string" ? new Date(iso) : iso).getTime() + BKK_OFFSET_MS;
+  return new Date(t).toISOString().slice(0, 10);
+}
+/** วัน + เวลาไทย → ISO (UTC) */
+export function bangkokIso(date: string, time: string): string {
+  return new Date(`${date}T${time}:00+07:00`).toISOString();
+}
+/** ทุกวันที่ในเดือน "YYYY-MM" ที่ตรงกับ weekday (0 = จันทร์) — คำนวณแบบปฏิทินล้วน ไม่ขึ้นกับ timezone */
+export function datesForWeekday(month: string, weekday: number): string[] {
+  const [y, m] = month.split("-").map(Number);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const out: string[] = [];
+  for (let d = 1; d <= days; d++) {
+    const dow = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+    if (dow === weekday) out.push(`${month}-${String(d).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+/**
+ * แผนที่จะสร้างจากสล็อตในเดือนนี้
+ *   ข้ามวันที่ผ่านไปแล้ว (ก่อน todayKey) · ข้ามที่เคยสร้างจากสล็อตเดียวกันวันเดียวกันแล้ว (existing = "slotId|YYYY-MM-DD")
+ */
+export function planSlotsForMonth(slots: PlanSlot[], month: string, existing: Set<string>, todayKey: string): { create: SlotDraft[]; skippedPast: number; skippedExisting: number } {
+  const create: SlotDraft[] = [];
+  let skippedPast = 0, skippedExisting = 0;
+  for (const s of slots) {
+    if (!s.is_active) continue;
+    for (const date of datesForWeekday(month, s.weekday)) {
+      if (date < todayKey) { skippedPast++; continue; }
+      if (existing.has(`${s.id}|${date}`)) { skippedExisting++; continue; }
+      create.push({ slot_id: s.id, date, time: s.post_time, title: s.title, platform: s.platform, post_type: s.post_type, pillar_id: s.pillar_id });
+    }
+  }
+  create.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return { create, skippedPast, skippedExisting };
+}
+
+type ProgressItem = { brand_id?: string | null; platforms?: string[] | null; post_type?: string | null; scheduled_at?: string | null; status?: string | null; task_id?: string | null };
+/** ความคืบหน้าเป้าในเดือน: วางแผนแล้ว (มีวันในเดือน ไม่ยกเลิก) / โพสต์แล้ว */
+export function targetProgress(t: PlanTarget, items: ProgressItem[], month: string): { planned: number; published: number } {
+  let planned = 0, published = 0;
+  for (const c of items) {
+    if (c.brand_id !== t.brand_id || c.status === "cancelled" || !c.scheduled_at) continue;
+    if (!(c.platforms ?? []).includes(t.platform)) continue;
+    if (t.post_type && !String(c.post_type ?? "").split(",").map((x) => x.trim()).includes(t.post_type)) continue;
+    if (bangkokDateKey(c.scheduled_at).slice(0, 7) !== month) continue;
+    planned++;
+    if (c.status === "published") published++;
+  }
+  return { planned, published };
+}

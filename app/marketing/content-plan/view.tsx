@@ -21,6 +21,8 @@ import {
 import { getBrandPlatforms, type BrandPlatformMap } from "@/app/tasks/content/brand-platforms-modal";
 import { PlanModal, type PlatformOpt } from "./plan-modal";
 import { PlanSettingsModal, type PlanSettingsTab } from "./plan-settings-modal";
+import { TargetsPanel, GenerateModal } from "./plan-targets-slots";
+import type { PlanTarget } from "@/lib/marketing/content-plan";
 import { WeekView, MonthView, BoardView, BacklogPanel } from "./plan-views";
 
 // รายละเอียดเต็ม/แคปชั่น = ContentDrawer ตัวเดิม (โหลดเมื่อเปิด)
@@ -51,6 +53,8 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
   const [settings, setSettings] = useState<PlanSettingsTab | null>(null);   // เปิดตั้งค่าหน้า (แท็บไหน)
   const [planPlatforms, setPlanPlatforms] = useState<string[] | null>(null); // ช่องทางที่ตั้งให้โชว์ · null = ทั้งหมด
   const [brandPlatforms, setBrandPlatforms] = useState<BrandPlatformMap>({});
+  const [targets, setTargets] = useState<PlanTarget[]>([]);
+  const [genOpen, setGenOpen] = useState(false);
   const { view, setView, saveDefault } = useViewPref<View>("content_plan_view", VIEWS, "week");
   const pickView = (v: View) => { setView(v); void saveDefault(v); };
 
@@ -79,7 +83,11 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
       setBrandPlatforms(bp.map);
     } catch { /* ตั้งค่าโหลดไม่ได้ = โชว์ทุกช่องทาง */ }
   }, []);
-  useEffect(() => { void load(); void loadPillars(); void loadSettings(); }, [load, loadPillars, loadSettings]);
+  const loadTargets = useCallback(async () => {
+    try { const j = await apiFetch("/api/marketing/content-plan/targets").then((r) => r.json()); if (!j.error) setTargets((j.data ?? []) as PlanTarget[]); }
+    catch { /* ไม่มีเป้า = แผงเป้าโชว์ชวนตั้ง */ }
+  }, []);
+  useEffect(() => { void load(); void loadPillars(); void loadSettings(); void loadTargets(); }, [load, loadPillars, loadSettings, loadTargets]);
 
   // แถวช่องทาง = ที่ตั้งไว้ (ตามลำดับ) หรือทั้งหมด · เลือกแท็บแบรนด์ที่ตั้ง "ลงช่องทางไหน" ไว้ → เหลือเฉพาะของแบรนด์นั้น
   const rowPlatforms = useMemo(() => {
@@ -172,6 +180,9 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
     if (view === "week") setAnchorWeek((w) => addDays(w, 7 * n));
     else { const d = parseDateKey(`${anchorMonth}-01`); d.setMonth(d.getMonth() + n); setAnchorMonth(localDateKey(d).slice(0, 7)); }
   };
+  // เดือนของช่วงที่ดูอยู่ (สัปดาห์ = เดือนของวันพฤหัสในสัปดาห์นั้น) — ใช้กับแผงเป้า + สร้างแผนจากสล็อต
+  const periodMonth = view === "month" ? anchorMonth : view === "week" ? addDays(anchorWeek, 3).slice(0, 7) : localDateKey(new Date()).slice(0, 7);
+  const brandName = brands.find((b) => b.id === brandTab)?.name ?? "";
   const goToday = () => { const t = localDateKey(new Date()); setAnchorWeek(weekStart(t)); setAnchorMonth(t.slice(0, 7)); };
 
   return (
@@ -226,9 +237,17 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
                   <span className="ml-1 text-sm font-semibold text-slate-700">{periodLabel}</span>
                 </div>
               )}
+              {canCreate && (
+                <button type="button" onClick={() => setGenOpen(true)} disabled={!brandTab}
+                  title={brandTab ? `ลงไอเดียตามสล็อตประจำสัปดาห์ของ ${brandName} ทั้งเดือน` : "เลือกแท็บแบรนด์ก่อน (สล็อตตั้งแยกต่อแบรนด์)"}
+                  className="h-8 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40">⚡ สร้างแผนจากสล็อต</button>
+              )}
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหาหัวข้อ / รหัส / บรีฟ…"
                 className="ml-auto h-9 w-full sm:w-64 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
+
+            <TargetsPanel targets={targets} items={live} month={periodMonth} brandTab={brandTab} brands={brands} platforms={platforms}
+              canSetup={canPillars} onSetup={() => setSettings("targets")} />
 
             {/* แนวคอนเทนต์: กรอง + สรุปจำนวนในช่วงที่ดู */}
             <div className="flex flex-wrap items-center gap-1.5">
@@ -281,7 +300,13 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
         allPlatforms={platforms} planPlatforms={planPlatforms} pillars={pillarsWithUsage} brands={brands}
         canEdit={canPillars} canEditBrands={canEdit}
         onPlatformsSaved={setPlanPlatforms} onPillarsChanged={() => void loadPillars()}
-        onOptionsChanged={() => reloadOptions(true)} onBrandPlatformsSaved={setBrandPlatforms} />
+        onOptionsChanged={() => reloadOptions(true)} onBrandPlatformsSaved={setBrandPlatforms}
+        defaultBrandId={brandTab || null} onTargetsChanged={() => void loadTargets()} />
+
+      {brandTab && (
+        <GenerateModal open={genOpen} brandId={brandTab} brandName={brandName} month={periodMonth} platforms={platforms} pillars={pillars}
+          onClose={() => setGenOpen(false)} onDone={() => void load()} onSetup={() => { setGenOpen(false); setSettings("slots"); }} />
+      )}
     </>
   );
 }
