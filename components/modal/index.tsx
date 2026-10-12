@@ -102,6 +102,8 @@ export interface ERPModalProps {
   storageKey?: string;
   /** โหมดฝังในกรอบอื่น (เช่น iframe) — เต็มกรอบ ไม่มี backdrop/กล่องลอย/หัวปุ่ม (ตัวครอบภายนอกคุมหัว+ปิด) กัน popup ซ้อน popup */
   embedded?: boolean;
+  /** เปิดแบบเต็มจอไหม — ไม่ส่ง = ตามค่าที่ผู้ใช้กดไว้ล่าสุด (ค่าเริ่มต้นเต็มจอ) · false = ป๊อปนี้เปิดขนาดปกติเสมอ (ยังกดขยายเองได้) */
+  defaultExpanded?: boolean;
 }
 
 export interface ConfirmDialogProps {
@@ -210,6 +212,7 @@ export function ERPModal({
   resizable = true,
   storageKey,
   embedded = false,
+  defaultExpanded,
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -217,6 +220,7 @@ export function ERPModal({
   // ป๊อปเล็ก (size="sm" = ยืนยัน/ถามสั้น ๆ) ไม่ขยาย เพราะเต็มจอแล้วอ่านยากกว่า
   const [expanded, setExpanded] = useState<boolean>(() => {
     if (size === "sm") return false;
+    if (defaultExpanded !== undefined) return defaultExpanded;
     try { const v = localStorage.getItem(EXPANDED_PREF_KEY); return v == null ? true : v === "1"; } catch { return true; }
   });
   // ขนาดที่ผู้ใช้ลากเอง (null = ใช้ preset). { w, h } เป็น px

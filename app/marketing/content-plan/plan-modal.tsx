@@ -40,18 +40,25 @@ function toDraft(c: ContentItem | null, defaults: { brandId?: string | null; dat
   };
 }
 
-export function PlanModal({ open, item, defaults, brands, pillars, platforms, canEdit, onClose, onSaved, onOpenDetail }: {
+export function PlanModal({ open, item, defaults, brands, pillars, platforms, planPlatforms, brandPlatforms, canEdit, onClose, onSaved, onOpenDetail, onOpenSettings }: {
   open: boolean;
   /** null = สร้างใหม่ */
   item: ContentItem | null;
   defaults: { brandId?: string | null; date?: string | null; platform?: string | null };
   brands: BrandOption[];
   pillars: MarketingSkuLabel[];
+  /** ช่องทางทั้งหมดจากรายการกลาง */
   platforms: PlatformOpt[];
+  /** ช่องทางที่ตั้งให้โชว์ในหน้าวางแผน (เรียงแล้ว) · null = ทั้งหมด */
+  planPlatforms: string[] | null;
+  /** แบรนด์ → ช่องทางที่ลง (ไม่มีคีย์ = ทุกช่องทาง) */
+  brandPlatforms: Record<string, string[]>;
   canEdit: boolean;
   onClose: () => void;
   onSaved: () => void;
   onOpenDetail: (id: string) => void;
+  /** ⚙️ เปิดตั้งค่าหน้าวางแผน (ซ้อนบนการ์ดนี้) */
+  onOpenSettings: () => void;
 }) {
   const toast = useToast();
   const [d, setD] = useState<Draft>(() => toDraft(item, defaults));
@@ -66,6 +73,15 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, ca
   const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
   const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const stage = item ? stageOf(item) : "idea";
+  // ตัวเลือกช่องทาง = ที่ตั้งไว้ในหน้าวางแผน ∩ ช่องทางของแบรนด์ที่เลือก (ถ้าแบรนด์ตั้งไว้) · ที่เลือกอยู่แล้วโชว์เสมอ
+  const platformChoices = useMemo(() => {
+    const byKey = new Map(platforms.map((p) => [p.value, p]));
+    let keys = planPlatforms ? planPlatforms.filter((k) => byKey.has(k)) : platforms.map((p) => p.value);
+    const brandList = d.brand_id ? brandPlatforms[d.brand_id] : undefined;
+    if (brandList) keys = keys.filter((k) => brandList.includes(k));
+    for (const k of d.platforms) if (!keys.includes(k) && byKey.has(k)) keys.push(k);
+    return keys.map((k) => byKey.get(k)!).filter(Boolean);
+  }, [platforms, planPlatforms, brandPlatforms, d.brand_id, d.platforms]);
   const locked = item?.status === "published";   // โพสต์แล้ว = ระบบเดิมล็อกเนื้อหาหลัก
 
   const payload = () => ({
@@ -137,7 +153,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, ca
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} size="lg" hasUnsavedChanges={dirty && canEdit}
+      <ERPModal open={open} onClose={onClose} size="lg" defaultExpanded={false} hasUnsavedChanges={dirty && canEdit}
         title={item ? `${item.content_no ?? ""} ${item.title}`.trim() : "💡 ไอเดียคอนเทนต์ใหม่"}
         description={item && stage ? `${STAGE_META[stage].icon} ${STAGE_META[stage].label}${item.task_no ? ` · งาน ${item.task_no}` : ""}` : "วางแผนก่อน รายละเอียดแคปชั่นค่อยเติมทีหลังได้"}
         footer={
@@ -164,6 +180,9 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, ca
           </div>
         }>
         <div className="space-y-4">
+          <div className="-mb-2 flex justify-end">
+            <button type="button" onClick={onOpenSettings} className="rounded-md px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800">⚙️ ตั้งค่าหน้านี้ (ช่องทาง/แนว)</button>
+          </div>
           {locked && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">โพสต์แล้ว — แก้ได้เฉพาะแนว/เป้าหมาย/บรีฟ/วัน (เนื้อหาหลักล็อกตามระบบเดิม)</div>}
           <div>
             <label className={label}>หัวข้อ *</label>
@@ -201,7 +220,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, ca
                   {p.icon && <span>{p.icon}</span>}{p.name}
                 </button>
               ))}
-              {pillars.length === 0 && <span className="text-xs text-slate-400">ยังไม่มีแนวคอนเทนต์ — ตั้งได้ที่ "🧭 ตั้งค่าแนว"</span>}
+              {pillars.length === 0 && <span className="text-xs text-slate-400">ยังไม่มีแนวคอนเทนต์ — ตั้งได้ที่ "⚙️ ตั้งค่าหน้านี้"</span>}
             </div>
           </div>
 
@@ -231,7 +250,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, ca
           <div>
             <label className={label}>ลงที่ไหน</label>
             <div className="flex flex-wrap gap-1.5">
-              {platforms.map((p) => (
+              {platformChoices.map((p) => (
                 <button key={p.value} type="button" disabled={ro || locked} onClick={() => set({ platforms: toggle(d.platforms, p.value) })} className={chip(d.platforms.includes(p.value))}>
                   <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={14} />{p.label}
                 </button>

@@ -70,15 +70,24 @@ export function PlanCard({ item, pillar, compact = false, showDate = false, canE
 }
 
 // ── สัปดาห์: แถว = ช่องทาง · คอลัมน์ = 7 วัน ──
-export function WeekView({ start, items, platforms, pillarOf, canEdit, onOpen, onAdd, onMove }: {
-  start: string; items: ContentItem[]; platforms: PlatformOpt[]; pillarOf: (c: ContentItem) => MarketingSkuLabel | undefined;
+export function WeekView({ start, items, platforms, allPlatforms, pillarOf, canEdit, onOpen, onAdd, onMove }: {
+  /** แถว = ช่องทางที่ตั้งให้โชว์ (เรียงแล้ว) */
+  start: string; items: ContentItem[]; platforms: PlatformOpt[];
+  /** ทุกช่องทาง (ไว้หาชื่อ/ไอคอน ของช่องทางที่ซ่อนแต่มีคอนเทนต์ในสัปดาห์นี้) */
+  allPlatforms: PlatformOpt[];
+  pillarOf: (c: ContentItem) => MarketingSkuLabel | undefined;
   canEdit: boolean; onOpen: (c: ContentItem) => void; onAdd: (date: string, platform: string | null) => void;
   onMove: (id: string, date: string | null, platform: string | null) => void;
 }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const today = localDateKey(new Date());
   const inWeek = items.filter((c) => { const k = dateKeyOf(c.scheduled_at); return k && k >= days[0] && k <= days[6]; });
+  // ช่องทางที่ถูกซ่อนแต่มีคอนเทนต์ในสัปดาห์นี้ → ยังโชว์ (กันคอนเทนต์หาย) พร้อมป้าย "ซ่อนอยู่"
+  const shown = new Set(platforms.map((p) => p.value));
+  const hiddenUsed = [...new Set(inWeek.flatMap((c) => c.platforms ?? []))].filter((k) => !shown.has(k));
+  const allByKey = new Map(allPlatforms.map((p) => [p.value, p]));
   const rows = [...platforms.map((p) => ({ key: p.value, label: p.label, p })),
+    ...hiddenUsed.map((k) => ({ key: k, label: `${allByKey.get(k)?.label ?? k} (ซ่อนอยู่)`, p: allByKey.get(k) ?? ({ value: k, label: k } as PlatformOpt) })),
     ...(inWeek.some((c) => !(c.platforms ?? []).length) ? [{ key: NO_PLATFORM, label: "ยังไม่เลือกช่องทาง", p: null as PlatformOpt | null }] : [])];
   const cellItems = (day: string, row: string) => inWeek.filter((c) => dateKeyOf(c.scheduled_at) === day
     && (row === NO_PLATFORM ? !(c.platforms ?? []).length : (c.platforms ?? []).includes(row)));

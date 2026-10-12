@@ -18,8 +18,9 @@ import {
   stageOf, statusForStage, dateKeyOf, timeOf, toScheduledIso, localDateKey, weekStart, addDays, shortThaiDate, parseDateKey,
   type PlanStage,
 } from "@/lib/marketing/content-plan";
-import { LabelManagerModal } from "../skus/label-manager";
+import { getBrandPlatforms, type BrandPlatformMap } from "@/app/tasks/content/brand-platforms-modal";
 import { PlanModal, type PlatformOpt } from "./plan-modal";
+import { PlanSettingsModal, type PlanSettingsTab } from "./plan-settings-modal";
 import { WeekView, MonthView, BoardView, BacklogPanel } from "./plan-views";
 
 // รายละเอียดเต็ม/แคปชั่น = ContentDrawer ตัวเดิม (โหลดเมื่อเปิด)
@@ -33,7 +34,7 @@ const writeLS = (k: string, v: string) => { try { localStorage.setItem(k, v); } 
 
 export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate: boolean; canEdit: boolean; canPillars: boolean }) {
   const toast = useToast();
-  const { platforms: platformOpts } = useCreativeOptions();
+  const { platforms: platformOpts, reload: reloadOptions } = useCreativeOptions();
   const platforms = platformOpts as PlatformOpt[];
 
   const [items, setItems] = useState<ContentItem[] | null>(null);
@@ -47,7 +48,9 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
   const [anchorMonth, setAnchorMonth] = useState(() => localDateKey(new Date()).slice(0, 7));
   const [modal, setModal] = useState<{ item: ContentItem | null; date?: string | null; platform?: string | null } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [pillarMgr, setPillarMgr] = useState(false);
+  const [settings, setSettings] = useState<PlanSettingsTab | null>(null);   // เปิดตั้งค่าหน้า (แท็บไหน)
+  const [planPlatforms, setPlanPlatforms] = useState<string[] | null>(null); // ช่องทางที่ตั้งให้โชว์ · null = ทั้งหมด
+  const [brandPlatforms, setBrandPlatforms] = useState<BrandPlatformMap>({});
   const { view, setView, saveDefault } = useViewPref<View>("content_plan_view", VIEWS, "week");
   const pickView = (v: View) => { setView(v); void saveDefault(v); };
 
@@ -69,7 +72,24 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
       setErr(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ");
     }
   }, []);
-  useEffect(() => { void load(); void loadPillars(); }, [load, loadPillars]);
+  const loadSettings = useCallback(async () => {
+    try {
+      const [j, bp] = await Promise.all([apiFetch("/api/marketing/content-plan-settings").then((r) => r.json()), getBrandPlatforms()]);
+      if (!j.error) setPlanPlatforms(Array.isArray(j.platforms) ? j.platforms : null);
+      setBrandPlatforms(bp.map);
+    } catch { /* ตั้งค่าโหลดไม่ได้ = โชว์ทุกช่องทาง */ }
+  }, []);
+  useEffect(() => { void load(); void loadPillars(); void loadSettings(); }, [load, loadPillars, loadSettings]);
+
+  // แถวช่องทาง = ที่ตั้งไว้ (ตามลำดับ) หรือทั้งหมด · เลือกแท็บแบรนด์ที่ตั้ง "ลงช่องทางไหน" ไว้ → เหลือเฉพาะของแบรนด์นั้น
+  const rowPlatforms = useMemo(() => {
+    const byKey = new Map(platforms.map((p) => [p.value, p]));
+    let keys = planPlatforms ? planPlatforms.filter((k) => byKey.has(k)) : platforms.map((p) => p.value);
+    const brandList = brandTab ? brandPlatforms[brandTab] : undefined;
+    if (brandList) keys = keys.filter((k) => brandList.includes(k));
+    return keys.map((k) => byKey.get(k)!);
+  }, [platforms, planPlatforms, brandPlatforms, brandTab]);
+  const brandFiltered = !!(brandTab && brandPlatforms[brandTab]);
 
   const pillarMap = useMemo(() => new Map(pillars.map((p) => [p.id, p])), [pillars]);
   const pillarOf = useCallback((c: ContentItem) => (c.pillar_id ? pillarMap.get(c.pillar_id) : undefined), [pillarMap]);
@@ -163,7 +183,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
             <p className="text-sm text-slate-500 mt-1">จะลงอะไร แนวไหน ลงที่ไหน · ข้อมูลชุดเดียวกับ <Link href="/tasks/content-calendar" className="text-blue-600 hover:underline">ปฏิทินคอนเทนต์</Link> ของทีม Creative</p>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setPillarMgr(true)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">🧭 {canPillars ? "ตั้งค่าแนว" : "ดูแนว"}</button>
+            <button type="button" onClick={() => setSettings("platforms")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">⚙️ ตั้งค่า</button>
             {canCreate && <button type="button" onClick={() => openNew()} className="h-9 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white hover:bg-blue-700">＋ ไอเดียใหม่</button>}
           </div>
         </div>
@@ -235,7 +255,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
                 <div className="min-w-0">
                   {view === "week"
-                    ? <WeekView start={anchorWeek} items={filtered} platforms={platforms} pillarOf={pillarOf} canEdit={canEdit}
+                    ? <WeekView start={anchorWeek} items={filtered} platforms={rowPlatforms} allPlatforms={platforms} pillarOf={pillarOf} canEdit={canEdit}
                         onOpen={openItem} onAdd={(d, p) => openNew(d, p)} onMove={(id, d, p) => void move(id, d, p)} />
                     : <MonthView ym={anchorMonth} items={filtered} pillarOf={pillarOf} canEdit={canEdit}
                         onOpen={openItem} onAdd={(d) => openNew(d)} onMove={(id, d) => void move(id, d, null)} />}
@@ -244,19 +264,24 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
                   onDrop={(id) => void move(id, null, null)} />
               </div>
             )}
+            {view === "week" && brandFiltered && <p className="text-xs text-slate-400">แสดงเฉพาะช่องทางที่แบรนด์นี้ลง ({rowPlatforms.length}) · ปรับได้ที่ ⚙️ ตั้งค่า → ช่องทาง → ตั้งค่าต่อแบรนด์</p>}
             {canEdit && view !== "board" && <p className="text-xs text-slate-400">ลากการ์ดไปวางช่องวันเพื่อเปลี่ยนวัน (เวลาเดิมคงไว้) · ลากกลับกล่องไอเดีย = เอาวันออก · กด ＋ ในช่องเพื่อเพิ่มไอเดียลงวันนั้น</p>}
           </>
         )}
       </div>
 
       <PlanModal open={!!modal} item={modal?.item ?? null} defaults={{ brandId: brandTab || null, date: modal?.date ?? null, platform: modal?.platform ?? null }}
-        brands={brands} pillars={pillars} platforms={platforms} canEdit={modal?.item ? canEdit : canCreate}
-        onClose={() => setModal(null)} onSaved={() => void load()} onOpenDetail={(id) => { setModal(null); setDetailId(id); }} />
+        brands={brands} pillars={pillars} platforms={platforms} planPlatforms={planPlatforms} brandPlatforms={brandPlatforms} canEdit={modal?.item ? canEdit : canCreate}
+        onClose={() => setModal(null)} onSaved={() => void load()} onOpenDetail={(id) => { setModal(null); setDetailId(id); }}
+        onOpenSettings={() => setSettings("platforms")} />
 
       {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => void load()} pushToast={pushToast} />}
 
-      <LabelManagerModal open={pillarMgr} onClose={() => setPillarMgr(false)} kinds={["pillar"]} pillars={pillarsWithUsage} title="🧭 แนวคอนเทนต์"
-        canEdit={canPillars} onChanged={() => void loadPillars()} />
+      <PlanSettingsModal open={!!settings} initialTab={settings ?? "platforms"} onClose={() => setSettings(null)}
+        allPlatforms={platforms} planPlatforms={planPlatforms} pillars={pillarsWithUsage} brands={brands}
+        canEdit={canPillars} canEditBrands={canEdit}
+        onPlatformsSaved={setPlanPlatforms} onPillarsChanged={() => void loadPillars()}
+        onOptionsChanged={() => reloadOptions(true)} onBrandPlatformsSaved={setBrandPlatforms} />
     </>
   );
 }
