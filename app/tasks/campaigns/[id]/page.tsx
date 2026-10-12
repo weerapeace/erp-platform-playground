@@ -67,6 +67,8 @@ const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type ParentSkuVal = { id: string; code: string; name: string; image_url: string | null };
+// การ์ด "SKU การตลาด" = รุ่น (Parent SKU) + ป้ายการตลาด + ป้ายเสริม + สีที่เหลือ — ข้อมูลจากหน้า /marketing/skus (API /api/marketing/skus)
+type MktSkuVal = { id: string; code: string; name: string; image_url: string | null; label: string | null; label_color: string | null; badges: string[]; sku_active: number; sku_total: number; note: string | null };
 
 // โซนสำเร็จรูปสำหรับกระดานแคมเปญ
 const sectionPresets = (): string[] => [tt("ไอเดีย (Brainstorming)", "Brainstorming"), "Reference", tt("ข้อมูล (Information)", "Information"), tt("สินค้าใน Campaign", "Products in Campaign"), tt("งาน (Tasks)", "Tasks")];
@@ -101,6 +103,28 @@ function parentSkuCardSkeleton(s: ParentSkuVal): Record<string, unknown>[] {
   ];
   if (hasImg) els.push({ type: "image", _imageUrl: s.image_url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
   els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#0f766e", groupIds: [gid], customData: data });
+  return els;
+}
+
+// การ์ด SKU การตลาด บน Excalidraw (ขอบ = สีป้ายการตลาด · ไม่มีป้าย = ส้ม) — ดับเบิลคลิกเปิดตัวแก้สินค้ากลาง (Parent)
+function marketingSkuCardSkeleton(s: MktSkuVal): Record<string, unknown>[] {
+  const gid = `marketing_sku-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
+  const data = { kind: "marketing_sku", id: s.id, code: s.code, name: s.name, image_url: s.image_url ?? null, label: s.label, badges: s.badges, sku_active: s.sku_active, sku_total: s.sku_total };
+  const hasImg = !!s.image_url;
+  const tags = [s.label ? `🏷 ${s.label}` : null, ...s.badges.map((b) => `· ${b}`)].filter(Boolean).join(" ");
+  const text = [
+    `🎯 ${s.code}`, wrapCardText(s.name, 24, 2), tags || null,
+    `🎨 ${tt("สีที่เหลือ", "Colors left")} ${s.sku_active}/${s.sku_total}`,
+    s.note ? wrapCardText(`📝 ${s.note}`, 26, 2) : null,
+  ].filter(Boolean).join("\n");
+  const lineCount = text.split("\n").length;
+  const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = txtY + lineCount * 20 + 12;
+  const stroke = s.label_color && /^#[0-9a-fA-F]{6}$/.test(s.label_color) ? s.label_color : "#ea580c";
+  const els: Record<string, unknown>[] = [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: stroke, fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+  ];
+  if (hasImg) els.push({ type: "image", _imageUrl: s.image_url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
+  els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#9a3412", groupIds: [gid], customData: data });
   return els;
 }
 
@@ -400,6 +424,8 @@ export default function CampaignCanvasPage() {
   const [fForm, setFForm] = useState({ label: "", path: "" });
   const [parentOpen, setParentOpen] = useState(false);  // modal การ์ด Parent SKU
   const [parentSel, setParentSel] = useState<ParentSkuVal[]>([]);
+  const [mktOpen, setMktOpen] = useState(false);        // modal การ์ด SKU การตลาด
+  const [mktSel, setMktSel] = useState<MktSkuVal[]>([]);
   // โหมดเลือกแบบ "การ์ดใหญ่ ตามแท็ก" (ของกลาง SkuTagBrowser) — จำค่าไว้ต่อคน
   const [bigPick, setBigPick] = useState(false);
   useEffect(() => { try { setBigPick(localStorage.getItem("campaign-bigpick") === "1"); } catch { /* ignore */ } }, []);
@@ -484,6 +510,13 @@ export default function CampaignCanvasPage() {
     void sketchRef.current.insert(all);
     setParentOpen(false); setParentSel([]);
   };
+  const confirmMkt = () => {
+    if (!mktSel.length || !sketchRef.current) return;
+    const all: Record<string, unknown>[] = [];
+    mktSel.forEach((s, i) => { const dx = i * 270; for (const el of marketingSkuCardSkeleton(s)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+    void sketchRef.current.insert(all);
+    setMktOpen(false); setMktSel([]);
+  };
   // เลือกรูปจากคลังเสร็จ → เด้งกล่องถามว่าจะดึงข้อมูลอะไรมาด้วย
   const onAssetPicked = (assets: AssetRow[]) => { setAssetSel(assets); setAssetOpen(false); setAssetOptOpen(true); };
   const toggleAssetField = (k: AssetFieldKey) => setAssetFields((f) => f.includes(k) ? f.filter((x) => x !== k) : [...f, k]);
@@ -552,7 +585,7 @@ export default function CampaignCanvasPage() {
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
-  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); else if (data.kind === "table") setTableView(data); else if (data.kind === "design_sheet") setDsViewId(String(data.id ?? "")); else if (data.kind === "trend") window.open(`/tasks/trends/${encodeURIComponent(String(data.id ?? ""))}`, "_blank", "noopener"); }, [openFolder]);
+  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku" || data.kind === "marketing_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); else if (data.kind === "table") setTableView(data); else if (data.kind === "design_sheet") setDsViewId(String(data.id ?? "")); else if (data.kind === "trend") window.open(`/tasks/trends/${encodeURIComponent(String(data.id ?? ""))}`, "_blank", "noopener"); }, [openFolder]);
   // สร้างตารางคำนวณใหม่ → วางการ์ดบนกระดาน
   const createTableCard = async () => {
     try {
@@ -758,6 +791,7 @@ export default function CampaignCanvasPage() {
             <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[
               { icon: "📦", label: "SKU Card", hint: t("สินค้าราย SKU", "Product SKUs"), onClick: () => { setSkuSel([]); setSkuOpen(true); } },
               { icon: "🧬", label: "Parent SKU", hint: t("สินค้าหลัก", "Parent products"), onClick: () => { setParentSel([]); setParentOpen(true); } },
+              { icon: "🎯", label: t("SKU การตลาด", "Marketing SKU"), hint: t("รุ่น + ป้าย + สีที่เหลือ (จากหน้า SKU การตลาด)", "Model + labels + colors left"), onClick: () => { setMktSel([]); setMktOpen(true); } },
               { icon: "✅", label: "Task Card", hint: t("สร้างงานใหม่ + วางการ์ด", "New task + card"), onClick: () => setTaskOpen(true) },
               { icon: "🧲", label: t("ลากงานเข้า", "Drag tasks in"), hint: t("งานในแคมเปญที่ยังไม่อยู่บนกระดาน", "Campaign tasks not on the board yet"), onClick: openDragPanel },
               { icon: "📱", label: "Content Card", hint: t("คอนเทนต์ที่จะโพสต์", "Content to post"), onClick: () => setContentOpen(true) },
@@ -835,6 +869,15 @@ export default function CampaignCanvasPage() {
         {bigPick
           ? <BigTagPick entity="parent-skus" picked={parentSel.map((x) => x.id)} onPick={toggleParentPick} t={t} />
           : <ParentSkuMultiPick selected={parentSel} onChange={setParentSel} />}
+      </ERPModal>
+
+      <ERPModal open={mktOpen} onClose={() => setMktOpen(false)} title={t("เพิ่มการ์ด SKU การตลาด ลงกระดาน", "Add Marketing SKU card to board")} size="lg"
+        footer={<>
+          <a href="/marketing/skus" target="_blank" rel="noreferrer" className="mr-auto h-9 px-3 inline-flex items-center text-sm text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-50">🎯 {t("เปิดหน้า SKU การตลาด", "Open Marketing SKUs")}</a>
+          <button onClick={() => setMktOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={confirmMkt} disabled={!mktSel.length} className="h-9 px-4 text-sm text-white bg-orange-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{mktSel.length ? ` (${mktSel.length})` : ""}</button>
+        </>}>
+        <MarketingSkuMultiPick selected={mktSel} onChange={setMktSel} />
       </ERPModal>
 
       {/* เลือกใบงานออกแบบ (จาก Design Dashboard) หลายใบ → วางการ์ด · หรือกดสร้างใบงานใหม่จากบนกระดาน */}
@@ -983,7 +1026,7 @@ export default function CampaignCanvasPage() {
       {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
       <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title={t("การ์ดบนกระดาน", "Cards on board")} size="md"
         footer={<button onClick={() => setCardsOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
-        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "parent_sku") setParentRecId(String(c.data.id ?? "")); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); else if (c.kind === "asset") setAssetView(c.data); else if (c.kind === "design_sheet") setDsViewId(String(c.data.id ?? "")); }} />
+        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "parent_sku" || c.kind === "marketing_sku") setParentRecId(String(c.data.id ?? "")); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); else if (c.kind === "asset") setAssetView(c.data); else if (c.kind === "design_sheet") setDsViewId(String(c.data.id ?? "")); }} />
       </ERPModal>
 
       {/* สร้างงานจริง (ฟอร์มเดียวกับหน้างาน) -- ล็อกแคมเปญนี้ → วางการ์ดงานบนกระดาน */}
@@ -1115,6 +1158,7 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
   const tasks = cards.filter((c) => c.kind === "task");
   const skus = cards.filter((c) => c.kind === "sku");
   const parentSkus = cards.filter((c) => c.kind === "parent_sku");
+  const mktSkus = cards.filter((c) => c.kind === "marketing_sku");
   const contents = cards.filter((c) => c.kind === "content");
   const folders = cards.filter((c) => c.kind === "folder");
   const assets = cards.filter((c) => c.kind === "asset");
@@ -1135,6 +1179,21 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
           </div>
         )}
       </div>
+      {mktSkus.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">🎯 {t("การ์ด SKU การตลาด", "Marketing SKU cards")} ({mktSkus.length})</p>
+          <div className="space-y-1.5">
+            {mktSkus.map((c, i) => (
+              <button key={i} onClick={() => onOpen(c)} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 hover:border-orange-300 hover:bg-orange-50/40 text-left">
+                <span className="font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{String(c.data.code ?? "")}</span>
+                <span className="text-sm text-slate-700 flex-1 truncate">{String(c.data.name ?? "")}</span>
+                {c.data.label ? <span className="text-[10px] text-orange-700 bg-orange-50 rounded px-1.5 py-0.5 shrink-0">{String(c.data.label)}</span> : null}
+                <span className="text-[10px] text-slate-400 shrink-0">🎨 {String(c.data.sku_active ?? "")}/{String(c.data.sku_total ?? "")}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {parentSkus.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">🧬 {t("การ์ด Parent SKU", "Parent SKU cards")} ({parentSkus.length})</p>
@@ -1271,6 +1330,78 @@ function ParentSkuMultiPick({ selected, onChange }: { selected: ParentSkuVal[]; 
         )}
       </div>
       {!loading && total > 0 && <p className="text-[11px] text-slate-400">{t("พบ", "Found")} {total} {t("รายการ", "items")}{results.length < total ? ` · ${t("แสดง", "showing")} ${results.length}` : ""}</p>}
+    </div>
+  );
+}
+
+// เลือก "SKU การตลาด" หลายรุ่น — โหลดรายการทั้งหมดครั้งเดียว (API เดียวกับหน้า /marketing/skus) แล้วค้น/กรองแบรนด์/ป้าย ในเครื่อง
+type MktApiLabel = { id: string; name: string; icon: string | null; color: string };
+type MktApiItem = { parent_sku_id: string; code: string; name: string; image_key: string | null; brand_id: string | null; label_id: string | null; note: string | null; sku_total: number; sku_active: number; badge_ids: string[] };
+function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; onChange: (v: MktSkuVal[]) => void }) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const [brandId, setBrandId] = useState("");
+  const [labelId, setLabelId] = useState("");
+  const [items, setItems] = useState<(MktSkuVal & { brand_id: string | null; label_id: string | null })[]>([]);
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [labels, setLabels] = useState<MktApiLabel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiFetch("/api/marketing/skus").then(async (r) => {
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || (r.status === 401 || r.status === 403 ? t("ไม่มีสิทธิ์ดู SKU การตลาด (marketing.sku.view)", "No permission (marketing.sku.view)") : `HTTP ${r.status}`));
+      if (!alive) return;
+      const d = j.data as { items: MktApiItem[]; labels: MktApiLabel[]; badges: MktApiLabel[]; brands: { id: string; name: string }[] };
+      const lab = new Map<string, MktApiLabel>(); for (const l of [...(d.labels ?? []), ...(d.badges ?? [])]) lab.set(l.id, l);
+      setLabels(d.labels ?? []); setBrands(d.brands ?? []);
+      setItems((d.items ?? []).map((it) => ({
+        id: it.parent_sku_id, code: it.code, name: it.name,
+        image_url: it.image_key ? `/api/r2-image?key=${encodeURIComponent(it.image_key)}` : null,
+        label: it.label_id ? (lab.get(it.label_id)?.name ?? null) : null,
+        label_color: it.label_id ? (lab.get(it.label_id)?.color ?? null) : null,
+        badges: (it.badge_ids ?? []).map((b) => lab.get(b)?.name ?? "").filter(Boolean),
+        sku_active: it.sku_active, sku_total: it.sku_total, note: it.note,
+        brand_id: it.brand_id, label_id: it.label_id,
+      })));
+    }).catch((e) => { if (alive) setError(e instanceof Error ? e.message : "โหลดไม่ได้"); }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [t]);
+  const q = query.trim().toLowerCase();
+  const shown = items.filter((it) => (!brandId || it.brand_id === brandId) && (!labelId || it.label_id === labelId) && (!q || `${it.code} ${it.name} ${it.label ?? ""} ${it.badges.join(" ")}`.toLowerCase().includes(q))).slice(0, 300);
+  const toggle = (s: MktSkuVal) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
+  return (
+    <div className="space-y-2">
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("🔍 ค้นหารหัสรุ่น / ชื่อ / ป้าย...", "🔍 Search model / name / label...")} className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+      <div className="flex flex-wrap gap-1">
+        <button type="button" onClick={() => setBrandId("")} className={`h-7 rounded-full border px-2.5 text-[11px] ${!brandId ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200"}`}>{t("ทุกแบรนด์", "All brands")}</button>
+        {brands.map((b) => <button key={b.id} type="button" onClick={() => setBrandId(brandId === b.id ? "" : b.id)} className={`h-7 rounded-full border px-2.5 text-[11px] ${brandId === b.id ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200"}`}>{b.name}</button>)}
+      </div>
+      {labels.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          <button type="button" onClick={() => setLabelId("")} className={`h-7 rounded-full border px-2.5 text-[11px] ${!labelId ? "bg-orange-600 text-white border-orange-600" : "bg-white text-slate-600 border-slate-200"}`}>{t("ทุกป้าย", "All labels")}</button>
+          {labels.map((l) => <button key={l.id} type="button" onClick={() => setLabelId(labelId === l.id ? "" : l.id)} className={`h-7 rounded-full border px-2.5 text-[11px] ${labelId === l.id ? "text-white" : "bg-white text-slate-600 border-slate-200"}`} style={labelId === l.id ? { backgroundColor: l.color, borderColor: l.color } : undefined}>{l.icon ? `${l.icon} ` : ""}{l.name}</button>)}
+        </div>
+      )}
+      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-orange-50 text-orange-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
+      <div className="max-h-72 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
+        {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("กำลังโหลด...", "Loading...")}</p>
+          : error ? <p className="px-3 py-3 text-sm text-rose-600 text-center">⚠️ {error}</p>
+          : shown.length === 0 ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("ไม่พบรุ่นที่ตรง", "No matching model")}</p>
+          : shown.map((s) => { const on = selected.some((x) => x.id === s.id); return (
+            <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-orange-50/40" : ""}`}>
+              <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-orange-600 pointer-events-none" />
+              {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">🎯</span>}
+              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+              {s.label && <span className="text-[10px] rounded px-1.5 py-0.5 text-white shrink-0" style={{ backgroundColor: s.label_color || "#ea580c" }}>{s.label}</span>}
+              {s.badges.length > 0 && <span className="text-[10px] text-slate-400 shrink-0" title={s.badges.join(", ")}>+{s.badges.length}</span>}
+              <span className="text-[11px] text-slate-500 shrink-0">🎨 {s.sku_active}/{s.sku_total}</span>
+            </button>
+          ); })}
+      </div>
+      {!loading && !error && <p className="text-[11px] text-slate-400">{t("แสดง", "Showing")} {shown.length}{items.length > shown.length ? ` / ${items.length}` : ""} {t("รุ่น", "models")}{shown.length >= 300 ? ` · ${t("พิมพ์ค้นหาเพื่อกรองเพิ่ม", "type to narrow down")}` : ""}</p>}
     </div>
   );
 }
