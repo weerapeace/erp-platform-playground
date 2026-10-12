@@ -13,6 +13,8 @@ import dynamic from "next/dynamic";
 import { SkuTagBrowser } from "@/components/sku-tag-browser";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { apiFetch } from "@/lib/api";
+import { useViewPref } from "@/lib/use-view-pref";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { suppressUnload } from "@/lib/canvas-unload-guard";
 import { ERPModal } from "@/components/modal";
 import { ERPInput, ERPDateTime24 } from "@/components/form";
@@ -871,7 +873,7 @@ export default function CampaignCanvasPage() {
           : <ParentSkuMultiPick selected={parentSel} onChange={setParentSel} />}
       </ERPModal>
 
-      <ERPModal open={mktOpen} onClose={() => setMktOpen(false)} title={t("เพิ่มการ์ด SKU การตลาด ลงกระดาน", "Add Marketing SKU card to board")} size="lg"
+      <ERPModal open={mktOpen} onClose={() => setMktOpen(false)} title={t("เพิ่มการ์ด SKU การตลาด ลงกระดาน", "Add Marketing SKU card to board")} size="xl"
         footer={<>
           <a href="/marketing/skus" target="_blank" rel="noreferrer" className="mr-auto h-9 px-3 inline-flex items-center text-sm text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-50">🎯 {t("เปิดหน้า SKU การตลาด", "Open Marketing SKUs")}</a>
           <button onClick={() => setMktOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
@@ -1347,6 +1349,9 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
   const [labels, setLabels] = useState<MktApiLabel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // มุมมอง ☰ รายการ / 🖼️ การ์ด — จำรายคน (ของกลาง useViewPref) · จำนวนการ์ดต่อแถว (ของกลาง gallery-columns)
+  const { view, setView, saveDefault } = useViewPref("campaign_mkt_pick_view", ["list", "grid"] as const, "grid");
+  const { cols, setCols, gridStyle } = useGalleryColumns("campaign-mkt-pick", 5);
   useEffect(() => {
     let alive = true;
     apiFetch("/api/marketing/skus").then(async (r) => {
@@ -1384,7 +1389,46 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
           {labels.map((l) => <button key={l.id} type="button" onClick={() => setLabelId(labelId === l.id ? "" : l.id)} className={`h-7 rounded-full border px-2.5 text-[11px] ${labelId === l.id ? "text-white" : "bg-white text-slate-600 border-slate-200"}`} style={labelId === l.id ? { backgroundColor: l.color, borderColor: l.color } : undefined}>{l.icon ? `${l.icon} ` : ""}{l.name}</button>)}
         </div>
       )}
-      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-orange-50 text-orange-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+          {([["grid", "🖼️", t("การ์ด", "Cards")], ["list", "☰", t("รายการ", "List")]] as const).map(([k, icon, label]) => (
+            <button key={k} type="button" onClick={() => { setView(k); void saveDefault(k); }} className={`h-7 rounded px-2 text-xs ${view === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{icon} {label}</button>
+          ))}
+        </div>
+        {view === "grid" && <GalleryColumnsControl cols={cols} onChange={setCols} />}
+        {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-orange-50 text-orange-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
+      </div>
+      {view === "grid" ? (
+        /* 🖼️ การ์ด: รูปใหญ่ + รหัส/ชื่อ/ป้าย/สีที่เหลือ · ติ๊กที่มุม · กดการ์ด = เลือก */
+        <div className="max-h-[62vh] overflow-y-auto rounded-lg border border-slate-100 p-2">
+          {loading ? <p className="px-3 py-6 text-sm text-slate-400 text-center">{t("กำลังโหลด...", "Loading...")}</p>
+            : error ? <p className="px-3 py-6 text-sm text-rose-600 text-center">⚠️ {error}</p>
+            : shown.length === 0 ? <p className="px-3 py-6 text-sm text-slate-400 text-center">{t("ไม่พบรุ่นที่ตรง", "No matching model")}</p>
+            : (
+              <div style={gridStyle}>
+                {shown.map((s) => { const on = selected.some((x) => x.id === s.id); return (
+                  <button key={s.id} type="button" onClick={() => toggle(s)} title={`${s.code} · ${s.name}`}
+                    className={`relative flex flex-col overflow-hidden rounded-lg border bg-white text-left transition ${on ? "border-orange-500 ring-2 ring-orange-200" : "border-slate-200 hover:border-orange-300"}`}
+                    style={s.label_color && on ? { borderColor: s.label_color } : undefined}>
+                    <span className={`absolute left-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold shadow-sm ${on ? "border-orange-600 bg-orange-600 text-white" : "border-slate-300 bg-white/90 text-transparent"}`}>✓</span>
+                    {s.label && <span className="absolute right-1.5 top-1.5 z-10 rounded px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm" style={{ backgroundColor: s.label_color || "#ea580c" }}>{s.label}</span>}
+                    {s.image_url
+                      ? <img src={`${s.image_url}&w=400`} alt="" loading="lazy" className="aspect-square w-full bg-slate-50 object-contain" />
+                      : <span className="flex aspect-square w-full items-center justify-center bg-slate-50 text-3xl text-slate-300">🎯</span>}
+                    <span className="flex flex-1 flex-col gap-0.5 p-2">
+                      <span className="font-mono text-[10px] text-slate-500">{s.code}</span>
+                      <span className="line-clamp-2 text-xs font-medium leading-snug text-slate-800">{s.name}</span>
+                      <span className="mt-auto flex items-center justify-between gap-1 pt-0.5 text-[10px] text-slate-500">
+                        <span>🎨 {s.sku_active}/{s.sku_total}</span>
+                        {s.badges.length > 0 && <span className="truncate text-slate-400" title={s.badges.join(", ")}>{s.badges.join(" · ")}</span>}
+                      </span>
+                    </span>
+                  </button>
+                ); })}
+              </div>
+            )}
+        </div>
+      ) : (
       <div className="max-h-72 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
         {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("กำลังโหลด...", "Loading...")}</p>
           : error ? <p className="px-3 py-3 text-sm text-rose-600 text-center">⚠️ {error}</p>
@@ -1401,6 +1445,7 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
             </button>
           ); })}
       </div>
+      )}
       {!loading && !error && <p className="text-[11px] text-slate-400">{t("แสดง", "Showing")} {shown.length}{items.length > shown.length ? ` / ${items.length}` : ""} {t("รุ่น", "models")}{shown.length >= 300 ? ` · ${t("พิมพ์ค้นหาเพื่อกรองเพิ่ม", "type to narrow down")}` : ""}</p>}
     </div>
   );
