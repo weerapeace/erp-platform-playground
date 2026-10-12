@@ -176,6 +176,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       link("primary", "ปุ่มหลัก", "ดูสินค้าทั้งหมด", "/shop"),
       link("secondary", "ปุ่มรอง", "", ""),
       image("imageKey", "รูปพื้นหลัง", { hint: "แนะนำกว้าง 1600px+ · ไม่ใส่ = พื้นหลังไล่สีจากธีม" }),
+      image("mobileImageKey", "รูปพื้นหลัง (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · จอมือถือแคบ รูปแนวนอนจะโดนตัดข้าง แนะนำรูปแนวตั้ง 1080×1350+" }),
       text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, hint: "มีผลกับ SEO" }),
       f("overlay", "ความทึบของสีทับรูป (%)", "range", { group: "media", default: 45, min: 0, numMax: 90, step: 5 }),
       f("videoUrl", "วิดีโอพื้นหลัง (ลิงก์ .mp4 / .webm)", "href", {
@@ -232,6 +233,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     meta: { label: "รูปภาพ / แบนเนอร์รูป", icon: "🏞️", hint: "รูปเดี่ยว + คำบรรยาย + ลิงก์", group: "พื้นฐาน" },
     fields: [
       image("imageKey", "รูปภาพ", { hint: "แนะนำกว้าง 1200px+", required: true, requiredMessage: "ยังไม่ได้เลือกรูป" }),
+      image("mobileImageKey", "รูปภาพ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · ใส่เมื่ออยากให้จอมือถือเห็นรูปคนละแนว เช่น แนวตั้ง" }),
       text("alt", "คำบรรยายรูป (Alt) — มีผลกับ SEO", { group: "media", default: "", max: 200, placeholder: "อธิบายว่าในรูปคืออะไร" }),
       text("caption", "ข้อความใต้รูป", { default: "", max: 300 }),
       f("href", "ลิงก์เมื่อคลิกรูป", "href", { group: "action", default: "", placeholder: "/shop", hint: "ไม่ใส่ = คลิกไม่ได้" }),
@@ -409,6 +411,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       max: 10,
       fields: [
         image("imageKey", "รูปสไลด์", { hint: "แนะนำกว้าง 1600px+" }),
+        image("mobileImageKey", "รูปสไลด์ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · แนะนำแนวตั้ง" }),
         text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200 }),
         text("eyebrow", "คำโปรยเล็ก", { default: "", max: 80 }),
         text("title", "หัวข้อบนรูป", { default: "", max: 120, wide: true }),

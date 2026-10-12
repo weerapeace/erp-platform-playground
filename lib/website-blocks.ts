@@ -164,6 +164,8 @@ export interface HeroBlock extends BlockBase {
   features: (ChildBase & { title: string; desc: string })[];
   /** รูปพื้นหลัง (r2 key) — ว่าง = ใช้พื้นหลังไล่สีเดิม */
   imageKey: string | null;
+  /** รูปพื้นหลังสำหรับจอมือถือ (< 768px) — ว่าง = ใช้ imageKey (กฎเดียวกันทุก Section ที่มีรูปเต็มจอ) */
+  mobileImageKey: string | null;
   imageAlt: string;
   /** ความทึบของสีดำที่ทับรูป 0–90 (%) */
   overlay: number;
@@ -245,6 +247,7 @@ export type ImageWidth = "full" | "wide" | "narrow";
 export interface ImageBlock extends BlockBase {
   type: "image";
   imageKey: string | null;
+  mobileImageKey: string | null;
   alt: string;
   caption: string;
   width: ImageWidth;
@@ -281,6 +284,7 @@ export interface SlideshowBlock extends BlockBase {
   height: "short" | "medium" | "tall";
   slides: (ChildBase & {
     imageKey: string | null;
+    mobileImageKey: string | null;
     alt: string;
     eyebrow: string;
     title: string;

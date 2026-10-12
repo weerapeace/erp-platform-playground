@@ -82,3 +82,9 @@
 - Block ย่อยทุกชิ้นมี `id` / `enabled` / `visibility` (ERP เติมให้ตอน normalize · เว็บร้าน `parseBlocks` ตัดชิ้นที่ `enabled=false`)
 - `style.mobile` = ค่าทับเฉพาะจอ < 768px (ระยะห่างบน/ล่าง/จัดข้อความ) · เว็บร้านแปลงเป็น `data-*-m` + CSS ท้าย globals.css
 - API สาธารณะ `site`/`page` ส่งโครงที่ผ่าน normalize แล้ว (id ชิ้นย่อยตรงกับที่ตัวจัดหน้าเห็น)
+
+## รูปแยกจอมือถือ (`mobileImageKey`)
+
+Section ที่มีรูปเต็มจอ (hero · image · slideshow/สไลด์) มีช่อง `mobileImageKey` คู่กับ `imageKey`
+ว่าง = ใช้รูปเดียวกับคอม · ฝั่งเว็บร้านแสดงด้วย `<picture><source media="(max-width: 767px)">` (breakpoint เดียวกับ `md:`)
+เพิ่ม Section ใหม่ที่มีรูปเต็มจอ ให้ใช้ชื่อ key นี้เหมือนกัน
