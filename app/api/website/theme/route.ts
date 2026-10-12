@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import {
   normalizeTheme,
   mergeTheme,
@@ -138,7 +139,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     metadata: { version: nextNo, note: body.note ?? null },
   });
 
-  return NextResponse.json({ ok: true, mode: "publish", theme: normalizeTheme(merged), version: nextNo });
+  // สั่งเว็บร้านล้างแคช → ธีมใหม่ขึ้นเว็บจริงทันที
+  const purged = await purgeStorefrontCache(sb, body.shopId);
+
+  return NextResponse.json({ ok: true, purged, mode: "publish", theme: normalizeTheme(merged), version: nextNo });
 }
 
 /** ละทิ้งร่าง */

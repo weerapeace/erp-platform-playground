@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, defaultLayout, BLOCK_META } from "@/lib/website-blocks";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 
@@ -120,7 +121,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     metadata: { blocks: blocks.length, version: nextNo },
   });
 
-  return NextResponse.json({ ok: true, mode: "publish", blocks, version: nextNo });
+  // สั่งเว็บร้านล้างแคช → เว็บจริงเปลี่ยนทันที (ไม่สำเร็จ = อัปเดตเองใน ≤60 วิ)
+  const purged = await purgeStorefrontCache(sb, body.shopId);
+
+  return NextResponse.json({ ok: true, mode: "publish", blocks, version: nextNo, purged });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {

@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, BLOCK_META } from "@/lib/website-blocks";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 
@@ -239,7 +240,15 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ ok: true, mode: publish ? "publish" : "draft", blocks: blocks ?? undefined });
+  // เผยแพร่ (โครงหรือชื่อ/SEO) → สั่งเว็บร้านล้างแคช
+  let purged = false;
+  if (publish) {
+    const { data: pg } = await sb.from("store_pages").select("shop_id").eq("id", body.pageId).maybeSingle();
+    const shopId = (pg as { shop_id: string } | null)?.shop_id;
+    if (shopId) purged = await purgeStorefrontCache(sb, shopId);
+  }
+
+  return NextResponse.json({ ok: true, mode: publish ? "publish" : "draft", blocks: blocks ?? undefined, purged });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {

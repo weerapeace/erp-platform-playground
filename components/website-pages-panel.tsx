@@ -254,7 +254,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       if (mode === "publish") {
         setPublishedBlocks(blocks);
         setHasDraft(false);
-        toast.success("เผยแพร่หน้านี้แล้ว — เว็บอัปเดตใน ~1 นาที");
+        toast.success(j.purged ? "เผยแพร่หน้านี้แล้ว — เว็บจริงเปลี่ยนแล้ว รีเฟรชดูได้เลย" : "เผยแพร่หน้านี้แล้ว — เว็บจริงจะเปลี่ยนภายใน 1 นาที");
         setPreviewVersion((v) => v + 1);
       } else {
         setHasDraft(true);

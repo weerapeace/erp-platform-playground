@@ -79,3 +79,10 @@ ERP (/website/<slug>)  ──API สาธารณะ──▶  เว็บห
 - Header/Footer ยังไม่อยู่ในตัวจัดหน้า (ดึงจากแท็บดีไซน์ + ข้อมูลร้าน) · ยังไม่มีการตั้งค่า Typography ต่อบล็อก (ใช้ธีมร้าน)
 - หน้า `/about` `/oem` `/gallery` `/quote` เป็น route ที่ฝังในโค้ด → ร้านอื่นสร้างหน้าชื่อซ้ำพวกนี้จาก ERP ไม่ได้ (ERP กันไว้ใน RESERVED แล้ว)
 - รายการหน้าในพรีวิวแท็บดีไซน์ (`PAGES` ใน website-theme-panel) ยังเป็นชุดของ IG
+
+## เผยแพร่แล้วเว็บจริงเปลี่ยนทันที (ล้างแคช)
+
+- เว็บร้านแคชข้อมูลจาก ERP ไว้ 60 วิ (ISR + tag `site-config`) · API สาธารณะ site/page ของ ERP ไม่แคชที่ edge
+- หลังเผยแพร่ หน้าแรก / หน้าเว็บ / ธีม → ERP เรียก `POST <โดเมนร้าน>/api/revalidate?shop=<slug>` (`lib/storefront-revalidate.ts`)
+- เว็บร้านเช็ก slug ตรงกับตัวเอง แล้ว `revalidateTag('site-config')` + `revalidatePath('/', 'layout')`
+- เรียกไม่สำเร็จ (ยังไม่ผูกโดเมน / เว็บล่ม) → toast บอกว่า "จะเปลี่ยนภายใน 1 นาที"

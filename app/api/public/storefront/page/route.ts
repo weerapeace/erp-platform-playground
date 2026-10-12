@@ -26,13 +26,13 @@ export async function OPTIONS(): Promise<NextResponse> {
 }
 
 /**
- * แคช 60 วิที่ edge เฉพาะของจริง — โหมดพรีวิว (ร่าง) ต้อง no-store
- * ⚠️ เคยพลาด: Vercel edge แคช preview=1 ไว้ 60 วิ → บันทึกร่างแล้วพรีวิวยังโชว์ของเก่า
+ * ไม่แคชที่ edge เลย — เว็บร้านแคชเอง 60 วิ (ISR + tag) และถูก ERP สั่งล้างตอนเผยแพร่ (lib/storefront-revalidate.ts)
+ * ⚠️ เคยพลาด: Vercel edge แคชไว้ 60 วิ → เผยแพร่/บันทึกร่างแล้ว เว็บยังโชว์ของเก่า
  */
-const json = (body: unknown, status = 200, noStore = false) =>
+const json = (body: unknown, status = 200) =>
   NextResponse.json(body, {
     status,
-    headers: { ...CORS, "Cache-Control": noStore ? "no-store" : "public, max-age=60, stale-while-revalidate=300" },
+    headers: { ...CORS, "Cache-Control": "no-store" },
   });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data } = preview ? await q : await q.eq("status", "published");
     return json({
       pages: ((data ?? []) as { slug: string; title: string }[]).map((p) => ({ slug: p.slug, title: p.title })),
-    }, 200, preview);
+    });
   }
 
   const { data: p } = await sb
@@ -89,5 +89,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     title: row.title,
     seo: (row.seo ?? {}) as Record<string, string>,
     layout: normalizeBlocks(layout),
-  }, 200, preview);
+  });
 }

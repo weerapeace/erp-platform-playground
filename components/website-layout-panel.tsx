@@ -202,7 +202,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       setBlocks(j.blocks);
       setNeverSet(false);
       setHadDraft(false);
-      toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บอัปเดตใน ~1 นาที`);
+      toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version})${j.purged ? " — เว็บจริงเปลี่ยนแล้ว รีเฟรชดูได้เลย" : " — เว็บจริงจะเปลี่ยนภายใน 1 นาที"}`);
       setPreviewVersion((v) => v + 1);
     } catch {
       toast.error("เชื่อมต่อไม่ได้");
