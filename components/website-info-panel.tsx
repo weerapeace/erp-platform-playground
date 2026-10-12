@@ -82,6 +82,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       setSaved(j.info);
       setInfo(j.info);
       setPrefix(j.effectiveOrderPrefix ?? "");
+      window.dispatchEvent(new Event("website-info-saved"));
       toast.success("บันทึกข้อมูลร้านแล้ว — เว็บจะอัปเดตภายใน 1 นาที");
     } catch {
       toast.error("บันทึกไม่สำเร็จ");

@@ -19,6 +19,7 @@ import { WebsiteLayoutPanel } from "@/components/website-layout-panel";
 import { WebsitePagesPanel } from "@/components/website-pages-panel";
 import { WebsiteInfoPanel } from "@/components/website-info-panel";
 import { WebsiteOrdersPanel } from "@/components/website-orders-panel";
+import { WebsiteOpenToggle } from "@/components/website-open-toggle";
 
 type Shop = { id: string; name: string; slug: string; isDefault: boolean };
 
@@ -271,12 +272,16 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
           <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
             ← เว็บไซต์ทั้งหมด
           </Link>
-          <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2 mt-1.5">
-            🌐 {shop?.name ?? "กำลังโหลด…"}
-            {shop?.isDefault && (
-              <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">ร้านหลัก</span>
-            )}
-          </h1>
+          <div className="flex flex-wrap items-center gap-3 mt-1.5">
+            <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+              🌐 {shop?.name ?? "กำลังโหลด…"}
+              {shop?.isDefault && (
+                <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">ร้านหลัก</span>
+              )}
+            </h1>
+            {/* ปุ่มเปิด/ปิดเว็บชั่วคราว — ค่าเดียวกับช่องในแท็บข้อมูลร้าน */}
+            {shop && <WebsiteOpenToggle shopSlug={shop.slug} shopId={shop.id} />}
+          </div>
           <p className="text-sm text-slate-500 mt-1">
             กำหนดว่าสินค้าไหนขึ้นเว็บร้านนี้ พร้อมตั้งชื่อ/ราคา/หน่วย/หมวดเฉพาะเว็บ — เว้นว่าง = เติมอัตโนมัติจาก ERP
           </p>

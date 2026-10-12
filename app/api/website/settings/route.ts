@@ -11,6 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import {
   SITE_INFO_FIELDS,
   SITE_INFO_GROUPS,
@@ -86,5 +87,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     metadata: { shop: s.slug, changed },
   });
 
-  return NextResponse.json({ ok: true, info, effectiveOrderPrefix: orderPrefixFor(info, s.slug) });
+  // ข้อมูลร้านมีผลกับทุกหน้า (ท้ายเว็บ/ติดต่อ/ปิดเว็บชั่วคราว) → สั่งเว็บร้านล้างแคชทันที
+  const purged = await purgeStorefrontCache(sb, s.id);
+
+  return NextResponse.json({ ok: true, info, effectiveOrderPrefix: orderPrefixFor(info, s.slug), purged });
 }
