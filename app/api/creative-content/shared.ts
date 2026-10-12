@@ -26,6 +26,11 @@ export function validateContentFields(body: Record<string, unknown>): string | n
       return "รูปอ้างอิงไม่ถูกต้อง";
     if (body.ref_image_keys.length > 12) return "รูปอ้างอิงได้สูงสุด 12 รูป";
   }
+  // ลงที่ไหน แบบแบ่งประเภท "ประเภท:ช่องทาง" เช่น story:instagram
+  if (body.placements != null) {
+    if (!Array.isArray(body.placements) || body.placements.length > 60 || body.placements.some((k) => typeof k !== "string" || !/^[a-z0-9_-]{1,40}:[a-z0-9_-]{1,60}$/i.test(k)))
+      return "ประเภทการลงไม่ถูกต้อง";
+  }
   return null;
 }
 
@@ -36,7 +41,7 @@ export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sk
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, platform_formats, note,
   discount_value, discount_is_percent, color_source,
   is_template, template_icon, is_active, created_at, updated_at, assignee_id, assignee_ids,
-  pillar_id, goal, brief, ref_image_keys,
+  pillar_id, goal, brief, ref_image_keys, placements,
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price),

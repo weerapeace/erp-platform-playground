@@ -22,7 +22,7 @@ import { getBrandPlatforms, type BrandPlatformMap } from "@/app/tasks/content/br
 import { PlanModal, type PlatformOpt } from "./plan-modal";
 import { PlanSettingsModal, type PlanSettingsTab } from "./plan-settings-modal";
 import { TargetsPanel, GenerateModal } from "./plan-targets-slots";
-import type { PlanTarget } from "@/lib/marketing/content-plan";
+import { DEFAULT_PLACEMENTS, type PlanTarget, type PlacementType } from "@/lib/marketing/content-plan";
 import { WeekView, MonthView, BoardView, BacklogPanel } from "./plan-views";
 
 // รายละเอียดเต็ม/แคปชั่น = ContentDrawer ตัวเดิม (โหลดเมื่อเปิด)
@@ -54,6 +54,8 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
   const [planPlatforms, setPlanPlatforms] = useState<string[] | null>(null); // ช่องทางที่ตั้งให้โชว์ · null = ทั้งหมด
   const [brandPlatforms, setBrandPlatforms] = useState<BrandPlatformMap>({});
   const [targets, setTargets] = useState<PlanTarget[]>([]);
+  const [placementSetting, setPlacementSetting] = useState<PlacementType[] | null>(null);   // null = ยังไม่ตั้ง → ค่าเริ่มต้น
+  const placementTypes = placementSetting ?? DEFAULT_PLACEMENTS;
   const [genOpen, setGenOpen] = useState(false);
   const { view, setView, saveDefault } = useViewPref<View>("content_plan_view", VIEWS, "week");
   const pickView = (v: View) => { setView(v); void saveDefault(v); };
@@ -79,7 +81,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
   const loadSettings = useCallback(async () => {
     try {
       const [j, bp] = await Promise.all([apiFetch("/api/marketing/content-plan-settings").then((r) => r.json()), getBrandPlatforms()]);
-      if (!j.error) setPlanPlatforms(Array.isArray(j.platforms) ? j.platforms : null);
+      if (!j.error) { setPlanPlatforms(Array.isArray(j.platforms) ? j.platforms : null); setPlacementSetting(Array.isArray(j.placements) ? j.placements : null); }
       setBrandPlatforms(bp.map);
     } catch { /* ตั้งค่าโหลดไม่ได้ = โชว์ทุกช่องทาง */ }
   }, []);
@@ -274,7 +276,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
                 <div className="min-w-0">
                   {view === "week"
-                    ? <WeekView start={anchorWeek} items={filtered} platforms={rowPlatforms} allPlatforms={platforms} pillarOf={pillarOf} canEdit={canEdit}
+                    ? <WeekView start={anchorWeek} items={filtered} platforms={rowPlatforms} allPlatforms={platforms} placementTypes={placementTypes} pillarOf={pillarOf} canEdit={canEdit}
                         onOpen={openItem} onAdd={(d, p) => openNew(d, p)} onMove={(id, d, p) => void move(id, d, p)} />
                     : <MonthView ym={anchorMonth} items={filtered} pillarOf={pillarOf} canEdit={canEdit}
                         onOpen={openItem} onAdd={(d) => openNew(d)} onMove={(id, d) => void move(id, d, null)} />}
@@ -290,16 +292,16 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
       </div>
 
       <PlanModal open={!!modal} item={modal?.item ?? null} defaults={{ brandId: brandTab || null, date: modal?.date ?? null, platform: modal?.platform ?? null }}
-        brands={brands} pillars={pillars} platforms={platforms} planPlatforms={planPlatforms} brandPlatforms={brandPlatforms} canEdit={modal?.item ? canEdit : canCreate}
+        brands={brands} pillars={pillars} platforms={platforms} planPlatforms={planPlatforms} brandPlatforms={brandPlatforms} placementTypes={placementTypes} canEdit={modal?.item ? canEdit : canCreate}
         onClose={() => setModal(null)} onSaved={() => void load()} onOpenDetail={(id) => { setModal(null); setDetailId(id); }}
         onOpenSettings={() => setSettings("platforms")} />
 
       {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => void load()} pushToast={pushToast} />}
 
       <PlanSettingsModal open={!!settings} initialTab={settings ?? "platforms"} onClose={() => setSettings(null)}
-        allPlatforms={platforms} planPlatforms={planPlatforms} pillars={pillarsWithUsage} brands={brands}
+        allPlatforms={platforms} planPlatforms={planPlatforms} placementTypes={placementTypes} pillars={pillarsWithUsage} brands={brands}
         canEdit={canPillars} canEditBrands={canEdit}
-        onPlatformsSaved={setPlanPlatforms} onPillarsChanged={() => void loadPillars()}
+        onPlatformsSaved={(pf, pt) => { setPlanPlatforms(pf); setPlacementSetting(pt); }} onPillarsChanged={() => void loadPillars()}
         onOptionsChanged={() => reloadOptions(true)} onBrandPlatformsSaved={setBrandPlatforms}
         defaultBrandId={brandTab || null} onTargetsChanged={() => void loadTargets()} />
 

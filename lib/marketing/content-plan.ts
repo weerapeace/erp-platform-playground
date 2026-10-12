@@ -161,3 +161,41 @@ export function targetProgress(t: PlanTarget, items: ProgressItem[], month: stri
   }
   return { planned, published };
 }
+
+// ═══════════════ "ลงที่ไหน" แบบแบ่งประเภทการลง ═══════════════
+/** ประเภทการลง เช่น แต่งร้าน (Shopee/Lazada/TikTok) · Story (Facebook/IG) — ตั้งค่าใน ui_config marketing_content_plan.placements */
+export type PlacementType = { key: string; label: string; icon: string | null; platforms: string[] };
+
+/** ค่าเริ่มต้นเมื่อยังไม่ได้ตั้ง (เจ้าของยกตัวอย่าง 2026-10-12 + โพสต์ฟีด) — แก้/ลบ/เพิ่มได้ที่ ⚙️ ตั้งค่า → ช่องทาง */
+export const DEFAULT_PLACEMENTS: PlacementType[] = [
+  { key: "shop_decor", label: "แต่งร้าน", icon: "🏪", platforms: ["shopee", "lazada", "tiktok"] },
+  { key: "product", label: "ในสินค้า", icon: "🛍️", platforms: ["shopee", "lazada", "tiktok"] },
+  { key: "story", label: "Story", icon: "📱", platforms: ["facebook", "instagram"] },
+  { key: "feed", label: "โพสต์ฟีด", icon: "📰", platforms: ["facebook", "instagram", "tiktok"] },
+];
+
+export const placementId = (typeKey: string, platform: string) => `${typeKey}:${platform}`;
+export function parsePlacement(id: string): { type: string; platform: string } | null {
+  const i = id.indexOf(":");
+  return i > 0 && i < id.length - 1 ? { type: id.slice(0, i), platform: id.slice(i + 1) } : null;
+}
+/** ช่องทางรวม (เก็บลง platforms เดิม) = ช่องทางจากประเภทการลง ∪ ช่องทางที่เลือกแบบไม่ระบุประเภท (ของเดิม) */
+export function platformsFromPlacements(placements: string[], loosePlatforms: string[] = []): string[] {
+  const out: string[] = [];
+  for (const p of placements) { const x = parsePlacement(p); if (x && !out.includes(x.platform)) out.push(x.platform); }
+  for (const p of loosePlatforms) if (!out.includes(p)) out.push(p);
+  return out;
+}
+/** ป้ายประเภทการลงของคอนเทนต์บนช่องทางหนึ่ง เช่น ["แต่งร้าน","ในสินค้า"] (ใช้โชว์บนการ์ดในแถวช่องทางนั้น) */
+export function placementLabelsFor(placements: string[] | null | undefined, platform: string | null, types: PlacementType[]): string[] {
+  const byKey = new Map(types.map((t) => [t.key, t]));
+  const out: string[] = [];
+  for (const id of placements ?? []) {
+    const x = parsePlacement(id);
+    if (!x || (platform && x.platform !== platform)) continue;
+    const t = byKey.get(x.type);
+    const lbl = t ? `${t.icon ? `${t.icon} ` : ""}${t.label}` : x.type;
+    if (!out.includes(lbl)) out.push(lbl);
+  }
+  return out;
+}

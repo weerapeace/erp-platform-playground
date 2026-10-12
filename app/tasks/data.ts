@@ -404,6 +404,7 @@ export type ContentItem = {
   assignee_ids?: string[] | null; assignees?: { id: string; name: string }[];   // ผู้รับผิดชอบหลายคน (m2m)
   // ฝั่งวางแผน (หน้า /marketing/content-plan): แนวคอนเทนต์ (marketing_sku_labels kind=pillar) · เป้าหมาย · บรีฟ · รูปอ้างอิง
   pillar_id?: string | null; goal?: string | null; brief?: string | null; ref_image_keys?: string[]; ref_image_urls?: string[];
+  placements?: string[];   // ลงที่ไหน แบบแบ่งประเภท "ประเภท:ช่องทาง" (platforms ยังเก็บช่องทางรวมเหมือนเดิม)
 };
 
 // หาแบรนด์จากสินค้าที่เลือก (Parent SKU หรือ SKU เดี่ยว) — ให้ฟอร์มคอนเทนต์เติมแบรนด์อัตโนมัติ

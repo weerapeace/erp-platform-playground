@@ -29,7 +29,7 @@ async function resolveContentCover(admin: ReturnType<typeof supabaseAdmin>, cont
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "posted_links", "post_status", "platform_images", "platform_formats", "note", "discount_value", "discount_is_percent", "color_source", "template_icon", "assignee_id", "assignee_ids", "pillar_id", "goal", "brief", "ref_image_keys"]);
+const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "posted_links", "post_status", "platform_images", "platform_formats", "note", "discount_value", "discount_is_percent", "color_source", "template_icon", "assignee_id", "assignee_ids", "pillar_id", "goal", "brief", "ref_image_keys", "placements"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;

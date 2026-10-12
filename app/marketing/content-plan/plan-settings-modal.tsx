@@ -4,6 +4,7 @@
  * ⚙️ ตั้งค่าหน้าวางแผนคอนเทนต์ — เปิดได้จากหัวหน้า และจากในการ์ดไอเดีย
  *   📱 ช่องทาง: เลือกช่องทางที่โชว์ (แถวในมุมมองสัปดาห์ + ตัวเลือกในการ์ด) · ลากเรียงลำดับ · เพิ่มช่องทางใหม่ (เข้ารายการกลาง creative-options)
  *        + ลัดไป "แบรนด์ลงช่องทางไหน" (BrandPlatformsModal ของโมดูลคอนเทนต์ — ตอนเลือกแท็บแบรนด์ แถวจะเหลือเฉพาะช่องทางของแบรนด์นั้น)
+ *        + ประเภทการลง (แต่งร้าน / ในสินค้า / Story …) แต่ละประเภทติ๊กช่องทางของตัวเอง — บันทึกพร้อมช่องทาง
  *   🧭 แนวคอนเทนต์: LabelListEditor (kind = pillar)
  *   🎯 เป้ารายเดือน / 🗓️ สล็อตประจำสัปดาห์: ต่อแบรนด์ (plan-targets-slots.tsx)
  * ของกลาง: ERPModal · useDragReorder/DragHandle · PlatformIcon · createOption · BrandPlatformsModal · LabelListEditor · Toast
@@ -21,10 +22,11 @@ import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { LabelListEditor } from "../skus/label-manager";
 import type { PlatformOpt } from "./plan-modal";
 import { BrandSelect, TargetsEditor, SlotsEditor } from "./plan-targets-slots";
+import type { PlacementType } from "@/lib/marketing/content-plan";
 
 export type PlanSettingsTab = "platforms" | "pillars" | "targets" | "slots";
 
-export function PlanSettingsModal({ open, onClose, initialTab = "platforms", allPlatforms, planPlatforms, pillars, brands, defaultBrandId, canEdit, canEditBrands, onPlatformsSaved, onPillarsChanged, onOptionsChanged, onBrandPlatformsSaved, onTargetsChanged }: {
+export function PlanSettingsModal({ open, onClose, initialTab = "platforms", allPlatforms, planPlatforms, placementTypes, pillars, brands, defaultBrandId, canEdit, canEditBrands, onPlatformsSaved, onPillarsChanged, onOptionsChanged, onBrandPlatformsSaved, onTargetsChanged }: {
   open: boolean;
   onClose: () => void;
   initialTab?: PlanSettingsTab;
@@ -32,6 +34,8 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   allPlatforms: PlatformOpt[];
   /** ช่องทางที่ตั้งไว้ให้โชว์ (เรียงแล้ว) · null = ยังไม่ตั้ง (โชว์ทั้งหมด) */
   planPlatforms: string[] | null;
+  /** ประเภทการลงที่ใช้อยู่ (ค่าที่บันทึก หรือค่าเริ่มต้น) */
+  placementTypes: PlacementType[];
   pillars: MarketingSkuLabel[];
   brands: BrandOption[];
   /** แบรนด์เริ่มต้นของแท็บเป้า/สล็อต (แท็บแบรนด์ที่เปิดอยู่) */
@@ -39,7 +43,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   canEdit: boolean;
   /** แก้ "แบรนด์ลงช่องทางไหน" ได้ (สิทธิ์ของโมดูลคอนเทนต์ tasks.edit) */
   canEditBrands: boolean;
-  onPlatformsSaved: (platforms: string[] | null) => void;
+  onPlatformsSaved: (platforms: string[] | null, placements: PlacementType[]) => void;
   onPillarsChanged: () => void;
   /** เพิ่มช่องทางใหม่แล้ว → ให้หน้าโหลดรายการกลางใหม่ */
   onOptionsChanged: () => Promise<void> | void;
@@ -58,7 +62,9 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   const [brandId, setBrandId] = useState("");   // แบรนด์ของแท็บเป้า/สล็อต
 
   // เปิดใหม่ทุกครั้ง → ตั้งจากค่าล่าสุด: ที่เลือกไว้ (ตามลำดับ) ก่อน แล้วต่อด้วยช่องทางที่เหลือ
+  const [ptypes, setPtypes] = useState<PlacementType[]>([]);   // ประเภทการลง (กำลังแก้)
   const resetFrom = () => {
+    setPtypes(placementTypes.map((t) => ({ ...t, platforms: [...t.platforms] })));
     const keys = allPlatforms.map((p) => p.value);
     const sel = planPlatforms ? planPlatforms.filter((k) => keys.includes(k)) : keys;
     setOrder([...sel, ...keys.filter((k) => !sel.includes(k))]);
@@ -73,19 +79,25 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   const byKey = new Map(allPlatforms.map((p) => [p.value, p]));
   const savedSel = (planPlatforms ?? allPlatforms.map((p) => p.value)).filter((k) => byKey.has(k));
   const curSel = order.filter((k) => chosen.has(k));
-  const platformsDirty = JSON.stringify(curSel) !== JSON.stringify(savedSel);
+  const placementsDirty = JSON.stringify(ptypes) !== JSON.stringify(placementTypes);
+  const platformsDirty = JSON.stringify(curSel) !== JSON.stringify(savedSel) || placementsDirty;
+  const ptypeError = ptypes.find((t) => !t.label.trim()) ? "ใส่ชื่อประเภทการลงให้ครบ"
+    : ptypes.find((t) => t.platforms.length === 0) ? `ประเภท "${ptypes.find((t) => t.platforms.length === 0)!.label}" ยังไม่ได้ติ๊กช่องทาง` : null;
+  const setPtype = (i: number, patch: Partial<PlacementType>) => setPtypes((list) => list.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+  const movePtype = (i: number, dir: -1 | 1) => setPtypes((list) => { const j = i + dir; if (j < 0 || j >= list.length) return list; const n = [...list]; [n[i], n[j]] = [n[j], n[i]]; return n; });
 
   const { rowProps, handleProps, dragIdx } = useDragReorder((from, to) => setOrder((o) => moveItem(o, from, to)));
 
   const savePlatforms = async () => {
     if (curSel.length === 0) { toast.warning("เลือกอย่างน้อย 1 ช่องทาง"); return; }
+    if (ptypeError) { toast.warning(ptypeError); return; }
     setBusy(true);
     try {
-      const r = await apiFetch("/api/marketing/content-plan-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platforms: curSel }) });
+      const r = await apiFetch("/api/marketing/content-plan-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platforms: curSel, placements: ptypes }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      onPlatformsSaved(curSel);
-      toast.success("บันทึกช่องทางแล้ว");
+      onPlatformsSaved(curSel, ptypes);
+      toast.success("บันทึกช่องทาง + ประเภทการลงแล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setBusy(false); }
   };
@@ -120,7 +132,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
           <div className="flex w-full justify-end gap-2">
             <button type="button" onClick={resetFrom} disabled={busy || !platformsDirty} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50 disabled:opacity-40">คืนค่าเดิม</button>
             <button type="button" onClick={() => void savePlatforms()} disabled={busy || !platformsDirty}
-              className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังบันทึก…" : "บันทึกช่องทาง"}</button>
+              className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
           </div>
         ) : undefined}>
         <div className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist">
@@ -164,6 +176,53 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
                   className="h-9 rounded-lg bg-slate-800 px-3 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-30">เพิ่ม</button>
               </div>
             )}
+            {/* ── ประเภทการลง ── */}
+            <div className="border-t border-slate-100 pt-3">
+              <div className="mb-1 text-sm font-semibold text-slate-700">ประเภทการลง</div>
+              <p className="mb-2 text-xs text-slate-500">แบ่ง "ลงที่ไหน" ในการ์ดไอเดียเป็นประเภท เช่น แต่งร้าน → Shopee/Lazada/TikTok · Story → Facebook/IG (ติ๊กได้เฉพาะช่องทางที่เลือกไว้ด้านบน)</p>
+              <div className="space-y-1.5">
+                {ptypes.map((t, i) => (
+                  <div key={t.key} className="rounded-lg border border-slate-200 px-2 py-1.5">
+                    <div className="flex items-center gap-1.5">
+                      {canEdit && (
+                        <span className="flex flex-col">
+                          <button type="button" onClick={() => movePtype(i, -1)} disabled={i === 0} className="h-3.5 text-[10px] leading-none text-slate-400 hover:text-slate-700 disabled:opacity-20" aria-label="เลื่อนขึ้น">▲</button>
+                          <button type="button" onClick={() => movePtype(i, 1)} disabled={i === ptypes.length - 1} className="h-3.5 text-[10px] leading-none text-slate-400 hover:text-slate-700 disabled:opacity-20" aria-label="เลื่อนลง">▼</button>
+                        </span>
+                      )}
+                      <input value={t.icon ?? ""} onChange={(e) => setPtype(i, { icon: e.target.value.slice(0, 8) || null })} disabled={!canEdit} placeholder="🏪" title="ไอคอน (อีโมจิ)"
+                        className="h-8 w-10 rounded-md border border-slate-200 text-center text-sm disabled:bg-slate-50" />
+                      <input value={t.label} onChange={(e) => setPtype(i, { label: e.target.value.slice(0, 40) })} disabled={!canEdit} placeholder="ชื่อประเภท เช่น แต่งร้าน"
+                        className={`h-8 w-36 rounded-md border px-2 text-sm disabled:bg-slate-50 ${t.label.trim() ? "border-slate-200" : "border-red-300"}`} />
+                      <div className="flex flex-1 flex-wrap gap-1">
+                        {curSel.map((k) => {
+                          const p = byKey.get(k);
+                          if (!p) return null;
+                          const on = t.platforms.includes(k);
+                          return (
+                            <button key={k} type="button" disabled={!canEdit} onClick={() => setPtypes((list) => list.map((x, j) => (j === i ? { ...x, platforms: x.platforms.includes(k) ? x.platforms.filter((y) => y !== k) : [...x.platforms, k] } : x)))}
+                              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ${on ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"}`}>
+                              <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={12} />{p.label}
+                            </button>
+                          );
+                        })}
+                        {t.platforms.filter((k) => !curSel.includes(k)).map((k) => (
+                          <span key={k} className="rounded-md px-1.5 py-0.5 text-xs text-slate-300 line-through" title="ช่องทางนี้ถูกซ่อนด้านบน — ไม่โชว์ในการ์ด">{byKey.get(k)?.label ?? k}</span>
+                        ))}
+                      </div>
+                      {canEdit && <button type="button" onClick={() => setPtypes((list) => list.filter((_, j) => j !== i))} title="ลบประเภท" className="h-8 w-8 rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600">🗑</button>}
+                    </div>
+                  </div>
+                ))}
+                {canEdit && (
+                  <button type="button" onClick={() => setPtypes((list) => [...list, { key: `t${Date.now().toString(36)}`, label: "", icon: null, platforms: [] }])}
+                    disabled={ptypes.length >= 20} className="w-full rounded-lg border border-dashed border-slate-300 py-1.5 text-xs text-slate-500 hover:bg-slate-50">＋ เพิ่มประเภทการลง</button>
+                )}
+                {ptypeError && canEdit && <p className="text-xs text-red-600">{ptypeError}</p>}
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-400">ลบประเภทแล้ว คอนเทนต์ที่เคยเลือกไว้ยังเก็บช่องทางไว้ตามเดิม (โชว์เป็น "ไม่ระบุประเภท")</p>
+            </div>
+
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
               🏷️ แต่ละแบรนด์ลงช่องทางไหนบ้าง — ตอนเลือกแท็บแบรนด์ แถวจะเหลือเฉพาะช่องทางของแบรนด์นั้น
               {canEditBrands && <button type="button" onClick={() => void openBrandModal()} className="ml-2 font-medium text-blue-600 hover:underline">ตั้งค่าต่อแบรนด์ →</button>}

@@ -46,3 +46,17 @@ describe("content-plan helpers", () => {
     expect(targetProgress({ ...t, post_type: null }, items, "2026-10")).toEqual({ planned: 3, published: 1 });
   });
 });
+
+import { platformsFromPlacements, placementLabelsFor, parsePlacement, DEFAULT_PLACEMENTS } from "@/lib/marketing/content-plan";
+describe("placements (ลงที่ไหน แบบแบ่งประเภท)", () => {
+  it("parsePlacement / platformsFromPlacements รวมช่องทางไม่ซ้ำ + คงช่องทางเดิมที่ไม่มีประเภท", () => {
+    expect(parsePlacement("story:instagram")).toEqual({ type: "story", platform: "instagram" });
+    expect(parsePlacement("bad")).toBeNull();
+    expect(platformsFromPlacements(["shop_decor:shopee", "product:shopee", "story:facebook"], ["line_oa"])).toEqual(["shopee", "facebook", "line_oa"]);
+  });
+  it("placementLabelsFor: ป้ายเฉพาะช่องทางของแถว", () => {
+    const pl = ["shop_decor:shopee", "product:shopee", "story:facebook"];
+    expect(placementLabelsFor(pl, "shopee", DEFAULT_PLACEMENTS)).toEqual(["🏪 แต่งร้าน", "🛍️ ในสินค้า"]);
+    expect(placementLabelsFor(pl, null, DEFAULT_PLACEMENTS)).toEqual(["🏪 แต่งร้าน", "🛍️ ในสินค้า", "📱 Story"]);
+  });
+});

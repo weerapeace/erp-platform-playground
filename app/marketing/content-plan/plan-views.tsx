@@ -10,7 +10,7 @@ import { POST_TYPES, splitPostTypes, type ContentItem } from "@/app/tasks/data";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import {
   PLAN_STAGES, STAGE_META, GOAL_META, stageOf, dateKeyOf, timeOf, addDays, localDateKey, parseDateKey, dowLabel, shortThaiDate,
-  type PlanStage,
+  placementLabelsFor, type PlanStage, type PlacementType,
 } from "@/lib/marketing/content-plan";
 import type { PlatformOpt } from "./plan-modal";
 
@@ -37,8 +37,10 @@ function useDrop(onDrop: (id: string) => void, enabled: boolean) {
 }
 
 // ── การ์ด ──
-export function PlanCard({ item, pillar, compact = false, showDate = false, canEdit, onOpen }: {
+export function PlanCard({ item, pillar, compact = false, showDate = false, canEdit, onOpen, placementText }: {
   item: ContentItem; pillar?: MarketingSkuLabel; compact?: boolean; showDate?: boolean; canEdit: boolean; onOpen: (c: ContentItem) => void;
+  /** ป้ายประเภทการลง เช่น "🏪 แต่งร้าน" (ในแถวช่องทาง) */
+  placementText?: string;
 }) {
   const stage = stageOf(item) ?? "idea";
   const st = STAGE_META[stage];
@@ -54,6 +56,7 @@ export function PlanCard({ item, pillar, compact = false, showDate = false, canE
       <div className={`flex gap-1.5 ${compact ? "p-1.5" : "p-2"}`}>
         {!compact && thumb && <img src={thumb} alt="" loading="lazy" className="h-10 w-10 flex-shrink-0 rounded-md object-cover" />} {/* eslint-disable-line @next/next/no-img-element */}
         <div className="min-w-0 flex-1">
+          {placementText && <div className="truncate text-[10px] font-medium text-slate-500">{placementText}</div>}
           <div className={`line-clamp-2 font-medium text-slate-800 ${compact ? "text-[11px] leading-4" : "text-xs leading-4"}`}>{item.title}</div>
           <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
@@ -70,11 +73,13 @@ export function PlanCard({ item, pillar, compact = false, showDate = false, canE
 }
 
 // ── สัปดาห์: แถว = ช่องทาง · คอลัมน์ = 7 วัน ──
-export function WeekView({ start, items, platforms, allPlatforms, pillarOf, canEdit, onOpen, onAdd, onMove }: {
+export function WeekView({ start, items, platforms, allPlatforms, placementTypes = [], pillarOf, canEdit, onOpen, onAdd, onMove }: {
   /** แถว = ช่องทางที่ตั้งให้โชว์ (เรียงแล้ว) */
   start: string; items: ContentItem[]; platforms: PlatformOpt[];
   /** ทุกช่องทาง (ไว้หาชื่อ/ไอคอน ของช่องทางที่ซ่อนแต่มีคอนเทนต์ในสัปดาห์นี้) */
   allPlatforms: PlatformOpt[];
+  /** ประเภทการลง (ทำป้ายบนการ์ด) */
+  placementTypes?: PlacementType[];
   pillarOf: (c: ContentItem) => MarketingSkuLabel | undefined;
   canEdit: boolean; onOpen: (c: ContentItem) => void; onAdd: (date: string, platform: string | null) => void;
   onMove: (id: string, date: string | null, platform: string | null) => void;
@@ -102,7 +107,7 @@ export function WeekView({ start, items, platforms, allPlatforms, pillarOf, canE
           </div>
         ))}
         {rows.map((r) => (
-          <WeekRow key={r.key} row={r} days={days} today={today} cellItems={cellItems} pillarOf={pillarOf}
+          <WeekRow key={r.key} row={r} days={days} today={today} cellItems={cellItems} pillarOf={pillarOf} placementTypes={placementTypes}
             canEdit={canEdit} onOpen={onOpen} onAdd={onAdd} onMove={onMove} />
         ))}
       </div>
@@ -110,12 +115,14 @@ export function WeekView({ start, items, platforms, allPlatforms, pillarOf, canE
   );
 }
 
-function WeekRow({ row, days, today, cellItems, pillarOf, canEdit, onOpen, onAdd, onMove }: {
+function WeekRow({ row, days, today, cellItems, pillarOf, placementTypes, canEdit, onOpen, onAdd, onMove }: {
   row: { key: string; label: string; p: PlatformOpt | null }; days: string[]; today: string;
   cellItems: (day: string, row: string) => ContentItem[]; pillarOf: (c: ContentItem) => MarketingSkuLabel | undefined;
+  placementTypes: PlacementType[];
   canEdit: boolean; onOpen: (c: ContentItem) => void; onAdd: (date: string, platform: string | null) => void;
   onMove: (id: string, date: string | null, platform: string | null) => void;
 }) {
+  const labelOf = (c: ContentItem) => (row.key === NO_PLATFORM ? "" : placementLabelsFor(c.placements, row.key, placementTypes).join(" · "));
   return (
     <>
       <div className="sticky left-0 z-10 flex items-center gap-1.5 border-b border-slate-100 bg-white px-2 py-2 text-xs font-medium text-slate-700">
@@ -123,22 +130,23 @@ function WeekRow({ row, days, today, cellItems, pillarOf, canEdit, onOpen, onAdd
         <span className="truncate">{row.label}</span>
       </div>
       {days.map((d) => (
-        <DayCell key={d} today={d === today} items={cellItems(d, row.key)} pillarOf={pillarOf} canEdit={canEdit} onOpen={onOpen}
+        <DayCell key={d} today={d === today} items={cellItems(d, row.key)} pillarOf={pillarOf} canEdit={canEdit} onOpen={onOpen} labelOf={labelOf}
           onAdd={() => onAdd(d, row.key === NO_PLATFORM ? null : row.key)} onDrop={(id) => onMove(id, d, row.key === NO_PLATFORM ? null : row.key)} />
       ))}
     </>
   );
 }
 
-function DayCell({ today, items, pillarOf, canEdit, onOpen, onAdd, onDrop, minH = "min-h-[5.5rem]", children }: {
+function DayCell({ today, items, pillarOf, canEdit, onOpen, onAdd, onDrop, labelOf, minH = "min-h-[5.5rem]", children }: {
   today: boolean; items: ContentItem[]; pillarOf: (c: ContentItem) => MarketingSkuLabel | undefined; canEdit: boolean;
+  labelOf?: (c: ContentItem) => string;
   onOpen: (c: ContentItem) => void; onAdd: () => void; onDrop: (id: string) => void; minH?: string; children?: ReactNode;
 }) {
   const { over, props } = useDrop(onDrop, canEdit);
   return (
     <div {...props} className={`group/cell relative ${minH} space-y-1 border-b border-l border-slate-100 p-1 ${today ? "bg-blue-50/40" : ""} ${over ? "bg-blue-100 ring-2 ring-inset ring-blue-400" : ""}`}>
       {children}
-      {items.map((c) => <PlanCard key={c.id} item={c} pillar={pillarOf(c)} compact canEdit={canEdit} onOpen={onOpen} />)}
+      {items.map((c) => <PlanCard key={c.id} item={c} pillar={pillarOf(c)} compact canEdit={canEdit} onOpen={onOpen} placementText={labelOf?.(c) || undefined} />)}
       {canEdit && (
         <button type="button" onClick={onAdd} title="เพิ่มไอเดียลงช่องนี้"
           className="w-full rounded-md border border-dashed border-transparent py-0.5 text-[11px] text-slate-300 hover:border-slate-300 hover:text-slate-500 group-hover/cell:text-slate-400 max-sm:text-slate-400">＋</button>

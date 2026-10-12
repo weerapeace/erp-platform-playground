@@ -18,12 +18,16 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { useToast } from "@/components/toast";
 import { createContent, updateContent, deleteContent, createTask, POST_TYPES, splitPostTypes, joinPostTypes, type ContentItem, type BrandOption } from "@/app/tasks/data";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
-import { CONTENT_GOALS, dateKeyOf, timeOf, toScheduledIso, stageOf, STAGE_META } from "@/lib/marketing/content-plan";
+import { CONTENT_GOALS, dateKeyOf, timeOf, toScheduledIso, stageOf, STAGE_META, placementId, parsePlacement, platformsFromPlacements, type PlacementType } from "@/lib/marketing/content-plan";
 
 export type PlatformOpt = { value: string; label: string; color?: string | null; icon?: string | null; icon_key?: string | null };
 
 type Draft = {
-  title: string; brand_id: string; pillar_id: string; goal: string; post_types: string[]; platforms: string[];
+  title: string; brand_id: string; pillar_id: string; goal: string; post_types: string[];
+  /** ลงที่ไหน แบบแบ่งประเภท "ประเภท:ช่องทาง" */
+  placements: string[];
+  /** ช่องทางที่เลือกแบบไม่ระบุประเภท (ข้อมูลเดิม / ยังไม่ตั้งประเภท) */
+  platforms: string[];
   date: string; time: string; parent: ParentSkuPickerValue | null; brief: string; ref_image_keys: string[];
 };
 
@@ -32,19 +36,21 @@ const toggleCls = (on: boolean) => `inline-flex items-center gap-1 rounded-md px
 
 function toDraft(c: ContentItem | null, defaults: { brandId?: string | null; date?: string | null; platform?: string | null }): Draft {
   if (!c) return {
-    title: "", brand_id: defaults.brandId ?? "", pillar_id: "", goal: "", post_types: [], platforms: defaults.platform ? [defaults.platform] : [],
+    title: "", brand_id: defaults.brandId ?? "", pillar_id: "", goal: "", post_types: [], placements: [], platforms: defaults.platform ? [defaults.platform] : [],
     date: defaults.date ?? "", time: "10:00", parent: null, brief: "", ref_image_keys: [],
   };
   return {
     title: c.title ?? "", brand_id: c.brand_id ?? "", pillar_id: c.pillar_id ?? "", goal: c.goal ?? "",
-    post_types: splitPostTypes(c.post_type), platforms: c.platforms ?? [],
+    post_types: splitPostTypes(c.post_type), placements: c.placements ?? [],
+    // ช่องทางที่ไม่ได้มาจากประเภทการลง = ช่องทางเดิมที่เลือกแบบไม่ระบุประเภท
+    platforms: (c.platforms ?? []).filter((p) => !(c.placements ?? []).some((x) => parsePlacement(x)?.platform === p)),
     date: dateKeyOf(c.scheduled_at) ?? "", time: timeOf(c.scheduled_at),
     parent: c.parent_sku_id ? { id: c.parent_sku_id, code: c.parent_sku_code ?? "", name: c.parent_sku_name ?? "", image_url: c.parent_sku_image_url ?? null } : null,
     brief: c.brief ?? "", ref_image_keys: c.ref_image_keys ?? [],
   };
 }
 
-export function PlanModal({ open, item, defaults, brands, pillars, platforms, planPlatforms, brandPlatforms, canEdit, onClose, onSaved, onOpenDetail, onOpenSettings }: {
+export function PlanModal({ open, item, defaults, brands, pillars, platforms, planPlatforms, brandPlatforms, placementTypes, canEdit, onClose, onSaved, onOpenDetail, onOpenSettings }: {
   open: boolean;
   /** null = สร้างใหม่ */
   item: ContentItem | null;
@@ -57,6 +63,8 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
   planPlatforms: string[] | null;
   /** แบรนด์ → ช่องทางที่ลง (ไม่มีคีย์ = ทุกช่องทาง) */
   brandPlatforms: Record<string, string[]>;
+  /** ประเภทการลง (แต่งร้าน / ในสินค้า / Story …) แต่ละประเภทมีช่องทางของตัวเอง */
+  placementTypes: PlacementType[];
   canEdit: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -86,11 +94,23 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
     for (const k of d.platforms) if (!keys.includes(k) && byKey.has(k)) keys.push(k);
     return keys.map((k) => byKey.get(k)!).filter(Boolean);
   }, [platforms, planPlatforms, brandPlatforms, d.brand_id, d.platforms]);
+  // ประเภทการลง → ช่องทางของแต่ละประเภทที่ใช้ได้ (∩ ช่องทางที่ตั้งให้โชว์/ของแบรนด์) · ที่เลือกไว้แล้วโชว์เสมอ
+  const placementRows = useMemo(() => {
+    const allowed = new Set(platformChoices.map((p) => p.value));
+    const byKey = new Map(platforms.map((p) => [p.value, p]));
+    return placementTypes.map((t) => ({
+      t,
+      opts: t.platforms.filter((k) => byKey.has(k) && (allowed.has(k) || d.placements.includes(placementId(t.key, k)))).map((k) => byKey.get(k)!),
+    })).filter((r) => r.opts.length > 0);
+  }, [placementTypes, platforms, platformChoices, d.placements]);
+  // แถว "ไม่ระบุประเภท": โชว์เมื่อยังไม่มีประเภทเลย หรือมีช่องทางเดิมที่เลือกแบบไม่ระบุประเภทค้างอยู่
+  const showLoose = placementRows.length === 0 || d.platforms.length > 0;
   const locked = item?.status === "published";   // โพสต์แล้ว = ระบบเดิมล็อกเนื้อหาหลัก
 
   const payload = () => ({
     title: d.title.trim(), brand_id: d.brand_id || null, pillar_id: d.pillar_id || null, goal: d.goal || null,
-    post_type: d.post_types.length ? joinPostTypes(d.post_types) : null, platforms: d.platforms,
+    post_type: d.post_types.length ? joinPostTypes(d.post_types) : null,
+    placements: d.placements, platforms: platformsFromPlacements(d.placements, d.platforms),   // ช่องทางรวม (ปฏิทิน/เป้า/แคปชั่นเดิมใช้)
     scheduled_at: d.date ? toScheduledIso(d.date, d.time || "10:00") : null,
     parent_sku_id: d.parent?.id ?? null, brief: d.brief.trim() || null, ref_image_keys: d.ref_image_keys,
   });
@@ -102,7 +122,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
       let id = item?.id ?? null;
       if (id) {
         const p: Record<string, unknown> = payload();
-        if (locked) for (const k of ["title", "brand_id", "post_type", "platforms", "parent_sku_id"]) delete p[k];
+        if (locked) for (const k of ["title", "brand_id", "post_type", "platforms", "placements", "parent_sku_id"]) delete p[k];
         await updateContent(id, p);
       } else {
         id = (await createContent({ ...payload(), status: "draft" })).id;
@@ -126,7 +146,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
     setBusy(true);
     try {
       const t = await createTask({
-        title: d.title.trim(), brand_id: d.brand_id || null, parent_sku_id: d.parent?.id ?? null, platforms: d.platforms,
+        title: d.title.trim(), brand_id: d.brand_id || null, parent_sku_id: d.parent?.id ?? null, platforms: platformsFromPlacements(d.placements, d.platforms),
         description: d.brief.trim() || null, reference_images: d.ref_image_keys, due_date: d.date || null,
       });
       await updateContent(id, { task_id: t.id });
@@ -220,13 +240,31 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
           ), d.date ? undefined : "เว้นว่าง = เก็บเป็นไอเดียไว้ก่อน (อยู่ในกล่องไอเดียยังไม่ลงวัน)")}
 
           {row("📱", "ลงที่ไหน", (
-            <div className="flex flex-wrap gap-1">
-              {platformChoices.map((p) => (
-                <button key={p.value} type="button" disabled={ro || locked} onClick={() => set({ platforms: toggle(d.platforms, p.value) })} className={toggleCls(d.platforms.includes(p.value))}>
-                  <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={14} />{p.label}
-                </button>
+            <div className="space-y-1">
+              {placementRows.map(({ t, opts }) => (
+                <div key={t.key} className="flex flex-wrap items-center gap-1">
+                  <span className="w-20 flex-shrink-0 truncate text-xs text-slate-500" title={t.label}>{t.icon ? `${t.icon} ` : ""}{t.label}</span>
+                  {opts.map((p) => {
+                    const id = placementId(t.key, p.value);
+                    return (
+                      <button key={id} type="button" disabled={ro || locked} onClick={() => set({ placements: toggle(d.placements, id) })} className={toggleCls(d.placements.includes(id))}>
+                        <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={14} />{p.label}
+                      </button>
+                    );
+                  })}
+                </div>
               ))}
-              {platformChoices.length === 0 && <span className="pt-1 text-xs text-slate-400">ยังไม่มีช่องทาง — ตั้งได้ที่ ⚙️</span>}
+              {showLoose && (
+                <div className="flex flex-wrap items-center gap-1">
+                  {placementRows.length > 0 && <span className="w-20 flex-shrink-0 text-xs text-slate-400" title="ช่องทางที่เลือกไว้แบบไม่ระบุประเภท (ข้อมูลเดิม)">ไม่ระบุประเภท</span>}
+                  {(placementRows.length > 0 ? platformChoices.filter((p) => d.platforms.includes(p.value)) : platformChoices).map((p) => (
+                    <button key={p.value} type="button" disabled={ro || locked} onClick={() => set({ platforms: toggle(d.platforms, p.value) })} className={toggleCls(d.platforms.includes(p.value))}>
+                      <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={14} />{p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {placementRows.length === 0 && platformChoices.length === 0 && <span className="pt-1 text-xs text-slate-400">ยังไม่มีช่องทาง — ตั้งได้ที่ ⚙️</span>}
             </div>
           ))}
 
