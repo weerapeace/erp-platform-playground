@@ -17,6 +17,9 @@ export type CardHover = "none" | "lift" | "zoom";
 export type ProductLayout = "classic" | "showcase";
 export type ProductTitleStyle = "serif" | "display";
 export type ProductImageBg = "tint" | "surface" | "none";
+/** ส่วนประกอบของหน้าสินค้าแบบโชว์เคส — ลากจัดลำดับ/ซ่อนได้ในแท็บหน้าสินค้า */
+export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
+export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related"];
 
 export interface SiteTheme {
   colors: {
@@ -74,6 +77,10 @@ export interface SiteTheme {
     imageBg: ProductImageBg;
     /** แยก รายละเอียด / จุดเด่น เป็นแท็บ */
     showTabs: boolean;
+    /** ลำดับส่วนประกอบ (ครบทุกตัวเสมอ) */
+    sections: ProductSection[];
+    /** ส่วนที่ซ่อน (ซ่อนได้เฉพาะ details/banner/related) */
+    hidden: ProductSection[];
   };
 }
 
@@ -99,8 +106,26 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", showTabs: true },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", showTabs: true, sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
 };
+
+/** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
+export function normalizeProductSections(raw: unknown): ProductSection[] {
+  const seen = new Set<ProductSection>();
+  const out: ProductSection[] = [];
+  for (const v of Array.isArray(raw) ? raw : []) {
+    if (typeof v === "string" && (PRODUCT_SECTION_ORDER as string[]).includes(v) && !seen.has(v as ProductSection)) {
+      seen.add(v as ProductSection);
+      out.push(v as ProductSection);
+    }
+  }
+  for (const k of PRODUCT_SECTION_ORDER) if (!seen.has(k)) out.push(k);
+  return out;
+}
+const HIDEABLE: ProductSection[] = ["details", "banner", "related"];
+export function normalizeHiddenSections(raw: unknown): ProductSection[] {
+  return (Array.isArray(raw) ? raw : []).filter((v): v is ProductSection => typeof v === "string" && (HIDEABLE as string[]).includes(v));
+}
 
 export const FONT_CHOICES = ["Kanit", "Noto Sans Thai", "Prompt", "Sarabun", "IBM Plex Sans Thai"];
 
@@ -147,6 +172,14 @@ export const PRODUCT_TITLE_STYLES: { value: ProductTitleStyle; label: string }[]
   { value: "serif", label: "ตัวเอียงแบบนิตยสาร (ชื่ออังกฤษ)" },
   { value: "display", label: "ฟอนต์หัวเรื่องของธีม" },
 ];
+export const PRODUCT_SECTIONS: { value: ProductSection; label: string; hint: string; hideable: boolean }[] = [
+  { value: "gallery", label: "ชื่อรุ่น + รูปใหญ่", hint: "หัวเรื่อง รูปกลางจอ จุดเลื่อนรูป", hideable: false },
+  { value: "buy", label: "ราคา · ตัวเลือก · ใส่ตะกร้า", hint: "ราคา/คำอธิบายสั้น ซ้าย · จำนวน/สี/ปุ่ม ขวา", hideable: false },
+  { value: "details", label: "รายละเอียด / จุดเด่น", hint: "แท็บหรือเรียงต่อกัน ตามตัวเลือกด้านบน", hideable: true },
+  { value: "banner", label: "แบนเนอร์รูปที่ 2", hint: "โชว์เมื่อสินค้ามีรูปมากกว่า 1 รูป", hideable: true },
+  { value: "related", label: "คุณอาจชอบ", hint: "สินค้าหมวดเดียวกัน 4 รายการ", hideable: true },
+];
+
 export const PRODUCT_IMAGE_BGS: { value: ProductImageBg; label: string }[] = [
   { value: "tint", label: "วงกลมสีแบรนด์จาง ๆ" },
   { value: "surface", label: "วงกลมสีพื้นการ์ด" },
@@ -238,6 +271,8 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       titleStyle: pick(pd.titleStyle, ["serif", "display"] as const, d.product.titleStyle),
       imageBg: pick(pd.imageBg, ["tint", "surface", "none"] as const, d.product.imageBg),
       showTabs: pd.showTabs !== false,
+      sections: normalizeProductSections(pd.sections),
+      hidden: normalizeHiddenSections(pd.hidden),
     },
   };
 }

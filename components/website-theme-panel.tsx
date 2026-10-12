@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 
 type Radius = "sharp" | "soft" | "round";
 type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -25,6 +26,7 @@ type CardHover = "none" | "lift" | "zoom";
 type ProductLayout = "classic" | "showcase";
 type ProductTitleStyle = "serif" | "display";
 type ProductImageBg = "tint" | "surface" | "none";
+type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
 
 interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
@@ -41,7 +43,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; showTabs: boolean };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; showTabs: boolean; sections: ProductSection[]; hidden: ProductSection[] };
 }
 
 interface Choices {
@@ -56,6 +58,7 @@ interface Choices {
   productLayouts?: { value: ProductLayout; label: string; hint: string }[];
   productTitleStyles?: { value: ProductTitleStyle; label: string }[];
   productImageBgs?: { value: ProductImageBg; label: string }[];
+  productSections?: { value: ProductSection; label: string; hint: string; hideable: boolean }[];
 }
 
 type ColorKey = keyof Theme["colors"];
@@ -173,6 +176,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [device, setDevice] = useState<Device>("desktop");
   const [zoom, setZoom] = useState<Zoom>("fit");
   const [page, setPage] = useState("/");
+  /** สินค้าตัวแรกบนเว็บร้านนี้ — ไว้เปิดพรีวิว "หน้าสินค้า (ตัวอย่าง)" */
+  const [sampleProduct, setSampleProduct] = useState<string | null>(null);
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; theme: Theme }[]>([]);
 
   const undoStack = useRef<Theme[]>([]);
@@ -212,6 +217,29 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     void load();
   }, [load]);
 
+  // หา slug สินค้าตัวแรกของร้าน (API สาธารณะตัวเดียวกับที่เว็บร้านใช้) → เปิดพรีวิวหน้าสินค้าได้
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/public/storefront/products?shop=${encodeURIComponent(shopSlug)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const slug = (j?.products as { slug?: string }[] | undefined)?.find((x) => x.slug)?.slug ?? null;
+        if (alive) setSampleProduct(slug);
+      })
+      .catch(() => {
+        /* ไม่มีสินค้า = ไม่มีตัวเลือกนี้ */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [shopSlug]);
+
+  // เข้าแท็บ "หน้าสินค้า" → พรีวิวเปลี่ยนไปหน้าสินค้าตัวอย่างให้เอง (ถ้ายังดูหน้าแรกอยู่)
+  useEffect(() => {
+    if (tab === "product" && sampleProduct && page === "/") setPage(`/product/${sampleProduct}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, sampleProduct]);
+
   // วัดขนาดกล่องพรีวิวเพื่อคำนวณ "พอดีจอ" (แบบเดียวกับแท็บ 🧱 จัดหน้าแรก)
   useEffect(() => {
     const el = previewBoxRef.current;
@@ -242,6 +270,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setHeader = (p: Partial<Theme["header"]>) => theme && apply({ ...theme, header: { ...theme.header, ...p } });
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
   const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
+  const sectionDrag = useDragReorder((from, to) => theme && setProduct({ sections: moveItem(theme.product.sections, from, to) }));
 
   const undo = useCallback(() => {
     const prev = undoStack.current.pop();
@@ -834,7 +863,45 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
               )}
 
-              <p className="text-[11px] text-slate-400 mt-3">ดูผล: ในพรีวิวด้านขวา กดการ์ดสินค้าใบไหนก็ได้ → หน้าสินค้าจะเป็น Style ที่เลือกทันที (ยังไม่ขึ้นเว็บจริงจนกว่าจะกดเผยแพร่)</p>
+              {theme.product.layout === "showcase" && (
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={labelCls} style={{ marginBottom: 0 }}>ลำดับส่วนประกอบ (ลากที่ ⠿ เพื่อสลับ · 👁️ ซ่อน/แสดง)</label>
+                    {(JSON.stringify(theme.product.sections) !== JSON.stringify(published.product.sections) || theme.product.hidden.length > 0) && (
+                      <button onClick={() => setProduct({ sections: ["gallery", "buy", "details", "banner", "related"], hidden: [] })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
+                    )}
+                  </div>
+                  <ul className="space-y-1">
+                    {theme.product.sections.map((k, i) => {
+                      const meta = (choices.productSections ?? []).find((x) => x.value === k);
+                      const isHidden = theme.product.hidden.includes(k);
+                      return (
+                        <li key={k} {...sectionDrag.rowProps(i)} className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 ${sectionDrag.rowCls(i)} ${isHidden ? "opacity-60" : ""}`}>
+                          <DragHandle {...sectionDrag.handleProps(i)} />
+                          <span className="w-5 text-[11px] text-slate-400 text-center">{i + 1}</span>
+                          <span className="flex-1 min-w-0">
+                            <span className={`block text-sm ${isHidden ? "line-through text-slate-400" : "text-slate-800"}`}>{meta?.label ?? k}</span>
+                            <span className="block text-[11px] text-slate-400 truncate">{meta?.hint}</span>
+                          </span>
+                          {meta?.hideable ? (
+                            <button
+                              onClick={() => setProduct({ hidden: isHidden ? theme.product.hidden.filter((x) => x !== k) : [...theme.product.hidden, k] })}
+                              title={isHidden ? "แสดงส่วนนี้" : "ซ่อนส่วนนี้"}
+                              className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-slate-400"
+                            >
+                              {isHidden ? "🚫" : "👁️"}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 px-1" title="ส่วนหลัก ซ่อนไม่ได้">หลัก</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-400 mt-3">ดูผล: พรีวิวด้านขวาเปิด &quot;หน้าสินค้า (ตัวอย่าง)&quot; ให้แล้ว (เลือกหน้าอื่นได้จากเมนูบนพรีวิว) — ยังไม่ขึ้นเว็บจริงจนกว่าจะกดเผยแพร่</p>
             </div>
           )}
 
@@ -903,7 +970,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               </button>
             ))}
             <select value={page} onChange={(e) => setPage(e.target.value)} className={inputCls} style={{ width: "auto" }}>
-              {PAGES.map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}
+              {[...PAGES, ...(sampleProduct ? [{ path: `/product/${sampleProduct}`, label: "หน้าสินค้า (ตัวอย่าง)" }] : [])].map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}
             </select>
             <select
               value={String(zoom)}

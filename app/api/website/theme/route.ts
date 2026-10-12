@@ -26,6 +26,7 @@ import {
   PRODUCT_LAYOUTS,
   PRODUCT_TITLE_STYLES,
   PRODUCT_IMAGE_BGS,
+  PRODUCT_SECTIONS,
   IMAGE_RATIOS,
   CARD_HOVERS,
 } from "@/lib/website-theme";
@@ -81,6 +82,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       productLayouts: PRODUCT_LAYOUTS,
       productTitleStyles: PRODUCT_TITLE_STYLES,
       productImageBgs: PRODUCT_IMAGE_BGS,
+      productSections: PRODUCT_SECTIONS,
       imageRatios: IMAGE_RATIOS,
       cardHovers: CARD_HOVERS,
     },
