@@ -45,7 +45,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; sections: ProductSection[]; hidden: ProductSection[] };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; sections: ProductSection[]; hidden: ProductSection[] };
 }
 
 interface Choices {
@@ -868,10 +868,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </select>
                   </div>
                   <div>
-                    <label className={labelCls}>พื้นหลังหลังรูป</label>
+                    <label className={labelCls}>พื้นหลังหลังรูป (สี)</label>
                     <select className={inputCls} value={theme.product.imageBg} onChange={(e) => setProduct({ imageBg: e.target.value as ProductImageBg })}>
                       {(choices.productImageBgs ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <ImageUploadField
+                      label="รูปพื้นหลังหลังรูปสินค้า (ไม่บังคับ)"
+                      hint="ใส่แล้วใช้แทนสีด้านบน · แนะนำรูปโทนอ่อน ไม่รก (เช่น พื้นผิวหนัง/ผ้า หรือฉากสตูดิโอ) กว้าง 1600px+ · ใช้กับทุกสินค้า"
+                      value={theme.product.imageBgKey}
+                      onChange={(k) => setProduct({ imageBgKey: k })}
+                      previewBg={theme.colors.page}
+                      height={64}
+                    />
                   </div>
                 </div>
               )}

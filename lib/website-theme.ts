@@ -77,8 +77,10 @@ export interface SiteTheme {
     layout: ProductLayout;
     /** ชื่อรุ่นตัวเอียงแบบนิตยสาร (เฉพาะชื่ออังกฤษ) หรือฟอนต์หัวเรื่องของธีม */
     titleStyle: ProductTitleStyle;
-    /** พื้นหลังวงกลมหลังรูป */
+    /** พื้นหลังหลังรูป (สี) */
     imageBg: ProductImageBg;
+    /** รูปพื้นหลังหลังรูปสินค้า (r2 key) — ใส่แล้วใช้แทนสี */
+    imageBgKey: string | null;
     /** (เก่า) แยกเป็นแท็บ — ใช้ detailsStyle แทน เก็บไว้ให้ค่าที่บันทึกก่อนหน้ายังอ่านได้ */
     showTabs: boolean;
     galleryStyle: ProductGalleryStyle;
@@ -112,7 +114,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -286,6 +288,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       layout: pick(pd.layout, ["classic", "showcase"] as const, d.product.layout),
       titleStyle: pick(pd.titleStyle, ["serif", "display"] as const, d.product.titleStyle),
       imageBg: pick(pd.imageBg, ["tint", "surface", "none"] as const, d.product.imageBg),
+      imageBgKey: key(pd.imageBgKey),
       showTabs: pd.showTabs !== false,
       galleryStyle: pick(pd.galleryStyle, ["editorial", "spotlight"] as const, d.product.galleryStyle),
       // ค่าที่บันทึกก่อนมี detailsStyle: showTabs=false เคยหมายถึง "เรียงต่อกัน"
