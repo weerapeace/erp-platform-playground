@@ -443,6 +443,13 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
   const [sections, setSections] = useState<MenuSectionRow[]>([]);   // ไอคอน/ลำดับหมวด (ต่อแอป)
   const [activeApp, setActiveAppState] = useState<string | null>(null);
+  // หน้าที่อยู่หลายแอป: เลือกแอปที่ผู้ใช้เข้าได้ (ไม่มี permission_key หรือมีสิทธิ์) ตัวแรก · ไม่มีเลย → ตัวแรกในรายการ (ให้ตัวกันสิทธิ์บอกเหตุผลตามเดิม)
+  const pickAccessibleApp = (keys: string[]): string | undefined => {
+    const valid = keys.filter((k) => appGroups.some((a) => a.key === k));
+    if (!valid.length) return undefined;
+    const ok = valid.find((k) => { const ag = appGroups.find((a) => a.key === k); return !ag?.permission_key || can(ag.permission_key as Parameters<typeof can>[0]); });
+    return ok ?? valid[0];
+  };
   // แอปที่ผู้ใช้ "กดแท็บเอง" → ต้องชนะ auto-sync (หน้าที่อยู่หลายแอป เช่น work-board = [dispatch,production]
   //  เดิม sync เลือก app_keys ตัวแรกเสมอ = เด้งไป "จ่ายงาน" ทั้งที่กด "ผลิต" → ต้องกด 2 รอบ)
   const pickedAppRef = useRef<string | null>(null);
@@ -507,7 +514,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         return;
       }
       if (activeApp && keys.includes(activeApp)) return;   // App ปัจจุบันถูกต้องแล้ว → ไม่กระตุก
-      target = keys.find((k) => appGroups.some((a) => a.key === k));
+      // หน้าอยู่หลายแอป → เลือกแอปที่ผู้ใช้ "เข้าได้" ก่อน (เดิมเอาตัวแรกในรายการเสมอ → พนักงานเปิด SKU การตลาด
+      // จากแอปจัดการงาน ถูกเช็กสิทธิ์แอป "การตลาด" ที่ไม่มี แล้วโดนกั้นทั้งที่มีสิทธิ์หน้านั้น)
+      target = pickAccessibleApp(keys);
     } else {
       // หา match จากตารางสำรอง (หน้าจริงที่ลิงก์ไม่ตรงเมนู)
       const fb = ROUTE_APP_FALLBACK
@@ -592,7 +601,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         // (ไม่งั้น favicon/ชื่อแท็บ/ตัวกันสิทธิ์จะเดาเป็น app_key ตัวแรกเสมอ = เด้งเป็น Master Data)
         const allKeys = [...new Set(matches.filter((r) => r.href === best.href).flatMap((r) => r.app_keys ?? []))];
         const valid = allKeys.filter((x) => appGroups.some((a) => a.key === x));
-        if (valid.length) return (activeApp && valid.includes(activeApp)) ? activeApp : valid[0];
+        if (valid.length) return (activeApp && valid.includes(activeApp)) ? activeApp : (pickAccessibleApp(valid) ?? valid[0]);
       }
     }
     const fb = ROUTE_APP_FALLBACK
