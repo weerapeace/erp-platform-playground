@@ -22,6 +22,9 @@ type MenuAlign = "left" | "center" | "right";
 type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
 type CardHover = "none" | "lift" | "zoom";
+type ProductLayout = "classic" | "showcase";
+type ProductTitleStyle = "serif" | "display";
+type ProductImageBg = "tint" | "surface" | "none";
 
 interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
@@ -38,6 +41,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; showTabs: boolean };
 }
 
 interface Choices {
@@ -49,10 +53,13 @@ interface Choices {
   cardPresets: { value: CardPreset; label: string; hint: string }[];
   imageRatios: { value: ImageRatio; label: string }[];
   cardHovers: { value: CardHover; label: string }[];
+  productLayouts?: { value: ProductLayout; label: string; hint: string }[];
+  productTitleStyles?: { value: ProductTitleStyle; label: string }[];
+  productImageBgs?: { value: ProductImageBg; label: string }[];
 }
 
 type ColorKey = keyof Theme["colors"];
-type TabKey = "colors" | "fonts" | "logo" | "header" | "card" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "card" | "product" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -61,6 +68,7 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "logo", label: "โลโก้" },
   { k: "header", label: "Header" },
   { k: "card", label: "การ์ดสินค้า" },
+  { k: "product", label: "หน้าสินค้า" },
   { k: "shape", label: "รูปทรง" },
   { k: "history", label: "ประวัติ" },
 ];
@@ -233,6 +241,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setLogo = (p: Partial<Theme["logo"]>) => theme && apply({ ...theme, logo: { ...theme.logo, ...p } });
   const setHeader = (p: Partial<Theme["header"]>) => theme && apply({ ...theme, header: { ...theme.header, ...p } });
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
+  const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
 
   const undo = useCallback(() => {
     const prev = undoStack.current.pop();
@@ -751,6 +760,81 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   แสดงสถานะสต๊อก
                 </label>
               </div>
+            </div>
+          )}
+
+          {/* ── หน้าสินค้า (Style) ── */}
+          {tab === "product" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-1">หน้าสินค้า — เลือก Style</h3>
+              <p className="text-[11px] text-slate-400 mb-3">Style เป็นของกลาง ทุกร้าน/ทุกแบรนด์เลือกใช้ได้ สลับกลับได้ตลอด · ข้อมูลสินค้าชุดเดิม ไม่ต้องกรอกเพิ่ม</p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(choices.productLayouts ?? []).map((p) => {
+                  const on = theme.product.layout === p.value;
+                  return (
+                    <button
+                      key={p.value}
+                      onClick={() => setProduct({ layout: p.value })}
+                      className={`text-left rounded-xl border p-3 transition ${on ? "border-blue-600 bg-blue-50/60" : "border-slate-200 hover:border-slate-400"}`}
+                    >
+                      {/* ภาพจำลองโครงหน้า */}
+                      <div className="rounded-lg bg-white border border-slate-200 p-2 mb-2" style={{ height: 96 }}>
+                        {p.value === "classic" ? (
+                          <div className="flex gap-2 h-full">
+                            <div className="w-1/2 rounded-md" style={{ background: theme.colors.surface, border: "1px solid #e5e7eb" }} />
+                            <div className="w-1/2 flex flex-col gap-1.5 pt-1">
+                              <div className="h-2.5 w-4/5 rounded bg-slate-300" />
+                              <div className="h-2 w-1/3 rounded" style={{ background: theme.colors.brand }} />
+                              <div className="h-1.5 w-full rounded bg-slate-200" />
+                              <div className="h-1.5 w-5/6 rounded bg-slate-200" />
+                              <div className="mt-auto h-4 w-2/3 rounded" style={{ background: theme.colors.brand }} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="relative h-full flex flex-col items-center">
+                            <div className="h-3 w-1/3 rounded italic" style={{ background: theme.colors.brand }} />
+                            <div className="mt-1.5 w-11 h-11 rounded-full" style={{ background: `color-mix(in srgb, ${theme.colors.brand} 12%, white)`, border: "1px solid #e5e7eb" }} />
+                            <div className="absolute left-1 bottom-1 flex flex-col gap-1 w-1/4">
+                              <div className="h-2 w-2/3 rounded bg-slate-400" />
+                              <div className="h-1.5 w-full rounded bg-slate-200" />
+                            </div>
+                            <div className="absolute right-1 bottom-1 flex flex-col gap-1 w-1/4 items-end">
+                              <div className="flex gap-0.5">{[0, 1, 2, 3].map((i) => <span key={i} className="w-2 h-2 rounded-full bg-slate-300" />)}</div>
+                              <div className="h-3.5 w-full rounded" style={{ background: theme.colors.brand }} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <p className={`text-sm font-medium ${on ? "text-blue-700" : "text-slate-800"}`}>{p.label}{on && " ✓"}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{p.hint}</p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {theme.product.layout === "showcase" && (
+                <div className="grid gap-3 sm:grid-cols-3 mt-4 pt-3 border-t border-slate-100">
+                  <div>
+                    <label className={labelCls}>ชื่อรุ่น</label>
+                    <select className={inputCls} value={theme.product.titleStyle} onChange={(e) => setProduct({ titleStyle: e.target.value as ProductTitleStyle })}>
+                      {(choices.productTitleStyles ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>พื้นหลังหลังรูป</label>
+                    <select className={inputCls} value={theme.product.imageBg} onChange={(e) => setProduct({ imageBg: e.target.value as ProductImageBg })}>
+                      {(choices.productImageBgs ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer self-end pb-2">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.product.showTabs} onChange={(e) => setProduct({ showTabs: e.target.checked })} />
+                    แยกรายละเอียดเป็นแท็บ
+                  </label>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-400 mt-3">ดูผล: ในพรีวิวด้านขวา กดการ์ดสินค้าใบไหนก็ได้ → หน้าสินค้าจะเป็น Style ที่เลือกทันที (ยังไม่ขึ้นเว็บจริงจนกว่าจะกดเผยแพร่)</p>
             </div>
           )}
 

@@ -13,6 +13,10 @@ export type MenuAlign = "left" | "center" | "right";
 export type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 export type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
 export type CardHover = "none" | "lift" | "zoom";
+/** แบบหน้าสินค้า (Style) — เก็บในธีม สลับกลับได้ ทุกแบรนด์ใช้ร่วมกัน */
+export type ProductLayout = "classic" | "showcase";
+export type ProductTitleStyle = "serif" | "display";
+export type ProductImageBg = "tint" | "surface" | "none";
 
 export interface SiteTheme {
   colors: {
@@ -61,6 +65,16 @@ export interface SiteTheme {
     showStock: boolean;
     hover: CardHover;
   };
+  /** หน้าสินค้า: classic = รูปซ้าย ข้อมูลขวา · showcase = ชื่อรุ่นใหญ่ + รูปกลางจอ (ดู storefront ProductShowcase) */
+  product: {
+    layout: ProductLayout;
+    /** ชื่อรุ่นตัวเอียงแบบนิตยสาร (เฉพาะชื่ออังกฤษ) หรือฟอนต์หัวเรื่องของธีม */
+    titleStyle: ProductTitleStyle;
+    /** พื้นหลังวงกลมหลังรูป */
+    imageBg: ProductImageBg;
+    /** แยก รายละเอียด / จุดเด่น เป็นแท็บ */
+    showTabs: boolean;
+  };
 }
 
 export const DEFAULT_THEME: SiteTheme = {
@@ -85,6 +99,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", showTabs: true },
 };
 
 export const FONT_CHOICES = ["Kanit", "Noto Sans Thai", "Prompt", "Sarabun", "IBM Plex Sans Thai"];
@@ -122,6 +137,20 @@ export const CARD_PRESETS: { value: CardPreset; label: string; hint: string }[] 
   { value: "shadow", label: "เงานุ่ม", hint: "เงาอ่อน ๆ" },
   { value: "floating", label: "ลอย", hint: "เงาชัด ดูเด่น" },
   { value: "minimal", label: "มินิมอล", hint: "เฉพาะรูป+ข้อความ" },
+];
+
+export const PRODUCT_LAYOUTS: { value: ProductLayout; label: string; hint: string }[] = [
+  { value: "classic", label: "คลาสสิก", hint: "รูปซ้าย ข้อมูลขวา — แบบร้านค้าทั่วไป อ่านง่าย" },
+  { value: "showcase", label: "โชว์เคส", hint: "ชื่อรุ่นตัวใหญ่ + รูปใหญ่กลางจอ ราคาซ้าย ตัวเลือกขวา — แบบแบรนด์บิวตี้/แฟชั่น" },
+];
+export const PRODUCT_TITLE_STYLES: { value: ProductTitleStyle; label: string }[] = [
+  { value: "serif", label: "ตัวเอียงแบบนิตยสาร (ชื่ออังกฤษ)" },
+  { value: "display", label: "ฟอนต์หัวเรื่องของธีม" },
+];
+export const PRODUCT_IMAGE_BGS: { value: ProductImageBg; label: string }[] = [
+  { value: "tint", label: "วงกลมสีแบรนด์จาง ๆ" },
+  { value: "surface", label: "วงกลมสีพื้นการ์ด" },
+  { value: "none", label: "ไม่มีพื้นหลัง" },
 ];
 
 export const IMAGE_RATIOS: { value: ImageRatio; label: string }[] = [
@@ -162,6 +191,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
   const l = (r.logo ?? {}) as Record<string, unknown>;
   const h = (r.header ?? {}) as Record<string, unknown>;
   const cd = (r.card ?? {}) as Record<string, unknown>;
+  const pd = (r.product ?? {}) as Record<string, unknown>;
   const d = DEFAULT_THEME;
 
   return {
@@ -203,6 +233,12 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       showStock: cd.showStock !== false,
       hover: pick(cd.hover, ["none", "lift", "zoom"] as const, d.card.hover),
     },
+    product: {
+      layout: pick(pd.layout, ["classic", "showcase"] as const, d.product.layout),
+      titleStyle: pick(pd.titleStyle, ["serif", "display"] as const, d.product.titleStyle),
+      imageBg: pick(pd.imageBg, ["tint", "surface", "none"] as const, d.product.imageBg),
+      showTabs: pd.showTabs !== false,
+    },
   };
 }
 
@@ -223,5 +259,6 @@ export function mergeTheme(existing: unknown, incoming: unknown): Record<string,
     logo: t.logo,
     header: t.header,
     card: t.card,
+    product: t.product,
   };
 }
