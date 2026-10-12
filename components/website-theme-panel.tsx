@@ -27,6 +27,8 @@ type ProductLayout = "classic" | "showcase";
 type ProductTitleStyle = "serif" | "display";
 type ProductImageBg = "tint" | "surface" | "none";
 type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
+type ProductGalleryStyle = "editorial" | "spotlight";
+type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 
 interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
@@ -43,7 +45,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; showTabs: boolean; sections: ProductSection[]; hidden: ProductSection[] };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; sections: ProductSection[]; hidden: ProductSection[] };
 }
 
 interface Choices {
@@ -59,6 +61,8 @@ interface Choices {
   productTitleStyles?: { value: ProductTitleStyle; label: string }[];
   productImageBgs?: { value: ProductImageBg; label: string }[];
   productSections?: { value: ProductSection; label: string; hint: string; hideable: boolean }[];
+  productGalleryStyles?: { value: ProductGalleryStyle; label: string; hint: string }[];
+  productDetailsStyles?: { value: ProductDetailsStyle; label: string }[];
 }
 
 type ColorKey = keyof Theme["colors"];
@@ -843,7 +847,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               </div>
 
               {theme.product.layout === "showcase" && (
-                <div className="grid gap-3 sm:grid-cols-3 mt-4 pt-3 border-t border-slate-100">
+                <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
+                  <div>
+                    <label className={labelCls}>แกลเลอรีรูปสินค้า</label>
+                    <select className={inputCls} value={theme.product.galleryStyle} onChange={(e) => setProduct({ galleryStyle: e.target.value as ProductGalleryStyle })}>
+                      {(choices.productGalleryStyles ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">{(choices.productGalleryStyles ?? []).find((o) => o.value === theme.product.galleryStyle)?.hint}</p>
+                  </div>
+                  <div>
+                    <label className={labelCls}>รายละเอียดสินค้า</label>
+                    <select className={inputCls} value={theme.product.detailsStyle} onChange={(e) => setProduct({ detailsStyle: e.target.value as ProductDetailsStyle })}>
+                      {(choices.productDetailsStyles ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
                   <div>
                     <label className={labelCls}>ชื่อรุ่น</label>
                     <select className={inputCls} value={theme.product.titleStyle} onChange={(e) => setProduct({ titleStyle: e.target.value as ProductTitleStyle })}>
@@ -856,10 +873,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       {(choices.productImageBgs ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
-                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer self-end pb-2">
-                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.product.showTabs} onChange={(e) => setProduct({ showTabs: e.target.checked })} />
-                    แยกรายละเอียดเป็นแท็บ
-                  </label>
                 </div>
               )}
 

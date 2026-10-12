@@ -17,6 +17,10 @@ export type CardHover = "none" | "lift" | "zoom";
 export type ProductLayout = "classic" | "showcase";
 export type ProductTitleStyle = "serif" | "display";
 export type ProductImageBg = "tint" | "surface" | "none";
+/** แกลเลอรีรูปของแบบโชว์เคส: editorial = เลื่อนซ้าย-ขวาเต็มจอ+ซูม (แบบ gucci) · spotlight = รูปเดียวบนวงกลม */
+export type ProductGalleryStyle = "editorial" | "spotlight";
+/** รายละเอียดสินค้า: accordion = พับเก็บ · tabs = แท็บ · plain = เรียงต่อกัน */
+export type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 /** ส่วนประกอบของหน้าสินค้าแบบโชว์เคส — ลากจัดลำดับ/ซ่อนได้ในแท็บหน้าสินค้า */
 export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
 export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related"];
@@ -75,8 +79,10 @@ export interface SiteTheme {
     titleStyle: ProductTitleStyle;
     /** พื้นหลังวงกลมหลังรูป */
     imageBg: ProductImageBg;
-    /** แยก รายละเอียด / จุดเด่น เป็นแท็บ */
+    /** (เก่า) แยกเป็นแท็บ — ใช้ detailsStyle แทน เก็บไว้ให้ค่าที่บันทึกก่อนหน้ายังอ่านได้ */
     showTabs: boolean;
+    galleryStyle: ProductGalleryStyle;
+    detailsStyle: ProductDetailsStyle;
     /** ลำดับส่วนประกอบ (ครบทุกตัวเสมอ) */
     sections: ProductSection[];
     /** ส่วนที่ซ่อน (ซ่อนได้เฉพาะ details/banner/related) */
@@ -106,7 +112,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", showTabs: true, sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -172,6 +178,16 @@ export const PRODUCT_TITLE_STYLES: { value: ProductTitleStyle; label: string }[]
   { value: "serif", label: "ตัวเอียงแบบนิตยสาร (ชื่ออังกฤษ)" },
   { value: "display", label: "ฟอนต์หัวเรื่องของธีม" },
 ];
+export const PRODUCT_GALLERY_STYLES: { value: ProductGalleryStyle; label: string; hint: string }[] = [
+  { value: "editorial", label: "เลื่อนซ้าย-ขวา เต็มจอ (แบบ Gucci)", hint: "รูปเต็มความกว้าง ลูกศร/รูปย่อ/ตัวนับ คลิกซูม ปัดนิ้วได้" },
+  { value: "spotlight", label: "รูปเดียวบนวงกลม", hint: "รูปใหญ่กลางจอบนพื้นวงกลม จุดเลื่อนรูป" },
+];
+export const PRODUCT_DETAILS_STYLES: { value: ProductDetailsStyle; label: string }[] = [
+  { value: "accordion", label: "พับเก็บ กดเปิดทีละหัวข้อ (แบบ Gucci)" },
+  { value: "tabs", label: "แท็บ" },
+  { value: "plain", label: "เรียงต่อกัน ไม่พับ" },
+];
+
 export const PRODUCT_SECTIONS: { value: ProductSection; label: string; hint: string; hideable: boolean }[] = [
   { value: "gallery", label: "ชื่อรุ่น + รูปใหญ่", hint: "หัวเรื่อง รูปกลางจอ จุดเลื่อนรูป", hideable: false },
   { value: "buy", label: "ราคา · ตัวเลือก · ใส่ตะกร้า", hint: "ราคา/คำอธิบายสั้น ซ้าย · จำนวน/สี/ปุ่ม ขวา", hideable: false },
@@ -271,6 +287,9 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       titleStyle: pick(pd.titleStyle, ["serif", "display"] as const, d.product.titleStyle),
       imageBg: pick(pd.imageBg, ["tint", "surface", "none"] as const, d.product.imageBg),
       showTabs: pd.showTabs !== false,
+      galleryStyle: pick(pd.galleryStyle, ["editorial", "spotlight"] as const, d.product.galleryStyle),
+      // ค่าที่บันทึกก่อนมี detailsStyle: showTabs=false เคยหมายถึง "เรียงต่อกัน"
+      detailsStyle: pick(pd.detailsStyle, ["accordion", "tabs", "plain"] as const, pd.showTabs === false ? "plain" : d.product.detailsStyle),
       sections: normalizeProductSections(pd.sections),
       hidden: normalizeHiddenSections(pd.hidden),
     },
