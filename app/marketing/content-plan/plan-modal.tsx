@@ -4,14 +4,17 @@
  * การ์ดไอเดียคอนเทนต์ — สร้าง/แก้ (ฝั่งวางแผน) บนข้อมูลชุดเดียวกับปฏิทินคอนเทนต์เดิม
  *   หัวข้อ · แบรนด์ · แนวคอนเทนต์ · เป้าหมาย · รูปแบบ · ลงที่ไหน · วัน/เวลา · สินค้า · บรีฟ · รูปอ้างอิง
  *   ปุ่ม: บันทึก · 🎬 ส่งเป็นงานให้ทีม Creative (สร้างงาน + ผูก) · 📝 รายละเอียดเต็ม/แคปชั่น (ContentDrawer เดิม) · 🗑 ลบ
- * ของกลาง: ERPModal · ConfirmDialog · ParentSkuPicker · FileMultiInput · ERPDateTime24 (เวลา 24 ชม.) · PlatformIcon · Toast
+ * หน้าตา (2026-10-12 เจ้าของบอก "ตาลาย"): บนสุด = หัวข้อตัวใหญ่ + บรีฟ · ล่าง = รายการ "ป้ายซ้าย : ค่าขวา" ทีละบรรทัด
+ *   แนว/เป้าหมาย/แบรนด์ = dropdown (โชว์แค่ค่าที่เลือก) · ช่องทาง/รูปแบบ = ปุ่มเรียบ (ไม่มีกรอบ ตัวที่เลือกถึงเข้ม)
+ * ของกลาง: ERPModal · ConfirmDialog · ParentSkuPicker · FileMultiInput · ERPDateTime24 (เวลา 24 ชม.) · SearchableSelect · PlatformIcon · Toast
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { FileMultiInput } from "@/components/file-multi-input";
 import { ERPDateTime24 } from "@/components/form";
 import { PlatformIcon } from "@/components/platform-icon";
+import { SearchableSelect } from "@/components/searchable-select";
 import { useToast } from "@/components/toast";
 import { createContent, updateContent, deleteContent, createTask, POST_TYPES, splitPostTypes, joinPostTypes, type ContentItem, type BrandOption } from "@/app/tasks/data";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
@@ -24,7 +27,8 @@ type Draft = {
   date: string; time: string; parent: ParentSkuPickerValue | null; brief: string; ref_image_keys: string[];
 };
 
-const chip = (on: boolean) => `inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`;
+/** ปุ่มเลือกแบบเรียบ (ช่องทาง/รูปแบบ) — ไม่มีกรอบ · ตัวที่เลือก = พื้นเข้ม */
+const toggleCls = (on: boolean) => `inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-default ${on ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"}`;
 
 function toDraft(c: ContentItem | null, defaults: { brandId?: string | null; date?: string | null; platform?: string | null }): Draft {
   if (!c) return {
@@ -147,29 +151,40 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
     finally { setBusy(false); }
   };
 
-  const input = "h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
-  const label = "mb-1 block text-xs font-medium text-slate-500";
   const ro = !canEdit;
+  // บรรทัดคุณสมบัติ "ป้ายซ้าย : ค่าขวา" (เป็นฟังก์ชันเรียกตรง ไม่ใช่ component — กันช่องพิมพ์หลุดโฟกัส)
+  const row = (icon: string, labelText: string, body: ReactNode, hint?: string) => (
+    <div className="grid gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-start sm:gap-3">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 sm:pt-2"><span className="w-4 text-center">{icon}</span>{labelText}</div>
+      <div className="min-w-0">{body}{hint && <div className="mt-1 text-[11px] text-slate-400">{hint}</div>}</div>
+    </div>
+  );
+  const pillarOptions = [{ value: "", label: "— ไม่ระบุแนว —" }, ...pillars.filter((p) => p.is_active || p.id === d.pillar_id).map((p) => ({ value: p.id, label: p.name, badge: p.icon ?? undefined }))];
+  const goalOptions = [{ value: "", label: "— ไม่ระบุ —" }, ...CONTENT_GOALS.map((g) => ({ value: g.key, label: g.label, badge: g.icon }))];
+  const brandOptions = [{ value: "", label: "— ไม่ระบุแบรนด์ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))];
+  const pillar = d.pillar_id ? pillars.find((p) => p.id === d.pillar_id) : undefined;
 
   return (
     <>
       <ERPModal open={open} onClose={onClose} size="lg" defaultExpanded={false} hasUnsavedChanges={dirty && canEdit}
         title={item ? `${item.content_no ?? ""} ${item.title}`.trim() : "💡 ไอเดียคอนเทนต์ใหม่"}
-        description={item && stage ? `${STAGE_META[stage].icon} ${STAGE_META[stage].label}${item.task_no ? ` · งาน ${item.task_no}` : ""}` : "วางแผนก่อน รายละเอียดแคปชั่นค่อยเติมทีหลังได้"}
+        description={item && stage ? `${STAGE_META[stage].icon} ${STAGE_META[stage].label}${item.task_no ? ` · งาน ${item.task_no}` : ""}` : undefined}
         footer={
-          <div className="flex w-full flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-1.5">
+            <button type="button" onClick={onOpenSettings} title="ตั้งค่าหน้านี้ (ช่องทาง / แนว / เป้า / สล็อต)"
+              className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">⚙️</button>
             {item && canEdit && (
-              <button type="button" onClick={() => setAskDelete(true)} disabled={busy}
-                className="h-9 rounded-lg px-3 text-sm text-red-600 hover:bg-red-50">🗑 ลบ</button>
+              <button type="button" onClick={() => setAskDelete(true)} disabled={busy} title="ลบไอเดีย"
+                className="h-9 w-9 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600">🗑</button>
             )}
             {item && (
               <button type="button" onClick={() => onOpenDetail(item.id)} disabled={busy}
-                className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50">📝 รายละเอียด/แคปชั่น</button>
+                className="h-9 rounded-lg px-2.5 text-sm text-slate-600 hover:bg-slate-100">📝 แคปชั่น/รายละเอียด</button>
             )}
             <div className="ml-auto flex gap-2">
               {canEdit && stage === "idea" && (
                 <button type="button" onClick={() => setAskTask(true)} disabled={busy || !d.title.trim()}
-                  className="h-9 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50">🎬 ส่งเป็นงาน</button>
+                  className="h-9 rounded-lg px-3 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-40">🎬 ส่งเป็นงาน</button>
               )}
               <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{canEdit ? "ยกเลิก" : "ปิด"}</button>
               {canEdit && (
@@ -179,101 +194,71 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
             </div>
           </div>
         }>
-        <div className="space-y-4">
-          <div className="-mb-2 flex justify-end">
-            <button type="button" onClick={onOpenSettings} className="rounded-md px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800">⚙️ ตั้งค่าหน้านี้ (ช่องทาง/แนว)</button>
-          </div>
-          {locked && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">โพสต์แล้ว — แก้ได้เฉพาะแนว/เป้าหมาย/บรีฟ/วัน (เนื้อหาหลักล็อกตามระบบเดิม)</div>}
-          <div>
-            <label className={label}>หัวข้อ *</label>
+        {locked && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">โพสต์แล้ว — แก้ได้เฉพาะแนว/เป้าหมาย/บรีฟ/วัน (เนื้อหาหลักล็อกตามระบบเดิม)</div>}
+
+        {/* ── ตัวไอเดีย: หัวข้อ + บรีฟ ── */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            {pillar && <span className="h-6 w-1.5 flex-shrink-0 rounded-full" style={{ background: pillar.color }} title={pillar.name} />}
             <input value={d.title} onChange={(e) => set({ title: e.target.value })} disabled={ro || locked} maxLength={200} autoFocus={!item}
-              placeholder="เช่น BBP08 แมตช์ชุดไปเที่ยว" className={input} />
+              placeholder="ไอเดียคืออะไร? เช่น BBP08 แมตช์ชุดไปเที่ยว"
+              className="w-full border-0 border-b border-transparent bg-transparent px-0 py-1 text-lg font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 hover:border-slate-200 focus:border-blue-500 focus:outline-none focus:ring-0 disabled:text-slate-700" />
           </div>
+          <textarea value={d.brief} onChange={(e) => set({ brief: e.target.value })} disabled={ro} rows={3} maxLength={3000}
+            placeholder="บรีฟ: อยากได้รูป/คลิปแนวไหน (ไม่บังคับ) — เช่น ถ่ายกลางแจ้ง โทนอุ่น · เปิดคลิปด้วยฉากเทของออกจากกระเป๋า 3 วิแรก"
+            className="w-full resize-y rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:text-slate-600" />
+        </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className={label}>แบรนด์</label>
-              <select value={d.brand_id} onChange={(e) => set({ brand_id: e.target.value })} disabled={ro || locked} className={input}>
-                <option value="">— ไม่ระบุ —</option>
-                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+        {/* ── คุณสมบัติ: ป้ายซ้าย : ค่าขวา ── */}
+        <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
+          {row("📅", "วันที่ลง", (
+            <div className="flex items-center gap-2">
+              <ERPDateTime24 value={d.date ? `${d.date}T${d.time || "10:00"}` : ""} disabled={ro} className="w-full max-w-xs"
+                onChange={(v) => set({ date: (v ?? "").slice(0, 10), time: (v ?? "").slice(11, 16) || d.time || "10:00" })} />
+              {d.date && !ro && <button type="button" onClick={() => set({ date: "" })} className="text-xs text-slate-400 hover:text-slate-700 hover:underline">ไม่ลงวัน</button>}
             </div>
-            <div>
-              <label className={label}>วันที่จะลง (เว้นว่าง = เก็บเป็นไอเดียไว้ก่อน)</label>
-              <div className="flex items-center gap-2">
-                <ERPDateTime24 value={d.date ? `${d.date}T${d.time || "10:00"}` : ""} disabled={ro} className="flex-1"
-                  onChange={(v) => set({ date: (v ?? "").slice(0, 10), time: (v ?? "").slice(11, 16) || d.time || "10:00" })} />
-                {d.date && !ro && (
-                  <button type="button" onClick={() => set({ date: "" })} title="เอาวันออก (เก็บเป็นไอเดีย)"
-                    className="h-9 flex-shrink-0 rounded-lg border border-slate-200 px-2 text-xs text-slate-500 hover:bg-slate-50">ไม่ลงวัน</button>
-                )}
-              </div>
-            </div>
-          </div>
+          ), d.date ? undefined : "เว้นว่าง = เก็บเป็นไอเดียไว้ก่อน (อยู่ในกล่องไอเดียยังไม่ลงวัน)")}
 
-          <div>
-            <label className={label}>แนวคอนเทนต์</label>
-            <div className="flex flex-wrap gap-1.5">
-              {pillars.filter((p) => p.is_active || p.id === d.pillar_id).map((p) => (
-                <button key={p.id} type="button" disabled={ro} onClick={() => set({ pillar_id: d.pillar_id === p.id ? "" : p.id })}
-                  className={chip(d.pillar_id === p.id)} style={d.pillar_id === p.id ? { background: p.color, borderColor: p.color } : undefined}>
-                  {p.icon && <span>{p.icon}</span>}{p.name}
-                </button>
-              ))}
-              {pillars.length === 0 && <span className="text-xs text-slate-400">ยังไม่มีแนวคอนเทนต์ — ตั้งได้ที่ "⚙️ ตั้งค่าหน้านี้"</span>}
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className={label}>เป้าหมาย</label>
-              <div className="flex flex-wrap gap-1.5">
-                {CONTENT_GOALS.map((g) => (
-                  <button key={g.key} type="button" disabled={ro} onClick={() => set({ goal: d.goal === g.key ? "" : g.key })} className={chip(d.goal === g.key)}>
-                    {g.icon} {g.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className={label}>รูปแบบ (เลือกได้หลายอย่าง)</label>
-              <div className="flex flex-wrap gap-1.5">
-                {POST_TYPES.map((t) => (
-                  <button key={t.value} type="button" disabled={ro || locked} onClick={() => set({ post_types: toggle(d.post_types, t.value) })} className={chip(d.post_types.includes(t.value))}>
-                    {t.icon} {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className={label}>ลงที่ไหน</label>
-            <div className="flex flex-wrap gap-1.5">
+          {row("📱", "ลงที่ไหน", (
+            <div className="flex flex-wrap gap-1">
               {platformChoices.map((p) => (
-                <button key={p.value} type="button" disabled={ro || locked} onClick={() => set({ platforms: toggle(d.platforms, p.value) })} className={chip(d.platforms.includes(p.value))}>
+                <button key={p.value} type="button" disabled={ro || locked} onClick={() => set({ platforms: toggle(d.platforms, p.value) })} className={toggleCls(d.platforms.includes(p.value))}>
                   <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={14} />{p.label}
                 </button>
               ))}
+              {platformChoices.length === 0 && <span className="pt-1 text-xs text-slate-400">ยังไม่มีช่องทาง — ตั้งได้ที่ ⚙️</span>}
             </div>
-          </div>
+          ))}
 
-          <div>
-            <label className={label}>สินค้า (รุ่น)</label>
+          {row("🎞️", "รูปแบบ", (
+            <div className="flex flex-wrap gap-1">
+              {POST_TYPES.map((t) => (
+                <button key={t.value} type="button" disabled={ro || locked} onClick={() => set({ post_types: toggle(d.post_types, t.value) })} className={toggleCls(d.post_types.includes(t.value))}>
+                  <span className="text-[13px] leading-none">{t.icon}</span>{t.label}
+                </button>
+              ))}
+            </div>
+          ))}
+
+          {row("🧭", "แนวคอนเทนต์", (
+            <div className="max-w-xs"><SearchableSelect value={d.pillar_id} options={pillarOptions} onChange={(v) => set({ pillar_id: v })} disabled={ro} placeholder="— ไม่ระบุแนว —" /></div>
+          ))}
+
+          {row("🎯", "เป้าหมาย", (
+            <div className="max-w-xs"><SearchableSelect value={d.goal} options={goalOptions} onChange={(v) => set({ goal: v })} disabled={ro} placeholder="— ไม่ระบุ —" /></div>
+          ))}
+
+          {row("🏷️", "แบรนด์", (
+            <div className="max-w-xs"><SearchableSelect value={d.brand_id} options={brandOptions} onChange={(v) => set({ brand_id: v })} disabled={ro || locked} placeholder="— ไม่ระบุแบรนด์ —" /></div>
+          ))}
+
+          {row("📦", "สินค้า", (
             <ParentSkuPicker value={d.parent} onChange={(v) => set({ parent: v })} disabled={ro || locked} disableCreate placeholder="เลือกรุ่นสินค้า (ไม่บังคับ)" />
-          </div>
+          ))}
 
-          <div>
-            <label className={label}>บรีฟ — อยากได้รูป/คลิปแนวไหน</label>
-            <textarea value={d.brief} onChange={(e) => set({ brief: e.target.value })} disabled={ro} rows={4} maxLength={3000}
-              placeholder="เช่น ถ่ายกลางแจ้ง โทนอุ่น นางแบบสะพายไปคาเฟ่ · เปิดคลิปด้วยฉากเทของออกจากกระเป๋า 3 วิแรก"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-          </div>
-
-          <div>
-            <label className={label}>รูปอ้างอิง (สูงสุด 12 รูป)</label>
+          {row("🖼️", "รูปอ้างอิง", (
             <FileMultiInput value={d.ref_image_keys} onChange={(keys) => set({ ref_image_keys: keys })} folder="content-plan" max={12} disabled={ro} />
-          </div>
+          ), "สูงสุด 12 รูป")}
         </div>
       </ERPModal>
 
