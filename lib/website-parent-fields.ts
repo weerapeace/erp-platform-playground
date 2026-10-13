@@ -64,7 +64,9 @@ const LABEL_TH: Record<string, string> = {
 const isAutoLabel = (key: string, label: string): boolean => {
   const auto = key.split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : "")).join(" ").toLowerCase();
   const l = label.trim().toLowerCase().replace(/\s*\[en\]$/, "");
-  return !l || l === auto || l === key.toLowerCase();
+  // "Name Platform [EN]" ของ name_platform_en ก็นับเป็นอัตโนมัติ
+  const autoNoEn = key.replace(/_en$/, "").split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : "")).join(" ").toLowerCase();
+  return !l || l === auto || l === autoNoEn || l === key.toLowerCase();
 };
 const pickLabel = (key: string, registryLabel: string | null | undefined): string => {
   const reg = (registryLabel ?? "").trim();
