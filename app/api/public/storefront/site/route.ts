@@ -9,7 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeBlocks } from "@/lib/website-blocks";
-import { normalizeTheme, PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
+import { normalizeTheme } from "@/lib/website-theme";
+import { loadParentWebFields } from "@/lib/website-parent-fields";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
 
@@ -90,6 +91,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      */
     info,
     /** ป้ายชื่อฟิลด์สเปก (key → label) ให้เว็บร้านวาดตาราง "วัสดุและขนาด" */
-    specFields: PRODUCT_SPEC_FIELDS.map((f) => ({ key: f.key, label: f.label })),
+    specFields: (await loadParentWebFields(sb)).map((f) => ({ key: f.key, label: f.label })),
   });
 }

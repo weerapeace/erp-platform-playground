@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { normalizeFieldMap } from "@/lib/website-field-map";
+import { loadParentWebFields, PARENT_FIELD_GROUP_LABEL } from "@/lib/website-parent-fields";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import {
@@ -78,6 +79,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     sb.from("shop_domains").select("domain").eq("shop_id", s.id).limit(1).maybeSingle(),
   ]);
 
+  // ฟิลด์ Parent SKU ที่ให้เลือกโชว์บนเว็บ (ทุกฟิลด์จากทะเบียน ยกเว้นต้นทุน/ข้อมูลภายใน)
+  const parentFields = await loadParentWebFields(sb);
   const hasDraft = s.theme_draft != null;
   const rawDomain = (dom as { domain: string } | null)?.domain ?? null;
   const siteUrl = rawDomain ? (rawDomain.startsWith("http") ? rawDomain : `https://${rawDomain}`) : null;
@@ -104,7 +107,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       productDetailsOpen: PRODUCT_DETAILS_OPEN,
       partChoices: PART_CHOICES,
       detailSources: DETAIL_SOURCES,
-      specFields: PRODUCT_SPEC_FIELDS.map((f) => ({ key: f.key, label: f.label })),
+      specFields: parentFields.map((f) => ({ key: f.key, label: f.label, group: f.group })),
+      fieldGroups: PARENT_FIELD_GROUP_LABEL,
       categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label })),
       products: webProducts,
       imageRatios: IMAGE_RATIOS,

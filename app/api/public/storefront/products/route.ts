@@ -16,13 +16,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeFieldMap,
   resolveProduct,
-  productSpecAttrs,
-  PARENT_SELECT,
   CHILD_SELECT,
   type ParentRow,
   type ChildSku,
 } from "@/lib/website-field-map";
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
+import { loadParentWebFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -83,10 +82,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const parentIds = rows.map((r) => r.parent_sku_id as string).filter(Boolean);
 
-  const [{ data: parents }, { data: children }] = await Promise.all([
-    sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
+  // ดึงทุกคอลัมน์ แล้วค่อยคัดเฉพาะฟิลด์ที่อนุญาตให้ออกเว็บ (ทะเบียนฟิลด์ + บัญชีดำ) ก่อนส่ง — ต้นทุน/ข้อมูลภายในไม่หลุด
+  const [{ data: parents }, { data: children }, parentFields] = await Promise.all([
+    sb.from("parent_skus_v2").select("*").in("id", parentIds),
     sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
+    loadParentWebFields(sb),
   ]);
+  const relatedValues = await resolveRelatedValues(sb, parentFields, (parents ?? []) as Record<string, unknown>[]);
 
   const parentById = new Map(((parents ?? []) as ParentRow[]).map((p) => [p.id, p]));
 
@@ -181,7 +183,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         options2: r.options2,
         featured: Boolean(l.featured),
         /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
-        attrs: productSpecAttrs(p),
+        attrs: productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues),
         images: r.images.map(imageUrl),
         /** รูปปก + แกลเลอรีของ Parent SKU (แยกจาก images ที่อาจมาจาก SKU ลูก) */
         parentImages: [...new Set([...(p.cover_image_r2_key ? [p.cover_image_r2_key] : []), ...(parentGallery.get(p.id) ?? [])])].map(imageUrl),

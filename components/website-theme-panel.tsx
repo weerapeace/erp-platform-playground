@@ -16,6 +16,7 @@ import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken }
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, type ProductParts } from "@/lib/website-theme";
+import { ERPModal } from "@/components/modal";
 
 type Radius = "sharp" | "soft" | "round";
 type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -70,7 +71,8 @@ interface Choices {
   productDetailsStyles?: { value: ProductDetailsStyle; label: string }[];
   productDetailsOpen?: { value: ProductDetailsOpen; label: string }[];
   detailSources?: { value: DetailSource; label: string; hint: string }[];
-  specFields?: { key: string; label: string }[];
+  specFields?: { key: string; label: string; group?: string }[];
+  fieldGroups?: Record<string, string>;
   categories?: { key: string; label: string }[];
   products?: { code: string; name: string }[];
 }
@@ -291,6 +293,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     theme && setProduct({ parts: { ...theme.product.parts, [k]: { ...theme.product.parts[k], ...p } } });
   const detailDrag = useDragReorder((from, to) => theme && setProduct({ detailItems: moveItem(theme.product.detailItems, from, to) }));
   const [openDetail, setOpenDetail] = useState<string | null>(null);
+  // ป๊อปอัปเลือกฟิลด์ Parent SKU ให้หัวข้อไหน (id ของหัวข้อ) + คำค้น
+  const [fieldPickerFor, setFieldPickerFor] = useState<string | null>(null);
+  const [fieldQuery, setFieldQuery] = useState("");
   const [prodQuery, setProdQuery] = useState("");
   const setDetailItem = (id: string, patch: Partial<DetailItem>) =>
     theme && setProduct({ detailItems: theme.product.detailItems.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
@@ -1021,18 +1026,22 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                               </div>
                               {it.source === "fields" && (
                                 <div className="sm:col-span-2">
-                                  <label className={labelCls}>ฟิลด์ที่โชว์ (เรียงตามที่ติ๊ก)</label>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {(choices.specFields ?? []).map((f) => {
-                                      const on = it.fields.includes(f.key);
+                                  <label className={labelCls}>ฟิลด์ที่โชว์ ({it.fields.length}) — เรียงตามที่เลือก</label>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {it.fields.map((k) => {
+                                      const f = (choices.specFields ?? []).find((x) => x.key === k);
                                       return (
-                                        <button key={f.key} onClick={() => setDetailItem(it.id, { fields: on ? it.fields.filter((k) => k !== f.key) : [...it.fields, f.key] })} className={`px-2.5 py-1 rounded-full border text-xs ${on ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
-                                          {on ? "✓ " : ""}{f.label}
-                                        </button>
+                                        <span key={k} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 text-xs">
+                                          {f?.label ?? k}
+                                          <button type="button" onClick={() => setDetailItem(it.id, { fields: it.fields.filter((x) => x !== k) })} className="text-blue-400 hover:text-rose-600" title="เอาออก">✕</button>
+                                        </span>
                                       );
                                     })}
+                                    <button type="button" onClick={() => { setFieldQuery(""); setFieldPickerFor(it.id); }} className="px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-700">
+                                      ＋ เลือกฟิลด์…
+                                    </button>
                                   </div>
-                                  <p className="text-[11px] text-slate-400 mt-1">ค่ามาจากช่องใน Parent SKU (แท็บข้อมูลสินค้า) · ช่องที่ว่างจะไม่โชว์</p>
+                                  <p className="text-[11px] text-slate-400 mt-1">เลือกได้ทุกฟิลด์ของ Parent SKU (ยกเว้นต้นทุน/ข้อมูลภายใน) · ช่องที่ว่างจะไม่โชว์ · เปลี่ยนป้ายชื่อได้ที่ทะเบียนฟิลด์กลาง</p>
                                 </div>
                               )}
                               {it.source === "text" && (
@@ -1240,6 +1249,71 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           </button>
         </div>
       </div>
+      {/* ป๊อปอัปเลือกฟิลด์ Parent SKU (ของกลาง ERPModal) — ทุกฟิลด์จากทะเบียน จัดกลุ่ม ค้นหาได้ ติ๊กแล้วเรียงตามลำดับที่ติ๊ก */}
+      <ERPModal
+        open={!!fieldPickerFor}
+        onClose={() => setFieldPickerFor(null)}
+        title="เลือกฟิลด์จาก Parent SKU"
+        description="ติ๊กฟิลด์ที่จะโชว์ในหัวข้อนี้ — เรียงตามลำดับที่ติ๊ก · ฟิลด์ที่สินค้าไม่ได้กรอกจะไม่โชว์เอง"
+        size="md"
+        defaultExpanded={false}
+        storageKey="theme-field-picker"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <span className="text-xs text-slate-500">
+              เลือกแล้ว {theme?.product.detailItems.find((d) => d.id === fieldPickerFor)?.fields.length ?? 0} ฟิลด์
+            </span>
+            <button type="button" onClick={() => setFieldPickerFor(null)} className="text-sm px-4 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">เสร็จ</button>
+          </div>
+        }
+      >
+        {theme && fieldPickerFor && (() => {
+          const item = theme.product.detailItems.find((d) => d.id === fieldPickerFor);
+          if (!item) return null;
+          const q = fieldQuery.trim().toLowerCase();
+          const all = (choices?.specFields ?? []).filter((f) => !q || f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q));
+          const groups = new Map<string, typeof all>();
+          for (const f of all) {
+            const g = f.group ?? "other";
+            groups.set(g, [...(groups.get(g) ?? []), f]);
+          }
+          const toggle = (key: string) => setDetailItem(item.id, { fields: item.fields.includes(key) ? item.fields.filter((k) => k !== key) : [...item.fields, key] });
+          return (
+            <div className="space-y-3">
+              <input autoFocus value={fieldQuery} onChange={(e) => setFieldQuery(e.target.value)} placeholder="ค้นหาชื่อฟิลด์…" className={inputCls} />
+              {item.fields.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {item.fields.map((k, i) => (
+                    <span key={k} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px]">
+                      <span className="text-blue-400">{i + 1}</span> {(choices?.specFields ?? []).find((x) => x.key === k)?.label ?? k}
+                      <button type="button" onClick={() => toggle(k)} className="text-blue-400 hover:text-rose-600">✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {[...groups.entries()].map(([g, list]) => (
+                <div key={g}>
+                  <div className="text-[11px] font-medium text-slate-500 mb-1">{choices?.fieldGroups?.[g] ?? g}</div>
+                  <div className="grid sm:grid-cols-2 gap-x-3 gap-y-0.5">
+                    {list.map((f) => {
+                      const on = item.fields.includes(f.key);
+                      return (
+                        <label key={f.key} className={`flex items-center gap-2 px-2 py-1 rounded-lg text-sm cursor-pointer ${on ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-slate-50"}`}>
+                          <input type="checkbox" className="accent-blue-600" checked={on} onChange={() => toggle(f.key)} />
+                          <span className="truncate">{f.label}</span>
+                          <span className="ml-auto text-[10px] text-slate-300 font-mono truncate max-w-[40%]">{f.key}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {all.length === 0 && <div className="text-sm text-slate-400 py-6 text-center">ไม่พบฟิลด์ที่ค้นหา</div>}
+            </div>
+          );
+        })()}
+      </ERPModal>
+
     </div>
   );
 }
