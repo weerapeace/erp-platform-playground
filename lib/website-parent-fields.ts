@@ -129,6 +129,39 @@ export async function loadParentWebFields(sb: Admin): Promise<ParentWebField[]> 
   }
 }
 
+/**
+ * ฟิลด์ "รูปภาพ" ของ Parent SKU (ทะเบียนฟิลด์ ui_field_type = image) — ให้แบนเนอร์หน้าสินค้าเลือกใช้รูปต่อรุ่น
+ * เจ้าของเพิ่มฟิลด์รูปใหม่เองได้ (Parent SKU → เพิ่มฟิลด์ ชนิดรูปภาพ) แล้วฟิลด์จะโผล่ให้เลือกเอง · ค่าในคอลัมน์ = r2 key
+ */
+export interface ParentImageField { key: string; column: string; label: string }
+let imgCache: { at: number; fields: ParentImageField[] } | null = null;
+export async function loadParentImageFields(sb: Admin): Promise<ParentImageField[]> {
+  if (imgCache && Date.now() - imgCache.at < TTL) return imgCache.fields;
+  try {
+    const { data: mod } = await sb.from("erp_modules").select("id").eq("table_name", "parent_skus_v2").limit(1).maybeSingle();
+    const moduleId = (mod as { id: string } | null)?.id;
+    if (!moduleId) return [];
+    const { data } = await sb
+      .from("erp_module_fields")
+      .select("field_key, column_name, field_label, is_sensitive, is_active")
+      .eq("module_id", moduleId)
+      .eq("ui_field_type", "image")
+      .order("display_order", { ascending: true });
+    type Row = { field_key: string; column_name: string | null; field_label: string | null; is_sensitive: boolean | null; is_active: boolean | null };
+    const seen = new Set<string>();
+    const fields: ParentImageField[] = [];
+    for (const r of (data ?? []) as Row[]) {
+      if (r.is_active === false || r.is_sensitive || !r.column_name || !/^[a-z0-9_]+$/.test(r.column_name) || seen.has(r.field_key)) continue;
+      seen.add(r.field_key);
+      fields.push({ key: r.field_key, column: r.column_name, label: r.field_key === "cover_image_r2_key" ? "รูปปก Parent SKU" : pickLabel(r.field_key, r.field_label) });
+    }
+    imgCache = { at: Date.now(), fields };
+    return fields;
+  } catch {
+    return [];
+  }
+}
+
 /** ค่าของตารางปลายทางสำหรับฟิลด์ related: table → (id → row) — ดึงทีเดียวต่อตารางสำหรับทุกสินค้า */
 export async function resolveRelatedValues(
   sb: Admin,

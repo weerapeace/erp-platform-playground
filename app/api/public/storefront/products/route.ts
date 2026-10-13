@@ -23,7 +23,7 @@ import {
   type ChildSku,
 } from "@/lib/website-field-map";
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
-import { loadParentWebFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
+import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
@@ -88,12 +88,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const parentIds = rows.map((r) => r.parent_sku_id as string).filter(Boolean);
 
   // ดึงทุกคอลัมน์ แล้วค่อยคัดเฉพาะฟิลด์ที่อนุญาตให้ออกเว็บ (ทะเบียนฟิลด์ + บัญชีดำ) ก่อนส่ง — ต้นทุน/ข้อมูลภายในไม่หลุด
-  const [{ data: parents }, { data: children }, parentFields, { data: swatchRows }] = await Promise.all([
+  const [{ data: parents }, { data: children }, parentFields, { data: swatchRows }, imageFieldDefs] = await Promise.all([
     sb.from("parent_skus_v2").select("*").in("id", parentIds),
     sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
     loadParentWebFields(sb),
     // 🎨 ทะเบียนสีกลาง → จุดสีของแต่ละตัวเลือก (ดู lib/color-swatch.ts)
     sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
+    // 🖼 ฟิลด์รูปของ Parent SKU → แบนเนอร์เลือก "ฟิลด์รูปของ Parent SKU" ได้
+    loadParentImageFields(sb),
   ]);
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const relatedValues = await resolveRelatedValues(sb, parentFields, (parents ?? []) as Record<string, unknown>[]);
@@ -217,6 +219,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
         /** ปั๊มชื่อ (null = รุ่นนี้ปั๊มไม่ได้) */
         personalize,
+        /** 🖼 ฟิลด์รูปของ Parent SKU { fieldKey: URL } — เฉพาะช่องที่มีรูป (แบนเนอร์ source=field ใช้) */
+        imageFields: (() => {
+          const out: Record<string, string> = {};
+          for (const f of imageFieldDefs) {
+            const v = (p as unknown as Record<string, unknown>)[f.column];
+            if (typeof v === "string" && v.trim()) out[f.key] = /^https?:\/\//.test(v) ? v : v.startsWith("/") ? `${origin}${v}` : imageUrl(v.trim());
+          }
+          return Object.keys(out).length ? out : undefined;
+        })(),
         /** 🖼 แบนเนอร์หน้าสินค้าเฉพาะรุ่น (เฉพาะที่มีรูป) — ไม่มี = เว็บใช้แบนเนอร์กลางของธีม */
         banners: (() => {
           const bs = normalizeBanners(l.web_banners).filter((b) => b.imageKey).map((b) => ({ ...b, imageUrl: imageUrl(b.imageKey as string) }));

@@ -69,7 +69,12 @@ export type ProductDetailsOpen = "first" | "closed" | "all";
 export type GalleryColorMode = "set" | "jump";
 /** จอคอมโชว์กี่รูปพร้อมกันในแกลเลอรีเลื่อนซ้าย-ขวา: 1 = ทีละรูป · 2 = สองรูปคู่กัน (แบบ Gucci) — มือถือทีละรูปเสมอ */
 export type GalleryPerView = 1 | 2;
-export type BannerImageSource = "second" | "last" | "parent" | "fixed";
+/** second/last = รูปสินค้า · nth = รูปที่ N ของสินค้า · parent = รูปที่ N ของแกลเลอรี Parent SKU · field = ฟิลด์รูปของ Parent SKU · fixed = อัปโหลดรูปกลาง */
+export type BannerImageSource = "second" | "last" | "nth" | "parent" | "field" | "fixed";
+/** สัดส่วนรูปแบนเนอร์ — auto = ตามเดิม (ครึ่งจอ 16:10 · เต็มจอ 21:9 · มือถือ 4:3) */
+export type BannerRatio = "auto" | "1:1" | "4:5" | "3:4" | "4:3" | "16:10" | "16:9" | "21:9" | "3:1";
+/** ความกว้างแบนเนอร์: narrow = แคบกลางจอ · container = เท่าเนื้อหา · full = เต็มขอบจอ */
+export type BannerWidth = "narrow" | "container" | "full";
 export type BannerTitleSource = "subtitle" | "category" | "name" | "text" | "none";
 export type BannerTextSource = "description" | "introduction" | "english_description" | "text" | "none";
 export type BuyNoteSource = "wholesale" | "shipping" | "text" | "none";
@@ -205,23 +210,101 @@ export interface ProductParts {
   /** สวิตช์เดิม (showUnit…) ยังเก็บไว้ให้ค่ามือถือทับได้ · ของจริงอยู่ใน items */
   buy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean; noteSource: BuyNoteSource; noteText: string; columns: 1 | 2; items: BuyItem[] };
   /** layout/textPos/fields = ค่ากลางสำหรับสินค้าที่ยังไม่ตั้งแบนเนอร์เอง (ค่าในหน้า Parent SKU ทับได้ต่อรุ่น) */
-  banner: { imageSource: BannerImageSource; imageKey: string | null; titleSource: BannerTitleSource; titleText: string; textSource: BannerTextSource; text: string; layout: "half" | "full"; textPos: "left" | "right" | "over-left" | "over-center" | "over-right" | "below"; fields: string[] };
+  banner: BannerPart;
+  /** ➕ แบนเนอร์เพิ่ม (ปุ่ม "เพิ่มแบนเนอร์" ใต้ลำดับส่วนประกอบ) — อยู่ในลำดับเป็น `banner:<id>` · ไม่ถูกแบนเนอร์รายรุ่นทับ */
+  extraBanners: ExtraBanner[];
   /** codes = รหัส Parent SKU (ตัวพิมพ์ใหญ่) เมื่อ source=manual · count 2–8 · title ว่าง = ใช้ข้อความเดิมของเว็บ */
   related: { source: RelatedSource; codes: string[]; count: number; title: string };
 }
+export interface BannerPart {
+  imageSource: BannerImageSource;
+  imageKey: string | null;
+  /** รูปที่เท่าไหร่ (1 = รูปแรก) — ใช้กับ nth / parent */
+  imageIndex: number;
+  /** key ของฟิลด์รูปใน Parent SKU — ใช้กับ field */
+  imageField: string;
+  titleSource: BannerTitleSource;
+  titleText: string;
+  textSource: BannerTextSource;
+  text: string;
+  layout: "half" | "full";
+  textPos: "left" | "right" | "over-left" | "over-center" | "over-right" | "below";
+  fields: string[];
+  /** 📐 ขนาด: สัดส่วนรูป (คอม / มือถือ — same = เท่าคอม) + ความกว้าง */
+  ratio: BannerRatio;
+  ratioMobile: BannerRatio | "same";
+  width: BannerWidth;
+}
+export interface ExtraBanner extends BannerPart {
+  id: string;
+  /** ชื่อในรายการลำดับส่วนประกอบ (ลูกค้าไม่เห็น) */
+  name: string;
+}
+export const MAX_EXTRA_BANNERS = 6;
+const DEFAULT_BANNER: BannerPart = { imageSource: "second", imageKey: null, imageIndex: 2, imageField: "", titleSource: "subtitle", titleText: "", textSource: "description", text: "", layout: "half", textPos: "left", fields: [], ratio: "auto", ratioMobile: "same", width: "container" };
 export const DEFAULT_PARTS: ProductParts = {
   gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set", perView: 1 },
   buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "", columns: 2, items: DEFAULT_BUY_ITEMS() },
-  banner: { imageSource: "second", imageKey: null, titleSource: "subtitle", titleText: "", textSource: "description", text: "", layout: "half", textPos: "left", fields: [] },
+  banner: { ...DEFAULT_BANNER },
+  extraBanners: [],
   related: { source: "category", codes: [], count: 4, title: "" },
 };
+/** แบนเนอร์เพิ่มตัวใหม่ — ค่าเริ่มต้นใช้รูปที่ 3 ของสินค้า (รูปที่ 2 แบนเนอร์หลักใช้ไปแล้ว) */
+export const newExtraBanner = (n: number): ExtraBanner => ({
+  ...DEFAULT_BANNER,
+  imageSource: "nth",
+  imageIndex: 3,
+  layout: "full",
+  textPos: "over-left",
+  id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+  name: `แบนเนอร์ ${n}`,
+});
+/** id ส่วนประกอบของแบนเนอร์เพิ่ม ↔ id แบนเนอร์ */
+export const extraBannerSection = (id: string) => `banner:${id}` as const;
+export const extraBannerId = (section: string): string | null => (section.startsWith("banner:") ? section.slice(7) : null);
 const PART_KEY_RE = /^[\w\-./%()]+$/;
+const BANNER_RATIOS = ["auto", "1:1", "4:5", "3:4", "4:3", "16:10", "16:9", "21:9", "3:1"] as const;
+/** ตัวกรองค่าแบนเนอร์ 1 ชิ้น (ใช้ทั้งแบนเนอร์หลักและแบนเนอร์เพิ่ม) */
+function normalizeBannerPart(raw: unknown): BannerPart {
+  const bn = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_BANNER;
+  const one = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
+  const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const idx = Number(bn.imageIndex);
+  return {
+    imageSource: one(bn.imageSource, ["second", "last", "nth", "parent", "field", "fixed"] as const, d.imageSource),
+    imageKey: typeof bn.imageKey === "string" && PART_KEY_RE.test(bn.imageKey) ? bn.imageKey : null,
+    imageIndex: Number.isFinite(idx) ? Math.min(20, Math.max(1, Math.round(idx))) : d.imageIndex,
+    imageField: typeof bn.imageField === "string" && /^[a-z0-9_]+$/.test(bn.imageField) ? bn.imageField : "",
+    titleSource: one(bn.titleSource, ["subtitle", "category", "name", "text", "none"] as const, d.titleSource),
+    titleText: text(bn.titleText, 120),
+    textSource: one(bn.textSource, ["description", "introduction", "english_description", "text", "none"] as const, d.textSource),
+    text: text(bn.text, 2000),
+    layout: one(bn.layout, ["half", "full"] as const, d.layout),
+    textPos: one(bn.textPos, ["left", "right", "over-left", "over-center", "over-right", "below"] as const, d.textPos),
+    fields: (Array.isArray(bn.fields) ? bn.fields : []).filter((f): f is string => typeof f === "string" && /^[a-z0-9_]+$/.test(f)).slice(0, 12),
+    ratio: one(bn.ratio, BANNER_RATIOS, d.ratio),
+    ratioMobile: one(bn.ratioMobile, [...BANNER_RATIOS, "same"] as const, d.ratioMobile),
+    width: one(bn.width, ["narrow", "container", "full"] as const, d.width),
+  };
+}
 export function normalizeParts(raw: unknown): ProductParts {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, Record<string, unknown> | undefined>;
   const g = r.gallery ?? {};
   const b = r.buy ?? {};
-  const bn = r.banner ?? {};
   const rl = r.related ?? {};
+  const seenX = new Set<string>();
+  const extraBanners: ExtraBanner[] = [];
+  for (const x of Array.isArray(r.extraBanners) ? (r.extraBanners as unknown as unknown[]) : []) {
+    if (!x || typeof x !== "object") continue;
+    const o = x as Record<string, unknown>;
+    const id = typeof o.id === "string" && /^[\w-]{1,40}$/.test(o.id) ? o.id : null;
+    if (!id || seenX.has(id)) continue;
+    seenX.add(id);
+    const name = typeof o.name === "string" && o.name.trim() ? o.name.trim().slice(0, 60) : `แบนเนอร์ ${extraBanners.length + 2}`;
+    extraBanners.push({ ...normalizeBannerPart(o), id, name });
+    if (extraBanners.length >= MAX_EXTRA_BANNERS) break;
+  }
   const d = DEFAULT_PARTS;
   const one = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
   const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -243,17 +326,8 @@ export function normalizeParts(raw: unknown): ProductParts {
       columns: Number(b.columns) === 1 ? 1 : 2,
       items: normalizeBuyItems(b.items, { showUnit: b.showUnit !== false, showBadge: b.showBadge !== false, showStock: b.showStock !== false, showShortDesc: b.showShortDesc !== false }),
     },
-    banner: {
-      imageSource: one(bn.imageSource, ["second", "last", "parent", "fixed"] as const, d.banner.imageSource),
-      imageKey: typeof bn.imageKey === "string" && PART_KEY_RE.test(bn.imageKey) ? bn.imageKey : null,
-      titleSource: one(bn.titleSource, ["subtitle", "category", "name", "text", "none"] as const, d.banner.titleSource),
-      titleText: text(bn.titleText, 120),
-      textSource: one(bn.textSource, ["description", "introduction", "english_description", "text", "none"] as const, d.banner.textSource),
-      text: text(bn.text, 2000),
-      layout: one(bn.layout, ["half", "full"] as const, d.banner.layout),
-      textPos: one(bn.textPos, ["left", "right", "over-left", "over-center", "over-right", "below"] as const, d.banner.textPos),
-      fields: (Array.isArray(bn.fields) ? bn.fields : []).filter((f): f is string => typeof f === "string" && /^[a-z0-9_]+$/.test(f)).slice(0, 12),
-    },
+    banner: normalizeBannerPart(r.banner),
+    extraBanners,
     related: {
       source: one(rl.source, ["category", "collection", "featured", "bestseller", "manual", "random"] as const, d.related.source),
       codes: (Array.isArray(rl.codes) ? rl.codes : []).filter((c): c is string => typeof c === "string" && c.trim().length > 0).map((c) => c.trim().toUpperCase()).slice(0, 24),
@@ -274,10 +348,28 @@ export const PART_CHOICES = {
   ] as { value: GalleryColorMode; label: string; hint: string }[],
   bannerImages: [
     { value: "second", label: "รูปที่ 2 ของสินค้า" },
+    { value: "nth", label: "รูปที่ … ของสินค้า (เลือกเลขรูป)" },
     { value: "last", label: "รูปสุดท้ายของสินค้า" },
-    { value: "parent", label: "รูปจากแกลเลอรี Parent SKU (รูปที่ 2 ถ้ามี)" },
+    { value: "parent", label: "รูปที่ … จากแกลเลอรี Parent SKU" },
+    { value: "field", label: "ฟิลด์รูปของ Parent SKU (อัปโหลดต่อรุ่น)" },
     { value: "fixed", label: "อัปโหลดรูปกลาง 1 รูป ใช้ทุกสินค้า" },
   ] as { value: BannerImageSource; label: string }[],
+  bannerRatios: [
+    { value: "auto", label: "อัตโนมัติ (ครึ่งจอ 16:10 · เต็มจอ 21:9)" },
+    { value: "3:1", label: "3:1 แถบยาวเตี้ย" },
+    { value: "21:9", label: "21:9 กว้างพิเศษ" },
+    { value: "16:9", label: "16:9 จอกว้าง" },
+    { value: "16:10", label: "16:10" },
+    { value: "4:3", label: "4:3" },
+    { value: "1:1", label: "1:1 จัตุรัส" },
+    { value: "4:5", label: "4:5 แนวตั้ง" },
+    { value: "3:4", label: "3:4 แนวตั้งสูง" },
+  ] as { value: BannerRatio; label: string }[],
+  bannerWidths: [
+    { value: "narrow", label: "แคบ (กลางจอ)" },
+    { value: "container", label: "ปกติ (เท่าเนื้อหา)" },
+    { value: "full", label: "เต็มขอบจอ" },
+  ] as { value: BannerWidth; label: string }[],
   bannerTitles: [
     { value: "subtitle", label: "ชื่อรอง (ข้อความหลังขีดในชื่อรุ่น) หรือชื่อหมวด" },
     { value: "category", label: "ชื่อหมวด" },
@@ -399,7 +491,7 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
   return out;
 }
 /** ส่วนประกอบของหน้าสินค้าแบบโชว์เคส — ลากจัดลำดับ/ซ่อนได้ในแท็บหน้าสินค้า */
-export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
+export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related" | `banner:${string}`;
 export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related"];
 
 
@@ -451,7 +543,8 @@ export interface ProductMobile {
   /** ขนาดตัวอักษรเฉพาะมือถือ (เฉพาะช่องที่ตั้ง) */
   fonts: Partial<ProductFonts>;
 }
-export function normalizeMobile(raw: unknown): ProductMobile {
+/** @param extraIds id ของแบนเนอร์เพิ่มที่มีอยู่ (ให้ลำดับ/ซ่อนของมือถือรู้จัก banner:<id>) */
+export function normalizeMobile(raw: unknown, extraIds: string[] = []): ProductMobile {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const pick = <T extends string>(v: unknown, allowed: readonly T[]): T | null => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : null);
   const bool = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined);
@@ -489,8 +582,8 @@ export function normalizeMobile(raw: unknown): ProductMobile {
     detailsStyle: pick(r.detailsStyle, ["accordion", "tabs", "plain"] as const),
     detailsOpen: pick(r.detailsOpen, ["first", "closed", "all"] as const),
     itemsOpen,
-    sections: Array.isArray(r.sections) ? normalizeProductSections(r.sections) : null,
-    hidden: Array.isArray(r.hidden) ? normalizeHiddenSections(r.hidden) : null,
+    sections: Array.isArray(r.sections) ? normalizeProductSections(r.sections, extraIds) : null,
+    hidden: Array.isArray(r.hidden) ? normalizeHiddenSections(r.hidden, extraIds) : null,
     gallery,
     buy,
     buyItems,
@@ -1001,21 +1094,26 @@ export const DEFAULT_THEME: SiteTheme = {
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
-export function normalizeProductSections(raw: unknown): ProductSection[] {
+export function normalizeProductSections(raw: unknown, extraIds: string[] = []): ProductSection[] {
+  const extras = extraIds.map(extraBannerSection) as ProductSection[];
+  const valid = new Set<string>([...PRODUCT_SECTION_ORDER, ...extras]);
   const seen = new Set<ProductSection>();
   const out: ProductSection[] = [];
   for (const v of Array.isArray(raw) ? raw : []) {
-    if (typeof v === "string" && (PRODUCT_SECTION_ORDER as string[]).includes(v) && !seen.has(v as ProductSection)) {
+    if (typeof v === "string" && valid.has(v) && !seen.has(v as ProductSection)) {
       seen.add(v as ProductSection);
       out.push(v as ProductSection);
     }
   }
   for (const k of PRODUCT_SECTION_ORDER) if (!seen.has(k)) out.push(k);
+  // แบนเนอร์เพิ่มที่ยังไม่อยู่ในลำดับ (เช่น ลำดับมือถือที่ตั้งไว้ก่อนเพิ่มแบนเนอร์) → ต่อหลังแบนเนอร์หลัก
+  for (const k of extras) if (!seen.has(k)) out.splice(out.indexOf("banner") + 1, 0, k);
   return out;
 }
 const HIDEABLE: ProductSection[] = ["details", "banner", "related"];
-export function normalizeHiddenSections(raw: unknown): ProductSection[] {
-  return (Array.isArray(raw) ? raw : []).filter((v): v is ProductSection => typeof v === "string" && (HIDEABLE as string[]).includes(v));
+export function normalizeHiddenSections(raw: unknown, extraIds: string[] = []): ProductSection[] {
+  const ok = new Set<string>([...HIDEABLE, ...extraIds.map(extraBannerSection)]);
+  return (Array.isArray(raw) ? raw : []).filter((v): v is ProductSection => typeof v === "string" && ok.has(v));
 }
 
 /** แคตตาล็อกฟอนต์ Google ที่เลือกได้ (thai=false → ฟอนต์อังกฤษ ตัวไทยจะใช้ฟอนต์สำรอง) · weights = น้ำหนักที่มีจริง (ใช้สร้างลิงก์โหลด) */
@@ -1184,6 +1282,9 @@ export function normalizeTheme(raw: unknown): SiteTheme {
   const h = (r.header ?? {}) as Record<string, unknown>;
   const cd = (r.card ?? {}) as Record<string, unknown>;
   const pd = (r.product ?? {}) as Record<string, unknown>;
+  // ส่วนประกอบก่อน — ลำดับ/ซ่อน (คอม+มือถือ) ต้องรู้ id ของแบนเนอร์เพิ่ม
+  const parts = normalizeParts(pd.parts);
+  const xIds = parts.extraBanners.map((x) => x.id);
   const d = DEFAULT_THEME;
 
   return {
@@ -1275,10 +1376,10 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       detailsStyle: pick(pd.detailsStyle, ["accordion", "tabs", "plain"] as const, pd.showTabs === false ? "plain" : d.product.detailsStyle),
       detailsOpen: pick(pd.detailsOpen, ["first", "closed", "all"] as const, d.product.detailsOpen),
       detailItems: normalizeDetailItems(pd.detailItems),
-      sections: normalizeProductSections(pd.sections),
-      hidden: normalizeHiddenSections(pd.hidden),
-      parts: normalizeParts(pd.parts),
-      mobile: normalizeMobile(pd.mobile),
+      sections: normalizeProductSections(pd.sections, xIds),
+      hidden: normalizeHiddenSections(pd.hidden, xIds),
+      parts,
+      mobile: normalizeMobile(pd.mobile, xIds),
       fonts: normalizeFonts(pd.fonts),
     },
   };

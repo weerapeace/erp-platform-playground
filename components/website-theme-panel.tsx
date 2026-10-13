@@ -15,6 +15,9 @@ import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
+import { FieldChipsPicker } from "@/components/field-chips-picker";
+import { FieldCreatorModal } from "@/components/field-creator";
+import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, GOOGLE_FONTS, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
@@ -30,7 +33,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
   { k: "body", label: "เนื้อหา", hint: "คำอธิบาย · รายละเอียด · ข้อความแบนเนอร์" },
 ];
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ColorPicker } from "@/components/color-picker";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem } from "@/lib/website-theme";
 
@@ -44,7 +47,8 @@ type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap";
 type ProductLayout = "classic" | "showcase";
 type ProductTitleStyle = "serif" | "display";
 type ProductImageBg = "tint" | "surface" | "none";
-type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
+/** ส่วนประกอบหน้าสินค้า (รวมแบนเนอร์เพิ่ม banner:<id>) — ใช้ type กลางจาก lib */
+type ProductSection = import("@/lib/website-theme").ProductSection;
 type ProductGalleryStyle = "editorial" | "spotlight";
 type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 type ProductDetailsOpen = "first" | "closed" | "all";
@@ -96,6 +100,8 @@ interface Choices {
   detailSources?: { value: DetailSource; label: string; hint: string }[];
   specFields?: { key: string; label: string; group?: string }[];
   fieldGroups?: Record<string, string>;
+  /** ฟิลด์รูปของ Parent SKU (แบนเนอร์ source = field) */
+  imageFields?: { key: string; label: string }[];
   categories?: { key: string; label: string }[];
   products?: { code: string; name: string }[];
 }
@@ -373,6 +379,53 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const sectionDrag = useDragReorder((from, to) => theme && setSections(moveItem(viewProduct(theme).sections, from, to)));
   // ⚙️ ตั้งค่าต่อส่วนประกอบ (จับคู่ข้อมูล) — เปิดได้ทีละส่วน
   const [openPart, setOpenPart] = useState<ProductSection | null>(null);
+  // ➕ แบนเนอร์เพิ่ม — ตั้งค่าที่โหมดคอม (มือถือใช้ร่วม) · อยู่ในลำดับเป็น banner:<id>
+  const [delExtra, setDelExtra] = useState<ExtraBanner | null>(null);
+  const [imgFieldCreator, setImgFieldCreator] = useState(false);
+  const afterBanner = (secs: ProductSection[], sec: ProductSection) => {
+    const out = [...secs];
+    const last = out.reduce((acc, k, i) => (k === "banner" || k.startsWith("banner:") ? i : acc), -1);
+    out.splice(last + 1, 0, sec);
+    return out;
+  };
+  const addExtraBanner = () => {
+    if (!theme) return;
+    const xs = theme.product.parts.extraBanners;
+    if (xs.length >= MAX_EXTRA_BANNERS) return;
+    const nb = newExtraBanner(xs.length + 2);
+    const sec = extraBannerSection(nb.id) as ProductSection;
+    const m = theme.product.mobile;
+    setProduct({
+      parts: { ...theme.product.parts, extraBanners: [...xs, nb] },
+      sections: afterBanner(theme.product.sections, sec),
+      mobile: m.sections ? { ...m, sections: afterBanner(m.sections, sec) } : m,
+    });
+    setOpenPart(sec);
+  };
+  const setExtraBanner = (id: string, patch: Partial<ExtraBanner>) =>
+    theme && setProduct({ parts: { ...theme.product.parts, extraBanners: theme.product.parts.extraBanners.map((x) => (x.id === id ? { ...x, ...patch } : x)) } });
+  const removeExtraBanner = (id: string) => {
+    if (!theme) return;
+    const sec = extraBannerSection(id);
+    const m = theme.product.mobile;
+    const drop = (arr: ProductSection[] | null) => (arr ? arr.filter((k) => k !== sec) : arr);
+    setProduct({
+      parts: { ...theme.product.parts, extraBanners: theme.product.parts.extraBanners.filter((x) => x.id !== id) },
+      sections: drop(theme.product.sections) as ProductSection[],
+      hidden: drop(theme.product.hidden) as ProductSection[],
+      mobile: { ...m, sections: drop(m.sections), hidden: drop(m.hidden) },
+    });
+    if (openPart === sec) setOpenPart(null);
+  };
+  /** สร้างฟิลด์รูปใหม่ใน Parent SKU แล้ว → โหลดรายการฟิลด์รูปใหม่ (ไม่แตะธีมที่กำลังแก้) */
+  const reloadImageFields = async () => {
+    try {
+      const j = await apiFetch(`/api/website/theme?shop=${encodeURIComponent(shopSlug)}&freshFields=1`).then((r) => r.json());
+      setChoices((c) => (c ? { ...c, imageFields: j.choices?.imageFields ?? c.imageFields } : c));
+    } catch {
+      /* ไม่เป็นไร — เปิดหน้าใหม่ก็เห็น */
+    }
+  };
   const setPart = <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) => {
     if (!theme) return;
     // มือถือ: ทุกส่วนตั้งแยกได้ — ราคา-ตะกร้าเก็บทั้งชุด (buyItems/buyColumns) · ส่วนอื่นเก็บเฉพาะช่องที่ตั้ง
@@ -397,8 +450,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const detailDrag = useDragReorder((from, to) => theme && setProduct({ detailItems: moveItem(theme.product.detailItems, from, to) }));
   const [openDetail, setOpenDetail] = useState<string | null>(null);
   // ป๊อปอัปเลือกฟิลด์ Parent SKU ให้หัวข้อไหน (id ของหัวข้อ) + คำค้น
-  const [fieldPickerFor, setFieldPickerFor] = useState<string | null>(null);
-  const [fieldQuery, setFieldQuery] = useState("");
   const [prodQuery, setProdQuery] = useState("");
   const setDetailItem = (id: string, patch: Partial<DetailItem>) =>
     theme && setProduct({ detailItems: theme.product.detailItems.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
@@ -1430,13 +1481,17 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       )
                     ) : (
                       (JSON.stringify(theme.product.sections) !== JSON.stringify(published.product.sections) || theme.product.hidden.length > 0) && (
-                        <button onClick={() => setProduct({ sections: ["gallery", "buy", "details", "banner", "related"], hidden: [] })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
+                        <button onClick={() => setProduct({ sections: ["gallery", "buy", "details", "banner", ...theme.product.parts.extraBanners.map((x) => extraBannerSection(x.id) as ProductSection), "related"], hidden: [] })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
                       )
                     )}
                   </div>
                   <ul className="space-y-1">
                     {pv.sections.map((k, i) => {
-                      const meta = (choices.productSections ?? []).find((x) => x.value === k);
+                      const xid = extraBannerId(k);
+                      const xb = xid ? pv.parts.extraBanners.find((x) => x.id === xid) ?? null : null;
+                      const meta = xb
+                        ? { label: `🖼 ${xb.name}`, hint: `แบนเนอร์เพิ่ม · ${PART_CHOICES.bannerImages.find((o) => o.value === xb.imageSource)?.label ?? ""}`, hideable: true }
+                        : (choices.productSections ?? []).find((x) => x.value === k);
                       const isHidden = pv.hidden.includes(k);
                       const hasPart = k !== "details";
                       const partOpen = openPart === k;
@@ -1460,6 +1515,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                           ) : (
                             <span className="text-[10px] text-slate-300 px-1" title="ตั้งค่าที่กล่อง ชุดรายละเอียดสินค้า ด้านล่าง">↓ ด้านล่าง</span>
                           )}
+                          {xb && !isMobileEdit && (
+                            <button onClick={() => setDelExtra(xb)} title="ลบแบนเนอร์นี้" className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-400 hover:border-rose-300 hover:text-rose-600">🗑</button>
+                          )}
                           {meta?.hideable ? (
                             <button
                               onClick={() => setHidden(isHidden ? pv.hidden.filter((x) => x !== k) : [...pv.hidden, k])}
@@ -1482,6 +1540,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             onCopyBuyToMobile={() => setMobile({ buyItems: pv.parts.buy.items.map((it) => ({ ...it })), buyColumns: pv.parts.buy.columns, buy: {} })}
                             products={choices.products ?? []}
                             fields={choices.specFields ?? []}
+                            fieldGroups={choices.fieldGroups}
+                            imageFields={choices.imageFields ?? []}
+                            onCreateImageField={() => setImgFieldCreator(true)}
+                            extra={xb}
+                            setExtra={xb ? (p) => setExtraBanner(xb.id, p) : undefined}
                             previewBg={theme.colors.page}
                           />
                         )}
@@ -1489,6 +1552,32 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       );
                     })}
                   </ul>
+                  {isMobileEdit ? (
+                    <p className="text-[11px] text-slate-400 mt-2">➕ เพิ่ม/ลบแบนเนอร์ได้ที่โหมด 🖥 คอม (มือถือจัดลำดับ/ซ่อนแยกได้)</p>
+                  ) : pv.parts.extraBanners.length < MAX_EXTRA_BANNERS ? (
+                    <button type="button" onClick={addExtraBanner} className="mt-2 w-full rounded-lg border border-dashed border-orange-300 text-orange-700 text-xs py-2 hover:bg-orange-50">
+                      ＋ เพิ่มแบนเนอร์ <span className="text-orange-400">({pv.parts.extraBanners.length}/{MAX_EXTRA_BANNERS})</span>
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 mt-2">เพิ่มแบนเนอร์ได้สูงสุด {MAX_EXTRA_BANNERS} อัน</p>
+                  )}
+                  <ConfirmDialog
+                    open={!!delExtra}
+                    onClose={() => setDelExtra(null)}
+                    onConfirm={() => { if (delExtra) removeExtraBanner(delExtra.id); setDelExtra(null); }}
+                    title="ลบแบนเนอร์นี้?"
+                    message={`ลบ "${delExtra?.name ?? ""}" ออกจากหน้าสินค้า — ยังไม่หายจากเว็บจริงจนกว่าจะกดเผยแพร่ (ย้อนได้ด้วยปุ่มเลิกทำ)`}
+                    confirmText="ลบแบนเนอร์"
+                    variant="danger"
+                  />
+                  {imgFieldCreator && (
+                    <FieldCreatorModal
+                      moduleKey="parent-skus-v2"
+                      moduleTitle="Parent SKU"
+                      onClose={() => setImgFieldCreator(false)}
+                      onCreated={() => { setImgFieldCreator(false); void reloadImageFields(); toast.success("สร้างฟิลด์แล้ว — ไปอัปโหลดรูปในแต่ละ Parent SKU ได้เลย"); }}
+                    />
+                  )}
                 </div>
               )}
 
@@ -1560,20 +1649,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                               {it.source === "fields" && (
                                 <div className="sm:col-span-2">
                                   <label className={labelCls}>ฟิลด์ที่โชว์ ({it.fields.length}) — เรียงตามที่เลือก</label>
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    {it.fields.map((k) => {
-                                      const f = (choices.specFields ?? []).find((x) => x.key === k);
-                                      return (
-                                        <span key={k} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 text-xs">
-                                          {f?.label ?? k}
-                                          <button type="button" onClick={() => setDetailItem(it.id, { fields: it.fields.filter((x) => x !== k) })} className="text-blue-400 hover:text-rose-600" title="เอาออก">✕</button>
-                                        </span>
-                                      );
-                                    })}
-                                    <button type="button" onClick={() => { setFieldQuery(""); setFieldPickerFor(it.id); }} className="px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-700">
-                                      ＋ เลือกฟิลด์…
-                                    </button>
-                                  </div>
+                                  <FieldChipsPicker
+                                    value={it.fields}
+                                    onChange={(f) => setDetailItem(it.id, { fields: f })}
+                                    fields={choices.specFields ?? []}
+                                    groups={choices.fieldGroups}
+                                    description="ติ๊กฟิลด์ที่จะโชว์ในหัวข้อนี้ — เรียงตามลำดับที่ติ๊ก · ฟิลด์ที่สินค้าไม่ได้กรอกจะไม่โชว์เอง"
+                                  />
                                   <p className="text-[11px] text-slate-400 mt-1">เลือกได้ทุกฟิลด์ของ Parent SKU (ยกเว้นต้นทุน/ข้อมูลภายใน) · ช่องที่ว่างจะไม่โชว์ · เปลี่ยนป้ายชื่อได้ที่ทะเบียนฟิลด์กลาง</p>
                                 </div>
                               )}
@@ -1850,70 +1932,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           </button>
         </div>
       </div>
-      {/* ป๊อปอัปเลือกฟิลด์ Parent SKU (ของกลาง ERPModal) — ทุกฟิลด์จากทะเบียน จัดกลุ่ม ค้นหาได้ ติ๊กแล้วเรียงตามลำดับที่ติ๊ก */}
-      <ERPModal
-        open={!!fieldPickerFor}
-        onClose={() => setFieldPickerFor(null)}
-        title="เลือกฟิลด์จาก Parent SKU"
-        description="ติ๊กฟิลด์ที่จะโชว์ในหัวข้อนี้ — เรียงตามลำดับที่ติ๊ก · ฟิลด์ที่สินค้าไม่ได้กรอกจะไม่โชว์เอง"
-        size="md"
-        defaultExpanded={false}
-        storageKey="theme-field-picker"
-        footer={
-          <div className="flex items-center justify-between w-full">
-            <span className="text-xs text-slate-500">
-              เลือกแล้ว {theme?.product.detailItems.find((d) => d.id === fieldPickerFor)?.fields.length ?? 0} ฟิลด์
-            </span>
-            <button type="button" onClick={() => setFieldPickerFor(null)} className="text-sm px-4 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">เสร็จ</button>
-          </div>
-        }
-      >
-        {theme && fieldPickerFor && (() => {
-          const item = theme.product.detailItems.find((d) => d.id === fieldPickerFor);
-          if (!item) return null;
-          const q = fieldQuery.trim().toLowerCase();
-          const all = (choices?.specFields ?? []).filter((f) => !q || f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q));
-          const groups = new Map<string, typeof all>();
-          for (const f of all) {
-            const g = f.group ?? "other";
-            groups.set(g, [...(groups.get(g) ?? []), f]);
-          }
-          const toggle = (key: string) => setDetailItem(item.id, { fields: item.fields.includes(key) ? item.fields.filter((k) => k !== key) : [...item.fields, key] });
-          return (
-            <div className="space-y-3">
-              <input autoFocus value={fieldQuery} onChange={(e) => setFieldQuery(e.target.value)} placeholder="ค้นหาชื่อฟิลด์…" className={inputCls} />
-              {item.fields.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {item.fields.map((k, i) => (
-                    <span key={k} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px]">
-                      <span className="text-blue-400">{i + 1}</span> {(choices?.specFields ?? []).find((x) => x.key === k)?.label ?? k}
-                      <button type="button" onClick={() => toggle(k)} className="text-blue-400 hover:text-rose-600">✕</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              {[...groups.entries()].map(([g, list]) => (
-                <div key={g}>
-                  <div className="text-[11px] font-medium text-slate-500 mb-1">{choices?.fieldGroups?.[g] ?? g}</div>
-                  <div className="grid sm:grid-cols-2 gap-x-3 gap-y-0.5">
-                    {list.map((f) => {
-                      const on = item.fields.includes(f.key);
-                      return (
-                        <label key={f.key} className={`flex items-center gap-2 px-2 py-1 rounded-lg text-sm cursor-pointer ${on ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-slate-50"}`}>
-                          <input type="checkbox" className="accent-blue-600" checked={on} onChange={() => toggle(f.key)} />
-                          <span className="truncate">{f.label}</span>
-                          <span className="ml-auto text-[10px] text-slate-300 font-mono truncate max-w-[40%]">{f.key}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-              {all.length === 0 && <div className="text-sm text-slate-400 py-6 text-center">ไม่พบฟิลด์ที่ค้นหา</div>}
-            </div>
-          );
-        })()}
-      </ERPModal>
 
     </div>
   );
@@ -1935,6 +1953,11 @@ function PartSettings({
   setPart,
   products,
   fields = [],
+  fieldGroups,
+  imageFields = [],
+  onCreateImageField,
+  extra = null,
+  setExtra,
   previewBg,
   mobile = null,
   onResetMobile,
@@ -1945,7 +1968,15 @@ function PartSettings({
   setPart: <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) => void;
   products: { code: string; name: string }[];
   /** ฟิลด์ Parent SKU (จากทะเบียนฟิลด์) ให้คำอธิบายย่อเลือกดึง */
-  fields?: { key: string; label: string }[];
+  fields?: { key: string; label: string; group?: string }[];
+  fieldGroups?: Record<string, string>;
+  /** ฟิลด์รูปของ Parent SKU (แบนเนอร์ source = field) */
+  imageFields?: { key: string; label: string }[];
+  /** เปิดตัวสร้างฟิลด์ใหม่ใน Parent SKU (ชนิดรูปภาพ) */
+  onCreateImageField?: () => void;
+  /** แบนเนอร์เพิ่ม (part = banner:<id>) */
+  extra?: ExtraBanner | null;
+  setExtra?: (p: Partial<ExtraBanner>) => void;
   previewBg: string;
   /** กำลังตั้งค่าสำหรับมือถือ → ค่ามือถือที่ตั้งแยกไว้ (null = กำลังตั้งคอม) */
   mobile?: ProductMobile | null;
@@ -2013,65 +2044,117 @@ function PartSettings({
       </div>
     );
   }
-  if (part === "banner") {
-    const bn = parts.banner;
+  if (part === "banner" || extra) {
+    const bn: BannerPart = extra ?? parts.banner;
+    const set = (p: Partial<ExtraBanner>) => (extra ? setExtra?.(p) : setPart("banner", p));
+    const needsIndex = bn.imageSource === "nth" || bn.imageSource === "parent";
     return (
-      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-        {mobileNote("banner")}
+      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2.5">
+        {extra ? (
+          <div className="flex items-center gap-2">
+            <label className={`${lbl} mb-0 shrink-0`}>ชื่อในรายการ</label>
+            <input className={partInputCls} value={extra.name} maxLength={60} onChange={(e) => set({ name: e.target.value })} placeholder="เช่น แบนเนอร์ไลฟ์สไตล์" />
+          </div>
+        ) : (
+          mobileNote("banner")
+        )}
+        {extra && mobile && <p className="text-[11px] text-blue-700 bg-blue-50 rounded-lg px-2 py-1">📱 แบนเนอร์เพิ่มใช้ค่าเดียวกันทั้งคอมและมือถือ — สัดส่วนบนมือถือตั้งได้ที่ช่อง “มือถือ” ใน 📐 ขนาด</p>}
+
+        {/* 🖼 รูป */}
         <div>
           <label className={lbl}>รูปแบนเนอร์เอาจาก</label>
-          <select className={partInputCls} value={bn.imageSource} onChange={(e) => setPart("banner", { imageSource: e.target.value as ProductParts["banner"]["imageSource"] })}>
-            {PART_CHOICES.bannerImages.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          {bn.imageSource === "fixed" && (
-            <div className="mt-1.5">
-              <ImageUploadField label="รูปกลาง (ใช้ทุกสินค้า)" hint="แนะนำแนวนอน 16:10" value={bn.imageKey} onChange={(k) => setPart("banner", { imageKey: k })} previewBg={previewBg} height={56} />
+          <div className="flex gap-1.5">
+            <select className={partInputCls} value={bn.imageSource} onChange={(e) => set({ imageSource: e.target.value as BannerPart["imageSource"] })}>
+              {PART_CHOICES.bannerImages.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {needsIndex && (
+              <label className="flex items-center gap-1 text-[11px] text-slate-500 shrink-0">
+                รูปที่
+                <input type="number" min={1} max={20} value={bn.imageIndex} onChange={(e) => set({ imageIndex: Math.min(20, Math.max(1, Number(e.target.value) || 1)) })} className="w-14 rounded-lg border border-slate-200 px-1.5 py-1.5 text-xs text-center" />
+              </label>
+            )}
+          </div>
+          {bn.imageSource === "field" && (
+            <div className="mt-1.5 space-y-1">
+              <div className="flex gap-1.5">
+                <select className={partInputCls} value={bn.imageField} onChange={(e) => set({ imageField: e.target.value })}>
+                  <option value="">— เลือกฟิลด์รูป —</option>
+                  {imageFields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                </select>
+                {onCreateImageField && (
+                  <button type="button" onClick={onCreateImageField} className="shrink-0 text-[11px] px-2 rounded-lg border border-dashed border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-700" title="เพิ่มฟิลด์ชนิดรูปภาพให้ Parent SKU">＋ ฟิลด์รูปใหม่</button>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400">อัปโหลดรูปต่อรุ่นในหน้า Parent SKU (ช่องของฟิลด์นี้) · รุ่นที่ยังไม่มีรูปในช่องนี้ = ไม่โชว์แบนเนอร์</p>
             </div>
           )}
-          <p className="text-[11px] text-slate-400 mt-1">ไม่มีรูปตามแหล่งที่เลือก = ส่วนนี้ไม่โชว์สำหรับสินค้านั้น</p>
+          {bn.imageSource === "fixed" && (
+            <div className="mt-1.5">
+              <ImageUploadField label="รูปกลาง (ใช้ทุกสินค้า)" hint="แนะนำแนวนอน 16:10" value={bn.imageKey} onChange={(k) => set({ imageKey: k })} previewBg={previewBg} height={56} />
+            </div>
+          )}
+          {bn.imageSource !== "field" && <p className="text-[11px] text-slate-400 mt-1">ไม่มีรูปตามแหล่งที่เลือก = ส่วนนี้ไม่โชว์สำหรับสินค้านั้น</p>}
         </div>
+
+        {/* 📐 ขนาด */}
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <label className={lbl}>📐 ความกว้าง</label>
+            <select className={partInputCls} value={bn.width} onChange={(e) => set({ width: e.target.value as BannerPart["width"] })}>
+              {PART_CHOICES.bannerWidths.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>สัดส่วนรูป · คอม</label>
+            <select className={partInputCls} value={bn.ratio} onChange={(e) => set({ ratio: e.target.value as BannerPart["ratio"] })}>
+              {PART_CHOICES.bannerRatios.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>สัดส่วนรูป · มือถือ</label>
+            <select className={partInputCls} value={bn.ratioMobile} onChange={(e) => set({ ratioMobile: e.target.value as BannerPart["ratioMobile"] })}>
+              <option value="same">เท่าคอม</option>
+              {PART_CHOICES.bannerRatios.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* ✍️ ข้อความ + จัดวาง */}
         <div className="grid sm:grid-cols-2 gap-2">
           <div>
             <label className={lbl}>หัวข้อ</label>
-            <select className={partInputCls} value={bn.titleSource} onChange={(e) => setPart("banner", { titleSource: e.target.value as ProductParts["banner"]["titleSource"] })}>
+            <select className={partInputCls} value={bn.titleSource} onChange={(e) => set({ titleSource: e.target.value as BannerPart["titleSource"] })}>
               {PART_CHOICES.bannerTitles.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            {bn.titleSource === "text" && <input className={`${partInputCls} mt-1.5`} value={bn.titleText} onChange={(e) => setPart("banner", { titleText: e.target.value })} placeholder="หัวข้อแบนเนอร์" />}
+            {bn.titleSource === "text" && <input className={`${partInputCls} mt-1.5`} value={bn.titleText} onChange={(e) => set({ titleText: e.target.value })} placeholder="หัวข้อแบนเนอร์" />}
           </div>
           <div>
             <label className={lbl}>ข้อความ</label>
-            <select className={partInputCls} value={bn.textSource} onChange={(e) => setPart("banner", { textSource: e.target.value as ProductParts["banner"]["textSource"] })}>
+            <select className={partInputCls} value={bn.textSource} onChange={(e) => set({ textSource: e.target.value as BannerPart["textSource"] })}>
               {PART_CHOICES.bannerTexts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            {bn.textSource === "text" && <textarea rows={3} className={`${partInputCls} mt-1.5`} value={bn.text} onChange={(e) => setPart("banner", { text: e.target.value })} placeholder="ข้อความใต้หัวข้อ" />}
+            {bn.textSource === "text" && <textarea rows={3} className={`${partInputCls} mt-1.5`} value={bn.text} onChange={(e) => set({ text: e.target.value })} placeholder="ข้อความใต้หัวข้อ" />}
           </div>
-        </div>
-        <div className="grid sm:grid-cols-2 gap-2">
           <div>
             <label className={lbl}>จัดวาง</label>
-            <select className={partInputCls} value={bn.layout} onChange={(e) => { const layout = e.target.value as BannerLayout; setPart("banner", { layout, textPos: fixTextPos(layout, bn.textPos) }); }}>
+            <select className={partInputCls} value={bn.layout} onChange={(e) => { const layout = e.target.value as BannerLayout; set({ layout, textPos: fixTextPos(layout, bn.textPos) }); }}>
               {BANNER_LAYOUTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div>
             <label className={lbl}>ตำแหน่งข้อความ</label>
-            <select className={partInputCls} value={bn.textPos} onChange={(e) => setPart("banner", { textPos: e.target.value as BannerTextPos })}>
+            <select className={partInputCls} value={bn.textPos} onChange={(e) => set({ textPos: e.target.value as BannerTextPos })}>
               {textPosFor(bn.layout).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
         </div>
+
+        {/* ฟิลด์ (กะทัดรัด: ชิป + ป๊อปอัปเลือก) */}
         <div>
-          <label className={lbl}>ฟิลด์ Parent SKU ที่โชว์ในแบนเนอร์ ({bn.fields.length}) — ติ๊กเลือก</label>
-          <div className="max-h-32 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5 grid grid-cols-2 gap-x-2">
-            {(fields ?? []).map((f) => (
-              <label key={f.key} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer py-0.5">
-                <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={bn.fields.includes(f.key)} onChange={(e) => setPart("banner", { fields: e.target.checked ? [...bn.fields, f.key].slice(0, 12) : bn.fields.filter((k) => k !== f.key) })} />
-                <span className="truncate">{f.label}</span>
-              </label>
-            ))}
-          </div>
+          <label className={lbl}>ฟิลด์ Parent SKU ที่โชว์ในแบนเนอร์ ({bn.fields.length}/12)</label>
+          <FieldChipsPicker compact value={bn.fields} onChange={(f) => set({ fields: f })} fields={fields} groups={fieldGroups} max={12} description="ติ๊กฟิลด์ที่จะโชว์เป็นตารางในแบนเนอร์ — เรียงตามลำดับที่ติ๊ก · ช่องที่สินค้าไม่ได้กรอกจะไม่โชว์" />
         </div>
-        <p className="text-[11px] text-slate-400">สินค้าที่ตั้ง "🖼 แบนเนอร์หน้าสินค้า" ไว้เองในแท็บ 🛍 เว็บไซต์ ของ Parent SKU จะใช้ของตัวเองแทนค่ากลางนี้ (หลายรูปได้)</p>
+        {!extra && <p className="text-[11px] text-slate-400">สินค้าที่ตั้ง &quot;🖼 แบนเนอร์หน้าสินค้า&quot; ไว้เองในแท็บ 🛍 เว็บไซต์ ของ Parent SKU จะใช้ของตัวเองแทนแบนเนอร์นี้ (แบนเนอร์เพิ่มยังโชว์ตามปกติ)</p>}
       </div>
     );
   }

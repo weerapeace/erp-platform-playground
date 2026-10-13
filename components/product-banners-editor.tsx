@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, newBanner, type ProductBanner, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 import { PART_CHOICES } from "@/lib/website-theme";
+import { FieldChipsPicker } from "@/components/field-chips-picker";
 
 const keyUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
@@ -30,7 +31,6 @@ export function ProductBannersEditor({
 }) {
   const drag = useDragReorder((from, to) => onChange(moveItem(banners, from, to)));
   const [openId, setOpenId] = useState<string | null>(null);
-  const [fq, setFq] = useState("");
   const set = (id: string, patch: Partial<ProductBanner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
   return (
@@ -119,25 +119,8 @@ export function ProductBannersEditor({
 
                   {/* ฟิลด์ */}
                   <div>
-                    <label className={lbl}>ฟิลด์ Parent SKU ที่โชว์ในแบนเนอร์ ({b.fields.length})</label>
-                    {b.fields.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mb-1.5">
-                        {b.fields.map((k) => (
-                          <span key={k} className="inline-flex items-center gap-1 text-[11px] bg-orange-50 text-orange-700 rounded-full px-2 py-0.5">
-                            {fields.find((f) => f.key === k)?.label ?? k}
-                            <button type="button" onClick={() => set(b.id, { fields: b.fields.filter((x) => x !== k) })} className="hover:text-rose-600">✕</button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <input className={`${mini} w-full`} placeholder="ค้นหาฟิลด์เพื่อเพิ่ม…" value={fq} onChange={(e) => setFq(e.target.value)} />
-                    {fq.trim() && (
-                      <div className="mt-1 max-h-36 overflow-auto rounded-lg border border-slate-200 bg-white">
-                        {fields.filter((f) => !b.fields.includes(f.key) && (f.label + f.key).toLowerCase().includes(fq.trim().toLowerCase())).slice(0, 30).map((f) => (
-                          <button key={f.key} type="button" onClick={() => { set(b.id, { fields: [...b.fields, f.key] }); setFq(""); }} className="block w-full text-left text-[11px] px-2 py-1 hover:bg-slate-50">{f.label} <span className="text-slate-400">· {f.key}</span></button>
-                        ))}
-                      </div>
-                    )}
+                    <label className={lbl}>ฟิลด์ Parent SKU ที่โชว์ในแบนเนอร์ ({b.fields.length}/12)</label>
+                    <FieldChipsPicker compact value={b.fields} onChange={(f) => set(b.id, { fields: f })} fields={fields} max={12} description="ติ๊กฟิลด์ที่จะโชว์เป็นตารางในแบนเนอร์ — เรียงตามลำดับที่ติ๊ก · ช่องที่ไม่ได้กรอกจะไม่โชว์" />
                   </div>
                 </div>
               )}
