@@ -189,8 +189,11 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
       ? draft.imageKey ? swatchCss({ colors: [], imageKey: draft.imageKey }, thumb) : null
       : draft.colors.filter(isHex).length ? swatchCss({ colors: draft.colors.filter(isHex), imageKey: null }, thumb) : null
     : null;
+  // ทุกช่องสีต้องกรอกถูก (ช่องว่างที่กด "+ เพิ่มสี" ค้างไว้ = ยังไม่ครบ ไม่ปล่อยให้หายเงียบตอนบันทึก)
   const draftValid = !!draft && (!draft.isNew || draft.en.trim().length > 0) && (
-    draft.kind === "image" ? !!draft.imageKey : draft.kind === "split" ? draft.colors.filter(isHex).length >= 2 : draft.colors.filter(isHex).length >= 1
+    draft.kind === "image" ? !!draft.imageKey
+      : draft.kind === "split" ? draft.colors.length >= 2 && draft.colors.every(isHex)
+      : isHex(draft.colors[0])
   );
 
   if (loadError) {
