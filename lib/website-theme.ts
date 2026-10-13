@@ -20,6 +20,26 @@ export type ProductImageBg = "tint" | "surface" | "none";
 /** พื้นหลังหลังรูปสินค้า: preset = สีตามตัวเลือก (imageBg) · color = สีเดียวที่เลือกเอง · gradient = ไล่สี 2 สี · image = รูป (imageBgKey) */
 export type ProductImageBgKind = "preset" | "color" | "gradient" | "image";
 export interface ProductGradient { from: string; to: string; angle: number }
+/** เอฟเฟกต์รูปสินค้า: shadow เงานุ่ม (เดิม) · none ไม่มี · border กรอบบาง · rounded มุมมน · rounded-shadow มุมมน+เงา */
+export type ProductImageEffect = "shadow" | "none" | "border" | "rounded" | "rounded-shadow";
+export const PRODUCT_IMAGE_EFFECTS: { value: ProductImageEffect; label: string }[] = [
+  { value: "shadow", label: "เงานุ่มใต้รูป" },
+  { value: "none", label: "ไม่มีเอฟเฟกต์" },
+  { value: "border", label: "กรอบเส้นบาง" },
+  { value: "rounded", label: "มุมมน" },
+  { value: "rounded-shadow", label: "มุมมน + เงา" },
+];
+/** ขนาดรูปในกรอบ: cover = เต็มกรอบ (ตัดขอบ) · contain = ย่อให้พอดี ตาม imageSize % ของกรอบ */
+export type ProductImageFit = "contain" | "cover";
+export const PRODUCT_IMAGE_SIZES: { value: string; label: string }[] = [
+  { value: "cover", label: "เต็มกรอบ (ตัดขอบให้เต็ม)" },
+  { value: "100", label: "100% พอดีกรอบ" },
+  { value: "90", label: "90%" },
+  { value: "86", label: "86% (ปกติ)" },
+  { value: "75", label: "75%" },
+  { value: "60", label: "60%" },
+  { value: "50", label: "50%" },
+];
 export const GRADIENT_ANGLES: { value: number; label: string }[] = [
   { value: 180, label: "บน → ล่าง" },
   { value: 0, label: "ล่าง → บน" },
@@ -396,6 +416,12 @@ export interface SiteTheme {
     imageBgColor: string;
     /** ไล่สี เมื่อ imageBgKind = gradient */
     imageBgGradient: ProductGradient;
+    /** เอฟเฟกต์รูปสินค้า (เงา/กรอบ/มุมมน) */
+    imageEffect: ProductImageEffect;
+    /** รูปเต็มกรอบ หรือย่อให้พอดี */
+    imageFit: ProductImageFit;
+    /** % ของกรอบเมื่อ imageFit = contain (50–100) */
+    imageSize: number;
     /** (เก่า) แยกเป็นแท็บ — ใช้ detailsStyle แทน เก็บไว้ให้ค่าที่บันทึกก่อนหน้ายังอ่านได้ */
     showTabs: boolean;
     galleryStyle: ProductGalleryStyle;
@@ -438,7 +464,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -620,6 +646,9 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       imageBg: pick(pd.imageBg, ["tint", "surface", "none"] as const, d.product.imageBg),
       imageBgKey: key(pd.imageBgKey),
       imageBgKind: pick(pd.imageBgKind, ["preset", "color", "gradient", "image"] as const, key(pd.imageBgKey) ? "image" : "preset"),
+      imageEffect: pick(pd.imageEffect, ["shadow", "none", "border", "rounded", "rounded-shadow"] as const, d.product.imageEffect),
+      imageFit: pick(pd.imageFit, ["contain", "cover"] as const, d.product.imageFit),
+      imageSize: num(pd.imageSize, d.product.imageSize, 50, 100),
       imageBgColor: color(pd.imageBgColor, d.product.imageBgColor),
       imageBgGradient: (() => {
         const g = (pd.imageBgGradient && typeof pd.imageBgGradient === "object" ? pd.imageBgGradient : {}) as Record<string, unknown>;

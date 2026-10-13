@@ -27,7 +27,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal } from "@/components/modal";
 import { ColorPicker } from "@/components/color-picker";
-import { GRADIENT_ANGLES, type ProductImageBgKind, type ProductGradient } from "@/lib/website-theme";
+import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
 type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -63,7 +63,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
 
 interface Choices {
@@ -986,6 +986,26 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     <select className={inputCls} value={theme.product.titleStyle} onChange={(e) => setProduct({ titleStyle: e.target.value as ProductTitleStyle })}>
                       {(choices.productTitleStyles ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>เอฟเฟกต์รูปสินค้า</label>
+                    <select className={inputCls} value={theme.product.imageEffect} onChange={(e) => setProduct({ imageEffect: e.target.value as ProductImageEffect })}>
+                      {PRODUCT_IMAGE_EFFECTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>ขนาดรูปในกรอบ</label>
+                    <select
+                      className={inputCls}
+                      value={theme.product.imageFit === "cover" ? "cover" : String(theme.product.imageSize)}
+                      onChange={(e) => (e.target.value === "cover" ? setProduct({ imageFit: "cover" }) : setProduct({ imageFit: "contain", imageSize: Number(e.target.value) }))}
+                    >
+                      {PRODUCT_IMAGE_SIZES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      {theme.product.imageFit === "contain" && !PRODUCT_IMAGE_SIZES.some((o) => o.value === String(theme.product.imageSize)) && (
+                        <option value={String(theme.product.imageSize)}>{theme.product.imageSize}%</option>
+                      )}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">เต็มกรอบ = รูปกางเต็มพื้นที่ (ตัดขอบ) · % = ย่อรูปให้อยู่ในกรอบตามสัดส่วน</p>
                   </div>
                   <div>
                     <label className={labelCls}>พื้นหลังหลังรูปสินค้า</label>
