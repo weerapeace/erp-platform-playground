@@ -280,7 +280,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
             <RefreshPanel statuses={refresh} brandTab={brandTab} brands={brands} platforms={platforms} placementTypes={placementTypes}
               canCreate={canCreate} canSetup={canPillars} onPrepare={prepareRefresh} onOpen={openContentId} onSetup={() => setSettings("refresh")} />
 
-            <TargetsPanel targets={targets} items={live} month={periodMonth} brandTab={brandTab} brands={brands} platforms={platforms}
+            <TargetsPanel targets={targets} items={live} month={periodMonth} brandTab={brandTab} brands={brands} platforms={platforms} placementTypes={placementTypes}
               canSetup={canPillars} onSetup={() => setSettings("targets")} />
 
             {/* แนวคอนเทนต์: กรอง + สรุปจำนวนในช่วงที่ดู */}

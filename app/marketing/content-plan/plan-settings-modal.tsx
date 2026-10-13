@@ -241,7 +241,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
           <div className="space-y-3">
             <BrandSelect brands={brands} value={brandId} onChange={setBrandId} />
             {brandId && (tab === "targets"
-              ? <TargetsEditor key={`t-${brandId}`} brandId={brandId} platforms={planPlatformOpts} canEdit={canEdit} onChanged={onTargetsChanged} />
+              ? <TargetsEditor key={`t-${brandId}`} brandId={brandId} platforms={planPlatformOpts} placementTypes={placementTypes} canEdit={canEdit} onChanged={onTargetsChanged} />
               : tab === "refresh"
                 ? <RefreshRulesEditor key={`r-${brandId}`} brandId={brandId} platforms={allPlatforms} placementTypes={placementTypes} canEdit={canEdit} onChanged={() => onRefreshChanged?.()} />
                 : <SlotsEditor key={`s-${brandId}`} brandId={brandId} platforms={planPlatformOpts} pillars={pillars} canEdit={canEdit} onChanged={onTargetsChanged} />)}

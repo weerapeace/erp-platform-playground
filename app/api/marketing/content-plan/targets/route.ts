@@ -1,8 +1,9 @@
 /**
  * เป้ารายเดือนของแผนคอนเทนต์ — /api/marketing/content-plan/targets
  * GET ?brand_id=      → รายการเป้า (ไม่ส่ง brand_id = ทุกแบรนด์)
- * POST { brand_id, platform, post_type?, monthly_count }
- * PATCH { id, platform?, post_type?, monthly_count? }
+ * POST { brand_id, placement_type?, platform, post_type?, monthly_count }
+ * PATCH { id, placement_type?, platform?, post_type?, monthly_count? }
+ *   placement_type = ประเภทการลง (เช่น shop_decor) · null/ว่าง = ทุกประเภท
  * DELETE ?id=
  * อ่าน = tasks.view · แก้ = marketing.label.manage · ทุกการแก้ลง audit
  */
@@ -15,9 +16,9 @@ import { isUuid } from "@/lib/marketing/sku-list";
 
 export const dynamic = "force-dynamic";
 
-const SEL = "id, brand_id, platform, post_type, monthly_count, sort_order";
+const SEL = "id, brand_id, placement_type, platform, post_type, monthly_count, sort_order";
 const POST_TYPES = new Set(["image", "album", "video", "reel", "story", "live"]);
-const dupMsg = (e: { code?: string; message: string }) => (e.code === "23505" ? "มีเป้าของแบรนด์ + ช่องทาง + รูปแบบนี้อยู่แล้ว — แก้จำนวนที่แถวเดิมได้เลย" : "บันทึกไม่สำเร็จ: " + e.message);
+const dupMsg = (e: { code?: string; message: string }) => (e.code === "23505" ? "มีเป้าของแบรนด์ + ประเภท + ช่องทาง + รูปแบบนี้อยู่แล้ว — แก้จำนวนที่แถวเดิมได้เลย" : "บันทึกไม่สำเร็จ: " + e.message);
 
 async function actor(request: NextRequest) {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -30,6 +31,11 @@ function pick(b: Record<string, unknown>, requireAll: boolean): { f: Record<stri
     const p = String(b.platform ?? "").trim();
     if (!p || p.length > 60) return { f, error: "เลือกช่องทาง" };
     f.platform = p;
+  }
+  if ("placement_type" in b) {
+    const t = b.placement_type == null || b.placement_type === "" ? null : String(b.placement_type).trim();
+    if (t && (t.length > 60 || t.includes(":"))) return { f, error: "ประเภทการลงไม่ถูกต้อง" };   // กฎเดียวกับ refresh-rules
+    f.placement_type = t;
   }
   if ("post_type" in b) {
     const t = b.post_type == null || b.post_type === "" ? null : String(b.post_type);

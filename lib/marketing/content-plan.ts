@@ -98,7 +98,8 @@ export function shortThaiDate(key: string): string {
 
 export const WEEKDAYS_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];   // index 0 = จันทร์ (ตรงกับ content_plan_slots.weekday)
 
-export type PlanTarget = { id: string; brand_id: string; platform: string; post_type: string | null; monthly_count: number; sort_order?: number };
+/** placement_type = ประเภทการลง (เช่น shop_decor) · null = ทุกประเภท — นับเฉพาะคอนเทนต์ที่ติ๊ก "ลงที่ไหน" ตรงประเภท + ช่องทาง */
+export type PlanTarget = { id: string; brand_id: string; placement_type?: string | null; platform: string; post_type: string | null; monthly_count: number; sort_order?: number };
 export type PlanSlot = {
   id: string; brand_id: string; weekday: number; post_time: string; platform: string; post_type: string | null;
   pillar_id: string | null; title: string; is_active: boolean; sort_order?: number;
@@ -147,13 +148,13 @@ export function planSlotsForMonth(slots: PlanSlot[], month: string, existing: Se
   return { create, skippedPast, skippedExisting };
 }
 
-type ProgressItem = { brand_id?: string | null; platforms?: string[] | null; post_type?: string | null; scheduled_at?: string | null; status?: string | null; task_id?: string | null };
-/** ความคืบหน้าเป้าในเดือน: วางแผนแล้ว (มีวันในเดือน ไม่ยกเลิก) / โพสต์แล้ว */
+type ProgressItem = { brand_id?: string | null; platforms?: string[] | null; placements?: string[] | null; post_type?: string | null; scheduled_at?: string | null; status?: string | null; task_id?: string | null };
+/** ความคืบหน้าเป้าในเดือน: วางแผนแล้ว (มีวันในเดือน ไม่ยกเลิก) / โพสต์แล้ว · ระบุประเภทการลง = นับเฉพาะที่ติ๊กประเภทนั้นบนช่องทางนั้น */
 export function targetProgress(t: PlanTarget, items: ProgressItem[], month: string): { planned: number; published: number } {
   let planned = 0, published = 0;
   for (const c of items) {
     if (c.brand_id !== t.brand_id || c.status === "cancelled" || !c.scheduled_at) continue;
-    if (!(c.platforms ?? []).includes(t.platform)) continue;
+    if (t.placement_type ? !(c.placements ?? []).includes(placementId(t.placement_type, t.platform)) : !(c.platforms ?? []).includes(t.platform)) continue;
     if (t.post_type && !String(c.post_type ?? "").split(",").map((x) => x.trim()).includes(t.post_type)) continue;
     if (bangkokDateKey(c.scheduled_at).slice(0, 7) !== month) continue;
     planned++;

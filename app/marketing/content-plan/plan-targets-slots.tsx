@@ -14,10 +14,16 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { POST_TYPES, type BrandOption, type ContentItem } from "@/app/tasks/data";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
-import { WEEKDAYS_TH, targetProgress, shortThaiDate, dowLabel, type PlanTarget, type PlanSlot, type SlotDraft } from "@/lib/marketing/content-plan";
+import { WEEKDAYS_TH, targetProgress, shortThaiDate, dowLabel, type PlanTarget, type PlanSlot, type SlotDraft, type PlacementType } from "@/lib/marketing/content-plan";
 import type { PlatformOpt } from "./plan-modal";
 
 const TYPE_META = Object.fromEntries(POST_TYPES.map((t) => [t.value, t]));
+/** ป้ายประเภทการลงของเป้า เช่น "🏪 แต่งร้าน" · ไม่ระบุ = "" (ทุกประเภท) */
+const placementLabel = (key: string | null | undefined, types: PlacementType[]) => {
+  if (!key) return "";
+  const t = types.find((x) => x.key === key);
+  return t ? `${t.icon ? `${t.icon} ` : ""}${t.label}` : `${key} (ถูกลบแล้ว)`;
+};
 const input = "h-9 rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
 
 async function call(method: "POST" | "PATCH" | "DELETE", url: string, body?: unknown) {
@@ -40,11 +46,16 @@ export function BrandSelect({ brands, value, onChange }: { brands: BrandOption[]
 }
 
 // ═══════════ เป้ารายเดือน (ตั้งค่า) ═══════════
-export function TargetsEditor({ brandId, platforms, canEdit, onChanged }: { brandId: string; platforms: PlatformOpt[]; canEdit: boolean; onChanged: () => void }) {
+const EMPTY_TARGET = { placement_type: "", platform: "", post_type: "", monthly_count: "" };
+
+export function TargetsEditor({ brandId, platforms, placementTypes = [], canEdit, onChanged }: { brandId: string; platforms: PlatformOpt[]; placementTypes?: PlacementType[]; canEdit: boolean; onChanged: () => void }) {
   const toast = useToast();
   const [rows, setRows] = useState<PlanTarget[] | null>(null);
   const [edit, setEdit] = useState<Record<string, string>>({});   // id → จำนวนที่แก้ (ยังไม่บันทึก)
-  const [add, setAdd] = useState({ platform: "", post_type: "", monthly_count: "" });
+  const [add, setAdd] = useState(EMPTY_TARGET);
+  /** ช่องทางที่เลือกได้ = ของประเภทการลงนั้น (ถ้าเลือกประเภท) ไม่งั้นทุกช่องทาง — เหมือนแท็บรอบเปลี่ยน */
+  const addType = placementTypes.find((x) => x.key === add.placement_type);
+  const addPlatforms = addType ? addType.platforms.map((k) => platforms.find((p) => p.value === k) ?? { value: k, label: k }) : platforms;
   const [del, setDel] = useState<PlanTarget | null>(null);
   const [busy, setBusy] = useState(false);
   const pfLabel = (k: string) => platforms.find((p) => p.value === k)?.label ?? k;
@@ -63,14 +74,14 @@ export function TargetsEditor({ brandId, platforms, canEdit, onChanged }: { bran
   };
   const addRow = () => {
     if (!add.platform) { toast.warning("เลือกช่องทาง"); return; }
-    void run(() => call("POST", "/api/marketing/content-plan/targets", { brand_id: brandId, platform: add.platform, post_type: add.post_type || null, monthly_count: Number(add.monthly_count) }), "เพิ่มเป้าแล้ว")
-      .then(() => setAdd({ platform: "", post_type: "", monthly_count: "" }));
+    void run(() => call("POST", "/api/marketing/content-plan/targets", { brand_id: brandId, placement_type: add.placement_type || null, platform: add.platform, post_type: add.post_type || null, monthly_count: Number(add.monthly_count) }), "เพิ่มเป้าแล้ว")
+      .then(() => setAdd(EMPTY_TARGET));
   };
 
   if (!rows) return <div className="h-24 animate-pulse rounded-xl bg-slate-100" />;
   return (
     <div className="space-y-2">
-      <p className="text-xs text-slate-500">จำนวนโพสต์ที่อยากได้ต่อเดือน (ใช้ซ้ำทุกเดือน) — หน้าแผนจะโชว์ว่า "วางแล้วกี่ชิ้น / ขาดอีกกี่ชิ้น" · ระบุรูปแบบได้ เช่น IG ทั้งหมด 20 และในนั้นเป็น Reels 8</p>
+      <p className="text-xs text-slate-500">จำนวนโพสต์ที่อยากได้ต่อเดือน (ใช้ซ้ำทุกเดือน) — หน้าแผนจะโชว์ว่า "วางแล้วกี่ชิ้น / ขาดอีกกี่ชิ้น" · ระบุรูปแบบได้ เช่น IG ทั้งหมด 20 และในนั้นเป็น Reels 8 · เลือกประเภทได้ เช่น 🏪 แต่งร้าน · Shopee เดือนละ 2 (นับเฉพาะคอนเทนต์ที่ติ๊ก &quot;ลงที่ไหน&quot; ตรงประเภท + ช่องทาง)</p>
       {rows.length === 0 && <div className="rounded-lg bg-slate-50 py-4 text-center text-sm text-slate-400">ยังไม่มีเป้าของแบรนด์นี้</div>}
       {rows.map((t) => {
         const v = edit[t.id] ?? String(t.monthly_count);
@@ -78,6 +89,7 @@ export function TargetsEditor({ brandId, platforms, canEdit, onChanged }: { bran
         return (
           <div key={t.id} className={`flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 ${changed ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}>
             <PlatformIcon code={t.platform} iconKey={platforms.find((p) => p.value === t.platform)?.icon_key ?? platforms.find((p) => p.value === t.platform)?.icon} size={16} />
+            {t.placement_type && <span className="text-sm text-slate-600">{placementLabel(t.placement_type, placementTypes)} ·</span>}
             <span className="text-sm font-medium text-slate-700">{pfLabel(t.platform)}</span>
             <span className="text-xs text-slate-500">{t.post_type ? `${TYPE_META[t.post_type]?.icon ?? ""} ${TYPE_META[t.post_type]?.label ?? t.post_type}` : "ทุกรูปแบบ"}</span>
             <span className="ml-auto text-xs text-slate-500">เดือนละ</span>
@@ -96,9 +108,14 @@ export function TargetsEditor({ brandId, platforms, canEdit, onChanged }: { bran
       {canEdit && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 px-2.5 py-2">
           <span className="text-xs font-medium text-slate-500">＋ เป้าใหม่</span>
+          <select value={add.placement_type} className={input} title="ประเภทการลง (ตั้งรายการได้ที่แท็บช่องทาง)"
+            onChange={(e) => { const t = placementTypes.find((x) => x.key === e.target.value); setAdd({ ...add, placement_type: e.target.value, ...(t && add.platform && !t.platforms.includes(add.platform) ? { platform: "" } : {}) }); }}>
+            <option value="">ทุกประเภท</option>
+            {placementTypes.map((t) => <option key={t.key} value={t.key}>{t.icon ? `${t.icon} ` : ""}{t.label}</option>)}
+          </select>
           <select value={add.platform} onChange={(e) => setAdd({ ...add, platform: e.target.value })} className={input}>
             <option value="">— ช่องทาง —</option>
-            {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            {addPlatforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
           </select>
           <select value={add.post_type} onChange={(e) => setAdd({ ...add, post_type: e.target.value })} className={input}>
             <option value="">ทุกรูปแบบ</option>
@@ -111,7 +128,7 @@ export function TargetsEditor({ brandId, platforms, canEdit, onChanged }: { bran
         </div>
       )}
       <ConfirmDialog open={!!del} onClose={() => setDel(null)} variant="danger" loading={busy} confirmText="ลบเป้า"
-        title="ลบเป้านี้?" message={del ? `${pfLabel(del.platform)} · ${del.post_type ? TYPE_META[del.post_type]?.label ?? del.post_type : "ทุกรูปแบบ"} · เดือนละ ${del.monthly_count} ชิ้น (คอนเทนต์ไม่ถูกแตะ)` : ""}
+        title="ลบเป้านี้?" message={del ? `${del.placement_type ? `${placementLabel(del.placement_type, placementTypes)} · ` : ""}${pfLabel(del.platform)} · ${del.post_type ? TYPE_META[del.post_type]?.label ?? del.post_type : "ทุกรูปแบบ"} · เดือนละ ${del.monthly_count} ชิ้น (คอนเทนต์ไม่ถูกแตะ)` : ""}
         onConfirm={() => { const t = del; if (t) void run(() => call("DELETE", `/api/marketing/content-plan/targets?id=${t.id}`), "ลบเป้าแล้ว").then(() => setDel(null)); }} />
     </div>
   );
@@ -225,8 +242,8 @@ export function SlotsEditor({ brandId, platforms, pillars, canEdit, onChanged }:
 }
 
 // ═══════════ 🎯 เป้าเดือนนี้ (หน้าแผน) ═══════════
-export function TargetsPanel({ targets, items, month, brandTab, brands, platforms, onSetup, canSetup }: {
-  targets: PlanTarget[]; items: ContentItem[]; month: string; brandTab: string; brands: BrandOption[]; platforms: PlatformOpt[];
+export function TargetsPanel({ targets, items, month, brandTab, brands, platforms, placementTypes = [], onSetup, canSetup }: {
+  targets: PlanTarget[]; items: ContentItem[]; month: string; brandTab: string; brands: BrandOption[]; platforms: PlatformOpt[]; placementTypes?: PlacementType[];
   onSetup: () => void; canSetup: boolean;
 }) {
   const [open, setOpen] = useState(true);
@@ -264,6 +281,7 @@ export function TargetsPanel({ targets, items, month, brandTab, brands, platform
               <div key={t.id} className="rounded-lg border border-slate-100 px-2.5 py-2">
                 <div className="flex items-center gap-1.5 text-xs">
                   <PlatformIcon code={t.platform} iconKey={p?.icon_key ?? p?.icon} size={14} />
+                  {t.placement_type && <span className="text-slate-600">{placementLabel(t.placement_type, placementTypes)} ·</span>}
                   <span className="font-medium text-slate-700">{p?.label ?? t.platform}</span>
                   <span className="text-slate-400">{t.post_type ? `· ${TYPE_META[t.post_type]?.label ?? t.post_type}` : "· ทุกรูปแบบ"}</span>
                   {!brandTab && <span className="ml-auto truncate text-slate-400">{brandName(t.brand_id)}</span>}

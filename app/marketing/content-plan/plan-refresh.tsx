@@ -144,6 +144,8 @@ type RuleForm = { placement_type: string; platform: string; every_days: string; 
 const EMPTY: RuleForm = { placement_type: "", platform: "", every_days: "14", lead_days: "3", title: "" };
 const toForm = (r: RefreshRule): RuleForm => ({ placement_type: r.placement_type ?? "", platform: r.platform, every_days: String(r.every_days), lead_days: String(r.lead_days), title: r.title ?? "" });
 const digits = (v: string, n: number) => v.replace(/\D/g, "").slice(0, n);
+/** ช่องในแถวรอบเปลี่ยน — เตี้ยกว่า input ปกติ ให้ทั้งกฎจบในบรรทัดเดียว */
+const cell = "h-8 rounded-lg border border-slate-200 px-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
 
 async function call(method: "POST" | "PATCH" | "DELETE", url: string, body?: unknown) {
   const r = await apiFetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -191,23 +193,23 @@ export function RefreshRulesEditor({ brandId, platforms, placementTypes, canEdit
   // ⚠️ ฟังก์ชันเรียกตรง (ไม่ใช่ component) — กันช่องพิมพ์หลุดโฟกัส
   const renderFields = (f: RuleForm, set: (p: Partial<RuleForm>) => void, disabled: boolean) => (
     <>
-      <select value={f.placement_type} disabled={disabled} className={`${input} w-36`}
+      <select value={f.placement_type} disabled={disabled} className={`${cell} w-32 shrink-0`}
         onChange={(e) => { const t = placementTypes.find((x) => x.key === e.target.value); set({ placement_type: e.target.value, ...(t && f.platform && !t.platforms.includes(f.platform) ? { platform: "" } : {}) }); }}>
         <option value="">ทุกประเภท</option>
         {placementTypes.map((t) => <option key={t.key} value={t.key}>{t.icon ? `${t.icon} ` : ""}{t.label}</option>)}
         {f.placement_type && !placementTypes.some((t) => t.key === f.placement_type) && <option value={f.placement_type}>{f.placement_type} (ถูกลบแล้ว)</option>}
       </select>
-      <select value={f.platform} onChange={(e) => set({ platform: e.target.value })} disabled={disabled} className={`${input} w-32 ${f.platform ? "" : "border-red-300"}`}>
+      <select value={f.platform} onChange={(e) => set({ platform: e.target.value })} disabled={disabled} className={`${cell} w-28 shrink-0 ${f.platform ? "" : "border-red-300"}`}>
         <option value="">— ช่องทาง —</option>
         {platformChoices(f).map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
       </select>
-      <span className="text-xs text-slate-500">ทุก</span>
-      <input value={f.every_days} onChange={(e) => set({ every_days: digits(e.target.value, 3) })} disabled={disabled} inputMode="numeric" className={`${input} w-14 text-right`} />
-      <span className="text-xs text-slate-500">วัน · เตือนก่อน</span>
-      <input value={f.lead_days} onChange={(e) => set({ lead_days: digits(e.target.value, 2) })} disabled={disabled} inputMode="numeric" className={`${input} w-12 text-right`} />
-      <span className="text-xs text-slate-500">วัน</span>
-      <input value={f.title} onChange={(e) => set({ title: e.target.value })} disabled={disabled} maxLength={200} placeholder="ชื่อเรียก (ไม่ใส่ก็ได้) เช่น แบนเนอร์หน้าร้าน"
-        className={`${input} min-w-[10rem] flex-1`} />
+      <span className="shrink-0 text-xs text-slate-500">ทุก</span>
+      <input value={f.every_days} onChange={(e) => set({ every_days: digits(e.target.value, 3) })} disabled={disabled} inputMode="numeric" title="เปลี่ยนทุกกี่วัน" className={`${cell} w-11 shrink-0 text-right`} />
+      <span className="shrink-0 text-xs text-slate-500">วัน · เตือน</span>
+      <input value={f.lead_days} onChange={(e) => set({ lead_days: digits(e.target.value, 2) })} disabled={disabled} inputMode="numeric" title="เตือนก่อนถึงรอบกี่วัน" className={`${cell} w-10 shrink-0 text-right`} />
+      <span className="shrink-0 text-xs text-slate-500">วันก่อน</span>
+      <input value={f.title} onChange={(e) => set({ title: e.target.value })} disabled={disabled} maxLength={200} placeholder="ชื่อเรียก (ไม่ใส่ก็ได้)" title="ชื่อเรียก (ไม่ใส่ก็ได้) เช่น แบนเนอร์หน้าร้าน"
+        className={`${cell} min-w-[7rem] flex-1`} />
     </>
   );
 
@@ -220,29 +222,32 @@ export function RefreshRulesEditor({ brandId, platforms, placementTypes, canEdit
         const f = forms[r.id] ?? toForm(r);
         const changed = JSON.stringify(f) !== JSON.stringify(toForm(r));
         return (
-          <div key={r.id} className={`flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1.5 ${changed ? "border-amber-300 bg-amber-50/40" : r.is_active ? "border-slate-200" : "border-dashed border-slate-200 bg-slate-50 opacity-70"}`}>
-            <PlatformIcon code={r.platform} iconKey={platforms.find((p) => p.value === r.platform)?.icon_key ?? platforms.find((p) => p.value === r.platform)?.icon} size={16} />
+          <div key={r.id} className={`flex flex-wrap md:flex-nowrap items-center gap-1 rounded-lg border px-2 py-1 ${changed ? "border-amber-300 bg-amber-50/40" : r.is_active ? "border-slate-200" : "border-dashed border-slate-200 bg-slate-50 opacity-70"}`}>
+            <span className="shrink-0"><PlatformIcon code={r.platform} iconKey={platforms.find((p) => p.value === r.platform)?.icon_key ?? platforms.find((p) => p.value === r.platform)?.icon} size={16} /></span>
             {renderFields(f, (p) => setForms((m) => ({ ...m, [r.id]: { ...(m[r.id] ?? toForm(r)), ...p } })), !canEdit)}
             {canEdit && (
-              <div className="flex items-center gap-1">
-                <button type="button" title={r.is_active ? "ปิดชั่วคราว (ไม่เตือน)" : "เปิดเตือน"} disabled={busy}
+              <div className="flex shrink-0 items-center gap-0.5">
+                <button type="button" title={r.is_active ? "เปิดเตือนอยู่ — กดเพื่อปิดชั่วคราว" : "ปิดอยู่ — กดเพื่อเปิดเตือน"} disabled={busy}
                   onClick={() => void run(() => call("PATCH", "/api/marketing/content-plan/refresh-rules", { id: r.id, is_active: !r.is_active }), r.is_active ? "ปิดการเตือนแล้ว" : "เปิดการเตือนแล้ว")}
-                  className={`h-8 rounded-lg px-2 text-xs ${r.is_active ? "text-emerald-700 hover:bg-emerald-50" : "text-slate-500 hover:bg-slate-100"}`}>{r.is_active ? "● เปิด" : "○ ปิด"}</button>
-                <button type="button" disabled={!changed || busy || !valid(f)} onClick={() => void run(() => call("PATCH", "/api/marketing/content-plan/refresh-rules", { id: r.id, ...payload(f) }), "บันทึกแล้ว")}
-                  className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-30">บันทึก</button>
-                <button type="button" onClick={() => setDel(r)} disabled={busy} title="ลบ" className="h-8 w-8 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600">🗑</button>
+                  className={`h-8 whitespace-nowrap rounded-lg px-1.5 text-xs ${r.is_active ? "text-emerald-700 hover:bg-emerald-50" : "text-slate-500 hover:bg-slate-100"}`}>{r.is_active ? "● เปิด" : "○ ปิด"}</button>
+                {/* ปุ่มบันทึกโผล่เฉพาะตอนแก้ — แถวปกติจะได้สั้นพอจบบรรทัดเดียว */}
+                {changed && (
+                  <button type="button" disabled={busy || !valid(f)} onClick={() => void run(() => call("PATCH", "/api/marketing/content-plan/refresh-rules", { id: r.id, ...payload(f) }), "บันทึกแล้ว")}
+                    className="h-8 whitespace-nowrap rounded-lg bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-30">บันทึก</button>
+                )}
+                <button type="button" onClick={() => setDel(r)} disabled={busy} title="ลบ" className="h-8 w-7 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600">🗑</button>
               </div>
             )}
           </div>
         );
       })}
       {canEdit && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-2 py-2">
-          <span className="text-xs font-medium text-slate-500">＋ ใหม่</span>
+        <div className="flex flex-wrap md:flex-nowrap items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2 py-1">
+          <span className="shrink-0 text-xs font-medium text-slate-500">＋ ใหม่</span>
           {renderFields(add, (p) => setAdd((a) => ({ ...a, ...p })), busy)}
           <button type="button" disabled={busy || !valid(add)}
             onClick={() => void run(() => call("POST", "/api/marketing/content-plan/refresh-rules", { brand_id: brandId, ...payload(add) }), "เพิ่มรอบเปลี่ยนแล้ว").then((ok) => { if (ok) setAdd(EMPTY); })}
-            className="ml-auto h-8 rounded-lg bg-slate-800 px-3 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-30">เพิ่ม</button>
+            className="ml-auto h-8 shrink-0 whitespace-nowrap rounded-lg bg-slate-800 px-3 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-30">เพิ่ม</button>
         </div>
       )}
       <ConfirmDialog open={!!del} onClose={() => setDel(null)} variant="danger" loading={busy} confirmText="ลบ"

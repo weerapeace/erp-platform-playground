@@ -45,6 +45,18 @@ describe("content-plan helpers", () => {
     expect(targetProgress(t, items, "2026-10")).toEqual({ planned: 2, published: 1 });
     expect(targetProgress({ ...t, post_type: null }, items, "2026-10")).toEqual({ planned: 3, published: 1 });
   });
+
+  it("targetProgress: ระบุประเภทการลง = นับเฉพาะที่ติ๊กประเภทนั้นบนช่องทางนั้น", () => {
+    const t: PlanTarget = { id: "t", brand_id: "b", placement_type: "shop_decor", platform: "shopee", post_type: null, monthly_count: 2 };
+    const at = bangkokIso("2026-10-10", "10:00");
+    const items = [
+      { brand_id: "b", platforms: ["shopee"], placements: ["shop_decor:shopee"], scheduled_at: at, status: "published" },
+      { brand_id: "b", platforms: ["shopee", "lazada"], placements: ["product:shopee", "shop_decor:lazada"], scheduled_at: at, status: "draft" }, // แต่งร้านแต่คนละช่องทาง
+      { brand_id: "b", platforms: ["shopee"], placements: [], scheduled_at: at, status: "draft" },                                                // ไม่ระบุประเภท
+    ];
+    expect(targetProgress(t, items, "2026-10")).toEqual({ planned: 1, published: 1 });
+    expect(targetProgress({ ...t, placement_type: null }, items, "2026-10")).toEqual({ planned: 3, published: 1 });
+  });
 });
 
 import { platformsFromPlacements, placementLabelsFor, parsePlacement, DEFAULT_PLACEMENTS } from "@/lib/marketing/content-plan";
