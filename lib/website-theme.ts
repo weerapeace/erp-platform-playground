@@ -142,7 +142,7 @@ export const BUY_ITEM_DEFS: Record<BuyItemKey, { label: string; hint: string; st
   desc: { label: "คำอธิบายย่อ", hint: "ตัดกี่บรรทัดตั้งได้ (ฉบับเต็มอยู่ในรายละเอียด)" },
   stock: { label: "สถานะสต๊อก", hint: "● พร้อมส่ง / เหลือน้อย / สั่งจอง", styles: [{ value: "text", label: "ข้อความ" }, { value: "badge", label: "ป้ายสี" }] },
   qty: { label: "จำนวน", hint: "ปุ่ม − 1 +" },
-  options: { label: "ตัวเลือก (สี/แบบ)", hint: "ตัวเลือกสี + ตัวเลือกที่ 2", styles: [{ value: "pills", label: "เม็ดยา (ชื่อ)" }, { value: "swatches", label: "วงกลมสี" }, { value: "dropdown", label: "ดรอปดาวน์" }] },
+  options: { label: "ตัวเลือก (สี/แบบ)", hint: "ตัวเลือกสี + ตัวเลือกที่ 2", styles: [{ value: "pills", label: "เม็ดยา (ชื่อ)" }, { value: "swatches", label: "วงกลมสี" }, { value: "tiles", label: "รูปสินค้า (ชี้แล้วโชว์ชื่อสี)" }, { value: "dropdown", label: "ดรอปดาวน์" }] },
   personalize: { label: "ปั๊มชื่อ (Personalize)", hint: "โชว์เฉพาะรุ่นที่เปิดปั๊มชื่อไว้ · พิมพ์ข้อความ + เลือกแบบ/ตำแหน่ง + รูปสด" },
   button: { label: "ปุ่มใส่ตะกร้า", hint: "ข้อความ / ทึบ-ขอบ / สีพื้น / เต็มความกว้าง", styles: [{ value: "fill", label: "ทึบ" }, { value: "outline", label: "ขอบ" }] },
   note: { label: "ข้อความใต้ปุ่ม", hint: "ขายส่ง / ค่าส่งจากข้อมูลร้าน / ข้อความ" },
@@ -219,7 +219,9 @@ export function normalizeBuyItems(raw: unknown, legacy: { showUnit: boolean; sho
 }
 
 export interface ProductParts {
-  gallery: { showBreadcrumb: boolean; showSubtitle: boolean; colorMode: GalleryColorMode; perView: GalleryPerView };
+  /** width: container = ในกรอบเนื้อหา · full = เต็มขอบจอ · height: md = ปกติ · tall = 80% จอ · screen = เต็มจอ (หักแถบเมนู)
+   *  showTitle = ชื่อรุ่นตัวใหญ่เหนือรูป · bar = แถบลอยล่างรูป (ชื่อ · สี · ราคา · ใส่ตะกร้า — จอคอม) หายเมื่อเลื่อนลง */
+  gallery: { showBreadcrumb: boolean; showSubtitle: boolean; colorMode: GalleryColorMode; perView: GalleryPerView; width: "container" | "full"; height: "md" | "tall" | "screen"; showTitle: boolean; bar: boolean };
   /** สวิตช์เดิม (showUnit…) ยังเก็บไว้ให้ค่ามือถือทับได้ · ของจริงอยู่ใน items */
   buy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean; noteSource: BuyNoteSource; noteText: string; columns: 1 | 2; items: BuyItem[] };
   /** layout/textPos/fields = ค่ากลางสำหรับสินค้าที่ยังไม่ตั้งแบนเนอร์เอง (ค่าในหน้า Parent SKU ทับได้ต่อรุ่น) */
@@ -256,7 +258,7 @@ export interface ExtraBanner extends BannerPart {
 export const MAX_EXTRA_BANNERS = 6;
 const DEFAULT_BANNER: BannerPart = { imageSource: "second", imageKey: null, imageIndex: 2, imageField: "", titleSource: "subtitle", titleText: "", textSource: "description", text: "", layout: "half", textPos: "left", fields: [], ratio: "auto", ratioMobile: "same", width: "container" };
 export const DEFAULT_PARTS: ProductParts = {
-  gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set", perView: 1 },
+  gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set", perView: 1, width: "container", height: "md", showTitle: true, bar: false },
   buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "", columns: 2, items: DEFAULT_BUY_ITEMS() },
   banner: { ...DEFAULT_BANNER },
   extraBanners: [],
@@ -328,6 +330,10 @@ export function normalizeParts(raw: unknown): ProductParts {
       showSubtitle: g.showSubtitle !== false,
       colorMode: one(g.colorMode, ["set", "jump"] as const, d.gallery.colorMode),
       perView: Number(g.perView) === 2 ? 2 : 1,
+      width: one(g.width, ["container", "full"] as const, d.gallery.width),
+      height: one(g.height, ["md", "tall", "screen"] as const, d.gallery.height),
+      showTitle: g.showTitle !== false,
+      bar: g.bar === true,
     },
     buy: {
       showUnit: b.showUnit !== false,
@@ -351,6 +357,15 @@ export function normalizeParts(raw: unknown): ProductParts {
 }
 /** ตัวเลือกสำหรับ ⚙️ แต่ละส่วน (ป้ายภาษาคน) — ใช้ในแท็บดีไซน์ */
 export const PART_CHOICES = {
+  galleryWidths: [
+    { value: "container", label: "ในกรอบเนื้อหา (มีขอบมน)" },
+    { value: "full", label: "เต็มขอบจอ (แบบ Gucci)" },
+  ] as { value: ProductParts["gallery"]["width"]; label: string }[],
+  galleryHeights: [
+    { value: "md", label: "ปกติ (ประมาณ 60% ของจอ)" },
+    { value: "tall", label: "สูง (80% ของจอ)" },
+    { value: "screen", label: "เต็มจอ (หักแถบเมนูด้านบน)" },
+  ] as { value: ProductParts["gallery"]["height"]; label: string }[],
   perViews: [
     { value: 1, label: "ทีละ 1 รูป เต็มความกว้าง" },
     { value: 2, label: "2 รูปคู่กัน เลื่อนทีละรูป (แบบ Gucci) — มือถือยังทีละรูป" },

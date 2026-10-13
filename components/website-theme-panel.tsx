@@ -1582,6 +1582,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             fieldGroups={choices.fieldGroups}
                             imageFields={choices.imageFields ?? []}
                             onCreateImageField={() => setImgFieldCreator(true)}
+                            onGalleryPreset={() => setProduct({ galleryStyle: "editorial", imageFit: "cover", parts: { ...theme.product.parts, gallery: { ...theme.product.parts.gallery, width: "full", height: "screen", perView: 2 } } })}
                             extra={xb}
                             setExtra={xb ? (p) => setExtraBanner(xb.id, p) : undefined}
                             previewBg={theme.colors.page}
@@ -1995,6 +1996,7 @@ function PartSettings({
   fieldGroups,
   imageFields = [],
   onCreateImageField,
+  onGalleryPreset,
   extra = null,
   setExtra,
   previewBg,
@@ -2013,6 +2015,8 @@ function PartSettings({
   imageFields?: { key: string; label: string }[];
   /** เปิดตัวสร้างฟิลด์ใหม่ใน Parent SKU (ชนิดรูปภาพ) */
   onCreateImageField?: () => void;
+  /** ✨ ตั้งแกลเลอรีแบบเต็มจอในคลิกเดียว (แตะค่าระดับหน้าสินค้าด้วย จึงให้ผู้เรียกทำ) */
+  onGalleryPreset?: () => void;
   /** แบนเนอร์เพิ่ม (part = banner:<id>) */
   extra?: ExtraBanner | null;
   setExtra?: (p: Partial<ExtraBanner>) => void;
@@ -2054,9 +2058,30 @@ function PartSettings({
           </select>
           <p className="text-[11px] text-slate-400 mt-1">{PART_CHOICES.colorModes.find((o) => o.value === g.colorMode)?.hint}</p>
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={lbl}>ความกว้างแกลเลอรี</label>
+            <select className={partInputCls} value={g.width} onChange={(e) => setPart("gallery", { width: e.target.value as ProductParts["gallery"]["width"] })}>
+              {PART_CHOICES.galleryWidths.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>ความสูงแกลเลอรี</label>
+            <select className={partInputCls} value={g.height} onChange={(e) => setPart("gallery", { height: e.target.value as ProductParts["gallery"]["height"] })}>
+              {PART_CHOICES.galleryHeights.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+        </div>
+        {!mobile && onGalleryPreset && (
+          <button type="button" onClick={onGalleryPreset} className="w-full text-xs rounded-lg border border-dashed border-blue-300 text-blue-700 py-1.5 hover:bg-blue-50">
+            ✨ ตั้งแบบเต็มจอ (Gucci): เต็มขอบจอ · สูงเต็มจอ · 2 รูปคู่กัน · รูปเต็มกรอบ
+          </button>
+        )}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <PartToggle label="เส้นทางหน้า (หน้าแรก / สินค้า / หมวด)" on={g.showBreadcrumb} onChange={(v) => setPart("gallery", { showBreadcrumb: v })} />
+          <PartToggle label="ชื่อรุ่นตัวใหญ่เหนือรูป" on={g.showTitle} onChange={(v) => setPart("gallery", { showTitle: v })} />
           <PartToggle label="ชื่อรองใต้ชื่อรุ่น" on={g.showSubtitle} onChange={(v) => setPart("gallery", { showSubtitle: v })} />
+          {!mobile && <PartToggle label="แถบลอยล่างรูป (ชื่อ · สี · ราคา · ใส่ตะกร้า) — หายเมื่อเลื่อนลง (จอคอม)" on={g.bar} onChange={(v) => setPart("gallery", { bar: v })} />}
         </div>
         <p className="text-[11px] text-slate-400">รูปมาจากไหน (ปก Parent / SKU ลูก) ตั้งที่แท็บ ⚙️ จับคู่ฟิลด์ · รูปรายสีหลายรูป ตั้งที่ Parent SKU → แท็บ 🛍 เว็บไซต์</p>
       </div>
