@@ -25,6 +25,113 @@ export type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 export type ProductDetailsOpen = "first" | "closed" | "all";
 
 /**
+ * ⚙️ ตั้งค่าต่อส่วนประกอบของหน้าสินค้าแบบโชว์เคส — แต่ละส่วนเลือกได้ว่า "จับคู่กับข้อมูลไหน"
+ * (ปุ่ม ⚙️ ในรายการลำดับส่วนประกอบ แท็บดีไซน์ → หน้าสินค้า) · storefront มิเรอร์ใน src/lib/site-config.ts
+ */
+/** เลือกสีแล้วแกลเลอรีทำอะไร: set = โชว์เฉพาะชุดรูปของสีนั้น · jump = รูปทั้งหมด แล้วเลื่อนไปรูปของสี */
+export type GalleryColorMode = "set" | "jump";
+export type BannerImageSource = "second" | "last" | "parent" | "fixed";
+export type BannerTitleSource = "subtitle" | "category" | "name" | "text" | "none";
+export type BannerTextSource = "description" | "introduction" | "english_description" | "text" | "none";
+export type BuyNoteSource = "wholesale" | "shipping" | "text" | "none";
+export type RelatedSource = "category" | "collection" | "featured" | "bestseller" | "manual" | "random";
+export interface ProductParts {
+  gallery: { showBreadcrumb: boolean; showSubtitle: boolean; colorMode: GalleryColorMode };
+  buy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean; noteSource: BuyNoteSource; noteText: string };
+  banner: { imageSource: BannerImageSource; imageKey: string | null; titleSource: BannerTitleSource; titleText: string; textSource: BannerTextSource; text: string };
+  /** codes = รหัส Parent SKU (ตัวพิมพ์ใหญ่) เมื่อ source=manual · count 2–8 · title ว่าง = ใช้ข้อความเดิมของเว็บ */
+  related: { source: RelatedSource; codes: string[]; count: number; title: string };
+}
+export const DEFAULT_PARTS: ProductParts = {
+  gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set" },
+  buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "" },
+  banner: { imageSource: "second", imageKey: null, titleSource: "subtitle", titleText: "", textSource: "description", text: "" },
+  related: { source: "category", codes: [], count: 4, title: "" },
+};
+const PART_KEY_RE = /^[\w\-./%()]+$/;
+export function normalizeParts(raw: unknown): ProductParts {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, Record<string, unknown> | undefined>;
+  const g = r.gallery ?? {};
+  const b = r.buy ?? {};
+  const bn = r.banner ?? {};
+  const rl = r.related ?? {};
+  const d = DEFAULT_PARTS;
+  const one = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
+  const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const n = Number(rl.count);
+  return {
+    gallery: {
+      showBreadcrumb: g.showBreadcrumb !== false,
+      showSubtitle: g.showSubtitle !== false,
+      colorMode: one(g.colorMode, ["set", "jump"] as const, d.gallery.colorMode),
+    },
+    buy: {
+      showUnit: b.showUnit !== false,
+      showBadge: b.showBadge !== false,
+      showStock: b.showStock !== false,
+      showShortDesc: b.showShortDesc !== false,
+      noteSource: one(b.noteSource, ["wholesale", "shipping", "text", "none"] as const, d.buy.noteSource),
+      noteText: text(b.noteText, 300),
+    },
+    banner: {
+      imageSource: one(bn.imageSource, ["second", "last", "parent", "fixed"] as const, d.banner.imageSource),
+      imageKey: typeof bn.imageKey === "string" && PART_KEY_RE.test(bn.imageKey) ? bn.imageKey : null,
+      titleSource: one(bn.titleSource, ["subtitle", "category", "name", "text", "none"] as const, d.banner.titleSource),
+      titleText: text(bn.titleText, 120),
+      textSource: one(bn.textSource, ["description", "introduction", "english_description", "text", "none"] as const, d.banner.textSource),
+      text: text(bn.text, 2000),
+    },
+    related: {
+      source: one(rl.source, ["category", "collection", "featured", "bestseller", "manual", "random"] as const, d.related.source),
+      codes: (Array.isArray(rl.codes) ? rl.codes : []).filter((c): c is string => typeof c === "string" && c.trim().length > 0).map((c) => c.trim().toUpperCase()).slice(0, 24),
+      count: Number.isFinite(n) ? Math.min(8, Math.max(2, Math.round(n))) : d.related.count,
+      title: text(rl.title, 80),
+    },
+  };
+}
+/** ตัวเลือกสำหรับ ⚙️ แต่ละส่วน (ป้ายภาษาคน) — ใช้ในแท็บดีไซน์ */
+export const PART_CHOICES = {
+  colorModes: [
+    { value: "set", label: "โชว์เฉพาะชุดรูปของสีนั้น", hint: "ตั้งรูปรายสีไว้ในแท็บ 🛍 เว็บไซต์ ของ Parent SKU (ไม่ได้ตั้ง = รูปปก SKU)" },
+    { value: "jump", label: "รูปทั้งหมด แล้วเลื่อนไปรูปของสี", hint: "ลูกค้ายังเห็นรูปทุกสี แค่กระโดดไปรูปสีที่เลือก" },
+  ] as { value: GalleryColorMode; label: string; hint: string }[],
+  bannerImages: [
+    { value: "second", label: "รูปที่ 2 ของสินค้า" },
+    { value: "last", label: "รูปสุดท้ายของสินค้า" },
+    { value: "parent", label: "รูปจากแกลเลอรี Parent SKU (รูปที่ 2 ถ้ามี)" },
+    { value: "fixed", label: "อัปโหลดรูปกลาง 1 รูป ใช้ทุกสินค้า" },
+  ] as { value: BannerImageSource; label: string }[],
+  bannerTitles: [
+    { value: "subtitle", label: "ชื่อรอง (ข้อความหลังขีดในชื่อรุ่น) หรือชื่อหมวด" },
+    { value: "category", label: "ชื่อหมวด" },
+    { value: "name", label: "ชื่อสินค้าเต็ม" },
+    { value: "text", label: "ข้อความตายตัว" },
+    { value: "none", label: "ไม่มีหัวข้อ" },
+  ] as { value: BannerTitleSource; label: string }[],
+  bannerTexts: [
+    { value: "description", label: "คำอธิบายสินค้า (ตามที่จับคู่ฟิลด์)" },
+    { value: "introduction", label: "ฟิลด์ \"คำแนะนำสินค้า\" ของ Parent SKU" },
+    { value: "english_description", label: "ฟิลด์ \"คำอธิบาย EN\" ของ Parent SKU" },
+    { value: "text", label: "ข้อความตายตัว" },
+    { value: "none", label: "ไม่มีข้อความ" },
+  ] as { value: BannerTextSource; label: string }[],
+  buyNotes: [
+    { value: "wholesale", label: "ลิงก์ \"สั่งจำนวนมาก / ขายส่ง? ติดต่อเรา\"" },
+    { value: "shipping", label: "เงื่อนไขค่าส่งจากแท็บข้อมูลร้าน (เช่น ส่งฟรีเมื่อครบ ฿1,500)" },
+    { value: "text", label: "ข้อความตายตัว" },
+    { value: "none", label: "ไม่มี" },
+  ] as { value: BuyNoteSource; label: string }[],
+  relatedSources: [
+    { value: "category", label: "หมวดเดียวกัน" },
+    { value: "collection", label: "คอลเลกชันเดียวกัน (ฟิลด์ collection ใน Parent SKU)" },
+    { value: "featured", label: "สินค้าที่ติ๊ก ★ แนะนำ" },
+    { value: "bestseller", label: "ขายดี (จากยอดสั่งซื้อบนเว็บ)" },
+    { value: "manual", label: "เลือกเอง (ระบุรุ่น)" },
+    { value: "random", label: "สุ่ม" },
+  ] as { value: RelatedSource; label: string }[],
+};
+
+/**
  * "ชุดรายละเอียดสินค้า" — หัวข้อ (พับเก็บ/แท็บ) ตั้งที่เดียว ใช้ทุกสินค้า
  * แต่ละหัวข้อเลือกได้ว่าเอาข้อมูลจากไหน และใช้กับรุ่นไหน (ทุกตัว / เฉพาะหมวด / เลือกเป็นรายตัว)
  * สินค้าที่ไม่มีข้อมูลในหัวข้อนั้น → หัวข้อหายไปเอง (เว็บร้านเป็นคนตัด)
@@ -181,6 +288,8 @@ export interface SiteTheme {
     sections: ProductSection[];
     /** ส่วนที่ซ่อน (ซ่อนได้เฉพาะ details/banner/related) */
     hidden: ProductSection[];
+    /** ⚙️ ตั้งค่าต่อส่วนประกอบ (จับคู่ข้อมูล / โชว์-ซ่อนรายละเอียดย่อย) */
+    parts: ProductParts;
   };
 }
 
@@ -206,7 +315,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS) },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -395,6 +504,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       detailItems: normalizeDetailItems(pd.detailItems),
       sections: normalizeProductSections(pd.sections),
       hidden: normalizeHiddenSections(pd.hidden),
+      parts: normalizeParts(pd.parts),
     },
   };
 }

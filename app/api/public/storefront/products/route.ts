@@ -42,7 +42,9 @@ export async function OPTIONS(): Promise<NextResponse> {
 const json = (body: unknown, status = 200) =>
   NextResponse.json(body, {
     status,
-    headers: { ...CORS, "Cache-Control": "public, max-age=60, stale-while-revalidate=300" },
+    // ⚠️ ห้ามแคชที่ขอบเครือข่าย (Vercel CDN) — ไม่งั้นเว็บร้านล้างแคชแล้วยังได้รายการสินค้าเก่าอีก ≤6 นาที
+    // (เว็บร้านแคชเองด้วย tag 'site-config' และ ERP สั่งล้างหลังบันทึก/เผยแพร่อยู่แล้ว) — site/page ใช้ no-store เหมือนกัน
+    headers: { ...CORS, "Cache-Control": "no-store" },
   });
 
 /** สร้าง slug จากรหัสสินค้า (ใช้เป็น URL บนเว็บร้าน) */
@@ -93,6 +95,38 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const arr = kidsByParent.get(k.parent_sku_id) ?? [];
     arr.push(k);
     kidsByParent.set(k.parent_sku_id, arr);
+  }
+
+  // แกลเลอรีของ Parent SKU (รูปปก + รูปเพิ่มเติม) — ⚙️ แบนเนอร์เลือก "รูปจากแกลเลอรี Parent SKU" ได้
+  const parentGallery = new Map<string, string[]>();
+  const { data: pAtt } = await sb
+    .from("erp_playground_attachments")
+    .select("entity_id, file_path, content_type, is_primary, sort_order")
+    .eq("entity_type", "parent_skus_v2")
+    .in("entity_id", parentIds)
+    .order("is_primary", { ascending: false })
+    .order("sort_order", { ascending: true });
+  for (const a of (pAtt ?? []) as { entity_id: string; file_path: string | null; content_type: string | null }[]) {
+    if (!a.file_path || (a.content_type && !a.content_type.startsWith("image/"))) continue;
+    const arr = parentGallery.get(a.entity_id) ?? [];
+    if (!arr.includes(a.file_path) && arr.length < 12) arr.push(a.file_path);
+    parentGallery.set(a.entity_id, arr);
+  }
+
+  // อันดับขายดี (จากออเดอร์บนเว็บของร้านนี้ ไม่รวมยกเลิก) — ส่งเป็น "อันดับ" ไม่ส่งจำนวนจริง
+  const salesRank = new Map<string, number>();
+  {
+    const { data: orders } = await sb.from("store_orders").select("id").eq("shop_id", s.id).neq("status", "cancelled").order("created_at", { ascending: false }).limit(2000);
+    const orderIds = ((orders ?? []) as { id: string }[]).map((o) => o.id);
+    if (orderIds.length) {
+      const { data: items } = await sb.from("store_order_items").select("parent_code, qty").in("order_id", orderIds);
+      const qtyByCode = new Map<string, number>();
+      for (const it of (items ?? []) as { parent_code: string | null; qty: number | string | null }[]) {
+        const c = (it.parent_code ?? "").toUpperCase();
+        if (c) qtyByCode.set(c, (qtyByCode.get(c) ?? 0) + (Number(it.qty) || 0));
+      }
+      [...qtyByCode.entries()].sort((a, b) => b[1] - a[1]).forEach(([c], i) => salesRank.set(c, i + 1));
+    }
   }
 
   // ชื่อหมวดใน ERP (ใช้จับคู่เป็นหมวดเว็บ)
@@ -149,6 +183,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
         attrs: productSpecAttrs(p),
         images: r.images.map(imageUrl),
+        /** รูปปก + แกลเลอรีของ Parent SKU (แยกจาก images ที่อาจมาจาก SKU ลูก) */
+        parentImages: [...new Set([...(p.cover_image_r2_key ? [p.cover_image_r2_key] : []), ...(parentGallery.get(p.id) ?? [])])].map(imageUrl),
+        /** คอลเลกชันใน ERP (id) — ใช้จับกลุ่มสินค้าที่เกี่ยวข้อง */
+        collection: p.collection_id ?? null,
+        /** อันดับขายดีบนเว็บ (1 = ขายดีสุด) — ไม่มี = ยังไม่เคยขาย */
+        salesRank: salesRank.get(code.toUpperCase()) ?? null,
         /** จับคู่รายละเอียดหน้าเว็บเฉพาะรุ่น { itemId: { show, text } } — ไม่มี = ตามชุดรายละเอียดกลางของธีม */
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
       };

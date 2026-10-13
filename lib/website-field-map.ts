@@ -170,6 +170,8 @@ export interface ParentRow {
   fake_price: number | string | null;
   cover_image_r2_key: string | null;
   category_id: string | null;
+  /** คอลเลกชัน (ใช้จับกลุ่ม "คุณอาจชอบ: คอลเลกชันเดียวกัน") */
+  collection_id?: string | null;
   // ฟิลด์สเปก (optional — บางที่ select ไม่ครบ)
   materials?: string | null;
   size_summary?: string | null;
@@ -218,7 +220,7 @@ export interface ListingRow {
 // ⚠️ ต้องเป็น string literal ก้อนเดียว (ห้าม + ต่อ) ไม่งั้น type ของ supabase .select() พัง (GenericStringError)
 // ท้ายรายการ = ฟิลด์สเปกสำหรับ "ชุดรายละเอียดสินค้า" บนเว็บ (lib/website-theme.ts PRODUCT_SPEC_FIELDS) — ไม่มีต้นทุน/ข้อมูลภายใน
 export const PARENT_SELECT =
-  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty";
+  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id, collection_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty";
 
 /** ค่าฟิลด์สเปกของ Parent SKU ที่ไม่ว่าง (key → ข้อความพร้อมหน่วย) ส่งให้เว็บร้านโชว์ในหัวข้อ "ฟิลด์จาก Parent SKU" */
 export function productSpecAttrs(p: ParentRow): Record<string, string> {
@@ -229,7 +231,8 @@ export function productSpecAttrs(p: ParentRow): Record<string, string> {
     const str = typeof v === "number" ? (v > 0 ? String(v) : "") : String(v).trim();
     // ช่องที่กรอกขีด/ไม่มี ("-", "—", "n/a", "ไม่มี") = ไม่มีข้อมูล ไม่ต้องโชว์
     if (!str || /^[-–—._/]+$|^(n\/a|na|none|ไม่มี|ไม่ระบุ)$/i.test(str)) continue;
-    out[f.key] = f.unit ? `${str} ${f.unit}` : str.slice(0, 1000);
+    // ข้อความยาว (คำแนะนำ/คำอธิบาย EN) ให้พอสำหรับแบนเนอร์ด้วย
+    out[f.key] = f.unit ? `${str} ${f.unit}` : str.slice(0, 4000);
   }
   return out;
 }

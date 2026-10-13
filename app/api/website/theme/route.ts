@@ -34,8 +34,7 @@ import {
   PRODUCT_SPEC_FIELDS,
   DETAIL_SOURCES,
   IMAGE_RATIOS,
-  CARD_HOVERS,
-} from "@/lib/website-theme";
+  CARD_HOVERS, PART_CHOICES } from "@/lib/website-theme";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -103,6 +102,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       productGalleryStyles: PRODUCT_GALLERY_STYLES,
       productDetailsStyles: PRODUCT_DETAILS_STYLES,
       productDetailsOpen: PRODUCT_DETAILS_OPEN,
+      partChoices: PART_CHOICES,
       detailSources: DETAIL_SOURCES,
       specFields: PRODUCT_SPEC_FIELDS.map((f) => ({ key: f.key, label: f.label })),
       categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label })),

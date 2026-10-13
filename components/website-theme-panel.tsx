@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { PART_CHOICES, type ProductParts } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
 type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -49,7 +50,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[] };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts };
 }
 
 interface Choices {
@@ -284,6 +285,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
   const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
   const sectionDrag = useDragReorder((from, to) => theme && setProduct({ sections: moveItem(theme.product.sections, from, to) }));
+  // ⚙️ ตั้งค่าต่อส่วนประกอบ (จับคู่ข้อมูล) — เปิดได้ทีละส่วน
+  const [openPart, setOpenPart] = useState<ProductSection | null>(null);
+  const setPart = <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) =>
+    theme && setProduct({ parts: { ...theme.product.parts, [k]: { ...theme.product.parts[k], ...p } } });
   const detailDrag = useDragReorder((from, to) => theme && setProduct({ detailItems: moveItem(theme.product.detailItems, from, to) }));
   const [openDetail, setOpenDetail] = useState<string | null>(null);
   const [prodQuery, setProdQuery] = useState("");
@@ -908,7 +913,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               {theme.product.layout === "showcase" && (
                 <div className="mt-4 pt-3 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-2">
-                    <label className={labelCls} style={{ marginBottom: 0 }}>ลำดับส่วนประกอบ (ลากที่ ⠿ เพื่อสลับ · 👁️ ซ่อน/แสดง)</label>
+                    <label className={labelCls} style={{ marginBottom: 0 }}>ลำดับส่วนประกอบ (ลากที่ ⠿ เพื่อสลับ · ⚙️ เลือกจับคู่ข้อมูล · 👁️ ซ่อน/แสดง)</label>
                     {(JSON.stringify(theme.product.sections) !== JSON.stringify(published.product.sections) || theme.product.hidden.length > 0) && (
                       <button onClick={() => setProduct({ sections: ["gallery", "buy", "details", "banner", "related"], hidden: [] })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
                     )}
@@ -917,14 +922,28 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     {theme.product.sections.map((k, i) => {
                       const meta = (choices.productSections ?? []).find((x) => x.value === k);
                       const isHidden = theme.product.hidden.includes(k);
+                      const hasPart = k !== "details";
+                      const partOpen = openPart === k;
                       return (
-                        <li key={k} {...sectionDrag.rowProps(i)} className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 ${sectionDrag.rowCls(i)} ${isHidden ? "opacity-60" : ""}`}>
+                        <li key={k} {...sectionDrag.rowProps(i)} className={`rounded-lg border bg-white px-2 py-1.5 ${sectionDrag.rowCls(i)} ${isHidden ? "opacity-60" : ""} ${partOpen ? "border-blue-300" : "border-slate-200"}`}>
+                        <div className="flex items-center gap-2">
                           <DragHandle {...sectionDrag.handleProps(i)} />
                           <span className="w-5 text-[11px] text-slate-400 text-center">{i + 1}</span>
                           <span className="flex-1 min-w-0">
                             <span className={`block text-sm ${isHidden ? "line-through text-slate-400" : "text-slate-800"}`}>{meta?.label ?? k}</span>
                             <span className="block text-[11px] text-slate-400 truncate">{meta?.hint}</span>
                           </span>
+                          {hasPart ? (
+                            <button
+                              onClick={() => setOpenPart(partOpen ? null : k)}
+                              title="เลือกว่าส่วนนี้จับคู่กับข้อมูลไหน / โชว์อะไรบ้าง"
+                              className={`w-7 h-7 rounded-lg border text-xs ${partOpen ? "bg-blue-600 border-blue-600 text-white" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
+                            >
+                              ⚙️
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 px-1" title="ตั้งค่าที่กล่อง ชุดรายละเอียดสินค้า ด้านล่าง">↓ ด้านล่าง</span>
+                          )}
                           {meta?.hideable ? (
                             <button
                               onClick={() => setProduct({ hidden: isHidden ? theme.product.hidden.filter((x) => x !== k) : [...theme.product.hidden, k] })}
@@ -936,6 +955,16 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                           ) : (
                             <span className="text-[10px] text-slate-300 px-1" title="ส่วนหลัก ซ่อนไม่ได้">หลัก</span>
                           )}
+                        </div>
+                        {partOpen && (
+                          <PartSettings
+                            part={k}
+                            parts={theme.product.parts}
+                            setPart={setPart}
+                            products={choices.products ?? []}
+                            previewBg={theme.colors.page}
+                          />
+                        )}
                         </li>
                       );
                     })}
@@ -1213,4 +1242,160 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       </div>
     </div>
   );
+}
+
+/* ─────────── ⚙️ ตั้งค่าต่อส่วนประกอบของหน้าสินค้า (จับคู่ข้อมูล) ─────────── */
+const partInputCls = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-800 outline-none focus:border-blue-400 bg-white";
+function PartToggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} className="accent-blue-600" />
+      {label}
+    </label>
+  );
+}
+function PartSettings({
+  part,
+  parts,
+  setPart,
+  products,
+  previewBg,
+}: {
+  part: ProductSection;
+  parts: ProductParts;
+  setPart: <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) => void;
+  products: { code: string; name: string }[];
+  previewBg: string;
+}) {
+  const [q, setQ] = useState("");
+  const lbl = "block text-[11px] text-slate-500 mb-1";
+  if (part === "gallery") {
+    const g = parts.gallery;
+    return (
+      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        <div>
+          <label className={lbl}>กดเลือกสีแล้วรูปใหญ่ทำอย่างไร</label>
+          <select className={partInputCls} value={g.colorMode} onChange={(e) => setPart("gallery", { colorMode: e.target.value as ProductParts["gallery"]["colorMode"] })}>
+            {PART_CHOICES.colorModes.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <p className="text-[11px] text-slate-400 mt-1">{PART_CHOICES.colorModes.find((o) => o.value === g.colorMode)?.hint}</p>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <PartToggle label="เส้นทางหน้า (หน้าแรก / สินค้า / หมวด)" on={g.showBreadcrumb} onChange={(v) => setPart("gallery", { showBreadcrumb: v })} />
+          <PartToggle label="ชื่อรองใต้ชื่อรุ่น" on={g.showSubtitle} onChange={(v) => setPart("gallery", { showSubtitle: v })} />
+        </div>
+        <p className="text-[11px] text-slate-400">รูปมาจากไหน (ปก Parent / SKU ลูก) ตั้งที่แท็บ ⚙️ จับคู่ฟิลด์ · รูปรายสีหลายรูป ตั้งที่ Parent SKU → แท็บ 🛍 เว็บไซต์</p>
+      </div>
+    );
+  }
+  if (part === "buy") {
+    const b = parts.buy;
+    return (
+      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <PartToggle label="หน่วย (/ ใบ)" on={b.showUnit} onChange={(v) => setPart("buy", { showUnit: v })} />
+          <PartToggle label="ป้าย (ใหม่/ลดราคา)" on={b.showBadge} onChange={(v) => setPart("buy", { showBadge: v })} />
+          <PartToggle label="สถานะสต๊อก (● พร้อมส่ง)" on={b.showStock} onChange={(v) => setPart("buy", { showStock: v })} />
+          <PartToggle label="คำอธิบายย่อ 4 บรรทัด" on={b.showShortDesc} onChange={(v) => setPart("buy", { showShortDesc: v })} />
+        </div>
+        <div>
+          <label className={lbl}>ข้อความใต้ปุ่มใส่ตะกร้า</label>
+          <select className={partInputCls} value={b.noteSource} onChange={(e) => setPart("buy", { noteSource: e.target.value as ProductParts["buy"]["noteSource"] })}>
+            {PART_CHOICES.buyNotes.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {b.noteSource === "text" && (
+            <input className={`${partInputCls} mt-1.5`} value={b.noteText} onChange={(e) => setPart("buy", { noteText: e.target.value })} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · จัดส่งใน 1–2 วัน" />
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (part === "banner") {
+    const bn = parts.banner;
+    return (
+      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        <div>
+          <label className={lbl}>รูปแบนเนอร์เอาจาก</label>
+          <select className={partInputCls} value={bn.imageSource} onChange={(e) => setPart("banner", { imageSource: e.target.value as ProductParts["banner"]["imageSource"] })}>
+            {PART_CHOICES.bannerImages.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {bn.imageSource === "fixed" && (
+            <div className="mt-1.5">
+              <ImageUploadField label="รูปกลาง (ใช้ทุกสินค้า)" hint="แนะนำแนวนอน 16:10" value={bn.imageKey} onChange={(k) => setPart("banner", { imageKey: k })} previewBg={previewBg} height={56} />
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 mt-1">ไม่มีรูปตามแหล่งที่เลือก = ส่วนนี้ไม่โชว์สำหรับสินค้านั้น</p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-2">
+          <div>
+            <label className={lbl}>หัวข้อ</label>
+            <select className={partInputCls} value={bn.titleSource} onChange={(e) => setPart("banner", { titleSource: e.target.value as ProductParts["banner"]["titleSource"] })}>
+              {PART_CHOICES.bannerTitles.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {bn.titleSource === "text" && <input className={`${partInputCls} mt-1.5`} value={bn.titleText} onChange={(e) => setPart("banner", { titleText: e.target.value })} placeholder="หัวข้อแบนเนอร์" />}
+          </div>
+          <div>
+            <label className={lbl}>ข้อความ</label>
+            <select className={partInputCls} value={bn.textSource} onChange={(e) => setPart("banner", { textSource: e.target.value as ProductParts["banner"]["textSource"] })}>
+              {PART_CHOICES.bannerTexts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {bn.textSource === "text" && <textarea rows={3} className={`${partInputCls} mt-1.5`} value={bn.text} onChange={(e) => setPart("banner", { text: e.target.value })} placeholder="ข้อความใต้หัวข้อ" />}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (part === "related") {
+    const r = parts.related;
+    const ql = q.trim().toLowerCase();
+    const list = products.filter((p) => !ql || p.code.toLowerCase().includes(ql) || p.name.toLowerCase().includes(ql)).slice(0, 30);
+    const toggle = (code: string) => setPart("related", { codes: r.codes.includes(code) ? r.codes.filter((c) => c !== code) : [...r.codes, code] });
+    return (
+      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        <div className="grid sm:grid-cols-[1fr_auto] gap-2">
+          <div>
+            <label className={lbl}>เอาสินค้าจาก</label>
+            <select className={partInputCls} value={r.source} onChange={(e) => setPart("related", { source: e.target.value as ProductParts["related"]["source"] })}>
+              {PART_CHOICES.relatedSources.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>จำนวน</label>
+            <select className={partInputCls} value={r.count} onChange={(e) => setPart("related", { count: Number(e.target.value) })}>
+              {[2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n} ชิ้น</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className={lbl}>หัวข้อ (ว่าง = "สินค้าที่เกี่ยวข้อง")</label>
+          <input className={partInputCls} value={r.title} onChange={(e) => setPart("related", { title: e.target.value })} placeholder="เช่น คุณอาจชอบ · จับคู่กับรุ่นนี้" />
+        </div>
+        {r.source === "manual" && (
+          <div>
+            <label className={lbl}>เลือกรุ่น ({r.codes.length} รุ่น) — เรียงตามที่เลือก</label>
+            {r.codes.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {r.codes.map((c) => (
+                  <button key={c} type="button" onClick={() => toggle(c)} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200" title="เอาออก">{c} ✕</button>
+                ))}
+              </div>
+            )}
+            <input className={partInputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส / ชื่อรุ่น" />
+            <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-slate-100 divide-y divide-slate-50">
+              {list.map((p) => (
+                <label key={p.code} className="flex items-center gap-2 px-2 py-1 text-xs cursor-pointer hover:bg-slate-50">
+                  <input type="checkbox" className="accent-blue-600" checked={r.codes.includes(p.code.toUpperCase())} onChange={() => toggle(p.code.toUpperCase())} />
+                  <span className="font-mono text-slate-500">{p.code}</span>
+                  <span className="truncate text-slate-700">{p.name}</span>
+                </label>
+              ))}
+              {list.length === 0 && <div className="px-2 py-2 text-[11px] text-slate-400">ไม่พบรุ่น</div>}
+            </div>
+          </div>
+        )}
+        <p className="text-[11px] text-slate-400">ถ้าสินค้าตามแหล่งที่เลือกมีไม่ครบจำนวน ระบบเติมด้วยสินค้าหมวดเดียวกันให้ · "ขายดี" นับจากออเดอร์บนเว็บ ยังไม่มีออเดอร์ = เติมด้วยหมวดเดียวกัน</p>
+      </div>
+    );
+  }
+  return null;
 }
