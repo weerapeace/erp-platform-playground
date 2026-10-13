@@ -551,6 +551,10 @@ export interface SiteTheme {
   };
   fonts: { display: string; body: string };
   radius: "sharp" | "soft" | "round";
+  /** ตัวอักษร 6 บทบาท (แท็บ "ตัวอักษร") */
+  typography: Typography;
+  /** รูปทรงปุ่ม/การ์ด/ช่องกรอก/เงา (แท็บ "รูปทรง") */
+  shape: Shape;
   logo: {
     /** ตัวอักษรในกล่องโลโก้ เช่น "IG" */
     mark: string;
@@ -642,6 +646,120 @@ export interface SiteTheme {
   };
 }
 
+/* ───────── ตัวอักษร 6 บทบาท (แท็บ "ตัวอักษร") ─────────
+   แต่ละบทบาทตั้ง ฟอนต์/น้ำหนัก/เอียง/ขนาด %/ระยะห่าง/ตัวพิมพ์ใหญ่/สี/พื้นหลัง แยกกัน
+   เว็บร้านแปลงเป็น CSS ใน site-config.themeToCss (zoom = ขนาด %) */
+export type TextRoleKey = "hero" | "heading" | "eyebrow" | "body" | "button" | "nav";
+export interface TextRole {
+  /** ชื่อฟอนต์จาก GOOGLE_FONTS · "" = ตามฟอนต์หัวข้อ/เนื้อหา */
+  font: string;
+  weight: number;
+  italic: boolean;
+  /** % ของขนาดปกติ (คอม) */
+  size: number;
+  /** % บนมือถือ · 0 = เท่าคอม */
+  sizeMobile: number;
+  /** ระยะห่างตัวอักษร หน่วย 1/100 em (14 = 0.14em) */
+  spacing: number;
+  uppercase: boolean;
+  /** "" = ตามสีธีม */
+  color: string;
+  /** สีพื้นหลังไฮไลต์ · "" = ไม่มี */
+  bg: string;
+}
+export const TEXT_ROLE_DEFS: { key: TextRoleKey; label: string; hint: string; base: "display" | "body"; sample: string; px: number }[] = [
+  { key: "hero", label: "หัวข้อใหญ่ (Hero / สไลด์)", hint: "ข้อความใหญ่สุดบนแบนเนอร์หน้าแรก", base: "display", sample: "กระเป๋าดีไซน์ดี ใช้ได้ทุกวัน", px: 26 },
+  { key: "heading", label: "หัวข้อส่วน", hint: "ชื่อหัวข้อของแต่ละส่วนในหน้า (ไม่รวมชื่อสินค้าในหน้าสินค้า)", base: "display", sample: "สินค้าแนะนำ", px: 18 },
+  { key: "eyebrow", label: "ป้ายเล็กเหนือหัวข้อ", hint: "ตัวเล็ก ๆ เหนือหัวข้อ และชื่อหมวดบนการ์ด", base: "body", sample: "NEW ARRIVAL", px: 11 },
+  { key: "body", label: "เนื้อหา (ฐานทั้งเว็บ)", hint: "ข้อความทั่วไป — ขนาดนี้คือฐาน ทุกอย่างบนเว็บขยายตาม", base: "body", sample: "หนังวัวแท้ฟอกฝาด ผิวเรียบเนียน ทนทาน ใช้ได้นานหลายปี", px: 14 },
+  { key: "button", label: "ปุ่ม", hint: "ปุ่มทุกปุ่มบนเว็บ (สีปุ่มมาจากแท็บสี)", base: "body", sample: "เพิ่มลงตะกร้า", px: 12 },
+  { key: "nav", label: "เมนูด้านบน", hint: "ลิงก์เมนูใน Header", base: "body", sample: "สินค้า   เกี่ยวกับเรา   ติดต่อ", px: 11 },
+];
+const ROLE_DEFAULTS: Record<TextRoleKey, Partial<TextRole>> = {
+  hero: { weight: 600, spacing: -1 },
+  heading: { weight: 700, spacing: 0 },
+  eyebrow: { weight: 600, spacing: 22, uppercase: true },
+  body: { weight: 400, spacing: 0 },
+  button: { weight: 600, spacing: 8, uppercase: true },
+  nav: { weight: 600, spacing: 14, uppercase: true },
+};
+export const defaultTextRole = (k: TextRoleKey): TextRole => ({ font: "", weight: 500, italic: false, size: 100, sizeMobile: 0, spacing: 0, uppercase: false, color: "", bg: "", ...ROLE_DEFAULTS[k] });
+export type Typography = Record<TextRoleKey, TextRole>;
+export const DEFAULT_TYPOGRAPHY = (): Typography => Object.fromEntries(TEXT_ROLE_DEFS.map((d) => [d.key, defaultTextRole(d.key)])) as Typography;
+const hexOrEmpty = (v: unknown) => (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : "");
+export function normalizeTypography(raw: unknown): Typography {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const out = DEFAULT_TYPOGRAPHY();
+  for (const d of TEXT_ROLE_DEFS) {
+    const x = (r[d.key] && typeof r[d.key] === "object" ? r[d.key] : {}) as Record<string, unknown>;
+    const def = out[d.key];
+    const n = (v: unknown, fb: number, lo: number, hi: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : fb);
+    out[d.key] = {
+      font: typeof x.font === "string" && FONT_NAMES.includes(x.font) ? x.font : "",
+      weight: n(x.weight, def.weight, 100, 900),
+      italic: x.italic === true,
+      size: n(x.size, 100, 50, 250),
+      sizeMobile: n(x.sizeMobile, 0, 0, 250),
+      spacing: n(x.spacing, def.spacing, -10, 40),
+      uppercase: typeof x.uppercase === "boolean" ? x.uppercase : def.uppercase,
+      color: hexOrEmpty(x.color),
+      bg: hexOrEmpty(x.bg),
+    };
+  }
+  return out;
+}
+/** ชื่อฟอนต์ทั้งหมดที่ธีมใช้ (ฟอนต์หัวข้อ/เนื้อหา + ที่ตั้งเฉพาะบทบาท) → ไว้โหลด Google Fonts */
+export function themeFontNames(t: { fonts: { display: string; body: string }; typography: Typography }): string[] {
+  return [...new Set([t.fonts.display, t.fonts.body, ...Object.values(t.typography).map((r) => r.font)].filter(Boolean))];
+}
+
+/* ───────── รูปทรง (แท็บ "รูปทรง") ───────── */
+export type ButtonShape = "pill" | "rounded" | "square";
+export type ButtonSize = "sm" | "md" | "lg";
+export type ShadowLevel = "none" | "soft" | "strong";
+export interface Shape {
+  button: ButtonShape;
+  buttonSize: ButtonSize;
+  /** px · null = ตามความมนรวม */
+  cardRadius: number | null;
+  imageRadius: number | null;
+  inputRadius: number | null;
+  borderWidth: 1 | 2;
+  shadow: ShadowLevel;
+}
+export const DEFAULT_SHAPE: Shape = { button: "pill", buttonSize: "md", cardRadius: null, imageRadius: null, inputRadius: null, borderWidth: 1, shadow: "soft" };
+export const BUTTON_SHAPES: { value: ButtonShape; label: string }[] = [
+  { value: "pill", label: "แคปซูล (มนสุด)" },
+  { value: "rounded", label: "มนเล็กน้อย" },
+  { value: "square", label: "เหลี่ยม" },
+];
+export const BUTTON_SIZES: { value: ButtonSize; label: string }[] = [
+  { value: "sm", label: "เล็ก" },
+  { value: "md", label: "ปกติ" },
+  { value: "lg", label: "ใหญ่" },
+];
+export const SHADOW_LEVELS: { value: ShadowLevel; label: string }[] = [
+  { value: "none", label: "ไม่มีเงา" },
+  { value: "soft", label: "เงาบาง" },
+  { value: "strong", label: "เงาชัด" },
+];
+export const RADIUS_PX_CHOICES = [0, 4, 8, 12, 16, 20, 24, 32];
+export function normalizeShape(raw: unknown): Shape {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_SHAPE;
+  const px = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? Math.min(48, Math.max(0, Math.round(v))) : null);
+  const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
+  return {
+    button: oneOf(r.button, ["pill", "rounded", "square"] as const, d.button),
+    buttonSize: oneOf(r.buttonSize, ["sm", "md", "lg"] as const, d.buttonSize),
+    cardRadius: px(r.cardRadius),
+    imageRadius: px(r.imageRadius),
+    inputRadius: px(r.inputRadius),
+    borderWidth: r.borderWidth === 2 ? 2 : 1,
+    shadow: oneOf(r.shadow, ["none", "soft", "strong"] as const, d.shadow),
+  };
+}
+
 export const DEFAULT_THEME: SiteTheme = {
   colors: {
     brand: "#E2540F",
@@ -653,6 +771,8 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   fonts: { display: "Kanit", body: "Noto Sans Thai" },
   radius: "soft",
+  typography: DEFAULT_TYPOGRAPHY(),
+  shape: { ...DEFAULT_SHAPE },
   logo: {
     mark: "IG",
     text: "International",
@@ -685,7 +805,52 @@ export function normalizeHiddenSections(raw: unknown): ProductSection[] {
   return (Array.isArray(raw) ? raw : []).filter((v): v is ProductSection => typeof v === "string" && (HIDEABLE as string[]).includes(v));
 }
 
-export const FONT_CHOICES = ["Kanit", "Noto Sans Thai", "Prompt", "Sarabun", "IBM Plex Sans Thai"];
+/** แคตตาล็อกฟอนต์ Google ที่เลือกได้ (thai=false → ฟอนต์อังกฤษ ตัวไทยจะใช้ฟอนต์สำรอง) · weights = น้ำหนักที่มีจริง (ใช้สร้างลิงก์โหลด) */
+export const GOOGLE_FONTS: { name: string; thai: boolean; weights: number[] }[] = [
+  { name: "Kanit", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Noto Sans Thai", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Prompt", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Sarabun", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "IBM Plex Sans Thai", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Anuphan", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Athiti", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Bai Jamjuree", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Chakra Petch", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "K2D", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Krub", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Maitree", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Mali", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Mitr", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Niramit", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Noto Serif Thai", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Pridi", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Taviraj", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Trirong", thai: true, weights: [300, 400, 500, 600, 700] },
+  { name: "Charm", thai: true, weights: [400, 700] },
+  { name: "Itim", thai: true, weights: [400] },
+  { name: "Sriracha", thai: true, weights: [400] },
+  { name: "Pattaya", thai: true, weights: [400] },
+  { name: "Thasadith", thai: true, weights: [400, 700] },
+  { name: "Srisakdi", thai: true, weights: [400, 700] },
+  { name: "Playfair Display", thai: false, weights: [400, 500, 600, 700] },
+  { name: "Cormorant Garamond", thai: false, weights: [300, 400, 500, 600, 700] },
+  { name: "Lora", thai: false, weights: [400, 500, 600, 700] },
+  { name: "Inter", thai: false, weights: [300, 400, 500, 600, 700] },
+  { name: "Montserrat", thai: false, weights: [300, 400, 500, 600, 700] },
+  { name: "Poppins", thai: false, weights: [300, 400, 500, 600, 700] },
+  { name: "Raleway", thai: false, weights: [300, 400, 500, 600, 700] },
+  { name: "Oswald", thai: false, weights: [300, 400, 500, 600, 700] },
+  { name: "DM Sans", thai: false, weights: [300, 400, 500, 600, 700] },
+  { name: "Lato", thai: false, weights: [300, 400, 700] },
+];
+export const FONT_NAMES = GOOGLE_FONTS.map((f) => f.name);
+export const FONT_CHOICES = FONT_NAMES;
+/** ลิงก์ Google Fonts สำหรับชื่อฟอนต์ที่ให้มา (ERP ใช้พรีวิว · เว็บร้านโหลดเฉพาะที่ไม่ได้ฝังมากับ build) */
+export function googleFontsHref(names: string[], exclude: string[] = []): string | null {
+  const fams = [...new Set(names)].filter((n) => n && !exclude.includes(n)).map((n) => GOOGLE_FONTS.find((f) => f.name === n)).filter((f): f is (typeof GOOGLE_FONTS)[number] => !!f);
+  if (!fams.length) return null;
+  return "https://fonts.googleapis.com/css2?" + fams.map((f) => `family=${f.name.replace(/ /g, "+")}:wght@${f.weights.join(";")}`).join("&") + "&display=swap";
+}
 
 export const RADIUS_CHOICES: { value: SiteTheme["radius"]; label: string }[] = [
   { value: "sharp", label: "เหลี่ยม (คม)" },
@@ -822,6 +987,8 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       body: text(f.body, d.fonts.body),
     },
     radius: pick(r.radius, ["sharp", "soft", "round"] as const, d.radius),
+    typography: normalizeTypography(r.typography),
+    shape: normalizeShape(r.shape),
     logo: {
       mark: text(l.mark, d.logo.mark, 4),
       text: text(l.text, d.logo.text, 40),
@@ -905,6 +1072,8 @@ export function mergeTheme(existing: unknown, incoming: unknown): Record<string,
     colors: { ...baseColors, ...t.colors },
     fonts: t.fonts,
     radius: t.radius,
+    typography: t.typography,
+    shape: t.shape,
     logo: t.logo,
     header: t.header,
     card: t.card,

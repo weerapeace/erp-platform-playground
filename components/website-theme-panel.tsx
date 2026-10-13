@@ -16,6 +16,7 @@ import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken }
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
+import { TEXT_ROLE_DEFS, defaultTextRole, GOOGLE_FONTS, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
 const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
@@ -54,6 +55,8 @@ interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
   fonts: { display: string; body: string };
   radius: Radius;
+  typography: Typography;
+  shape: Shape;
   logo: {
     mark: string;
     text: string;
@@ -288,6 +291,24 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     };
   }, [shopSlug]);
 
+  // โหลดฟอนต์ Google ที่ธีมใช้ เพื่อให้ "ตัวอย่าง" ในแผงแสดงฟอนต์จริง
+  useEffect(() => {
+    if (!theme) return;
+    const href = googleFontsHref(themeFontNames(theme));
+    let el = document.getElementById("zz-gfonts") as HTMLLinkElement | null;
+    if (!href) {
+      el?.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("link");
+      el.id = "zz-gfonts";
+      el.rel = "stylesheet";
+      document.head.appendChild(el);
+    }
+    if (el.getAttribute("href") !== href) el.setAttribute("href", href);
+  }, [theme]);
+
   // เข้าแท็บ "หน้าสินค้า" → พรีวิวเปลี่ยนไปหน้าสินค้าตัวอย่างให้เอง (ถ้ายังดูหน้าแรกอยู่)
   useEffect(() => {
     if (tab === "product" && sampleProduct && page === "/") setPage(`/product/${sampleProduct}`);
@@ -323,6 +344,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setLogo = (p: Partial<Theme["logo"]>) => theme && apply({ ...theme, logo: { ...theme.logo, ...p } });
   const setHeader = (p: Partial<Theme["header"]>) => theme && apply({ ...theme, header: { ...theme.header, ...p } });
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
+  const setShape = (patch: Partial<Shape>) => theme && apply({ ...theme, shape: { ...theme.shape, ...patch } });
   const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
   // 🖥/📱 กำลังตั้งค่าให้จอไหน — มือถือ = เขียนลง product.mobile (ค่าที่ไม่ตั้ง = ตามคอม)
   const [editDevice, setEditDevice] = useState<"pc" | "mobile">("pc");
@@ -422,6 +444,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (theme.fonts.display !== published.fonts.display) out.push("ฟอนต์หัวข้อ");
     if (theme.fonts.body !== published.fonts.body) out.push("ฟอนต์เนื้อหา");
     if (theme.radius !== published.radius) out.push("ความมนขอบ");
+    if (!eq(theme.typography, published.typography)) out.push("ตัวอักษร");
+    if (!eq(theme.shape, published.shape)) out.push("รูปทรง");
     if (!eq(theme.logo, published.logo)) out.push("โลโก้");
     if (!eq(theme.header, published.header)) out.push("Header");
     if (!eq(theme.card, published.card)) out.push("การ์ดสินค้า");
@@ -553,11 +577,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   const tabDirty = (k: TabKey) =>
     (k === "colors" && dirtyFields.some((d) => COLOR_FIELDS.some((c) => c.label === d))) ||
-    (k === "fonts" && dirtyFields.some((d) => d.startsWith("ฟอนต์"))) ||
+    (k === "fonts" && dirtyFields.some((d) => d.startsWith("ฟอนต์") || d === "ตัวอักษร")) ||
     (k === "logo" && dirtyFields.includes("โลโก้")) ||
     (k === "header" && dirtyFields.includes("Header")) ||
     (k === "card" && dirtyFields.includes("การ์ดสินค้า")) ||
-    (k === "shape" && dirtyFields.includes("ความมนขอบ")) ||
+    (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง"))) ||
     (k === "product" && dirtyFields.includes("หน้าสินค้า"));
 
   return (
@@ -690,35 +714,47 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
           {/* ── ตัวอักษร ── */}
           {tab === "fonts" && (
-            <div className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800 mb-3">ตัวอักษร</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className={labelCls}>ฟอนต์หัวข้อ</label>
-                  <div className="flex items-center gap-2">
-                    <select className={inputCls} value={theme.fonts.display} onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, display: e.target.value } })}>
-                      {choices.fonts.map((f) => <option key={f} value={f}>{f}</option>)}
-                    </select>
-                    <ResetBtn show={theme.fonts.display !== published.fonts.display} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, display: published.fonts.display } })} />
-                  </div>
-                </div>
-                <div>
-                  <label className={labelCls}>ฟอนต์เนื้อหา</label>
-                  <div className="flex items-center gap-2">
-                    <select className={inputCls} value={theme.fonts.body} onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, body: e.target.value } })}>
-                      {choices.fonts.map((f) => <option key={f} value={f}>{f}</option>)}
-                    </select>
-                    <ResetBtn show={theme.fonts.body !== published.fonts.body} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, body: published.fonts.body } })} />
-                  </div>
+            <>
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">ฟอนต์หลัก</h3>
+                <p className="text-xs text-slate-500 mb-3">ฟอนต์หัวข้อใช้กับหัวข้อ/ชื่อสินค้า · ฟอนต์เนื้อหาใช้กับข้อความทั่วไป ปุ่ม เมนู · ฟอนต์อังกฤษ: ตัวไทยจะใช้ฟอนต์หลักแทน</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {(["display", "body"] as const).map((fk) => (
+                    <div key={fk}>
+                      <label className={labelCls}>{fk === "display" ? "ฟอนต์หัวข้อ" : "ฟอนต์เนื้อหา"}</label>
+                      <div className="flex items-center gap-2">
+                        <select className={inputCls} value={theme.fonts[fk]} onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, [fk]: e.target.value } })}>
+                          <optgroup label="ไทย + อังกฤษ">{GOOGLE_FONTS.filter((f) => f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
+                          <optgroup label="อังกฤษ (ไทยใช้ฟอนต์สำรอง)">{GOOGLE_FONTS.filter((f) => !f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
+                        </select>
+                        <ResetBtn show={theme.fonts[fk] !== published.fonts[fk]} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, [fk]: published.fonts[fk] } })} />
+                      </div>
+                      <p className="mt-1.5 text-base leading-snug" style={{ fontFamily: `"${theme.fonts[fk]}", ${fk === "display" ? `"${theme.fonts.body}",` : ""} sans-serif`, color: theme.colors.ink, fontWeight: fk === "display" ? 600 : 400 }}>
+                        งานหนังคุณภาพ Premium leather 0123456789
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5">
-                <p className={labelCls}>ตัวอย่าง</p>
-                <p className="text-xl font-semibold" style={{ color: theme.colors.ink }}>งานหนังคุณภาพ ครบจบที่เดียว</p>
-                <p className="text-lg font-semibold" style={{ color: theme.colors.ink }}>Premium leather manufacturing</p>
-                <p className="text-sm" style={{ color: theme.colors.muted }}>หนังวัวแท้ฟอกฝาด ผิวเรียบเนียน — 0123456789</p>
+
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">ปรับละเอียดรายบทบาท</h3>
+                <p className="text-xs text-slate-500 mb-3">แต่ละชนิดข้อความตั้งแยกได้: ฟอนต์ น้ำหนัก เอียง ขนาด (คอม/มือถือ) ระยะห่าง ตัวพิมพ์ใหญ่ สี พื้นหลัง · ตัวอย่างด้านล่างเปลี่ยนตามทันที</p>
+                <div className="space-y-3">
+                  {TEXT_ROLE_DEFS.map((d) => (
+                    <TextRoleEditor
+                      key={d.key}
+                      def={d}
+                      value={theme.typography[d.key]}
+                      pub={published.typography[d.key]}
+                      theme={theme}
+                      onChange={(patch) => apply({ ...theme, typography: { ...theme.typography, [d.key]: { ...theme.typography[d.key], ...patch } } })}
+                      onReset={() => apply({ ...theme, typography: { ...theme.typography, [d.key]: { ...published.typography[d.key] } } })}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           {/* ── โลโก้ ── */}
@@ -1428,30 +1464,98 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
           {/* ── รูปทรง ── */}
           {tab === "shape" && (
-            <div className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ (ทั้งเว็บ)</h3>
-              <div className="flex flex-wrap gap-2">
-                {choices.radius.map((o) => (
-                  <button
-                    key={o.value}
-                    onClick={() => apply({ ...theme, radius: o.value })}
-                    className={`px-4 py-3 border text-sm transition ${theme.radius === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
-                    style={{ borderRadius: o.value === "sharp" ? 2 : o.value === "soft" ? 12 : 22 }}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-                <ResetBtn show={theme.radius !== published.radius} onClick={() => apply({ ...theme, radius: published.radius })} />
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-100">
-                <p className={labelCls}>ตัวอย่างปุ่มและการ์ด</p>
-                <div className="flex items-center gap-3">
-                  <span className="px-4 py-2 text-xs font-semibold text-white" style={{ background: theme.colors.brand, borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99 }}>ปุ่มหลัก</span>
-                  <span className="px-4 py-2 text-xs border" style={{ borderColor: "#d6d6d2", color: theme.colors.ink, borderRadius: theme.radius === "sharp" ? 2 : theme.radius === "soft" ? 10 : 99 }}>ปุ่มรอง</span>
-                  <span className="w-16 h-12 border inline-block" style={{ background: theme.colors.surface, borderColor: "#e7e7e4", borderRadius: theme.radius === "sharp" ? 3 : theme.radius === "soft" ? 14 : 24 }} />
+            <>
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ (ค่ารวมทั้งเว็บ)</h3>
+                <div className="flex flex-wrap gap-2">
+                  {choices.radius.map((o) => (
+                    <button
+                      key={o.value}
+                      onClick={() => apply({ ...theme, radius: o.value })}
+                      className={`px-4 py-3 border text-sm transition ${theme.radius === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+                      style={{ borderRadius: o.value === "sharp" ? 2 : o.value === "soft" ? 12 : 22 }}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                  <ResetBtn show={theme.radius !== published.radius} onClick={() => apply({ ...theme, radius: published.radius })} />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3 mt-4 pt-3 border-t border-slate-100">
+                  {([
+                    ["cardRadius", "ขอบการ์ด/กล่อง"],
+                    ["imageRadius", "ขอบรูปบนการ์ด"],
+                    ["inputRadius", "ขอบช่องกรอก"],
+                  ] as const).map(([k, label]) => (
+                    <div key={k}>
+                      <label className={labelCls}>{label}</label>
+                      <select className={inputCls} value={theme.shape[k] == null ? "" : String(theme.shape[k])} onChange={(e) => setShape({ [k]: e.target.value === "" ? null : Number(e.target.value) } as Partial<Shape>)}>
+                        <option value="">ตามค่ารวม</option>
+                        {RADIUS_PX_CHOICES.map((n) => <option key={n} value={n}>{n === 0 ? "เหลี่ยม (0)" : `${n} px`}</option>)}
+                      </select>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
+
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">ปุ่ม · เส้นขอบ · เงา</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={labelCls}>รูปทรงปุ่ม</label>
+                    <div className="flex flex-wrap gap-2">
+                      {BUTTON_SHAPES.map((o) => (
+                        <button key={o.value} onClick={() => setShape({ button: o.value })} className={`px-3.5 py-2 border text-xs transition ${theme.shape.button === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`} style={{ borderRadius: o.value === "pill" ? 99 : o.value === "rounded" ? 10 : 2 }}>
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>ขนาดปุ่ม</label>
+                    <select className={inputCls} value={theme.shape.buttonSize} onChange={(e) => setShape({ buttonSize: e.target.value as Shape["buttonSize"] })}>
+                      {BUTTON_SIZES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>ความหนาเส้นขอบ (การ์ด/ช่องกรอก)</label>
+                    <select className={inputCls} value={theme.shape.borderWidth} onChange={(e) => setShape({ borderWidth: Number(e.target.value) === 2 ? 2 : 1 })}>
+                      <option value={1}>บาง (1 px)</option>
+                      <option value={2}>หนา (2 px)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>เงาของการ์ด</label>
+                    <select className={inputCls} value={theme.shape.shadow} onChange={(e) => setShape({ shadow: e.target.value as Shape["shadow"] })}>
+                      {SHADOW_LEVELS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <p className={labelCls}>ตัวอย่าง (ปุ่ม · ช่องกรอก · การ์ด)</p>
+                  <div className="flex flex-wrap items-center gap-3 rounded-xl p-4" style={{ background: theme.colors.page }}>
+                    {(() => {
+                      const r = theme.radius === "sharp" ? { sm: 2, lg: 4 } : theme.radius === "soft" ? { sm: 8, lg: 20 } : { sm: 14, lg: 30 };
+                      const br = theme.shape.button === "pill" ? 99 : theme.shape.button === "rounded" ? 10 : 2;
+                      const pad = theme.shape.buttonSize === "sm" ? "8px 16px" : theme.shape.buttonSize === "lg" ? "14px 28px" : "11px 22px";
+                      const fs = theme.shape.buttonSize === "sm" ? 10 : theme.shape.buttonSize === "lg" ? 13 : 11;
+                      const shadow = theme.shape.shadow === "none" ? "none" : theme.shape.shadow === "soft" ? "0 1px 2px rgba(20,21,23,.06)" : "0 12px 32px rgba(20,21,23,.14)";
+                      const tr = theme.typography.button;
+                      const btnFont = { fontFamily: `"${tr.font || theme.fonts.body}", sans-serif`, fontWeight: tr.weight, letterSpacing: `${tr.spacing / 100}em`, textTransform: tr.uppercase ? ("uppercase" as const) : ("none" as const), fontStyle: tr.italic ? "italic" : "normal" };
+                      return (
+                        <>
+                          <span className="text-white" style={{ background: theme.colors.brand, borderRadius: br, padding: pad, fontSize: fs, ...btnFont }}>เพิ่มลงตะกร้า</span>
+                          <span style={{ border: `1px solid #D6D6D2`, color: theme.colors.ink, borderRadius: br, padding: pad, fontSize: fs, ...btnFont }}>ดูเพิ่มเติม</span>
+                          <span className="text-xs text-slate-400 px-3 py-2 bg-white" style={{ border: `${theme.shape.borderWidth}px solid #DEDEDA`, borderRadius: theme.shape.inputRadius ?? r.sm, minWidth: 120 }}>ช่องกรอก…</span>
+                          <span className="inline-block w-24 h-16" style={{ background: theme.colors.surface, border: `${theme.shape.borderWidth}px solid #e7e7e4`, borderRadius: theme.shape.cardRadius ?? r.lg, boxShadow: shadow }} />
+                          <span className="inline-block w-16 h-16 bg-slate-300" style={{ borderRadius: theme.shape.imageRadius ?? r.lg }} />
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
 
           {/* ── ประวัติ ── */}
@@ -2042,6 +2146,124 @@ function SampleCard({ item, card, colors, fonts, radius }: { item: SampleItem; c
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ─────────── สีแบบเลือกได้/ล้างได้ (ตามธีม) — ใช้ในแท็บตัวอักษร ─────────── */
+function ColorField({ label, value, onChange, emptyLabel = "ตามธีม" }: { label: string; value: string; onChange: (hex: string) => void; emptyLabel?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <label className={labelCls}>{label}</label>
+      <div className="flex items-center gap-1.5">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 hover:border-slate-400 bg-white" title="เลือกสี">
+          <span className="inline-block w-4 h-4 rounded border border-black/10" style={{ background: value || "transparent", backgroundImage: value ? undefined : "linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%),linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%)", backgroundSize: "8px 8px", backgroundPosition: "0 0,4px 4px" }} />
+          {value || emptyLabel}
+        </button>
+        {value && (
+          <button type="button" onClick={() => { onChange(""); setOpen(false); }} className="text-xs text-slate-400 hover:text-red-600 px-1" title="ล้าง → ตามธีม">✕</button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-2">
+          <ColorPicker value={value || "#333333"} onChange={onChange} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── ตัวแก้ 1 บทบาทตัวอักษร + ตัวอย่างสด ─────────── */
+const WEIGHT_CHOICES = [300, 400, 500, 600, 700];
+function TextRoleEditor({ def, value, pub, theme, onChange, onReset }: { def: (typeof TEXT_ROLE_DEFS)[number]; value: TextRole; pub: TextRole; theme: Theme; onChange: (p: Partial<TextRole>) => void; onReset: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const dirty = JSON.stringify(value) !== JSON.stringify(pub);
+  const isDefault = JSON.stringify(value) === JSON.stringify(defaultTextRole(def.key));
+  const baseFont = def.base === "display" ? theme.fonts.display : theme.fonts.body;
+  const fam = value.font ? `"${value.font}", "${baseFont}", sans-serif` : `"${baseFont}", sans-serif`;
+  const scale = (mobile && value.sizeMobile ? value.sizeMobile : value.size) / 100;
+  const defaultColor = def.key === "eyebrow" ? theme.colors.brand : def.key === "button" ? "#fff" : theme.colors.ink;
+  const sample: React.CSSProperties = {
+    fontFamily: fam,
+    fontWeight: value.weight,
+    fontStyle: value.italic ? "italic" : "normal",
+    letterSpacing: `${value.spacing / 100}em`,
+    textTransform: value.uppercase ? "uppercase" : "none",
+    fontSize: def.px * scale,
+    color: value.color || defaultColor,
+    background: def.key === "button" ? theme.colors.brand : value.bg || undefined,
+    padding: def.key === "button" ? "0.7em 1.6em" : value.bg ? "0.08em 0.35em" : undefined,
+    borderRadius: def.key === "button" ? 99 : undefined,
+    width: "fit-content",
+    lineHeight: 1.3,
+  };
+  return (
+    <div className={`rounded-lg border ${dirty ? "border-amber-300" : "border-slate-200"} bg-slate-50/50`}>
+      <div className="flex items-center gap-3 px-3 py-2">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="flex-1 min-w-0 text-left">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-700">{def.label}</span>
+            {!isDefault && <span className="text-[10px] text-blue-600 bg-blue-50 rounded-full px-1.5">ปรับแล้ว</span>}
+            <span className="text-[10px] text-slate-400">{open ? "▲" : "▼"}</span>
+          </div>
+          <div className="mt-1 overflow-hidden" style={{ background: theme.colors.page, padding: "6px 8px", borderRadius: 6 }}>
+            <span style={sample}>{def.sample}</span>
+          </div>
+        </button>
+        {!isDefault && (
+          <button type="button" onClick={() => onChange(defaultTextRole(def.key))} className="text-[11px] text-slate-400 hover:text-slate-700 shrink-0" title="กลับค่าเริ่มต้น">↺ ค่าเริ่มต้น</button>
+        )}
+        {dirty && (
+          <button type="button" onClick={onReset} className="text-[11px] text-amber-700 hover:underline shrink-0" title="คืนค่าที่เผยแพร่อยู่">คืนค่าเดิม</button>
+        )}
+      </div>
+      {open && (
+        <div className="px-3 pb-3 space-y-3 border-t border-slate-200 pt-3">
+          <p className="text-[11px] text-slate-500">{def.hint}</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className={labelCls}>ฟอนต์</label>
+              <select className={inputCls} value={value.font} onChange={(e) => onChange({ font: e.target.value })}>
+                <option value="">ตาม{def.base === "display" ? "ฟอนต์หัวข้อ" : "ฟอนต์เนื้อหา"} ({baseFont})</option>
+                <optgroup label="ไทย + อังกฤษ">{GOOGLE_FONTS.filter((f) => f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
+                <optgroup label="อังกฤษ (ไทยใช้ฟอนต์สำรอง)">{GOOGLE_FONTS.filter((f) => !f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>น้ำหนัก</label>
+              <select className={inputCls} value={value.weight} onChange={(e) => onChange({ weight: Number(e.target.value) })}>
+                {WEIGHT_CHOICES.map((w) => <option key={w} value={w}>{w === 300 ? "บาง (300)" : w === 400 ? "ปกติ (400)" : w === 500 ? "กลาง (500)" : w === 600 ? "หนา (600)" : "หนามาก (700)"}</option>)}
+              </select>
+            </div>
+            <div className="flex items-end gap-4 pb-2">
+              <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer"><input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.italic} onChange={(e) => onChange({ italic: e.target.checked })} />เอียง</label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer"><input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.uppercase} onChange={(e) => onChange({ uppercase: e.target.checked })} />ตัวพิมพ์ใหญ่ (อังกฤษ)</label>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className={labelCls}>🖥 ขนาดบนคอม ({value.size}%)</label>
+              <input type="range" min={50} max={250} step={5} value={value.size} onChange={(e) => onChange({ size: Number(e.target.value) })} className="w-full" onMouseEnter={() => setMobile(false)} />
+            </div>
+            <div>
+              <label className={labelCls}>📱 ขนาดบนมือถือ ({value.sizeMobile ? `${value.sizeMobile}%` : "เท่าคอม"})</label>
+              <input type="range" min={0} max={250} step={5} value={value.sizeMobile} onChange={(e) => onChange({ sizeMobile: Number(e.target.value) })} className="w-full" onMouseEnter={() => setMobile(true)} />
+            </div>
+            <div>
+              <label className={labelCls}>ระยะห่างตัวอักษร ({value.spacing / 100}em)</label>
+              <input type="range" min={-10} max={40} step={1} value={value.spacing} onChange={(e) => onChange({ spacing: Number(e.target.value) })} className="w-full" />
+            </div>
+          </div>
+          {def.key !== "button" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ColorField label="สีตัวอักษร" value={value.color} onChange={(hex) => onChange({ color: hex })} />
+              {def.key !== "body" && <ColorField label="พื้นหลังไฮไลต์" value={value.bg} onChange={(hex) => onChange({ bg: hex })} emptyLabel="ไม่มี" />}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
