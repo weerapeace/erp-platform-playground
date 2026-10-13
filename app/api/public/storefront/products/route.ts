@@ -22,6 +22,7 @@ import {
   type ParentRow,
   type ChildSku,
 } from "@/lib/website-field-map";
+import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -116,6 +117,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const r = resolveProduct(fieldMap, p, kids, l, cat);
 
       const code = p.code ?? "";
+      const detailOverrides = cleanDetailOverrides(l.web_details);
       return {
         id: p.id,
         code,
@@ -130,13 +132,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         stock: String(l.web_stock_status ?? "in").trim() || "in",
         swatch: String(l.web_swatch ?? "").trim(),
         // รูปต่อสี (r2 key → URL) ให้เว็บสลับรูปใหญ่ตอนเลือกสี
-        options: r.options ? { ...r.options, items: r.options.items.map((it) => ({ ...it, image: it.image ? imageUrl(it.image) : undefined })) } : null,
+        // image = รูปแรก · images = ทั้งชุดของสีนั้น (เลือกไว้ในแท็บ 🛍 เว็บไซต์) → เว็บโชว์เฉพาะชุดนี้เมื่อเลือกสี
+        options: r.options
+          ? {
+              ...r.options,
+              items: r.options.items.map((it) => ({
+                ...it,
+                image: it.image ? imageUrl(it.image) : undefined,
+                images: it.images?.length ? it.images.map(imageUrl) : undefined,
+              })),
+            }
+          : null,
         /** ตัวเลือกกลุ่มที่ 2 (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง */
         options2: r.options2,
         featured: Boolean(l.featured),
         /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
         attrs: productSpecAttrs(p),
         images: r.images.map(imageUrl),
+        /** จับคู่รายละเอียดหน้าเว็บเฉพาะรุ่น { itemId: { show, text } } — ไม่มี = ตามชุดรายละเอียดกลางของธีม */
+        detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
       };
     })
     .filter(Boolean);

@@ -3,17 +3,20 @@
 /**
  * ParentWebListings — แท็บ "🛍 เว็บไซต์" ใน Parent SKU (drawer + หน้าเต็ม)
  * แก้ข้อมูลบนเว็บร้านออนไลน์ได้เลยในแท็บ: ทุกร้านในที่เดียว
- *   - เปิด/ปิดขึ้นร้าน · แนะนำ · ราคาเว็บ · ชื่อเว็บ · คำอธิบายเว็บ · รูปเว็บ (รุ่น + รายสี)
- *   - เว้นว่าง = ใช้ของ ERP ตามเดิม
- * ของกลาง: AssetPicker (เลือกรูปจากคลัง) · /api/parent-web-listings (guardApi products.edit + audit)
+ *   - เปิด/ปิดขึ้นร้าน · แนะนำ · ราคาเว็บ · ชื่อเว็บ · คำอธิบายเว็บ · รูปเว็บ (รุ่น + รายสี หลายรูปต่อสี เลือกจากแกลเลอรี SKU หรือคลัง)
+ *   - 📋 จับคู่รายละเอียดหน้าเว็บ: ต่อหัวข้อในชุดรายละเอียดของธีม → ตามค่ากลาง / โชว์ / ซ่อน + ข้อความเฉพาะรุ่นนี้
+ *   - เว้นว่าง = ใช้ของ ERP / ค่ากลางตามเดิม
+ * ของกลาง: AssetPicker (เลือกรูปจากคลัง) · /api/parent-web-listings (guardApi products.edit + audit + ล้างแคชเว็บร้าน)
  */
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
+import type { DetailOverride } from "@/lib/website-detail-overrides";
 
-type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null };
+type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
+type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
 type ShopState = {
   shopId: string;
   shopName: string;
@@ -26,22 +29,36 @@ type ShopState = {
   webName: string;
   webDescription: string;
   webImages: string[];
-  webSkuImages: Record<string, string>;
+  webSkuImages: Record<string, string[]>;
+  webDetails: Record<string, DetailOverride>;
+  detailItems: DetailItemInfo[];
   soldQty: number;
   productUrl: string;
 };
 type Resp = { code: string; parentName: string; erpDescription: string | null; adminUrl: string; variants: Variant[]; shops: ShopState[] };
 
+const MAX_SKU_IMAGES = 8;
 const keyUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 const baht = (n: number) => `฿${n.toLocaleString("th-TH")}`;
+const SOURCE_LABEL: Record<string, string> = {
+  description: "คำอธิบายสินค้า",
+  fields: "ฟิลด์ Parent SKU",
+  details: "จุดเด่น",
+  text: "ข้อความตายตัว",
+  shipping: "การจัดส่ง/ชำระเงิน",
+};
 
 export function ParentWebListings({ parentId }: { parentId: string | null }) {
   const toast = useToast();
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingShop, setSavingShop] = useState<string | null>(null);
-  // ตัวเลือกรูป: กำลังเลือกให้ร้านไหน + เป้าหมาย (gallery = รูปรุ่น, หรือ sku id)
+  // ตัวเลือกรูปจากคลัง: กำลังเลือกให้ร้านไหน + เป้าหมาย (gallery = รูปรุ่น, หรือ sku id)
   const [picker, setPicker] = useState<{ shopId: string; target: "gallery" | string } | null>(null);
+  // แผงเลือกรูปจากแกลเลอรี SKU ที่เปิดอยู่ (ร้าน + สี)
+  const [skuPanel, setSkuPanel] = useState<{ shopId: string; skuId: string } | null>(null);
+  // ร้านที่กางแผง "จับคู่รายละเอียดหน้าเว็บ" อยู่
+  const [detailsOpen, setDetailsOpen] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     if (!parentId) return;
@@ -60,6 +77,22 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
 
   const patchShop = (shopId: string, p: Partial<ShopState>) =>
     setData((d) => (d ? { ...d, shops: d.shops.map((s) => (s.shopId === shopId ? { ...s, ...p } : s)) } : d));
+
+  const setSkuImages = (s: ShopState, skuId: string, keys: string[]) => {
+    const n = { ...s.webSkuImages };
+    const list = [...new Set(keys)].slice(0, MAX_SKU_IMAGES);
+    if (list.length) n[skuId] = list;
+    else delete n[skuId];
+    patchShop(s.shopId, { webSkuImages: n });
+  };
+
+  const setDetail = (s: ShopState, itemId: string, p: Partial<DetailOverride> | null) => {
+    const n = { ...s.webDetails };
+    const cur = { ...(n[itemId] ?? {}), ...(p ?? {}) };
+    if (p === null || (cur.show === undefined && !(cur.text ?? "").trim())) delete n[itemId];
+    else n[itemId] = cur;
+    patchShop(s.shopId, { webDetails: n });
+  };
 
   const addToShop = async (shopId: string) => {
     if (!parentId) return;
@@ -86,11 +119,11 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
           patch: {
             isPublished: s.published, featured: s.featured, webPrice: s.webPrice,
             webName: s.webName, webDescription: s.webDescription,
-            webImages: s.webImages, webSkuImages: s.webSkuImages,
+            webImages: s.webImages, webSkuImages: s.webSkuImages, webDetails: s.webDetails,
           },
         }),
       });
-      if ((await r.json()).ok) toast.success(`บันทึก ${s.shopName} แล้ว`);
+      if ((await r.json()).ok) toast.success(`บันทึก ${s.shopName} แล้ว — เว็บเปลี่ยนตามทันที`);
       else toast.error("บันทึกไม่สำเร็จ");
     } catch { toast.error("เชื่อมต่อไม่ได้"); }
     setSavingShop(null);
@@ -104,7 +137,7 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
     if (picker.target === "gallery") {
       patchShop(s.shopId, { webImages: [...s.webImages, ...keys].slice(0, 12) });
     } else {
-      patchShop(s.shopId, { webSkuImages: { ...s.webSkuImages, [picker.target]: keys[0] } });
+      setSkuImages(s, picker.target, [...(s.webSkuImages[picker.target] ?? []), ...keys]);
     }
     setPicker(null);
   };
@@ -124,7 +157,10 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
         </a>
       </div>
 
-      {data.shops.map((s) => (
+      {data.shops.map((s) => {
+        const overrideCount = Object.keys(s.webDetails).length;
+        const detailsShown = detailsOpen.has(s.shopId);
+        return (
         <div key={s.shopId} className="rounded-xl border border-slate-200 overflow-hidden">
           <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
             <span className="text-sm font-medium text-slate-800">{s.shopName}</span>
@@ -181,38 +217,150 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                 )}
               </div>
 
-              {/* รูปเว็บรายสี */}
+              {/* รูปเว็บรายสี — หลายรูปต่อสี เลือกจากแกลเลอรี SKU หรือคลัง */}
               {data.variants.length > 0 && (
                 <div>
-                  <div className="text-xs font-medium text-slate-600 mb-1.5">ตัวเลือก (สี) — {data.variants.length} แบบ · ตั้งรูปเว็บรายสีได้</div>
+                  <div className="text-xs font-medium text-slate-600 mb-1.5">
+                    ตัวเลือก (สี) — {data.variants.length} แบบ · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น
+                  </div>
                   <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
                     {data.variants.map((v) => {
-                      const webKey = s.webSkuImages[v.id] ?? null;
-                      const thumb = webKey ? keyUrl(webKey) : v.erpImageKey ? keyUrl(v.erpImageKey) : null;
+                      const chosen = s.webSkuImages[v.id] ?? [];
+                      const panelOpen = skuPanel?.shopId === s.shopId && skuPanel.skuId === v.id;
                       return (
-                        <div key={v.id} className="flex items-center gap-2.5 p-2 bg-white">
-                          {thumb ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={thumb} alt="" className={`w-10 h-10 rounded object-cover bg-slate-100 shrink-0 ${webKey ? "ring-1 ring-orange-300 border border-orange-400" : ""}`} />
-                          ) : <div className="w-10 h-10 rounded bg-slate-100 shrink-0" />}
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm text-slate-800 truncate">{v.label}</div>
-                            <div className="text-xs text-slate-400">{v.code} · {baht(v.price)} · สต๊อก {v.qty}</div>
+                        <div key={v.id} className="p-2 bg-white space-y-1.5">
+                          <div className="flex items-center gap-2.5">
+                            {v.erpImageKey ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={keyUrl(v.erpImageKey)} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0" />
+                            ) : <div className="w-10 h-10 rounded bg-slate-100 shrink-0" />}
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-slate-800 truncate">{v.label}</div>
+                              <div className="text-xs text-slate-400">{v.code} · {baht(v.price)} · สต๊อก {v.qty} · รูปใน SKU {v.gallery.length}</div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button onClick={() => setSkuPanel(panelOpen ? null : { shopId: s.shopId, skuId: v.id })}
+                                disabled={!v.gallery.length}
+                                title={v.gallery.length ? "เลือกจากรูปที่อัปโหลดไว้ในหน้า SKU" : "SKU นี้ยังไม่มีรูป — อัปโหลดในหน้า SKU ก่อน"}
+                                className={`text-xs border rounded-lg px-2 py-1 disabled:opacity-40 ${panelOpen ? "bg-orange-500 border-orange-500 text-white" : "border-orange-300 text-orange-600 hover:bg-orange-50"}`}>
+                                📷 จากรูป SKU
+                              </button>
+                              <button onClick={() => setPicker({ shopId: s.shopId, target: v.id })}
+                                className="text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg px-2 py-1">🖼 จากคลัง</button>
+                              {chosen.length > 0 && (
+                                <button onClick={() => setSkuImages(s, v.id, [])} className="text-xs text-rose-500 hover:underline">ล้าง</button>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button onClick={() => setPicker({ shopId: s.shopId, target: v.id })}
-                              className="text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2 py-1">รูปเว็บ</button>
-                            {webKey && (
-                              <button onClick={() => { const n = { ...s.webSkuImages }; delete n[v.id]; patchShop(s.shopId, { webSkuImages: n }); }}
-                                className="text-xs text-rose-500 hover:underline">ล้าง</button>
-                            )}
-                          </div>
+
+                          {/* รูปเว็บที่เลือกไว้ของสีนี้ (เรียงตามลำดับที่จะโชว์) */}
+                          {chosen.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pl-12">
+                              {chosen.map((k, i) => (
+                                <div key={`${k}-${i}`} className="relative group">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={keyUrl(k)} alt="" className={`w-12 h-12 object-cover rounded-lg border ${i === 0 ? "border-orange-400 ring-1 ring-orange-300" : "border-slate-200"}`} />
+                                  <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-slate-700 text-white rounded px-1">{i + 1}</span>
+                                  {i > 0 && (
+                                    <button title="เลื่อนไปซ้าย" onClick={() => { const n = [...chosen]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; setSkuImages(s, v.id, n); }}
+                                      className="absolute bottom-0 left-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">‹</button>
+                                  )}
+                                  {i < chosen.length - 1 && (
+                                    <button title="เลื่อนไปขวา" onClick={() => { const n = [...chosen]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; setSkuImages(s, v.id, n); }}
+                                      className="absolute bottom-0 right-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">›</button>
+                                  )}
+                                  <button onClick={() => setSkuImages(s, v.id, chosen.filter((_, j) => j !== i))}
+                                    className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 text-[10px] leading-none opacity-0 group-hover:opacity-100">✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* แผงแกลเลอรี SKU: กดรูปเพื่อเลือก/ยกเลิก */}
+                          {panelOpen && (
+                            <div className="ml-12 rounded-lg border border-orange-200 bg-orange-50/50 p-2 space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                <span>รูปในหน้า SKU {v.code} — กดเพื่อเลือก (สูงสุด {MAX_SKU_IMAGES} รูป · เลือกแล้ว {chosen.length})</span>
+                                <div className="flex gap-2">
+                                  <button onClick={() => setSkuImages(s, v.id, v.gallery)} className="text-orange-600 hover:underline">เลือกทั้งหมด</button>
+                                  <button onClick={() => setSkuPanel(null)} className="text-slate-500 hover:underline">ปิด</button>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {v.gallery.map((k) => {
+                                  const idx = chosen.indexOf(k);
+                                  const on = idx >= 0;
+                                  return (
+                                    <button key={k} type="button"
+                                      onClick={() => setSkuImages(s, v.id, on ? chosen.filter((x) => x !== k) : [...chosen, k])}
+                                      disabled={!on && chosen.length >= MAX_SKU_IMAGES}
+                                      className={`relative rounded-lg overflow-hidden border-2 disabled:opacity-40 ${on ? "border-orange-500" : "border-transparent hover:border-orange-300"}`}>
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={keyUrl(k)} alt="" className="w-14 h-14 object-cover" />
+                                      {on && <span className="absolute top-0.5 left-0.5 text-[10px] bg-orange-500 text-white rounded px-1">{idx + 1}</span>}
+                                      {k === v.erpImageKey && <span className="absolute bottom-0 inset-x-0 text-[9px] bg-black/50 text-white text-center">ปก SKU</span>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 </div>
               )}
+
+              {/* 📋 จับคู่รายละเอียดหน้าเว็บ (ทับชุดรายละเอียดของธีมเฉพาะรุ่นนี้) */}
+              <div className="rounded-lg border border-slate-200">
+                <button type="button" onClick={() => setDetailsOpen((prev) => { const n = new Set(prev); if (n.has(s.shopId)) n.delete(s.shopId); else n.add(s.shopId); return n; })}
+                  className="w-full flex items-center justify-between px-3 py-2 text-left">
+                  <span className="text-xs font-medium text-slate-600">
+                    📋 จับคู่รายละเอียดหน้าเว็บ
+                    {overrideCount > 0 && <span className="ml-2 text-[10px] bg-orange-100 text-orange-700 rounded-full px-1.5 py-0.5">ปรับไว้ {overrideCount} หัวข้อ</span>}
+                  </span>
+                  <span className="text-xs text-slate-400">{detailsShown ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+                </button>
+                {detailsShown && (
+                  <div className="border-t border-slate-100 p-3 space-y-2">
+                    <p className="text-[11px] text-slate-500">
+                      หัวข้อมาจาก "ชุดรายละเอียดสินค้า" ของธีม (ดีไซน์ → หน้าสินค้า) — ตั้งเฉพาะรุ่นนี้ว่าจะโชว์/ซ่อน หรือใส่ข้อความเฉพาะรุ่นแทนเนื้อหากลาง ·{" "}
+                      <a href={`/website/${s.slug}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">แก้ชุดรายละเอียดกลาง ↗</a>
+                    </p>
+                    {s.detailItems.length === 0 && <div className="text-xs text-slate-400">ธีมร้านนี้ยังไม่มีหัวข้อรายละเอียด</div>}
+                    {s.detailItems.map((it) => {
+                      const ov = s.webDetails[it.id];
+                      const mode: "default" | "show" | "hide" = ov?.show === true ? "show" : ov?.show === false ? "hide" : "default";
+                      return (
+                        <div key={it.id} className="rounded-lg bg-slate-50 p-2 space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-slate-800 truncate">{it.label}</div>
+                              <div className="text-[11px] text-slate-400">{SOURCE_LABEL[it.source] ?? it.source} · ค่ากลาง: {it.defaultLabel}</div>
+                            </div>
+                            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs shrink-0">
+                              {([["default", "ตามค่ากลาง"], ["show", "โชว์"], ["hide", "ซ่อน"]] as const).map(([m, label]) => (
+                                <button key={m} type="button"
+                                  onClick={() => setDetail(s, it.id, m === "default" ? { show: undefined } : { show: m === "show" })}
+                                  className={`px-2.5 py-1 ${mode === m ? (m === "hide" ? "bg-rose-500 text-white" : m === "show" ? "bg-emerald-500 text-white" : "bg-slate-600 text-white") : "bg-white text-slate-600 hover:bg-slate-100"}`}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {mode !== "hide" && (
+                            <textarea value={ov?.text ?? ""} rows={ov?.text ? 3 : 1}
+                              onChange={(e) => setDetail(s, it.id, { text: e.target.value })}
+                              placeholder="ข้อความเฉพาะรุ่นนี้ (ว่าง = ใช้เนื้อหาจากแหล่งข้อมูลกลาง)"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-orange-400" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               <div className="flex items-center gap-2 pt-1">
                 <button onClick={() => saveShop(s)} disabled={savingShop === s.shopId}
@@ -223,15 +371,16 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
 
       <AssetPicker
         open={!!picker}
         onClose={() => setPicker(null)}
         onSelect={onPickImages}
-        multiple={picker?.target === "gallery"}
+        multiple
         typeFilter="image"
-        title={picker?.target === "gallery" ? "เลือกรูปสินค้าบนเว็บ" : "เลือกรูปของสีนี้"}
+        title={picker?.target === "gallery" ? "เลือกรูปสินค้าบนเว็บ" : "เลือกรูปเว็บของสีนี้ (เลือกได้หลายรูป)"}
       />
     </div>
   );

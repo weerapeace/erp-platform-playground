@@ -204,6 +204,8 @@ export interface ListingRow {
   web_price?: number | string | null;
   web_description?: string | null;
   web_images?: unknown;
+  /** รูปเว็บรายสี { [skuId]: string[] } (ค่าเก่าเป็น string เดี่ยว) — ตั้งในแท็บ 🛍 เว็บไซต์ ของ Parent SKU */
+  web_sku_images?: unknown;
   web_unit?: string | null;
   web_category?: string | null;
   web_options?: unknown;
@@ -289,17 +291,38 @@ const sortKids = (kids: ChildSku[]): ChildSku[] =>
     return ai !== bi ? ai - bi : clean(a.code).localeCompare(clean(b.code), "th");
   });
 
+/** รูปเว็บรายสีจาก listing: { [skuId]: string[] } — รองรับค่าเก่าที่เป็น string เดี่ยว */
+export function skuImageOverrides(raw: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [skuId, v] of Object.entries(raw as Record<string, unknown>)) {
+    const arr = typeof v === "string" ? [v] : Array.isArray(v) ? v : [];
+    const keys = [...new Set(arr.filter((k): k is string => typeof k === "string" && k.trim().length > 0))];
+    if (keys.length) out[skuId] = keys;
+  }
+  return out;
+}
+
+/** รูปที่จะโชว์ของ SKU ลูกตัวหนึ่ง: รูปเว็บที่เลือกไว้รายสี ชนะรูปปก */
+const kidImages = (k: ChildSku, overrides: Record<string, string[]>): string[] =>
+  overrides[k.id]?.length ? overrides[k.id] : k.cover_image_r2_key ? [k.cover_image_r2_key] : [];
+
 /** สร้างตัวเลือกจากสีของ SKU ลูก (ตัดสีซ้ำ) */
-function resolveOptions(map: FieldMap, kids: ChildSku[]): { label: string; items: { id: string; label: string; image?: string | null }[] } | null {
+function resolveOptions(
+  map: FieldMap,
+  kids: ChildSku[],
+  overrides: Record<string, string[]>
+): { label: string; items: { id: string; label: string; image?: string | null; images?: string[] }[] } | null {
   if (map.options.source !== "sku_color") return null;
   const seen = new Set<string>();
-  const items: { id: string; label: string; image?: string | null }[] = [];
+  const items: { id: string; label: string; image?: string | null; images?: string[] }[] = [];
   for (const k of sortKids(kids)) {
     const label = clean(k.color);
     if (!label || seen.has(label)) continue;
     seen.add(label);
-    // รูปของสีนั้น (r2 key) — เว็บร้านใช้สลับรูปใหญ่ตอนกดเลือกสี
-    items.push({ id: `sku-${k.id.slice(0, 8)}`, label, image: k.cover_image_r2_key ?? null });
+    // รูปของสีนั้น (r2 key) — เว็บร้านใช้สลับแกลเลอรีตอนกดเลือกสี (image = รูปแรก, images = ทั้งชุด)
+    const imgs = kidImages(k, overrides);
+    items.push({ id: `sku-${k.id.slice(0, 8)}`, label, image: imgs[0] ?? null, images: imgs.length ? imgs : undefined });
     if (items.length >= 24) break;
   }
   return items.length ? { label: map.options.label || "แบบ/สี", items } : null;
@@ -334,7 +357,7 @@ export interface ResolvedProduct {
   unit: string;
   category: string;
   images: string[];
-  options: { label: string; items: { id: string; label: string; swatch?: string | null; image?: string | null }[] } | null;
+  options: { label: string; items: { id: string; label: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
   /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
   options2: { label: string; items: { id: string; label: string }[] } | null;
 }
@@ -353,13 +376,14 @@ export function resolveProduct(
   const l = listing ?? {};
 
   const parentImages = map.image.useCover && parent.cover_image_r2_key ? [parent.cover_image_r2_key] : [];
-  // รูปจาก SKU ลูก (เรียงตามสี ไม่ซ้ำ) — ได้หลายรูป + เว็บสลับรูปตามสีที่เลือกได้
-  const kidImages = [...new Set(sortKids(kids).map((k) => k.cover_image_r2_key).filter((x): x is string => Boolean(x)))];
+  // รูปจาก SKU ลูก (เรียงตามสี ไม่ซ้ำ) — รูปเว็บรายสีที่เลือกไว้ชนะรูปปก · ได้หลายรูป + เว็บสลับชุดรูปตามสีที่เลือกได้
+  const skuOverrides = skuImageOverrides(l.web_sku_images);
+  const kidImgs = [...new Set(sortKids(kids).flatMap((k) => kidImages(k, skuOverrides)))];
   const mappedImages =
-    map.image.source === "skus" ? (kidImages.length ? kidImages : parentImages) : map.image.source === "both" ? [...new Set([...parentImages, ...kidImages])] : parentImages;
+    map.image.source === "skus" ? (kidImgs.length ? kidImgs : parentImages) : map.image.source === "both" ? [...new Set([...parentImages, ...kidImgs])] : parentImages;
   const listingImages = Array.isArray(l.web_images) ? (l.web_images as string[]).filter(Boolean) : [];
 
-  const mappedOptions = resolveOptions(map, kids);
+  const mappedOptions = resolveOptions(map, kids, skuOverrides);
   const listingOptions =
     l.web_options && typeof l.web_options === "object"
       ? (l.web_options as { label: string; items: { id: string; label: string; swatch?: string | null }[] })
