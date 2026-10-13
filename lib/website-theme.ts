@@ -72,7 +72,7 @@ export type RelatedSource = "category" | "collection" | "featured" | "bestseller
  * 🧩 ชิ้นส่วนในส่วน "ราคา · ตัวเลือก · ใส่ตะกร้า" — จัดลำดับ/คอลัมน์/จัดชิด/ขนาด/สี/ระยะห่าง ได้ต่อชิ้น (⚙️ ในแท็บหน้าสินค้า)
  * ชิ้นมาตรฐานมีอย่างละ 1 (price/desc/stock/qty/options/button/note) · "text" = ข้อความอิสระ เพิ่มได้หลายชิ้น
  */
-export type BuyItemKey = "price" | "desc" | "stock" | "qty" | "options" | "button" | "note" | "text";
+export type BuyItemKey = "price" | "desc" | "stock" | "qty" | "options" | "personalize" | "button" | "note" | "text";
 export type BuyCol = "left" | "right";
 export type BuyAlign = "left" | "center" | "right";
 export type BuyGap = "sm" | "md" | "lg";
@@ -119,6 +119,7 @@ export const BUY_ITEM_DEFS: Record<BuyItemKey, { label: string; hint: string; st
   stock: { label: "สถานะสต๊อก", hint: "● พร้อมส่ง / เหลือน้อย / สั่งจอง", styles: [{ value: "text", label: "ข้อความ" }, { value: "badge", label: "ป้ายสี" }] },
   qty: { label: "จำนวน", hint: "ปุ่ม − 1 +" },
   options: { label: "ตัวเลือก (สี/แบบ)", hint: "ตัวเลือกสี + ตัวเลือกที่ 2", styles: [{ value: "pills", label: "เม็ดยา (ชื่อ)" }, { value: "swatches", label: "วงกลมสี" }, { value: "dropdown", label: "ดรอปดาวน์" }] },
+  personalize: { label: "ปั๊มชื่อ (Personalize)", hint: "โชว์เฉพาะรุ่นที่เปิดปั๊มชื่อไว้ · พิมพ์ข้อความ + เลือกแบบ/ตำแหน่ง + รูปสด" },
   button: { label: "ปุ่มใส่ตะกร้า", hint: "ข้อความ / ทึบ-ขอบ / สีพื้น / เต็มความกว้าง", styles: [{ value: "fill", label: "ทึบ" }, { value: "outline", label: "ขอบ" }] },
   note: { label: "ข้อความใต้ปุ่ม", hint: "ขายส่ง / ค่าส่งจากข้อมูลร้าน / ข้อความ" },
   text: { label: "ข้อความอิสระ", hint: "เช่น ✓ ส่งฟรี · ประกัน 6 เดือน" },
@@ -129,6 +130,7 @@ const BUY_DEFAULT_ORDER: { key: BuyItemKey; col: BuyCol }[] = [
   { key: "stock", col: "left" },
   { key: "qty", col: "right" },
   { key: "options", col: "right" },
+  { key: "personalize", col: "right" },
   { key: "button", col: "right" },
   { key: "note", col: "right" },
 ];
@@ -141,7 +143,7 @@ export function defaultBuyItem(key: BuyItemKey, col: BuyCol = "left", id?: strin
   };
 }
 export const DEFAULT_BUY_ITEMS = (): BuyItem[] => BUY_DEFAULT_ORDER.map((d) => defaultBuyItem(d.key, d.col));
-const BUY_KEYS: BuyItemKey[] = ["price", "desc", "stock", "qty", "options", "button", "note", "text"];
+const BUY_KEYS: BuyItemKey[] = ["price", "desc", "stock", "qty", "options", "personalize", "button", "note", "text"];
 /** อ่านรายการชิ้นส่วนจาก DB — ไม่มี (ค่าเก่า) = ชุดมาตรฐานโดยใช้สวิตช์เดิม (showUnit/showBadge/showStock/showShortDesc) */
 export function normalizeBuyItems(raw: unknown, legacy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean }): BuyItem[] {
   if (!Array.isArray(raw)) {

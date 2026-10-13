@@ -22,6 +22,7 @@ import {
 } from "@/lib/website-field-map";
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
+import { normalizePersonalize } from "@/lib/website-personalize";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -154,6 +155,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
       const code = p.code ?? "";
       const detailOverrides = cleanDetailOverrides(l.web_details);
+      // 🔤 ปั๊มชื่อ: ส่งเฉพาะรุ่นที่เปิดไว้ (รูปฉาก → URL · ไม่ได้เลือก = รูปแรกของสินค้า)
+      const pz = l.web_personalize ? normalizePersonalize(l.web_personalize) : null;
+      const personalize = pz?.enabled
+        ? { ...pz, imageUrl: imageUrl(pz.imageKey ?? r.images[0] ?? p.cover_image_r2_key ?? ""), positions: pz.positions.filter((x) => x.enabled) }
+        : null;
       return {
         id: p.id,
         code,
@@ -195,6 +201,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         salesRank: salesRank.get(code.toUpperCase()) ?? null,
         /** จับคู่รายละเอียดหน้าเว็บเฉพาะรุ่น { itemId: { show, text } } — ไม่มี = ตามชุดรายละเอียดกลางของธีม */
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
+        /** ปั๊มชื่อ (null = รุ่นนี้ปั๊มไม่ได้) */
+        personalize,
       };
     })
     .filter(Boolean);

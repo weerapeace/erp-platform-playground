@@ -20,6 +20,7 @@ import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { cleanDetailOverrides, type DetailOverride } from "@/lib/website-detail-overrides";
+import { normalizePersonalize, type PersonalizeConfig } from "@/lib/website-personalize";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -154,6 +155,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webImages: Array.isArray(l?.web_images) ? (l!.web_images as string[]).filter((k) => typeof k === "string") : [],
       webSkuImages,
       webDetails: cleanDetailOverrides(l?.web_details),
+      /** 🔤 ปั๊มชื่อ (null = ยังไม่เคยตั้ง → UI ใช้ค่าเริ่มต้นปิดอยู่) */
+      webPersonalize: l?.web_personalize ? normalizePersonalize(l.web_personalize) : null,
       detailItems,
       soldQty: soldByShop.get(s.id) ?? 0,
       productUrl: productUrlFor(code, s.slug, s.is_default),
@@ -182,6 +185,7 @@ type Patch = {
   webImages?: string[];
   webSkuImages?: Record<string, string | string[]>;
   webDetails?: Record<string, DetailOverride>;
+  webPersonalize?: PersonalizeConfig | null;
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -233,6 +237,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (p.webDetails !== undefined) {
     const clean = cleanDetailOverrides(p.webDetails);
     row.web_details = Object.keys(clean).length ? clean : null;
+  }
+  if (p.webPersonalize !== undefined) {
+    row.web_personalize = p.webPersonalize ? normalizePersonalize(p.webPersonalize) : null;
   }
 
   const { error } = await sb.from("store_listings").upsert(row, { onConflict: "shop_id,parent_sku_id" });

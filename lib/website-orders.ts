@@ -24,6 +24,7 @@ import {
   type ListingRow,
 } from "@/lib/website-field-map";
 import { calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
+import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -63,6 +64,8 @@ export interface PublicOrderItem {
   optionId?: string;
   option2Id?: string;
   qty: number;
+  /** ปั๊มชื่อ (ถ้าลูกค้าเลือก) — ตรวจกับค่าที่ตั้งไว้ของรุ่นตอนสร้างออเดอร์ */
+  personalize?: { text?: unknown; style?: unknown; position?: unknown } | null;
 }
 
 export interface PublicOrderInput {
@@ -124,6 +127,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       optionId: clean(o.optionId, 60) || undefined,
       option2Id: clean(o.option2Id, 60) || undefined,
       qty,
+      personalize: o.personalize && typeof o.personalize === "object" ? (o.personalize as PublicOrderItem["personalize"]) : null,
     });
   }
 
@@ -222,6 +226,7 @@ type LineInsert = {
   unit_price: number;
   qty: number;
   line_total: number;
+  personalize: PersonalizeChoice | null;
 };
 
 const pad = (n: number, len: number) => String(n).padStart(len, "0");
@@ -251,7 +256,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const [{ data: listData }, { data: parents }, { data: children }] = await Promise.all([
     sb
       .from("store_listings")
-      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_options")
+      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_options, web_personalize")
       .eq("shop_id", shop.id)
       .in("parent_sku_id", parentIds),
     sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
@@ -297,10 +302,19 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     if (price <= 0) return { ok: false, error: `สินค้า ${resolved.name} ยังไม่มีราคา กรุณาติดต่อร้าน`, status: 409 };
 
     const picked = pickSku(kids, it.optionId, it.option2Id);
-    const variant = customOptionLabel(listing, it.optionId) ?? picked.variantLabel;
+    let variant = customOptionLabel(listing, it.optionId) ?? picked.variantLabel;
+    // 🔤 ปั๊มชื่อ: ยอมเฉพาะรุ่นที่เปิดไว้ และข้อความ/แบบ/ตำแหน่งต้องผ่านตัวกรอง
+    let personalize: PersonalizeChoice | null = null;
+    if (it.personalize) {
+      const cfg = (listing as { web_personalize?: unknown } | null)?.web_personalize ? normalizePersonalize((listing as { web_personalize?: unknown }).web_personalize) : null;
+      personalize = normalizePersonalizeChoice(it.personalize, cfg);
+      if (!personalize) return { ok: false, error: `สินค้า ${resolved.name} ปั๊มชื่อไม่ได้ หรือข้อความไม่ถูกต้อง`, status: 409 };
+      variant = [variant, personalizeLabel(personalize, cfg)].filter(Boolean).join(" · ");
+    }
     const lineTotal = Math.round(price * it.qty * 100) / 100;
     subtotal += lineTotal;
     lines.push({
+      personalize,
       sku_id: picked.sku?.id ?? null,
       sku_code: picked.sku?.code ?? null,
       parent_code: parent.code ?? null,

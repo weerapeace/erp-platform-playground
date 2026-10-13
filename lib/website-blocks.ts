@@ -49,7 +49,8 @@ export type BlockType =
   | "map"
   | "custom-html"
   | "spotlight"
-  | "stats";
+  | "stats"
+  | "personalize";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -380,6 +381,17 @@ export interface StatsBlock extends BlockBase {
   items: (ChildBase & { value: number; prefix: string; suffix: string; label: string })[];
 }
 
+/** ปั๊มชื่อ — ลูกค้าเลือกสินค้าที่ปั๊มได้ พิมพ์ข้อความ เลือกแบบ/ตำแหน่ง */
+export interface PersonalizeBlock extends BlockBase {
+  type: "personalize";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  source: "all" | "manual";
+  codes: string[];
+  buttonText: string;
+}
+
 /** แผนที่ร้าน — รับเฉพาะลิงก์ฝังของ Google Maps */
 export interface MapBlock extends BlockBase {
   type: "map";
@@ -412,7 +424,8 @@ export type Block =
   | MapBlock
   | CustomHtmlBlock
   | SpotlightBlock
-  | StatsBlock;
+  | StatsBlock
+  | PersonalizeBlock;
 
 /** ชื่อ/ไอคอน/คำอธิบาย/กลุ่ม ของทุกชนิด — มาจาก schema */
 export const BLOCK_META: Record<BlockType, SectionMeta> = Object.fromEntries(

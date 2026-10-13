@@ -14,6 +14,8 @@ import { useToast } from "@/components/toast";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
 import type { DetailOverride } from "@/lib/website-detail-overrides";
+import { DEFAULT_PERSONALIZE, type PersonalizeConfig } from "@/lib/website-personalize";
+import { PersonalizeEditor } from "@/components/personalize-editor";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
@@ -31,6 +33,7 @@ type ShopState = {
   webImages: string[];
   webSkuImages: Record<string, string[]>;
   webDetails: Record<string, DetailOverride>;
+  webPersonalize: PersonalizeConfig | null;
   detailItems: DetailItemInfo[];
   soldQty: number;
   productUrl: string;
@@ -59,6 +62,8 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
   const [skuPanel, setSkuPanel] = useState<{ shopId: string; skuId: string } | null>(null);
   // ร้านที่กางแผง "จับคู่รายละเอียดหน้าเว็บ" อยู่
   const [detailsOpen, setDetailsOpen] = useState<Set<string>>(new Set());
+  // ร้านที่กางแผง "ปั๊มชื่อ" อยู่
+  const [pzOpen, setPzOpen] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     if (!parentId) return;
@@ -120,6 +125,7 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
             isPublished: s.published, featured: s.featured, webPrice: s.webPrice,
             webName: s.webName, webDescription: s.webDescription,
             webImages: s.webImages, webSkuImages: s.webSkuImages, webDetails: s.webDetails,
+            webPersonalize: s.webPersonalize,
           },
         }),
       });
@@ -311,6 +317,32 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                   </div>
                 </div>
               )}
+
+              {/* 🔤 ปั๊มชื่อ (Personalize) — ตั้งตำแหน่ง/ขนาด/แบบ ต่อรุ่น */}
+              <div className="rounded-lg border border-slate-200">
+                <button type="button" onClick={() => setPzOpen((prev) => { const n = new Set(prev); if (n.has(s.shopId)) n.delete(s.shopId); else n.add(s.shopId); return n; })}
+                  className="w-full flex items-center justify-between px-3 py-2 text-left">
+                  <span className="text-xs font-medium text-slate-600">
+                    🔤 ปั๊มชื่อ (Personalize)
+                    {s.webPersonalize?.enabled && <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">เปิดอยู่ · {s.webPersonalize.positions.filter((p) => p.enabled).length} ตำแหน่ง</span>}
+                  </span>
+                  <span className="text-xs text-slate-400">{pzOpen.has(s.shopId) ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+                </button>
+                {pzOpen.has(s.shopId) && (
+                  <div className="border-t border-slate-100 p-3">
+                    <PersonalizeEditor
+                      value={s.webPersonalize ?? DEFAULT_PERSONALIZE}
+                      onChange={(next) => patchShop(s.shopId, { webPersonalize: next })}
+                      imageOptions={[
+                        ...s.webImages.map((k, i) => ({ key: k, label: `รูปเว็บ ${i + 1}` })),
+                        ...data.variants.flatMap((v) => (s.webSkuImages[v.id] ?? v.gallery).map((k, i) => ({ key: k, label: `${v.label} · รูป ${i + 1}` }))),
+                      ].filter((o, i, arr) => arr.findIndex((x) => x.key === o.key) === i)}
+                      fallbackImageKey={s.webImages[0] ?? data.variants[0]?.erpImageKey ?? null}
+                    />
+                    <p className="text-[11px] text-slate-400 mt-2">ลูกค้าจะพิมพ์ข้อความ เลือกแบบ และเลือกตำแหน่งได้ในหน้าสินค้า (ชิ้นส่วน "ปั๊มชื่อ" ในส่วนราคา-ตะกร้า) และในบล็อก "ปั๊มชื่อ" ของตัวจัดหน้า · กด "บันทึก" ด้านล่างเพื่อใช้งาน</p>
+                  </div>
+                )}
+              </div>
 
               {/* 📋 จับคู่รายละเอียดหน้าเว็บ (ทับชุดรายละเอียดของธีมเฉพาะรุ่นนี้) */}
               <div className="rounded-lg border border-slate-200">

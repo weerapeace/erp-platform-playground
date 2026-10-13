@@ -591,6 +591,27 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     summary: (b) => `${count((b.codes as unknown[])?.length ?? 0, "รุ่น")}${s(b.bigText) ? ` · ${s(b.bigText)}` : ""}`,
   },
 
+  personalize: {
+    type: "personalize",
+    meta: { label: "ปั๊มชื่อ (Personalize)", icon: "🔤", hint: "ลูกค้าเลือกสินค้าที่ปั๊มได้ พิมพ์ข้อความ เลือกแบบ/ตำแหน่ง เห็นรูปสด แล้วใส่ตะกร้า", group: "สินค้า" },
+    fields: [
+      ...headFields({ eyebrow: "Personalize", title: "ปั๊มชื่อของคุณ", subtitle: true }),
+      f("source", "สินค้าที่ให้เลือก", "select", {
+        group: "products",
+        default: "all",
+        wide: true,
+        options: [
+          { v: "all", l: "ทุกรุ่นที่เปิดปั๊มชื่อไว้ (ตั้งในแท็บเว็บไซต์ของ Parent SKU)" },
+          { v: "manual", l: "เลือกเองทีละรุ่น (เฉพาะรุ่นที่เปิดปั๊มชื่อ)" },
+        ],
+      }),
+      f("codes", "เลือกสินค้า", "products", { group: "products", default: [], max: 24, wide: true, showIf: { key: "source", eq: "manual" } }),
+      f("buttonText", "ข้อความปุ่ม", "text", { group: "products", default: "ใส่ตะกร้า", max: 40 }),
+    ],
+    summary: (b) => (s(b.source) === "manual" ? count((b.codes as unknown[])?.length ?? 0, "รุ่นที่เลือก") : "ทุกรุ่นที่เปิดปั๊มชื่อ"),
+    validate: (b, label) => (s(b.source) === "manual" && !(b.codes as unknown[])?.length ? [{ level: "error", message: `${label}: ยังไม่ได้เลือกสินค้า` }] : []),
+  },
+
   stats: {
     type: "stats",
     meta: { label: "ตัวเลขเด่น", icon: "🔢", hint: "ตัวเลขนับขึ้นตอนเลื่อนถึง เช่น ขายแล้ว 10,000 ใบ", group: "เนื้อหา" },
