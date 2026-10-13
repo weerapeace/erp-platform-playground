@@ -17,6 +17,8 @@ import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, GOOGLE_FONTS, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
+import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
+import { FOOTER_COL_DEFS, FOOTER_BGS, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
 const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
@@ -66,7 +68,9 @@ interface Theme {
     faviconKey: string | null;
     height: number;
   };
-  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
+  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string } };
+  menu: MenuConfig;
+  footer: FooterConfig;
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover; showCompare: boolean; showSwatches: boolean; showUnit: boolean; showCategory: boolean; quickAdd: "hover" | "always" | "none"; align: "left" | "center"; columns: { desktop: number; tablet: number; mobile: number }; gap: "sm" | "md" | "lg"; nameSize: number; priceSize: number; imageFit: "cover" | "contain" };
   product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
@@ -95,7 +99,7 @@ interface Choices {
 }
 
 type ColorKey = keyof Theme["colors"];
-type TabKey = "colors" | "fonts" | "logo" | "header" | "card" | "product" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "product" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -103,6 +107,8 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "fonts", label: "ตัวอักษร" },
   { k: "logo", label: "โลโก้" },
   { k: "header", label: "Header" },
+  { k: "menu", label: "เมนู" },
+  { k: "footer", label: "Footer" },
   { k: "card", label: "การ์ดสินค้า" },
   { k: "product", label: "หน้าสินค้า" },
   { k: "shape", label: "รูปทรง" },
@@ -213,6 +219,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [sampleProduct, setSampleProduct] = useState<string | null>(null);
   // สินค้าตัวอย่างสำหรับการ์ดจำลองในแท็บการ์ดสินค้า
   const [sampleItems, setSampleItems] = useState<SampleItem[]>([]);
+  // หน้าที่สร้างเอง (ไว้ให้เมนูลิงก์ถึง)
+  const [storePages, setStorePages] = useState<{ slug: string; title: string }[]>([]);
+  useEffect(() => {
+    fetch(`/api/public/storefront/page?shop=${encodeURIComponent(shopSlug)}`)
+      .then((r) => r.json())
+      .then((j) => setStorePages((j?.pages as { slug: string; title: string }[]) ?? []))
+      .catch(() => setStorePages([]));
+  }, [shopSlug]);
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; theme: Theme }[]>([]);
 
   const undoStack = useRef<Theme[]>([]);
@@ -343,6 +357,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setColor = (k: ColorKey, v: string) => theme && apply({ ...theme, colors: { ...theme.colors, [k]: v } });
   const setLogo = (p: Partial<Theme["logo"]>) => theme && apply({ ...theme, logo: { ...theme.logo, ...p } });
   const setHeader = (p: Partial<Theme["header"]>) => theme && apply({ ...theme, header: { ...theme.header, ...p } });
+  const setMenu = (p: Partial<MenuConfig>) => theme && apply({ ...theme, menu: { ...theme.menu, ...p } });
+  const setFooter = (p: Partial<FooterConfig>) => theme && apply({ ...theme, footer: { ...theme.footer, ...p } });
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
   const setShape = (patch: Partial<Shape>) => theme && apply({ ...theme, shape: { ...theme.shape, ...patch } });
   const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
@@ -448,6 +464,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (!eq(theme.shape, published.shape)) out.push("รูปทรง");
     if (!eq(theme.logo, published.logo)) out.push("โลโก้");
     if (!eq(theme.header, published.header)) out.push("Header");
+    if (!eq(theme.menu, published.menu)) out.push("เมนู");
+    if (!eq(theme.footer, published.footer)) out.push("Footer");
     if (!eq(theme.card, published.card)) out.push("การ์ดสินค้า");
     // หน้าสินค้า (Style/ชุดรายละเอียด/⚙️/ขนาดตัวอักษร/ค่ามือถือ) — เดิมไม่ถูกนับ ทำให้แถบล่างบอก "ไม่มีการเปลี่ยนแปลง" ทั้งที่แก้แล้ว
     if (!eq(theme.product, published.product)) out.push("หน้าสินค้า");
@@ -580,6 +598,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "fonts" && dirtyFields.some((d) => d.startsWith("ฟอนต์") || d === "ตัวอักษร")) ||
     (k === "logo" && dirtyFields.includes("โลโก้")) ||
     (k === "header" && dirtyFields.includes("Header")) ||
+    (k === "menu" && dirtyFields.includes("เมนู")) ||
+    (k === "footer" && dirtyFields.includes("Footer")) ||
     (k === "card" && dirtyFields.includes("การ์ดสินค้า")) ||
     (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง"))) ||
     (k === "product" && dirtyFields.includes("หน้าสินค้า"));
@@ -868,8 +888,166 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </label>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-400 mt-3">* หน้าที่สร้างเองจะเพิ่มเข้าเมนูอัตโนมัติเมื่อเผยแพร่</p>
+              <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
+                <div>
+                  <label className={labelCls}>สีพื้น Header</label>
+                  <select className={inputCls} value={theme.header.bgKind} onChange={(e) => setHeader({ bgKind: e.target.value as "preset" | "custom" })}>
+                    <option value="preset">ตามตัวเลือกด้านบน</option>
+                    <option value="custom">กำหนดสีเอง</option>
+                  </select>
+                  {theme.header.bgKind === "custom" && (
+                    <div className="mt-2">
+                      <ColorPicker value={theme.header.bgColor} onChange={(hex) => setHeader({ bgColor: hex })} />
+                    </div>
+                  )}
+                </div>
+                <ColorField label="สีตัวอักษร/ไอคอนใน Header" value={theme.header.textColor} onChange={(hex) => setHeader({ textColor: hex })} emptyLabel="อัตโนมัติ (ขาว/ดำตามพื้น)" />
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <label className={labelCls}>ตำแหน่งชิ้นส่วน (ซ้าย · กลาง · ขวา) — ลาก ⠿ จัดลำดับในโซน · ◀ ▶ ย้ายโซน · ✕ เอาออก</label>
+                <ZonesEditor zones={theme.header.zones} onChange={(zones) => setHeader({ zones })} />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
+                <div>
+                  <label className={labelCls}>ข้อความปุ่มใน Header (ว่าง = ไม่มีปุ่ม)</label>
+                  <input className={inputCls} value={theme.header.button.text} maxLength={30} placeholder="เช่น ช้อปเลย" onChange={(e) => setHeader({ button: { ...theme.header.button, text: e.target.value } })} />
+                </div>
+                <div>
+                  <label className={labelCls}>ลิงก์ของปุ่ม</label>
+                  <input className={inputCls} value={theme.header.button.href} placeholder="/shop" onChange={(e) => setHeader({ button: { ...theme.header.button, href: e.target.value } })} />
+                </div>
+                <div>
+                  <label className={labelCls}>เมนูมือถือเปิดจาก</label>
+                  <select className={inputCls} value={theme.header.mobileMenuSide} onChange={(e) => setHeader({ mobileMenuSide: e.target.value as "left" | "right" | "top" })}>
+                    <option value="top">คลี่ลงใต้แถบเมนู</option>
+                    <option value="left">ลิ้นชักจากซ้าย</option>
+                    <option value="right">ลิ้นชักจากขวา</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-2 justify-end pb-1">
+                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.header.overHero} onChange={(e) => setHeader({ overHero: e.target.checked })} />
+                    โปร่งใสทับแบนเนอร์แรก (เลื่อนแล้วกลับเป็นสีปกติ)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.header.hideOnScroll} onChange={(e) => setHeader({ hideOnScroll: e.target.checked })} />
+                    เลื่อนลงซ่อนแถบเมนู · เลื่อนขึ้นโผล่
+                  </label>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-3">* รายการในเมนูตั้งที่แท็บ "เมนู" · ยังไม่ตั้ง = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้างเอง + ติดต่อ)</p>
             </div>
+          )}
+
+          {/* ── เมนู ── */}
+          {tab === "menu" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-1">เมนูด้านบน</h3>
+              <p className="text-xs text-slate-500 mb-3">จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้</p>
+              {theme.menu.items === null ? (
+                <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
+                  ตอนนี้ใช้เมนู<b>อัตโนมัติ</b>: สินค้าทั้งหมด → หน้าที่สร้างเอง → ติดต่อ (ถ้ากรอกช่องทางติดต่อแล้ว)
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                      onClick={() => setMenu({ items: [newMenuItem("สินค้าทั้งหมด", "shop"), ...storePages.map((pg) => newMenuItem(pg.title, "page", pg.slug)), newMenuItem("ติดต่อ", "contact")] })}
+                    >
+                      จัดเมนูเอง (เริ่มจากชุดอัตโนมัติ)
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <MenuEditor items={theme.menu.items} onChange={(items) => setMenu({ items })} choices={choices} pages={storePages} />
+                  <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => { if (confirm("กลับไปใช้เมนูอัตโนมัติ? (รายการที่จัดไว้จะหาย)")) setMenu({ items: null, mobileItems: null }); }}>กลับไปใช้เมนูอัตโนมัติ</button>
+                </>
+              )}
+
+              <div className="mt-5 pt-3 border-t border-slate-100">
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.menu.mobileItems !== null} onChange={(e) => setMenu({ mobileItems: e.target.checked ? (theme.menu.items ?? []).map((it) => ({ ...it, id: `mb${it.id}`, children: it.children.map((c) => ({ ...c, id: `mb${c.id}` })) })) : null })} />
+                  📱 มือถือใช้เมนูคนละชุด
+                </label>
+                {theme.menu.mobileItems !== null && (
+                  <div className="mt-3">
+                    <MenuEditor items={theme.menu.mobileItems} onChange={(mobileItems) => setMenu({ mobileItems })} choices={choices} pages={storePages} />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Footer ── */}
+          {tab === "footer" && (
+            <>
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">ท้ายเว็บ (Footer) — สี</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={labelCls}>สีพื้น</label>
+                    <select className={inputCls} value={theme.footer.bg} onChange={(e) => setFooter({ bg: e.target.value as FooterConfig["bg"] })}>
+                      {FOOTER_BGS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    {theme.footer.bg === "custom" && (
+                      <div className="mt-2">
+                        <ColorPicker value={theme.footer.bgColor} onChange={(hex) => setFooter({ bgColor: hex })} />
+                      </div>
+                    )}
+                  </div>
+                  <ColorField label="สีตัวอักษร" value={theme.footer.textColor} onChange={(hex) => setFooter({ textColor: hex })} emptyLabel="อัตโนมัติ (ขาว/ดำตามพื้น)" />
+                  <div>
+                    <label className={labelCls}>จัดข้อความ</label>
+                    <select className={inputCls} value={theme.footer.align} onChange={(e) => setFooter({ align: e.target.value as "left" | "center" })}>
+                      <option value="left">ชิดซ้าย</option>
+                      <option value="center">กึ่งกลาง (เหมาะกับ 1-2 คอลัมน์)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">คอลัมน์</h3>
+                <p className="text-xs text-slate-500 mb-3">เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง (ทั้งแถวมี 4 ช่อง) · มือถือเรียงลงมาทีละคอลัมน์</p>
+                {theme.footer.columns === null ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
+                    ตอนนี้ใช้แบบ<b>อัตโนมัติ</b>: โลโก้ + คำอธิบายร้าน (2 ช่อง) · เมนู · ติดต่อ
+                    <div className="mt-3">
+                      <button type="button" className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700" onClick={() => setFooter({ columns: [newFooterColumn("about"), newFooterColumn("links"), newFooterColumn("contact")] })}>
+                        จัดคอลัมน์เอง (เริ่มจากชุดอัตโนมัติ)
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <FooterColumnsEditor columns={theme.footer.columns} onChange={(columns) => setFooter({ columns })} choices={choices} pages={storePages} />
+                    <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => { if (confirm("กลับไปใช้ท้ายเว็บแบบอัตโนมัติ? (คอลัมน์ที่จัดไว้จะหาย)")) setFooter({ columns: null }); }}>กลับไปใช้แบบอัตโนมัติ</button>
+                  </>
+                )}
+              </div>
+
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">แถวล่างสุด</h3>
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-3">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.showCopyright} onChange={(e) => setFooter({ showCopyright: e.target.checked })} />
+                  แสดง © ปี + ชื่อร้าน (ข้อความท้ายเว็บตั้งที่แท็บข้อมูลร้าน)
+                </label>
+                <label className={labelCls}>ไอคอนช่องทางชำระเงิน</label>
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mb-3">
+                  {PAYMENT_ICONS.map((pm) => (
+                    <label key={pm.value} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={theme.footer.payments.includes(pm.value)} onChange={(e) => setFooter({ payments: e.target.checked ? [...theme.footer.payments, pm.value] : theme.footer.payments.filter((v) => v !== pm.value) })} />
+                      {pm.label}
+                    </label>
+                  ))}
+                </div>
+                <label className={labelCls}>ลิงก์แถวล่าง (เช่น นโยบายความเป็นส่วนตัว · เงื่อนไข)</label>
+                <MenuEditor items={theme.footer.bottomLinks} onChange={(bottomLinks) => setFooter({ bottomLinks })} choices={choices} pages={storePages} depth={1} />
+                <button type="button" className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:border-slate-500" onClick={() => setFooter({ bottomLinks: [...theme.footer.bottomLinks, newMenuItem("ลิงก์ใหม่", "page")] })}>+ เพิ่มลิงก์</button>
+              </div>
+            </>
           )}
 
           {/* ── การ์ดสินค้า ── */}
@@ -2264,6 +2442,210 @@ function TextRoleEditor({ def, value, pub, theme, onChange, onReset }: { def: (t
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─────────── Header: จัดชิ้นส่วน 3 โซน ─────────── */
+function ZonesEditor({ zones, onChange }: { zones: HeaderZones; onChange: (z: HeaderZones) => void }) {
+  const ZK = ["left", "center", "right"] as const;
+  const ZL: Record<(typeof ZK)[number], string> = { left: "ซ้าย", center: "กลาง", right: "ขวา" };
+  const placed = new Set([...zones.left, ...zones.center, ...zones.right]);
+  const missing = HEADER_EL_DEFS.filter((d) => !placed.has(d.key));
+  const label = (k: HeaderEl) => HEADER_EL_DEFS.find((d) => d.key === k)?.label ?? k;
+  const move = (from: (typeof ZK)[number], idx: number, dir: -1 | 1) => {
+    const to = ZK[ZK.indexOf(from) + dir];
+    if (!to) return;
+    const el = zones[from][idx];
+    onChange({ ...zones, [from]: zones[from].filter((_, i) => i !== idx), [to]: dir === 1 ? [el, ...zones[to]] : [...zones[to], el] });
+  };
+  const remove = (z: (typeof ZK)[number], idx: number) => onChange({ ...zones, [z]: zones[z].filter((_, i) => i !== idx) });
+  const add = (z: (typeof ZK)[number], el: HeaderEl) => onChange({ ...zones, [z]: [...zones[z], el] });
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {ZK.map((z) => (
+        <ZoneColumn key={z} title={ZL[z]} items={zones[z]} label={label} canLeft={z !== "left"} canRight={z !== "right"} missing={missing} onReorder={(from, to) => onChange({ ...zones, [z]: moveItem(zones[z], from, to) })} onMove={(i, d) => move(z, i, d)} onRemove={(i) => remove(z, i)} onAdd={(el) => add(z, el)} />
+      ))}
+    </div>
+  );
+}
+function ZoneColumn({ title, items, label, canLeft, canRight, missing, onReorder, onMove, onRemove, onAdd }: { title: string; items: HeaderEl[]; label: (k: HeaderEl) => string; canLeft: boolean; canRight: boolean; missing: { key: HeaderEl; label: string }[]; onReorder: (from: number, to: number) => void; onMove: (i: number, dir: -1 | 1) => void; onRemove: (i: number) => void; onAdd: (el: HeaderEl) => void }) {
+  const drag = useDragReorder(onReorder);
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 min-h-[96px]">
+      <div className="text-[11px] font-semibold text-slate-500 mb-1.5 text-center">{title}</div>
+      <ul className="space-y-1">
+        {items.map((el, i) => (
+          <li key={el} {...drag.rowProps(i)} className={`flex items-center gap-1 bg-white border border-slate-200 rounded-md px-1.5 py-1 text-xs text-slate-700 ${drag.rowCls(i)}`}>
+            <DragHandle {...drag.handleProps(i)} />
+            <span className="flex-1 truncate">{label(el)}</span>
+            <button type="button" disabled={!canLeft} onClick={() => onMove(i, -1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-20 px-0.5" title="ย้ายไปโซนซ้าย">◀</button>
+            <button type="button" disabled={!canRight} onClick={() => onMove(i, 1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-20 px-0.5" title="ย้ายไปโซนขวา">▶</button>
+            <button type="button" onClick={() => onRemove(i)} className="text-slate-300 hover:text-rose-600 px-0.5" title="เอาออก">✕</button>
+          </li>
+        ))}
+      </ul>
+      {missing.length > 0 && (
+        <select className="mt-1.5 w-full h-7 rounded-md border border-dashed border-slate-300 text-[11px] text-slate-500 bg-white px-1" value="" onChange={(e) => e.target.value && onAdd(e.target.value as HeaderEl)}>
+          <option value="">+ เพิ่มชิ้นส่วน…</option>
+          {missing.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── เมนู: รายการ + รายการย่อย (ลึก 1 ชั้น) ─────────── */
+function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = false }: { items: MenuItem[]; onChange: (items: MenuItem[]) => void; choices: Choices; pages: { slug: string; title: string }[]; depth?: number; parentMega?: boolean }) {
+  const drag = useDragReorder((from, to) => onChange(moveItem(items, from, to)));
+  const [openId, setOpenId] = useState<string | null>(null);
+  const setItem = (id: string, patch: Partial<MenuItem>) => onChange(items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+  const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
+  const valueField = (it: MenuItem) => {
+    switch (it.kind) {
+      case "category":
+        return (
+          <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value })}>
+            <option value="">— เลือกหมวด —</option>
+            {(choices.categories ?? []).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        );
+      case "product":
+        return (
+          <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value })}>
+            <option value="">— เลือกสินค้า —</option>
+            {(choices.products ?? []).map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}
+          </select>
+        );
+      case "page":
+        return (
+          <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value })}>
+            <option value="">— เลือกหน้า —</option>
+            {pages.map((p) => <option key={p.slug} value={p.slug}>{p.title}</option>)}
+          </select>
+        );
+      case "url":
+        return <input className={`${mini} w-full`} value={it.value} placeholder="https://… หรือ /path" onChange={(e) => setItem(it.id, { value: e.target.value })} />;
+      default:
+        return <span className="text-[11px] text-slate-400">{menuItemHref(it)}</span>;
+    }
+  };
+  return (
+    <div>
+      <ul className="space-y-1">
+        {items.map((it, i) => {
+          const open = openId === it.id;
+          return (
+            <li key={it.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
+              <div className="flex items-center gap-1.5 px-2 py-1.5">
+                <DragHandle {...drag.handleProps(i)} />
+                <input className={`${mini} flex-1 min-w-0`} value={it.label} maxLength={60} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder="ชื่อเมนู" />
+                <select className={mini} value={it.kind} onChange={(e) => setItem(it.id, { kind: e.target.value as MenuKind, value: "" })}>
+                  {MENU_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                </select>
+                <button type="button" onClick={() => setOpenId(open ? null : it.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500 hover:border-slate-400"}`} title="ตั้งค่าเพิ่ม">✎{it.children.length ? ` ${it.children.length}` : ""}</button>
+                <button type="button" onClick={() => onChange(items.filter((x) => x.id !== it.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">✕</button>
+              </div>
+              {open && (
+                <div className="px-3 pb-3 pt-1 border-t border-slate-100 space-y-2">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1">ลิงก์ไป</label>
+                      {valueField(it)}
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1">ป้ายเล็ก (เช่น ใหม่ / ลด)</label>
+                      <input className={`${mini} w-full`} value={it.badge} maxLength={20} onChange={(e) => setItem(it.id, { badge: e.target.value })} />
+                    </div>
+                  </div>
+                  {depth === 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] text-slate-500">เมนูย่อย ({it.children.length})</label>
+                        <div className="flex items-center gap-3">
+                          {it.children.length > 0 && (
+                            <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer"><input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={it.mega} onChange={(e) => setItem(it.id, { mega: e.target.checked })} />แผง Mega (กว้าง มีรูป)</label>
+                          )}
+                          <button type="button" className="text-[11px] text-blue-600 hover:underline" onClick={() => setItem(it.id, { children: [...it.children, newMenuItem("รายการย่อย", "shop")] })}>+ เพิ่มรายการย่อย</button>
+                        </div>
+                      </div>
+                      {it.children.length > 0 && (
+                        <div className="pl-3 border-l-2 border-slate-100">
+                          <MenuEditor items={it.children} onChange={(children) => setItem(it.id, { children })} choices={choices} pages={pages} depth={1} parentMega={it.mega} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {depth === 1 && parentMega && (
+                    <ImageUploadField label="รูปในแผง Mega" hint="สัดส่วน 4:3" value={it.imageKey} onChange={(key) => setItem(it.id, { imageKey: key })} height={48} />
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {depth === 0 && (
+        <button type="button" className="mt-2 text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700" onClick={() => { const it = newMenuItem(); onChange([...items, it]); setOpenId(it.id); }}>+ เพิ่มเมนู</button>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── Footer: คอลัมน์ ─────────── */
+function FooterColumnsEditor({ columns, onChange, choices, pages }: { columns: FooterColumn[]; onChange: (c: FooterColumn[]) => void; choices: Choices; pages: { slug: string; title: string }[] }) {
+  const drag = useDragReorder((from, to) => onChange(moveItem(columns, from, to)));
+  const [openId, setOpenId] = useState<string | null>(null);
+  const setCol = (id: string, patch: Partial<FooterColumn>) => onChange(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
+  const used = columns.reduce((n, c) => n + c.width, 0);
+  return (
+    <div>
+      <ul className="space-y-1">
+        {columns.map((c, i) => {
+          const def = FOOTER_COL_DEFS.find((d) => d.key === c.kind)!;
+          const open = openId === c.id;
+          return (
+            <li key={c.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
+              <div className="flex items-center gap-1.5 px-2 py-1.5">
+                <DragHandle {...drag.handleProps(i)} />
+                <select className={mini} value={c.kind} onChange={(e) => setCol(c.id, { kind: e.target.value as FooterColKind })}>
+                  {FOOTER_COL_DEFS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+                </select>
+                <input className={`${mini} flex-1 min-w-0`} value={c.title} maxLength={60} placeholder={def.defaultTitle || "หัวข้อ (ไม่บังคับ)"} onChange={(e) => setCol(c.id, { title: e.target.value })} />
+                <select className={mini} value={c.width} onChange={(e) => setCol(c.id, { width: Number(e.target.value) === 2 ? 2 : 1 })} title="ความกว้าง">
+                  <option value={1}>กว้าง 1</option>
+                  <option value={2}>กว้าง 2</option>
+                </select>
+                <button type="button" onClick={() => setOpenId(open ? null : c.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500 hover:border-slate-400"}`} title="ตั้งค่าเพิ่ม">✎</button>
+                <button type="button" onClick={() => onChange(columns.filter((x) => x.id !== c.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">✕</button>
+              </div>
+              {open && (
+                <div className="px-3 pb-3 pt-1 border-t border-slate-100 space-y-2">
+                  <p className="text-[11px] text-slate-400">{def.hint}</p>
+                  {(c.kind === "text" || c.kind === "about" || c.kind === "newsletter") && (
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1">{c.kind === "about" ? "คำอธิบาย (ว่าง = ใช้คำอธิบายร้านจากแท็บข้อมูลร้าน)" : "ข้อความ"}</label>
+                      <textarea className="w-full rounded-lg border border-slate-200 text-xs px-2 py-1.5 bg-white text-slate-700" rows={3} value={c.text} onChange={(e) => setCol(c.id, { text: e.target.value })} />
+                    </div>
+                  )}
+                  {c.kind === "links" && (
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1">ลิงก์ (ว่าง = อัตโนมัติ)</label>
+                      <MenuEditor items={c.links} onChange={(links) => setCol(c.id, { links })} choices={choices} pages={pages} depth={1} />
+                      <button type="button" className="mt-2 text-[11px] text-blue-600 hover:underline" onClick={() => setCol(c.id, { links: [...c.links, newMenuItem("ลิงก์ใหม่", "page")] })}>+ เพิ่มลิงก์</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex items-center gap-3 mt-2">
+        <button type="button" className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700" onClick={() => { const c = newFooterColumn(); onChange([...columns, c]); setOpenId(c.id); }}>+ เพิ่มคอลัมน์</button>
+        <span className="text-[11px] text-slate-400">ใช้ไป {used} / 4 ช่องต่อแถว{used > 4 ? " — เกินจะขึ้นแถวใหม่" : ""}</span>
+      </div>
     </div>
   );
 }

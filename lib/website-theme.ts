@@ -581,7 +581,21 @@ export interface SiteTheme {
     showCart: boolean;
     /** เส้นคั่นใต้แถบเมนู */
     border: boolean;
+    /** สีเอง: bgKind=custom ใช้ bgColor · textColor "" = อัตโนมัติ (ขาว/ดำตามพื้น) */
+    bgKind: "preset" | "custom";
+    bgColor: string;
+    textColor: string;
+    /** ตำแหน่งชิ้นส่วน ซ้าย/กลาง/ขวา */
+    zones: HeaderZones;
+    /** โปร่งใสทับบล็อกแรกของหน้า (hero) · เลื่อนแล้วกลายเป็นสีปกติ */
+    overHero: boolean;
+    /** เลื่อนลงซ่อน เลื่อนขึ้นโผล่ */
+    hideOnScroll: boolean;
+    mobileMenuSide: "left" | "right" | "top";
+    button: { text: string; href: string };
   };
+  menu: MenuConfig;
+  footer: FooterConfig;
   card: {
     preset: CardPreset;
     imageRatio: ImageRatio;
@@ -760,6 +774,199 @@ export function normalizeShape(raw: unknown): Shape {
   };
 }
 
+/* ───────── Header: ชิ้นส่วน 3 โซน + เมนู (แท็บ "Header" / "เมนู") ───────── */
+export type HeaderEl = "logo" | "menu" | "search" | "cart" | "social" | "button";
+export interface HeaderZones { left: HeaderEl[]; center: HeaderEl[]; right: HeaderEl[] }
+export const HEADER_EL_DEFS: { key: HeaderEl; label: string; hint: string }[] = [
+  { key: "logo", label: "โลโก้", hint: "โลโก้/ชื่อร้าน (แท็บโลโก้)" },
+  { key: "menu", label: "เมนู", hint: "ลิงก์เมนูหลัก (แท็บเมนู) — บนมือถือเป็นปุ่ม ☰" },
+  { key: "search", label: "ค้นหา", hint: "ไอคอนแว่นขยาย กดแล้วพิมพ์ค้นหาสินค้า" },
+  { key: "cart", label: "ตะกร้า", hint: "ไอคอนตะกร้า + จำนวนชิ้น" },
+  { key: "social", label: "โซเชียล", hint: "ไอคอน Facebook/IG/TikTok จากแท็บข้อมูลร้าน (ซ่อนบนมือถือ)" },
+  { key: "button", label: "ปุ่ม", hint: "ปุ่มสีแบรนด์ เช่น \"ช้อปเลย\" (ตั้งข้อความ/ลิงก์ด้านล่าง · ซ่อนบนมือถือ)" },
+];
+const HEADER_EL_KEYS = HEADER_EL_DEFS.map((d) => d.key);
+export function normalizeZones(raw: unknown, legacy?: { menuAlign: MenuAlign; showCart: boolean }): HeaderZones {
+  const r = (raw && typeof raw === "object" ? raw : null) as Record<string, unknown> | null;
+  if (!r) {
+    // ไม่เคยตั้ง → สร้างจากค่าเดิม (ตำแหน่งเมนู + แสดงตะกร้า)
+    const a = legacy?.menuAlign ?? "center";
+    const cart: HeaderEl[] = legacy?.showCart === false ? [] : ["cart"];
+    return a === "left" ? { left: ["logo", "menu"], center: [], right: cart } : a === "right" ? { left: ["logo"], center: [], right: ["menu", ...cart] } : { left: ["logo"], center: ["menu"], right: cart };
+  }
+  const seen = new Set<HeaderEl>();
+  const zone = (v: unknown): HeaderEl[] => {
+    const out: HeaderEl[] = [];
+    for (const x of Array.isArray(v) ? v : []) {
+      if (typeof x === "string" && (HEADER_EL_KEYS as string[]).includes(x) && !seen.has(x as HeaderEl)) {
+        seen.add(x as HeaderEl);
+        out.push(x as HeaderEl);
+      }
+    }
+    return out;
+  };
+  return { left: zone(r.left), center: zone(r.center), right: zone(r.right) };
+}
+
+export type MenuKind = "home" | "shop" | "category" | "product" | "page" | "contact" | "url";
+export interface MenuItem {
+  id: string;
+  label: string;
+  kind: MenuKind;
+  /** category = key หมวด · product = รหัส Parent SKU · page = slug หน้า · url = ลิงก์ */
+  value: string;
+  /** ป้ายเล็กท้ายชื่อ เช่น "ใหม่" "ลด" */
+  badge: string;
+  /** รายการย่อยแบบ Mega (แผงกว้างมีรูป) แทน dropdown */
+  mega: boolean;
+  /** รูปประกอบ (ใช้เมื่อเป็นรายการย่อยในแผง Mega) */
+  imageKey: string | null;
+  children: MenuItem[];
+}
+export interface MenuConfig {
+  /** null = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ติดต่อ) */
+  items: MenuItem[] | null;
+  /** null = ใช้ชุดเดียวกับคอม */
+  mobileItems: MenuItem[] | null;
+}
+export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
+  { value: "home", label: "หน้าแรก", hint: "/" },
+  { value: "shop", label: "สินค้าทั้งหมด", hint: "/shop" },
+  { value: "category", label: "หมวดสินค้า", hint: "/shop?cat=…" },
+  { value: "product", label: "สินค้า 1 ตัว", hint: "/product/…" },
+  { value: "page", label: "หน้าที่สร้างเอง", hint: "/<slug>" },
+  { value: "contact", label: "ติดต่อ", hint: "/contact" },
+  { value: "url", label: "ลิงก์อื่น", hint: "URL ภายนอก/ภายใน" },
+];
+export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, badge: "", mega: false, imageKey: null, children: [] });
+function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MenuItem[] = [];
+  raw.forEach((x, i) => {
+    if (!x || typeof x !== "object") return;
+    const r = x as Record<string, unknown>;
+    const label = typeof r.label === "string" ? r.label.trim().slice(0, 60) : "";
+    if (!label) return;
+    const kind = typeof r.kind === "string" && MENU_KINDS.some((k) => k.value === r.kind) ? (r.kind as MenuKind) : "url";
+    out.push({
+      id: typeof r.id === "string" && r.id ? r.id.slice(0, 40) : `m${depth}${i}`,
+      label,
+      kind,
+      value: typeof r.value === "string" ? r.value.trim().slice(0, 500) : "",
+      badge: typeof r.badge === "string" ? r.badge.trim().slice(0, 20) : "",
+      mega: r.mega === true,
+      imageKey: typeof r.imageKey === "string" && /^[\w./-]+$/.test(r.imageKey) ? r.imageKey : null,
+      children: depth < 1 ? normalizeMenuItems(r.children, depth + 1) : [],
+    });
+  });
+  return out.slice(0, 40);
+}
+export function normalizeMenu(raw: unknown): MenuConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { items: Array.isArray(r.items) ? normalizeMenuItems(r.items, 0) : null, mobileItems: Array.isArray(r.mobileItems) ? normalizeMenuItems(r.mobileItems, 0) : null };
+}
+/** ลิงก์ของรายการเมนู (ตรงกับฝั่งเว็บร้าน) */
+export function menuItemHref(it: { kind: MenuKind; value: string }): string {
+  switch (it.kind) {
+    case "home": return "/";
+    case "shop": return "/shop";
+    case "category": return it.value ? `/shop?cat=${encodeURIComponent(it.value)}` : "/shop";
+    case "product": return it.value ? `/product/${it.value.toLowerCase()}` : "/shop";
+    case "page": return it.value ? `/${it.value}` : "/";
+    case "contact": return "/contact";
+    default: return it.value || "/";
+  }
+}
+
+/* ───────── Footer (แท็บ "Footer") ───────── */
+export type FooterColKind = "about" | "links" | "contact" | "social" | "newsletter" | "text";
+export interface FooterColumn {
+  id: string;
+  kind: FooterColKind;
+  /** หัวคอลัมน์ ("" = ค่าเริ่มต้นตามชนิด) */
+  title: string;
+  /** ข้อความ (ชนิด text / newsletter / about = ทับคำอธิบายร้าน) */
+  text: string;
+  /** ลิงก์ (ชนิด links) · ว่าง = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ตามสถานะ) */
+  links: MenuItem[];
+  /** กว้าง 1 หรือ 2 ช่อง */
+  width: 1 | 2;
+}
+export type FooterBg = "ink" | "surface" | "brand" | "custom";
+export type PaymentIcon = "visa" | "mastercard" | "promptpay" | "cod" | "truemoney" | "shopee" | "lazada" | "line";
+export interface FooterConfig {
+  bg: FooterBg;
+  bgColor: string;
+  /** "" = อัตโนมัติ (ขาว/ดำตามพื้น) */
+  textColor: string;
+  /** null = จัดอัตโนมัติ (โลโก้+คำอธิบาย · เมนู · ติดต่อ) */
+  columns: FooterColumn[] | null;
+  /** แถวล่าง */
+  showCopyright: boolean;
+  payments: PaymentIcon[];
+  bottomLinks: MenuItem[];
+  align: "left" | "center";
+}
+export const FOOTER_COL_DEFS: { key: FooterColKind; label: string; hint: string; defaultTitle: string }[] = [
+  { key: "about", label: "เกี่ยวกับร้าน", hint: "โลโก้ + คำอธิบายร้าน (จากแท็บข้อมูลร้าน หรือพิมพ์ทับ)", defaultTitle: "" },
+  { key: "links", label: "ลิงก์", hint: "รายการลิงก์ — ว่างไว้ = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ตามสถานะ)", defaultTitle: "เมนู" },
+  { key: "contact", label: "ติดต่อ", hint: "โทร / LINE / อีเมล / ที่อยู่ / เวลาทำการ จากแท็บข้อมูลร้าน", defaultTitle: "ติดต่อ" },
+  { key: "social", label: "โซเชียล", hint: "ปุ่ม Facebook / IG / TikTok / Shopee / Lazada ที่กรอกไว้", defaultTitle: "ติดตามเรา" },
+  { key: "newsletter", label: "รับข่าวสาร", hint: "ช่องกรอกอีเมล (ตอนนี้ยังเป็นตัวอย่าง ไม่ได้เก็บอีเมลจริง)", defaultTitle: "รับข่าวสาร & โปรโมชัน" },
+  { key: "text", label: "ข้อความอิสระ", hint: "หัวข้อ + ข้อความหลายบรรทัด เช่น นโยบาย / เวลาจัดส่ง", defaultTitle: "" },
+];
+export const FOOTER_BGS: { value: FooterBg; label: string }[] = [
+  { value: "ink", label: "สีเข้ม" },
+  { value: "surface", label: "สีขาว/พื้นการ์ด" },
+  { value: "brand", label: "สีแบรนด์" },
+  { value: "custom", label: "กำหนดสีเอง" },
+];
+export const PAYMENT_ICONS: { value: PaymentIcon; label: string }[] = [
+  { value: "visa", label: "VISA" },
+  { value: "mastercard", label: "Mastercard" },
+  { value: "promptpay", label: "PromptPay" },
+  { value: "cod", label: "เก็บเงินปลายทาง" },
+  { value: "truemoney", label: "TrueMoney" },
+  { value: "line", label: "LINE Pay" },
+  { value: "shopee", label: "Shopee" },
+  { value: "lazada", label: "Lazada" },
+];
+export const newFooterColumn = (kind: FooterColKind = "links"): FooterColumn => ({ id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, title: "", text: "", links: [], width: kind === "about" ? 2 : 1 });
+export const DEFAULT_FOOTER: FooterConfig = { bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left" };
+export function normalizeFooter(raw: unknown): FooterConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_FOOTER;
+  const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
+  const cols = Array.isArray(r.columns)
+    ? (r.columns as unknown[])
+        .map((x, i) => {
+          if (!x || typeof x !== "object") return null;
+          const c = x as Record<string, unknown>;
+          const kind = oneOf(c.kind, FOOTER_COL_DEFS.map((k) => k.key), "links");
+          return {
+            id: typeof c.id === "string" && c.id ? c.id.slice(0, 40) : `f${i}`,
+            kind,
+            title: typeof c.title === "string" ? c.title.trim().slice(0, 60) : "",
+            text: typeof c.text === "string" ? c.text.slice(0, 2000) : "",
+            links: normalizeMenu({ items: c.links }).items ?? [],
+            width: c.width === 2 ? 2 : 1,
+          } as FooterColumn;
+        })
+        .filter((c): c is FooterColumn => !!c)
+        .slice(0, 6)
+    : null;
+  return {
+    bg: oneOf(r.bg, ["ink", "surface", "brand", "custom"] as const, d.bg),
+    bgColor: typeof r.bgColor === "string" && /^#[0-9a-fA-F]{6}$/.test(r.bgColor) ? r.bgColor : d.bgColor,
+    textColor: typeof r.textColor === "string" && /^#[0-9a-fA-F]{6}$/.test(r.textColor) ? r.textColor : "",
+    columns: cols,
+    showCopyright: r.showCopyright !== false,
+    payments: Array.isArray(r.payments) ? (r.payments.filter((v) => PAYMENT_ICONS.some((p) => p.value === v)) as PaymentIcon[]) : [],
+    bottomLinks: normalizeMenu({ items: r.bottomLinks }).items ?? [],
+    align: oneOf(r.align, ["left", "center"] as const, d.align),
+  };
+}
+
 export const DEFAULT_THEME: SiteTheme = {
   colors: {
     brand: "#E2540F",
@@ -782,7 +989,9 @@ export const DEFAULT_THEME: SiteTheme = {
     faviconKey: null,
     height: 34,
   },
-  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
+  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["cart"] }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" } },
+  menu: { items: null, mobileItems: null },
+  footer: { ...DEFAULT_FOOTER },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
@@ -1005,7 +1214,20 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       menuAlign: pick(h.menuAlign, ["left", "center", "right"] as const, d.header.menuAlign),
       showCart: h.showCart !== false,
       border: h.border !== false,
+      bgKind: pick(h.bgKind, ["preset", "custom"] as const, "preset"),
+      bgColor: color(h.bgColor, d.header.bgColor),
+      textColor: typeof h.textColor === "string" && /^#[0-9a-fA-F]{6}$/.test(h.textColor) ? h.textColor : "",
+      zones: normalizeZones(h.zones, { menuAlign: pick(h.menuAlign, ["left", "center", "right"] as const, d.header.menuAlign), showCart: h.showCart !== false }),
+      overHero: h.overHero === true,
+      hideOnScroll: h.hideOnScroll === true,
+      mobileMenuSide: pick(h.mobileMenuSide, ["left", "right", "top"] as const, "top"),
+      button: (() => {
+        const b = (h.button && typeof h.button === "object" ? h.button : {}) as Record<string, unknown>;
+        return { text: typeof b.text === "string" ? b.text.trim().slice(0, 30) : "", href: typeof b.href === "string" && b.href.trim() ? b.href.trim().slice(0, 500) : "/shop" };
+      })(),
     },
+    menu: normalizeMenu(r.menu),
+    footer: normalizeFooter(r.footer),
     card: {
       preset: pick(cd.preset, ["flat", "border", "shadow", "floating", "minimal"] as const, d.card.preset),
       imageRatio: pick(cd.imageRatio, ["1:1", "4:3", "4:5", "3:4", "16:9"] as const, d.card.imageRatio),
@@ -1076,6 +1298,8 @@ export function mergeTheme(existing: unknown, incoming: unknown): Record<string,
     shape: t.shape,
     logo: t.logo,
     header: t.header,
+    menu: t.menu,
+    footer: t.footer,
     card: t.card,
     product: t.product,
   };
