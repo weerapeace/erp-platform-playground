@@ -220,7 +220,8 @@ export function productSpecAttrs(p: ParentRow): Record<string, string> {
     const v = (p as unknown as Record<string, unknown>)[f.key];
     if (v == null) continue;
     const str = typeof v === "number" ? (v > 0 ? String(v) : "") : String(v).trim();
-    if (!str) continue;
+    // ช่องที่กรอกขีด/ไม่มี ("-", "—", "n/a", "ไม่มี") = ไม่มีข้อมูล ไม่ต้องโชว์
+    if (!str || /^[-–—._/]+$|^(n\/a|na|none|ไม่มี|ไม่ระบุ)$/i.test(str)) continue;
     out[f.key] = f.unit ? `${str} ${f.unit}` : str.slice(0, 1000);
   }
   return out;
