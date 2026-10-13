@@ -21,6 +21,93 @@ export type ProductImageBg = "tint" | "surface" | "none";
 export type ProductGalleryStyle = "editorial" | "spotlight";
 /** รายละเอียดสินค้า: accordion = พับเก็บ · tabs = แท็บ · plain = เรียงต่อกัน */
 export type ProductDetailsStyle = "accordion" | "tabs" | "plain";
+
+/**
+ * "ชุดรายละเอียดสินค้า" — หัวข้อ (พับเก็บ/แท็บ) ตั้งที่เดียว ใช้ทุกสินค้า
+ * แต่ละหัวข้อเลือกได้ว่าเอาข้อมูลจากไหน และใช้กับรุ่นไหน (ทุกตัว / เฉพาะหมวด / เลือกเป็นรายตัว)
+ * สินค้าที่ไม่มีข้อมูลในหัวข้อนั้น → หัวข้อหายไปเอง (เว็บร้านเป็นคนตัด)
+ */
+export type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
+export type DetailApply = "all" | "categories" | "products";
+export interface ProductDetailItem {
+  id: string;
+  label: string;
+  source: DetailSource;
+  /** source=fields: ฟิลด์ของ Parent SKU ที่จะโชว์ (ดู PRODUCT_SPEC_FIELDS) */
+  fields: string[];
+  /** source=text: ข้อความตายตัว */
+  text: string;
+  applyTo: DetailApply;
+  /** applyTo=categories: รหัสหมวดเว็บ */
+  categories: string[];
+  /** applyTo=products: รหัส Parent SKU */
+  products: string[];
+  enabled: boolean;
+}
+/** ฟิลด์ของ Parent SKU ที่ให้เลือกโชว์บนเว็บ (API สาธารณะส่งเฉพาะชุดนี้ — ไม่มีต้นทุน/ข้อมูลภายใน) */
+export const PRODUCT_SPEC_FIELDS: { key: string; label: string; unit?: string }[] = [
+  { key: "materials", label: "วัสดุ" },
+  { key: "size_summary", label: "ขนาด" },
+  { key: "custom_size", label: "ขนาด (ระบุเอง)" },
+  { key: "size_length_cm", label: "ความยาว", unit: "ซม." },
+  { key: "size_height_cm", label: "ความสูง", unit: "ซม." },
+  { key: "size_thickness_cm", label: "ความหนา", unit: "ซม." },
+  { key: "weight_g", label: "น้ำหนัก", unit: "กรัม" },
+  { key: "lining", label: "ซับใน" },
+  { key: "strap", label: "สายสะพาย" },
+  { key: "zipper", label: "ซิป" },
+  { key: "spares", label: "อะไหล่" },
+  { key: "logo", label: "โลโก้" },
+  { key: "thread", label: "ด้าย" },
+  { key: "warranty", label: "การรับประกัน" },
+  { key: "introduction", label: "คำแนะนำสินค้า" },
+  { key: "english_description", label: "คำอธิบาย (EN)" },
+];
+export const DETAIL_SOURCES: { value: DetailSource; label: string; hint: string }[] = [
+  { value: "description", label: "คำอธิบายสินค้า", hint: "ตามที่จับคู่ฟิลด์ไว้ / ที่กรอกทับในสินค้าบนเว็บ" },
+  { value: "fields", label: "ฟิลด์จาก Parent SKU", hint: "เลือกได้หลายช่อง โชว์เป็นตาราง เช่น วัสดุ · ขนาด · น้ำหนัก" },
+  { value: "details", label: "จุดเด่น (รายการติ๊ก)", hint: "รายการย่อยของสินค้า (ถ้ามี)" },
+  { value: "text", label: "ข้อความตายตัว", hint: "พิมพ์ครั้งเดียว ใช้หลายรุ่น เช่น ประกัน/วิธีดูแล" },
+  { value: "shipping", label: "การจัดส่ง & ชำระเงิน", hint: "ดึงจากแท็บข้อมูลร้าน (ค่าส่ง/ส่งฟรี/ช่องทางจ่าย)" },
+];
+export const DEFAULT_DETAIL_ITEMS: ProductDetailItem[] = [
+  { id: "desc", label: "รายละเอียดสินค้า", source: "description", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true },
+  { id: "spec", label: "วัสดุและขนาด", source: "fields", fields: ["materials", "size_summary", "weight_g", "lining", "strap"], text: "", applyTo: "all", categories: [], products: [], enabled: true },
+  { id: "details", label: "จุดเด่น", source: "details", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true },
+  { id: "shipping", label: "การจัดส่งและชำระเงิน", source: "shipping", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true },
+];
+const SPEC_KEYS = new Set(PRODUCT_SPEC_FIELDS.map((f) => f.key));
+const strList = (v: unknown, max: number, upper = false): string[] =>
+  (Array.isArray(v) ? v : [])
+    .map((x) => String(x ?? "").trim().slice(0, 80))
+    .map((x) => (upper ? x.toUpperCase() : x))
+    .filter(Boolean)
+    .slice(0, max);
+export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
+  if (!Array.isArray(raw)) return DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] }));
+  const out: ProductDetailItem[] = [];
+  const seen = new Set<string>();
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r !== "object") continue;
+    let id = String(r.id ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || `d${out.length + 1}`;
+    while (seen.has(id)) id = `${id}_`;
+    seen.add(id);
+    const source = (["description", "fields", "details", "text", "shipping"] as const).includes(r.source as DetailSource) ? (r.source as DetailSource) : "text";
+    out.push({
+      id,
+      label: String(r.label ?? "").trim().slice(0, 60) || "หัวข้อ",
+      source,
+      fields: strList(r.fields, 20).filter((k) => SPEC_KEYS.has(k)),
+      text: String(r.text ?? "").slice(0, 4000),
+      applyTo: (["all", "categories", "products"] as const).includes(r.applyTo as DetailApply) ? (r.applyTo as DetailApply) : "all",
+      categories: strList(r.categories, 50),
+      products: strList(r.products, 500, true),
+      enabled: r.enabled !== false,
+    });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
 /** ส่วนประกอบของหน้าสินค้าแบบโชว์เคส — ลากจัดลำดับ/ซ่อนได้ในแท็บหน้าสินค้า */
 export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
 export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related"];
@@ -85,6 +172,8 @@ export interface SiteTheme {
     showTabs: boolean;
     galleryStyle: ProductGalleryStyle;
     detailsStyle: ProductDetailsStyle;
+    /** ชุดรายละเอียดสินค้า (หัวข้อพับเก็บ/แท็บ) */
+    detailItems: ProductDetailItem[];
     /** ลำดับส่วนประกอบ (ครบทุกตัวเสมอ) */
     sections: ProductSection[];
     /** ส่วนที่ซ่อน (ซ่อนได้เฉพาะ details/banner/related) */
@@ -114,7 +203,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -293,6 +382,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       galleryStyle: pick(pd.galleryStyle, ["editorial", "spotlight"] as const, d.product.galleryStyle),
       // ค่าที่บันทึกก่อนมี detailsStyle: showTabs=false เคยหมายถึง "เรียงต่อกัน"
       detailsStyle: pick(pd.detailsStyle, ["accordion", "tabs", "plain"] as const, pd.showTabs === false ? "plain" : d.product.detailsStyle),
+      detailItems: normalizeDetailItems(pd.detailItems),
       sections: normalizeProductSections(pd.sections),
       hidden: normalizeHiddenSections(pd.hidden),
     },

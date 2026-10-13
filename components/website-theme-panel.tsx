@@ -29,6 +29,9 @@ type ProductImageBg = "tint" | "surface" | "none";
 type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
 type ProductGalleryStyle = "editorial" | "spotlight";
 type ProductDetailsStyle = "accordion" | "tabs" | "plain";
+type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
+type DetailApply = "all" | "categories" | "products";
+interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean }
 
 interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
@@ -45,7 +48,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; sections: ProductSection[]; hidden: ProductSection[] };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[] };
 }
 
 interface Choices {
@@ -63,6 +66,10 @@ interface Choices {
   productSections?: { value: ProductSection; label: string; hint: string; hideable: boolean }[];
   productGalleryStyles?: { value: ProductGalleryStyle; label: string; hint: string }[];
   productDetailsStyles?: { value: ProductDetailsStyle; label: string }[];
+  detailSources?: { value: DetailSource; label: string; hint: string }[];
+  specFields?: { key: string; label: string }[];
+  categories?: { key: string; label: string }[];
+  products?: { code: string; name: string }[];
 }
 
 type ColorKey = keyof Theme["colors"];
@@ -275,6 +282,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
   const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
   const sectionDrag = useDragReorder((from, to) => theme && setProduct({ sections: moveItem(theme.product.sections, from, to) }));
+  const detailDrag = useDragReorder((from, to) => theme && setProduct({ detailItems: moveItem(theme.product.detailItems, from, to) }));
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
+  const [prodQuery, setProdQuery] = useState("");
+  const setDetailItem = (id: string, patch: Partial<DetailItem>) =>
+    theme && setProduct({ detailItems: theme.product.detailItems.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
 
   const undo = useCallback(() => {
     const prev = undoStack.current.pop();
@@ -920,6 +932,132 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         </li>
                       );
                     })}
+                  </ul>
+                </div>
+              )}
+
+
+              {theme.product.layout === "showcase" && (
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className={labelCls} style={{ marginBottom: 0 }}>ชุดรายละเอียดสินค้า — หัวข้อที่โชว์ใต้ราคา (พับเก็บ/แท็บ ตามที่เลือกด้านบน)</label>
+                    <button
+                      onClick={() => {
+                        const id = `d${Date.now().toString(36).slice(-5)}`;
+                        setProduct({ detailItems: [...theme.product.detailItems, { id, label: "หัวข้อใหม่", source: "text", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true }] });
+                        setOpenDetail(id);
+                      }}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      + เพิ่มหัวข้อ
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-2">ตั้งที่เดียว ใช้ทุกสินค้า · แต่ละหัวข้อเลือกได้ว่าเอาข้อมูลจากไหน และใช้กับรุ่นไหน · สินค้าที่ไม่มีข้อมูลในหัวข้อนั้น หัวข้อจะหายไปเอง</p>
+                  <ul className="space-y-1.5">
+                    {theme.product.detailItems.map((it, i) => {
+                      const open = openDetail === it.id;
+                      const src = (choices.detailSources ?? []).find((x) => x.value === it.source);
+                      const scope = it.applyTo === "all" ? "ทุกสินค้า" : it.applyTo === "categories" ? `${it.categories.length} หมวด` : `${it.products.length} รุ่น`;
+                      return (
+                        <li key={it.id} {...detailDrag.rowProps(i)} className={`rounded-lg border border-slate-200 bg-white ${detailDrag.rowCls(i)} ${it.enabled ? "" : "opacity-60"}`}>
+                          <div className="flex items-center gap-2 px-2 py-1.5">
+                            <DragHandle {...detailDrag.handleProps(i)} />
+                            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={it.enabled} onChange={(e) => setDetailItem(it.id, { enabled: e.target.checked })} title="แสดง/ซ่อนหัวข้อนี้" />
+                            <button onClick={() => setOpenDetail(open ? null : it.id)} className="flex-1 min-w-0 text-left">
+                              <span className={`block text-sm ${it.enabled ? "text-slate-800" : "line-through text-slate-400"}`}>{it.label}</span>
+                              <span className="block text-[11px] text-slate-400 truncate">{src?.label ?? it.source} · {scope}</span>
+                            </button>
+                            <button onClick={() => setOpenDetail(open ? null : it.id)} className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-slate-400" title={open ? "พับ" : "ตั้งค่า"}>{open ? "▾" : "✎"}</button>
+                            <button onClick={() => { if (confirm(`ลบหัวข้อ "${it.label}"?`)) setProduct({ detailItems: theme.product.detailItems.filter((x) => x.id !== it.id) }); }} className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-400 hover:text-red-600 hover:border-red-300" title="ลบ">🗑️</button>
+                          </div>
+                          {open && (
+                            <div className="border-t border-slate-100 px-3 py-3 grid gap-3 sm:grid-cols-2">
+                              <div>
+                                <label className={labelCls}>ชื่อหัวข้อ</label>
+                                <input className={inputCls} value={it.label} onChange={(e) => setDetailItem(it.id, { label: e.target.value })} maxLength={60} />
+                              </div>
+                              <div>
+                                <label className={labelCls}>เอาข้อมูลจาก</label>
+                                <select className={inputCls} value={it.source} onChange={(e) => setDetailItem(it.id, { source: e.target.value as DetailSource })}>
+                                  {(choices.detailSources ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                </select>
+                                {src?.hint && <p className="text-[11px] text-slate-400 mt-1">{src.hint}</p>}
+                              </div>
+                              {it.source === "fields" && (
+                                <div className="sm:col-span-2">
+                                  <label className={labelCls}>ฟิลด์ที่โชว์ (เรียงตามที่ติ๊ก)</label>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {(choices.specFields ?? []).map((f) => {
+                                      const on = it.fields.includes(f.key);
+                                      return (
+                                        <button key={f.key} onClick={() => setDetailItem(it.id, { fields: on ? it.fields.filter((k) => k !== f.key) : [...it.fields, f.key] })} className={`px-2.5 py-1 rounded-full border text-xs ${on ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                                          {on ? "✓ " : ""}{f.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-1">ค่ามาจากช่องใน Parent SKU (แท็บข้อมูลสินค้า) · ช่องที่ว่างจะไม่โชว์</p>
+                                </div>
+                              )}
+                              {it.source === "text" && (
+                                <div className="sm:col-span-2">
+                                  <label className={labelCls}>ข้อความ</label>
+                                  <textarea className={`${inputCls} min-h-[96px]`} value={it.text} onChange={(e) => setDetailItem(it.id, { text: e.target.value })} maxLength={4000} placeholder={"เช่น รับประกันงานเย็บ 6 เดือน\nเช็ดด้วยผ้าแห้ง หลีกเลี่ยงแสงแดดจัด"} />
+                                  <p className="text-[11px] text-slate-400 mt-1">ขึ้นบรรทัดใหม่ได้ · ใช้กับทุกรุ่นที่เลือกด้านล่าง</p>
+                                </div>
+                              )}
+                              <div>
+                                <label className={labelCls}>ใช้กับรุ่นไหน</label>
+                                <select className={inputCls} value={it.applyTo} onChange={(e) => setDetailItem(it.id, { applyTo: e.target.value as DetailApply })}>
+                                  <option value="all">ทุกสินค้า</option>
+                                  <option value="categories">เฉพาะหมวด</option>
+                                  <option value="products">เลือกเป็นรายตัว</option>
+                                </select>
+                              </div>
+                              {it.applyTo === "categories" && (
+                                <div>
+                                  <label className={labelCls}>หมวด ({it.categories.length})</label>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {(choices.categories ?? []).map((c) => {
+                                      const on = it.categories.includes(c.key);
+                                      return (
+                                        <button key={c.key} onClick={() => setDetailItem(it.id, { categories: on ? it.categories.filter((k) => k !== c.key) : [...it.categories, c.key] })} className={`px-2.5 py-1 rounded-full border text-xs ${on ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                                          {on ? "✓ " : ""}{c.label}
+                                        </button>
+                                      );
+                                    })}
+                                    {!(choices.categories ?? []).length && <span className="text-[11px] text-slate-400">ยังไม่มีหมวด — ตั้งที่แท็บจับคู่ฟิลด์</span>}
+                                  </div>
+                                </div>
+                              )}
+                              {it.applyTo === "products" && (
+                                <div className="sm:col-span-2">
+                                  <label className={labelCls}>รุ่นที่ใช้ ({it.products.length} รุ่น)</label>
+                                  <input className={`${inputCls} mb-1.5`} value={prodQuery} onChange={(e) => setProdQuery(e.target.value)} placeholder="ค้นหารหัส/ชื่อรุ่น" />
+                                  <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                                    {(choices.products ?? [])
+                                      .filter((pr) => !prodQuery.trim() || `${pr.code} ${pr.name}`.toLowerCase().includes(prodQuery.trim().toLowerCase()))
+                                      .slice(0, 80)
+                                      .map((pr) => {
+                                        const on = it.products.includes(pr.code.toUpperCase());
+                                        return (
+                                          <label key={pr.code} className="flex items-center gap-2 px-2 py-1 text-xs text-slate-700 cursor-pointer hover:bg-slate-50">
+                                            <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={on} onChange={(e) => setDetailItem(it.id, { products: e.target.checked ? [...it.products, pr.code.toUpperCase()] : it.products.filter((k) => k !== pr.code.toUpperCase()) })} />
+                                            <span className="font-mono text-[11px] text-slate-500">{pr.code}</span>
+                                            <span className="truncate">{pr.name}</span>
+                                          </label>
+                                        );
+                                      })}
+                                    {!(choices.products ?? []).length && <p className="px-2 py-2 text-[11px] text-slate-400">ยังไม่มีสินค้าบนเว็บร้านนี้</p>}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                    {!theme.product.detailItems.length && <li className="rounded-lg border border-dashed border-slate-300 py-4 text-center text-xs text-slate-400">ยังไม่มีหัวข้อ — กด "+ เพิ่มหัวข้อ"</li>}
                   </ul>
                 </div>
               )}

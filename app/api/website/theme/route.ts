@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
+import { normalizeFieldMap } from "@/lib/website-field-map";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import {
@@ -29,6 +30,8 @@ import {
   PRODUCT_SECTIONS,
   PRODUCT_GALLERY_STYLES,
   PRODUCT_DETAILS_STYLES,
+  PRODUCT_SPEC_FIELDS,
+  DETAIL_SOURCES,
   IMAGE_RATIOS,
   CARD_HOVERS,
 } from "@/lib/website-theme";
@@ -45,12 +48,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, theme, theme_draft")
+    .select("id, name, slug, theme, theme_draft, field_map")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
 
-  const s = shop as { id: string; name: string; slug: string; theme: unknown; theme_draft: unknown };
+  const s = shop as { id: string; name: string; slug: string; theme: unknown; theme_draft: unknown; field_map: unknown };
+
+  // รายการสินค้าบนเว็บ (รหัส+ชื่อ) ไว้ให้เลือก "ใช้กับรุ่นไหน" ในชุดรายละเอียดสินค้า
+  const { data: listRows } = await sb.from("store_listings").select("parent_sku_id").eq("shop_id", s.id).limit(500);
+  const parentIds = ((listRows ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
+  const { data: parentRows } = parentIds.length
+    ? await sb.from("parent_skus_v2").select("code, name_th").in("id", parentIds)
+    : { data: [] as { code: string; name_th: string | null }[] };
+  const webProducts = ((parentRows ?? []) as { code: string; name_th: string | null }[])
+    .filter((r) => r.code)
+    .map((r) => ({ code: r.code, name: r.name_th ?? "" }))
+    .sort((a, b) => a.code.localeCompare(b.code));
 
   // เวอร์ชันล่าสุด (ไว้โชว์ "บันทึกล่าสุดเมื่อ...")
   const [{ data: last }, { data: dom }] = await Promise.all([
@@ -87,6 +101,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       productSections: PRODUCT_SECTIONS,
       productGalleryStyles: PRODUCT_GALLERY_STYLES,
       productDetailsStyles: PRODUCT_DETAILS_STYLES,
+      detailSources: DETAIL_SOURCES,
+      specFields: PRODUCT_SPEC_FIELDS.map((f) => ({ key: f.key, label: f.label })),
+      categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label })),
+      products: webProducts,
       imageRatios: IMAGE_RATIOS,
       cardHovers: CARD_HOVERS,
     },

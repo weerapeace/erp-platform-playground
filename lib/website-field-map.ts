@@ -10,6 +10,8 @@
  *          ถ้าเว้นว่าง → คำนวณจาก field_map (ดึงจาก Parent SKU / SKU ลูก)
  */
 
+import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
+
 export type NameSource = "name_th" | "name_platform" | "name_en" | "sku_name" | "code";
 export type PriceSource = "sku_max" | "sku_min" | "final_price" | "sale_price" | "fake_price";
 export type DescSource = "platform_description" | "introduction" | "description" | "english_description" | "none";
@@ -163,6 +165,21 @@ export interface ParentRow {
   fake_price: number | string | null;
   cover_image_r2_key: string | null;
   category_id: string | null;
+  // ฟิลด์สเปก (optional — บางที่ select ไม่ครบ)
+  materials?: string | null;
+  size_summary?: string | null;
+  custom_size?: string | null;
+  size_length_cm?: number | string | null;
+  size_height_cm?: number | string | null;
+  size_thickness_cm?: number | string | null;
+  weight_g?: number | string | null;
+  lining?: string | null;
+  strap?: string | null;
+  zipper?: string | null;
+  spares?: string | null;
+  logo?: string | null;
+  thread?: string | null;
+  warranty?: string | null;
 }
 
 export interface ChildSku {
@@ -191,8 +208,23 @@ export interface ListingRow {
 }
 
 /** คอลัมน์ที่ต้อง select จาก parent_skus_v2 ให้ resolver ทำงานได้ครบ */
+// ⚠️ ต้องเป็น string literal ก้อนเดียว (ห้าม + ต่อ) ไม่งั้น type ของ supabase .select() พัง (GenericStringError)
+// ท้ายรายการ = ฟิลด์สเปกสำหรับ "ชุดรายละเอียดสินค้า" บนเว็บ (lib/website-theme.ts PRODUCT_SPEC_FIELDS) — ไม่มีต้นทุน/ข้อมูลภายใน
 export const PARENT_SELECT =
-  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id";
+  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty";
+
+/** ค่าฟิลด์สเปกของ Parent SKU ที่ไม่ว่าง (key → ข้อความพร้อมหน่วย) ส่งให้เว็บร้านโชว์ในหัวข้อ "ฟิลด์จาก Parent SKU" */
+export function productSpecAttrs(p: ParentRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of PRODUCT_SPEC_FIELDS) {
+    const v = (p as unknown as Record<string, unknown>)[f.key];
+    if (v == null) continue;
+    const str = typeof v === "number" ? (v > 0 ? String(v) : "") : String(v).trim();
+    if (!str) continue;
+    out[f.key] = f.unit ? `${str} ${f.unit}` : str.slice(0, 1000);
+  }
+  return out;
+}
 
 export const CHILD_SELECT =
   "id, code, color, color_index, list_price, cover_image_r2_key, parent_sku_id, attribute_values";

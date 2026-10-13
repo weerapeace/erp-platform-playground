@@ -16,6 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeFieldMap,
   resolveProduct,
+  productSpecAttrs,
   PARENT_SELECT,
   CHILD_SELECT,
   type ParentRow,
@@ -132,6 +133,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         /** ตัวเลือกกลุ่มที่ 2 (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง */
         options2: r.options2,
         featured: Boolean(l.featured),
+        /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
+        attrs: productSpecAttrs(p),
         images: r.images.map(imageUrl),
       };
     })
