@@ -17,7 +17,7 @@ import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { FieldCreatorModal } from "@/components/field-creator";
-import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart } from "@/lib/website-theme";
+import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart, type ImagePlaceholder } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, GOOGLE_FONTS, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
@@ -43,7 +43,7 @@ type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 type MenuAlign = "left" | "center" | "right";
 type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
-type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap";
+type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap" | "slide";
 type ProductLayout = "classic" | "showcase";
 type ProductTitleStyle = "serif" | "display";
 type ProductImageBg = "tint" | "surface" | "none";
@@ -73,11 +73,12 @@ interface Theme {
     imageDarkKey: string | null;
     faviconKey: string | null;
     height: number;
+    placeholder: ImagePlaceholder;
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string } };
   menu: MenuConfig;
   footer: FooterConfig;
-  card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover; showCompare: boolean; showSwatches: boolean; showUnit: boolean; showCategory: boolean; quickAdd: "hover" | "always" | "none"; align: "left" | "center"; columns: { desktop: number; tablet: number; mobile: number }; gap: "sm" | "md" | "lg"; nameSize: number; priceSize: number; imageFit: "cover" | "contain" };
+  card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover; showCompare: boolean; showSwatches: boolean; swatchMax: number; swatchSwap: boolean; showColorCount: boolean; showUnit: boolean; showCategory: boolean; quickAdd: "hover" | "always" | "none"; align: "left" | "center"; columns: { desktop: number; tablet: number; mobile: number }; gap: "sm" | "md" | "lg"; nameSize: number; priceSize: number; imageFit: "cover" | "contain" };
   product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
 
@@ -515,7 +516,12 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (theme.radius !== published.radius) out.push("ความมนขอบ");
     if (!eq(theme.typography, published.typography)) out.push("ตัวอักษร");
     if (!eq(theme.shape, published.shape)) out.push("รูปทรง");
-    if (!eq(theme.logo, published.logo)) out.push("โลโก้");
+    {
+      const { placeholder: ph, ...lg } = theme.logo;
+      const { placeholder: php, ...lgp } = published.logo;
+      if (!eq(lg, lgp)) out.push("โลโก้");
+      if (!eq(ph, php)) out.push("รอรูปโหลด");
+    }
     if (!eq(theme.header, published.header)) out.push("Header");
     if (!eq(theme.menu, published.menu)) out.push("เมนู");
     if (!eq(theme.footer, published.footer)) out.push("Footer");
@@ -653,7 +659,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "header" && dirtyFields.includes("Header")) ||
     (k === "menu" && dirtyFields.includes("เมนู")) ||
     (k === "footer" && dirtyFields.includes("Footer")) ||
-    (k === "card" && dirtyFields.includes("การ์ดสินค้า")) ||
+    (k === "card" && (dirtyFields.includes("การ์ดสินค้า") || dirtyFields.includes("รอรูปโหลด"))) ||
     (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง"))) ||
     (k === "product" && dirtyFields.includes("หน้าสินค้า"));
 
@@ -1227,6 +1233,39 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 {/* หน้าตาจุดสีมาจากทะเบียนสีกลาง (ใช้ทุกร้าน) — บันทึกแล้วเว็บเปลี่ยนทันที ไม่ต้องกดเผยแพร่ธีม */}
                 <span className="ml-auto"><ColorSwatchButton /></span>
               </div>
+
+              {/* 🎨 จุดสีบนการ์ด */}
+              {theme.card.showSwatches && (
+                <div className="mt-3 rounded-lg bg-slate-50 p-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      จุดสีสูงสุด
+                      <select className="rounded-lg border border-slate-200 px-2 py-1 text-sm bg-white" value={theme.card.swatchMax} onChange={(e) => setCard({ swatchMax: Number(e.target.value) })}>
+                        {[3, 4, 5, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n} จุด</option>)}
+                      </select>
+                      <span className="text-[11px] text-slate-400">เกินโชว์ +N</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card.swatchSwap} onChange={(e) => setCard({ swatchSwap: e.target.checked })} />
+                      ชี้ (คอม) / แตะ (มือถือ) จุดสี แล้วรูปการ์ดเปลี่ยนเป็นสีนั้น
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card.showColorCount} onChange={(e) => setCard({ showColorCount: e.target.checked })} />
+                      โชว์จำนวนสี (เช่น &quot;4 สี&quot;)
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-400">เลือกว่าแต่ละรุ่นโชว์สีไหนบ้าง + ★ สีหลัก (รูปแรกบนการ์ด) ได้ที่ Parent SKU → แท็บ 🛍 เว็บไซต์ · ไม่ตั้ง = ทุกสีตามลำดับเดิม · กดการ์ดหลังเลือกสี = เปิดหน้าสินค้าโดยเลือกสีนั้นไว้</p>
+                </div>
+              )}
+
+              {/* 🖼 ระหว่างรอรูปโหลด — ใช้ทั้งการ์ดและหน้าสินค้า (เก็บใน logo.placeholder) */}
+              <PlaceholderSettings
+                value={theme.logo.placeholder}
+                onChange={(p) => setLogo({ placeholder: { ...theme.logo.placeholder, ...p } })}
+                logoKey={theme.logo.imageKey}
+                surface={theme.colors.surface}
+                ratio={RATIO_CSS[theme.card.imageRatio] ?? "4 / 5"}
+              />
 
               {/* การ์ดจำลองจากสินค้าจริง — เปลี่ยนค่าแล้วเห็นทันที (ชี้เมาส์ดูเอฟเฟกต์) */}
               <div className="mt-4 pt-3 border-t border-slate-100">
@@ -2387,6 +2426,48 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
 /* ─────────── การ์ดสินค้าจำลอง (แท็บการ์ดสินค้า) — เลียนแบบ storefront ProductCard ให้ใกล้ที่สุด ─────────── */
 const RATIO_CSS: Record<string, string> = { "1:1": "1 / 1", "4:3": "4 / 3", "4:5": "4 / 5", "3:4": "3 / 4", "16:9": "16 / 9" };
 const STOCK_TH: Record<string, { text: string; color: string }> = { in: { text: "พร้อมส่ง", color: "#1F9254" }, low: { text: "เหลือน้อย", color: "#C77A0A" }, preorder: { text: "สั่งจอง", color: "#8A8F97" } };
+/** 🖼 ระหว่างรอรูปโหลด: โลโก้จาง ๆ กลางกรอบรูป (การ์ด + หน้าสินค้า) — ตัวอย่างสดด้านขวา */
+function PlaceholderSettings({ value, onChange, logoKey, surface, ratio }: { value: ImagePlaceholder; onChange: (p: Partial<ImagePlaceholder>) => void; logoKey: string | null; surface: string; ratio: string }) {
+  const k = value.imageKey ?? logoKey;
+  const url = k ? keyUrl(k, 400) : null;
+  return (
+    <div className="mt-4 pt-3 border-t border-slate-100">
+      <label className={labelCls}>🖼 ระหว่างรอรูปโหลด (การ์ดสินค้า + หน้าสินค้า)</label>
+      <div className="grid gap-3 sm:grid-cols-[1fr_7rem]">
+        <div className="space-y-2">
+          <select className={inputCls} value={value.mode} onChange={(e) => onChange({ mode: e.target.value as ImagePlaceholder["mode"] })}>
+            <option value="logo">โลโก้แบรนด์จาง ๆ กลางกรอบ แล้วรูปจริงค่อย ๆ ขึ้นทับ</option>
+            <option value="none">พื้นเปล่า (ไม่มีโลโก้)</option>
+          </select>
+          {value.mode === "logo" && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-slate-500">ความจาง ({value.opacity}%)</label>
+                  <input type="range" min={4} max={40} step={2} value={value.opacity} onChange={(e) => onChange({ opacity: Number(e.target.value) })} className="w-full" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-500">ขนาดโลโก้ ({value.size}% ของกรอบ)</label>
+                  <input type="range" min={20} max={70} step={2} value={value.size} onChange={(e) => onChange({ size: Number(e.target.value) })} className="w-full" />
+                </div>
+              </div>
+              <ImageUploadField label="โลโก้สำหรับจุดนี้ (ว่าง = ใช้โลโก้หลัก)" hint="แนะนำโลโก้สีเดียว พื้นใส" value={value.imageKey} onChange={(key) => onChange({ imageKey: key })} height={44} />
+              {!k && <p className="text-[11px] text-amber-600">ยังไม่มีรูปโลโก้ — อัปโหลดที่แท็บ “โลโก้” หรือช่องด้านบน (ไม่มีรูป = พื้นเปล่า)</p>}
+            </>
+          )}
+        </div>
+        <div className="relative rounded-lg overflow-hidden border border-slate-200" style={{ aspectRatio: ratio, background: surface }} title="ตัวอย่างตอนรูปยังโหลดไม่เสร็จ">
+          {value.mode === "logo" && url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={url} alt="" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 object-contain" style={{ width: `${value.size}%`, opacity: value.opacity / 100, filter: "grayscale(1)" }} />
+          )}
+          <span className="absolute bottom-1 left-0 right-0 text-center text-[9px] text-slate-400">ตัวอย่าง</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SampleCard({ item, card, colors, fonts, radius }: { item: SampleItem; card: Theme["card"]; colors: Theme["colors"]; fonts: Theme["fonts"]; radius: Theme["radius"] }) {
   const [hover, setHover] = useState(false);
   const r = radius === "sharp" ? 4 : radius === "round" ? 20 : 12;
@@ -2433,10 +2514,12 @@ function SampleCard({ item, card, colors, fonts, radius }: { item: SampleItem; c
           {card.showUnit && <span className="text-[0.8em]" style={{ color: colors.muted }}> / {item.unit}</span>}
         </div>
         {card.showSwatches && item.swatches.length > 0 && (
-          <div className={`flex gap-1 mt-1.5 ${card.align === "center" ? "justify-center" : ""}`}>
-            {item.swatches.slice(0, 6).map((c, i) => <span key={i} className="inline-block w-3 h-3 rounded-full bg-cover bg-center" style={{ background: c.color, backgroundImage: c.color ? undefined : `url(${c.img})`, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.15)" }} />)}
+          <div className={`flex items-center gap-1 mt-1.5 ${card.align === "center" ? "justify-center" : ""}`}>
+            {item.swatches.slice(0, card.swatchMax).map((c, i) => <span key={i} className="inline-block w-3 h-3 rounded-full bg-cover bg-center" style={{ background: c.color, backgroundImage: c.color ? undefined : `url(${c.img})`, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.15)" }} />)}
+            {item.swatches.length > card.swatchMax && <span className="text-[9px]" style={{ color: colors.muted }}>+{item.swatches.length - card.swatchMax}</span>}
           </div>
         )}
+        {card.showColorCount && item.swatches.length > 1 && <div className="text-[9px] mt-0.5" style={{ color: colors.muted }}>{item.swatches.length} สี</div>}
       </div>
     </div>
   );

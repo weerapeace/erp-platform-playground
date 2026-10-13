@@ -18,6 +18,7 @@ import { DEFAULT_PERSONALIZE, type PersonalizeConfig } from "@/lib/website-perso
 import { PersonalizeEditor } from "@/components/personalize-editor";
 import { ProductBannersEditor } from "@/components/product-banners-editor";
 import type { ProductBanner } from "@/lib/website-banners";
+import type { CardColors } from "@/lib/website-card-colors";
 import type { NameRuleFlag } from "@/lib/website-field-map";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
@@ -42,6 +43,8 @@ type ShopState = {
   webDetails: Record<string, DetailOverride>;
   webPersonalize: PersonalizeConfig | null;
   webBanners: ProductBanner[];
+  /** 🎴 สีที่โชว์บนการ์ด + สีหลัก (colors null = ทุกสี) */
+  webCardColors: CardColors;
   detailItems: DetailItemInfo[];
   soldQty: number;
   productUrl: string;
@@ -163,6 +166,22 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
     }
   };
 
+  // 🎴 สีบนการ์ด — เก็บเป็นชื่อสี (ไม่สนตัวพิมพ์) · ติ๊กครบทุกสี = กลับเป็นค่าเริ่มต้น (null)
+  const sameColor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const colorLabels = () => {
+    const out: string[] = [];
+    for (const v of data?.variants ?? []) if (v.label && !out.some((x) => sameColor(x, v.label))) out.push(v.label);
+    return out;
+  };
+  const cardShown = (s: ShopState, label: string) => s.webCardColors.colors === null || s.webCardColors.colors.some((c) => sameColor(c, label));
+  const toggleCardColor = (s: ShopState, label: string) => {
+    const all = colorLabels();
+    const next = all.filter((l) => (sameColor(l, label) ? !cardShown(s, l) : cardShown(s, l)));
+    patchShop(s.shopId, { webCardColors: { ...s.webCardColors, colors: next.length === all.length ? null : next } });
+  };
+  const setCardMain = (s: ShopState, label: string) =>
+    patchShop(s.shopId, { webCardColors: { ...s.webCardColors, main: s.webCardColors.main && sameColor(s.webCardColors.main, label) ? null : label } });
+
   const saveShop = async (s: ShopState) => {
     if (!parentId) return;
     setSavingShop(s.shopId);
@@ -176,6 +195,7 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
             webName: s.webName, webDescription: s.webDescription,
             webImages: s.webImages, webSkuImages: s.webSkuImages, webDetails: s.webDetails,
             webPersonalize: s.webPersonalize, webBanners: s.webBanners,
+            webCardColors: s.webCardColors,
           },
         }),
       });
@@ -306,6 +326,18 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                   <div className="text-xs font-medium text-slate-600 mb-1.5">
                     ตัวเลือก (สี) — {data.variants.length} แบบ · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น
                   </div>
+                  {(() => {
+                    const all = colorLabels();
+                    const shown = all.filter((l) => cardShown(s, l)).length;
+                    const custom = s.webCardColors.colors !== null || s.webCardColors.main !== null;
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 mb-1.5 rounded-lg bg-emerald-50/60 px-2 py-1">
+                        <span>🎴 การ์ดสินค้า: โชว์จุดสี <b className="text-slate-700">{shown}/{all.length}</b> สี · ★ สีหลัก (รูปแรกบนการ์ด): <b className="text-slate-700">{s.webCardColors.main ?? "ตามลำดับเดิม"}</b></span>
+                        {custom && <button type="button" onClick={() => patchShop(s.shopId, { webCardColors: { colors: null, main: null } })} className="text-blue-600 hover:underline">ใช้ค่าเริ่มต้น (ทุกสี)</button>}
+                        <span className="text-slate-400">กด 🎴 เพื่อโชว์/ซ่อนบนการ์ด · กด ★ เลือกสีหลัก</span>
+                      </div>
+                    );
+                  })()}
                   <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
                     {data.variants.map((v) => {
                       const chosen = s.webSkuImages[v.id] ?? [];
@@ -322,6 +354,20 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                               <div className="text-xs text-slate-400">{v.code} · {baht(v.price)} · สต๊อก {v.qty} · รูปใน SKU {v.gallery.length}</div>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
+                              {(() => {
+                                const on = cardShown(s, v.label);
+                                const isMain = !!s.webCardColors.main && sameColor(s.webCardColors.main, v.label);
+                                return (
+                                  <>
+                                    <button type="button" onClick={() => toggleCardColor(s, v.label)}
+                                      title={on ? "โชว์เป็นจุดสีบนการ์ดสินค้า — กดเพื่อซ่อน" : "ไม่โชว์บนการ์ด — กดเพื่อโชว์"}
+                                      className={`text-xs border rounded-lg px-1.5 py-1 ${on ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-300 line-through"}`}>🎴</button>
+                                    <button type="button" onClick={() => setCardMain(s, v.label)}
+                                      title={isMain ? "สีหลักของการ์ด — กดเพื่อยกเลิก" : "ตั้งเป็นสีหลัก (รูปแรกบนการ์ดเป็นรูปสีนี้)"}
+                                      className={`text-base leading-none px-0.5 ${isMain ? "text-amber-500" : "text-slate-300 hover:text-amber-400"}`}>★</button>
+                                  </>
+                                );
+                              })()}
                               <button onClick={() => setSkuPanel(panelOpen ? null : { shopId: s.shopId, skuId: v.id })}
                                 disabled={!v.gallery.length}
                                 title={v.gallery.length ? "เลือกจากรูปที่อัปโหลดไว้ในหน้า SKU" : "SKU นี้ยังไม่มีรูป — อัปโหลดในหน้า SKU ก่อน"}

@@ -12,7 +12,20 @@ export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
 export type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 export type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
-export type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap";
+/** slide = เลื่อนรูปบนการ์ด (คอม: ลูกศร‹ › ตอนชี้ · มือถือ: ปัดนิ้ว) */
+export type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap" | "slide";
+/** 🖼 ระหว่างรอรูปโหลด: logo = โลโก้จาง ๆ กลางกรอบ · none = พื้นเปล่า */
+export type ImagePlaceholderMode = "logo" | "none";
+export interface ImagePlaceholder {
+  mode: ImagePlaceholderMode;
+  /** รูปโลโก้สำหรับจุดนี้ (r2 key) — ว่าง = ใช้โลโก้หลัก */
+  imageKey: string | null;
+  /** ความจาง % (4–40) */
+  opacity: number;
+  /** ขนาด % ของกรอบ (20–70) */
+  size: number;
+}
+export const DEFAULT_IMAGE_PLACEHOLDER: ImagePlaceholder = { mode: "logo", imageKey: null, opacity: 12, size: 36 };
 export type CardQuickAdd = "hover" | "always" | "none";
 export type CardAlign = "left" | "center";
 export type CardGap = "sm" | "md" | "lg";
@@ -667,6 +680,8 @@ export interface SiteTheme {
     faviconKey: string | null;
     /** ความสูงโลโก้ (px) */
     height: number;
+    /** 🖼 โลโก้จาง ๆ ระหว่างรอรูปสินค้าโหลด (การ์ด + หน้าสินค้า) */
+    placeholder: ImagePlaceholder;
   };
   header: {
     /** ความสูงแถบเมนู (px) */
@@ -704,6 +719,12 @@ export interface SiteTheme {
     /** ราคาเต็มขีดฆ่า (fake_price) · จุดสีตัวเลือก · หน่วย · ชื่อหมวดเหนือชื่อ */
     showCompare: boolean;
     showSwatches: boolean;
+    /** จุดสีสูงสุดกี่จุด (ที่เกินโชว์ +N) */
+    swatchMax: number;
+    /** ชี้ (คอม) / แตะ (มือถือ) จุดสีแล้วรูปการ์ดเปลี่ยนเป็นสีนั้น */
+    swatchSwap: boolean;
+    /** โชว์จำนวนสี เช่น "4 สี" ใต้ชื่อ */
+    showColorCount: boolean;
     showUnit: boolean;
     showCategory: boolean;
     /** ปุ่ม "เพิ่มลงตะกร้า" บนรูป: โผล่ตอนชี้ / โชว์ตลอด / ไม่มี */
@@ -1085,11 +1106,12 @@ export const DEFAULT_THEME: SiteTheme = {
     imageDarkKey: null,
     faviconKey: null,
     height: 34,
+    placeholder: { ...DEFAULT_IMAGE_PLACEHOLDER },
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["cart"] }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" } },
   menu: { items: null, mobileItems: null },
   footer: { ...DEFAULT_FOOTER },
-  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
+  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
@@ -1250,6 +1272,7 @@ export const CARD_HOVERS: { value: CardHover; label: string }[] = [
   { value: "zoom", label: "ซูมรูป" },
   { value: "swap", label: "สลับเป็นรูปที่ 2" },
   { value: "lift-swap", label: "ยกขึ้น + สลับเป็นรูปที่ 2" },
+  { value: "slide", label: "สไลด์รูป (ลูกศรตอนชี้ · มือถือปัดนิ้ว)" },
 ];
 export const CARD_QUICK_ADDS: { value: CardQuickAdd; label: string }[] = [
   { value: "hover", label: "โผล่ตอนชี้เมาส์ (มือถือไม่มี)" },
@@ -1311,6 +1334,11 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       imageDarkKey: key(l.imageDarkKey),
       faviconKey: key(l.faviconKey),
       height: num(l.height, d.logo.height, 20, 80),
+      placeholder: (() => {
+        const p = (l.placeholder && typeof l.placeholder === "object" ? l.placeholder : {}) as Record<string, unknown>;
+        const dp = DEFAULT_IMAGE_PLACEHOLDER;
+        return { mode: pick(p.mode, ["logo", "none"] as const, dp.mode), imageKey: key(p.imageKey), opacity: num(p.opacity, dp.opacity, 4, 40), size: num(p.size, dp.size, 20, 70) };
+      })(),
     },
     header: {
       height: num(h.height, d.header.height, 48, 120),
@@ -1339,9 +1367,12 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       titleLines: num(cd.titleLines, d.card.titleLines, 1, 3),
       showBadge: cd.showBadge !== false,
       showStock: cd.showStock !== false,
-      hover: pick(cd.hover, ["none", "lift", "zoom", "swap", "lift-swap"] as const, d.card.hover),
+      hover: pick(cd.hover, ["none", "lift", "zoom", "swap", "lift-swap", "slide"] as const, d.card.hover),
       showCompare: cd.showCompare !== false,
       showSwatches: cd.showSwatches === true,
+      swatchMax: num(cd.swatchMax, d.card.swatchMax, 3, 12),
+      swatchSwap: cd.swatchSwap !== false,
+      showColorCount: cd.showColorCount === true,
       showUnit: cd.showUnit !== false,
       showCategory: cd.showCategory !== false,
       quickAdd: pick(cd.quickAdd, ["hover", "always", "none"] as const, d.card.quickAdd),

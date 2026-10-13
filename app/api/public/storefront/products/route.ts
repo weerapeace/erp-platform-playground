@@ -27,6 +27,7 @@ import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, produ
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
+import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -219,6 +220,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
         /** ปั๊มชื่อ (null = รุ่นนี้ปั๊มไม่ได้) */
         personalize,
+        /** 🎴 การ์ดสินค้า: id ตัวเลือกที่โชว์เป็นจุดสี (เรียงตามที่ตั้ง · [] = ไม่โชว์) + สีหลัก (รูปแรกบนการ์ด) — ไม่มี = ทุกสีตามลำดับเดิม */
+        ...(() => {
+          const cc = resolveCardColors(r.options?.items ?? [], normalizeCardColors(l.web_card_colors));
+          return { cardColors: cc.show, cardMain: cc.main };
+        })(),
         /** 🖼 ฟิลด์รูปของ Parent SKU { fieldKey: URL } — เฉพาะช่องที่มีรูป (แบนเนอร์ source=field ใช้) */
         imageFields: (() => {
           const out: Record<string, string> = {};

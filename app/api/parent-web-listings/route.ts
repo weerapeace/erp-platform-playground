@@ -21,6 +21,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeBanners } from "@/lib/website-banners";
+import { normalizeCardColors, isEmptyCardColors } from "@/lib/website-card-colors";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
 import {
   normalizeFieldMap,
@@ -181,6 +182,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webPersonalize: l?.web_personalize ? normalizePersonalize(l.web_personalize) : null,
       /** 🖼 แบนเนอร์หน้าสินค้าเฉพาะรุ่น (ว่าง = ใช้แบนเนอร์กลางของธีม) */
       webBanners: normalizeBanners(l?.web_banners),
+      /** 🎴 สีที่โชว์บนการ์ด + สีหลัก (ว่าง = ทุกสีตามลำดับเดิม) */
+      webCardColors: normalizeCardColors(l?.web_card_colors),
       detailItems,
       soldQty: soldByShop.get(s.id) ?? 0,
       productUrl: productUrlFor(code, s.slug, s.is_default),
@@ -215,6 +218,7 @@ type Patch = {
   webDetails?: Record<string, DetailOverride>;
   webPersonalize?: PersonalizeConfig | null;
   webBanners?: unknown;
+  webCardColors?: unknown;
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -289,6 +293,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (p.webBanners !== undefined) {
     const banners = normalizeBanners(p.webBanners);
     row.web_banners = banners.length ? banners : null;
+  }
+  if (p.webCardColors !== undefined) {
+    const cc = normalizeCardColors(p.webCardColors);
+    row.web_card_colors = isEmptyCardColors(cc) ? null : cc;
   }
 
   const { error } = await sb.from("store_listings").upsert(row, { onConflict: "shop_id,parent_sku_id" });
