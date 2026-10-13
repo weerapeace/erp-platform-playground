@@ -32,7 +32,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   open: boolean;
   onClose: () => void;
   initialTab?: PlanSettingsTab;
-  /** ช่องทางทั้งหมดจากรายการกลาง (เปิดใช้อยู่) */
+  /** ช่องทางทั้งหมดจากหน้าแพลตฟอร์มกลาง (รวมที่ปิดอยู่ · is_active บอกสถานะ) */
   allPlatforms: PlatformOpt[];
   /** ช่องทางที่ตั้งไว้ให้โชว์ (เรียงแล้ว) · null = ยังไม่ตั้ง (โชว์ทั้งหมด) */
   planPlatforms: string[] | null;
@@ -70,18 +70,18 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   const resetFrom = () => {
     setPtypes(placementTypes.map((t) => ({ ...t, platforms: [...t.platforms] })));
     const keys = allPlatforms.map((p) => p.value);
-    const sel = planPlatforms ? planPlatforms.filter((k) => keys.includes(k)) : keys;
+    const sel = planPlatforms ? planPlatforms.filter((k) => keys.includes(k)) : allPlatforms.filter((p) => p.is_active !== false).map((p) => p.value);
     setOrder([...sel, ...keys.filter((k) => !sel.includes(k))]);
     setChosen(new Set(sel));
   };
   useEffect(() => { if (open) { setTab(initialTab); resetFrom(); setNewName(""); setBrandId(defaultBrandId || brands[0]?.id || ""); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (open && !brandId && brands[0]) setBrandId(brands[0].id); }, [open, brands, brandId]);
   // ช่องทางสำหรับเป้า/สล็อต = ที่ตั้งให้โชว์ในหน้านี้ (เรียงแล้ว)
-  const planPlatformOpts = (planPlatforms ? planPlatforms : allPlatforms.map((p) => p.value)).map((k) => allPlatforms.find((p) => p.value === k)).filter((p): p is PlatformOpt => !!p);
+  const planPlatformOpts = (planPlatforms ? planPlatforms : allPlatforms.filter((p) => p.is_active !== false).map((p) => p.value)).map((k) => allPlatforms.find((p) => p.value === k)).filter((p): p is PlatformOpt => !!p);
   useEffect(() => { if (open) setOrder((o) => [...o, ...allPlatforms.map((p) => p.value).filter((k) => !o.includes(k))]); }, [allPlatforms, open]);
 
   const byKey = new Map(allPlatforms.map((p) => [p.value, p]));
-  const savedSel = (planPlatforms ?? allPlatforms.map((p) => p.value)).filter((k) => byKey.has(k));
+  const savedSel = (planPlatforms ?? allPlatforms.filter((p) => p.is_active !== false).map((p) => p.value)).filter((k) => byKey.has(k));
   const curSel = order.filter((k) => chosen.has(k));
   const placementsDirty = JSON.stringify(ptypes) !== JSON.stringify(placementTypes);
   const platformsDirty = JSON.stringify(curSel) !== JSON.stringify(savedSel) || placementsDirty;
@@ -150,7 +150,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
 
         {tab === "platforms" ? (
           <div className="space-y-3">
-            <p className="text-xs text-slate-500">ติ๊กช่องทางที่ทีมวางแผน — ใช้เป็นแถวในมุมมองสัปดาห์และตัวเลือกในการ์ดไอเดีย · ลาก ⋮⋮ เพื่อเรียงลำดับ</p>
+            <p className="text-xs text-slate-500">รายการดึงจากหน้าแพลตฟอร์มกลางครบทุกตัว ({allPlatforms.length}) — ติ๊กช่องทางที่ทีมวางแผน ใช้เป็นแถวในมุมมองสัปดาห์และตัวเลือกในการ์ดไอเดีย · ลาก ⋮⋮ เพื่อเรียงลำดับ</p>
             <div className="space-y-1">
               {order.map((k, i) => {
                 const p = byKey.get(k);
@@ -166,6 +166,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
                       <PlatformIcon code={p.value} iconKey={p.icon_key ?? p.icon} size={18} />
                       <span className={`text-sm ${on ? "text-slate-800" : "text-slate-400"}`}>{p.label}</span>
                     </label>
+                    {p.is_active === false && <span className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-500" title="ปิดอยู่ในหน้าแพลตฟอร์มกลาง — ติ๊กใช้ในแผนได้เลย (ฟอร์มสร้างคอนเทนต์ของทีม Creative จะโชว์เมื่อเปิดในหน้าแพลตฟอร์ม)">ปิดในหน้าแพลตฟอร์ม</span>}
                     {!on && <span className="text-[11px] text-slate-400">ไม่โชว์</span>}
                   </div>
                 );

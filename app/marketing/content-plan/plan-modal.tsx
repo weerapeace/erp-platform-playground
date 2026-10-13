@@ -20,7 +20,8 @@ import { createContent, updateContent, deleteContent, createTask, POST_TYPES, sp
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { CONTENT_GOALS, dateKeyOf, timeOf, toScheduledIso, stageOf, STAGE_META, placementId, parsePlacement, platformsFromPlacements, type PlacementType } from "@/lib/marketing/content-plan";
 
-export type PlatformOpt = { value: string; label: string; color?: string | null; icon?: string | null; icon_key?: string | null };
+/** is_active = เปิดอยู่ในหน้าแพลตฟอร์มกลาง (ปิดอยู่ก็ยังเลือกในแผนได้ ถ้าติ๊กไว้ในตั้งค่าหน้าแผน) */
+export type PlatformOpt = { value: string; label: string; color?: string | null; icon?: string | null; icon_key?: string | null; is_active?: boolean };
 
 type Draft = {
   title: string; brand_id: string; pillar_id: string; goal: string; post_types: string[];
@@ -91,7 +92,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
   // ตัวเลือกช่องทาง = ที่ตั้งไว้ในหน้าวางแผน ∩ ช่องทางของแบรนด์ที่เลือก (ถ้าแบรนด์ตั้งไว้) · ที่เลือกอยู่แล้วโชว์เสมอ
   const platformChoices = useMemo(() => {
     const byKey = new Map(platforms.map((p) => [p.value, p]));
-    let keys = planPlatforms ? planPlatforms.filter((k) => byKey.has(k)) : platforms.map((p) => p.value);
+    let keys = planPlatforms ? planPlatforms.filter((k) => byKey.has(k)) : platforms.filter((p) => p.is_active !== false).map((p) => p.value);
     const brandList = d.brand_id ? brandPlatforms[d.brand_id] : undefined;
     if (brandList) keys = keys.filter((k) => brandList.includes(k));
     for (const k of d.platforms) if (!keys.includes(k) && byKey.has(k)) keys.push(k);

@@ -67,9 +67,13 @@ export function useCreativeOptions() {
   const taskTypes = raw.filter((o) => o.kind === "task_type" && o.is_active !== false).map((o) => ({ value: o.key, label: labelOf(o) }));
   const platforms: PlatformOpt[] = raw.filter((o) => o.kind === "platform" && o.is_active !== false).map((o) => ({ value: o.key, label: labelOf(o), color: o.color ?? null, icon: o.icon ?? null, icon_key: o.icon_key ?? null }));
 
+  // ทุกแพลตฟอร์มในหน้าแพลตฟอร์มกลาง (erp_platforms) รวมที่ปิดอยู่ — ใช้ในหน้าที่ต้องเลือกจากรายการเต็ม (เช่น วางแผนคอนเทนต์)
+  const allPlatforms: (PlatformOpt & { is_active: boolean })[] = raw.filter((o) => o.kind === "platform").map((o) => ({ value: o.key, label: labelOf(o), color: o.color ?? null, icon: o.icon ?? null, icon_key: o.icon_key ?? null, is_active: o.is_active !== false }));
+
   return {
     taskTypes: taskTypes.length ? taskTypes : TASK_TYPES,
     platforms: (platforms.length ? platforms : PLATFORMS) as PlatformOpt[],
+    allPlatforms: allPlatforms.length ? allPlatforms : (PLATFORMS as PlatformOpt[]).map((p) => ({ ...p, is_active: true })),
     loading, reload,
   };
 }

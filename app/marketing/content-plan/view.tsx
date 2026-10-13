@@ -43,8 +43,9 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
   embedded?: boolean;
 }) {
   const toast = useToast();
-  const { platforms: platformOpts, reload: reloadOptions } = useCreativeOptions();
-  const platforms = platformOpts as PlatformOpt[];
+  // ช่องทาง = ทุกแพลตฟอร์มจากหน้าแพลตฟอร์มกลาง (รวมที่ปิดอยู่ — เลือกใช้ในแผนได้) · ยังไม่ตั้งค่า = โชว์เฉพาะที่เปิดอยู่
+  const { allPlatforms, reload: reloadOptions } = useCreativeOptions();
+  const platforms = allPlatforms as PlatformOpt[];
 
   const [items, setItems] = useState<ContentItem[] | null>(null);
   const [brands, setBrands] = useState<BrandOption[]>([]);
@@ -101,7 +102,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
   // แถวช่องทาง = ที่ตั้งไว้ (ตามลำดับ) หรือทั้งหมด · เลือกแท็บแบรนด์ที่ตั้ง "ลงช่องทางไหน" ไว้ → เหลือเฉพาะของแบรนด์นั้น
   const rowPlatforms = useMemo(() => {
     const byKey = new Map(platforms.map((p) => [p.value, p]));
-    let keys = planPlatforms ? planPlatforms.filter((k) => byKey.has(k)) : platforms.map((p) => p.value);
+    let keys = planPlatforms ? planPlatforms.filter((k) => byKey.has(k)) : platforms.filter((p) => p.is_active !== false).map((p) => p.value);
     const brandList = brandTab ? brandPlatforms[brandTab] : undefined;
     if (brandList) keys = keys.filter((k) => brandList.includes(k));
     return keys.map((k) => byKey.get(k)!);
