@@ -7,6 +7,7 @@
  *        + ประเภทการลง (แต่งร้าน / ในสินค้า / Story …) แต่ละประเภทติ๊กช่องทางของตัวเอง — บันทึกพร้อมช่องทาง
  *   🧭 แนวคอนเทนต์: LabelListEditor (kind = pillar)
  *   🎯 เป้ารายเดือน / 🗓️ สล็อตประจำสัปดาห์: ต่อแบรนด์ (plan-targets-slots.tsx)
+ *   🔔 รอบเปลี่ยน: อะไรต้องเปลี่ยนทุกกี่วัน ต่อแบรนด์ (plan-refresh.tsx)
  * ของกลาง: ERPModal · useDragReorder/DragHandle · PlatformIcon · createOption · BrandPlatformsModal · LabelListEditor · Toast
  */
 import { useEffect, useState } from "react";
@@ -22,11 +23,12 @@ import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { LabelListEditor } from "../skus/label-manager";
 import type { PlatformOpt } from "./plan-modal";
 import { BrandSelect, TargetsEditor, SlotsEditor } from "./plan-targets-slots";
+import { RefreshRulesEditor } from "./plan-refresh";
 import type { PlacementType } from "@/lib/marketing/content-plan";
 
-export type PlanSettingsTab = "platforms" | "pillars" | "targets" | "slots";
+export type PlanSettingsTab = "platforms" | "pillars" | "targets" | "slots" | "refresh";
 
-export function PlanSettingsModal({ open, onClose, initialTab = "platforms", allPlatforms, planPlatforms, placementTypes, pillars, brands, defaultBrandId, canEdit, canEditBrands, onPlatformsSaved, onPillarsChanged, onOptionsChanged, onBrandPlatformsSaved, onTargetsChanged }: {
+export function PlanSettingsModal({ open, onClose, initialTab = "platforms", allPlatforms, planPlatforms, placementTypes, pillars, brands, defaultBrandId, canEdit, canEditBrands, onPlatformsSaved, onPillarsChanged, onOptionsChanged, onBrandPlatformsSaved, onTargetsChanged, onRefreshChanged }: {
   open: boolean;
   onClose: () => void;
   initialTab?: PlanSettingsTab;
@@ -50,6 +52,8 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
   onBrandPlatformsSaved: (map: BrandPlatformMap) => void;
   /** เป้า/สล็อตเปลี่ยน → ให้หน้าแผนโหลดเป้าใหม่ */
   onTargetsChanged: () => void;
+  /** รอบเปลี่ยนเปลี่ยน → ให้กล่อง 🔔 ต้องเตรียม โหลดใหม่ */
+  onRefreshChanged?: () => void;
 }) {
   const toast = useToast();
   const [tab, setTab] = useState<PlanSettingsTab>(initialTab);
@@ -141,6 +145,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
             onClick={() => setTab("pillars")} className={seg(tab === "pillars")}>🧭 แนวคอนเทนต์ ({pillars.length})</button>
           <button type="button" role="tab" aria-selected={tab === "targets"} disabled={(platformsDirty && canEdit) || pillarDirty} onClick={() => setTab("targets")} className={seg(tab === "targets")}>🎯 เป้ารายเดือน</button>
           <button type="button" role="tab" aria-selected={tab === "slots"} disabled={(platformsDirty && canEdit) || pillarDirty} onClick={() => setTab("slots")} className={seg(tab === "slots")}>🗓️ สล็อตประจำสัปดาห์</button>
+          <button type="button" role="tab" aria-selected={tab === "refresh"} disabled={(platformsDirty && canEdit) || pillarDirty} onClick={() => setTab("refresh")} className={seg(tab === "refresh")}>🔔 รอบเปลี่ยน</button>
         </div>
 
         {tab === "platforms" ? (
@@ -236,7 +241,9 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
             <BrandSelect brands={brands} value={brandId} onChange={setBrandId} />
             {brandId && (tab === "targets"
               ? <TargetsEditor key={`t-${brandId}`} brandId={brandId} platforms={planPlatformOpts} canEdit={canEdit} onChanged={onTargetsChanged} />
-              : <SlotsEditor key={`s-${brandId}`} brandId={brandId} platforms={planPlatformOpts} pillars={pillars} canEdit={canEdit} onChanged={onTargetsChanged} />)}
+              : tab === "refresh"
+                ? <RefreshRulesEditor key={`r-${brandId}`} brandId={brandId} platforms={allPlatforms} placementTypes={placementTypes} canEdit={canEdit} onChanged={() => onRefreshChanged?.()} />
+                : <SlotsEditor key={`s-${brandId}`} brandId={brandId} platforms={planPlatformOpts} pillars={pillars} canEdit={canEdit} onChanged={onTargetsChanged} />)}
           </div>
         )}
       </ERPModal>

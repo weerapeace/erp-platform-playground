@@ -4,6 +4,7 @@
  * 🗓️ วางแผนคอนเทนต์ (ตัวหน้าจอ) — ข้อมูลชุดเดียวกับปฏิทินคอนเทนต์เดิม (erp_creative_content)
  *   แท็บแบรนด์ · มุมมอง สัปดาห์ (แถว=ช่องทาง) / เดือน / บอร์ดตามขั้น · กรองแนวคอนเทนต์ · สรุปแนวในช่วงที่ดูอยู่
  *   กล่องไอเดียยังไม่ลงวัน · ลากวางเปลี่ยนวัน/ขั้น · การ์ดไอเดีย (PlanModal) · รายละเอียดเต็ม = ContentDrawer เดิม
+ *   🔔 ต้องเตรียม (รอบเปลี่ยน) · ใช้เป็นแท็บ "วางแผน" ในปฏิทินคอนเทนต์ (embedded = ไม่มีหัวหน้าของตัวเอง)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
@@ -24,6 +25,8 @@ import { PlanSettingsModal, type PlanSettingsTab } from "./plan-settings-modal";
 import { TargetsPanel, GenerateModal } from "./plan-targets-slots";
 import { DEFAULT_PLACEMENTS, type PlanTarget, type PlacementType } from "@/lib/marketing/content-plan";
 import { WeekView, MonthView, BoardView, BacklogPanel } from "./plan-views";
+import { RefreshPanel, useRefreshRules, refreshRuleLabel } from "./plan-refresh";
+import { refreshStatuses, bangkokDateKey, placementId, type RefreshStatus } from "@/lib/marketing/content-plan";
 
 // รายละเอียดเต็ม/แคปชั่น = ContentDrawer ตัวเดิม (โหลดเมื่อเปิด)
 const ContentDrawer = dynamic(() => import("@/app/tasks/content/content").then((m) => m.ContentDrawer), { ssr: false });
@@ -34,7 +37,11 @@ const BRAND_KEY = "content-plan:brand";
 const readLS = (k: string) => { try { return localStorage.getItem(k) ?? ""; } catch { return ""; } };
 const writeLS = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
 
-export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate: boolean; canEdit: boolean; canPillars: boolean }) {
+export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = false }: {
+  canCreate: boolean; canEdit: boolean; canPillars: boolean;
+  /** ฝังเป็นแท็บในปฏิทินคอนเทนต์ — ไม่โชว์หัวข้อหน้าของตัวเอง (ปุ่มตั้งค่า/ไอเดียใหม่ย้ายไปแถวเครื่องมือ) */
+  embedded?: boolean;
+}) {
   const toast = useToast();
   const { platforms: platformOpts, reload: reloadOptions } = useCreativeOptions();
   const platforms = platformOpts as PlatformOpt[];
@@ -48,7 +55,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
   const [q, setQ] = useState("");
   const [anchorWeek, setAnchorWeek] = useState(() => weekStart(localDateKey(new Date())));
   const [anchorMonth, setAnchorMonth] = useState(() => localDateKey(new Date()).slice(0, 7));
-  const [modal, setModal] = useState<{ item: ContentItem | null; date?: string | null; platform?: string | null } | null>(null);
+  const [modal, setModal] = useState<{ item: ContentItem | null; date?: string | null; platform?: string | null; brandId?: string | null; title?: string | null; placements?: string[] } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [settings, setSettings] = useState<PlanSettingsTab | null>(null);   // เปิดตั้งค่าหน้า (แท็บไหน)
   const [planPlatforms, setPlanPlatforms] = useState<string[] | null>(null); // ช่องทางที่ตั้งให้โชว์ · null = ทั้งหมด
@@ -113,6 +120,9 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
       && (!pillarFilter || (pillarFilter === "__none" ? !c.pillar_id : c.pillar_id === pillarFilter))
       && (!t || `${c.title} ${c.content_no ?? ""} ${c.parent_sku_code ?? ""} ${c.brief ?? ""}`.toLowerCase().includes(t)));
   }, [live, brandTab, pillarFilter, q]);
+  // 🔔 รอบเปลี่ยน: เทียบกฎกับคอนเทนต์ทุกชิ้นที่ไม่ยกเลิก (ไม่สนแนว/คำค้น — เตือนตามของจริง)
+  const { rules: refreshRules, reload: reloadRefresh } = useRefreshRules();
+  const refresh = useMemo(() => refreshStatuses(refreshRules, live, bangkokDateKey(new Date())), [refreshRules, live]);
   const backlog = useMemo(() => filtered.filter((c) => !c.scheduled_at && stageOf(c) !== "published")
     .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")), [filtered]);
 
@@ -169,6 +179,18 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
 
   const openNew = (date?: string | null, platform?: string | null) => canCreate && setModal({ item: null, date: date ?? null, platform: platform ?? null });
   const openItem = (c: ContentItem) => setModal({ item: c });
+  // ＋ เตรียมเลย → การ์ดไอเดียใหม่: แบรนด์ของกฎ + ที่ลง (ประเภท:ช่องทาง) + วันครบรอบ + ชื่อเรียก
+  const prepareRefresh = (s: RefreshStatus) => {
+    if (!canCreate) return;
+    const r = s.rule;
+    setModal({
+      item: null, date: s.suggestDate, brandId: r.brand_id,
+      platform: r.placement_type ? null : r.platform,
+      placements: r.placement_type ? [placementId(r.placement_type, r.platform)] : [],
+      title: r.title || refreshRuleLabel(r, placementTypes, platforms),
+    });
+  };
+  const openContentId = (id: string) => { const c = items?.find((x) => x.id === id); if (c) openItem(c); else setDetailId(id); };
   const pickBrand = (k: string) => { setBrandTab(k); writeLS(BRAND_KEY, k); };
 
   const pillarsWithUsage = useMemo(() => pillars.map((p) => ({ ...p, usage_count: live.filter((c) => c.pillar_id === p.id).length })), [pillars, live]);
@@ -189,7 +211,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
 
   return (
     <>
-      <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
+      {!embedded && <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3 max-w-7xl mx-auto">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-800">🗓️ วางแผนคอนเทนต์</h1>
@@ -200,7 +222,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
             {canCreate && <button type="button" onClick={() => openNew()} className="h-9 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white hover:bg-blue-700">＋ ไอเดียใหม่</button>}
           </div>
         </div>
-      </div>
+      </div>}
 
       <div className="px-4 sm:px-8 py-5 space-y-4 max-w-7xl mx-auto">
         {err && !items ? (
@@ -246,7 +268,16 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
               )}
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหาหัวข้อ / รหัส / บรีฟ…"
                 className="ml-auto h-9 w-full sm:w-64 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {embedded && (
+                <>
+                  <button type="button" onClick={() => setSettings("platforms")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">⚙️ ตั้งค่า</button>
+                  {canCreate && <button type="button" onClick={() => openNew()} className="h-9 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white hover:bg-blue-700">＋ ไอเดียใหม่</button>}
+                </>
+              )}
             </div>
+
+            <RefreshPanel statuses={refresh} brandTab={brandTab} brands={brands} platforms={platforms} placementTypes={placementTypes}
+              canCreate={canCreate} canSetup={canPillars} onPrepare={prepareRefresh} onOpen={openContentId} onSetup={() => setSettings("refresh")} />
 
             <TargetsPanel targets={targets} items={live} month={periodMonth} brandTab={brandTab} brands={brands} platforms={platforms}
               canSetup={canPillars} onSetup={() => setSettings("targets")} />
@@ -291,7 +322,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
         )}
       </div>
 
-      <PlanModal open={!!modal} item={modal?.item ?? null} defaults={{ brandId: brandTab || null, date: modal?.date ?? null, platform: modal?.platform ?? null }}
+      <PlanModal open={!!modal} item={modal?.item ?? null} defaults={{ brandId: modal?.brandId ?? (brandTab || null), date: modal?.date ?? null, platform: modal?.platform ?? null, title: modal?.title ?? null, placements: modal?.placements ?? null }}
         brands={brands} pillars={pillars} platforms={platforms} planPlatforms={planPlatforms} brandPlatforms={brandPlatforms} placementTypes={placementTypes} canEdit={modal?.item ? canEdit : canCreate}
         onClose={() => setModal(null)} onSaved={() => void load()} onOpenDetail={(id) => { setModal(null); setDetailId(id); }}
         onOpenSettings={() => setSettings("platforms")} />
@@ -303,7 +334,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars }: { canCreate:
         canEdit={canPillars} canEditBrands={canEdit}
         onPlatformsSaved={(pf, pt) => { setPlanPlatforms(pf); setPlacementSetting(pt); }} onPillarsChanged={() => void loadPillars()}
         onOptionsChanged={() => reloadOptions(true)} onBrandPlatformsSaved={setBrandPlatforms}
-        defaultBrandId={brandTab || null} onTargetsChanged={() => void loadTargets()} />
+        defaultBrandId={brandTab || null} onTargetsChanged={() => void loadTargets()} onRefreshChanged={() => void reloadRefresh()} />
 
       {brandTab && (
         <GenerateModal open={genOpen} brandId={brandTab} brandName={brandName} month={periodMonth} platforms={platforms} pillars={pillars}

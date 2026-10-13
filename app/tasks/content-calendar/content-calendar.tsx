@@ -7,6 +7,8 @@
 // เฟส 3: คลิกช่องวัน=ป๊อปเลือก (สร้างใหม่/หยิบจากค้าง) · กล่อง "ยังไม่ลงวันที่" · ลากวางเปลี่ยนวัน
 // เฟส 4 (2026-10-07): โหมด "งาน" — ปฏิทินเดียวกัน ใช้กำหนดส่ง (due_date) · การ์ดมีรูปปก · ลากเปลี่ยนกำหนดส่ง
 //   ทุกอย่างทำงานบน CalEntry (รูปกลาง) → แผงปฏิทิน/กล่องค้าง/ป๊อปวัน ใช้โค้ดชุดเดียวทั้ง 2 โหมด
+// 2026-10-13: แท็บ "วางแผน" (?cal=plan) = หน้าวางแผนคอนเทนต์ (ContentPlanView embedded) ย้ายมารวมที่นี่
+//   + ตัวเลข 🔔 บนแท็บ = รอบเปลี่ยนที่ต้องเตรียม (เลยรอบ/ยังไม่เคยทำ/ใกล้ถึงรอบ)
 // ============================================================
 
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
@@ -28,9 +30,18 @@ import { statusMeta, statusLabel, isTerminal, useCreativeStatuses } from "../use
 import { BrandStyleModal } from "./brand-style-modal";
 import { platformLabel, useCreativeOptions } from "../use-options";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { useAuth } from "@/components/auth";
+import dynamic from "next/dynamic";
+import { useRefreshRules } from "@/app/marketing/content-plan/plan-refresh";
+import { refreshStatuses, bangkokDateKey, REFRESH_ALERT_STATES } from "@/lib/marketing/content-plan";
+
+// แท็บวางแผน โหลดเมื่อกดเข้า (ไม่ถ่วงแท็บคอนเทนต์/งาน)
+const ContentPlanView = dynamic(() => import("@/app/marketing/content-plan/view").then((m) => m.ContentPlanView), {
+  ssr: false, loading: () => <div className="px-4 sm:px-8 py-5 space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 rounded-xl bg-slate-100 animate-pulse" />)}</div>,
+});
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
-type CalMode = "content" | "task";
+type CalMode = "content" | "task" | "plan";
 /** รายการบนปฏิทิน (รูปกลางของทั้งคอนเทนต์และงาน) — แผงปฏิทินไม่ต้องรู้ว่าเป็นชนิดไหน */
 type CalEntry = {
   id: string; kind: CalMode; title: string;
@@ -49,11 +60,11 @@ export function ContentCalendarView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
   const { statuses: taskStatuses } = useCreativeStatuses();
-  // โหมดปฏิทิน: คอนเทนต์ (วันตั้งโพสต์) / งาน (กำหนดส่ง) — จำใน URL ?cal=task
+  // โหมดปฏิทิน: คอนเทนต์ (วันตั้งโพสต์) / งาน (กำหนดส่ง) / วางแผน — จำใน URL ?cal=task | ?cal=plan
   const [mode, setModeState] = useState<CalMode>("content");
   const setMode = (m: CalMode) => {
     setModeState(m); setStatusFilter("all"); setCancelAsk(null);
-    try { const u = new URL(window.location.href); if (m === "task") u.searchParams.set("cal", "task"); else u.searchParams.delete("cal"); window.history.replaceState(null, "", u.toString()); } catch { /* noop */ }
+    try { const u = new URL(window.location.href); if (m !== "content") u.searchParams.set("cal", m); else u.searchParams.delete("cal"); window.history.replaceState(null, "", u.toString()); } catch { /* noop */ }
   };
   const [detail, setDetail] = useState<{ kind: CalMode; id: string } | null>(null);
   const [brandFilter, setBrandFilter] = useState<string>("all");   // "all" | brandId
@@ -102,6 +113,11 @@ export function ContentCalendarView() {
   const items = useMemo(() => itemsSWR.data ?? [], [itemsSWR.data]);
   const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
   const brands = brandsSWR.data ?? [];
+  // 🔔 รอบเปลี่ยนที่ต้องเตรียม → ตัวเลขบนแท็บวางแผน (กฎ = แคชร่วมกับแท็บวางแผน)
+  const { can } = useAuth();
+  const { rules: refreshRules } = useRefreshRules();
+  const refreshAlerts = useMemo(() => refreshStatuses(refreshRules, items.filter((c) => !c.is_template), bangkokDateKey(new Date()))
+    .filter((s) => REFRESH_ALERT_STATES.includes(s.state)).length, [refreshRules, items]);
   const campaigns = campaignsSWR.data ?? [];
   const styleMap = useMemo(() => Object.fromEntries((stylesSWR.data ?? []).map((s) => [s.brand_id, s])) as Record<string, BrandCalStyle>, [stylesSWR.data]);
   const loading = mode === "content" ? itemsSWR.loading : tasksSWR.loading;
@@ -113,6 +129,7 @@ export function ContentCalendarView() {
     const sp = new URLSearchParams(window.location.search);
     const cid = sp.get("content"); const tid = sp.get("task");
     if (sp.get("cal") === "task" || tid) setModeState("task");
+    else if (sp.get("cal") === "plan" && !cid) setModeState("plan");
     if (cid) setDetail({ kind: "content", id: cid }); else if (tid) setDetail({ kind: "task", id: tid });
   }, []);
 
@@ -329,6 +346,34 @@ export function ContentCalendarView() {
     );
   };
 
+  const modeBtn = (m: CalMode) => `h-8 px-3 rounded-md text-sm font-medium transition inline-flex items-center gap-1.5 ${mode === m ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
+  const modeSwitch = (
+    <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label={t("เลือกปฏิทิน", "Choose calendar")}>
+      <button onClick={() => setMode("content")} className={modeBtn("content")}>🗓️ {t("คอนเทนต์", "Content")}</button>
+      <button onClick={() => setMode("task")} className={modeBtn("task")}>📋 {t("งาน", "Tasks")}</button>
+      <button onClick={() => setMode("plan")} className={modeBtn("plan")} title={refreshAlerts ? t(`มี ${refreshAlerts} ที่ต้องเตรียม (ถึงรอบเปลี่ยน)`, `${refreshAlerts} to prepare`) : undefined}>
+        🧭 {t("วางแผน", "Plan")}
+        {refreshAlerts > 0 && <span className="min-w-[1.25rem] rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold leading-5 text-white">🔔{refreshAlerts}</span>}
+      </button>
+    </div>
+  );
+
+  // แท็บวางแผน = หน้าวางแผนคอนเทนต์ทั้งหน้า (ข้อมูลชุดเดียวกัน · สิทธิ์ชุดเดิม tasks.* / แนว+ตั้งค่า = marketing.label.manage)
+  if (mode === "plan") {
+    return (
+      <StandaloneShell title={t("วางแผนคอนเทนต์", "Content Plan")} icon="🧭" accent="violet">
+        <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-6">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-slate-900">🧭 {t("วางแผนคอนเทนต์", "Content Plan")}</h1>
+            {modeSwitch}
+          </div>
+          <p className="text-slate-500 mt-1">{t("จะลงอะไร แนวไหน ลงที่ไหน · 🔔 เตือนว่าที่ไหนถึงรอบต้องเปลี่ยน · ข้อมูลชุดเดียวกับแท็บคอนเทนต์", "What, which pillar, where · reminders for recurring refreshes")}</p>
+        </div>
+        <ContentPlanView embedded canCreate={can("tasks.create" as never)} canEdit={can("tasks.edit" as never)} canPillars={can("marketing.label.manage" as never)} />
+      </StandaloneShell>
+    );
+  }
+
   return (
     <StandaloneShell title={L.title} icon={L.icon} accent="violet">
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-6">
@@ -337,10 +382,7 @@ export function ContentCalendarView() {
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-slate-900">{L.icon} {L.title}</h1>
               {/* สลับโหมด คอนเทนต์ ⇄ งาน (ปฏิทินเดียวกัน) */}
-              <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label={t("เลือกปฏิทิน", "Choose calendar")}>
-                <button onClick={() => setMode("content")} className={`h-8 px-3 rounded-md text-sm font-medium transition ${mode === "content" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🗓️ {t("คอนเทนต์", "Content")}</button>
-                <button onClick={() => setMode("task")} className={`h-8 px-3 rounded-md text-sm font-medium transition ${mode === "task" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>📋 {t("งาน", "Tasks")}</button>
-              </div>
+              {modeSwitch}
             </div>
             <p className="text-slate-500 mt-1">{L.desc}</p>
           </div>

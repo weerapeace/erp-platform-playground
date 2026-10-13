@@ -199,3 +199,88 @@ export function placementLabelsFor(placements: string[] | null | undefined, plat
   }
   return out;
 }
+
+// ═══════════════ 🔔 รอบเปลี่ยน — "อะไรต้องเปลี่ยนทุกกี่วัน" (content_refresh_rules) ═══════════════
+/** กฎ: แบรนด์ × ประเภทการลง (ว่าง = ทุกประเภท) × ช่องทาง ต้องมีของใหม่ทุก every_days วัน · เตือนก่อน lead_days วัน */
+export type RefreshRule = {
+  id: string; brand_id: string; placement_type: string | null; platform: string;
+  every_days: number; lead_days: number; title: string | null; is_active: boolean; sort_order?: number;
+};
+/**
+ * สถานะของกฎ (เรียงจากด่วนสุด):
+ *   overdue   = เลยรอบแล้ว ยังไม่มีของใหม่ลงวันไว้
+ *   never     = ยังไม่เคยทำเลย และยังไม่ได้ลงวันไว้
+ *   due_soon  = ใกล้ถึงรอบ (ภายใน lead_days) ยังไม่ได้ลงวันไว้
+ *   late_plan = ลงวันไว้แล้ว แต่ช้ากว่าวันครบรอบ
+ *   waiting   = ยังไม่ถึงรอบ (ยังไม่ต้องทำอะไร)
+ *   prepared  = ลงวันไว้แล้วทันรอบ
+ */
+export type RefreshState = "overdue" | "never" | "due_soon" | "late_plan" | "waiting" | "prepared";
+export const REFRESH_STATE_META: Record<RefreshState, { label: string; icon: string; cls: string; rank: number }> = {
+  overdue: { label: "เลยรอบแล้ว", icon: "🔴", cls: "border-red-200 bg-red-50 text-red-700", rank: 0 },
+  never: { label: "ยังไม่เคยทำ", icon: "⚪", cls: "border-slate-200 bg-slate-50 text-slate-600", rank: 1 },
+  due_soon: { label: "ใกล้ถึงรอบ", icon: "⚠️", cls: "border-amber-200 bg-amber-50 text-amber-800", rank: 2 },
+  late_plan: { label: "ลงไว้ช้ากว่ารอบ", icon: "🟠", cls: "border-orange-200 bg-orange-50 text-orange-700", rank: 3 },
+  waiting: { label: "ยังไม่ถึงรอบ", icon: "⏳", cls: "border-slate-200 bg-white text-slate-500", rank: 4 },
+  prepared: { label: "เตรียมแล้ว", icon: "✅", cls: "border-emerald-200 bg-emerald-50 text-emerald-700", rank: 5 },
+};
+/** สถานะที่ต้องลงมือ (นับเป็นตัวเลขเตือนบนแท็บ) */
+export const REFRESH_ALERT_STATES: RefreshState[] = ["overdue", "never", "due_soon"];
+
+type RefreshItem = { id: string; title?: string | null; brand_id?: string | null; platforms?: string[] | null; placements?: string[] | null; scheduled_at?: string | null; status?: string | null };
+export type RefreshStatus = {
+  rule: RefreshRule; state: RefreshState;
+  /** วันที่ทำรอบล่าสุด (ของที่ลงไปแล้ว) */
+  lastDone: string | null;
+  /** วันครบรอบถัดไป = lastDone + every_days · ยังไม่เคยทำ = null */
+  nextDue: string | null;
+  /** อีกกี่วันถึงรอบ (ติดลบ = เลยมาแล้ว) */
+  daysLeft: number | null;
+  /** ของที่ลงวันไว้สำหรับรอบถัดไป (ชิ้นที่เร็วที่สุด) */
+  prepared: { id: string; title: string; date: string } | null;
+  /** วันที่แนะนำให้ลงของใหม่ (= วันครบรอบ ถ้ายังไม่ผ่าน ไม่งั้น = วันนี้) */
+  suggestDate: string;
+};
+
+/** สถานะที่ถือว่า "ลงไปแล้ว" เมื่อถึงวัน (แต่งร้านมักลงเองที่หลังร้าน ไม่ได้กดโพสต์ผ่านระบบ → พร้อมโพสต์/ตั้งเวลาแล้ว ก็นับ) */
+const DONE_STATUSES = new Set(["published", "scheduled", "ready"]);
+
+export function refreshRuleMatches(rule: Pick<RefreshRule, "brand_id" | "placement_type" | "platform">, c: RefreshItem): boolean {
+  if (c.brand_id !== rule.brand_id || c.status === "cancelled" || !c.scheduled_at) return false;
+  if (rule.placement_type) return (c.placements ?? []).includes(placementId(rule.placement_type, rule.platform));
+  return (c.platforms ?? []).includes(rule.platform);
+}
+
+const dayDiff = (a: string, b: string) => Math.round((parseDateKey(a).getTime() - parseDateKey(b).getTime()) / 86400000);
+
+/** คิดสถานะรอบเปลี่ยนของกฎหนึ่ง · todayKey = "YYYY-MM-DD" (เวลาไทย) · วันของคอนเทนต์คิดเป็นเวลาไทยเสมอ */
+export function refreshStatus(rule: RefreshRule, items: RefreshItem[], todayKey: string): RefreshStatus {
+  let lastDone: string | null = null;
+  const upcoming: { id: string; title: string; date: string }[] = [];
+  const matched = items.filter((c) => refreshRuleMatches(rule, c)).map((c) => ({ c, date: bangkokDateKey(c.scheduled_at!) }));
+  for (const { c, date } of matched) {
+    if (date <= todayKey && DONE_STATUSES.has(String(c.status))) { if (!lastDone || date > lastDone) lastDone = date; }
+  }
+  for (const { c, date } of matched) {
+    if (date >= todayKey && (!lastDone || date > lastDone)) upcoming.push({ id: c.id, title: c.title ?? "", date });
+  }
+  upcoming.sort((a, b) => a.date.localeCompare(b.date));
+  const prepared = upcoming[0] ?? null;
+  const nextDue = lastDone ? addDays(lastDone, rule.every_days) : null;
+  const daysLeft = nextDue ? dayDiff(nextDue, todayKey) : null;
+  let state: RefreshState;
+  if (prepared) state = nextDue && prepared.date > nextDue ? "late_plan" : "prepared";
+  else if (!nextDue) state = "never";
+  else if (daysLeft! < 0) state = "overdue";
+  else if (daysLeft! <= rule.lead_days) state = "due_soon";
+  else state = "waiting";
+  const suggestDate = nextDue && nextDue >= todayKey ? nextDue : todayKey;
+  return { rule, state, lastDone, nextDue, daysLeft, prepared, suggestDate };
+}
+
+/** สถานะทุกกฎที่เปิดอยู่ เรียงด่วนสุดก่อน (เลยรอบ → ยังไม่เคยทำ → ใกล้ถึง → …) แล้วตามวันครบรอบ */
+export function refreshStatuses(rules: RefreshRule[], items: RefreshItem[], todayKey: string): RefreshStatus[] {
+  return rules.filter((r) => r.is_active).map((r) => refreshStatus(r, items, todayKey))
+    .sort((a, b) => REFRESH_STATE_META[a.state].rank - REFRESH_STATE_META[b.state].rank
+      || (a.daysLeft ?? -9999) - (b.daysLeft ?? -9999) || (a.rule.sort_order ?? 0) - (b.rule.sort_order ?? 0));
+}

@@ -34,9 +34,11 @@ type Draft = {
 /** ปุ่มเลือกแบบเรียบ (ช่องทาง/รูปแบบ) — ไม่มีกรอบ · ตัวที่เลือก = พื้นเข้ม */
 const toggleCls = (on: boolean) => `inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-default ${on ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"}`;
 
-function toDraft(c: ContentItem | null, defaults: { brandId?: string | null; date?: string | null; platform?: string | null }): Draft {
+type PlanDefaults = { brandId?: string | null; date?: string | null; platform?: string | null; title?: string | null; placements?: string[] | null };
+
+function toDraft(c: ContentItem | null, defaults: PlanDefaults): Draft {
   if (!c) return {
-    title: "", brand_id: defaults.brandId ?? "", pillar_id: "", goal: "", post_types: [], placements: [], platforms: defaults.platform ? [defaults.platform] : [],
+    title: defaults.title ?? "", brand_id: defaults.brandId ?? "", pillar_id: "", goal: "", post_types: [], placements: defaults.placements ?? [], platforms: defaults.platform ? [defaults.platform] : [],
     date: defaults.date ?? "", time: "10:00", parent: null, brief: "", ref_image_keys: [],
   };
   return {
@@ -54,7 +56,8 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
   open: boolean;
   /** null = สร้างใหม่ */
   item: ContentItem | null;
-  defaults: { brandId?: string | null; date?: string | null; platform?: string | null };
+  /** ค่าตั้งต้นของการ์ดใหม่ (title/placements มาจาก "🔔 ＋ เตรียมเลย") */
+  defaults: PlanDefaults;
   brands: BrandOption[];
   pillars: MarketingSkuLabel[];
   /** ช่องทางทั้งหมดจากรายการกลาง */
