@@ -1121,6 +1121,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             mobile={isMobileEdit ? mob : null}
                             onResetMobile={(k) => setMobile({ [k]: {} } as Partial<ProductMobile>)}
                             products={choices.products ?? []}
+                            fields={choices.specFields ?? []}
                             previewBg={theme.colors.page}
                           />
                         )}
@@ -1505,6 +1506,7 @@ function PartSettings({
   parts,
   setPart,
   products,
+  fields = [],
   previewBg,
   mobile = null,
   onResetMobile,
@@ -1513,6 +1515,8 @@ function PartSettings({
   parts: ProductParts;
   setPart: <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) => void;
   products: { code: string; name: string }[];
+  /** ฟิลด์ Parent SKU (จากทะเบียนฟิลด์) ให้คำอธิบายย่อเลือกดึง */
+  fields?: { key: string; label: string }[];
   previewBg: string;
   /** กำลังตั้งค่าสำหรับมือถือ → ค่ามือถือที่ตั้งแยกไว้ (null = กำลังตั้งคอม) */
   mobile?: ProductMobile | null;
@@ -1580,7 +1584,7 @@ function PartSettings({
     }
     return (
       <div className="mt-2 pt-2 border-t border-slate-100">
-        <BuyItemsEditor buy={b} onChange={(p) => setPart("buy", p)} />
+        <BuyItemsEditor buy={b} onChange={(p) => setPart("buy", p)} fields={fields} />
       </div>
     );
   }
@@ -1678,7 +1682,7 @@ function PartSettings({
 
 /* ─────────── 🧩 จัดชิ้นส่วนในส่วน "ราคา · ตัวเลือก · ใส่ตะกร้า" ─────────── */
 const BUY_SIZES = [70, 80, 90, 100, 110, 125, 150, 175, 200];
-function BuyItemsEditor({ buy, onChange }: { buy: ProductParts["buy"]; onChange: (p: Partial<ProductParts["buy"]>) => void }) {
+function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy"]; onChange: (p: Partial<ProductParts["buy"]>) => void; fields?: { key: string; label: string }[] }) {
   const items = buy.items;
   const [openId, setOpenId] = useState<string | null>(null);
   const drag = useDragReorder((from, to) => onChange({ items: moveItem(items, from, to) }));
@@ -1771,11 +1775,20 @@ function BuyItemsEditor({ buy, onChange }: { buy: ProductParts["buy"]; onChange:
                     </div>
                   )}
                   {it.key === "desc" && (
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className={lbl}>ดึงข้อความจาก</label>
+                        <select className={partInputCls} value={it.field} onChange={(e) => setItem(it.id, { field: e.target.value })}>
+                          <option value="">คำอธิบาย (ตามที่จับคู่ฟิลด์)</option>
+                          {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                        </select>
+                      </div>
                     <div>
                       <label className={lbl}>ตัดกี่บรรทัด</label>
                       <select className={mini} value={it.lines} onChange={(e) => setItem(it.id, { lines: Number(e.target.value) })}>
                         {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n} บรรทัด</option>)}
                       </select>
+                    </div>
                     </div>
                   )}
                   {def.styles && (
