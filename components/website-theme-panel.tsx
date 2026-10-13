@@ -1788,6 +1788,7 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                       <select className={mini} value={it.lines} onChange={(e) => setItem(it.id, { lines: Number(e.target.value) })}>
                         {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n} บรรทัด</option>)}
                       </select>
+                      <div className="mt-1.5"><PartToggle label="ปุ่ม “ดูเพิ่มเติม” เมื่อยาวเกิน" on={it.more} onChange={(v) => setItem(it.id, { more: v })} /></div>
                     </div>
                     </div>
                   )}

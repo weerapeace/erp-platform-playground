@@ -110,6 +110,8 @@ export interface BuyItem {
   text: string;
   /** desc: ดึงข้อความจากฟิลด์ Parent SKU ไหน (key ในทะเบียนฟิลด์) — ว่าง = คำอธิบายตามที่จับคู่ฟิลด์ */
   field: string;
+  /** desc: ปุ่ม "ดูเพิ่มเติม" เมื่อข้อความยาวเกินจำนวนบรรทัด */
+  more: boolean;
 }
 export const BUY_ITEM_DEFS: Record<BuyItemKey, { label: string; hint: string; styles?: { value: string; label: string }[] }> = {
   price: { label: "ราคา", hint: "ราคา + หน่วย + ป้าย + ราคาเต็มขีดฆ่า" },
@@ -135,7 +137,7 @@ export function defaultBuyItem(key: BuyItemKey, col: BuyCol = "left", id?: strin
     id: id ?? (key === "text" ? `t${Date.now().toString(36).slice(-5)}` : key),
     key, enabled: true, col, align: "left", size: 100, color: null, gap: key === "price" ? "sm" : "md",
     showUnit: true, showBadge: true, showCompare: true, lines: 4, label: "",
-    style: key === "stock" ? "text" : key === "options" ? "pills" : key === "button" ? "fill" : "", bg: null, fullWidth: true, bold: false, text: "", field: "",
+    style: key === "stock" ? "text" : key === "options" ? "pills" : key === "button" ? "fill" : "", bg: null, fullWidth: true, bold: false, text: "", field: "", more: true,
   };
 }
 export const DEFAULT_BUY_ITEMS = (): BuyItem[] => BUY_DEFAULT_ORDER.map((d) => defaultBuyItem(d.key, d.col));
@@ -181,6 +183,7 @@ export function normalizeBuyItems(raw: unknown, legacy: { showUnit: boolean; sho
       bold: r.bold === true,
       text: typeof r.text === "string" ? r.text.slice(0, 500) : "",
       field: typeof r.field === "string" && /^[a-z0-9_]{0,60}$/i.test(r.field) ? r.field : "",
+      more: r.more !== false,
     });
     if (out.length >= 20) break;
   }
