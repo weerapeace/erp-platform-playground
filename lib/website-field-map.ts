@@ -22,6 +22,8 @@ export type OptionSource = "sku_color" | "none";
  * เช่น เครื่องมือเจาะหนัง PI338 = จำนวนรู (สี) × ขนาดรู (variant_option)
  */
 export type Option2Source = "variant_option" | "none";
+/** รูปสินค้าบนเว็บมาจากไหน: parent = หน้าปก Parent SKU · skus = รูปของ SKU ลูกแต่ละสี (หลายรูป + สลับตามสี) · both = Parent ก่อนแล้วตามด้วย SKU */
+export type ImageSource = "parent" | "skus" | "both";
 /**
  * หมวดสินค้าบนเว็บ — เป็น "รหัสอะไรก็ได้" ที่เจ้าของตั้งเอง ไม่ใช่รายการตายตัวอีกแล้ว
  * รายการหมวดของแต่ละร้านเก็บใน field_map.categories
@@ -59,7 +61,7 @@ export interface FieldMap {
   category: { default: WebCategory; rules: Record<string, WebCategory> };
   /** รายการหมวดของร้านนี้ — เจ้าของเพิ่ม/แก้/ลบเองได้ในแท็บจับคู่ฟิลด์ */
   categories: WebCategoryDef[];
-  image: { useCover: boolean };
+  image: { useCover: boolean; source: ImageSource };
 }
 
 export const DEFAULT_FIELD_MAP: FieldMap = {
@@ -71,7 +73,7 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
   options2: { source: "none", label: "ตัวเลือกที่ 2" },
   category: { default: "hardware", rules: {} },
   categories: DEFAULT_WEB_CATEGORIES,
-  image: { useCover: true },
+  image: { useCover: true, source: "parent" },
 };
 
 const NAME_SOURCES: NameSource[] = ["name_th", "name_platform", "name_en", "sku_name", "code"];
@@ -143,7 +145,10 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
     },
     category: { default: defaultCat, rules },
     categories: cats,
-    image: { useCover: g("image").useCover !== false },
+    image: {
+      useCover: g("image").useCover !== false,
+      source: (["parent", "skus", "both"] as const).includes(g("image").source as ImageSource) ? (g("image").source as ImageSource) : "parent",
+    },
   };
 }
 
@@ -285,15 +290,16 @@ const sortKids = (kids: ChildSku[]): ChildSku[] =>
   });
 
 /** สร้างตัวเลือกจากสีของ SKU ลูก (ตัดสีซ้ำ) */
-function resolveOptions(map: FieldMap, kids: ChildSku[]): { label: string; items: { id: string; label: string }[] } | null {
+function resolveOptions(map: FieldMap, kids: ChildSku[]): { label: string; items: { id: string; label: string; image?: string | null }[] } | null {
   if (map.options.source !== "sku_color") return null;
   const seen = new Set<string>();
-  const items: { id: string; label: string }[] = [];
+  const items: { id: string; label: string; image?: string | null }[] = [];
   for (const k of sortKids(kids)) {
     const label = clean(k.color);
     if (!label || seen.has(label)) continue;
     seen.add(label);
-    items.push({ id: `sku-${k.id.slice(0, 8)}`, label });
+    // รูปของสีนั้น (r2 key) — เว็บร้านใช้สลับรูปใหญ่ตอนกดเลือกสี
+    items.push({ id: `sku-${k.id.slice(0, 8)}`, label, image: k.cover_image_r2_key ?? null });
     if (items.length >= 24) break;
   }
   return items.length ? { label: map.options.label || "แบบ/สี", items } : null;
@@ -328,7 +334,7 @@ export interface ResolvedProduct {
   unit: string;
   category: string;
   images: string[];
-  options: { label: string; items: { id: string; label: string; swatch?: string | null }[] } | null;
+  options: { label: string; items: { id: string; label: string; swatch?: string | null; image?: string | null }[] } | null;
   /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
   options2: { label: string; items: { id: string; label: string }[] } | null;
 }
@@ -346,7 +352,11 @@ export function resolveProduct(
 ): ResolvedProduct {
   const l = listing ?? {};
 
-  const mappedImages = map.image.useCover && parent.cover_image_r2_key ? [parent.cover_image_r2_key] : [];
+  const parentImages = map.image.useCover && parent.cover_image_r2_key ? [parent.cover_image_r2_key] : [];
+  // รูปจาก SKU ลูก (เรียงตามสี ไม่ซ้ำ) — ได้หลายรูป + เว็บสลับรูปตามสีที่เลือกได้
+  const kidImages = [...new Set(sortKids(kids).map((k) => k.cover_image_r2_key).filter((x): x is string => Boolean(x)))];
+  const mappedImages =
+    map.image.source === "skus" ? (kidImages.length ? kidImages : parentImages) : map.image.source === "both" ? [...new Set([...parentImages, ...kidImages])] : parentImages;
   const listingImages = Array.isArray(l.web_images) ? (l.web_images as string[]).filter(Boolean) : [];
 
   const mappedOptions = resolveOptions(map, kids);

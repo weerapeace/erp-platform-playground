@@ -129,7 +129,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         badge: String(l.web_badge ?? "").trim(),
         stock: String(l.web_stock_status ?? "in").trim() || "in",
         swatch: String(l.web_swatch ?? "").trim(),
-        options: r.options,
+        // รูปต่อสี (r2 key → URL) ให้เว็บสลับรูปใหญ่ตอนเลือกสี
+        options: r.options ? { ...r.options, items: r.options.items.map((it) => ({ ...it, image: it.image ? imageUrl(it.image) : undefined })) } : null,
         /** ตัวเลือกกลุ่มที่ 2 (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง */
         options2: r.options2,
         featured: Boolean(l.featured),

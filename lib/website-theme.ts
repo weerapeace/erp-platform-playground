@@ -21,6 +21,8 @@ export type ProductImageBg = "tint" | "surface" | "none";
 export type ProductGalleryStyle = "editorial" | "spotlight";
 /** รายละเอียดสินค้า: accordion = พับเก็บ · tabs = แท็บ · plain = เรียงต่อกัน */
 export type ProductDetailsStyle = "accordion" | "tabs" | "plain";
+/** หัวข้อพับเก็บเริ่มต้นเป็นอย่างไร: first = เปิดหัวข้อแรก · closed = พับหมด · all = ขยายหมด */
+export type ProductDetailsOpen = "first" | "closed" | "all";
 
 /**
  * "ชุดรายละเอียดสินค้า" — หัวข้อ (พับเก็บ/แท็บ) ตั้งที่เดียว ใช้ทุกสินค้า
@@ -172,6 +174,7 @@ export interface SiteTheme {
     showTabs: boolean;
     galleryStyle: ProductGalleryStyle;
     detailsStyle: ProductDetailsStyle;
+    detailsOpen: ProductDetailsOpen;
     /** ชุดรายละเอียดสินค้า (หัวข้อพับเก็บ/แท็บ) */
     detailItems: ProductDetailItem[];
     /** ลำดับส่วนประกอบ (ครบทุกตัวเสมอ) */
@@ -203,7 +206,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [] },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -277,6 +280,12 @@ export const PRODUCT_DETAILS_STYLES: { value: ProductDetailsStyle; label: string
   { value: "accordion", label: "พับเก็บ กดเปิดทีละหัวข้อ (แบบ Gucci)" },
   { value: "tabs", label: "แท็บ" },
   { value: "plain", label: "เรียงต่อกัน ไม่พับ" },
+];
+
+export const PRODUCT_DETAILS_OPEN: { value: ProductDetailsOpen; label: string }[] = [
+  { value: "first", label: "เปิดหัวข้อแรกไว้ ที่เหลือพับ" },
+  { value: "closed", label: "พับทั้งหมด" },
+  { value: "all", label: "ขยายทั้งหมด (พับได้)" },
 ];
 
 export const PRODUCT_SECTIONS: { value: ProductSection; label: string; hint: string; hideable: boolean }[] = [
@@ -382,6 +391,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       galleryStyle: pick(pd.galleryStyle, ["editorial", "spotlight"] as const, d.product.galleryStyle),
       // ค่าที่บันทึกก่อนมี detailsStyle: showTabs=false เคยหมายถึง "เรียงต่อกัน"
       detailsStyle: pick(pd.detailsStyle, ["accordion", "tabs", "plain"] as const, pd.showTabs === false ? "plain" : d.product.detailsStyle),
+      detailsOpen: pick(pd.detailsOpen, ["first", "closed", "all"] as const, d.product.detailsOpen),
       detailItems: normalizeDetailItems(pd.detailItems),
       sections: normalizeProductSections(pd.sections),
       hidden: normalizeHiddenSections(pd.hidden),

@@ -24,7 +24,7 @@ interface FieldMap {
   category: { default: WebCategory; rules: Record<string, WebCategory> };
   /** อาจไม่มีในข้อมูลเก่า — server จะเติมชุดตั้งต้นให้ */
   categories?: CategoryDef[];
-  image: { useCover: boolean };
+  image: { useCover: boolean; source?: "parent" | "skus" | "both" };
 }
 
 const NAME_OPTS = [
@@ -293,10 +293,23 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
                 type="checkbox"
                 className="w-4 h-4 accent-blue-600"
                 checked={map.image.useCover}
-                onChange={(e) => patch({ image: { useCover: e.target.checked } })}
+                onChange={(e) => patch({ image: { ...map.image, useCover: e.target.checked } })}
               />
               ใช้รูปหน้าปกจาก ERP
             </label>
+          </div>
+          <div className="sm:col-span-2 lg:col-span-3">
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">รูปสินค้าบนเว็บเอาจาก</label>
+            <select
+              className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
+              value={map.image.source ?? "parent"}
+              onChange={(e) => patch({ image: { ...map.image, source: e.target.value as "parent" | "skus" | "both" } })}
+            >
+              <option value="parent">หน้าปก Parent SKU (รูปเดียว)</option>
+              <option value="skus">รูปของ SKU ลูกแต่ละสี (หลายรูป · กดเลือกสีแล้วรูปเปลี่ยน)</option>
+              <option value="both">ทั้งสองอย่าง — หน้าปก Parent ก่อน แล้วตามด้วยรูปแต่ละสี</option>
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">ถ้ากรอกรูปทับไว้ในแท็บ &quot;สินค้าบนเว็บ&quot; จะใช้รูปที่กรอกแทนเสมอ · SKU ลูกที่ไม่มีรูปจะถูกข้าม</p>
           </div>
         </div>
       </div>

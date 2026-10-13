@@ -29,6 +29,7 @@ type ProductImageBg = "tint" | "surface" | "none";
 type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
 type ProductGalleryStyle = "editorial" | "spotlight";
 type ProductDetailsStyle = "accordion" | "tabs" | "plain";
+type ProductDetailsOpen = "first" | "closed" | "all";
 type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
 type DetailApply = "all" | "categories" | "products";
 interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean }
@@ -48,7 +49,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[] };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[] };
 }
 
 interface Choices {
@@ -66,6 +67,7 @@ interface Choices {
   productSections?: { value: ProductSection; label: string; hint: string; hideable: boolean }[];
   productGalleryStyles?: { value: ProductGalleryStyle; label: string; hint: string }[];
   productDetailsStyles?: { value: ProductDetailsStyle; label: string }[];
+  productDetailsOpen?: { value: ProductDetailsOpen; label: string }[];
   detailSources?: { value: DetailSource; label: string; hint: string }[];
   specFields?: { key: string; label: string }[];
   categories?: { key: string; label: string }[];
@@ -872,6 +874,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     <select className={inputCls} value={theme.product.detailsStyle} onChange={(e) => setProduct({ detailsStyle: e.target.value as ProductDetailsStyle })}>
                       {(choices.productDetailsStyles ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
+                    {theme.product.detailsStyle === "accordion" && (
+                      <select className={`${inputCls} mt-1.5`} value={theme.product.detailsOpen} onChange={(e) => setProduct({ detailsOpen: e.target.value as ProductDetailsOpen })} title="หัวข้อพับเก็บเริ่มต้น">
+                        {(choices.productDetailsOpen ?? []).map((o) => <option key={o.value} value={o.value}>ค่าเริ่มต้น: {o.label}</option>)}
+                      </select>
+                    )}
                   </div>
                   <div>
                     <label className={labelCls}>ชื่อรุ่น</label>

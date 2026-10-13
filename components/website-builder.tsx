@@ -339,6 +339,8 @@ export function WebsiteBuilder({
         // พรีวิวโหลดใหม่ → ไฮไลต์+เลื่อนไปที่ที่เลือกอยู่ หรือคืนตำแหน่งเลื่อนเดิม
         const sel = selectionRef.current;
         const win = iframeRef.current?.contentWindow;
+        // บอกพรีวิวว่าอยู่ในตัวจัดหน้า → คลิก Section = เลือก (ถ้าไม่บอก = พรีวิวธรรมดา คลิกสินค้าแล้วเปิดหน้าสินค้าได้)
+        win?.postMessage({ type: "storefront-edit-mode", on: true }, "*");
         if (sel) win?.postMessage({ type: "storefront-select-block", blockId: sel.blockId, childId: sel.childId ?? null }, "*");
         else if (lastScrollY.current > 0) win?.postMessage({ type: "storefront-restore-scroll", y: lastScrollY.current }, "*");
         return;
