@@ -238,6 +238,28 @@ export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "detai
  * เว็บร้านเลือกใช้เองตามขนาดจอ (ThemeProvider → resolveMobileProduct) · แท็บดีไซน์มีสวิตช์ 🖥 คอม / 📱 มือถือ
  * รองรับ: วิธีโชว์รายละเอียด + ค่าเริ่มต้นพับ/เปิด (รวม/ต่อหัวข้อ) · ลำดับ/ซ่อนส่วนประกอบ · โชว์-ซ่อนรายละเอียดย่อยในส่วนรูปใหญ่/ราคา-ตะกร้า
  */
+/** 🔠 ขนาดตัวอักษรหน้าสินค้า (% ของขนาดปกติ = 100) — title ชื่อรุ่น · price ราคา · heading หัวข้อรายละเอียด/แบนเนอร์/คุณอาจชอบ · body เนื้อหา */
+export interface ProductFonts { title: number; price: number; heading: number; body: number }
+export const DEFAULT_FONTS: ProductFonts = { title: 100, price: 100, heading: 100, body: 100 };
+export const FONT_KEYS: (keyof ProductFonts)[] = ["title", "price", "heading", "body"];
+const fontPct = (v: unknown): number | undefined => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 60 && n <= 180 ? Math.round(n) : undefined;
+};
+export function normalizeFonts(raw: unknown): ProductFonts {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { title: fontPct(r.title) ?? 100, price: fontPct(r.price) ?? 100, heading: fontPct(r.heading) ?? 100, body: fontPct(r.body) ?? 100 };
+}
+function partialFonts(raw: unknown): Partial<ProductFonts> {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const out: Partial<ProductFonts> = {};
+  for (const k of FONT_KEYS) {
+    const n = fontPct(r[k]);
+    if (n !== undefined) out[k] = n;
+  }
+  return out;
+}
+
 export interface ProductMobile {
   detailsStyle: ProductDetailsStyle | null;
   detailsOpen: ProductDetailsOpen | null;
@@ -247,6 +269,8 @@ export interface ProductMobile {
   hidden: ProductSection[] | null;
   gallery: Partial<Pick<ProductParts["gallery"], "showBreadcrumb" | "showSubtitle">>;
   buy: Partial<ProductParts["buy"]>;
+  /** ขนาดตัวอักษรเฉพาะมือถือ (เฉพาะช่องที่ตั้ง) */
+  fonts: Partial<ProductFonts>;
 }
 export function normalizeMobile(raw: unknown): ProductMobile {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -277,6 +301,7 @@ export function normalizeMobile(raw: unknown): ProductMobile {
     hidden: Array.isArray(r.hidden) ? normalizeHiddenSections(r.hidden) : null,
     gallery,
     buy,
+    fonts: partialFonts(r.fonts),
   };
 }
 /** ค่าหน้าสินค้าที่ "มือถือ" ใช้จริง = ค่าคอม แล้วทับด้วยที่ตั้งแยกไว้ */
@@ -290,11 +315,12 @@ export function resolveMobileProduct<P extends SiteTheme["product"]>(p: P): P {
     hidden: m.hidden ?? p.hidden,
     detailItems: p.detailItems.map((it) => (m.itemsOpen[it.id] ? { ...it, defaultOpen: m.itemsOpen[it.id] } : it)),
     parts: { ...p.parts, gallery: { ...p.parts.gallery, ...m.gallery }, buy: { ...p.parts.buy, ...m.buy } },
+    fonts: { ...p.fonts, ...m.fonts },
   };
 }
 /** มีค่าที่ตั้งแยกสำหรับมือถืออยู่ไหม (ไว้โชว์ป้ายในแท็บดีไซน์) */
 export function mobileOverrideCount(m: ProductMobile): number {
-  return (m.detailsStyle ? 1 : 0) + (m.detailsOpen ? 1 : 0) + Object.keys(m.itemsOpen).length + (m.sections ? 1 : 0) + (m.hidden ? 1 : 0) + Object.keys(m.gallery).length + Object.keys(m.buy).length;
+  return (m.detailsStyle ? 1 : 0) + (m.detailsOpen ? 1 : 0) + Object.keys(m.itemsOpen).length + (m.sections ? 1 : 0) + (m.hidden ? 1 : 0) + Object.keys(m.gallery).length + Object.keys(m.buy).length + Object.keys(m.fonts).length;
 }
 
 export interface SiteTheme {
@@ -368,6 +394,8 @@ export interface SiteTheme {
     parts: ProductParts;
     /** 📱 ค่าที่ตั้งแยกสำหรับมือถือ (ตามคอมถ้าไม่ตั้ง) */
     mobile: ProductMobile;
+    /** 🔠 ขนาดตัวอักษร (% ของปกติ) */
+    fonts: ProductFonts;
   };
 }
 
@@ -393,7 +421,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null) },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -584,6 +612,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       hidden: normalizeHiddenSections(pd.hidden),
       parts: normalizeParts(pd.parts),
       mobile: normalizeMobile(pd.mobile),
+      fonts: normalizeFonts(pd.fonts),
     },
   };
 }

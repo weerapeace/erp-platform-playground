@@ -15,7 +15,16 @@ import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
-import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, type ProductParts, type ProductMobile } from "@/lib/website-theme";
+import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
+
+/** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
+const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
+  { k: "title", label: "ชื่อรุ่น", hint: "หัวเรื่องใหญ่ + ชื่อรอง" },
+  { k: "price", label: "ราคา", hint: "ตัวเลขราคา" },
+  { k: "heading", label: "หัวข้อ", hint: "หัวข้อพับเก็บ/แท็บ · แบนเนอร์ · คุณอาจชอบ" },
+  { k: "body", label: "เนื้อหา", hint: "คำอธิบาย · รายละเอียด · ข้อความแบนเนอร์" },
+];
+const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal } from "@/components/modal";
 
 type Radius = "sharp" | "soft" | "round";
@@ -52,7 +61,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
 
 interface Choices {
@@ -377,6 +386,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (!eq(theme.logo, published.logo)) out.push("โลโก้");
     if (!eq(theme.header, published.header)) out.push("Header");
     if (!eq(theme.card, published.card)) out.push("การ์ดสินค้า");
+    // หน้าสินค้า (Style/ชุดรายละเอียด/⚙️/ขนาดตัวอักษร/ค่ามือถือ) — เดิมไม่ถูกนับ ทำให้แถบล่างบอก "ไม่มีการเปลี่ยนแปลง" ทั้งที่แก้แล้ว
+    if (!eq(theme.product, published.product)) out.push("หน้าสินค้า");
     return out;
   }, [theme, published]);
 
@@ -507,7 +518,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "logo" && dirtyFields.includes("โลโก้")) ||
     (k === "header" && dirtyFields.includes("Header")) ||
     (k === "card" && dirtyFields.includes("การ์ดสินค้า")) ||
-    (k === "shape" && dirtyFields.includes("ความมนขอบ"));
+    (k === "shape" && dirtyFields.includes("ความมนขอบ")) ||
+    (k === "product" && dirtyFields.includes("หน้าสินค้า"));
 
   return (
     <div className="space-y-3">
@@ -855,7 +867,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               {isMobileEdit && (
                 <div className="mb-3 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-[11px] text-blue-800 flex items-center justify-between gap-2 flex-wrap">
                   <span>📱 กำลังตั้งค่าสำหรับ <b>มือถือ</b> (จอแคบกว่า 768px) — ช่องที่เป็น "ตามคอม" ใช้ค่าเดียวกับคอม · ตั้งแยกได้: วิธีโชว์รายละเอียด, พับ/เปิด, ลำดับ/ซ่อนส่วนประกอบ, รายละเอียดย่อยของรูปใหญ่และราคา-ตะกร้า</span>
-                  {mobCount > 0 && <button type="button" onClick={() => setProduct({ mobile: { detailsStyle: null, detailsOpen: null, itemsOpen: {}, sections: null, hidden: null, gallery: {}, buy: {} } })} className="text-blue-700 hover:underline whitespace-nowrap">ล้างค่ามือถือทั้งหมด (ตามคอม)</button>}
+                  {mobCount > 0 && <button type="button" onClick={() => setProduct({ mobile: { detailsStyle: null, detailsOpen: null, itemsOpen: {}, sections: null, hidden: null, gallery: {}, buy: {}, fonts: {} } })} className="text-blue-700 hover:underline whitespace-nowrap">ล้างค่ามือถือทั้งหมด (ตามคอม)</button>}
                 </div>
               )}
               <p className="text-[11px] text-slate-400 mb-3">Style เป็นของกลาง ทุกร้าน/ทุกแบรนด์เลือกใช้ได้ สลับกลับได้ตลอด · ข้อมูลสินค้าชุดเดิม ไม่ต้องกรอกเพิ่ม</p>
@@ -934,6 +946,38 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         {(choices.productDetailsOpen ?? []).map((o) => <option key={o.value} value={o.value}>ค่าเริ่มต้น: {o.label}</option>)}
                       </select>
                     )}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className={labelCls}>🔠 ขนาดตัวอักษร (% ของปกติ){isMobileEdit && " — สำหรับมือถือ"}</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {FONT_LABELS.map((f) => {
+                        const pcVal = theme.product.fonts[f.k];
+                        const mVal = mob.fonts[f.k];
+                        const val = isMobileEdit ? (mVal != null ? String(mVal) : "__pc") : String(pcVal);
+                        return (
+                          <div key={f.k}>
+                            <span className="block text-[11px] text-slate-500 mb-0.5" title={f.hint}>{f.label}</span>
+                            <select
+                              className={`${inputCls} ${isMobileEdit && mVal != null ? "border-blue-400" : ""}`}
+                              value={val}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (isMobileEdit) {
+                                  const next = { ...mob.fonts };
+                                  if (v === "__pc") delete next[f.k];
+                                  else next[f.k] = Number(v);
+                                  setMobile({ fonts: next });
+                                } else setProduct({ fonts: { ...theme.product.fonts, [f.k]: Number(v) } });
+                              }}
+                            >
+                              {isMobileEdit && <option value="__pc">ตามคอม ({pcVal}%)</option>}
+                              {FONT_SIZES.map((n) => <option key={n} value={n}>{n}%{n === 100 ? " (ปกติ)" : ""}</option>)}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">ใช้กับหน้าสินค้าแบบโชว์เคส · เนื้อหา = คำอธิบาย/รายละเอียด/ข้อความแบนเนอร์ · หัวข้อ = หัวข้อพับเก็บ/แท็บ/แบนเนอร์/คุณอาจชอบ</p>
                   </div>
                   <div>
                     <label className={labelCls}>ชื่อรุ่น</label>
