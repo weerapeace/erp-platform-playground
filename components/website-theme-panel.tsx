@@ -34,7 +34,8 @@ type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 type ProductDetailsOpen = "first" | "closed" | "all";
 type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
 type DetailApply = "all" | "categories" | "products";
-interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean }
+type DetailOpen = "auto" | "open" | "closed";
+interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen }
 
 interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
@@ -985,7 +986,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     <button
                       onClick={() => {
                         const id = `d${Date.now().toString(36).slice(-5)}`;
-                        setProduct({ detailItems: [...theme.product.detailItems, { id, label: "หัวข้อใหม่", source: "text", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true }] });
+                        setProduct({ detailItems: [...theme.product.detailItems, { id, label: "หัวข้อใหม่", source: "text", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true, defaultOpen: "auto" }] });
                         setOpenDetail(id);
                       }}
                       className="text-xs px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
@@ -1008,6 +1009,18 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                               <span className={`block text-sm ${it.enabled ? "text-slate-800" : "line-through text-slate-400"}`}>{it.label}</span>
                               <span className="block text-[11px] text-slate-400 truncate">{src?.label ?? it.source} · {scope}</span>
                             </button>
+                            {theme.product.detailsStyle === "accordion" && (
+                              <select
+                                value={it.defaultOpen}
+                                onChange={(e) => setDetailItem(it.id, { defaultOpen: e.target.value as DetailOpen })}
+                                title="หัวข้อนี้เริ่มต้นพับหรือเปิด"
+                                className={`h-7 rounded-lg border text-[11px] px-1.5 bg-white ${it.defaultOpen === "auto" ? "border-slate-200 text-slate-500" : "border-blue-300 text-blue-700"}`}
+                              >
+                                <option value="auto">ตามค่ารวม</option>
+                                <option value="open">▾ เปิดไว้</option>
+                                <option value="closed">▸ พับไว้</option>
+                              </select>
+                            )}
                             <button onClick={() => setOpenDetail(open ? null : it.id)} className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-slate-400" title={open ? "พับ" : "ตั้งค่า"}>{open ? "▾" : "✎"}</button>
                             <button onClick={() => { if (confirm(`ลบหัวข้อ "${it.label}"?`)) setProduct({ detailItems: theme.product.detailItems.filter((x) => x.id !== it.id) }); }} className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-400 hover:text-red-600 hover:border-red-300" title="ลบ">🗑️</button>
                           </div>

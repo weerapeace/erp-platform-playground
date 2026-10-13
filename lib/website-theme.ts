@@ -145,6 +145,8 @@ export const PART_CHOICES = {
  */
 export type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
 export type DetailApply = "all" | "categories" | "products";
+/** หัวข้อนี้เริ่มต้นพับหรือเปิด: auto = ตามค่ารวม (detailsOpen) · open = เปิดไว้ · closed = พับไว้ */
+export type DetailOpen = "auto" | "open" | "closed";
 export interface ProductDetailItem {
   id: string;
   label: string;
@@ -159,6 +161,7 @@ export interface ProductDetailItem {
   /** applyTo=products: รหัส Parent SKU */
   products: string[];
   enabled: boolean;
+  defaultOpen: DetailOpen;
 }
 /** ฟิลด์ของ Parent SKU ที่ให้เลือกโชว์บนเว็บ (API สาธารณะส่งเฉพาะชุดนี้ — ไม่มีต้นทุน/ข้อมูลภายใน) */
 export const PRODUCT_SPEC_FIELDS: { key: string; label: string; unit?: string }[] = [
@@ -187,12 +190,11 @@ export const DETAIL_SOURCES: { value: DetailSource; label: string; hint: string 
   { value: "shipping", label: "การจัดส่ง & ชำระเงิน", hint: "ดึงจากแท็บข้อมูลร้าน (ค่าส่ง/ส่งฟรี/ช่องทางจ่าย)" },
 ];
 export const DEFAULT_DETAIL_ITEMS: ProductDetailItem[] = [
-  { id: "desc", label: "รายละเอียดสินค้า", source: "description", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true },
-  { id: "spec", label: "วัสดุและขนาด", source: "fields", fields: ["materials", "size_summary", "weight_g", "lining", "strap"], text: "", applyTo: "all", categories: [], products: [], enabled: true },
-  { id: "details", label: "จุดเด่น", source: "details", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true },
-  { id: "shipping", label: "การจัดส่งและชำระเงิน", source: "shipping", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true },
+  { id: "desc", label: "รายละเอียดสินค้า", source: "description", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true, defaultOpen: "auto" },
+  { id: "spec", label: "วัสดุและขนาด", source: "fields", fields: ["materials", "size_summary", "weight_g", "lining", "strap"], text: "", applyTo: "all", categories: [], products: [], enabled: true, defaultOpen: "auto" },
+  { id: "details", label: "จุดเด่น", source: "details", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true, defaultOpen: "auto" },
+  { id: "shipping", label: "การจัดส่งและชำระเงิน", source: "shipping", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true, defaultOpen: "auto" },
 ];
-const SPEC_KEYS = new Set(PRODUCT_SPEC_FIELDS.map((f) => f.key));
 const strList = (v: unknown, max: number, upper = false): string[] =>
   (Array.isArray(v) ? v : [])
     .map((x) => String(x ?? "").trim().slice(0, 80))
@@ -213,12 +215,14 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
       id,
       label: String(r.label ?? "").trim().slice(0, 60) || "หัวข้อ",
       source,
-      fields: strList(r.fields, 20).filter((k) => SPEC_KEYS.has(k)),
+      // ฟิลด์มาจากทะเบียนฟิลด์กลาง (lib/website-parent-fields.ts) ไม่ใช่แค่ 15 ช่องเดิม — รับทุก key ที่เป็นชื่อคอลัมน์
+      fields: strList(r.fields, 40).filter((k) => /^[a-z0-9_]+$/i.test(k)),
       text: String(r.text ?? "").slice(0, 4000),
       applyTo: (["all", "categories", "products"] as const).includes(r.applyTo as DetailApply) ? (r.applyTo as DetailApply) : "all",
       categories: strList(r.categories, 50),
       products: strList(r.products, 500, true),
       enabled: r.enabled !== false,
+      defaultOpen: (["auto", "open", "closed"] as const).includes(r.defaultOpen as DetailOpen) ? (r.defaultOpen as DetailOpen) : "auto",
     });
     if (out.length >= 20) break;
   }
