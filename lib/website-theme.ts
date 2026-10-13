@@ -232,6 +232,71 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
 export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related";
 export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related"];
 
+
+/**
+ * 📱 ค่าที่ตั้ง "แยกสำหรับมือถือ" (จอ < 768px) ของหน้าสินค้า — null/ไม่มี = ตามคอม
+ * เว็บร้านเลือกใช้เองตามขนาดจอ (ThemeProvider → resolveMobileProduct) · แท็บดีไซน์มีสวิตช์ 🖥 คอม / 📱 มือถือ
+ * รองรับ: วิธีโชว์รายละเอียด + ค่าเริ่มต้นพับ/เปิด (รวม/ต่อหัวข้อ) · ลำดับ/ซ่อนส่วนประกอบ · โชว์-ซ่อนรายละเอียดย่อยในส่วนรูปใหญ่/ราคา-ตะกร้า
+ */
+export interface ProductMobile {
+  detailsStyle: ProductDetailsStyle | null;
+  detailsOpen: ProductDetailsOpen | null;
+  /** ต่อหัวข้อ (id → open|closed) — ไม่มี key = ตามคอม */
+  itemsOpen: Record<string, DetailOpen>;
+  sections: ProductSection[] | null;
+  hidden: ProductSection[] | null;
+  gallery: Partial<Pick<ProductParts["gallery"], "showBreadcrumb" | "showSubtitle">>;
+  buy: Partial<ProductParts["buy"]>;
+}
+export function normalizeMobile(raw: unknown): ProductMobile {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const pick = <T extends string>(v: unknown, allowed: readonly T[]): T | null => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : null);
+  const bool = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined);
+  const itemsOpen: Record<string, DetailOpen> = {};
+  if (r.itemsOpen && typeof r.itemsOpen === "object") {
+    for (const [k, v] of Object.entries(r.itemsOpen as Record<string, unknown>).slice(0, 40)) {
+      const o = pick(v, ["open", "closed"] as const);
+      if (o && /^[a-z0-9_-]+$/i.test(k)) itemsOpen[k] = o;
+    }
+  }
+  const g = (r.gallery && typeof r.gallery === "object" ? r.gallery : {}) as Record<string, unknown>;
+  const b = (r.buy && typeof r.buy === "object" ? r.buy : {}) as Record<string, unknown>;
+  const gallery: ProductMobile["gallery"] = {};
+  if (bool(g.showBreadcrumb) !== undefined) gallery.showBreadcrumb = g.showBreadcrumb as boolean;
+  if (bool(g.showSubtitle) !== undefined) gallery.showSubtitle = g.showSubtitle as boolean;
+  const buy: ProductMobile["buy"] = {};
+  for (const k of ["showUnit", "showBadge", "showStock", "showShortDesc"] as const) if (bool(b[k]) !== undefined) buy[k] = b[k] as boolean;
+  const ns = pick(b.noteSource, ["wholesale", "shipping", "text", "none"] as const);
+  if (ns) buy.noteSource = ns;
+  if (typeof b.noteText === "string" && b.noteText.trim()) buy.noteText = b.noteText.trim().slice(0, 300);
+  return {
+    detailsStyle: pick(r.detailsStyle, ["accordion", "tabs", "plain"] as const),
+    detailsOpen: pick(r.detailsOpen, ["first", "closed", "all"] as const),
+    itemsOpen,
+    sections: Array.isArray(r.sections) ? normalizeProductSections(r.sections) : null,
+    hidden: Array.isArray(r.hidden) ? normalizeHiddenSections(r.hidden) : null,
+    gallery,
+    buy,
+  };
+}
+/** ค่าหน้าสินค้าที่ "มือถือ" ใช้จริง = ค่าคอม แล้วทับด้วยที่ตั้งแยกไว้ */
+export function resolveMobileProduct<P extends SiteTheme["product"]>(p: P): P {
+  const m = p.mobile;
+  return {
+    ...p,
+    detailsStyle: m.detailsStyle ?? p.detailsStyle,
+    detailsOpen: m.detailsOpen ?? p.detailsOpen,
+    sections: m.sections ?? p.sections,
+    hidden: m.hidden ?? p.hidden,
+    detailItems: p.detailItems.map((it) => (m.itemsOpen[it.id] ? { ...it, defaultOpen: m.itemsOpen[it.id] } : it)),
+    parts: { ...p.parts, gallery: { ...p.parts.gallery, ...m.gallery }, buy: { ...p.parts.buy, ...m.buy } },
+  };
+}
+/** มีค่าที่ตั้งแยกสำหรับมือถืออยู่ไหม (ไว้โชว์ป้ายในแท็บดีไซน์) */
+export function mobileOverrideCount(m: ProductMobile): number {
+  return (m.detailsStyle ? 1 : 0) + (m.detailsOpen ? 1 : 0) + Object.keys(m.itemsOpen).length + (m.sections ? 1 : 0) + (m.hidden ? 1 : 0) + Object.keys(m.gallery).length + Object.keys(m.buy).length;
+}
+
 export interface SiteTheme {
   colors: {
     brand: string;
@@ -301,6 +366,8 @@ export interface SiteTheme {
     hidden: ProductSection[];
     /** ⚙️ ตั้งค่าต่อส่วนประกอบ (จับคู่ข้อมูล / โชว์-ซ่อนรายละเอียดย่อย) */
     parts: ProductParts;
+    /** 📱 ค่าที่ตั้งแยกสำหรับมือถือ (ตามคอมถ้าไม่ตั้ง) */
+    mobile: ProductMobile;
   };
 }
 
@@ -326,7 +393,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS) },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null) },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -516,6 +583,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       sections: normalizeProductSections(pd.sections),
       hidden: normalizeHiddenSections(pd.hidden),
       parts: normalizeParts(pd.parts),
+      mobile: normalizeMobile(pd.mobile),
     },
   };
 }

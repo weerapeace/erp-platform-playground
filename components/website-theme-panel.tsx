@@ -15,7 +15,7 @@ import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
-import { PART_CHOICES, type ProductParts } from "@/lib/website-theme";
+import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, type ProductParts, type ProductMobile } from "@/lib/website-theme";
 import { ERPModal } from "@/components/modal";
 
 type Radius = "sharp" | "soft" | "round";
@@ -52,7 +52,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile };
 }
 
 interface Choices {
@@ -287,11 +287,25 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setHeader = (p: Partial<Theme["header"]>) => theme && apply({ ...theme, header: { ...theme.header, ...p } });
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
   const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
-  const sectionDrag = useDragReorder((from, to) => theme && setProduct({ sections: moveItem(theme.product.sections, from, to) }));
+  // 🖥/📱 กำลังตั้งค่าให้จอไหน — มือถือ = เขียนลง product.mobile (ค่าที่ไม่ตั้ง = ตามคอม)
+  const [editDevice, setEditDevice] = useState<"pc" | "mobile">("pc");
+  const setMobile = (p: Partial<ProductMobile>) => theme && setProduct({ mobile: { ...theme.product.mobile, ...p } });
+  const viewProduct = (t: Theme) => (editDevice === "mobile" ? resolveMobileProduct(t.product) : t.product);
+  const setSections = (sections: ProductSection[]) => (editDevice === "mobile" ? setMobile({ sections }) : setProduct({ sections }));
+  const setHidden = (hidden: ProductSection[]) => (editDevice === "mobile" ? setMobile({ hidden }) : setProduct({ hidden }));
+  const sectionDrag = useDragReorder((from, to) => theme && setSections(moveItem(viewProduct(theme).sections, from, to)));
   // ⚙️ ตั้งค่าต่อส่วนประกอบ (จับคู่ข้อมูล) — เปิดได้ทีละส่วน
   const [openPart, setOpenPart] = useState<ProductSection | null>(null);
-  const setPart = <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) =>
-    theme && setProduct({ parts: { ...theme.product.parts, [k]: { ...theme.product.parts[k], ...p } } });
+  const setPart = <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) => {
+    if (!theme) return;
+    // มือถือ: รูปใหญ่/ราคา-ตะกร้า ตั้งแยกได้ · แบนเนอร์/คุณอาจชอบ ใช้ร่วมกัน
+    if (editDevice === "mobile" && (k === "gallery" || k === "buy")) {
+      const mk = k as "gallery" | "buy";
+      setMobile({ [mk]: { ...(theme.product.mobile[mk] as Record<string, unknown>), ...p } } as Partial<ProductMobile>);
+      return;
+    }
+    setProduct({ parts: { ...theme.product.parts, [k]: { ...theme.product.parts[k], ...p } } });
+  };
   const detailDrag = useDragReorder((from, to) => theme && setProduct({ detailItems: moveItem(theme.product.detailItems, from, to) }));
   const [openDetail, setOpenDetail] = useState<string | null>(null);
   // ป๊อปอัปเลือกฟิลด์ Parent SKU ให้หัวข้อไหน (id ของหัวข้อ) + คำค้น
@@ -456,6 +470,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
   if (!theme || !published || !choices) return <div className="py-16 text-center text-sm text-slate-400">โหลดธีมไม่สำเร็จ</div>;
+  // ค่าที่กำลังแก้ (คอม = ค่าหลัก · มือถือ = ค่าหลัก + ที่ตั้งแยก)
+  const pv = viewProduct(theme);
+  const mob = theme.product.mobile;
+  const isMobileEdit = editDevice === "mobile";
+  const mobCount = mobileOverrideCount(mob);
 
   const dev = DEVICES.find((d) => d.k === device)!;
   const previewSrc = siteUrl ? `${siteUrl}${page}?preview=1` : null;
@@ -824,7 +843,21 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {/* ── หน้าสินค้า (Style) ── */}
           {tab === "product" && (
             <div className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800 mb-1">หน้าสินค้า — เลือก Style</h3>
+              <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+                <h3 className="text-sm font-semibold text-slate-800">หน้าสินค้า — เลือก Style</h3>
+                <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs" title="ตั้งค่าแยกตามจอ: ช่องที่ยังเป็น 'ตามคอม' ใช้ค่าเดียวกับคอม">
+                  <button type="button" onClick={() => { setEditDevice("pc"); setDevice("desktop"); }} className={`px-2.5 py-1 ${!isMobileEdit ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🖥 คอม</button>
+                  <button type="button" onClick={() => { setEditDevice("mobile"); setDevice("mobile"); }} className={`px-2.5 py-1 ${isMobileEdit ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                    📱 มือถือ{mobCount > 0 && <span className={`ml-1 rounded-full px-1.5 text-[10px] ${isMobileEdit ? "bg-white/20" : "bg-blue-100 text-blue-700"}`}>{mobCount}</span>}
+                  </button>
+                </div>
+              </div>
+              {isMobileEdit && (
+                <div className="mb-3 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-[11px] text-blue-800 flex items-center justify-between gap-2 flex-wrap">
+                  <span>📱 กำลังตั้งค่าสำหรับ <b>มือถือ</b> (จอแคบกว่า 768px) — ช่องที่เป็น "ตามคอม" ใช้ค่าเดียวกับคอม · ตั้งแยกได้: วิธีโชว์รายละเอียด, พับ/เปิด, ลำดับ/ซ่อนส่วนประกอบ, รายละเอียดย่อยของรูปใหญ่และราคา-ตะกร้า</span>
+                  {mobCount > 0 && <button type="button" onClick={() => setProduct({ mobile: { detailsStyle: null, detailsOpen: null, itemsOpen: {}, sections: null, hidden: null, gallery: {}, buy: {} } })} className="text-blue-700 hover:underline whitespace-nowrap">ล้างค่ามือถือทั้งหมด (ตามคอม)</button>}
+                </div>
+              )}
               <p className="text-[11px] text-slate-400 mb-3">Style เป็นของกลาง ทุกร้าน/ทุกแบรนด์เลือกใช้ได้ สลับกลับได้ตลอด · ข้อมูลสินค้าชุดเดิม ไม่ต้องกรอกเพิ่ม</p>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -882,11 +915,22 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </div>
                   <div>
                     <label className={labelCls}>รายละเอียดสินค้า</label>
-                    <select className={inputCls} value={theme.product.detailsStyle} onChange={(e) => setProduct({ detailsStyle: e.target.value as ProductDetailsStyle })}>
+                    <select
+                      className={`${inputCls} ${isMobileEdit && mob.detailsStyle ? "border-blue-400" : ""}`}
+                      value={isMobileEdit ? (mob.detailsStyle ?? "__pc") : theme.product.detailsStyle}
+                      onChange={(e) => (isMobileEdit ? setMobile({ detailsStyle: e.target.value === "__pc" ? null : (e.target.value as ProductDetailsStyle) }) : setProduct({ detailsStyle: e.target.value as ProductDetailsStyle }))}
+                    >
+                      {isMobileEdit && <option value="__pc">ตามคอม ({(choices.productDetailsStyles ?? []).find((o) => o.value === theme.product.detailsStyle)?.label})</option>}
                       {(choices.productDetailsStyles ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
-                    {theme.product.detailsStyle === "accordion" && (
-                      <select className={`${inputCls} mt-1.5`} value={theme.product.detailsOpen} onChange={(e) => setProduct({ detailsOpen: e.target.value as ProductDetailsOpen })} title="หัวข้อพับเก็บเริ่มต้น">
+                    {pv.detailsStyle === "accordion" && (
+                      <select
+                        className={`${inputCls} mt-1.5 ${isMobileEdit && mob.detailsOpen ? "border-blue-400" : ""}`}
+                        value={isMobileEdit ? (mob.detailsOpen ?? "__pc") : theme.product.detailsOpen}
+                        onChange={(e) => (isMobileEdit ? setMobile({ detailsOpen: e.target.value === "__pc" ? null : (e.target.value as ProductDetailsOpen) }) : setProduct({ detailsOpen: e.target.value as ProductDetailsOpen }))}
+                        title="หัวข้อพับเก็บเริ่มต้น"
+                      >
+                        {isMobileEdit && <option value="__pc">ค่าเริ่มต้น: ตามคอม ({(choices.productDetailsOpen ?? []).find((o) => o.value === theme.product.detailsOpen)?.label})</option>}
                         {(choices.productDetailsOpen ?? []).map((o) => <option key={o.value} value={o.value}>ค่าเริ่มต้น: {o.label}</option>)}
                       </select>
                     )}
@@ -920,14 +964,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <div className="mt-4 pt-3 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-2">
                     <label className={labelCls} style={{ marginBottom: 0 }}>ลำดับส่วนประกอบ (ลากที่ ⠿ เพื่อสลับ · ⚙️ เลือกจับคู่ข้อมูล · 👁️ ซ่อน/แสดง)</label>
-                    {(JSON.stringify(theme.product.sections) !== JSON.stringify(published.product.sections) || theme.product.hidden.length > 0) && (
-                      <button onClick={() => setProduct({ sections: ["gallery", "buy", "details", "banner", "related"], hidden: [] })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
+                    {isMobileEdit ? (
+                      (mob.sections || mob.hidden) && (
+                        <button onClick={() => setMobile({ sections: null, hidden: null })} className="text-[11px] text-blue-600 hover:underline">มือถือ: ใช้ตามคอม</button>
+                      )
+                    ) : (
+                      (JSON.stringify(theme.product.sections) !== JSON.stringify(published.product.sections) || theme.product.hidden.length > 0) && (
+                        <button onClick={() => setProduct({ sections: ["gallery", "buy", "details", "banner", "related"], hidden: [] })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
+                      )
                     )}
                   </div>
                   <ul className="space-y-1">
-                    {theme.product.sections.map((k, i) => {
+                    {pv.sections.map((k, i) => {
                       const meta = (choices.productSections ?? []).find((x) => x.value === k);
-                      const isHidden = theme.product.hidden.includes(k);
+                      const isHidden = pv.hidden.includes(k);
                       const hasPart = k !== "details";
                       const partOpen = openPart === k;
                       return (
@@ -952,7 +1002,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                           )}
                           {meta?.hideable ? (
                             <button
-                              onClick={() => setProduct({ hidden: isHidden ? theme.product.hidden.filter((x) => x !== k) : [...theme.product.hidden, k] })}
+                              onClick={() => setHidden(isHidden ? pv.hidden.filter((x) => x !== k) : [...pv.hidden, k])}
                               title={isHidden ? "แสดงส่วนนี้" : "ซ่อนส่วนนี้"}
                               className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-slate-400"
                             >
@@ -965,8 +1015,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         {partOpen && (
                           <PartSettings
                             part={k}
-                            parts={theme.product.parts}
+                            parts={pv.parts}
                             setPart={setPart}
+                            mobile={isMobileEdit ? mob : null}
+                            onResetMobile={(k) => setMobile({ [k]: {} } as Partial<ProductMobile>)}
                             products={choices.products ?? []}
                             previewBg={theme.colors.page}
                           />
@@ -1009,14 +1061,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                               <span className={`block text-sm ${it.enabled ? "text-slate-800" : "line-through text-slate-400"}`}>{it.label}</span>
                               <span className="block text-[11px] text-slate-400 truncate">{src?.label ?? it.source} · {scope}</span>
                             </button>
-                            {theme.product.detailsStyle === "accordion" && (
+                            {pv.detailsStyle === "accordion" && (
                               <select
-                                value={it.defaultOpen}
-                                onChange={(e) => setDetailItem(it.id, { defaultOpen: e.target.value as DetailOpen })}
+                                value={isMobileEdit ? (mob.itemsOpen[it.id] ?? "__pc") : it.defaultOpen}
+                                onChange={(e) => {
+                                  if (!isMobileEdit) return setDetailItem(it.id, { defaultOpen: e.target.value as DetailOpen });
+                                  const next = { ...mob.itemsOpen };
+                                  if (e.target.value === "__pc") delete next[it.id];
+                                  else next[it.id] = e.target.value as DetailOpen;
+                                  setMobile({ itemsOpen: next });
+                                }}
                                 title="หัวข้อนี้เริ่มต้นพับหรือเปิด"
-                                className={`h-7 rounded-lg border text-[11px] px-1.5 bg-white ${it.defaultOpen === "auto" ? "border-slate-200 text-slate-500" : "border-blue-300 text-blue-700"}`}
+                                className={`h-7 rounded-lg border text-[11px] px-1.5 bg-white ${(isMobileEdit ? !mob.itemsOpen[it.id] : it.defaultOpen === "auto") ? "border-slate-200 text-slate-500" : "border-blue-300 text-blue-700"}`}
                               >
-                                <option value="auto">ตามค่ารวม</option>
+                                {isMobileEdit ? <option value="__pc">ตามคอม</option> : <option value="auto">ตามค่ารวม</option>}
                                 <option value="open">▾ เปิดไว้</option>
                                 <option value="closed">▸ พับไว้</option>
                               </select>
@@ -1347,25 +1405,42 @@ function PartSettings({
   setPart,
   products,
   previewBg,
+  mobile = null,
+  onResetMobile,
 }: {
   part: ProductSection;
   parts: ProductParts;
   setPart: <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) => void;
   products: { code: string; name: string }[];
   previewBg: string;
+  /** กำลังตั้งค่าสำหรับมือถือ → ค่ามือถือที่ตั้งแยกไว้ (null = กำลังตั้งคอม) */
+  mobile?: ProductMobile | null;
+  onResetMobile?: (k: "gallery" | "buy") => void;
 }) {
   const [q, setQ] = useState("");
   const lbl = "block text-[11px] text-slate-500 mb-1";
+  const mobileNote = (k: "gallery" | "buy") =>
+    mobile ? (
+      <div className="flex items-center justify-between gap-2 text-[11px] text-blue-700 bg-blue-50 rounded-lg px-2 py-1">
+        <span>📱 ค่าสำหรับมือถือ{Object.keys(mobile[k]).length ? ` (ตั้งแยกไว้ ${Object.keys(mobile[k]).length} ช่อง)` : " — ยังตามคอมทั้งหมด"}</span>
+        {Object.keys(mobile[k]).length > 0 && <button type="button" onClick={() => onResetMobile?.(k)} className="hover:underline">ใช้ตามคอม</button>}
+      </div>
+    ) : null;
+  const sharedNote = mobile ? <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2 py-1">🖥📱 ส่วนนี้ใช้ค่าเดียวกันทั้งคอมและมือถือ</div> : null;
   if (part === "gallery") {
     const g = parts.gallery;
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        {mobileNote("gallery")}
+        {!mobile && (
         <div>
           <label className={lbl}>จอคอมโชว์กี่รูปพร้อมกัน (แกลเลอรีเลื่อนซ้าย-ขวา)</label>
           <select className={partInputCls} value={g.perView} onChange={(e) => setPart("gallery", { perView: Number(e.target.value) === 2 ? 2 : 1 })}>
             {PART_CHOICES.perViews.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
+        )}
+        {!mobile && (
         <div>
           <label className={lbl}>กดเลือกสีแล้วรูปใหญ่ทำอย่างไร</label>
           <select className={partInputCls} value={g.colorMode} onChange={(e) => setPart("gallery", { colorMode: e.target.value as ProductParts["gallery"]["colorMode"] })}>
@@ -1373,6 +1448,7 @@ function PartSettings({
           </select>
           <p className="text-[11px] text-slate-400 mt-1">{PART_CHOICES.colorModes.find((o) => o.value === g.colorMode)?.hint}</p>
         </div>
+        )}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <PartToggle label="เส้นทางหน้า (หน้าแรก / สินค้า / หมวด)" on={g.showBreadcrumb} onChange={(v) => setPart("gallery", { showBreadcrumb: v })} />
           <PartToggle label="ชื่อรองใต้ชื่อรุ่น" on={g.showSubtitle} onChange={(v) => setPart("gallery", { showSubtitle: v })} />
@@ -1385,6 +1461,7 @@ function PartSettings({
     const b = parts.buy;
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        {mobileNote("buy")}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <PartToggle label="หน่วย (/ ใบ)" on={b.showUnit} onChange={(v) => setPart("buy", { showUnit: v })} />
           <PartToggle label="ป้าย (ใหม่/ลดราคา)" on={b.showBadge} onChange={(v) => setPart("buy", { showBadge: v })} />
@@ -1407,6 +1484,7 @@ function PartSettings({
     const bn = parts.banner;
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        {sharedNote}
         <div>
           <label className={lbl}>รูปแบนเนอร์เอาจาก</label>
           <select className={partInputCls} value={bn.imageSource} onChange={(e) => setPart("banner", { imageSource: e.target.value as ProductParts["banner"]["imageSource"] })}>
@@ -1445,6 +1523,7 @@ function PartSettings({
     const toggle = (code: string) => setPart("related", { codes: r.codes.includes(code) ? r.codes.filter((c) => c !== code) : [...r.codes, code] });
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        {sharedNote}
         <div className="grid sm:grid-cols-[1fr_auto] gap-2">
           <div>
             <label className={lbl}>เอาสินค้าจาก</label>
