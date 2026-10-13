@@ -17,6 +17,17 @@ export type CardHover = "none" | "lift" | "zoom";
 export type ProductLayout = "classic" | "showcase";
 export type ProductTitleStyle = "serif" | "display";
 export type ProductImageBg = "tint" | "surface" | "none";
+/** พื้นหลังหลังรูปสินค้า: preset = สีตามตัวเลือก (imageBg) · color = สีเดียวที่เลือกเอง · gradient = ไล่สี 2 สี · image = รูป (imageBgKey) */
+export type ProductImageBgKind = "preset" | "color" | "gradient" | "image";
+export interface ProductGradient { from: string; to: string; angle: number }
+export const GRADIENT_ANGLES: { value: number; label: string }[] = [
+  { value: 180, label: "บน → ล่าง" },
+  { value: 0, label: "ล่าง → บน" },
+  { value: 90, label: "ซ้าย → ขวา" },
+  { value: 270, label: "ขวา → ซ้าย" },
+  { value: 135, label: "เฉียง ↘" },
+  { value: 45, label: "เฉียง ↗" },
+];
 /** แกลเลอรีรูปของแบบโชว์เคส: editorial = เลื่อนซ้าย-ขวาเต็มจอ+ซูม (แบบ gucci) · spotlight = รูปเดียวบนวงกลม */
 export type ProductGalleryStyle = "editorial" | "spotlight";
 /** รายละเอียดสินค้า: accordion = พับเก็บ · tabs = แท็บ · plain = เรียงต่อกัน */
@@ -377,8 +388,14 @@ export interface SiteTheme {
     titleStyle: ProductTitleStyle;
     /** พื้นหลังหลังรูป (สี) */
     imageBg: ProductImageBg;
-    /** รูปพื้นหลังหลังรูปสินค้า (r2 key) — ใส่แล้วใช้แทนสี */
+    /** รูปพื้นหลังหลังรูปสินค้า (r2 key) — ใช้เมื่อ imageBgKind = image */
     imageBgKey: string | null;
+    /** แบบพื้นหลัง (ค่าเก่าที่ไม่มีช่องนี้: มีรูป = image · ไม่มี = preset) */
+    imageBgKind: ProductImageBgKind;
+    /** สีเดียว (hex) เมื่อ imageBgKind = color */
+    imageBgColor: string;
+    /** ไล่สี เมื่อ imageBgKind = gradient */
+    imageBgGradient: ProductGradient;
     /** (เก่า) แยกเป็นแท็บ — ใช้ detailsStyle แทน เก็บไว้ให้ค่าที่บันทึกก่อนหน้ายังอ่านได้ */
     showTabs: boolean;
     galleryStyle: ProductGalleryStyle;
@@ -421,7 +438,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -602,6 +619,13 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       titleStyle: pick(pd.titleStyle, ["serif", "display"] as const, d.product.titleStyle),
       imageBg: pick(pd.imageBg, ["tint", "surface", "none"] as const, d.product.imageBg),
       imageBgKey: key(pd.imageBgKey),
+      imageBgKind: pick(pd.imageBgKind, ["preset", "color", "gradient", "image"] as const, key(pd.imageBgKey) ? "image" : "preset"),
+      imageBgColor: color(pd.imageBgColor, d.product.imageBgColor),
+      imageBgGradient: (() => {
+        const g = (pd.imageBgGradient && typeof pd.imageBgGradient === "object" ? pd.imageBgGradient : {}) as Record<string, unknown>;
+        const a = Number(g.angle);
+        return { from: color(g.from, d.product.imageBgGradient.from), to: color(g.to, d.product.imageBgGradient.to), angle: Number.isFinite(a) ? ((Math.round(a) % 360) + 360) % 360 : d.product.imageBgGradient.angle };
+      })(),
       showTabs: pd.showTabs !== false,
       galleryStyle: pick(pd.galleryStyle, ["editorial", "spotlight"] as const, d.product.galleryStyle),
       // ค่าที่บันทึกก่อนมี detailsStyle: showTabs=false เคยหมายถึง "เรียงต่อกัน"

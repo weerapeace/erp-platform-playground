@@ -26,6 +26,8 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 ];
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal } from "@/components/modal";
+import { ColorPicker } from "@/components/color-picker";
+import { GRADIENT_ANGLES, type ProductImageBgKind, type ProductGradient } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
 type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -61,7 +63,7 @@ interface Theme {
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
 
 interface Choices {
@@ -986,21 +988,56 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </select>
                   </div>
                   <div>
-                    <label className={labelCls}>พื้นหลังหลังรูป (สี)</label>
-                    <select className={inputCls} value={theme.product.imageBg} onChange={(e) => setProduct({ imageBg: e.target.value as ProductImageBg })}>
-                      {(choices.productImageBgs ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    <label className={labelCls}>พื้นหลังหลังรูปสินค้า</label>
+                    <select className={inputCls} value={theme.product.imageBgKind} onChange={(e) => setProduct({ imageBgKind: e.target.value as ProductImageBgKind })}>
+                      <option value="preset">สีตามตัวเลือก (สีแบรนด์จาง / สีพื้นการ์ด / ไม่มี)</option>
+                      <option value="color">สีเดียว เลือกเอง</option>
+                      <option value="gradient">ไล่สี 2 สี</option>
+                      <option value="image">รูปภาพ</option>
                     </select>
+                    {theme.product.imageBgKind === "preset" && (
+                      <select className={`${inputCls} mt-1.5`} value={theme.product.imageBg} onChange={(e) => setProduct({ imageBg: e.target.value as ProductImageBg })}>
+                        {(choices.productImageBgs ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    )}
                   </div>
+                  <div>
+                    {theme.product.imageBgKind === "color" && (
+                      <>
+                        <label className={labelCls}>สีพื้นหลัง</label>
+                        <div className="flex items-center gap-2">
+                          <ColorPicker value={theme.product.imageBgColor} onChange={(hex) => setProduct({ imageBgColor: hex })} />
+                          <div className="h-9 flex-1 rounded-lg border border-slate-200" style={{ background: theme.product.imageBgColor }} title="ตัวอย่าง" />
+                        </div>
+                      </>
+                    )}
+                    {theme.product.imageBgKind === "gradient" && (
+                      <>
+                        <label className={labelCls}>ไล่สี (สีเริ่ม → สีปลาย · ทิศทาง)</label>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <ColorPicker value={theme.product.imageBgGradient.from} onChange={(hex) => setProduct({ imageBgGradient: { ...theme.product.imageBgGradient, from: hex } })} />
+                          <span className="text-slate-400 text-xs">→</span>
+                          <ColorPicker value={theme.product.imageBgGradient.to} onChange={(hex) => setProduct({ imageBgGradient: { ...theme.product.imageBgGradient, to: hex } })} />
+                          <select className={inputCls} style={{ width: "auto" }} value={theme.product.imageBgGradient.angle} onChange={(e) => setProduct({ imageBgGradient: { ...theme.product.imageBgGradient, angle: Number(e.target.value) } })}>
+                            {GRADIENT_ANGLES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="h-9 mt-1.5 rounded-lg border border-slate-200" style={{ background: `linear-gradient(${theme.product.imageBgGradient.angle}deg, ${theme.product.imageBgGradient.from}, ${theme.product.imageBgGradient.to})` }} title="ตัวอย่าง" />
+                      </>
+                    )}
+                  </div>
+                  {theme.product.imageBgKind === "image" && (
                   <div className="sm:col-span-2">
                     <ImageUploadField
-                      label="รูปพื้นหลังหลังรูปสินค้า (ไม่บังคับ)"
-                      hint="ใส่แล้วใช้แทนสีด้านบน · แนะนำรูปโทนอ่อน ไม่รก (เช่น พื้นผิวหนัง/ผ้า หรือฉากสตูดิโอ) กว้าง 1600px+ · ใช้กับทุกสินค้า"
+                      label="รูปพื้นหลังหลังรูปสินค้า"
+                      hint="แนะนำรูปโทนอ่อน ไม่รก (เช่น พื้นผิวหนัง/ผ้า หรือฉากสตูดิโอ) กว้าง 1600px+ · ใช้กับทุกสินค้า"
                       value={theme.product.imageBgKey}
                       onChange={(k) => setProduct({ imageBgKey: k })}
                       previewBg={theme.colors.page}
                       height={64}
                     />
                   </div>
+                  )}
                 </div>
               )}
 
