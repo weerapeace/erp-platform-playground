@@ -1274,6 +1274,12 @@ function PartSettings({
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
         <div>
+          <label className={lbl}>จอคอมโชว์กี่รูปพร้อมกัน (แกลเลอรีเลื่อนซ้าย-ขวา)</label>
+          <select className={partInputCls} value={g.perView} onChange={(e) => setPart("gallery", { perView: Number(e.target.value) === 2 ? 2 : 1 })}>
+            {PART_CHOICES.perViews.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <div>
           <label className={lbl}>กดเลือกสีแล้วรูปใหญ่ทำอย่างไร</label>
           <select className={partInputCls} value={g.colorMode} onChange={(e) => setPart("gallery", { colorMode: e.target.value as ProductParts["gallery"]["colorMode"] })}>
             {PART_CHOICES.colorModes.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}

@@ -30,20 +30,22 @@ export type ProductDetailsOpen = "first" | "closed" | "all";
  */
 /** เลือกสีแล้วแกลเลอรีทำอะไร: set = โชว์เฉพาะชุดรูปของสีนั้น · jump = รูปทั้งหมด แล้วเลื่อนไปรูปของสี */
 export type GalleryColorMode = "set" | "jump";
+/** จอคอมโชว์กี่รูปพร้อมกันในแกลเลอรีเลื่อนซ้าย-ขวา: 1 = ทีละรูป · 2 = สองรูปคู่กัน (แบบ Gucci) — มือถือทีละรูปเสมอ */
+export type GalleryPerView = 1 | 2;
 export type BannerImageSource = "second" | "last" | "parent" | "fixed";
 export type BannerTitleSource = "subtitle" | "category" | "name" | "text" | "none";
 export type BannerTextSource = "description" | "introduction" | "english_description" | "text" | "none";
 export type BuyNoteSource = "wholesale" | "shipping" | "text" | "none";
 export type RelatedSource = "category" | "collection" | "featured" | "bestseller" | "manual" | "random";
 export interface ProductParts {
-  gallery: { showBreadcrumb: boolean; showSubtitle: boolean; colorMode: GalleryColorMode };
+  gallery: { showBreadcrumb: boolean; showSubtitle: boolean; colorMode: GalleryColorMode; perView: GalleryPerView };
   buy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean; noteSource: BuyNoteSource; noteText: string };
   banner: { imageSource: BannerImageSource; imageKey: string | null; titleSource: BannerTitleSource; titleText: string; textSource: BannerTextSource; text: string };
   /** codes = รหัส Parent SKU (ตัวพิมพ์ใหญ่) เมื่อ source=manual · count 2–8 · title ว่าง = ใช้ข้อความเดิมของเว็บ */
   related: { source: RelatedSource; codes: string[]; count: number; title: string };
 }
 export const DEFAULT_PARTS: ProductParts = {
-  gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set" },
+  gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set", perView: 1 },
   buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "" },
   banner: { imageSource: "second", imageKey: null, titleSource: "subtitle", titleText: "", textSource: "description", text: "" },
   related: { source: "category", codes: [], count: 4, title: "" },
@@ -64,6 +66,7 @@ export function normalizeParts(raw: unknown): ProductParts {
       showBreadcrumb: g.showBreadcrumb !== false,
       showSubtitle: g.showSubtitle !== false,
       colorMode: one(g.colorMode, ["set", "jump"] as const, d.gallery.colorMode),
+      perView: Number(g.perView) === 2 ? 2 : 1,
     },
     buy: {
       showUnit: b.showUnit !== false,
@@ -91,6 +94,10 @@ export function normalizeParts(raw: unknown): ProductParts {
 }
 /** ตัวเลือกสำหรับ ⚙️ แต่ละส่วน (ป้ายภาษาคน) — ใช้ในแท็บดีไซน์ */
 export const PART_CHOICES = {
+  perViews: [
+    { value: 1, label: "ทีละ 1 รูป เต็มความกว้าง" },
+    { value: 2, label: "2 รูปคู่กัน เลื่อนทีละรูป (แบบ Gucci) — มือถือยังทีละรูป" },
+  ] as { value: GalleryPerView; label: string }[],
   colorModes: [
     { value: "set", label: "โชว์เฉพาะชุดรูปของสีนั้น", hint: "ตั้งรูปรายสีไว้ในแท็บ 🛍 เว็บไซต์ ของ Parent SKU (ไม่ได้ตั้ง = รูปปก SKU)" },
     { value: "jump", label: "รูปทั้งหมด แล้วเลื่อนไปรูปของสี", hint: "ลูกค้ายังเห็นรูปทุกสี แค่กระโดดไปรูปสีที่เลือก" },
