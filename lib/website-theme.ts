@@ -68,16 +68,135 @@ export type BannerTitleSource = "subtitle" | "category" | "name" | "text" | "non
 export type BannerTextSource = "description" | "introduction" | "english_description" | "text" | "none";
 export type BuyNoteSource = "wholesale" | "shipping" | "text" | "none";
 export type RelatedSource = "category" | "collection" | "featured" | "bestseller" | "manual" | "random";
+/**
+ * 🧩 ชิ้นส่วนในส่วน "ราคา · ตัวเลือก · ใส่ตะกร้า" — จัดลำดับ/คอลัมน์/จัดชิด/ขนาด/สี/ระยะห่าง ได้ต่อชิ้น (⚙️ ในแท็บหน้าสินค้า)
+ * ชิ้นมาตรฐานมีอย่างละ 1 (price/desc/stock/qty/options/button/note) · "text" = ข้อความอิสระ เพิ่มได้หลายชิ้น
+ */
+export type BuyItemKey = "price" | "desc" | "stock" | "qty" | "options" | "button" | "note" | "text";
+export type BuyCol = "left" | "right";
+export type BuyAlign = "left" | "center" | "right";
+export type BuyGap = "sm" | "md" | "lg";
+export interface BuyItem {
+  id: string;
+  key: BuyItemKey;
+  enabled: boolean;
+  col: BuyCol;
+  align: BuyAlign;
+  /** ขนาด % ของปกติ (60–200) */
+  size: number;
+  /** สีตัวอักษร (hex) — null = ตามธีม */
+  color: string | null;
+  /** ระยะห่างจากชิ้นก่อนหน้า */
+  gap: BuyGap;
+  // ── เฉพาะชนิด ──
+  /** price */
+  showUnit: boolean;
+  showBadge: boolean;
+  /** price: ราคาเต็มขีดฆ่า (จาก fake_price ใน ERP เมื่อสูงกว่าราคาขาย) */
+  showCompare: boolean;
+  /** desc: ตัดกี่บรรทัด (1–10) */
+  lines: number;
+  /** qty/options: ป้ายกำกับ · button: ข้อความบนปุ่ม (ว่าง = "ใส่ตะกร้า · ราคา") */
+  label: string;
+  /** stock: text|badge · options: pills|swatches|dropdown · button: fill|outline */
+  style: string;
+  /** button: สีพื้นปุ่ม (hex) — null = สีแบรนด์ */
+  bg: string | null;
+  /** button: เต็มความกว้างคอลัมน์ */
+  fullWidth: boolean;
+  /** text: ตัวหนา */
+  bold: boolean;
+  /** text: เนื้อหา (ขึ้นบรรทัดใหม่ได้) */
+  text: string;
+}
+export const BUY_ITEM_DEFS: Record<BuyItemKey, { label: string; hint: string; styles?: { value: string; label: string }[] }> = {
+  price: { label: "ราคา", hint: "ราคา + หน่วย + ป้าย + ราคาเต็มขีดฆ่า" },
+  desc: { label: "คำอธิบายย่อ", hint: "ตัดกี่บรรทัดตั้งได้ (ฉบับเต็มอยู่ในรายละเอียด)" },
+  stock: { label: "สถานะสต๊อก", hint: "● พร้อมส่ง / เหลือน้อย / สั่งจอง", styles: [{ value: "text", label: "ข้อความ" }, { value: "badge", label: "ป้ายสี" }] },
+  qty: { label: "จำนวน", hint: "ปุ่ม − 1 +" },
+  options: { label: "ตัวเลือก (สี/แบบ)", hint: "ตัวเลือกสี + ตัวเลือกที่ 2", styles: [{ value: "pills", label: "เม็ดยา (ชื่อ)" }, { value: "swatches", label: "วงกลมสี" }, { value: "dropdown", label: "ดรอปดาวน์" }] },
+  button: { label: "ปุ่มใส่ตะกร้า", hint: "ข้อความ / ทึบ-ขอบ / สีพื้น / เต็มความกว้าง", styles: [{ value: "fill", label: "ทึบ" }, { value: "outline", label: "ขอบ" }] },
+  note: { label: "ข้อความใต้ปุ่ม", hint: "ขายส่ง / ค่าส่งจากข้อมูลร้าน / ข้อความ" },
+  text: { label: "ข้อความอิสระ", hint: "เช่น ✓ ส่งฟรี · ประกัน 6 เดือน" },
+};
+const BUY_DEFAULT_ORDER: { key: BuyItemKey; col: BuyCol }[] = [
+  { key: "price", col: "left" },
+  { key: "desc", col: "left" },
+  { key: "stock", col: "left" },
+  { key: "qty", col: "right" },
+  { key: "options", col: "right" },
+  { key: "button", col: "right" },
+  { key: "note", col: "right" },
+];
+export function defaultBuyItem(key: BuyItemKey, col: BuyCol = "left", id?: string): BuyItem {
+  return {
+    id: id ?? (key === "text" ? `t${Date.now().toString(36).slice(-5)}` : key),
+    key, enabled: true, col, align: "left", size: 100, color: null, gap: key === "price" ? "sm" : "md",
+    showUnit: true, showBadge: true, showCompare: true, lines: 4, label: "",
+    style: key === "stock" ? "text" : key === "options" ? "pills" : key === "button" ? "fill" : "", bg: null, fullWidth: true, bold: false, text: "",
+  };
+}
+export const DEFAULT_BUY_ITEMS = (): BuyItem[] => BUY_DEFAULT_ORDER.map((d) => defaultBuyItem(d.key, d.col));
+const BUY_KEYS: BuyItemKey[] = ["price", "desc", "stock", "qty", "options", "button", "note", "text"];
+/** อ่านรายการชิ้นส่วนจาก DB — ไม่มี (ค่าเก่า) = ชุดมาตรฐานโดยใช้สวิตช์เดิม (showUnit/showBadge/showStock/showShortDesc) */
+export function normalizeBuyItems(raw: unknown, legacy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean }): BuyItem[] {
+  if (!Array.isArray(raw)) {
+    return DEFAULT_BUY_ITEMS().map((it) => {
+      if (it.key === "price") return { ...it, showUnit: legacy.showUnit, showBadge: legacy.showBadge };
+      if (it.key === "stock") return { ...it, enabled: legacy.showStock };
+      if (it.key === "desc") return { ...it, enabled: legacy.showShortDesc };
+      return it;
+    });
+  }
+  const out: BuyItem[] = [];
+  const seen = new Set<string>();
+  const hex = (v: unknown): string | null => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toUpperCase() : null);
+  const pick = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r !== "object") continue;
+    const key = pick(r.key, BUY_KEYS, "text");
+    let id = key === "text" ? String(r.id ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 24) || `t${out.length}` : key;
+    if (key !== "text" && seen.has(id)) continue;
+    while (seen.has(id)) id = `${id}_`;
+    seen.add(id);
+    const d = defaultBuyItem(key, pick(r.col, ["left", "right"] as const, "left"), id);
+    const n = (v: unknown, fb: number, lo: number, hi: number) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, Math.round(x))) : fb; };
+    out.push({
+      ...d,
+      enabled: r.enabled !== false,
+      align: pick(r.align, ["left", "center", "right"] as const, "left"),
+      size: n(r.size, 100, 60, 200),
+      color: hex(r.color),
+      gap: pick(r.gap, ["sm", "md", "lg"] as const, d.gap),
+      showUnit: r.showUnit !== false,
+      showBadge: r.showBadge !== false,
+      showCompare: r.showCompare !== false,
+      lines: n(r.lines, 4, 1, 10),
+      label: typeof r.label === "string" ? r.label.trim().slice(0, 80) : "",
+      style: typeof r.style === "string" ? r.style.slice(0, 20) : d.style,
+      bg: hex(r.bg),
+      fullWidth: r.fullWidth !== false,
+      bold: r.bold === true,
+      text: typeof r.text === "string" ? r.text.slice(0, 500) : "",
+    });
+    if (out.length >= 20) break;
+  }
+  // ชิ้นมาตรฐานที่หายไป (เช่น เพิ่มชนิดใหม่ทีหลัง) ต่อท้ายให้ครบ
+  for (const d of BUY_DEFAULT_ORDER) if (!seen.has(d.key)) out.push(defaultBuyItem(d.key, d.col));
+  return out;
+}
+
 export interface ProductParts {
   gallery: { showBreadcrumb: boolean; showSubtitle: boolean; colorMode: GalleryColorMode; perView: GalleryPerView };
-  buy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean; noteSource: BuyNoteSource; noteText: string };
+  /** สวิตช์เดิม (showUnit…) ยังเก็บไว้ให้ค่ามือถือทับได้ · ของจริงอยู่ใน items */
+  buy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean; noteSource: BuyNoteSource; noteText: string; columns: 1 | 2; items: BuyItem[] };
   banner: { imageSource: BannerImageSource; imageKey: string | null; titleSource: BannerTitleSource; titleText: string; textSource: BannerTextSource; text: string };
   /** codes = รหัส Parent SKU (ตัวพิมพ์ใหญ่) เมื่อ source=manual · count 2–8 · title ว่าง = ใช้ข้อความเดิมของเว็บ */
   related: { source: RelatedSource; codes: string[]; count: number; title: string };
 }
 export const DEFAULT_PARTS: ProductParts = {
   gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set", perView: 1 },
-  buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "" },
+  buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "", columns: 2, items: DEFAULT_BUY_ITEMS() },
   banner: { imageSource: "second", imageKey: null, titleSource: "subtitle", titleText: "", textSource: "description", text: "" },
   related: { source: "category", codes: [], count: 4, title: "" },
 };
@@ -106,6 +225,8 @@ export function normalizeParts(raw: unknown): ProductParts {
       showShortDesc: b.showShortDesc !== false,
       noteSource: one(b.noteSource, ["wholesale", "shipping", "text", "none"] as const, d.buy.noteSource),
       noteText: text(b.noteText, 300),
+      columns: Number(b.columns) === 1 ? 1 : 2,
+      items: normalizeBuyItems(b.items, { showUnit: b.showUnit !== false, showBadge: b.showBadge !== false, showStock: b.showStock !== false, showShortDesc: b.showShortDesc !== false }),
     },
     banner: {
       imageSource: one(bn.imageSource, ["second", "last", "parent", "fixed"] as const, d.banner.imageSource),
@@ -345,7 +466,21 @@ export function resolveMobileProduct<P extends SiteTheme["product"]>(p: P): P {
     sections: m.sections ?? p.sections,
     hidden: m.hidden ?? p.hidden,
     detailItems: p.detailItems.map((it) => (m.itemsOpen[it.id] ? { ...it, defaultOpen: m.itemsOpen[it.id] } : it)),
-    parts: { ...p.parts, gallery: { ...p.parts.gallery, ...m.gallery }, buy: { ...p.parts.buy, ...m.buy } },
+    parts: {
+      ...p.parts,
+      gallery: { ...p.parts.gallery, ...m.gallery },
+      buy: {
+        ...p.parts.buy,
+        ...m.buy,
+        // สวิตช์มือถือ (เปิด/ปิดหน่วย ป้าย สต๊อก คำอธิบายย่อ) ทับลงชิ้นส่วนที่จัดไว้ในโหมดคอม
+        items: p.parts.buy.items.map((it) => {
+          if (it.key === "price") return { ...it, showUnit: m.buy.showUnit ?? it.showUnit, showBadge: m.buy.showBadge ?? it.showBadge };
+          if (it.key === "stock" && m.buy.showStock !== undefined) return { ...it, enabled: m.buy.showStock };
+          if (it.key === "desc" && m.buy.showShortDesc !== undefined) return { ...it, enabled: m.buy.showShortDesc };
+          return it;
+        }),
+      },
+    },
     fonts: { ...p.fonts, ...m.fonts },
   };
 }

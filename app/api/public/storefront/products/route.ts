@@ -162,6 +162,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         description: r.description,
         /** ราคาเป็น "บาท" (ไม่ใช่สตางค์) */
         price: r.price,
+        /** ราคาเต็ม (ขีดฆ่า) จาก fake_price ของ Parent SKU — ส่งเฉพาะเมื่อสูงกว่าราคาขาย */
+        comparePrice: Number(p.fake_price) > r.price ? Number(p.fake_price) : null,
         unit: r.unit,
         category: r.category,
         badge: String(l.web_badge ?? "").trim(),

@@ -27,7 +27,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal } from "@/components/modal";
 import { ColorPicker } from "@/components/color-picker";
-import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit } from "@/lib/website-theme";
+import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
 type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -1560,24 +1560,27 @@ function PartSettings({
   }
   if (part === "buy") {
     const b = parts.buy;
+    if (mobile) {
+      // โหมดมือถือ: สวิตช์เปิด/ปิดทับค่าคอม · การจัดตำแหน่ง/ขนาด/สี ใช้ร่วมกัน (ตั้งในโหมดคอม)
+      const pi = b.items.find((i) => i.key === "price");
+      const si = b.items.find((i) => i.key === "stock");
+      const di = b.items.find((i) => i.key === "desc");
+      return (
+        <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+          {mobileNote("buy")}
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <PartToggle label="หน่วย (/ ใบ)" on={mobile.buy.showUnit ?? pi?.showUnit ?? true} onChange={(v) => setPart("buy", { showUnit: v })} />
+            <PartToggle label="ป้าย (ใหม่/ลดราคา)" on={mobile.buy.showBadge ?? pi?.showBadge ?? true} onChange={(v) => setPart("buy", { showBadge: v })} />
+            <PartToggle label="สถานะสต๊อก" on={mobile.buy.showStock ?? si?.enabled ?? true} onChange={(v) => setPart("buy", { showStock: v })} />
+            <PartToggle label="คำอธิบายย่อ" on={mobile.buy.showShortDesc ?? di?.enabled ?? true} onChange={(v) => setPart("buy", { showShortDesc: v })} />
+          </div>
+          <p className="text-[11px] text-slate-400">ลำดับ/ตำแหน่ง/ขนาด/สีของชิ้นส่วน ตั้งที่โหมด 🖥 คอม (ใช้ร่วมกันทั้งสองจอ · บนมือถือเรียงเป็นคอลัมน์เดียวตามลำดับ)</p>
+        </div>
+      );
+    }
     return (
-      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-        {mobileNote("buy")}
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          <PartToggle label="หน่วย (/ ใบ)" on={b.showUnit} onChange={(v) => setPart("buy", { showUnit: v })} />
-          <PartToggle label="ป้าย (ใหม่/ลดราคา)" on={b.showBadge} onChange={(v) => setPart("buy", { showBadge: v })} />
-          <PartToggle label="สถานะสต๊อก (● พร้อมส่ง)" on={b.showStock} onChange={(v) => setPart("buy", { showStock: v })} />
-          <PartToggle label="คำอธิบายย่อ 4 บรรทัด" on={b.showShortDesc} onChange={(v) => setPart("buy", { showShortDesc: v })} />
-        </div>
-        <div>
-          <label className={lbl}>ข้อความใต้ปุ่มใส่ตะกร้า</label>
-          <select className={partInputCls} value={b.noteSource} onChange={(e) => setPart("buy", { noteSource: e.target.value as ProductParts["buy"]["noteSource"] })}>
-            {PART_CHOICES.buyNotes.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          {b.noteSource === "text" && (
-            <input className={`${partInputCls} mt-1.5`} value={b.noteText} onChange={(e) => setPart("buy", { noteText: e.target.value })} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · จัดส่งใน 1–2 วัน" />
-          )}
-        </div>
+      <div className="mt-2 pt-2 border-t border-slate-100">
+        <BuyItemsEditor buy={b} onChange={(p) => setPart("buy", p)} />
       </div>
     );
   }
@@ -1671,4 +1674,163 @@ function PartSettings({
     );
   }
   return null;
+}
+
+/* ─────────── 🧩 จัดชิ้นส่วนในส่วน "ราคา · ตัวเลือก · ใส่ตะกร้า" ─────────── */
+const BUY_SIZES = [70, 80, 90, 100, 110, 125, 150, 175, 200];
+function BuyItemsEditor({ buy, onChange }: { buy: ProductParts["buy"]; onChange: (p: Partial<ProductParts["buy"]>) => void }) {
+  const items = buy.items;
+  const [openId, setOpenId] = useState<string | null>(null);
+  const drag = useDragReorder((from, to) => onChange({ items: moveItem(items, from, to) }));
+  const setItem = (id: string, patch: Partial<BuyItem>) => onChange({ items: items.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
+  const lbl = "block text-[11px] text-slate-500 mb-1";
+  const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
+  const ColorBtn = ({ value, onChange: oc, title }: { value: string | null; onChange: (v: string | null) => void; title: string }) => (
+    <span className="inline-flex items-center gap-1">
+      <input type="color" value={value ?? "#000000"} onChange={(e) => oc(e.target.value.toUpperCase())} title={title} className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white" />
+      {value ? <button type="button" onClick={() => oc(null)} className="text-[11px] text-slate-500 hover:text-rose-600" title="ใช้สีตามธีม">✕</button> : <span className="text-[10px] text-slate-400">ตามธีม</span>}
+    </span>
+  );
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <label className={`${lbl} mb-0`}>จัดเป็น</label>
+          <select className={mini} value={buy.columns} onChange={(e) => onChange({ columns: Number(e.target.value) === 1 ? 1 : 2 })}>
+            <option value={2}>2 คอลัมน์ (ซ้าย / ขวา)</option>
+            <option value={1}>1 คอลัมน์ (เรียงตามลำดับ)</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => { const it = defaultBuyItem("text", "right"); onChange({ items: [...items, it] }); setOpenId(it.id); }} className="text-[11px] px-2 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">+ ข้อความอิสระ</button>
+          <button type="button" onClick={() => { if (confirm("คืนค่าเริ่มต้นของส่วนราคา-ตะกร้า?")) onChange({ items: DEFAULT_BUY_ITEMS(), columns: 2 }); }} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-400">ลาก ⠿ สลับลำดับ · ติ๊กเปิด/ปิด · เลือกคอลัมน์ · ✎ ตั้งค่าขนาด/สี/จัดชิด และค่าเฉพาะชิ้น · มือถือเรียงเป็นคอลัมน์เดียว (ซ้ายก่อนขวา)</p>
+      <ul className="space-y-1">
+        {items.map((it, i) => {
+          const def = BUY_ITEM_DEFS[it.key];
+          const open = openId === it.id;
+          const title = it.key === "text" ? (it.text.trim().split("\n")[0] || "ข้อความอิสระ") : def.label;
+          return (
+            <li key={it.id} {...drag.rowProps(i)} className={`rounded-lg border bg-white ${drag.rowCls(i)} ${it.enabled ? "border-slate-200" : "border-slate-100 opacity-60"} ${open ? "border-blue-300" : ""}`}>
+              <div className="flex items-center gap-2 px-2 py-1.5">
+                <DragHandle {...drag.handleProps(i)} />
+                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={it.enabled} onChange={(e) => setItem(it.id, { enabled: e.target.checked })} title="แสดง/ซ่อน" />
+                <button type="button" onClick={() => setOpenId(open ? null : it.id)} className="flex-1 min-w-0 text-left">
+                  <span className={`block text-sm truncate ${it.enabled ? "text-slate-800" : "line-through text-slate-400"}`}>{title}</span>
+                  <span className="block text-[11px] text-slate-400 truncate">{def.hint}{it.size !== 100 ? ` · ${it.size}%` : ""}{it.color ? " · สี" : ""}{it.align !== "left" ? (it.align === "center" ? " · กลาง" : " · ขวา") : ""}</span>
+                </button>
+                {buy.columns === 2 && (
+                  <select className={mini} value={it.col} onChange={(e) => setItem(it.id, { col: e.target.value as BuyItem["col"] })} title="อยู่คอลัมน์ไหน">
+                    <option value="left">ซ้าย</option>
+                    <option value="right">ขวา</option>
+                  </select>
+                )}
+                <button type="button" onClick={() => setOpenId(open ? null : it.id)} className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-slate-400" title={open ? "พับ" : "ตั้งค่า"}>{open ? "▾" : "✎"}</button>
+                {it.key === "text" && (
+                  <button type="button" onClick={() => onChange({ items: items.filter((x) => x.id !== it.id) })} className="w-7 h-7 rounded-lg border border-slate-200 text-xs text-slate-400 hover:text-red-600 hover:border-red-300" title="ลบ">🗑️</button>
+                )}
+              </div>
+              {open && (
+                <div className="border-t border-slate-100 px-3 py-2 space-y-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                      <label className={lbl}>จัดชิด</label>
+                      <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+                        {([["left", "⇤"], ["center", "☰"], ["right", "⇥"]] as const).map(([a, ic]) => (
+                          <button key={a} type="button" onClick={() => setItem(it.id, { align: a })} className={`w-8 h-7 text-xs ${it.align === a ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`} title={a === "left" ? "ชิดซ้าย" : a === "center" ? "กึ่งกลาง" : "ชิดขวา"}>{ic}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className={lbl}>ขนาด</label>
+                      <select className={mini} value={it.size} onChange={(e) => setItem(it.id, { size: Number(e.target.value) })}>
+                        {[...new Set([...BUY_SIZES, it.size])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n}%{n === 100 ? " (ปกติ)" : ""}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={lbl}>สีตัวอักษร</label>
+                      <ColorBtn value={it.color} onChange={(v) => setItem(it.id, { color: v })} title="สีตัวอักษรของชิ้นนี้" />
+                    </div>
+                    <div>
+                      <label className={lbl}>ระยะห่างด้านบน</label>
+                      <select className={mini} value={it.gap} onChange={(e) => setItem(it.id, { gap: e.target.value as BuyItem["gap"] })}>
+                        <option value="sm">ชิด</option>
+                        <option value="md">ปกติ</option>
+                        <option value="lg">ห่าง</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {it.key === "price" && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <PartToggle label="หน่วย (/ ใบ)" on={it.showUnit} onChange={(v) => setItem(it.id, { showUnit: v })} />
+                      <PartToggle label="ป้าย (ใหม่/ลดราคา)" on={it.showBadge} onChange={(v) => setItem(it.id, { showBadge: v })} />
+                      <PartToggle label="ราคาเต็มขีดฆ่า (fake_price ใน Parent SKU)" on={it.showCompare} onChange={(v) => setItem(it.id, { showCompare: v })} />
+                    </div>
+                  )}
+                  {it.key === "desc" && (
+                    <div>
+                      <label className={lbl}>ตัดกี่บรรทัด</label>
+                      <select className={mini} value={it.lines} onChange={(e) => setItem(it.id, { lines: Number(e.target.value) })}>
+                        {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n} บรรทัด</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {def.styles && (
+                    <div>
+                      <label className={lbl}>รูปแบบ</label>
+                      <select className={mini} value={it.style} onChange={(e) => setItem(it.id, { style: e.target.value })}>
+                        {def.styles.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {(it.key === "qty" || it.key === "options") && (
+                    <div>
+                      <label className={lbl}>ป้ายกำกับ (ว่าง = ค่าเดิม)</label>
+                      <input className={partInputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder={it.key === "qty" ? "จำนวน" : "สี / ตัวเลือก"} />
+                    </div>
+                  )}
+                  {it.key === "button" && (
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className={lbl}>ข้อความบนปุ่ม (ว่าง = "ใส่ตะกร้า · ราคา")</label>
+                        <input className={partInputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder="ใส่ตะกร้า · ฿890" />
+                      </div>
+                      <div className="flex items-end gap-4 flex-wrap">
+                        <div>
+                          <label className={lbl}>สีพื้นปุ่ม</label>
+                          <ColorBtn value={it.bg} onChange={(v) => setItem(it.id, { bg: v })} title="สีพื้นปุ่ม (ว่าง = สีแบรนด์)" />
+                        </div>
+                        <PartToggle label="เต็มความกว้าง" on={it.fullWidth} onChange={(v) => setItem(it.id, { fullWidth: v })} />
+                      </div>
+                    </div>
+                  )}
+                  {it.key === "note" && (
+                    <div>
+                      <label className={lbl}>เอาข้อความจาก</label>
+                      <select className={partInputCls} value={buy.noteSource} onChange={(e) => onChange({ noteSource: e.target.value as ProductParts["buy"]["noteSource"] })}>
+                        {PART_CHOICES.buyNotes.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                      {buy.noteSource === "text" && (
+                        <input className={`${partInputCls} mt-1.5`} value={buy.noteText} onChange={(e) => onChange({ noteText: e.target.value })} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · จัดส่งใน 1–2 วัน" />
+                      )}
+                    </div>
+                  )}
+                  {it.key === "text" && (
+                    <div>
+                      <label className={lbl}>ข้อความ (ขึ้นบรรทัดใหม่ได้)</label>
+                      <textarea rows={3} className={partInputCls} value={it.text} onChange={(e) => setItem(it.id, { text: e.target.value })} placeholder={"✓ ส่งฟรีเมื่อครบ ฿1,500\n✓ รับประกันงานเย็บ 6 เดือน"} />
+                      <div className="mt-1"><PartToggle label="ตัวหนา" on={it.bold} onChange={(v) => setItem(it.id, { bold: v })} /></div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
