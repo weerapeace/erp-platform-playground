@@ -1226,7 +1226,7 @@ export const PRODUCT_SECTIONS: { value: ProductSection; label: string; hint: str
   { value: "gallery", label: "ชื่อรุ่น + รูปใหญ่", hint: "หัวเรื่อง รูปกลางจอ จุดเลื่อนรูป", hideable: false },
   { value: "buy", label: "ราคา · ตัวเลือก · ใส่ตะกร้า", hint: "ราคา/คำอธิบายสั้น ซ้าย · จำนวน/สี/ปุ่ม ขวา", hideable: false },
   { value: "details", label: "รายละเอียด / จุดเด่น", hint: "แท็บหรือเรียงต่อกัน ตามตัวเลือกด้านบน", hideable: true },
-  { value: "banner", label: "แบนเนอร์รูปที่ 2", hint: "โชว์เมื่อสินค้ามีรูปมากกว่า 1 รูป", hideable: true },
+  { value: "banner", label: "แบนเนอร์หลัก", hint: "รูปตามที่ตั้งใน ⚙️ · รุ่นที่ตั้งแบนเนอร์เองใช้ของรุ่นนั้น", hideable: true },
   { value: "related", label: "คุณอาจชอบ", hint: "สินค้าหมวดเดียวกัน 4 รายการ", hideable: true },
 ];
 
