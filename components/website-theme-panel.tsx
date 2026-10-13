@@ -35,7 +35,7 @@ type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 type MenuAlign = "left" | "center" | "right";
 type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
-type CardHover = "none" | "lift" | "zoom";
+type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap";
 type ProductLayout = "classic" | "showcase";
 type ProductTitleStyle = "serif" | "display";
 type ProductImageBg = "tint" | "surface" | "none";
@@ -47,6 +47,8 @@ type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
 type DetailApply = "all" | "categories" | "products";
 type DetailOpen = "auto" | "open" | "closed";
 interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen }
+
+interface SampleItem { name: string; price: number; comparePrice: number | null; unit: string; category: string; badge: string; stock: string; images: string[]; swatches: { color?: string; img?: string }[] }
 
 interface Theme {
   colors: { brand: string; brandDeep: string; ink: string; page: string; surface: string; muted: string };
@@ -62,7 +64,7 @@ interface Theme {
     height: number;
   };
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean };
-  card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover };
+  card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover; showCompare: boolean; showSwatches: boolean; showUnit: boolean; showCategory: boolean; quickAdd: "hover" | "always" | "none"; align: "left" | "center"; columns: { desktop: number; tablet: number; mobile: number }; gap: "sm" | "md" | "lg"; nameSize: number; priceSize: number; imageFit: "cover" | "contain" };
   product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
 
@@ -206,6 +208,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [page, setPage] = useState("/");
   /** สินค้าตัวแรกบนเว็บร้านนี้ — ไว้เปิดพรีวิว "หน้าสินค้า (ตัวอย่าง)" */
   const [sampleProduct, setSampleProduct] = useState<string | null>(null);
+  // สินค้าตัวอย่างสำหรับการ์ดจำลองในแท็บการ์ดสินค้า
+  const [sampleItems, setSampleItems] = useState<SampleItem[]>([]);
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; theme: Theme }[]>([]);
 
   const undoStack = useRef<Theme[]>([]);
@@ -251,8 +255,30 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     fetch(`/api/public/storefront/products?shop=${encodeURIComponent(shopSlug)}`)
       .then((r) => r.json())
       .then((j) => {
-        const slug = (j?.products as { slug?: string }[] | undefined)?.find((x) => x.slug)?.slug ?? null;
+        const list = (j?.products as Record<string, unknown>[] | undefined) ?? [];
+        const slug = (list.find((x) => x.slug) as { slug?: string } | undefined)?.slug ?? null;
         if (alive) setSampleProduct(slug);
+        // การ์ดจำลอง 3 ใบ — ตัวที่มีรูป ≥ 2 มาก่อน (จะได้เห็นเอฟเฟกต์สลับรูป)
+        const multi = list.filter((x) => Array.isArray(x.images) && (x.images as unknown[]).length > 1);
+        const picks = [...multi, ...list.filter((x) => !multi.includes(x))].slice(0, 3);
+        if (alive) {
+          setSampleItems(
+            picks.map((pick) => {
+              const opts = (pick.options as { items?: { label: string; swatch?: string | null; image?: string | null; images?: string[] | null }[] } | null)?.items ?? [];
+              return {
+                name: String(pick.name ?? ""),
+                price: Number(pick.price) || 0,
+                comparePrice: typeof pick.comparePrice === "number" ? pick.comparePrice : null,
+                unit: String(pick.unit ?? "ชิ้น"),
+                category: String(pick.category ?? ""),
+                badge: String(pick.badge ?? ""),
+                stock: String(pick.stock ?? "in"),
+                images: (pick.images as string[]) ?? [],
+                swatches: opts.map((o) => (o.swatch ? { color: o.swatch } : { img: o.image || o.images?.[0] || "" })).filter((x) => x.color || x.img),
+              };
+            })
+          );
+        }
       })
       .catch(() => {
         /* ไม่มีสินค้า = ไม่มีตัวเลือกนี้ */
@@ -852,15 +878,101 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-4 mt-4 pt-3 border-t border-slate-100">
-                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card.showBadge} onChange={(e) => setCard({ showBadge: e.target.checked })} />
-                  แสดงป้าย (ขายดี/แนะนำ)
-                </label>
-                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card.showStock} onChange={(e) => setCard({ showStock: e.target.checked })} />
-                  แสดงสถานะสต๊อก
-                </label>
+              <div className="grid gap-3 sm:grid-cols-3 mt-3">
+                <div>
+                  <label className={labelCls}>รูปในกรอบ</label>
+                  <select className={inputCls} value={theme.card.imageFit} onChange={(e) => setCard({ imageFit: e.target.value as Theme["card"]["imageFit"] })}>
+                    <option value="cover">เต็มกรอบ (ตัดขอบ)</option>
+                    <option value="contain">ย่อให้เห็นทั้งรูป</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>ปุ่ม "เพิ่มลงตะกร้า" บนรูป</label>
+                  <select className={inputCls} value={theme.card.quickAdd} onChange={(e) => setCard({ quickAdd: e.target.value as Theme["card"]["quickAdd"] })}>
+                    <option value="hover">โผล่ตอนชี้เมาส์ (มือถือไม่มี)</option>
+                    <option value="always">โชว์ตลอด</option>
+                    <option value="none">ไม่มีปุ่ม</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>จัดข้อความ</label>
+                  <select className={inputCls} value={theme.card.align} onChange={(e) => setCard({ align: e.target.value as Theme["card"]["align"] })}>
+                    <option value="left">ชิดซ้าย</option>
+                    <option value="center">กึ่งกลาง</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-4 mt-3">
+                <div>
+                  <label className={labelCls}>คอลัมน์ · คอม</label>
+                  <select className={inputCls} value={theme.card.columns.desktop} onChange={(e) => setCard({ columns: { ...theme.card.columns, desktop: Number(e.target.value) } })}>
+                    {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>คอลัมน์ · แท็บเล็ต</label>
+                  <select className={inputCls} value={theme.card.columns.tablet} onChange={(e) => setCard({ columns: { ...theme.card.columns, tablet: Number(e.target.value) } })}>
+                    {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>คอลัมน์ · มือถือ</label>
+                  <select className={inputCls} value={theme.card.columns.mobile} onChange={(e) => setCard({ columns: { ...theme.card.columns, mobile: Number(e.target.value) } })}>
+                    {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>ระยะห่างการ์ด</label>
+                  <select className={inputCls} value={theme.card.gap} onChange={(e) => setCard({ gap: e.target.value as Theme["card"]["gap"] })}>
+                    <option value="sm">ชิด</option>
+                    <option value="md">ปกติ</option>
+                    <option value="lg">ห่าง</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 mt-3">
+                <div>
+                  <label className={labelCls}>ขนาดชื่อสินค้า ({theme.card.nameSize}%)</label>
+                  <input type="range" min={60} max={180} step={5} value={theme.card.nameSize} onChange={(e) => setCard({ nameSize: Number(e.target.value) })} className="w-full" />
+                </div>
+                <div>
+                  <label className={labelCls}>ขนาดราคา ({theme.card.priceSize}%)</label>
+                  <input type="range" min={60} max={180} step={5} value={theme.card.priceSize} onChange={(e) => setCard({ priceSize: Number(e.target.value) })} className="w-full" />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 pt-3 border-t border-slate-100">
+                {([
+                  ["showBadge", "ป้าย (ขายดี/แนะนำ)"],
+                  ["showStock", "สถานะสต๊อก"],
+                  ["showCategory", "ชื่อหมวดเหนือชื่อสินค้า"],
+                  ["showUnit", "หน่วย (/ ใบ)"],
+                  ["showCompare", "ราคาเต็มขีดฆ่า (fake_price)"],
+                  ["showSwatches", "จุดสีตัวเลือก"],
+                ] as const).map(([k, label]) => (
+                  <label key={k} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card[k]} onChange={(e) => setCard({ [k]: e.target.checked } as Partial<Theme["card"]>)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+
+              {/* การ์ดจำลองจากสินค้าจริง — เปลี่ยนค่าแล้วเห็นทันที (ชี้เมาส์ดูเอฟเฟกต์) */}
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <label className={labelCls}>ตัวอย่างการ์ด (จากสินค้าจริงในร้าน · ชี้เมาส์เพื่อดูเอฟเฟกต์)</label>
+                {sampleItems.length ? (
+                  <div className="rounded-xl p-4" style={{ background: theme.colors.page }}>
+                    <div className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(sampleItems.length, theme.card.columns.desktop)}, minmax(0, 1fr))`, gap: theme.card.gap === "sm" ? 8 : theme.card.gap === "lg" ? 24 : 16, maxWidth: 560 }}>
+                      {sampleItems.slice(0, Math.min(sampleItems.length, theme.card.columns.desktop)).map((it, i) => (
+                        <SampleCard key={i} item={it} card={theme.card} colors={theme.colors} fonts={theme.fonts} radius={theme.radius} />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400">ยังไม่มีสินค้าบนเว็บ — การ์ดจำลองจะโชว์เมื่อมีสินค้าที่เผยแพร่แล้ว</p>
+                )}
               </div>
             </div>
           )}
@@ -1872,6 +1984,64 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/* ─────────── การ์ดสินค้าจำลอง (แท็บการ์ดสินค้า) — เลียนแบบ storefront ProductCard ให้ใกล้ที่สุด ─────────── */
+const RATIO_CSS: Record<string, string> = { "1:1": "1 / 1", "4:3": "4 / 3", "4:5": "4 / 5", "3:4": "3 / 4", "16:9": "16 / 9" };
+const STOCK_TH: Record<string, { text: string; color: string }> = { in: { text: "พร้อมส่ง", color: "#1F9254" }, low: { text: "เหลือน้อย", color: "#C77A0A" }, preorder: { text: "สั่งจอง", color: "#8A8F97" } };
+function SampleCard({ item, card, colors, fonts, radius }: { item: SampleItem; card: Theme["card"]; colors: Theme["colors"]; fonts: Theme["fonts"]; radius: Theme["radius"] }) {
+  const [hover, setHover] = useState(false);
+  const r = radius === "sharp" ? 4 : radius === "round" ? 20 : 12;
+  const boxed = card.preset === "border" || card.preset === "shadow" || card.preset === "floating";
+  const lift = card.hover === "lift" || card.hover === "lift-swap";
+  const swap = (card.hover === "swap" || card.hover === "lift-swap") && item.images.length > 1;
+  const wrap: React.CSSProperties = {
+    background: boxed ? colors.surface : "transparent",
+    border: card.preset === "border" ? "1px solid #e5e7eb" : undefined,
+    boxShadow: card.preset === "shadow" ? "0 2px 10px rgba(20,21,23,.06)" : card.preset === "floating" ? "0 14px 34px rgba(20,21,23,.14)" : undefined,
+    borderRadius: boxed ? r : undefined,
+    overflow: boxed ? "hidden" : undefined,
+    transform: hover && lift ? "translateY(-4px)" : undefined,
+    transition: "transform .25s, box-shadow .25s",
+    textAlign: card.align === "center" ? "center" : "left",
+    fontFamily: fonts.body,
+  };
+  const stock = STOCK_TH[item.stock] ?? STOCK_TH.in;
+  return (
+    <div style={wrap} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <div className="relative overflow-hidden" style={{ aspectRatio: RATIO_CSS[card.imageRatio] ?? "4 / 5", background: "#eee", borderRadius: boxed ? undefined : r }}>
+        {item.images[0] && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.images[0]} alt="" className={`absolute inset-0 w-full h-full transition-all duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ transform: hover && card.hover === "zoom" ? "scale(1.05)" : undefined, opacity: hover && swap ? 0 : 1 }} />
+        )}
+        {swap && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.images[1]} alt="" className={`absolute inset-0 w-full h-full transition-opacity duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ opacity: hover ? 1 : 0 }} />
+        )}
+        {card.showBadge && item.badge && <span className="absolute top-2 left-2 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white/90" style={{ color: colors.ink, letterSpacing: ".08em" }}>{item.badge}</span>}
+        {card.quickAdd !== "none" && (
+          <span className="absolute left-2 right-2 bottom-2 text-[11px] text-center rounded-md py-1 bg-white/95 transition-all duration-300" style={{ color: colors.ink, opacity: card.quickAdd === "always" || hover ? 1 : 0, transform: card.quickAdd === "always" || hover ? "none" : "translateY(6px)" }}>เพิ่มลงตะกร้า</span>
+        )}
+      </div>
+      <div className={boxed ? "p-3" : "pt-2.5"}>
+        <div className={`flex items-center text-[9px] mb-0.5 ${card.align === "center" ? "justify-center gap-2" : "justify-between"}`}>
+          {card.showCategory && <span className="uppercase tracking-wider" style={{ color: colors.muted }}>{item.category}</span>}
+          {card.showStock && <span className="inline-flex items-center gap-1" style={{ color: stock.color }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: stock.color }} />{stock.text}</span>}
+        </div>
+        <div className="font-medium leading-snug" style={{ fontFamily: fonts.display, color: hover ? colors.brand : colors.ink, fontSize: `${0.8 * card.nameSize / 100}rem`, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: card.titleLines, overflow: "hidden" }}>{item.name}</div>
+        <div className="mt-1" style={{ fontSize: `${0.82 * card.priceSize / 100}rem` }}>
+          <span className="font-semibold" style={{ fontFamily: fonts.display, color: colors.ink }}>฿{item.price.toLocaleString("th-TH")}</span>
+          {card.showCompare && item.comparePrice && item.comparePrice > item.price && <s className="ml-1.5 text-[0.8em]" style={{ color: colors.muted }}>฿{item.comparePrice.toLocaleString("th-TH")}</s>}
+          {card.showUnit && <span className="text-[0.8em]" style={{ color: colors.muted }}> / {item.unit}</span>}
+        </div>
+        {card.showSwatches && item.swatches.length > 0 && (
+          <div className={`flex gap-1 mt-1.5 ${card.align === "center" ? "justify-center" : ""}`}>
+            {item.swatches.slice(0, 6).map((c, i) => <span key={i} className="inline-block w-3 h-3 rounded-full bg-cover bg-center" style={{ background: c.color, backgroundImage: c.color ? undefined : `url(${c.img})`, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.15)" }} />)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

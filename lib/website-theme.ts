@@ -12,7 +12,13 @@ export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
 export type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 export type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
-export type CardHover = "none" | "lift" | "zoom";
+export type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap";
+export type CardQuickAdd = "hover" | "always" | "none";
+export type CardAlign = "left" | "center";
+export type CardGap = "sm" | "md" | "lg";
+export type CardImageFit = "cover" | "contain";
+/** จำนวนคอลัมน์ของกริดการ์ดต่อจอ */
+export interface CardColumns { desktop: number; tablet: number; mobile: number }
 /** แบบหน้าสินค้า (Style) — เก็บในธีม สลับกลับได้ ทุกแบรนด์ใช้ร่วมกัน */
 export type ProductLayout = "classic" | "showcase";
 export type ProductTitleStyle = "serif" | "display";
@@ -580,6 +586,20 @@ export interface SiteTheme {
     showBadge: boolean;
     showStock: boolean;
     hover: CardHover;
+    /** ราคาเต็มขีดฆ่า (fake_price) · จุดสีตัวเลือก · หน่วย · ชื่อหมวดเหนือชื่อ */
+    showCompare: boolean;
+    showSwatches: boolean;
+    showUnit: boolean;
+    showCategory: boolean;
+    /** ปุ่ม "เพิ่มลงตะกร้า" บนรูป: โผล่ตอนชี้ / โชว์ตลอด / ไม่มี */
+    quickAdd: CardQuickAdd;
+    align: CardAlign;
+    columns: CardColumns;
+    gap: CardGap;
+    /** ขนาดชื่อ/ราคา % ของปกติ */
+    nameSize: number;
+    priceSize: number;
+    imageFit: CardImageFit;
   };
   /** หน้าสินค้า: classic = รูปซ้าย ข้อมูลขวา · showcase = ชื่อรุ่นใหญ่ + รูปกลางจอ (ดู storefront ProductShowcase) */
   product: {
@@ -643,7 +663,7 @@ export const DEFAULT_THEME: SiteTheme = {
     height: 34,
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true },
-  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift" },
+  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
@@ -752,6 +772,13 @@ export const CARD_HOVERS: { value: CardHover; label: string }[] = [
   { value: "none", label: "ไม่มี" },
   { value: "lift", label: "ยกขึ้นเล็กน้อย" },
   { value: "zoom", label: "ซูมรูป" },
+  { value: "swap", label: "สลับเป็นรูปที่ 2" },
+  { value: "lift-swap", label: "ยกขึ้น + สลับเป็นรูปที่ 2" },
+];
+export const CARD_QUICK_ADDS: { value: CardQuickAdd; label: string }[] = [
+  { value: "hover", label: "โผล่ตอนชี้เมาส์ (มือถือไม่มี)" },
+  { value: "always", label: "โชว์ตลอด" },
+  { value: "none", label: "ไม่มีปุ่ม" },
 ];
 
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
@@ -818,7 +845,21 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       titleLines: num(cd.titleLines, d.card.titleLines, 1, 3),
       showBadge: cd.showBadge !== false,
       showStock: cd.showStock !== false,
-      hover: pick(cd.hover, ["none", "lift", "zoom"] as const, d.card.hover),
+      hover: pick(cd.hover, ["none", "lift", "zoom", "swap", "lift-swap"] as const, d.card.hover),
+      showCompare: cd.showCompare !== false,
+      showSwatches: cd.showSwatches === true,
+      showUnit: cd.showUnit !== false,
+      showCategory: cd.showCategory !== false,
+      quickAdd: pick(cd.quickAdd, ["hover", "always", "none"] as const, d.card.quickAdd),
+      align: pick(cd.align, ["left", "center"] as const, d.card.align),
+      columns: (() => {
+        const c = (cd.columns && typeof cd.columns === "object" ? cd.columns : {}) as Record<string, unknown>;
+        return { desktop: num(c.desktop, d.card.columns.desktop, 2, 6), tablet: num(c.tablet, d.card.columns.tablet, 1, 4), mobile: num(c.mobile, d.card.columns.mobile, 1, 3) };
+      })(),
+      gap: pick(cd.gap, ["sm", "md", "lg"] as const, d.card.gap),
+      nameSize: num(cd.nameSize, d.card.nameSize, 60, 180),
+      priceSize: num(cd.priceSize, d.card.priceSize, 60, 180),
+      imageFit: pick(cd.imageFit, ["cover", "contain"] as const, d.card.imageFit),
     },
     product: {
       layout: pick(pd.layout, ["classic", "showcase"] as const, d.product.layout),
