@@ -425,8 +425,17 @@ export interface ProductMobile {
   itemsOpen: Record<string, DetailOpen>;
   sections: ProductSection[] | null;
   hidden: ProductSection[] | null;
-  gallery: Partial<Pick<ProductParts["gallery"], "showBreadcrumb" | "showSubtitle">>;
-  buy: Partial<ProductParts["buy"]>;
+  gallery: Partial<ProductParts["gallery"]>;
+  /** สวิตช์เดิม (ค่าเก่า) — ถ้าตั้ง buyItems แล้วจะใช้ชุดนั้นแทน */
+  buy: Partial<Pick<ProductParts["buy"], "showUnit" | "showBadge" | "showStock" | "showShortDesc" | "noteSource" | "noteText">>;
+  /** ส่วนราคา-ตะกร้า ตั้งแยกทั้งชุดสำหรับมือถือ (null = ตามคอม) */
+  buyItems: BuyItem[] | null;
+  buyColumns: 1 | 2 | null;
+  banner: Partial<ProductParts["banner"]>;
+  related: Partial<ProductParts["related"]>;
+  imageEffect: ProductImageEffect | null;
+  imageFit: ProductImageFit | null;
+  imageSize: number | null;
   /** ขนาดตัวอักษรเฉพาะมือถือ (เฉพาะช่องที่ตั้ง) */
   fonts: Partial<ProductFonts>;
 }
@@ -443,9 +452,22 @@ export function normalizeMobile(raw: unknown): ProductMobile {
   }
   const g = (r.gallery && typeof r.gallery === "object" ? r.gallery : {}) as Record<string, unknown>;
   const b = (r.buy && typeof r.buy === "object" ? r.buy : {}) as Record<string, unknown>;
-  const gallery: ProductMobile["gallery"] = {};
-  if (bool(g.showBreadcrumb) !== undefined) gallery.showBreadcrumb = g.showBreadcrumb as boolean;
-  if (bool(g.showSubtitle) !== undefined) gallery.showSubtitle = g.showSubtitle as boolean;
+  // เอาเฉพาะคีย์ที่ตั้งไว้ แต่ค่าผ่านตัวกรองเดียวกับของคอม (normalizeParts)
+  const partial = <K extends keyof ProductParts>(k: K, rawPart: unknown): Partial<ProductParts[K]> => {
+    const src = (rawPart && typeof rawPart === "object" ? rawPart : {}) as Record<string, unknown>;
+    // ไม่มีช่องตั้งไว้ = {} ทันที (ไม่เรียกตัวกรองของคอมตอนโหลดโมดูล — กัน TDZ เมื่อ DEFAULT_THEME ใช้ normalizeMobile(null))
+    if (!Object.keys(src).length) return {};
+    const norm = normalizeParts({ [k]: src })[k] as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(src)) if (key in norm) out[key] = norm[key];
+    return out as Partial<ProductParts[K]>;
+  };
+  const gallery = partial("gallery", g);
+  const banner = partial("banner", r.banner);
+  const related = partial("related", r.related);
+  const buyItems = Array.isArray(r.buyItems) ? normalizeBuyItems(r.buyItems, { showUnit: true, showBadge: true, showStock: true, showShortDesc: true }) : null;
+  const buyColumns = Number(r.buyColumns) === 1 ? 1 : Number(r.buyColumns) === 2 ? 2 : null;
+  const sizeN = Number(r.imageSize);
   const buy: ProductMobile["buy"] = {};
   for (const k of ["showUnit", "showBadge", "showStock", "showShortDesc"] as const) if (bool(b[k]) !== undefined) buy[k] = b[k] as boolean;
   const ns = pick(b.noteSource, ["wholesale", "shipping", "text", "none"] as const);
@@ -459,6 +481,13 @@ export function normalizeMobile(raw: unknown): ProductMobile {
     hidden: Array.isArray(r.hidden) ? normalizeHiddenSections(r.hidden) : null,
     gallery,
     buy,
+    buyItems,
+    buyColumns,
+    banner,
+    related,
+    imageEffect: pick(r.imageEffect, ["shadow", "none", "border", "rounded", "rounded-shadow"] as const),
+    imageFit: pick(r.imageFit, ["contain", "cover"] as const),
+    imageSize: Number.isFinite(sizeN) && sizeN >= 50 && sizeN <= 100 ? Math.round(sizeN) : null,
     fonts: partialFonts(r.fonts),
   };
 }
@@ -472,19 +501,27 @@ export function resolveMobileProduct<P extends SiteTheme["product"]>(p: P): P {
     sections: m.sections ?? p.sections,
     hidden: m.hidden ?? p.hidden,
     detailItems: p.detailItems.map((it) => (m.itemsOpen[it.id] ? { ...it, defaultOpen: m.itemsOpen[it.id] } : it)),
+    imageEffect: m.imageEffect ?? p.imageEffect,
+    imageFit: m.imageFit ?? p.imageFit,
+    imageSize: m.imageSize ?? p.imageSize,
     parts: {
       ...p.parts,
       gallery: { ...p.parts.gallery, ...m.gallery },
+      banner: { ...p.parts.banner, ...m.banner },
+      related: { ...p.parts.related, ...m.related },
       buy: {
         ...p.parts.buy,
         ...m.buy,
-        // สวิตช์มือถือ (เปิด/ปิดหน่วย ป้าย สต๊อก คำอธิบายย่อ) ทับลงชิ้นส่วนที่จัดไว้ในโหมดคอม
-        items: p.parts.buy.items.map((it) => {
-          if (it.key === "price") return { ...it, showUnit: m.buy.showUnit ?? it.showUnit, showBadge: m.buy.showBadge ?? it.showBadge };
-          if (it.key === "stock" && m.buy.showStock !== undefined) return { ...it, enabled: m.buy.showStock };
-          if (it.key === "desc" && m.buy.showShortDesc !== undefined) return { ...it, enabled: m.buy.showShortDesc };
-          return it;
-        }),
+        columns: m.buyColumns ?? p.parts.buy.columns,
+        // ตั้งแยกทั้งชุด (buyItems) ชนะ · ไม่งั้นสวิตช์เดิมทับลงชิ้นส่วนของคอม
+        items:
+          m.buyItems ??
+          p.parts.buy.items.map((it) => {
+            if (it.key === "price") return { ...it, showUnit: m.buy.showUnit ?? it.showUnit, showBadge: m.buy.showBadge ?? it.showBadge };
+            if (it.key === "stock" && m.buy.showStock !== undefined) return { ...it, enabled: m.buy.showStock };
+            if (it.key === "desc" && m.buy.showShortDesc !== undefined) return { ...it, enabled: m.buy.showShortDesc };
+            return it;
+          }),
       },
     },
     fonts: { ...p.fonts, ...m.fonts },
@@ -492,7 +529,7 @@ export function resolveMobileProduct<P extends SiteTheme["product"]>(p: P): P {
 }
 /** มีค่าที่ตั้งแยกสำหรับมือถืออยู่ไหม (ไว้โชว์ป้ายในแท็บดีไซน์) */
 export function mobileOverrideCount(m: ProductMobile): number {
-  return (m.detailsStyle ? 1 : 0) + (m.detailsOpen ? 1 : 0) + Object.keys(m.itemsOpen).length + (m.sections ? 1 : 0) + (m.hidden ? 1 : 0) + Object.keys(m.gallery).length + Object.keys(m.buy).length + Object.keys(m.fonts).length;
+  return (m.detailsStyle ? 1 : 0) + (m.detailsOpen ? 1 : 0) + Object.keys(m.itemsOpen).length + (m.sections ? 1 : 0) + (m.hidden ? 1 : 0) + Object.keys(m.gallery).length + Object.keys(m.buy).length + Object.keys(m.fonts).length + (m.buyItems ? 1 : 0) + (m.buyColumns ? 1 : 0) + Object.keys(m.banner).length + Object.keys(m.related).length + (m.imageEffect ? 1 : 0) + (m.imageFit ? 1 : 0) + (m.imageSize ? 1 : 0);
 }
 
 export interface SiteTheme {

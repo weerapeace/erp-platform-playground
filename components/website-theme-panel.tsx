@@ -15,7 +15,7 @@ import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
-import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
+import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
 const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
@@ -309,9 +309,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [openPart, setOpenPart] = useState<ProductSection | null>(null);
   const setPart = <K extends keyof ProductParts>(k: K, p: Partial<ProductParts[K]>) => {
     if (!theme) return;
-    // มือถือ: รูปใหญ่/ราคา-ตะกร้า ตั้งแยกได้ · แบนเนอร์/คุณอาจชอบ ใช้ร่วมกัน
-    if (editDevice === "mobile" && (k === "gallery" || k === "buy")) {
-      const mk = k as "gallery" | "buy";
+    // มือถือ: ทุกส่วนตั้งแยกได้ — ราคา-ตะกร้าเก็บทั้งชุด (buyItems/buyColumns) · ส่วนอื่นเก็บเฉพาะช่องที่ตั้ง
+    if (editDevice === "mobile") {
+      if (k === "buy") {
+        const pb = p as Partial<ProductParts["buy"]>;
+        const patch: Partial<ProductMobile> = {};
+        if (pb.items !== undefined) patch.buyItems = pb.items;
+        if (pb.columns !== undefined) patch.buyColumns = pb.columns;
+        const legacy: Record<string, unknown> = {};
+        for (const key of ["showUnit", "showBadge", "showStock", "showShortDesc", "noteSource", "noteText"] as const) if (pb[key] !== undefined) legacy[key] = pb[key];
+        if (Object.keys(legacy).length) patch.buy = { ...theme.product.mobile.buy, ...legacy };
+        setMobile(patch);
+        return;
+      }
+      const mk = k as "gallery" | "banner" | "related";
       setMobile({ [mk]: { ...(theme.product.mobile[mk] as Record<string, unknown>), ...p } } as Partial<ProductMobile>);
       return;
     }
@@ -868,8 +879,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               </div>
               {isMobileEdit && (
                 <div className="mb-3 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-[11px] text-blue-800 flex items-center justify-between gap-2 flex-wrap">
-                  <span>📱 กำลังตั้งค่าสำหรับ <b>มือถือ</b> (จอแคบกว่า 768px) — ช่องที่เป็น "ตามคอม" ใช้ค่าเดียวกับคอม · ตั้งแยกได้: วิธีโชว์รายละเอียด, พับ/เปิด, ลำดับ/ซ่อนส่วนประกอบ, รายละเอียดย่อยของรูปใหญ่และราคา-ตะกร้า</span>
-                  {mobCount > 0 && <button type="button" onClick={() => setProduct({ mobile: { detailsStyle: null, detailsOpen: null, itemsOpen: {}, sections: null, hidden: null, gallery: {}, buy: {}, fonts: {} } })} className="text-blue-700 hover:underline whitespace-nowrap">ล้างค่ามือถือทั้งหมด (ตามคอม)</button>}
+                  <span>📱 กำลังตั้งค่าสำหรับ <b>มือถือ</b> (จอแคบกว่า 768px) — ช่องที่เป็น "ตามคอม" ใช้ค่าเดียวกับคอม · ตั้งแยกได้ทุกอย่าง: วิธีโชว์รายละเอียด, พับ/เปิด, ลำดับ/ซ่อนส่วนประกอบ, ⚙️ ทุกส่วน (รูปใหญ่ · ราคา-ตะกร้าทั้งชุด · แบนเนอร์ · คุณอาจชอบ), เอฟเฟกต์/ขนาดรูป, ขนาดตัวอักษร</span>
+                  {mobCount > 0 && <button type="button" onClick={() => setProduct({ mobile: normalizeMobile(null) })} className="text-blue-700 hover:underline whitespace-nowrap">ล้างค่ามือถือทั้งหมด (ตามคอม)</button>}
                 </div>
               )}
               <p className="text-[11px] text-slate-400 mb-3">Style เป็นของกลาง ทุกร้าน/ทุกแบรนด์เลือกใช้ได้ สลับกลับได้ตลอด · ข้อมูลสินค้าชุดเดิม ไม่ต้องกรอกเพิ่ม</p>
@@ -989,17 +1000,35 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </div>
                   <div>
                     <label className={labelCls}>เอฟเฟกต์รูปสินค้า</label>
-                    <select className={inputCls} value={theme.product.imageEffect} onChange={(e) => setProduct({ imageEffect: e.target.value as ProductImageEffect })}>
+                    <select
+                      className={`${inputCls} ${isMobileEdit && mob.imageEffect ? "border-blue-400" : ""}`}
+                      value={isMobileEdit ? (mob.imageEffect ?? "__pc") : theme.product.imageEffect}
+                      onChange={(e) => (isMobileEdit ? setMobile({ imageEffect: e.target.value === "__pc" ? null : (e.target.value as ProductImageEffect) }) : setProduct({ imageEffect: e.target.value as ProductImageEffect }))}
+                    >
+                      {isMobileEdit && <option value="__pc">ตามคอม ({PRODUCT_IMAGE_EFFECTS.find((o) => o.value === theme.product.imageEffect)?.label})</option>}
                       {PRODUCT_IMAGE_EFFECTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className={labelCls}>ขนาดรูปในกรอบ</label>
                     <select
-                      className={inputCls}
-                      value={theme.product.imageFit === "cover" ? "cover" : String(theme.product.imageSize)}
-                      onChange={(e) => (e.target.value === "cover" ? setProduct({ imageFit: "cover" }) : setProduct({ imageFit: "contain", imageSize: Number(e.target.value) }))}
+                      className={`${inputCls} ${isMobileEdit && (mob.imageFit || mob.imageSize) ? "border-blue-400" : ""}`}
+                      value={
+                        isMobileEdit
+                          ? !mob.imageFit && !mob.imageSize ? "__pc" : (mob.imageFit ?? theme.product.imageFit) === "cover" ? "cover" : String(mob.imageSize ?? theme.product.imageSize)
+                          : theme.product.imageFit === "cover" ? "cover" : String(theme.product.imageSize)
+                      }
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (isMobileEdit) {
+                          if (v === "__pc") setMobile({ imageFit: null, imageSize: null });
+                          else if (v === "cover") setMobile({ imageFit: "cover" });
+                          else setMobile({ imageFit: "contain", imageSize: Number(v) });
+                        } else if (v === "cover") setProduct({ imageFit: "cover" });
+                        else setProduct({ imageFit: "contain", imageSize: Number(v) });
+                      }}
                     >
+                      {isMobileEdit && <option value="__pc">ตามคอม ({theme.product.imageFit === "cover" ? "เต็มกรอบ" : `${theme.product.imageSize}%`})</option>}
                       {PRODUCT_IMAGE_SIZES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       {theme.product.imageFit === "contain" && !PRODUCT_IMAGE_SIZES.some((o) => o.value === String(theme.product.imageSize)) && (
                         <option value={String(theme.product.imageSize)}>{theme.product.imageSize}%</option>
@@ -1119,7 +1148,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             parts={pv.parts}
                             setPart={setPart}
                             mobile={isMobileEdit ? mob : null}
-                            onResetMobile={(k) => setMobile({ [k]: {} } as Partial<ProductMobile>)}
+                            onResetMobile={(k) => (k === "buy" ? setMobile({ buyItems: null, buyColumns: null, buy: {} }) : setMobile({ [k]: {} } as Partial<ProductMobile>))}
+                            onCopyBuyToMobile={() => setMobile({ buyItems: pv.parts.buy.items.map((it) => ({ ...it })), buyColumns: pv.parts.buy.columns, buy: {} })}
                             products={choices.products ?? []}
                             fields={choices.specFields ?? []}
                             previewBg={theme.colors.page}
@@ -1510,6 +1540,7 @@ function PartSettings({
   previewBg,
   mobile = null,
   onResetMobile,
+  onCopyBuyToMobile,
 }: {
   part: ProductSection;
   parts: ProductParts;
@@ -1520,18 +1551,21 @@ function PartSettings({
   previewBg: string;
   /** กำลังตั้งค่าสำหรับมือถือ → ค่ามือถือที่ตั้งแยกไว้ (null = กำลังตั้งคอม) */
   mobile?: ProductMobile | null;
-  onResetMobile?: (k: "gallery" | "buy") => void;
+  onResetMobile?: (k: "gallery" | "buy" | "banner" | "related") => void;
+  /** มือถือ: คัดลอกชุดราคา-ตะกร้าของคอมมาตั้งแยก */
+  onCopyBuyToMobile?: () => void;
 }) {
   const [q, setQ] = useState("");
   const lbl = "block text-[11px] text-slate-500 mb-1";
-  const mobileNote = (k: "gallery" | "buy") =>
+  const mobileCount = (k: "gallery" | "buy" | "banner" | "related") =>
+    !mobile ? 0 : k === "buy" ? (mobile.buyItems ? 1 : 0) + (mobile.buyColumns ? 1 : 0) + Object.keys(mobile.buy).length : Object.keys(mobile[k]).length;
+  const mobileNote = (k: "gallery" | "buy" | "banner" | "related") =>
     mobile ? (
       <div className="flex items-center justify-between gap-2 text-[11px] text-blue-700 bg-blue-50 rounded-lg px-2 py-1">
-        <span>📱 ค่าสำหรับมือถือ{Object.keys(mobile[k]).length ? ` (ตั้งแยกไว้ ${Object.keys(mobile[k]).length} ช่อง)` : " — ยังตามคอมทั้งหมด"}</span>
-        {Object.keys(mobile[k]).length > 0 && <button type="button" onClick={() => onResetMobile?.(k)} className="hover:underline">ใช้ตามคอม</button>}
+        <span>📱 ค่าสำหรับมือถือ{mobileCount(k) ? ` (ตั้งแยกไว้ ${mobileCount(k)} ${k === "buy" ? "รายการ" : "ช่อง"})` : " — ยังตามคอมทั้งหมด (แก้ช่องไหน = ตั้งแยกช่องนั้น)"}</span>
+        {mobileCount(k) > 0 && <button type="button" onClick={() => onResetMobile?.(k)} className="hover:underline">ใช้ตามคอม</button>}
       </div>
     ) : null;
-  const sharedNote = mobile ? <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2 py-1">🖥📱 ส่วนนี้ใช้ค่าเดียวกันทั้งคอมและมือถือ</div> : null;
   if (part === "gallery") {
     const g = parts.gallery;
     return (
@@ -1539,13 +1573,12 @@ function PartSettings({
         {mobileNote("gallery")}
         {!mobile && (
         <div>
-          <label className={lbl}>จอคอมโชว์กี่รูปพร้อมกัน (แกลเลอรีเลื่อนซ้าย-ขวา)</label>
+          <label className={lbl}>จอคอมโชว์กี่รูปพร้อมกัน (แกลเลอรีเลื่อนซ้าย-ขวา · มือถือทีละรูปเสมอ)</label>
           <select className={partInputCls} value={g.perView} onChange={(e) => setPart("gallery", { perView: Number(e.target.value) === 2 ? 2 : 1 })}>
             {PART_CHOICES.perViews.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
         )}
-        {!mobile && (
         <div>
           <label className={lbl}>กดเลือกสีแล้วรูปใหญ่ทำอย่างไร</label>
           <select className={partInputCls} value={g.colorMode} onChange={(e) => setPart("gallery", { colorMode: e.target.value as ProductParts["gallery"]["colorMode"] })}>
@@ -1553,7 +1586,6 @@ function PartSettings({
           </select>
           <p className="text-[11px] text-slate-400 mt-1">{PART_CHOICES.colorModes.find((o) => o.value === g.colorMode)?.hint}</p>
         </div>
-        )}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <PartToggle label="เส้นทางหน้า (หน้าแรก / สินค้า / หมวด)" on={g.showBreadcrumb} onChange={(v) => setPart("gallery", { showBreadcrumb: v })} />
           <PartToggle label="ชื่อรองใต้ชื่อรุ่น" on={g.showSubtitle} onChange={(v) => setPart("gallery", { showSubtitle: v })} />
@@ -1564,26 +1596,21 @@ function PartSettings({
   }
   if (part === "buy") {
     const b = parts.buy;
-    if (mobile) {
-      // โหมดมือถือ: สวิตช์เปิด/ปิดทับค่าคอม · การจัดตำแหน่ง/ขนาด/สี ใช้ร่วมกัน (ตั้งในโหมดคอม)
-      const pi = b.items.find((i) => i.key === "price");
-      const si = b.items.find((i) => i.key === "stock");
-      const di = b.items.find((i) => i.key === "desc");
+    if (mobile && !mobile.buyItems) {
+      // โหมดมือถือ ยังตามคอม: ให้กดคัดลอกชุดของคอมมาตั้งแยกก่อน (จะได้แก้ทุกอย่างได้เหมือนคอม)
       return (
         <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
           {mobileNote("buy")}
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <PartToggle label="หน่วย (/ ใบ)" on={mobile.buy.showUnit ?? pi?.showUnit ?? true} onChange={(v) => setPart("buy", { showUnit: v })} />
-            <PartToggle label="ป้าย (ใหม่/ลดราคา)" on={mobile.buy.showBadge ?? pi?.showBadge ?? true} onChange={(v) => setPart("buy", { showBadge: v })} />
-            <PartToggle label="สถานะสต๊อก" on={mobile.buy.showStock ?? si?.enabled ?? true} onChange={(v) => setPart("buy", { showStock: v })} />
-            <PartToggle label="คำอธิบายย่อ" on={mobile.buy.showShortDesc ?? di?.enabled ?? true} onChange={(v) => setPart("buy", { showShortDesc: v })} />
+          <div className="rounded-lg border border-dashed border-blue-200 p-3 text-center">
+            <p className="text-xs text-slate-600 mb-2">มือถือใช้ชุดชิ้นส่วนเดียวกับคอมอยู่ (เรียงเป็นคอลัมน์เดียว ซ้ายก่อนขวา)</p>
+            <button type="button" onClick={() => onCopyBuyToMobile?.()} className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">📱 ตั้งแยกสำหรับมือถือ (คัดลอกค่าคอมมาแก้)</button>
           </div>
-          <p className="text-[11px] text-slate-400">ลำดับ/ตำแหน่ง/ขนาด/สีของชิ้นส่วน ตั้งที่โหมด 🖥 คอม (ใช้ร่วมกันทั้งสองจอ · บนมือถือเรียงเป็นคอลัมน์เดียวตามลำดับ)</p>
         </div>
       );
     }
     return (
-      <div className="mt-2 pt-2 border-t border-slate-100">
+      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
+        {mobileNote("buy")}
         <BuyItemsEditor buy={b} onChange={(p) => setPart("buy", p)} fields={fields} />
       </div>
     );
@@ -1592,7 +1619,7 @@ function PartSettings({
     const bn = parts.banner;
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-        {sharedNote}
+        {mobileNote("banner")}
         <div>
           <label className={lbl}>รูปแบนเนอร์เอาจาก</label>
           <select className={partInputCls} value={bn.imageSource} onChange={(e) => setPart("banner", { imageSource: e.target.value as ProductParts["banner"]["imageSource"] })}>
@@ -1631,7 +1658,7 @@ function PartSettings({
     const toggle = (code: string) => setPart("related", { codes: r.codes.includes(code) ? r.codes.filter((c) => c !== code) : [...r.codes, code] });
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-        {sharedNote}
+        {mobileNote("related")}
         <div className="grid sm:grid-cols-[1fr_auto] gap-2">
           <div>
             <label className={lbl}>เอาสินค้าจาก</label>
