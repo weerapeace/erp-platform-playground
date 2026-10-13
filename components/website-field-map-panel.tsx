@@ -14,7 +14,7 @@ import { useToast } from "@/components/toast";
 type WebCategory = string;
 
 interface FieldMap {
-  name: { source: string; stripPrefix?: string };
+  name: { source: string; stripPrefix?: string; removeBrand?: boolean; removeCollection?: boolean; removeCode?: boolean; removeParens?: boolean };
   price: { source: string };
   description: { source: string };
   unit: { default: string };
@@ -190,6 +190,31 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
               onChange={(e) => patch({ name: { ...map.name, stripPrefix: e.target.value } })}
               placeholder="เช่น IG International"
             />
+          </div>
+
+          {/* กฎประกอบชื่อ — ตัดส่วนที่ไม่อยากโชว์ออกจากชื่อใน ERP (ใช้ทุกสินค้าในร้าน) */}
+          <div className="sm:col-span-2 lg:col-span-3">
+            <label className={labelCls}>ตัดออกจากชื่ออัตโนมัติ</label>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {(
+                [
+                  ["removeBrand", "ชื่อแบรนด์"],
+                  ["removeCollection", "ชื่อคอลเลกชัน"],
+                  ["removeCode", "รหัสสินค้า"],
+                  ["removeParens", "ข้อความในวงเล็บ ( )"],
+                ] as const
+              ).map(([k, l]) => (
+                <label key={k} className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!map.name[k]}
+                    onChange={(e) => patch({ name: { ...map.name, [k]: e.target.checked } })}
+                    className="accent-orange-500"
+                  />
+                  {l}
+                </label>
+              ))}
+            </div>
           </div>
 
           <div>

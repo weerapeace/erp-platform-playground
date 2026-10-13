@@ -6,6 +6,9 @@
  *                    + SKU ลูก (สต๊อก + รูปปก + แกลเลอรีรูปของ SKU ให้เลือกเป็นรูปเว็บรายสี) + ยอดขายเว็บ
  * POST { parentId, shopId, action:"add" }      → เพิ่มรุ่นเข้าร้านนั้น (ปิดไว้ก่อน)
  * POST { parentId, shopId, patch:{...} }        → แก้ override ของร้านนั้น (store_listings) แล้วสั่งเว็บร้านล้างแคช
+ * POST { parentId, shopId, action:"nameRule", nameRule:{removeBrand?,removeCollection?,removeCode?,removeParens?} }
+ *                                               → กฎชื่อของร้าน (shops.field_map.name — ใช้ทุกสินค้าในร้าน)
+ * GET คืน autoName ต่อร้าน = ชื่อที่เว็บใช้จริงเมื่อเว้นช่องชื่อว่าง (resolveName ตัวเดียวกับเว็บ)
  *
  * web_sku_images = { [skuId]: string[] }  รูปเว็บของสีนั้น (หลายรูปได้) — ค่าเก่าเป็น string เดี่ยว ยังอ่านได้
  * web_details    = { [detailItemId]: { show?: boolean, text?: string } }  ทับ "ชุดรายละเอียดสินค้า" ของธีมเฉพาะรุ่นนี้
@@ -17,7 +20,15 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeTheme } from "@/lib/website-theme";
-import { normalizeFieldMap } from "@/lib/website-field-map";
+import {
+  normalizeFieldMap,
+  resolveName,
+  attachNameRefs,
+  PARENT_SELECT,
+  NAME_RULE_FLAGS,
+  type ParentRow,
+  type NameRuleFlag,
+} from "@/lib/website-field-map";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { cleanDetailOverrides, type DetailOverride } from "@/lib/website-detail-overrides";
 import { normalizePersonalize, type PersonalizeConfig } from "@/lib/website-personalize";
@@ -52,7 +63,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const sb = supabaseAdmin();
   const [{ data: parent }, { data: listings }, { data: shops }, { data: children }] = await Promise.all([
-    sb.from("parent_skus_v2").select("id, code, name_th, name_platform, platform_description, description").eq("id", parentId).maybeSingle(),
+    sb.from("parent_skus_v2").select(PARENT_SELECT).eq("id", parentId).maybeSingle(),
     sb.from("store_listings").select("*").eq("parent_sku_id", parentId),
     sb.from("shops").select("id, name, slug, is_default, theme, theme_draft, field_map").order("is_default", { ascending: false }),
     sb.from("skus_v2").select("id, code, color, list_price, cover_image_r2_key").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
@@ -60,6 +71,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
 
   const code = (parent as { code: string }).code;
+  // ชื่อแบรนด์/คอลเลกชัน → ไว้คำนวณ "ชื่อที่เว็บจะใช้จริง" ตามกฎชื่อของแต่ละร้าน + โชว์เป็นป้ายบนปุ่มกฎ
+  const parentRow = parent as unknown as ParentRow;
+  await attachNameRefs(sb, [parentRow]);
   const kids = (children ?? []) as Record<string, unknown>[];
   const kidIds = kids.map((k) => k.id as string);
 
@@ -131,7 +145,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     // "ชุดรายละเอียดสินค้า" ของธีมร้านนี้ (ฉบับร่างถ้ามี) → ให้หน้าจอโชว์ว่าแต่ละหัวข้อค่ากลางเป็นอย่างไรกับรุ่นนี้
     const theme = normalizeTheme(s.theme_draft ?? s.theme);
-    const catLabel = new Map(normalizeFieldMap(s.field_map).categories.map((c) => [c.key, c.label]));
+    const fieldMap = normalizeFieldMap(s.field_map);
+    const catLabel = new Map(fieldMap.categories.map((c) => [c.key, c.label]));
     const detailItems = theme.product.detailItems.map((it) => {
       let defaultLabel: string;
       if (!it.enabled) defaultLabel = "ปิดอยู่ (ค่ากลาง)";
@@ -151,6 +166,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       featured: Boolean(l?.featured),
       webPrice: l?.web_price != null ? Number(l.web_price) : null,
       webName: (l?.web_name as string | null) ?? "",
+      /** ชื่อที่เว็บร้านนี้ใช้จริงถ้าเว้นช่องชื่อว่าง (ตามกฎชื่อของร้าน — ตัวเดียวกับเว็บจริง) */
+      autoName: resolveName(fieldMap, parentRow),
+      /** กฎชื่อของร้าน (ใช้กับทุกสินค้าในร้าน) */
+      nameRule: Object.fromEntries(NAME_RULE_FLAGS.map((f) => [f, !!fieldMap.name[f]])) as Record<NameRuleFlag, boolean>,
       webDescription: (l?.web_description as string | null) ?? "",
       webImages: Array.isArray(l?.web_images) ? (l!.web_images as string[]).filter((k) => typeof k === "string") : [],
       webSkuImages,
@@ -170,6 +189,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ((parent as { platform_description?: string | null }).platform_description ?? "").trim() ||
       ((parent as { description?: string | null }).description ?? "").trim() ||
       null,
+    /** แบรนด์/คอลเลกชัน/รหัสของรุ่นนี้ — โชว์บนปุ่มกฎชื่อให้เห็นว่าจะลบคำไหน */
+    nameRefs: { brand: parentRow.brand_name ?? null, collection: parentRow.collection_name ?? null, code },
     adminUrl: `${STORE_BASE}/admin/products`,
     variants,
     shops: shopRows,
@@ -193,7 +214,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  let b: { parentId?: string; shopId?: string; action?: string; patch?: Patch };
+  let b: { parentId?: string; shopId?: string; action?: string; patch?: Patch; nameRule?: Record<string, unknown> };
   try {
     b = await request.json();
   } catch {
@@ -212,6 +233,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await writeAudit(sb, { action: "create", entityType: "store_listing", entityId: b.parentId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { shopId: b.shopId } });
     }
     return NextResponse.json({ ok: true });
+  }
+
+  // กฎชื่อของร้าน (ลบแบรนด์/คอลเลกชัน/รหัส/วงเล็บ) — เก็บที่ shops.field_map.name ใช้กับทุกสินค้าในร้าน
+  if (b.action === "nameRule") {
+    const flags = (b.nameRule ?? {}) as Partial<Record<NameRuleFlag, unknown>>;
+    const { data: shop } = await sb.from("shops").select("field_map").eq("id", b.shopId).maybeSingle();
+    if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
+    const raw = ((shop as { field_map: unknown }).field_map ?? {}) as Record<string, unknown>;
+    const before = normalizeFieldMap(raw).name;
+    const name: Record<string, unknown> = { ...before };
+    for (const f of NAME_RULE_FLAGS) if (typeof flags[f] === "boolean") name[f] = flags[f];
+    const { error } = await sb.from("shops").update({ field_map: { ...raw, name } }).eq("id", b.shopId);
+    if (error) return NextResponse.json({ error: "บันทึกกฎชื่อไม่สำเร็จ" }, { status: 500 });
+    await writeAudit(sb, { action: "update", entityType: "shop_field_map", entityId: b.shopId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { field: "name", before, after: name, from: "parent_web_tab", parentId: b.parentId } });
+    const purged = await purgeStorefrontCache(sb, b.shopId);
+    return NextResponse.json({ ok: true, purged });
   }
 
   const p = b.patch ?? {};

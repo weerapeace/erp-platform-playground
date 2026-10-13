@@ -19,6 +19,8 @@ import { writeAudit } from "@/lib/audit";
 import {
   normalizeFieldMap,
   resolveProduct,
+  attachNameRefs,
+  nameRuleNeedsRefs,
   PARENT_SELECT,
   CHILD_SELECT,
   type ParentRow as MapParentRow,
@@ -121,6 +123,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
     ]);
     for (const p of (parents ?? []) as ParentRow[]) parentById.set(p.id, p);
+    if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (mapParents ?? []) as MapParentRow[]);
     for (const p of (mapParents ?? []) as MapParentRow[]) mapParentById.set(p.id, p);
     for (const k of (children ?? []) as (ChildSku & { parent_sku_id: string })[]) {
       const arr = kidsByParent.get(k.parent_sku_id) ?? [];

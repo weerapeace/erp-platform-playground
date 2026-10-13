@@ -16,6 +16,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeFieldMap,
   resolveProduct,
+  attachNameRefs,
+  nameRuleNeedsRefs,
   CHILD_SELECT,
   type ParentRow,
   type ChildSku,
@@ -91,6 +93,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
   const relatedValues = await resolveRelatedValues(sb, parentFields, (parents ?? []) as Record<string, unknown>[]);
 
+  // กฎชื่อของร้าน "ลบแบรนด์/คอลเลกชัน" ต้องรู้ชื่อแบรนด์/คอลเลกชันก่อน
+  if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (parents ?? []) as ParentRow[]);
   const parentById = new Map(((parents ?? []) as ParentRow[]).map((p) => [p.id, p]));
 
   const kidsByParent = new Map<string, ChildSku[]>();

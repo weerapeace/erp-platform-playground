@@ -12,6 +12,8 @@
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
 
+type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
+
 export type NameSource = "name_th" | "name_platform" | "name_en" | "sku_name" | "code";
 export type PriceSource = "sku_max" | "sku_min" | "final_price" | "sale_price" | "fake_price";
 export type DescSource = "platform_description" | "introduction" | "description" | "english_description" | "none";
@@ -50,8 +52,30 @@ export interface WebCategoryDef {
   blurb: string;
 }
 
+/**
+ * กฎประกอบชื่อบนเว็บ (ต่อร้าน) — ตัดส่วนที่ไม่อยากโชว์ออกจากชื่อใน ERP อัตโนมัติ
+ * เช่น ร้านแบรนด์ตัวเองไม่ต้องมีชื่อแบรนด์/รหัสรุ่นซ้ำในชื่อ
+ */
+export interface NameRule {
+  source: NameSource;
+  /** ตัดคำนำหน้าชื่อ (ข้อความตายตัว) */
+  stripPrefix?: string;
+  /** ลบชื่อแบรนด์ของสินค้า (brands.name) ออกจากชื่อ */
+  removeBrand?: boolean;
+  /** ลบชื่อคอลเลกชันของสินค้า (collections.name) ออกจากชื่อ */
+  removeCollection?: boolean;
+  /** ลบรหัสสินค้า (code ของ Parent SKU) ออกจากชื่อ */
+  removeCode?: boolean;
+  /** ลบข้อความในวงเล็บ (...) [...] ออกจากชื่อ */
+  removeParens?: boolean;
+}
+
+/** กฎชื่อแบบเปิด/ปิด — ใช้ร่วมกันระหว่าง normalize, API และหน้าจอ */
+export const NAME_RULE_FLAGS = ["removeBrand", "removeCollection", "removeCode", "removeParens"] as const;
+export type NameRuleFlag = (typeof NAME_RULE_FLAGS)[number];
+
 export interface FieldMap {
-  name: { source: NameSource; stripPrefix?: string };
+  name: NameRule;
   price: { source: PriceSource };
   description: { source: DescSource };
   unit: { default: string };
@@ -131,6 +155,7 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
     name: {
       source: pick(g("name").source, NAME_SOURCES, d.name.source),
       stripPrefix: str(g("name").stripPrefix).slice(0, 60),
+      ...Object.fromEntries(NAME_RULE_FLAGS.map((f) => [f, g("name")[f] === true])),
     },
     price: { source: pick(g("price").source, PRICE_SOURCES, d.price.source) },
     description: { source: pick(g("description").source, DESC_SOURCES, d.description.source) },
@@ -172,6 +197,10 @@ export interface ParentRow {
   category_id: string | null;
   /** คอลเลกชัน (ใช้จับกลุ่ม "คุณอาจชอบ: คอลเลกชันเดียวกัน") */
   collection_id?: string | null;
+  brand_id?: string | null;
+  /** ชื่อแบรนด์/คอลเลกชัน — เติมด้วย attachNameRefs() เมื่อกฎชื่อของร้านต้องใช้ (ลบแบรนด์/คอลเลกชันออกจากชื่อ) */
+  brand_name?: string | null;
+  collection_name?: string | null;
   // ฟิลด์สเปก (optional — บางที่ select ไม่ครบ)
   materials?: string | null;
   size_summary?: string | null;
@@ -220,7 +249,7 @@ export interface ListingRow {
 // ⚠️ ต้องเป็น string literal ก้อนเดียว (ห้าม + ต่อ) ไม่งั้น type ของ supabase .select() พัง (GenericStringError)
 // ท้ายรายการ = ฟิลด์สเปกสำหรับ "ชุดรายละเอียดสินค้า" บนเว็บ (lib/website-theme.ts PRODUCT_SPEC_FIELDS) — ไม่มีต้นทุน/ข้อมูลภายใน
 export const PARENT_SELECT =
-  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id, collection_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty";
+  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id, collection_id, brand_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty";
 
 /** ค่าฟิลด์สเปกของ Parent SKU ที่ไม่ว่าง (key → ข้อความพร้อมหน่วย) ส่งให้เว็บร้านโชว์ในหัวข้อ "ฟิลด์จาก Parent SKU" */
 export function productSpecAttrs(p: ParentRow): Record<string, string> {
@@ -262,18 +291,69 @@ function resolvePrice(map: FieldMap, parent: ParentRow, kids: ChildSku[]): numbe
   }
 }
 
-function resolveName(map: FieldMap, parent: ParentRow): string {
+const escRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** ลบคำ/วลีออกจากชื่อ (ไม่สนตัวพิมพ์เล็ก/ใหญ่) — ไม่ตัดกลางคำอังกฤษ/ตัวเลข เช่น ลบ "BBP03" ไม่กิน "BBP031" */
+function removeTerm(text: string, term: string): string {
+  const t = clean(term);
+  if (!t) return text;
+  return text.replace(new RegExp(`(?<![A-Za-z0-9])${escRe(t)}(?![A-Za-z0-9])`, "gi"), " ");
+}
+
+/** เก็บกวาดหลังลบคำ: วงเล็บ/เครื่องหมายคำพูดที่ว่างเปล่า · ช่องว่างซ้อน · ขีด/จุดที่ค้างหัว-ท้าย */
+function tidyName(text: string): string {
+  return text
+    .replace(/[([]\s*[)\]]/g, " ")
+    .replace(/(['"])\s*\1|‘\s*’|“\s*”/g, " ")
+    .replace(/\s+([,·|])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s\-–—:·|,/]+|[\s\-–—:·|,/]+$/g, "")
+    .trim();
+}
+
+/**
+ * ชื่อบนเว็บตามกฎของร้าน (ของกลาง — เว็บจริง, ออเดอร์, หน้าจัดการ, แท็บ 🛍 เว็บไซต์ ใน Parent SKU ใช้ตัวเดียวกัน)
+ * ลำดับ: เลือกแหล่งชื่อ → ตัดคำนำหน้า → ลบวงเล็บ/แบรนด์/คอลเลกชัน/รหัส → เก็บกวาด · ลบจนว่าง = ใช้ชื่อเดิม
+ * ⚠️ ลบแบรนด์/คอลเลกชันต้องเติม brand_name/collection_name ก่อน (attachNameRefs)
+ */
+export function resolveName(map: FieldMap, parent: ParentRow): string {
   const raw =
     clean(parent[map.name.source as keyof ParentRow]) ||
     clean(parent.name_th) ||
     clean(parent.name_platform) ||
     clean(parent.code);
+  let name = raw;
   const prefix = clean(map.name.stripPrefix);
-  if (!prefix) return raw;
   // ตัดคำนำหน้าออก (ไม่สนตัวพิมพ์เล็ก/ใหญ่) เช่น "IG International อะไหล่..." → "อะไหล่..."
-  const lower = raw.toLowerCase();
-  const p = prefix.toLowerCase();
-  return lower.startsWith(p) ? raw.slice(prefix.length).replace(/^[\s\-–—:·]+/, "").trim() || raw : raw;
+  if (prefix && name.toLowerCase().startsWith(prefix.toLowerCase())) {
+    name = name.slice(prefix.length).replace(/^[\s\-–—:·]+/, "").trim() || name;
+  }
+  const r = map.name;
+  if (r.removeParens) name = name.replace(/\([^()]*\)|\[[^[\]]*\]/g, " ");
+  if (r.removeBrand && parent.brand_name) name = removeTerm(name, parent.brand_name);
+  if (r.removeCollection && parent.collection_name) name = removeTerm(name, parent.collection_name);
+  if (r.removeCode && parent.code) name = removeTerm(name, parent.code);
+  if (NAME_RULE_FLAGS.some((f) => r[f])) name = tidyName(name);
+  return name || raw;
+}
+
+/** กฎชื่อของร้านต้องรู้ชื่อแบรนด์/คอลเลกชันไหม (ไม่ต้อง = ข้าม query) */
+export const nameRuleNeedsRefs = (map: FieldMap) => !!(map.name.removeBrand || map.name.removeCollection);
+
+/** เติม brand_name / collection_name ให้ Parent SKU (แก้ในตัว) — เรียกก่อน resolveProduct/resolveName */
+export async function attachNameRefs(sb: Admin, parents: ParentRow[]): Promise<void> {
+  const brandIds = [...new Set(parents.map((p) => p.brand_id).filter(Boolean))] as string[];
+  const collIds = [...new Set(parents.map((p) => p.collection_id).filter(Boolean))] as string[];
+  const [b, c] = await Promise.all([
+    brandIds.length ? sb.from("brands").select("id, name").in("id", brandIds) : { data: [] },
+    collIds.length ? sb.from("collections").select("id, name").in("id", collIds) : { data: [] },
+  ]);
+  const bn = new Map(((b.data ?? []) as { id: string; name: string }[]).map((x) => [x.id, x.name]));
+  const cn = new Map(((c.data ?? []) as { id: string; name: string }[]).map((x) => [x.id, x.name]));
+  for (const p of parents) {
+    p.brand_name = p.brand_id ? bn.get(p.brand_id) ?? null : null;
+    p.collection_name = p.collection_id ? cn.get(p.collection_id) ?? null : null;
+  }
 }
 
 function resolveDescription(map: FieldMap, parent: ParentRow): string {

@@ -17,6 +17,8 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeFieldMap,
   resolveProduct,
+  attachNameRefs,
+  nameRuleNeedsRefs,
   PARENT_SELECT,
   CHILD_SELECT,
   type ParentRow,
@@ -267,6 +269,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   for (const l of (listData ?? []) as (ListingRow & { parent_sku_id: string; is_published: boolean })[]) {
     listingByParent.set(l.parent_sku_id, l);
   }
+  // ชื่อสินค้าในออเดอร์ต้องตรงกับที่ลูกค้าเห็นบนเว็บ (กฎลบแบรนด์/คอลเลกชัน)
+  if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (parents ?? []) as ParentRow[]);
   const parentById = new Map(((parents ?? []) as ParentRow[]).map((p) => [p.id, p]));
   const kidsByParent = new Map<string, ChildSku[]>();
   for (const k of (children ?? []) as (ChildSku & { parent_sku_id: string })[]) {

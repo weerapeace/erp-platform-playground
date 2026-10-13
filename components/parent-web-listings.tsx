@@ -16,6 +16,7 @@ import type { AssetRow } from "@/app/api/assets/shared";
 import type { DetailOverride } from "@/lib/website-detail-overrides";
 import { DEFAULT_PERSONALIZE, type PersonalizeConfig } from "@/lib/website-personalize";
 import { PersonalizeEditor } from "@/components/personalize-editor";
+import type { NameRuleFlag } from "@/lib/website-field-map";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
@@ -29,6 +30,10 @@ type ShopState = {
   featured: boolean;
   webPrice: number | null;
   webName: string;
+  /** ชื่อที่เว็บใช้จริงถ้าเว้นช่องชื่อว่าง (คำนวณจากกฎชื่อของร้าน) */
+  autoName: string;
+  /** กฎชื่อของร้าน — ใช้กับทุกสินค้าในร้าน */
+  nameRule: Record<NameRuleFlag, boolean>;
   webDescription: string;
   webImages: string[];
   webSkuImages: Record<string, string[]>;
@@ -38,7 +43,23 @@ type ShopState = {
   soldQty: number;
   productUrl: string;
 };
-type Resp = { code: string; parentName: string; erpDescription: string | null; adminUrl: string; variants: Variant[]; shops: ShopState[] };
+type Resp = {
+  code: string;
+  parentName: string;
+  erpDescription: string | null;
+  nameRefs: { brand: string | null; collection: string | null; code: string };
+  adminUrl: string;
+  variants: Variant[];
+  shops: ShopState[];
+};
+
+/** ปุ่มกฎชื่อ — ป้ายโชว์คำที่จะถูกลบจริงของรุ่นนี้ */
+const NAME_RULE_CHIPS: { flag: NameRuleFlag; label: string; ref?: keyof Resp["nameRefs"] }[] = [
+  { flag: "removeBrand", label: "ลบแบรนด์", ref: "brand" },
+  { flag: "removeCollection", label: "ลบคอลเลกชัน", ref: "collection" },
+  { flag: "removeCode", label: "ลบรหัสสินค้า", ref: "code" },
+  { flag: "removeParens", label: "ลบข้อความในวงเล็บ" },
+];
 
 const MAX_SKU_IMAGES = 8;
 const keyUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
@@ -113,6 +134,27 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
     setSavingShop(null);
   };
 
+  // กฎชื่อของร้าน: บันทึกทันที (ใช้ทุกสินค้าในร้าน) แล้วดึง "ชื่ออัตโนมัติ" ใหม่ — ไม่ทับช่องอื่นที่กำลังแก้อยู่
+  const toggleNameRule = async (s: ShopState, flag: NameRuleFlag) => {
+    if (!parentId) return;
+    const next = !s.nameRule[flag];
+    patchShop(s.shopId, { nameRule: { ...s.nameRule, [flag]: next } });
+    try {
+      const r = await apiFetch("/api/parent-web-listings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentId, shopId: s.shopId, action: "nameRule", nameRule: { [flag]: next } }),
+      });
+      if (!(await r.json()).ok) throw new Error();
+      const fresh = (await (await apiFetch(`/api/parent-web-listings?parentId=${encodeURIComponent(parentId)}`)).json()) as Resp;
+      const f = fresh?.shops?.find((x) => x.shopId === s.shopId);
+      if (f) patchShop(s.shopId, { autoName: f.autoName, nameRule: f.nameRule });
+      toast.success(`กฎชื่อร้าน ${s.shopName} ใช้กับทุกสินค้าในร้านแล้ว`);
+    } catch {
+      patchShop(s.shopId, { nameRule: s.nameRule });
+      toast.error("บันทึกกฎชื่อไม่สำเร็จ");
+    }
+  };
+
   const saveShop = async (s: ShopState) => {
     if (!parentId) return;
     setSavingShop(s.shopId);
@@ -163,40 +205,64 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
         </a>
       </div>
 
-      {data.shops.map((s) => {
+      {/* ร้านที่ยังไม่ขายรุ่นนี้ — รวมเป็นแถวเดียว กดเพิ่มทีละร้าน */}
+      {data.shops.some((s) => !s.listed) && (
+        <div className="flex items-center gap-2 flex-wrap rounded-xl border border-dashed border-slate-300 px-3 py-2">
+          <span className="text-xs text-slate-500">ยังไม่ขายใน:</span>
+          {data.shops.filter((s) => !s.listed).map((s) => (
+            <button key={s.shopId} onClick={() => addToShop(s.shopId)} disabled={savingShop === s.shopId}
+              title={`เพิ่มรุ่นนี้เข้าร้าน ${s.shopName} (ยังปิดอยู่ จนกว่าจะเปิด "ขึ้นร้าน")`}
+              className="text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 disabled:opacity-60 rounded-full px-2.5 py-1">
+              {savingShop === s.shopId ? "กำลังเพิ่ม…" : `+ ${s.shopName}`}
+              {s.isDefault && <span className="text-[10px] text-slate-400 ml-1">ร้านหลัก</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {data.shops.filter((s) => s.listed).map((s) => {
         const overrideCount = Object.keys(s.webDetails).length;
         const detailsShown = detailsOpen.has(s.shopId);
         return (
         <div key={s.shopId} className="rounded-xl border border-slate-200 overflow-hidden">
-          <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
+          {/* หัวการ์ด: ชื่อร้าน + เปิดขึ้นร้าน + แนะนำ + ยอดขาย ในแถวเดียว */}
+          <div className="flex items-center gap-x-3 gap-y-1 bg-slate-50 px-3 py-1.5 border-b border-slate-200 flex-wrap">
             <span className="text-sm font-medium text-slate-800">{s.shopName}</span>
-            {s.isDefault && <span className="text-[11px] text-slate-400">(ร้านหลัก)</span>}
-            {s.listed && s.published && s.productUrl && (
-              <a href={s.productUrl} target="_blank" rel="noreferrer" className="ml-auto text-xs text-blue-600 hover:underline">ดูหน้าเว็บ ↗</a>
+            {s.isDefault && <span className="text-[11px] text-slate-400 -ml-2">(ร้านหลัก)</span>}
+            <Toggle label="ขึ้นร้าน" on={s.published} onClick={() => patchShop(s.shopId, { published: !s.published })} />
+            <button onClick={() => patchShop(s.shopId, { featured: !s.featured })}
+              className={`text-xs flex items-center gap-1 ${s.featured ? "text-amber-500" : "text-slate-400"}`}>
+              <span className="text-base leading-none">★</span> แนะนำ
+            </button>
+            <span className="text-[11px] text-slate-400 ml-auto">ขายผ่านเว็บ {s.soldQty} ชิ้น</span>
+            {s.published && s.productUrl && (
+              <a href={s.productUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">ดูหน้าเว็บ ↗</a>
             )}
           </div>
 
-          {!s.listed ? (
-            <div className="px-3 py-4 flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-sm text-slate-400">ยังไม่ได้ขายรุ่นนี้ในร้านนี้</span>
-              <button onClick={() => addToShop(s.shopId)} disabled={savingShop === s.shopId}
-                className="text-xs bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white rounded-full px-3 py-1.5">
-                {savingShop === s.shopId ? "กำลังเพิ่ม…" : "+ เพิ่มเข้าร้านนี้"}
-              </button>
-            </div>
-          ) : (
             <div className="p-3 space-y-3">
-              <div className="flex items-center gap-4 flex-wrap">
-                <Toggle label="ขึ้นร้าน" on={s.published} onClick={() => patchShop(s.shopId, { published: !s.published })} />
-                <button onClick={() => patchShop(s.shopId, { featured: !s.featured })}
-                  className={`text-sm flex items-center gap-1 ${s.featured ? "text-amber-500" : "text-slate-400"}`}>
-                  <span className="text-lg leading-none">★</span> แนะนำ
-                </button>
-                <span className="text-xs text-slate-400 ml-auto">ขายผ่านเว็บ {s.soldQty} ชิ้น</span>
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-2">
-                <Field label={`ชื่อบนเว็บ (ว่าง = ${data.parentName})`} value={s.webName} onChange={(v) => patchShop(s.shopId, { webName: v })} placeholder={data.parentName} />
+              <div className="grid sm:grid-cols-[1fr_10rem] gap-2">
+                <div>
+                  <Field label="ชื่อบนเว็บ (ว่าง = ใช้ชื่ออัตโนมัติด้านล่าง)" value={s.webName} onChange={(v) => patchShop(s.shopId, { webName: v })} placeholder={s.autoName} />
+                  {/* กฎชื่อของร้าน: ประกอบชื่ออัตโนมัติจากชื่อใน ERP โดยตัดส่วนที่ไม่ต้องการออก */}
+                  <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] text-slate-400" title="ตั้งครั้งเดียว ใช้กับทุกสินค้าในร้านนี้ (แก้ได้ที่ เว็บไซต์ → จับคู่ฟิลด์ ด้วย)">กฎชื่อร้านนี้:</span>
+                    {NAME_RULE_CHIPS.map((c) => {
+                      const ref = c.ref ? data.nameRefs[c.ref] : null;
+                      if (c.ref && !ref) return null; // รุ่นนี้ไม่มีแบรนด์/คอลเลกชัน → ไม่ต้องโชว์ปุ่ม
+                      const on = s.nameRule[c.flag];
+                      return (
+                        <button key={c.flag} type="button" onClick={() => toggleNameRule(s, c.flag)}
+                          className={`text-[11px] rounded-full border px-2 py-0.5 ${on ? "bg-slate-700 border-slate-700 text-white" : "border-slate-300 text-slate-500 hover:bg-slate-100"}`}>
+                          {on ? "✓ " : ""}{c.label}{ref ? ` "${ref}"` : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-500 truncate" title={s.autoName}>
+                    {s.webName.trim() ? "⚠️ พิมพ์ชื่อทับไว้ — เว็บใช้ชื่อที่พิมพ์ (ลบออกเพื่อใช้ชื่ออัตโนมัติ)" : <>ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span></>}
+                  </div>
+                </div>
                 <NumField label="ราคาเว็บ (ว่าง = ราคาปกติ)" value={s.webPrice} onChange={(v) => patchShop(s.shopId, { webPrice: v })} />
               </div>
               <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={data.erpDescription ?? "—"} />
@@ -401,7 +467,6 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                 </button>
               </div>
             </div>
-          )}
         </div>
         );
       })}
@@ -420,10 +485,10 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
 
 function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+    <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
       <button type="button" role="switch" aria-checked={on} onClick={onClick}
-        className={`relative w-10 h-6 rounded-full transition-colors ${on ? "bg-emerald-500" : "bg-slate-300"}`}>
-        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${on ? "translate-x-4" : ""}`} />
+        className={`relative w-8 h-5 rounded-full transition-colors ${on ? "bg-emerald-500" : "bg-slate-300"}`}>
+        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${on ? "translate-x-3" : ""}`} />
       </button>
       {label}
     </label>
