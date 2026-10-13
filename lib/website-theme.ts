@@ -204,14 +204,15 @@ export interface ProductParts {
   gallery: { showBreadcrumb: boolean; showSubtitle: boolean; colorMode: GalleryColorMode; perView: GalleryPerView };
   /** สวิตช์เดิม (showUnit…) ยังเก็บไว้ให้ค่ามือถือทับได้ · ของจริงอยู่ใน items */
   buy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean; noteSource: BuyNoteSource; noteText: string; columns: 1 | 2; items: BuyItem[] };
-  banner: { imageSource: BannerImageSource; imageKey: string | null; titleSource: BannerTitleSource; titleText: string; textSource: BannerTextSource; text: string };
+  /** layout/textPos/fields = ค่ากลางสำหรับสินค้าที่ยังไม่ตั้งแบนเนอร์เอง (ค่าในหน้า Parent SKU ทับได้ต่อรุ่น) */
+  banner: { imageSource: BannerImageSource; imageKey: string | null; titleSource: BannerTitleSource; titleText: string; textSource: BannerTextSource; text: string; layout: "half" | "full"; textPos: "left" | "right" | "over-left" | "over-center" | "over-right" | "below"; fields: string[] };
   /** codes = รหัส Parent SKU (ตัวพิมพ์ใหญ่) เมื่อ source=manual · count 2–8 · title ว่าง = ใช้ข้อความเดิมของเว็บ */
   related: { source: RelatedSource; codes: string[]; count: number; title: string };
 }
 export const DEFAULT_PARTS: ProductParts = {
   gallery: { showBreadcrumb: true, showSubtitle: true, colorMode: "set", perView: 1 },
   buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "", columns: 2, items: DEFAULT_BUY_ITEMS() },
-  banner: { imageSource: "second", imageKey: null, titleSource: "subtitle", titleText: "", textSource: "description", text: "" },
+  banner: { imageSource: "second", imageKey: null, titleSource: "subtitle", titleText: "", textSource: "description", text: "", layout: "half", textPos: "left", fields: [] },
   related: { source: "category", codes: [], count: 4, title: "" },
 };
 const PART_KEY_RE = /^[\w\-./%()]+$/;
@@ -249,6 +250,9 @@ export function normalizeParts(raw: unknown): ProductParts {
       titleText: text(bn.titleText, 120),
       textSource: one(bn.textSource, ["description", "introduction", "english_description", "text", "none"] as const, d.banner.textSource),
       text: text(bn.text, 2000),
+      layout: one(bn.layout, ["half", "full"] as const, d.banner.layout),
+      textPos: one(bn.textPos, ["left", "right", "over-left", "over-center", "over-right", "below"] as const, d.banner.textPos),
+      fields: (Array.isArray(bn.fields) ? bn.fields : []).filter((f): f is string => typeof f === "string" && /^[a-z0-9_]+$/.test(f)).slice(0, 12),
     },
     related: {
       source: one(rl.source, ["category", "collection", "featured", "bestseller", "manual", "random"] as const, d.related.source),

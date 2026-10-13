@@ -19,6 +19,7 @@ import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobil
 import { TEXT_ROLE_DEFS, defaultTextRole, GOOGLE_FONTS, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
 import { FOOTER_COL_DEFS, FOOTER_BGS, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
+import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
 const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
@@ -2042,6 +2043,32 @@ function PartSettings({
             {bn.textSource === "text" && <textarea rows={3} className={`${partInputCls} mt-1.5`} value={bn.text} onChange={(e) => setPart("banner", { text: e.target.value })} placeholder="ข้อความใต้หัวข้อ" />}
           </div>
         </div>
+        <div className="grid sm:grid-cols-2 gap-2">
+          <div>
+            <label className={lbl}>จัดวาง</label>
+            <select className={partInputCls} value={bn.layout} onChange={(e) => { const layout = e.target.value as BannerLayout; setPart("banner", { layout, textPos: fixTextPos(layout, bn.textPos) }); }}>
+              {BANNER_LAYOUTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>ตำแหน่งข้อความ</label>
+            <select className={partInputCls} value={bn.textPos} onChange={(e) => setPart("banner", { textPos: e.target.value as BannerTextPos })}>
+              {textPosFor(bn.layout).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className={lbl}>ฟิลด์ Parent SKU ที่โชว์ในแบนเนอร์ ({bn.fields.length}) — ติ๊กเลือก</label>
+          <div className="max-h-32 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5 grid grid-cols-2 gap-x-2">
+            {(fields ?? []).map((f) => (
+              <label key={f.key} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer py-0.5">
+                <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={bn.fields.includes(f.key)} onChange={(e) => setPart("banner", { fields: e.target.checked ? [...bn.fields, f.key].slice(0, 12) : bn.fields.filter((k) => k !== f.key) })} />
+                <span className="truncate">{f.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-400">สินค้าที่ตั้ง "🖼 แบนเนอร์หน้าสินค้า" ไว้เองในแท็บ 🛍 เว็บไซต์ ของ Parent SKU จะใช้ของตัวเองแทนค่ากลางนี้ (หลายรูปได้)</p>
       </div>
     );
   }

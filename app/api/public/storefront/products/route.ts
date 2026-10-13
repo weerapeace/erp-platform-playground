@@ -25,6 +25,7 @@ import {
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
+import { normalizeBanners } from "@/lib/website-banners";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -207,6 +208,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
         /** ปั๊มชื่อ (null = รุ่นนี้ปั๊มไม่ได้) */
         personalize,
+        /** 🖼 แบนเนอร์หน้าสินค้าเฉพาะรุ่น (เฉพาะที่มีรูป) — ไม่มี = เว็บใช้แบนเนอร์กลางของธีม */
+        banners: (() => {
+          const bs = normalizeBanners(l.web_banners).filter((b) => b.imageKey).map((b) => ({ ...b, imageUrl: imageUrl(b.imageKey as string) }));
+          return bs.length ? bs : undefined;
+        })(),
       };
     })
     .filter(Boolean);

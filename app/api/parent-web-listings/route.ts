@@ -20,6 +20,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeTheme } from "@/lib/website-theme";
+import { normalizeBanners } from "@/lib/website-banners";
+import { loadParentWebFields } from "@/lib/website-parent-fields";
 import {
   normalizeFieldMap,
   resolveName,
@@ -62,11 +64,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parentId" }, { status: 400 });
 
   const sb = supabaseAdmin();
-  const [{ data: parent }, { data: listings }, { data: shops }, { data: children }] = await Promise.all([
+  const [{ data: parent }, { data: listings }, { data: shops }, { data: children }, parentFields] = await Promise.all([
     sb.from("parent_skus_v2").select(PARENT_SELECT).eq("id", parentId).maybeSingle(),
     sb.from("store_listings").select("*").eq("parent_sku_id", parentId),
     sb.from("shops").select("id, name, slug, is_default, theme, theme_draft, field_map").order("is_default", { ascending: false }),
     sb.from("skus_v2").select("id, code, color, list_price, cover_image_r2_key").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
+    loadParentWebFields(sb),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
 
@@ -176,13 +179,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webDetails: cleanDetailOverrides(l?.web_details),
       /** 🔤 ปั๊มชื่อ (null = ยังไม่เคยตั้ง → UI ใช้ค่าเริ่มต้นปิดอยู่) */
       webPersonalize: l?.web_personalize ? normalizePersonalize(l.web_personalize) : null,
+      /** 🖼 แบนเนอร์หน้าสินค้าเฉพาะรุ่น (ว่าง = ใช้แบนเนอร์กลางของธีม) */
+      webBanners: normalizeBanners(l?.web_banners),
       detailItems,
       soldQty: soldByShop.get(s.id) ?? 0,
       productUrl: productUrlFor(code, s.slug, s.is_default),
     };
   });
 
+  const webFields = parentFields.map((f) => ({ key: f.key, label: f.label }));
   return NextResponse.json({
+    webFields,
     code,
     parentName: displayName(parent as { name_platform?: string | null; name_th?: string | null; code?: string | null }),
     erpDescription:
@@ -207,6 +214,7 @@ type Patch = {
   webSkuImages?: Record<string, string | string[]>;
   webDetails?: Record<string, DetailOverride>;
   webPersonalize?: PersonalizeConfig | null;
+  webBanners?: unknown;
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -277,6 +285,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (p.webPersonalize !== undefined) {
     row.web_personalize = p.webPersonalize ? normalizePersonalize(p.webPersonalize) : null;
+  }
+  if (p.webBanners !== undefined) {
+    const banners = normalizeBanners(p.webBanners);
+    row.web_banners = banners.length ? banners : null;
   }
 
   const { error } = await sb.from("store_listings").upsert(row, { onConflict: "shop_id,parent_sku_id" });

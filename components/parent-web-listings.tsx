@@ -16,6 +16,8 @@ import type { AssetRow } from "@/app/api/assets/shared";
 import type { DetailOverride } from "@/lib/website-detail-overrides";
 import { DEFAULT_PERSONALIZE, type PersonalizeConfig } from "@/lib/website-personalize";
 import { PersonalizeEditor } from "@/components/personalize-editor";
+import { ProductBannersEditor } from "@/components/product-banners-editor";
+import type { ProductBanner } from "@/lib/website-banners";
 import type { NameRuleFlag } from "@/lib/website-field-map";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
@@ -39,6 +41,7 @@ type ShopState = {
   webSkuImages: Record<string, string[]>;
   webDetails: Record<string, DetailOverride>;
   webPersonalize: PersonalizeConfig | null;
+  webBanners: ProductBanner[];
   detailItems: DetailItemInfo[];
   soldQty: number;
   productUrl: string;
@@ -51,6 +54,8 @@ type Resp = {
   adminUrl: string;
   variants: Variant[];
   shops: ShopState[];
+  /** ฟิลด์ Parent SKU (ทะเบียนฟิลด์) ให้แบนเนอร์เลือกโชว์ */
+  webFields?: { key: string; label: string }[];
 };
 
 /** ปุ่มกฎชื่อ — ป้ายโชว์คำที่จะถูกลบจริงของรุ่นนี้ */
@@ -78,7 +83,10 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
   const [loading, setLoading] = useState(true);
   const [savingShop, setSavingShop] = useState<string | null>(null);
   // ตัวเลือกรูปจากคลัง: กำลังเลือกให้ร้านไหน + เป้าหมาย (gallery = รูปรุ่น, หรือ sku id)
+  // target: gallery = รูปรุ่น · sku id = รูปสีนั้น · "banner:<id>" = รูปแบนเนอร์
   const [picker, setPicker] = useState<{ shopId: string; target: "gallery" | string } | null>(null);
+  // ร้านที่กางแผง "แบนเนอร์หน้าสินค้า" อยู่
+  const [bnOpen, setBnOpen] = useState<Set<string>>(new Set());
   // แผงเลือกรูปจากแกลเลอรี SKU ที่เปิดอยู่ (ร้าน + สี)
   const [skuPanel, setSkuPanel] = useState<{ shopId: string; skuId: string } | null>(null);
   // ร้านที่กางแผง "จับคู่รายละเอียดหน้าเว็บ" อยู่
@@ -167,7 +175,7 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
             isPublished: s.published, featured: s.featured, webPrice: s.webPrice,
             webName: s.webName, webDescription: s.webDescription,
             webImages: s.webImages, webSkuImages: s.webSkuImages, webDetails: s.webDetails,
-            webPersonalize: s.webPersonalize,
+            webPersonalize: s.webPersonalize, webBanners: s.webBanners,
           },
         }),
       });
@@ -184,6 +192,9 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
     if (!s || !keys.length) { setPicker(null); return; }
     if (picker.target === "gallery") {
       patchShop(s.shopId, { webImages: [...s.webImages, ...keys].slice(0, 12) });
+    } else if (picker.target.startsWith("banner:")) {
+      const id = picker.target.slice(7);
+      patchShop(s.shopId, { webBanners: s.webBanners.map((b) => (b.id === id ? { ...b, imageKey: keys[0] } : b)) });
     } else {
       setSkuImages(s, picker.target, [...(s.webSkuImages[picker.target] ?? []), ...keys]);
     }
@@ -410,6 +421,33 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                 )}
               </div>
 
+              {/* 🖼 แบนเนอร์หน้าสินค้า (หลายรูป) — ทับแบนเนอร์กลางของธีมเฉพาะรุ่นนี้ */}
+              <div className="rounded-lg border border-slate-200">
+                <button type="button" onClick={() => setBnOpen((prev) => { const n = new Set(prev); if (n.has(s.shopId)) n.delete(s.shopId); else n.add(s.shopId); return n; })}
+                  className="w-full flex items-center justify-between px-3 py-2 text-left">
+                  <span className="text-xs font-medium text-slate-600">
+                    🖼 แบนเนอร์หน้าสินค้า
+                    {s.webBanners.length > 0 && <span className="ml-2 text-[10px] bg-orange-100 text-orange-700 rounded-full px-1.5 py-0.5">{s.webBanners.length} แบนเนอร์</span>}
+                  </span>
+                  <span className="text-xs text-slate-400">{bnOpen.has(s.shopId) ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+                </button>
+                {bnOpen.has(s.shopId) && (
+                  <div className="border-t border-slate-100 p-3 space-y-2">
+                    <p className="text-[11px] text-slate-500">ไม่ตั้ง = ใช้แบนเนอร์กลางของธีม (ดีไซน์ → หน้าสินค้า → ⚙️ แบนเนอร์) · ตั้งแล้วจะโชว์ตามลำดับนี้แทน หลายรูปได้ แต่ละรูปเลือกครึ่งจอ/เต็มจอ ตำแหน่งข้อความ ฟิลด์ และค่ามือถือแยก</p>
+                    <ProductBannersEditor
+                      banners={s.webBanners}
+                      onChange={(webBanners) => patchShop(s.shopId, { webBanners })}
+                      imageOptions={[
+                        ...s.webImages.map((k, i) => ({ key: k, label: `รูปเว็บ ${i + 1}` })),
+                        ...data.variants.flatMap((v) => (s.webSkuImages[v.id] ?? v.gallery).map((k, i) => ({ key: k, label: `${v.label} · รูป ${i + 1}` }))),
+                      ].filter((o, i, arr) => arr.findIndex((x) => x.key === o.key) === i)}
+                      fields={data.webFields ?? []}
+                      onPickFromLibrary={(id) => setPicker({ shopId: s.shopId, target: `banner:${id}` })}
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* 📋 จับคู่รายละเอียดหน้าเว็บ (ทับชุดรายละเอียดของธีมเฉพาะรุ่นนี้) */}
               <div className="rounded-lg border border-slate-200">
                 <button type="button" onClick={() => setDetailsOpen((prev) => { const n = new Set(prev); if (n.has(s.shopId)) n.delete(s.shopId); else n.add(s.shopId); return n; })}
@@ -475,9 +513,9 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
         open={!!picker}
         onClose={() => setPicker(null)}
         onSelect={onPickImages}
-        multiple
+        multiple={!picker?.target.startsWith("banner:")}
         typeFilter="image"
-        title={picker?.target === "gallery" ? "เลือกรูปสินค้าบนเว็บ" : "เลือกรูปเว็บของสีนี้ (เลือกได้หลายรูป)"}
+        title={picker?.target === "gallery" ? "เลือกรูปสินค้าบนเว็บ" : picker?.target.startsWith("banner:") ? "เลือกรูปแบนเนอร์" : "เลือกรูปเว็บของสีนี้ (เลือกได้หลายรูป)"}
       />
     </div>
   );
