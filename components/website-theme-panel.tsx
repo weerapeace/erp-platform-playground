@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
+import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, GOOGLE_FONTS, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
@@ -1172,6 +1173,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     {label}
                   </label>
                 ))}
+                {/* หน้าตาจุดสีมาจากทะเบียนสีกลาง (ใช้ทุกร้าน) — บันทึกแล้วเว็บเปลี่ยนทันที ไม่ต้องกดเผยแพร่ธีม */}
+                <span className="ml-auto"><ColorSwatchButton /></span>
               </div>
 
               {/* การ์ดจำลองจากสินค้าจริง — เปลี่ยนค่าแล้วเห็นทันที (ชี้เมาส์ดูเอฟเฟกต์) */}
@@ -2246,6 +2249,7 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                       <select className={mini} value={it.style} onChange={(e) => setItem(it.id, { style: e.target.value })}>
                         {def.styles.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
+                      {it.key === "options" && it.style === "swatches" && <div className="mt-1.5"><ColorSwatchButton /></div>}
                     </div>
                   )}
                   {(it.key === "qty" || it.key === "options") && (

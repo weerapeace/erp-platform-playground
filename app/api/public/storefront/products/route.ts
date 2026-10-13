@@ -26,6 +26,7 @@ import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { normalizeBanners } from "@/lib/website-banners";
+import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -87,11 +88,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const parentIds = rows.map((r) => r.parent_sku_id as string).filter(Boolean);
 
   // ดึงทุกคอลัมน์ แล้วค่อยคัดเฉพาะฟิลด์ที่อนุญาตให้ออกเว็บ (ทะเบียนฟิลด์ + บัญชีดำ) ก่อนส่ง — ต้นทุน/ข้อมูลภายในไม่หลุด
-  const [{ data: parents }, { data: children }, parentFields] = await Promise.all([
+  const [{ data: parents }, { data: children }, parentFields, { data: swatchRows }] = await Promise.all([
     sb.from("parent_skus_v2").select("*").in("id", parentIds),
     sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
     loadParentWebFields(sb),
+    // 🎨 ทะเบียนสีกลาง → จุดสีของแต่ละตัวเลือก (ดู lib/color-swatch.ts)
+    sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
   ]);
+  const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const relatedValues = await resolveRelatedValues(sb, parentFields, (parents ?? []) as Record<string, unknown>[]);
 
   // กฎชื่อของร้าน "ลบแบรนด์/คอลเลกชัน" ต้องรู้ชื่อแบรนด์/คอลเลกชันก่อน
@@ -182,14 +186,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         swatch: String(l.web_swatch ?? "").trim(),
         // รูปต่อสี (r2 key → URL) ให้เว็บสลับรูปใหญ่ตอนเลือกสี
         // image = รูปแรก · images = ทั้งชุดของสีนั้น (เลือกไว้ในแท็บ 🛍 เว็บไซต์) → เว็บโชว์เฉพาะชุดนี้เมื่อเลือกสี
+        // swatch = ค่า CSS background ของจุดสี — ที่กรอกเองในหน้าจัดการชนะ · ไม่งั้นหาจากทะเบียนสีกลาง (ยังไม่ตั้ง = ไม่ส่ง เว็บใช้รูปเล็กแทน)
         options: r.options
           ? {
               ...r.options,
-              items: r.options.items.map((it) => ({
-                ...it,
-                image: it.image ? imageUrl(it.image) : undefined,
-                images: it.images?.length ? it.images.map(imageUrl) : undefined,
-              })),
+              items: r.options.items.map((it) => {
+                const spec = it.swatch ? null : swatches.resolve(it.label);
+                return {
+                  ...it,
+                  swatch: it.swatch || (spec ? swatchCss(spec, (k) => `${imageUrl(k)}&w=96`) : undefined),
+                  image: it.image ? imageUrl(it.image) : undefined,
+                  images: it.images?.length ? it.images.map(imageUrl) : undefined,
+                };
+              }),
             }
           : null,
         /** ตัวเลือกกลุ่มที่ 2 (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง */
