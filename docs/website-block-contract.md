@@ -97,6 +97,7 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 ## ชุดหน้าตารูปของกลาง (imageLookFields + FramedImage)
 - ERP `lib/website-schema.ts` `imageLookFields({ ratio, frame?, allowAuto?, ratioHint?, autoFrame? })` = ช่อง ratio · frame (มุมมน/เหลี่ยม/วงกลม/โค้ง/หัวใจ/หยัก/โพลารอยด์/แสตมป์) · border · borderColor
 - เว็บร้าน `src/components/home/FramedImage.tsx` วาดรูปตามชุดนี้ + crop (CSS `.gal-img` `.gal-fr-*` `.gal-paper-*` ใน globals.css)
+- ใช้อยู่ (เพิ่ม 2026-10-14): 💬 รีวิว (รูปจากลูกค้ารายรีวิว + ดาว `showStars` ปิดไว้ก่อน = หน้าตาเดิม · `rating` "1"–"5") · 📸 ฟีด Instagram (Section ใหม่ `instagram`: handle/profileUrl/buttonText/columns/mobileColumns/gap · รายรูป imageKey/crop/alt/href ว่าง = โปรไฟล์ · กรอบเริ่ม rect · เว็บร้าน InstagramBlockView)
 - ใช้อยู่: แกลเลอรีรูป · รูปคู่ข้อความ (+ `imgSize` ความกว้างรูป %) · หลายคอลัมน์ (ค่าเริ่ม 4:3 มุมมน = แบบเดิม · ครอปรายคอลัมน์) · รูปภาพ (ค่าเริ่ม ratio "auto" ตามรูปจริง + frame "auto" = เต็มจอเหลี่ยม/อื่นมุมมน แบบเดิม · `mobileKey` รูปมือถือแยก) — Section ใหม่ที่มีรูปให้ใช้ชุดนี้ ไม่เขียนกรอบเอง
 - `autoFrame` = เพิ่มตัวเลือกทรง "อัตโนมัติ" (Section ตัดสินเองตามค่าอื่น) — เว็บร้านต้องแปลง "auto" เป็นทรงจริงก่อนส่งให้ FramedImage
 

@@ -49,6 +49,7 @@ export type BlockType =
   | "video"
   | "steps"
   | "reviews"
+  | "instagram"
   | "map"
   | "custom-html"
   | "spotlight"

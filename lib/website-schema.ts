@@ -872,7 +872,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
   reviews: {
     type: "reviews",
     meta: { label: "รีวิวลูกค้า", icon: "💬", hint: "คำชมจากลูกค้าจริง สร้างความเชื่อมั่น", group: "เนื้อหา" },
-    fields: headFields({ eyebrow: "ลูกค้าของเรา", title: "เสียงจากลูกค้า" }),
+    fields: [
+      ...headFields({ eyebrow: "ลูกค้าของเรา", title: "เสียงจากลูกค้า" }),
+      f("showStars", "แสดงดาว ★", "toggle", { group: "layout", default: false, hint: "ตั้งจำนวนดาวได้ทีละรีวิว (ค่าเริ่ม 5 ดาว)" }),
+      f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 3, min: 1, numMax: 4 }),
+      ...imageLookFields({ ratio: "1:1", ratioHint: "รูปจากลูกค้า (ถ้าใส่) ทุกรีวิว — เลือกส่วนที่เห็นได้ทีละรีวิว" }),
+    ],
     children: {
       key: "items",
       label: "รีวิว",
@@ -883,11 +888,75 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         area("text", "คำรีวิว", { default: "", max: 600 }),
         text("name", "ชื่อลูกค้า", { default: "", max: 80 }),
         text("role", "รายละเอียดเพิ่ม เช่น จังหวัด/อาชีพ", { default: "", max: 80 }),
+        f("rating", "จำนวนดาว", "select", {
+          default: "5",
+          options: [
+            { v: "5", l: "★★★★★ 5" },
+            { v: "4", l: "★★★★ 4" },
+            { v: "3", l: "★★★ 3" },
+            { v: "2", l: "★★ 2" },
+            { v: "1", l: "★ 1" },
+          ],
+          hint: "โชว์เมื่อเปิด \"แสดงดาว\" ที่ Section",
+        }),
+        image("imageKey", "รูปจากลูกค้า (ถ้ามี)"),
+        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
       ],
       summary: (it) => s(it.name) || s(it.text).slice(0, 30) || "รีวิว",
     },
     summary: (b) => count(arr(b.items).length, "รีวิว"),
     validate: (b, label) => (!arr(b.items).some((i) => s(i.text)) ? [{ level: "warning", message: `${label}: ยังไม่ได้ใส่รีวิว` }] : []),
+  },
+
+  instagram: {
+    type: "instagram",
+    meta: { label: "ฟีด Instagram", icon: "📸", hint: "ตารางรูปสี่เหลี่ยมแบบ IG + ปุ่มติดตาม (เลือกรูปเอง ไม่ดึงจาก IG อัตโนมัติ)", group: "เนื้อหา" },
+    fields: [
+      ...headFields({ eyebrow: "Instagram", title: "ติดตามเรา" }),
+      text("handle", "ชื่อบัญชี", { default: "", max: 60, placeholder: "@yourshop" }),
+      f("profileUrl", "ลิงก์โปรไฟล์ Instagram", "href", { default: "", placeholder: "https://instagram.com/yourshop" }),
+      text("buttonText", "ข้อความปุ่ม", { default: "ติดตามบน Instagram", max: 40 }),
+      f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 4, min: 2, numMax: 6 }),
+      f("mobileColumns", "จำนวนคอลัมน์ (มือถือ)", "select", {
+        group: "layout",
+        default: "3",
+        options: [
+          { v: "2", l: "2 คอลัมน์" },
+          { v: "3", l: "3 คอลัมน์" },
+        ],
+      }),
+      f("gap", "ระยะห่างระหว่างรูป", "select", {
+        group: "layout",
+        default: "sm",
+        options: [
+          { v: "none", l: "ชิดกัน" },
+          { v: "sm", l: "น้อย" },
+          { v: "md", l: "กลาง" },
+        ],
+      }),
+      ...imageLookFields({ ratio: "1:1", frame: "rect", ratioHint: "IG ใช้จัตุรัส 1:1 หรือแนวตั้ง 4:5" }),
+    ],
+    children: {
+      key: "items",
+      label: "รูปโพสต์",
+      itemLabel: "รูป",
+      icon: "🖼️",
+      max: 24,
+      fields: [
+        image("imageKey", "รูป"),
+        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
+        text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200 }),
+        f("href", "กดรูปแล้วไปที่ (ว่าง = โปรไฟล์ IG)", "href", { default: "", placeholder: "https://instagram.com/p/..." }),
+      ],
+      summary: (it) => (it.imageKey ? s(it.alt) || "รูป" : "ยังไม่เลือกรูป"),
+    },
+    summary: (b) => [count(arr(b.items).filter((i) => i.imageKey).length, "รูป"), s(b.handle)].filter(Boolean).join(" · "),
+    validate: (b, label) => {
+      const out: Omit<ValidationIssue, "blockId">[] = [];
+      if (!arr(b.items).some((i) => i.imageKey)) out.push({ level: "error", message: `${label}: ยังไม่มีรูป` });
+      if (!s(b.profileUrl)) out.push({ level: "warning", message: `${label}: ยังไม่ได้ใส่ลิงก์โปรไฟล์ Instagram (ปุ่มติดตามจะไม่ขึ้น)` });
+      return out;
+    },
   },
 
   cta: {
