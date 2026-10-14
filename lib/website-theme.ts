@@ -7,6 +7,7 @@
  * ใช้ที่: /api/website/theme (ตั้งค่า) · /api/public/storefront/site (ส่งให้เว็บ) · UI แท็บดีไซน์
  */
 
+import { normalizeListing, type ListingConfig } from "@/lib/website-listing";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
@@ -723,6 +724,8 @@ export interface SiteTheme {
   };
   menu: MenuConfig;
   footer: FooterConfig;
+  /** 🖼 หน้ารายการสินค้า: รูปแทรกในกริด (ดู lib/website-listing.ts) */
+  listing: ListingConfig;
   card: {
     preset: CardPreset;
     imageRatio: ImageRatio;
@@ -1126,6 +1129,7 @@ export const DEFAULT_THEME: SiteTheme = {
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["cart"] }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" } },
   menu: { items: null, mobileItems: null },
   footer: { ...DEFAULT_FOOTER },
+  listing: { inserts: [] },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
@@ -1376,6 +1380,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
     },
     menu: normalizeMenu(r.menu),
     footer: normalizeFooter(r.footer),
+    listing: normalizeListing(r.listing),
     card: {
       preset: pick(cd.preset, ["flat", "border", "shadow", "floating", "minimal"] as const, d.card.preset),
       imageRatio: pick(cd.imageRatio, ["1:1", "4:3", "4:5", "3:4", "16:9"] as const, d.card.imageRatio),
@@ -1453,5 +1458,6 @@ export function mergeTheme(existing: unknown, incoming: unknown): Record<string,
     footer: t.footer,
     card: t.card,
     product: t.product,
+    listing: t.listing,
   };
 }

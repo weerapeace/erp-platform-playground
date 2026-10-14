@@ -16,6 +16,8 @@ import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken }
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
+import { ListingPanel } from "@/components/website-listing-panel";
+import type { ListingConfig } from "@/lib/website-listing";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart, type ImagePlaceholder } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
@@ -78,6 +80,7 @@ interface Theme {
   header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string } };
   menu: MenuConfig;
   footer: FooterConfig;
+  listing: ListingConfig;
   card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover; showCompare: boolean; showSwatches: boolean; swatchMax: number; swatchSwap: boolean; showColorCount: boolean; showUnit: boolean; showCategory: boolean; quickAdd: "hover" | "always" | "none"; align: "left" | "center"; columns: { desktop: number; tablet: number; mobile: number }; gap: "sm" | "md" | "lg"; nameSize: number; priceSize: number; imageFit: "cover" | "contain" };
   product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
@@ -108,7 +111,7 @@ interface Choices {
 }
 
 type ColorKey = keyof Theme["colors"];
-type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "product" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -119,6 +122,7 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "menu", label: "เมนู" },
   { k: "footer", label: "Footer" },
   { k: "card", label: "การ์ดสินค้า" },
+  { k: "listing", label: "หน้ารายการสินค้า" },
   { k: "product", label: "หน้าสินค้า" },
   { k: "shape", label: "รูปทรง" },
   { k: "history", label: "ประวัติ" },
@@ -332,6 +336,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (el.getAttribute("href") !== href) el.setAttribute("href", href);
   }, [theme]);
 
+  // เข้าแท็บ "หน้ารายการสินค้า" → พรีวิวไปหน้าร้านค้า (/shop) ให้เห็นรูปแทรกทันที
+  useEffect(() => {
+    if (tab === "listing" && page !== "/shop" && !page.startsWith("/shop?")) setPage("/shop");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
   // เข้าแท็บ "หน้าสินค้า" → พรีวิวเปลี่ยนไปหน้าสินค้าตัวอย่างให้เอง (ถ้ายังดูหน้าแรกอยู่)
   useEffect(() => {
     if (tab === "product" && sampleProduct && page === "/") setPage(`/product/${sampleProduct}`);
@@ -525,6 +534,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (!eq(theme.header, published.header)) out.push("Header");
     if (!eq(theme.menu, published.menu)) out.push("เมนู");
     if (!eq(theme.footer, published.footer)) out.push("Footer");
+    if (!eq(theme.listing, published.listing)) out.push("หน้ารายการสินค้า");
     if (!eq(theme.card, published.card)) out.push("การ์ดสินค้า");
     // หน้าสินค้า (Style/ชุดรายละเอียด/⚙️/ขนาดตัวอักษร/ค่ามือถือ) — เดิมไม่ถูกนับ ทำให้แถบล่างบอก "ไม่มีการเปลี่ยนแปลง" ทั้งที่แก้แล้ว
     if (!eq(theme.product, published.product)) out.push("หน้าสินค้า");
@@ -660,6 +670,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "menu" && dirtyFields.includes("เมนู")) ||
     (k === "footer" && dirtyFields.includes("Footer")) ||
     (k === "card" && (dirtyFields.includes("การ์ดสินค้า") || dirtyFields.includes("รอรูปโหลด"))) ||
+    (k === "listing" && dirtyFields.includes("หน้ารายการสินค้า")) ||
     (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง"))) ||
     (k === "product" && dirtyFields.includes("หน้าสินค้า"));
 
@@ -1582,7 +1593,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             fieldGroups={choices.fieldGroups}
                             imageFields={choices.imageFields ?? []}
                             onCreateImageField={() => setImgFieldCreator(true)}
-                            onGalleryPreset={() => setProduct({ galleryStyle: "editorial", imageFit: "cover", parts: { ...theme.product.parts, gallery: { ...theme.product.parts.gallery, width: "full", height: "screen", perView: 2 } } })}
+                            onGalleryPreset={() => setProduct({ galleryStyle: "editorial", imageFit: "contain", imageSize: 90, parts: { ...theme.product.parts, gallery: { ...theme.product.parts.gallery, width: "full", height: "screen", perView: 2 } } })}
                             extra={xb}
                             setExtra={xb ? (p) => setExtraBanner(xb.id, p) : undefined}
                             previewBg={theme.colors.page}
@@ -1767,6 +1778,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           )}
 
           {/* ── รูปทรง ── */}
+          {/* ── หน้ารายการสินค้า: รูปแทรกในกริด ── */}
+          {tab === "listing" && (
+            <div className={cardCls}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">หน้ารายการสินค้า — แทรกรูปในกริดสินค้า</h3>
+              <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} />
+            </div>
+          )}
+
           {tab === "shape" && (
             <>
               <div className={cardCls}>
@@ -2074,7 +2093,7 @@ function PartSettings({
         </div>
         {!mobile && onGalleryPreset && (
           <button type="button" onClick={onGalleryPreset} className="w-full text-xs rounded-lg border border-dashed border-blue-300 text-blue-700 py-1.5 hover:bg-blue-50">
-            ✨ ตั้งแบบเต็มจอ (Gucci): เต็มขอบจอ · สูงเต็มจอ · 2 รูปคู่กัน · รูปเต็มกรอบ
+            ✨ ตั้งแบบเต็มจอ (Gucci): เต็มขอบจอ · สูงเต็มจอ · 2 รูปคู่กัน · เห็นรูปครบทั้งใบ (ไม่ตัดรูป)
           </button>
         )}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
