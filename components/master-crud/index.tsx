@@ -66,6 +66,7 @@ const CentralCategoryPicker = dynamic(() => import("@/components/central-categor
 const InlineCentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker), { ssr: false });
 // "ใส่อะไรได้บ้าง" ของ Parent SKU (fits) — ชิปเลือกจากรายการกลาง product_fit_items
 const ParentFitField = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentFitField), { ssr: false });
+const ParentHighlightField = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentHighlightField), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -3221,7 +3222,10 @@ export function MasterRecordDrawer({
               <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder={tr("— เลือกหมวดกลาง —", "— select central category —")} />
             ),
             ...(moduleKey === "parent-skus-v2"
-              ? { fits: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} /> }
+              ? {
+                fits: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
+                highlights: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentHighlightField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
+              }
               : {}),
             ...(formRenderers ?? {}),
           }
@@ -3232,7 +3236,10 @@ export function MasterRecordDrawer({
               <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null}
                 apiPath={moduleKey === "parent-skus-v2" ? "parent-skus" : "skus"} />
             ),
-            ...(moduleKey === "parent-skus-v2" ? { fits: ({ value, recordId, editable, onSaved }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void }) => <ParentFitField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} /> } : {}),
+            ...(moduleKey === "parent-skus-v2" ? {
+              fits: ({ value, recordId, editable, onSaved }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void }) => <ParentFitField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
+              highlights: ({ value, recordId, editable, onSaved }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void }) => <ParentHighlightField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
+            } : {}),
           }
         : undefined,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)

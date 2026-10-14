@@ -34,6 +34,10 @@ const InlineCentralCategoryPicker = dynamic(
   () => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker),
   { ssr: false },
 );
+const ParentHighlightField = dynamic(
+  () => import("@/components/parent-fit-picker").then((m) => m.ParentHighlightField),
+  { ssr: false },
+);
 const ParentFitField = dynamic(
   () => import("@/components/parent-fit-picker").then((m) => m.ParentFitField),
   { ssr: false },
@@ -161,6 +165,7 @@ export default function ParentSKUsV2Page() {
       ),
       // "ใส่อะไรได้บ้าง" — ชิปจากรายการกลาง (ต้องตั้งคู่กับ MasterRecordDrawer ใน master-crud ด้วย)
       fits: ({ value, onChange, disabled }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
+      highlights: ({ value, onChange, disabled }) => <ParentHighlightField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
     },
     detailRenderers: {
       ...(CONFIG.detailRenderers ?? {}),
@@ -168,6 +173,7 @@ export default function ParentSKUsV2Page() {
         <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null} apiPath="parent-skus" />
       ),
       fits: ({ value, recordId, editable, onSaved }) => <ParentFitField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
+      highlights: ({ value, recordId, editable, onSaved }) => <ParentHighlightField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
     },
     // section พิเศษในฟอร์ม: รูป Description (มีลำดับ)
     extraFormSection: ({ recordId, readonly }) => (
