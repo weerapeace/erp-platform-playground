@@ -1203,6 +1203,33 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
               </div>
 
+              {/* ⬜ ความมน/เหลี่ยมของกรอบ — ค่าเดียวกับแท็บรูปทรง (theme.shape) แก้ที่ไหนก็เปลี่ยนตาม */}
+              <div className="grid gap-3 sm:grid-cols-2 mt-3">
+                {([
+                  ["cardRadius", "ความมนของกรอบการ์ด", "มีผลกับแบบ มีกรอบ / เงานุ่ม / ลอย"],
+                  ["imageRadius", "ความมนของรูปสินค้า", "มีผลกับแบบ เรียบ / มินิมอล (รูปไม่มีกรอบการ์ด)"],
+                ] as const).map(([k, label, hint]) => (
+                  <div key={k}>
+                    <label className={labelCls}>{label}</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {([null, 0, 4, 8, 12, 20, 32] as const).map((n) => {
+                        const on = theme.shape[k] === n;
+                        const preview = n == null ? (theme.radius === "sharp" ? 4 : theme.radius === "round" ? 20 : 12) : n;
+                        return (
+                          <button key={String(n)} type="button" onClick={() => setShape({ [k]: n } as Partial<Shape>)}
+                            title={n == null ? "ตามค่ารวมของธีม (แท็บรูปทรง)" : n === 0 ? "เหลี่ยม" : `มน ${n}px`}
+                            className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-1.5 text-[10px] ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}>
+                            <span className="block w-6 h-6 border-2 border-current" style={{ borderRadius: Math.min(preview, 12) }} />
+                            {n == null ? "ตามธีม" : n === 0 ? "เหลี่ยม" : n}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{hint}</p>
+                  </div>
+                ))}
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-4 mt-3">
                 <div>
                   <label className={labelCls}>คอลัมน์ · คอม</label>
@@ -1301,7 +1328,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   <div className="rounded-xl p-4" style={{ background: theme.colors.page }}>
                     <div className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(sampleItems.length, theme.card.columns.desktop)}, minmax(0, 1fr))`, gap: theme.card.gap === "sm" ? 8 : theme.card.gap === "lg" ? 24 : 16, maxWidth: 560 }}>
                       {sampleItems.slice(0, Math.min(sampleItems.length, theme.card.columns.desktop)).map((it, i) => (
-                        <SampleCard key={i} item={it} card={theme.card} colors={theme.colors} fonts={theme.fonts} radius={theme.radius} />
+                        <SampleCard key={i} item={it} card={theme.card} colors={theme.colors} fonts={theme.fonts} radius={theme.radius} shape={theme.shape} />
                       ))}
                     </div>
                   </div>
@@ -2554,9 +2581,12 @@ function PlaceholderSettings({ value, onChange, logoKey, surface, ratio }: { val
   );
 }
 
-function SampleCard({ item, card, colors, fonts, radius }: { item: SampleItem; card: Theme["card"]; colors: Theme["colors"]; fonts: Theme["fonts"]; radius: Theme["radius"] }) {
+function SampleCard({ item, card, colors, fonts, radius, shape }: { item: SampleItem; card: Theme["card"]; colors: Theme["colors"]; fonts: Theme["fonts"]; radius: Theme["radius"]; shape?: Shape }) {
   const [hover, setHover] = useState(false);
-  const r = radius === "sharp" ? 4 : radius === "round" ? 20 : 12;
+  const base = radius === "sharp" ? 4 : radius === "round" ? 20 : 12;
+  // ความมนจริงตามแท็บรูปทรง/การ์ด (null = ตามค่ารวม) — การ์ดย่อส่วน จึงหารครึ่งให้ดูสมจริง
+  const rCard = Math.round((shape?.cardRadius ?? base) * 0.6);
+  const r = Math.round((shape?.imageRadius ?? base) * 0.6);
   const boxed = card.preset === "border" || card.preset === "shadow" || card.preset === "floating";
   const lift = card.hover === "lift" || card.hover === "lift-swap";
   const swap = (card.hover === "swap" || card.hover === "lift-swap") && item.images.length > 1;
@@ -2564,7 +2594,7 @@ function SampleCard({ item, card, colors, fonts, radius }: { item: SampleItem; c
     background: boxed ? colors.surface : "transparent",
     border: card.preset === "border" ? "1px solid #e5e7eb" : undefined,
     boxShadow: card.preset === "shadow" ? "0 2px 10px rgba(20,21,23,.06)" : card.preset === "floating" ? "0 14px 34px rgba(20,21,23,.14)" : undefined,
-    borderRadius: boxed ? r : undefined,
+    borderRadius: boxed ? rCard : undefined,
     overflow: boxed ? "hidden" : undefined,
     transform: hover && lift ? "translateY(-4px)" : undefined,
     transition: "transform .25s, box-shadow .25s",

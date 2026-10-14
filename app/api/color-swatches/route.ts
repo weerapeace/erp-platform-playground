@@ -39,15 +39,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     shopsByParent.set(l.parent_sku_id, set);
   }
   const parentIds = [...shopsByParent.keys()];
-  const used = new Map<string, { name: string; skus: number; shops: Set<string> }>();
+  // images = รูปปก SKU ของสีนั้น (≤6) — ใช้ "💧 ดูดสีจากรูปสินค้า" ในหน้าต่างทะเบียนสี
+  const used = new Map<string, { name: string; skus: number; shops: Set<string>; images: string[] }>();
   for (let i = 0; i < parentIds.length; i += 200) {
-    const { data: kids } = await sb.from("skus_v2").select("parent_sku_id, color").in("parent_sku_id", parentIds.slice(i, i + 200)).eq("is_active", true);
-    for (const k of (kids ?? []) as { parent_sku_id: string; color: string | null }[]) {
+    const { data: kids } = await sb.from("skus_v2").select("parent_sku_id, color, cover_image_r2_key").in("parent_sku_id", parentIds.slice(i, i + 200)).eq("is_active", true);
+    for (const k of (kids ?? []) as { parent_sku_id: string; color: string | null; cover_image_r2_key: string | null }[]) {
       const name = (k.color ?? "").trim();
       if (!name) continue;
       const key = normColorName(name);
-      const u = used.get(key) ?? { name, skus: 0, shops: new Set<string>() };
+      const u = used.get(key) ?? { name, skus: 0, shops: new Set<string>(), images: [] };
       u.skus += 1;
+      if (k.cover_image_r2_key && u.images.length < 6 && !u.images.includes(k.cover_image_r2_key)) u.images.push(k.cover_image_r2_key);
       for (const s of shopsByParent.get(k.parent_sku_id) ?? []) if (s) u.shops.add(s);
       used.set(key, u);
     }
@@ -56,7 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     data: {
       entries: ((dict ?? []) as Row[]).map(rowToSwatchEntry),
-      used: [...used.values()].map((u) => ({ name: u.name, skus: u.skus, shops: [...u.shops].sort() })),
+      used: [...used.values()].map((u) => ({ name: u.name, skus: u.skus, shops: [...u.shops].sort(), images: u.images })),
     },
     error: null,
   });

@@ -17,12 +17,13 @@ import { MiniTable } from "@/components/mini-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ColorInput } from "@/components/color-picker";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
+import { ImageEyedropper } from "@/components/image-eyedropper";
 import {
   SwatchIndex, swatchCss, splitColorName, hasSwatch, normColorName, isHex,
   SWATCH_KIND_LABEL, MAX_SPLIT, type SwatchEntry, type SwatchKind,
 } from "@/lib/color-swatch";
 
-interface Used { name: string; skus: number; shops: string[] }
+interface Used { name: string; skus: number; shops: string[]; images?: string[] }
 type Status = "set" | "auto" | "unset";
 interface Row {
   key: string;
@@ -35,6 +36,8 @@ interface Row {
   css: string | null;
   status: Status;
   missing: string[];
+  /** รูปปก SKU ที่ใช้สีนี้ (ไว้ดูดสี) */
+  images: string[];
 }
 interface Draft { th: string; en: string; kind: SwatchKind | null; colors: string[]; imageKey: string | null; isNew: boolean }
 
@@ -64,7 +67,7 @@ function buildRows(entries: SwatchEntry[], used: Used[]): Row[] {
   const idx = new SwatchIndex(entries);
   const rows = new Map<string, Row>();
   const blank = (name: string, entry: SwatchEntry | null, compound = false): Row => ({
-    key: normColorName(name), name, entry, compound, skus: 0, shops: new Set(), css: null, status: "unset", missing: [],
+    key: normColorName(name), name, entry, compound, skus: 0, shops: new Set(), css: null, status: "unset", missing: [], images: [],
   });
   for (const e of entries) rows.set(normColorName(e.th), blank(e.th, e));
 
@@ -75,6 +78,7 @@ function buildRows(entries: SwatchEntry[], used: Used[]): Row[] {
     const r = rows.get(key)!;
     r.skus += u.skus;
     u.shops.forEach((s) => r.shops.add(s));
+    for (const im of u.images ?? []) if (r.images.length < 8 && !r.images.includes(im)) r.images.push(im);
   };
   for (const u of used) {
     const parts = splitColorName(u.name);
@@ -85,6 +89,7 @@ function buildRows(entries: SwatchEntry[], used: Used[]): Row[] {
     const r = rows.get(key)!;
     r.skus += u.skus;
     u.shops.forEach((s) => r.shops.add(s));
+    for (const im of u.images ?? []) if (r.images.length < 8 && !r.images.includes(im)) r.images.push(im);
     parts.forEach((p) => tally(p, u));
   }
 
@@ -115,6 +120,8 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  // 💧 กำลังดูดสีให้ช่องไหน (index ใน draft.colors)
+  const [dropSlot, setDropSlot] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -308,7 +315,16 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
             </div>
 
             {draft.kind === "solid" && (
-              <ColorInput value={draft.colors[0] ?? ""} onChange={(v) => edit({ colors: [v] })} invalid={!isHex(draft.colors[0])} />
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1"><ColorInput value={draft.colors[0] ?? ""} onChange={(v) => edit({ colors: [v] })} invalid={!isHex(draft.colors[0])} /></div>
+                {sel.images.length > 0 && <button type="button" onClick={() => setDropSlot(0)} title="ดูดสีจากรูปสินค้า (SKU ที่ใช้สีนี้)" className="h-8 px-2 rounded border border-slate-200 bg-white text-sm hover:border-blue-400">💧</button>}
+              </div>
+            )}
+            {draft.kind !== "image" && sel.images.length > 0 && (
+              <p className="text-[11px] text-slate-400">💧 = ดูดสีจากรูปสินค้าที่ใช้สีนี้ ({sel.images.length} รูป) แล้วกดจุดบนรูป</p>
+            )}
+            {draft.kind !== "image" && sel.images.length === 0 && (
+              <p className="text-[11px] text-slate-400">ยังไม่มีรูป SKU ของสีนี้บนเว็บ — ดูดสีจากรูปไม่ได้</p>
             )}
             {draft.kind === "split" && (
               <div className="space-y-1.5">
@@ -316,6 +332,7 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
                   <div key={i} className="flex items-center gap-1.5">
                     <span className="text-[11px] text-slate-400 w-4">{i + 1}</span>
                     <div className="flex-1"><ColorInput value={c} onChange={(v) => edit({ colors: draft.colors.map((x, j) => (j === i ? v : x)) })} invalid={!isHex(c)} /></div>
+                    {sel.images.length > 0 && <button type="button" onClick={() => setDropSlot(i)} title="ดูดสีจากรูปสินค้า" className="h-8 px-1.5 rounded border border-slate-200 bg-white text-xs hover:border-blue-400">💧</button>}
                     {draft.colors.length > 2 && <button type="button" onClick={() => edit({ colors: draft.colors.filter((_, j) => j !== i) })} className="text-slate-400 hover:text-red-500 text-xs px-1" aria-label="ลบสีนี้">✕</button>}
                   </div>
                 ))}
@@ -340,6 +357,20 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
           </div>
         )}
       </div>
+
+      <ImageEyedropper
+        open={dropSlot !== null && !!sel && sel.images.length > 0}
+        images={sel?.images ?? []}
+        title={`💧 ดูดสีจากรูปสินค้า — ${sel?.name ?? ""}${draft && draft.kind === "split" && dropSlot !== null ? ` (สีที่ ${dropSlot + 1})` : ""}`}
+        onClose={() => setDropSlot(null)}
+        onPick={(hex) => {
+          if (draft && dropSlot !== null) {
+            const next = draft.kind === "split" ? draft.colors.map((x, j) => (j === dropSlot ? hex : x)) : [hex];
+            edit({ colors: next });
+          }
+          setDropSlot(null);
+        }}
+      />
 
       <ConfirmDialog
         open={!!pendingKey}
