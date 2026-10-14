@@ -8,6 +8,7 @@
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
  * - ✏️ แก้ด่วน (ชื่อ ราคา หน่วย หมวด ป้าย ฯลฯ) · 🖼 รูป สี และรูปเปิด = เปิดแท็บ 🛍 ของ Parent SKU ตัวจริงใน drawer (ไม่ทำฟอร์มซ้ำ)
+ * - 📦 เปิด Parent SKU = MasterRecordDrawer ตัวจริง (ทุกแท็บ · ◀ ▶ เลื่อนตามรายการที่เห็น)
  * ของกลาง: BulkActionBar · useDragReorder/DragHandle · CopyButton · Drawer/ConfirmDialog · footer-save · ParentWebListings
  * ข้อมูล: /api/website/listings (guardApi products.view/edit + audit) — โหลดที่ manager-client แล้วส่งเข้ามา
  */
@@ -24,6 +25,8 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { listingIssues, type ListingIssue } from "@/lib/website-listing-health";
 
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
+// ⚠️ ต้อง dynamic — master-crud import relation-multi อยู่ (import ตรงจะวนกัน) ดู memory unify_drawer
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 export type ShopInfo = { id: string; name: string; slug: string; isDefault: boolean; siteUrl?: string | null };
 
@@ -170,6 +173,8 @@ export function WebsiteListingsPanel({
   // 🖼 รูป สี และรูปเปิด → แท็บ 🛍 ของ Parent SKU ตัวจริงใน drawer · ปุ่มบันทึกอยู่แถบล่าง (footer-save)
   const [media, setMedia] = useState<Listing | null>(null);
   const mediaSave = useFooterSaveHost();
+  // 📦 เปิด Parent SKU — drawer ตัวจริงของหน้า Parent SKU (ทุกแท็บ) · ◀ ▶ เลื่อนตามรายการที่เห็นอยู่
+  const [parentOpen, setParentOpen] = useState<string | null>(null);
 
   // แผงเพิ่มสินค้า
   const [showAdd, setShowAdd] = useState(false);
@@ -670,6 +675,14 @@ export function WebsiteListingsPanel({
                         >
                           🖼 รูป สี และรูปเปิด
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setParentOpen(l.parentId)}
+                          title="เปิดข้อมูลสินค้าเต็ม (หน้าต่างเดียวกับหน้า Parent SKU — ทุกแท็บ)"
+                          className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:border-slate-500"
+                        >
+                          📦 เปิด Parent SKU
+                        </button>
                         {l.display?.productUrl && (
                           <>
                             <a href={l.display.productUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:border-slate-400">
@@ -859,6 +872,21 @@ export function WebsiteListingsPanel({
       >
         <FooterSaveProvider value={mediaSave.register}>{media && <ParentWebListings parentId={media.parentId} />}</FooterSaveProvider>
       </Drawer>
+
+      {/* 📦 Parent SKU ตัวเต็ม (ข้อมูลสินค้า/รูป/BOM/🛍 เว็บไซต์ …) — ปิดแล้วดึงค่าที่เว็บเห็นใหม่ */}
+      {parentOpen && (
+        <MasterRecordDrawer
+          moduleKey="parent-skus-v2"
+          apiPath="parent-skus"
+          recordId={parentOpen}
+          navIds={shown.map((l) => l.parentId)}
+          onClose={() => {
+            setParentOpen(null);
+            void reload();
+          }}
+          onChanged={() => void reload()}
+        />
+      )}
 
       <ConfirmDialog
         open={!!removing}
