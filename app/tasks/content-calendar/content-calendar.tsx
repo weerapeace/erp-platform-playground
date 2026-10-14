@@ -22,7 +22,7 @@ import {
   listTasks, updateTask, deleteTask, isOverdue, type CreativeTask,
 } from "../data";
 import { ContentDrawer } from "../content/content";
-import { ContentCreateModal } from "../content/content-create-modal";
+import { ContentCreateModal, type ContentCreatePreset } from "../content/content-create-modal";
 import { TaskDetailDrawer } from "../task-detail-drawer";
 import { CreateTaskModal } from "../create-task-modal";
 import { applyTaskTransition } from "../task-actions";
@@ -62,6 +62,7 @@ type CalEntry = {
   platformImages: Record<string, string[]>;   // รูปที่เลือกต่อแพลตฟอร์ม (r2_key) — ว่าง = ใช้รูปทั้งหมด
   imageKeys: string[]; imageCount: number;    // รูปแนบทั้งหมด (ตัวอย่าง ≤6) + จำนวน
   postStatus: Record<string, string>;         // posted / scheduled / skip ต่อแพลตฟอร์ม
+  isStory: boolean;                           // โพสต์แบบ Story (platform_formats มี "story") — โหมด Story ของปฏิทิน
 };
 
 /** ความพร้อมของแพลตฟอร์มหนึ่ง ๆ บนการ์ด: โพสต์แล้ว / ข้าม / พร้อม / ขาดอะไร */
@@ -180,6 +181,15 @@ export function ContentCalendarView() {
   const [createOpen, setCreateOpen] = useState(false);
   const [taskCreateOpen, setTaskCreateOpen] = useState(false);
   const [createDate, setCreateDate] = useState<string | null>(null);   // วันตั้งโพสต์ prefill (จากช่องที่คลิก)
+  const [createPreset, setCreatePreset] = useState<ContentCreatePreset | null>(null);   // ค่าตั้งต้นฟอร์ม (โหมด Story)
+  // 📖 โหมด Story: แถบเล็กใต้ทุกวันบอกว่า "ทำ Story ของวันนี้รึยัง" (เจ้าของลง Story ทุกวัน) — จำค่าไว้ในเครื่อง
+  const [storyMode, setStoryMode] = useState<boolean>(() => typeof window !== "undefined" && window.localStorage.getItem("content-calendar-story") === "1");
+  const toggleStory = () => setStoryMode((v) => { try { window.localStorage.setItem("content-calendar-story", v ? "0" : "1"); } catch { /* ignore */ } return !v; });
+  const openStoryCreate = (dayKey: string) => {
+    const d = new Date(`${dayKey}T00:00:00`);
+    setCreatePreset({ title: `Story ${d.getDate()}/${d.getMonth() + 1}`, platforms: ["instagram", "facebook"], platform_formats: { instagram: "story", facebook: "story" }, post_types: ["image"] });
+    setCreateDate(dayKey); setCreateOpen(true);
+  };
   // ลากวาง: จำ id + เวลาเดิมของการ์ดที่กำลังลาก + ช่องที่เมาส์ลอยอยู่
   const dragRef = useRef<{ id: string; time: string | null } | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -239,6 +249,7 @@ export function ContentCalendarView() {
           meta: [c.parent_sku_code || c.sku_code || null, c.brand_label].filter(Boolean).join(" · ") || null,
           platforms: c.platforms ?? [], overdue: false, hideInBacklog: c.status === "cancelled",
           captionPlatforms: c.caption_platforms ?? [], platformImages: c.platform_images ?? {}, imageKeys: c.image_keys ?? [], imageCount: c.image_count ?? 0, postStatus: c.post_status ?? {},
+          isStory: Object.values(c.platform_formats ?? {}).includes("story"),
         };
       });
     }
@@ -254,7 +265,7 @@ export function ContentCalendarView() {
         thumb: key ? r2ImageUrl(key, 96) : null, sub: tk.task_no ? `#${tk.task_no}${tk.sku_code ? ` · ${tk.parent_sku_code || tk.sku_code}` : ""}` : null,
         meta: [who ? `👤 ${who}` : null, tk.brand_label].filter(Boolean).join(" · ") || null,
         platforms: tk.platforms ?? [], overdue: isOverdue(tk), hideInBacklog: isTerminal(tk.status),
-        captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {},
+        captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {}, isStory: false,
       };
     });
   }, [mode, items, tasks]);
@@ -289,6 +300,14 @@ export function ContentCalendarView() {
     const notReadyN = inBrand.filter(isNotReady).length;   // ยังขาดแคปชั่น/รูป (เดือนนี้ ในแบรนด์ที่เลือก)
     return { total: all.length, inBrand: inBrand.length, brand, plat, stat, notReady: notReadyN };
   }, [entries, brandFilter, ym]);
+
+  // Story ต่อวัน (ตามตัวกรองแบรนด์เท่านั้น — ไม่สนแพลตฟอร์ม/สถานะ/ยังไม่พร้อม เพื่อให้แถบ Story คงที่)
+  const storyByDay = useMemo(() => {
+    const map: Record<string, CalEntry[]> = {};
+    for (const e of entries) { if (!e.isStory || !e.dateKey || e.status === "cancelled") continue; if (brandFilter !== "all" && e.brand_id !== brandFilter) continue; (map[e.dateKey] ??= []).push(e); }
+    return map;
+  }, [entries, brandFilter]);
+  const storyDaysInMonth = useMemo(() => Object.keys(storyByDay).filter((k) => k.slice(0, 7) === ym).length, [storyByDay, ym]);
 
   // จัดเข้าแต่ละวัน + กล่องค้าง (ยังไม่ลงวันที่ / ยังไม่กำหนดส่ง)
   const byDay = useMemo(() => {
@@ -611,6 +630,12 @@ export function ContentCalendarView() {
             <button onClick={() => setOffset((o) => o - 1)} aria-label={t("เดือนก่อน", "Previous month")} className="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">‹</button>
             <h2 className="text-lg font-semibold text-slate-800 min-w-[150px] text-center">{monthName}</h2>
             <button onClick={() => setOffset((o) => o + 1)} aria-label={t("เดือนถัดไป", "Next month")} className="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">›</button>
+            {mode === "content" && (
+              <button onClick={toggleStory} title={t("โหมด Story: แถบเล็กใต้ทุกวันบอกว่าทำ Story ของวันนั้นแล้วหรือยัง (กด ＋ สร้าง Story ลงวันนั้นได้เลย)", "Story mode: a strip under each day shows whether a Story exists")}
+                className={`h-9 px-3 rounded-lg border text-sm font-medium inline-flex items-center gap-1.5 ${storyMode ? "bg-pink-600 border-pink-600 text-white shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                📖 Story{storyMode && <span className={`text-[11px] tabular-nums ${storyDaysInMonth >= days ? "text-white/90" : "text-white/80"}`}>{storyDaysInMonth}/{days} {t("วัน", "days")}</span>}
+              </button>
+            )}
             {offset !== 0 && <button onClick={() => setOffset(0)} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">{t("วันนี้", "Today")}</button>}
           </div>
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 text-xs">{L.icon} {t("เดือนนี้", "This month")} {scheduledThisMonth}</span>
@@ -646,6 +671,35 @@ export function ContentCalendarView() {
                       {list.slice(0, 4).map((e) => <Chip key={e.id} e={e} />)}
                       {list.length > 4 && <div className="text-[10px] text-slate-400 pl-0.5">+{list.length - 4} {t("อื่น ๆ", "more")}</div>}
                     </div>
+                    {/* 📖 แถบ Story ของวัน: มีแล้ว = จุดสีแบรนด์ (✓ ถ้าโพสต์แล้ว) · ยังไม่มี = ปุ่ม ＋ สร้าง Story ลงวันนี้ · วันที่ผ่านมาแล้วและไม่มี = ขีดแดงจาง */}
+                    {mode === "content" && storyMode && (() => {
+                      const st = storyByDay[key] ?? [];
+                      const past = key < todayKey;
+                      return (
+                        <div className={`mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[10px] ${st.length ? "bg-pink-50 text-pink-700" : past ? "bg-rose-50 text-rose-400" : "bg-slate-50 text-slate-400"}`}
+                          title={st.length ? st.map((e) => `${e.brand_label ?? ""} ${e.title}${e.status === "posted" ? " ✓" : ""}`).join(" · ") : (past ? t("วันนี้ไม่ได้ทำ Story", "No story this day") : t("ยังไม่มี Story ของวันนี้", "No story yet"))}>
+                          <span>📖</span>
+                          {st.length ? (
+                            <span className="flex items-center gap-0.5 flex-1 min-w-0">
+                              {st.slice(0, 5).map((e) => (
+                                <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); setDetail({ kind: "content", id: e.id }); }} title={`${e.brand_label ?? ""} · ${e.title} · ${e.statusLabel}`}
+                                  className={`h-3.5 min-w-3.5 px-0.5 rounded-full ring-1 ring-white text-[8px] leading-none text-white flex items-center justify-center ${e.status === "posted" ? "" : "opacity-60"}`} style={{ background: brandColor(e.brand_id) }}>
+                                  {e.status === "posted" ? "✓" : ""}
+                                </button>
+                              ))}
+                              {st.length > 5 && <span>+{st.length - 5}</span>}
+                              <span className="ml-auto truncate">{st.every((e) => e.status === "posted") ? t("โพสต์แล้ว", "Posted") : t(`${st.length} Story`, `${st.length} story`)}</span>
+                            </span>
+                          ) : (
+                            <span className="flex-1 truncate">{past ? t("ไม่มี Story", "No story") : t("ยังไม่มี Story", "No story yet")}</span>
+                          )}
+                          {!past || !st.length ? (
+                            <button type="button" onClick={(ev) => { ev.stopPropagation(); openStoryCreate(key); }} title={t("สร้าง Story ลงวันนี้", "Create a story for this day")}
+                              className="h-4 w-4 rounded-full bg-white border border-pink-300 text-pink-600 leading-none hover:bg-pink-100">＋</button>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -759,7 +813,7 @@ export function ContentCalendarView() {
           pushToast={pushToast} />
       )}
 
-      <ContentCreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); reload(); }}
+      <ContentCreateModal open={createOpen} onClose={() => { setCreateOpen(false); setCreatePreset(null); }} onCreated={() => { setCreateOpen(false); setCreatePreset(null); reload(); }} preset={createPreset}
         brands={brands} campaigns={campaigns}
         defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultDate={createDate} pushToast={pushToast} />
       <CreateTaskModal open={taskCreateOpen} onClose={() => setTaskCreateOpen(false)} onCreated={() => { setTaskCreateOpen(false); void tasksSWR.revalidate(true); }} pushToast={pushToast} />

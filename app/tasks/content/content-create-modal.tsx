@@ -26,7 +26,9 @@ type CampaignOpt = { id: string; name: string };
 type Form = { title: string; post_types: string[]; status: ContentStatus; brand_id: string; campaign_id: string; scheduled_at: string; product: SkuPickerValue | null; parent: ParentSkuPickerValue | null; platforms: string[]; note: string };
 const emptyForm = (): Form => ({ title: "", post_types: ["image"], status: "draft", brand_id: "", campaign_id: "", scheduled_at: "", product: null, parent: null, platforms: [], note: "" });
 
-export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, defaultBrandId, defaultDate, pushToast }: {
+export type ContentCreatePreset = { title?: string; platforms?: string[]; platform_formats?: Record<string, string>; post_types?: string[] };
+export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, defaultBrandId, defaultDate, preset = null, pushToast }: {
+  preset?: ContentCreatePreset | null;   // เติมค่าตั้งต้น (เช่น ปฏิทินโหมด Story: ชื่อ + IG/FB + รูปแบบ story)
   open: boolean;
   onClose: () => void;
   onCreated: (r: { id: string; content_no: string }) => void;
@@ -59,9 +61,9 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       const rec = (recRef.current[String(day)] ?? [])[0]?.time;
       sched = `${sched}T${rec || "10:00"}`;
     }
-    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched });
+    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched, ...(preset?.title ? { title: preset.title } : {}), ...(preset?.platforms ? { platforms: preset.platforms } : {}), ...(preset?.post_types ? { post_types: preset.post_types } : {}) });
     setDirty(false); setFormErr(null); setChildren([]); setSkuIds([]); setExtras([]); brandTouchedRef.current = !!defaultBrandId;
-  }, [open, defaultBrandId, defaultDate]);
+  }, [open, defaultBrandId, defaultDate, preset]);
 
   const upd = (patch: Partial<Form>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   // ลูก SKU ของ Parent ที่เลือก (ชิปสีให้กดเลือกสีเดียว หรือใช้ทุกสี)
@@ -140,7 +142,8 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         // สินค้าทุกตัวในโพสต์: ตัวหลัก (ช่อง SKU/Parent) ขึ้นก่อน แล้วตามด้วยสินค้าเพิ่มเติม
         products: [...((form.parent || form.product) ? [{ parent_sku_id: form.parent?.id ?? form.product?.parent_sku_id ?? null, sku_id: form.product?.id ?? null, sku_ids: form.product ? [] : skuIds }] : []), ...extras.map(extraToPayload)],
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
-        platform_formats: Object.fromEntries(Object.entries(bpFmt[form.brand_id] ?? {}).filter(([p]) => form.platforms.includes(p))),
+        // รูปแบบโพสต์: ของแบรนด์ + ที่ preset บังคับ (เช่น story) — เฉพาะแพลตฟอร์มที่เลือกไว้จริง
+        platform_formats: Object.fromEntries(Object.entries({ ...(bpFmt[form.brand_id] ?? {}), ...(preset?.platform_formats ?? {}) }).filter(([p]) => form.platforms.includes(p))),
       });
       setDirty(false);
       pushToast("success", t(`สร้างคอนเทนต์ ${r.content_no} แล้ว`, `Content ${r.content_no} created`));
