@@ -24,6 +24,7 @@ import { MediaUploadField, type MediaValue } from "@/components/media-upload-fie
 import { NAME_RULE_EXCLUSIVE, type NameRuleFlag } from "@/lib/website-field-map";
 import { uploadResizedImage } from "@/components/image-attach";
 import { useFooterSave } from "@/components/footer-save";
+import { CopyButton } from "@/components/copy-button";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
@@ -344,7 +345,10 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
             </button>
             <span className="text-[11px] text-slate-400 ml-auto">ขายผ่านเว็บ {s.soldQty} ชิ้น</span>
             {s.published && s.productUrl && (
-              <a href={s.productUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">ดูหน้าเว็บ ↗</a>
+              <>
+                <a href={s.productUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">ดูหน้าเว็บ ↗</a>
+                <CopyButton value={s.productUrl} label="คัดลอกลิงก์" title="คัดลอกลิงก์หน้าสินค้านี้" className="!py-0.5" />
+              </>
             )}
           </div>
 

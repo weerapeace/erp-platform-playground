@@ -36,6 +36,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 ];
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem } from "@/lib/website-theme";
 
@@ -1983,6 +1984,24 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
             <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px · {Math.round(scale * 100)}%</span>
           </div>
+
+          {/* 🔗 ลิงก์พรีวิว — คัดลอกส่งทีม/เปิดบนมือถือ เห็น "ร่างที่บันทึกแล้ว" ก่อนเผยแพร่ (ลูกค้าทั่วไปไม่เห็น) */}
+          {previewSrc && (
+            <div className="mb-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-500 shrink-0">🔗 ลิงก์พรีวิว</span>
+                <input readOnly value={previewSrc} onFocus={(e) => e.currentTarget.select()}
+                  className="min-w-0 flex-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600" />
+                <CopyButton value={previewSrc} label="คัดลอก" title="คัดลอกลิงก์พรีวิว (ส่งให้ทีม หรือเปิดในมือถือ)" />
+                <a href={previewSrc} target="_blank" rel="noreferrer" title="เปิดในแท็บใหม่" className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-slate-400">↗</a>
+              </div>
+              <p className={`mt-1 text-[10px] ${isDirty ? "text-amber-700" : "text-slate-400"}`}>
+                {isDirty
+                  ? "⚠️ มีการแก้ที่ยังไม่ได้กด \"บันทึกร่าง\" — คนเปิดลิงก์จะยังไม่เห็นส่วนนี้"
+                  : "คนเปิดลิงก์จะเห็นร่างล่าสุดที่บันทึกไว้ (ยังไม่เผยแพร่) · ลูกค้าทั่วไปยังเห็นแบบเดิม"}
+              </p>
+            </div>
+          )}
 
           <div ref={previewBoxRef} className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: "72vh", minHeight: 420 }}>
             {previewSrc ? (
