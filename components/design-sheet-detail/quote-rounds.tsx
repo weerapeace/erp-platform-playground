@@ -26,7 +26,7 @@ const fmtDate = (d: string | null) => { if (!d) return "—"; const t = new Date
 const qtyKey = (q: number | null | undefined) => (q == null ? "" : String(q));
 
 type Size = { key: string; label: string };
-type Batch = { batch: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
+type Batch = { batch: number; part: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
 
 export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, canEdit, costDirty, saveCost, onReload, onOpenVersions, onSendToQuotation }: {
   sheetId: string;
@@ -58,12 +58,24 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
       (m.get(b) ?? m.set(b, []).get(b)!).push(q);
     }
     const order = new Map(sizes.map((s, i) => [s.key, i]));
-    return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([batch, qs], i) => {
-      const sz = [...new Set(qs.map((q) => q.parent_code ?? ""))].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
-      const qtys = [...new Set(qs.map((q) => q.qty ?? null))].sort((a, b) => (a == null ? 1 : b == null ? -1 : a - b));
-      const sts = new Set(qs.map((q) => q.status));
-      return { batch: batch > 0 ? batch : i + 1, quotes: qs, date: qs[0]?.quote_date ?? null, note: qs.find((q) => q.note)?.note ?? null, sizes: sz, qtys, status: sts.size === 1 ? qs[0].status : "mixed" };
+    const out: Batch[] = [];
+    [...m.entries()].sort((a, b) => a[0] - b[0]).forEach(([batch, all], i) => {
+      // ข้อมูลเก่าอาจมีหลายแถวที่ไซส์+จำนวนซ้ำกันในวันเดียว (เช่น เสนอใหม่ไม่ระบุจำนวน) → แยกเป็น "รายการที่ 2, 3…" ไม่ให้แถวหาย
+      const parts: DesignSheetQuote[][] = [];
+      for (const q of [...all].sort((a, b) => a.round - b.round)) {
+        const k = `${q.parent_code ?? ""}|${qtyKey(q.qty)}`;
+        let part = parts.find((p) => !p.some((x) => `${x.parent_code ?? ""}|${qtyKey(x.qty)}` === k));
+        if (!part) { part = []; parts.push(part); }
+        part.push(q);
+      }
+      parts.forEach((qs, pi) => {
+        const sz = [...new Set(qs.map((q) => q.parent_code ?? ""))].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
+        const qtys = [...new Set(qs.map((q) => q.qty ?? null))].sort((a, b) => (a == null ? 1 : b == null ? -1 : a - b));
+        const sts = new Set(qs.map((q) => q.status));
+        out.push({ batch: batch > 0 ? batch : i + 1, part: pi, quotes: qs, date: qs[0]?.quote_date ?? null, note: qs.find((q) => q.note)?.note ?? null, sizes: sz, qtys, status: sts.size === 1 ? qs[0].status : "mixed" });
+      });
     });
+    return out;
   }, [quotes, sizes]);
   const cellOf = (b: Batch, size: string, qty: number | null) => b.quotes.find((q) => (q.parent_code ?? "") === size && qtyKey(q.qty) === qtyKey(qty)) ?? null;
 
@@ -98,13 +110,13 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
           <div className="text-xs text-slate-400">1 ครั้ง = 1 การ์ด (หลายไซส์ × หลายขั้นจำนวน) · กดตัวเลขราคาเพื่อแก้ · สถานะตั้งได้ทั้งครั้งหรือรายช่อง</div>
           <div className="flex gap-1.5">
             {onSendToQuotation && <button type="button" onClick={onSendToQuotation} className="h-8 px-3 text-sm border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">🧾 ส่งไปใบเสนอราคา</button>}
-            <button type="button" onClick={() => setAddOpen(true)} disabled={addOpen} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">＋ เสนอราคาครั้งที่ {(batches.at(-1)?.batch ?? 0) + 1}</button>
+            <button type="button" onClick={() => setAddOpen(true)} disabled={addOpen} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">＋ เสนอราคาครั้งที่ {Math.max(0, ...batches.map((x) => x.batch)) + 1}</button>
           </div>
         </div>
       )}
 
       {addOpen && (
-        <NewRoundEditor sheetId={sheetId} nextBatch={(batches.at(-1)?.batch ?? 0) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={batches.at(-1) ?? null}
+        <NewRoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={batches.at(-1) ?? null}
           costDirty={costDirty} saveCost={saveCost} onClose={() => setAddOpen(false)}
           onSaved={async (n) => { setAddOpen(false); await onReload(); toast.success(`เสนอราคาครั้งที่ ${n} แล้ว`); }} />
       )}
@@ -112,15 +124,16 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
       {batches.length === 0 && !addOpen && <div className="py-8 text-center text-sm text-slate-300">— ยังไม่เคยเสนอราคา —</div>}
 
       {[...batches].reverse().map((b, bi) => {
-        const prev = batches[batches.length - 2 - bi] ?? null;   // ครั้งก่อนหน้า (ไว้เทียบราคาที่เสนอช่องต่อช่อง)
+        void bi;
+        const prev = [...batches].reverse().find((x) => x.batch < b.batch) ?? null;   // ครั้งก่อนหน้า (ไว้เทียบราคาที่เสนอช่องต่อช่อง)
         const st = b.status === "mixed" ? null : (QUOTE_STATUS[b.status] ?? QUOTE_STATUS.pending);
         // "ที่เปลี่ยนจากครั้งก่อน" ต่อไซส์ (API คำนวณจากเวอร์ชันตีราคา) — เอาช่องแรกของแต่ละไซส์
         const changes = b.sizes.map((s) => ({ size: s, q: b.quotes.find((q) => (q.parent_code ?? "") === s) })).filter((x) => x.q?.changes || x.q?.cost_snapshot_id);
         return (
-          <div key={b.batch} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div key={`${b.batch}-${b.part}`} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
             {/* หัวการ์ด: ครั้งที่ · วันที่ · สถานะรวม · หมายเหตุ · ลบ */}
             <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
-              <span className="h-7 min-w-[2.5rem] px-2 rounded-lg bg-slate-800 text-white text-xs font-semibold flex items-center justify-center">ครั้งที่ {b.batch}</span>
+              <span className="h-7 min-w-[2.5rem] px-2 rounded-lg bg-slate-800 text-white text-xs font-semibold flex items-center justify-center" title={b.part > 0 ? "วันเดียวกันมีหลายรายการที่ไซส์/จำนวนซ้ำกัน (ข้อมูลเก่า) — แยกให้เห็นครบ" : undefined}>ครั้งที่ {b.batch}{b.part > 0 ? ` · รายการที่ ${b.part + 1}` : ""}</span>
               {canEdit
                 ? <input type="date" value={b.date ?? ""} onChange={(e) => void patchBatch(b, { quote_date: e.target.value || null })} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white" />
                 : <span className="text-xs text-slate-600">{fmtDate(b.date)}</span>}
