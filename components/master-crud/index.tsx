@@ -64,6 +64,9 @@ const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detai
 // หมวดกลางสำหรับลงขาย — picker ค้นหา + เพิ่มหมวดใหม่พร้อมจับคู่ร้านในตัว (ของกลาง)
 const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
 const InlineCentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker), { ssr: false });
+// "ใส่อะไรได้บ้าง" ของ Parent SKU (fits) — ชิปเลือกจากรายการกลาง product_fit_items
+const ParentFitPicker = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentFitPicker), { ssr: false });
+const ParentFitView = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentFitView), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -3212,6 +3215,9 @@ export function MasterRecordDrawer({
             platform_category_id: ({ value, onChange, disabled }) => (
               <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder={tr("— เลือกหมวดกลาง —", "— select central category —")} />
             ),
+            ...(moduleKey === "parent-skus-v2"
+              ? { fits: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentFitPicker value={value} onChange={onChange} disabled={disabled} /> }
+              : {}),
             ...(formRenderers ?? {}),
           }
         : formRenderers,
@@ -3221,6 +3227,7 @@ export function MasterRecordDrawer({
               <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null}
                 apiPath={moduleKey === "parent-skus-v2" ? "parent-skus" : "skus"} />
             ),
+            ...(moduleKey === "parent-skus-v2" ? { fits: ({ value }: { value: unknown }) => <ParentFitView value={value} /> } : {}),
           }
         : undefined,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
