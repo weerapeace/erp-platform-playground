@@ -37,7 +37,7 @@ export type PriceGroup = {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { data, error } = await supabaseAdmin().from("design_price_items")
-    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
+    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, updated_at, price_updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
     .eq("is_active", true).order("name", { ascending: true }).limit(1000);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 
@@ -58,7 +58,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       uom_default: (g?.uom_default as string) ?? null,
       sku_count: 0, sku_latest_price: null, sku_latest_currency: null, sku_avg_price: null,
       sku_max_price: null, sku_min_price: null, last_used_price: null,
-      price_updated_at: (r.updated_at as string) ?? null, sku_latest_date: null,
+      // วันปรับราคา (trigger ตั้งให้เมื่อ price_per_unit เปลี่ยน) — รายการเก่าก่อนมี trigger ยังไม่มีค่า → null (ไม่โชว์วัน)
+      price_updated_at: (r.price_updated_at as string) ?? null, sku_latest_date: null,
     };
   });
   const admin = supabaseAdmin();
