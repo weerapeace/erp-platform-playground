@@ -29,6 +29,7 @@ import { productDimensions, type FitItem, type DimensionRow } from "@/lib/produc
 import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
+import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, created_at, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -251,6 +252,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         banners: (() => {
           const bs = normalizeBanners(l.web_banners).filter((b) => b.imageKey).map((b) => ({ ...b, imageUrl: imageUrl(b.imageKey as string) }));
           return bs.length ? bs : undefined;
+        })(),
+        /** 🎬 รูปเปิดหน้าสินค้า (ภาพแรกเต็มช่อง) { desktop, mobile: {kind, url, poster} } — ไม่มี = ใช้รูปสินค้า · รูปย่อเป็น webp (คอม 2000 / มือถือ 1080) */
+        hero: (() => {
+          const h = normalizeHero(l.web_hero);
+          if (!h) return undefined;
+          const out = (m: HeroMedia | null, w: number) =>
+            m ? { kind: m.kind, url: m.kind === "image" ? `${imageUrl(m.key)}&w=${w}` : imageUrl(m.key), poster: m.posterKey ? `${imageUrl(m.posterKey)}&w=${w}` : null } : null;
+          return { desktop: out(h.desktop, 2000), mobile: out(h.mobile, 1080) };
         })(),
       };
     })

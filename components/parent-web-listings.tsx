@@ -19,6 +19,8 @@ import { PersonalizeEditor } from "@/components/personalize-editor";
 import { ProductBannersEditor } from "@/components/product-banners-editor";
 import type { ProductBanner } from "@/lib/website-banners";
 import type { CardColors } from "@/lib/website-card-colors";
+import { HERO_SIZE_HINT, type ProductHero } from "@/lib/website-hero";
+import { MediaUploadField, type MediaValue } from "@/components/media-upload-field";
 import type { NameRuleFlag } from "@/lib/website-field-map";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
@@ -45,6 +47,8 @@ type ShopState = {
   webBanners: ProductBanner[];
   /** 🎴 สีที่โชว์บนการ์ด + สีหลัก (colors null = ทุกสี) */
   webCardColors: CardColors;
+  /** 🎬 รูปเปิดหน้าสินค้า คอม/มือถือ (null = ใช้รูปสินค้า) */
+  webHero: ProductHero | null;
   detailItems: DetailItemInfo[];
   soldQty: number;
   productUrl: string;
@@ -181,6 +185,12 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
   };
   const setCardMain = (s: ShopState, label: string) =>
     patchShop(s.shopId, { webCardColors: { ...s.webCardColors, main: s.webCardColors.main && sameColor(s.webCardColors.main, label) ? null : label } });
+  /** 🎬 ตั้ง/เอาออก รูปเปิดหน้าสินค้าของคอมหรือมือถือ (ว่างทั้งคู่ = null → ใช้รูปสินค้า) */
+  const setHero = (s: ShopState, slot: "desktop" | "mobile", m: MediaValue | null) => {
+    const cur: ProductHero = s.webHero ?? { desktop: null, mobile: null };
+    const next: ProductHero = { ...cur, [slot]: m ? { kind: m.kind, key: m.key, posterKey: null } : null };
+    patchShop(s.shopId, { webHero: next.desktop || next.mobile ? next : null });
+  };
 
   const saveShop = async (s: ShopState) => {
     if (!parentId) return;
@@ -195,7 +205,7 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
             webName: s.webName, webDescription: s.webDescription,
             webImages: s.webImages, webSkuImages: s.webSkuImages, webDetails: s.webDetails,
             webPersonalize: s.webPersonalize, webBanners: s.webBanners,
-            webCardColors: s.webCardColors,
+            webCardColors: s.webCardColors, webHero: s.webHero,
           },
         }),
       });
@@ -297,6 +307,30 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                 <NumField label="ราคาเว็บ (ว่าง = ราคาปกติ)" value={s.webPrice} onChange={(v) => patchShop(s.shopId, { webPrice: v })} />
               </div>
               <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={data.erpDescription ?? "—"} />
+
+              {/* 🎬 รูปเปิดหน้าสินค้า (Hero) — ภาพ/วิดีโอแรกของแกลเลอรี เต็มช่องแบบ Gucci */}
+              <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-medium text-slate-700">🎬 รูปเปิดหน้าสินค้า (Hero) — ภาพแรกเต็มช่อง ไม่มีขอบ</span>
+                  <span className="text-[11px] text-slate-500">{s.webHero ? "ตั้งไว้แล้ว" : "ว่าง = ใช้รูปสินค้าตามเดิม"}</span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <MediaUploadField
+                    label="🖥 คอม"
+                    hint={`${HERO_SIZE_HINT.desktop} · ${HERO_SIZE_HINT.video}`}
+                    value={s.webHero?.desktop ?? null}
+                    onChange={(m) => setHero(s, "desktop", m)}
+                    previewRatio="16 / 9"
+                  />
+                  <MediaUploadField
+                    label="📱 มือถือ"
+                    hint={HERO_SIZE_HINT.mobile}
+                    value={s.webHero?.mobile ?? null}
+                    onChange={(m) => setHero(s, "mobile", m)}
+                    previewRatio="4 / 5"
+                  />
+                </div>
+              </div>
 
               {/* รูปเว็บ (รุ่น) */}
               <div>

@@ -22,6 +22,7 @@ import { writeAudit } from "@/lib/audit";
 import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeBanners } from "@/lib/website-banners";
 import { normalizeCardColors, isEmptyCardColors } from "@/lib/website-card-colors";
+import { normalizeHero } from "@/lib/website-hero";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
 import {
   normalizeFieldMap,
@@ -184,6 +185,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webBanners: normalizeBanners(l?.web_banners),
       /** 🎴 สีที่โชว์บนการ์ด + สีหลัก (ว่าง = ทุกสีตามลำดับเดิม) */
       webCardColors: normalizeCardColors(l?.web_card_colors),
+      /** 🎬 รูปเปิดหน้าสินค้า (Hero) คอม/มือถือ (null = ใช้รูปสินค้า) */
+      webHero: normalizeHero(l?.web_hero),
       detailItems,
       soldQty: soldByShop.get(s.id) ?? 0,
       productUrl: productUrlFor(code, s.slug, s.is_default),
@@ -219,6 +222,7 @@ type Patch = {
   webPersonalize?: PersonalizeConfig | null;
   webBanners?: unknown;
   webCardColors?: unknown;
+  webHero?: unknown;
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -298,6 +302,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const cc = normalizeCardColors(p.webCardColors);
     row.web_card_colors = isEmptyCardColors(cc) ? null : cc;
   }
+  if (p.webHero !== undefined) row.web_hero = normalizeHero(p.webHero);
 
   const { error } = await sb.from("store_listings").upsert(row, { onConflict: "shop_id,parent_sku_id" });
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });

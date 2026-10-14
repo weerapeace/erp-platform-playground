@@ -96,6 +96,27 @@ export async function GET(request: NextRequest): Promise<Response> {
       }
     }
 
+    // 🎬 วิดีโอ (เช่น รูปเปิดหน้าสินค้า ≤ 4 MB): รองรับ Range — Safari/iPhone ขอไฟล์ทีละช่วง (206) ถ้าไม่รองรับจะไม่เล่นเลย
+    // ไม่ให้ CDN เก็บ (206 ปน 200 แล้วเสิร์ฟผิดช่วงได้) · เบราว์เซอร์เก็บเองได้ 1 ชม.
+    if (ct0.startsWith("video/")) {
+      const vHeaders = { "Content-Type": ct0, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range" };
+      const buf = new Uint8Array(await new Response(obj.body as ReadableStream).arrayBuffer());
+      const total = buf.byteLength;
+      const m = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") ?? "");
+      if (m && (m[1] || m[2])) {
+        const start = m[1] ? Number(m[1]) : Math.max(0, total - Number(m[2]));
+        const end = m[1] && m[2] ? Math.min(Number(m[2]), total - 1) : total - 1;
+        if (start >= total || start > end) {
+          return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${total}` } });
+        }
+        return new Response(buf.slice(start, end + 1), {
+          status: 206,
+          headers: { ...vHeaders, "Content-Length": String(end - start + 1), "Content-Range": `bytes ${start}-${end}/${total}` },
+        });
+      }
+      return new Response(buf, { status: 200, headers: { ...vHeaders, "Content-Length": String(total) } });
+    }
+
     const res = new Response(obj.body, {
       status: 200,
       headers: {
