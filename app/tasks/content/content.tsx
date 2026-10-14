@@ -1660,6 +1660,7 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
     ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", ...sharedVars })
     : `${useCaption ? (cap.caption ?? "") : ""}\n\n${useHashtags ? (cap.hashtags ?? "") : ""}`.trim();
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
+  const [previewOpen, setPreviewOpen] = useState(false);   // 👁 ป๊อปดูตัวอย่างโพสต์ (จากหัวการ์ด ไม่ต้องกาง)
   // สถานะโพสต์ต่อแพลตฟอร์ม: ป้ายบนหัวการ์ด + ปุ่ม ✅ โพสต์แล้ว (กดสลับ) · "ข้าม" อยู่ในเมนู ⋯ (นาน ๆ ใช้ที)
 
   // ตัวอย่างที่ประกอบจากแม่แบบ — โชว์เฉพาะตอนแม่แบบ "เติมข้อความเพิ่ม" จริง ๆ
@@ -1709,10 +1710,47 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
             </>
           )}
           {open && <span className="flex-1" />}
-          <span className={`text-[11px] px-1.5 py-0.5 rounded-full border shrink-0 ${stBadge.cls}`}>{stBadge.label}</span>
         </button>
+        {/* 📋 คัดลอก + 👁 ดูตัวอย่าง — กดได้จากหัวการ์ดโดยไม่ต้องกาง (เจ้าของขอ) */}
+        {useCaption && (
+          <>
+            <button type="button" onClick={() => void copy()} disabled={!preview.trim()} title={t("คัดลอกแคปชั่นที่จะโพสต์ (ประกอบจากแม่แบบ+แฮชแท็ก)", "Copy the assembled caption")}
+              className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40">📋</button>
+            <button type="button" onClick={() => setPreviewOpen(true)} disabled={!preview.trim()} title={t("ดูตัวอย่างที่จะโพสต์", "Preview the post")}
+              className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40">👁</button>
+          </>
+        )}
+        <button type="button" onClick={onToggle} className="shrink-0"><span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${stBadge.cls}`}>{stBadge.label}</span></button>
         {open && menuItems.length > 0 && <div className="shrink-0"><RowMenu items={menuItems} /></div>}
       </div>
+
+      {/* 👁 ป๊อปตัวอย่างโพสต์: รูปที่เลือก + ข้อความที่ประกอบแล้ว (ของกลาง ERPModal) */}
+      <ERPModal open={previewOpen} onClose={() => setPreviewOpen(false)} size="sm"
+        title={`👁 ${t("ตัวอย่างที่จะโพสต์", "Post preview")} · ${platformLabel(cap.platform)}`}
+        footer={<div className="flex items-center justify-between gap-2 w-full">
+          <span className="text-[11px] text-slate-400">{preview.length.toLocaleString("th-TH")} {t("ตัวอักษร", "chars")}{selectedImages.length ? ` · 🖼 ${selectedImages.length}` : ""}</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => void copy()} className="h-9 px-3 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("คัดลอก", "Copy")}</button>
+            <button type="button" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">{t("ปิด", "Close")}</button>
+          </div>
+        </div>}>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+          <div className="flex items-center gap-2"><PlatformChip code={cap.platform} />{format && <span className="text-[10px] text-slate-500 bg-slate-100 rounded-full px-1.5">{postFormatLabel(cap.platform, format, t)}</span>}</div>
+          {selectedImages.length > 0 && (
+            <div className={`grid gap-1 ${selectedImages.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+              {postImages.filter((im) => selectedImages.includes(im.key)).slice(0, 4).map((im, i) => (
+                <div key={im.key} className={`relative overflow-hidden rounded-lg bg-white ${selectedImages.length === 1 ? "aspect-[4/5]" : "aspect-square"}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={r2ImageUrl(im.key, 600) ?? ""} alt="" className="w-full h-full object-cover" />
+                  {im.type === "video" && <span className="absolute bottom-1 left-1 text-[10px] bg-black/60 text-white px-1.5 rounded">🎬</span>}
+                  {i === 3 && selectedImages.length > 4 && <span className="absolute inset-0 bg-black/50 text-white flex items-center justify-center text-lg font-semibold">+{selectedImages.length - 4}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
+        </div>
+      </ERPModal>
 
       {open && (
         <div className="px-2.5 pb-2.5 space-y-2">
