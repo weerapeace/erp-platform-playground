@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ConfirmDialog } from "@/components/modal";
+import { ColorToneButton } from "@/components/color-tone-manager";
 import {
   LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
   newListingInsert, type ListingConfig, type ListingInsert,
@@ -44,6 +45,18 @@ export function ListingPanel({
 
   return (
     <div className="space-y-3">
+      {/* 🎨 ตัวกรองสีตามโทน (โทนสีเป็นของกลางทุกร้าน — จัดในป๊อป "จัดโทนสี") */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+          <input type="checkbox" checked={value.colorFilter} onChange={(e) => onChange({ ...value, colorFilter: e.target.checked })} className="w-4 h-4 accent-blue-600" />
+          🎨 โชว์แถบ &quot;กรองตามสี&quot; เหนือรายการสินค้า
+        </label>
+        <span className="text-[11px] text-slate-400">ลูกค้ากดโทน เช่น แดง → เห็นสินค้าที่มีสีแดงทุกเฉด + รูปการ์ดเปลี่ยนเป็นสีนั้น</span>
+        <span className="ml-auto">
+          <ColorToneButton />
+        </span>
+      </div>
+
       <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
         แทรกรูป (เช่น รูปนายแบบ/ไลฟ์สไตล์) ระหว่างการ์ดสินค้าในหน้า <b>สินค้าทั้งหมด</b> และหน้าหมวด · เพิ่มได้หลายรูป ลาก ⠿ เพื่อเรียง
         <br />

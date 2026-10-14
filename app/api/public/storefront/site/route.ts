@@ -92,5 +92,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     info,
     /** ป้ายชื่อฟิลด์สเปก (key → label) ให้เว็บร้านวาดตาราง "วัสดุและขนาด" */
     specFields: (await loadParentWebFields(sb)).map((f) => ({ key: f.key, label: f.label })),
+    /**
+     * 🎨 โทนสี (ของกลางทุกร้าน) [{key,name,hex}] เรียงตามที่จัด — ปุ่ม "กรองตามสี" ในหน้าสินค้า
+     * สินค้าแต่ละตัวบอกโทนของแต่ละสีเองใน products API (options.items[].tones) · เว็บโชว์เฉพาะโทนที่มีสินค้า
+     */
+    colorTones: await (async () => {
+      const { data } = await sb.from("erp_color_tones").select("key, name, hex").eq("is_active", true).order("sort_order");
+      return (data ?? []) as { key: string; name: string; hex: string }[];
+    })(),
   });
 }

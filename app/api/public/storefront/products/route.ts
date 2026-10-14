@@ -30,6 +30,7 @@ import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
 import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
+import { rowToTone, tonesOfLabel, TONE_SELECT } from "@/lib/color-tone";
 import { productSlug } from "@/lib/website-links";
 
 export const dynamic = "force-dynamic";
@@ -101,10 +102,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     loadParentImageFields(sb),
   ]);
   // 📏 รายการกลาง "ใส่อะไรได้บ้าง" + ✅ "รายละเอียดเพิ่ม (ติ๊ก)" (ตารางเล็ก) → หัวข้อ "ขนาด" / ต่อท้าย "รายละเอียดสินค้า"
-  const [{ data: fitRows }, { data: hlRows }] = await Promise.all([
+  const [{ data: fitRows }, { data: hlRows }, { data: toneRows }] = await Promise.all([
     sb.from("product_fit_items").select("id, name, name_en, is_active").eq("is_active", true),
     sb.from("product_highlight_items").select("id, name, name_en, is_active").eq("is_active", true).order("sort_order"),
+    // 🎨 โทนสี (ของกลาง) → ตัวเลือกแต่ละสีบอกว่าอยู่โทนไหน (ปุ่ม "กรองตามสี" บนเว็บ · ดู lib/color-tone.ts)
+    sb.from("erp_color_tones").select(TONE_SELECT).eq("is_active", true).order("sort_order"),
   ]);
+  const colorTones = ((toneRows ?? []) as Parameters<typeof rowToTone>[0][]).map(rowToTone);
   const fitCatalog = (fitRows ?? []) as FitItem[];
   const highlightCatalog = (hlRows ?? []) as FitItem[];
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
@@ -218,6 +222,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
                   swatch: it.swatch || (spec ? swatchCss(spec, (k) => `${imageUrl(k)}&w=96`) : undefined),
                   image: it.image ? imageUrl(it.image) : undefined,
                   images: it.images?.length ? it.images.map(imageUrl) : undefined,
+                  // 🎨 โทนของสีนี้ (key) — สีผสมได้หลายโทน · ไม่อยู่โทนไหน = [] (ตัวกรองสีหาไม่เจอ)
+                  tones: tonesOfLabel(it.label, colorTones).map((t) => t.key),
                 };
               }),
             }
