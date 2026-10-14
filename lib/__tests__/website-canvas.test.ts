@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { matchShowIf, SECTION_SCHEMAS, type FieldDef } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockTypesFor, safeTarget, type Block } from "../website-blocks";
-import { canvasItemPreset, canvasItemSummary, validateCanvas, CANVAS_SHAPE_LABEL } from "../website-canvas";
+import { canvasItemPreset, canvasItemSummary, validateCanvas, CANVAS_SHAPE_LABEL, CANVAS_FRAME_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_BUTTON_PRESETS, fitImageBox, canvasImageKeys } from "../website-canvas";
 import { productHref, productSlug, categoryHref, sectionHref } from "../website-links";
 
 /**
@@ -113,5 +113,46 @@ describe("Section ทดลอง (beta)", () => {
     expect(blockTypesFor(new Set(["beta_canvas"])).some((t) => t.type === "canvas")).toBe(true);
     // ชนิดปกติอยู่ครบเสมอ
     expect(blockTypesFor(new Set()).some((t) => t.type === "hero")).toBe(true);
+  });
+});
+
+describe("ป๊อปอัปแก้เต็มจอ — ของที่ใช้ร่วม", () => {
+  it("ค่าจากแถบเครื่องมือลอยในพรีวิวผ่านตัวกรองของ schema (ห้ามเปลี่ยน id/ชนิด · ค่ามั่วกลับเป็นค่าที่ปลอดภัย)", async () => {
+    const { livePatch } = await import("../../components/website-canvas-tools");
+    expect(livePatch({ id: "hack", kind: "button", frame: "ellipse", border: "lace", x: 10.6 })).toEqual({ frame: "ellipse", border: "lace", x: 11 });
+    expect(livePatch({ frame: "star", href: "javascript:alert(1)", color: "neon", unknownKey: 1 })).toEqual({ frame: "rect", href: "", color: "ink" });
+    expect(livePatch({ label: "ซื้อเลย", size: 9999 })).toEqual({ label: "ซื้อเลย", size: 240 });
+  });
+
+  it("รูปที่เพิ่มใหม่ไม่มีกรอบ (แต่งทีหลังที่ตัวรูป)", () => {
+    expect(canvasItemPreset("image")).toMatchObject({ frame: "rect", border: "none" });
+  });
+
+  it("วางรูปตามสัดส่วนจริง", () => {
+    expect(fitImageBox(1000, 1000)).toEqual({ w: 360, h: 360 });
+    expect(fitImageBox(800, 1600)).toEqual({ w: 240, h: 480 });
+    expect(fitImageBox(1600, 400, 160, 160)).toEqual({ w: 160, h: 40 });
+    expect(fitImageBox(0, 0)).toEqual({ w: 360, h: 360 });
+  });
+
+  it("กรอบ/ข้อความ/ปุ่มสำเร็จรูป ผ่าน normalize ได้ค่าเดิม", () => {
+    const items = [
+      ...CANVAS_FRAME_PRESETS.map((p, i) => ({ id: `f${i}`, ...canvasItemPreset("image"), ...p.patch })),
+      ...CANVAS_TEXT_PRESETS.map((p, i) => ({ id: `t${i}`, ...canvasItemPreset("text"), ...p.patch })),
+      ...CANVAS_BUTTON_PRESETS.map((p, i) => ({ id: `b${i}`, ...canvasItemPreset("button"), ...p.patch })),
+    ];
+    const [b] = normalizeBlocks([{ id: "c1", type: "canvas", items }]) as unknown as Record<string, unknown>[];
+    const out = b.items as Record<string, unknown>[];
+    CANVAS_FRAME_PRESETS.forEach((p, i) => expect(out[i]).toMatchObject(p.patch));
+    expect(out.find((x) => x.id === "t1")).toMatchObject({ font: "Parisienne", color: "brand" });
+    expect(out.find((x) => x.id === "b1")).toMatchObject({ variant: "outline", href: "/shop" });
+  });
+
+  it("เก็บ r2 key ของรูปในผืน (ไว้บันทึกว่าถูกใช้ในคลังไฟล์)", () => {
+    const keys = canvasImageKeys([
+      { type: "hero", imageKey: "x/hero.png" },
+      { type: "canvas", bgImageKey: "x/bg.jpg", items: [{ kind: "image", imageKey: "x/a.png" }, { kind: "shape", imageKey: "x/no.png" }, { kind: "image", imageKey: "x/a.png" }] },
+    ]);
+    expect(keys.sort()).toEqual(["x/a.png", "x/bg.jpg"]);
   });
 });

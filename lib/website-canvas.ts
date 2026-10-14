@@ -120,7 +120,8 @@ export function canvasItemPreset(kind: CanvasKind, n = 0): Record<string, unknow
   const off = (n % 6) * 24;
   switch (kind) {
     case "image":
-      return { kind, x: 720 + off, y: 60 + off, w: 320, h: 420, frame: "ellipse", fit: "cover", border: "lace", borderColor: "brand", borderWidth: 2, borderGap: 14 };
+      // รูปเปล่า ไม่มีกรอบ — แต่งกรอบทีหลังที่ตัวรูป (แถบเครื่องมือลอย → กรอบ)
+      return { kind, x: 720 + off, y: 60 + off, w: 320, h: 420, frame: "rect", fit: "cover", border: "none", borderColor: "brand", borderWidth: 2, borderGap: 12 };
     case "button":
       return { kind, label: "เลือกดูสินค้า", href: "/shop", x: 100 + off, y: 420 + off, w: 220, h: 54, font: "body", size: 16, weight: "600", variant: "brand" };
     case "shape":
@@ -128,6 +129,58 @@ export function canvasItemPreset(kind: CanvasKind, n = 0): Record<string, unknow
     default:
       return { kind: "text", text: "หัวข้อของคุณ", font: "display", size: 56, weight: "500", lineHeight: 115, x: 100 + off, y: 120 + off, w: 560, h: 80, color: "ink" };
   }
+}
+
+/** ข้อความสำเร็จรูป (แถบซ้ายของป๊อปอัปแก้เต็มจอ) — กดแล้ววางกลางผืน */
+export const CANVAS_TEXT_PRESETS: { key: string; label: string; sample: string; patch: Record<string, unknown> }[] = [
+  { key: "heading", label: "หัวข้อใหญ่", sample: "หัวข้อใหญ่", patch: { text: "หัวข้อของคุณ", font: "display", size: 64, weight: "500", lineHeight: 110, w: 640, color: "ink" } },
+  { key: "script", label: "คำโปรยลายมือ", sample: "the little boutique", patch: { text: "the little boutique of", font: "Parisienne", size: 42, weight: "400", lineHeight: 110, w: 520, color: "brand" } },
+  { key: "caps", label: "ตัวพิมพ์ใหญ่ห่าง ๆ", sample: "NEW COLLECTION", patch: { text: "new collection", font: "body", size: 14, weight: "600", spacing: 5, uppercase: true, w: 420, color: "muted" } },
+  { key: "body", label: "ย่อหน้า", sample: "ข้อความอธิบายสั้น ๆ", patch: { text: "เล่าเรื่องสั้น ๆ เกี่ยวกับสินค้าหรือร้าน", font: "body", size: 18, weight: "400", lineHeight: 170, w: 460, color: "ink" } },
+];
+
+/** ปุ่มสำเร็จรูป */
+export const CANVAS_BUTTON_PRESETS: { key: string; label: string; patch: Record<string, unknown> }[] = [
+  { key: "solid", label: "ปุ่มทึบ", patch: { label: "เลือกดูสินค้า", variant: "brand", href: "/shop", w: 220, h: 54, size: 16 } },
+  { key: "outline", label: "ปุ่มขอบ", patch: { label: "ดูของใหม่", variant: "outline", color: "ink", href: "/shop", w: 200, h: 50, size: 15 } },
+  { key: "link", label: "ลิงก์ขีดเส้นใต้", patch: { label: "อ่านต่อ →", variant: "link", color: "brandDeep", href: "/shop", w: 160, h: 40, size: 15 } },
+];
+
+/** กรอบรูปสำเร็จรูป — ⚠️ ค่าตรงกับ FRAME_PRESETS ของเว็บร้าน (src/components/home/CanvasToolbar.tsx) */
+export const CANVAS_FRAME_PRESETS: { key: string; label: string; patch: Record<string, unknown> }[] = [
+  { key: "none", label: "ไม่มีกรอบ", patch: { frame: "rect", border: "none" } },
+  { key: "rounded", label: "มุมมน", patch: { frame: "rounded", border: "none" } },
+  { key: "ellipse", label: "วงรี", patch: { frame: "ellipse", border: "none" } },
+  { key: "arch", label: "โค้งประตู", patch: { frame: "arch", border: "none" } },
+  { key: "lace", label: "วงรีลูกไม้", patch: { frame: "ellipse", border: "lace", borderWidth: 2, borderGap: 14 } },
+  { key: "ellipse-line", label: "วงรีเส้นลอย", patch: { frame: "ellipse", border: "line", borderWidth: 2, borderGap: 10 } },
+  { key: "ellipse-dot", label: "วงรีจุดไข่ปลา", patch: { frame: "ellipse", border: "dotted", borderWidth: 3, borderGap: 8 } },
+  { key: "arch-line", label: "โค้งเส้นลอย", patch: { frame: "arch", border: "line", borderWidth: 2, borderGap: 10 } },
+  { key: "rect-double", label: "เส้นคู่", patch: { frame: "rect", border: "double", borderWidth: 2, borderGap: 10 } },
+];
+
+/** ขนาดรูปตอนวางลงผืน — ตามสัดส่วนรูปจริง (กว้างสุด maxW · สูงไม่เกิน maxH) */
+export function fitImageBox(naturalW: number, naturalH: number, maxW = 360, maxH = 480): { w: number; h: number } {
+  const ratio = naturalW > 0 && naturalH > 0 ? naturalH / naturalW : 1;
+  let w = maxW;
+  let h = Math.round(w * ratio);
+  if (h > maxH) {
+    h = maxH;
+    w = Math.round(h / ratio);
+  }
+  return { w: Math.max(40, w), h: Math.max(40, h) };
+}
+
+/** r2 key ของรูปทั้งหมดในผืน (ไว้บันทึก "ถูกใช้ที่ไหน" ในคลังไฟล์ → กันลบรูปที่ยังขึ้นเว็บอยู่) */
+export function canvasImageKeys(blocks: unknown): string[] {
+  const out = new Set<string>();
+  for (const b of Array.isArray(blocks) ? (blocks as Record<string, unknown>[]) : []) {
+    if (b?.type !== "canvas") continue;
+    if (typeof b.bgImageKey === "string" && b.bgImageKey) out.add(b.bgImageKey);
+    for (const it of Array.isArray(b.items) ? (b.items as Record<string, unknown>[]) : [])
+      if (it?.kind === "image" && typeof it.imageKey === "string" && it.imageKey) out.add(it.imageKey);
+  }
+  return [...out];
 }
 
 const s = (v: unknown) => String(v ?? "").trim();

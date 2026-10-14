@@ -31,7 +31,7 @@ import { ERPModal } from "@/components/modal";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
 import { useCanvasBridge, previewStructureSig, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
-import { canvasItemPreset, type CanvasKind } from "@/lib/website-canvas";
+import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canvas-editor";
 
 export interface Selection {
   blockId: string;
@@ -288,13 +288,11 @@ export function WebsiteBuilder({
     patchBlock(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
   };
 
-  const addChild = (blockId: string, canvasKind?: CanvasKind) => {
+  const addChild = (blockId: string) => {
     const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
-    // ผืนผ้าใบ: เพิ่มตามชนิดที่กด (รูป/ข้อความ/ปุ่ม/ของตกแต่ง) ตำแหน่งเหลื่อมกันไม่ทับสนิท
-    const spec = canvasKind ? { ...c.spec, blank: () => canvasItemPreset(canvasKind, c.list.length) } : c.spec;
-    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(spec) };
+    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(c.spec) };
     patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
     setExpanded((s) => new Set(s).add(blockId));
     onSelect({ blockId, childId: item.id });
@@ -347,7 +345,35 @@ export function WebsiteBuilder({
   };
 
   /* ── ผืนผ้าใบอิสระ: ส่งข้อมูลเข้าพรีวิวสด + รับตำแหน่งที่ลากในพรีวิวกลับมา (components/website-canvas-tools.tsx) ── */
-  useCanvasBridge({ blocks, blocksRef, iframeRef, patchBlock, removeChild, duplicateChild, onUndo: toolbar?.onUndo, onRedo: toolbar?.onRedo });
+  const [canvasEditor, setCanvasEditor] = useState<CanvasEditorTarget | null>(null);
+  const canvasEditorRef = useRef(canvasEditor);
+  canvasEditorRef.current = canvasEditor;
+  useCanvasBridge({
+    blocks,
+    blocksRef,
+    iframeRef,
+    patchBlock,
+    removeChild,
+    duplicateChild,
+    onUndo: toolbar?.onUndo,
+    onRedo: toolbar?.onRedo,
+    // ดับเบิลคลิกผืนในพรีวิว = เปิดแก้เต็มจอ · ปุ่มเปลี่ยนรูป/ลิงก์บนแถบลอย = เปิดป๊อปอัปไปที่หน้าต่างนั้นเลย
+    onOpen: (blockId) => setCanvasEditor({ blockId }),
+    onAction: (blockId, childId, action) => {
+      onSelect({ blockId, childId });
+      setCanvasEditor({ blockId, childId, action });
+    },
+  });
+
+  /** ใส่ชิ้นใหม่ลงผืน (ป๊อปอัปเต็มจอสร้างชิ้นเอง) แล้วเลือกให้ */
+  const insertChild = (blockId: string, item: ChildBlock) => {
+    const b = blocksRef.current.find((x) => x.id === blockId);
+    const c = b && childrenOf(b);
+    if (!b || !c || c.list.length >= c.spec.max) return;
+    patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
+    setExpanded((x) => new Set(x).add(blockId));
+    onSelect({ blockId, childId: item.id });
+  };
 
   /** ctx ของฟอร์ม + รายชื่อ Section ในหน้านี้ (ช่อง "กดแล้วไปที่ → เลื่อนไปส่วนอื่นในหน้านี้") */
   const formCtx = useMemo<SchemaFormContext>(
@@ -380,6 +406,7 @@ export function WebsiteBuilder({
         const win = iframeRef.current?.contentWindow;
         // บอกพรีวิวว่าอยู่ในตัวจัดหน้า → คลิก Section = เลือก (ถ้าไม่บอก = พรีวิวธรรมดา คลิกสินค้าแล้วเปิดหน้าสินค้าได้)
         win?.postMessage({ type: "storefront-edit-mode", on: true }, "*");
+        win?.postMessage({ type: "storefront-ui-scale", scale: scaleRef.current }, "*");
         if (sel) win?.postMessage({ type: "storefront-select-block", blockId: sel.blockId, childId: sel.childId ?? null }, "*");
         else if (lastScrollY.current > 0) win?.postMessage({ type: "storefront-restore-scroll", y: lastScrollY.current }, "*");
         return;
@@ -417,6 +444,8 @@ export function WebsiteBuilder({
         return;
       }
       if (inInput(e.target) || showAi) return;
+      // ป๊อปอัปแก้ผืนเปิดอยู่ → ลูกศรไม่ใช่ "เลือก Section ก่อน/ถัดไป" (ไม่งั้นกดแล้วหลุดจากชิ้นที่แก้)
+      if (canvasEditorRef.current && e.key.startsWith("Arrow")) return;
       const sel = selectionRef.current;
       const cur = blocksRef.current;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && sel) {
@@ -621,6 +650,10 @@ export function WebsiteBuilder({
   const dev = DEVICES.find((d) => d.k === device)!;
   const scale = zoom === "fit" ? Math.min(1, (boxW - 16) / dev.w) : zoom;
   scaleRef.current = scale;
+  // พรีวิวย่ออยู่ → บอกเว็บร้านให้ขยายแถบเครื่องมือของผืนผ้าใบกลับ (ส่งซ้ำตอนพรีวิวโหลดใหม่ด้วย)
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-ui-scale", scale }, "*");
+  }, [scale, nonce, iframeRef]);
 
   /* ── แถบเครื่องมือ ── */
   const topbar = (
@@ -1030,7 +1063,7 @@ export function WebsiteBuilder({
         {propTab === "content" && (
           <div className="space-y-4">
             {selBlock.type === "canvas" && (
-              <CanvasAddBar onAdd={(k) => addChild(selBlock.id, k)} count={childrenOf(selBlock)?.list.length ?? 0} max={selSchema.children?.max ?? 60} />
+              <CanvasAddBar onOpen={(action) => setCanvasEditor({ blockId: selBlock.id, action })} count={childrenOf(selBlock)?.list.length ?? 0} max={selSchema.children?.max ?? 60} />
             )}
             <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={formCtx} />
             {selSchema.children && (
@@ -1125,6 +1158,30 @@ export function WebsiteBuilder({
           </div>
           <div className="flex-1 min-h-0">{previewFrame("100%")}</div>
         </div>
+      )}
+
+      {/* ผืนผ้าใบอิสระ: แก้แบบเต็มจอ (components/website-canvas-editor.tsx) */}
+      {canvasEditor && previewSrc && (
+        <CanvasEditor
+          key={canvasEditor.blockId}
+          target={canvasEditor}
+          onClose={() => setCanvasEditor(null)}
+          blocks={blocks}
+          blocksRef={blocksRef}
+          previewOrigin={new URL(previewSrc).origin}
+          ctx={formCtx}
+          selection={selection}
+          onSelect={onSelect}
+          patchBlock={patchBlock}
+          patchChild={patchChild}
+          insertChild={insertChild}
+          removeChild={removeChild}
+          duplicateChild={duplicateChild}
+          onUndo={toolbar?.onUndo}
+          onRedo={toolbar?.onRedo}
+          canUndo={toolbar?.canUndo}
+          canRedo={toolbar?.canRedo}
+        />
       )}
     </>
   );

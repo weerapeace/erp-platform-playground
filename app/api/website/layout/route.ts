@@ -18,6 +18,7 @@ import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, defaultLayout, blockTypesFor } from "@/lib/website-blocks";
 import { readShopBetas } from "@/lib/website-site-info";
+import { syncCanvasAssetUsages } from "@/lib/website-canvas-usage";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
@@ -89,6 +90,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   if (!publish) {
     const { error } = await sb.from("shops").update({ home_layout_draft: blocks }).eq("id", body.shopId);
     if (error) return NextResponse.json({ error: "บันทึกร่างไม่สำเร็จ" }, { status: 500 });
+    // รูป/ของตกแต่งบนผืนผ้าใบ → บันทึกว่าถูกใช้ (คลังไฟล์กันลบของที่ยังใช้อยู่)
+    await syncCanvasAssetUsages(sb, { module: "website_home", recordId: body.shopId, recordLabel: "หน้าแรกเว็บ (ร่าง)", field: "draft", blocks });
     return NextResponse.json({ ok: true, mode: "draft", blocks });
   }
 
@@ -97,6 +100,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     .update({ home_layout: blocks, home_layout_draft: null })
     .eq("id", body.shopId);
   if (error) return NextResponse.json({ error: "เผยแพร่ไม่สำเร็จ" }, { status: 500 });
+  await syncCanvasAssetUsages(sb, { module: "website_home", recordId: body.shopId, recordLabel: "หน้าแรกเว็บ", field: "live", blocks });
+  await syncCanvasAssetUsages(sb, { module: "website_home", recordId: body.shopId, recordLabel: "หน้าแรกเว็บ (ร่าง)", field: "draft", blocks: [] });
 
   // เก็บประวัติไว้ย้อนกลับได้
   const { data: last } = await sb
@@ -139,5 +144,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const { error } = await sb.from("shops").update({ home_layout_draft: null }).eq("id", shopId);
   if (error) return NextResponse.json({ error: "ละทิ้งร่างไม่สำเร็จ" }, { status: 500 });
+  await syncCanvasAssetUsages(sb, { module: "website_home", recordId: shopId, recordLabel: "หน้าแรกเว็บ (ร่าง)", field: "draft", blocks: [] });
   return NextResponse.json({ ok: true });
 }

@@ -18,6 +18,7 @@ import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, blockTypesFor } from "@/lib/website-blocks";
 import { readShopBetas } from "@/lib/website-site-info";
+import { syncCanvasAssetUsages } from "@/lib/website-canvas-usage";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
@@ -215,6 +216,12 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
   const { error } = await sb.from("store_pages").update(patch).eq("id", body.pageId);
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+  if (blocks) {
+    // รูป/ของตกแต่งบนผืนผ้าใบ → บันทึกว่าถูกใช้ (คลังไฟล์กันลบของที่ยังใช้อยู่)
+    const label = `หน้าเว็บ ${String(patch.title ?? "") || body.pageId}`;
+    await syncCanvasAssetUsages(sb, { module: "website_page", recordId: body.pageId, recordLabel: label, field: publish ? "live" : "draft", blocks });
+    if (publish) await syncCanvasAssetUsages(sb, { module: "website_page", recordId: body.pageId, recordLabel: label, field: "draft", blocks: [] });
+  }
 
   if (publish && blocks) {
     // เก็บประวัติ (ตารางมีอยู่เดิม)
