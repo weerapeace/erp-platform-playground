@@ -49,3 +49,18 @@ describe("diffExtras", () => {
     expect(d).toEqual([{ label: "ค่าแรง", a: 10, b: 15, diff: 5 }, { label: "ขนส่ง", a: null, b: 3, diff: 3 }]);
   });
 });
+
+import { summarizeCostChanges } from "../design-sheet-cost-snapshot";
+describe("summarizeCostChanges", () => {
+  it("สรุป ราคาเปลี่ยน / เพิ่ม / ตัด / ค่าใช้จ่ายเพิ่ม + ต้นทุนรวม เฉพาะ Parent ที่ขอ", () => {
+    const prev = { lines: [L({ item_name: "ผ้า", unit_price: 200, qty: 1, amount: 200 }), L({ item_id: "x", item_name: "อื่น", parent_code: "P1", amount: 999 })], extra: { "": [{ label: "ค่าแรง", amount: 10 }] } };
+    const cur = { lines: [L({ item_name: "ผ้า", unit_price: 260, qty: 1, amount: 260 }), L({ item_id: "z", item_name: "ซิป", amount: 5 })], extra: { "": [{ label: "ค่าแรง", amount: 12 }] } };
+    const s = summarizeCostChanges(prev, cur, "");
+    expect(s.total_diff).toBe(67);
+    expect(s.text).toBe("ผ้า 200→260 (+60) · เพิ่ม ซิป +5 · ค่าแรง 10→12 · ต้นทุน +67");
+  });
+  it("ไม่มีอะไรเปลี่ยน = ข้อความว่าง", () => {
+    const a = { lines: [L({})], extra: {} };
+    expect(summarizeCostChanges(a, a, "").text).toBe("");
+  });
+});

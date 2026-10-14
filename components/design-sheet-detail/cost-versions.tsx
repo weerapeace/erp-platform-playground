@@ -22,8 +22,9 @@ const fmtWhen = (d: string) => { const t = new Date(d); return Number.isNaN(t.ge
 
 type Side = { label: string; lines: SnapLine[]; extra: SnapExtra[] };
 
-export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLabel, currentLines, currentExtra, canEdit, onRestore }: {
+export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLabel, currentLines, currentExtra, canEdit, onRestore, initialA, initialB }: {
   open: boolean; onClose: () => void; sheetId: string;
+  initialA?: string | null; initialB?: string | null;   // เปิดมาพร้อมเลือกซ้าย/ขวาให้เลย (เช่น จากคอลัมน์ "อะไรเปลี่ยน" ของรอบเสนอราคา)
   parentKey: string; parentLabel: string;
   currentLines: SnapLine[]; currentExtra: SnapExtraMap;   // ที่อยู่บนหน้าจอตอนนี้ (รวมที่ยังไม่บันทึก)
   canEdit: boolean;
@@ -52,7 +53,7 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
     } catch (e) { setError(e instanceof Error ? e.message : "โหลดเวอร์ชันไม่สำเร็จ"); }
     finally { setLoading(false); }
   }, [sheetId]);
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  useEffect(() => { if (open) { if (initialA) setAId(initialA); setBId(initialB ?? "current"); void load(); } }, [open, load, initialA, initialB]);
 
   // ดึงเวอร์ชันเต็ม (lines) เมื่อถูกเลือก
   const ensureFull = useCallback(async (id: string | null) => {

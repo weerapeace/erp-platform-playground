@@ -108,3 +108,47 @@ export function diffExtras(a: SnapExtra[] | undefined, b: SnapExtra[] | undefine
     return { label, a: va, b: vb, diff: r2((vb ?? 0) - (va ?? 0)) };
   }).filter((x) => x.a || x.b);   // ตัดรายการที่ 0 ทั้งคู่
 }
+
+// ---------- สรุป "อะไรเปลี่ยน" ระหว่าง 2 เวอร์ชัน (ใช้ในตารางรอบเสนอราคา) ----------
+export type CostChangeItem = { kind: "price" | "qty" | "added" | "removed" | "extra"; name: string; from: number | null; to: number | null; diff: number };
+export type CostChangeSummary = { text: string; total_diff: number; items: CostChangeItem[] };
+const money = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${money(Math.abs(n))}`;
+
+/**
+ * เทียบต้นทุนของ Parent เดียว (parentKey) ระหว่างเวอร์ชันก่อน (prev) กับเวอร์ชันนี้ (cur)
+ * คืนข้อความสั้นอ่านง่าย เช่น "ผ้าแม่ฟ้าหลวง 200→260 (+60) · เพิ่ม ซิป +5 · ต้นทุน +94.09" (ตัดที่ maxItems รายการ แล้วต่อด้วย "+N รายการ")
+ */
+export function summarizeCostChanges(
+  prev: { lines: SnapLine[]; extra: SnapExtraMap }, cur: { lines: SnapLine[]; extra: SnapExtraMap }, parentKey: string, maxItems = 4,
+): CostChangeSummary {
+  const pl = prev.lines.filter((l) => (l.parent_code ?? "") === parentKey);
+  const cl = cur.lines.filter((l) => (l.parent_code ?? "") === parentKey);
+  const items: CostChangeItem[] = [];
+  for (const r of diffCostLines(pl, cl)) {
+    const name = (r.b ?? r.a)?.item_name ?? (r.b ?? r.a)?.group_name ?? "—";
+    if (r.status === "added") items.push({ kind: "added", name, from: null, to: r.b?.amount ?? null, diff: r.amountDiff });
+    else if (r.status === "removed") items.push({ kind: "removed", name, from: r.a?.amount ?? null, to: null, diff: r.amountDiff });
+    else if (r.status === "changed") {
+      if (r.changedFields.includes("unit_price")) items.push({ kind: "price", name, from: r.a?.unit_price ?? null, to: r.b?.unit_price ?? null, diff: r.amountDiff });
+      else items.push({ kind: "qty", name, from: r.a?.qty ?? null, to: r.b?.qty ?? null, diff: r.amountDiff });
+    }
+  }
+  for (const e of diffExtras(prev.extra[parentKey], cur.extra[parentKey])) if (Math.abs(e.diff) > 0.004) items.push({ kind: "extra", name: e.label, from: e.a, to: e.b, diff: e.diff });
+  const tp = costTotals(pl, { [parentKey]: prev.extra[parentKey] ?? [] }).totals[parentKey]?.total ?? 0;
+  const tc = costTotals(cl, { [parentKey]: cur.extra[parentKey] ?? [] }).totals[parentKey]?.total ?? 0;
+  const total_diff = Math.round((tc - tp) * 100) / 100;
+  const part = (it: CostChangeItem): string => {
+    if (it.kind === "added") return `เพิ่ม ${it.name} ${signed(it.diff)}`;
+    if (it.kind === "removed") return `ตัด ${it.name} ${signed(it.diff)}`;
+    if (it.kind === "price") return `${it.name} ${money(it.from ?? 0)}→${money(it.to ?? 0)} (${signed(it.diff)})`;
+    if (it.kind === "extra") return `${it.name} ${money(it.from ?? 0)}→${money(it.to ?? 0)}`;
+    return `${it.name} จำนวน ${money(it.from ?? 0)}→${money(it.to ?? 0)} (${signed(it.diff)})`;
+  };
+  // เรียงตามขนาดผลกระทบ (มาก→น้อย) ให้ของสำคัญขึ้นก่อน
+  const sorted = [...items].sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+  const shown = sorted.slice(0, maxItems).map(part);
+  if (sorted.length > maxItems) shown.push(`+${sorted.length - maxItems} รายการ`);
+  const text = items.length ? `${shown.join(" · ")} · ต้นทุน ${signed(total_diff)}` : (Math.abs(total_diff) > 0.004 ? `ต้นทุน ${signed(total_diff)}` : "");
+  return { text, total_diff, items: sorted };
+}

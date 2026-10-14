@@ -532,6 +532,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);   // 🕘 ป๊อปเวอร์ชันตีราคา (ข้อ C)
+  const [versionsInit, setVersionsInit] = useState<{ a: string | null; b: string | null; parent: string } | null>(null);   // เปิดจากรอบเสนอราคา: เทียบเวอร์ชันก่อน↔รอบนี้
   const [driftOpen, setDriftOpen] = useState(false);       // แถบ ⚠ ราคาวัสดุปรับ — กดขยายดูรายละเอียดรายบรรทัด
   const [changedOpen, setChangedOpen] = useState(false);   // แถบ 🔁 เปลี่ยนวัสดุ — กดขยาย
   const [parentRefs, setParentRefs] = useState<Record<string, string>>({});   // รหัส Parent SKU → id (ทำ chip เป็นลิงก์)
@@ -1036,6 +1037,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   const addQuote = async () => {
     if (!form?.id || qSaving) return;
+    // ตีราคายังไม่บันทึก → บันทึกให้ก่อน (รอบเสนอราคาจะได้ผูกกับเวอร์ชันต้นทุนที่เห็นบนจอจริง)
+    if (costDirty && !(await saveCost())) return;
     setQSaving(true);
     try {
       // ถ้าไม่กรอกราคาที่เสนอ ใช้ราคาจากตีราคาแทน
@@ -2352,7 +2355,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 <div className="text-sm text-slate-600">ต้นทุนสินค้า: <b className="text-base text-emerald-700">{fmtBaht(grandTotal)}</b> บาท
                   {costDirty && <span className="ml-2 text-[11px] text-amber-600">● มีแก้ไขที่ยังไม่บันทึก</span>}
                   {form.id && (
-                    <button type="button" onClick={() => setVersionsOpen(true)} title="เปรียบเทียบตีราคาเวอร์ชันก่อน ๆ กับปัจจุบัน"
+                    <button type="button" onClick={() => { setVersionsInit(null); setVersionsOpen(true); }} title="เปรียบเทียบตีราคาเวอร์ชันก่อน ๆ กับปัจจุบัน"
                       className="ml-2 h-7 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50">🕘 เวอร์ชัน</button>
                   )}</div>
                 {fullEdit && (
@@ -2407,15 +2410,27 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       <th className="border border-slate-200 px-2 py-1.5 w-28 text-right text-slate-400">ราคาจากตีราคา</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28 text-right bg-blue-50 text-blue-600">ราคาที่เสนอ</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-24 text-right">จำนวน (ชิ้น)</th>
+                      <th className="border border-slate-200 px-2 py-1.5 w-40 text-right bg-emerald-50 text-emerald-700" title="ราคาที่เสนอ − ราคาจากตีราคา · % ของราคาที่เสนอ · รวม = ต่อชิ้น × จำนวน · เทียบราคาที่เสนอครั้งก่อนของไซส์เดียวกัน">ส่วนต่าง (กำไร)</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28">สถานะ</th>
                       <th className="border border-slate-200 px-2 py-1.5 text-left">หมายเหตุ</th>
+                      <th className="border border-slate-200 px-2 py-1.5 text-left w-64" title="ต้นทุนเปลี่ยนอะไรจากรอบก่อน (ไซส์เดียวกัน) — ระบบสรุปจากเวอร์ชันตีราคา กดเพื่อดูเต็ม">ที่เปลี่ยนจากครั้งก่อน</th>
                       {canEdit && <th className="border border-slate-200 px-2 py-1.5 w-20"></th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {quotes.map((q) => {
+                    {quotes.map((q, qi) => {
                       const st = QUOTE_STATUS[q.status] ?? QUOTE_STATUS.pending;
                       const editing = editQid === q.id;
+                      // ส่วนต่าง = ราคาที่เสนอ − ราคาจากตีราคา (ต่อชิ้น) · % ของราคาที่เสนอ · รวมตามจำนวน · เทียบราคาที่เสนอครั้งก่อนของไซส์เดียวกัน
+                      const offered = q.offered_price ?? q.price;
+                      const margin = offered != null && q.price != null ? offered - q.price : null;
+                      const marginPct = margin != null && offered ? (margin / offered) * 100 : null;
+                      const marginTotal = margin != null && q.qty != null ? margin * q.qty : null;
+                      const prevQ = quotes.slice(0, qi).reverse().find((p) => (p.parent_code ?? "") === (q.parent_code ?? "") && (p.offered_price ?? p.price) != null);
+                      const prevOffered = prevQ ? (prevQ.offered_price ?? prevQ.price) : null;
+                      const vsPrev = prevOffered != null && offered != null ? offered - prevOffered : null;
+                      const sgn = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtBaht(Math.abs(n))}`;
+                      const cls = (n: number) => (n > 0.004 ? "text-emerald-700" : n < -0.004 ? "text-rose-600" : "text-slate-400");
                       return (
                         <tr key={q.id}>
                           <td className="border border-slate-200 px-2 py-1 text-center font-medium text-slate-600">{q.round}</td>
@@ -2443,6 +2458,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                             {editing ? <input type="number" min={1} step="any" value={editQ.qty} onChange={(e) => setEditQ({ ...editQ, qty: e.target.value })} placeholder="—" className="h-7 px-1 w-20 text-sm text-right border border-slate-200 rounded" />
                               : (q.qty != null ? Number(q.qty).toLocaleString("th-TH") : <span className="text-slate-300">—</span>)}
                           </td>
+                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums bg-emerald-50/30 leading-tight">
+                            {margin == null ? <span className="text-slate-300">—</span> : (
+                              <div title={`ราคาที่เสนอ ${fmtBaht(offered)} − ตีราคา ${fmtBaht(q.price)} = ${sgn(margin)} ต่อชิ้น${marginPct != null ? ` (${marginPct.toFixed(1)}% ของราคาที่เสนอ)` : ""}${marginTotal != null ? ` · × ${Number(q.qty).toLocaleString("th-TH")} ชิ้น = ${sgn(marginTotal)}` : ""}`}>
+                                <div className={`font-semibold ${cls(margin)}`}>{sgn(margin)}{marginPct != null && <span className="ml-1 text-[10px] font-normal opacity-80">({marginPct.toFixed(0)}%)</span>}</div>
+                                {marginTotal != null && <div className={`text-[11px] ${cls(marginTotal)}`}>รวม {sgn(marginTotal)}</div>}
+                                {vsPrev != null && <div className={`text-[10px] ${vsPrev === 0 ? "text-slate-400" : "text-slate-500"}`} title={`ราคาที่เสนอครั้งที่ ${prevQ?.round} = ${fmtBaht(prevOffered)}`}>เทียบครั้งที่ {prevQ?.round}: {vsPrev === 0 ? "เท่ากัน" : sgn(vsPrev)}</div>}
+                              </div>
+                            )}
+                          </td>
                           <td className="border border-slate-200 px-2 py-1 text-center">
                             {canEdit ? (
                               <select value={q.status} onChange={(e) => patchQuoteStatus(q, e.target.value)} className={`h-7 px-1 text-xs rounded cursor-pointer ${st.cls}`}>
@@ -2453,6 +2477,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                           <td className="border border-slate-200 px-2 py-1">
                             {editing ? <input value={editQ.note} onChange={(e) => setEditQ({ ...editQ, note: e.target.value })} className="h-7 px-1 w-full text-sm border border-slate-200 rounded" />
                               : <span className="text-slate-500">{q.note ?? ""}</span>}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-xs leading-snug">
+                            {q.changes ? (
+                              q.changes.text ? (
+                                <button type="button" onClick={() => { setVersionsInit({ a: q.changes!.prev_snapshot_id, b: q.changes!.snapshot_id, parent: q.parent_code ?? "" }); setVersionsOpen(true); }}
+                                  className={`text-left hover:underline ${q.changes.total_diff > 0 ? "text-rose-700" : q.changes.total_diff < 0 ? "text-emerald-700" : "text-slate-600"}`} title="กดดูรายละเอียดเทียบเวอร์ชันตีราคา">
+                                  {q.changes.text}
+                                </button>
+                              ) : <span className="text-slate-400">เหมือนครั้งที่ {q.changes.prev_round}</span>
+                            ) : q.cost_snapshot_id ? (
+                              <button type="button" onClick={() => { setVersionsInit({ a: q.cost_snapshot_id ?? null, b: "current", parent: q.parent_code ?? "" }); setVersionsOpen(true); }} className="text-slate-400 hover:underline" title="รอบแรกของไซส์นี้ — กดดูต้นทุนเวอร์ชันที่ใช้เสนอ เทียบกับปัจจุบัน">ครั้งแรก · ดูต้นทุนที่ใช้</button>
+                            ) : <span className="text-slate-300" title="รอบเก่าก่อนมีระบบเวอร์ชันตีราคา — ไม่มีข้อมูลให้เทียบ">—</span>}
                           </td>
                           {canEdit && (
                             <td className="border border-slate-200 px-1 py-1 text-center whitespace-nowrap">
@@ -2480,7 +2516,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* 🕘 เวอร์ชันตีราคา (ข้อ C) — เทียบเวอร์ชันที่เคยบันทึกกับปัจจุบัน / ใช้เวอร์ชันเก่ากลับมา */}
       {form?.id && (
         <CostVersionsModal open={versionsOpen} onClose={() => setVersionsOpen(false)} sheetId={form.id}
-          parentKey={costParent} parentLabel={costParent || "ทั่วไป"}
+          initialA={versionsInit?.a ?? null} initialB={versionsInit?.b ?? null}
+          parentKey={versionsInit?.parent ?? costParent} parentLabel={(versionsInit?.parent ?? costParent) || "ทั่วไป"}
           currentLines={costLines as SnapLine[]} currentExtra={costExtraMap} canEdit={canEdit}
           onRestore={(lines: SnapLine[], extra: SnapExtra[]) => {
             // ใส่บรรทัดของเวอร์ชันนั้นแทนของ Parent ที่ดูอยู่ (ยังไม่ลง DB — ต้องกด 💾 บันทึกตีราคา)
