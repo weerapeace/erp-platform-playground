@@ -635,6 +635,19 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const pv = viewProduct(theme);
   const mob = theme.product.mobile;
   const isMobileEdit = editDevice === "mobile";
+  // ขนาดรูปในกรอบ: "cover" = เต็มกรอบ (ตัดรูป) · ตัวเลข = เห็นรูปครบทั้งใบ (% ของกรอบ) · "__pc" = มือถือตามคอม
+  // ใช้ร่วม 2 ที่: ช่องในแท็บหน้าสินค้า + ⚙️ ชื่อรุ่น + รูปใหญ่
+  const imageFitValue = isMobileEdit
+    ? !mob.imageFit && !mob.imageSize ? "__pc" : (mob.imageFit ?? theme.product.imageFit) === "cover" ? "cover" : String(mob.imageSize ?? theme.product.imageSize)
+    : theme.product.imageFit === "cover" ? "cover" : String(theme.product.imageSize);
+  const setImageFitValue = (v: string) => {
+    if (isMobileEdit) {
+      if (v === "__pc") setMobile({ imageFit: null, imageSize: null });
+      else if (v === "cover") setMobile({ imageFit: "cover" });
+      else setMobile({ imageFit: "contain", imageSize: Number(v) });
+    } else if (v === "cover") setProduct({ imageFit: "cover" });
+    else setProduct({ imageFit: "contain", imageSize: Number(v) });
+  };
   const mobCount = mobileOverrideCount(mob);
 
   const dev = DEVICES.find((d) => d.k === device)!;
@@ -1444,20 +1457,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     <label className={labelCls}>ขนาดรูปในกรอบ</label>
                     <select
                       className={`${inputCls} ${isMobileEdit && (mob.imageFit || mob.imageSize) ? "border-blue-400" : ""}`}
-                      value={
-                        isMobileEdit
-                          ? !mob.imageFit && !mob.imageSize ? "__pc" : (mob.imageFit ?? theme.product.imageFit) === "cover" ? "cover" : String(mob.imageSize ?? theme.product.imageSize)
-                          : theme.product.imageFit === "cover" ? "cover" : String(theme.product.imageSize)
-                      }
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (isMobileEdit) {
-                          if (v === "__pc") setMobile({ imageFit: null, imageSize: null });
-                          else if (v === "cover") setMobile({ imageFit: "cover" });
-                          else setMobile({ imageFit: "contain", imageSize: Number(v) });
-                        } else if (v === "cover") setProduct({ imageFit: "cover" });
-                        else setProduct({ imageFit: "contain", imageSize: Number(v) });
-                      }}
+                      value={imageFitValue}
+                      onChange={(e) => setImageFitValue(e.target.value)}
                     >
                       {isMobileEdit && <option value="__pc">ตามคอม ({theme.product.imageFit === "cover" ? "เต็มกรอบ" : `${theme.product.imageSize}%`})</option>}
                       {PRODUCT_IMAGE_SIZES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -1593,6 +1594,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             fieldGroups={choices.fieldGroups}
                             imageFields={choices.imageFields ?? []}
                             onCreateImageField={() => setImgFieldCreator(true)}
+                            imageFitValue={imageFitValue}
+                            onImageFit={setImageFitValue}
+                            pcImageFitLabel={theme.product.imageFit === "cover" ? "เต็มกรอบ" : `${theme.product.imageSize}%`}
                             onGalleryPreset={() => setProduct({ galleryStyle: "editorial", imageFit: "contain", imageSize: 90, parts: { ...theme.product.parts, gallery: { ...theme.product.parts.gallery, width: "full", height: "screen", perView: 2 } } })}
                             extra={xb}
                             setExtra={xb ? (p) => setExtraBanner(xb.id, p) : undefined}
@@ -2016,6 +2020,9 @@ function PartSettings({
   imageFields = [],
   onCreateImageField,
   onGalleryPreset,
+  imageFitValue,
+  onImageFit,
+  pcImageFitLabel,
   extra = null,
   setExtra,
   previewBg,
@@ -2036,6 +2043,10 @@ function PartSettings({
   onCreateImageField?: () => void;
   /** ✨ ตั้งแกลเลอรีแบบเต็มจอในคลิกเดียว (แตะค่าระดับหน้าสินค้าด้วย จึงให้ผู้เรียกทำ) */
   onGalleryPreset?: () => void;
+  /** การแสดงรูป (ตัด/ไม่ตัด) — ค่าระดับหน้าสินค้า ผู้เรียกจัดการคอม/มือถือ */
+  imageFitValue?: string;
+  onImageFit?: (v: string) => void;
+  pcImageFitLabel?: string;
   /** แบนเนอร์เพิ่ม (part = banner:<id>) */
   extra?: ExtraBanner | null;
   setExtra?: (p: Partial<ExtraBanner>) => void;
@@ -2077,6 +2088,22 @@ function PartSettings({
           </select>
           <p className="text-[11px] text-slate-400 mt-1">{PART_CHOICES.colorModes.find((o) => o.value === g.colorMode)?.hint}</p>
         </div>
+        {onImageFit && (
+          <div>
+            <label className={lbl}>การแสดงรูป</label>
+            <select className={`${partInputCls} ${imageFitValue === "cover" ? "border-amber-400" : ""}`} value={imageFitValue} onChange={(e) => onImageFit(e.target.value)}>
+              {mobile && <option value="__pc">ตามคอม ({pcImageFitLabel})</option>}
+              {PRODUCT_IMAGE_SIZES.filter((o) => o.value !== "cover").map((o) => (
+                <option key={o.value} value={o.value}>เห็นรูปครบทั้งใบ — ไม่ตัดรูป ({o.value}% ของกรอบ)</option>
+              ))}
+              {imageFitValue && imageFitValue !== "cover" && imageFitValue !== "__pc" && !PRODUCT_IMAGE_SIZES.some((o) => o.value === imageFitValue) && (
+                <option value={imageFitValue}>เห็นรูปครบทั้งใบ ({imageFitValue}%)</option>
+              )}
+              <option value="cover">เต็มกรอบ — ตัดขอบรูปให้เต็มพื้นที่</option>
+            </select>
+            {imageFitValue === "cover" && <p className="text-[11px] text-amber-600 mt-1">⚠️ รูปจะถูกตัดบน-ล่าง/ซ้าย-ขวาให้เต็มกรอบ — เลือก “เห็นรูปครบทั้งใบ” ถ้าไม่อยากให้ตัด</p>}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={lbl}>ความกว้างแกลเลอรี</label>
