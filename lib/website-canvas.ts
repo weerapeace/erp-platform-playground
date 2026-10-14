@@ -81,7 +81,25 @@ export const CANVAS_ENTRANCES: FieldOption[] = [
   { v: "pop", l: "เด้งออกมา" },
   { v: "spin-in", l: "หมุนเข้า" },
   { v: "blur", l: "เบลอเป็นชัด" },
+  { v: "type", l: "พิมพ์ทีละตัว" },
 ];
+
+/** แบบโผล่ที่ใช้ได้กับชิ้นชนิดนี้ (พิมพ์ทีละตัว = ข้อความเท่านั้น) */
+export const canvasEntrancesFor = (kind: string): FieldOption[] => CANVAS_ENTRANCES.filter((o) => o.v !== "type" || kind === "text");
+
+/**
+ * ตอนเอาเมาส์ชี้ (เฉพาะจอที่มีเมาส์) — lift/zoom/glow ชื่อเดียวกับลูกเล่น hover ของ Section
+ * ⚠️ ค่าตรงกับ CANVAS_HOVERS ของเว็บร้าน · zoom = ซูมรูปในกรอบ (รูปเท่านั้น)
+ */
+export const CANVAS_HOVERS: FieldOption[] = [
+  { v: "", l: "ไม่มี" },
+  { v: "lift", l: "ยกตัว" },
+  { v: "grow", l: "ขยาย" },
+  { v: "zoom", l: "ซูมรูปในกรอบ" },
+  { v: "glow", l: "เรืองแสง" },
+  { v: "tilt", l: "เอียงนิด" },
+];
+export const canvasHoversFor = (kind: string): FieldOption[] => CANVAS_HOVERS.filter((o) => o.v !== "zoom" || kind === "image");
 
 /** การเคลื่อนไหว: ขยับตลอดเวลา — ⚠️ ค่าตรงกับ CSS ของกลาง [data-loop] เว็บร้าน · shine ใช้กับรูป/ปุ่ม */
 export const CANVAS_LOOPS: FieldOption[] = [

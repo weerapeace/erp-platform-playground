@@ -49,7 +49,9 @@
   - ใช้ **CSS ของกลาง `[data-motion]`** ตัวเดียวกับลูกเล่นของ Section (ERP `MOTION_ENTRANCES` ได้ pop/spin-in/blur เพิ่มด้วย) · `MotionObserver` + ตัวจับของผืนเอง (ชิ้นที่เพิ่งได้แบบโผล่) ใส่ `data-inview`
 - **ขยับตลอดเวลา** (`loop`): float · sway · pulse · spin · twinkle · bounce · wiggle · shine (รูป/ปุ่ม) + `loopSpeed` — **CSS ของกลางใหม่ `[data-loop]`** (ใส่ที่ element ไหนก็ได้) · หลายชิ้นเลื่อนจังหวะกันเอง (`loopOffset` จาก id)
 - โครง: `.cv-body` (ความทึบ) > `.cv-anim` (โผล่) > `.cv-loop` (ขยับ) — แยกชั้นกัน transform/opacity ไม่ชนกัน
-- ตัวจัดหน้า: ▶ ดูตัวอย่าง (`storefront-canvas-play`) · เลือกแบบโผล่แล้วเล่นให้ดูทันที · ระหว่างลาก loop หยุด (`data-dragging`) · "✨ โผล่ทีละชิ้น" (`canvasStagger`: บน→ล่าง หน่วงไล่ 0.15 วิ)
+- ตัวจัดหน้า: ▶ ดูตัวอย่าง (`storefront-canvas-play`) · เลือกแบบโผล่แล้วเล่นให้ดูทันที (ป๊อปปิดเองจะได้เห็น) · ระหว่างลาก loop/hover หยุด (`data-dragging`) · "✨ โผล่ทีละชิ้น" (`canvasStagger`: บน→ล่าง หน่วงไล่ 0.15 วิ)
+- **พิมพ์ทีละตัว** (`anim: "type"`, ข้อความ ≤ 400 ตัว · ยาวกว่า/ไม่ใช่ข้อความ = ค่อย ๆ ขึ้นมา): แยกตัวอักษรด้วย `Intl.Segmenter` (สระ/วรรณยุกต์ไทยไม่หลุด) เป็น `.cv-ch` + เคอร์เซอร์ · โชว์ด้วย **visibility** (opacity ใช้กับตัวหนังสือสีไล่ไม่ได้) · ความเร็ว ช้า/ปกติ/เร็ว = 90/55/30 ms ต่อตัว · หน่วงเวลาใช้ `animDelay` · ผู้อ่านหน้าจอได้ข้อความเต็มจาก `aria-label`
+- **ตอนเอาเมาส์ชี้** (`hover`, ที่ `.cv-body[data-hov]`): lift ยกตัว · grow ขยาย · zoom ซูมรูปในกรอบ (รูป · ใช้ CSS `scale` ไม่ชน transform ของครอป) · glow เรืองแสง · tilt เอียงนิด — ชื่อ lift/zoom/glow เดียวกับลูกเล่น hover ของ Section · เฉพาะ `@media (hover: hover)` · เงา/แสงเป็น drop-shadow (ตามรูปทรงจริง)
 - คนที่ตั้งเครื่อง "ลดการเคลื่อนไหว" = นิ่งทั้งหมด
 
 ## กรอบรูป / สีไล่
@@ -83,7 +85,7 @@
     x, y, w, h, rotate, opacity, hideMobile, locked,   // หน่วยบนผืนกว้าง 1200 (จอ 1200px = 1:1)
     mx, my, mw, mh, msize, malign,                      // มือถือแบบจัดเอง (ผืนกว้าง 400) · mw = 0 = ยังไม่ได้จัด
     group, bleed,                                       // กลุ่ม (รหัส) · ยืดเต็มความกว้างจอ (รูป/ของตกแต่ง)
-    anim, animDelay, animSpeed, loop, loopSpeed,        // โผล่ตอนเลื่อนมาเจอ · ขยับตลอดเวลา
+    anim, animDelay, animSpeed, loop, loopSpeed, hover, // โผล่ตอนเลื่อนมาเจอ (รวมพิมพ์ทีละตัว) · ขยับตลอดเวลา · ตอนเอาเมาส์ชี้
     grad, color2, color2Hex,                            // สีไล่ (ข้อความ/ของตกแต่ง)
     overlayKey, overlayInset,                           // กรอบจากรูปของร้าน (PNG ทับรูป)
     href, newTab,                                       // กดแล้วไปที่ (กรอง javascript: ทิ้งทั้ง ERP และเว็บร้าน)

@@ -322,3 +322,27 @@ describe("สีไล่ (ของกลาง)", () => {
     expect(sanitizeStyle({ motion: { entrance: "explode" } }).motion.entrance).toBe("none");
   });
 });
+
+/**
+ * รอบ 6: ตอนเอาเมาส์ชี้ · พิมพ์ทีละตัว
+ */
+describe("canvas รอบ 6", () => {
+  it("ชิ้นเก่า = ไม่มีเอฟเฟกต์ตอนชี้ · ค่าผิดกลับเป็นไม่มี", async () => {
+    const [b] = normalizeBlocks([{ id: "c1", type: "canvas", items: [{ id: "a", kind: "text", text: "hi" }] }]) as unknown as Record<string, unknown>[];
+    expect((b.items as Record<string, unknown>[])[0]).toMatchObject({ hover: "" });
+    const { livePatch } = await import("../../components/website-canvas-tools");
+    expect(livePatch({ hover: "lift", anim: "type" })).toEqual({ hover: "lift", anim: "type" });
+    expect(livePatch({ hover: "explode" })).toEqual({ hover: "" });
+  });
+  it("พิมพ์ทีละตัวเลือกได้เฉพาะข้อความ · ซูมรูปในกรอบเฉพาะรูป", async () => {
+    const { canvasEntrancesFor, canvasHoversFor } = await import("../website-canvas");
+    expect(canvasEntrancesFor("text").some((o) => o.v === "type")).toBe(true);
+    expect(canvasEntrancesFor("image").some((o) => o.v === "type")).toBe(false);
+    expect(canvasHoversFor("image").some((o) => o.v === "zoom")).toBe(true);
+    expect(canvasHoversFor("button").some((o) => o.v === "zoom")).toBe(false);
+  });
+  it("ลูกเล่นโผล่ของ Section ไม่มี 'พิมพ์ทีละตัว' (ใช้ได้เฉพาะชิ้นข้อความบนผืน)", async () => {
+    const { sanitizeStyle } = await import("../website-blocks");
+    expect(sanitizeStyle({ motion: { entrance: "type" } }).motion.entrance).toBe("none");
+  });
+});

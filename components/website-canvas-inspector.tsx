@@ -16,7 +16,6 @@ import { CanvasShape } from "@/components/website-canvas-shapes";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import {
   CANVAS_BUTTON_VARIANTS,
-  CANVAS_ENTRANCES,
   CANVAS_FONTS,
   CANVAS_FRAME_PRESETS,
   CANVAS_LOOPS,
@@ -24,7 +23,9 @@ import {
   CANVAS_SHAPES,
   CANVAS_SPEEDS,
   CANVAS_WEIGHTS,
+  canvasEntrancesFor,
   canvasFrameMask,
+  canvasHoversFor,
   canvasMobileBox,
   canvasStagger,
 } from "@/lib/website-canvas";
@@ -311,7 +312,7 @@ export function CanvasInspector({
           </button>
           <div className="flex gap-1.5">
             <button className={seg(false)} onClick={() => onReplay?.()}>▶ ดูตัวอย่าง</button>
-            <button className={seg(false)} disabled={!items.some((x) => x.anim || x.loop)} onClick={() => onPatchBlock({ items: items.map((x) => ({ ...x, anim: "", animDelay: 0, loop: "" })) })}>
+            <button className={seg(false)} disabled={!items.some((x) => x.anim || x.loop || x.hover)} onClick={() => onPatchBlock({ items: items.map((x) => ({ ...x, anim: "", animDelay: 0, loop: "", hover: "" })) })}>
               ล้างทั้งหมด
             </button>
           </div>
@@ -713,7 +714,7 @@ export function CanvasInspector({
         <div>
           <H>โผล่ตอนเลื่อนมาเจอ</H>
           <Chips
-            options={CANVAS_ENTRANCES}
+            options={canvasEntrancesFor(kind)}
             value={str("anim")}
             onPick={(v) => {
               onPatchItem({ anim: v });
@@ -746,6 +747,11 @@ export function CanvasInspector({
             ))}
           </div>
         )}
+        <div>
+          <H>ตอนเอาเมาส์ชี้ (คอม · ลองชี้ที่ชิ้นบนผืนได้เลย)</H>
+          <Chips options={canvasHoversFor(kind)} value={str("hover")} onPick={(v) => onPatchItem({ hover: v })} />
+        </div>
+        {str("anim") === "type" && <p className="text-[10px] text-violet-700">พิมพ์ทีละตัว: ความเร็ว = เร็ว/ปกติ/ช้า ด้านบน · ข้อความยาวเกิน 400 ตัวจะใช้ &quot;ค่อย ๆ ขึ้นมา&quot; แทน</p>}
       </div>
 
       {/* ทุกชนิด */}

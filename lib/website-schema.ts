@@ -28,6 +28,7 @@ import {
   CANVAS_ENTRANCES,
   CANVAS_FONTS,
   CANVAS_FRAMES,
+  CANVAS_HOVERS,
   CANVAS_KINDS,
   CANVAS_LOOPS,
   CANVAS_SHAPES,
@@ -283,6 +284,7 @@ function canvasItemFields(): FieldDef[] {
     f("animSpeed", "ความเร็วตอนโผล่", "select", { group: "layout", default: "normal", options: CANVAS_SPEEDS, showIf: { key: "anim", eq: CANVAS_ENTRANCES.map((o) => o.v).filter(Boolean) } }),
     f("loop", "ขยับตลอดเวลา", "select", { group: "layout", default: "", options: CANVAS_LOOPS }),
     f("loopSpeed", "ความเร็วการขยับ", "select", { group: "layout", default: "normal", options: CANVAS_SPEEDS, showIf: { key: "loop", eq: CANVAS_LOOPS.map((o) => o.v).filter(Boolean) } }),
+    f("hover", "ตอนเอาเมาส์ชี้ (คอม)", "select", { group: "layout", default: "", options: CANVAS_HOVERS, hint: "มือถือไม่มีเมาส์ จะไม่เห็นเอฟเฟกต์นี้" }),
     f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
     text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
 
