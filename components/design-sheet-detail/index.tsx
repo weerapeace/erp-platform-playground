@@ -530,6 +530,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
   const [priceAlertOff, setPriceAlertOff] = useState<Set<string>>(new Set());   // บรรทัดที่กด "ไม่เปลี่ยน" (ปิดเตือนชั่วคราว)
+  const [driftOpen, setDriftOpen] = useState(false);       // แถบ ⚠ ราคาวัสดุปรับ — กดขยายดูรายละเอียดรายบรรทัด
+  const [changedOpen, setChangedOpen] = useState(false);   // แถบ 🔁 เปลี่ยนวัสดุ — กดขยาย
   const [parentRefs, setParentRefs] = useState<Record<string, string>>({});   // รหัส Parent SKU → id (ทำ chip เป็นลิงก์)
   const [linkedSkus, setLinkedSkus] = useState<DesignSheetLinkedSku[]>([]);   // SKU ที่สร้างจากใบนี้ (+ พี่น้องใต้ Parent เดียวกัน)
   const [comments, setComments] = useState<DesignSheetComment[]>([]);
@@ -906,14 +908,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const removeParentDraft = (label: string) =>
     setForm((f) => (f ? { ...f, parent_sku_drafts: f.parent_sku_drafts.filter((d) => d !== label) } : f));
 
-  const saveCost = useCallback(async (): Promise<boolean> => {
+  const saveCost = useCallback(async (linesOverride?: CostRow[]): Promise<boolean> => {
     if (!form?.id) return false;
+    const src = linesOverride ?? costLines;
     setCostSaving(true);
     try {
       // บันทึกพร้อมกัน: บรรทัดวัสดุ (PUT cost-lines) + ค่าใช้จ่ายเพิ่ม (PATCH design-sheets)
       const [lr, er] = await Promise.all([
         apiFetch(`/api/design-sheets/${form.id}/cost-lines`, { method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lines: costLines.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }) }) }),
+          body: JSON.stringify({ lines: src.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }) }) }),
         apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
           // ส่ง cost_extra ทั้ง map (แยกตาม Parent) + ชื่อเวอร์ชัน/ร่าง Parent (แท็บที่เพิ่มจากหน้านี้จะได้ไม่หายตอนรีโหลด)
           body: JSON.stringify({ cost_extra: costExtraMap, parent_sku_drafts: form.parent_sku_drafts }) }),
@@ -1187,6 +1190,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const patch = (p: Partial<FormState>) => setForm((f) => (f ? { ...f, ...p } : f));
   // แก้ได้เต็มที่เมื่อ: มีสิทธิ์ + (กดแก้ไขอยู่ หรือเป็นงานสร้างใหม่) · ช่อง quick (สถานะ/Deadline/Note/รายละเอียด/ลิงก์) แก้ได้เสมอเมื่อมีสิทธิ์
   const fullEdit = canEdit && (editing || !form?.id);
+  // ทำรายการจากแถบสรุป (เปลี่ยนราคา / กลับของเดิม / รับทราบ) — เจ้าของขอให้กดได้โดยไม่ต้องเข้าโหมดแก้ไข
+  // โหมดแก้ไข: แก้ค้างไว้ให้กด 💾 เอง · โหมดดู: บันทึกลง DB ให้ทันที
+  const quickApply = useCallback((mutate: (rows: CostRow[]) => CostRow[]) => {
+    const next = mutate(costLines);
+    setCostLines(next);
+    if (fullEdit) setCostDirty(true); else void saveCost(next);
+  }, [costLines, fullEdit, saveCost]);
 
   // อัปโหลดรูปในรายละเอียดงาน (Tiptap) → R2 ผ่านระบบแนบไฟล์กลาง (entity=design_sheet_detail)
   const uploadDetailImage = async (file: File): Promise<string> => {
@@ -1505,48 +1515,6 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
               <div className="text-[10px] text-amber-600">⚠ ราคาเป็น {item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”</div>
             )}
-            {/* เตือนราคาปรับ (วัสดุ master / ราคาซื้อจริง / กลุ่ม) + ให้เลือกว่าจะใช้ราคาใหม่ไหม — ไม่เปลี่ยนให้เองเงียบ ๆ */}
-            {(() => {
-              if (priceAlertOff.has(r.key)) return null;
-              const d = priceDrift(r, item ?? null, inGroupMode ? (g ?? null) : null);
-              if (!d) return null;
-              const when = fmtShortDate(d.date);
-              return (
-                <div className="mt-0.5 flex flex-wrap items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800" title={d.reason}>
-                  <span>⚠ ราคาปรับ <b className="tabular-nums">{fmtBaht(r.unit_price)}</b> → <b className="tabular-nums">{fmtBaht(d.price)}</b>
-                    <span className={d.price > (r.unit_price ?? 0) ? "text-rose-700" : "text-emerald-700"}> {fmtSigned(d.price - (r.unit_price ?? 0))}/หน่วย{pct(r.unit_price, d.price)}{r.qty != null ? ` · รวม ${fmtSigned((d.price - (r.unit_price ?? 0)) * r.qty)}` : ""}</span>
-                    {when ? ` · ตั้งแต่ ${when}` : ""}</span>
-                  {fullEdit ? (
-                    <>
-                      <button type="button" onClick={() => u({ unit_price: d.price })} className="h-5 rounded bg-amber-600 px-1.5 font-medium text-white hover:bg-amber-700">ใช้ราคาใหม่</button>
-                      <button type="button" onClick={() => setPriceAlertOff((s) => new Set(s).add(r.key))} className="h-5 rounded px-1.5 text-amber-700 hover:bg-amber-100">ไม่เปลี่ยน</button>
-                    </>
-                  ) : <span className="text-amber-600/80">(กด ✏️ แก้ไข เพื่อเปลี่ยน)</span>}
-                </div>
-              );
-            })()}
-            {/* ข้อ B: เปลี่ยนวัสดุแล้ว → โชว์ของเดิม + ส่วนต่าง จนกว่าจะกด ↶ กลับของเดิม / ✓ รับทราบ (จำถาวร บันทึกลง DB) */}
-            {r.prev_item && (() => {
-              const p = r.prev_item;
-              const dUnit = r.unit_price != null && p.unit_price != null ? r.unit_price - p.unit_price : null;
-              const dLine = r.amount != null && p.amount != null ? r.amount - p.amount : null;
-              const when = fmtShortDate(p.changed_at);
-              return (
-                <div className="mt-0.5 flex flex-wrap items-center gap-1 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-900"
-                  title={`เปลี่ยนวัสดุ${when ? `เมื่อ ${when}` : ""} — เดิมฐานราคา ${p.price_basis ?? "กรอกเอง"} · ${p.uom ?? ""}`}>
-                  <span>🔁 เดิม: <b>{p.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(p.unit_price)}</span> → <b>{r.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(r.unit_price)}</span>
-                    {dUnit != null && <span className={dUnit > 0 ? "text-rose-700" : dUnit < 0 ? "text-emerald-700" : ""}> ({fmtSigned(dUnit)}/หน่วย{pct(p.unit_price, r.unit_price)}{dLine != null ? ` · รวม ${fmtSigned(dLine)}` : ""})</span>}
-                    {when ? <span className="text-sky-700/70"> · {when}</span> : null}
-                  </span>
-                  {fullEdit ? (
-                    <>
-                      <button type="button" onClick={() => u(restorePrevItem(p))} className="h-5 rounded border border-sky-300 bg-white px-1.5 text-sky-800 hover:bg-sky-100">↶ กลับของเดิม</button>
-                      <button type="button" onClick={() => u({ prev_item: null })} className="h-5 rounded bg-sky-600 px-1.5 font-medium text-white hover:bg-sky-700">✓ รับทราบ</button>
-                    </>
-                  ) : <span className="text-sky-700/70">(กด ✏️ แก้ไข เพื่อรับทราบ)</span>}
-                </div>
-              );
-            })()}
           </div>
         );
       } },
@@ -1600,7 +1568,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     { key: "note", header: "หมายเหตุ", minWidth: 120, getValue: (r) => r.note,
       render: (r, u) => <input value={r.note ?? ""} disabled={!cellEdit} title={roTip} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline, priceAlertOff]);
+  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline]);
 
   // ส่วนรูปภาพ (คอลัมน์ซ้ายของ modal — เห็นตลอดทุกแท็บ): บันทึกแล้ว=ImageManager แกลเลอรี · ยังไม่บันทึก=ที่พักรูป (อัปตอนกดบันทึก)
   const imageSection = !form ? null : form.id ? (
@@ -2151,7 +2119,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 </div>
               )}
 
-              {/* แถบสรุป A+B: บรรทัดที่ราคาวัสดุปรับ (ยังไม่กดใช้/ไม่เปลี่ยน) + บรรทัดที่เปลี่ยนวัสดุ (ยังไม่รับทราบ) — ให้กดทีเดียวทั้งหมดได้ */}
+              {/* แถบสรุป A+B (กดขยายดูรายบรรทัด): ⚠ ราคาวัสดุปรับ · 🔁 เปลี่ยนวัสดุ — ปุ่ม เปลี่ยน/ไม่เปลี่ยน/กลับของเดิม/รับทราบ กดได้เลยไม่ต้องเข้าโหมดแก้ไข (โหมดดู = บันทึกทันที) */}
               {(() => {
                 const drifted = curLines.flatMap((r) => {
                   if (priceAlertOff.has(r.key)) return [];
@@ -2164,31 +2132,96 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 if (!drifted.length && !changed.length) return null;
                 const driftTotal = drifted.reduce((s, { r, d }) => s + (d.price - (r.unit_price ?? 0)) * (r.qty ?? 0), 0);
                 const changedTotal = changed.reduce((s, r) => s + ((r.amount ?? 0) - (r.prev_item?.amount ?? 0)), 0);
+                const signCls = (n: number) => (n > 0 ? "text-rose-700" : n < 0 ? "text-emerald-700" : "");
+                const applyPrices = (m: Map<string, number>) =>
+                  quickApply((rows) => rows.map((r) => (m.has(r.key) ? recomputeRow({ ...r, unit_price: m.get(r.key) ?? r.unit_price }) : r)));
+                const offKeys = (keys: string[]) => setPriceAlertOff((prev) => { const n = new Set(prev); keys.forEach((k) => n.add(k)); return n; });
+                const ackKeys = (keys: Set<string>) => quickApply((rows) => rows.map((r) => (keys.has(r.key) ? { ...r, prev_item: null } : r)));
+                const restoreKey = (key: string, p: PrevItem) => quickApply((rows) => rows.map((r) => (r.key === key ? recomputeRow({ ...r, ...restorePrevItem(p) }) : r)));
+                const hint = !fullEdit && canEdit ? <span className="text-[10px] opacity-70">· กดแล้วบันทึกให้ทันที</span> : null;
+                const sm = "h-6 rounded px-2 text-[11px] font-medium";
                 return (
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <div className="space-y-1.5 text-xs">
                     {drifted.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-800">
-                        <span>⚠ ราคาวัสดุปรับ <b>{drifted.length}</b> บรรทัด — ถ้าใช้ราคาใหม่ ต้นทุนรวม <b className={driftTotal > 0 ? "text-rose-700" : "text-emerald-700"}>{fmtSigned(driftTotal)}</b> บาท</span>
-                        {fullEdit && (
-                          <>
-                            <button type="button" className="h-6 rounded bg-amber-600 px-2 font-medium text-white hover:bg-amber-700"
-                              onClick={() => {
-                                const m = new Map(drifted.map(({ r, d }) => [r.key, d.price]));
-                                setCostLines((prev) => prev.map((r) => (m.has(r.key) ? recomputeRow({ ...r, unit_price: m.get(r.key) ?? r.unit_price }) : r)));
-                                setCostDirty(true); toast.success(`ใช้ราคาใหม่ ${m.size} บรรทัดแล้ว`);
-                              }}>ใช้ราคาใหม่ทั้งหมด</button>
-                            <button type="button" className="h-6 rounded px-2 text-amber-700 hover:bg-amber-100"
-                              onClick={() => setPriceAlertOff((s) => { const n = new Set(s); drifted.forEach(({ r }) => n.add(r.key)); return n; })}>ไม่เปลี่ยนทั้งหมด</button>
-                          </>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800">
+                        <button type="button" onClick={() => setDriftOpen((o) => !o)} className="flex w-full flex-wrap items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-amber-100/60 rounded-lg">
+                          <span className="w-3 text-[10px]">{driftOpen ? "▼" : "▶"}</span>
+                          <span>⚠ ราคาวัสดุปรับ <b>{drifted.length}</b> บรรทัด — ถ้าใช้ราคาใหม่ ต้นทุนรวม <b className={signCls(driftTotal)}>{fmtSigned(driftTotal)}</b> บาท</span>
+                          <span className="ml-auto text-[10px] text-amber-600">{driftOpen ? "ซ่อน" : "กดดูรายละเอียด"}</span>
+                        </button>
+                        {driftOpen && (
+                          <div className="space-y-1 border-t border-amber-200 px-2.5 py-1.5">
+                            {drifted.map(({ r, d }) => {
+                              const diff = d.price - (r.unit_price ?? 0); const when = fmtShortDate(d.date);
+                              return (
+                                <div key={r.key} className="flex flex-wrap items-center gap-1.5" title={d.reason}>
+                                  <span className="min-w-0 flex-1">
+                                    <b>{r.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(r.unit_price)}</span> → <b className="tabular-nums">{fmtBaht(d.price)}</b>
+                                    <span className={signCls(diff)}> {fmtSigned(diff)}/หน่วย{pct(r.unit_price, d.price)}{r.qty != null ? ` · รวม ${fmtSigned(diff * r.qty)}` : ""}</span>
+                                    {when ? <span className="text-amber-600/80"> · ตั้งแต่ {when}</span> : null}
+                                  </span>
+                                  {canEdit && (
+                                    <>
+                                      <button type="button" onClick={() => applyPrices(new Map([[r.key, d.price]]))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>เปลี่ยน</button>
+                                      <button type="button" onClick={() => offKeys([r.key])} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยน</button>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {canEdit && (
+                              <div className="flex flex-wrap items-center gap-1.5 border-t border-amber-200/60 pt-1.5">
+                                {drifted.length > 1 && (
+                                  <>
+                                    <button type="button" onClick={() => applyPrices(new Map(drifted.map(({ r, d }) => [r.key, d.price])))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>เปลี่ยนทั้งหมด ({drifted.length})</button>
+                                    <button type="button" onClick={() => offKeys(drifted.map(({ r }) => r.key))} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยนทั้งหมด</button>
+                                  </>
+                                )}
+                                {hint}
+                                <span className="text-[10px] opacity-70">· "ไม่เปลี่ยน" = ซ่อนเตือนจนกว่าจะเปิดใบนี้ใหม่</span>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
                     {changed.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-sky-900">
-                        <span>🔁 เปลี่ยนวัสดุ <b>{changed.length}</b> บรรทัด (ยังไม่รับทราบ) — ต้นทุนต่างจากเดิม <b className={changedTotal > 0 ? "text-rose-700" : "text-emerald-700"}>{fmtSigned(changedTotal)}</b> บาท</span>
-                        {fullEdit && (
-                          <button type="button" className="h-6 rounded bg-sky-600 px-2 font-medium text-white hover:bg-sky-700"
-                            onClick={() => { setCostLines((prev) => prev.map((r) => (r.prev_item && pkey(r.parent_code) === costParent ? { ...r, prev_item: null } : r))); setCostDirty(true); }}>✓ รับทราบทั้งหมด</button>
+                      <div className="rounded-lg border border-sky-200 bg-sky-50 text-sky-900">
+                        <button type="button" onClick={() => setChangedOpen((o) => !o)} className="flex w-full flex-wrap items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-sky-100/60 rounded-lg">
+                          <span className="w-3 text-[10px]">{changedOpen ? "▼" : "▶"}</span>
+                          <span>🔁 เปลี่ยนวัสดุ <b>{changed.length}</b> บรรทัด (ยังไม่รับทราบ) — ต้นทุนต่างจากเดิม <b className={signCls(changedTotal)}>{fmtSigned(changedTotal)}</b> บาท</span>
+                          <span className="ml-auto text-[10px] text-sky-600">{changedOpen ? "ซ่อน" : "กดดูรายละเอียด"}</span>
+                        </button>
+                        {changedOpen && (
+                          <div className="space-y-1 border-t border-sky-200 px-2.5 py-1.5">
+                            {changed.map((r) => {
+                              const p = r.prev_item as PrevItem;
+                              const dUnit = r.unit_price != null && p.unit_price != null ? r.unit_price - p.unit_price : null;
+                              const dLine = r.amount != null && p.amount != null ? r.amount - p.amount : null;
+                              const when = fmtShortDate(p.changed_at);
+                              return (
+                                <div key={r.key} className="flex flex-wrap items-center gap-1.5" title={`เดิมฐานราคา ${p.price_basis ?? "กรอกเอง"} · ${p.uom ?? ""}`}>
+                                  <span className="min-w-0 flex-1">
+                                    เดิม: <b>{p.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(p.unit_price)}</span> → <b>{r.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(r.unit_price)}</span>
+                                    {dUnit != null && <span className={signCls(dUnit)}> ({fmtSigned(dUnit)}/หน่วย{pct(p.unit_price, r.unit_price)}{dLine != null ? ` · รวม ${fmtSigned(dLine)}` : ""})</span>}
+                                    {when ? <span className="text-sky-700/70"> · {when}</span> : null}
+                                  </span>
+                                  {canEdit && (
+                                    <>
+                                      <button type="button" onClick={() => restoreKey(r.key, p)} className={`${sm} border border-sky-300 bg-white text-sky-800 hover:bg-sky-100`}>↶ กลับของเดิม</button>
+                                      <button type="button" onClick={() => ackKeys(new Set([r.key]))} className={`${sm} bg-sky-600 text-white hover:bg-sky-700`}>✓ รับทราบ</button>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {canEdit && (
+                              <div className="flex flex-wrap items-center gap-1.5 border-t border-sky-200/60 pt-1.5">
+                                {changed.length > 1 && <button type="button" onClick={() => ackKeys(new Set(changed.map((r) => r.key)))} className={`${sm} bg-sky-600 text-white hover:bg-sky-700`}>✓ รับทราบทั้งหมด ({changed.length})</button>}
+                                {hint}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
