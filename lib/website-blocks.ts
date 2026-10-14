@@ -216,7 +216,9 @@ export interface ProductsBlock extends BlockBase {
   type: "products";
   eyebrow: string;
   title: string;
-  source: "manual" | "category" | "featured" | "all";
+  source: "manual" | "category" | "featured" | "new" | "best" | "sale" | "all";
+  /** เรียง: ตามแหล่ง · ราคาถูก→แพง · แพง→ถูก · ใหม่ล่าสุด */
+  sort?: "default" | "price-asc" | "price-desc" | "newest";
   /** รหัสรุ่น (parent code) ที่เลือกเอง */
   codes: string[];
   category: string;
@@ -224,6 +226,11 @@ export interface ProductsBlock extends BlockBase {
   /** รูปแบบการโชว์ (ปุ่มรูปย่อใน schema) — เว็บร้านวาดที่ src/components/home/ProductsBlock.tsx */
   layout: "grid" | "carousel" | "feature" | "mosaic" | "lookbook" | "spotlight" | "rank" | "tabs" | "banner";
   columns: number;
+  /** มือถือใช้แบบอื่น ("same" = เหมือนคอม) */
+  layoutMobile?: "same" | ProductsBlock["layout"];
+  /** เลื่อนเองอัตโนมัติ (เลื่อนข้าง/สปอตไลต์) + ทุกกี่วินาที */
+  autoplay?: boolean;
+  autoplaySec?: number;
   /** ตัวเด่น / แบนเนอร์ อยู่ด้านไหน */
   side?: "left" | "right";
   /** ลุคบุ๊ก: รูปต่อแถวบนคอม */

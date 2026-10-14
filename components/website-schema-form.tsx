@@ -40,7 +40,9 @@ const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "la
  */
 type Cell = { c: number; r: number; cs?: number; rs?: number; dim?: boolean; dark?: boolean; h?: number };
 const SKETCHES: Record<string, { cols: number; rows: number; cells: Cell[] }> = {
-  grid: { cols: 4, rows: 2, cells: [1, 2, 3, 4].flatMap((c) => [{ c, r: 1 }, { c, r: 2 }]) },
+  /** "เหมือนคอม" — จอคอม (กว้าง) กับ มือถือ (แคบ) */
+  same: { cols: 5, rows: 1, cells: [{ c: 1, r: 1, cs: 3, dim: true }, { c: 5, r: 1, h: 100 }] },
+  grid:{ cols: 4, rows: 2, cells: [1, 2, 3, 4].flatMap((c) => [{ c, r: 1 }, { c, r: 2 }]) },
   carousel: { cols: 7, rows: 1, cells: [{ c: 1, r: 1, cs: 2 }, { c: 3, r: 1, cs: 2 }, { c: 5, r: 1, cs: 2 }, { c: 7, r: 1, dim: true }] },
   feature: { cols: 4, rows: 2, cells: [{ c: 1, r: 1, cs: 2, rs: 2, dark: true }, { c: 3, r: 1 }, { c: 4, r: 1 }, { c: 3, r: 2 }, { c: 4, r: 2 }] },
   mosaic: { cols: 4, rows: 2, cells: [{ c: 1, r: 1, cs: 2, rs: 2, dark: true }, { c: 3, r: 1 }, { c: 4, r: 1 }, { c: 3, r: 2, cs: 2 }] },
