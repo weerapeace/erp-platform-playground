@@ -43,6 +43,8 @@ import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines/route";
+import { CostVersionsModal } from "./cost-versions";
+import { normalizeSnapLine, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
@@ -529,7 +531,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [modalTab, setModalTab] = useState<"info" | "comments" | "cost" | "quotes">("info");
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
-  const [priceAlertOff, setPriceAlertOff] = useState<Set<string>>(new Set());   // บรรทัดที่กด "ไม่เปลี่ยน" (ปิดเตือนชั่วคราว)
+  const [versionsOpen, setVersionsOpen] = useState(false);   // 🕘 ป๊อปเวอร์ชันตีราคา (ข้อ C)
   const [driftOpen, setDriftOpen] = useState(false);       // แถบ ⚠ ราคาวัสดุปรับ — กดขยายดูรายละเอียดรายบรรทัด
   const [changedOpen, setChangedOpen] = useState(false);   // แถบ 🔁 เปลี่ยนวัสดุ — กดขยาย
   const [parentRefs, setParentRefs] = useState<Record<string, string>>({});   // รหัส Parent SKU → id (ทำ chip เป็นลิงก์)
@@ -916,7 +918,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       // บันทึกพร้อมกัน: บรรทัดวัสดุ (PUT cost-lines) + ค่าใช้จ่ายเพิ่ม (PATCH design-sheets)
       const [lr, er] = await Promise.all([
         apiFetch(`/api/design-sheets/${form.id}/cost-lines`, { method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lines: src.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }) }) }),
+          body: JSON.stringify({ lines: src.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }), cost_extra: costExtraMap }) }),
         apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
           // ส่ง cost_extra ทั้ง map (แยกตาม Parent) + ชื่อเวอร์ชัน/ร่าง Parent (แท็บที่เพิ่มจากหน้านี้จะได้ไม่หายตอนรีโหลด)
           body: JSON.stringify({ cost_extra: costExtraMap, parent_sku_drafts: form.parent_sku_drafts }) }),
@@ -2122,11 +2124,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               {/* แถบสรุป A+B (กดขยายดูรายบรรทัด): ⚠ ราคาวัสดุปรับ · 🔁 เปลี่ยนวัสดุ — ปุ่ม เปลี่ยน/ไม่เปลี่ยน/กลับของเดิม/รับทราบ กดได้เลยไม่ต้องเข้าโหมดแก้ไข (โหมดดู = บันทึกทันที) */}
               {(() => {
                 const drifted = curLines.flatMap((r) => {
-                  if (priceAlertOff.has(r.key)) return [];
                   const g = !r.item_id && r.group_code ? priceGroups.find((x) => x.code === r.group_code) ?? null : null;
                   const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) ?? null : null;
                   const d = priceDrift(r, item, g);
-                  return d ? [{ r, d }] : [];
+                  if (!d) return [];
+                  // กด "ไม่เปลี่ยน" แล้ว (จำถาวรใน DB) — เงียบจนกว่าราคาฐานจะเปลี่ยนไปจากที่รับทราบอีกครั้ง
+                  if (r.price_ack && Math.abs(r.price_ack.price - d.price) < 0.005) return [];
+                  return [{ r, d }];
                 });
                 const changed = curLines.filter((r) => !!r.prev_item);
                 if (!drifted.length && !changed.length) return null;
@@ -2135,7 +2139,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 const signCls = (n: number) => (n > 0 ? "text-rose-700" : n < 0 ? "text-emerald-700" : "");
                 const applyPrices = (m: Map<string, number>) =>
                   quickApply((rows) => rows.map((r) => (m.has(r.key) ? recomputeRow({ ...r, unit_price: m.get(r.key) ?? r.unit_price }) : r)));
-                const offKeys = (keys: string[]) => setPriceAlertOff((prev) => { const n = new Set(prev); keys.forEach((k) => n.add(k)); return n; });
+                const offKeys = (pairs: [string, number][]) => { const m = new Map(pairs); const at = new Date().toISOString();
+                  quickApply((rows) => rows.map((r) => (m.has(r.key) ? { ...r, price_ack: { price: m.get(r.key) as number, at } } : r))); };
                 const ackKeys = (keys: Set<string>) => quickApply((rows) => rows.map((r) => (keys.has(r.key) ? { ...r, prev_item: null } : r)));
                 const restoreKey = (key: string, p: PrevItem) => quickApply((rows) => rows.map((r) => (r.key === key ? recomputeRow({ ...r, ...restorePrevItem(p) }) : r)));
                 const hint = !fullEdit && canEdit ? <span className="text-[10px] opacity-70">· กดแล้วบันทึกให้ทันที</span> : null;
@@ -2163,7 +2168,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                                   {canEdit && (
                                     <>
                                       <button type="button" onClick={() => applyPrices(new Map([[r.key, d.price]]))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>เปลี่ยน</button>
-                                      <button type="button" onClick={() => offKeys([r.key])} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยน</button>
+                                      <button type="button" onClick={() => offKeys([[r.key, d.price]])} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยน</button>
                                     </>
                                   )}
                                 </div>
@@ -2174,11 +2179,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                                 {drifted.length > 1 && (
                                   <>
                                     <button type="button" onClick={() => applyPrices(new Map(drifted.map(({ r, d }) => [r.key, d.price])))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>เปลี่ยนทั้งหมด ({drifted.length})</button>
-                                    <button type="button" onClick={() => offKeys(drifted.map(({ r }) => r.key))} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยนทั้งหมด</button>
+                                    <button type="button" onClick={() => offKeys(drifted.map(({ r, d }) => [r.key, d.price]))} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยนทั้งหมด</button>
                                   </>
                                 )}
                                 {hint}
-                                <span className="text-[10px] opacity-70">· "ไม่เปลี่ยน" = ซ่อนเตือนจนกว่าจะเปิดใบนี้ใหม่</span>
+                                <span className="text-[10px] opacity-70">· "ไม่เปลี่ยน" = จำไว้ถาวร จะเตือนอีกเมื่อราคาฐานเปลี่ยนอีกครั้ง</span>
                               </div>
                             )}
                           </div>
@@ -2345,7 +2350,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               {/* แถบยอดรวม + ปุ่ม — sticky ติดล่าง (เลื่อนตารางยาวแค่ไหนก็เห็นปุ่มเสมอ) */}
               <div className="sticky bottom-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm text-slate-600">ต้นทุนสินค้า: <b className="text-base text-emerald-700">{fmtBaht(grandTotal)}</b> บาท
-                  {costDirty && <span className="ml-2 text-[11px] text-amber-600">● มีแก้ไขที่ยังไม่บันทึก</span>}</div>
+                  {costDirty && <span className="ml-2 text-[11px] text-amber-600">● มีแก้ไขที่ยังไม่บันทึก</span>}
+                  {form.id && (
+                    <button type="button" onClick={() => setVersionsOpen(true)} title="เปรียบเทียบตีราคาเวอร์ชันก่อน ๆ กับปัจจุบัน"
+                      className="ml-2 h-7 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50">🕘 เวอร์ชัน</button>
+                  )}</div>
                 {fullEdit && (
                   <div className="flex gap-1.5">
                     <button onClick={() => void saveCost()} disabled={costSaving}
@@ -2468,6 +2477,22 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         )}
       </ERPModal>
 
+      {/* 🕘 เวอร์ชันตีราคา (ข้อ C) — เทียบเวอร์ชันที่เคยบันทึกกับปัจจุบัน / ใช้เวอร์ชันเก่ากลับมา */}
+      {form?.id && (
+        <CostVersionsModal open={versionsOpen} onClose={() => setVersionsOpen(false)} sheetId={form.id}
+          parentKey={costParent} parentLabel={costParent || "ทั่วไป"}
+          currentLines={costLines as SnapLine[]} currentExtra={costExtraMap} canEdit={canEdit}
+          onRestore={(lines: SnapLine[], extra: SnapExtra[]) => {
+            // ใส่บรรทัดของเวอร์ชันนั้นแทนของ Parent ที่ดูอยู่ (ยังไม่ลง DB — ต้องกด 💾 บันทึกตีราคา)
+            const t = Date.now();
+            const rows: CostRow[] = lines.map((l, i) => ({ ...normalizeSnapLine(l), key: `v${t}_${i}`, parent_code: costParent || null, sort_order: i + 1 } as CostRow));
+            setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...rows]);
+            setCostExtraMap((m) => ({ ...m, [costParent]: extra.map((e) => ({ label: e.label, amount: e.amount })) }));
+            setCostDirty(true); if (!editing) setEditing(true);
+            setVersionsOpen(false);
+            toast.success(`ใส่เวอร์ชันที่เลือกกลับเข้าตารางแล้ว (${rows.length} บรรทัด) — กด 💾 บันทึกตีราคา เพื่อยืนยัน`);
+          }} />
+      )}
       <ConfirmDialog open={delComment !== null} onClose={() => setDelComment(null)} onConfirm={doDeleteComment}
         title="ลบ comment" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
         message={`ลบ comment วันที่ ${delComment ? formatDate(delComment.comment_date) : ""} หรือไม่? รูปประกอบของ comment นี้จะถูกลบออกจาก R2 ด้วย`} />

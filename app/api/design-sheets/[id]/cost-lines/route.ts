@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
+import { costFingerprint, costTotals, normalizeSnapLine, type SnapExtraMap } from "@/lib/design-sheet-cost-snapshot";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,6 +30,7 @@ export type PrevItem = {
 export type CostLine = {
   id?: string; item_id: string | null; item_name: string | null; group_name: string | null;
   prev_item?: PrevItem | null;   // วัสดุเดิมก่อนเปลี่ยน (null = ไม่มี/รับทราบแล้ว)
+  price_ack?: { price: number; at: string } | null;   // กด "ไม่เปลี่ยน" แล้ว: ราคาฐาน ณ ตอนนั้น (เตือนใหม่เมื่อราคาฐานเปลี่ยนอีก)
   group_code?: string | null; price_basis?: string | null;   // ตีราคาแบบกลุ่ม: code กลุ่ม + ฐานราคา (avg/set/manual)
   item_sku_id?: string | null; item_sku_code?: string | null;   // เลือกวัตถุดิบจากคลังสินค้า (SKU) โดยตรง
   parent_code?: string | null;   // ข้อ 7: บรรทัดนี้อยู่แท็บ Parent ไหน (null = ทั่วไป)
@@ -53,7 +55,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { lines?: CostLine[] };
+  let body: { lines?: CostLine[]; cost_extra?: SnapExtraMap };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const lines = Array.isArray(body.lines) ? body.lines : [];
@@ -70,6 +72,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     qty: num(l.qty), uom: l.uom || null, unit_price: num(l.unit_price), amount: num(l.amount),
     note: l.note?.trim() || null, sort_order: i + 1,
     prev_item: l.prev_item && typeof l.prev_item === "object" ? l.prev_item : null,
+    price_ack: l.price_ack && typeof l.price_ack === "object" && Number.isFinite(Number(l.price_ack.price)) ? { price: Number(l.price_ack.price), at: String(l.price_ack.at || new Date().toISOString()) } : null,
   }));
 
   const admin = supabaseAdmin();
@@ -81,10 +84,35 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const total = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
+
+  // เวอร์ชันตีราคา: เก็บ snapshot เมื่อเนื้อหา (บรรทัด+ค่าใช้จ่ายเพิ่ม) ต่างจากเวอร์ชันล่าสุด — กดบันทึกซ้ำโดยไม่แก้ = ไม่เพิ่มเวอร์ชัน
+  // cost_extra ส่งมาจากหน้าจอ (PATCH design-sheets แยกเส้นอยู่แล้ว ตรงนี้ใช้เฉพาะทำ snapshot/ยอดรวม)
+  let snapshot: { id: string; created: boolean } | null = null;
+  try {
+    const snapLines = rows.map((r) => normalizeSnapLine(r));
+    const extra = body.cost_extra && typeof body.cost_extra === "object" ? body.cost_extra : {};
+    const fp = costFingerprint(snapLines, extra);
+    const { data: last } = await admin.from("design_sheet_cost_snapshots").select("id, fingerprint")
+      .eq("sheet_id", id).order("taken_at", { ascending: false }).limit(1).maybeSingle();
+    if (last?.fingerprint === fp) snapshot = { id: last.id as string, created: false };
+    else {
+      const { totals, grand_total } = costTotals(snapLines, extra);
+      const { data: ins } = await admin.from("design_sheet_cost_snapshots").insert({
+        sheet_id: id, taken_by: user?.id ?? null, taken_by_name: user?.email ?? null,
+        fingerprint: fp, lines: snapLines, cost_extra: extra, totals, grand_total,
+      }).select("id").single();
+      snapshot = ins ? { id: ins.id as string, created: true } : null;
+      // เก็บไม่เกิน 50 เวอร์ชัน/ใบ — ลบเก่าสุดทิ้ง
+      const { data: old } = await admin.from("design_sheet_cost_snapshots").select("id").eq("sheet_id", id)
+        .order("taken_at", { ascending: false }).range(50, 200);
+      if (old?.length) await admin.from("design_sheet_cost_snapshots").delete().in("id", old.map((o) => o.id as string));
+    }
+  } catch { snapshot = null; }   // snapshot ล้มไม่ควรทำให้บันทึกตีราคาล้ม
+
   await writeAudit(admin, {
     action: "cost_update", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { lines: rows.length, total: Math.round(total * 100) / 100 },
   });
-  return NextResponse.json({ saved: rows.length, total, error: null });
+  return NextResponse.json({ saved: rows.length, total, snapshot, error: null });
 }
