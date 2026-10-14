@@ -400,6 +400,18 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         hint: "หน่วยเดียวกับตำแหน่งชิ้น (ผืนกว้าง 1200) · ลากแถบใต้ผืนในพรีวิวก็ได้",
       }),
       image("bgImageKey", "รูปพื้นหลังผืน", { hint: "เต็มความกว้างจอ · ไม่ใส่ = ใช้สีพื้นจากแท็บรูปลักษณ์" }),
+      f("bgFit", "รูปพื้นหลัง: การวาง", "select", {
+        group: "media",
+        default: "cover",
+        options: [
+          { v: "cover", l: "เต็มผืน (ตัดส่วนที่เกิน)" },
+          { v: "contain", l: "เห็นทั้งรูป (เหลือขอบเป็นสีพื้น)" },
+        ],
+        hint: "ใช้เมื่อมีรูปพื้นหลัง · ลากกรอบเลือกส่วนที่เห็นได้ในแผงตั้งค่าของผืน",
+      }),
+      f("bgX", "รูปพื้นหลัง: ซ้าย ↔ ขวา (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, step: 1 }),
+      f("bgY", "รูปพื้นหลัง: บน ↕ ล่าง (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, step: 1 }),
+      f("bgZoom", "รูปพื้นหลัง: ซูม (%)", "range", { group: "media", default: 100, min: 100, numMax: 300, step: 5, showIf: { key: "bgFit", eq: "cover" } }),
       f("mobileMode", "มือถือ: วิธีจัด", "select", {
         group: "layout",
         default: "auto",

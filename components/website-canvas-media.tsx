@@ -5,7 +5,8 @@
  *
  * ImageChooser   : อัปโหลดจากเครื่อง (เก็บเข้าคลังไฟล์กลางให้) · เลือกจากคลังรูป (AssetPicker) · รูปสินค้าของร้าน
  * DecorLibrary   : ลายในตัว (SVG สีตามธีม) + ของร้าน (อัลบั้ม "ของตกแต่งเว็บ · <ร้าน>" ในคลังไฟล์กลาง — แยกต่อร้าน)
- *                  อัปโหลด/ลบ ผ่าน API คลังไฟล์เดิม → ลบ = ย้ายไปถังขยะ (กู้คืนได้) · ของที่ยังขึ้นเว็บอยู่ลบไม่ได้ (409)
+ *                  เพิ่ม = อัปโหลด หรือ 📁 เลือกจากคลังไฟล์ (ใส่ไฟล์เดิมเข้าอัลบั้มนี้ — ไม่ก๊อปไฟล์ ไม่ย้ายออกจากอัลบั้มเดิม)
+ *                  ✕ = เอาออกจากอัลบั้มนี้เท่านั้น (ไฟล์ยังอยู่ในคลังไฟล์ — กันไฟล์ที่ใช้ที่อื่นหายไปด้วย)
  *
  * ทั้งคู่คืนแค่ r2 key + ขนาดจริงของรูป → ตัวที่เรียกเป็นคนวางลงผืน (lib/website-canvas.ts fitImageBox)
  */
@@ -220,6 +221,8 @@ export function DecorLibrary({
   const [uploading, setUploading] = useState(0);
   const [confirmDel, setConfirmDel] = useState<Sticker | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [libOpen, setLibOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   const load = useCallback(async (aid: string) => {
     const r = await apiFetch(`/api/assets?collection_id=${encodeURIComponent(aid)}&type=image&source=all&limit=200`);
@@ -274,14 +277,39 @@ export function DecorLibrary({
     await load(albumId);
   };
 
+  /** 📁 เลือกจากคลังไฟล์ → ใส่เข้าอัลบั้มของร้าน (ไฟล์เดิม ไม่ก๊อป) · เลือกชิ้นเดียว = วางลงผืนเลย */
+  const addFromLibrary = async (assets: { id: string; r2_key?: string | null; title?: string | null }[]) => {
+    setLibOpen(false);
+    const list = assets.filter((a) => a.id && a.r2_key);
+    if (!list.length || !albumId) return;
+    setAdding(true);
+    try {
+      const r = await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "move", asset_ids: list.map((a) => a.id), collection_id: albumId }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || `เพิ่ม${noun}ไม่สำเร็จ`);
+      await load(albumId);
+      if (list.length === 1) await pickSticker({ id: list[0].id, key: String(list[0].r2_key), title: String(list[0].title ?? "") });
+      else toast.success(`เพิ่ม${noun} ${list.length} ชิ้นแล้ว — กดเลือกชิ้นที่จะวาง`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  /** ✕ = เอาออกจากอัลบั้มนี้เท่านั้น (อัลบั้มอื่น/ตัวไฟล์ในคลังยังอยู่) */
   const doDelete = async () => {
     if (!confirmDel || !albumId) return;
     setDeleting(true);
     try {
-      const r = await apiFetch(`/api/assets/${confirmDel.id}`, { method: "DELETE" });
+      const g = await apiFetch(`/api/assets/${confirmDel.id}`);
+      const gj = await g.json().catch(() => ({}));
+      if (!g.ok) throw new Error(gj?.error || "เอาออกไม่สำเร็จ");
+      const ids = ((gj?.data?.collection_ids ?? []) as string[]).filter((c) => c !== albumId);
+      const r = await apiFetch(`/api/assets/${confirmDel.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ collection_ids: ids }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "ลบไม่สำเร็จ");
-      toast.success("ย้ายไปถังขยะของคลังไฟล์แล้ว (กู้คืนได้)");
+      if (!r.ok) throw new Error(j?.error || "เอาออกไม่สำเร็จ");
+      toast.success(`เอาออกจาก${isFrame ? "กรอบของร้าน" : "ของร้าน"}แล้ว — ไฟล์ยังอยู่ในคลังไฟล์`);
       setConfirmDel(null);
       await load(albumId);
     } catch (e) {
@@ -299,13 +327,16 @@ export function DecorLibrary({
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title={isFrame ? "กรอบรูปของร้าน" : "คลังของตกแต่ง"} size="xl" defaultExpanded={false}>
+      <ERPModal open={open && !libOpen} onClose={onClose} title={isFrame ? "กรอบรูปของร้าน" : "คลังของตกแต่ง"} size="xl" defaultExpanded={false}>
         <div className="space-y-5">
           <section>
             <div className="flex items-center gap-2 mb-2">
               <p className="flex-1 text-sm font-semibold text-slate-800">
-                {isFrame ? "กรอบของร้าน" : "ของร้าน"} <span className="font-normal text-xs text-slate-400">(อัปโหลดเอง · เก็บถาวร · ใช้ได้ทุกหน้าของร้านนี้)</span>
+                {isFrame ? "กรอบของร้าน" : "ของร้าน"} <span className="font-normal text-xs text-slate-400">(อัปโหลด / เลือกจากคลังไฟล์ · เก็บถาวร · ใช้ได้ทุกหน้าของร้านนี้)</span>
               </p>
+              <button disabled={!albumId || adding} onClick={() => setLibOpen(true)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:border-blue-500 disabled:opacity-50">
+                {adding ? "กำลังเพิ่ม…" : "📁 เลือกจากคลังไฟล์"}
+              </button>
               <input ref={fileRef} type="file" accept="image/png,image/svg+xml,image/webp,image/gif,image/jpeg" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
               <button disabled={!albumId || uploading > 0} onClick={() => fileRef.current?.click()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:border-blue-500 disabled:opacity-50">
                 {uploading > 0 ? `กำลังอัปโหลด… (${uploading})` : "⬆️ อัปโหลด"}
@@ -321,7 +352,7 @@ export function DecorLibrary({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={imgUrl(s.key, 200)} alt={s.title} className="w-full h-full object-contain" loading="lazy" />
                     </button>
-                    <button title="ลบ" onClick={() => setConfirmDel(s)} className="absolute -top-1.5 -right-1.5 hidden group-hover:flex w-5 h-5 items-center justify-center rounded-full bg-white border border-slate-300 text-[11px] text-red-600 shadow-sm">
+                    <button title="เอาออก" onClick={() => setConfirmDel(s)} className="absolute -top-1.5 -right-1.5 hidden group-hover:flex w-5 h-5 items-center justify-center rounded-full bg-white border border-slate-300 text-[11px] text-red-600 shadow-sm">
                       ✕
                     </button>
                   </div>
@@ -373,10 +404,18 @@ export function DecorLibrary({
         onClose={() => setConfirmDel(null)}
         onConfirm={() => void doDelete()}
         loading={deleting}
-        variant="danger"
-        title={`ลบ${noun}นี้?`}
-        message={`"${confirmDel?.title ?? ""}" จะย้ายไปถังขยะของคลังไฟล์ (กู้คืนได้) — ถ้ายังวางอยู่บนเว็บ ระบบจะไม่ให้ลบ`}
-        confirmText="ลบ"
+        variant="default"
+        title={`เอา${noun}นี้ออก?`}
+        message={`"${confirmDel?.title ?? ""}" จะหายจากรายการนี้เท่านั้น — ไฟล์ยังอยู่ในคลังไฟล์ (ชิ้นที่วางบนเว็บแล้วไม่หาย) · ลบไฟล์ถาวรได้ที่หน้าคลังไฟล์`}
+        confirmText="เอาออก"
+      />
+      <AssetPicker
+        open={libOpen}
+        onClose={() => setLibOpen(false)}
+        multiple
+        typeFilter="image"
+        title={isFrame ? "เลือกกรอบจากคลังไฟล์" : "เลือกของตกแต่งจากคลังไฟล์"}
+        onSelect={(assets) => void addFromLibrary(assets)}
       />
     </>
   );

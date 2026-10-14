@@ -42,7 +42,10 @@ export function CanvasMiniPreview({
       style={{
         width,
         height,
-        background: bgKey ? `center / cover no-repeat url("/api/r2-image?key=${encodeURIComponent(bgKey)}&w=400")` : bgColor,
+        // รูปพื้นหลัง: ตำแหน่ง + เต็มผืน/เห็นทั้งรูป ตามที่ตั้ง (ซูมไม่โชว์ในภาพย่อ)
+        background: bgKey
+          ? `${Number.isFinite(Number(data.bgX)) ? Number(data.bgX) : 50}% ${Number.isFinite(Number(data.bgY)) ? Number(data.bgY) : 50}% / ${data.bgFit === "contain" ? "contain" : "cover"} no-repeat url("/api/r2-image?key=${encodeURIComponent(bgKey)}&w=400") ${bgColor}`
+          : bgColor,
       }}
       aria-hidden
     >

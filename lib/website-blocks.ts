@@ -454,6 +454,13 @@ export interface CanvasBlock extends BlockBase {
   type: "canvas";
   height: number;
   bgImageKey: string | null;
+  /** รูปพื้นหลัง: cover = เต็มผืน (ตัดส่วนเกิน) · contain = เห็นทั้งรูป */
+  bgFit: "cover" | "contain";
+  /** ตำแหน่งรูปพื้นหลัง 0–100% (จุดนี้ของรูปอยู่ในจอเสมอ) */
+  bgX: number;
+  bgY: number;
+  /** ซูมรูปพื้นหลัง 100–300% (เฉพาะ cover) */
+  bgZoom: number;
   mobileAlign: "center" | "left";
   items: CanvasItem[];
 }

@@ -22,6 +22,7 @@ import { useCanvasBridge, reorderLayer, reorderLayerMany, duplicateItems, newGro
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { SECTION_SCHEMAS, blankChild, newChildId } from "@/lib/website-schema";
 import {
+  CANVAS_BG_DEFAULT,
   CANVAS_BUTTON_PRESETS,
   CANVAS_TEXT_PRESETS,
   CANVAS_WIDTH,
@@ -274,7 +275,7 @@ export function CanvasEditor({
   const applyTemplate = (data: Record<string, unknown>) => {
     const spec = SECTION_SCHEMAS.canvas.children!;
     const inst = instantiateCanvasTemplate(data, (raw) => blankChild({ ...spec, blank: () => raw }));
-    patchBlock(blockId, { mobileMode: "auto", bgImageKey: null, ...inst });
+    patchBlock(blockId, { mobileMode: "auto", bgImageKey: null, ...CANVAS_BG_DEFAULT, ...inst });
     selectMany([]);
   };
 
@@ -314,7 +315,8 @@ export function CanvasEditor({
 
   const onPicked = (img: PickedImage) => {
     if (!chooser) return;
-    if (chooser.mode === "bg") patchBlock(blockId, { bgImageKey: img.key });
+    // รูปพื้นหลังใหม่ = เริ่มที่กลางรูป ไม่ซูม (ตำแหน่งเดิมเป็นของรูปเก่า)
+    if (chooser.mode === "bg") patchBlock(blockId, { bgImageKey: img.key, ...CANVAS_BG_DEFAULT });
     else if (chooser.mode === "replace" && chooser.childId) {
       const it = items.find((x) => x.id === chooser.childId);
       const w = Number(it?.w) || 300;

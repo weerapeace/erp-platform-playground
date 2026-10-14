@@ -62,6 +62,14 @@
   - พื้นหลังทุก Section: `style.bg = "gradient"` + `style.bgGrad` (แผง "รูปลักษณ์" → พื้นหลังบล็อก → ไล่สี · `GradientPicker`)
   - ข้อความ/ของตกแต่งบนผืน: `grad` + `color` (สีเริ่ม) + `color2` (สีปลาย) — ข้อความใช้ background-clip:text · ของตกแต่งใช้ SVG gradient
 
+## รูปพื้นหลังผืน (ตำแหน่ง / ซูม / เห็นทั้งรูป)
+
+- แผงตั้งค่าทั้งผืน → "รูปพื้นหลังผืน" → `CanvasBgPositioner` (`components/website-canvas-bg-position.tsx`)
+  - **เต็มผืน** (`bgFit: cover`): รูปเต็ม + กรอบขาว = ส่วนที่เห็นบนจอคอม (อ้างอิงจอกว้าง 1440 · เส้นประ = มือถือแบบจัดเอง) → ลากกรอบ/คลิกตรงไหนของรูป = ย้ายส่วนที่เห็น · ซูม 100–300%
+  - **เห็นทั้งรูป** (`contain`): รูปไม่ถูกตัด ที่ว่างเป็นสีพื้นผืน · เลื่อนชิดซ้าย/ขวา/บน/ล่างด้วยแถบเลื่อน
+- เก็บ `bgX`/`bgY` (0–100%) + `bgZoom` — สูตรเดียวกันทั้งสองฝั่ง: `object-position: x% y%` + `scale(zoom)` รอบจุดเดียวกัน (`canvasBgWindow` ใน lib/website-canvas.ts คำนวณกรอบ "ส่วนที่เห็น" ให้แผง)
+- เว็บร้านวาดเป็นชั้นรูป `.cv-bg` (LoadImg + กรอบรอรูป `sf-ph-nologo`) ใต้ผืน แทน background-image เดิม · เปลี่ยนรูป/ใช้แม่แบบ = กลับกลางรูป (`CANVAS_BG_DEFAULT`)
+
 ## แม่แบบ (📐)
 
 - บันทึกทั้งผืน (ชิ้น · ตำแหน่งคอม/มือถือ · ความสูง · พื้นหลัง · สี) ลงตาราง **`website_canvas_templates`** → ใช้กับผืนอื่น หน้าอื่น หรือร้านอื่น
@@ -77,6 +85,9 @@
   id, type: "canvas", enabled, visibility, style,   // style.bg = สีพื้นผืน (เต็มความกว้างจอ)
   height: 560,              // ความสูงผืน (หน่วย)
   bgImageKey: null,         // รูปพื้นหลังผืน (r2 key)
+  bgFit: "cover",           // รูปพื้นหลัง: cover (เต็มผืน ตัดส่วนเกิน) | contain (เห็นทั้งรูป)
+  bgX: 50, bgY: 50,         // ส่วนที่เห็น 0–100% (object-position)
+  bgZoom: 100,              // ซูม 100–300% (เฉพาะ cover)
   mobileAlign: "center",    // มือถือแบบเรียงอัตโนมัติ: center | left
   mobileMode: "auto",       // มือถือ: auto (เรียงให้) | custom (จัดเอง)
   mobileHeight: 800,        // ความสูงผืนมือถือแบบจัดเอง (หน่วยผืนมือถือ 400)
@@ -103,7 +114,8 @@
 
 - ลายในตัว 13 แบบ (SVG สีตามธีม) + **ของร้าน** = อัลบั้ม "ของตกแต่งเว็บ · <ชื่อร้าน>" ใน**คลังไฟล์กลาง** (`asset_collections`)
 - id อัลบั้มจำไว้ที่ `store_settings.canvas_decor_album` ของร้าน · สร้างอัตโนมัติครั้งแรกที่เปิดคลัง (POST `/api/website/canvas-decor`)
-- อัปโหลด/ลบ ใช้ API คลังไฟล์เดิม (กันไฟล์ซ้ำ · ลบ = ถังขยะกู้คืนได้ · audit log)
+- เพิ่ม = ⬆️ อัปโหลด หรือ **📁 เลือกจากคลังไฟล์** (AssetPicker หลายรูป → `/api/assets/bulk` action `move` = ใส่ไฟล์เดิมเข้าอัลบั้มนี้ ไม่ก๊อป ไม่หลุดจากอัลบั้มเดิม · เลือกรูปเดียว = วางลงผืนทันที)
+- ✕ = **เอาออกจากอัลบั้มนี้เท่านั้น** (PATCH `collection_ids` ตัดอัลบั้มนี้ออก) — ไฟล์ยังอยู่ในคลังไฟล์/อัลบั้มอื่น · ลบไฟล์ถาวรทำที่หน้าคลังไฟล์ (กันรูปที่ใช้ที่อื่นหายไปด้วย)
 - **รูปที่วางบนผืนถูกบันทึกเป็น "ถูกใช้"** (`asset_usages` module `website_home`/`website_page` field `draft`/`live`) ทุกครั้งที่บันทึกร่าง/เผยแพร่ → คลังไฟล์ไม่ให้ลบของที่ยังอยู่บนเว็บ (409)
 
 ## ไฟล์
@@ -115,7 +127,8 @@
 | ERP | `components/website-canvas-tools.tsx` | คุยสดกับพรีวิว (`useCanvasBridge` — ฟังเฉพาะ iframe ของตัวเอง · `livePatch` กรองค่าด้วย schema) · แผงเปิดแก้เต็มจอ · จัดชั้น |
 | ERP | `components/website-canvas-editor.tsx` | ป๊อปอัปแก้เต็มจอ (ERPModal) |
 | ERP | `components/website-canvas-inspector.tsx` | แผงตั้งค่าแบบภาพ |
-| ERP | `components/website-canvas-media.tsx` | หน้าต่างเพิ่มรูป 3 ทาง + คลังของตกแต่ง |
+| ERP | `components/website-canvas-media.tsx` | หน้าต่างเพิ่มรูป 3 ทาง + คลังของตกแต่ง (อัปโหลด / เลือกจากคลังไฟล์) |
+| ERP | `components/website-canvas-bg-position.tsx` | ตั้งส่วนที่เห็นของรูปพื้นหลังผืน (ลากกรอบ · ซูม · เต็มผืน/เห็นทั้งรูป) |
 | ERP | `components/website-canvas-shapes.tsx` | ⚠️ สำเนาลาย SVG จากเว็บร้าน (ไว้โชว์ตัวอย่างในคลัง) — แก้ลายที่เว็บร้านแล้วคัดลอกมาด้วย |
 | ERP | `app/api/website/canvas-decor/route.ts` · `lib/website-canvas-usage.ts` | อัลบั้มของตกแต่งต่อร้าน · บันทึก "ถูกใช้ที่ไหน" |
 | ERP | `components/website-canvas-templates.tsx` · `app/api/website/canvas-templates/route.ts` | หน้าต่างแม่แบบ + API (GET/POST/PATCH/DELETE) · migration `supabase/migrations/202610142300_website_canvas_templates.sql` |

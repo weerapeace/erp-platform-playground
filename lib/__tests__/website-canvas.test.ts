@@ -346,3 +346,52 @@ describe("canvas รอบ 6", () => {
     expect(sanitizeStyle({ motion: { entrance: "type" } }).motion.entrance).toBe("none");
   });
 });
+
+describe("รูปพื้นหลังผืน: ตำแหน่ง/ซูม", () => {
+  it("เต็มผืน: รูปกว้างกว่าจอ → เห็นเต็มสูง ตัดซ้าย-ขวา · ตำแหน่ง 0/50/100 = ชิดซ้าย/กลาง/ชิดขวา", async () => {
+    const { canvasBgWindow } = await import("../website-canvas");
+    const img = { w: 2000, h: 1000 }; // 2:1
+    const box = { w: 1000, h: 1000 }; // 1:1 → เห็นครึ่งความกว้าง
+    expect(canvasBgWindow(img, box, { x: 50, y: 50, zoom: 100 })).toEqual({ x: 0.25, y: 0, w: 0.5, h: 1 });
+    expect(canvasBgWindow(img, box, { x: 0, y: 50, zoom: 100 }).x).toBe(0);
+    expect(canvasBgWindow(img, box, { x: 100, y: 50, zoom: 100 }).x).toBe(0.5);
+  });
+
+  it("รูปแนวตั้งบนจอกว้าง → ตัดบน-ล่าง · ตำแหน่งบน 0 = เห็นหัวรูป", async () => {
+    const { canvasBgWindow } = await import("../website-canvas");
+    const w = canvasBgWindow({ w: 1000, h: 1500 }, { w: 1440, h: 560 }, { x: 50, y: 0, zoom: 100 });
+    expect(w.w).toBe(1);
+    expect(w.y).toBe(0);
+    expect(w.h).toBeCloseTo((1000 / 1500) / (1440 / 560), 6);
+  });
+
+  it("ซูม 200% = เห็นครึ่งหนึ่งของเดิมทั้งสองแกน รอบจุดเดิม", async () => {
+    const { canvasBgWindow } = await import("../website-canvas");
+    const w = canvasBgWindow({ w: 1000, h: 1000 }, { w: 1000, h: 1000 }, { x: 50, y: 50, zoom: 200 });
+    expect(w).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
+  });
+
+  it("ลากกรอบ → bgX/bgY · แกนที่เห็นครบอยู่แล้วคงค่าเดิม · ลากเลยขอบ = ชิดขอบ", async () => {
+    const { canvasBgPosFromWindow } = await import("../website-canvas");
+    const win = { w: 0.5, h: 1 };
+    expect(canvasBgPosFromWindow(win, 0.25, 0, { x: 10, y: 30 })).toEqual({ x: 50, y: 30 });
+    expect(canvasBgPosFromWindow(win, -0.3, 0, { x: 10, y: 30 }).x).toBe(0);
+    expect(canvasBgPosFromWindow(win, 0.9, 0, { x: 10, y: 30 }).x).toBe(100);
+  });
+
+  it("บันทึกผืน: เก็บ bgFit/bgX/bgY/bgZoom (ค่าเกินช่วงถูกตัด) · ข้อมูลเก่าไม่มีช่อง = เต็มผืน กลางรูป ไม่ซูม", () => {
+    const [b] = normalizeBlocks([{ type: "canvas", bgImageKey: "x/bg.jpg", bgFit: "contain", bgX: 130, bgY: 20, bgZoom: 50, items: [] }]) as unknown as Record<string, unknown>[];
+    expect(b.bgFit).toBe("contain");
+    expect(b.bgX).toBe(100);
+    expect(b.bgY).toBe(20);
+    expect(b.bgZoom).toBe(100);
+    const [old] = normalizeBlocks([{ type: "canvas", bgImageKey: "x/bg.jpg", items: [] }]) as unknown as Record<string, unknown>[];
+    expect([old.bgFit, old.bgX, old.bgY, old.bgZoom]).toEqual(["cover", 50, 50, 100]);
+  });
+
+  it("แม่แบบผืนจำตำแหน่งรูปพื้นหลังด้วย", async () => {
+    const { canvasTemplateData } = await import("../website-canvas");
+    const d = canvasTemplateData({ height: 600, bgImageKey: "x/bg.jpg", bgX: 30, bgY: 10, bgZoom: 140, bgFit: "cover", items: [] });
+    expect([d.bgX, d.bgY, d.bgZoom, d.bgFit]).toEqual([30, 10, 140, "cover"]);
+  });
+});

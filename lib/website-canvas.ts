@@ -315,10 +315,45 @@ export function canvasMobileBox(it: Record<string, unknown>): { mx: number; my: 
   return { mx: Math.round(n("x") * k), my: Math.round(n("y") * k), mw: Math.max(4, Math.round((n("w") || 400) * k)), mh: Math.max(4, Math.round((n("h") || 80) * k)), msize: Math.max(10, Math.round(size * k)) };
 }
 
+/* ─────────── รูปพื้นหลังผืน: ตำแหน่ง / ซูม ─────────── */
+
+/** ค่าตั้งต้นรูปพื้นหลัง (เต็มผืน · กลางรูป · ไม่ซูม) — ใส่ตอนเปลี่ยนรูป/ใช้แม่แบบ */
+export const CANVAS_BG_DEFAULT = { bgFit: "cover", bgX: 50, bgY: 50, bgZoom: 100 } as const;
+
+/** ความกว้างจอคอมที่ใช้คำนวณกรอบ "ส่วนที่เห็น" ในแผงตั้งค่า (ผืนเต็มความกว้างจอ — จอกว้างกว่านี้จะเห็นแนวนอนมากขึ้นอีกนิด) */
+export const CANVAS_BG_REF_WIDTH = 1440;
+
+const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+
+/**
+ * ส่วนของรูปที่เห็นบนเว็บ (สัดส่วน 0–1 ของรูป) เมื่อวางแบบเต็มผืน — ⚠️ สูตรเดียวกับเว็บร้าน
+ * (object-fit: cover + object-position: x% y% + scale(zoom) รอบจุด x% y%)
+ * @param img ขนาดรูปจริง · @param box ขนาดกล่องที่แสดง (px หรือสัดส่วนก็ได้)
+ */
+export function canvasBgWindow(img: { w: number; h: number }, box: { w: number; h: number }, pos: { x: number; y: number; zoom: number }) {
+  const ia = Math.max(1e-6, img.w) / Math.max(1e-6, img.h);
+  const ba = Math.max(1e-6, box.w) / Math.max(1e-6, box.h);
+  const z = Math.max(1, (Number(pos.zoom) || 100) / 100);
+  // เต็มผืน: รูปกว้างกว่ากล่อง → เห็นเต็มสูง ตัดซ้าย-ขวา · แคบกว่า → เห็นเต็มกว้าง ตัดบน-ล่าง
+  const w = clamp01((ia > ba ? ba / ia : 1) / z);
+  const h = clamp01((ia > ba ? 1 : ia / ba) / z);
+  return { x: (clamp01(pos.x / 100) * (1 - w)), y: (clamp01(pos.y / 100) * (1 - h)), w, h };
+}
+
+/** ลากกรอบ "ส่วนที่เห็น" ไปมุมซ้ายบนที่ (left, top) [สัดส่วนของรูป] → ค่า bgX/bgY (%) · แกนที่เห็นครบอยู่แล้ว = คงค่าเดิม */
+export function canvasBgPosFromWindow(win: { w: number; h: number }, left: number, top: number, prev: { x: number; y: number }): { x: number; y: number } {
+  const ax = 1 - win.w;
+  const ay = 1 - win.h;
+  return {
+    x: ax > 1e-4 ? Math.round(clamp01(left / ax) * 100) : prev.x,
+    y: ay > 1e-4 ? Math.round(clamp01(top / ay) * 100) : prev.y,
+  };
+}
+
 /* ─────────── แม่แบบผืน ─────────── */
 
 /** ช่องของผืนที่เก็บในแม่แบบ (ไม่รวม id/type/enabled/visibility ของ Section) */
-export const CANVAS_TEMPLATE_KEYS = ["height", "bgImageKey", "mobileAlign", "mobileMode", "mobileHeight", "style", "items"] as const;
+export const CANVAS_TEMPLATE_KEYS = ["height", "bgImageKey", "bgFit", "bgX", "bgY", "bgZoom", "mobileAlign", "mobileMode", "mobileHeight", "style", "items"] as const;
 
 /** เนื้อผืนสำหรับบันทึกเป็นแม่แบบ */
 export function canvasTemplateData(block: Record<string, unknown>): Record<string, unknown> {
