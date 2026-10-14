@@ -23,6 +23,8 @@ import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeBanners } from "@/lib/website-banners";
 import { normalizeCardColors, isEmptyCardColors } from "@/lib/website-card-colors";
 import { normalizeHero } from "@/lib/website-hero";
+import { productPageUrl } from "@/lib/website-links";
+import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
 import {
   normalizeFieldMap,
@@ -67,12 +69,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parentId" }, { status: 400 });
 
   const sb = supabaseAdmin();
-  const [{ data: parent }, { data: listings }, { data: shops }, { data: children }, parentFields] = await Promise.all([
+  const [{ data: parent }, { data: listings }, { data: shops }, { data: children }, parentFields, siteUrls] = await Promise.all([
     sb.from("parent_skus_v2").select(PARENT_SELECT).eq("id", parentId).maybeSingle(),
     sb.from("store_listings").select("*").eq("parent_sku_id", parentId),
     sb.from("shops").select("id, name, slug, is_default, theme, theme_draft, field_map").order("is_default", { ascending: false }),
     sb.from("skus_v2").select("id, code, color, list_price, cover_image_r2_key").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
     loadParentWebFields(sb),
+    loadShopSiteUrls(sb),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
 
@@ -190,7 +193,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webHero: normalizeHero(l?.web_hero),
       detailItems,
       soldQty: soldByShop.get(s.id) ?? 0,
-      productUrl: productUrlFor(code, s.slug, s.is_default),
+      // 🌐 โดเมนจริงของร้าน (shop_domains) · ยังไม่ตั้งโดเมน = ลิงก์แบบเดิม
+      productUrl: productPageUrl(siteUrls.get(s.id) ?? null, code) ?? productUrlFor(code, s.slug, s.is_default),
     };
   });
 

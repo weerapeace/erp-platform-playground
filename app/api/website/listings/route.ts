@@ -27,7 +27,12 @@ import {
   CHILD_SELECT,
   type ParentRow as MapParentRow,
   type ChildSku,
+  type ListingRow,
 } from "@/lib/website-field-map";
+import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
+import { normalizeHero } from "@/lib/website-hero";
+import { productPageUrl } from "@/lib/website-links";
+import { loadShopSiteUrls } from "@/lib/website-site-url";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -119,6 +124,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const mapParentById = new Map<string, MapParentRow>();
   const kidsByParent = new Map<string, ChildSku[]>();
   const catName = new Map<string, string>();
+  // 🎨 ทะเบียนสีกลาง (จุดสีของแต่ละตัวเลือก — ตัวเดียวกับเว็บจริง) + 🌐 โดเมนร้าน (ลิงก์ดูหน้าเว็บ)
+  const [{ data: swatchRows }, siteUrls] = await Promise.all([
+    sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
+    loadShopSiteUrls(sb, [shop.id]),
+  ]);
+  const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
+  const siteUrl = siteUrls.get(shop.id) ?? null;
+  const thumb = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}&w=96`;
 
   if (parentIds.length) {
     const [{ data: parents }, { data: mapParents }, { data: children }] = await Promise.all([
@@ -147,10 +160,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const p = parentById.get(l.parent_sku_id as string);
     const mp = mapParentById.get(l.parent_sku_id as string);
     // ค่าที่เว็บจะใช้จริงถ้าไม่กรอกทับ (เอาไปโชว์เป็น placeholder ในหน้าจัดการ)
-    const mapped = mp
-      ? resolveProduct(fieldMap, mp, kidsByParent.get(mp.id) ?? [], null, mp.category_id ? catName.get(mp.category_id) ?? null : null)
+    const kids = mp ? kidsByParent.get(mp.id) ?? [] : [];
+    const catLabel = mp?.category_id ? catName.get(mp.category_id) ?? null : null;
+    const mapped = mp ? resolveProduct(fieldMap, mp, kids, null, catLabel) : null;
+    // 👁 ค่าที่ "ลูกค้าเห็นจริง" (รวมที่กรอกทับแล้ว) — ชื่อ/ราคา/รูป/สี โชว์ในรายการ + ตรวจข้อมูลไม่ครบ
+    const eff = mp ? resolveProduct(fieldMap, mp, kids, l as ListingRow, catLabel) : null;
+    const display = eff
+      ? {
+          name: eff.name,
+          price: eff.price,
+          priceVaries:
+            !(l.web_price != null && Number(l.web_price) > 0) &&
+            (fieldMap.price.source === "sku_min" || fieldMap.price.source === "sku_max") &&
+            new Set(kids.map((k) => Number(k.list_price)).filter((n) => n > 0)).size > 1,
+          imageKey: eff.images[0] ?? null,
+          imageCount: eff.images.length,
+          colors: (eff.options?.items ?? []).map((it) => {
+            const spec = it.swatch ? null : swatches.resolve(it.label);
+            return { label: it.label, swatch: it.swatch || (spec ? swatchCss(spec, thumb) : null), hasImage: !!(it.image || it.images?.length) };
+          }),
+          hero: !!normalizeHero(l.web_hero),
+          productUrl: productPageUrl(siteUrl, p?.code ?? ""),
+        }
       : null;
     return {
+      display,
       mapped,
       id: l.id as string,
       parentId: l.parent_sku_id as string,
@@ -203,7 +237,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({
     shops: shops.map((s) => ({ id: s.id, name: s.name, slug: s.slug, isDefault: s.is_default })),
-    shop: { id: shop.id, name: shop.name, slug: shop.slug, isDefault: shop.is_default },
+    shop: { id: shop.id, name: shop.name, slug: shop.slug, isDefault: shop.is_default, siteUrl },
     listings,
     results,
     /** หมวดของร้านนี้ (ตั้งเองได้ในแท็บจับคู่ฟิลด์) — ช่อง "หมวดบนเว็บ" ใช้รายการนี้ */
@@ -236,7 +270,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string };
+  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string; parentIds?: unknown; order?: unknown };
   try {
     b = await request.json();
   } catch {
@@ -245,6 +279,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const sb = supabaseAdmin();
   const actor = { actorId: user?.id ?? null, actorName: user?.email ?? null };
+  const idList = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && !!x))].slice(0, 500) : []);
+
+  // ☑️ ทำหลายรายการพร้อมกัน (หน้า "สินค้าบนเว็บ" → แถบล่าง) — parentIds + patch { isPublished?, featured? } เท่านั้น
+  if (b.action === "bulk") {
+    const ids = idList(b.parentIds);
+    const p = b.patch ?? {};
+    const upd: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (typeof p.isPublished === "boolean") upd.is_published = p.isPublished;
+    if (typeof p.featured === "boolean") upd.featured = p.featured;
+    if (!b.shopId || !ids.length || Object.keys(upd).length < 2) return NextResponse.json({ error: "ต้องระบุ shopId + parentIds + สิ่งที่จะเปลี่ยน" }, { status: 400 });
+    const { error } = await sb.from("store_listings").update(upd).eq("shop_id", b.shopId).in("parent_sku_id", ids);
+    if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+    await writeAudit(sb, { action: "bulk_update", entityType: "store_listing", entityId: b.shopId, ...actor, metadata: { count: ids.length, parentIds: ids, patch: { isPublished: p.isPublished, featured: p.featured } } });
+    return NextResponse.json({ ok: true, count: ids.length });
+  }
+
+  // ⠿ เรียงลำดับบนเว็บ — order = parentId ทั้งร้านตามลำดับใหม่ → sort_order = ตำแหน่ง (เขียนเฉพาะตัวที่เปลี่ยน)
+  if (b.action === "reorder") {
+    const order = idList(b.order);
+    if (!b.shopId || !order.length) return NextResponse.json({ error: "ต้องระบุ shopId + order" }, { status: 400 });
+    const { data: cur } = await sb.from("store_listings").select("parent_sku_id, sort_order").eq("shop_id", b.shopId).in("parent_sku_id", order);
+    const now = new Map(((cur ?? []) as { parent_sku_id: string; sort_order: number | null }[]).map((r) => [r.parent_sku_id, Number(r.sort_order) || 0]));
+    const jobs = order.map((id, i) => ({ id, i })).filter(({ id, i }) => now.has(id) && now.get(id) !== i);
+    const results = await Promise.all(
+      jobs.map(({ id, i }) => sb.from("store_listings").update({ sort_order: i, updated_at: new Date().toISOString() }).eq("shop_id", b.shopId!).eq("parent_sku_id", id))
+    );
+    if (results.some((r) => r.error)) return NextResponse.json({ error: "เรียงลำดับไม่สำเร็จบางรายการ" }, { status: 500 });
+    await writeAudit(sb, { action: "update", entityType: "store_listing", entityId: b.shopId, ...actor, metadata: { kind: "reorder", changed: jobs.length } });
+    return NextResponse.json({ ok: true, changed: jobs.length });
+  }
 
   // 📂 จัดสินค้าลงหมวดทีละหลายรุ่น (แท็บหมวดหมู่) — items: [{ parentId, categories }] ชุดหมวดใหม่ทั้งชุดของแต่ละรุ่น
   if (b.action === "setCategories") {

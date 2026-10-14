@@ -8,6 +8,15 @@ export const productSlug = (code: string): string =>
   code.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || code;
 
 export const productHref = (code: string) => `/product/${productSlug(code)}`;
+
+/** โดเมนร้าน (shop_domains.domain) → https://… · ว่าง = null */
+export const siteUrlFromDomain = (domain: string | null | undefined): string | null => {
+  const d = (domain ?? "").trim().replace(/\/+$/, "");
+  return d ? (/^https?:\/\//.test(d) ? d : `https://${d}`) : null;
+};
+/** ลิงก์เต็มหน้าสินค้าบนเว็บร้าน (ร้านยังไม่มีโดเมน = null) */
+export const productPageUrl = (siteUrl: string | null, code: string): string | null =>
+  siteUrl && code ? `${siteUrl}${productHref(code)}` : null;
 export const categoryHref = (key: string) => `/shop?cat=${encodeURIComponent(key)}`;
 /** เลื่อนไปยัง Section ในหน้าเดียวกัน (เว็บร้านใส่ id="s-<blockId>" ให้ทุก Section) */
 export const sectionHref = (blockId: string) => `#s-${blockId}`;
