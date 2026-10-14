@@ -34,12 +34,8 @@ const InlineCentralCategoryPicker = dynamic(
   () => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker),
   { ssr: false },
 );
-const ParentFitPicker = dynamic(
-  () => import("@/components/parent-fit-picker").then((m) => m.ParentFitPicker),
-  { ssr: false },
-);
-const ParentFitView = dynamic(
-  () => import("@/components/parent-fit-picker").then((m) => m.ParentFitView),
+const ParentFitField = dynamic(
+  () => import("@/components/parent-fit-picker").then((m) => m.ParentFitField),
   { ssr: false },
 );
 const ParentDescriptionImages = dynamic(
@@ -164,14 +160,14 @@ export default function ParentSKUsV2Page() {
         <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder="— เลือกหมวดกลาง —" />
       ),
       // "ใส่อะไรได้บ้าง" — ชิปจากรายการกลาง (ต้องตั้งคู่กับ MasterRecordDrawer ใน master-crud ด้วย)
-      fits: ({ value, onChange, disabled }) => <ParentFitPicker value={value} onChange={onChange} disabled={disabled} />,
+      fits: ({ value, onChange, disabled }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
     },
     detailRenderers: {
       ...(CONFIG.detailRenderers ?? {}),
       platform_category_id: ({ value, recordId }) => (
         <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null} apiPath="parent-skus" />
       ),
-      fits: ({ value }) => <ParentFitView value={value} />,
+      fits: ({ value, recordId, editable, onSaved }) => <ParentFitField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
     },
     // section พิเศษในฟอร์ม: รูป Description (มีลำดับ)
     extraFormSection: ({ recordId, readonly }) => (

@@ -1,17 +1,20 @@
 "use client";
 
 /**
- * ParentFitPicker — ช่อง "ใส่อะไรได้บ้าง" ในฟอร์ม Parent SKU (ของกลาง)
- *   กดชิปเลือกจากรายการกลาง (product_fit_items) · ของที่มีขนาด → เลือกขนาดต่อท้ายชิป
+ * ช่อง "ใส่อะไรได้บ้าง" ของ Parent SKU (ของกลาง)
+ *   ParentFitField  = ที่ใช้ในฟอร์ม/หน้าดู: ชิปสรุป + ปุ่ม "✏️ เลือก" → ป๊อป (ERPModal)
+ *                     หน้า "ดู" = บันทึกทันทีเมื่อกดบันทึกในป๊อป · หน้า "แก้ไข" = ใส่ค่าในฟอร์ม (บันทึกพร้อมฟอร์ม)
+ *   ParentFitPicker = เนื้อในป๊อป: กดชิปเลือกจากรายการกลาง (product_fit_items) · ของที่มีขนาด → เลือกขนาดต่อท้ายชิป
  *   "+ เพิ่มรายการ" = เพิ่มเข้ารายการกลางเลย (ใช้ได้ทุกรุ่น) · แก้/ลบรายการกลางที่ /m/product_fit_items
  * ค่าเก็บที่ parent_skus_v2.fits = [{ id, size? }]
- * ข้อมูลผ่าน /api/master-v2/product_fit_items (guardApi + audit ของกลาง) — ไม่ query ตรง
+ * ข้อมูลผ่าน /api/master-v2/* (guardApi + audit ของกลาง) — ไม่ query ตรง
  * ตัวช่วย pure: lib/product-fits
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useSWRLite, invalidateSWR } from "@/lib/swr-lite";
 import { useToast } from "@/components/toast";
+import { ERPModal } from "@/components/modal";
 import { parseFits, fitSizeOptions, fitLabels, type FitItem, type FitPick } from "@/lib/product-fits";
 
 const KEY = "product-fit-items";
@@ -118,9 +121,79 @@ export function ParentFitPicker({ value, onChange, disabled }: { value: unknown;
   );
 }
 
-/** หน้า "ดู" (ไม่ใช่แก้) — โชว์เป็นข้อความอ่านง่าย */
-export function ParentFitView({ value }: { value: unknown }) {
+const sameFits = (a: unknown, b: unknown) => JSON.stringify(parseFits(a)) === JSON.stringify(parseFits(b));
+
+/**
+ * ช่องในฟอร์ม/หน้าดู: ชิปสรุปที่เลือกไว้ + ปุ่มเปิดป๊อปเลือก
+ *   mode="edit" → กดตกลงในป๊อป = onChange (บันทึกพร้อมฟอร์ม)
+ *   mode="view" → กดบันทึกในป๊อป = PATCH ทันที แล้ว onSaved แจ้งฟอร์ม · ไม่มีสิทธิ์แก้ (canEdit=false) = ดูอย่างเดียว
+ */
+export function ParentFitField({ value, mode, onChange, onSaved, recordId, canEdit = true, apiPath = "parent-skus" }: {
+  value: unknown;
+  mode: "edit" | "view";
+  onChange?: (v: unknown) => void;
+  onSaved?: (v: unknown) => void;
+  recordId?: string | null;
+  canEdit?: boolean;
+  apiPath?: string;
+}) {
+  const toast = useToast();
   const { data: items } = useFitItems();
-  const labels = fitLabels(value, items ?? []);
-  return labels.length ? <span className="text-sm text-slate-700">{labels.join(", ")}</span> : <span className="text-sm text-slate-300">—</span>;
+  const [cur, setCur] = useState<unknown>(value);   // หน้า "ดู" เก็บค่าที่เพิ่งบันทึกไว้โชว์ทันที
+  useEffect(() => { setCur(value); }, [value]);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<unknown>(null);
+  const [saving, setSaving] = useState(false);
+
+  const labels = fitLabels(cur, items ?? []);
+  const dirty = open && !sameFits(draft, cur);
+  const openPopup = () => { setDraft(cur); setOpen(true); };
+
+  const confirm = async () => {
+    const next = parseFits(draft);
+    const v = next.length ? next : null;
+    if (mode === "edit") { onChange?.(v); setCur(v); setOpen(false); return; }
+    if (!recordId) return;
+    setSaving(true);
+    try {
+      const r = await apiFetch(`/api/master-v2/${apiPath}/${recordId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fits: v }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      setCur(v); onSaved?.(v); setOpen(false);
+      toast.success("บันทึก \"ใส่อะไรได้บ้าง\" แล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+      {labels.length
+        ? labels.map((l) => <span key={l} className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-700">{l}</span>)
+        : <span className="text-sm text-slate-300">—</span>}
+      {canEdit && (
+        <button type="button" onClick={openPopup}
+          className="rounded-full border border-orange-300 px-2.5 py-0.5 text-xs text-orange-600 hover:bg-orange-50">
+          {labels.length ? "✏️ เลือก" : "＋ เลือก"}
+        </button>
+      )}
+      <ERPModal open={open} onClose={() => setOpen(false)} size="lg" hasUnsavedChanges={dirty}
+        title="ใส่อะไรได้บ้าง"
+        description="กดชิปเพื่อเลือก · ของที่มีขนาด เลือกขนาดได้ที่ช่องข้างชิป"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setOpen(false)} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">ยกเลิก</button>
+            <button type="button" onClick={() => void confirm()} disabled={saving}
+              className="h-9 rounded-lg bg-orange-500 px-4 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-60">
+              {saving ? "กำลังบันทึก…" : mode === "view" ? "บันทึก" : "ตกลง"}
+            </button>
+          </div>
+        }>
+        {open && <ParentFitPicker value={draft} onChange={setDraft} />}
+        {mode === "edit" && <p className="mt-3 text-[11px] text-slate-400">กด &quot;ตกลง&quot; แล้วอย่าลืมกด &quot;บันทึก&quot; ของฟอร์มสินค้า</p>}
+      </ERPModal>
+    </div>
+  );
 }

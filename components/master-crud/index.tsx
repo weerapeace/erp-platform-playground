@@ -65,8 +65,7 @@ const AiProductDetailModal = dynamic(() => import("@/components/ai-product-detai
 const CentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker), { ssr: false });
 const InlineCentralCategoryPicker = dynamic(() => import("@/components/central-category-picker").then((m) => m.InlineCentralCategoryPicker), { ssr: false });
 // "ใส่อะไรได้บ้าง" ของ Parent SKU (fits) — ชิปเลือกจากรายการกลาง product_fit_items
-const ParentFitPicker = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentFitPicker), { ssr: false });
-const ParentFitView = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentFitView), { ssr: false });
+const ParentFitField = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentFitField), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -436,6 +435,8 @@ export type FieldDef = {
     value: unknown;
     recordId: string | null;
     editable: boolean;
+    /** widget ที่บันทึกเองจากหน้า "ดู" (เช่น ป๊อปเลือก) แจ้งค่าใหม่ → ฟอร์ม/ค่าตั้งต้นตรงกับ DB (กดแก้ไขต่อไม่เห็นค่าเก่า) */
+    onSaved?: (value: unknown) => void;
     form: Record<string, unknown>;
   }) => React.ReactNode;
 };
@@ -2309,6 +2310,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         recordId: editingId,
         editable: !!(drawerMode === "view" && editingId && canEdit && !f.readonly),
         form,
+        onSaved: (nv) => {
+          setForm((p) => ({ ...p, [f.key]: nv }));
+          baseSnapRef.current = { ...baseSnapRef.current, [f.key]: nv };
+        },
       });
     }
     // Quick edit: field ที่ตั้ง inline ไว้ (กดครั้งเดียวแก้ได้) หรือ field ที่เพิ่งดับเบิลคลิก
@@ -3216,7 +3221,7 @@ export function MasterRecordDrawer({
               <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder={tr("— เลือกหมวดกลาง —", "— select central category —")} />
             ),
             ...(moduleKey === "parent-skus-v2"
-              ? { fits: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentFitPicker value={value} onChange={onChange} disabled={disabled} /> }
+              ? { fits: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} /> }
               : {}),
             ...(formRenderers ?? {}),
           }
@@ -3227,7 +3232,7 @@ export function MasterRecordDrawer({
               <InlineCentralCategoryPicker recordId={recordId} value={(value as string) || null}
                 apiPath={moduleKey === "parent-skus-v2" ? "parent-skus" : "skus"} />
             ),
-            ...(moduleKey === "parent-skus-v2" ? { fits: ({ value }: { value: unknown }) => <ParentFitView value={value} /> } : {}),
+            ...(moduleKey === "parent-skus-v2" ? { fits: ({ value, recordId, editable, onSaved }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void }) => <ParentFitField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} /> } : {}),
           }
         : undefined,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
