@@ -156,3 +156,22 @@ describe("ป๊อปอัปแก้เต็มจอ — ของที�
     expect(keys.sort()).toEqual(["x/a.png", "x/bg.jpg"]);
   });
 });
+
+describe("ครอป / พลิก / จัดวาง", () => {
+  it("ค่าครอป-พลิกผ่านตัวกรอง schema (จำกัดช่วง)", async () => {
+    const { livePatch } = await import("../../components/website-canvas-tools");
+    expect(livePatch({ cropZoom: 999, cropX: -5, cropY: 120, flipH: true, flipV: "yes" })).toEqual({ cropZoom: 400, cropX: 0, cropY: 100, flipH: true, flipV: false });
+  });
+  it("ชิ้นเก่าที่ไม่มีค่าครอป = ไม่ซูม เห็นกึ่งกลาง ไม่พลิก", () => {
+    const [b] = normalizeBlocks([{ id: "c1", type: "canvas", items: [{ id: "a", kind: "image", imageKey: "x/a.png" }] }]) as unknown as Record<string, unknown>[];
+    expect((b.items as Record<string, unknown>[])[0]).toMatchObject({ cropZoom: 100, cropX: 50, cropY: 50, flipH: false, flipV: false });
+  });
+  it("จัดชั้นหน้า-หลัง", async () => {
+    const { reorderLayer } = await import("../../components/website-canvas-tools");
+    const list = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(reorderLayer(list, "a", "up").map((x) => x.id)).toEqual(["b", "a", "c"]);
+    expect(reorderLayer(list, "a", "front").map((x) => x.id)).toEqual(["b", "c", "a"]);
+    expect(reorderLayer(list, "c", "back").map((x) => x.id)).toEqual(["c", "a", "b"]);
+    expect(reorderLayer(list, "b", "down").map((x) => x.id)).toEqual(["b", "a", "c"]);
+  });
+});

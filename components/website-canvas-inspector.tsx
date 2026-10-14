@@ -100,6 +100,9 @@ export function CanvasInspector({
   onPatchBlock,
   onReplaceImage,
   onPickBgImage,
+  onLayer,
+  onAlign,
+  onCrop,
 }: {
   block: Block;
   item: ChildBlock | null;
@@ -111,6 +114,12 @@ export function CanvasInspector({
   onPatchBlock: (p: Record<string, unknown>) => void;
   onReplaceImage: () => void;
   onPickBgImage: () => void;
+  /** ชั้นหน้า-หลังของชิ้นที่เลือก */
+  onLayer: (to: "up" | "down" | "front" | "back") => void;
+  /** จัดชิดผืน (พรีวิวคำนวณจากขนาดจริงบนจอ) */
+  onAlign: (to: "top" | "left" | "middle" | "center" | "bottom" | "right") => void;
+  /** เข้าโหมดครอปบนผืน (ลากรูปในกรอบ) */
+  onCrop: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const spec = SECTION_SCHEMAS.canvas.children!;
@@ -180,8 +189,57 @@ export function CanvasInspector({
   const str = (k: string) => String(item[k] ?? "");
   const colorPick = (key: string, hexKey: string) => (v: string, hex?: string) => onPatchItem(hex ? { [key]: v, [hexKey]: hex } : { [key]: v });
 
+  const arr = "flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700";
   return (
     <div className="space-y-4">
+      {/* จัดวาง (Arrange) — ชั้น + จัดชิดผืน */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
+        <H>ชั้น</H>
+        <div className="grid grid-cols-2 gap-1.5 -mt-1">
+          <button className={arr} onClick={() => onLayer("up")}>↑ ขึ้นหน้า 1 ชั้น</button>
+          <button className={arr} onClick={() => onLayer("down")}>↓ ถอยหลัง 1 ชั้น</button>
+          <button className={arr} onClick={() => onLayer("front")}>⤒ หน้าสุด</button>
+          <button className={arr} onClick={() => onLayer("back")}>⤓ หลังสุด</button>
+        </div>
+        <H>จัดชิดผืน</H>
+        <div className="grid grid-cols-2 gap-1.5 -mt-1">
+          <button className={arr} onClick={() => onAlign("top")}>⤒ ชิดบน</button>
+          <button className={arr} onClick={() => onAlign("left")}>⇤ ชิดซ้าย</button>
+          <button className={arr} onClick={() => onAlign("middle")}>⇕ กลางแนวตั้ง</button>
+          <button className={arr} onClick={() => onAlign("center")}>⇔ กลางแนวนอน</button>
+          <button className={arr} onClick={() => onAlign("bottom")}>⤓ ชิดล่าง</button>
+          <button className={arr} onClick={() => onAlign("right")}>⇥ ชิดขวา</button>
+        </div>
+      </div>
+
+      {(kind === "image" || kind === "shape") && (
+        <div>
+          <H>พลิก</H>
+          <div className="flex gap-1.5">
+            <button className={seg(item.flipH === true)} onClick={() => onPatchItem({ flipH: !item.flipH })}>⇋ ซ้าย-ขวา</button>
+            <button className={seg(item.flipV === true)} onClick={() => onPatchItem({ flipV: !item.flipV })}>⇅ บน-ล่าง</button>
+          </div>
+        </div>
+      )}
+
+      {kind === "image" && Boolean(item.imageKey) && (
+        <div>
+          <div className="flex items-center justify-between">
+            <H>ครอป (ซูม/เลื่อนรูปในกรอบ)</H>
+            <button onClick={onCrop} className="text-[11px] text-blue-600 hover:underline">✂️ ลากบนผืน</button>
+          </div>
+          <Slider label="ซูม" value={num("cropZoom", 100)} min={100} max={400} step={5} unit="%" onChange={(n) => onPatchItem({ cropZoom: n })} />
+          <div className="grid grid-cols-2 gap-2">
+            <Slider label="ซ้าย ↔ ขวา" value={num("cropX", 50)} min={0} max={100} unit="%" onChange={(n) => onPatchItem({ cropX: n })} />
+            <Slider label="บน ↕ ล่าง" value={num("cropY", 50)} min={0} max={100} unit="%" onChange={(n) => onPatchItem({ cropY: n })} />
+          </div>
+          {(num("cropZoom", 100) !== 100 || num("cropX", 50) !== 50 || num("cropY", 50) !== 50) && (
+            <button onClick={() => onPatchItem({ cropZoom: 100, cropX: 50, cropY: 50 })} className="text-[11px] text-slate-500 hover:text-blue-600">↺ รีเซ็ตครอป</button>
+          )}
+          <p className="text-[10px] text-slate-400 mt-1">ตัดขอบรูป = ลากจุดจับที่มุม/ขอบของกรอบ · ซูม/เลื่อน = ตรงนี้ หรือกด &quot;ลากบนผืน&quot;</p>
+        </div>
+      )}
+
       {kind === "image" && (
         <>
           <div className="flex items-center gap-3">
@@ -210,9 +268,10 @@ export function CanvasInspector({
           {str("border") && str("border") !== "none" && (
             <>
               <div>
-                <H>สีกรอบ</H>
+                <H>สีเส้นกรอบ</H>
                 <Swatches theme={theme} value={str("borderColor")} hex={str("borderHex")} onPick={colorPick("borderColor", "borderHex")} />
               </div>
+              <Slider label="ความหนาเส้น" value={num("borderWidth", 2)} min={1} max={16} onChange={(n) => onPatchItem({ borderWidth: n })} />
               <Slider label="ระยะห่างกรอบกับรูป" value={num("borderGap", 12)} min={0} max={60} onChange={(n) => onPatchItem({ borderGap: n })} />
             </>
           )}

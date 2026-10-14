@@ -15,6 +15,7 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasInspector, type ThemeColors } from "@/components/website-canvas-inspector";
 import { ImageChooser, DecorLibrary, type PickedImage } from "@/components/website-canvas-media";
 import { useCanvasBridge, reorderLayer } from "@/components/website-canvas-tools";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { SECTION_SCHEMAS, blankChild, newChildId } from "@/lib/website-schema";
 import { CANVAS_BUTTON_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_WIDTH, canvasItemPreset, canvasItemSummary, fitImageBox, type CanvasKind } from "@/lib/website-canvas";
 import type { SchemaFormContext } from "@/components/website-schema-form";
@@ -132,6 +133,11 @@ export function CanvasEditor({
   }, []);
 
   const post = (msg: Record<string, unknown>) => iframeRef.current?.contentWindow?.postMessage(msg, "*");
+
+  // แผงชั้น: ลากสลับ (ของกลาง useDragReorder) — รายการแสดงกลับด้าน (บน = หน้าสุด) จึงกลับก่อน/หลังย้าย
+  const layerDrag = useDragReorder((from, to) => {
+    patchBlock(blockId, { items: moveItem([...items].reverse(), from, to).reverse() });
+  });
 
   /* ── คุยกับพรีวิวในป๊อปอัป ── */
   useCanvasBridge({
@@ -336,11 +342,17 @@ export function CanvasEditor({
                     ))}
                   {panel === "layers" && (
                     <div className="max-h-[55vh] overflow-y-auto space-y-1">
-                      {[...items].reverse().map((it) => {
+                      <p className="text-[10px] text-slate-400 -mt-1 mb-1">ลาก ⠿ เพื่อสลับชั้น</p>
+                      {[...items].reverse().map((it, shownIdx) => {
                         const idx = items.findIndex((x) => x.id === it.id);
                         const on = selItem?.id === it.id;
                         return (
-                          <div key={it.id} className={`flex items-center gap-1 rounded-lg border px-2 py-1.5 ${on ? "border-blue-500 bg-blue-50" : "border-slate-200"}`}>
+                          <div
+                            key={it.id}
+                            {...layerDrag.rowProps(shownIdx)}
+                            className={`flex items-center gap-1 rounded-lg border px-1.5 py-1.5 ${on ? "border-blue-500 bg-blue-50" : "border-slate-200"} ${layerDrag.rowCls(shownIdx)}`}
+                          >
+                            <DragHandle {...layerDrag.handleProps(shownIdx)} title="ลากเพื่อสลับชั้น" />
                             <button onClick={() => onSelect({ blockId, childId: it.id })} className="flex-1 min-w-0 text-left text-xs text-slate-700 truncate">
                               {canvasItemSummary(it)}
                             </button>
@@ -395,6 +407,9 @@ export function CanvasEditor({
                   onPatchBlock={(p) => patchBlock(blockId, p)}
                   onReplaceImage={() => selItem && setChooser({ mode: "replace", childId: selItem.id })}
                   onPickBgImage={() => setChooser({ mode: "bg" })}
+                  onLayer={(to) => selItem && patchBlock(blockId, { items: reorderLayer(items, selItem.id, to) })}
+                  onAlign={(to) => selItem && post({ type: "storefront-canvas-align", blockId, childId: selItem.id, to })}
+                  onCrop={() => selItem && post({ type: "storefront-canvas-crop", blockId, childId: selItem.id })}
                 />
               </div>
             </div>

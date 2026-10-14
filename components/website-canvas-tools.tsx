@@ -116,6 +116,12 @@ export function useCanvasBridge(opts: {
         if (Object.keys(p).length) fns.current.patchBlock(b.id, p);
         return;
       }
+      // ชั้นหน้า-หลัง (ปุ่ม "จัดวาง" บนแถบลอย) — เรียงลำดับใหม่ในข้อมูลได้เลย ไม่ต้องเปิดหน้าจออะไร
+      const layer = { "layer-up": "up", "layer-down": "down", "layer-front": "front", "layer-back": "back" } as const;
+      if (d.type === "storefront-canvas-action" && d.childId && d.action && d.action in layer) {
+        fns.current.patchBlock(b.id, { items: reorderLayer(list, d.childId, layer[d.action as keyof typeof layer]) });
+        return;
+      }
       if (d.type === "storefront-canvas-open") fns.current.onOpen?.(b.id);
       else if (d.type === "storefront-canvas-action" && d.childId && d.action) fns.current.onAction?.(b.id, d.childId, d.action);
       else if (d.type === "storefront-canvas-delete" && d.childId) fns.current.removeChild(b.id, d.childId);

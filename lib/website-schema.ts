@@ -242,6 +242,12 @@ function canvasItemFields(): FieldDef[] {
     f("borderHex", "สีกรอบเอง", "color", { group: "media", default: "", showIf: [...framed, { key: "borderColor", eq: "custom" }] }),
     f("borderWidth", "ความหนาเส้นกรอบ", "number", { group: "media", default: 2, min: 1, numMax: 16, showIf: framed }),
     f("borderGap", "ระยะห่างกรอบกับรูป", "number", { group: "media", default: 12, min: 0, numMax: 80, showIf: framed }),
+    /* ครอป = ซูม + เลื่อนจุดที่เห็นในกรอบ (ลากในพรีวิวโหมดครอปได้) · พลิก */
+    f("cropZoom", "ซูมรูปในกรอบ (%)", "range", { group: "media", default: 100, min: 100, numMax: 400, step: 5, showIf: isImage }),
+    f("cropX", "จุดที่เห็น แนวนอน (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, showIf: isImage }),
+    f("cropY", "จุดที่เห็น แนวตั้ง (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, showIf: isImage }),
+    f("flipH", "พลิกซ้าย-ขวา", "toggle", { group: "media", default: false, showIf: { key: "kind", eq: ["image", "shape"] } }),
+    f("flipV", "พลิกบน-ล่าง", "toggle", { group: "media", default: false, showIf: { key: "kind", eq: ["image", "shape"] } }),
 
     /* ของตกแต่ง */
     f("shape", "ลาย", "select", { default: "bow", options: CANVAS_SHAPES, showIf: isShape }),
