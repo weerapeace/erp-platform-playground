@@ -173,6 +173,8 @@ export function ContentCalendarView() {
   const [brandFilter, setBrandFilter] = useState<string>("all");   // "all" | brandId
   const [platformFilter, setPlatformFilter] = useState<string>("all");   // "all" | platform value
   const [statusFilter, setStatusFilter] = useState<string>("all");   // "all" | สถานะ (ตามโหมด)
+  const [notReady, setNotReady] = useState(false);   // ⚠ ยังไม่พร้อม = โพสต์ที่ยังขาดแคปชั่นหรือรูปในแพลตฟอร์มใดแพลตฟอร์มหนึ่ง (ใช้ร่วมกับตัวกรองอื่นได้)
+  const isNotReady = (e: CalEntry) => e.kind === "content" && e.status !== "cancelled" && platReadiness(e).some((p) => p.state === "missing");
   const [offset, setOffset] = useState(0);                          // เลื่อนเดือน (0 = เดือนนี้)
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -262,11 +264,12 @@ export function ContentCalendarView() {
     () => entries.filter((e) =>
       (brandFilter === "all" || e.brand_id === brandFilter)
       && (platformFilter === "all" || e.platforms.includes(platformFilter))
-      && (statusFilter === "all" || e.status === statusFilter),
+      && (statusFilter === "all" || e.status === statusFilter)
+      && (!notReady || isNotReady(e)),
     ),
-    [entries, brandFilter, platformFilter, statusFilter],
+    [entries, brandFilter, platformFilter, statusFilter, notReady],
   );
-  const hasFilter = brandFilter !== "all" || platformFilter !== "all" || statusFilter !== "all";
+  const hasFilter = brandFilter !== "all" || platformFilter !== "all" || statusFilter !== "all" || notReady;
 
   // เดือนที่กำลังดู
   const base = useMemo(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + offset, 1); }, [offset]);
@@ -283,7 +286,8 @@ export function ContentCalendarView() {
     const brand: Record<string, number> = {}; const plat: Record<string, number> = {}; const stat: Record<string, number> = {};
     for (const e of all) { const k = e.brand_id ?? "_"; brand[k] = (brand[k] ?? 0) + 1; }
     for (const e of inBrand) { for (const p of e.platforms) plat[p] = (plat[p] ?? 0) + 1; stat[e.status] = (stat[e.status] ?? 0) + 1; }
-    return { total: all.length, inBrand: inBrand.length, brand, plat, stat };
+    const notReadyN = inBrand.filter(isNotReady).length;   // ยังขาดแคปชั่น/รูป (เดือนนี้ ในแบรนด์ที่เลือก)
+    return { total: all.length, inBrand: inBrand.length, brand, plat, stat, notReady: notReadyN };
   }, [entries, brandFilter, ym]);
 
   // จัดเข้าแต่ละวัน + กล่องค้าง (ยังไม่ลงวันที่ / ยังไม่กำหนดส่ง)
@@ -556,11 +560,19 @@ export function ContentCalendarView() {
                 );
               })}
             </div>
+            {/* ⚠ ยังไม่พร้อม — กรองโพสต์ที่ยังขาดแคปชั่น/รูป (ใช้ซ้อนกับแบรนด์/แพลตฟอร์ม/สถานะได้) · เฉพาะโหมดคอนเทนต์ */}
+            {mode === "content" && (
+              <button onClick={() => setNotReady((v) => !v)} title={t("โพสต์ที่ยังขาดแคปชั่นหรือรูปในแพลตฟอร์มใดแพลตฟอร์มหนึ่ง (ชี้การ์ดดูว่าขาดอะไร)", "Posts missing caption or images on some platform")}
+                className={`h-7 px-2.5 rounded-md text-xs font-medium border inline-flex items-center gap-1 ${notReady ? "bg-amber-500 border-amber-500 text-white shadow-sm" : counts.notReady > 0 ? "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100" : "bg-white border-slate-200 text-slate-400"}`}>
+                ⚠ {t("ยังไม่พร้อม", "Not ready")}
+                {counts.notReady > 0 && <span className={`text-[10px] tabular-nums ${notReady ? "text-white/80" : "text-amber-600"}`}>{counts.notReady}</span>}
+              </button>
+            )}
           </div>
           <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
             <span title={L.countTip}>{t("เดือนนี้แสดง", "This month showing")} <b className="text-slate-700 tabular-nums">{scheduledThisMonth}</b> / {counts.total} {t("รายการ", "items")}</span>
             {hasFilter && (
-              <button onClick={() => { setBrandFilter("all"); setPlatformFilter("all"); setStatusFilter("all"); }} className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-100">✕ {t("ล้างตัวกรอง", "Clear")}</button>
+              <button onClick={() => { setBrandFilter("all"); setPlatformFilter("all"); setStatusFilter("all"); setNotReady(false); }} className="h-7 px-2.5 rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-100">✕ {t("ล้างตัวกรอง", "Clear")}</button>
             )}
           </div>
         </div>
