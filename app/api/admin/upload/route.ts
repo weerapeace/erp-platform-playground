@@ -27,7 +27,7 @@ const LIBRARY_FOLDER_LABEL: Record<string, string> = {
   "parent-skus": "สินค้า (Parent)", "skus": "สินค้า (SKU)",
   "app-icons": "ไอคอนแอป", "section-icons": "ไอคอนหมวด", "overview-theme": "ธีมภาพรวม",
   "design-sheets": "งานออกแบบ", "uploads": "อัปทั่วไป",
-  "storefront-hero": "รูปเปิดหน้าสินค้า (เว็บ)",
+  "storefront-hero": "รูปเปิดหน้าสินค้า (เว็บ)", "storefront-products": "รูปสินค้า (เว็บ)",
 };
 
 // ลงทะเบียนไฟล์ที่เพิ่งอัปเข้าคลังกลาง (assets) อัตโนมัติ — กันซ้ำด้วย checksum · ห้าม throw (best-effort)

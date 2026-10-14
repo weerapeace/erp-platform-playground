@@ -14,7 +14,7 @@ import { useToast } from "@/components/toast";
 type WebCategory = string;
 
 interface FieldMap {
-  name: { source: string; stripPrefix?: string; removeBrand?: boolean; removeCollection?: boolean; removeCode?: boolean; removeParens?: boolean };
+  name: { source: string; stripPrefix?: string; removeBrand?: boolean; removeCollection?: boolean; removeCode?: boolean; removeParens?: boolean; removeParenMarks?: boolean };
   price: { source: string };
   description: { source: string };
   unit: { default: string };
@@ -202,13 +202,18 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
                   ["removeCollection", "ชื่อคอลเลกชัน"],
                   ["removeCode", "รหัสสินค้า"],
                   ["removeParens", "ข้อความในวงเล็บ ( )"],
+                  ["removeParenMarks", "แค่เครื่องหมายวงเล็บ (เก็บข้อความ)"],
                 ] as const
               ).map(([k, l]) => (
                 <label key={k} className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={!!map.name[k]}
-                    onChange={(e) => patch({ name: { ...map.name, [k]: e.target.checked } })}
+                    onChange={(e) => {
+                      // วงเล็บ: ลบทั้งข้อความ ↔ ลบแค่เครื่องหมาย — เลือกได้ทีละอัน (ตรงกับ NAME_RULE_EXCLUSIVE ใน lib/website-field-map)
+                      const other = k === "removeParens" ? "removeParenMarks" : k === "removeParenMarks" ? "removeParens" : null;
+                      patch({ name: { ...map.name, [k]: e.target.checked, ...(other && e.target.checked ? { [other]: false } : {}) } });
+                    }}
                     className="accent-orange-500"
                   />
                   {l}

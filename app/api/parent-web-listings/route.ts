@@ -6,7 +6,7 @@
  *                    + SKU ลูก (สต๊อก + รูปปก + แกลเลอรีรูปของ SKU ให้เลือกเป็นรูปเว็บรายสี) + ยอดขายเว็บ
  * POST { parentId, shopId, action:"add" }      → เพิ่มรุ่นเข้าร้านนั้น (ปิดไว้ก่อน)
  * POST { parentId, shopId, patch:{...} }        → แก้ override ของร้านนั้น (store_listings) แล้วสั่งเว็บร้านล้างแคช
- * POST { parentId, shopId, action:"nameRule", nameRule:{removeBrand?,removeCollection?,removeCode?,removeParens?} }
+ * POST { parentId, shopId, action:"nameRule", nameRule:{removeBrand?,removeCollection?,removeCode?,removeParens?,removeParenMarks?} }
  *                                               → กฎชื่อของร้าน (shops.field_map.name — ใช้ทุกสินค้าในร้าน)
  * GET คืน autoName ต่อร้าน = ชื่อที่เว็บใช้จริงเมื่อเว้นช่องชื่อว่าง (resolveName ตัวเดียวกับเว็บ)
  *
@@ -30,6 +30,7 @@ import {
   attachNameRefs,
   PARENT_SELECT,
   NAME_RULE_FLAGS,
+  NAME_RULE_EXCLUSIVE,
   type ParentRow,
   type NameRuleFlag,
 } from "@/lib/website-field-map";
@@ -260,6 +261,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const before = normalizeFieldMap(raw).name;
     const name: Record<string, unknown> = { ...before };
     for (const f of NAME_RULE_FLAGS) if (typeof flags[f] === "boolean") name[f] = flags[f];
+    // กฎคู่ที่เปิดพร้อมกันไม่ได้ (ลบข้อความในวงเล็บ ↔ ลบแค่วงเล็บ) — เปิดอันไหน ปิดอีกอัน
+    for (const f of NAME_RULE_FLAGS) { const other = NAME_RULE_EXCLUSIVE[f]; if (flags[f] === true && other) name[other] = false; }
     const { error } = await sb.from("shops").update({ field_map: { ...raw, name } }).eq("id", b.shopId);
     if (error) return NextResponse.json({ error: "บันทึกกฎชื่อไม่สำเร็จ" }, { status: 500 });
     await writeAudit(sb, { action: "update", entityType: "shop_field_map", entityId: b.shopId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { field: "name", before, after: name, from: "parent_web_tab", parentId: b.parentId } });

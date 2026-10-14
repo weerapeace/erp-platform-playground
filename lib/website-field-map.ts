@@ -68,10 +68,14 @@ export interface NameRule {
   removeCode?: boolean;
   /** ลบข้อความในวงเล็บ (...) [...] ออกจากชื่อ */
   removeParens?: boolean;
+  /** ลบแค่เครื่องหมายวงเล็บ ( ) [ ] — เก็บข้อความข้างในไว้ เช่น "(Rise & Go) กระเป๋า" → "Rise & Go กระเป๋า" (คู่กับ removeParens เปิดได้ทีละอัน) */
+  removeParenMarks?: boolean;
 }
 
 /** กฎชื่อแบบเปิด/ปิด — ใช้ร่วมกันระหว่าง normalize, API และหน้าจอ */
-export const NAME_RULE_FLAGS = ["removeBrand", "removeCollection", "removeCode", "removeParens"] as const;
+export const NAME_RULE_FLAGS = ["removeBrand", "removeCollection", "removeCode", "removeParens", "removeParenMarks"] as const;
+/** กฎที่เปิดพร้อมกันไม่ได้ (เปิดอันหนึ่ง = ปิดอีกอัน) */
+export const NAME_RULE_EXCLUSIVE: Partial<Record<NameRuleFlag, NameRuleFlag>> = { removeParens: "removeParenMarks", removeParenMarks: "removeParens" };
 export type NameRuleFlag = (typeof NAME_RULE_FLAGS)[number];
 
 export interface FieldMap {
@@ -330,6 +334,7 @@ export function resolveName(map: FieldMap, parent: ParentRow): string {
   }
   const r = map.name;
   if (r.removeParens) name = name.replace(/\([^()]*\)|\[[^[\]]*\]/g, " ");
+  else if (r.removeParenMarks) name = name.replace(/[()[\]]/g, " ");
   if (r.removeBrand && parent.brand_name) name = removeTerm(name, parent.brand_name);
   if (r.removeCollection && parent.collection_name) name = removeTerm(name, parent.collection_name);
   if (r.removeCode && parent.code) name = removeTerm(name, parent.code);

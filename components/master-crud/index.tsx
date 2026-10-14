@@ -13,6 +13,7 @@ import { PlaygroundShell, useShellPresent } from "@/components/playground-shell"
 import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
 import { Drawer, ConfirmDialog } from "@/components/modal";
+import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/components/footer-save";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
@@ -970,6 +971,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [dirty,       setDirty]       = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // 💾 ปุ่มบันทึกของแท็บย่อย (ฝากไว้แถบล่าง) + รายการที่รอเลื่อนไปถ้าแท็บมีของค้าง
+  const footerSave = useFooterSaveHost();
+  const [pendingNav, setPendingNav] = useState<Row | null>(null);
   // F11: drawer mode — "view" (อ่านอย่างเดียว) | "edit" (ฟอร์ม)
   const [drawerMode,  setDrawerMode]  = useState<"view" | "edit">("view");
   const [dblEditKey,  setDblEditKey]  = useState<string | null>(null);   // ฟิลด์ที่เพิ่งดับเบิลคลิกเพื่อแก้ตรงนั้น
@@ -2618,7 +2622,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         open={modalOpen}
         onClose={discard}
         size="lg"
-        hasUnsavedChanges={drawerMode === "edit" && dirty}
+        hasUnsavedChanges={(drawerMode === "edit" && dirty) || footerSave.anyDirty}
         headerActions={config.moduleKey && canEdit && drawerMode === "view" ? () => (
           <button type="button" onClick={() => setStudioOpen(true)}
             title={tr("ออกแบบฟิลด์/ฟอร์มของโมดูลนี้ (เพิ่ม/แก้/ซ่อนฟิลด์ · แอดมิน)", "Design this module's fields/form (add/edit/hide · admin)")}
@@ -2636,7 +2640,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               {editingId && (() => {
                 const list = navRowsRef.current;
                 const idx = list.findIndex((r) => String(r.id) === String(editingId));
-                const go = (dir: 1 | -1) => { const nxt = list[idx + dir]; if (nxt) openEdit(nxt); };
+                const go = (dir: 1 | -1) => { const nxt = list[idx + dir]; if (!nxt) return; if (footerSave.anyDirty) setPendingNav(nxt); else openEdit(nxt); };
                 return (
                   <div className="mr-auto flex items-center gap-1">
                     <button onClick={() => go(-1)} disabled={idx <= 0}
@@ -2660,14 +2664,18 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 <button onClick={() => openDelete({ ...form, id: editingId })} title={tr("ลบ (เก็บในถังขยะ · กู้คืนได้)", "Delete (goes to trash · restorable)")}
                   className="h-9 px-3 text-sm border border-rose-300 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1.5">{tr("🗑 ลบ", "🗑 Delete")}</button>
               )}
-              <button onClick={() => setModalOpen(false)}
+              <button onClick={() => (footerSave.anyDirty ? setConfirmDiscard(true) : setModalOpen(false))}
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">{tr("ปิด", "Close")}</button>
               {canEdit && (
                 <button onClick={switchToEdit}
-                  className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1.5">
+                  className={footerSave.has
+                    ? "h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"
+                    : "h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1.5"}>
                   ✎ แก้ไข
                 </button>
               )}
+              {/* 💾 บันทึกของแท็บที่เปิดอยู่ (เช่น 🛍 เว็บไซต์) — ปุ่มหลักตัวขวาสุดเมื่อมี */}
+              <FooterSaveButton host={footerSave} />
             </>
           ) : (
             <>
@@ -2677,7 +2685,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                 {editingId ? tr("ยกเลิก", "Cancel") : tr("ปิด", "Close")}
               </button>
-              <button onClick={save} disabled={saving}
+              <button onClick={async () => { await footerSave.saveDirty(); await save(); }} disabled={saving || footerSave.saving}
                 className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
                 {saving ? tr("กำลังบันทึก...", "Saving...") : tr("บันทึก", "Save")}
               </button>
@@ -2685,6 +2693,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           )
         }
       >
+        {/* 💾 แท็บที่บันทึกแยกเอง (เช่น 🛍 เว็บไซต์) ฝากปุ่มบันทึกไว้ที่แถบล่าง — ของกลาง components/footer-save */}
+        <FooterSaveProvider value={footerSave.register}>
         {/* สลับภาษา TH/EN + แปลอัตโนมัติ + ✨ ให้ AI คิดรายละเอียด — โผล่เฉพาะโมดูลที่ตั้งค่าไว้ */}
         {(() => {
           const pairFields = effectiveFields.filter((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_en);
@@ -2974,7 +2984,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             {s.render({ recordId: String(editingId), row: form as Record<string, unknown>, readonly: !canEdit, refresh: reloadRecord })}
           </div>
         ))}
+        </FooterSaveProvider>
       </Drawer>
+
+      {/* เลื่อนไปรายการอื่นตอนแท็บย่อยมีของค้าง → ถามก่อน (ของที่แก้ในแท็บจะหาย) */}
+      <ConfirmDialog open={!!pendingNav} onClose={() => setPendingNav(null)}
+        title={tr("ยังไม่บันทึก", "Unsaved")} message={tr("มีข้อมูลที่ยังไม่ได้บันทึก ไปรายการอื่นโดยไม่บันทึกหรือไม่?", "You have unsaved changes. Go to another record without saving?")}
+        confirmText={tr("ไปโดยไม่บันทึก", "Leave")} cancelText={tr("อยู่ต่อ", "Stay")} variant="danger"
+        onConfirm={() => { const r = pendingNav; setPendingNav(null); if (r) openEdit(r); }} />
 
       <ConfirmDialog open={confirmDiscard} onClose={() => setConfirmDiscard(false)}
         title={tr("ยังไม่บันทึก", "Unsaved")} message={tr("ออกโดยไม่บันทึกหรือไม่?", "Leave without saving?")}

@@ -8,7 +8,7 @@
  *   - เว้นว่าง = ใช้ของ ERP / ค่ากลางตามเดิม
  * ของกลาง: AssetPicker (เลือกรูปจากคลัง) · /api/parent-web-listings (guardApi products.edit + audit + ล้างแคชเว็บร้าน)
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { AssetPicker } from "@/components/asset-picker";
@@ -21,7 +21,9 @@ import type { ProductBanner } from "@/lib/website-banners";
 import type { CardColors } from "@/lib/website-card-colors";
 import { HERO_SIZE_HINT, type ProductHero } from "@/lib/website-hero";
 import { MediaUploadField, type MediaValue } from "@/components/media-upload-field";
-import type { NameRuleFlag } from "@/lib/website-field-map";
+import { NAME_RULE_EXCLUSIVE, type NameRuleFlag } from "@/lib/website-field-map";
+import { uploadResizedImage } from "@/components/image-attach";
+import { useFooterSave } from "@/components/footer-save";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
@@ -71,7 +73,12 @@ const NAME_RULE_CHIPS: { flag: NameRuleFlag; label: string; ref?: keyof Resp["na
   { flag: "removeCollection", label: "ลบคอลเลกชัน", ref: "collection" },
   { flag: "removeCode", label: "ลบรหัสสินค้า", ref: "code" },
   { flag: "removeParens", label: "ลบข้อความในวงเล็บ" },
+  { flag: "removeParenMarks", label: "ลบแค่วงเล็บ" },
 ];
+
+/** ค่าที่ปุ่มบันทึกส่ง (saveShop) รวมเป็นข้อความเดียว — ใช้เทียบว่ามีของแก้ค้างไหม */
+const snapOf = (s: ShopState) =>
+  JSON.stringify([s.published, s.featured, s.webPrice, s.webName, s.webDescription, s.webImages, s.webSkuImages, s.webDetails, s.webPersonalize, s.webBanners, s.webCardColors, s.webHero]);
 
 const MAX_SKU_IMAGES = 8;
 const keyUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
@@ -100,6 +107,8 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
   const [detailsOpen, setDetailsOpen] = useState<Set<string>>(new Set());
   // ร้านที่กางแผง "ปั๊มชื่อ" อยู่
   const [pzOpen, setPzOpen] = useState<Set<string>>(new Set());
+  // ค่าที่บันทึกล่าสุดต่อร้าน (เทียบหา "มีของแก้ค้าง" → ปุ่ม 💾 บันทึก แถบล่าง)
+  const [savedSnap, setSavedSnap] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!parentId) return;
@@ -108,6 +117,7 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
       const r = await apiFetch(`/api/parent-web-listings?parentId=${encodeURIComponent(parentId)}`);
       const j = await r.json();
       setData(j?.shops ? (j as Resp) : null);
+      if (j?.shops) setSavedSnap(Object.fromEntries((j as Resp).shops.map((s) => [s.shopId, snapOf(s)])));
     } catch {
       /* ignore */
     } finally {
@@ -153,11 +163,14 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
   const toggleNameRule = async (s: ShopState, flag: NameRuleFlag) => {
     if (!parentId) return;
     const next = !s.nameRule[flag];
-    patchShop(s.shopId, { nameRule: { ...s.nameRule, [flag]: next } });
+    // ลบข้อความในวงเล็บ ↔ ลบแค่วงเล็บ เปิดได้ทีละอัน (เปิดอันหนึ่ง = ปิดอีกอัน)
+    const other = next ? NAME_RULE_EXCLUSIVE[flag] : undefined;
+    const changes: Partial<Record<NameRuleFlag, boolean>> = { [flag]: next, ...(other ? { [other]: false } : {}) };
+    patchShop(s.shopId, { nameRule: { ...s.nameRule, ...changes } });
     try {
       const r = await apiFetch("/api/parent-web-listings", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parentId, shopId: s.shopId, action: "nameRule", nameRule: { [flag]: next } }),
+        body: JSON.stringify({ parentId, shopId: s.shopId, action: "nameRule", nameRule: changes }),
       });
       if (!(await r.json()).ok) throw new Error();
       const fresh = (await (await apiFetch(`/api/parent-web-listings?parentId=${encodeURIComponent(parentId)}`)).json()) as Resp;
@@ -209,27 +222,81 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
           },
         }),
       });
-      if ((await r.json()).ok) toast.success(`บันทึก ${s.shopName} แล้ว — เว็บเปลี่ยนตามทันที`);
-      else toast.error("บันทึกไม่สำเร็จ");
+      if ((await r.json()).ok) {
+        setSavedSnap((p) => ({ ...p, [s.shopId]: snapOf(s) }));
+        toast.success(`บันทึก ${s.shopName} แล้ว — เว็บเปลี่ยนตามทันที`);
+      } else toast.error("บันทึกไม่สำเร็จ");
     } catch { toast.error("เชื่อมต่อไม่ได้"); }
     setSavingShop(null);
   };
 
+  /** เพิ่มรูป (r2 key) ให้ร้าน/เป้าหมาย — ใช้ทั้ง "เลือกจากคลัง" และ "อัปโหลด" · อ่าน state ล่าสุด (อัปโหลดใช้เวลา ระหว่างนั้นอาจแก้ช่องอื่น) */
+  const addImages = (shopId: string, target: string, keys: string[]) =>
+    setData((d) => (d ? {
+      ...d,
+      shops: d.shops.map((s) => {
+        if (s.shopId !== shopId) return s;
+        if (target === "gallery") return { ...s, webImages: [...s.webImages, ...keys].slice(0, 12) };
+        if (target.startsWith("banner:")) {
+          const id = target.slice(7);
+          return { ...s, webBanners: s.webBanners.map((b) => (b.id === id ? { ...b, imageKey: keys[0] } : b)) };
+        }
+        const list = [...new Set([...(s.webSkuImages[target] ?? []), ...keys])].slice(0, MAX_SKU_IMAGES);
+        return { ...s, webSkuImages: { ...s.webSkuImages, [target]: list } };
+      }),
+    } : d));
+
   const onPickImages = (assets: AssetRow[]) => {
-    if (!picker || !data) return;
+    if (!picker) return;
     const keys = assets.map((a) => a.r2_key).filter(Boolean);
-    const s = data.shops.find((x) => x.shopId === picker.shopId);
-    if (!s || !keys.length) { setPicker(null); return; }
-    if (picker.target === "gallery") {
-      patchShop(s.shopId, { webImages: [...s.webImages, ...keys].slice(0, 12) });
-    } else if (picker.target.startsWith("banner:")) {
-      const id = picker.target.slice(7);
-      patchShop(s.shopId, { webBanners: s.webBanners.map((b) => (b.id === id ? { ...b, imageKey: keys[0] } : b)) });
-    } else {
-      setSkuImages(s, picker.target, [...(s.webSkuImages[picker.target] ?? []), ...keys]);
-    }
+    if (keys.length) addImages(picker.shopId, picker.target, keys);
     setPicker(null);
   };
+
+  // ⬆ อัปโหลดรูปจากเครื่อง (หลายรูป) → ย่อด้านยาว ≤ 2000px (ของกลาง uploadResizedImage) → เข้าคลังไฟล์อัตโนมัติ → ต่อท้ายรูปของเป้าหมาย
+  const fileRef = useRef<HTMLInputElement>(null);
+  const uploadTo = useRef<{ shopId: string; target: string } | null>(null);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const startUpload = (shopId: string, target: string) => {
+    uploadTo.current = { shopId, target };
+    fileRef.current?.click();
+  };
+  const onUploadFiles = async (files: FileList | null) => {
+    const t = uploadTo.current;
+    const imgs = Array.from(files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (!t || !imgs.length) return;
+    setUploading(`${t.shopId}:${t.target}`);
+    const keys: string[] = [];
+    for (const f of imgs) {
+      try {
+        keys.push((await uploadResizedImage(f, { folder: "storefront-products", max: 2000 })).r2_key);
+      } catch (e) {
+        toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${(e as Error).message}`);
+      }
+    }
+    if (keys.length) {
+      addImages(t.shopId, t.target, keys);
+      toast.success(`อัปโหลด ${keys.length} รูปแล้ว — กด 💾 บันทึก เพื่อขึ้นเว็บ`);
+    }
+    setUploading(null);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+  const uploadBtn = (shopId: string, target: string, cls: string) => {
+    const busy = uploading === `${shopId}:${target}`;
+    return (
+      <button type="button" onClick={() => startUpload(shopId, target)} disabled={!!uploading}
+        title="อัปโหลดรูปจากเครื่อง (เลือกได้หลายรูป · ย่อให้อัตโนมัติ · เก็บเข้าคลังไฟล์ด้วย)" className={`${cls} disabled:opacity-50`}>
+        {busy ? "กำลังอัป…" : "⬆ อัปโหลด"}
+      </button>
+    );
+  };
+
+  // 💾 ปุ่มบันทึกอยู่แถบล่างของหน้าต่าง (ของกลาง footer-save) — เทียบกับค่าที่บันทึกล่าสุดต่อร้าน
+  const dirtyShops = (data?.shops ?? []).filter((s) => s.listed && savedSnap[s.shopId] !== undefined && snapOf(s) !== savedSnap[s.shopId]);
+  const saveDirty = async () => {
+    for (const s of dirtyShops) await saveShop(s);
+  };
+  const inFooter = useFooterSave(parentId && data ? { label: "เว็บไซต์", dirty: dirtyShops.length > 0, saving: savingShop !== null, onSave: saveDirty } : null);
 
   if (!parentId) return <div className="text-sm text-slate-400 py-8 text-center">บันทึกรุ่นก่อน แล้วค่อยตั้งค่าการขายบนเว็บ</div>;
   if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
@@ -336,8 +403,11 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xs font-medium text-slate-600">รูปบนเว็บ ({s.webImages.length}) — ว่าง = ใช้รูป ERP</span>
-                  <button onClick={() => setPicker({ shopId: s.shopId, target: "gallery" })}
-                    className="text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2.5 py-1">🖼 เลือกรูปจากคลัง</button>
+                  <div className="flex items-center gap-1.5">
+                    {uploadBtn(s.shopId, "gallery", "text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2.5 py-1")}
+                    <button onClick={() => setPicker({ shopId: s.shopId, target: "gallery" })}
+                      className="text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2.5 py-1">🖼 เลือกรูปจากคลัง</button>
+                  </div>
                 </div>
                 {s.webImages.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
@@ -408,6 +478,7 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                                 className={`text-xs border rounded-lg px-2 py-1 disabled:opacity-40 ${panelOpen ? "bg-orange-500 border-orange-500 text-white" : "border-orange-300 text-orange-600 hover:bg-orange-50"}`}>
                                 📷 จากรูป SKU
                               </button>
+                              {uploadBtn(s.shopId, v.id, "text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg px-2 py-1")}
                               <button onClick={() => setPicker({ shopId: s.shopId, target: v.id })}
                                 className="text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg px-2 py-1">🖼 จากคลัง</button>
                               {chosen.length > 0 && (
@@ -578,12 +649,21 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
                 )}
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <button onClick={() => saveShop(s)} disabled={savingShop === s.shopId}
-                  className="bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm rounded-lg px-5 py-2">
-                  {savingShop === s.shopId ? "กำลังบันทึก…" : "บันทึก"}
-                </button>
-              </div>
+              {/* อยู่ในหน้าต่าง (drawer) = ปุ่มบันทึกอยู่แถบล่างแล้ว · เปิดนอก drawer = ปุ่มในกล่องตามเดิม */}
+              {inFooter ? (
+                dirtyShops.some((d) => d.shopId === s.shopId) && (
+                  <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                    มีการแก้ไขที่ยังไม่บันทึก — กด 💾 บันทึก ที่แถบล่าง
+                  </div>
+                )
+              ) : (
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={() => saveShop(s)} disabled={savingShop === s.shopId}
+                    className="bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm rounded-lg px-5 py-2">
+                    {savingShop === s.shopId ? "กำลังบันทึก…" : "บันทึก"}
+                  </button>
+                </div>
+              )}
             </div>
         </div>
         );
@@ -597,6 +677,8 @@ export function ParentWebListings({ parentId }: { parentId: string | null }) {
         typeFilter="image"
         title={picker?.target === "gallery" ? "เลือกรูปสินค้าบนเว็บ" : picker?.target.startsWith("banner:") ? "เลือกรูปแบนเนอร์" : "เลือกรูปเว็บของสีนี้ (เลือกได้หลายรูป)"}
       />
+      {/* ช่องเลือกไฟล์ตัวเดียว ใช้ร่วมทุกปุ่ม ⬆ อัปโหลด (รู้เป้าหมายจาก uploadTo) */}
+      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadFiles(e.target.files)} />
     </div>
   );
 }
