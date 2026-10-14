@@ -8,6 +8,7 @@
  */
 
 import { normalizeListing, type ListingConfig } from "@/lib/website-listing";
+import { isGradStop } from "@/lib/website-gradient";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
@@ -53,8 +54,13 @@ export interface ImagePlaceholder {
   opacity: number;
   /** ขนาด % ของกรอบ (20–70) */
   size: number;
+  /**
+   * สีพื้นตอนรอ (หายไปเมื่อรูปจริงขึ้น) — ว่าง = ตามพื้นหลังรูปเดิม · ชื่อสีธีม (เปลี่ยนธีมแล้วตาม) หรือ #rrggbb
+   * ตรวจด้วยของกลาง isGradStop (lib/website-gradient.ts) ชุดเดียวกับจุดสีของสีไล่
+   */
+  bg: string;
 }
-export const DEFAULT_IMAGE_PLACEHOLDER: ImagePlaceholder = { mode: "logo", imageKey: null, opacity: 12, size: 36 };
+export const DEFAULT_IMAGE_PLACEHOLDER: ImagePlaceholder = { mode: "logo", imageKey: null, opacity: 12, size: 36, bg: "" };
 export type CardQuickAdd = "hover" | "always" | "none";
 export type CardAlign = "left" | "center";
 export type CardGap = "sm" | "md" | "lg";
@@ -1403,7 +1409,14 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       placeholder: (() => {
         const p = (l.placeholder && typeof l.placeholder === "object" ? l.placeholder : {}) as Record<string, unknown>;
         const dp = DEFAULT_IMAGE_PLACEHOLDER;
-        return { mode: pick(p.mode, ["logo", "none"] as const, dp.mode), imageKey: key(p.imageKey), opacity: num(p.opacity, dp.opacity, 4, 40), size: num(p.size, dp.size, 20, 70) };
+        const bg = typeof p.bg === "string" ? p.bg.trim() : "";
+        return {
+          mode: pick(p.mode, ["logo", "none"] as const, dp.mode),
+          imageKey: key(p.imageKey),
+          opacity: num(p.opacity, dp.opacity, 4, 40),
+          size: num(p.size, dp.size, 20, 70),
+          bg: isGradStop(bg) ? (bg.startsWith("#") ? bg.toLowerCase() : bg) : "",
+        };
       })(),
     },
     header: {

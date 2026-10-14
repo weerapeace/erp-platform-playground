@@ -3,6 +3,7 @@
 /**
  * ColorPicker / ColorInput — ของกลางเลือกสี (ลากได้ ใช้ง่ายกว่า <input type="color">)
  * - ColorPicker: แผง HSV (กล่อง saturation/value ลากได้ + แถบ hue ลากได้) + ช่อง hex
+ *   + ปุ่ม 💧 ดูดสีจากหน้าจอ (รวมพรีวิวเว็บร้านใน iframe) — EyeDropper ของเบราว์เซอร์ (Chrome/Edge) · ไม่รองรับ = ไม่โชว์ปุ่ม
  * - ColorInput: ปุ่ม swatch + ช่องพิมพ์ hex/rgba → กดเปิด popover (portal ลอยทะลุ modal)
  *
  * ใช้แทน <input type="color"> ทุกที่ในระบบ (มาตรฐานกลาง)
@@ -32,6 +33,12 @@ function hexToHsv(hex: string): { h: number; s: number; v: number } {
   }
   return { h, s: max ? d / max : 0, v: max };
 }
+/** "rgb(r, g, b)" → #rrggbb (ตัวดูดสีบางเบราว์เซอร์คืนแบบนี้) */
+function rgbToHex(v: string): string | null {
+  const m = /rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(v ?? "");
+  if (!m) return null;
+  return "#" + [m[1], m[2], m[3]].map((n) => Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, "0")).join("");
+}
 function hsvToHex(h: number, s: number, v: number): string {
   const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
   let r = 0, g = 0, b = 0;
@@ -42,12 +49,38 @@ function hsvToHex(h: number, s: number, v: number): string {
   return "#" + to(r) + to(g) + to(b);
 }
 
+/** EyeDropper API (ยังไม่อยู่ใน type ของ TypeScript) */
+type EyeDropperCtor = new () => { open: () => Promise<{ sRGBHex: string }> };
+const eyeDropperCtor = (): EyeDropperCtor | null =>
+  typeof window !== "undefined" && "EyeDropper" in window ? (window as unknown as { EyeDropper: EyeDropperCtor }).EyeDropper : null;
+
 export function ColorPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
   const hsv = hexToHsv(value);
   const [h, setH] = useState(hsv.h);
   const [s, setS] = useState(hsv.s);
   const [v, setV] = useState(hsv.v);
   const [hexText, setHexText] = useState(normHex(value) ?? "#000000");
+  // เช็กหลัง mount (ฝั่งเซิร์ฟเวอร์ไม่มี window → กัน hydration ไม่ตรง)
+  const [canDrop, setCanDrop] = useState(false);
+  useEffect(() => setCanDrop(!!eyeDropperCtor()), []);
+  /** 💧 ดูดสีจากจุดไหนก็ได้บนจอ (กด Esc = ยกเลิก) */
+  const pickFromScreen = async () => {
+    const Ctor = eyeDropperCtor();
+    if (!Ctor) return;
+    try {
+      const { sRGBHex } = await new Ctor().open();
+      const nh = normHex(sRGBHex) ?? rgbToHex(sRGBHex);
+      if (!nh) return;
+      const x = hexToHsv(nh);
+      setH(x.h);
+      setS(x.s);
+      setV(x.v);
+      setHexText(nh);
+      onChange(nh);
+    } catch {
+      /* กด Esc / ปิดตัวดูดสี = ไม่เปลี่ยน */
+    }
+  };
 
   // sync เมื่อ value นอก เปลี่ยน (และไม่ตรงกับสีปัจจุบัน)
   useEffect(() => {
@@ -93,6 +126,12 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
         <span className="h-7 w-7 shrink-0 rounded border border-slate-200" style={{ background: hsvToHex(h, s, v) }} />
         <input value={hexText} onChange={(e) => { setHexText(e.target.value); const nh = normHex(e.target.value); if (nh) { const x = hexToHsv(nh); setH(x.h); setS(x.s); setV(x.v); onChange(nh); } }}
           className="h-7 flex-1 min-w-0 px-2 text-xs font-mono border border-slate-200 rounded" />
+        {canDrop && (
+          <button type="button" onClick={() => void pickFromScreen()} title="ดูดสีจากหน้าจอ — คลิกจุดไหนก็ได้ รวมในพรีวิวเว็บร้าน (Esc = ยกเลิก)"
+            className="h-7 shrink-0 px-2 rounded border border-slate-200 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-700">
+            💧 ดูดสี
+          </button>
+        )}
       </div>
     </div>
   );

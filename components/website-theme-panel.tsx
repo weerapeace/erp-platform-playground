@@ -1321,6 +1321,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 onChange={(p) => setLogo({ placeholder: { ...theme.logo.placeholder, ...p } })}
                 logoKey={theme.logo.imageKey}
                 surface={theme.colors.surface}
+                colors={theme.colors}
                 ratio={RATIO_CSS[theme.card.imageRatio] ?? "4 / 5"}
               />
 
@@ -2705,9 +2706,36 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
 }
 
 /** 🖼 ระหว่างรอรูปโหลด: โลโก้จาง ๆ กลางกรอบรูป (การ์ด + หน้าสินค้า) — ตัวอย่างสดด้านขวา */
-function PlaceholderSettings({ value, onChange, logoKey, surface, ratio }: { value: ImagePlaceholder; onChange: (p: Partial<ImagePlaceholder>) => void; logoKey: string | null; surface: string; ratio: string }) {
+function PlaceholderSettings({
+  value,
+  onChange,
+  logoKey,
+  surface,
+  colors,
+  ratio,
+}: {
+  value: ImagePlaceholder;
+  onChange: (p: Partial<ImagePlaceholder>) => void;
+  logoKey: string | null;
+  surface: string;
+  colors: Theme["colors"];
+  ratio: string;
+}) {
   const k = value.imageKey ?? logoKey;
   const url = k ? keyUrl(k, 400) : null;
+  // สีพื้นตอนรอ: ชื่อสีธีม (เปลี่ยนธีมแล้วตาม) — แบรนด์จาง = สูตรเดียวกับเว็บร้าน (แบรนด์ 14% บนขาว)
+  const soft = `color-mix(in srgb, ${colors.brand} 14%, white)`;
+  const BG_CHOICES: { v: string; l: string; css: string }[] = [
+    { v: "page", l: "พื้นเว็บ", css: colors.page },
+    { v: "surface", l: "พื้นการ์ด", css: colors.surface },
+    { v: "brandSoft", l: "แบรนด์จาง", css: soft },
+    { v: "brand", l: "แบรนด์", css: colors.brand },
+    { v: "muted", l: "ตัวอักษรรอง", css: colors.muted },
+    { v: "ink", l: "เข้ม", css: colors.ink },
+    { v: "white", l: "ขาว", css: "#ffffff" },
+  ];
+  const custom = /^#[0-9a-f]{6}$/i.test(value.bg);
+  const bgCss = !value.bg ? surface : custom ? value.bg : BG_CHOICES.find((c) => c.v === value.bg)?.css ?? surface;
   return (
     <div className="mt-4 pt-3 border-t border-slate-100">
       <label className={labelCls}>🖼 ระหว่างรอรูปโหลด (การ์ดสินค้า + หน้าสินค้า)</label>
@@ -2733,8 +2761,42 @@ function PlaceholderSettings({ value, onChange, logoKey, surface, ratio }: { val
               {!k && <p className="text-[11px] text-amber-600">ยังไม่มีรูปโลโก้ — อัปโหลดที่แท็บ “โลโก้” หรือช่องด้านบน (ไม่มีรูป = พื้นเปล่า)</p>}
             </>
           )}
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">สีพื้นตอนรอ (หายไปเมื่อรูปจริงขึ้น)</label>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onChange({ bg: "" })}
+                className={`rounded-full border px-2 py-0.5 text-[11px] ${!value.bg ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+                title="ใช้พื้นหลังรูปเดิม (ตั้งที่ “พื้นหลังหลังรูปสินค้า”)"
+              >
+                ตามพื้นหลังรูป
+              </button>
+              {BG_CHOICES.map((c) => (
+                <button
+                  key={c.v}
+                  type="button"
+                  title={c.l}
+                  onClick={() => onChange({ bg: c.v })}
+                  className={`w-6 h-6 rounded-full border border-black/10 ${value.bg === c.v ? "ring-2 ring-blue-500 ring-offset-1" : ""}`}
+                  style={{ background: c.css }}
+                />
+              ))}
+              {/* สีเอง: ตัวเลือกสีของกลาง (มีปุ่ม 💧 ดูดสีจากหน้าจอ/พรีวิว) */}
+              <span title="สีเอง (มี 💧 ดูดสีจากหน้าจอ)" className={`rounded ${custom ? "ring-2 ring-blue-500 ring-offset-1" : ""}`}>
+                <ColorInput
+                  value={custom ? value.bg : "#f4e3e6"}
+                  allowText={false}
+                  onChange={(hex) => {
+                    if (/^#[0-9a-f]{6}$/i.test(hex)) onChange({ bg: hex.toLowerCase() });
+                  }}
+                />
+              </span>
+            </div>
+            {custom && <p className="mt-1 text-[11px] text-amber-600">สีที่เลือกเองจะไม่เปลี่ยนตามธีมร้าน</p>}
+          </div>
         </div>
-        <div className="relative rounded-lg overflow-hidden border border-slate-200" style={{ aspectRatio: ratio, background: surface }} title="ตัวอย่างตอนรูปยังโหลดไม่เสร็จ">
+        <div className="relative rounded-lg overflow-hidden border border-slate-200" style={{ aspectRatio: ratio, background: bgCss }} title="ตัวอย่างตอนรูปยังโหลดไม่เสร็จ">
           {value.mode === "logo" && url && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={url} alt="" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 object-contain" style={{ width: `${value.size}%`, opacity: value.opacity / 100, filter: "grayscale(1)" }} />
