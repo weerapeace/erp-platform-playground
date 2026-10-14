@@ -146,9 +146,12 @@ const DEVICES: { k: Device; label: string; w: number; h: number; icon: string }[
 /** ระดับการย่อพรีวิว — "fit" = ย่อให้พอดีกล่อง (เหมือนแท็บจัดหน้าแรก) */
 type Zoom = "fit" | 0.5 | 0.75 | 1;
 
+/** แท็บ → หน้าที่พรีวิว ("product" = สินค้าตัวอย่างของร้าน) · ไม่อยู่ในรายการ = อยู่หน้าเดิม */
+const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product" };
+
 const PAGES = [
   { path: "/", label: "หน้าแรก" },
-  { path: "/shop", label: "ร้านวัสดุ" },
+  { path: "/shop", label: "สินค้าทั้งหมด (ร้านค้า)" },
   { path: "/oem", label: "รับผลิต" },
   { path: "/quote", label: "ขอใบเสนอราคา" },
   { path: "/contact", label: "ติดต่อ" },
@@ -336,14 +339,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (el.getAttribute("href") !== href) el.setAttribute("href", href);
   }, [theme]);
 
-  // เข้าแท็บ "หน้ารายการสินค้า" → พรีวิวไปหน้าร้านค้า (/shop) ให้เห็นรูปแทรกทันที
+  // กดแท็บ → พรีวิวไปหน้าที่แท็บนั้นแก้ทันที (การ์ด/หน้ารายการ = ร้านค้า · หน้าสินค้า = สินค้าตัวอย่าง)
+  // แท็บที่มีผลทุกหน้า (สี/ตัวอักษร/โลโก้/Header/เมนู/Footer/รูปทรง) = อยู่หน้าเดิม
+  // ถ้าในพรีวิวกดลิงก์ไปหน้าอื่นมาแล้ว (state ยังเป็น path เดิม) → สั่ง iframe ไปใหม่ตรง ๆ
   useEffect(() => {
-    if (tab === "listing" && page !== "/shop" && !page.startsWith("/shop?")) setPage("/shop");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
-  // เข้าแท็บ "หน้าสินค้า" → พรีวิวเปลี่ยนไปหน้าสินค้าตัวอย่างให้เอง (ถ้ายังดูหน้าแรกอยู่)
-  useEffect(() => {
-    if (tab === "product" && sampleProduct && page === "/") setPage(`/product/${sampleProduct}`);
+    const path = TAB_PREVIEW_PAGE[tab] === "product" ? (sampleProduct ? `/product/${sampleProduct}` : null) : TAB_PREVIEW_PAGE[tab] ?? null;
+    if (!path) return;
+    if (page !== path) setPage(path);
+    else if (siteUrl && iframeRef.current) iframeRef.current.src = `${siteUrl}${path}?preview=1`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, sampleProduct]);
 
