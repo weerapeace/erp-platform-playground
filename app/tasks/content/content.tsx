@@ -35,6 +35,8 @@ import {
 import { useCreativeOptions, platformLabel, platformMeta } from "../use-options";
 import { PlatformChip } from "../platform-chip";
 import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
+import { PostMockup } from "./post-mockup";
+import { captionLimitCheck, PLATFORM_LIMITS } from "@/lib/caption-template";
 import { ContentCreateModal } from "./content-create-modal";
 import { MultiUserPicker } from "../multi-user-picker";
 import { apiFetch } from "@/lib/api";
@@ -1308,7 +1310,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                         ? { connected: true, label: t(`เชื่อม Instagram แล้ว (ผ่านเพจ ${metaStatus.facebook?.page_name ?? "-"})`, `Instagram connected (via page ${metaStatus.facebook?.page_name ?? "-"})`), href: "/admin/platform-accounts" }
                         : { connected: false, label: t("ยังไม่เชื่อม Instagram — ต้องเชื่อมเพจ Facebook ที่ผูกบัญชี IG ธุรกิจ", "Instagram not connected — link an FB page with an IG business account"), href: "/admin/platform-accounts" })
                       : undefined}
-                  postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast} />)}
+                  postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast}
+                  pageName={(c.platform === "facebook" || c.platform === "instagram") ? (metaStatus.facebook?.page_name ?? brandLabel) : brandLabel} avatarUrl={brands.find((b) => b.id === brandId)?.logo_url ?? null} />)}
               </div>
             )}
           </div>
@@ -1645,7 +1648,7 @@ export function postFormatLabel(platform: string, key: string | undefined, t: (t
 }
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, connInfo, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast }: { open?: boolean; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; connInfo?: { connected: boolean; label: string; href: string }; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, connInfo, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast, pageName, avatarUrl }: { open?: boolean; pageName?: string | null; avatarUrl?: string | null; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; connInfo?: { connected: boolean; label: string; href: string }; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
   // ปุ่ม ✨ ของช่องนี้ = เปิดป๊อป "AI เขียนแคปชั่น" ของ drawer (ใส่คำสั่งเพิ่มได้) — ใช้เส้นทางเดียวกับปุ่มเขียนทั้งหมด
@@ -1661,6 +1664,8 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
     : `${useCaption ? (cap.caption ?? "") : ""}\n\n${useHashtags ? (cap.hashtags ?? "") : ""}`.trim();
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
   const [previewOpen, setPreviewOpen] = useState(false);   // 👁 ป๊อปดูตัวอย่างโพสต์ (จากหัวการ์ด ไม่ต้องกาง)
+  const lim = captionLimitCheck(cap.platform, preview);   // ลิมิตตัวอักษร/แฮชแท็กของแพลตฟอร์ม (lib/caption-template PLATFORM_LIMITS)
+  const overLimit = lim.over > 0 || lim.hashtagsOver > 0;
   // สถานะโพสต์ต่อแพลตฟอร์ม: ป้ายบนหัวการ์ด + ปุ่ม ✅ โพสต์แล้ว (กดสลับ) · "ข้าม" อยู่ในเมนู ⋯ (นาน ๆ ใช้ที)
 
   // ตัวอย่างที่ประกอบจากแม่แบบ — โชว์เฉพาะตอนแม่แบบ "เติมข้อความเพิ่ม" จริง ๆ
@@ -1718,6 +1723,12 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
               className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40">📋</button>
             <button type="button" onClick={() => setPreviewOpen(true)} disabled={!preview.trim()} title={t("ดูตัวอย่างที่จะโพสต์", "Preview the post")}
               className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40">👁</button>
+            {overLimit && (
+              <button type="button" onClick={() => setPreviewOpen(true)} className="h-7 shrink-0 rounded-md border border-rose-300 bg-rose-50 px-1.5 text-[10px] font-medium text-rose-700"
+                title={lim.over > 0 ? t(`ยาวเกินลิมิต ${platformLabel(cap.platform)} ${lim.max?.toLocaleString("th-TH")} ตัวอักษร อยู่ ${lim.over.toLocaleString("th-TH")} ตัว`, `${lim.over} chars over the ${lim.max} limit`) : t(`แฮชแท็กเกิน ${lim.maxHashtags} อัน`, `Over ${lim.maxHashtags} hashtags`)}>
+                ⚠ {lim.over > 0 ? t(`เกิน ${lim.over.toLocaleString("th-TH")} ตัว`, `+${lim.over}`) : t(`#เกิน ${lim.hashtagsOver}`, `#+${lim.hashtagsOver}`)}
+              </button>
+            )}
           </>
         )}
         <button type="button" onClick={onToggle} className="shrink-0"><span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${stBadge.cls}`}>{stBadge.label}</span></button>
@@ -1728,27 +1739,29 @@ function CaptionCard({ open = true, onToggle, contentId, canAi = false, aiBusy =
       <ERPModal open={previewOpen} onClose={() => setPreviewOpen(false)} size="sm"
         title={`👁 ${t("ตัวอย่างที่จะโพสต์", "Post preview")} · ${platformLabel(cap.platform)}`}
         footer={<div className="flex items-center justify-between gap-2 w-full">
-          <span className="text-[11px] text-slate-400">{preview.length.toLocaleString("th-TH")} {t("ตัวอักษร", "chars")}{selectedImages.length ? ` · 🖼 ${selectedImages.length}` : ""}</span>
+          <span className={`text-[11px] ${lim.over > 0 ? "text-rose-600 font-medium" : "text-slate-400"}`} title={PLATFORM_LIMITS[cap.platform]?.note ?? ""}>
+            {lim.chars.toLocaleString("th-TH")}{lim.max != null ? ` / ${lim.max.toLocaleString("th-TH")}` : ""} {t("ตัวอักษร", "chars")}
+            {lim.maxHashtags != null ? <span className={lim.hashtagsOver > 0 ? " text-rose-600 font-medium" : ""}> · #{lim.hashtagCount}/{lim.maxHashtags}</span> : null}
+            {selectedImages.length ? ` · 🖼 ${selectedImages.length}` : ""}
+          </span>
           <div className="flex gap-2">
             <button type="button" onClick={() => void copy()} className="h-9 px-3 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("คัดลอก", "Copy")}</button>
             <button type="button" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">{t("ปิด", "Close")}</button>
           </div>
         </div>}>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
-          <div className="flex items-center gap-2"><PlatformChip code={cap.platform} />{format && <span className="text-[10px] text-slate-500 bg-slate-100 rounded-full px-1.5">{postFormatLabel(cap.platform, format, t)}</span>}</div>
-          {selectedImages.length > 0 && (
-            <div className={`grid gap-1 ${selectedImages.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
-              {postImages.filter((im) => selectedImages.includes(im.key)).slice(0, 4).map((im, i) => (
-                <div key={im.key} className={`relative overflow-hidden rounded-lg bg-white ${selectedImages.length === 1 ? "aspect-[4/5]" : "aspect-square"}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r2ImageUrl(im.key, 600) ?? ""} alt="" className="w-full h-full object-cover" />
-                  {im.type === "video" && <span className="absolute bottom-1 left-1 text-[10px] bg-black/60 text-white px-1.5 rounded">🎬</span>}
-                  {i === 3 && selectedImages.length > 4 && <span className="absolute inset-0 bg-black/50 text-white flex items-center justify-center text-lg font-semibold">+{selectedImages.length - 4}</span>}
-                </div>
-              ))}
+        <div className="space-y-2">
+          {overLimit && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700">
+              ⚠ {lim.over > 0
+                ? t(`ข้อความยาว ${lim.chars.toLocaleString("th-TH")} ตัวอักษร เกินลิมิต ${platformLabel(cap.platform)} (${lim.max?.toLocaleString("th-TH")}) อยู่ ${lim.over.toLocaleString("th-TH")} ตัว — ต้องตัดก่อนโพสต์`, `${lim.chars} chars — ${lim.over} over the ${lim.max} limit`)
+                : t(`แฮชแท็ก ${lim.hashtagCount} อัน เกินที่ ${platformLabel(cap.platform)} รับ (${lim.maxHashtags}) — ตัดออก ${lim.hashtagsOver} อัน`, `${lim.hashtagCount} hashtags — ${lim.hashtagsOver} over the ${lim.maxHashtags} limit`)}
             </div>
           )}
-          <pre className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
+          <div className="rounded-xl bg-slate-100 p-3">
+            <PostMockup platform={cap.platform} pageName={pageName} avatarUrl={avatarUrl} format={format} text={preview} t={t}
+              images={selectedImages.map((k) => postImages.find((im) => im.key === k)).filter((im): im is PostImage => !!im)} />
+          </div>
+          <p className="text-[10px] text-slate-400 text-center">{t("ภาพจำลองหน้าตาโพสต์ — ของจริงอาจต่างเล็กน้อยตามแอป/ขนาดจอ", "Mock-up — the real post may differ slightly")}</p>
         </div>
       </ERPModal>
 

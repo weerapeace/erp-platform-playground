@@ -75,3 +75,26 @@ export function computeRealPrice(fake: number | null | undefined, discount: numb
   const real = isPercent ? fake * (1 - discount / 100) : fake - discount;
   return Math.max(0, Math.round(real));
 }
+
+// ---------- ลิมิตความยาวต่อแพลตฟอร์ม (ไว้เตือนในตัวอย่างโพสต์/หัวการ์ด) ----------
+/** ตัวอักษรสูงสุดของข้อความโพสต์ + จำนวนแฮชแท็กสูงสุด (ตามกติกาแพลตฟอร์ม ณ 2026) · ไม่มีในตาราง = ไม่เตือน */
+export const PLATFORM_LIMITS: Record<string, { chars: number; hashtags?: number; note?: string }> = {
+  x:         { chars: 280, note: "X (Twitter) โพสต์ธรรมดา 280 ตัวอักษร" },
+  instagram: { chars: 2200, hashtags: 30, note: "Instagram แคปชั่น 2,200 ตัวอักษร · แฮชแท็กไม่เกิน 30" },
+  tiktok:    { chars: 4000, note: "TikTok แคปชั่น 4,000 ตัวอักษร" },
+  tiktok_shop: { chars: 4000 },
+  facebook:  { chars: 63206, note: "Facebook 63,206 ตัวอักษร (แต่ที่เห็นก่อนกด 'ดูเพิ่มเติม' ≈ 3 บรรทัดแรก)" },
+  youtube:   { chars: 5000, note: "YouTube คำอธิบาย 5,000 ตัวอักษร" },
+  pinterest: { chars: 500, note: "Pinterest คำอธิบายพิน 500 ตัวอักษร" },
+  line_oa:   { chars: 5000, note: "LINE OA ข้อความ 5,000 ตัวอักษร" },
+  lemon8:    { chars: 5000 },
+};
+export type CaptionLimitCheck = { chars: number; max: number | null; over: number; hashtagCount: number; maxHashtags: number | null; hashtagsOver: number };
+/** นับตัวอักษร (ตาม code point — อีโมจิ/ไทยนับถูก) + แฮชแท็ก แล้วเทียบลิมิต · over > 0 = เกิน */
+export function captionLimitCheck(platform: string, text: string): CaptionLimitCheck {
+  const lim = PLATFORM_LIMITS[platform];
+  const chars = Array.from(text ?? "").length;
+  const hashtagCount = (text.match(/(^|\s)#[^\s#]+/g) ?? []).length;
+  const max = lim?.chars ?? null; const maxHashtags = lim?.hashtags ?? null;
+  return { chars, max, over: max != null ? Math.max(0, chars - max) : 0, hashtagCount, maxHashtags, hashtagsOver: maxHashtags != null ? Math.max(0, hashtagCount - maxHashtags) : 0 };
+}
