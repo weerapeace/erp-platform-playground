@@ -54,6 +54,8 @@ export interface WebCategoryDef {
   imageKey?: string | null;
   /** 🖼 แบนเนอร์หัวหน้าหมวด (r2 key) — โชว์บนหน้าร้านตอนเลือกหมวดนี้ · ไม่มี = หัวข้อธรรมดา */
   bannerKey?: string | null;
+  /** ↕ ลำดับสินค้าในหมวดนี้ (รหัสรุ่น) — ลากเรียงในแท็บหมวดหมู่ · ตัวที่ไม่อยู่ในรายการต่อท้ายตามลำดับรวมของร้าน */
+  order?: string[];
 }
 
 /** r2 key ของรูปหมวด — ตัวอักษรที่ปลอดภัยเท่านั้น (ไม่ผ่าน = ไม่มีรูป) */
@@ -144,6 +146,9 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
         blurb: str(o.blurb).slice(0, 240),
         imageKey: catImgKey(o.imageKey),
         bannerKey: catImgKey(o.bannerKey),
+        order: Array.isArray(o.order)
+          ? [...new Set((o.order as unknown[]).map((c) => String(c ?? "").trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "")).filter(Boolean))].slice(0, 500)
+          : [],
       };
     })
     .filter((c) => c.key && c.label && !seenKey.has(c.key) && seenKey.add(c.key) !== undefined);

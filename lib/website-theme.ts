@@ -997,7 +997,7 @@ export function normalizeZones(raw: unknown, legacy?: { menuAlign: MenuAlign; sh
   return { left: zone(r.left), center: zone(r.center), right: zone(r.right) };
 }
 
-export type MenuKind = "home" | "shop" | "category" | "product" | "page" | "contact" | "url";
+export type MenuKind = "home" | "shop" | "category" | "categories" | "product" | "page" | "contact" | "url";
 export interface MenuItem {
   id: string;
   label: string;
@@ -1022,6 +1022,7 @@ export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "home", label: "หน้าแรก", hint: "/" },
   { value: "shop", label: "สินค้าทั้งหมด", hint: "/shop" },
   { value: "category", label: "หมวดสินค้า", hint: "/shop?cat=…" },
+  { value: "categories", label: "📂 หมวดทั้งหมด (อัตโนมัติ)", hint: "/shop + เมนูย่อย = ทุกหมวดในแท็บหมวดหมู่ (เพิ่มหมวดแล้วขึ้นเอง)" },
   { value: "product", label: "สินค้า 1 ตัว", hint: "/product/…" },
   { value: "page", label: "หน้าที่สร้างเอง", hint: "/<slug>" },
   { value: "contact", label: "ติดต่อ", hint: "/contact" },
@@ -1059,6 +1060,7 @@ export function menuItemHref(it: { kind: MenuKind; value: string }): string {
   switch (it.kind) {
     case "home": return "/";
     case "shop": return "/shop";
+    case "categories": return "/shop";
     case "category": return it.value ? `/shop?cat=${encodeURIComponent(it.value)}` : "/shop";
     case "product": return it.value ? `/product/${it.value.toLowerCase()}` : "/shop";
     case "page": return it.value ? `/${it.value}` : "/";

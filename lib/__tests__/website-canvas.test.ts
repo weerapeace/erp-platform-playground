@@ -404,3 +404,21 @@ describe("รูปพื้นหลังผืน: มือถือปร�
     expect(old.bgMCustom).toBe(false);
   });
 });
+
+describe("แกลเลอรี / Spotlight / หมวด: ช่องใหม่", () => {
+  it("แกลเลอรี: ครอปรายรูปถูกกรองช่วง · บล็อกเก่า = จัตุรัส มุมมน 3 คอลัมน์ ชี้แล้วขยาย", () => {
+    const [g] = normalizeBlocks([{ type: "gallery", items: [{ imageKey: "x/a.jpg", crop: { x: 130, y: -4, zoom: 50 }, href: "javascript:alert(1)" }] }]) as unknown as Record<string, unknown>[];
+    const it0 = (g.items as Record<string, unknown>[])[0];
+    expect(it0.crop).toEqual({ x: 100, y: 0, zoom: 100 });
+    expect(String(it0.href)).not.toMatch(/javascript/i);
+    expect([g.ratio, g.frame, g.columns, g.hoverZoom, g.fullBleed]).toEqual(["1:1", "rounded", 3, true, false]);
+  });
+  it("Spotlight: บล็อกเก่า = แบบเดิม (จัดวางกลาง · ตามรูป · โชว์ทุกส่วน)", () => {
+    const [s0] = normalizeBlocks([{ type: "spotlight", codes: ["A1"] }]) as unknown as Record<string, unknown>[];
+    expect([s0.layout, s0.imageFit, s0.imageSize, s0.showName, s0.showBigText, s0.showNav, s0.bigTextOpacity]).toEqual(["center", "contain", 100, true, true, true, 14]);
+  });
+  it("หมวดสินค้า: ขนาดรูปถูกกรองช่วง 40–200", () => {
+    const [c] = normalizeBlocks([{ type: "categories", imgSize: 500 }]) as unknown as Record<string, unknown>[];
+    expect(c.imgSize).toBe(200);
+  });
+});

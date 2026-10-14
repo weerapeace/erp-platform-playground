@@ -3103,7 +3103,16 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
                       <input className={`${mini} w-full`} value={it.badge} maxLength={20} onChange={(e) => setItem(it.id, { badge: e.target.value })} />
                     </div>
                   </div>
-                  {depth === 0 && (
+                  {depth === 0 && it.kind === "categories" && (
+                    <div className="rounded-md bg-blue-50 border border-blue-100 px-2 py-1.5 space-y-1">
+                      <p className="text-[11px] text-blue-800">📂 เมนูย่อย = ทุกหมวดในแท็บ &quot;หมวดหมู่&quot; เรียงตามนั้น (เพิ่ม/ลบหมวดแล้วเมนูเปลี่ยนเอง)</p>
+                      <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
+                        <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={it.mega} onChange={(e) => setItem(it.id, { mega: e.target.checked })} />
+                        แผง Mega (กว้าง โชว์รูปหมวด)
+                      </label>
+                    </div>
+                  )}
+                  {depth === 0 && it.kind !== "categories" && (
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[11px] text-slate-500">เมนูย่อย ({it.children.length})</label>

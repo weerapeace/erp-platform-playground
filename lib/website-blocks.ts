@@ -630,6 +630,12 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
     case "categories":
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c, 40).toLowerCase()).filter(Boolean))].slice(0, fd.max ?? 40) : [];
+    case "crop": {
+      // ส่วนที่เห็นของรูป { x, y (0–100 %), zoom (100–300 %) } — ค่าแปลก ๆ = กลางรูป ไม่ซูม
+      const o = (v ?? {}) as Record<string, unknown>;
+      const n = (x: unknown, fb: number, lo: number, hi: number) => (Number.isFinite(Number(x)) && x !== null && x !== "" ? Math.max(lo, Math.min(hi, Math.round(Number(x)))) : fb);
+      return { x: n(o.x, 50, 0, 100), y: n(o.y, 50, 0, 100), zoom: n(o.zoom, 100, 100, 300) };
+    }
     case "category":
       return codeStr(v, 40).toLowerCase();
     case "code":

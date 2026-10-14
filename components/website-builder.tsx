@@ -1083,7 +1083,7 @@ export function WebsiteBuilder({
             onPatch={(p) => patchChild(selBlock.id, selChild.id, p)}
           />
         )}
-        <SchemaForm fields={selSchema.children!.fields} value={selChild} onChange={(p) => patchChild(selBlock.id, selChild.id, p)} ctx={formCtx} />
+        <SchemaForm fields={selSchema.children!.fields} value={selChild} onChange={(p) => patchChild(selBlock.id, selChild.id, p)} ctx={formCtx} parent={selBlock as unknown as Record<string, unknown>} />
         {visibilityRow(selChild.visibility, (k, val) => patchChild(selBlock.id, selChild.id, { visibility: { ...ALL_VISIBLE, ...selChild.visibility, [k]: val } }))}
       </div>
     </div>

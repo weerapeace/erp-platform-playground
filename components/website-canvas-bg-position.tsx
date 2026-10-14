@@ -12,17 +12,8 @@
  *
  * คำนวณด้วย canvasBgWindow (lib/website-canvas.ts) — สูตรเดียวกับเว็บร้าน (object-position + scale รอบจุดเดียวกัน)
  */
-import { useEffect, useRef, useState } from "react";
-import { measureImage } from "@/components/website-canvas-media";
-import {
-  CANVAS_BG_DEFAULT,
-  CANVAS_BG_REF_PHONE,
-  CANVAS_BG_REF_WIDTH,
-  CANVAS_MOBILE_WIDTH,
-  CANVAS_WIDTH,
-  canvasBgPosFromWindow,
-  canvasBgWindow,
-} from "@/lib/website-canvas";
+import { ImageCropBox } from "@/components/image-crop-box";
+import { CANVAS_BG_DEFAULT, CANVAS_BG_REF_PHONE, CANVAS_BG_REF_WIDTH, CANVAS_MOBILE_WIDTH, CANVAS_WIDTH } from "@/lib/website-canvas";
 
 export interface CanvasBgPos {
   fit: "cover" | "contain";
@@ -35,7 +26,6 @@ type BgPatch = Record<string, unknown>;
 
 const imgUrl = (key: string, w: number) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 const seg = (on: boolean) => `flex-1 px-2 py-1.5 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
-const pct = (n: number) => `${n * 100}%`;
 const n = (v: unknown, fb: number, min: number, max: number) => (v !== null && v !== "" && Number.isFinite(Number(v)) ? Math.max(min, Math.min(max, Number(v))) : fb);
 
 /** ค่าในบล็อก → ค่าที่ใช้ของจอนั้น (ข้อมูลเก่าไม่มีช่อง = กลางรูป เต็มผืน ไม่ซูม · มือถือไม่ได้ปรับแยก = ค่าคอม) */
@@ -85,19 +75,6 @@ export function CanvasBgPositioner({
   onChange: (p: BgPatch) => void;
 }) {
   const imageKey = String(block.bgImageKey ?? "");
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ offX: number; offY: number } | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setSize(null);
-    if (imageKey) void measureImage(imageKey).then((s) => alive && setSize(s));
-    return () => {
-      alive = false;
-    };
-  }, [imageKey]);
-
   const mobile = device === "mobile";
   const mobileCustomLayout = block.mobileMode === "custom";
   const split = block.bgMCustom === true;
@@ -111,32 +88,6 @@ export function CanvasBgPositioner({
   const phone = mobileCustomLayout ? { w: CANVAS_MOBILE_WIDTH, h: n(block.mobileHeight, 800, 120, 8000) } : CANVAS_BG_REF_PHONE;
   const box = mobile ? phone : desk;
   const cover = value.fit === "cover";
-  const win = size && cover ? canvasBgWindow(size, box, value) : null;
-  // หน้าคอม + มือถือยังใช้ค่าเดียวกัน → โชว์ส่วนที่มือถือเห็นเป็นเส้นประให้ด้วย
-  const mwin = size && cover && !mobile && !split ? canvasBgWindow(size, phone, value) : null;
-  const ia = size ? size.w / size.h : 16 / 9;
-
-  // ลาก/คลิกบนรูป → ย้ายกรอบ (คลิกนอกกรอบ = ให้จุดที่คลิกอยู่กลางกรอบ แล้วลากต่อได้)
-  const moveTo = (clientX: number, clientY: number) => {
-    const el = boxRef.current;
-    if (!el || !win || !drag.current) return;
-    const r = el.getBoundingClientRect();
-    const left = (clientX - r.left) / r.width - drag.current.offX;
-    const top = (clientY - r.top) / r.height - drag.current.offY;
-    const p = canvasBgPosFromWindow(win, left, top, value);
-    if (p.x !== value.x || p.y !== value.y || (mobile && !split)) set({ x: p.x, y: p.y });
-  };
-  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!win || e.button !== 0) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    const fx = (e.clientX - r.left) / r.width;
-    const fy = (e.clientY - r.top) / r.height;
-    const inside = fx >= win.x && fx <= win.x + win.w && fy >= win.y && fy <= win.y + win.h;
-    drag.current = inside ? { offX: fx - win.x, offY: fy - win.y } : { offX: win.w / 2, offY: win.h / 2 };
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (!inside) moveTo(e.clientX, e.clientY);
-  };
-
   if (!imageKey) return null;
 
   return (
@@ -169,31 +120,16 @@ export function CanvasBgPositioner({
 
       {cover ? (
         <>
-          <div
-            ref={boxRef}
-            className={`relative mx-auto overflow-hidden rounded-md border border-slate-200 bg-slate-100 select-none touch-none ${win ? "cursor-move" : ""}`}
-            style={{ aspectRatio: `${ia}`, maxWidth: `min(100%, ${Math.round(190 * ia)}px)` }}
-            onPointerDown={onDown}
-            onPointerMove={(e) => drag.current && moveTo(e.clientX, e.clientY)}
-            onPointerUp={() => (drag.current = null)}
-            onPointerCancel={() => (drag.current = null)}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imgUrl(imageKey, 600)} alt="" draggable={false} className="absolute inset-0 w-full h-full pointer-events-none" />
-            {win && (
-              <div
-                className={`absolute border-2 pointer-events-none ${mobile ? "border-amber-300" : "border-white"}`}
-                style={{ left: pct(win.x), top: pct(win.y), width: pct(win.w), height: pct(win.h), boxShadow: "0 0 0 9999px rgba(15,23,42,0.5)" }}
-              >
-                <span className="absolute left-1 top-1 rounded bg-white/90 px-1 text-[9px] text-slate-700">{mobile ? "📲 มือถือ" : "🖥 คอม"}</span>
-              </div>
-            )}
-            {mwin && (
-              <div className="absolute border-2 border-dashed border-amber-300 pointer-events-none" style={{ left: pct(mwin.x), top: pct(mwin.y), width: pct(mwin.w), height: pct(mwin.h) }}>
-                <span className="absolute right-1 bottom-1 rounded bg-amber-100/90 px-1 text-[9px] text-amber-800">📲</span>
-              </div>
-            )}
-          </div>
+          {/* ของกลาง ImageCropBox — หน้าคอม + มือถือยังใช้ค่าเดียวกัน → เส้นประ = ส่วนที่มือถือเห็น */}
+          <ImageCropBox
+            imageKey={imageKey}
+            box={box}
+            value={value}
+            onChange={(p) => set(p)}
+            label={mobile ? "📲 มือถือ" : "🖥 คอม"}
+            tone={mobile ? "amber" : "white"}
+            extraBox={!mobile && !split ? phone : null}
+          />
           <p className="text-[10px] text-slate-500">
             {mobile
               ? `ลากกรอบ (หรือคลิกตรงไหนของรูป) = ส่วนที่เห็นบนมือถือ${mobileCustomLayout ? "" : " · ผืนเรียงอัตโนมัติ: กรอบคิดจากจอโทรศัพท์ (สูงจริงตามจำนวนชิ้น)"}`

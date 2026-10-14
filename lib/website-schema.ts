@@ -62,6 +62,7 @@ export type FieldType =
   | "products" // เลือกสินค้าหลายตัว (เก็บรหัสรุ่น code[])
   | "category" // หมวดสินค้าบนเว็บของร้าน (key)
   | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
+  | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
   | "code"; // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
 
 export type FieldGroup = "content" | "media" | "action" | "layout" | "products";
@@ -106,6 +107,10 @@ export interface FieldDef {
    * eq เป็น array = ค่าใดค่าหนึ่งในรายการ · ใส่หลายเงื่อนไขเป็น array = ต้องตรงทุกข้อ
    */
   showIf?: ShowIf | ShowIf[];
+  /** ช่องชนิด crop: key ของรูปในชิ้นเดียวกัน (เช่น "imageKey") */
+  cropImage?: string;
+  /** ช่องชนิด crop: key ของสัดส่วนกรอบใน Section แม่ (ค่าแบบ "4:5" · "auto" = ตามรูป ไม่ต้องครอป) */
+  cropRatio?: string;
 }
 
 export interface ShowIf {
@@ -509,7 +514,70 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     meta: { label: "แกลเลอรีรูป", icon: "🖼️", hint: "หลายรูปเรียงเป็นตาราง", group: "พื้นฐาน" },
     fields: [
       ...headFields({ title: "แกลเลอรี" }),
-      f("columns", "จำนวนคอลัมน์", "number", { group: "layout", default: 3, min: 2, numMax: 4 }),
+      f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 3, min: 1, numMax: 6 }),
+      f("ratio", "สัดส่วนรูป", "select", {
+        group: "layout",
+        default: "1:1",
+        options: [
+          { v: "1:1", l: "จัตุรัส 1:1" },
+          { v: "4:5", l: "แนวตั้ง 4:5" },
+          { v: "3:4", l: "แนวตั้ง 3:4" },
+          { v: "2:3", l: "แนวตั้งสูง 2:3" },
+          { v: "4:3", l: "แนวนอน 4:3" },
+          { v: "16:9", l: "แนวนอนกว้าง 16:9" },
+          { v: "auto", l: "ตามรูปจริง (ไม่ตัด)" },
+        ],
+        hint: "ตัดรูปเป็นสัดส่วนนี้ — เลือกส่วนที่เห็น/ซูมได้ทีละรูป (กดที่รูปในต้นไม้)",
+      }),
+      f("frame", "ทรงกรอบ", "select", {
+        group: "layout",
+        default: "rounded",
+        options: [
+          { v: "rounded", l: "มุมมน" },
+          { v: "rect", l: "เหลี่ยม" },
+          { v: "circle", l: "วงกลม / วงรี" },
+          { v: "arch", l: "โค้งประตู" },
+          { v: "heart", l: "หัวใจ" },
+          { v: "scallop", l: "ขอบหยัก" },
+          { v: "polaroid", l: "โพลารอยด์" },
+          { v: "stamp", l: "แสตมป์" },
+        ],
+      }),
+      f("border", "เส้นกรอบ", "select", {
+        group: "layout",
+        default: "none",
+        options: [
+          { v: "none", l: "ไม่มี" },
+          { v: "line", l: "เส้นเดียว" },
+          { v: "double", l: "เส้นคู่" },
+          { v: "dotted", l: "จุดไข่ปลา" },
+        ],
+        showIf: { key: "frame", eq: ["rounded", "rect", "circle", "arch"] },
+      }),
+      f("borderColor", "สีเส้นกรอบ", "select", {
+        group: "layout",
+        default: "brand",
+        options: [
+          { v: "brand", l: "สีแบรนด์" },
+          { v: "brandDeep", l: "แบรนด์เข้ม" },
+          { v: "ink", l: "ตัวอักษรหลัก" },
+          { v: "muted", l: "เทาอ่อน" },
+          { v: "white", l: "ขาว" },
+        ],
+        showIf: [{ key: "frame", eq: ["rounded", "rect", "circle", "arch"] }, { key: "border", eq: ["line", "double", "dotted"] }],
+      }),
+      f("gap", "ระยะห่างระหว่างรูป", "select", {
+        group: "layout",
+        default: "md",
+        options: [
+          { v: "none", l: "ชิดกัน" },
+          { v: "sm", l: "น้อย" },
+          { v: "md", l: "กลาง" },
+          { v: "lg", l: "มาก" },
+        ],
+      }),
+      f("fullBleed", "รูปเต็มความกว้างจอ", "toggle", { group: "layout", default: false, hint: "ตารางรูปยืดเต็มจอ (หัวข้อยังอยู่ในกรอบปกติ)" }),
+      f("hoverZoom", "ชี้แล้วรูปขยายนิด ๆ", "toggle", { group: "layout", default: true }),
     ],
     children: {
       key: "items",
@@ -517,7 +585,13 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       itemLabel: "รูป",
       icon: "🏞️",
       max: 24,
-      fields: [image("imageKey", "รูป"), text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200 }), text("caption", "ข้อความใต้รูป", { default: "", max: 200 })],
+      fields: [
+        image("imageKey", "รูป"),
+        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
+        text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200 }),
+        text("caption", "ข้อความใต้รูป", { default: "", max: 200 }),
+        f("href", "กดรูปแล้วไปที่", "target", { group: "action", default: "", hint: "ว่าง = กดไม่ได้" }),
+      ],
       summary: (it) => (it.imageKey ? s(it.caption) || s(it.alt) || "รูป" : "ยังไม่เลือกรูป"),
     },
     summary: (b) => count(arr(b.items).length, "รูป"),
@@ -840,6 +914,80 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       f("bgColor", "สีพื้นหลัง", "color", { group: "layout", default: "", showIf: { key: "bgMode", eq: "custom" } }),
       f("autoplay", "สลับสินค้าอัตโนมัติ", "toggle", { group: "layout", default: true }),
       f("interval", "เวลาต่อสินค้า (วินาที)", "number", { group: "layout", default: 6, min: 3, numMax: 30 }),
+      /* ── โชว์/ซ่อน แต่ละส่วน ── */
+      f("showName", "โชว์ชื่อสินค้า", "toggle", { group: "content", default: true }),
+      f("showCategory", "โชว์ชื่อหมวด", "toggle", { group: "content", default: true }),
+      f("showBigText", "โชว์ตัวอักษรยักษ์ด้านหลัง", "toggle", { group: "content", default: true }),
+      f("showNav", "โชว์ปุ่มเลื่อน/จุด", "toggle", { group: "content", default: true }),
+      /* ── การจัดวาง ── */
+      f("layout", "การจัดวาง", "select", {
+        group: "layout",
+        default: "center",
+        wide: true,
+        options: [
+          { v: "center", l: "ข้อความซ้าย · รูปกลาง · ตัวเลือกขวา (แบบเดิม)" },
+          { v: "image-left", l: "รูปซ้าย · ข้อความ+ตัวเลือกขวา" },
+          { v: "image-right", l: "ข้อความ+ตัวเลือกซ้าย · รูปขวา" },
+          { v: "stack", l: "รูปบน · ข้อความกลางด้านล่าง" },
+        ],
+      }),
+      f("textAlign", "จัดข้อความ", "select", {
+        group: "layout",
+        default: "left",
+        options: [
+          { v: "left", l: "ชิดซ้าย" },
+          { v: "center", l: "กึ่งกลาง" },
+        ],
+      }),
+      /* ── รูปสินค้า ── */
+      f("imageFit", "การแสดงรูป", "select", {
+        group: "media",
+        default: "contain",
+        options: [
+          { v: "contain", l: "ตามรูป (เห็นทั้งรูป)" },
+          { v: "cover", l: "เต็มกล่อง (ตัดขอบที่เกิน)" },
+        ],
+      }),
+      f("imageRatio", "สัดส่วนกล่องรูป", "select", {
+        group: "media",
+        default: "1:1",
+        options: [
+          { v: "1:1", l: "จัตุรัส 1:1" },
+          { v: "4:5", l: "แนวตั้ง 4:5" },
+          { v: "3:4", l: "แนวตั้ง 3:4" },
+          { v: "4:3", l: "แนวนอน 4:3" },
+        ],
+      }),
+      f("imageSize", "ขนาดรูป (%)", "range", { group: "media", default: 100, min: 60, numMax: 140, step: 5, hint: "100 = ปกติ (กว้างสุด 420px)" }),
+      f("imageFrame", "กรอบรูป", "select", {
+        group: "media",
+        default: "none",
+        options: [
+          { v: "none", l: "ไม่มี (ลอยบนพื้น)" },
+          { v: "rounded", l: "มุมมน" },
+          { v: "circle", l: "วงกลม" },
+          { v: "arch", l: "โค้งประตู" },
+        ],
+      }),
+      f("imageBg", "พื้นหลังรูป", "select", {
+        group: "media",
+        default: "none",
+        options: [
+          { v: "none", l: "โปร่ง" },
+          { v: "white", l: "ขาว" },
+          { v: "surface", l: "พื้นการ์ด" },
+          { v: "soft", l: "สีแบรนด์จาง" },
+        ],
+      }),
+      f("imageShadow", "เงาใต้รูป", "toggle", { group: "media", default: true }),
+      /* ── ตัวอักษร / สี ── */
+      f("nameFont", "ฟอนต์ชื่อสินค้า", "select", { group: "layout", default: "display", options: CANVAS_FONTS }),
+      f("nameSize", "ขนาดชื่อสินค้า (px)", "range", { group: "layout", default: 30, min: 16, numMax: 64, step: 1 }),
+      f("nameColor", "สีชื่อสินค้า", "color", { group: "layout", default: "", hint: "ว่าง = ตามธีม" }),
+      f("priceColor", "สีราคา", "color", { group: "layout", default: "", hint: "ว่าง = สีแบรนด์" }),
+      f("bigTextFont", "ฟอนต์ตัวอักษรยักษ์", "select", { group: "layout", default: "display", options: CANVAS_FONTS, showIf: { key: "showBigText", eq: true } }),
+      f("bigTextColor", "สีตัวอักษรยักษ์", "color", { group: "layout", default: "", hint: "ว่าง = สีแบรนด์", showIf: { key: "showBigText", eq: true } }),
+      f("bigTextOpacity", "ความเข้มตัวอักษรยักษ์ (%)", "range", { group: "layout", default: 14, min: 4, numMax: 60, step: 1, showIf: { key: "showBigText", eq: true } }),
     ],
     summary: (b) => `${count((b.codes as unknown[])?.length ?? 0, "รุ่น")}${s(b.bigText) ? ` · ${s(b.bigText)}` : ""}`,
   },
@@ -942,6 +1090,24 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "16:9", l: "แนวนอนกว้าง 16:9" },
         ],
         showIf: { key: "layout", eq: "tile" },
+      }),
+      f("imgFit", "การวางรูปในการ์ด", "select", {
+        group: "layout",
+        default: "cover",
+        options: [
+          { v: "cover", l: "เต็มการ์ด (ตัดขอบที่เกิน)" },
+          { v: "contain", l: "เห็นทั้งรูป (ไม่ตัด)" },
+        ],
+        showIf: { key: "layout", eq: "tile" },
+      }),
+      f("imgSize", "ขนาดรูป (%)", "range", {
+        group: "layout",
+        default: 100,
+        min: 40,
+        numMax: 200,
+        step: 5,
+        hint: "100 = ปกติ · น้อยกว่า = รูปเล็กลง · มากกว่า = ขยาย",
+        showIf: { key: "layout", eq: ["tile", "row", "icon"] },
       }),
       f("textPos", "ตำแหน่งชื่อบนรูป", "select", {
         group: "layout",
@@ -1061,6 +1227,8 @@ export function defaultForType(t: FieldType): unknown {
     case "products":
     case "categories":
       return [];
+    case "crop":
+      return { x: 50, y: 50, zoom: 100 };
     default:
       return "";
   }

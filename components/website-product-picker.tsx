@@ -5,13 +5,16 @@
  *
  * ใช้ในบล็อก "ตารางสินค้า / คอลเลกชัน" (schema field type = products)
  * ดึงจาก /api/website/listings?shop= (สินค้าที่เพิ่มในแท็บ "สินค้าบนเว็บ" แล้ว) — ไม่ใช่ทั้ง ERP
- * ป๊อปใช้ของกลาง ERPModal + MiniTable (เลือกหลายแถว) · ลำดับที่เลือก = ลำดับที่โชว์บนเว็บ (ลากสลับในแถบชิปได้)
+ * ป๊อปใช้ของกลาง ERPModal + MiniTable (เลือกหลายแถว) · ลำดับที่เลือก = ลำดับที่โชว์บนเว็บ
+ * รายการที่เลือก = แถวมีรูปเล็ก + รหัส + ชื่อ · ลากหูจับ ⠿ เพื่อเรียง (ของกลาง useDragReorder) · ✕ เอาออก
+ * รายการสินค้าบนเว็บโหลดครั้งเดียวต่อร้าน (แคชในหน้า) — หลายช่องในหน้าเดียวกันไม่ยิงซ้ำ
  */
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { MiniTable } from "@/components/mini-table";
 import { keyUrl } from "@/components/website-theme-media";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 
 type Listing = {
   id: string;
@@ -22,8 +25,23 @@ type Listing = {
   erpImageKey: string | null;
   webImages: string[];
   webCategory: string;
-  mapped: { category?: string; name?: string } | null;
+  mapped: { category?: string; name?: string; images?: string[] } | null;
 };
+
+/** สินค้าที่เผยแพร่ของร้าน — แคชต่อร้าน (โหลดใหม่เมื่อเปิดป๊อปเลือก) */
+const listingCache = new Map<string, Promise<Listing[]>>();
+function loadListings(shopSlug: string, fresh = false): Promise<Listing[]> {
+  if (fresh || !listingCache.has(shopSlug)) {
+    listingCache.set(
+      shopSlug,
+      apiFetch(`/api/website/listings?shop=${encodeURIComponent(shopSlug)}`)
+        .then((r) => r.json())
+        .then((j) => ((j.listings ?? []) as Listing[]).filter((l) => l.published))
+        .catch(() => [])
+    );
+  }
+  return listingCache.get(shopSlug)!;
+}
 
 export function WebsiteProductPicker({
   shopSlug,
@@ -41,15 +59,15 @@ export function WebsiteProductPicker({
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set(value));
 
+  // โหลดรายการตั้งแต่แรก (โชว์รูป/ชื่อในรายการที่เลือก) · เปิดป๊อป = โหลดใหม่ (เผื่อเพิ่งเพิ่มสินค้า)
   useEffect(() => {
-    if (!open) return;
-    setSel(new Set(value));
     let alive = true;
-    setLoading(true);
-    apiFetch(`/api/website/listings?shop=${encodeURIComponent(shopSlug)}`)
-      .then((r) => r.json())
-      .then((j) => alive && setRows(((j.listings ?? []) as Listing[]).filter((l) => l.published)))
-      .catch(() => alive && setRows([]))
+    if (open) {
+      setSel(new Set(value));
+      setLoading(true);
+    }
+    loadListings(shopSlug, open)
+      .then((ls) => alive && setRows(ls))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -59,7 +77,8 @@ export function WebsiteProductPicker({
 
   const byCode = useMemo(() => new Map(rows.map((r) => [r.code, r])), [rows]);
   const name = (l: Listing) => l.webName || l.mapped?.name || l.erpName || l.code;
-  const img = (l: Listing) => keyUrl(l.webImages?.[0] ?? l.erpImageKey, 80);
+  const img = (l: Listing) => keyUrl(l.webImages?.[0] ?? l.mapped?.images?.[0] ?? l.erpImageKey, 80);
+  const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => onChange(moveItem(value, from, to)));
 
   const confirm = () => {
     // คงลำดับเดิมของตัวที่เลือกไว้แล้ว + ต่อท้ายตัวใหม่ตามลำดับในตาราง
@@ -69,29 +88,35 @@ export function WebsiteProductPicker({
     setOpen(false);
   };
 
-  const move = (code: string, dir: -1 | 1) => {
-    const i = value.indexOf(code);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= value.length) return;
-    const next = [...value];
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  };
-
   return (
     <div className="space-y-2">
       {value.length === 0 ? (
         <p className="text-xs text-slate-400">ยังไม่ได้เลือกสินค้า</p>
       ) : (
-        <ul className="flex flex-wrap gap-1.5">
-          {value.map((code) => (
-            <li key={code} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white pl-2 pr-1 py-0.5 text-xs text-slate-700">
-              <span className="font-mono">{code}</span>
-              <button type="button" onClick={() => move(code, -1)} className="text-slate-400 hover:text-slate-800 px-0.5" title="เลื่อนขึ้น">‹</button>
-              <button type="button" onClick={() => move(code, 1)} className="text-slate-400 hover:text-slate-800 px-0.5" title="เลื่อนลง">›</button>
-              <button type="button" onClick={() => onChange(value.filter((c) => c !== code))} className="text-slate-400 hover:text-red-500 px-1" title="เอาออก">×</button>
-            </li>
-          ))}
+        <ul className="space-y-1">
+          {value.map((code, i) => {
+            const l = byCode.get(code);
+            const u = l ? img(l) : null;
+            return (
+              <li key={code} {...rowProps(i)} className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-1.5 py-1 ${rowCls(i)}`}>
+                <DragHandle {...handleProps(i)} title="ลากเพื่อเรียงลำดับ" />
+                <span className="text-[10px] text-slate-400 tabular-nums w-3 text-right">{i + 1}</span>
+                {u ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={u} alt="" className="w-8 h-8 rounded object-cover bg-slate-100 shrink-0" />
+                ) : (
+                  <span className="w-8 h-8 rounded bg-slate-100 shrink-0" />
+                )}
+                <span className="flex-1 min-w-0">
+                  <span className="block font-mono text-[11px] text-slate-700">{code}</span>
+                  <span className={`block text-[10px] truncate ${l ? "text-slate-400" : "text-amber-600"}`}>{l ? name(l) : rows.length ? "ไม่อยู่บนเว็บแล้ว" : ""}</span>
+                </span>
+                <button type="button" onClick={() => onChange(value.filter((c) => c !== code))} className="text-slate-400 hover:text-red-500 px-1.5" title="เอาออก">
+                  ×
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
       <button type="button" onClick={() => setOpen(true)} className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-700 hover:border-slate-500">

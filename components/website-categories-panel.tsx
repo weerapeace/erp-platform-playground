@@ -130,7 +130,20 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   };
 
   const sel = cats.find((c) => c.key === selKey) ?? null;
-  const inCat = useMemo(() => (sel ? listings.filter((l) => l.categories.includes(sel.key)) : []), [listings, sel]);
+  // สินค้าในหมวด เรียงตามที่ลากไว้ (ตัวที่ยังไม่อยู่ในลำดับ ต่อท้ายตามลำดับรวมของร้าน)
+  const inCat = useMemo(() => {
+    if (!sel) return [];
+    const list = listings.filter((l) => l.categories.includes(sel.key));
+    const pos = new Map((sel.order ?? []).map((c, i) => [c, i]));
+    return list
+      .map((l, i) => ({ l, i }))
+      .sort((a, b) => (pos.get(a.l.code.toUpperCase()) ?? 1e6 + a.i) - (pos.get(b.l.code.toUpperCase()) ?? 1e6 + b.i))
+      .map((x) => x.l);
+  }, [listings, sel]);
+  const prodDrag = useDragReorder((from, to) => {
+    if (!sel) return;
+    patchCat(sel.key, { order: moveItem(inCat, from, to).map((l) => l.code.toUpperCase()) });
+  });
   const countOf = (key: string) => listings.filter((l) => l.categories.includes(key)).length;
   const labelOf = (key: string) => cats.find((c) => c.key === key)?.label ?? key;
 
@@ -248,12 +261,15 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                   ➕ เพิ่มสินค้าเข้าหมวด
                 </button>
               </div>
+              {inCat.length > 1 && <p className="text-[11px] text-slate-400 -mt-1.5 mb-2">ลาก ⠿ เพื่อเรียงลำดับสินค้าในหมวดนี้ (หน้าร้านเรียงตามนี้เมื่อเลือกหมวด)</p>}
               {inCat.length === 0 ? (
                 <p className="text-xs text-slate-400 py-8 text-center">ยังไม่มีสินค้าในหมวดนี้ — กด ➕ เพิ่มสินค้าเข้าหมวด</p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
-                  {inCat.map((l) => (
-                    <div key={l.parentId} className="group relative rounded-lg border border-slate-200 p-1.5">
+                  {inCat.map((l, i) => (
+                    <div key={l.parentId} {...prodDrag.rowProps(i)} className={`group relative rounded-lg border border-slate-200 p-1.5 ${prodDrag.rowCls(i)}`}>
+                      <DragHandle {...prodDrag.handleProps(i)} title="ลากเพื่อเรียงลำดับในหมวดนี้" className="absolute left-2.5 top-2.5 z-10 rounded bg-white/90 px-1 text-sm shadow-sm" />
+                      <span className="absolute right-2 top-2 z-10 rounded-full bg-white/90 px-1.5 text-[10px] text-slate-500 tabular-nums">{i + 1}</span>
                       <div className="aspect-square rounded-md bg-slate-100 overflow-hidden">
                         {thumbOf(l) && (
                           // eslint-disable-next-line @next/next/no-img-element

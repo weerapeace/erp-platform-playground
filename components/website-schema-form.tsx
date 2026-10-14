@@ -9,6 +9,7 @@
  *
  * จัดกลุ่มช่องเป็นหมวด (เนื้อหา / รูป / ปุ่ม / การจัดวาง / สินค้า) · รองรับ showIf (โชว์เมื่อช่องอื่นเป็นค่าที่กำหนด)
  */
+import { ImageCropBox, CropZoom } from "@/components/image-crop-box";
 import { useMemo } from "react";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
@@ -73,18 +74,49 @@ function ListEditor({ items, placeholder, max, onChange }: { items: string[]; pl
   );
 }
 
+/** ช่อง crop: ลากกรอบเลือกส่วนที่เห็น + ซูม (ของกลาง ImageCropBox) — กรอบตามสัดส่วนที่ตั้งใน Section แม่ */
+function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value: unknown; onChange: (v: unknown) => void; item?: Record<string, unknown>; parent?: Record<string, unknown> }) {
+  const key = fd.cropImage ? item?.[fd.cropImage] : null;
+  const ratio = String((fd.cropRatio ? parent?.[fd.cropRatio] : null) ?? "1:1");
+  const o = (value ?? {}) as Record<string, unknown>;
+  const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50), zoom: Number(o.zoom ?? 100) };
+  const m = /^(\d+):(\d+)$/.exec(ratio);
+  if (typeof key !== "string" || !key) return <Field label={fd.label} wide><p className="text-xs text-slate-400">เลือกรูปก่อน แล้วค่อยเลือกส่วนที่เห็น</p></Field>;
+  if (!m) return <Field label={fd.label} wide><p className="text-xs text-slate-400">สัดส่วน &quot;ตามรูปจริง&quot; = เห็นทั้งรูป ไม่ต้องเลือกส่วน</p></Field>;
+  return (
+    <Field label={fd.label} hint="ลากกรอบ (หรือคลิกตรงไหนของรูป) = ส่วนที่โชว์บนเว็บ" wide>
+      <div className="space-y-2">
+        <ImageCropBox imageKey={key} box={{ w: Number(m[1]), h: Number(m[2]) }} value={v} onChange={(p) => onChange({ ...v, ...p })} />
+        <CropZoom value={v.zoom} onChange={(z) => onChange({ ...v, zoom: z })} />
+        {(v.x !== 50 || v.y !== 50 || v.zoom !== 100) && (
+          <button type="button" className="text-[11px] text-slate-500 hover:text-blue-600" onClick={() => onChange({ x: 50, y: 50, zoom: 100 })}>
+            ↺ กลับกลางรูป
+          </button>
+        )}
+      </div>
+    </Field>
+  );
+}
+
 /** ช่องเดียวตาม schema */
 export function SchemaField({
   fd,
   value,
   onChange,
   ctx,
+  item,
+  parent,
 }: {
   fd: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
   ctx: SchemaFormContext;
+  /** ค่าทั้งชิ้นที่ช่องนี้อยู่ (ช่อง crop อ่านรูปของชิ้นเดียวกัน) */
+  item?: Record<string, unknown>;
+  /** Section แม่ (ตอนแก้ Block ย่อย — ช่อง crop อ่านสัดส่วนกรอบ) */
+  parent?: Record<string, unknown>;
 }) {
+  if (fd.type === "crop") return <CropField fd={fd} value={value} onChange={onChange} item={item} parent={parent} />;
   const s = typeof value === "string" ? value : value == null ? "" : String(value);
   switch (fd.type) {
     case "text":
@@ -246,11 +278,14 @@ export function SchemaForm({
   onChange,
   ctx,
   compact = false,
+  parent,
 }: {
   fields: FieldDef[];
   value: Record<string, unknown>;
   onChange: (patch: Record<string, unknown>) => void;
   ctx: SchemaFormContext;
+  /** Section แม่ (เฉพาะตอนแก้ Block ย่อย) */
+  parent?: Record<string, unknown>;
   /** ชิ้นย่อย: ไม่แยกหัวกลุ่ม */
   compact?: boolean;
 }) {
@@ -275,7 +310,7 @@ export function SchemaForm({
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             {list.map((fd) => (
-              <SchemaField key={fd.key} fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} ctx={ctx} />
+              <SchemaField key={fd.key} fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} ctx={ctx} item={value} parent={parent} />
             ))}
           </div>
         </section>
