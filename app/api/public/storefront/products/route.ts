@@ -25,6 +25,7 @@ import {
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
+import { productDimensions, type FitItem, type DimensionRow } from "@/lib/product-fits";
 import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
@@ -98,6 +99,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // 🖼 ฟิลด์รูปของ Parent SKU → แบนเนอร์เลือก "ฟิลด์รูปของ Parent SKU" ได้
     loadParentImageFields(sb),
   ]);
+  // 📏 รายการกลาง "ใส่อะไรได้บ้าง" (ตารางเล็ก) → หัวข้อ "ขนาด" ในชุดรายละเอียดสินค้า
+  const { data: fitRows } = await sb.from("product_fit_items").select("id, name, name_en, is_active").eq("is_active", true);
+  const fitCatalog = (fitRows ?? []) as FitItem[];
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const relatedValues = await resolveRelatedValues(sb, parentFields, (parents ?? []) as Record<string, unknown>[]);
 
@@ -209,6 +213,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         featured: Boolean(l.featured),
         /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
         attrs: productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues),
+        /** 📏 หัวข้อ "ขนาด": ใส่ได้ + แถว ซม./นิ้ว (เว็บเลือกเองว่าจะต่อนิ้วไหม ตามธีม) — ไม่มีข้อมูล = ไม่ส่ง */
+        dimensions: productDimensions(p as unknown as DimensionRow & { fits?: unknown }, fitCatalog),
         images: r.images.map(imageUrl),
         /** รูปปก + แกลเลอรีของ Parent SKU (แยกจาก images ที่อาจมาจาก SKU ลูก) */
         parentImages: [...new Set([...(p.cover_image_r2_key ? [p.cover_image_r2_key] : []), ...(parentGallery.get(p.id) ?? [])])].map(imageUrl),

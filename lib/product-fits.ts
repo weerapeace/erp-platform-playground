@@ -68,30 +68,44 @@ const num = (v: unknown): number => {
 };
 
 /**
- * บรรทัดขนาดสำหรับโชว์ เช่น
- *   { label: "กว้าง", text: "23 ซม. | 9.1\"" } · สายปรับได้ → "50–60 ซม. | 19.7–23.6\""
- * ช่องที่ว่าง/0 ถูกข้าม · showInch=false → ไม่ต่อท้ายนิ้ว
+ * แถวขนาดสำหรับโชว์ — แยก ซม. / นิ้ว ไว้ ให้ปลายทางเลือกเองว่าจะต่อนิ้วไหม (ตั้งเปิด/ปิดต่อร้านในธีม)
+ *   { key:"width", label:"กว้าง", cm:"23 ซม.", inch:"9.1\"" }
+ *   สายปรับได้ → { cm:"50–60 ซม. (ปรับได้)", inch:"19.7–23.6\"" }
+ * ช่องที่ว่าง/0 ถูกข้าม
  */
 export type DimensionRow = {
   size_length_cm?: unknown; size_height_cm?: unknown; size_thickness_cm?: unknown;
   handle_drop_cm?: unknown; strap_drop_cm?: unknown; strap_drop_max_cm?: unknown;
 };
-export function dimensionLines(r: DimensionRow, opts: { showInch?: boolean; lang?: "th" | "en" } = {}): { key: string; label: string; text: string }[] {
-  const showInch = opts.showInch ?? true;
-  const en = opts.lang === "en";
+export type DimensionLine = { key: string; label: string; cm: string; inch: string };
+export function dimensionRows(r: DimensionRow, lang: "th" | "en" = "th"): DimensionLine[] {
+  const en = lang === "en";
   const cmU = en ? "cm" : "ซม.";
-  const one = (cm: number) => `${cm} ${cmU}${showInch ? ` | ${cmToInch(cm)}"` : ""}`;
-  const range = (a: number, b: number) =>
-    `${a}–${b} ${cmU}${showInch ? ` | ${cmToInch(a)}–${cmToInch(b)}"` : ""}${en ? " (adjustable)" : " (ปรับได้)"}`;
-
-  const rows: { key: string; label: string; text: string }[] = [];
-  const push = (key: string, th: string, eng: string, cm: number) => { if (cm) rows.push({ key, label: en ? eng : th, text: one(cm) }); };
+  const rows: DimensionLine[] = [];
+  const push = (key: string, th: string, eng: string, cm: number) => {
+    if (cm) rows.push({ key, label: en ? eng : th, cm: `${cm} ${cmU}`, inch: `${cmToInch(cm)}"` });
+  };
   push("width", "กว้าง", "Width", num(r.size_length_cm));
   push("height", "สูง", "Height", num(r.size_height_cm));
   push("thickness", "หนา", "Depth", num(r.size_thickness_cm));
   push("handle", "ความสูงหูหิ้ว", "Handle drop", num(r.handle_drop_cm));
   const s1 = num(r.strap_drop_cm), s2 = num(r.strap_drop_max_cm);
-  if (s1 && s2 && s2 > s1) rows.push({ key: "strap", label: en ? "Strap drop" : "ความยาวสายสะพาย", text: range(s1, s2) });
-  else push("strap", "ความยาวสายสะพาย", "Strap drop", s1 || s2);
+  if (s1 && s2 && s2 > s1) {
+    rows.push({
+      key: "strap", label: en ? "Strap drop" : "ความยาวสายสะพาย",
+      cm: `${s1}–${s2} ${cmU} ${en ? "(adjustable)" : "(ปรับได้)"}`, inch: `${cmToInch(s1)}–${cmToInch(s2)}"`,
+    });
+  } else push("strap", "ความยาวสายสะพาย", "Strap drop", s1 || s2);
   return rows;
+}
+
+/** ข้อมูล "ขนาด" ของรุ่นหนึ่งสำหรับเว็บ — ไม่มีอะไรเลย = undefined (เว็บจะไม่โชว์หัวข้อนี้) */
+export function productDimensions(
+  r: DimensionRow & { fits?: unknown },
+  catalog: FitItem[],
+  lang: "th" | "en" = "th",
+): { fits: string[]; rows: DimensionLine[] } | undefined {
+  const fits = fitLabels(r.fits, catalog, lang);
+  const rows = dimensionRows(r, lang);
+  return fits.length || rows.length ? { fits, rows } : undefined;
 }

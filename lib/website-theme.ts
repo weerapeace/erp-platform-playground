@@ -434,7 +434,8 @@ export const PART_CHOICES = {
  * แต่ละหัวข้อเลือกได้ว่าเอาข้อมูลจากไหน และใช้กับรุ่นไหน (ทุกตัว / เฉพาะหมวด / เลือกเป็นรายตัว)
  * สินค้าที่ไม่มีข้อมูลในหัวข้อนั้น → หัวข้อหายไปเอง (เว็บร้านเป็นคนตัด)
  */
-export type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
+export type DetailSource = "description" | "fields" | "details" | "text" | "shipping" | "dimensions";
+const DETAIL_SOURCE_KEYS: DetailSource[] = ["description", "fields", "details", "text", "shipping", "dimensions"];
 export type DetailApply = "all" | "categories" | "products";
 /** หัวข้อนี้เริ่มต้นพับหรือเปิด: auto = ตามค่ารวม (detailsOpen) · open = เปิดไว้ · closed = พับไว้ */
 export type DetailOpen = "auto" | "open" | "closed";
@@ -453,15 +454,17 @@ export interface ProductDetailItem {
   products: string[];
   enabled: boolean;
   defaultOpen: DetailOpen;
+  /** source=dimensions: ต่อท้ายเป็นนิ้วด้วย (23 ซม. | 9.1") · ไม่ตั้ง = โชว์ */
+  showInch?: boolean;
 }
 /** ฟิลด์ของ Parent SKU ที่ให้เลือกโชว์บนเว็บ (API สาธารณะส่งเฉพาะชุดนี้ — ไม่มีต้นทุน/ข้อมูลภายใน) */
 export const PRODUCT_SPEC_FIELDS: { key: string; label: string; unit?: string }[] = [
   { key: "materials", label: "วัสดุ" },
   { key: "size_summary", label: "ขนาด" },
   { key: "custom_size", label: "ขนาด (ระบุเอง)" },
-  { key: "size_length_cm", label: "ความยาว", unit: "ซม." },
-  { key: "size_height_cm", label: "ความสูง", unit: "ซม." },
-  { key: "size_thickness_cm", label: "ความหนา", unit: "ซม." },
+  { key: "size_length_cm", label: "กว้าง", unit: "ซม." },
+  { key: "size_height_cm", label: "สูง", unit: "ซม." },
+  { key: "size_thickness_cm", label: "หนา", unit: "ซม." },
   { key: "weight_g", label: "น้ำหนัก", unit: "กรัม" },
   { key: "lining", label: "ซับใน" },
   { key: "strap", label: "สายสะพาย" },
@@ -479,6 +482,7 @@ export const DETAIL_SOURCES: { value: DetailSource; label: string; hint: string 
   { value: "details", label: "จุดเด่น (รายการติ๊ก)", hint: "รายการย่อยของสินค้า (ถ้ามี)" },
   { value: "text", label: "ข้อความตายตัว", hint: "พิมพ์ครั้งเดียว ใช้หลายรุ่น เช่น ประกัน/วิธีดูแล" },
   { value: "shipping", label: "การจัดส่ง & ชำระเงิน", hint: "ดึงจากแท็บข้อมูลร้าน (ค่าส่ง/ส่งฟรี/ช่องทางจ่าย)" },
+  { value: "dimensions", label: "📏 ขนาด (ใส่ได้ + กว้าง/สูง/หนา/หูหิ้ว/สาย)", hint: "ประกอบเป็นรายการจุดให้อัตโนมัติจากช่องขนาดใน Parent SKU · ช่องที่ว่างจะไม่โชว์" },
 ];
 export const DEFAULT_DETAIL_ITEMS: ProductDetailItem[] = [
   { id: "desc", label: "รายละเอียดสินค้า", source: "description", fields: [], text: "", applyTo: "all", categories: [], products: [], enabled: true, defaultOpen: "auto" },
@@ -501,7 +505,7 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
     let id = String(r.id ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || `d${out.length + 1}`;
     while (seen.has(id)) id = `${id}_`;
     seen.add(id);
-    const source = (["description", "fields", "details", "text", "shipping"] as const).includes(r.source as DetailSource) ? (r.source as DetailSource) : "text";
+    const source = DETAIL_SOURCE_KEYS.includes(r.source as DetailSource) ? (r.source as DetailSource) : "text";
     out.push({
       id,
       label: String(r.label ?? "").trim().slice(0, 60) || "หัวข้อ",
@@ -514,6 +518,7 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
       products: strList(r.products, 500, true),
       enabled: r.enabled !== false,
       defaultOpen: (["auto", "open", "closed"] as const).includes(r.defaultOpen as DetailOpen) ? (r.defaultOpen as DetailOpen) : "auto",
+      ...(source === "dimensions" ? { showInch: r.showInch !== false } : {}),
     });
     if (out.length >= 20) break;
   }

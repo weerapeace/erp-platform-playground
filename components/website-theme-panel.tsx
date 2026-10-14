@@ -54,10 +54,10 @@ type ProductSection = import("@/lib/website-theme").ProductSection;
 type ProductGalleryStyle = "editorial" | "spotlight";
 type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 type ProductDetailsOpen = "first" | "closed" | "all";
-type DetailSource = "description" | "fields" | "details" | "text" | "shipping";
+type DetailSource = "description" | "fields" | "details" | "text" | "shipping" | "dimensions";
 type DetailApply = "all" | "categories" | "products";
 type DetailOpen = "auto" | "open" | "closed";
-interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen }
+interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen; showInch?: boolean }
 
 interface SampleItem { name: string; price: number; comparePrice: number | null; unit: string; category: string; badge: string; stock: string; images: string[]; swatches: { color?: string; img?: string }[] }
 
@@ -1722,6 +1722,18 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                                   <label className={labelCls}>ข้อความ</label>
                                   <textarea className={`${inputCls} min-h-[96px]`} value={it.text} onChange={(e) => setDetailItem(it.id, { text: e.target.value })} maxLength={4000} placeholder={"เช่น รับประกันงานเย็บ 6 เดือน\nเช็ดด้วยผ้าแห้ง หลีกเลี่ยงแสงแดดจัด"} />
                                   <p className="text-[11px] text-slate-400 mt-1">ขึ้นบรรทัดใหม่ได้ · ใช้กับทุกรุ่นที่เลือกด้านล่าง</p>
+                                </div>
+                              )}
+                              {it.source === "dimensions" && (
+                                <div className="sm:col-span-2 rounded-lg bg-slate-50 px-3 py-2">
+                                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                    <input type="checkbox" className="accent-orange-500" checked={it.showInch !== false} onChange={(e) => setDetailItem(it.id, { showInch: e.target.checked })} />
+                                    โชว์เป็นนิ้วด้วย (ระบบแปลงให้เอง)
+                                  </label>
+                                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                                    ตัวอย่าง: • ใส่ได้: สมาร์ทโฟน (ถึง 6.7 นิ้ว), กระเป๋าสตางค์ (ใบยาว) · • กว้าง: 23 ซม.{it.showInch !== false ? ' | 9.1"' : ""} · • ความยาวสายสะพาย: 50–60 ซม. (ปรับได้){it.showInch !== false ? ' | 19.7–23.6"' : ""}
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 mt-1">ข้อมูลมาจากหน้า Parent SKU: กว้าง/สูง/หนา · ความสูงหูหิ้ว · ความยาวสายสะพาย (+ ปรับได้ถึง) · ใส่อะไรได้บ้าง</p>
                                 </div>
                               )}
                               <div>
