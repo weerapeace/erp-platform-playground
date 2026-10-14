@@ -175,3 +175,83 @@ describe("ครอป / พลิก / จัดวาง", () => {
     expect(reorderLayer(list, "b", "down").map((x) => x.id)).toEqual(["b", "a", "c"]);
   });
 });
+
+/**
+ * รอบ 4: มือถือแบบจัดเอง · เลือกหลายชิ้น/กลุ่ม · ยืดเต็มจอ · แม่แบบ
+ */
+describe("canvas รอบ 4", () => {
+  it("ชิ้นเก่า = มือถือยังไม่ได้จัด (mw 0) · ไม่ยืดเต็มจอ · ไม่มีกลุ่ม · ผืนเรียงอัตโนมัติ", () => {
+    const [b] = normalizeBlocks([{ id: "c1", type: "canvas", items: [{ id: "a", kind: "text", text: "hi" }] }]) as unknown as Record<string, unknown>[];
+    expect(b).toMatchObject({ mobileMode: "auto", mobileHeight: 800 });
+    expect((b.items as Record<string, unknown>[])[0]).toMatchObject({ mx: 0, my: 0, mw: 0, mh: 0, msize: 0, malign: "", bleed: false, group: "" });
+  });
+  it("ช่องมือถือจำกัดช่วง + โหมดผิดค่ากลับเป็น auto", () => {
+    const [b] = normalizeBlocks([{ id: "c1", type: "canvas", mobileMode: "hack", mobileHeight: 99999, items: [{ id: "a", kind: "text", mw: 5000, msize: -3, malign: "justify" }] }]) as unknown as Record<string, unknown>[];
+    expect(b).toMatchObject({ mobileMode: "auto", mobileHeight: 8000 });
+    expect((b.items as Record<string, unknown>[])[0]).toMatchObject({ mw: 800, msize: 0, malign: "" });
+  });
+  it("พรีวิวส่งตำแหน่งมือถือ/กลุ่ม/ยืดเต็มจอ ผ่านตัวกรองเดียวกัน", async () => {
+    const { livePatch } = await import("../../components/website-canvas-tools");
+    expect(livePatch({ mx: 20, my: 30, mw: 360, mh: 120, msize: 22, malign: "center", group: "g1", bleed: true })).toEqual({ mx: 20, my: 30, mw: 360, mh: 120, msize: 22, malign: "center", group: "g1", bleed: true });
+  });
+  it("canvasMobileBox: ยังไม่จัด = ย่อจากคอม 1/3 · จัดแล้ว = ใช้ค่าที่จัด", async () => {
+    const { canvasMobileBox } = await import("../website-canvas");
+    expect(canvasMobileBox({ x: 300, y: 120, w: 600, h: 90, size: 48, mw: 0 })).toEqual({ mx: 100, my: 40, mw: 200, mh: 30, msize: 16 });
+    expect(canvasMobileBox({ x: 300, y: 120, w: 600, h: 90, size: 48, mx: 10, my: 20, mw: 380, mh: 60, msize: 30 })).toEqual({ mx: 10, my: 20, mw: 380, mh: 60, msize: 30 });
+  });
+  it("canvasMobilePreset: ชิ้นใหม่อยู่กลางผืนมือถือ ขนาดอ่านง่าย", async () => {
+    const { canvasMobilePreset, CANVAS_MOBILE_WIDTH } = await import("../website-canvas");
+    const t = canvasMobilePreset({ kind: "text", size: 56, w: 560, h: 80 });
+    expect(t.mw).toBeLessThanOrEqual(CANVAS_MOBILE_WIDTH);
+    expect(t.mx).toBe(Math.round((CANVAS_MOBILE_WIDTH - t.mw) / 2));
+    expect(t.msize).toBe(34);
+    const img = canvasMobilePreset({ kind: "image", w: 320, h: 420 });
+    expect(img.mh).toBe(Math.round((img.mw * 420) / 320));
+  });
+  it("แม่แบบ: เก็บเฉพาะเนื้อผืน · ใช้แล้วได้ id ใหม่ไม่ซ้ำ + กลุ่มรหัสใหม่ที่ยังจับคู่กันเหมือนเดิม", async () => {
+    const { canvasTemplateData, instantiateCanvasTemplate } = await import("../website-canvas");
+    const data = canvasTemplateData({ id: "c1", type: "canvas", enabled: true, height: 400, items: [{ id: "a", group: "g1" }, { id: "b", group: "g1" }, { id: "c", group: "" }] });
+    expect(Object.keys(data).sort()).toEqual(["height", "items"]);
+    const inst = instantiateCanvasTemplate(data);
+    const items = inst.items as Record<string, unknown>[];
+    expect(new Set(items.map((x) => x.id)).size).toBe(3);
+    expect(items.map((x) => x.id)).not.toContain("a");
+    expect(items[0].group).toBe(items[1].group);
+    expect(items[0].group).not.toBe("g1");
+    expect(items[2].group).toBe("");
+    expect(inst.height).toBe(400);
+  });
+  it("แม่แบบตั้งต้นผ่านตัวทำความสะอาด (ไม่มีชิ้นหาย · ชิ้นยืดเต็มจออยู่ครบ)", async () => {
+    const { CANVAS_STARTER_TEMPLATES, instantiateCanvasTemplate } = await import("../website-canvas");
+    for (const t of CANVAS_STARTER_TEMPLATES) {
+      const inst = instantiateCanvasTemplate(t.data);
+      const [b] = normalizeBlocks([{ id: "c1", type: "canvas", ...inst }]) as unknown as Record<string, unknown>[];
+      expect((b.items as unknown[]).length).toBe((t.data.items as unknown[]).length);
+    }
+    const promo = CANVAS_STARTER_TEMPLATES.find((t) => t.key === "starter-promo-band")!;
+    const [b] = normalizeBlocks([{ id: "c1", type: "canvas", ...instantiateCanvasTemplate(promo.data) }]) as unknown as Record<string, unknown>[];
+    expect((b.items as Record<string, unknown>[]).filter((x) => x.bleed).length).toBe(2);
+  });
+  it("ตรวจก่อนเผยแพร่: ชิ้นยืดเต็มจอไม่ถูกเตือนว่านอกผืน · ชิ้นหลุดผืนมือถือถูกเตือน", () => {
+    const ok = validateCanvas({ height: 300, items: [{ kind: "shape", bleed: true, x: 5000, y: 10, w: 1200 }] }, "ผืน");
+    expect(ok.some((x) => x.message.includes("นอกผืน"))).toBe(false);
+    const mob = validateCanvas({ height: 300, mobileMode: "custom", mobileHeight: 500, items: [{ kind: "shape", x: 10, y: 10, w: 100, mx: 900, my: 10, mw: 100 }] }, "ผืน");
+    expect(mob.some((x) => x.message.includes("นอกผืนมือถือ"))).toBe(true);
+  });
+  it("หลายชิ้น: ไปหน้าสุด/หลังสุดพร้อมกัน · ทำสำเนาได้กลุ่มใหม่", async () => {
+    const { reorderLayerMany, duplicateItems } = await import("../../components/website-canvas-tools");
+    const list = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+    expect(reorderLayerMany(list, ["a", "c"], "front").map((x) => x.id)).toEqual(["b", "d", "a", "c"]);
+    expect(reorderLayerMany(list, ["b", "d"], "back").map((x) => x.id)).toEqual(["b", "d", "a", "c"]);
+    const src = [
+      { id: "a", x: 0, y: 0, group: "g1" },
+      { id: "b", x: 10, y: 10, group: "g1" },
+    ];
+    const r = duplicateItems(src, ["a", "b"], false, 60);
+    expect(r.copies.length).toBe(2);
+    const copies = r.list.slice(2);
+    expect(copies[0]).toMatchObject({ x: 24, y: 24 });
+    expect(copies[0].group).toBe(copies[1].group);
+    expect(copies[0].group).not.toBe("g1");
+  });
+});

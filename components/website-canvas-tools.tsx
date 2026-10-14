@@ -5,18 +5,20 @@
  *
  *   useCanvasBridge  = คุยกับพรีวิวแบบสด (ไม่ต้องโหลดหน้าใหม่)
  *     ERP → เว็บ : storefront-canvas-update {block}          ทุกครั้งที่ข้อมูลผืนเปลี่ยน (แก้ในแผง/undo/ลากเสร็จ)
- *     เว็บ → ERP : storefront-canvas-change {blockId, items?, height?}   ลาก/ย่อ/หมุน/พิมพ์แก้ข้อความในพรีวิวเสร็จ
- *                  storefront-canvas-delete {blockId, childId} · storefront-canvas-duplicate {blockId, childId}
+ *     เว็บ → ERP : storefront-canvas-change {blockId, items?, height?, mobileHeight?, mobileMode?}   ลาก/ย่อ/หมุน/พิมพ์/จับกลุ่ม/แปลงมือถือ เสร็จ
+ *                  storefront-canvas-delete {blockId, childId | childIds} · storefront-canvas-duplicate {blockId, childId | childIds}
  *                  storefront-canvas-key {action:"undo"|"redo"}  (กดคีย์ลัดตอนเมาส์อยู่ในพรีวิว)
- *                  storefront-canvas-action {blockId, childId, action:"replace-image"|"link"}  (ปุ่มบนแถบเครื่องมือลอย)
+ *                  storefront-canvas-action {blockId, childId | childIds, action}  (ปุ่มบนแถบเครื่องมือลอย: เปลี่ยนรูป/ลิงก์/ชั้น)
+ *                  storefront-canvas-multi {blockId, ids}  (เลือกหลายชิ้น — ตัวท้าย = ชิ้นหลัก)
  *                  storefront-canvas-open {blockId}  (ดับเบิลคลิกผืน = เปิดแก้แบบเต็มจอ)
+ *     ERP → เว็บ (คำสั่งที่ต้องใช้ขนาดจริงบนจอ): storefront-canvas-align {childIds, to} · storefront-canvas-crop · storefront-canvas-mobile-freeze
  *   previewStructureSig = ลายเซ็นโครงหน้า "ไม่รวมเนื้อในผืน" → บันทึกร่างแล้วไม่ต้องโหลดพรีวิวใหม่ถ้าแก้แค่ในผืน
  *   CanvasAddBar / CanvasItemTools = ปุ่มเพิ่มชิ้น + จัดชั้นหน้า-หลัง ในแผงขวา
  *
  * ตัววาดผืน + การลากอยู่ที่เว็บร้าน src/components/home/CanvasSection.tsx
  */
 import { useEffect, useRef, type MutableRefObject, type RefObject } from "react";
-import { CANVAS_WIDTH } from "@/lib/website-canvas";
+import { CANVAS_MOBILE_WIDTH, CANVAS_WIDTH } from "@/lib/website-canvas";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { sanitizeField } from "@/lib/website-blocks";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
@@ -64,6 +66,8 @@ export function useCanvasBridge(opts: {
   onAction?: (blockId: string, childId: string, action: string) => void;
   /** ดับเบิลคลิกผืนในพรีวิว = ขอเปิดแก้แบบเต็มจอ */
   onOpen?: (blockId: string) => void;
+  /** พรีวิวเลือกหลายชิ้น (ตัวท้าย = ชิ้นหลัก) · หลังทำสำเนาหลายชิ้นก็เรียกตัวนี้ให้เลือกชุดสำเนา */
+  onMulti?: (blockId: string, ids: string[]) => void;
 }) {
   const { blocks, blocksRef, iframeRef } = opts;
   const sent = useRef(new Map<string, string>());
@@ -86,7 +90,18 @@ export function useCanvasBridge(opts: {
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      const d = e.data as { type?: string; blockId?: string; childId?: string; items?: Record<string, unknown>[]; height?: unknown; action?: string } | null;
+      const d = e.data as {
+        type?: string;
+        blockId?: string;
+        childId?: string;
+        childIds?: unknown;
+        ids?: unknown;
+        items?: Record<string, unknown>[];
+        height?: unknown;
+        mobileHeight?: unknown;
+        mobileMode?: unknown;
+        action?: string;
+      } | null;
       if (!d?.type?.startsWith("storefront-")) return;
       // ฟังเฉพาะพรีวิวของตัวเอง (ตัวจัดหน้า + ป๊อปอัปเต็มจอ มีคนละ iframe ห้ามทำซ้ำสองรอบ)
       if (e.source !== iframeRef.current?.contentWindow) return;
@@ -105,6 +120,8 @@ export function useCanvasBridge(opts: {
       if (!b) return;
       const list = (Array.isArray(b.items) ? b.items : []) as ChildBlock[];
 
+      const ids = Array.isArray(d.childIds) ? (d.childIds as unknown[]).filter((x): x is string => typeof x === "string" && list.some((it) => it.id === x)) : [];
+
       if (d.type === "storefront-canvas-change") {
         const p: Record<string, unknown> = {};
         if (Array.isArray(d.items) && d.items.length) {
@@ -113,15 +130,41 @@ export function useCanvasBridge(opts: {
         }
         const h = clampInt(d.height, 120, 2400);
         if (h !== null) p.height = h;
+        const mh = clampInt(d.mobileHeight, 120, 8000);
+        if (mh !== null) p.mobileHeight = mh;
+        if (d.mobileMode === "auto" || d.mobileMode === "custom") p.mobileMode = d.mobileMode;
         if (Object.keys(p).length) fns.current.patchBlock(b.id, p);
+        return;
+      }
+      if (d.type === "storefront-canvas-multi") {
+        const sel = Array.isArray(d.ids) ? (d.ids as unknown[]).filter((x): x is string => typeof x === "string") : [];
+        fns.current.onMulti?.(b.id, sel);
         return;
       }
       // ชั้นหน้า-หลัง (ปุ่ม "จัดวาง" บนแถบลอย) — เรียงลำดับใหม่ในข้อมูลได้เลย ไม่ต้องเปิดหน้าจออะไร
       const layer = { "layer-up": "up", "layer-down": "down", "layer-front": "front", "layer-back": "back" } as const;
-      if (d.type === "storefront-canvas-action" && d.childId && d.action && d.action in layer) {
-        fns.current.patchBlock(b.id, { items: reorderLayer(list, d.childId, layer[d.action as keyof typeof layer]) });
+      if (d.type === "storefront-canvas-action" && d.action && d.action in layer) {
+        const to = layer[d.action as keyof typeof layer];
+        const one = d.childId ?? (ids.length === 1 ? ids[0] : null);
+        if (ids.length > 1) fns.current.patchBlock(b.id, { items: reorderLayerMany(list, ids, to === "up" ? "front" : to === "down" ? "back" : to) });
+        else if (one) fns.current.patchBlock(b.id, { items: reorderLayer(list, one, to) });
         return;
       }
+      // หลายชิ้น: ลบ / ทำสำเนา ทีเดียว (ย้อนกลับได้ในขั้นเดียว)
+      if (d.type === "storefront-canvas-delete" && ids.length > 1) {
+        fns.current.patchBlock(b.id, { items: list.filter((it) => !ids.includes(it.id)) });
+        fns.current.onMulti?.(b.id, []);
+        return;
+      }
+      if (d.type === "storefront-canvas-duplicate" && ids.length > 1) {
+        const r = duplicateItems(list, ids, b.mobileMode === "custom", Number((SECTION_SCHEMAS.canvas?.children?.max ?? 60)));
+        if (!r.copies.length) return;
+        fns.current.patchBlock(b.id, { items: r.list });
+        fns.current.onMulti?.(b.id, r.copies);
+        post({ type: "storefront-select-block", blockId: b.id, childId: r.copies[r.copies.length - 1], childIds: r.copies });
+        return;
+      }
+      if (ids.length === 1 && !d.childId) d.childId = ids[0];
       if (d.type === "storefront-canvas-open") fns.current.onOpen?.(b.id);
       else if (d.type === "storefront-canvas-action" && d.childId && d.action) fns.current.onAction?.(b.id, d.childId, d.action);
       else if (d.type === "storefront-canvas-delete" && d.childId) fns.current.removeChild(b.id, d.childId);
@@ -148,15 +191,54 @@ export function reorderLayer<T extends { id: string }>(list: T[], id: string, to
   return next;
 }
 
+/** หลายชิ้นไปหน้าสุด/หลังสุดพร้อมกัน (คงลำดับกันเองไว้) */
+export function reorderLayerMany<T extends { id: string }>(list: T[], ids: string[], to: "front" | "back"): T[] {
+  const moving = list.filter((x) => ids.includes(x.id));
+  const rest = list.filter((x) => !ids.includes(x.id));
+  return to === "front" ? [...rest, ...moving] : [...moving, ...rest];
+}
+
+/** รหัสกลุ่มใหม่ (ชิ้นที่ group ตรงกัน = เลือก/ย้ายไปด้วยกัน) */
+export const newGroupId = () => `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+/**
+ * ทำสำเนาหลายชิ้น: สำเนาวางเยื้องนิดหน่อย (คอม +24 · มือถือแบบจัดเอง +12) · อยู่ชั้นหน้าสุด · กลุ่มได้รหัสใหม่
+ * คืนรายการใหม่ + id ของสำเนา (ไว้เลือกต่อ)
+ */
+export function duplicateItems(list: ChildBlock[], ids: string[], mobileCustom: boolean, max: number): { list: ChildBlock[]; copies: string[] } {
+  const src = list.filter((it) => ids.includes(it.id)).slice(0, Math.max(0, max - list.length));
+  const stamp = Date.now().toString(36);
+  const groups = new Map<string, string>();
+  const copies = src.map((it, i) => {
+    const c: ChildBlock = { ...(JSON.parse(JSON.stringify(it)) as ChildBlock), id: `items-${stamp}${i.toString(36)}${Math.random().toString(36).slice(2, 5)}`, locked: false };
+    c.x = (Number(c.x) || 0) + 24;
+    c.y = (Number(c.y) || 0) + 24;
+    if (mobileCustom && Number(c.mw) > 0) {
+      c.mx = (Number(c.mx) || 0) + 12;
+      c.my = (Number(c.my) || 0) + 12;
+    }
+    const g = String(c.group ?? "");
+    if (g) {
+      if (!groups.has(g)) groups.set(g, newGroupId() + groups.size);
+      c.group = groups.get(g);
+    }
+    return c;
+  });
+  return { list: [...list, ...copies], copies: copies.map((c) => c.id) };
+}
+
 const chip = "flex-1 min-w-[64px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 hover:border-blue-400 hover:text-blue-700";
 
 /** แผงขวาของตัวจัดหน้าเมื่อเลือกผืน: ปุ่มเปิดแก้เต็มจอ (แนะนำ) + ทางลัดเพิ่มชิ้น (เปิดป๊อปอัปไปที่เครื่องมือนั้นเลย) */
-export function CanvasAddBar({ onOpen, count, max }: { onOpen: (action?: string) => void; count: number; max: number }) {
+export function CanvasAddBar({ onOpen, count, max, mobileCustom }: { onOpen: (action?: string) => void; count: number; max: number; mobileCustom?: boolean }) {
   const full = count >= max;
   return (
     <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2.5">
       <button onClick={() => onOpen()} className="w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
         ✏️ แก้แบบเต็มจอ
+      </button>
+      <button onClick={() => onOpen("templates")} className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 hover:border-blue-400">
+        📐 แม่แบบ — เริ่มจากแบบสำเร็จ / บันทึกผืนนี้ไว้ใช้ซ้ำ
       </button>
       <p className="text-xs font-medium text-slate-700">เพิ่มบนผืน {full && <span className="text-red-600">(ครบ {max} ชิ้นแล้ว)</span>}</p>
       <div className="flex flex-wrap gap-1.5">
@@ -174,9 +256,9 @@ export function CanvasAddBar({ onOpen, count, max }: { onOpen: (action?: string)
         ))}
       </div>
       <p className="text-[11px] text-slate-500 leading-relaxed">
-        ดับเบิลคลิกที่ว่างบนผืนในพรีวิวก็เปิดแก้เต็มจอได้ · คลิกชิ้นในพรีวิวจะมีแถบเครื่องมือลอย (เปลี่ยนรูป/กรอบ/สี/ลิงก์)
+        ดับเบิลคลิกที่ว่างบนผืนในพรีวิวก็เปิดแก้เต็มจอได้ · คลิกชิ้นในพรีวิวจะมีแถบเครื่องมือลอย (เปลี่ยนรูป/กรอบ/สี/ลิงก์) · Shift+คลิก หรือลากกรอบ = เลือกหลายชิ้น
         <br />
-        มือถือ: เรียงชิ้นลงมาให้อัตโนมัติตามตำแหน่ง บน→ล่าง
+        {mobileCustom ? `มือถือ: จัดเอง (ผืนมือถือกว้าง ${CANVAS_MOBILE_WIDTH}) — สลับเป็นมือถือในหน้าแก้เต็มจอเพื่อจัด` : "มือถือ: เรียงชิ้นลงมาให้อัตโนมัติตามตำแหน่ง บน→ล่าง (จัดเองได้ในหน้าแก้เต็มจอ → 📲 มือถือ)"}
       </p>
     </div>
   );

@@ -3,8 +3,11 @@
  *
  * วางรูป / ข้อความ / ปุ่ม / ของตกแต่ง ตรงไหนก็ได้ บนผืนกว้าง 1200 หน่วย (= px ตอนจอกว้าง 1200)
  *   - คอม/แท็บเล็ต: เว็บร้านย่อทั้งผืนตามความกว้างจอ (container query) หน้าตาเหมือนที่จัดทุกประการ
- *   - มือถือ (< 768px): เรียงชิ้นลงมาอัตโนมัติตามตำแหน่ง บน→ล่าง (เฟส 2 จะจัดหน้ามือถือแยกได้)
+ *   - มือถือ (< 768px): mobileMode "auto" = เรียงชิ้นลงมาอัตโนมัติตามตำแหน่ง บน→ล่าง
+ *                       mobileMode "custom" = ผืนมือถือกว้าง 400 หน่วยแยก จัดเองได้ (ช่อง mx/my/mw/mh/msize/malign ของชิ้น)
+ *   - ชิ้นยืดเต็มจอ (bleed) = รูป/ของตกแต่งกว้างเต็มความกว้างจอ · กลุ่ม (group) = เลือก/ย้ายไปด้วยกัน
  *   - ลาก/ย่อ-ขยาย/หมุน ทำในพรีวิว (เว็บร้าน ?preview=1) แล้วส่งตำแหน่งกลับมาที่ตัวจัดหน้า
+ *   - แม่แบบ (website_canvas_templates) = บันทึกเนื้อผืนไว้ใช้ซ้ำ (canvasTemplateData / instantiateCanvasTemplate)
  *
  * ไฟล์นี้ = ตัวเลือก/ค่าเริ่มต้น/สรุป/ตรวจ ที่ schema (lib/website-schema.ts) และตัวจัดหน้าใช้ร่วมกัน
  * ⚠️ ค่า (v) ทุกตัวต้องตรงกับเว็บร้าน src/lib/canvas.ts — เปลี่ยนชื่อ = เว็บวาดไม่ถูก
@@ -13,6 +16,8 @@ import type { FieldOption } from "@/lib/website-schema";
 
 /** ความกว้างผืนตอนออกแบบ (หน่วยของ x/y/w/h ทั้งหมด) */
 export const CANVAS_WIDTH = 1200;
+/** ความกว้างผืนมือถือแบบจัดเอง (หน่วยของ mx/my/mw/mh/msize) — ⚠️ ตรงกับ CANVAS_MW ของเว็บร้าน */
+export const CANVAS_MOBILE_WIDTH = 400;
 
 export type CanvasKind = "image" | "text" | "button" | "shape";
 
@@ -171,6 +176,122 @@ export function fitImageBox(naturalW: number, naturalH: number, maxW = 360, maxH
   return { w: Math.max(40, w), h: Math.max(40, h) };
 }
 
+/**
+ * ตำแหน่งบนผืนมือถือแบบจัดเอง ของชิ้นใหม่ (วางกลางผืนมือถือ เหลื่อมลงตามจำนวนชิ้น)
+ * ขนาดคิดแบบเดียวกับตอนเรียงอัตโนมัติ: รูป/ของตกแต่งกว้างราวสองเท่าของสัดส่วนบนคอม · ข้อความเกือบเต็มจอ
+ */
+export function canvasMobilePreset(item: Record<string, unknown>, n = 0): { mx: number; my: number; mw: number; mh: number; msize: number } {
+  const kind = s(item.kind) || "text";
+  const w = Math.max(1, Number(item.w) || 300);
+  const h = Math.max(1, Number(item.h) || 80);
+  const size = Number(item.size) || 16;
+  const msize = size <= 20 ? Math.max(13, Math.round(size * 0.95)) : Math.max(20, Math.round(size * 0.6));
+  let mw: number;
+  let mh: number;
+  if (kind === "text") {
+    mw = 340;
+    mh = Math.round(msize * 1.4);
+  } else if (kind === "button") {
+    mw = Math.max(140, Math.min(340, Math.round(w * 0.8)));
+    mh = 46;
+  } else {
+    mw = Math.max(48, Math.min(360, Math.round((w / CANVAS_WIDTH) * CANVAS_MOBILE_WIDTH * 2)));
+    mh = Math.max(12, Math.round((mw * h) / w));
+  }
+  return { mx: Math.round((CANVAS_MOBILE_WIDTH - mw) / 2), my: 40 + (n % 6) * 28, mw, mh, msize };
+}
+
+/**
+ * กล่องของชิ้นบนผืนมือถือแบบจัดเอง — ⚠️ สูตรเดียวกับ mobileBox() ของเว็บร้าน
+ * ยังไม่ได้จัด (mw = 0) = ย่อจากตำแหน่งบนคอม 1/3 · แก้ช่องมือถือช่องเดียวต้องส่ง "ครบชุด" (ไม่งั้นยังถือว่ายังไม่ได้จัด)
+ */
+export function canvasMobileBox(it: Record<string, unknown>): { mx: number; my: number; mw: number; mh: number; msize: number } {
+  const n = (k: string) => Number(it[k]) || 0;
+  const size = n("size") || 40;
+  if (n("mw") > 0)
+    return { mx: n("mx"), my: n("my"), mw: n("mw"), mh: n("mh") || Math.round((n("mw") * (n("h") || 80)) / Math.max(1, n("w") || 400)), msize: n("msize") || Math.max(10, Math.round(size / 3)) };
+  const k = CANVAS_MOBILE_WIDTH / CANVAS_WIDTH;
+  return { mx: Math.round(n("x") * k), my: Math.round(n("y") * k), mw: Math.max(4, Math.round((n("w") || 400) * k)), mh: Math.max(4, Math.round((n("h") || 80) * k)), msize: Math.max(10, Math.round(size * k)) };
+}
+
+/* ─────────── แม่แบบผืน ─────────── */
+
+/** ช่องของผืนที่เก็บในแม่แบบ (ไม่รวม id/type/enabled/visibility ของ Section) */
+export const CANVAS_TEMPLATE_KEYS = ["height", "bgImageKey", "mobileAlign", "mobileMode", "mobileHeight", "style", "items"] as const;
+
+/** เนื้อผืนสำหรับบันทึกเป็นแม่แบบ */
+export function canvasTemplateData(block: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of CANVAS_TEMPLATE_KEYS) if (block[k] !== undefined) out[k] = JSON.parse(JSON.stringify(block[k]));
+  return out;
+}
+
+/**
+ * แม่แบบ → ค่าที่ใส่ทับผืน: ทุกชิ้นได้ id ใหม่ (ไม่ชนกับผืนอื่นในหน้า) + กลุ่มได้รหัสใหม่ (ไม่ปนกับกลุ่มเดิม)
+ * @param itemDefaults เติมช่องที่แม่แบบไม่มี (ค่าเริ่มต้นจาก schema)
+ */
+export function instantiateCanvasTemplate(data: Record<string, unknown>, itemDefaults: (raw: Record<string, unknown>) => Record<string, unknown> = (r) => r): Record<string, unknown> {
+  const stamp = Date.now().toString(36);
+  const rand = () => Math.random().toString(36).slice(2, 5);
+  const groups = new Map<string, string>();
+  const items = (Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : []).slice(0, 60).map((raw, i) => {
+    const g = s(raw.group);
+    if (g && !groups.has(g)) groups.set(g, `g${stamp}${groups.size.toString(36)}${rand()}`);
+    return { ...itemDefaults(JSON.parse(JSON.stringify(raw)) as Record<string, unknown>), id: `items-${stamp}${i.toString(36)}${rand()}`, enabled: true, group: g ? groups.get(g) : "" };
+  });
+  const out: Record<string, unknown> = {};
+  for (const k of CANVAS_TEMPLATE_KEYS) if (k !== "items" && data[k] !== undefined) out[k] = JSON.parse(JSON.stringify(data[k]));
+  out.items = items;
+  return out;
+}
+
+/** แม่แบบตั้งต้นของระบบ (ไม่มีรูป — ใช้ได้ทุกร้าน สีตามธีม) · ลบ/แก้ไม่ได้ */
+export const CANVAS_STARTER_TEMPLATES: { key: string; name: string; data: Record<string, unknown> }[] = [
+  {
+    key: "starter-script-hero",
+    name: "หัวข้อลายมือ + ปุ่ม",
+    data: {
+      height: 520,
+      items: [
+        { kind: "shape", shape: "bow", color: "brand", x: 300, y: 120, w: 96, h: 70, rotate: -12, hideMobile: true },
+        { kind: "shape", shape: "bow", color: "brand", x: 804, y: 120, w: 96, h: 70, rotate: 12, flipH: true, hideMobile: true },
+        { kind: "text", text: "the little boutique of", font: "Parisienne", size: 40, weight: "400", lineHeight: 110, align: "center", color: "brand", x: 350, y: 110, w: 500, h: 50 },
+        { kind: "text", text: "ชื่อร้านของคุณ", font: "display", size: 72, weight: "500", lineHeight: 110, align: "center", color: "ink", x: 200, y: 180, w: 800, h: 90 },
+        { kind: "text", text: "new collection", font: "body", size: 14, weight: "600", spacing: 5, uppercase: true, align: "center", color: "muted", x: 400, y: 300, w: 400, h: 24 },
+        { kind: "button", label: "เลือกดูสินค้า", variant: "brand", href: "/shop", font: "body", size: 16, weight: "600", x: 490, y: 360, w: 220, h: 54 },
+      ],
+    },
+  },
+  {
+    key: "starter-promo-band",
+    name: "แถบโปรโมชันเต็มจอ",
+    data: {
+      height: 240,
+      items: [
+        { kind: "shape", shape: "rect", color: "brandSoft", bleed: true, x: 0, y: 20, w: 1200, h: 200 },
+        { kind: "shape", shape: "scallop", color: "brand", bleed: true, x: 0, y: 8, w: 1200, h: 24 },
+        { kind: "shape", shape: "sparkle", color: "brand", x: 250, y: 70, w: 40, h: 40, hideMobile: true },
+        { kind: "shape", shape: "sparkle", color: "brand", x: 910, y: 140, w: 30, h: 30, hideMobile: true },
+        { kind: "text", text: "ลดพิเศษ 20% ทั้งร้าน", font: "display", size: 44, weight: "600", align: "center", color: "brandDeep", x: 300, y: 64, w: 600, h: 60 },
+        { kind: "button", label: "ช้อปเลย", variant: "outline", color: "brandDeep", href: "/shop", font: "body", size: 15, weight: "600", x: 520, y: 144, w: 160, h: 46 },
+      ],
+    },
+  },
+  {
+    key: "starter-lace-frame",
+    name: "กรอบลูกไม้ + ข้อความ",
+    data: {
+      height: 560,
+      items: [
+        { kind: "shape", shape: "lace", color: "brand", strokeWidth: 2, x: 420, y: 60, w: 360, h: 440 },
+        { kind: "text", text: "our story", font: "Parisienne", size: 44, weight: "400", align: "center", color: "brand", x: 450, y: 170, w: 300, h: 56 },
+        { kind: "text", text: "เล่าเรื่องสั้น ๆ เกี่ยวกับร้าน\nหรือคอลเลกชันใหม่ของคุณ", font: "body", size: 18, weight: "400", lineHeight: 170, align: "center", color: "ink", x: 460, y: 250, w: 280, h: 90 },
+        { kind: "button", label: "อ่านต่อ →", variant: "link", color: "brandDeep", href: "/shop", font: "body", size: 15, weight: "500", x: 520, y: 370, w: 160, h: 40 },
+      ],
+    },
+  },
+];
+
 /** r2 key ของรูปทั้งหมดในผืน (ไว้บันทึก "ถูกใช้ที่ไหน" ในคลังไฟล์ → กันลบรูปที่ยังขึ้นเว็บอยู่) */
 export function canvasImageKeys(blocks: unknown): string[] {
   const out = new Set<string>();
@@ -213,8 +334,17 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
     const x = Number(it.x) || 0;
     const y = Number(it.y) || 0;
     const w = Number(it.w) || 0;
-    if (x >= CANVAS_WIDTH || x + w <= 0 || (height && y >= height))
+    if ((!it.bleed && (x >= CANVAS_WIDTH || x + w <= 0)) || (height && y >= height))
       out.push({ level: "warning", message: `${name}: อยู่นอกผืนทั้งชิ้น — ลูกค้าจะมองไม่เห็น` });
+    // มือถือแบบจัดเอง: ชิ้นที่ยังไม่ได้จัด/หลุดผืนมือถือ
+    if (b.mobileMode === "custom" && !it.hideMobile) {
+      const mw = Number(it.mw) || 0;
+      const mx = Number(it.mx) || 0;
+      const my = Number(it.my) || 0;
+      const mh = Number(b.mobileHeight) || 0;
+      if (mw > 0 && ((!it.bleed && (mx >= CANVAS_MOBILE_WIDTH || mx + mw <= 0)) || (mh && my >= mh)))
+        out.push({ level: "warning", message: `${name}: อยู่นอกผืนมือถือ — ลูกค้าที่ใช้มือถือจะมองไม่เห็น` });
+    }
   });
   return out;
 }

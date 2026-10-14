@@ -3,21 +3,35 @@
 /**
  * ป๊อปอัป "แก้ผืนผ้าใบ" แบบเต็มจอ (ของกลาง — เปิดจากตัวจัดหน้า: ปุ่ม ✏️ หรือดับเบิลคลิกผืนในพรีวิว)
  *
- *   ซ้าย  = เพิ่มชิ้น: รูป (อัปโหลด/คลัง/รูปสินค้า) · ข้อความสำเร็จรูป · ปุ่มสำเร็จรูป · คลังของตกแต่ง · ชั้น
+ *   ซ้าย  = เพิ่มชิ้น: รูป (อัปโหลด/คลัง/รูปสินค้า) · ข้อความสำเร็จรูป · ปุ่มสำเร็จรูป · คลังของตกแต่ง · ชั้น (Ctrl/Shift+คลิก = เลือกหลายชิ้น)
  *   กลาง  = ผืนใหญ่ของเว็บร้านจริง (iframe /canvas-edit?preview=1&block=<id>) — ลาก/ย่อ/หมุน + แถบเครื่องมือลอยเหนือชิ้น
- *   ขวา   = แผงตั้งค่าแบบภาพของชิ้นที่เลือก (components/website-canvas-inspector.tsx)
+ *           📲 มือถือ: ผืนจัดเอง = ลากบนจอมือถือได้ (แยกจากคอม) · เรียงอัตโนมัติ = ดูอย่างเดียว
+ *   ขวา   = แผงตั้งค่าแบบภาพของชิ้นที่เลือก / หลายชิ้น / ทั้งผืน (components/website-canvas-inspector.tsx)
+ *   📐 แม่แบบ = บันทึกผืนไว้ใช้ซ้ำ / เริ่มจากแบบสำเร็จ (components/website-canvas-templates.tsx)
  *
  * ข้อมูล/ย้อนกลับ/บันทึกร่างอัตโนมัติ ใช้ของตัวจัดหน้าเดิมทั้งหมด (ส่งฟังก์ชันมาทาง props) — ป๊อปอัปนี้ไม่เก็บข้อมูลเอง
+ * เลือกหลายชิ้น: พรีวิวบอกมาทาง storefront-canvas-multi → เก็บใน multi (ตัวท้าย = ชิ้นหลัก = selection.childId)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ERPModal } from "@/components/modal";
 import { LinkTargetPicker } from "@/components/website-link-picker";
-import { CanvasInspector, type ThemeColors } from "@/components/website-canvas-inspector";
+import { CanvasInspector, type CanvasAlign, type CanvasMultiAction, type ThemeColors } from "@/components/website-canvas-inspector";
 import { ImageChooser, DecorLibrary, type PickedImage } from "@/components/website-canvas-media";
-import { useCanvasBridge, reorderLayer } from "@/components/website-canvas-tools";
+import { CanvasTemplates } from "@/components/website-canvas-templates";
+import { useCanvasBridge, reorderLayer, reorderLayerMany, duplicateItems, newGroupId } from "@/components/website-canvas-tools";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { SECTION_SCHEMAS, blankChild, newChildId } from "@/lib/website-schema";
-import { CANVAS_BUTTON_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_WIDTH, canvasItemPreset, canvasItemSummary, fitImageBox, type CanvasKind } from "@/lib/website-canvas";
+import {
+  CANVAS_BUTTON_PRESETS,
+  CANVAS_TEXT_PRESETS,
+  CANVAS_WIDTH,
+  canvasItemPreset,
+  canvasItemSummary,
+  canvasMobilePreset,
+  fitImageBox,
+  instantiateCanvasTemplate,
+  type CanvasKind,
+} from "@/lib/website-canvas";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
 import type { Selection } from "@/components/website-builder";
@@ -25,7 +39,7 @@ import type { Selection } from "@/components/website-builder";
 /** เปิดป๊อปอัปพร้อมคำสั่งแรก (เช่น กด "รูป" ในแผงตัวจัดหน้า → เปิดมาที่หน้าต่างเลือกรูปเลย) */
 export interface CanvasEditorTarget {
   blockId: string;
-  action?: "add-image" | "add-text" | "add-button" | "add-shape" | "replace-image" | "link" | string;
+  action?: "add-image" | "add-text" | "add-button" | "add-shape" | "replace-image" | "link" | "templates" | string;
   childId?: string | null;
 }
 
@@ -82,6 +96,13 @@ export function CanvasEditor({
   const block = blocks.find((b) => b.id === blockId && b.type === "canvas") ?? null;
   const items = useMemo(() => ((block?.items as ChildBlock[] | undefined) ?? []), [block]);
   const selItem = selection?.blockId === blockId && selection.childId ? items.find((it) => it.id === selection.childId) ?? null : null;
+  /** เลือกหลายชิ้น (ตัวท้าย = ชิ้นหลัก) — ใช้ได้เมื่อชิ้นหลักตรงกับ selection (ไม่งั้นถือว่าเลือกชิ้นเดียวไปแล้ว) */
+  const [multi, setMulti] = useState<string[]>([]);
+  const multiOk = multi.length > 1 && !!selItem && multi.includes(selItem.id);
+  const multiItems = multiOk ? items.filter((it) => multi.includes(it.id)) : [];
+  /** ชุดที่พรีวิวบอกมาล่าสุด — ไม่ส่งซ้ำกลับไป (กันวนเลือก) */
+  const lastFromFrame = useRef("");
+  const [templatesOpen, setTemplatesOpen] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const centerRef = useRef<HTMLDivElement>(null);
@@ -155,6 +176,12 @@ export function CanvasEditor({
       if (action === "replace-image") setChooser({ mode: "replace", childId });
       else if (action === "link") setLinkFor(childId);
     },
+    onMulti: (bid, ids) => {
+      if (bid !== blockId) return;
+      lastFromFrame.current = ids.join(",");
+      setMulti(ids);
+      if (ids.length > 1) onSelect({ blockId: bid, childId: ids[ids.length - 1] });
+    },
   });
 
   // พรีวิวย่ออยู่เท่าไร → บอกเว็บร้านให้ขยายแถบเครื่องมือ/จุดจับกลับ (อ่านง่ายเท่าเดิม)
@@ -176,9 +203,71 @@ export function CanvasEditor({
   }, [blockId]);
 
   useEffect(() => {
-    post({ type: "storefront-select-block", blockId, childId: selection?.blockId === blockId ? (selection.childId ?? null) : null });
+    const childId = selection?.blockId === blockId ? (selection.childId ?? null) : null;
+    const ids = childId && multi.length > 1 && multi.includes(childId) ? multi : childId ? [childId] : [];
+    // พรีวิวเพิ่งบอกชุดนี้มาเอง → ไม่ต้องส่งกลับ
+    if (ids.join(",") === lastFromFrame.current) return;
+    lastFromFrame.current = ids.join(",");
+    post({ type: "storefront-select-block", blockId, childId, ...(ids.length > 1 ? { childIds: ids } : {}) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection, blockId]);
+  }, [selection, blockId, multi]);
+
+  /** เลือกหลายชิ้นจากฝั่ง ERP (แผงชั้น Ctrl/Shift+คลิก) */
+  const selectMany = (ids: string[]) => {
+    setMulti(ids);
+    onSelect(ids.length ? { blockId, childId: ids[ids.length - 1] } : { blockId });
+  };
+
+  /* ── หลายชิ้น: คำสั่งจากแผงขวา ── */
+  const multiAction = (a: CanvasMultiAction) => {
+    const ids = multiItems.map((x) => x.id);
+    if (ids.length < 2) return;
+    if (a === "group" || a === "ungroup") {
+      const g = a === "group" ? newGroupId() : "";
+      patchBlock(blockId, { items: items.map((it) => (ids.includes(it.id) ? { ...it, group: g } : it)) });
+    } else if (a === "front" || a === "back") patchBlock(blockId, { items: reorderLayerMany(items, ids, a) });
+    else if (a === "delete") {
+      patchBlock(blockId, { items: items.filter((it) => !ids.includes(it.id)) });
+      selectMany([]);
+    } else if (a === "duplicate") {
+      const r = duplicateItems(items, ids, block?.mobileMode === "custom", SECTION_SCHEMAS.canvas.children!.max);
+      if (!r.copies.length) return;
+      patchBlock(blockId, { items: r.list });
+      selectMany(r.copies);
+    } else {
+      const p = a === "hideMobile" ? { hideMobile: true } : a === "showMobile" ? { hideMobile: false } : a === "lock" ? { locked: true } : { locked: false };
+      patchBlock(blockId, { items: items.map((it) => (ids.includes(it.id) ? { ...it, ...p } : it)) });
+    }
+  };
+  const alignTo = (to: CanvasAlign) => {
+    const ids = multiItems.length > 1 ? multiItems.map((x) => x.id) : selItem ? [selItem.id] : [];
+    if (ids.length) post({ type: "storefront-canvas-align", blockId, childIds: ids, to });
+  };
+
+  /* ── มือถือแบบจัดเอง ── */
+  const freezeMobile = () => {
+    // วัดจากหน้ามือถือแบบเรียงอัตโนมัติ → ต้องเป็นจอมือถือ + แบบอัตโนมัติก่อน แล้วค่อยสั่งพรีวิววัด
+    setDevice("mobile");
+    if (blocksRef.current.find((b) => b.id === blockId)?.mobileMode === "custom") patchBlock(blockId, { mobileMode: "auto" });
+    window.setTimeout(() => post({ type: "storefront-canvas-mobile-freeze", blockId }), 450);
+  };
+  const mobileCtl = {
+    device,
+    onFreeze: freezeMobile,
+    onUseSaved: () => {
+      patchBlock(blockId, { mobileMode: "custom" });
+      setDevice("mobile");
+    },
+    onAuto: () => patchBlock(blockId, { mobileMode: "auto" }),
+  };
+
+  /** ใช้แม่แบบ: ใส่เนื้อแม่แบบแทนผืนนี้ (id ชิ้นใหม่ทั้งหมด · ช่องที่ขาดเติมจาก schema) */
+  const applyTemplate = (data: Record<string, unknown>) => {
+    const spec = SECTION_SCHEMAS.canvas.children!;
+    const inst = instantiateCanvasTemplate(data, (raw) => blankChild({ ...spec, blank: () => raw }));
+    patchBlock(blockId, { mobileMode: "auto", bgImageKey: null, ...inst });
+    selectMany([]);
+  };
 
   /* ── เพิ่มชิ้น ── */
   const addItem = useCallback(
@@ -196,6 +285,8 @@ export function CanvasEditor({
       // วางกลางผืน เหลื่อมลงทีละนิดตามจำนวนชิ้น จะได้ไม่ทับกันสนิท
       item.x = Math.round((CANVAS_WIDTH - w) / 2);
       item.y = Math.max(0, Math.min(height - Math.min(h, height), 60 + (list.length % 6) * 36));
+      // มือถือแบบจัดเอง: ชิ้นใหม่ได้ตำแหน่งบนผืนมือถือด้วย (กลางผืน ช่วงบน)
+      if (b.mobileMode === "custom") Object.assign(item, canvasMobilePreset(item, list.length));
       insertChild(blockId, item);
     },
     [blockId, blocksRef, insertChild]
@@ -241,6 +332,7 @@ export function CanvasEditor({
     else if (a === "add-shape") setDecorOpen(true);
     else if (a === "replace-image" && target.childId) setChooser({ mode: "replace", childId: target.childId });
     else if (a === "link" && target.childId) setLinkFor(target.childId);
+    else if (a === "templates") setTemplatesOpen(true);
   }, [target]);
 
   if (!block) return null;
@@ -268,8 +360,16 @@ export function CanvasEditor({
             <span className="w-px h-5 bg-slate-200 mx-1" />
             <button onClick={() => setDevice("desktop")} className={`h-8 px-3 rounded-lg border text-xs ${device === "desktop" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600"}`}>🖥️ คอม</button>
             <button onClick={() => setDevice("mobile")} className={`h-8 px-3 rounded-lg border text-xs ${device === "mobile" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600"}`}>📲 มือถือ</button>
-            <span className="hidden md:inline text-[11px] text-slate-400 ml-2">
-              {device === "mobile" ? "มือถือเรียงชิ้นลงมาให้อัตโนมัติ (ดูอย่างเดียว · จัดในโหมดคอม)" : "ลากย้าย · จับมุมย่อ-ขยาย · จุดกลมด้านบน = หมุน · ดับเบิลคลิกข้อความเพื่อพิมพ์ · บันทึกร่างอัตโนมัติ"}
+            <span className="w-px h-5 bg-slate-200 mx-1" />
+            <button onClick={() => setTemplatesOpen(true)} className="h-8 px-3 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-blue-400">
+              📐 แม่แบบ
+            </button>
+            <span className="hidden md:inline text-[11px] text-slate-400 ml-2 truncate">
+              {device === "mobile"
+                ? block?.mobileMode === "custom"
+                  ? "ผืนมือถือแยกจากคอม — ลาก/ย่อ/หมุนได้ ไม่กระทบหน้าคอม"
+                  : "มือถือเรียงชิ้นลงมาให้อัตโนมัติ (ดูอย่างเดียว)"
+                : "ลากย้าย · มุม = ย่อ-ขยาย · Shift+คลิก/ลากกรอบ = หลายชิ้น · ดับเบิลคลิกข้อความเพื่อพิมพ์ · บันทึกร่างอัตโนมัติ"}
             </span>
             <span className="flex-1" />
             <button onClick={onClose} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">เสร็จ</button>
@@ -342,10 +442,10 @@ export function CanvasEditor({
                     ))}
                   {panel === "layers" && (
                     <div className="max-h-[55vh] overflow-y-auto space-y-1">
-                      <p className="text-[10px] text-slate-400 -mt-1 mb-1">ลาก ⠿ เพื่อสลับชั้น</p>
+                      <p className="text-[10px] text-slate-400 -mt-1 mb-1">ลาก ⠿ เพื่อสลับชั้น · Ctrl/Shift+คลิก = เลือกหลายชิ้น</p>
                       {[...items].reverse().map((it, shownIdx) => {
                         const idx = items.findIndex((x) => x.id === it.id);
-                        const on = selItem?.id === it.id;
+                        const on = selItem?.id === it.id || (multiOk && multi.includes(it.id));
                         return (
                           <div
                             key={it.id}
@@ -353,7 +453,16 @@ export function CanvasEditor({
                             className={`flex items-center gap-1 rounded-lg border px-1.5 py-1.5 ${on ? "border-blue-500 bg-blue-50" : "border-slate-200"} ${layerDrag.rowCls(shownIdx)}`}
                           >
                             <DragHandle {...layerDrag.handleProps(shownIdx)} title="ลากเพื่อสลับชั้น" />
-                            <button onClick={() => onSelect({ blockId, childId: it.id })} className="flex-1 min-w-0 text-left text-xs text-slate-700 truncate">
+                            <button
+                              onClick={(e) => {
+                                if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                                  const cur = multiOk ? multi : selItem ? [selItem.id] : [];
+                                  selectMany(cur.includes(it.id) ? cur.filter((x) => x !== it.id) : [...cur, it.id]);
+                                } else selectMany([it.id]);
+                              }}
+                              className="flex-1 min-w-0 text-left text-xs text-slate-700 truncate"
+                            >
+                              {it.group ? "⛓ " : ""}
                               {canvasItemSummary(it)}
                             </button>
                             <button title="ขึ้นหน้า" disabled={idx === items.length - 1} onClick={() => patchBlock(blockId, { items: reorderLayer(items, it.id, "up") })} className="text-xs text-slate-400 hover:text-slate-800 disabled:opacity-30">↑</button>
@@ -371,6 +480,14 @@ export function CanvasEditor({
 
             {/* กลาง: ผืนจริง */}
             <div ref={centerRef} className="relative min-w-0 overflow-hidden" onClick={() => setPanel(null)}>
+              {device === "mobile" && block.mobileMode !== "custom" && (
+                <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 shadow-sm">
+                  <span className="text-[11px] text-amber-800">มือถือเรียงอัตโนมัติ (ดูอย่างเดียว)</span>
+                  <button onClick={() => (items.some((x) => Number(x.mw) > 0) ? mobileCtl.onUseSaved() : freezeMobile())} className="rounded-full bg-amber-500 px-2.5 py-0.5 text-[11px] text-white hover:bg-amber-600">
+                    ✋ จัดเองบนมือถือ
+                  </button>
+                </div>
+              )}
               <div className="mx-auto mt-3" style={{ width: base * scale, height: box.h - 24, overflow: "hidden" }}>
                 <iframe
                   ref={iframeRef}
@@ -385,9 +502,14 @@ export function CanvasEditor({
             {/* ขวา: ตั้งค่า */}
             <div className="border-l border-slate-200 bg-white flex flex-col min-h-0">
               <div className="px-3 py-2.5 border-b border-slate-200 flex items-center gap-1">
-                {selItem ? (
+                {multiOk ? (
                   <>
-                    <button onClick={() => onSelect({ blockId })} className="text-[11px] text-slate-500 hover:text-blue-600">← ทั้งผืน</button>
+                    <button onClick={() => selectMany([])} className="text-[11px] text-slate-500 hover:text-blue-600">← ทั้งผืน</button>
+                    <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate ml-1">หลายชิ้น ({multiItems.length})</span>
+                  </>
+                ) : selItem ? (
+                  <>
+                    <button onClick={() => selectMany([])} className="text-[11px] text-slate-500 hover:text-blue-600">← ทั้งผืน</button>
                     <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate ml-1">{canvasItemSummary(selItem)}</span>
                     <button title="ทำสำเนา" onClick={() => duplicateChild(blockId, selItem.id)} className="w-7 h-7 rounded-md border border-slate-200 text-xs">⧉</button>
                     <button title="ลบ" onClick={() => removeChild(blockId, selItem.id)} className="w-7 h-7 rounded-md border border-slate-200 text-xs text-red-600">🗑</button>
@@ -408,8 +530,11 @@ export function CanvasEditor({
                   onReplaceImage={() => selItem && setChooser({ mode: "replace", childId: selItem.id })}
                   onPickBgImage={() => setChooser({ mode: "bg" })}
                   onLayer={(to) => selItem && patchBlock(blockId, { items: reorderLayer(items, selItem.id, to) })}
-                  onAlign={(to) => selItem && post({ type: "storefront-canvas-align", blockId, childId: selItem.id, to })}
+                  onAlign={alignTo}
                   onCrop={() => selItem && post({ type: "storefront-canvas-crop", blockId, childId: selItem.id })}
+                  multi={multiItems}
+                  onMulti={multiAction}
+                  mobile={mobileCtl}
                 />
               </div>
             </div>
@@ -417,6 +542,15 @@ export function CanvasEditor({
         </div>
       </ERPModal>
 
+      <CanvasTemplates
+        open={templatesOpen}
+        onClose={() => setTemplatesOpen(false)}
+        shopId={ctx.shopId}
+        block={block as unknown as Record<string, unknown>}
+        theme={theme}
+        fontNames={fontNames}
+        onApply={applyTemplate}
+      />
       <ImageChooser
         open={!!chooser}
         onClose={() => setChooser(null)}

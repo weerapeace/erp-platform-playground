@@ -316,6 +316,12 @@ export function WebsiteBuilder({
     if (b.type === "canvas") {
       copy.x = (Number(copy.x) || 0) + 24;
       copy.y = (Number(copy.y) || 0) + 24;
+      if (b.mobileMode === "custom" && Number(copy.mw) > 0) {
+        copy.mx = (Number(copy.mx) || 0) + 12;
+        copy.my = (Number(copy.my) || 0) + 12;
+      }
+      // สำเนาชิ้นเดียว = ไม่อยู่ในกลุ่มเดิม (ไม่งั้นคลิกแล้วเลือกติดไปทั้งกลุ่ม)
+      copy.group = "";
       copy.locked = false;
     }
     const next = [...c.list];
@@ -362,6 +368,10 @@ export function WebsiteBuilder({
     onAction: (blockId, childId, action) => {
       onSelect({ blockId, childId });
       setCanvasEditor({ blockId, childId, action });
+    },
+    // เลือกหลายชิ้นในพรีวิวเล็ก: แผงขวาโชว์ชิ้นหลัก (ตัวท้าย) · ทำสำเนาหลายชิ้นแล้วเลือกชุดสำเนา
+    onMulti: (blockId, ids) => {
+      if (ids.length > 1) onSelect({ blockId, childId: ids[ids.length - 1] });
     },
   });
 
@@ -1063,7 +1073,12 @@ export function WebsiteBuilder({
         {propTab === "content" && (
           <div className="space-y-4">
             {selBlock.type === "canvas" && (
-              <CanvasAddBar onOpen={(action) => setCanvasEditor({ blockId: selBlock.id, action })} count={childrenOf(selBlock)?.list.length ?? 0} max={selSchema.children?.max ?? 60} />
+              <CanvasAddBar
+                onOpen={(action) => setCanvasEditor({ blockId: selBlock.id, action })}
+                count={childrenOf(selBlock)?.list.length ?? 0}
+                max={selSchema.children?.max ?? 60}
+                mobileCustom={selBlock.mobileMode === "custom"}
+              />
             )}
             <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={formCtx} />
             {selSchema.children && (

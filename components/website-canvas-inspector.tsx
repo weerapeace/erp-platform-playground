@@ -5,15 +5,31 @@
  *
  * แสดงเฉพาะเรื่องที่ใช้บ่อยของชิ้นที่เลือก — สีเป็นจุดสีของธีม · ฟอนต์โชว์ตัวอย่างจริง · ขนาดเป็นแถบเลื่อน · กรอบเลือกจากภาพ
  * ค่าละเอียดทั้งหมด (ตำแหน่งเป๊ะ ๆ ฯลฯ) อยู่ใน "ตั้งค่าละเอียด" = ฟอร์มจาก schema ตัวเดิม (SchemaForm)
- * ไม่มีชิ้นที่เลือก = ตั้งค่าของทั้งผืน (ความสูง · พื้นหลัง · มือถือ)
+ * ไม่มีชิ้นที่เลือก = ตั้งค่าของทั้งผืน (ความสูง · พื้นหลัง · มือถือ: เรียงอัตโนมัติ / จัดเอง)
+ * เลือกหลายชิ้น = แผงหลายชิ้น (จับกลุ่ม · จัดชิดกัน · กระจายระยะ · ชั้น · สำเนา · ลบ)
+ * ดูจอมือถือ + ผืนจัดเอง = ขนาดตัวอักษร/จัดข้อความ แก้เฉพาะมือถือ (ช่อง msize/malign)
  */
 import { useState, type ReactNode } from "react";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasShape } from "@/components/website-canvas-shapes";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
-import { CANVAS_BUTTON_VARIANTS, CANVAS_FONTS, CANVAS_FRAME_PRESETS, CANVAS_SHAPES, CANVAS_WEIGHTS, CANVAS_WIDTH } from "@/lib/website-canvas";
+import { CANVAS_BUTTON_VARIANTS, CANVAS_FONTS, CANVAS_FRAME_PRESETS, CANVAS_SHAPES, CANVAS_WEIGHTS, canvasMobileBox } from "@/lib/website-canvas";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
+
+export type CanvasAlign = "top" | "left" | "middle" | "center" | "bottom" | "right" | "distribute-h" | "distribute-v";
+export type CanvasMultiAction = "group" | "ungroup" | "duplicate" | "delete" | "front" | "back" | "hideMobile" | "showMobile" | "lock" | "unlock";
+
+/** โหมดมือถือของผืน (ป๊อปอัปแก้เต็มจอส่งมา) */
+export interface CanvasMobileCtl {
+  device: "desktop" | "mobile";
+  /** เริ่มจัดเอง: จับตำแหน่งที่เรียงอัตโนมัติอยู่ตอนนี้เป็นจุดเริ่ม */
+  onFreeze: () => void;
+  /** กลับไปใช้ตำแหน่งมือถือที่เคยจัดไว้ */
+  onUseSaved: () => void;
+  /** กลับเป็นเรียงอัตโนมัติ (ตำแหน่งที่จัดไว้ยังเก็บอยู่) */
+  onAuto: () => void;
+}
 
 /** สีของธีมร้าน (จาก API สาธารณะ) — ใช้วาดจุดสี */
 export type ThemeColors = { brand: string; brandDeep: string; ink: string; muted: string; page: string; surface: string };
@@ -103,9 +119,16 @@ export function CanvasInspector({
   onLayer,
   onAlign,
   onCrop,
+  multi = [],
+  onMulti,
+  mobile,
 }: {
   block: Block;
   item: ChildBlock | null;
+  /** เลือกหลายชิ้น (≥ 2) → แสดงแผงหลายชิ้นแทน */
+  multi?: ChildBlock[];
+  onMulti?: (a: CanvasMultiAction) => void;
+  mobile?: CanvasMobileCtl;
   theme: ThemeColors;
   /** ชื่อฟอนต์หัวข้อ/เนื้อหาของธีม (โชว์ในรายการฟอนต์) */
   fontNames: { display: string; body: string };
@@ -116,18 +139,76 @@ export function CanvasInspector({
   onPickBgImage: () => void;
   /** ชั้นหน้า-หลังของชิ้นที่เลือก */
   onLayer: (to: "up" | "down" | "front" | "back") => void;
-  /** จัดชิดผืน (พรีวิวคำนวณจากขนาดจริงบนจอ) */
-  onAlign: (to: "top" | "left" | "middle" | "center" | "bottom" | "right") => void;
+  /** จัดชิดผืน / ชิดกันเอง (พรีวิวคำนวณจากขนาดจริงบนจอ) */
+  onAlign: (to: CanvasAlign) => void;
   /** เข้าโหมดครอปบนผืน (ลากรูปในกรอบ) */
   onCrop: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const spec = SECTION_SCHEMAS.canvas.children!;
+  const custom = block.mobileMode === "custom";
+  const mobileEditing = custom && mobile?.device === "mobile";
+  const arr = "flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700";
+
+  /* ── หลายชิ้น ── */
+  if (multi.length > 1) {
+    const grouped = !!multi[0].group && multi.every((x) => x.group === multi[0].group);
+    const allHidden = multi.every((x) => x.hideMobile === true);
+    const allLocked = multi.every((x) => x.locked === true);
+    return (
+      <div className="space-y-4">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">
+            เลือก {multi.length} ชิ้น {grouped && <span className="text-[11px] font-normal text-blue-700">· ⛓ กลุ่มเดียวกัน</span>}
+          </p>
+          <p className="text-[11px] text-slate-500">Shift/Ctrl+คลิก = เพิ่ม/เอาออก · ลากที่ว่างบนผืนเป็นกรอบ = เลือกหลายชิ้น · ลากชิ้นใดก็ได้ = ย้ายทั้งชุด</p>
+        </div>
+        <button onClick={() => onMulti?.(grouped ? "ungroup" : "group")} className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100">
+          {grouped ? "✂ แยกกลุ่ม" : "⛓ จับกลุ่ม (คลิกทีเดียวได้ทั้งชุด)"}
+        </button>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
+          <H>จัดชิดกัน (เทียบกรอบรวม)</H>
+          <div className="grid grid-cols-2 gap-1.5 -mt-1">
+            <button className={arr} onClick={() => onAlign("top")}>⤒ ชิดบน</button>
+            <button className={arr} onClick={() => onAlign("left")}>⇤ ชิดซ้าย</button>
+            <button className={arr} onClick={() => onAlign("middle")}>⇕ กลางแนวตั้ง</button>
+            <button className={arr} onClick={() => onAlign("center")}>⇔ กลางแนวนอน</button>
+            <button className={arr} onClick={() => onAlign("bottom")}>⤓ ชิดล่าง</button>
+            <button className={arr} onClick={() => onAlign("right")}>⇥ ชิดขวา</button>
+          </div>
+          {multi.length >= 3 && (
+            <>
+              <H>กระจายระยะห่างเท่ากัน</H>
+              <div className="grid grid-cols-2 gap-1.5 -mt-1">
+                <button className={arr} onClick={() => onAlign("distribute-h")}>↔ แนวนอน</button>
+                <button className={arr} onClick={() => onAlign("distribute-v")}>↕ แนวตั้ง</button>
+              </div>
+            </>
+          )}
+          <H>ชั้น</H>
+          <div className="grid grid-cols-2 gap-1.5 -mt-1">
+            <button className={arr} onClick={() => onMulti?.("front")}>⤒ หน้าสุด</button>
+            <button className={arr} onClick={() => onMulti?.("back")}>⤓ หลังสุด</button>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button className={seg(allHidden)} onClick={() => onMulti?.(allHidden ? "showMobile" : "hideMobile")}>{allHidden ? "📵 ซ่อนบนมือถือ" : "📲 โชว์บนมือถือ"}</button>
+          <button className={seg(allLocked)} onClick={() => onMulti?.(allLocked ? "unlock" : "lock")}>{allLocked ? "🔒 ล็อกอยู่" : "🔓 ไม่ล็อก"}</button>
+        </div>
+        <div className="flex gap-1.5">
+          <button className={seg(false)} onClick={() => onMulti?.("duplicate")}>⧉ ทำสำเนาทั้งหมด</button>
+          <button className="flex-1 px-2 py-1.5 text-xs rounded-md border border-red-200 text-red-600 hover:bg-red-50" onClick={() => onMulti?.("delete")}>🗑 ลบ {multi.length} ชิ้น</button>
+        </div>
+      </div>
+    );
+  }
 
   /* ── ทั้งผืน ── */
   if (!item) {
     const style = (block.style ?? {}) as Record<string, unknown>;
     const bg = String(style.bg ?? "auto");
+    const items = (Array.isArray(block.items) ? block.items : []) as ChildBlock[];
+    const hasSaved = items.some((x) => Number(x.mw) > 0);
     return (
       <div className="space-y-4">
         <p className="text-sm font-semibold text-slate-800">ทั้งผืน</p>
@@ -172,12 +253,36 @@ export function CanvasInspector({
             )}
           </div>
         </div>
-        <div>
-          <H>มือถือ (เรียงชิ้นลงมาให้อัตโนมัติ)</H>
-          <div className="flex gap-1.5">
-            <button className={seg(block.mobileAlign !== "left")} onClick={() => onPatchBlock({ mobileAlign: "center" })}>จัดกึ่งกลาง</button>
-            <button className={seg(block.mobileAlign === "left")} onClick={() => onPatchBlock({ mobileAlign: "left" })}>ชิดซ้าย</button>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
+          <H>📲 มือถือ</H>
+          <div className="flex gap-1.5 -mt-1">
+            <button className={seg(!custom)} onClick={() => mobile?.onAuto()}>เรียงอัตโนมัติ</button>
+            <button className={seg(custom)} onClick={() => (custom ? undefined : hasSaved ? mobile?.onUseSaved() : mobile?.onFreeze())}>
+              ✋ จัดเอง
+            </button>
           </div>
+          {custom ? (
+            <>
+              <p className="text-[11px] text-slate-500">ผืนมือถือแยกจากคอม — {mobile?.device === "mobile" ? "ลาก/ย่อ/หมุนบนผืนได้เลย ไม่กระทบหน้าคอม" : "กด 📲 มือถือ ด้านบนเพื่อจัด"}</p>
+              <Slider label="ความสูงผืนมือถือ" value={Number(block.mobileHeight) || 800} min={120} max={3000} step={10} onChange={(n) => onPatchBlock({ mobileHeight: n })} />
+              <button onClick={() => mobile?.onFreeze()} className="text-[11px] text-slate-500 hover:text-blue-600">
+                ↺ เริ่มจัดใหม่จากแบบเรียงอัตโนมัติ
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-500">เรียงชิ้นลงมาตามตำแหน่ง บน→ล่าง · กด &quot;จัดเอง&quot; = ใช้ที่เรียงไว้ตอนนี้เป็นจุดเริ่ม แล้วลากต่อเองได้</p>
+              <div className="flex gap-1.5">
+                <button className={seg(block.mobileAlign !== "left")} onClick={() => onPatchBlock({ mobileAlign: "center" })}>จัดกึ่งกลาง</button>
+                <button className={seg(block.mobileAlign === "left")} onClick={() => onPatchBlock({ mobileAlign: "left" })}>ชิดซ้าย</button>
+              </div>
+              {hasSaved && (
+                <button onClick={() => mobile?.onFreeze()} className="text-[11px] text-slate-500 hover:text-blue-600">
+                  ✋ จัดเองใหม่จากแบบเรียงอัตโนมัติ (ทิ้งที่เคยจัด)
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
     );
@@ -189,9 +294,50 @@ export function CanvasInspector({
   const str = (k: string) => String(item[k] ?? "");
   const colorPick = (key: string, hexKey: string) => (v: string, hex?: string) => onPatchItem(hex ? { [key]: v, [hexKey]: hex } : { [key]: v });
 
-  const arr = "flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700";
+  const mb = canvasMobileBox(item);
   return (
     <div className="space-y-4">
+      {/* ดูจอมือถือ: ผืนจัดเอง = แก้แยกจากคอม · เรียงอัตโนมัติ = บอกวิธีเปลี่ยน */}
+      {mobile?.device === "mobile" &&
+        (mobileEditing ? (
+          <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-2.5 space-y-2">
+            <p className="text-[11px] font-semibold text-violet-800">📲 กำลังจัดหน้ามือถือ — ลาก/ย่อบนผืนได้เลย ไม่กระทบหน้าคอม</p>
+            {(kind === "text" || kind === "button") && (
+              <Slider label="ขนาดตัวอักษร (มือถือ)" value={mb.msize} min={8} max={kind === "button" ? 32 : 96} onChange={(n) => onPatchItem({ ...mb, msize: n })} />
+            )}
+            {kind === "text" && (
+              <div>
+                <H>จัดข้อความ (มือถือ)</H>
+                <div className="flex gap-1">
+                  {(
+                    [
+                      ["", "เหมือนคอม"],
+                      ["left", "ซ้าย"],
+                      ["center", "กลาง"],
+                      ["right", "ขวา"],
+                    ] as const
+                  ).map(([v, l]) => (
+                    <button key={v || "same"} className={seg(str("malign") === v)} onClick={() => onPatchItem({ malign: v })}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] text-amber-800">มือถือเรียงชิ้นให้อัตโนมัติอยู่ — อยากวางเองบนมือถือ กด &quot;← ทั้งผืน&quot; แล้วเลือก ✋ จัดเอง</p>
+        ))}
+
+      {Boolean(item.group) && (
+        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-2.5 py-1.5">
+          <span className="flex-1 text-[11px] text-blue-800">⛓ อยู่ในกลุ่ม — คลิกบนผืน = เลือกทั้งกลุ่ม · คลิกซ้ำ = ชิ้นเดียว</span>
+          <button onClick={() => onPatchItem({ group: "" })} className="text-[11px] text-blue-700 hover:underline">
+            เอาออกจากกลุ่ม
+          </button>
+        </div>
+      )}
+
       {/* จัดวาง (Arrange) — ชั้น + จัดชิดผืน */}
       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
         <H>ชั้น</H>
@@ -219,6 +365,10 @@ export function CanvasInspector({
             <button className={seg(item.flipH === true)} onClick={() => onPatchItem({ flipH: !item.flipH })}>⇋ ซ้าย-ขวา</button>
             <button className={seg(item.flipV === true)} onClick={() => onPatchItem({ flipV: !item.flipV })}>⇅ บน-ล่าง</button>
           </div>
+          <button className={`${seg(item.bleed === true)} mt-1.5 w-full`} onClick={() => onPatchItem({ bleed: !item.bleed })}>
+            ⟷ {item.bleed ? "ยืดเต็มความกว้างจออยู่ (กดเพื่อเลิก)" : "ยืดเต็มความกว้างจอ"}
+          </button>
+          {item.bleed === true && <p className="text-[10px] text-slate-400 mt-1">กว้างซ้ายสุด–ขวาสุดของจอทุกขนาด · ลากได้แค่ขึ้น-ลง · ปรับสูงด้วยจุดจับบน/ล่าง</p>}
         </div>
       )}
 
@@ -419,7 +569,7 @@ export function CanvasInspector({
       <div className="flex flex-wrap gap-1.5">
         <button className={seg(item.hideMobile === true)} onClick={() => onPatchItem({ hideMobile: !item.hideMobile })}>{item.hideMobile ? "📵 ซ่อนบนมือถือ" : "📲 โชว์บนมือถือ"}</button>
         <button className={seg(item.locked === true)} onClick={() => onPatchItem({ locked: !item.locked })}>{item.locked ? "🔒 ล็อกอยู่" : "🔓 ไม่ล็อก"}</button>
-        <button className={seg(false)} onClick={() => onPatchItem({ x: Math.round((CANVAS_WIDTH - num("w", 0)) / 2) })}>↔ กึ่งกลางผืน</button>
+        <button className={seg(false)} onClick={() => onAlign("center")}>↔ กึ่งกลางผืน</button>
       </div>
 
       <div className="border-t border-slate-200 pt-3">

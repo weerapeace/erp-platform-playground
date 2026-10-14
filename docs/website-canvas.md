@@ -30,9 +30,26 @@
 
 ## มือถือ
 
-- เฟส 1: จอ < 768px **เรียงชิ้นลงมาอัตโนมัติ** ตามตำแหน่ง บน→ล่าง แล้วซ้าย→ขวา · ข้อความจัดกึ่งกลาง (ตั้ง "มือถือ: ชิดซ้าย" ได้)
-- ของตกแต่งที่เพิ่มใหม่ตั้ง "ซ่อนบนมือถือ" ไว้ให้ (ตำแหน่งอิสระไม่มีความหมายเมื่อเรียงเป็นแถว)
-- เฟส 2 (ยังไม่ทำ): จัดหน้ามือถือแยกเองได้ + ปุ่ม "สร้างจากหน้าคอม"
+- **เรียงอัตโนมัติ** (`mobileMode: "auto"` ค่าเริ่มต้น): จอ < 768px เรียงชิ้นลงมาตามตำแหน่ง บน→ล่าง แล้วซ้าย→ขวา · ข้อความจัดกึ่งกลาง (ตั้ง "มือถือ: ชิดซ้าย" ได้) · ดูอย่างเดียว ลากไม่ได้
+- **จัดเอง** (`mobileMode: "custom"`): ผืนมือถือกว้าง **400 หน่วย** แยกจากคอม — ลาก/ย่อ/หมุน/ขนาดตัวอักษร/จัดข้อความ บนจอ 📲 มือถือ ในป๊อปอัปแก้เต็มจอ ไม่กระทบหน้าคอม
+  - กด "✋ จัดเอง" = พรีวิว **วัดตำแหน่งจริงของแบบเรียงอัตโนมัติที่เห็นอยู่** แล้วเก็บเป็นจุดเริ่ม (`storefront-canvas-mobile-freeze`) → หน้ามือถือไม่กระโดด
+  - กลับเป็นเรียงอัตโนมัติได้ (ตำแหน่งที่จัดยังเก็บไว้ กด "จัดเอง" อีกครั้งได้ของเดิมคืน) · "↺ เริ่มจัดใหม่" = วัดจากแบบอัตโนมัติใหม่
+  - ชิ้นที่เพิ่มตอนเป็นแบบจัดเองได้ตำแหน่งมือถือให้เลย (`canvasMobilePreset`) · ชิ้นที่ยังไม่ได้จัด (`mw = 0`) = ย่อจากตำแหน่งคอม 1/3
+- ของตกแต่งที่เพิ่มใหม่ตั้ง "ซ่อนบนมือถือ" ไว้ให้ (เปิดโชว์ทีหลังได้)
+
+## เลือกหลายชิ้น / กลุ่ม / ยืดเต็มจอ
+
+- **หลายชิ้น**: Shift/Ctrl+คลิก · ลากกรอบจากที่ว่าง · Ctrl+A · แผงชั้น Ctrl/Shift+คลิก → ลากย้ายทั้งชุด · ลูกศร · จัดชิดกัน (เทียบกรอบรวม) · กระจายระยะเท่ากัน (≥ 3 ชิ้น) · หน้าสุด/หลังสุด · สำเนา · ลบ · ซ่อนบนมือถือ/ล็อกทั้งชุด
+- **กลุ่ม** (`group` = รหัสเดียวกัน): Ctrl+G / ปุ่ม ⛓ จับกลุ่ม → คลิกชิ้นใดก็ได้ = เลือกทั้งกลุ่ม · คลิกซ้ำ = เฉพาะชิ้นนั้น · Ctrl+Shift+G / ✂ แยกกลุ่ม
+- **ยืดเต็มจอ** (`bleed`, รูป/ของตกแต่ง): กว้างซ้ายสุด–ขวาสุดของจอทุกขนาด (`left: calc(50% - 50vw); width: 100vw`) ใช้แค่ตำแหน่งแนวตั้ง · จุดจับเหลือบน/ล่าง · `.cv-sec` ตัดส่วนเกินแนวนอน (ไม่มีแถบเลื่อนข้าง)
+
+## แม่แบบ (📐)
+
+- บันทึกทั้งผืน (ชิ้น · ตำแหน่งคอม/มือถือ · ความสูง · พื้นหลัง · สี) ลงตาราง **`website_canvas_templates`** → ใช้กับผืนอื่น หน้าอื่น หรือร้านอื่น
+- ใช้ = **คัดลอก**เนื้อแม่แบบมาแทนผืนนี้ (ชิ้นได้ id ใหม่ + กลุ่มได้รหัสใหม่ · ย้อนกลับด้วย ↶ ได้) — แก้ผืน/แม่แบบทีหลังไม่กระทบกัน
+- แก้ชื่อ · บันทึกทับด้วยผืนปัจจุบัน · ลบ (ConfirmDialog) · ทุกการกระทำลง audit log (`entity_type = website_canvas_template`)
+- แบบสำเร็จของระบบ 3 แบบ (`CANVAS_STARTER_TEMPLATES` — ไม่มีรูป สีตามธีม) ลบ/แก้ไม่ได้
+- รูปในแม่แบบบันทึก "ถูกใช้" (`asset_usages` module `website_canvas_template` field `data`) → คลังไฟล์ไม่ให้ลบรูปที่แม่แบบยังใช้
 
 ## ข้อมูล (เก็บใน `shops.home_layout` / `store_pages.layout` เหมือน Section อื่น)
 
@@ -41,10 +58,14 @@
   id, type: "canvas", enabled, visibility, style,   // style.bg = สีพื้นผืน (เต็มความกว้างจอ)
   height: 560,              // ความสูงผืน (หน่วย)
   bgImageKey: null,         // รูปพื้นหลังผืน (r2 key)
-  mobileAlign: "center",    // มือถือ: center | left
+  mobileAlign: "center",    // มือถือแบบเรียงอัตโนมัติ: center | left
+  mobileMode: "auto",       // มือถือ: auto (เรียงให้) | custom (จัดเอง)
+  mobileHeight: 800,        // ความสูงผืนมือถือแบบจัดเอง (หน่วยผืนมือถือ 400)
   items: [{                 // ลำดับใน array = ลำดับวาด (ตัวแรกอยู่หลังสุด)
     id, enabled, kind: "image" | "text" | "button" | "shape",
     x, y, w, h, rotate, opacity, hideMobile, locked,   // หน่วยบนผืนกว้าง 1200 (จอ 1200px = 1:1)
+    mx, my, mw, mh, msize, malign,                      // มือถือแบบจัดเอง (ผืนกว้าง 400) · mw = 0 = ยังไม่ได้จัด
+    group, bleed,                                       // กลุ่ม (รหัส) · ยืดเต็มความกว้างจอ (รูป/ของตกแต่ง)
     href, newTab,                                       // กดแล้วไปที่ (กรอง javascript: ทิ้งทั้ง ERP และเว็บร้าน)
     // ข้อความ/ปุ่ม: text | label, variant, font, size, weight, italic, uppercase, spacing, lineHeight, align, color, colorHex, bg, bgHex
     // รูป: imageKey, alt, frame (rect|rounded|ellipse|arch), fit, border (none|line|double|dotted|lace), borderColor, borderHex, borderWidth, borderGap
@@ -75,6 +96,8 @@
 | ERP | `components/website-canvas-media.tsx` | หน้าต่างเพิ่มรูป 3 ทาง + คลังของตกแต่ง |
 | ERP | `components/website-canvas-shapes.tsx` | ⚠️ สำเนาลาย SVG จากเว็บร้าน (ไว้โชว์ตัวอย่างในคลัง) — แก้ลายที่เว็บร้านแล้วคัดลอกมาด้วย |
 | ERP | `app/api/website/canvas-decor/route.ts` · `lib/website-canvas-usage.ts` | อัลบั้มของตกแต่งต่อร้าน · บันทึก "ถูกใช้ที่ไหน" |
+| ERP | `components/website-canvas-templates.tsx` · `app/api/website/canvas-templates/route.ts` | หน้าต่างแม่แบบ + API (GET/POST/PATCH/DELETE) · migration `supabase/migrations/202610142300_website_canvas_templates.sql` |
+| ERP | `components/website-canvas-mini.tsx` | ภาพย่อผืน (การ์ดแม่แบบ) — วาดใน ERP เอง ไม่ต้องเปิด iframe |
 | ERP | `components/website-link-picker.tsx` + `lib/website-links.ts` | ของกลาง "กดแล้วไปที่" (ช่องชนิด `target`) |
 | เว็บร้าน | `src/lib/canvas.ts` | ชนิด + `parseCanvasBlock` (กรองซ้ำทุกช่อง) + ตัวช่วยสี/ฟอนต์/มือถือ |
 | เว็บร้าน | `src/components/home/CanvasSection.tsx` | วาด + ลาก/ย่อ/หมุน/เส้นจัดแนว/พิมพ์แก้ (เฉพาะโหมดแก้ไข) |
@@ -96,8 +119,15 @@
 | ERP → เว็บ | `storefront-canvas-align {blockId, childId, to}` · `storefront-canvas-crop {blockId, childId}` | ปุ่มในแผงขวาที่ต้องใช้ขนาดจริงบนจอ / เปิดโหมดครอปในพรีวิว |
 | เว็บ → ERP | `storefront-canvas-action {action: layer-up/down/front/back}` | ปุ่มชั้นบนแถบลอย — bridge เรียงลำดับใหม่ในข้อมูลเอง |
 | ERP → เว็บ | `storefront-ui-scale {scale}` | พรีวิวถูกย่อเท่าไร → PreviewBridge ตั้ง `--cv-ui` ให้แถบลอย/จุดจับขยายกลับ |
+| เว็บ → ERP | `storefront-canvas-multi {blockId, ids}` | เลือกเปลี่ยน (ตัวท้าย = ชิ้นหลัก) — ป๊อปอัปเก็บไว้แสดงแผงหลายชิ้น |
+| ERP → เว็บ | `storefront-select-block {blockId, childId, childIds?}` | เลือกจากฝั่ง ERP · ไม่มี childIds + childId = ชิ้นหลักเดิม → พรีวิวคงการเลือกหลายชิ้นไว้ |
+| เว็บ → ERP | `storefront-canvas-delete` / `-duplicate {blockId, childIds}` · `storefront-canvas-action {childIds, action: layer-front/back}` | คำสั่งกับหลายชิ้น (ย้อนกลับได้ในขั้นเดียว) |
+| ERP → เว็บ | `storefront-canvas-align {blockId, childIds, to}` | หลายชิ้น = ชิดกันเอง + `distribute-h/v` |
+| ERP → เว็บ | `storefront-canvas-mobile-freeze {blockId}` | วัดหน้ามือถือแบบเรียงอัตโนมัติ → ตอบ `storefront-canvas-change {mobileMode: "custom", mobileHeight, items:[{id,mx,my,mw,mh,msize,malign}]}` |
 
 - เลือกชิ้น = `storefront-block-click {blockId, childId}` (CanvasSection ส่งเองด้วย เพราะหน้าเต็มจอไม่มีตัวห่อ Section) · แถบลอยมี `data-pv-ignore` ให้ PreviewBridge ปล่อยคลิกผ่าน
+- ผืน (`.cv-stage`) ก็มี `data-pv-ignore` ตอนแก้ — CanvasSection จัดการคลิกเอง (ไม่งั้น PreviewBridge ส่ง "เลือก Section" ซ้อนแล้วการเลือกหลายชิ้นหลุด)
+- ป๊อปอัปไม่ส่ง `select-block` ชุดที่พรีวิวเพิ่งบอกมาเองกลับไป (`lastFromFrame`) — กันวนเลือก
 - iframe 2 ตัว (พรีวิวเล็ก + ป๊อปอัป) ใช้ข้อมูลชุดเดียวของตัวจัดหน้า · แต่ละ bridge ฟังเฉพาะ `e.source` ของ iframe ตัวเอง (กันแก้ซ้ำสองรอบ)
 - บันทึกร่างอัตโนมัติแล้วตัวจัดหน้า **ไม่โหลดพรีวิวใหม่** ถ้าแก้แค่ในผืน (`previewStructureSig`) — พรีวิวรับสดอยู่แล้ว
 - ⚠️ CSS ตำแหน่งชิ้นต้อง specificity สูงกว่า `html.pv-edit [data-child-id]{position:relative}` ของ PreviewBridge
@@ -109,6 +139,8 @@
 
 ## ข้อจำกัดที่รู้แล้ว
 
-- ชิ้นต่าง ๆ อยู่ในกรอบกว้าง 1200 กลางจอ — พื้นสี/รูปพื้นเต็มจอได้ แต่ชิ้นยังยืดเต็มจอไม่ได้
-- เลือกได้ทีละชิ้น (ยังไม่มีเลือกหลายชิ้น/จับกลุ่ม)
+- ชิ้นทั่วไปอยู่ในกรอบกว้าง 1200 กลางจอ — ยืดเต็มจอได้เฉพาะรูป/ของตกแต่ง (`bleed`)
+- หลายชิ้น: ย้าย/จัดชิด/กระจายได้ แต่ย่อ-ขยาย/หมุนทั้งชุดพร้อมกันยังไม่ได้ (ทำทีละชิ้น)
+- แม่แบบเห็นได้ทุกร้าน (คนที่เข้าตัวจัดหน้าได้ = จัดการเว็บได้ทุกร้านอยู่แล้ว) — ยังไม่มีแม่แบบ "ส่วนตัว"
+- ภาพย่อแม่แบบวาดคร่าว ๆ ใน ERP (ฟอนต์/ระยะอาจต่างจากเว็บจริงเล็กน้อย)
 - ยังไม่ส่งให้ AI ช่วยจัดหน้า (ต้องจัดตำแหน่งด้วยตา)

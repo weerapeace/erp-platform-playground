@@ -267,6 +267,26 @@ function canvasItemFields(): FieldDef[] {
     f("opacity", "ความทึบ (%)", "range", { group: "layout", default: 100, min: 5, numMax: 100, step: 5 }),
     f("hideMobile", "ซ่อนบนมือถือ", "toggle", { group: "layout", default: false }),
     f("locked", "ล็อกตำแหน่ง (ลากไม่ได้)", "toggle", { group: "layout", default: false }),
+    f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
+    text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
+
+    /* มือถือแบบจัดเอง (Section ตั้ง "มือถือ: จัดเอง") — ผืนมือถือกว้าง 400 · กว้าง 0 = ยังไม่ได้จัด (ใช้ค่าย่อจากคอม) */
+    f("mx", "มือถือ: ซ้าย (X)", "number", { group: "layout", default: 0, min: -400, numMax: 800 }),
+    f("my", "มือถือ: บน (Y)", "number", { group: "layout", default: 0, min: -200, numMax: 8000 }),
+    f("mw", "มือถือ: กว้าง", "number", { group: "layout", default: 0, min: 0, numMax: 800 }),
+    f("mh", "มือถือ: สูง", "number", { group: "layout", default: 0, min: 0, numMax: 8000 }),
+    f("msize", "มือถือ: ขนาดตัวอักษร", "number", { group: "layout", default: 0, min: 0, numMax: 160, showIf: typed }),
+    f("malign", "มือถือ: จัดข้อความ", "select", {
+      group: "layout",
+      default: "",
+      options: [
+        { v: "", l: "เหมือนคอม" },
+        { v: "left", l: "ชิดซ้าย" },
+        { v: "center", l: "กึ่งกลาง" },
+        { v: "right", l: "ชิดขวา" },
+      ],
+      showIf: isText,
+    }),
   ];
 }
 
@@ -362,6 +382,15 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         hint: "หน่วยเดียวกับตำแหน่งชิ้น (ผืนกว้าง 1200) · ลากแถบใต้ผืนในพรีวิวก็ได้",
       }),
       image("bgImageKey", "รูปพื้นหลังผืน", { hint: "เต็มความกว้างจอ · ไม่ใส่ = ใช้สีพื้นจากแท็บรูปลักษณ์" }),
+      f("mobileMode", "มือถือ: วิธีจัด", "select", {
+        group: "layout",
+        default: "auto",
+        options: [
+          { v: "auto", l: "เรียงลงมาให้อัตโนมัติ" },
+          { v: "custom", l: "จัดเอง (ผืนมือถือแยก)" },
+        ],
+        hint: "จัดเอง = ลากวางบนจอมือถือได้เหมือนคอม (กด 📲 มือถือ ในหน้าแก้เต็มจอ)",
+      }),
       f("mobileAlign", "มือถือ: จัดชิ้นส่วน", "select", {
         group: "layout",
         default: "center",
@@ -369,7 +398,17 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "center", l: "กึ่งกลาง" },
           { v: "left", l: "ชิดซ้าย" },
         ],
-        hint: "มือถือเรียงชิ้นลงมาตามตำแหน่ง บน→ล่าง ให้อัตโนมัติ",
+        hint: "แบบเรียงอัตโนมัติ: เรียงชิ้นลงมาตามตำแหน่ง บน→ล่าง",
+        showIf: { key: "mobileMode", eq: "auto" },
+      }),
+      f("mobileHeight", "มือถือ: ความสูงผืน", "number", {
+        group: "layout",
+        default: 800,
+        min: 120,
+        numMax: 8000,
+        step: 10,
+        hint: "หน่วยผืนมือถือ (กว้าง 400) · ลากแถบใต้ผืนในพรีวิวมือถือก็ได้",
+        showIf: { key: "mobileMode", eq: "custom" },
       }),
     ],
     children: {
