@@ -14,6 +14,34 @@ export type MenuAlign = "left" | "center" | "right";
 export type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 export type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
 /** slide = เลื่อนรูปบนการ์ด (คอม: ลูกศร‹ › ตอนชี้ · มือถือ: ปัดนิ้ว) */
+/** 🏷 ป้ายอัตโนมัติบนการ์ด — {pct} ในข้อความลด = เปอร์เซ็นต์ที่ลด (จากราคาขีดฆ่า) */
+export interface CardAutoBadges {
+  sale: boolean; saleText: string; saleMin: number; saleColor: string;
+  new: boolean; newText: string; newDays: number; newColor: string;
+  best: boolean; bestText: string; bestTop: number; bestColor: string;
+  pos: "top-left" | "top-right";
+  shape: "pill" | "square";
+}
+export const DEFAULT_AUTO_BADGES: CardAutoBadges = {
+  sale: false, saleText: "ลด {pct}%", saleMin: 5, saleColor: "#C62828",
+  new: false, newText: "ใหม่", newDays: 30, newColor: "#141517",
+  best: false, bestText: "ขายดี", bestTop: 5, bestColor: "#B7791F",
+  pos: "top-left", shape: "pill",
+};
+export function normalizeAutoBadges(raw: unknown): CardAutoBadges {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_AUTO_BADGES;
+  const txt = (v: unknown, fb: string) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 24) : fb);
+  const hex = (v: unknown, fb: string) => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : fb);
+  const n = (v: unknown, fb: number, lo: number, hi: number) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, Math.round(x))) : fb; };
+  return {
+    sale: r.sale === true, saleText: txt(r.saleText, d.saleText), saleMin: n(r.saleMin, d.saleMin, 1, 90), saleColor: hex(r.saleColor, d.saleColor),
+    new: r.new === true, newText: txt(r.newText, d.newText), newDays: n(r.newDays, d.newDays, 1, 365), newColor: hex(r.newColor, d.newColor),
+    best: r.best === true, bestText: txt(r.bestText, d.bestText), bestTop: n(r.bestTop, d.bestTop, 1, 50), bestColor: hex(r.bestColor, d.bestColor),
+    pos: r.pos === "top-right" ? "top-right" : "top-left",
+    shape: r.shape === "square" ? "square" : "pill",
+  };
+}
 export type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap" | "slide";
 /** 🖼 ระหว่างรอรูปโหลด: logo = โลโก้จาง ๆ กลางกรอบ · none = พื้นเปล่า */
 export type ImagePlaceholderMode = "logo" | "none";
@@ -748,6 +776,20 @@ export interface SiteTheme {
     swatchSwap: boolean;
     /** โชว์จำนวนสี เช่น "4 สี" ใต้ชื่อ */
     showColorCount: boolean;
+    /** 🏷 ป้ายอัตโนมัติ (ลด % / ใหม่ / ขายดี) — ซ้อนกับป้ายที่ตั้งเองรายรุ่น */
+    autoBadges: CardAutoBadges;
+    /** 🖼 สีพื้นหลังหลังรูป ('' = ตามสินค้า) · ระยะขอบรูป % (null = อัตโนมัติ: ย่อพอดี 12px · เต็มกรอบ 0) */
+    imageBg: string;
+    imagePad: number | null;
+    /** 🔤 ชื่อสินค้า: ตัวพิมพ์ใหญ่ · ความหนา · ระยะห่างตัวอักษร (1/100 em) */
+    nameUpper: boolean;
+    nameWeight: 400 | 500 | 600 | 700;
+    nameTracking: number;
+    /** ราคา "เริ่มต้น ฿…" เมื่อแต่ละตัวเลือกราคาไม่เท่ากัน · ชื่อหมวดอยู่เหนือชื่อ/ใต้ราคา */
+    priceFrom: boolean;
+    categoryPos: "above" | "below";
+    /** 👁 ดูด่วน: none · button = ปุ่มตามุมรูป · replace = ปุ่มบนรูปเปิดดูด่วนแทนใส่ตะกร้าทันที */
+    quickView: "none" | "button" | "replace";
     showUnit: boolean;
     showCategory: boolean;
     /** ปุ่ม "เพิ่มลงตะกร้า" บนรูป: โผล่ตอนชี้ / โชว์ตลอด / ไม่มี */
@@ -1135,7 +1177,7 @@ export const DEFAULT_THEME: SiteTheme = {
   menu: { items: null, mobileItems: null },
   footer: { ...DEFAULT_FOOTER },
   listing: { inserts: [] },
-  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
+  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
@@ -1398,6 +1440,15 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       swatchMax: num(cd.swatchMax, d.card.swatchMax, 3, 12),
       swatchSwap: cd.swatchSwap !== false,
       showColorCount: cd.showColorCount === true,
+      autoBadges: normalizeAutoBadges(cd.autoBadges),
+      imageBg: typeof cd.imageBg === "string" && /^#[0-9a-f]{6}$/i.test(cd.imageBg) ? cd.imageBg : "",
+      imagePad: typeof cd.imagePad === "number" && Number.isFinite(cd.imagePad) ? Math.min(20, Math.max(0, Math.round(cd.imagePad))) : null,
+      nameUpper: cd.nameUpper === true,
+      nameWeight: ([400, 500, 600, 700] as const).includes(Number(cd.nameWeight) as 400) ? (Number(cd.nameWeight) as 400 | 500 | 600 | 700) : 500,
+      nameTracking: num(cd.nameTracking, 0, 0, 20),
+      priceFrom: cd.priceFrom === true,
+      categoryPos: pick(cd.categoryPos, ["above", "below"] as const, "above"),
+      quickView: pick(cd.quickView, ["none", "button", "replace"] as const, "none"),
       showUnit: cd.showUnit !== false,
       showCategory: cd.showCategory !== false,
       quickAdd: pick(cd.quickAdd, ["hover", "always", "none"] as const, d.card.quickAdd),

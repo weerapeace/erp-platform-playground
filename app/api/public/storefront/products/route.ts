@@ -77,7 +77,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, created_at, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -186,6 +186,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         price: r.price,
         /** ราคาเต็ม (ขีดฆ่า) จาก fake_price ของ Parent SKU — ส่งเฉพาะเมื่อสูงกว่าราคาขาย */
         comparePrice: Number(p.fake_price) > r.price ? Number(p.fake_price) : null,
+        /** ราคาแต่ละตัวเลือกไม่เท่ากัน (ราคามาจาก SKU ลูก + ไม่ได้กรอกราคาเว็บทับ) → การ์ดโชว์ "เริ่มต้น ฿…" ได้ */
+        priceVaries:
+          !(l.web_price != null && Number(l.web_price) > 0) &&
+          (fieldMap.price.source === "sku_min" || fieldMap.price.source === "sku_max") &&
+          new Set(kids.map((k) => Number(k.list_price)).filter((n) => n > 0)).size > 1,
+        /** วันที่ขึ้นร้านนี้ (ป้าย "ใหม่" อัตโนมัติ) */
+        listedAt: typeof l.created_at === "string" ? l.created_at : null,
         unit: r.unit,
         category: r.category,
         badge: String(l.web_badge ?? "").trim(),

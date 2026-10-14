@@ -36,7 +36,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 ];
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal, ConfirmDialog } from "@/components/modal";
-import { ColorPicker } from "@/components/color-picker";
+import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -81,7 +81,7 @@ interface Theme {
   menu: MenuConfig;
   footer: FooterConfig;
   listing: ListingConfig;
-  card: { preset: CardPreset; imageRatio: ImageRatio; titleLines: number; showBadge: boolean; showStock: boolean; hover: CardHover; showCompare: boolean; showSwatches: boolean; swatchMax: number; swatchSwap: boolean; showColorCount: boolean; showUnit: boolean; showCategory: boolean; quickAdd: "hover" | "always" | "none"; align: "left" | "center"; columns: { desktop: number; tablet: number; mobile: number }; gap: "sm" | "md" | "lg"; nameSize: number; priceSize: number; imageFit: "cover" | "contain" };
+  card: import("@/lib/website-theme").SiteTheme["card"];
   product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
 
@@ -1312,6 +1312,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
               )}
 
+              <CardExtras card={theme.card} setCard={setCard} />
+
               {/* 🖼 ระหว่างรอรูปโหลด — ใช้ทั้งการ์ดและหน้าสินค้า (เก็บใน logo.placeholder) */}
               <PlaceholderSettings
                 value={theme.logo.placeholder}
@@ -2539,6 +2541,150 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
 /* ─────────── การ์ดสินค้าจำลอง (แท็บการ์ดสินค้า) — เลียนแบบ storefront ProductCard ให้ใกล้ที่สุด ─────────── */
 const RATIO_CSS: Record<string, string> = { "1:1": "1 / 1", "4:3": "4 / 3", "4:5": "4 / 5", "3:4": "3 / 4", "16:9": "16 / 9" };
 const STOCK_TH: Record<string, { text: string; color: string }> = { in: { text: "พร้อมส่ง", color: "#1F9254" }, low: { text: "เหลือน้อย", color: "#C77A0A" }, preorder: { text: "สั่งจอง", color: "#8A8F97" } };
+/* ─────────── การ์ดสินค้า: ป้ายอัตโนมัติ · รูปบนการ์ด · ชื่อ/ราคา · ดูด่วน ─────────── */
+function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Partial<Theme["card"]>) => void }) {
+  const ab = card.autoBadges;
+  const setAb = (p: Partial<typeof ab>) => setCard({ autoBadges: { ...ab, ...p } });
+  const mini = "rounded-lg border border-slate-200 px-2 py-1 text-xs bg-white";
+  const badgeRow = (
+    on: boolean,
+    label: string,
+    text: string,
+    color: string,
+    param: React.ReactNode,
+    set: (p: { on?: boolean; text?: string; color?: string }) => void,
+    placeholder: string
+  ) => (
+    <div className={`flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 ${on ? "bg-white border border-slate-200" : "bg-slate-50"}`}>
+      <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer w-24 shrink-0">
+        <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={on} onChange={(e) => set({ on: e.target.checked })} />
+        {label}
+      </label>
+      <input className={`${mini} w-28`} value={text} maxLength={24} onChange={(e) => set({ text: e.target.value })} placeholder={placeholder} disabled={!on} />
+      {param}
+      <span className="w-36"><ColorInput value={color} onChange={(v) => set({ color: v })} /></span>
+      <span className="text-[11px] px-2 py-0.5 text-white" style={{ background: color, borderRadius: ab.shape === "pill" ? 99 : 3 }}>{text.replace("{pct}", "20") || placeholder}</span>
+    </div>
+  );
+  return (
+    <>
+      {/* 🏷 ป้ายอัตโนมัติ */}
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>🏷 ป้ายอัตโนมัติ (ซ้อนกับป้ายที่ตั้งเองรายรุ่น)</label>
+        <div className="space-y-1.5">
+          {badgeRow(ab.sale, "ลดราคา", ab.saleText, ab.saleColor,
+            <label className="flex items-center gap-1 text-[11px] text-slate-500">ลดอย่างน้อย
+              <select className={mini} value={ab.saleMin} disabled={!ab.sale} onChange={(e) => setAb({ saleMin: Number(e.target.value) })}>
+                {[1, 5, 10, 15, 20, 30].map((n) => <option key={n} value={n}>{n}%</option>)}
+              </select>
+            </label>,
+            (p) => setAb({ ...(p.on !== undefined ? { sale: p.on } : {}), ...(p.text !== undefined ? { saleText: p.text } : {}), ...(p.color !== undefined ? { saleColor: p.color } : {}) }),
+            "ลด {pct}%")}
+          {badgeRow(ab.new, "สินค้าใหม่", ab.newText, ab.newColor,
+            <label className="flex items-center gap-1 text-[11px] text-slate-500">ขึ้นเว็บภายใน
+              <select className={mini} value={ab.newDays} disabled={!ab.new} onChange={(e) => setAb({ newDays: Number(e.target.value) })}>
+                {[7, 14, 30, 60, 90].map((n) => <option key={n} value={n}>{n} วัน</option>)}
+              </select>
+            </label>,
+            (p) => setAb({ ...(p.on !== undefined ? { new: p.on } : {}), ...(p.text !== undefined ? { newText: p.text } : {}), ...(p.color !== undefined ? { newColor: p.color } : {}) }),
+            "ใหม่")}
+          {badgeRow(ab.best, "ขายดี", ab.bestText, ab.bestColor,
+            <label className="flex items-center gap-1 text-[11px] text-slate-500">อันดับ 1 –
+              <select className={mini} value={ab.bestTop} disabled={!ab.best} onChange={(e) => setAb({ bestTop: Number(e.target.value) })}>
+                {[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>,
+            (p) => setAb({ ...(p.on !== undefined ? { best: p.on } : {}), ...(p.text !== undefined ? { bestText: p.text } : {}), ...(p.color !== undefined ? { bestColor: p.color } : {}) }),
+            "ขายดี")}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-slate-600">
+          <label className="flex items-center gap-1.5">มุมป้าย
+            <select className={mini} value={ab.pos} onChange={(e) => setAb({ pos: e.target.value as typeof ab.pos })}>
+              <option value="top-left">บนซ้าย</option>
+              <option value="top-right">บนขวา</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5">รูปทรงป้าย
+            <select className={mini} value={ab.shape} onChange={(e) => setAb({ shape: e.target.value as typeof ab.shape })}>
+              <option value="pill">มน</option>
+              <option value="square">เหลี่ยม</option>
+            </select>
+          </label>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-1">ลด % คิดจาก “ราคาเต็มขีดฆ่า (fake_price)” · {"{pct}"} = เลขเปอร์เซ็นต์ · ใหม่ = นับจากวันที่เพิ่มรุ่นเข้าร้าน · ขายดี = อันดับยอดขายบนเว็บ (ยังไม่มีออเดอร์ = ยังไม่ขึ้น)</p>
+      </div>
+
+      {/* 🖼 รูปบนการ์ด */}
+      <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
+        <div>
+          <label className={labelCls}>🖼 สีพื้นหลังหลังรูปสินค้า</label>
+          <div className="flex items-center gap-2">
+            <span className="flex-1"><ColorInput value={card.imageBg} onChange={(v) => setCard({ imageBg: v })} /></span>
+            {card.imageBg && <button type="button" onClick={() => setCard({ imageBg: "" })} className="text-xs text-slate-500 hover:text-red-600">ล้าง (ตามสินค้า)</button>}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-0.5">เช่น เทาอ่อน #F2F2F0 ให้รูปพื้นขาวดูเป็นชุดเดียวกัน · ว่าง = แบบเดิม</p>
+        </div>
+        <div>
+          <label className={labelCls}>ระยะห่างรูปจากขอบกรอบ</label>
+          <select className={inputCls} value={card.imagePad == null ? "" : String(card.imagePad)} onChange={(e) => setCard({ imagePad: e.target.value === "" ? null : Number(e.target.value) })}>
+            <option value="">อัตโนมัติ (ย่อพอดี = เว้นนิดหน่อย · เต็มกรอบ = ชิดขอบ)</option>
+            {[0, 2, 4, 6, 8, 12, 16].map((n) => <option key={n} value={n}>{n === 0 ? "ชิดขอบ (0)" : `${n}%`}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* 🔤 ชื่อ / ราคา */}
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>🔤 ชื่อสินค้า / ราคา</label>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">ความหนาชื่อ</label>
+            <select className={inputCls} value={card.nameWeight} onChange={(e) => setCard({ nameWeight: Number(e.target.value) as Theme["card"]["nameWeight"] })}>
+              <option value={400}>ปกติ</option>
+              <option value={500}>กลาง</option>
+              <option value={600}>หนา</option>
+              <option value={700}>หนามาก</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">ระยะห่างตัวอักษร</label>
+            <select className={inputCls} value={card.nameTracking} onChange={(e) => setCard({ nameTracking: Number(e.target.value) })}>
+              {[0, 2, 4, 8, 12].map((n) => <option key={n} value={n}>{n === 0 ? "ปกติ" : `+${n}`}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">ชื่อหมวด</label>
+            <select className={inputCls} value={card.categoryPos} onChange={(e) => setCard({ categoryPos: e.target.value as Theme["card"]["categoryPos"] })}>
+              <option value="above">เหนือชื่อสินค้า</option>
+              <option value="below">ใต้ราคา</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={card.nameUpper} onChange={(e) => setCard({ nameUpper: e.target.checked })} />
+            ชื่อเป็นตัวพิมพ์ใหญ่ (ชื่ออังกฤษ แบบแบรนด์หรู)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={card.priceFrom} onChange={(e) => setCard({ priceFrom: e.target.checked })} />
+            ราคา “เริ่มต้น ฿…” เมื่อแต่ละสีราคาไม่เท่ากัน
+          </label>
+        </div>
+      </div>
+
+      {/* 👁 ดูด่วน */}
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>👁 ดูด่วน (Quick view) — เลือกสี/จำนวนแล้วใส่ตะกร้าได้โดยไม่ต้องเข้าหน้าสินค้า</label>
+        <select className={inputCls} value={card.quickView} onChange={(e) => setCard({ quickView: e.target.value as Theme["card"]["quickView"] })}>
+          <option value="none">ไม่มี</option>
+          <option value="button">ปุ่ม 👁 มุมรูป (คอมโผล่ตอนชี้ · มือถือโชว์ตลอด)</option>
+          <option value="replace">ปุ่มบนรูป &quot;เลือกสี / ใส่ตะกร้า&quot; เปิดดูด่วน (แทนใส่ตะกร้าทันที)</option>
+        </select>
+      </div>
+    </>
+  );
+}
+
 /** 🖼 ระหว่างรอรูปโหลด: โลโก้จาง ๆ กลางกรอบรูป (การ์ด + หน้าสินค้า) — ตัวอย่างสดด้านขวา */
 function PlaceholderSettings({ value, onChange, logoKey, surface, ratio }: { value: ImagePlaceholder; onChange: (p: Partial<ImagePlaceholder>) => void; logoKey: string | null; surface: string; ratio: string }) {
   const k = value.imageKey ?? logoKey;
@@ -2604,16 +2750,21 @@ function SampleCard({ item, card, colors, fonts, radius, shape }: { item: Sample
   const stock = STOCK_TH[item.stock] ?? STOCK_TH.in;
   return (
     <div style={wrap} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      <div className="relative overflow-hidden" style={{ aspectRatio: RATIO_CSS[card.imageRatio] ?? "4 / 5", background: "#eee", borderRadius: boxed ? undefined : r }}>
+      <div className="relative overflow-hidden" style={{ aspectRatio: RATIO_CSS[card.imageRatio] ?? "4 / 5", background: card.imageBg || "#eee", borderRadius: boxed ? undefined : r }}>
         {item.images[0] && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.images[0]} alt="" className={`absolute inset-0 w-full h-full transition-all duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ transform: hover && card.hover === "zoom" ? "scale(1.05)" : undefined, opacity: hover && swap ? 0 : 1 }} />
+          <img src={item.images[0]} alt="" className={`absolute inset-0 w-full h-full transition-all duration-500 ${card.imageFit === "contain" ? "object-contain" : "object-cover"} ${card.imagePad == null && card.imageFit === "contain" ? "p-2" : ""}`} style={{ transform: hover && card.hover === "zoom" ? "scale(1.05)" : undefined, opacity: hover && swap ? 0 : 1, padding: card.imagePad != null ? `${card.imagePad}%` : undefined }} />
         )}
         {swap && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={item.images[1]} alt="" className={`absolute inset-0 w-full h-full transition-opacity duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ opacity: hover ? 1 : 0 }} />
         )}
         {card.showBadge && item.badge && <span className="absolute top-2 left-2 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white/90" style={{ color: colors.ink, letterSpacing: ".08em" }}>{item.badge}</span>}
+        {card.autoBadges.sale && item.comparePrice && item.comparePrice > item.price && Math.round((1 - item.price / item.comparePrice) * 100) >= card.autoBadges.saleMin && (
+          <span className={`absolute top-2 ${card.autoBadges.pos === "top-right" ? "right-2" : "left-2"} text-[9px] font-bold px-2 py-0.5 text-white`} style={{ background: card.autoBadges.saleColor, borderRadius: card.autoBadges.shape === "pill" ? 99 : 2, marginTop: item.badge && card.showBadge && card.autoBadges.pos === "top-left" ? 18 : 0 }}>
+            {card.autoBadges.saleText.replace("{pct}", String(Math.round((1 - item.price / item.comparePrice) * 100)))}
+          </span>
+        )}
         {card.quickAdd !== "none" && (
           <span className="absolute left-2 right-2 bottom-2 text-[11px] text-center rounded-md py-1 bg-white/95 transition-all duration-300" style={{ color: colors.ink, opacity: card.quickAdd === "always" || hover ? 1 : 0, transform: card.quickAdd === "always" || hover ? "none" : "translateY(6px)" }}>เพิ่มลงตะกร้า</span>
         )}
@@ -2623,7 +2774,7 @@ function SampleCard({ item, card, colors, fonts, radius, shape }: { item: Sample
           {card.showCategory && <span className="uppercase tracking-wider" style={{ color: colors.muted }}>{item.category}</span>}
           {card.showStock && <span className="inline-flex items-center gap-1" style={{ color: stock.color }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: stock.color }} />{stock.text}</span>}
         </div>
-        <div className="font-medium leading-snug" style={{ fontFamily: fonts.display, color: hover ? colors.brand : colors.ink, fontSize: `${0.8 * card.nameSize / 100}rem`, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: card.titleLines, overflow: "hidden" }}>{item.name}</div>
+        <div className="leading-snug" style={{ fontFamily: fonts.display, color: hover ? colors.brand : colors.ink, fontWeight: card.nameWeight, textTransform: card.nameUpper ? "uppercase" : undefined, letterSpacing: card.nameTracking ? `${card.nameTracking / 100}em` : undefined, fontSize: `${0.8 * card.nameSize / 100}rem`, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: card.titleLines, overflow: "hidden" }}>{item.name}</div>
         <div className="mt-1" style={{ fontSize: `${0.82 * card.priceSize / 100}rem` }}>
           <span className="font-semibold" style={{ fontFamily: fonts.display, color: colors.ink }}>฿{item.price.toLocaleString("th-TH")}</span>
           {card.showCompare && item.comparePrice && item.comparePrice > item.price && <s className="ml-1.5 text-[0.8em]" style={{ color: colors.muted }}>฿{item.comparePrice.toLocaleString("th-TH")}</s>}
