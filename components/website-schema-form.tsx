@@ -194,6 +194,34 @@ export function SchemaField({
           <WebsiteProductPicker shopSlug={ctx.shopSlug} value={Array.isArray(value) ? (value as string[]) : []} max={fd.max} onChange={onChange} />
         </Field>
       );
+    case "categories": {
+      // หลายหมวด เรียงตามลำดับที่กด · ไม่เลือก = ทุกหมวด
+      const cur = Array.isArray(value) ? (value as string[]) : [];
+      return (
+        <Field label={fd.label} hint={fd.hint ?? "ไม่เลือก = ทุกหมวด"} wide>
+          {ctx.categories.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {ctx.categories.map((c) => {
+                const i = cur.indexOf(c.key);
+                return (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => onChange(i >= 0 ? cur.filter((k) => k !== c.key) : [...cur, c.key])}
+                    className={`rounded-full border px-2.5 py-1 text-xs ${i >= 0 ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-600 hover:border-slate-500"}`}
+                  >
+                    {i >= 0 && <span className="mr-1 tabular-nums">{i + 1}.</span>}
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">ร้านนี้ยังไม่มีหมวด — ตั้งที่แท็บ 📂 หมวดหมู่</p>
+          )}
+        </Field>
+      );
+    }
     case "category":
       return (
         <Field label={fd.label} hint={fd.hint ?? "รายการหมวดตั้งที่แท็บ ⚙️ จับคู่ฟิลด์"} wide={fd.wide}>

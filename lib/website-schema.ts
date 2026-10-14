@@ -61,6 +61,7 @@ export type FieldType =
   | "map" // ลิงก์ฝัง Google Maps (กรองโฮสต์)
   | "products" // เลือกสินค้าหลายตัว (เก็บรหัสรุ่น code[])
   | "category" // หมวดสินค้าบนเว็บของร้าน (key)
+  | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
   | "code"; // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
 
 export type FieldGroup = "content" | "media" | "action" | "layout" | "products";
@@ -908,9 +909,74 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
   /* ── สินค้า ── */
   categories: {
     type: "categories",
-    meta: { label: "หมวดสินค้า", icon: "📂", hint: "ปุ่มลัดไปแต่ละหมวด (รายการหมวดตั้งที่แท็บจับคู่ฟิลด์)", group: "สินค้า" },
-    fields: headFields({ eyebrow: "เลือกตามหมวด", title: "เลือกซื้อตามหมวด" }),
-    summary: (b) => s(b.title) || "หมวดสินค้า",
+    meta: { label: "หมวดสินค้า", icon: "📂", hint: "ปุ่มลัดไปแต่ละหมวด — รูปใหญ่ / รูปเล็ก / ตัวอักษร (หมวด+รูป ตั้งที่แท็บ 📂 หมวดหมู่)", group: "สินค้า" },
+    fields: [
+      ...headFields({ eyebrow: "เลือกตามหมวด", title: "เลือกซื้อตามหมวด" }),
+      f("layout", "แบบแสดง", "select", {
+        group: "layout",
+        default: "icon",
+        wide: true,
+        options: [
+          { v: "icon", l: "การ์ดไอคอน + คำอธิบาย (แบบเดิม)" },
+          { v: "tile", l: "🖼 การ์ดรูปใหญ่ (ชื่อทับบนรูป)" },
+          { v: "row", l: "รูปเล็ก + ชื่อ (เรียงแถว มีเส้นคั่น)" },
+          { v: "text", l: "ตัวอักษรอย่างเดียว" },
+        ],
+        hint: "รูปของแต่ละหมวดตั้งที่แท็บ 📂 หมวดหมู่ (ไม่มีรูป = ใช้ไอคอน)",
+      }),
+      f("cats", "หมวดที่โชว์ (เรียงตามที่เลือก)", "categories", { group: "content", hint: "ไม่เลือก = ทุกหมวด ตามลำดับในแท็บ 📂 หมวดหมู่" }),
+      f("columns", "จำนวนคอลัมน์ (จอคอม)", "select", {
+        group: "layout",
+        default: "4",
+        options: ["2", "3", "4", "5", "6"].map((v) => ({ v, l: `${v} คอลัมน์` })),
+        showIf: { key: "layout", eq: ["icon", "tile"] },
+      }),
+      f("ratio", "สัดส่วนรูป", "select", {
+        group: "layout",
+        default: "4:5",
+        options: [
+          { v: "1:1", l: "จัตุรัส 1:1" },
+          { v: "4:5", l: "แนวตั้ง 4:5" },
+          { v: "3:4", l: "แนวตั้ง 3:4" },
+          { v: "4:3", l: "แนวนอน 4:3" },
+          { v: "16:9", l: "แนวนอนกว้าง 16:9" },
+        ],
+        showIf: { key: "layout", eq: "tile" },
+      }),
+      f("textPos", "ตำแหน่งชื่อบนรูป", "select", {
+        group: "layout",
+        default: "top-left",
+        options: [
+          { v: "top-left", l: "บนซ้าย" },
+          { v: "center", l: "กลางรูป" },
+          { v: "bottom-left", l: "ล่างซ้าย" },
+        ],
+        showIf: { key: "layout", eq: "tile" },
+      }),
+      f("cta", "ข้อความเล็กบนการ์ด", "text", { group: "content", default: "SHOP NOW", max: 30, hint: "ว่าง = ไม่มี", showIf: { key: "layout", eq: "tile" } }),
+      f("tileText", "สีตัวอักษรบนรูป", "select", {
+        group: "layout",
+        default: "dark",
+        options: [
+          { v: "dark", l: "เข้ม (รูปโทนอ่อน)" },
+          { v: "light", l: "ขาว + เงาไล่ (รูปโทนเข้ม)" },
+        ],
+        showIf: { key: "layout", eq: "tile" },
+      }),
+      f("textStyle", "แบบตัวอักษร", "select", {
+        group: "layout",
+        default: "pill",
+        options: [
+          { v: "pill", l: "ปุ่มมน" },
+          { v: "plain", l: "ข้อความ + เส้นคั่น" },
+        ],
+        showIf: { key: "layout", eq: "text" },
+      }),
+      f("upper", "ชื่อหมวดตัวพิมพ์ใหญ่ (อังกฤษ)", "toggle", { group: "layout", default: false }),
+      f("showAll", "ปุ่ม \"ดูทั้งหมด\"", "toggle", { group: "action", default: true }),
+      f("allText", "ข้อความปุ่มดูทั้งหมด", "text", { group: "action", default: "ดูทั้งหมด →", max: 40, showIf: { key: "showAll", eq: true } }),
+    ],
+    summary: (b) => `${s(b.title) || "หมวดสินค้า"} · ${{ icon: "การ์ดไอคอน", tile: "รูปใหญ่", row: "รูปเล็ก", text: "ตัวอักษร" }[s(b.layout) || "icon"] ?? "การ์ดไอคอน"}`,
   },
 
   featured: {
@@ -993,6 +1059,7 @@ export function defaultForType(t: FieldType): unknown {
       return { text: "", href: "" };
     case "list":
     case "products":
+    case "categories":
       return [];
     default:
       return "";

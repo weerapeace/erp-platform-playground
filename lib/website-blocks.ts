@@ -628,6 +628,8 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return mapUrl(v);
     case "products":
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
+    case "categories":
+      return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c, 40).toLowerCase()).filter(Boolean))].slice(0, fd.max ?? 40) : [];
     case "category":
       return codeStr(v, 40).toLowerCase();
     case "code":
@@ -722,7 +724,7 @@ export function normalizeBlocks(raw: unknown): Block[] {
 /* ─────────── ตรวจก่อนเผยแพร่ ─────────── */
 
 const isEmptyValue = (fd: FieldDef, v: unknown): boolean => {
-  if (fd.type === "list" || fd.type === "products") return !Array.isArray(v) || !v.filter((x) => (typeof x === "string" ? x.trim() : x)).length;
+  if (fd.type === "list" || fd.type === "products" || fd.type === "categories") return !Array.isArray(v) || !v.filter((x) => (typeof x === "string" ? x.trim() : x)).length;
   if (fd.type === "image") return !v;
   if (fd.type === "link") return !String((v as CtaLink | undefined)?.text ?? "").trim();
   return !String(v ?? "").trim();

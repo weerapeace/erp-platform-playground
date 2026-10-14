@@ -48,9 +48,16 @@ export interface WebCategoryDef {
   key: string;
   label: string;
   icon: string;
-  /** คำโปรยสั้น ๆ ใต้ชื่อหมวดบนการ์ดหน้าแรก — เว้นว่างได้ */
+  /** คำโปรยสั้น ๆ ใต้ชื่อหมวดบนการ์ดหน้าแรก / คำอธิบายบนหน้าหมวด — เว้นว่างได้ */
   blurb: string;
+  /** 🖼 รูปหมวด (r2 key) — การ์ด/แถบหมวดบนหน้าแรก (Section หมวดสินค้าแบบรูปใหญ่/รูปเล็ก) · ไม่มี = ใช้ไอคอน */
+  imageKey?: string | null;
+  /** 🖼 แบนเนอร์หัวหน้าหมวด (r2 key) — โชว์บนหน้าร้านตอนเลือกหมวดนี้ · ไม่มี = หัวข้อธรรมดา */
+  bannerKey?: string | null;
 }
+
+/** r2 key ของรูปหมวด — ตัวอักษรที่ปลอดภัยเท่านั้น (ไม่ผ่าน = ไม่มีรูป) */
+const catImgKey = (v: unknown): string | null => (typeof v === "string" && /^[\w\-./%()]{1,300}$/.test(v.trim()) ? v.trim() : null);
 
 /**
  * กฎประกอบชื่อบนเว็บ (ต่อร้าน) — ตัดส่วนที่ไม่อยากโชว์ออกจากชื่อใน ERP อัตโนมัติ
@@ -134,7 +141,9 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
         key: cleanCategoryKey(o.key),
         label: str(o.label).slice(0, 60),
         icon: str(o.icon).slice(0, 8),
-        blurb: str(o.blurb).slice(0, 120),
+        blurb: str(o.blurb).slice(0, 240),
+        imageKey: catImgKey(o.imageKey),
+        bannerKey: catImgKey(o.bannerKey),
       };
     })
     .filter((c) => c.key && c.label && !seenKey.has(c.key) && seenKey.add(c.key) !== undefined);
@@ -243,6 +252,8 @@ export interface ListingRow {
   web_sku_images?: unknown;
   web_unit?: string | null;
   web_category?: string | null;
+  /** หมวดบนเว็บหลายหมวด — null = ใช้แบบเดิม (web_category / กฎ / หมวดตั้งต้น) · array = จัดเองแล้ว (ตัวแรก = หมวดหลัก) */
+  web_categories?: unknown;
   web_options?: unknown;
   web_badge?: string | null;
   web_stock_status?: string | null;
@@ -438,12 +449,26 @@ function resolveOptions2(map: FieldMap, kids: ChildSku[]): { label: string; item
   return items.length ? { label: map.options2.label || groupName || "ตัวเลือกที่ 2", items } : null;
 }
 
+/**
+ * หมวดของสินค้าบนเว็บ (หลายหมวดได้)
+ * จัดเองแล้ว (web_categories เป็น array แม้ว่าง) = ใช้ตามนั้น เฉพาะหมวดที่ร้านยังมีอยู่ · ยังไม่เคยจัด (null) = หมวดเดียวแบบเดิม (legacy)
+ */
+export function resolveCategories(map: Pick<FieldMap, "categories">, webCategories: unknown, legacy: string): string[] {
+  const keys = new Set(map.categories.map((c) => c.key));
+  if (Array.isArray(webCategories)) return [...new Set(webCategories.map(cleanCategoryKey).filter((k) => keys.has(k)))];
+  // แบบเดิม: หมวดเดียว (คงพฤติกรรมเดิมทุกอย่าง แม้รหัสจะไม่อยู่ในรายการหมวด)
+  return legacy ? [legacy] : [];
+}
+
 export interface ResolvedProduct {
   name: string;
   price: number;
   description: string;
   unit: string;
+  /** หมวดหลัก (ตัวแรกของ categories · ว่าง = ไม่อยู่หมวดไหน) */
   category: string;
+  /** ทุกหมวดที่สินค้านี้อยู่ (หน้าร้านกรองหมวดด้วยรายการนี้) */
+  categories: string[];
   images: string[];
   options: { label: string; items: { id: string; label: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
   /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
@@ -478,13 +503,15 @@ export function resolveProduct(
       : null;
 
   const rule = categoryName ? map.category.rules[categoryName] : undefined;
+  const categories = resolveCategories(map, l.web_categories, clean(l.web_category) || rule || map.category.default);
 
   return {
     name: clean(l.web_name) || resolveName(map, parent),
     price: l.web_price != null && num(l.web_price) > 0 ? num(l.web_price) : resolvePrice(map, parent, kids),
     description: clean(l.web_description) || resolveDescription(map, parent),
     unit: clean(l.web_unit) || map.unit.default,
-    category: clean(l.web_category) || rule || map.category.default,
+    category: categories[0] ?? "",
+    categories,
     images: listingImages.length ? listingImages : mappedImages,
     options: listingOptions?.items?.length ? listingOptions : mappedOptions,
     // กรอกทับตัวเลือกเองในหน้าจัดการ = ตั้งใจคุมเอง → ไม่ยัดกลุ่ม 2 ตามไปด้วย จะกลายเป็นเลือกไม่ตรงของ

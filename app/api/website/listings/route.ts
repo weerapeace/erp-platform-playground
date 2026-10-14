@@ -18,6 +18,8 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import {
   normalizeFieldMap,
+  cleanCategoryKey,
+  resolveCategories,
   resolveProduct,
   attachNameRefs,
   nameRuleNeedsRefs,
@@ -31,6 +33,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const KEY_RE = /^[\w\-./%()]+$/; // r2 object key ที่ยอมรับ
+/** รายการรหัสหมวด (ไม่ซ้ำ · ≤ 20) — null = กลับไปใช้หมวดแบบเดิม */
+const cleanCategoryList = (v: unknown): string[] | null => (Array.isArray(v) ? [...new Set(v.map(cleanCategoryKey).filter(Boolean))].slice(0, 20) : null);
 const STOCK_STATUS = new Set(["in", "low", "preorder"]);
 
 type ParentRow = {
@@ -164,6 +168,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webImages: Array.isArray(l.web_images) ? (l.web_images as string[]) : [],
       webUnit: (l.web_unit as string | null) ?? "",
       webCategory: (l.web_category as string | null) ?? "",
+      /** 📂 หมวดหลายหมวด — null = ยังไม่เคยจัด (ใช้ mapped.categories แบบเดิม) */
+      webCategories: Array.isArray(l.web_categories) ? (l.web_categories as string[]) : null,
+      /** หมวดที่เว็บใช้จริงตอนนี้ (จัดเอง หรือแบบเดิม) */
+      categories: resolveCategories(fieldMap, l.web_categories, String(l.web_category ?? "").trim() || mapped?.category || ""),
       webBadge: (l.web_badge as string | null) ?? "",
       webStockStatus: (l.web_stock_status as string | null) ?? "",
       webSwatch: (l.web_swatch as string | null) ?? "",
@@ -213,6 +221,8 @@ type Patch = {
   webImages?: string[];
   webUnit?: string;
   webCategory?: string;
+  /** null = กลับไปใช้แบบเดิม · array = จัดเอง */
+  webCategories?: string[] | null;
   webBadge?: string;
   webStockStatus?: string;
   webSwatch?: string;
@@ -226,16 +236,41 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch };
+  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string };
   try {
     b = await request.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
-  if (!b.shopId || !b.parentId) return NextResponse.json({ error: "ต้องระบุ shopId + parentId" }, { status: 400 });
 
   const sb = supabaseAdmin();
   const actor = { actorId: user?.id ?? null, actorName: user?.email ?? null };
+
+  // 📂 จัดสินค้าลงหมวดทีละหลายรุ่น (แท็บหมวดหมู่) — items: [{ parentId, categories }] ชุดหมวดใหม่ทั้งชุดของแต่ละรุ่น
+  if (b.action === "setCategories") {
+    if (!b.shopId || !Array.isArray(b.items) || !b.items.length) return NextResponse.json({ error: "ต้องระบุ shopId + items" }, { status: 400 });
+    const items = b.items.slice(0, 500).filter((it) => typeof it?.parentId === "string" && it.parentId);
+    let ok = 0;
+    for (const it of items) {
+      const { error } = await sb
+        .from("store_listings")
+        .update({ web_categories: cleanCategoryList(it.categories), updated_at: new Date().toISOString() })
+        .eq("shop_id", b.shopId)
+        .eq("parent_sku_id", it.parentId!);
+      if (!error) ok++;
+    }
+    await writeAudit(sb, {
+      action: "update",
+      entityType: "store_listing",
+      entityId: b.shopId,
+      ...actor,
+      metadata: { kind: "web_categories", category: b.category ?? null, count: ok, items: items.map((it) => ({ parentId: it.parentId, categories: cleanCategoryList(it.categories) })) },
+    });
+    if (ok < items.length) return NextResponse.json({ ok: false, error: `บันทึกได้ ${ok}/${items.length} รายการ` }, { status: 500 });
+    return NextResponse.json({ ok: true, count: ok });
+  }
+
+  if (!b.shopId || !b.parentId) return NextResponse.json({ error: "ต้องระบุ shopId + parentId" }, { status: 400 });
 
   if (b.action === "add") {
     const { data: exists } = await sb
@@ -289,6 +324,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (p.webDescription !== undefined) row.web_description = text(p.webDescription, 3000);
   if (p.webUnit !== undefined) row.web_unit = text(p.webUnit, 40);
   if (p.webCategory !== undefined) row.web_category = text(p.webCategory, 60);
+  if (p.webCategories !== undefined) row.web_categories = cleanCategoryList(p.webCategories);
   if (p.webBadge !== undefined) row.web_badge = text(p.webBadge, 40);
   if (p.webSwatch !== undefined) row.web_swatch = text(p.webSwatch, 300);
   if (p.webStockStatus !== undefined) {

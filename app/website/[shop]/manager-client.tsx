@@ -14,6 +14,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
+import { WebsiteCategoriesPanel } from "@/components/website-categories-panel";
 import { WebsiteThemePanel } from "@/components/website-theme-panel";
 import { WebsiteLayoutPanel } from "@/components/website-layout-panel";
 import { WebsitePagesPanel } from "@/components/website-pages-panel";
@@ -54,6 +55,10 @@ type Listing = {
   webImages: string[];
   webUnit: string;
   webCategory: string;
+  /** 📂 หลายหมวด — null = ยังไม่เคยจัด (ใช้หมวดแบบเดิม) */
+  webCategories: string[] | null;
+  /** หมวดที่เว็บใช้จริงตอนนี้ */
+  categories: string[];
   webBadge: string;
   webStockStatus: string;
   webSwatch: string;
@@ -97,7 +102,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [tab, setTab] = useState<"listings" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders">("listings");
+  const [tab, setTab] = useState<"listings" | "categories" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders">("listings");
 
   // แผงเพิ่มสินค้า
   const [showAdd, setShowAdd] = useState(false);
@@ -210,6 +215,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
           webDescription: l.webDescription,
           webUnit: l.webUnit,
           webCategory: l.webCategory,
+          webCategories: l.webCategories,
           webBadge: l.webBadge,
           webStockStatus: l.webStockStatus || "in",
           webSwatch: l.webSwatch,
@@ -292,6 +298,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
           <div className="flex items-center gap-1 mb-4 border-b border-slate-200">
             {([
               { k: "listings", l: "สินค้าบนเว็บ" },
+              { k: "categories", l: "📂 หมวดหมู่" },
               { k: "fieldmap", l: "⚙️ จับคู่ฟิลด์" },
               { k: "design", l: "🎨 ดีไซน์" },
               { k: "layout", l: "🧱 หน้าแรก" },
@@ -313,6 +320,9 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
             ))}
           </div>
         )}
+
+        {/* แท็บหมวดหมู่ (หมวด + รูป/แบนเนอร์ + จัดสินค้าลงหมวด) */}
+        {tab === "categories" && shop && <WebsiteCategoriesPanel shopSlug={shop.slug} shopId={shop.id} />}
 
         {/* แท็บจับคู่ฟิลด์ */}
         {tab === "fieldmap" && shop && (
@@ -447,7 +457,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
                       <p className="text-sm font-medium text-slate-800 truncate">{l.webName || l.erpName}</p>
                       <p className="text-xs text-slate-400 truncate">
                         {l.code}
-                        {l.webCategory && ` · ${categories.find((c) => c.key === l.webCategory)?.label ?? l.webCategory}`}
+                        {(l.categories ?? []).length > 0 && ` · ${l.categories.map((k) => categories.find((c) => c.key === k)?.label ?? k).join(", ")}`}
                         {" · "}
                         {baht(l.webPrice ?? l.erpPrice)}
                         {l.webUnit && `/${l.webUnit}`}
@@ -503,24 +513,29 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
                           />
                         </div>
                         <div>
-                          <label className={labelCls}>หมวดบนเว็บ</label>
-                          <select
-                            value={l.webCategory}
-                            onChange={(e) => patch(l.parentId, { webCategory: e.target.value })}
-                            className={inputCls}
-                          >
-                            <option value="">— ไม่ระบุ —</option>
-                            {categories.map((c) => (
-                              <option key={c.key} value={c.key}>
-                                {c.icon ? `${c.icon} ` : ""}
-                                {c.label}
-                              </option>
-                            ))}
-                            {/* หมวดที่เคยตั้งไว้แต่ถูกลบออกจากรายการแล้ว — ยังต้องเห็น ไม่งั้นค่าหายเงียบตอนบันทึก */}
-                            {l.webCategory && !categories.some((c) => c.key === l.webCategory) && (
-                              <option value={l.webCategory}>{l.webCategory} (หมวดที่ถูกลบแล้ว)</option>
-                            )}
-                          </select>
+                          <label className={labelCls}>หมวดบนเว็บ (เลือกได้หลายหมวด · ตัวแรก = หมวดหลัก)</label>
+                          {/* 📂 หลายหมวด — จัดแบบเต็มที่แท็บ "หมวดหมู่" ได้ด้วย */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {categories.map((c) => {
+                              const cur = l.webCategories ?? l.categories ?? [];
+                              const on = cur.includes(c.key);
+                              return (
+                                <button
+                                  key={c.key}
+                                  type="button"
+                                  onClick={() => {
+                                    const next = on ? cur.filter((k) => k !== c.key) : [...cur, c.key];
+                                    patch(l.parentId, { webCategories: next, categories: next });
+                                  }}
+                                  className={`rounded-full border px-2.5 py-1 text-xs ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-600 hover:border-slate-500"}`}
+                                >
+                                  {on && cur[0] === c.key ? "★ " : ""}
+                                  {c.icon ? `${c.icon} ` : ""}
+                                  {c.label}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                         <div>
                           <label className={labelCls}>สถานะสต๊อกบนเว็บ</label>

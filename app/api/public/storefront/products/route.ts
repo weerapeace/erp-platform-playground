@@ -78,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -200,6 +200,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         listedAt: typeof l.created_at === "string" ? l.created_at : null,
         unit: r.unit,
         category: r.category,
+        /** 📂 ทุกหมวดที่อยู่ (หลายหมวดได้ · ตัวแรก = category) — หน้าร้านกรองหมวดด้วยรายการนี้ */
+        categories: r.categories,
         badge: String(l.web_badge ?? "").trim(),
         stock: String(l.web_stock_status ?? "in").trim() || "in",
         swatch: String(l.web_swatch ?? "").trim(),

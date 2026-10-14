@@ -258,7 +258,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const [{ data: listData }, { data: parents }, { data: children }] = await Promise.all([
     sb
       .from("store_listings")
-      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_options, web_personalize")
+      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize")
       .eq("shop_id", shop.id)
       .in("parent_sku_id", parentIds),
     sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
