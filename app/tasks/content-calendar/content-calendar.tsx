@@ -23,6 +23,7 @@ import {
 } from "../data";
 import { ContentDrawer } from "../content/content";
 import { ContentCreateModal, type ContentCreatePreset } from "../content/content-create-modal";
+import { StoryQuickModal } from "./story-quick-modal";
 import { TaskDetailDrawer } from "../task-detail-drawer";
 import { CreateTaskModal } from "../create-task-modal";
 import { applyTaskTransition } from "../task-actions";
@@ -185,11 +186,10 @@ export function ContentCalendarView() {
   // 📖 โหมด Story: แถบเล็กใต้ทุกวันบอกว่า "ทำ Story ของวันนี้รึยัง" (เจ้าของลง Story ทุกวัน) — จำค่าไว้ในเครื่อง
   const [storyMode, setStoryMode] = useState<boolean>(() => typeof window !== "undefined" && window.localStorage.getItem("content-calendar-story") === "1");
   const toggleStory = () => setStoryMode((v) => { try { window.localStorage.setItem("content-calendar-story", v ? "0" : "1"); } catch { /* ignore */ } return !v; });
-  const openStoryCreate = (dayKey: string) => {
-    const d = new Date(`${dayKey}T00:00:00`);
-    setCreatePreset({ title: `Story ${d.getDate()}/${d.getMonth() + 1}`, platforms: ["instagram", "facebook"], platform_formats: { instagram: "story", facebook: "story" }, post_types: ["image"] });
-    setCreateDate(dayKey); setCreateOpen(true);
-  };
+  // ＋ ในแถบ Story → ป๊อปเล็ก (หัวข้อ/ประเภท/ที่อยู่ไฟล์) ไม่ใช่ฟอร์มคอนเทนต์เต็ม (เจ้าของขอ) — story-quick-modal.tsx
+  const [storyDay, setStoryDay] = useState<string | null>(null);
+  const openStoryCreate = (dayKey: string) => setStoryDay(dayKey);
+  void setCreatePreset;
   // ลากวาง: จำ id + เวลาเดิมของการ์ดที่กำลังลาก + ช่องที่เมาส์ลอยอยู่
   const dragRef = useRef<{ id: string; time: string | null } | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -813,6 +813,8 @@ export function ContentCalendarView() {
           pushToast={pushToast} />
       )}
 
+      <StoryQuickModal open={storyDay !== null} onClose={() => setStoryDay(null)} day={storyDay} brands={brands} defaultBrandId={brandFilter === "all" ? null : brandFilter}
+        onCreated={() => { setStoryDay(null); reload(); }} pushToast={pushToast} />
       <ContentCreateModal open={createOpen} onClose={() => { setCreateOpen(false); setCreatePreset(null); }} onCreated={() => { setCreateOpen(false); setCreatePreset(null); reload(); }} preset={createPreset}
         brands={brands} campaigns={campaigns}
         defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultDate={createDate} pushToast={pushToast} />
