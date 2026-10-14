@@ -14,6 +14,7 @@ import {
   SECTION_TYPES,
   blankChild,
   defaultForType,
+  matchShowIf,
   newChildId,
   structuredCloneSafe,
   type ChildSpec,
@@ -50,7 +51,8 @@ export type BlockType =
   | "custom-html"
   | "spotlight"
   | "stats"
-  | "personalize";
+  | "personalize"
+  | "canvas";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -425,12 +427,47 @@ export type Block =
   | CustomHtmlBlock
   | SpotlightBlock
   | StatsBlock
-  | PersonalizeBlock;
+  | PersonalizeBlock
+  | CanvasBlock;
+
+/** ชิ้นบนผืนผ้าใบอิสระ — ช่องตามชนิด (kind) ดู canvasItemFields() ใน lib/website-schema.ts */
+export type CanvasItem = ChildBase & {
+  kind: "image" | "text" | "button" | "shape";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotate: number;
+  opacity: number;
+  hideMobile: boolean;
+  locked: boolean;
+  href: string;
+  newTab: boolean;
+} & Record<string, unknown>;
+
+/** ผืนผ้าใบอิสระ — วางชิ้นส่วนตำแหน่งอิสระบนผืนกว้าง 1200 หน่วย (ดู lib/website-canvas.ts) */
+export interface CanvasBlock extends BlockBase {
+  type: "canvas";
+  height: number;
+  bgImageKey: string | null;
+  mobileAlign: "center" | "left";
+  items: CanvasItem[];
+}
 
 /** ชื่อ/ไอคอน/คำอธิบาย/กลุ่ม ของทุกชนิด — มาจาก schema */
 export const BLOCK_META: Record<BlockType, SectionMeta> = Object.fromEntries(
   SECTION_TYPES.map((t) => [t, SECTION_SCHEMAS[t].meta])
 ) as Record<BlockType, SectionMeta>;
+
+/**
+ * รายการชนิดที่ "เพิ่มได้" ในคลังของร้านนี้ — Section ทดลอง (meta.beta) โชว์เฉพาะร้านที่เปิดสวิตช์นั้น
+ * @param betas key ของสวิตช์ที่ร้านเปิดอยู่ เช่น new Set(["beta_canvas"])
+ */
+export function blockTypesFor(betas: Set<string>): ({ type: BlockType } & SectionMeta)[] {
+  return (Object.entries(BLOCK_META) as [BlockType, SectionMeta][])
+    .filter(([, m]) => !m.beta || betas.has(m.beta))
+    .map(([type, m]) => ({ type, ...m }));
+}
 
 const uid = (t: string, n: number) => `${t}-${n}`;
 const ALL_VISIBLE: Visibility = { desktop: true, tablet: true, mobile: true };
@@ -525,6 +562,18 @@ export const mapUrl = (v: unknown): string => {
   }
 };
 
+/**
+ * ลิงก์ปลายทาง (ช่องชนิด target) — รับเฉพาะ /หน้าในเว็บ · #ส่วนในหน้า · http(s):// · mailto: · tel:
+ * กัน javascript: และลิงก์แปลก ๆ หลุดขึ้นเว็บ (เว็บร้านกรองซ้ำอีกชั้น)
+ */
+export function safeTarget(v: unknown): string {
+  const raw = String(v ?? "").trim().slice(0, 300);
+  if (!raw) return "";
+  if (/^\/(?!\/)/.test(raw) || raw.startsWith("#")) return raw.replace(/\s/g, "");
+  if (/^(https?:\/\/|mailto:|tel:)/i.test(raw)) return raw.replace(/\s/g, "");
+  return "";
+}
+
 /** รหัสหมวด/รหัสสินค้า — ตัวอักษร ตัวเลข ขีด จุด เท่านั้น */
 const codeStr = (v: unknown, max = 60) => String(v ?? "").trim().replace(/[^A-Za-z0-9._-]/g, "").slice(0, max);
 
@@ -539,6 +588,8 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return str(v, fb as string, fd.max ?? 600);
     case "href":
       return str(v, fb as string, 200);
+    case "target":
+      return safeTarget(v);
     case "number":
     case "range":
       return num(v, fb as number, fd.min ?? 0, fd.numMax ?? 999999);
@@ -665,7 +716,8 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
   if (!active.length) issues.push({ blockId: null, level: "error", message: "ยังไม่มีบล็อกที่เปิดใช้งาน — หน้าจะว่างเปล่า" });
 
   const heroes = active.filter((b) => b.type === "hero");
-  if (heroes.length === 0) issues.push({ blockId: null, level: "warning", message: "ไม่มีแบนเนอร์หลัก (Hero) — หน้าอาจดูไม่มีหัวเรื่อง" });
+  // ผืนผ้าใบอิสระมักใช้เป็นหัวเว็บแทนแบนเนอร์ → มีแล้วไม่ต้องเตือนว่าไม่มี Hero
+  if (heroes.length === 0 && !active.some((b) => b.type === "canvas")) issues.push({ blockId: null, level: "warning", message: "ไม่มีแบนเนอร์หลัก (Hero) — หน้าอาจดูไม่มีหัวเรื่อง" });
   if (heroes.length > 1) issues.push({ blockId: null, level: "warning", message: `มีแบนเนอร์หลัก ${heroes.length} อัน — ควรมีอันเดียวเพื่อ SEO` });
 
   for (const b of active) {
@@ -682,7 +734,7 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
     // ช่องที่ schema บอกว่าต้องกรอก (ข้ามช่องที่ซ่อนอยู่เพราะ showIf ไม่ตรง)
     for (const fd of schema.fields) {
       if (!fd.required) continue;
-      if (fd.showIf && rec[fd.showIf.key] !== fd.showIf.eq) continue;
+      if (!matchShowIf(fd, rec)) continue;
       if (isEmptyValue(fd, rec[fd.key]))
         issues.push({ blockId: b.id, level: "error", message: `${label}: ${fd.requiredMessage ?? `ยังไม่ได้กรอก "${fd.label}"`}` });
     }

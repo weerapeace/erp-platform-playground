@@ -13,7 +13,8 @@ import { useMemo } from "react";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
-import { FIELD_GROUP_LABEL, type FieldDef, type FieldGroup } from "@/lib/website-schema";
+import { LinkTargetPicker } from "@/components/website-link-picker";
+import { FIELD_GROUP_LABEL, matchShowIf, type FieldDef, type FieldGroup } from "@/lib/website-schema";
 
 export interface SchemaFormContext {
   shopSlug: string;
@@ -22,6 +23,8 @@ export interface SchemaFormContext {
   shopName?: string;
   /** หมวดสินค้าบนเว็บของร้าน (จากแท็บจับคู่ฟิลด์) */
   categories: { key: string; label: string }[];
+  /** Section ในหน้าที่กำลังจัด (ช่อง "กดแล้วไปที่ → เลื่อนไปส่วนอื่นในหน้านี้") */
+  sections?: { id: string; label: string }[];
 }
 
 export const inputCls =
@@ -92,6 +95,12 @@ export function SchemaField({
       return (
         <Field label={fd.label} hint={fd.hint} wide={fd.wide || fd.type === "video" || fd.type === "map"}>
           <input className={inputCls} value={s} placeholder={fd.placeholder} maxLength={fd.max} onChange={(e) => onChange(e.target.value)} />
+        </Field>
+      );
+    case "target":
+      return (
+        <Field label={fd.label} hint={fd.hint} wide>
+          <LinkTargetPicker value={s} onChange={onChange} ctx={ctx} />
         </Field>
       );
     case "code":
@@ -217,7 +226,7 @@ export function SchemaForm({
   /** ชิ้นย่อย: ไม่แยกหัวกลุ่ม */
   compact?: boolean;
 }) {
-  const visible = useMemo(() => fields.filter((fd) => !fd.showIf || value[fd.showIf.key] === fd.showIf.eq), [fields, value]);
+  const visible = useMemo(() => fields.filter((fd) => matchShowIf(fd, value)), [fields, value]);
   const groups = useMemo(() => {
     const map = new Map<FieldGroup, FieldDef[]>();
     for (const fd of visible) {

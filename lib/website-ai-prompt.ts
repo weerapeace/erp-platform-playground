@@ -22,7 +22,8 @@ const fieldLine = (f: FieldDef): string => {
 };
 
 export function buildAiPrompt(opts: { shopName: string; categories: { key: string; label: string }[]; brief?: string }): string {
-  const sections = SECTION_TYPES.filter((t) => t !== "announcement")
+  // ไม่ส่ง Section ทดลอง (meta.beta) ให้ AI — ยังไม่นิ่ง และผืนผ้าใบต้องจัดตำแหน่งด้วยตา ไม่เหมาะให้ AI เดาพิกัด
+  const sections = SECTION_TYPES.filter((t) => t !== "announcement" && !SECTION_SCHEMAS[t].meta.beta)
     .map((t) => {
       const s = SECTION_SCHEMAS[t];
       const lines = [`- type "${t}" = ${s.meta.label} (${s.meta.hint})`, ...s.fields.map(fieldLine)];

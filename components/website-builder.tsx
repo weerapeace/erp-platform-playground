@@ -21,6 +21,7 @@
  *   เว็บ → ERP : storefront-block-click {blockId, childId?} · storefront-drop {data, beforeId} · storefront-preview-loaded · storefront-scroll {y}
  *   ERP → เว็บ : storefront-select-block {blockId, childId?} · storefront-restore-scroll {y}
  *                storefront-drag-at {x,y} · storefront-drag-leave · storefront-drag-drop {data}   (ลากด้วย pointer)
+ *   ผืนผ้าใบอิสระ (canvas) คุยสดอีกชุด — ดู components/website-canvas-tools.tsx
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, type ChildSpec } from "@/lib/website-schema";
@@ -29,6 +30,8 @@ import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
+import { useCanvasBridge, previewStructureSig, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
+import { canvasItemPreset, type CanvasKind } from "@/lib/website-canvas";
 
 export interface Selection {
   blockId: string;
@@ -174,10 +177,19 @@ export function WebsiteBuilder({
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
+  // บันทึกร่างแล้ว → โหลดพรีวิวใหม่ "เฉพาะเมื่อโครงหน้าเปลี่ยน" — แก้แค่ในผืนผ้าใบอิสระ พรีวิวรับสดอยู่แล้ว
+  // (ไม่งั้นลากเสร็จ 1.5 วิ หน้าพรีวิวกระพริบโหลดใหม่ทุกครั้ง)
+  const loadedSig = useRef<string | null>(null);
   useEffect(() => {
+    const sig = previewStructureSig(blocksRef.current);
+    if (loadedSig.current !== null && loadedSig.current === sig) return;
+    loadedSig.current = sig;
     setNonce((n) => n + 1);
   }, [previewVersion]);
-  const reloadPreview = () => setNonce((n) => n + 1);
+  const reloadPreview = () => {
+    loadedSig.current = previewStructureSig(blocksRef.current);
+    setNonce((n) => n + 1);
+  };
 
   useEffect(() => {
     const el = previewBoxRef.current;
@@ -276,15 +288,24 @@ export function WebsiteBuilder({
     patchBlock(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
   };
 
-  const addChild = (blockId: string) => {
+  const addChild = (blockId: string, canvasKind?: CanvasKind) => {
     const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
-    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(c.spec) };
+    // ผืนผ้าใบ: เพิ่มตามชนิดที่กด (รูป/ข้อความ/ปุ่ม/ของตกแต่ง) ตำแหน่งเหลื่อมกันไม่ทับสนิท
+    const spec = canvasKind ? { ...c.spec, blank: () => canvasItemPreset(canvasKind, c.list.length) } : c.spec;
+    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(spec) };
     patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
     setExpanded((s) => new Set(s).add(blockId));
     onSelect({ blockId, childId: item.id });
     setPropTab("content");
+  };
+
+  const layerChild = (blockId: string, childId: string, to: "front" | "back" | "up" | "down") => {
+    const b = blocksRef.current.find((x) => x.id === blockId);
+    const c = b && childrenOf(b);
+    if (!b || !c) return;
+    patchBlock(blockId, { [c.spec.key]: reorderLayer(c.list, childId, to) });
   };
 
   const duplicateChild = (blockId: string, childId: string) => {
@@ -292,7 +313,13 @@ export function WebsiteBuilder({
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
     const i = c.list.findIndex((it) => it.id === childId);
-    const copy = { ...deepCopy(c.list[i]), id: newChildId(c.spec.key) };
+    const copy: ChildBlock = { ...deepCopy(c.list[i]), id: newChildId(c.spec.key) };
+    // ผืนผ้าใบ: สำเนาเลื่อนเยื้องนิดหน่อย จะได้เห็นว่ามีสองชิ้น (ไม่ทับกันสนิท)
+    if (b.type === "canvas") {
+      copy.x = (Number(copy.x) || 0) + 24;
+      copy.y = (Number(copy.y) || 0) + 24;
+      copy.locked = false;
+    }
     const next = [...c.list];
     next.splice(i + 1, 0, copy);
     patchBlock(blockId, { [c.spec.key]: next });
@@ -318,6 +345,18 @@ export function WebsiteBuilder({
     next.splice(idx > from ? idx - 1 : idx, 0, moved);
     patchBlock(blockId, { [c.spec.key]: next });
   };
+
+  /* ── ผืนผ้าใบอิสระ: ส่งข้อมูลเข้าพรีวิวสด + รับตำแหน่งที่ลากในพรีวิวกลับมา (components/website-canvas-tools.tsx) ── */
+  useCanvasBridge({ blocks, blocksRef, iframeRef, patchBlock, removeChild, duplicateChild, onUndo: toolbar?.onUndo, onRedo: toolbar?.onRedo });
+
+  /** ctx ของฟอร์ม + รายชื่อ Section ในหน้านี้ (ช่อง "กดแล้วไปที่ → เลื่อนไปส่วนอื่นในหน้านี้") */
+  const formCtx = useMemo<SchemaFormContext>(
+    () => ({
+      ...ctx,
+      sections: blocks.map((b, i) => ({ id: b.id, label: `${i + 1}. ${SECTION_SCHEMAS[b.type]?.meta.label ?? b.type} — ${blockSummary(b as unknown as Record<string, unknown>)}`.slice(0, 80) })),
+    }),
+    [ctx, blocks]
+  );
 
   /* ── พรีวิว ↔ ตัวจัดหน้า ── */
   useEffect(() => {
@@ -957,7 +996,16 @@ export function WebsiteBuilder({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        <SchemaForm fields={selSchema.children!.fields} value={selChild} onChange={(p) => patchChild(selBlock.id, selChild.id, p)} ctx={ctx} />
+        {selBlock.type === "canvas" && (
+          <CanvasItemTools
+            item={selChild}
+            index={childrenOf(selBlock)?.list.findIndex((it) => it.id === selChild.id) ?? 0}
+            count={childrenOf(selBlock)?.list.length ?? 1}
+            onLayer={(to) => layerChild(selBlock.id, selChild.id, to)}
+            onPatch={(p) => patchChild(selBlock.id, selChild.id, p)}
+          />
+        )}
+        <SchemaForm fields={selSchema.children!.fields} value={selChild} onChange={(p) => patchChild(selBlock.id, selChild.id, p)} ctx={formCtx} />
         {visibilityRow(selChild.visibility, (k, val) => patchChild(selBlock.id, selChild.id, { visibility: { ...ALL_VISIBLE, ...selChild.visibility, [k]: val } }))}
       </div>
     </div>
@@ -981,7 +1029,10 @@ export function WebsiteBuilder({
       <div className="flex-1 overflow-y-auto p-3">
         {propTab === "content" && (
           <div className="space-y-4">
-            <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={ctx} />
+            {selBlock.type === "canvas" && (
+              <CanvasAddBar onAdd={(k) => addChild(selBlock.id, k)} count={childrenOf(selBlock)?.list.length ?? 0} max={selSchema.children?.max ?? 60} />
+            )}
+            <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={formCtx} />
             {selSchema.children && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
                 {selSchema.children.icon} {selSchema.children.label}: {childrenOf(selBlock)?.list.length ?? 0} รายการ — แก้ทีละชิ้นจากต้นไม้ทางซ้าย (กด ▸)

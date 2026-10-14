@@ -38,6 +38,8 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "site_closed", label: "ปิดเว็บชั่วคราว (ลูกค้าเห็นหน้า 'เร็ว ๆ นี้')", hint: "ทุกโดเมนของร้านนี้ · พรีวิวใน ERP ยังเห็นเว็บเต็ม · ระบบรับออเดอร์ยังทำงาน", group: "shop", type: "bool", isPublic: true },
   { key: "closed_title", label: "หัวข้อหน้ารอเปิด", hint: "เว้นว่าง = 'เร็ว ๆ นี้'", group: "shop", type: "text", isPublic: true, placeholder: "เร็ว ๆ นี้" },
   { key: "closed_message", label: "ข้อความหน้ารอเปิด", hint: "เว้นว่าง = '<ชื่อร้าน> กำลังเตรียมเว็บใหม่ให้พร้อม…' · ช่องทางติดต่อที่กรอกไว้จะโชว์ใต้ข้อความ", group: "shop", type: "textarea", isPublic: true },
+  // ─── ฟีเจอร์ทดลอง: เปิดให้ร้านนี้เห็น Section ทดลองในคลังของตัวจัดหน้า (SectionMeta.beta ใน lib/website-schema.ts) ───
+  { key: "beta_canvas", label: "🧪 ทดลองใช้ \"ผืนผ้าใบอิสระ\"", hint: "เพิ่ม Section ที่วางรูป/ข้อความ/ปุ่ม/ของตกแต่งได้อิสระ ในคลังของตัวจัดหน้า · ปิดทีหลัง ของที่วางไว้แล้วยังขึ้นเว็บตามเดิม", group: "shop", type: "bool", isPublic: false },
 
   // ─── ติดต่อ ───
   { key: "contact_phone", label: "เบอร์โทร", group: "contact", type: "text", isPublic: true, placeholder: "08X-XXX-XXXX" },
@@ -73,6 +75,7 @@ export interface SiteInfo {
   site_closed: boolean;
   closed_title: string;
   closed_message: string;
+  beta_canvas: boolean;
   contact_phone: string;
   contact_line: string;
   contact_line_url: string;
@@ -101,6 +104,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   site_closed: false,
   closed_title: "",
   closed_message: "",
+  beta_canvas: false,
   contact_phone: "",
   contact_line: "",
   contact_line_url: "",
@@ -203,12 +207,19 @@ export function siteInfoToRows(shopId: string, info: SiteInfo): { shop_id: strin
 }
 
 /** ชุดที่ปล่อยออก API สาธารณะ — ตัดฟิลด์ภายในออก */
-export function publicSiteInfo(info: SiteInfo): Omit<SiteInfo, "order_prefix"> {
+export function publicSiteInfo(info: SiteInfo): Omit<SiteInfo, "order_prefix" | "beta_canvas"> {
   const out: Record<string, unknown> = {};
   for (const f of SITE_INFO_FIELDS) {
     if (f.isPublic) out[f.key] = info[f.key as keyof SiteInfo];
   }
-  return out as Omit<SiteInfo, "order_prefix">;
+  return out as Omit<SiteInfo, "order_prefix" | "beta_canvas">;
+}
+
+/** สวิตช์ฟีเจอร์ทดลองที่ร้านนี้เปิดอยู่ (key ขึ้นต้น beta_) — ใช้กรองคลัง Section ด้วย blockTypesFor() */
+export async function readShopBetas(sb: Admin, shopId: string): Promise<Set<string>> {
+  const { data } = await sb.from("store_settings").select("key, value").eq("shop_id", shopId).like("key", "beta_%");
+  const on = (v: unknown) => ["1", "true", "yes", "on"].includes(String(v ?? "").trim().toLowerCase());
+  return new Set(((data ?? []) as { key: string; value: unknown }[]).filter((r) => on(r.value)).map((r) => r.key));
 }
 
 /** ค่าส่ง: ฟรีเมื่อถึงยอดขั้นต่ำ (ถ้าตั้ง) ไม่งั้นเหมาตามที่ตั้ง */

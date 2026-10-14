@@ -20,6 +20,22 @@
  *   3. เพิ่ม Section ใหม่ = เพิ่มก้อนเดียวใน SECTION_SCHEMAS + ตัวแสดงผล 1 ตัวที่เว็บร้าน
  */
 
+import {
+  CANVAS_BORDERS,
+  CANVAS_BORDERS_ON,
+  CANVAS_BUTTON_VARIANTS,
+  CANVAS_COLORS,
+  CANVAS_FONTS,
+  CANVAS_FRAMES,
+  CANVAS_KINDS,
+  CANVAS_SHAPES,
+  CANVAS_TEXT_BGS,
+  CANVAS_WEIGHTS,
+  canvasItemPreset,
+  canvasItemSummary,
+  validateCanvas,
+} from "@/lib/website-canvas";
+
 /* ─────────── ชนิดช่องตั้งค่า ─────────── */
 
 export type FieldType =
@@ -32,6 +48,7 @@ export type FieldType =
   | "image" // รูป (r2 key) — เลือกจากคลัง/อัปโหลด
   | "link" // ปุ่ม/ลิงก์ = { text, href }
   | "href" // ลิงก์อย่างเดียว (string)
+  | "target" // ลิงก์ปลายทางแบบเลือกจากรายการ (หน้า/หมวด/สินค้า/ส่วนในหน้า/ภายนอก) → เก็บเป็น href string
   | "color" // สี #rrggbb
   | "list" // รายการข้อความ string[]
   | "emoji" // ไอคอนอีโมจิ (สั้น ๆ)
@@ -78,8 +95,23 @@ export interface FieldDef {
   required?: boolean;
   /** ข้อความตอนตรวจไม่ผ่าน (ไม่ใส่ = สร้างจาก label) */
   requiredMessage?: string;
-  /** โชว์เฉพาะเมื่อช่องอื่นมีค่าตามนี้ เช่น { key: "source", eq: "manual" } */
-  showIf?: { key: string; eq: unknown };
+  /**
+   * โชว์เฉพาะเมื่อช่องอื่นมีค่าตามนี้ เช่น { key: "source", eq: "manual" }
+   * eq เป็น array = ค่าใดค่าหนึ่งในรายการ · ใส่หลายเงื่อนไขเป็น array = ต้องตรงทุกข้อ
+   */
+  showIf?: ShowIf | ShowIf[];
+}
+
+export interface ShowIf {
+  key: string;
+  eq: unknown;
+}
+
+/** ช่องนี้ควรโชว์ไหม (ใช้ร่วม: ฟอร์ม + ตัวตรวจก่อนเผยแพร่) */
+export function matchShowIf(fd: FieldDef, value: Record<string, unknown>): boolean {
+  if (!fd.showIf) return true;
+  const conds = Array.isArray(fd.showIf) ? fd.showIf : [fd.showIf];
+  return conds.every((c) => (Array.isArray(c.eq) ? (c.eq as unknown[]).includes(value[c.key]) : value[c.key] === c.eq));
 }
 
 /** Block ย่อยใน Section (เก็บเป็น array ในฟิลด์ `key` ของ Section) */
@@ -105,6 +137,11 @@ export interface SectionMeta {
   icon: string;
   hint: string;
   group: string;
+  /**
+   * Section ทดลอง — โชว์ในคลังเฉพาะร้านที่เปิดสวิตช์นี้ (store_settings key เช่น "beta_canvas" = true)
+   * ตัวแสดงผล/ข้อมูลที่มีอยู่แล้วไม่ถูกกรอง (ปิดสวิตช์ทีหลัง Section ที่วางไว้ยังขึ้นเว็บตามเดิม)
+   */
+  beta?: string;
 }
 
 export interface ValidationIssue {
@@ -143,6 +180,89 @@ const headFields = (opts: { eyebrow?: string; title?: string; subtitle?: boolean
 const count = (n: number, unit: string) => `${n} ${unit}`;
 const s = (v: unknown) => String(v ?? "").trim();
 const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
+
+/**
+ * ช่องตั้งค่าของ "ชิ้น" บนผืนผ้าใบอิสระ — ชิ้นเดียวมีได้ 4 ชนิด (kind) ช่องที่โชว์เปลี่ยนตามชนิด
+ * ตำแหน่ง/ขนาด (x,y,w,h,rotate) ปกติไม่ต้องกรอก — ลากในพรีวิวแล้วค่ามาเอง
+ */
+function canvasItemFields(): FieldDef[] {
+  const isText = { key: "kind", eq: "text" };
+  const isButton = { key: "kind", eq: "button" };
+  const isImage = { key: "kind", eq: "image" };
+  const isShape = { key: "kind", eq: "shape" };
+  const typed = { key: "kind", eq: ["text", "button"] };
+  const colored = { key: "kind", eq: ["text", "button", "shape"] };
+  const framed = [isImage, { key: "border", eq: CANVAS_BORDERS_ON }];
+  return [
+    f("kind", "ชนิดชิ้น", "select", { default: "text", options: CANVAS_KINDS }),
+
+    /* ข้อความ */
+    area("text", "ข้อความ", { default: "ข้อความ", max: 2000, showIf: isText, hint: "ดับเบิลคลิกข้อความในพรีวิวเพื่อพิมพ์แก้ตรงนั้นก็ได้" }),
+    /* ปุ่ม */
+    text("label", "ข้อความบนปุ่ม", { default: "เลือกดูสินค้า", max: 60, showIf: isButton }),
+    f("variant", "รูปแบบปุ่ม", "select", { default: "brand", options: CANVAS_BUTTON_VARIANTS, showIf: isButton }),
+    /* ตัวอักษร (ข้อความ + ปุ่ม) */
+    f("font", "ฟอนต์", "select", { default: "display", options: CANVAS_FONTS, showIf: typed }),
+    f("size", "ขนาดตัวอักษร", "number", { default: 40, min: 8, numMax: 240, showIf: typed, hint: "ขนาดตอนจอกว้าง 1200 (จอเล็กย่อตาม)" }),
+    f("weight", "ความหนา", "select", { default: "500", options: CANVAS_WEIGHTS, showIf: typed }),
+    f("spacing", "ระยะห่างตัวอักษร", "number", { default: 0, min: -10, numMax: 60, showIf: typed }),
+    f("uppercase", "ตัวพิมพ์ใหญ่ทั้งหมด (อังกฤษ)", "toggle", { default: false, showIf: typed }),
+    f("italic", "ตัวเอียง", "toggle", { default: false, showIf: isText }),
+    f("lineHeight", "ระยะบรรทัด (%)", "number", { default: 130, min: 70, numMax: 300, step: 5, showIf: isText }),
+    f("align", "จัดข้อความ", "select", {
+      default: "left",
+      options: [
+        { v: "left", l: "ชิดซ้าย" },
+        { v: "center", l: "กึ่งกลาง" },
+        { v: "right", l: "ชิดขวา" },
+      ],
+      showIf: isText,
+    }),
+    /* สี (ข้อความ / ปุ่ม / ของตกแต่ง) */
+    f("color", "สี", "select", { default: "ink", options: CANVAS_COLORS, showIf: colored, hint: "สีตามธีม = เปลี่ยนธีมแล้วเปลี่ยนตาม" }),
+    f("colorHex", "สีเอง", "color", { default: "", showIf: [colored, { key: "color", eq: "custom" }] }),
+    f("bg", "พื้นหลังข้อความ (แถบ)", "select", { default: "none", options: CANVAS_TEXT_BGS, showIf: isText }),
+    f("bgHex", "พื้นหลังสีเอง", "color", { default: "", showIf: [isText, { key: "bg", eq: "custom" }] }),
+
+    /* รูป */
+    image("imageKey", "รูป", { showIf: isImage, hint: "PNG พื้นใสก็ได้ (เช่น สติกเกอร์/โลโก้)" }),
+    text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, showIf: isImage, hint: "มีผลกับ SEO" }),
+    f("frame", "ทรงรูป", "select", { group: "media", default: "rect", options: CANVAS_FRAMES, showIf: isImage }),
+    f("fit", "การจัดรูปในกรอบ", "select", {
+      group: "media",
+      default: "cover",
+      options: [
+        { v: "cover", l: "เต็มกรอบ (อาจตัดขอบ)" },
+        { v: "contain", l: "ทั้งรูป (ไม่ตัด)" },
+      ],
+      showIf: isImage,
+    }),
+    f("border", "เส้นกรอบรอบรูป", "select", { group: "media", default: "none", options: CANVAS_BORDERS, showIf: isImage }),
+    f("borderColor", "สีกรอบ", "select", { group: "media", default: "brand", options: CANVAS_COLORS, showIf: framed }),
+    f("borderHex", "สีกรอบเอง", "color", { group: "media", default: "", showIf: [...framed, { key: "borderColor", eq: "custom" }] }),
+    f("borderWidth", "ความหนาเส้นกรอบ", "number", { group: "media", default: 2, min: 1, numMax: 16, showIf: framed }),
+    f("borderGap", "ระยะห่างกรอบกับรูป", "number", { group: "media", default: 12, min: 0, numMax: 80, showIf: framed }),
+
+    /* ของตกแต่ง */
+    f("shape", "ลาย", "select", { default: "bow", options: CANVAS_SHAPES, showIf: isShape }),
+    f("outline", "แบบเส้น (ไม่ทึบ)", "toggle", { default: false, showIf: isShape }),
+    f("strokeWidth", "ความหนาเส้น", "number", { default: 2, min: 1, numMax: 24, showIf: isShape }),
+
+    /* ลิงก์ (ทุกชนิด) */
+    f("href", "กดแล้วไปที่", "target", { group: "action", default: "", wide: true }),
+    f("newTab", "เปิดในแท็บใหม่", "toggle", { group: "action", default: false }),
+
+    /* ตำแหน่ง/ขนาด — ลากในพรีวิวแทนได้ */
+    f("x", "ซ้าย (X)", "number", { group: "layout", default: 100, min: -1200, numMax: 2400 }),
+    f("y", "บน (Y)", "number", { group: "layout", default: 100, min: -600, numMax: 4800 }),
+    f("w", "กว้าง", "number", { group: "layout", default: 400, min: 4, numMax: 2400 }),
+    f("h", "สูง", "number", { group: "layout", default: 80, min: 4, numMax: 4800, showIf: { key: "kind", eq: ["image", "button", "shape"] } }),
+    f("rotate", "หมุน (องศา)", "range", { group: "layout", default: 0, min: -180, numMax: 180 }),
+    f("opacity", "ความทึบ (%)", "range", { group: "layout", default: 100, min: 5, numMax: 100, step: 5 }),
+    f("hideMobile", "ซ่อนบนมือถือ", "toggle", { group: "layout", default: false }),
+    f("locked", "ล็อกตำแหน่ง (ลากไม่ได้)", "toggle", { group: "layout", default: false }),
+  ];
+}
 
 /* ─────────── SECTION LIBRARY ─────────── */
 
@@ -214,6 +334,50 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       if (s(p.text) && !s(p.href)) out.push({ level: "error", message: `${label}: ปุ่มหลักยังไม่มีลิงก์` });
       return out;
     },
+  },
+
+  /* ผืนผ้าใบอิสระ — ค่าตัวเลือก/สรุป/ตรวจ อยู่ที่ lib/website-canvas.ts · ตัววาดอยู่ที่เว็บร้าน CanvasSection */
+  canvas: {
+    type: "canvas",
+    meta: {
+      label: "ผืนผ้าใบอิสระ",
+      icon: "🎨",
+      hint: "วางรูป ข้อความ ปุ่ม ของตกแต่ง ตรงไหนก็ได้ — ลาก/ย่อ/หมุนในพรีวิว",
+      group: "พื้นฐาน",
+      beta: "beta_canvas",
+    },
+    fields: [
+      f("height", "ความสูงผืน", "number", {
+        group: "layout",
+        default: 560,
+        min: 120,
+        numMax: 2400,
+        step: 10,
+        hint: "หน่วยเดียวกับตำแหน่งชิ้น (ผืนกว้าง 1200) · ลากแถบใต้ผืนในพรีวิวก็ได้",
+      }),
+      image("bgImageKey", "รูปพื้นหลังผืน", { hint: "เต็มความกว้างจอ · ไม่ใส่ = ใช้สีพื้นจากแท็บรูปลักษณ์" }),
+      f("mobileAlign", "มือถือ: จัดชิ้นส่วน", "select", {
+        group: "layout",
+        default: "center",
+        options: [
+          { v: "center", l: "กึ่งกลาง" },
+          { v: "left", l: "ชิดซ้าย" },
+        ],
+        hint: "มือถือเรียงชิ้นลงมาตามตำแหน่ง บน→ล่าง ให้อัตโนมัติ",
+      }),
+    ],
+    children: {
+      key: "items",
+      label: "ชิ้นส่วนบนผืน (บน = อยู่หลังสุด)",
+      itemLabel: "ชิ้น",
+      icon: "🧩",
+      max: 60,
+      blank: () => canvasItemPreset("text"),
+      summary: canvasItemSummary,
+      fields: canvasItemFields(),
+    },
+    summary: (b) => `${arr(b.items).length} ชิ้น · สูง ${Number(b.height) || 0}`,
+    validate: (b, label) => validateCanvas(b, label),
   },
 
   "rich-text": {

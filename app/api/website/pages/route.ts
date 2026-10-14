@@ -16,7 +16,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
-import { normalizeBlocks, BLOCK_META } from "@/lib/website-blocks";
+import { normalizeBlocks, blockTypesFor } from "@/lib/website-blocks";
+import { readShopBetas } from "@/lib/website-site-info";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 
 export const dynamic = "force-dynamic";
@@ -84,7 +85,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         hasDraft: row.draft_layout != null,
         updatedAt: row.updated_at,
       },
-      blockTypes: Object.entries(BLOCK_META).map(([type, m]) => ({ type, ...m })),
+      // Section ทดลอง (meta.beta) โชว์ในคลังเฉพาะร้านที่เปิดสวิตช์ในแท็บข้อมูลร้าน
+      blockTypes: blockTypesFor(await readShopBetas(sb, s.id)),
       categories,
     });
   }
@@ -109,7 +111,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       hasDraft: p.draft_layout != null,
       updatedAt: p.updated_at,
     })),
-    blockTypes: Object.entries(BLOCK_META).map(([type, m]) => ({ type, ...m })),
+    // Section ทดลอง (meta.beta) โชว์ในคลังเฉพาะร้านที่เปิดสวิตช์ในแท็บข้อมูลร้าน
+    blockTypes: blockTypesFor(await readShopBetas(sb, s.id)),
   });
 }
 

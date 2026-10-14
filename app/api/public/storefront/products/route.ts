@@ -30,6 +30,7 @@ import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
 import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
+import { productSlug } from "@/lib/website-links";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,9 +55,8 @@ const json = (body: unknown, status = 200) =>
     headers: { ...CORS, "Cache-Control": "no-store" },
   });
 
-/** สร้าง slug จากรหัสสินค้า (ใช้เป็น URL บนเว็บร้าน) */
-const slugify = (code: string) =>
-  code.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || code;
+/** สร้าง slug จากรหัสสินค้า (ใช้เป็น URL บนเว็บร้าน) — ของกลางที่ lib/website-links.ts (ตัวเลือกลิงก์ใช้สูตรเดียวกัน) */
+const slugify = productSlug;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const shopSlug = (new URL(request.url).searchParams.get("shop") ?? "").trim();

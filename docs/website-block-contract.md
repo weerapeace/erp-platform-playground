@@ -64,7 +64,10 @@
    - `meta` (ชื่อไทย/ไอคอน/คำอธิบาย/กลุ่ม) · `fields` (ช่องตั้งค่า: key/label/type/default/max/options/required/showIf)
    - `children` ถ้ามี Block ย่อย (key ของ array · itemLabel · max · fields ของแต่ละชิ้น · summary)
    - `summary` (ข้อความสรุปในต้นไม้) · `validate` (กฎตรวจเพิ่มจาก required)
-   - ชนิดช่องที่ใช้ได้: text textarea number range select toggle image link href color list emoji video map products category
+   - ชนิดช่องที่ใช้ได้: text textarea number range select toggle image link href target color list emoji video map products category
+   - `target` = "กดแล้วไปที่" เลือกจากรายการ (หน้า/หมวด/สินค้า/ส่วนในหน้า/ภายนอก) เก็บเป็น href string — ใช้แทน `href` ในของใหม่
+   - `showIf` ใส่ได้หลายเงื่อนไข (array = ต้องตรงทุกข้อ) และ `eq` เป็น array ได้ (= ค่าใดค่าหนึ่ง)
+   - Section ทดลอง: ใส่ `meta.beta: "beta_xxx"` → โชว์ในคลังเฉพาะร้านที่เปิดสวิตช์นั้น (store_settings) · เพิ่มสวิตช์ใน lib/website-site-info.ts
 2. `lib/website-blocks.ts` — เพิ่มชื่อใน `BlockType` + interface ของชนิดนั้น (ให้ TypeScript รู้จัก) แล้วต่อเข้า union `Block`
 3. `npx vitest run lib/__tests__/website-schema.test.ts` — ต้องเขียว (เทสต์ไล่ทุกชนิดอัตโนมัติ: newBlock→normalize ต้องได้ค่าเดิม, ค่าเริ่มต้นห้ามมีข้อความร้าน IG)
 
@@ -88,3 +91,7 @@
 Section ที่มีรูปเต็มจอ (hero · image · slideshow/สไลด์) มีช่อง `mobileImageKey` คู่กับ `imageKey`
 ว่าง = ใช้รูปเดียวกับคอม · ฝั่งเว็บร้านแสดงด้วย `<picture><source media="(max-width: 767px)">` (breakpoint เดียวกับ `md:`)
 เพิ่ม Section ใหม่ที่มีรูปเต็มจอ ให้ใช้ชื่อ key นี้เหมือนกัน
+
+## ผืนผ้าใบอิสระ (canvas)
+
+Section ที่วางชิ้นตำแหน่งอิสระ — สัญญาข้อมูล/การคุยสดกับพรีวิว อยู่ที่ `docs/website-canvas.md`
