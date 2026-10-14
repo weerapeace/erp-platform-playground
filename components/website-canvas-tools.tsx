@@ -46,12 +46,8 @@ export function livePatch(raw: Record<string, unknown>): Record<string, unknown>
   return out;
 }
 
-/** โครงหน้าแบบไม่รวม "เนื้อในผืน" (ชิ้นส่วน/ความสูง/รูปพื้น ซึ่งพรีวิวรับสดอยู่แล้ว) */
-export function previewStructureSig(blocks: Block[]): string {
-  return JSON.stringify(
-    blocks.map((b) => (b.type === "canvas" ? { id: b.id, type: b.type, enabled: b.enabled, visibility: b.visibility, style: b.style } : b))
-  );
-}
+/** โครงหน้าแบบไม่รวม "เนื้อในผืน" (ชิ้นส่วน/ความสูง/รูปพื้น ซึ่งพรีวิวรับสดอยู่แล้ว) — ย้ายไป lib/website-live-preview.ts */
+export { previewStructureSig } from "@/lib/website-live-preview";
 
 export function useCanvasBridge(opts: {
   blocks: Block[];

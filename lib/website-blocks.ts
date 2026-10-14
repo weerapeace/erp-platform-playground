@@ -461,6 +461,12 @@ export interface CanvasBlock extends BlockBase {
   bgY: number;
   /** ซูมรูปพื้นหลัง 100–300% (เฉพาะ cover) */
   bgZoom: number;
+  /** มือถือปรับรูปพื้นหลังแยก (false = ใช้ค่าคอม) + ค่าของมือถือ */
+  bgMCustom: boolean;
+  bgMFit: "cover" | "contain";
+  bgMX: number;
+  bgMY: number;
+  bgMZoom: number;
   mobileAlign: "center" | "left";
   items: CanvasItem[];
 }

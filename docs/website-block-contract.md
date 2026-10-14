@@ -76,7 +76,9 @@
 ### ฝั่งเว็บร้าน (repo `weerapeace/storefront`)
 
 4. `src/lib/blocks.ts` — เพิ่มชนิด + interface ให้ตรงกับ ERP (ชื่อฟิลด์ต้องเหมือนกันเป๊ะ)
-5. เขียน component แสดงผล แล้วเพิ่ม 1 บรรทัดใน `REGISTRY` + `BLOCK_LABEL` ของ `src/components/home/BlockRenderer.tsx`
+5. เขียน component แสดงผล แล้วเพิ่ม 1 บรรทัดในทะเบียน + `BLOCK_LABEL`
+   - ไม่ต้องดึงข้อมูล (ส่วนใหญ่) → `PURE_REGISTRY` ใน `src/components/home/block-registry.tsx` (⚠️ ห้าม async/ของเฉพาะเซิร์ฟเวอร์) → พรีวิวสดวาดใหม่ทันที
+   - ต้องดึงข้อมูลสินค้า/หมวด (async) → `SERVER_REGISTRY` ใน `BlockRenderer.tsx` + ใส่ชนิดใน `SERVER_TYPES` (เว็บร้าน) และ `LIVE_RELOAD_TYPES` (ERP `lib/website-live-preview.ts`)
    - ถ้ามี Block ย่อย: ใส่ `{...childAttrs(item, i, 'ชื่อชิ้น')}` ที่ element นอกสุดของแต่ละชิ้น → คลิกเลือกจากพรีวิวใน ERP ได้ + ซ่อนตามอุปกรณ์ได้
 6. `npm run check-schema` (เทียบกับ `/api/public/storefront/schema` ของ ERP) → `npm run build` → deploy
 
@@ -91,6 +93,13 @@
 Section ที่มีรูปเต็มจอ (hero · image · slideshow/สไลด์) มีช่อง `mobileImageKey` คู่กับ `imageKey`
 ว่าง = ใช้รูปเดียวกับคอม · ฝั่งเว็บร้านแสดงด้วย `<picture><source media="(max-width: 767px)">` (breakpoint เดียวกับ `md:`)
 เพิ่ม Section ใหม่ที่มีรูปเต็มจอ ให้ใช้ชื่อ key นี้เหมือนกัน
+
+## ⚡ พรีวิวสด (ตัวจัดหน้า → iframe เว็บร้าน)
+
+- ERP `components/website-builder.tsx`: พรีวิวโหลดเสร็จ → ส่ง `storefront-live-hello` · เว็บร้านตอบ `storefront-live-ready` → ทุกครั้งที่แก้ ส่ง `storefront-blocks-live {blocks}` (รวบเป็น 1 ครั้งต่อเฟรม)
+- เว็บร้าน `src/components/home/LiveBlocks.tsx` (ใช้เฉพาะ ?preview=1): `parseBlocks` แล้ววาดใหม่ทันที · รับเฉพาะจาก origin ของ `NEXT_PUBLIC_ERP_BASE_URL` (+ localhost ตอน dev)
+  - Section ทั่วไป = วาดใหม่ในเบราว์เซอร์ · Section ที่ดึงข้อมูล = ใช้ที่เซิร์ฟเวอร์วาดมา (รูปลักษณ์ตัวห่อเปลี่ยนสด) · ผืนผ้าใบ = วาดครั้งเดียวต่อ id (รับสดทาง `storefront-canvas-update`)
+- บันทึกร่าง (1.5 วิ) แล้วโหลดพรีวิวใหม่ **เฉพาะ** เมื่อ `previewReloadSig` เปลี่ยน = เนื้อหาของ Section ที่ดึงข้อมูล (ย้ายลำดับ/รูปลักษณ์ไม่นับ) · เว็บร้านรุ่นเก่าที่ไม่ตอบ = แบบเดิม (แก้อะไรก็โหลดใหม่)
 
 ## ผืนผ้าใบอิสระ (canvas)
 

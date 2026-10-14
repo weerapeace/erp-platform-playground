@@ -391,7 +391,16 @@ describe("รูปพื้นหลังผืน: ตำแหน่ง/ซ�
 
   it("แม่แบบผืนจำตำแหน่งรูปพื้นหลังด้วย", async () => {
     const { canvasTemplateData } = await import("../website-canvas");
-    const d = canvasTemplateData({ height: 600, bgImageKey: "x/bg.jpg", bgX: 30, bgY: 10, bgZoom: 140, bgFit: "cover", items: [] });
-    expect([d.bgX, d.bgY, d.bgZoom, d.bgFit]).toEqual([30, 10, 140, "cover"]);
+    const d = canvasTemplateData({ height: 600, bgImageKey: "x/bg.jpg", bgX: 30, bgY: 10, bgZoom: 140, bgFit: "cover", bgMCustom: true, bgMY: 0, items: [] });
+    expect([d.bgX, d.bgY, d.bgZoom, d.bgFit, d.bgMCustom, d.bgMY]).toEqual([30, 10, 140, "cover", true, 0]);
+  });
+});
+
+describe("รูปพื้นหลังผืน: มือถือปรับแยก", () => {
+  it("บันทึกผืน: เก็บช่องมือถือ · ข้อมูลเก่า = มือถือใช้ค่าคอม (bgMCustom false)", () => {
+    const [b] = normalizeBlocks([{ type: "canvas", bgImageKey: "x/bg.jpg", bgMCustom: true, bgMFit: "contain", bgMX: 10, bgMY: 0, bgMZoom: 999, items: [] }]) as unknown as Record<string, unknown>[];
+    expect([b.bgMCustom, b.bgMFit, b.bgMX, b.bgMY, b.bgMZoom]).toEqual([true, "contain", 10, 0, 300]);
+    const [old] = normalizeBlocks([{ type: "canvas", items: [] }]) as unknown as Record<string, unknown>[];
+    expect(old.bgMCustom).toBe(false);
   });
 });

@@ -31,7 +31,7 @@ import {
 } from "@/lib/website-canvas";
 import { GRAD_DIRS, GRADIENT_PRESETS, type GradThemeHex } from "@/lib/website-gradient";
 import { GradientPicker } from "@/components/website-gradient-picker";
-import { CanvasBgPositioner, canvasBgPosOf } from "@/components/website-canvas-bg-position";
+import { CanvasBgPositioner } from "@/components/website-canvas-bg-position";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
 
 export type CanvasAlign = "top" | "left" | "middle" | "center" | "bottom" | "right" | "distribute-h" | "distribute-v";
@@ -337,14 +337,7 @@ export function CanvasInspector({
           </div>
           {Boolean(block.bgImageKey) && (
             <div className="mt-2 rounded-lg border border-slate-200 p-2.5">
-              <CanvasBgPositioner
-                imageKey={String(block.bgImageKey)}
-                value={canvasBgPosOf(block as Record<string, unknown>)}
-                height={Number(block.height) || 560}
-                mobileHeight={Number(block.mobileHeight) || 800}
-                mobileCustom={custom}
-                onChange={(p) => onPatchBlock(p)}
-              />
+              <CanvasBgPositioner block={block as Record<string, unknown>} device={mobile?.device ?? "desktop"} onChange={(p) => onPatchBlock(p)} />
             </div>
           )}
         </div>

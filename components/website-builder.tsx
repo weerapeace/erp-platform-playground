@@ -30,7 +30,8 @@ import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
-import { useCanvasBridge, previewStructureSig, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
+import { useCanvasBridge, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
+import { previewReloadSig } from "@/lib/website-live-preview";
 import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canvas-editor";
 
 export interface Selection {
@@ -177,19 +178,35 @@ export function WebsiteBuilder({
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
-  // บันทึกร่างแล้ว → โหลดพรีวิวใหม่ "เฉพาะเมื่อโครงหน้าเปลี่ยน" — แก้แค่ในผืนผ้าใบอิสระ พรีวิวรับสดอยู่แล้ว
-  // (ไม่งั้นลากเสร็จ 1.5 วิ หน้าพรีวิวกระพริบโหลดใหม่ทุกครั้ง)
-  const loadedSig = useRef<string | null>(null);
+  // ⚡ พรีวิวสด: เว็บร้านตอบ storefront-live-ready → ส่งโครงหน้าล่าสุดไปวาดทันทีทุกครั้งที่แก้ (ไม่ต้องรอบันทึกร่าง/โหลดหน้าใหม่)
+  // บันทึกร่างแล้ว → โหลดพรีวิวใหม่ "เฉพาะสิ่งที่พรีวิวทำเองไม่ได้" (lib/website-live-preview.ts)
+  //   พรีวิวสด = เนื้อหา Section ที่ดึงข้อมูลสินค้า/หมวด · เว็บรุ่นเก่า = โครงหน้าเปลี่ยน (ยกเว้นเนื้อในผืนผ้าใบ)
+  const liveRef = useRef(false);
+  const loadedBlocks = useRef<Block[] | null>(null);
   useEffect(() => {
-    const sig = previewStructureSig(blocksRef.current);
-    if (loadedSig.current !== null && loadedSig.current === sig) return;
-    loadedSig.current = sig;
+    const live = liveRef.current;
+    if (loadedBlocks.current && previewReloadSig(loadedBlocks.current, live) === previewReloadSig(blocksRef.current, live)) return;
+    loadedBlocks.current = blocksRef.current;
     setNonce((n) => n + 1);
   }, [previewVersion]);
   const reloadPreview = () => {
-    loadedSig.current = previewStructureSig(blocksRef.current);
+    loadedBlocks.current = blocksRef.current;
     setNonce((n) => n + 1);
   };
+  // โหลดพรีวิวใหม่ = ยังไม่รู้ว่ารับค่าสดได้ไหม (รอถามใหม่ตอนโหลดเสร็จ)
+  useEffect(() => {
+    liveRef.current = false;
+  }, [nonce]);
+  const postLive = useCallback(() => {
+    if (liveRef.current) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-blocks-live", blocks: blocksRef.current }, "*");
+  }, [iframeRef]);
+  // แก้อะไร → ส่งไปพรีวิว (รวบเป็นครั้งเดียวต่อเฟรม — ลากแถบเลื่อนรัว ๆ ไม่ท่วม)
+  const liveFrame = useRef(0);
+  useEffect(() => {
+    if (!liveRef.current) return;
+    cancelAnimationFrame(liveFrame.current);
+    liveFrame.current = requestAnimationFrame(postLive);
+  }, [blocks, postLive]);
 
   useEffect(() => {
     const el = previewBoxRef.current;
@@ -419,6 +436,16 @@ export function WebsiteBuilder({
         win?.postMessage({ type: "storefront-ui-scale", scale: scaleRef.current }, "*");
         if (sel) win?.postMessage({ type: "storefront-select-block", blockId: sel.blockId, childId: sel.childId ?? null }, "*");
         else if (lastScrollY.current > 0) win?.postMessage({ type: "storefront-restore-scroll", y: lastScrollY.current }, "*");
+        // ถามว่ารับค่าสดได้ไหม (เว็บร้านรุ่นใหม่ตอบ storefront-live-ready)
+        win?.postMessage({ type: "storefront-live-hello" }, "*");
+        return;
+      }
+      if (d.type === "storefront-live-ready") {
+        liveRef.current = true;
+        // พรีวิวโหลดร่างที่บันทึกไว้ — ส่งของล่าสุด (ที่อาจแก้ต่อระหว่างโหลด) ไปทับทันที
+        postLive();
+        const sel = selectionRef.current;
+        if (sel) window.setTimeout(() => iframeRef.current?.contentWindow?.postMessage({ type: "storefront-select-block", blockId: sel.blockId, childId: sel.childId ?? null }, "*"), 50);
         return;
       }
       if (d.type === "storefront-drop" && typeof d.data === "string") {
@@ -436,11 +463,19 @@ export function WebsiteBuilder({
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [onSelect, iframeRef, addSection, moveSectionTo]);
+  }, [onSelect, iframeRef, addSection, moveSectionTo, postLive]);
 
   useEffect(() => {
     iframeRef.current?.contentWindow?.postMessage({ type: "storefront-select-block", blockId: selection?.blockId ?? null, childId: selection?.childId ?? null }, "*");
   }, [selection, iframeRef]);
+  // Section ที่เพิ่ม/ย้ายสด ๆ ยังไม่มีกรอบเลือก → เลือกซ้ำหลังพรีวิววาดเสร็จ (เฉพาะตอนลำดับ/จำนวน Section เปลี่ยน)
+  const idsSig = blocks.map((b) => b.id).join(",");
+  useEffect(() => {
+    if (!liveRef.current || !selection) return;
+    const t = window.setTimeout(() => iframeRef.current?.contentWindow?.postMessage({ type: "storefront-select-block", blockId: selection.blockId, childId: selection.childId ?? null }, "*"), 60);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsSig]);
 
   /* ── คีย์ลัด ── */
   useEffect(() => {

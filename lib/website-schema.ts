@@ -412,6 +412,19 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       f("bgX", "รูปพื้นหลัง: ซ้าย ↔ ขวา (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, step: 1 }),
       f("bgY", "รูปพื้นหลัง: บน ↕ ล่าง (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, step: 1 }),
       f("bgZoom", "รูปพื้นหลัง: ซูม (%)", "range", { group: "media", default: 100, min: 100, numMax: 300, step: 5, showIf: { key: "bgFit", eq: "cover" } }),
+      f("bgMCustom", "มือถือ: ปรับรูปพื้นหลังแยก", "toggle", { group: "media", default: false, hint: "ปิด = มือถือใช้ตำแหน่ง/ซูมเดียวกับคอม · ปรับได้ในหน้าแก้เต็มจอ → 📲 มือถือ" }),
+      f("bgMFit", "มือถือ: รูปพื้นหลัง การวาง", "select", {
+        group: "media",
+        default: "cover",
+        options: [
+          { v: "cover", l: "เต็มผืน (ตัดส่วนที่เกิน)" },
+          { v: "contain", l: "เห็นทั้งรูป" },
+        ],
+        showIf: { key: "bgMCustom", eq: true },
+      }),
+      f("bgMX", "มือถือ: ซ้าย ↔ ขวา (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, step: 1, showIf: { key: "bgMCustom", eq: true } }),
+      f("bgMY", "มือถือ: บน ↕ ล่าง (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, step: 1, showIf: { key: "bgMCustom", eq: true } }),
+      f("bgMZoom", "มือถือ: ซูม (%)", "range", { group: "media", default: 100, min: 100, numMax: 300, step: 5, showIf: [{ key: "bgMCustom", eq: true }, { key: "bgMFit", eq: "cover" }] }),
       f("mobileMode", "มือถือ: วิธีจัด", "select", {
         group: "layout",
         default: "auto",

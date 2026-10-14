@@ -318,7 +318,10 @@ export function canvasMobileBox(it: Record<string, unknown>): { mx: number; my: 
 /* ─────────── รูปพื้นหลังผืน: ตำแหน่ง / ซูม ─────────── */
 
 /** ค่าตั้งต้นรูปพื้นหลัง (เต็มผืน · กลางรูป · ไม่ซูม) — ใส่ตอนเปลี่ยนรูป/ใช้แม่แบบ */
-export const CANVAS_BG_DEFAULT = { bgFit: "cover", bgX: 50, bgY: 50, bgZoom: 100 } as const;
+export const CANVAS_BG_DEFAULT = { bgFit: "cover", bgX: 50, bgY: 50, bgZoom: 100, bgMCustom: false, bgMFit: "cover", bgMX: 50, bgMY: 50, bgMZoom: 100 } as const;
+
+/** จอมือถืออ้างอิงตอนผืนมือถือ "เรียงอัตโนมัติ" (ความสูงจริงขึ้นกับจำนวนชิ้น — ใช้สัดส่วนจอโทรศัพท์ประมาณ) */
+export const CANVAS_BG_REF_PHONE = { w: 390, h: 844 } as const;
 
 /** ความกว้างจอคอมที่ใช้คำนวณกรอบ "ส่วนที่เห็น" ในแผงตั้งค่า (ผืนเต็มความกว้างจอ — จอกว้างกว่านี้จะเห็นแนวนอนมากขึ้นอีกนิด) */
 export const CANVAS_BG_REF_WIDTH = 1440;
@@ -353,7 +356,7 @@ export function canvasBgPosFromWindow(win: { w: number; h: number }, left: numbe
 /* ─────────── แม่แบบผืน ─────────── */
 
 /** ช่องของผืนที่เก็บในแม่แบบ (ไม่รวม id/type/enabled/visibility ของ Section) */
-export const CANVAS_TEMPLATE_KEYS = ["height", "bgImageKey", "bgFit", "bgX", "bgY", "bgZoom", "mobileAlign", "mobileMode", "mobileHeight", "style", "items"] as const;
+export const CANVAS_TEMPLATE_KEYS = ["height", "bgImageKey", "bgFit", "bgX", "bgY", "bgZoom", "bgMCustom", "bgMFit", "bgMX", "bgMY", "bgMZoom", "mobileAlign", "mobileMode", "mobileHeight", "style", "items"] as const;
 
 /** เนื้อผืนสำหรับบันทึกเป็นแม่แบบ */
 export function canvasTemplateData(block: Record<string, unknown>): Record<string, unknown> {
