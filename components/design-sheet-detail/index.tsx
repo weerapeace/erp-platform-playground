@@ -2445,9 +2445,23 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                               </select>
                             ) : <span className="text-xs text-slate-500">{quoteSizeLabel(q.parent_code)}</span>}
                           </td>
-                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums text-slate-400">
+                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums text-slate-400 leading-tight">
                             {editing ? <input type="number" min={0} step="any" value={editQ.price} onChange={(e) => setEditQ({ ...editQ, price: e.target.value })} className="h-7 px-1 w-24 text-sm text-right border border-slate-200 rounded" />
                               : (q.price != null ? Number(q.price).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : "—")}
+                            {/* ต้นทุน ณ ตอนเสนอ ต่างจาก "ตีราคาปัจจุบัน" ของไซส์นี้เท่าไหร่ (เจ้าของขอ) — กดเปิดเทียบเวอร์ชันได้ถ้ารอบนี้มีเวอร์ชันผูกไว้ */}
+                            {!editing && q.price != null && (() => {
+                              const cur = totalForParent(q.parent_code ?? "");
+                              if (!(cur > 0)) return null;
+                              const d = cur - Number(q.price); const pctv = Number(q.price) ? (d / Number(q.price)) * 100 : null;
+                              const same = Math.abs(d) < 0.005;
+                              const inner = same
+                                ? <span className="text-[10px] text-slate-400">= ปัจจุบัน</span>
+                                : <span className={`text-[10px] ${d > 0 ? "text-rose-600" : "text-emerald-700"}`}>ปัจจุบัน {fmtBaht(cur)} ({sgn(d)}{pctv != null ? ` · ${pctv > 0 ? "+" : "−"}${Math.abs(pctv).toFixed(1)}%` : ""})</span>;
+                              const tip = same ? "ตีราคาปัจจุบันของไซส์นี้เท่ากับตอนเสนอ" : `ตีราคาปัจจุบัน ${fmtBaht(cur)} − ตอนเสนอ ${fmtBaht(Number(q.price))} = ${sgn(d)} ต่อชิ้น (ต้นทุน${d > 0 ? "ขึ้น" : "ลง"})`;
+                              return q.cost_snapshot_id
+                                ? <button type="button" title={`${tip} — กดดูว่าวัสดุอะไรเปลี่ยน`} onClick={() => { setVersionsInit({ a: q.cost_snapshot_id ?? null, b: "current", parent: q.parent_code ?? "" }); setVersionsOpen(true); }} className="block w-full text-right hover:underline">{inner}</button>
+                                : <div title={tip}>{inner}</div>;
+                            })()}
                           </td>
                           <td className="border border-slate-200 px-2 py-1 text-right tabular-nums font-semibold text-blue-700 bg-blue-50/40">
                             {editing ? <input type="number" min={0} step="any" value={editQ.offered} onChange={(e) => setEditQ({ ...editQ, offered: e.target.value })} placeholder="ใช้ราคาตีราคา" className="h-7 px-1 w-24 text-sm text-right border border-blue-300 rounded" />
