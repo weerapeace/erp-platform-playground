@@ -24,6 +24,7 @@ import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
+import { QuoteRounds } from "@/components/design-sheet-detail/quote-rounds";
 
 // ป๊อปอัปเต็ม (ของกลางเดิม) โหลดเฉพาะตอนกด "แก้ไขเต็ม"
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
@@ -117,8 +118,6 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const [openSec, setOpenSec] = useState<"cost" | "quote" | "sku" | null>(null);   // ส่วนที่กางอยู่ (ตีราคา/เสนอราคา/SKU)
   const [costParent, setCostParent] = useState("");                                // ตีราคา: แท็บ Parent ที่ดูอยู่ ("" = ทั่วไป)
   const [skuDrawer, setSkuDrawer] = useState<{ moduleKey: string; id: string } | null>(null);   // drawer ดู SKU/Parent
-  const [quoteForm, setQuoteForm] = useState(false);
-  const [newQ, setNewQ] = useState({ offered: "", qty: "", status: "pending", note: "", date: todayStr() });
 
   // โหลดข้อมูล: ชุดหลักก่อน (ใบงาน+สถานะ+รูป) แล้วค่อยชุดรอง (comment/ตีราคา/เสนอราคา) — ไม่ยิงพร้อมกัน 6 เส้น
   useEffect(() => {
@@ -186,22 +185,10 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     finally { setSaving(null); }
   }
 
-  async function sendQuote() {
+  async function reloadQuotes() {
     if (!sheet) return;
-    const offered = newQ.offered.replace(/,/g, "").trim();
-    if (!offered || !Number.isFinite(Number(offered))) { toast.warning("กรุณาใส่ราคาที่เสนอ"); return; }
-    setSaving("quote");
-    try {
-      const r = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: newQ.date, price: grandTotal || null, offered_price: Number(offered), qty: newQ.qty.trim() ? Number(newQ.qty) : null, status: newQ.status, note: newQ.note, parent_code: costParent || null }) });
-      const j = await r.json() as { error?: string | null };
-      if (!r.ok || j.error) throw new Error(j.error || "บันทึกเสนอราคาไม่สำเร็จ");
-      const qt = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/quotes`).then((x) => x.json() as Promise<{ data: DesignSheetQuote[] }>);
-      setQuotes(Array.isArray(qt.data) ? qt.data : []);
-      setNewQ({ offered: "", qty: "", status: "pending", note: "", date: todayStr() }); setQuoteForm(false);
-      toast.success("เพิ่มรอบเสนอราคาแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกเสนอราคาไม่สำเร็จ"); }
-    finally { setSaving(null); }
+    const qt = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/quotes`).then((x) => x.json() as Promise<{ data: DesignSheetQuote[] }>);
+    setQuotes(Array.isArray(qt.data) ? qt.data : []);
   }
 
   const goBack = () => {
@@ -306,57 +293,17 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     </div>
   );
 
-  // ── เสนอราคา: ไทม์ไลน์รอบ + เพิ่มรอบใหม่ได้จากมือถือ (ราคา/จำนวน/ผล/โน้ต) ──
+  // ── เสนอราคา: การ์ดต่อครั้ง (ไซส์ × ขั้นจำนวน) ชุดเดียวกับหน้าเต็ม — components/design-sheet-detail/quote-rounds.tsx ──
+  // ตีราคาปัจจุบันของไซส์ (วัสดุ + ค่าใช้จ่ายเพิ่ม) — ให้การ์ดเทียบ "ตีราคา → ปัจจุบัน"
+  const costTotalFor = (key: string) =>
+    costLines.filter((l) => (l.parent_code ?? "") === key).reduce((n, l) => n + (Number(l.amount) || 0), 0)
+    + (costExtraMap[key] ?? []).reduce((n, c) => n + (Number(c.amount) || 0), 0);
   const quoteSection = (
-    <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
-      {quotes.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">ยังไม่เคยเสนอราคา</div>
-      ) : (
-        <div className="space-y-1.5">
-          {[...quotes].reverse().map((q) => {
-            const st = QUOTE_STATUS[q.status] ?? QUOTE_STATUS.pending;
-            return (
-              <div key={q.id} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">รอบ {q.round}</span>
-                  <span className="text-[11px] text-slate-400">{fmtDate(q.quote_date)}{q.parent_code ? ` · ${q.parent_code}` : ""}</span>
-                  <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[11px] font-medium ${st.cls}`}>{st.label}</span>
-                </div>
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-lg font-semibold tabular-nums text-slate-900">{money(q.offered_price ?? q.price)}</span>
-                  {q.qty != null && <span className="text-[11px] text-slate-400">ที่ {Number(q.qty).toLocaleString("th-TH")} ชิ้น</span>}
-                  {q.price != null && q.offered_price != null && q.price !== q.offered_price && <span className="text-[11px] text-slate-400">ต้นทุน {money(q.price)}</span>}
-                </div>
-                {q.note && <div className="mt-0.5 text-xs text-slate-500">{q.note}</div>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {canEdit && !quoteForm && (
-        <button type="button" onClick={() => setQuoteForm(true)} className="mt-2 inline-flex h-9 w-full items-center justify-center rounded-lg bg-slate-900 text-xs font-medium text-white">＋ เพิ่มรอบเสนอราคา</button>
-      )}
-      {canEdit && quoteForm && (
-        <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
-          {parentChips(costParents, costParent, setCostParent)}
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block"><span className="text-[11px] text-slate-500">ราคาที่เสนอ (บาท)</span>
-              <input inputMode="decimal" value={newQ.offered} onChange={(e) => setNewQ({ ...newQ, offered: e.target.value })} placeholder={grandTotal ? `ต้นทุน ${money(grandTotal)}` : "0"} className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-2.5 text-base tabular-nums" /></label>
-            <label className="block"><span className="text-[11px] text-slate-500">จำนวน (ชิ้น)</span>
-              <input inputMode="numeric" value={newQ.qty} onChange={(e) => setNewQ({ ...newQ, qty: e.target.value })} placeholder="ไม่ระบุ" className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-2.5 text-base tabular-nums" /></label>
-            <label className="block"><span className="text-[11px] text-slate-500">ผล</span>
-              <select value={newQ.status} onChange={(e) => setNewQ({ ...newQ, status: e.target.value })} className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
-                {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select></label>
-            <label className="block"><span className="text-[11px] text-slate-500">วันที่</span>
-              <input type="date" value={newQ.date} onChange={(e) => setNewQ({ ...newQ, date: e.target.value })} className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-2 text-sm" /></label>
-          </div>
-          <input value={newQ.note} onChange={(e) => setNewQ({ ...newQ, note: e.target.value })} placeholder="โน้ต เช่น ลูกค้าขอต่อรอง…" className="h-10 w-full rounded-lg border border-slate-200 px-2.5 text-sm" />
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setQuoteForm(false)} className="h-10 flex-1 rounded-lg border border-slate-200 text-sm text-slate-600">ยกเลิก</button>
-            <button type="button" onClick={() => void sendQuote()} disabled={saving === "quote"} className="h-10 flex-1 rounded-lg bg-blue-600 text-sm font-medium text-white disabled:opacity-50">{saving === "quote" ? "กำลังบันทึก…" : "บันทึกรอบนี้"}</button>
-          </div>
-        </div>
+    <div className="border-t border-slate-100 bg-slate-50/60 px-2 py-3">
+      {sheet && (
+        <QuoteRounds sheetId={sheet.id} quotes={quotes} compact
+          sizes={costParents.map((k) => ({ key: k, label: k || "ทั่วไป" }))} sizeLabel={(c) => (c == null ? "—" : c === "" ? "ทั่วไป" : c)}
+          currentCost={costTotalFor} canEdit={canEdit} costDirty={false} saveCost={async () => true} onReload={reloadQuotes} />
       )}
     </div>
   );
@@ -474,7 +421,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       <div className={`${sectionCls} divide-y divide-slate-100 !p-0`}>
         {([
           { key: "cost", icon: "🧮", label: "ตีราคา", value: costLines.length ? `${costLines.length} รายการ · ต้นทุน ${money(grandTotal)}` : "ยังไม่ตีราคา", done: costLines.length > 0 },
-          { key: "quote", icon: "💰", label: "เสนอราคา", value: latestQuote ? `รอบ ${latestQuote.round} · ${money(latestQuote.offered_price ?? latestQuote.price)} · ${QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status}` : "ยังไม่เสนอราคา", done: !!latestQuote },
+          { key: "quote", icon: "💰", label: "เสนอราคา", value: latestQuote ? `ครั้งที่ ${latestQuote.batch ?? latestQuote.round} · ${money(latestQuote.offered_price ?? latestQuote.price)} · ${QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status}` : "ยังไม่เสนอราคา", done: !!latestQuote },
           { key: "sku", icon: "🏷️", label: "SKU ที่เชื่อม", value: sheet.linked_skus.length ? `${sheet.linked_skus.length} ตัว${sheet.parent_sku_refs.length ? ` · ${sheet.parent_sku_refs.length} Parent` : ""}` : "ยังไม่มี SKU", done: sheet.linked_skus.length > 0 },
         ] as const).map((row) => {
           const open = openSec === row.key;
