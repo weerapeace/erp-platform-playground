@@ -9,6 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeBlocks } from "@/lib/website-blocks";
+import { toWebVersion, VERSION_LIST_LIMIT, type WebVersionRow } from "@/lib/website-versions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,16 +29,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .select("version_no, layout, actor, created_at")
     .eq("shop_id", (shop as { id: string }).id)
     .order("version_no", { ascending: false })
-    .limit(30);
+    .limit(VERSION_LIST_LIMIT);
 
-  return NextResponse.json({
-    versions: ((data ?? []) as { version_no: number; layout: unknown; actor: string | null; created_at: string }[]).map((v) => ({
-      versionNo: v.version_no,
-      createdAt: v.created_at,
-      actor: v.actor,
-      blocks: normalizeBlocks(v.layout).length,
-    })),
-  });
+  return NextResponse.json({ versions: ((data ?? []) as WebVersionRow[]).map(toWebVersion) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

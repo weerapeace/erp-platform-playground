@@ -13,6 +13,7 @@ import { summarizeChanges } from "@/components/website-layout-panel";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
+import { VersionHistoryDrawer } from "@/components/website-version-history";
 
 type PageRow = {
   id: string;
@@ -55,6 +56,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   // ✅ ตรวจก่อนเผยแพร่: ข้อมูลสินค้าของร้าน (ไม่มีราคา/รูป/หมวด)
   const dataIssues = useShopPublishIssues(shopSlug);
   const [showSeo, setShowSeo] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const undoStack = useRef<Block[][]>([]);
   const redoStack = useRef<Block[][]>([]);
@@ -349,6 +351,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             onUndo: undo,
             onRedo: redo,
             onSaveDraft: () => void save("draft"),
+            onHistory: () => setShowVersions(true),
             onPublish: () => void save("publish"),
             publishLabel: "เผยแพร่หน้านี้",
             busy: busy === "publish",
@@ -362,6 +365,21 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
           what={` "${editTitle || "หน้านี้"}"`}
           busy={busy === "publish"}
           onGoBlock={(id) => setSelection({ blockId: id })}
+        />
+        <VersionHistoryDrawer<Block>
+          open={showVersions}
+          onClose={() => setShowVersions(false)}
+          what={` "${editTitle || "หน้านี้"}"`}
+          listUrl={`/api/website/pages/versions?pageId=${encodeURIComponent(editId)}`}
+          restoreUrl="/api/website/pages/versions"
+          restoreBody={(versionNo) => ({ pageId: editId, versionNo })}
+          onRestored={(restored) => {
+            // ฝั่งเซิร์ฟเวอร์บันทึกเป็นร่างแล้ว → ถือว่าบันทึกแล้ว (ไม่บันทึกซ้ำ) · ใส่ผ่าน apply() ให้กด ↶ ย้อนได้
+            apply(restored);
+            setSavedBlocks(restored);
+            setHasDraft(true);
+            setPreviewVersion((v) => v + 1);
+          }}
         />
       </div>
     );

@@ -30,6 +30,7 @@ import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { useShopTheme } from "@/components/website-text-pickers";
+import { SaveSectionTemplateDialog, SectionTemplateGroup } from "@/components/website-section-templates";
 import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
 import { useCanvasBridge, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
 import { previewReloadSig } from "@/lib/website-live-preview";
@@ -83,6 +84,14 @@ export interface BuilderToolbar {
 
 const uidCopy = (type: string) => `${type}-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
 const deepCopy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+/** สำเนา Section ที่ได้ id ใหม่ทั้งตัวและชิ้นย่อย (ทำสำเนา · ใส่จากแม่แบบ) — ไม่ชนกับของเดิมบนหน้า */
+const freshCopy = (b: Block): Block => {
+  const copy = deepCopy(b);
+  copy.id = uidCopy(String(copy.type));
+  const c = childrenOf(copy);
+  if (c) copy[c.spec.key] = c.list.map((it) => ({ ...it, id: newChildId(c.spec.key) }));
+  return copy;
+};
 const childrenOf = (b: Block): { spec: ChildSpec; list: ChildBlock[] } | null => {
   const spec = SECTION_SCHEMAS[b.type]?.children;
   if (!spec) return null;
@@ -148,6 +157,8 @@ export function WebsiteBuilder({
   const [pane, setPane] = useState<Pane>("tree");
   const [propTab, setPropTab] = useState<PropTab>("content");
   const [showLib, setShowLib] = useState(false);
+  // ⭐ บันทึก Section ที่เลือกเป็นแม่แบบ (ป๊อปตั้งชื่อ)
+  const [tplSave, setTplSave] = useState<Block | null>(null);
   const [libQuery, setLibQuery] = useState("");
   const [showAi, setShowAi] = useState(false);
   const [aiBrief, setAiBrief] = useState("");
@@ -244,6 +255,20 @@ export function WebsiteBuilder({
     [onChange, onSelect]
   );
 
+  const insertTemplate = useCallback(
+    (tpl: Record<string, unknown>) => {
+      const cur = blocksRef.current;
+      const fresh = freshCopy({ ...(tpl as Block), enabled: true });
+      onChange([...cur, fresh]);
+      onSelect({ blockId: fresh.id });
+      setPropTab("content");
+      setExpanded((s) => new Set(s).add(fresh.id));
+      setShowLib(false);
+      setLibQuery("");
+    },
+    [onChange, onSelect]
+  );
+
   const moveSectionTo = useCallback(
     (id: string, idx: number) => {
       const cur = blocksRef.current;
@@ -263,10 +288,7 @@ export function WebsiteBuilder({
       const cur = blocksRef.current;
       const i = cur.findIndex((b) => b.id === id);
       if (i < 0) return;
-      const copy = deepCopy(cur[i]);
-      copy.id = uidCopy(copy.type);
-      const c = childrenOf(copy);
-      if (c) copy[c.spec.key] = c.list.map((it) => ({ ...it, id: newChildId(c.spec.key) }));
+      const copy = freshCopy(cur[i]);
       const next = [...cur];
       next.splice(i + 1, 0, copy);
       onChange(next);
@@ -673,6 +695,7 @@ export function WebsiteBuilder({
   };
 
   /* ── คลัง Section ── */
+  const allowedTypes = useMemo(() => new Set<string>(types.map((t) => t.type)), [types]);
   const grouped = useMemo(() => {
     const q = libQuery.trim().toLowerCase();
     const hit = types.filter((t) => !q || t.label.toLowerCase().includes(q) || t.hint.toLowerCase().includes(q) || t.type.includes(q));
@@ -972,6 +995,7 @@ export function WebsiteBuilder({
             <button onClick={() => { setShowLib(false); setLibQuery(""); }} className={iconBtn} title="ปิด (Esc)">✕</button>
           </div>
           <div className="flex-1 overflow-y-auto space-y-3 pr-0.5">
+            <SectionTemplateGroup shopId={ctx.shopId} query={libQuery} allowedTypes={allowedTypes} onUse={(b) => insertTemplate(b)} />
             {grouped.length === 0 ? (
               <p className="py-6 text-center text-xs text-slate-400">ไม่พบ Section ที่ค้นหา</p>
             ) : (
@@ -1103,6 +1127,7 @@ export function WebsiteBuilder({
           <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate" title={selSchema.meta.hint}>{selSchema.meta.label}</span>
           <button onClick={() => patchBlock(selBlock.id, { enabled: !selBlock.enabled })} title={selBlock.enabled ? "ซ่อน Section" : "แสดง Section"} className={iconBtn}>{selBlock.enabled ? "👁️" : "🚫"}</button>
           <button onClick={() => duplicateSection(selBlock.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
+          <button onClick={() => setTplSave(selBlock)} title="บันทึกเป็นแม่แบบ (ใช้ซ้ำกับหน้าอื่น/ร้านอื่น)" className={iconBtn}>💾</button>
           <button onClick={() => removeSection(selBlock.id)} title="ลบ (Delete)" className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
         </div>
         {!selBlock.enabled && <p className="mt-1 text-[11px] text-amber-600">Section นี้ซ่อนอยู่ — ไม่แสดงบนเว็บ</p>}
@@ -1241,6 +1266,7 @@ export function WebsiteBuilder({
           canRedo={toolbar?.canRedo}
         />
       )}
+      <SaveSectionTemplateDialog open={!!tplSave} onClose={() => setTplSave(null)} shopId={ctx.shopId} block={tplSave as Record<string, unknown> | null} />
     </>
   );
 }

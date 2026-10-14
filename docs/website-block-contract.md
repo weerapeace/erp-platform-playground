@@ -100,6 +100,16 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ใช้อยู่: แกลเลอรีรูป · รูปคู่ข้อความ (+ `imgSize` ความกว้างรูป %) · หลายคอลัมน์ (ค่าเริ่ม 4:3 มุมมน = แบบเดิม · ครอปรายคอลัมน์) · รูปภาพ (ค่าเริ่ม ratio "auto" ตามรูปจริง + frame "auto" = เต็มจอเหลี่ยม/อื่นมุมมน แบบเดิม · `mobileKey` รูปมือถือแยก) — Section ใหม่ที่มีรูปให้ใช้ชุดนี้ ไม่เขียนกรอบเอง
 - `autoFrame` = เพิ่มตัวเลือกทรง "อัตโนมัติ" (Section ตัดสินเองตามค่าอื่น) — เว็บร้านต้องแปลง "auto" เป็นทรงจริงก่อนส่งให้ FramedImage
 
+## ⭐ แม่แบบ Section + 🕘 ประวัติเวอร์ชัน
+- **แม่แบบ Section** — ตาราง `website_section_templates` (migration 202610150200 · RLS เปิด ไม่มี policy · เข้าผ่าน API service role เท่านั้น)
+  - API `/api/website/section-templates` GET/POST/PATCH(ชื่อ)/DELETE · ทุกการกระทำลง audit · ผืนผ้าใบในแม่แบบบันทึกรูปถูกใช้ (module `website_section_template`)
+  - ตัวกลาง `lib/website-section-templates.ts`: `cleanTemplateBlock` (normalizeBlocks + ตัด id · รับเฉพาะชนิดที่ schema รู้จัก) · `defaultTemplateName`
+  - หน้าจอ `components/website-section-templates.tsx`: ปุ่ม 💾 หัวแผงขวา → `SaveSectionTemplateDialog` · คลัง Section กลุ่ม "⭐ แม่แบบที่บันทึกไว้" (`SectionTemplateGroup` ร้านนี้ก่อน · ✏️ แก้ชื่อ · 🗑 ลบ ConfirmDialog) · Section ทดลองที่ร้านยังไม่เปิด = ใส่ไม่ได้
+  - ใส่ = `freshCopy()` ใน website-builder (id ใหม่ทั้ง Section + ชิ้นย่อย — ตัวเดียวกับปุ่มทำสำเนา) ต่อท้ายหน้า · แก้ทีหลังไม่กระทบแม่แบบ
+- **ประวัติเวอร์ชัน** — บันทึกตอนกดเผยแพร่ (หน้าแรก `store_home_versions` · หน้าอื่น `store_page_versions` โครงเดียวกัน)
+  - API `/api/website/layout/versions` (หน้าแรก) · `/api/website/pages/versions` (หน้าอื่น) — GET 30 เวอร์ชันล่าสุด · POST กู้คืน = เขียนลงร่างเท่านั้น (เว็บจริงไม่เปลี่ยน) + audit
+  - ตัวแปลงกลาง `lib/website-versions.ts` `toWebVersion` (จำนวน + ชื่อ Section ที่เปิดใช้) · หน้าจอ `components/website-version-history.tsx` `VersionHistoryDrawer` (Drawer + ConfirmDialog กลาง) — ปุ่ม 🕘 ทั้งหน้าแรกและหน้าอื่น · ใส่ผลผ่าน apply() จึงกด ↶ ย้อนได้
+
 ## 🔤 ตัวอักษรหัวข้อต่อ Section + มือถือแยก (style.text · style.mobile)
 - ERP `lib/website-blocks.ts` `BlockStyle.text` = `{ font, size, weight, color, colorHex, subColor, subColorHex }` · ค่าเริ่ม "auto" ทุกช่อง = หน้าเว็บเหมือนเดิม
   - ฟอนต์/สี/ความหนา = ชุดเดียวกับผืนผ้าใบ (`CANVAS_FONTS` · `CANVAS_COLORS` · `CANVAS_WEIGHTS`) — ค่านอกรายการถูกล้างเป็น "auto" ตอน normalize · สีเองไม่มีรหัสสี = "auto"

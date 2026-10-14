@@ -3,7 +3,7 @@
  * → คลังไฟล์กันลบรูป/ของตกแต่งที่ยังขึ้นเว็บอยู่ (DELETE /api/assets/[id] ตอบ 409 พร้อมบอกจำนวนที่ใช้)
  *
  * เรียกตอนบันทึกร่าง (field "draft") และเผยแพร่ (field "live") ของหน้าแรก/หน้าเว็บ
- * + แม่แบบผืน (module "website_canvas_template", field "data") — ลบแม่แบบ = ส่ง blocks ว่าง
+ * + แม่แบบผืน (module "website_canvas_template") / แม่แบบ Section (module "website_section_template") field "data" — ลบแม่แบบ = ส่ง blocks ว่าง
  * รูปที่ไม่ได้อยู่ในคลัง (เช่น key เก่าที่ไม่ได้นำเข้า) ข้ามไปเงียบ ๆ — ไม่ทำให้บันทึกพัง
  */
 import { canvasImageKeys } from "@/lib/website-canvas";
@@ -12,7 +12,7 @@ type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
 export async function syncCanvasAssetUsages(
   sb: Admin,
-  opts: { module: "website_home" | "website_page" | "website_canvas_template"; recordId: string; recordLabel: string; field: "draft" | "live" | "data"; blocks: unknown }
+  opts: { module: "website_home" | "website_page" | "website_canvas_template" | "website_section_template"; recordId: string; recordLabel: string; field: "draft" | "live" | "data"; blocks: unknown }
 ): Promise<void> {
   try {
     const { module, recordId, recordLabel, field } = opts;

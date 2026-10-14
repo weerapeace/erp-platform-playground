@@ -15,6 +15,7 @@ import { WebsiteBuilder, type Selection, type ChangeSummary } from "@/components
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
+import { VersionHistoryDrawer } from "@/components/website-version-history";
 
 /** บันทึกร่างเงียบ ๆ หลังหยุดแก้ 1.5 วิ → พรีวิวโหลดใหม่เอง */
 const AUTOSAVE_MS = 1500;
@@ -49,7 +50,6 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showVersions, setShowVersions] = useState(false);
-  const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; actor: string | null; blocks: number }[]>([]);
 
   const [autoSave, setAutoSave] = useState(true);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -225,35 +225,10 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
     toast.info("ละทิ้งการเปลี่ยนแปลงแล้ว");
   };
 
-  const loadVersions = async () => {
-    try {
-      const r = await apiFetch(`/api/website/layout/versions?shop=${encodeURIComponent(shopSlug)}`);
-      const j = await r.json();
-      setVersions(j.versions ?? []);
-      setShowVersions(true);
-    } catch {
-      toast.error("โหลดประวัติไม่สำเร็จ");
-    }
-  };
-
-  const restore = async (versionNo: number) => {
-    if (!confirm(`ดึงเวอร์ชัน ${versionNo} กลับมาเป็นร่าง?`)) return;
-    try {
-      const r = await apiFetch("/api/website/layout/versions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, versionNo }),
-      });
-      const j = await r.json();
-      if (j.ok) {
-        apply(j.blocks);
-        setHadDraft(true);
-        setShowVersions(false);
-        toast.success(`กู้คืนเวอร์ชัน ${versionNo} เป็นร่างแล้ว`);
-      } else toast.error(j.error ?? "กู้คืนไม่สำเร็จ");
-    } catch {
-      toast.error("เชื่อมต่อไม่ได้");
-    }
+  // 🕘 ประวัติ = ของกลาง VersionHistoryDrawer (โหลด/ยืนยัน/กู้คืนเป็นร่าง) — ที่นี่แค่ใส่ผลลงร่าง
+  const onRestored = (restored: Block[]) => {
+    apply(restored);
+    setHadDraft(true);
   };
 
   const previewSrc = siteUrl ? `${siteUrl}/?preview=1` : null;
@@ -286,7 +261,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
           onRedo: redo,
           autoSave,
           onAutoSave: setAutoSave,
-          onHistory: () => void loadVersions(),
+          onHistory: () => setShowVersions(true),
           onDiscard: () => void discard(),
           onSaveDraft: () => void saveDraft(false),
           onPublish: () => setCheckOpen(true),
@@ -305,38 +280,15 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       />
 
       {/* ประวัติเวอร์ชัน */}
-      {showVersions && (
-        <>
-          <div className="fixed inset-0 z-40 bg-slate-900/40" onClick={() => setShowVersions(false)} />
-          <div className="fixed right-0 top-0 z-50 h-full w-full max-w-md bg-white shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between px-5 h-14 border-b border-slate-200">
-              <h3 className="text-sm font-semibold text-slate-800">ประวัติหน้าแรกที่เผยแพร่</h3>
-              <button onClick={() => setShowVersions(false)} className="text-slate-400 hover:text-slate-800">✕</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {!versions.length ? (
-                <p className="py-10 text-center text-sm text-slate-400">ยังไม่มีประวัติ — จะบันทึกทุกครั้งที่กดเผยแพร่</p>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {versions.map((v) => (
-                    <li key={v.versionNo} className="flex items-center gap-3 py-3">
-                      <span className="text-xs text-slate-400 w-10">#{v.versionNo}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-slate-700">{v.blocks} Section</p>
-                        <p className="text-[11px] text-slate-400 truncate">
-                          {new Date(v.createdAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })}
-                          {v.actor && ` · ${v.actor}`}
-                        </p>
-                      </div>
-                      <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline whitespace-nowrap">กู้คืนเป็นร่าง</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+      <VersionHistoryDrawer<Block>
+        open={showVersions}
+        onClose={() => setShowVersions(false)}
+        what="หน้าแรก"
+        listUrl={`/api/website/layout/versions?shop=${encodeURIComponent(shopSlug)}`}
+        restoreUrl="/api/website/layout/versions"
+        restoreBody={(versionNo) => ({ shopId, versionNo })}
+        onRestored={onRestored}
+      />
     </div>
   );
 }
