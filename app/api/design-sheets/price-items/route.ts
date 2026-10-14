@@ -21,6 +21,8 @@ export type PriceItem = {
   sku_count: number; sku_latest_price: number | null; sku_latest_currency: string | null; sku_avg_price: number | null;
   sku_max_price: number | null; sku_min_price: number | null;   // แพงสุด/ถูกสุด จากราคาซื้อจริงของ SKU ที่ผูก
   last_used_price: number | null;                               // ราคาที่ "เคยใช้ตีราคา" ครั้งล่าสุดของวัสดุนี้
+  price_updated_at: string | null;   // แก้ master วัสดุล่าสุดเมื่อไหร่ (ใช้บอก "ราคากรอกเองปรับตั้งแต่…")
+  sku_latest_date: string | null;    // วันรับของของราคาซื้อจริงล่าสุด (ใช้บอก "ราคาซื้อจริงปรับตั้งแต่…")
 };
 
 // กลุ่มวัสดุ (สำหรับตีราคาแบบ "กลุ่ม") — ราคาเฉลี่ยจากวัสดุในกลุ่ม + ราคาตั้ง + ราคาซื้อจริงล่าสุด (GR→PO)
@@ -29,12 +31,13 @@ export type PriceGroup = {
   calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
   avg_price: number | null; set_price: number | null; item_count: number;
   latest_price: number | null; latest_currency: string | null;   // ราคา PO ของรายการที่รับล่าสุด (สกุลตามจริง)
+  latest_date: string | null;                                   // วันรับของของราคาล่าสุด
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { data, error } = await supabaseAdmin().from("design_price_items")
-    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
+    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
     .eq("is_active", true).order("name", { ascending: true }).limit(1000);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 
@@ -55,6 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       uom_default: (g?.uom_default as string) ?? null,
       sku_count: 0, sku_latest_price: null, sku_latest_currency: null, sku_avg_price: null,
       sku_max_price: null, sku_min_price: null, last_used_price: null,
+      price_updated_at: (r.updated_at as string) ?? null, sku_latest_date: null,
     };
   });
   const admin = supabaseAdmin();
@@ -139,6 +143,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     it.sku_latest_price = latest?.price ?? null;
     it.sku_latest_currency = latest?.currency ?? null;
+    it.sku_latest_date = latest?.date ?? null;
     it.sku_avg_price = n > 0 ? Math.round((sum / n) * 100) / 100 : null;
     it.sku_max_price = allPrices.length ? Math.max(...allPrices) : null;
     it.sku_min_price = allPrices.length ? Math.min(...allPrices) : null;
@@ -172,6 +177,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       set_price: g.set_price != null ? Number(g.set_price) : null,
       item_count: agg?.n ?? 0,
       latest_price: latest?.price ?? null, latest_currency: latest?.currency ?? null,
+      latest_date: latest?.date ?? null,
     };
   });
 

@@ -284,6 +284,13 @@ export function DesignSheetMobileView({ id }: { id: string }) {
                   {l.unit_price != null && <> × {money(l.unit_price)}</>}
                   {l.note && <span className="ml-1 text-slate-300">· {l.note}</span>}
                 </div>
+                {/* ข้อ B: เปลี่ยนวัสดุแล้วยังไม่รับทราบ — โชว์ของเดิม + ส่วนต่าง (มือถือดูอย่างเดียว · กดรับทราบที่หน้า PC) */}
+                {l.prev_item && (
+                  <div className="mt-0.5 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-900">
+                    🔁 เดิม: {l.prev_item.item_name ?? "—"} {money(l.prev_item.unit_price)} → {money(l.unit_price)}
+                    {l.unit_price != null && l.prev_item.unit_price != null && (() => { const d = l.unit_price - l.prev_item.unit_price; return <span className={d > 0 ? " text-rose-700" : " text-emerald-700"}> ({d > 0 ? "+" : d < 0 ? "−" : ""}{money(Math.abs(d))}/หน่วย)</span>; })()}
+                  </div>
+                )}
               </div>
               <div className="shrink-0 text-sm font-medium tabular-nums text-slate-800">{money(l.amount)}</div>
             </div>

@@ -17,8 +17,18 @@ import { friendlyDbError } from "../../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+/** ข้อ B (เปรียบเทียบ): วัสดุ/ราคาเดิมก่อนเปลี่ยน — เก็บถาวรจนผู้ใช้กด "รับทราบ" หรือ "กลับของเดิม" */
+export type PrevItem = {
+  item_id: string | null; item_sku_id: string | null; item_sku_code: string | null; item_name: string | null;
+  group_name: string | null; group_code: string | null; price_basis: string | null;
+  unit_price: number | null; uom: string | null; calc_method: string | null;
+  waste_percent: number | null; divisor: number | null; face_width_cm: number | null;
+  amount: number | null; changed_at: string;
+};
+
 export type CostLine = {
   id?: string; item_id: string | null; item_name: string | null; group_name: string | null;
+  prev_item?: PrevItem | null;   // วัสดุเดิมก่อนเปลี่ยน (null = ไม่มี/รับทราบแล้ว)
   group_code?: string | null; price_basis?: string | null;   // ตีราคาแบบกลุ่ม: code กลุ่ม + ฐานราคา (avg/set/manual)
   item_sku_id?: string | null; item_sku_code?: string | null;   // เลือกวัตถุดิบจากคลังสินค้า (SKU) โดยตรง
   parent_code?: string | null;   // ข้อ 7: บรรทัดนี้อยู่แท็บ Parent ไหน (null = ทั่วไป)
@@ -59,6 +69,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     face_width_cm: num(l.face_width_cm), waste_percent: num(l.waste_percent), divisor: num(l.divisor),
     qty: num(l.qty), uom: l.uom || null, unit_price: num(l.unit_price), amount: num(l.amount),
     note: l.note?.trim() || null, sort_order: i + 1,
+    prev_item: l.prev_item && typeof l.prev_item === "object" ? l.prev_item : null,
   }));
 
   const admin = supabaseAdmin();

@@ -42,7 +42,7 @@ import type { BomComponent } from "@/app/api/bom/components/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
-import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
+import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
@@ -196,6 +196,71 @@ function itemBasisPrice(it: PriceItem, basis: string | null): number | null {
   if (basis === "used")   return it.last_used_price ?? it.price_per_unit; // ราคาที่เคยตีครั้งล่าสุด
   return it.price_per_unit;   // manual (ค่าเริ่มต้น)
 }
+// วันที่ของราคาฐานที่เลือก (ไว้บอก "ปรับตั้งแต่…") — manual/used = วันแก้ master · latest/avg/max/min = วันรับของล่าสุด
+function itemBasisDate(it: PriceItem, basis: string | null): string | null {
+  if (basis === "latest" || basis === "avg" || basis === "max" || basis === "min") return it.sku_latest_date;
+  return it.price_updated_at;
+}
+const fmtShortDate = (d: string | null | undefined) => {
+  if (!d) return "";
+  const t = new Date(d); return Number.isNaN(t.getTime()) ? "" : t.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+};
+/**
+ * ตรวจว่าราคาของบรรทัด "ตกยุค" ไหม — เจ้าของขอ: วัสดุปรับราคาแล้ว ให้เตือนในแถวตีราคา (พร้อมวันที่) แล้วเลือกเองว่าจะเปลี่ยนไหม
+ * ลำดับเช็ก: (1) ราคาฐานที่บรรทัดใช้ (ตามปุ่ม 💰) เปลี่ยนไปจากที่เก็บไว้ (2) ฐาน "กรอกเอง" แต่มีราคาซื้อจริงล่าสุดต่างจากที่ตีไว้
+ * คืน null = ไม่ต้องเตือน
+ */
+function priceDrift(r: CostRow, item: PriceItem | null, g: PriceGroup | null): { price: number; date: string | null; reason: string } | null {
+  if (r.unit_price == null || rowIsPiece(r)) return null;
+  const diff = (a: number | null | undefined) => a != null && Math.abs(a - (r.unit_price as number)) > 0.005;
+  if (item) {
+    const basis = r.price_basis ?? "manual";
+    const cur = itemBasisPrice(item, basis);
+    if (diff(cur)) return { price: cur as number, date: itemBasisDate(item, basis), reason: basis === "manual" ? "ราคาวัสดุ (master) ปรับ" : "ราคาฐานที่เลือกปรับ" };
+    if (basis === "manual" && item.sku_latest_price != null && (item.sku_latest_currency ?? "THB") === "THB" && diff(item.sku_latest_price))
+      return { price: item.sku_latest_price, date: item.sku_latest_date, reason: "มีราคาซื้อจริงล่าสุดต่างจากที่ตีไว้" };
+    return null;
+  }
+  if (g) {
+    const cur = groupBasisPrice(g, r.price_basis ?? "avg");
+    if (diff(cur)) return { price: cur as number, date: g.latest_date, reason: "ราคากลุ่มปรับ" };
+  }
+  return null;
+}
+
+/** ตัวตนวัสดุของบรรทัด (ไว้เทียบว่า "เปลี่ยนวัสดุ" จริงไหม) */
+const rowMatKey = (r: { item_id?: string | null; item_sku_id?: string | null; group_code?: string | null }) =>
+  r.item_id ? `i:${r.item_id}` : r.item_sku_id ? `s:${r.item_sku_id}` : r.group_code ? `g:${r.group_code}` : "";
+/**
+ * ข้อ B — ตอนเปลี่ยนวัสดุให้บรรทัดที่มีวัสดุอยู่แล้ว: จำ "วัสดุเดิม + ราคาเดิม" ไว้ใน prev_item (ถาวรจนกดรับทราบ/กลับของเดิม)
+ * - ถ้าเคยจำไว้แล้ว ไม่ทับ (ของเดิมคือของเดิมตัวแรกเสมอ)   - ถ้าเลือกกลับมาเป็นวัสดุเดิม → ล้างทิ้ง (ไม่มีอะไรต่าง)
+ */
+function withPrevItem(r: CostRow, patch: Partial<CostRow>): Partial<CostRow> {
+  const before = rowMatKey(r); const after = rowMatKey({ ...r, ...patch });
+  if (!before || before === after) return patch;
+  if (r.prev_item) return rowMatKey(r.prev_item) === after ? { ...patch, prev_item: null } : patch;
+  const prev: PrevItem = {
+    item_id: r.item_id ?? null, item_sku_id: r.item_sku_id ?? null, item_sku_code: r.item_sku_code ?? null, item_name: r.item_name ?? null,
+    group_name: r.group_name ?? null, group_code: r.group_code ?? null, price_basis: r.price_basis ?? null,
+    unit_price: r.unit_price ?? null, uom: r.uom ?? null, calc_method: r.calc_method ?? null,
+    waste_percent: r.waste_percent ?? null, divisor: r.divisor ?? null, face_width_cm: r.face_width_cm ?? null,
+    amount: r.amount ?? null, changed_at: new Date().toISOString(),
+  };
+  return { ...patch, prev_item: prev };
+}
+/** กลับไปใช้วัสดุเดิม (↶) — คืนฟิลด์วัสดุ/ราคา คงขนาด/จำนวนที่กรอกไว้ */
+function restorePrevItem(p: PrevItem): Partial<CostRow> {
+  return {
+    item_id: p.item_id, item_sku_id: p.item_sku_id, item_sku_code: p.item_sku_code, item_name: p.item_name,
+    group_name: p.group_name, group_code: p.group_code, price_basis: p.price_basis,
+    unit_price: p.unit_price, uom: p.uom, calc_method: p.calc_method,
+    waste_percent: p.waste_percent, divisor: p.divisor, face_width_cm: p.face_width_cm, prev_item: null,
+  };
+}
+const fmtSigned = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtBaht(Math.abs(n))}`;
+const pct = (from: number | null | undefined, to: number | null | undefined) =>
+  from && to != null ? ` (${to >= from ? "+" : "−"}${(Math.abs(to - from) / from * 100).toFixed(1)}%)` : "";
+
 // ฟิลด์บรรทัดเมื่อเลือกแบบ "กลุ่ม" (item_id = null = จับคู่วัสดุจริงทีหลัง)
 function rowFieldsFromGroup(g: PriceGroup, basis: string): Partial<CostRow> {
   return {
@@ -464,6 +529,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [modalTab, setModalTab] = useState<"info" | "comments" | "cost" | "quotes">("info");
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
+  const [priceAlertOff, setPriceAlertOff] = useState<Set<string>>(new Set());   // บรรทัดที่กด "ไม่เปลี่ยน" (ปิดเตือนชั่วคราว)
   const [parentRefs, setParentRefs] = useState<Record<string, string>>({});   // รหัส Parent SKU → id (ทำ chip เป็นลิงก์)
   const [linkedSkus, setLinkedSkus] = useState<DesignSheetLinkedSku[]>([]);   // SKU ที่สร้างจากใบนี้ (+ พี่น้องใต้ Parent เดียวกัน)
   const [comments, setComments] = useState<DesignSheetComment[]>([]);
@@ -1377,7 +1443,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
         const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) : undefined;
         // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
-        const applyItem = (it: PriceItem) => u(costItemPatch(it, r));
+        const applyItem = (it: PriceItem) => u(withPrevItem(r, costItemPatch(it, r)));
         return (
           <div className="space-y-1">
             <div className="flex items-center gap-1">
@@ -1386,7 +1452,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 {r.item_sku_id ? (
                   <ComponentPicker sku={r.item_sku_code ?? ""} name={r.item_name ?? ""}
                     placeholder="— เลือก SKU วัตถุดิบ —"
-                    onPick={(c) => u(costSkuPatch(c, priceGroups, r))} />
+                    onPick={(c) => u(withPrevItem(r, costSkuPatch(c, priceGroups, r)))} />
                 ) : (
                 <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
                   initialQuery={!r.item_id ? bomRefSearchSeed(r.note) : undefined}
@@ -1439,6 +1505,48 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
               <div className="text-[10px] text-amber-600">⚠ ราคาเป็น {item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”</div>
             )}
+            {/* เตือนราคาปรับ (วัสดุ master / ราคาซื้อจริง / กลุ่ม) + ให้เลือกว่าจะใช้ราคาใหม่ไหม — ไม่เปลี่ยนให้เองเงียบ ๆ */}
+            {(() => {
+              if (priceAlertOff.has(r.key)) return null;
+              const d = priceDrift(r, item ?? null, inGroupMode ? (g ?? null) : null);
+              if (!d) return null;
+              const when = fmtShortDate(d.date);
+              return (
+                <div className="mt-0.5 flex flex-wrap items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800" title={d.reason}>
+                  <span>⚠ ราคาปรับ <b className="tabular-nums">{fmtBaht(r.unit_price)}</b> → <b className="tabular-nums">{fmtBaht(d.price)}</b>
+                    <span className={d.price > (r.unit_price ?? 0) ? "text-rose-700" : "text-emerald-700"}> {fmtSigned(d.price - (r.unit_price ?? 0))}/หน่วย{pct(r.unit_price, d.price)}{r.qty != null ? ` · รวม ${fmtSigned((d.price - (r.unit_price ?? 0)) * r.qty)}` : ""}</span>
+                    {when ? ` · ตั้งแต่ ${when}` : ""}</span>
+                  {fullEdit ? (
+                    <>
+                      <button type="button" onClick={() => u({ unit_price: d.price })} className="h-5 rounded bg-amber-600 px-1.5 font-medium text-white hover:bg-amber-700">ใช้ราคาใหม่</button>
+                      <button type="button" onClick={() => setPriceAlertOff((s) => new Set(s).add(r.key))} className="h-5 rounded px-1.5 text-amber-700 hover:bg-amber-100">ไม่เปลี่ยน</button>
+                    </>
+                  ) : <span className="text-amber-600/80">(กด ✏️ แก้ไข เพื่อเปลี่ยน)</span>}
+                </div>
+              );
+            })()}
+            {/* ข้อ B: เปลี่ยนวัสดุแล้ว → โชว์ของเดิม + ส่วนต่าง จนกว่าจะกด ↶ กลับของเดิม / ✓ รับทราบ (จำถาวร บันทึกลง DB) */}
+            {r.prev_item && (() => {
+              const p = r.prev_item;
+              const dUnit = r.unit_price != null && p.unit_price != null ? r.unit_price - p.unit_price : null;
+              const dLine = r.amount != null && p.amount != null ? r.amount - p.amount : null;
+              const when = fmtShortDate(p.changed_at);
+              return (
+                <div className="mt-0.5 flex flex-wrap items-center gap-1 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-900"
+                  title={`เปลี่ยนวัสดุ${when ? `เมื่อ ${when}` : ""} — เดิมฐานราคา ${p.price_basis ?? "กรอกเอง"} · ${p.uom ?? ""}`}>
+                  <span>🔁 เดิม: <b>{p.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(p.unit_price)}</span> → <b>{r.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(r.unit_price)}</span>
+                    {dUnit != null && <span className={dUnit > 0 ? "text-rose-700" : dUnit < 0 ? "text-emerald-700" : ""}> ({fmtSigned(dUnit)}/หน่วย{pct(p.unit_price, r.unit_price)}{dLine != null ? ` · รวม ${fmtSigned(dLine)}` : ""})</span>}
+                    {when ? <span className="text-sky-700/70"> · {when}</span> : null}
+                  </span>
+                  {fullEdit ? (
+                    <>
+                      <button type="button" onClick={() => u(restorePrevItem(p))} className="h-5 rounded border border-sky-300 bg-white px-1.5 text-sky-800 hover:bg-sky-100">↶ กลับของเดิม</button>
+                      <button type="button" onClick={() => u({ prev_item: null })} className="h-5 rounded bg-sky-600 px-1.5 font-medium text-white hover:bg-sky-700">✓ รับทราบ</button>
+                    </>
+                  ) : <span className="text-sky-700/70">(กด ✏️ แก้ไข เพื่อรับทราบ)</span>}
+                </div>
+              );
+            })()}
           </div>
         );
       } },
@@ -1492,7 +1600,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     { key: "note", header: "หมายเหตุ", minWidth: 120, getValue: (r) => r.note,
       render: (r, u) => <input value={r.note ?? ""} disabled={!cellEdit} title={roTip} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline]);
+  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline, priceAlertOff]);
 
   // ส่วนรูปภาพ (คอลัมน์ซ้ายของ modal — เห็นตลอดทุกแท็บ): บันทึกแล้ว=ImageManager แกลเลอรี · ยังไม่บันทึก=ที่พักรูป (อัปตอนกดบันทึก)
   const imageSection = !form ? null : form.id ? (
@@ -2043,6 +2151,51 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 </div>
               )}
 
+              {/* แถบสรุป A+B: บรรทัดที่ราคาวัสดุปรับ (ยังไม่กดใช้/ไม่เปลี่ยน) + บรรทัดที่เปลี่ยนวัสดุ (ยังไม่รับทราบ) — ให้กดทีเดียวทั้งหมดได้ */}
+              {(() => {
+                const drifted = curLines.flatMap((r) => {
+                  if (priceAlertOff.has(r.key)) return [];
+                  const g = !r.item_id && r.group_code ? priceGroups.find((x) => x.code === r.group_code) ?? null : null;
+                  const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) ?? null : null;
+                  const d = priceDrift(r, item, g);
+                  return d ? [{ r, d }] : [];
+                });
+                const changed = curLines.filter((r) => !!r.prev_item);
+                if (!drifted.length && !changed.length) return null;
+                const driftTotal = drifted.reduce((s, { r, d }) => s + (d.price - (r.unit_price ?? 0)) * (r.qty ?? 0), 0);
+                const changedTotal = changed.reduce((s, r) => s + ((r.amount ?? 0) - (r.prev_item?.amount ?? 0)), 0);
+                return (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    {drifted.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-800">
+                        <span>⚠ ราคาวัสดุปรับ <b>{drifted.length}</b> บรรทัด — ถ้าใช้ราคาใหม่ ต้นทุนรวม <b className={driftTotal > 0 ? "text-rose-700" : "text-emerald-700"}>{fmtSigned(driftTotal)}</b> บาท</span>
+                        {fullEdit && (
+                          <>
+                            <button type="button" className="h-6 rounded bg-amber-600 px-2 font-medium text-white hover:bg-amber-700"
+                              onClick={() => {
+                                const m = new Map(drifted.map(({ r, d }) => [r.key, d.price]));
+                                setCostLines((prev) => prev.map((r) => (m.has(r.key) ? recomputeRow({ ...r, unit_price: m.get(r.key) ?? r.unit_price }) : r)));
+                                setCostDirty(true); toast.success(`ใช้ราคาใหม่ ${m.size} บรรทัดแล้ว`);
+                              }}>ใช้ราคาใหม่ทั้งหมด</button>
+                            <button type="button" className="h-6 rounded px-2 text-amber-700 hover:bg-amber-100"
+                              onClick={() => setPriceAlertOff((s) => { const n = new Set(s); drifted.forEach(({ r }) => n.add(r.key)); return n; })}>ไม่เปลี่ยนทั้งหมด</button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {changed.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-sky-900">
+                        <span>🔁 เปลี่ยนวัสดุ <b>{changed.length}</b> บรรทัด (ยังไม่รับทราบ) — ต้นทุนต่างจากเดิม <b className={changedTotal > 0 ? "text-rose-700" : "text-emerald-700"}>{fmtSigned(changedTotal)}</b> บาท</span>
+                        {fullEdit && (
+                          <button type="button" className="h-6 rounded bg-sky-600 px-2 font-medium text-white hover:bg-sky-700"
+                            onClick={() => { setCostLines((prev) => prev.map((r) => (r.prev_item && pkey(r.parent_code) === costParent ? { ...r, prev_item: null } : r))); setCostDirty(true); }}>✓ รับทราบทั้งหมด</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <LineItemsGrid<CostRow>
                 rows={curLines}
                 columns={costCols}
@@ -2068,7 +2221,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   const keys = new Set(sel.map((r) => r.key));
                   // ตั้งวัสดุให้ทุกแถวที่เลือก — คงขนาด/จำนวนเดิม คำนวณ ชนิด/ปริมาณ/ราคา ใหม่ (คงการเลือกไว้ให้เห็นผล)
                   const applyBulkItem = (it: PriceItem) => {
-                    setCostLines((prev) => prev.map((r) => (keys.has(r.key) ? recomputeRow({ ...r, ...costItemPatch(it, r) }) : r)));
+                    setCostLines((prev) => prev.map((r) => (keys.has(r.key) ? recomputeRow({ ...r, ...withPrevItem(r, costItemPatch(it, r)) }) : r)));
                     setCostDirty(true);
                     toast.success(`ตั้งวัสดุ "${it.name}" ให้ ${keys.size} บรรทัดแล้ว`);
                   };
