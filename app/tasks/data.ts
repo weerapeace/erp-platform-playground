@@ -395,6 +395,8 @@ export type ContentItem = {
   parent_sku_image_url?: string | null;   // รูปปก Parent SKU   // ลิงก์ร้านที่เก็บไว้ที่ Parent SKU (shopee/lazada/tiktok) — ใช้เติมลิงก์สินค้าให้
   products?: ContentProduct[];   // สินค้าทุกตัวในโพสต์ (ตัวหลัก + เพิ่มเติม) — ว่าง/ไม่มี = ใช้ sku_id/parent_sku_id ตามเดิม
   cover_image_url?: string | null;   // รูปหน้าปก (resolve จากสื่อแนบ/SKU/งาน) — ใช้โชว์บนการ์ดกระดานแคมเปญ
+  caption_platforms?: string[];      // แพลตฟอร์มที่เขียนแคปชั่นแล้ว (list API attachReadiness)
+  image_keys?: string[]; image_count?: number;   // รูปแนบ (r2_key สูงสุด 6) + จำนวนทั้งหมด
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
   product_links: { platform: string; url: string }[]; posted_links?: Record<string, string> | null; post_status?: Record<string, string> | null; platform_images?: Record<string, string[]> | null; platform_formats?: Record<string, string> | null; note: string | null; is_template?: boolean; template_icon?: string | null; updated_at: string;

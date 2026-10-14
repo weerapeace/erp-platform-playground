@@ -28,7 +28,10 @@ import { CreateTaskModal } from "../create-task-modal";
 import { applyTaskTransition } from "../task-actions";
 import { statusMeta, statusLabel, isTerminal, useCreativeStatuses } from "../use-statuses";
 import { BrandStyleModal } from "./brand-style-modal";
-import { platformLabel, useCreativeOptions } from "../use-options";
+import { platformLabel, platformMeta, useCreativeOptions } from "../use-options";
+import { PlatformIcon } from "@/components/platform-icon";
+import { useCanHover } from "@/lib/use-can-hover";
+import { createPortal } from "react-dom";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useAuth } from "@/components/auth";
 import dynamic from "next/dynamic";
@@ -54,7 +57,107 @@ type CalEntry = {
   meta: string | null;         // บรรทัดสาม (รหัสสินค้า · แบรนด์ / ผู้รับผิดชอบ)
   platforms: string[]; overdue: boolean;
   hideInBacklog: boolean;      // ยกเลิก/จบแล้ว → ไม่โชว์ในกล่องค้าง (เว้นแต่กรองสถานะนั้นอยู่)
+  // ความพร้อมต่อแพลตฟอร์ม (เฉพาะคอนเทนต์) — ไว้ทำไอคอนสี + quick view
+  captionPlatforms: string[];                 // แพลตฟอร์มที่มีแคปชั่นแล้ว
+  platformImages: Record<string, string[]>;   // รูปที่เลือกต่อแพลตฟอร์ม (r2_key) — ว่าง = ใช้รูปทั้งหมด
+  imageKeys: string[]; imageCount: number;    // รูปแนบทั้งหมด (ตัวอย่าง ≤6) + จำนวน
+  postStatus: Record<string, string>;         // posted / scheduled / skip ต่อแพลตฟอร์ม
 };
+
+/** ความพร้อมของแพลตฟอร์มหนึ่ง ๆ บนการ์ด: โพสต์แล้ว / ข้าม / พร้อม / ขาดอะไร */
+type PlatReady = { code: string; state: "posted" | "scheduled" | "skip" | "ready" | "missing"; missing: ("caption" | "image")[]; images: string[] };
+function platReadiness(e: CalEntry): PlatReady[] {
+  return e.platforms.map((code) => {
+    const st = e.postStatus[code];
+    const imgs = e.platformImages[code]?.length ? e.platformImages[code] : e.imageKeys;
+    const missing: PlatReady["missing"] = [];
+    if (!e.captionPlatforms.includes(code)) missing.push("caption");
+    if (!imgs.length) missing.push("image");
+    const state: PlatReady["state"] = st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "skip" ? "skip" : missing.length ? "missing" : "ready";
+    return { code, state, missing, images: imgs.slice(0, 4) };
+  });
+}
+const READY_RING: Record<PlatReady["state"], string> = {
+  posted: "ring-emerald-500 bg-emerald-50", scheduled: "ring-blue-500 bg-blue-50", ready: "ring-emerald-400 bg-white", missing: "ring-amber-400 bg-amber-50", skip: "ring-slate-300 bg-slate-100 opacity-50",
+};
+const READY_LABEL: Record<PlatReady["state"], string> = { posted: "โพสต์แล้ว", scheduled: "ตั้งเวลาแล้ว", ready: "พร้อมโพสต์", missing: "ยังขาด", skip: "ข้าม" };
+const MISSING_LABEL = { caption: "แคปชั่น", image: "รูป" } as const;
+
+/** แถวไอคอนแพลตฟอร์มเล็ก ๆ บนการ์ด — วงสีบอกความพร้อม (เขียว=พร้อม/โพสต์แล้ว · เหลือง=ยังขาดแคปชั่นหรือรูป · เทา=ข้าม) */
+function PlatIcons({ list, size = 12 }: { list: PlatReady[]; size?: number }) {
+  if (!list.length) return null;
+  return (
+    <span className="inline-flex items-center gap-0.5 shrink-0">
+      {list.slice(0, 6).map((p) => (
+        <span key={p.code} title={`${platformLabel(p.code)}: ${READY_LABEL[p.state]}${p.missing.length ? ` ${p.missing.map((m) => MISSING_LABEL[m]).join("+")}` : ""}`}
+          className={`inline-flex items-center justify-center rounded-full ring-1 ${READY_RING[p.state]}`} style={{ width: size + 4, height: size + 4 }}>
+          <PlatformIcon code={p.code} iconKey={platformMeta(p.code)?.icon_key ?? null} size={size} />
+        </span>
+      ))}
+      {list.length > 6 && <span className="text-[9px] text-slate-400">+{list.length - 6}</span>}
+    </span>
+  );
+}
+
+/**
+ * Quick view ของคอนเทนต์ — ชี้เมาส์ค้าง (จอที่มีเมาส์) หรือแตะ ⓘ (จอสัมผัส): รูปที่จะลง + ต่อแพลตฟอร์มว่าขาดอะไร (แคปชั่น/รูป)
+ * วางแบบ fixed ผ่าน portal (ไม่โดนช่องวันตัด) — แบบเดียวกับ Popover ของกลาง แต่เปิดด้วย hover
+ */
+function QuickView({ e, open, anchor, onClose, onOpen }: { e: CalEntry; open: boolean; anchor: HTMLElement | null; onClose: () => void; onOpen: () => void }) {
+  if (!open || !anchor || typeof document === "undefined") return null;
+  const r = anchor.getBoundingClientRect();
+  const W = 300; const left = Math.min(Math.max(8, r.left), window.innerWidth - W - 8);
+  const above = window.innerHeight - r.bottom < 300 && r.top > 300;
+  const style: React.CSSProperties = above ? { position: "fixed", left, bottom: window.innerHeight - r.top + 4, width: W, zIndex: 80 } : { position: "fixed", left, top: r.bottom + 4, width: W, zIndex: 80 };
+  const plats = platReadiness(e);
+  const missingAny = plats.filter((p) => p.state === "missing");
+  const shown = e.imageKeys.slice(0, 4);
+  return createPortal(
+    <div style={style} className="rounded-xl border border-slate-200 bg-white shadow-xl p-2.5 text-xs" onMouseEnter={onOpen} onMouseLeave={onClose}>
+      <div className="flex items-start gap-2">
+        <span className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${e.statusDot}`} />
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-slate-800 leading-snug line-clamp-2">{e.title}</div>
+          <div className="text-[10px] text-slate-400">{e.time ? `${e.time} · ` : ""}{e.brand_label ?? ""}{e.meta ? ` · ${e.meta}` : ""} · {e.statusLabel}</div>
+        </div>
+      </div>
+      {/* รูปที่จะลง */}
+      {shown.length > 0 ? (
+        <div className={`mt-2 grid gap-1 ${shown.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+          {shown.map((k, i) => (
+            <div key={k} className={`relative overflow-hidden rounded-md bg-slate-100 ${shown.length === 1 ? "aspect-[4/3]" : "aspect-square"}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={r2ImageUrl(k, 300) ?? ""} alt="" className="w-full h-full object-cover" />
+              {i === 3 && e.imageCount > 4 && <span className="absolute inset-0 bg-black/50 text-white flex items-center justify-center text-base font-semibold">+{e.imageCount - 4}</span>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700">🖼 ยังไม่มีรูปที่จะลง</div>
+      )}
+      {/* ต่อแพลตฟอร์ม */}
+      {plats.length > 0 && (
+        <div className="mt-2 space-y-0.5">
+          {plats.map((p) => (
+            <div key={p.code} className="flex items-center gap-1.5">
+              <PlatformIcon code={p.code} iconKey={platformMeta(p.code)?.icon_key ?? null} size={13} />
+              <span className="text-slate-700 w-20 truncate">{platformLabel(p.code)}</span>
+              <span className={`text-[10px] px-1.5 py-px rounded-full ${p.state === "posted" ? "bg-emerald-100 text-emerald-700" : p.state === "scheduled" ? "bg-blue-100 text-blue-700" : p.state === "ready" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : p.state === "skip" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"}`}>
+                {p.state === "missing" ? `ขาด ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
+              </span>
+              {p.images.length > 0 && e.platformImages[p.code]?.length ? <span className="ml-auto text-[10px] text-slate-400">🖼 {e.platformImages[p.code].length}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+        <span>{missingAny.length ? `⚠ ยังขาด ${missingAny.length}/${plats.length} แพลตฟอร์ม` : plats.length ? "✓ ครบทุกแพลตฟอร์ม" : "ยังไม่เลือกแพลตฟอร์ม"}</span>
+        <span>คลิกการ์ดเพื่อเปิดแก้</span>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 export function ContentCalendarView() {
   const t = useT();
@@ -78,6 +181,11 @@ export function ContentCalendarView() {
   // ลากวาง: จำ id + เวลาเดิมของการ์ดที่กำลังลาก + ช่องที่เมาส์ลอยอยู่
   const dragRef = useRef<{ id: string; time: string | null } | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
+  // quick view ของการ์ดคอนเทนต์ (ชี้ค้าง/แตะ ⓘ) — เก็บ id + ปุ่มที่ยึดตำแหน่ง
+  const [quickView, setQuickView] = useState<{ id: string; anchor: HTMLElement } | null>(null);
+  const qvTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canHover = useCanHover();
+  useEffect(() => { if (!canHover) return; const off = () => setQuickView(null); window.addEventListener("scroll", off, true); return () => window.removeEventListener("scroll", off, true); }, [canHover]);
   // (เอาออก 2026-10-14) เดิมหมุนลูกกลิ้งบนปฏิทิน = เปลี่ยนเดือน — เจ้าของขอให้เลื่อนหน้าธรรมดา ใช้ปุ่ม ‹ › เปลี่ยนเดือนแทน
 
   const pushToast = useCallback((type: Toast["type"], message: string) => {
@@ -128,6 +236,7 @@ export function ContentCalendarView() {
           thumb: c.task_cover_url ?? null, sub: c.task_label ? `📋 ${c.task_label}` : null,
           meta: [c.parent_sku_code || c.sku_code || null, c.brand_label].filter(Boolean).join(" · ") || null,
           platforms: c.platforms ?? [], overdue: false, hideInBacklog: c.status === "cancelled",
+          captionPlatforms: c.caption_platforms ?? [], platformImages: c.platform_images ?? {}, imageKeys: c.image_keys ?? [], imageCount: c.image_count ?? 0, postStatus: c.post_status ?? {},
         };
       });
     }
@@ -143,6 +252,7 @@ export function ContentCalendarView() {
         thumb: key ? r2ImageUrl(key, 96) : null, sub: tk.task_no ? `#${tk.task_no}${tk.sku_code ? ` · ${tk.parent_sku_code || tk.sku_code}` : ""}` : null,
         meta: [who ? `👤 ${who}` : null, tk.brand_label].filter(Boolean).join(" · ") || null,
         platforms: tk.platforms ?? [], overdue: isOverdue(tk), hideInBacklog: isTerminal(tk.status),
+        captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {},
       };
     });
   }, [mode, items, tasks]);
@@ -318,13 +428,29 @@ export function ContentCalendarView() {
   // การ์ดในช่องวัน (ใช้ร่วม 2 โหมด) — งาน: มีรูปปก + ขอบแดงถ้าเลยกำหนด
   const Chip = ({ e }: { e: CalEntry }) => {
     const tip = [e.title, e.sub, e.meta, e.platforms.slice(0, 3).map((p) => platformLabel(p)).join(" · "), e.statusLabel].filter(Boolean).join(" · ");
+    const plats = e.kind === "content" ? platReadiness(e) : [];
+    const isQv = quickView?.id === e.id;
+    const openQv = (el: HTMLElement) => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView({ id: e.id, anchor: el }), 350); };
+    const closeQv = () => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView((q) => (q?.id === e.id ? null : q)), 200); };
     return (
-      <button draggable onDragStart={() => startDrag(e)} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
-        onClick={(ev) => { ev.stopPropagation(); setDetail({ kind: e.kind, id: e.id }); }} title={tip}
-        className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1.5 cursor-pointer ${e.overdue ? "bg-red-50 border-red-300 text-red-700" : e.statusCls}`}>
-        <Thumb e={e} size="xs" />
-        <span className="truncate">{e.time ? `${e.time} ` : ""}{e.title}</span>
-      </button>
+      <div className="relative group"
+        onMouseEnter={(ev) => { if (canHover && e.kind === "content") openQv(ev.currentTarget); }}
+        onMouseLeave={() => { if (canHover) closeQv(); }}>
+        <button draggable onDragStart={() => { setQuickView(null); startDrag(e); }} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
+          onClick={(ev) => { ev.stopPropagation(); setQuickView(null); setDetail({ kind: e.kind, id: e.id }); }} title={canHover ? undefined : tip}
+          className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1.5 cursor-pointer ${e.overdue ? "bg-red-50 border-red-300 text-red-700" : e.statusCls}`}>
+          <Thumb e={e} size="xs" />
+          <span className="truncate flex-1 min-w-0">{e.time ? `${e.time} ` : ""}{e.title}</span>
+          {/* ไอคอนแพลตฟอร์ม วงสี = พร้อม/ขาด/โพสต์แล้ว */}
+          <PlatIcons list={plats} />
+        </button>
+        {/* จอสัมผัส: ปุ่ม ⓘ เปิด quick view (จอเมาส์ใช้ชี้ค้างแทน) */}
+        {!canHover && e.kind === "content" && (
+          <button type="button" onClick={(ev) => { ev.stopPropagation(); setQuickView(isQv ? null : { id: e.id, anchor: ev.currentTarget }); }}
+            className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white border border-slate-300 text-[9px] text-slate-500 shadow-sm">ⓘ</button>
+        )}
+        <QuickView e={e} open={isQv} anchor={quickView?.anchor ?? null} onClose={closeQv} onOpen={() => { if (qvTimer.current) clearTimeout(qvTimer.current); }} />
+      </div>
     );
   };
 

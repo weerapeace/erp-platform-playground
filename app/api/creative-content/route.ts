@@ -13,7 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { nextContentNo } from "@/lib/creative-tasks-server";
-import { SELECT, flattenContent, attachAssignees, validateContentFields, attachProducts, normalizeProducts, replaceContentProducts } from "./shared";
+import { SELECT, flattenContent, attachAssignees, validateContentFields, attachProducts, attachReadiness, normalizeProducts, replaceContentProducts } from "./shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -49,6 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const items = ((data ?? []) as Record<string, unknown>[]).map(flattenContent);
   await attachAssignees(admin, items);
   await attachProducts(admin, items);   // สินค้าทุกตัวในโพสต์ (การ์ด/ปฏิทินโชว์ +N ได้)
+  await attachReadiness(admin, items);  // แคปชั่น/รูป พร้อมแล้วยัง (การ์ดปฏิทิน + quick view)
   return NextResponse.json({ data: items, total: count ?? items.length, error: null });
 }
 
