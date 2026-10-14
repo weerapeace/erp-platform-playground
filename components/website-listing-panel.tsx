@@ -45,16 +45,39 @@ export function ListingPanel({
 
   return (
     <div className="space-y-3">
-      {/* 🎨 ตัวกรองสีตามโทน (โทนสีเป็นของกลางทุกร้าน — จัดในป๊อป "จัดโทนสี") */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-          <input type="checkbox" checked={value.colorFilter} onChange={(e) => onChange({ ...value, colorFilter: e.target.checked })} className="w-4 h-4 accent-blue-600" />
-          🎨 โชว์แถบ &quot;กรองตามสี&quot; เหนือรายการสินค้า
-        </label>
-        <span className="text-[11px] text-slate-400">ลูกค้ากดโทน เช่น แดง → เห็นสินค้าที่มีสีแดงทุกเฉด + รูปการ์ดเปลี่ยนเป็นสีนั้น</span>
-        <span className="ml-auto">
-          <ColorToneButton />
-        </span>
+      {/* 🧭 ตัวกรอง (หมวด + สีตามโทน — โทนสีเป็นของกลางทุกร้าน จัดในป๊อป "จัดโทนสี") */}
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-slate-700">ตำแหน่งตัวกรอง</span>
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            {([
+              ["side", "◧ แถบซ้าย"],
+              ["top", "▤ แถวบน"],
+            ] as const).map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => onChange({ ...value, filterLayout: v })}
+                className={`px-3 py-1 text-xs ${value.filterLayout === v ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            {value.filterLayout === "side" ? "จอคอม: หมวด + สี อยู่แถบซ้าย (ติดจอเวลาเลื่อน) · มือถือ: ปุ่ม “ตัวกรอง” เปิดจากด้านล่าง" : "หมวด + สี เป็นแถวปุ่มเหนือรายการสินค้า"}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={value.colorFilter} onChange={(e) => onChange({ ...value, colorFilter: e.target.checked })} className="w-4 h-4 accent-blue-600" />
+            🎨 มีตัวกรอง &quot;สี&quot;
+          </label>
+          <span className="text-[11px] text-slate-400">ลูกค้ากดโทน เช่น แดง → เห็นสินค้าที่มีสีแดงทุกเฉด + รูปการ์ดเปลี่ยนเป็นสีนั้น</span>
+          <span className="ml-auto">
+            <ColorToneButton />
+          </span>
+        </div>
       </div>
 
       <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">

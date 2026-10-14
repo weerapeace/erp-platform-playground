@@ -40,10 +40,12 @@ export interface ListingConfig {
   inserts: ListingInsert[];
   /** 🎨 แถบ "กรองตามสี" (โทนสีกลาง erp_color_tones) ในหน้าสินค้าทั้งหมด/หน้าหมวด — ค่าเริ่มต้นเปิด */
   colorFilter: boolean;
+  /** ตำแหน่งตัวกรอง (หมวด + สี): side = แถบซ้าย (มือถือเป็นปุ่ม "ตัวกรอง") · top = แถวเหนือรายการแบบเดิม */
+  filterLayout: "side" | "top";
 }
 
 export const MAX_LISTING_INSERTS = 20;
-export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true };
+export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side" };
 
 export const LISTING_SIZES: { value: ListingInsertSize; label: string; hint: string }[] = [
   { value: "1x1", label: "1 ช่อง (เท่าการ์ดสินค้า)", hint: "มือถือ: 1 ช่อง" },
@@ -120,5 +122,5 @@ export function normalizeListing(raw: unknown): ListingConfig {
     });
     if (inserts.length >= MAX_LISTING_INSERTS) break;
   }
-  return { inserts, colorFilter: r.colorFilter !== false };
+  return { inserts, colorFilter: r.colorFilter !== false, filterLayout: r.filterLayout === "top" ? "top" : "side" };
 }
