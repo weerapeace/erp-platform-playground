@@ -9,7 +9,7 @@
  *
  * เก็บที่ไหน: รายการหมวด = shops.field_map.categories (PUT /api/website/field-map — บันทึกเองหลังหยุดแก้)
  *             สินค้า↔หมวด = store_listings.web_categories (POST /api/website/listings action "setCategories" — บันทึกทันที + audit)
- * รหัสหมวด (ใช้ในลิงก์ /shop?cat=) ตั้งตอนสร้างแล้วเปลี่ยนไม่ได้ — กันลิงก์/เมนูเดิมเสีย
+ * รหัสหมวด (ใช้ในลิงก์หน้าหมวด /c/<รหัส>) ตั้งตอนสร้างแล้วเปลี่ยนไม่ได้ — กันลิงก์/เมนูเดิมเสีย
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -210,7 +210,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
               )}
               <span className="flex-1 min-w-0">
                 <span className="block text-sm font-medium text-slate-800 truncate">{c.label}</span>
-                <span className="block text-[10px] text-slate-400 truncate">/shop?cat={c.key}</span>
+                <span className="block text-[10px] text-slate-400 truncate">/c/{c.key}</span>
               </span>
               <span className="text-[11px] text-slate-500 tabular-nums">{countOf(c.key)}</span>
             </div>
@@ -238,13 +238,35 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                 <label className={labelCls}>คำอธิบาย (ใต้ชื่อหมวด / บนหน้าหมวด)</label>
                 <textarea value={sel.blurb} onChange={(e) => patchCat(sel.key, { blurb: e.target.value.slice(0, 240) })} rows={2} className={inputCls} />
               </div>
+              {/* 🔎 หน้าหมวดใน Google — หน้า /c/<รหัส> ของเว็บร้านใช้ค่านี้เป็น title/description */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+                <p className="text-xs font-semibold text-slate-700">🔎 หน้าหมวดใน Google <span className="font-normal text-slate-400">· ว่าง = ใช้ชื่อหมวด/คำอธิบายด้านบน</span></p>
+                <div>
+                  <label className={labelCls}>
+                    ชื่อใน Google <span className={(sel.seoTitle ?? "").length > 60 ? "text-amber-600" : "text-slate-400"}>({(sel.seoTitle ?? "").length}/70 · แนะนำไม่เกิน 60)</span>
+                  </label>
+                  <input value={sel.seoTitle ?? ""} onChange={(e) => patchCat(sel.key, { seoTitle: e.target.value.slice(0, 70) })} className={inputCls} placeholder={`${sel.label} | ชื่อร้าน`} />
+                </div>
+                <div>
+                  <label className={labelCls}>
+                    คำอธิบายใน Google <span className={(sel.seoDescription ?? "").length > 155 ? "text-amber-600" : "text-slate-400"}>({(sel.seoDescription ?? "").length}/170 · แนะนำ 70–155)</span>
+                  </label>
+                  <textarea value={sel.seoDescription ?? ""} onChange={(e) => patchCat(sel.key, { seoDescription: e.target.value.slice(0, 170) })} rows={2} className={inputCls} placeholder={sel.blurb || "เช่น กระเป๋าถือดีไซน์น่ารัก งานคุณภาพ ส่งไวทั่วไทย"} />
+                </div>
+                {/* ตัวอย่างหน้าตาผลค้นหา */}
+                <div className="rounded-md bg-white border border-slate-200 px-3 py-2">
+                  <p className="text-[11px] text-emerald-700 truncate">…/c/{sel.key}</p>
+                  <p className="text-sm text-blue-700 truncate">{(sel.seoTitle ?? "").trim() || `${sel.label} | ชื่อร้าน`}</p>
+                  <p className="text-xs text-slate-600 line-clamp-2">{(sel.seoDescription ?? "").trim() || sel.blurb || "(ยังไม่มีคำอธิบาย — Google จะดึงข้อความจากหน้ามาเอง)"}</p>
+                </div>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <ImageSlot label="รูปหมวด (การ์ด/แถบหมวดหน้าแรก)" k={sel.imageKey} aspect="1 / 1" onPick={() => setChooser("imageKey")} onClear={() => patchCat(sel.key, { imageKey: null })} />
                 <ImageSlot label="แบนเนอร์หัวหน้าหมวด" k={sel.bannerKey} aspect="21 / 9" onPick={() => setChooser("bannerKey")} onClear={() => patchCat(sel.key, { bannerKey: null })} />
               </div>
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[11px] text-slate-400">
-                  รหัสในลิงก์: <code>{sel.key}</code> (เปลี่ยนไม่ได้ — กันลิงก์เดิมเสีย)
+                  ลิงก์หน้าหมวด: <code>/c/{sel.key}</code> (รหัสเปลี่ยนไม่ได้ — กันลิงก์เดิมเสีย)
                 </span>
                 <button onClick={() => setConfirmDel(sel)} className="text-xs text-red-600 hover:underline">
                   🗑 ลบหมวดนี้
@@ -347,7 +369,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         onConfirm={() => void deleteCat()}
         variant="danger"
         title={`ลบหมวด "${confirmDel?.label ?? ""}"?`}
-        message={`สินค้า ${confirmDel ? countOf(confirmDel.key) : 0} รายการจะไม่อยู่ในหมวดนี้แล้ว (สินค้ายังอยู่บนเว็บ) · ลิงก์ /shop?cat=${confirmDel?.key ?? ""} จะใช้ไม่ได้`}
+        message={`สินค้า ${confirmDel ? countOf(confirmDel.key) : 0} รายการจะไม่อยู่ในหมวดนี้แล้ว (สินค้ายังอยู่บนเว็บ) · ลิงก์หน้าหมวด /c/${confirmDel?.key ?? ""} จะใช้ไม่ได้`}
         confirmText="ลบหมวด"
       />
     </div>
@@ -422,7 +444,7 @@ function NewCategoryModal({ open, onClose, taken, onCreate }: { open: boolean; o
           <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} className={inputCls} placeholder="เช่น BAGS / กระเป๋าสะพาย" />
         </div>
         <div>
-          <label className={labelCls}>รหัสในลิงก์ (/shop?cat=…)</label>
+          <label className={labelCls}>รหัสในลิงก์ (/c/…)</label>
           <input
             value={keyTouched ? key : autoKey}
             onChange={(e) => {

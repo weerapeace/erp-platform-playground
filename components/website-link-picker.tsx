@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
-import { BASE_PAGES, categoryHref, productHref, sectionHref } from "@/lib/website-links";
+import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf } from "@/lib/website-links";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 
 type Kind = "none" | "page" | "category" | "product" | "section" | "url";
@@ -31,7 +31,7 @@ function kindOf(href: string): Kind {
   if (!href) return "none";
   if (href.startsWith("#")) return "section";
   if (/^(https?:\/\/|mailto:|tel:)/i.test(href)) return "url";
-  if (href.startsWith("/shop?cat=")) return "category";
+  if (categoryKeyOf(href) !== null) return "category";
   if (href.startsWith("/product/")) return "product";
   return "page";
 }
@@ -67,7 +67,7 @@ export function LinkTargetPicker({ value, onChange, ctx }: { value: string; onCh
   }, [ctx.shopSlug]);
 
   const pages = useMemo(() => [...BASE_PAGES, ...storePages.map((p) => ({ href: `/${p.slug}`, label: `📄 ${p.title || p.slug}` }))], [storePages]);
-  const catKey = value.startsWith("/shop?cat=") ? decodeURIComponent(value.slice("/shop?cat=".length)) : "";
+  const catKey = categoryKeyOf(value) ?? "";
 
   const pickKind = (k: Kind) => {
     setKind(k);

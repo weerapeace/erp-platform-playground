@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ConfirmDialog } from "@/components/modal";
+import { categoryHref } from "@/lib/website-links";
 import { ColorToneButton } from "@/components/color-tone-manager";
 import {
   LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
@@ -183,10 +184,10 @@ export function ListingPanel({
                   <div>
                     <label className={lbl}>ลิงก์เมื่อกดรูป (ว่าง = กดไม่ได้)</label>
                     <div className="grid gap-1.5 sm:grid-cols-[1fr_auto_auto]">
-                      <input className={inputCls} value={x.link} onChange={(e) => patch(x.id, { link: e.target.value })} placeholder="/shop?cat=backpack · /product/bbp10 · https://…" />
+                      <input className={inputCls} value={x.link} onChange={(e) => patch(x.id, { link: e.target.value })} placeholder="/c/backpack · /product/bbp10 · https://…" />
                       <select className={inputCls} value="" onChange={(e) => e.target.value && patch(x.id, { link: e.target.value })} title="เลือกหมวดแทนการพิมพ์">
                         <option value="">↳ ลิงก์ไปหมวด…</option>
-                        {categories.map((c) => <option key={c.key} value={`/shop?cat=${c.key}`}>{c.label}</option>)}
+                        {categories.map((c) => <option key={c.key} value={categoryHref(c.key)}>{c.label}</option>)}
                       </select>
                       <select className={inputCls} value="" onChange={(e) => e.target.value && patch(x.id, { link: e.target.value })} title="เลือกสินค้าแทนการพิมพ์">
                         <option value="">↳ ลิงก์ไปสินค้า…</option>

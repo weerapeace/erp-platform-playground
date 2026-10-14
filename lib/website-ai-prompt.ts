@@ -46,7 +46,7 @@ ${opts.brief ? `โจทย์: ${opts.brief}\n` : ""}
 กติกา:
 - ใช้เฉพาะชนิดและช่องตามรายการด้านล่าง ห้ามเพิ่มช่องอื่น ภาษาไทยเป็นหลัก ข้อความกระชับขายของได้จริง
 - รูปภาพให้ใส่ null (เจ้าของจะเลือกรูปเองทีหลัง) ยกเว้นชนิด "custom-html" ที่ใช้ <img src="https://..."> ได้
-- ลิงก์ภายในเว็บใช้ /shop, /shop?cat=<หมวด>, /product/<รหัสรุ่นตัวเล็ก>, /contact, /track
+- ลิงก์ภายในเว็บใช้ /shop, /c/<หมวด>, /product/<รหัสรุ่นตัวเล็ก>, /contact, /track
 - หมวดสินค้าของร้านนี้: ${cats}
 - ถ้าใช้ "custom-html": เขียน HTML + <style> ธรรมดา ห้ามใช้ JavaScript ห้ามใช้ Tailwind class (เว็บไม่รู้จัก) ใช้ตัวแปรสีของร้านได้: var(--color-brand), var(--color-brand-deep), var(--color-ink), var(--color-paper), var(--color-surface), var(--color-muted) และฟอนต์ var(--font-display), var(--font-body) · ต้อง responsive (มือถือ 1 คอลัมน์) · CSS จะถูกจำกัดให้มีผลเฉพาะใน Section นี้
 

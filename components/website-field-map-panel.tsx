@@ -53,7 +53,7 @@ const DESC_OPTS = [
 
 type CategoryDef = { key: string; label: string; icon: string; blurb: string };
 
-/** รหัสหมวดต้องปลอดภัยกับ URL (/shop?cat=<key>) — ให้ตรงกับฝั่ง server */
+/** รหัสหมวดต้องปลอดภัยกับ URL (/c/<key>) — ให้ตรงกับฝั่ง server */
 const cleanKey = (v: string) =>
   v.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 40);
 
@@ -356,7 +356,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
           </button>
         </div>
         <p className="text-[11px] text-slate-500 mb-3">
-          เมนูหมวดบนหน้าเว็บมาจากรายการนี้ · <b>รหัส</b> คือชื่อที่โผล่ในลิงก์ (`/shop?cat=รหัส`) ตั้งแล้วไม่ควรเปลี่ยน
+          เมนูหมวดบนหน้าเว็บมาจากรายการนี้ · <b>รหัส</b> คือชื่อที่โผล่ในลิงก์ (`/c/รหัส`) ตั้งแล้วไม่ควรเปลี่ยน
           เพราะลิงก์เก่าที่ลูกค้าเคยบันทึกไว้จะเสีย
         </p>
 

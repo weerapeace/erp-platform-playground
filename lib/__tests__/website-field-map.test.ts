@@ -18,7 +18,7 @@ describe("normalizeFieldMap — รายการหมวดของร้า
       categories: [{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน" }],
     });
     // รูปหมวด / แบนเนอร์ / ลำดับสินค้า ยังไม่ตั้ง = ค่าว่าง (ไม่ทำให้หมวดเดิมเปลี่ยนหน้าตา)
-    expect(m.categories).toEqual([{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน", imageKey: null, bannerKey: null, order: [] }]);
+    expect(m.categories).toEqual([{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน", imageKey: null, bannerKey: null, order: [], seoTitle: "", seoDescription: "" }]);
   });
 
   it("คำโปรยที่ไม่ใช่ข้อความ / ยาวเกิน ถูกจัดให้เรียบร้อย ไม่ทำให้หมวดหาย", () => {

@@ -1021,7 +1021,7 @@ export interface MenuConfig {
 export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "home", label: "หน้าแรก", hint: "/" },
   { value: "shop", label: "สินค้าทั้งหมด", hint: "/shop" },
-  { value: "category", label: "หมวดสินค้า", hint: "/shop?cat=…" },
+  { value: "category", label: "หมวดสินค้า", hint: "/c/…" },
   { value: "categories", label: "📂 หมวดทั้งหมด (อัตโนมัติ)", hint: "/shop + เมนูย่อย = ทุกหมวดในแท็บหมวดหมู่ (เพิ่มหมวดแล้วขึ้นเอง)" },
   { value: "product", label: "สินค้า 1 ตัว", hint: "/product/…" },
   { value: "page", label: "หน้าที่สร้างเอง", hint: "/<slug>" },
@@ -1061,7 +1061,7 @@ export function menuItemHref(it: { kind: MenuKind; value: string }): string {
     case "home": return "/";
     case "shop": return "/shop";
     case "categories": return "/shop";
-    case "category": return it.value ? `/shop?cat=${encodeURIComponent(it.value)}` : "/shop";
+    case "category": return it.value ? `/c/${encodeURIComponent(it.value)}` : "/shop";
     case "product": return it.value ? `/product/${it.value.toLowerCase()}` : "/shop";
     case "page": return it.value ? `/${it.value}` : "/";
     case "contact": return "/contact";

@@ -24,7 +24,7 @@ export interface ListingInsert {
   scope: ListingInsertScope;
   /** key หมวดเว็บ (scope = categories) */
   categories: string[];
-  /** ลิงก์เมื่อกด ('' = ไม่มี) เช่น /shop?cat=backpack · /product/bbp10 · https://… */
+  /** ลิงก์เมื่อกด ('' = ไม่มี) เช่น /c/backpack · /product/bbp10 · https://… */
   link: string;
   title: string;
   text: string;

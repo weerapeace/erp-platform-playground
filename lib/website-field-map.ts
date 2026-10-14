@@ -44,7 +44,7 @@ export const DEFAULT_WEB_CATEGORIES: WebCategoryDef[] = [
 ];
 
 export interface WebCategoryDef {
-  /** รหัสที่ใช้ในลิงก์ /shop?cat=<key> — a-z 0-9 - เท่านั้น */
+  /** รหัสที่ใช้ในลิงก์หน้าหมวด /c/<key> (ลิงก์เก่า /shop?cat=<key> ยังใช้ได้) — a-z 0-9 - เท่านั้น */
   key: string;
   label: string;
   icon: string;
@@ -56,6 +56,10 @@ export interface WebCategoryDef {
   bannerKey?: string | null;
   /** ↕ ลำดับสินค้าในหมวดนี้ (รหัสรุ่น) — ลากเรียงในแท็บหมวดหมู่ · ตัวที่ไม่อยู่ในรายการต่อท้ายตามลำดับรวมของร้าน */
   order?: string[];
+  /** 🔎 ชื่อหน้าหมวดใน Google (≤ 70 ตัว) — ว่าง = "<ชื่อหมวด> | <ชื่อร้าน>" */
+  seoTitle?: string;
+  /** 🔎 คำอธิบายใต้ชื่อใน Google (≤ 170 ตัว) — ว่าง = คำอธิบายหมวด (blurb) */
+  seoDescription?: string;
 }
 
 /** r2 key ของรูปหมวด — ตัวอักษรที่ปลอดภัยเท่านั้น (ไม่ผ่าน = ไม่มีรูป) */
@@ -116,7 +120,7 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
 const NAME_SOURCES: NameSource[] = ["name_th", "name_platform", "name_en", "sku_name", "code"];
 const PRICE_SOURCES: PriceSource[] = ["sku_max", "sku_min", "final_price", "sale_price", "fake_price"];
 const DESC_SOURCES: DescSource[] = ["platform_description", "introduction", "description", "english_description", "none"];
-/** รหัสหมวดต้องปลอดภัยกับ URL (/shop?cat=<key>) — ตัวเล็ก ตัวเลข ขีดกลาง เท่านั้น */
+/** รหัสหมวดต้องปลอดภัยกับ URL (/c/<key>) — ตัวเล็ก ตัวเลข ขีดกลาง เท่านั้น */
 export const cleanCategoryKey = (v: unknown): string =>
   String(v ?? "")
     .toLowerCase()
@@ -149,6 +153,8 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
         order: Array.isArray(o.order)
           ? [...new Set((o.order as unknown[]).map((c) => String(c ?? "").trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "")).filter(Boolean))].slice(0, 500)
           : [],
+        seoTitle: str(o.seoTitle).replace(/\s+/g, " ").trim().slice(0, 70),
+        seoDescription: str(o.seoDescription).replace(/\s+/g, " ").trim().slice(0, 170),
       };
     })
     .filter((c) => c.key && c.label && !seenKey.has(c.key) && seenKey.add(c.key) !== undefined);

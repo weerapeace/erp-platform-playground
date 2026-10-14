@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { matchShowIf, SECTION_SCHEMAS, type FieldDef } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockTypesFor, safeTarget, type Block } from "../website-blocks";
 import { canvasItemPreset, canvasItemSummary, validateCanvas, CANVAS_SHAPE_LABEL, CANVAS_FRAME_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_BUTTON_PRESETS, fitImageBox, canvasImageKeys } from "../website-canvas";
-import { productHref, productSlug, categoryHref, sectionHref } from "../website-links";
+import { productHref, productSlug, categoryHref, sectionHref, categoryKeyOf } from "../website-links";
 
 /**
  * ผืนผ้าใบอิสระ (canvas) + ของกลางที่เพิ่มมาพร้อมกัน (showIf หลายเงื่อนไข · ช่องลิงก์ปลายทาง · Section ทดลอง)
@@ -38,7 +38,10 @@ describe("website-links", () => {
   it("URL ตรงกับ route ของเว็บร้าน", () => {
     expect(productSlug("PIX10-BELT")).toBe("pix10-belt");
     expect(productHref("PIX01")).toBe("/product/pix01");
-    expect(categoryHref("bag")).toBe("/shop?cat=bag");
+    expect(categoryHref("bag")).toBe("/c/bag");
+    expect(categoryKeyOf("/c/bag")).toBe("bag");
+    expect(categoryKeyOf("/shop?cat=bag")).toBe("bag");
+    expect(categoryKeyOf("/product/bag")).toBeNull();
     expect(sectionHref("canvas-1")).toBe("#s-canvas-1");
   });
 });
