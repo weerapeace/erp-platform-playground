@@ -44,7 +44,7 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { getBrandPlatforms } from "./brand-platforms-modal";
-import { ExtraProductsEditor, extrasFromDetail, extraToPayload, childToSkuValue, skuValueToChild, multiProductVars, type ExtraProduct } from "./content-products-editor";
+import { ExtraProductsEditor, extrasFromDetail, extraToPayload, childToSkuValue, skuValueToChild, multiProductVars, toggleChildSelection, activeChildren, type ExtraProduct } from "./content-products-editor";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
@@ -473,6 +473,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
   const [children, setChildren] = useState<ParentSkuChild[]>([]);   // ลูก SKU ของ Parent (สี 2 ภาษา + ราคา)
+  const [skuIds, setSkuIds] = useState<string[]>([]);   // เลือกหลายสี (ว่าง = ทุกสี · sku เดี่ยว = สีเดียว) — เก็บที่ erp_creative_content_products.sku_ids ของตัวหลัก
   const [extras, setExtras] = useState<ExtraProduct[]>([]);   // สินค้าเพิ่มเติมในโพสต์ (นอกจากตัวหลัก sku/parent) — erp_creative_content_products
   const [colorSource, setColorSource] = useState<"th" | "en">("th");   // {color} ใช้ไทย/อังกฤษ (จำต่อคอนเทนต์)
   const [priceSkuId, setPriceSkuId] = useState<string>("");   // เลือกราคาจาก SKU ลูกตัวไหน (Parent)
@@ -526,6 +527,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price, fake_price: detail.sku_fake_price ?? null } : null);
       setParent(detail.parent_sku_id ? { id: detail.parent_sku_id, code: detail.parent_sku_code ?? "", name: detail.parent_sku_name ?? "" } : null);
       setExtras(extrasFromDetail(detail.products));
+      { const prim = (detail.products ?? []).find((p) => p.is_primary); setSkuIds(detail.sku_id ? [] : (prim?.sku_ids ?? [])); }
       setBrandId(detail.brand_id ?? null); setBrandTouched(false);
       setColorSource(detail.color_source === "en" ? "en" : "th");
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์ — แพลตฟอร์มที่ยังไม่มีแคปชั่น เติมแฮชแท็กเริ่มต้นให้
@@ -796,11 +798,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // ราคาเต็ม = ราคา SKU ที่เลือก · ราคาขาย = ราคา − ส่วนลด · สี = SKU เดี่ยว หรือ รวมสีลูกของ Parent
   // สี: Parent → รวมสีลูก (เลือกภาษาไทย/อังกฤษได้) · SKU เดี่ยว → สีของตัวเอง (ตามภาษาที่มี)
-  const childColors = [...new Set(children.map((c) => ((colorSource === "en" ? c.color_en : c.color_th) ?? "").trim()).filter(Boolean))];
+  const usedChildren = activeChildren(children, skuIds);   // ทุกสี หรือเฉพาะสีที่เลือก
+  const childColors = [...new Set(usedChildren.map((c) => ((colorSource === "en" ? c.color_en : c.color_th) ?? "").trim()).filter(Boolean))];
   const singleColor = colorSource === "en" ? (d?.sku_color_en ?? sku?.color ?? null) : (d?.sku_color_th ?? sku?.color ?? null);
   const colorText = childColors.length ? childColors.join(", ") : (sku ? singleColor : null);
   // ราคา: SKU เดี่ยว → ราคาตัวเอง · Parent → ราคาจาก SKU ลูกที่เลือก (default ตัวแรก)
-  const priceChild = children.find((c) => c.id === priceSkuId) ?? children[0] ?? null;
+  const priceChild = usedChildren.find((c) => c.id === priceSkuId) ?? usedChildren[0] ?? null;
   const realSelling = sku?.list_price ?? priceChild?.list_price ?? null;   // ราคาขายจริง (list_price)
   const fakeVal = sku?.fake_price ?? priceChild?.fake_price ?? null;        // ราคาปลอม (fake_price — ราคาขีดฆ่าให้ดูลดเยอะ)
   const discountAmt = (fakeVal != null && realSelling != null && fakeVal > realSelling) ? fakeVal - realSelling : null;  // ส่วนลด = ปลอม − จริง
@@ -898,7 +901,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         post_status: postStatus, posted_links: postedLinks, platform_images: platformImages, platform_formats: platformFormats,
         brand_id: brandId || null, sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
         // สินค้าทุกตัวในโพสต์ — ตัวหลักขึ้นก่อน (API ทับ sku_id/parent_sku_id จากแถวแรกให้ตรงกัน)
-        products: [...((parent || sku) ? [{ parent_sku_id: parent?.id ?? sku?.parent_sku_id ?? null, sku_id: sku?.id ?? null }] : []), ...extras.map(extraToPayload)],
+        products: [...((parent || sku) ? [{ parent_sku_id: parent?.id ?? sku?.parent_sku_id ?? null, sku_id: sku?.id ?? null, sku_ids: sku ? [] : skuIds }] : []), ...extras.map(extraToPayload)],
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
       });
@@ -937,8 +940,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const makePrimary = (i: number) => {
     const e = extras[i]; if (!e || (!e.parent && !e.sku)) return;
     const oldParent = parent ?? (sku?.parent_sku_id ? { id: sku.parent_sku_id, code: sku.parent_code ?? "", name: sku.parent_name ?? "" } : null);
-    const old: ExtraProduct | null = hasProduct ? { key: `old-${Date.now()}`, parent: oldParent, sku: sku ? skuValueToChild(sku) : null, children: parent ? children : [], childrenLoaded: !!parent, links: links.filter((l) => l.url.trim()) } : null;
-    setParent(e.parent); setSku(e.sku ? childToSkuValue(e.sku, e.parent) : null); setPriceSkuId("");
+    const old: ExtraProduct | null = hasProduct ? { key: `old-${Date.now()}`, parent: oldParent, sku: sku ? skuValueToChild(sku) : null, skuIds: sku ? [] : skuIds, children: parent ? children : [], childrenLoaded: !!parent, links: links.filter((l) => l.url.trim()) } : null;
+    setParent(e.parent); setSku(e.sku ? childToSkuValue(e.sku, e.parent) : null); setSkuIds(e.sku ? [] : e.skuIds); setPriceSkuId("");
     setLinks(e.links.length ? e.links.map((l) => ({ ...l })) : []);
     setExtras((xs) => { const rest = xs.filter((_, j) => j !== i); return old ? [old, ...rest] : rest; });
   };
@@ -1067,13 +1070,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   {!hasProduct && <p className="text-[11px] text-slate-400">{t("เลือก SKU (สีเดียว) หรือ Parent SKU (รวมทุกสี) → ระบบเติมแบรนด์ สี และราคาให้", "Pick a SKU (single color) or Parent SKU (all colors) → brand, colors and price fill in")}</p>}
                   <div className="grid grid-cols-2 gap-2 items-start">
                     <div><label className="text-[11px] text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label>
-                      <SkuPicker value={sku} onChange={(v) => { setSku(v); if (v?.parent_sku_id && parent?.id !== v.parent_sku_id) setParent({ id: v.parent_sku_id, code: v.parent_code ?? "", name: v.parent_name ?? "" }); }} /></div>
+                      <SkuPicker value={sku} onChange={(v) => { setSku(v); setSkuIds([]); if (v?.parent_sku_id && parent?.id !== v.parent_sku_id) setParent({ id: v.parent_sku_id, code: v.parent_code ?? "", name: v.parent_name ?? "" }); }} /></div>
                     <div>
                       <div className="flex items-center justify-between h-4">
                         <label className="text-[11px] text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label>
                         {parent?.id && <button type="button" onClick={() => setOpenParentId(parent.id)} className="text-[11px] text-violet-700 hover:underline">↗ {t("เปิด drawer Parent", "Open Parent")}</button>}
                       </div>
-                      <ParentSkuPicker value={parent} onChange={setParent} />
+                      <ParentSkuPicker value={parent} onChange={(v) => { setParent(v); setSkuIds([]); }} />
                     </div>
                   </div>
                   <div>
@@ -1091,12 +1094,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               {/* เลือก Parent แล้ว → ชิป SKU ลูกให้กดเลือกสีเดียว (หรือ "ทุกสี" = ใช้ Parent ทั้งชุด) */}
               {parent && children.length > 0 && (
                 <div className="mt-2.5 pt-2.5 border-t border-slate-100">
-                  <div className="text-[11px] text-slate-400 mb-1">{t("SKU ลูกของ", "Child SKUs of")} <span className="font-mono">{parent.code}</span> · {t("เลือกสีเดียว หรือใช้ทุกสี", "pick one color or use all")}</div>
+                  <div className="text-[11px] text-slate-400 mb-1">{t("SKU ลูกของ", "Child SKUs of")} <span className="font-mono">{parent.code}</span> · {t("กดเลือกได้หลายสี · ไม่เลือก = ทุกสี", "tap to pick colors · none = all")}{!sku && skuIds.length > 0 && <span className="ml-1 text-violet-600 font-medium">{t(`เลือก ${skuIds.length} สี`, `${skuIds.length} selected`)}</span>}</div>
                   <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-0.5">
-                    <button type="button" onClick={() => setSku(null)} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!sku ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All colors")} ({children.length})</button>
-                    {children.map((c) => { const on = sku?.id === c.id; const col = (colorSource === "en" ? c.color_en : c.color_th) ?? c.color_th ?? c.color_en; return (
+                    <button type="button" onClick={() => { setSku(null); setSkuIds([]); }} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!sku && !skuIds.length ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All colors")} ({children.length})</button>
+                    {children.map((c) => { const on = sku?.id === c.id || skuIds.includes(c.id); const col = (colorSource === "en" ? c.color_en : c.color_th) ?? c.color_th ?? c.color_en; return (
                       <button key={c.id} type="button" title={c.code}
-                        onClick={() => setSku({ id: c.id, code: c.code, name: c.name, color: c.color_th ?? c.color_en ?? null, list_price: c.list_price, fake_price: c.fake_price, image_key: c.image_key, image_url: r2ImageUrl(c.image_key ?? "", 80), parent_sku_id: parent.id, parent_code: parent.code, parent_name: parent.name })}
+                        onClick={() => { const cur = sku ? { sku: skuValueToChild(sku), skuIds: [] as string[] } : { sku: null, skuIds }; const nx = toggleChildSelection(cur, c, children); setSku(nx.sku ? childToSkuValue(nx.sku, parent) : null); setSkuIds(nx.skuIds); setPriceSkuId(""); }}
                         className={`h-7 px-2.5 rounded-full border text-[11px] ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
                         {col || c.code}{col && <span className={`ml-1 font-mono ${on ? "text-violet-200" : "text-slate-400"}`}>{c.code.replace(`${parent.code}-`, "")}</span>}
                       </button>
@@ -1125,9 +1128,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-slate-400 shrink-0 w-10">{t("ราคา", "Price")}</span>
-                    {!sku && children.length > 1 && (
+                    {!sku && usedChildren.length > 1 && (
                       <select value={priceSkuId} onChange={(e) => setPriceSkuId(e.target.value)} title={t("ราคาจาก SKU ลูกตัวไหน", "Price from which child SKU")} className="h-6 border border-slate-200 rounded-md px-1 text-[11px] bg-white max-w-[150px]">
-                        {children.map((c) => <option key={c.id} value={c.id}>{c.code}</option>)}
+                        {usedChildren.map((c) => <option key={c.id} value={c.id}>{c.code}</option>)}
                       </select>
                     )}
                     <span className="flex items-center gap-1.5">

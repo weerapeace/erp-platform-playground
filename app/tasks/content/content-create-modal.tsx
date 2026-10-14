@@ -10,11 +10,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea, ERPDateTime24 } from "@/components/form";
 import { SkuPicker, ParentSkuPicker, type SkuPickerValue, type ParentSkuPickerValue } from "@/components/pickers";
-import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
-import { ExtraProductsEditor, extraToPayload, childToSkuValue, skuValueToChild, type ExtraProduct } from "./content-products-editor";
+import { ExtraProductsEditor, extraToPayload, childToSkuValue, skuValueToChild, toggleChildSelection, type ExtraProduct } from "./content-products-editor";
 import {
   createContent, getRecommendedTimes, POST_TYPES, postTypeLabel, joinPostTypes,
   getParentSkuChildren, resolveBrandFromProduct, type ParentSkuChild,
@@ -61,34 +60,39 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       sched = `${sched}T${rec || "10:00"}`;
     }
     setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched });
-    setDirty(false); setFormErr(null); setChildren([]); setExtras([]); brandTouchedRef.current = !!defaultBrandId;
+    setDirty(false); setFormErr(null); setChildren([]); setSkuIds([]); setExtras([]); brandTouchedRef.current = !!defaultBrandId;
   }, [open, defaultBrandId, defaultDate]);
 
   const upd = (patch: Partial<Form>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   // ลูก SKU ของ Parent ที่เลือก (ชิปสีให้กดเลือกสีเดียว หรือใช้ทุกสี)
   const [children, setChildren] = useState<ParentSkuChild[]>([]);
+  const [skuIds, setSkuIds] = useState<string[]>([]);   // เลือกหลายสี (ว่าง = ทุกสี · form.product = สีเดียว)
   // สินค้าเพิ่มเติมในโพสต์ (นอกจากตัวหลักในช่อง SKU/Parent) — 1 โพสต์โปรโมทได้หลายตัว
   const [extras, setExtras] = useState<ExtraProduct[]>([]);
   // ⭐ สลับสินค้าเพิ่มเติมขึ้นเป็นตัวหลัก (ตัวหลักเดิมถอยไปอยู่หัวรายการเพิ่มเติม)
   const makePrimary = (i: number) => {
     const e = extras[i]; if (!e || (!e.parent && !e.sku)) return;
     const oldParent = form.parent ?? (form.product?.parent_sku_id ? { id: form.product.parent_sku_id, code: form.product.parent_code ?? "", name: form.product.parent_name ?? "" } : null);
-    const old: ExtraProduct | null = (form.parent || form.product) ? { key: `old-${Date.now()}`, parent: oldParent, sku: form.product ? skuValueToChild(form.product) : null, children: form.parent ? children : [], childrenLoaded: !!form.parent, links: [] } : null;
-    upd({ parent: e.parent, product: e.sku ? childToSkuValue(e.sku, e.parent) : null });
+    const old: ExtraProduct | null = (form.parent || form.product) ? { key: `old-${Date.now()}`, parent: oldParent, sku: form.product ? skuValueToChild(form.product) : null, skuIds: form.product ? [] : skuIds, children: form.parent ? children : [], childrenLoaded: !!form.parent, links: [] } : null;
+    upd({ parent: e.parent, product: e.sku ? childToSkuValue(e.sku, e.parent) : null }); setSkuIds(e.sku ? [] : e.skuIds);
     setExtras((xs) => { const rest = xs.filter((_, j) => j !== i); return old ? [old, ...rest] : rest; });
   };
   useEffect(() => { if (!form.parent?.id) { setChildren([]); return; } let live = true; getParentSkuChildren(form.parent.id).then((cs) => { if (live) setChildren(cs); }).catch(() => {}); return () => { live = false; }; }, [form.parent?.id]);
   // เลือก SKU จาก picker → เติม Parent ให้ (เปลี่ยนเองได้)
   const pickSku = (v: SkuPickerValue | null) => {
+    setSkuIds([]);
     const patch: Partial<Form> = { product: v };
     if (v?.parent_sku_id && form.parent?.id !== v.parent_sku_id) patch.parent = { id: v.parent_sku_id, code: v.parent_code ?? "", name: v.parent_name ?? "" };
     upd(patch);
   };
   // เปลี่ยน Parent → ถ้า SKU เดิมไม่ใช่ลูกของ Parent ใหม่ ให้ล้าง SKU
-  const pickParent = (v: ParentSkuPickerValue | null) => upd({ parent: v, ...(v && form.product?.parent_sku_id && form.product.parent_sku_id !== v.id ? { product: null } : {}) });
+  const pickParent = (v: ParentSkuPickerValue | null) => { setSkuIds([]); upd({ parent: v, ...(v && form.product?.parent_sku_id && form.product.parent_sku_id !== v.id ? { product: null } : {}) }); };
+  // กดชิปสี: เลือกได้หลายสี (1 สี = SKU เดี่ยว · ≥2 = skuIds · ไม่เลือก = ทุกสี)
   const pickChild = (c: ParentSkuChild | null) => {
-    if (!c || !form.parent) { upd({ product: null }); return; }
-    upd({ product: { id: c.id, code: c.code, name: c.name, color: c.color_th ?? c.color_en ?? null, list_price: c.list_price, fake_price: c.fake_price, image_key: c.image_key, image_url: r2ImageUrl(c.image_key ?? "", 80), parent_sku_id: form.parent.id, parent_code: form.parent.code, parent_name: form.parent.name } });
+    if (!c || !form.parent) { upd({ product: null }); setSkuIds([]); return; }
+    const cur = form.product ? { sku: skuValueToChild(form.product), skuIds: [] as string[] } : { sku: null, skuIds };
+    const nx = toggleChildSelection(cur, c, children);
+    upd({ product: nx.sku ? childToSkuValue(nx.sku, form.parent) : null }); setSkuIds(nx.skuIds);
   };
   // เลือกสินค้าแล้วยังไม่มีแบรนด์ → เดาแบรนด์จากสินค้า (ติ๊กแพลตฟอร์มตามแบรนด์ให้ด้วย)
   const brandTouchedRef = useRef(false);
@@ -134,7 +138,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         sku_id: form.product?.id ?? null, parent_sku_id: form.parent?.id ?? null, product_name: form.product?.name ?? form.parent?.name ?? null, post_type: joinPostTypes(form.post_types),
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
         // สินค้าทุกตัวในโพสต์: ตัวหลัก (ช่อง SKU/Parent) ขึ้นก่อน แล้วตามด้วยสินค้าเพิ่มเติม
-        products: [...((form.parent || form.product) ? [{ parent_sku_id: form.parent?.id ?? form.product?.parent_sku_id ?? null, sku_id: form.product?.id ?? null }] : []), ...extras.map(extraToPayload)],
+        products: [...((form.parent || form.product) ? [{ parent_sku_id: form.parent?.id ?? form.product?.parent_sku_id ?? null, sku_id: form.product?.id ?? null, sku_ids: form.product ? [] : skuIds }] : []), ...extras.map(extraToPayload)],
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
         platform_formats: Object.fromEntries(Object.entries(bpFmt[form.brand_id] ?? {}).filter(([p]) => form.platforms.includes(p))),
       });
@@ -182,13 +186,13 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         </ERPFormField>
         {/* สินค้า: SKU สีเดียว | Parent SKU ทุกสี (กฎเดียวกับ drawer) */}
         <ERPFormField label={t("สินค้า SKU (สีเดียว)", "SKU (single color)")} hint={t("เลือก SKU แล้วระบบเติม Parent + แบรนด์ให้", "Picking a SKU fills Parent + brand")}><SkuPicker value={form.product} onChange={pickSku} /></ERPFormField>
-        <ERPFormField label={t("Parent SKU (ทุกสี)", "Parent SKU (all colors)")} hint={form.parent && children.length > 0 ? t("กดเลือกสีด้านล่าง หรือปล่อยว่าง = ใช้ทุกสี", "Pick a color below, or leave = all colors") : undefined}><ParentSkuPicker value={form.parent} onChange={pickParent} /></ERPFormField>
+        <ERPFormField label={t("Parent SKU (ทุกสี)", "Parent SKU (all colors)")} hint={form.parent && children.length > 0 ? t("กดเลือกสีด้านล่างได้หลายสี หรือปล่อยว่าง = ใช้ทุกสี", "Pick colors below, or leave = all colors") : undefined}><ParentSkuPicker value={form.parent} onChange={pickParent} /></ERPFormField>
         {form.parent && children.length > 0 && (
           <div className="col-span-2 -mt-2">
-            <div className="text-[11px] text-slate-400 mb-1">{t("SKU ลูกของ", "Child SKUs of")} <span className="font-mono">{form.parent.code}</span></div>
+            <div className="text-[11px] text-slate-400 mb-1">{t("SKU ลูกของ", "Child SKUs of")} <span className="font-mono">{form.parent.code}</span> · {t("กดเลือกได้หลายสี", "tap to pick colors")}{!form.product && skuIds.length > 0 && <span className="ml-1 text-violet-600 font-medium">{t(`เลือก ${skuIds.length} สี`, `${skuIds.length} selected`)}</span>}</div>
             <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-0.5">
-              <button type="button" onClick={() => pickChild(null)} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!form.product ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All colors")} ({children.length})</button>
-              {children.map((c) => { const on = form.product?.id === c.id; const col = c.color_th ?? c.color_en; const parentCode = form.parent?.code ?? ""; return (
+              <button type="button" onClick={() => pickChild(null)} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!form.product && !skuIds.length ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All colors")} ({children.length})</button>
+              {children.map((c) => { const on = form.product?.id === c.id || skuIds.includes(c.id); const col = c.color_th ?? c.color_en; const parentCode = form.parent?.code ?? ""; return (
                 <button key={c.id} type="button" title={c.code} onClick={() => pickChild(c)}
                   className={`h-7 px-2.5 rounded-full border text-[11px] ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
                   {col || c.code}{col && <span className={`ml-1 font-mono ${on ? "text-violet-200" : "text-slate-400"}`}>{c.code.replace(`${parentCode}-`, "")}</span>}

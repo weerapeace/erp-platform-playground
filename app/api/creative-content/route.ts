@@ -102,7 +102,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error || !created) return NextResponse.json({ error: friendlyDbError(error?.message ?? "insert failed") }, { status: 400 });
 
   // รายการสินค้าในโพสต์ (ตัวหลัก + เพิ่มเติม) — ไม่ได้ส่ง products มา แต่มีสินค้าหลัก → ลง 1 แถวให้ตารางตรงกัน
-  const productRows = prods ?? ((primaryParent || primarySku) ? [{ parent_sku_id: primaryParent, sku_id: primarySku }] : []);
+  const productRows = prods ?? ((primaryParent || primarySku) ? [{ parent_sku_id: primaryParent, sku_id: primarySku, sku_ids: [] as string[] }] : []);
   if (productRows.length) await replaceContentProducts(admin, created.id, productRows);
 
   // captions เริ่มต้น (ถ้าส่งมา)

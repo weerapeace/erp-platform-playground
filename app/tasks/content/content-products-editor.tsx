@@ -19,7 +19,8 @@ export type ProductLink = { platform: string; url: string };
 export type ExtraProduct = {
   key: string;
   parent: ParentSkuPickerValue | null;
-  sku: ParentSkuChild | null;          // เลือกสีเดียว (null = ทุกสีของ Parent)
+  sku: ParentSkuChild | null;          // เลือกสีเดียว (null = ทุกสีของ Parent หรือตาม skuIds)
+  skuIds: string[];                    // เลือกหลายสี (ว่าง = ทุกสี) — ใช้เมื่อ sku เป็น null
   children: ParentSkuChild[];          // SKU ลูกของ Parent (โหลดให้เองเมื่อยังไม่มี)
   childrenLoaded?: boolean;
   links: ProductLink[];                // ลิงก์ร้านที่เก็บไว้ที่ Parent (shopee/lazada/tiktok) — ใช้ใน {link}
@@ -31,12 +32,23 @@ export function extrasFromDetail(products: ContentProduct[] | null | undefined):
     key: p.id ?? `${p.parent_sku_id ?? ""}|${p.sku_id ?? ""}`,
     parent: p.parent_sku_id ? { id: p.parent_sku_id, code: p.parent_code ?? "", name: p.parent_name ?? "", image_url: p.parent_image_url ?? null } : null,
     sku: p.sku_id ? { id: p.sku_id, code: p.sku_code ?? "", name: p.sku_name ?? "", color_en: p.sku_color_en ?? null, color_th: p.sku_color_th ?? null, list_price: p.sku_price ?? null, fake_price: p.sku_fake_price ?? null, image_key: null } : null,
+    skuIds: p.sku_id ? [] : (p.sku_ids ?? []),
     children: [], childrenLoaded: false, links: p.parent_links ?? [],
   }));
 }
 
 /** payload ที่ API รับ (ตัวหลักต้องอยู่หน้าสุด — ผู้เรียกใส่เอง) */
-export const extraToPayload = (e: ExtraProduct) => ({ parent_sku_id: e.parent?.id ?? null, sku_id: e.sku?.id ?? null });
+export const extraToPayload = (e: ExtraProduct) => ({ parent_sku_id: e.parent?.id ?? null, sku_id: e.sku?.id ?? null, sku_ids: e.sku ? [] : e.skuIds });
+
+/** กดชิปสี (เลือกได้หลายสี): 1 สี = sku เดี่ยว · ≥2 สี = skuIds · 0 สี = ทุกสี — ใช้ทั้งตัวหลัก (drawer/ฟอร์มสร้าง) และสินค้าเพิ่มเติม */
+export function toggleChildSelection(cur: { sku: ParentSkuChild | null; skuIds: string[] }, c: ParentSkuChild, children: ParentSkuChild[]): { sku: ParentSkuChild | null; skuIds: string[] } {
+  const ids = cur.sku ? [cur.sku.id] : cur.skuIds;
+  const next = ids.includes(c.id) ? ids.filter((x) => x !== c.id) : [...ids, c.id];
+  if (next.length === 1) return { sku: children.find((x) => x.id === next[0]) ?? null, skuIds: [] };
+  return { sku: null, skuIds: next };
+}
+/** สีลูกที่ "ใช้จริง" ของรายการ (ทุกสี / ที่เลือก) */
+export const activeChildren = (children: ParentSkuChild[], skuIds: string[]) => (skuIds.length ? children.filter((c) => skuIds.includes(c.id)) : children);
 
 /** SKU ลูก → ค่าของ SkuPicker (ตอนสลับขึ้นเป็นตัวหลัก) */
 export function childToSkuValue(c: ParentSkuChild, parent: ParentSkuPickerValue | null): SkuPickerValue {
@@ -65,8 +77,9 @@ export function multiProductVars(primary: PrimaryProductVars, extras: ExtraProdu
     { code: primary.code ?? "", name: primary.name ?? "", color: primary.color, price: primary.price, fake: primary.fake, links: primary.links },
     ...extras.map((e): Row => {
       const pick = (c: ParentSkuChild) => (colorSource === "en" ? c.color_en : c.color_th) ?? c.color_th ?? c.color_en ?? null;
-      const color = e.sku ? pick(e.sku) : (uniq(e.children.map(pick)).join(", ") || null);
-      const priceFrom = e.sku ?? e.children[0] ?? null;
+      const subset = activeChildren(e.children, e.skuIds);   // เลือกหลายสี → เฉพาะสีที่เลือก
+      const color = e.sku ? pick(e.sku) : (uniq(subset.map(pick)).join(", ") || null);
+      const priceFrom = e.sku ?? subset[0] ?? null;
       return { code: e.sku?.code ?? e.parent?.code ?? "", name: e.sku?.name ?? e.parent?.name ?? "", color, price: priceFrom?.list_price ?? null, fake: priceFrom?.fake_price ?? null, links: e.links };
     }),
   ];
@@ -116,9 +129,11 @@ export function ExtraProductsEditor({ items, onChange, colorSource = "th", onMak
   const add = (v: ParentSkuPickerValue | null) => {
     if (!v) return;
     if (excludeParentIds.includes(v.id) || items.some((i) => i.parent?.id === v.id)) { onDuplicate?.(); return; }
-    onChange([...items, { key: `n-${v.id}-${Date.now()}`, parent: v, sku: null, children: [], childrenLoaded: false, links: [] }]);
+    onChange([...items, { key: `n-${v.id}-${Date.now()}`, parent: v, sku: null, skuIds: [], children: [], childrenLoaded: false, links: [] }]);
   };
-  const setChild = (i: number, skuId: string) => onChange(items.map((x, j) => j === i ? { ...x, sku: skuId ? (x.children.find((c) => c.id === skuId) ?? null) : null } : x));
+  // กดชิปสี: เลือกได้หลายสี (1 สี = SKU เดี่ยว · ไม่เลือก = ทุกสี)
+  const toggleChild = (i: number, c: ParentSkuChild) => onChange(items.map((x, j) => j === i ? { ...x, ...toggleChildSelection(x, c, x.children) } : x));
+  const allColors = (i: number) => onChange(items.map((x, j) => j === i ? { ...x, sku: null, skuIds: [] } : x));
 
   return (
     <div>
@@ -133,23 +148,26 @@ export function ExtraProductsEditor({ items, onChange, colorSource = "th", onMak
             const name = it.sku?.name ?? it.parent?.name ?? "";
             const thumb = it.sku?.image_key ? r2ImageUrl(it.sku.image_key, 80) : (it.parent?.image_url ?? null);
             return (
-              <div key={it.key} {...rowProps(i)} className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 ${rowCls(i)}`}>
+              <div key={it.key} {...rowProps(i)} className={`flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 ${rowCls(i)}`}>
                 <DragHandle {...handleProps(i)} title={t("ลากเพื่อสลับลำดับ", "Drag to reorder")} />
                 {thumb
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={thumb} alt="" className="h-9 w-9 rounded-md object-cover border border-slate-200 shrink-0" />
                   : <div className="h-9 w-9 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 shrink-0">🛍</div>}
                 <div className="min-w-0 flex-1">
-                  <div className="font-mono text-[10px] text-slate-500 truncate">{code}{it.sku && it.parent ? <span className="text-slate-300"> · Parent {it.parent.code}</span> : null}</div>
+                  <div className="font-mono text-[10px] text-slate-500 truncate">{code}{it.sku && it.parent ? <span className="text-slate-300"> · Parent {it.parent.code}</span> : null}{!it.sku && it.skuIds.length > 0 ? <span className="text-violet-500"> · {t(`เลือก ${it.skuIds.length} สี`, `${it.skuIds.length} colors`)}</span> : null}</div>
                   <div className="text-xs text-slate-800 truncate" title={name}>{name}</div>
+                  {/* ชิปสี: กดเลือกได้หลายสี (1 สี = SKU เดี่ยว · ไม่เลือก = ทุกสี) */}
+                  {it.parent && it.children.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1 max-h-16 overflow-y-auto pr-0.5">
+                      <button type="button" onClick={() => allColors(i)} className={`h-6 px-2 rounded-full border text-[10px] font-medium ${!it.sku && !it.skuIds.length ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All")} ({it.children.length})</button>
+                      {it.children.map((c) => { const on = it.sku?.id === c.id || it.skuIds.includes(c.id); const col = (colorSource === "en" ? c.color_en : c.color_th) ?? c.color_th ?? c.color_en; return (
+                        <button key={c.id} type="button" title={c.code} onClick={() => toggleChild(i, c)}
+                          className={`h-6 px-2 rounded-full border text-[10px] ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{col || c.code}</button>
+                      ); })}
+                    </div>
+                  )}
                 </div>
-                {it.parent && it.children.length > 0 && (
-                  <select value={it.sku?.id ?? ""} onChange={(e) => setChild(i, e.target.value)} title={t("เลือกสีเดียว หรือใช้ทุกสี", "Pick one color or all")}
-                    className="h-7 max-w-[130px] border border-slate-200 rounded-md px-1 text-[11px] bg-white shrink-0">
-                    <option value="">🎨 {t("ทุกสี", "All colors")} ({it.children.length})</option>
-                    {it.children.map((c) => { const col = (colorSource === "en" ? c.color_en : c.color_th) ?? c.color_th ?? c.color_en; return <option key={c.id} value={c.id}>{col || c.code}</option>; })}
-                  </select>
-                )}
                 {onMakePrimary && <button type="button" onClick={() => onMakePrimary(i)} title={t("ตั้งเป็นสินค้าหลัก (สลับกับตัวหลักปัจจุบัน)", "Make primary (swap)")} className="h-7 w-7 rounded-md text-slate-400 hover:text-amber-500 hover:bg-amber-50 shrink-0">⭐</button>}
                 {onOpenParent && it.parent && <button type="button" onClick={() => onOpenParent(it.parent!.id)} title={t("เปิด drawer Parent", "Open Parent")} className="h-7 w-7 rounded-md text-violet-600 hover:bg-violet-50 shrink-0">↗</button>}
                 <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} title={t("เอาออกจากโพสต์นี้", "Remove from this post")} className="h-7 w-7 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 shrink-0">✕</button>

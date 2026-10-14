@@ -378,7 +378,7 @@ export async function saveBrandCalStyle(s: BrandCalStyle): Promise<void> {
 export type ContentCaption = { id?: string; platform: string; caption: string | null; hashtags: string | null; caption_type?: string; sort_order?: number };
 /** สินค้าในคอนเทนต์ (หลายตัวต่อโพสต์ — erp_creative_content_products) · แถว is_primary = ตัวหลัก (ตรงกับ sku_id/parent_sku_id ของคอนเทนต์) */
 export type ContentProduct = {
-  id?: string; parent_sku_id: string | null; sku_id: string | null; sort_order?: number; is_primary?: boolean;
+  id?: string; parent_sku_id: string | null; sku_id: string | null; sku_ids?: string[]; sort_order?: number; is_primary?: boolean;   // sku_ids = สีลูกที่เลือกหลายสี (ว่าง = ทุกสี)
   parent_code?: string | null; parent_name?: string | null; parent_image_url?: string | null; parent_links?: { platform: string; url: string }[];
   sku_code?: string | null; sku_name?: string | null; sku_color_th?: string | null; sku_color_en?: string | null; sku_price?: number | null; sku_fake_price?: number | null;
 };

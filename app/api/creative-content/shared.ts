@@ -97,9 +97,9 @@ export async function attachAssignees(admin: Parameters<typeof employeeLabelMap>
 // ตารางนี้มาจาก migration 202610081200 (รอเจ้าของรัน) → ทุกฟังก์ชันที่นี่ "ทน" ต่อการที่ตารางยังไม่มี:
 // อ่านไม่ได้ = ถือว่าไม่มีสินค้าเพิ่มเติม · เขียนไม่ได้ = ข้าม (ตัวหลักยังอยู่ที่คอลัมน์ sku_id/parent_sku_id เสมอ)
 type Admin = Parameters<typeof employeeLabelMap>[0];
-export type ProductInput = { parent_sku_id: string | null; sku_id: string | null };
+export type ProductInput = { parent_sku_id: string | null; sku_id: string | null; sku_ids: string[] };   // sku_ids = สีลูกที่เลือกหลายสี (ว่าง = ทุกสี · sku_id = สีเดียว)
 const PRODUCTS_TABLE = "erp_creative_content_products";
-const PRODUCT_SELECT = `id, content_id, parent_sku_id, sku_id, sort_order, is_primary,
+const PRODUCT_SELECT = `id, content_id, parent_sku_id, sku_id, sku_ids, sort_order, is_primary,
   parent:parent_skus_v2!parent_sku_id(code, name_th, cover_image_r2_key, shopee_url, lazada_url, tiktok_url),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price)`;
 
@@ -113,7 +113,9 @@ export function normalizeProducts(raw: unknown): ProductInput[] | null {
     const sk = typeof o.sku_id === "string" && o.sku_id ? o.sku_id : null;
     if (!p && !sk) continue;
     const k = `${p ?? ""}|${sk ?? ""}`; if (seen.has(k)) continue; seen.add(k);
-    out.push({ parent_sku_id: p, sku_id: sk });
+    // สีที่เลือกหลายสี — มีเฉพาะตอนเลือกแบบ Parent (sku_id ว่าง) · ตัด id เพี้ยน/ซ้ำ · ไม่เกิน 50
+    const ids = !sk && Array.isArray(o.sku_ids) ? [...new Set((o.sku_ids as unknown[]).filter((x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)))].slice(0, 50) : [];
+    out.push({ parent_sku_id: p, sku_id: sk, sku_ids: ids });
     if (out.length >= 30) break;
   }
   return out;
@@ -123,7 +125,7 @@ function flattenProduct(r: Record<string, unknown>): Record<string, unknown> {
   const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string; cover_image_r2_key?: string | null; shopee_url?: string | null; lazada_url?: string | null; tiktok_url?: string | null } | null;
   const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string; color?: string | null; color_th?: string | null; list_price?: number | null; fake_price?: number | null } | null;
   return {
-    id: r.id, parent_sku_id: r.parent_sku_id ?? null, sku_id: r.sku_id ?? null, sort_order: r.sort_order ?? 0, is_primary: !!r.is_primary,
+    id: r.id, parent_sku_id: r.parent_sku_id ?? null, sku_id: r.sku_id ?? null, sku_ids: Array.isArray(r.sku_ids) ? r.sku_ids : [], sort_order: r.sort_order ?? 0, is_primary: !!r.is_primary,
     parent_code: par?.code ?? null, parent_name: par?.name_th ?? null,
     parent_image_url: par?.cover_image_r2_key ? r2ImageUrl(String(par.cover_image_r2_key), 160) : null,
     parent_links: par ? PARENT_LINK_PLATFORMS.map((pf) => ({ platform: pf, url: (par[`${pf}_url` as "shopee_url"] ?? "").trim() })).filter((l) => l.url) : [],
@@ -153,14 +155,17 @@ export async function replaceContentProducts(admin: Admin, contentId: string, pr
   const { error: dErr } = await admin.from(PRODUCTS_TABLE).delete().eq("content_id", contentId);
   if (dErr) return false;
   if (!products.length) return true;
-  const rows = products.map((p, i) => ({ content_id: contentId, parent_sku_id: p.parent_sku_id, sku_id: p.sku_id, sort_order: i, is_primary: i === 0 }));
+  const rows = products.map((p, i) => ({ content_id: contentId, parent_sku_id: p.parent_sku_id, sku_id: p.sku_id, sku_ids: p.sku_ids ?? [], sort_order: i, is_primary: i === 0 }));
   const { error } = await admin.from(PRODUCTS_TABLE).insert(rows);
   return !error;
 }
 /** อัปเดตเฉพาะ "ตัวหลัก" ให้ตรงกับคอลัมน์ sku_id/parent_sku_id (ผู้เรียกที่ส่งแค่ sku_id/parent_sku_id มา ไม่ได้ส่ง products) — ไม่แตะสินค้าเพิ่มเติม */
 export async function syncPrimaryProduct(admin: Admin, contentId: string, parentSkuId: string | null, skuId: string | null): Promise<void> {
+  // คง "สีที่เลือกหลายสี" ของตัวหลักไว้ ถ้ายังเป็น Parent เดิมและไม่ได้เลือกสีเดียว
+  const { data: prev } = await admin.from(PRODUCTS_TABLE).select("parent_sku_id, sku_ids").eq("content_id", contentId).eq("is_primary", true).maybeSingle();
+  const keepIds = !skuId && prev && prev.parent_sku_id === parentSkuId && Array.isArray(prev.sku_ids) ? prev.sku_ids : [];
   const { error } = await admin.from(PRODUCTS_TABLE).delete().eq("content_id", contentId).eq("is_primary", true);
   if (error) return;
   if (!parentSkuId && !skuId) return;
-  await admin.from(PRODUCTS_TABLE).insert({ content_id: contentId, parent_sku_id: parentSkuId, sku_id: skuId, sort_order: 0, is_primary: true });
+  await admin.from(PRODUCTS_TABLE).insert({ content_id: contentId, parent_sku_id: parentSkuId, sku_id: skuId, sku_ids: keepIds, sort_order: 0, is_primary: true });
 }
