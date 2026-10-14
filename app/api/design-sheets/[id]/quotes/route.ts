@@ -22,6 +22,7 @@ export type DesignSheetQuote = {
   quote_date: string | null; price: number | null; offered_price: number | null; status: string; note: string | null;
   parent_code: string | null;   // ไซส์/แท็บที่เสนอราคา ("" = ทั่วไป · null = รอบเก่าไม่ระบุ)
   qty: number | null;           // จำนวนที่ราคานี้ใช้ (ราคาขั้นบันได) · null = ไม่ระบุ
+  batch?: number | null;              // "ครั้งที่" จริง (1 ครั้ง = หลายไซส์ × หลายขั้นจำนวน; แถวนี้ = 1 ช่อง) · null = แถวเก่าก่อนมี batch
   cost_snapshot_id?: string | null;   // เวอร์ชันตีราคาที่ใช้ตอนเสนอรอบนี้ (null = รอบเก่าก่อนมีเวอร์ชัน)
   /** ต้นทุนเปลี่ยนอะไรจากรอบก่อน (ไซส์เดียวกัน) — คำนวณฝั่งเซิร์ฟเวอร์จากเวอร์ชันตีราคา · null = ไม่มีรอบก่อนที่เทียบได้ */
   changes?: { text: string; total_diff: number; prev_round: number; prev_snapshot_id: string; snapshot_id: string } | null;
@@ -41,17 +42,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (snapIds.length) {
     const { data: snaps } = await admin.from("design_sheet_cost_snapshots").select("id, lines, cost_extra").in("id", snapIds);
     const byId = new Map((snaps ?? []).map((s) => [s.id as string, { lines: (s.lines ?? []) as SnapLine[], extra: (s.cost_extra ?? {}) as SnapExtraMap }]));
-    const lastBySize = new Map<string, DesignSheetQuote>();   // รอบล่าสุดก่อนหน้า (ที่มีเวอร์ชัน) ต่อไซส์
+    // "ครั้งก่อน" = batch ก่อนหน้า (ช่องแรกของไซส์เดียวกันที่มีเวอร์ชัน) — ช่องอื่นในครั้งเดียวกันไม่นับเป็นครั้งก่อน
+    const bOf = (q: DesignSheetQuote) => q.batch ?? q.round;
     for (const q of quotes) {
+      q.changes = null;
+      if (!q.cost_snapshot_id || !byId.has(q.cost_snapshot_id)) continue;
       const key = q.parent_code ?? "";
-      const prev = lastBySize.get(key);
-      if (q.cost_snapshot_id && byId.has(q.cost_snapshot_id)) {
-        if (prev?.cost_snapshot_id && byId.has(prev.cost_snapshot_id)) {
-          const s = summarizeCostChanges(byId.get(prev.cost_snapshot_id)!, byId.get(q.cost_snapshot_id)!, key);
-          q.changes = { text: s.text, total_diff: s.total_diff, prev_round: prev.round, prev_snapshot_id: prev.cost_snapshot_id, snapshot_id: q.cost_snapshot_id };
-        } else q.changes = null;
-        lastBySize.set(key, q);
-      } else q.changes = null;
+      const prev = quotes.filter((p) => (p.parent_code ?? "") === key && bOf(p) < bOf(q) && p.cost_snapshot_id && byId.has(p.cost_snapshot_id)).sort((a, b) => bOf(b) - bOf(a))[0];
+      if (!prev?.cost_snapshot_id) continue;
+      const s = summarizeCostChanges(byId.get(prev.cost_snapshot_id)!, byId.get(q.cost_snapshot_id)!, key);
+      q.changes = { text: s.text, total_diff: s.total_diff, prev_round: prev.batch ?? prev.round, prev_snapshot_id: prev.cost_snapshot_id, snapshot_id: q.cost_snapshot_id };
     }
   }
   return NextResponse.json({ data: quotes, error: null });
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { quote_date?: string; price?: number; offered_price?: number; status?: string; note?: string; parent_code?: string | null; qty?: number | null; cost_snapshot_id?: string | null };
+  let body: { quote_date?: string; price?: number; offered_price?: number; status?: string; note?: string; parent_code?: string | null; qty?: number | null; cost_snapshot_id?: string | null; batch?: number | null };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const price = body.price != null ? Number(body.price) : null;
@@ -80,6 +80,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: last } = await admin.from("design_sheet_quotes").select("round")
     .eq("sheet_id", id).order("round", { ascending: false }).limit(1);
   const round = ((last?.[0]?.round as number | undefined) ?? 0) + 1;
+  // ครั้งที่ (batch): ส่งมา = เพิ่มช่องเข้าครั้งนั้น · ไม่ส่ง = เปิดครั้งใหม่ (ล่าสุด + 1)
+  let batch = body.batch != null && Number.isFinite(Number(body.batch)) ? Number(body.batch) : null;
+  if (batch == null) {
+    const { data: lb } = await admin.from("design_sheet_quotes").select("batch").eq("sheet_id", id).order("batch", { ascending: false, nullsFirst: false }).limit(1);
+    batch = ((lb?.[0]?.batch as number | null) ?? 0) + 1;
+  }
 
   // ผูกรอบนี้กับเวอร์ชันตีราคาล่าสุดของใบ (หน้าจอบันทึกตีราคาก่อนเพิ่มรอบแล้ว) — ไม่มีเวอร์ชัน = null
   let costSnapshotId: string | null = body.cost_snapshot_id ?? null;
@@ -91,7 +97,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     sheet_id: id, round, quote_date: body.quote_date || new Date().toISOString().slice(0, 10),
     price, offered_price: offered, qty, status, note: body.note?.trim() || null, created_by: user?.id ?? null,
     parent_code: body.parent_code == null ? null : String(body.parent_code),   // ไซส์ที่เสนอ ("" = ทั่วไป)
-    cost_snapshot_id: costSnapshotId,
+    cost_snapshot_id: costSnapshotId, batch,
   }).select("id, round").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
@@ -100,5 +106,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { quote_id: row.id, round, price, offered_price: offered, qty, status },
   });
-  return NextResponse.json({ id: row.id, round, error: null });
+  return NextResponse.json({ id: row.id, round, batch, error: null });
 }

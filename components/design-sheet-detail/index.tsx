@@ -44,6 +44,7 @@ import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/r
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import { CostVersionsModal } from "./cost-versions";
+import { QuoteRounds } from "./quote-rounds";
 import { normalizeSnapLine, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
@@ -550,17 +551,6 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [openImgCid, setOpenImgCid] = useState<string | null>(null);   // comment ที่กางช่องรูปอยู่
   const [delComment, setDelComment] = useState<DesignSheetComment | null>(null);
   // เพิ่ม/แก้รอบเสนอราคา
-  const [newQDate, setNewQDate] = useState("");
-  const [newQPrice, setNewQPrice] = useState("");      // ราคาจากตีราคา (อ้างอิง)
-  const [newQOffered, setNewQOffered] = useState("");  // ราคาที่เสนอ (ใช้อันนี้)
-  const [newQStatus, setNewQStatus] = useState("pending");
-  const [newQNote, setNewQNote] = useState("");
-  const [newQQty, setNewQQty] = useState("");         // จำนวนที่ราคานี้ใช้ (ราคาขั้นบันได) — เว้นว่างได้
-  const [newQParent, setNewQParent] = useState("");   // ไซส์/แท็บที่จะเสนอราคา ("" = ทั่วไป)
-  const [qSaving, setQSaving] = useState(false);
-  const [editQid, setEditQid] = useState<string | null>(null);
-  const [editQ, setEditQ] = useState({ quote_date: "", price: "", offered: "", qty: "", note: "", parent_code: "" });
-  const [delQuote, setDelQuote] = useState<DesignSheetQuote | null>(null);
 
   // ---- เฟส 4: ตีราคา ----
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
@@ -616,12 +606,6 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     if (pool.length === 0) return null;
     return val(pool.reduce((a, b) => (b.round > a.round ? b : a))) ?? null;
   }, [quotes]);
-  // เลือกไซส์ในฟอร์มเสนอราคา → เด้ง "ราคาจากตีราคา" ของไซส์นั้น + ตั้ง "ราคาที่เสนอ" เท่ากัน (แก้ต่อได้)
-  useEffect(() => {
-    const t = totalForParent(newQParent);
-    const s = t > 0 ? String(t) : "";
-    setNewQPrice(s); setNewQOffered(s);
-  }, [newQParent, totalForParent]);
   // ต้นทุนวัสดุแยกตามชนิด (สำหรับการ์ดสรุป)
   const costByGroup = useMemo(() => {
     const m = new Map<string, number>();
@@ -1035,54 +1019,6 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบ comment ไม่สำเร็จ"); }
   };
 
-  const addQuote = async () => {
-    if (!form?.id || qSaving) return;
-    // ตีราคายังไม่บันทึก → บันทึกให้ก่อน (รอบเสนอราคาจะได้ผูกกับเวอร์ชันต้นทุนที่เห็นบนจอจริง)
-    if (costDirty && !(await saveCost())) return;
-    setQSaving(true);
-    try {
-      // ถ้าไม่กรอกราคาที่เสนอ ใช้ราคาจากตีราคาแทน
-      const offered = newQOffered !== "" ? Number(newQOffered) : (newQPrice !== "" ? Number(newQPrice) : null);
-      const res = await apiFetch(`/api/design-sheets/${form.id}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: newQDate || todayStr(), price: newQPrice === "" ? null : Number(newQPrice), offered_price: offered, qty: newQQty === "" ? null : Number(newQQty), status: newQStatus, note: newQNote || null, parent_code: newQParent }) });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      setNewQPrice(""); setNewQOffered(""); setNewQNote(""); setNewQQty(""); setNewQStatus("pending"); setNewQDate(todayStr());
-      await loadCq(form.id); toast.success(`เพิ่มรอบเสนอราคา ครั้งที่ ${j.round} แล้ว`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มรอบเสนอราคาไม่สำเร็จ"); }
-    finally { setQSaving(false); }
-  };
-
-  // เปลี่ยนสถานะรอบ (ผ่าน/ไม่ผ่าน) — บันทึกทันที + ดึงกลับถ้าพลาด
-  const patchQuoteStatus = async (q: DesignSheetQuote, status: string) => {
-    if (!form?.id) return;
-    const prev = quotes;
-    setQuotes((list) => list.map((x) => (x.id === q.id ? { ...x, status } : x)));
-    try {
-      const res = await apiFetch(`/api/design-sheets/${form.id}/quotes/${q.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-    } catch (e) { setQuotes(prev); toast.error(e instanceof Error ? e.message : "เปลี่ยนสถานะไม่สำเร็จ"); }
-  };
-
-  const startEditQuote = (q: DesignSheetQuote) => { setEditQid(q.id); setEditQ({ quote_date: q.quote_date ?? "", price: q.price != null ? String(q.price) : "", offered: q.offered_price != null ? String(q.offered_price) : "", qty: q.qty != null ? String(q.qty) : "", note: q.note ?? "", parent_code: q.parent_code ?? "" }); };
-  const saveEditQuote = async () => {
-    if (!form?.id || !editQid) return;
-    try {
-      const res = await apiFetch(`/api/design-sheets/${form.id}/quotes/${editQid}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: editQ.quote_date || null, price: editQ.price === "" ? null : Number(editQ.price), offered_price: editQ.offered === "" ? null : Number(editQ.offered), qty: editQ.qty === "" ? null : Number(editQ.qty), note: editQ.note || null, parent_code: editQ.parent_code }) });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      setEditQid(null); await loadCq(form.id); toast.success("แก้รอบเสนอราคาแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
-  };
-
-  const doDeleteQuote = async () => {
-    if (!form?.id || !delQuote) return;
-    try {
-      const res = await apiFetch(`/api/design-sheets/${form.id}/quotes/${delQuote.id}`, { method: "DELETE" });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      setDelQuote(null); await loadCq(form.id); toast.success("ลบรอบเสนอราคาแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
-  };
-
   // มุมมอง: ตาราง / Canvas (จำค่าล่าสุดไว้ในเครื่อง)
   const [view, setView] = useState<"table" | "canvas">(() =>
     typeof window !== "undefined" && window.localStorage.getItem("design-sheets-view") === "canvas" ? "canvas" : "table");
@@ -1238,11 +1174,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   }, []);
 
-  const openCreate = () => { setEditing(true); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
+  const openCreate = () => { setEditing(true); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
-    setModalTab(tab); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend();
+    setModalTab(tab); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend();
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
@@ -2371,157 +2307,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             </div>}
 
             {/* แท็บรอบเสนอราคา (เฟส 3) */}
-            {modalTab === "quotes" && form.id && <div className="space-y-2">
-              {canEdit && (
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs text-slate-400">บันทึกรอบเสนอราคาภายใน — หรือส่งสินค้าไปออกใบเสนอราคาจริงในระบบขาย</div>
-                  <button onClick={() => setToQuote(true)}
-                    className="h-8 px-3 text-sm border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">🧾 ส่งไปใบเสนอราคา</button>
-                </div>
-              )}
-              {canEdit && (
-                <div className="flex flex-wrap gap-1.5 items-center p-2 bg-slate-50 border border-slate-200 rounded-lg">
-                  <input type="date" value={newQDate} onChange={(e) => setNewQDate(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-36" />
-                  <select value={newQParent} onChange={(e) => setNewQParent(e.target.value)} title="เสนอราคาสำหรับไซส์/รายการไหน — เลือกแล้วเด้งราคาจากตีราคาของไซส์นั้นให้"
-                    className="h-8 px-2 text-sm border border-slate-200 rounded-lg">
-                    {costParentTabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-                  </select>
-                  <input type="number" min={0} step="any" value={newQPrice} onChange={(e) => setNewQPrice(e.target.value)} placeholder="ราคาจากตีราคา" title="ราคาอ้างอิงจากการตีราคา"
-                    className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg w-32" />
-                  <input type="number" min={0} step="any" value={newQOffered} onChange={(e) => setNewQOffered(e.target.value)} placeholder="ราคาที่เสนอ" title="ราคาที่เสนอลูกค้าจริง (ใช้อันนี้) — เว้นว่าง = ใช้ราคาจากตีราคา"
-                    className="h-8 px-2 text-sm text-right border border-blue-300 bg-blue-50/40 rounded-lg w-32 font-medium" />
-                  <input type="number" min={1} step="any" value={newQQty} onChange={(e) => setNewQQty(e.target.value)} placeholder="จำนวน (ชิ้น)" title="ราคานี้ใช้ที่จำนวนเท่าไหร่ (ราคาขั้นบันได เช่น 100 ชิ้น / 500 ชิ้น) — เว้นว่างได้"
-                    className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg w-28" />
-                  <select value={newQStatus} onChange={(e) => setNewQStatus(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg">
-                    {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                  <input value={newQNote} onChange={(e) => setNewQNote(e.target.value)} placeholder="หมายเหตุ" className="flex-1 min-w-[120px] h-8 px-2 text-sm border border-slate-200 rounded-lg" />
-                  <button onClick={addQuote} disabled={qSaving} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                    {qSaving ? "..." : `＋ เพิ่มครั้งที่ ${quotes.length + 1}`}</button>
-                </div>
-              )}
-              {quotes.length === 0 ? <div className="py-8 text-center text-sm text-slate-300">— ยังไม่เคยเสนอราคา —</div> : (
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-xs text-slate-500">
-                      <th className="border border-slate-200 px-2 py-1.5 w-14">ครั้งที่</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-32">วันที่เสนอ</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-24">ไซส์</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-28 text-right text-slate-400">ราคาจากตีราคา</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-28 text-right bg-blue-50 text-blue-600">ราคาที่เสนอ</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-24 text-right">จำนวน (ชิ้น)</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-40 text-right bg-emerald-50 text-emerald-700" title="ราคาที่เสนอ − ราคาจากตีราคา · % ของราคาที่เสนอ · รวม = ต่อชิ้น × จำนวน · เทียบราคาที่เสนอครั้งก่อนของไซส์เดียวกัน">ส่วนต่าง (กำไร)</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-28">สถานะ</th>
-                      <th className="border border-slate-200 px-2 py-1.5 text-left">หมายเหตุ</th>
-                      <th className="border border-slate-200 px-2 py-1.5 text-left w-64" title="ต้นทุนเปลี่ยนอะไรจากรอบก่อน (ไซส์เดียวกัน) — ระบบสรุปจากเวอร์ชันตีราคา กดเพื่อดูเต็ม">ที่เปลี่ยนจากครั้งก่อน</th>
-                      {canEdit && <th className="border border-slate-200 px-2 py-1.5 w-20"></th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {quotes.map((q, qi) => {
-                      const st = QUOTE_STATUS[q.status] ?? QUOTE_STATUS.pending;
-                      const editing = editQid === q.id;
-                      // ส่วนต่าง = ราคาที่เสนอ − ราคาจากตีราคา (ต่อชิ้น) · % ของราคาที่เสนอ · รวมตามจำนวน · เทียบราคาที่เสนอครั้งก่อนของไซส์เดียวกัน
-                      const offered = q.offered_price ?? q.price;
-                      const margin = offered != null && q.price != null ? offered - q.price : null;
-                      const marginPct = margin != null && offered ? (margin / offered) * 100 : null;
-                      const marginTotal = margin != null && q.qty != null ? margin * q.qty : null;
-                      const prevQ = quotes.slice(0, qi).reverse().find((p) => (p.parent_code ?? "") === (q.parent_code ?? "") && (p.offered_price ?? p.price) != null);
-                      const prevOffered = prevQ ? (prevQ.offered_price ?? prevQ.price) : null;
-                      const vsPrev = prevOffered != null && offered != null ? offered - prevOffered : null;
-                      const sgn = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtBaht(Math.abs(n))}`;
-                      const cls = (n: number) => (n > 0.004 ? "text-emerald-700" : n < -0.004 ? "text-rose-600" : "text-slate-400");
-                      return (
-                        <tr key={q.id}>
-                          <td className="border border-slate-200 px-2 py-1 text-center font-medium text-slate-600">{q.round}</td>
-                          <td className="border border-slate-200 px-2 py-1 text-center">
-                            {editing ? <input type="date" value={editQ.quote_date} onChange={(e) => setEditQ({ ...editQ, quote_date: e.target.value })} className="h-7 px-1 text-sm border border-slate-200 rounded" />
-                              : <span className="text-slate-600">{formatDate(q.quote_date)}</span>}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1 text-center">
-                            {editing ? (
-                              <select value={editQ.parent_code} onChange={(e) => setEditQ({ ...editQ, parent_code: e.target.value })} className="h-7 px-1 text-xs border border-slate-200 rounded">
-                                {costParentTabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-                              </select>
-                            ) : <span className="text-xs text-slate-500">{quoteSizeLabel(q.parent_code)}</span>}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums text-slate-400 leading-tight">
-                            {editing ? <input type="number" min={0} step="any" value={editQ.price} onChange={(e) => setEditQ({ ...editQ, price: e.target.value })} className="h-7 px-1 w-24 text-sm text-right border border-slate-200 rounded" />
-                              : (q.price != null ? Number(q.price).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : "—")}
-                            {/* ต้นทุน ณ ตอนเสนอ ต่างจาก "ตีราคาปัจจุบัน" ของไซส์นี้เท่าไหร่ (เจ้าของขอ) — กดเปิดเทียบเวอร์ชันได้ถ้ารอบนี้มีเวอร์ชันผูกไว้ */}
-                            {!editing && q.price != null && (() => {
-                              const cur = totalForParent(q.parent_code ?? "");
-                              if (!(cur > 0)) return null;
-                              const d = cur - Number(q.price); const pctv = Number(q.price) ? (d / Number(q.price)) * 100 : null;
-                              const same = Math.abs(d) < 0.005;
-                              const inner = same
-                                ? <span className="text-[10px] text-slate-400">= ปัจจุบัน</span>
-                                : <span className={`text-[10px] ${d > 0 ? "text-rose-600" : "text-emerald-700"}`}>ปัจจุบัน {fmtBaht(cur)} ({sgn(d)}{pctv != null ? ` · ${pctv > 0 ? "+" : "−"}${Math.abs(pctv).toFixed(1)}%` : ""})</span>;
-                              const tip = same ? "ตีราคาปัจจุบันของไซส์นี้เท่ากับตอนเสนอ" : `ตีราคาปัจจุบัน ${fmtBaht(cur)} − ตอนเสนอ ${fmtBaht(Number(q.price))} = ${sgn(d)} ต่อชิ้น (ต้นทุน${d > 0 ? "ขึ้น" : "ลง"})`;
-                              return q.cost_snapshot_id
-                                ? <button type="button" title={`${tip} — กดดูว่าวัสดุอะไรเปลี่ยน`} onClick={() => { setVersionsInit({ a: q.cost_snapshot_id ?? null, b: "current", parent: q.parent_code ?? "" }); setVersionsOpen(true); }} className="block w-full text-right hover:underline">{inner}</button>
-                                : <div title={tip}>{inner}</div>;
-                            })()}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums font-semibold text-blue-700 bg-blue-50/40">
-                            {editing ? <input type="number" min={0} step="any" value={editQ.offered} onChange={(e) => setEditQ({ ...editQ, offered: e.target.value })} placeholder="ใช้ราคาตีราคา" className="h-7 px-1 w-24 text-sm text-right border border-blue-300 rounded" />
-                              : (q.offered_price != null ? Number(q.offered_price).toLocaleString("th-TH", { minimumFractionDigits: 2 })
-                                : (q.price != null ? <span className="text-slate-400 font-normal">{Number(q.price).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span> : "—"))}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums text-slate-700">
-                            {editing ? <input type="number" min={1} step="any" value={editQ.qty} onChange={(e) => setEditQ({ ...editQ, qty: e.target.value })} placeholder="—" className="h-7 px-1 w-20 text-sm text-right border border-slate-200 rounded" />
-                              : (q.qty != null ? Number(q.qty).toLocaleString("th-TH") : <span className="text-slate-300">—</span>)}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums bg-emerald-50/30 leading-tight">
-                            {margin == null ? <span className="text-slate-300">—</span> : (
-                              <div title={`ราคาที่เสนอ ${fmtBaht(offered)} − ตีราคา ${fmtBaht(q.price)} = ${sgn(margin)} ต่อชิ้น${marginPct != null ? ` (${marginPct.toFixed(1)}% ของราคาที่เสนอ)` : ""}${marginTotal != null ? ` · × ${Number(q.qty).toLocaleString("th-TH")} ชิ้น = ${sgn(marginTotal)}` : ""}`}>
-                                <div className={`font-semibold ${cls(margin)}`}>{sgn(margin)}{marginPct != null && <span className="ml-1 text-[10px] font-normal opacity-80">({marginPct.toFixed(0)}%)</span>}</div>
-                                {marginTotal != null && <div className={`text-[11px] ${cls(marginTotal)}`}>รวม {sgn(marginTotal)}</div>}
-                                {vsPrev != null && <div className={`text-[10px] ${vsPrev === 0 ? "text-slate-400" : "text-slate-500"}`} title={`ราคาที่เสนอครั้งที่ ${prevQ?.round} = ${fmtBaht(prevOffered)}`}>เทียบครั้งที่ {prevQ?.round}: {vsPrev === 0 ? "เท่ากัน" : sgn(vsPrev)}</div>}
-                              </div>
-                            )}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1 text-center">
-                            {canEdit ? (
-                              <select value={q.status} onChange={(e) => patchQuoteStatus(q, e.target.value)} className={`h-7 px-1 text-xs rounded cursor-pointer ${st.cls}`}>
-                                {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                              </select>
-                            ) : <span className={`text-xs px-2 py-0.5 rounded ${st.cls}`}>{st.label}</span>}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1">
-                            {editing ? <input value={editQ.note} onChange={(e) => setEditQ({ ...editQ, note: e.target.value })} className="h-7 px-1 w-full text-sm border border-slate-200 rounded" />
-                              : <span className="text-slate-500">{q.note ?? ""}</span>}
-                          </td>
-                          <td className="border border-slate-200 px-2 py-1 text-xs leading-snug">
-                            {q.changes ? (
-                              q.changes.text ? (
-                                <button type="button" onClick={() => { setVersionsInit({ a: q.changes!.prev_snapshot_id, b: q.changes!.snapshot_id, parent: q.parent_code ?? "" }); setVersionsOpen(true); }}
-                                  className={`text-left hover:underline ${q.changes.total_diff > 0 ? "text-rose-700" : q.changes.total_diff < 0 ? "text-emerald-700" : "text-slate-600"}`} title="กดดูรายละเอียดเทียบเวอร์ชันตีราคา">
-                                  {q.changes.text}
-                                </button>
-                              ) : <span className="text-slate-400">เหมือนครั้งที่ {q.changes.prev_round}</span>
-                            ) : q.cost_snapshot_id ? (
-                              <button type="button" onClick={() => { setVersionsInit({ a: q.cost_snapshot_id ?? null, b: "current", parent: q.parent_code ?? "" }); setVersionsOpen(true); }} className="text-slate-400 hover:underline" title="รอบแรกของไซส์นี้ — กดดูต้นทุนเวอร์ชันที่ใช้เสนอ เทียบกับปัจจุบัน">ครั้งแรก · ดูต้นทุนที่ใช้</button>
-                            ) : <span className="text-slate-300" title="รอบเก่าก่อนมีระบบเวอร์ชันตีราคา — ไม่มีข้อมูลให้เทียบ">—</span>}
-                          </td>
-                          {canEdit && (
-                            <td className="border border-slate-200 px-1 py-1 text-center whitespace-nowrap">
-                              {editing ? (<>
-                                <button onClick={saveEditQuote} title="บันทึก" className="h-6 px-1.5 text-xs bg-emerald-600 text-white rounded mr-1">✓</button>
-                                <button onClick={() => setEditQid(null)} title="ยกเลิก" className="h-6 px-1.5 text-xs border border-slate-200 rounded">✕</button>
-                              </>) : (<>
-                                <button onClick={() => startEditQuote(q)} title="แก้" className="h-6 px-1.5 text-xs border border-slate-200 rounded text-slate-500 mr-1">✏</button>
-                                <button onClick={() => setDelQuote(q)} title="ลบ" className="h-6 px-1.5 text-xs border border-rose-200 rounded text-rose-500">🗑</button>
-                              </>)}
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>}
+            {modalTab === "quotes" && form.id && (
+              /* รอบเสนอราคาแบบ 1 ครั้ง = 1 การ์ด (ไซส์ × ขั้นจำนวน) — components/design-sheet-detail/quote-rounds.tsx */
+              <QuoteRounds sheetId={form.id} quotes={quotes} sizes={costParentTabs.map((t) => ({ key: t.key, label: t.label }))} sizeLabel={quoteSizeLabel}
+                currentCost={totalForParent} canEdit={canEdit} costDirty={costDirty} saveCost={saveCost}
+                onReload={() => loadCq(form.id!)}
+                onOpenVersions={(a, b, parent) => { setVersionsInit({ a, b, parent }); setVersionsOpen(true); }}
+                onSendToQuotation={canEdit ? () => setToQuote(true) : undefined} />
+            )}
             </div>
           </div>
         )}
@@ -2548,11 +2341,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         title="ลบ comment" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
         message={`ลบ comment วันที่ ${delComment ? formatDate(delComment.comment_date) : ""} หรือไม่? รูปประกอบของ comment นี้จะถูกลบออกจาก R2 ด้วย`} />
 
-      <ConfirmDialog open={delQuote !== null} onClose={() => setDelQuote(null)} onConfirm={doDeleteQuote}
-        title="ลบรอบเสนอราคา" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
-        message={`ลบรอบเสนอราคา ครั้งที่ ${delQuote?.round ?? ""} หรือไม่?`} />
-
-      {/* จัดการสถานะงาน (โซนบนกระดาน) — เปิดจากปุ่มบนหน้า Canvas */}
+{/* จัดการสถานะงาน (โซนบนกระดาน) — เปิดจากปุ่มบนหน้า Canvas */}
       <WorkflowStatusManager open={statusMgr} onClose={() => setStatusMgr(false)}
         entityType="design_sheet" actor={user?.email ?? null} onChanged={reloadStatuses} />
 
