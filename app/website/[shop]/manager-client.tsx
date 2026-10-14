@@ -31,6 +31,12 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState<"listings" | "categories" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders">("listings");
   const [categories, setCategories] = useState<CategoryDef[]>([]);
+  // ลิงก์จากที่อื่น (เช่น ป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") เปิดแท็บที่ระบุ ?tab= · ⚠️ ไม่ใช้ useSearchParams (อยู่ใน PlaygroundShell)
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    const ok = ["listings", "categories", "fieldmap", "design", "layout", "pages", "info", "orders"] as const;
+    if (t && (ok as readonly string[]).includes(t)) setTab(t as (typeof ok)[number]);
+  }, []);
 
   const load = useCallback(
     async (slug?: string) => {

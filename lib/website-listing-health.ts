@@ -33,3 +33,26 @@ export function listingIssues(x: ListingHealthInput): ListingIssue[] {
     out.push({ key: "color_no_image", label: `สีที่ยังไม่มีรูป ${noImg.length}`, detail: noImg.map((c) => c.label).join(", ") });
   return out;
 }
+
+/** ปัญหาระดับร้าน (รวมทุกรุ่นที่ขึ้นเว็บ) สำหรับ "ตรวจก่อนเผยแพร่" — ไม่มีราคา = error · ไม่มีรูป/ไม่อยู่หมวด = warning */
+export interface ShopPublishIssue {
+  blockId: null;
+  level: "error" | "warning";
+  message: string;
+  /** ลิงก์ไปแก้ (แท็บสินค้าบนเว็บ ตัวกรอง "ต้องแก้") */
+  fix?: string;
+}
+
+export function shopPublishIssues(rows: { code: string; published: boolean; issues: ListingIssue[] }[], fixHref?: string): ShopPublishIssue[] {
+  const live = rows.filter((r) => r.published);
+  const codes = (key: ListingIssue["key"]) => live.filter((r) => r.issues.some((i) => i.key === key)).map((r) => r.code);
+  const list = (cs: string[]) => cs.slice(0, 6).join(", ") + (cs.length > 6 ? ` และอีก ${cs.length - 6}` : "");
+  const out: ShopPublishIssue[] = [];
+  const noPrice = codes("no_price");
+  if (noPrice.length) out.push({ blockId: null, level: "error", message: `สินค้า ${noPrice.length} รุ่นยังไม่มีราคา — ลูกค้าเห็น "สอบถามราคา" สั่งออนไลน์ไม่ได้: ${list(noPrice)}`, fix: fixHref });
+  const noImg = codes("no_image");
+  if (noImg.length) out.push({ blockId: null, level: "warning", message: `สินค้า ${noImg.length} รุ่นยังไม่มีรูป: ${list(noImg)}`, fix: fixHref });
+  const noCat = codes("no_category");
+  if (noCat.length) out.push({ blockId: null, level: "warning", message: `สินค้า ${noCat.length} รุ่นยังไม่อยู่หมวดไหน (ไม่ขึ้นตอนลูกค้าเลือกหมวด): ${list(noCat)}`, fix: fixHref });
+  return out;
+}

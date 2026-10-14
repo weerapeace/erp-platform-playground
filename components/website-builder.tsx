@@ -749,6 +749,11 @@ export function WebsiteBuilder({
                   <li key={i} className="flex items-start gap-2 text-xs px-1 py-1">
                     <span className={it.level === "error" ? "text-red-600" : "text-amber-600"}>{it.level === "error" ? "✕" : "!"}</span>
                     <span className="flex-1 text-slate-700">{it.message}</span>
+                    {it.fix && (
+                      <a href={it.fix} target="_blank" rel="noopener" className="text-blue-600 hover:underline whitespace-nowrap">
+                        ไปแก้ ↗
+                      </a>
+                    )}
                     {it.blockId && (
                       <button
                         onClick={() => {

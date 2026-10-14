@@ -12,7 +12,7 @@
  * ของกลาง: BulkActionBar · useDragReorder/DragHandle · CopyButton · Drawer/ConfirmDialog · footer-save · ParentWebListings
  * ข้อมูล: /api/website/listings (guardApi products.view/edit + audit) — โหลดที่ manager-client แล้วส่งเข้ามา
  */
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
@@ -164,6 +164,10 @@ export function WebsiteListingsPanel({
   const [saving, setSaving] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  // ?filter=fix (จากป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") = เปิดตัวกรอง "⚠️ ต้องแก้"
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("filter") === "fix") setFilter("fix" as Filter);
+  }, []);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
   const { view, setView, saveDefault } = useViewPref("website_listings_view", VIEWS, "list");

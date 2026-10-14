@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { WebsiteBuilder, type Selection, type ChangeSummary } from "@/components/website-builder";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
+import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
 
 /** บันทึกร่างเงียบ ๆ หลังหยุดแก้ 1.5 วิ → พรีวิวโหลดใหม่เอง */
 const AUTOSAVE_MS = 1500;
@@ -133,8 +134,10 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   }, [undo, redo]);
 
   const isDirty = !eq(blocks, published) || hadDraft;
-  const issues: ValidationIssue[] = useMemo(() => validateBlocks(blocks as never), [blocks]);
-  const errors = issues.filter((i) => i.level === "error");
+  // ✅ ตรวจก่อนเผยแพร่ = ปัญหาในหน้า (Section) + ข้อมูลสินค้าของร้าน (ไม่มีราคา/รูป/หมวด)
+  const dataIssues = useShopPublishIssues(shopSlug);
+  const issues: ValidationIssue[] = useMemo(() => [...validateBlocks(blocks as never), ...dataIssues], [blocks, dataIssues]);
+  const [checkOpen, setCheckOpen] = useState(false);
 
   // สรุปว่าร่างต่างจากที่เผยแพร่ตรงไหน (ชื่อ Section อ่านออก) — โชว์ตอนกดป้าย "ยังไม่เผยแพร่"
   const changes: ChangeSummary = useMemo(() => summarizeChanges(blocks, published, types), [blocks, published, types]);
@@ -184,8 +187,8 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   }, [blocks, autoSave, loading]);
 
   const publish = async () => {
-    if (errors.length && !confirm(`พบ ${errors.length} จุดที่ควรแก้ก่อน\nยืนยันเผยแพร่ทั้งที่ยังมีปัญหา?`)) return;
-    if (!errors.length && !confirm("ยืนยันเผยแพร่โครงหน้าแรกนี้ไปยังเว็บไซต์จริง?")) return;
+    // ยืนยันผ่าน PublishCheckDialog แล้ว (โชว์รายการที่ควรแก้ก่อนกด)
+    setCheckOpen(false);
     setBusy("publish");
     try {
       const r = await apiFetch("/api/website/layout", {
@@ -286,9 +289,19 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
           onHistory: () => void loadVersions(),
           onDiscard: () => void discard(),
           onSaveDraft: () => void saveDraft(false),
-          onPublish: () => void publish(),
+          onPublish: () => setCheckOpen(true),
           busy: busy === "publish",
         }}
+      />
+
+      <PublishCheckDialog
+        open={checkOpen}
+        onClose={() => setCheckOpen(false)}
+        onConfirm={() => void publish()}
+        issues={issues}
+        what="หน้าแรก"
+        busy={busy === "publish"}
+        onGoBlock={(id) => setSelection({ blockId: id })}
       />
 
       {/* ประวัติเวอร์ชัน */}

@@ -12,6 +12,7 @@ import { WebsiteBuilder, type Selection } from "@/components/website-builder";
 import { summarizeChanges } from "@/components/website-layout-panel";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks } from "@/lib/website-blocks";
+import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
 
 type PageRow = {
   id: string;
@@ -50,6 +51,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [checkOpen, setCheckOpen] = useState(false);
+  // ✅ ตรวจก่อนเผยแพร่: ข้อมูลสินค้าของร้าน (ไม่มีราคา/รูป/หมวด)
+  const dataIssues = useShopPublishIssues(shopSlug);
   const [showSeo, setShowSeo] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const undoStack = useRef<Block[][]>([]);
@@ -232,11 +236,14 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     }
   };
 
-  const save = async (mode: "draft" | "publish") => {
+  const save = async (mode: "draft" | "publish", confirmed = false) => {
     if (!editId) return;
-    const errs = validateBlocks(blocks as never).filter((i) => i.level === "error");
-    if (mode === "publish" && errs.length && !confirm(`พบ ${errs.length} จุดที่ควรแก้ก่อน\nยืนยันเผยแพร่ทั้งที่ยังมีปัญหา?`)) return;
-    if (mode === "publish" && !errs.length && !confirm("เผยแพร่หน้านี้ไปยังเว็บไซต์จริง?")) return;
+    // เผยแพร่ = เปิดป๊อป "ตรวจก่อนเผยแพร่" ก่อน (รายการที่ควรแก้ + ข้อมูลสินค้า) · กดยืนยันในป๊อปแล้วค่อยเผยแพร่จริง
+    if (mode === "publish" && !confirmed) {
+      setCheckOpen(true);
+      return;
+    }
+    setCheckOpen(false);
     setBusy(mode);
     try {
       const r = await apiFetch("/api/website/pages", {
@@ -275,7 +282,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   /* ── หน้าจอแก้ไขหน้าเดียว ── */
   if (editId) {
     const previewSrc = siteUrl ? `${siteUrl}/${editSlug}?preview=1` : null;
-    const issues = validateBlocks(blocks as never);
+    const issues = [...validateBlocks(blocks as never), ...dataIssues];
     const unpublished = hasDraft || dirty || !eq(blocks, publishedBlocks);
     return (
       <div className="space-y-3">
@@ -346,6 +353,15 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             publishLabel: "เผยแพร่หน้านี้",
             busy: busy === "publish",
           }}
+        />
+        <PublishCheckDialog
+          open={checkOpen}
+          onClose={() => setCheckOpen(false)}
+          onConfirm={() => void save("publish", true)}
+          issues={issues}
+          what={` "${editTitle || "หน้านี้"}"`}
+          busy={busy === "publish"}
+          onGoBlock={(id) => setSelection({ blockId: id })}
         />
       </div>
     );

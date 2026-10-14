@@ -168,6 +168,8 @@ export interface ValidationIssue {
   blockId: string | null;
   level: "error" | "warning";
   message: string;
+  /** ลิงก์ไปแก้ที่อื่น (เช่น ข้อมูลสินค้า → แท็บสินค้าบนเว็บ) — เปิดแท็บใหม่ */
+  fix?: string;
 }
 
 export interface SectionSchema {
