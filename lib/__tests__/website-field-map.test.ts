@@ -17,7 +17,8 @@ describe("normalizeFieldMap — รายการหมวดของร้า
     const m = normalizeFieldMap({
       categories: [{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน" }],
     });
-    expect(m.categories).toEqual([{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน" }]);
+    // รูปหมวด / แบนเนอร์ / ลำดับสินค้า ยังไม่ตั้ง = ค่าว่าง (ไม่ทำให้หมวดเดิมเปลี่ยนหน้าตา)
+    expect(m.categories).toEqual([{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน", imageKey: null, bannerKey: null, order: [] }]);
   });
 
   it("คำโปรยที่ไม่ใช่ข้อความ / ยาวเกิน ถูกจัดให้เรียบร้อย ไม่ทำให้หมวดหาย", () => {
@@ -29,7 +30,7 @@ describe("normalizeFieldMap — รายการหมวดของร้า
     });
     expect(m.categories).toHaveLength(2);
     expect(m.categories[0].blurb).toBe("");
-    expect(m.categories[1].blurb).toHaveLength(120);
+    expect(m.categories[1].blurb).toHaveLength(240);
   });
 
   it("หมวดที่ไม่มีรหัสหรือไม่มีชื่อ ถูกตัดออก (กรอกค้างไว้ครึ่งเดียว)", () => {

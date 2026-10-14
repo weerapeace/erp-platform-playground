@@ -95,13 +95,15 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 เพิ่ม Section ใหม่ที่มีรูปเต็มจอ ให้ใช้ชื่อ key นี้เหมือนกัน
 
 ## ชุดหน้าตารูปของกลาง (imageLookFields + FramedImage)
-- ERP `lib/website-schema.ts` `imageLookFields({ ratio, frame?, allowAuto?, ratioHint? })` = ช่อง ratio · frame (มุมมน/เหลี่ยม/วงกลม/โค้ง/หัวใจ/หยัก/โพลารอยด์/แสตมป์) · border · borderColor
+- ERP `lib/website-schema.ts` `imageLookFields({ ratio, frame?, allowAuto?, ratioHint?, autoFrame? })` = ช่อง ratio · frame (มุมมน/เหลี่ยม/วงกลม/โค้ง/หัวใจ/หยัก/โพลารอยด์/แสตมป์) · border · borderColor
 - เว็บร้าน `src/components/home/FramedImage.tsx` วาดรูปตามชุดนี้ + crop (CSS `.gal-img` `.gal-fr-*` `.gal-paper-*` ใน globals.css)
-- ใช้อยู่: แกลเลอรีรูป · รูปคู่ข้อความ (+ `imgSize` ความกว้างรูป %) — Section ใหม่ที่มีรูปให้ใช้ชุดนี้ ไม่เขียนกรอบเอง
+- ใช้อยู่: แกลเลอรีรูป · รูปคู่ข้อความ (+ `imgSize` ความกว้างรูป %) · หลายคอลัมน์ (ค่าเริ่ม 4:3 มุมมน = แบบเดิม · ครอปรายคอลัมน์) · รูปภาพ (ค่าเริ่ม ratio "auto" ตามรูปจริง + frame "auto" = เต็มจอเหลี่ยม/อื่นมุมมน แบบเดิม · `mobileKey` รูปมือถือแยก) — Section ใหม่ที่มีรูปให้ใช้ชุดนี้ ไม่เขียนกรอบเอง
+- `autoFrame` = เพิ่มตัวเลือกทรง "อัตโนมัติ" (Section ตัดสินเองตามค่าอื่น) — เว็บร้านต้องแปลง "auto" เป็นทรงจริงก่อนส่งให้ FramedImage
 
 ## ช่องชนิด crop (ส่วนที่เห็น/ซูมของรูป)
 - `f("crop", "...", "crop", { cropImage: "imageKey", cropRatio: "ratio" })` เก็บ `{ x, y, zoom }` — ฟอร์มวาดของกลาง `ImageCropBox` (components/image-crop-box.tsx · ลากกรอบ/คลิกรูป + ซูม) กรอบตามสัดส่วนใน Section แม่
-- เว็บร้านวาดสูตรเดียวกัน: `object-fit: cover; object-position: x% y%; transform: scale(zoom/100); transform-origin: x% y%` (ใช้ที่แกลเลอรีรูป · รูปพื้นหลังผืนผ้าใบใช้ ImageCropBox ตัวเดียวกัน)
+- ไม่มีช่องสัดส่วน (รูปเต็มจอ) ใช้ `cropBox: "16:7"` = กรอบตายตัว ≈ แบนเนอร์บนจอคอม — ใช้ที่แบนเนอร์หลัก (Hero) · สไลด์ (รายสไลด์) · เว็บร้านวาดด้วย `cropStyle(crop)` (src/lib/image-crop.ts · ค่ากลาง = ไม่ใส่ style)
+- เว็บร้านวาดสูตรเดียวกัน: `object-fit: cover; object-position: x% y%; transform: scale(zoom/100); transform-origin: x% y%` (ใช้ที่แกลเลอรีรูป · รูปคู่ข้อความ · หลายคอลัมน์ · รูปภาพ · แบนเนอร์หลัก · สไลด์ · รูปพื้นหลังผืนผ้าใบใช้ ImageCropBox ตัวเดียวกัน)
 
 ## ⚡ พรีวิวสด (ตัวจัดหน้า → iframe เว็บร้าน)
 

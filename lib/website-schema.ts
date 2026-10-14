@@ -117,6 +117,8 @@ export interface FieldDef {
   cropImage?: string;
   /** ช่องชนิด crop: key ของสัดส่วนกรอบใน Section แม่ (ค่าแบบ "4:5" · "auto" = ตามรูป ไม่ต้องครอป) */
   cropRatio?: string;
+  /** ช่องชนิด crop: สัดส่วนกรอบตายตัว (ไม่มีช่องสัดส่วน เช่น แบนเนอร์เต็มจอ ≈ "16:7") — ใช้เมื่อไม่ได้ตั้ง cropRatio */
+  cropBox?: string;
 }
 
 export interface ShowIf {
@@ -212,7 +214,7 @@ const PRODUCT_LAYOUTS: FieldOption[] = [
  * คู่กับช่อง crop (ส่วนที่เห็น/ซูม — cropRatio: "ratio") ได้
  */
 const LINE_FRAME_KEYS = ["rounded", "rect", "circle", "arch"];
-const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: boolean; ratioHint?: string }): FieldDef[] => [
+const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: boolean; ratioHint?: string; autoFrame?: string }): FieldDef[] => [
   f("ratio", "สัดส่วนรูป", "select", {
     group: "layout",
     default: opts.ratio,
@@ -231,6 +233,7 @@ const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: bool
     group: "layout",
     default: opts.frame ?? "rounded",
     options: [
+      ...(opts.autoFrame ? [{ v: "auto", l: opts.autoFrame }] : []),
       { v: "rounded", l: "มุมมน" },
       { v: "rect", l: "เหลี่ยม" },
       { v: "circle", l: "วงกลม / วงรี" },
@@ -250,7 +253,7 @@ const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: bool
       { v: "double", l: "เส้นคู่" },
       { v: "dotted", l: "จุดไข่ปลา" },
     ],
-    showIf: { key: "frame", eq: LINE_FRAME_KEYS },
+    showIf: { key: "frame", eq: [...LINE_FRAME_KEYS, "auto"] },
   }),
   f("borderColor", "สีเส้นกรอบ", "select", {
     group: "layout",
@@ -262,7 +265,7 @@ const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: bool
       { v: "muted", l: "เทาอ่อน" },
       { v: "white", l: "ขาว" },
     ],
-    showIf: [{ key: "frame", eq: LINE_FRAME_KEYS }, { key: "border", eq: ["line", "double", "dotted"] }],
+    showIf: [{ key: "frame", eq: [...LINE_FRAME_KEYS, "auto"] }, { key: "border", eq: ["line", "double", "dotted"] }],
   }),
 ];
 
@@ -431,6 +434,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       link("secondary", "ปุ่มรอง", "", ""),
       image("imageKey", "รูปพื้นหลัง", { hint: "แนะนำกว้าง 1600px+ · ไม่ใส่ = พื้นหลังไล่สีจากธีม" }),
       image("mobileImageKey", "รูปพื้นหลัง (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · จอมือถือแคบ รูปแนวนอนจะโดนตัดข้าง แนะนำรูปแนวตั้ง 1080×1350+" }),
+      f("crop", "รูปพื้นหลัง: ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropBox: "16:7", hint: "กรอบ ≈ แบนเนอร์บนจอคอม (สูงจริงตามความสูงที่ตั้ง)" }),
       text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, hint: "มีผลกับ SEO" }),
       f("overlay", "ความทึบของสีทับรูป (%)", "range", { group: "media", default: 45, min: 0, numMax: 90, step: 5 }),
       f("videoUrl", "วิดีโอพื้นหลัง (ลิงก์ .mp4 / .webm)", "href", {
@@ -588,6 +592,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "full", l: "เต็มจอ" },
         ],
       }),
+      ...imageLookFields({ ratio: "auto", allowAuto: true, frame: "auto", autoFrame: "อัตโนมัติ (เต็มจอ = เหลี่ยม · อื่น = มุมมน)", ratioHint: "ตามรูปจริง = ไม่ตัด · เลือกสัดส่วน = ตัด + เลือกส่วนที่เห็นได้" }),
+      f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
     ],
     summary: (b) => (b.imageKey ? s(b.caption) || s(b.alt) || "รูปภาพ" : "ยังไม่ได้เลือกรูป"),
     validate: (b, label) => (b.imageKey && !s(b.alt) ? [{ level: "warning", message: `${label}: ยังไม่มีคำบรรยายรูป (Alt)` }] : []),
@@ -728,6 +734,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "plain", l: "ไม่มีกรอบ" },
         ],
       }),
+      ...imageLookFields({ ratio: "4:3", ratioHint: "รูปของทุกคอลัมน์ — เลือกส่วนที่เห็น/ซูมได้ทีละคอลัมน์" }),
     ],
     children: {
       key: "items",
@@ -739,6 +746,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       fields: [
         f("emoji", "ไอคอน (อีโมจิ)", "emoji", { default: "✨" }),
         image("imageKey", "รูป (ถ้ามี จะใช้แทนไอคอน)"),
+        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
         text("title", "หัวข้อ", { default: "หัวข้อ", max: 80 }),
         area("text", "ข้อความ", { default: "", max: 400 }),
         link("link", "ลิงก์ (ถ้ามี)", "", ""),
@@ -776,6 +784,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       fields: [
         image("imageKey", "รูปสไลด์", { hint: "แนะนำกว้าง 1600px+" }),
         image("mobileImageKey", "รูปสไลด์ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · แนะนำแนวตั้ง" }),
+        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropBox: "16:7", hint: "กรอบ ≈ สไลด์บนจอคอม" }),
         text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200 }),
         text("eyebrow", "คำโปรยเล็ก", { default: "", max: 80 }),
         text("title", "หัวข้อบนรูป", { default: "", max: 120, wide: true }),

@@ -147,3 +147,32 @@ describe("Block ย่อย + schema ใหม่", () => {
     expect((m as { embedUrl: string }).embedUrl).toContain("/maps/embed");
   });
 });
+
+describe("ชุดรูปกลางครบทุก Section (หลายคอลัมน์ · รูปภาพ · แบนเนอร์หลัก · สไลด์โชว์)", () => {
+  const field = (fields: { key: string }[], key: string) => fields.find((x) => x.key === key) as Record<string, unknown> | undefined;
+
+  it("รูปภาพ: ค่าเริ่ม = ตามรูปจริง + ทรงอัตโนมัติ (หน้าตาเหมือนเดิม ไม่ตัดรูปใคร)", () => {
+    const b = newBlock("image", 1) as unknown as Record<string, unknown>;
+    expect(b.ratio).toBe("auto");
+    expect(b.frame).toBe("auto");
+    expect(b.crop).toEqual({ x: 50, y: 50, zoom: 100 });
+    // บล็อกเก่า (ไม่มีช่องใหม่) ผ่าน normalize แล้วยังได้ค่าที่หน้าตาเหมือนเดิม
+    const [old] = normalizeBlocks([{ id: "i", type: "image", imageKey: "a/b", alt: "", caption: "", width: "full", href: "" }]) as unknown as Record<string, unknown>[];
+    expect(old.ratio).toBe("auto");
+    expect(old.frame).toBe("auto");
+  });
+
+  it("หลายคอลัมน์: 4:3 มุมมน (แบบเดิม) + ส่วนที่เห็นรายคอลัมน์ตามสัดส่วนของ Section", () => {
+    const b = newBlock("multicolumn", 1) as unknown as Record<string, unknown>;
+    expect(b.ratio).toBe("4:3");
+    expect(b.frame).toBe("rounded");
+    const crop = field(SECTION_SCHEMAS.multicolumn.children!.fields, "crop");
+    expect(crop?.cropImage).toBe("imageKey");
+    expect(crop?.cropRatio).toBe("ratio");
+  });
+
+  it("แบนเนอร์หลัก + สไลด์: ส่วนที่เห็น/ซูม กรอบตายตัว 16:7", () => {
+    expect(field(SECTION_SCHEMAS.hero.fields, "crop")?.cropBox).toBe("16:7");
+    expect(field(SECTION_SCHEMAS.slideshow.children!.fields, "crop")?.cropBox).toBe("16:7");
+  });
+});

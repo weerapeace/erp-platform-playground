@@ -112,7 +112,7 @@ function ListEditor({ items, placeholder, max, onChange }: { items: string[]; pl
 function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value: unknown; onChange: (v: unknown) => void; item?: Record<string, unknown>; parent?: Record<string, unknown> }) {
   const key = fd.cropImage ? item?.[fd.cropImage] : null;
   // สัดส่วนกรอบ: จาก Section แม่ (ช่องในชิ้นย่อย) หรือจากตัวเอง (ช่องใน Section)
-  const ratio = String((fd.cropRatio ? parent?.[fd.cropRatio] ?? item?.[fd.cropRatio] : null) ?? "1:1");
+  const ratio = String((fd.cropRatio ? parent?.[fd.cropRatio] ?? item?.[fd.cropRatio] : null) ?? fd.cropBox ?? "1:1");
   const o = (value ?? {}) as Record<string, unknown>;
   const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50), zoom: Number(o.zoom ?? 100) };
   const m = /^(\d+):(\d+)$/.exec(ratio);
