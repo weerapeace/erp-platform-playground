@@ -60,7 +60,7 @@ describe("canvas section", () => {
         type: "canvas",
         height: 99999,
         items: [
-          { id: "a", kind: "image", x: -99999, y: 50.6, w: 0, h: 300, rotate: 999, href: "javascript:alert(1)", frame: "star" },
+          { id: "a", kind: "image", x: -99999, y: 50.6, w: 0, h: 300, rotate: 999, href: "javascript:alert(1)", frame: "octopus" },
           { id: "b", kind: "weird", shape: "skull", href: "/shop" },
         ],
       },
@@ -120,7 +120,7 @@ describe("ป๊อปอัปแก้เต็มจอ — ของที�
   it("ค่าจากแถบเครื่องมือลอยในพรีวิวผ่านตัวกรองของ schema (ห้ามเปลี่ยน id/ชนิด · ค่ามั่วกลับเป็นค่าที่ปลอดภัย)", async () => {
     const { livePatch } = await import("../../components/website-canvas-tools");
     expect(livePatch({ id: "hack", kind: "button", frame: "ellipse", border: "lace", x: 10.6 })).toEqual({ frame: "ellipse", border: "lace", x: 11 });
-    expect(livePatch({ frame: "star", href: "javascript:alert(1)", color: "neon", unknownKey: 1 })).toEqual({ frame: "rect", href: "", color: "ink" });
+    expect(livePatch({ frame: "octopus", href: "javascript:alert(1)", color: "neon", unknownKey: 1 })).toEqual({ frame: "rect", href: "", color: "ink" });
     expect(livePatch({ label: "ซื้อเลย", size: 9999 })).toEqual({ label: "ซื้อเลย", size: 240 });
   });
 
@@ -253,5 +253,72 @@ describe("canvas รอบ 4", () => {
     expect(copies[0]).toMatchObject({ x: 24, y: 24 });
     expect(copies[0].group).toBe(copies[1].group);
     expect(copies[0].group).not.toBe("g1");
+  });
+});
+
+/**
+ * รอบ 5: เคลื่อนไหว · สีไล่ (ของกลาง) · กรอบใหม่ + กรอบจากรูป
+ */
+describe("canvas รอบ 5", () => {
+  it("ชิ้นเก่า = ไม่เคลื่อนไหว ไม่ไล่สี ไม่มีกรอบจากรูป", () => {
+    const [b] = normalizeBlocks([{ id: "c1", type: "canvas", items: [{ id: "a", kind: "image", imageKey: "x/a.png" }] }]) as unknown as Record<string, unknown>[];
+    expect((b.items as Record<string, unknown>[])[0]).toMatchObject({ anim: "", animDelay: 0, animSpeed: "normal", loop: "", loopSpeed: "normal", grad: "", overlayKey: null, overlayInset: 12 });
+  });
+  it("ค่าผิดถูกกรองทิ้ง (แบบโผล่/ขยับ/ทรง/สีไล่ ต้องอยู่ในรายการ · หน่วงเวลาจำกัด 0–3 วิ)", async () => {
+    const { livePatch } = await import("../../components/website-canvas-tools");
+    expect(livePatch({ anim: "explode", loop: "spin", animDelay: 99999, frame: "octopus", grad: "radial", color2: "brandDeep", overlayKey: "javascript:x" })).toEqual({
+      anim: "",
+      loop: "spin",
+      animDelay: 3000,
+      frame: "rect",
+      grad: "radial",
+      color2: "brandDeep",
+      overlayKey: null,
+    });
+    expect(livePatch({ anim: "pop", frame: "heart", overlayKey: "storefront-brand/x/frame.png" })).toEqual({ anim: "pop", frame: "heart", overlayKey: "storefront-brand/x/frame.png" });
+  });
+  it("โผล่ทีละชิ้น: เรียงบน→ล่าง ซ้าย→ขวา หน่วงไล่ 0.15 วิ · ชิ้นที่มีแบบโผล่อยู่แล้วคงแบบเดิม", async () => {
+    const { canvasStagger } = await import("../website-canvas");
+    const out = canvasStagger([
+      { id: "b", x: 0, y: 300, anim: "" },
+      { id: "a", x: 500, y: 100, anim: "pop" },
+      { id: "c", x: 100, y: 100, anim: "" },
+    ]);
+    expect(out.map((x) => x.id)).toEqual(["b", "a", "c"]);
+    expect(Object.fromEntries(out.map((x) => [x.id, [x.anim, x.animDelay]]))).toEqual({ c: ["fade-up", 0], a: ["pop", 150], b: ["fade-up", 300] });
+    const only = canvasStagger([{ id: "a", x: 0, y: 0 }, { id: "b", x: 0, y: 10 }], ["b"]);
+    expect(only[0]).not.toHaveProperty("animDelay");
+    expect(only[1]).toMatchObject({ anim: "fade-up", animDelay: 0 });
+  });
+  it("กรอบจากรูปนับเป็น 'ถูกใช้' ในคลังไฟล์", () => {
+    expect(canvasImageKeys([{ type: "canvas", items: [{ kind: "image", imageKey: "p/1.png", overlayKey: "f/frame.png" }] }]).sort()).toEqual(["f/frame.png", "p/1.png"]);
+  });
+  it("ทรงกรอบใหม่ใน schema ครบตามที่เว็บร้านรู้จัก + ทรง mask มีเส้นทาง", async () => {
+    const { CANVAS_FRAMES, CANVAS_FRAME_PATHS, CANVAS_FRAME_PRESETS, canvasFrameMask } = await import("../website-canvas");
+    expect(CANVAS_FRAMES.map((o) => o.v)).toEqual(["rect", "rounded", "ellipse", "arch", "heart", "star", "hexagon", "cloud", "blob", "scallop", "stamp", "polaroid", "mat"]);
+    for (const k of Object.keys(CANVAS_FRAME_PATHS)) expect(canvasFrameMask(k)).toMatch(/^url\("data:image\/svg\+xml,/);
+    expect(canvasFrameMask("rect")).toBeNull();
+    expect(CANVAS_FRAME_PRESETS.every((p) => CANVAS_FRAMES.some((o) => o.v === p.patch.frame))).toBe(true);
+  });
+});
+
+describe("สีไล่ (ของกลาง)", () => {
+  it("sanitizeGradient: จุดสีต้องเป็นสีธีมหรือ #hex · ไม่ถึง 2 จุด = null · ทิศผิด = บน→ล่าง", async () => {
+    const { sanitizeGradient } = await import("../website-gradient");
+    expect(sanitizeGradient({ dir: "radial", stops: ["brand", "#FFAA00", "javascript:x"] })).toEqual({ dir: "radial", stops: ["brand", "#ffaa00"] });
+    expect(sanitizeGradient({ dir: "sideways", stops: ["brandSoft", "white", "page", "ink"] })).toEqual({ dir: "down", stops: ["brandSoft", "white", "page"] });
+    expect(sanitizeGradient({ stops: ["brand"] })).toBeNull();
+  });
+  it("พื้นหลัง Section แบบไล่สี: ไม่มีสีไล่ที่ใช้ได้ = กลับเป็นค่าเริ่มต้น · เก็บสีไล่ไว้แม้สลับไปแบบอื่น", async () => {
+    const { sanitizeStyle } = await import("../website-blocks");
+    expect(sanitizeStyle({ bg: "gradient" }).bg).toBe("auto");
+    const s = sanitizeStyle({ bg: "gradient", bgGrad: { dir: "diag", stops: ["page", "brandSoft"] } });
+    expect(s).toMatchObject({ bg: "gradient", bgGrad: { dir: "diag", stops: ["page", "brandSoft"] } });
+    expect(sanitizeStyle({ bg: "page", bgGrad: { dir: "diag", stops: ["page", "brandSoft"] } })).toMatchObject({ bg: "page", bgGrad: { dir: "diag" } });
+  });
+  it("Section ทั่วไปได้แบบโผล่ใหม่ (เด้ง/หมุนเข้า/เบลอ) ด้วย", async () => {
+    const { sanitizeStyle } = await import("../website-blocks");
+    expect(sanitizeStyle({ motion: { entrance: "pop" } }).motion.entrance).toBe("pop");
+    expect(sanitizeStyle({ motion: { entrance: "explode" } }).motion.entrance).toBe("none");
   });
 });

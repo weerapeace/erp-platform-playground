@@ -43,6 +43,23 @@
 - **กลุ่ม** (`group` = รหัสเดียวกัน): Ctrl+G / ปุ่ม ⛓ จับกลุ่ม → คลิกชิ้นใดก็ได้ = เลือกทั้งกลุ่ม · คลิกซ้ำ = เฉพาะชิ้นนั้น · Ctrl+Shift+G / ✂ แยกกลุ่ม
 - **ยืดเต็มจอ** (`bleed`, รูป/ของตกแต่ง): กว้างซ้ายสุด–ขวาสุดของจอทุกขนาด (`left: calc(50% - 50vw); width: 100vw`) ใช้แค่ตำแหน่งแนวตั้ง · จุดจับเหลือบน/ล่าง · `.cv-sec` ตัดส่วนเกินแนวนอน (ไม่มีแถบเลื่อนข้าง)
 
+## การเคลื่อนไหว (✨)
+
+- **โผล่ตอนเลื่อนมาเจอ** (`anim`): fade-up · fade-in · slide-left/right · zoom · pop · spin-in · blur + `animDelay` (0–3000 ms) + `animSpeed`
+  - ใช้ **CSS ของกลาง `[data-motion]`** ตัวเดียวกับลูกเล่นของ Section (ERP `MOTION_ENTRANCES` ได้ pop/spin-in/blur เพิ่มด้วย) · `MotionObserver` + ตัวจับของผืนเอง (ชิ้นที่เพิ่งได้แบบโผล่) ใส่ `data-inview`
+- **ขยับตลอดเวลา** (`loop`): float · sway · pulse · spin · twinkle · bounce · wiggle · shine (รูป/ปุ่ม) + `loopSpeed` — **CSS ของกลางใหม่ `[data-loop]`** (ใส่ที่ element ไหนก็ได้) · หลายชิ้นเลื่อนจังหวะกันเอง (`loopOffset` จาก id)
+- โครง: `.cv-body` (ความทึบ) > `.cv-anim` (โผล่) > `.cv-loop` (ขยับ) — แยกชั้นกัน transform/opacity ไม่ชนกัน
+- ตัวจัดหน้า: ▶ ดูตัวอย่าง (`storefront-canvas-play`) · เลือกแบบโผล่แล้วเล่นให้ดูทันที · ระหว่างลาก loop หยุด (`data-dragging`) · "✨ โผล่ทีละชิ้น" (`canvasStagger`: บน→ล่าง หน่วงไล่ 0.15 วิ)
+- คนที่ตั้งเครื่อง "ลดการเคลื่อนไหว" = นิ่งทั้งหมด
+
+## กรอบรูป / สีไล่
+
+- ทรงใหม่: หัวใจ · ดาว · หกเหลี่ยม · ก้อนเมฆ · ทรงอิสระ = **mask จากเส้นทาง SVG** (`FRAME_PATHS` เว็บร้าน = `CANVAS_FRAME_PATHS` ERP) + เส้นรอบทรง (`FrameRing`: เส้น/จุด/เส้นคู่) · ขอบหยัก/แสตมป์ = CSS mask · โพลารอยด์/ขอบหนาสองชั้น = padding+พื้น
+- **กรอบจากรูปของร้าน** (`overlayKey` + `overlayInset` %): PNG พื้นใสวางทับรูป · อัลบั้ม "กรอบรูปเว็บ" ต่อร้าน (`/api/website/canvas-decor` kind `frame` → `store_settings.canvas_frame_album`) · นับเป็น "ถูกใช้" ในคลังไฟล์
+- **สีไล่ = ของกลาง** (`lib/website-gradient.ts` ↔ เว็บร้าน `src/lib/gradient.ts`): จุดสี = ชื่อสีธีมหรือ #hex 2–3 จุด · ทิศ down/right/diag/diag-up/radial
+  - พื้นหลังทุก Section: `style.bg = "gradient"` + `style.bgGrad` (แผง "รูปลักษณ์" → พื้นหลังบล็อก → ไล่สี · `GradientPicker`)
+  - ข้อความ/ของตกแต่งบนผืน: `grad` + `color` (สีเริ่ม) + `color2` (สีปลาย) — ข้อความใช้ background-clip:text · ของตกแต่งใช้ SVG gradient
+
 ## แม่แบบ (📐)
 
 - บันทึกทั้งผืน (ชิ้น · ตำแหน่งคอม/มือถือ · ความสูง · พื้นหลัง · สี) ลงตาราง **`website_canvas_templates`** → ใช้กับผืนอื่น หน้าอื่น หรือร้านอื่น
@@ -66,6 +83,9 @@
     x, y, w, h, rotate, opacity, hideMobile, locked,   // หน่วยบนผืนกว้าง 1200 (จอ 1200px = 1:1)
     mx, my, mw, mh, msize, malign,                      // มือถือแบบจัดเอง (ผืนกว้าง 400) · mw = 0 = ยังไม่ได้จัด
     group, bleed,                                       // กลุ่ม (รหัส) · ยืดเต็มความกว้างจอ (รูป/ของตกแต่ง)
+    anim, animDelay, animSpeed, loop, loopSpeed,        // โผล่ตอนเลื่อนมาเจอ · ขยับตลอดเวลา
+    grad, color2, color2Hex,                            // สีไล่ (ข้อความ/ของตกแต่ง)
+    overlayKey, overlayInset,                           // กรอบจากรูปของร้าน (PNG ทับรูป)
     href, newTab,                                       // กดแล้วไปที่ (กรอง javascript: ทิ้งทั้ง ERP และเว็บร้าน)
     // ข้อความ/ปุ่ม: text | label, variant, font, size, weight, italic, uppercase, spacing, lineHeight, align, color, colorHex, bg, bgHex
     // รูป: imageKey, alt, frame (rect|rounded|ellipse|arch), fit, border (none|line|double|dotted|lace), borderColor, borderHex, borderWidth, borderGap
@@ -124,6 +144,8 @@
 | เว็บ → ERP | `storefront-canvas-delete` / `-duplicate {blockId, childIds}` · `storefront-canvas-action {childIds, action: layer-front/back}` | คำสั่งกับหลายชิ้น (ย้อนกลับได้ในขั้นเดียว) |
 | ERP → เว็บ | `storefront-canvas-align {blockId, childIds, to}` | หลายชิ้น = ชิดกันเอง + `distribute-h/v` |
 | ERP → เว็บ | `storefront-canvas-mobile-freeze {blockId}` | วัดหน้ามือถือแบบเรียงอัตโนมัติ → ตอบ `storefront-canvas-change {mobileMode: "custom", mobileHeight, items:[{id,mx,my,mw,mh,msize,malign}]}` |
+| ERP → เว็บ | `storefront-canvas-play {blockId, childIds?}` | ▶ ดูตัวอย่าง "โผล่ตอนเลื่อนมาเจอ" (ไม่ระบุ = ทั้งผืน) |
+| เว็บ → ERP | `storefront-canvas-action {action: "pick-frame"}` | ปุ่ม "เลือก/อัปโหลดกรอบ" บนแถบลอย → ERP เปิดคลังกรอบรูปของร้าน |
 
 - เลือกชิ้น = `storefront-block-click {blockId, childId}` (CanvasSection ส่งเองด้วย เพราะหน้าเต็มจอไม่มีตัวห่อ Section) · แถบลอยมี `data-pv-ignore` ให้ PreviewBridge ปล่อยคลิกผ่าน
 - ผืน (`.cv-stage`) ก็มี `data-pv-ignore` ตอนแก้ — CanvasSection จัดการคลิกเอง (ไม่งั้น PreviewBridge ส่ง "เลือก Section" ซ้อนแล้วการเลือกหลายชิ้นหลุด)

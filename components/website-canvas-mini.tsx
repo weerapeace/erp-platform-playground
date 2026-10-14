@@ -9,7 +9,7 @@
 import type { CSSProperties } from "react";
 import { CanvasShape } from "@/components/website-canvas-shapes";
 import { swatchesOf, softOf, type ThemeColors } from "@/components/website-canvas-inspector";
-import { CANVAS_WIDTH } from "@/lib/website-canvas";
+import { CANVAS_WIDTH, canvasFrameMask } from "@/lib/website-canvas";
 
 const num = (v: unknown, fb: number) => (Number.isFinite(Number(v)) ? Number(v) : fb);
 
@@ -63,8 +63,29 @@ export function CanvasMiniPreview({
           const frame = String(it.frame ?? "rect");
           const radius = frame === "ellipse" ? "50%" : frame === "arch" ? "9999px 9999px 0 0" : frame === "rounded" ? Math.min(num(it.w, 100), num(it.h, 100)) * 0.08 * k : 0;
           const key = typeof it.imageKey === "string" && it.imageKey ? it.imageKey : null;
+          const mask = canvasFrameMask(frame);
+          const overlay = typeof it.overlayKey === "string" && it.overlayKey ? it.overlayKey : null;
+          if (overlay)
+            return (
+              <div key={String(it.id ?? i)} style={box}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {key && <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=300`} alt="" loading="lazy" style={{ position: "absolute", inset: `${num(it.overlayInset, 12)}%`, width: "auto", height: "auto", objectFit: "cover" }} />}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/api/r2-image?key=${encodeURIComponent(overlay)}&w=300`} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
+              </div>
+            );
           return (
-            <div key={String(it.id ?? i)} style={{ ...box, borderRadius: radius, overflow: "hidden", background: key ? undefined : softOf(theme.brand) }}>
+            <div
+              key={String(it.id ?? i)}
+              style={{
+                ...box,
+                borderRadius: mask ? 0 : radius,
+                overflow: "hidden",
+                background: key ? undefined : softOf(theme.brand),
+                ...(mask ? { WebkitMaskImage: mask, maskImage: mask, WebkitMaskSize: "100% 100%", maskSize: "100% 100%" } : null),
+                ...(frame === "polaroid" ? { background: "#fff", padding: `${12 * k}px ${12 * k}px ${42 * k}px` } : frame === "mat" ? { background: softOf(theme.brand), padding: 16 * k } : null),
+              }}
+            >
               {key && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img

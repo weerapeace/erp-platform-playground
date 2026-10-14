@@ -199,15 +199,20 @@ export function DecorLibrary({
   color,
   onPickShape,
   onPickSticker,
+  kind = "decor",
 }: {
   open: boolean;
   onClose: () => void;
   shopId: string;
   /** สีที่ใช้วาดตัวอย่างลายในตัว (สีแบรนด์ของร้าน) */
   color: string;
-  onPickShape: (shape: string) => void;
+  onPickShape?: (shape: string) => void;
   onPickSticker: (img: PickedImage) => void;
+  /** decor = คลังของตกแต่ง (มีลายในตัว) · frame = กรอบรูปของร้าน (PNG วางทับรูป) — อัลบั้มแยกกันต่อร้าน */
+  kind?: "decor" | "frame";
 }) {
+  const isFrame = kind === "frame";
+  const noun = isFrame ? "กรอบ" : "ของตกแต่ง";
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [albumId, setAlbumId] = useState<string | null>(null);
@@ -230,9 +235,9 @@ export function DecorLibrary({
       try {
         let aid = albumId;
         if (!aid) {
-          const r = await apiFetch("/api/website/canvas-decor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId }) });
+          const r = await apiFetch("/api/website/canvas-decor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, kind }) });
           const j = await r.json();
-          if (!r.ok || !j.albumId) throw new Error(j.error || "เปิดคลังของตกแต่งไม่สำเร็จ");
+          if (!r.ok || !j.albumId) throw new Error(j.error || `เปิดคลัง${noun}ไม่สำเร็จ`);
           aid = j.albumId as string;
           if (alive) setAlbumId(aid);
         }
@@ -265,7 +270,7 @@ export function DecorLibrary({
       setUploading((n) => n - 1);
     }
     if (fileRef.current) fileRef.current.value = "";
-    if (ok) toast.success(`เพิ่มของตกแต่ง ${ok} ชิ้นแล้ว`);
+    if (ok) toast.success(`เพิ่ม${noun} ${ok} ชิ้นแล้ว`);
     await load(albumId);
   };
 
@@ -294,11 +299,13 @@ export function DecorLibrary({
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title="คลังของตกแต่ง" size="xl" defaultExpanded={false}>
+      <ERPModal open={open} onClose={onClose} title={isFrame ? "กรอบรูปของร้าน" : "คลังของตกแต่ง"} size="xl" defaultExpanded={false}>
         <div className="space-y-5">
           <section>
             <div className="flex items-center gap-2 mb-2">
-              <p className="flex-1 text-sm font-semibold text-slate-800">ของร้าน <span className="font-normal text-xs text-slate-400">(อัปโหลดเอง · เก็บถาวร · ใช้ได้ทุกหน้าของร้านนี้)</span></p>
+              <p className="flex-1 text-sm font-semibold text-slate-800">
+                {isFrame ? "กรอบของร้าน" : "ของร้าน"} <span className="font-normal text-xs text-slate-400">(อัปโหลดเอง · เก็บถาวร · ใช้ได้ทุกหน้าของร้านนี้)</span>
+              </p>
               <input ref={fileRef} type="file" accept="image/png,image/svg+xml,image/webp,image/gif,image/jpeg" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
               <button disabled={!albumId || uploading > 0} onClick={() => fileRef.current?.click()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:border-blue-500 disabled:opacity-50">
                 {uploading > 0 ? `กำลังอัปโหลด… (${uploading})` : "⬆️ อัปโหลด"}
@@ -319,14 +326,19 @@ export function DecorLibrary({
                     </button>
                   </div>
                 ))}
-                <button onClick={() => fileRef.current?.click()} disabled={!albumId} className="aspect-square rounded-lg border-2 border-dashed border-slate-300 text-slate-400 text-xl hover:border-blue-400 hover:text-blue-500 disabled:opacity-50" title="อัปโหลดของตกแต่ง">
+                <button onClick={() => fileRef.current?.click()} disabled={!albumId} className="aspect-square rounded-lg border-2 border-dashed border-slate-300 text-slate-400 text-xl hover:border-blue-400 hover:text-blue-500 disabled:opacity-50" title={`อัปโหลด${noun}`}>
                   +
                 </button>
               </div>
             )}
-            <p className="mt-2 text-[11px] text-slate-400">แนะนำ PNG พื้นใส (เช่น โบว์ ดอกไม้ สติกเกอร์ของแบรนด์) · ไฟล์อยู่ในคลังไฟล์ อัลบั้ม &quot;ของตกแต่งเว็บ&quot; ของร้านนี้</p>
+            <p className="mt-2 text-[11px] text-slate-400">
+              {isFrame
+                ? 'แนะนำ PNG พื้นใส ตรงกลางโปร่ง (เช่น กรอบวินเทจ/กรอบดอกไม้จาก Canva) · กดเลือกแล้วกรอบจะวางทับรูป ปรับ "รูปห่างขอบ" ได้ · ไฟล์อยู่ในคลังไฟล์ อัลบั้ม "กรอบรูปเว็บ" ของร้านนี้'
+                : 'แนะนำ PNG พื้นใส (เช่น โบว์ ดอกไม้ สติกเกอร์ของแบรนด์) · ไฟล์อยู่ในคลังไฟล์ อัลบั้ม "ของตกแต่งเว็บ" ของร้านนี้'}
+            </p>
           </section>
 
+          {!isFrame && onPickShape && (
           <section>
             <p className="text-sm font-semibold text-slate-800 mb-2">
               ลายในตัว <span className="font-normal text-xs text-slate-400">(เปลี่ยนสีตามธีม/เลือกสีเองได้หลังวาง)</span>
@@ -353,6 +365,7 @@ export function DecorLibrary({
               })}
             </div>
           </section>
+          )}
         </div>
       </ERPModal>
       <ConfirmDialog
@@ -361,7 +374,7 @@ export function DecorLibrary({
         onConfirm={() => void doDelete()}
         loading={deleting}
         variant="danger"
-        title="ลบของตกแต่งนี้?"
+        title={`ลบ${noun}นี้?`}
         message={`"${confirmDel?.title ?? ""}" จะย้ายไปถังขยะของคลังไฟล์ (กู้คืนได้) — ถ้ายังวางอยู่บนเว็บ ระบบจะไม่ให้ลบ`}
         confirmText="ลบ"
       />

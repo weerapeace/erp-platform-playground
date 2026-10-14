@@ -11,6 +11,8 @@
  */
 import { useState } from "react";
 import { ColorInput } from "@/components/color-picker";
+import { GradientPicker } from "@/components/website-gradient-picker";
+import { GRADIENT_PRESETS } from "@/lib/website-gradient";
 import { DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, newBlock, type BlockMotion, type BlockStyle, type BlockType, type Visibility } from "@/lib/website-blocks";
 
 export type { BlockType, Visibility };
@@ -64,6 +66,22 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export function Seg<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { v: T; l: string }[] }) {
+  // ตัวเลือกเยอะ (> 6) = ตารางปุ่ม 3 คอลัมน์ (แถวเดียวปุ่มจะเล็กจนอ่านไม่ออก)
+  if (options.length > 6)
+    return (
+      <div className="grid grid-cols-3 gap-1">
+        {options.map((o) => (
+          <button
+            key={o.v}
+            type="button"
+            onClick={() => onChange(o.v)}
+            className={`px-2 py-1.5 text-xs rounded-md border transition ${value === o.v ? "bg-slate-900 border-slate-900 text-white font-medium" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+          >
+            {o.l}
+          </button>
+        ))}
+      </div>
+    );
   return (
     <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
       {options.map((o) => (
@@ -169,6 +187,9 @@ export function StylePanel({ value, onChange, defaultOpen = true, mode = "all" }
                       { v: "slide-left", l: "จากขวา" },
                       { v: "slide-right", l: "จากซ้าย" },
                       { v: "zoom", l: "ซูม" },
+                      { v: "pop", l: "เด้ง" },
+                      { v: "spin-in", l: "หมุนเข้า" },
+                      { v: "blur", l: "เบลอ→ชัด" },
                     ]}
                   />
                 </Field>
@@ -201,7 +222,8 @@ export function StylePanel({ value, onChange, defaultOpen = true, mode = "all" }
                 <Field label="พื้นหลังบล็อก">
                   <Seg
                     value={s.bg}
-                    onChange={(v) => set({ bg: v })}
+                    // เลือก "ไล่สี" ครั้งแรก = ใส่แบบสำเร็จแรกให้เลย (เห็นผลทันที)
+                    onChange={(v) => set(v === "gradient" && !s.bgGrad ? { bg: v, bgGrad: GRADIENT_PRESETS[0].g } : { bg: v })}
                     options={[
                       { v: "auto", l: "ตามเดิม" },
                       { v: "page", l: "พื้นเว็บ" },
@@ -209,9 +231,15 @@ export function StylePanel({ value, onChange, defaultOpen = true, mode = "all" }
                       { v: "brand", l: "สีแบรนด์" },
                       { v: "ink", l: "เข้ม" },
                       { v: "custom", l: "เลือกเอง" },
+                      { v: "gradient", l: "ไล่สี" },
                     ]}
                   />
                 </Field>
+                {s.bg === "gradient" && (
+                  <div className="mt-2 rounded-lg border border-slate-200 p-2.5">
+                    <GradientPicker value={s.bgGrad ?? null} onChange={(g) => set({ bg: "gradient", bgGrad: g })} />
+                  </div>
+                )}
                 {s.bg === "custom" && (
                   <div className="mt-2">
                     <ColorInput value={s.bgColor || "#ffffff"} onChange={(hex) => set({ bgColor: hex })} />

@@ -28,6 +28,7 @@ import {
   canvasItemPreset,
   canvasItemSummary,
   canvasMobilePreset,
+  canvasStagger,
   fitImageBox,
   instantiateCanvasTemplate,
   type CanvasKind,
@@ -103,6 +104,8 @@ export function CanvasEditor({
   /** ชุดที่พรีวิวบอกมาล่าสุด — ไม่ส่งซ้ำกลับไป (กันวนเลือก) */
   const lastFromFrame = useRef("");
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  /** เลือกกรอบจากรูปของร้านให้รูปชิ้นนี้ */
+  const [frameFor, setFrameFor] = useState<string | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const centerRef = useRef<HTMLDivElement>(null);
@@ -175,6 +178,7 @@ export function CanvasEditor({
       onSelect({ blockId: bid, childId });
       if (action === "replace-image") setChooser({ mode: "replace", childId });
       else if (action === "link") setLinkFor(childId);
+      else if (action === "pick-frame") setFrameFor(childId);
     },
     onMulti: (bid, ids) => {
       if (bid !== blockId) return;
@@ -222,7 +226,10 @@ export function CanvasEditor({
   const multiAction = (a: CanvasMultiAction) => {
     const ids = multiItems.map((x) => x.id);
     if (ids.length < 2) return;
-    if (a === "group" || a === "ungroup") {
+    if (a === "stagger") {
+      patchBlock(blockId, { items: canvasStagger(items, ids) });
+      window.setTimeout(() => replay(ids), 250);
+    } else if (a === "group" || a === "ungroup") {
       const g = a === "group" ? newGroupId() : "";
       patchBlock(blockId, { items: items.map((it) => (ids.includes(it.id) ? { ...it, group: g } : it)) });
     } else if (a === "front" || a === "back") patchBlock(blockId, { items: reorderLayerMany(items, ids, a) });
@@ -239,6 +246,8 @@ export function CanvasEditor({
       patchBlock(blockId, { items: items.map((it) => (ids.includes(it.id) ? { ...it, ...p } : it)) });
     }
   };
+  /** ▶ ดูตัวอย่าง: พรีวิวเล่น "โผล่ตอนเลื่อนมาเจอ" ใหม่ (ไม่ระบุ = ทั้งผืน) */
+  const replay = (ids?: string[]) => post({ type: "storefront-canvas-play", blockId, ...(ids?.length ? { childIds: ids } : {}) });
   const alignTo = (to: CanvasAlign) => {
     const ids = multiItems.length > 1 ? multiItems.map((x) => x.id) : selItem ? [selItem.id] : [];
     if (ids.length) post({ type: "storefront-canvas-align", blockId, childIds: ids, to });
@@ -333,6 +342,7 @@ export function CanvasEditor({
     else if (a === "replace-image" && target.childId) setChooser({ mode: "replace", childId: target.childId });
     else if (a === "link" && target.childId) setLinkFor(target.childId);
     else if (a === "templates") setTemplatesOpen(true);
+    else if (a === "pick-frame" && target.childId) setFrameFor(target.childId);
   }, [target]);
 
   if (!block) return null;
@@ -363,6 +373,9 @@ export function CanvasEditor({
             <span className="w-px h-5 bg-slate-200 mx-1" />
             <button onClick={() => setTemplatesOpen(true)} className="h-8 px-3 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-blue-400">
               📐 แม่แบบ
+            </button>
+            <button onClick={() => replay()} title="เล่น “โผล่ตอนเลื่อนมาเจอ” ของทุกชิ้นอีกครั้ง" className="h-8 px-3 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-violet-400">
+              ▶ ดูตัวอย่าง
             </button>
             <span className="hidden md:inline text-[11px] text-slate-400 ml-2 truncate">
               {device === "mobile"
@@ -535,6 +548,8 @@ export function CanvasEditor({
                   multi={multiItems}
                   onMulti={multiAction}
                   mobile={mobileCtl}
+                  onReplay={replay}
+                  onPickFrame={() => selItem && setFrameFor(selItem.id)}
                 />
               </div>
             </div>
@@ -572,6 +587,18 @@ export function CanvasEditor({
           })
         }
         onPickSticker={(img) => addImage(img, true)}
+      />
+      <DecorLibrary
+        kind="frame"
+        open={!!frameFor}
+        onClose={() => setFrameFor(null)}
+        shopId={ctx.shopId}
+        color={theme.brand}
+        onPickSticker={(img) => {
+          if (!frameFor) return;
+          const cur = items.find((x) => x.id === frameFor);
+          patchChild(blockId, frameFor, { overlayKey: img.key, overlayInset: Number(cur?.overlayInset) > 0 ? Number(cur?.overlayInset) : 12 });
+        }}
       />
       <ERPModal open={!!linkItem} onClose={() => setLinkFor(null)} title="กดแล้วไปที่" size="md" defaultExpanded={false} resizable={false} footer={<button onClick={() => setLinkFor(null)} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm">เสร็จ</button>}>
         {linkItem && (

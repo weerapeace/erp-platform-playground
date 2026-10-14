@@ -14,11 +14,26 @@ import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasShape } from "@/components/website-canvas-shapes";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
-import { CANVAS_BUTTON_VARIANTS, CANVAS_FONTS, CANVAS_FRAME_PRESETS, CANVAS_SHAPES, CANVAS_WEIGHTS, canvasMobileBox } from "@/lib/website-canvas";
+import {
+  CANVAS_BUTTON_VARIANTS,
+  CANVAS_ENTRANCES,
+  CANVAS_FONTS,
+  CANVAS_FRAME_PRESETS,
+  CANVAS_LOOPS,
+  CANVAS_NO_LINE_FRAMES,
+  CANVAS_SHAPES,
+  CANVAS_SPEEDS,
+  CANVAS_WEIGHTS,
+  canvasFrameMask,
+  canvasMobileBox,
+  canvasStagger,
+} from "@/lib/website-canvas";
+import { GRAD_DIRS, GRADIENT_PRESETS, type GradThemeHex } from "@/lib/website-gradient";
+import { GradientPicker } from "@/components/website-gradient-picker";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
 
 export type CanvasAlign = "top" | "left" | "middle" | "center" | "bottom" | "right" | "distribute-h" | "distribute-v";
-export type CanvasMultiAction = "group" | "ungroup" | "duplicate" | "delete" | "front" | "back" | "hideMobile" | "showMobile" | "lock" | "unlock";
+export type CanvasMultiAction = "group" | "ungroup" | "duplicate" | "delete" | "front" | "back" | "hideMobile" | "showMobile" | "lock" | "unlock" | "stagger";
 
 /** โหมดมือถือของผืน (ป๊อปอัปแก้เต็มจอส่งมา) */
 export interface CanvasMobileCtl {
@@ -57,6 +72,25 @@ export function swatchesOf(t: ThemeColors): { v: string; label: string; hex: str
 }
 
 const H = ({ children }: { children: ReactNode }) => <p className="text-[11px] font-semibold text-slate-500 mb-1.5">{children}</p>;
+const SCALLOP_MASK = "radial-gradient(circle closest-side, #000 97%, transparent) 0 0 / 10px 10px round, linear-gradient(#000 0 0) center / calc(100% - 10px) calc(100% - 10px) no-repeat";
+
+/** สีธีม (hex) → ชุดสีของตัวเลือกสีไล่ */
+export function gradThemeOf(t: ThemeColors): GradThemeHex {
+  return { ink: t.ink, brand: t.brand, brandDeep: t.brandDeep, brandSoft: softOf(t.brand), muted: t.muted, page: t.page, surface: t.surface, white: "#ffffff" };
+}
+
+/** ตัวเลือกแบบปุ่มหลายช่อง (การเคลื่อนไหว) */
+function Chips({ options, value, onPick }: { options: { v: string; l: string }[]; value: string; onPick: (v: string) => void }) {
+  return (
+    <div className="grid grid-cols-3 gap-1">
+      {options.map((o) => (
+        <button key={o.v || "none"} type="button" onClick={() => onPick(o.v)} className={`px-1.5 py-1.5 text-[11px] rounded-md border ${value === o.v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+          {o.l}
+        </button>
+      ))}
+    </div>
+  );
+}
 const seg = (on: boolean) => `flex-1 px-2 py-1.5 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
 
 function Swatches({ theme, value, hex, onPick, allowNone }: { theme: ThemeColors; value: string; hex: string; onPick: (v: string, hex?: string) => void; allowNone?: boolean }) {
@@ -94,6 +128,12 @@ function Slider({ label, value, min, max, step = 1, unit = "", onChange }: { lab
 
 const framePreview = (key: string): React.CSSProperties => {
   const base: React.CSSProperties = { width: 30, height: 38, background: "#f1d5dc" };
+  const mask = canvasFrameMask(key);
+  if (mask) return { ...base, WebkitMaskImage: mask, maskImage: mask, WebkitMaskSize: "100% 100%", maskSize: "100% 100%", ...(key === "cloud" ? { width: 40, height: 30 } : null) };
+  if (key === "scallop") return { ...base, borderRadius: 0, WebkitMask: SCALLOP_MASK, mask: SCALLOP_MASK };
+  if (key === "stamp") return { ...base, borderRadius: 0, outline: "3px dotted #fff", outlineOffset: -3, boxShadow: "0 0 0 1px #e2e8f0" };
+  if (key === "polaroid") return { ...base, borderRadius: 0, border: "3px solid #fff", borderBottomWidth: 9, boxShadow: "0 1px 5px rgba(15,23,42,.22)" };
+  if (key === "mat") return { ...base, background: "#b76e79", border: "5px solid #f1d5dc", outline: "1.5px solid #9d4e5a", outlineOffset: 2 };
   const r = key.startsWith("arch") ? "50% 50% 0 0 / 40% 40% 0 0" : key.startsWith("ellipse") || key === "lace" ? "50%" : key === "rounded" ? 8 : 2;
   const o =
     key === "lace" || key === "ellipse-dot"
@@ -122,9 +162,15 @@ export function CanvasInspector({
   multi = [],
   onMulti,
   mobile,
+  onReplay,
+  onPickFrame,
 }: {
   block: Block;
   item: ChildBlock | null;
+  /** เล่น "โผล่ตอนเลื่อนมาเจอ" ในพรีวิว (ไม่ระบุ = ทั้งผืน) */
+  onReplay?: (ids?: string[]) => void;
+  /** เปิดคลังกรอบรูปของร้าน (PNG วางทับรูป) */
+  onPickFrame?: () => void;
   /** เลือกหลายชิ้น (≥ 2) → แสดงแผงหลายชิ้นแทน */
   multi?: ChildBlock[];
   onMulti?: (a: CanvasMultiAction) => void;
@@ -165,6 +211,9 @@ export function CanvasInspector({
         </div>
         <button onClick={() => onMulti?.(grouped ? "ungroup" : "group")} className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100">
           {grouped ? "✂ แยกกลุ่ม" : "⛓ จับกลุ่ม (คลิกทีเดียวได้ทั้งชุด)"}
+        </button>
+        <button onClick={() => onMulti?.("stagger")} className="w-full rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm text-violet-700 hover:bg-violet-100">
+          ✨ ให้โผล่ทีละชิ้นตามลำดับ (บน→ล่าง)
         </button>
         <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
           <H>จัดชิดกัน (เทียบกรอบรวม)</H>
@@ -234,7 +283,39 @@ export function CanvasInspector({
               สีเอง
               <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={String(style.bgColor || "#ffffff")} onChange={(e) => onPatchBlock({ style: { ...style, bg: "custom", bgColor: e.target.value } })} />
             </label>
+            <button
+              title="ไล่สี"
+              onClick={() => onPatchBlock({ style: { ...style, bg: "gradient", bgGrad: style.bgGrad ?? GRADIENT_PRESETS[0].g } })}
+              className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${bg === "gradient" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}
+            >
+              <span className="w-3.5 h-3.5 rounded-full border border-black/10" style={{ background: `linear-gradient(180deg, ${softOf(theme.brand)}, ${theme.brand})` }} />
+              ไล่สี
+            </button>
           </div>
+          {bg === "gradient" && (
+            <div className="mt-2 rounded-lg border border-slate-200 p-2.5">
+              <GradientPicker value={(style.bgGrad as never) ?? null} theme={gradThemeOf(theme)} onChange={(g) => onPatchBlock({ style: { ...style, bg: "gradient", bgGrad: g } })} />
+            </div>
+          )}
+        </div>
+        <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-2.5 space-y-2">
+          <H>✨ การเคลื่อนไหวทั้งผืน</H>
+          <button
+            onClick={() => {
+              onPatchBlock({ items: canvasStagger(items) });
+              window.setTimeout(() => onReplay?.(), 250);
+            }}
+            className="w-full rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100"
+          >
+            ✨ ให้ทุกชิ้นโผล่ทีละชิ้น (บน→ล่าง)
+          </button>
+          <div className="flex gap-1.5">
+            <button className={seg(false)} onClick={() => onReplay?.()}>▶ ดูตัวอย่าง</button>
+            <button className={seg(false)} disabled={!items.some((x) => x.anim || x.loop)} onClick={() => onPatchBlock({ items: items.map((x) => ({ ...x, anim: "", animDelay: 0, loop: "" })) })}>
+              ล้างทั้งหมด
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-500">ตั้งทีละชิ้นได้ที่ &quot;✨ เคลื่อนไหว&quot; บนแถบลอย หรือแผงนี้ตอนเลือกชิ้น</p>
         </div>
         <div>
           <H>รูปพื้นหลังผืน</H>
@@ -295,6 +376,29 @@ export function CanvasInspector({
   const colorPick = (key: string, hexKey: string) => (v: string, hex?: string) => onPatchItem(hex ? { [key]: v, [hexKey]: hex } : { [key]: v });
 
   const mb = canvasMobileBox(item);
+  // สีไล่ (ข้อความ/ของตกแต่ง): สีแรก = ช่องสีด้านบน · ที่นี่เลือกทิศ + สีปลาย
+  const chip = (on: boolean) => `px-2 py-1 text-[11px] rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
+  const gradRow = (
+    <div>
+      <H>ไล่สี</H>
+      <div className="flex flex-wrap gap-1">
+        <button className={chip(!str("grad"))} onClick={() => onPatchItem({ grad: "" })}>
+          สีเดียว
+        </button>
+        {GRAD_DIRS.map((d) => (
+          <button key={d.v} className={chip(str("grad") === d.v)} onClick={() => onPatchItem({ grad: d.v })}>
+            {d.l}
+          </button>
+        ))}
+      </div>
+      {str("grad") && (
+        <div className="mt-2">
+          <H>สีปลาย</H>
+          <Swatches theme={theme} value={str("color2") || "brandSoft"} hex={str("color2Hex")} onPick={colorPick("color2", "color2Hex")} />
+        </div>
+      )}
+    </div>
+  );
   return (
     <div className="space-y-4">
       {/* ดูจอมือถือ: ผืนจัดเอง = แก้แยกจากคอม · เรียงอัตโนมัติ = บอกวิธีเปลี่ยน */}
@@ -405,7 +509,8 @@ export function CanvasInspector({
             <H>กรอบรูป</H>
             <div className="grid grid-cols-3 gap-1.5">
               {CANVAS_FRAME_PRESETS.map((p) => {
-                const on = p.patch.frame === item.frame && p.patch.border === item.border;
+                const exact = CANVAS_FRAME_PRESETS.find((q) => q.patch.frame === item.frame && q.patch.border === item.border);
+                const on = exact ? exact.key === p.key : p.patch.frame === item.frame && CANVAS_FRAME_PRESETS.find((q) => q.patch.frame === item.frame)?.key === p.key;
                 return (
                   <button key={p.key} onClick={() => onPatchItem(p.patch)} className={`flex flex-col items-center gap-1 rounded-lg border py-2 ${on ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-400"}`}>
                     <span style={framePreview(p.key)} />
@@ -415,7 +520,46 @@ export function CanvasInspector({
               })}
             </div>
           </div>
-          {str("border") && str("border") !== "none" && (
+          {!CANVAS_NO_LINE_FRAMES.includes(str("frame")) && (
+            <div>
+              <H>เส้นรอบกรอบ</H>
+              <div className="flex gap-1">
+                {(
+                  [
+                    ["none", "ไม่มี"],
+                    ["line", "เส้น"],
+                    ["dotted", "จุด"],
+                    ["double", "เส้นคู่"],
+                  ] as const
+                ).map(([v, l]) => (
+                  <button key={v} className={seg(str("border") === v)} onClick={() => onPatchItem({ border: v })}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="rounded-lg border border-slate-200 p-2.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex-1 text-[11px] font-semibold text-slate-500">กรอบจากรูปของร้าน (PNG วางทับรูป)</span>
+              <button onClick={() => onPickFrame?.()} className="rounded-md border border-slate-300 px-2 py-1 text-[11px] hover:border-blue-500">
+                {item.overlayKey ? "เปลี่ยน…" : "เลือก/อัปโหลด…"}
+              </button>
+            </div>
+            {Boolean(item.overlayKey) && (
+              <>
+                <div className="flex items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/api/r2-image?key=${encodeURIComponent(str("overlayKey"))}&w=200`} alt="" className="w-12 h-12 rounded object-contain border border-slate-200 bg-[repeating-conic-gradient(#f8fafc_0_25%,#fff_0_50%)] bg-[length:12px_12px]" />
+                  <button onClick={() => onPatchItem({ overlayKey: null })} className="text-[11px] text-red-600 hover:underline">
+                    เอากรอบรูปออก
+                  </button>
+                </div>
+                <Slider label="รูปห่างขอบกรอบ" value={num("overlayInset", 12)} min={0} max={40} unit="%" onChange={(n) => onPatchItem({ overlayInset: n })} />
+              </>
+            )}
+          </div>
+          {str("border") && str("border") !== "none" && !CANVAS_NO_LINE_FRAMES.includes(str("frame")) && (
             <>
               <div>
                 <H>สีเส้นกรอบ</H>
@@ -450,6 +594,7 @@ export function CanvasInspector({
             <H>สีตัวอักษร</H>
             <Swatches theme={theme} value={str("color")} hex={str("colorHex")} onPick={colorPick("color", "colorHex")} />
           </div>
+          {gradRow}
           <div>
             <H>จัดข้อความ</H>
             <div className="flex gap-1.5">
@@ -544,6 +689,7 @@ export function CanvasInspector({
             <H>สี</H>
             <Swatches theme={theme} value={str("color")} hex={str("colorHex")} onPick={colorPick("color", "colorHex")} />
           </div>
+          {gradRow}
           <div className="flex gap-1.5">
             <button className={seg(item.outline !== true)} onClick={() => onPatchItem({ outline: false })}>ทึบ</button>
             <button className={seg(item.outline === true)} onClick={() => onPatchItem({ outline: true })}>เส้น</button>
@@ -553,6 +699,54 @@ export function CanvasInspector({
           )}
         </>
       )}
+
+      {/* การเคลื่อนไหว (ทุกชนิด) */}
+      <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
+        <div className="flex items-center">
+          <span className="flex-1 text-[11px] font-semibold text-violet-800">✨ เคลื่อนไหว</span>
+          {str("anim") && (
+            <button onClick={() => onReplay?.([item.id])} className="text-[11px] text-violet-700 hover:underline">
+              ▶ ดูอีกครั้ง
+            </button>
+          )}
+        </div>
+        <div>
+          <H>โผล่ตอนเลื่อนมาเจอ</H>
+          <Chips
+            options={CANVAS_ENTRANCES}
+            value={str("anim")}
+            onPick={(v) => {
+              onPatchItem({ anim: v });
+              if (v) window.setTimeout(() => onReplay?.([item.id]), 250);
+            }}
+          />
+        </div>
+        {str("anim") && (
+          <>
+            <Slider label="หน่วงเวลาก่อนโผล่" value={Math.round(num("animDelay", 0) / 100) / 10} min={0} max={3} step={0.1} unit=" วิ" onChange={(n) => onPatchItem({ animDelay: Math.round(n * 1000) })} />
+            <div className="flex gap-1">
+              {CANVAS_SPEEDS.map((o) => (
+                <button key={o.v} className={seg((str("animSpeed") || "normal") === o.v)} onClick={() => onPatchItem({ animSpeed: o.v })}>
+                  {o.l}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <div>
+          <H>ขยับตลอดเวลา</H>
+          <Chips options={CANVAS_LOOPS.filter((o) => o.v !== "shine" || kind === "image" || kind === "button")} value={str("loop")} onPick={(v) => onPatchItem({ loop: v })} />
+        </div>
+        {str("loop") && (
+          <div className="flex gap-1">
+            {CANVAS_SPEEDS.map((o) => (
+              <button key={o.v} className={seg((str("loopSpeed") || "normal") === o.v)} onClick={() => onPatchItem({ loopSpeed: o.v })}>
+                {o.l}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* ทุกชนิด */}
       <div>

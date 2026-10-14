@@ -30,13 +30,87 @@ export const CANVAS_KINDS: FieldOption[] = [
 
 export const CANVAS_KIND_ICON: Record<CanvasKind, string> = { image: "🖼️", text: "🔤", button: "🔘", shape: "🎀" };
 
-/** ทรงของรูป */
+/** ทรงของรูป — ⚠️ ตรงกับ CANVAS_FRAMES ของเว็บร้าน */
 export const CANVAS_FRAMES: FieldOption[] = [
   { v: "rect", l: "สี่เหลี่ยม" },
   { v: "rounded", l: "มุมมน" },
   { v: "ellipse", l: "วงรี / วงกลม" },
   { v: "arch", l: "โค้งประตู" },
+  { v: "heart", l: "หัวใจ" },
+  { v: "star", l: "ดาว" },
+  { v: "hexagon", l: "หกเหลี่ยม" },
+  { v: "cloud", l: "ก้อนเมฆ" },
+  { v: "blob", l: "ทรงอิสระ" },
+  { v: "scallop", l: "ขอบหยัก" },
+  { v: "stamp", l: "แสตมป์" },
+  { v: "polaroid", l: "โพลารอยด์" },
+  { v: "mat", l: "ขอบหนาสองชั้น" },
 ];
+
+/**
+ * ทรงที่ตัดรูปด้วยเส้นทาง SVG (กรอบ 0–100 ยืดตามกล่อง) — ⚠️ ตรงกับ FRAME_PATHS ของเว็บร้าน
+ * ใช้วาดตัวอย่างในแผงขวา/ภาพย่อแม่แบบ
+ */
+export const CANVAS_FRAME_PATHS: Record<string, string> = {
+  heart: "M50 94C20 72 2 55 2 32 2 15 15 4 30 4c9 0 16 5 20 13C54 9 61 4 70 4c15 0 28 11 28 28 0 23-18 40-48 62Z",
+  star: "M50 2 62 36 98 37 69 58 80 95 50 73 20 95 31 58 2 37 38 36Z",
+  hexagon: "M25 3H75L99 50 75 97H25L1 50Z",
+  cloud: "M24 88C11 88 2 79 2 67 2 56 10 48 21 46 21 28 34 15 52 15 66 15 77 23 82 35 93 37 98 47 98 58 98 75 87 88 70 88Z",
+  blob: "M52 3C72 2 92 14 96 36 100 58 91 82 70 93 49 104 22 96 10 77-2 58 1 34 15 18 24 8 38 4 52 3Z",
+};
+
+/** ทรง → CSS mask-image (ตัวอย่างใน ERP) · ไม่ใช่ทรง mask = null */
+export function canvasFrameMask(frame: string): string | null {
+  const d = CANVAS_FRAME_PATHS[frame];
+  if (!d) return null;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'><path d='${d}'/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+/** ทรงที่เส้นรอบกรอบใช้ไม่ได้ (ตัดขอบเป็นลายอยู่แล้ว) */
+export const CANVAS_NO_LINE_FRAMES = ["scallop", "stamp", "polaroid"];
+
+/** การเคลื่อนไหว: โผล่ตอนเลื่อนมาเจอ — ⚠️ ค่าตรงกับ CSS ของกลาง [data-motion] เว็บร้าน (MOTION_ENTRANCES ของ Section ชุดเดียวกัน) */
+export const CANVAS_ENTRANCES: FieldOption[] = [
+  { v: "", l: "ไม่มี" },
+  { v: "fade-up", l: "ค่อย ๆ ขึ้นมา" },
+  { v: "fade-in", l: "จางเข้า" },
+  { v: "slide-right", l: "เลื่อนจากซ้าย" },
+  { v: "slide-left", l: "เลื่อนจากขวา" },
+  { v: "zoom", l: "ขยายเข้า" },
+  { v: "pop", l: "เด้งออกมา" },
+  { v: "spin-in", l: "หมุนเข้า" },
+  { v: "blur", l: "เบลอเป็นชัด" },
+];
+
+/** การเคลื่อนไหว: ขยับตลอดเวลา — ⚠️ ค่าตรงกับ CSS ของกลาง [data-loop] เว็บร้าน · shine ใช้กับรูป/ปุ่ม */
+export const CANVAS_LOOPS: FieldOption[] = [
+  { v: "", l: "นิ่ง" },
+  { v: "float", l: "ลอยขึ้นลง" },
+  { v: "sway", l: "แกว่ง" },
+  { v: "pulse", l: "เต้นตุบ" },
+  { v: "spin", l: "หมุนช้า" },
+  { v: "twinkle", l: "วิบวับ" },
+  { v: "bounce", l: "เด้งดึ๋ง" },
+  { v: "wiggle", l: "ส่าย" },
+  { v: "shine", l: "แสงวิ้ง (รูป/ปุ่ม)" },
+];
+
+export const CANVAS_SPEEDS: FieldOption[] = [
+  { v: "slow", l: "ช้า" },
+  { v: "normal", l: "ปกติ" },
+  { v: "fast", l: "เร็ว" },
+];
+
+/**
+ * โผล่ทีละชิ้นตามลำดับ: เรียงบน→ล่าง ซ้าย→ขวา แล้วหน่วงเวลาไล่กัน 0.15 วิ
+ * ชิ้นที่ยังไม่มีแบบโผล่ = "ค่อย ๆ ขึ้นมา" · ids ว่าง = ทุกชิ้น · คืนรายการใหม่ (ลำดับชั้นเดิม)
+ */
+export function canvasStagger<T extends Record<string, unknown> & { id: string }>(items: T[], ids?: string[]): (T & { anim?: unknown; animDelay?: number })[] {
+  const pick = items.filter((it) => !ids || ids.includes(it.id)).sort((a, b) => (Number(a.y) || 0) - (Number(b.y) || 0) || (Number(a.x) || 0) - (Number(b.x) || 0));
+  const delay = new Map(pick.map((it, i) => [it.id, Math.min(3000, i * 150)]));
+  return items.map((it) => (delay.has(it.id) ? { ...it, anim: s(it.anim) || "fade-up", animDelay: delay.get(it.id) } : it));
+}
 
 /** เส้นกรอบรอบรูป (เว้นระยะจากรูปได้ = กรอบลอย แบบเว็บสายวินเทจ) */
 export const CANVAS_BORDERS: FieldOption[] = [
@@ -162,6 +236,15 @@ export const CANVAS_FRAME_PRESETS: { key: string; label: string; patch: Record<s
   { key: "ellipse-dot", label: "วงรีจุดไข่ปลา", patch: { frame: "ellipse", border: "dotted", borderWidth: 3, borderGap: 8 } },
   { key: "arch-line", label: "โค้งเส้นลอย", patch: { frame: "arch", border: "line", borderWidth: 2, borderGap: 10 } },
   { key: "rect-double", label: "เส้นคู่", patch: { frame: "rect", border: "double", borderWidth: 2, borderGap: 10 } },
+  { key: "heart", label: "หัวใจ", patch: { frame: "heart", border: "none" } },
+  { key: "star", label: "ดาว", patch: { frame: "star", border: "none" } },
+  { key: "scallop", label: "ขอบหยัก", patch: { frame: "scallop", border: "none" } },
+  { key: "cloud", label: "ก้อนเมฆ", patch: { frame: "cloud", border: "none" } },
+  { key: "hexagon", label: "หกเหลี่ยม", patch: { frame: "hexagon", border: "none" } },
+  { key: "blob", label: "ทรงอิสระ", patch: { frame: "blob", border: "none" } },
+  { key: "polaroid", label: "โพลารอยด์", patch: { frame: "polaroid", border: "none" } },
+  { key: "stamp", label: "แสตมป์", patch: { frame: "stamp", border: "none" } },
+  { key: "mat", label: "ขอบหนาสองชั้น", patch: { frame: "mat", border: "line", borderWidth: 2, borderGap: 4 } },
 ];
 
 /** ขนาดรูปตอนวางลงผืน — ตามสัดส่วนรูปจริง (กว้างสุด maxW · สูงไม่เกิน maxH) */
@@ -298,8 +381,11 @@ export function canvasImageKeys(blocks: unknown): string[] {
   for (const b of Array.isArray(blocks) ? (blocks as Record<string, unknown>[]) : []) {
     if (b?.type !== "canvas") continue;
     if (typeof b.bgImageKey === "string" && b.bgImageKey) out.add(b.bgImageKey);
-    for (const it of Array.isArray(b.items) ? (b.items as Record<string, unknown>[]) : [])
+    for (const it of Array.isArray(b.items) ? (b.items as Record<string, unknown>[]) : []) {
       if (it?.kind === "image" && typeof it.imageKey === "string" && it.imageKey) out.add(it.imageKey);
+      // กรอบจากรูปที่ร้านอัปโหลด (วางทับรูป)
+      if (it?.kind === "image" && typeof it.overlayKey === "string" && it.overlayKey) out.add(it.overlayKey);
+    }
   }
   return [...out];
 }

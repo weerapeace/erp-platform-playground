@@ -23,6 +23,7 @@ import {
   type ValidationIssue,
 } from "@/lib/website-schema";
 import { sanitizeCustomHtml } from "@/lib/website-html";
+import { sanitizeGradient, type GradientValue } from "@/lib/website-gradient";
 
 export type { ValidationIssue };
 
@@ -70,12 +71,12 @@ export type BlockSpacing = "auto" | "none" | "sm" | "md" | "lg";
 export type BlockWidth = "auto" | "narrow" | "full";
 export type BlockAlign = "auto" | "left" | "center" | "right";
 /** พื้นหลัง — อิงสีจากธีมร้าน (เปลี่ยนธีมแล้วบล็อกเปลี่ยนตาม) */
-export type BlockBg = "auto" | "page" | "surface" | "brand" | "ink" | "custom";
+export type BlockBg = "auto" | "page" | "surface" | "brand" | "ink" | "custom" | "gradient";
 
 export const BLOCK_SPACINGS: readonly BlockSpacing[] = ["auto", "none", "sm", "md", "lg"];
 export const BLOCK_WIDTHS: readonly BlockWidth[] = ["auto", "narrow", "full"];
 export const BLOCK_ALIGNS: readonly BlockAlign[] = ["auto", "left", "center", "right"];
-export const BLOCK_BGS: readonly BlockBg[] = ["auto", "page", "surface", "brand", "ink", "custom"];
+export const BLOCK_BGS: readonly BlockBg[] = ["auto", "page", "surface", "brand", "ink", "custom", "gradient"];
 
 /** ค่าที่ตั้งทับเฉพาะมือถือ — "auto" = ใช้ค่าเดียวกับคอม */
 export interface BlockStyleMobile {
@@ -85,10 +86,11 @@ export interface BlockStyleMobile {
 }
 
 /** ลูกเล่น — โผล่ตอนเลื่อนถึง / ตอนชี้เมาส์ · "none" = ไม่มี (ค่าเริ่มต้น หน้าเว็บเหมือนเดิม) */
-export type MotionEntrance = "none" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom";
+export type MotionEntrance = "none" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom" | "pop" | "spin-in" | "blur";
 export type MotionHover = "none" | "lift" | "zoom" | "glow";
 export type MotionSpeed = "normal" | "slow" | "fast";
-export const MOTION_ENTRANCES: readonly MotionEntrance[] = ["none", "fade-up", "fade-in", "slide-left", "slide-right", "zoom"];
+/** ⚠️ CSS ของกลาง [data-motion] ที่เว็บร้าน globals.css — ผืนผ้าใบใช้ชุดเดียวกันต่อชิ้น (CANVAS_ENTRANCES) */
+export const MOTION_ENTRANCES: readonly MotionEntrance[] = ["none", "fade-up", "fade-in", "slide-left", "slide-right", "zoom", "pop", "spin-in", "blur"];
 export const MOTION_HOVERS: readonly MotionHover[] = ["none", "lift", "zoom", "glow"];
 export const MOTION_SPEEDS: readonly MotionSpeed[] = ["normal", "slow", "fast"];
 export interface BlockMotion {
@@ -107,6 +109,8 @@ export interface BlockStyle {
   bg: BlockBg;
   /** ใช้เมื่อ bg = "custom" เท่านั้น (#rrggbb) */
   bgColor: string;
+  /** ใช้เมื่อ bg = "gradient" (ของกลาง lib/website-gradient.ts) */
+  bgGrad?: GradientValue;
   width: BlockWidth;
   align: BlockAlign;
   /** ตั้งทับเฉพาะจอมือถือ (< 768px) */
@@ -639,14 +643,17 @@ export function sanitizeStyle(v: unknown): BlockStyle {
   const d = DEFAULT_BLOCK_STYLE;
   const bgColor = typeof o.bgColor === "string" && HEX6.test(o.bgColor.trim()) ? o.bgColor.trim().toLowerCase() : "";
   const bg = pickOne(o.bg, BLOCK_BGS, d.bg);
+  const bgGrad = sanitizeGradient(o.bgGrad);
   const m = (o.mobile ?? {}) as Record<string, unknown>;
   const mo = (o.motion ?? {}) as Record<string, unknown>;
   return {
     padTop: pickOne(o.padTop, BLOCK_SPACINGS, d.padTop),
     padBottom: pickOne(o.padBottom, BLOCK_SPACINGS, d.padBottom),
-    // เลือก "สีเอง" แต่ยังไม่ได้ใส่สี → ถือว่าไม่ได้ตั้ง กันบล็อกกลายเป็นพื้นโปร่งแปลก ๆ
-    bg: bg === "custom" && !bgColor ? d.bg : bg,
+    // เลือก "สีเอง"/"ไล่สี" แต่ยังไม่ได้ใส่สี → ถือว่าไม่ได้ตั้ง กันบล็อกกลายเป็นพื้นโปร่งแปลก ๆ
+    bg: (bg === "custom" && !bgColor) || (bg === "gradient" && !bgGrad) ? d.bg : bg,
     bgColor,
+    // เก็บสีไล่ไว้แม้สลับไปแบบอื่น (สลับกลับมาแล้วได้ของเดิม)
+    ...(bgGrad ? { bgGrad } : {}),
     width: pickOne(o.width, BLOCK_WIDTHS, d.width),
     align: pickOne(o.align, BLOCK_ALIGNS, d.align),
     mobile: {

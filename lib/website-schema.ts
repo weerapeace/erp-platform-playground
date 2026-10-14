@@ -25,16 +25,20 @@ import {
   CANVAS_BORDERS_ON,
   CANVAS_BUTTON_VARIANTS,
   CANVAS_COLORS,
+  CANVAS_ENTRANCES,
   CANVAS_FONTS,
   CANVAS_FRAMES,
   CANVAS_KINDS,
+  CANVAS_LOOPS,
   CANVAS_SHAPES,
+  CANVAS_SPEEDS,
   CANVAS_TEXT_BGS,
   CANVAS_WEIGHTS,
   canvasItemPreset,
   canvasItemSummary,
   validateCanvas,
 } from "@/lib/website-canvas";
+import { GRAD_DIRS } from "@/lib/website-gradient";
 
 /* ─────────── ชนิดช่องตั้งค่า ─────────── */
 
@@ -223,11 +227,17 @@ function canvasItemFields(): FieldDef[] {
     f("colorHex", "สีเอง", "color", { default: "", showIf: [colored, { key: "color", eq: "custom" }] }),
     f("bg", "พื้นหลังข้อความ (แถบ)", "select", { default: "none", options: CANVAS_TEXT_BGS, showIf: isText }),
     f("bgHex", "พื้นหลังสีเอง", "color", { default: "", showIf: [isText, { key: "bg", eq: "custom" }] }),
+    /* สีไล่ (ข้อความ/ของตกแต่ง): ทิศ + สีที่ 2 (สีแรก = ช่อง "สี") */
+    f("grad", "ไล่สี", "select", { default: "", options: [{ v: "", l: "ไม่ไล่ (สีเดียว)" }, ...GRAD_DIRS], showIf: { key: "kind", eq: ["text", "shape"] } }),
+    f("color2", "สีปลาย (ไล่สี)", "select", { default: "brandSoft", options: CANVAS_COLORS, showIf: [{ key: "kind", eq: ["text", "shape"] }, { key: "grad", eq: GRAD_DIRS.map((d) => d.v) }] }),
+    f("color2Hex", "สีปลายเอง", "color", { default: "", showIf: [{ key: "kind", eq: ["text", "shape"] }, { key: "color2", eq: "custom" }] }),
 
     /* รูป */
     image("imageKey", "รูป", { showIf: isImage, hint: "PNG พื้นใสก็ได้ (เช่น สติกเกอร์/โลโก้)" }),
     text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, showIf: isImage, hint: "มีผลกับ SEO" }),
     f("frame", "ทรงรูป", "select", { group: "media", default: "rect", options: CANVAS_FRAMES, showIf: isImage }),
+    image("overlayKey", "กรอบจากรูป (PNG พื้นใส วางทับรูป)", { showIf: isImage, hint: "อัปโหลดกรอบของร้านเองได้ (เช่น กรอบวินเทจจาก Canva) — ว่าง = ไม่มี" }),
+    f("overlayInset", "รูปห่างขอบกรอบ (%)", "range", { group: "media", default: 12, min: 0, numMax: 40, showIf: isImage }),
     f("fit", "การจัดรูปในกรอบ", "select", {
       group: "media",
       default: "cover",
@@ -267,6 +277,12 @@ function canvasItemFields(): FieldDef[] {
     f("opacity", "ความทึบ (%)", "range", { group: "layout", default: 100, min: 5, numMax: 100, step: 5 }),
     f("hideMobile", "ซ่อนบนมือถือ", "toggle", { group: "layout", default: false }),
     f("locked", "ล็อกตำแหน่ง (ลากไม่ได้)", "toggle", { group: "layout", default: false }),
+    /* การเคลื่อนไหว (CSS ของกลางที่เว็บร้าน: [data-motion] โผล่ตอนเลื่อนมาเจอ · [data-loop] ขยับตลอด) */
+    f("anim", "โผล่ตอนเลื่อนมาเจอ", "select", { group: "layout", default: "", options: CANVAS_ENTRANCES }),
+    f("animDelay", "หน่วงเวลาก่อนโผล่ (มิลลิวินาที)", "number", { group: "layout", default: 0, min: 0, numMax: 3000, step: 100, showIf: { key: "anim", eq: CANVAS_ENTRANCES.map((o) => o.v).filter(Boolean) } }),
+    f("animSpeed", "ความเร็วตอนโผล่", "select", { group: "layout", default: "normal", options: CANVAS_SPEEDS, showIf: { key: "anim", eq: CANVAS_ENTRANCES.map((o) => o.v).filter(Boolean) } }),
+    f("loop", "ขยับตลอดเวลา", "select", { group: "layout", default: "", options: CANVAS_LOOPS }),
+    f("loopSpeed", "ความเร็วการขยับ", "select", { group: "layout", default: "normal", options: CANVAS_SPEEDS, showIf: { key: "loop", eq: CANVAS_LOOPS.map((o) => o.v).filter(Boolean) } }),
     f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
     text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
 
