@@ -182,6 +182,66 @@ const link = (key: string, label: string, dText = "", dHref = "", extra: Partial
 const image = (key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "image", { group: "media", default: null, wide: true, ...extra });
 
 /** หัวข้อมาตรฐานของ Section ส่วนใหญ่: คำโปรยเล็ก + หัวข้อ (+ คำอธิบาย) */
+/**
+ * ของกลาง: ชุดตั้งค่าหน้าตารูป (สัดส่วน · ทรงกรอบ · เส้นกรอบ + สี) — ใช้ร่วมทุก Section ที่มีรูป (แกลเลอรี · รูปคู่ข้อความ …)
+ * key คงที่ ratio / frame / border / borderColor · เว็บร้านวาดด้วยตัวกลาง FramedImage (src/components/home/FramedImage.tsx)
+ * คู่กับช่อง crop (ส่วนที่เห็น/ซูม — cropRatio: "ratio") ได้
+ */
+const LINE_FRAME_KEYS = ["rounded", "rect", "circle", "arch"];
+const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: boolean; ratioHint?: string }): FieldDef[] => [
+  f("ratio", "สัดส่วนรูป", "select", {
+    group: "layout",
+    default: opts.ratio,
+    options: [
+      { v: "1:1", l: "จัตุรัส 1:1" },
+      { v: "4:5", l: "แนวตั้ง 4:5" },
+      { v: "3:4", l: "แนวตั้ง 3:4" },
+      { v: "2:3", l: "แนวตั้งสูง 2:3" },
+      { v: "4:3", l: "แนวนอน 4:3" },
+      { v: "16:9", l: "แนวนอนกว้าง 16:9" },
+      ...(opts.allowAuto ? [{ v: "auto", l: "ตามรูปจริง (ไม่ตัด)" }] : []),
+    ],
+    hint: opts.ratioHint,
+  }),
+  f("frame", "ทรงกรอบ", "select", {
+    group: "layout",
+    default: opts.frame ?? "rounded",
+    options: [
+      { v: "rounded", l: "มุมมน" },
+      { v: "rect", l: "เหลี่ยม" },
+      { v: "circle", l: "วงกลม / วงรี" },
+      { v: "arch", l: "โค้งประตู" },
+      { v: "heart", l: "หัวใจ" },
+      { v: "scallop", l: "ขอบหยัก" },
+      { v: "polaroid", l: "โพลารอยด์" },
+      { v: "stamp", l: "แสตมป์" },
+    ],
+  }),
+  f("border", "เส้นกรอบ", "select", {
+    group: "layout",
+    default: "none",
+    options: [
+      { v: "none", l: "ไม่มี" },
+      { v: "line", l: "เส้นเดียว" },
+      { v: "double", l: "เส้นคู่" },
+      { v: "dotted", l: "จุดไข่ปลา" },
+    ],
+    showIf: { key: "frame", eq: LINE_FRAME_KEYS },
+  }),
+  f("borderColor", "สีเส้นกรอบ", "select", {
+    group: "layout",
+    default: "brand",
+    options: [
+      { v: "brand", l: "สีแบรนด์" },
+      { v: "brandDeep", l: "แบรนด์เข้ม" },
+      { v: "ink", l: "ตัวอักษรหลัก" },
+      { v: "muted", l: "เทาอ่อน" },
+      { v: "white", l: "ขาว" },
+    ],
+    showIf: [{ key: "frame", eq: LINE_FRAME_KEYS }, { key: "border", eq: ["line", "double", "dotted"] }],
+  }),
+];
+
 const headFields = (opts: { eyebrow?: string; title?: string; subtitle?: boolean; subtitleMax?: number } = {}): FieldDef[] => [
   text("eyebrow", "คำโปรยเหนือหัวข้อ", { default: opts.eyebrow ?? "", max: 120, placeholder: "เช่น ขายดี" }),
   text("title", "หัวข้อ", { default: opts.title ?? "", max: 160, wide: true }),
@@ -515,57 +575,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     fields: [
       ...headFields({ title: "แกลเลอรี" }),
       f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 3, min: 1, numMax: 6 }),
-      f("ratio", "สัดส่วนรูป", "select", {
-        group: "layout",
-        default: "1:1",
-        options: [
-          { v: "1:1", l: "จัตุรัส 1:1" },
-          { v: "4:5", l: "แนวตั้ง 4:5" },
-          { v: "3:4", l: "แนวตั้ง 3:4" },
-          { v: "2:3", l: "แนวตั้งสูง 2:3" },
-          { v: "4:3", l: "แนวนอน 4:3" },
-          { v: "16:9", l: "แนวนอนกว้าง 16:9" },
-          { v: "auto", l: "ตามรูปจริง (ไม่ตัด)" },
-        ],
-        hint: "ตัดรูปเป็นสัดส่วนนี้ — เลือกส่วนที่เห็น/ซูมได้ทีละรูป (กดที่รูปในต้นไม้)",
-      }),
-      f("frame", "ทรงกรอบ", "select", {
-        group: "layout",
-        default: "rounded",
-        options: [
-          { v: "rounded", l: "มุมมน" },
-          { v: "rect", l: "เหลี่ยม" },
-          { v: "circle", l: "วงกลม / วงรี" },
-          { v: "arch", l: "โค้งประตู" },
-          { v: "heart", l: "หัวใจ" },
-          { v: "scallop", l: "ขอบหยัก" },
-          { v: "polaroid", l: "โพลารอยด์" },
-          { v: "stamp", l: "แสตมป์" },
-        ],
-      }),
-      f("border", "เส้นกรอบ", "select", {
-        group: "layout",
-        default: "none",
-        options: [
-          { v: "none", l: "ไม่มี" },
-          { v: "line", l: "เส้นเดียว" },
-          { v: "double", l: "เส้นคู่" },
-          { v: "dotted", l: "จุดไข่ปลา" },
-        ],
-        showIf: { key: "frame", eq: ["rounded", "rect", "circle", "arch"] },
-      }),
-      f("borderColor", "สีเส้นกรอบ", "select", {
-        group: "layout",
-        default: "brand",
-        options: [
-          { v: "brand", l: "สีแบรนด์" },
-          { v: "brandDeep", l: "แบรนด์เข้ม" },
-          { v: "ink", l: "ตัวอักษรหลัก" },
-          { v: "muted", l: "เทาอ่อน" },
-          { v: "white", l: "ขาว" },
-        ],
-        showIf: [{ key: "frame", eq: ["rounded", "rect", "circle", "arch"] }, { key: "border", eq: ["line", "double", "dotted"] }],
-      }),
+      ...imageLookFields({ ratio: "1:1", allowAuto: true, ratioHint: "ตัดรูปเป็นสัดส่วนนี้ — เลือกส่วนที่เห็น/ซูมได้ทีละรูป (กดที่รูปในพรีวิว/ต้นไม้)" }),
       f("gap", "ระยะห่างระหว่างรูป", "select", {
         group: "layout",
         default: "md",
@@ -659,7 +669,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     type: "image-text",
     meta: { label: "รูปคู่ข้อความ", icon: "🖼️", hint: "รูปด้านหนึ่ง ข้อความ+ปุ่มอีกด้าน", group: "เนื้อหา" },
     fields: [
-      image("imageKey", "รูปภาพ", { hint: "แนะนำสัดส่วน 4:3 หรือ 1:1", required: true, requiredMessage: "ยังไม่ได้เลือกรูป" }),
+      image("imageKey", "รูปภาพ", { hint: "ตั้งสัดส่วน/กรอบ/ขนาด/ส่วนที่เห็นได้ด้านล่าง", required: true, requiredMessage: "ยังไม่ได้เลือกรูป" }),
+      f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
+      f("imgSize", "ขนาดรูป (%)", "range", { group: "media", default: 100, min: 40, numMax: 100, step: 5, hint: "ความกว้างของรูปในฝั่งของรูป (100 = เต็มฝั่ง)" }),
       text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200 }),
       ...headFields({ subtitle: false }),
       area("body", "เนื้อหา", { default: "", max: 1500 }),
@@ -673,6 +685,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "right", l: "รูปขวา ข้อความซ้าย" },
         ],
       }),
+      ...imageLookFields({ ratio: "4:3" }),
     ],
     summary: (b) => s(b.title) || "รูปคู่ข้อความ",
   },

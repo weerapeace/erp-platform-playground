@@ -422,3 +422,20 @@ describe("แกลเลอรี / Spotlight / หมวด: ช่องใ�
     expect(c.imgSize).toBe(200);
   });
 });
+
+describe("ชุดหน้าตารูปของกลาง (imageLookFields)", () => {
+  it("รูปคู่ข้อความ: บล็อกเก่า = 4:3 มุมมน ขนาด 100% · ครอป/ขนาดถูกกรองช่วง", () => {
+    const [b] = normalizeBlocks([{ type: "image-text", imageKey: "x/a.jpg", imgSize: 10, crop: { x: 20, y: 300, zoom: 150 } }]) as unknown as Record<string, unknown>[];
+    expect([b.ratio, b.frame, b.border, b.imgSize]).toEqual(["4:3", "rounded", "none", 40]);
+    expect(b.crop).toEqual({ x: 20, y: 100, zoom: 150 });
+    const [old] = normalizeBlocks([{ type: "image-text", imageKey: "x/a.jpg" }]) as unknown as Record<string, unknown>[];
+    expect([old.ratio, old.frame, old.imgSize]).toEqual(["4:3", "rounded", 100]);
+  });
+  it("แกลเลอรีกับรูปคู่ข้อความใช้ช่องชุดเดียวกัน (ratio/frame/border/borderColor)", async () => {
+    const keys = (t: string) => SECTION_SCHEMAS[t as "gallery"].fields.map((f: FieldDef) => f.key);
+    for (const k of ["ratio", "frame", "border", "borderColor"]) {
+      expect(keys("gallery")).toContain(k);
+      expect(keys("image-text")).toContain(k);
+    }
+  });
+});
