@@ -78,12 +78,18 @@ export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
 export interface FieldOption {
   v: string;
   l: string;
+  /** โหมดปุ่มรูปย่อ (display "tiles"): ภาพร่างเล็ก ๆ ของตัวเลือก — ดู SKETCHES ใน components/website-schema-form */
+  sketch?: string;
+  /** โหมดปุ่มรูปย่อ: คำอธิบายสั้นใต้ชื่อ */
+  hint?: string;
 }
 
 export interface FieldDef {
   key: string;
   label: string;
   type: FieldType;
+  /** select: "tiles" = แสดงเป็นปุ่มรูปย่อให้กดเลือก (แทน dropdown) */
+  display?: "tiles";
   group?: FieldGroup;
   hint?: string;
   placeholder?: string;
@@ -1187,15 +1193,60 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       f("codes", "เลือกสินค้า", "products", { group: "products", default: [], max: 24, wide: true, showIf: { key: "source", eq: "manual" } }),
       f("category", "หมวด", "category", { group: "products", default: "", showIf: { key: "source", eq: "category" } }),
       f("limit", "จำนวนสูงสุด", "number", { group: "products", default: 8, min: 1, numMax: 24 }),
-      f("layout", "รูปแบบ", "select", {
+      // 🎛️ รูปแบบการโชว์ 9 แบบ (ปุ่มรูปย่อ) — เว็บร้าน: src/components/home/ProductsBlock.tsx · ทุกแบบใช้การ์ด/ไทล์สินค้าตัวกลาง
+      f("layout", "รูปแบบการโชว์", "select", {
         group: "layout",
         default: "grid",
+        wide: true,
+        display: "tiles",
         options: [
-          { v: "grid", l: "ตาราง" },
-          { v: "carousel", l: "เลื่อนข้าง (Carousel)" },
+          { v: "grid", l: "ตาราง", sketch: "grid", hint: "ใช้ได้ทุกกรณี" },
+          { v: "carousel", l: "เลื่อนข้าง", sketch: "carousel", hint: "สินค้าเยอะ กินที่น้อย" },
+          { v: "feature", l: "ตัวเด่น + ตาราง", sketch: "feature", hint: "ดันตัวแรก 1 ตัว + ตัวรอง 4" },
+          { v: "mosaic", l: "นิตยสาร (โมเสก)", sketch: "mosaic", hint: "ใหญ่-เล็กสลับ แบบแคตตาล็อก" },
+          { v: "lookbook", l: "ลุคบุ๊ก รูปใหญ่", sketch: "lookbook", hint: "รูปเต็ม ชื่อ/ราคาบนรูป" },
+          { v: "spotlight", l: "สปอตไลต์", sketch: "spotlight", hint: "ตัวกลางใหญ่ เลื่อนทีละตัว" },
+          { v: "rank", l: "อันดับขายดี", sketch: "rank", hint: "เลขอันดับ 01–05 ตัวใหญ่" },
+          { v: "tabs", l: "แท็บตามหมวด", sketch: "tabs", hint: "กดแท็บสลับหมวด" },
+          { v: "banner", l: "แบนเนอร์ + สินค้า", sketch: "banner", hint: "รูปแคมเปญ + สินค้าข้างกัน" },
         ],
       }),
-      f("columns", "คอลัมน์ (ตารางบนคอม)", "number", { group: "layout", default: 4, min: 2, numMax: 5 }),
+      f("columns", "คอลัมน์ (ตารางบนคอม)", "number", { group: "layout", default: 4, min: 2, numMax: 5, showIf: { key: "layout", eq: ["grid", "rank", "tabs"] } }),
+      f("side", "ตัวเด่น / แบนเนอร์ อยู่ด้าน", "select", {
+        group: "layout",
+        default: "left",
+        options: [
+          { v: "left", l: "ซ้าย" },
+          { v: "right", l: "ขวา" },
+        ],
+        showIf: { key: "layout", eq: ["feature", "banner"] },
+      }),
+      f("lookCols", "จำนวนรูปต่อแถว (จอคอม)", "select", {
+        group: "layout",
+        default: "2",
+        options: [
+          { v: "2", l: "2 รูป" },
+          { v: "3", l: "3 รูป" },
+        ],
+        showIf: { key: "layout", eq: "lookbook" },
+      }),
+      f("rankBy", "เรียงอันดับจาก", "select", {
+        group: "layout",
+        default: "sales",
+        options: [
+          { v: "sales", l: "ยอดขายบนเว็บจริง (ยังไม่มียอด = ตามลำดับที่ดึงมา)" },
+          { v: "order", l: "ตามลำดับที่ดึงมา / ที่เลือก" },
+        ],
+        wide: true,
+        showIf: { key: "layout", eq: "rank" },
+      }),
+      f("tabCats", "หมวดที่เป็นแท็บ", "categories", { group: "layout", default: [], max: 8, wide: true, hint: "ว่าง = ทุกหมวดที่มีสินค้า", showIf: { key: "layout", eq: "tabs" } }),
+      f("tabAll", "มีแท็บ \"ทั้งหมด\" เป็นแท็บแรก", "toggle", { group: "layout", default: true, hint: "ใช้สินค้าตาม \"ดึงสินค้าจาก\"", showIf: { key: "layout", eq: "tabs" } }),
+      f("bannerImage", "รูปแบนเนอร์", "image", { group: "layout", default: null, hint: "แนะนำแนวตั้ง 4:5 · ว่าง = ใช้รูปสินค้าตัวแรก", showIf: { key: "layout", eq: "banner" } }),
+      f("bannerEyebrow", "คำโปรยบนแบนเนอร์", "text", { group: "layout", default: "คอลเลกชันใหม่", max: 60, showIf: { key: "layout", eq: "banner" } }),
+      f("bannerTitle", "หัวข้อบนแบนเนอร์", "text", { group: "layout", default: "", max: 80, showIf: { key: "layout", eq: "banner" } }),
+      f("bannerText", "ข้อความบนแบนเนอร์", "textarea", { group: "layout", default: "", max: 300, showIf: { key: "layout", eq: "banner" } }),
+      link("bannerCta", "ปุ่มบนแบนเนอร์", "ดูคอลเลกชัน", "/shop", { group: "layout", showIf: { key: "layout", eq: "banner" } }),
       link("more", "ปุ่ม \"ดูทั้งหมด\"", "ดูทั้งหมด", "/shop"),
     ],
     summary: (b) => {

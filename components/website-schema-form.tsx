@@ -34,6 +34,38 @@ export const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 
 const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout"];
 
+/**
+ * ภาพร่างเล็ก ๆ ของตัวเลือกแบบปุ่มรูปย่อ (FieldOption.sketch) — กล่องเทา ๆ บอกการจัดวางคร่าว ๆ
+ * เพิ่มแบบใหม่: ใส่ key + ช่องในกริด (col/row เริ่ม 1 · span) ที่นี่ แล้วอ้าง sketch: "<key>" ใน schema
+ */
+type Cell = { c: number; r: number; cs?: number; rs?: number; dim?: boolean; dark?: boolean; h?: number };
+const SKETCHES: Record<string, { cols: number; rows: number; cells: Cell[] }> = {
+  grid: { cols: 4, rows: 2, cells: [1, 2, 3, 4].flatMap((c) => [{ c, r: 1 }, { c, r: 2 }]) },
+  carousel: { cols: 7, rows: 1, cells: [{ c: 1, r: 1, cs: 2 }, { c: 3, r: 1, cs: 2 }, { c: 5, r: 1, cs: 2 }, { c: 7, r: 1, dim: true }] },
+  feature: { cols: 4, rows: 2, cells: [{ c: 1, r: 1, cs: 2, rs: 2, dark: true }, { c: 3, r: 1 }, { c: 4, r: 1 }, { c: 3, r: 2 }, { c: 4, r: 2 }] },
+  mosaic: { cols: 4, rows: 2, cells: [{ c: 1, r: 1, cs: 2, rs: 2, dark: true }, { c: 3, r: 1 }, { c: 4, r: 1 }, { c: 3, r: 2, cs: 2 }] },
+  lookbook: { cols: 2, rows: 1, cells: [{ c: 1, r: 1, dark: true }, { c: 2, r: 1, dark: true }] },
+  spotlight: { cols: 5, rows: 1, cells: [{ c: 1, r: 1, dim: true, h: 60 }, { c: 2, r: 1, cs: 3, dark: true }, { c: 5, r: 1, dim: true, h: 60 }] },
+  rank: { cols: 5, rows: 1, cells: [1, 2, 3, 4, 5].map((c) => ({ c, r: 1, dark: c === 1 })) },
+  tabs: { cols: 4, rows: 3, cells: [{ c: 1, r: 1, h: 45, dark: true }, { c: 2, r: 1, h: 45, dim: true }, { c: 3, r: 1, h: 45, dim: true }, ...[1, 2, 3, 4].map((c) => ({ c, r: 2, rs: 2 }))] },
+  banner: { cols: 4, rows: 1, cells: [{ c: 1, r: 1, cs: 2, dark: true }, { c: 3, r: 1 }, { c: 4, r: 1 }] },
+};
+function LayoutSketch({ kind, on }: { kind: string; on: boolean }) {
+  const sk = SKETCHES[kind];
+  if (!sk) return null;
+  return (
+    <div className="grid gap-[3px] h-9 items-stretch" style={{ gridTemplateColumns: `repeat(${sk.cols}, 1fr)`, gridTemplateRows: `repeat(${sk.rows}, 1fr)` }} aria-hidden>
+      {sk.cells.map((x, i) => (
+        <span
+          key={i}
+          className={`rounded-[3px] self-center ${x.dark ? (on ? "bg-blue-400" : "bg-slate-400") : on ? "bg-blue-200" : "bg-slate-200"} ${x.dim ? "opacity-50" : ""}`}
+          style={{ gridColumn: `${x.c} / span ${x.cs ?? 1}`, gridRow: `${x.r} / span ${x.rs ?? 1}`, height: `${x.h ?? 100}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function Field({ label, hint, children, wide }: { label: string; hint?: string; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className={wide ? "sm:col-span-2" : ""}>
@@ -180,6 +212,30 @@ export function SchemaField({
         </Field>
       );
     case "select":
+      // 🎛️ ปุ่มรูปย่อ (display "tiles") — เห็นหน้าตาแต่ละแบบก่อนเลือก (เช่น รูปแบบการโชว์สินค้า)
+      if (fd.display === "tiles")
+        return (
+          <Field label={fd.label} hint={fd.hint} wide>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(fd.options ?? []).map((o) => {
+                const on = s === o.v;
+                return (
+                  <button
+                    key={o.v}
+                    type="button"
+                    onClick={() => onChange(o.v)}
+                    title={o.hint ?? o.l}
+                    className={`rounded-lg border p-1.5 text-left transition ${on ? "border-blue-500 bg-blue-50 ring-1 ring-blue-400" : "border-slate-200 bg-white hover:border-slate-400"}`}
+                  >
+                    {o.sketch && <LayoutSketch kind={o.sketch} on={on} />}
+                    <span className={`block text-[11px] leading-tight mt-1 ${on ? "text-blue-700 font-medium" : "text-slate-700"}`}>{o.l}</span>
+                    {o.hint && <span className="block text-[10px] leading-tight text-slate-400 mt-0.5">{o.hint}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        );
       return (
         <Field label={fd.label} hint={fd.hint} wide={fd.wide}>
           <select className={inputCls} value={s} onChange={(e) => onChange(e.target.value)}>

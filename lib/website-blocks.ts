@@ -221,8 +221,24 @@ export interface ProductsBlock extends BlockBase {
   codes: string[];
   category: string;
   limit: number;
-  layout: "grid" | "carousel";
+  /** รูปแบบการโชว์ (ปุ่มรูปย่อใน schema) — เว็บร้านวาดที่ src/components/home/ProductsBlock.tsx */
+  layout: "grid" | "carousel" | "feature" | "mosaic" | "lookbook" | "spotlight" | "rank" | "tabs" | "banner";
   columns: number;
+  /** ตัวเด่น / แบนเนอร์ อยู่ด้านไหน */
+  side?: "left" | "right";
+  /** ลุคบุ๊ก: รูปต่อแถวบนคอม */
+  lookCols?: "2" | "3";
+  /** อันดับขายดี: เรียงจากยอดขายจริง หรือตามลำดับที่ดึงมา */
+  rankBy?: "sales" | "order";
+  /** แท็บตามหมวด: หมวดที่เป็นแท็บ (ว่าง = ทุกหมวดที่มีสินค้า) + มีแท็บ "ทั้งหมด" ไหม */
+  tabCats?: string[];
+  tabAll?: boolean;
+  /** แบนเนอร์ + สินค้า */
+  bannerImage?: string | null;
+  bannerEyebrow?: string;
+  bannerTitle?: string;
+  bannerText?: string;
+  bannerCta?: CtaLink;
   more: CtaLink;
 }
 
