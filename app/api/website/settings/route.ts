@@ -67,6 +67,12 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
   const before = await readSiteInfo(sb, s.id);
   const info = normalizeSiteInfo(body.info);
+  if (info.promo_enabled) {
+    if (!info.promo_code) return NextResponse.json({ error: "เปิดป๊อปอัปลูกค้าใหม่แล้ว แต่ยังไม่ได้ใส่โค้ดที่แจก" }, { status: 400 });
+    const { data: cp } = await sb.from("store_coupons").select("id, active").eq("shop_id", s.id).eq("code", info.promo_code).maybeSingle();
+    if (!cp) return NextResponse.json({ error: `ไม่พบคูปอง ${info.promo_code} ในร้านนี้ — สร้างที่แท็บ 🎟️ คูปอง ก่อน` }, { status: 400 });
+    if (!(cp as { active: boolean }).active) return NextResponse.json({ error: `คูปอง ${info.promo_code} ปิดใช้งานอยู่ — เปิดที่แท็บ 🎟️ คูปอง ก่อน` }, { status: 400 });
+  }
   const { error } = await sb.from("store_settings").upsert(siteInfoToRows(s.id, info), { onConflict: "shop_id,key" });
   if (error) {
     console.error("[website/settings] upsert", error);

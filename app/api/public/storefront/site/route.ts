@@ -13,6 +13,8 @@ import { normalizeTheme } from "@/lib/website-theme";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
+import { couponLabel, evaluateCoupon } from "@/lib/website-coupons";
+import { couponUsage, loadCouponByCode } from "@/lib/website-coupons-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -66,7 +68,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   };
 
   // ข้อมูลร้าน (คำโปรย/ติดต่อ/ค่าส่ง/ช่องทางจ่าย) — ส่งเฉพาะชุดสาธารณะ
-  const info = publicSiteInfo(await readSiteInfo(sb, s.id));
+  const info: ReturnType<typeof publicSiteInfo> & { promo_label?: string } = publicSiteInfo(await readSiteInfo(sb, s.id));
+  // 🎁 ป๊อปอัปลูกค้าใหม่: แนบคำอธิบายส่วนลดของโค้ด · คูปองปิด/หมดอายุ/ไม่มีจริง = ปิดป๊อปอัปให้เอง (ไม่แจกโค้ดที่ใช้ไม่ได้)
+  if (info.promo_enabled) {
+    const cp = info.promo_code ? await loadCouponByCode(sb, s.id, info.promo_code) : null;
+    // ยอดสมมุติ = ถึงขั้นต่ำพอดี (ดูแค่ว่าโค้ดยังเปิด/ไม่หมดอายุ/ยังไม่ครบจำนวน) · ไม่รู้เบอร์ลูกค้า
+    const usable = cp && evaluateCoupon(cp, Math.max(cp.minSubtotal, 1000), await couponUsage(sb, cp));
+    if (cp && usable && usable.ok) info.promo_label = couponLabel(cp);
+    else info.promo_enabled = false;
+  }
 
   const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
   const layoutSource = preview && s.home_layout_draft != null ? s.home_layout_draft : s.home_layout;

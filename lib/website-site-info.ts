@@ -10,13 +10,15 @@
  * กฎ: ฟิลด์ที่ `isPublic: false` (เช่น prefix เลขออเดอร์) ห้ามหลุดไป API สาธารณะ — ดู publicSiteInfo()
  */
 
+import { normalizeCouponCode } from "@/lib/website-coupons";
+
 export type SiteInfoType = "text" | "textarea" | "number" | "bool";
 
 export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order";
+  group: "shop" | "contact" | "order" | "promo";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -27,6 +29,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "shop", label: "🏪 ร้าน", hint: "ข้อความแนะนำร้านที่โชว์ท้ายเว็บและใน Google" },
   { key: "contact", label: "📞 ช่องทางติดต่อ", hint: "ขึ้นที่ท้ายเว็บและหน้า /contact — เว้นว่างช่องไหน เว็บจะไม่โชว์ช่องนั้น" },
   { key: "order", label: "🧾 การสั่งซื้อ", hint: "ค่าส่ง ช่องทางชำระเงิน และเลขที่ออเดอร์ — มีผลทันทีตอนลูกค้ากดสั่ง" },
+  { key: "promo", label: "🎁 ป๊อปอัปลูกค้าใหม่", hint: "โผล่ครั้งเดียวต่อผู้เข้าชม (ไม่โผล่หน้าชำระเงิน) · แจกโค้ดจากแท็บ 🎟️ คูปอง — สร้างคูปองก่อนแล้วใส่โค้ดที่นี่" },
 ];
 
 export const SITE_INFO_FIELDS: SiteInfoField[] = [
@@ -63,6 +66,14 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "promptpay_name", label: "ชื่อบัญชีพร้อมเพย์", group: "order", type: "text", isPublic: true },
   { key: "order_note", label: "ข้อความแจ้งลูกค้าตอนสั่งซื้อ", hint: "เช่น จัดส่งภายใน 1-2 วันทำการหลังยืนยันยอด", group: "order", type: "text", isPublic: true },
   { key: "order_prefix", label: "ตัวย่อเลขที่ออเดอร์", hint: "A-Z 0-9 ไม่เกิน 6 ตัว · เว้นว่าง = ใช้ตัวอักษรจากชื่อร้าน · เลขจะเป็น XX-256910-00001", group: "order", type: "text", isPublic: false },
+
+  // ─── 🎁 ป๊อปอัปลูกค้าใหม่ (เว็บร้าน src/components/layout/PromoPopup.tsx) ───
+  { key: "promo_enabled", label: "เปิดป๊อปอัปแจกโค้ดลูกค้าใหม่", group: "promo", type: "bool", isPublic: true },
+  { key: "promo_code", label: "โค้ดที่แจก", hint: "ต้องเป็นคูปองที่สร้างไว้ในแท็บ 🎟️ คูปอง ของร้านนี้ (ระบบตรวจให้ตอนบันทึก)", group: "promo", type: "text", isPublic: true, placeholder: "WELCOME10" },
+  { key: "promo_title", label: "หัวข้อป๊อปอัป", hint: "เว้นว่าง = 'ส่วนลดสำหรับลูกค้าใหม่'", group: "promo", type: "text", isPublic: true, placeholder: "ส่วนลดสำหรับลูกค้าใหม่" },
+  { key: "promo_text", label: "ข้อความในป๊อปอัป", hint: "เว้นว่าง = บอกส่วนลดของโค้ดให้เอง (เช่น ลด 10% เมื่อซื้อครบ ฿590)", group: "promo", type: "textarea", isPublic: true },
+  { key: "promo_collect_email", label: "ให้กรอกอีเมลก่อนเห็นโค้ด", hint: "อีเมลเข้ารายชื่อรับข่าวสารของร้าน (ระบบเดียวกับ Section สมัครรับข่าวสาร) · ปิด = เห็นโค้ดทันที", group: "promo", type: "bool", isPublic: true },
+  { key: "promo_delay", label: "โผล่หลังเข้าเว็บกี่วินาที", hint: "0–60 · แนะนำ 5–10 (ให้ลูกค้าได้ดูของก่อน)", group: "promo", type: "number", isPublic: true },
 ];
 
 export const SITE_INFO_KEYS = SITE_INFO_FIELDS.map((f) => f.key);
@@ -95,6 +106,12 @@ export interface SiteInfo {
   promptpay_name: string;
   order_note: string;
   order_prefix: string;
+  promo_enabled: boolean;
+  promo_code: string;
+  promo_title: string;
+  promo_text: string;
+  promo_collect_email: boolean;
+  promo_delay: number;
 }
 
 export const DEFAULT_SITE_INFO: SiteInfo = {
@@ -124,6 +141,12 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   promptpay_name: "",
   order_note: "",
   order_prefix: "",
+  promo_enabled: false,
+  promo_code: "",
+  promo_title: "",
+  promo_text: "",
+  promo_collect_email: true,
+  promo_delay: 6,
 };
 
 const URL_KEYS = new Set([
@@ -188,8 +211,9 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     const v = m.get(f.key);
     const fb = d[f.key as keyof SiteInfo];
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
-    else if (f.type === "number") out[f.key] = toNum(v, fb as number);
+    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : toNum(v, fb as number);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);
+    else if (f.key === "promo_code") out[f.key] = normalizeCouponCode(v);
     else if (URL_KEYS.has(f.key)) out[f.key] = cleanUrl(v);
     else out[f.key] = String(v ?? "").trim().slice(0, f.type === "textarea" ? 1000 : 200);
   }

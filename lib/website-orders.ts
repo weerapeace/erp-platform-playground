@@ -27,6 +27,8 @@ import {
 } from "@/lib/website-field-map";
 import { calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
+import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
+import { checkCoupon } from "@/lib/website-coupons-db";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -76,6 +78,8 @@ export interface PublicOrderInput {
   ship: { addressLine: string; subdistrict?: string; district?: string; province?: string; postal?: string };
   paymentMethod: PaymentMethod;
   note?: string;
+  /** โค้ดส่วนลด (ตรวจ+คิดใหม่ฝั่งเซิร์ฟเวอร์เสมอ — lib/website-coupons) */
+  couponCode?: string;
 }
 
 export interface OrderLineView {
@@ -98,6 +102,8 @@ export interface OrderView {
   subtotal: number;
   shippingFee: number;
   discount: number;
+  /** โค้ดส่วนลดที่ใช้ (ไม่มี = null) */
+  couponCode?: string | null;
   grandTotal: number;
   note: string;
   createdAt: string;
@@ -163,6 +169,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       },
       paymentMethod: pm,
       note: clean(r.note, 500) || undefined,
+      couponCode: normalizeCouponCode(r.couponCode) || undefined,
     },
   };
 }
@@ -332,7 +339,15 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
 
   subtotal = Math.round(subtotal * 100) / 100;
   const shippingFee = calcShippingFee(subtotal, info);
-  const discount = 0;
+  // 🎟️ โค้ดส่วนลด: ตรวจ + คิดใหม่ที่นี่เสมอ (ไม่เชื่อยอดจากหน้าเว็บ) · ใช้ไม่ได้ = ไม่รับออเดอร์ บอกเหตุผล (ลูกค้าเอาโค้ดออกแล้วสั่งต่อได้)
+  let discount = 0;
+  let coupon: StoreCoupon | null = null;
+  if (input.couponCode) {
+    const cr = await checkCoupon(sb, shop.id, input.couponCode, subtotal, input.customer.phone);
+    if (!cr.ok) return { ok: false, error: `โค้ดส่วนลด ${input.couponCode}: ${cr.error}`, status: 400 };
+    discount = cr.discount;
+    coupon = cr.coupon ?? null;
+  }
   const grandTotal = Math.round((subtotal + shippingFee - discount) * 100) / 100;
 
   const prefix = orderNoPrefix(info, shop.slug);
@@ -385,6 +400,14 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       return { ok: false, error: "บันทึกรายการสินค้าไม่สำเร็จ กรุณาลองใหม่", status: 500 };
     }
 
+    // บันทึกการใช้คูปอง (นับจำนวนครั้ง/เบอร์ละครั้ง) — พังก็ไม่ล้มออเดอร์ (ยอดลดถูกบันทึกในออเดอร์แล้ว) แค่ log
+    if (coupon && discount > 0) {
+      const { error: redErr } = await sb
+        .from("store_coupon_redemptions")
+        .insert({ coupon_id: coupon.id, shop_id: shop.id, order_id: order.id, customer_phone: input.customer.phone, discount });
+      if (redErr) console.error("[website-orders] coupon redemption", redErr);
+    }
+
     return {
       ok: true,
       order: {
@@ -411,6 +434,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         subtotal,
         shippingFee,
         discount,
+        couponCode: coupon?.code ?? null,
         grandTotal,
         note: input.note ?? "",
         createdAt: order.created_at,
