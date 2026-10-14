@@ -1319,6 +1319,17 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
 
 export const SECTION_TYPES = Object.keys(SECTION_SCHEMAS);
 
+/**
+ * Section นี้มี "หัวข้อ" ที่แผง 🔤 ตัวอักษร ปรับได้ไหม (มีช่อง title ที่ตัว Section หรือชิ้นย่อย)
+ * ผืนผ้าใบ / โชว์สินค้าเด่น มีตัวตั้งตัวอักษรของตัวเองครบแล้ว → ไม่โชว์ (กันตั้งสองที่ชนกัน)
+ */
+export function sectionHasHeading(type: string): boolean {
+  if (type === "canvas" || type === "spotlight") return false;
+  const sc = SECTION_SCHEMAS[type];
+  if (!sc) return false;
+  return sc.fields.some((f) => f.key === "title") || !!sc.children?.fields.some((f) => f.key === "title");
+}
+
 /** ลำดับกลุ่มในคลัง Section */
 export const SECTION_GROUP_ORDER = ["พื้นฐาน", "สินค้า", "เนื้อหา", "ขั้นสูง"];
 

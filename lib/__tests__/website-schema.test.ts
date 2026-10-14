@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SECTION_SCHEMAS, SECTION_TYPES, blankChild } from "../website-schema";
+import { SECTION_SCHEMAS, SECTION_TYPES, blankChild, sectionHasHeading } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockSummary, BLOCK_META, DEFAULT_BLOCK_STYLE, type Block } from "../website-blocks";
 
 /**
@@ -26,6 +26,7 @@ function stripAdded(v: unknown): unknown {
     if ("padTop" in o) {
       delete o.mobile;
       delete o.motion;
+      delete o.text; // แผง 🔤 ตัวอักษร (ค่าเริ่ม = ตามเดิมทุกช่อง ตรวจแยกใน describe ของมันเอง)
     }
     return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, stripAdded(x)]));
   }
@@ -174,5 +175,33 @@ describe("ชุดรูปกลางครบทุก Section (หลาย
   it("แบนเนอร์หลัก + สไลด์: ส่วนที่เห็น/ซูม กรอบตายตัว 16:7", () => {
     expect(field(SECTION_SCHEMAS.hero.fields, "crop")?.cropBox).toBe("16:7");
     expect(field(SECTION_SCHEMAS.slideshow.children!.fields, "crop")?.cropBox).toBe("16:7");
+  });
+});
+
+describe("ตัวอักษรหัวข้อต่อ Section + มือถือแยก (แผง 🔤 ตัวอักษร)", () => {
+  const styleOf = (style: unknown) => (normalizeBlocks([{ id: "t", type: "rich-text", title: "หัวข้อ", style }])[0] as unknown as { style: Record<string, Record<string, unknown>> }).style;
+
+  it("บล็อกเก่าไม่เคยตั้ง = ตามเดิมทุกช่อง (หน้าเว็บไม่เปลี่ยน)", () => {
+    const st = styleOf(undefined);
+    expect(st.text).toEqual({ font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "" });
+    expect(st.mobile).toMatchObject({ hSize: "auto", hideEyebrow: false, hideSub: false });
+  });
+
+  it("ค่าที่ตั้งถูกเก็บครบ · ค่ามั่ว/ฟอนต์นอกรายการ = ตามเดิม · สีเองไม่มีรหัสสี = ตามเดิม", () => {
+    const ok = styleOf({ text: { font: "Charm", size: "xl", weight: "700", color: "custom", colorHex: "#AA3366", subColor: "brand" }, mobile: { hSize: "s", hideEyebrow: true, hideSub: true } });
+    expect(ok.text).toMatchObject({ font: "Charm", size: "xl", weight: "700", color: "custom", colorHex: "#aa3366", subColor: "brand" });
+    expect(ok.mobile).toMatchObject({ hSize: "s", hideEyebrow: true, hideSub: true });
+    const bad = styleOf({ text: { font: "Comic Sans<script>", size: "huge", weight: "950", color: "custom", colorHex: "red", subColor: "nope" }, mobile: { hSize: 3, hideSub: "yes" } });
+    expect(bad.text).toMatchObject({ font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto" });
+    expect(bad.mobile).toMatchObject({ hSize: "auto", hideSub: false });
+  });
+
+  it("แท็บตัวอักษรโชว์เฉพาะ Section ที่มีหัวข้อ (ไม่ซ้อนกับผืนผ้าใบ/โชว์สินค้าเด่นที่ตั้งเองได้แล้ว)", () => {
+    expect(sectionHasHeading("rich-text")).toBe(true);
+    expect(sectionHasHeading("hero")).toBe(true);
+    expect(sectionHasHeading("slideshow")).toBe(true); // หัวข้ออยู่ที่สไลด์
+    expect(sectionHasHeading("canvas")).toBe(false);
+    expect(sectionHasHeading("spotlight")).toBe(false);
+    expect(sectionHasHeading("divider")).toBe(false);
   });
 });

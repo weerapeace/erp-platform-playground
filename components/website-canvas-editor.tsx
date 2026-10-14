@@ -15,7 +15,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ERPModal } from "@/components/modal";
 import { LinkTargetPicker } from "@/components/website-link-picker";
-import { CanvasInspector, type CanvasAlign, type CanvasMultiAction, type ThemeColors } from "@/components/website-canvas-inspector";
+import { CanvasInspector, type CanvasAlign, type CanvasMultiAction } from "@/components/website-canvas-inspector";
+import { usePreviewFonts, useShopTheme } from "@/components/website-text-pickers";
 import { ImageChooser, DecorLibrary, type PickedImage } from "@/components/website-canvas-media";
 import { CanvasTemplates } from "@/components/website-canvas-templates";
 import { useCanvasBridge, reorderLayer, reorderLayerMany, duplicateItems, newGroupId } from "@/components/website-canvas-tools";
@@ -45,11 +46,6 @@ export interface CanvasEditorTarget {
   childId?: string | null;
 }
 
-const DEFAULT_THEME: ThemeColors = { brand: "#b76e79", brandDeep: "#9d4e5a", ink: "#141517", muted: "#9ba1a9", page: "#fafaf9", surface: "#ffffff" };
-
-/** ฟอนต์ตัวอย่างในแผง (Google Fonts) */
-const PREVIEW_FONTS_HREF =
-  "https://fonts.googleapis.com/css2?family=Parisienne&family=Great+Vibes&family=Cormorant+Garamond:wght@500&family=Playfair+Display:wght@500&family=Trirong:wght@400;500&family=Charm&family=Mali:wght@500&family=Itim&family=Kanit:wght@400;500&family=Prompt:wght@400;500&display=swap";
 
 const DEVICE_W = { desktop: 1280, mobile: 390 } as const;
 const WIDE_SHAPES = ["pearls", "scallop", "wave", "line"];
@@ -116,36 +112,10 @@ export function CanvasEditor({
   const [chooser, setChooser] = useState<null | { mode: "add" | "replace" | "bg"; childId?: string }>(null);
   const [decorOpen, setDecorOpen] = useState(false);
   const [linkFor, setLinkFor] = useState<string | null>(null);
-  const [theme, setTheme] = useState<ThemeColors>(DEFAULT_THEME);
-  const [fontNames, setFontNames] = useState({ display: "Kanit", body: "Noto Sans Thai" });
+  // สีธีม/ฟอนต์ของร้าน (ของกลาง — ใช้วาดจุดสี/ตัวอย่างฟอนต์ให้ตรงเว็บจริง)
+  const { theme, fontNames } = useShopTheme(ctx.shopSlug);
 
-  // สีธีม/ฟอนต์ของร้าน (API สาธารณะ — ใช้วาดจุดสี/ตัวอย่างฟอนต์ให้ตรงเว็บจริง)
-  useEffect(() => {
-    let alive = true;
-    fetch(`/api/public/storefront/site?shop=${encodeURIComponent(ctx.shopSlug)}&preview=1`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (!alive || !j?.theme) return;
-        const c = j.theme.colors ?? {};
-        setTheme({ ...DEFAULT_THEME, ...c });
-        if (j.theme.fonts) setFontNames({ display: j.theme.fonts.display || "Kanit", body: j.theme.fonts.body || "Noto Sans Thai" });
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [ctx.shopSlug]);
-
-  // ฟอนต์ตัวอย่างในแผงขวา
-  useEffect(() => {
-    const id = "zz-canvas-fonts";
-    if (document.getElementById(id)) return;
-    const el = document.createElement("link");
-    el.id = id;
-    el.rel = "stylesheet";
-    el.href = PREVIEW_FONTS_HREF;
-    document.head.appendChild(el);
-  }, []);
+  usePreviewFonts();
 
   // ขนาดกล่องกลาง → ย่อพรีวิวให้พอดี
   useEffect(() => {

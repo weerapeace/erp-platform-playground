@@ -24,11 +24,12 @@
  *   ผืนผ้าใบอิสระ (canvas) คุยสดอีกชุด — ดู components/website-canvas-tools.tsx
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, type ChildSpec } from "@/lib/website-schema";
+import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, sectionHasHeading, type ChildSpec } from "@/lib/website-schema";
 import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, type BlockStyle, type BlockType, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
+import { useShopTheme } from "@/components/website-text-pickers";
 import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
 import { useCanvasBridge, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
 import { previewReloadSig } from "@/lib/website-live-preview";
@@ -688,6 +689,8 @@ export function WebsiteBuilder({
   const selBlock = selection ? blocks.find((b) => b.id === selection.blockId) ?? null : null;
   const selChild = selBlock && selection?.childId ? childrenOf(selBlock)?.list.find((it) => it.id === selection.childId) ?? null : null;
   const selSchema = selBlock ? SECTION_SCHEMAS[selBlock.type] : null;
+  // สี/ฟอนต์ของธีมร้าน → จุดสี/ตัวอย่างฟอนต์ในแผง 🔤 ตัวอักษร
+  const shopLook = useShopTheme(ctx.shopSlug);
   const errors = (toolbar?.issues ?? []).filter((i) => i.level === "error");
   const warnings = (toolbar?.issues ?? []).filter((i) => i.level === "warning");
   const hasChanges = !!toolbar?.changes && (toolbar.changes.added.length > 0 || toolbar.changes.removed.length > 0 || toolbar.changes.changed.length > 0);
@@ -1131,7 +1134,7 @@ export function WebsiteBuilder({
         )}
         {propTab === "style" && (
           <div className="space-y-4">
-            <StylePanel value={styleOf(selBlock)} onChange={(style) => patchBlock(selBlock.id, { style })} mode="style" />
+            <StylePanel value={styleOf(selBlock)} onChange={(style) => patchBlock(selBlock.id, { style })} mode="style" hasHeading={sectionHasHeading(selBlock.type)} theme={shopLook.theme} fontNames={shopLook.fontNames} />
             {visibilityRow(selBlock.visibility, (k, val) => setVis(selBlock.id, k, val))}
           </div>
         )}

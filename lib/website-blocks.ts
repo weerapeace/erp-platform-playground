@@ -24,6 +24,7 @@ import {
 } from "@/lib/website-schema";
 import { sanitizeCustomHtml } from "@/lib/website-html";
 import { sanitizeGradient, type GradientValue } from "@/lib/website-gradient";
+import { CANVAS_COLORS, CANVAS_FONTS, CANVAS_WEIGHTS } from "@/lib/website-canvas";
 
 export type { ValidationIssue };
 
@@ -83,7 +84,36 @@ export interface BlockStyleMobile {
   padTop: BlockSpacing;
   padBottom: BlockSpacing;
   align: BlockAlign;
+  /** ขนาดหัวข้อเฉพาะมือถือ ("auto" = ตามที่ตั้งของทุกจอ) */
+  hSize: TextSize;
+  /** ซ่อนตัวเล็กเหนือหัวข้อ (eyebrow) บนมือถือ */
+  hideEyebrow: boolean;
+  /** ซ่อนคำโปรยใต้หัวข้อบนมือถือ */
+  hideSub: boolean;
 }
+
+/**
+ * ตัวอักษรหัวข้อของ Section (แผง "🔤 ตัวอักษร") — "auto" = ตามเดิมของ Section/ธีม (ไม่ตั้ง = หน้าเว็บเหมือนเดิม)
+ * ฟอนต์/สี/ความหนา ใช้ชุดเดียวกับผืนผ้าใบ (CANVAS_FONTS · CANVAS_COLORS · CANVAS_WEIGHTS) — เว็บร้านโหลดฟอนต์ให้เอง
+ * ขนาดเก็บเป็นชื่อสเกล (s…xxl) ไม่ใช่ px → เว็บร้านแปลงเป็นขนาดที่ย่อตามจอ
+ */
+export type TextSize = "auto" | "s" | "m" | "l" | "xl" | "xxl";
+export const TEXT_SIZES: readonly TextSize[] = ["auto", "s", "m", "l", "xl", "xxl"];
+export const TEXT_FONTS: readonly string[] = ["auto", ...CANVAS_FONTS.map((o) => o.v)];
+export const TEXT_WEIGHTS: readonly string[] = ["auto", ...CANVAS_WEIGHTS.map((o) => o.v)];
+export const TEXT_COLORS: readonly string[] = ["auto", ...CANVAS_COLORS.map((o) => o.v)];
+export interface BlockText {
+  font: string;
+  size: TextSize;
+  weight: string;
+  /** สีหัวข้อ — ชื่อสีธีม หรือ "custom" + colorHex */
+  color: string;
+  colorHex: string;
+  /** สีตัวเล็กเหนือหัวข้อ + คำโปรยใต้หัวข้อ */
+  subColor: string;
+  subColorHex: string;
+}
+export const DEFAULT_BLOCK_TEXT: BlockText = { font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "" };
 
 /** ลูกเล่น — โผล่ตอนเลื่อนถึง / ตอนชี้เมาส์ · "none" = ไม่มี (ค่าเริ่มต้น หน้าเว็บเหมือนเดิม) */
 export type MotionEntrance = "none" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom" | "pop" | "spin-in" | "blur";
@@ -117,6 +147,8 @@ export interface BlockStyle {
   mobile: BlockStyleMobile;
   /** ลูกเล่น (แผง "✨ ลูกเล่น") */
   motion: BlockMotion;
+  /** ตัวอักษรหัวข้อ (แผง "🔤 ตัวอักษร") */
+  text: BlockText;
 }
 
 export const DEFAULT_BLOCK_STYLE: BlockStyle = {
@@ -126,8 +158,9 @@ export const DEFAULT_BLOCK_STYLE: BlockStyle = {
   bgColor: "",
   width: "auto",
   align: "auto",
-  mobile: { padTop: "auto", padBottom: "auto", align: "auto" },
+  mobile: { padTop: "auto", padBottom: "auto", align: "auto", hSize: "auto", hideEyebrow: false, hideSub: false },
   motion: { ...DEFAULT_MOTION },
+  text: { ...DEFAULT_BLOCK_TEXT },
 };
 
 export interface BlockBase {
@@ -690,6 +723,12 @@ export function sanitizeStyle(v: unknown): BlockStyle {
   const bgGrad = sanitizeGradient(o.bgGrad);
   const m = (o.mobile ?? {}) as Record<string, unknown>;
   const mo = (o.motion ?? {}) as Record<string, unknown>;
+  const tx = (o.text ?? {}) as Record<string, unknown>;
+  const hex = (v: unknown) => (typeof v === "string" && HEX6.test(v.trim()) ? v.trim().toLowerCase() : "");
+  const colorHex = hex(tx.colorHex);
+  const subColorHex = hex(tx.subColorHex);
+  const color = pickOne(tx.color, TEXT_COLORS, "auto");
+  const subColor = pickOne(tx.subColor, TEXT_COLORS, "auto");
   return {
     padTop: pickOne(o.padTop, BLOCK_SPACINGS, d.padTop),
     padBottom: pickOne(o.padBottom, BLOCK_SPACINGS, d.padBottom),
@@ -704,6 +743,19 @@ export function sanitizeStyle(v: unknown): BlockStyle {
       padTop: pickOne(m.padTop, BLOCK_SPACINGS, "auto"),
       padBottom: pickOne(m.padBottom, BLOCK_SPACINGS, "auto"),
       align: pickOne(m.align, BLOCK_ALIGNS, "auto"),
+      hSize: pickOne(m.hSize, TEXT_SIZES, "auto"),
+      hideEyebrow: m.hideEyebrow === true,
+      hideSub: m.hideSub === true,
+    },
+    // เลือก "สีเอง" แต่ยังไม่ได้ใส่สี → ถือว่าไม่ได้ตั้ง (เหมือนพื้นหลัง)
+    text: {
+      font: pickOne(tx.font, TEXT_FONTS, "auto"),
+      size: pickOne(tx.size, TEXT_SIZES, "auto"),
+      weight: pickOne(tx.weight, TEXT_WEIGHTS, "auto"),
+      color: color === "custom" && !colorHex ? "auto" : color,
+      colorHex,
+      subColor: subColor === "custom" && !subColorHex ? "auto" : subColor,
+      subColorHex,
     },
     motion: {
       entrance: pickOne(mo.entrance, MOTION_ENTRANCES, "none"),

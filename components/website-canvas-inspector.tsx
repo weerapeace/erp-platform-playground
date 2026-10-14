@@ -16,7 +16,6 @@ import { CanvasShape } from "@/components/website-canvas-shapes";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import {
   CANVAS_BUTTON_VARIANTS,
-  CANVAS_FONTS,
   CANVAS_FRAME_PRESETS,
   CANVAS_LOOPS,
   CANVAS_NO_LINE_FRAMES,
@@ -33,6 +32,9 @@ import { GRAD_DIRS, GRADIENT_PRESETS, type GradThemeHex } from "@/lib/website-gr
 import { GradientPicker } from "@/components/website-gradient-picker";
 import { CanvasBgPositioner } from "@/components/website-canvas-bg-position";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
+// สีธีม/จุดสี/ฟอนต์ = ของกลาง (ใช้ร่วมกับแผง "🔤 ตัวอักษร" ของทุก Section)
+import { ColorSwatches, FontPickList, softOf, type ThemeColors } from "@/components/website-text-pickers";
+export { softOf, swatchesOf, type ThemeColors } from "@/components/website-text-pickers";
 
 export type CanvasAlign = "top" | "left" | "middle" | "center" | "bottom" | "right" | "distribute-h" | "distribute-v";
 export type CanvasMultiAction = "group" | "ungroup" | "duplicate" | "delete" | "front" | "back" | "hideMobile" | "showMobile" | "lock" | "unlock" | "stagger";
@@ -46,31 +48,6 @@ export interface CanvasMobileCtl {
   onUseSaved: () => void;
   /** กลับเป็นเรียงอัตโนมัติ (ตำแหน่งที่จัดไว้ยังเก็บอยู่) */
   onAuto: () => void;
-}
-
-/** สีของธีมร้าน (จาก API สาธารณะ) — ใช้วาดจุดสี */
-export type ThemeColors = { brand: string; brandDeep: string; ink: string; muted: string; page: string; surface: string };
-
-/** สีแบรนด์จาง = แบรนด์ 14% บนขาว (สูตรเดียวกับเว็บร้าน --color-brand-soft) */
-export function softOf(hex: string): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return "#f4e3e6";
-  const n = parseInt(m[1], 16);
-  const mix = (c: number) => Math.round(c * 0.14 + 255 * 0.86);
-  return `#${[n >> 16, (n >> 8) & 255, n & 255].map((c) => mix(c).toString(16).padStart(2, "0")).join("")}`;
-}
-
-export function swatchesOf(t: ThemeColors): { v: string; label: string; hex: string }[] {
-  return [
-    { v: "ink", label: "ตัวอักษรหลัก", hex: t.ink },
-    { v: "brand", label: "แบรนด์", hex: t.brand },
-    { v: "brandDeep", label: "แบรนด์เข้ม", hex: t.brandDeep },
-    { v: "brandSoft", label: "แบรนด์จาง", hex: softOf(t.brand) },
-    { v: "muted", label: "ตัวอักษรรอง", hex: t.muted },
-    { v: "page", label: "พื้นเว็บ", hex: t.page },
-    { v: "surface", label: "พื้นการ์ด", hex: t.surface },
-    { v: "white", label: "ขาว", hex: "#ffffff" },
-  ];
 }
 
 const H = ({ children }: { children: ReactNode }) => <p className="text-[11px] font-semibold text-slate-500 mb-1.5">{children}</p>;
@@ -95,23 +72,7 @@ function Chips({ options, value, onPick }: { options: { v: string; l: string }[]
 }
 const seg = (on: boolean) => `flex-1 px-2 py-1.5 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
 
-function Swatches({ theme, value, hex, onPick, allowNone }: { theme: ThemeColors; value: string; hex: string; onPick: (v: string, hex?: string) => void; allowNone?: boolean }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {allowNone && (
-        <button title="ไม่มี" onClick={() => onPick("none")} className={`w-7 h-7 rounded-full border text-[10px] text-slate-400 ${value === "none" ? "ring-2 ring-blue-500 ring-offset-1" : "border-slate-300"}`}>
-          ∅
-        </button>
-      )}
-      {swatchesOf(theme).map((s) => (
-        <button key={s.v} title={s.label} onClick={() => onPick(s.v)} className={`w-7 h-7 rounded-full border border-black/10 ${value === s.v ? "ring-2 ring-blue-500 ring-offset-1" : ""}`} style={{ background: s.hex }} />
-      ))}
-      <label title="สีเอง" className={`relative w-7 h-7 rounded-full border border-black/10 overflow-hidden cursor-pointer ${value === "custom" ? "ring-2 ring-blue-500 ring-offset-1" : ""}`} style={{ background: value === "custom" && hex ? hex : "conic-gradient(#f87171,#fbbf24,#34d399,#60a5fa,#a78bfa,#f472b6,#f87171)" }}>
-        <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={hex || "#d4537e"} onChange={(e) => onPick("custom", e.target.value)} />
-      </label>
-    </div>
-  );
-}
+const Swatches = ColorSwatches;
 
 function Slider({ label, value, min, max, step = 1, unit = "", onChange }: { label: string; value: number; min: number; max: number; step?: number; unit?: string; onChange: (n: number) => void }) {
   return (
@@ -653,19 +614,7 @@ export function CanvasInspector({
         <>
           <div>
             <H>ฟอนต์</H>
-            <div className="grid grid-cols-1 gap-1 max-h-52 overflow-y-auto pr-1">
-              {CANVAS_FONTS.map((f) => {
-                const family = f.v === "display" ? fontNames.display : f.v === "body" ? fontNames.body : f.v;
-                return (
-                  <button key={f.v} onClick={() => onPatchItem({ font: f.v })} className={`flex items-baseline justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left ${str("font") === f.v ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-400"}`}>
-                    <span className="text-[17px] text-slate-800 truncate" style={{ fontFamily: `"${family}", sans-serif` }}>
-                      {kind === "button" ? str("label") || "ปุ่ม" : "Aa ก ข ค"}
-                    </span>
-                    <span className="text-[10px] text-slate-400 shrink-0">{f.v === "display" || f.v === "body" ? `${f.l.replace("ฟอนต์", "")} (${family})` : f.v}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <FontPickList value={str("font")} onPick={(v) => onPatchItem({ font: v })} fontNames={fontNames} sample={kind === "button" ? str("label") || "ปุ่ม" : "Aa ก ข ค"} />
           </div>
           <div>
             <H>ความหนา</H>

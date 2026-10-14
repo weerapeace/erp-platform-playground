@@ -100,6 +100,17 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ใช้อยู่: แกลเลอรีรูป · รูปคู่ข้อความ (+ `imgSize` ความกว้างรูป %) · หลายคอลัมน์ (ค่าเริ่ม 4:3 มุมมน = แบบเดิม · ครอปรายคอลัมน์) · รูปภาพ (ค่าเริ่ม ratio "auto" ตามรูปจริง + frame "auto" = เต็มจอเหลี่ยม/อื่นมุมมน แบบเดิม · `mobileKey` รูปมือถือแยก) — Section ใหม่ที่มีรูปให้ใช้ชุดนี้ ไม่เขียนกรอบเอง
 - `autoFrame` = เพิ่มตัวเลือกทรง "อัตโนมัติ" (Section ตัดสินเองตามค่าอื่น) — เว็บร้านต้องแปลง "auto" เป็นทรงจริงก่อนส่งให้ FramedImage
 
+## 🔤 ตัวอักษรหัวข้อต่อ Section + มือถือแยก (style.text · style.mobile)
+- ERP `lib/website-blocks.ts` `BlockStyle.text` = `{ font, size, weight, color, colorHex, subColor, subColorHex }` · ค่าเริ่ม "auto" ทุกช่อง = หน้าเว็บเหมือนเดิม
+  - ฟอนต์/สี/ความหนา = ชุดเดียวกับผืนผ้าใบ (`CANVAS_FONTS` · `CANVAS_COLORS` · `CANVAS_WEIGHTS`) — ค่านอกรายการถูกล้างเป็น "auto" ตอน normalize · สีเองไม่มีรหัสสี = "auto"
+  - ขนาด = ชื่อสเกล `s|m|l|xl|xxl` (ไม่ใช่ px) → เว็บร้านแปลงเป็น clamp() ย่อตามจอ
+- `style.mobile` เพิ่ม `hSize` (ขนาดหัวข้อเฉพาะมือถือ) · `hideEyebrow` · `hideSub`
+- แผงตั้ง: `StylePanel` แท็บ "🔤 ตัวอักษร" + แท็บ "📲 มือถือ" — โชว์เฉพาะ Section ที่มีหัวข้อ (`sectionHasHeading(type)` · ผืนผ้าใบ/โชว์สินค้าเด่นมีตัวตั้งเองแล้ว → ไม่โชว์)
+- ตัวเลือกฟอนต์/จุดสี = ของกลาง `components/website-text-pickers.tsx` (`FontPickList` · `ColorSwatches` · `useShopTheme` · `usePreviewFonts`) ใช้ร่วมกับผืนผ้าใบ
+- เว็บร้าน `blockStyleAttrs` (src/lib/blocks.ts) → `data-h-font|data-h-size|data-h-weight|data-h-color|data-sub-color` + ตัวแปร `--sec-h-*` · มือถือ `data-h-size-m|data-hide-eyebrow-m|data-hide-sub-m`
+  - CSS globals.css "ตัวอักษรหัวข้อต่อ Section": หัวข้อ = `h1/h2` ของ Section · ตัวเล็ก = `.eyebrow` · คำโปรย = `<p>` ถัดจากหัวข้อ → **Section ใหม่ต้องเขียนหัวข้อตามแบบนี้** ถึงจะปรับได้
+  - ฟอนต์นอกธีม: `BlockFontLink` (block-registry.tsx) ใส่ `<link precedence>` ในตัวห่อ Section — React ยกขึ้น head + ไม่โหลดซ้ำ
+
 ## ช่องชนิด crop (ส่วนที่เห็น/ซูมของรูป)
 - `f("crop", "...", "crop", { cropImage: "imageKey", cropRatio: "ratio" })` เก็บ `{ x, y, zoom }` — ฟอร์มวาดของกลาง `ImageCropBox` (components/image-crop-box.tsx · ลากกรอบ/คลิกรูป + ซูม) กรอบตามสัดส่วนใน Section แม่
 - ไม่มีช่องสัดส่วน (รูปเต็มจอ) ใช้ `cropBox: "16:7"` = กรอบตายตัว ≈ แบนเนอร์บนจอคอม — ใช้ที่แบนเนอร์หลัก (Hero) · สไลด์ (รายสไลด์) · เว็บร้านวาดด้วย `cropStyle(crop)` (src/lib/image-crop.ts · ค่ากลาง = ไม่ใส่ style)
