@@ -60,7 +60,7 @@ type ProductDetailsOpen = "first" | "closed" | "all";
 type DetailSource = "description" | "fields" | "details" | "text" | "shipping" | "dimensions";
 type DetailApply = "all" | "categories" | "products";
 type DetailOpen = "auto" | "open" | "closed";
-interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen; showInch?: boolean }
+interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen; showInch?: boolean; sizeCompare?: boolean }
 
 interface SampleItem { name: string; price: number; comparePrice: number | null; unit: string; category: string; badge: string; stock: string; images: string[]; swatches: { color?: string; img?: string }[] }
 
@@ -84,6 +84,8 @@ interface Theme {
   menu: MenuConfig;
   footer: FooterConfig;
   listing: ListingConfig;
+  /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
+  page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
   product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
 }
@@ -1745,6 +1747,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                                     description="ติ๊กฟิลด์ที่จะโชว์ในหัวข้อนี้ — เรียงตามลำดับที่ติ๊ก · ฟิลด์ที่สินค้าไม่ได้กรอกจะไม่โชว์เอง"
                                   />
                                   <p className="text-[11px] text-slate-400 mt-1">เลือกได้ทุกฟิลด์ของ Parent SKU (ยกเว้นต้นทุน/ข้อมูลภายใน) · ช่องที่ว่างจะไม่โชว์ · เปลี่ยนป้ายชื่อได้ที่ทะเบียนฟิลด์กลาง</p>
+                                  {/* 📏 หัวข้อที่มีฟิลด์ขนาด → ปุ่มเทียบขนาด (เว็บร้าน: SIZE_FIELD_KEYS ใน src/lib/product-details.ts) */}
+                                  {it.fields.some((k) => ["size_summary", "custom_size", "size_length_cm", "size_height_cm", "size_thickness_cm"].includes(k)) && (
+                                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mt-2">
+                                      <input type="checkbox" className="accent-orange-500" checked={it.sizeCompare !== false} onChange={(e) => setDetailItem(it.id, { sizeCompare: e.target.checked })} />
+                                      📏 ปุ่ม &quot;เทียบขนาด&quot; (ป๊อปภาพเทียบกับ มือถือ / iPad / A4 / โน้ตบุ๊ก / ขวดน้ำ · ใช้ กว้าง/สูง/หนา ของสินค้า)
+                                    </label>
+                                  )}
                                 </div>
                               )}
                               {it.source === "text" && (
@@ -1759,6 +1768,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                                   <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                                     <input type="checkbox" className="accent-orange-500" checked={it.showInch !== false} onChange={(e) => setDetailItem(it.id, { showInch: e.target.checked })} />
                                     โชว์เป็นนิ้วด้วย (ระบบแปลงให้เอง)
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mt-1">
+                                    <input type="checkbox" className="accent-orange-500" checked={it.sizeCompare !== false} onChange={(e) => setDetailItem(it.id, { sizeCompare: e.target.checked })} />
+                                    📏 ปุ่ม &quot;เทียบขนาด&quot; (ป๊อปภาพเทียบกับ มือถือ / iPad / A4 / โน้ตบุ๊ก / ขวดน้ำ)
                                   </label>
                                   <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
                                     ตัวอย่าง: • ใส่ได้: สมาร์ทโฟน (ถึง 6.7 นิ้ว), กระเป๋าสตางค์ (ใบยาว) · • กว้าง: 23 ซม.{it.showInch !== false ? ' | 9.1"' : ""} · • ความยาวสายสะพาย: 50–60 ซม. (ปรับได้){it.showInch !== false ? ' | 19.7–23.6"' : ""}
@@ -1837,6 +1850,33 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
           {tab === "shape" && (
             <>
+              {/* ✨ การเคลื่อนไหวทั้งเว็บ — เว็บร้าน: PageMotion + ::view-transition (globals.css) */}
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">✨ การเคลื่อนไหวทั้งเว็บ</h3>
+                <p className="text-xs text-slate-500 mb-3">ตอนลูกค้ากดไปหน้าอื่น · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว จะไม่เห็นแอนิเมชันเสมอ</p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {([
+                    ["fade", "จางเปลี่ยนหน้า", "หน้าเก่าจางออก หน้าใหม่จางเข้า (แนะนำ)"],
+                    ["rise", "เลื่อนขึ้น", "หน้าใหม่ลอยขึ้นพร้อมจางเข้า ดูหรูขึ้น"],
+                    ["none", "ไม่มี", "เปลี่ยนหน้าทันที"],
+                  ] as const).map(([v, l, d]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => apply({ ...theme, page: { ...theme.page, transition: v } })}
+                      className={`text-left px-3 py-2 rounded-lg border text-sm transition ${theme.page.transition === v ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+                    >
+                      <span className="block font-medium">{l}</span>
+                      <span className="block text-[11px] text-slate-500">{d}</span>
+                    </button>
+                  ))}
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.page.smoothScroll} onChange={(e) => apply({ ...theme, page: { ...theme.page, smoothScroll: e.target.checked } })} />
+                  เลื่อนจอนุ่ม (Smooth scroll)
+                </label>
+                <p className="text-[11px] text-slate-400 mt-1">เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง</p>
+              </div>
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ (ค่ารวมทั้งเว็บ)</h3>
                 <div className="flex flex-wrap gap-2">
