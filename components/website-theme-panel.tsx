@@ -37,6 +37,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SocialLinksModal } from "@/components/website-social-links";
+import { FULL_THEME_PRESETS, applyFullPreset } from "@/lib/website-theme-presets";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
@@ -749,6 +750,36 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {/* ── สี ── */}
           {tab === "colors" && (
             <>
+              {/* 🎨 ธีมทั้งชุด (lib/website-theme-presets) — สี ฟอนต์ ปุ่ม การ์ด หัวเว็บ การเปลี่ยนหน้า ในคลิกเดียว */}
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">🎨 ธีมทั้งชุด (กดครั้งเดียว)</h3>
+                <p className="text-[11px] text-slate-500 mb-3">เปลี่ยน สี · ฟอนต์ · ปุ่ม · การ์ดสินค้า · หัวเว็บ · การเปลี่ยนหน้า พร้อมกัน — ไม่แตะโลโก้/เมนู/เนื้อหา · กดแล้วปรับต่อได้ · ↶ ย้อนกลับได้ก่อนบันทึก</p>
+                <div className="grid gap-2 grid-cols-2 lg:grid-cols-4">
+                  {FULL_THEME_PRESETS.map((p) => {
+                    const on = theme.colors.brand === p.colors.brand && theme.colors.page === p.colors.page && theme.fonts.display === p.fonts.display;
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => {
+                          apply(applyFullPreset(theme, p));
+                          toast.success(`ใช้ธีม "${p.label}" แล้ว — ปรับต่อได้ · กด ↶ เพื่อย้อนกลับ`);
+                        }}
+                        className={`text-left rounded-xl border p-2 transition ${on ? "border-blue-600 ring-2 ring-blue-100" : "border-slate-200 hover:border-slate-400"}`}
+                      >
+                        <div className="rounded-lg h-16 px-3 flex flex-col justify-center gap-1.5 border border-black/5" style={{ background: p.colors.page }}>
+                          <span style={{ fontFamily: `"${p.fonts.display}", serif`, color: p.colors.ink, fontSize: 15, letterSpacing: p.key === "luxury" ? "0.12em" : undefined }}>LOUIS MONTINI</span>
+                          <span className="inline-block w-fit text-[10px] px-2.5 py-0.5" style={{ background: p.colors.brand, color: "#fff", borderRadius: p.shape.button === "pill" ? 999 : p.shape.button === "square" ? 0 : 6 }}>
+                            ช้อปเลย
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium text-slate-800 mt-1.5">{p.label}</p>
+                        <p className="text-[11px] text-slate-500 leading-snug">{p.hint}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">ชุดสีสำเร็จรูป</h3>
                 <p className="text-[11px] text-slate-500 mb-3">เลือกแล้วปรับต่อได้ · ย้อนกลับได้ก่อนบันทึก</p>

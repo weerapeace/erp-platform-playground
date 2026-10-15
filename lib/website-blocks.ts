@@ -59,7 +59,8 @@ export type BlockType =
   | "timeline"
   | "countdown"
   | "lookbook"
-  | "logos";
+  | "logos"
+  | "collections";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -324,6 +325,19 @@ export interface LookbookBlock extends BlockBase {
   showList: boolean;
   spots: (ChildBase & { code: string[]; pos: { x: number; y: number } })[];
 }
+/** 📖 การ์ดคอลเลกชัน (คอลเลกชันที่เปิดหน้าไว้ · แท็บ 🎞 คอลเลกชัน) */
+export interface CollectionsBlock extends BlockBase {
+  type: "collections";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  layout: "grid" | "rows" | "carousel";
+  columns: number;
+  ratio: "3:4" | "4:5" | "1:1" | "16:9";
+  textPos: "on" | "below";
+  showCount: boolean;
+  limit: number;
+}
 /** 📰 โลโก้สื่อ / พาร์ตเนอร์ */
 export interface LogosBlock extends BlockBase {
   type: "logos";
@@ -540,6 +554,7 @@ export type Block =
   | CountdownBlock
   | LookbookBlock
   | LogosBlock
+  | CollectionsBlock
   | CtaBlock
   | RichTextBlock
   | ImageBlock

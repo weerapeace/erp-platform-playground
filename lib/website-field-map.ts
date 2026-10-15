@@ -9,6 +9,7 @@
  * หลักการ: ถ้า store_listings กรอกทับไว้ → ใช้ค่าที่กรอก
  *          ถ้าเว้นว่าง → คำนวณจาก field_map (ดึงจาก Parent SKU / SKU ลูก)
  */
+import { normalizeWebCollections, type WebCollection } from "@/lib/website-collections";
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
 
@@ -103,6 +104,8 @@ export interface FieldMap {
   /** รายการหมวดของร้านนี้ — เจ้าของเพิ่ม/แก้/ลบเองได้ในแท็บจับคู่ฟิลด์ */
   categories: WebCategoryDef[];
   image: { useCover: boolean; source: ImageSource };
+  /** 📖 หน้าคอลเลกชันบนเว็บร้านนี้ (แท็บ 🎞 คอลเลกชัน · lib/website-collections) */
+  collections: WebCollection[];
 }
 
 export const DEFAULT_FIELD_MAP: FieldMap = {
@@ -115,6 +118,7 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
   category: { default: "hardware", rules: {} },
   categories: DEFAULT_WEB_CATEGORIES,
   image: { useCover: true, source: "parent" },
+  collections: [],
 };
 
 const NAME_SOURCES: NameSource[] = ["name_th", "name_platform", "name_en", "sku_name", "code"];
@@ -194,6 +198,7 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
     },
     category: { default: defaultCat, rules },
     categories: cats,
+    collections: normalizeWebCollections(r.collections),
     image: {
       useCover: g("image").useCover !== false,
       source: (["parent", "skus", "both"] as const).includes(g("image").source as ImageSource) ? (g("image").source as ImageSource) : "parent",

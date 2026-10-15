@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
 import { WebsiteCategoriesPanel } from "@/components/website-categories-panel";
+import { WebsiteCollectionsPanel } from "@/components/website-collections-panel";
 import { WebsiteThemePanel } from "@/components/website-theme-panel";
 import { WebsiteLayoutPanel } from "@/components/website-layout-panel";
 import { WebsitePagesPanel } from "@/components/website-pages-panel";
@@ -31,12 +32,12 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<"listings" | "categories" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders" | "coupons" | "members">("listings");
+  const [tab, setTab] = useState<"listings" | "categories" | "collections" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders" | "coupons" | "members">("listings");
   const [categories, setCategories] = useState<CategoryDef[]>([]);
   // ลิงก์จากที่อื่น (เช่น ป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") เปิดแท็บที่ระบุ ?tab= · ⚠️ ไม่ใช้ useSearchParams (อยู่ใน PlaygroundShell)
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    const ok = ["listings", "categories", "fieldmap", "design", "layout", "pages", "info", "orders", "coupons", "members"] as const;
+    const ok = ["listings", "categories", "collections", "fieldmap", "design", "layout", "pages", "info", "orders", "coupons", "members"] as const;
     if (t && (ok as readonly string[]).includes(t)) setTab(t as (typeof ok)[number]);
   }, []);
 
@@ -125,6 +126,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
             {([
               { k: "listings", l: "สินค้าบนเว็บ" },
               { k: "categories", l: "📂 หมวดหมู่" },
+              { k: "collections", l: "🎞 คอลเลกชัน" },
               { k: "fieldmap", l: "⚙️ จับคู่ฟิลด์" },
               { k: "design", l: "🎨 ดีไซน์" },
               { k: "layout", l: "🧱 หน้าแรก" },
@@ -163,6 +165,9 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
 
         {/* แท็บหมวดหมู่ (หมวด + รูป/แบนเนอร์ + จัดสินค้าลงหมวด) */}
         {tab === "categories" && shop && <WebsiteCategoriesPanel shopSlug={shop.slug} shopId={shop.id} />}
+
+        {/* แท็บคอลเลกชัน (เปิดหน้า /collection/<ลิงก์> + แบนเนอร์/เรื่องราว/Google) */}
+        {tab === "collections" && shop && <WebsiteCollectionsPanel shopSlug={shop.slug} shopId={shop.id} siteUrl={shop.siteUrl} />}
 
         {/* แท็บจับคู่ฟิลด์ */}
         {tab === "fieldmap" && shop && <WebsiteFieldMapPanel shopSlug={shop.slug} shopId={shop.id} />}

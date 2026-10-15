@@ -939,6 +939,48 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     summary: (b) => (s(b.endAt) ? `ถึง ${s(b.endAt).replace("T", " ")}` : "ยังไม่ตั้งเวลา"),
   },
 
+  // 📖 คอลเลกชัน (2026-10-15) — การ์ดคอลเลกชันที่เปิดหน้าไว้ (แท็บ 🎞 คอลเลกชัน · เรียงตามที่ลากไว้) → /collection/<ลิงก์>
+  //    เว็บร้าน: src/components/home/CollectionsBody.tsx (วาดสดในพรีวิวด้วยข้อมูลคอลเลกชัน)
+  collections: {
+    type: "collections",
+    meta: { label: "คอลเลกชัน", icon: "📖", hint: "การ์ดคอลเลกชัน กดแล้วไปหน้าคอลเลกชัน", group: "สินค้า" },
+    fields: [
+      ...headFields({ eyebrow: "Collections", title: "คอลเลกชันของเรา", subtitle: true }),
+      f("layout", "รูปแบบ", "select", {
+        group: "layout",
+        default: "grid",
+        options: [
+          { v: "grid", l: "การ์ดรูปเรียงเป็นตาราง" },
+          { v: "rows", l: "แถวใหญ่ รูป + เรื่องราว สลับซ้ายขวา" },
+          { v: "carousel", l: "การ์ดเลื่อนข้าง" },
+        ],
+      }),
+      f("columns", "คอลัมน์ (คอม)", "number", { group: "layout", default: 3, min: 2, numMax: 4, showIf: { key: "layout", eq: "grid" } }),
+      f("ratio", "สัดส่วนรูป", "select", {
+        group: "layout",
+        default: "4:5",
+        options: [
+          { v: "3:4", l: "แนวตั้ง 3:4" },
+          { v: "4:5", l: "แนวตั้ง 4:5" },
+          { v: "1:1", l: "จัตุรัส 1:1" },
+          { v: "16:9", l: "แนวนอน 16:9" },
+        ],
+      }),
+      f("textPos", "ชื่อคอลเลกชัน", "select", {
+        group: "layout",
+        default: "on",
+        options: [
+          { v: "on", l: "บนรูป (มุมล่าง)" },
+          { v: "below", l: "ใต้รูป" },
+        ],
+        showIf: { key: "layout", eq: ["grid", "carousel"] },
+      }),
+      f("showCount", "โชว์จำนวนสินค้า", "toggle", { group: "layout", default: true }),
+      f("limit", "จำนวนสูงสุด", "number", { group: "layout", default: 6, min: 1, numMax: 24 }),
+    ],
+    summary: (b) => ({ grid: "ตาราง", rows: "แถวใหญ่", carousel: "เลื่อนข้าง" } as Record<string, string>)[s(b.layout)] ?? "คอลเลกชัน",
+  },
+
   // 🛍 ลุคบุ๊กกดซื้อได้ (2026-10-15) — เว็บร้าน: src/components/home/LookbookBody.tsx (วาดสดในพรีวิวด้วยข้อมูลสินค้า)
   lookbook: {
     type: "lookbook",

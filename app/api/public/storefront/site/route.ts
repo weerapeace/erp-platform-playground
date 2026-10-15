@@ -96,6 +96,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      */
     categories: normalizeFieldMap(s.field_map).categories,
     /**
+     * 📖 หน้าคอลเลกชัน (เปิดไว้ในแท็บ 🎞 คอลเลกชัน) [{id,slug,name,title,bannerKey,mobileBannerKey,story,seoTitle,seoDescription}] เรียงตามที่จัด
+     * เว็บร้าน: /collection/<slug> + Section "คอลเลกชัน" · สินค้าในคอลเลกชัน = products API ช่อง collection (id)
+     */
+    collections: await (async () => {
+      const cs = normalizeFieldMap(s.field_map).collections.filter((c) => c.enabled);
+      if (!cs.length) return [];
+      const { data } = await sb.from("collections").select("id, name").in("id", cs.map((c) => c.id));
+      const name = new Map(((data ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]));
+      return cs.filter((c) => name.has(c.id)).map((c) => ({ ...c, name: name.get(c.id) ?? "" }));
+    })(),
+    /**
      * ข้อมูลร้าน — เว็บร้านใช้วาด footer/หน้าติดต่อ/เงื่อนไขค่าส่ง (แก้ได้ที่แท็บ "🏪 ข้อมูลร้าน")
      * เว็บรุ่นเก่าที่ยังไม่รู้จักฟิลด์นี้จะข้ามไปเอง
      */
