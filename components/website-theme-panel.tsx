@@ -1832,7 +1832,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {tab === "listing" && (
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-2">หน้ารายการสินค้า — แทรกรูปในกริดสินค้า</h3>
-              <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} />
+              <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} />
             </div>
           )}
 

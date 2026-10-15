@@ -9,7 +9,7 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ConfirmDialog } from "@/components/modal";
 import { categoryHref } from "@/lib/website-links";
-import { ColorToneButton } from "@/components/color-tone-manager";
+import { ShopFiltersEditor } from "@/components/website-shop-filters-editor";
 import {
   LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
   newListingInsert, type ListingConfig, type ListingInsert,
@@ -23,11 +23,14 @@ export function ListingPanel({
   onChange,
   categories,
   products,
+  fields = [],
 }: {
   value: ListingConfig;
   onChange: (v: ListingConfig) => void;
   categories: { key: string; label: string }[];
   products: { code: string; name: string }[];
+  /** ฟิลด์สินค้าที่ส่งออกเว็บ — เลือกทำตัวกรองเพิ่มได้ */
+  fields?: { key: string; label: string }[];
 }) {
   const list = value.inserts;
   const set = (inserts: ListingInsert[]) => onChange({ ...value, inserts });
@@ -46,8 +49,9 @@ export function ListingPanel({
 
   return (
     <div className="space-y-3">
-      {/* 🧭 ตัวกรอง (หมวด + สีตามโทน — โทนสีเป็นของกลางทุกร้าน จัดในป๊อป "จัดโทนสี") */}
+      {/* 🧭 ตัวกรอง — ตำแหน่ง + กลุ่มตัวกรอง (ลำดับ/เปิดปิด/ชื่อ/ตั้งค่า) · โทนสีเป็นของกลางทุกร้าน จัดในป๊อป "จัดโทนสี" */}
       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+        <p className="text-xs font-semibold text-slate-800">🧭 ตัวกรองสินค้า</p>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-slate-700">ตำแหน่งตัวกรอง</span>
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
@@ -66,25 +70,16 @@ export function ListingPanel({
             ))}
           </div>
           <span className="text-[11px] text-slate-400">
-            {value.filterLayout === "side" ? "จอคอม: หมวด + สี อยู่แถบซ้าย (ติดจอเวลาเลื่อน) · มือถือ: ปุ่ม “ตัวกรอง” เปิดจากด้านล่าง" : "หมวด + สี เป็นแถวปุ่มเหนือรายการสินค้า"}
+            {value.filterLayout === "side" ? "จอคอม: ตัวกรองอยู่แถบซ้าย (ติดจอเวลาเลื่อน · พับ/กางทีละกลุ่ม) · มือถือ: ปุ่ม “ตัวกรอง” เปิดจากด้านล่าง" : "ตัวกรองเป็นแถวปุ่มเหนือรายการสินค้า"}
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={value.colorFilter} onChange={(e) => onChange({ ...value, colorFilter: e.target.checked })} className="w-4 h-4 accent-blue-600" />
-            🎨 มีตัวกรอง &quot;สี&quot;
-          </label>
-          <span className="text-[11px] text-slate-400">ลูกค้ากดโทน เช่น แดง → เห็นสินค้าที่มีสีแดงทุกเฉด + รูปการ์ดเปลี่ยนเป็นสีนั้น</span>
-          <span className="ml-auto">
-            <ColorToneButton />
-          </span>
-        </div>
+        <ShopFiltersEditor value={value} onChange={onChange} fields={fields} />
       </div>
 
       <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
         แทรกรูป (เช่น รูปนายแบบ/ไลฟ์สไตล์) ระหว่างการ์ดสินค้าในหน้า <b>สินค้าทั้งหมด</b> และหน้าหมวด · เพิ่มได้หลายรูป ลาก ⠿ เพื่อเรียง
         <br />
-        กฎบนเว็บ: โชว์เฉพาะตอนลูกค้าเรียงแบบ &quot;แนะนำ&quot; และไม่ได้พิมพ์ค้นหา · ถ้าหมวดนั้นมีสินค้าน้อยกว่าลำดับที่ตั้ง รูปนั้นจะไม่โชว์ · ระบบดึงการ์ดมาเติมช่องว่างให้เอง (ไม่มีรูโหว่) · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว
+        กฎบนเว็บ: โชว์เฉพาะตอนลูกค้าเรียงแบบ &quot;แนะนำ&quot; และไม่ได้ค้นหา/กดตัวกรอง · ถ้าหมวดนั้นมีสินค้าน้อยกว่าลำดับที่ตั้ง รูปนั้นจะไม่โชว์ · ระบบดึงการ์ดมาเติมช่องว่างให้เอง (ไม่มีรูโหว่) · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว
       </div>
 
       {list.length === 0 && (

@@ -113,6 +113,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const highlightCatalog = (hlRows ?? []) as FitItem[];
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const relatedValues = await resolveRelatedValues(sb, parentFields, (parents ?? []) as Record<string, unknown>[]);
+  // 🧭 ชื่อคอลเลกชัน (ตัวกรอง "คอลเลกชัน" บนเว็บ)
+  const collIds = [...new Set(((parents ?? []) as { collection_id?: string | null }[]).map((p) => p.collection_id).filter(Boolean))] as string[];
+  const collName = new Map<string, string>();
+  if (collIds.length) {
+    const { data: colls } = await sb.from("collections").select("id, name").in("id", collIds);
+    for (const c of (colls ?? []) as { id: string; name: string | null }[]) if (c.name?.trim()) collName.set(c.id, c.name.trim());
+  }
 
   // กฎชื่อของร้าน "ลบแบรนด์/คอลเลกชัน" ต้องรู้ชื่อแบรนด์/คอลเลกชันก่อน
   if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (parents ?? []) as ParentRow[]);
@@ -242,6 +249,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         parentImages: [...new Set([...(p.cover_image_r2_key ? [p.cover_image_r2_key] : []), ...(parentGallery.get(p.id) ?? [])])].map(imageUrl),
         /** คอลเลกชันใน ERP (id) — ใช้จับกลุ่มสินค้าที่เกี่ยวข้อง */
         collection: p.collection_id ?? null,
+        /** ชื่อคอลเลกชัน — ตัวกรอง "คอลเลกชัน" */
+        collectionName: p.collection_id ? collName.get(p.collection_id) ?? null : null,
         /** อันดับขายดีบนเว็บ (1 = ขายดีสุด) — ไม่มี = ยังไม่เคยขาย */
         salesRank: salesRank.get(code.toUpperCase()) ?? null,
         /** จับคู่รายละเอียดหน้าเว็บเฉพาะรุ่น { itemId: { show, text } } — ไม่มี = ตามชุดรายละเอียดกลางของธีม */
