@@ -46,5 +46,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (!c.ok) return storefrontJson({ ok: false, error: c.error }, 400);
   const { error } = await g.sb.from("store_customer_identities").delete().eq("customer_id", g.member.id).eq("provider", provider);
   if (error) return storefrontJson({ ok: false, error: "ยกเลิกไม่สำเร็จ" }, 500);
+  // ยกเลิก "อีเมล + รหัสผ่าน" = ลบรหัสผ่านด้วย (เข้าด้วยรหัสเดิมไม่ได้อีก — การเข้าด้วยรหัสหาจากอีเมล ไม่ใช่จากรายการช่องทาง)
+  if (provider === "password") await g.sb.from("store_customers").update({ password_hash: null, updated_at: new Date().toISOString() }).eq("id", g.member.id);
   return storefrontJson({ ok: true, member: await memberSummary(g.sb, g.member) }, 200);
 }

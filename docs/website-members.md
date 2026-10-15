@@ -70,8 +70,24 @@ RLS เปิด ไม่มี policy (service role ผ่าน API เท่
 - ลบบัญชี (พิมพ์ "ลบบัญชี"): ERP `POST /api/storefront-member/delete` → ล้างชื่อ/อีเมล/เบอร์/รูป + ลบช่องทางและที่อยู่ + status deleted + audit · ออเดอร์เดิมเก็บไว้ (หลักฐานการขาย) · ออกจากระบบทันที · เข้าด้วยช่องทางเดิมอีก = บัญชีใหม่
 - `/privacy` นโยบายความเป็นส่วนตัว (PDPA) ทุกร้าน ใส่ชื่อร้าน+ช่องทางติดต่อจากแท็บข้อมูลร้านให้เอง · ลิงก์ท้ายเว็บเสมอ · ⚠️ เป็นแม่แบบ — ควรให้ผู้รู้กฎหมายตรวจ
 
+## 🔑 อีเมล + รหัสผ่าน (M3)
+- สมัคร (/account/register) → ERP ส่งลิงก์ยืนยัน → เปิดลิงก์ (/account/verify) = ยืนยัน + เข้าสู่ระบบ · **ยังไม่ยืนยัน = เข้าด้วยรหัสไม่ได้**
+- ลืมรหัส (/account/forgot) → ลิงก์ 30 นาที ใช้ครั้งเดียว → ตั้งรหัสใหม่ (/account/reset) = ถือว่ายืนยันอีเมลแล้ว + ปลดล็อก · ใช้ตั้งรหัสให้บัญชีที่สมัครด้วย Google/LINE/FB ได้ด้วย
+- หน้าบัญชี → โปรไฟล์: ตั้ง/เปลี่ยนรหัส (มีรหัสเดิม = ต้องใส่) · ยกเลิกช่องทาง "อีเมล" = ลบรหัสผ่านด้วย
+- กติกา: ≥ 8 ตัว มีตัวอักษร+ตัวเลข · ผิด 5 ครั้ง ล็อก 15 นาที · ส่งอีเมลได้ ≤ 3 ครั้ง/ชม./คน · ข้อความผิดพลาดไม่บอกว่าอีเมลนี้มีบัญชีไหม
+- ⚠️ กันสวมบัญชี: บัญชีที่ยังไม่ยืนยันอีเมล ห้ามผูกกับ Google อัตโนมัติ · เจ้าของอีเมลตัวจริงเข้าด้วย Google = ได้อีเมลนั้น บัญชีค้างถูกปลดอีเมล+ช่องทางรหัส · สมัครซ้ำตอนยังไม่ยืนยัน = ลิงก์เก่าใช้ไม่ได้
+- ไฟล์: ERP `lib/member-password.ts` (scrypt + โทเคน sha256) · `lib/email.ts` (ของกลางส่งอีเมล · Resend) · `lib/member-emails.ts` (แม่แบบ) · `app/api/storefront-member/password` (action register/resend/verify/login/forgot/reset/change) · migration 202610170100 (store_customer_tokens + failed_login_count/locked_until)
+  เว็บร้าน `/api/auth/password` · `src/components/account/EmailAuthForms.tsx` · `AuthCard.tsx` · หน้า /account/{register,forgot,reset,verify}
+
+### 🔧 เปิดใช้ (เจ้าของร้าน)
+1. สมัคร https://resend.com (ฟรี 3,000 ฉบับ/เดือน) → **Domains → Add domain** (โดเมนของบริษัท เช่น `louismontini.co.th` — โดเมน `*.vercel.app` ยืนยันไม่ได้) → ใส่ DNS (SPF/DKIM) ที่ผู้ให้บริการโดเมน → รอ Verified
+2. Resend → API Keys → Create (สิทธิ์ Sending)
+3. Vercel **ERP**: `RESEND_API_KEY` · `EMAIL_FROM` = `no-reply@<โดเมนที่ยืนยันแล้ว>` (ทุกร้านใช้ที่อยู่นี้ · ชื่อผู้ส่ง = ชื่อร้านให้เอง)
+4. Vercel **เว็บร้าน**: `MEMBER_EMAIL_LOGIN=1` → Redeploy (ฟอร์มอีเมลขึ้นหน้าเข้าสู่ระบบ)
+- ลิงก์ในอีเมลชี้โดเมนร้านที่อยู่ใน shop_domains เท่านั้น (เพิ่มโดเมนใหม่ต้องลงทะเบียนก่อน)
+
 ## เครื่อง dev
-`.env.local` ของเว็บร้าน: `MEMBER_DEV_LOGIN=1` + `MEMBER_ERP_BASE=http://localhost:3032` → ปุ่ม "ทดสอบ (เครื่อง dev)" (ใช้ได้เฉพาะ NODE_ENV=development บน localhost) · ⚠️ dev ต่อฐานข้อมูลจริง — ลบบัญชีทดสอบ (`zz-dev@example.test`) หลังทดสอบ · ห้ามสร้างออเดอร์ทดสอบจริง
+`.env.local` ของเว็บร้าน: `MEMBER_DEV_LOGIN=1` + `MEMBER_ERP_BASE=http://localhost:3032` + `MEMBER_EMAIL_LOGIN=1` · ERP: `EMAIL_DEV_ECHO=1` (ไม่ส่งอีเมลจริง — ลิงก์โผล่ในหน้าจอเป็น "(dev) ลิงก์ในอีเมล") → ปุ่ม "ทดสอบ (เครื่อง dev)" (ใช้ได้เฉพาะ NODE_ENV=development บน localhost) · ⚠️ dev ต่อฐานข้อมูลจริง — ลบบัญชีทดสอบ (`zz-dev@example.test`) หลังทดสอบ · ห้ามสร้างออเดอร์ทดสอบจริง
 
 ## ขั้นถัดไป
 M2 LINE + Facebook + เชื่อมบัญชีเพิ่มจากหน้าบัญชี + หน้านโยบายความเป็นส่วนตัว + ลบบัญชี · M3 อีเมล+รหัสผ่าน (ต้องมีบริการส่งอีเมล) · M4 แต้ม/ระดับสมาชิก · M5 คูปองเฉพาะสมาชิก + รายการโปรด

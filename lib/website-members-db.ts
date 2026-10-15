@@ -50,8 +50,16 @@ export async function loginMember(sb: Admin, shopId: string, input: MemberLoginI
 
   let byEmail: { customerId: string; status: string } | null = null;
   if (!byIdentity && input.email && input.emailVerified) {
-    const { data } = await sb.from("store_customers").select("id, status").eq("shop_id", shopId).eq("email", input.email).neq("status", "deleted").maybeSingle();
-    if (data) byEmail = { customerId: (data as { id: string }).id, status: (data as { status: string }).status };
+    const { data } = await sb.from("store_customers").select("id, status, email_verified").eq("shop_id", shopId).eq("email", input.email).neq("status", "deleted").maybeSingle();
+    const row = data as { id: string; status: string; email_verified: boolean } | null;
+    // ⚠️ ผูกเข้าบัญชีเดิมได้เฉพาะบัญชีที่ "ยืนยันอีเมลแล้ว" — บัญชีที่สมัครด้วยอีเมลแต่ยังไม่ยืนยัน (อาจเป็นคนอื่นแอบใช้อีเมลนี้)
+    //    ห้ามผูก · เจ้าของอีเมลตัวจริง (ยืนยันผ่าน Google แล้ว) ได้อีเมลนี้ไป บัญชีที่ยังไม่ยืนยันถูกปลดอีเมลออก
+    if (row && row.email_verified) byEmail = { customerId: row.id, status: row.status };
+    else if (row) {
+      await sb.from("store_customers").update({ email: null, updated_at: now }).eq("id", row.id);
+      // ช่องทาง "อีเมล+รหัส" ของบัญชีที่ถูกปลดอีเมลใช้ต่อไม่ได้แล้ว (ไม่งั้นค้างชื่ออีเมลนี้ไว้ เจ้าของตัวจริงตั้งรหัสผ่านไม่ได้)
+      await sb.from("store_customer_identities").delete().eq("customer_id", row.id).eq("provider", "password");
+    }
   }
 
   const d = resolveLogin(input, { byIdentity, byEmail });
