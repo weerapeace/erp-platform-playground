@@ -42,6 +42,8 @@ export interface ListingConfig {
   colorFilter: boolean;
   /** ตำแหน่งตัวกรอง (หมวด + สี): side = แถบซ้าย (มือถือเป็นปุ่ม "ตัวกรอง") · top = แถวเหนือรายการแบบเดิม */
   filterLayout: "side" | "top";
+  /** แถบซ้าย (จอคอม) ตอนเปิดหน้า: open = โชว์ · collapsed = พับเข้าซ้าย (ลูกค้ากดปุ่ม "ตัวกรอง" เพื่อกาง) */
+  filterSidebar: "open" | "collapsed";
   /** 🧭 ตัวกรอง (ลำดับ/เปิดปิด/ชื่อ) — ดู normalizeShopFilters */
   filters: ShopFilter[];
   /** ช่วงราคา (บาท) เช่น [500,1000,2000] → ต่ำกว่า 500 · 500–1,000 · 1,000–2,000 · 2,000 ขึ้นไป */
@@ -166,7 +168,7 @@ export const normalizeSizeBreaks = (v: unknown) => {
 
 
 export const MAX_LISTING_INSERTS = 20;
-export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30 };
+export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30 };
 
 export const LISTING_SIZES: { value: ListingInsertSize; label: string; hint: string }[] = [
   { value: "1x1", label: "1 ช่อง (เท่าการ์ดสินค้า)", hint: "มือถือ: 1 ช่อง" },
@@ -243,6 +245,6 @@ export function normalizeListing(raw: unknown): ListingConfig {
     });
     if (inserts.length >= MAX_LISTING_INSERTS) break;
   }
-  return { inserts, colorFilter: r.colorFilter !== false, filterLayout: r.filterLayout === "top" ? "top" : "side", filters: normalizeShopFilters(r.filters, r.colorFilter === false), priceBreaks: normalizePriceBreaks(r.priceBreaks), sizeBreaks: normalizeSizeBreaks(r.sizeBreaks), newDays: Number.isFinite(Number(r.newDays)) && Number(r.newDays) >= 1 ? Math.min(365, Math.round(Number(r.newDays))) : 30 };
+  return { inserts, colorFilter: r.colorFilter !== false, filterLayout: r.filterLayout === "top" ? "top" : "side", filterSidebar: r.filterSidebar === "collapsed" ? "collapsed" : "open", filters: normalizeShopFilters(r.filters, r.colorFilter === false), priceBreaks: normalizePriceBreaks(r.priceBreaks), sizeBreaks: normalizeSizeBreaks(r.sizeBreaks), newDays: Number.isFinite(Number(r.newDays)) && Number(r.newDays) >= 1 ? Math.min(365, Math.round(Number(r.newDays))) : 30 };
 }
 

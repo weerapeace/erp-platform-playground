@@ -73,6 +73,29 @@ export function ListingPanel({
             {value.filterLayout === "side" ? "จอคอม: ตัวกรองอยู่แถบซ้าย (ติดจอเวลาเลื่อน · พับ/กางทีละกลุ่ม) · มือถือ: ปุ่ม “ตัวกรอง” เปิดจากด้านล่าง" : "ตัวกรองเป็นแถวปุ่มเหนือรายการสินค้า"}
           </span>
         </div>
+        {value.filterLayout === "side" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-700">เปิดหน้ามา (จอคอม)</span>
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+              {([
+                ["open", "▣ โชว์แถบตัวกรอง"],
+                ["collapsed", "◁ พับเข้าซ้าย"],
+              ] as const).map(([v, l]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => onChange({ ...value, filterSidebar: v })}
+                  className={`px-3 py-1 text-xs ${(value.filterSidebar ?? "open") === v ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <span className="text-[11px] text-slate-400">
+              {value.filterSidebar === "collapsed" ? "สินค้าเต็มความกว้าง · ลูกค้ากดปุ่ม “ตัวกรอง” เพื่อกางแถบออกมา" : "แถบตัวกรองกางอยู่ · ลูกค้ากด “« ซ่อน” เพื่อพับเข้าซ้ายได้"}
+            </span>
+          </div>
+        )}
         <ShopFiltersEditor value={value} onChange={onChange} fields={fields} />
       </div>
 

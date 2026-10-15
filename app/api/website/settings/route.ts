@@ -3,6 +3,7 @@
  *
  * GET ?shop=<slug>           → ค่าปัจจุบัน + นิยามฟิลด์ (label/hint/กลุ่ม) ให้หน้าจอวาดฟอร์มเอง
  * PUT { shopId, info:{...} } → บันทึก (upsert ลง store_settings) + audit
+ * PUT { shopId, patch:{...} } → แก้เฉพาะบางช่อง (ช่องอื่นคงเดิม) — ใช้โดยป๊อป 🌐 โซเชียล (components/website-social-links.tsx)
  *
  * ของกลาง: lib/website-site-info.ts · guardApi(products.view/edit) · writeAudit
  */
@@ -53,7 +54,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { shopId?: string; info?: unknown };
+  // info = ทั้งชุด (แท็บข้อมูลร้าน) · patch = แก้เฉพาะบางช่อง (เช่น ป๊อป 🌐 โซเชียลในหน้าดีไซน์) — ช่องอื่นคงค่าเดิม
+  let body: { shopId?: string; info?: unknown; patch?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -67,8 +69,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const s = shop as { id: string; slug: string };
 
   const before = await readSiteInfo(sb, s.id);
-  const info = normalizeSiteInfo(body.info);
-  if (info.promo_enabled) {
+  const patch = body.patch && typeof body.patch === "object" && !Array.isArray(body.patch) ? (body.patch as Record<string, unknown>) : null;
+  const info = normalizeSiteInfo(patch ? { ...before, ...patch } : body.info);
+  // patch ที่ไม่แตะป๊อปอัป ไม่ต้องตรวจคูปองซ้ำ (กันบันทึกโซเชียลไม่ได้เพราะคูปองเก่ามีปัญหา)
+  if (info.promo_enabled && (!patch || Object.keys(patch).some((k) => k.startsWith("promo_")))) {
     if (!info.promo_code) return NextResponse.json({ error: "เปิดป๊อปอัปลูกค้าใหม่แล้ว แต่ยังไม่ได้ใส่โค้ดที่แจก" }, { status: 400 });
     const { data: cp } = await sb.from("store_coupons").select("id, active").eq("shop_id", s.id).eq("code", info.promo_code).maybeSingle();
     if (!cp) return NextResponse.json({ error: `ไม่พบคูปอง ${info.promo_code} ในร้านนี้ — สร้างที่แท็บ 🎟️ คูปอง ก่อน` }, { status: 400 });

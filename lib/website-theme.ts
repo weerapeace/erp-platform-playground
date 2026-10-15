@@ -964,13 +964,15 @@ export function normalizeShape(raw: unknown): Shape {
 }
 
 /* ───────── Header: ชิ้นส่วน 3 โซน + เมนู (แท็บ "Header" / "เมนู") ───────── */
-export type HeaderEl = "logo" | "menu" | "search" | "cart" | "social" | "button";
-export interface HeaderZones { left: HeaderEl[]; center: HeaderEl[]; right: HeaderEl[] }
+export type HeaderEl = "logo" | "menu" | "search" | "cart" | "account" | "social" | "button";
+/** v = รุ่นของชุดชิ้นส่วน (2 = มีชิ้น "บัญชีสมาชิก" แยกจากตะกร้าแล้ว) — ธีมเก่าไม่มี v จะได้ "account" เติมหน้าตะกร้าให้ครั้งเดียว */
+export interface HeaderZones { left: HeaderEl[]; center: HeaderEl[]; right: HeaderEl[]; v?: number }
 export const HEADER_EL_DEFS: { key: HeaderEl; label: string; hint: string }[] = [
   { key: "logo", label: "โลโก้", hint: "โลโก้/ชื่อร้าน (แท็บโลโก้)" },
   { key: "menu", label: "เมนู", hint: "ลิงก์เมนูหลัก (แท็บเมนู) — บนมือถือเป็นปุ่ม ☰" },
   { key: "search", label: "ค้นหา", hint: "ไอคอนแว่นขยาย กดแล้วพิมพ์ค้นหาสินค้า" },
   { key: "cart", label: "ตะกร้า", hint: "ไอคอนตะกร้า + จำนวนชิ้น" },
+  { key: "account", label: "บัญชีสมาชิก", hint: "ไอคอนคน → เข้าสู่ระบบ / บัญชีของฉัน (โชว์เมื่อเปิดระบบสมาชิกในแท็บ 👥 สมาชิก)" },
   { key: "social", label: "โซเชียล", hint: "ไอคอน Facebook/IG/TikTok จากแท็บข้อมูลร้าน (ซ่อนบนมือถือ)" },
   { key: "button", label: "ปุ่ม", hint: "ปุ่มสีแบรนด์ เช่น \"ช้อปเลย\" (ตั้งข้อความ/ลิงก์ด้านล่าง · ซ่อนบนมือถือ)" },
 ];
@@ -980,8 +982,8 @@ export function normalizeZones(raw: unknown, legacy?: { menuAlign: MenuAlign; sh
   if (!r) {
     // ไม่เคยตั้ง → สร้างจากค่าเดิม (ตำแหน่งเมนู + แสดงตะกร้า)
     const a = legacy?.menuAlign ?? "center";
-    const cart: HeaderEl[] = legacy?.showCart === false ? [] : ["cart"];
-    return a === "left" ? { left: ["logo", "menu"], center: [], right: cart } : a === "right" ? { left: ["logo"], center: [], right: ["menu", ...cart] } : { left: ["logo"], center: ["menu"], right: cart };
+    const cart: HeaderEl[] = legacy?.showCart === false ? ["account"] : ["account", "cart"];
+    return a === "left" ? { left: ["logo", "menu"], center: [], right: cart, v: 2 } : a === "right" ? { left: ["logo"], center: [], right: ["menu", ...cart], v: 2 } : { left: ["logo"], center: ["menu"], right: cart, v: 2 };
   }
   const seen = new Set<HeaderEl>();
   const zone = (v: unknown): HeaderEl[] => {
@@ -994,7 +996,15 @@ export function normalizeZones(raw: unknown, legacy?: { menuAlign: MenuAlign; sh
     }
     return out;
   };
-  return { left: zone(r.left), center: zone(r.center), right: zone(r.right) };
+  const z: HeaderZones = { left: zone(r.left), center: zone(r.center), right: zone(r.right), v: 2 };
+  // ธีมก่อนมีชิ้น "บัญชีสมาชิก" (ไอคอนเคยติดอยู่กับตะกร้า) → วางไว้หน้าตะกร้าให้ครั้งเดียว · หลังจากนี้เอาออกได้ตามใจ
+  if (r.v !== 2 && !seen.has("account")) {
+    for (const k of ["left", "center", "right"] as const) {
+      const i = z[k].indexOf("cart");
+      if (i >= 0) z[k].splice(i, 0, "account");
+    }
+  }
+  return z;
 }
 
 export type MenuKind = "home" | "shop" | "category" | "categories" | "product" | "page" | "contact" | "url";
@@ -1181,7 +1191,7 @@ export const DEFAULT_THEME: SiteTheme = {
     height: 34,
     placeholder: { ...DEFAULT_IMAGE_PLACEHOLDER },
   },
-  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["cart"] }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" } },
+  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" } },
   menu: { items: null, mobileItems: null },
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },

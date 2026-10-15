@@ -36,6 +36,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 ];
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { SocialLinksModal } from "@/components/website-social-links";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem } from "@/lib/website-theme";
@@ -250,6 +251,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const redoStack = useRef<Theme[]>([]);
   const [, tick] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** ป๊อปตั้งค่าชิ้นส่วนหัวเว็บที่เปิดอยู่ (กดชื่อชิ้นที่มี ⚙ ใน ZonesEditor) */
+  const [zoneCfg, setZoneCfg] = useState<HeaderEl | null>(null);
   // วัดกล่องพรีวิวจริง เพื่อย่อ "พอดีจอ" (เดิม hardcode 400px → จอคอมถูกบีบเหลือ ~28%)
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(420);
@@ -993,7 +996,30 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
               <div className="mt-4 pt-3 border-t border-slate-100">
                 <label className={labelCls}>ตำแหน่งชิ้นส่วน (ซ้าย · กลาง · ขวา) — ลาก ⠿ จัดลำดับในโซน · ◀ ▶ ย้ายโซน · ✕ เอาออก</label>
-                <ZonesEditor zones={theme.header.zones} onChange={(zones) => setHeader({ zones })} />
+                <ZonesEditor zones={theme.header.zones} onChange={(zones) => setHeader({ zones })} onConfig={setZoneCfg} />
+                <p className="text-[11px] text-slate-400 mt-1.5">กดชื่อชิ้นที่มี ⚙ (เมนู · โซเชียล) เพื่อตั้งค่าในป๊อปได้เลย · “บัญชีสมาชิก” โชว์เมื่อเปิดระบบสมาชิกในแท็บ 👥 สมาชิก</p>
+                {/* ⚙ ป๊อปตั้งค่าชิ้นส่วน: เมนู = แก้ในธีม (บันทึกร่าง/เผยแพร่พร้อมดีไซน์) · โซเชียล = ข้อมูลร้าน บันทึกทันที */}
+                <ERPModal
+                  open={zoneCfg === "menu"}
+                  onClose={() => setZoneCfg(null)}
+                  title="☰ เมนูด้านบน"
+                  description="จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ป้ายเล็ก · เมนูย่อย · ชุดมือถือแยกได้ — แก้แล้วเห็นในพรีวิวทันที อย่าลืมกดบันทึก/เผยแพร่ด้านบนเหมือนการแก้ดีไซน์อื่น"
+                  size="xl"
+                  footer={
+                    <button type="button" onClick={() => setZoneCfg(null)} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700">
+                      เสร็จ
+                    </button>
+                  }
+                >
+                  <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} />
+                </ERPModal>
+                <SocialLinksModal
+                  open={zoneCfg === "social"}
+                  onClose={() => setZoneCfg(null)}
+                  shopSlug={shopSlug}
+                  shopId={shopId}
+                  onSaved={() => setTimeout(() => { if (iframeRef.current) iframeRef.current.src = iframeRef.current.src; }, 1500)}
+                />
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
@@ -1033,37 +1059,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-1">เมนูด้านบน</h3>
               <p className="text-xs text-slate-500 mb-3">จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้</p>
-              {theme.menu.items === null ? (
-                <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
-                  ตอนนี้ใช้เมนู<b>อัตโนมัติ</b>: สินค้าทั้งหมด → หน้าที่สร้างเอง → ติดต่อ (ถ้ากรอกช่องทางติดต่อแล้ว)
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                      onClick={() => setMenu({ items: [newMenuItem("สินค้าทั้งหมด", "shop"), ...storePages.map((pg) => newMenuItem(pg.title, "page", pg.slug)), newMenuItem("ติดต่อ", "contact")] })}
-                    >
-                      จัดเมนูเอง (เริ่มจากชุดอัตโนมัติ)
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <MenuEditor items={theme.menu.items} onChange={(items) => setMenu({ items })} choices={choices} pages={storePages} />
-                  <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => { if (confirm("กลับไปใช้เมนูอัตโนมัติ? (รายการที่จัดไว้จะหาย)")) setMenu({ items: null, mobileItems: null }); }}>กลับไปใช้เมนูอัตโนมัติ</button>
-                </>
-              )}
-
-              <div className="mt-5 pt-3 border-t border-slate-100">
-                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.menu.mobileItems !== null} onChange={(e) => setMenu({ mobileItems: e.target.checked ? (theme.menu.items ?? []).map((it) => ({ ...it, id: `mb${it.id}`, children: it.children.map((c) => ({ ...c, id: `mb${c.id}` })) })) : null })} />
-                  📱 มือถือใช้เมนูคนละชุด
-                </label>
-                {theme.menu.mobileItems !== null && (
-                  <div className="mt-3">
-                    <MenuEditor items={theme.menu.mobileItems} onChange={(mobileItems) => setMenu({ mobileItems })} choices={choices} pages={storePages} />
-                  </div>
-                )}
-              </div>
+              <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} />
             </div>
           )}
 
@@ -2992,7 +2988,9 @@ function TextRoleEditor({ def, value, pub, theme, onChange, onReset }: { def: (t
 }
 
 /* ─────────── Header: จัดชิ้นส่วน 3 โซน ─────────── */
-function ZonesEditor({ zones, onChange }: { zones: HeaderZones; onChange: (z: HeaderZones) => void }) {
+/** ชิ้นที่กดแล้วเปิดป๊อปตั้งค่าได้ */
+const ZONE_CONFIGURABLE: HeaderEl[] = ["menu", "social"];
+export function ZonesEditor({ zones, onChange, onConfig }: { zones: HeaderZones; onChange: (z: HeaderZones) => void; onConfig?: (el: HeaderEl) => void }) {
   const ZK = ["left", "center", "right"] as const;
   const ZL: Record<(typeof ZK)[number], string> = { left: "ซ้าย", center: "กลาง", right: "ขวา" };
   const placed = new Set([...zones.left, ...zones.center, ...zones.right]);
@@ -3009,12 +3007,12 @@ function ZonesEditor({ zones, onChange }: { zones: HeaderZones; onChange: (z: He
   return (
     <div className="grid grid-cols-3 gap-2">
       {ZK.map((z) => (
-        <ZoneColumn key={z} title={ZL[z]} items={zones[z]} label={label} canLeft={z !== "left"} canRight={z !== "right"} missing={missing} onReorder={(from, to) => onChange({ ...zones, [z]: moveItem(zones[z], from, to) })} onMove={(i, d) => move(z, i, d)} onRemove={(i) => remove(z, i)} onAdd={(el) => add(z, el)} />
+        <ZoneColumn key={z} title={ZL[z]} items={zones[z]} label={label} onConfig={onConfig} canLeft={z !== "left"} canRight={z !== "right"} missing={missing} onReorder={(from, to) => onChange({ ...zones, [z]: moveItem(zones[z], from, to) })} onMove={(i, d) => move(z, i, d)} onRemove={(i) => remove(z, i)} onAdd={(el) => add(z, el)} />
       ))}
     </div>
   );
 }
-function ZoneColumn({ title, items, label, canLeft, canRight, missing, onReorder, onMove, onRemove, onAdd }: { title: string; items: HeaderEl[]; label: (k: HeaderEl) => string; canLeft: boolean; canRight: boolean; missing: { key: HeaderEl; label: string }[]; onReorder: (from: number, to: number) => void; onMove: (i: number, dir: -1 | 1) => void; onRemove: (i: number) => void; onAdd: (el: HeaderEl) => void }) {
+function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, missing, onReorder, onMove, onRemove, onAdd }: { title: string; items: HeaderEl[]; label: (k: HeaderEl) => string; onConfig?: (el: HeaderEl) => void; canLeft: boolean; canRight: boolean; missing: { key: HeaderEl; label: string }[]; onReorder: (from: number, to: number) => void; onMove: (i: number, dir: -1 | 1) => void; onRemove: (i: number) => void; onAdd: (el: HeaderEl) => void }) {
   const drag = useDragReorder(onReorder);
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 min-h-[96px]">
@@ -3023,7 +3021,14 @@ function ZoneColumn({ title, items, label, canLeft, canRight, missing, onReorder
         {items.map((el, i) => (
           <li key={el} {...drag.rowProps(i)} className={`flex items-center gap-1 bg-white border border-slate-200 rounded-md px-1.5 py-1 text-xs text-slate-700 ${drag.rowCls(i)}`}>
             <DragHandle {...drag.handleProps(i)} />
-            <span className="flex-1 truncate">{label(el)}</span>
+            {onConfig && ZONE_CONFIGURABLE.includes(el) ? (
+              <button type="button" onClick={() => onConfig(el)} className="flex-1 min-w-0 flex items-center gap-1 text-left text-blue-700 hover:underline" title={`ตั้งค่า${label(el)}`}>
+                <span className="truncate">{label(el)}</span>
+                <span aria-hidden className="text-[10px] text-slate-400">⚙</span>
+              </button>
+            ) : (
+              <span className="flex-1 truncate" title={HEADER_EL_DEFS.find((d) => d.key === el)?.hint}>{label(el)}</span>
+            )}
             <button type="button" disabled={!canLeft} onClick={() => onMove(i, -1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-20 px-0.5" title="ย้ายไปโซนซ้าย">◀</button>
             <button type="button" disabled={!canRight} onClick={() => onMove(i, 1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-20 px-0.5" title="ย้ายไปโซนขวา">▶</button>
             <button type="button" onClick={() => onRemove(i)} className="text-slate-300 hover:text-rose-600 px-0.5" title="เอาออก">✕</button>
@@ -3037,6 +3042,60 @@ function ZoneColumn({ title, items, label, canLeft, canRight, missing, onReorder
         </select>
       )}
     </div>
+  );
+}
+
+/* ─────────── เมนู: ชุดตั้งค่าทั้งก้อน (แท็บ "เมนู" + ป๊อปจากชิ้น "เมนู" ใน Header ใช้ตัวเดียวกัน) ─────────── */
+function MenuSettings({ menu, setMenu, choices, pages }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[] }) {
+  const [askAuto, setAskAuto] = useState(false);
+  return (
+    <>
+      {menu.items === null ? (
+        <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
+          ตอนนี้ใช้เมนู<b>อัตโนมัติ</b>: สินค้าทั้งหมด → หน้าที่สร้างเอง → ติดต่อ (ถ้ากรอกช่องทางติดต่อแล้ว)
+          <div className="mt-3">
+            <button
+              type="button"
+              className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+              onClick={() => setMenu({ items: [newMenuItem("สินค้าทั้งหมด", "shop"), ...pages.map((pg) => newMenuItem(pg.title, "page", pg.slug)), newMenuItem("ติดต่อ", "contact")] })}
+            >
+              จัดเมนูเอง (เริ่มจากชุดอัตโนมัติ)
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <MenuEditor items={menu.items} onChange={(items) => setMenu({ items })} choices={choices} pages={pages} />
+          <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => setAskAuto(true)}>
+            กลับไปใช้เมนูอัตโนมัติ
+          </button>
+        </>
+      )}
+
+      <div className="mt-5 pt-3 border-t border-slate-100">
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={menu.mobileItems !== null} onChange={(e) => setMenu({ mobileItems: e.target.checked ? (menu.items ?? []).map((it) => ({ ...it, id: `mb${it.id}`, children: it.children.map((c) => ({ ...c, id: `mb${c.id}` })) })) : null })} />
+          📱 มือถือใช้เมนูคนละชุด
+        </label>
+        {menu.mobileItems !== null && (
+          <div className="mt-3">
+            <MenuEditor items={menu.mobileItems} onChange={(mobileItems) => setMenu({ mobileItems })} choices={choices} pages={pages} />
+          </div>
+        )}
+      </div>
+      <ConfirmDialog
+        open={askAuto}
+        onClose={() => setAskAuto(false)}
+        onConfirm={() => {
+          setMenu({ items: null, mobileItems: null });
+          setAskAuto(false);
+        }}
+        title="กลับไปใช้เมนูอัตโนมัติ?"
+        message="รายการเมนูที่จัดไว้ (รวมชุดมือถือ) จะหาย แล้วเว็บใช้เมนูอัตโนมัติแทน"
+        confirmText="ใช้เมนูอัตโนมัติ"
+        variant="danger"
+      />
+    </>
   );
 }
 
