@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveLogin, sanitizeAddress, sanitizeLoginInput, sanitizeProfilePatch } from "../website-members";
+import { canUnlink, deletedMemberPatch, resolveLogin, sanitizeAddress, sanitizeLoginInput, sanitizeProfilePatch } from "../website-members";
 
 /**
  * 👤 สมาชิกเว็บร้าน — กฎผูกบัญชี (ความปลอดภัย) + ตรวจข้อมูล
@@ -48,5 +48,18 @@ describe("ที่อยู่ / โปรไฟล์", () => {
     expect(sanitizeProfilePatch({ name: " " }).ok).toBe(false);
     expect(sanitizeProfilePatch({ phone: "" })).toEqual({ ok: true, patch: { phone: null } });
     expect(sanitizeProfilePatch({ marketingOptIn: true, email: "x@y.z" })).toEqual({ ok: true, patch: { marketing_opt_in: true } });
+  });
+});
+
+describe("ลบบัญชี / ยกเลิกเชื่อม", () => {
+  it("ลบบัญชี = ล้างข้อมูลส่วนตัวทุกช่อง + สถานะ deleted", () => {
+    const p = deletedMemberPatch(new Date("2026-10-15T00:00:00Z"));
+    expect(p).toMatchObject({ status: "deleted", email: null, email_verified: false, phone: null, avatar_url: null, password_hash: null, marketing_opt_in: false });
+    expect(p.name).not.toMatch(/@/);
+  });
+  it("ยกเลิกเชื่อม: ต้องเหลืออย่างน้อย 1 ช่องทาง · ไม่ได้เชื่อม = บอก", () => {
+    expect(canUnlink(2, 1)).toEqual({ ok: true });
+    expect(canUnlink(1, 1).ok).toBe(false);
+    expect(canUnlink(2, 0).ok).toBe(false);
   });
 });

@@ -132,6 +132,32 @@ export const addressFromRow = (r: Record<string, unknown>) => ({
 });
 export type MemberAddress = ReturnType<typeof addressFromRow>;
 
+/**
+ * ลบบัญชี (สมาชิกกดเอง · PDPA) = ล้างข้อมูลส่วนตัวในบัญชี + ลบวิธีเข้าสู่ระบบ/ที่อยู่ (ทำที่ DB)
+ * ออเดอร์เดิมยังเก็บไว้ (หลักฐานการขาย/ภาษี) แต่ไม่ผูกกับตัวตนที่ล็อกอินได้อีก · เข้าด้วย Google/LINE เดิมอีกครั้ง = บัญชีใหม่
+ */
+export const DELETE_CONFIRM_TEXT = "ลบบัญชี";
+export function deletedMemberPatch(now = new Date()) {
+  return {
+    status: "deleted" as const,
+    email: null,
+    email_verified: false,
+    name: "ผู้ใช้ที่ลบบัญชีแล้ว",
+    phone: null,
+    avatar_url: null,
+    password_hash: null,
+    marketing_opt_in: false,
+    updated_at: now.toISOString(),
+  };
+}
+
+/** ยกเลิกการเชื่อมวิธีเข้าสู่ระบบได้ไหม — ต้องเหลืออย่างน้อย 1 วิธี (ไม่งั้นเข้าบัญชีไม่ได้อีก) */
+export function canUnlink(identityCount: number, providerCount: number): { ok: true } | { ok: false; error: string } {
+  if (providerCount === 0) return { ok: false, error: "บัญชีนี้ไม่ได้เชื่อมกับช่องทางนี้" };
+  if (identityCount - providerCount < 1) return { ok: false, error: "ต้องเหลือช่องทางเข้าสู่ระบบอย่างน้อย 1 ช่องทาง" };
+  return { ok: true };
+}
+
 /** แก้โปรไฟล์ (ชื่อ/เบอร์/รับข่าวสาร) — อีเมลแก้ไม่ได้ (มาจากผู้ให้บริการที่ยืนยันแล้ว) */
 export function sanitizeProfilePatch(raw: unknown): { ok: true; patch: Record<string, unknown> } | { ok: false; error: string } {
   const r = (raw ?? {}) as Record<string, unknown>;

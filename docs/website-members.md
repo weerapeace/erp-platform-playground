@@ -47,6 +47,29 @@ RLS เปิด ไม่มี policy (service role ผ่าน API เท่
 
 ขาดตัวไหน = ปุ่มนั้นไม่ขึ้น · ไม่ครบเลย = ไม่มีไอคอน 👤 (หน้าเว็บเหมือนเดิม)
 
+## 🟢 LINE Login (M2)
+1. https://developers.line.biz → สร้าง Provider (ชื่อบริษัท) → Create channel → **LINE Login** → App type: Web app
+2. แท็บ LINE Login → Callback URL: `https://<โดเมนร้าน>/api/auth/line/callback` (ใส่ได้หลายบรรทัด ร้านละบรรทัด)
+3. (ไม่บังคับ) OpenID Connect → **Email address permission → Apply** (แนบลิงก์ `https://<โดเมนร้าน>/privacy` + ภาพหน้าจอขอความยินยอม) — ไม่ขอ = ได้แค่ชื่อ+รูป ไม่มีอีเมล (ใช้งานได้ปกติ)
+4. (ไม่บังคับ) Basic settings → Linked LINE Official Account = OA ของร้าน → ตั้ง env `LINE_BOT_PROMPT=normal` = ชวนกดเพิ่มเพื่อน OA ตอนเข้าสู่ระบบ (ใช้ส่งแจ้งเตือนออเดอร์ทาง LINE ภายหลัง)
+5. เปลี่ยนสถานะ channel จาก Developing → **Published**
+6. Vercel เว็บร้าน: `LINE_CHANNEL_ID` · `LINE_CHANNEL_SECRET` → Redeploy
+
+## 🔵 Facebook Login (M2)
+1. https://developers.facebook.com → Create App → ใช้กรณี "Authenticate and request data from users with Facebook Login" (Consumer)
+2. Facebook Login → Settings → **Valid OAuth Redirect URIs**: `https://<โดเมนร้าน>/api/auth/facebook/callback` (ร้านละบรรทัด)
+3. App settings → Basic: App domains (โดเมนร้าน) · **Privacy Policy URL** `https://<โดเมนร้าน>/privacy` · **User data deletion → Data deletion instructions URL** `https://<โดเมนร้าน>/privacy#delete-account` · หมวดหมู่ · ไอคอนแอป
+4. สิทธิ์ที่ใช้: `email`, `public_profile` (สิทธิ์มาตรฐาน ไม่ต้องรอตรวจ)
+5. เปลี่ยน App Mode เป็น **Live** (ยังเป็น Development = ใช้ได้เฉพาะคนที่เพิ่มเป็นผู้ทดสอบในแอป)
+6. Vercel เว็บร้าน: `FACEBOOK_APP_ID` · `FACEBOOK_APP_SECRET` → Redeploy
+- โค้ดเรียก Facebook แบบไม่ระบุเวอร์ชัน (ตามเวอร์ชันที่ตั้งในแอป Meta — ไม่หมดอายุ) + `appsecret_proof` · ไลบรารี arctic ฝัง v16.0 ที่ปลดแล้ว จึงไม่ใช้กับ Facebook
+
+## 🔗 เชื่อมหลายช่องทาง / 🗑 ลบบัญชี / 🔒 นโยบาย (M2)
+- หน้าบัญชี → โปรไฟล์ → "ช่องทางเข้าสู่ระบบ": เชื่อม Google/LINE/Facebook เพิ่มเข้าบัญชีเดียวกัน (ตอนล็อกอินอยู่ = ยืนยันตัวแล้ว จึงผูกได้โดยไม่พึ่งอีเมล) · ยกเลิกได้แต่ต้องเหลือ ≥ 1 ช่องทาง
+  - เว็บร้าน `/api/auth/<p>/start?link=1` → คุกกี้ `sf_oauth_link` → callback เรียก ERP `POST /api/storefront-member/link` · ช่องทางที่เป็นของสมาชิกอื่น = 409 (ไม่ย้ายให้เอง)
+- ลบบัญชี (พิมพ์ "ลบบัญชี"): ERP `POST /api/storefront-member/delete` → ล้างชื่อ/อีเมล/เบอร์/รูป + ลบช่องทางและที่อยู่ + status deleted + audit · ออเดอร์เดิมเก็บไว้ (หลักฐานการขาย) · ออกจากระบบทันที · เข้าด้วยช่องทางเดิมอีก = บัญชีใหม่
+- `/privacy` นโยบายความเป็นส่วนตัว (PDPA) ทุกร้าน ใส่ชื่อร้าน+ช่องทางติดต่อจากแท็บข้อมูลร้านให้เอง · ลิงก์ท้ายเว็บเสมอ · ⚠️ เป็นแม่แบบ — ควรให้ผู้รู้กฎหมายตรวจ
+
 ## เครื่อง dev
 `.env.local` ของเว็บร้าน: `MEMBER_DEV_LOGIN=1` + `MEMBER_ERP_BASE=http://localhost:3032` → ปุ่ม "ทดสอบ (เครื่อง dev)" (ใช้ได้เฉพาะ NODE_ENV=development บน localhost) · ⚠️ dev ต่อฐานข้อมูลจริง — ลบบัญชีทดสอบ (`zz-dev@example.test`) หลังทดสอบ · ห้ามสร้างออเดอร์ทดสอบจริง
 
