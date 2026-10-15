@@ -18,7 +18,14 @@ import type { SheetSku } from "@/app/api/design-sheets/[id]/skus/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 
 /** แถวเลือกรอบเสนอราคา: ติ๊ก + จำนวน/ราคาที่แก้ได้ก่อนส่ง */
-type RoundPick = { id: string; round: number; size: string; status: string; checked: boolean; qty: string; price: string };
+type RoundPick = {
+  id: string; round: number; size: string; status: string; checked: boolean; qty: string; price: string;
+  batch: number; date: string | null; note: string | null;   // ครั้งที่จริง (1 ครั้ง = หลายไซส์ × หลายขั้นจำนวน) + วันที่/หมายเหตุของครั้ง
+  cost: number | null;                                       // ราคาจากตีราคา ณ ตอนเสนอ (ไว้โชว์กำไร/ชิ้น)
+};
+const fmt2 = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (d: string | null) => { if (!d) return ""; const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }); };
+const STATUS_CLS: Record<string, string> = { pending: "bg-amber-50 text-amber-700 border-amber-200", passed: "bg-emerald-50 text-emerald-700 border-emerald-200", failed: "bg-rose-50 text-rose-600 border-rose-200" };
 
 // จำนวนตั้งต้นของรอบ: ช่องจำนวน → ถ้าไม่มี แต่หมายเหตุเป็นตัวเลขล้วน (รอบเก่าที่จดจำนวนไว้ในหมายเหตุ) ใช้อันนั้น → 1
 const roundQty = (q: DesignSheetQuote) => {
@@ -81,6 +88,7 @@ export function ToQuotationModal({
       id: q.id, round: q.round, size: q.parent_code ?? "", status: q.status,
       checked: anyPassed && q.status === "passed",
       qty: roundQty(q), price: String(q.offered_price ?? q.price),
+      batch: q.batch ?? q.round, date: q.quote_date ?? null, note: q.note ?? null, cost: q.price != null ? Number(q.price) : null,
     })));
     setManual(priced.length === 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- รีเซ็ตเฉพาะตอนเปิดป๊อป (quotes อัปเดตระหว่างเปิดไม่ต้องล้างที่ติ๊กไว้)
@@ -109,6 +117,19 @@ export function ToQuotationModal({
   const roundMode = !batch && !manual && picks.length > 0;   // โหมดติ๊กเลือกจากรอบเสนอราคา
   const checkedPicks = picks.filter((p) => p.checked);
   const setPick = (id: string, patch: Partial<RoundPick>) => setPicks((l) => l.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const setMany = (ids: Set<string>, checked: boolean) => setPicks((l) => l.map((p) => (ids.has(p.id) ? { ...p, checked } : p)));
+  // จัดกลุ่ม: ครั้งที่ (ล่าสุดบน) → ไซส์ → ขั้นจำนวน (น้อย→มาก) — เจ้าของขอ "จับกลุ่มให้ดูง่าย + มีรายละเอียด"
+  const groups = (() => {
+    const byBatch = new Map<number, RoundPick[]>();
+    for (const p of picks) (byBatch.get(p.batch) ?? byBatch.set(p.batch, []).get(p.batch)!).push(p);
+    return [...byBatch.entries()].sort((a, b) => b[0] - a[0]).map(([batch, ps]) => {
+      const bySize = new Map<string, RoundPick[]>();
+      for (const p of ps) (bySize.get(p.size) ?? bySize.set(p.size, []).get(p.size)!).push(p);
+      const sizes = [...bySize.entries()].map(([size, rows]) => ({ size, rows: rows.sort((a, b) => (Number(a.qty) || 0) - (Number(b.qty) || 0)) }));
+      const sts = new Set(ps.map((p) => p.status));
+      return { batch, date: ps[0]?.date ?? null, note: ps.find((p) => p.note)?.note ?? null, status: sts.size === 1 ? ps[0].status : "mixed", sizes, ids: new Set(ps.map((p) => p.id)), checked: ps.filter((p) => p.checked).length };
+    });
+  })();
   const labelOf = (code: string) => (sizeLabel ? sizeLabel(code) : code || "ทั่วไป");
 
   const save = async () => {
@@ -228,42 +249,75 @@ export function ToQuotationModal({
                 <button type="button" onClick={() => setPicks((l) => l.map((p) => ({ ...p, checked: false })))} className="text-slate-500 hover:underline">ล้างติ๊ก</button>
               </span>
             </div>
-            <div className="max-h-72 overflow-auto">
-              <table className="w-full text-[13px]">
-                <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
-                  <tr>
-                    <th className="w-9 px-2 py-1"></th>
-                    <th className="w-14 px-2 py-1 text-center">ครั้งที่</th>
-                    <th className="px-2 py-1 text-left">ไซส์</th>
-                    <th className="w-16 px-2 py-1 text-center">สถานะ</th>
-                    <th className="w-28 px-2 py-1 text-right">จำนวน (ชิ้น)</th>
-                    <th className="w-28 px-2 py-1 text-right">ราคา/ชิ้น</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {picks.map((p) => (
-                    <tr key={p.id} className={p.checked ? "bg-blue-50/40" : ""}>
-                      <td className="px-2 py-1 text-center">
-                        <input type="checkbox" checked={p.checked} onChange={(e) => setPick(p.id, { checked: e.target.checked })} className="h-4 w-4 cursor-pointer" />
-                      </td>
-                      <td className="px-2 py-1 text-center text-slate-500">{p.round}</td>
-                      <td className="px-2 py-1 text-slate-600">{labelOf(p.size)}</td>
-                      <td className="px-2 py-1 text-center text-xs text-slate-400">{STATUS_LABEL[p.status] ?? p.status}</td>
-                      <td className="px-2 py-1">
-                        <input type="number" min={1} step="any" value={p.qty} onChange={(e) => setPick(p.id, { qty: e.target.value, checked: true })}
-                          className="h-7 w-full px-1.5 text-right text-sm border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input type="number" min={0} step="any" value={p.price} onChange={(e) => setPick(p.id, { price: e.target.value, checked: true })}
-                          className="h-7 w-full px-1.5 text-right text-sm border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="max-h-[26rem] overflow-auto p-2 space-y-2 bg-slate-50/60">
+              {groups.map((g) => (
+                <div key={g.batch} className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+                  {/* หัวครั้ง: ครั้งที่ · วันที่ · สถานะ · หมายเหตุ · ติ๊กทั้งครั้ง */}
+                  <div className="flex flex-wrap items-center gap-2 px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 text-xs">
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={g.checked === g.ids.size} ref={(el) => { if (el) el.indeterminate = g.checked > 0 && g.checked < g.ids.size; }} onChange={(e) => setMany(g.ids, e.target.checked)} className="h-4 w-4 cursor-pointer" />
+                      <span className="h-6 px-2 rounded-md bg-slate-800 text-white font-semibold flex items-center">ครั้งที่ {g.batch}</span>
+                    </label>
+                    <span className="text-slate-500">{fmtDate(g.date)}</span>
+                    <span className={`px-1.5 py-0.5 rounded border text-[11px] ${g.status === "mixed" ? "bg-slate-50 text-slate-500 border-slate-200" : (STATUS_CLS[g.status] ?? "bg-slate-50 text-slate-500 border-slate-200")}`}>{g.status === "mixed" ? "◐ ผสม" : (STATUS_LABEL[g.status] ?? g.status)}</span>
+                    {g.note && <span className="text-slate-500 truncate min-w-0 flex-1" title={g.note}>📝 {g.note}</span>}
+                    <span className="ml-auto text-[11px] text-slate-400">{g.checked}/{g.ids.size} ติ๊ก</span>
+                  </div>
+                  <table className="w-full text-[13px]">
+                    <thead className="text-[11px] text-slate-400">
+                      <tr>
+                        <th className="w-9 px-2 py-1"></th>
+                        <th className="px-2 py-1 text-left">ไซส์ / ขั้นจำนวน</th>
+                        <th className="w-24 px-2 py-1 text-right">จำนวน (ชิ้น)</th>
+                        <th className="w-24 px-2 py-1 text-right">ราคา/ชิ้น</th>
+                        <th className="w-28 px-2 py-1 text-right" title="ราคาที่เสนอ − ราคาจากตีราคาตอนเสนอ">กำไร/ชิ้น</th>
+                        <th className="w-24 px-2 py-1 text-right">รวม</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.sizes.map(({ size, rows }) => {
+                        const sizeIds = new Set(rows.map((r) => r.id)); const sizeChecked = rows.filter((r) => r.checked).length;
+                        return [
+                          <tr key={`h-${size}`} className="bg-blue-50/40">
+                            <td className="px-2 py-1 text-center"><input type="checkbox" checked={sizeChecked === rows.length} ref={(el) => { if (el) el.indeterminate = sizeChecked > 0 && sizeChecked < rows.length; }} onChange={(e) => setMany(sizeIds, e.target.checked)} className="h-3.5 w-3.5 cursor-pointer" /></td>
+                            <td colSpan={5} className="px-2 py-1 text-xs font-semibold text-blue-800">{labelOf(size)} <span className="font-normal text-blue-500">· {rows.length} ขั้นจำนวน</span></td>
+                          </tr>,
+                          ...rows.map((p) => {
+                            const price = Number(p.price) || 0; const qn = Number(p.qty) || 0;
+                            const margin = p.cost != null && p.price !== "" ? price - p.cost : null;
+                            const pct = margin != null && price ? (margin / price) * 100 : null;
+                            return (
+                              <tr key={p.id} className={`border-t border-slate-50 ${p.checked ? "bg-blue-50/40" : ""}`}>
+                                <td className="px-2 py-1 text-center"><input type="checkbox" checked={p.checked} onChange={(e) => setPick(p.id, { checked: e.target.checked })} className="h-4 w-4 cursor-pointer" /></td>
+                                <td className="px-2 py-1 pl-6 text-slate-600">
+                                  {qn ? `${qn.toLocaleString("th-TH")} ชิ้น` : "ไม่ระบุจำนวน"}
+                                  <span className={`ml-1.5 text-[10px] px-1 py-px rounded border ${STATUS_CLS[p.status] ?? "bg-slate-50 text-slate-400 border-slate-200"}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
+                                  {p.cost != null && <span className="ml-1.5 text-[10px] text-slate-400" title="ราคาจากตีราคาตอนเสนอ">ต้นทุน {fmt2(p.cost)}</span>}
+                                </td>
+                                <td className="px-2 py-1">
+                                  <input type="number" min={1} step="any" value={p.qty} onChange={(e) => setPick(p.id, { qty: e.target.value, checked: true })}
+                                    className="h-7 w-full px-1.5 text-right text-sm border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                </td>
+                                <td className="px-2 py-1">
+                                  <input type="number" min={0} step="any" value={p.price} onChange={(e) => setPick(p.id, { price: e.target.value, checked: true })}
+                                    className="h-7 w-full px-1.5 text-right text-sm font-medium text-blue-700 border border-blue-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                </td>
+                                <td className={`px-2 py-1 text-right tabular-nums text-xs ${margin == null ? "text-slate-300" : margin > 0 ? "text-emerald-700" : margin < 0 ? "text-rose-600" : "text-slate-400"}`}>
+                                  {margin == null ? "—" : `${margin > 0 ? "+" : margin < 0 ? "−" : ""}${fmt2(Math.abs(margin))}${pct != null ? ` (${pct.toFixed(0)}%)` : ""}`}
+                                </td>
+                                <td className="px-2 py-1 text-right tabular-nums text-slate-700">{fmt2(qn * price)}</td>
+                              </tr>
+                            );
+                          }),
+                        ];
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
             </div>
             <div className="flex items-center justify-between border-t border-slate-100 px-3 py-1.5 text-[13px]">
-              <span className="text-slate-500">เลือก {checkedPicks.length} / {picks.length} รายการ</span>
+              <span className="text-slate-500">เลือก {checkedPicks.length} / {picks.length} รายการ{checkedPicks.length ? ` · ${checkedPicks.reduce((n, p) => n + (Number(p.qty) || 0), 0).toLocaleString("th-TH")} ชิ้น` : ""}</span>
               <b className="tabular-nums text-emerald-700">{checkedPicks.reduce((s, p) => s + (Number(p.qty) || 0) * (Number(p.price) || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿</b>
             </div>
           </div>
