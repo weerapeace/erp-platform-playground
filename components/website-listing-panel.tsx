@@ -10,6 +10,8 @@ import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ConfirmDialog } from "@/components/modal";
 import { categoryHref } from "@/lib/website-links";
 import { ShopFiltersEditor } from "@/components/website-shop-filters-editor";
+import { LinkTargetPicker } from "@/components/website-link-picker";
+import type { SchemaFormContext } from "@/components/website-schema-form";
 import {
   LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
   newListingInsert, type ListingConfig, type ListingInsert,
@@ -24,6 +26,7 @@ export function ListingPanel({
   categories,
   products,
   fields = [],
+  linkCtx,
 }: {
   value: ListingConfig;
   onChange: (v: ListingConfig) => void;
@@ -31,6 +34,8 @@ export function ListingPanel({
   products: { code: string; name: string }[];
   /** ฟิลด์สินค้าที่ส่งออกเว็บ — เลือกทำตัวกรองเพิ่มได้ */
   fields?: { key: string; label: string }[];
+  /** ตัวเลือกลิงก์ปลายทาง (ของกลาง) — ไม่ส่ง = ช่องพิมพ์เอง */
+  linkCtx?: SchemaFormContext;
 }) {
   const list = value.inserts;
   const set = (inserts: ListingInsert[]) => onChange({ ...value, inserts });
@@ -200,7 +205,10 @@ export function ListingPanel({
                   )}
 
                   <div>
-                    <label className={lbl}>ลิงก์เมื่อกดรูป (ว่าง = กดไม่ได้)</label>
+                    <label className={lbl}>ลิงก์เมื่อกดรูป (ไม่มีลิงก์ = กดไม่ได้)</label>
+                    {linkCtx ? (
+                      <LinkTargetPicker value={x.link} onChange={(link) => patch(x.id, { link })} ctx={linkCtx} />
+                    ) : (
                     <div className="grid gap-1.5 sm:grid-cols-[1fr_auto_auto]">
                       <input className={inputCls} value={x.link} onChange={(e) => patch(x.id, { link: e.target.value })} placeholder="/c/backpack · /product/bbp10 · https://…" />
                       <select className={inputCls} value="" onChange={(e) => e.target.value && patch(x.id, { link: e.target.value })} title="เลือกหมวดแทนการพิมพ์">
@@ -212,6 +220,7 @@ export function ListingPanel({
                         {products.map((p) => <option key={p.code} value={`/product/${p.code.toLowerCase()}`}>{p.code} {p.name.slice(0, 30)}</option>)}
                       </select>
                     </div>
+                    )}
                   </div>
 
                   <div className="grid gap-2 sm:grid-cols-2">

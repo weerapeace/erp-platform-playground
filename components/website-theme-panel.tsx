@@ -37,6 +37,7 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SocialLinksModal } from "@/components/website-social-links";
+import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem } from "@/lib/website-theme";
@@ -253,6 +254,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const iframeRef = useRef<HTMLIFrameElement>(null);
   /** ป๊อปตั้งค่าชิ้นส่วนหัวเว็บที่เปิดอยู่ (กดชื่อชิ้นที่มี ⚙ ใน ZonesEditor) */
   const [zoneCfg, setZoneCfg] = useState<HeaderEl | null>(null);
+  /** ตัวเลือกลิงก์ปลายทาง (ของกลาง) ในหน้าดีไซน์: ปุ่มหัวเว็บ · รูปแทรกในกริด */
+  const linkCtx = useMemo(() => ({ shopSlug, shopId, categories: choices?.categories ?? [] }), [shopSlug, shopId, choices]);
   // วัดกล่องพรีวิวจริง เพื่อย่อ "พอดีจอ" (เดิม hardcode 400px → จอคอมถูกบีบเหลือ ~28%)
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(420);
@@ -1029,7 +1032,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
                 <div>
                   <label className={labelCls}>ลิงก์ของปุ่ม</label>
-                  <input className={inputCls} value={theme.header.button.href} placeholder="/shop" onChange={(e) => setHeader({ button: { ...theme.header.button, href: e.target.value } })} />
+                  <LinkTargetPicker value={theme.header.button.href} onChange={(href) => setHeader({ button: { ...theme.header.button, href } })} ctx={linkCtx} />
                 </div>
                 <div>
                   <label className={labelCls}>เมนูมือถือเปิดจาก</label>
@@ -1828,7 +1831,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {tab === "listing" && (
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-2">หน้ารายการสินค้า — แทรกรูปในกริดสินค้า</h3>
-              <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} />
+              <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} linkCtx={linkCtx} />
             </div>
           )}
 

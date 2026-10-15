@@ -590,7 +590,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       image("mobileImageKey", "รูปภาพ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · ใส่เมื่ออยากให้จอมือถือเห็นรูปคนละแนว เช่น แนวตั้ง" }),
       text("alt", "คำบรรยายรูป (Alt) — มีผลกับ SEO", { group: "media", default: "", max: 200, placeholder: "อธิบายว่าในรูปคืออะไร" }),
       text("caption", "ข้อความใต้รูป", { default: "", max: 300 }),
-      f("href", "ลิงก์เมื่อคลิกรูป", "href", { group: "action", default: "", placeholder: "/shop", hint: "ไม่ใส่ = คลิกไม่ได้" }),
+      f("href", "ลิงก์เมื่อคลิกรูป", "target", { group: "action", default: "", wide: true, hint: "ไม่มีลิงก์ = คลิกไม่ได้" }),
       f("width", "ความกว้าง", "select", {
         group: "layout",
         default: "wide",
@@ -655,7 +655,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     meta: { label: "ปุ่ม", icon: "🔘", hint: "ปุ่มเดี่ยว วางคั่นตรงไหนก็ได้", group: "พื้นฐาน" },
     fields: [
       text("text", "ข้อความบนปุ่ม", { default: "ดูสินค้าทั้งหมด", max: 60, required: true, requiredMessage: "ยังไม่ได้ใส่ข้อความบนปุ่ม" }),
-      f("href", "ลิงก์ปลายทาง", "href", { default: "/shop", required: true, requiredMessage: "ยังไม่ได้ใส่ลิงก์ปลายทาง" }),
+      f("href", "ลิงก์ปลายทาง", "target", { default: "/shop", wide: true, required: true, requiredMessage: "ยังไม่ได้ใส่ลิงก์ปลายทาง" }),
       f("variant", "รูปแบบ", "select", {
         group: "layout",
         default: "brand",

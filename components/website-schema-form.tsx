@@ -83,12 +83,13 @@ export function Field({ label, hint, children, wide }: { label: string; hint?: s
   );
 }
 
-function LinkPair({ value, onChange }: { value: { text?: string; href?: string } | undefined; onChange: (v: { text: string; href: string }) => void }) {
+/** ปุ่ม/ลิงก์ = ข้อความ + ปลายทาง (เลือกจากรายการ: หน้า/หมวด/สินค้า/ส่วนในหน้า/ลิงก์นอก — ของกลาง LinkTargetPicker) */
+function LinkPair({ value, onChange, ctx }: { value: { text?: string; href?: string } | undefined; onChange: (v: { text: string; href: string }) => void; ctx: SchemaFormContext }) {
   const v = value ?? { text: "", href: "" };
   return (
-    <div className="flex gap-2">
-      <input className={inputCls} placeholder="ข้อความปุ่ม" value={v.text ?? ""} onChange={(e) => onChange({ text: e.target.value, href: v.href ?? "" })} />
-      <input className={inputCls} placeholder="/shop หรือ https://…" value={v.href ?? ""} onChange={(e) => onChange({ text: v.text ?? "", href: e.target.value })} />
+    <div className="space-y-1.5">
+      <input className={inputCls} placeholder="ข้อความปุ่ม (ว่าง = ไม่มีปุ่ม)" value={v.text ?? ""} onChange={(e) => onChange({ text: e.target.value, href: v.href ?? "" })} />
+      <LinkTargetPicker value={v.href ?? ""} onChange={(href) => onChange({ text: v.text ?? "", href })} ctx={ctx} />
     </div>
   );
 }
@@ -269,7 +270,7 @@ export function SchemaField({
     case "link":
       return (
         <Field label={fd.label} hint={fd.hint} wide={fd.wide !== false}>
-          <LinkPair value={value as { text?: string; href?: string } | undefined} onChange={onChange} />
+          <LinkPair value={value as { text?: string; href?: string } | undefined} onChange={onChange} ctx={ctx} />
         </Field>
       );
     case "color":
