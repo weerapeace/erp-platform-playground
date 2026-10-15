@@ -11,10 +11,12 @@ export interface ListingHealthInput {
   categories: string[];
   /** ตัวเลือก (สี) — swatch = จุดสีจากทะเบียนสี (null = ยังไม่ผูก) · hasImage = สีนี้มีรูปไหม */
   colors: { label: string; swatch: string | null; hasImage: boolean }[];
+  /** 📐 ร้านเปิด "เช็คขนาด" แต่รุ่นนี้ยังไม่ได้วัดช่องใส่ของ (lib/fit-check) */
+  compartmentsMissing?: boolean;
 }
 
 export interface ListingIssue {
-  key: "no_price" | "no_image" | "no_category" | "swatch_missing" | "color_no_image";
+  key: "no_price" | "no_image" | "no_category" | "swatch_missing" | "color_no_image" | "no_compartments";
   label: string;
   /** ชื่อสีที่เกี่ยว (ถ้ามี) — โชว์ใน tooltip */
   detail?: string;
@@ -31,6 +33,8 @@ export function listingIssues(x: ListingHealthInput): ListingIssue[] {
   const noImg = x.colors.filter((c) => !c.hasImage);
   if (noImg.length && x.colors.length > 1)
     out.push({ key: "color_no_image", label: `สีที่ยังไม่มีรูป ${noImg.length}`, detail: noImg.map((c) => c.label).join(", ") });
+  if (x.compartmentsMissing)
+    out.push({ key: "no_compartments", label: "ยังไม่ได้วัดช่องใส่ของ", detail: "ไม่ขึ้นในหน้าเช็คขนาดตุ๊กตา — วัดขนาดด้านในของแต่ละช่อง หรือกด \"ไม่มีช่องใส่ของ\" ถ้าไม่ใช่กระเป๋า" });
   return out;
 }
 

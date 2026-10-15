@@ -33,6 +33,7 @@ import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/c
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { listingPatchToRow, cleanCategoryList, type ListingPatch } from "@/lib/website-listing-patch";
 import { computeListingDisplay } from "@/lib/website-listing-display";
+import { readFitCheckShops } from "@/lib/website-site-info";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -127,6 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const siteUrl = siteUrls.get(shop.id) ?? null;
+  const fitCheck = (await readFitCheckShops(sb)).has(shop.id);
   const thumb = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}&w=96`;
 
   if (parentIds.length) {
@@ -159,7 +161,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const kids = mp ? kidsByParent.get(mp.id) ?? [] : [];
     const catLabel = mp?.category_id ? catName.get(mp.category_id) ?? null : null;
     // 👁 ค่าอัตโนมัติ + ค่าที่ "ลูกค้าเห็นจริง" (ของกลาง — ตัวเดียวกับตัวตั้งค่าเว็บของสินค้า)
-    const view = mp ? computeListingDisplay({ fieldMap, parent: mp, kids, listing: l, categoryName: catLabel, swatches, siteUrl, code: p?.code ?? "", thumb }) : null;
+    const view = mp ? computeListingDisplay({ fieldMap, parent: mp, kids, listing: l, categoryName: catLabel, swatches, siteUrl, code: p?.code ?? "", thumb, fitCheck }) : null;
     const mapped = view?.mapped ?? null;
     const display = view?.display ?? null;
     return {

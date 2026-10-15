@@ -19,6 +19,8 @@ export const FIT_CFG: TickListConfig = {
   columns: 2,
   addPlaceholder: "เช่น ขวดน้ำ",
   emptyHint: "ติ๊กของที่ใส่ในกระเป๋านี้ได้",
+  // ตุ๊กตา/ฟิกเกอร์ = คำนวณจาก "ช่องใส่ของ" เอง (lib/fit-check · components/compartments-editor) ไม่ต้องติ๊ก
+  hide: (x) => x.kind === "doll",
 };
 
 export const HIGHLIGHT_CFG: TickListConfig = {

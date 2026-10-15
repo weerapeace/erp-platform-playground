@@ -32,6 +32,8 @@ export type TickListConfig = {
   columns?: 1 | 2;
   addPlaceholder: string;
   emptyHint: string;
+  /** ซ่อนบางรายการจากป๊อปติ๊ก (เช่น ตุ๊กตา = ระบบคำนวณจากช่องใส่ของเอง ไม่ต้องติ๊ก) */
+  hide?: (item: Record<string, unknown>) => boolean;
 };
 
 const keyOf = (catalog: string) => `tick-catalog:${catalog}`;
@@ -83,7 +85,7 @@ export function TickListPicker({ cfg, value, onChange, disabled }: { cfg: TickLi
   };
 
   if (loading && !items) return <div className="h-40 animate-pulse rounded-lg bg-slate-100" />;
-  const list = items ?? [];
+  const list = (items ?? []).filter((x) => !cfg.hide?.(x as unknown as Record<string, unknown>));
   const gone = picks.filter((p) => !list.some((x) => x.id === p.id));
   return (
     <div className="space-y-3">

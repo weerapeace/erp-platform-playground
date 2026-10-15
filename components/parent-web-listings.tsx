@@ -8,7 +8,7 @@
  * แท็บต่อร้าน:
  *   🛒 ขายบนเว็บ — ขึ้นร้าน · แนะนำ · ชื่อ (+กฎชื่อร้าน) · ราคา · หมวด · หน่วย · สต๊อก · ป้าย · คำอธิบาย · ตัวเลือกกรอกเอง/สีตัวอย่าง
  *   🖼 รูป สี และรูปเปิด — รูปเปิด (Hero) · รูปรุ่น · รูปรายสี + จุดสีบนการ์ด/สีหลัก
- *   🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด — ตั้งเฉพาะรุ่นนี้
+ *   🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด — ตั้งเฉพาะรุ่นนี้ · 📐 ช่องใส่ของ (ของตัวสินค้า ทุกร้านเห็นเหมือนกัน · components/compartments-editor)
  *   ⚠️ ต้องแก้ — กฎกลาง lib/website-listing-health (ตัวเดียวกับป้ายเหลืองในหน้าสินค้าบนเว็บ) + ปุ่มพาไปแก้
  * เว้นว่าง = ใช้ของ ERP / ค่ากลางตามเดิม
  * ของกลาง: AssetPicker · MediaUploadField · PersonalizeEditor · ProductBannersEditor · footer-save (ปุ่มบันทึกแถบล่าง) · ColorSwatchButton
@@ -33,6 +33,8 @@ import { useFooterSave } from "@/components/footer-save";
 import { CopyButton } from "@/components/copy-button";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import type { ListingIssue } from "@/lib/website-listing-health";
+import { CompartmentsEditor } from "@/components/compartments-editor";
+import type { Compartment } from "@/lib/fit-check";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
@@ -77,6 +79,8 @@ type ShopState = {
   display: { name: string; price: number; imageKey: string | null; imageCount: number; hero: boolean; productUrl: string | null } | null;
   issues: ListingIssue[];
   soldQty: number;
+  /** 📐 ร้านนี้เปิดเช็คขนาด */
+  fitCheck?: boolean;
   productUrl: string;
 };
 type Resp = {
@@ -89,6 +93,9 @@ type Resp = {
   shops: ShopState[];
   /** ฟิลด์ Parent SKU (ทะเบียนฟิลด์) ให้แบนเนอร์เลือกโชว์ */
   webFields?: { key: string; label: string }[];
+  /** 📐 ช่องใส่ของของตัวสินค้า (null = ยังไม่วัด · [] = ไม่มีช่อง) + ขนาดภายนอก */
+  compartments?: Compartment[] | null;
+  outer?: { w: unknown; h: unknown; d: unknown };
 };
 
 type Tab = "sell" | "media" | "extra" | "fix";
@@ -129,7 +136,7 @@ const inputCls = "w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-s
 const labelCls = "block text-xs text-slate-500 mb-1";
 
 /** ปัญหาแต่ละชนิด → ไปแก้ที่แท็บไหน */
-const FIX_TAB: Record<ListingIssue["key"], Tab> = { no_price: "sell", no_category: "sell", no_image: "media", color_no_image: "media", swatch_missing: "fix" };
+const FIX_TAB: Record<ListingIssue["key"], Tab> = { no_price: "sell", no_category: "sell", no_image: "media", color_no_image: "media", swatch_missing: "fix", no_compartments: "extra" };
 
 export function ParentWebListings({
   parentId,
@@ -155,6 +162,8 @@ export function ParentWebListings({
   const [skuPanel, setSkuPanel] = useState<{ shopId: string; skuId: string } | null>(null);
   // ร้านที่กางแผง "จับคู่รายละเอียดหน้าเว็บ" อยู่
   const [detailsOpen, setDetailsOpen] = useState<Set<string>>(new Set());
+  // 📐 แผง "ช่องใส่ของ" กางอยู่ (ของตัวสินค้า — ไม่แยกร้าน)
+  const [fitOpen, setFitOpen] = useState(false);
   // ร้านที่กางแผง "ปั๊มชื่อ" อยู่
   const [pzOpen, setPzOpen] = useState<Set<string>>(new Set());
   // แท็บที่เปิดอยู่ต่อร้าน (ค่าเริ่ม = ขายบนเว็บ)
@@ -763,8 +772,33 @@ export function ParentWebListings({
   const renderExtra = (s: ShopState) => {
     const overrideCount = Object.keys(s.webDetails).length;
     const detailsShown = detailsOpen.has(s.shopId);
+    const comps = data.compartments ?? null;
+    const fitShown = fitOpen || (s.fitCheck && comps === null);
     return (
       <div className="space-y-3">
+        {/* 📐 ช่องใส่ของ (ขนาดด้านใน) — ของตัวสินค้า ทุกร้านใช้ร่วม · คำนวณว่าใส่ตุ๊กตา/ของอะไรได้ (lib/fit-check) */}
+        <div className="rounded-lg border border-slate-200" data-fit-section>
+          <button type="button" onClick={() => setFitOpen((v) => !v)} className="w-full flex items-center justify-between px-3 py-2 text-left">
+            <span className="text-xs font-medium text-slate-600">
+              📐 ช่องใส่ของ (ใส่ตุ๊กตา/ของได้ไหม)
+              {comps === null ? (
+                <span className={`ml-2 text-[10px] rounded-full px-1.5 py-0.5 ${s.fitCheck ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-500"}`}>ยังไม่ได้วัด</span>
+              ) : comps.length ? (
+                <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">{comps.length} ช่อง</span>
+              ) : (
+                <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 rounded-full px-1.5 py-0.5">ไม่มีช่อง</span>
+              )}
+            </span>
+            <span className="text-xs text-slate-400">{fitShown ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+          </button>
+          {fitShown && (
+            <div className="border-t border-slate-100 p-3">
+              {!s.fitCheck && <p className="text-[11px] text-slate-400 mb-2">ร้านนี้ยังไม่เปิด "เช็คขนาด" (ข้อมูลร้าน → 📐) — วัดเก็บไว้ก่อนได้</p>}
+              <CompartmentsEditor value={comps} parentId={parentId} outer={data.outer ?? null} onSaved={() => void load(true)} />
+            </div>
+          )}
+        </div>
+
         {/* 🔤 ปั๊มชื่อ (Personalize) — ตั้งตำแหน่ง/ขนาด/แบบ ต่อรุ่น */}
         <div className="rounded-lg border border-slate-200">
           <button type="button" onClick={() => flip(setPzOpen, s.shopId)} className="w-full flex items-center justify-between px-3 py-2 text-left">

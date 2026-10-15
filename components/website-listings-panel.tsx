@@ -54,6 +54,7 @@ type Display = {
   colors: { label: string; swatch: string | null; hasImage: boolean }[];
   hero: boolean;
   productUrl: string | null;
+  compartmentsMissing?: boolean;
 } | null;
 
 export type Listing = {
@@ -102,7 +103,7 @@ const shownName = (l: Listing) => l.display?.name || l.webName || l.mapped?.name
 const shownPrice = (l: Listing) => l.display?.price ?? l.webPrice ?? l.mapped?.price ?? l.erpPrice;
 const issuesOf = (l: Listing): ListingIssue[] =>
   l.display
-    ? listingIssues({ price: l.display.price, imageCount: l.display.imageCount, categories: l.categories ?? [], colors: l.display.colors })
+    ? listingIssues({ price: l.display.price, imageCount: l.display.imageCount, categories: l.categories ?? [], colors: l.display.colors, compartmentsMissing: l.display.compartmentsMissing })
     : [];
 
 function ColorDots({ colors, max = 5 }: { colors: { label: string; swatch: string | null }[]; max?: number }) {

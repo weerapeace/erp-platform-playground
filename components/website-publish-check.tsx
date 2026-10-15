@@ -17,7 +17,7 @@ type ListingRow = {
   code: string;
   published: boolean;
   categories?: string[];
-  display?: { price: number; imageCount: number; colors: { label: string; swatch: string | null; hasImage: boolean }[] } | null;
+  display?: { price: number; imageCount: number; colors: { label: string; swatch: string | null; hasImage: boolean }[]; compartmentsMissing?: boolean } | null;
 };
 
 /** ปัญหาข้อมูลสินค้าที่ขึ้นเว็บ (โหลดตอนเปิด + ตอนกลับมาที่แท็บนี้) */
@@ -33,7 +33,7 @@ export function useShopPublishIssues(shopSlug: string): ValidationIssue[] {
           const rows = ((j.listings ?? []) as ListingRow[]).map((l) => ({
             code: l.code,
             published: l.published,
-            issues: l.display ? listingIssues({ price: l.display.price, imageCount: l.display.imageCount, categories: l.categories ?? [], colors: l.display.colors ?? [] }) : [],
+            issues: l.display ? listingIssues({ price: l.display.price, imageCount: l.display.imageCount, categories: l.categories ?? [], colors: l.display.colors ?? [], compartmentsMissing: l.display.compartmentsMissing }) : [],
           }));
           setIssues(shopPublishIssues(rows, `/website/${encodeURIComponent(shopSlug)}?tab=listings&filter=fix`));
         })

@@ -44,6 +44,8 @@ import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { listingPatchToRow, toKeyList, type ListingPatch } from "@/lib/website-listing-patch";
 import { computeListingDisplay } from "@/lib/website-listing-display";
+import { readFitCheckShops } from "@/lib/website-site-info";
+import { parseCompartments } from "@/lib/fit-check";
 import { CHILD_SELECT, type ChildSku } from "@/lib/website-field-map";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 
@@ -150,6 +152,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const listingByShop = new Map(((listings ?? []) as Record<string, unknown>[]).map((l) => [l.shop_id as string, l]));
+  const fitShops = await readFitCheckShops(sb);
   type ShopRow = { id: string; name: string; slug: string; is_default: boolean; theme: unknown; theme_draft: unknown; field_map: unknown };
   const shopRows = ((shops ?? []) as ShopRow[]).map((s) => {
     const l = listingByShop.get(s.id);
@@ -174,7 +177,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     // 👁 ค่าอัตโนมัติ + ที่ลูกค้าเห็นจริง + สิ่งที่ต้องแก้ (ของกลาง — ตัวเดียวกับหน้า "สินค้าบนเว็บ")
-    const view = computeListingDisplay({ fieldMap, parent: parentRow, kids: webKids, listing: l ?? null, categoryName: catName, swatches, siteUrl: siteUrls.get(s.id) ?? null, code });
+    const view = computeListingDisplay({ fieldMap, parent: parentRow, kids: webKids, listing: l ?? null, categoryName: catName, swatches, siteUrl: siteUrls.get(s.id) ?? null, code, fitCheck: fitShops.has(s.id) });
 
     return {
       shopId: s.id,
@@ -218,6 +221,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       display: view.display,
       issues: l ? view.issues : [],
       soldQty: soldByShop.get(s.id) ?? 0,
+      /** 📐 ร้านนี้เปิดเช็คขนาด */
+      fitCheck: fitShops.has(s.id),
       // 🌐 โดเมนจริงของร้าน (shop_domains) · ยังไม่ตั้งโดเมน = ลิงก์แบบเดิม
       productUrl: productPageUrl(siteUrls.get(s.id) ?? null, code) ?? productUrlFor(code, s.slug, s.is_default),
     };
@@ -235,6 +240,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     /** แบรนด์/คอลเลกชัน/รหัสของรุ่นนี้ — โชว์บนปุ่มกฎชื่อให้เห็นว่าจะลบคำไหน */
     nameRefs: { brand: parentRow.brand_name ?? null, collection: parentRow.collection_name ?? null, code },
     adminUrl: `${STORE_BASE}/admin/products`,
+    /** 📐 ช่องใส่ของ (null = ยังไม่วัด · [] = ไม่มีช่อง) + ขนาดภายนอก (ไว้เตือนตัวเลขแปลก) */
+    compartments: parseCompartments((parent as { compartments?: unknown }).compartments),
+    outer: {
+      w: (parent as { size_length_cm?: unknown }).size_length_cm ?? null,
+      h: (parent as { size_height_cm?: unknown }).size_height_cm ?? null,
+      d: (parent as { size_thickness_cm?: unknown }).size_thickness_cm ?? null,
+    },
     variants,
     shops: shopRows,
   });

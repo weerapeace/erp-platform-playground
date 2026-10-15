@@ -18,7 +18,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "promo" | "points";
+  group: "shop" | "contact" | "order" | "promo" | "points" | "fit";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -30,6 +30,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "contact", label: "📞 ช่องทางติดต่อ", hint: "ขึ้นที่ท้ายเว็บและหน้า /contact — เว้นว่างช่องไหน เว็บจะไม่โชว์ช่องนั้น" },
   { key: "order", label: "🧾 การสั่งซื้อ", hint: "ค่าส่ง ช่องทางชำระเงิน และเลขที่ออเดอร์ — มีผลทันทีตอนลูกค้ากดสั่ง" },
   { key: "points", label: "⭐ แต้มสมาชิก", hint: "สมาชิกได้แต้มเมื่อออเดอร์เป็น 'สำเร็จ' (ไม่นับค่าส่ง) และใช้แต้มลดราคาตอนสั่งได้ · ระดับสมาชิก (Silver/Gold ได้แต้มคูณ) ตั้งที่แท็บ 👥 สมาชิก" },
+  { key: "fit", label: "📐 เช็คขนาด (ใส่ตุ๊กตา/ของ)", hint: "คำนวณจาก \"ช่องใส่ของ\" (ขนาดด้านใน) ของแต่ละรุ่น กับขนาดตุ๊กตาในทะเบียน \"ใส่อะไรได้บ้าง\" · เปิดแล้วรุ่นที่ยังไม่วัดช่องจะขึ้นในแท็บ ⚠️ ต้องแก้" },
   { key: "promo", label: "🎁 ป๊อปอัปลูกค้าใหม่", hint: "โผล่ครั้งเดียวต่อผู้เข้าชม (ไม่โผล่หน้าชำระเงิน) · แจกโค้ดจากแท็บ 🎟️ คูปอง — สร้างคูปองก่อนแล้วใส่โค้ดที่นี่" },
 ];
 
@@ -81,6 +82,7 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "points_earn_unit", label: "ซื้อครบกี่บาท ได้ 1 แต้ม", hint: "คิดจากยอดสินค้าหลังส่วนลด ไม่นับค่าส่ง · เช่น 100 = ซื้อ ฿1,990 ได้ 19 แต้ม", group: "points", type: "number", isPublic: true, placeholder: "100" },
   { key: "points_value", label: "1 แต้ม ลดได้กี่บาท", hint: "เช่น 1 = ใช้ 100 แต้ม ลด ฿100", group: "points", type: "number", isPublic: true, placeholder: "1" },
   { key: "points_max_redeem_pct", label: "ใช้แต้มลดได้ไม่เกินกี่ % ของยอดสินค้า", hint: "1–100 · แนะนำ 50", group: "points", type: "number", isPublic: true, placeholder: "50" },
+  { key: "fit_check_enabled", label: "เปิดเช็คขนาด (ใส่ตุ๊กตา/ของได้ไหม)", hint: "รอบนี้: ERP คำนวณ + เตือนรุ่นที่ยังไม่วัด · หน้าเช็คขนาดบนเว็บจะตามมาในรอบถัดไป", group: "fit", type: "bool", isPublic: true },
   { key: "points_min_redeem", label: "ใช้ขั้นต่ำครั้งละกี่แต้ม", hint: "กันใช้ทีละนิด เช่น 10", group: "points", type: "number", isPublic: true, placeholder: "10" },
 ];
 
@@ -125,6 +127,7 @@ export interface SiteInfo {
   points_value: number;
   points_max_redeem_pct: number;
   points_min_redeem: number;
+  fit_check_enabled: boolean;
 }
 
 export const DEFAULT_SITE_INFO: SiteInfo = {
@@ -165,6 +168,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   points_value: 1,
   points_max_redeem_pct: 50,
   points_min_redeem: 10,
+  fit_check_enabled: false,
 };
 
 const URL_KEYS = new Set([
@@ -262,6 +266,13 @@ export async function readShopBetas(sb: Admin, shopId: string): Promise<Set<stri
   const { data } = await sb.from("store_settings").select("key, value").eq("shop_id", shopId).like("key", "beta_%");
   const on = (v: unknown) => ["1", "true", "yes", "on"].includes(String(v ?? "").trim().toLowerCase());
   return new Set(((data ?? []) as { key: string; value: unknown }[]).filter((r) => on(r.value)).map((r) => r.key));
+}
+
+/** 📐 ร้านที่เปิด "เช็คขนาด" (fit_check_enabled) — อ่านทีเดียวทุกร้าน */
+export async function readFitCheckShops(sb: Admin): Promise<Set<string>> {
+  const { data } = await sb.from("store_settings").select("shop_id, value").eq("key", "fit_check_enabled");
+  const on = (v: unknown) => ["1", "true", "yes", "on"].includes(String(v ?? "").trim().toLowerCase());
+  return new Set(((data ?? []) as { shop_id: string; value: unknown }[]).filter((r) => on(r.value)).map((r) => r.shop_id));
 }
 
 /** ค่าส่ง: ฟรีเมื่อถึงยอดขั้นต่ำ (ถ้าตั้ง) ไม่งั้นเหมาตามที่ตั้ง */

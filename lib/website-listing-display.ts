@@ -28,6 +28,8 @@ export type ListingDisplay = {
   colors: { label: string; swatch: string | null; hasImage: boolean }[];
   hero: boolean;
   productUrl: string | null;
+  /** 📐 ร้านเปิดเช็คขนาด แต่ยังไม่ได้วัดช่องใส่ของ (compartments = null) */
+  compartmentsMissing: boolean;
 };
 
 export function computeListingDisplay(a: {
@@ -41,6 +43,8 @@ export function computeListingDisplay(a: {
   siteUrl: string | null;
   code: string;
   thumb?: (key: string) => string;
+  /** 📐 ร้านนี้เปิด "เช็คขนาด" (SiteInfo fit_check_enabled) */
+  fitCheck?: boolean;
 }): { mapped: ListingAuto; display: ListingDisplay; categories: string[]; issues: ListingIssue[] } {
   const thumb = a.thumb ?? ((k: string) => `/api/r2-image?key=${encodeURIComponent(k)}&w=96`);
   const l = a.listing ?? {};
@@ -61,7 +65,8 @@ export function computeListingDisplay(a: {
     }),
     hero: !!normalizeHero(l.web_hero),
     productUrl: productPageUrl(a.siteUrl, a.code),
+    compartmentsMissing: !!a.fitCheck && (a.parent as { compartments?: unknown }).compartments == null,
   };
   const categories = resolveCategories(a.fieldMap, l.web_categories, String(l.web_category ?? "").trim() || mapped?.category || "");
-  return { mapped, display, categories, issues: listingIssues({ price: display.price, imageCount: display.imageCount, categories, colors: display.colors }) };
+  return { mapped, display, categories, issues: listingIssues({ price: display.price, imageCount: display.imageCount, categories, colors: display.colors, compartmentsMissing: display.compartmentsMissing }) };
 }

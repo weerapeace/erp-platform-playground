@@ -42,6 +42,11 @@ const ParentFitField = dynamic(
   () => import("@/components/parent-fit-picker").then((m) => m.ParentFitField),
   { ssr: false },
 );
+// 📐 ช่องใส่ของ (ขนาดด้านใน) — คำนวณว่าใส่ตุ๊กตา/ของอะไรได้ (ต้องตั้งคู่กับ MasterRecordDrawer ใน master-crud ด้วย)
+const ParentCompartmentsField = dynamic(
+  () => import("@/components/compartments-editor").then((m) => m.ParentCompartmentsField),
+  { ssr: false },
+);
 const ParentDescriptionImages = dynamic(
   () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
   { ssr: false },
@@ -166,6 +171,7 @@ export default function ParentSKUsV2Page() {
       // "ใส่อะไรได้บ้าง" — ชิปจากรายการกลาง (ต้องตั้งคู่กับ MasterRecordDrawer ใน master-crud ด้วย)
       fits: ({ value, onChange, disabled }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
       highlights: ({ value, onChange, disabled }) => <ParentHighlightField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
+      compartments: ({ value, onChange, disabled }) => <ParentCompartmentsField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
     },
     detailRenderers: {
       ...(CONFIG.detailRenderers ?? {}),
@@ -174,6 +180,7 @@ export default function ParentSKUsV2Page() {
       ),
       fits: ({ value, recordId, editable, onSaved }) => <ParentFitField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
       highlights: ({ value, recordId, editable, onSaved }) => <ParentHighlightField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
+      compartments: ({ value, recordId, editable, onSaved }) => <ParentCompartmentsField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
     },
     // section พิเศษในฟอร์ม: รูป Description (มีลำดับ)
     extraFormSection: ({ recordId, readonly }) => (
