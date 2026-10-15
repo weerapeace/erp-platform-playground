@@ -30,17 +30,13 @@ import {
   type ListingRow,
 } from "@/lib/website-field-map";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
-import { normalizeHero } from "@/lib/website-hero";
-import { productPageUrl } from "@/lib/website-links";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
+import { listingPatchToRow, cleanCategoryList, type ListingPatch } from "@/lib/website-listing-patch";
+import { computeListingDisplay } from "@/lib/website-listing-display";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const KEY_RE = /^[\w\-./%()]+$/; // r2 object key ที่ยอมรับ
-/** รายการรหัสหมวด (ไม่ซ้ำ · ≤ 20) — null = กลับไปใช้หมวดแบบเดิม */
-const cleanCategoryList = (v: unknown): string[] | null => (Array.isArray(v) ? [...new Set(v.map(cleanCategoryKey).filter(Boolean))].slice(0, 20) : null);
-const STOCK_STATUS = new Set(["in", "low", "preorder"]);
 
 type ParentRow = {
   id: string;
@@ -162,27 +158,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // ค่าที่เว็บจะใช้จริงถ้าไม่กรอกทับ (เอาไปโชว์เป็น placeholder ในหน้าจัดการ)
     const kids = mp ? kidsByParent.get(mp.id) ?? [] : [];
     const catLabel = mp?.category_id ? catName.get(mp.category_id) ?? null : null;
-    const mapped = mp ? resolveProduct(fieldMap, mp, kids, null, catLabel) : null;
-    // 👁 ค่าที่ "ลูกค้าเห็นจริง" (รวมที่กรอกทับแล้ว) — ชื่อ/ราคา/รูป/สี โชว์ในรายการ + ตรวจข้อมูลไม่ครบ
-    const eff = mp ? resolveProduct(fieldMap, mp, kids, l as ListingRow, catLabel) : null;
-    const display = eff
-      ? {
-          name: eff.name,
-          price: eff.price,
-          priceVaries:
-            !(l.web_price != null && Number(l.web_price) > 0) &&
-            (fieldMap.price.source === "sku_min" || fieldMap.price.source === "sku_max") &&
-            new Set(kids.map((k) => Number(k.list_price)).filter((n) => n > 0)).size > 1,
-          imageKey: eff.images[0] ?? null,
-          imageCount: eff.images.length,
-          colors: (eff.options?.items ?? []).map((it) => {
-            const spec = it.swatch ? null : swatches.resolve(it.label);
-            return { label: it.label, swatch: it.swatch || (spec ? swatchCss(spec, thumb) : null), hasImage: !!(it.image || it.images?.length) };
-          }),
-          hero: !!normalizeHero(l.web_hero),
-          productUrl: productPageUrl(siteUrl, p?.code ?? ""),
-        }
-      : null;
+    // 👁 ค่าอัตโนมัติ + ค่าที่ "ลูกค้าเห็นจริง" (ของกลาง — ตัวเดียวกับตัวตั้งค่าเว็บของสินค้า)
+    const view = mp ? computeListingDisplay({ fieldMap, parent: mp, kids, listing: l, categoryName: catLabel, swatches, siteUrl, code: p?.code ?? "", thumb }) : null;
+    const mapped = view?.mapped ?? null;
+    const display = view?.display ?? null;
     return {
       display,
       mapped,
@@ -205,7 +184,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       /** 📂 หมวดหลายหมวด — null = ยังไม่เคยจัด (ใช้ mapped.categories แบบเดิม) */
       webCategories: Array.isArray(l.web_categories) ? (l.web_categories as string[]) : null,
       /** หมวดที่เว็บใช้จริงตอนนี้ (จัดเอง หรือแบบเดิม) */
-      categories: resolveCategories(fieldMap, l.web_categories, String(l.web_category ?? "").trim() || mapped?.category || ""),
+      categories: view?.categories ?? resolveCategories(fieldMap, l.web_categories, String(l.web_category ?? "").trim()),
       webBadge: (l.web_badge as string | null) ?? "",
       webStockStatus: (l.web_stock_status as string | null) ?? "",
       webSwatch: (l.web_swatch as string | null) ?? "",
@@ -245,23 +224,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-type Patch = {
-  isPublished?: boolean;
-  featured?: boolean;
-  sortOrder?: number;
-  webName?: string;
-  webPrice?: number | null;
-  webDescription?: string;
-  webImages?: string[];
-  webUnit?: string;
-  webCategory?: string;
-  /** null = กลับไปใช้แบบเดิม · array = จัดเอง */
-  webCategories?: string[] | null;
-  webBadge?: string;
-  webStockStatus?: string;
-  webSwatch?: string;
-  webOptions?: unknown;
-};
+type Patch = ListingPatch;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit");
@@ -373,51 +336,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const p = b.patch ?? {};
-  const row: Record<string, unknown> = {
-    shop_id: b.shopId,
-    parent_sku_id: b.parentId,
-    updated_at: new Date().toISOString(),
-  };
-  const text = (v: unknown, max: number) => String(v ?? "").slice(0, max).trim() || null;
-
-  if (p.isPublished !== undefined) row.is_published = !!p.isPublished;
-  if (p.featured !== undefined) row.featured = !!p.featured;
-  if (p.sortOrder !== undefined) row.sort_order = Number(p.sortOrder) || 0;
-  if (p.webName !== undefined) row.web_name = text(p.webName, 200);
-  if (p.webPrice !== undefined) row.web_price = p.webPrice == null ? null : Number(p.webPrice) || null;
-  if (p.webDescription !== undefined) row.web_description = text(p.webDescription, 3000);
-  if (p.webUnit !== undefined) row.web_unit = text(p.webUnit, 40);
-  if (p.webCategory !== undefined) row.web_category = text(p.webCategory, 60);
-  if (p.webCategories !== undefined) row.web_categories = cleanCategoryList(p.webCategories);
-  if (p.webBadge !== undefined) row.web_badge = text(p.webBadge, 40);
-  if (p.webSwatch !== undefined) row.web_swatch = text(p.webSwatch, 300);
-  if (p.webStockStatus !== undefined) {
-    const s = String(p.webStockStatus ?? "").trim();
-    row.web_stock_status = STOCK_STATUS.has(s) ? s : null;
-  }
-  if (p.webImages !== undefined) {
-    const keys = (Array.isArray(p.webImages) ? p.webImages : [])
-      .filter((k) => typeof k === "string" && KEY_RE.test(k))
-      .slice(0, 12);
-    row.web_images = keys.length ? keys : null;
-  }
-  if (p.webOptions !== undefined) {
-    // รูปแบบ: { label: string, items: [{ id, label, swatch? }] }
-    const o = p.webOptions as { label?: unknown; items?: unknown } | null;
-    if (!o || !Array.isArray(o.items) || !o.items.length) {
-      row.web_options = null;
-    } else {
-      const items = (o.items as Record<string, unknown>[])
-        .slice(0, 24)
-        .map((it) => ({
-          id: text(it.id, 40) ?? "",
-          label: text(it.label, 80) ?? "",
-          swatch: text(it.swatch, 80),
-        }))
-        .filter((it) => it.id && it.label);
-      row.web_options = items.length ? { label: text(o.label, 60) ?? "ตัวเลือก", items } : null;
-    }
-  }
+  // ของกลาง: ฟิลด์ชุดเดียวกับตัวตั้งค่าเว็บของสินค้า (/api/parent-web-listings)
+  const row: Record<string, unknown> = { shop_id: b.shopId, parent_sku_id: b.parentId, updated_at: new Date().toISOString(), ...listingPatchToRow(p) };
 
   const { error } = await sb.from("store_listings").upsert(row, { onConflict: "shop_id,parent_sku_id" });
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });

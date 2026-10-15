@@ -9,6 +9,9 @@
  * POST { parentId, shopId, action:"nameRule", nameRule:{removeBrand?,removeCollection?,removeCode?,removeParens?,removeParenMarks?} }
  *                                               → กฎชื่อของร้าน (shops.field_map.name — ใช้ทุกสินค้าในร้าน)
  * GET คืน autoName ต่อร้าน = ชื่อที่เว็บใช้จริงเมื่อเว้นช่องชื่อว่าง (resolveName ตัวเดียวกับเว็บ)
+ *     + ขายบนเว็บ (หมวด/หน่วย/สต๊อก/ป้าย/ตัวเลือกกรอกเอง/สีตัวอย่าง) + ค่าอัตโนมัติ + ที่ลูกค้าเห็นจริง + สิ่งที่ต้องแก้ (ของกลาง computeListingDisplay)
+ * ⭐ ตัวตั้งค่าเว็บของสินค้า (components/parent-web-listings) ใช้ API นี้ทั้งในแท็บ 🛍 ของ Parent SKU และ drawer หน้า "สินค้าบนเว็บ"
+ *    → ฟิลด์ที่บันทึกได้ = ชุดเดียวกับ /api/website/listings (ของกลาง lib/website-listing-patch)
  *
  * web_sku_images = { [skuId]: string[] }  รูปเว็บของสีนั้น (หลายรูปได้) — ค่าเก่าเป็น string เดี่ยว ยังอ่านได้
  * web_details    = { [detailItemId]: { show?: boolean, text?: string } }  ทับ "ชุดรายละเอียดสินค้า" ของธีมเฉพาะรุ่นนี้
@@ -21,7 +24,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeBanners } from "@/lib/website-banners";
-import { normalizeCardColors, isEmptyCardColors } from "@/lib/website-card-colors";
+import { normalizeCardColors } from "@/lib/website-card-colors";
 import { normalizeHero } from "@/lib/website-hero";
 import { productPageUrl } from "@/lib/website-links";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
@@ -37,15 +40,18 @@ import {
   type NameRuleFlag,
 } from "@/lib/website-field-map";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
-import { cleanDetailOverrides, type DetailOverride } from "@/lib/website-detail-overrides";
-import { normalizePersonalize, type PersonalizeConfig } from "@/lib/website-personalize";
+import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
+import { normalizePersonalize } from "@/lib/website-personalize";
+import { listingPatchToRow, toKeyList, type ListingPatch } from "@/lib/website-listing-patch";
+import { computeListingDisplay } from "@/lib/website-listing-display";
+import { CHILD_SELECT, type ChildSku } from "@/lib/website-field-map";
+import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const STORE_BASE = process.env.NEXT_PUBLIC_STORE_BASE || "https://pixiedustie-store.vercel.app";
 const KEY_RE = /^[\w\-./%()]+$/; // r2 object key ที่ยอมรับ
-const MAX_SKU_IMAGES = 8;
 
 const displayName = (p: { name_platform?: string | null; name_th?: string | null; code?: string | null }) =>
   (p.name_platform && p.name_platform.trim()) || (p.name_th && p.name_th.trim()) || p.code || "";
@@ -55,11 +61,6 @@ const productUrlFor = (code: string, slug: string, isDefault: boolean) =>
     ? `${STORE_BASE}/product/${encodeURIComponent(code)}`
     : `${STORE_BASE}/preview/${encodeURIComponent(slug)}?next=${encodeURIComponent(`/product/${code}`)}`;
 
-/** รูปเว็บรายสี: รับได้ทั้งค่าเก่า (string เดี่ยว) และค่าใหม่ (string[]) → คืนเป็น string[] เสมอ */
-const toKeyList = (v: unknown): string[] => {
-  const arr = typeof v === "string" ? [v] : Array.isArray(v) ? v : [];
-  return [...new Set(arr.filter((k): k is string => typeof k === "string" && KEY_RE.test(k)))].slice(0, MAX_SKU_IMAGES);
-};
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view");
@@ -69,13 +70,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parentId" }, { status: 400 });
 
   const sb = supabaseAdmin();
-  const [{ data: parent }, { data: listings }, { data: shops }, { data: children }, parentFields, siteUrls] = await Promise.all([
+  const [{ data: parent }, { data: listings }, { data: shops }, { data: children }, parentFields, siteUrls, { data: mapKids }, { data: swatchRows }] = await Promise.all([
     sb.from("parent_skus_v2").select(PARENT_SELECT).eq("id", parentId).maybeSingle(),
     sb.from("store_listings").select("*").eq("parent_sku_id", parentId),
     sb.from("shops").select("id, name, slug, is_default, theme, theme_draft, field_map").order("is_default", { ascending: false }),
     sb.from("skus_v2").select("id, code, color, list_price, cover_image_r2_key").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
     loadParentWebFields(sb),
     loadShopSiteUrls(sb),
+    // SKU ลูกแบบที่เว็บใช้ (คำนวณราคา/รูป/สีที่ลูกค้าเห็นจริง) + ทะเบียนสีกลาง (จุดสี)
+    sb.from("skus_v2").select(CHILD_SELECT).eq("parent_sku_id", parentId).eq("is_active", true),
+    sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
   ]);
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
 
@@ -84,6 +88,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const parentRow = parent as unknown as ParentRow;
   await attachNameRefs(sb, [parentRow]);
   const kids = (children ?? []) as Record<string, unknown>[];
+  const webKids = (mapKids ?? []) as ChildSku[];
+  const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
+  const catId = (parentRow as { category_id?: string | null }).category_id ?? null;
+  const catName = catId ? (((await sb.from("product_categories").select("name").eq("id", catId).maybeSingle()).data as { name?: string } | null)?.name ?? null) : null;
   const kidIds = kids.map((k) => k.id as string);
 
   // สต๊อก + แกลเลอรีรูปของ SKU ลูก (รูปภาพเพิ่มเติมที่อัปโหลดไว้ในหน้า SKU) — ให้เลือกเป็นรูปเว็บรายสีได้
@@ -165,6 +173,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return { id: it.id, label: it.label, source: it.source, enabled: it.enabled, defaultLabel };
     });
 
+    // 👁 ค่าอัตโนมัติ + ที่ลูกค้าเห็นจริง + สิ่งที่ต้องแก้ (ของกลาง — ตัวเดียวกับหน้า "สินค้าบนเว็บ")
+    const view = computeListingDisplay({ fieldMap, parent: parentRow, kids: webKids, listing: l ?? null, categoryName: catName, swatches, siteUrl: siteUrls.get(s.id) ?? null, code });
+
     return {
       shopId: s.id,
       shopName: s.name,
@@ -192,6 +203,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       /** 🎬 รูปเปิดหน้าสินค้า (Hero) คอม/มือถือ (null = ใช้รูปสินค้า) */
       webHero: normalizeHero(l?.web_hero),
       detailItems,
+      // 🛒 ขายบนเว็บ (ชุดเดียวกับหน้า "สินค้าบนเว็บ")
+      webUnit: (l?.web_unit as string | null) ?? "",
+      webCategories: Array.isArray(l?.web_categories) ? (l!.web_categories as string[]) : null,
+      categories: view.categories,
+      webBadge: (l?.web_badge as string | null) ?? "",
+      webStockStatus: (l?.web_stock_status as string | null) ?? "",
+      webSwatch: (l?.web_swatch as string | null) ?? "",
+      webOptions: (l?.web_options as unknown) ?? null,
+      /** หมวดของร้านนี้ (แท็บ 📂 หมวดหมู่) */
+      shopCategories: fieldMap.categories.map((c) => ({ key: c.key, label: c.label, icon: c.icon ?? "" })),
+      /** ค่าที่เว็บใช้อัตโนมัติถ้าไม่กรอกทับ */
+      auto: { price: view.mapped.price, unit: view.mapped.unit, description: view.mapped.description },
+      display: view.display,
+      issues: l ? view.issues : [],
       soldQty: soldByShop.get(s.id) ?? 0,
       // 🌐 โดเมนจริงของร้าน (shop_domains) · ยังไม่ตั้งโดเมน = ลิงก์แบบเดิม
       productUrl: productPageUrl(siteUrls.get(s.id) ?? null, code) ?? productUrlFor(code, s.slug, s.is_default),
@@ -215,20 +240,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-type Patch = {
-  isPublished?: boolean;
-  featured?: boolean;
-  webPrice?: number | null;
-  webName?: string;
-  webDescription?: string;
-  webImages?: string[];
-  webSkuImages?: Record<string, string | string[]>;
-  webDetails?: Record<string, DetailOverride>;
-  webPersonalize?: PersonalizeConfig | null;
-  webBanners?: unknown;
-  webCardColors?: unknown;
-  webHero?: unknown;
-};
+type Patch = ListingPatch;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit");
@@ -275,41 +287,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const p = b.patch ?? {};
-  const row: Record<string, unknown> = { shop_id: b.shopId, parent_sku_id: b.parentId, updated_at: new Date().toISOString() };
-  if (p.isPublished !== undefined) row.is_published = !!p.isPublished;
-  if (p.featured !== undefined) row.featured = !!p.featured;
-  if (p.webPrice !== undefined) row.web_price = p.webPrice == null ? null : Number(p.webPrice) || null;
-  if (p.webName !== undefined) row.web_name = String(p.webName).slice(0, 200).trim() || null;
-  if (p.webDescription !== undefined) row.web_description = String(p.webDescription).slice(0, 3000).trim() || null;
-  if (p.webImages !== undefined) {
-    const keys = (Array.isArray(p.webImages) ? p.webImages : []).filter((k) => typeof k === "string" && KEY_RE.test(k)).slice(0, 12);
-    row.web_images = keys.length ? keys : null;
-  }
-  if (p.webSkuImages !== undefined) {
-    const clean: Record<string, string[]> = {};
-    for (const [skuId, v] of Object.entries(p.webSkuImages ?? {}).slice(0, 60)) {
-      if (!/^[0-9a-f-]{36}$/i.test(skuId)) continue;
-      const keys = toKeyList(v);
-      if (keys.length) clean[skuId] = keys;
-    }
-    row.web_sku_images = Object.keys(clean).length ? clean : null;
-  }
-  if (p.webDetails !== undefined) {
-    const clean = cleanDetailOverrides(p.webDetails);
-    row.web_details = Object.keys(clean).length ? clean : null;
-  }
-  if (p.webPersonalize !== undefined) {
-    row.web_personalize = p.webPersonalize ? normalizePersonalize(p.webPersonalize) : null;
-  }
-  if (p.webBanners !== undefined) {
-    const banners = normalizeBanners(p.webBanners);
-    row.web_banners = banners.length ? banners : null;
-  }
-  if (p.webCardColors !== undefined) {
-    const cc = normalizeCardColors(p.webCardColors);
-    row.web_card_colors = isEmptyCardColors(cc) ? null : cc;
-  }
-  if (p.webHero !== undefined) row.web_hero = normalizeHero(p.webHero);
+  // ของกลาง: ฟิลด์ชุดเดียวกับ /api/website/listings (ขายบนเว็บ + รูป/สี/รูปเปิด + ปั๊มชื่อ/แบนเนอร์/รายละเอียด)
+  const row: Record<string, unknown> = { shop_id: b.shopId, parent_sku_id: b.parentId, updated_at: new Date().toISOString(), ...listingPatchToRow(p) };
 
   const { error } = await sb.from("store_listings").upsert(row, { onConflict: "shop_id,parent_sku_id" });
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });

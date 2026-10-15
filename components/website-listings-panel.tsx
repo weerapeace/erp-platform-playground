@@ -7,8 +7,9 @@
  * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด (จำต่อคนด้วย useViewPref)
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
- * - ✏️ แก้ด่วน (ชื่อ ราคา หน่วย หมวด ป้าย ฯลฯ) · 🖼 รูป สี และรูปเปิด = เปิดแท็บ 🛍 ของ Parent SKU ตัวจริงใน drawer (ไม่ทำฟอร์มซ้ำ)
- * - 📦 เปิด Parent SKU = MasterRecordDrawer ตัวจริง (ทุกแท็บ · ◀ ▶ เลื่อนตามรายการที่เห็น)
+ * - กดการ์ด/แถว/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
+ *     แท็บ ขายบนเว็บ · รูป สี และรูปเปิด · ปั๊มชื่อ/แบนเนอร์/รายละเอียด · ต้องแก้ · ◀ ▶ เลื่อนตามรายการที่เห็น · 💾 บันทึกแถบล่าง
+ * - 📦 เปิด Parent SKU = MasterRecordDrawer ตัวจริง (ทุกแท็บ · ◀ ▶ เลื่อนตามรายการที่เห็น · ปิดแล้วกลับมาที่ drawer เว็บ)
  * ของกลาง: BulkActionBar · useDragReorder/DragHandle · CopyButton · Drawer/ConfirmDialog · footer-save · ParentWebListings
  * ข้อมูล: /api/website/listings (guardApi products.view/edit + audit) — โหลดที่ manager-client แล้วส่งเข้ามา
  */
@@ -88,24 +89,13 @@ type SearchHit = { id: string; code: string; name: string; price: number; imageK
 /** หมวดของร้าน — มาจาก API (ตั้งได้เองในแท็บ ⚙️ จับคู่ฟิลด์) */
 export type CategoryDef = { key: string; label: string; icon: string };
 
-const STOCKS = [
-  { value: "in", label: "พร้อมส่ง" },
-  { value: "low", label: "เหลือน้อย" },
-  { value: "preorder", label: "สั่งจอง" },
-];
 type Filter = "all" | "pub" | "hide" | "feat" | "fix";
 const VIEWS = ["list", "grid"] as const;
 
 const baht = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH")}`;
-const keyUrl = (key: string, w = 120) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
-/** "1.5 มม., 2.0 มม." → [{id,label}] (id สร้างอัตโนมัติ) */
-const parseItems = (raw: string): OptionItem[] =>
-  raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 24).map((label, i) => ({ id: `opt-${i + 1}`, label }));
-const itemsToText = (o: WebOptions) => (o?.items ?? []).map((i) => i.label).join(", ");
-
 const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
+const keyUrl = (key: string, w = 120) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 
 /** ชื่อ/ราคาที่โชว์ในรายการ = ที่ลูกค้าเห็นจริง (เดิมโชว์ชื่อดิบ ERP + ราคา Parent ซึ่งเป็น ฿0) */
 const shownName = (l: Listing) => l.display?.name || l.webName || l.mapped?.name || l.erpName;
@@ -174,9 +164,10 @@ export function WebsiteListingsPanel({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [removing, setRemoving] = useState<Listing | null>(null);
-  // 🖼 รูป สี และรูปเปิด → แท็บ 🛍 ของ Parent SKU ตัวจริงใน drawer · ปุ่มบันทึกอยู่แถบล่าง (footer-save)
-  const [media, setMedia] = useState<Listing | null>(null);
-  const mediaSave = useFooterSaveHost();
+  // 🛍 drawer ตั้งค่าเว็บของสินค้า (ของกลาง ParentWebListings) · ปุ่มบันทึกอยู่แถบล่าง (footer-save)
+  const webSave = useFooterSaveHost();
+  // ◀ ▶ / ปิด ตอนมีของแก้ค้าง → ถามก่อน (ไปไหน: parentId · null = ปิด)
+  const [pendingNav, setPendingNav] = useState<{ to: string | null } | null>(null);
   // 📦 เปิด Parent SKU — drawer ตัวจริงของหน้า Parent SKU (ทุกแท็บ) · ◀ ▶ เลื่อนตามรายการที่เห็นอยู่
   const [parentOpen, setParentOpen] = useState<string | null>(null);
 
@@ -321,39 +312,6 @@ export function WebsiteListingsPanel({
     }
   };
 
-  const save = async (l: Listing) => {
-    setSaving(l.parentId);
-    try {
-      const j = await post({
-        shopId: shop.id,
-        parentId: l.parentId,
-        patch: {
-          isPublished: l.published,
-          featured: l.featured,
-          sortOrder: l.sortOrder,
-          webName: l.webName,
-          webPrice: l.webPrice,
-          webDescription: l.webDescription,
-          webUnit: l.webUnit,
-          webCategory: l.webCategory,
-          webCategories: l.webCategories,
-          webBadge: l.webBadge,
-          webStockStatus: l.webStockStatus || "in",
-          webSwatch: l.webSwatch,
-          webOptions: l.webOptions,
-        },
-      });
-      if (j.ok) {
-        toast.success("บันทึกแล้ว");
-        await reload(); // ชื่อ/ราคาที่โชว์ในรายการ = ค่าจริงหลังบันทึก
-      } else toast.error(j.error ?? "บันทึกไม่สำเร็จ");
-    } catch {
-      toast.error("เชื่อมต่อไม่ได้");
-    } finally {
-      setSaving(null);
-    }
-  };
-
   const togglePublish = async (l: Listing) => {
     const next = !l.published;
     patch(l.parentId, { published: next });
@@ -374,9 +332,12 @@ export function WebsiteListingsPanel({
     }
   };
 
-  const closeMedia = () => {
-    setMedia(null);
-    void reload(); // รูป/สี/รูปเปิด อาจเปลี่ยน → ดึงค่าจริงใหม่
+  // 🛍 drawer เว็บ: เปิด/เลื่อน/ปิด (มีของแก้ค้าง = ถามก่อน)
+  const webL = open ? listings.find((l) => l.parentId === open) ?? null : null;
+  const navIdx = webL ? shown.findIndex((l) => l.parentId === webL.parentId) : -1;
+  const goWeb = (to: string | null) => {
+    if (webSave.anyDirty) setPendingNav({ to });
+    else setOpen(to);
   };
 
   const FILTERS: { k: Filter; label: string; warn?: boolean }[] = [
@@ -540,10 +501,7 @@ export function WebsiteListingsPanel({
               <button
                 key={l.parentId}
                 type="button"
-                onClick={() => {
-                  setView("list");
-                  setOpen(l.parentId);
-                }}
+                onClick={() => setOpen(l.parentId)}
                 className={`text-left rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-slate-400 transition ${l.published ? "" : "opacity-60"}`}
               >
                 <div className="relative aspect-square bg-slate-100" style={!key && l.webSwatch ? { background: l.webSwatch } : undefined}>
@@ -661,161 +619,13 @@ export function WebsiteListingsPanel({
                     </span>
 
                     <button
-                      onClick={() => setOpen(isOpen ? null : l.parentId)}
+                      onClick={() => setOpen(l.parentId)}
                       className={`w-16 shrink-0 px-2 py-1.5 rounded-lg border text-xs ${isOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
                     >
-                      {isOpen ? "ปิด" : "✏️ แก้"}
+                      ✏️ แก้
                     </button>
                   </div>
 
-                  {/* แผงแก้ไขด่วน */}
-                  {isOpen && (
-                    <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-4">
-                      <div className="flex flex-wrap items-center gap-2 mb-3">
-                        <button
-                          type="button"
-                          onClick={() => setMedia(l)}
-                          className="px-3 py-1.5 rounded-lg border border-violet-300 bg-violet-50 text-violet-700 text-xs font-medium hover:bg-violet-100"
-                        >
-                          🖼 รูป สี และรูปเปิด
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setParentOpen(l.parentId)}
-                          title="เปิดข้อมูลสินค้าเต็ม (หน้าต่างเดียวกับหน้า Parent SKU — ทุกแท็บ)"
-                          className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:border-slate-500"
-                        >
-                          📦 เปิด Parent SKU
-                        </button>
-                        {l.display?.productUrl && (
-                          <>
-                            <a href={l.display.productUrl} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:border-slate-400">
-                              ดูหน้าเว็บ ↗
-                            </a>
-                            <CopyButton value={l.display.productUrl} label="คัดลอกลิงก์" title="คัดลอกลิงก์หน้าสินค้านี้" className="!py-1.5" />
-                          </>
-                        )}
-                        {!l.published && <span className="text-[11px] text-slate-400">ซ่อนอยู่ — ลูกค้าเปิดหน้านี้ไม่ได้จนกว่าจะขึ้นเว็บ</span>}
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        <div className="sm:col-span-2">
-                          <label className={labelCls}>ชื่อบนเว็บ (เว้นว่าง = ใช้อัตโนมัติ: {l.mapped?.name || l.erpName})</label>
-                          <input value={l.webName} onChange={(e) => patch(l.parentId, { webName: e.target.value })} placeholder={l.mapped?.name || l.erpName} className={inputCls} />
-                        </div>
-                        <div>
-                          <label className={labelCls}>ราคาบนเว็บ (บาท) — อัตโนมัติ: {baht(l.mapped?.price ?? l.erpPrice)}</label>
-                          <input
-                            type="number"
-                            value={l.webPrice ?? ""}
-                            onChange={(e) => patch(l.parentId, { webPrice: e.target.value === "" ? null : Number(e.target.value) })}
-                            placeholder={String(l.mapped?.price ?? l.erpPrice)}
-                            className={inputCls}
-                          />
-                        </div>
-
-                        <div className="sm:col-span-2 lg:col-span-3">
-                          <label className={labelCls}>หมวดบนเว็บ (เลือกได้หลายหมวด · ตัวแรก = หมวดหลัก)</label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {categories.map((c) => {
-                              const cur = l.webCategories ?? l.categories ?? [];
-                              const on = cur.includes(c.key);
-                              return (
-                                <button
-                                  key={c.key}
-                                  type="button"
-                                  onClick={() => {
-                                    const next = on ? cur.filter((k) => k !== c.key) : [...cur, c.key];
-                                    patch(l.parentId, { webCategories: next, categories: next });
-                                  }}
-                                  className={`rounded-full border px-2.5 py-1 text-xs ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-600 hover:border-slate-500"}`}
-                                >
-                                  {on && cur[0] === c.key ? "★ " : ""}
-                                  {c.icon ? `${c.icon} ` : ""}
-                                  {c.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className={labelCls}>หน่วยขาย{l.mapped?.unit ? ` (อัตโนมัติ: ${l.mapped.unit})` : ""}</label>
-                          <input value={l.webUnit} onChange={(e) => patch(l.parentId, { webUnit: e.target.value })} placeholder={l.mapped?.unit || "ชิ้น / ใบ / หลา"} className={inputCls} />
-                        </div>
-                        <div>
-                          <label className={labelCls}>สถานะสต๊อกบนเว็บ</label>
-                          <select value={l.webStockStatus || "in"} onChange={(e) => patch(l.parentId, { webStockStatus: e.target.value })} className={inputCls}>
-                            {STOCKS.map((s) => (
-                              <option key={s.value} value={s.value}>
-                                {s.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className={labelCls}>ป้ายบนการ์ด</label>
-                          <input value={l.webBadge} onChange={(e) => patch(l.parentId, { webBadge: e.target.value })} placeholder="ขายดี / ใหม่" className={inputCls} />
-                        </div>
-
-                        <div className="sm:col-span-2 lg:col-span-3">
-                          <label className={labelCls}>คำอธิบายบนเว็บ (เว้นว่าง = ใช้อัตโนมัติ)</label>
-                          <textarea
-                            rows={2}
-                            value={l.webDescription}
-                            onChange={(e) => patch(l.parentId, { webDescription: e.target.value })}
-                            placeholder={l.mapped?.description || l.erpDescription || "อธิบายสินค้าสำหรับลูกค้า"}
-                            className={inputCls}
-                          />
-                        </div>
-
-                        {/* ตัวเลือกกรอกเอง + สีตัวอย่าง — ใช้กับร้านวัสดุ (ร้านกระเป๋าใช้สีจาก SKU อัตโนมัติ) */}
-                        <details className="sm:col-span-2 lg:col-span-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                          <summary className="cursor-pointer text-xs text-slate-500">ตั้งค่าเพิ่มเติม (ตัวเลือกกรอกเอง · สีตัวอย่างแทนรูป)</summary>
-                          <div className="grid gap-3 sm:grid-cols-3 mt-2">
-                            <div>
-                              <label className={labelCls}>ชื่อชุดตัวเลือก</label>
-                              <input
-                                value={l.webOptions?.label ?? ""}
-                                onChange={(e) => patch(l.parentId, { webOptions: { label: e.target.value, items: l.webOptions?.items ?? [] } })}
-                                placeholder="ความหนา / สี"
-                                className={inputCls}
-                              />
-                            </div>
-                            <div className="sm:col-span-2">
-                              <label className={labelCls}>ตัวเลือก (คั่นด้วยจุลภาค · ว่าง = ใช้สีจาก SKU อัตโนมัติ)</label>
-                              <input
-                                defaultValue={itemsToText(l.webOptions)}
-                                onBlur={(e) => patch(l.parentId, { webOptions: { label: l.webOptions?.label || "ตัวเลือก", items: parseItems(e.target.value) } })}
-                                placeholder="1.5 มม., 2.0 มม., 3.0 มม."
-                                className={inputCls}
-                              />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className={labelCls}>สีตัวอย่าง (ใช้แทนรูปจนกว่าจะมีรูปจริง)</label>
-                              <div className="flex items-center gap-2">
-                                <input value={l.webSwatch} onChange={(e) => patch(l.parentId, { webSwatch: e.target.value })} placeholder="#C89A5B หรือ linear-gradient(...)" className={inputCls} />
-                                <span className="shrink-0 w-9 h-9 rounded-lg border border-slate-200" style={l.webSwatch ? { background: l.webSwatch } : { background: "#f1f5f9" }} />
-                              </div>
-                            </div>
-                          </div>
-                        </details>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-200">
-                        <button onClick={() => setRemoving(l)} className="text-xs text-red-500 hover:text-red-700 hover:underline">
-                          เอาออกจากเว็บร้านนี้
-                        </button>
-                        <button
-                          onClick={() => void save(l)}
-                          disabled={saving === l.parentId}
-                          className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                        >
-                          {saving === l.parentId ? "กำลังบันทึก…" : "บันทึก"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </li>
               );
             })}
@@ -857,25 +667,97 @@ export function WebsiteListingsPanel({
         </button>
       </BulkActionBar>
 
-      {/* 🖼 รูป สี และรูปเปิด — แท็บ 🛍 เว็บไซต์ ของ Parent SKU ตัวจริง (ทุกร้าน) */}
+      {/* 🛍 ตั้งค่าเว็บของสินค้า — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (เฉพาะร้านนี้) */}
       <Drawer
-        open={!!media}
-        onClose={closeMedia}
+        open={!!webL && !parentOpen}
+        onClose={() => goWeb(null)}
         size="xl"
-        title={media ? `รูป สี และรูปเปิด — ${media.code}` : ""}
-        description="ตั้งค่าบนเว็บของรุ่นนี้ (ชุดเดียวกับแท็บ 🛍 เว็บไซต์ ในหน้า Parent SKU)"
-        hasUnsavedChanges={mediaSave.anyDirty}
+        title={webL ? shownName(webL) : ""}
+        description={webL ? `${webL.code} · ${priceText(webL)}${navIdx >= 0 ? ` · ${navIdx + 1}/${shown.length}` : ""}` : ""}
+        hasUnsavedChanges={webSave.anyDirty}
         footer={
           <>
-            <button onClick={closeMedia} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
+            {webL && (
+              <button onClick={() => setRemoving(webL)} className="mr-auto text-xs text-red-500 hover:text-red-700 hover:underline">
+                🗑 เอาออกจากเว็บร้านนี้
+              </button>
+            )}
+            <button onClick={() => goWeb(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
               ปิด
             </button>
-            <FooterSaveButton host={mediaSave} />
+            <FooterSaveButton host={webSave} />
           </>
         }
       >
-        <FooterSaveProvider value={mediaSave.register}>{media && <ParentWebListings parentId={media.parentId} />}</FooterSaveProvider>
+        {webL && (
+          <div className="space-y-3">
+            {/* หัว: รูป · สถานะ · ลิงก์ · Parent SKU · เลื่อนตัวก่อน/ถัดไป */}
+            <div className="flex items-start gap-3">
+              <Thumb l={webL} size={64} />
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <div className="flex flex-wrap gap-1">
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${webL.published ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{webL.published ? "ขึ้นเว็บอยู่" : "ซ่อนอยู่"}</span>
+                  {webL.featured && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">★ แนะนำ</span>}
+                  {webL.display?.hero && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">🎬 รูปเปิด</span>}
+                  {(issuesById.get(webL.parentId) ?? []).length > 0 && (
+                    <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] text-amber-800">⚠️ ต้องแก้ {(issuesById.get(webL.parentId) ?? []).length}</span>
+                  )}
+                  <ColorDots colors={webL.display?.colors ?? []} max={8} />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {webL.display?.productUrl && (
+                    <>
+                      <a href={webL.display.productUrl} target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:border-slate-400">
+                        👁 ดูบนเว็บ ↗
+                      </a>
+                      <CopyButton value={webL.display.productUrl} label="คัดลอกลิงก์" title="คัดลอกลิงก์หน้าสินค้านี้" className="!py-1" />
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (webSave.anyDirty) {
+                        toast.info("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU");
+                        return;
+                      }
+                      setParentOpen(webL.parentId);
+                    }}
+                    title="เปิดข้อมูลสินค้าเต็ม (หน้าต่างเดียวกับหน้า Parent SKU — ทุกแท็บ)"
+                    className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:border-slate-500"
+                  >
+                    📦 เปิด Parent SKU
+                  </button>
+                  {!webL.published && <span className="text-[11px] text-slate-400">ซ่อนอยู่ — ลูกค้าเปิดหน้านี้ไม่ได้จนกว่าจะขึ้นเว็บ</span>}
+                </div>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button type="button" disabled={navIdx <= 0} onClick={() => goWeb(shown[navIdx - 1]?.parentId ?? null)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวก่อนหน้า" aria-label="ตัวก่อนหน้า">
+                  ◀
+                </button>
+                <button type="button" disabled={navIdx < 0 || navIdx >= shown.length - 1} onClick={() => goWeb(shown[navIdx + 1]?.parentId ?? null)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวถัดไป" aria-label="ตัวถัดไป">
+                  ▶
+                </button>
+              </div>
+            </div>
+            <FooterSaveProvider value={webSave.register}>
+              <ParentWebListings key={webL.parentId} parentId={webL.parentId} shopId={shop.id} onChanged={() => void reload()} />
+            </FooterSaveProvider>
+          </div>
+        )}
       </Drawer>
+      <ConfirmDialog
+        open={!!pendingNav}
+        onClose={() => setPendingNav(null)}
+        onConfirm={() => {
+          setOpen(pendingNav?.to ?? null);
+          setPendingNav(null);
+        }}
+        title="มีข้อมูลที่ยังไม่บันทึก"
+        message="ต้องการออกโดยไม่บันทึกหรือไม่? (กด ยกเลิก แล้วกด 💾 บันทึก ที่แถบล่างก่อนได้)"
+        confirmText="ออกโดยไม่บันทึก"
+        cancelText="อยู่ต่อ"
+        variant="danger"
+      />
 
       {/* 📦 Parent SKU ตัวเต็ม (ข้อมูลสินค้า/รูป/BOM/🛍 เว็บไซต์ …) — ปิดแล้วดึงค่าที่เว็บเห็นใหม่ */}
       {parentOpen && (
