@@ -33,4 +33,12 @@ describe("พรีวิวสด: ต้องโหลดพรีวิว�
     expect(sig(canvas, false)).toBe(sig(base, false));
     expect(sig(base, false)).toBe(previewStructureSig(base as never));
   });
+  it("เว็บร้านบอก serverTypes มาเอง = ใช้ชุดนั้น (ตารางสินค้าวาดสดได้ → เปลี่ยนรูปแบบไม่ต้องโหลดใหม่)", () => {
+    const pb = [...base, { id: "p1", type: "products", enabled: true, layout: "grid", style: {} }] as Record<string, unknown>[];
+    const next = pb.map((b) => (b.id === "p1" ? { ...b, layout: "mosaic" } : b));
+    const st = ["featured", "personalize"];
+    expect(previewReloadSig(next as never, true, st)).toBe(previewReloadSig(pb as never, true, st));
+    // ไม่บอก = ชุดเดิม (products ยังโหลดใหม่ — เว็บร้านรุ่นเก่า)
+    expect(previewReloadSig(next as never, true)).not.toBe(previewReloadSig(pb as never, true));
+  });
 });

@@ -194,10 +194,13 @@ export function WebsiteBuilder({
   // บันทึกร่างแล้ว → โหลดพรีวิวใหม่ "เฉพาะสิ่งที่พรีวิวทำเองไม่ได้" (lib/website-live-preview.ts)
   //   พรีวิวสด = เนื้อหา Section ที่ดึงข้อมูลสินค้า/หมวด · เว็บรุ่นเก่า = โครงหน้าเปลี่ยน (ยกเว้นเนื้อในผืนผ้าใบ)
   const liveRef = useRef(false);
+  // ชนิด Section ที่พรีวิวรุ่นนี้ยังต้องโหลดใหม่ (เว็บร้านบอกมากับ storefront-live-ready · ไม่บอก = ชุดเดิมใน lib)
+  const serverTypesRef = useRef<string[] | null>(null);
   const loadedBlocks = useRef<Block[] | null>(null);
   useEffect(() => {
     const live = liveRef.current;
-    if (loadedBlocks.current && previewReloadSig(loadedBlocks.current, live) === previewReloadSig(blocksRef.current, live)) return;
+    const st = serverTypesRef.current;
+    if (loadedBlocks.current && previewReloadSig(loadedBlocks.current, live, st) === previewReloadSig(blocksRef.current, live, st)) return;
     loadedBlocks.current = blocksRef.current;
     setNonce((n) => n + 1);
   }, [previewVersion]);
@@ -208,6 +211,7 @@ export function WebsiteBuilder({
   // โหลดพรีวิวใหม่ = ยังไม่รู้ว่ารับค่าสดได้ไหม (รอถามใหม่ตอนโหลดเสร็จ)
   useEffect(() => {
     liveRef.current = false;
+    serverTypesRef.current = null;
   }, [nonce]);
   const postLive = useCallback(() => {
     if (liveRef.current) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-blocks-live", blocks: blocksRef.current }, "*");
@@ -465,6 +469,8 @@ export function WebsiteBuilder({
       }
       if (d.type === "storefront-live-ready") {
         liveRef.current = true;
+        const st = (d as { serverTypes?: unknown }).serverTypes;
+        serverTypesRef.current = Array.isArray(st) ? st.filter((x): x is string => typeof x === "string") : null;
         // พรีวิวโหลดร่างที่บันทึกไว้ — ส่งของล่าสุด (ที่อาจแก้ต่อระหว่างโหลด) ไปทับทันที
         postLive();
         const sel = selectionRef.current;

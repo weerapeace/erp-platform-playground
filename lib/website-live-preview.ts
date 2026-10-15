@@ -6,7 +6,8 @@
  *   - Section ที่ดึงข้อมูลสินค้า/หมวด (LIVE_RELOAD_TYPES) = เนื้อหาเปลี่ยน → โหลดพรีวิวใหม่หลังบันทึกร่าง (เซิร์ฟเวอร์ต้องดึงข้อมูลใหม่)
  * เว็บร้านรุ่นเก่า (ไม่ตอบ) = แบบเดิม: โครงหน้าเปลี่ยนอะไรก็โหลดใหม่ (ยกเว้นเนื้อในผืนผ้าใบที่รับสดอยู่แล้ว)
  *
- * ⚠️ LIVE_RELOAD_TYPES ต้องตรงกับ SERVER_TYPES ของเว็บร้าน (src/components/home/block-registry.tsx)
+ * ชนิดที่ต้องโหลดใหม่: เว็บร้านบอกมาเองตอนตอบ storefront-live-ready { serverTypes } (ตาม SERVER_TYPES ของเว็บรุ่นนั้น)
+ * เว็บที่ยังไม่บอก = ใช้ LIVE_RELOAD_TYPES (ชุดเดิม) — กันพรีวิวค้างของเก่าระหว่างเว็บร้านยังไม่อัปเดต
  */
 type AnyBlock = { id: string; type: string; enabled?: boolean; visibility?: unknown; style?: unknown } & Record<string, unknown>;
 
@@ -21,10 +22,11 @@ export function previewStructureSig(blocks: AnyBlock[]): string {
  * ลายเซ็นของ "สิ่งที่พรีวิวสดทำเองไม่ได้" — เปลี่ยน = ต้องโหลดพรีวิวใหม่
  * live = เฉพาะเนื้อหาของ Section ที่ดึงข้อมูล (เรียงตาม id — ย้ายลำดับไม่ต้องโหลดใหม่ · รูปลักษณ์/ซ่อน/ปิด ไม่นับ)
  */
-export function previewReloadSig(blocks: AnyBlock[], live: boolean): string {
+export function previewReloadSig(blocks: AnyBlock[], live: boolean, serverTypes?: readonly string[] | null): string {
   if (!live) return previewStructureSig(blocks);
+  const types = serverTypes ?? LIVE_RELOAD_TYPES;
   const data = blocks
-    .filter((b) => LIVE_RELOAD_TYPES.includes(b.type) && b.enabled !== false)
+    .filter((b) => types.includes(b.type) && b.enabled !== false)
     .map((b) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { style, visibility, enabled, ...content } = b;
