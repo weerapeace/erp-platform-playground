@@ -212,6 +212,9 @@ export function buildQuotationHtml(
     ? `ภาษีมูลค่าเพิ่ม ${quote.vat_rate}% (รวมแล้ว)`
     : `ภาษีมูลค่าเพิ่ม ${quote.vat_rate}%`;
   const totalQty = quote.lines.reduce((sum, line) => sum + Number(line.qty ?? 0), 0);
+  // คอลัมน์ "ภาพ" กว้างตามขนาดรูป (22mm = 17% เท่าเดิม) — ส่วนต่างยืม/คืนจากคอลัมน์ "รายการ"
+  const imageColPct = Math.round((17 * layout.imageSizeMm / 22) * 10) / 10;
+  const nameColPct = Math.max(12, (layout.showSku || layout.showImage ? 29 : 45) - (layout.showImage ? imageColPct - 17 : 0));
   const visibleColumnCount = 6 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
   const summaryLabelColspan = 1 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
   const signatureMarginTop = layout.signatureToBottom ? "auto" : `${layout.signatureGapMm}mm`;
@@ -251,7 +254,7 @@ export function buildQuotationHtml(
     .right { text-align: right; }
     .code { font-size: 10px; }
     ${layout.showImage ? `.photo-cell { padding: 1mm !important; text-align: center; }
-    .photo-cell img { width: 100%; height: 22mm; object-fit: contain; display: block; }` : ""}
+    .photo-cell img { width: 100%; height: ${layout.imageSizeMm}mm; object-fit: contain; display: block; }` : ""}
     .items tbody tr.summary-row { height: auto; }
     .summary-row td { height: auto !important; padding: 1.5mm; }
     .bottom { display: grid; grid-template-columns: 1.95fr 1fr; border: 1px solid #000; margin-top: -1px; break-inside: avoid; page-break-inside: avoid; }
@@ -304,8 +307,8 @@ export function buildQuotationHtml(
       <colgroup>
         <col style="width: 6%">
         ${layout.showSku ? `<col style="width: 13%">` : ""}
-        <col style="width: ${layout.showSku || layout.showImage ? 29 : 45}%">
-        ${layout.showImage ? `<col style="width: 17%">` : ""}
+        <col style="width: ${nameColPct}%">
+        ${layout.showImage ? `<col style="width: ${imageColPct}%">` : ""}
         <col style="width: 9%">
         <col style="width: 7%">
         <col style="width: 9%">

@@ -2,12 +2,17 @@
 export type ReportLineSort = "none" | "qty" | "price" | "sku";
 export const REPORT_LINE_SORTS: ReportLineSort[] = ["none", "qty", "price", "sku"];
 
+export const REPORT_IMAGE_SIZE_MIN_MM = 10;
+export const REPORT_IMAGE_SIZE_MAX_MM = 45;
+
 export type ReportLayoutSettings = {
   topMarginMm: number;
   horizontalMarginMm: number;
   bottomMarginMm: number;
   fontSizePx: number;
   rowHeightMm: number;
+  /** ความสูงรูปสินค้าในตาราง (mm) — คอลัมน์ "ภาพ" กว้างตามสัดส่วน */
+  imageSizeMm: number;
   signatureGapMm: number;
   signatureToBottom: boolean;
   showSku: boolean;
@@ -40,6 +45,7 @@ export const DEFAULT_REPORT_LAYOUT: ReportLayoutSettings = {
   bottomMarginMm: 11,
   fontSizePx: 11,
   rowHeightMm: 24,
+  imageSizeMm: 22,
   signatureGapMm: 22,
   signatureToBottom: true,
   showSku: true,
@@ -85,6 +91,7 @@ export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {})
     bottomMarginMm: clamp(input.bottomMarginMm, 0, 30, DEFAULT_REPORT_LAYOUT.bottomMarginMm),
     fontSizePx: clamp(input.fontSizePx, 8, 14, DEFAULT_REPORT_LAYOUT.fontSizePx),
     rowHeightMm: clamp(input.rowHeightMm, 10, 36, DEFAULT_REPORT_LAYOUT.rowHeightMm),
+    imageSizeMm: clamp(input.imageSizeMm, REPORT_IMAGE_SIZE_MIN_MM, REPORT_IMAGE_SIZE_MAX_MM, DEFAULT_REPORT_LAYOUT.imageSizeMm),
     signatureGapMm: clamp(input.signatureGapMm, 0, 45, DEFAULT_REPORT_LAYOUT.signatureGapMm),
     signatureToBottom: input.signatureToBottom ?? DEFAULT_REPORT_LAYOUT.signatureToBottom,
     showSku: input.showSku ?? DEFAULT_REPORT_LAYOUT.showSku,
@@ -118,9 +125,17 @@ export function compactReportLayout(input: Partial<ReportLayoutSettings> = DEFAU
     bottomMarginMm: Math.min(current.bottomMarginMm, 8),
     fontSizePx: Math.min(current.fontSizePx, 10),
     rowHeightMm: Math.min(current.rowHeightMm, 18),
+    imageSizeMm: Math.min(current.imageSizeMm, 16),
     signatureGapMm: Math.min(current.signatureGapMm, 10),
     signatureToBottom: true,
   });
+}
+
+/** ปรับขนาดรูป + ให้ความสูงแถวพอดีรูป (รูป + ขอบ 2mm — ค่าเริ่มต้น 22 → แถว 24 เหมือนเดิม) */
+export function withReportImageSize(input: Partial<ReportLayoutSettings>, imageSizeMm: number): ReportLayoutSettings {
+  const current = normalizeReportLayout(input);
+  const size = normalizeReportLayout({ ...current, imageSizeMm }).imageSizeMm;
+  return normalizeReportLayout({ ...current, imageSizeMm: size, rowHeightMm: size + 2 });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

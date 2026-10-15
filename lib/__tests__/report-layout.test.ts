@@ -6,6 +6,7 @@ import {
   normalizeReportLayout,
   prepareReportLayoutForSave,
   reportLayoutFromStoredValue,
+  withReportImageSize,
 } from "@/lib/report-layout";
 
 describe("report layout settings", () => {
@@ -34,6 +35,26 @@ describe("report layout settings", () => {
     expect(compact.fontSizePx).toBeLessThan(DEFAULT_REPORT_LAYOUT.fontSizePx);
     expect(compact.rowHeightMm).toBeLessThan(DEFAULT_REPORT_LAYOUT.rowHeightMm);
     expect(compact.signatureToBottom).toBe(true);
+  });
+
+  it("resizes product images and fits the row height to the image", () => {
+    expect(normalizeReportLayout({ imageSizeMm: 2 }).imageSizeMm).toBe(10);
+    expect(normalizeReportLayout({ imageSizeMm: 99 }).imageSizeMm).toBe(45);
+    expect(reportLayoutFromStoredValue({ topMarginMm: 5 }).imageSizeMm).toBe(DEFAULT_REPORT_LAYOUT.imageSizeMm);
+
+    const bigger = withReportImageSize(DEFAULT_REPORT_LAYOUT, 30);
+    expect(bigger.imageSizeMm).toBe(30);
+    expect(bigger.rowHeightMm).toBe(32);
+
+    const smaller = withReportImageSize(DEFAULT_REPORT_LAYOUT, 12);
+    expect(smaller.imageSizeMm).toBe(12);
+    expect(smaller.rowHeightMm).toBe(14);
+
+    const huge = withReportImageSize(DEFAULT_REPORT_LAYOUT, 80);
+    expect(huge.imageSizeMm).toBe(45);
+    expect(huge.rowHeightMm).toBe(36);
+
+    expect(compactReportLayout(DEFAULT_REPORT_LAYOUT).imageSizeMm).toBeLessThan(DEFAULT_REPORT_LAYOUT.imageSizeMm);
   });
 
   it("normalizes a stored report layout before using it", () => {

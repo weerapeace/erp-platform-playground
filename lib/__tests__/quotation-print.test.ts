@@ -111,6 +111,22 @@ describe("quotation print", () => {
     expect(html).not.toContain("center code");
   });
 
+  it("keeps the default image size and column widths unchanged", () => {
+    const html = buildQuotationHtml(quote, "");
+
+    expect(html).toContain("height: 22mm; object-fit: contain");
+    expect(html).toContain(`<col style="width: 29%">`);
+    expect(html).toContain(`<col style="width: 17%">`);
+  });
+
+  it("grows the image and its column when the image size is raised", () => {
+    const html = buildQuotationHtml(quote, "", { imageSizeMm: 33 });
+
+    expect(html).toContain("height: 33mm; object-fit: contain");
+    expect(html).toContain(`<col style="width: 25.5%">`);
+    expect(html).toContain(`<col style="width: 20.5%">`);
+  });
+
   it("hides all totals when showTotals is off but keeps line amounts and the note", () => {
     const html = buildQuotationHtml(quote, "", { showTotals: false });
 

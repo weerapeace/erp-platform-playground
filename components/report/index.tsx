@@ -5,6 +5,9 @@ import {
   compactReportLayout,
   DEFAULT_REPORT_LAYOUT,
   normalizeReportLayout,
+  REPORT_IMAGE_SIZE_MAX_MM,
+  REPORT_IMAGE_SIZE_MIN_MM,
+  withReportImageSize,
   type ReportLayoutSettings,
 } from "@/lib/report-layout";
 
@@ -474,6 +477,7 @@ export function ReportLayoutControls({
   const [signatureOpen, setSignatureOpen] = useState(false);
   const layout = normalizeReportLayout(value);
   const patch = (next: Partial<ReportLayoutSettings>) => onChange(normalizeReportLayout({ ...layout, ...next }));
+  const setImageSize = (mm: number) => onChange(withReportImageSize(layout, mm));
 
   return (
     <div className="no-print mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -520,6 +524,17 @@ export function ReportLayoutControls({
           <input type="checkbox" checked={!layout.showTotals} onChange={(e) => patch({ showTotals: !e.target.checked })} className="h-4 w-4 cursor-pointer" />
           ไม่รวมยอดทั้งหมด
         </label>
+        {layout.showImage && (
+          <div className={`flex h-9 items-center gap-1 rounded-lg border px-2 text-sm ${layout.imageSizeMm === DEFAULT_REPORT_LAYOUT.imageSizeMm ? "border-slate-200 bg-white text-slate-700" : "border-sky-300 bg-sky-50 text-sky-800"}`}
+            title="ขนาดรูปสินค้าในตาราง — แถวสูง/เตี้ยตามรูปอัตโนมัติ">
+            <span className="font-medium">ขนาดรูป</span>
+            <button type="button" onClick={() => setImageSize(layout.imageSizeMm - 2)} disabled={layout.imageSizeMm <= REPORT_IMAGE_SIZE_MIN_MM}
+              aria-label="ลดขนาดรูป" className="h-7 w-7 rounded text-base font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-30">−</button>
+            <span className="w-11 text-center font-mono text-xs">{layout.imageSizeMm}mm</span>
+            <button type="button" onClick={() => setImageSize(layout.imageSizeMm + 2)} disabled={layout.imageSizeMm >= REPORT_IMAGE_SIZE_MAX_MM}
+              aria-label="เพิ่มขนาดรูป" className="h-7 w-7 rounded text-base font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-30">+</button>
+          </div>
+        )}
         <div className={`flex h-9 items-center gap-1 rounded-lg border px-2 text-sm ${layout.sortBy === "none" ? "border-slate-200 bg-white text-slate-700" : "border-indigo-300 bg-indigo-50 text-indigo-800"}`}
           title="เรียงรายการเฉพาะตอนพิมพ์ — ลำดับในเอกสารจริงไม่เปลี่ยน">
           <span className="font-medium">เรียง</span>
@@ -570,6 +585,9 @@ export function ReportLayoutControls({
             <NumberControl label="ขอบล่าง" value={layout.bottomMarginMm} min={0} max={30} unit="mm" onChange={(bottomMarginMm) => patch({ bottomMarginMm })} />
             <NumberControl label="ตัวอักษร" value={layout.fontSizePx} min={8} max={14} unit="px" onChange={(fontSizePx) => patch({ fontSizePx })} />
             <NumberControl label="ความสูงแถว" value={layout.rowHeightMm} min={10} max={36} unit="mm" onChange={(rowHeightMm) => patch({ rowHeightMm })} />
+            {layout.showImage && (
+              <NumberControl label="ขนาดรูป" value={layout.imageSizeMm} min={REPORT_IMAGE_SIZE_MIN_MM} max={REPORT_IMAGE_SIZE_MAX_MM} unit="mm" onChange={setImageSize} />
+            )}
             <NumberControl label="ช่องลายเซ็น" value={layout.signatureGapMm} min={0} max={45} unit="mm" onChange={(signatureGapMm) => patch({ signatureGapMm })} />
           </div>
 
