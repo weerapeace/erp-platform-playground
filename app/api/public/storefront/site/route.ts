@@ -83,7 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 📐 เช็คขนาด: ตุ๊กตา/ของที่มีขนาด (ทะเบียน product_fit_items · ตุ๊กตาขึ้นก่อน) — ร้านไม่เปิด = ไม่ส่ง
   let fitTargets: FitTarget[] | undefined;
   if (info.fit_check_enabled) {
-    const { data: fr } = await sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order").eq("is_active", true).order("sort_order");
+    const { data: fr } = await sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order, image_key").eq("is_active", true).order("sort_order");
     const all = ((fr ?? []) as Parameters<typeof fitTargetOf>[0][]).map((r) => fitTargetOf(r)).filter((x): x is FitTarget => !!x);
     fitTargets = [...all.filter((t) => t.kind === "doll"), ...all.filter((t) => t.kind !== "doll")];
   }
@@ -105,7 +105,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      * เว็บร้านต้องวาดเมนูหมวดจากรายการนี้ ห้ามฝังไว้ในโค้ดเว็บ ไม่งั้นเพิ่มหมวดแล้วไม่ขึ้น
      */
     categories: normalizeFieldMap(s.field_map).categories,
-    /** 📐 ตุ๊กตา/ของที่มีขนาด (เฉพาะร้านที่เปิดเช็คขนาด) [{id,name,w,h,d,soft,estimated,kind}] — Section เช็คขนาดบนเว็บ (lib/fit-check) */
+    /** 📐 ตุ๊กตา/ของที่มีขนาด (เฉพาะร้านที่เปิดเช็คขนาด) [{id,name,w,h,d,soft,estimated,kind,imageKey?}] — Section เช็คขนาดบนเว็บ (lib/fit-check) */
     ...(fitTargets ? { fitTargets } : {}),
     /**
      * 📖 หน้าคอลเลกชัน (เปิดไว้ในแท็บ 🎞 คอลเลกชัน) [{id,slug,name,title,bannerKey,mobileBannerKey,story,seoTitle,seoDescription}] เรียงตามที่จัด

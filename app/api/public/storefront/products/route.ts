@@ -26,7 +26,7 @@ import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { productDimensions, fitLabels, type FitItem, type DimensionRow } from "@/lib/product-fits";
-import { fitTargetOf, parseCompartments, withFitLines, type FitTarget } from "@/lib/fit-check";
+import { fitNames, fitTargetOf, parseCompartments, withFitLines, type FitTarget } from "@/lib/fit-check";
 import { readFitCheckShops } from "@/lib/website-site-info";
 import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
@@ -250,6 +250,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         dimensions: withFitLines(productDimensions(p as unknown as DimensionRow & { fits?: unknown }, fitCatalog), fitOn ? parseCompartments((p as { compartments?: unknown }).compartments) : null, fitTargets),
         /** 📐 ช่องใส่ของ (ขนาดด้านใน ซม.) — เฉพาะร้านที่เปิดเช็คขนาด + รุ่นที่วัดแล้ว · Section "เช็คขนาด" ใช้คิดขนาดที่ลูกค้าพิมพ์เอง */
         fitBoxes: (() => { const c = fitOn ? parseCompartments((p as { compartments?: unknown }).compartments) : null; return c?.length ? c : undefined; })(),
+        /**
+         * 🧭 ตัวกรอง "ใส่อะไรได้": ชื่อที่คำนวณได้ (ไม่มีจำนวน — "Labubu" รวมเป็นตัวเลือกเดียว) + ที่ติ๊กเอง
+         * ส่งเฉพาะเมื่อมีของที่คำนวณได้ (ไม่มี = เว็บใช้ dimensions.fits ตามเดิม)
+         */
+        ...(() => {
+          const names = fitOn ? fitNames(parseCompartments((p as { compartments?: unknown }).compartments), fitTargets) : [];
+          return names.length ? { fitNames: names, fitManual: fitLabels((p as { fits?: unknown }).fits, fitCatalog) } : {};
+        })(),
         /** ✅ รายละเอียดเพิ่ม (ติ๊กใน Parent SKU) — เว็บต่อท้ายหัวข้อ "รายละเอียดสินค้า" เป็น "- ข้อความ" · ไม่มี = ไม่ส่ง */
         highlights: (() => { const h = fitLabels((p as { highlights?: unknown }).highlights, highlightCatalog); return h.length ? h : undefined; })(),
         images: r.images.map(imageUrl),

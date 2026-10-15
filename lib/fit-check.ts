@@ -35,6 +35,8 @@ export interface FitTarget {
   estimated?: boolean;
   /** doll = ตุ๊กตา/ฟิกเกอร์ (นับเป็น "ตัว") · item = ของใช้ (นับเป็น "ชิ้น") */
   kind?: "item" | "doll";
+  /** รูป (R2 key) — ปุ่มเลือกบนเว็บ · ว่าง = โชว์แค่ชื่อ */
+  imageKey?: string | null;
 }
 
 export type FitStatus = "roomy" | "snug";
@@ -150,7 +152,7 @@ export function fitReport(items: FitTarget[], comps: Compartment[]): { item: Fit
 /** แถว product_fit_items → ของที่คำนวณได้ (ขนาดไม่ครบ / ปิดใช้ = null) */
 export function fitTargetOf(row: {
   id: string; name: string; name_en?: string | null; width_cm?: unknown; height_cm?: unknown; depth_cm?: unknown;
-  is_soft?: unknown; size_estimated?: unknown; is_active?: unknown; kind?: unknown;
+  is_soft?: unknown; size_estimated?: unknown; is_active?: unknown; kind?: unknown; image_key?: unknown;
 }, lang: "th" | "en" = "th"): FitTarget | null {
   if (row.is_active === false) return null;
   const w = n(row.width_cm), h = n(row.height_cm), d = n(row.depth_cm);
@@ -162,7 +164,14 @@ export function fitTargetOf(row: {
     soft: row.is_soft === true,
     estimated: row.size_estimated === true,
     kind: row.kind === "doll" ? "doll" : "item",
+    ...(typeof row.image_key === "string" && row.image_key.trim() ? { imageKey: row.image_key.trim() } : {}),
   };
+}
+
+/** ชื่อของที่ใส่ได้ (ไม่มีจำนวน) — ตัวกรองหน้ารวมสินค้า "ใส่อะไรได้" (ชื่อเดียวกันรวมเป็นตัวเลือกเดียว) */
+export function fitNames(comps: Compartment[] | null, targets: FitTarget[]): string[] {
+  if (!comps?.length) return [];
+  return fitReport(targets, comps).flatMap((r) => (r.result ? [r.item.name] : []));
 }
 
 /** หน่วยนับ: ตุ๊กตา = ตัว · ของใช้ = ชิ้น */

@@ -90,7 +90,7 @@ type SearchHit = { id: string; code: string; name: string; price: number; imageK
 /** หมวดของร้าน — มาจาก API (ตั้งได้เองในแท็บ ⚙️ จับคู่ฟิลด์) */
 export type CategoryDef = { key: string; label: string; icon: string };
 
-type Filter = "all" | "pub" | "hide" | "feat" | "fix";
+type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit";
 const VIEWS = ["list", "grid"] as const;
 
 const baht = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH")}`;
@@ -157,7 +157,8 @@ export function WebsiteListingsPanel({
   const [filter, setFilter] = useState<Filter>("all");
   // ?filter=fix (จากป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") = เปิดตัวกรอง "⚠️ ต้องแก้"
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("filter") === "fix") setFilter("fix" as Filter);
+    const qf = new URLSearchParams(window.location.search).get("filter");
+    if (qf === "fix" || qf === "fit") setFilter(qf as Filter);
   }, []);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
@@ -194,6 +195,8 @@ export function WebsiteListingsPanel({
       hide: listings.filter((l) => !l.published).length,
       feat: listings.filter((l) => l.featured).length,
       fix: listings.filter((l) => (issuesById.get(l.parentId) ?? []).length > 0).length,
+      // 📐 รายงาน "ยังไม่วัดช่องใส่ของ" (ร้านเปิดเช็คขนาด · รุ่นที่ไม่ใช่กระเป๋ากด "ไม่มีช่องใส่ของ" แล้วไม่นับ)
+      fit: listings.filter((l) => l.display?.compartmentsMissing).length,
     }),
     [listings, issuesById]
   );
@@ -204,6 +207,7 @@ export function WebsiteListingsPanel({
       if (filter === "hide" && l.published) return false;
       if (filter === "feat" && !l.featured) return false;
       if (filter === "fix" && !(issuesById.get(l.parentId) ?? []).length) return false;
+      if (filter === "fit" && !l.display?.compartmentsMissing) return false;
       if (cat === "__none" ? (l.categories ?? []).length > 0 : cat && !(l.categories ?? []).includes(cat)) return false;
       if (term && !`${shownName(l)} ${l.erpName} ${l.code}`.toLowerCase().includes(term)) return false;
       return true;
@@ -347,6 +351,8 @@ export function WebsiteListingsPanel({
     { k: "hide", label: "ซ่อนอยู่" },
     { k: "feat", label: "⭐ แนะนำ" },
     { k: "fix", label: "⚠️ ต้องแก้", warn: true },
+    // 📐 โผล่เมื่อร้านเปิดเช็คขนาดและยังมีรุ่นที่ไม่ได้วัด (วัดครบ = หายไปเอง)
+    ...(counts.fit > 0 || filter === "fit" ? [{ k: "fit" as Filter, label: "📐 ยังไม่วัดช่อง", warn: true }] : []),
   ];
 
   const priceText = (l: Listing) => (shownPrice(l) > 0 ? `${l.display?.priceVaries ? "เริ่ม " : ""}${baht(shownPrice(l))}` : "—");

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bestFit, compartmentsProblem, fitInto, fitLabel, fitReport, fitTargetOf, fitText, parseCompartments, withFitLines, type Compartment, type FitTarget } from "../fit-check";
+import { bestFit, compartmentsProblem, fitInto, fitLabel, fitNames, fitReport, fitTargetOf, fitText, parseCompartments, withFitLines, type Compartment, type FitTarget } from "../fit-check";
 
 /** 📐 ใส่ได้ไหม / กี่ชิ้น — ตอบลูกค้าตรง ๆ จึงต้องถูกเสมอ */
 const labubu: FitTarget = { id: "l", name: "Labubu", w: 9.5, h: 17, d: 7, soft: true };
@@ -75,5 +75,17 @@ describe("บรรทัดใส่ได้ในหัวข้อขนา�
     expect(withFitLines(undefined, [main], [lab])).toEqual({ fits: ["Labubu ประมาณ 2 ตัว"], rows: [] });
     expect(withFitLines(undefined, null, [lab])).toBeUndefined();
     expect(withFitLines(undefined, [front], [big])).toBeUndefined();
+  });
+});
+
+describe("ตัวกรองหน้ารวมสินค้า + รูป", () => {
+  it("ชื่อที่ใส่ได้ (ไม่มีจำนวน) · ไม่วัด = []", () => {
+    const big: FitTarget = { id: "z", name: "ตุ๊กตา 30", w: 18, h: 30, d: 12, soft: true };
+    expect(fitNames([main, front], [labubu, figure, big])).toEqual(["Labubu", "ฟิกเกอร์"]);
+    expect(fitNames(null, [labubu])).toEqual([]);
+  });
+  it("รูปจากทะเบียน (ว่าง = ไม่ใส่)", () => {
+    expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, image_key: " dolls/a.png " })?.imageKey).toBe("dolls/a.png");
+    expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, image_key: "" })).not.toHaveProperty("imageKey");
   });
 });
