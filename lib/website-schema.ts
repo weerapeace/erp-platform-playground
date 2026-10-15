@@ -63,7 +63,9 @@ export type FieldType =
   | "category" // หมวดสินค้าบนเว็บของร้าน (key)
   | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
-  | "code"; // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
+  | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
+  | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
+  | "point"; // จุดบนรูป { x, y } เป็น % — คลิกบนรูปเพื่อวาง · ต้องตั้ง pointImage
 
 export type FieldGroup = "content" | "media" | "action" | "layout" | "products";
 
@@ -119,6 +121,8 @@ export interface FieldDef {
   cropRatio?: string;
   /** ช่องชนิด crop: สัดส่วนกรอบตายตัว (ไม่มีช่องสัดส่วน เช่น แบนเนอร์เต็มจอ ≈ "16:7") — ใช้เมื่อไม่ได้ตั้ง cropRatio */
   cropBox?: string;
+  /** ช่องชนิด point: key ของรูปใน Section แม่ (หรือชิ้นเดียวกัน) ที่ใช้คลิกวางจุด เช่น "imageKey" */
+  pointImage?: string;
 }
 
 export interface ShowIf {
@@ -205,6 +209,12 @@ const PRODUCT_LAYOUTS: FieldOption[] = [
   { v: "rank", l: "อันดับขายดี", sketch: "rank", hint: "เลขอันดับ 01–05 ตัวใหญ่" },
   { v: "tabs", l: "แท็บตามหมวด", sketch: "tabs", hint: "กดแท็บสลับหมวด" },
   { v: "banner", l: "แบนเนอร์ + สินค้า", sketch: "banner", hint: "รูปแคมเปญ + สินค้าข้างกัน" },
+];
+
+/** 🛍 ลุคบุ๊กกดซื้อได้ — เว็บร้านวาดที่ src/components/home/LookbookBody.tsx */
+const LOOKBOOK_LAYOUTS: FieldOption[] = [
+  { v: "side", l: "รูป + การ์ดสินค้าข้าง", sketch: "lb-side", hint: "กดจุด → การ์ดข้างเปลี่ยน" },
+  { v: "pop", l: "รูปเต็ม + ป๊อปที่จุด", sketch: "lb-pop", hint: "กดจุด → การ์ดเด้งตรงจุด" },
 ];
 
 /** ❓ รูปแบบของ Section คำถามที่พบบ่อย — เว็บร้านวาดที่ src/components/home/FaqSection.tsx */
@@ -841,6 +851,188 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         .map((c) => s(c.title))
         .filter(Boolean)
         .join(" / ") || "2 การ์ด",
+  },
+
+  // 🕰 ไทม์ไลน์ / เรื่องราวแบรนด์ (2026-10-15) — เว็บร้าน: src/components/home/TimelineSection.tsx
+  timeline: {
+    type: "timeline",
+    meta: { label: "ไทม์ไลน์ / เรื่องราวแบรนด์", icon: "🕰", hint: "ปี + เรื่องราว + รูป ตามลำดับเวลา", group: "เนื้อหา" },
+    fields: [
+      ...headFields({ eyebrow: "เรื่องราวของเรา", title: "จากวันแรก ถึงวันนี้", subtitle: true }),
+      f("layout", "รูปแบบ", "select", {
+        group: "layout",
+        default: "line",
+        options: [
+          { v: "line", l: "แนวนอน (เส้นเวลา)" },
+          { v: "zigzag", l: "แนวตั้งสลับซ้าย-ขวา (มีรูป)" },
+          { v: "cards", l: "การ์ดเลื่อนข้าง" },
+        ],
+      }),
+      f("imageRatio", "สัดส่วนรูป", "select", {
+        group: "layout",
+        default: "4:3",
+        options: [
+          { v: "1:1", l: "จัตุรัส 1:1" },
+          { v: "4:3", l: "แนวนอน 4:3" },
+          { v: "3:4", l: "แนวตั้ง 3:4" },
+          { v: "16:9", l: "แนวนอนกว้าง 16:9" },
+        ],
+        showIf: { key: "layout", eq: ["zigzag", "cards"] },
+      }),
+    ],
+    children: {
+      key: "items",
+      label: "ช่วงเวลา",
+      itemLabel: "ช่วง",
+      icon: "📍",
+      max: 20,
+      fields: [
+        text("year", "ปี / ช่วงเวลา", { default: "1996", max: 30, placeholder: "เช่น 1996 หรือ 2010–2015" }),
+        text("title", "หัวข้อ", { default: "", max: 120, wide: true }),
+        area("text", "เรื่องราว", { default: "", max: 600 }),
+        image("imageKey", "รูป (ถ้ามี)"),
+      ],
+      summary: (it) => [s(it.year), s(it.title)].filter(Boolean).join(" · ") || "ช่วงเวลา",
+    },
+    summary: (b) => count(arr(b.items).length, "ช่วง"),
+    validate: (b, label) => (!arr(b.items).some((i) => s(i.year) || s(i.title)) ? [{ level: "warning", message: `${label}: ยังไม่มีช่วงเวลา` }] : []),
+  },
+
+  // ⏳ นับถอยหลังแคมเปญ (2026-10-15) — เว็บร้าน: src/components/home/CountdownSection.tsx (นับในเบราว์เซอร์ · เวลาไทย)
+  countdown: {
+    type: "countdown",
+    meta: { label: "นับถอยหลังแคมเปญ", icon: "⏳", hint: "เปิดตัวคอลเลกชัน / Flash sale", group: "เนื้อหา" },
+    fields: [
+      text("eyebrow", "คำโปรยเหนือหัวข้อ", { default: "NEW COLLECTION", max: 80 }),
+      text("title", "หัวข้อ", { default: "คอลเลกชันใหม่ เปิดตัวใน", max: 160, wide: true }),
+      area("subtitle", "คำอธิบาย", { default: "", max: 300 }),
+      f("endAt", "นับถอยหลังถึง (เวลาไทย)", "datetime", { default: "", wide: true, required: true, requiredMessage: "ยังไม่ได้ตั้งเวลาที่นับถอยหลังถึง" }),
+      link("cta", "ปุ่ม", "ดูคอลเลกชัน", "/shop"),
+      f("afterEnd", "ครบเวลาแล้ว", "select", {
+        group: "layout",
+        default: "message",
+        options: [
+          { v: "message", l: "เปลี่ยนเป็นข้อความ" },
+          { v: "hide", l: "ซ่อนทั้งแถบ" },
+        ],
+      }),
+      text("endedTitle", "ข้อความหลังครบเวลา", { default: "เปิดตัวแล้ว! ช้อปได้เลย", max: 160, wide: true, showIf: { key: "afterEnd", eq: "message" } }),
+      f("layout", "รูปแบบ", "select", {
+        group: "layout",
+        default: "bar",
+        options: [
+          { v: "bar", l: "แถบ (หัวข้อซ้าย · เวลาขวา)" },
+          { v: "center", l: "กึ่งกลาง ตัวเลขใหญ่" },
+        ],
+      }),
+      f("tone", "โทนสี", "select", {
+        group: "layout",
+        default: "dark",
+        options: [
+          { v: "dark", l: "เข้ม (ตัวหนังสือขาว)" },
+          { v: "light", l: "อ่อน" },
+          { v: "brand", l: "สีแบรนด์" },
+        ],
+      }),
+      f("showDays", "โชว์ช่อง วัน", "toggle", { group: "layout", default: true }),
+    ],
+    summary: (b) => (s(b.endAt) ? `ถึง ${s(b.endAt).replace("T", " ")}` : "ยังไม่ตั้งเวลา"),
+  },
+
+  // 🛍 ลุคบุ๊กกดซื้อได้ (2026-10-15) — เว็บร้าน: src/components/home/LookbookBody.tsx (วาดสดในพรีวิวด้วยข้อมูลสินค้า)
+  lookbook: {
+    type: "lookbook",
+    meta: { label: "ลุคบุ๊กกดซื้อได้", icon: "🛍", hint: "รูปนายแบบ + จุดกดดูสินค้า", group: "สินค้า" },
+    fields: [
+      ...headFields({ eyebrow: "Shop the look", title: "", subtitle: true }),
+      image("imageKey", "รูปลุค", { required: true, requiredMessage: "ยังไม่ได้เลือกรูปลุค", hint: "รูปนายแบบ/ไลฟ์สไตล์ · โชว์เต็มรูปไม่ตัด · วางจุดในแต่ละ \"จุดบนรูป\" ด้านล่าง" }),
+      f("layout", "รูปแบบ", "select", { group: "layout", default: "side", wide: true, display: "tiles", options: LOOKBOOK_LAYOUTS }),
+      f("side", "รูปอยู่ด้าน", "select", {
+        group: "layout",
+        default: "left",
+        options: [
+          { v: "left", l: "ซ้าย" },
+          { v: "right", l: "ขวา" },
+        ],
+        showIf: { key: "layout", eq: "side" },
+      }),
+      f("dot", "หน้าตาจุด", "select", {
+        group: "layout",
+        default: "dot",
+        options: [
+          { v: "dot", l: "วงกลม" },
+          { v: "plus", l: "เครื่องหมาย +" },
+          { v: "num", l: "ตัวเลข 1 2 3" },
+        ],
+      }),
+      f("showList", "การ์ดสินค้าทุกจุดใต้รูป", "toggle", { group: "layout", default: false, hint: "เรียงสินค้าทุกจุดไว้ใต้รูปด้วย (ลูกค้าเห็นครบโดยไม่ต้องกดจุด)" }),
+    ],
+    children: {
+      key: "spots",
+      label: "จุดบนรูป",
+      itemLabel: "จุด",
+      icon: "📍",
+      max: 12,
+      fields: [
+        f("code", "สินค้าของจุดนี้", "products", { max: 1, wide: true }),
+        f("pos", "ตำแหน่งบนรูป", "point", { pointImage: "imageKey", wide: true }),
+      ],
+      summary: (it) => (Array.isArray(it.code) && it.code.length ? String(it.code[0]) : "ยังไม่เลือกสินค้า"),
+    },
+    summary: (b) => count(arr(b.spots).length, "จุด"),
+    validate: (b, label) => (arr(b.spots).some((x) => !(Array.isArray(x.code) && x.code.length)) ? [{ level: "warning", message: `${label}: บางจุดยังไม่เลือกสินค้า` }] : []),
+  },
+
+  // 📰 โลโก้สื่อ / พาร์ตเนอร์ (2026-10-15) — เว็บร้าน: src/components/home/LogosSection.tsx
+  logos: {
+    type: "logos",
+    meta: { label: "โลโก้สื่อ / พาร์ตเนอร์", icon: "📰", hint: "As seen in · ร้านค้าที่ขาย · พาร์ตเนอร์", group: "เนื้อหา" },
+    fields: [
+      text("eyebrow", "คำโปรยเหนือหัวข้อ", { default: "", max: 80 }),
+      text("title", "หัวข้อ", { default: "As seen in", max: 120, wide: true }),
+      f("layout", "รูปแบบ", "select", {
+        group: "layout",
+        default: "row",
+        options: [
+          { v: "row", l: "แถวเรียงกลาง" },
+          { v: "marquee", l: "เลื่อนวนไม่หยุด" },
+        ],
+      }),
+      f("size", "ขนาดโลโก้", "select", {
+        group: "layout",
+        default: "m",
+        options: [
+          { v: "s", l: "เล็ก" },
+          { v: "m", l: "กลาง" },
+          { v: "l", l: "ใหญ่" },
+        ],
+      }),
+      f("speed", "ความเร็วเลื่อน", "select", {
+        group: "layout",
+        default: "normal",
+        options: [
+          { v: "slow", l: "ช้า" },
+          { v: "normal", l: "ปกติ" },
+          { v: "fast", l: "เร็ว" },
+        ],
+        showIf: { key: "layout", eq: "marquee" },
+      }),
+      f("mono", "โลโก้สีเทา (ชี้แล้วเป็นสีจริง)", "toggle", { group: "layout", default: true }),
+    ],
+    children: {
+      key: "items",
+      label: "โลโก้",
+      itemLabel: "โลโก้",
+      icon: "🏷",
+      max: 24,
+      fields: [
+        image("imageKey", "รูปโลโก้", { hint: "PNG พื้นใส / SVG แนะนำ" }),
+        text("name", "ชื่อ (ใช้แทนเมื่อไม่มีรูป)", { default: "", max: 60 }),
+        f("href", "กดแล้วไปที่", "target", { default: "" }),
+      ],
+      summary: (it) => s(it.name) || (it.imageKey ? "โลโก้" : "ยังไม่มีรูป"),
+    },
+    summary: (b) => count(arr(b.items).length, "โลโก้"),
   },
 
   // ❓ ปรับละเอียด (2026-10-15): รูปแบบ 4 แบบ · หน้าตาแต่ละข้อ · ไอคอน · เลขข้อ · กางตอนเปิดหน้า · หลายข้อพร้อมกัน · ขนาดคำถาม
@@ -1508,6 +1700,8 @@ export function defaultForType(t: FieldType): unknown {
       return [];
     case "crop":
       return { x: 50, y: 50, zoom: 100 };
+    case "point":
+      return { x: 50, y: 50 };
     default:
       return "";
   }

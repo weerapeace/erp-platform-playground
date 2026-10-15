@@ -15,6 +15,7 @@ import { ImageUploadField } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { LinkTargetPicker } from "@/components/website-link-picker";
+import { ERPDateTime24 } from "@/components/form";
 import { FIELD_GROUP_LABEL, matchShowIf, type FieldDef, type FieldGroup } from "@/lib/website-schema";
 
 export interface SchemaFormContext {
@@ -52,6 +53,9 @@ const SKETCHES: Record<string, { cols: number; rows: number; cells: Cell[] }> = 
   tabs: { cols: 4, rows: 3, cells: [{ c: 1, r: 1, h: 45, dark: true }, { c: 2, r: 1, h: 45, dim: true }, { c: 3, r: 1, h: 45, dim: true }, ...[1, 2, 3, 4].map((c) => ({ c, r: 2, rs: 2 }))] },
   banner: { cols: 4, rows: 1, cells: [{ c: 1, r: 1, cs: 2, dark: true }, { c: 3, r: 1 }, { c: 4, r: 1 }] },
   /* ❓ คำถามที่พบบ่อย: เข้ม = หัวข้อ · แถบบาง = คำถาม */
+  /* 🛍 ลุคบุ๊ก: เข้ม = รูปนายแบบ · อ่อน = การ์ดสินค้า */
+  "lb-side": { cols: 5, rows: 3, cells: [{ c: 1, r: 1, cs: 3, rs: 3, dark: true }, { c: 4, r: 1, cs: 2, rs: 2 }, { c: 4, r: 3, cs: 2, h: 45 }] },
+  "lb-pop": { cols: 5, rows: 3, cells: [{ c: 1, r: 1, cs: 5, rs: 3, dark: true }, { c: 3, r: 2, cs: 2, rs: 1 }] },
   "faq-side": { cols: 5, rows: 4, cells: [{ c: 1, r: 1, cs: 2, h: 70, dark: true }, { c: 1, r: 2, cs: 2, h: 40, dim: true }, ...[1, 2, 3, 4].map((r) => ({ c: 3, r, cs: 3, h: 45 }))] },
   "faq-center": { cols: 5, rows: 4, cells: [{ c: 2, r: 1, cs: 3, h: 70, dark: true }, ...[2, 3, 4].map((r) => ({ c: 2, r, cs: 3, h: 45 }))] },
   "faq-two": { cols: 4, rows: 4, cells: [{ c: 2, r: 1, cs: 2, h: 70, dark: true }, ...[2, 3, 4].flatMap((r) => [{ c: 1, r, cs: 2, h: 45 }, { c: 3, r, cs: 2, h: 45 }])] },
@@ -139,6 +143,36 @@ function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value:
   );
 }
 
+/** 📍 จุดบนรูป (ช่องชนิด point) — คลิกบนรูปของ Section แม่ (pointImage) เพื่อวางจุด · เก็บเป็น % */
+function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value: unknown; onChange: (v: unknown) => void; item?: Record<string, unknown>; parent?: Record<string, unknown> }) {
+  const key = fd.pointImage ? parent?.[fd.pointImage] ?? item?.[fd.pointImage] : null;
+  const o = (value ?? {}) as Record<string, unknown>;
+  const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50) };
+  if (typeof key !== "string" || !key) return <Field label={fd.label} wide><p className="text-xs text-slate-400">เลือกรูปของ Section ก่อน แล้วค่อยคลิกวางจุด</p></Field>;
+  const pick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const round = (n: number) => Math.max(0, Math.min(100, Math.round(n * 10) / 10));
+    onChange({ x: round(((e.clientX - r.left) / r.width) * 100), y: round(((e.clientY - r.top) / r.height) * 100) });
+  };
+  return (
+    <Field label={fd.label} hint="คลิกบนรูปตรงตำแหน่งสินค้า = วางจุด (คลิกใหม่เพื่อย้าย)" wide>
+      <div className="relative inline-block max-w-full cursor-crosshair select-none rounded-lg overflow-hidden border border-slate-200" onClick={pick}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=800`} alt="" className="block max-h-72 w-auto max-w-full" draggable={false} />
+        <span
+          className="absolute w-6 h-6 -ml-3 -mt-3 rounded-full bg-white border-2 border-slate-900 shadow flex items-center justify-center pointer-events-none"
+          style={{ left: `${v.x}%`, top: `${v.y}%` }}
+        >
+          <span className="w-2 h-2 rounded-full bg-slate-900" />
+        </span>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1">
+        ตำแหน่ง: ซ้าย {v.x}% · บน {v.y}%
+      </p>
+    </Field>
+  );
+}
+
 /** ช่องเดียวตาม schema */
 export function SchemaField({
   fd,
@@ -158,6 +192,13 @@ export function SchemaField({
   parent?: Record<string, unknown>;
 }) {
   if (fd.type === "crop") return <CropField fd={fd} value={value} onChange={onChange} item={item} parent={parent} />;
+  if (fd.type === "point") return <PointField fd={fd} value={value} onChange={onChange} item={item} parent={parent} />;
+  if (fd.type === "datetime")
+    return (
+      <Field label={fd.label} hint={fd.hint ?? "เวลาไทย · พิมพ์เวลาแบบ 24 ชม. เช่น 20:00"} wide={fd.wide}>
+        <ERPDateTime24 value={typeof value === "string" ? value : ""} onChange={(v) => onChange(v)} defaultTime="00:00" />
+      </Field>
+    );
   const s = typeof value === "string" ? value : value == null ? "" : String(value);
   switch (fd.type) {
     case "text":

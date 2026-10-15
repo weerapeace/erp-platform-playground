@@ -55,7 +55,11 @@ export type BlockType =
   | "spotlight"
   | "stats"
   | "personalize"
-  | "canvas";
+  | "canvas"
+  | "timeline"
+  | "countdown"
+  | "lookbook"
+  | "logos";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -283,6 +287,55 @@ export interface ProductsBlock extends BlockBase {
   more: CtaLink;
 }
 
+/** 🕰 ไทม์ไลน์ / เรื่องราวแบรนด์ */
+export interface TimelineBlock extends BlockBase {
+  type: "timeline";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  layout: "line" | "zigzag" | "cards";
+  imageRatio: "1:1" | "4:3" | "3:4" | "16:9";
+  items: (ChildBase & { year: string; title: string; text: string; imageKey: string | null })[];
+}
+/** ⏳ นับถอยหลังแคมเปญ — endAt = เวลาไทย "YYYY-MM-DDTHH:mm" */
+export interface CountdownBlock extends BlockBase {
+  type: "countdown";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  endAt: string;
+  cta: CtaLink;
+  afterEnd: "message" | "hide";
+  endedTitle: string;
+  layout: "bar" | "center";
+  tone: "dark" | "light" | "brand";
+  showDays: boolean;
+}
+/** 🛍 ลุคบุ๊กกดซื้อได้ — spots[].pos = % บนรูป */
+export interface LookbookBlock extends BlockBase {
+  type: "lookbook";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  imageKey: string | null;
+  layout: "side" | "pop";
+  side: "left" | "right";
+  dot: "dot" | "plus" | "num";
+  showList: boolean;
+  spots: (ChildBase & { code: string[]; pos: { x: number; y: number } })[];
+}
+/** 📰 โลโก้สื่อ / พาร์ตเนอร์ */
+export interface LogosBlock extends BlockBase {
+  type: "logos";
+  eyebrow: string;
+  title: string;
+  layout: "row" | "marquee";
+  size: "s" | "m" | "l";
+  speed: "slow" | "normal" | "fast";
+  mono: boolean;
+  items: (ChildBase & { imageKey: string | null; name: string; href: string })[];
+}
+
 export interface FaqBlock extends BlockBase {
   type: "faq";
   eyebrow: string;
@@ -483,6 +536,10 @@ export type Block =
   | FeaturedBlock
   | ProductsBlock
   | FaqBlock
+  | TimelineBlock
+  | CountdownBlock
+  | LookbookBlock
+  | LogosBlock
   | CtaBlock
   | RichTextBlock
   | ImageBlock
@@ -699,6 +756,15 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
     case "categories":
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c, 40).toLowerCase()).filter(Boolean))].slice(0, fd.max ?? 40) : [];
+    case "datetime":
+      // วันเวลาไทย "YYYY-MM-DDTHH:mm" — รูปแบบอื่น = ว่าง
+      return typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v.trim()) ? v.trim() : "";
+    case "point": {
+      // จุดบนรูป { x, y } เป็น % (ทศนิยม 1 ตำแหน่ง) — ค่าแปลก ๆ = กลางรูป
+      const o = (v ?? {}) as Record<string, unknown>;
+      const n = (x: unknown) => (Number.isFinite(Number(x)) && x !== null && x !== "" ? Math.max(0, Math.min(100, Math.round(Number(x) * 10) / 10)) : 50);
+      return { x: n(o.x), y: n(o.y) };
+    }
     case "crop": {
       // ส่วนที่เห็นของรูป { x, y (0–100 %), zoom (100–300 %) } — ค่าแปลก ๆ = กลางรูป ไม่ซูม
       const o = (v ?? {}) as Record<string, unknown>;
