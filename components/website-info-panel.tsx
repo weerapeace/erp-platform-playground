@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
 
 type FieldDef = {
   key: string;
@@ -38,6 +39,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
   const [prefix, setPrefix] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [cardsOpen, setCardsOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,6 +123,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       </div>
 
       <SubscribersCard shopSlug={shopSlug} />
+      <GiftCardsEditor open={cardsOpen} onClose={() => setCardsOpen(false)} shopSlug={shopSlug} shopId={shopId} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         {groups.map((g) => {
@@ -135,6 +138,14 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
                   <Field key={f.key} f={f} value={info[f.key]} onChange={(v) => set(f.key, v)} />
                 ))}
               </div>
+              {g.key === "gift" && (
+                <div className="mt-3 rounded-lg bg-pink-50 px-3 py-2 flex flex-wrap items-center gap-2">
+                  <p className="flex-1 min-w-[12rem] text-[11px] text-pink-800">🎴 การ์ดของขวัญ: ลายการ์ดของร้าน · ขนาด · โอกาส + ไอเดียข้อความ (ใช้เมื่อเปิด &quot;ให้ลูกค้าเขียนข้อความบนการ์ด&quot;)</p>
+                  <button type="button" onClick={() => setCardsOpen(true)} className="px-3 py-1.5 rounded-lg border border-pink-300 bg-white text-xs text-pink-700 hover:bg-pink-100">
+                    ⚙ ตั้งค่าการ์ด
+                  </button>
+                </div>
+              )}
               {g.key === "order" && (
                 <p className="text-[11px] text-slate-500 mt-3 rounded-lg bg-slate-50 px-3 py-2">
                   เลขที่ออเดอร์ของร้านนี้จะขึ้นต้นด้วย <span className="font-mono font-semibold text-slate-800">{prefix}-</span>{" "}

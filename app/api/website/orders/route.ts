@@ -38,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_message, gift_hide_price, customer_id, grand_total, note, created_at, erp_so_number"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
@@ -100,12 +100,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string };
+  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown } };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
+  // 🎴 ติ๊ก/เอาติ๊ก "พิมพ์การ์ดแล้ว" หลายออเดอร์พร้อมกัน (หน้า /print/gift-cards) — เก็บใน gift_card.printedAt/printedBy
+  if (body.cardPrinted) return markCardsPrinted(body.cardPrinted, user?.id ?? null, user?.email ?? null);
   if (!body.orderId) return NextResponse.json({ error: "ต้องระบุ orderId" }, { status: 400 });
 
   const patch: Record<string, unknown> = {};
@@ -155,4 +157,31 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   if (points === null) return NextResponse.json({ ok: true, warning: "เปลี่ยนสถานะแล้ว แต่ปรับแต้มสมาชิกไม่สำเร็จ — ลองเปลี่ยนสถานะอีกครั้ง หรือปรับแต้มเองที่แท็บ 👥 สมาชิก" });
   return NextResponse.json({ ok: true, points });
+}
+
+/** 🎴 ติ๊กว่าพิมพ์การ์ดแล้ว (printed=true) หรือเอาติ๊กออก — เฉพาะออเดอร์ที่มีการ์ด · audit ทีละใบ */
+async function markCardsPrinted(raw: { orderIds?: unknown; printed?: unknown }, actorId: string | null, actorName: string | null): Promise<NextResponse> {
+  const ids = (Array.isArray(raw.orderIds) ? raw.orderIds : []).filter((x): x is string => typeof x === "string").slice(0, 200);
+  if (!ids.length) return NextResponse.json({ error: "ต้องระบุออเดอร์" }, { status: 400 });
+  const printed = raw.printed !== false;
+  const sb = supabaseAdmin();
+  const { data } = await sb.from("store_orders").select("id, shop_id, order_no, gift_card").in("id", ids);
+  const rows = ((data ?? []) as { id: string; shop_id: string; order_no: string; gift_card: unknown }[]).filter((r) => r.gift_card && typeof r.gift_card === "object");
+  const at = new Date().toISOString();
+  let done = 0;
+  for (const r of rows) {
+    const card = { ...(r.gift_card as Record<string, unknown>), printedAt: printed ? at : null, printedBy: printed ? actorName : null };
+    const { error } = await sb.from("store_orders").update({ gift_card: card }).eq("id", r.id);
+    if (error) continue;
+    done++;
+    await writeAudit(sb, {
+      action: "update",
+      entityType: "store_orders",
+      entityId: r.id,
+      actorId,
+      actorName,
+      metadata: { orderNo: r.order_no, shopId: r.shop_id, giftCardPrinted: printed },
+    });
+  }
+  return NextResponse.json({ ok: true, updated: done });
 }

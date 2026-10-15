@@ -15,6 +15,8 @@ import { useToast } from "@/components/toast";
 import { MiniTable } from "@/components/mini-table";
 import { ERPModal } from "@/components/modal";
 import { CopyButton } from "@/components/copy-button";
+import { GiftCardPreview } from "@/components/website-gift-cards-editor";
+import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type OrderGiftCard } from "@/lib/website-gift-cards";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -39,6 +41,7 @@ type Order = {
   giftFee?: number;
   giftMessage?: string;
   giftHidePrice?: boolean;
+  giftCard?: OrderGiftCard | null;
   isMember?: boolean;
   grandTotal: number;
   note: string;
@@ -125,6 +128,16 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   };
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  // 🎴 การ์ดที่รอพิมพ์ (ในรายการที่โหลดอยู่) + ตั้งค่าการ์ดของร้าน (โหลดเมื่อเปิดออเดอร์ที่มีการ์ด — ไว้วาดพรีวิว)
+  const cardsWaiting = orders.filter((o) => o.giftCard && !o.giftCard.printedAt && o.status !== "cancelled").length;
+  const [cardCfg, setCardCfg] = useState<GiftCardConfig | null>(null);
+  useEffect(() => {
+    if (!open?.giftCard || cardCfg) return;
+    apiFetch(`/api/website/gift-cards?shop=${encodeURIComponent(shopSlug)}`)
+      .then((r) => r.json())
+      .then((j) => j.config && setCardCfg(normalizeGiftCards(j.config)))
+      .catch(() => {});
+  }, [open?.giftCard, cardCfg, shopSlug]);
 
   return (
     <div className="space-y-3">
@@ -138,7 +151,12 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
             {s.label} <span className="opacity-60">{counts[s.key] ?? 0}</span>
           </Chip>
         ))}
-        <button onClick={() => void load()} className="ml-auto text-xs text-slate-500 hover:text-blue-600 px-2 py-1">
+        {cardsWaiting > 0 && (
+          <a href={`/print/gift-cards?shop=${encodeURIComponent(shopSlug)}`} target="_blank" rel="noopener" className="ml-auto text-xs px-2.5 py-1 rounded-full border border-pink-300 bg-pink-50 text-pink-700 hover:bg-pink-100">
+            🎴 พิมพ์การ์ดที่รอ ({cardsWaiting})
+          </a>
+        )}
+        <button onClick={() => void load()} className={`${cardsWaiting > 0 ? "" : "ml-auto "}text-xs text-slate-500 hover:text-blue-600 px-2 py-1`}>
           ↻ รีเฟรช
         </button>
       </div>
@@ -167,7 +185,11 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 <div>
                   <p className="font-mono text-xs font-semibold text-slate-800">{o.orderNo}</p>
                   <p className="text-[11px] text-slate-400">{when(o.createdAt)}</p>
-                  {o.giftWrap && <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200">🎀 ต้องห่อของขวัญ</span>}
+                  {o.giftWrap && (
+                    <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200">
+                      🎀 ต้องห่อของขวัญ{o.giftCard ? (o.giftCard.printedAt ? " · การ์ดพิมพ์แล้ว" : " · 🎴 รอพิมพ์การ์ด") : ""}
+                    </span>
+                  )}
                 </div>
               ),
               sortValue: (o) => o.createdAt,
@@ -270,6 +292,28 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                       </div>
                     ) : (
                       <p className="text-pink-700/80">ไม่มีข้อความบนการ์ด</p>
+                    )}
+                    {open.giftCard && (
+                      <div className="pt-1 space-y-1.5">
+                        {cardCfg && (
+                          <GiftCardPreview
+                            cfg={cardCfg}
+                            design={cardCfg.designs.find((d) => d.id === open.giftCard!.design) ?? cardCfg.designs[0] ?? DEFAULT_GIFT_DESIGN}
+                            to={open.giftCard.to}
+                            from={open.giftCard.anon ? "" : open.giftCard.from}
+                            message={open.giftMessage ?? ""}
+                            font={open.giftCard.font}
+                            className="max-w-[260px]"
+                          />
+                        )}
+                        <p className="text-pink-700/90">
+                          🎴 ถึง {open.giftCard.to || "—"} · จาก {open.giftCard.anon ? "ไม่ระบุชื่อ" : open.giftCard.from || "—"}
+                          {open.giftCard.printedAt ? ` · พิมพ์แล้ว ${when(open.giftCard.printedAt)}` : " · ยังไม่ได้พิมพ์"}
+                        </p>
+                        <a href={`/print/gift-cards?shop=${encodeURIComponent(shopSlug)}&ids=${open.id}`} target="_blank" rel="noopener" className="inline-block rounded-md border border-pink-300 bg-white px-2.5 py-1 text-pink-700 hover:bg-pink-100">
+                          🖨 พิมพ์การ์ดใบนี้
+                        </a>
+                      </div>
                     )}
                   </div>
                 )}

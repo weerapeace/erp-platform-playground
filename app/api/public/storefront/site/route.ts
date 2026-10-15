@@ -14,6 +14,7 @@ import { loadParentWebFields } from "@/lib/website-parent-fields";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
 import { fitTargetOf, type FitTarget } from "@/lib/fit-check";
+import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { couponLabel, evaluateCoupon } from "@/lib/website-coupons";
 import { couponUsage, loadCouponByCode } from "@/lib/website-coupons-db";
 
@@ -128,6 +129,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      * 🎨 โทนสี (ของกลางทุกร้าน) [{key,name,hex}] เรียงตามที่จัด — ปุ่ม "กรองตามสี" ในหน้าสินค้า
      * สินค้าแต่ละตัวบอกโทนของแต่ละสีเองใน products API (options.items[].tones) · เว็บโชว์เฉพาะโทนที่มีสินค้า
      */
+    /**
+     * 🎴 การ์ดของขวัญ (ร้านเปิดห่อของขวัญ + ให้เขียนการ์ด) — ขนาด/ลายที่เปิด/โอกาส+ไอเดียข้อความ · ปิด = null
+     * ตั้งใน ERP แท็บ 🏪 ข้อมูลร้าน → 🎴 ตั้งค่าการ์ด · ตัววาดต้องตรงกับ lib/website-gift-cards.ts giftCardHtml
+     */
+    giftCards:
+      info.gift_enabled && info.gift_allow_message
+        ? await readGiftCards(sb, s.id).then((c) => ({ ...c, designs: c.designs.filter((d) => d.enabled) }))
+        : null,
     colorTones: await (async () => {
       const { data } = await sb.from("erp_color_tones").select("key, name, hex").eq("is_active", true).order("sort_order");
       return (data ?? []) as { key: string; name: string; hex: string }[];

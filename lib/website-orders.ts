@@ -31,6 +31,8 @@ import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
 import { pointsConfigFrom, validateRedeem } from "@/lib/member-points";
 import { pointsBalance, redeemForOrder } from "@/lib/member-points-db";
+import { normalizeOrderCard, readOrderCard, type OrderGiftCard } from "@/lib/website-gift-cards";
+import { readGiftCards } from "@/lib/website-gift-cards-db";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -83,7 +85,7 @@ export interface PublicOrderInput {
   /** โค้ดส่วนลด (ตรวจ+คิดใหม่ฝั่งเซิร์ฟเวอร์เสมอ — lib/website-coupons) */
   couponCode?: string;
   /** 🎀 ห่อของขวัญ — ค่าห่อคิดจากที่ร้านตั้ง (calcGiftFee) ไม่เชื่อตัวเลขจากหน้าเว็บ */
-  gift?: { wrap: boolean; message?: string; hidePrice?: boolean };
+  gift?: { wrap: boolean; message?: string; hidePrice?: boolean; card?: unknown };
 }
 
 export interface OrderLineView {
@@ -118,6 +120,8 @@ export interface OrderView {
   giftFee?: number;
   giftMessage?: string;
   giftHidePrice?: boolean;
+  /** 🎴 การ์ด (ถึง/จาก/ลาย/ตัวหนังสือ) — ข้อความอยู่ giftMessage · ไม่มีการ์ด = null */
+  giftCard?: OrderGiftCard | null;
   grandTotal: number;
   note: string;
   createdAt: string;
@@ -172,7 +176,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
   // 🎀 ห่อของขวัญ (ข้อความการ์ด ≤ 300 ตัว · ขึ้นบรรทัดใหม่ได้)
   const g = (r.gift ?? {}) as Record<string, unknown>;
   const gift = g.wrap === true
-    ? { wrap: true, message: String(g.message ?? "").replace(/\r/g, "").trim().slice(0, 300) || undefined, hidePrice: g.hidePrice === true }
+    ? { wrap: true, message: String(g.message ?? "").replace(/\r/g, "").trim().slice(0, 300) || undefined, hidePrice: g.hidePrice === true, card: g.card && typeof g.card === "object" ? g.card : undefined }
     : undefined;
 
   return {
@@ -370,6 +374,13 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const giftFee = calcGiftFee(giftWrap, info);
   const giftMessage = giftWrap && info.gift_allow_message ? input.gift?.message ?? null : null;
   const giftHidePrice = giftWrap && info.gift_allow_hide_price && !!input.gift?.hidePrice;
+  // 🎴 การ์ด: ตรวจความยาว/จำนวนบรรทัดตามที่ร้านตั้ง + ลาย/ตัวหนังสือต้องยังเปิดอยู่ (lib/website-gift-cards)
+  let giftCard: OrderGiftCard | null = null;
+  if (giftWrap && info.gift_allow_message) {
+    const rc = normalizeOrderCard(input.gift?.card ?? null, await readGiftCards(sb, shop.id), giftMessage ?? "");
+    if (!rc.ok) return { ok: false, error: rc.error, status: 400 };
+    giftCard = rc.card;
+  }
   // 🎟️ โค้ดส่วนลด: ตรวจ + คิดใหม่ที่นี่เสมอ (ไม่เชื่อยอดจากหน้าเว็บ) · ใช้ไม่ได้ = ไม่รับออเดอร์ บอกเหตุผล (ลูกค้าเอาโค้ดออกแล้วสั่งต่อได้)
   let discount = 0;
   let coupon: StoreCoupon | null = null;
@@ -425,6 +436,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         gift_fee: giftFee,
         gift_message: giftMessage,
         gift_hide_price: giftHidePrice,
+        gift_card: giftCard,
         grand_total: grandTotal,
         note: input.note ?? null,
         customer_id: opts.customerId ?? null,
@@ -497,6 +509,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         giftFee,
         giftMessage: giftMessage ?? "",
         giftHidePrice,
+        giftCard,
         grandTotal,
         note: input.note ?? "",
         createdAt: order.created_at,
@@ -538,6 +551,7 @@ export type OrderRow = {
   gift_fee?: number | string | null;
   gift_message?: string | null;
   gift_hide_price?: boolean | null;
+  gift_card?: unknown;
   grand_total: number | string;
   note: string | null;
   created_at: string;
@@ -584,6 +598,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     giftFee: num(o.gift_fee),
     giftMessage: o.gift_message ?? "",
     giftHidePrice: !!o.gift_hide_price,
+    giftCard: readOrderCard(o.gift_card),
     grandTotal: num(o.grand_total),
     note: o.note ?? "",
     createdAt: o.created_at,

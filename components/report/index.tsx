@@ -233,7 +233,8 @@ function withDocBase(html: string): string {
 /** ฝังสคริปต์ให้เอกสารเด้งหน้าต่างพิมพ์เองทันทีที่เปิด */
 function withAutoPrintScript(html: string): string {
   return html.includes("</body>")
-    ? html.replace("</body>", `<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},350);};</script></body>`)
+    // รอฟอนต์เว็บ (เช่น ลายมือบนการ์ดของขวัญ) โหลดครบก่อน — ไม่งั้นพิมพ์ออกมาเป็นฟอนต์สำรอง
+    ? html.replace("</body>", `<script>window.onload=function(){var go=function(){setTimeout(function(){window.focus();window.print();},350);};if(document.fonts&&document.fonts.ready){document.fonts.ready.then(go,go);}else{go();}};</script></body>`)
     : html;
 }
 
