@@ -207,6 +207,14 @@ const PRODUCT_LAYOUTS: FieldOption[] = [
   { v: "banner", l: "แบนเนอร์ + สินค้า", sketch: "banner", hint: "รูปแคมเปญ + สินค้าข้างกัน" },
 ];
 
+/** ❓ รูปแบบของ Section คำถามที่พบบ่อย — เว็บร้านวาดที่ src/components/home/FaqSection.tsx */
+const FAQ_LAYOUTS: FieldOption[] = [
+  { v: "side", l: "หัวข้อซ้าย + คำถามขวา", sketch: "faq-side", hint: "แบบเดิม" },
+  { v: "center", l: "กึ่งกลาง 1 คอลัมน์", sketch: "faq-center", hint: "อ่านง่าย สะอาดตา" },
+  { v: "two", l: "คำถาม 2 คอลัมน์", sketch: "faq-two", hint: "คำถามเยอะ ไม่ยาวลงไป" },
+  { v: "tabs", l: "แท็บตามหมวด", sketch: "faq-tabs", hint: "ใส่หมวดให้แต่ละคำถาม" },
+];
+
 /** หัวข้อมาตรฐานของ Section ส่วนใหญ่: คำโปรยเล็ก + หัวข้อ (+ คำอธิบาย) */
 /**
  * ของกลาง: ชุดตั้งค่าหน้าตารูป (สัดส่วน · ทรงกรอบ · เส้นกรอบ + สี) — ใช้ร่วมทุก Section ที่มีรูป (แกลเลอรี · รูปคู่ข้อความ …)
@@ -835,20 +843,94 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         .join(" / ") || "2 การ์ด",
   },
 
+  // ❓ ปรับละเอียด (2026-10-15): รูปแบบ 4 แบบ · หน้าตาแต่ละข้อ · ไอคอน · เลขข้อ · กางตอนเปิดหน้า · หลายข้อพร้อมกัน · ขนาดคำถาม
+  //    · ปุ่มติดต่อ (แก้ได้) · ช่องค้นหา · หมวดต่อคำถาม (แบบแท็บ) · ข้อมูลให้ Google (FAQPage) — เว็บร้าน: src/components/home/FaqSection.tsx
+  //    ค่าเริ่มต้น = หน้าตาเดิมทุกอย่าง (ร้านที่วางไว้แล้วไม่เปลี่ยน)
   faq: {
     type: "faq",
     meta: { label: "คำถามที่พบบ่อย", icon: "❓", hint: "รายการถาม-ตอบแบบพับได้", group: "เนื้อหา" },
-    fields: headFields({ eyebrow: "คำถามที่พบบ่อย", title: "เรื่องที่ลูกค้าถามบ่อย", subtitle: true }),
+    fields: [
+      ...headFields({ eyebrow: "คำถามที่พบบ่อย", title: "เรื่องที่ลูกค้าถามบ่อย", subtitle: true }),
+      f("showContact", "ปุ่มใต้หัวข้อ", "toggle", { group: "action", default: true, hint: "เช่น ติดต่อเรา / ทักแชท" }),
+      link("contact", "ข้อความ + ลิงก์ปุ่ม", "ติดต่อเรา", "/contact", { showIf: { key: "showContact", eq: true } }),
+      f("layout", "รูปแบบ", "select", { group: "layout", default: "side", wide: true, display: "tiles", options: FAQ_LAYOUTS }),
+      f("itemStyle", "หน้าตาแต่ละข้อ", "select", {
+        group: "layout",
+        default: "line",
+        options: [
+          { v: "line", l: "เส้นคั่น" },
+          { v: "card", l: "กล่องการ์ด" },
+          { v: "fill", l: "พื้นสีอ่อน" },
+        ],
+      }),
+      f("icon", "ไอคอนกาง/พับ", "select", {
+        group: "layout",
+        default: "plus",
+        options: [
+          { v: "plus", l: "+ หมุนเป็น ×" },
+          { v: "chev", l: "ลูกศร ▾" },
+          { v: "pm", l: "+ / −" },
+          { v: "none", l: "ไม่มี" },
+        ],
+      }),
+      f("iconSide", "ไอคอนอยู่ด้าน", "select", {
+        group: "layout",
+        default: "right",
+        options: [
+          { v: "right", l: "ขวา" },
+          { v: "left", l: "ซ้าย" },
+        ],
+        showIf: { key: "icon", eq: ["plus", "chev", "pm"] },
+      }),
+      f("numbering", "เลขข้อ", "select", {
+        group: "layout",
+        default: "none",
+        options: [
+          { v: "none", l: "ไม่มี" },
+          { v: "num", l: "01 02 03" },
+          { v: "q", l: "Q." },
+        ],
+      }),
+      f("qSize", "ขนาดคำถาม", "select", {
+        group: "layout",
+        default: "md",
+        options: [
+          { v: "sm", l: "เล็ก" },
+          { v: "md", l: "กลาง" },
+          { v: "lg", l: "ใหญ่" },
+        ],
+      }),
+      f("openMode", "เปิดหน้ามา", "select", {
+        group: "layout",
+        default: "first",
+        options: [
+          { v: "first", l: "กางข้อแรกไว้" },
+          { v: "none", l: "พับทั้งหมด" },
+          { v: "all", l: "กางทั้งหมด" },
+        ],
+      }),
+      f("multi", "กางหลายข้อพร้อมกันได้", "toggle", { group: "layout", default: false, hint: "ปิด = กางข้อใหม่แล้วข้อเดิมพับเอง" }),
+      f("search", "ช่องค้นหาคำถาม", "toggle", { group: "layout", default: false, hint: "เหมาะเมื่อมีคำถามเยอะ" }),
+      f("seo", "ส่งคำถาม-คำตอบให้ Google", "toggle", {
+        group: "content",
+        default: true,
+        hint: "ใส่ข้อมูล FAQ แบบที่ Google/AI อ่านเข้าใจ (ไม่เห็นบนหน้าเว็บ) · Google เลือกเองว่าจะโชว์เป็นกล่องพิเศษหรือไม่",
+      }),
+    ],
     children: {
       key: "items",
       label: "คำถาม-คำตอบ",
       itemLabel: "คำถาม",
       icon: "❔",
-      max: 20,
-      fields: [text("q", "คำถาม", { default: "คำถาม", max: 200, wide: true }), area("a", "คำตอบ", { default: "คำตอบ", max: 1500 })],
-      summary: (it) => s(it.q) || "คำถาม",
+      max: 30,
+      fields: [
+        text("q", "คำถาม", { default: "คำถาม", max: 200, wide: true }),
+        area("a", "คำตอบ", { default: "คำตอบ", max: 1500 }),
+        text("cat", "หมวด (ใช้กับรูปแบบแท็บ)", { default: "", max: 40, placeholder: "เช่น การสั่งซื้อ · จัดส่ง · ชำระเงิน", hint: "พิมพ์ชื่อหมวดเหมือนกัน = อยู่แท็บเดียวกัน · ว่าง = อยู่แท็บ ทั้งหมด อย่างเดียว" }),
+      ],
+      summary: (it) => (s(it.cat) ? `[${s(it.cat)}] ` : "") + (s(it.q) || "คำถาม"),
     },
-    summary: (b) => count(arr(b.items).length, "คำถาม"),
+    summary: (b) => count(arr(b.items).length, "คำถาม") + (FAQ_LAYOUTS.find((o) => o.v === b.layout && o.v !== "side")?.l ? ` · ${FAQ_LAYOUTS.find((o) => o.v === b.layout)?.l}` : ""),
     validate: (b, label) => (!arr(b.items).length ? [{ level: "warning", message: `${label}: ยังไม่มีคำถาม` }] : []),
   },
 

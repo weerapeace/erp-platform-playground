@@ -288,7 +288,19 @@ export interface FaqBlock extends BlockBase {
   eyebrow: string;
   title: string;
   subtitle: string;
-  items: (ChildBase & { q: string; a: string })[];
+  showContact: boolean;
+  contact: CtaLink;
+  layout: "side" | "center" | "two" | "tabs";
+  itemStyle: "line" | "card" | "fill";
+  icon: "plus" | "chev" | "pm" | "none";
+  iconSide: "right" | "left";
+  numbering: "none" | "num" | "q";
+  qSize: "sm" | "md" | "lg";
+  openMode: "first" | "none" | "all";
+  multi: boolean;
+  search: boolean;
+  seo: boolean;
+  items: (ChildBase & { q: string; a: string; cat: string })[];
 }
 
 export interface CtaBlock extends BlockBase {

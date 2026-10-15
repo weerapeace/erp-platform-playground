@@ -51,6 +51,11 @@ const SKETCHES: Record<string, { cols: number; rows: number; cells: Cell[] }> = 
   rank: { cols: 5, rows: 1, cells: [1, 2, 3, 4, 5].map((c) => ({ c, r: 1, dark: c === 1 })) },
   tabs: { cols: 4, rows: 3, cells: [{ c: 1, r: 1, h: 45, dark: true }, { c: 2, r: 1, h: 45, dim: true }, { c: 3, r: 1, h: 45, dim: true }, ...[1, 2, 3, 4].map((c) => ({ c, r: 2, rs: 2 }))] },
   banner: { cols: 4, rows: 1, cells: [{ c: 1, r: 1, cs: 2, dark: true }, { c: 3, r: 1 }, { c: 4, r: 1 }] },
+  /* ❓ คำถามที่พบบ่อย: เข้ม = หัวข้อ · แถบบาง = คำถาม */
+  "faq-side": { cols: 5, rows: 4, cells: [{ c: 1, r: 1, cs: 2, h: 70, dark: true }, { c: 1, r: 2, cs: 2, h: 40, dim: true }, ...[1, 2, 3, 4].map((r) => ({ c: 3, r, cs: 3, h: 45 }))] },
+  "faq-center": { cols: 5, rows: 4, cells: [{ c: 2, r: 1, cs: 3, h: 70, dark: true }, ...[2, 3, 4].map((r) => ({ c: 2, r, cs: 3, h: 45 }))] },
+  "faq-two": { cols: 4, rows: 4, cells: [{ c: 2, r: 1, cs: 2, h: 70, dark: true }, ...[2, 3, 4].flatMap((r) => [{ c: 1, r, cs: 2, h: 45 }, { c: 3, r, cs: 2, h: 45 }])] },
+  "faq-tabs": { cols: 5, rows: 4, cells: [{ c: 2, r: 1, h: 55, dark: true }, { c: 3, r: 1, h: 55, dim: true }, { c: 4, r: 1, h: 55, dim: true }, ...[2, 3, 4].map((r) => ({ c: 2, r, cs: 3, h: 45 }))] },
 };
 function LayoutSketch({ kind, on }: { kind: string; on: boolean }) {
   const sk = SKETCHES[kind];
