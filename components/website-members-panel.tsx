@@ -6,6 +6,7 @@
  * รายการ = MiniTable กลาง (ค้นหา ชื่อ/อีเมล/เบอร์ · เรียง · จัดกลุ่มตามสถานะ) · ระงับ/เปิดบัญชี = ConfirmDialog + audit (ฝั่ง API)
  * ข้อมูล /api/website/members · สมาชิกสมัครเองที่เว็บร้าน (Google/LINE/Facebook/อีเมล) — ERP ดูและระงับได้ แก้ข้อมูลแทนลูกค้าไม่ได้
  * ยังไม่ได้ตั้งค่าการเข้าสู่ระบบที่เว็บร้าน = ยังไม่มีใครสมัครได้ (บอกวิธีเปิดในกล่องว่าง)
+ * ⭐ แต้ม/ระดับ: คอลัมน์แต้ม (กด = ประวัติ + ปรับแต้ม) · ปุ่ม "ระดับสมาชิก" มุมขวาบน — components/website-member-points
  */
 import { useCallback, useEffect, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
@@ -13,6 +14,8 @@ import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { PROVIDER_LABEL, type MemberProvider } from "@/lib/website-members";
+import { MemberPointsModal, MemberTiersModal } from "@/components/website-member-points";
+import type { MemberTier } from "@/lib/member-points";
 
 type Member = {
   id: string;
@@ -28,6 +31,9 @@ type Member = {
   providers: MemberProvider[];
   orderCount: number;
   orderTotal: number;
+  points: number;
+  spend12m: number;
+  tier: { key: string; name: string; color: string } | null;
 };
 
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "2-digit" }) : "—");
@@ -39,6 +45,10 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
   const [rows, setRows] = useState<Member[] | null>(null);
   const [ask, setAsk] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tiers, setTiers] = useState<MemberTier[]>([]);
+  const [pointsOn, setPointsOn] = useState(false);
+  const [pointsOf, setPointsOf] = useState<Member | null>(null);
+  const [tierEdit, setTierEdit] = useState(false);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/members?shop=${encodeURIComponent(shopSlug)}`)
@@ -46,6 +56,8 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
       .then((j) => {
         if (j.error) toast.error(j.error);
         setRows(j.members ?? []);
+        setTiers(j.tiers ?? []);
+        setPointsOn(!!j.pointsEnabled);
       })
       .catch(() => {
         toast.error("โหลดสมาชิกไม่สำเร็จ");
@@ -75,6 +87,8 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
   };
 
   if (rows === null) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  // แสดงคอลัมน์แต้ม/ระดับเมื่อร้านเปิดแต้ม หรือเคยมีแต้ม/ตั้งระดับไว้ (ปิดทีหลังแต้มเดิมยังอยู่)
+  const showPoints = pointsOn || tiers.length > 0 || rows.some((r) => r.points !== 0);
 
   return (
     <div className="space-y-3">
@@ -83,6 +97,11 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
         rows={rows}
         rowKey={(r) => r.id}
         countUnit="คน"
+        actions={
+          <button type="button" onClick={() => setTierEdit(true)} className="h-8 px-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs" data-open-tiers>
+            ⭐ ระดับสมาชิก{tiers.length ? ` (${tiers.length})` : ""}
+          </button>
+        }
         searchText={(r) => `${r.name} ${r.email ?? ""} ${r.phone}`}
         searchPlaceholder="ค้นหาชื่อ / อีเมล / เบอร์"
         groupBy={(r) => (r.status === "blocked" ? "ระงับอยู่" : "ใช้งาน")}
@@ -96,7 +115,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
           {
             key: "name",
             header: "สมาชิก",
-            width: "1.6fr",
+            width: "minmax(11rem, 1.6fr)",
             sortValue: (r) => r.name,
             cell: (r) => (
               <span className="flex items-center gap-2 min-w-0">
@@ -119,7 +138,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
           {
             key: "prov",
             header: "เข้าด้วย",
-            width: "8rem",
+            width: "6.5rem",
             cell: (r) => (
               <span className="flex flex-wrap gap-1">
                 {r.providers.map((p) => (
@@ -130,15 +149,39 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
               </span>
             ),
           },
-          { key: "orders", header: "ออเดอร์", align: "right", width: "5rem", sortValue: (r) => r.orderCount, cell: (r) => <span className="text-sm tabular-nums">{r.orderCount}</span> },
-          { key: "total", header: "ยอดซื้อ", align: "right", width: "7rem", sortValue: (r) => r.orderTotal, cell: (r) => <span className="text-sm tabular-nums">{baht(r.orderTotal)}</span> },
-          { key: "joined", header: "สมัครเมื่อ", width: "6rem", sortValue: (r) => r.createdAt, cell: (r) => <span className="text-xs text-slate-500">{day(r.createdAt)}</span> },
-          { key: "last", header: "เข้าล่าสุด", width: "6rem", sortValue: (r) => r.lastLoginAt ?? "", cell: (r) => <span className="text-xs text-slate-500">{day(r.lastLoginAt)}</span> },
-          { key: "mkt", header: "รับข่าวสาร", width: "5.5rem", cell: (r) => <span className="text-xs">{r.marketingOptIn ? "✓" : "—"}</span> },
+          { key: "orders", header: "ออเดอร์", align: "right", width: "4.5rem", sortValue: (r) => r.orderCount, cell: (r) => <span className="text-sm tabular-nums">{r.orderCount}</span> },
+          { key: "total", header: "ยอดซื้อ", align: "right", width: "6.5rem", sortValue: (r) => r.orderTotal, cell: (r) => <span className="text-sm tabular-nums">{baht(r.orderTotal)}</span> },
+          ...(showPoints
+            ? [
+                {
+                  key: "points",
+                  header: "⭐ แต้ม · ระดับ",
+                  align: "right" as const,
+                  width: "6.5rem",
+                  sortValue: (r: Member) => r.points,
+                  sortLabel: "แต้ม",
+                  cell: (r: Member) => (
+                    <span className="flex flex-col items-end gap-0.5">
+                      <button type="button" onClick={() => setPointsOf(r)} className="text-sm tabular-nums text-amber-700 hover:underline" data-points-of={r.id} title="ดูประวัติ / ปรับแต้ม">
+                        {r.points.toLocaleString("th-TH")}
+                      </button>
+                      {r.tier && (
+                        <span className="px-1.5 py-px rounded text-[10px] font-medium text-white" style={{ background: r.tier.color }} title={`ยอดซื้อ 12 เดือน ${baht(r.spend12m)}`} data-tier-badge>
+                          {r.tier.name}
+                        </span>
+                      )}
+                    </span>
+                  ),
+                },
+              ]
+            : []),
+          { key: "joined", header: "สมัครเมื่อ", width: "5.5rem", sortValue: (r) => r.createdAt, cell: (r) => <span className="text-xs text-slate-500">{day(r.createdAt)}</span> },
+          { key: "last", header: "เข้าล่าสุด", width: "5.5rem", sortValue: (r) => r.lastLoginAt ?? "", cell: (r) => <span className="text-xs text-slate-500">{day(r.lastLoginAt)}</span> },
+          { key: "mkt", header: "รับข่าวสาร", width: "4.5rem", cell: (r) => <span className="text-xs">{r.marketingOptIn ? "✓" : "—"}</span> },
           {
             key: "act",
             header: "",
-            width: "6rem",
+            width: "5rem",
             align: "right",
             cell: (r) => (
               <button type="button" onClick={() => setAsk(r)} className={`h-7 px-2 text-[11px] rounded-md border ${r.status === "blocked" ? "border-emerald-300 text-emerald-700" : "border-slate-200 text-red-600 hover:border-red-300"}`}>
@@ -147,8 +190,10 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
             ),
           },
         ]}
-        footnote="ออเดอร์/ยอดซื้อ = ออเดอร์ที่ผูกกับบัญชี (ไม่นับที่ยกเลิก) · สมาชิกแก้ข้อมูลตัวเองที่หน้าเว็บ ‘บัญชีของฉัน’"
+        footnote={`ออเดอร์/ยอดซื้อ = ออเดอร์ที่ผูกกับบัญชี (ไม่นับที่ยกเลิก) · สมาชิกแก้ข้อมูลตัวเองที่หน้าเว็บ ‘บัญชีของฉัน’${showPoints ? " · ⭐ กดตัวเลขแต้มเพื่อดูประวัติ/ปรับแต้ม · ระดับคิดจากยอดซื้อ 12 เดือน" : " · ⭐ เปิดแต้มสะสมที่แท็บ 🏪 ข้อมูลร้าน"}`}
       />
+      <MemberPointsModal member={pointsOf} onClose={() => setPointsOf(null)} onChanged={load} />
+      <MemberTiersModal open={tierEdit} shopSlug={shopSlug} onClose={() => setTierEdit(false)} onSaved={load} />
       <ConfirmDialog
         open={!!ask}
         onClose={() => !busy && setAsk(null)}

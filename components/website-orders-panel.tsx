@@ -29,6 +29,11 @@ type Order = {
   subtotal: number;
   shippingFee: number;
   discount: number;
+  couponCode?: string | null;
+  pointsUsed?: number;
+  pointsDiscount?: number;
+  pointsEarned?: number;
+  isMember?: boolean;
   grandTotal: number;
   note: string;
   createdAt: string;
@@ -100,7 +105,11 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
         toast.error(j.error ?? "บันทึกไม่สำเร็จ");
         return;
       }
-      toast.success(okMsg);
+      // ⭐ ออเดอร์สมาชิก: บอกว่าแต้มขยับยังไง (ได้/เรียกคืน/คืนแต้มที่ใช้) · ปรับแต้มไม่สำเร็จ = เตือน
+      const pts = (j.points ?? []) as { kind: string; delta: number }[];
+      const ptsMsg = pts.map((p) => `${p.kind === "earn" ? "สมาชิกได้" : p.kind === "revoke" ? "เรียกคืน" : p.kind === "refund" ? "คืนแต้มที่ใช้" : "หักแต้มที่ใช้"} ${Math.abs(p.delta).toLocaleString("th-TH")} แต้ม`).join(" · ");
+      toast.success(ptsMsg ? `${okMsg} · ⭐ ${ptsMsg}` : okMsg);
+      if (j.warning) toast.error(j.warning);
       await load();
     } catch {
       toast.error("บันทึกไม่สำเร็จ");
@@ -262,8 +271,14 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 <div className="mt-2 pt-2 border-t border-slate-200 space-y-0.5 text-xs text-slate-600">
                   <div className="flex justify-between"><span>ยอดสินค้า</span><span>{money(open.subtotal)}</span></div>
                   <div className="flex justify-between"><span>ค่าส่ง</span><span>{money(open.shippingFee)}</span></div>
-                  {open.discount > 0 && <div className="flex justify-between"><span>ส่วนลด</span><span>-{money(open.discount)}</span></div>}
+                  {open.discount > 0 && <div className="flex justify-between"><span>ส่วนลด{open.couponCode ? ` (${open.couponCode})` : ""}</span><span>-{money(open.discount)}</span></div>}
+                  {(open.pointsDiscount ?? 0) > 0 && <div className="flex justify-between"><span>⭐ ใช้แต้ม {(open.pointsUsed ?? 0).toLocaleString("th-TH")} แต้ม</span><span>-{money(open.pointsDiscount ?? 0)}</span></div>}
                   <div className="flex justify-between text-sm font-semibold text-slate-900 pt-1"><span>ยอดรวม</span><span>{money(open.grandTotal)}</span></div>
+                  {open.isMember && (
+                    <div className="pt-1 text-[11px] text-amber-700">
+                      👤 ออเดอร์สมาชิก · {(open.pointsEarned ?? 0) > 0 ? `⭐ ได้ ${(open.pointsEarned ?? 0).toLocaleString("th-TH")} แต้มแล้ว` : "ได้แต้มเมื่อเปลี่ยนเป็น “สำเร็จ” (ถ้าร้านเปิดแต้ม)"}
+                    </div>
+                  )}
                 </div>
               </section>
             </div>

@@ -1,6 +1,7 @@
 /**
  * 👥 สมาชิกเว็บร้าน (ERP แท็บสมาชิก) — /api/website/members
- * GET   ?shop=<slug> → { members: [...สรุป + วิธีเข้าสู่ระบบ + จำนวนออเดอร์ + ยอดซื้อ (ไม่นับยกเลิก)] }
+ * GET   ?shop=<slug> → { members: [...สรุป + วิธีเข้าสู่ระบบ + จำนวนออเดอร์ + ยอดซื้อ (ไม่นับยกเลิก) + ⭐ แต้ม/ระดับ], tiers, pointsEnabled }
+ *       ยอด/แต้มคิดใน DB (store_member_stats) — ไม่ดึงแถวมารวมเอง (ติดเพดาน 1,000 แถว)
  * PATCH { id, status: "active" | "blocked" } → ระงับ/เปิดบัญชี (ระงับ = เข้าสู่ระบบไม่ได้ · ออเดอร์เดิมไม่หาย) + audit
  * ด่าน: guardApi (พนักงาน) — ไม่ใช่เส้นของเว็บร้าน
  */
@@ -10,6 +11,9 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import type { MemberProvider } from "@/lib/website-members";
+import { memberStats, readTiers } from "@/lib/member-points-db";
+import { tierFor } from "@/lib/member-points";
+import { readSiteInfo } from "@/lib/website-site-info";
 
 export const dynamic = "force-dynamic";
 
@@ -33,22 +37,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: "โหลดสมาชิกไม่สำเร็จ" }, { status: 500 });
   const rows = (data ?? []) as Row[];
   const ids = rows.map((r) => r.id);
-  const [{ data: idents }, { data: orders }] = ids.length
-    ? await Promise.all([
-        sb.from("store_customer_identities").select("customer_id, provider").in("customer_id", ids),
-        sb.from("store_orders").select("customer_id, grand_total, status").in("customer_id", ids),
-      ])
-    : [{ data: [] }, { data: [] }];
+  let stats: Awaited<ReturnType<typeof memberStats>>;
+  try {
+    stats = await memberStats(sb, ids);
+  } catch {
+    return NextResponse.json({ error: "โหลดสรุปสมาชิกไม่สำเร็จ" }, { status: 500 });
+  }
+  const [{ data: idents }, tiers, info] = await Promise.all([
+    ids.length ? sb.from("store_customer_identities").select("customer_id, provider").in("customer_id", ids) : Promise.resolve({ data: [] }),
+    readTiers(sb, shopId),
+    readSiteInfo(sb, shopId),
+  ]);
   const prov = new Map<string, Set<MemberProvider>>();
   for (const i of (idents ?? []) as { customer_id: string; provider: MemberProvider }[]) prov.set(i.customer_id, (prov.get(i.customer_id) ?? new Set()).add(i.provider));
-  const stats = new Map<string, { count: number; total: number }>();
-  for (const o of (orders ?? []) as { customer_id: string; grand_total: number | string; status: string }[]) {
-    if (o.status === "cancelled") continue;
-    const s = stats.get(o.customer_id) ?? { count: 0, total: 0 };
-    s.count += 1;
-    s.total += Number(o.grand_total) || 0;
-    stats.set(o.customer_id, s);
-  }
   return NextResponse.json(
     {
       members: rows.map((r) => ({
@@ -63,9 +64,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         createdAt: r.created_at,
         lastLoginAt: r.last_login_at,
         providers: [...(prov.get(r.id) ?? [])],
-        orderCount: stats.get(r.id)?.count ?? 0,
-        orderTotal: Math.round((stats.get(r.id)?.total ?? 0) * 100) / 100,
+        orderCount: stats.get(r.id)?.orderCount ?? 0,
+        orderTotal: stats.get(r.id)?.orderTotal ?? 0,
+        points: stats.get(r.id)?.balance ?? 0,
+        spend12m: stats.get(r.id)?.spend12m ?? 0,
+        tier: (() => {
+          const t = tierFor(stats.get(r.id)?.spend12m ?? 0, tiers).tier;
+          return t ? { key: t.key, name: t.name, color: t.color } : null;
+        })(),
       })),
+      tiers,
+      pointsEnabled: info.points_enabled,
     },
     { headers: { "Cache-Control": "no-store" } }
   );

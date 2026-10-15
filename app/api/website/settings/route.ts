@@ -12,6 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { pointsSettingsProblem } from "@/lib/member-points";
 import {
   SITE_INFO_FIELDS,
   SITE_INFO_GROUPS,
@@ -73,6 +74,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     if (!cp) return NextResponse.json({ error: `ไม่พบคูปอง ${info.promo_code} ในร้านนี้ — สร้างที่แท็บ 🎟️ คูปอง ก่อน` }, { status: 400 });
     if (!(cp as { active: boolean }).active) return NextResponse.json({ error: `คูปอง ${info.promo_code} ปิดใช้งานอยู่ — เปิดที่แท็บ 🎟️ คูปอง ก่อน` }, { status: 400 });
   }
+  const pointsErr = pointsSettingsProblem(info);
+  if (pointsErr) return NextResponse.json({ error: pointsErr }, { status: 400 });
   const { error } = await sb.from("store_settings").upsert(siteInfoToRows(s.id, info), { onConflict: "shop_id,key" });
   if (error) {
     console.error("[website/settings] upsert", error);

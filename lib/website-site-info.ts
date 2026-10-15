@@ -18,7 +18,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "promo";
+  group: "shop" | "contact" | "order" | "promo" | "points";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -29,6 +29,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "shop", label: "🏪 ร้าน", hint: "ข้อความแนะนำร้านที่โชว์ท้ายเว็บและใน Google" },
   { key: "contact", label: "📞 ช่องทางติดต่อ", hint: "ขึ้นที่ท้ายเว็บและหน้า /contact — เว้นว่างช่องไหน เว็บจะไม่โชว์ช่องนั้น" },
   { key: "order", label: "🧾 การสั่งซื้อ", hint: "ค่าส่ง ช่องทางชำระเงิน และเลขที่ออเดอร์ — มีผลทันทีตอนลูกค้ากดสั่ง" },
+  { key: "points", label: "⭐ แต้มสมาชิก", hint: "สมาชิกได้แต้มเมื่อออเดอร์เป็น 'สำเร็จ' (ไม่นับค่าส่ง) และใช้แต้มลดราคาตอนสั่งได้ · ระดับสมาชิก (Silver/Gold ได้แต้มคูณ) ตั้งที่แท็บ 👥 สมาชิก" },
   { key: "promo", label: "🎁 ป๊อปอัปลูกค้าใหม่", hint: "โผล่ครั้งเดียวต่อผู้เข้าชม (ไม่โผล่หน้าชำระเงิน) · แจกโค้ดจากแท็บ 🎟️ คูปอง — สร้างคูปองก่อนแล้วใส่โค้ดที่นี่" },
 ];
 
@@ -74,6 +75,13 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "promo_text", label: "ข้อความในป๊อปอัป", hint: "เว้นว่าง = บอกส่วนลดของโค้ดให้เอง (เช่น ลด 10% เมื่อซื้อครบ ฿590)", group: "promo", type: "textarea", isPublic: true },
   { key: "promo_collect_email", label: "ให้กรอกอีเมลก่อนเห็นโค้ด", hint: "อีเมลเข้ารายชื่อรับข่าวสารของร้าน (ระบบเดียวกับ Section สมัครรับข่าวสาร) · ปิด = เห็นโค้ดทันที", group: "promo", type: "bool", isPublic: true },
   { key: "promo_delay", label: "โผล่หลังเข้าเว็บกี่วินาที", hint: "0–60 · แนะนำ 5–10 (ให้ลูกค้าได้ดูของก่อน)", group: "promo", type: "number", isPublic: true },
+
+  // ─── ⭐ แต้มสมาชิก (กฎ: lib/member-points.ts · ต้องเปิดระบบสมาชิกที่เว็บร้านด้วย) ───
+  { key: "points_enabled", label: "เปิดระบบแต้มสะสม", hint: "ปิดทีหลัง แต้มที่สมาชิกมีอยู่ไม่หาย (แค่ได้/ใช้เพิ่มไม่ได้) · ออเดอร์ที่ใช้แต้มไปแล้วถ้ายกเลิกยังคืนแต้มให้", group: "points", type: "bool", isPublic: true },
+  { key: "points_earn_unit", label: "ซื้อครบกี่บาท ได้ 1 แต้ม", hint: "คิดจากยอดสินค้าหลังส่วนลด ไม่นับค่าส่ง · เช่น 100 = ซื้อ ฿1,990 ได้ 19 แต้ม", group: "points", type: "number", isPublic: true, placeholder: "100" },
+  { key: "points_value", label: "1 แต้ม ลดได้กี่บาท", hint: "เช่น 1 = ใช้ 100 แต้ม ลด ฿100", group: "points", type: "number", isPublic: true, placeholder: "1" },
+  { key: "points_max_redeem_pct", label: "ใช้แต้มลดได้ไม่เกินกี่ % ของยอดสินค้า", hint: "1–100 · แนะนำ 50", group: "points", type: "number", isPublic: true, placeholder: "50" },
+  { key: "points_min_redeem", label: "ใช้ขั้นต่ำครั้งละกี่แต้ม", hint: "กันใช้ทีละนิด เช่น 10", group: "points", type: "number", isPublic: true, placeholder: "10" },
 ];
 
 export const SITE_INFO_KEYS = SITE_INFO_FIELDS.map((f) => f.key);
@@ -112,6 +120,11 @@ export interface SiteInfo {
   promo_text: string;
   promo_collect_email: boolean;
   promo_delay: number;
+  points_enabled: boolean;
+  points_earn_unit: number;
+  points_value: number;
+  points_max_redeem_pct: number;
+  points_min_redeem: number;
 }
 
 export const DEFAULT_SITE_INFO: SiteInfo = {
@@ -147,6 +160,11 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   promo_text: "",
   promo_collect_email: true,
   promo_delay: 6,
+  points_enabled: false,
+  points_earn_unit: 100,
+  points_value: 1,
+  points_max_redeem_pct: 50,
+  points_min_redeem: 10,
 };
 
 const URL_KEYS = new Set([

@@ -5,6 +5,7 @@
  * PATCH { orderId, status?, paymentStatus?, note? } → เปลี่ยนสถานะ/สถานะจ่าย/โน้ตภายใน + audit
  *
  * ไม่มีลบ: ออเดอร์เป็นเอกสารที่ลูกค้าถืออยู่ (มีเลขที่) จึงให้ "ยกเลิก" (status=cancelled) แทน
+ * ⭐ เปลี่ยนสถานะออเดอร์ของสมาชิก = ปรับแต้มให้อัตโนมัติ (สำเร็จ = ได้แต้ม · ถอย/ยกเลิก = เรียกคืน · ยกเลิก = คืนแต้มที่ใช้) — lib/member-points-db
  * ของกลาง: lib/website-orders.ts · guardApi(products.view/edit) · writeAudit
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -13,6 +14,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { ORDER_STATUSES, PAYMENT_STATUSES, PAYMENT_METHOD_LABEL, toOrderView } from "@/lib/website-orders";
+import { syncOrderPoints } from "@/lib/member-points-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -36,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, grand_total, note, created_at, erp_so_number"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, customer_id, grand_total, note, created_at, erp_so_number"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
@@ -84,6 +86,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         ...view,
         customerEmail: (r.customer_email as string | null) ?? "",
         erpSoNumber: (r.erp_so_number as string | null) ?? null,
+        isMember: !!r.customer_id,
         skuCodes: items.map((i) => i.sku_code).filter(Boolean),
       };
     }),
@@ -129,6 +132,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { error } = await sb.from("store_orders").update(patch).eq("id", b.id);
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
 
+  // ⭐ แต้มสมาชิก: ปรับตามสถานะใหม่ (ไม่ใช่สมาชิก = ไม่มีอะไร) · พังไม่ล้มการเปลี่ยนสถานะ แต่บอกพนักงาน
+  let points: { kind: string; delta: number }[] | null = [];
+  if (patch.status !== undefined && patch.status !== b.status) {
+    points = await syncOrderPoints(sb, b.id, `staff:${user?.email ?? user?.id ?? "unknown"}`).then((r) => r?.rows ?? null).catch(() => null);
+  }
+
   await writeAudit(sb, {
     action: patch.status === "cancelled" ? "cancel" : "update",
     entityType: "store_orders",
@@ -140,8 +149,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       shopId: b.shop_id,
       before: { status: b.status, paymentStatus: b.payment_status, note: b.note },
       after: patch,
+      ...(points?.length ? { points } : {}),
     },
   });
 
-  return NextResponse.json({ ok: true });
+  if (points === null) return NextResponse.json({ ok: true, warning: "เปลี่ยนสถานะแล้ว แต่ปรับแต้มสมาชิกไม่สำเร็จ — ลองเปลี่ยนสถานะอีกครั้ง หรือปรับแต้มเองที่แท็บ 👥 สมาชิก" });
+  return NextResponse.json({ ok: true, points });
 }

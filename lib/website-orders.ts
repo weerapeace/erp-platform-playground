@@ -29,6 +29,8 @@ import { calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
+import { pointsConfigFrom, validateRedeem } from "@/lib/member-points";
+import { pointsBalance, redeemForOrder } from "@/lib/member-points-db";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -104,6 +106,11 @@ export interface OrderView {
   discount: number;
   /** โค้ดส่วนลดที่ใช้ (ไม่มี = null) */
   couponCode?: string | null;
+  /** ⭐ แต้มที่ใช้ลด + เป็นเงินเท่าไร (ไม่ได้ใช้ = 0) */
+  pointsUsed?: number;
+  pointsDiscount?: number;
+  /** ⭐ แต้มที่ได้จากออเดอร์นี้ (ได้เมื่อสถานะ "สำเร็จ") */
+  pointsEarned?: number;
   grandTotal: number;
   note: string;
   createdAt: string;
@@ -250,8 +257,11 @@ export type CreateOrderResult =
   | { ok: true; order: OrderView }
   | { ok: false; error: string; status: number };
 
-/** opts.customerId = สมาชิกที่ล็อกอิน (มาจากเว็บร้านฝั่งเซิร์ฟเวอร์ผ่านด่านกุญแจภายในเท่านั้น — ห้ามรับจากเบราว์เซอร์ตรง ๆ) */
-export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unknown, opts: { customerId?: string | null } = {}): Promise<CreateOrderResult> {
+/**
+ * opts.customerId = สมาชิกที่ล็อกอิน (มาจากเว็บร้านฝั่งเซิร์ฟเวอร์ผ่านด่านกุญแจภายในเท่านั้น — ห้ามรับจากเบราว์เซอร์ตรง ๆ)
+ * opts.redeemPoints = ⭐ แต้มที่สมาชิกขอใช้ลดราคา (สมาชิกเท่านั้น · ตรวจ + ตัดแต้มแบบล็อกแถวที่นี่ · lib/member-points)
+ */
+export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unknown, opts: { customerId?: string | null; redeemPoints?: number } = {}): Promise<CreateOrderResult> {
   const v = validateOrderInput(raw);
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const input = v.input;
@@ -349,7 +359,17 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     discount = cr.discount;
     coupon = cr.coupon ?? null;
   }
-  const grandTotal = Math.round((subtotal + shippingFee - discount) * 100) / 100;
+  // ⭐ ใช้แต้มลดราคา (สมาชิกเท่านั้น · หลังคูปอง) — ตรวจกับยอดคงเหลือตอนนี้ แล้วตัดจริงแบบล็อกแถวหลังบันทึกออเดอร์
+  let pointsUsed = 0;
+  let pointsDiscount = 0;
+  const wantPoints = Math.floor(Number(opts.redeemPoints) || 0);
+  if (opts.customerId && wantPoints > 0) {
+    const rr = validateRedeem(wantPoints, await pointsBalance(sb, opts.customerId), Math.max(0, subtotal - discount), pointsConfigFrom(info));
+    if (!rr.ok) return { ok: false, error: `ใช้แต้ม: ${rr.error}`, status: 400 };
+    pointsUsed = rr.points;
+    pointsDiscount = rr.discount;
+  }
+  const grandTotal = Math.round((subtotal + shippingFee - discount - pointsDiscount) * 100) / 100;
 
   const prefix = orderNoPrefix(info, shop.slug);
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -378,6 +398,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         subtotal,
         shipping_fee: shippingFee,
         discount,
+        coupon_code: coupon?.code ?? null,
+        points_used: pointsUsed,
+        points_discount: pointsDiscount,
         grand_total: grandTotal,
         note: input.note ?? null,
         customer_id: opts.customerId ?? null,
@@ -400,6 +423,12 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       await sb.from("store_orders").delete().eq("id", order.id);
       console.error("[website-orders] insert items", itemsErr);
       return { ok: false, error: "บันทึกรายการสินค้าไม่สำเร็จ กรุณาลองใหม่", status: 500 };
+    }
+
+    // ⭐ ตัดแต้มจริง (ล็อกแถวสมาชิก) — ไม่พอแล้ว (ใช้ไปกับอีกออเดอร์พร้อมกัน) = ยกเลิกออเดอร์นี้ทั้งใบ ไม่ให้ได้ส่วนลดฟรี
+    if (opts.customerId && pointsUsed > 0 && !(await redeemForOrder(sb, opts.customerId, order.id, pointsUsed))) {
+      await sb.from("store_orders").delete().eq("id", order.id);
+      return { ok: false, error: "แต้มไม่พอแล้ว (อาจใช้ไปกับออเดอร์อื่น) — รีเฟรชหน้าแล้วลองใหม่", status: 409 };
     }
 
     // บันทึกการใช้คูปอง (นับจำนวนครั้ง/เบอร์ละครั้ง) — พังก็ไม่ล้มออเดอร์ (ยอดลดถูกบันทึกในออเดอร์แล้ว) แค่ log
@@ -437,6 +466,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         shippingFee,
         discount,
         couponCode: coupon?.code ?? null,
+        pointsUsed,
+        pointsDiscount,
+        pointsEarned: 0,
         grandTotal,
         note: input.note ?? "",
         createdAt: order.created_at,
@@ -470,6 +502,10 @@ export type OrderRow = {
   subtotal: number | string;
   shipping_fee: number | string;
   discount: number | string;
+  coupon_code?: string | null;
+  points_used?: number | null;
+  points_discount?: number | string | null;
+  points_earned?: number | null;
   grand_total: number | string;
   note: string | null;
   created_at: string;
@@ -508,6 +544,10 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     subtotal: num(o.subtotal),
     shippingFee: num(o.shipping_fee),
     discount: num(o.discount),
+    couponCode: o.coupon_code ?? null,
+    pointsUsed: num(o.points_used),
+    pointsDiscount: num(o.points_discount),
+    pointsEarned: num(o.points_earned),
     grandTotal: num(o.grand_total),
     note: o.note ?? "",
     createdAt: o.created_at,
