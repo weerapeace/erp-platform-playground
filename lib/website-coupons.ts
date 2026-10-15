@@ -5,6 +5,7 @@
  * ส่วนลด "คิดฝั่งเซิร์ฟเวอร์เท่านั้น" ตอนรับออเดอร์ (lib/website-orders) · หน้าเว็บร้านแค่ขอดูผลล่วงหน้า (/api/public/storefront/coupon)
  * เงินคิดด้วย service กลาง lib/money (หน่วยสตางค์ ปัดเศษ half-up) · ลดเฉพาะค่าสินค้า ไม่ลดค่าส่ง · ไม่เกินยอดสินค้า
  * ข้อความเหตุผลที่ใช้ไม่ได้ = ภาษาคน ลูกค้าเห็นตรง ๆ
+ * 👤 คูปองเฉพาะสมาชิก (M5): membersOnly = ต้องเข้าสู่ระบบ · minTier = ระดับขั้นต่ำ (รหัสระดับ store_member_tiers) — ระดับที่ตั้งถูกลบไปแล้ว = ไม่มีใครใช้ได้ (ปลอดภัยกว่าแจกทุกคน)
  */
 import { money, percent, toMajor, type Money } from "@/lib/money";
 
@@ -29,6 +30,10 @@ export interface StoreCoupon {
   perPhoneOnce: boolean;
   /** เฉพาะลูกค้าใหม่ (เบอร์นี้ยังไม่เคยสั่งกับร้าน) */
   newCustomersOnly: boolean;
+  /** 👤 เฉพาะสมาชิกที่เข้าสู่ระบบ */
+  membersOnly: boolean;
+  /** 👤 ระดับสมาชิกขั้นต่ำ (รหัสระดับ) · null = ทุกระดับ · ตั้ง = เฉพาะสมาชิกด้วย */
+  minTier: string | null;
   active: boolean;
   note: string;
 }
@@ -69,6 +74,8 @@ export function sanitizeCouponInput(raw: unknown): { ok: true; coupon: Omit<Stor
   const limRaw = n(r.usageLimit);
   const usageLimit = Number.isNaN(limRaw) || limRaw === 0 ? null : Math.floor(limRaw);
   if (usageLimit !== null && usageLimit < 1) return { ok: false, error: "จำนวนครั้งที่ใช้ได้ต้องอย่างน้อย 1 (เว้นว่าง = ไม่จำกัด)" };
+  const minTier = String(r.minTier ?? "").trim().toLowerCase() || null;
+  if (minTier && !/^[a-z0-9-]{1,20}$/.test(minTier)) return { ok: false, error: "ระดับสมาชิกไม่ถูกต้อง — เลือกจากรายการ" };
   const startsAt = isoOrNull(r.startsAt);
   const endsAt = isoOrNull(r.endsAt);
   if (startsAt && endsAt && endsAt <= startsAt) return { ok: false, error: "วันหมดอายุต้องอยู่หลังวันเริ่ม" };
@@ -85,6 +92,8 @@ export function sanitizeCouponInput(raw: unknown): { ok: true; coupon: Omit<Stor
       usageLimit,
       perPhoneOnce: r.perPhoneOnce !== false,
       newCustomersOnly: r.newCustomersOnly === true,
+      membersOnly: r.membersOnly === true || !!minTier,
+      minTier,
       active: r.active !== false,
       note: String(r.note ?? "").trim().slice(0, 200),
     },
@@ -99,6 +108,10 @@ export interface CouponUsage {
   phoneUsed: boolean;
   /** เบอร์นี้เคยสั่งกับร้านแล้ว (ไม่รู้เบอร์ = false) */
   phoneHasOrders: boolean;
+  /** 👤 สมาชิกที่ใช้โค้ด (null/ไม่ใส่ = ไม่ได้เข้าสู่ระบบ) · reachedTiers = รหัสระดับที่ยอดซื้อถึงแล้ว */
+  member?: { reachedTiers: string[] } | null;
+  /** ชื่อระดับขั้นต่ำของคูปอง (ไว้บอกลูกค้า) · ไม่พบระดับนี้แล้ว = null */
+  minTierName?: string | null;
 }
 
 export type CouponResult = { ok: true; discount: number; label: string } | { ok: false; error: string };
@@ -120,6 +133,12 @@ export function evaluateCoupon(c: StoreCoupon, subtotal: number, usage: CouponUs
   if (c.minSubtotal > 0 && subtotal < c.minSubtotal) return { ok: false, error: `ใช้ได้เมื่อซื้อสินค้าครบ ${baht(c.minSubtotal)}` };
   if (c.perPhoneOnce && usage.phoneUsed) return { ok: false, error: "เบอร์นี้ใช้โค้ดนี้ไปแล้ว" };
   if (c.newCustomersOnly && usage.phoneHasOrders) return { ok: false, error: "โค้ดนี้สำหรับลูกค้าที่สั่งครั้งแรกเท่านั้น" };
+  if (c.membersOnly || c.minTier) {
+    if (!usage.member) return { ok: false, error: "โค้ดนี้สำหรับสมาชิก — เข้าสู่ระบบก่อนใช้" };
+    if (c.minTier && !usage.member.reachedTiers.includes(c.minTier)) {
+      return { ok: false, error: usage.minTierName ? `โค้ดนี้สำหรับสมาชิกระดับ ${usage.minTierName} ขึ้นไป` : "โค้ดนี้สำหรับสมาชิกระดับที่ร้านกำหนด" };
+    }
+  }
 
   const sub: Money = money(subtotal);
   let d: Money = c.kind === "percent" ? percent(sub, c.value) : money(c.value);
@@ -148,6 +167,8 @@ export function couponFromRow(r: Record<string, unknown>): StoreCoupon {
     usageLimit: num(r.usage_limit),
     perPhoneOnce: r.per_phone_once !== false,
     newCustomersOnly: r.new_customers_only === true,
+    membersOnly: r.members_only === true || !!r.min_tier,
+    minTier: (r.min_tier as string | null) ?? null,
     active: r.active !== false,
     note: String(r.note ?? ""),
   };
@@ -166,6 +187,8 @@ export function couponToRow(c: Omit<StoreCoupon, "id" | "shopId">): Record<strin
     usage_limit: c.usageLimit,
     per_phone_once: c.perPhoneOnce,
     new_customers_only: c.newCustomersOnly,
+    members_only: c.membersOnly,
+    min_tier: c.minTier,
     active: c.active,
     note: c.note || null,
   };

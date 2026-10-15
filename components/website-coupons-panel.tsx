@@ -6,6 +6,7 @@
  * รายการ = MiniTable กลาง · เพิ่ม/แก้ = ERPModal · ลบ = ConfirmDialog (ลบได้เฉพาะที่ยังไม่เคยถูกใช้ — ใช้แล้วให้ปิดแทน)
  * ข้อมูล /api/website/coupons · กฎตรวจ/คิดเงิน lib/website-coupons (ตัวเดียวกับตอนลูกค้าสั่งจริง)
  * ป๊อปอัปลูกค้าใหม่บนเว็บ ตั้งที่แท็บ "🏪 ข้อมูลร้าน" กลุ่ม 🎁 (ใส่โค้ดจากที่นี่)
+ * 👤 เฉพาะสมาชิก / ระดับขั้นต่ำ (M5) — ระดับมาจากแท็บ 👥 สมาชิก (/api/website/members/tiers) · สมาชิกเห็นคูปองพวกนี้ในหน้าบัญชีของตัวเอง
  */
 import { useCallback, useEffect, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
@@ -30,11 +31,13 @@ type Form = {
   usageLimit: string;
   perPhoneOnce: boolean;
   newCustomersOnly: boolean;
+  membersOnly: boolean;
+  minTier: string;
   active: boolean;
   note: string;
 };
 
-const EMPTY: Form = { code: "", kind: "percent", value: "10", minSubtotal: "", maxDiscount: "", startsAt: "", endsAt: "", usageLimit: "", perPhoneOnce: true, newCustomersOnly: true, active: true, note: "" };
+const EMPTY: Form = { code: "", kind: "percent", value: "10", minSubtotal: "", maxDiscount: "", startsAt: "", endsAt: "", usageLimit: "", perPhoneOnce: true, newCustomersOnly: true, membersOnly: false, minTier: "", active: true, note: "" };
 
 const isoDay = (v: string | null) => (v ? v.slice(0, 10) : "");
 /** วันที่ (YYYY-MM-DD) → เวลาไทย: เริ่ม 00:00 · หมด 23:59:59 ของวันนั้น */
@@ -61,6 +64,14 @@ export function WebsiteCouponsPanel({ shopSlug, shopId }: { shopSlug: string; sh
   const [form, setForm] = useState<Form | null>(null);
   const [saving, setSaving] = useState(false);
   const [del, setDel] = useState<Row | null>(null);
+  const [tiers, setTiers] = useState<{ key: string; name: string; minSpend: number }[]>([]);
+  useEffect(() => {
+    apiFetch(`/api/website/members/tiers?shop=${encodeURIComponent(shopSlug)}`)
+      .then((r) => r.json())
+      .then((j) => setTiers(j.tiers ?? []))
+      .catch(() => setTiers([]));
+  }, [shopSlug]);
+  const tierName = (key: string | null) => (key ? tiers.find((t) => t.key === key)?.name ?? null : null);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/coupons?shop=${encodeURIComponent(shopSlug)}`)
@@ -89,6 +100,8 @@ export function WebsiteCouponsPanel({ shopSlug, shopId }: { shopSlug: string; sh
       usageLimit: c.usageLimit ? String(c.usageLimit) : "",
       perPhoneOnce: c.perPhoneOnce,
       newCustomersOnly: c.newCustomersOnly,
+      membersOnly: c.membersOnly,
+      minTier: c.minTier ?? "",
       active: c.active,
       note: c.note,
     });
@@ -165,7 +178,11 @@ export function WebsiteCouponsPanel({ shopSlug, shopId }: { shopSlug: string; sh
         }
         columns={[
           { key: "code", header: "โค้ด", width: "9rem", cell: (r) => <span className="font-mono text-sm font-semibold text-slate-800">{r.code}</span>, sortValue: (r) => r.code },
-          { key: "what", header: "ส่วนลด", width: "1.6fr", cell: (r) => <span className="text-sm text-slate-700">{couponLabel(r)}{r.newCustomersOnly && <span className="ml-1 text-[10px] text-blue-600">· ลูกค้าใหม่</span>}</span> },
+          { key: "what", header: "ส่วนลด", width: "1.6fr", cell: (r) => <span className="text-sm text-slate-700">{couponLabel(r)}{r.newCustomersOnly && <span className="ml-1 text-[10px] text-blue-600">· ลูกค้าใหม่</span>}{(r.membersOnly || r.minTier) && (
+                <span className={`ml-1 text-[10px] ${r.minTier && !tierName(r.minTier) ? "text-red-600" : "text-amber-700"}`} title={r.minTier && !tierName(r.minTier) ? "ระดับที่ตั้งไว้ถูกลบแล้ว — ไม่มีใครใช้คูปองนี้ได้ แก้คูปองเลือกระดับใหม่" : undefined}>
+                  · 👤 {r.minTier ? (tierName(r.minTier) ? `สมาชิก ${tierName(r.minTier)} ขึ้นไป` : "⚠️ ระดับถูกลบแล้ว") : "เฉพาะสมาชิก"}
+                </span>
+              )}</span> },
           {
             key: "when",
             header: "ช่วงเวลา",
@@ -276,6 +293,30 @@ export function WebsiteCouponsPanel({ shopSlug, shopId }: { shopSlug: string; sh
               <input type="checkbox" className="w-4 h-4 accent-orange-600" checked={f.active} onChange={(e) => set({ active: e.target.checked })} />
               เปิดใช้งาน
             </label>
+            <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3 grid gap-2 sm:grid-cols-2" data-member-coupon>
+              <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 accent-orange-600" checked={f.membersOnly || !!f.minTier} onChange={(e) => set({ membersOnly: e.target.checked, ...(e.target.checked ? { newCustomersOnly: false } : { minTier: "" }) })} />
+                👤 เฉพาะสมาชิก (ต้องเข้าสู่ระบบ · สมาชิกเห็นในหน้าบัญชี · ระดับคิดจากยอดซื้อ 12 เดือน)
+              </label>
+              <div>
+                <select
+                  aria-label="ระดับสมาชิกขั้นต่ำ"
+                  className={`${inputCls} bg-white`}
+                  value={f.minTier}
+                  disabled={!(f.membersOnly || f.minTier) || !tiers.length}
+                  onChange={(e) => set({ minTier: e.target.value, membersOnly: true })}
+                >
+                  <option value="">ทุกระดับ</option>
+                  {tiers.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.name} ขึ้นไป (≥ ฿{t.minSpend.toLocaleString("th-TH")})
+                    </option>
+                  ))}
+                </select>
+                {!tiers.length && (f.membersOnly || !!f.minTier) && <p className="mt-1 text-[11px] text-slate-500">ยังไม่ได้ตั้งระดับ — ตั้งที่แท็บ 👥 สมาชิก ปุ่ม ⭐ ระดับสมาชิก</p>}
+                {f.minTier && !tierName(f.minTier) && tiers.length > 0 && <p className="mt-1 text-[11px] text-red-600">ระดับเดิมถูกลบแล้ว — เลือกใหม่</p>}
+              </div>
+            </div>
             <div className="sm:col-span-2">
               <label className={labelCls}>หมายเหตุ (ลูกค้าไม่เห็น)</label>
               <input className={inputCls} value={f.note} maxLength={200} onChange={(e) => set({ note: e.target.value })} placeholder="เช่น แจกในป๊อปอัปลูกค้าใหม่" />

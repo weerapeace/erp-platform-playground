@@ -19,6 +19,8 @@ const base: StoreCoupon = {
   usageLimit: null,
   perPhoneOnce: true,
   newCustomersOnly: false,
+  membersOnly: false,
+  minTier: null,
   active: true,
   note: "",
 };
@@ -77,5 +79,28 @@ describe("ข้อมูลจากหน้าจอ ERP", () => {
   it("ป้ายอธิบาย", () => {
     expect(couponLabel({ kind: "percent", value: 10, maxDiscount: 200, minSubtotal: 1000 })).toBe("ลด 10% (สูงสุด ฿200) เมื่อซื้อครบ ฿1,000");
     expect(couponLabel({ kind: "fixed", value: 100, maxDiscount: null, minSubtotal: 0 })).toBe("ลด ฿100");
+  });
+});
+
+describe("👤 คูปองเฉพาะสมาชิก (M5)", () => {
+  const mem = { ...base, membersOnly: true };
+  const gold = { ...base, membersOnly: true, minTier: "gold" };
+  it("ไม่ได้เข้าสู่ระบบ = ใช้ไม่ได้ บอกให้เข้าสู่ระบบ", () => {
+    expect(evaluateCoupon(mem, 1000, fresh, NOW)).toEqual({ ok: false, error: "โค้ดนี้สำหรับสมาชิก — เข้าสู่ระบบก่อนใช้" });
+    expect(evaluateCoupon(mem, 1000, { ...fresh, member: { reachedTiers: [] } }, NOW)).toMatchObject({ ok: true, discount: 100 });
+  });
+  it("ระดับขั้นต่ำ: ไม่ถึง = บอกชื่อระดับ · ถึง = ใช้ได้", () => {
+    expect(evaluateCoupon(gold, 1000, { ...fresh, member: { reachedTiers: ["member", "silver"] }, minTierName: "Gold" }, NOW)).toEqual({ ok: false, error: "โค้ดนี้สำหรับสมาชิกระดับ Gold ขึ้นไป" });
+    expect(evaluateCoupon(gold, 1000, { ...fresh, member: { reachedTiers: ["member", "silver", "gold"] }, minTierName: "Gold" }, NOW)).toMatchObject({ ok: true });
+  });
+  it("ระดับที่ตั้งถูกลบไปแล้ว = ไม่มีใครใช้ได้ (ไม่แจกทุกคนโดยไม่ตั้งใจ)", () => {
+    expect(evaluateCoupon(gold, 1000, { ...fresh, member: { reachedTiers: ["member"] }, minTierName: null }, NOW)).toEqual({ ok: false, error: "โค้ดนี้สำหรับสมาชิกระดับที่ร้านกำหนด" });
+  });
+  it("ฟอร์ม ERP: เลือกระดับ = เฉพาะสมาชิกให้เอง · รหัสระดับแปลก ๆ ไม่รับ", () => {
+    const ok = sanitizeCouponInput({ code: "GOLD20", kind: "percent", value: 20, minTier: "gold" });
+    expect(ok.ok && ok.coupon).toMatchObject({ membersOnly: true, minTier: "gold" });
+    expect(sanitizeCouponInput({ code: "GOLD20", kind: "percent", value: 20, minTier: "gold; drop" }).ok).toBe(false);
+    const plain = sanitizeCouponInput({ code: "ALL10", kind: "percent", value: 10 });
+    expect(plain.ok && plain.coupon).toMatchObject({ membersOnly: false, minTier: null });
   });
 });

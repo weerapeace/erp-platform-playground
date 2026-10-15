@@ -354,7 +354,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   let discount = 0;
   let coupon: StoreCoupon | null = null;
   if (input.couponCode) {
-    const cr = await checkCoupon(sb, shop.id, input.couponCode, subtotal, input.customer.phone);
+    const cr = await checkCoupon(sb, shop.id, input.couponCode, subtotal, input.customer.phone, opts.customerId ?? null);
     if (!cr.ok) return { ok: false, error: `โค้ดส่วนลด ${input.couponCode}: ${cr.error}`, status: 400 };
     discount = cr.discount;
     coupon = cr.coupon ?? null;

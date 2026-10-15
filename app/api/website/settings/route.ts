@@ -74,9 +74,11 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   // patch ที่ไม่แตะป๊อปอัป ไม่ต้องตรวจคูปองซ้ำ (กันบันทึกโซเชียลไม่ได้เพราะคูปองเก่ามีปัญหา)
   if (info.promo_enabled && (!patch || Object.keys(patch).some((k) => k.startsWith("promo_")))) {
     if (!info.promo_code) return NextResponse.json({ error: "เปิดป๊อปอัปลูกค้าใหม่แล้ว แต่ยังไม่ได้ใส่โค้ดที่แจก" }, { status: 400 });
-    const { data: cp } = await sb.from("store_coupons").select("id, active").eq("shop_id", s.id).eq("code", info.promo_code).maybeSingle();
+    const { data: cp } = await sb.from("store_coupons").select("id, active, members_only, min_tier").eq("shop_id", s.id).eq("code", info.promo_code).maybeSingle();
     if (!cp) return NextResponse.json({ error: `ไม่พบคูปอง ${info.promo_code} ในร้านนี้ — สร้างที่แท็บ 🎟️ คูปอง ก่อน` }, { status: 400 });
     if (!(cp as { active: boolean }).active) return NextResponse.json({ error: `คูปอง ${info.promo_code} ปิดใช้งานอยู่ — เปิดที่แท็บ 🎟️ คูปอง ก่อน` }, { status: 400 });
+    const c = cp as { members_only: boolean; min_tier: string | null };
+    if (c.members_only || c.min_tier) return NextResponse.json({ error: `คูปอง ${info.promo_code} เป็นคูปองเฉพาะสมาชิก — ลูกค้าใหม่ใช้ไม่ได้ เลือกคูปองทั่วไปแทน` }, { status: 400 });
   }
   const pointsErr = pointsSettingsProblem(info);
   if (pointsErr) return NextResponse.json({ error: pointsErr }, { status: 400 });
