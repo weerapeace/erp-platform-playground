@@ -981,6 +981,22 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     summary: (b) => ({ grid: "ตาราง", rows: "แถวใหญ่", carousel: "เลื่อนข้าง" } as Record<string, string>)[s(b.layout)] ?? "คอลเลกชัน",
   },
 
+  // 📐 เช็คขนาด (2026-10-15) — ลูกค้าเลือกตุ๊กตา/ของ หรือพิมพ์ขนาดเอง → รุ่นที่ใส่ได้ + ใส่ได้ประมาณกี่ตัว
+  //    ข้อมูล: ช่องใส่ของของแต่ละรุ่น + ทะเบียน "ใส่อะไรได้บ้าง" (กฎ lib/fit-check) · ร้านต้องเปิด "เช็คขนาด" ในข้อมูลร้าน
+  //    เว็บร้าน: src/components/fit/FitCheckBody.tsx (วาดสดในพรีวิวด้วยข้อมูลสินค้า)
+  fitcheck: {
+    type: "fitcheck",
+    meta: { label: "เช็คขนาด (ใส่ตุ๊กตาได้ไหม)", icon: "📐", hint: "เลือกตุ๊กตา → เห็นกระเป๋าที่ใส่ได้", group: "สินค้า" },
+    fields: [
+      ...headFields({ eyebrow: "Size check", title: "ตุ๊กตาของคุณใส่ใบไหนได้บ้าง?", subtitle: true }),
+      f("showCustom", "ให้ลูกค้าพิมพ์ขนาดเอง", "toggle", { group: "layout", default: true, hint: "กว้าง × สูง × หนา (ซม.) สำหรับตุ๊กตาที่ไม่มีในรายการ" }),
+      f("showSnug", "โชว์รุ่นที่ใส่ได้แบบพอดี (แน่น)", "toggle", { group: "layout", default: true }),
+      f("columns", "คอลัมน์ (คอม)", "number", { group: "layout", default: 4, min: 2, numMax: 5 }),
+      f("limit", "จำนวนรุ่นสูงสุด", "number", { group: "layout", default: 12, min: 1, numMax: 48 }),
+    ],
+    summary: () => "เลือกตุ๊กตา → รุ่นที่ใส่ได้",
+  },
+
   // 🛍 ลุคบุ๊กกดซื้อได้ (2026-10-15) — เว็บร้าน: src/components/home/LookbookBody.tsx (วาดสดในพรีวิวด้วยข้อมูลสินค้า)
   lookbook: {
     type: "lookbook",

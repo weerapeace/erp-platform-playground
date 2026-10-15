@@ -33,6 +33,8 @@ export interface FitTarget {
   soft?: boolean;
   /** ขนาดเป็นค่าประมาณ (ยังไม่ได้วัดของจริง) */
   estimated?: boolean;
+  /** doll = ตุ๊กตา/ฟิกเกอร์ (นับเป็น "ตัว") · item = ของใช้ (นับเป็น "ชิ้น") */
+  kind?: "item" | "doll";
 }
 
 export type FitStatus = "roomy" | "snug";
@@ -148,7 +150,7 @@ export function fitReport(items: FitTarget[], comps: Compartment[]): { item: Fit
 /** แถว product_fit_items → ของที่คำนวณได้ (ขนาดไม่ครบ / ปิดใช้ = null) */
 export function fitTargetOf(row: {
   id: string; name: string; name_en?: string | null; width_cm?: unknown; height_cm?: unknown; depth_cm?: unknown;
-  is_soft?: unknown; size_estimated?: unknown; is_active?: unknown;
+  is_soft?: unknown; size_estimated?: unknown; is_active?: unknown; kind?: unknown;
 }, lang: "th" | "en" = "th"): FitTarget | null {
   if (row.is_active === false) return null;
   const w = n(row.width_cm), h = n(row.height_cm), d = n(row.depth_cm);
@@ -159,7 +161,28 @@ export function fitTargetOf(row: {
     w, h, d,
     soft: row.is_soft === true,
     estimated: row.size_estimated === true,
+    kind: row.kind === "doll" ? "doll" : "item",
   };
+}
+
+/** หน่วยนับ: ตุ๊กตา = ตัว · ของใช้ = ชิ้น */
+export const fitUnit = (t: Pick<FitTarget, "kind">, lang: "th" | "en" = "th") => (lang === "en" ? "" : t.kind === "doll" ? "ตัว" : "ชิ้น");
+
+/**
+ * เติมบรรทัด "ใส่ได้ … ประมาณ N ตัว" (เฉพาะของที่ใส่ได้) ต่อท้ายรายการ "ใส่ได้" เดิมของหัวข้อขนาด
+ * ไม่มีช่อง/ไม่มีของที่มีขนาด/ไม่มีอะไรใส่ได้ = คืนค่าเดิม · เดิมว่าง (undefined) แต่ใส่ได้ = สร้างใหม่ (rows ว่าง)
+ * ใช้ที่ products API (เว็บร้าน: หัวข้อขนาด + ป๊อป 📏 เทียบขนาด อ่านรายการนี้)
+ */
+export function withFitLines<R>(d: { fits: string[]; rows: R[] } | undefined, comps: Compartment[] | null, targets: FitTarget[], lang: "th" | "en" = "th"): { fits: string[]; rows: R[] } | undefined {
+  if (!comps?.length || !targets.length) return d;
+  const labels = fitReport(targets, comps).flatMap((r) => (r.result ? [fitLabel(r.item, r.result, lang)] : []));
+  return labels.length ? { fits: [...(d?.fits ?? []), ...labels], rows: d?.rows ?? [] } : d;
+}
+
+/** บรรทัด "ใส่ได้" สำหรับหน้าสินค้า เช่น "Labubu พวงกุญแจ (~17 ซม.) ประมาณ 2 ตัว" · "… 1 ตัว (แน่น)" */
+export function fitLabel(t: FitTarget, r: FitResult, lang: "th" | "en" = "th"): string {
+  if (lang === "en") return `${t.name} approx. ${r.count}${r.status === "snug" ? " (snug)" : ""}`;
+  return `${t.name} ประมาณ ${r.count} ${fitUnit(t)}${r.status === "snug" ? " (แน่น)" : ""}`;
 }
 
 /** ข้อความสั้น เช่น "ใส่สบาย · ประมาณ 2 ชิ้น · ช่องหน้าใส" */

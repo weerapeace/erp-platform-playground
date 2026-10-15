@@ -26,6 +26,8 @@ import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { productDimensions, fitLabels, type FitItem, type DimensionRow } from "@/lib/product-fits";
+import { fitTargetOf, parseCompartments, withFitLines, type FitTarget } from "@/lib/fit-check";
+import { readFitCheckShops } from "@/lib/website-site-info";
 import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
@@ -103,13 +105,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
   // 📏 รายการกลาง "ใส่อะไรได้บ้าง" + ✅ "รายละเอียดเพิ่ม (ติ๊ก)" (ตารางเล็ก) → หัวข้อ "ขนาด" / ต่อท้าย "รายละเอียดสินค้า"
   const [{ data: fitRows }, { data: hlRows }, { data: toneRows }] = await Promise.all([
-    sb.from("product_fit_items").select("id, name, name_en, is_active").eq("is_active", true),
+    sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order").eq("is_active", true).order("sort_order"),
     sb.from("product_highlight_items").select("id, name, name_en, is_active").eq("is_active", true).order("sort_order"),
     // 🎨 โทนสี (ของกลาง) → ตัวเลือกแต่ละสีบอกว่าอยู่โทนไหน (ปุ่ม "กรองตามสี" บนเว็บ · ดู lib/color-tone.ts)
     sb.from("erp_color_tones").select(TONE_SELECT).eq("is_active", true).order("sort_order"),
   ]);
   const colorTones = ((toneRows ?? []) as Parameters<typeof rowToTone>[0][]).map(rowToTone);
   const fitCatalog = (fitRows ?? []) as FitItem[];
+  // 📐 เช็คขนาด (เปิดต่อร้าน): ตุ๊กตา/ของที่มีขนาด × ช่องใส่ของของแต่ละรุ่น → บรรทัด "ใส่ได้" (lib/fit-check)
+  const fitOn = (await readFitCheckShops(sb)).has(s.id);
+  const fitTargets: FitTarget[] = fitOn ? ((fitRows ?? []) as Parameters<typeof fitTargetOf>[0][]).map((r) => fitTargetOf(r)).filter((x): x is FitTarget => !!x) : [];
+
   const highlightCatalog = (hlRows ?? []) as FitItem[];
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const relatedValues = await resolveRelatedValues(sb, parentFields, (parents ?? []) as Record<string, unknown>[]);
@@ -241,7 +247,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
         attrs: productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues),
         /** 📏 หัวข้อ "ขนาด": ใส่ได้ + แถว ซม./นิ้ว (เว็บเลือกเองว่าจะต่อนิ้วไหม ตามธีม) — ไม่มีข้อมูล = ไม่ส่ง */
-        dimensions: productDimensions(p as unknown as DimensionRow & { fits?: unknown }, fitCatalog),
+        dimensions: withFitLines(productDimensions(p as unknown as DimensionRow & { fits?: unknown }, fitCatalog), fitOn ? parseCompartments((p as { compartments?: unknown }).compartments) : null, fitTargets),
+        /** 📐 ช่องใส่ของ (ขนาดด้านใน ซม.) — เฉพาะร้านที่เปิดเช็คขนาด + รุ่นที่วัดแล้ว · Section "เช็คขนาด" ใช้คิดขนาดที่ลูกค้าพิมพ์เอง */
+        fitBoxes: (() => { const c = fitOn ? parseCompartments((p as { compartments?: unknown }).compartments) : null; return c?.length ? c : undefined; })(),
         /** ✅ รายละเอียดเพิ่ม (ติ๊กใน Parent SKU) — เว็บต่อท้ายหัวข้อ "รายละเอียดสินค้า" เป็น "- ข้อความ" · ไม่มี = ไม่ส่ง */
         highlights: (() => { const h = fitLabels((p as { highlights?: unknown }).highlights, highlightCatalog); return h.length ? h : undefined; })(),
         images: r.images.map(imageUrl),

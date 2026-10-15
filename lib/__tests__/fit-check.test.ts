@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bestFit, compartmentsProblem, fitInto, fitReport, fitTargetOf, fitText, parseCompartments, type Compartment, type FitTarget } from "../fit-check";
+import { bestFit, compartmentsProblem, fitInto, fitLabel, fitReport, fitTargetOf, fitText, parseCompartments, withFitLines, type Compartment, type FitTarget } from "../fit-check";
 
 /** 📐 ใส่ได้ไหม / กี่ชิ้น — ตอบลูกค้าตรง ๆ จึงต้องถูกเสมอ */
 const labubu: FitTarget = { id: "l", name: "Labubu", w: 9.5, h: 17, d: 7, soft: true };
@@ -52,5 +52,28 @@ describe("ใส่ได้ไหม", () => {
     expect(fitTargetOf({ id: "1", name: "A", width_cm: "9.5", height_cm: 17, depth_cm: 7, is_soft: true, size_estimated: true })).toMatchObject({ w: 9.5, soft: true, estimated: true });
     expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: null, depth_cm: 7 })).toBeNull();
     expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, is_active: false })).toBeNull();
+  });
+});
+
+describe("บรรทัดหน้าสินค้า", () => {
+  it("ตุ๊กตานับเป็นตัว · ของใช้นับเป็นชิ้น · แน่นบอก", () => {
+    const doll = fitTargetOf({ id: "1", name: "Labubu", kind: "doll", width_cm: 9.5, height_cm: 17, depth_cm: 7, is_soft: true })!;
+    expect(fitLabel(doll, bestFit(doll, [main])!)).toBe("Labubu ประมาณ 2 ตัว");
+    expect(fitLabel(doll, bestFit(doll, [{ id: "x", name: "x", w: 17, h: 9, d: 6.5 }])!)).toBe("Labubu ประมาณ 1 ตัว (แน่น)");
+    const item = fitTargetOf({ id: "2", name: "ขวดน้ำ", width_cm: 6.5, height_cm: 22, depth_cm: 6.5 })!;
+    expect(fitLabel(item, bestFit(item, [{ id: "y", name: "y", w: 25, h: 15, d: 10 }])!)).toBe("ขวดน้ำ ประมาณ 2 ชิ้น");
+  });
+});
+
+describe("บรรทัดใส่ได้ในหัวข้อขนาด (products API)", () => {
+  const big: FitTarget = { id: "z", name: "ตุ๊กตา 30", w: 18, h: 30, d: 12, soft: true, kind: "doll" };
+  const lab: FitTarget = { ...labubu, kind: "doll" };
+  it("ต่อท้ายของเดิม เฉพาะที่ใส่ได้", () => {
+    expect(withFitLines({ fits: ["สมาร์ทโฟน"], rows: [1] }, [main], [lab, big])).toEqual({ fits: ["สมาร์ทโฟน", "Labubu ประมาณ 2 ตัว"], rows: [1] });
+  });
+  it("เดิมว่างแต่ใส่ได้ = สร้างใหม่ · ไม่วัด/ใส่ไม่ได้ = ค่าเดิม", () => {
+    expect(withFitLines(undefined, [main], [lab])).toEqual({ fits: ["Labubu ประมาณ 2 ตัว"], rows: [] });
+    expect(withFitLines(undefined, null, [lab])).toBeUndefined();
+    expect(withFitLines(undefined, [front], [big])).toBeUndefined();
   });
 });

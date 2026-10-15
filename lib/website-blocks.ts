@@ -60,7 +60,8 @@ export type BlockType =
   | "countdown"
   | "lookbook"
   | "logos"
-  | "collections";
+  | "collections"
+  | "fitcheck";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -349,6 +350,17 @@ export interface CollectionsBlock extends BlockBase {
   showCount: boolean;
   limit: number;
 }
+/** 📐 เช็คขนาด — ลูกค้าเลือกตุ๊กตา/ของ (หรือพิมพ์ขนาดเอง) → รุ่นที่ใส่ได้ (lib/fit-check · ร้านต้องเปิดเช็คขนาด) */
+export interface FitCheckBlock extends BlockBase {
+  type: "fitcheck";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  showCustom: boolean;
+  showSnug: boolean;
+  columns: number;
+  limit: number;
+}
 /** 📰 โลโก้สื่อ / พาร์ตเนอร์ */
 export interface LogosBlock extends BlockBase {
   type: "logos";
@@ -566,6 +578,7 @@ export type Block =
   | LookbookBlock
   | LogosBlock
   | CollectionsBlock
+  | FitCheckBlock
   | CtaBlock
   | RichTextBlock
   | ImageBlock
