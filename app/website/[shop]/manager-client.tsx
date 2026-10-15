@@ -21,6 +21,7 @@ import { WebsitePagesPanel } from "@/components/website-pages-panel";
 import { WebsiteInfoPanel } from "@/components/website-info-panel";
 import { WebsiteOrdersPanel } from "@/components/website-orders-panel";
 import { WebsiteCouponsPanel } from "@/components/website-coupons-panel";
+import { WebsiteMembersPanel } from "@/components/website-members-panel";
 import { WebsiteOpenToggle } from "@/components/website-open-toggle";
 import { WebsiteListingsPanel, type Listing, type CategoryDef, type ShopInfo } from "@/components/website-listings-panel";
 
@@ -30,12 +31,12 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<"listings" | "categories" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders" | "coupons">("listings");
+  const [tab, setTab] = useState<"listings" | "categories" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders" | "coupons" | "members">("listings");
   const [categories, setCategories] = useState<CategoryDef[]>([]);
   // ลิงก์จากที่อื่น (เช่น ป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") เปิดแท็บที่ระบุ ?tab= · ⚠️ ไม่ใช้ useSearchParams (อยู่ใน PlaygroundShell)
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    const ok = ["listings", "categories", "fieldmap", "design", "layout", "pages", "info", "orders", "coupons"] as const;
+    const ok = ["listings", "categories", "fieldmap", "design", "layout", "pages", "info", "orders", "coupons", "members"] as const;
     if (t && (ok as readonly string[]).includes(t)) setTab(t as (typeof ok)[number]);
   }, []);
 
@@ -131,6 +132,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               { k: "info", l: "🏪 ข้อมูลร้าน" },
               { k: "orders", l: "🧾 ออเดอร์" },
               { k: "coupons", l: "🎟️ คูปอง" },
+              { k: "members", l: "👥 สมาชิก" },
             ] as const).map((t) => (
               <button
                 key={t.k}
@@ -180,6 +182,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {/* แท็บออเดอร์จากเว็บ */}
         {tab === "orders" && shop && <WebsiteOrdersPanel shopSlug={shop.slug} shopId={shop.id} />}
         {tab === "coupons" && shop && <WebsiteCouponsPanel shopSlug={shop.slug} shopId={shop.id} />}
+        {tab === "members" && shop && <WebsiteMembersPanel shopSlug={shop.slug} />}
       </div>
     </PlaygroundShell>
   );

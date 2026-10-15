@@ -250,7 +250,8 @@ export type CreateOrderResult =
   | { ok: true; order: OrderView }
   | { ok: false; error: string; status: number };
 
-export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unknown): Promise<CreateOrderResult> {
+/** opts.customerId = สมาชิกที่ล็อกอิน (มาจากเว็บร้านฝั่งเซิร์ฟเวอร์ผ่านด่านกุญแจภายในเท่านั้น — ห้ามรับจากเบราว์เซอร์ตรง ๆ) */
+export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unknown, opts: { customerId?: string | null } = {}): Promise<CreateOrderResult> {
   const v = validateOrderInput(raw);
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const input = v.input;
@@ -379,6 +380,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         discount,
         grand_total: grandTotal,
         note: input.note ?? null,
+        customer_id: opts.customerId ?? null,
     };
     const ins = await sb.from("store_orders").insert(payload).select("id, order_no, created_at").maybeSingle();
     const insErr = ins.error;
@@ -452,7 +454,7 @@ function promptpayFor(info: SiteInfo, method: string, paymentStatus: string): Or
 
 // ─── ลูกค้าตามออเดอร์ (ต้องรู้เลขที่ + เบอร์โทร กันคนอื่นสุ่มดู) ───
 
-type OrderRow = {
+export type OrderRow = {
   id: string;
   order_no: string;
   status: string;
@@ -473,7 +475,7 @@ type OrderRow = {
   created_at: string;
 };
 
-type ItemRow = {
+export type ItemRow = {
   name: string;
   variant_label: string | null;
   unit_price: number | string;
