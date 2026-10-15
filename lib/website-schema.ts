@@ -1008,6 +1008,36 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         ],
       }),
       f("showList", "การ์ดสินค้าทุกจุดใต้รูป", "toggle", { group: "layout", default: false, hint: "เรียงสินค้าทุกจุดไว้ใต้รูปด้วย (ลูกค้าเห็นครบโดยไม่ต้องกดจุด)" }),
+      // 🃏 การ์ดสินค้าที่เด้ง/อยู่ข้างรูป — เลือกว่าจะโชว์อะไร
+      f("cardSize", "ขนาดการ์ดป๊อป", "select", {
+        group: "products",
+        default: "m",
+        options: [
+          { v: "s", l: "เล็ก" },
+          { v: "m", l: "กลาง" },
+          { v: "l", l: "ใหญ่" },
+        ],
+        showIf: { key: "layout", eq: "pop" },
+      }),
+      f("cardRatio", "สัดส่วนรูปในการ์ด", "select", {
+        group: "products",
+        default: "auto",
+        options: [
+          { v: "auto", l: "อัตโนมัติ (ข้างรูป 4:5 · ป๊อป 1:1)" },
+          { v: "1:1", l: "จัตุรัส 1:1" },
+          { v: "4:5", l: "แนวตั้ง 4:5" },
+          { v: "3:4", l: "แนวตั้ง 3:4" },
+        ],
+      }),
+      f("showImage", "รูปสินค้า", "toggle", { group: "products", default: true }),
+      f("showName", "ชื่อสินค้า", "toggle", { group: "products", default: true }),
+      f("showPrice", "ราคา", "toggle", { group: "products", default: true }),
+      f("showSwatches", "จุดสี (กดแล้วรูปเปลี่ยนเป็นสีนั้น)", "toggle", { group: "products", default: false }),
+      f("showDesc", "คำอธิบายย่อ (2 บรรทัด)", "toggle", { group: "products", default: false }),
+      f("showAdd", "ปุ่มใส่ตะกร้า", "toggle", { group: "products", default: true }),
+      text("addText", "ข้อความปุ่มใส่ตะกร้า", { group: "products", default: "ใส่ตะกร้า", max: 30, showIf: { key: "showAdd", eq: true } }),
+      f("showView", "ปุ่มดูสินค้า", "toggle", { group: "products", default: true }),
+      text("viewText", "ข้อความปุ่มดูสินค้า", { group: "products", default: "ดูสินค้า", max: 30, showIf: { key: "showView", eq: true } }),
     ],
     children: {
       key: "spots",
@@ -1018,6 +1048,18 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       fields: [
         f("code", "สินค้าของจุดนี้", "products", { max: 1, wide: true }),
         f("pos", "ตำแหน่งบนรูป", "point", { pointImage: "imageKey", wide: true }),
+        f("popSide", "การ์ดเด้งด้านไหนของจุด", "select", {
+          default: "auto",
+          options: [
+            { v: "auto", l: "อัตโนมัติ (หลบขอบรูปให้เอง)" },
+            { v: "right", l: "ขวาของจุด" },
+            { v: "left", l: "ซ้ายของจุด" },
+            { v: "top", l: "เหนือจุด" },
+            { v: "bottom", l: "ใต้จุด" },
+          ],
+          hint: "ใช้กับรูปแบบ \"รูปเต็ม + ป๊อปที่จุด\"",
+        }),
+        text("note", "ข้อความเพิ่มในการ์ด (ถ้ามี)", { default: "", max: 120, wide: true, placeholder: "เช่น สี Cherry Red · ขายดีอันดับ 1" }),
       ],
       summary: (it) => (Array.isArray(it.code) && it.code.length ? String(it.code[0]) : "ยังไม่เลือกสินค้า"),
     },

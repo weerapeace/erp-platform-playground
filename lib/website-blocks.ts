@@ -323,7 +323,18 @@ export interface LookbookBlock extends BlockBase {
   side: "left" | "right";
   dot: "dot" | "plus" | "num";
   showList: boolean;
-  spots: (ChildBase & { code: string[]; pos: { x: number; y: number } })[];
+  cardSize: "s" | "m" | "l";
+  cardRatio: "auto" | "1:1" | "4:5" | "3:4";
+  showImage: boolean;
+  showName: boolean;
+  showPrice: boolean;
+  showSwatches: boolean;
+  showDesc: boolean;
+  showAdd: boolean;
+  addText: string;
+  showView: boolean;
+  viewText: string;
+  spots: (ChildBase & { code: string[]; pos: { x: number; y: number }; popSide: "auto" | "right" | "left" | "top" | "bottom"; note: string })[];
 }
 /** 📖 การ์ดคอลเลกชัน (คอลเลกชันที่เปิดหน้าไว้ · แท็บ 🎞 คอลเลกชัน) */
 export interface CollectionsBlock extends BlockBase {

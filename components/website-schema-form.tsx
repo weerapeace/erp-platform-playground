@@ -148,6 +148,16 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
   const key = fd.pointImage ? parent?.[fd.pointImage] ?? item?.[fd.pointImage] : null;
   const o = (value ?? {}) as Record<string, unknown>;
   const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50) };
+  // จุดอื่นในชุดเดียวกัน (ชิ้นย่อยพี่น้องที่มีช่องนี้) → โชว์จาง ๆ ให้วางไม่ทับกัน
+  const siblings: { x: number; y: number }[] = [];
+  for (const arr of Object.values(parent ?? {})) {
+    if (!Array.isArray(arr)) continue;
+    for (const it of arr as Record<string, unknown>[]) {
+      if (!it || typeof it !== "object" || it === item || (item?.id && it.id === item.id)) continue;
+      const pv = it[fd.key] as { x?: unknown; y?: unknown } | undefined;
+      if (pv && typeof pv === "object" && Number.isFinite(Number(pv.x)) && Number.isFinite(Number(pv.y))) siblings.push({ x: Number(pv.x), y: Number(pv.y) });
+    }
+  }
   if (typeof key !== "string" || !key) return <Field label={fd.label} wide><p className="text-xs text-slate-400">เลือกรูปของ Section ก่อน แล้วค่อยคลิกวางจุด</p></Field>;
   const pick = (e: React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -159,6 +169,9 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
       <div className="relative inline-block max-w-full cursor-crosshair select-none rounded-lg overflow-hidden border border-slate-200" onClick={pick}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=800`} alt="" className="block max-h-72 w-auto max-w-full" draggable={false} />
+        {siblings.map((p, i) => (
+          <span key={i} className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-white/70 border border-slate-500/60 pointer-events-none" style={{ left: `${p.x}%`, top: `${p.y}%` }} title="จุดอื่น" />
+        ))}
         <span
           className="absolute w-6 h-6 -ml-3 -mt-3 rounded-full bg-white border-2 border-slate-900 shadow flex items-center justify-center pointer-events-none"
           style={{ left: `${v.x}%`, top: `${v.y}%` }}

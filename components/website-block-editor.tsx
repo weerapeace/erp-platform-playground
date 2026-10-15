@@ -139,6 +139,7 @@ export function StylePanel({
   hasHeading = true,
   theme = DEFAULT_THEME_COLORS,
   fontNames = DEFAULT_FONT_NAMES,
+  onPlay,
 }: {
   value: BlockStyle;
   onChange: (s: BlockStyle) => void;
@@ -149,6 +150,8 @@ export function StylePanel({
   /** สี/ฟอนต์ของธีมร้าน — วาดจุดสี/ตัวอย่างฟอนต์ (ของกลาง useShopTheme) */
   theme?: ThemeColors;
   fontNames?: ThemeFontNames;
+  /** แท็บลูกเล่น: ปุ่ม ▶ เล่นให้ดูอีกครั้งในพรีวิว (ไม่ส่ง = ไม่มีปุ่ม) — เลือกค่าแล้วพรีวิวเล่นให้เองอยู่แล้ว */
+  onPlay?: () => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [tab, setTab] = useState<"all" | "text" | "mobile" | "motion">(mode === "motion" ? "motion" : "all");
@@ -239,8 +242,18 @@ export function StylePanel({
                   <Seg value={s.motion.hover} onChange={(v) => setMo({ hover: v })} options={[{ v: "none", l: "ไม่มี" }, { v: "lift", l: "ยกตัว" }, { v: "zoom", l: "ซูมรูป" }, { v: "glow", l: "เรืองแสง" }]} />
                 </Field>
               </div>
+              {onPlay && (
+                <button
+                  type="button"
+                  onClick={onPlay}
+                  disabled={s.motion.entrance === "none" && s.motion.hover === "none"}
+                  className="sm:col-span-2 justify-self-start rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100 disabled:opacity-40"
+                >
+                  ▶ เล่นให้ดูอีกครั้ง
+                </button>
+              )}
               <p className="sm:col-span-2 text-[11px] text-slate-400">
-                ขยับไม่เกิน 0.6 วิ · คนที่ตั้งเครื่องว่า &quot;ลดการเคลื่อนไหว&quot; จะไม่เห็นลูกเล่น (ระบบปิดให้เอง) · ดูผลจริงในพรีวิว (อัปเดตเองใน ~2 วิ)
+                กดเลือกแล้วพรีวิวเล่นให้ดูทันที (ตอนชี้เมาส์ = ค้างให้ดูแป๊บหนึ่ง) · ขยับไม่เกิน 1 วิ · ลูกค้าที่ตั้งเครื่องว่า &quot;ลดการเคลื่อนไหว&quot; จะไม่เห็นลูกเล่น (ระบบปิดให้เอง)
               </p>
             </div>
           ) : tab === "text" ? (

@@ -1169,7 +1169,14 @@ export function WebsiteBuilder({
             {visibilityRow(selBlock.visibility, (k, val) => setVis(selBlock.id, k, val))}
           </div>
         )}
-        {propTab === "motion" && <StylePanel value={styleOf(selBlock)} onChange={(style) => patchBlock(selBlock.id, { style })} mode="motion" />}
+        {propTab === "motion" && (
+          <StylePanel
+            value={styleOf(selBlock)}
+            onChange={(style) => patchBlock(selBlock.id, { style })}
+            mode="motion"
+            onPlay={() => iframeRef.current?.contentWindow?.postMessage({ type: "storefront-motion-play", blockId: selBlock.id }, "*")}
+          />
+        )}
       </div>
     </div>
   );
