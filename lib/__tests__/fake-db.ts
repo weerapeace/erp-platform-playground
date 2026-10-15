@@ -1,6 +1,7 @@
 /**
  * ฐานข้อมูลจำลองในหน่วยความจำ สำหรับ test ตัวเชื่อม DB (ไม่แตะฐานข้อมูลจริง — ห้ามสร้างออเดอร์/คูปองทดสอบใน DB จริง)
- * รองรับเท่าที่โค้ดเราใช้: select (ไม่สนคอลัมน์ · แถวต้องมีตารางลูกที่ embed ใส่มาเอง) · eq/neq/in/gte/is/or · order/limit · maybeSingle · count
+ * รองรับเท่าที่โค้ดเราใช้: select (ไม่สนคอลัมน์ · แถวต้องมีตารางลูกที่ embed ใส่มาเอง) · eq/neq/in/gte/is/or/like · order/limit · maybeSingle · count
+ * เขียน: insert (แถวเดียว/หลายแถว · ใส่ id/created_at ให้ถ้าไม่มี · ต่อ .select().maybeSingle() ได้) · delete().eq() — แก้ตาราง tables ที่ส่งมาเลย (test อ่านผลได้)
  * rpc = ฟังก์ชันที่ test ส่งมาเอง (เลียนแบบฟังก์ชัน DB จริง)
  */
 export type Row = Record<string, unknown>;
@@ -23,8 +24,25 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
   const from = (table: string) => {
     const filters: Filter[] = [];
     let head = false;
-    const rows = () => (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+    let inserted: Row[] | null = null;
+    let del = false;
+    const rows = () => inserted ?? (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+    const run = () => {
+      if (del) tables[table] = (tables[table] ?? []).filter((r) => !filters.every((f) => f(r)));
+    };
     const q = {
+      insert: (v: Row | Row[]) => {
+        const list = (Array.isArray(v) ? v : [v]).map((r, i) => ({ id: `${table}-${(tables[table]?.length ?? 0) + i + 1}`, created_at: "2026-10-20T00:00:00Z", ...r }));
+        (tables[table] ??= []).push(...list);
+        inserted = list;
+        return q;
+      },
+      delete: () => ((del = true), q),
+      like: (c: string, pat: string) => {
+        const re = new RegExp("^" + pat.split("%").map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
+        filters.push((r) => re.test(String(r[c] ?? "")));
+        return q;
+      },
       select: (_cols?: string, opts?: { head?: boolean }) => ((head = !!opts?.head), q),
       eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), q),
       neq: (c: string, v: unknown) => (filters.push((r) => r[c] !== v), q),
@@ -35,7 +53,10 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
       order: () => q,
       limit: () => q,
       maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
-      then: (res: (v: { data: Row[] | null; count: number; error: null }) => unknown) => res({ data: head ? null : rows(), count: rows().length, error: null }),
+      then: (res: (v: { data: Row[] | null; count: number; error: null }) => unknown) => {
+        run();
+        return res({ data: head || del ? null : rows(), count: rows().length, error: null });
+      },
     };
     return q;
   };

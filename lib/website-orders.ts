@@ -25,7 +25,7 @@ import {
   type ChildSku,
   type ListingRow,
 } from "@/lib/website-field-map";
-import { calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
+import { calcGiftFee, calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
@@ -82,6 +82,8 @@ export interface PublicOrderInput {
   note?: string;
   /** โค้ดส่วนลด (ตรวจ+คิดใหม่ฝั่งเซิร์ฟเวอร์เสมอ — lib/website-coupons) */
   couponCode?: string;
+  /** 🎀 ห่อของขวัญ — ค่าห่อคิดจากที่ร้านตั้ง (calcGiftFee) ไม่เชื่อตัวเลขจากหน้าเว็บ */
+  gift?: { wrap: boolean; message?: string; hidePrice?: boolean };
 }
 
 export interface OrderLineView {
@@ -111,6 +113,11 @@ export interface OrderView {
   pointsDiscount?: number;
   /** ⭐ แต้มที่ได้จากออเดอร์นี้ (ได้เมื่อสถานะ "สำเร็จ") */
   pointsEarned?: number;
+  /** 🎀 ห่อของขวัญ (ไม่ห่อ = false / 0 / "") */
+  giftWrap?: boolean;
+  giftFee?: number;
+  giftMessage?: string;
+  giftHidePrice?: boolean;
   grandTotal: number;
   note: string;
   createdAt: string;
@@ -162,6 +169,12 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
   const pm = clean(r.paymentMethod, 20);
   if (pm !== "cod" && pm !== "promptpay") return { ok: false, error: "กรุณาเลือกวิธีชำระเงิน" };
 
+  // 🎀 ห่อของขวัญ (ข้อความการ์ด ≤ 300 ตัว · ขึ้นบรรทัดใหม่ได้)
+  const g = (r.gift ?? {}) as Record<string, unknown>;
+  const gift = g.wrap === true
+    ? { wrap: true, message: String(g.message ?? "").replace(/\r/g, "").trim().slice(0, 300) || undefined, hidePrice: g.hidePrice === true }
+    : undefined;
+
   return {
     ok: true,
     input: {
@@ -177,6 +190,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       paymentMethod: pm,
       note: clean(r.note, 500) || undefined,
       couponCode: normalizeCouponCode(r.couponCode) || undefined,
+      gift,
     },
   };
 }
@@ -350,6 +364,12 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
 
   subtotal = Math.round(subtotal * 100) / 100;
   const shippingFee = calcShippingFee(subtotal, info);
+  // 🎀 ห่อของขวัญ: ร้านปิดบริการไปแล้วระหว่างลูกค้ากรอก = บอกให้เอาออก (ไม่เงียบห่อไม่ได้) · ข้อความ/ซ่อนราคา รับเฉพาะที่ร้านเปิดให้เลือก
+  if (input.gift?.wrap && !info.gift_enabled) return { ok: false, error: "ร้านปิดบริการห่อของขวัญแล้ว — เอาตัวเลือกห่อของขวัญออกแล้วสั่งอีกครั้ง", status: 409 };
+  const giftWrap = !!input.gift?.wrap;
+  const giftFee = calcGiftFee(giftWrap, info);
+  const giftMessage = giftWrap && info.gift_allow_message ? input.gift?.message ?? null : null;
+  const giftHidePrice = giftWrap && info.gift_allow_hide_price && !!input.gift?.hidePrice;
   // 🎟️ โค้ดส่วนลด: ตรวจ + คิดใหม่ที่นี่เสมอ (ไม่เชื่อยอดจากหน้าเว็บ) · ใช้ไม่ได้ = ไม่รับออเดอร์ บอกเหตุผล (ลูกค้าเอาโค้ดออกแล้วสั่งต่อได้)
   let discount = 0;
   let coupon: StoreCoupon | null = null;
@@ -369,7 +389,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     pointsUsed = rr.points;
     pointsDiscount = rr.discount;
   }
-  const grandTotal = Math.round((subtotal + shippingFee - discount - pointsDiscount) * 100) / 100;
+  const grandTotal = Math.round((subtotal + shippingFee + giftFee - discount - pointsDiscount) * 100) / 100;
 
   const prefix = orderNoPrefix(info, shop.slug);
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -401,6 +421,10 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         coupon_code: coupon?.code ?? null,
         points_used: pointsUsed,
         points_discount: pointsDiscount,
+        gift_wrap: giftWrap,
+        gift_fee: giftFee,
+        gift_message: giftMessage,
+        gift_hide_price: giftHidePrice,
         grand_total: grandTotal,
         note: input.note ?? null,
         customer_id: opts.customerId ?? null,
@@ -469,6 +493,10 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         pointsUsed,
         pointsDiscount,
         pointsEarned: 0,
+        giftWrap,
+        giftFee,
+        giftMessage: giftMessage ?? "",
+        giftHidePrice,
         grandTotal,
         note: input.note ?? "",
         createdAt: order.created_at,
@@ -506,6 +534,10 @@ export type OrderRow = {
   points_used?: number | null;
   points_discount?: number | string | null;
   points_earned?: number | null;
+  gift_wrap?: boolean | null;
+  gift_fee?: number | string | null;
+  gift_message?: string | null;
+  gift_hide_price?: boolean | null;
   grand_total: number | string;
   note: string | null;
   created_at: string;
@@ -548,6 +580,10 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     pointsUsed: num(o.points_used),
     pointsDiscount: num(o.points_discount),
     pointsEarned: num(o.points_earned),
+    giftWrap: !!o.gift_wrap,
+    giftFee: num(o.gift_fee),
+    giftMessage: o.gift_message ?? "",
+    giftHidePrice: !!o.gift_hide_price,
     grandTotal: num(o.grand_total),
     note: o.note ?? "",
     createdAt: o.created_at,

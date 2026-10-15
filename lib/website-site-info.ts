@@ -18,7 +18,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "promo" | "points" | "fit";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -29,6 +29,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "shop", label: "🏪 ร้าน", hint: "ข้อความแนะนำร้านที่โชว์ท้ายเว็บและใน Google" },
   { key: "contact", label: "📞 ช่องทางติดต่อ", hint: "ขึ้นที่ท้ายเว็บและหน้า /contact — เว้นว่างช่องไหน เว็บจะไม่โชว์ช่องนั้น" },
   { key: "order", label: "🧾 การสั่งซื้อ", hint: "ค่าส่ง ช่องทางชำระเงิน และเลขที่ออเดอร์ — มีผลทันทีตอนลูกค้ากดสั่ง" },
+  { key: "gift", label: "🎀 ห่อของขวัญ", hint: "ลูกค้าติ๊ก \"ห่อเป็นของขวัญ\" ตอนสั่งซื้อ (เขียนการ์ด/ไม่ใส่ราคาในกล่องได้) · ค่าห่อบวกในยอดรวม (ไม่โดนส่วนลด/แต้ม) · ออเดอร์ในแท็บ 🧾 จะมีป้าย 🎀 ต้องห่อ + ข้อความการ์ด" },
   { key: "points", label: "⭐ แต้มสมาชิก", hint: "สมาชิกได้แต้มเมื่อออเดอร์เป็น 'สำเร็จ' (ไม่นับค่าส่ง) และใช้แต้มลดราคาตอนสั่งได้ · ระดับสมาชิก (Silver/Gold ได้แต้มคูณ) ตั้งที่แท็บ 👥 สมาชิก" },
   { key: "fit", label: "📐 เช็คขนาด (ใส่ตุ๊กตา/ของ)", hint: "คำนวณจาก \"ช่องใส่ของ\" (ขนาดด้านใน) ของแต่ละรุ่น กับขนาดตุ๊กตาในทะเบียน \"ใส่อะไรได้บ้าง\" · เปิดแล้วรุ่นที่ยังไม่วัดช่องจะขึ้นในแท็บ ⚠️ ต้องแก้" },
   { key: "promo", label: "🎁 ป๊อปอัปลูกค้าใหม่", hint: "โผล่ครั้งเดียวต่อผู้เข้าชม (ไม่โผล่หน้าชำระเงิน) · แจกโค้ดจากแท็บ 🎟️ คูปอง — สร้างคูปองก่อนแล้วใส่โค้ดที่นี่" },
@@ -68,6 +69,14 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "promptpay_name", label: "ชื่อบัญชีพร้อมเพย์", group: "order", type: "text", isPublic: true },
   { key: "order_note", label: "ข้อความแจ้งลูกค้าตอนสั่งซื้อ", hint: "เช่น จัดส่งภายใน 1-2 วันทำการหลังยืนยันยอด", group: "order", type: "text", isPublic: true },
   { key: "order_prefix", label: "ตัวย่อเลขที่ออเดอร์", hint: "A-Z 0-9 ไม่เกิน 6 ตัว · เว้นว่าง = ใช้ตัวอักษรจากชื่อร้าน · เลขจะเป็น XX-256910-00001", group: "order", type: "text", isPublic: false },
+
+  // ─── 🎀 ห่อของขวัญ (เว็บร้าน CheckoutClient · คิดค่าห่อใหม่ฝั่งเซิร์ฟเวอร์ calcGiftFee ใน createStorefrontOrder) ───
+  { key: "gift_enabled", label: "เปิดบริการห่อของขวัญ", hint: "ปิดทีหลัง ออเดอร์ที่สั่งห่อไว้แล้วยังอยู่ครบ", group: "gift", type: "bool", isPublic: true },
+  { key: "gift_fee", label: "ค่าห่อ (บาท ต่อออเดอร์)", hint: "0 = ห่อฟรี", group: "gift", type: "number", isPublic: true, placeholder: "50" },
+  { key: "gift_title", label: "ชื่อบริการที่ลูกค้าเห็น", hint: "เว้นว่าง = ห่อเป็นของขวัญ", group: "gift", type: "text", isPublic: true, placeholder: "ห่อเป็นของขวัญ" },
+  { key: "gift_desc", label: "รายละเอียดสั้น ๆ", hint: "บอกว่าได้อะไร เช่น กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ", group: "gift", type: "text", isPublic: true, placeholder: "กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ" },
+  { key: "gift_allow_message", label: "ให้ลูกค้าเขียนข้อความบนการ์ด", hint: "ไม่เกิน 300 ตัวอักษร · โชว์ในออเดอร์ให้คนแพ็กเขียน/พิมพ์ใส่การ์ด", group: "gift", type: "bool", isPublic: true },
+  { key: "gift_allow_hide_price", label: "ให้เลือก \"ไม่ใส่ราคา/ใบเสร็จในกล่อง\"", hint: "สำหรับส่งตรงถึงผู้รับเป็นของขวัญ", group: "gift", type: "bool", isPublic: true },
 
   // ─── 🎁 ป๊อปอัปลูกค้าใหม่ (เว็บร้าน src/components/layout/PromoPopup.tsx) ───
   { key: "promo_enabled", label: "เปิดป๊อปอัปแจกโค้ดลูกค้าใหม่", group: "promo", type: "bool", isPublic: true },
@@ -116,6 +125,12 @@ export interface SiteInfo {
   promptpay_name: string;
   order_note: string;
   order_prefix: string;
+  gift_enabled: boolean;
+  gift_fee: number;
+  gift_title: string;
+  gift_desc: string;
+  gift_allow_message: boolean;
+  gift_allow_hide_price: boolean;
   promo_enabled: boolean;
   promo_code: string;
   promo_title: string;
@@ -157,6 +172,12 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   promptpay_name: "",
   order_note: "",
   order_prefix: "",
+  gift_enabled: false,
+  gift_fee: 0,
+  gift_title: "",
+  gift_desc: "",
+  gift_allow_message: true,
+  gift_allow_hide_price: true,
   promo_enabled: false,
   promo_code: "",
   promo_title: "",
@@ -259,6 +280,12 @@ export function publicSiteInfo(info: SiteInfo): Omit<SiteInfo, "order_prefix" | 
     if (f.isPublic) out[f.key] = info[f.key as keyof SiteInfo];
   }
   return out as Omit<SiteInfo, "order_prefix" | "beta_canvas">;
+}
+
+/** 🎀 ค่าห่อของขวัญที่คิดจริง — ร้านปิดบริการ / ลูกค้าไม่ได้ขอ = 0 (ไม่โดนส่วนลด/แต้ม เหมือนค่าส่ง) */
+export function calcGiftFee(wrap: boolean, info: Pick<SiteInfo, "gift_enabled" | "gift_fee">): number {
+  if (!wrap || !info.gift_enabled) return 0;
+  return Math.max(0, Math.round(info.gift_fee * 100) / 100);
 }
 
 /** สวิตช์ฟีเจอร์ทดลองที่ร้านนี้เปิดอยู่ (key ขึ้นต้น beta_) — ใช้กรองคลัง Section ด้วย blockTypesFor() */

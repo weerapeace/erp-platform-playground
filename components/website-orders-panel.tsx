@@ -5,6 +5,7 @@
  *
  * รายการออเดอร์ที่ลูกค้าสั่งจากเว็บร้าน (ตาราง MiniTable ของกลาง) · กดแถวดูรายละเอียด
  * เปลี่ยนสถานะ / สถานะชำระเงิน / โน้ตภายใน — ทุกการแก้มี audit
+ * 🎀 ออเดอร์ห่อของขวัญ: ป้ายในตาราง + กล่องข้อความการ์ด (คัดลอกได้) + เตือน "ไม่ใส่ราคาในกล่อง" (ตั้งบริการที่แท็บ 🏪 ข้อมูลร้าน)
  * ไม่มีปุ่มลบ: ออเดอร์มีเลขที่ที่ลูกค้าถืออยู่ → ใช้ "ยกเลิก" แทน (ยังค้นย้อนได้)
  * ข้อมูล: /api/website/orders
  */
@@ -13,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { MiniTable } from "@/components/mini-table";
 import { ERPModal } from "@/components/modal";
+import { CopyButton } from "@/components/copy-button";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -33,6 +35,10 @@ type Order = {
   pointsUsed?: number;
   pointsDiscount?: number;
   pointsEarned?: number;
+  giftWrap?: boolean;
+  giftFee?: number;
+  giftMessage?: string;
+  giftHidePrice?: boolean;
   isMember?: boolean;
   grandTotal: number;
   note: string;
@@ -149,7 +155,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
               ? "ยังไม่มีออเดอร์จากเว็บร้านนี้ — เมื่อลูกค้ากดสั่งซื้อบนเว็บ รายการจะขึ้นที่นี่"
               : "ไม่มีออเดอร์ในสถานะนี้"
           }
-          searchText={(o) => `${o.orderNo} ${o.customerName} ${o.customerPhone} ${o.skuCodes.join(" ")} ${o.items.map((i) => i.name).join(" ")}`}
+          searchText={(o) => `${o.giftWrap ? "ห่อของขวัญ " : ""}${o.orderNo} ${o.customerName} ${o.customerPhone} ${o.skuCodes.join(" ")} ${o.items.map((i) => i.name).join(" ")}`}
           searchPlaceholder="ค้นหา เลขที่ / ชื่อ / เบอร์ / รหัสสินค้า"
           onRowClick={(o) => setOpenId(o.id)}
           columns={[
@@ -161,6 +167,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 <div>
                   <p className="font-mono text-xs font-semibold text-slate-800">{o.orderNo}</p>
                   <p className="text-[11px] text-slate-400">{when(o.createdAt)}</p>
+                  {o.giftWrap && <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200">🎀 ต้องห่อของขวัญ</span>}
                 </div>
               ),
               sortValue: (o) => o.createdAt,
@@ -252,6 +259,20 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 {open.note && (
                   <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mt-2">หมายเหตุ: {open.note}</p>
                 )}
+                {open.giftWrap && (
+                  <div className="mt-2 rounded-lg border border-pink-200 bg-pink-50 px-2.5 py-2 text-xs text-pink-800 space-y-1">
+                    <p className="font-semibold">🎀 ห่อเป็นของขวัญ</p>
+                    {open.giftHidePrice && <p className="font-medium text-rose-700">⚠️ ห้ามใส่ใบเสร็จ/ป้ายราคาในกล่อง (ส่งถึงผู้รับเป็นของขวัญ)</p>}
+                    {open.giftMessage ? (
+                      <div className="flex items-start gap-1.5">
+                        <p className="flex-1 whitespace-pre-line rounded-md bg-white/70 px-2 py-1.5 text-slate-800">“{open.giftMessage}”</p>
+                        <CopyButton value={open.giftMessage} title="คัดลอกข้อความการ์ด" />
+                      </div>
+                    ) : (
+                      <p className="text-pink-700/80">ไม่มีข้อความบนการ์ด</p>
+                    )}
+                  </div>
+                )}
               </section>
 
               <section className="rounded-xl border border-slate-200 p-3">
@@ -271,6 +292,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 <div className="mt-2 pt-2 border-t border-slate-200 space-y-0.5 text-xs text-slate-600">
                   <div className="flex justify-between"><span>ยอดสินค้า</span><span>{money(open.subtotal)}</span></div>
                   <div className="flex justify-between"><span>ค่าส่ง</span><span>{money(open.shippingFee)}</span></div>
+                  {open.giftWrap && <div className="flex justify-between"><span>🎀 ค่าห่อของขวัญ</span><span>{open.giftFee ? money(open.giftFee) : "ฟรี"}</span></div>}
                   {open.discount > 0 && <div className="flex justify-between"><span>ส่วนลด{open.couponCode ? ` (${open.couponCode})` : ""}</span><span>-{money(open.discount)}</span></div>}
                   {(open.pointsDiscount ?? 0) > 0 && <div className="flex justify-between"><span>⭐ ใช้แต้ม {(open.pointsUsed ?? 0).toLocaleString("th-TH")} แต้ม</span><span>-{money(open.pointsDiscount ?? 0)}</span></div>}
                   <div className="flex justify-between text-sm font-semibold text-slate-900 pt-1"><span>ยอดรวม</span><span>{money(open.grandTotal)}</span></div>

@@ -3,6 +3,7 @@ import {
   normalizeSiteInfo,
   publicSiteInfo,
   calcShippingFee,
+  calcGiftFee,
   orderPrefixFor,
   cleanOrderPrefix,
   cleanUrl,
@@ -119,6 +120,26 @@ describe("website-orders", () => {
     expect(pickSku(kids, "sku-aaaaaaaa", "opt2-cccccccc")).toMatchObject({ sku: { code: "X-02" }, variantLabel: "ดำ / M" });
     // สีน้ำตาล + ขนาด M → X-03
     expect(pickSku(kids, "sku-bbbbbbbb", "opt2-cccccccc")).toMatchObject({ sku: { code: "X-03" } });
+  });
+
+  it("🎀 ห่อของขวัญ: รับเฉพาะ wrap === true · ข้อความตัดเหลือ 300 ตัว · ไม่ส่ง = ไม่ห่อ", () => {
+    const r = validateOrderInput({ ...good, gift: { wrap: true, message: "  สุขสันต์วันเกิด\r\nรักนะ  ", hidePrice: true } });
+    expect(r.ok && r.input.gift).toEqual({ wrap: true, message: "สุขสันต์วันเกิด\nรักนะ", hidePrice: true });
+    const long = validateOrderInput({ ...good, gift: { wrap: true, message: "ก".repeat(500) } });
+    expect(long.ok && long.input.gift?.message?.length).toBe(300);
+    expect(validateOrderInput({ ...good, gift: { wrap: "1" } })).toMatchObject({ ok: true, input: { gift: undefined } });
+    expect(validateOrderInput(good)).toMatchObject({ ok: true, input: { gift: undefined } });
+  });
+
+  it("🎀 calcGiftFee: คิดจากที่ร้านตั้งเท่านั้น · ร้านปิดบริการ/ไม่ขอห่อ = 0 · ค่าติดลบ = 0", () => {
+    expect(calcGiftFee(true, { gift_enabled: true, gift_fee: 59 })).toBe(59);
+    expect(calcGiftFee(false, { gift_enabled: true, gift_fee: 59 })).toBe(0);
+    expect(calcGiftFee(true, { gift_enabled: false, gift_fee: 59 })).toBe(0);
+    expect(calcGiftFee(true, { gift_enabled: true, gift_fee: -10 })).toBe(0);
+    // ค่าใน store_settings เป็น string → normalizeSiteInfo แปลงให้
+    const info = normalizeSiteInfo([{ key: "gift_enabled", value: "1" }, { key: "gift_fee", value: "49.5" }]);
+    expect(calcGiftFee(true, info)).toBe(49.5);
+    expect(info.gift_allow_message).toBe(true);
   });
 
   it("pickSku: ไม่มีตัวเลือก → ใช้ SKU ตัวแรก · รหัสมั่ว → ไม่พัง", () => {
