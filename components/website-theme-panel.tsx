@@ -650,17 +650,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const isMobileEdit = editDevice === "mobile";
   // ขนาดรูปในกรอบ: "cover" = เต็มกรอบ (ตัดรูป) · ตัวเลข = เห็นรูปครบทั้งใบ (% ของกรอบ) · "__pc" = มือถือตามคอม
   // ใช้ร่วม 2 ที่: ช่องในแท็บหน้าสินค้า + ⚙️ ชื่อรุ่น + รูปใหญ่
+  // "auto" = อัตโนมัติตามรูป (รูปสัดส่วนใกล้กรอบเต็มกรอบ · ที่เหลือย่อพอดีตาม %)
+  const fitOf = (fit: ProductImageFit, size: number) => (fit === "cover" || fit === "auto" ? fit : String(size));
   const imageFitValue = isMobileEdit
-    ? !mob.imageFit && !mob.imageSize ? "__pc" : (mob.imageFit ?? theme.product.imageFit) === "cover" ? "cover" : String(mob.imageSize ?? theme.product.imageSize)
-    : theme.product.imageFit === "cover" ? "cover" : String(theme.product.imageSize);
+    ? !mob.imageFit && !mob.imageSize ? "__pc" : fitOf(mob.imageFit ?? theme.product.imageFit, mob.imageSize ?? theme.product.imageSize)
+    : fitOf(theme.product.imageFit, theme.product.imageSize);
   const setImageFitValue = (v: string) => {
     if (isMobileEdit) {
       if (v === "__pc") setMobile({ imageFit: null, imageSize: null });
-      else if (v === "cover") setMobile({ imageFit: "cover" });
+      else if (v === "cover" || v === "auto") setMobile({ imageFit: v });
       else setMobile({ imageFit: "contain", imageSize: Number(v) });
-    } else if (v === "cover") setProduct({ imageFit: "cover" });
+    } else if (v === "cover" || v === "auto") setProduct({ imageFit: v });
     else setProduct({ imageFit: "contain", imageSize: Number(v) });
   };
+  const fitLabel = (fit: ProductImageFit, size: number) => (fit === "cover" ? "เต็มกรอบ" : fit === "auto" ? "อัตโนมัติตามรูป" : `${size}%`);
   const mobCount = mobileOverrideCount(mob);
 
   const dev = DEVICES.find((d) => d.k === device)!;
@@ -1526,13 +1529,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       value={imageFitValue}
                       onChange={(e) => setImageFitValue(e.target.value)}
                     >
-                      {isMobileEdit && <option value="__pc">ตามคอม ({theme.product.imageFit === "cover" ? "เต็มกรอบ" : `${theme.product.imageSize}%`})</option>}
+                      {isMobileEdit && <option value="__pc">ตามคอม ({fitLabel(theme.product.imageFit, theme.product.imageSize)})</option>}
                       {PRODUCT_IMAGE_SIZES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       {theme.product.imageFit === "contain" && !PRODUCT_IMAGE_SIZES.some((o) => o.value === String(theme.product.imageSize)) && (
                         <option value={String(theme.product.imageSize)}>{theme.product.imageSize}%</option>
                       )}
                     </select>
-                    <p className="text-[11px] text-slate-400 mt-1">เต็มกรอบ = รูปกางเต็มพื้นที่ (ตัดขอบ) · % = ย่อรูปให้อยู่ในกรอบตามสัดส่วน</p>
+                    <p className="text-[11px] text-slate-400 mt-1">อัตโนมัติ = รูปที่สัดส่วนใกล้กรอบ (นายแบบ/จัตุรัส) เต็มกรอบ ส่วนรูปที่ต้องตัดเยอะย่อพอดี · เต็มกรอบ = ทุกรูปกางเต็ม (ตัดขอบ) · % = ย่อรูปให้อยู่ในกรอบ</p>
                   </div>
                   <div>
                     <label className={labelCls}>พื้นหลังหลังรูปสินค้า</label>
@@ -1662,7 +1665,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             onCreateImageField={() => setImgFieldCreator(true)}
                             imageFitValue={imageFitValue}
                             onImageFit={setImageFitValue}
-                            pcImageFitLabel={theme.product.imageFit === "cover" ? "เต็มกรอบ" : `${theme.product.imageSize}%`}
+                            pcImageFitLabel={fitLabel(theme.product.imageFit, theme.product.imageSize)}
                             onGalleryPreset={() => setProduct({ galleryStyle: "editorial", imageFit: "contain", imageSize: 90, parts: { ...theme.product.parts, gallery: { ...theme.product.parts.gallery, width: "full", height: "screen", perView: 2 } } })}
                             extra={xb}
                             setExtra={xb ? (p) => setExtraBanner(xb.id, p) : undefined}
@@ -2227,10 +2230,11 @@ function PartSettings({
             <label className={lbl}>การแสดงรูป</label>
             <select className={`${partInputCls} ${imageFitValue === "cover" ? "border-amber-400" : ""}`} value={imageFitValue} onChange={(e) => onImageFit(e.target.value)}>
               {mobile && <option value="__pc">ตามคอม ({pcImageFitLabel})</option>}
-              {PRODUCT_IMAGE_SIZES.filter((o) => o.value !== "cover").map((o) => (
+              <option value="auto">อัตโนมัติตามรูป — รูปนายแบบเต็มกรอบ · รูปที่ต้องตัดเยอะย่อพอดี</option>
+              {PRODUCT_IMAGE_SIZES.filter((o) => o.value !== "cover" && o.value !== "auto").map((o) => (
                 <option key={o.value} value={o.value}>เห็นรูปครบทั้งใบ — ไม่ตัดรูป ({o.value}% ของกรอบ)</option>
               ))}
-              {imageFitValue && imageFitValue !== "cover" && imageFitValue !== "__pc" && !PRODUCT_IMAGE_SIZES.some((o) => o.value === imageFitValue) && (
+              {imageFitValue && imageFitValue !== "cover" && imageFitValue !== "auto" && imageFitValue !== "__pc" && !PRODUCT_IMAGE_SIZES.some((o) => o.value === imageFitValue) && (
                 <option value={imageFitValue}>เห็นรูปครบทั้งใบ ({imageFitValue}%)</option>
               )}
               <option value="cover">เต็มกรอบ — ตัดขอบรูปให้เต็มพื้นที่</option>

@@ -39,10 +39,20 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
   return { cols, setCols, gridStyle };
 }
 
-/** ปุ่มเลือกจำนวนการ์ดต่อแถว (segmented) — เสียบข้างแถบเครื่องมือของหน้ากริดใดก็ได้ */
-export function GalleryColumnsControl({ cols, onChange, options = GALLERY_COL_OPTIONS, className = "" }: {
-  cols: number; onChange: (n: GalleryCols) => void; options?: readonly GalleryCols[]; className?: string;
+/** ปุ่มเลือกจำนวนการ์ดต่อแถว (segmented · หรือ as="select" = dropdown กะทัดรัด) — เสียบข้างแถบเครื่องมือของหน้ากริดใดก็ได้ */
+export function GalleryColumnsControl({ cols, onChange, options = GALLERY_COL_OPTIONS, className = "", as = "buttons" }: {
+  cols: number; onChange: (n: GalleryCols) => void; options?: readonly GalleryCols[]; className?: string; as?: "buttons" | "select";
 }) {
+  if (as === "select") {
+    return (
+      <label className={`inline-flex items-center gap-1.5 text-xs text-slate-500 ${className}`} title="จำนวนการ์ดต่อแถว">
+        <span aria-hidden>▦</span>
+        <select value={cols} onChange={(e) => onChange(Number(e.target.value) as GalleryCols)} className="h-8 rounded-lg border border-slate-200 bg-white px-1.5 text-xs text-slate-700">
+          {options.map((n) => <option key={n} value={n}>{n} ต่อแถว</option>)}
+        </select>
+      </label>
+    );
+  }
   return (
     <div className={`inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 ${className}`} title="จำนวนการ์ดต่อแถว">
       <span className="px-1 text-[13px] leading-none text-slate-400" aria-hidden>▦</span>

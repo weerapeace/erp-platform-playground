@@ -84,8 +84,10 @@ export const PRODUCT_IMAGE_EFFECTS: { value: ProductImageEffect; label: string }
   { value: "rounded-shadow", label: "มุมมน + เงา" },
 ];
 /** ขนาดรูปในกรอบ: cover = เต็มกรอบ (ตัดขอบ) · contain = ย่อให้พอดี ตาม imageSize % ของกรอบ */
-export type ProductImageFit = "contain" | "cover";
+/** auto = ทีละรูป: รูปที่สัดส่วนใกล้กรอบ (ตัดไม่เกิน ~30% เช่น รูปนายแบบ/รูปจัตุรัส) = เต็มกรอบ · รูปที่ต้องตัดเยอะ = ย่อพอดีตาม imageSize */
+export type ProductImageFit = "contain" | "cover" | "auto";
 export const PRODUCT_IMAGE_SIZES: { value: string; label: string }[] = [
+  { value: "auto", label: "อัตโนมัติตามรูป (รูปนายแบบเต็มกรอบ · รูปที่ต้องตัดเยอะย่อพอดี)" },
   { value: "cover", label: "เต็มกรอบ (ตัดขอบให้เต็ม)" },
   { value: "100", label: "100% พอดีกรอบ" },
   { value: "90", label: "90%" },
@@ -662,7 +664,7 @@ export function normalizeMobile(raw: unknown, extraIds: string[] = []): ProductM
     banner,
     related,
     imageEffect: pick(r.imageEffect, ["shadow", "none", "border", "rounded", "rounded-shadow"] as const),
-    imageFit: pick(r.imageFit, ["contain", "cover"] as const),
+    imageFit: pick(r.imageFit, ["contain", "cover", "auto"] as const),
     imageSize: Number.isFinite(sizeN) && sizeN >= 50 && sizeN <= 100 ? Math.round(sizeN) : null,
     fonts: partialFonts(r.fonts),
   };
@@ -1504,7 +1506,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       imageBgKey: key(pd.imageBgKey),
       imageBgKind: pick(pd.imageBgKind, ["preset", "color", "gradient", "image"] as const, key(pd.imageBgKey) ? "image" : "preset"),
       imageEffect: pick(pd.imageEffect, ["shadow", "none", "border", "rounded", "rounded-shadow"] as const, d.product.imageEffect),
-      imageFit: pick(pd.imageFit, ["contain", "cover"] as const, d.product.imageFit),
+      imageFit: pick(pd.imageFit, ["contain", "cover", "auto"] as const, d.product.imageFit),
       imageSize: num(pd.imageSize, d.product.imageSize, 50, 100),
       imageBgColor: color(pd.imageBgColor, d.product.imageBgColor),
       imageBgGradient: (() => {

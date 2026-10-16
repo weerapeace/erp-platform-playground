@@ -6,7 +6,7 @@
  *   ติ๊กได้หลายรุ่น (จำข้ามแท็บ/หน้า) → เพิ่มทีเดียว · ค่าเริ่มต้น "ซ่อนไว้ก่อน" (เจ้าของเลือก) ไปตั้งรูป/ราคา/หมวดก่อนค่อยขึ้นเว็บ
  *   รุ่นที่อยู่บนเว็บแล้ว = ติ๊กไม่ได้ · ป้าย Out Of Stock / ไม่ใช่สินค้าสำหรับขาย = เตือนก่อนเพิ่ม
  * ข้อมูล: GET /api/website/listings/catalog (ตัวโหลดกลางเดียวกับหน้า SKU การตลาด) · POST /api/website/listings action addMany (audit)
- * ของกลาง: ERPModal · Pager · useViewPref · r2ImageUrl
+ * ของกลาง: ERPModal · Pager · useViewPref · r2ImageUrl · GalleryColumns (จำนวนการ์ดต่อแถว จำรายคน)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -15,6 +15,7 @@ import { ERPModal } from "@/components/modal";
 import { Pager } from "@/components/pager";
 import { useViewPref } from "@/lib/use-view-pref";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import type { MarketingBrand, MarketingSkuItem, MarketingSkuLabel } from "@/lib/marketing/sku-list";
 
 type Item = MarketingSkuItem & { category_id: string | null };
@@ -44,6 +45,8 @@ export function WebsiteAddProductsModal({ open, onClose, shop, onAdded }: { open
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [publish, setPublish] = useState(false);
   const [saving, setSaving] = useState(false);
+  // ▦ การ์ดต่อแถว (dropdown · จำรายคน) — มือถือ 2 ใบเสมอ
+  const { cols, setCols } = useGalleryColumns("website-add-products", 6);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -304,6 +307,7 @@ export function WebsiteAddProductsModal({ open, onClose, shop, onAdded }: { open
               <input type="checkbox" checked={hideOn} onChange={(e) => setHideOn(e.target.checked)} className="w-4 h-4 accent-blue-600" />
               ซ่อนที่อยู่บนเว็บแล้ว
             </label>
+            {tab === "mkt" && <GalleryColumnsControl as="select" cols={cols} onChange={setCols} />}
             {pageSelectable.length > 0 && (
               <button type="button" onClick={togglePage} className="text-xs text-blue-600 hover:underline">
                 {pageAllOn ? "เอาติ๊กหน้านี้ออก" : `ติ๊กทั้งหน้านี้ (${pageSelectable.length})`}
@@ -315,7 +319,7 @@ export function WebsiteAddProductsModal({ open, onClose, shop, onAdded }: { open
           {!filtered.length ? (
             <p className="py-10 text-center text-sm text-slate-400">ไม่พบสินค้า ลองเปลี่ยนป้าย/แบรนด์ หรือคำค้น</p>
           ) : tab === "mkt" ? (
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ ["--cols" as string]: cols } as React.CSSProperties}>
               {pageRows.map((i) => {
                 const on = onShop.has(i.parent_sku_id);
                 const picked = sel.has(i.parent_sku_id);
