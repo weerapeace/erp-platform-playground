@@ -26,7 +26,7 @@ import { PartEditor, blankPart, duplicateBody } from "./studio-part-editor";
 import { BulkUploadModal } from "./studio-bulk-upload";
 import { ShopSettingsDrawer } from "./studio-settings-drawer";
 import { DesignsPanel, EngravingPanel, SizeRulesPanel } from "./studio-panels";
-import { createPart, fetchParts, fetchShopInfo, fetchShops, hasImage, money, partWidth, patchPart, reorderParts, softDeletePart, type BeltPart, type BeltShop, type BeltShopInfo } from "./studio-data";
+import { createPart, fetchDesigns, fetchParts, fetchShopInfo, fetchShops, hasImage, money, partWidth, patchPart, reorderParts, softDeletePart, type BeltPart, type BeltShop, type BeltShopInfo } from "./studio-data";
 import { uploadBeltPartPng } from "./upload-png";
 
 type Rail = PartType | "sizes" | "engraving" | "designs";
@@ -90,7 +90,7 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
   }, [shop]);
   useEffect(() => {
     if (!shopId || designsTotal !== null) return;
-    import("./studio-data").then((m) => m.fetchDesigns(shopId)).then((r) => setDesignsTotal(r.total)).catch(() => setDesignsTotal(0));
+    fetchDesigns(shopId).then((r) => setDesignsTotal(r.total)).catch(() => setDesignsTotal(0));
   }, [shopId, designsTotal]);
 
   // ── รายการที่โชว์ ──
