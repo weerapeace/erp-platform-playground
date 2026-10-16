@@ -25,10 +25,19 @@ import { WebsiteCouponsPanel } from "@/components/website-coupons-panel";
 import { WebsiteMembersPanel } from "@/components/website-members-panel";
 import { WebsiteOpenToggle } from "@/components/website-open-toggle";
 import { WebsiteListingsPanel, type Listing, type CategoryDef, type ShopInfo } from "@/components/website-listings-panel";
+import { WheelSelect } from "@/components/wheel-select";
+import { useViewPref } from "@/lib/use-view-pref";
+
+/** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
+const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
+type PageWidth = (typeof PAGE_WIDTHS)[number];
+const PAGE_WIDTH_CLS: Record<PageWidth, string> = { normal: "max-w-6xl", wide: "max-w-[1680px]", full: "max-w-none" };
+const PAGE_WIDTH_LABEL: Record<PageWidth, string> = { normal: "ปกติ", wide: "กว้าง", full: "เต็มจอ" };
 
 export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const toast = useToast();
   const [shop, setShop] = useState<ShopInfo | null>(null);
+  const { view: pageWidth, setView: setPageWidth, saveDefault: savePageWidth } = useViewPref<PageWidth>("website_manager_width", PAGE_WIDTHS, "wide");
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -94,7 +103,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
 
   return (
     <PlaygroundShell>
-      <div className="max-w-6xl mx-auto px-5 py-6">
+      <div className={`${PAGE_WIDTH_CLS[pageWidth]} mx-auto px-5 py-6`}>
         {/* หัวเรื่อง */}
         <div className="mb-5">
           <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
@@ -114,6 +123,21 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
                 {shop.siteUrl.replace(/^https?:\/\//, "")} ↗
               </a>
             )}
+            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate-500" title="ความกว้างของหน้านี้ (จำไว้ให้ครั้งหน้า)">
+              ↔ ความกว้างหน้า
+              <WheelSelect
+                value={pageWidth}
+                onChange={(e) => {
+                  const v = e.target.value as PageWidth;
+                  setPageWidth(v);
+                  void savePageWidth(v);
+                }}
+              >
+                {PAGE_WIDTHS.map((w) => (
+                  <option key={w} value={w}>{PAGE_WIDTH_LABEL[w]}</option>
+                ))}
+              </WheelSelect>
+            </label>
           </div>
           <p className="text-sm text-slate-500 mt-1">
             กำหนดว่าสินค้าไหนขึ้นเว็บร้านนี้ พร้อมตั้งชื่อ/ราคา/หน่วย/หมวดเฉพาะเว็บ — เว้นว่าง = เติมอัตโนมัติจาก ERP
