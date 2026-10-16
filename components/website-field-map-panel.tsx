@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { NAME_SOURCE_OPTIONS, PRICE_SOURCE_OPTIONS, DESC_SOURCE_OPTIONS } from "@/lib/website-field-map";
 
 /** รหัสหมวดตั้งเองได้แล้ว ไม่ใช่รายการตายตัว (ให้ตรงกับ lib/website-field-map.ts) */
 type WebCategory = string;
@@ -27,29 +28,10 @@ interface FieldMap {
   image: { useCover: boolean; source?: "parent" | "skus" | "both" };
 }
 
-const NAME_OPTS = [
-  { v: "name_th", l: "ชื่อไทย (name_th)" },
-  { v: "name_platform", l: "ชื่อแพลตฟอร์ม (name_platform)" },
-  { v: "name_en", l: "ชื่ออังกฤษ (name_en)" },
-  { v: "sku_name", l: "ชื่อ SKU (sku_name)" },
-  { v: "code", l: "รหัสสินค้า (code)" },
-];
-
-const PRICE_OPTS = [
-  { v: "sku_max", l: "ราคาสูงสุดของ SKU ลูก (แนะนำ)" },
-  { v: "sku_min", l: "ราคาต่ำสุดของ SKU ลูก" },
-  { v: "final_price", l: "ราคาสุทธิ (final_price)" },
-  { v: "sale_price", l: "ราคาขาย (sale_price)" },
-  { v: "fake_price", l: "ราคาก่อนลด (fake_price)" },
-];
-
-const DESC_OPTS = [
-  { v: "platform_description", l: "คำโปรยแพลตฟอร์ม (สั้น — แนะนำ)" },
-  { v: "introduction", l: "บทนำ (introduction)" },
-  { v: "description", l: "คำอธิบายเต็ม (description)" },
-  { v: "english_description", l: "คำอธิบายอังกฤษ" },
-  { v: "none", l: "— ไม่ดึง —" },
-];
+// ป้ายแหล่งข้อมูล = ของกลางใน lib/website-field-map (กล่อง 🔗 ข้อมูลที่เชื่อม ใช้ชุดเดียวกัน)
+const NAME_OPTS = NAME_SOURCE_OPTIONS;
+const PRICE_OPTS = PRICE_SOURCE_OPTIONS;
+const DESC_OPTS = DESC_SOURCE_OPTIONS;
 
 type CategoryDef = { key: string; label: string; icon: string; blurb: string };
 

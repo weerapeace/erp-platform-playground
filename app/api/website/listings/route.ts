@@ -33,6 +33,7 @@ import {
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { listingPatchToRow, cleanCategoryList, type ListingPatch } from "@/lib/website-listing-patch";
+import { sanitizeBulkPatch } from "@/lib/website-listing-fields";
 import { computeListingDisplay } from "@/lib/website-listing-display";
 import { readFitCheckShops } from "@/lib/website-site-info";
 
@@ -247,18 +248,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const actor = { actorId: user?.id ?? null, actorName: user?.email ?? null };
   const idList = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && !!x))].slice(0, 500) : []);
 
-  // ☑️ ทำหลายรายการพร้อมกัน (หน้า "สินค้าบนเว็บ" → แถบล่าง) — parentIds + patch { isPublished?, featured? } เท่านั้น
+  // ☑️ ทำหลายรายการพร้อมกัน (หน้า "สินค้าบนเว็บ" → แถบล่าง + ✏️ แก้หลายรายการ) — parentIds + patch
+  //   ช่องที่ยอมให้แก้หลายรายการ = ทะเบียนกลาง lib/website-listing-fields (BULK_PATCH_KEYS · ชื่อ/คำอธิบาย = ล้างเท่านั้น) · หมวดคิดต่อรุ่นไปทาง setCategories
   if (b.action === "bulk") {
     const ids = idList(b.parentIds);
-    const p = b.patch ?? {};
-    const upd: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (typeof p.isPublished === "boolean") upd.is_published = p.isPublished;
-    if (typeof p.featured === "boolean") upd.featured = p.featured;
+    const p = sanitizeBulkPatch(b.patch ?? {});
+    const upd: Record<string, unknown> = { updated_at: new Date().toISOString(), ...listingPatchToRow(p) };
     if (!b.shopId || !ids.length || Object.keys(upd).length < 2) return NextResponse.json({ error: "ต้องระบุ shopId + parentIds + สิ่งที่จะเปลี่ยน" }, { status: 400 });
-    const { error } = await sb.from("store_listings").update(upd).eq("shop_id", b.shopId).in("parent_sku_id", ids);
+    const { data: done, error } = await sb.from("store_listings").update(upd).eq("shop_id", b.shopId).in("parent_sku_id", ids).select("parent_sku_id");
     if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
-    await writeAudit(sb, { action: "bulk_update", entityType: "store_listing", entityId: b.shopId, ...actor, metadata: { count: ids.length, parentIds: ids, patch: { isPublished: p.isPublished, featured: p.featured } } });
-    return NextResponse.json({ ok: true, count: ids.length });
+    const count = (done ?? []).length;
+    await writeAudit(sb, { action: "bulk_update", entityType: "store_listing", entityId: b.shopId, ...actor, metadata: { count, requested: ids.length, parentIds: ids, patch: p } });
+    return NextResponse.json({ ok: true, count, failed: ids.length - count });
   }
 
   // ➕ เพิ่มหลายรุ่นพร้อมกัน (ป๊อปเพิ่มสินค้าเข้าเว็บ) — ตัวที่อยู่ในร้านแล้วข้าม · publish=false (ค่าเริ่มต้น) = ซ่อนไว้ก่อนให้ไปตั้งรูป/ราคา/หมวด

@@ -34,6 +34,8 @@ import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-color
 import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
 import { rowToTone, tonesOfLabel, TONE_SELECT } from "@/lib/color-tone";
 import { productSlug } from "@/lib/website-links";
+import { badgeColorOf } from "@/lib/website-card-badges";
+import { readCardBadges } from "@/lib/website-card-badges-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -104,11 +106,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     loadParentImageFields(sb),
   ]);
   // 📏 รายการกลาง "ใส่อะไรได้บ้าง" + ✅ "รายละเอียดเพิ่ม (ติ๊ก)" (ตารางเล็ก) → หัวข้อ "ขนาด" / ต่อท้าย "รายละเอียดสินค้า"
-  const [{ data: fitRows }, { data: hlRows }, { data: toneRows }] = await Promise.all([
+  const [{ data: fitRows }, { data: hlRows }, { data: toneRows }, cardBadges] = await Promise.all([
     sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order").eq("is_active", true).order("sort_order"),
     sb.from("product_highlight_items").select("id, name, name_en, is_active").eq("is_active", true).order("sort_order"),
     // 🎨 โทนสี (ของกลาง) → ตัวเลือกแต่ละสีบอกว่าอยู่โทนไหน (ปุ่ม "กรองตามสี" บนเว็บ · ดู lib/color-tone.ts)
     sb.from("erp_color_tones").select(TONE_SELECT).eq("is_active", true).order("sort_order"),
+    // 🏷 ป้ายบนการ์ดของร้าน (ชื่อ + สี) → badgeColor ของแต่ละสินค้า
+    readCardBadges(sb, s.id),
   ]);
   const colorTones = ((toneRows ?? []) as Parameters<typeof rowToTone>[0][]).map(rowToTone);
   const fitCatalog = (fitRows ?? []) as FitItem[];
@@ -220,6 +224,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         /** 📂 ทุกหมวดที่อยู่ (หลายหมวดได้ · ตัวแรก = category) — หน้าร้านกรองหมวดด้วยรายการนี้ */
         categories: r.categories,
         badge: String(l.web_badge ?? "").trim(),
+        /** 🏷 สีป้าย (ตามรายการป้ายของร้าน · ป้ายนอกรายการ = ไม่ส่ง → สีป้ายปกติของธีม) */
+        badgeColor: badgeColorOf(cardBadges, l.web_badge as string | null) ?? undefined,
         stock: String(l.web_stock_status ?? "in").trim() || "in",
         swatch: String(l.web_swatch ?? "").trim(),
         // รูปต่อสี (r2 key → URL) ให้เว็บสลับรูปใหญ่ตอนเลือกสี

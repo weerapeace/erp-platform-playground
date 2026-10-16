@@ -35,6 +35,10 @@ import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import type { ListingIssue } from "@/lib/website-listing-health";
 import { CompartmentsEditor } from "@/components/compartments-editor";
 import type { Compartment } from "@/lib/fit-check";
+import { FieldChipsPicker } from "@/components/field-chips-picker";
+import { CardBadgeSelect } from "@/components/website-card-badges";
+import type { LinkedRow } from "@/lib/website-listing-linked";
+import { STOCK_STATUS_OPTIONS } from "@/lib/website-listing-fields";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
@@ -78,6 +82,8 @@ type ShopState = {
   auto: { price: number; unit: string; description: string };
   display: { name: string; price: number; imageKey: string | null; imageCount: number; hero: boolean; productUrl: string | null } | null;
   issues: ListingIssue[];
+  /** 🔗 หน้าเว็บดึงอะไรมาจากไหน (lib/website-listing-linked) */
+  linked?: LinkedRow[];
   soldQty: number;
   /** 📐 ร้านนี้เปิดเช็คขนาด */
   fitCheck?: boolean;
@@ -109,11 +115,8 @@ const NAME_RULE_CHIPS: { flag: NameRuleFlag; label: string; ref?: keyof Resp["na
   { flag: "removeParenMarks", label: "ลบแค่วงเล็บ" },
 ];
 
-const STOCKS = [
-  { value: "in", label: "พร้อมส่ง" },
-  { value: "low", label: "เหลือน้อย" },
-  { value: "preorder", label: "สั่งจอง" },
-];
+/** ตัวเลือกสถานะสต๊อก = ทะเบียนกลาง (ชุดเดียวกับแก้หลายรายการ) */
+const STOCKS = STOCK_STATUS_OPTIONS;
 
 /** ค่าที่ปุ่มบันทึกส่ง (saveShop) รวมเป็นข้อความเดียว — ใช้เทียบว่ามีของแก้ค้างไหม */
 const snapOf = (s: ShopState) =>
@@ -142,12 +145,15 @@ export function ParentWebListings({
   parentId,
   shopId,
   onChanged,
+  onOpenParent,
 }: {
   parentId: string | null;
   /** เฉพาะร้านนี้ (drawer หน้า "สินค้าบนเว็บ") — ไม่ส่ง = ทุกร้าน (แท็บ 🛍 ใน Parent SKU) */
   shopId?: string;
   /** บันทึก/เพิ่มเข้าร้านสำเร็จ (ให้หน้าที่เปิดอยู่ดึงค่าที่เว็บเห็นใหม่) */
   onChanged?: () => void;
+  /** ปุ่ม "ไปเติมที่ Parent SKU" ในกล่องข้อมูลที่เชื่อม (ไม่ส่ง = อยู่ในหน้า Parent SKU อยู่แล้ว → บอกให้ไปแท็บข้อมูล) */
+  onOpenParent?: () => void;
 }) {
   const toast = useToast();
   const [data, setData] = useState<Resp | null>(null);
@@ -452,13 +458,26 @@ export function ParentWebListings({
                 );
               })}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500 truncate" title={s.autoName}>
+            <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 min-w-0">
+              <span className="truncate flex-1 min-w-0" title={s.autoName}>
+                {s.webName.trim() ? (
+                  "⚠️ ใช้ชื่อที่พิมพ์เอง — แก้ชื่อที่ Parent SKU แล้วเว็บจะไม่เปลี่ยนตาม"
+                ) : (
+                  <>
+                    ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span>
+                  </>
+                )}
+              </span>
               {s.webName.trim() ? (
-                "⚠️ พิมพ์ชื่อทับไว้ — เว็บใช้ชื่อที่พิมพ์ (ลบออกเพื่อใช้ชื่ออัตโนมัติ)"
+                <button type="button" onClick={() => patchShop(s.shopId, { webName: "" })} className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50" title="ลบชื่อที่พิมพ์ — กลับไปใช้ชื่ออัตโนมัติ (เปลี่ยนตาม Parent SKU)">
+                  ↺ กลับเป็นอัตโนมัติ
+                </button>
               ) : (
-                <>
-                  ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span>
-                </>
+                s.autoName && (
+                  <button type="button" onClick={() => patchShop(s.shopId, { webName: s.autoName })} className="shrink-0 rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-blue-700 hover:bg-blue-100" title="เติมชื่ออัตโนมัติลงช่อง แล้วแก้ต่อได้">
+                    ↓ ใช้ชื่อนี้
+                  </button>
+                )
               )}
             </div>
           </div>
@@ -468,26 +487,19 @@ export function ParentWebListings({
         <div>
           <span className={labelCls}>หมวดบนเว็บ (เลือกได้หลายหมวด · ตัวแรก = หมวดหลัก)</span>
           {s.shopCategories.length ? (
-            <div className="flex flex-wrap gap-1.5">
-              {s.shopCategories.map((c) => {
-                const on = cats.includes(c.key);
-                return (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => {
-                      const next = on ? cats.filter((k) => k !== c.key) : [...cats, c.key];
-                      patchShop(s.shopId, { webCategories: next, categories: next });
-                    }}
-                    className={`rounded-full border px-2.5 py-1 text-xs ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-600 hover:border-slate-500"}`}
-                  >
-                    {on && cats[0] === c.key ? "★ " : ""}
-                    {c.icon ? `${c.icon} ` : ""}
-                    {c.label}
-                  </button>
-                );
-              })}
-            </div>
+            <FieldChipsPicker
+              value={cats.filter((k) => s.shopCategories.some((c) => c.key === k))}
+              onChange={(next) => patchShop(s.shopId, { webCategories: next, categories: next })}
+              fields={s.shopCategories.map((c) => ({ key: c.key, label: c.label, icon: c.icon || undefined }))}
+              title="เลือกหมวดบนเว็บ"
+              description="ติ๊กได้หลายหมวด · ★ = หมวดหลัก (กด ★ เปลี่ยนได้) — สินค้าโผล่ในทุกหมวดที่ติ๊ก"
+              addLabel="＋ เลือกหมวด"
+              searchPlaceholder="ค้นหาหมวด…"
+              unit="หมวด"
+              showKeys={false}
+              markFirst="หมวดหลัก"
+              emptyText="ยังไม่อยู่หมวดไหน"
+            />
           ) : (
             <p className="text-[11px] text-slate-400">ร้านนี้ยังไม่ได้ตั้งหมวด — ตั้งที่ เว็บไซต์ → 📂 หมวดหมู่</p>
           )}
@@ -505,10 +517,14 @@ export function ParentWebListings({
               ))}
             </select>
           </label>
-          <Field label="ป้ายบนการ์ด" value={s.webBadge} onChange={(v) => patchShop(s.shopId, { webBadge: v })} placeholder="ขายดี / ใหม่" />
+          <label className="block">
+            <span className={labelCls}>ป้ายบนการ์ด</span>
+            <CardBadgeSelect shopId={s.shopId} value={s.webBadge} onChange={(v) => patchShop(s.shopId, { webBadge: v })} />
+          </label>
         </div>
 
         <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={s.auto.description || data.erpDescription || "—"} />
+        {s.linked?.length ? <LinkedPanel rows={s.linked} onOpenParent={onOpenParent} /> : null}
 
         {/* ตัวเลือกกรอกเอง + สีตัวอย่าง — ใช้กับร้านวัสดุ (ร้านกระเป๋าใช้สีจาก SKU อัตโนมัติ) */}
         <details className="rounded-lg border border-slate-200 bg-white px-3 py-2" open={!!(s.webOptions?.items?.length || s.webSwatch)}>
@@ -1154,5 +1170,53 @@ function ItemsInput({ value, onCommit }: { value: WebOptions; onCommit: (items: 
       placeholder="1.5 มม., 2.0 มม., 3.0 มม."
       className={inputCls}
     />
+  );
+}
+
+/** 🔗 ข้อมูลที่เชื่อม — หน้าเว็บดึงอะไรมาจากไหน + ค่าตอนนี้ · ช่องที่ว่างไปเติมที่ Parent SKU (ข้อมูลจาก lib/website-listing-linked) */
+function LinkedPanel({ rows, onOpenParent }: { rows: LinkedRow[]; onOpenParent?: () => void }) {
+  const missing = rows.flatMap((r) => r.missing ?? []);
+  const uniqMissing = [...new Set(missing)];
+  const tone: Record<LinkedRow["status"], string> = { ok: "text-emerald-700", empty: "text-rose-600", override: "text-blue-700", hidden: "text-slate-400", none: "text-amber-700" };
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white px-3 py-2" open={uniqMissing.length > 0}>
+      <summary className="cursor-pointer text-xs text-slate-600">
+        🔗 ข้อมูลที่เชื่อม — หน้าเว็บดึงอะไรมาจากไหน
+        {uniqMissing.length > 0 ? <span className="ml-1.5 text-rose-600">· ว่าง {uniqMissing.length} ช่อง</span> : <span className="ml-1.5 text-emerald-700">· ครบ</span>}
+      </summary>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="text-left text-[11px] text-slate-400">
+              <th className="py-1 pr-2 font-normal">บนเว็บ</th>
+              <th className="py-1 pr-2 font-normal">ดึงจาก (Parent SKU)</th>
+              <th className="py-1 font-normal">ค่าตอนนี้</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.label}-${i}`} className="border-t border-slate-100 align-top">
+                <td className="py-1.5 pr-2 text-slate-700 whitespace-nowrap">{r.label}</td>
+                <td className="py-1.5 pr-2 text-slate-500">{r.from}</td>
+                <td className={`py-1.5 ${tone[r.status]}`}>
+                  {r.value}
+                  {r.missing?.length ? <span className="block text-[11px] text-rose-600">ว่าง: {r.missing.join(" · ")}</span> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+        {uniqMissing.length > 0 && (onOpenParent ? (
+          <button type="button" onClick={onOpenParent} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-slate-700 hover:border-slate-500">
+            📦 ไปเติมที่ Parent SKU ({uniqMissing.length} ช่องว่าง)
+          </button>
+        ) : (
+          <span>เติมช่องที่ว่างได้ที่แท็บข้อมูลของ Parent SKU นี้</span>
+        ))}
+        <span>สีฟ้า = พิมพ์ทับบนเว็บ · สีส้ม = ไม่มีแหล่งข้อมูล · เปลี่ยนแหล่งข้อมูลได้ที่ เว็บไซต์ → ⚙️ จับคู่ฟิลด์ / 🎨 ดีไซน์ → หน้าสินค้า</span>
+      </div>
+    </details>
   );
 }

@@ -29,6 +29,8 @@ import { normalizeHero } from "@/lib/website-hero";
 import { productPageUrl } from "@/lib/website-links";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
+import { buildLinkedRows } from "@/lib/website-listing-linked";
+import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
 import {
   normalizeFieldMap,
   resolveName,
@@ -44,7 +46,7 @@ import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { listingPatchToRow, toKeyList, type ListingPatch } from "@/lib/website-listing-patch";
 import { computeListingDisplay } from "@/lib/website-listing-display";
-import { readFitCheckShops } from "@/lib/website-site-info";
+import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
 import { parseCompartments } from "@/lib/fit-check";
 import { CHILD_SELECT, type ChildSku } from "@/lib/website-field-map";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
@@ -153,6 +155,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const listingByShop = new Map(((listings ?? []) as Record<string, unknown>[]).map((l) => [l.shop_id as string, l]));
   const fitShops = await readFitCheckShops(sb);
+  // 🔗 ข้อมูลที่เชื่อม: ชื่อฟิลด์ (ทะเบียน → ชุดสเปก) + ค่าส่งของแต่ละร้าน
+  const fieldLabelMap = new Map<string, string>([...PRODUCT_SPEC_FIELDS.map((f) => [f.key, f.label] as const), ...parentFields.map((f) => [f.key, f.label] as const)]);
+  const fieldLabel = (k: string) => fieldLabelMap.get(k) ?? k;
+  const shipByShop = new Map(
+    await Promise.all(((shops ?? []) as { id: string }[]).map(async (s) => {
+      const info = await readSiteInfo(sb, s.id);
+      return [s.id, { flat: info.shipping_flat, freeMin: info.free_shipping_min }] as const;
+    }))
+  );
   type ShopRow = { id: string; name: string; slug: string; is_default: boolean; theme: unknown; theme_draft: unknown; field_map: unknown };
   const shopRows = ((shops ?? []) as ShopRow[]).map((s) => {
     const l = listingByShop.get(s.id);
@@ -220,6 +231,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       auto: { price: view.mapped.price, unit: view.mapped.unit, description: view.mapped.description },
       display: view.display,
       issues: l ? view.issues : [],
+      /** 🔗 หน้าเว็บดึงอะไรมาจากไหน + ค่าตอนนี้ (lib/website-listing-linked) */
+      linked: buildLinkedRows({
+        fieldMap,
+        parent: parentRow as unknown as Record<string, unknown>,
+        code,
+        autoName: resolveName(fieldMap, parentRow),
+        listing: l ?? null,
+        auto: { price: view.mapped.price, description: view.mapped.description },
+        imageCount: view.display.imageCount,
+        categories: view.categories,
+        detailItems: theme.product.detailItems,
+        detailOverrides: cleanDetailOverrides(l?.web_details),
+        fieldLabel,
+        shipping: shipByShop.get(s.id) ?? { flat: 0, freeMin: 0 },
+      }),
       soldQty: soldByShop.get(s.id) ?? 0,
       /** 📐 ร้านนี้เปิดเช็คขนาด */
       fitCheck: fitShops.has(s.id),

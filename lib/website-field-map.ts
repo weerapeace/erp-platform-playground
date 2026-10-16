@@ -27,6 +27,34 @@ export type OptionSource = "sku_color" | "none";
 export type Option2Source = "variant_option" | "none";
 /** รูปสินค้าบนเว็บมาจากไหน: parent = หน้าปก Parent SKU · skus = รูปของ SKU ลูกแต่ละสี (หลายรูป + สลับตามสี) · both = Parent ก่อนแล้วตามด้วย SKU */
 export type ImageSource = "parent" | "skus" | "both";
+
+/** ป้ายของแต่ละแหล่งข้อมูล (ของกลาง) — แท็บจับคู่ฟิลด์ (website-field-map-panel) + กล่อง 🔗 ข้อมูลที่เชื่อม (lib/website-listing-linked) */
+export const NAME_SOURCE_OPTIONS: { v: NameSource; l: string }[] = [
+  { v: "name_th", l: "ชื่อไทย (name_th)" },
+  { v: "name_platform", l: "ชื่อแพลตฟอร์ม (name_platform)" },
+  { v: "name_en", l: "ชื่ออังกฤษ (name_en)" },
+  { v: "sku_name", l: "ชื่อ SKU (sku_name)" },
+  { v: "code", l: "รหัสสินค้า (code)" },
+];
+export const PRICE_SOURCE_OPTIONS: { v: PriceSource; l: string }[] = [
+  { v: "sku_max", l: "ราคาสูงสุดของ SKU ลูก (แนะนำ)" },
+  { v: "sku_min", l: "ราคาต่ำสุดของ SKU ลูก" },
+  { v: "final_price", l: "ราคาสุทธิ (final_price)" },
+  { v: "sale_price", l: "ราคาขาย (sale_price)" },
+  { v: "fake_price", l: "ราคาก่อนลด (fake_price)" },
+];
+export const DESC_SOURCE_OPTIONS: { v: DescSource; l: string }[] = [
+  { v: "platform_description", l: "คำโปรยแพลตฟอร์ม (สั้น — แนะนำ)" },
+  { v: "introduction", l: "บทนำ (introduction)" },
+  { v: "description", l: "คำอธิบายเต็ม (description)" },
+  { v: "english_description", l: "คำอธิบายอังกฤษ" },
+  { v: "none", l: "— ไม่ดึง —" },
+];
+export const IMAGE_SOURCE_OPTIONS: { v: ImageSource; l: string }[] = [
+  { v: "parent", l: "รูปปก + แกลเลอรี Parent SKU" },
+  { v: "skus", l: "รูปของ SKU ลูกแต่ละสี" },
+  { v: "both", l: "Parent ก่อน แล้วตามด้วยรูปรายสี" },
+];
 /**
  * หมวดสินค้าบนเว็บ — เป็น "รหัสอะไรก็ได้" ที่เจ้าของตั้งเอง ไม่ใช่รายการตายตัวอีกแล้ว
  * รายการหมวดของแต่ละร้านเก็บใน field_map.categories

@@ -6,7 +6,7 @@
  * - ตัวกรองบน: ทั้งหมด · ขึ้นเว็บ · ซ่อนอยู่ · แนะนำ · ⚠️ ต้องแก้ (นับจากกฎกลาง lib/website-listing-health)
  * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด (จำต่อคนด้วย useViewPref)
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
- * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
+ * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
  * - กดการ์ด/แถว/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
  *     แท็บ ขายบนเว็บ · รูป สี และรูปเปิด · ปั๊มชื่อ/แบนเนอร์/รายละเอียด · ต้องแก้ · ◀ ▶ เลื่อนตามรายการที่เห็น · 💾 บันทึกแถบล่าง
  * - 📦 เปิด Parent SKU = MasterRecordDrawer ตัวจริง (ทุกแท็บ · ◀ ▶ เลื่อนตามรายการที่เห็น · ปิดแล้วกลับมาที่ drawer เว็บ)
@@ -25,6 +25,7 @@ import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/compo
 import { useViewPref } from "@/lib/use-view-pref";
 import { listingIssues, type ListingIssue } from "@/lib/website-listing-health";
 import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
+import { WebsiteListingsMassEdit } from "@/components/website-listings-mass-edit";
 
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 // ⚠️ ต้อง dynamic — master-crud import relation-multi อยู่ (import ตรงจะวนกัน) ดู memory unify_drawer
@@ -165,6 +166,7 @@ export function WebsiteListingsPanel({
   const { view, setView, saveDefault } = useViewPref("website_listings_view", VIEWS, "list");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [massOpen, setMassOpen] = useState(false);
   const [removing, setRemoving] = useState<Listing | null>(null);
   // 🛍 drawer ตั้งค่าเว็บของสินค้า (ของกลาง ParentWebListings) · ปุ่มบันทึกอยู่แถบล่าง (footer-save)
   const webSave = useFooterSaveHost();
@@ -593,7 +595,22 @@ export function WebsiteListingsPanel({
         <button disabled={bulkBusy} onClick={() => void bulk({ featured: false }, "เลิกแนะนำ")} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
           เลิกแนะนำ
         </button>
+        <button disabled={bulkBusy} onClick={() => setMassOpen(true)} className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-medium hover:bg-slate-100 disabled:opacity-50">
+          ✏️ แก้หลายรายการ
+        </button>
       </BulkActionBar>
+
+      {/* ✏️ แก้หลายรายการ — ช่องวาดจากทะเบียนกลาง (lib/website-listing-fields) */}
+      <WebsiteListingsMassEdit
+        open={massOpen}
+        onClose={() => setMassOpen(false)}
+        shopId={shop.id}
+        rows={listings.filter((l) => sel.has(l.parentId)).map((l) => ({ parentId: l.parentId, categories: l.categories ?? [] }))}
+        shopCategories={categories}
+        onDone={async () => {
+          await reload();
+        }}
+      />
 
       {/* 🛍 ตั้งค่าเว็บของสินค้า — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (เฉพาะร้านนี้) */}
       <Drawer
@@ -668,7 +685,19 @@ export function WebsiteListingsPanel({
               </div>
             </div>
             <FooterSaveProvider value={webSave.register}>
-              <ParentWebListings key={webL.parentId} parentId={webL.parentId} shopId={shop.id} onChanged={() => void reload()} />
+              <ParentWebListings
+                key={webL.parentId}
+                parentId={webL.parentId}
+                shopId={shop.id}
+                onChanged={() => void reload()}
+                onOpenParent={() => {
+                  if (webSave.anyDirty) {
+                    toast.info("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU");
+                    return;
+                  }
+                  setParentOpen(webL.parentId);
+                }}
+              />
             </FooterSaveProvider>
           </div>
         )}
