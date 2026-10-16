@@ -29,6 +29,7 @@ const LIBRARY_FOLDER_LABEL: Record<string, string> = {
   "design-sheets": "งานออกแบบ", "uploads": "อัปทั่วไป",
   "storefront-hero": "รูปเปิดหน้าสินค้า (เว็บ)", "storefront-products": "รูปสินค้า (เว็บ)",
   "color-swatches": "จุดสี (ทะเบียนสี)",
+  "belt-parts": "ชิ้นส่วนเข็มขัด (Belt Builder)",
 };
 
 // ลงทะเบียนไฟล์ที่เพิ่งอัปเข้าคลังกลาง (assets) อัตโนมัติ — กันซ้ำด้วย checksum · ห้าม throw (best-effort)

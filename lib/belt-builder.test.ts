@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  validatePart, validateSizeRule, parseAnchor, strapLengthCm, holePositionsCm, pickSizeRule, totalPrice, DEFAULT_ANCHOR, DEFAULT_STRAP_FORMULA,
+  validatePart, validateSizeRule, parseAnchor, strapLengthCm, holePositionsCm, pickSizeRule, totalPrice, DEFAULT_ANCHOR, DEFAULT_STRAP_FORMULA, matchFileToPart, normalizeCodeKey,
 } from "./belt-builder";
 
 describe("belt-builder · validatePart", () => {
@@ -57,5 +57,26 @@ describe("belt-builder · size rules", () => {
 describe("belt-builder · totalPrice", () => {
   it("รวมฐาน + delta ทุกชิ้น + ค่าสลัก", () => {
     expect(totalPrice(1500, [{ price_delta: 200 }, { price_delta: "150" }, null], 100)).toBe(1950);
+  });
+});
+
+describe("belt-builder · จับคู่ชื่อไฟล์กับ code (อัปโหลดหลายรูป)", () => {
+  const parts = [{ id: "a", code: "strap-dbr-35" }, { id: "b", code: "buckle-pin-gold" }, { id: "c", code: null }];
+  it("ชื่อไฟล์ตัวใหญ่/ขีดล่าง/นามสกุล → ตรง code", () => {
+    expect(matchFileToPart("STRAP-DBR-35.png", parts)?.id).toBe("a");
+    expect(matchFileToPart("strap_dbr_35.PNG", parts)?.id).toBe("a");
+    expect(matchFileToPart("Buckle Pin Gold.png", parts)?.id).toBe("b");
+  });
+  it("ท้ายชื่อมี -1 / (1) / -copy → ยังจับคู่ได้", () => {
+    expect(matchFileToPart("strap-dbr-35-1.png", parts)?.id).toBe("a");
+    expect(matchFileToPart("strap-dbr-35 (1).png", parts)?.id).toBe("a");
+    expect(matchFileToPart("buckle-pin-gold-final.png", parts)?.id).toBe("b");
+  });
+  it("ไม่ตรงอะไรเลย / ไฟล์ไม่มีชื่อ → null", () => {
+    expect(matchFileToPart("IMG_0001.png", parts)).toBeNull();
+    expect(matchFileToPart(".png", parts)).toBeNull();
+  });
+  it("normalizeCodeKey ยุบขีดซ้ำและตัดขีดหัวท้าย", () => {
+    expect(normalizeCodeKey("--Strap__Black--35--.png")).toBe("strap-black-35");
   });
 });

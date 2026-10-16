@@ -1155,6 +1155,12 @@ export function WebsiteBuilder({
               />
             )}
             <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={formCtx} />
+            {selSchema.meta.manage && (
+              <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-900">
+                <span className="min-w-0 flex-1">{selSchema.meta.manage.hint ?? "ข้อมูลของ Section นี้ตั้งค่าที่หน้าหลังบ้านแยก"}</span>
+                <a href={selSchema.meta.manage.href} target="_blank" rel="noreferrer" className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700">{selSchema.meta.manage.label}</a>
+              </div>
+            )}
             {selSchema.children && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
                 {selSchema.children.icon} {selSchema.children.label}: {childrenOf(selBlock)?.list.length ?? 0} รายการ — แก้ทีละชิ้นจากต้นไม้ทางซ้าย (กด ▸)

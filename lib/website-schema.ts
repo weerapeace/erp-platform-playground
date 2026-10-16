@@ -168,6 +168,11 @@ export interface SectionMeta {
    * ตัวแสดงผล/ข้อมูลที่มีอยู่แล้วไม่ถูกกรอง (ปิดสวิตช์ทีหลัง Section ที่วางไว้ยังขึ้นเว็บตามเดิม)
    */
   beta?: string;
+  /**
+   * ปุ่ม "จัดการ … →" ใต้แผงตั้งค่าของ Section — เปิดหน้าหลังบ้านที่เก็บข้อมูลของ Section นี้ในแท็บใหม่
+   * (เช่น ออกแบบเข็มขัด → สตูดิโอ /admin/belt-builder) · ไม่มี = ไม่โชว์ปุ่ม
+   */
+  manage?: { label: string; href: string; hint?: string };
 }
 
 export interface ValidationIssue {
@@ -1001,7 +1006,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
   //    ข้อมูล: /admin/belt-builder (belt_parts/belt_size_rules) + ข้อมูลร้าน กลุ่ม 🧵 (ราคาฐาน/ค่าสลัก) · เว็บร้าน: src/components/belt/BeltBuilderBody.tsx
   beltbuilder: {
     type: "beltbuilder",
-    meta: { label: "ออกแบบเข็มขัด (Belt Builder)", icon: "🧵", hint: "ลูกค้าประกอบเข็มขัดเอง เห็นพรีวิว + ราคา", group: "สินค้า" },
+    meta: { label: "ออกแบบเข็มขัด (Belt Builder)", icon: "🧵", hint: "ลูกค้าประกอบเข็มขัดเอง เห็นพรีวิว + ราคา", group: "สินค้า",
+      manage: { label: "จัดการชิ้นส่วน →", href: "/admin/belt-builder", hint: "สตูดิโอ: อัปโหลดรูปสาย/หัว/หู · ตั้งราคาฐาน · จัดตำแหน่งบนพรีวิว" } },
     fields: [
       ...headFields({ eyebrow: "Personalize", title: "ออกแบบเข็มขัดในแบบของคุณ", subtitle: true }),
       f("showPrice", "โชว์ราคา", "toggle", { group: "layout", default: true, hint: "ปิด = โชว์เฉพาะพรีวิว (เหมาะตอนยังไม่ตั้งราคาฐาน)" }),

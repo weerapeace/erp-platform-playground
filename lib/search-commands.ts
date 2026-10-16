@@ -38,6 +38,7 @@ export const COMMANDS: SearchCommand[] = [
   { id: "new-task",     icon: "🎨", label: "สร้างงาน Creative ใหม่",          aliases: ["งาน", "task", "งานใหม่", "creative"],                          href: "/tasks?new=1",                      perm: "tasks.create" },
   { id: "go-receive",   icon: "📥", label: "ไปหน้ารับสินค้าเข้า",              aliases: ["รับของ", "รับสินค้า", "ของเข้า", "receive"],                   href: "/purchasing/receive" },
   { id: "go-scan",      icon: "📷", label: "เปิดสถานีสแกน",                   aliases: ["สแกน", "scan", "qr", "ยิงบาร์โค้ด"],                          href: "/scan" },
+  { id: "go-belt",      icon: "🧵", label: "เปิดสตูดิโอออกแบบเข็มขัด (Belt Builder)", aliases: ["เข็มขัด", "belt", "belt builder", "สตูดิโอเข็มขัด", "ชิ้นส่วนเข็มขัด", "สายหนัง", "หัวเข็มขัด", "louis montini"], href: "/admin/belt-builder", perm: "belt_builder.view" },
   // ---- 💰 Payroll (scope "payroll") — หน้า MasterCRUD รับ ?new=1 อยู่แล้ว ----
   { id: "new-employee",   icon: "🧑‍💼", label: "เพิ่มพนักงานใหม่",                aliases: ["พนักงาน", "employee", "คน", "ลูกน้อง"],                  href: "/payroll/employees?new=1",   perm: "employees.create", scope: "payroll" },
   { id: "new-contract",   icon: "📄", label: "เพิ่มสัญญาจ้างใหม่",               aliases: ["สัญญา", "สัญญาจ้าง", "contract"],                          href: "/payroll/contracts?new=1",   perm: "employees.create", scope: "payroll" },

@@ -175,3 +175,25 @@ export function totalPrice(basePrice: number, parts: Array<{ price_delta?: numbe
 export function scaleAnchor(a: Anchor, scale: number): Anchor {
   return { x: a.x * scale, y: a.y * scale, w: a.w * scale, h: a.h * scale };
 }
+
+/* ───────────── จับคู่ชื่อไฟล์รูป ↔ code ชิ้นส่วน (ใช้ใน "อัปโหลดหลายรูป" ของสตูดิโอ) ───────────── */
+
+/** ทำชื่อไฟล์/รหัสให้เทียบกันได้: ตัดนามสกุล · ตัวพิมพ์เล็ก · "_"/ช่องว่าง → "-" · ยุบ "--" */
+export function normalizeCodeKey(s: string): string {
+  return s.toLowerCase().replace(/\.[a-z0-9]+$/i, "").replace(/[_\s]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").trim();
+}
+
+/**
+ * หาชิ้นที่ code ตรงกับชื่อไฟล์ (STRAP-DBR-35.png → strap-dbr-35) · ไม่ตรงเป๊ะ ลองตัดท้าย "-1" / "(1)" / "-copy" / "-final" / "-new"
+ * ไม่เจอ = null (ให้ผู้ใช้เลือกเอง)
+ */
+export function matchFileToPart<T extends { code: string | null }>(fileName: string, parts: T[]): T | null {
+  const key = normalizeCodeKey(fileName);
+  if (!key) return null;
+  const byCode = new Map<string, T>();
+  for (const p of parts) if (p.code) byCode.set(normalizeCodeKey(p.code), p);
+  if (byCode.has(key)) return byCode.get(key) ?? null;
+  const stripped = key.replace(/(-?\(\d+\)|-\d+|-copy|-final|-new)$/i, "");
+  if (stripped !== key && byCode.has(stripped)) return byCode.get(stripped) ?? null;
+  return null;
+}

@@ -19,6 +19,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError, parseDupError } from "@/app/api/master-v2/[entity]/route";
 import type { ValidationResult } from "@/lib/belt-builder";
+import { siteUrlFromDomain } from "@/lib/website-links";
 
 export const VIEW_PERM = "belt_builder.view";
 export const EDIT_PERM = "belt_builder.edit";
@@ -194,10 +195,20 @@ export async function deleteHandler(res: CrudResource, request: NextRequest, id:
   return NextResponse.json({ id, error: null });
 }
 
-/** รายการ shops ที่เปิดอยู่ (ใช้เป็นตัวเลือกร้านบนหัวหน้า) */
+/** รายการ shops ที่เปิดอยู่ (ใช้เป็นตัวเลือกร้านบนหัวหน้า) + โดเมนเว็บร้าน (shop_domains) ไว้ทำปุ่ม "ดูหน้าเว็บ" ในสตูดิโอ */
 export async function listShops(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, VIEW_PERM); if (denied) return denied;
-  const { data, error } = await supabaseAdmin().from("shops").select("id, slug, name, status").eq("status", "active").order("is_default", { ascending: false }).order("name");
+  const admin = supabaseAdmin();
+  const [{ data, error }, { data: domains }] = await Promise.all([
+    admin.from("shops").select("id, slug, name, status").eq("status", "active").order("is_default", { ascending: false }).order("name"),
+    admin.from("shop_domains").select("shop_id, domain"),
+  ]);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
-  return NextResponse.json({ data: data ?? [], error: null });
+  const siteByShop = new Map<string, string>();
+  for (const d of (domains ?? []) as { shop_id: string; domain: string | null }[]) {
+    const url = siteUrlFromDomain(d.domain);
+    if (url && !siteByShop.has(d.shop_id)) siteByShop.set(d.shop_id, url);
+  }
+  const rows = ((data ?? []) as { id: string }[]).map((s) => ({ ...s, site_url: siteByShop.get(s.id) ?? null }));
+  return NextResponse.json({ data: rows, error: null });
 }

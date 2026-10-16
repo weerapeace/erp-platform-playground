@@ -4,7 +4,7 @@
 ให้ลูกค้าบนเว็บหน้าร้าน Louis Montini ประกอบเข็มขัดเอง: เลือกสายหนัง · หัวเข็มขัด · หูเข็มขัด · สลักชื่อ · ความยาวตามรอบเอว
 แล้วเห็นพรีวิวเป็น **รูปถ่ายจริงซ้อนเป็นชั้น** ก่อนสั่งซื้อ · แอดมินเพิ่ม/ลบ/ตั้งราคาตัวเลือกเองจากหลังบ้าน ไม่ต้องแก้โค้ด
 
-สถานะ: **ก้อน 1+2 (ฐานข้อมูล + หลังบ้าน) เสร็จ** · ก้อน 3 หน้าเว็บลูกค้า · ก้อน 4 สั่งซื้อ → ใบสั่งขาย ยังไม่ทำ
+สถานะ: ก้อน 1–4 เสร็จ (ฐานข้อมูล · หลังบ้าน · หน้าเว็บลูกค้า · ออเดอร์เว็บ) · **หลังบ้านเป็นสตูดิโอแล้ว (2026-10-16)** · ยังค้าง: ตั้งฟอนต์/ตำแหน่งสลักจากหน้าจอ
 
 ## ภาพรวมการซ้อนชั้น (ผืนผ้าใบคงที่ 1600×600 px)
 | ชั้น | ชิ้น | รูป | จุดยึดเริ่มต้น {x,y,w,h} |
@@ -38,11 +38,24 @@ POST   /api/belt-builder/{res}                   → {data}   (ตรวจ vali
 GET    /api/belt-builder/{res}/{id}              → {data}
 PATCH  /api/belt-builder/{res}/{id}              → {data}   (ส่งเฉพาะฟิลด์ที่แก้ · audit เก็บ changes {from,to})
 DELETE /api/belt-builder/{res}/{id}[?hard=1]     → {id}     (parts: soft = is_active=false + deleted_at · กู้คืน = PATCH is_active=true)
+POST   /api/belt-builder/parts/reorder          → {data:{updated}}  body {shop_id, ids[]} ตั้ง sort_order = ลำดับ×10 (สตูดิโอลากจัดลำดับ · audit "reorder" 1 แถว)
+GET    /api/belt-builder/shops                   → {data: [{id, slug, name, status, site_url}]}  (site_url จาก shop_domains ไว้ทำปุ่มดูหน้าเว็บ)
 GET    /api/belt-builder/shops                   → ร้านที่เปิดอยู่ (ตัวเลือกบนหัวหน้า)
 ```
 audit `entity_type` = belt_parts / belt_size_rules / belt_designs · action = create / update / restore / archive / delete
 
-## หลังบ้าน `/admin/belt-builder` (เมนู 🌐 เว็บไซต์ → ออกแบบเข็มขัด)
+## หลังบ้าน `/admin/belt-builder` = 🧵 สตูดิโอออกแบบเข็มขัด (2026-10-16 · เมนู 🌐 เว็บไซต์ → ออกแบบเข็มขัด · Ctrl+K พิมพ์ "เข็มขัด")
+เจ้าของขอหน้าที่ "หาเจอ · โหลดรูปง่าย · เห็นภาพ" → หน้าหลักเป็นสตูดิโอ (`components/belt-builder/studio.tsx`) ส่วนตารางเดิมย้ายไป `?view=tables` (ปุ่ม 📋 ตาราง)
+- **แถบบน**: ชื่อร้าน + ป้ายเปิดใช้ · 👁 ดูหน้าเว็บ (`<โดเมนร้าน>/belt-builder?preview=1` จาก `shop_domains`) · ⚙ ตั้งค่าร้าน (`studio-settings-drawer.tsx` → `/api/website/settings` PUT patch: ราคาฐาน/ค่าสลัก/ตัวอักษร/ระยะเวลา ใช้ `MoneyInput`) · การ์ดสถานะ 4 ใบ (ราคาฐาน แดงถ้า 0 · ค่าสลักชื่อ · รูปที่ยังไม่อัปโหลด n/ทั้งหมด · จำนวนแบบของลูกค้า) กดแล้วพาไปที่เกี่ยวข้อง
+- **รางซ้าย**: สายหนัง / หัว / หู (นับจำนวน) · 📏 กติกาไซซ์ (`SizeRulesPanel` แก้ในที่ + `StrapFormulaEditor`) · ✒️ สลักชื่อ (`EngravingPanel` โชว์ ENGRAVING_FONTS/POSITIONS จาก `lib/belt-builder-public.ts` อ่านอย่างเดียว + ลองพิมพ์บนพรีวิว) · 🧾 แบบของลูกค้า (`DesignsPanel` = DataTable กลาง: รหัส 8 ตัว · วันที่ · ที่เลือก · ราคา · สถานะ · เลขใบสั่งขาย · ปุ่มเปิด `?design=`)
+- **กริดการ์ด** (`studio-part-card.tsx`): รูปย่อ R2 (ไม่มีรูป = วงกลมสีจาก attrs.color_hex/metal_hex + ป้าย "ไม่มีรูป") · ชื่อ/รหัส/กว้าง · +ราคาเพิ่ม · สวิตช์ is_active (PATCH ทันที) · ติ๊กหลายใบ → `BulkActionBar` (เปิด/ปิด/ลบ) · ชิปกรอง (กว้าง 35/40 จาก attrs.width_mm · ไม่มีรูป · ปิดอยู่) · **ลากที่ ⠿ จัดลำดับ** (`useDragReorder` → `POST /api/belt-builder/parts/reorder` ตั้ง sort_order = ลำดับ×10 · ปิดลากตอนกรองอยู่) · **ลากไฟล์ PNG วางบนการ์ด = เปลี่ยนรูปทันที**
+- **📤 อัปโหลดหลายรูป** (`studio-bulk-upload.tsx`): จับคู่ชื่อไฟล์ ↔ code ด้วย `matchFileToPart` (lib/belt-builder · test) เช่น `STRAP-BLACK-35.png` → `strap-black-35` (ยอมท้าย -1 / (1) / -copy) · พรีวิวคู่ + dropdown แก้คู่เอง · กันเลือกชิ้นซ้ำ · อัปโหลดทีละไฟล์แล้ว PATCH image_key รายชิ้น
+- **แผงแก้ไข** (`studio-part-editor.tsx` — คอมอยู่ใต้กริด · มือถือเป็น `Drawer`): ซ้าย `AnchorEditor` เดิม (พรีวิวซ้อนชิ้นอ้างอิง + ลาก + x/y/w/h + ค่ามาตรฐาน) · ขวา ช่องรูป (ลากวาง/เลือกไฟล์/📁 `AssetPicker` คลังไฟล์/ลบรูป) · ชื่อไทย/อังกฤษ · code · ประเภท · ราคาเพิ่ม (`MoneyInput`) · สีจุดเลือก (`ColorInput` → color_hex หรือ metal_hex) · `AttrsEditor` · เปิดใช้ · **บันทึกส่งเฉพาะฟิลด์ที่แก้** (`diffPatch`) · ปุ่ม 📑 ทำสำเนา (code เติม -copy ปิดไว้ก่อน) / 🗑 ลบ (soft + `ConfirmDialog`)
+- **ตัวช่วยอัปโหลด** `upload-png.ts`: รับเฉพาะ PNG (เช็ก signature) · เตือนถ้า > 2 MB หรือ IHDR color type ไม่มี alpha (พื้นทึบ) · ไม่ย่อขนาด (สายต้องคมที่ 1600px) · ขึ้น R2 โฟลเดอร์ `belt-parts` ผ่าน `/api/admin/upload` (ลงคลังไฟล์กลางอัตโนมัติ แท็ก "ชิ้นส่วนเข็มขัด")
+- **ทางเข้าอื่น**: ตัวจัดหน้าเว็บ → Section ออกแบบเข็มขัด → แผงตั้งค่ามีปุ่ม "จัดการชิ้นส่วน →" (ของกลางใหม่ `SectionMeta.manage` ใน `lib/website-schema.ts` วาดใน `website-builder.tsx` · Section อื่นใส่ได้) · Global Search คำสั่ง `go-belt` (lib/search-commands) · `/admin/belt-builder/studio` redirect มาหน้านี้
+- มุมมองตาราง (`belt-admin-tables.tsx` = MasterCRUD 3 แท็บเดิม) ยังอยู่สำหรับ: กู้คืนชิ้นที่ลบ (ติ๊กโชว์ที่ปิดอยู่) · export · แก้ sort_order เป็นตัวเลขตรง ๆ
+
+### มุมมองตาราง (`?view=tables` — MasterCRUD เดิม)
 ของกลางที่ใช้: `MasterCRUDPage` (+ flag ใหม่ `restApi: true` สำหรับ API ที่ไม่ใช่ master-v2) · DataTable กลาง · MasterRecordDrawer · `ImageInput` (อัปโหลด/เลือกจากคลังไฟล์ → R2 โฟลเดอร์ `belt-parts`)
 - แท็บ **ชิ้นส่วน** — ชิปกรองประเภท (ทั้งหมด/สาย/หัว/หู) · ใน drawer: ช่องรูป · คุณสมบัติแบบ ชื่อ=ค่า (`AttrsEditor` มีคีย์แนะนำต่อประเภท) · **จุดยึด + พรีวิวซ้อนรูป** (`AnchorEditor`: ผืนผ้าใบย่อ + ชิ้นอ้างอิงของประเภทอื่นในร้านโชว์จาง ๆ · ลากย้าย/พิมพ์ x,y,w,h · ปุ่มค่าเริ่มต้น · เห็นผลทันทีก่อนบันทึก)
 - แท็บ **กติกาไซซ์** — `StrapFormulaEditor` แก้ mult/add_cm + ตารางตัวอย่าง "เอวเท่านี้ → ตัดหนังกี่ซม. · รูอยู่ตรงไหน" สด
