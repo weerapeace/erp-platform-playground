@@ -536,6 +536,8 @@ export async function deleteContentAttachment(contentId: string, attId: string):
 // ---- ตั้งค่าต่อแพลตฟอร์ม (แม่แบบเริ่มต้น/ปิดแคปชั่น-แฮชแท็ก/ลิงก์โพสต์/โน้ต) ----
 export type PlatformSetting = { template_key?: string | null; use_caption?: boolean; use_hashtags?: boolean; post_url?: string | null; note?: string | null };
 export type PlatformSettings = Record<string, PlatformSetting>;
+/** key แคช (useSWRLite) ของตั้งค่าแพลตฟอร์ม — ปฏิทินอ่าน · drawer บันทึกแล้ว mutateSWR key นี้ให้ปฏิทินเปลี่ยนตามทันที */
+export const PLATFORM_SETTINGS_SWR_KEY = "creative:platform-settings";
 export async function getPlatformSettings(): Promise<PlatformSettings> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-platform-settings"));
   return (j.settings as PlatformSettings) ?? {};

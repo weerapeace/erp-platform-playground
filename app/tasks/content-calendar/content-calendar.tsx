@@ -20,7 +20,9 @@ import {
   listContent, listBrands, listCampaigns, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes,
   CONTENT_STATUS_META, contentStatusLabel, type BrandCalStyle, type ContentStatus,
   listTasks, updateTask, deleteTask, isOverdue, type CreativeTask,
+  getPlatformSettings, PLATFORM_SETTINGS_SWR_KEY, type PlatformSettings,
 } from "../data";
+import { platformReadiness, type PlatReady } from "@/lib/content-readiness";
 import { ContentDrawer } from "../content/content";
 import { ContentCreateModal, type ContentCreatePreset } from "../content/content-create-modal";
 import { StoryQuickModal } from "./story-quick-modal";
@@ -77,19 +79,9 @@ function NoFileBadge() {
   );
 }
 
-/** ความพร้อมของแพลตฟอร์มหนึ่ง ๆ บนการ์ด: โพสต์แล้ว / ข้าม / พร้อม / ขาดอะไร */
-type PlatReady = { code: string; state: "posted" | "scheduled" | "skip" | "ready" | "missing"; missing: ("caption" | "image")[]; images: string[] };
-function platReadiness(e: CalEntry): PlatReady[] {
-  return e.platforms.map((code) => {
-    const st = e.postStatus[code];
-    const imgs = e.platformImages[code]?.length ? e.platformImages[code] : e.imageKeys;
-    const missing: PlatReady["missing"] = [];
-    if (e.formats[code] !== "story" && !e.captionPlatforms.includes(code)) missing.push("caption");   // Story ไม่ต้องมีแคปชั่น
-    if (!imgs.length) missing.push("image");
-    const state: PlatReady["state"] = st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "skip" ? "skip" : missing.length ? "missing" : "ready";
-    return { code, state, missing, images: imgs.slice(0, 4) };
-  });
-}
+/** ความพร้อมของแพลตฟอร์มหนึ่ง ๆ บนการ์ด: โพสต์แล้ว / ข้าม / พร้อม / ขาดอะไร — กติกาอยู่ที่ของกลาง lib/content-readiness
+ *  (ไม่ต้องมีแคปชั่น: แพลตฟอร์มที่ ⚙️ ตั้ง "ไม่ใช้แคปชั่น" เช่น Shopee/Lazada · แพลตฟอร์มที่ลงเป็น Story → มีรูปก็พร้อมโพสต์) */
+const platReadiness = (e: CalEntry, pset?: PlatformSettings | null): PlatReady[] => platformReadiness(e, pset);
 const READY_RING: Record<PlatReady["state"], string> = {
   posted: "ring-emerald-500 bg-emerald-50", scheduled: "ring-blue-500 bg-blue-50", ready: "ring-emerald-400 bg-white", missing: "ring-amber-400 bg-amber-50", skip: "ring-slate-300 bg-slate-100 opacity-50",
 };
@@ -116,13 +108,12 @@ function PlatIcons({ list, size = 12 }: { list: PlatReady[]; size?: number }) {
  * Quick view ของคอนเทนต์ — ชี้เมาส์ค้าง (จอที่มีเมาส์) หรือแตะ ⓘ (จอสัมผัส): รูปที่จะลง + ต่อแพลตฟอร์มว่าขาดอะไร (แคปชั่น/รูป)
  * วางแบบ fixed ผ่าน portal (ไม่โดนช่องวันตัด) — แบบเดียวกับ Popover ของกลาง แต่เปิดด้วย hover
  */
-function QuickView({ e, open, anchor, onClose, onOpen }: { e: CalEntry; open: boolean; anchor: HTMLElement | null; onClose: () => void; onOpen: () => void }) {
+function QuickView({ e, plats, open, anchor, onClose, onOpen }: { e: CalEntry; plats: PlatReady[]; open: boolean; anchor: HTMLElement | null; onClose: () => void; onOpen: () => void }) {
   if (!open || !anchor || typeof document === "undefined") return null;
   const r = anchor.getBoundingClientRect();
   const W = 300; const left = Math.min(Math.max(8, r.left), window.innerWidth - W - 8);
   const above = window.innerHeight - r.bottom < 300 && r.top > 300;
   const style: React.CSSProperties = above ? { position: "fixed", left, bottom: window.innerHeight - r.top + 4, width: W, zIndex: 80 } : { position: "fixed", left, top: r.bottom + 4, width: W, zIndex: 80 };
-  const plats = platReadiness(e);
   const missingAny = plats.filter((p) => p.state === "missing");
   const shown = e.imageKeys.slice(0, 4);
   if (e.isStory) {
@@ -184,6 +175,7 @@ function QuickView({ e, open, anchor, onClose, onOpen }: { e: CalEntry; open: bo
               <span className={`text-[10px] px-1.5 py-px rounded-full ${p.state === "posted" ? "bg-emerald-100 text-emerald-700" : p.state === "scheduled" ? "bg-blue-100 text-blue-700" : p.state === "ready" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : p.state === "skip" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"}`}>
                 {p.state === "missing" ? `ขาด ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
               </span>
+              {p.captionOff && p.state !== "skip" && <span className="text-[10px] text-slate-400" title={p.isStory ? "ลงเป็น Story — ไม่ต้องมีแคปชั่น" : "ตั้งไว้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม — แพลตฟอร์มนี้ลงแค่รูป"}>{p.isStory ? "Story" : "ไม่ใช้แคปชั่น"}</span>}
               {p.images.length > 0 && e.platformImages[p.code]?.length ? <span className="ml-auto text-[10px] text-slate-400">🖼 {e.platformImages[p.code].length}</span> : null}
             </div>
           ))}
@@ -213,7 +205,6 @@ export function ContentCalendarView() {
   const [platformFilter, setPlatformFilter] = useState<string>("all");   // "all" | platform value
   const [statusFilter, setStatusFilter] = useState<string>("all");   // "all" | สถานะ (ตามโหมด)
   const [notReady, setNotReady] = useState(false);   // ⚠ ยังไม่พร้อม = โพสต์ที่ยังขาดแคปชั่นหรือรูปในแพลตฟอร์มใดแพลตฟอร์มหนึ่ง (ใช้ร่วมกับตัวกรองอื่นได้)
-  const isNotReady = (e: CalEntry) => e.kind === "content" && e.status !== "cancelled" && platReadiness(e).some((p) => p.state === "missing");
   const [offset, setOffset] = useState(0);                          // เลื่อนเดือน (0 = เดือนนี้)
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -249,6 +240,10 @@ export function ContentCalendarView() {
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
   const stylesSWR = useSWRLite("creative:brand-cal-styles", () => listBrandCalStyles());
+  // ⚙️ ตั้งค่าแพลตฟอร์ม (เช่น Shopee/Lazada "ไม่ใช้แคปชั่น") — ใช้ตัดสินว่าพร้อมโพสต์หรือยัง · key เดียวกับ drawer (แก้ตั้งค่าแล้วปฏิทินเปลี่ยนตามทันที)
+  const psetSWR = useSWRLite(PLATFORM_SETTINGS_SWR_KEY, () => getPlatformSettings());
+  const pset = psetSWR.data;
+  const isNotReady = useCallback((e: CalEntry) => e.kind === "content" && e.status !== "cancelled" && platReadiness(e, pset).some((p) => p.state === "missing"), [pset]);
   const items = useMemo(() => itemsSWR.data ?? [], [itemsSWR.data]);
   const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
   const brands = brandsSWR.data ?? [];
@@ -316,7 +311,7 @@ export function ContentCalendarView() {
       && (statusFilter === "all" || e.status === statusFilter)
       && (!notReady || isNotReady(e)),
     ),
-    [entries, brandFilter, platformFilter, statusFilter, notReady],
+    [entries, brandFilter, platformFilter, statusFilter, notReady, isNotReady],
   );
   const hasFilter = brandFilter !== "all" || platformFilter !== "all" || statusFilter !== "all" || notReady;
 
@@ -337,7 +332,7 @@ export function ContentCalendarView() {
     for (const e of inBrand) { for (const p of e.platforms) plat[p] = (plat[p] ?? 0) + 1; stat[e.status] = (stat[e.status] ?? 0) + 1; }
     const notReadyN = inBrand.filter(isNotReady).length;   // ยังขาดแคปชั่น/รูป (เดือนนี้ ในแบรนด์ที่เลือก)
     return { total: all.length, inBrand: inBrand.length, brand, plat, stat, notReady: notReadyN };
-  }, [entries, brandFilter, ym]);
+  }, [entries, brandFilter, ym, isNotReady]);
 
   // Story ต่อวัน (ตามตัวกรองแบรนด์เท่านั้น — ไม่สนแพลตฟอร์ม/สถานะ/ยังไม่พร้อม เพื่อให้แถบ Story คงที่)
   const storyByDay = useMemo(() => {
@@ -489,7 +484,7 @@ export function ContentCalendarView() {
   // การ์ดในช่องวัน (ใช้ร่วม 2 โหมด) — งาน: มีรูปปก + ขอบแดงถ้าเลยกำหนด
   const Chip = ({ e }: { e: CalEntry }) => {
     const tip = [e.title, e.sub, e.meta, e.platforms.slice(0, 3).map((p) => platformLabel(p)).join(" · "), e.statusLabel].filter(Boolean).join(" · ");
-    const plats = e.kind === "content" ? platReadiness(e) : [];
+    const plats = e.kind === "content" ? platReadiness(e, pset) : [];
     const story = e.kind === "content" && e.isStory;   // Story = การ์ดเล็กจาง ๆ ไม่ให้เด่นกว่าโพสต์ปกติ
     const isQv = quickView?.id === e.id;
     const openQv = (el: HTMLElement) => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView({ id: e.id, anchor: el }), 350); };
@@ -524,7 +519,7 @@ export function ContentCalendarView() {
           <button type="button" onClick={(ev) => { ev.stopPropagation(); setQuickView(isQv ? null : { id: e.id, anchor: ev.currentTarget }); }}
             className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white border border-slate-300 text-[9px] text-slate-500 shadow-sm">ⓘ</button>
         )}
-        <QuickView e={e} open={isQv} anchor={quickView?.anchor ?? null} onClose={closeQv} onOpen={() => { if (qvTimer.current) clearTimeout(qvTimer.current); }} />
+        <QuickView e={e} plats={plats} open={isQv} anchor={quickView?.anchor ?? null} onClose={closeQv} onOpen={() => { if (qvTimer.current) clearTimeout(qvTimer.current); }} />
       </div>
     );
   };

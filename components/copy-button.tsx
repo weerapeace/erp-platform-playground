@@ -9,22 +9,28 @@
  */
 import { useState, type MouseEvent } from "react";
 
+/** คัดลอกข้อความลง clipboard (ของกลาง) — ลอง navigator.clipboard ก่อน · ไม่มี/ถูกปฏิเสธ (http, in-app browser, ไม่มีสิทธิ์) → วิธีสำรอง execCommand · คืน true = สำเร็จ */
+export async function copyText(value: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) { await navigator.clipboard.writeText(value); return true; }
+  } catch { /* ตกไปใช้วิธีสำรอง */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = value; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+
 export function CopyButton({ value, title, className = "", label }: { value: string; title?: string; className?: string; /** มี = ปุ่มมีข้อความ (แทนไอคอนเล็ก) */ label?: string }) {
   const [done, setDone] = useState(false);
   if (!value) return null;
 
   const copy = async (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation(); e.preventDefault();
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = value; ta.style.position = "fixed"; ta.style.opacity = "0";
-        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
-      }
-      setDone(true); setTimeout(() => setDone(false), 1200);
-    } catch { /* เงียบ ๆ */ }
+    if (await copyText(value)) { setDone(true); setTimeout(() => setDone(false), 1200); }
   };
 
   const icon = done ? (
