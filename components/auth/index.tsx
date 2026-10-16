@@ -58,6 +58,14 @@ export type Permission =
   | "cashflow.view" | "cashflow.manage"
   | "receipts.view" | "receipts.create" | "receipts.edit" | "receipts.cancel"
   | "belt_builder.view" | "belt_builder.edit"
+  // ↓ คืนจาก commit 6895c54d (ไฟล์นี้เคยถูกทับด้วยฉบับเก่า 2026-07-01) — ใช้จริงในหลายหน้า · สิทธิ์จริงอ่านจาก DB (erp_my_permissions)
+  | "products.platforms.view" | "products.platforms.edit" | "products.platforms.publish" | "products.platforms.manage_accounts" | "platform_orders.view" | "platform_orders.manage"
+  | "work_board.dispatch" | "production.piecework" | "qc.view" | "qc.receive" | "qc.move" | "qc.ship"
+  | "qc.defect" | "qc.repair" | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory"
+  | "app.production" | "app.sales" | "app.china_pay" | "app.payroll" | "app.settings" | "app.design"
+  | "app.misc" | "offers.view" | "offers.edit" | "report.create" | "report.manage" | "task_template.view"
+  | "task_template.create" | "task_template.edit" | "task_template.delete" | "task_subtask.approve" | "task_subtask.revise" | "task_subtask.cancel"
+  | "product_media.sync" | "sku_description.sync"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
@@ -100,6 +108,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "subscriptions.view", "subscriptions.edit",
     "books.view", "books.edit",
     "admin.users", "admin.audit_log",
+    // คืนจาก 6895c54d
+    "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts", "platform_orders.view", "platform_orders.manage", "work_board.dispatch", "production.piecework", "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair", "task_template.view", "task_template.create", "task_template.edit", "task_template.delete", "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   manager: [
     "products.view", "products.create", "products.edit", "products.cost.view",
@@ -116,6 +126,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "attachments.view", "attachments.upload", "attachments.delete",
     "accounting.view", "accounting.manage", "accounting.post",
     "admin.audit_log",
+    // คืนจาก 6895c54d
+    "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts", "platform_orders.view", "platform_orders.manage", "work_board.dispatch", "production.piecework", "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair", "task_template.view", "task_template.create", "task_template.edit", "task_template.delete", "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   staff: [
     "products.view", "products.create", "products.edit",
@@ -133,12 +145,17 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "stock.view", "stock.create",
     "po.view", "po.create", "po.edit", "po.receive", "po.cancel",
     "attachments.view", "attachments.upload",
+    // คืนจาก 6895c54d
+    "products.platforms.view", "products.platforms.edit", "platform_orders.view", "platform_orders.manage", "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair", "task_template.view",
   ],
   viewer: ["goals.view", "products.view", "pr.view", "suppliers.view", "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
     "customers.view", "employees.view", "warehouses.view", "departments.view", "units.view", "taxes.view", "validation.view", "roles.view",
     "comments.view", "notification_rules.view",
     "so.view", "qt.view", "cn.view", "stock.view", "po.view",
-    "attachments.view"],
+    "attachments.view",
+    // คืนจาก 6895c54d
+    "qc.view",
+  ],
 };
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -229,7 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // โหลดพลาด = perms คงเป็น null → can() ใช้ค่าสำรอง + app-lock ไม่บล็อก (ไม่ค้าง)
       supabaseBrowser.rpc("erp_my_permissions").then(({ data: pr, error }) => {
         if (!error && Array.isArray(pr)) setPerms(new Set(pr as string[]));
-      }).catch(() => { /* เงียบ — ใช้ค่าสำรอง */ });
+      }, () => { /* เงียบ — ใช้ค่าสำรอง (ตัวที่ 2 ของ then = จับ error · rpc() คืน PromiseLike ไม่มี .catch) */ });
     } else {
       setUser(null);
       setPerms(null);

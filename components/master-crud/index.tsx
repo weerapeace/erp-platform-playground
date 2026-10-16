@@ -510,6 +510,11 @@ export type MasterCRUDConfig = {
   }) => React.ReactNode>;
   /** custom field ในหน้า "ดู" (key → renderDetail) — คู่กับ formRenderers */
   detailRenderers?: Record<string, FieldDef["renderDetail"]>;
+  /** กล่องลบ: โชว์ "สิ่งที่ผูกอยู่" + ตัวเลือกลบพ่วง (เช่น Parent SKU: รูป/ตัวลูก) · apply เรียกก่อนลบตัวหลัก */
+  deleteExtras?: {
+    fetch: (id: string) => Promise<{ items: { icon: string; label: string; count: number }[]; options: { key: string; label: string }[] }>;
+    apply: (id: string, selected: Record<string, boolean>, mode: "soft" | "hard") => Promise<void>;
+  };
   /** แถบ custom เหนือฟอร์ม "ตอนสร้างใหม่" เท่านั้น (เช่น แม่แบบ) — รับค่าฟอร์มปัจจุบัน + setter */
   createFormHeader?: (ctx: { form: Record<string, unknown>; updateForm: (patch: Partial<Record<string, unknown>>) => void }) => React.ReactNode;
   /** ปุ่ม/ลิงก์เพิ่มเติมบนหัวหน้า (ซ้ายของ ปรับแต่ง/นำเข้า/เพิ่ม) เช่น "พิมพ์ฟอร์ม" */
@@ -976,6 +981,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const baseSnapRef = useRef<Record<string, unknown>>({});
   formRef.current = form;
   const [formErr,     setFormErr]     = useState<string | null>(null);
+  const [dupHit, setDupHit] = useState<{ field: string; value: string } | null>(null);   // ค่าซ้ำล่าสุด → ปุ่ม "ดูตัวที่ซ้ำ"
   const [dirty,       setDirty]       = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -1027,16 +1033,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     return k.includes("sku") && !k.includes("parent") ? "sku" : "parent_sku";
   }, [config.moduleKey, config.apiPath]);
   const [familyTemplates, setFamilyTemplates] = useState<Record<string, FamilyTemplate>>({});
+  const familyNameToIdRef = useRef<Record<string, string>>({});   // ชื่อ family (lowercase) → id (สำหรับ auto-fill จาก Brand/หมวด)
   useEffect(() => {
     if (familyM2mFields.length === 0) return;
     cachedJson<{ data?: Record<string, unknown>[]; rows?: Record<string, unknown>[] }>(`/api/master-v2/product_families?limit=500&include_inactive=true`)
       .then((j) => {
         const m: Record<string, FamilyTemplate> = {};
-        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
+        const nameMap: Record<string, string> = {};
+        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) {
+          m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
+          const nm = String(r.name ?? "").trim().toLowerCase();
+          if (nm && !nameMap[nm]) nameMap[nm] = String(r.id);
+        }
         setFamilyTemplates(m);
+        familyNameToIdRef.current = nameMap;
       })
       .catch(() => {});
   }, [familyM2mFields.length, tplScope]);
+  // Auto-fill Product Family จาก Brand + หมวด (จับคู่ "ชื่อ") — เติมให้เมื่อเลือก แต่ผู้ใช้ลบเองได้
+  const pickedLabelsRef = useRef<Record<string, string>>({});   // label ที่ "เพิ่งเลือก" จาก RelationPicker ในเซสชันนี้
+  const prevRelRef = useRef<Record<string, string>>({});        // ค่า id ครั้งก่อนของ brand_id/category_id (กันเติมซ้ำ + เคารพการลบเอง)
 
   // ids ของแท็กที่เลือกในฟอร์มปัจจุบัน → รวมเทมเพลต union (โชว์ชนะซ่อน)
   const selectedFamilyIds = useMemo(() => {
@@ -1072,6 +1088,32 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familyKey, modalOpen, drawerMode]);
 
+  // รีเซ็ต label/prev ที่จำไว้ เมื่อเปิด record ใหม่ (กันเอา label ของ record ก่อนมาใช้ผิด)
+  useEffect(() => { pickedLabelsRef.current = {}; prevRelRef.current = {}; }, [editingId, modalOpen]);
+
+  // Auto-fill Product Family: เลือก Brand/หมวด (Category Id) → เติมแท็กที่ "ชื่อตรงกัน" ให้อัตโนมัติ (ลบเองได้)
+  // เติมเฉพาะตอนผู้ใช้ "เพิ่งเลือก" ในเซสชันนี้ (มี label สดใน pickedLabelsRef) — ไม่เติมตอนเปิด record + ไม่ทับการลบเอง
+  useEffect(() => {
+    if (!modalOpen || drawerMode !== "edit" || familyM2mFields.length === 0) return;
+    const fkey = familyM2mFields[0].key;
+    const loaded = Array.isArray(form[fkey]);
+    const current = loaded ? (form[fkey] as unknown[]).map(String) : [];
+    const nameMap = familyNameToIdRef.current;
+    const add: string[] = [];
+    for (const relKey of ["brand_id", "category_id"]) {
+      const idStr = form[relKey] == null ? "" : String(form[relKey]);
+      if (prevRelRef.current[relKey] === idStr) continue;   // ฟิลด์นี้ไม่เปลี่ยน → ข้าม (เคารพการลบเอง)
+      prevRelRef.current[relKey] = idStr;
+      if (!loaded || !idStr) continue;                       // ยังไม่โหลด m2m / ไม่มีค่า → แค่จำ prev
+      const label = (pickedLabelsRef.current[relKey] ?? "").trim().toLowerCase();  // เฉพาะที่ "เพิ่งเลือก"
+      if (!label) continue;
+      const famId = nameMap[label];
+      if (famId && !current.includes(famId) && !add.includes(famId)) add.push(famId);
+    }
+    if (add.length) updateForm({ [fkey]: [...current, ...add] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.brand_id, form.category_id, modalOpen, drawerMode]);
+
   // field ถูกซ่อน/บังคับโดยเทมเพลตไหม (โชว์ชนะซ่อน)
   const tplHidden = useCallback((f: FieldDef) => {
     if (mergedTemplate.show.has(f.key)) return false;
@@ -1094,6 +1136,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard">("soft");
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
+  // สิ่งที่ผูกอยู่ + ตัวเลือกลบพ่วง (config.deleteExtras)
+  const [deleteInfo, setDeleteInfo] = useState<{ items: { icon: string; label: string; count: number }[]; options: { key: string; label: string }[] } | null>(null);
+  const [deleteOpts, setDeleteOpts] = useState<Record<string, boolean>>({});
 
   // toast กลาง (ของกลาง) — flash = สำเร็จ, fail = ผิดพลาด
   const notify = useToast();
@@ -1361,7 +1406,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const tryClose = () => { if (drawerMode === "edit" && dirty) setConfirmDiscard(true); else setModalOpen(false); };
   const discard  = () => { setConfirmDiscard(false); setModalOpen(false); setDirty(false); };
   // F11: สลับเข้าโหมดแก้ไข
-  const switchToEdit = () => { setDrawerMode("edit"); setFormErr(null); setFieldErrors({}); };
+  const switchToEdit = () => { setDrawerMode("edit"); setFormErr(null); setFieldErrors({}); setDupHit(null); };
+
+  // เปิดดู "รายการที่ซ้ำ" กับค่าที่กรอก (หา id จากค่าที่ซ้ำ → เปิด drawer ตัวนั้น)
+  const gotoDup = async () => {
+    const mk = config.moduleKey;
+    if (!dupHit || !mk) return;
+    try {
+      const flt = encodeURIComponent(JSON.stringify({ [dupHit.field]: { type: "text", value: dupHit.value } }));
+      const j = await apiFetch(`${apiBase}${config.apiPath}?limit=20&filters=${flt}`).then((r) => r.json());
+      const rows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
+      const hit = rows.find((r) => String(r[dupHit.field]) === String(dupHit.value)) ?? rows[0];
+      if (hit?.id) setPeek({ moduleKey: mk, id: String(hit.id) });
+      else fail(tr("ไม่พบรายการที่ซ้ำ (อาจถูกปิดใช้งาน/ลบไปแล้ว)", "Duplicate not found (may be inactive/deleted)"));
+    } catch { fail(tr("ค้นหารายการที่ซ้ำไม่สำเร็จ", "Couldn't look up the duplicate")); }
+  };
+  const dupBtn = dupHit && config.moduleKey ? (
+    <button type="button" onClick={gotoDup} className="flex-shrink-0 h-6 px-2 rounded border border-red-300 bg-white text-red-700 hover:bg-red-100 font-medium">
+      {tr("👁 ดูตัวที่ซ้ำ", "👁 View duplicate")}
+    </button>
+  ) : null;
 
   const save = async () => {
     // 1. รัน validation rules per field — Sprint 13: skip field ที่ condition ไม่ผ่าน
@@ -1385,7 +1449,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       setFormErr(tr("มี field ที่ยังไม่ผ่านการตรวจ — ดูข้อความใต้แต่ละ field", "Some fields didn't pass validation — see the message under each field"));
       return;
     }
-    setSaving(true); setFormErr(null);
+    setSaving(true); setFormErr(null); setDupHit(null);
     try {
       // serialize fields:
       //   REST mode (v2): proper types (number → number, boolean → boolean)
@@ -1438,6 +1502,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         // ค่าซ้ำ (23505): server แนบ dup:{field,value} → ไฮไลต์ช่องที่ซ้ำในฟอร์ม (เดิมโชว์แค่ข้อความรวม)
         const dup = json.dup as { field?: string; value?: string } | undefined;
         if (dup?.field) setFieldErrors((prev) => ({ ...prev, [dup.field as string]: [tr("ค่านี้ซ้ำกับที่มีอยู่แล้ว", "This value already exists") + (dup.value ? ` ("${dup.value}")` : "")] }));
+        if (dup?.field) setDupHit({ field: dup.field, value: String(dup.value ?? "") });
         throw new Error(json.error);
       }
       flash(editingId ? tr("บันทึกแล้ว", "Saved") : tr("สร้างใหม่แล้ว", "Created"));
@@ -1514,6 +1579,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     }
     setDeleting(true); setError(null);
     try {
+      // ลบพ่วง (รูป/ตัวลูก) ก่อนลบตัวหลัก — สำคัญตอนลบถาวร (ลูกต้องไปก่อน กัน FK)
+      if (config.deleteExtras && Object.values(deleteOpts).some(Boolean)) {
+        await config.deleteExtras.apply(String(deleteTarget.id), deleteOpts, deleteMode);
+      }
       const url = `${apiBase}${config.apiPath}/${deleteTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}${deleteMode === "hard" ? "&hard=1" : ""}`;
       const res = await apiFetch(url, { method: "DELETE" });
       const json = await res.json();
@@ -1526,7 +1595,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     } catch (err) { const m = err instanceof Error ? err.message : tr("ลบไม่สำเร็จ", "Delete failed"); setError(m); fail(m); }
     finally { setDeleting(false); }
   };
-  const openDelete = (r: Row) => { setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); };
+  const openDelete = (r: Row) => {
+    setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); setDeleteInfo(null); setDeleteOpts({});
+    if (config.deleteExtras) config.deleteExtras.fetch(String(r.id)).then(setDeleteInfo).catch(() => {});   // โชว์สิ่งที่ผูก + ตัวเลือกลบพ่วง
+  };
   const restore = async (r: Row) => {
     try {
       const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
@@ -2181,7 +2253,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           <div className="mt-0.5">
             <RelationPicker
               value={(v as string) || null}
-              onChange={(val) => updateForm({ [f.key]: val })}
+              onChange={(val, opt) => { updateForm({ [f.key]: val }); if (opt?.label) pickedLabelsRef.current[f.key] = opt.label; }}
               config={f.relationConfig}
               placeholder={f.placeholder ?? tr(`— เลือก ${f.label} —`, `— select ${f.label} —`)}
               required={f.required}
@@ -2805,7 +2877,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 )}
                 {renderDetailHero(visibleFields)}
                 {drawerMode === "edit" && formErr && (
-                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap"><span className="flex-1 min-w-0">⚠ {formErr}</span>{dupBtn}</div>
                 )}
                 {/* Layout คุมทุก field (รวม core) */}
                 {createHeaderEl}
@@ -2822,7 +2894,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <div className="space-y-4">
                 {renderDetailHero(visibleFields)}
                 {drawerMode === "edit" && formErr && (
-                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap"><span className="flex-1 min-w-0">⚠ {formErr}</span>{dupBtn}</div>
                 )}
                 {createHeaderEl}
                 {drawerMode === "view"
@@ -2939,7 +3011,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <div className="flex-1 min-w-0 md:order-2">
                 {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">{tr("⏳ กำลังโหลด...", "⏳ Loading...")}</div>}
                 {drawerMode === "edit" && formErr && (
-                  <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                  <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap"><span className="flex-1 min-w-0">⚠ {formErr}</span>{dupBtn}</div>
                 )}
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
@@ -3074,6 +3146,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <label className="text-xs text-slate-600">{tr("พิมพ์ ", "Type ")}<code className="px-1 bg-slate-100 rounded text-red-600 font-mono">{tr("ลบ", "DELETE")}</code>{tr(" เพื่อยืนยัน", " to confirm")}</label>
                   <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus placeholder={tr("ลบ", "DELETE")}
                     className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-red-400" />
+                </div>
+              )}
+              {deleteInfo && (deleteInfo.items.length > 0 || deleteInfo.options.length > 0) && (
+                <div className="pt-1 space-y-2">
+                  {deleteInfo.items.length > 0 && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                      <div className="text-[11px] font-medium text-slate-500 mb-1">{tr("สิ่งที่ผูกอยู่กับรายการนี้", "Linked to this record")}</div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        {deleteInfo.items.map((it) => (
+                          <span key={it.label} className="text-xs text-slate-600">{it.icon} {it.label} <b className="text-slate-800">{it.count}</b></span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {deleteInfo.options.map((opt) => (
+                    <label key={opt.key} className="flex gap-2 items-start px-1 cursor-pointer">
+                      <input type="checkbox" checked={!!deleteOpts[opt.key]} onChange={(e) => setDeleteOpts((p) => ({ ...p, [opt.key]: e.target.checked }))} className="mt-0.5" />
+                      <span className="text-xs text-slate-700">{opt.label}</span>
+                    </label>
+                  ))}
                 </div>
               )}
               {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">⚠ {error}</div>}
