@@ -23,8 +23,11 @@ const KINDS: { v: Kind; l: string }[] = [
   { v: "url", l: "ลิงก์ภายนอก / อีเมล / โทร" },
 ];
 
-const cls =
+const clsMd =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
+/** size="sm" — ช่องเตี้ย ตัวเล็ก (รายการที่เปิดก็ตัวเล็กตาม) ใช้ในแผงตั้งค่าที่แน่น เช่น ตัวจัดแผงเมนู */
+const clsSm =
+  "w-full h-7 rounded-lg border border-slate-200 px-2 text-xs text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
 
 /** ทายว่า href เดิมเป็นลิงก์ชนิดไหน */
 function kindOf(href: string): Kind {
@@ -50,7 +53,8 @@ function loadStorePages(shopSlug: string) {
   return pagesCache.get(shopSlug)!;
 }
 
-export function LinkTargetPicker({ value, onChange, ctx }: { value: string; onChange: (href: string) => void; ctx: SchemaFormContext }) {
+export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value: string; onChange: (href: string) => void; ctx: SchemaFormContext; /** sm = ช่องเตี้ยตัวเล็ก (แผงตั้งค่าแน่น) */ size?: "sm" | "md" }) {
+  const cls = size === "sm" ? clsSm : clsMd;
   const [kind, setKind] = useState<Kind>(() => kindOf(value));
   const [storePages, setStorePages] = useState<{ slug: string; title: string }[]>([]);
   const [productCode, setProductCode] = useState<string>("");

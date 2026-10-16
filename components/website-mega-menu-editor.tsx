@@ -103,7 +103,7 @@ function LinkField({ value, onChange, ctx }: { value: string; onChange: (href: s
       </button>
       {open && (
         <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
-          <LinkTargetPicker value={value} onChange={onChange} ctx={ctx} />
+          <LinkTargetPicker value={value} onChange={onChange} ctx={ctx} size="sm" />
           <button type="button" onClick={() => setOpen(false)} className="mt-1 text-[11px] text-blue-600 hover:underline">
             เสร็จ
           </button>
