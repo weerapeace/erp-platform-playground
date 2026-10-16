@@ -4,7 +4,7 @@
  * ของกลางเล็ก ๆ — ช่องอัปโหลดรูปสำหรับหน้าตั้งค่าธีม (โลโก้ / favicon)
  * อัปผ่าน /api/admin/upload (R2) แล้วเก็บเป็น r2_key · แสดงผลผ่าน /api/r2-image
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
@@ -22,6 +22,7 @@ export function ImageUploadField({
   onChange,
   previewBg = "#ffffff",
   height = 56,
+  compact,
 }: {
   label: string;
   hint?: string;
@@ -29,11 +30,25 @@ export function ImageUploadField({
   onChange: (key: string | null) => void;
   previewBg?: string;
   height?: number;
+  /** แบบแคบ: รูปเต็มความกว้าง + ปุ่มเล็กเรียงใต้รูป · ไม่ใส่ = เลือกเองตามความกว้างที่วาง (แคบกว่า 260px = แบบแคบ) */
+  compact?: boolean;
 }) {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 📐 วางในช่องแคบ (เช่น การ์ดในตัวจัดเมนู) → สลับเป็นแบบแคบเอง กันปุ่มเบียด/ทับกัน
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (compact !== undefined) return;
+    const el = boxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setNarrow(el.clientWidth > 0 && el.clientWidth < 260));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [compact]);
+  const small = compact ?? narrow;
 
   const upload = async (file: File) => {
     setBusy(true);
@@ -57,13 +72,60 @@ export function ImageUploadField({
 
   const url = keyUrl(value, 300);
 
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/png,image/jpeg,image/webp,image/gif"
+      className="hidden"
+      onChange={(e) => {
+        const f = e.target.files?.[0];
+        if (f) void upload(f);
+      }}
+    />
+  );
+  const smallBtn = "h-7 px-2 rounded-md border border-slate-200 text-[11px] text-slate-700 bg-white whitespace-nowrap";
+
   return (
-    <div>
+    <div ref={boxRef} className="min-w-0">
       <label className="block text-[11px] font-medium text-slate-500 mb-1">
         {label}
         {hint && <span className="text-slate-400"> · {hint}</span>}
       </label>
 
+      {small ? (
+        /* แบบแคบ: รูปเต็มความกว้าง (กดที่รูป = เลือกจากคลัง) + ปุ่มเล็กใต้รูป */
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            title="เลือกจากคลังรูป"
+            className="w-full rounded-lg border border-slate-200 flex items-center justify-center overflow-hidden hover:border-blue-400"
+            style={{ height, background: previewBg }}
+          >
+            {url ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={url} alt={label} style={{ maxHeight: height - 6, maxWidth: "94%", objectFit: "contain" }} />
+            ) : (
+              <span className="text-[10px] text-slate-400">ยังไม่มีรูป</span>
+            )}
+          </button>
+          <div className="flex flex-wrap gap-1">
+            <button type="button" onClick={() => setPickerOpen(true)} className={`${smallBtn} hover:border-blue-400 hover:text-blue-700`} title="เลือกจากคลังรูป">
+              🖼 คลัง
+            </button>
+            <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} className={`${smallBtn} hover:border-slate-500 disabled:opacity-50`} title={value ? "อัปโหลดรูปใหม่" : "อัปโหลดรูป"}>
+              {busy ? "…" : "⬆ อัปโหลด"}
+            </button>
+            {value && (
+              <button type="button" onClick={() => onChange(null)} className={`${smallBtn} text-red-500 hover:border-red-300`} title="เอารูปออก">
+                ✕
+              </button>
+            )}
+          </div>
+          {fileInput}
+        </div>
+      ) : (
       <div className="flex items-center gap-2">
         <div
           className="shrink-0 rounded-lg border border-slate-200 flex items-center justify-center overflow-hidden"
@@ -98,17 +160,9 @@ export function ImageUploadField({
           )}
         </div>
 
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void upload(f);
-          }}
-        />
+        {fileInput}
       </div>
+      )}
 
       {/* คลังรูปกลางของ ERP — เลือกแล้วเก็บ r2_key เหมือนตอนอัปโหลดเอง */}
       {pickerOpen && (
