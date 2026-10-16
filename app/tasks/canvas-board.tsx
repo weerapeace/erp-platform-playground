@@ -10,6 +10,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
 import { useT } from "@/components/i18n";
+import { FontSelect } from "@/components/font-select";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
 import {
@@ -571,13 +572,9 @@ export function CanvasBoard({
 
               {o && <>
                 <BarSep />
-                <div className="relative flex items-center pl-2.5 pr-1 hover:bg-slate-50">
-                  <select value={o.fontFamily} onChange={e => patchObject(o.id, { fontFamily: e.target.value })} title={t("ฟอนต์", "Font")}
-                    className="appearance-none bg-transparent text-sm text-slate-700 outline-none cursor-pointer pr-4 max-w-[112px]"
-                    style={{ fontFamily: o.fontFamily || undefined }}>
-                    {FONTS.map(f => <option key={f.label} value={f.value}>{f.label}</option>)}
-                  </select>
-                  <span className="pointer-events-none absolute right-1.5 text-slate-400"><IconChevron /></span>
+                <div className="flex items-center px-1.5">
+                  {/* 🔤 ฟอนต์ — เห็นหน้าตาจริงก่อนเลือก (ของกลาง FontSelect) */}
+                  <FontSelect value={o.fontFamily} onChange={(v) => patchObject(o.id, { fontFamily: v })} options={FONTS.map((f) => ({ value: f.value, label: f.label, family: f.value || null }))} title={t("ฟอนต์", "Font")} size="sm" className="w-[132px]" sample="Aa กขค" />
                 </div>
                 <BarSep />
                 <div className="flex items-center pl-2.5 pr-1.5 gap-1.5">
@@ -666,7 +663,6 @@ function ColorPopover({ colors, value, onPick }: { colors: string[]; value: stri
 function MenuItem({ onClick, danger, children }: { onClick: () => void; danger?: boolean; children: React.ReactNode }) {
   return <button onClick={onClick} className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 ${danger ? "text-red-600" : "text-slate-700"}`}>{children}</button>;
 }
-function IconChevron() { return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>; }
 function IconCaret({ dir }: { dir: "up" | "down" }) { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d={dir === "up" ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} /></svg>; }
 function IconMore() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" /></svg>; }
 function IconAlign({ align }: { align: Align }) {

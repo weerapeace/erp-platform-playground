@@ -90,8 +90,8 @@ export interface FieldDef {
   key: string;
   label: string;
   type: FieldType;
-  /** select: "tiles" = แสดงเป็นปุ่มรูปย่อให้กดเลือก (แทน dropdown) */
-  display?: "tiles";
+  /** select: "tiles" = แสดงเป็นปุ่มรูปย่อให้กดเลือก (แทน dropdown) · "font" = ตัวเลือกฟอนต์เห็นหน้าตาจริง (FontSelect · options = CANVAS_FONTS) */
+  display?: "tiles" | "font";
   group?: FieldGroup;
   hint?: string;
   placeholder?: string;
@@ -318,7 +318,7 @@ function canvasItemFields(): FieldDef[] {
     text("label", "ข้อความบนปุ่ม", { default: "เลือกดูสินค้า", max: 60, showIf: isButton }),
     f("variant", "รูปแบบปุ่ม", "select", { default: "brand", options: CANVAS_BUTTON_VARIANTS, showIf: isButton }),
     /* ตัวอักษร (ข้อความ + ปุ่ม) */
-    f("font", "ฟอนต์", "select", { default: "display", options: CANVAS_FONTS, showIf: typed }),
+    f("font", "ฟอนต์", "select", { default: "display", options: CANVAS_FONTS, display: "font", showIf: typed }),
     f("size", "ขนาดตัวอักษร", "number", { default: 40, min: 8, numMax: 240, showIf: typed, hint: "ขนาดตอนจอกว้าง 1200 (จอเล็กย่อตาม)" }),
     f("weight", "ความหนา", "select", { default: "500", options: CANVAS_WEIGHTS, showIf: typed }),
     f("spacing", "ระยะห่างตัวอักษร", "number", { default: 0, min: -10, numMax: 60, showIf: typed }),
@@ -1470,11 +1470,11 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       }),
       f("imageShadow", "เงาใต้รูป", "toggle", { group: "media", default: true }),
       /* ── ตัวอักษร / สี ── */
-      f("nameFont", "ฟอนต์ชื่อสินค้า", "select", { group: "layout", default: "display", options: CANVAS_FONTS }),
+      f("nameFont", "ฟอนต์ชื่อสินค้า", "select", { group: "layout", default: "display", options: CANVAS_FONTS, display: "font" }),
       f("nameSize", "ขนาดชื่อสินค้า (px)", "range", { group: "layout", default: 30, min: 16, numMax: 64, step: 1 }),
       f("nameColor", "สีชื่อสินค้า", "color", { group: "layout", default: "", hint: "ว่าง = ตามธีม" }),
       f("priceColor", "สีราคา", "color", { group: "layout", default: "", hint: "ว่าง = สีแบรนด์" }),
-      f("bigTextFont", "ฟอนต์ตัวอักษรยักษ์", "select", { group: "layout", default: "display", options: CANVAS_FONTS, showIf: { key: "showBigText", eq: true } }),
+      f("bigTextFont", "ฟอนต์ตัวอักษรยักษ์", "select", { group: "layout", default: "display", options: CANVAS_FONTS, display: "font", showIf: { key: "showBigText", eq: true } }),
       f("bigTextColor", "สีตัวอักษรยักษ์", "color", { group: "layout", default: "", hint: "ว่าง = สีแบรนด์", showIf: { key: "showBigText", eq: true } }),
       f("bigTextOpacity", "ความเข้มตัวอักษรยักษ์ (%)", "range", { group: "layout", default: 14, min: 4, numMax: 60, step: 1, showIf: { key: "showBigText", eq: true } }),
     ],

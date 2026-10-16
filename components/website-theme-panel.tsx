@@ -22,7 +22,7 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart, type ImagePlaceholder } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
-import { TEXT_ROLE_DEFS, defaultTextRole, GOOGLE_FONTS, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
+import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
 import { FOOTER_COL_DEFS, FOOTER_BGS, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
@@ -45,6 +45,8 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
+import { FontSelect } from "@/components/font-select";
+import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
@@ -977,10 +979,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     <div key={fk}>
                       <label className={labelCls}>{fk === "display" ? "ฟอนต์หัวข้อ" : "ฟอนต์เนื้อหา"}</label>
                       <div className="flex items-center gap-2">
-                        <select className={inputCls} value={theme.fonts[fk]} onChange={(e) => apply({ ...theme, fonts: { ...theme.fonts, [fk]: e.target.value } })}>
-                          <optgroup label="ไทย + อังกฤษ">{GOOGLE_FONTS.filter((f) => f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
-                          <optgroup label="อังกฤษ (ไทยใช้ฟอนต์สำรอง)">{GOOGLE_FONTS.filter((f) => !f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
-                        </select>
+                        <FontSelect value={theme.fonts[fk]} onChange={(v) => apply({ ...theme, fonts: { ...theme.fonts, [fk]: v } })} options={webFontOptions()} googleFonts={WEB_FONT_NAMES} sample="กขค งานหนัง Aa 123" />
                         <ResetBtn show={theme.fonts[fk] !== published.fonts[fk]} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, [fk]: published.fonts[fk] } })} />
                       </div>
                       <p className="mt-1.5 text-base leading-snug" style={{ fontFamily: `"${theme.fonts[fk]}", ${fk === "display" ? `"${theme.fonts.body}",` : ""} sans-serif`, color: theme.colors.ink, fontWeight: fk === "display" ? 600 : 400 }}>
@@ -3350,11 +3349,13 @@ function TextRoleEditor({ def, value, pub, theme, onChange, onReset }: { def: (t
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label className={labelCls}>ฟอนต์</label>
-              <select className={inputCls} value={value.font} onChange={(e) => onChange({ font: e.target.value })}>
-                <option value="">ตาม{def.base === "display" ? "ฟอนต์หัวข้อ" : "ฟอนต์เนื้อหา"} ({baseFont})</option>
-                <optgroup label="ไทย + อังกฤษ">{GOOGLE_FONTS.filter((f) => f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
-                <optgroup label="อังกฤษ (ไทยใช้ฟอนต์สำรอง)">{GOOGLE_FONTS.filter((f) => !f.thai).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}</optgroup>
-              </select>
+              <FontSelect
+                value={value.font}
+                onChange={(v) => onChange({ font: v })}
+                options={webFontOptions([{ value: "", label: `ตาม${def.base === "display" ? "ฟอนต์หัวข้อ" : "ฟอนต์เนื้อหา"} (${baseFont})`, family: `"${baseFont}", sans-serif` }])}
+                googleFonts={WEB_FONT_NAMES}
+                sample={def.sample.slice(0, 18)}
+              />
             </div>
             <div>
               <label className={labelCls}>น้ำหนัก</label>

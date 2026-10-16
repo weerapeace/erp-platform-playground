@@ -9,9 +9,35 @@
  *  - FontPickList            = รายการฟอนต์ + ตัวอย่างตัวอักษร
  *  - ColorSwatches           = จุดสีธีม + สีเอง (ค่าเก็บเป็นชื่อสีธีม เปลี่ยนธีมแล้วตามไปเอง · "custom" + hex)
  * ⚠️ รายชื่อฟอนต์/สีมาจาก lib/website-canvas.ts (CANVAS_FONTS · CANVAS_COLORS) ที่เดียว — เว็บร้านมีชุดเดียวกัน
+ *  - webFontOptions / WEB_FONT_NAMES = ตัวเลือกฟอนต์ธีม (GOOGLE_FONTS) สำหรับ FontSelect (ของกลาง components/font-select)
+ *  - canvasFontOptions = ตัวเลือก CANVAS_FONTS (ฟอนต์หัวข้อ/เนื้อหาของธีม + ฟอนต์พิเศษ) สำหรับ FontSelect
  */
 import { useEffect, useState } from "react";
 import { CANVAS_FONTS } from "@/lib/website-canvas";
+import { GOOGLE_FONTS } from "@/lib/website-theme";
+import type { FontOption } from "@/components/font-select";
+
+/** ฟอนต์ทั้งหมดที่ธีมเว็บร้านเลือกได้ (Google Fonts) */
+export const WEB_FONT_NAMES = GOOGLE_FONTS.map((f) => f.name);
+/** ตัวเลือก FontSelect ของฟอนต์ธีม · first = ตัวเลือกพิเศษบนสุด (เช่น "ตามฟอนต์เนื้อหา") */
+export function webFontOptions(first: FontOption[] = []): FontOption[] {
+  return [
+    ...first,
+    ...GOOGLE_FONTS.map((f) => ({ value: f.name, label: f.name, family: `"${f.name}", sans-serif`, group: f.thai ? "ไทย + อังกฤษ" : "อังกฤษ (ตัวไทยใช้ฟอนต์สำรอง)" })),
+  ];
+}
+/** ตัวเลือก FontSelect ของ CANVAS_FONTS (display/body = ฟอนต์ของธีมร้าน) */
+export function canvasFontOptions(fontNames: ThemeFontNames, autoLabel?: string): FontOption[] {
+  return [
+    ...(autoLabel ? [{ value: "auto", label: autoLabel }] : []),
+    ...CANVAS_FONTS.map((f) => {
+      const family = fontFamilyOf(f.v, fontNames);
+      return { value: f.v, label: f.v === "display" || f.v === "body" ? `${f.l} (${family})` : f.l, family: `"${family}", sans-serif` };
+    }),
+  ];
+}
+/** ชื่อฟอนต์ Google ที่ต้องโหลดของ CANVAS_FONTS (+ ฟอนต์ธีม) */
+export const canvasFontNames = (fontNames: ThemeFontNames) => [...new Set([fontNames.display, fontNames.body, ...CANVAS_FONTS.filter((f) => f.v !== "display" && f.v !== "body").map((f) => f.v)])];
 
 /** สีของธีมร้าน (จาก API สาธารณะ) — ใช้วาดจุดสี */
 export type ThemeColors = { brand: string; brandDeep: string; ink: string; muted: string; page: string; surface: string };

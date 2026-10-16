@@ -16,6 +16,8 @@ import { ColorInput } from "@/components/color-picker";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { ERPDateTime24 } from "@/components/form";
+import { FontSelect } from "@/components/font-select";
+import { canvasFontNames, canvasFontOptions, useShopTheme } from "@/components/website-text-pickers";
 import { FIELD_GROUP_LABEL, matchShowIf, type FieldDef, type FieldGroup } from "@/lib/website-schema";
 
 export interface SchemaFormContext {
@@ -88,6 +90,16 @@ export function Field({ label, hint, children, wide }: { label: string; hint?: s
 }
 
 /** ปุ่ม/ลิงก์ = ข้อความ + ปลายทาง (เลือกจากรายการ: หน้า/หมวด/สินค้า/ส่วนในหน้า/ลิงก์นอก — ของกลาง LinkTargetPicker) */
+/** 🔤 ช่องฟอนต์ของ Section (CANVAS_FONTS) — โชว์ฟอนต์หัวข้อ/เนื้อหาของร้านจริง */
+function SchemaFontField({ fd, value, onChange, ctx }: { fd: FieldDef; value: string; onChange: (v: unknown) => void; ctx: SchemaFormContext }) {
+  const { fontNames } = useShopTheme(ctx.shopSlug);
+  return (
+    <Field label={fd.label} hint={fd.hint} wide={fd.wide}>
+      <FontSelect value={value} onChange={(v) => onChange(v)} options={canvasFontOptions(fontNames)} googleFonts={canvasFontNames(fontNames)} />
+    </Field>
+  );
+}
+
 function LinkPair({ value, onChange, ctx }: { value: { text?: string; href?: string } | undefined; onChange: (v: { text: string; href: string }) => void; ctx: SchemaFormContext }) {
   const v = value ?? { text: "", href: "" };
   return (
@@ -274,6 +286,8 @@ export function SchemaField({
         </Field>
       );
     case "select":
+      // 🔤 ช่องฟอนต์ — เห็นหน้าตาฟอนต์จริงก่อนเลือก (ของกลาง FontSelect)
+      if (fd.display === "font") return <SchemaFontField fd={fd} value={s} onChange={onChange} ctx={ctx} />;
       // 🎛️ ปุ่มรูปย่อ (display "tiles") — เห็นหน้าตาแต่ละแบบก่อนเลือก (เช่น รูปแบบการโชว์สินค้า)
       if (fd.display === "tiles")
         return (

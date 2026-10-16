@@ -10,6 +10,7 @@ import { useState, useEffect } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { FontSelect } from "@/components/font-select";
 import { tr } from "@/lib/lang";
 import { KanbanSettingsControls } from "./kanban-settings";
 import { useCreativeStatuses } from "./use-statuses";
@@ -588,10 +589,14 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("ฟอนต์ & ความหนาแน่น", "Font & density")}</div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <label className="flex items-center gap-2 text-xs text-slate-600">{t("ฟอนต์", "Font")}
-            <select value={theme.fontFamily ?? "default"} onChange={(e) => onChange({ ...theme, fontFamily: e.target.value })}
-              className="h-8 px-2 text-sm border border-slate-200 rounded bg-white" style={{ fontFamily: fontStack(theme.fontFamily) || undefined }}>
-              {OV_FONTS.map((f) => <option key={f.key} value={f.key}>{f.label()}</option>)}
-            </select>
+            <FontSelect
+              value={theme.fontFamily ?? "default"}
+              onChange={(v) => onChange({ ...theme, fontFamily: v })}
+              options={OV_FONTS.map((f) => ({ value: f.key, label: f.label(), family: f.stack || null }))}
+              googleFonts={OV_FONTS.filter((f) => f.google).map((f) => (f.google as string).split(":")[0].replace(/\+/g, " "))}
+              className="w-44"
+              size="sm"
+            />
           </label>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-slate-500">{t("ขนาดตัวอักษร", "Text size")}</span>
