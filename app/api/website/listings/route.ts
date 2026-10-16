@@ -5,6 +5,7 @@
  * GET  ?shop=<slug>              → ร้านทั้งหมด + สินค้าที่อยู่บนเว็บของร้านนั้น
  * GET  ?shop=<slug>&search=<q>   → ค้นหาสินค้า ERP (parent_skus_v2) ที่ยังไม่อยู่ในร้านนั้น (ไว้กดเพิ่ม)
  * POST { shopId, parentId, action:"add"|"remove" }  → เพิ่ม/เอาออกจากร้าน
+ * POST { shopId, parentIds:[], action:"addMany", publish? } → เพิ่มหลายรุ่นพร้อมกัน (ป๊อปเพิ่มสินค้าเข้าเว็บ · ค่าเริ่มต้น = ซ่อนไว้ก่อน)
  * POST { shopId, parentId, patch:{...} }            → แก้ข้อมูลเวอร์ชันเว็บ (store_listings)
  *
  * ของกลาง: guardApi(products.view/edit) + supabaseAdmin (store_* อยู่ DB เดียวกัน) + writeAudit
@@ -235,7 +236,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string; parentIds?: unknown; order?: unknown };
+  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string; parentIds?: unknown; order?: unknown; publish?: unknown };
   try {
     b = await request.json();
   } catch {
@@ -258,6 +259,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
     await writeAudit(sb, { action: "bulk_update", entityType: "store_listing", entityId: b.shopId, ...actor, metadata: { count: ids.length, parentIds: ids, patch: { isPublished: p.isPublished, featured: p.featured } } });
     return NextResponse.json({ ok: true, count: ids.length });
+  }
+
+  // ➕ เพิ่มหลายรุ่นพร้อมกัน (ป๊อปเพิ่มสินค้าเข้าเว็บ) — ตัวที่อยู่ในร้านแล้วข้าม · publish=false (ค่าเริ่มต้น) = ซ่อนไว้ก่อนให้ไปตั้งรูป/ราคา/หมวด
+  if (b.action === "addMany") {
+    const ids = idList(b.parentIds);
+    if (!b.shopId || !ids.length) return NextResponse.json({ error: "ต้องระบุ shopId + parentIds" }, { status: 400 });
+    const publish = b.publish === true;
+    const [{ data: have }, { data: real }] = await Promise.all([
+      sb.from("store_listings").select("parent_sku_id").eq("shop_id", b.shopId).in("parent_sku_id", ids),
+      sb.from("parent_skus_v2").select("id").in("id", ids),
+    ]);
+    const exists = new Set(((have ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id));
+    const valid = new Set(((real ?? []) as { id: string }[]).map((r) => r.id));
+    const add = ids.filter((id) => valid.has(id) && !exists.has(id));
+    if (add.length) {
+      const { error } = await sb.from("store_listings").insert(add.map((id) => ({ shop_id: b.shopId, parent_sku_id: id, is_published: publish })));
+      if (error) return NextResponse.json({ error: "เพิ่มเข้าร้านไม่สำเร็จ" }, { status: 500 });
+      await writeAudit(sb, { action: "create", entityType: "store_listing", entityId: b.shopId, ...actor, metadata: { kind: "add_many", count: add.length, parentIds: add, published: publish } });
+    }
+    return NextResponse.json({ ok: true, added: add.length, skipped: ids.length - add.length });
   }
 
   // ⠿ เรียงลำดับบนเว็บ — order = parentId ทั้งร้านตามลำดับใหม่ → sort_order = ตำแหน่ง (เขียนเฉพาะตัวที่เปลี่ยน)

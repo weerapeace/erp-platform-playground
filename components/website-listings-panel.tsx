@@ -24,6 +24,7 @@ import { CopyButton } from "@/components/copy-button";
 import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/components/footer-save";
 import { useViewPref } from "@/lib/use-view-pref";
 import { listingIssues, type ListingIssue } from "@/lib/website-listing-health";
+import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
 
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 // ⚠️ ต้อง dynamic — master-crud import relation-multi อยู่ (import ตรงจะวนกัน) ดู memory unify_drawer
@@ -86,7 +87,6 @@ export type Listing = {
   webOptions: WebOptions;
 };
 
-type SearchHit = { id: string; code: string; name: string; price: number; imageKey: string | null };
 /** หมวดของร้าน — มาจาก API (ตั้งได้เองในแท็บ ⚙️ จับคู่ฟิลด์) */
 export type CategoryDef = { key: string; label: string; icon: string };
 
@@ -175,9 +175,6 @@ export function WebsiteListingsPanel({
 
   // แผงเพิ่มสินค้า
   const [showAdd, setShowAdd] = useState(false);
-  const [search, setSearch] = useState("");
-  const [results, setResults] = useState<SearchHit[]>([]);
-  const [searching, setSearching] = useState(false);
 
   const patch = (parentId: string, p: Partial<Listing>) =>
     setListings((ls) => ls.map((l) => (l.parentId === parentId ? { ...l, ...p } : l)));
@@ -269,37 +266,6 @@ export function WebsiteListingsPanel({
     }
   };
 
-  const doSearch = async () => {
-    if (!search.trim()) return;
-    setSearching(true);
-    try {
-      const r = await apiFetch(`/api/website/listings?shop=${encodeURIComponent(shop.slug)}&search=${encodeURIComponent(search.trim())}`);
-      const j = await r.json();
-      setResults(j.results ?? []);
-      if (!(j.results ?? []).length) toast.info("ไม่พบสินค้าที่ยังไม่อยู่ในร้านนี้");
-    } catch {
-      toast.error("ค้นหาไม่สำเร็จ");
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const addProduct = async (hit: SearchHit) => {
-    setSaving(hit.id);
-    try {
-      const j = await post({ shopId: shop.id, parentId: hit.id, action: "add" });
-      if (j.ok) {
-        toast.success(`เพิ่ม "${hit.name}" แล้ว (ยังไม่เผยแพร่)`);
-        setResults((rs) => rs.filter((r) => r.id !== hit.id));
-        await reload();
-      } else toast.error(j.error ?? "เพิ่มไม่สำเร็จ");
-    } catch {
-      toast.error("เชื่อมต่อไม่ได้");
-    } finally {
-      setSaving(null);
-    }
-  };
-
   const removeProduct = async (l: Listing) => {
     setSaving(l.parentId);
     try {
@@ -384,60 +350,15 @@ export function WebsiteListingsPanel({
           })}
         </div>
         <button
-          onClick={() => setShowAdd((v) => !v)}
+          onClick={() => setShowAdd(true)}
           className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
         >
-          {showAdd ? "ปิดการเพิ่ม" : "+ เพิ่มสินค้าเข้าเว็บ"}
+          + เพิ่มสินค้าเข้าเว็บ
         </button>
       </div>
 
-      {/* แผงเพิ่มสินค้า */}
-      {showAdd && (
-        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/50 p-4">
-          <p className="text-xs text-slate-500 mb-2">ค้นหาสินค้าจาก ERP (รหัส หรือ ชื่อ) แล้วกดเพิ่มเข้าเว็บร้านนี้</p>
-          <div className="flex gap-2">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void doSearch()}
-              placeholder="เช่น หนัง, ซิป, IG001"
-              className={inputCls}
-            />
-            <button
-              onClick={() => void doSearch()}
-              disabled={searching}
-              className="shrink-0 px-4 py-1.5 rounded-lg bg-slate-900 text-white text-sm hover:bg-black disabled:opacity-50"
-            >
-              {searching ? "ค้นหา…" : "ค้นหา"}
-            </button>
-          </div>
-          {results.length > 0 && (
-            <ul className="mt-3 space-y-1.5 max-h-72 overflow-y-auto">
-              {results.map((r) => (
-                <li key={r.id} className="flex items-center gap-3 bg-white rounded-lg border border-slate-200 px-3 py-2">
-                  {r.imageKey ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={keyUrl(r.imageKey, 80)} alt="" className="w-9 h-9 rounded object-cover bg-slate-100" />
-                  ) : (
-                    <div className="w-9 h-9 rounded bg-slate-100" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-800 truncate">{r.name}</p>
-                    <p className="text-xs text-slate-400">{r.code}</p>
-                  </div>
-                  <button
-                    onClick={() => void addProduct(r)}
-                    disabled={saving === r.id}
-                    className="shrink-0 px-3 py-1 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {saving === r.id ? "…" : "+ เพิ่ม"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      {/* ➕ ป๊อปเพิ่มสินค้า: แท็บ 🎯 SKU การตลาด / ☰ รายการสินค้า · ติ๊กหลายรุ่น · ค่าเริ่มต้นซ่อนไว้ก่อน */}
+      <WebsiteAddProductsModal open={showAdd} onClose={() => setShowAdd(false)} shop={shop} onAdded={reload} />
 
       {/* ค้นหา + หมวด + มุมมอง */}
       {listings.length > 0 && (
