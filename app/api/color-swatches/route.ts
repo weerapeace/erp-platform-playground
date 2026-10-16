@@ -1,6 +1,7 @@
 /**
  * /api/color-swatches — 🎨 ทะเบียนสีกลาง (หน้าตาจุดสีของแต่ละชื่อสี) · ข้อมูลอยู่ในพจนานุกรมสี erp_color_dictionary
  *   GET  → { entries: แถวในพจนานุกรม + จุดสี, used: ชื่อสีที่ SKU บนเว็บใช้อยู่ (นับ SKU + ร้าน) }
+ *   GET ?images=ชื่อ1|ชื่อ2 → { groups: SKU ที่ใช้สีนี้ + รูปทั้งหมดของแต่ละตัว (ปก · แกลเลอรี · รูปเว็บ) } — ✂️ ครอปรูปลายจากรูปสินค้า
  *   POST { id?, th, en?, kind, colors, imageKey } → ตั้งจุดสี (มีชื่อนี้แล้ว = แก้ · ยังไม่มี = เพิ่มคำใหม่ ต้องมีคำอังกฤษ)
  *
  * สิทธิ์เหมือนพจนานุกรมสี: อ่าน = products.view · แก้ = products.edit · ทุกการแก้เขียน audit
@@ -13,15 +14,67 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeSwatchInput, rowToSwatchEntry, SWATCH_SELECT, normColorName } from "@/lib/color-swatch";
+import { toKeyList } from "@/lib/website-listing-patch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Row = { id: string; th: string; en: string | null; swatch_kind: string | null; swatch_colors: string[] | null; swatch_image_key: string | null };
 
+const KEY_RE = /^[\w\-./%()]+$/; // r2 object key ที่ยอมรับ
+type Sb = ReturnType<typeof supabaseAdmin>;
+
+/** SKU ที่ใช้สีชื่อเหล่านี้ + รูปทั้งหมดของแต่ละตัว (ตัวที่ขึ้นเว็บก่อน · สูงสุด 16 ตัว) */
+async function skuImagesFor(sb: Sb, names: string[]) {
+  const esc = (s: string) => s.replace(/[\\%_]/g, (m) => "\\" + m);
+  const res = await Promise.all(
+    names.map((n) => sb.from("skus_v2").select("id, code, name_th, color, cover_image_r2_key, parent_sku_id").ilike("color", esc(n)).eq("is_active", true).order("code").limit(40)),
+  );
+  type K = { id: string; code: string | null; name_th: string | null; color: string | null; cover_image_r2_key: string | null; parent_sku_id: string | null };
+  const kids = new Map<string, K>();
+  for (const r of res) for (const k of (r.data ?? []) as K[]) kids.set(k.id, k);
+  if (!kids.size) return [];
+  const ids = [...kids.keys()];
+  const parents = [...new Set([...kids.values()].map((k) => k.parent_sku_id).filter((x): x is string => !!x))];
+  const [{ data: att }, { data: lst }] = await Promise.all([
+    sb.from("erp_playground_attachments").select("entity_id, file_path, content_type").eq("entity_type", "skus_v2").in("entity_id", ids).order("is_primary", { ascending: false }).order("sort_order", { ascending: true }),
+    parents.length ? sb.from("store_listings").select("parent_sku_id, is_published, web_sku_images").in("parent_sku_id", parents) : Promise.resolve({ data: [] }),
+  ]);
+  const imgs = new Map<string, string[]>();
+  const add = (id: string, key: string | null | undefined) => {
+    if (!key || !KEY_RE.test(key)) return;
+    const arr = imgs.get(id) ?? [];
+    if (!arr.includes(key)) arr.push(key);
+    imgs.set(id, arr);
+  };
+  for (const k of kids.values()) add(k.id, k.cover_image_r2_key);
+  for (const a of (att ?? []) as { entity_id: string; file_path: string | null; content_type: string | null }[]) {
+    if (a.content_type && !a.content_type.startsWith("image/")) continue;
+    add(a.entity_id, a.file_path);
+  }
+  const onWeb = new Set<string>();
+  for (const l of (lst ?? []) as { parent_sku_id: string; is_published: boolean | null; web_sku_images: unknown }[]) {
+    if (l.is_published) onWeb.add(l.parent_sku_id);
+    const raw = l.web_sku_images && typeof l.web_sku_images === "object" && !Array.isArray(l.web_sku_images) ? (l.web_sku_images as Record<string, unknown>) : {};
+    for (const [skuId, v] of Object.entries(raw)) if (kids.has(skuId)) for (const key of toKeyList(v)) add(skuId, key);
+  }
+  return [...kids.values()]
+    .map((k) => ({ skuId: k.id, code: k.code ?? "", name: k.name_th ?? "", color: k.color ?? "", onWeb: !!k.parent_sku_id && onWeb.has(k.parent_sku_id), images: (imgs.get(k.id) ?? []).slice(0, 12) }))
+    .filter((g) => g.images.length > 0)
+    .sort((a, b) => Number(b.onWeb) - Number(a.onWeb) || a.code.localeCompare(b.code))
+    .slice(0, 16);
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const sb = supabaseAdmin();
+
+  const imgParam = request.nextUrl.searchParams.get("images");
+  if (imgParam !== null) {
+    const names = [...new Set(imgParam.split("|").map((s) => s.trim()).filter(Boolean))].slice(0, 6);
+    if (!names.length) return NextResponse.json({ data: { groups: [] }, error: null });
+    return NextResponse.json({ data: { groups: await skuImagesFor(sb, names) }, error: null });
+  }
 
   const [{ data: dict, error }, { data: listings }, { data: shops }] = await Promise.all([
     sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true).order("th"),

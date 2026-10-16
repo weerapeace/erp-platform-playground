@@ -128,14 +128,14 @@ export function ImageCropBox({
 }
 
 /** แถบซูม (ใช้คู่กับ ImageCropBox) */
-export function CropZoom({ value, onChange }: { value: number; onChange: (z: number) => void }) {
+export function CropZoom({ value, onChange, max = 300 }: { value: number; onChange: (z: number) => void; /** ซูมได้สูงสุด (%) */ max?: number }) {
   return (
     <label className="block">
       <span className="flex items-center justify-between text-[11px] text-slate-500">
         ซูม
         <span className="tabular-nums">{value}%</span>
       </span>
-      <input type="range" className="w-full accent-blue-600" min={100} max={300} step={5} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <input type="range" className="w-full accent-blue-600" min={100} max={max} step={5} value={value} onChange={(e) => onChange(Number(e.target.value))} />
     </label>
   );
 }

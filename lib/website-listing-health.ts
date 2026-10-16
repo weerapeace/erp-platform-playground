@@ -20,6 +20,8 @@ export interface ListingIssue {
   label: string;
   /** ชื่อสีที่เกี่ยว (ถ้ามี) — โชว์ใน tooltip */
   detail?: string;
+  /** ชื่อสีที่เกี่ยว (แยกรายการ) — ปุ่ม 🎨 ผูกจุดสี เปิดทะเบียนสีโชว์เฉพาะสีเหล่านี้ */
+  names?: string[];
 }
 
 export function listingIssues(x: ListingHealthInput): ListingIssue[] {
@@ -29,7 +31,7 @@ export function listingIssues(x: ListingHealthInput): ListingIssue[] {
   if (!x.categories.length) out.push({ key: "no_category", label: "ยังไม่อยู่หมวดไหน" });
   const noSwatch = x.colors.filter((c) => !c.swatch);
   if (noSwatch.length)
-    out.push({ key: "swatch_missing", label: `สียังไม่ผูกทะเบียนสี ${noSwatch.length}`, detail: noSwatch.map((c) => c.label).join(", ") });
+    out.push({ key: "swatch_missing", label: `สียังไม่ผูกทะเบียนสี ${noSwatch.length}`, detail: noSwatch.map((c) => c.label).join(", "), names: noSwatch.map((c) => c.label) });
   const noImg = x.colors.filter((c) => !c.hasImage);
   if (noImg.length && x.colors.length > 1)
     out.push({ key: "color_no_image", label: `สีที่ยังไม่มีรูป ${noImg.length}`, detail: noImg.map((c) => c.label).join(", ") });

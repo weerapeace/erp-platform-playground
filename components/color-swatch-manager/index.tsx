@@ -5,10 +5,11 @@
  * --------------------------------------------------------------------------
  * ข้อมูล = พจนานุกรมสี (erp_color_dictionary) ผ่าน /api/color-swatches · ตรรกะกลาง = lib/color-swatch.ts
  * - ซ้าย: รายชื่อสี (MiniTable) — เริ่มที่ "ต้องตั้ง" = สีที่สินค้าบนเว็บใช้อยู่แต่ยังไม่มีจุดสี
- * - ขวา: แก้สีที่เลือก — สีเดียว / หลายสีแบ่งช่อง (2–4) / รูปลาย
+ * - ขวา: แก้สีที่เลือก — สีเดียว / หลายสีแบ่งช่อง (2–4) / รูปลาย (อัปโหลด · คลังรูป · ✂️ ครอปจากรูป SKU ที่ใช้สีนี้ = ImageCropPicker)
  * - ชื่อสีผสม ("กรมท่า-ครีม-ขาว") ประกอบจากสีย่อยให้เอง → ตั้งสีย่อยครบก็ขึ้นเอง หรือกด "ตั้งเองเฉพาะชื่อนี้"
  *
  * ใช้: <ColorSwatchButton /> (ปุ่ม + ป๊อปอัป) หรือ <ColorSwatchManager /> ฝังในหน้า
+ * focusNames = เปิดมาโชว์ "เฉพาะสีเหล่านี้" (เช่น สีของสินค้าที่กำลังแก้ · ชื่อผสมพ่วงสีย่อยให้) — สลับแท็บ ทั้งหมด ได้
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -18,6 +19,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ColorInput } from "@/components/color-picker";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ImageEyedropper } from "@/components/image-eyedropper";
+import { ImageCropPicker, type CropSourceGroup } from "@/components/image-crop-picker";
 import {
   SwatchIndex, swatchCss, splitColorName, hasSwatch, normColorName, isHex,
   SWATCH_KIND_LABEL, MAX_SPLIT, type SwatchEntry, type SwatchKind,
@@ -107,13 +109,30 @@ function buildRows(entries: SwatchEntry[], used: Used[]): Row[] {
   return [...rows.values()];
 }
 
-export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
+/** แถวที่เกี่ยวกับชื่อสีชุดนี้ (ชื่อตรง/ชื่อในพจนานุกรม + สีย่อยของชื่อผสม) */
+function focusKeysFor(names: string[], entries: SwatchEntry[]): Set<string> {
+  const idx = new SwatchIndex(entries);
+  const keyOf = (n: string) => normColorName(idx.find(n)?.th ?? n);
+  const out = new Set<string>();
+  for (const n of names) {
+    out.add(keyOf(n));
+    if (!idx.find(n)) splitColorName(n).forEach((p) => out.add(keyOf(p)));
+  }
+  return out;
+}
+
+export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChange?: (dirty: boolean) => void; focusNames?: string[] }) {
   const toast = useToast();
   const [entries, setEntries] = useState<SwatchEntry[]>([]);
   const [used, setUsed] = useState<Used[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"todo" | "done" | "all">("todo");
+  // ค่าคงที่ตามเนื้อหา (ผู้เรียกส่ง array ใหม่ทุกครั้งก็ไม่คำนวณแถวซ้ำ)
+  const focusSig = (focusNames ?? []).join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const focus = useMemo(() => focusNames ?? [], [focusSig]);
+  const hasFocus = focus.length > 0;
+  const [filter, setFilter] = useState<"focus" | "todo" | "done" | "all">(hasFocus ? "focus" : "todo");
   const [shop, setShop] = useState("");
   const [selKey, setSelKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -122,6 +141,10 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   // 💧 กำลังดูดสีให้ช่องไหน (index ใน draft.colors)
   const [dropSlot, setDropSlot] = useState<number | null>(null);
+  // ✂️ ครอปรูปลายจากรูป SKU ที่ใช้สีนี้ (โหลดรูปตอนกดเปิด)
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropGroups, setCropGroups] = useState<CropSourceGroup[] | null>(null);
+  const [cropErr, setCropErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,16 +163,21 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
-  const rows = useMemo(() => buildRows(entries, used), [entries, used]);
+  // focusNames ใส่เป็นแถวด้วยเสมอ (สีที่ยังไม่มีในทะเบียน/ยังไม่ถูกนับ ก็ยังกดตั้งได้ · นับ 0 SKU ไม่กระทบยอด)
+  const rows = useMemo(() => buildRows(entries, [...used, ...focus.map((name) => ({ name, skus: 0, shops: [] }))]), [entries, used, focus]);
   const shops = useMemo(() => [...new Set(rows.flatMap((r) => [...r.shops]))].sort(), [rows]);
   const todoCount = rows.filter((r) => r.status === "unset" && r.skus > 0).length;
+  const focusKeys = useMemo(() => focusKeysFor(focus, entries), [focus, entries]);
   const shown = rows.filter((r) => {
+    if (filter === "focus") return focusKeys.has(r.key);
     if (shop && !r.shops.has(shop)) return false;
     if (filter === "todo") return r.status === "unset" && r.skus > 0;
     if (filter === "done") return r.status !== "unset";
     return true;
   });
   const sel = rows.find((r) => r.key === selKey) ?? null;
+  // เปิดจากสินค้า → เลือกสีแรกที่ยังไม่ตั้งให้เลย (ตั้งต่อได้ทันที)
+  const [autoPicked, setAutoPicked] = useState(false);
 
   const draftFor = (r: Row): Draft => {
     const e = r.entry;
@@ -170,6 +198,28 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
     setDirty(false);
   };
   const edit = (patch: Partial<Draft>) => { setDraft((d) => (d ? { ...d, ...patch } : d)); setDirty(true); };
+  const openCrop = async () => {
+    if (!sel) return;
+    const names = [...new Set([sel.name, sel.entry?.th, sel.entry?.en, draft?.th, draft?.en].map((s) => (s ?? "").trim()).filter(Boolean))];
+    setCropOpen(true);
+    setCropGroups(null);
+    setCropErr(null);
+    try {
+      const j = await apiFetch(`/api/color-swatches?images=${encodeURIComponent(names.join("|"))}`).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      type G = { skuId: string; code: string; name: string; color: string; onWeb: boolean; images: string[] };
+      setCropGroups(((j.data?.groups ?? []) as G[]).map((g) => ({ key: g.skuId, label: g.code || g.color, sub: g.name, badge: g.onWeb ? "บนเว็บ" : undefined, images: g.images })));
+    } catch (e) {
+      setCropErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ");
+    }
+  };
+  useEffect(() => {
+    if (!hasFocus || autoPicked || loading || selKey) return;
+    const first = rows.filter((r) => focusKeys.has(r.key)).sort((a, b) => Number(a.status !== "unset") - Number(b.status !== "unset"))[0];
+    setAutoPicked(true);
+    if (first) select(first);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasFocus, autoPicked, loading, selKey, rows, focusKeys]);
 
   const save = async (clear = false) => {
     if (!draft) return;
@@ -216,6 +266,7 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 mb-2">
           {([
+            ...(hasFocus ? ([["focus", `🎯 สีของสินค้านี้ (${rows.filter((r) => focusKeys.has(r.key)).length})`]] as const) : []),
             ["todo", `ต้องตั้ง (${todoCount})`],
             ["done", "ตั้งแล้ว"],
             ["all", "ทั้งหมด"],
@@ -225,7 +276,7 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
               {label}
             </button>
           ))}
-          {shops.length > 1 && (
+          {shops.length > 1 && filter !== "focus" && (
             <select value={shop} onChange={(e) => setShop(e.target.value)} className="ml-auto text-xs border border-slate-200 rounded-md px-2 py-1 bg-white">
               <option value="">ทุกร้าน</option>
               {shops.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -241,7 +292,7 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
           searchText={(r) => `${r.name} ${r.entry?.en ?? ""}`}
           searchPlaceholder="ค้นหาชื่อสี ไทย/อังกฤษ…"
           onRowClick={select}
-          emptyText={loading ? "กำลังโหลด…" : filter === "todo" ? "🎉 สีที่ใช้บนเว็บตั้งครบแล้ว" : "ไม่มีรายการ"}
+          emptyText={loading ? "กำลังโหลด…" : filter === "todo" ? "🎉 สีที่ใช้บนเว็บตั้งครบแล้ว" : filter === "focus" ? "ไม่พบชื่อสีของสินค้านี้ในทะเบียน — ลองค้นในแท็บ ทั้งหมด" : "ไม่มีรายการ"}
           columns={[
             { key: "dot", header: "", width: "2.25rem", cell: (r) => <Dot css={r.css} /> },
             {
@@ -341,7 +392,12 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
               </div>
             )}
             {draft.kind === "image" && (
-              <ImageUploadField label="รูปลาย" hint="รูปจัตุรัส ครอปเฉพาะลาย" value={draft.imageKey} onChange={(k) => edit({ imageKey: k })} height={64} />
+              <div className="space-y-1.5">
+                <ImageUploadField label="รูปลาย" hint="รูปจัตุรัส ครอปเฉพาะลาย" value={draft.imageKey} onChange={(k) => edit({ imageKey: k })} height={64} />
+                <button type="button" onClick={openCrop} className="w-full h-8 rounded-lg border border-blue-200 bg-blue-50 text-xs font-medium text-blue-700 hover:bg-blue-100">
+                  ✂️ ครอปจากรูปสินค้า (เลือก SKU · เลือกรูป)
+                </button>
+              </div>
             )}
 
             <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
@@ -372,6 +428,19 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
         }}
       />
 
+      <ImageCropPicker
+        open={cropOpen}
+        onClose={() => setCropOpen(false)}
+        groups={cropGroups}
+        error={cropErr}
+        title={`✂️ ครอปรูปลาย — ${sel?.name ?? ""}`}
+        description="เลือก SKU และรูปทางซ้าย → ลากกรอบไปตรงลายที่ต้องการ · ซูมด้วยแถบ หรือหมุนลูกกลิ้งเมาส์บนรูป · ผลลัพธ์ = รูปลายจัตุรัสของจุดสีนี้"
+        emptyText="ยังไม่มี SKU ที่ใช้สีนี้และมีรูป — อัปโหลดรูปลายเอง หรือเลือกจากคลังรูปแทน"
+        folder="color-swatches"
+        outSize={320}
+        onDone={(k) => edit({ imageKey: k })}
+      />
+
       <ConfirmDialog
         open={!!pendingKey}
         onClose={() => setPendingKey(null)}
@@ -391,7 +460,7 @@ export function ColorSwatchManager({ onDirtyChange }: { onDirtyChange?: (dirty: 
 }
 
 /** ปุ่ม + ป๊อปอัปทะเบียนสี — วางได้ทุกที่ที่มีการตั้งค่าจุดสี */
-export function ColorSwatchButton({ label = "🎨 ตั้งสีของจุดสี", className }: { label?: string; className?: string }) {
+export function ColorSwatchButton({ label = "🎨 ตั้งสีของจุดสี", className, focusNames }: { label?: string; className?: string; focusNames?: string[] }) {
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   return (
@@ -408,7 +477,7 @@ export function ColorSwatchButton({ label = "🎨 ตั้งสีของจ
         size="xl"
         hasUnsavedChanges={dirty}
       >
-        {open && <ColorSwatchManager onDirtyChange={setDirty} />}
+        {open && <ColorSwatchManager onDirtyChange={setDirty} focusNames={focusNames} />}
       </ERPModal>
     </>
   );

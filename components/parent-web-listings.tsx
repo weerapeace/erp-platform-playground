@@ -947,7 +947,7 @@ export function ParentWebListings({
               {x.detail && <p className="text-[11px] text-amber-700 truncate" title={x.detail}>{x.detail}</p>}
             </div>
             {x.key === "swatch_missing" ? (
-              <ColorSwatchButton label="🎨 ผูกจุดสี" className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 hover:bg-amber-100" />
+              <ColorSwatchButton label="🎨 ผูกจุดสี" focusNames={x.names ?? x.detail?.split(", ")} className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 hover:bg-amber-100" />
             ) : (
               <button type="button" onClick={() => setTab(s.shopId, FIX_TAB[x.key])} className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 hover:bg-amber-100">
                 ไปแก้ →
