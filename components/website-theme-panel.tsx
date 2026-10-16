@@ -1140,7 +1140,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </button>
                   }
                 >
-                  <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} />
+                  <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} navUpper={theme.typography.nav.uppercase} setNavUpper={(v) => apply({ ...theme, typography: { ...theme.typography, nav: { ...theme.typography.nav, uppercase: v } } })} />
                 </ERPModal>
                 <SocialLinksModal
                   open={zoneCfg === "social"}
@@ -1188,7 +1188,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-1">เมนูด้านบน</h3>
               <p className="text-xs text-slate-500 mb-3">จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้</p>
-              <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} />
+              <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} navUpper={theme.typography.nav.uppercase} setNavUpper={(v) => apply({ ...theme, typography: { ...theme.typography, nav: { ...theme.typography.nav, uppercase: v } } })} />
             </div>
           )}
 
@@ -3448,11 +3448,26 @@ function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, missing,
 
 /* ─────────── เมนู: ชุดตั้งค่าทั้งก้อน (แท็บ "เมนู" + ป๊อปจากชิ้น "เมนู" ใน Header ใช้ตัวเดียวกัน) ─────────── */
 /** ⚙️ พฤติกรรมเมนูทั้งชุด (lib/website-mega-menu MenuBehavior) — ใช้กับทุกเมนูที่มีเมนูย่อย/แผง */
-function MenuBehaviorSettings({ value, onChange }: { value: MenuBehavior; onChange: (p: Partial<MenuBehavior>) => void }) {
+function MenuBehaviorSettings({ value, onChange, navUpper, setNavUpper }: { value: MenuBehavior; onChange: (p: Partial<MenuBehavior>) => void; navUpper?: boolean; setNavUpper?: (v: boolean) => void }) {
   const seg = (on: boolean) => `text-[11px] px-2.5 h-7 rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
   return (
     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2.5">
-      <p className="text-xs font-semibold text-slate-700">⚙️ พฤติกรรมเมนู (ใช้กับทุกเมนูที่มีเมนูย่อย/แผง)</p>
+      <p className="text-xs font-semibold text-slate-700">⚙️ หน้าตา + พฤติกรรมเมนู (ใช้กับทุกเมนู)</p>
+      {/* 🔠 ตัวพิมพ์ใหญ่ทั้งหมด — เมนูด้านบน = ค่าเดียวกับแท็บตัวอักษร → เมนูด้านบน (แก้ที่ไหนก็ตรงกัน) */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {setNavUpper && (
+          <div className="flex items-center gap-1.5" title="ค่าเดียวกับ แท็บตัวอักษร → ปรับละเอียดรายบทบาท → เมนูด้านบน (มือถือใช้ค่าเดียวกัน)">
+            <span className="text-[11px] text-slate-500">🔠 เมนูด้านบน</span>
+            <button type="button" className={seg(!!navUpper)} onClick={() => setNavUpper(true)}>ตัวพิมพ์ใหญ่ทั้งหมด (BAGS)</button>
+            <button type="button" className={seg(!navUpper)} onClick={() => setNavUpper(false)}>ตามที่พิมพ์ (Bags)</button>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5" title="หัวคอลัมน์ ลิงก์ แท็บ และชื่อการ์ดในแผงเมนู (คำอธิบายและชื่อสินค้าไม่เปลี่ยน)">
+          <span className="text-[11px] text-slate-500">ในแผงเมนู</span>
+          <button type="button" className={seg(value.panelUpper)} onClick={() => onChange({ panelUpper: true })}>ใหญ่ทั้งหมด</button>
+          <button type="button" className={seg(!value.panelUpper)} onClick={() => onChange({ panelUpper: false })}>ตามที่พิมพ์</button>
+        </div>
+      </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] text-slate-500">เปิดแผงเมื่อ</span>
@@ -3489,7 +3504,7 @@ function MenuBehaviorSettings({ value, onChange }: { value: MenuBehavior; onChan
   );
 }
 
-function MenuSettings({ menu, setMenu, choices, pages, megaCtx }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[]; megaCtx?: MegaEditorCtx }) {
+function MenuSettings({ menu, setMenu, choices, pages, megaCtx, navUpper, setNavUpper }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[]; megaCtx?: MegaEditorCtx; navUpper?: boolean; setNavUpper?: (v: boolean) => void }) {
   const [askAuto, setAskAuto] = useState(false);
   return (
     <>
@@ -3515,7 +3530,7 @@ function MenuSettings({ menu, setMenu, choices, pages, megaCtx }: { menu: MenuCo
         </>
       )}
 
-      {menu.items !== null && <MenuBehaviorSettings value={menu.behavior} onChange={(p) => setMenu({ behavior: { ...menu.behavior, ...p } })} />}
+      <MenuBehaviorSettings value={menu.behavior} onChange={(p) => setMenu({ behavior: { ...menu.behavior, ...p } })} navUpper={navUpper} setNavUpper={setNavUpper} />
 
       <div className="mt-5 pt-3 border-t border-slate-100">
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
