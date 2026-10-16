@@ -53,8 +53,16 @@ audit `entity_type` = belt_parts / belt_size_rules / belt_designs · action = cr
 - สิทธิ์ `belt_builder.view` (admin/manager/staff) · `belt_builder.edit` (admin/manager) · ใน `Permission` type ด้วย
 - `erp_modules`: belt_parts / belt_size_rules / belt_designs (+ erp_module_fields) → โผล่ใน "โมดูลทั้งหมด" ตั้ง Field Registry ได้ · หน้าจริงคือ /admin/belt-builder
 
+## ก้อน 3 — หน้าเว็บลูกค้า (2026-10-16)
+- **เปิดใช้ต่อร้าน:** ERP → ข้อมูลร้าน → กลุ่ม 🧵 `belt_enabled` + `belt_base_price` (0 = เว็บโชว์ "สอบถามราคาได้ที่ร้าน" ซ่อนราคาเพิ่ม) + `belt_engraving_fee` / `belt_engraving_max` (0 = ปิดสลัก) + `belt_lead_time` · ต้องมีสาย+หัวที่เปิดอยู่อย่างน้อยอย่างละ 1
+- **payload สาธารณะ** site API `beltBuilder` (`lib/belt-builder-public.ts`): canvas · basePrice · leadTime · engraving {enabled,maxChars,fee,fonts[3],positions[3: tip/center/inside]} · parts[] (เฉพาะเปิด+ไม่ลบ) · sizeRules[]
+- **API บันทึกแบบ** `POST /api/public/storefront/belt-designs` {shop, selections} → ตรวจ id ชิ้นส่วนเป็นของร้าน · กรองข้อความสลัก · เอวต้องอยู่ในกติกา · คิดราคาซ้ำฝั่งเซิร์ฟเวอร์ → แถว belt_designs (status saved) → {id, code (8 ตัวแรก), total} · `GET ?shop&id` โหลดกลับ (ลิงก์ `?design=<id>`)
+- **Section ตัวจัดหน้า** `beltbuilder` (หมวดสินค้า): หัวข้อ · โชว์ราคา · โชว์คู่มือไซซ์ · ข้อความปุ่ม — ฝั่งเว็บเป็น SERVER_TYPES (พรีวิว ERP วาดจากเซิร์ฟเวอร์ด้วยข้อมูลร่าง)
+- **เว็บร้าน (weerapeace/storefront)**: `src/lib/belt-builder.ts` (สำเนากฎ + parse) · `src/components/belt/BeltPreview.tsx` (ซ้อนชั้นเป็น % ของผืน · สลักใช้ cqw) · `BeltBuilderBody.tsx` (5 ขั้น: สาย กว้าง+สี → หัว ทรง+โลหะ → หู → สลัก → ไซซ์ · พรีวิว+ราคาติดบนจอ · บันทึกแบบ/ก๊อปลิงก์ · ปุ่มติดต่อสั่งทำ → /contact?design=รหัส) · หน้า `/belt-builder` สำเร็จรูป (404 ถ้าร้านไม่เปิด) · CSS `.belt-*` ใน globals.css
+- ทดสอบแล้ว (dev): เลือกหัวโรสโกลด์ +250 → ราคา 1,750 · สลัก "LOUIS M." · เอว 32 → ตัดหนัง 105.3 ซม. · บันทึก → รหัสแบบ + reload ด้วย ?design= คืนค่าเดิม
+
 ## ยังไม่มี / ข้อควรรู้
-- หน้าเว็บลูกค้า (ก้อน 3) · สั่งซื้อ → ใบสั่งขาย + ตัดสต๊อก (ก้อน 4) · public API สำหรับเว็บร้าน
+- สั่งซื้อ → ใส่ตะกร้า/ใบสั่งขาย + ตัดสต๊อก (ก้อน 4) — ตอนนี้ "ติดต่อสั่งทำ" พาไปหน้าติดต่อพร้อมรหัสแบบ
 - ยังไม่มีรูปจริง — แอดมินต้องอัปโหลด PNG พื้นโปร่งทีละชิ้น (32 ชิ้นใน seed)
-- ชื่อฟอนต์สลัก / ตำแหน่งสลักยังเป็นค่าตายตัวใน `DEFAULT_ENGRAVING_BOX` (ทำเป็นตั้งค่าได้ในก้อน 3)
+- ฟอนต์/ตำแหน่งสลักเป็นชุดตายตัวใน `lib/belt-builder-public.ts` (ENGRAVING_FONTS / ENGRAVING_POSITIONS) — ยังไม่ให้แอดมินตั้งเอง
 - ระบบมีโมดูล `belt_*` เก่าของฝั่งผลิต (belt_hole, belt_width_size, belt_template …) อยู่ก่อนแล้ว — คนละชุดกับ Belt Builder ยังไม่ได้เชื่อม

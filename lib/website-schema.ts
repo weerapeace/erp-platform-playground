@@ -997,6 +997,20 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     summary: () => "เลือกตุ๊กตา → รุ่นที่ใส่ได้",
   },
 
+  // 🧵 ออกแบบเข็มขัด (2026-10-16) — ลูกค้าเลือกสายหนัง/หัว/หู + สลักชื่อ + ไซซ์ → พรีวิวรูปซ้อนชั้น + ราคา
+  //    ข้อมูล: /admin/belt-builder (belt_parts/belt_size_rules) + ข้อมูลร้าน กลุ่ม 🧵 (ราคาฐาน/ค่าสลัก) · เว็บร้าน: src/components/belt/BeltBuilderBody.tsx
+  beltbuilder: {
+    type: "beltbuilder",
+    meta: { label: "ออกแบบเข็มขัด (Belt Builder)", icon: "🧵", hint: "ลูกค้าประกอบเข็มขัดเอง เห็นพรีวิว + ราคา", group: "สินค้า" },
+    fields: [
+      ...headFields({ eyebrow: "Personalize", title: "ออกแบบเข็มขัดในแบบของคุณ", subtitle: true }),
+      f("showPrice", "โชว์ราคา", "toggle", { group: "layout", default: true, hint: "ปิด = โชว์เฉพาะพรีวิว (เหมาะตอนยังไม่ตั้งราคาฐาน)" }),
+      f("showSizeGuide", "โชว์คู่มือวัดไซซ์", "toggle", { group: "layout", default: true, hint: "ช่วงเอวชาย/หญิง + ความยาวหนังที่ตัด" }),
+      text("ctaLabel", "ข้อความปุ่มบันทึกแบบ", { group: "layout", default: "บันทึกแบบนี้", max: 40 }),
+    ],
+    summary: () => "เลือกสาย/หัว/หู → พรีวิว + ราคา",
+  },
+
   // 🛍 ลุคบุ๊กกดซื้อได้ (2026-10-15) — เว็บร้าน: src/components/home/LookbookBody.tsx (วาดสดในพรีวิวด้วยข้อมูลสินค้า)
   lookbook: {
     type: "lookbook",

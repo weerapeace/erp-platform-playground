@@ -61,7 +61,8 @@ export type BlockType =
   | "lookbook"
   | "logos"
   | "collections"
-  | "fitcheck";
+  | "fitcheck"
+  | "beltbuilder";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -349,6 +350,16 @@ export interface CollectionsBlock extends BlockBase {
   textPos: "on" | "below";
   showCount: boolean;
   limit: number;
+}
+/** 🧵 ออกแบบเข็มขัด — ลูกค้าเลือกสาย/หัว/หู + สลักชื่อ + ไซซ์ → พรีวิวซ้อนรูป + ราคา (lib/belt-builder · ร้านต้องเปิดใน ข้อมูลร้าน → 🧵) */
+export interface BeltBuilderBlock extends BlockBase {
+  type: "beltbuilder";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  showPrice: boolean;
+  showSizeGuide: boolean;
+  ctaLabel: string;
 }
 /** 📐 เช็คขนาด — ลูกค้าเลือกตุ๊กตา/ของ (หรือพิมพ์ขนาดเอง) → รุ่นที่ใส่ได้ (lib/fit-check · ร้านต้องเปิดเช็คขนาด) */
 export interface FitCheckBlock extends BlockBase {

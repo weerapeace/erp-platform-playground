@@ -18,7 +18,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -32,6 +32,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "gift", label: "🎀 ห่อของขวัญ", hint: "ลูกค้าติ๊ก \"ห่อเป็นของขวัญ\" ตอนสั่งซื้อ (เขียนการ์ด/ไม่ใส่ราคาในกล่องได้) · ค่าห่อบวกในยอดรวม (ไม่โดนส่วนลด/แต้ม) · ออเดอร์ในแท็บ 🧾 จะมีป้าย 🎀 ต้องห่อ + ข้อความการ์ด" },
   { key: "points", label: "⭐ แต้มสมาชิก", hint: "สมาชิกได้แต้มเมื่อออเดอร์เป็น 'สำเร็จ' (ไม่นับค่าส่ง) และใช้แต้มลดราคาตอนสั่งได้ · ระดับสมาชิก (Silver/Gold ได้แต้มคูณ) ตั้งที่แท็บ 👥 สมาชิก" },
   { key: "fit", label: "📐 เช็คขนาด (ใส่ตุ๊กตา/ของ)", hint: "คำนวณจาก \"ช่องใส่ของ\" (ขนาดด้านใน) ของแต่ละรุ่น กับขนาดตุ๊กตาในทะเบียน \"ใส่อะไรได้บ้าง\" · เปิดแล้วรุ่นที่ยังไม่วัดช่องจะขึ้นในแท็บ ⚠️ ต้องแก้ + ตัวกรอง 📐 ยังไม่วัดช่อง ในแท็บสินค้าบนเว็บ · ตัวกรองหน้ารวมสินค้าเว็บ = เปิดกลุ่ม \"ใส่อะไรได้\" ในแท็บหน้ารายการสินค้า" },
+  { key: "belt", label: "🧵 ออกแบบเข็มขัด (Belt Builder)", hint: "ลูกค้าประกอบเข็มขัดเองบนเว็บ (สายหนัง/หัว/หู/สลักชื่อ/ไซซ์) · ชิ้นส่วนและกติกาไซซ์ตั้งที่เมนู 🌐 เว็บไซต์ → ออกแบบเข็มขัด · เปิดแล้ววาง Section \"ออกแบบเข็มขัด\" ในหน้าใดก็ได้ หรือใช้หน้า /belt-builder ของเว็บ" },
   { key: "promo", label: "🎁 ป๊อปอัปลูกค้าใหม่", hint: "โผล่ครั้งเดียวต่อผู้เข้าชม (ไม่โผล่หน้าชำระเงิน) · แจกโค้ดจากแท็บ 🎟️ คูปอง — สร้างคูปองก่อนแล้วใส่โค้ดที่นี่" },
 ];
 
@@ -91,6 +92,12 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "points_earn_unit", label: "ซื้อครบกี่บาท ได้ 1 แต้ม", hint: "คิดจากยอดสินค้าหลังส่วนลด ไม่นับค่าส่ง · เช่น 100 = ซื้อ ฿1,990 ได้ 19 แต้ม", group: "points", type: "number", isPublic: true, placeholder: "100" },
   { key: "points_value", label: "1 แต้ม ลดได้กี่บาท", hint: "เช่น 1 = ใช้ 100 แต้ม ลด ฿100", group: "points", type: "number", isPublic: true, placeholder: "1" },
   { key: "points_max_redeem_pct", label: "ใช้แต้มลดได้ไม่เกินกี่ % ของยอดสินค้า", hint: "1–100 · แนะนำ 50", group: "points", type: "number", isPublic: true, placeholder: "50" },
+  // ─── 🧵 ออกแบบเข็มขัด (ชิ้นส่วน/ไซซ์: /admin/belt-builder · กฎ lib/belt-builder.ts · payload lib/belt-builder-public.ts) ───
+  { key: "belt_enabled", label: "เปิดออกแบบเข็มขัดบนเว็บ", hint: "ต้องมีสายหนัง + หัวเข็มขัด ที่เปิดอยู่อย่างน้อยอย่างละ 1 ชิ้น ไม่งั้นเว็บยังไม่โชว์", group: "belt", type: "bool", isPublic: true },
+  { key: "belt_base_price", label: "ราคาฐานเข็มขัด (฿)", hint: "ราคาเริ่มต้นก่อนบวกราคาเพิ่มของแต่ละชิ้น · 0 = ยังไม่ตั้ง (เว็บโชว์ \"สอบถามราคา\")", group: "belt", type: "number", isPublic: true, placeholder: "1500" },
+  { key: "belt_engraving_fee", label: "ค่าสลักชื่อ (฿)", hint: "บวกเมื่อลูกค้าพิมพ์ชื่อ · 0 = ฟรี", group: "belt", type: "number", isPublic: true, placeholder: "0" },
+  { key: "belt_engraving_max", label: "สลักชื่อได้สูงสุดกี่ตัวอักษร", hint: "แนะนำ 12 · 0 = ปิดสลักชื่อ", group: "belt", type: "number", isPublic: true, placeholder: "12" },
+  { key: "belt_lead_time", label: "ระยะเวลาทำ (ข้อความ)", hint: "โชว์ใต้ราคา เช่น ทำ 7–10 วันทำการ", group: "belt", type: "text", isPublic: true, placeholder: "ทำ 7–10 วันทำการ" },
   { key: "fit_check_enabled", label: "เปิดเช็คขนาด (ใส่ตุ๊กตา/ของได้ไหม)", hint: "รอบนี้: ERP คำนวณ + เตือนรุ่นที่ยังไม่วัด · หน้าเช็คขนาดบนเว็บจะตามมาในรอบถัดไป", group: "fit", type: "bool", isPublic: true },
   { key: "points_min_redeem", label: "ใช้ขั้นต่ำครั้งละกี่แต้ม", hint: "กันใช้ทีละนิด เช่น 10", group: "points", type: "number", isPublic: true, placeholder: "10" },
 ];
@@ -143,6 +150,11 @@ export interface SiteInfo {
   points_max_redeem_pct: number;
   points_min_redeem: number;
   fit_check_enabled: boolean;
+  belt_enabled: boolean;
+  belt_base_price: number;
+  belt_engraving_fee: number;
+  belt_engraving_max: number;
+  belt_lead_time: string;
 }
 
 export const DEFAULT_SITE_INFO: SiteInfo = {
@@ -190,6 +202,11 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   points_max_redeem_pct: 50,
   points_min_redeem: 10,
   fit_check_enabled: false,
+  belt_enabled: false,
+  belt_base_price: 0,
+  belt_engraving_fee: 0,
+  belt_engraving_max: 12,
+  belt_lead_time: "",
 };
 
 const URL_KEYS = new Set([

@@ -17,6 +17,7 @@ import { fitTargetOf, type FitTarget } from "@/lib/fit-check";
 import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { couponLabel, evaluateCoupon } from "@/lib/website-coupons";
 import { couponUsage, loadCouponByCode } from "@/lib/website-coupons-db";
+import { buildBeltBuilderPayload } from "@/lib/belt-builder-public";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -88,6 +89,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     fitTargets = [...all.filter((t) => t.kind === "doll"), ...all.filter((t) => t.kind !== "doll")];
   }
 
+  // 🧵 ออกแบบเข็มขัด: ชิ้นส่วน + กติกาไซซ์ + ราคาฐาน (เฉพาะร้านที่เปิด belt_enabled และมีสาย+หัวอย่างน้อยอย่างละ 1) — lib/belt-builder-public
+  const beltBuilder = info.belt_enabled ? await buildBeltBuilderPayload(sb, s.id, info) : null;
+
   const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
   const layoutSource = preview && s.home_layout_draft != null ? s.home_layout_draft : s.home_layout;
 
@@ -107,6 +111,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     categories: normalizeFieldMap(s.field_map).categories,
     /** 📐 ตุ๊กตา/ของที่มีขนาด (เฉพาะร้านที่เปิดเช็คขนาด) [{id,name,w,h,d,soft,estimated,kind,imageKey?}] — Section เช็คขนาดบนเว็บ (lib/fit-check) */
     ...(fitTargets ? { fitTargets } : {}),
+    /** 🧵 ออกแบบเข็มขัด (เฉพาะร้านที่เปิด) {canvas,basePrice,engraving,parts[],sizeRules[]} — Section "ออกแบบเข็มขัด" + หน้า /belt-builder (lib/belt-builder-public) */
+    ...(beltBuilder ? { beltBuilder } : {}),
     /**
      * 📖 หน้าคอลเลกชัน (เปิดไว้ในแท็บ 🎞 คอลเลกชัน) [{id,slug,name,title,bannerKey,mobileBannerKey,story,seoTitle,seoDescription}] เรียงตามที่จัด
      * เว็บร้าน: /collection/<slug> + Section "คอลเลกชัน" · สินค้าในคอลเลกชัน = products API ช่อง collection (id)
