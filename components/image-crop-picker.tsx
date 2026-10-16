@@ -4,7 +4,7 @@
  * ✂️ ครอปรูปจากรูปสินค้า (ของกลาง) — เลือกรูป (จัดกลุ่มตาม SKU) → ลากกรอบ + ซูม → ได้รูปใหม่เฉพาะส่วนนั้น (อัปขึ้น R2)
  * --------------------------------------------------------------------------
  * - ซ้าย: กลุ่มรูป (เช่น SKU ละกลุ่ม · ป้าย "บนเว็บ") → กดรูปย่อเพื่อเลือก
- * - ขวา: ImageCropBox (กรอบสัดส่วน aspect) + ซูม (แถบ หรือหมุนลูกกลิ้งเมาส์บนรูป) + ตัวอย่างผลลัพธ์ (วงกลม/สี่เหลี่ยม)
+ * - ขวา: ImageCropBox (กรอบสัดส่วน aspect · ลากกลางกรอบ = ย้าย · จับมุมลาก = ย่อ/ขยาย · หมุนลูกกลิ้งบนรูปก็ได้) + ตัวอย่างผลลัพธ์ (วงกลม/สี่เหลี่ยม)
  * - "ใช้ส่วนนี้" → ตัดพิกเซลจริงบน canvas (รูปจาก /api/r2-image โดเมนเดียวกัน) → อัปผ่าน /api/admin/upload → onDone(r2Key)
  * ใช้ที่: ทะเบียนสี (รูปลายจุดสี) · ใช้ได้กับงานอื่นที่ต้อง "ตัดส่วนหนึ่งของรูปสินค้า" (ไอคอน · ป้าย · พื้นผิว)
  * ข้อจำกัด: รูปต้องเป็น r2 key (โดเมนเดียวกัน) · ผลลัพธ์เป็น webp ขนาด outSize px (ด้านกว้าง)
@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { ImageCropBox, CropZoom, useImageSize, type CropValue } from "@/components/image-crop-box";
+import { ImageCropBox, useImageSize, type CropValue } from "@/components/image-crop-box";
 import { canvasBgWindow } from "@/lib/website-canvas";
 
 export interface CropSourceGroup {
@@ -72,7 +72,7 @@ export function ImageCropPicker({
   groups,
   error,
   title = "✂️ ครอปจากรูปสินค้า",
-  description = "เลือกรูปทางซ้าย → ลากกรอบไปตรงส่วนที่ต้องการ · ซูมด้วยแถบ หรือหมุนลูกกลิ้งเมาส์บนรูป",
+  description = "เลือกรูปทางซ้าย → ลากกรอบไปตรงส่วนที่ต้องการ · จับมุมกรอบลากเพื่อย่อ/ขยาย (หรือหมุนลูกกลิ้งเมาส์บนรูป)",
   aspect = 1,
   outSize = 320,
   folder = "uploads",
@@ -212,9 +212,9 @@ export function ImageCropPicker({
             {sel ? (
               <>
                 <div ref={wheelRef}>
-                  <ImageCropBox imageKey={sel} box={box} value={crop} onChange={(p) => setCrop((c) => ({ ...c, ...p }))} maxHeight={400} />
+                  <ImageCropBox imageKey={sel} box={box} value={crop} onChange={(p) => setCrop((c) => ({ ...c, ...p }))} maxHeight={460} maxZoom={ZOOM_MAX} />
                 </div>
-                <CropZoom value={crop.zoom} max={ZOOM_MAX} onChange={(zoom) => setCrop((c) => ({ ...c, zoom }))} />
+                <p className="text-center text-[11px] text-slate-400">ลากกลางกรอบ = ย้าย · จับมุม ◻ ลาก = ย่อ/ขยาย · หมุนลูกกลิ้ง = ซูม</p>
               </>
             ) : (
               <div className="py-12 text-center text-sm text-slate-400">เลือกรูปทางซ้าย</div>

@@ -434,7 +434,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
         groups={cropGroups}
         error={cropErr}
         title={`✂️ ครอปรูปลาย — ${sel?.name ?? ""}`}
-        description="เลือก SKU และรูปทางซ้าย → ลากกรอบไปตรงลายที่ต้องการ · ซูมด้วยแถบ หรือหมุนลูกกลิ้งเมาส์บนรูป · ผลลัพธ์ = รูปลายจัตุรัสของจุดสีนี้"
+        description="เลือก SKU และรูปทางซ้าย → ลากกรอบไปตรงลายที่ต้องการ · จับมุมกรอบลากเพื่อย่อ/ขยาย · ผลลัพธ์ = รูปลายจัตุรัสของจุดสีนี้"
         emptyText="ยังไม่มี SKU ที่ใช้สีนี้และมีรูป — อัปโหลดรูปลายเอง หรือเลือกจากคลังรูปแทน"
         folder="color-swatches"
         outSize={320}
