@@ -65,6 +65,7 @@ type CalEntry = {
   postStatus: Record<string, string>;         // posted / scheduled / skip ต่อแพลตฟอร์ม
   isStory: boolean;                           // โพสต์แบบ Story (platform_formats มี "story") — โหมด Story ของปฏิทิน
   fileCount: number;                          // ไฟล์แนบทุกชนิด (รูป/วิดีโอ/ลิงก์) — 0 = ยังไม่มีไฟล์
+  formats: Record<string, string>;            // รูปแบบโพสต์ต่อแพลตฟอร์ม (story/reels/…) — Story ไม่ต้องมีแคปชั่น
 };
 
 /** Story ที่ลงแผนไว้ก่อน ยังไม่ได้ใส่ไฟล์ (รูป/วิดีโอ/ลิงก์) → ขึ้นป้าย "ยังไม่มีไฟล์" ให้รู้ว่าต้องกลับมาใส่ */
@@ -72,7 +73,7 @@ const storyNoFile = (e: CalEntry) => e.isStory && e.fileCount === 0;
 function NoFileBadge() {
   return (
     <span title="Story นี้ยังไม่มีไฟล์ — กดเปิด แล้วใส่ไฟล์ที่การ์ด 🖼 รูป/วิดีโอ (＋ เพิ่ม / จัดการ)"
-      className="shrink-0 rounded px-1 py-px text-[9px] leading-none font-medium bg-amber-100 text-amber-700 border border-amber-200">📎 ยังไม่มีไฟล์</span>
+      className="shrink-0 text-[9px] leading-none text-amber-600">ไม่มีไฟล์</span>
   );
 }
 
@@ -83,7 +84,7 @@ function platReadiness(e: CalEntry): PlatReady[] {
     const st = e.postStatus[code];
     const imgs = e.platformImages[code]?.length ? e.platformImages[code] : e.imageKeys;
     const missing: PlatReady["missing"] = [];
-    if (!e.captionPlatforms.includes(code)) missing.push("caption");
+    if (e.formats[code] !== "story" && !e.captionPlatforms.includes(code)) missing.push("caption");   // Story ไม่ต้องมีแคปชั่น
     if (!imgs.length) missing.push("image");
     const state: PlatReady["state"] = st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "skip" ? "skip" : missing.length ? "missing" : "ready";
     return { code, state, missing, images: imgs.slice(0, 4) };
@@ -124,6 +125,32 @@ function QuickView({ e, open, anchor, onClose, onOpen }: { e: CalEntry; open: bo
   const plats = platReadiness(e);
   const missingAny = plats.filter((p) => p.state === "missing");
   const shown = e.imageKeys.slice(0, 4);
+  if (e.isStory) {
+    const sw = 230; const st: React.CSSProperties = { ...style, left: Math.min(Math.max(8, r.left), window.innerWidth - sw - 8), width: sw };
+    return createPortal(
+      <div style={st} className="rounded-lg border border-slate-200 bg-white shadow-lg p-2 text-[11px]" onMouseEnter={onOpen} onMouseLeave={onClose}>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${e.statusDot}`} />
+          <span className="truncate font-medium text-slate-700">📖 {e.title}</span>
+          <span className="ml-auto shrink-0 text-[10px] text-slate-400">{e.statusLabel}</span>
+        </div>
+        {shown.length > 0 && (
+          <div className="mt-1.5 flex gap-1">
+            {shown.map((k) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={k} src={r2ImageUrl(k, 120) ?? ""} alt="" className="h-10 w-10 rounded object-cover border border-slate-200" />
+            ))}
+          </div>
+        )}
+        <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+          <PlatIcons list={plats} size={10} />
+          <span className={e.fileCount ? "text-slate-400" : "text-amber-600"}>{e.fileCount ? `📎 ${e.fileCount} ไฟล์` : "ยังไม่มีไฟล์"}</span>
+          <span className="ml-auto text-slate-400">คลิกเพื่อเปิด</span>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
   return createPortal(
     <div style={style} className="rounded-xl border border-slate-200 bg-white shadow-xl p-2.5 text-xs" onMouseEnter={onOpen} onMouseLeave={onClose}>
       <div className="flex items-start gap-2">
@@ -145,9 +172,7 @@ function QuickView({ e, open, anchor, onClose, onOpen }: { e: CalEntry; open: bo
           ))}
         </div>
       ) : (
-        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700">
-          {storyNoFile(e) ? "📎 Story นี้ยังไม่มีไฟล์ — กดการ์ดเพื่อเปิด แล้วใส่ไฟล์ทีหลังได้" : "🖼 ยังไม่มีรูปที่จะลง"}
-        </div>
+        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700">🖼 ยังไม่มีรูปที่จะลง</div>
       )}
       {/* ต่อแพลตฟอร์ม */}
       {plats.length > 0 && (
@@ -262,7 +287,7 @@ export function ContentCalendarView() {
           platforms: c.platforms ?? [], overdue: false, hideInBacklog: c.status === "cancelled",
           captionPlatforms: c.caption_platforms ?? [], platformImages: c.platform_images ?? {}, imageKeys: c.image_keys ?? [], imageCount: c.image_count ?? 0, postStatus: c.post_status ?? {},
           isStory: Object.values(c.platform_formats ?? {}).includes("story"),
-          fileCount: c.file_count ?? c.image_count ?? 0,
+          fileCount: c.file_count ?? c.image_count ?? 0, formats: c.platform_formats ?? {},
         };
       });
     }
@@ -278,7 +303,7 @@ export function ContentCalendarView() {
         thumb: key ? r2ImageUrl(key, 96) : null, sub: tk.task_no ? `#${tk.task_no}${tk.sku_code ? ` · ${tk.parent_sku_code || tk.sku_code}` : ""}` : null,
         meta: [who ? `👤 ${who}` : null, tk.brand_label].filter(Boolean).join(" · ") || null,
         platforms: tk.platforms ?? [], overdue: isOverdue(tk), hideInBacklog: isTerminal(tk.status),
-        captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {}, isStory: false, fileCount: 0,
+        captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {}, isStory: false, fileCount: 0, formats: {},
       };
     });
   }, [mode, items, tasks]);
@@ -465,6 +490,7 @@ export function ContentCalendarView() {
   const Chip = ({ e }: { e: CalEntry }) => {
     const tip = [e.title, e.sub, e.meta, e.platforms.slice(0, 3).map((p) => platformLabel(p)).join(" · "), e.statusLabel].filter(Boolean).join(" · ");
     const plats = e.kind === "content" ? platReadiness(e) : [];
+    const story = e.kind === "content" && e.isStory;   // Story = การ์ดเล็กจาง ๆ ไม่ให้เด่นกว่าโพสต์ปกติ
     const isQv = quickView?.id === e.id;
     const openQv = (el: HTMLElement) => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView({ id: e.id, anchor: el }), 350); };
     const closeQv = () => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView((q) => (q?.id === e.id ? null : q)), 200); };
@@ -474,15 +500,27 @@ export function ContentCalendarView() {
         onMouseLeave={() => { if (canHover) closeQv(); }}>
         <button draggable onDragStart={() => { setQuickView(null); startDrag(e); }} onDragEnd={() => { dragRef.current = null; setOverKey(null); }}
           onClick={(ev) => { ev.stopPropagation(); setQuickView(null); setDetail({ kind: e.kind, id: e.id }); }} title={canHover ? undefined : tip}
-          className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1.5 cursor-pointer ${e.overdue ? "bg-red-50 border-red-300 text-red-700" : e.statusCls}`}>
-          <Thumb e={e} size="xs" />
-          <span className="truncate flex-1 min-w-0">{e.time ? `${e.time} ` : ""}{e.title}</span>
-          {storyNoFile(e) && <NoFileBadge />}
-          {/* ไอคอนแพลตฟอร์ม วงสี = พร้อม/ขาด/โพสต์แล้ว */}
-          <PlatIcons list={plats} />
+          className={story
+            ? "w-full text-left text-[9px] leading-tight px-1 py-px rounded border border-pink-100 bg-pink-50/50 text-pink-700/80 flex items-center gap-1 cursor-pointer hover:border-pink-300"
+            : `w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1.5 cursor-pointer ${e.overdue ? "bg-red-50 border-red-300 text-red-700" : e.statusCls}`}>
+          {story ? (
+            <>
+              <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: brandColor(e.brand_id) }} />
+              <span className="truncate flex-1 min-w-0">📖 {e.title}</span>
+              {storyNoFile(e) && <NoFileBadge />}
+              {e.status === "posted" && <span className="shrink-0 text-emerald-600">✓</span>}
+            </>
+          ) : (
+            <>
+              <Thumb e={e} size="xs" />
+              <span className="truncate flex-1 min-w-0">{e.time ? `${e.time} ` : ""}{e.title}</span>
+              {/* ไอคอนแพลตฟอร์ม วงสี = พร้อม/ขาด/โพสต์แล้ว */}
+              <PlatIcons list={plats} />
+            </>
+          )}
         </button>
-        {/* จอสัมผัส: ปุ่ม ⓘ เปิด quick view (จอเมาส์ใช้ชี้ค้างแทน) */}
-        {!canHover && e.kind === "content" && (
+        {/* จอสัมผัส: ปุ่ม ⓘ เปิด quick view (จอเมาส์ใช้ชี้ค้างแทน) · Story ไม่ต้องมี (การ์ดเล็ก แตะ = เปิดเลย) */}
+        {!canHover && e.kind === "content" && !story && (
           <button type="button" onClick={(ev) => { ev.stopPropagation(); setQuickView(isQv ? null : { id: e.id, anchor: ev.currentTarget }); }}
             className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white border border-slate-300 text-[9px] text-slate-500 shadow-sm">ⓘ</button>
         )}
@@ -698,13 +736,13 @@ export function ContentCalendarView() {
                             <span className="flex items-center gap-0.5 flex-1 min-w-0">
                               {st.slice(0, 5).map((e) => (
                                 <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); setDetail({ kind: "content", id: e.id }); }} title={`${e.brand_label ?? ""} · ${e.title} · ${e.statusLabel}${storyNoFile(e) ? ` · ${t("ยังไม่มีไฟล์ — กดเพื่อใส่", "no file yet — click to add")}` : ""}`}
-                                  className={`h-3.5 min-w-3.5 px-0.5 rounded-full text-[8px] leading-none text-white flex items-center justify-center ${storyNoFile(e) ? "ring-2 ring-amber-400 font-bold" : "ring-1 ring-white"} ${e.status === "posted" ? "" : "opacity-60"}`} style={{ background: brandColor(e.brand_id) }}>
-                                  {e.status === "posted" ? "✓" : storyNoFile(e) ? "!" : ""}
+                                  className={`h-3.5 min-w-3.5 px-0.5 rounded-full ring-1 ring-white text-[8px] leading-none text-white flex items-center justify-center ${e.status === "posted" ? "" : "opacity-60"}`} style={{ background: brandColor(e.brand_id) }}>
+                                  {e.status === "posted" ? "✓" : ""}
                                 </button>
                               ))}
                               {st.length > 5 && <span>+{st.length - 5}</span>}
                               {noFile > 0
-                                ? <span className="ml-auto truncate font-medium text-amber-700">📎 {t("ยังไม่มีไฟล์", "No file yet")}{st.length > 1 ? ` ${noFile}` : ""}</span>
+                                ? <span className="ml-auto truncate text-amber-600">{t("ยังไม่มีไฟล์", "No file yet")}{st.length > 1 ? ` ${noFile}` : ""}</span>
                                 : <span className="ml-auto truncate">{st.every((e) => e.status === "posted") ? t("โพสต์แล้ว", "Posted") : t(`${st.length} Story`, `${st.length} story`)}</span>}
                             </span>
                           ) : (
