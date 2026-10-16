@@ -46,7 +46,7 @@ import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
-import { MENU_DELAYS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
+import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -127,6 +127,8 @@ type ColorKey = Exclude<keyof Theme["colors"], "softPct">;
 /** สีละเอียด (lib/website-theme FINE_COLOR_DEFAULTS) — ไว้นับ "แก้แล้ว" */
 const FINE_COLOR_KEYS = Object.keys(FINE_COLOR_DEFAULTS) as (keyof typeof FINE_COLOR_DEFAULTS)[];
 const FINE_COLOR_LABEL = "สีละเอียด";
+/** บทบาทตัวอักษร — ธีมเก่าที่ยังไม่มีบทบาทใหม่ (เช่น เมนูย่อย) = ค่าเริ่มต้น */
+const roleOf = (t: { typography: Partial<Typography> }, k: TextRoleKey): TextRole => t.typography[k] ?? defaultTextRole(k);
 type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
@@ -767,6 +769,19 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   });
   const failCount = checks.filter((c) => c.level === "fail").length;
 
+  // ✏️ ตัวแก้ 1 บทบาทตัวอักษร — ใช้ร่วม แท็บตัวอักษร + แท็บเมนู (เมนูด้านบน/เมนูย่อย) → แก้ที่ไหนก็ค่าเดียวกัน
+  const roleEditor = (d: (typeof TEXT_ROLE_DEFS)[number]) => (
+    <TextRoleEditor
+      key={d.key}
+      def={d}
+      value={roleOf(theme, d.key)}
+      pub={roleOf(published, d.key)}
+      theme={theme}
+      onChange={(patch) => apply({ ...theme, typography: { ...theme.typography, [d.key]: { ...roleOf(theme, d.key), ...patch } } })}
+      onReset={() => apply({ ...theme, typography: { ...theme.typography, [d.key]: { ...roleOf(published, d.key) } } })}
+    />
+  );
+
   const ResetBtn = ({ onClick, show }: { onClick: () => void; show: boolean }) =>
     show ? (
       <button onClick={onClick} title="คืนค่าที่เผยแพร่อยู่" className="shrink-0 w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-400 text-xs">
@@ -980,17 +995,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">ปรับละเอียดรายบทบาท</h3>
                 <p className="text-xs text-slate-500 mb-3">แต่ละชนิดข้อความตั้งแยกได้: ฟอนต์ น้ำหนัก เอียง ขนาด (คอม/มือถือ) ระยะห่าง ตัวพิมพ์ใหญ่ สี พื้นหลัง · ตัวอย่างด้านล่างเปลี่ยนตามทันที</p>
                 <div className="space-y-3">
-                  {TEXT_ROLE_DEFS.map((d) => (
-                    <TextRoleEditor
-                      key={d.key}
-                      def={d}
-                      value={theme.typography[d.key]}
-                      pub={published.typography[d.key]}
-                      theme={theme}
-                      onChange={(patch) => apply({ ...theme, typography: { ...theme.typography, [d.key]: { ...theme.typography[d.key], ...patch } } })}
-                      onReset={() => apply({ ...theme, typography: { ...theme.typography, [d.key]: { ...published.typography[d.key] } } })}
-                    />
-                  ))}
+                  {TEXT_ROLE_DEFS.map(roleEditor)}
                 </div>
               </div>
             </>
@@ -1140,7 +1145,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </button>
                   }
                 >
-                  <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} navUpper={theme.typography.nav.uppercase} setNavUpper={(v) => apply({ ...theme, typography: { ...theme.typography, nav: { ...theme.typography.nav, uppercase: v } } })} />
+                  <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} typo={{ nav: roleOf(theme, "nav").uppercase, menu: roleOf(theme, "menu").uppercase, setUpper: (k, v) => apply({ ...theme, typography: { ...theme.typography, [k]: { ...roleOf(theme, k), uppercase: v } } }), editors: TEXT_ROLE_DEFS.filter((d) => d.key === "nav" || d.key === "menu").map(roleEditor) }} />
                 </ERPModal>
                 <SocialLinksModal
                   open={zoneCfg === "social"}
@@ -1188,7 +1193,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-1">เมนูด้านบน</h3>
               <p className="text-xs text-slate-500 mb-3">จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้</p>
-              <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} navUpper={theme.typography.nav.uppercase} setNavUpper={(v) => apply({ ...theme, typography: { ...theme.typography, nav: { ...theme.typography.nav, uppercase: v } } })} />
+              <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} typo={{ nav: roleOf(theme, "nav").uppercase, menu: roleOf(theme, "menu").uppercase, setUpper: (k, v) => apply({ ...theme, typography: { ...theme.typography, [k]: { ...roleOf(theme, k), uppercase: v } } }), editors: TEXT_ROLE_DEFS.filter((d) => d.key === "nav" || d.key === "menu").map(roleEditor) }} />
             </div>
           )}
 
@@ -3448,26 +3453,40 @@ function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, missing,
 
 /* ─────────── เมนู: ชุดตั้งค่าทั้งก้อน (แท็บ "เมนู" + ป๊อปจากชิ้น "เมนู" ใน Header ใช้ตัวเดียวกัน) ─────────── */
 /** ⚙️ พฤติกรรมเมนูทั้งชุด (lib/website-mega-menu MenuBehavior) — ใช้กับทุกเมนูที่มีเมนูย่อย/แผง */
-function MenuBehaviorSettings({ value, onChange, navUpper, setNavUpper }: { value: MenuBehavior; onChange: (p: Partial<MenuBehavior>) => void; navUpper?: boolean; setNavUpper?: (v: boolean) => void }) {
+function MenuBehaviorSettings({ value, onChange, typo }: { value: MenuBehavior; onChange: (p: Partial<MenuBehavior>) => void; typo?: MenuTypo }) {
+  const [typoOpen, setTypoOpen] = useState(false);
   const seg = (on: boolean) => `text-[11px] px-2.5 h-7 rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
   return (
     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2.5">
       <p className="text-xs font-semibold text-slate-700">⚙️ หน้าตา + พฤติกรรมเมนู (ใช้กับทุกเมนู)</p>
-      {/* 🔠 ตัวพิมพ์ใหญ่ทั้งหมด — เมนูด้านบน = ค่าเดียวกับแท็บตัวอักษร → เมนูด้านบน (แก้ที่ไหนก็ตรงกัน) */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {setNavUpper && (
-          <div className="flex items-center gap-1.5" title="ค่าเดียวกับ แท็บตัวอักษร → ปรับละเอียดรายบทบาท → เมนูด้านบน (มือถือใช้ค่าเดียวกัน)">
-            <span className="text-[11px] text-slate-500">🔠 เมนูด้านบน</span>
-            <button type="button" className={seg(!!navUpper)} onClick={() => setNavUpper(true)}>ตัวพิมพ์ใหญ่ทั้งหมด (BAGS)</button>
-            <button type="button" className={seg(!navUpper)} onClick={() => setNavUpper(false)}>ตามที่พิมพ์ (Bags)</button>
+      {/* 🔠 ตัวอักษรเมนู — ค่าเดียวกับแท็บตัวอักษร (เมนูด้านบน / เมนูย่อย-แผงเมนู) แก้ที่ไหนก็ตรงกัน */}
+      {typo && (
+        <>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-500">🔠 เมนูด้านบน</span>
+              <button type="button" className={seg(typo.nav)} onClick={() => typo.setUpper("nav", true)}>ตัวพิมพ์ใหญ่ทั้งหมด (BAGS)</button>
+              <button type="button" className={seg(!typo.nav)} onClick={() => typo.setUpper("nav", false)}>ตามที่พิมพ์ (Bags)</button>
+            </div>
+            <div className="flex items-center gap-1.5" title="หัวคอลัมน์ ลิงก์ แท็บ และชื่อการ์ดในเมนูย่อย/แผงเมนู (คำอธิบายและชื่อสินค้าไม่เปลี่ยน)">
+              <span className="text-[11px] text-slate-500">เมนูย่อย/แผง</span>
+              <button type="button" className={seg(typo.menu)} onClick={() => typo.setUpper("menu", true)}>ใหญ่ทั้งหมด</button>
+              <button type="button" className={seg(!typo.menu)} onClick={() => typo.setUpper("menu", false)}>ตามที่พิมพ์</button>
+            </div>
           </div>
-        )}
-        <div className="flex items-center gap-1.5" title="หัวคอลัมน์ ลิงก์ แท็บ และชื่อการ์ดในแผงเมนู (คำอธิบายและชื่อสินค้าไม่เปลี่ยน)">
-          <span className="text-[11px] text-slate-500">ในแผงเมนู</span>
-          <button type="button" className={seg(value.panelUpper)} onClick={() => onChange({ panelUpper: true })}>ใหญ่ทั้งหมด</button>
-          <button type="button" className={seg(!value.panelUpper)} onClick={() => onChange({ panelUpper: false })}>ตามที่พิมพ์</button>
-        </div>
-      </div>
+          <div>
+            <button type="button" onClick={() => setTypoOpen((v) => !v)} className="text-[11px] text-blue-600 hover:underline">
+              {typoOpen ? "▲" : "▼"} ฟอนต์ · สี · ขนาด · น้ำหนัก · ระยะตัวอักษร ของเมนู
+            </button>
+            {typoOpen && (
+              <div className="mt-2 space-y-2">
+                <p className="text-[11px] text-slate-500">ตัวเดียวกับ แท็บตัวอักษร → ปรับละเอียดรายบทบาท — แก้ตรงนี้ แท็บตัวอักษรเปลี่ยนตาม (และกลับกัน)</p>
+                {typo.editors}
+              </div>
+            )}
+          </div>
+        </>
+      )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] text-slate-500">เปิดแผงเมื่อ</span>
@@ -3504,7 +3523,9 @@ function MenuBehaviorSettings({ value, onChange, navUpper, setNavUpper }: { valu
   );
 }
 
-function MenuSettings({ menu, setMenu, choices, pages, megaCtx, navUpper, setNavUpper }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[]; megaCtx?: MegaEditorCtx; navUpper?: boolean; setNavUpper?: (v: boolean) => void }) {
+/** 🔠 ตัวอักษรเมนู (theme.typography.nav / .menu) ที่ส่งจากหน้าดีไซน์ — ค่าเดียวกับแท็บตัวอักษร */
+type MenuTypo = { nav: boolean; menu: boolean; setUpper: (k: "nav" | "menu", v: boolean) => void; editors: React.ReactNode };
+function MenuSettings({ menu, setMenu, choices, pages, megaCtx, typo }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[]; megaCtx?: MegaEditorCtx; typo?: MenuTypo }) {
   const [askAuto, setAskAuto] = useState(false);
   return (
     <>
@@ -3530,7 +3551,7 @@ function MenuSettings({ menu, setMenu, choices, pages, megaCtx, navUpper, setNav
         </>
       )}
 
-      <MenuBehaviorSettings value={menu.behavior} onChange={(p) => setMenu({ behavior: { ...menu.behavior, ...p } })} navUpper={navUpper} setNavUpper={setNavUpper} />
+      <MenuBehaviorSettings value={menu.behavior ?? DEFAULT_MENU_BEHAVIOR} onChange={(p) => setMenu({ behavior: { ...DEFAULT_MENU_BEHAVIOR, ...menu.behavior, ...p } })} typo={typo} />
 
       <div className="mt-5 pt-3 border-t border-slate-100">
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">

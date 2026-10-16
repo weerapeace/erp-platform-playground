@@ -156,11 +156,9 @@ export interface MenuBehavior {
   mobileStyle: "accordion" | "drill";
   /** มือถือ: แถบรูปหมวดวงกลมเลื่อนแนวนอนบนสุดของเมนู */
   mobileCats: boolean;
-  /** 🔠 ตัวพิมพ์ใหญ่ทั้งหมดในแผงเมนู (หัวคอลัมน์ · ลิงก์ · แท็บ · ชื่อการ์ด — ไม่รวมคำอธิบาย/ชื่อสินค้า)
-   *  เมนูด้านบนใช้ค่าจาก theme.typography.nav.uppercase (ที่เดียวกับแท็บตัวอักษร) */
-  panelUpper: boolean;
 }
-export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileCats: false, panelUpper: false };
+/** 🔠 ฟอนต์/สี/ขนาด/ตัวพิมพ์ใหญ่ของเมนู = theme.typography.nav (เมนูด้านบน) + .menu (เมนูย่อย/แผงเมนู) — ไม่เก็บซ้ำที่นี่ */
+export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileCats: false };
 export const MENU_DELAYS = [0, 100, 150, 200, 300, 400, 600] as const;
 
 /** แม่แบบแผงเมนูที่บันทึกไว้ (ตาราง website_menu_templates · /api/website/menu-templates) */
@@ -468,7 +466,6 @@ export function normalizeMenuBehavior(raw: unknown): MenuBehavior {
     dim: r.dim === true,
     mobileStyle: oneOf(r.mobileStyle, ["accordion", "drill"] as const, d.mobileStyle),
     mobileCats: r.mobileCats === true,
-    panelUpper: r.panelUpper === true,
   };
 }
 

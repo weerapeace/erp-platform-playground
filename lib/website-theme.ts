@@ -952,10 +952,10 @@ export interface SiteTheme {
   };
 }
 
-/* ───────── ตัวอักษร 6 บทบาท (แท็บ "ตัวอักษร") ─────────
+/* ───────── ตัวอักษร 7 บทบาท (แท็บ "ตัวอักษร" · เมนูด้านบน/เมนูย่อย ตั้งจากแท็บ "เมนู" ได้ด้วย = ค่าเดียวกัน) ─────────
    แต่ละบทบาทตั้ง ฟอนต์/น้ำหนัก/เอียง/ขนาด %/ระยะห่าง/ตัวพิมพ์ใหญ่/สี/พื้นหลัง แยกกัน
    เว็บร้านแปลงเป็น CSS ใน site-config.themeToCss (zoom = ขนาด %) */
-export type TextRoleKey = "hero" | "heading" | "eyebrow" | "body" | "button" | "nav";
+export type TextRoleKey = "hero" | "heading" | "eyebrow" | "body" | "button" | "nav" | "menu";
 export interface TextRole {
   /** ชื่อฟอนต์จาก GOOGLE_FONTS · "" = ตามฟอนต์หัวข้อ/เนื้อหา */
   font: string;
@@ -979,7 +979,8 @@ export const TEXT_ROLE_DEFS: { key: TextRoleKey; label: string; hint: string; ba
   { key: "eyebrow", label: "ป้ายเล็กเหนือหัวข้อ", hint: "ตัวเล็ก ๆ เหนือหัวข้อ และชื่อหมวดบนการ์ด", base: "body", sample: "NEW ARRIVAL", px: 11 },
   { key: "body", label: "เนื้อหา (ฐานทั้งเว็บ)", hint: "ข้อความทั่วไป — ขนาดนี้คือฐาน ทุกอย่างบนเว็บขยายตาม", base: "body", sample: "หนังวัวแท้ฟอกฝาด ผิวเรียบเนียน ทนทาน ใช้ได้นานหลายปี", px: 14 },
   { key: "button", label: "ปุ่ม", hint: "ปุ่มทุกปุ่มบนเว็บ (สีปุ่มมาจากแท็บสี)", base: "body", sample: "เพิ่มลงตะกร้า", px: 12 },
-  { key: "nav", label: "เมนูด้านบน", hint: "ลิงก์เมนูใน Header", base: "body", sample: "สินค้า   เกี่ยวกับเรา   ติดต่อ", px: 11 },
+  { key: "nav", label: "เมนูด้านบน", hint: "ลิงก์เมนูใน Header + รายการในเมนูมือถือ (สีมีผลเฉพาะแถบเมนูบนคอม)", base: "body", sample: "สินค้า   เกี่ยวกับเรา   ติดต่อ", px: 11 },
+  { key: "menu", label: "เมนูย่อย / แผงเมนู", hint: "ลิงก์ในเมนูเลื่อนลง + แผงเมนูใหญ่ (ลิงก์ หัวข้อย่อย แท็บ ชื่อการ์ด) · ตัวพิมพ์ใหญ่รวมหัวคอลัมน์ด้วย · ไม่ตั้ง = หน้าตาเดิม", base: "body", sample: "กระเป๋าเป้   กระเป๋าถือ   ดูทั้งหมด", px: 13 },
 ];
 const ROLE_DEFAULTS: Record<TextRoleKey, Partial<TextRole>> = {
   hero: { weight: 600, spacing: -1 },
@@ -988,6 +989,7 @@ const ROLE_DEFAULTS: Record<TextRoleKey, Partial<TextRole>> = {
   body: { weight: 400, spacing: 0 },
   button: { weight: 600, spacing: 8, uppercase: true },
   nav: { weight: 600, spacing: 14, uppercase: true },
+  menu: { weight: 500, spacing: 0 },
 };
 export const defaultTextRole = (k: TextRoleKey): TextRole => ({ font: "", weight: 500, italic: false, size: 100, sizeMobile: 0, spacing: 0, uppercase: false, color: "", bg: "", ...ROLE_DEFAULTS[k] });
 export type Typography = Record<TextRoleKey, TextRole>;
