@@ -9,6 +9,7 @@
 
 import { normalizeListing, DEFAULT_LISTING, type ListingConfig } from "@/lib/website-listing";
 import { isGradStop } from "@/lib/website-gradient";
+import { normalizeMegaPanel, type MegaPanel } from "@/lib/website-mega-menu";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
@@ -1123,6 +1124,8 @@ export interface MenuItem {
   /** รูปประกอบ (ใช้เมื่อเป็นรายการย่อยในแผง Mega) */
   imageKey: string | null;
   children: MenuItem[];
+  /** 🧭 แผงเมนูใหญ่ (แบบ A/B/C · lib/website-mega-menu) — มี = ใช้แทนเมนูย่อย · เฉพาะเมนูบนสุด */
+  panel: MegaPanel | null;
 }
 export interface MenuConfig {
   /** null = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ติดต่อ) */
@@ -1140,7 +1143,7 @@ export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "contact", label: "ติดต่อ", hint: "/contact" },
   { value: "url", label: "ลิงก์อื่น", hint: "URL ภายนอก/ภายใน" },
 ];
-export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, badge: "", mega: false, imageKey: null, children: [] });
+export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, badge: "", mega: false, imageKey: null, children: [], panel: null });
 function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
   if (!Array.isArray(raw)) return [];
   const out: MenuItem[] = [];
@@ -1159,6 +1162,7 @@ function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
       mega: r.mega === true,
       imageKey: typeof r.imageKey === "string" && /^[\w./-]+$/.test(r.imageKey) ? r.imageKey : null,
       children: depth < 1 ? normalizeMenuItems(r.children, depth + 1) : [],
+      panel: depth === 0 ? normalizeMegaPanel(r.panel) : null,
     });
   });
   return out.slice(0, 40);

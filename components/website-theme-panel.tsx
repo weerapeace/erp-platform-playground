@@ -45,6 +45,7 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
+import { MegaMenuEditor, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -267,6 +268,18 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [zoneCfg, setZoneCfg] = useState<HeaderEl | null>(null);
   /** ตัวเลือกลิงก์ปลายทาง (ของกลาง) ในหน้าดีไซน์: ปุ่มหัวเว็บ · รูปแทรกในกริด */
   const linkCtx = useMemo(() => ({ shopSlug, shopId, categories: choices?.categories ?? [] }), [shopSlug, shopId, choices]);
+  /** 🧭 ตัวจัดแผงเมนูใหญ่ (components/website-mega-menu-editor) */
+  const megaCtx = useMemo<MegaEditorCtx>(() => ({ link: linkCtx, categories: choices?.categories ?? [], products: choices?.products ?? [], shopId }), [linkCtx, choices, shopId]);
+  // 👁 แก้แผงเมนูอยู่ → สั่งพรีวิวเปิดแผงของเมนูนั้นค้างไว้ (ส่งซ้ำตอนพรีวิวโหลดหน้าใหม่)
+  const menuPin = useRef<string | null>(null);
+  useEffect(() => {
+    const onPin = (e: Event) => {
+      menuPin.current = ((e as CustomEvent).detail as string | null) ?? null;
+      iframeRef.current?.contentWindow?.postMessage({ type: "storefront-menu-pin", id: menuPin.current }, "*");
+    };
+    window.addEventListener("website-menu-pin", onPin);
+    return () => window.removeEventListener("website-menu-pin", onPin);
+  }, []);
   // วัดกล่องพรีวิวจริง เพื่อย่อ "พอดีจอ" (เดิม hardcode 400px → จอคอมถูกบีบเหลือ ~28%)
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(420);
@@ -529,6 +542,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
+      if ((e.data as { type?: string })?.type === "storefront-preview-ready" && menuPin.current) {
+        iframeRef.current?.contentWindow?.postMessage({ type: "storefront-menu-pin", id: menuPin.current }, "*");
+      }
       if ((e.data as { type?: string })?.type === "storefront-preview-ready" && theme) {
         iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme }, "*");
       }
@@ -1077,7 +1093,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </button>
                   }
                 >
-                  <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} />
+                  <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} />
                 </ERPModal>
                 <SocialLinksModal
                   open={zoneCfg === "social"}
@@ -1125,7 +1141,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-1">เมนูด้านบน</h3>
               <p className="text-xs text-slate-500 mb-3">จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้</p>
-              <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} />
+              <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} />
             </div>
           )}
 
@@ -3384,7 +3400,7 @@ function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, missing,
 }
 
 /* ─────────── เมนู: ชุดตั้งค่าทั้งก้อน (แท็บ "เมนู" + ป๊อปจากชิ้น "เมนู" ใน Header ใช้ตัวเดียวกัน) ─────────── */
-function MenuSettings({ menu, setMenu, choices, pages }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[] }) {
+function MenuSettings({ menu, setMenu, choices, pages, megaCtx }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[]; megaCtx?: MegaEditorCtx }) {
   const [askAuto, setAskAuto] = useState(false);
   return (
     <>
@@ -3403,7 +3419,7 @@ function MenuSettings({ menu, setMenu, choices, pages }: { menu: MenuConfig; set
         </div>
       ) : (
         <>
-          <MenuEditor items={menu.items} onChange={(items) => setMenu({ items })} choices={choices} pages={pages} />
+          <MenuEditor items={menu.items} onChange={(items) => setMenu({ items })} choices={choices} pages={pages} megaCtx={megaCtx} />
           <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => setAskAuto(true)}>
             กลับไปใช้เมนูอัตโนมัติ
           </button>
@@ -3417,7 +3433,7 @@ function MenuSettings({ menu, setMenu, choices, pages }: { menu: MenuConfig; set
         </label>
         {menu.mobileItems !== null && (
           <div className="mt-3">
-            <MenuEditor items={menu.mobileItems} onChange={(mobileItems) => setMenu({ mobileItems })} choices={choices} pages={pages} />
+            <MenuEditor items={menu.mobileItems} onChange={(mobileItems) => setMenu({ mobileItems })} choices={choices} pages={pages} megaCtx={megaCtx} />
           </div>
         )}
       </div>
@@ -3438,7 +3454,7 @@ function MenuSettings({ menu, setMenu, choices, pages }: { menu: MenuConfig; set
 }
 
 /* ─────────── เมนู: รายการ + รายการย่อย (ลึก 1 ชั้น) ─────────── */
-function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = false }: { items: MenuItem[]; onChange: (items: MenuItem[]) => void; choices: Choices; pages: { slug: string; title: string }[]; depth?: number; parentMega?: boolean }) {
+function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = false, megaCtx }: { items: MenuItem[]; onChange: (items: MenuItem[]) => void; choices: Choices; pages: { slug: string; title: string }[]; depth?: number; parentMega?: boolean; /** มี = เมนูบนสุดเลือกแผงเมนูใหญ่ A/B/C ได้ */ megaCtx?: MegaEditorCtx }) {
   const drag = useDragReorder((from, to) => onChange(moveItem(items, from, to)));
   const [openId, setOpenId] = useState<string | null>(null);
   const setItem = (id: string, patch: Partial<MenuItem>) => onChange(items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -3500,7 +3516,10 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
                       <input className={`${mini} w-full`} value={it.badge} maxLength={20} onChange={(e) => setItem(it.id, { badge: e.target.value })} />
                     </div>
                   </div>
-                  {depth === 0 && it.kind === "categories" && (
+                  {depth === 0 && megaCtx && (
+                    <MegaMenuEditor itemId={it.id} panel={it.panel} onChange={(panel) => setItem(it.id, { panel })} ctx={megaCtx} />
+                  )}
+                  {depth === 0 && it.kind === "categories" && !it.panel && (
                     <div className="rounded-md bg-blue-50 border border-blue-100 px-2 py-1.5 space-y-1">
                       <p className="text-[11px] text-blue-800">📂 เมนูย่อย = ทุกหมวดในแท็บ &quot;หมวดหมู่&quot; เรียงตามนั้น (เพิ่ม/ลบหมวดแล้วเมนูเปลี่ยนเอง)</p>
                       <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
@@ -3509,7 +3528,7 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
                       </label>
                     </div>
                   )}
-                  {depth === 0 && it.kind !== "categories" && (
+                  {depth === 0 && it.kind !== "categories" && !it.panel && (
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[11px] text-slate-500">เมนูย่อย ({it.children.length})</label>
