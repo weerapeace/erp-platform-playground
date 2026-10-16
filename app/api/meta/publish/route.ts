@@ -35,6 +35,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const format = (body.format ?? "").trim();
   if (format === "story" && Number(body.scheduled_time) > 0)
     return NextResponse.json({ error: "Story ตั้งเวลาล่วงหน้าไม่ได้ — เลือก “โพสต์เลย”" }, { status: 400 });
+  if (format === "story" && media.length === 0)
+    return NextResponse.json({ error: "Story นี้ยังไม่มีไฟล์ (รูปหรือวิดีโอ) — ใส่ไฟล์ก่อนแล้วค่อยโพสต์" }, { status: 400 });
   if (format === "story") media = media.slice(0, 1);   // Story = 1 ชิ้นต่อครั้ง
   if (format === "single") media = media.filter((m) => m.type !== "video").slice(0, 1);
   if (format === "carousel") media = media.filter((m) => m.type !== "video");

@@ -1,8 +1,9 @@
 "use client";
 /**
  * สร้าง Story แบบเร็ว (จากแถบ 📖 ในปฏิทิน) — เจ้าของขอ: ไม่ต้องเหมือนฟอร์มคอนเทนต์ปกติ
- * ป๊อปเล็ก ๆ ถามแค่ หัวข้อ · ประเภท (รูป/วิดีโอ) · ที่อยู่ไฟล์ (อัปโหลด หรือวางลิงก์ Drive/อื่น ๆ)
+ * ป๊อปเล็ก ๆ ถามแค่ หัวข้อ · ประเภท (รูป/วิดีโอ) · ที่อยู่ไฟล์ (อัปโหลด หรือวางลิงก์ Drive/อื่น ๆ — ไม่บังคับ)
  * บันทึกเป็นคอนเทนต์ปกติ (status ร่าง · IG+FB รูปแบบ Story · วันที่ = วันที่กด) แล้วแนบไฟล์/ลิงก์ให้ → เปิดแก้ต่อใน drawer ได้เหมือนเดิม
+ * ไม่ใส่ไฟล์ก็สร้างได้ (เจ้าของขอ: บางทีแค่ลงแผนไว้ก่อน) → ปฏิทินขึ้นป้าย "ยังไม่มีไฟล์" · กดจุด Story เปิด drawer ใส่ไฟล์ทีหลัง
  * ของกลาง: ERPModal / ERPInput / useT / apiFetch(/api/admin/upload) / createContent / addContentAttachment
  */
 import { useEffect, useRef, useState } from "react";
@@ -40,15 +41,18 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
   const save = async () => {
     if (!day) return;
     if (!title.trim()) { pushToast("error", t("ใส่หัวข้อก่อน", "Enter a title")); return; }
-    if (!file && !link.trim()) { pushToast("error", t("ใส่ที่อยู่ไฟล์ (อัปโหลด หรือวางลิงก์)", "Add a file or a link")); return; }
     setSaving(true);
+    let r: { id: string; content_no: string };
     try {
-      const r = await createContent({
+      r = await createContent({
         title: title.trim(), brand_id: brandId || null, post_type: kind, status: "draft",
         platforms: ["instagram", "facebook"], platform_formats: { instagram: "story", facebook: "story" },
         scheduled_at: `${day}T10:00`, note: null,
       });
-      // ที่อยู่ไฟล์: อัปโหลดขึ้น R2 (รูป/วิดีโอ) หรือเก็บเป็นลิงก์
+    } catch (e) { pushToast("error", e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); setSaving(false); return; }
+    // ที่อยู่ไฟล์ (ไม่บังคับ): อัปโหลดขึ้น R2 (รูป/วิดีโอ) หรือเก็บเป็นลิงก์
+    // Story ถูกสร้างไปแล้ว → ถ้าแนบไฟล์พลาด ไม่ให้กดสร้างซ้ำ (จะได้ Story ซ้ำ) แค่บอกให้ไปใส่ไฟล์ทีหลัง
+    try {
       if (file) {
         const fd = new FormData(); fd.append("file", file); fd.append("folder", "creative-content");
         const up = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
@@ -57,10 +61,14 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
         await addContentAttachment(r.id, { kind: file.type.startsWith("video/") ? "video" : "image", r2_key: j.r2_key as string, file_name: file.name, content_type: j.content_type as string, size_bytes: j.size as number });
       }
       if (link.trim()) await addContentAttachment(r.id, { kind: "link", url: link.trim(), label: t("ไฟล์ Story", "Story file") });
-      pushToast("success", t(`สร้าง Story ${r.content_no} แล้ว`, `Story ${r.content_no} created`));
-      onCreated();
-    } catch (e) { pushToast("error", e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
-    finally { setSaving(false); }
+      pushToast("success", file || link.trim()
+        ? t(`สร้าง Story ${r.content_no} แล้ว`, `Story ${r.content_no} created`)
+        : t(`สร้าง Story ${r.content_no} แล้ว (ยังไม่มีไฟล์ — กดจุด Story ในปฏิทินเพื่อใส่ทีหลัง)`, `Story ${r.content_no} created (no file yet — add it later)`));
+    } catch (e) {
+      pushToast("error", t(`สร้าง Story ${r.content_no} แล้ว แต่แนบไฟล์ไม่สำเร็จ (${e instanceof Error ? e.message : "ไม่ทราบสาเหตุ"}) — กดจุด Story ในปฏิทินเพื่อใส่ไฟล์อีกครั้ง`, `Story ${r.content_no} created but the file failed — add it again from the story strip`));
+    }
+    setSaving(false);
+    onCreated();
   };
 
   const dLabel = day ? new Date(`${day}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" }) : "";
@@ -93,7 +101,7 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
           </div>
         </div>
         <div>
-          <span className="text-xs text-slate-500">{t("ที่อยู่ไฟล์", "File")}</span>
+          <span className="text-xs text-slate-500">{t("ที่อยู่ไฟล์", "File")} <span className="text-slate-400">{t("(ไม่บังคับ — ใส่ทีหลังได้)", "(optional — add later)")}</span></span>
           <div className="mt-1 space-y-1.5">
             <input ref={fileRef} type="file" accept={kind === "video" ? "video/*" : "image/*"} className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
             <button type="button" onClick={() => fileRef.current?.click()} className={`h-10 w-full rounded-lg border border-dashed text-sm ${file ? "border-pink-300 bg-pink-50 text-pink-700" : "border-slate-300 text-slate-500 hover:border-pink-300 hover:text-pink-700"}`}>
@@ -103,7 +111,7 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
             <ERPInput value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://drive.google.com/…" className="!h-10" />
           </div>
         </div>
-        <p className="text-[11px] text-slate-400">{t("บันทึกเป็นร่าง ลง Instagram + Facebook แบบ Story · แคปชั่น/รูปเพิ่ม แก้ต่อได้โดยกดจุดในแถบ Story", "Saved as draft · IG + FB story · edit later from the story strip")}</p>
+        <p className="text-[11px] text-slate-400">{t("บันทึกเป็นร่าง ลง Instagram + Facebook แบบ Story · ยังไม่มีไฟล์ก็สร้างได้ (ลงแผนไว้ก่อน) · ใส่ไฟล์/แคปชั่นทีหลังได้โดยกดจุดในแถบ Story", "Saved as draft · IG + FB story · no file needed yet — add file/caption later from the story strip")}</p>
       </div>
     </ERPModal>
   );

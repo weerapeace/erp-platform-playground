@@ -64,7 +64,17 @@ type CalEntry = {
   imageKeys: string[]; imageCount: number;    // รูปแนบทั้งหมด (ตัวอย่าง ≤6) + จำนวน
   postStatus: Record<string, string>;         // posted / scheduled / skip ต่อแพลตฟอร์ม
   isStory: boolean;                           // โพสต์แบบ Story (platform_formats มี "story") — โหมด Story ของปฏิทิน
+  fileCount: number;                          // ไฟล์แนบทุกชนิด (รูป/วิดีโอ/ลิงก์) — 0 = ยังไม่มีไฟล์
 };
+
+/** Story ที่ลงแผนไว้ก่อน ยังไม่ได้ใส่ไฟล์ (รูป/วิดีโอ/ลิงก์) → ขึ้นป้าย "ยังไม่มีไฟล์" ให้รู้ว่าต้องกลับมาใส่ */
+const storyNoFile = (e: CalEntry) => e.isStory && e.fileCount === 0;
+function NoFileBadge() {
+  return (
+    <span title="Story นี้ยังไม่มีไฟล์ — กดเปิด แล้วใส่ไฟล์ที่การ์ด 🖼 รูป/วิดีโอ (＋ เพิ่ม / จัดการ)"
+      className="shrink-0 rounded px-1 py-px text-[9px] leading-none font-medium bg-amber-100 text-amber-700 border border-amber-200">📎 ยังไม่มีไฟล์</span>
+  );
+}
 
 /** ความพร้อมของแพลตฟอร์มหนึ่ง ๆ บนการ์ด: โพสต์แล้ว / ข้าม / พร้อม / ขาดอะไร */
 type PlatReady = { code: string; state: "posted" | "scheduled" | "skip" | "ready" | "missing"; missing: ("caption" | "image")[]; images: string[] };
@@ -135,7 +145,9 @@ function QuickView({ e, open, anchor, onClose, onOpen }: { e: CalEntry; open: bo
           ))}
         </div>
       ) : (
-        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700">🖼 ยังไม่มีรูปที่จะลง</div>
+        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700">
+          {storyNoFile(e) ? "📎 Story นี้ยังไม่มีไฟล์ — กดการ์ดเพื่อเปิด แล้วใส่ไฟล์ทีหลังได้" : "🖼 ยังไม่มีรูปที่จะลง"}
+        </div>
       )}
       {/* ต่อแพลตฟอร์ม */}
       {plats.length > 0 && (
@@ -250,6 +262,7 @@ export function ContentCalendarView() {
           platforms: c.platforms ?? [], overdue: false, hideInBacklog: c.status === "cancelled",
           captionPlatforms: c.caption_platforms ?? [], platformImages: c.platform_images ?? {}, imageKeys: c.image_keys ?? [], imageCount: c.image_count ?? 0, postStatus: c.post_status ?? {},
           isStory: Object.values(c.platform_formats ?? {}).includes("story"),
+          fileCount: c.file_count ?? c.image_count ?? 0,
         };
       });
     }
@@ -265,7 +278,7 @@ export function ContentCalendarView() {
         thumb: key ? r2ImageUrl(key, 96) : null, sub: tk.task_no ? `#${tk.task_no}${tk.sku_code ? ` · ${tk.parent_sku_code || tk.sku_code}` : ""}` : null,
         meta: [who ? `👤 ${who}` : null, tk.brand_label].filter(Boolean).join(" · ") || null,
         platforms: tk.platforms ?? [], overdue: isOverdue(tk), hideInBacklog: isTerminal(tk.status),
-        captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {}, isStory: false,
+        captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {}, isStory: false, fileCount: 0,
       };
     });
   }, [mode, items, tasks]);
@@ -464,6 +477,7 @@ export function ContentCalendarView() {
           className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border flex items-center gap-1.5 cursor-pointer ${e.overdue ? "bg-red-50 border-red-300 text-red-700" : e.statusCls}`}>
           <Thumb e={e} size="xs" />
           <span className="truncate flex-1 min-w-0">{e.time ? `${e.time} ` : ""}{e.title}</span>
+          {storyNoFile(e) && <NoFileBadge />}
           {/* ไอคอนแพลตฟอร์ม วงสี = พร้อม/ขาด/โพสต์แล้ว */}
           <PlatIcons list={plats} />
         </button>
@@ -675,20 +689,23 @@ export function ContentCalendarView() {
                     {mode === "content" && storyMode && (() => {
                       const st = storyByDay[key] ?? [];
                       const past = key < todayKey;
+                      const noFile = st.filter(storyNoFile).length;   // Story ที่ยังไม่มีไฟล์ (ลงแผนไว้ก่อน)
                       return (
                         <div className={`mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[10px] ${st.length ? "bg-pink-50 text-pink-700" : past ? "bg-rose-50 text-rose-400" : "bg-slate-50 text-slate-400"}`}
-                          title={st.length ? st.map((e) => `${e.brand_label ?? ""} ${e.title}${e.status === "posted" ? " ✓" : ""}`).join(" · ") : (past ? t("วันนี้ไม่ได้ทำ Story", "No story this day") : t("ยังไม่มี Story ของวันนี้", "No story yet"))}>
+                          title={st.length ? st.map((e) => `${e.brand_label ?? ""} ${e.title}${e.status === "posted" ? " ✓" : ""}${storyNoFile(e) ? ` (${t("ยังไม่มีไฟล์", "no file yet")})` : ""}`).join(" · ") : (past ? t("วันนี้ไม่ได้ทำ Story", "No story this day") : t("ยังไม่มี Story ของวันนี้", "No story yet"))}>
                           <span>📖</span>
                           {st.length ? (
                             <span className="flex items-center gap-0.5 flex-1 min-w-0">
                               {st.slice(0, 5).map((e) => (
-                                <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); setDetail({ kind: "content", id: e.id }); }} title={`${e.brand_label ?? ""} · ${e.title} · ${e.statusLabel}`}
-                                  className={`h-3.5 min-w-3.5 px-0.5 rounded-full ring-1 ring-white text-[8px] leading-none text-white flex items-center justify-center ${e.status === "posted" ? "" : "opacity-60"}`} style={{ background: brandColor(e.brand_id) }}>
-                                  {e.status === "posted" ? "✓" : ""}
+                                <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); setDetail({ kind: "content", id: e.id }); }} title={`${e.brand_label ?? ""} · ${e.title} · ${e.statusLabel}${storyNoFile(e) ? ` · ${t("ยังไม่มีไฟล์ — กดเพื่อใส่", "no file yet — click to add")}` : ""}`}
+                                  className={`h-3.5 min-w-3.5 px-0.5 rounded-full text-[8px] leading-none text-white flex items-center justify-center ${storyNoFile(e) ? "ring-2 ring-amber-400 font-bold" : "ring-1 ring-white"} ${e.status === "posted" ? "" : "opacity-60"}`} style={{ background: brandColor(e.brand_id) }}>
+                                  {e.status === "posted" ? "✓" : storyNoFile(e) ? "!" : ""}
                                 </button>
                               ))}
                               {st.length > 5 && <span>+{st.length - 5}</span>}
-                              <span className="ml-auto truncate">{st.every((e) => e.status === "posted") ? t("โพสต์แล้ว", "Posted") : t(`${st.length} Story`, `${st.length} story`)}</span>
+                              {noFile > 0
+                                ? <span className="ml-auto truncate font-medium text-amber-700">📎 {t("ยังไม่มีไฟล์", "No file yet")}{st.length > 1 ? ` ${noFile}` : ""}</span>
+                                : <span className="ml-auto truncate">{st.every((e) => e.status === "posted") ? t("โพสต์แล้ว", "Posted") : t(`${st.length} Story`, `${st.length} story`)}</span>}
                             </span>
                           ) : (
                             <span className="flex-1 truncate">{past ? t("ไม่มี Story", "No story") : t("ยังไม่มี Story", "No story yet")}</span>
@@ -728,7 +745,7 @@ export function ContentCalendarView() {
                     <span className="text-slate-300 shrink-0" title={t("ลากเพื่อจัดวัน", "Drag to schedule")}>⠿</span>
                     <Thumb e={e} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-xs font-medium text-slate-700 truncate">{e.title}</div>
+                      <div className="flex items-center gap-1"><span className="text-xs font-medium text-slate-700 truncate">{e.title}</span>{storyNoFile(e) && <NoFileBadge />}</div>
                       {e.sub && <div className="text-[10px] text-violet-500 truncate">{e.sub}</div>}
                       {e.meta && <div className="text-[10px] text-slate-400 truncate">{e.meta}</div>}
                       {cancelAsk === e.id && (

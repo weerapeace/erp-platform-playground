@@ -46,13 +46,14 @@ export function PostConfirmModal({
 
   const doPublish = () => onPublish(orderedSel, mode === "schedule" && schedFuture ? schedUnix : null, fmt);
   const storyBlocked = fmt === "story" && platform === "instagram";   // IG Story รอสิทธิ์ Meta
+  const storyNoMedia = connected && fmt === "story" && orderedSel.length === 0;   // Story ที่ลงแผนไว้ก่อน ยังไม่มีไฟล์ → ยิงไม่ได้
 
   return (
     <ERPModal open onClose={onClose} size="lg" title={`🚀 ${t("ยืนยันการโพสต์", "Confirm post")}`}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         {connected ? (
-          <button onClick={doPublish} disabled={busy || storyBlocked || (mode === "schedule" && !schedFuture)} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={doPublish} disabled={busy || storyBlocked || storyNoMedia || (mode === "schedule" && !schedFuture)} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
             {busy ? t("กำลังส่ง...", "Sending...") : mode === "schedule" ? `⏰ ${t("ตั้งเวลาโพสต์", "Schedule")}` : `🚀 ${t("โพสต์เลย", "Post now")}`}
           </button>
         ) : (
@@ -88,6 +89,13 @@ export function PostConfirmModal({
                   : t("Story = ใช้สื่อ 1 ชิ้น · อยู่ 24 ชม. · ตั้งเวลาล่วงหน้าไม่ได้", "Story = 1 item, 24h, no scheduling")}
               </p>
             )}
+            {storyNoMedia && !storyBlocked && (
+              <p className="text-[11px] mt-1 text-rose-600">
+                {images.length === 0
+                  ? t("Story นี้ยังไม่มีไฟล์ — ใส่รูปหรือวิดีโอที่การ์ด 🖼 รูป/วิดีโอ ก่อน แล้วค่อยกดโพสต์ (ลิงก์ธรรมดาโพสต์อัตโนมัติไม่ได้)", "This story has no file yet — add an image/video first (plain links can't be auto-posted)")
+                  : t("เลือกรูปหรือวิดีโอ 1 ชิ้นด้านล่างก่อน แล้วค่อยกดโพสต์", "Select one image or video below first")}
+              </p>
+            )}
             {(fmt === "video" || fmt === "reels") && !selHasVideo && (
               <p className="text-[11px] text-amber-700 mt-1">{t("เลือกไฟล์วิดีโอในรายการด้านล่างก่อน", "Select a video below first")}</p>
             )}
@@ -104,7 +112,7 @@ export function PostConfirmModal({
         <div>
           <p className="text-[11px] text-slate-400 mb-1">{t("เลือกรูป/วิดีโอที่จะลง", "Choose media")} — {t("เลือกแล้ว", "selected")} {sel.length}</p>
           {images.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">{t("ไม่มีรูป/วิดีโอ — จะโพสต์เป็นข้อความอย่างเดียว", "No media — text only")}</p>
+            <p className="text-xs text-slate-400 italic">{fmt === "story" ? t("ยังไม่มีรูป/วิดีโอ — Story ต้องมีไฟล์ 1 ชิ้น", "No media — a story needs one file") : t("ไม่มีรูป/วิดีโอ — จะโพสต์เป็นข้อความอย่างเดียว", "No media — text only")}</p>
           ) : (
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
               {images.map((im) => {

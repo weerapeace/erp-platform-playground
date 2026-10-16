@@ -1158,7 +1158,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               {!coll("media") && (
                 <>
                   {postImages.length === 0 && !mediaAdd ? (
+                    Object.values(platformFormats).includes("story") && attachments.length === 0 ? (
+                      // Story ที่ลงแผนไว้ก่อน (สร้างจากแถบ 📖 ในปฏิทินโดยยังไม่ใส่ไฟล์)
+                      <button onClick={() => setMediaAdd(true)} className="w-full rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800 hover:bg-amber-100">
+                        📎 {t("Story นี้ยังไม่มีไฟล์ — กดที่นี่เพื่ออัปโหลดรูป/วิดีโอ หรือวางลิงก์ Google Drive", "This story has no file yet — click to upload an image/video or paste a Google Drive link")}
+                      </button>
+                    ) : (
                     <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป — กด ＋ เพิ่ม หรือผูกงานที่มีรูปส่งมาแล้ว", "No media yet — click ＋ or link a task that has images")}</p>
+                    )
                   ) : postImages.length > 0 && (
                     <div className="grid grid-cols-4 gap-1.5">
                       {postImages.slice(0, mediaAdd ? postImages.length : 8).map((im) => {
