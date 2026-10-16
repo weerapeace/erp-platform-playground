@@ -750,6 +750,47 @@ export function mobileOverrideCount(m: ProductMobile): number {
   return (m.detailsStyle ? 1 : 0) + (m.detailsOpen ? 1 : 0) + Object.keys(m.itemsOpen).length + (m.sections ? 1 : 0) + (m.hidden ? 1 : 0) + Object.keys(m.gallery).length + Object.keys(m.buy).length + Object.keys(m.fonts).length + (m.buyItems ? 1 : 0) + (m.buyColumns ? 1 : 0) + Object.keys(m.banner).length + Object.keys(m.related).length + (m.imageEffect ? 1 : 0) + (m.imageFit ? 1 : 0) + (m.imageSize ? 1 : 0);
 }
 
+/**
+ * 🎨 สีละเอียด (แท็บ "สี" → ปรับละเอียด) — ค่าเริ่มต้น = หน้าตาเดิมของเว็บทุกอย่าง (ไม่ตั้ง = ไม่เปลี่ยน)
+ *   onBrand  ตัวอักษรบนพื้นสีหลัก (ปุ่ม/ป้าย) · "auto" = ขาว/ดำ ตามที่อ่านง่ายกว่า
+ *   line     เส้นขอบ/เส้นคั่น ทั้งเว็บ
+ *   link     ลิงก์ในข้อความ + สีตอนชี้ลิงก์ตัวหนังสือ · "" = สีหลัก
+ *   price    ราคา (การ์ด + หน้าสินค้า) · "" = ตามเดิม (การ์ด/หน้าสินค้าแบบใหม่ = สีตัวอักษรหลัก · หน้าสินค้าแบบคลาสสิก = สีหลัก)
+ *   sale     ราคาตอนลดราคา (มีราคาเต็มขีดฆ่า) · "" = เท่าราคาปกติ
+ *   stockIn / stockLow  จุด+ข้อความ "พร้อมส่ง" / "เหลือน้อย"
+ *   softPct  ความเข้มของ "สีหลักอ่อน" (พื้นป้าย/กล่องเน้น) 4-40% · พื้นจางมาก (tint) คิดตามสัดส่วน
+ * ป้ายลดราคาใช้สีจาก การ์ดสินค้า → ป้ายอัตโนมัติ (card.autoBadges.saleColor) ที่เดียว
+ * เว็บร้านมิเรอร์ใน storefront src/lib/site-config.ts (themeToCss → --color-on-brand / -line / -link / -price / -sale / -stock-*)
+ */
+export const FINE_COLOR_DEFAULTS = {
+  onBrand: "#FFFFFF",
+  line: "#ECECEA",
+  link: "",
+  price: "",
+  sale: "",
+  stockIn: "#1F9254",
+  stockLow: "#C77A0A",
+  softPct: 14,
+} as const;
+export const SOFT_PCT_RANGE = { min: 4, max: 40 } as const;
+/** สีจางมาก (tint) ตามความเข้มสีอ่อน — ค่าเดิม 14% → 5% */
+export const tintPctOf = (softPct: number) => Math.max(2, Math.round((softPct * 5) / 14));
+/** ตัวอักษรเข้มที่ใช้เมื่อ "อัตโนมัติ" เลือกดำ */
+export const ON_BRAND_DARK = "#111111";
+const relLum = (hex: string) => {
+  const h = hex.replace("#", "");
+  const f = h.length === 3 || h.length === 4 ? h.slice(0, 3).split("").map((c) => c + c).join("") : h.slice(0, 6);
+  const ch = [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+};
+/** สีตัวอักษรบนพื้นสีหลักที่ใช้จริง — "auto" = ขาวหรือดำ แล้วแต่อันไหนอ่านง่ายกว่า (มิเรอร์ storefront site-config) */
+export function resolveOnBrand(c: { brand: string; onBrand: string }): string {
+  if (c.onBrand !== "auto") return c.onBrand;
+  const L = relLum(c.brand);
+  if (!Number.isFinite(L)) return "#FFFFFF";
+  return 1.05 / (L + 0.05) >= (L + 0.05) / (relLum(ON_BRAND_DARK) + 0.05) ? "#FFFFFF" : ON_BRAND_DARK;
+}
+
 export interface SiteTheme {
   colors: {
     brand: string;
@@ -758,6 +799,18 @@ export interface SiteTheme {
     page: string;
     surface: string;
     muted: string;
+    /** ตัวอักษรบนพื้นสีหลัก · "auto" = ขาว/ดำ ตามความอ่านง่าย */
+    onBrand: string;
+    line: string;
+    /** "" = สีหลัก */
+    link: string;
+    /** "" = ตามเดิมของแต่ละหน้า */
+    price: string;
+    /** "" = เท่าราคาปกติ */
+    sale: string;
+    stockIn: string;
+    stockLow: string;
+    softPct: number;
   };
   fonts: { display: string; body: string };
   radius: "sharp" | "soft" | "round";
@@ -1225,6 +1278,7 @@ export const DEFAULT_THEME: SiteTheme = {
     page: "#FAFAF9",
     surface: "#FFFFFF",
     muted: "#9BA1A9",
+    ...FINE_COLOR_DEFAULTS,
   },
   fonts: { display: "Kanit", body: "Noto Sans Thai" },
   radius: "soft",
@@ -1452,6 +1506,14 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       page: color(c.page, d.colors.page),
       surface: color(c.surface, d.colors.surface),
       muted: color(c.muted, d.colors.muted),
+      onBrand: c.onBrand === "auto" ? "auto" : color(c.onBrand, d.colors.onBrand),
+      line: color(c.line, d.colors.line),
+      link: color(c.link, ""),
+      price: color(c.price, ""),
+      sale: color(c.sale, ""),
+      stockIn: color(c.stockIn, d.colors.stockIn),
+      stockLow: color(c.stockLow, d.colors.stockLow),
+      softPct: num(c.softPct, d.colors.softPct, SOFT_PCT_RANGE.min, SOFT_PCT_RANGE.max),
     },
     fonts: {
       display: text(f.display, d.fonts.display),

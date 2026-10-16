@@ -3,13 +3,16 @@
  * ไม่แตะเนื้อหา (โลโก้ เมนู ท้ายเว็บ หน้าสินค้า รูปแทรก ฯลฯ) · กดแล้วปรับต่อได้ทุกค่า · ย้อนกลับได้ (↶) ก่อนบันทึก
  * ใช้ที่: แท็บ "สี" ในหน้าดีไซน์เว็บ (components/website-theme-panel.tsx)
  */
-import type { SiteTheme } from "@/lib/website-theme";
+import { FINE_COLOR_DEFAULTS, type SiteTheme } from "@/lib/website-theme";
+
+/** สีหลัก 6 ตัวของชุดสำเร็จรูป (สีละเอียดกลับเป็นค่าเริ่มต้นเมื่อใช้ธีมทั้งชุด) */
+export type BaseColors = Pick<SiteTheme["colors"], "brand" | "brandDeep" | "ink" | "page" | "surface" | "muted">;
 
 export interface FullThemePreset {
   key: string;
   label: string;
   hint: string;
-  colors: SiteTheme["colors"];
+  colors: BaseColors;
   fonts: SiteTheme["fonts"];
   radius: SiteTheme["radius"];
   shape: Partial<SiteTheme["shape"]>;
@@ -73,7 +76,7 @@ export const FULL_THEME_PRESETS: FullThemePreset[] = [
 export function applyFullPreset<T extends Pick<SiteTheme, "colors" | "fonts" | "radius" | "shape" | "card" | "header" | "page">>(t: T, p: FullThemePreset): T {
   return {
     ...t,
-    colors: { ...p.colors },
+    colors: { ...t.colors, ...FINE_COLOR_DEFAULTS, ...p.colors },
     fonts: { ...p.fonts },
     radius: p.radius,
     shape: { ...t.shape, ...p.shape },
