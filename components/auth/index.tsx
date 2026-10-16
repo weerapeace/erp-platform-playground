@@ -57,6 +57,7 @@ export type Permission =
   | "od_interest.view" | "od_interest.reconcile"
   | "cashflow.view" | "cashflow.manage"
   | "receipts.view" | "receipts.create" | "receipts.edit" | "receipts.cancel"
+  | "belt_builder.view" | "belt_builder.edit"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";

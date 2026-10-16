@@ -526,6 +526,11 @@ export type MasterCRUDConfig = {
    * override = "/api/master-v2/" → REST pattern (Master Data v2: parent-skus/skus/partners)
    */
   apiBase?: string;
+  /**
+   * API ของโมดูลนี้เป็นแบบ REST เดียวกับ master-v2 (GET list/{id} · POST · PATCH {id} · DELETE {id}?hard=1 · ส่ง number/boolean จริง)
+   * ใช้กับ apiBase ที่ไม่ใช่ master-v2 เช่น "/api/belt-builder/" — ไม่ใส่ = เดาจากชื่อ apiBase (เดิม)
+   */
+  restApi?: boolean;
   /** field ที่เป็น soft-delete (default 'active' for RPC, 'is_active' for v2) */
   activeField?: string;
   /** ซ่อนคอลัมน์ "สถานะ เปิด/ปิดใช้งาน" + แท็บ เปิดอยู่/ปิดอยู่ — ใช้กับตารางผลลัพธ์ที่ไม่มีฟิลด์ active
@@ -697,7 +702,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const { user, can } = useAuth();
   const apiBase    = config.apiBase ?? "/api/master/";
   const activeField = config.activeField ?? "active";
-  const isRest     = (config.apiBase ?? "").includes("master-v2");
+  // REST pattern = master-v2 หรือโมดูลที่ประกาศ restApi เอง (เช่น /api/belt-builder/*) → ส่ง number/boolean จริง + มี GET /[id]
+  const isRest     = !!config.restApi || (config.apiBase ?? "").includes("master-v2");
   const allowPermanentDelete = config.allowPermanentDelete !== false;
   const extraQueryString = useMemo(() => {
     const qs = new URLSearchParams();
