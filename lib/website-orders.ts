@@ -33,6 +33,8 @@ import { pointsConfigFrom, validateRedeem } from "@/lib/member-points";
 import { pointsBalance, redeemForOrder } from "@/lib/member-points-db";
 import { normalizeOrderCard, readOrderCard, type OrderGiftCard } from "@/lib/website-gift-cards";
 import { readGiftCards } from "@/lib/website-gift-cards-db";
+import { writeAudit } from "@/lib/audit";
+import { beltDesignLine, type BeltDesignRow } from "@/lib/belt-builder-order";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -74,6 +76,8 @@ export interface PublicOrderItem {
   qty: number;
   /** ปั๊มชื่อ (ถ้าลูกค้าเลือก) — ตรวจกับค่าที่ตั้งไว้ของรุ่นตอนสร้างออเดอร์ */
   personalize?: { text?: unknown; style?: unknown; position?: unknown } | null;
+  /** 🧵 เข็มขัดสั่งทำ (Belt Builder): id แบบใน belt_designs — ใช้แทน productId · ราคาเอาจากแบบที่บันทึกไว้ (คิดฝั่งเซิร์ฟเวอร์แล้ว) */
+  beltDesignId?: string;
 }
 
 export interface PublicOrderInput {
@@ -144,10 +148,17 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
   const items: PublicOrderItem[] = [];
   for (const it of itemsRaw) {
     const o = (it ?? {}) as Record<string, unknown>;
-    const productId = clean(o.productId, 40);
-    if (!UUID.test(productId)) return { ok: false, error: "รหัสสินค้าไม่ถูกต้อง" };
     const qty = Math.floor(num(o.qty));
     if (qty < 1 || qty > 99) return { ok: false, error: "จำนวนต้องอยู่ระหว่าง 1–99 ชิ้น" };
+    // 🧵 เข็มขัดสั่งทำ: อ้างแบบที่บันทึกไว้แทนสินค้า
+    const beltDesignId = clean(o.beltDesignId, 40);
+    if (beltDesignId) {
+      if (!UUID.test(beltDesignId)) return { ok: false, error: "รหัสแบบเข็มขัดไม่ถูกต้อง" };
+      items.push({ productId: "", beltDesignId, qty, personalize: null });
+      continue;
+    }
+    const productId = clean(o.productId, 40);
+    if (!UUID.test(productId)) return { ok: false, error: "รหัสสินค้าไม่ถูกต้อง" };
     items.push({
       productId,
       optionId: clean(o.optionId, 60) || undefined,
@@ -261,6 +272,8 @@ type LineInsert = {
   qty: number;
   line_total: number;
   personalize: PersonalizeChoice | null;
+  /** 🧵 แบบเข็มขัด (belt_designs.id) — รายการสินค้าปกติ = null */
+  belt_design_id?: string | null;
 };
 
 const pad = (n: number, len: number) => String(n).padStart(len, "0");
@@ -289,7 +302,14 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   if (input.paymentMethod === "promptpay" && !info.pay_promptpay) return { ok: false, error: "ร้านนี้ไม่รับโอนพร้อมเพย์", status: 400 };
 
   const fieldMap = normalizeFieldMap(shop.field_map);
-  const parentIds = [...new Set(input.items.map((i) => i.productId))];
+  const parentIds = [...new Set(input.items.filter((i) => !i.beltDesignId).map((i) => i.productId))];
+  // 🧵 แบบเข็มขัดที่สั่ง: ต้องเป็นของร้านนี้ ยังไม่เคยสั่ง และมีราคา (ราคาคิดไว้ตอนบันทึกแบบ — lib/belt-builder-order)
+  const beltIds = [...new Set(input.items.map((i) => i.beltDesignId).filter((x): x is string => !!x))];
+  const beltById = new Map<string, BeltDesignRow>();
+  if (beltIds.length) {
+    const { data: bd } = await sb.from("belt_designs").select("id, status, total_price, selections, order_ref").eq("shop_id", shop.id).in("id", beltIds);
+    for (const d of (bd ?? []) as BeltDesignRow[]) beltById.set(d.id, d);
+  }
 
   const [{ data: listData }, { data: parents }, { data: children }] = await Promise.all([
     sb
@@ -325,6 +345,13 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const lines: LineInsert[] = [];
   let subtotal = 0;
   for (const it of input.items) {
+    if (it.beltDesignId) {
+      const bl = beltDesignLine(beltById.get(it.beltDesignId) ?? null, it.qty);
+      if (!bl.ok) return { ok: false, error: bl.error, status: 409 };
+      subtotal += bl.line.line_total;
+      lines.push(bl.line);
+      continue;
+    }
     const listing = listingByParent.get(it.productId);
     const parent = parentById.get(it.productId);
     if (!listing || !listing.is_published || !parent) {
@@ -459,6 +486,13 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       await sb.from("store_orders").delete().eq("id", order.id);
       console.error("[website-orders] insert items", itemsErr);
       return { ok: false, error: "บันทึกรายการสินค้าไม่สำเร็จ กรุณาลองใหม่", status: 500 };
+    }
+
+    // 🧵 แบบเข็มขัดที่สั่ง → ordered + จำเลขที่ออเดอร์ (แท็บ "แบบของลูกค้า" ใน /admin/belt-builder เห็นว่าแบบไหนสั่งแล้ว) + audit
+    if (beltIds.length) {
+      const { error: bdErr } = await sb.from("belt_designs").update({ status: "ordered", order_ref: order.order_no, updated_at: new Date().toISOString() }).in("id", beltIds);
+      if (bdErr) console.error("[website-orders] mark belt designs ordered", bdErr);
+      for (const id of beltIds) await writeAudit(sb, { action: "order", entityType: "belt_designs", entityId: id, actorName: input.customer.phone, metadata: { order_no: order.order_no, order_id: order.id, shop: shop.slug } });
     }
 
     // ⭐ ตัดแต้มจริง (ล็อกแถวสมาชิก) — ไม่พอแล้ว (ใช้ไปกับอีกออเดอร์พร้อมกัน) = ยกเลิกออเดอร์นี้ทั้งใบ ไม่ให้ได้ส่วนลดฟรี
