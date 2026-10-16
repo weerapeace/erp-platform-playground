@@ -23,6 +23,8 @@ import {
   getPlatformSettings, PLATFORM_SETTINGS_SWR_KEY, type PlatformSettings,
 } from "../data";
 import { platformReadiness, type PlatReady } from "@/lib/content-readiness";
+import { loadCaptionTexts } from "../content/caption-assemble";
+import { copyText } from "@/components/copy-button";
 import { ContentDrawer } from "../content/content";
 import { ContentCreateModal, type ContentCreatePreset } from "../content/content-create-modal";
 import { StoryQuickModal } from "./story-quick-modal";
@@ -108,10 +110,13 @@ function PlatIcons({ list, size = 12 }: { list: PlatReady[]; size?: number }) {
  * Quick view ของคอนเทนต์ — ชี้เมาส์ค้าง (จอที่มีเมาส์) หรือแตะ ⓘ (จอสัมผัส): รูปที่จะลง + ต่อแพลตฟอร์มว่าขาดอะไร (แคปชั่น/รูป)
  * วางแบบ fixed ผ่าน portal (ไม่โดนช่องวันตัด) — แบบเดียวกับ Popover ของกลาง แต่เปิดด้วย hover
  */
-function QuickView({ e, plats, open, anchor, onClose, onOpen }: { e: CalEntry; plats: PlatReady[]; open: boolean; anchor: HTMLElement | null; onClose: () => void; onOpen: () => void }) {
+/** ปุ่มในการ์ดลอย (ต่อแพลตฟอร์ม): 📋 คัดลอกแคปชั่น · ☐ โพสต์แล้ว — texts = ข้อความที่ประกอบแล้ว (undefined = กำลังโหลด) */
+type QvActions = { texts: Record<string, string> | "error" | undefined; busy: string | null; onCopy: (code: string) => void; onTogglePosted: (code: string) => void };
+function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen }: { e: CalEntry; plats: PlatReady[]; open: boolean; anchor: HTMLElement | null; rect?: DOMRect | null; actions?: QvActions; onClose: () => void; onOpen: () => void }) {
   if (!open || !anchor || typeof document === "undefined") return null;
-  const r = anchor.getBoundingClientRect();
-  const W = 300; const left = Math.min(Math.max(8, r.left), window.innerWidth - W - 8);
+  // การ์ดในปฏิทินถูกสร้างใหม่ทุกครั้งที่หน้าอัปเดต (เช่น หลังติ๊กโพสต์แล้ว/ขึ้นแจ้งเตือน) → ปุ่มเดิมหลุดจากหน้า ใช้ตำแหน่งที่จำไว้ตอนเปิดแทน
+  const r = anchor.isConnected || !rect ? anchor.getBoundingClientRect() : rect;
+  const W = actions ? 340 : 300; const left = Math.min(Math.max(8, r.left), window.innerWidth - W - 8);
   const above = window.innerHeight - r.bottom < 300 && r.top > 300;
   const style: React.CSSProperties = above ? { position: "fixed", left, bottom: window.innerHeight - r.top + 4, width: W, zIndex: 80 } : { position: "fixed", left, top: r.bottom + 4, width: W, zIndex: 80 };
   const missingAny = plats.filter((p) => p.state === "missing");
@@ -143,7 +148,8 @@ function QuickView({ e, plats, open, anchor, onClose, onOpen }: { e: CalEntry; p
     );
   }
   return createPortal(
-    <div style={style} className="rounded-xl border border-slate-200 bg-white shadow-xl p-2.5 text-xs" onMouseEnter={onOpen} onMouseLeave={onClose}>
+    <div style={style} className="rounded-xl border border-slate-200 bg-white shadow-xl p-2.5 text-xs" onMouseEnter={onOpen} onMouseLeave={onClose}
+      onClick={(ev) => ev.stopPropagation()}>
       <div className="flex items-start gap-2">
         <span className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${e.statusDot}`} />
         <div className="min-w-0 flex-1">
@@ -171,12 +177,39 @@ function QuickView({ e, plats, open, anchor, onClose, onOpen }: { e: CalEntry; p
           {plats.map((p) => (
             <div key={p.code} className="flex items-center gap-1.5">
               <PlatformIcon code={p.code} iconKey={platformMeta(p.code)?.icon_key ?? null} size={13} />
-              <span className="text-slate-700 w-20 truncate">{platformLabel(p.code)}</span>
-              <span className={`text-[10px] px-1.5 py-px rounded-full ${p.state === "posted" ? "bg-emerald-100 text-emerald-700" : p.state === "scheduled" ? "bg-blue-100 text-blue-700" : p.state === "ready" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : p.state === "skip" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"}`}>
-                {p.state === "missing" ? `ขาด ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
-              </span>
+              <span className="text-slate-700 w-[72px] truncate">{platformLabel(p.code)}</span>
+              {/* โพสต์แล้ว + มีปุ่มติ๊ก = ปุ่มเขียวทำหน้าที่เป็นป้ายแทน (ไม่ให้ซ้ำ) */}
+              {!(actions && p.state === "posted") && (
+                <span className={`text-[10px] px-1.5 py-px rounded-full ${p.state === "posted" ? "bg-emerald-100 text-emerald-700" : p.state === "scheduled" ? "bg-blue-100 text-blue-700" : p.state === "ready" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : p.state === "skip" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"}`}>
+                  {p.state === "missing" ? `ขาด ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
+                </span>
+              )}
               {p.captionOff && p.state !== "skip" && <span className="text-[10px] text-slate-400" title={p.isStory ? "ลงเป็น Story — ไม่ต้องมีแคปชั่น" : "ตั้งไว้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม — แพลตฟอร์มนี้ลงแค่รูป"}>{p.isStory ? "Story" : "ไม่ใช้แคปชั่น"}</span>}
-              {p.images.length > 0 && e.platformImages[p.code]?.length ? <span className="ml-auto text-[10px] text-slate-400">🖼 {e.platformImages[p.code].length}</span> : null}
+              <span className="ml-auto flex items-center gap-1 shrink-0">
+                {p.images.length > 0 && e.platformImages[p.code]?.length ? <span className="text-[10px] text-slate-400">🖼 {e.platformImages[p.code].length}</span> : null}
+                {/* 📋 คัดลอกแคปชั่นที่จะโพสต์ (ข้อความเดียวกับปุ่ม 📋 ใน drawer) */}
+                {actions && !p.captionOff && p.state !== "skip" && (() => {
+                  const tx = actions.texts; const text = tx && tx !== "error" ? (tx[p.code] ?? "") : "";
+                  const loading = tx === undefined;
+                  return (
+                    <button type="button" onClick={() => actions.onCopy(p.code)} disabled={loading || tx === "error" || !text}
+                      title={loading ? "กำลังเตรียมแคปชั่น…" : tx === "error" ? "โหลดแคปชั่นไม่สำเร็จ — เปิดการ์ดเพื่อคัดลอก" : text ? `คัดลอกแคปชั่น ${platformLabel(p.code)}` : "ยังไม่มีแคปชั่น — คลิกการ์ดเพื่อเขียน"}
+                      className="h-5 w-6 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 disabled:opacity-40">{loading ? "…" : "📋"}</button>
+                  );
+                })()}
+                {/* ☐ โพสต์แล้ว (บันทึกทันที · กดซ้ำ = ยกเลิก) — ข้าม/ตั้งเวลาแล้ว ไม่มีปุ่ม (เหมือนใน drawer) */}
+                {actions && (p.state === "posted" || p.state === "ready" || p.state === "missing") && (() => {
+                  const posted = p.state === "posted"; const busy = actions.busy === p.code;
+                  return (
+                    <button type="button" onClick={() => actions.onTogglePosted(p.code)} disabled={busy}
+                      title={posted ? "โพสต์แล้ว — กดอีกครั้งเพื่อยกเลิก" : "โพสต์เสร็จแล้ว → ติ๊กที่นี่ (บันทึกทันที)"}
+                      className={`h-5 inline-flex items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium disabled:opacity-60 ${posted ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700" : "bg-white text-slate-500 border-slate-300 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700"}`}>
+                      <span className={`inline-flex h-3 w-3 items-center justify-center rounded-sm border text-[8px] leading-none ${posted ? "bg-white text-emerald-600 border-white" : "bg-white border-slate-400"}`}>{busy ? "…" : posted ? "✓" : ""}</span>
+                      โพสต์แล้ว
+                    </button>
+                  );
+                })()}
+              </span>
             </div>
           ))}
         </div>
@@ -222,7 +255,7 @@ export function ContentCalendarView() {
   const dragRef = useRef<{ id: string; time: string | null } | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
   // quick view ของการ์ดคอนเทนต์ (ชี้ค้าง/แตะ ⓘ) — เก็บ id + ปุ่มที่ยึดตำแหน่ง
-  const [quickView, setQuickView] = useState<{ id: string; anchor: HTMLElement } | null>(null);
+  const [quickView, setQuickView] = useState<{ id: string; anchor: HTMLElement; rect: DOMRect } | null>(null);
   const qvTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canHover = useCanHover();
   useEffect(() => { if (!canHover) return; const off = () => setQuickView(null); window.addEventListener("scroll", off, true); return () => window.removeEventListener("scroll", off, true); }, [canHover]);
@@ -369,6 +402,42 @@ export function ContentCalendarView() {
   [mode, taskStatuses]);
 
   // ───── เปลี่ยนวัน (ลากวาง / หยิบจากค้าง) — optimistic แล้วบันทึกจริง · error = คืนค่าเดิม ─────
+  // 📋 ข้อความแคปชั่นของการ์ดลอย — โหลดตอนเปิดการ์ด (ให้กดคัดลอกได้ทันที) · ประกอบด้วยของกลางตัวเดียวกับ drawer · แคชตามเวลาแก้ล่าสุดของโพสต์
+  const [qvTexts, setQvTexts] = useState<Record<string, Record<string, string> | "error">>({});
+  const qvLoading = useRef(new Set<string>());
+  const textKeyOf = useCallback((id: string) => { const c = items.find((x) => x.id === id); return c ? `${c.id}|${c.updated_at}` : null; }, [items]);
+  const qvKey = mode === "content" && quickView ? textKeyOf(quickView.id) : null;
+  useEffect(() => {
+    if (!qvKey || qvTexts[qvKey] || qvLoading.current.has(qvKey)) return;
+    qvLoading.current.add(qvKey);
+    loadCaptionTexts(qvKey.split("|")[0], pset)
+      .then((tx) => setQvTexts((m) => ({ ...m, [qvKey]: tx })))
+      .catch(() => setQvTexts((m) => ({ ...m, [qvKey]: "error" })))
+      .finally(() => qvLoading.current.delete(qvKey));
+  }, [qvKey, qvTexts, pset]);
+  const qvCopy = useCallback(async (id: string, code: string) => {
+    const k = textKeyOf(id); const tx = k ? qvTexts[k] : undefined;
+    const text = tx && tx !== "error" ? tx[code] : "";
+    if (!text) { pushToast("info", t(`ยังไม่มีแคปชั่นของ ${platformLabel(code)} — คลิกการ์ดเพื่อเขียน`, `No ${platformLabel(code)} caption yet`)); return; }
+    const ok = await copyText(text);
+    pushToast(ok ? "success" : "error", ok ? t(`คัดลอกแคปชั่น ${platformLabel(code)} แล้ว`, `Copied ${platformLabel(code)} caption`) : t("คัดลอกไม่สำเร็จ", "Copy failed"));
+  }, [textKeyOf, qvTexts, pushToast, t]);
+  // ☐ โพสต์แล้ว จากการ์ดลอย — บันทึกทันที (เหมือนปุ่มใน drawer: เปลี่ยนเฉพาะ post_status) · โชว์ผลก่อนแล้วค่อยยิง (พลาด = ย้อนกลับ)
+  const [qvBusy, setQvBusy] = useState<string | null>(null);   // "contentId|platform" ที่กำลังบันทึก
+  const togglePosted = useCallback(async (id: string, code: string) => {
+    const cur = items; const it = cur.find((c) => c.id === id); if (!it) return;
+    const prev = (it.post_status ?? {}) as Record<string, string>;
+    const willPost = prev[code] !== "posted";
+    const next = { ...prev }; if (willPost) next[code] = "posted"; else delete next[code];
+    setQvBusy(`${id}|${code}`);
+    itemsSWR.mutate(cur.map((c) => c.id === id ? { ...c, post_status: next } : c));
+    try {
+      await updateContent(id, { post_status: next });
+      pushToast("success", willPost ? t(`ติ๊ก ${platformLabel(code)} โพสต์แล้ว`, `${platformLabel(code)} marked posted`) : t(`ยกเลิก “โพสต์แล้ว” ของ ${platformLabel(code)}`, `${platformLabel(code)} unmarked`));
+    } catch (e) { itemsSWR.mutate(cur); pushToast("error", (e as Error).message); }
+    finally { setQvBusy(null); void itemsSWR.revalidate(true); }
+  }, [items, itemsSWR, pushToast, t]);
+
   const reschedule = useCallback(async (entry: CalEntry, dayKey: string | null, time?: string | null) => {
     if (entry.kind === "content") {
       const newAt = dayKey ? `${dayKey}T${time || "10:00"}` : null;
@@ -487,7 +556,7 @@ export function ContentCalendarView() {
     const plats = e.kind === "content" ? platReadiness(e, pset) : [];
     const story = e.kind === "content" && e.isStory;   // Story = การ์ดเล็กจาง ๆ ไม่ให้เด่นกว่าโพสต์ปกติ
     const isQv = quickView?.id === e.id;
-    const openQv = (el: HTMLElement) => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView({ id: e.id, anchor: el }), 350); };
+    const openQv = (el: HTMLElement) => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView({ id: e.id, anchor: el, rect: el.getBoundingClientRect() }), 350); };
     const closeQv = () => { if (qvTimer.current) clearTimeout(qvTimer.current); qvTimer.current = setTimeout(() => setQuickView((q) => (q?.id === e.id ? null : q)), 200); };
     return (
       <div className="relative group"
@@ -516,10 +585,15 @@ export function ContentCalendarView() {
         </button>
         {/* จอสัมผัส: ปุ่ม ⓘ เปิด quick view (จอเมาส์ใช้ชี้ค้างแทน) · Story ไม่ต้องมี (การ์ดเล็ก แตะ = เปิดเลย) */}
         {!canHover && e.kind === "content" && !story && (
-          <button type="button" onClick={(ev) => { ev.stopPropagation(); setQuickView(isQv ? null : { id: e.id, anchor: ev.currentTarget }); }}
+          <button type="button" onClick={(ev) => { ev.stopPropagation(); setQuickView(isQv ? null : { id: e.id, anchor: ev.currentTarget, rect: ev.currentTarget.getBoundingClientRect() }); }}
             className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white border border-slate-300 text-[9px] text-slate-500 shadow-sm">ⓘ</button>
         )}
-        <QuickView e={e} plats={plats} open={isQv} anchor={quickView?.anchor ?? null} onClose={closeQv} onOpen={() => { if (qvTimer.current) clearTimeout(qvTimer.current); }} />
+        <QuickView e={e} plats={plats} open={isQv} anchor={quickView?.anchor ?? null} rect={isQv ? quickView?.rect : null} onClose={closeQv}
+          actions={e.kind === "content" && !story ? {
+            texts: (() => { const k = textKeyOf(e.id); return k ? qvTexts[k] : undefined; })(),
+            busy: qvBusy?.startsWith(`${e.id}|`) ? qvBusy.slice(e.id.length + 1) : null,
+            onCopy: (code) => void qvCopy(e.id, code), onTogglePosted: (code) => void togglePosted(e.id, code),
+          } : undefined} onOpen={() => { if (qvTimer.current) clearTimeout(qvTimer.current); }} />
       </div>
     );
   };

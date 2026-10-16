@@ -37,6 +37,7 @@ import { PlatformChip } from "../platform-chip";
 import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
 import { PostMockup } from "./post-mockup";
 import { CopyPathButton, AddPathForm, isLocalPath, type PathItem } from "@/components/copy-path-button";
+import { buildCaptionVars, assembleCaption, captionTemplateFor, captionsForDetail, type SharedVars } from "./caption-assemble";
 import { CopyButton } from "@/components/copy-button";
 import { captionLimitCheck, PLATFORM_LIMITS } from "@/lib/caption-template";
 import { ContentCreateModal } from "./content-create-modal";
@@ -48,7 +49,7 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { getBrandPlatforms } from "./brand-platforms-modal";
-import { ExtraProductsEditor, extrasFromDetail, extraToPayload, childToSkuValue, skuValueToChild, multiProductVars, toggleChildSelection, activeChildren, type ExtraProduct } from "./content-products-editor";
+import { ExtraProductsEditor, extrasFromDetail, extraToPayload, childToSkuValue, skuValueToChild, toggleChildSelection, type ExtraProduct } from "./content-products-editor";
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
@@ -538,9 +539,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์ — แพลตฟอร์มที่ยังไม่มีแคปชั่น เติมแฮชแท็กเริ่มต้นให้
       const cfg = await getCaptionConfig().catch(() => ({} as CaptionConfig));
       setCapCfg(cfg);
-      const platforms = detail.platforms ?? [];
-      const byPlat = new Map(detail.captions.map((c) => [c.platform, c]));
-      setCaps(platforms.map((p) => byPlat.get(p) ?? { platform: p, caption: "", hashtags: defaultHashtags(cfg, detail.brand_id, p) }));
+      setCaps(captionsForDetail(detail, cfg));
     } catch (e) { pushToast("error", (e as Error).message); }
   }, [contentId, pushToast]);
   useEffect(() => { load(); }, [load]);
@@ -823,14 +822,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // ราคาเต็ม = ราคา SKU ที่เลือก · ราคาขาย = ราคา − ส่วนลด · สี = SKU เดี่ยว หรือ รวมสีลูกของ Parent
   // สี: Parent → รวมสีลูก (เลือกภาษาไทย/อังกฤษได้) · SKU เดี่ยว → สีของตัวเอง (ตามภาษาที่มี)
-  const usedChildren = activeChildren(children, skuIds);   // ทุกสี หรือเฉพาะสีที่เลือก
-  const childColors = [...new Set(usedChildren.map((c) => ((colorSource === "en" ? c.color_en : c.color_th) ?? "").trim()).filter(Boolean))];
-  const singleColor = colorSource === "en" ? (d?.sku_color_en ?? sku?.color ?? null) : (d?.sku_color_th ?? sku?.color ?? null);
-  const colorText = childColors.length ? childColors.join(", ") : (sku ? singleColor : null);
-  // ราคา: SKU เดี่ยว → ราคาตัวเอง · Parent → ราคาจาก SKU ลูกที่เลือก (default ตัวแรก)
-  const priceChild = usedChildren.find((c) => c.id === priceSkuId) ?? usedChildren[0] ?? null;
-  const realSelling = sku?.list_price ?? priceChild?.list_price ?? null;   // ราคาขายจริง (list_price)
-  const fakeVal = sku?.fake_price ?? priceChild?.fake_price ?? null;        // ราคาปลอม (fake_price — ราคาขีดฆ่าให้ดูลดเยอะ)
+  // ราคา/สี/ลิงก์ → ตัวแปรแม่แบบแคปชั่น — ของกลาง caption-assemble (การ์ดลอยในปฏิทินใช้ตัวเดียวกัน → คัดลอกที่ไหนก็ได้ข้อความเดียวกัน)
+  // หลายสินค้าในโพสต์ → {product}/{color}/{price}/{link} แยกเป็นบรรทัดต่อสินค้า (สินค้าเดียว = ค่าเดิม)
+  const { vars: sharedVars, usedChildren, colorText, realSelling, fakeVal } = useMemo(() => buildCaptionVars({
+    sku, parent, productName: d?.product_name ?? null, skuColorTh: d?.sku_color_th ?? null, skuColorEn: d?.sku_color_en ?? null,
+    children, skuIds, priceSkuId, colorSource, links, extras, shopChannels,
+  }), [sku, parent, d?.product_name, d?.sku_color_th, d?.sku_color_en, children, skuIds, priceSkuId, colorSource, links, extras, shopChannels]);
   const discountAmt = (fakeVal != null && realSelling != null && fakeVal > realSelling) ? fakeVal - realSelling : null;  // ส่วนลด = ปลอม − จริง
   // เวลาแนะนำของวันที่เลือกโพสต์ (โชว์ปุ่มให้กดใช้ — มีได้หลายเวลา ตัดอันที่ตรงกับที่เลือกอยู่)
   const schedRec = useMemo(() => {
@@ -843,17 +840,6 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     return { items, label: t(["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][day], ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]) };
   }, [scheduledAt, recTimes, t]);
   const applyRecommendedTime = (tm: string) => setScheduledAt(`${scheduledAt.slice(0, 10)}T${tm}`);
-  // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
-  // หลายสินค้าในโพสต์ → {product}/{color}/{price}/{link} แยกเป็นบรรทัดต่อสินค้า (สินค้าเดียว = null → ใช้ค่าเดิม หน้าตาเหมือนเดิมเป๊ะ)
-  const multiVars = useMemo(() => multiProductVars({ code: sku?.code ?? parent?.code ?? null, name: sku?.name ?? parent?.name ?? d?.product_name ?? null, color: colorText, price: realSelling, fake: fakeVal, links: links.filter((l) => l.url.trim()) }, extras, colorSource),
-    [sku?.code, sku?.name, parent?.code, parent?.name, d?.product_name, colorText, realSelling, fakeVal, links, extras, colorSource]);
-  const sharedVars = useMemo(() => ({
-    shop: shopChannels, fake_price: fakeVal, real_price: realSelling,
-    price: realSelling, color: colorText, sku: sku?.code ?? null, product: sku?.name ?? d?.product_name ?? null,
-    // {link} = ลิงก์สินค้าทุกแพลตฟอร์มเป็นบล็อก (เช่น "Shopee: TEST1\nLazada: TEST2")
-    link: links.filter((l) => l.url.trim()).map((l) => `${platformLabel(l.platform)}: ${l.url.trim()}`).join("\n") || null,
-    ...(multiVars ?? {}),
-  }), [shopChannels, fakeVal, realSelling, colorText, sku?.code, sku?.name, d?.product_name, links, multiVars]);
 
   // คัดลอกพรอมต์ตั้งต้น (เติมตัวแปรสินค้าให้แล้ว) ไปวางใน AI เขียนแคปชั่นต่อ
   const copyPrompt = async () => {
@@ -1437,7 +1423,6 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 }
 
 // ราคาเป็นข้อความได้เมื่อมีหลายสินค้า (บรรทัดละ "ชื่อ: ราคา" — ดู multiProductVars)
-type SharedVars = { shop: ShopChannel[]; fake_price: number | string | null; real_price: number | string | null; price: number | string | null; color: string | null; sku: string | null; product: string | null; link: string | null };
 
 // ============================================================
 // ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)
@@ -1711,11 +1696,9 @@ function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPullFrom, o
   const postUrl = (setting?.post_url ?? "").trim();
 
   const typeKey = cap.caption_type ?? setting?.template_key ?? templates[0]?.key ?? "short";
-  const tpl = templates.find((x) => x.key === typeKey) ?? templates[0];
-  // ประกอบ preview จากแม่แบบ + ตัวแปร (ตัด caption/hashtags ออกถ้าปิดไว้)
-  const preview = tpl
-    ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", ...sharedVars })
-    : `${useCaption ? (cap.caption ?? "") : ""}\n\n${useHashtags ? (cap.hashtags ?? "") : ""}`.trim();
+  const tpl = captionTemplateFor(cap, setting, templates);
+  // ข้อความที่จะโพสต์ (แม่แบบ + ตัวแปร · ตัดแคปชั่น/แฮชแท็กที่ปิดไว้) — ของกลาง caption-assemble ตัวเดียวกับปฏิทิน
+  const preview = assembleCaption(cap, setting, templates, sharedVars);
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
   const [previewOpen, setPreviewOpen] = useState(false);   // 👁 ป๊อปดูตัวอย่างโพสต์ (จากหัวการ์ด ไม่ต้องกาง)
   const previewImgKeys = selectedImages.length ? selectedImages : fallbackImages;   // รูปในตัวอย่าง: ที่เลือกไว้ ไม่งั้น = รูปแนบของโพสต์
