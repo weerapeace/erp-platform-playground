@@ -149,7 +149,7 @@ where m.module_key = 'belt_size_rules'
 insert into public.belt_parts (shop_id, part_type, code, name_th, name_en, anchor, attrs, price_delta, sort_order)
 select s.id, 'strap', 'strap-' || c.key || '-' || w.mm, 'สาย' || c.th || ' ' || w.mm || ' มม.', c.en || ' ' || w.mm || 'mm',
        '{"x":0,"y":300,"w":1600,"h":150}'::jsonb,
-       jsonb_build_object('color', c.key, 'color_th', c.th, 'color_hex', c.hex, 'width_mm', w.mm),
+       jsonb_build_object('color', c.key, 'color_th', c.th, 'color_hex', c.hex, 'width_mm', w.mm::int),
        w.delta, c.ord * 10 + w.ord
 from public.shops s
 cross join (values
