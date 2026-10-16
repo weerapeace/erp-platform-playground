@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanHref, megaHasContent, megaPreset, normalizeMegaPanel, pickMegaProducts, newMegaBlock } from "@/lib/website-mega-menu";
+import { cleanHref, cloneMegaBlock, DEFAULT_MENU_BEHAVIOR, inShowWindow, megaBlockLinks, megaHasContent, megaLinkIssue, megaPreset, newMegaBlock, newMegaLink, normalizeMegaPanel, normalizeMenuBehavior, pickMegaProducts } from "@/lib/website-mega-menu";
 import { normalizeMenu } from "@/lib/website-theme";
 
 const cats = [
@@ -84,5 +84,67 @@ describe("แผงเมนูใหญ่: คัดสินค้า", () =>
   it("เลือกเอง: ตามลำดับที่เลือก · ไม่มีในร้าน = ข้าม · ไม่สนตัวพิมพ์", () => {
     const b = { ...newMegaBlock("products"), source: "pick" as const, codes: ["p4", "X9", "P1"] };
     expect(pickMegaProducts(b, products).map((p) => p.code)).toEqual(["P4", "P1"]);
+  });
+});
+
+describe("แผงเมนูใหญ่ รอบ 2", () => {
+  it("ตั้งเวลาแสดง (เวลาไทย · วันสิ้นสุดถึงสิ้นวัน)", () => {
+    const at = (s: string) => Date.parse(s);
+    expect(inShowWindow("", "", at("2026-01-01T00:00:00Z"))).toBe(true);
+    expect(inShowWindow("2026-10-20", "", at("2026-10-19T16:59:00Z"))).toBe(false); // 23:59 ไทย วันที่ 19
+    expect(inShowWindow("2026-10-20", "", at("2026-10-19T17:00:00Z"))).toBe(true); // 00:00 ไทย วันที่ 20
+    expect(inShowWindow("", "2026-10-31", at("2026-10-31T16:59:00Z"))).toBe(true); // 23:59 ไทย
+    expect(inShowWindow("", "2026-10-31", at("2026-10-31T17:01:00Z"))).toBe(false);
+    expect(inShowWindow("2026-10-20T09:30", "", at("2026-10-20T02:31:00Z"))).toBe(true);
+  });
+  it("รายการอัตโนมัติ: ที่ใส่เองก่อน + หมวด/คอลเลกชัน/สี · จำกัดจำนวน · ซ่อนลิงก์หมดเวลา", () => {
+    const data = { categories: [{ key: "tote", label: "ถือ", imageKey: "c/t.jpg", count: 3 }, { key: "bp", label: "เป้" }], collections: [{ slug: "rise", label: "Rise", imageKey: "k.jpg" }], tones: [{ key: "red", name: "แดง", hex: "#f00" }] };
+    const manual = [{ ...newMegaLink("ดูทั้งหมด", "/shop") }, { ...newMegaLink("โปรหมด", "/x"), showUntil: "2020-01-01" }];
+    const cats = megaBlockLinks({ links: manual, auto: "categories", autoMax: 1 }, data);
+    expect(cats.map((l) => l.label)).toEqual(["ดูทั้งหมด", "ถือ"]);
+    expect(cats[1]).toMatchObject({ href: "/c/tote", hoverImageKey: "c/t.jpg", count: 3, id: "a-c-tote" });
+    expect(megaBlockLinks({ links: [], auto: "collections", autoMax: 9 }, data)[0].href).toBe("/collection/rise");
+    expect(megaBlockLinks({ links: [], auto: "colors", autoMax: 9 }, data)[0]).toMatchObject({ href: "/shop?tone=red", color: "#f00" });
+    expect(megaBlockLinks({ links: [], auto: "colors", autoMax: 9 }, null)).toEqual([]);
+  });
+  it("การ์ดสินค้า: เฉพาะลด · ลดมากสุด · ราคา · สุ่มคงที่ทั้งวัน", () => {
+    const ps = [
+      { code: "A", price: 100, comparePrice: 200 },
+      { code: "B", price: 300, comparePrice: null },
+      { code: "C", price: 90, comparePrice: 100 },
+    ];
+    const base = { ...newMegaBlock("products"), count: 5 };
+    expect(pickMegaProducts({ ...base, onSale: true }, ps).map((p) => p.code)).toEqual(["A", "C"]);
+    expect(pickMegaProducts({ ...base, sort: "discount" }, ps).map((p) => p.code)).toEqual(["A", "C", "B"]);
+    expect(pickMegaProducts({ ...base, sort: "price-asc" }, ps).map((p) => p.code)).toEqual(["C", "A", "B"]);
+    expect(pickMegaProducts({ ...base, sort: "price-desc" }, ps).map((p) => p.code)).toEqual(["B", "A", "C"]);
+    const day = Date.parse("2026-10-16T05:00:00Z");
+    const r1 = pickMegaProducts({ ...base, id: "b1", sort: "random" }, ps, day).map((p) => p.code);
+    const r2 = pickMegaProducts({ ...base, id: "b1", sort: "random" }, ps, day + 3600e3).map((p) => p.code);
+    expect(r1).toEqual(r2);
+  });
+  it("ตรวจลิงก์เสีย", () => {
+    const sets = { categories: new Set(["tote"]), products: new Set(["bbp03"]), pages: new Set(["about-us"]), collections: new Set(["rise"]) };
+    expect(megaLinkIssue("/c/tote", sets)).toBeNull();
+    expect(megaLinkIssue("/c/gone", sets)).toBe("หมวดนี้ไม่มีแล้ว");
+    expect(megaLinkIssue("/product/BBP03", sets)).toBeNull();
+    expect(megaLinkIssue("/product/zz", sets)).toBe("สินค้านี้ไม่ได้อยู่บนเว็บแล้ว");
+    expect(megaLinkIssue("/collection/old", sets)).toBe("คอลเลกชันนี้ไม่มีแล้ว");
+    expect(megaLinkIssue("/about-us", sets)).toBeNull();
+    expect(megaLinkIssue("/shop", sets)).toBeNull();
+    expect(megaLinkIssue("/old-page", sets)).toBe("หน้านี้ไม่มีแล้ว");
+    expect(megaLinkIssue("https://x.com", sets)).toBeNull();
+  });
+  it("ทำซ้ำคอลัมน์ = id ใหม่ทั้งหมด", () => {
+    const b = { ...newMegaBlock("links"), links: [newMegaLink("a")] };
+    const c = cloneMegaBlock(b);
+    expect(c.id).not.toBe(b.id);
+    expect(c.links[0].id).not.toBe(b.links[0].id);
+    expect(c.links[0].label).toBe("a");
+  });
+  it("พฤติกรรมเมนู: ค่าแปลก = ค่าเริ่มต้น · เมนูเก่าไม่มี behavior", () => {
+    expect(normalizeMenuBehavior({ open: "click", delay: 150, dim: true, mobileStyle: "drill" })).toMatchObject({ open: "click", delay: 150, dim: true, mobileStyle: "drill", mobileCats: false });
+    expect(normalizeMenuBehavior({ delay: 999, open: "x" })).toEqual(DEFAULT_MENU_BEHAVIOR);
+    expect(normalizeMenu({ items: [] }).behavior).toEqual(DEFAULT_MENU_BEHAVIOR);
   });
 });

@@ -45,7 +45,8 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
-import { MegaMenuEditor, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
+import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
+import { MENU_DELAYS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -250,6 +251,23 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [sampleProduct, setSampleProduct] = useState<string | null>(null);
   // สินค้าตัวอย่างสำหรับการ์ดจำลองในแท็บการ์ดสินค้า
   const [sampleItems, setSampleItems] = useState<SampleItem[]>([]);
+  const [liveProducts, setLiveProducts] = useState<(MegaEditorCtx["liveProducts"][number] & { collection?: string | null })[]>([]);
+  // 🧭 หมวด(+รูป)/คอลเลกชัน/โทนสี ของร้าน (API สาธารณะชุดเดียวกับเว็บร้าน) — รายการอัตโนมัติในแผงเมนู
+  const [shopLists, setShopLists] = useState<{ categories: { key: string; label: string; imageKey: string | null }[]; collections: { id: string; slug: string; label: string; imageKey: string | null }[]; tones: { key: string; name: string; hex: string }[] } | null>(null);
+  useEffect(() => {
+    fetch(`/api/public/storefront/site?shop=${encodeURIComponent(shopSlug)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const arr = (v: unknown) => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
+        const str = (v: unknown) => (typeof v === "string" ? v : "");
+        setShopLists({
+          categories: arr(j?.categories).map((c) => ({ key: str(c.key), label: str(c.label), imageKey: str(c.imageKey) || null })).filter((c) => c.key),
+          collections: arr(j?.collections).map((c) => ({ id: str(c.id), slug: str(c.slug), label: str(c.title) || str(c.name), imageKey: str(c.bannerKey) || null })).filter((c) => c.slug),
+          tones: arr(j?.colorTones).map((t) => ({ key: str(t.key), name: str(t.name), hex: str(t.hex) || "#888888" })).filter((t) => t.key),
+        });
+      })
+      .catch(() => setShopLists(null));
+  }, [shopSlug]);
   // หน้าที่สร้างเอง (ไว้ให้เมนูลิงก์ถึง)
   const [storePages, setStorePages] = useState<{ slug: string; title: string }[]>([]);
   useEffect(() => {
@@ -269,7 +287,19 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   /** ตัวเลือกลิงก์ปลายทาง (ของกลาง) ในหน้าดีไซน์: ปุ่มหัวเว็บ · รูปแทรกในกริด */
   const linkCtx = useMemo(() => ({ shopSlug, shopId, categories: choices?.categories ?? [] }), [shopSlug, shopId, choices]);
   /** 🧭 ตัวจัดแผงเมนูใหญ่ (components/website-mega-menu-editor) */
-  const megaCtx = useMemo<MegaEditorCtx>(() => ({ link: linkCtx, categories: choices?.categories ?? [], products: choices?.products ?? [], shopId }), [linkCtx, choices, shopId]);
+  const megaAuto = useMemo<MegaAutoData | null>(() => {
+    if (!shopLists) return null;
+    const inCat = (k: string) => liveProducts.filter((p) => p.category === k || (p.categories ?? []).includes(k)).length;
+    return {
+      categories: shopLists.categories.map((c) => ({ ...c, count: inCat(c.key) })),
+      collections: shopLists.collections.map((c) => ({ ...c, count: liveProducts.filter((p) => p.collection === c.id).length })),
+      tones: shopLists.tones,
+    };
+  }, [shopLists, liveProducts]);
+  const megaCtx = useMemo<MegaEditorCtx>(
+    () => ({ link: linkCtx, categories: choices?.categories ?? [], products: choices?.products ?? [], shopId, pages: storePages, liveProducts, autoData: megaAuto }),
+    [linkCtx, choices, shopId, storePages, liveProducts, megaAuto]
+  );
   // 👁 แก้แผงเมนูอยู่ → สั่งพรีวิวเปิดแผงของเมนูนั้นค้างไว้ (ส่งซ้ำตอนพรีวิวโหลดหน้าใหม่)
   const menuPin = useRef<string | null>(null);
   useEffect(() => {
@@ -322,6 +352,23 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         const list = (j?.products as Record<string, unknown>[] | undefined) ?? [];
         const slug = (list.find((x) => x.slug) as { slug?: string } | undefined)?.slug ?? null;
         if (alive) setSampleProduct(slug);
+        // 🧭 แผงเมนู: พรีวิว "จะโชว์กี่ชิ้น" + นับสินค้าต่อหมวด/คอลเลกชัน
+        if (alive)
+          setLiveProducts(
+            list
+              .filter((x) => typeof x.code === "string")
+              .map((x) => ({
+                code: String(x.code),
+                name: String(x.name ?? ""),
+                category: typeof x.category === "string" ? x.category : undefined,
+                categories: Array.isArray(x.categories) ? (x.categories as string[]) : undefined,
+                collection: typeof x.collection === "string" ? x.collection : null,
+                listedAt: typeof x.listedAt === "string" ? x.listedAt : null,
+                salesRank: typeof x.salesRank === "number" ? x.salesRank : null,
+                price: Number(x.price) || 0,
+                comparePrice: typeof x.comparePrice === "number" ? x.comparePrice : null,
+              }))
+          );
         // การ์ดจำลอง 3 ใบ — ตัวที่มีรูป ≥ 2 มาก่อน (จะได้เห็นเอฟเฟกต์สลับรูป)
         const multi = list.filter((x) => Array.isArray(x.images) && (x.images as unknown[]).length > 1);
         const picks = [...multi, ...list.filter((x) => !multi.includes(x))].slice(0, 3);
@@ -3400,6 +3447,48 @@ function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, missing,
 }
 
 /* ─────────── เมนู: ชุดตั้งค่าทั้งก้อน (แท็บ "เมนู" + ป๊อปจากชิ้น "เมนู" ใน Header ใช้ตัวเดียวกัน) ─────────── */
+/** ⚙️ พฤติกรรมเมนูทั้งชุด (lib/website-mega-menu MenuBehavior) — ใช้กับทุกเมนูที่มีเมนูย่อย/แผง */
+function MenuBehaviorSettings({ value, onChange }: { value: MenuBehavior; onChange: (p: Partial<MenuBehavior>) => void }) {
+  const seg = (on: boolean) => `text-[11px] px-2.5 h-7 rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
+  return (
+    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2.5">
+      <p className="text-xs font-semibold text-slate-700">⚙️ พฤติกรรมเมนู (ใช้กับทุกเมนูที่มีเมนูย่อย/แผง)</p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-slate-500">เปิดแผงเมื่อ</span>
+          <button type="button" className={seg(value.open === "hover")} onClick={() => onChange({ open: "hover" })}>ชี้เมาส์</button>
+          <button type="button" className={seg(value.open === "click")} onClick={() => onChange({ open: "click" })}>กดก่อน</button>
+        </div>
+        {value.open === "hover" && (
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-500" title="ชี้ค้างนานเท่านี้ก่อนแผงเปิด — กันแผงเด้งตอนแค่เลื่อนเมาส์ผ่านเมนู">
+            หน่วงก่อนเปิด
+            <WheelSelect value={value.delay} onChange={(e) => onChange({ delay: Number(e.target.value) })}>
+              {MENU_DELAYS.map((ms) => (
+                <option key={ms} value={ms}>{ms === 0 ? "ไม่หน่วง" : `${(ms / 1000).toFixed(ms % 100 ? 2 : 1)} วินาที`}</option>
+              ))}
+            </WheelSelect>
+          </label>
+        )}
+        <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
+          <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={value.dim} onChange={(e) => onChange({ dim: e.target.checked })} />
+          ฉากหลังมืดลงตอนแผงเปิด
+        </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-slate-500">📱 มือถือ</span>
+          <button type="button" className={seg(value.mobileStyle === "accordion")} onClick={() => onChange({ mobileStyle: "accordion" })}>พับ-กาง</button>
+          <button type="button" className={seg(value.mobileStyle === "drill")} onClick={() => onChange({ mobileStyle: "drill" })}>เลื่อนเข้าหน้าถัดไป (แบบแอป)</button>
+        </div>
+        <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer" title="รูปหมวดวงกลมเลื่อนแนวนอนบนสุดของเมนูมือถือ (ต้องใส่รูปหมวดในแท็บหมวดหมู่)">
+          <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={value.mobileCats} onChange={(e) => onChange({ mobileCats: e.target.checked })} />
+          แถบรูปหมวดวงกลมบนสุด
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function MenuSettings({ menu, setMenu, choices, pages, megaCtx }: { menu: MenuConfig; setMenu: (p: Partial<MenuConfig>) => void; choices: Choices; pages: { slug: string; title: string }[]; megaCtx?: MegaEditorCtx }) {
   const [askAuto, setAskAuto] = useState(false);
   return (
@@ -3425,6 +3514,8 @@ function MenuSettings({ menu, setMenu, choices, pages, megaCtx }: { menu: MenuCo
           </button>
         </>
       )}
+
+      {menu.items !== null && <MenuBehaviorSettings value={menu.behavior} onChange={(p) => setMenu({ behavior: { ...menu.behavior, ...p } })} />}
 
       <div className="mt-5 pt-3 border-t border-slate-100">
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -3516,6 +3607,7 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
                       <input className={`${mini} w-full`} value={it.badge} maxLength={20} onChange={(e) => setItem(it.id, { badge: e.target.value })} />
                     </div>
                   </div>
+                  <ShowWindowFields from={it.showFrom} until={it.showUntil} onChange={(p) => setItem(it.id, p)} />
                   {depth === 0 && megaCtx && (
                     <MegaMenuEditor itemId={it.id} panel={it.panel} onChange={(panel) => setItem(it.id, { panel })} ctx={megaCtx} />
                   )}

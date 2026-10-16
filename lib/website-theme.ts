@@ -9,7 +9,7 @@
 
 import { normalizeListing, DEFAULT_LISTING, type ListingConfig } from "@/lib/website-listing";
 import { isGradStop } from "@/lib/website-gradient";
-import { normalizeMegaPanel, type MegaPanel } from "@/lib/website-mega-menu";
+import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
@@ -1126,12 +1126,17 @@ export interface MenuItem {
   children: MenuItem[];
   /** 🧭 แผงเมนูใหญ่ (แบบ A/B/C · lib/website-mega-menu) — มี = ใช้แทนเมนูย่อย · เฉพาะเมนูบนสุด */
   panel: MegaPanel | null;
+  /** ⏰ ตั้งเวลาแสดง (เวลาไทย "YYYY-MM-DD" / "YYYY-MM-DDTHH:mm" · ว่าง = ไม่จำกัด · inShowWindow) */
+  showFrom: string;
+  showUntil: string;
 }
 export interface MenuConfig {
   /** null = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ติดต่อ) */
   items: MenuItem[] | null;
   /** null = ใช้ชุดเดียวกับคอม */
   mobileItems: MenuItem[] | null;
+  /** ⚙️ พฤติกรรมเมนู (ชี้/กดเปิด · หน่วงเวลา · พื้นหลังมืด · มือถือ) */
+  behavior: MenuBehavior;
 }
 export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "home", label: "หน้าแรก", hint: "/" },
@@ -1143,7 +1148,7 @@ export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "contact", label: "ติดต่อ", hint: "/contact" },
   { value: "url", label: "ลิงก์อื่น", hint: "URL ภายนอก/ภายใน" },
 ];
-export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, badge: "", mega: false, imageKey: null, children: [], panel: null });
+export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, badge: "", mega: false, imageKey: null, children: [], panel: null, showFrom: "", showUntil: "" });
 function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
   if (!Array.isArray(raw)) return [];
   const out: MenuItem[] = [];
@@ -1163,13 +1168,15 @@ function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
       imageKey: typeof r.imageKey === "string" && /^[\w./-]+$/.test(r.imageKey) ? r.imageKey : null,
       children: depth < 1 ? normalizeMenuItems(r.children, depth + 1) : [],
       panel: depth === 0 ? normalizeMegaPanel(r.panel) : null,
+      showFrom: typeof r.showFrom === "string" && /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(r.showFrom) ? r.showFrom : "",
+      showUntil: typeof r.showUntil === "string" && /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(r.showUntil) ? r.showUntil : "",
     });
   });
   return out.slice(0, 40);
 }
 export function normalizeMenu(raw: unknown): MenuConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  return { items: Array.isArray(r.items) ? normalizeMenuItems(r.items, 0) : null, mobileItems: Array.isArray(r.mobileItems) ? normalizeMenuItems(r.mobileItems, 0) : null };
+  return { items: Array.isArray(r.items) ? normalizeMenuItems(r.items, 0) : null, mobileItems: Array.isArray(r.mobileItems) ? normalizeMenuItems(r.mobileItems, 0) : null, behavior: normalizeMenuBehavior(r.behavior) };
 }
 /** ลิงก์ของรายการเมนู (ตรงกับฝั่งเว็บร้าน) */
 export function menuItemHref(it: { kind: MenuKind; value: string }): string {
@@ -1299,7 +1306,7 @@ export const DEFAULT_THEME: SiteTheme = {
     placeholder: { ...DEFAULT_IMAGE_PLACEHOLDER },
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" } },
-  menu: { items: null, mobileItems: null },
+  menu: { items: null, mobileItems: null, behavior: { ...DEFAULT_MENU_BEHAVIOR } },
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
   page: { transition: "fade", smoothScroll: false },
