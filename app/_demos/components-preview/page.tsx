@@ -2,6 +2,40 @@
 
 import { useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
+import { WheelSelect } from "@/components/wheel-select";
+
+/** 🖱 ตัวอย่าง WheelSelect (ของกลาง components/wheel-select) */
+function WheelSelectDemo() {
+  const [space, setSpace] = useState("sm");
+  const [cols, setCols] = useState("4");
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div>
+        <label className="block text-[11px] text-slate-500 mb-1">ระยะห่างจากส่วนด้านบน</label>
+        <WheelSelect value={space} onChange={(e) => setSpace(e.target.value)} highlight={space !== "auto"}>
+          {[["auto", "ตามเดิม"], ["none", "ไม่มี (ชิดส่วนบน)"], ["sm", "เล็ก"], ["md", "กลาง"], ["lg", "ใหญ่"], ["xl", "ใหญ่มาก"]].map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
+        </WheelSelect>
+      </div>
+      <div>
+        <label className="block text-[11px] text-slate-500 mb-1">คอลัมน์ · คอม</label>
+        <WheelSelect value={cols} onChange={(e) => setCols(e.target.value)}>
+          {[2, 3, 4, 5, 6].map((n) => (
+            <option key={n} value={n}>{n} คอลัมน์</option>
+          ))}
+        </WheelSelect>
+      </div>
+      <div>
+        <label className="block text-[11px] text-slate-400 mb-1">ปิดอยู่</label>
+        <WheelSelect value="a" onChange={() => undefined} disabled>
+          <option value="a">ปิดใช้งาน</option>
+        </WheelSelect>
+      </div>
+      <p className="md:col-span-3 text-xs text-slate-500">ชี้ที่กล่องแล้วหมุนลูกกลิ้งเมาส์ = เลื่อนตัวเลือก (ลง = ตัวล่างในรายการ) · กด ▴▾ = ทีละขั้น · กดที่ค่า = เปิดรายการ · เลื่อนหน้าผ่านเฉย ๆ ไม่เปลี่ยนค่า</p>
+    </div>
+  );
+}
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
@@ -253,6 +287,12 @@ export default function ComponentsPreviewPage() {
               </div>
             </div>
           </div>
+        </section>
+
+        {/* WheelSelect */}
+        <section>
+          <SectionTitle>WheelSelect — ตัวเลือกเล็ก หมุนลูกกลิ้งปรับได้</SectionTitle>
+          <WheelSelectDemo />
         </section>
 
         {/* Loading / Empty / Error States */}

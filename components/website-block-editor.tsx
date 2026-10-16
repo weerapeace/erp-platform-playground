@@ -9,7 +9,8 @@
  *
  * ⚠️ ชนิดบล็อก/ค่าตั้งต้น มาจาก lib/website-blocks.ts + lib/website-schema.ts ที่เดียวเท่านั้น — ห้ามประกาศซ้ำที่นี่
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useWheelStep } from "@/components/wheel-select";
 import { ColorInput } from "@/components/color-picker";
 import { GradientPicker } from "@/components/website-gradient-picker";
 import { GRADIENT_PRESETS } from "@/lib/website-gradient";
@@ -67,11 +68,28 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function Seg<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { v: T; l: string }[] }) {
+export function Seg<T extends string>({ value, onChange, options, wheel }: { value: T; onChange: (v: T) => void; options: { v: T; l: string }[]; /** 🖱 ค่ามีลำดับ (ขนาด/ระยะ/ความเร็ว) — ชี้แล้วหมุนลูกกลิ้งเลื่อนไปตัวซ้าย/ขวาได้ (ของกลาง useWheelStep) */ wheel?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // ค่าล่าสุดที่ส่งออกไป (หมุนเร็วหลายคลิกก่อนวาดใหม่ ก็นับต่อได้)
+  const curRef = useRef(value);
+  curRef.current = value;
+  useWheelStep(
+    ref,
+    (dir) => {
+      const i = options.findIndex((o) => o.v === curRef.current);
+      const next = options[i < 0 ? 0 : i + dir];
+      if (next && next.v !== curRef.current) {
+        curRef.current = next.v;
+        onChange(next.v);
+      }
+    },
+    !!wheel
+  );
+  const tip = wheel ? "ชี้แล้วหมุนลูกกลิ้งเมาส์เพื่อเลื่อนตัวเลือก" : undefined;
   // ตัวเลือกเยอะ (> 5) = ตารางปุ่ม 3 คอลัมน์ (แถวเดียวปุ่มจะเล็กจนอ่านไม่ออก)
   if (options.length > 5)
     return (
-      <div className="grid grid-cols-3 gap-1">
+      <div ref={ref} title={tip} className="grid grid-cols-3 gap-1">
         {options.map((o) => (
           <button
             key={o.v}
@@ -85,7 +103,7 @@ export function Seg<T extends string>({ value, onChange, options }: { value: T; 
       </div>
     );
   return (
-    <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
+    <div ref={ref} title={tip} className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
       {options.map((o) => (
         <button
           key={o.v}
@@ -231,7 +249,7 @@ export function StylePanel({
                 </Field>
               </div>
               <Field label="ความเร็ว">
-                <Seg value={s.motion.speed} onChange={(v) => setMo({ speed: v })} options={[{ v: "fast", l: "เร็ว" }, { v: "normal", l: "ปกติ" }, { v: "slow", l: "ช้า" }]} />
+                <Seg wheel value={s.motion.speed} onChange={(v) => setMo({ speed: v })} options={[{ v: "fast", l: "เร็ว" }, { v: "normal", l: "ปกติ" }, { v: "slow", l: "ช้า" }]} />
               </Field>
               <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer self-end pb-2">
                 <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={s.motion.stagger} disabled={s.motion.entrance === "none"} onChange={(e) => setMo({ stagger: e.target.checked })} />
@@ -262,9 +280,9 @@ export function StylePanel({
               <Field label="ฟอนต์หัวข้อ">
                 <FontPickList value={s.text.font} onPick={(v) => setT({ font: v })} fontNames={fontNames} autoLabel="ตามเดิม (ฟอนต์หัวข้อของธีม)" />
               </Field>
-              <Field label="ขนาดหัวข้อ (ย่อตามจอเอง)"><Seg value={s.text.size} onChange={(v) => setT({ size: v })} options={H_SIZE} /></Field>
+              <Field label="ขนาดหัวข้อ (ย่อตามจอเอง)"><Seg wheel value={s.text.size} onChange={(v) => setT({ size: v })} options={H_SIZE} /></Field>
               <Field label="ความหนา">
-                <Seg value={s.text.weight} onChange={(v) => setT({ weight: v })} options={[{ v: "auto", l: "ตามเดิม" }, ...CANVAS_WEIGHTS]} />
+                <Seg wheel value={s.text.weight} onChange={(v) => setT({ weight: v })} options={[{ v: "auto", l: "ตามเดิม" }, ...CANVAS_WEIGHTS]} />
               </Field>
               <Field label="สีหัวข้อ">
                 <ColorSwatches theme={theme} value={s.text.color} hex={s.text.colorHex} autoLabel="ตามเดิม" onPick={(v, hex) => setT(v === "custom" ? { color: v, colorHex: hex ?? s.text.colorHex } : { color: v })} />
@@ -280,10 +298,10 @@ export function StylePanel({
             </div>
           ) : tab === "all" ? (
             <div className="grid gap-3">
-              <Field label="ระยะห่างด้านบน"><Seg value={s.padTop} onChange={(v) => set({ padTop: v })} options={SPACE} /></Field>
-              <Field label="ระยะห่างด้านล่าง"><Seg value={s.padBottom} onChange={(v) => set({ padBottom: v })} options={SPACE} /></Field>
+              <Field label="ระยะห่างด้านบน"><Seg wheel value={s.padTop} onChange={(v) => set({ padTop: v })} options={SPACE} /></Field>
+              <Field label="ระยะห่างด้านล่าง"><Seg wheel value={s.padBottom} onChange={(v) => set({ padBottom: v })} options={SPACE} /></Field>
               <Field label="ความกว้างเนื้อหา">
-                <Seg value={s.width} onChange={(v) => set({ width: v })} options={[{ v: "auto", l: "ตามเดิม" }, { v: "narrow", l: "แคบ" }, { v: "full", l: "เต็มจอ" }]} />
+                <Seg wheel value={s.width} onChange={(v) => set({ width: v })} options={[{ v: "auto", l: "ตามเดิม" }, { v: "narrow", l: "แคบ" }, { v: "full", l: "เต็มจอ" }]} />
               </Field>
               <Field label="จัดข้อความ"><Seg value={s.align} onChange={(v) => set({ align: v })} options={ALIGN} /></Field>
               <div>
@@ -318,13 +336,13 @@ export function StylePanel({
             </div>
           ) : (
             <div className="grid gap-3">
-              <Field label="ระยะห่างด้านบน (มือถือ)"><Seg value={s.mobile.padTop} onChange={(v) => setM({ padTop: v })} options={SPACE} /></Field>
-              <Field label="ระยะห่างด้านล่าง (มือถือ)"><Seg value={s.mobile.padBottom} onChange={(v) => setM({ padBottom: v })} options={SPACE} /></Field>
+              <Field label="ระยะห่างด้านบน (มือถือ)"><Seg wheel value={s.mobile.padTop} onChange={(v) => setM({ padTop: v })} options={SPACE} /></Field>
+              <Field label="ระยะห่างด้านล่าง (มือถือ)"><Seg wheel value={s.mobile.padBottom} onChange={(v) => setM({ padBottom: v })} options={SPACE} /></Field>
               <Field label="จัดข้อความ (มือถือ)"><Seg value={s.mobile.align} onChange={(v) => setM({ align: v })} options={ALIGN} /></Field>
               {hasHeading && (
                 <>
                   <div>
-                    <Field label="ขนาดหัวข้อ (มือถือ)"><Seg value={s.mobile.hSize} onChange={(v) => setM({ hSize: v })} options={H_SIZE} /></Field>
+                    <Field label="ขนาดหัวข้อ (มือถือ)"><Seg wheel value={s.mobile.hSize} onChange={(v) => setM({ hSize: v })} options={H_SIZE} /></Field>
                   </div>
                   <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                     <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={s.mobile.hideEyebrow} onChange={(e) => setM({ hideEyebrow: e.target.checked })} />

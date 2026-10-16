@@ -44,6 +44,7 @@ import { SavedThemesCard } from "@/components/website-saved-themes";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
+import { WheelSelect } from "@/components/wheel-select";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -1228,9 +1229,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
                 <div>
                   <label className={labelCls}>ชื่อสินค้าแสดงกี่บรรทัด</label>
-                  <select className={inputCls} value={theme.card.titleLines} onChange={(e) => setCard({ titleLines: Number(e.target.value) })}>
+                  <WheelSelect value={theme.card.titleLines} onChange={(e) => setCard({ titleLines: Number(e.target.value) })}>
                     {[1, 2, 3].map((n) => <option key={n} value={n}>{n} บรรทัด</option>)}
-                  </select>
+                  </WheelSelect>
                 </div>
                 <div>
                   <label className={labelCls}>เอฟเฟกต์ตอนชี้เมาส์</label>
@@ -1295,29 +1296,29 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className="grid gap-3 sm:grid-cols-4 mt-3">
                 <div>
                   <label className={labelCls}>คอลัมน์ · คอม</label>
-                  <select className={inputCls} value={theme.card.columns.desktop} onChange={(e) => setCard({ columns: { ...theme.card.columns, desktop: Number(e.target.value) } })}>
+                  <WheelSelect value={theme.card.columns.desktop} onChange={(e) => setCard({ columns: { ...theme.card.columns, desktop: Number(e.target.value) } })}>
                     {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
+                  </WheelSelect>
                 </div>
                 <div>
                   <label className={labelCls}>คอลัมน์ · แท็บเล็ต</label>
-                  <select className={inputCls} value={theme.card.columns.tablet} onChange={(e) => setCard({ columns: { ...theme.card.columns, tablet: Number(e.target.value) } })}>
+                  <WheelSelect value={theme.card.columns.tablet} onChange={(e) => setCard({ columns: { ...theme.card.columns, tablet: Number(e.target.value) } })}>
                     {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
+                  </WheelSelect>
                 </div>
                 <div>
                   <label className={labelCls}>คอลัมน์ · มือถือ</label>
-                  <select className={inputCls} value={theme.card.columns.mobile} onChange={(e) => setCard({ columns: { ...theme.card.columns, mobile: Number(e.target.value) } })}>
+                  <WheelSelect value={theme.card.columns.mobile} onChange={(e) => setCard({ columns: { ...theme.card.columns, mobile: Number(e.target.value) } })}>
                     {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
+                  </WheelSelect>
                 </div>
                 <div>
                   <label className={labelCls}>ระยะห่างการ์ด</label>
-                  <select className={inputCls} value={theme.card.gap} onChange={(e) => setCard({ gap: e.target.value as Theme["card"]["gap"] })}>
+                  <WheelSelect value={theme.card.gap} onChange={(e) => setCard({ gap: e.target.value as Theme["card"]["gap"] })}>
                     <option value="sm">ชิด</option>
                     <option value="md">ปกติ</option>
                     <option value="lg">ห่าง</option>
-                  </select>
+                  </WheelSelect>
                 </div>
               </div>
 
@@ -1356,9 +1357,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                     <label className="flex items-center gap-2 text-sm text-slate-700">
                       จุดสีสูงสุด
-                      <select className="rounded-lg border border-slate-200 px-2 py-1 text-sm bg-white" value={theme.card.swatchMax} onChange={(e) => setCard({ swatchMax: Number(e.target.value) })}>
+                      <WheelSelect value={theme.card.swatchMax} onChange={(e) => setCard({ swatchMax: Number(e.target.value) })}>
                         {[3, 4, 5, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n} จุด</option>)}
-                      </select>
+                      </WheelSelect>
                       <span className="text-[11px] text-slate-400">เกินโชว์ +N</span>
                     </label>
                     <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -1509,8 +1510,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         return (
                           <div key={f.k}>
                             <span className="block text-[11px] text-slate-500 mb-0.5" title={f.hint}>{f.label}</span>
-                            <select
-                              className={`${inputCls} ${isMobileEdit && mVal != null ? "border-blue-400" : ""}`}
+                            <WheelSelect
+                              highlight={!!(isMobileEdit && mVal != null)}
                               value={val}
                               onChange={(e) => {
                                 const v = e.target.value;
@@ -1524,7 +1525,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             >
                               {isMobileEdit && <option value="__pc">ตามคอม ({pcVal}%)</option>}
                               {FONT_SIZES.map((n) => <option key={n} value={n}>{n}%{n === 100 ? " (ปกติ)" : ""}</option>)}
-                            </select>
+                            </WheelSelect>
                           </div>
                         );
                       })}
@@ -1550,8 +1551,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </div>
                   <div>
                     <label className={labelCls}>ขนาดรูปในกรอบ</label>
-                    <select
-                      className={`${inputCls} ${isMobileEdit && (mob.imageFit || mob.imageSize) ? "border-blue-400" : ""}`}
+                    <WheelSelect
+                      highlight={!!(isMobileEdit && (mob.imageFit || mob.imageSize))}
                       value={imageFitValue}
                       onChange={(e) => setImageFitValue(e.target.value)}
                     >
@@ -1560,7 +1561,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       {theme.product.imageFit === "contain" && !PRODUCT_IMAGE_SIZES.some((o) => o.value === String(theme.product.imageSize)) && (
                         <option value={String(theme.product.imageSize)}>{theme.product.imageSize}%</option>
                       )}
-                    </select>
+                    </WheelSelect>
                     <p className="text-[11px] text-slate-400 mt-1">อัตโนมัติ = รูปที่สัดส่วนใกล้กรอบ (นายแบบ/จัตุรัส) เต็มกรอบ ส่วนรูปที่ต้องตัดเยอะย่อพอดี · เต็มกรอบ = ทุกรูปกางเต็ม (ตัดขอบ) · % = ย่อรูปให้อยู่ในกรอบ</p>
                   </div>
                   <div>
@@ -1976,10 +1977,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   ] as const).map(([k, label]) => (
                     <div key={k}>
                       <label className={labelCls}>{label}</label>
-                      <select className={inputCls} value={theme.shape[k] == null ? "" : String(theme.shape[k])} onChange={(e) => setShape({ [k]: e.target.value === "" ? null : Number(e.target.value) } as Partial<Shape>)}>
+                      <WheelSelect value={theme.shape[k] == null ? "" : String(theme.shape[k])} onChange={(e) => setShape({ [k]: e.target.value === "" ? null : Number(e.target.value) } as Partial<Shape>)}>
                         <option value="">ตามค่ารวม</option>
                         {RADIUS_PX_CHOICES.map((n) => <option key={n} value={n}>{n === 0 ? "เหลี่ยม (0)" : `${n} px`}</option>)}
-                      </select>
+                      </WheelSelect>
                     </div>
                   ))}
                 </div>
@@ -2000,22 +2001,22 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </div>
                   <div>
                     <label className={labelCls}>ขนาดปุ่ม</label>
-                    <select className={inputCls} value={theme.shape.buttonSize} onChange={(e) => setShape({ buttonSize: e.target.value as Shape["buttonSize"] })}>
+                    <WheelSelect value={theme.shape.buttonSize} onChange={(e) => setShape({ buttonSize: e.target.value as Shape["buttonSize"] })}>
                       {BUTTON_SIZES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
+                    </WheelSelect>
                   </div>
                   <div>
                     <label className={labelCls}>ความหนาเส้นขอบ (การ์ด/ช่องกรอก)</label>
-                    <select className={inputCls} value={theme.shape.borderWidth} onChange={(e) => setShape({ borderWidth: Number(e.target.value) === 2 ? 2 : 1 })}>
+                    <WheelSelect value={theme.shape.borderWidth} onChange={(e) => setShape({ borderWidth: Number(e.target.value) === 2 ? 2 : 1 })}>
                       <option value={1}>บาง (1 px)</option>
                       <option value={2}>หนา (2 px)</option>
-                    </select>
+                    </WheelSelect>
                   </div>
                   <div>
                     <label className={labelCls}>เงาของการ์ด</label>
-                    <select className={inputCls} value={theme.shape.shadow} onChange={(e) => setShape({ shadow: e.target.value as Shape["shadow"] })}>
+                    <WheelSelect value={theme.shape.shadow} onChange={(e) => setShape({ shadow: e.target.value as Shape["shadow"] })}>
                       {SHADOW_LEVELS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
+                    </WheelSelect>
                   </div>
                 </div>
 
@@ -2192,28 +2193,27 @@ function PartToggle({ label, on, onChange }: { label: string; on: boolean; onCha
 /** 📐 ความกว้าง + ระยะห่างด้านบน ของส่วนประกอบหน้าสินค้า (ของกลาง ทุกส่วน · lib/website-theme PartBox) */
 function PartBoxControls({ k, value, onChange, mobile }: { k: string; value?: PartBox; onChange: (p: Partial<PartBox>) => void; mobile: boolean }) {
   const v: PartBox = { width: "auto", spaceTop: "auto", ...value };
-  const sel = "w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700";
   return (
     <div className="mt-2 pt-2 border-t border-slate-100 grid gap-2 sm:grid-cols-2">
       {partHasWidth(k) ? (
         <label className="block">
           <span className="block text-[11px] text-slate-500 mb-1">ความกว้าง</span>
-          <select value={v.width} onChange={(e) => onChange({ width: e.target.value as PartBox["width"] })} className={`${sel} ${v.width !== "auto" ? "border-blue-400" : ""}`}>
+          <WheelSelect value={v.width} onChange={(e) => onChange({ width: e.target.value as PartBox["width"] })} highlight={!!(v.width !== "auto")}>
             {PART_WIDTH_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
-          </select>
+          </WheelSelect>
         </label>
       ) : (
         <p className="text-[11px] text-slate-400 self-end pb-1.5">ความกว้างของส่วนนี้ตั้งในตัวเลือกด้านล่าง (เต็มจอ/ในกรอบ)</p>
       )}
       <label className="block">
         <span className="block text-[11px] text-slate-500 mb-1">ระยะห่างจากส่วนด้านบน</span>
-        <select value={v.spaceTop} onChange={(e) => onChange({ spaceTop: e.target.value as PartBox["spaceTop"] })} className={`${sel} ${v.spaceTop !== "auto" ? "border-blue-400" : ""}`}>
+        <WheelSelect value={v.spaceTop} onChange={(e) => onChange({ spaceTop: e.target.value as PartBox["spaceTop"] })} highlight={!!(v.spaceTop !== "auto")}>
           {PART_SPACE_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
-        </select>
+        </WheelSelect>
       </label>
       {mobile && <p className="sm:col-span-2 text-[11px] text-blue-700">📱 ใช้ค่าเดียวกับคอม — มือถือระยะห่างย่อลงให้เองตามจอ</p>}
     </div>
@@ -2286,9 +2286,9 @@ function PartSettings({
         {!mobile && (
         <div>
           <label className={lbl}>จอคอมโชว์กี่รูปพร้อมกัน (แกลเลอรีเลื่อนซ้าย-ขวา · มือถือทีละรูปเสมอ)</label>
-          <select className={partInputCls} value={g.perView} onChange={(e) => setPart("gallery", { perView: Number(e.target.value) === 2 ? 2 : 1 })}>
+          <WheelSelect value={g.perView} onChange={(e) => setPart("gallery", { perView: Number(e.target.value) === 2 ? 2 : 1 })}>
             {PART_CHOICES.perViews.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          </WheelSelect>
         </div>
         )}
         <div>
@@ -2301,7 +2301,7 @@ function PartSettings({
         {onImageFit && (
           <div>
             <label className={lbl}>การแสดงรูป</label>
-            <select className={`${partInputCls} ${imageFitValue === "cover" ? "border-amber-400" : ""}`} value={imageFitValue} onChange={(e) => onImageFit(e.target.value)}>
+            <WheelSelect warn={!!(imageFitValue === "cover")} value={imageFitValue ?? ""} onChange={(e) => onImageFit(e.target.value)}>
               {mobile && <option value="__pc">ตามคอม ({pcImageFitLabel})</option>}
               <option value="auto">อัตโนมัติตามรูป — รูปนายแบบเต็มกรอบ · รูปที่ต้องตัดเยอะย่อพอดี</option>
               {PRODUCT_IMAGE_SIZES.filter((o) => o.value !== "cover" && o.value !== "auto").map((o) => (
@@ -2311,22 +2311,22 @@ function PartSettings({
                 <option value={imageFitValue}>เห็นรูปครบทั้งใบ ({imageFitValue}%)</option>
               )}
               <option value="cover">เต็มกรอบ — ตัดขอบรูปให้เต็มพื้นที่</option>
-            </select>
+            </WheelSelect>
             {imageFitValue === "cover" && <p className="text-[11px] text-amber-600 mt-1">⚠️ รูปจะถูกตัดบน-ล่าง/ซ้าย-ขวาให้เต็มกรอบ — เลือก “เห็นรูปครบทั้งใบ” ถ้าไม่อยากให้ตัด</p>}
           </div>
         )}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={lbl}>ความกว้างแกลเลอรี</label>
-            <select className={partInputCls} value={g.width} onChange={(e) => setPart("gallery", { width: e.target.value as ProductParts["gallery"]["width"] })}>
+            <WheelSelect value={g.width} onChange={(e) => setPart("gallery", { width: e.target.value as ProductParts["gallery"]["width"] })}>
               {PART_CHOICES.galleryWidths.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            </WheelSelect>
           </div>
           <div>
             <label className={lbl}>ความสูงแกลเลอรี</label>
-            <select className={partInputCls} value={g.height} onChange={(e) => setPart("gallery", { height: e.target.value as ProductParts["gallery"]["height"] })}>
+            <WheelSelect value={g.height} onChange={(e) => setPart("gallery", { height: e.target.value as ProductParts["gallery"]["height"] })}>
               {PART_CHOICES.galleryHeights.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            </WheelSelect>
           </div>
         </div>
         {!mobile && onGalleryPreset && (
@@ -2421,9 +2421,9 @@ function PartSettings({
         <div className="grid grid-cols-3 gap-2">
           <div>
             <label className={lbl}>📐 ความกว้าง</label>
-            <select className={partInputCls} value={bn.width} onChange={(e) => set({ width: e.target.value as BannerPart["width"] })}>
+            <WheelSelect value={bn.width} onChange={(e) => set({ width: e.target.value as BannerPart["width"] })}>
               {PART_CHOICES.bannerWidths.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            </WheelSelect>
           </div>
           <div>
             <label className={lbl}>สัดส่วนรูป · คอม</label>
@@ -2496,9 +2496,9 @@ function PartSettings({
           </div>
           <div>
             <label className={lbl}>จำนวน</label>
-            <select className={partInputCls} value={r.count} onChange={(e) => setPart("related", { count: Number(e.target.value) })}>
+            <WheelSelect value={r.count} onChange={(e) => setPart("related", { count: Number(e.target.value) })}>
               {[2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n} ชิ้น</option>)}
-            </select>
+            </WheelSelect>
           </div>
         </div>
         <div>
@@ -2555,10 +2555,10 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <label className={`${lbl} mb-0`}>จัดเป็น</label>
-          <select className={mini} value={buy.columns} onChange={(e) => onChange({ columns: Number(e.target.value) === 1 ? 1 : 2 })}>
+          <WheelSelect value={buy.columns} onChange={(e) => onChange({ columns: Number(e.target.value) === 1 ? 1 : 2 })}>
             <option value={2}>2 คอลัมน์ (ซ้าย / ขวา)</option>
             <option value={1}>1 คอลัมน์ (เรียงตามลำดับ)</option>
-          </select>
+          </WheelSelect>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => { const it = defaultBuyItem("text", "right"); onChange({ items: [...items, it] }); setOpenId(it.id); }} className="text-[11px] px-2 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">+ ข้อความอิสระ</button>
@@ -2604,9 +2604,9 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                     </div>
                     <div>
                       <label className={lbl}>ขนาด</label>
-                      <select className={mini} value={it.size} onChange={(e) => setItem(it.id, { size: Number(e.target.value) })}>
+                      <WheelSelect value={it.size} onChange={(e) => setItem(it.id, { size: Number(e.target.value) })}>
                         {[...new Set([...BUY_SIZES, it.size])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n}%{n === 100 ? " (ปกติ)" : ""}</option>)}
-                      </select>
+                      </WheelSelect>
                     </div>
                     <div>
                       <label className={lbl}>สีตัวอักษร</label>
@@ -2614,11 +2614,11 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                     </div>
                     <div>
                       <label className={lbl}>ระยะห่างด้านบน</label>
-                      <select className={mini} value={it.gap} onChange={(e) => setItem(it.id, { gap: e.target.value as BuyItem["gap"] })}>
+                      <WheelSelect value={it.gap} onChange={(e) => setItem(it.id, { gap: e.target.value as BuyItem["gap"] })}>
                         <option value="sm">ชิด</option>
                         <option value="md">ปกติ</option>
                         <option value="lg">ห่าง</option>
-                      </select>
+                      </WheelSelect>
                     </div>
                   </div>
 
@@ -2640,9 +2640,9 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                       </div>
                     <div>
                       <label className={lbl}>ตัดกี่บรรทัด</label>
-                      <select className={mini} value={it.lines} onChange={(e) => setItem(it.id, { lines: Number(e.target.value) })}>
+                      <WheelSelect value={it.lines} onChange={(e) => setItem(it.id, { lines: Number(e.target.value) })}>
                         {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n} บรรทัด</option>)}
-                      </select>
+                      </WheelSelect>
                       <div className="mt-1.5"><PartToggle label="ปุ่ม “ดูเพิ่มเติม” เมื่อยาวเกิน" on={it.more} onChange={(v) => setItem(it.id, { more: v })} /></div>
                     </div>
                     </div>
@@ -2741,25 +2741,25 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
         <div className="space-y-1.5">
           {badgeRow(ab.sale, "ลดราคา", ab.saleText, ab.saleColor,
             <label className="flex items-center gap-1 text-[11px] text-slate-500">ลดอย่างน้อย
-              <select className={mini} value={ab.saleMin} disabled={!ab.sale} onChange={(e) => setAb({ saleMin: Number(e.target.value) })}>
+              <WheelSelect value={ab.saleMin} disabled={!ab.sale} onChange={(e) => setAb({ saleMin: Number(e.target.value) })}>
                 {[1, 5, 10, 15, 20, 30].map((n) => <option key={n} value={n}>{n}%</option>)}
-              </select>
+              </WheelSelect>
             </label>,
             (p) => setAb({ ...(p.on !== undefined ? { sale: p.on } : {}), ...(p.text !== undefined ? { saleText: p.text } : {}), ...(p.color !== undefined ? { saleColor: p.color } : {}) }),
             "ลด {pct}%")}
           {badgeRow(ab.new, "สินค้าใหม่", ab.newText, ab.newColor,
             <label className="flex items-center gap-1 text-[11px] text-slate-500">ขึ้นเว็บภายใน
-              <select className={mini} value={ab.newDays} disabled={!ab.new} onChange={(e) => setAb({ newDays: Number(e.target.value) })}>
+              <WheelSelect value={ab.newDays} disabled={!ab.new} onChange={(e) => setAb({ newDays: Number(e.target.value) })}>
                 {[7, 14, 30, 60, 90].map((n) => <option key={n} value={n}>{n} วัน</option>)}
-              </select>
+              </WheelSelect>
             </label>,
             (p) => setAb({ ...(p.on !== undefined ? { new: p.on } : {}), ...(p.text !== undefined ? { newText: p.text } : {}), ...(p.color !== undefined ? { newColor: p.color } : {}) }),
             "ใหม่")}
           {badgeRow(ab.best, "ขายดี", ab.bestText, ab.bestColor,
             <label className="flex items-center gap-1 text-[11px] text-slate-500">อันดับ 1 –
-              <select className={mini} value={ab.bestTop} disabled={!ab.best} onChange={(e) => setAb({ bestTop: Number(e.target.value) })}>
+              <WheelSelect value={ab.bestTop} disabled={!ab.best} onChange={(e) => setAb({ bestTop: Number(e.target.value) })}>
                 {[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              </WheelSelect>
             </label>,
             (p) => setAb({ ...(p.on !== undefined ? { best: p.on } : {}), ...(p.text !== undefined ? { bestText: p.text } : {}), ...(p.color !== undefined ? { bestColor: p.color } : {}) }),
             "ขายดี")}
@@ -2793,10 +2793,10 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
         </div>
         <div>
           <label className={labelCls}>ระยะห่างรูปจากขอบกรอบ</label>
-          <select className={inputCls} value={card.imagePad == null ? "" : String(card.imagePad)} onChange={(e) => setCard({ imagePad: e.target.value === "" ? null : Number(e.target.value) })}>
+          <WheelSelect value={card.imagePad == null ? "" : String(card.imagePad)} onChange={(e) => setCard({ imagePad: e.target.value === "" ? null : Number(e.target.value) })}>
             <option value="">อัตโนมัติ (ย่อพอดี = เว้นนิดหน่อย · เต็มกรอบ = ชิดขอบ)</option>
             {[0, 2, 4, 6, 8, 12, 16].map((n) => <option key={n} value={n}>{n === 0 ? "ชิดขอบ (0)" : `${n}%`}</option>)}
-          </select>
+          </WheelSelect>
         </div>
       </div>
 
@@ -2806,18 +2806,18 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">ความหนาชื่อ</label>
-            <select className={inputCls} value={card.nameWeight} onChange={(e) => setCard({ nameWeight: Number(e.target.value) as Theme["card"]["nameWeight"] })}>
+            <WheelSelect value={card.nameWeight} onChange={(e) => setCard({ nameWeight: Number(e.target.value) as Theme["card"]["nameWeight"] })}>
               <option value={400}>ปกติ</option>
               <option value={500}>กลาง</option>
               <option value={600}>หนา</option>
               <option value={700}>หนามาก</option>
-            </select>
+            </WheelSelect>
           </div>
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">ระยะห่างตัวอักษร</label>
-            <select className={inputCls} value={card.nameTracking} onChange={(e) => setCard({ nameTracking: Number(e.target.value) })}>
+            <WheelSelect value={card.nameTracking} onChange={(e) => setCard({ nameTracking: Number(e.target.value) })}>
               {[0, 2, 4, 8, 12].map((n) => <option key={n} value={n}>{n === 0 ? "ปกติ" : `+${n}`}</option>)}
-            </select>
+            </WheelSelect>
           </div>
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">ชื่อหมวด</label>
@@ -3290,9 +3290,9 @@ function TextRoleEditor({ def, value, pub, theme, onChange, onReset }: { def: (t
             </div>
             <div>
               <label className={labelCls}>น้ำหนัก</label>
-              <select className={inputCls} value={value.weight} onChange={(e) => onChange({ weight: Number(e.target.value) })}>
+              <WheelSelect value={value.weight} onChange={(e) => onChange({ weight: Number(e.target.value) })}>
                 {WEIGHT_CHOICES.map((w) => <option key={w} value={w}>{w === 300 ? "บาง (300)" : w === 400 ? "ปกติ (400)" : w === 500 ? "กลาง (500)" : w === 600 ? "หนา (600)" : "หนามาก (700)"}</option>)}
-              </select>
+              </WheelSelect>
             </div>
             <div className="flex items-end gap-4 pb-2">
               <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer"><input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.italic} onChange={(e) => onChange({ italic: e.target.checked })} />เอียง</label>
