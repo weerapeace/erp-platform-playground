@@ -34,7 +34,7 @@ export const cleanSavedThemeName = (v: unknown) => String(v ?? "").replace(/\s+/
 export const cleanSavedThemeScope = (v: unknown): SavedThemeScope | null => (v === "colors" || v === "full" ? v : null);
 
 /** หน้าตาของหัวเว็บ (ไม่รวม zones = ชิ้นส่วนบนหัวเว็บ และ button = ข้อความ/ลิงก์ปุ่ม ที่เป็นของร้าน) */
-const HEADER_LOOK = ["height", "sticky", "bg", "menuAlign", "showCart", "border", "bgKind", "bgColor", "textColor", "overHero", "hideOnScroll", "mobileMenuSide"] as const;
+const HEADER_LOOK = ["height", "sticky", "bg", "menuAlign", "showCart", "border", "bgKind", "bgColor", "textColor", "overHero", "hideOnScroll", "mobileMenuSide", "cart", "search"] as const;
 /** หน้าตาหน้าสินค้า (ไม่รวม ชุดรายละเอียด/ลำดับ-ซ่อนส่วน/ส่วนประกอบ/กรอบส่วน/ค่ามือถือ ที่ผูกกับสินค้า-หมวดของร้าน) */
 const PRODUCT_LOOK = ["layout", "titleStyle", "imageBg", "imageBgKey", "imageBgKind", "imageBgColor", "imageBgGradient", "imageEffect", "imageFit", "imageSize", "showTabs", "galleryStyle", "detailsStyle", "detailsOpen", "fonts"] as const;
 

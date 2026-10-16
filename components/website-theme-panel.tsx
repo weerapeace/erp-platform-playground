@@ -48,7 +48,9 @@ import { WheelSelect } from "@/components/wheel-select";
 import { FontSelect } from "@/components/font-select";
 import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
-import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
+import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
+import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
+import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -89,7 +91,7 @@ interface Theme {
     height: number;
     placeholder: ImagePlaceholder;
   };
-  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string } };
+  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string }; cart: HeaderCart; search: HeaderSearch };
   menu: MenuConfig;
   footer: FooterConfig;
   listing: ListingConfig;
@@ -803,6 +805,81 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง"))) ||
     (k === "product" && dirtyFields.includes("หน้าสินค้า"));
 
+  // 🔤 เนื้อหาแท็บโลโก้ — ใช้ร่วม แท็บโลโก้ + ป๊อป ⚙ โลโก้ ในตำแหน่งชิ้นส่วน Header (ค่าเดียวกัน)
+  const logoSettings = (
+    <>
+      <div className={cardCls}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-3">รูปแบบโลโก้</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>แสดงแบบ</label>
+            <select className={inputCls} value={theme.logo.mode} onChange={(e) => setLogo({ mode: e.target.value as LogoMode })}>
+              {choices.logoModes.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>ความสูงโลโก้ · {theme.logo.height}px</label>
+            <input type="range" min={20} max={80} value={theme.logo.height} onChange={(e) => setLogo({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+          </div>
+          <div>
+            <label className={labelCls}>อักษรในกล่อง (1-4 ตัว)</label>
+            <input className={inputCls} maxLength={4} value={theme.logo.mark} onChange={(e) => setLogo({ mark: e.target.value })} />
+          </div>
+          <div>
+            <label className={labelCls}>ชื่อร้าน</label>
+            <input className={inputCls} value={theme.logo.text} onChange={(e) => setLogo({ text: e.target.value })} />
+          </div>
+        </div>
+      </div>
+
+      <div className={cardCls}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">รูปโลโก้ &amp; ไอคอน</h3>
+        <p className="text-[11px] text-slate-500 mb-3">อัปโหลดแล้วเลือก &quot;แสดงแบบ: รูปโลโก้&quot; ด้านบน · รองรับ PNG/JPG/WebP (โปร่งใสแนะนำ PNG)</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ImageUploadField label="โลโก้หลัก" hint="ใช้บนพื้นสว่าง" value={theme.logo.imageKey} onChange={(k) => setLogo({ imageKey: k })} previewBg={theme.colors.page} />
+          <ImageUploadField label="โลโก้สำหรับพื้นเข้ม" hint="ใช้ตอน Header สีเข้ม" value={theme.logo.imageDarkKey} onChange={(k) => setLogo({ imageDarkKey: k })} previewBg={theme.colors.ink} />
+          <ImageUploadField label="ไอคอนแท็บเบราว์เซอร์ (Favicon)" hint="จัตุรัส 64px+" value={theme.logo.faviconKey} onChange={(k) => setLogo({ faviconKey: k })} height={44} />
+        </div>
+      </div>
+
+      <div className={cardCls}>
+        <p className={labelCls}>ดูบนพื้นหลังต่าง ๆ</p>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { bg: "#FFFFFF", label: "พื้นขาว", dark: false },
+            { bg: theme.colors.ink, label: "พื้นเข้ม", dark: true },
+            { bg: theme.colors.brand, label: "พื้นแบรนด์", dark: true },
+          ].map((v) => {
+            const img = v.dark && theme.logo.imageDarkKey ? theme.logo.imageDarkKey : theme.logo.imageKey;
+            const showImg = theme.logo.mode === "image" && img;
+            return (
+              <div key={v.label} className="rounded-lg p-3 border border-slate-200 text-center" style={{ background: v.bg }}>
+                <span className="inline-flex items-center gap-1.5">
+                  {showImg ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={keyUrl(img, 200)!} alt="โลโก้" style={{ height: Math.min(theme.logo.height, 34) }} />
+                  ) : (
+                    <>
+                      {(theme.logo.mode === "icon-text" || theme.logo.mode === "icon") && (
+                        <span className="inline-flex items-center justify-center text-white font-semibold" style={{ width: 22, height: 22, borderRadius: 6, background: theme.colors.brand, fontSize: 10 }}>
+                          {theme.logo.mark}
+                        </span>
+                      )}
+                      {(theme.logo.mode === "icon-text" || theme.logo.mode === "text") && (
+                        <span className="text-xs font-semibold" style={{ color: v.dark ? "#fff" : theme.colors.ink }}>{theme.logo.text}</span>
+                      )}
+                    </>
+                  )}
+                </span>
+                <p className="text-[9px] mt-1.5" style={{ color: v.dark ? "rgba(255,255,255,.6)" : "#94a3b8" }}>{v.label}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <div className="space-y-3">
       {/* แถบสถานะ */}
@@ -1001,79 +1078,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           )}
 
           {/* ── โลโก้ ── */}
-          {tab === "logo" && (
-            <>
-              <div className={cardCls}>
-                <h3 className="text-sm font-semibold text-slate-800 mb-3">รูปแบบโลโก้</h3>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className={labelCls}>แสดงแบบ</label>
-                    <select className={inputCls} value={theme.logo.mode} onChange={(e) => setLogo({ mode: e.target.value as LogoMode })}>
-                      {choices.logoModes.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>ความสูงโลโก้ · {theme.logo.height}px</label>
-                    <input type="range" min={20} max={80} value={theme.logo.height} onChange={(e) => setLogo({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
-                  </div>
-                  <div>
-                    <label className={labelCls}>อักษรในกล่อง (1-4 ตัว)</label>
-                    <input className={inputCls} maxLength={4} value={theme.logo.mark} onChange={(e) => setLogo({ mark: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>ชื่อร้าน</label>
-                    <input className={inputCls} value={theme.logo.text} onChange={(e) => setLogo({ text: e.target.value })} />
-                  </div>
-                </div>
-              </div>
-
-              <div className={cardCls}>
-                <h3 className="text-sm font-semibold text-slate-800 mb-1">รูปโลโก้ &amp; ไอคอน</h3>
-                <p className="text-[11px] text-slate-500 mb-3">อัปโหลดแล้วเลือก &quot;แสดงแบบ: รูปโลโก้&quot; ด้านบน · รองรับ PNG/JPG/WebP (โปร่งใสแนะนำ PNG)</p>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <ImageUploadField label="โลโก้หลัก" hint="ใช้บนพื้นสว่าง" value={theme.logo.imageKey} onChange={(k) => setLogo({ imageKey: k })} previewBg={theme.colors.page} />
-                  <ImageUploadField label="โลโก้สำหรับพื้นเข้ม" hint="ใช้ตอน Header สีเข้ม" value={theme.logo.imageDarkKey} onChange={(k) => setLogo({ imageDarkKey: k })} previewBg={theme.colors.ink} />
-                  <ImageUploadField label="ไอคอนแท็บเบราว์เซอร์ (Favicon)" hint="จัตุรัส 64px+" value={theme.logo.faviconKey} onChange={(k) => setLogo({ faviconKey: k })} height={44} />
-                </div>
-              </div>
-
-              <div className={cardCls}>
-                <p className={labelCls}>ดูบนพื้นหลังต่าง ๆ</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { bg: "#FFFFFF", label: "พื้นขาว", dark: false },
-                    { bg: theme.colors.ink, label: "พื้นเข้ม", dark: true },
-                    { bg: theme.colors.brand, label: "พื้นแบรนด์", dark: true },
-                  ].map((v) => {
-                    const img = v.dark && theme.logo.imageDarkKey ? theme.logo.imageDarkKey : theme.logo.imageKey;
-                    const showImg = theme.logo.mode === "image" && img;
-                    return (
-                      <div key={v.label} className="rounded-lg p-3 border border-slate-200 text-center" style={{ background: v.bg }}>
-                        <span className="inline-flex items-center gap-1.5">
-                          {showImg ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img src={keyUrl(img, 200)!} alt="โลโก้" style={{ height: Math.min(theme.logo.height, 34) }} />
-                          ) : (
-                            <>
-                              {(theme.logo.mode === "icon-text" || theme.logo.mode === "icon") && (
-                                <span className="inline-flex items-center justify-center text-white font-semibold" style={{ width: 22, height: 22, borderRadius: 6, background: theme.colors.brand, fontSize: 10 }}>
-                                  {theme.logo.mark}
-                                </span>
-                              )}
-                              {(theme.logo.mode === "icon-text" || theme.logo.mode === "text") && (
-                                <span className="text-xs font-semibold" style={{ color: v.dark ? "#fff" : theme.colors.ink }}>{theme.logo.text}</span>
-                              )}
-                            </>
-                          )}
-                        </span>
-                        <p className="text-[9px] mt-1.5" style={{ color: v.dark ? "rgba(255,255,255,.6)" : "#94a3b8" }}>{v.label}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
+          {tab === "logo" && logoSettings}
 
           {/* ── Header ── */}
           {tab === "header" && (
@@ -1130,7 +1135,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className="mt-4 pt-3 border-t border-slate-100">
                 <label className={labelCls}>ตำแหน่งชิ้นส่วน (ซ้าย · กลาง · ขวา) — ลาก ⠿ จัดลำดับในโซน · ◀ ▶ ย้ายโซน · ✕ เอาออก</label>
                 <ZonesEditor zones={theme.header.zones} onChange={(zones) => setHeader({ zones })} onConfig={setZoneCfg} />
-                <p className="text-[11px] text-slate-400 mt-1.5">กดชื่อชิ้นที่มี ⚙ (เมนู · โซเชียล) เพื่อตั้งค่าในป๊อปได้เลย · “บัญชีสมาชิก” โชว์เมื่อเว็บเปิดระบบสมาชิกแล้ว (ตั้งช่องทางเข้าสู่ระบบ)</p>
+                <p className="text-[11px] text-slate-400 mt-1.5">กดชื่อชิ้นที่มี ⚙ (โลโก้ · เมนู · ค้นหา · ตะกร้า · โซเชียล) เพื่อตั้งค่าในป๊อปได้เลย · “บัญชีสมาชิก” โชว์เมื่อเว็บเปิดระบบสมาชิกแล้ว (ตั้งช่องทางเข้าสู่ระบบ)</p>
                 {/* ⚙ ป๊อปตั้งค่าชิ้นส่วน: เมนู = แก้ในธีม (บันทึกร่าง/เผยแพร่พร้อมดีไซน์) · โซเชียล = ข้อมูลร้าน บันทึกทันที */}
                 <ERPModal
                   open={zoneCfg === "menu"}
@@ -1145,6 +1150,39 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   }
                 >
                   <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} typo={{ nav: roleOf(theme, "nav").uppercase, menu: roleOf(theme, "menu").uppercase, setUpper: (k, v) => apply({ ...theme, typography: { ...theme.typography, [k]: { ...roleOf(theme, k), uppercase: v } } }), editors: TEXT_ROLE_DEFS.filter((d) => d.key === "nav" || d.key === "menu").map(roleEditor) }} />
+                </ERPModal>
+                {/* ⚙ โลโก้ = เนื้อหาเดียวกับแท็บโลโก้ · ⚙ ตะกร้า/ค้นหา = theme.header.cart / .search (บันทึกร่าง/เผยแพร่พร้อมดีไซน์) */}
+                <ERPModal
+                  open={zoneCfg === "logo"}
+                  onClose={() => setZoneCfg(null)}
+                  title="🏷 โลโก้"
+                  description="ค่าเดียวกับแท็บโลโก้ — แก้ตรงนี้ แท็บโลโก้เปลี่ยนตาม · เห็นในพรีวิวทันที อย่าลืมกดบันทึก/เผยแพร่ด้านบน"
+                  size="xl"
+                  footer={
+                    <button type="button" onClick={() => setZoneCfg(null)} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700">
+                      เสร็จ
+                    </button>
+                  }
+                >
+                  <div className="space-y-3">{logoSettings}</div>
+                </ERPModal>
+                <ERPModal
+                  open={zoneCfg === "cart" || zoneCfg === "search"}
+                  onClose={() => setZoneCfg(null)}
+                  title={zoneCfg === "cart" ? "🛒 ตะกร้า" : "🔍 ค้นหา"}
+                  description="เห็นในพรีวิวทันที อย่าลืมกดบันทึก/เผยแพร่ด้านบนเหมือนการแก้ดีไซน์อื่น"
+                  size="md"
+                  footer={
+                    <button type="button" onClick={() => setZoneCfg(null)} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700">
+                      เสร็จ
+                    </button>
+                  }
+                >
+                  {zoneCfg === "cart" ? (
+                    <HeaderCartSettings value={theme.header.cart ?? DEFAULT_HEADER_CART} onChange={(p) => setHeader({ cart: { ...(theme.header.cart ?? DEFAULT_HEADER_CART), ...p } })} theme={theme} />
+                  ) : (
+                    <HeaderSearchSettings value={theme.header.search ?? DEFAULT_HEADER_SEARCH} onChange={(p) => setHeader({ search: { ...(theme.header.search ?? DEFAULT_HEADER_SEARCH), ...p } })} theme={theme} />
+                  )}
                 </ERPModal>
                 <SocialLinksModal
                   open={zoneCfg === "social"}
@@ -3396,7 +3434,7 @@ function TextRoleEditor({ def, value, pub, theme, onChange, onReset }: { def: (t
 
 /* ─────────── Header: จัดชิ้นส่วน 3 โซน ─────────── */
 /** ชิ้นที่กดแล้วเปิดป๊อปตั้งค่าได้ */
-const ZONE_CONFIGURABLE: HeaderEl[] = ["menu", "social"];
+const ZONE_CONFIGURABLE: HeaderEl[] = ["logo", "menu", "search", "cart", "social"];
 export function ZonesEditor({ zones, onChange, onConfig }: { zones: HeaderZones; onChange: (z: HeaderZones) => void; onConfig?: (el: HeaderEl) => void }) {
   const ZK = ["left", "center", "right"] as const;
   const ZL: Record<(typeof ZK)[number], string> = { left: "ซ้าย", center: "กลาง", right: "ขวา" };
@@ -3453,6 +3491,30 @@ function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, missing,
 }
 
 /* ─────────── เมนู: ชุดตั้งค่าทั้งก้อน (แท็บ "เมนู" + ป๊อปจากชิ้น "เมนู" ใน Header ใช้ตัวเดียวกัน) ─────────── */
+/** ✨ ตัวอย่างเอฟเฟกต์ตอนชี้ (CSS ชุดเดียวกับเว็บร้าน globals.css .nav-hv-* / .mm-hv-*) */
+function HoverDemo({ b }: { b: MenuBehavior }) {
+  const c = b.hoverColor || "#1D4ED8";
+  const top = (k: string) =>
+    k === "fade" ? "hover:opacity-60" : k === "color" ? "hd-color" : k === "underline" ? "hd-under hd-color" : "hd-grow";
+  const sub = (k: string) => (k === "color" ? "hd-color" : k === "underline" ? "hd-under2 hd-color" : k === "grow" ? "hd-grow" : "");
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800" style={{ ["--hd" as string]: c }}>
+      <style>{`.hd-color{transition:color .2s}.hd-color:hover{color:var(--hd)}.hd-under{background-image:linear-gradient(var(--hd),var(--hd));background-size:0 1.5px;background-repeat:no-repeat;background-position:0 100%;padding-bottom:2px;transition:background-size .25s,color .2s}.hd-under:hover{background-size:100% 1.5px}.hd-under2{text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px;transition:text-decoration-color .2s,color .2s}.hd-under2:hover{text-decoration-color:var(--hd)}.hd-grow{display:inline-block;transition:transform .2s;transform-origin:left center}.hd-grow:hover{transform:scale(1.07)}`}</style>
+      <p className="text-[10px] text-slate-400 mb-1">ตัวอย่าง (ชี้เมาส์ดู)</p>
+      <div className="flex gap-3 font-semibold uppercase tracking-wider text-[11px] mb-1.5">
+        {["Bags", "Wallets", "ติดต่อ"].map((t) => (
+          <span key={t} className={`cursor-pointer transition-opacity ${top(b.navHover)}`}>{t}</span>
+        ))}
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {["กระเป๋าเป้", "กระเป๋าคาดอก"].map((t) => (
+          <span key={t} className={`cursor-pointer w-fit ${sub(b.subHover)}`}>{t}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** ⚙️ พฤติกรรมเมนูทั้งชุด (lib/website-mega-menu MenuBehavior) — ใช้กับทุกเมนูที่มีเมนูย่อย/แผง */
 function MenuBehaviorSettings({ value, onChange, typo }: { value: MenuBehavior; onChange: (p: Partial<MenuBehavior>) => void; typo?: MenuTypo }) {
   const [typoOpen, setTypoOpen] = useState(false);
@@ -3488,6 +3550,41 @@ function MenuBehaviorSettings({ value, onChange, typo }: { value: MenuBehavior; 
           </div>
         </>
       )}
+      {/* ✨ เอฟเฟกต์ตอนชี้ลิงก์ — ตัวอย่างสดด้านขวา (ชี้เมาส์ดู) */}
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-500 w-24">✨ ชี้เมนูด้านบน</span>
+            {NAV_HOVERS.map((o) => (
+              <button key={o.value} type="button" className={seg(value.navHover === o.value)} onClick={() => onChange({ navHover: o.value })}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-500 w-24">✨ ชี้เมนูย่อย/แผง</span>
+            {SUB_HOVERS.map((o) => (
+              <button key={o.value} type="button" className={seg(value.subHover === o.value)} onClick={() => onChange({ subHover: o.value })}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-slate-500 w-24">สีตอนชี้</span>
+            <span className="w-32">
+              <ColorInput value={value.hoverColor || "#1D4ED8"} onChange={(v) => onChange({ hoverColor: v })} />
+            </span>
+            {value.hoverColor ? (
+              <button type="button" className="text-[11px] text-slate-400 hover:text-rose-600" onClick={() => onChange({ hoverColor: "" })}>
+                ✕ ใช้สีลิงก์ของธีม
+              </button>
+            ) : (
+              <span className="text-[11px] text-slate-400">= สีลิงก์ของธีม (แท็บสี → ปรับละเอียด)</span>
+            )}
+          </div>
+        </div>
+        <HoverDemo b={value} />
+      </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] text-slate-500">เปิดแผงเมื่อ</span>

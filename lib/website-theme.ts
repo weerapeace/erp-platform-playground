@@ -9,6 +9,7 @@
 
 import { normalizeListing, DEFAULT_LISTING, type ListingConfig } from "@/lib/website-listing";
 import { isGradStop } from "@/lib/website-gradient";
+import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
@@ -859,6 +860,10 @@ export interface SiteTheme {
     hideOnScroll: boolean;
     mobileMenuSide: "left" | "right" | "top";
     button: { text: string; href: string };
+    /** 🛒 ⚙ ตะกร้า (lib/website-header-els) */
+    cart: HeaderCart;
+    /** 🔍 ⚙ ค้นหา */
+    search: HeaderSearch;
   };
   menu: MenuConfig;
   footer: FooterConfig;
@@ -1307,7 +1312,7 @@ export const DEFAULT_THEME: SiteTheme = {
     height: 34,
     placeholder: { ...DEFAULT_IMAGE_PLACEHOLDER },
   },
-  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" } },
+  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH } },
   menu: { items: null, mobileItems: null, behavior: { ...DEFAULT_MENU_BEHAVIOR } },
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
@@ -1574,6 +1579,8 @@ export function normalizeTheme(raw: unknown): SiteTheme {
         const b = (h.button && typeof h.button === "object" ? h.button : {}) as Record<string, unknown>;
         return { text: typeof b.text === "string" ? b.text.trim().slice(0, 30) : "", href: typeof b.href === "string" && b.href.trim() ? b.href.trim().slice(0, 500) : "/shop" };
       })(),
+      cart: normalizeHeaderCart(h.cart),
+      search: normalizeHeaderSearch(h.search),
     },
     menu: normalizeMenu(r.menu),
     footer: normalizeFooter(r.footer),

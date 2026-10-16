@@ -156,9 +156,27 @@ export interface MenuBehavior {
   mobileStyle: "accordion" | "drill";
   /** มือถือ: แถบรูปหมวดวงกลมเลื่อนแนวนอนบนสุดของเมนู */
   mobileCats: boolean;
+  /** ✨ ตอนชี้ลิงก์เมนูด้านบน: จางลง (เดิม) / เปลี่ยนสี / เส้นใต้ (+เปลี่ยนสี) / ขยายนิดหน่อย */
+  navHover: "fade" | "color" | "underline" | "grow";
+  /** ✨ ตอนชี้ลิงก์เมนูย่อย/แผงเมนู: เปลี่ยนสี (เดิม) / เส้นใต้ (+เปลี่ยนสี) / ขยายนิดหน่อย / ไม่มี */
+  subHover: "color" | "underline" | "grow" | "none";
+  /** สีตอนชี้ ("" = สีลิงก์ของธีม) */
+  hoverColor: string;
 }
+export const NAV_HOVERS: { value: MenuBehavior["navHover"]; label: string }[] = [
+  { value: "fade", label: "จางลง (เดิม)" },
+  { value: "color", label: "เปลี่ยนสี" },
+  { value: "underline", label: "เส้นใต้" },
+  { value: "grow", label: "ขยายนิดหน่อย" },
+];
+export const SUB_HOVERS: { value: MenuBehavior["subHover"]; label: string }[] = [
+  { value: "color", label: "เปลี่ยนสี (เดิม)" },
+  { value: "underline", label: "เส้นใต้" },
+  { value: "grow", label: "ขยายนิดหน่อย" },
+  { value: "none", label: "ไม่มี" },
+];
 /** 🔠 ฟอนต์/สี/ขนาด/ตัวพิมพ์ใหญ่ของเมนู = theme.typography.nav (เมนูด้านบน) + .menu (เมนูย่อย/แผงเมนู) — ไม่เก็บซ้ำที่นี่ */
-export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileCats: false };
+export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileCats: false, navHover: "fade", subHover: "color", hoverColor: "" };
 export const MENU_DELAYS = [0, 100, 150, 200, 300, 400, 600] as const;
 
 /** แม่แบบแผงเมนูที่บันทึกไว้ (ตาราง website_menu_templates · /api/website/menu-templates) */
@@ -466,6 +484,9 @@ export function normalizeMenuBehavior(raw: unknown): MenuBehavior {
     dim: r.dim === true,
     mobileStyle: oneOf(r.mobileStyle, ["accordion", "drill"] as const, d.mobileStyle),
     mobileCats: r.mobileCats === true,
+    navHover: oneOf(r.navHover, ["fade", "color", "underline", "grow"] as const, d.navHover),
+    subHover: oneOf(r.subHover, ["color", "underline", "grow", "none"] as const, d.subHover),
+    hoverColor: hex(r.hoverColor),
   };
 }
 
