@@ -565,6 +565,46 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
 }
 /** ส่วนประกอบของหน้าสินค้าแบบโชว์เคส — ลากจัดลำดับ/ซ่อนได้ในแท็บหน้าสินค้า */
 export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related" | `banner:${string}`;
+
+/**
+ * 📐 กรอบของแต่ละส่วนประกอบหน้าสินค้า (ของกลาง ใช้ได้ทุกส่วน) — ความกว้าง + ระยะห่างด้านบน
+ *   auto = ตามเดิมของส่วนนั้น · ตั้งแล้วเว็บร้านปิดระยะเดิมของส่วนนั้นแล้วใช้ค่านี้แทน (ไม่บวกกัน)
+ *   รูปใหญ่/แบนเนอร์ มีความกว้างของตัวเองอยู่แล้ว → ตั้งได้แค่ระยะห่าง (PART_BOX_NO_WIDTH)
+ *   มือถือ: ระยะห่างย่อลงให้เองตามจอ
+ */
+export type PartWidth = "auto" | "narrow" | "full";
+export type PartSpace = "auto" | "none" | "sm" | "md" | "lg" | "xl";
+export interface PartBox {
+  width: PartWidth;
+  spaceTop: PartSpace;
+}
+export const PART_WIDTH_OPTIONS: { value: PartWidth; label: string }[] = [
+  { value: "auto", label: "ตามเดิม (กว้างเท่าเนื้อหาเว็บ)" },
+  { value: "narrow", label: "แคบ (อ่านง่าย ตรงกลาง)" },
+  { value: "full", label: "เต็มความกว้างจอ" },
+];
+export const PART_SPACE_OPTIONS: { value: PartSpace; label: string }[] = [
+  { value: "auto", label: "ตามเดิม" },
+  { value: "none", label: "ไม่มี (ชิดส่วนบน)" },
+  { value: "sm", label: "เล็ก" },
+  { value: "md", label: "กลาง" },
+  { value: "lg", label: "ใหญ่" },
+  { value: "xl", label: "ใหญ่มาก" },
+];
+export const partHasWidth = (k: string) => k !== "gallery" && !k.startsWith("banner");
+export function normalizePartBox(raw: unknown): Record<string, PartBox> {
+  const out: Record<string, PartBox> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^(gallery|buy|details|banner|related|banner:[\w-]{1,40})$/.test(k) || !v || typeof v !== "object") continue;
+    const o = v as Record<string, unknown>;
+    const width = PART_WIDTH_OPTIONS.some((x) => x.value === o.width) ? (o.width as PartWidth) : "auto";
+    const spaceTop = PART_SPACE_OPTIONS.some((x) => x.value === o.spaceTop) ? (o.spaceTop as PartSpace) : "auto";
+    if (width === "auto" && spaceTop === "auto") continue;
+    out[k] = { width: partHasWidth(k) ? width : "auto", spaceTop };
+  }
+  return out;
+}
 export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related"];
 
 
@@ -849,6 +889,8 @@ export interface SiteTheme {
     hidden: ProductSection[];
     /** ⚙️ ตั้งค่าต่อส่วนประกอบ (จับคู่ข้อมูล / โชว์-ซ่อนรายละเอียดย่อย) */
     parts: ProductParts;
+    /** 📐 ความกว้าง + ระยะห่างด้านบน ต่อส่วนประกอบ (ไม่มี = ตามเดิม) */
+    partBox: Record<string, PartBox>;
     /** 📱 ค่าที่ตั้งแยกสำหรับมือถือ (ตามคอมถ้าไม่ตั้ง) */
     mobile: ProductMobile;
     /** 🔠 ขนาดตัวอักษร (% ของปกติ) */
@@ -1204,7 +1246,7 @@ export const DEFAULT_THEME: SiteTheme = {
   listing: { ...DEFAULT_LISTING },
   page: { transition: "fade", smoothScroll: false },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -1341,7 +1383,7 @@ export const PRODUCT_SECTIONS: { value: ProductSection; label: string; hint: str
   { value: "buy", label: "ราคา · ตัวเลือก · ใส่ตะกร้า", hint: "ราคา/คำอธิบายสั้น ซ้าย · จำนวน/สี/ปุ่ม ขวา", hideable: false },
   { value: "details", label: "รายละเอียด / จุดเด่น", hint: "แท็บหรือเรียงต่อกัน ตามตัวเลือกด้านบน", hideable: true },
   { value: "banner", label: "แบนเนอร์หลัก", hint: "รูปตามที่ตั้งใน ⚙️ · รุ่นที่ตั้งแบนเนอร์เองใช้ของรุ่นนั้น", hideable: true },
-  { value: "related", label: "คุณอาจชอบ", hint: "สินค้าหมวดเดียวกัน 4 รายการ", hideable: true },
+  { value: "related", label: "สินค้าที่เกี่ยวข้อง (คุณอาจชอบ)", hint: "เลือกแหล่ง/จำนวน/หัวข้อใน ⚙️ · ต่อด้วย สินค้าที่ดูล่าสุด", hideable: true },
 ];
 
 export const PRODUCT_IMAGE_BGS: { value: ProductImageBg; label: string }[] = [
@@ -1523,6 +1565,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
       sections: normalizeProductSections(pd.sections, xIds),
       hidden: normalizeHiddenSections(pd.hidden, xIds),
       parts,
+      partBox: normalizePartBox(pd.partBox),
       mobile: normalizeMobile(pd.mobile, xIds),
       fonts: normalizeFonts(pd.fonts),
     },

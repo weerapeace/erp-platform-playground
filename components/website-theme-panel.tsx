@@ -41,7 +41,7 @@ import { FULL_THEME_PRESETS, applyFullPreset } from "@/lib/website-theme-presets
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
-import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem } from "@/lib/website-theme";
+import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
 type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -88,7 +88,7 @@ interface Theme {
   /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; mobile: ProductMobile; fonts: ProductFonts };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts };
 }
 
 interface Choices {
@@ -1613,7 +1613,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         ? { label: `🖼 ${xb.name}`, hint: `แบนเนอร์เพิ่ม · ${PART_CHOICES.bannerImages.find((o) => o.value === xb.imageSource)?.label ?? ""}`, hideable: true }
                         : (choices.productSections ?? []).find((x) => x.value === k);
                       const isHidden = pv.hidden.includes(k);
-                      const hasPart = k !== "details";
+                      const hasPart = true;
                       const partOpen = openPart === k;
                       return (
                         <li key={k} {...sectionDrag.rowProps(i)} className={`rounded-lg border bg-white px-2 py-1.5 ${sectionDrag.rowCls(i)} ${isHidden ? "opacity-60" : ""} ${partOpen ? "border-blue-300" : "border-slate-200"}`}>
@@ -1651,6 +1651,22 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                           )}
                         </div>
                         {partOpen && (
+                          <PartBoxControls
+                            k={k}
+                            value={theme.product.partBox[k]}
+                            onChange={(p) => {
+                              const base: PartBox = theme.product.partBox[k] ?? { width: "auto", spaceTop: "auto" };
+                              const cur: PartBox = { ...base, ...p };
+                              const next = { ...theme.product.partBox };
+                              if (cur.width === "auto" && cur.spaceTop === "auto") delete next[k];
+                              else next[k] = cur;
+                              setProduct({ partBox: next });
+                            }}
+                            mobile={isMobileEdit}
+                          />
+                        )}
+                        {partOpen && k === "details" && <p className="mt-2 text-[11px] text-slate-400">เนื้อหา/หัวข้อของรายละเอียด ตั้งที่กล่อง &quot;ชุดรายละเอียดสินค้า&quot; ด้านล่าง</p>}
+                        {partOpen && k !== "details" && (
                           <PartSettings
                             part={k}
                             parts={pv.parts}
@@ -2147,6 +2163,37 @@ function PartToggle({ label, on, onChange }: { label: string; on: boolean; onCha
     </label>
   );
 }
+/** 📐 ความกว้าง + ระยะห่างด้านบน ของส่วนประกอบหน้าสินค้า (ของกลาง ทุกส่วน · lib/website-theme PartBox) */
+function PartBoxControls({ k, value, onChange, mobile }: { k: string; value?: PartBox; onChange: (p: Partial<PartBox>) => void; mobile: boolean }) {
+  const v: PartBox = { width: "auto", spaceTop: "auto", ...value };
+  const sel = "w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700";
+  return (
+    <div className="mt-2 pt-2 border-t border-slate-100 grid gap-2 sm:grid-cols-2">
+      {partHasWidth(k) ? (
+        <label className="block">
+          <span className="block text-[11px] text-slate-500 mb-1">ความกว้าง</span>
+          <select value={v.width} onChange={(e) => onChange({ width: e.target.value as PartBox["width"] })} className={`${sel} ${v.width !== "auto" ? "border-blue-400" : ""}`}>
+            {PART_WIDTH_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p className="text-[11px] text-slate-400 self-end pb-1.5">ความกว้างของส่วนนี้ตั้งในตัวเลือกด้านล่าง (เต็มจอ/ในกรอบ)</p>
+      )}
+      <label className="block">
+        <span className="block text-[11px] text-slate-500 mb-1">ระยะห่างจากส่วนด้านบน</span>
+        <select value={v.spaceTop} onChange={(e) => onChange({ spaceTop: e.target.value as PartBox["spaceTop"] })} className={`${sel} ${v.spaceTop !== "auto" ? "border-blue-400" : ""}`}>
+          {PART_SPACE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </label>
+      {mobile && <p className="sm:col-span-2 text-[11px] text-blue-700">📱 ใช้ค่าเดียวกับคอม — มือถือระยะห่างย่อลงให้เองตามจอ</p>}
+    </div>
+  );
+}
+
 function PartSettings({
   part,
   parts,
