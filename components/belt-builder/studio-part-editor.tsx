@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * แผงแก้ไขชิ้นส่วน (สตูดิโอ) — เลือกการ์ดแล้วโชว์ใต้กริด (คอม) หรือใน Drawer (มือถือ)
- *   ซ้าย  = BeltPreview ซ้อนรูปชิ้นนี้บนชิ้นอ้างอิง + AnchorEditor ลากกรอบ / ช่อง x,y,w,h / ปุ่มค่ามาตรฐานของประเภท (ของกลางเดิม)
- *   ขวา   = ช่องอัปโหลด PNG (ลากวาง/เลือกไฟล์/คลังไฟล์ · เตือนถ้าไม่ใช่ PNG โปร่ง หรือ > 2 MB) · ชื่อไทย/อังกฤษ · code · ประเภท
- *           · คุณสมบัติ (AttrsEditor) · สีจุดเลือก (ColorInput) · ราคาเพิ่ม (MoneyInput) · เปิดใช้
+ * แผงแก้ไขชิ้นส่วน (สตูดิโอ) — เปิดใน Drawer ด้านขวาทุกขนาดจอ (เจ้าของขอ 2026-10-17: "อยากได้หน้าแก้ไขเป็น drawer")
+ *   บน   = BeltPreview ซ้อนรูปชิ้นนี้บนชิ้นอ้างอิง + AnchorEditor ลากกรอบ / ช่อง x,y,w,h / ปุ่มค่ามาตรฐานของประเภท (ของกลางเดิม)
+ *          ความกว้างพรีวิวย่อตามความกว้าง drawer (วัดด้วย ResizeObserver) — ลากขอบ drawer ให้กว้างขึ้น พรีวิวก็ใหญ่ตาม
+ *   ล่าง = ช่องอัปโหลด PNG (ลากวาง/เลือกไฟล์/คลังไฟล์ · เตือนถ้าไม่ใช่ PNG โปร่ง หรือ > 2 MB) · ชื่อไทย/อังกฤษ · code · ประเภท
+ *          · คุณสมบัติ (AttrsEditor) · สีจุดเลือก (ColorInput) · ราคาเพิ่ม (MoneyInput) · เปิดใช้
  *   บันทึก = ส่งเฉพาะฟิลด์ที่แก้ (diffPatch) → PATCH /api/belt-builder/parts/:id (server เขียน audit changes)
+ *   แจ้ง dirty ออกไป (onDirtyChange) ให้ Drawer ถามก่อนปิด/ข้ามชิ้น
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnchorEditor, invalidateRefParts } from "./anchor-editor";
 import { AttrsEditor } from "./attrs-editor";
 import { AssetPicker } from "@/components/asset-picker";
@@ -21,15 +23,22 @@ import { uploadBeltPartPng } from "./upload-png";
 
 const EDIT_KEYS: (keyof BeltPart)[] = ["part_type", "code", "name_th", "name_en", "image_key", "image_url", "anchor", "attrs", "price_delta", "is_active"];
 
-export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved, onClose, onDuplicate, onDelete }: {
+const PHOTO_HINT: Record<PartType, string> = {
+  strap: "ถ่ายทั้งเส้นแนวนอน หัวอยู่ซ้าย หางอยู่ขวา — ให้เห็นหาง (ปลายแหลม + รู) ในรูปเดียวกัน · กว้าง ~1600px",
+  buckle: "ถ่ายด้านหน้าตรง ไดคัทเฉพาะตัวหัว (ไม่เอาสาย)",
+  keeper: "ถ่ายด้านหน้าตรง ไดคัทเฉพาะตัวหู",
+};
+
+export function PartEditor({ part, shopId, canEdit, onSaved, onRequestClose, onDuplicate, onDelete, onDirtyChange }: {
   part: BeltPart;
   shopId: string;
   canEdit: boolean;
-  previewWidth?: number;
   onSaved: (p: BeltPart) => void;
-  onClose: () => void;
+  /** กดปุ่ม "ปิด" ในแผง (ผู้เรียกจะถามก่อนถ้ายังไม่บันทึก) */
+  onRequestClose: () => void;
   onDuplicate: (p: BeltPart) => void;
   onDelete: (p: BeltPart) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const toast = useToast();
   const [form, setForm] = useState<BeltPart>(part);
@@ -38,12 +47,26 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [previewWidth, setPreviewWidth] = useState(640);
 
-  // สลับการ์ด → โหลดค่าชิ้นใหม่เข้าฟอร์ม (ถ้ามีของค้างไม่ได้บันทึก พ่อแม่จะถามก่อนสลับ)
+  // สลับการ์ด → โหลดค่าชิ้นใหม่เข้าฟอร์ม (ผู้เรียกถามก่อนสลับถ้ามีของค้าง)
   useEffect(() => { setForm(part); setErrors([]); }, [part]);
+
+  // พรีวิวกว้างตาม drawer (ลากขอบ drawer แล้วพรีวิวขยายตาม) · เผื่อขอบ 8px · ไม่เกิน 960
+  useEffect(() => {
+    const el = rootRef.current; if (!el) return;
+    const apply = () => setPreviewWidth(Math.max(280, Math.min(960, Math.floor(el.clientWidth) - 8)));
+    apply();
+    const ro = new ResizeObserver(apply); ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const patch = useMemo(() => diffPatch(part as unknown as Record<string, unknown>, form as unknown as Record<string, unknown>, EDIT_KEYS as string[]) as Partial<BeltPart>, [part, form]);
   const dirty = Object.keys(patch).length > 0;
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);   // ถอดแผง (สลับชิ้น/ปิด) → ล้างสถานะค้าง
+
   const set = <K extends keyof BeltPart>(k: K, v: BeltPart[K]) => setForm((f) => ({ ...f, [k]: v }));
   const pt: PartType = PART_TYPES.includes(form.part_type) ? form.part_type : "strap";
   const colorKey = pt === "buckle" ? "metal_hex" : "color_hex";
@@ -81,9 +104,9 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
   const img = form.image_url || r2ImageUrl(form.image_key, 600);
 
   return (
-    <div className="flex flex-col gap-4 lg:flex-row">
-      {/* ซ้าย: พรีวิว + จุดยึด */}
-      <div className="min-w-0 flex-1">
+    <div ref={rootRef} className="flex flex-col gap-4">
+      {/* บน: พรีวิว + จุดยึด */}
+      <div className="min-w-0">
         <div className="mb-1 flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-800">{PART_TYPE_LABEL[pt].icon} {form.name_th || "(ไม่มีชื่อ)"} <span className="ml-1 text-xs font-normal text-slate-400">{form.code}</span></div>
           {dirty && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">ยังไม่ได้บันทึก</span>}
@@ -93,8 +116,8 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
           shopId={shopId} currentId={part.id} width={previewWidth} />
       </div>
 
-      {/* ขวา: รูป + ข้อมูล */}
-      <div className="w-full shrink-0 space-y-3 lg:w-[340px]">
+      {/* ล่าง: รูป + ข้อมูล */}
+      <div className="space-y-3">
         <div>
           <span className={lab}>รูป PNG พื้นโปร่ง</span>
           <div
@@ -102,7 +125,7 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) void handleFile(f); }}
             className={`flex items-center gap-3 rounded-lg border-2 border-dashed p-2 ${dragOver ? "border-emerald-500 bg-emerald-50" : "border-slate-300 bg-slate-50"}`}>
-            <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded bg-white">
+            <div className="flex h-16 w-28 shrink-0 items-center justify-center overflow-hidden rounded bg-white">
               {img ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img} alt="" className="max-h-full max-w-full object-contain" /> : <span className="text-[11px] text-slate-400">ไม่มีรูป</span>}
             </div>
             <div className="min-w-0 flex-1 text-[11px] text-slate-600">
@@ -117,12 +140,12 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
                   <button type="button" onClick={() => { set("image_key", null); set("image_url", null); }} className="rounded border border-slate-300 bg-white px-2 py-0.5 text-red-600 hover:bg-red-50">ลบรูป</button>
                 )}
               </div>
-              <div className="mt-1 text-slate-400">PNG ไดคัทพื้นออก · {pt === "strap" ? "สายหนังถ่ายเต็มเส้นแนวนอน (กว้าง ~1600px)" : "ถ่ายด้านหน้าตรง"} · ไม่เกิน 2 MB</div>
+              <div className="mt-1 text-slate-400">PNG ไดคัทพื้นออก · {PHOTO_HINT[pt]} · ไม่เกิน 2 MB</div>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <div className="col-span-2"><label className={lab}>ชื่อ (ไทย) *</label><input className={inp} value={form.name_th ?? ""} disabled={!canEdit} onChange={(e) => set("name_th", e.target.value)} /></div>
           <div className="col-span-2"><label className={lab}>ชื่อ (อังกฤษ)</label><input className={inp} value={form.name_en ?? ""} disabled={!canEdit} onChange={(e) => set("name_en", e.target.value || null)} /></div>
           <div><label className={lab}>รหัส (code)</label><input className={`${inp} font-mono`} value={form.code ?? ""} disabled={!canEdit} placeholder="strap-black-35" onChange={(e) => set("code", e.target.value || null)} /></div>
@@ -143,11 +166,11 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
               <span className="text-[11px] text-slate-500">{colorKey}</span>
             </div>
           </div>
-          <div className="col-span-2">
+          <div className="col-span-2 md:col-span-4">
             <label className={lab}>คุณสมบัติ (ทำตัวกรองบนเว็บ: สี / กว้างสาย / ทรง / สีโลหะ)</label>
             <AttrsEditor value={form.attrs} onChange={(v) => set("attrs", v)} disabled={!canEdit} partType={pt} />
           </div>
-          <label className="col-span-2 flex items-center gap-2 text-sm text-slate-700">
+          <label className="col-span-2 flex items-center gap-2 text-sm text-slate-700 md:col-span-4">
             <input type="checkbox" className="h-4 w-4 accent-emerald-600" checked={!!form.is_active} disabled={!canEdit} onChange={(e) => set("is_active", e.target.checked)} />
             เปิดให้ลูกค้าเลือกบนเว็บ
           </label>
@@ -155,7 +178,7 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
 
         {errors.length > 0 && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{errors.map((e) => <div key={e}>• {e}</div>)}</div>}
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+        <div className="sticky bottom-0 -mx-1 flex flex-wrap items-center gap-2 border-t border-slate-200 bg-white px-1 pb-1 pt-3">
           {canEdit && (
             <>
               <button type="button" onClick={save} disabled={!dirty || saving} className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
@@ -165,7 +188,7 @@ export function PartEditor({ part, shopId, canEdit, previewWidth = 640, onSaved,
               <button type="button" onClick={() => onDelete(part)} className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">🗑 ลบ</button>
             </>
           )}
-          <button type="button" onClick={onClose} className="ml-auto rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100">ปิด</button>
+          <button type="button" onClick={onRequestClose} className="ml-auto rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100">ปิด</button>
         </div>
         {!canEdit && <div className="text-[11px] text-slate-400">คุณมีสิทธิ์ดูอย่างเดียว (ต้องมีสิทธิ์ belt_builder.edit จึงจะแก้ได้)</div>}
       </div>

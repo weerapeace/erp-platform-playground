@@ -8,8 +8,8 @@
  *   รางซ้าย    สายหนัง / หัว / หู (นับจำนวน) · 📏 กติกาไซซ์ · ✒️ สลักชื่อ · 🧾 แบบของลูกค้า
  *   กริดการ์ด  PartCard: รูปย่อ R2 · สวิตช์เปิด/ปิด (PATCH ทันที) · ลากจัดลำดับ (useDragReorder → /parts/reorder) · ลาก PNG วางบนการ์ด = เปลี่ยนรูป
  *              ตัวกรองชิป (กว้าง 35/40 · ไม่มีรูป · ปิดอยู่) · ติ๊กหลายใบ → BulkActionBar (เปิด/ปิด/ลบ) · + เพิ่ม · อัปโหลดหลายรูป
- *   แผงแก้ไข   PartEditor ใต้กริด (คอม) หรือ Drawer (มือถือ) — ส่งเฉพาะฟิลด์ที่แก้
- * ของกลางที่ใช้: DataTable · Drawer/ERPModal/ConfirmDialog · BulkActionBar · MoneyInput · ColorInput · AssetPicker · useDragReorder · useToast · useMediaQuery
+ *   แผงแก้ไข   PartEditor ใน Drawer ด้านขวาทุกขนาดจอ (ลากขอบปรับกว้างได้ · ปุ่ม ◀ ▶ ไล่ชิ้นก่อนหน้า/ถัดไปในหัว drawer · ถามก่อนปิด/ข้ามถ้ายังไม่บันทึก) — ส่งเฉพาะฟิลด์ที่แก้
+ * ของกลางที่ใช้: DataTable · Drawer/ERPModal/ConfirmDialog · BulkActionBar · MoneyInput · ColorInput · AssetPicker · useDragReorder · useToast
  * API: /api/belt-builder/* (guardApi belt_builder.view/edit + writeAudit) + /api/website/settings (กลุ่ม 🧵) · กฎ lib/belt-builder.ts
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,7 +18,6 @@ import { BulkActionBar } from "@/components/bulk-action-bar";
 import { ConfirmDialog, Drawer } from "@/components/modal";
 import { moveItem, useDragReorder } from "@/components/sortable-list";
 import { useToast } from "@/components/toast";
-import { useMediaQuery } from "@/lib/use-media-query";
 import { PART_TYPES, PART_TYPE_LABEL, type PartType } from "@/lib/belt-builder";
 import { invalidateRefParts } from "./anchor-editor";
 import { PartCard } from "./studio-part-card";
@@ -42,7 +41,6 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
   const toast = useToast();
   const { can } = useAuth();
   const canEdit = can("belt_builder.edit");
-  const isWide = useMediaQuery("(min-width: 1024px)");
 
   const [shops, setShops] = useState<BeltShop[]>([]);
   const [shopId, setShopId] = useState(shopIdProp ?? "");
@@ -61,7 +59,8 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [confirm, setConfirm] = useState<{ title: string; message: string; danger?: boolean; run: () => Promise<void> } | null>(null);
+  const [confirm, setConfirm] = useState<{ title: string; message: string; danger?: boolean; confirmText?: string; run: () => Promise<void> } | null>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
   const [designsTotal, setDesignsTotal] = useState<number | null>(null);
 
   // ── โหลดร้าน ──
@@ -205,9 +204,23 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
 
   if (shopErr && !shopId) return <div className="p-6 text-sm text-amber-700">⚠ {shopErr} — ต้องเข้าสู่ระบบและมีสิทธิ์ &quot;ดูตั้งค่าออกแบบเข็มขัด&quot; (belt_builder.view)</div>;
 
+  // ── Drawer แก้ไข: ไล่ชิ้นก่อนหน้า/ถัดไปตามลำดับที่แสดงในกริด · ถ้ามีของค้างถามก่อน ──
+  const selIndex = selected ? filtered.findIndex((p) => p.id === selected.id) : -1;
+  const guardThen = (label: string, fn: () => void) => {
+    if (!editorDirty) { fn(); return; }
+    setConfirm({ title: "มีข้อมูลที่ยังไม่ได้บันทึก", message: `${label}โดยไม่บันทึกที่แก้ไว้หรือไม่? (กด "บันทึก" ในแผงก่อน ถ้าต้องการเก็บ)`, confirmText: "ไปต่อโดยไม่บันทึก", run: async () => fn() });
+  };
+  const goTo = (i: number) => { const p = filtered[i]; if (p) setSelectedId(p.id); };
   const editorPanel = selected && (
-    <PartEditor key={selected.id} part={selected} shopId={shopId} canEdit={canEdit} previewWidth={isWide ? 640 : Math.min(640, (typeof window !== "undefined" ? window.innerWidth : 400) - 48)}
-      onSaved={(p) => replacePart(p)} onClose={() => setSelectedId(null)} onDuplicate={(p) => void duplicate(p)} onDelete={askDelete} />
+    <PartEditor key={selected.id} part={selected} shopId={shopId} canEdit={canEdit} onDirtyChange={setEditorDirty}
+      onSaved={(p) => replacePart(p)} onRequestClose={() => guardThen("ปิดแผง", () => setSelectedId(null))} onDuplicate={(p) => void duplicate(p)} onDelete={askDelete} />
+  );
+  const drawerNav = () => (
+    <span className="flex items-center gap-1 text-xs text-slate-500">
+      <button type="button" disabled={selIndex <= 0} onClick={() => guardThen("ไปชิ้นก่อนหน้า", () => goTo(selIndex - 1))} title="ชิ้นก่อนหน้า" className="rounded-md border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-40">◀</button>
+      <span className="tabular-nums">{selIndex + 1}/{filtered.length}</span>
+      <button type="button" disabled={selIndex < 0 || selIndex >= filtered.length - 1} onClick={() => guardThen("ไปชิ้นถัดไป", () => goTo(selIndex + 1))} title="ชิ้นถัดไป" className="rounded-md border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-40">▶</button>
+    </span>
   );
 
   return (
@@ -312,7 +325,7 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
                     <div key={p.id} {...(filtering ? {} : rowProps(i))} className={filtering ? "" : rowCls(i)}>
                       <PartCard part={p} selected={selectedId === p.id} checked={checked.has(p.id)} canEdit={canEdit} busy={busyIds.has(p.id)}
                         dragHandleProps={filtering ? undefined : handleProps(i)}
-                        onSelect={() => setSelectedId(selectedId === p.id ? null : p.id)}
+                        onSelect={() => guardThen("สลับไปชิ้นอื่น", () => setSelectedId(selectedId === p.id ? null : p.id))}
                         onToggleCheck={() => setChecked((s) => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
                         onToggleActive={(next) => void toggleActive(p, next)}
                         onDropFile={(f) => void dropFile(p, f)} />
@@ -321,12 +334,13 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
                 </div>
               )}
 
-              {/* แผงแก้ไข (คอม = ใต้กริด · มือถือ = Drawer) */}
-              {selected && isWide && (
-                <div className="mt-4 rounded-xl border border-indigo-200 bg-white p-4 shadow-sm">{editorPanel}</div>
-              )}
-              {selected && !isWide && (
-                <Drawer open onClose={() => setSelectedId(null)} title={`${PART_TYPE_LABEL[selected.part_type].icon} ${selected.name_th}`} size="xl" storageKey="belt-studio-editor">{editorPanel}</Drawer>
+              {/* แผงแก้ไข = Drawer ด้านขวาทุกขนาดจอ (Drawer ถามเองก่อนปิดถ้า hasUnsavedChanges · ◀ ▶ ที่หัว) */}
+              {selected && (
+                <Drawer open onClose={() => setSelectedId(null)} title={`${PART_TYPE_LABEL[selected.part_type].icon} ${selected.name_th}`}
+                  description={selected.code ?? undefined} size="xl" defaultWidth={980} storageKey="belt-studio-editor-width"
+                  hasUnsavedChanges={editorDirty} headerActions={drawerNav}>
+                  {editorPanel}
+                </Drawer>
               )}
 
               {canEdit && (
@@ -350,7 +364,7 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
       <BulkUploadModal open={bulkOpen} onClose={() => setBulkOpen(false)} parts={partType ? typeList : parts ?? []} shopId={shopId}
         onDone={(updated) => updated.forEach(replacePart)} />
       <ConfirmDialog open={!!confirm} onClose={() => setConfirm(null)} onConfirm={() => void runConfirm()} title={confirm?.title ?? ""} message={confirm?.message ?? ""}
-        variant={confirm?.danger ? "danger" : "default"} confirmText={confirm?.danger ? "ลบ" : "ยืนยัน"} />
+        variant={confirm?.danger ? "danger" : "default"} confirmText={confirm?.confirmText ?? (confirm?.danger ? "ลบ" : "ยืนยัน")} />
     </div>
   );
 }

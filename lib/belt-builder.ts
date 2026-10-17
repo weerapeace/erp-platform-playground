@@ -28,7 +28,7 @@ export type Anchor = { x: number; y: number; w: number; h: number };
 
 /** จุดยึดเริ่มต้นต่อประเภท (ตามที่เจ้าของตัดสินใจ) */
 export const DEFAULT_ANCHOR: Record<PartType, Anchor> = {
-  strap:  { x: 0,   y: 300, w: 1600, h: 150 },
+  strap:  { x: 0,   y: 300, w: 1560, h: 150 },   // รูปสาย = ทั้งเส้นรวมหาง (ปลายแหลม+รู) อยู่ขวา · เว้นขอบขวา 40px ให้หางไม่ชนขอบ (2026-10-17)
   buckle: { x: 0,   y: 225, w: 200,  h: 300 },
   keeper: { x: 235, y: 255, w: 65,   h: 210 },
 };
