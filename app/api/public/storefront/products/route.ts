@@ -38,6 +38,7 @@ import { productSlug } from "@/lib/website-links";
 import { badgeColorOf } from "@/lib/website-card-badges";
 import { readCardBadges } from "@/lib/website-card-badges-db";
 import { withParentCategories } from "@/lib/website-category-tree";
+import { findMaterialLinks, MATERIAL_SELECT, type MaterialRow } from "@/lib/product-materials";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -108,14 +109,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     loadParentImageFields(sb),
   ]);
   // 📏 รายการกลาง "ใส่อะไรได้บ้าง" + ✅ "รายละเอียดเพิ่ม (ติ๊ก)" (ตารางเล็ก) → หัวข้อ "ขนาด" / ต่อท้าย "รายละเอียดสินค้า"
-  const [{ data: fitRows }, { data: hlRows }, { data: toneRows }, cardBadges] = await Promise.all([
+  const [{ data: fitRows }, { data: hlRows }, { data: toneRows }, cardBadges, { data: matRows }] = await Promise.all([
     sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order").eq("is_active", true).order("sort_order"),
     sb.from("product_highlight_items").select("id, name, name_en, is_active").eq("is_active", true).order("sort_order"),
     // 🎨 โทนสี (ของกลาง) → ตัวเลือกแต่ละสีบอกว่าอยู่โทนไหน (ปุ่ม "กรองตามสี" บนเว็บ · ดู lib/color-tone.ts)
     sb.from("erp_color_tones").select(TONE_SELECT).eq("is_active", true).order("sort_order"),
     // 🏷 ป้ายบนการ์ดของร้าน (ชื่อ + สี) → badgeColor ของแต่ละสินค้า
     readCardBadges(sb, s.id),
+    // 🧵 วัสดุ → ชื่อวัสดุในคำอธิบายลิงก์ไปหน้าวัสดุบนเว็บ (เฉพาะที่มีหน้าแล้ว · lib/product-materials)
+    sb.from("product_materials").select(MATERIAL_SELECT).eq("is_active", true).order("sort_order"),
   ]);
+  const materials = (matRows ?? []) as MaterialRow[];
   const colorTones = ((toneRows ?? []) as Parameters<typeof rowToTone>[0][]).map(rowToTone);
   const fitCatalog = (fitRows ?? []) as FitItem[];
   // 📐 เช็คขนาด (เปิดต่อร้าน): ตุ๊กตา/ของที่มีขนาด × ช่องใส่ของของแต่ละรุ่น → บรรทัด "ใส่ได้" (lib/fit-check)
@@ -210,6 +214,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const personalize = pz?.enabled
         ? { ...pz, imageUrl: imageUrl(pz.imageKey ?? r.images[0] ?? p.cover_image_r2_key ?? ""), positions: pz.positions.filter((x) => x.enabled) }
         : null;
+      const attrs = productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues);
       return {
         id: p.id,
         code,
@@ -219,6 +224,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         // 🌐 ภาษาอังกฤษ (เว็บหน้า /en สลับ <key>_en ให้เอง · ว่าง = ไม่ส่ง → ใช้ไทย)
         ...(r.name_en ? { name_en: r.name_en } : {}),
         ...(r.description_en ? { description_en: r.description_en } : {}),
+        /** 🧵 วัสดุที่พูดถึงในคำอธิบาย (ไทย/อังกฤษ) หรือฟิลด์สเปกที่ส่งออกเว็บ (เช่น Description/วัสดุ) + มีหน้าวัสดุแล้ว → เว็บทำคำเหล่านั้นเป็นลิงก์ /materials/<slug> · ไม่มี = ไม่ส่ง */
+        ...(() => {
+          const links = findMaterialLinks([r.description, r.description_en, ...Object.values(attrs)], materials);
+          return links.length ? { materialLinks: links } : {};
+        })(),
         /** ราคาเป็น "บาท" (ไม่ใช่สตางค์) */
         price: r.price,
         /** ราคาเต็ม (ขีดฆ่า) จาก fake_price ของ Parent SKU — ส่งเฉพาะเมื่อสูงกว่าราคาขาย */
@@ -280,7 +290,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           : r.options2,
         featured: Boolean(l.featured),
         /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
-        attrs: productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues),
+        attrs,
         /** 📏 หัวข้อ "ขนาด": ใส่ได้ + แถว ซม./นิ้ว (เว็บเลือกเองว่าจะต่อนิ้วไหม ตามธีม) — ไม่มีข้อมูล = ไม่ส่ง */
         dimensions: withFitLines(productDimensions(p as unknown as DimensionRow & { fits?: unknown }, fitCatalog), fitOn ? parseCompartments((p as { compartments?: unknown }).compartments) : null, fitTargets),
         /** 📐 ช่องใส่ของ (ขนาดด้านใน ซม.) — เฉพาะร้านที่เปิดเช็คขนาด + รุ่นที่วัดแล้ว · Section "เช็คขนาด" ใช้คิดขนาดที่ลูกค้าพิมพ์เอง */

@@ -12,7 +12,7 @@
  */
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { useSWRLite, invalidateSWR } from "@/lib/swr-lite";
+import { useSWRLite } from "@/lib/swr-lite";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { parseFits, fitSizeOptions, fitLabels, type FitItem, type FitPick } from "@/lib/product-fits";
@@ -48,7 +48,7 @@ export function useTickCatalog(catalog: string) {
 
 export function TickListPicker({ cfg, value, onChange, disabled }: { cfg: TickListConfig; value: unknown; onChange: (v: unknown) => void; disabled?: boolean }) {
   const toast = useToast();
-  const { data: items, loading } = useTickCatalog(cfg.catalog);
+  const { data: items, loading, revalidate } = useTickCatalog(cfg.catalog);
   const picks = parseFits(value);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -75,7 +75,8 @@ export function TickListPicker({ cfg, value, onChange, disabled }: { cfg: TickLi
       });
       const j = await r.json();
       if (!r.ok || j.error || !j.data?.id) throw new Error(j.error || "เพิ่มไม่สำเร็จ");
-      invalidateSWR(keyOf(cfg.catalog));
+      // โหลดรายการใหม่ทันที (invalidateSWR แค่ล้างแคช ไม่โหลดใหม่ → รายการว่างจนกว่าจะสลับแท็บ)
+      await revalidate(true);
       emit([...picks, { id: String(j.data.id) }]);
       setNewName(""); setNewSizes(""); setAdding(false);
       toast.success(`เพิ่ม "${name}" เข้ารายการกลางแล้ว (ใช้ได้ทุกรุ่น)`);

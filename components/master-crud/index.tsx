@@ -70,6 +70,8 @@ const ParentFitField = dynamic(() => import("@/components/parent-fit-picker").th
 const ParentHighlightField = dynamic(() => import("@/components/parent-fit-picker").then((m) => m.ParentHighlightField), { ssr: false });
 // 📐 ช่องใส่ของ (ขนาดด้านใน) ของ Parent SKU — คำนวณว่าใส่ตุ๊กตา/ของอะไรได้ (lib/fit-check)
 const ParentCompartmentsField = dynamic(() => import("@/components/compartments-editor").then((m) => m.ParentCompartmentsField), { ssr: false });
+// 📝 ปุ่ม "＋ แทรก" ข้างหัวข้อช่องคำอธิบาย (ทะเบียนฟิลด์ ui_style.insert_details) — ข้อความสำเร็จรูป/วัสดุ/ช่อง+ตัวเลข
+const DetailInsertButton = dynamic(() => import("@/components/detail-insert").then((m) => m.DetailInsertButton), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -2835,19 +2837,38 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           //   สลับได้ทั้งฟอร์ม (ปุ่มบน) หรือทีละช่อง (ปุ่ม TH/EN ข้างหัวข้อ — เจ้าของขอ 2026-10-17 "บางช่องไม่ต้องมี 2 ภาษา")
           const langPair = (f: FieldDef) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "");
           const enKeys = new Set(baseVisible.map(langPair).filter(Boolean));
-          const visibleFields =
-            enKeys.size === 0 ? baseVisible
-            : baseVisible.flatMap((f) => {
+          // 📝 ปุ่ม "＋ แทรก" ข้างหัวข้อ (ทะเบียนฟิลด์ ui_style.insert_details) → แทรกช่องไทย + คู่อังกฤษ (ถ้ามี) ในคราวเดียว
+          //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (quickSave ทีละช่อง · audit ของกลางเหมือนดับเบิลคลิกแก้)
+          const insertBtn = (f: FieldDef, enKey: string): React.ReactNode => {
+            if (!(f.uiStyle as Record<string, unknown> | undefined)?.insert_details) return null;
+            if (!canEdit || f.readonly || (drawerMode === "view" && !editingId)) return null;
+            const viewMode = drawerMode === "view";
+            return (
+              <DetailInsertButton thText={String(form[f.key] ?? "")} enText={enKey ? String(form[enKey] ?? "") : ""} hasEn={!!enKey}
+                saveLabel={viewMode ? tr("แทรกและบันทึก", "Insert & save") : undefined}
+                onApply={async ({ th, en }) => {
+                  const withEn = !!enKey && en !== undefined;
+                  if (!viewMode) { updateForm({ [f.key]: th, ...(withEn ? { [enKey]: en } : {}) }); return true; }
+                  const e1 = await quickSave(f.key, th);
+                  if (e1) { fail(e1); return false; }
+                  if (withEn) { const e2 = await quickSave(enKey, en ?? ""); if (e2) { fail(e2); return false; } }
+                  flash(tr("แทรกรายละเอียดแล้ว", "Details inserted"));
+                  return true;
+                }} />
+            );
+          };
+          const visibleFields = baseVisible.flatMap((f) => {
                 if (enKeys.has(f.key)) return [];             // ช่องอังกฤษ: ไม่โชว์ที่ตำแหน่งเดิมของมัน
                 const pair = langPair(f);
-                if (!pair) return [f];
-                const en = baseVisible.find((x) => x.key === pair);
-                if (!en) return [f];                          // ยังไม่มีช่องอังกฤษคู่นี้ → คงช่องไทยไว้
+                const en = pair ? baseVisible.find((x) => x.key === pair) : undefined;
+                const btn = insertBtn(f, en ? pair : "");
+                if (!en) return [btn ? { ...f, labelAddon: btn } : f];   // ไม่มีคู่อังกฤษ (หรือยังไม่โชว์) → คงช่องไทยไว้
                 const m = langField[f.key] ?? langMode;
                 const pill = <LangPill mode={m} enFilled={en.type === "computed" || String(form[pair] ?? "").trim() !== ""} onChange={(nm) => setLangField((p) => ({ ...p, [f.key]: nm }))} />;
+                const addon = <>{pill}{btn}</>;
                 return m === "th"
-                  ? [{ ...f, labelAddon: pill }]
-                  : [{ ...en, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? en.formSpan, labelAddon: pill }];
+                  ? [{ ...f, labelAddon: addon }]
+                  : [{ ...en, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? en.formSpan, labelAddon: addon }];
               });
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
           // ปุ่มลบรูป (เฉพาะตอนดู + มีสิทธิ์แก้ + มีรูป) — โผล่ตอน hover
