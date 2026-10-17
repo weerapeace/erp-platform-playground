@@ -111,6 +111,13 @@ export const GRADIENT_ANGLES: { value: number; label: string }[] = [
 ];
 /** แกลเลอรีรูปของแบบโชว์เคส: editorial = เลื่อนซ้าย-ขวาเต็มจอ+ซูม (แบบ gucci) · spotlight = รูปเดียวบนวงกลม */
 export type ProductGalleryStyle = "editorial" | "spotlight";
+/** 🧵 กดชื่อวัสดุในรายละเอียดสินค้า → page หน้าเต็ม · drawer แผงจากขวา · modal ป๊อปกลางจอ (เว็บร้าน components/materials/MaterialViewer) */
+export type ProductMaterialView = "page" | "drawer" | "modal";
+export const MATERIAL_VIEWS: { value: ProductMaterialView; label: string; hint: string }[] = [
+  { value: "drawer", label: "แผงเลื่อนจากขวา", hint: "แนะนำ · ลูกค้าอยู่หน้าสินค้าต่อ · มือถือเลื่อนขึ้นจากล่าง" },
+  { value: "modal", label: "ป๊อปกลางจอ แบบนิตยสาร", hint: "รูปผิววัสดุซ้าย ข้อความขวา · เด่นสุดเมื่อมีรูปวัสดุ" },
+  { value: "page", label: "ไปหน้าวัสดุเต็ม", hint: "เปิดหน้าใหม่ /materials/… รูปเต็มจอ + เรื่องราว (ค่าเดิม)" },
+];
 /** รายละเอียดสินค้า: accordion = พับเก็บ · tabs = แท็บ · plain = เรียงต่อกัน */
 export type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 /** หัวข้อพับเก็บเริ่มต้นเป็นอย่างไร: first = เปิดหัวข้อแรก · closed = พับหมด · all = ขยายหมด */
@@ -945,6 +952,8 @@ export interface SiteTheme {
     /** (เก่า) แยกเป็นแท็บ — ใช้ detailsStyle แทน เก็บไว้ให้ค่าที่บันทึกก่อนหน้ายังอ่านได้ */
     showTabs: boolean;
     galleryStyle: ProductGalleryStyle;
+    /** 🧵 กดชื่อวัสดุ → เปิดแบบไหน (ค่าเริ่ม page = ไปหน้าเต็มเหมือนเดิม) */
+    materialView: ProductMaterialView;
     detailsStyle: ProductDetailsStyle;
     detailsOpen: ProductDetailsOpen;
     /** ชุดรายละเอียดสินค้า (หัวข้อพับเก็บ/แท็บ) */
@@ -1326,7 +1335,7 @@ export const DEFAULT_THEME: SiteTheme = {
   cart: { ...DEFAULT_CART },
   page: { transition: "fade", smoothScroll: false },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -1682,6 +1691,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       })(),
       showTabs: pd.showTabs !== false,
       galleryStyle: pick(pd.galleryStyle, ["editorial", "spotlight"] as const, d.product.galleryStyle),
+      materialView: pick(pd.materialView, ["page", "drawer", "modal"] as const, d.product.materialView),
       // ค่าที่บันทึกก่อนมี detailsStyle: showTabs=false เคยหมายถึง "เรียงต่อกัน"
       detailsStyle: pick(pd.detailsStyle, ["accordion", "tabs", "plain"] as const, pd.showTabs === false ? "plain" : d.product.detailsStyle),
       detailsOpen: pick(pd.detailsOpen, ["first", "closed", "all"] as const, d.product.detailsOpen),

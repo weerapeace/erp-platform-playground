@@ -55,6 +55,8 @@ import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/componen
 import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
 import { CartSettings } from "@/components/website-cart-settings";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
+import { MaterialViewSetting } from "@/components/website-material-view-setting";
+import type { ProductMaterialView } from "@/lib/website-theme";
 import type { OverPages } from "@/lib/website-header-over";
 import type { CartConfig } from "@/lib/website-cart";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
@@ -108,7 +110,7 @@ interface Theme {
   /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts };
 }
 
 interface Choices {
@@ -1618,6 +1620,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   );
                 })}
               </div>
+
+              <MaterialViewSetting value={theme.product.materialView} onChange={(materialView) => setProduct({ materialView })} brand={theme.colors.brand} />
 
               {theme.product.layout === "showcase" && (
                 <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
