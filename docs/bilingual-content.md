@@ -28,7 +28,7 @@
 |---|---|
 | `lib/content-i18n.ts` | กฎกลาง (ไม่ผูก React): `enKey` · `pickText`/`pickList` (เลือกภาษา + fallback ไทย) · `translationStatus` · `translationPatch`/`confirmPatch` · `coverageOf` |
 | `lib/content-translate.ts` | ส่งไปแปลที่ `/api/ai/translate` (`kind: "content"`) แบ่งชุดเอง คืนลำดับตรงกับที่ส่ง |
-| `components/bilingual-field.tsx` | widget: `ContentLangProvider` · `ContentLangSwitch` · `TranslationBar` · `BilingualField` · `BilingualText` · `TranslationChip` |
+| `components/bilingual-field.tsx` | widget: `ContentLangProvider` · `ContentLangSwitch` · `TranslationBar` · `BilingualField` · `BilingualText` · `TranslationChip` · `RecordLangBar` |
 | `lib/website-i18n.ts` | ต่อกฎเข้ากับ Schema ของหน้าเว็บ: ช่องไหนแปลได้ · ทำความสะอาด `_en` ตอน normalize · รวบรวมช่องที่ขาด · ใส่คำแปลทีเดียวหลายช่อง |
 
 ## ใช้ยังไง
@@ -44,6 +44,19 @@
 
 `onPatch` อาจได้หลายช่องพร้อมกัน (`name_en` + `_i18n`) — รวมเข้า object ทั้งก้อน
 ถ้าเก็บในตาราง DB ต้องมีคอลัมน์ `<key>_en` (+ `i18n jsonb` ถ้าอยากเก็บสถานะ) และ API ต้องยอมรับช่องนั้น
+
+### การ์ดแก้ "1 รายการ" (เช่น หมวดหมู่ — ทำให้แล้ว) — `RecordLangBar`
+
+แถบเดียวจบ: ปุ่ม 🇹🇭 ไทย | 🇬🇧 EN + "อังกฤษ x/y" + 🌐 แปลที่ยังขาด (นับเฉพาะช่องที่มีอักษรไทย · ช่องที่แปล/แก้เองไม่ถูกทับ)
+
+```tsx
+<ContentLangProvider lang={lang} onLangChange={setLang}>
+  <RecordLangBar value={row} keys={["label", "blurb"]} onPatch={(p) => patch(row.key, p)} />
+  <BilingualText label="ชื่อหมวด" value={row} fieldKey="label" onPatch={(p) => patch(row.key, p)} />
+</ContentLangProvider>
+```
+
+ใช้จริง: แท็บ 📂 หมวดหมู่ (`components/website-categories-panel.tsx`) — ชื่อ · คำอธิบาย · ชื่อ/คำอธิบายใน Google · ตัวอย่างผลค้นหาโชว์ตามภาษาที่กำลังแก้ (`/en/c/<รหัส>`)
 
 ### ช่องในฟอร์ม Section (ทำให้แล้ว)
 

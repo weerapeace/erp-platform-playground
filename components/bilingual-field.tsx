@@ -8,6 +8,7 @@
  *   <TranslationBar/>       แถบความครบ "อังกฤษ 3/5" + ปุ่ม 🌐 แปลที่ยังขาด
  *   <BilingualField/>       โครงช่อง: โหมดไทย = ช่องไทย + ป้ายสถานะ · โหมด EN = ช่องอังกฤษ + ไทยให้ดูเทียบ + ปุ่มแปล/ตรวจแล้ว
  *   <BilingualText/>        ช่องข้อความสำเร็จรูป ใช้กับ object ที่เก็บตามกฎกลาง (key + key_en + _i18n)
+ *   <RecordLangBar/>        แถบสลับภาษา + ความครบ + แปลที่ยังขาด ของ "1 รายการ" (หมวด/คอลเลกชัน/…) — ส่ง object + ช่องที่แปลได้
  *
  * กฎการเก็บข้อมูล: lib/content-i18n.ts · เอกสาร: docs/bilingual-content.md
  * ไม่มี Provider ครอบ = โชว์ช่องไทยแบบเดิม (ที่เรียกใช้เก่าไม่เปลี่ยน)
@@ -15,6 +16,7 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import {
   confirmPatch,
+  coverageOf,
   enKey,
   needsTranslation,
   readMeta,
@@ -322,5 +324,56 @@ export function BilingualText({
       onTranslate={() => tx.run([th], (out) => onPatch(translationPatch(value, fieldKey, th, out[0], true)))}
       onConfirm={() => onPatch(confirmPatch(value, fieldKey, th))}
     />
+  );
+}
+
+/**
+ * 🌐 แถบสลับภาษาของ "1 รายการ" — ปุ่ม 🇹🇭 ไทย | 🇬🇧 EN + "อังกฤษ x/y" + 🌐 แปลที่ยังขาด
+ * ใช้คู่กับ ContentLangProvider ที่ครอบการ์ดแก้รายการนั้น แล้วเปลี่ยนช่องข้อความเป็น BilingualText
+ *   <ContentLangProvider><RecordLangBar value={cat} keys={["label","blurb"]} onPatch={(p) => patch(cat.key, p)} /> …</ContentLangProvider>
+ * นับเฉพาะช่องที่มีภาษาไทย (ช่องที่เป็นอังกฤษอยู่แล้ว/ว่าง ไม่ต้องแปล) · แปลแล้วติดป้าย AI รอตรวจ (ช่องที่แปล/แก้เองไม่ถูกทับ)
+ */
+export function RecordLangBar({
+  value,
+  keys,
+  onPatch,
+  note,
+  className = "",
+}: {
+  value: Record<string, unknown>;
+  keys: readonly string[];
+  onPatch: (patch: Record<string, unknown>) => void;
+  /** ข้อความเล็กบนแถบ (เช่น "หน้าเว็บ /en ใช้ค่านี้") */
+  note?: string;
+  className?: string;
+}) {
+  const meta = readMeta(value);
+  const slots = keys
+    .filter((k) => needsTranslation(value[k]))
+    .map((k) => ({ key: k, th: textOf(value[k]), status: translationStatus(value[k], value[enKey(k)], meta[k]) }));
+  const tx = useTranslateOne();
+  const translateMissing = () => {
+    const todo = slots.filter((x) => x.status === "empty" || x.status === "stale");
+    if (!todo.length) return;
+    void tx.run(
+      todo.map((x) => x.th),
+      (out) => {
+        let acc = { ...value };
+        let patch: Record<string, unknown> = {};
+        todo.forEach((x, i) => {
+          if (!out[i]?.trim()) return;
+          const p = translationPatch(acc, x.key, x.th, out[i].trim(), true);
+          acc = { ...acc, ...p };
+          patch = { ...patch, ...p };
+        });
+        onPatch(patch);
+      },
+    );
+  };
+  return (
+    <div className={className}>
+      {note && <p className="text-[11px] text-slate-500 mb-1.5">{note}</p>}
+      <TranslationBar coverage={coverageOf(slots)} busy={tx.busy} error={tx.error} onTranslateMissing={translateMissing} />
+    </div>
   );
 }

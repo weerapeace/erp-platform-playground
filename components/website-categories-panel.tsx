@@ -26,6 +26,8 @@ import { categoryTree, reorderCategoryTree, childCategories, topCategories, fami
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SaveBar } from "@/components/save-bar";
 import { TranslateButton } from "@/components/translation-table";
+import { BilingualText, ContentLangProvider, RecordLangBar } from "@/components/bilingual-field";
+import { pickText, type ContentLang } from "@/lib/content-i18n";
 import { CATEGORY_TEXT_KEYS } from "@/lib/website-field-map";
 
 /** ชนิดข้อมูลตอนลากการ์ดสินค้า (กันรับของที่ลากมาจากที่อื่น) */
@@ -145,6 +147,9 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     setCats(next);
   };
   const patchCat = (key: string, p: Partial<WebCategoryDef>) => editCats(cats.map((c) => (c.key === key ? { ...c, ...p } : c)));
+  // 🌐 ภาษาที่กำลังแก้ในการ์ดหมวด (ไทย/EN) — ช่องข้อความ = BilingualText · ตัวอย่างใน Google โชว์ตามภาษานี้
+  const [editLang, setEditLang] = useState<ContentLang>("th");
+  const patchI18n = (key: string, p: Record<string, unknown>) => patchCat(key, p as Partial<WebCategoryDef>);
 
   /* ── สินค้า ↔ หมวด (บันทึกทันที) ── */
   const setCategoriesOf = async (items: { parentId: string; categories: string[] }[], category: string, okMsg: string) => {
@@ -169,6 +174,8 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   };
 
   const sel = cats.find((c) => c.key === selKey) ?? null;
+  // หมวดที่เลือกแบบ object ทั่วไป (ช่อง _en/_i18n ที่ widget 2 ภาษาอ่าน/เขียน)
+  const selRec = (sel ?? {}) as unknown as Record<string, unknown>;
   useEffect(() => setPicked(new Set()), [selKey]);
   // สินค้าในหมวด เรียงตามที่ลากไว้ (ตัวที่ยังไม่อยู่ในลำดับ ต่อท้ายตามลำดับรวมของร้าน)
   const inCat = useMemo(() => {
@@ -337,12 +344,17 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         {/* ขวา: หมวดที่เลือก */}
         {sel ? (
           <div className="space-y-4">
+            <ContentLangProvider lang={editLang} onLangChange={setEditLang}>
             <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+              {/* 🌐 สลับ ไทย | EN ทั้งการ์ด (ของกลาง RecordLangBar) — ชื่อ/คำอธิบาย/ชื่อและคำอธิบายใน Google */}
+              <RecordLangBar
+                value={selRec}
+                keys={CATEGORY_TEXT_KEYS}
+                onPatch={(p) => patchI18n(sel.key, p)}
+                note={editLang === "en" ? "🇬🇧 กำลังแก้ภาษาอังกฤษ — หน้าเว็บ /en ใช้ค่านี้ · ช่องที่ว่าง ลูกค้าเห็นภาษาไทยแทน" : undefined}
+              />
               <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-                <div>
-                  <label className={labelCls}>ชื่อหมวด</label>
-                  <input value={sel.label} onChange={(e) => patchCat(sel.key, { label: e.target.value.slice(0, 60) })} className={inputCls} />
-                </div>
+                <BilingualText label="ชื่อหมวด" maxLength={60} value={selRec} fieldKey="label" onPatch={(p) => patchI18n(sel.key, p)} />
                 <div>
                   <label className={labelCls}>ไอคอน (ถ้าไม่มีรูป)</label>
                   <input value={sel.icon} onChange={(e) => patchCat(sel.key, { icon: e.target.value.slice(0, 8) })} className={inputCls} placeholder="👜" />
@@ -374,31 +386,45 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                       : "เลือกหมวดแม่ = ทำเป็นหมวดย่อย"}
                 </span>
               </div>
-              <div>
-                <label className={labelCls}>คำอธิบาย (ใต้ชื่อหมวด / บนหน้าหมวด)</label>
-                <textarea value={sel.blurb} onChange={(e) => patchCat(sel.key, { blurb: e.target.value.slice(0, 240) })} rows={2} className={inputCls} />
-              </div>
+              <BilingualText label="คำอธิบาย (ใต้ชื่อหมวด / บนหน้าหมวด)" multiline rows={2} maxLength={240} value={selRec} fieldKey="blurb" onPatch={(p) => patchI18n(sel.key, p)} />
               {/* 🔎 หน้าหมวดใน Google — หน้า /c/<รหัส> ของเว็บร้านใช้ค่านี้เป็น title/description */}
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
                 <p className="text-xs font-semibold text-slate-700">🔎 หน้าหมวดใน Google <span className="font-normal text-slate-400">· ว่าง = ใช้ชื่อหมวด/คำอธิบายด้านบน</span></p>
-                <div>
-                  <label className={labelCls}>
-                    ชื่อใน Google <span className={(sel.seoTitle ?? "").length > 60 ? "text-amber-600" : "text-slate-400"}>({(sel.seoTitle ?? "").length}/70 · แนะนำไม่เกิน 60)</span>
-                  </label>
-                  <input value={sel.seoTitle ?? ""} onChange={(e) => patchCat(sel.key, { seoTitle: e.target.value.slice(0, 70) })} className={inputCls} placeholder={`${sel.label} | ชื่อร้าน`} />
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    คำอธิบายใน Google <span className={(sel.seoDescription ?? "").length > 155 ? "text-amber-600" : "text-slate-400"}>({(sel.seoDescription ?? "").length}/170 · แนะนำ 70–155)</span>
-                  </label>
-                  <textarea value={sel.seoDescription ?? ""} onChange={(e) => patchCat(sel.key, { seoDescription: e.target.value.slice(0, 170) })} rows={2} className={inputCls} placeholder={sel.blurb || "เช่น กระเป๋าถือดีไซน์น่ารัก งานคุณภาพ ส่งไวทั่วไทย"} />
-                </div>
-                {/* ตัวอย่างหน้าตาผลค้นหา */}
-                <div className="rounded-md bg-white border border-slate-200 px-3 py-2">
-                  <p className="text-[11px] text-emerald-700 truncate">…/c/{sel.key}</p>
-                  <p className="text-sm text-blue-700 truncate">{(sel.seoTitle ?? "").trim() || `${sel.label} | ชื่อร้าน`}</p>
-                  <p className="text-xs text-slate-600 line-clamp-2">{(sel.seoDescription ?? "").trim() || sel.blurb || "(ยังไม่มีคำอธิบาย — Google จะดึงข้อความจากหน้ามาเอง)"}</p>
-                </div>
+                {(() => {
+                  // นับตัวอักษรตามภาษาที่กำลังแก้ (Google ตัดตามความยาวจริงของแต่ละภาษา)
+                  const t = pickText(selRec, "seoTitle", editLang);
+                  const d = pickText(selRec, "seoDescription", editLang);
+                  const lab = pickText(selRec, "label", editLang);
+                  const blurb = pickText(selRec, "blurb", editLang);
+                  return (
+                    <>
+                      <BilingualText
+                        label={`ชื่อใน Google (${t.length}/70 · แนะนำไม่เกิน 60)`}
+                        maxLength={70}
+                        placeholder={`${sel.label} | ชื่อร้าน`}
+                        value={selRec}
+                        fieldKey="seoTitle"
+                        onPatch={(p) => patchI18n(sel.key, p)}
+                      />
+                      <BilingualText
+                        label={`คำอธิบายใน Google (${d.length}/170 · แนะนำ 70–155)`}
+                        multiline
+                        rows={2}
+                        maxLength={170}
+                        placeholder={sel.blurb || "เช่น กระเป๋าถือดีไซน์น่ารัก งานคุณภาพ ส่งไวทั่วไทย"}
+                        value={selRec}
+                        fieldKey="seoDescription"
+                        onPatch={(p) => patchI18n(sel.key, p)}
+                      />
+                      {/* ตัวอย่างหน้าตาผลค้นหา (ตามภาษาที่กำลังแก้ · อังกฤษว่าง = ไทย) */}
+                      <div className="rounded-md bg-white border border-slate-200 px-3 py-2">
+                        <p className="text-[11px] text-emerald-700 truncate">…{editLang === "en" ? "/en" : ""}/c/{sel.key}</p>
+                        <p className="text-sm text-blue-700 truncate">{t.trim() || `${lab} | ชื่อร้าน`}</p>
+                        <p className="text-xs text-slate-600 line-clamp-2">{d.trim() || blurb || "(ยังไม่มีคำอธิบาย — Google จะดึงข้อความจากหน้ามาเอง)"}</p>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <ImageSlot label="รูปหมวด (การ์ด/แถบหมวดหน้าแรก)" k={sel.imageKey} aspect="1 / 1" onPick={() => setChooser("imageKey")} onClear={() => patchCat(sel.key, { imageKey: null })} />
@@ -413,6 +439,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                 </button>
               </div>
             </div>
+            </ContentLangProvider>
 
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-center gap-2 mb-3">
