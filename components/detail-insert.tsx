@@ -137,7 +137,8 @@ function categoryPath(id: string, byId: Map<string, CategoryRow>): string {
 }
 
 const SIDE_LABEL: Record<string, string> = { inside: "ด้านใน", outside: "ด้านนอก", "": "ไม่ระบุตำแหน่ง" };
-const sideRank = (s: string | null | undefined) => (s === "inside" ? 0 : s === "outside" ? 1 : 2);
+// เจ้าของขอ: ด้านนอกอยู่บน → ด้านใน → ไม่ระบุ (ทั้งในแท็บช่องและบรรทัดที่แทรก — lib/detail-snippets slotGroups)
+const sideRank = (s: string | null | undefined) => (s === "outside" ? 0 : s === "inside" ? 1 : 2);
 
 export function DetailInsertButton({
   thText,

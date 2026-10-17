@@ -151,18 +151,18 @@ describe("รูปแบบบรรทัดกลาง (⚙️) — คำ�
 });
 
 describe("รอบ 5 — ช่องด้านใน/นอก · อังกฤษเอกพจน์ · ชุดรายการตามประเภท", () => {
-  it("ช่องแยกบรรทัด ด้านใน → ด้านนอก → ไม่ระบุ", () => {
+  it("ช่องแยกบรรทัด ด้านนอก → ด้านใน → ไม่ระบุ", () => {
     const main = { id: "a", name: "ช่องซิปหลัก", name_en: "Main zip compartment", kind: "slot", slot_side: "inside" };
     const bill = { id: "b", name: "ช่องใส่ธนบัตร", name_en: "Bill compartment", kind: "slot", slot_side: "inside", template_en: "{n} bill compartments" };
     const front = { id: "c", name: "ช่องซิปด้านหน้า", name_en: "Front zip pocket", kind: "slot", slot_side: "outside" };
     const r = composeLines({ phrases: [], materials: [], slots: [{ item: main, n: 1 }, { item: bill, n: 1 }, { item: front, n: 1 }, { item: card, n: 2 }] });
     expect(r.th).toEqual([
-      "- ด้านในกระเป๋า: ช่องซิปหลัก 1 ช่อง และ ช่องใส่ธนบัตร 1 ช่อง",
       "- ด้านนอก: ช่องซิปด้านหน้า 1 ช่อง",
+      "- ด้านในกระเป๋า: ช่องซิปหลัก 1 ช่อง และ ช่องใส่ธนบัตร 1 ช่อง",
       "- ช่องใส่บัตรเครดิต 2 ช่อง",
     ]);
     // 1 ชิ้น = เอกพจน์อัตโนมัติ
-    expect(r.en[0]).toBe("- Inside: Main zip compartment × 1 and 1 bill compartment");
+    expect(r.en[1]).toBe("- Inside: Main zip compartment × 1 and 1 bill compartment");
     expect(r.pairs).toHaveLength(3);
   });
   it("อังกฤษเอกพจน์/พหูพจน์ + {s}", () => {

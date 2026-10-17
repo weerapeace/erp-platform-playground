@@ -234,12 +234,12 @@ export function slotLine(picks: { item: SnippetItem; n: number }[], lang: Lang, 
   return withLead(lead(tpl, kind, lang), joinList(parts as string[], lang, tpl));
 }
 
-/** แยกช่องตามตำแหน่ง → กลุ่มบรรทัด: ด้านใน → ด้านนอก → ไม่ระบุ */
+/** แยกช่องตามตำแหน่ง → กลุ่มบรรทัด: ด้านนอก → ด้านใน → ไม่ระบุ (เรียงเหมือนแท็บช่องในป๊อป) */
 export function slotGroups<T extends { item: SnippetItem; n: number }>(picks: T[]): { kind: "slot_in" | "slot_out" | "slot"; picks: T[] }[] {
   const by = (s: string | null) => picks.filter((p) => (p.item.slot_side === "inside" ? "inside" : p.item.slot_side === "outside" ? "outside" : null) === s);
   return [
-    { kind: "slot_in" as const, picks: by("inside") },
     { kind: "slot_out" as const, picks: by("outside") },
+    { kind: "slot_in" as const, picks: by("inside") },
     { kind: "slot" as const, picks: by(null) },
   ].filter((g) => g.picks.some((p) => p.n > 0));
 }
