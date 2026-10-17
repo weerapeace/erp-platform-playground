@@ -16,6 +16,7 @@ import { useToast } from "@/components/toast";
 import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
 import { WebsiteCategoriesPanel } from "@/components/website-categories-panel";
 import { WebsiteCollectionsPanel } from "@/components/website-collections-panel";
+import { WebsiteNewDropsPanel } from "@/components/website-new-drops-panel";
 import { WebsiteThemePanel } from "@/components/website-theme-panel";
 import { WebsiteLayoutPanel } from "@/components/website-layout-panel";
 import { WebsitePagesPanel } from "@/components/website-pages-panel";
@@ -44,7 +45,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  type TabKey = "listings" | "categories" | "collections" | "fieldmap" | "design" | "layout" | "pages" | "info" | "i18n" | "orders" | "coupons" | "members";
+  type TabKey = "listings" | "categories" | "collections" | "newdrops" | "fieldmap" | "design" | "layout" | "pages" | "info" | "i18n" | "orders" | "coupons" | "members";
   const [tab, setTab] = useState<TabKey>("listings");
   // ⚠️ สลับแท็บตอนแท็บเดิมยังไม่บันทึก → ถามก่อน (เดิมของที่แก้หายเงียบ)
   const guard = useUnsavedGuardHost();
@@ -163,6 +164,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               { k: "listings", l: "สินค้าบนเว็บ" },
               { k: "categories", l: "📂 หมวดหมู่" },
               { k: "collections", l: "🎞 คอลเลกชัน" },
+              { k: "newdrops", l: "🆕 มาใหม่" },
               { k: "fieldmap", l: "⚙️ จับคู่ฟิลด์" },
               { k: "design", l: "🎨 ดีไซน์" },
               { k: "layout", l: "🧱 หน้าแรก" },
@@ -219,6 +221,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
 
         {/* แท็บคอลเลกชัน (เปิดหน้า /collection/<ลิงก์> + แบนเนอร์/เรื่องราว/Google) */}
         {tab === "collections" && shop && <WebsiteCollectionsPanel shopSlug={shop.slug} shopId={shop.id} siteUrl={shop.siteUrl} />}
+        {tab === "newdrops" && shop && <WebsiteNewDropsPanel shopSlug={shop.slug} shopId={shop.id} />}
 
         {/* แท็บจับคู่ฟิลด์ */}
         {tab === "fieldmap" && shop && <WebsiteFieldMapPanel shopSlug={shop.slug} shopId={shop.id} />}

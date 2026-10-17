@@ -33,6 +33,7 @@ import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
 import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
+import { dropFromRow, hiddenDropCodes, liveDropByCode } from "@/lib/website-new-drops";
 import { rowToTone, tonesOfLabel, TONE_SELECT } from "@/lib/color-tone";
 import { productSlug } from "@/lib/website-links";
 import { badgeColorOf } from "@/lib/website-card-badges";
@@ -82,6 +83,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (s.status !== "active") return json({ shop: shopSlug, products: [] });
 
   const fieldMap = normalizeFieldMap(s.field_map);
+  // 🆕 มาใหม่เป็นชุด: รุ่นในชุดที่ยังไม่ถึงเวลาเปิด (ตั้งซ่อน) = ไม่ส่งออกเว็บเลย · รุ่นในชุดที่เปิดอยู่ = แนบ newDrop (ป้าย "ใหม่" + Section)
+  const { data: dropRows } = await sb.from("store_new_drops").select("id, start_at, end_at, codes, hide_until_start").eq("shop_id", s.id);
+  const drops = ((dropRows ?? []) as Record<string, unknown>[]).map(dropFromRow);
+  const dropHidden = hiddenDropCodes(drops);
+  const dropLive = liveDropByCode(drops);
 
   const { data: listData } = await sb
     .from("store_listings")
@@ -208,6 +214,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const r = resolveProduct(fieldMap, p, kids, l, cat);
 
       const code = p.code ?? "";
+      if (dropHidden.has(code.toUpperCase())) return null;
+      const liveDrop = dropLive.get(code.toUpperCase());
       const detailOverrides = cleanDetailOverrides(l.web_details);
       // 🔤 ปั๊มชื่อ: ส่งเฉพาะรุ่นที่เปิดไว้ (รูปฉาก → URL · ไม่ได้เลือก = รูปแรกของสินค้า)
       const pz = l.web_personalize ? normalizePersonalize(l.web_personalize) : null;
@@ -219,6 +227,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         id: p.id,
         code,
         slug: slugify(code),
+        /** 🆕 อยู่ในชุดมาใหม่ที่เปิดอยู่ (ป้าย "ใหม่" ถึง endAt · Section แหล่ง "ชุดมาใหม่") */
+        newDrop: liveDrop ? { id: liveDrop.id, startAt: liveDrop.startAt, endAt: liveDrop.endAt } : undefined,
         name: r.name,
         description: r.description,
         // 🌐 ภาษาอังกฤษ (เว็บหน้า /en สลับ <key>_en ให้เอง · ว่าง = ไม่ส่ง → ใช้ไทย)

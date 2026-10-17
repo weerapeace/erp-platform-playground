@@ -258,7 +258,7 @@ export interface ProductsBlock extends BlockBase {
   type: "products";
   eyebrow: string;
   title: string;
-  source: "manual" | "category" | "featured" | "new" | "best" | "sale" | "all" | "skus";
+  source: "manual" | "category" | "featured" | "new" | "newdrop" | "best" | "sale" | "all" | "skus";
   /** เรียง: ตามแหล่ง · ราคาถูก→แพง · แพง→ถูก · ใหม่ล่าสุด */
   sort?: "default" | "price-asc" | "price-desc" | "newest";
   /** รหัสรุ่น (parent code) ที่เลือกเอง */

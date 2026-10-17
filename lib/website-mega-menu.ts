@@ -344,7 +344,7 @@ export function megaPreset(template: MegaTemplate, ctx: { categories: { key: str
   const base: MegaPanel = { template, layout: template === "C" ? "tabs" : "columns", blocks: [], tabs: [], cardsPerRow: 4, viewAllLabel: "", width: "full", bg: "", divider: false, promo: "", promoHref: "", mobileHideMedia: false };
   if (template === "A") {
     const list = newMegaBlock("links", "");
-    list.links = [newMegaLink("ดูทั้งหมด", "/shop"), newMegaLink("มาใหม่", "/shop?sort=new"), ...cats.map((c) => newMegaLink("", megaCategoryHref(c.key)))];
+    list.links = [newMegaLink("ดูทั้งหมด", "/shop"), newMegaLink("มาใหม่", "/new"), ...cats.map((c) => newMegaLink("", megaCategoryHref(c.key)))];
     const prods = newMegaBlock("products", "");
     prods.span = 2;
     prods.count = 6;
@@ -618,6 +618,6 @@ export function megaLinkIssue(href: string, ctx: { categories: Set<string>; prod
   const col = /^\/collection\/([^/?#]+)/.exec(h);
   if (col && ctx.collections) return ctx.collections.has(decodeURIComponent(col[1])) ? null : "คอลเลกชันนี้ไม่มีแล้ว";
   const page = /^\/([a-z0-9-]+)$/i.exec(h);
-  if (page && !["shop", "contact", "about", "oem", "quote", "track", "account", "checkout", "gallery", "privacy"].includes(page[1].toLowerCase())) return ctx.pages.has(page[1]) ? null : "หน้านี้ไม่มีแล้ว";
+  if (page && !["shop", "new", "cart", "contact", "about", "oem", "quote", "track", "account", "checkout", "gallery", "privacy"].includes(page[1].toLowerCase())) return ctx.pages.has(page[1]) ? null : "หน้านี้ไม่มีแล้ว";
   return null;
 }

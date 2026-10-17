@@ -37,6 +37,7 @@ import { writeAudit } from "@/lib/audit";
 import { beltDesignLine, type BeltDesignRow } from "@/lib/belt-builder-order";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { customerLang, type CustomerLang } from "@/lib/customer-messages";
+import { dropFromRow, hiddenDropCodes } from "@/lib/website-new-drops";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -326,7 +327,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     for (const d of (bd ?? []) as BeltDesignRow[]) beltById.set(d.id, d);
   }
 
-  const [{ data: listData }, { data: parents }, { data: children }, { data: swatchRows }] = await Promise.all([
+  const [{ data: listData }, { data: parents }, { data: children }, { data: swatchRows }, { data: dropRows }] = await Promise.all([
     sb
       .from("store_listings")
       .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status")
@@ -336,7 +337,10 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
     // 🌐 ชื่อสีภาษาอังกฤษ (ทะเบียนสีกลาง) — เก็บคู่ไทยในรายการสินค้า ให้ลูกค้าหน้า /en เห็นภาษาเดียวกับตอนเลือก
     sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
+    // 🆕 ชุดมาใหม่ที่ยังไม่ถึงเวลาเปิด (ตั้งซ่อน) — ห้ามสั่งก่อนเวลา (กันลิงก์/ตะกร้าเก่า)
+    sb.from("store_new_drops").select("id, start_at, end_at, codes, hide_until_start").eq("shop_id", shop.id),
   ]);
+  const dropHidden = hiddenDropCodes(((dropRows ?? []) as Record<string, unknown>[]).map(dropFromRow));
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const enOf = (s: string) => swatches.english(s) || s;
 
@@ -376,6 +380,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     if (!listing || !listing.is_published || !parent) {
       return { ok: false, error: "มีสินค้าที่ไม่ได้เปิดขายบนเว็บแล้ว กรุณาเอาออกจากตะกร้า", status: 409 };
     }
+    if (dropHidden.has(String(parent.code ?? "").toUpperCase())) return { ok: false, error: "มีสินค้าที่ยังไม่ถึงเวลาเปิดขาย กรุณาเอาออกจากตะกร้า", status: 409 };
     const kids = kidsByParent.get(parent.id) ?? [];
     const resolved = resolveProduct(
       fieldMap,

@@ -1695,6 +1695,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "category", l: "ทั้งหมวด" },
           { v: "featured", l: "ที่ติ๊ก ★ แนะนำ" },
           { v: "new", l: "สินค้าใหม่ (ขึ้นร้านล่าสุดก่อน)" },
+          { v: "newdrop", l: "🆕 ชุดมาใหม่ที่เปิดอยู่ (แท็บ 🆕 มาใหม่)" },
           { v: "best", l: "ขายดี (ยอดขายบนเว็บ)" },
           { v: "sale", l: "กำลังลดราคา (มีราคาขีดฆ่า)" },
           { v: "all", l: "สินค้าทั้งหมด (ตามลำดับร้าน)" },
@@ -1713,7 +1714,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "parent", l: "1 การ์ด / รุ่น (เดิม · มีจุดสี)" },
           { v: "sku", l: "1 การ์ด / SKU (แยกทุกสี)" },
         ],
-        showIf: { key: "source", eq: ["manual", "category", "featured", "new", "best", "sale", "all"] },
+        showIf: { key: "source", eq: ["manual", "category", "featured", "new", "newdrop", "best", "sale", "all"] },
       }),
       f("skuOrder", "เรียงการ์ด SKU", "select", {
         group: "products",
@@ -1722,7 +1723,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "mix", l: "สลับรุ่น (สีแรกของทุกรุ่นก่อน)" },
           { v: "group", l: "เรียงต่อกันทีละรุ่น" },
         ],
-        showIf: [{ key: "source", eq: ["manual", "category", "featured", "new", "best", "sale", "all"] }, { key: "cardMode", eq: "sku" }],
+        showIf: [{ key: "source", eq: ["manual", "category", "featured", "new", "newdrop", "best", "sale", "all"] }, { key: "cardMode", eq: "sku" }],
       }),
       f("category", "หมวด", "category", { group: "products", default: "", showIf: { key: "source", eq: "category" } }),
       f("sort", "เรียงลำดับ", "select", {
@@ -1807,6 +1808,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       if (src === "category") return `หมวด ${s(b.category) || "(ยังไม่เลือก)"}`;
       if (src === "featured") return "สินค้าที่ติ๊กแนะนำ";
       if (src === "new") return "สินค้าใหม่";
+      if (src === "newdrop") return "ชุดมาใหม่ที่เปิดอยู่";
       if (src === "best") return "ขายดี";
       if (src === "sale") return "กำลังลดราคา";
       if (src === "skus") return count((b.skus as unknown[])?.length ?? 0, "SKU ที่เลือก");

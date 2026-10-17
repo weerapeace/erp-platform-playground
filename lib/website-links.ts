@@ -36,6 +36,7 @@ export const sectionHref = (blockId: string) => `#s-${blockId}`;
 export const BASE_PAGES: { href: string; label: string }[] = [
   { href: "/", label: "หน้าแรก" },
   { href: "/shop", label: "สินค้าทั้งหมด" },
+  { href: "/new", label: "🆕 มาใหม่ (ชุดมาใหม่ · แท็บ 🆕 มาใหม่)" },
   { href: "/contact", label: "ติดต่อเรา" },
   { href: "/track", label: "ติดตามออเดอร์" },
 ];
