@@ -32,6 +32,7 @@ import { uploadResizedImage } from "@/components/image-attach";
 import { useFooterSave } from "@/components/footer-save";
 import { CopyButton } from "@/components/copy-button";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
+import { RestockBadge } from "@/components/website-restock-panel";
 import type { ListingIssue } from "@/lib/website-listing-health";
 import { CompartmentsEditor } from "@/components/compartments-editor";
 import type { Compartment } from "@/lib/fit-check";
@@ -508,7 +509,11 @@ export function ParentWebListings({
         <div className="grid gap-2 sm:grid-cols-3">
           <Field label={`หน่วยขาย${s.auto.unit ? ` (อัตโนมัติ: ${s.auto.unit})` : ""}`} value={s.webUnit} onChange={(v) => patchShop(s.shopId, { webUnit: v })} placeholder={s.auto.unit || "ชิ้น / ใบ / หลา"} />
           <label className="block">
-            <span className={labelCls}>สถานะสต๊อกบนเว็บ</span>
+            <span className={`${labelCls} flex items-center gap-1.5 flex-wrap`}>
+              สถานะสต๊อกบนเว็บ
+              {/* 🔔 ลูกค้าที่ฝากให้แจ้งเมื่อมีของ (โชว์เมื่อมีคนรอ) */}
+              {parentId && <RestockBadge shopId={s.shopId} parentId={parentId} soldOut={(s.webStockStatus || "in") === "out"} />}
+            </span>
             <select value={s.webStockStatus || "in"} onChange={(e) => patchShop(s.shopId, { webStockStatus: e.target.value })} className={inputCls}>
               {STOCKS.map((x) => (
                 <option key={x.value} value={x.value}>

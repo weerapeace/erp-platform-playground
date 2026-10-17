@@ -12,6 +12,7 @@ import { MiniTable } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
+import { RestockCard } from "@/components/website-restock-panel";
 
 type FieldDef = {
   key: string;
@@ -123,6 +124,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       </div>
 
       <SubscribersCard shopSlug={shopSlug} />
+      <RestockCard shopSlug={shopSlug} cardCls={cardCls} />
       <GiftCardsEditor open={cardsOpen} onClose={() => setCardsOpen(false)} shopSlug={shopSlug} shopId={shopId} />
 
       <div className="grid gap-4 lg:grid-cols-2">

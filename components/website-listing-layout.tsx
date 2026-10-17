@@ -83,6 +83,10 @@ export function ListingLayoutSettings({
             <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={value.header.showCount} onChange={(e) => setHeader({ showCount: e.target.checked })} />
             ข้อความ "พบ N รายการ"
           </label>
+          <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer" title="เลื่อนลงดูสินค้าแล้ว แถบค้นหา · ปุ่มตัวกรอง · การเรียง ยังติดอยู่บนจอ (ใต้หัวเว็บ)">
+            <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={value.stickyBar} onChange={(e) => set({ stickyBar: e.target.checked })} />
+            📌 แถบค้นหา/ตัวกรอง/เรียง ติดบนจอตอนเลื่อน
+          </label>
           <span className="text-[11px] text-slate-400">หน้าหมวดใช้ชื่อ/คำอธิบายของหมวด (ตั้งที่ เว็บไซต์ → หมวดหมู่)</span>
         </div>
       </div>

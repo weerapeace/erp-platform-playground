@@ -66,6 +66,8 @@ export interface ListingConfig {
   header: ListingHeader;
   /** 🚫 สินค้าที่ตั้ง "สินค้าหมด": normal = ตามลำดับเดิม · last = ไปท้ายรายการ · hide = ไม่โชว์ในหน้ารายการ */
   soldOut: ListingSoldOut;
+  /** 📌 แถบค้นหา/ตัวกรอง/เรียง ติดบนจอตอนเลื่อนลง (อยู่ใต้หัวเว็บถ้าหัวเว็บติดจอ) */
+  stickyBar: boolean;
 }
 export type ListingSoldOut = "normal" | "last" | "hide";
 export const LISTING_SOLD_OUT: { value: ListingSoldOut; label: string; hint: string }[] = [
@@ -230,7 +232,7 @@ export const normalizeSizeBreaks = (v: unknown) => {
 
 
 export const MAX_LISTING_INSERTS = 20;
-export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER }, soldOut: "last" };
+export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER }, soldOut: "last", stickyBar: false };
 
 export const LISTING_SIZES: { value: ListingInsertSize; label: string; hint: string }[] = [
   { value: "1x1", label: "1 ช่อง (เท่าการ์ดสินค้า)", hint: "มือถือ: 1 ช่อง" },
@@ -311,7 +313,7 @@ export function normalizeListing(raw: unknown): ListingConfig {
 }
 
 /** 📐 ต่อแถว · 📄 แบ่งหน้า · ↕ การเรียง · หัวหน้า (ส่วนที่เพิ่มรอบ 2026-10-17) */
-function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig, "columns" | "paging" | "pageSize" | "defaultSort" | "sorts" | "header" | "soldOut"> {
+function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig, "columns" | "paging" | "pageSize" | "defaultSort" | "sorts" | "header" | "soldOut" | "stickyBar"> {
   const int = (v: unknown, fb: number, lo: number, hi: number) => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : fb;
@@ -336,6 +338,7 @@ function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig,
     sorts,
     header: { eyebrow: txt(h.eyebrow, 60), title: txt(h.title, 80), subtitle: txt(h.subtitle, 240), showSearch: h.showSearch !== false, showCount: h.showCount !== false },
     soldOut: r.soldOut === "normal" || r.soldOut === "hide" ? r.soldOut : "last",
+    stickyBar: r.stickyBar === true,
   };
 }
 
