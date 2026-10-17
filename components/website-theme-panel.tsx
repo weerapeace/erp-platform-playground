@@ -846,7 +846,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           </div>
           <div>
             <label className={labelCls}>ความสูงโลโก้ · {theme.logo.height}px</label>
-            <input type="range" min={20} max={80} value={theme.logo.height} onChange={(e) => setLogo({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+            <input type="range" min={16} max={200} value={theme.logo.height} onChange={(e) => setLogo({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+            <p className="text-[11px] text-slate-500 mt-1">Header สูงขึ้นตามโลโก้ให้เอง · บนมือถือโลโก้สูงสุด 80px</p>
           </div>
           <div>
             <label className={labelCls}>อักษรในกล่อง (1-4 ตัว)</label>
@@ -1125,7 +1126,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className={labelCls}>ความสูง · {theme.header.height}px</label>
-                  <input type="range" min={48} max={120} value={theme.header.height} onChange={(e) => setHeader({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+                  <input type="range" min={48} max={240} value={theme.header.height} onChange={(e) => setHeader({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
                 </div>
                 <div>
                   <label className={labelCls}>สีพื้นหลัง</label>

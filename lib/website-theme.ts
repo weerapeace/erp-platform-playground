@@ -1582,7 +1582,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       imageKey: key(l.imageKey),
       imageDarkKey: key(l.imageDarkKey),
       faviconKey: key(l.faviconKey),
-      height: num(l.height, d.logo.height, 20, 80),
+      height: num(l.height, d.logo.height, 16, 200),
       placeholder: (() => {
         const p = (l.placeholder && typeof l.placeholder === "object" ? l.placeholder : {}) as Record<string, unknown>;
         const dp = DEFAULT_IMAGE_PLACEHOLDER;
@@ -1597,7 +1597,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       })(),
     },
     header: {
-      height: num(h.height, d.header.height, 48, 120),
+      height: num(h.height, d.header.height, 48, 240),
       sticky: h.sticky !== false,
       bg: pick(h.bg, ["surface", "page", "ink", "brand", "transparent"] as const, d.header.bg),
       menuAlign: pick(h.menuAlign, ["left", "center", "right"] as const, d.header.menuAlign),
