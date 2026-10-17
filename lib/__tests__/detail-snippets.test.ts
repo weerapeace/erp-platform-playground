@@ -149,3 +149,48 @@ describe("รูปแบบบรรทัดกลาง (⚙️) — คำ�
     expect(alreadyMentions("", "size")).toBe(false);
   });
 });
+
+describe("รอบ 5 — ช่องด้านใน/นอก · อังกฤษเอกพจน์ · ชุดรายการตามประเภท", () => {
+  it("ช่องแยกบรรทัด ด้านใน → ด้านนอก → ไม่ระบุ", () => {
+    const main = { id: "a", name: "ช่องซิปหลัก", name_en: "Main zip compartment", kind: "slot", slot_side: "inside" };
+    const bill = { id: "b", name: "ช่องใส่ธนบัตร", name_en: "Bill compartment", kind: "slot", slot_side: "inside", template_en: "{n} bill compartments" };
+    const front = { id: "c", name: "ช่องซิปด้านหน้า", name_en: "Front zip pocket", kind: "slot", slot_side: "outside" };
+    const r = composeLines({ phrases: [], materials: [], slots: [{ item: main, n: 1 }, { item: bill, n: 1 }, { item: front, n: 1 }, { item: card, n: 2 }] });
+    expect(r.th).toEqual([
+      "- ด้านในกระเป๋า: ช่องซิปหลัก 1 ช่อง และ ช่องใส่ธนบัตร 1 ช่อง",
+      "- ด้านนอก: ช่องซิปด้านหน้า 1 ช่อง",
+      "- ช่องใส่บัตรเครดิต 2 ช่อง",
+    ]);
+    // 1 ชิ้น = เอกพจน์อัตโนมัติ
+    expect(r.en[0]).toBe("- Inside: Main zip compartment × 1 and 1 bill compartment");
+    expect(r.pairs).toHaveLength(3);
+  });
+  it("อังกฤษเอกพจน์/พหูพจน์ + {s}", () => {
+    expect(slotText({ id: "x", name: "ช่อง", kind: "slot", template_en: "{n} card slots" }, 1, "en")).toBe("1 card slot");
+    expect(slotText({ id: "x", name: "ช่อง", kind: "slot", template_en: "{n} card slots" }, 2, "en")).toBe("2 card slots");
+    expect(slotText({ id: "x", name: "ช่อง", kind: "slot", template_en: "{n} pouches" }, 1, "en")).toBe("1 pouch");
+    expect(slotText({ id: "x", name: "ช่อง", kind: "slot", template_en: "{n} pocket{s} inside" }, 1, "en")).toBe("1 pocket inside");
+    expect(slotText({ id: "x", name: "ช่อง", kind: "slot", template_en: "{n} pocket{s} inside" }, 3, "en")).toBe("3 pockets inside");
+  });
+  it("ชุดรายการ: ไล่หมวดขึ้นไปหาหมวดแม่ · ไม่มีชุด = null · กรองรายการ", async () => {
+    const { normalizeProfiles, pickProfile, profileAllows } = await import("@/lib/detail-snippets");
+    const ps = normalizeProfiles([
+      { id: "wallet", name: "กระเป๋าสตางค์", categoryIds: ["cat-wallet"], tabs: ["phrase", "slot", "bogus"], items: { slot: ["s1"] }, sizeFields: ["w", "zz"] },
+      { id: "", name: "ไม่มี id" },
+      { id: "belt", name: "เข็มขัด", categoryIds: ["cat-belt-a", "cat-belt-b"] },
+    ]);
+    expect(ps.map((p) => p.id)).toEqual(["wallet", "belt"]);
+    expect(ps[0].tabs).toEqual(["phrase", "slot"]);
+    expect(ps[0].sizeFields).toEqual(["w"]);
+    expect(ps[1].tabs).toBeNull();
+    const parentOf = new Map<string, string | null>([["cat-wallet-long", "cat-wallet"], ["cat-wallet", "lm"], ["lm", null]]);
+    expect(pickProfile(ps, "cat-wallet-long", parentOf)?.id).toBe("wallet");
+    expect(pickProfile(ps, "cat-belt-b", parentOf)?.id).toBe("belt");
+    expect(pickProfile(ps, "other", parentOf)).toBeNull();
+    expect(pickProfile(ps, null, parentOf)).toBeNull();
+    expect(profileAllows(ps[0], "slot", "s1")).toBe(true);
+    expect(profileAllows(ps[0], "slot", "s2")).toBe(false);
+    expect(profileAllows(ps[0], "phrase", "anything")).toBe(true);
+    expect(profileAllows(null, "slot", "s2")).toBe(true);
+  });
+});

@@ -20,6 +20,8 @@ export type SnippetItem = {
   kind?: string | null;
   template?: string | null;
   template_en?: string | null;
+  /** ชนิด slot: ช่องอยู่ด้านใน/ด้านนอก (null = ไม่ระบุ → รวมบรรทัดเดียว) */
+  slot_side?: string | null;
   sort_order?: number | null;
   is_active?: boolean | null;
 };
@@ -35,7 +37,7 @@ const fill = (tpl: string, name: string, n: number) => tpl.replace(/\{name\}/g, 
 
 /* ─────────── รูปแบบบรรทัดกลาง ─────────── */
 
-export type LineKind = "material" | "slot" | "fit" | "size" | "weight" | "handle" | "strap";
+export type LineKind = "material" | "slot" | "slot_in" | "slot_out" | "fit" | "size" | "weight" | "handle" | "strap";
 export type BracketKind = "phrase" | "material" | "slot" | "fit";
 
 export type InsertTemplates = {
@@ -45,11 +47,34 @@ export type InsertTemplates = {
   enInBrackets: Record<BracketKind, boolean>;
   /** คำนำหน้าบรรทัด (ว่าง = ไม่มี) */
   prefix: Record<LineKind, { th: string; en: string }>;
+  /** ชุดรายการตามประเภทสินค้า (เช่น กระเป๋าสตางค์ / เข็มขัด) — เลือกอัตโนมัติจากหมวดสินค้า */
+  profiles: InsertProfile[];
+};
+
+export type InsertTab = "phrase" | "material" | "slot" | "size" | "fit";
+export type CatalogKind = "phrase" | "material" | "slot" | "fit";
+export const INSERT_TABS: InsertTab[] = ["phrase", "material", "slot", "size", "fit"];
+/** ช่องตัวเลขในแท็บขนาด (กว้าง สูง หนา น้ำหนัก หูหิ้ว สาย สายยาวสุด) */
+export const INSERT_SIZE_KEYS = ["w", "h", "d", "g", "hd", "s1", "s2"] as const;
+
+export type InsertProfile = {
+  id: string;
+  name: string;
+  /** หมวดสินค้าที่ใช้ชุดนี้ (รวมหมวดย่อยข้างใต้อัตโนมัติ) */
+  categoryIds: string[];
+  /** แท็บที่โชว์ (null = ทุกแท็บ) */
+  tabs: InsertTab[] | null;
+  /** รายการที่โชว์ในแต่ละแท็บ (null/ไม่มี = ทุกรายการ) */
+  items: Partial<Record<CatalogKind, string[] | null>>;
+  /** ช่องตัวเลขที่โชว์ในแท็บขนาด (null = ทุกช่อง) */
+  sizeFields: string[] | null;
 };
 
 export const LINE_KIND_LABEL: Record<LineKind, string> = {
   material: "วัสดุ",
-  slot: "ช่อง",
+  slot: "ช่อง (ไม่ระบุ)",
+  slot_in: "ช่องด้านใน",
+  slot_out: "ช่องด้านนอก",
   fit: "ใส่อะไรได้",
   size: "ขนาด",
   weight: "น้ำหนัก",
@@ -63,13 +88,64 @@ export const DEFAULT_INSERT_TEMPLATES: InsertTemplates = {
   prefix: {
     material: { th: "วัสดุ:", en: "Material:" },
     slot: { th: "", en: "" },
+    slot_in: { th: "ด้านในกระเป๋า:", en: "Inside:" },
+    slot_out: { th: "ด้านนอก:", en: "Outside:" },
     fit: { th: "ใส่ได้:", en: "Fits:" },
     size: { th: "ขนาด:", en: "Size:" },
     weight: { th: "น้ำหนัก:", en: "Weight:" },
     handle: { th: "ความสูงหูหิ้ว:", en: "Handle drop:" },
     strap: { th: "ความยาวสายสะพาย:", en: "Strap drop:" },
   },
+  profiles: [],
 };
+
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const strList = (v: unknown, max: number, ok?: (s: string) => boolean): string[] =>
+  Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && ID_RE.test(x) && (!ok || ok(x))))].slice(0, max) : [];
+
+/** ชุดรายการจาก DB → ถูกรูปเสมอ (ไม่มีชื่อ/id = ทิ้ง) · null = "ทั้งหมด" */
+export function normalizeProfiles(raw: unknown): InsertProfile[] {
+  if (!Array.isArray(raw)) return [];
+  const out: InsertProfile[] = [];
+  for (const x of raw.slice(0, 30)) {
+    const r = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+    const id = typeof r.id === "string" && ID_RE.test(r.id) ? r.id : "";
+    const name = typeof r.name === "string" ? r.name.replace(/\s+/g, " ").trim().slice(0, 40) : "";
+    if (!id || !name || out.some((p) => p.id === id)) continue;
+    const it = (r.items && typeof r.items === "object" ? r.items : {}) as Record<string, unknown>;
+    const items: InsertProfile["items"] = {};
+    for (const k of ["phrase", "material", "slot", "fit"] as CatalogKind[]) if (Array.isArray(it[k])) items[k] = strList(it[k], 500);
+    out.push({
+      id,
+      name,
+      categoryIds: strList(r.categoryIds, 100),
+      tabs: Array.isArray(r.tabs) ? (strList(r.tabs, 5, (s) => (INSERT_TABS as string[]).includes(s)) as InsertTab[]) : null,
+      items,
+      sizeFields: Array.isArray(r.sizeFields) ? strList(r.sizeFields, 7, (s) => (INSERT_SIZE_KEYS as readonly string[]).includes(s)) : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * ชุดของสินค้าจากหมวด: ไล่จากหมวดของสินค้าขึ้นไปหาหมวดแม่ — เจอชุดที่ผูกหมวดชั้นไหนก่อนใช้ชุดนั้น (หมวดย่อยได้ชุดของหมวดแม่)
+ * ไม่มีหมวด / ไม่มีชุดไหนผูก = null (โชว์ทั้งหมด)
+ */
+export function pickProfile(profiles: InsertProfile[], categoryId: string | null | undefined, parentOf: Map<string, string | null>): InsertProfile | null {
+  let cur = categoryId ?? null;
+  for (let depth = 0; cur && depth < 12; depth++) {
+    const hit = profiles.find((p) => p.categoryIds.includes(cur as string));
+    if (hit) return hit;
+    cur = parentOf.get(cur) ?? null;
+  }
+  return null;
+}
+
+/** รายการในแท็บนี้ตามชุด (ไม่มีชุด/ไม่ได้จำกัด = ทุกรายการ) */
+export function profileAllows(profile: InsertProfile | null, kind: CatalogKind, id: string): boolean {
+  const ids = profile?.items[kind];
+  return !ids || ids.includes(id);
+}
 
 /** ค่าจาก DB (หรือที่ส่งมาบันทึก) → ครบทุกช่องเสมอ · ช่องที่ไม่ส่ง = ค่าเริ่มต้น · คำเชื่อมเก็บช่องว่างหน้า/หลังไว้ */
 export function normalizeInsertTemplates(raw: unknown): InsertTemplates {
@@ -99,6 +175,7 @@ export function normalizeInsertTemplates(raw: unknown): InsertTemplates {
     prefix: Object.fromEntries(
       (Object.keys(D.prefix) as LineKind[]).map((k) => [k, { th: str(p[k]?.th, D.prefix[k].th), en: str(p[k]?.en, D.prefix[k].en) }])
     ) as InsertTemplates["prefix"],
+    profiles: normalizeProfiles(r.profiles),
   };
 }
 
@@ -139,16 +216,32 @@ export function slotText(it: SnippetItem, n: number, lang: Lang, tpl: InsertTemp
   if (!tplEn && !name) return null;
   if (!tplEn) return fill(DEFAULT_SLOT_TEMPLATE_EN, name, n);
   if (tplEn.includes("{name}") && !name) return null;
-  return fill(tplEn, name, n);
+  return countEn(tplEn, fill(tplEn.replace(/\{s\}/g, n === 1 ? "" : "s"), name, n), n);
+}
+
+/** อังกฤษ 1 ชิ้น = เอกพจน์: "{n} bill compartments" + 1 → "1 bill compartment" (ใส่ {s} ในรูปแบบ = คุมเอง) */
+function countEn(tplEn: string, s: string, n: number): string {
+  if (n !== 1 || tplEn.includes("{s}") || !tplEn.includes("{n}")) return s;
+  return s.replace(/([A-Za-z]+)$/, (w) => (/(ches|shes|sses|xes|zes)$/i.test(w) ? w.slice(0, -2) : /[^su]s$/i.test(w) ? w.slice(0, -1) : w));
 }
 
 /** หลายช่องรวมบรรทัดเดียว "ช่องหลัก 2 ช่อง, ช่องซิป 2 ช่อง และ ช่องใส่บัตร 1 ช่อง" · อังกฤษขาดตัวไหน = null ทั้งบรรทัด */
-export function slotLine(picks: { item: SnippetItem; n: number }[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
+export function slotLine(picks: { item: SnippetItem; n: number }[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES, kind: "slot" | "slot_in" | "slot_out" = "slot"): string | null {
   const used = picks.filter((p) => p.n > 0);
   if (!used.length) return null;
   const parts = used.map((p) => slotText(p.item, p.n, lang, tpl));
   if (parts.some((x) => !x)) return null;
-  return withLead(lead(tpl, "slot", lang), joinList(parts as string[], lang, tpl));
+  return withLead(lead(tpl, kind, lang), joinList(parts as string[], lang, tpl));
+}
+
+/** แยกช่องตามตำแหน่ง → กลุ่มบรรทัด: ด้านใน → ด้านนอก → ไม่ระบุ */
+export function slotGroups<T extends { item: SnippetItem; n: number }>(picks: T[]): { kind: "slot_in" | "slot_out" | "slot"; picks: T[] }[] {
+  const by = (s: string | null) => picks.filter((p) => (p.item.slot_side === "inside" ? "inside" : p.item.slot_side === "outside" ? "outside" : null) === s);
+  return [
+    { kind: "slot_in" as const, picks: by("inside") },
+    { kind: "slot_out" as const, picks: by("outside") },
+    { kind: "slot" as const, picks: by(null) },
+  ].filter((g) => g.picks.some((p) => p.n > 0));
 }
 
 /** วัสดุหลายตัวรวมบรรทัดเดียว "วัสดุ: A และ B" / "Material: A and B" · อังกฤษขาดชื่อ = null */
@@ -226,6 +319,8 @@ export function fitLine(entries: FitEntry[], lang: Lang, tpl: InsertTemplates = 
 const DUP_WORDS: Record<LineKind, string[]> = {
   material: ["วัสดุ"],
   slot: [],
+  slot_in: ["ด้านใน"],
+  slot_out: ["ด้านนอก"],
   fit: ["ใส่ได้"],
   size: ["ขนาด"],
   weight: ["น้ำหนัก"],
@@ -283,23 +378,25 @@ export function composeLines(
     fits?: FitEntry[] | null;
   },
   tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES
-): { th: string[]; en: string[]; enMissing: number } {
+): { th: string[]; en: string[]; enMissing: number; pairs: { th: string; en: string | null }[] } {
   const th: string[] = [];
   const en: string[] = [];
+  const pairs: { th: string; en: string | null }[] = [];
   let enMissing = 0;
   const push = (t: string | null, e: string | null) => {
     if (!t) return;
     th.push(withPrefix(t));
+    pairs.push({ th: withPrefix(t), en: e ? withPrefix(e) : null });
     if (e) en.push(withPrefix(e));
     else enMissing += 1;
   };
   for (const p of sel.phrases) push(phraseText(p, "th", tpl), phraseText(p, "en", tpl));
   push(materialLine(sel.materials, "th", tpl), materialLine(sel.materials, "en", tpl));
-  push(slotLine(sel.slots, "th", tpl), slotLine(sel.slots, "en", tpl));
+  for (const g of slotGroups(sel.slots)) push(slotLine(g.picks, "th", tpl, g.kind), slotLine(g.picks, "en", tpl, g.kind));
   if (sel.size) push(sizeLine(sel.size, "th", tpl), sizeLine(sel.size, "en", tpl));
   if (sel.weight != null) push(weightLine(sel.weight, "th", tpl), weightLine(sel.weight, "en", tpl));
   if (sel.handle != null) push(handleLine(sel.handle, "th", tpl), handleLine(sel.handle, "en", tpl));
   if (sel.strap) push(strapLine(sel.strap.min, sel.strap.max, "th", tpl), strapLine(sel.strap.min, sel.strap.max, "en", tpl));
   if (sel.fits?.length) push(fitLine(sel.fits, "th", tpl), fitLine(sel.fits, "en", tpl));
-  return { th, en, enMissing };
+  return { th, en, enMissing, pairs };
 }

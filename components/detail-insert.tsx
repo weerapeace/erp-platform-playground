@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useTickCatalog } from "@/components/tick-list-field";
+import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { uploadResizedImage } from "@/components/image-attach";
 import { useSWRLite } from "@/lib/swr-lite";
 import {
@@ -31,9 +32,13 @@ import {
   isSlot,
   joinList,
   normalizeInsertTemplates,
+  pickProfile,
+  profileAllows,
+  INSERT_TABS,
   slotText,
   splitLines,
   type BracketKind,
+  type InsertProfile,
   type InsertTemplates,
   type LineKind,
   type SnippetItem,
@@ -41,13 +46,14 @@ import {
 import { hasMaterialPage, type MaterialRow } from "@/lib/product-materials";
 import { fitSizeOptions, parseFits, type FitItem, type FitPick } from "@/lib/product-fits";
 import { translateContent } from "@/lib/content-translate";
+import { bestFit, fitTargetOf, parseCompartments, type Compartment } from "@/lib/fit-check";
 
 // กด "🔗 มีหน้า" ที่วัสดุ = เปิดระเบียนวัสดุ (drawer ตัวจริงของหน้า master · แก้คำอธิบาย/วิธีดูแล/รูปได้) — ต้อง dynamic กัน import วนกับ master-crud
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type Tab = "phrase" | "material" | "slot" | "size" | "fit";
 type CatalogKind = "phrase" | "slot" | "material" | "fit";
-type FitRow = FitItem & { kind?: string | null; image_key?: string | null };
+type FitRow = FitItem & { kind?: string | null; image_key?: string | null; width_cm?: number | null; height_cm?: number | null; depth_cm?: number | null; is_soft?: boolean | null; size_estimated?: boolean | null };
 
 const SNIP = "product_highlight_items";
 const MAT = "product_materials";
@@ -106,6 +112,32 @@ function useInsertTemplates() {
     return normalizeInsertTemplates(j.data);
   }, { dedupeMs: 60000 });
 }
+
+type CategoryRow = { id: string; name: string; parent_id?: string | null; is_active?: boolean | null };
+
+/** หมวดสินค้า (ผูกชุดรายการ) — แคชข้ามป๊อป */
+function useCategories() {
+  return useSWRLite<CategoryRow[]>("insert-categories", async () => {
+    const j = await apiFetch("/api/master-v2/product_categories?limit=1000").then((r) => r.json());
+    return ((j.data ?? []) as CategoryRow[]).filter((c) => c.is_active !== false);
+  }, { dedupeMs: 300000 });
+}
+
+/** ชื่อหมวดพร้อมหมวดแม่ "Louis Montini › เข็มขัด" (ชื่อหมวดซ้ำกันได้หลายที่) */
+function categoryPath(id: string, byId: Map<string, CategoryRow>): string {
+  const parts: string[] = [];
+  let cur: string | null | undefined = id;
+  for (let i = 0; cur && i < 4; i++) {
+    const c = byId.get(cur);
+    if (!c) break;
+    parts.unshift(c.name);
+    cur = c.parent_id;
+  }
+  return parts.join(" › ");
+}
+
+const SIDE_LABEL: Record<string, string> = { inside: "ด้านใน", outside: "ด้านนอก", "": "ไม่ระบุตำแหน่ง" };
+const sideRank = (s: string | null | undefined) => (s === "inside" ? 0 : s === "outside" ? 1 : 2);
 
 export function DetailInsertButton({
   thText,
@@ -180,22 +212,36 @@ function DetailInsertModal({
   onClose: () => void;
 }) {
   const toast = useToast();
-  const { data: snipRows, loading: snipLoading, revalidate: reloadSnips } = useTickCatalog(SNIP);
-  const { data: matRows, loading: matLoading, revalidate: reloadMats } = useTickCatalog(MAT);
-  const { data: fitRows, loading: fitLoading, revalidate: reloadFits } = useTickCatalog(FIT);
+  const { data: snipRows, loading: snipLoading, revalidate: reloadSnips, mutate: mutateSnips } = useTickCatalog(SNIP);
+  const { data: matRows, loading: matLoading, revalidate: reloadMats, mutate: mutateMats } = useTickCatalog(MAT);
+  const { data: fitRows, loading: fitLoading, revalidate: reloadFits, mutate: mutateFits } = useTickCatalog(FIT);
   const { data: tplData, revalidate: reloadTpl } = useInsertTemplates();
+  const { data: catRows } = useCategories();
   const baseTpl = tplData ?? DEFAULT_INSERT_TEMPLATES;
   const snips = (snipRows ?? []) as unknown as SnippetItem[];
   const mats = (matRows ?? []) as unknown as MaterialRow[];
   // ตุ๊กตา/ฟิกเกอร์ = ระบบคำนวณจากช่องใส่ของเอง (ไม่ติ๊ก — เหมือน FIT_CFG)
-  const fitItems = ((fitRows ?? []) as FitRow[]).filter((x) => x.kind !== "doll");
-  const phraseItems = snips.filter((x) => !isSlot(x));
-  const slotItems = snips.filter(isSlot);
+  const allFits = ((fitRows ?? []) as FitRow[]).filter((x) => x.kind !== "doll");
+  const allPhrase = snips.filter((x) => !isSlot(x));
+  const allSlot = snips.filter(isSlot);
 
-  const numFields = NUM_FIELDS.filter((f) => writable.includes(f.field));
+  // 🗂 ชุดรายการตามประเภทสินค้า (⚙️ › ชุดตามประเภท) — เลือกให้เองจากหมวดของสินค้า · สลับได้ในป๊อป
+  const categories = useMemo(() => catRows ?? [], [catRows]);
+  const parentOf = useMemo(() => new Map(categories.map((c) => [c.id, c.parent_id ?? null])), [categories]);
+  const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+  const productCat = typeof values.category_id === "string" ? values.category_id : null;
+  const autoProfile = pickProfile(baseTpl.profiles, productCat, parentOf);
+  const [profileSel, setProfileSel] = useState<string | null>(null); // null = อัตโนมัติ · "__all" = ไม่กรอง
+  const profile: InsertProfile | null = profileSel === null ? autoProfile : profileSel === "__all" ? null : baseTpl.profiles.find((p) => p.id === profileSel) ?? null;
+  const phraseItems = allPhrase.filter((x) => profileAllows(profile, "phrase", x.id));
+  const slotItems = allSlot.filter((x) => profileAllows(profile, "slot", x.id));
+  const visMats = mats.filter((x) => profileAllows(profile, "material", x.id));
+  const fitItems = allFits.filter((x) => profileAllows(profile, "fit", x.id));
+
+  const numFields = NUM_FIELDS.filter((f) => writable.includes(f.field) && (!profile?.sizeFields || profile.sizeFields.includes(f.k)));
   const has = (k: NumK) => numFields.some((f) => f.k === k);
   const canFit = writable.includes("fits");
-  const tabs = TABS.filter((t) => (t.key === "size" ? numFields.length > 0 : t.key === "fit" ? canFit : true));
+  const tabs = TABS.filter((t) => (t.key === "size" ? numFields.length > 0 : t.key === "fit" ? canFit : true) && (!profile?.tabs || profile.tabs.includes(t.key)));
 
   const lines = useMemo(() => splitLines(thText), [thText]);
   const enLines = useMemo(() => splitLines(enText), [enText]);
@@ -240,16 +286,37 @@ function DetailInsertModal({
     if (t === "size") setSizeSeen(true);
     if (t === "fit") setFitSeen(true);
   };
+  // ชุดที่เลือกไม่มีแท็บที่เปิดอยู่ → ย้ายไปแท็บแรกของชุด
+  const tabKeys = tabs.map((t) => t.key).join(",");
+  useEffect(() => {
+    const keys = tabKeys.split(",").filter(Boolean) as Tab[];
+    if (keys.length && !keys.includes(tab)) setTab(keys[0]);
+  }, [tabKeys, tab]);
 
-  const fitEntries = fits
-    .map((p) => {
-      const it = fitItems.find((x) => x.id === p.id);
-      return it ? { th: it.name, en: it.name_en, size: p.size } : null;
+  // 📐 ตรวจซ้ำว่าของใส่ได้จริงไหม (ของกลาง lib/fit-check เหมือนระบบเทียบขนาด) — เทียบช่องด้านในที่วัดไว้ · ยังไม่วัด = เทียบขนาดนอก
+  const comps = useMemo(() => parseCompartments(values.compartments), [values.compartments]);
+  const outer: Compartment | null = Number(num.w) > 0 && Number(num.h) > 0 && Number(num.d) > 0 ? { id: "outer", name: "ขนาดนอก", w: Number(num.w), h: Number(num.h), d: Number(num.d) } : null;
+  const boxes: Compartment[] = comps && comps.length ? comps : outer ? [outer] : [];
+  const boxBasis = comps && comps.length ? "inner" : outer ? "outer" : "none";
+  const fitCheck = (it: FitRow) => {
+    const t = fitTargetOf(it as Parameters<typeof fitTargetOf>[0]);
+    if (!t) return { kind: "nosize" as const, t: null };
+    if (!boxes.length) return { kind: "nobag" as const, t };
+    const r = bestFit(t, boxes);
+    return r ? { kind: r.status, t } : { kind: "no" as const, t };
+  };
+  const badFits = fitItems.filter((it) => fits.some((p) => p.id === it.id) && fitCheck(it).kind === "no");
+
+  // บรรทัดเรียงตามลำดับรายการ (ลาก ⠿ จัดได้) ไม่ใช่ลำดับที่ติ๊ก
+  const fitEntries = fitItems
+    .map((it) => {
+      const p = fits.find((x) => x.id === it.id);
+      return p ? { th: it.name, en: it.name_en, size: p.size } : null;
     })
     .filter((x): x is { th: string; en: string | null | undefined; size: string | null | undefined } => !!x);
   const sel = {
-    phrases: phraseIds.map((id) => phraseItems.find((x) => x.id === id)).filter((x): x is SnippetItem => !!x),
-    materials: matIds.map((id) => mats.find((x) => x.id === id)).filter((x): x is MaterialRow => !!x),
+    phrases: phraseItems.filter((x) => phraseIds.includes(x.id)),
+    materials: visMats.filter((x) => matIds.includes(x.id)),
     slots: slotItems.map((item) => ({ item, n: Math.floor(Number(slotN[item.id])) || 0 })).filter((p) => p.n > 0),
     size: sizeSeen && use.size && has("w") ? { w: num.w, h: num.h, d: num.d } : null,
     weight: sizeSeen && use.weight && has("g") ? num.g : null,
@@ -258,8 +325,22 @@ function DetailInsertModal({
     fits: fitSeen && useFit ? fitEntries : null,
   };
   const out = composeLines(sel, tpl);
-  const finalTh = out.th.map((l) => edits.th[l] ?? l).filter((l) => l.trim());
-  const finalEn = out.en.map((l) => edits.en[l] ?? l).filter((l) => l.trim());
+  // ↑↓ สลับบรรทัดในตัวอย่าง (จำลำดับด้วยข้อความไทยเดิม · บรรทัดที่ยังไม่เคยจัด ต่อท้ายตามลำดับปกติ)
+  const [pairOrder, setPairOrder] = useState<string[]>([]);
+  const rank = (k: string) => {
+    const i = pairOrder.indexOf(k);
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  const pairs = out.pairs.map((p, n) => ({ p, n })).sort((a, b) => rank(a.p.th) - rank(b.p.th) || a.n - b.n).map((x) => x.p);
+  const finalTh = pairs.map((p) => edits.th[p.th] ?? p.th).filter((l) => l.trim());
+  const finalEn = pairs.flatMap((p) => (p.en ? [edits.en[p.en] ?? p.en] : [])).filter((l) => l.trim());
+  const movePair = (i: number, dir: -1 | 1) => {
+    const keys = pairs.map((p) => p.th);
+    const j = i + dir;
+    if (j < 0 || j >= keys.length) return;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+    setPairOrder(keys);
+  };
 
   // 🔄 ช่องของสินค้าที่จะบันทึกกลับ (เทียบค่าเดิม)
   const fields: Record<string, unknown> = {};
@@ -297,6 +378,7 @@ function DetailInsertModal({
   const clearAll = () => {
     (["phrase", "material", "slot", "size", "fit"] as Tab[]).forEach(clearTab);
     setEdits({ th: {}, en: {} });
+    setPairOrder([]);
   };
   const tabCount = (t: Tab) =>
     t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
@@ -334,6 +416,46 @@ function DetailInsertModal({
     setFits((p) => p.filter((x) => x.id !== id));
   };
 
+  // ⠿ ลากจัดลำดับรายการกลาง (ทุกสินค้าใช้ลำดับเดียวกัน · บรรทัดที่แทรกเรียงตามนี้) — เขียน sort_order เฉพาะแถวที่เปลี่ยน
+  const reorder = async (k: CatalogKind, visible: { id: string }[], from: number, to: number) => {
+    const full = (k === "material" ? mats : k === "fit" ? ((fitRows ?? []) as FitRow[]) : snips) as unknown as { id: string; sort_order?: number | null }[];
+    const vis = new Set(visible.map((x) => x.id));
+    const moved = moveItem(visible, from, to);
+    let n = 0;
+    const next = full.map((x) => {
+      if (!vis.has(x.id)) return x;
+      const target = moved[n++];
+      return full.find((y) => y.id === target.id) ?? x;
+    });
+    const withOrder = next.map((x, i) => ({ ...x, sort_order: (i + 1) * 10 }));
+    const jobs = withOrder.filter((x, i) => next[i].sort_order !== x.sort_order);
+    (k === "material" ? mutateMats : k === "fit" ? mutateFits : mutateSnips)(withOrder as never);
+    try {
+      await Promise.all(
+        jobs.map(async (x) => {
+          const j = await apiFetch(`/api/master-v2/${catalogOf(k)}/${x.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sort_order: x.sort_order }) }).then((r) => r.json());
+          if (j.error) throw new Error(j.error);
+        })
+      );
+    } catch {
+      toast.error("บันทึกลำดับไม่สำเร็จ — ลองใหม่อีกครั้ง");
+    }
+    await reloadOf(k);
+  };
+  // ชุดรายการ: บันทึกจากป๊อป ✏️ (ติ๊ก "ใช้กับชุด")
+  const saveProfiles = async (next: InsertProfile[]): Promise<boolean> => {
+    try {
+      const r = await apiFetch("/api/detail-insert/templates", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templates: { ...baseTpl, profiles: next } }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || (r.status === 403 ? "ไม่มีสิทธิ์แก้ชุดรายการ" : "บันทึกชุดไม่สำเร็จ"));
+      await reloadTpl(true);
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกชุดไม่สำเร็จ");
+      return false;
+    }
+  };
+
   const loading = (snipLoading && !snipRows) || (matLoading && !matRows) || (fitLoading && !fitRows);
   const tabInfo = TABS.find((t) => t.key === tab)!;
   const bracketKind: BracketKind | null = tab === "phrase" ? "phrase" : tab === "material" ? "material" : tab === "slot" ? "slot" : tab === "fit" ? "fit" : null;
@@ -352,7 +474,7 @@ function DetailInsertModal({
 
   // ─── ตัวอย่าง: ไทย = คลิกระหว่างบรรทัดเลือกตำแหน่ง · อังกฤษ = ดูอย่างเดียว (ตำแหน่งตามภาษาไทย) ───
   const pvLines = view === "en" ? enLines : lines;
-  const pvOut = view === "en" ? (withEn ? out.en : []) : out.th;
+  const pvOut = view === "en" ? (withEn ? pairs.flatMap((p) => (p.en ? [p.en] : [])) : []) : pairs.map((p) => p.th);
   const pvEdits = view === "en" ? edits.en : edits.th;
   const pvAt = view === "en" ? enInsertAt(thText, enText, at) : at;
   const hereRef = useRef<HTMLDivElement | null>(null);
@@ -381,7 +503,7 @@ function DetailInsertModal({
   const insertBlock = (
     <div ref={hereRef} className="my-0.5 rounded-md border border-dashed border-orange-300 bg-orange-50 px-1 py-1" data-insert-here>
       {pvOut.length ? (
-        pvOut.map((orig) => {
+        pvOut.map((orig, i) => {
           const shown = pvEdits[orig] ?? orig;
           const k = `${view}:${orig}`;
           return editing === k ? (
@@ -398,6 +520,14 @@ function DetailInsertModal({
                 className={`flex-1 rounded px-1 text-left hover:bg-white ${shown.trim() ? "text-orange-700" : "text-slate-400 line-through"}`}>
                 {shown.trim() ? shown : orig}
               </button>
+              {view === "th" && pvOut.length > 1 && (
+                <span className="flex shrink-0 items-center">
+                  <button type="button" onClick={() => movePair(i, -1)} disabled={i === 0} aria-label="ย้ายบรรทัดขึ้น" title="ย้ายขึ้น" data-insert-up
+                    className="rounded px-1 text-[12px] leading-5 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-20">↑</button>
+                  <button type="button" onClick={() => movePair(i, 1)} disabled={i === pvOut.length - 1} aria-label="ย้ายบรรทัดลง" title="ย้ายลง" data-insert-down
+                    className="rounded px-1 text-[12px] leading-5 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-20">↓</button>
+                </span>
+              )}
               {pvEdits[orig] !== undefined ? (
                 <button type="button" onClick={() => commitEdit(orig, orig)} title="คืนเป็นข้อความเดิม" className="shrink-0 px-1 text-[11px] text-slate-400 hover:text-slate-700">แก้แล้ว ↺</button>
               ) : (
@@ -452,6 +582,22 @@ function DetailInsertModal({
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]" data-detail-insert-modal>
         {/* ─── ซ้าย: เลือก ─── */}
         <div className="min-w-0 space-y-2.5">
+          {baseTpl.profiles.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-[12px] text-slate-600" data-insert-profile>
+              <span>🗂 ชุดรายการ</span>
+              <select value={profileSel ?? "__auto"} onChange={(e) => setProfileSel(e.target.value === "__auto" ? null : e.target.value)} aria-label="ชุดรายการ"
+                className="h-7 max-w-full rounded-md border border-slate-200 px-1.5 text-[12px]">
+                <option value="__auto">
+                  {`อัตโนมัติ: ${autoProfile ? autoProfile.name : "ทั้งหมด"}${productCat && catById.get(productCat) ? ` (หมวด ${catById.get(productCat)!.name})` : ""}`}
+                </option>
+                {baseTpl.profiles.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+                <option value="__all">ทั้งหมด (ไม่กรอง)</option>
+              </select>
+              {profile && <span className="text-[11px] text-slate-400">โชว์เฉพาะรายการของชุดนี้</span>}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-1.5">
             {tabs.map((t) => (
               <button key={t.key} type="button" onClick={() => openTab(t.key)} data-insert-tab={t.key}
@@ -493,10 +639,11 @@ function DetailInsertModal({
             <div className="max-h-[22rem] space-y-1 overflow-auto pr-1">
               {tab === "phrase" && (
                 <>
-                  {phraseItems.filter(match).map((it) => {
+                  <SortList items={phraseItems.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("phrase", phraseItems, f, t)} render={(it, handle) => {
                     const on = phraseIds.includes(it.id);
                     return (
-                      <div key={it.id} className={rowCls(on)}>
+                      <div className={rowCls(on)}>
+                        {handle}
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                           <span className={`flex-1 text-sm ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{it.name}</span>
@@ -505,7 +652,7 @@ function DetailInsertModal({
                         {editBtn("phrase", it as unknown as Record<string, unknown>)}
                       </div>
                     );
-                  })}
+                  }} />
                   {!phraseItems.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบข้อความ</p>}
                   {addBtn("phrase", "ข้อความ")}
                 </>
@@ -513,11 +660,12 @@ function DetailInsertModal({
 
               {tab === "material" && (
                 <>
-                  {mats.filter(match).map((m) => {
+                  <SortList items={visMats.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("material", visMats, f, t)} render={(m, handle) => {
                     const on = matIds.includes(m.id);
                     const page = hasMaterialPage(m);
                     return (
-                      <div key={m.id} className={rowCls(on)}>
+                      <div className={rowCls(on)}>
+                        {handle}
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setMatIds((p) => toggle(p, m.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                           <span className={`text-sm ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{m.name}</span>
@@ -533,18 +681,25 @@ function DetailInsertModal({
                         {editBtn("material", m as unknown as Record<string, unknown>)}
                       </div>
                     );
-                  })}
-                  {!mats.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบวัสดุ</p>}
+                  }} />
+                  {!visMats.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบวัสดุ</p>}
                   {addBtn("material", "วัสดุ")}
                 </>
               )}
 
               {tab === "slot" && (
                 <>
-                  {slotItems.map((it) => {
+                  <SortList items={[...slotItems].sort((a, b) => sideRank(a.slot_side) - sideRank(b.slot_side))} onMove={(f, t) => void reorder("slot", [...slotItems].sort((a, b) => sideRank(a.slot_side) - sideRank(b.slot_side)), f, t)}
+                    header={(it, i, all) =>
+                      slotItems.some((x) => x.slot_side) && (i === 0 || sideRank(all[i - 1].slot_side) !== sideRank(it.slot_side)) ? (
+                        <p className="px-1 pt-1.5 text-[11px] font-semibold text-slate-500" data-slot-group={it.slot_side ?? ""}>{SIDE_LABEL[it.slot_side ?? ""] ?? SIDE_LABEL[""]}</p>
+                      ) : null
+                    }
+                    render={(it, handle) => {
                     const n = Math.floor(Number(slotN[it.id])) || 0;
                     return (
-                      <div key={it.id} className={rowCls(n > 0)}>
+                      <div className={rowCls(n > 0)}>
+                        {handle}
                         <span className={`min-w-0 flex-1 text-sm ${n > 0 ? "font-medium text-slate-800" : "text-slate-600"}`}>
                           {it.name}
                           {it.name_en ? <span className="ml-1.5 text-[11px] font-normal text-slate-400">{it.name_en}</span> : <span className="ml-1.5 text-[11px] font-normal text-slate-300">ไม่มีอังกฤษ</span>}
@@ -563,7 +718,7 @@ function DetailInsertModal({
                         {editBtn("slot", it as unknown as Record<string, unknown>)}
                       </div>
                     );
-                  })}
+                  }} />
                   {!slotItems.length && <p className="py-3 text-center text-xs text-slate-400">ยังไม่มีช่อง</p>}
                   {addBtn("slot", "ช่อง")}
                 </>
@@ -634,35 +789,60 @@ function DetailInsertModal({
 
               {tab === "fit" && (
                 <>
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3" data-insert-fit-grid>
-                    {fitItems.filter(match).map((it) => {
+                  <div className="rounded-md bg-slate-50 px-2 py-1 text-[11.5px] text-slate-600" data-fit-bag>
+                    📐 {boxBasis === "inner"
+                      ? <>ช่องด้านใน: {(comps ?? []).map((c) => `${c.name || "ช่อง"} ${c.w}×${c.h}×${c.d}`).join(" · ")} ซม.</>
+                      : boxBasis === "outer"
+                        ? <>กระเป๋า (ขนาดนอก): {num.w}×{num.h}×{num.d} ซม. <span className="text-slate-400">— ยังไม่วัดช่องด้านใน ใส่ได้จริงอาจน้อยกว่านี้</span></>
+                        : <span className="text-slate-400">ยังไม่มีขนาดกระเป๋า — ใส่ กว้าง/สูง/หนา ที่แท็บขนาด แล้วระบบจะตรวจว่าใส่ได้ไหม</span>}
+                  </div>
+                  {badFits.length > 0 && (
+                    <p className="rounded-md bg-rose-50 px-2 py-1 text-[11.5px] text-rose-700" data-fit-warn>
+                      ⚠️ เลือกไว้แต่ขนาดอาจไม่พอ: {badFits.map((x) => x.name).join(", ")} — ตรวจขนาดกระเป๋า/ของอีกครั้ง
+                    </p>
+                  )}
+                  <div className="grid grid-cols-3 gap-1 sm:grid-cols-5" data-insert-fit-grid>
+                    <SortList items={fitItems.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("fit", fitItems, f, t)} render={(it, handle) => {
                       const pick = fits.find((p) => p.id === it.id);
                       const opts = fitSizeOptions(it);
                       const flip = () => setFits((p) => (pick ? p.filter((x) => x.id !== it.id) : [...p, { id: it.id }]));
                       return (
-                        <div key={it.id} className={`relative rounded-lg border p-1.5 ${pick ? "border-orange-400 bg-orange-50 ring-1 ring-orange-300" : "border-slate-200 hover:border-slate-300"}`}>
+                        <div className={`relative h-full rounded-lg border p-1 ${pick ? "border-orange-400 bg-orange-50 ring-1 ring-orange-300" : "border-slate-200 hover:border-slate-300"}`}>
                           <button type="button" onClick={flip} aria-pressed={!!pick} aria-label={`เลือก ${it.name}`} className="block w-full text-left">
-                            <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-slate-50">
-                              {it.image_key ? <img src={imgUrl(it.image_key)} alt="" className="h-full w-full object-contain" /> : <span className="text-3xl opacity-40">🎒</span>}
+                            <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-slate-50">
+                              {it.image_key ? <img src={imgUrl(it.image_key, 160)} alt="" className="h-full w-full object-contain" /> : <span className="text-xl opacity-40">🎒</span>}
                             </div>
-                            <div className="mt-1 truncate text-[12.5px] font-medium text-slate-700">{it.name}</div>
-                            <div className="truncate text-[10.5px] text-slate-400">{it.name_en || "ไม่มีอังกฤษ"}</div>
+                            <div className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-700" title={it.name}>{it.name}</div>
+                            <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>
+                            {(() => {
+                              const c = fitCheck(it);
+                              const dims = c.t ? `${c.t.w}×${c.t.h}×${c.t.d}` : "";
+                              const tone = c.kind === "roomy" ? "text-emerald-700" : c.kind === "snug" ? "text-amber-700" : c.kind === "no" ? "text-rose-600" : "text-slate-400";
+                              const mark = c.kind === "roomy" ? "✓ ใส่ได้" : c.kind === "snug" ? "≈ พอดี" : c.kind === "no" ? "⚠️ ไม่พอ" : c.kind === "nosize" ? "ไม่มีขนาด" : "";
+                              return (
+                                <div className={`truncate text-[9.5px] leading-tight ${tone}`} data-fit-check={c.kind} title={c.kind === "nosize" ? "ใส่ขนาดของที่ ✏️ เพื่อให้ระบบตรวจว่าใส่ได้ไหม" : `${dims} ซม.`}>
+                                  {mark}{dims ? ` · ${dims}` : ""}
+                                </div>
+                              );
+                            })()}
                           </button>
-                          <span className={`pointer-events-none absolute left-2.5 top-2.5 flex h-4 w-4 items-center justify-center rounded border text-[10px] ${pick ? "border-orange-500 bg-orange-500 text-white" : "border-slate-300 bg-white"}`}>{pick ? "✓" : ""}</span>
-                          {editBtn("fit", it as unknown as Record<string, unknown>, "absolute right-1.5 top-1.5 bg-white/80")}
+                          <span className={`pointer-events-none absolute left-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded border text-[9px] ${pick ? "border-orange-500 bg-orange-500 text-white" : "border-slate-300 bg-white"}`}>{pick ? "✓" : ""}</span>
+                          {editBtn("fit", it as unknown as Record<string, unknown>, "absolute right-0.5 top-0.5 bg-white/80 text-[11px]")}
+                          {handle && <span className="absolute bottom-0.5 right-0.5 text-[11px]">{handle}</span>}
                           {pick && opts.length > 0 && (
                             <select aria-label={`ขนาด ${it.name}`} value={pick.size ?? ""} onChange={(e) => setFits((p) => p.map((x) => (x.id === it.id ? (e.target.value ? { id: it.id, size: e.target.value } : { id: it.id }) : x)))}
-                              className="mt-1 h-7 w-full rounded-md border border-slate-200 px-1 text-xs">
+                              className="mt-0.5 h-6 w-full rounded border border-slate-200 px-0.5 text-[10.5px]">
                               <option value="">ไม่ระบุขนาด</option>
                               {opts.map((o) => <option key={o} value={o}>{o}</option>)}
                             </select>
                           )}
                         </div>
                       );
-                    })}
+                    }} />
                   </div>
                   {!fitItems.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบรายการ</p>}
                   {addBtn("fit", "ของที่ใส่ได้")}
+                  {!needle && fitItems.length > 1 && <p className="text-[10.5px] text-slate-400">ลาก ⠿ มุมการ์ดเพื่อจัดลำดับ (ใช้กับทุกสินค้า)</p>}
                   <label className="flex cursor-pointer items-center gap-2 pt-1 text-[12.5px] text-slate-600">
                     <input type="checkbox" checked={useFit} onChange={(e) => setUseFit(e.target.checked)} className="h-4 w-4 accent-orange-500" data-insert-use="fit" />
                     ใส่บรรทัด &quot;{baseTpl.prefix.fit.th || "ใส่ได้"} …&quot; ลงคำอธิบาย
@@ -752,7 +932,11 @@ function DetailInsertModal({
         <CatalogItemDialog
           kind={editor.kind}
           item={editor.item}
-          existing={editor.kind === "material" ? mats : editor.kind === "fit" ? fitItems : editor.kind === "slot" ? slotItems : phraseItems}
+          existing={editor.kind === "material" ? mats : editor.kind === "fit" ? allFits : editor.kind === "slot" ? allSlot : allPhrase}
+          profiles={baseTpl.profiles}
+          allIds={(editor.kind === "material" ? mats : editor.kind === "fit" ? allFits : editor.kind === "slot" ? allSlot : allPhrase).map((x) => x.id)}
+          currentProfileId={profile?.id ?? null}
+          onProfiles={saveProfiles}
           onClose={() => setEditor(null)}
           onSaved={(id, created) => void onEdited(editor.kind, id, created)}
           onDeleted={(id) => void onDeleted(editor.kind, id)}
@@ -771,6 +955,8 @@ function DetailInsertModal({
       {tplOpen && (
         <TemplateDialog
           value={baseTpl}
+          catalogs={{ phrase: allPhrase, material: mats, slot: allSlot, fit: allFits }}
+          categories={categories}
           onClose={() => setTplOpen(false)}
           onSaved={() => {
             setEnBr({});
@@ -789,9 +975,12 @@ const SAMPLE = {
   slots: ["ช่องหลัก 2 ช่อง", "ช่องซิป 1 ช่อง", "ช่องใส่บัตร 4 ช่อง"],
 };
 
-function TemplateDialog({ value, onClose, onSaved }: { value: InsertTemplates; onClose: () => void; onSaved: () => void }) {
+type CatalogLists = Record<CatalogKind, { id: string; name: string; name_en?: string | null }[]>;
+
+function TemplateDialog({ value, catalogs, categories, onClose, onSaved }: { value: InsertTemplates; catalogs: CatalogLists; categories: CategoryRow[]; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [t, setT] = useState<InsertTemplates>(value);
+  const [pane, setPane] = useState<"format" | "profiles">("format");
   const [busy, setBusy] = useState(false);
   const dirty = JSON.stringify(t) !== JSON.stringify(value);
   const setJoin = (k: keyof InsertTemplates["joiner"], v: string) => setT((p) => ({ ...p, joiner: { ...p.joiner, [k]: v } }));
@@ -831,10 +1020,10 @@ function TemplateDialog({ value, onClose, onSaved }: { value: InsertTemplates; o
     <ERPModal
       open
       onClose={onClose}
-      size="lg"
+      size="xl"
       defaultExpanded={false}
       hasUnsavedChanges={dirty}
-      title="⚙️ รูปแบบบรรทัด"
+      title="⚙️ รูปแบบบรรทัด · ชุดรายการ"
       description="ตั้งครั้งเดียว ใช้กับทุกสินค้า ทุกคน (มีประวัติว่าใครแก้) · บรรทัดที่แทรกไปแล้วไม่เปลี่ยนตาม"
       footer={
         <div className="flex items-center gap-2">
@@ -846,6 +1035,15 @@ function TemplateDialog({ value, onClose, onSaved }: { value: InsertTemplates; o
         </div>
       }
     >
+      <div className="mb-3 inline-flex overflow-hidden rounded-lg border border-slate-200 text-[12.5px]">
+        {([["format", "✍️ รูปแบบบรรทัด"], ["profiles", "🗂 ชุดตามประเภทสินค้า"]] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setPane(k)} data-tpl-pane={k}
+            className={`px-3 py-1.5 ${pane === k ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{l}{k === "profiles" && t.profiles.length ? ` (${t.profiles.length})` : ""}</button>
+        ))}
+      </div>
+      {pane === "profiles" ? (
+        <ProfilesEditor profiles={t.profiles} onChange={(profiles) => setT((p) => ({ ...p, profiles }))} catalogs={catalogs} categories={categories} />
+      ) : (
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]" data-tpl-dialog>
         <div className="space-y-4">
           <section className="space-y-1.5">
@@ -904,7 +1102,195 @@ function TemplateDialog({ value, onClose, onSaved }: { value: InsertTemplates; o
           </div>
         </div>
       </div>
+      )}
     </ERPModal>
+  );
+}
+
+/* ─────────── 🗂 ชุดรายการตามประเภทสินค้า ─────────── */
+
+const KIND_TITLE: Record<CatalogKind, string> = { phrase: "📝 ข้อความ", material: "🧵 วัสดุ", slot: "🔢 ช่อง", fit: "🎒 ใส่อะไรได้" };
+
+function ProfilesEditor({ profiles, onChange, catalogs, categories }: { profiles: InsertProfile[]; onChange: (p: InsertProfile[]) => void; catalogs: CatalogLists; categories: CategoryRow[] }) {
+  const [selId, setSelId] = useState<string | null>(profiles[0]?.id ?? null);
+  const [newName, setNewName] = useState("");
+  const [catQ, setCatQ] = useState("");
+  const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+  const sel = profiles.find((p) => p.id === selId) ?? null;
+  const update = (id: string, patch: Partial<InsertProfile>) => onChange(profiles.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const add = () => {
+    const name = newName.trim();
+    if (!name) return;
+    const id = `p${Date.now().toString(36)}`;
+    onChange([...profiles, { id, name, categoryIds: [], tabs: null, items: {}, sizeFields: null }]);
+    setSelId(id);
+    setNewName("");
+  };
+  /** ติ๊ก/เอาติ๊กออก ในลิสต์ที่ null = ทั้งหมด → ครบทุกตัว = กลับเป็น null */
+  const toggleIn = (list: string[] | null | undefined, all: string[], v: string): string[] | null => {
+    const cur = list ?? all;
+    const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v];
+    return all.every((x) => next.includes(x)) ? null : next;
+  };
+  const cats = categories
+    .map((c) => ({ id: c.id, path: categoryPath(c.id, byId) }))
+    .filter((c) => !catQ.trim() || c.path.toLowerCase().includes(catQ.trim().toLowerCase()))
+    .sort((a, b) => a.path.localeCompare(b.path, "th"));
+  const tabLabel = (k: string) => TABS.find((x) => x.key === k)?.label ?? k;
+
+  return (
+    <div className="space-y-4" data-profiles-editor>
+      <p className="text-[12px] text-slate-500">
+        ชุดรายการ = กำหนดว่าสินค้าแต่ละประเภทเห็นแท็บ/รายการอะไรในป๊อปแทรก · ผูกกับหมวดสินค้า (หมวดย่อยข้างใต้ได้ชุดเดียวกัน) · สินค้าที่ไม่ตรงชุดไหน = เห็นทั้งหมด
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {profiles.map((p) => (
+          <button key={p.id} type="button" onClick={() => setSelId(p.id)} data-profile-chip={p.id}
+            className={`h-8 rounded-full border px-3 text-[12.5px] ${selId === p.id ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+            {p.name} <span className="text-[11px] text-slate-400">· {p.categoryIds.length} หมวด</span>
+          </button>
+        ))}
+        <span className="flex items-center gap-1">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ชื่อชุดใหม่ เช่น กระเป๋าสตางค์" maxLength={40} aria-label="ชื่อชุดใหม่"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            className="h-8 w-44 rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
+          <button type="button" onClick={add} disabled={!newName.trim()} data-profile-add className="h-8 rounded-md bg-slate-800 px-2.5 text-xs text-white disabled:opacity-40">＋ เพิ่มชุด</button>
+        </span>
+      </div>
+
+      {sel && (
+        <div className="grid gap-3 rounded-xl border border-slate-200 p-3 md:grid-cols-2">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <input value={sel.name} onChange={(e) => update(sel.id, { name: e.target.value.slice(0, 40) })} aria-label="ชื่อชุด"
+                className="h-8 flex-1 rounded-md border border-slate-200 px-2 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-orange-400" />
+              <button type="button" onClick={() => { onChange(profiles.filter((p) => p.id !== sel.id)); setSelId(profiles.find((p) => p.id !== sel.id)?.id ?? null); }}
+                className="h-8 rounded-md px-2 text-xs text-rose-600 hover:bg-rose-50" data-profile-delete>🗑 ลบชุด</button>
+            </div>
+            <div>
+              <h5 className="mb-1 text-xs font-semibold text-slate-600">แท็บที่โชว์</h5>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
+                {INSERT_TABS.map((k) => (
+                  <label key={k} className="flex cursor-pointer items-center gap-1.5">
+                    <input type="checkbox" checked={!sel.tabs || sel.tabs.includes(k)} onChange={() => update(sel.id, { tabs: toggleIn(sel.tabs, INSERT_TABS, k) as InsertProfile["tabs"] })} className="h-4 w-4 accent-orange-500" />
+                    {tabLabel(k)}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h5 className="mb-1 text-xs font-semibold text-slate-600">ช่องในแท็บขนาด</h5>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
+                {NUM_FIELDS.map((f) => (
+                  <label key={f.k} className="flex cursor-pointer items-center gap-1.5">
+                    <input type="checkbox" checked={!sel.sizeFields || sel.sizeFields.includes(f.k)} onChange={() => update(sel.id, { sizeFields: toggleIn(sel.sizeFields, NUM_FIELDS.map((x) => x.k), f.k) })} className="h-4 w-4 accent-orange-500" />
+                    {f.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div>
+            <h5 className="mb-1 text-xs font-semibold text-slate-600">ใช้กับหมวดสินค้า <span className="font-normal text-slate-400">({sel.categoryIds.length} หมวด · หมวดชื่อซ้ำ ติ๊กได้ทุกอัน)</span></h5>
+            <div className="mb-1 flex flex-wrap gap-1">
+              {sel.categoryIds.map((cid) => (
+                <span key={cid} className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-[11px] text-orange-700">
+                  {categoryPath(cid, byId) || cid}
+                  <button type="button" onClick={() => update(sel.id, { categoryIds: sel.categoryIds.filter((x) => x !== cid) })} aria-label="เอาหมวดออก" className="text-orange-400 hover:text-orange-700">✕</button>
+                </span>
+              ))}
+            </div>
+            <input value={catQ} onChange={(e) => setCatQ(e.target.value)} placeholder="ค้นหาหมวด…" aria-label="ค้นหาหมวด"
+              className="mb-1 h-8 w-full rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
+            <div className="max-h-44 space-y-0.5 overflow-auto rounded-md border border-slate-100 p-1">
+              {cats.map((c) => (
+                <label key={c.id} className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-[12px] text-slate-600 hover:bg-slate-50">
+                  <input type="checkbox" checked={sel.categoryIds.includes(c.id)} onChange={() => update(sel.id, { categoryIds: sel.categoryIds.includes(c.id) ? sel.categoryIds.filter((x) => x !== c.id) : [...sel.categoryIds, c.id] })} className="h-3.5 w-3.5 accent-orange-500" />
+                  {c.path}
+                </label>
+              ))}
+              {!cats.length && <p className="px-1 text-[11px] text-slate-400">ไม่พบหมวด</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profiles.length > 0 && (
+        <div>
+          <h5 className="mb-1 text-xs font-semibold text-slate-600">รายการในแต่ละชุด <span className="font-normal text-slate-400">(ติ๊ก = โชว์ในชุดนั้น · &quot;ทุกรายการ&quot; = รายการเพิ่มใหม่โชว์อัตโนมัติ)</span></h5>
+          <div className="max-h-80 overflow-auto rounded-lg border border-slate-200" data-profile-matrix>
+            <table className="w-full text-[12px]">
+              <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium">รายการ</th>
+                  {profiles.map((p) => <th key={p.id} className="px-2 py-1 text-center font-medium">{p.name}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {(["phrase", "material", "slot", "fit"] as CatalogKind[]).map((k) => {
+                  const all = catalogs[k].map((x) => x.id);
+                  return (
+                    <Fragment key={k}>
+                      <tr className="border-t border-slate-200 bg-slate-50/60">
+                        <td className="px-2 py-1 font-semibold text-slate-600">{KIND_TITLE[k]}</td>
+                        {profiles.map((p) => (
+                          <td key={p.id} className="px-2 py-1 text-center">
+                            <label className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-slate-500">
+                              <input type="checkbox" checked={!p.items[k]} onChange={(e) => update(p.id, { items: { ...p.items, [k]: e.target.checked ? null : [...all] } })} className="h-3.5 w-3.5 accent-orange-500" />
+                              ทุกรายการ
+                            </label>
+                          </td>
+                        ))}
+                      </tr>
+                      {catalogs[k].map((it) => (
+                        <tr key={it.id} className="border-t border-slate-100">
+                          <td className="px-2 py-0.5 text-slate-700">{it.name}</td>
+                          {profiles.map((p) => (
+                            <td key={p.id} className="px-2 py-0.5 text-center">
+                              <input type="checkbox" checked={profileAllows(p, k, it.id)} onChange={() => update(p.id, { items: { ...p.items, [k]: toggleIn(p.items[k], all, it.id) } })} aria-label={`${p.name}: ${it.name}`} className="h-3.5 w-3.5 accent-orange-500" />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── ⠿ ลิสต์ลากจัดลำดับ (ใช้ของกลาง useDragReorder) ─────────── */
+
+function SortList<T extends { id: string }>({
+  items,
+  render,
+  onMove,
+  disabled,
+  header,
+}: {
+  items: T[];
+  render: (item: T, handle: React.ReactNode) => React.ReactNode;
+  onMove: (from: number, to: number) => void;
+  disabled?: boolean;
+  header?: (item: T, i: number, all: T[]) => React.ReactNode;
+}) {
+  const { rowProps, handleProps, rowCls } = useDragReorder(onMove);
+  return (
+    <>
+      {items.map((it, i) => (
+        <Fragment key={it.id}>
+          {header?.(it, i, items)}
+          <div {...rowProps(i)} className={`rounded-lg ${rowCls(i)}`}>
+            {render(it, disabled || items.length < 2 ? null : <DragHandle {...handleProps(i)} title="ลากเพื่อจัดลำดับ (ใช้กับทุกสินค้า)" />)}
+          </div>
+        </Fragment>
+      ))}
+    </>
   );
 }
 
@@ -922,6 +1308,10 @@ function CatalogItemDialog({
   kind,
   item,
   existing,
+  profiles,
+  allIds,
+  currentProfileId,
+  onProfiles,
   onClose,
   onSaved,
   onDeleted,
@@ -929,6 +1319,10 @@ function CatalogItemDialog({
   kind: CatalogKind;
   item: Record<string, unknown> | null;
   existing: { id: string; name: string }[];
+  profiles: InsertProfile[];
+  allIds: string[];
+  currentProfileId: string | null;
+  onProfiles: (next: InsertProfile[]) => Promise<boolean>;
   onClose: () => void;
   onSaved: (id: string, created: boolean) => void;
   onDeleted: (id: string) => void;
@@ -941,14 +1335,27 @@ function CatalogItemDialog({
   const [tplEn, setTplEn] = useState(s("template_en"));
   const [sizes, setSizes] = useState(s("sizes"));
   const [imageKey, setImageKey] = useState(s("image_key"));
+  const [dimW, setDimW] = useState(s("width_cm"));
+  const [dimH, setDimH] = useState(s("height_cm"));
+  const [dimD, setDimD] = useState(s("depth_cm"));
+  const [soft, setSoft] = useState(item?.is_soft === true);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [askDelete, setAskDelete] = useState(false);
+  const [side, setSide] = useState(s("slot_side"));
   const fileRef = useRef<HTMLInputElement | null>(null);
   const id = item ? String(item.id) : "";
   const catalog = catalogOf(kind);
-  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key");
+  // ใช้กับชุด: ของเดิม = ชุดที่โชว์รายการนี้อยู่ · ของใหม่ = ชุด "ทุกรายการ" + ชุดที่เปิดอยู่
+  const inInit = useMemo(
+    () => profiles.filter((p) => (item ? profileAllows(p, kind, id) : !p.items[kind] || p.id === currentProfileId)).map((p) => p.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const [inProfiles, setInProfiles] = useState<string[]>(inInit);
+  const profilesDirty = JSON.stringify([...inProfiles].sort()) !== JSON.stringify([...inInit].sort());
+  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key") || side !== s("slot_side") || profilesDirty || dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || soft !== (item?.is_soft === true);
 
   const translate = async () => {
     if (!name.trim()) {
@@ -995,8 +1402,12 @@ function CatalogItemDialog({
       return;
     }
     const body: Record<string, unknown> = { name: n, name_en: nameEn.trim() || null };
-    if (kind === "slot") Object.assign(body, { template: tpl.trim() || null, template_en: tplEn.trim() || null });
-    if (kind === "fit") Object.assign(body, { sizes: sizes.trim() || null, image_key: imageKey || null });
+    if (kind === "slot") Object.assign(body, { template: tpl.trim() || null, template_en: tplEn.trim() || null, slot_side: side || null });
+    if (kind === "fit") {
+      const dim = (v: string) => (Number(v) > 0 ? Math.round(Number(v) * 10) / 10 : null);
+      const dimsChanged = dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm");
+      Object.assign(body, { sizes: sizes.trim() || null, image_key: imageKey || null, width_cm: dim(dimW), height_cm: dim(dimH), depth_cm: dim(dimD), is_soft: soft, ...(dimsChanged ? { size_estimated: false } : {}) });
+    }
     if (!item) Object.assign(body, { sort_order: 500, is_active: true, ...(kind === "phrase" || kind === "slot" ? { kind } : {}) });
     setBusy(true);
     try {
@@ -1008,6 +1419,17 @@ function CatalogItemDialog({
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
       const newId = item ? id : String(j.data?.id ?? "");
+      // ใช้กับชุด → แก้ชุดรายการ (ชุด "ทุกรายการ" ที่เอาออก = เปลี่ยนเป็นลิสต์ทุกตัวยกเว้นตัวนี้)
+      if (newId && (profilesDirty || (!item && inProfiles.length))) {
+        const all = allIds.includes(newId) ? allIds : [...allIds, newId];
+        const next = profiles.map((p) => {
+          const want = inProfiles.includes(p.id);
+          const list = p.items[kind];
+          if (want) return list && !list.includes(newId) ? { ...p, items: { ...p.items, [kind]: [...list, newId] } } : p;
+          return { ...p, items: { ...p.items, [kind]: (list ?? all).filter((x) => x !== newId) } };
+        });
+        if (JSON.stringify(next) !== JSON.stringify(profiles)) await onProfiles(next);
+      }
       toast.success(item ? `แก้ "${n}" แล้ว — ใช้ได้ทุกรุ่น` : `เพิ่ม "${n}" เข้ารายการกลางแล้ว (ใช้ได้ทุกรุ่น)`);
       if (newId) onSaved(newId, !item);
       onClose();
@@ -1094,6 +1516,33 @@ function CatalogItemDialog({
             </div>
           </div>
           {kind === "slot" && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">ตำแหน่งช่อง <span className="font-normal text-slate-400">(แยกบรรทัด &quot;ด้านในกระเป๋า:&quot; / &quot;ด้านนอก:&quot;)</span></label>
+              <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-[12.5px]" data-slot-side>
+                {([["inside", "ด้านใน"], ["outside", "ด้านนอก"], ["", "ไม่ระบุ"]] as const).map(([v, l]) => (
+                  <button key={v || "none"} type="button" onClick={() => setSide(v)} data-side={v || "none"}
+                    className={`px-3 py-1.5 ${side === v ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {profiles.length > 0 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">ใช้กับชุด <span className="font-normal text-slate-400">(โชว์รายการนี้ในป๊อปของสินค้าประเภทไหน)</span></label>
+              <div className="flex flex-wrap gap-1" data-item-profiles>
+                {profiles.map((p) => {
+                  const on = inProfiles.includes(p.id);
+                  return (
+                    <button key={p.id} type="button" onClick={() => setInProfiles((x) => (on ? x.filter((y) => y !== p.id) : [...x, p.id]))} aria-pressed={on}
+                      className={`h-7 rounded-full border px-2.5 text-[12px] ${on ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                      {on ? "✓ " : ""}{p.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {kind === "slot" && (
             <div className="space-y-2 rounded-lg bg-slate-50 p-2.5">
               <p className="text-[11.5px] text-slate-500">รูปแบบบรรทัด — <code>{"{name}"}</code> = ชื่อ · <code>{"{n}"}</code> = จำนวน · เว้นว่าง = แบบมาตรฐาน</p>
               <input value={tpl} onChange={(e) => setTpl(e.target.value)} placeholder={DEFAULT_SLOT_TEMPLATE} className={input} aria-label="รูปแบบบรรทัดไทย" />
@@ -1103,6 +1552,25 @@ function CatalogItemDialog({
                 {" · "}
                 {slotText({ id: "x", name: name || "ช่อง", name_en: nameEn, kind: "slot", template: tpl, template_en: tplEn }, 6, "en") ?? "— (ยังไม่มีอังกฤษ)"}
               </p>
+            </div>
+          )}
+          {kind === "fit" && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">ขนาดของ (ซม.) <span className="font-normal text-slate-400">— ใช้ตรวจว่าใส่กระเป๋าได้ไหม (เหมือนระบบเทียบขนาด)</span></label>
+              <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-slate-500" data-fit-dims>
+                {([["กว้าง", dimW, setDimW], ["สูง", dimH, setDimH], ["หนา", dimD, setDimD]] as const).map(([l, v, set]) => (
+                  <label key={l} className="flex items-center gap-1">
+                    {l}
+                    <input value={v} onChange={(e) => set(e.target.value.replace(/[^\d.]/g, "").slice(0, 6))} inputMode="decimal" placeholder="0" aria-label={`${l} (ซม.)`}
+                      className="h-8 w-16 rounded-md border border-slate-200 px-2 text-right text-sm tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                  </label>
+                ))}
+                <label className="ml-1 flex cursor-pointer items-center gap-1">
+                  <input type="checkbox" checked={soft} onChange={(e) => setSoft(e.target.checked)} className="h-4 w-4 accent-orange-500" />
+                  นุ่ม บีบได้
+                </label>
+              </div>
+              {item?.size_estimated === true && <p className="mt-1 text-[11px] text-amber-700">ขนาดตอนนี้เป็นค่าประมาณ — แก้เป็นขนาดจริงได้เลย</p>}
             </div>
           )}
           {kind === "fit" && (
