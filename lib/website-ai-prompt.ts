@@ -12,6 +12,7 @@ const fieldLine = (f: FieldDef): string => {
   else if (f.type === "link") t = `{ "text": string, "href": string }`;
   else if (f.type === "list") t = "string[]";
   else if (f.type === "products") t = "string[] (รหัสรุ่น)";
+  else if (f.type === "skus") t = 'string[] ("รหัสรุ่น:sku-xxxxxxxx" — ให้เว้น [] เจ้าของเลือกเอง)';
   else if (f.type === "image") t = "null (รูปให้เว้น null เจ้าของเลือกเองทีหลัง)";
   else if (f.type === "toggle") t = "boolean";
   else if (f.type === "number" || f.type === "range") t = `number${f.min != null || f.numMax != null ? ` (${f.min ?? 0}–${f.numMax ?? ""})` : ""}`;

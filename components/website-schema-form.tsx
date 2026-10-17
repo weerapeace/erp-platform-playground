@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
+import { WebsiteSkuPicker } from "@/components/website-sku-picker";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { ERPDateTime24 } from "@/components/form";
 import { FontSelect } from "@/components/font-select";
@@ -457,6 +458,12 @@ function SchemaFieldInner({
       return (
         <Field label={fd.label} hint={fd.hint} wide>
           <WebsiteProductPicker shopSlug={ctx.shopSlug} value={Array.isArray(value) ? (value as string[]) : []} max={fd.max} onChange={onChange} />
+        </Field>
+      );
+    case "skus":
+      return (
+        <Field label={fd.label} hint={fd.hint} wide>
+          <WebsiteSkuPicker shopSlug={ctx.shopSlug} value={Array.isArray(value) ? (value as string[]) : []} max={fd.max} onChange={onChange} />
         </Field>
       );
     case "categories": {

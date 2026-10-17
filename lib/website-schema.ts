@@ -60,6 +60,7 @@ export type FieldType =
   | "video" // ลิงก์ YouTube/Vimeo (กรองโฮสต์)
   | "map" // ลิงก์ฝัง Google Maps (กรองโฮสต์)
   | "products" // เลือกสินค้าหลายตัว (เก็บรหัสรุ่น code[])
+  | "skus" // เลือก SKU ทีละตัว (รุ่น + สี) เก็บ "CODE:sku-xxxxxxxx"[] · ไม่มีสี = "CODE" (lib/website-sku-cards)
   | "category" // หมวดสินค้าบนเว็บของร้าน (key)
   | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
@@ -1697,9 +1698,32 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "best", l: "ขายดี (ยอดขายบนเว็บ)" },
           { v: "sale", l: "กำลังลดราคา (มีราคาขีดฆ่า)" },
           { v: "all", l: "สินค้าทั้งหมด (ตามลำดับร้าน)" },
+          { v: "skus", l: "เลือก SKU เองทีละตัว (รุ่น + สี)" },
         ],
       }),
       f("codes", "เลือกสินค้า", "products", { group: "products", default: [], max: 24, wide: true, showIf: { key: "source", eq: "manual" } }),
+      f("skus", "เลือก SKU (1 การ์ด / SKU · เรียงตามที่เลือก)", "skus", { group: "products", default: [], max: 24, wide: true, showIf: { key: "source", eq: "skus" } }),
+      // 🎨 แยกการ์ดตาม SKU (สี) — เว็บร้าน: src/lib/sku-cards.ts
+      f("cardMode", "การ์ดสินค้า", "select", {
+        group: "products",
+        default: "parent",
+        wide: true,
+        hint: "แยกตาม SKU = แต่ละสีเป็นการ์ดของตัวเอง (รูปของสีนั้น · ชื่อรุ่น + สี · กดแล้วเลือกสีนั้นให้) · \"จำนวนสูงสุด\" นับเป็นการ์ด",
+        options: [
+          { v: "parent", l: "1 การ์ด / รุ่น (เดิม · มีจุดสี)" },
+          { v: "sku", l: "1 การ์ด / SKU (แยกทุกสี)" },
+        ],
+        showIf: { key: "source", eq: ["manual", "category", "featured", "new", "best", "sale", "all"] },
+      }),
+      f("skuOrder", "เรียงการ์ด SKU", "select", {
+        group: "products",
+        default: "mix",
+        options: [
+          { v: "mix", l: "สลับรุ่น (สีแรกของทุกรุ่นก่อน)" },
+          { v: "group", l: "เรียงต่อกันทีละรุ่น" },
+        ],
+        showIf: [{ key: "source", eq: ["manual", "category", "featured", "new", "best", "sale", "all"] }, { key: "cardMode", eq: "sku" }],
+      }),
       f("category", "หมวด", "category", { group: "products", default: "", showIf: { key: "source", eq: "category" } }),
       f("sort", "เรียงลำดับ", "select", {
         group: "products",
@@ -1785,10 +1809,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       if (src === "new") return "สินค้าใหม่";
       if (src === "best") return "ขายดี";
       if (src === "sale") return "กำลังลดราคา";
+      if (src === "skus") return count((b.skus as unknown[])?.length ?? 0, "SKU ที่เลือก");
       return "สินค้าทั้งหมด";
     },
     validate: (b, label) => {
       if (s(b.source) === "manual" && !(b.codes as unknown[])?.length) return [{ level: "error", message: `${label}: ยังไม่ได้เลือกสินค้า` }];
+      if (s(b.source) === "skus" && !(b.skus as unknown[])?.length) return [{ level: "error", message: `${label}: ยังไม่ได้เลือก SKU` }];
       if (s(b.source) === "category" && !s(b.category)) return [{ level: "error", message: `${label}: ยังไม่ได้เลือกหมวด` }];
       return [];
     },
@@ -1831,6 +1857,7 @@ export function defaultForType(t: FieldType): unknown {
       return { text: "", href: "" };
     case "list":
     case "products":
+    case "skus":
     case "categories":
       return [];
     case "crop":

@@ -258,11 +258,17 @@ export interface ProductsBlock extends BlockBase {
   type: "products";
   eyebrow: string;
   title: string;
-  source: "manual" | "category" | "featured" | "new" | "best" | "sale" | "all";
+  source: "manual" | "category" | "featured" | "new" | "best" | "sale" | "all" | "skus";
   /** เรียง: ตามแหล่ง · ราคาถูก→แพง · แพง→ถูก · ใหม่ล่าสุด */
   sort?: "default" | "price-asc" | "price-desc" | "newest";
   /** รหัสรุ่น (parent code) ที่เลือกเอง */
   codes: string[];
+  /** 🎨 SKU ที่เลือกเอง (source = skus) — "CODE:sku-xxxxxxxx" · ไม่มีสี = "CODE" */
+  skus?: string[];
+  /** การ์ด: 1 ใบ/รุ่น (เดิม) หรือ แยกทุกสี 1 ใบ/SKU */
+  cardMode?: "parent" | "sku";
+  /** แยกตาม SKU: สลับรุ่น (สีแรกของทุกรุ่นก่อน) / เรียงต่อกันทีละรุ่น */
+  skuOrder?: "mix" | "group";
   category: string;
   limit: number;
   /** รูปแบบการโชว์ (ปุ่มรูปย่อใน schema) — เว็บร้านวาดที่ src/components/home/ProductsBlock.tsx */
@@ -770,6 +776,11 @@ export function safeTarget(v: unknown): string {
 
 /** รหัสหมวด/รหัสสินค้า — ตัวอักษร ตัวเลข ขีด จุด เท่านั้น */
 const codeStr = (v: unknown, max = 60) => String(v ?? "").trim().replace(/[^A-Za-z0-9._-]/g, "").slice(0, max);
+/** SKU ที่เลือกเอง "CODE:sku-xxxxxxxx" (รหัสรุ่น + ตัวเลือกสีที่ API สินค้าส่งให้เว็บ) · ไม่มีสี = "CODE" · แบบอื่น = ว่าง */
+const skuRefStr = (v: unknown): string => {
+  const m = /^([A-Za-z0-9._-]{1,40})(?::(sku-[0-9a-f]{8}))?$/i.exec(String(v ?? "").trim());
+  return m ? (m[2] ? `${m[1].toUpperCase()}:${m[2].toLowerCase()}` : m[1].toUpperCase()) : "";
+};
 
 /** ทำความสะอาดค่า 1 ช่องตามชนิดใน schema */
 export function sanitizeField(fd: FieldDef, v: unknown): unknown {
@@ -807,6 +818,8 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
     case "categories":
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c, 40).toLowerCase()).filter(Boolean))].slice(0, fd.max ?? 40) : [];
+    case "skus":
+      return Array.isArray(v) ? [...new Set(v.map((x) => skuRefStr(x)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
     case "datetime":
       // วันเวลาไทย "YYYY-MM-DDTHH:mm" — รูปแบบอื่น = ว่าง
       return typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v.trim()) ? v.trim() : "";
@@ -937,7 +950,7 @@ export function normalizeBlocks(raw: unknown): Block[] {
 /* ─────────── ตรวจก่อนเผยแพร่ ─────────── */
 
 const isEmptyValue = (fd: FieldDef, v: unknown): boolean => {
-  if (fd.type === "list" || fd.type === "products" || fd.type === "categories") return !Array.isArray(v) || !v.filter((x) => (typeof x === "string" ? x.trim() : x)).length;
+  if (fd.type === "list" || fd.type === "products" || fd.type === "skus" || fd.type === "categories") return !Array.isArray(v) || !v.filter((x) => (typeof x === "string" ? x.trim() : x)).length;
   if (fd.type === "image") return !v;
   if (fd.type === "link") return !String((v as CtaLink | undefined)?.text ?? "").trim();
   return !String(v ?? "").trim();
