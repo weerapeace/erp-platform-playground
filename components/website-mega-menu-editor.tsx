@@ -12,7 +12,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
-import { categoryChoiceLabel } from "@/lib/website-category-tree";
+import { categoryChoiceLabel, categoryTree } from "@/lib/website-category-tree";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
@@ -22,6 +22,7 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
+import { CategoryCheckList } from "@/components/category-check-list";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import {
   MEGA_AUTOS,
@@ -212,11 +213,31 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
   const [moreId, setMoreId] = useState<string | null>(null);
   const set = (id: string, p: Partial<MegaLink>) => onChange(links.map((l) => (l.id === id ? { ...l, ...p } : l)));
   const st = plainOnly ? "plain" : style;
-  const addCats = () => {
-    const have = new Set(links.map((l) => l.href));
-    const add = ctx.categories.filter((c) => !c.parent && !have.has(megaCategoryHref(c.key))).map((c) => newMegaLink(c.label, megaCategoryHref(c.key)));
-    onChange([...links, ...add].slice(0, max));
+  // ☑ ติ๊กเลือกหมวด (หลายหมวด + หมวดย่อย) — ติ๊ก = มีลิงก์ · เอาติ๊กออก = ลบลิงก์หมวดนั้น · ลิงก์อื่น (ใส่เอง) ไม่แตะ
+  const [catPick, setCatPick] = useState<string[] | null>(null);
+  const catByHref = useMemo(() => new Map(ctx.categories.map((c) => [megaCategoryHref(c.key), c.key])), [ctx.categories]);
+  const openCatPick = () => setCatPick(links.map((l) => catByHref.get(l.href)).filter((k): k is string => !!k));
+  const applyCatPick = () => {
+    if (!catPick) return;
+    const want = new Set(catPick);
+    const keep = links.filter((l) => {
+      const k = catByHref.get(l.href);
+      return !k || want.has(k);
+    });
+    // หมวดที่เพิ่งติ๊ก → แทรกต่อจากหมวดก่อนหน้าในต้นไม้ที่มีอยู่แล้ว (หมวดย่อยไปอยู่ใต้แม่) · ไม่มีเลย = ต่อท้าย
+    const order = categoryTree(ctx.categories).map((r) => r.cat.key);
+    const out = [...keep];
+    for (const k of order) {
+      if (!want.has(k) || out.some((l) => l.href === megaCategoryHref(k))) continue;
+      const link = newMegaLink(ctx.categories.find((c) => c.key === k)?.label ?? k, megaCategoryHref(k));
+      const prev = order.slice(0, order.indexOf(k)).reverse().find((p) => out.some((l) => l.href === megaCategoryHref(p)));
+      const at = prev ? out.findIndex((l) => l.href === megaCategoryHref(prev)) + 1 : out.length;
+      out.splice(at, 0, link);
+    }
+    onChange(out.slice(0, max));
+    setCatPick(null);
   };
+  const catPickTotal = catPick ? links.filter((l) => !catByHref.has(l.href)).length + catPick.length : 0;
   return (
     <div className="space-y-1">
       {links.map((l, i) => {
@@ -304,11 +325,28 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
           ＋ เพิ่มลิงก์
         </button>
         {ctx.categories.length > 0 && (
-          <button type="button" disabled={links.length >= max} onClick={addCats} className="text-[11px] text-blue-600 hover:underline disabled:opacity-40" title="เพิ่มลิงก์ไปทุกหมวดของร้านที่ยังไม่มีในรายการ">
-            ＋ เติมจากหมวดของร้าน
+          <button type="button" onClick={() => (catPick ? setCatPick(null) : openCatPick())} className={`text-[11px] hover:underline ${catPick ? "text-slate-500" : "text-blue-600"}`} title="ติ๊กเลือกหมวดของร้าน (หลายหมวด · มีหมวดย่อย) ที่จะเป็นลิงก์ในรายการนี้">
+            {catPick ? "ปิดตัวเลือกหมวด" : "☑ เลือกหมวดของร้าน (ติ๊กได้หลายหมวด)"}
           </button>
         )}
       </div>
+      {/* ☑ แผงติ๊กหมวด (ของกลาง CategoryCheckList) */}
+      {catPick && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-2 space-y-2">
+          <p className="text-[11px] text-slate-600">ติ๊กหมวดที่จะเป็นลิงก์ในรายการนี้ — หมวดย่อยอยู่เยื้องใต้หมวดแม่ · เอาติ๊กออก = ลบลิงก์หมวดนั้น (ลิงก์ที่ใส่เองไม่หาย)</p>
+          <CategoryCheckList categories={ctx.categories} value={catPick} onChange={setCatPick} />
+          <div className="flex items-center gap-2">
+            {catPickTotal > max && <span className="text-[11px] text-amber-700">⚠ เกิน {max} ลิงก์ — ส่วนเกินจะไม่ถูกเพิ่ม</span>}
+            <span className="flex-1" />
+            <button type="button" onClick={() => setCatPick(null)} className="h-7 px-2.5 rounded-md text-[11px] text-slate-600 hover:bg-slate-100">
+              ยกเลิก
+            </button>
+            <button type="button" onClick={applyCatPick} className="h-7 px-3 rounded-md bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700">
+              ใช้ {catPick.length} หมวด
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
