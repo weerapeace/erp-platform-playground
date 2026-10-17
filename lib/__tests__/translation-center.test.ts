@@ -51,6 +51,9 @@ describe("productsAdapter — ชื่อ/คำอธิบายสินค�
     expect(productPatch(p, v[0])).toEqual({ english_description: "Nylon fabric" });
     expect(productPatch(p, p)).toBeNull();
   });
+  it("ช่องอังกฤษที่กรอกเป็นภาษาไทย = ยังไม่มี EN (แปลทับได้)", () => {
+    expect(productsAdapter().rows([{ ...p, name: { th: "กระเป๋าเป้", en: "กระเป๋าเป้" }, desc: null }])[0].status).toBe("empty");
+  });
   it("ชื่อที่เป็นอังกฤษอยู่แล้ว = ไม่ต้องแปล", () => {
     expect(productsAdapter().rows([{ ...p, name: { th: "Classic Bag", en: "" }, desc: null }])).toEqual([]);
   });

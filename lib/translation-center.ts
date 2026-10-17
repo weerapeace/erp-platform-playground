@@ -134,7 +134,8 @@ export function productsAdapter(source = "products"): CenterAdapter<CenterProduc
   };
 }
 
-const statusOf = (x: { en: string; ai?: boolean }): TranslationStatus => (!x.en.trim() ? "empty" : x.ai ? "ai" : "ok");
+// ช่องอังกฤษที่มีอักษรไทย (ข้อมูลเก่ากรอกไทยลงช่อง name_en) = ยังไม่มีคำแปลจริง
+const statusOf = (x: { en: string; ai?: boolean }): TranslationStatus => (!x.en.trim() || /[฀-๿]/.test(x.en) ? "empty" : x.ai ? "ai" : "ok");
 function patchPart(v: CenterProduct[], id: string, patch: { en?: string; ai?: boolean }): CenterProduct[] {
   const [rid, part] = id.split("|");
   return v.map((p) => (p.id !== rid ? p : part === "name" ? { ...p, name: { ...p.name, ...patch } } : p.desc ? { ...p, desc: { ...p.desc, ...patch } } : p));
