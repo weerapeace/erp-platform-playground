@@ -13,6 +13,7 @@ import { isGradStop } from "@/lib/website-gradient";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
+import { defaultOverPages, normalizeOverPages, type OverPages } from "@/lib/website-header-over";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
@@ -856,8 +857,10 @@ export interface SiteTheme {
     textColor: string;
     /** ตำแหน่งชิ้นส่วน ซ้าย/กลาง/ขวา */
     zones: HeaderZones;
-    /** โปร่งใสทับบล็อกแรกของหน้า (hero) · เลื่อนแล้วกลายเป็นสีปกติ */
+    /** โปร่งใสทับบล็อกแรกของหน้าแรก (ค่าเก่า) — ตอนนี้ = overPages.home.on (เขียนคู่ไว้ให้เว็บรุ่นเก่าอ่าน) */
     overHero: boolean;
+    /** 🪟 โปร่งใสตอนอยู่บนสุด รายประเภทหน้า + สีตัวหนังสือ (lib/website-header-over) */
+    overPages: OverPages;
     /** เลื่อนลงซ่อน เลื่อนขึ้นโผล่ */
     hideOnScroll: boolean;
     mobileMenuSide: "left" | "right" | "top";
@@ -1316,7 +1319,7 @@ export const DEFAULT_THEME: SiteTheme = {
     height: 34,
     placeholder: { ...DEFAULT_IMAGE_PLACEHOLDER },
   },
-  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH } },
+  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, overPages: defaultOverPages(false), hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH } },
   menu: { items: null, mobileItems: null, behavior: { ...DEFAULT_MENU_BEHAVIOR } },
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
@@ -1607,7 +1610,10 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       bgColor: color(h.bgColor, d.header.bgColor),
       textColor: typeof h.textColor === "string" && /^#[0-9a-fA-F]{6}$/.test(h.textColor) ? h.textColor : "",
       zones: normalizeZones(h.zones, { menuAlign: pick(h.menuAlign, ["left", "center", "right"] as const, d.header.menuAlign), showCart: h.showCart !== false }),
-      overHero: h.overHero === true,
+      ...(() => {
+        const overPages = normalizeOverPages(h.overPages, h.overHero === true);
+        return { overHero: overPages.home.on, overPages };
+      })(),
       hideOnScroll: h.hideOnScroll === true,
       mobileMenuSide: pick(h.mobileMenuSide, ["left", "right", "top"] as const, "top"),
       button: (() => {

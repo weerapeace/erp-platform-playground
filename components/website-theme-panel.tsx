@@ -54,6 +54,8 @@ import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-picker
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
 import { CartSettings } from "@/components/website-cart-settings";
+import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
+import type { OverPages } from "@/lib/website-header-over";
 import type { CartConfig } from "@/lib/website-cart";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
@@ -97,7 +99,7 @@ interface Theme {
     height: number;
     placeholder: ImagePlaceholder;
   };
-  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string }; cart: HeaderCart; search: HeaderSearch };
+  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; overPages: OverPages; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string }; cart: HeaderCart; search: HeaderSearch };
   menu: MenuConfig;
   footer: FooterConfig;
   listing: ListingConfig;
@@ -187,6 +189,7 @@ const PAGES = [
   { path: "/quote", label: "ขอใบเสนอราคา" },
   { path: "/contact", label: "ติดต่อ" },
   { path: "/cart", label: "ตะกร้า (เต็มหน้า)" },
+  { path: "/new", label: "มาใหม่" },
 ];
 
 const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Theme["fonts"]; radius: Radius } }[] = [
@@ -1251,15 +1254,18 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
                 <div className="flex flex-col gap-2 justify-end pb-1">
                   <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.header.overHero} onChange={(e) => setHeader({ overHero: e.target.checked })} />
-                    โปร่งใสทับแบนเนอร์แรก (เลื่อนแล้วกลับเป็นสีปกติ)
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                     <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.header.hideOnScroll} onChange={(e) => setHeader({ hideOnScroll: e.target.checked })} />
                     เลื่อนลงซ่อนแถบเมนู · เลื่อนขึ้นโผล่
                   </label>
                 </div>
               </div>
+              <HeaderOverPagesSettings
+                value={theme.header.overPages}
+                onChange={(overPages) => setHeader({ overPages, overHero: overPages.home.on })}
+                previewPath={{ home: "/", product: sampleProduct ? `/product/${sampleProduct}` : null, listing: "/shop", new: "/new", custom: storePages[0] ? `/${storePages[0].slug}` : null, other: "/cart" }}
+                currentPath={page}
+                onPreview={setPage}
+              />
               <p className="text-[11px] text-slate-400 mt-3">* รายการในเมนูตั้งที่แท็บ "เมนู" · ยังไม่ตั้ง = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้างเอง + ติดต่อ)</p>
             </div>
           )}
