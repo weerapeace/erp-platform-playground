@@ -35,6 +35,10 @@ import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type C
 import { useCanvasBridge, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
 import { previewReloadSig } from "@/lib/website-live-preview";
 import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canvas-editor";
+import { ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
+import { coverageOf, hasText, type ContentLang } from "@/lib/content-i18n";
+import { translateContent } from "@/lib/content-translate";
+import { applySlotTranslations, collectTextSlots, slotSourceTexts, slotValueFrom, type TextSlot } from "@/lib/website-i18n";
 
 export interface Selection {
   blockId: string;
@@ -167,6 +171,11 @@ export function WebsiteBuilder({
   const [copied, setCopied] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
+  /* 🌐 2 ภาษา: ภาษาที่กำลังแก้ทั้งแผง + สถานะปุ่มแปล */
+  const [contentLang, setContentLang] = useState<ContentLang>("th");
+  const [showLang, setShowLang] = useState(false);
+  const [txBusy, setTxBusy] = useState<string | null>(null);
+  const [txError, setTxError] = useState<{ scope: string; msg: string } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   /* ลากวาง */
@@ -724,6 +733,59 @@ export function WebsiteBuilder({
   const warnings = (toolbar?.issues ?? []).filter((i) => i.level === "warning");
   const hasChanges = !!toolbar?.changes && (toolbar.changes.added.length > 0 || toolbar.changes.removed.length > 0 || toolbar.changes.changed.length > 0);
 
+  /* ── 🌐 2 ภาษา (ของกลาง lib/website-i18n + components/bilingual-field) ── */
+  const pageSlots = useMemo(() => collectTextSlots(blocks), [blocks]);
+  const pageCov = coverageOf(pageSlots);
+  const selSlots = useMemo(
+    () => (selBlock ? collectTextSlots(blocks, { blockId: selBlock.id, childId: selChild?.id }) : []),
+    [blocks, selBlock, selChild],
+  );
+  /** ส่วนที่ยังขาดอังกฤษ แยกตาม Section (โชว์ในป๊อป 🌐 ของทั้งหน้า) */
+  const missingBySection = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of pageSlots) if (s.status === "empty" || s.status === "stale") m.set(s.blockId, (m.get(s.blockId) ?? 0) + 1);
+    return blocks.filter((b) => m.has(b.id)).map((b) => ({ id: b.id, label: SECTION_SCHEMAS[b.type]?.meta.label ?? b.type, icon: SECTION_SCHEMAS[b.type]?.meta.icon ?? "🧩", n: m.get(b.id)! }));
+  }, [pageSlots, blocks]);
+
+  /**
+   * แปลช่องที่ยังไม่มีอังกฤษ + ช่องที่ไทยเปลี่ยนหลังแปล (ช่องที่แปล/แก้เองไว้แล้วไม่ถูกทับ)
+   * ผลติดป้าย "AI แปล · รอตรวจ" · ใส่ลงโครงหน้าทีเดียว (undo ครั้งเดียวกลับได้หมด)
+   * scope = ปุ่มไหนกด (โชว์ "กำลังแปล…" / ข้อผิดพลาด ถูกที่)
+   */
+  const translateMissing = async (slots: TextSlot[], scope: string) => {
+    const todo = slots.filter((s) => s.status === "empty" || s.status === "stale");
+    if (!todo.length) return;
+    setTxBusy(scope);
+    setTxError(null);
+    try {
+      const texts: string[] = [];
+      const at = todo.map((s) => {
+        const src = slotSourceTexts(s);
+        texts.push(...src);
+        return [texts.length - src.length, src.length] as const;
+      });
+      const out = await translateContent(texts);
+      const results = todo.map((slot, k) => ({ slot, en: slotValueFrom(slot, out.slice(at[k][0], at[k][0] + at[k][1])) })).filter((r) => hasText(r.en));
+      if (!results.length) throw new Error("แปลไม่สำเร็จ ลองใหม่อีกครั้ง");
+      onChange(applySlotTranslations(blocksRef.current, results, true));
+      if (results.length < todo.length) setTxError({ scope, msg: `แปลได้ ${results.length}/${todo.length} ช่อง — กดอีกครั้งเพื่อแปลส่วนที่เหลือ` });
+    } catch (e) {
+      setTxError({ scope, msg: e instanceof Error ? e.message : "แปลไม่สำเร็จ" });
+    } finally {
+      setTxBusy(null);
+    }
+  };
+  const txBar = (slots: TextSlot[], scope: string, className = "") =>
+    slots.length > 0 && (
+      <TranslationBar
+        className={className}
+        coverage={coverageOf(slots)}
+        busy={txBusy === scope}
+        error={txError?.scope === scope ? txError.msg : null}
+        onTranslateMissing={() => void translateMissing(slots, scope)}
+      />
+    );
+
   const dev = DEVICES.find((d) => d.k === device)!;
   const scale = zoom === "fit" ? Math.min(1, (boxW - 16) / dev.w) : zoom;
   scaleRef.current = scale;
@@ -802,6 +864,56 @@ export function WebsiteBuilder({
                   </li>
                 ))}
               </ul>
+            </>
+          )}
+        </div>
+      )}
+      {/* 🌐 ภาษาอังกฤษของทั้งหน้า — ความครบ + แปลที่ยังขาดทีเดียว + ไปที่ Section ที่ขาด */}
+      {pageCov.total > 0 && (
+        <div className="relative">
+          <button
+            onClick={() => setShowLang((v) => !v)}
+            className={`text-[11px] px-2 py-1 rounded-full border ${contentLang === "en" ? "bg-indigo-50 text-indigo-700 border-indigo-200" : pageCov.missing ? "bg-white text-slate-600 border-slate-200 hover:bg-slate-50" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
+            title="ภาษาอังกฤษของหน้านี้ — กดดูส่วนที่ยังขาด / แปลทีเดียวทั้งหน้า"
+          >
+            🌐 EN {pageCov.ready}/{pageCov.total}
+            {pageCov.aiPending > 0 && <span className="text-violet-700"> · รอตรวจ {pageCov.aiPending}</span>}
+          </button>
+          {showLang && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowLang(false)} />
+              <div className="absolute left-0 top-8 z-20 w-80 rounded-xl border border-slate-200 bg-white shadow-lg p-3 space-y-2">
+                <p className="text-xs font-medium text-slate-800">ภาษาอังกฤษของหน้านี้</p>
+                {txBar(pageSlots, "page")}
+                {missingBySection.length > 0 ? (
+                  <ul className="max-h-48 overflow-y-auto space-y-0.5">
+                    {missingBySection.map((s) => (
+                      <li key={s.id} className="flex items-center gap-2 text-xs px-1 py-0.5">
+                        <span>{s.icon}</span>
+                        <span className="flex-1 min-w-0 truncate text-slate-700">{s.label}</span>
+                        <span className="text-amber-700 tabular-nums">ขาด {s.n}</span>
+                        <button
+                          onClick={() => {
+                            onSelect({ blockId: s.id });
+                            setPropTab("content");
+                            setContentLang("en");
+                            setPane("props");
+                            setShowLang(false);
+                          }}
+                          className="text-blue-600 hover:underline whitespace-nowrap"
+                        >
+                          ไปที่
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[11px] text-emerald-700">ทุกข้อความในหน้านี้มีภาษาอังกฤษแล้ว</p>
+                )}
+                <p className="text-[11px] leading-relaxed text-slate-400">
+                  คำแปลจาก AI ติดป้าย &quot;รอตรวจ&quot; — อ่านแล้วกด ✓ ตรวจแล้ว หรือแก้เองได้ · ขึ้นเว็บเมื่อกด &quot;เผยแพร่&quot; · หน้าเว็บภาษาอังกฤษ (/en) จะเปิดในขั้นถัดไป ตอนนี้กรอก/แปลเก็บไว้ก่อนได้
+                </p>
+              </div>
             </>
           )}
         </div>
@@ -1112,6 +1224,7 @@ export function WebsiteBuilder({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        {txBar(selSlots, selChild.id)}
         {selBlock.type === "canvas" && (
           <CanvasItemTools
             item={selChild}
@@ -1146,6 +1259,7 @@ export function WebsiteBuilder({
       <div className="flex-1 overflow-y-auto p-3">
         {propTab === "content" && (
           <div className="space-y-4">
+            {txBar(selSlots, selBlock.id)}
             {selBlock.type === "canvas" && (
               <CanvasAddBar
                 onOpen={(action) => setCanvasEditor({ blockId: selBlock.id, action })}
@@ -1192,7 +1306,7 @@ export function WebsiteBuilder({
   );
 
   return (
-    <>
+    <ContentLangProvider lang={contentLang} onLangChange={setContentLang}>
       <div className="space-y-2">
         {topbar}
         {/* จอแคบ: สลับแผง */}
@@ -1286,6 +1400,6 @@ export function WebsiteBuilder({
         />
       )}
       <SaveSectionTemplateDialog open={!!tplSave} onClose={() => setTplSave(null)} shopId={ctx.shopId} block={tplSave as Record<string, unknown> | null} />
-    </>
+    </ContentLangProvider>
   );
 }

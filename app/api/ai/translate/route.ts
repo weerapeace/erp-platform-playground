@@ -2,6 +2,7 @@
  * POST /api/ai/translate — แปลข้อความ ไทย↔อังกฤษ
  * body: { text, to? }   คืน: { data: { translated, target, engine } }
  * body: { texts[], to? } คืน: { data: { translated_list, target, engine } }  ← ชุดเดียวหลายข้อความ
+ *   kind: "labels" (ค่าเริ่มต้น = ชื่อช่องสั้น ๆ) | "content" (ข้อความบนหน้าเว็บร้าน — เรียบเรียงให้ลูกค้าอ่าน · ใช้กับ 🌐 ในตัวจัดหน้าเว็บ)
  *   (ใช้กับปุ่ม "แปลชื่อฟิลด์ทั้งโมดูล" — ยิงครั้งเดียวแทนการยิงทีละฟิลด์เป็นร้อยครั้ง
  *    ลำดับผลลัพธ์ตรงกับลำดับที่ส่งไป · ช่องที่แปลไม่ได้จะคืนเป็นค่าว่าง ไม่ใช่ทำให้ทั้งชุดพัง)
  *
@@ -11,7 +12,7 @@
  * สไตล์การแปลตั้งเองได้ที่ทะเบียน prompt เดียวกับแคปชั่น โดยใช้ platform = "translate"
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
 import { getAi } from "@/lib/ai";
 import { chatJson, loadPromptRows, openAiKey, pickJobPrompt, TRANSLATE_KEY } from "@/lib/ai-caption";
 
@@ -41,21 +42,33 @@ function pickTarget(sample: string, to?: string): { tlCode: string; target: stri
 
 // แปลหลายข้อความในคำขอเดียว — GPT ก่อน (ครั้งเดียวจบ) ตกไป Google ทีละข้อความ (ทีละ 5 พร้อมกัน)
 // คืนลำดับตรงกับที่ส่งมาเสมอ · ช่องที่แปลไม่ได้ = "" ให้ฝั่งเรียกข้ามไปเอง
-async function translateBatch(list: string[], to?: string): Promise<NextResponse> {
+async function translateBatch(list: string[], to?: string, kind: "labels" | "content" = "labels"): Promise<NextResponse> {
   const { tlCode, target } = pickTarget(list.find(Boolean) ?? "", to);
 
   if (openAiKey()) {
     try {
       const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
-      const sys = [
-        `You are a professional translator for a Thai e-commerce/ERP system. Translate each numbered line into ${target}.`,
-        "These are short data-entry field names (labels) in a business form — translate them as concise UI labels, not sentences.",
-        "Keep proper nouns, URLs, product codes (SKU), and brand names unchanged.",
-        style || "",
-        'Reply as JSON: {"items":[{"i":1,"en":"..."}]} — exactly one entry per input line, keeping the same i number. No other keys.',
-      ].filter(Boolean).join(" ");
-      const userText = list.map((t, i) => `${i + 1}. ${t}`).join("\n");
-      const out = await chatJson(sys, [{ type: "text", text: userText }], 3000);
+      // labels  = ชื่อช่องในฟอร์ม (สั้น ตรงตัว) — ส่งทีละบรรทัดมีเลขกำกับ
+      // content = ข้อความบนหน้าเว็บร้าน (หัวข้อ/ปุ่ม/ย่อหน้า/คำตอบ FAQ) — ส่งเป็น JSON เพราะบางชิ้นมีหลายบรรทัด
+      const sys = kind === "content"
+        ? [
+            `You are a professional translator for a Thai online shop's website. Translate each item's text into ${target}.`,
+            "Items are separate pieces of on-page copy (headings, button labels, paragraphs, FAQ answers). Write naturally for online shoppers — rephrase so it reads like it was written in the target language, not word-for-word. Keep button labels short (1–4 words).",
+            "Keep proper nouns, URLs, product codes (SKU), and brand names unchanged. Preserve line breaks inside an item. Do not add facts that are not in the source.",
+            style || "",
+            'Input is a JSON array of {"i":number,"text":string}. Reply as JSON: {"items":[{"i":1,"en":"..."}]} — exactly one entry per input item, keeping the same i number. No other keys.',
+          ].filter(Boolean).join(" ")
+        : [
+            `You are a professional translator for a Thai e-commerce/ERP system. Translate each numbered line into ${target}.`,
+            "These are short data-entry field names (labels) in a business form — translate them as concise UI labels, not sentences.",
+            "Keep proper nouns, URLs, product codes (SKU), and brand names unchanged.",
+            style || "",
+            'Reply as JSON: {"items":[{"i":1,"en":"..."}]} — exactly one entry per input line, keeping the same i number. No other keys.',
+          ].filter(Boolean).join(" ");
+      const userText = kind === "content"
+        ? JSON.stringify(list.map((text, i) => ({ i: i + 1, text })))
+        : list.map((t, i) => `${i + 1}. ${t}`).join("\n");
+      const out = await chatJson(sys, [{ type: "text", text: userText }], kind === "content" ? 6000 : 3000);
       const items = Array.isArray((out as { items?: unknown })?.items) ? (out as { items: unknown[] }).items : [];
       const byIndex = new Map<number, string>();
       for (const raw of items) {
@@ -89,8 +102,11 @@ async function translateBatch(list: string[], to?: string): Promise<NextResponse
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
-  let body: { text?: string; texts?: unknown; to?: string };
+  // สิทธิ์: ทีมงาน/Creative (tasks.view) หรือคนจัดหน้าเว็บ (products.edit = สิทธิ์เดียวกับบันทึกหน้าเว็บ) — ปุ่ม 🌐 แปล ในตัวจัดหน้าเว็บ
+  if (!(await apiCan(request, "products.edit"))) {
+    const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
+  }
+  let body: { text?: string; texts?: unknown; to?: string; kind?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   // ---- โหมดชุด (หลายข้อความในครั้งเดียว) ----
@@ -99,7 +115,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!listIn.some(Boolean)) return NextResponse.json({ error: "no text" }, { status: 400 });
     if (listIn.length > 400) return NextResponse.json({ error: "ส่งมาเกิน 400 ข้อความ" }, { status: 400 });
     if (listIn.join("").length > 12000) return NextResponse.json({ error: "ข้อความรวมกันยาวเกินไป (จำกัด 12000 ตัวอักษร)" }, { status: 400 });
-    return translateBatch(listIn, body.to);
+    return translateBatch(listIn, body.to, body.kind === "content" ? "content" : "labels");
   }
 
   const text = (body.text ?? "").trim();

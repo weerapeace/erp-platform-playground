@@ -123,6 +123,12 @@ export interface FieldDef {
   cropBox?: string;
   /** ช่องชนิด point: key ของรูปใน Section แม่ (หรือชิ้นเดียวกัน) ที่ใช้คลิกวางจุด เช่น "imageKey" */
   pointImage?: string;
+  /**
+   * 🌐 2 ภาษา — ช่องข้อความ (text/textarea/link/list) แปลได้อัตโนมัติ (เก็บอังกฤษใน `<key>_en`)
+   * ใส่ false กับช่องที่ "ไม่ใช่ภาษา" เช่น รหัสกลุ่ม · ชื่อบัญชี IG · บันทึกช่วยจำที่ไม่แสดงบนเว็บ
+   * กติกากลาง: lib/content-i18n.ts · lib/website-i18n.ts
+   */
+  i18n?: boolean;
 }
 
 export interface ShowIf {
@@ -402,7 +408,7 @@ function canvasItemFields(): FieldDef[] {
     f("loopSpeed", "ความเร็วการขยับ", "select", { group: "layout", default: "normal", options: CANVAS_SPEEDS, showIf: { key: "loop", eq: CANVAS_LOOPS.map((o) => o.v).filter(Boolean) } }),
     f("hover", "ตอนเอาเมาส์ชี้ (คอม)", "select", { group: "layout", default: "", options: CANVAS_HOVERS, hint: "มือถือไม่มีเมาส์ จะไม่เห็นเอฟเฟกต์นี้" }),
     f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
-    text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
+    text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, i18n: false, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
 
     /* มือถือแบบจัดเอง (Section ตั้ง "มือถือ: จัดเอง") — ผืนมือถือกว้าง 400 · กว้าง 0 = ยังไม่ได้จัด (ใช้ค่าย่อจากคอม) */
     f("mx", "มือถือ: ซ้าย (X)", "number", { group: "layout", default: 0, min: -400, numMax: 800 }),
@@ -1147,7 +1153,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       max: 24,
       fields: [
         image("imageKey", "รูปโลโก้", { hint: "PNG พื้นใส / SVG แนะนำ" }),
-        text("name", "ชื่อ (ใช้แทนเมื่อไม่มีรูป)", { default: "", max: 60 }),
+        text("name", "ชื่อ (ใช้แทนเมื่อไม่มีรูป)", { default: "", max: 60, i18n: false }),
         f("href", "กดแล้วไปที่", "target", { default: "" }),
       ],
       summary: (it) => s(it.name) || (it.imageKey ? "โลโก้" : "ยังไม่มีรูป"),
@@ -1307,7 +1313,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     meta: { label: "ฟีด Instagram", icon: "📸", hint: "ตารางรูปสี่เหลี่ยมแบบ IG + ปุ่มติดตาม (เลือกรูปเอง ไม่ดึงจาก IG อัตโนมัติ)", group: "เนื้อหา" },
     fields: [
       ...headFields({ eyebrow: "Instagram", title: "ติดตามเรา" }),
-      text("handle", "ชื่อบัญชี", { default: "", max: 60, placeholder: "@yourshop" }),
+      text("handle", "ชื่อบัญชี", { default: "", max: 60, i18n: false, placeholder: "@yourshop" }),
       f("profileUrl", "ลิงก์โปรไฟล์ Instagram", "href", { default: "", placeholder: "https://instagram.com/yourshop" }),
       text("buttonText", "ข้อความปุ่ม", { default: "ติดตามบน Instagram", max: 40 }),
       f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 4, min: 2, numMax: 6 }),
@@ -1396,7 +1402,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         requiredMessage: "ยังไม่ได้วางโค้ด",
         hint: "ใช้ <style> ธรรมดาได้ CSS จะมีผลเฉพาะใน Section นี้ · ห้าม <script> · ห้าม Tailwind class · ใช้สีร้านได้ด้วย var(--color-brand) ฯลฯ",
       }),
-      text("note", "บันทึกช่วยจำ (ไม่แสดงบนเว็บ)", { default: "", max: 120, wide: true, placeholder: "เช่น แบนเนอร์โปรปีใหม่ จาก ChatGPT" }),
+      text("note", "บันทึกช่วยจำ (ไม่แสดงบนเว็บ)", { default: "", max: 120, i18n: false, wide: true, placeholder: "เช่น แบนเนอร์โปรปีใหม่ จาก ChatGPT" }),
     ],
     summary: (b) => s(b.note) || (s(b.html) ? `${s(b.html).length.toLocaleString()} ตัวอักษร` : "ยังไม่ได้วางโค้ด"),
   },

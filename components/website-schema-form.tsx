@@ -20,6 +20,9 @@ import { ERPDateTime24 } from "@/components/form";
 import { FontSelect } from "@/components/font-select";
 import { canvasFontNames, canvasFontOptions, useShopTheme } from "@/components/website-text-pickers";
 import { FIELD_GROUP_LABEL, matchShowIf, type FieldDef, type FieldGroup } from "@/lib/website-schema";
+import { BilingualField, useContentLang, useTranslateOne } from "@/components/bilingual-field";
+import { confirmPatch, readMeta, translationPatch, translationStatus } from "@/lib/content-i18n";
+import { englishValue, isTranslatable, thaiValue } from "@/lib/website-i18n";
 
 export interface SchemaFormContext {
   shopSlug: string;
@@ -89,6 +92,12 @@ export function Field({ label, hint, children, wide }: { label: string; hint?: s
       {hint && <p className="mt-1 text-[11px] text-slate-400">{hint}</p>}
     </div>
   );
+}
+const FieldBox = Field;
+
+/** ช่องกรอกล้วน (ไม่มีหัวข้อ/คำแนะนำ) — ใช้ใน widget 2 ภาษาที่วาดหัวให้เอง */
+function BareField({ children }: { label: string; hint?: string; children: React.ReactNode; wide?: boolean }) {
+  return <>{children}</>;
 }
 
 /** ปุ่ม/ลิงก์ = ข้อความ + ปลายทาง (เลือกจากรายการ: หน้า/หมวด/สินค้า/ส่วนในหน้า/ลิงก์นอก — ของกลาง LinkTargetPicker) */
@@ -200,15 +209,72 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
   );
 }
 
-/** ช่องเดียวตาม schema */
-export function SchemaField({
+/**
+ * 🌐 ช่องข้อความ 2 ภาษา (text/textarea/link/list) — ใช้ widget กลาง BilingualField
+ * โหมดไทย = ช่องเดิมทุกอย่าง + ป้ายสถานะ · โหมด EN = ช่องอังกฤษ (`<key>_en`) + ไทยให้ดูเทียบ + ปุ่มแปล/ตรวจแล้ว
+ */
+function SchemaBilingual({
   fd,
-  value,
-  onChange,
-  ctx,
   item,
-  parent,
+  onPatch,
+  thNode,
 }: {
+  fd: FieldDef;
+  item: Record<string, unknown>;
+  onPatch: (patch: Record<string, unknown>) => void;
+  thNode: React.ReactNode;
+}) {
+  const th = thaiValue(fd, item);
+  const en = englishValue(fd, item);
+  const status = translationStatus(th, en, readMeta(item)[fd.key]);
+  const tx = useTranslateOne();
+  const thList = Array.isArray(th) ? th : [];
+  const enList = Array.isArray(en) ? en : [];
+  const enStr = typeof en === "string" ? en : "";
+  const enMax = Math.ceil((fd.type === "link" ? 60 : fd.max ?? (fd.type === "textarea" ? 600 : 160)) * 1.5);
+  const setEn = (v: string | string[]) => onPatch(translationPatch(item, fd.key, th, v, false));
+
+  const enNode =
+    fd.type === "list" ? (
+      thList.length ? (
+        <div className="space-y-1.5">
+          {thList.map((t, i) => (
+            <input key={i} className={inputCls} value={enList[i] ?? ""} placeholder={t || "English"} onChange={(e) => setEn(thList.map((_, j) => (j === i ? e.target.value : enList[j] ?? "")))} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">ยังไม่มีรายการ — เพิ่มที่โหมดภาษาไทยก่อน</p>
+      )
+    ) : fd.type === "textarea" ? (
+      <textarea className={inputCls} rows={fd.max && fd.max > 1000 ? 6 : 3} value={enStr} placeholder="English" maxLength={enMax} onChange={(e) => setEn(e.target.value)} />
+    ) : (
+      <input className={inputCls} value={enStr} placeholder={fd.type === "link" ? "Button text" : "English"} maxLength={enMax} onChange={(e) => setEn(e.target.value)} />
+    );
+
+  return (
+    <BilingualField
+      label={fd.label}
+      hint={fd.hint}
+      wide={fd.wide || fd.type === "list" || fd.type === "textarea" || fd.type === "link"}
+      status={status}
+      thRef={Array.isArray(th) ? th.filter((x) => x.trim()).join("\n") : th}
+      thNode={thNode}
+      enNode={enNode}
+      enNote={fd.type === "link" ? "ลิงก์ปลายทางใช้ร่วมกับภาษาไทย" : fd.type === "list" ? "จำนวน/ลำดับรายการตามภาษาไทย" : undefined}
+      busy={tx.busy}
+      error={tx.error}
+      onTranslate={() =>
+        tx.run(Array.isArray(th) ? th : [th], (out) =>
+          onPatch(translationPatch(item, fd.key, th, Array.isArray(th) ? th.map((t, i) => (t.trim() ? out[i] ?? "" : "")) : out[0] ?? "", true)),
+        )
+      }
+      onConfirm={() => onPatch(confirmPatch(item, fd.key, th))}
+    />
+  );
+}
+
+/** ช่องเดียวตาม schema */
+export function SchemaField(props: {
   fd: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
@@ -217,7 +283,39 @@ export function SchemaField({
   item?: Record<string, unknown>;
   /** Section แม่ (ตอนแก้ Block ย่อย — ช่อง crop อ่านสัดส่วนกรอบ) */
   parent?: Record<string, unknown>;
+  /** แก้หลายช่องพร้อมกัน (ช่อง 2 ภาษาเขียน `<key>_en` + `_i18n`) — ไม่ส่ง = ช่องภาษาเดียวแบบเดิม */
+  onPatch?: (patch: Record<string, unknown>) => void;
 }) {
+  const { enabled } = useContentLang();
+  const { fd, item, onPatch } = props;
+  const inner = <SchemaFieldInner {...props} />;
+  // 🌐 อยู่ในแผงที่เปิดโหมด 2 ภาษา + ช่องนี้แปลได้ → ห่อด้วย widget กลาง (ช่องไทยข้างในหน้าตาเดิม)
+  if (enabled && onPatch && item && isTranslatable(fd)) {
+    return <SchemaBilingual fd={fd} item={item} onPatch={onPatch} thNode={<SchemaFieldInner {...props} bare />} />;
+  }
+  return inner;
+}
+
+function SchemaFieldInner({
+  fd,
+  value,
+  onChange,
+  ctx,
+  item,
+  parent,
+  bare,
+}: {
+  fd: FieldDef;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  ctx: SchemaFormContext;
+  item?: Record<string, unknown>;
+  parent?: Record<string, unknown>;
+  /** true = ช่องกรอกล้วน ไม่มีหัวข้อ/คำแนะนำ (widget 2 ภาษาวาดหัวให้เอง) */
+  bare?: boolean;
+}) {
+  // ช่องข้อความใน widget 2 ภาษา: วาดเฉพาะช่องกรอก (หัวข้อ + ป้ายสถานะ + คำแนะนำ อยู่ใน BilingualField)
+  const Field = bare ? BareField : FieldBox;
   if (fd.type === "crop") return <CropField fd={fd} value={value} onChange={onChange} item={item} parent={parent} />;
   if (fd.type === "point") return <PointField fd={fd} value={value} onChange={onChange} item={item} parent={parent} />;
   if (fd.type === "datetime")
@@ -445,7 +543,7 @@ export function SchemaForm({
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             {list.map((fd) => (
-              <SchemaField key={fd.key} fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} ctx={ctx} item={value} parent={parent} />
+              <SchemaField key={fd.key} fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} onPatch={onChange} ctx={ctx} item={value} parent={parent} />
             ))}
           </div>
         </section>

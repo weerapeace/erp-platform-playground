@@ -23,6 +23,7 @@ import {
   type ValidationIssue,
 } from "@/lib/website-schema";
 import { sanitizeCustomHtml } from "@/lib/website-html";
+import { sanitizeTranslations } from "@/lib/website-i18n";
 import { sanitizeGradient, type GradientValue } from "@/lib/website-gradient";
 import { CANVAS_COLORS, CANVAS_FONTS, CANVAS_WEIGHTS } from "@/lib/website-canvas";
 
@@ -839,6 +840,7 @@ function sanitizeChildren(spec: ChildSpec, raw: unknown, parentId: string): Reco
     };
     if (o.visibility && typeof o.visibility === "object") out.visibility = vis(o.visibility);
     for (const fd of spec.fields) out[fd.key] = sanitizeField(fd, o[fd.key]);
+    sanitizeTranslations(spec.fields, o, out); // 🌐 ภาษาอังกฤษ (`<key>_en`) — ไม่งั้นถูกทิ้งตอนบันทึก
     return out;
   });
 }
@@ -924,6 +926,7 @@ export function normalizeBlocks(raw: unknown): Block[] {
       style: sanitizeStyle(b.style),
     };
     for (const fd of schema.fields) block[fd.key] = sanitizeField(fd, b[fd.key]);
+    sanitizeTranslations(schema.fields, b, block); // 🌐 ภาษาอังกฤษ (`<key>_en`) — ไม่งั้นถูกทิ้งตอนบันทึก
     if (schema.children) block[schema.children.key] = sanitizeChildren(schema.children, b[schema.children.key], id);
     out.push(block as unknown as Block);
   });
