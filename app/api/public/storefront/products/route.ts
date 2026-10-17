@@ -343,7 +343,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           if (!h) return undefined;
           const out = (m: HeroMedia | null, w: number) =>
             m ? { kind: m.kind, url: m.kind === "image" ? `${imageUrl(m.key)}&w=${w}` : imageUrl(m.key), poster: m.posterKey ? `${imageUrl(m.posterKey)}&w=${w}` : null } : null;
-          return { desktop: out(h.desktop, 2000), mobile: out(h.mobile, 1080) };
+          // 🎨 Hero รายสี → คีย์เป็นรหัสตัวเลือกสีที่เว็บใช้ ("sku-" + 8 ตัวแรกของ id SKU ลูก · ตรงกับ options.items[].id)
+          const byOption = h.sku
+            ? Object.fromEntries(Object.entries(h.sku).map(([skuId, p]) => [`sku-${skuId.slice(0, 8)}`, { desktop: out(p.desktop, 2000), mobile: out(p.mobile, 1080) }]))
+            : undefined;
+          return { desktop: out(h.desktop, 2000), mobile: out(h.mobile, 1080), ...(byOption ? { byOption } : {}) };
         })(),
       };
     })

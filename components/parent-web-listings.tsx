@@ -25,7 +25,7 @@ import { PersonalizeEditor } from "@/components/personalize-editor";
 import { ProductBannersEditor } from "@/components/product-banners-editor";
 import type { ProductBanner } from "@/lib/website-banners";
 import type { CardColors } from "@/lib/website-card-colors";
-import { HERO_SIZE_HINT, type ProductHero } from "@/lib/website-hero";
+import { HERO_SIZE_HINT, heroOfSku, type ProductHero } from "@/lib/website-hero";
 import { MediaUploadField, type MediaValue } from "@/components/media-upload-field";
 import { NAME_RULE_EXCLUSIVE, type NameRuleFlag } from "@/lib/website-field-map";
 import { uploadResizedImage } from "@/components/image-attach";
@@ -167,6 +167,8 @@ export function ParentWebListings({
   const [bnOpen, setBnOpen] = useState<Set<string>>(new Set());
   // แผงเลือกรูปจากแกลเลอรี SKU ที่เปิดอยู่ (ร้าน + สี)
   const [skuPanel, setSkuPanel] = useState<{ shopId: string; skuId: string } | null>(null);
+  // 🎬 แผงตั้ง Hero รายสี (เปิดทีละสี)
+  const [heroPanel, setHeroPanel] = useState<{ shopId: string; skuId: string } | null>(null);
   // ร้านที่กางแผง "จับคู่รายละเอียดหน้าเว็บ" อยู่
   const [detailsOpen, setDetailsOpen] = useState<Set<string>>(new Set());
   // 📐 แผง "ช่องใส่ของ" กางอยู่ (ของตัวสินค้า — ไม่แยกร้าน)
@@ -283,10 +285,21 @@ export function ParentWebListings({
   const setCardMain = (s: ShopState, label: string) =>
     patchShop(s.shopId, { webCardColors: { ...s.webCardColors, main: s.webCardColors.main && sameColor(s.webCardColors.main, label) ? null : label } });
   /** 🎬 ตั้ง/เอาออก รูปเปิดหน้าสินค้าของคอมหรือมือถือ (ว่างทั้งคู่ = null → ใช้รูปสินค้า) */
+  const heroEmpty = (h: ProductHero) => !h.desktop && !h.mobile && !(h.sku && Object.keys(h.sku).length);
+  // 🎨 Hero รายสี — ว่างทั้งคอม/มือถือ = ลบสีนั้นออก (กลับไปใช้ของรุ่น)
+  const setSkuHero = (s: ShopState, skuId: string, slot: "desktop" | "mobile", m: MediaValue | null) => {
+    const cur: ProductHero = s.webHero ?? { desktop: null, mobile: null };
+    const one = { ...(cur.sku?.[skuId] ?? { desktop: null, mobile: null }), [slot]: m ? { kind: m.kind, key: m.key, posterKey: null } : null };
+    const sku = { ...(cur.sku ?? {}) };
+    if (one.desktop || one.mobile) sku[skuId] = one;
+    else delete sku[skuId];
+    const next: ProductHero = { desktop: cur.desktop, mobile: cur.mobile, ...(Object.keys(sku).length ? { sku } : {}) };
+    patchShop(s.shopId, { webHero: heroEmpty(next) ? null : next });
+  };
   const setHero = (s: ShopState, slot: "desktop" | "mobile", m: MediaValue | null) => {
     const cur: ProductHero = s.webHero ?? { desktop: null, mobile: null };
     const next: ProductHero = { ...cur, [slot]: m ? { kind: m.kind, key: m.key, posterKey: null } : null };
-    patchShop(s.shopId, { webHero: next.desktop || next.mobile ? next : null });
+    patchShop(s.shopId, { webHero: heroEmpty(next) ? null : next });
   };
 
   const saveShop = async (s: ShopState): Promise<boolean> => {
@@ -560,7 +573,10 @@ export function ParentWebListings({
       <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-xs font-medium text-slate-700">🎬 รูปเปิดหน้าสินค้า (Hero) — ภาพแรกเต็มช่อง ไม่มีขอบ</span>
-          <span className="text-[11px] text-slate-500">{s.webHero ? "ตั้งไว้แล้ว" : "ว่าง = ใช้รูปสินค้าตามเดิม"}</span>
+          <span className="text-[11px] text-slate-500">
+            {s.webHero?.desktop || s.webHero?.mobile ? "ตั้งไว้แล้ว" : "ว่าง = ใช้รูปสินค้าตามเดิม"}
+            {s.webHero?.sku && Object.keys(s.webHero.sku).length > 0 && ` · Hero รายสี ${Object.keys(s.webHero.sku).length} สี`}
+          </span>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <MediaUploadField label="🖥 คอม" hint={`${HERO_SIZE_HINT.desktop} · ${HERO_SIZE_HINT.video}`} value={s.webHero?.desktop ?? null} onChange={(m) => setHero(s, "desktop", m)} previewRatio="16 / 9" />
@@ -630,6 +646,8 @@ export function ParentWebListings({
             {data.variants.map((v) => {
               const chosen = s.webSkuImages[v.id] ?? [];
               const panelOpen = skuPanel?.shopId === s.shopId && skuPanel.skuId === v.id;
+              const skuHero = heroOfSku(s.webHero, v.id);
+              const heroOpen = heroPanel?.shopId === s.shopId && heroPanel.skuId === v.id;
               const on = cardShown(s, v.label);
               const isMain = !!s.webCardColors.main && sameColor(s.webCardColors.main, v.label);
               return (
@@ -671,6 +689,15 @@ export function ParentWebListings({
                         className={`text-xs border rounded-lg px-2 py-1 disabled:opacity-40 ${panelOpen ? "bg-orange-500 border-orange-500 text-white" : "border-orange-300 text-orange-600 hover:bg-orange-50"}`}
                       >
                         📷 จากรูป SKU
+                      </button>
+                      {/* 🎬 Hero ของสีนี้ (ลูกค้าเลือกสีนี้ = รูปเปิดเปลี่ยนเป็นภาพนี้) */}
+                      <button
+                        type="button"
+                        onClick={() => setHeroPanel(heroOpen ? null : { shopId: s.shopId, skuId: v.id })}
+                        title={skuHero ? "สีนี้มี Hero ของตัวเอง — กดเพื่อแก้" : "ตั้งรูปเปิดหน้าสินค้า (Hero) เฉพาะสีนี้ · ไม่ตั้ง = ใช้ Hero ของรุ่น"}
+                        className={`text-xs border rounded-lg px-2 py-1 ${heroOpen ? "bg-violet-600 border-violet-600 text-white" : skuHero ? "border-violet-300 bg-violet-50 text-violet-700" : "border-violet-200 text-violet-600 hover:bg-violet-50"}`}
+                      >
+                        🎬 Hero{skuHero ? " ✓" : ""}
                       </button>
                       {uploadBtn(s.shopId, v.id, "text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg px-2 py-1")}
                       <button onClick={() => setPicker({ shopId: s.shopId, target: v.id })} className="text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg px-2 py-1">
@@ -726,6 +753,24 @@ export function ParentWebListings({
                           </button>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* 🎬 แผง Hero ของสีนี้ — คอม 16:9 · มือถือ 4:5 (ว่าง = ใช้ของคอม) · รูปหรือวิดีโอ */}
+                  {heroOpen && (
+                    <div className="ml-12 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
+                        <span>
+                          🎬 Hero ของสี <b>{v.label}</b> — ลูกค้าเลือกสีนี้ (หรือกดการ์ดสีนี้มา) รูปเปิดจะเป็นภาพนี้ · ว่าง = ใช้ Hero ของรุ่น
+                        </span>
+                        <button type="button" onClick={() => setHeroPanel(null)} className="text-slate-500 hover:underline shrink-0">
+                          ปิด
+                        </button>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <MediaUploadField label="🖥 คอม (16:9)" hint={`${HERO_SIZE_HINT.desktop} · ${HERO_SIZE_HINT.video}`} value={skuHero?.desktop ?? null} onChange={(m) => setSkuHero(s, v.id, "desktop", m)} previewRatio="16 / 9" />
+                        <MediaUploadField label="📱 มือถือ (4:5)" hint={HERO_SIZE_HINT.mobile} value={skuHero?.mobile ?? null} onChange={(m) => setSkuHero(s, v.id, "mobile", m)} previewRatio="4 / 5" />
+                      </div>
                     </div>
                   )}
 

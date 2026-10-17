@@ -3,6 +3,7 @@
  * เป็นภาพแรกของแกลเลอรีหน้าสินค้า เต็มพื้นที่ (ไม่มีขอบขาว) แบบ Gucci · ไม่ใส่ = ใช้รูปสินค้าตามเดิม
  * desktop/mobile แยกกัน (มือถือว่าง = ใช้ของคอม) · รูปหรือวิดีโอ (วิดีโอ ≤ 4 MB เล่นเอง เงียบ วนซ้ำ)
  * storefront: Product.hero → components/shop/EditorialGallery (สไลด์แรก .pd-ed-hero)
+ * 🎨 Hero รายสี (sku): ตั้งต่อ SKU ลูกได้ — ลูกค้าเลือกสีนั้น (หรือเข้ามาจากการ์ด SKU ?color=) = รูปเปิดเป็นของสีนั้น · สีที่ไม่ตั้ง = ใช้ของรุ่น
  */
 export type HeroKind = "image" | "video";
 export interface HeroMedia {
@@ -12,9 +13,13 @@ export interface HeroMedia {
   /** รูปปกวิดีโอ (r2 key) — โชว์ระหว่างโหลด */
   posterKey: string | null;
 }
-export interface ProductHero {
+export interface HeroPair {
   desktop: HeroMedia | null;
   mobile: HeroMedia | null;
+}
+export interface ProductHero extends HeroPair {
+  /** 🎨 Hero รายสี { [id SKU ลูก]: { desktop, mobile } } — ไม่มี = ทุกสีใช้ของรุ่น */
+  sku?: Record<string, HeroPair>;
 }
 
 /** ขนาดแนะนำ (บอกเจ้าของตอนอัปโหลด) */
@@ -38,11 +43,32 @@ function media(raw: unknown): HeroMedia | null {
   };
 }
 
-/** null = ไม่ได้ตั้ง (ทั้งคอมและมือถือว่าง) */
-export function normalizeHero(raw: unknown): ProductHero | null {
+function pair(raw: unknown): HeroPair | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const desktop = media(r.desktop);
   const mobile = media(r.mobile);
   return desktop || mobile ? { desktop, mobile } : null;
 }
+
+const SKU_ID_RE = /^[0-9a-f-]{8,40}$/i;
+
+/** null = ไม่ได้ตั้งเลย (รุ่นและทุกสีว่าง) · มีแค่ Hero รายสี = desktop/mobile ของรุ่นเป็น null */
+export function normalizeHero(raw: unknown): ProductHero | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const base = pair(r) ?? { desktop: null, mobile: null };
+  const sku: Record<string, HeroPair> = {};
+  if (r.sku && typeof r.sku === "object" && !Array.isArray(r.sku)) {
+    for (const [id, v] of Object.entries(r.sku as Record<string, unknown>).slice(0, 60)) {
+      const p = SKU_ID_RE.test(id) ? pair(v) : null;
+      if (p) sku[id] = p;
+    }
+  }
+  const hasSku = Object.keys(sku).length > 0;
+  if (!base.desktop && !base.mobile && !hasSku) return null;
+  return hasSku ? { ...base, sku } : base;
+}
+
+/** Hero ของสีนี้ (ไม่ได้ตั้ง = null → ใช้ของรุ่น) */
+export const heroOfSku = (h: ProductHero | null | undefined, skuId: string): HeroPair | null => h?.sku?.[skuId] ?? null;
