@@ -51,6 +51,8 @@ import { FontSelect } from "@/components/font-select";
 import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
+import { CartSettings } from "@/components/website-cart-settings";
+import type { CartConfig } from "@/lib/website-cart";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
@@ -97,6 +99,8 @@ interface Theme {
   menu: MenuConfig;
   footer: FooterConfig;
   listing: ListingConfig;
+  /** 🛒 ดีไซน์ตะกร้า (lib/website-cart) */
+  cart: CartConfig;
   /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
@@ -135,7 +139,7 @@ const FINE_COLOR_KEYS = Object.keys(FINE_COLOR_DEFAULTS) as (keyof typeof FINE_C
 const FINE_COLOR_LABEL = "สีละเอียด";
 /** บทบาทตัวอักษร — ธีมเก่าที่ยังไม่มีบทบาทใหม่ (เช่น เมนูย่อย) = ค่าเริ่มต้น */
 const roleOf = (t: { typography: Partial<Typography> }, k: TextRoleKey): TextRole => t.typography[k] ?? defaultTextRole(k);
-type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "cart" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -148,6 +152,7 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "card", label: "การ์ดสินค้า" },
   { k: "listing", label: "หน้ารายการสินค้า" },
   { k: "product", label: "หน้าสินค้า" },
+  { k: "cart", label: "🛒 ตะกร้า" },
   { k: "shape", label: "รูปทรง" },
   { k: "history", label: "ประวัติ" },
 ];
@@ -179,6 +184,7 @@ const PAGES = [
   { path: "/oem", label: "รับผลิต" },
   { path: "/quote", label: "ขอใบเสนอราคา" },
   { path: "/contact", label: "ติดต่อ" },
+  { path: "/cart", label: "ตะกร้า (เต็มหน้า)" },
 ];
 
 const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Theme["fonts"]; radius: Radius } }[] = [
@@ -318,6 +324,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     window.addEventListener("website-menu-pin", onPin);
     return () => window.removeEventListener("website-menu-pin", onPin);
   }, []);
+  // 🛒 อยู่แท็บตะกร้า → สั่งพรีวิวเปิดตะกร้าค้างไว้ (ตะกร้าว่าง = เว็บใส่สินค้าตัวอย่างให้ดู) · ออกจากแท็บ = ปิด
+  const cartPin = useRef(false);
+  useEffect(() => {
+    const open = tab === "cart";
+    if (cartPin.current === open) return;
+    cartPin.current = open;
+    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-cart-pin", open }, "*");
+  }, [tab]);
   // วัดกล่องพรีวิวจริง เพื่อย่อ "พอดีจอ" (เดิม hardcode 400px → จอคอมถูกบีบเหลือ ~28%)
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(420);
@@ -600,6 +614,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       if ((e.data as { type?: string })?.type === "storefront-preview-ready" && menuPin.current) {
         iframeRef.current?.contentWindow?.postMessage({ type: "storefront-menu-pin", id: menuPin.current }, "*");
       }
+      if ((e.data as { type?: string })?.type === "storefront-preview-ready" && cartPin.current) {
+        iframeRef.current?.contentWindow?.postMessage({ type: "storefront-cart-pin", open: true }, "*");
+      }
       if ((e.data as { type?: string })?.type === "storefront-preview-ready" && theme) {
         iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme }, "*");
       }
@@ -631,6 +648,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (!eq(theme.card, published.card)) out.push("การ์ดสินค้า");
     // หน้าสินค้า (Style/ชุดรายละเอียด/⚙️/ขนาดตัวอักษร/ค่ามือถือ) — เดิมไม่ถูกนับ ทำให้แถบล่างบอก "ไม่มีการเปลี่ยนแปลง" ทั้งที่แก้แล้ว
     if (!eq(theme.product, published.product)) out.push("หน้าสินค้า");
+    if (!eq(theme.cart, published.cart)) out.push("ตะกร้า");
+    // ✨ การเคลื่อนไหว (แท็บรูปทรง) — เดิมไม่ถูกนับ
+    if (!eq(theme.page, published.page)) out.push("การเคลื่อนไหว");
     return out;
   }, [theme, published]);
 
@@ -806,7 +826,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "footer" && dirtyFields.includes("Footer")) ||
     (k === "card" && (dirtyFields.includes("การ์ดสินค้า") || dirtyFields.includes("รอรูปโหลด"))) ||
     (k === "listing" && dirtyFields.includes("หน้ารายการสินค้า")) ||
-    (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง"))) ||
+    (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง") || dirtyFields.includes("การเคลื่อนไหว"))) ||
+    (k === "cart" && dirtyFields.includes("ตะกร้า")) ||
     (k === "product" && dirtyFields.includes("หน้าสินค้า"));
 
   // 🔤 เนื้อหาแท็บโลโก้ — ใช้ร่วม แท็บโลโก้ + ป๊อป ⚙ โลโก้ ในตำแหน่งชิ้นส่วน Header (ค่าเดียวกัน)
@@ -2033,6 +2054,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} linkCtx={linkCtx} cardColumns={theme.card.columns} />
             </div>
           )}
+
+          {/* ── 🛒 ตะกร้า: หน้าตา · รายการ · ท้ายตะกร้า · สินค้าแนะนำ · ฟังก์ชันเพิ่ม (components/website-cart-settings) ── */}
+          {tab === "cart" && <CartSettings value={theme.cart} onChange={(cart) => apply({ ...theme, cart })} shopSlug={shopSlug} onPreviewPage={setPage} />}
 
           {tab === "shape" && (
             <>

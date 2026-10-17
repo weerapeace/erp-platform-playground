@@ -8,6 +8,7 @@
  */
 
 import { normalizeListing, DEFAULT_LISTING, type ListingConfig } from "@/lib/website-listing";
+import { normalizeCart, DEFAULT_CART, type CartConfig } from "@/lib/website-cart";
 import { isGradStop } from "@/lib/website-gradient";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
@@ -869,6 +870,8 @@ export interface SiteTheme {
   footer: FooterConfig;
   /** 🖼 หน้ารายการสินค้า: รูปแทรกในกริด (ดู lib/website-listing.ts) */
   listing: ListingConfig;
+  /** 🛒 ดีไซน์ตะกร้า (ลิ้นชัก + หน้า /cart · lib/website-cart.ts) */
+  cart: CartConfig;
   /** ✨ การเคลื่อนไหวทั้งเว็บ: เปลี่ยนหน้า (จาง/เลื่อนขึ้น) + เลื่อนจอนุ่ม (ปิดเป็นค่าเริ่ม) — เว็บร้าน: app/template.tsx + SmoothScroll */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: {
@@ -1316,6 +1319,7 @@ export const DEFAULT_THEME: SiteTheme = {
   menu: { items: null, mobileItems: null, behavior: { ...DEFAULT_MENU_BEHAVIOR } },
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
+  cart: { ...DEFAULT_CART },
   page: { transition: "fade", smoothScroll: false },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
@@ -1585,6 +1589,7 @@ export function normalizeTheme(raw: unknown): SiteTheme {
     menu: normalizeMenu(r.menu),
     footer: normalizeFooter(r.footer),
     listing: normalizeListing(r.listing),
+    cart: normalizeCart(r.cart),
     page: (() => {
       const pg = (r.page ?? {}) as Record<string, unknown>;
       return { transition: pick(pg.transition, ["none", "fade", "rise"] as const, "fade"), smoothScroll: pg.smoothScroll === true };
@@ -1677,5 +1682,8 @@ export function mergeTheme(existing: unknown, incoming: unknown): Record<string,
     card: t.card,
     product: t.product,
     listing: t.listing,
+    cart: t.cart,
+    // การเคลื่อนไหวทั้งเว็บ (เปลี่ยนหน้า/เลื่อนจอนุ่ม) — เดิมตกหล่น → บันทึกไม่ติด
+    page: t.page,
   };
 }
