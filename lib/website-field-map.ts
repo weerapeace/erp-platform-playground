@@ -252,6 +252,8 @@ export interface ParentRow {
   description: string | null;
   platform_description: string | null;
   english_description: string | null;
+  /** คำแนะนำสินค้าภาษาอังกฤษ (ใช้เป็นคำอธิบายบนเว็บหน้า /en เมื่อไม่มี english_description) — บางที่ select ไม่ครบ */
+  introduction_en?: string | null;
   sale_price: number | string | null;
   final_price: number | string | null;
   fake_price: number | string | null;
@@ -313,7 +315,7 @@ export interface ListingRow {
 // ⚠️ ต้องเป็น string literal ก้อนเดียว (ห้าม + ต่อ) ไม่งั้น type ของ supabase .select() พัง (GenericStringError)
 // ท้ายรายการ = ฟิลด์สเปกสำหรับ "ชุดรายละเอียดสินค้า" บนเว็บ (lib/website-theme.ts PRODUCT_SPEC_FIELDS) — ไม่มีต้นทุน/ข้อมูลภายใน
 export const PARENT_SELECT =
-  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, sale_price, final_price, fake_price, cover_image_r2_key, category_id, collection_id, brand_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty, compartments";
+  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, introduction_en, sale_price, final_price, fake_price, cover_image_r2_key, category_id, collection_id, brand_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty, compartments";
 
 /** ค่าฟิลด์สเปกของ Parent SKU ที่ไม่ว่าง (key → ข้อความพร้อมหน่วย) ส่งให้เว็บร้านโชว์ในหัวข้อ "ฟิลด์จาก Parent SKU" */
 export function productSpecAttrs(p: ParentRow): Record<string, string> {
@@ -386,6 +388,20 @@ export function resolveName(map: FieldMap, parent: ParentRow): string {
     clean(parent.name_th) ||
     clean(parent.name_platform) ||
     clean(parent.code);
+  return applyNameRule(map, parent, raw);
+}
+
+/**
+ * 🌐 ชื่อภาษาอังกฤษบนเว็บ (หน้า /en) = name_en ของ Parent SKU ผ่านกฎชื่อเดียวกับภาษาไทย (ตัดคำนำหน้า/แบรนด์/วงเล็บ)
+ * ว่าง = "" → เว็บร้านใช้ชื่อไทยแทน
+ */
+export function resolveNameEn(map: FieldMap, parent: ParentRow): string {
+  const raw = clean(parent.name_en);
+  return raw ? applyNameRule(map, parent, raw) : "";
+}
+
+/** กฎชื่อของร้าน (field_map.name) — ใช้ร่วมกันทั้งชื่อไทยและอังกฤษ */
+function applyNameRule(map: FieldMap, parent: ParentRow, raw: string): string {
   let name = raw;
   const prefix = clean(map.name.stripPrefix);
   // ตัดคำนำหน้าออก (ไม่สนตัวพิมพ์เล็ก/ใหญ่) เช่น "IG International อะไหล่..." → "อะไหล่..."
@@ -419,6 +435,17 @@ export async function attachNameRefs(sb: Admin, parents: ParentRow[]): Promise<v
     p.brand_name = p.brand_id ? bn.get(p.brand_id) ?? null : null;
     p.collection_name = p.collection_id ? cn.get(p.collection_id) ?? null : null;
   }
+}
+
+/**
+ * 🌐 คำอธิบายภาษาอังกฤษ (หน้า /en) — english_description / introduction_en ของ Parent SKU
+ * ร้านตั้งให้ใช้ "คำแนะนำ" (introduction) → ใช้ introduction_en ก่อน · ร้านปิดคำอธิบาย = "" · ว่าง = เว็บใช้ไทยแทน
+ */
+function resolveDescriptionEn(map: FieldMap, parent: ParentRow): string {
+  if (map.description.source === "none") return "";
+  const intro = clean(parent.introduction_en);
+  const long = clean(parent.english_description);
+  return map.description.source === "introduction" ? intro || long : long || intro;
 }
 
 function resolveDescription(map: FieldMap, parent: ParentRow): string {
@@ -511,8 +538,12 @@ export function resolveCategories(map: Pick<FieldMap, "categories">, webCategori
 
 export interface ResolvedProduct {
   name: string;
+  /** 🌐 ชื่อภาษาอังกฤษ (ว่าง = ยังไม่มี · เว็บใช้ชื่อไทย) */
+  name_en: string;
   price: number;
   description: string;
+  /** 🌐 คำอธิบายภาษาอังกฤษ (ว่าง = เว็บใช้ของไทย) */
+  description_en: string;
   unit: string;
   /** หมวดหลัก (ตัวแรกของ categories · ว่าง = ไม่อยู่หมวดไหน) */
   category: string;
@@ -556,8 +587,10 @@ export function resolveProduct(
 
   return {
     name: clean(l.web_name) || resolveName(map, parent),
+    name_en: resolveNameEn(map, parent),
     price: l.web_price != null && num(l.web_price) > 0 ? num(l.web_price) : resolvePrice(map, parent, kids),
     description: clean(l.web_description) || resolveDescription(map, parent),
+    description_en: resolveDescriptionEn(map, parent),
     unit: clean(l.web_unit) || map.unit.default,
     category: categories[0] ?? "",
     categories,

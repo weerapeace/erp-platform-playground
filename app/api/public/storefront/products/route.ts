@@ -209,6 +209,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         slug: slugify(code),
         name: r.name,
         description: r.description,
+        // 🌐 ภาษาอังกฤษ (เว็บหน้า /en สลับ <key>_en ให้เอง · ว่าง = ไม่ส่ง → ใช้ไทย)
+        ...(r.name_en ? { name_en: r.name_en } : {}),
+        ...(r.description_en ? { description_en: r.description_en } : {}),
         /** ราคาเป็น "บาท" (ไม่ใช่สตางค์) */
         price: r.price,
         /** ราคาเต็ม (ขีดฆ่า) จาก fake_price ของ Parent SKU — ส่งเฉพาะเมื่อสูงกว่าราคาขาย */

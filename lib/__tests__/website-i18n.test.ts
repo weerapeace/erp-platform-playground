@@ -12,6 +12,30 @@ import {
 import { applySlotTranslations, collectTextSlots, isTranslatable, slotValueFrom } from "../website-i18n";
 import { normalizeBlocks, newBlock } from "../website-blocks";
 import { SECTION_SCHEMAS } from "../website-schema";
+import { normalizeFieldMap, resolveProduct, type ParentRow } from "../website-field-map";
+
+describe("สินค้า: ชื่อ/คำอธิบายภาษาอังกฤษสำหรับหน้า /en", () => {
+  const parent = (o: Partial<ParentRow>): ParentRow =>
+    ({ id: "p1", code: "LM01", name_th: "กระเป๋า Louis Montini (Rise)", name_en: "", sku_name: null, name_platform: null, introduction: "แนะนำ", description: "ยาว", platform_description: null, english_description: "", sale_price: 1000, final_price: null, fake_price: null, cover_image_r2_key: null, category_id: null, ...o }) as ParentRow;
+
+  it("ไม่มี name_en = ว่าง (เว็บใช้ชื่อไทยแทน)", () => {
+    const r = resolveProduct(normalizeFieldMap(null), parent({}), [], null, null);
+    expect(r.name_en).toBe("");
+    expect(r.description_en).toBe("");
+  });
+
+  it("ชื่ออังกฤษผ่านกฎชื่อเดียวกับไทย (ตัดคำนำหน้า + วงเล็บ)", () => {
+    const map = normalizeFieldMap({ name: { source: "name_th", stripPrefix: "Louis Montini", removeParens: true } });
+    const r = resolveProduct(map, parent({ name_en: "Louis Montini Leather Bag (Rise)" }), [], null, null);
+    expect(r.name_en).toBe("Leather Bag");
+  });
+
+  it("คำอธิบาย: english_description ก่อน · ไม่มีใช้ introduction_en", () => {
+    const map = normalizeFieldMap(null);
+    expect(resolveProduct(map, parent({ english_description: "Long EN", introduction_en: "Intro EN" }), [], null, null).description_en).toBe("Long EN");
+    expect(resolveProduct(map, parent({ introduction_en: "Intro EN" }), [], null, null).description_en).toBe("Intro EN");
+  });
+});
 
 /**
  * 🌐 2 ภาษา (ไทย/อังกฤษ) — กฎกลาง `<key>_en` + `_i18n`

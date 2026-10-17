@@ -46,6 +46,8 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "closed_title", label: "หัวข้อหน้ารอเปิด", hint: "เว้นว่าง = 'เร็ว ๆ นี้'", group: "shop", type: "text", isPublic: true, placeholder: "เร็ว ๆ นี้" },
   { key: "closed_message", label: "ข้อความหน้ารอเปิด", hint: "เว้นว่าง = '<ชื่อร้าน> กำลังเตรียมเว็บใหม่ให้พร้อม…' · ช่องทางติดต่อที่กรอกไว้จะโชว์ใต้ข้อความ", group: "shop", type: "textarea", isPublic: true },
   // ─── ฟีเจอร์ทดลอง: เปิดให้ร้านนี้เห็น Section ทดลองในคลังของตัวจัดหน้า (SectionMeta.beta ใน lib/website-schema.ts) ───
+  // ─── 🌐 2 ภาษา (เว็บร้าน: /en + ปุ่ม TH/EN · กติกา docs/bilingual-content.md) ───
+  { key: "lang_en_enabled", label: "🌐 เปิดภาษาอังกฤษบนเว็บ (/en + ปุ่มสลับ TH/EN)", hint: "ลูกค้ากดสลับภาษาที่หัวเว็บได้ · ข้อความที่ยังไม่แปลจะโชว์ภาษาไทยแทน · กรอก/แปลอังกฤษที่ตัวจัดหน้าเว็บ (ปุ่ม 🌐) และชื่อสินค้าอังกฤษในฟอร์มสินค้า · ปิดอยู่ = หน้า /en เด้งกลับไทย แต่พรีวิวใน ERP ยังดูได้", group: "shop", type: "bool", isPublic: true },
   { key: "beta_canvas", label: "🧪 ทดลองใช้ \"ผืนผ้าใบอิสระ\"", hint: "เพิ่ม Section ที่วางรูป/ข้อความ/ปุ่ม/ของตกแต่งได้อิสระ ในคลังของตัวจัดหน้า · ปิดทีหลัง ของที่วางไว้แล้วยังขึ้นเว็บตามเดิม", group: "shop", type: "bool", isPublic: false },
 
   // ─── ติดต่อ ───
@@ -113,6 +115,7 @@ export interface SiteInfo {
   closed_title: string;
   closed_message: string;
   beta_canvas: boolean;
+  lang_en_enabled: boolean;
   contact_phone: string;
   contact_line: string;
   contact_line_url: string;
@@ -165,6 +168,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   closed_title: "",
   closed_message: "",
   beta_canvas: false,
+  lang_en_enabled: false,
   contact_phone: "",
   contact_line: "",
   contact_line_url: "",

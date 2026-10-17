@@ -40,6 +40,17 @@ import { coverageOf, hasText, type ContentLang } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
 import { applySlotTranslations, collectTextSlots, slotSourceTexts, slotValueFrom, type TextSlot } from "@/lib/website-i18n";
 
+/** URL พรีวิวของเว็บร้าน → หน้าเดียวกันฉบับภาษาอังกฤษ (/en/...) — เว็บร้านต้องรองรับ /en (proxy.ts) */
+export function previewInEnglish(src: string): string {
+  try {
+    const u = new URL(src);
+    if (u.pathname !== "/en" && !u.pathname.startsWith("/en/")) u.pathname = u.pathname === "/" ? "/en" : `/en${u.pathname}`;
+    return u.toString();
+  } catch {
+    return src;
+  }
+}
+
 export interface Selection {
   blockId: string;
   childId?: string | null;
@@ -786,6 +797,9 @@ export function WebsiteBuilder({
       />
     );
 
+  /** 🌐 แผงแก้ภาษาอังกฤษ → พรีวิวหน้า /en ของเว็บร้าน (สลับกลับไทย = กลับหน้าเดิม) */
+  const shownSrc = previewSrc && contentLang === "en" ? previewInEnglish(previewSrc) : previewSrc;
+
   const dev = DEVICES.find((d) => d.k === device)!;
   const scale = zoom === "fit" ? Math.min(1, (boxW - 16) / dev.w) : zoom;
   scaleRef.current = scale;
@@ -911,7 +925,7 @@ export function WebsiteBuilder({
                   <p className="text-[11px] text-emerald-700">ทุกข้อความในหน้านี้มีภาษาอังกฤษแล้ว</p>
                 )}
                 <p className="text-[11px] leading-relaxed text-slate-400">
-                  คำแปลจาก AI ติดป้าย &quot;รอตรวจ&quot; — อ่านแล้วกด ✓ ตรวจแล้ว หรือแก้เองได้ · ขึ้นเว็บเมื่อกด &quot;เผยแพร่&quot; · หน้าเว็บภาษาอังกฤษ (/en) จะเปิดในขั้นถัดไป ตอนนี้กรอก/แปลเก็บไว้ก่อนได้
+                  คำแปลจาก AI ติดป้าย &quot;รอตรวจ&quot; — อ่านแล้วกด ✓ ตรวจแล้ว หรือแก้เองได้ · ขึ้นเว็บเมื่อกด &quot;เผยแพร่&quot; · พรีวิวโชว์หน้า /en เมื่อสลับแผงเป็น EN · ลูกค้าเห็นเมื่อเปิด &quot;🌐 เปิดภาษาอังกฤษบนเว็บ&quot; ในแท็บข้อมูลร้าน
                 </p>
               </div>
             </>
@@ -941,7 +955,7 @@ export function WebsiteBuilder({
       </select>
       <button onClick={reloadPreview} title="โหลดพรีวิวใหม่" className={iconBtn}>↻</button>
       <button onClick={() => setFullscreen(true)} title="พรีวิวเต็มจอ (Esc ออก)" className={iconBtn}>⤢</button>
-      {previewSrc && <a href={previewSrc} target="_blank" rel="noreferrer" title="เปิดพรีวิวในแท็บใหม่" className={iconBtn}>↗</a>}
+      {previewSrc && <a href={shownSrc ?? previewSrc} target="_blank" rel="noreferrer" title="เปิดพรีวิวในแท็บใหม่" className={iconBtn}>↗</a>}
       {toolbar && (
         <>
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
@@ -970,7 +984,7 @@ export function WebsiteBuilder({
           <div style={{ width: dev.w * scale, height: dev.h * scale, margin: "0 auto", overflow: "hidden" }}>
             <iframe
               ref={iframeRef}
-              src={`${previewSrc}&_r=${nonce}`}
+              src={`${shownSrc}&_r=${nonce}`}
               title="พรีวิวหน้าเว็บ"
               className="bg-white border-0 shadow-sm"
               style={{ width: dev.w, height: dev.h, transform: `scale(${scale})`, transformOrigin: "top left", flexShrink: 0, display: "block" }}
