@@ -52,7 +52,61 @@ export interface ListingConfig {
   sizeBreaks: number[];
   /** สถานะ "สินค้าใหม่" = ขึ้นร้านไม่เกิน N วัน */
   newDays: number;
+  /** 📐 สินค้าต่อแถวเฉพาะหน้ารายการสินค้า (null = ใช้ค่า "การ์ดสินค้า" ของทั้งเว็บ) */
+  columns: ListingColumns | null;
+  /** 📄 แบ่งหน้า: all = โชว์ทั้งหมด (เดิม) · more = ปุ่ม "ดูเพิ่ม" · infinite = เลื่อนแล้วโหลดเอง · pages = เลขหน้า */
+  paging: ListingPaging;
+  /** จำนวนสินค้าต่อครั้ง/ต่อหน้า (ไม่ใช่ all) */
+  pageSize: number;
+  /** ↕ การเรียงตอนเปิดหน้า */
+  defaultSort: ListingSort;
+  /** ตัวเลือกการเรียงที่ลูกค้าเห็น (ตามลำดับ) — ว่าง = ซ่อนช่องเรียง */
+  sorts: ListingSort[];
+  /** หัวหน้า "สินค้าทั้งหมด" (หน้าหมวดใช้ชื่อ/คำอธิบายของหมวด) */
+  header: ListingHeader;
 }
+
+export interface ListingColumns {
+  desktop: number;
+  /** คอมตอนแถบตัวกรองซ้ายกางอยู่ (กินที่ 1 ช่อง) */
+  desktopRail: number;
+  tablet: number;
+  mobile: number;
+}
+export type ListingPaging = "all" | "more" | "infinite" | "pages";
+export type ListingSort = "featured" | "newest" | "best" | "price-asc" | "price-desc" | "name";
+export interface ListingHeader {
+  /** "" = ค่าเดิมของร้าน */
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  showSearch: boolean;
+  showCount: boolean;
+}
+export const LISTING_PAGINGS: { value: ListingPaging; label: string; hint: string }[] = [
+  { value: "all", label: "โชว์ทั้งหมด", hint: "เหมือนเดิม — สินค้าทุกชิ้นในหน้าเดียว" },
+  { value: "more", label: "ปุ่ม \"ดูเพิ่ม\"", hint: "โชว์ทีละชุด กดปุ่มเพื่อดูชุดถัดไป" },
+  { value: "infinite", label: "เลื่อนแล้วโหลดเอง", hint: "เลื่อนถึงท้ายรายการ ชุดถัดไปขึ้นเอง" },
+  { value: "pages", label: "เลขหน้า", hint: "‹ 1 2 3 › ทีละหน้า" },
+];
+export const LISTING_PAGE_SIZES = [12, 16, 20, 24, 30, 32, 36, 40, 48, 60, 72, 96] as const;
+export const LISTING_SORTS: { value: ListingSort; label: string; hint?: string }[] = [
+  { value: "featured", label: "แนะนำ", hint: "ลำดับที่จัดไว้ (ลากเรียงในหน้าสินค้าบนเว็บ)" },
+  { value: "newest", label: "ใหม่ล่าสุด" },
+  { value: "best", label: "ขายดี", hint: "โชว์เมื่อมีข้อมูลยอดขาย" },
+  { value: "price-asc", label: "ราคาน้อย → มาก" },
+  { value: "price-desc", label: "ราคามาก → น้อย" },
+  { value: "name", label: "ชื่อ ก–ฮ" },
+];
+const SORT_KEYS = LISTING_SORTS.map((s) => s.value);
+export const DEFAULT_LISTING_HEADER: ListingHeader = { eyebrow: "", title: "", subtitle: "", showSearch: true, showCount: true };
+/** ค่าตั้งต้นตอนกด "ตั้งเฉพาะหน้านี้" — เริ่มจากค่าการ์ดสินค้า */
+export const listingColumnsFrom = (c: { desktop: number; tablet: number; mobile: number }): ListingColumns => ({
+  desktop: c.desktop,
+  desktopRail: Math.max(2, c.desktop - 1),
+  tablet: c.tablet,
+  mobile: c.mobile,
+});
 
 /* ── 🧭 ตัวกรองหน้ารายการสินค้า (theme.listing.filters) — ตั้งใน ERP แท็บดีไซน์ → หน้ารายการสินค้า ──
  * ชนิด: หมวด · สี (โทนสีกลาง) · ช่วงราคา · ขนาด (จากด้านยาวสุด ซม.) · คอลเลกชัน · ใส่อะไรได้ · สถานะ (พร้อมส่ง/ลดราคา/ใหม่)
@@ -168,7 +222,7 @@ export const normalizeSizeBreaks = (v: unknown) => {
 
 
 export const MAX_LISTING_INSERTS = 20;
-export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30 };
+export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER } };
 
 export const LISTING_SIZES: { value: ListingInsertSize; label: string; hint: string }[] = [
   { value: "1x1", label: "1 ช่อง (เท่าการ์ดสินค้า)", hint: "มือถือ: 1 ช่อง" },
@@ -245,6 +299,34 @@ export function normalizeListing(raw: unknown): ListingConfig {
     });
     if (inserts.length >= MAX_LISTING_INSERTS) break;
   }
-  return { inserts, colorFilter: r.colorFilter !== false, filterLayout: r.filterLayout === "top" ? "top" : "side", filterSidebar: r.filterSidebar === "collapsed" ? "collapsed" : "open", filters: normalizeShopFilters(r.filters, r.colorFilter === false), priceBreaks: normalizePriceBreaks(r.priceBreaks), sizeBreaks: normalizeSizeBreaks(r.sizeBreaks), newDays: Number.isFinite(Number(r.newDays)) && Number(r.newDays) >= 1 ? Math.min(365, Math.round(Number(r.newDays))) : 30 };
+  return { inserts, colorFilter: r.colorFilter !== false, filterLayout: r.filterLayout === "top" ? "top" : "side", filterSidebar: r.filterSidebar === "collapsed" ? "collapsed" : "open", filters: normalizeShopFilters(r.filters, r.colorFilter === false), priceBreaks: normalizePriceBreaks(r.priceBreaks), sizeBreaks: normalizeSizeBreaks(r.sizeBreaks), newDays: Number.isFinite(Number(r.newDays)) && Number(r.newDays) >= 1 ? Math.min(365, Math.round(Number(r.newDays))) : 30, ...normalizeListingLayout(r) };
+}
+
+/** 📐 ต่อแถว · 📄 แบ่งหน้า · ↕ การเรียง · หัวหน้า (ส่วนที่เพิ่มรอบ 2026-10-17) */
+function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig, "columns" | "paging" | "pageSize" | "defaultSort" | "sorts" | "header"> {
+  const int = (v: unknown, fb: number, lo: number, hi: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : fb;
+  };
+  const c = r.columns && typeof r.columns === "object" ? (r.columns as Record<string, unknown>) : null;
+  const columns: ListingColumns | null = c
+    ? (() => {
+        const desktop = int(c.desktop, 4, 2, 6);
+        return { desktop, desktopRail: int(c.desktopRail, Math.max(2, desktop - 1), 1, 6), tablet: int(c.tablet, 3, 1, 4), mobile: int(c.mobile, 2, 1, 3) };
+      })()
+    : null;
+  const paging = (["all", "more", "infinite", "pages"] as const).includes(r.paging as ListingPaging) ? (r.paging as ListingPaging) : "all";
+  const sorts = Array.isArray(r.sorts) ? [...new Set(r.sorts.filter((x): x is ListingSort => SORT_KEYS.includes(x as ListingSort)))] : [...SORT_KEYS];
+  const defaultSort = SORT_KEYS.includes(r.defaultSort as ListingSort) ? (r.defaultSort as ListingSort) : "featured";
+  const h = r.header && typeof r.header === "object" ? (r.header as Record<string, unknown>) : {};
+  const txt = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  return {
+    columns,
+    paging,
+    pageSize: int(r.pageSize, 24, 4, 120),
+    defaultSort,
+    sorts,
+    header: { eyebrow: txt(h.eyebrow, 60), title: txt(h.title, 80), subtitle: txt(h.subtitle, 240), showSearch: h.showSearch !== false, showCount: h.showCount !== false },
+  };
 }
 

@@ -2025,8 +2025,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {/* ── หน้ารายการสินค้า: รูปแทรกในกริด ── */}
           {tab === "listing" && (
             <div className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800 mb-2">หน้ารายการสินค้า — แทรกรูปในกริดสินค้า</h3>
-              <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} linkCtx={linkCtx} />
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">หน้ารายการสินค้า — หัวหน้า · ต่อแถว · แบ่งหน้า · การเรียง · ตัวกรอง · รูปแทรก</h3>
+              <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} linkCtx={linkCtx} cardColumns={theme.card.columns} />
             </div>
           )}
 

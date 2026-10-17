@@ -11,6 +11,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { categoryHref } from "@/lib/website-links";
 import { ShopFiltersEditor } from "@/components/website-shop-filters-editor";
 import { LinkTargetPicker } from "@/components/website-link-picker";
+import { ListingLayoutSettings } from "@/components/website-listing-layout";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import {
   LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
@@ -27,6 +28,7 @@ export function ListingPanel({
   products,
   fields = [],
   linkCtx,
+  cardColumns = { desktop: 4, tablet: 3, mobile: 2 },
 }: {
   value: ListingConfig;
   onChange: (v: ListingConfig) => void;
@@ -36,6 +38,8 @@ export function ListingPanel({
   fields?: { key: string; label: string }[];
   /** ตัวเลือกลิงก์ปลายทาง (ของกลาง) — ไม่ส่ง = ช่องพิมพ์เอง */
   linkCtx?: SchemaFormContext;
+  /** ค่าต่อแถวของ "การ์ดสินค้า" ทั้งเว็บ (ตัวตั้งต่อแถวเฉพาะหน้านี้เริ่มจากค่านี้) */
+  cardColumns?: { desktop: number; tablet: number; mobile: number };
 }) {
   const list = value.inserts;
   const set = (inserts: ListingInsert[]) => onChange({ ...value, inserts });
@@ -54,6 +58,8 @@ export function ListingPanel({
 
   return (
     <div className="space-y-3">
+      {/* 📐 หัวหน้า · ต่อแถว · แบ่งหน้า · การเรียง */}
+      <ListingLayoutSettings value={value} onChange={onChange} cardColumns={cardColumns} />
       {/* 🧭 ตัวกรอง — ตำแหน่ง + กลุ่มตัวกรอง (ลำดับ/เปิดปิด/ชื่อ/ตั้งค่า) · โทนสีเป็นของกลางทุกร้าน จัดในป๊อป "จัดโทนสี" */}
       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
         <p className="text-xs font-semibold text-slate-800">🧭 ตัวกรองสินค้า</p>
