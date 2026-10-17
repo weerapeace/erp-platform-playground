@@ -12,6 +12,7 @@ import { normalizeCart, DEFAULT_CART, type CartConfig } from "@/lib/website-cart
 import { isGradStop } from "@/lib/website-gradient";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
+import { carryTranslations } from "@/lib/content-i18n";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
 export type MenuAlign = "left" | "center" | "right";
@@ -1507,7 +1508,37 @@ const pick = <T extends string>(v: unknown, allowed: readonly T[], fallback: T):
   typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
 
 /** อ่านค่าที่เก็บใน DB ให้เป็น SiteTheme ที่ครบถ้วนเสมอ (กันข้อมูลเก่า/ไม่ครบ) */
+/**
+ * 🌐 ช่องข้อความในธีมที่มีภาษาอังกฤษคู่ (`<key>_en`) — เมนู/ท้ายเว็บ/แผงเมนูใหญ่/หัวเว็บ/หน้าสินค้า/การ์ด/ตะกร้า
+ * เพิ่มช่องข้อความใหม่ในธีม = เพิ่มชื่อที่นี่ (ตารางคำแปล + ตัวทำความสะอาดใช้รายการนี้ร่วมกัน)
+ */
+export const THEME_TEXT_KEYS = [
+  "label", "badge", "title", "desc", "text", "caption", "moreLabel", "viewAllLabel", "promo", "placeholder",
+  "titleText", "noteText", "saleText", "newText", "bestText", "recsTitle", "freeShipText", "freeShipDone", "etaText",
+  "emptyText", "checkoutText", "heading", "subtitle",
+] as const;
+
+/** ป้ายตำแหน่ง (ภาษาคน) ในตารางคำแปลของธีม */
+const THEME_CRUMB: Record<string, string> = {
+  menu: "เมนู", items: "เมนูคอม", mobileItems: "เมนูมือถือ", children: "เมนูย่อย", panel: "แผงเมนูใหญ่", blocks: "กล่อง",
+  links: "ลิงก์", groups: "กลุ่ม", cards: "การ์ด", tabs: "แท็บ", footer: "ท้ายเว็บ", columns: "คอลัมน์", bottomLinks: "ลิงก์แถวล่าง",
+  header: "หัวเว็บ", button: "ปุ่ม", cart: "ตะกร้า", search: "ค้นหา", logo: "โลโก้", product: "หน้าสินค้า",
+  detailItems: "หัวข้อรายละเอียด", parts: "ส่วนประกอบ", buy: "ส่วนซื้อ", banner: "แบนเนอร์", related: "สินค้าที่เกี่ยวข้อง",
+  card: "การ์ดสินค้า", autoBadges: "ป้ายอัตโนมัติ", listing: "หน้ารายการสินค้า",
+  label: "ชื่อ", badge: "ป้าย", title: "หัวข้อ", desc: "คำอธิบาย", text: "ข้อความ", caption: "คำบรรยาย", moreLabel: "ลิงก์ท้าย",
+  viewAllLabel: "ดูทั้งหมด", promo: "แถบโปร", placeholder: "ข้อความในช่อง", titleText: "หัวข้อ", noteText: "หมายเหตุ",
+  saleText: "ป้ายลดราคา", newText: "ป้ายสินค้าใหม่", bestText: "ป้ายขายดี", recsTitle: "หัวข้อสินค้าแนะนำ",
+  freeShipText: "ข้อความส่งฟรี", freeShipDone: "ข้อความถึงยอดส่งฟรี", etaText: "ข้อความเวลาส่ง", emptyText: "ข้อความว่าง",
+  checkoutText: "ปุ่มชำระเงิน", heading: "หัวข้อ", subtitle: "คำอธิบาย",
+};
+export const themeCrumb = (field: string): string | null => THEME_CRUMB[field] ?? null;
+
+/** ทำความสะอาดธีม + เก็บคำแปลภาษาอังกฤษทุกชั้น (ตัวทำความสะอาดย่อยเก็บเฉพาะช่องที่รู้จัก) */
 export function normalizeTheme(raw: unknown): SiteTheme {
+  return carryTranslations(raw, normalizeThemeBase(raw), THEME_TEXT_KEYS);
+}
+
+function normalizeThemeBase(raw: unknown): SiteTheme {
   const r = (raw ?? {}) as Record<string, unknown>;
   const c = (r.colors ?? {}) as Record<string, unknown>;
   const f = (r.fonts ?? {}) as Record<string, unknown>;

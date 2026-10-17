@@ -44,6 +44,9 @@ export function textOf(v: unknown): string {
 
 export const hasText = (v: unknown): boolean => textOf(v).trim() !== "";
 
+/** มีอักษรไทยไหม — ข้อความที่เป็นอังกฤษ/ตัวเลขอยู่แล้ว (เช่น "PVC", "SHOP NOW") ไม่ต้องแปล ไม่นับว่าขาด */
+export const needsTranslation = (v: unknown): boolean => /[฀-๿]/.test(textOf(v));
+
 /** ลายนิ้วมือสั้น ๆ ของข้อความ (FNV-1a 32 บิต) — ใช้เทียบว่าไทยเปลี่ยนไหม โดยไม่ต้องเก็บข้อความซ้ำ */
 export function textFingerprint(v: unknown): string {
   const s = textOf(v).trim();
@@ -143,4 +146,144 @@ export function coverageOf(statuses: { th: unknown; status: TranslationStatus }[
     missing: withTh.filter((s) => s.status === "empty" || s.status === "stale").length,
     aiPending: withTh.filter((s) => s.status === "ai").length,
   };
+}
+
+/**
+ * คำมาตรฐานที่ใช้บ่อย (หน่วย/ชื่อชุดตัวเลือก) → อังกฤษ — ใช้แทนเมื่อร้านยังไม่ได้ตั้งภาษาอังกฤษเอง
+ * ค่าที่ตั้งเองชนะเสมอ · ไม่รู้จัก = "" (เว็บใช้ไทยแทน)
+ */
+const COMMON_EN: Record<string, string> = {
+  ใบ: "pc", ชิ้น: "pc", อัน: "pc", ตัว: "pc", เส้น: "pc", ลูก: "pc", ด้าม: "pc", คู่: "pair", ชุด: "set", กล่อง: "box",
+  แพ็ค: "pack", แพ็ก: "pack", ห่อ: "pack", ม้วน: "roll", เมตร: "m", หลา: "yd", ผืน: "sheet", แผ่น: "sheet", ขวด: "bottle",
+  กระปุก: "jar", หลอด: "tube", "ตร.ฟุต": "sq ft",
+  สี: "Colour", "แบบ/สี": "Style / colour", "แบบ / สี": "Style / colour", แบบ: "Style", ขนาด: "Size", ลาย: "Pattern",
+  ตัวเลือก: "Option", "ตัวเลือกที่ 2": "Option 2", วัสดุ: "Material", ไซซ์: "Size", ความยาว: "Length",
+};
+export const commonLabelEn = (th: string): string => COMMON_EN[th.trim()] ?? "";
+
+/* ─────────── ข้อมูลซ้อนลึก (ธีม/เมนู/หมวด/คอลเลกชัน) — ไม่ต้องแก้ตัวทำความสะอาดทีละจุด ─────────── */
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+/** รหัสที่ใช้จับคู่ชิ้นใน array (id ก่อน ไม่มีใช้ key) — ตัวทำความสะอาดอาจกรอง/เรียงใหม่ จึงจับคู่ด้วยตำแหน่งไม่ได้ */
+const idOf = (v: unknown): string | null => (isObj(v) ? (typeof v.id === "string" && v.id ? `id:${v.id}` : typeof v.key === "string" && v.key ? `key:${v.key}` : null) : null);
+
+/**
+ * เก็บคำแปล (`<key>_en` + `_i18n`) จากข้อมูลดิบกลับเข้าไปในผลที่ทำความสะอาดแล้ว — ทุกชั้นทุกจุด
+ * ใช้ต่อท้ายตัวทำความสะอาดเดิม (normalizeTheme / normalizeFieldMap …) ที่เก็บเฉพาะช่องที่รู้จัก
+ * keys = ช่องข้อความที่แปลได้ (เช่น label, title, desc) · array จับคู่ชิ้นด้วย id/key · แก้ norm ในตัว (คืนค่าเดิม)
+ */
+export function carryTranslations<T>(raw: unknown, norm: T, keys: readonly string[], maxLen = 2000): T {
+  const walk = (r: unknown, n: unknown, depth: number) => {
+    if (depth > 10 || r == null || n == null) return;
+    if (Array.isArray(n) && Array.isArray(r)) {
+      const byId = new Map<string, unknown>();
+      for (const x of r) {
+        const id = idOf(x);
+        if (id) byId.set(id, x);
+      }
+      n.forEach((x, i) => {
+        const id = idOf(x);
+        walk(id ? byId.get(id) : byId.size ? undefined : r[i], x, depth + 1);
+      });
+      return;
+    }
+    if (!isObj(n) || !isObj(r)) return;
+    const kept: string[] = [];
+    for (const k of keys) {
+      if (typeof n[k] !== "string") continue;
+      const en = r[enKey(k)];
+      if (typeof en === "string" && en.trim()) {
+        n[enKey(k)] = en.slice(0, maxLen);
+        kept.push(k);
+      }
+    }
+    const meta = sanitizeI18nMeta(r[I18N_META_KEY], kept);
+    if (meta) n[I18N_META_KEY] = meta;
+    for (const [k, v] of Object.entries(n)) if (v && typeof v === "object" && !k.endsWith(EN_SUFFIX) && k !== I18N_META_KEY) walk(r[k], v, depth + 1);
+  };
+  walk(raw, norm, 0);
+  return norm;
+}
+
+export type Path = (string | number)[];
+
+/** ช่องข้อความ 1 ช่องในข้อมูลซ้อนลึก (ใช้ทำตารางคำแปล) */
+export interface PathSlot {
+  /** ที่อยู่ของ object ที่ถือช่องนี้ */
+  path: Path;
+  key: string;
+  th: string;
+  en: string;
+  status: TranslationStatus;
+  /** ป้ายบอกตำแหน่งแบบคนอ่าน เช่น ["เมนู", "Wallets"] */
+  where: string[];
+}
+
+/**
+ * ไล่หาช่องข้อความที่แปลได้ทุกชั้น (ข้ามช่องที่ไทยว่าง)
+ * crumbOf = ป้ายของแต่ละชั้น (ชื่อช่องของ object/array → คำไทย) · ไม่คืน = ใช้ชื่อ/หัวข้อของ object นั้นเอง
+ */
+export function collectTextPaths(
+  root: unknown,
+  keys: readonly string[],
+  crumbOf: (field: string) => string | null = () => null,
+): PathSlot[] {
+  const out: PathSlot[] = [];
+  const nameOf = (o: Record<string, unknown>): string | null => {
+    for (const k of ["label", "title", "name", "key"]) if (typeof o[k] === "string" && (o[k] as string).trim()) return (o[k] as string).trim().slice(0, 40);
+    return null;
+  };
+  const walk = (v: unknown, path: Path, where: string[], depth: number) => {
+    if (depth > 10 || v == null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      v.forEach((x, i) => walk(x, [...path, i], isObj(x) ? [...where, nameOf(x) ?? `#${i + 1}`] : where, depth + 1));
+      return;
+    }
+    const meta = readMeta(v as Record<string, unknown>);
+    for (const k of keys) {
+      const th = (v as Record<string, unknown>)[k];
+      // ว่าง / ไม่มีอักษรไทย (เป็นอังกฤษอยู่แล้ว หรือค่าตั้งค่าอย่าง "count") = ไม่ต้องแปล
+      if (typeof th !== "string" || !needsTranslation(th)) continue;
+      const enRaw = (v as Record<string, unknown>)[enKey(k)];
+      const en = typeof enRaw === "string" ? enRaw : "";
+      out.push({ path, key: k, th, en, status: translationStatus(th, en, meta[k]), where: [...where, crumbOf(k) ?? k] });
+    }
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (!x || typeof x !== "object" || k.endsWith(EN_SUFFIX) || k === I18N_META_KEY) continue;
+      const c = crumbOf(k);
+      walk(x, [...path, k], c ? [...where, c] : where, depth + 1);
+    }
+  };
+  walk(root, [], [], 0);
+  return out;
+}
+
+/** แก้ object ที่ path (คืนก้อนใหม่ทั้งเส้นทาง — ของเดิมไม่ถูกแตะ) */
+export function updateAt<T>(root: T, path: Path, fn: (o: Record<string, unknown>) => Record<string, unknown>): T {
+  if (!path.length) return fn(root as unknown as Record<string, unknown>) as unknown as T;
+  const [head, ...rest] = path;
+  if (Array.isArray(root)) return root.map((x, i) => (i === head ? updateAt(x, rest, fn) : x)) as unknown as T;
+  const o = (root ?? {}) as Record<string, unknown>;
+  return { ...o, [head]: updateAt(o[head as string], rest, fn) } as unknown as T;
+}
+
+/** คัดเฉพาะช่องคำแปล (`*_en` + `_i18n`) ของ object — ใช้ตอนหน้าจอสร้าง object ใหม่จากช่องที่รู้จัก (กันคำแปลหาย) */
+export function pickTranslations(o: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) if ((k.endsWith(EN_SUFFIX) && typeof v === "string") || (k === I18N_META_KEY && isObj(v))) out[k] = v;
+  return out;
+}
+
+/** อ่าน object ที่ path */
+export function getAt(root: unknown, path: Path): Record<string, unknown> {
+  let cur: unknown = root;
+  for (const p of path) cur = cur == null ? undefined : (cur as Record<string | number, unknown>)[p];
+  return isObj(cur) ? cur : {};
+}
+
+/** ใส่คำแปลหลายช่องทีเดียว (ai = ติดป้าย "AI แปล · รอตรวจ") */
+export function applyPathTranslations<T>(root: T, results: { slot: PathSlot; en: string }[], ai = true): T {
+  let next = root;
+  for (const { slot, en } of results) next = updateAt(next, slot.path, (o) => ({ ...o, ...translationPatch(o, slot.key, o[slot.key] ?? slot.th, en, ai) }));
+  return next;
 }

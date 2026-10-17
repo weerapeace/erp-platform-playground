@@ -9,6 +9,7 @@ import {
   cleanUrl,
   siteInfoToRows,
   SITE_INFO_FIELDS,
+  SITE_INFO_I18N_KEYS,
 } from "../website-site-info";
 import { validateOrderInput, pickSku, orderNoPrefix } from "../website-orders";
 import type { ChildSku } from "../website-field-map";
@@ -67,7 +68,8 @@ describe("website-site-info", () => {
 
   it("siteInfoToRows เขียนครบทุกช่อง และ bool เป็น 1/0", () => {
     const rows = siteInfoToRows("shop-1", normalizeSiteInfo({ pay_cod: false }));
-    expect(rows).toHaveLength(SITE_INFO_FIELDS.length);
+    // ทุกช่อง + 🌐 ช่องอังกฤษของข้อความร้าน + สถานะการแปล (_i18n)
+    expect(rows).toHaveLength(SITE_INFO_FIELDS.length + SITE_INFO_I18N_KEYS.length + 1);
     expect(rows.find((r) => r.key === "pay_cod")?.value).toBe("0");
     expect(rows.every((r) => r.shop_id === "shop-1")).toBe(true);
   });

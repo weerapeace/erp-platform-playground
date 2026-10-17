@@ -24,6 +24,8 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart, type ImagePlaceholder } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
+import { TranslateButton } from "@/components/translation-table";
+import { THEME_TEXT_KEYS, themeCrumb } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
 import { FOOTER_COL_DEFS, FOOTER_BGS, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
@@ -950,6 +952,17 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 {tabDirty(t.k) && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />}
               </button>
             ))}
+            <span className="flex-1" />
+            {/* 🌐 ข้อความในธีมภาษาอังกฤษ (เมนู · ท้ายเว็บ · แผงเมนู · หัวเว็บ · หน้าสินค้า · ตะกร้า) — ตารางคำแปลของกลาง */}
+            <TranslateButton
+              className="self-center shrink-0 mb-1"
+              value={theme}
+              onChange={(next) => apply(next)}
+              keys={THEME_TEXT_KEYS}
+              crumbOf={themeCrumb}
+              title="ข้อความในธีม — เมนู · ท้ายเว็บ · แผงเมนูใหญ่ · หัวเว็บ · หน้าสินค้า · ตะกร้า"
+              description="แก้แล้วกด บันทึกร่าง / เผยแพร่ ของหน้านี้ตามปกติ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
+            />
           </div>
 
           {/* ── สี ── */}

@@ -6,6 +6,9 @@
  * ของกลาง: useDragReorder/DragHandle · ImageUploadField · CopyButton · lib/website-collections · API /api/website/collections
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { TranslateButton } from "@/components/translation-table";
+import { pickTranslations } from "@/lib/content-i18n";
+import { COLLECTION_TEXT_KEYS } from "@/lib/website-collections";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
@@ -59,7 +62,8 @@ export function WebsiteCollectionsPanel({ shopSlug, shopId, siteUrl }: { shopSlu
     void load();
   }, [load]);
 
-  const strip = (r: Row): WebCollection => ({ id: r.id, slug: r.slug, enabled: r.enabled, title: r.title, bannerKey: r.bannerKey, mobileBannerKey: r.mobileBannerKey, story: r.story, seoTitle: r.seoTitle, seoDescription: r.seoDescription });
+  // 🌐 เก็บคำแปล (<key>_en + _i18n) ไปด้วย ไม่งั้นหายตอนบันทึก
+  const strip = (r: Row): WebCollection => ({ id: r.id, slug: r.slug, enabled: r.enabled, title: r.title, bannerKey: r.bannerKey, mobileBannerKey: r.mobileBannerKey, story: r.story, seoTitle: r.seoTitle, seoDescription: r.seoDescription, ...pickTranslations(r as unknown as Record<string, unknown>) });
   const dirty = useMemo(() => JSON.stringify(rows.map(strip)) !== saved, [rows, saved]);
   const patch = (id: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const drag = useDragReorder((from, to) => setRows((rs) => moveItem(rs, from, to)));
@@ -91,6 +95,16 @@ export function WebsiteCollectionsPanel({ shopSlug, shopId, siteUrl }: { shopSlu
         <p className="text-xs text-slate-500">
           เปิดหน้าคอลเลกชันให้ลูกค้าเข้า <code>/collection/&lt;ลิงก์&gt;</code> — แบนเนอร์ + เรื่องราว + สินค้าในชุด · ลาก ⠿ เรียงลำดับ (ใช้กับ Section &quot;คอลเลกชัน&quot;) · เปิดอยู่ {enabledCount}/{rows.length}
         </p>
+        {/* 🌐 ชื่อ / เรื่องราว / SEO ภาษาอังกฤษ — ชื่อบนเว็บว่าง = ใช้ชื่อคอลเลกชันใน ERP มาให้แปล */}
+        <TranslateButton
+          className="ml-auto"
+          value={rows.map((r) => ({ ...r, title: r.title || r.name }))}
+          onChange={(next) => setRows(next.map((n, i) => ({ ...n, title: !rows[i]?.title && n.title === rows[i]?.name ? "" : n.title })))}
+          keys={COLLECTION_TEXT_KEYS}
+          crumbOf={(f) => ({ title: "ชื่อบนเว็บ", story: "เรื่องราว", seoTitle: "ชื่อใน Google", seoDescription: "คำอธิบายใน Google" })[f] ?? null}
+          title="คอลเลกชันภาษาอังกฤษ — ชื่อ · เรื่องราว · SEO"
+          description="แก้แล้วกด 💾 บันทึก ของแท็บนี้ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
+        />
         <button type="button" onClick={() => void save()} disabled={!dirty || saving} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-40">
           {saving ? "กำลังบันทึก…" : "💾 บันทึก"}
         </button>

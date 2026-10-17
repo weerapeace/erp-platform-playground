@@ -10,6 +10,7 @@
  *          ถ้าเว้นว่าง → คำนวณจาก field_map (ดึงจาก Parent SKU / SKU ลูก)
  */
 import { normalizeWebCollections, type WebCollection } from "@/lib/website-collections";
+import { carryTranslations } from "@/lib/content-i18n";
 import { cleanParents, flattenTree } from "@/lib/website-category-tree";
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
@@ -212,7 +213,7 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
   const defRaw = cleanCategoryKey(g("category").default);
   const defaultCat = catKeys.includes(defRaw) ? defRaw : catKeys[0] ?? "";
 
-  return {
+  const out: FieldMap = {
     name: {
       source: pick(g("name").source, NAME_SOURCES, d.name.source),
       stripPrefix: str(g("name").stripPrefix).slice(0, 60),
@@ -237,7 +238,16 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
       source: (["parent", "skus", "both"] as const).includes(g("image").source as ImageSource) ? (g("image").source as ImageSource) : "parent",
     },
   };
+  // 🌐 ภาษาอังกฤษ (<key>_en): ชื่อหมวด/คำโปรย/SEO · หัวข้อตัวเลือก · หน่วย (คอลเลกชันเก็บใน normalizeWebCollections แล้ว)
+  if (catsRaw) carryTranslations(catsRaw, out.categories, CATEGORY_TEXT_KEYS);
+  carryTranslations(g("options"), out.options, ["label"]);
+  carryTranslations(g("options2"), out.options2, ["label"]);
+  carryTranslations(g("unit"), out.unit, ["default"]);
+  return out;
 }
+
+/** 🌐 ช่องข้อความของหมวดที่มีภาษาอังกฤษคู่ */
+export const CATEGORY_TEXT_KEYS = ["label", "blurb", "seoTitle", "seoDescription"] as const;
 
 // ─── ข้อมูลดิบที่ resolver ต้องใช้ ───
 

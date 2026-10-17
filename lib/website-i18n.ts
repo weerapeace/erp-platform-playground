@@ -14,6 +14,7 @@ import {
   I18N_META_KEY,
   enKey,
   hasText,
+  needsTranslation,
   readMeta,
   sanitizeI18nMeta,
   translationPatch,
@@ -96,7 +97,7 @@ function slotsOf(fields: FieldDef[], item: Record<string, unknown>, at: Omit<Tex
   for (const fd of fields) {
     if (!isTranslatable(fd) || !matchShowIf(fd, item)) continue;
     const th = thaiValue(fd, item);
-    if (!hasText(th)) continue; // ไทยว่าง = ไม่มีอะไรให้แปล
+    if (!needsTranslation(th)) continue; // ไทยว่าง / เป็นอังกฤษอยู่แล้ว = ไม่มีอะไรให้แปล
     const en = englishValue(fd, item);
     out.push({ ...at, fd, th, en, status: translationStatus(th, en, meta[fd.key]) });
   }

@@ -11,6 +11,7 @@
  */
 
 import { normalizeCouponCode } from "@/lib/website-coupons";
+import { sanitizeI18nMeta, type I18nMeta } from "@/lib/content-i18n";
 
 export type SiteInfoType = "text" | "textarea" | "number" | "bool";
 
@@ -23,6 +24,8 @@ export interface SiteInfoField {
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
   placeholder?: string;
+  /** 🌐 ข้อความที่ลูกค้าเห็น → มีภาษาอังกฤษคู่ `<key>_en` (หน้าเว็บ /en) */
+  i18n?: boolean;
 }
 
 export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hint: string }[] = [
@@ -38,13 +41,13 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
 
 export const SITE_INFO_FIELDS: SiteInfoField[] = [
   // ─── ร้าน ───
-  { key: "site_tagline", label: "คำโปรยร้าน", hint: "สั้น ๆ 1 บรรทัด เช่น กระเป๋าหนังแท้ งานไทย ตั้งแต่ปี 1996", group: "shop", type: "text", isPublic: true },
-  { key: "site_description", label: "คำอธิบายร้าน (SEO)", hint: "2-3 ประโยค โชว์ใต้ชื่อเว็บใน Google และท้ายเว็บ", group: "shop", type: "textarea", isPublic: true },
-  { key: "footer_note", label: "ข้อความท้ายเว็บ", hint: "เช่น เลขทะเบียนพาณิชย์ หรือ 'จัดส่งทั่วไทย'", group: "shop", type: "text", isPublic: true },
+  { key: "site_tagline", label: "คำโปรยร้าน", hint: "สั้น ๆ 1 บรรทัด เช่น กระเป๋าหนังแท้ งานไทย ตั้งแต่ปี 1996", group: "shop", type: "text", isPublic: true, i18n: true },
+  { key: "site_description", label: "คำอธิบายร้าน (SEO)", hint: "2-3 ประโยค โชว์ใต้ชื่อเว็บใน Google และท้ายเว็บ", group: "shop", type: "textarea", isPublic: true, i18n: true },
+  { key: "footer_note", label: "ข้อความท้ายเว็บ", hint: "เช่น เลขทะเบียนพาณิชย์ หรือ 'จัดส่งทั่วไทย'", group: "shop", type: "text", isPublic: true, i18n: true },
   // ─── ปิดเว็บชั่วคราว (ปุ่มลัดอยู่หัวหน้า /website/<slug> · components/website-open-toggle.tsx) ───
   { key: "site_closed", label: "ปิดเว็บชั่วคราว (ลูกค้าเห็นหน้า 'เร็ว ๆ นี้')", hint: "ทุกโดเมนของร้านนี้ · พรีวิวใน ERP ยังเห็นเว็บเต็ม · ระบบรับออเดอร์ยังทำงาน", group: "shop", type: "bool", isPublic: true },
-  { key: "closed_title", label: "หัวข้อหน้ารอเปิด", hint: "เว้นว่าง = 'เร็ว ๆ นี้'", group: "shop", type: "text", isPublic: true, placeholder: "เร็ว ๆ นี้" },
-  { key: "closed_message", label: "ข้อความหน้ารอเปิด", hint: "เว้นว่าง = '<ชื่อร้าน> กำลังเตรียมเว็บใหม่ให้พร้อม…' · ช่องทางติดต่อที่กรอกไว้จะโชว์ใต้ข้อความ", group: "shop", type: "textarea", isPublic: true },
+  { key: "closed_title", label: "หัวข้อหน้ารอเปิด", hint: "เว้นว่าง = 'เร็ว ๆ นี้'", group: "shop", type: "text", isPublic: true, placeholder: "เร็ว ๆ นี้", i18n: true },
+  { key: "closed_message", label: "ข้อความหน้ารอเปิด", hint: "เว้นว่าง = '<ชื่อร้าน> กำลังเตรียมเว็บใหม่ให้พร้อม…' · ช่องทางติดต่อที่กรอกไว้จะโชว์ใต้ข้อความ", group: "shop", type: "textarea", isPublic: true, i18n: true },
   // ─── ฟีเจอร์ทดลอง: เปิดให้ร้านนี้เห็น Section ทดลองในคลังของตัวจัดหน้า (SectionMeta.beta ใน lib/website-schema.ts) ───
   // ─── 🌐 2 ภาษา (เว็บร้าน: /en + ปุ่ม TH/EN · กติกา docs/bilingual-content.md) ───
   { key: "lang_en_enabled", label: "🌐 เปิดภาษาอังกฤษบนเว็บ (/en + ปุ่มสลับ TH/EN)", hint: "ลูกค้ากดสลับภาษาที่หัวเว็บได้ · ข้อความที่ยังไม่แปลจะโชว์ภาษาไทยแทน · กรอก/แปลอังกฤษที่ตัวจัดหน้าเว็บ (ปุ่ม 🌐) และชื่อสินค้าอังกฤษในฟอร์มสินค้า · ปิดอยู่ = หน้า /en เด้งกลับไทย แต่พรีวิวใน ERP ยังดูได้", group: "shop", type: "bool", isPublic: true },
@@ -55,8 +58,8 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "contact_line", label: "LINE ID", group: "contact", type: "text", isPublic: true, placeholder: "@louismontini" },
   { key: "contact_line_url", label: "ลิงก์ LINE", hint: "เช่น https://lin.ee/xxxx (ถ้ามี ปุ่ม LINE จะกดเปิดแชทได้เลย)", group: "contact", type: "text", isPublic: true },
   { key: "contact_email", label: "อีเมล", group: "contact", type: "text", isPublic: true },
-  { key: "contact_address", label: "ที่อยู่ร้าน", group: "contact", type: "textarea", isPublic: true },
-  { key: "contact_hours", label: "เวลาทำการ", group: "contact", type: "text", isPublic: true, placeholder: "จันทร์–เสาร์ 9:00–18:00" },
+  { key: "contact_address", label: "ที่อยู่ร้าน", group: "contact", type: "textarea", isPublic: true, i18n: true },
+  { key: "contact_hours", label: "เวลาทำการ", group: "contact", type: "text", isPublic: true, placeholder: "จันทร์–เสาร์ 9:00–18:00", i18n: true },
   { key: "social_facebook", label: "Facebook (ลิงก์)", group: "contact", type: "text", isPublic: true },
   { key: "social_instagram", label: "Instagram (ลิงก์)", group: "contact", type: "text", isPublic: true },
   { key: "social_tiktok", label: "TikTok (ลิงก์)", group: "contact", type: "text", isPublic: true },
@@ -70,22 +73,22 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "pay_promptpay", label: "รับโอนพร้อมเพย์", group: "order", type: "bool", isPublic: true },
   { key: "promptpay_number", label: "เลขพร้อมเพย์", hint: "เบอร์โทรหรือเลขบัตรประชาชน/นิติบุคคล — ลูกค้าเห็นตอนสั่งซื้อ", group: "order", type: "text", isPublic: true },
   { key: "promptpay_name", label: "ชื่อบัญชีพร้อมเพย์", group: "order", type: "text", isPublic: true },
-  { key: "order_note", label: "ข้อความแจ้งลูกค้าตอนสั่งซื้อ", hint: "เช่น จัดส่งภายใน 1-2 วันทำการหลังยืนยันยอด", group: "order", type: "text", isPublic: true },
+  { key: "order_note", label: "ข้อความแจ้งลูกค้าตอนสั่งซื้อ", hint: "เช่น จัดส่งภายใน 1-2 วันทำการหลังยืนยันยอด", group: "order", type: "text", isPublic: true, i18n: true },
   { key: "order_prefix", label: "ตัวย่อเลขที่ออเดอร์", hint: "A-Z 0-9 ไม่เกิน 6 ตัว · เว้นว่าง = ใช้ตัวอักษรจากชื่อร้าน · เลขจะเป็น XX-256910-00001", group: "order", type: "text", isPublic: false },
 
   // ─── 🎀 ห่อของขวัญ (เว็บร้าน CheckoutClient · คิดค่าห่อใหม่ฝั่งเซิร์ฟเวอร์ calcGiftFee ใน createStorefrontOrder) ───
   { key: "gift_enabled", label: "เปิดบริการห่อของขวัญ", hint: "ปิดทีหลัง ออเดอร์ที่สั่งห่อไว้แล้วยังอยู่ครบ", group: "gift", type: "bool", isPublic: true },
   { key: "gift_fee", label: "ค่าห่อ (บาท ต่อออเดอร์)", hint: "0 = ห่อฟรี", group: "gift", type: "number", isPublic: true, placeholder: "50" },
-  { key: "gift_title", label: "ชื่อบริการที่ลูกค้าเห็น", hint: "เว้นว่าง = ห่อเป็นของขวัญ", group: "gift", type: "text", isPublic: true, placeholder: "ห่อเป็นของขวัญ" },
-  { key: "gift_desc", label: "รายละเอียดสั้น ๆ", hint: "บอกว่าได้อะไร เช่น กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ", group: "gift", type: "text", isPublic: true, placeholder: "กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ" },
+  { key: "gift_title", label: "ชื่อบริการที่ลูกค้าเห็น", hint: "เว้นว่าง = ห่อเป็นของขวัญ", group: "gift", type: "text", isPublic: true, placeholder: "ห่อเป็นของขวัญ", i18n: true },
+  { key: "gift_desc", label: "รายละเอียดสั้น ๆ", hint: "บอกว่าได้อะไร เช่น กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ", group: "gift", type: "text", isPublic: true, placeholder: "กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ", i18n: true },
   { key: "gift_allow_message", label: "ให้ลูกค้าเขียนข้อความบนการ์ด", hint: "ไม่เกิน 300 ตัวอักษร · โชว์ในออเดอร์ให้คนแพ็กเขียน/พิมพ์ใส่การ์ด", group: "gift", type: "bool", isPublic: true },
   { key: "gift_allow_hide_price", label: "ให้เลือก \"ไม่ใส่ราคา/ใบเสร็จในกล่อง\"", hint: "สำหรับส่งตรงถึงผู้รับเป็นของขวัญ", group: "gift", type: "bool", isPublic: true },
 
   // ─── 🎁 ป๊อปอัปลูกค้าใหม่ (เว็บร้าน src/components/layout/PromoPopup.tsx) ───
   { key: "promo_enabled", label: "เปิดป๊อปอัปแจกโค้ดลูกค้าใหม่", group: "promo", type: "bool", isPublic: true },
   { key: "promo_code", label: "โค้ดที่แจก", hint: "ต้องเป็นคูปองที่สร้างไว้ในแท็บ 🎟️ คูปอง ของร้านนี้ (ระบบตรวจให้ตอนบันทึก)", group: "promo", type: "text", isPublic: true, placeholder: "WELCOME10" },
-  { key: "promo_title", label: "หัวข้อป๊อปอัป", hint: "เว้นว่าง = 'ส่วนลดสำหรับลูกค้าใหม่'", group: "promo", type: "text", isPublic: true, placeholder: "ส่วนลดสำหรับลูกค้าใหม่" },
-  { key: "promo_text", label: "ข้อความในป๊อปอัป", hint: "เว้นว่าง = บอกส่วนลดของโค้ดให้เอง (เช่น ลด 10% เมื่อซื้อครบ ฿590)", group: "promo", type: "textarea", isPublic: true },
+  { key: "promo_title", label: "หัวข้อป๊อปอัป", hint: "เว้นว่าง = 'ส่วนลดสำหรับลูกค้าใหม่'", group: "promo", type: "text", isPublic: true, placeholder: "ส่วนลดสำหรับลูกค้าใหม่", i18n: true },
+  { key: "promo_text", label: "ข้อความในป๊อปอัป", hint: "เว้นว่าง = บอกส่วนลดของโค้ดให้เอง (เช่น ลด 10% เมื่อซื้อครบ ฿590)", group: "promo", type: "textarea", isPublic: true, i18n: true },
   { key: "promo_collect_email", label: "ให้กรอกอีเมลก่อนเห็นโค้ด", hint: "อีเมลเข้ารายชื่อรับข่าวสารของร้าน (ระบบเดียวกับ Section สมัครรับข่าวสาร) · ปิด = เห็นโค้ดทันที", group: "promo", type: "bool", isPublic: true },
   { key: "promo_delay", label: "โผล่หลังเข้าเว็บกี่วินาที", hint: "0–60 · แนะนำ 5–10 (ให้ลูกค้าได้ดูของก่อน)", group: "promo", type: "number", isPublic: true },
 
@@ -99,15 +102,19 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "belt_base_price", label: "ราคาฐานเข็มขัด (฿)", hint: "ราคาเริ่มต้นก่อนบวกราคาเพิ่มของแต่ละชิ้น · 0 = ยังไม่ตั้ง (เว็บโชว์ \"สอบถามราคา\")", group: "belt", type: "number", isPublic: true, placeholder: "1500" },
   { key: "belt_engraving_fee", label: "ค่าสลักชื่อ (฿)", hint: "บวกเมื่อลูกค้าพิมพ์ชื่อ · 0 = ฟรี", group: "belt", type: "number", isPublic: true, placeholder: "0" },
   { key: "belt_engraving_max", label: "สลักชื่อได้สูงสุดกี่ตัวอักษร", hint: "แนะนำ 12 · 0 = ปิดสลักชื่อ", group: "belt", type: "number", isPublic: true, placeholder: "12" },
-  { key: "belt_lead_time", label: "ระยะเวลาทำ (ข้อความ)", hint: "โชว์ใต้ราคา เช่น ทำ 7–10 วันทำการ", group: "belt", type: "text", isPublic: true, placeholder: "ทำ 7–10 วันทำการ" },
+  { key: "belt_lead_time", label: "ระยะเวลาทำ (ข้อความ)", hint: "โชว์ใต้ราคา เช่น ทำ 7–10 วันทำการ", group: "belt", type: "text", isPublic: true, placeholder: "ทำ 7–10 วันทำการ", i18n: true },
   { key: "fit_check_enabled", label: "เปิดเช็คขนาด (ใส่ตุ๊กตา/ของได้ไหม)", hint: "รอบนี้: ERP คำนวณ + เตือนรุ่นที่ยังไม่วัด · หน้าเช็คขนาดบนเว็บจะตามมาในรอบถัดไป", group: "fit", type: "bool", isPublic: true },
   { key: "points_min_redeem", label: "ใช้ขั้นต่ำครั้งละกี่แต้ม", hint: "กันใช้ทีละนิด เช่น 10", group: "points", type: "number", isPublic: true, placeholder: "10" },
 ];
 
 export const SITE_INFO_KEYS = SITE_INFO_FIELDS.map((f) => f.key);
 
-/** ค่าที่อ่านออกมาแล้ว (ครบทุก key เสมอ) */
+/** 🌐 ฟิลด์ที่มีภาษาอังกฤษคู่ */
+export const SITE_INFO_I18N_KEYS = SITE_INFO_FIELDS.filter((f) => f.i18n).map((f) => f.key);
+
+/** ค่าที่อ่านออกมาแล้ว (ครบทุก key เสมอ) · ภาษาอังกฤษ = `<key>_en` (มีเฉพาะที่กรอก) · `_i18n` = สถานะการแปล */
 export interface SiteInfo {
+  [enKey: `${string}_en`]: string;
   site_tagline: string;
   site_description: string;
   footer_note: string;
@@ -158,6 +165,7 @@ export interface SiteInfo {
   belt_engraving_fee: number;
   belt_engraving_max: number;
   belt_lead_time: string;
+  _i18n?: I18nMeta;
 }
 
 export const DEFAULT_SITE_INFO: SiteInfo = {
@@ -281,24 +289,52 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     else if (URL_KEYS.has(f.key)) out[f.key] = cleanUrl(v);
     else out[f.key] = String(v ?? "").trim().slice(0, f.type === "textarea" ? 1000 : 200);
   }
+  // 🌐 ภาษาอังกฤษ (ว่าง = ไม่เก็บ → เว็บใช้ไทย) + สถานะการแปล (DB เก็บเป็น JSON string)
+  const kept: string[] = [];
+  for (const f of SITE_INFO_FIELDS) {
+    if (!f.i18n) continue;
+    const en = String(m.get(`${f.key}_en`) ?? "").trim().slice(0, f.type === "textarea" ? 1500 : 300);
+    if (en) {
+      out[`${f.key}_en`] = en;
+      kept.push(f.key);
+    }
+  }
+  const metaRaw = m.get("_i18n");
+  const meta = sanitizeI18nMeta(typeof metaRaw === "string" ? safeJson(metaRaw) : metaRaw, kept);
+  if (meta) out._i18n = meta;
   return out as unknown as SiteInfo;
 }
+
+const safeJson = (s: string): unknown => {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+};
 
 /** แถวสำหรับ upsert ลง store_settings (เก็บทุกค่าเป็น string) */
 export function siteInfoToRows(shopId: string, info: SiteInfo): { shop_id: string; key: string; value: string; updated_at: string }[] {
   const now = new Date().toISOString();
-  return SITE_INFO_FIELDS.map((f) => {
+  const rows = SITE_INFO_FIELDS.map((f) => {
     const v = info[f.key as keyof SiteInfo];
     const value = typeof v === "boolean" ? (v ? "1" : "0") : String(v ?? "");
     return { shop_id: shopId, key: f.key, value, updated_at: now };
   });
+  // 🌐 เขียนทุกช่องอังกฤษ (ว่างด้วย — ลบคำแปลได้) + สถานะการแปล
+  for (const k of SITE_INFO_I18N_KEYS) rows.push({ shop_id: shopId, key: `${k}_en`, value: String(info[`${k}_en`] ?? ""), updated_at: now });
+  rows.push({ shop_id: shopId, key: "_i18n", value: info._i18n ? JSON.stringify(info._i18n) : "", updated_at: now });
+  return rows;
 }
 
 /** ชุดที่ปล่อยออก API สาธารณะ — ตัดฟิลด์ภายในออก */
 export function publicSiteInfo(info: SiteInfo): Omit<SiteInfo, "order_prefix" | "beta_canvas"> {
   const out: Record<string, unknown> = {};
   for (const f of SITE_INFO_FIELDS) {
-    if (f.isPublic) out[f.key] = info[f.key as keyof SiteInfo];
+    if (!f.isPublic) continue;
+    out[f.key] = info[f.key as keyof SiteInfo];
+    // 🌐 เว็บร้านหน้า /en สลับ <key>_en ให้เอง (lib/i18n localizeContent)
+    if (f.i18n && info[`${f.key}_en`]) out[`${f.key}_en`] = info[`${f.key}_en`];
   }
   return out as Omit<SiteInfo, "order_prefix" | "beta_canvas">;
 }

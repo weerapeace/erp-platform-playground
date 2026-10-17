@@ -14,6 +14,9 @@ import { useToast } from "@/components/toast";
 import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
 import { RestockCard } from "@/components/website-restock-panel";
 import { SaveBar } from "@/components/save-bar";
+import { BilingualText, ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
+import { coverageOf, needsTranslation, readMeta, translationPatch, translationStatus } from "@/lib/content-i18n";
+import { translateContent } from "@/lib/content-translate";
 
 type FieldDef = {
   key: string;
@@ -23,9 +26,11 @@ type FieldDef = {
   type: "text" | "textarea" | "number" | "bool";
   isPublic: boolean;
   placeholder?: string;
+  /** 🌐 มีภาษาอังกฤษคู่ (<key>_en) */
+  i18n?: boolean;
 };
 type GroupDef = { key: string; label: string; hint: string };
-type Info = Record<string, string | number | boolean>;
+type Info = Record<string, unknown>;
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
@@ -97,6 +102,37 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
 
   const set = (k: string, v: string | number | boolean) => setInfo((p) => ({ ...p, [k]: v }));
 
+  // 🌐 ข้อความร้าน 2 ภาษา (ของกลาง lib/content-i18n + components/bilingual-field)
+  const [txBusy, setTxBusy] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+  const i18nSlots = useMemo(() => {
+    const meta = readMeta(info);
+    return fields
+      .filter((f) => f.i18n && needsTranslation(info[f.key]))
+      .map((f) => ({ key: f.key, th: String(info[f.key] ?? ""), status: translationStatus(info[f.key], info[`${f.key}_en`], meta[f.key]) }));
+  }, [fields, info]);
+  const translateMissing = async () => {
+    const todo = i18nSlots.filter((x) => x.status === "empty" || x.status === "stale");
+    if (!todo.length) return;
+    setTxBusy(true);
+    setTxError(null);
+    try {
+      const out = await translateContent(todo.map((x) => x.th));
+      setInfo((prev) => {
+        let next = { ...prev };
+        todo.forEach((x, i) => {
+          if (out[i]?.trim()) next = { ...next, ...translationPatch(next, x.key, x.th, out[i].trim(), true) };
+        });
+        return next;
+      });
+      if (out.filter((x) => x.trim()).length < todo.length) setTxError("แปลไม่ครบบางช่อง — กดอีกครั้งเพื่อแปลส่วนที่เหลือ");
+    } catch (e) {
+      setTxError(e instanceof Error ? e.message : "แปลไม่สำเร็จ");
+    } finally {
+      setTxBusy(false);
+    }
+  };
+
   if (loading) return <p className="text-sm text-slate-500 py-8 text-center">กำลังโหลดข้อมูลร้าน…</p>;
 
   return (
@@ -128,6 +164,13 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       <RestockCard shopSlug={shopSlug} cardCls={cardCls} />
       <GiftCardsEditor open={cardsOpen} onClose={() => setCardsOpen(false)} shopSlug={shopSlug} shopId={shopId} />
 
+      <ContentLangProvider>
+      {i18nSlots.length > 0 && (
+        <div className={`${cardCls} !p-3`}>
+          <p className="text-[11px] text-slate-500 mb-2">🌐 ข้อความร้านภาษาอังกฤษ (หน้าเว็บ /en) — สลับเป็น EN เพื่อกรอก/ตรวจทีละช่อง · ช่องที่ว่าง ลูกค้าเห็นภาษาไทยแทน</p>
+          <TranslationBar coverage={coverageOf(i18nSlots)} busy={txBusy} error={txError} onTranslateMissing={() => void translateMissing()} />
+        </div>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
         {groups.map((g) => {
           const list = fields.filter((f) => f.group === g.key);
@@ -137,9 +180,23 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
               <h3 className="text-sm font-semibold text-slate-800">{g.label}</h3>
               <p className="text-[11px] text-slate-500 mt-0.5 mb-3">{g.hint}</p>
               <div className={`grid gap-3 ${g.key === "contact" ? "sm:grid-cols-2" : ""}`}>
-                {list.map((f) => (
-                  <Field key={f.key} f={f} value={info[f.key]} onChange={(v) => set(f.key, v)} />
-                ))}
+                {list.map((f) =>
+                  f.i18n ? (
+                    <BilingualText
+                      key={f.key}
+                      label={f.label}
+                      hint={f.hint}
+                      wide={f.type === "textarea"}
+                      multiline={f.type === "textarea"}
+                      placeholder={f.placeholder}
+                      value={info}
+                      fieldKey={f.key}
+                      onPatch={(patch) => setInfo((p) => ({ ...p, ...patch }))}
+                    />
+                  ) : (
+                    <Field key={f.key} f={f} value={info[f.key] as string | number | boolean | undefined} onChange={(v) => set(f.key, v)} />
+                  ),
+                )}
               </div>
               {g.key === "gift" && (
                 <div className="mt-3 rounded-lg bg-pink-50 px-3 py-2 flex flex-wrap items-center gap-2">
@@ -160,6 +217,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
           );
         })}
       </div>
+      </ContentLangProvider>
 
       {/* 💾 แถบบันทึก (ของกลาง) — หน้านี้ยาว ปุ่มบนสุดเลื่อนหายไป */}
       <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => setInfo(saved)} note="บันทึกแล้วเว็บร้านเปลี่ยนภายใน ~1 นาที" />

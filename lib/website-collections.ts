@@ -4,6 +4,8 @@
  *   เปิดหน้าไหม · ลิงก์ (/collection/<slug>) · ชื่อบนเว็บ · แบนเนอร์คอม/มือถือ · เรื่องราว · ชื่อ/คำอธิบายใน Google · ลำดับ (ตามลำดับในรายการ)
  * เว็บร้าน: src/app/collection/[slug]/page.tsx + Section "คอลเลกชัน" (CollectionsSection)
  */
+import { carryTranslations } from "@/lib/content-i18n";
+
 export interface WebCollection {
   /** collections.id */
   id: string;
@@ -63,5 +65,9 @@ export function normalizeWebCollections(raw: unknown): WebCollection[] {
       seoDescription: txt(o.seoDescription, 300),
     });
   }
-  return out;
+  // 🌐 ชื่อ/เรื่องราว/SEO ภาษาอังกฤษ (<key>_en) — หน้า /en ของเว็บร้าน
+  return carryTranslations(raw, out, COLLECTION_TEXT_KEYS);
 }
+
+/** 🌐 ช่องข้อความของคอลเลกชันที่มีภาษาอังกฤษคู่ */
+export const COLLECTION_TEXT_KEYS = ["title", "story", "seoTitle", "seoDescription"] as const;

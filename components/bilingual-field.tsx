@@ -16,6 +16,7 @@ import { createContext, useContext, useMemo, useState } from "react";
 import {
   confirmPatch,
   enKey,
+  needsTranslation,
   readMeta,
   textOf,
   translationPatch,
@@ -184,13 +185,15 @@ export function BilingualField({
 }) {
   const { lang, enabled } = useContentLang();
   const hasTh = thRef.trim() !== "";
+  // เป็นอังกฤษอยู่แล้ว (ไม่มีอักษรไทย) = ไม่ต้องแปล → ไม่ขึ้นป้าย "ไม่มี EN"
+  const needs = needsTranslation(thRef);
 
   if (!enabled || lang === "th") {
     return (
       <div className={wide ? "sm:col-span-2" : ""}>
         <div className="flex items-center gap-1.5 mb-1">
           <label className={`${labelCls} flex-1 min-w-0`}>{label}</label>
-          {enabled && hasTh && <TranslationChip status={status} short />}
+          {enabled && needs && <TranslationChip status={status} short />}
         </div>
         {thNode}
         {hint && <p className="mt-1 text-[11px] text-slate-400">{hint}</p>}
@@ -205,7 +208,7 @@ export function BilingualField({
         <label className={`${labelCls} flex-1 min-w-0`}>
           {label} <span className="text-[10px] font-semibold text-indigo-600">EN</span>
         </label>
-        {hasTh && <TranslationChip status={status} />}
+        {needs && <TranslationChip status={status} />}
       </div>
       {enNode}
       <p className="mt-1 text-[11px] text-slate-500 break-words whitespace-pre-line">

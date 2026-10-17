@@ -25,6 +25,8 @@ import { cleanCategoryKey, type WebCategoryDef } from "@/lib/website-field-map";
 import { categoryTree, reorderCategoryTree, childCategories, topCategories, familyKeys, flattenTree, categoryChoiceLabel } from "@/lib/website-category-tree";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SaveBar } from "@/components/save-bar";
+import { TranslateButton } from "@/components/translation-table";
+import { CATEGORY_TEXT_KEYS } from "@/lib/website-field-map";
 
 /** ชนิดข้อมูลตอนลากการ์ดสินค้า (กันรับของที่ลากมาจากที่อื่น) */
 const DRAG_MIME = "application/x-erp-web-listings";
@@ -277,6 +279,15 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
           <h2 className="text-base font-semibold text-slate-800">📂 หมวดหมู่สินค้าบนเว็บ</h2>
           <p className="text-xs text-slate-500 mt-0.5">ลากเรียงลำดับได้ · 1 สินค้าอยู่ได้หลายหมวด · หมวดแรกของสินค้า = ป้ายบนการ์ด · รูปหมวดใช้ใน Section &quot;หมวดสินค้า&quot; หน้าแรก</p>
         </div>
+        {/* 🌐 ชื่อหมวด / คำโปรย / SEO ภาษาอังกฤษ (หน้าเว็บ /en) — ตารางคำแปลของกลาง · บันทึกอัตโนมัติเหมือนช่องอื่น */}
+        <TranslateButton
+          value={cats}
+          onChange={editCats}
+          keys={CATEGORY_TEXT_KEYS}
+          crumbOf={(f) => ({ label: "ชื่อหมวด", blurb: "คำโปรย", seoTitle: "ชื่อใน Google", seoDescription: "คำอธิบายใน Google" })[f] ?? null}
+          title="หมวดหมู่ภาษาอังกฤษ — ชื่อ · คำโปรย · SEO"
+          description="บันทึกอัตโนมัติเหมือนช่องอื่นในแท็บนี้ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
+        />
         <span className="text-xs text-slate-400">💾 บันทึกอัตโนมัติ — ดูสถานะที่แถบล่าง</span>
       </div>
 

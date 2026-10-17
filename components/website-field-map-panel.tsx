@@ -7,6 +7,7 @@
  * ข้อมูล: /api/website/field-map (guardApi products.view/edit + audit)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { commonLabelEn } from "@/lib/content-i18n";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { NAME_SOURCE_OPTIONS, PRICE_SOURCE_OPTIONS, DESC_SOURCE_OPTIONS } from "@/lib/website-field-map";
@@ -19,10 +20,10 @@ interface FieldMap {
   name: { source: string; stripPrefix?: string; removeBrand?: boolean; removeCollection?: boolean; removeCode?: boolean; removeParens?: boolean; removeParenMarks?: boolean };
   price: { source: string };
   description: { source: string };
-  unit: { default: string };
-  options: { source: string; label: string };
+  unit: { default: string; default_en?: string };
+  options: { source: string; label: string; label_en?: string };
   /** อาจไม่มีในข้อมูลเก่าที่บันทึกไว้ก่อนมีฟีเจอร์นี้ */
-  options2?: { source: string; label: string };
+  options2?: { source: string; label: string; label_en?: string };
   category: { default: WebCategory; rules: Record<string, WebCategory> };
   /** อาจไม่มีในข้อมูลเก่า — server จะเติมชุดตั้งต้นให้ */
   categories?: CategoryDef[];
@@ -244,9 +245,10 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
             <input
               className={inputCls}
               value={map.unit.default}
-              onChange={(e) => patch({ unit: { default: e.target.value } })}
+              onChange={(e) => patch({ unit: { ...map.unit, default: e.target.value } })}
               placeholder="ชิ้น / ตร.ฟุต / หลา"
             />
+            <EnInput value={map.unit.default_en ?? ""} th={map.unit.default} onChange={(v) => patch({ unit: { ...map.unit, default_en: v } })} />
           </div>
         </div>
       </div>
@@ -274,6 +276,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
               onChange={(e) => patch({ options: { ...map.options, label: e.target.value } })}
               placeholder="แบบ/สี"
             />
+            <EnInput value={map.options.label_en ?? ""} th={map.options.label || "แบบ/สี"} onChange={(v) => patch({ options: { ...map.options, label_en: v } })} />
           </div>
 
           {/* ตัวเลือกชุดที่ 2 — สินค้าที่มี 2 มิติ เช่น ขนาดรู × จำนวนรู */}
@@ -297,6 +300,9 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
               placeholder="เว้นว่าง = ใช้ชื่อที่ตั้งไว้กับ SKU"
               disabled={(map.options2?.source ?? "none") === "none"}
             />
+            {(map.options2?.source ?? "none") !== "none" && (
+              <EnInput value={map.options2?.label_en ?? ""} th={map.options2?.label ?? ""} onChange={(v) => patch({ options2: { ...(map.options2 ?? { source: "none", label: "" }), label_en: v } })} />
+            )}
           </div>
           {(map.options2?.source ?? "none") === "variant_option" && (
             <p className="sm:col-span-2 lg:col-span-3 text-[11px] text-slate-500">
@@ -477,6 +483,22 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
 
       {/* 💾 แถบบันทึก (ของกลาง) */}
       <SaveBar dirty={!!map && JSON.stringify(map) !== savedJson} saving={saving} onSave={save} onDiscard={() => void load()} saveLabel="💾 บันทึกการจับคู่" note="สินค้าทุกตัวใช้ค่านี้อัตโนมัติ" />
+    </div>
+  );
+}
+
+/** 🌐 ช่องภาษาอังกฤษเล็ก ๆ ใต้ช่องไทย (หน้าเว็บ /en) — ว่าง = ใช้คำมาตรฐาน (ถ้ารู้จัก) ไม่งั้นโชว์ไทย */
+function EnInput({ value, th, onChange }: { value: string; th: string; onChange: (v: string) => void }) {
+  const auto = commonLabelEn(th);
+  return (
+    <div className="mt-1 flex items-center gap-1.5">
+      <span className="shrink-0 text-[10px] font-semibold text-indigo-600">🌐 EN</span>
+      <input
+        className="w-full rounded-md border border-indigo-100 bg-indigo-50/30 px-2 py-1 text-xs text-slate-800 focus:outline-none focus:border-indigo-300"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={auto ? `ว่าง = ${auto}` : "English (ว่าง = ใช้ภาษาไทย)"}
+      />
     </div>
   );
 }

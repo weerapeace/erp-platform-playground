@@ -18,6 +18,7 @@ import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { couponLabel, evaluateCoupon } from "@/lib/website-coupons";
 import { couponUsage, loadCouponByCode } from "@/lib/website-coupons-db";
 import { buildBeltBuilderPayload } from "@/lib/belt-builder-public";
+import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -144,8 +145,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         ? await readGiftCards(sb, s.id).then((c) => ({ ...c, designs: c.designs.filter((d) => d.enabled) }))
         : null,
     colorTones: await (async () => {
-      const { data } = await sb.from("erp_color_tones").select("key, name, hex").eq("is_active", true).order("sort_order");
-      return (data ?? []) as { key: string; name: string; hex: string }[];
+      const [{ data }, { data: dict }] = await Promise.all([
+        sb.from("erp_color_tones").select("key, name, hex").eq("is_active", true).order("sort_order"),
+        sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
+      ]);
+      // 🌐 ชื่อโทนภาษาอังกฤษจากทะเบียนสีกลาง (ดำ → Black · "ขาว / ครีม" แปลทีละคำ) — หน้า /en ของตัวกรองสี
+      const idx = new SwatchIndex(((dict ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
+      return ((data ?? []) as { key: string; name: string; hex: string }[]).map((t) => {
+        const en = idx.english(t.name);
+        return en ? { ...t, name_en: en } : t;
+      });
     })(),
   });
 }

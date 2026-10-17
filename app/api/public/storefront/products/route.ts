@@ -12,6 +12,7 @@
  * ⚠️ ต่างจาก API อื่นในระบบ: route นี้ "ไม่มี guardApi" โดยเจตนา และมี CORS
  */
 import { NextRequest, NextResponse } from "next/server";
+import { commonLabelEn } from "@/lib/content-i18n";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeFieldMap,
@@ -187,6 +188,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const origin = new URL(request.url).origin;
   const imageUrl = (key: string) => `${origin}/api/r2-image?key=${encodeURIComponent(key)}`;
 
+  // 🌐 ภาษาอังกฤษของหน่วย/ชื่อชุดตัวเลือกที่ร้านตั้งไว้ (แท็บจับคู่ฟิลด์ · lib/content-i18n carryTranslations)
+  const unitEn = String((fieldMap.unit as { default_en?: unknown }).default_en ?? "").trim();
+  const optLabel = fieldMap.options.label || "แบบ/สี";
+  const optLabelEn = String((fieldMap.options as { label_en?: unknown }).label_en ?? "").trim();
+  const optLabel2En = String((fieldMap.options2 as { label_en?: unknown }).label_en ?? "").trim();
+
   const products = rows
     .map((l) => {
       const p = parentById.get(l.parent_sku_id as string);
@@ -224,6 +231,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         /** วันที่ขึ้นร้านนี้ (ป้าย "ใหม่" อัตโนมัติ) */
         listedAt: typeof l.created_at === "string" ? l.created_at : null,
         unit: r.unit,
+        // 🌐 หน่วยภาษาอังกฤษ: ที่ตั้งในแท็บจับคู่ฟิลด์ชนะ (เฉพาะหน่วยตั้งต้น) · ไม่ตั้ง = คำมาตรฐาน (ใบ → pc)
+        ...(() => {
+          const en = (!String(l.web_unit ?? "").trim() && unitEn) || commonLabelEn(r.unit);
+          return en ? { unit_en: en } : {};
+        })(),
         category: r.category,
         /** 📂 ทุกหมวดที่อยู่ (หลายหมวดได้ · ตัวแรก = category) + หมวดแม่ของหมวดย่อย (สินค้าในหมวดย่อยขึ้นในหน้าหมวดแม่ด้วย) — หน้าร้านกรองหมวดด้วยรายการนี้ */
         categories: withParentCategories(fieldMap.categories, r.categories),
@@ -238,10 +250,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         options: r.options
           ? {
               ...r.options,
+              // 🌐 ชื่อชุดตัวเลือกภาษาอังกฤษ (ตั้งในแท็บจับคู่ฟิลด์ · ไม่ตั้ง = คำมาตรฐาน สี → Colour)
+              ...(() => {
+                const en = (r.options.label === optLabel && optLabelEn) || commonLabelEn(r.options.label);
+                return en ? { label_en: en } : {};
+              })(),
               items: r.options.items.map((it) => {
                 const spec = it.swatch ? null : swatches.resolve(it.label);
+                // 🌐 ชื่อสีภาษาอังกฤษจากทะเบียนสีกลาง (กรมท่า → Navy · สีผสมแปลทีละคำ)
+                const labelEn = swatches.english(it.label);
                 return {
                   ...it,
+                  ...(labelEn ? { label_en: labelEn } : {}),
                   swatch: it.swatch || (spec ? swatchCss(spec, (k) => `${imageUrl(k)}&w=96`) : undefined),
                   image: it.image ? imageUrl(it.image) : undefined,
                   images: it.images?.length ? it.images.map(imageUrl) : undefined,
@@ -252,7 +272,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             }
           : null,
         /** ตัวเลือกกลุ่มที่ 2 (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง */
-        options2: r.options2,
+        options2: r.options2
+          ? (() => {
+              const en = optLabel2En || commonLabelEn(r.options2.label);
+              return en ? { ...r.options2, label_en: en } : r.options2;
+            })()
+          : r.options2,
         featured: Boolean(l.featured),
         /** ฟิลด์สเปกจาก Parent SKU (วัสดุ/ขนาด/น้ำหนัก…) สำหรับหัวข้อ "ฟิลด์จาก Parent SKU" ในชุดรายละเอียดสินค้า */
         attrs: productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues),

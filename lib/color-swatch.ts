@@ -107,6 +107,34 @@ export class SwatchIndex {
     return { colors, imageKey: null };
   }
 
+  /**
+   * 🌐 ชื่อสีภาษาอังกฤษจากทะเบียนสีกลาง (หน้าเว็บ /en) — เช่น "กรมท่า (02)" → "Navy (02)"
+   * สีผสม แปลทีละคำแล้วคงตัวคั่นเดิม ("กรมท่า-ขาว" → "Navy-White") · คำไหนไม่มีในทะเบียน = "" ทั้งชื่อ (เว็บใช้ไทยแทน)
+   * ชื่อที่ไม่มีอักษรไทยอยู่แล้ว = "" (ไม่ต้องแปล)
+   */
+  english(label: string): string {
+    if (!/[฀-๿]/.test(label)) return "";
+    const m = /^(.*?)(\s*\([^)]*\))?\s*$/.exec(label.trim());
+    const core = (m?.[1] ?? label).trim();
+    const suffix = m?.[2] ?? "";
+    const one = (s: string) => this.find(s)?.en?.trim() || "";
+    const direct = one(core);
+    if (direct) return direct + suffix;
+    const tokens = core.split(/(\s*[-–—/,+&]\s*)/);
+    if (tokens.length < 3) return "";
+    const out: string[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (i % 2 === 1) {
+        out.push(tokens[i]);
+        continue;
+      }
+      const en = /[฀-๿]/.test(tokens[i]) ? one(tokens[i]) : tokens[i].trim();
+      if (!en) return "";
+      out.push(en);
+    }
+    return out.join("") + suffix;
+  }
+
   /** สีย่อยที่ยังขาด (ใช้บอกเจ้าของว่าต้องตั้งสีไหนก่อน) */
   missingParts(label: string): string[] {
     return splitColorName(label).filter((p) => {
