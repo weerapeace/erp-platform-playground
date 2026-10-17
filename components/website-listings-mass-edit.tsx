@@ -13,6 +13,7 @@ import { ERPModal } from "@/components/modal";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { CardBadgeSelect } from "@/components/website-card-badges";
 import { BULK_FIELDS, applyCategoriesOp, massEditPlan, type CategoriesOp, type ListingFieldKey, type MassEditValues, type PriceOp } from "@/lib/website-listing-fields";
+import { categoryChoiceLabel } from "@/lib/website-category-tree";
 
 type Row = { parentId: string; categories: string[] };
 const CONFIRM_OVER = 20;
@@ -26,14 +27,17 @@ export function WebsiteListingsMassEdit({
   rows,
   shopCategories,
   onDone,
+  preset = null,
 }: {
   open: boolean;
   onClose: () => void;
   shopId: string;
   /** รุ่นที่ติ๊กไว้ (หมวดปัจจุบันไว้คิดเพิ่ม/เอาออกต่อรุ่น) */
   rows: Row[];
-  shopCategories: { key: string; label: string; icon?: string }[];
+  shopCategories: { key: string; label: string; icon?: string; parent?: string | null }[];
   onDone: () => void | Promise<void>;
+  /** เปิดมาติ๊กช่องนี้ไว้เลย (เช่น ปุ่มลัด "📂 ย้ายหมวด" = categories + โหมดย้าย) */
+  preset?: { field: ListingFieldKey; categories?: CategoriesOp } | null;
 }) {
   const toast = useToast();
   const [on, setOn] = useState<Set<ListingFieldKey>>(new Set());
@@ -45,8 +49,8 @@ export function WebsiteListingsMassEdit({
 
   useEffect(() => {
     if (!open) return;
-    setOn(new Set());
-    setVals({ published: "on", featured: "on", price: { mode: "set" }, categories: { mode: "add", keys: [] }, badge: "", stockStatus: "in", unit: "", name: true, description: true });
+    setOn(new Set(preset ? [preset.field] : []));
+    setVals({ published: "on", featured: "on", price: { mode: "set" }, categories: preset?.categories ?? { mode: "add", keys: [] }, badge: "", stockStatus: "in", unit: "", name: true, description: true });
     setTyped("");
     setErr(null);
     setResult(null);
@@ -85,13 +89,26 @@ export function WebsiteListingsMassEdit({
       }
       if (plan.categories) {
         const op = plan.categories;
-        const items = rows.map((r) => ({ parentId: r.parentId, categories: applyCategoriesOp(r.categories, op) }));
-        const j = await post({ shopId, action: "setCategories", items, category: `mass:${op.mode}:${op.keys.join(",")}` });
+        // ส่งเฉพาะรุ่นที่หมวดเปลี่ยนจริง (เช่น ย้ายหมวด: รุ่นที่ไม่ได้อยู่หมวดต้นทาง = ไม่ต้องบันทึก/ไม่ขึ้นประวัติ)
+        const items = rows
+          .map((r) => ({ parentId: r.parentId, categories: applyCategoriesOp(r.categories, op), before: r.categories }))
+          .filter((it) => it.categories.join("|") !== it.before.join("|"))
+          .map(({ parentId, categories }) => ({ parentId, categories }));
+        if (!items.length) {
+          // ไม่มีรุ่นไหนต้องเปลี่ยน (เช่น ไม่มีรุ่นที่อยู่หมวดต้นทาง)
+          if (!Object.keys(plan.patch).length) {
+            setResult({ ok: 0, failed: 0 });
+            toast.success("ไม่มีรุ่นไหนต้องเปลี่ยนหมวด");
+            return;
+          }
+        } else {
+        const j = await post({ shopId, action: "setCategories", items, category: `mass:${op.mode}:${op.from ? `${op.from}>` : ""}${op.keys.join(",")}` });
         if (!Object.keys(plan.patch).length) ok = j.ok ? j.count ?? items.length : 0;
         if (!j.ok) {
           const m = String(j.error ?? "").match(/(\d+)\/(\d+)/);
           failed = Math.max(failed, m ? Number(m[2]) - Number(m[1]) : items.length);
           if (!m) throw new Error(j.error ?? "จัดหมวดไม่สำเร็จ");
+        }
         }
       }
       setResult({ ok, failed });
@@ -142,6 +159,7 @@ export function WebsiteListingsMassEdit({
                   ["add", "เพิ่มหมวด"],
                   ["remove", "เอาหมวดออก"],
                   ["replace", "แทนทั้งชุด"],
+                  ["move", "↪ ย้ายหมวด"],
                 ] as const
               ).map(([m, l]) => (
                 <button key={m} type="button" className={seg(c.mode === m)} onClick={() => setV("categories", { ...c, mode: m })}>
@@ -149,6 +167,40 @@ export function WebsiteListingsMassEdit({
                 </button>
               ))}
             </div>
+            {c.mode === "move" ? (
+              (() => {
+                // ↪ ย้ายจากหมวด A → B (ตำแหน่งเดิม) — โชว์ว่ามีกี่รุ่นที่อยู่หมวดต้นทาง
+                const inFrom = c.from ? rows.filter((r) => r.categories.includes(c.from!)).length : 0;
+                const fromOpts = shopCategories.filter((x) => rows.some((r) => r.categories.includes(x.key)));
+                return (
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                      <span>จากหมวด</span>
+                      <select value={c.from ?? ""} onChange={(e) => setV("categories", { ...c, from: e.target.value || undefined })} className={`${inputCls} w-auto`}>
+                        <option value="">— เลือก —</option>
+                        {fromOpts.map((x) => (
+                          <option key={x.key} value={x.key}>
+                            {categoryChoiceLabel(x)} ({rows.filter((r) => r.categories.includes(x.key)).length})
+                          </option>
+                        ))}
+                      </select>
+                      <span>→ ไปหมวด</span>
+                      <select value={c.keys[0] ?? ""} onChange={(e) => setV("categories", { ...c, keys: e.target.value ? [e.target.value] : [] })} className={`${inputCls} w-auto`}>
+                        <option value="">— เลือก —</option>
+                        {shopCategories.filter((x) => x.key !== c.from).map((x) => (
+                          <option key={x.key} value={x.key}>
+                            {categoryChoiceLabel(x)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      {c.from ? `ย้าย ${inFrom} จาก ${n} รุ่นที่เลือก${n - inFrom > 0 ? ` · อีก ${n - inFrom} รุ่นไม่ได้อยู่หมวดนี้ → ไม่เปลี่ยน` : ""}` : "เลือกหมวดต้นทาง"} · หมวดหลักยังเป็นหมวดหลัก (เปลี่ยนเป็นหมวดใหม่ที่ตำแหน่งเดิม)
+                    </p>
+                  </div>
+                );
+              })()
+            ) : (
             <FieldChipsPicker
               value={c.keys}
               onChange={(keys) => setV("categories", { ...c, keys })}
@@ -162,6 +214,7 @@ export function WebsiteListingsMassEdit({
               markFirst={c.mode === "replace" ? "หมวดหลัก" : undefined}
               compact
             />
+            )}
           </div>
         );
       }

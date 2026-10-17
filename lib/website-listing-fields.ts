@@ -34,7 +34,7 @@ export const LISTING_FIELDS: ListingFieldDef[] = [
   { key: "published", label: "ขึ้นเว็บ", kind: "choice", bulk: true, choices: [{ value: "on", label: "ขึ้นเว็บ" }, { value: "off", label: "ซ่อน" }] },
   { key: "featured", label: "สินค้าแนะนำ", kind: "choice", bulk: true, choices: [{ value: "on", label: "ตั้งแนะนำ" }, { value: "off", label: "เลิกแนะนำ" }] },
   { key: "price", label: "ราคาเว็บ", kind: "price", bulk: true, hint: "ล้าง = กลับไปใช้ราคาจาก ERP" },
-  { key: "categories", label: "หมวดบนเว็บ", kind: "categories", bulk: true, hint: "เพิ่ม / เอาออก / แทนทั้งชุด" },
+  { key: "categories", label: "หมวดบนเว็บ", kind: "categories", bulk: true, hint: "เพิ่ม / เอาออก / แทนทั้งชุด / ย้ายหมวด" },
   { key: "badge", label: "ป้ายบนการ์ด", kind: "badge", bulk: true },
   { key: "stockStatus", label: "สถานะสต๊อก", kind: "choice", bulk: true, choices: STOCK_STATUS_OPTIONS },
   { key: "unit", label: "หน่วยขาย", kind: "text", bulk: true, hint: "ว่าง = ใช้หน่วยจาก ERP" },
@@ -46,7 +46,8 @@ export const BULK_FIELDS = LISTING_FIELDS.filter((f) => f.bulk);
 /** ช่องของ ListingPatch ที่ API ยอมให้แก้หลายรายการ (ชื่อ/คำอธิบาย = ล้างเท่านั้น) */
 export const BULK_PATCH_KEYS = ["isPublished", "featured", "webPrice", "webBadge", "webStockStatus", "webUnit", "webName", "webDescription"] as const;
 
-export type CategoriesOp = { mode: "add" | "remove" | "replace"; keys: string[] };
+/** move = ย้ายจากหมวด from → หมวด keys[0] (แทนที่ตำแหน่งเดิม · หมวดหลักยังเป็นหมวดหลัก · รุ่นที่ไม่ได้อยู่หมวด from ไม่เปลี่ยน) */
+export type CategoriesOp = { mode: "add" | "remove" | "replace" | "move"; keys: string[]; from?: string };
 export type PriceOp = { mode: "set" | "clear"; value?: number };
 /** ค่าที่ป๊อปส่งมา (เฉพาะช่องที่ติ๊ก) */
 export type MassEditValues = Partial<{
@@ -91,9 +92,17 @@ export function massEditPlan(v: MassEditValues): { ok: true; patch: ListingPatch
   let categories: CategoriesOp | null = null;
   if (v.categories) {
     const keys = [...new Set((v.categories.keys ?? []).filter((k) => typeof k === "string" && k))];
-    if (!["add", "remove", "replace"].includes(v.categories.mode)) return { ok: false, error: "เลือกว่าจะเพิ่ม/เอาออก/แทนหมวด" };
-    if (v.categories.mode !== "replace" && !keys.length) return { ok: false, error: "เลือกหมวดที่จะเพิ่ม/เอาออกก่อน" };
-    categories = { mode: v.categories.mode, keys };
+    if (!["add", "remove", "replace", "move"].includes(v.categories.mode)) return { ok: false, error: "เลือกว่าจะเพิ่ม/เอาออก/แทน/ย้ายหมวด" };
+    if (v.categories.mode === "move") {
+      const from = typeof v.categories.from === "string" ? v.categories.from : "";
+      if (!from) return { ok: false, error: "เลือกหมวดต้นทาง (ย้ายจากหมวดไหน)" };
+      if (keys.length !== 1) return { ok: false, error: "เลือกหมวดปลายทาง 1 หมวด" };
+      if (keys[0] === from) return { ok: false, error: "หมวดต้นทางกับปลายทางต้องไม่ใช่หมวดเดียวกัน" };
+      categories = { mode: "move", keys, from };
+    } else {
+      if (v.categories.mode !== "replace" && !keys.length) return { ok: false, error: "เลือกหมวดที่จะเพิ่ม/เอาออกก่อน" };
+      categories = { mode: v.categories.mode, keys };
+    }
   }
   if (!Object.keys(patch).length && !categories) return { ok: false, error: "ติ๊กช่องที่จะแก้อย่างน้อย 1 ช่อง" };
   return { ok: true, patch, categories };
@@ -103,6 +112,10 @@ export function massEditPlan(v: MassEditValues): { ok: true; patch: ListingPatch
 export function applyCategoriesOp(current: string[], op: CategoriesOp): string[] {
   if (op.mode === "replace") return [...op.keys];
   if (op.mode === "add") return [...current, ...op.keys.filter((k) => !current.includes(k))];
+  if (op.mode === "move") {
+    if (!op.from || !current.includes(op.from) || !op.keys[0]) return current;
+    return [...new Set(current.map((k) => (k === op.from ? op.keys[0] : k)))];
+  }
   return current.filter((k) => !op.keys.includes(k));
 }
 

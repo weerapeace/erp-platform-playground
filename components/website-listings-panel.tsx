@@ -89,7 +89,7 @@ export type Listing = {
 };
 
 /** หมวดของร้าน — มาจาก API (ตั้งได้เองในแท็บ ⚙️ จับคู่ฟิลด์) */
-export type CategoryDef = { key: string; label: string; icon: string };
+export type CategoryDef = { key: string; label: string; icon: string; parent?: string | null };
 
 type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit";
 const VIEWS = ["list", "grid"] as const;
@@ -167,6 +167,8 @@ export function WebsiteListingsPanel({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [massOpen, setMassOpen] = useState(false);
+  // ปุ่มลัดในแถบล่าง → เปิดป๊อปแก้หลายรายการพร้อมช่องที่ตั้งไว้ (เช่น 📂 ย้ายหมวด)
+  const [massPreset, setMassPreset] = useState<{ field: "categories"; categories: { mode: "move"; keys: string[]; from?: string } } | null>(null);
   const [removing, setRemoving] = useState<Listing | null>(null);
   // 🛍 drawer ตั้งค่าเว็บของสินค้า (ของกลาง ParentWebListings) · ปุ่มบันทึกอยู่แถบล่าง (footer-save)
   const webSave = useFooterSaveHost();
@@ -595,7 +597,10 @@ export function WebsiteListingsPanel({
         <button disabled={bulkBusy} onClick={() => void bulk({ featured: false }, "เลิกแนะนำ")} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
           เลิกแนะนำ
         </button>
-        <button disabled={bulkBusy} onClick={() => setMassOpen(true)} className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-medium hover:bg-slate-100 disabled:opacity-50">
+        <button disabled={bulkBusy || !categories.length} onClick={() => { setMassPreset({ field: "categories", categories: { mode: "move", keys: [] } }); setMassOpen(true); }} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
+          📂 ย้ายหมวด
+        </button>
+        <button disabled={bulkBusy} onClick={() => { setMassPreset(null); setMassOpen(true); }} className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-medium hover:bg-slate-100 disabled:opacity-50">
           ✏️ แก้หลายรายการ
         </button>
       </BulkActionBar>
@@ -607,6 +612,7 @@ export function WebsiteListingsPanel({
         shopId={shop.id}
         rows={listings.filter((l) => sel.has(l.parentId)).map((l) => ({ parentId: l.parentId, categories: l.categories ?? [] }))}
         shopCategories={categories}
+        preset={massPreset}
         onDone={async () => {
           await reload();
         }}

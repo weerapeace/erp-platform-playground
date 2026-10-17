@@ -31,6 +31,13 @@ describe("ทะเบียนช่องสินค้าบนเว็บ 
     expect(applyCategoriesOp(["bag", "travel"], { mode: "add", keys: ["sale", "bag"] })).toEqual(["bag", "travel", "sale"]);
     expect(applyCategoriesOp(["bag", "travel"], { mode: "remove", keys: ["bag"] })).toEqual(["travel"]);
     expect(applyCategoriesOp(["bag"], { mode: "replace", keys: ["x", "y"] })).toEqual(["x", "y"]);
+    // ↪ ย้ายหมวด: แทนที่ตำแหน่งเดิม (หมวดหลักยังหลัก) · ไม่ได้อยู่หมวดต้นทาง = ไม่เปลี่ยน · ซ้ำกับปลายทาง = ไม่ซ้ำ
+    expect(applyCategoriesOp(["bag", "travel"], { mode: "move", from: "bag", keys: ["bag-small"] })).toEqual(["bag-small", "travel"]);
+    expect(applyCategoriesOp(["travel"], { mode: "move", from: "bag", keys: ["bag-small"] })).toEqual(["travel"]);
+    expect(applyCategoriesOp(["bag", "bag-small"], { mode: "move", from: "bag", keys: ["bag-small"] })).toEqual(["bag-small"]);
+    expect(massEditPlan({ categories: { mode: "move", from: "bag", keys: ["bag"] } }).ok).toBe(false);
+    expect(massEditPlan({ categories: { mode: "move", keys: ["x"] } }).ok).toBe(false);
+    expect(massEditPlan({ categories: { mode: "move", from: "bag", keys: ["x"] } }).ok).toBe(true);
   });
 
   it("API กรองช่อง: ช่องนอกทะเบียน (รูป/แบนเนอร์) ทิ้ง · ชื่อ/คำอธิบายรับแค่ล้าง", () => {
