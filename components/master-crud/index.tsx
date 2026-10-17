@@ -357,6 +357,8 @@ export type FieldDef = {
   /** ชื่อดิบจากทะเบียน (ไทย/อังกฤษ) — Studio ต้องใช้ค่าดิบ ไม่ใช่ค่าที่แปลแล้ว */
   labelTh?:   string;
   labelEn?:   string;
+  /** ของเสริมต่อท้ายหัวข้อช่อง (ฟอร์ม+หน้าดู) — ตอนนี้ใช้กับปุ่มสลับ TH/EN รายช่อง (ใส่ตอนประกอบช่องที่จะโชว์ ไม่ได้มาจากทะเบียน) */
+  labelAddon?: React.ReactNode;
   type:       "text" | "number" | "date" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many" | "computed";
   /** computed: สูตรคำนวณ เช่น "qty * price_est" (อ้างชื่อ field ในระเบียนเดียวกัน) */
   formula?:   string;
@@ -991,7 +993,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // F11: drawer mode — "view" (อ่านอย่างเดียว) | "edit" (ฟอร์ม)
   const [drawerMode,  setDrawerMode]  = useState<"view" | "edit">("view");
   const [dblEditKey,  setDblEditKey]  = useState<string | null>(null);   // ฟิลด์ที่เพิ่งดับเบิลคลิกเพื่อแก้ตรงนั้น
-  const [langMode,    setLangMode]    = useState<"th" | "en">("th");     // สลับดูช่องไทย/อังกฤษ (ของกลาง: ui_style.lang_en)
+  const [langMode,    setLangMode]    = useState<"th" | "en">("th");     // สลับดูช่องไทย/อังกฤษ (ของกลาง: ui_style.lang_en) — ค่าตั้งต้นทุกช่อง
+  const [langField,   setLangField]   = useState<Record<string, "th" | "en">>({});   // สลับรายช่อง (key = ช่องไทย) ทับค่าตั้งต้น — ปุ่ม TH/EN ที่หัวข้อช่อง
   const [translating, setTranslating] = useState(false);
   const [aiDetailOpen, setAiDetailOpen] = useState(false);              // ✨ ป๊อป "ให้ AI คิดรายละเอียดสินค้า"
   const [detailLoading, setDetailLoading] = useState(false);
@@ -2231,6 +2234,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
           {f.readonly && f.type !== "one2many" && f.type !== "many2many" && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
           {fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}
+          {f.labelAddon}
         </span>
         {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
         {f.type === "computed" ? (
@@ -2786,9 +2790,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               {pairFields.length > 0 && (
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
                 {(["th", "en"] as const).map((m) => (
-                  <button key={m} type="button" onClick={() => setLangMode(m)}
-                    title={m === "th" ? tr("ดูช่องภาษาไทย", "Show Thai fields") : tr("ดูช่องภาษาอังกฤษ", "Show English fields")}
-                    className={`h-8 px-3 text-[12.5px] font-semibold ${langMode === m ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"} ${m === "en" ? "border-l border-slate-200" : ""}`}>
+                  <button key={m} type="button" onClick={() => { setLangMode(m); setLangField({}); }}
+                    title={m === "th" ? tr("สลับทุกช่องเป็นภาษาไทย (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to Thai (or switch one field with the TH/EN button by its label)") : tr("สลับทุกช่องเป็นภาษาอังกฤษ (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to English (or switch one field with the TH/EN button by its label)")}
+                    className={`h-8 px-3 text-[12.5px] font-semibold ${pairFields.every((f) => (langField[f.key] ?? langMode) === m) ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"} ${m === "en" ? "border-l border-slate-200" : ""}`}>
                     {m === "th" ? `🇹🇭 ${tr("ไทย", "TH")}` : "🇬🇧 EN"}
                   </button>
                 ))}
@@ -2815,7 +2819,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </button>
                 </>
               )}
-              {langMode === "en" && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
+              {pairFields.some((f) => (langField[f.key] ?? langMode) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
             </div>
           );
         })()}
@@ -2828,18 +2832,22 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           // สลับภาษา (ของกลาง): field ฝั่งไทยตั้ง ui_style.lang_en = ชื่อ field อังกฤษที่คู่กัน
           //   โหมด TH = ซ่อนช่องอังกฤษ · โหมด EN = ช่องอังกฤษ "มานั่งแทนที่" ช่องไทย (ยืมกลุ่ม/ลำดับ/ความกว้าง)
           //   → ตำแหน่งช่องทั้งสองโหมดตรงกันเป๊ะ ไม่ว่าจะตั้ง display_order ของช่องอังกฤษไว้ตรงไหน
+          //   สลับได้ทั้งฟอร์ม (ปุ่มบน) หรือทีละช่อง (ปุ่ม TH/EN ข้างหัวข้อ — เจ้าของขอ 2026-10-17 "บางช่องไม่ต้องมี 2 ภาษา")
           const langPair = (f: FieldDef) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "");
           const enKeys = new Set(baseVisible.map(langPair).filter(Boolean));
           const visibleFields =
             enKeys.size === 0 ? baseVisible
-            : langMode === "th" ? baseVisible.filter((f) => !enKeys.has(f.key))
             : baseVisible.flatMap((f) => {
                 if (enKeys.has(f.key)) return [];             // ช่องอังกฤษ: ไม่โชว์ที่ตำแหน่งเดิมของมัน
                 const pair = langPair(f);
                 if (!pair) return [f];
                 const en = baseVisible.find((x) => x.key === pair);
                 if (!en) return [f];                          // ยังไม่มีช่องอังกฤษคู่นี้ → คงช่องไทยไว้
-                return [{ ...en, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? en.formSpan }];
+                const m = langField[f.key] ?? langMode;
+                const pill = <LangPill mode={m} enFilled={en.type === "computed" || String(form[pair] ?? "").trim() !== ""} onChange={(nm) => setLangField((p) => ({ ...p, [f.key]: nm }))} />;
+                return m === "th"
+                  ? [{ ...f, labelAddon: pill }]
+                  : [{ ...en, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? en.formSpan, labelAddon: pill }];
               });
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
           // ปุ่มลบรูป (เฉพาะตอนดู + มีสิทธิ์แก้ + มีรูป) — โผล่ตอน hover
@@ -3538,6 +3546,23 @@ function InfoTip({ tip }: { tip: string }) {
   return <span title={tip} className="ml-1 text-[11px] text-slate-300 hover:text-blue-500 cursor-help align-middle">ⓘ</span>;
 }
 
+// ปุ่มสลับภาษารายช่อง TH | EN ข้างหัวข้อ (เฉพาะช่องที่ตั้งคู่อังกฤษ ui_style.lang_en) · จุดเขียว = มีภาษาอังกฤษแล้ว
+function LangPill({ mode, enFilled, onChange }: { mode: "th" | "en"; enFilled: boolean; onChange: (m: "th" | "en") => void }) {
+  return (
+    <span className="ml-1.5 inline-flex align-middle overflow-hidden rounded border border-slate-200 text-[10px] font-semibold leading-none" data-lang-pill>
+      {(["th", "en"] as const).map((m) => (
+        <button key={m} type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange(m); }}
+          title={m === "th" ? tr("ดูช่องนี้เป็นภาษาไทย", "Show this field in Thai") : enFilled ? tr("ดูช่องนี้เป็นภาษาอังกฤษ", "Show this field in English") : tr("ดูช่องนี้เป็นภาษาอังกฤษ (ยังว่าง)", "Show this field in English (empty)")}
+          className={`px-1.5 py-[3px] ${m === "en" ? "border-l border-slate-200" : ""} ${mode === m ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-400 hover:text-slate-600"}`}>
+          {m === "th" ? "TH" : "EN"}
+          {m === "en" && <span className={`ml-0.5 ${enFilled ? "text-emerald-500" : "text-slate-300"}`}>•</span>}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 // ไอคอนหมวด — รองรับ emoji หรือรูปอัปโหลด "r2:<key>"
 function sectionIconNode(icon?: string | null): React.ReactNode {
   if (!icon) return null;
@@ -3848,7 +3873,7 @@ function DetailSections({
         return (
           <div key={f.key} style={{ gridColumn: `span ${gw12(f, cols)}`, ...(hl ? { background: hlColor, borderColor: hlColor } : {}) }}
             className={`${hl ? "border rounded-md p-1.5 -m-0.5" : ""} ${labelLeft ? "flex items-baseline gap-2" : ""}`}>
-            <dt className={`text-[11px] text-slate-400 mb-0.5 ${labelLeft ? "w-32 shrink-0" : ""}`} style={labelCss}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
+            <dt className={`text-[11px] text-slate-400 mb-0.5 ${labelLeft ? "w-32 shrink-0" : ""}`} style={labelCss}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}{f.labelAddon}</dt>
             <dd style={valueCss} className={labelLeft ? "flex-1 min-w-0" : ""}>{renderValue(f)}</dd>
           </div>
         );

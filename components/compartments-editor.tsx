@@ -39,6 +39,7 @@ export function CompartmentsEditor({
   onChange,
   canEdit = true,
   outer,
+  toggle = false,
 }: {
   value: unknown;
   /** มี = บันทึกเองด้วยปุ่มในกล่อง · ไม่มี = ส่งค่าออกทาง onChange (ฟอร์มบันทึกเอง) */
@@ -48,11 +49,17 @@ export function CompartmentsEditor({
   canEdit?: boolean;
   /** ขนาดภายนอก (ไว้เตือนถ้าช่องในใหญ่กว่าตัวกระเป๋า) */
   outer?: { w?: unknown; h?: unknown; d?: unknown } | null;
+  /** true = ยังไม่ได้วัด → ย่อเหลือช่องติ๊กบรรทัดเดียว ติ๊กก่อนถึงจะใส่ได้ (ฟอร์ม Parent SKU — เจ้าของขอ "จะได้ไม่รก" 2026-10-17)
+   *  ที่มีปุ่มพับ/กางของตัวเองอยู่แล้ว (ลิ้นชักเว็บ แผง 📐) ไม่ต้องเปิด */
+  toggle?: boolean;
 }) {
   const toast = useToast();
   const initial = parseCompartments(value);
   const [state, setState] = useState<"unmeasured" | "none" | "rows">(initial === null ? "unmeasured" : initial.length ? "rows" : "none");
   const [rows, setRows] = useState<Row[]>(toRows(initial ?? []));
+  // toggle: กางอยู่ไหม (มีข้อมูลแล้ว = กาง) · แถวที่เพิ่งเอาติ๊กออก เก็บไว้คืนให้ถ้าติ๊กกลับ
+  const [open, setOpen] = useState(!toggle || initial !== null);
+  const stash = useRef<Row[]>([]);
   const [targets, setTargets] = useState<FitTarget[] | null>(null);
   const [saving, setSaving] = useState(false);
   const selfSave = !!parentId && !onChange;
@@ -74,6 +81,8 @@ export function CompartmentsEditor({
     const p = parseCompartments(value);
     setState(p === null ? "unmeasured" : p.length ? "rows" : "none");
     setRows(toRows(p ?? []));
+    setOpen(!toggle || p !== null);
+    stash.current = [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valueKey]);
 
@@ -121,6 +130,26 @@ export function CompartmentsEditor({
     setRows([]);
     emit("none", []);
   };
+  // ติ๊กออก = กลับเป็น "ยังไม่ได้วัด" (หน้าดูยังต้องกดบันทึกเอง) · ติ๊กกลับ = คืนแถวเดิม
+  const setOpenTick = (on: boolean) => {
+    setOpen(on);
+    if (on) {
+      const back = stash.current;
+      stash.current = [];
+      if (back.length && state === "unmeasured") {
+        setRows(back);
+        setState("rows");
+        emit("rows", back);
+      }
+      return;
+    }
+    if (state === "rows" && rows.length) stash.current = rows;
+    if (state !== "unmeasured") {
+      setState("unmeasured");
+      setRows([]);
+      emit("unmeasured", []);
+    }
+  };
 
   const save = async () => {
     if (!parentId || problem) return;
@@ -141,8 +170,21 @@ export function CompartmentsEditor({
     }
   };
 
+  const tick = !toggle ? null : canEdit ? (
+    <label className="flex w-fit cursor-pointer select-none items-center gap-2 text-sm text-slate-600" data-compartments-toggle
+      title="สำหรับกระเป๋า — วัดขนาดด้านในของแต่ละช่อง แล้วระบบบอกเองว่าใส่ตุ๊กตา/ของอะไรได้">
+      <input type="checkbox" className="h-4 w-4 shrink-0 accent-orange-500" checked={open} onChange={(e) => setOpenTick(e.target.checked)} />
+      <span>{open ? "ใส่ข้อมูลช่องใส่ของ" : "ติ๊กเพื่อใส่ขนาดช่อง"}</span>
+    </label>
+  ) : !open ? (
+    <span className="text-sm text-slate-300">— ยังไม่ได้วัด</span>
+  ) : null;
+
   return (
     <div className="space-y-2" data-compartments>
+      {tick}
+      {open && (
+      <>
       {state === "unmeasured" && (
         <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/60 p-3 text-xs text-amber-800">
           ยังไม่ได้วัดช่องใส่ของ — วัดขนาด<b>ด้านใน</b>ของแต่ละช่อง (ไม่ใช่ขนาดตัวกระเป๋า) แล้วระบบจะบอกเองว่าใส่ตุ๊กตา/ของอะไรได้กี่ชิ้น
@@ -249,6 +291,8 @@ export function CompartmentsEditor({
           )}
         </div>
       )}
+      </>
+      )}
 
       {selfSave && canEdit && dirty && (
         <div className="flex items-center gap-2">
@@ -265,8 +309,8 @@ export function CompartmentsEditor({
 /** ฟิลด์ในฟอร์ม Parent SKU (ต่อสาย 2 ที่: app/master/parent-skus/page.tsx + MasterRecordDrawer ใน components/master-crud) */
 export function ParentCompartmentsField(p: { value: unknown; mode: "edit" | "view"; onChange?: (v: unknown) => void; onSaved?: (v: unknown) => void; recordId?: string | null; canEdit?: boolean }) {
   return p.mode === "edit" ? (
-    <CompartmentsEditor value={p.value} canEdit={p.canEdit} onChange={(v) => p.onChange?.(v)} />
+    <CompartmentsEditor value={p.value} canEdit={p.canEdit} onChange={(v) => p.onChange?.(v)} toggle />
   ) : (
-    <CompartmentsEditor value={p.value} parentId={p.recordId ?? null} canEdit={p.canEdit} onSaved={(v) => p.onSaved?.(v)} />
+    <CompartmentsEditor value={p.value} parentId={p.recordId ?? null} canEdit={p.canEdit} onSaved={(v) => p.onSaved?.(v)} toggle />
   );
 }
