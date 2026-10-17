@@ -45,6 +45,8 @@ import { MoneyInput } from "@/components/money-input";
 import { computedTextValue, textComputeDescribe } from "@/lib/computed-text";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
+// 🧩 ทะเบียนหน้าดูเฉพาะโมดูล (config.detailView ตาม moduleKey) — ตัวหน้าโหลดเฉพาะตอนเปิดโมดูลนั้น
+import { RECORD_DETAIL_VIEWS } from "@/components/record-detail-views";
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
@@ -456,6 +458,23 @@ export type MasterCRUDSaveContext = {
   actor?: string | null;
 };
 
+/** ของที่หน้าดูเฉพาะโมดูล (config.detailView) ได้รับ — อ่านค่า + บันทึกผ่านเส้นทางกลาง (PATCH + audit ที่ API) */
+export type DetailViewCtx = {
+  recordId: string;
+  /** ค่าปัจจุบันของระเบียน (อัปเดตทันทีหลังบันทึก) */
+  values: Record<string, unknown>;
+  fields: FieldDef[];
+  canEdit: boolean;
+  /** กำลังโหลดค่าเต็มของระเบียน (ตอนเปิด/เลื่อนรายการ) */
+  loading: boolean;
+  /** บันทึกหลายช่องในครั้งเดียว → null = สำเร็จ (ค่าในหน้าเปลี่ยนตามที่ระบบบันทึกจริง) · ข้อความ = ไม่สำเร็จ */
+  save: (patch: Record<string, unknown>) => Promise<string | null>;
+  /** เปิดฟอร์มแก้ไขเต็ม (ของกลาง) */
+  edit: () => void;
+  /** โฟลเดอร์อัปโหลดรูปของโมดูลนี้ (ImageInput folder) */
+  uploadFolder: string;
+};
+
 export type MasterCRUDConfig = {
   /** entity path (เช่น 'customers' → /api/master/customers) */
   apiPath:        string;
@@ -576,6 +595,12 @@ export type MasterCRUDConfig = {
   recordSections?: { key: string; title?: string; render: (ctx: { recordId: string; row: Record<string, unknown>; readonly: boolean; refresh: () => Promise<void> }) => React.ReactNode }[];
   /** แท็บพิเศษต่อโมดูล — โผล่ในแถบแท็บ (ต่อจากแท็บจาก Field Registry) เช่น "🛍 เว็บไซต์" ของ Parent SKU */
   extraTabs?: { key: string; label: string; icon?: string; inTab?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
+  /**
+   * 🧩 หน้า "ดูรายละเอียด" ที่ออกแบบเฉพาะโมดูล (จุดเสียบของกลาง) — แทนแถบสลับภาษา + แท็บฟิลด์ เฉพาะตอน "ดู" ระเบียนที่บันทึกแล้ว
+   * ฟอร์มแก้ไข/สร้างใหม่ + แถบหัว/แถบล่าง (ก่อนหน้า/ถัดไป/ลบ/แก้ไข) ยังเป็นของกลางเหมือนเดิม
+   * ไม่ส่ง = ดูทะเบียน components/record-detail-views ตาม moduleKey · ไม่มีทั้งคู่ = หน้าดูมาตรฐาน
+   */
+  detailView?: (ctx: DetailViewCtx) => React.ReactNode;
   /**
    * ปุ่ม "✨ ให้ AI คิดรายละเอียดสินค้า" ในฟอร์ม (ของกลาง) — ใช้กับโมดูลที่มีช่อง
    * name_th / introduction / description (+ คู่อังกฤษ) และมีรูปสินค้าให้ AI ดู
@@ -1977,6 +2002,33 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     return err;
   }, [editingId, onInlineEdit, effectiveFields]);
 
+  // 🧩 หน้าดูเฉพาะโมดูล (config.detailView / ทะเบียน record-detail-views) — บันทึกหลายช่องครั้งเดียว (PATCH + audit ที่ API)
+  //   ค่าในหน้า = แถวที่ระบบคืนมา (เช่น slug ที่ DB จัดรูปให้) · ไม่ toast เอง ให้หน้านั้นแจ้งผลตามบริบท
+  const customDetailView = config.detailView ?? (config.moduleKey ? RECORD_DETAIL_VIEWS[config.moduleKey] : undefined);
+  const saveDetailPatch = useCallback(async (patch: Record<string, unknown>): Promise<string | null> => {
+    if (!editingId) return tr("ยังไม่มีระเบียน", "No record yet");
+    const body: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      const def = effectiveFields.find((x) => x.key === k);
+      body[k] = def?.type === "number" && v != null && v !== "" && !isRest ? String(v) : v;
+    }
+    try {
+      const res = await apiFetch(`${apiBase}${config.apiPath}/${editingId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, actor: user?.name }),
+      });
+      const json = await res.json().catch(() => ({})) as { data?: unknown; error?: string };
+      if (!res.ok || json.error) return json.error || tr(`บันทึกไม่สำเร็จ (${res.status})`, `Save failed (${res.status})`);
+      const saved = json.data && typeof json.data === "object" ? (json.data as Record<string, unknown>) : patch;
+      setForm((p) => ({ ...p, ...saved }));
+      baseSnapRef.current = { ...baseSnapRef.current, ...saved };
+      setRows((prev) => prev.map((r) => (r.id === editingId ? ({ ...r, ...saved } as Row) : r)));
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed");
+    }
+  }, [editingId, effectiveFields, isRest, apiBase, config.apiPath, user?.name]);
+
   // ลบรูปปกในหน้า detail — ล้าง field + ย้ายไฟล์เข้าถังขยะ R2 (backend trash อัตโนมัติเมื่อ cover_image_r2_key ถูกล้าง)
   const [coverDeleteOpen, setCoverDeleteOpen] = useState(false);
   const deleteCover = useCallback(async () => {
@@ -2781,6 +2833,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       >
         {/* 💾 แท็บที่บันทึกแยกเอง (เช่น 🛍 เว็บไซต์) ฝากปุ่มบันทึกไว้ที่แถบล่าง — ของกลาง components/footer-save */}
         <FooterSaveProvider value={footerSave.register}>
+        {/* 🧩 หน้าดูเฉพาะโมดูล (เช่น 🧵 วัสดุ) — แทนแถบภาษา + แท็บฟิลด์ เฉพาะตอนดูระเบียนที่บันทึกแล้ว · key = รีเซ็ตสถานะเมื่อเลื่อนรายการ */}
+        {customDetailView && drawerMode === "view" && editingId ? (
+          <div key={String(editingId)}>
+            {customDetailView({
+              recordId: String(editingId), values: form, fields: effectiveFields, canEdit, loading: detailLoading,
+              save: saveDetailPatch, edit: switchToEdit, uploadFolder: config.apiPath,
+            })}
+          </div>
+        ) : (<>
         {/* สลับภาษา TH/EN + แปลอัตโนมัติ + ✨ ให้ AI คิดรายละเอียด — โผล่เฉพาะโมดูลที่ตั้งค่าไว้ */}
         {(() => {
           const pairFields = effectiveFields.filter((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_en);
@@ -3076,6 +3137,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             </div>
           );
         })()}
+        </>)}
 
         {/* reverse one2many อัตโนมัติ — รายการจากโมดูลอื่นที่ชี้กลับมาหาระเบียนนี้ (ของกลาง) */}
         {drawerMode === "view" && editingId && (() => {

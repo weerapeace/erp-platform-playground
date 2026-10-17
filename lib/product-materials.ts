@@ -43,15 +43,18 @@ export function materialTerms(m: MaterialRow): string[] {
 
 export type MaterialLink = { slug: string; terms: string[] };
 
+/** ข้อความใดข้อความหนึ่งพูดถึงวัสดุนี้ไหม (ชื่อ/ชื่ออังกฤษ/คำเรียกอื่น · ไม่สนตัวพิมพ์) — ไม่เช็กว่ามีหน้าแล้วหรือยัง */
+export function mentionsMaterial(texts: unknown[], m: MaterialRow): boolean {
+  const hay = texts.map((t) => s(t).toLowerCase()).filter(Boolean);
+  if (!hay.length) return false;
+  return materialTerms(m).some((t) => hay.some((h) => h.includes(t.toLowerCase())));
+}
+
 /** วัสดุที่มีหน้า + ถูกพูดถึงในข้อความใดข้อความหนึ่ง (ไทย/อังกฤษ) → รายการลิงก์ให้เว็บ (ไม่มี = []) */
 export function findMaterialLinks(texts: (string | null | undefined)[], mats: MaterialRow[]): MaterialLink[] {
-  const hay = texts.map((t) => s(t).toLowerCase()).filter(Boolean);
-  if (!hay.length) return [];
   const out: MaterialLink[] = [];
   for (const m of mats) {
-    if (!hasMaterialPage(m)) continue;
-    const terms = materialTerms(m);
-    if (terms.some((t) => hay.some((h) => h.includes(t.toLowerCase())))) out.push({ slug: s(m.slug), terms });
+    if (hasMaterialPage(m) && mentionsMaterial(texts, m)) out.push({ slug: s(m.slug), terms: materialTerms(m) });
   }
   return out;
 }

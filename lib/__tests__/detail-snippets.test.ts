@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { composeLines, enInsertAt, insertLines, materialLine, slotLine, slotText, splitLines } from "@/lib/detail-snippets";
-import { findMaterialLinks, materialTerms, publicMaterial, type MaterialRow } from "@/lib/product-materials";
+import { findMaterialLinks, materialTerms, mentionsMaterial, publicMaterial, type MaterialRow } from "@/lib/product-materials";
 
 const card = { id: "c", name: "ช่องใส่บัตรเครดิต", name_en: "Card slot", kind: "slot", template_en: "{n} card slots" };
 const bill = { id: "b", name: "ช่องใส่ธนบัตร", name_en: "Bill compartment", kind: "slot" };
@@ -65,6 +65,13 @@ describe("product-materials", () => {
     expect(links.map((l) => l.slug)).toEqual(["nappa-leather"]);
     expect(findMaterialLinks(["", "Made of NAPPA LEATHER"], [nappa])).toHaveLength(1);
     expect(findMaterialLinks(["ไม่มีวัสดุ"], [nappa])).toEqual([]);
+  });
+
+  it("พูดถึงวัสดุไหม — นับได้แม้ยังไม่มีหน้า (หน้าดูวัสดุบอก 'เขียนแล้วจะลิงก์ได้กี่รุ่น')", () => {
+    expect(mentionsMaterial(["ผลิตจากผ้าแคนวาสหนา"], empty)).toBe(true);
+    expect(mentionsMaterial([null, 42, "made of nappa leather"], nappa)).toBe(true);
+    expect(mentionsMaterial(["", undefined], nappa)).toBe(false);
+    expect(mentionsMaterial(["หนังวัวแท้"], nappa)).toBe(false);
   });
 
   it("ข้อมูลหน้าวัสดุไม่ส่งช่องว่าง", () => {
