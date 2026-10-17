@@ -229,6 +229,7 @@ export function collectTextPaths(
   crumbOf: (field: string) => string | null = () => null,
 ): PathSlot[] {
   const out: PathSlot[] = [];
+  const uniqKeys = [...new Set(keys)]; // กันชื่อช่องซ้ำในรายการ (แถวซ้ำ)
   const nameOf = (o: Record<string, unknown>): string | null => {
     for (const k of ["label", "title", "name", "key"]) if (typeof o[k] === "string" && (o[k] as string).trim()) return (o[k] as string).trim().slice(0, 40);
     return null;
@@ -240,7 +241,7 @@ export function collectTextPaths(
       return;
     }
     const meta = readMeta(v as Record<string, unknown>);
-    for (const k of keys) {
+    for (const k of uniqKeys) {
       const th = (v as Record<string, unknown>)[k];
       // ว่าง / ไม่มีอักษรไทย (เป็นอังกฤษอยู่แล้ว หรือค่าตั้งค่าอย่าง "count") = ไม่ต้องแปล
       if (typeof th !== "string" || !needsTranslation(th)) continue;
