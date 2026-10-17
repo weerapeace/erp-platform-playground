@@ -12,6 +12,8 @@
  * รหัสหมวด (ใช้ในลิงก์หน้าหมวด /c/<รหัส>) ตั้งตอนสร้างแล้วเปลี่ยนไม่ได้ — กันลิงก์/เมนูเดิมเสีย
  * 📂 หมวดย่อย (2 ชั้น · lib/website-category-tree): ➕ หมวดย่อยใต้หมวดที่เลือก · ช่อง "อยู่ใต้หมวด" ย้ายแม่ · ลากเรียงในแม่เดิม
  *    สินค้าในหมวดย่อยนับรวมในหมวดแม่ (เว็บร้านโชว์ในหน้าหมวดแม่ด้วย)
+ * ↪ ย้ายสินค้าข้ามหมวด: ลากการ์ดสินค้าไปวางบนหมวดทางซ้าย (Ctrl/Alt ค้าง = เพิ่มเข้าอีกหมวด) · ช่อง "↪ ย้ายไป…" ในการ์ด
+ *    · ติ๊กหลายรุ่น → แถบล่างจอ (ของกลาง BulkActionBar) ย้าย/เพิ่ม/เอาออกพร้อมกัน
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -20,7 +22,11 @@ import { apiFetch } from "@/lib/api";
 import { ImageChooser } from "@/components/website-canvas-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { cleanCategoryKey, type WebCategoryDef } from "@/lib/website-field-map";
-import { categoryTree, reorderCategoryTree, childCategories, topCategories, familyKeys, flattenTree } from "@/lib/website-category-tree";
+import { categoryTree, reorderCategoryTree, childCategories, topCategories, familyKeys, flattenTree, categoryChoiceLabel } from "@/lib/website-category-tree";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+
+/** ชนิดข้อมูลตอนลากการ์ดสินค้า (กันรับของที่ลากมาจากที่อื่น) */
+const DRAG_MIME = "application/x-erp-web-listings";
 
 type Listing = {
   parentId: string;
@@ -55,6 +61,9 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   const [newParent, setNewParent] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<WebCategoryDef | null>(null);
   const [chooser, setChooser] = useState<null | "imageKey" | "bannerKey">(null);
+  // ↪ ย้ายสินค้าข้ามหมวด: รุ่นที่ติ๊กไว้ · หมวดที่กำลังลากผ่าน (ไฮไลต์)
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [dropKey, setDropKey] = useState<string | null>(null);
   const dirty = useRef(false);
 
   const load = useCallback(async () => {
@@ -134,6 +143,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   };
 
   const sel = cats.find((c) => c.key === selKey) ?? null;
+  useEffect(() => setPicked(new Set()), [selKey]);
   // สินค้าในหมวด เรียงตามที่ลากไว้ (ตัวที่ยังไม่อยู่ในลำดับ ต่อท้ายตามลำดับรวมของร้าน)
   const inCat = useMemo(() => {
     if (!sel) return [];
@@ -160,6 +170,51 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   const rows = useMemo(() => categoryTree(cats), [cats]);
   const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => editCats(reorderCategoryTree(cats, from, to)));
   const selTop = sel ? (sel.parent ? sel.parent : sel.key) : null;
+
+  /**
+   * ↪ ย้าย (แทนที่หมวดนี้ด้วยหมวดปลายทาง — ตำแหน่งเดิม หมวดหลักยังเป็นหมวดหลัก) หรือ copy = เพิ่มเข้าอีกหมวด (คงหมวดนี้ไว้)
+   */
+  const moveTo = (ids: string[], toKey: string, copy = false) => {
+    if (!sel || !ids.length || toKey === sel.key) return;
+    const to = cats.find((c) => c.key === toKey);
+    if (!to) return;
+    const items = listings
+      .filter((l) => ids.includes(l.parentId))
+      .map((l) => {
+        const next = copy ? [...l.categories, toKey] : l.categories.map((k) => (k === sel.key ? toKey : k));
+        return { parentId: l.parentId, categories: [...new Set(next)] };
+      });
+    setPicked(new Set());
+    void setCategoriesOf(items, toKey, copy ? `เพิ่ม ${items.length} รุ่นเข้าหมวด ${to.label} แล้ว (ยังอยู่หมวด ${sel.label})` : `ย้าย ${items.length} รุ่นไปหมวด ${to.label} แล้ว`);
+  };
+  const removeMany = (ids: string[]) => {
+    if (!sel || !ids.length) return;
+    const items = listings.filter((l) => ids.includes(l.parentId)).map((l) => ({ parentId: l.parentId, categories: l.categories.filter((k) => k !== sel.key) }));
+    setPicked(new Set());
+    void setCategoriesOf(items, sel.key, `เอา ${items.length} รุ่นออกจากหมวด ${sel.label} แล้ว`);
+  };
+  // ปลายทางที่เลือกได้ (ทุกหมวดยกเว้นหมวดนี้ · เรียงแบบต้นไม้ ↳ = หมวดย่อย)
+  const moveTargets = sel ? rows.filter((r) => r.cat.key !== sel.key).map((r) => r.cat) : [];
+  const dropProps = (key: string) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!sel || key === sel.key || !e.dataTransfer.types.includes(DRAG_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.ctrlKey || e.altKey ? "copy" : "move";
+      if (dropKey !== key) setDropKey(key);
+    },
+    onDragLeave: () => setDropKey((k) => (k === key ? null : k)),
+    onDrop: (e: React.DragEvent) => {
+      setDropKey(null);
+      if (!sel || key === sel.key) return;
+      e.preventDefault();
+      try {
+        const ids = JSON.parse(e.dataTransfer.getData(DRAG_MIME) || "[]") as string[];
+        moveTo(ids, key, e.ctrlKey || e.altKey);
+      } catch {
+        /* ไม่ใช่ของเรา */
+      }
+    },
+  });
 
   const removeFromCat = (l: Listing) => {
     if (!sel) return;
@@ -213,8 +268,10 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
               <div key={c.key}>
                 <div
                   {...rowProps(i)}
+                  {...dropProps(c.key)}
                   onClick={() => setSelKey(c.key)}
-                  className={`flex items-center gap-2 rounded-lg py-2 cursor-pointer ${depth ? "pl-7 pr-2" : "px-2"} ${c.key === selKey ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"} ${rowCls(i)}`}
+                  className={`flex items-center gap-2 rounded-lg py-2 cursor-pointer ${depth ? "pl-7 pr-2" : "px-2"} ${dropKey === c.key ? "bg-emerald-50 ring-2 ring-emerald-400" : c.key === selKey ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"} ${rowCls(i)}`}
+                  title={dropKey === c.key ? "ปล่อยเพื่อย้ายมาหมวดนี้ (Ctrl ค้าง = เพิ่มเข้าหมวดนี้อีกหมวด)" : undefined}
                 >
                   {depth > 0 && <span className="text-slate-300 text-xs -ml-3" aria-hidden>└</span>}
                   <DragHandle {...handleProps(i)} />
@@ -333,7 +390,11 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                   ➕ เพิ่มสินค้าเข้าหมวด
                 </button>
               </div>
-              {inCat.length > 1 && <p className="text-[11px] text-slate-400 -mt-1.5 mb-2">ลาก ⠿ เพื่อเรียงลำดับสินค้าในหมวดนี้ (หน้าร้านเรียงตามนี้เมื่อเลือกหมวด)</p>}
+              {inCat.length > 0 && (
+                <p className="text-[11px] text-slate-400 -mt-1.5 mb-2">
+                  {inCat.length > 1 && "ลาก ⠿ = เรียงลำดับในหมวดนี้ · "}ลากรูปสินค้าไปวางบนหมวดทางซ้าย = <b className="font-medium text-slate-500">ย้าย</b> (Ctrl ค้าง = เพิ่มเข้าอีกหมวด) · ติ๊ก ☐ หลายรุ่นแล้วย้ายพร้อมกันได้
+                </p>
+              )}
               {/* 📂 สินค้าจากหมวดย่อย (ไม่ได้อยู่หมวดนี้ตรง ๆ แต่ขึ้นในหน้าหมวดนี้บนเว็บ) */}
               {!sel.parent && countOf(sel.key) > inCat.length && (
                 <p className="text-[11px] text-blue-600 -mt-1 mb-2">+ อีก {countOf(sel.key) - inCat.length} รุ่นจากหมวดย่อย ({childCategories(cats, sel.key).map((c) => c.label).join(", ")}) — ขึ้นในหน้าหมวดนี้บนเว็บด้วย · จัดลำดับ/เพิ่ม-เอาออกที่หมวดย่อยนั้น</p>
@@ -343,8 +404,28 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
                   {inCat.map((l, i) => (
-                    <div key={l.parentId} {...prodDrag.rowProps(i)} className={`group relative rounded-lg border border-slate-200 p-1.5 ${prodDrag.rowCls(i)}`}>
+                    <div
+                      key={l.parentId}
+                      {...prodDrag.rowProps(i)}
+                      draggable
+                      onDragStart={(e) => {
+                        const ids = picked.has(l.parentId) ? [...picked] : [l.parentId];
+                        e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
+                        e.dataTransfer.setData("text/plain", ids.length > 1 ? `${ids.length} รุ่น` : nameOf(l));
+                        e.dataTransfer.effectAllowed = "copyMove";
+                      }}
+                      onDragEnd={() => setDropKey(null)}
+                      className={`group relative rounded-lg border p-1.5 ${picked.has(l.parentId) ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200"} ${prodDrag.rowCls(i)}`}
+                    >
                       <DragHandle {...prodDrag.handleProps(i)} title="ลากเพื่อเรียงลำดับในหมวดนี้" className="absolute left-2.5 top-2.5 z-10 rounded bg-white/90 px-1 text-sm shadow-sm" />
+                      <label className="absolute left-9 top-2.5 z-10 flex h-5 w-5 items-center justify-center rounded bg-white/90 shadow-sm cursor-pointer" title="ติ๊กเพื่อย้ายหลายรุ่นพร้อมกัน">
+                        <input
+                          type="checkbox"
+                          className="w-3.5 h-3.5 accent-blue-600"
+                          checked={picked.has(l.parentId)}
+                          onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(l.parentId); else n.delete(l.parentId); return n; })}
+                        />
+                      </label>
                       <span className="absolute right-2 top-2 z-10 rounded-full bg-white/90 px-1.5 text-[10px] text-slate-500 tabular-nums">{i + 1}</span>
                       <div className="aspect-square rounded-md bg-slate-100 overflow-hidden">
                         {thumbOf(l) && (
@@ -358,6 +439,22 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                         {!l.published && " · ยังไม่เผยแพร่"}
                         {l.categories[0] === sel.key ? " · หมวดหลัก" : l.categories.length > 1 ? ` · หลัก: ${labelOf(l.categories[0])}` : ""}
                       </p>
+                      {moveTargets.length > 0 && (
+                        <select
+                          value=""
+                          disabled={busy}
+                          onChange={(e) => e.target.value && moveTo([l.parentId], e.target.value)}
+                          className="mt-1 w-full rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] text-slate-600 focus:border-blue-400 focus:outline-none"
+                          aria-label="ย้ายไปหมวด"
+                        >
+                          <option value="">↪ ย้ายไป…</option>
+                          {moveTargets.map((c) => (
+                            <option key={c.key} value={c.key}>
+                              {categoryChoiceLabel(c)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <button
                         title="เอาออกจากหมวดนี้"
                         disabled={busy}
@@ -376,6 +473,30 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
           <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-400">เลือกหมวดทางซ้าย หรือกด ➕ เพิ่มหมวด</div>
         )}
       </div>
+
+      {sel && (
+        <BulkActionBar count={picked.size} unit="รุ่น" onClear={() => setPicked(new Set())} extra={<button type="button" className="underline hover:text-white" onClick={() => setPicked(new Set(inCat.map((l) => l.parentId)))}>เลือกทั้งหมดในหมวด ({inCat.length})</button>}>
+          <select value="" disabled={busy} onChange={(e) => e.target.value && moveTo([...picked], e.target.value)} className="h-8 rounded-lg border border-slate-600 bg-slate-800 px-2 text-xs text-white" aria-label="ย้ายที่เลือกไปหมวด">
+            <option value="">↪ ย้ายไปหมวด…</option>
+            {moveTargets.map((c) => (
+              <option key={c.key} value={c.key}>
+                {categoryChoiceLabel(c)}
+              </option>
+            ))}
+          </select>
+          <select value="" disabled={busy} onChange={(e) => e.target.value && moveTo([...picked], e.target.value, true)} className="h-8 rounded-lg border border-slate-600 bg-slate-800 px-2 text-xs text-white" aria-label="เพิ่มที่เลือกเข้าอีกหมวด">
+            <option value="">＋ เพิ่มเข้าอีกหมวด…</option>
+            {moveTargets.map((c) => (
+              <option key={c.key} value={c.key}>
+                {categoryChoiceLabel(c)}
+              </option>
+            ))}
+          </select>
+          <button type="button" disabled={busy} onClick={() => removeMany([...picked])} className="h-8 rounded-lg px-3 text-xs text-red-300 hover:bg-white/10">
+            เอาออกจากหมวดนี้
+          </button>
+        </BulkActionBar>
+      )}
 
       <NewCategoryModal
         open={newParent !== null}
