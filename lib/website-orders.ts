@@ -314,15 +314,15 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const [{ data: listData }, { data: parents }, { data: children }] = await Promise.all([
     sb
       .from("store_listings")
-      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize")
+      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status")
       .eq("shop_id", shop.id)
       .in("parent_sku_id", parentIds),
     sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
     sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
   ]);
 
-  const listingByParent = new Map<string, ListingRow & { parent_sku_id: string; is_published: boolean }>();
-  for (const l of (listData ?? []) as (ListingRow & { parent_sku_id: string; is_published: boolean })[]) {
+  const listingByParent = new Map<string, ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null }>();
+  for (const l of (listData ?? []) as (ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null })[]) {
     listingByParent.set(l.parent_sku_id, l);
   }
   // ชื่อสินค้าในออเดอร์ต้องตรงกับที่ลูกค้าเห็นบนเว็บ (กฎลบแบรนด์/คอลเลกชัน)
@@ -367,6 +367,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     );
     const price = Math.round(resolved.price * 100) / 100;
     if (price <= 0) return { ok: false, error: `สินค้า ${resolved.name} ยังไม่มีราคา กรุณาติดต่อร้าน`, status: 409 };
+    // 🚫 ตั้ง "สินค้าหมด" ใน ERP แล้ว = รับออเดอร์ไม่ได้ (กันตะกร้าเก่าที่ใส่ไว้ก่อนของหมด)
+    if (listing.web_stock_status === "out") return { ok: false, error: `สินค้า ${resolved.name} หมดแล้ว กรุณาเอาออกจากตะกร้า`, status: 409 };
 
     const picked = pickSku(kids, it.optionId, it.option2Id);
     let variant = customOptionLabel(listing, it.optionId) ?? picked.variantLabel;

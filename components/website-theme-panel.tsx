@@ -2812,7 +2812,7 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
 
 /* ─────────── การ์ดสินค้าจำลอง (แท็บการ์ดสินค้า) — เลียนแบบ storefront ProductCard ให้ใกล้ที่สุด ─────────── */
 const RATIO_CSS: Record<string, string> = { "1:1": "1 / 1", "4:3": "4 / 3", "4:5": "4 / 5", "3:4": "3 / 4", "16:9": "16 / 9" };
-const STOCK_TH: Record<string, { text: string; color: string }> = { in: { text: "พร้อมส่ง", color: "#1F9254" }, low: { text: "เหลือน้อย", color: "#C77A0A" }, preorder: { text: "สั่งจอง", color: "#8A8F97" } };
+const STOCK_TH: Record<string, { text: string; color: string }> = { in: { text: "พร้อมส่ง", color: "#1F9254" }, low: { text: "เหลือน้อย", color: "#C77A0A" }, preorder: { text: "สั่งจอง", color: "#8A8F97" }, out: { text: "สินค้าหมด", color: "#9CA3AF" } };
 /* ─────────── การ์ดสินค้า: ป้ายอัตโนมัติ · รูปบนการ์ด · ชื่อ/ราคา · ดูด่วน ─────────── */
 function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Partial<Theme["card"]>) => void }) {
   const ab = card.autoBadges;
@@ -3266,7 +3266,7 @@ function SampleCard({ item, card, colors, fonts, radius, shape }: { item: Sample
     fontFamily: fonts.body,
   };
   const stock0 = STOCK_TH[item.stock] ?? STOCK_TH.in;
-  const stock = { ...stock0, color: item.stock === "low" ? colors.stockLow : item.stock === "preorder" ? stock0.color : colors.stockIn };
+  const stock = { ...stock0, color: item.stock === "low" ? colors.stockLow : item.stock === "preorder" || item.stock === "out" ? stock0.color : colors.stockIn };
   const onSale = !!item.comparePrice && item.comparePrice > item.price;
   return (
     <div style={wrap} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>

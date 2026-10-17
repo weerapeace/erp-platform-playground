@@ -8,7 +8,7 @@
 import { WheelSelect } from "@/components/wheel-select";
 import { Seg } from "@/components/website-block-editor";
 import {
-  LISTING_PAGINGS, LISTING_PAGE_SIZES, LISTING_SORTS, listingColumnsFrom,
+  LISTING_PAGINGS, LISTING_PAGE_SIZES, LISTING_SORTS, LISTING_SOLD_OUT, listingColumnsFrom,
   type ListingColumns, type ListingConfig, type ListingHeader, type ListingSort,
 } from "@/lib/website-listing";
 
@@ -194,6 +194,27 @@ export function ListingLayoutSettings({
         </div>
         <p className="text-[11px] text-slate-400">
           {value.sorts.length ? "\"ขายดี\" โชว์เมื่อมีข้อมูลยอดขาย" : "ไม่ติ๊กเลย = ซ่อนช่องเรียง ลูกค้าเห็นตามแบบเริ่มต้นอย่างเดียว"} · รูปแทรกโชว์ตอนลูกค้ายังไม่เปลี่ยนการเรียง (และไม่ได้ค้นหา/กรอง)
+        </p>
+      </div>
+
+      {/* 🚫 สินค้าหมด */}
+      <div className={box}>
+        <p className="text-xs font-semibold text-slate-800">🚫 สินค้าหมด</p>
+        <div className="grid gap-1.5 sm:grid-cols-3">
+          {LISTING_SOLD_OUT.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => set({ soldOut: o.value })}
+              className={`text-left px-2.5 py-1.5 rounded-lg border transition ${value.soldOut === o.value ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+            >
+              <span className="block text-xs font-medium">{o.label}</span>
+              <span className="block text-[10px] text-slate-500 leading-snug">{o.hint}</span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-400">
+          ตั้งสินค้าตัวไหนหมด: หน้า "สินค้าบนเว็บ" → ช่อง <b>สถานะสต๊อก</b> = สินค้าหมด (แก้หลายรายการพร้อมกันได้) · บนเว็บขึ้นป้าย "สินค้าหมด" + กดซื้อไม่ได้ทุกจุด + ระบบไม่รับออเดอร์
         </p>
       </div>
     </div>

@@ -13,6 +13,8 @@ export const STOCK_STATUS_OPTIONS = [
   { value: "in", label: "พร้อมส่ง" },
   { value: "low", label: "เหลือน้อย" },
   { value: "preorder", label: "สั่งจอง" },
+  // 🚫 สินค้าหมด: เว็บโชว์ป้าย "สินค้าหมด" + กดซื้อไม่ได้ + ออเดอร์ถูกปฏิเสธที่เซิร์ฟเวอร์ · หน้ารายการ: ไปท้าย/ซ่อน ตามที่ตั้ง (theme.listing.soldOut)
+  { value: "out", label: "สินค้าหมด" },
 ];
 
 export type ListingFieldKind = "choice" | "price" | "categories" | "badge" | "text" | "clear";

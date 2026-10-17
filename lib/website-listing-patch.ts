@@ -14,7 +14,7 @@ import { normalizeHero } from "@/lib/website-hero";
 
 export const LISTING_KEY_RE = /^[\w\-./%()]+$/; // r2 object key ที่ยอมรับ
 export const MAX_SKU_IMAGES = 8;
-export const STOCK_STATUS = new Set(["in", "low", "preorder"]);
+export const STOCK_STATUS = new Set(["in", "low", "preorder", "out"]);
 
 export type ListingPatch = {
   isPublished?: boolean;
