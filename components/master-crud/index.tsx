@@ -2840,7 +2840,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           // 📝 ปุ่ม "＋ แทรก" ข้างหัวข้อ (ทะเบียนฟิลด์ ui_style.insert_details) → แทรกช่องไทย + คู่อังกฤษ (ถ้ามี) ในคราวเดียว
           //   + แท็บขนาด/น้ำหนัก/ใส่อะไรได้ บันทึกกลับช่องของระเบียน (fields) — เฉพาะช่องที่ฟอร์มนี้มีและแก้ได้ (writable)
           //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (PATCH ครั้งเดียวทุกช่อง · audit ของกลางที่ API)
-          const INSERT_WRITABLE = ["size_length_cm", "size_height_cm", "size_thickness_cm", "weight_g", "fits"];
+          const INSERT_WRITABLE = ["size_length_cm", "size_height_cm", "size_thickness_cm", "weight_g", "handle_drop_cm", "strap_drop_cm", "strap_drop_max_cm", "fits"];
           const insertBtn = (f: FieldDef, enKey: string): React.ReactNode => {
             if (!(f.uiStyle as Record<string, unknown> | undefined)?.insert_details) return null;
             if (!canEdit || f.readonly || (drawerMode === "view" && !editingId)) return null;

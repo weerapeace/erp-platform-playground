@@ -12,14 +12,14 @@ describe("detail-snippets", () => {
     expect(slotText(card, 6, "en")).toBe("6 card slots");
     expect(slotText(bill, 2, "en")).toBe("Bill compartment × 2");
     expect(slotText(card, 0, "th")).toBeNull();
-    expect(slotLine([{ item: card, n: 6 }, { item: bill, n: 2 }, { item: noEn, n: 0 }], "th")).toBe("ช่องใส่บัตรเครดิต 6 ช่อง, ช่องใส่ธนบัตร 2 ช่อง");
+    expect(slotLine([{ item: card, n: 6 }, { item: bill, n: 2 }, { item: noEn, n: 0 }], "th")).toBe("ช่องใส่บัตรเครดิต 6 ช่อง และ ช่องใส่ธนบัตร 2 ช่อง");
     // อังกฤษขาดตัวไหน = ทั้งบรรทัดว่าง (ไม่ครึ่ง ๆ กลาง ๆ)
     expect(slotLine([{ item: card, n: 6 }, { item: noEn, n: 1 }], "en")).toBeNull();
   });
 
   it("วัสดุหลายตัว = บรรทัดเดียว", () => {
     const m = [{ id: "1", name: "หนังวัวนิ่มนัปป้า", name_en: "Nappa leather" }, { id: "2", name: "หนังวัวเรียบรูขน", name_en: "Smooth cowhide" }];
-    expect(materialLine(m, "th")).toBe("วัสดุ: หนังวัวนิ่มนัปป้า และหนังวัวเรียบรูขน");
+    expect(materialLine(m, "th")).toBe("วัสดุ: หนังวัวนิ่มนัปป้า และ หนังวัวเรียบรูขน");
     expect(materialLine(m, "en")).toBe("Materials: Nappa leather and Smooth cowhide");
     expect(materialLine([m[0]], "en")).toBe("Material: Nappa leather");
   });
@@ -83,11 +83,14 @@ describe("detail-snippets — ขนาด/น้ำหนัก/ใส่ได
     expect(weightLine(1250, "th")).toBe("น้ำหนัก: 1,250 กรัม");
     expect(weightLine("450", "en")).toBe("Weight: 450 g");
     expect(weightLine(0, "th")).toBeNull();
-    expect(fitLine(["iPad (11 นิ้ว)", "เอกสาร A4"], "th")).toBe("ใส่ได้: iPad (11 นิ้ว), เอกสาร A4");
+    const fits = [{ th: "แท็บเล็ต", en: "Tablet", size: "11 นิ้ว" }, { th: "เอกสาร A4", en: "A4 documents" }];
+    expect(fitLine(fits, "th")).toBe("ใส่ได้: แท็บเล็ต (11 นิ้ว) และ เอกสาร A4");
+    expect(fitLine(fits, "en")).toBe('Fits: Tablet (11") and A4 documents');
+    expect(fitLine([{ th: "ขวดน้ำ" }], "en")).toBeNull();
     expect(fitLine([], "en")).toBeNull();
   });
   it("รวมบรรทัด: เรียง ข้อความ → … → ขนาด → น้ำหนัก → ใส่ได้ · อังกฤษของ 'ใส่ได้' ขาด = นับว่าขาด", () => {
-    const out = composeLines({ phrases: [], materials: [], slots: [], size: { w: 30, h: 20 }, weight: 450, fits: { th: ["เอกสาร A4"], en: null } });
+    const out = composeLines({ phrases: [], materials: [], slots: [], size: { w: 30, h: 20 }, weight: 450, fits: [{ th: "เอกสาร A4" }] });
     expect(out.th).toEqual(["- ขนาด: กว้าง 30 × สูง 20 ซม.", "- น้ำหนัก: 450 กรัม", "- ใส่ได้: เอกสาร A4"]);
     expect(out.en).toEqual(["- Size: W 30 × H 20 cm", "- Weight: 450 g"]);
     expect(out.enMissing).toBe(1);
@@ -104,5 +107,42 @@ describe("ใส่อะไรได้ — ขนาดฝั่งอัง�
     const cat = [{ id, name: "ไอแพด", name_en: "iPad" }];
     expect(fitLabels([{ id, size: "11 นิ้ว" }], cat, "en")).toEqual(['iPad (11")']);
     expect(fitLabels([{ id, size: "11 นิ้ว" }], cat)).toEqual(["ไอแพด (11 นิ้ว)"]);
+  });
+});
+
+describe("รูปแบบบรรทัดกลาง (⚙️) — คำเชื่อม · คำนำหน้า · อังกฤษในวงเล็บ · หูหิ้ว/สาย · เตือนซ้ำ", () => {
+  it("คำเชื่อม: 1 / 2 / 3+ รายการ · ตั้งเองได้", async () => {
+    const { joinList, normalizeInsertTemplates } = await import("@/lib/detail-snippets");
+    expect(joinList(["A"], "th")).toBe("A");
+    expect(joinList(["A", "B"], "th")).toBe("A และ B");
+    expect(joinList(["A", "B", "C"], "th")).toBe("A, B และ C");
+    expect(joinList(["A", "B", "C"], "en")).toBe("A, B and C");
+    const t = normalizeInsertTemplates({ joiner: { last: " กับ " } });
+    expect(joinList(["A", "B"], "th", t)).toBe("A กับ B");
+    expect(t.joiner.sep).toBe(", ");
+  });
+  it("ค่าที่บันทึกมาไม่ครบ/ผิดชนิด = ค่าเริ่มต้น · คำนำหน้าว่างได้", async () => {
+    const { normalizeInsertTemplates, DEFAULT_INSERT_TEMPLATES, materialLine } = await import("@/lib/detail-snippets");
+    expect(normalizeInsertTemplates(null)).toEqual(DEFAULT_INSERT_TEMPLATES);
+    const t = normalizeInsertTemplates({ prefix: { material: { th: "", en: 5 } }, enInBrackets: { material: true, fit: "yes" } });
+    expect(t.prefix.material).toEqual({ th: "", en: "Material:" });
+    expect(t.enInBrackets).toEqual({ phrase: false, material: true, fit: false });
+    expect(materialLine([{ id: "1", name: "ผ้าไนล่อน", name_en: "Nylon" }], "th", t)).toBe("ผ้าไนล่อน (Nylon)");
+  });
+  it("หูหิ้ว / สาย (ช่วง = ปรับได้)", async () => {
+    const { handleLine, strapLine } = await import("@/lib/detail-snippets");
+    expect(handleLine(12, "th")).toBe("ความสูงหูหิ้ว: 12 ซม.");
+    expect(strapLine(100, 120, "th")).toBe("ความยาวสายสะพาย: 100–120 ซม. (ปรับได้)");
+    expect(strapLine(100, 120, "en")).toBe("Strap drop: 100–120 cm (adjustable)");
+    expect(strapLine("", 35, "th")).toBe("ความยาวสายสะพาย: 35 ซม.");
+    expect(strapLine(0, 0, "th")).toBeNull();
+  });
+  it("เตือนซ้ำเมื่อคำอธิบายมีเรื่องนั้นอยู่แล้ว", async () => {
+    const { alreadyMentions } = await import("@/lib/detail-snippets");
+    const d = "- วัสดุ: ผ้าขนเฟอร์\n- ความยาวสายสะพาย 35 cm.";
+    expect(alreadyMentions(d, "strap")).toBe(true);
+    expect(alreadyMentions(d, "material")).toBe(true);
+    expect(alreadyMentions(d, "weight")).toBe(false);
+    expect(alreadyMentions("", "size")).toBe(false);
   });
 });

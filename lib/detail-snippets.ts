@@ -2,11 +2,14 @@
  * 📝 เลือกแทรกรายละเอียดลง Description (ของกลาง · pure ใช้ได้ทั้งหน้าจอและ test)
  *   ทะเบียน product_highlight_items: kind 'phrase' ข้อความสำเร็จรูป | 'slot' ช่อง + ตัวเลข
  *   ทะเบียน product_materials: วัสดุ → บรรทัด "วัสดุ: A และ B" (ชื่อวัสดุบนเว็บลิงก์ไปหน้าวัสดุ — lib/product-materials)
- *   ขนาด/น้ำหนัก (ช่องของสินค้า size_*_cm · weight_g) → "ขนาด: กว้าง 30 × สูง 20 × หนา 10 ซม." · "น้ำหนัก: 450 กรัม"
- *   ใส่อะไรได้ (product_fit_items · fits) → "ใส่ได้: iPad (11 นิ้ว), เอกสาร A4"
+ *   ขนาด/น้ำหนัก/หูหิ้ว/สาย (ช่องของสินค้า) → "ขนาด: กว้าง 30 × สูง 20 × หนา 10 ซม." · "น้ำหนัก: 450 กรัม" · "ความยาวสายสะพาย: 100–120 ซม. (ปรับได้)"
+ *   ใส่อะไรได้ (product_fit_items · fits) → "ใส่ได้: iPad (11 นิ้ว) และ เอกสาร A4"
+ * รูปแบบบรรทัดกลาง (คำนำหน้า · คำเชื่อม "และ" · ชื่ออังกฤษในวงเล็บ) = InsertTemplates ตั้งที่ ⚙️ ในป๊อป
+ *   เก็บ app_settings.detail_insert_templates (ทุกสินค้า ทุกคนใช้ชุดเดียวกัน) · API /api/detail-insert/templates
  * ทุกบรรทัดขึ้นต้น "- " ตามรูปแบบคำอธิบายเดิม · แทรกเป็นข้อความธรรมดา (แก้ต่อได้เหมือนพิมพ์เอง)
  * ป๊อป: components/detail-insert.tsx · DB: supabase/migrations/202610210200_product_detail_snippets.sql
  */
+import { fitSizeEn } from "@/lib/product-fits";
 
 export type Lang = "th" | "en";
 
@@ -30,12 +33,100 @@ export const DEFAULT_SLOT_TEMPLATE_EN = "{name} × {n}";
 const clean = (s: unknown): string => String(s ?? "").replace(/\s+/g, " ").trim();
 const fill = (tpl: string, name: string, n: number) => tpl.replace(/\{name\}/g, name).replace(/\{n\}/g, String(n)).replace(/\s+/g, " ").trim();
 
+/* ─────────── รูปแบบบรรทัดกลาง ─────────── */
+
+export type LineKind = "material" | "slot" | "fit" | "size" | "weight" | "handle" | "strap";
+export type BracketKind = "phrase" | "material" | "fit";
+
+export type InsertTemplates = {
+  /** คำเชื่อมรายการ: 2 รายการ = A{last}B · 3+ = A{sep}B{last}C */
+  joiner: { sep: string; last: string; sep_en: string; last_en: string };
+  /** ชื่ออังกฤษในวงเล็บ (เฉพาะบรรทัดไทย) เช่น "ผ้าไนล่อน (Nylon)" */
+  enInBrackets: Record<BracketKind, boolean>;
+  /** คำนำหน้าบรรทัด (ว่าง = ไม่มี) */
+  prefix: Record<LineKind, { th: string; en: string }>;
+};
+
+export const LINE_KIND_LABEL: Record<LineKind, string> = {
+  material: "วัสดุ",
+  slot: "ช่อง",
+  fit: "ใส่อะไรได้",
+  size: "ขนาด",
+  weight: "น้ำหนัก",
+  handle: "หูหิ้ว",
+  strap: "สายสะพาย",
+};
+
+export const DEFAULT_INSERT_TEMPLATES: InsertTemplates = {
+  joiner: { sep: ", ", last: " และ ", sep_en: ", ", last_en: " and " },
+  enInBrackets: { phrase: false, material: false, fit: false },
+  prefix: {
+    material: { th: "วัสดุ:", en: "Material:" },
+    slot: { th: "", en: "" },
+    fit: { th: "ใส่ได้:", en: "Fits:" },
+    size: { th: "ขนาด:", en: "Size:" },
+    weight: { th: "น้ำหนัก:", en: "Weight:" },
+    handle: { th: "ความสูงหูหิ้ว:", en: "Handle drop:" },
+    strap: { th: "ความยาวสายสะพาย:", en: "Strap drop:" },
+  },
+};
+
+/** ค่าจาก DB (หรือที่ส่งมาบันทึก) → ครบทุกช่องเสมอ · ช่องที่ไม่ส่ง = ค่าเริ่มต้น · คำเชื่อมเก็บช่องว่างหน้า/หลังไว้ */
+export function normalizeInsertTemplates(raw: unknown): InsertTemplates {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const D = DEFAULT_INSERT_TEMPLATES;
+  const str = (v: unknown, d: string, keepSpaces = false) => {
+    if (typeof v !== "string") return d;
+    const s = v.replace(/[\r\n]/g, " ").slice(0, 40);
+    return keepSpaces ? s : s.trim();
+  };
+  const j = (r.joiner ?? {}) as Record<string, unknown>;
+  const b = (r.enInBrackets ?? {}) as Record<string, unknown>;
+  const p = (r.prefix ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  return {
+    joiner: {
+      sep: str(j.sep, D.joiner.sep, true),
+      last: str(j.last, D.joiner.last, true),
+      sep_en: str(j.sep_en, D.joiner.sep_en, true),
+      last_en: str(j.last_en, D.joiner.last_en, true),
+    },
+    enInBrackets: {
+      phrase: typeof b.phrase === "boolean" ? b.phrase : D.enInBrackets.phrase,
+      material: typeof b.material === "boolean" ? b.material : D.enInBrackets.material,
+      fit: typeof b.fit === "boolean" ? b.fit : D.enInBrackets.fit,
+    },
+    prefix: Object.fromEntries(
+      (Object.keys(D.prefix) as LineKind[]).map((k) => [k, { th: str(p[k]?.th, D.prefix[k].th), en: str(p[k]?.en, D.prefix[k].en) }])
+    ) as InsertTemplates["prefix"],
+  };
+}
+
+/** รวมรายการ: 1 = A · 2 = A และ B · 3+ = A, B และ C (คำเชื่อมตั้งได้) */
+export function joinList(items: string[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string {
+  const xs = items.filter(Boolean);
+  const sep = lang === "en" ? tpl.joiner.sep_en : tpl.joiner.sep;
+  const last = lang === "en" ? tpl.joiner.last_en : tpl.joiner.last;
+  if (xs.length <= 1) return xs[0] ?? "";
+  return `${xs.slice(0, -1).join(sep)}${last}${xs[xs.length - 1]}`;
+}
+
+const withLead = (lead: string, body: string) => (lead.trim() ? `${lead.trim()} ${body}` : body);
+const lead = (tpl: InsertTemplates, k: LineKind, lang: Lang) => (lang === "en" ? tpl.prefix[k].en : tpl.prefix[k].th);
+/** ชื่อไทย + (อังกฤษ) เมื่อเปิดวงเล็บ · อังกฤษว่าง/เหมือนไทย = ไทยอย่างเดียว */
+const thWithEn = (th: string, en: string | null | undefined, on: boolean) => {
+  const e = clean(en);
+  return on && e && e !== th ? `${th} (${e})` : th;
+};
+
+/* ─────────── บรรทัดแต่ละแบบ ─────────── */
+
 export const isSlot = (it: Pick<SnippetItem, "kind">): boolean => it.kind === "slot";
 
 /** ข้อความสำเร็จรูป · อังกฤษไม่มี = null (ข้ามบรรทัดนั้นในฝั่งอังกฤษ) */
-export function phraseText(it: SnippetItem, lang: Lang): string | null {
+export function phraseText(it: SnippetItem, lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
   const s = clean(lang === "en" ? it.name_en : it.name);
-  return s || null;
+  if (!s) return null;
+  return lang === "th" ? thWithEn(s, it.name_en, tpl.enInBrackets.phrase) : s;
 }
 
 /** ช่อง + ตัวเลข → "ช่องใส่บัตรเครดิต 6 ช่อง" / "6 card slots" · อังกฤษไม่มีชื่อ/รูปแบบ = null */
@@ -50,34 +141,37 @@ export function slotText(it: SnippetItem, n: number, lang: Lang): string | null 
   return fill(tpl, name, n);
 }
 
-/** หลายช่องรวมบรรทัดเดียว คั่นด้วยจุลภาค (ตามแบบคำอธิบายเดิม "ช่องใส่บัตรเครดิต 6 ช่อง, ช่องใส่ธนบัตร 2 ช่อง") · อังกฤษขาดตัวไหน = null ทั้งบรรทัด */
-export function slotLine(picks: { item: SnippetItem; n: number }[], lang: Lang): string | null {
+/** หลายช่องรวมบรรทัดเดียว "ช่องหลัก 2 ช่อง, ช่องซิป 2 ช่อง และ ช่องใส่บัตร 1 ช่อง" · อังกฤษขาดตัวไหน = null ทั้งบรรทัด */
+export function slotLine(picks: { item: SnippetItem; n: number }[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
   const used = picks.filter((p) => p.n > 0);
   if (!used.length) return null;
   const parts = used.map((p) => slotText(p.item, p.n, lang));
   if (parts.some((x) => !x)) return null;
-  return parts.join(", ");
+  return withLead(lead(tpl, "slot", lang), joinList(parts as string[], lang, tpl));
 }
 
 /** วัสดุหลายตัวรวมบรรทัดเดียว "วัสดุ: A และ B" / "Material: A and B" · อังกฤษขาดชื่อ = null */
-export function materialLine(mats: MaterialPick[], lang: Lang): string | null {
+export function materialLine(mats: MaterialPick[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
   if (!mats.length) return null;
   const names = mats.map((m) => clean(lang === "en" ? m.name_en : m.name));
   if (names.some((x) => !x)) return null;
-  if (lang === "en") return `${mats.length > 1 ? "Materials" : "Material"}: ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]}`;
-  // ไทยเขียนติด "และหนังวัว…" ตามคำอธิบายเดิม
-  return `วัสดุ: ${names.length > 1 ? `${names.slice(0, -1).join(", ")} และ${names[names.length - 1]}` : names[0]}`;
+  const shown = lang === "th" ? mats.map((m, i) => thWithEn(names[i], m.name_en, tpl.enInBrackets.material)) : names;
+  // คำนำหน้าค่าเริ่มต้น + หลายตัว = พหูพจน์ (Materials:)
+  const pre = lead(tpl, "material", lang);
+  const pre2 = lang === "en" && pre === "Material:" && mats.length > 1 ? "Materials:" : pre;
+  return withLead(pre2, joinList(shown, lang, tpl));
 }
 
 const pos = (v: unknown): number => {
   const n = Number(v);
   return isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
 };
+const cmU = (lang: Lang) => (lang === "en" ? "cm" : "ซม.");
 
 export type SizeInput = { w?: unknown; h?: unknown; d?: unknown };
 
 /** ขนาด กว้าง × สูง × หนา (ช่องที่ว่าง/0 ข้าม) · ไม่มีเลย = null */
-export function sizeLine(s: SizeInput, lang: Lang): string | null {
+export function sizeLine(s: SizeInput, lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
   const en = lang === "en";
   const parts: [string, number][] = [
     [en ? "W" : "กว้าง", pos(s.w)],
@@ -86,24 +180,68 @@ export function sizeLine(s: SizeInput, lang: Lang): string | null {
   ];
   const used = parts.filter(([, v]) => v > 0);
   if (!used.length) return null;
-  const body = used.map(([l, v]) => `${l} ${v}`).join(" × ");
-  return en ? `Size: ${body} cm` : `ขนาด: ${body} ซม.`;
+  return withLead(lead(tpl, "size", lang), `${used.map(([l, v]) => `${l} ${v}`).join(" × ")} ${cmU(lang)}`);
 }
 
 /** น้ำหนัก (กรัม) · 0/ว่าง = null */
-export function weightLine(g: unknown, lang: Lang): string | null {
+export function weightLine(g: unknown, lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
   const n = pos(g);
   if (!n) return null;
-  const s = n.toLocaleString("en-US");
-  return lang === "en" ? `Weight: ${s} g` : `น้ำหนัก: ${s} กรัม`;
+  return withLead(lead(tpl, "weight", lang), `${n.toLocaleString("en-US")} ${lang === "en" ? "g" : "กรัม"}`);
 }
 
-/** ใส่อะไรได้ → "ใส่ได้: A, B" / "Fits: A, B" · ไม่มี = null */
-export function fitLine(labels: string[], lang: Lang): string | null {
-  const xs = labels.map(clean).filter(Boolean);
-  if (!xs.length) return null;
-  return `${lang === "en" ? "Fits" : "ใส่ได้"}: ${xs.join(", ")}`;
+/** ความสูงหูหิ้ว (ซม.) · 0/ว่าง = null */
+export function handleLine(cm: unknown, lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
+  const n = pos(cm);
+  return n ? withLead(lead(tpl, "handle", lang), `${n} ${cmU(lang)}`) : null;
 }
+
+/** ความยาวสายสะพาย — มีทั้งสั้น/ยาว (ยาวกว่า) = ช่วง "100–120 ซม. (ปรับได้)" · มีค่าเดียว = ค่านั้น */
+export function strapLine(min: unknown, max: unknown, lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
+  const a = pos(min);
+  const b = pos(max);
+  const body = a && b && b > a ? `${a}–${b} ${cmU(lang)} ${lang === "en" ? "(adjustable)" : "(ปรับได้)"}` : a || b ? `${a || b} ${cmU(lang)}` : "";
+  return body ? withLead(lead(tpl, "strap", lang), body) : null;
+}
+
+export type FitEntry = { th: string; en?: string | null; size?: string | null };
+
+/** ใส่อะไรได้ → "ใส่ได้: iPad (11 นิ้ว) และ เอกสาร A4" · อังกฤษขาดชื่อตัวไหน = null ทั้งบรรทัด · ไม่มี = null */
+export function fitLine(entries: FitEntry[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
+  const xs = entries.filter((e) => clean(e.th));
+  if (!xs.length) return null;
+  if (lang === "en" && xs.some((e) => !clean(e.en))) return null;
+  const names = xs.map((e) => {
+    const size = clean(e.size);
+    if (lang === "en") return size ? `${clean(e.en)} (${fitSizeEn(size)})` : clean(e.en);
+    const n = thWithEn(clean(e.th), e.en, tpl.enInBrackets.fit);
+    return size ? `${n} (${size})` : n;
+  });
+  return withLead(lead(tpl, "fit", lang), joinList(names, lang, tpl));
+}
+
+/* ─────────── กันใส่ซ้ำ ─────────── */
+
+const DUP_WORDS: Record<LineKind, string[]> = {
+  material: ["วัสดุ"],
+  slot: [],
+  fit: ["ใส่ได้"],
+  size: ["ขนาด"],
+  weight: ["น้ำหนัก"],
+  handle: ["หูหิ้ว"],
+  strap: ["สายสะพาย"],
+};
+
+/** คำอธิบายมีเรื่องนี้อยู่แล้วไหม (เช่น มีบรรทัด "ความยาวสายสะพาย 35 cm." อยู่แล้ว) → เตือน "อาจซ้ำ" */
+export function alreadyMentions(text: string | null | undefined, kind: LineKind, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): boolean {
+  const t = String(text ?? "");
+  if (!t.trim()) return false;
+  const pre = tpl.prefix[kind].th.replace(/[:：]\s*$/, "").trim();
+  const words = [...DUP_WORDS[kind], ...(pre ? [pre] : [])];
+  return words.some((w) => w && t.includes(w));
+}
+
+/* ─────────── ประกอบ / แทรก ─────────── */
 
 /** เติม "- " ข้างหน้า (ถ้ายังไม่มี) */
 export const withPrefix = (line: string): string => (/^\s*[-•]/.test(line) ? line.trim() : `${LINE_PREFIX}${line.trim()}`);
@@ -131,16 +269,20 @@ export function enInsertAt(thText: string | null | undefined, enText: string | n
   return en.length === th.length ? Math.min(at, en.length) : en.length;
 }
 
-/** เลือกอะไรไว้บ้าง → บรรทัดที่จะแทรก (ไทย + อังกฤษ) เรียง: ข้อความ → วัสดุ → ช่อง → ขนาด → น้ำหนัก → ใส่ได้ */
-export function composeLines(sel: {
-  phrases: SnippetItem[];
-  materials: MaterialPick[];
-  slots: { item: SnippetItem; n: number }[];
-  size?: SizeInput | null;
-  weight?: unknown;
-  /** ชื่อของที่ใส่ได้ ไทย + อังกฤษ (อังกฤษขาดตัวไหน = null ทั้งบรรทัด) */
-  fits?: { th: string[]; en: string[] | null } | null;
-}): { th: string[]; en: string[]; enMissing: number } {
+/** เลือกอะไรไว้บ้าง → บรรทัดที่จะแทรก (ไทย + อังกฤษ) เรียง: ข้อความ → วัสดุ → ช่อง → ขนาด → น้ำหนัก → หูหิ้ว → สาย → ใส่ได้ */
+export function composeLines(
+  sel: {
+    phrases: SnippetItem[];
+    materials: MaterialPick[];
+    slots: { item: SnippetItem; n: number }[];
+    size?: SizeInput | null;
+    weight?: unknown;
+    handle?: unknown;
+    strap?: { min?: unknown; max?: unknown } | null;
+    fits?: FitEntry[] | null;
+  },
+  tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES
+): { th: string[]; en: string[]; enMissing: number } {
   const th: string[] = [];
   const en: string[] = [];
   let enMissing = 0;
@@ -150,11 +292,13 @@ export function composeLines(sel: {
     if (e) en.push(withPrefix(e));
     else enMissing += 1;
   };
-  for (const p of sel.phrases) push(phraseText(p, "th"), phraseText(p, "en"));
-  push(materialLine(sel.materials, "th"), materialLine(sel.materials, "en"));
-  push(slotLine(sel.slots, "th"), slotLine(sel.slots, "en"));
-  if (sel.size) push(sizeLine(sel.size, "th"), sizeLine(sel.size, "en"));
-  if (sel.weight != null) push(weightLine(sel.weight, "th"), weightLine(sel.weight, "en"));
-  if (sel.fits) push(fitLine(sel.fits.th, "th"), sel.fits.en ? fitLine(sel.fits.en, "en") : null);
+  for (const p of sel.phrases) push(phraseText(p, "th", tpl), phraseText(p, "en", tpl));
+  push(materialLine(sel.materials, "th", tpl), materialLine(sel.materials, "en", tpl));
+  push(slotLine(sel.slots, "th", tpl), slotLine(sel.slots, "en", tpl));
+  if (sel.size) push(sizeLine(sel.size, "th", tpl), sizeLine(sel.size, "en", tpl));
+  if (sel.weight != null) push(weightLine(sel.weight, "th", tpl), weightLine(sel.weight, "en", tpl));
+  if (sel.handle != null) push(handleLine(sel.handle, "th", tpl), handleLine(sel.handle, "en", tpl));
+  if (sel.strap) push(strapLine(sel.strap.min, sel.strap.max, "th", tpl), strapLine(sel.strap.min, sel.strap.max, "en", tpl));
+  if (sel.fits?.length) push(fitLine(sel.fits, "th", tpl), fitLine(sel.fits, "en", tpl));
   return { th, en, enMissing };
 }
