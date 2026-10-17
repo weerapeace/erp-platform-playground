@@ -111,7 +111,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       fieldGroups: PARENT_FIELD_GROUP_LABEL,
       /** ฟิลด์รูปของ Parent SKU (แบนเนอร์เลือก "ฟิลด์รูปของ Parent SKU") */
       imageFields: imageFields.map((f) => ({ key: f.key, label: f.label })),
-      categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null })),
+      // label_en = ชื่ออังกฤษของหมวด (ตัวจัดเมนู: ลิงก์หมวดที่ไม่ได้ตั้งชื่อเองบอกว่าจะโชว์อะไรบน /en)
+      categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null, label_en: String((c as { label_en?: unknown }).label_en ?? "") })),
       products: webProducts,
       imageRatios: IMAGE_RATIOS,
       cardHovers: CARD_HOVERS,

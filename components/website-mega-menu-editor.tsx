@@ -23,6 +23,7 @@ import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { CategoryCheckList } from "@/components/category-check-list";
+import { translationPatch } from "@/lib/content-i18n";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import {
   MEGA_AUTOS,
@@ -42,6 +43,7 @@ import {
   MEGA_RATIOS,
   MEGA_TEMPLATES,
   megaCategoryHref,
+  megaCategoryKeyOf,
   megaHasContent,
   megaPreset,
   newMegaBlock,
@@ -61,7 +63,7 @@ import {
 
 export interface MegaEditorCtx {
   link: SchemaFormContext;
-  categories: { key: string; label: string; parent?: string | null }[];
+  categories: { key: string; label: string; parent?: string | null; label_en?: string }[];
   products: { code: string; name: string }[];
   shopId: string;
   /** หน้าที่สร้างเอง (ตรวจลิงก์เสีย) */
@@ -229,7 +231,8 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
     const out = [...keep];
     for (const k of order) {
       if (!want.has(k) || out.some((l) => l.href === megaCategoryHref(k))) continue;
-      const link = newMegaLink(ctx.categories.find((c) => c.key === k)?.label ?? k, megaCategoryHref(k));
+      // ชื่อว่าง = ใช้ชื่อหมวดปัจจุบันเสมอ (เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · 2 ภาษา)
+      const link = newMegaLink("", megaCategoryHref(k));
       const prev = order.slice(0, order.indexOf(k)).reverse().find((p) => out.some((l) => l.href === megaCategoryHref(p)));
       const at = prev ? out.findIndex((l) => l.href === megaCategoryHref(prev)) + 1 : out.length;
       out.splice(at, 0, link);
@@ -238,6 +241,27 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
     setCatPick(null);
   };
   const catPickTotal = catPick ? links.filter((l) => !catByHref.has(l.href)).length + catPick.length : 0;
+
+  // 🔗 ลิงก์หมวด: ชื่อว่าง = ตามชื่อหมวด · ชื่อที่ตรงกับชื่อหมวด (ไทยหรืออังกฤษ) = คัดลอกมาจากหมวด → เปลี่ยนเป็น "ตามหมวด" ได้ทีเดียว
+  const catOf = (href: string) => {
+    const k = megaCategoryKeyOf(href);
+    return k ? ctx.categories.find((c) => c.key === k) ?? { key: k, label: k, label_en: "" } : null;
+  };
+  const same = (a: string, b?: string) => !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+  const copiedNames = links.filter((l) => {
+    const c = catOf(l.href);
+    return !!c && !!l.label.trim() && (same(l.label, c.label) || same(l.label, c.label_en));
+  });
+  const followCategory = (ids: Set<string>) =>
+    onChange(
+      links.map((l) => {
+        if (!ids.has(l.id)) return l;
+        const x: Record<string, unknown> = { ...(l as unknown as Record<string, unknown>), label: "", label_en: "" };
+        const meta = { ...((x._i18n as Record<string, unknown> | undefined) ?? {}) };
+        delete meta.label;
+        return { ...x, _i18n: meta } as unknown as MegaLink;
+      })
+    );
   return (
     <div className="space-y-1">
       {links.map((l, i) => {
@@ -247,14 +271,34 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
           <div key={l.id} {...drag.rowProps(i)} className={`rounded-md border ${more ? "border-blue-300" : "border-slate-200"} bg-white p-1.5 ${drag.rowCls(i)}`}>
             <div className="flex items-center gap-1">
               <DragHandle {...drag.handleProps(i)} />
-              <input
-                className={`${mini} flex-1 min-w-0 ${l.bold ? "font-semibold" : ""}`}
-                style={l.textColor ? { color: l.textColor } : undefined}
-                value={l.label}
-                maxLength={60}
-                placeholder="ชื่อลิงก์"
-                onChange={(e) => set(l.id, { label: e.target.value })}
-              />
+              {(() => {
+                const c = catOf(l.href);
+                const auto = !!c && !l.label.trim();
+                return (
+                  <>
+                    <input
+                      className={`${mini} flex-1 min-w-0 ${l.bold ? "font-semibold" : ""} ${auto ? "placeholder:text-slate-700" : ""}`}
+                      style={l.textColor ? { color: l.textColor } : undefined}
+                      value={l.label}
+                      maxLength={60}
+                      placeholder={c ? `${c.label}` : "ชื่อลิงก์"}
+                      title={auto ? "ชื่อตามหมวด — เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · พิมพ์ทับ = ตั้งชื่อเอง" : undefined}
+                      onChange={(e) => set(l.id, { label: e.target.value })}
+                    />
+                    {auto ? (
+                      <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700" title="ชื่อตามหมวด (ไทย/อังกฤษ) — เปลี่ยนชื่อหมวดในแท็บ 📂 หมวดหมู่ แล้วเมนูเปลี่ยนตามเอง">
+                        🔗 ตามหมวด
+                      </span>
+                    ) : (
+                      c && (
+                        <button type="button" onClick={() => followCategory(new Set([l.id]))} className="shrink-0 rounded px-1 text-[11px] text-slate-400 hover:text-emerald-700" title={`กลับไปใช้ชื่อหมวด (${c.label})`}>
+                          ↺
+                        </button>
+                      )
+                    )}
+                  </>
+                );
+              })()}
               <IssueBadge href={l.href} />
               <div className="w-36 shrink-0">
                 <LinkField value={l.href} onChange={(href) => set(l.id, { href })} ctx={ctx.link} />
@@ -314,6 +358,23 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                     </div>
                   </div>
                 </div>
+                {/* 🌐 ชื่อภาษาอังกฤษของลิงก์ (หน้า /en) — ว่าง = ลิงก์หมวดใช้ชื่ออังกฤษของหมวด · ลิงก์อื่นใช้ชื่อไทย */}
+                {(() => {
+                  const x = l as MegaLink & { label_en?: string };
+                  const c = catOf(l.href);
+                  return (
+                    <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                      <span className="shrink-0">🇬🇧 ชื่ออังกฤษ</span>
+                      <input
+                        className={`${mini} flex-1 min-w-0`}
+                        value={x.label_en ?? ""}
+                        maxLength={90}
+                        placeholder={!l.label.trim() && c ? `${c.label_en || c.label} (ตามหมวด)` : "ว่าง = ใช้ชื่อไทย"}
+                        onChange={(e) => onChange(links.map((y) => (y.id === l.id ? ({ ...y, ...translationPatch(y as unknown as Record<string, unknown>, "label", y.label, e.target.value, false) } as MegaLink) : y)))}
+                      />
+                    </label>
+                  );
+                })()}
                 <ShowWindowFields from={l.showFrom} until={l.showUntil} onChange={(p) => set(l.id, p)} />
               </div>
             )}
@@ -324,6 +385,11 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
         <button type="button" disabled={links.length >= max} onClick={() => onChange([...links, newMegaLink()])} className="text-[11px] text-blue-600 hover:underline disabled:opacity-40">
           ＋ เพิ่มลิงก์
         </button>
+        {copiedNames.length > 0 && (
+          <button type="button" onClick={() => followCategory(new Set(copiedNames.map((l) => l.id)))} className="text-[11px] text-emerald-700 hover:underline" title="ลิงก์หมวดที่ชื่อเหมือนชื่อหมวด (คัดลอกมา) → ให้ใช้ชื่อหมวดปัจจุบัน เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · ชื่อที่ตั้งเองอย่างอื่นไม่แตะ">
+            🔗 ให้ใช้ชื่อหมวด ({copiedNames.length})
+          </button>
+        )}
         {ctx.categories.length > 0 && (
           <button type="button" onClick={() => (catPick ? setCatPick(null) : openCatPick())} className={`text-[11px] hover:underline ${catPick ? "text-slate-500" : "text-blue-600"}`} title="ติ๊กเลือกหมวดของร้าน (หลายหมวด · มีหมวดย่อย) ที่จะเป็นลิงก์ในรายการนี้">
             {catPick ? "ปิดตัวเลือกหมวด" : "☑ เลือกหมวดของร้าน (ติ๊กได้หลายหมวด)"}

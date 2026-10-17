@@ -316,13 +316,35 @@ export function cloneMegaBlock(b: MegaBlock): MegaBlock {
 /** ลิงก์หมวด (ตรงกับเว็บร้าน /c/<key>) */
 export const megaCategoryHref = (key: string) => (key ? `/c/${encodeURIComponent(key)}` : "/shop");
 
+/** รหัสหมวดจากลิงก์หมวด (/c/<รหัส> หรือ /shop?cat=<รหัส>) — ไม่ใช่ลิงก์หมวด = null */
+export function megaCategoryKeyOf(href: string): string | null {
+  const m = /^\/c\/([^/?#]+)\/?(?:[?#].*)?$/.exec(href) ?? /^\/shop\?(?:.*&)?cat=([^&#]+)/.exec(href);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+/**
+ * 🔗 ชื่อที่โชว์ของลิงก์ — ลิงก์หมวดที่ "ไม่ได้ตั้งชื่อเอง" (ชื่อว่าง) = ชื่อหมวดปัจจุบัน
+ * เปลี่ยนชื่อหมวดในแท็บ 📂 หมวดหมู่ แล้วเมนูเปลี่ยนตามเอง · หน้า /en ได้ชื่ออังกฤษของหมวด (labels มาตามภาษาของหน้า)
+ * ตั้งชื่อเอง = ใช้ชื่อนั้น (อังกฤษตั้งแยกได้ที่ label_en) · ไม่รู้ชื่อหมวด = รหัสหมวด
+ */
+export function megaLinkLabel(l: Pick<MegaLink, "label" | "href">, labels?: Record<string, string> | null): string {
+  if (l.label.trim()) return l.label;
+  const k = megaCategoryKeyOf(l.href);
+  return k ? labels?.[k] || k : l.label;
+}
+
 /** แผงตั้งต้นจากแม่แบบ — เติมหมวดของร้านให้เลย (แก้ต่อได้ทุกอย่าง) */
 export function megaPreset(template: MegaTemplate, ctx: { categories: { key: string; label: string; imageKey?: string | null }[] }): MegaPanel {
   const cats = ctx.categories.slice(0, 8);
   const base: MegaPanel = { template, layout: template === "C" ? "tabs" : "columns", blocks: [], tabs: [], cardsPerRow: 4, viewAllLabel: "", width: "full", bg: "", divider: false, promo: "", promoHref: "", mobileHideMedia: false };
   if (template === "A") {
     const list = newMegaBlock("links", "");
-    list.links = [newMegaLink("ดูทั้งหมด", "/shop"), newMegaLink("มาใหม่", "/shop?sort=new"), ...cats.map((c) => newMegaLink(c.label, megaCategoryHref(c.key)))];
+    list.links = [newMegaLink("ดูทั้งหมด", "/shop"), newMegaLink("มาใหม่", "/shop?sort=new"), ...cats.map((c) => newMegaLink("", megaCategoryHref(c.key)))];
     const prods = newMegaBlock("products", "");
     prods.span = 2;
     prods.count = 6;
@@ -335,7 +357,7 @@ export function megaPreset(template: MegaTemplate, ctx: { categories: { key: str
   if (template === "B") {
     const byType = newMegaBlock("links", "เลือกช้อปตามประเภท");
     byType.style = "icon";
-    byType.links = cats.slice(0, 6).map((c, i) => ({ ...newMegaLink(c.label, megaCategoryHref(c.key)), icon: ["handbag", "backpack", "briefcase", "luggage", "clutch", "wallet"][i % 6] }));
+    byType.links = cats.slice(0, 6).map((c, i) => ({ ...newMegaLink("", megaCategoryHref(c.key)), icon: ["handbag", "backpack", "briefcase", "luggage", "clutch", "wallet"][i % 6] }));
     const byStyle = newMegaBlock("groups", "เลือกช้อปตามสไตล์");
     byStyle.groups = [
       { ...newMegaGroup("สำหรับผู้หญิง"), links: [newMegaLink("ใบเล็ก", "/shop"), newMegaLink("ถือ/สะพาย", "/shop")] },
@@ -378,11 +400,13 @@ const arr = (v: unknown, max: number) => (Array.isArray(v) ? v.filter((x) => x &
 
 function cleanLink(r: Record<string, unknown>, i: number): MegaLink | null {
   const label = str(r.label, 60);
-  if (!label) return null;
+  const href = cleanHref(r.href);
+  // ชื่อว่าง = ทิ้ง · ยกเว้นลิงก์หมวด (ชื่อว่าง = ใช้ชื่อหมวดปัจจุบัน — megaLinkLabel)
+  if (!label && !megaCategoryKeyOf(href)) return null;
   return {
     id: id(r.id, "l", i),
     label,
-    href: cleanHref(r.href),
+    href,
     desc: str(r.desc, 120),
     icon: typeof r.icon === "string" && ICON_KEYS.has(r.icon) ? r.icon : "",
     iconKey: key(r.iconKey),
@@ -562,12 +586,14 @@ export function pickMegaProducts<T extends MegaProductLike>(b: Pick<MegaBlock, "
 /** ข้อมูลร้านสำหรับรายการอัตโนมัติ (เว็บร้าน: layout.tsx · ERP: พรีวิวจำนวน) */
 export interface MegaAutoData {
   categories: { key: string; label: string; imageKey?: string | null; count?: number }[];
+  /** ชื่อทุกหมวด (รวมหมวดย่อย) รหัส → ชื่อ ตามภาษาของหน้า — ลิงก์หมวดที่ไม่ได้ตั้งชื่อเองใช้ชื่อนี้ (megaLinkLabel) */
+  labels?: Record<string, string>;
   collections: { slug: string; label: string; imageKey?: string | null; count?: number }[];
   tones: { key: string; name: string; hex: string }[];
 }
 /** รายการลิงก์ของกล่อง = ที่ใส่เอง (ตามเวลาแสดง) + อัตโนมัติต่อท้าย · count = จำนวนสินค้า (ถ้ารู้) */
 export function megaBlockLinks(b: Pick<MegaBlock, "links" | "auto" | "autoMax">, data: MegaAutoData | null, now = Date.now()): (MegaLink & { count?: number })[] {
-  const manual = b.links.filter((l) => inShowWindow(l.showFrom, l.showUntil, now));
+  const manual = b.links.filter((l) => inShowWindow(l.showFrom, l.showUntil, now)).map((l) => ({ ...l, label: megaLinkLabel(l, data?.labels) }));
   if (!b.auto || !data) return manual;
   const mk = (idv: string, label: string, href: string, extra: Partial<MegaLink> & { count?: number }) => ({ ...newMegaLinkFixed(idv, label, href), ...extra });
   const auto =
