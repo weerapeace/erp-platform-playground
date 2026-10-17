@@ -12,6 +12,7 @@
  * กฎคิดบรรทัด: lib/detail-snippets.ts · วัสดุ: lib/product-materials.ts · ใส่อะไรได้: lib/product-fits.ts
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
@@ -41,6 +42,9 @@ import { hasMaterialPage, type MaterialRow } from "@/lib/product-materials";
 import { fitSizeOptions, parseFits, type FitItem, type FitPick } from "@/lib/product-fits";
 import { translateContent } from "@/lib/content-translate";
 
+// กด "🔗 มีหน้า" ที่วัสดุ = เปิดระเบียนวัสดุ (drawer ตัวจริงของหน้า master · แก้คำอธิบาย/วิธีดูแล/รูปได้) — ต้อง dynamic กัน import วนกับ master-crud
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+
 type Tab = "phrase" | "material" | "slot" | "size" | "fit";
 type CatalogKind = "phrase" | "slot" | "material" | "fit";
 type FitRow = FitItem & { kind?: string | null; image_key?: string | null };
@@ -55,13 +59,13 @@ const imgUrl = (key: string, w = 240) => `/api/r2-image?key=${encodeURIComponent
 
 /** ช่องตัวเลขของสินค้า (คอลัมน์ size_length_cm = กว้าง ตามป้ายทุกที่) */
 const NUM_FIELDS = [
-  { k: "w", field: "size_length_cm", label: "กว้าง", unit: "ซม." },
-  { k: "h", field: "size_height_cm", label: "สูง", unit: "ซม." },
-  { k: "d", field: "size_thickness_cm", label: "หนา", unit: "ซม." },
-  { k: "g", field: "weight_g", label: "น้ำหนัก", unit: "กรัม" },
-  { k: "hd", field: "handle_drop_cm", label: "หูหิ้ว", unit: "ซม." },
-  { k: "s1", field: "strap_drop_cm", label: "สายสะพาย", unit: "ซม." },
-  { k: "s2", field: "strap_drop_max_cm", label: "สายยาวสุด", unit: "ซม." },
+  { k: "w", field: "size_length_cm", label: "กว้าง", en: "Width", unit: "ซม." },
+  { k: "h", field: "size_height_cm", label: "สูง", en: "Height", unit: "ซม." },
+  { k: "d", field: "size_thickness_cm", label: "หนา", en: "Depth", unit: "ซม." },
+  { k: "g", field: "weight_g", label: "น้ำหนัก", en: "Weight", unit: "กรัม" },
+  { k: "hd", field: "handle_drop_cm", label: "หูหิ้ว", en: "Handle drop", unit: "ซม." },
+  { k: "s1", field: "strap_drop_cm", label: "สายสะพาย", en: "Strap drop", unit: "ซม." },
+  { k: "s2", field: "strap_drop_max_cm", label: "สายยาวสุด", en: "Strap max", unit: "ซม." },
 ] as const;
 type NumK = (typeof NUM_FIELDS)[number]["k"];
 type SizeLine = "size" | "weight" | "handle" | "strap";
@@ -207,10 +211,11 @@ function DetailInsertModal({
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<{ kind: CatalogKind; item: Record<string, unknown> | null } | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
+  const [matOpen, setMatOpen] = useState<string | null>(null);
   // ชื่ออังกฤษในวงเล็บ — เปิด/ปิดเฉพาะรอบนี้ (ไม่แตะ = ตามรูปแบบกลาง)
   const [enBr, setEnBr] = useState<Partial<Record<BracketKind, boolean>>>({});
   const tpl: InsertTemplates = useMemo(
-    () => ({ ...baseTpl, enInBrackets: { phrase: enBr.phrase ?? baseTpl.enInBrackets.phrase, material: enBr.material ?? baseTpl.enInBrackets.material, fit: enBr.fit ?? baseTpl.enInBrackets.fit } }),
+    () => ({ ...baseTpl, enInBrackets: { phrase: enBr.phrase ?? baseTpl.enInBrackets.phrase, material: enBr.material ?? baseTpl.enInBrackets.material, slot: enBr.slot ?? baseTpl.enInBrackets.slot, fit: enBr.fit ?? baseTpl.enInBrackets.fit } }),
     [baseTpl, enBr]
   );
   // แก้บรรทัดใหม่เองก่อนแทรก (จับคู่ด้วยข้อความเดิม — เลือกรายการเปลี่ยน = บรรทัดใหม่ ไม่ใช้ที่แก้ไว้)
@@ -331,7 +336,7 @@ function DetailInsertModal({
 
   const loading = (snipLoading && !snipRows) || (matLoading && !matRows) || (fitLoading && !fitRows);
   const tabInfo = TABS.find((t) => t.key === tab)!;
-  const bracketKind: BracketKind | null = tab === "phrase" ? "phrase" : tab === "material" ? "material" : tab === "fit" ? "fit" : null;
+  const bracketKind: BracketKind | null = tab === "phrase" ? "phrase" : tab === "material" ? "material" : tab === "slot" ? "slot" : tab === "fit" ? "fit" : null;
   const dupKind: LineKind | null = tab === "material" ? "material" : tab === "fit" ? "fit" : null;
 
   const editBtn = (kind: CatalogKind, item: Record<string, unknown>, cls = "") => (
@@ -460,11 +465,11 @@ function DetailInsertModal({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="min-w-0 flex-1 text-[11.5px] text-slate-500">{tabInfo.hint}</p>
-            {tabDirty(tab) && (
-              <button type="button" onClick={() => clearTab(tab)} className="text-[11.5px] text-slate-500 underline-offset-2 hover:text-rose-600 hover:underline" data-insert-clear>
-                {tab === "size" || tab === "fit" ? "ล้าง (คืนค่าเดิม)" : "ล้าง"}
-              </button>
-            )}
+            <button type="button" onClick={() => clearTab(tab)} disabled={!tabDirty(tab)} data-insert-clear
+              title={tab === "size" || tab === "fit" ? "คืนตัวเลข/ของที่ใส่ได้ เป็นค่าเดิมของสินค้า และไม่ใส่บรรทัดของหน้านี้" : "เอาที่เลือกในหน้านี้ออกทั้งหมด (หน้าอื่นไม่เปลี่ยน)"}
+              className="h-7 shrink-0 rounded-md border border-slate-200 px-2 text-[11.5px] text-slate-600 hover:border-rose-300 hover:text-rose-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-600">
+              🧹 {tab === "size" || tab === "fit" ? "ล้างหน้านี้ (คืนค่าเดิม)" : "ล้างหน้านี้"}
+            </button>
             {tab !== "size" && tab !== "slot" && (
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา…"
                 className="h-8 w-28 rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
@@ -519,9 +524,11 @@ function DetailInsertModal({
                           {m.name_en && <span className="truncate text-[11px] text-slate-400">{m.name_en}</span>}
                         </label>
                         {page ? (
-                          <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10.5px] text-emerald-700" title="ชื่อวัสดุนี้บนเว็บกดไปหน้าวัสดุได้">🔗 มีหน้า</span>
+                          <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title="เปิดหน้าวัสดุ (แก้คำอธิบาย/วิธีดูแล/รูปได้) — ชื่อวัสดุนี้บนเว็บกดมาหน้านี้"
+                            className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10.5px] text-emerald-700 hover:bg-emerald-100 hover:underline">🔗 มีหน้า</button>
                         ) : (
-                          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] text-slate-500" title="ยังไม่มีคำอธิบายวัสดุ — กด ✏️ แล้วไปเขียนหน้าวัสดุ">ยังไม่มีหน้า</span>
+                          <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title="ยังไม่มีคำอธิบายวัสดุ — กดเพื่อเขียน แล้วชื่อวัสดุบนเว็บจะกดดูได้"
+                            className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] text-slate-500 hover:bg-slate-200 hover:text-slate-700">✍️ เขียนหน้า</button>
                         )}
                         {editBtn("material", m as unknown as Record<string, unknown>)}
                       </div>
@@ -540,7 +547,14 @@ function DetailInsertModal({
                       <div key={it.id} className={rowCls(n > 0)}>
                         <span className={`min-w-0 flex-1 text-sm ${n > 0 ? "font-medium text-slate-800" : "text-slate-600"}`}>
                           {it.name}
-                          {n > 0 && <span className="ml-1.5 text-[11px] font-normal text-slate-400">→ {slotText(it, n, "th")}</span>}
+                          {it.name_en ? <span className="ml-1.5 text-[11px] font-normal text-slate-400">{it.name_en}</span> : <span className="ml-1.5 text-[11px] font-normal text-slate-300">ไม่มีอังกฤษ</span>}
+                          {n > 0 && (
+                            <span className="block text-[11px] font-normal text-slate-400">
+                              → {slotText(it, n, "th", tpl)}
+                              {" · "}
+                              {slotText(it, n, "en", tpl) ?? "— (ยังไม่มีอังกฤษ)"}
+                            </span>
+                          )}
                         </span>
                         <input aria-label={`จำนวน ${it.name}`} type="number" inputMode="numeric" min={0} max={99} step={1} value={slotN[it.id] ?? ""} placeholder="0"
                           onChange={(e) => setSlotN((p) => ({ ...p, [it.id]: e.target.value.replace(/[^\d]/g, "").slice(0, 2) }))}
@@ -569,7 +583,10 @@ function DetailInsertModal({
                       );
                       return (
                         <div key={f.k} className={rowCls(changed)}>
-                          <span className="w-16 shrink-0 text-sm text-slate-700">{f.label}</span>
+                          <span className="w-20 shrink-0 leading-tight">
+                            <span className="block text-sm text-slate-700">{f.label}</span>
+                            <span className="block text-[10.5px] text-slate-400">{f.en}</span>
+                          </span>
                           {f.k === "s1" ? (
                             <span className="flex items-center gap-1">
                               {has("s1") && box("s1", "สายสะพายสั้นสุด")}
@@ -597,6 +614,17 @@ function DetailInsertModal({
                             ใส่บรรทัด{LINE_KIND_LABEL[k]}
                           </label>
                           {dupNote(k)}
+                          {(() => {
+                            const one = composeLines(
+                              { phrases: [], materials: [], slots: [], size: k === "size" ? { w: num.w, h: num.h, d: num.d } : null, weight: k === "weight" ? num.g : null, handle: k === "handle" ? num.hd : null, strap: k === "strap" ? { min: num.s1, max: num.s2 } : null },
+                              tpl
+                            );
+                            return one.th.length ? (
+                              <span className={`basis-full pl-6 text-[11px] ${use[k] ? "text-slate-500" : "text-slate-300"}`} data-insert-size-preview={k}>
+                                {one.th[0].replace(/^- /, "")} · {one.en[0]?.replace(/^- /, "") ?? "—"}
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
                       ))}
                     <p className="text-[11px] text-slate-400">ไม่ติ๊ก = ไม่ใส่บรรทัด แต่ตัวเลขที่แก้ยังบันทึกกลับช่องของสินค้า</p>
@@ -730,6 +758,16 @@ function DetailInsertModal({
           onDeleted={(id) => void onDeleted(editor.kind, id)}
         />
       )}
+      {matOpen && (
+        <MasterRecordDrawer
+          moduleKey={MAT}
+          recordId={matOpen}
+          title="วัสดุ"
+          icon="🧵"
+          onClose={() => setMatOpen(null)}
+          onChanged={() => void reloadMats(true)}
+        />
+      )}
       {tplOpen && (
         <TemplateDialog
           value={baseTpl}
@@ -830,7 +868,7 @@ function TemplateDialog({ value, onClose, onSaved }: { value: InsertTemplates; o
           <section className="space-y-1">
             <h4 className="text-xs font-semibold text-slate-600">ใส่ชื่ออังกฤษในวงเล็บ (บรรทัดไทย) — ค่าเริ่ม</h4>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-slate-600">
-              {(["phrase", "material", "fit"] as BracketKind[]).map((k) => (
+              {(["phrase", "material", "slot", "fit"] as BracketKind[]).map((k) => (
                 <label key={k} className="flex cursor-pointer items-center gap-1.5">
                   <input type="checkbox" checked={t.enInBrackets[k]} onChange={(e) => setT((p) => ({ ...p, enInBrackets: { ...p.enInBrackets, [k]: e.target.checked } }))} className="h-4 w-4 accent-orange-500" />
                   {k === "phrase" ? "ข้อความ" : LINE_KIND_LABEL[k]}

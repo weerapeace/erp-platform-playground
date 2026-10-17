@@ -36,7 +36,7 @@ const fill = (tpl: string, name: string, n: number) => tpl.replace(/\{name\}/g, 
 /* ─────────── รูปแบบบรรทัดกลาง ─────────── */
 
 export type LineKind = "material" | "slot" | "fit" | "size" | "weight" | "handle" | "strap";
-export type BracketKind = "phrase" | "material" | "fit";
+export type BracketKind = "phrase" | "material" | "slot" | "fit";
 
 export type InsertTemplates = {
   /** คำเชื่อมรายการ: 2 รายการ = A{last}B · 3+ = A{sep}B{last}C */
@@ -59,7 +59,7 @@ export const LINE_KIND_LABEL: Record<LineKind, string> = {
 
 export const DEFAULT_INSERT_TEMPLATES: InsertTemplates = {
   joiner: { sep: ", ", last: " และ ", sep_en: ", ", last_en: " and " },
-  enInBrackets: { phrase: false, material: false, fit: false },
+  enInBrackets: { phrase: false, material: false, slot: false, fit: false },
   prefix: {
     material: { th: "วัสดุ:", en: "Material:" },
     slot: { th: "", en: "" },
@@ -93,6 +93,7 @@ export function normalizeInsertTemplates(raw: unknown): InsertTemplates {
     enInBrackets: {
       phrase: typeof b.phrase === "boolean" ? b.phrase : D.enInBrackets.phrase,
       material: typeof b.material === "boolean" ? b.material : D.enInBrackets.material,
+      slot: typeof b.slot === "boolean" ? b.slot : D.enInBrackets.slot,
       fit: typeof b.fit === "boolean" ? b.fit : D.enInBrackets.fit,
     },
     prefix: Object.fromEntries(
@@ -129,23 +130,23 @@ export function phraseText(it: SnippetItem, lang: Lang, tpl: InsertTemplates = D
   return lang === "th" ? thWithEn(s, it.name_en, tpl.enInBrackets.phrase) : s;
 }
 
-/** ช่อง + ตัวเลข → "ช่องใส่บัตรเครดิต 6 ช่อง" / "6 card slots" · อังกฤษไม่มีชื่อ/รูปแบบ = null */
-export function slotText(it: SnippetItem, n: number, lang: Lang): string | null {
+/** ช่อง + ตัวเลข → "ช่องใส่บัตรเครดิต 6 ช่อง" / "6 card slots" · อังกฤษไม่มีชื่อ/รูปแบบ = null · วงเล็บ = "ช่องหลัก (Main compartment) 2 ช่อง" */
+export function slotText(it: SnippetItem, n: number, lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
   if (!(n > 0)) return null;
-  if (lang === "th") return fill(clean(it.template) || DEFAULT_SLOT_TEMPLATE, clean(it.name), n) || null;
-  const tpl = clean(it.template_en);
+  if (lang === "th") return fill(clean(it.template) || DEFAULT_SLOT_TEMPLATE, thWithEn(clean(it.name), it.name_en, tpl.enInBrackets.slot), n) || null;
+  const tplEn = clean(it.template_en);
   const name = clean(it.name_en);
-  if (!tpl && !name) return null;
-  if (!tpl) return fill(DEFAULT_SLOT_TEMPLATE_EN, name, n);
-  if (tpl.includes("{name}") && !name) return null;
-  return fill(tpl, name, n);
+  if (!tplEn && !name) return null;
+  if (!tplEn) return fill(DEFAULT_SLOT_TEMPLATE_EN, name, n);
+  if (tplEn.includes("{name}") && !name) return null;
+  return fill(tplEn, name, n);
 }
 
 /** หลายช่องรวมบรรทัดเดียว "ช่องหลัก 2 ช่อง, ช่องซิป 2 ช่อง และ ช่องใส่บัตร 1 ช่อง" · อังกฤษขาดตัวไหน = null ทั้งบรรทัด */
 export function slotLine(picks: { item: SnippetItem; n: number }[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
   const used = picks.filter((p) => p.n > 0);
   if (!used.length) return null;
-  const parts = used.map((p) => slotText(p.item, p.n, lang));
+  const parts = used.map((p) => slotText(p.item, p.n, lang, tpl));
   if (parts.some((x) => !x)) return null;
   return withLead(lead(tpl, "slot", lang), joinList(parts as string[], lang, tpl));
 }

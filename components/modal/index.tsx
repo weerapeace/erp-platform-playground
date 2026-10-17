@@ -85,6 +85,27 @@ function IconLoader() {
 
 export type ModalSize = "sm" | "md" | "lg" | "xl";
 
+/**
+ * ป๊อป/drawer ซ้อนกัน → กด Esc ปิดเฉพาะชั้นบนสุด (เดิมทุกชั้นฟัง keydown บน document เลยปิดพร้อมกันหมด)
+ * ชั้นที่เปิดทีหลัง = อยู่บน (portal ต่อท้าย body) → จดลำดับตอนเปิด
+ */
+const escStack: number[] = [];
+let escSeq = 0;
+function useEscTop(open: boolean): () => boolean {
+  const id = useRef(0);
+  useEffect(() => {
+    if (!open) return;
+    const my = ++escSeq;
+    id.current = my;
+    escStack.push(my);
+    return () => {
+      const i = escStack.lastIndexOf(my);
+      if (i >= 0) escStack.splice(i, 1);
+    };
+  }, [open]);
+  return () => escStack[escStack.length - 1] === id.current;
+}
+
 export interface ERPModalProps {
   open: boolean;
   onClose: () => void;
@@ -296,10 +317,11 @@ export function ERPModal({
     }
   }, [hasUnsavedChanges, onClose]);
 
+  const isTopEsc = useEscTop(open);
   useEffect(() => {
     if (!open) { setShowUnsavedWarning(false); return; }
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleClose();
+      if (e.key === "Escape" && isTopEsc()) handleClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -486,10 +508,11 @@ export function ConfirmDialog({
     if (!open) setTypedValue("");
   }, [open]);
 
+  const isTopEsc = useEscTop(open);
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && isTopEsc()) onClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -626,10 +649,11 @@ export function Drawer({
     }
   }, [hasUnsavedChanges, onClose]);
 
+  const isTopEsc = useEscTop(open);
   useEffect(() => {
     if (!open) { setShowUnsavedWarning(false); return; }
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleClose();
+      if (e.key === "Escape" && isTopEsc()) handleClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);

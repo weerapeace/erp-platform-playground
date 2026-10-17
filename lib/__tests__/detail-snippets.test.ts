@@ -126,7 +126,10 @@ describe("รูปแบบบรรทัดกลาง (⚙️) — คำ�
     expect(normalizeInsertTemplates(null)).toEqual(DEFAULT_INSERT_TEMPLATES);
     const t = normalizeInsertTemplates({ prefix: { material: { th: "", en: 5 } }, enInBrackets: { material: true, fit: "yes" } });
     expect(t.prefix.material).toEqual({ th: "", en: "Material:" });
-    expect(t.enInBrackets).toEqual({ phrase: false, material: true, fit: false });
+    expect(t.enInBrackets).toEqual({ phrase: false, material: true, slot: false, fit: false });
+    const ts = normalizeInsertTemplates({ enInBrackets: { slot: true } });
+    const { slotLine } = await import("@/lib/detail-snippets");
+    expect(slotLine([{ item: { id: "s", name: "ช่องหลัก", name_en: "Main compartment", kind: "slot" }, n: 2 }], "th", ts)).toBe("ช่องหลัก (Main compartment) 2 ช่อง");
     expect(materialLine([{ id: "1", name: "ผ้าไนล่อน", name_en: "Nylon" }], "th", t)).toBe("ผ้าไนล่อน (Nylon)");
   });
   it("หูหิ้ว / สาย (ช่วง = ปรับได้)", async () => {
