@@ -204,6 +204,50 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => editCats(reorderCategoryTree(cats, from, to)));
   const selTop = sel ? (sel.parent ? sel.parent : sel.key) : null;
 
+  /* ── ▸/▾ พับ/ขยายหมวดย่อย — จำต่อร้านในเครื่องนี้ (localStorage · ใช้ไม่ได้ = ไม่จำ) ── */
+  // ลากเรียงยังใช้ลำดับแถวเต็ม (rows) — แถวที่พับแค่ไม่วาด เลขแถวไม่เลื่อน
+  const collapseKey = `erp-web-cat-collapsed:${shopSlug}`;
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(collapseKey) ?? "[]");
+      if (Array.isArray(raw)) setCollapsed(new Set(raw.filter((x): x is string => typeof x === "string")));
+    } catch {
+      /* ไม่มีที่เก็บ = เริ่มกางทั้งหมด */
+    }
+  }, [collapseKey]);
+  const saveCollapsed = useCallback(
+    (next: Set<string>) => {
+      setCollapsed(next);
+      try {
+        localStorage.setItem(collapseKey, JSON.stringify([...next]));
+      } catch {
+        /* จำไม่ได้ก็ใช้ได้ในหน้านี้ */
+      }
+    },
+    [collapseKey]
+  );
+  const kidsOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of cats) if (c.parent) m.set(c.parent, (m.get(c.parent) ?? 0) + 1);
+    return m;
+  }, [cats]);
+  const toggleCollapse = (key: string) => {
+    const next = new Set(collapsed);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    saveCollapsed(next);
+  };
+  // เลือกหมวดย่อยที่ถูกพับอยู่ (เช่น เพิ่งสร้างหมวดย่อยใหม่) → กางแม่ให้เห็น
+  useEffect(() => {
+    if (sel?.parent && collapsed.has(sel.parent)) {
+      const next = new Set(collapsed);
+      next.delete(sel.parent);
+      saveCollapsed(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel?.parent]);
+
   /**
    * ↪ ย้าย (แทนที่หมวดนี้ด้วยหมวดปลายทาง — ตำแหน่งเดิม หมวดหลักยังเป็นหมวดหลัก) หรือ copy = เพิ่มเข้าอีกหมวด (คงหมวดนี้ไว้)
    */
@@ -302,18 +346,51 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         {/* ซ้าย: รายการหมวด */}
         <div className="rounded-xl border border-slate-200 bg-white p-2 h-fit">
           {cats.length === 0 && <p className="text-xs text-slate-400 px-2 py-6 text-center">ยังไม่มีหมวด — กด ➕ เพิ่มหมวด</p>}
+          {kidsOf.size > 0 && (
+            <div className="flex items-center justify-end gap-1 px-1 pb-1">
+              <button type="button" onClick={() => saveCollapsed(new Set())} disabled={collapsed.size === 0} className="rounded-md px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40">
+                ▾ ขยายทั้งหมด
+              </button>
+              <button type="button" onClick={() => saveCollapsed(new Set(kidsOf.keys()))} disabled={[...kidsOf.keys()].every((k) => collapsed.has(k))} className="rounded-md px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40">
+                ▸ พับทั้งหมด
+              </button>
+            </div>
+          )}
           {rows.map(({ cat: c, depth }, i) => {
-            const lastOfGroup = c.key === selTop || c.parent === selTop ? !rows[i + 1] || rows[i + 1].depth === 0 : false;
+            // หมวดย่อยของแม่ที่พับอยู่ = ไม่วาด (ยกเว้นตัวที่เลือกอยู่ — กันการ์ดขวาค้างไม่มีแถว)
+            if (depth > 0 && c.parent && collapsed.has(c.parent) && c.key !== selKey) return null;
+            const kids = depth === 0 ? kidsOf.get(c.key) ?? 0 : 0;
+            const folded = kids > 0 && collapsed.has(c.key);
+            const lastOfGroup = c.key === selTop || c.parent === selTop ? folded || !rows[i + 1] || rows[i + 1].depth === 0 : false;
             return (
               <div key={c.key}>
                 <div
                   {...rowProps(i)}
                   {...dropProps(c.key)}
                   onClick={() => setSelKey(c.key)}
-                  className={`flex items-center gap-2 rounded-lg py-2 cursor-pointer ${depth ? "pl-7 pr-2" : "px-2"} ${dropKey === c.key ? "bg-emerald-50 ring-2 ring-emerald-400" : c.key === selKey ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"} ${rowCls(i)}`}
+                  className={`flex items-center gap-2 rounded-lg py-2 cursor-pointer ${depth ? "pl-9 pr-2" : "px-1.5"} ${dropKey === c.key ? "bg-emerald-50 ring-2 ring-emerald-400" : c.key === selKey ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"} ${rowCls(i)}`}
                   title={dropKey === c.key ? "ปล่อยเพื่อย้ายมาหมวดนี้ (Ctrl ค้าง = เพิ่มเข้าหมวดนี้อีกหมวด)" : undefined}
                 >
                   {depth > 0 && <span className="text-slate-300 text-xs -ml-3" aria-hidden>└</span>}
+                  {/* ▸/▾ พับหมวดย่อย (เฉพาะหมวดแม่ที่มีหมวดย่อย · ไม่มี = เว้นที่ให้แถวตรงกัน) */}
+                  {depth === 0 &&
+                    (kids > 0 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleCollapse(c.key);
+                        }}
+                        title={folded ? `ขยาย — โชว์หมวดย่อย ${kids} หมวด` : "พับหมวดย่อย"}
+                        aria-expanded={!folded}
+                        aria-label={folded ? `ขยายหมวดย่อยของ ${c.label}` : `พับหมวดย่อยของ ${c.label}`}
+                        className="shrink-0 w-5 h-5 -mr-1 rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700 flex items-center justify-center"
+                      >
+                        <span className={`inline-block text-[10px] transition-transform ${folded ? "" : "rotate-90"}`}>▶</span>
+                      </button>
+                    ) : (
+                      <span className="shrink-0 w-5 -mr-1" aria-hidden />
+                    ))}
                   <DragHandle {...handleProps(i)} />
                   {c.imageKey ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -323,7 +400,10 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                   )}
                   <span className="flex-1 min-w-0">
                     <span className={`block ${depth ? "text-[13px]" : "text-sm font-medium"} text-slate-800 truncate`}>{c.label}</span>
-                    <span className="block text-[10px] text-slate-400 truncate">/c/{c.key}</span>
+                    <span className="block text-[10px] text-slate-400 truncate">
+                      /c/{c.key}
+                      {folded && <span className="text-slate-500"> · {kids} หมวดย่อย</span>}
+                    </span>
                   </span>
                   <span className="text-[11px] text-slate-500 tabular-nums" title={depth ? undefined : "รวมสินค้าในหมวดย่อย"}>{countOf(c.key)}</span>
                 </div>
