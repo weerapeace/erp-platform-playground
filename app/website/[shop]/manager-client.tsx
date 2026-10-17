@@ -27,6 +27,8 @@ import { WebsiteOpenToggle } from "@/components/website-open-toggle";
 import { WebsiteListingsPanel, type Listing, type CategoryDef, type ShopInfo } from "@/components/website-listings-panel";
 import { WheelSelect } from "@/components/wheel-select";
 import { useViewPref } from "@/lib/use-view-pref";
+import { ConfirmDialog } from "@/components/modal";
+import { UnsavedGuardProvider, useUnsavedGuardHost } from "@/components/save-bar";
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
@@ -41,7 +43,16 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<"listings" | "categories" | "collections" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders" | "coupons" | "members">("listings");
+  type TabKey = "listings" | "categories" | "collections" | "fieldmap" | "design" | "layout" | "pages" | "info" | "orders" | "coupons" | "members";
+  const [tab, setTab] = useState<TabKey>("listings");
+  // ⚠️ สลับแท็บตอนแท็บเดิมยังไม่บันทึก → ถามก่อน (เดิมของที่แก้หายเงียบ)
+  const guard = useUnsavedGuardHost();
+  const [pendingTab, setPendingTab] = useState<TabKey | null>(null);
+  const goTab = (k: TabKey) => {
+    if (k === tab) return;
+    if (guard.anyDirty()) setPendingTab(k);
+    else setTab(k);
+  };
   const [categories, setCategories] = useState<CategoryDef[]>([]);
   // ลิงก์จากที่อื่น (เช่น ป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") เปิดแท็บที่ระบุ ?tab= · ⚠️ ไม่ใช้ useSearchParams (อยู่ใน PlaygroundShell)
   useEffect(() => {
@@ -162,7 +173,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
             ] as const).map((t) => (
               <button
                 key={t.k}
-                onClick={() => setTab(t.k)}
+                onClick={() => goTab(t.k)}
                 className={`shrink-0 px-4 py-2 text-sm border-b-2 -mb-px transition ${
                   tab === t.k
                     ? "border-blue-600 text-blue-700 font-medium"
@@ -175,6 +186,20 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
           </div>
         )}
 
+        {/* ⚠️ ยังไม่บันทึก → ถามก่อนสลับแท็บ (แต่ละแท็บแจ้งผ่าน SaveBar / useReportUnsaved) */}
+        <ConfirmDialog
+          open={!!pendingTab}
+          onClose={() => setPendingTab(null)}
+          onConfirm={() => {
+            if (pendingTab) setTab(pendingTab);
+            setPendingTab(null);
+          }}
+          title="ยังไม่ได้บันทึก"
+          message="คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกโดยไม่บันทึกหรือไม่?"
+          confirmText="ออกโดยไม่บันทึก"
+          cancelText="อยู่ต่อ"
+        />
+        <UnsavedGuardProvider value={guard.register}>
         {/* แท็บสินค้าบนเว็บ (ตัวกรอง/ค้นหา/ทำหลายรายการ/ลากเรียง/แก้ด่วน) */}
         {tab === "listings" && shop && (
           <WebsiteListingsPanel
@@ -212,6 +237,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {tab === "orders" && shop && <WebsiteOrdersPanel shopSlug={shop.slug} shopId={shop.id} />}
         {tab === "coupons" && shop && <WebsiteCouponsPanel shopSlug={shop.slug} shopId={shop.id} />}
         {tab === "members" && shop && <WebsiteMembersPanel shopSlug={shop.slug} />}
+        </UnsavedGuardProvider>
       </div>
     </PlaygroundShell>
   );

@@ -24,6 +24,7 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { cleanCategoryKey, type WebCategoryDef } from "@/lib/website-field-map";
 import { categoryTree, reorderCategoryTree, childCategories, topCategories, familyKeys, flattenTree, categoryChoiceLabel } from "@/lib/website-category-tree";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SaveBar } from "@/components/save-bar";
 
 /** ชนิดข้อมูลตอนลากการ์ดสินค้า (กันรับของที่ลากมาจากที่อื่น) */
 const DRAG_MIME = "application/x-erp-web-listings";
@@ -54,7 +55,9 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "pending" | "saving" | "saved" | "error">("idle");
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   // เปิดป๊อปสร้างหมวด: null = ปิด · "" = หมวดชั้นบน · รหัส = หมวดย่อยใต้หมวดนั้น
@@ -91,31 +94,52 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     void load();
   }, [load]);
 
-  /* ── บันทึกรายการหมวด (หลังหยุดแก้ 0.7 วิ) ── */
-  useEffect(() => {
+  /* ── บันทึกรายการหมวด (หลังหยุดแก้ 0.7 วิ · หรือกด 💾 บันทึกเดี๋ยวนี้ ที่แถบล่าง) ── */
+  // ver = นับครั้งที่แก้ — บันทึกเสร็จแล้วมีการแก้ใหม่ระหว่างทาง = ยังไม่ถือว่าบันทึกครบ (รอบถัดไปบันทึกต่อ)
+  const ver = useRef(0);
+  const catsRef = useRef(cats);
+  catsRef.current = cats;
+  const timer = useRef<number | null>(null);
+  const persist = useCallback(async () => {
     if (!dirty.current || !fieldMap) return;
+    if (timer.current) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    const v = ver.current;
     setSaveState("saving");
-    const t = window.setTimeout(async () => {
-      try {
-        const r = await apiFetch("/api/website/field-map", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ shopId, fieldMap: { ...fieldMap, categories: cats } }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+    try {
+      const r = await apiFetch("/api/website/field-map", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopId, fieldMap: { ...fieldMap, categories: catsRef.current } }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setSaveErr(null);
+      setSavedAt(new Date());
+      if (ver.current === v) {
         dirty.current = false;
         setSaveState("saved");
-      } catch (e) {
-        setSaveState("error");
-        toast.error((e as Error).message);
-      }
-    }, 700);
-    return () => window.clearTimeout(t);
-  }, [cats, fieldMap, shopId, toast]);
+      } else setSaveState("pending");
+    } catch (e) {
+      setSaveState("error");
+      setSaveErr((e as Error).message);
+      toast.error((e as Error).message);
+    }
+  }, [fieldMap, shopId, toast]);
+  useEffect(() => {
+    if (!dirty.current || !fieldMap) return;
+    setSaveState("pending");
+    timer.current = window.setTimeout(() => void persist(), 700);
+    return () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    };
+  }, [cats, fieldMap, persist]);
 
   const editCats = (next: WebCategoryDef[]) => {
     dirty.current = true;
+    ver.current += 1;
     setCats(next);
   };
   const patchCat = (key: string, p: Partial<WebCategoryDef>) => editCats(cats.map((c) => (c.key === key ? { ...c, ...p } : c)));
@@ -253,9 +277,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
           <h2 className="text-base font-semibold text-slate-800">📂 หมวดหมู่สินค้าบนเว็บ</h2>
           <p className="text-xs text-slate-500 mt-0.5">ลากเรียงลำดับได้ · 1 สินค้าอยู่ได้หลายหมวด · หมวดแรกของสินค้า = ป้ายบนการ์ด · รูปหมวดใช้ใน Section &quot;หมวดสินค้า&quot; หน้าแรก</p>
         </div>
-        <span className="text-xs text-slate-400">
-          {saveState === "saving" ? "กำลังบันทึก…" : saveState === "saved" ? "✓ บันทึกแล้ว" : saveState === "error" ? "⚠ บันทึกไม่สำเร็จ" : ""}
-        </span>
+        <span className="text-xs text-slate-400">💾 บันทึกอัตโนมัติ — ดูสถานะที่แถบล่าง</span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
@@ -473,6 +495,17 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
           <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-400">เลือกหมวดทางซ้าย หรือกด ➕ เพิ่มหมวด</div>
         )}
       </div>
+
+      {/* 💾 แถบบันทึก (ของกลาง) — หมวด/รูป/ชื่อ บันทึกเองหลังหยุดแก้ · สินค้า↔หมวด บันทึกทันทีทุกครั้งที่กด */}
+      <SaveBar
+        mode="auto"
+        dirty={saveState === "pending"}
+        saving={saveState === "saving"}
+        error={saveState === "error" ? saveErr : null}
+        savedAt={savedAt}
+        onSave={persist}
+        note="ชื่อ/รูป/ลำดับหมวด บันทึกเองหลังหยุดแก้ · เพิ่ม/ย้ายสินค้าเข้าหมวด บันทึกทันที"
+      />
 
       {sel && (
         <BulkActionBar count={picked.size} unit="รุ่น" onClear={() => setPicked(new Set())} extra={<button type="button" className="underline hover:text-white" onClick={() => setPicked(new Set(inCat.map((l) => l.parentId)))}>เลือกทั้งหมดในหมวด ({inCat.length})</button>}>

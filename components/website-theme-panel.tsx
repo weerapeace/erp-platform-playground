@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
+import { useReportUnsaved } from "@/components/save-bar";
 import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
@@ -634,6 +635,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   }, [theme, published]);
 
   const isDirty = dirtyFields.length > 0;
+  // แจ้งหน้าแม่: ยังไม่บันทึก → ถามก่อนสลับแท็บ (แถบล่างของหน้านี้ยังเป็นของตัวเอง: ร่าง/เผยแพร่)
+  useReportUnsaved(isDirty);
 
   useEffect(() => {
     if (!isDirty) return;

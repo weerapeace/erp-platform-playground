@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
 import { RestockCard } from "@/components/website-restock-panel";
+import { SaveBar } from "@/components/save-bar";
 
 type FieldDef = {
   key: string;
@@ -159,6 +160,9 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
           );
         })}
       </div>
+
+      {/* 💾 แถบบันทึก (ของกลาง) — หน้านี้ยาว ปุ่มบนสุดเลื่อนหายไป */}
+      <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => setInfo(saved)} note="บันทึกแล้วเว็บร้านเปลี่ยนภายใน ~1 นาที" />
     </div>
   );
 }

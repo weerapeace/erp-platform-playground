@@ -12,6 +12,7 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { CopyButton } from "@/components/copy-button";
 import { slugifyCollection, type WebCollection } from "@/lib/website-collections";
+import { SaveBar } from "@/components/save-bar";
 
 type Item = { id: string; name: string; count: number; published: number; imageKey: string | null };
 type Row = WebCollection & { name: string; count: number; published: number; imageKey: string | null };
@@ -162,7 +163,8 @@ export function WebsiteCollectionsPanel({ shopSlug, shopId, siteUrl }: { shopSlu
           );
         })}
       </ul>
-      {dirty && <p className="text-[11px] text-amber-700">มีการแก้ไขที่ยังไม่บันทึก — กด 💾 บันทึก ด้านบน</p>}
+      {/* 💾 แถบบันทึก (ของกลาง) — ติดขอบล่างเสมอ ไม่ต้องเลื่อนขึ้นหาปุ่ม */}
+      <SaveBar dirty={dirty} saving={saving} onSave={save} note="บันทึกแล้วขึ้นเว็บทันที" />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { NAME_SOURCE_OPTIONS, PRICE_SOURCE_OPTIONS, DESC_SOURCE_OPTIONS } from "@/lib/website-field-map";
+import { SaveBar } from "@/components/save-bar";
 
 /** รหัสหมวดตั้งเองได้แล้ว ไม่ใช่รายการตายตัว (ให้ตรงกับ lib/website-field-map.ts) */
 type WebCategory = string;
@@ -50,6 +51,8 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
   const [categories, setCategories] = useState<{ name: string; count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // ค่าที่โหลด/บันทึกล่าสุด (เทียบหาว่ามีการแก้) — แถบบันทึกของกลางใช้
+  const [savedJson, setSavedJson] = useState("");
   const [q, setQ] = useState("");
 
   const load = useCallback(async () => {
@@ -58,6 +61,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
       const r = await apiFetch(`/api/website/field-map?shop=${encodeURIComponent(shopSlug)}`);
       const j = await r.json();
       setMap(j.fieldMap ?? null);
+      setSavedJson(JSON.stringify(j.fieldMap ?? null));
       setCategories(j.categories ?? []);
     } catch {
       toast.error("โหลดการตั้งค่าไม่สำเร็จ");
@@ -84,6 +88,7 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
       const j = await r.json();
       if (j.ok) {
         setMap(j.fieldMap);
+        setSavedJson(JSON.stringify(j.fieldMap ?? null));
         toast.success("บันทึกการจับคู่แล้ว — สินค้าทุกตัวจะใช้ค่านี้อัตโนมัติ");
       } else toast.error(j.error ?? "บันทึกไม่สำเร็จ");
     } catch {
@@ -470,18 +475,8 @@ export function WebsiteFieldMapPanel({ shopSlug, shopId }: { shopSlug: string; s
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 sticky bottom-0 bg-slate-50/80 backdrop-blur py-3">
-        <button onClick={() => void load()} className="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:border-slate-400">
-          ยกเลิกการแก้ไข
-        </button>
-        <button
-          onClick={() => void save()}
-          disabled={saving}
-          className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saving ? "กำลังบันทึก…" : "บันทึกการจับคู่"}
-        </button>
-      </div>
+      {/* 💾 แถบบันทึก (ของกลาง) */}
+      <SaveBar dirty={!!map && JSON.stringify(map) !== savedJson} saving={saving} onSave={save} onDiscard={() => void load()} saveLabel="💾 บันทึกการจับคู่" note="สินค้าทุกตัวใช้ค่านี้อัตโนมัติ" />
     </div>
   );
 }
