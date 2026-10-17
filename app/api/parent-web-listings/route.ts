@@ -50,6 +50,7 @@ import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
 import { parseCompartments } from "@/lib/fit-check";
 import { CHILD_SELECT, type ChildSku } from "@/lib/website-field-map";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
+import { categoryPathLabel } from "@/lib/website-category-tree";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -226,7 +227,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webSwatch: (l?.web_swatch as string | null) ?? "",
       webOptions: (l?.web_options as unknown) ?? null,
       /** หมวดของร้านนี้ (แท็บ 📂 หมวดหมู่) */
-      shopCategories: fieldMap.categories.map((c) => ({ key: c.key, label: c.label, icon: c.icon ?? "" })),
+      shopCategories: fieldMap.categories.map((c) => ({ key: c.key, label: categoryPathLabel(fieldMap.categories, c.key), icon: c.icon ?? "" })),
       /** ค่าที่เว็บใช้อัตโนมัติถ้าไม่กรอกทับ */
       auto: { price: view.mapped.price, unit: view.mapped.unit, description: view.mapped.description },
       display: view.display,

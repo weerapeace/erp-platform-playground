@@ -6,6 +6,7 @@
  */
 import { useState } from "react";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { categoryChoiceLabel } from "@/lib/website-category-tree";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ConfirmDialog } from "@/components/modal";
 import { categoryHref } from "@/lib/website-links";
@@ -32,7 +33,7 @@ export function ListingPanel({
 }: {
   value: ListingConfig;
   onChange: (v: ListingConfig) => void;
-  categories: { key: string; label: string }[];
+  categories: { key: string; label: string; parent?: string | null }[];
   products: { code: string; name: string }[];
   /** ฟิลด์สินค้าที่ส่งออกเว็บ — เลือกทำตัวกรองเพิ่มได้ */
   fields?: { key: string; label: string }[];
@@ -219,7 +220,7 @@ export function ListingPanel({
                       <input className={inputCls} value={x.link} onChange={(e) => patch(x.id, { link: e.target.value })} placeholder="/c/backpack · /product/bbp10 · https://…" />
                       <select className={inputCls} value="" onChange={(e) => e.target.value && patch(x.id, { link: e.target.value })} title="เลือกหมวดแทนการพิมพ์">
                         <option value="">↳ ลิงก์ไปหมวด…</option>
-                        {categories.map((c) => <option key={c.key} value={categoryHref(c.key)}>{c.label}</option>)}
+                        {categories.map((c) => <option key={c.key} value={categoryHref(c.key)}>{categoryChoiceLabel(c)}</option>)}
                       </select>
                       <select className={inputCls} value="" onChange={(e) => e.target.value && patch(x.id, { link: e.target.value })} title="เลือกสินค้าแทนการพิมพ์">
                         <option value="">↳ ลิงก์ไปสินค้า…</option>

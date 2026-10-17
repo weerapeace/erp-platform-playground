@@ -10,6 +10,8 @@
  * เก็บที่ไหน: รายการหมวด = shops.field_map.categories (PUT /api/website/field-map — บันทึกเองหลังหยุดแก้)
  *             สินค้า↔หมวด = store_listings.web_categories (POST /api/website/listings action "setCategories" — บันทึกทันที + audit)
  * รหัสหมวด (ใช้ในลิงก์หน้าหมวด /c/<รหัส>) ตั้งตอนสร้างแล้วเปลี่ยนไม่ได้ — กันลิงก์/เมนูเดิมเสีย
+ * 📂 หมวดย่อย (2 ชั้น · lib/website-category-tree): ➕ หมวดย่อยใต้หมวดที่เลือก · ช่อง "อยู่ใต้หมวด" ย้ายแม่ · ลากเรียงในแม่เดิม
+ *    สินค้าในหมวดย่อยนับรวมในหมวดแม่ (เว็บร้านโชว์ในหน้าหมวดแม่ด้วย)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -18,6 +20,7 @@ import { apiFetch } from "@/lib/api";
 import { ImageChooser } from "@/components/website-canvas-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { cleanCategoryKey, type WebCategoryDef } from "@/lib/website-field-map";
+import { categoryTree, reorderCategoryTree, childCategories, topCategories, familyKeys, flattenTree } from "@/lib/website-category-tree";
 
 type Listing = {
   parentId: string;
@@ -48,7 +51,8 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [busy, setBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [newOpen, setNewOpen] = useState(false);
+  // เปิดป๊อปสร้างหมวด: null = ปิด · "" = หมวดชั้นบน · รหัส = หมวดย่อยใต้หมวดนั้น
+  const [newParent, setNewParent] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<WebCategoryDef | null>(null);
   const [chooser, setChooser] = useState<null | "imageKey" | "bannerKey">(null);
   const dirty = useRef(false);
@@ -144,10 +148,18 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     if (!sel) return;
     patchCat(sel.key, { order: moveItem(inCat, from, to).map((l) => l.code.toUpperCase()) });
   });
-  const countOf = (key: string) => listings.filter((l) => l.categories.includes(key)).length;
+  // นับรวมหมวดย่อย (ไม่ซ้ำรุ่น) — ตรงกับที่เว็บร้านโชว์ในหน้าหมวดแม่
+  const countOf = (key: string) => {
+    const fam = familyKeys(cats, key);
+    return listings.filter((l) => l.categories.some((k) => fam.includes(k))).length;
+  };
+  const directCount = (key: string) => listings.filter((l) => l.categories.includes(key)).length;
   const labelOf = (key: string) => cats.find((c) => c.key === key)?.label ?? key;
 
-  const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => editCats(moveItem(cats, from, to)));
+  // 📂 มุมมองต้นไม้ (หมวด → หมวดย่อย) · ลากหมวดชั้นบน = ย้ายทั้งกลุ่ม · ลากหมวดย่อย = เรียงในแม่เดิม
+  const rows = useMemo(() => categoryTree(cats), [cats]);
+  const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => editCats(reorderCategoryTree(cats, from, to)));
+  const selTop = sel ? (sel.parent ? sel.parent : sel.key) : null;
 
   const removeFromCat = (l: Listing) => {
     if (!sel) return;
@@ -161,7 +173,8 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     // สินค้าที่อยู่หมวดนี้ → เอาหมวดนี้ออก (สินค้ายังอยู่บนเว็บ)
     const affected = listings.filter((l) => l.categories.includes(c.key)).map((l) => ({ parentId: l.parentId, categories: l.categories.filter((k) => k !== c.key) }));
     if (affected.length) await setCategoriesOf(affected, c.key, `เอาสินค้า ${affected.length} รายการออกจากหมวด ${c.label} แล้ว`);
-    const next = cats.filter((x) => x.key !== c.key);
+    // หมวดย่อยของหมวดที่ลบ → กลายเป็นหมวดชั้นบน (ไม่หายไปด้วย)
+    const next = flattenTree(cats.filter((x) => x.key !== c.key).map((x) => (x.parent === c.key ? { ...x, parent: null } : x)));
     editCats(next);
     setSelKey(next[0]?.key ?? null);
     toast.success(`ลบหมวด "${c.label}" แล้ว`);
@@ -194,28 +207,39 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         {/* ซ้าย: รายการหมวด */}
         <div className="rounded-xl border border-slate-200 bg-white p-2 h-fit">
           {cats.length === 0 && <p className="text-xs text-slate-400 px-2 py-6 text-center">ยังไม่มีหมวด — กด ➕ เพิ่มหมวด</p>}
-          {cats.map((c, i) => (
-            <div
-              key={c.key}
-              {...rowProps(i)}
-              onClick={() => setSelKey(c.key)}
-              className={`flex items-center gap-2 rounded-lg px-2 py-2 cursor-pointer ${c.key === selKey ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"} ${rowCls(i)}`}
-            >
-              <DragHandle {...handleProps(i)} />
-              {c.imageKey ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={img(c.imageKey, 80)!} alt="" className="w-9 h-9 rounded-md object-cover border border-slate-200" />
-              ) : (
-                <span className="w-9 h-9 rounded-md bg-slate-100 flex items-center justify-center text-lg">{c.icon || "📁"}</span>
-              )}
-              <span className="flex-1 min-w-0">
-                <span className="block text-sm font-medium text-slate-800 truncate">{c.label}</span>
-                <span className="block text-[10px] text-slate-400 truncate">/c/{c.key}</span>
-              </span>
-              <span className="text-[11px] text-slate-500 tabular-nums">{countOf(c.key)}</span>
-            </div>
-          ))}
-          <button onClick={() => setNewOpen(true)} className="mt-1 w-full rounded-lg border border-dashed border-slate-300 py-2 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-600">
+          {rows.map(({ cat: c, depth }, i) => {
+            const lastOfGroup = c.key === selTop || c.parent === selTop ? !rows[i + 1] || rows[i + 1].depth === 0 : false;
+            return (
+              <div key={c.key}>
+                <div
+                  {...rowProps(i)}
+                  onClick={() => setSelKey(c.key)}
+                  className={`flex items-center gap-2 rounded-lg py-2 cursor-pointer ${depth ? "pl-7 pr-2" : "px-2"} ${c.key === selKey ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"} ${rowCls(i)}`}
+                >
+                  {depth > 0 && <span className="text-slate-300 text-xs -ml-3" aria-hidden>└</span>}
+                  <DragHandle {...handleProps(i)} />
+                  {c.imageKey ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={img(c.imageKey, 80)!} alt="" className={`${depth ? "w-7 h-7" : "w-9 h-9"} rounded-md object-cover border border-slate-200`} />
+                  ) : (
+                    <span className={`${depth ? "w-7 h-7 text-sm" : "w-9 h-9 text-lg"} rounded-md bg-slate-100 flex items-center justify-center`}>{c.icon || (depth ? "▫️" : "📁")}</span>
+                  )}
+                  <span className="flex-1 min-w-0">
+                    <span className={`block ${depth ? "text-[13px]" : "text-sm font-medium"} text-slate-800 truncate`}>{c.label}</span>
+                    <span className="block text-[10px] text-slate-400 truncate">/c/{c.key}</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500 tabular-nums" title={depth ? undefined : "รวมสินค้าในหมวดย่อย"}>{countOf(c.key)}</span>
+                </div>
+                {/* ➕ หมวดย่อย — ท้ายกลุ่มของหมวดที่เลือกอยู่ */}
+                {lastOfGroup && selTop && (
+                  <button type="button" onClick={() => setNewParent(selTop)} className="ml-7 mb-1 mt-0.5 rounded-md px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50">
+                    ➕ หมวดย่อยใน “{cats.find((x) => x.key === selTop)?.label}”
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          <button onClick={() => setNewParent("")} className="mt-1 w-full rounded-lg border border-dashed border-slate-300 py-2 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-600">
             ➕ เพิ่มหมวด
           </button>
         </div>
@@ -233,6 +257,32 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                   <label className={labelCls}>ไอคอน (ถ้าไม่มีรูป)</label>
                   <input value={sel.icon} onChange={(e) => patchCat(sel.key, { icon: e.target.value.slice(0, 8) })} className={inputCls} placeholder="👜" />
                 </div>
+              </div>
+              {/* 📂 อยู่ใต้หมวด (หมวดย่อย) */}
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs font-medium text-slate-600">อยู่ใต้หมวด</label>
+                <select
+                  value={sel.parent ?? ""}
+                  disabled={childCategories(cats, sel.key).length > 0}
+                  onChange={(e) => editCats(flattenTree(cats.map((c) => (c.key === sel.key ? { ...c, parent: e.target.value || null } : c))))}
+                  className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  <option value="">— ไม่มี (เป็นหมวดหลัก) —</option>
+                  {topCategories(cats)
+                    .filter((c) => c.key !== sel.key)
+                    .map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                </select>
+                <span className="text-[11px] text-slate-400">
+                  {childCategories(cats, sel.key).length > 0
+                    ? `มีหมวดย่อย ${childCategories(cats, sel.key).length} หมวด — ย้ายไปอยู่ใต้หมวดอื่นไม่ได้ (ซ้อนได้ 2 ชั้น)`
+                    : sel.parent
+                      ? "สินค้าในหมวดนี้ขึ้นในหน้าหมวดแม่ด้วย · บนเว็บเป็นปุ่มชิปใต้ชื่อหมวดแม่"
+                      : "เลือกหมวดแม่ = ทำเป็นหมวดย่อย"}
+                </span>
               </div>
               <div>
                 <label className={labelCls}>คำอธิบาย (ใต้ชื่อหมวด / บนหน้าหมวด)</label>
@@ -284,6 +334,10 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                 </button>
               </div>
               {inCat.length > 1 && <p className="text-[11px] text-slate-400 -mt-1.5 mb-2">ลาก ⠿ เพื่อเรียงลำดับสินค้าในหมวดนี้ (หน้าร้านเรียงตามนี้เมื่อเลือกหมวด)</p>}
+              {/* 📂 สินค้าจากหมวดย่อย (ไม่ได้อยู่หมวดนี้ตรง ๆ แต่ขึ้นในหน้าหมวดนี้บนเว็บ) */}
+              {!sel.parent && countOf(sel.key) > inCat.length && (
+                <p className="text-[11px] text-blue-600 -mt-1 mb-2">+ อีก {countOf(sel.key) - inCat.length} รุ่นจากหมวดย่อย ({childCategories(cats, sel.key).map((c) => c.label).join(", ")}) — ขึ้นในหน้าหมวดนี้บนเว็บด้วย · จัดลำดับ/เพิ่ม-เอาออกที่หมวดย่อยนั้น</p>
+              )}
               {inCat.length === 0 ? (
                 <p className="text-xs text-slate-400 py-8 text-center">ยังไม่มีสินค้าในหมวดนี้ — กด ➕ เพิ่มสินค้าเข้าหมวด</p>
               ) : (
@@ -324,13 +378,15 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
       </div>
 
       <NewCategoryModal
-        open={newOpen}
-        onClose={() => setNewOpen(false)}
+        open={newParent !== null}
+        onClose={() => setNewParent(null)}
         taken={cats.map((c) => c.key)}
+        parentLabel={newParent ? cats.find((c) => c.key === newParent)?.label ?? null : null}
+        suggestPrefix={newParent || ""}
         onCreate={(c) => {
-          editCats([...cats, c]);
+          editCats(flattenTree([...cats, { ...c, parent: newParent || null }]));
           setSelKey(c.key);
-          setNewOpen(false);
+          setNewParent(null);
         }}
       />
 
@@ -369,7 +425,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         onConfirm={() => void deleteCat()}
         variant="danger"
         title={`ลบหมวด "${confirmDel?.label ?? ""}"?`}
-        message={`สินค้า ${confirmDel ? countOf(confirmDel.key) : 0} รายการจะไม่อยู่ในหมวดนี้แล้ว (สินค้ายังอยู่บนเว็บ) · ลิงก์หน้าหมวด /c/${confirmDel?.key ?? ""} จะใช้ไม่ได้`}
+        message={`สินค้า ${confirmDel ? directCount(confirmDel.key) : 0} รายการจะไม่อยู่ในหมวดนี้แล้ว (สินค้ายังอยู่บนเว็บ) · ลิงก์หน้าหมวด /c/${confirmDel?.key ?? ""} จะใช้ไม่ได้${confirmDel && childCategories(cats, confirmDel.key).length ? ` · หมวดย่อย ${childCategories(cats, confirmDel.key).length} หมวดจะกลายเป็นหมวดหลัก (ไม่ถูกลบ)` : ""}`}
         confirmText="ลบหมวด"
       />
     </div>
@@ -403,7 +459,7 @@ function ImageSlot({ label, k, aspect, onPick, onClear }: { label: string; k?: s
 }
 
 /** สร้างหมวดใหม่: ชื่อ + รหัสในลิงก์ (เดาจากชื่อภาษาอังกฤษ · ชื่อไทย = ต้องตั้งเอง) */
-function NewCategoryModal({ open, onClose, taken, onCreate }: { open: boolean; onClose: () => void; taken: string[]; onCreate: (c: WebCategoryDef) => void }) {
+function NewCategoryModal({ open, onClose, taken, onCreate, parentLabel, suggestPrefix = "" }: { open: boolean; onClose: () => void; taken: string[]; onCreate: (c: WebCategoryDef) => void; /** สร้างเป็นหมวดย่อยใต้หมวดนี้ */ parentLabel?: string | null; /** หมวดย่อย: รหัสขึ้นต้นด้วยรหัสแม่ (กันชนกับหมวดอื่น) */ suggestPrefix?: string }) {
   const [label, setLabel] = useState("");
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
@@ -414,14 +470,16 @@ function NewCategoryModal({ open, onClose, taken, onCreate }: { open: boolean; o
       setKeyTouched(false);
     }
   }, [open]);
-  const autoKey = cleanCategoryKey(label);
+  // ชื่ออังกฤษ = เดารหัสให้ (หมวดย่อยขึ้นต้นด้วยรหัสแม่) · ชื่อไทยล้วน = ว่าง ให้ตั้งเอง (ไม่เดาเป็นรหัสแม่ซ้ำ)
+  const baseKey = cleanCategoryKey(label);
+  const autoKey = baseKey ? (suggestPrefix ? cleanCategoryKey(`${suggestPrefix}-${baseKey}`) : baseKey) : "";
   const k = keyTouched ? cleanCategoryKey(key) : autoKey;
   const problem = !label.trim() ? "ใส่ชื่อหมวด" : !k ? "ตั้งรหัสในลิงก์ (ภาษาอังกฤษ/ตัวเลข/ขีด)" : taken.includes(k) ? "รหัสนี้มีแล้ว — ตั้งใหม่" : null;
   return (
     <ERPModal
       open={open}
       onClose={onClose}
-      title="➕ เพิ่มหมวด"
+      title={parentLabel ? `➕ หมวดย่อยใน “${parentLabel}”` : "➕ เพิ่มหมวด"}
       size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
@@ -452,7 +510,7 @@ function NewCategoryModal({ open, onClose, taken, onCreate }: { open: boolean; o
               setKey(e.target.value);
             }}
             className={inputCls}
-            placeholder="เช่น bags"
+            placeholder={suggestPrefix ? `เช่น ${suggestPrefix}-small` : "เช่น bags"}
           />
           <p className="text-[11px] text-slate-400 mt-1">ภาษาอังกฤษตัวเล็ก ตัวเลข ขีดกลาง · ตั้งแล้วเปลี่ยนไม่ได้</p>
         </div>

@@ -111,7 +111,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       fieldGroups: PARENT_FIELD_GROUP_LABEL,
       /** ฟิลด์รูปของ Parent SKU (แบนเนอร์เลือก "ฟิลด์รูปของ Parent SKU") */
       imageFields: imageFields.map((f) => ({ key: f.key, label: f.label })),
-      categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label })),
+      categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null })),
       products: webProducts,
       imageRatios: IMAGE_RATIOS,
       cardHovers: CARD_HOVERS,

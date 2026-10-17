@@ -12,6 +12,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
+import { categoryChoiceLabel } from "@/lib/website-category-tree";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
@@ -59,7 +60,7 @@ import {
 
 export interface MegaEditorCtx {
   link: SchemaFormContext;
-  categories: { key: string; label: string }[];
+  categories: { key: string; label: string; parent?: string | null }[];
   products: { code: string; name: string }[];
   shopId: string;
   /** หน้าที่สร้างเอง (ตรวจลิงก์เสีย) */
@@ -213,7 +214,7 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
   const st = plainOnly ? "plain" : style;
   const addCats = () => {
     const have = new Set(links.map((l) => l.href));
-    const add = ctx.categories.filter((c) => !have.has(megaCategoryHref(c.key))).map((c) => newMegaLink(c.label, megaCategoryHref(c.key)));
+    const add = ctx.categories.filter((c) => !c.parent && !have.has(megaCategoryHref(c.key))).map((c) => newMegaLink(c.label, megaCategoryHref(c.key)));
     onChange([...links, ...add].slice(0, max));
   };
   return (
@@ -430,7 +431,7 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
                 <select className={mini} value={b.category} onChange={(e) => set({ category: e.target.value })}>
                   <option value="">ทุกหมวด</option>
                   {ctx.categories.map((c) => (
-                    <option key={c.key} value={c.key}>{c.label}</option>
+                    <option key={c.key} value={c.key}>{categoryChoiceLabel(c)}</option>
                   ))}
                 </select>
               </label>
@@ -779,7 +780,7 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
             disabled={tabs.length >= MEGA_LIMITS.tabs}
             onClick={() => {
               const have = new Set(tabs.map((t) => t.href));
-              const add = ctx.categories.filter((c) => !have.has(megaCategoryHref(c.key))).map((c) => ({ ...newMegaTab(c.label, megaCategoryHref(c.key)), cards: [newMegaCard(c.label, megaCategoryHref(c.key))] }));
+              const add = ctx.categories.filter((c) => !c.parent && !have.has(megaCategoryHref(c.key))).map((c) => ({ ...newMegaTab(c.label, megaCategoryHref(c.key)), cards: [newMegaCard(c.label, megaCategoryHref(c.key))] }));
               setTabs([...tabs, ...add].slice(0, MEGA_LIMITS.tabs));
             }}
             className="text-[11px] text-blue-600 hover:underline disabled:opacity-40"

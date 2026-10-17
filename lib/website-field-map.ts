@@ -10,6 +10,7 @@
  *          ถ้าเว้นว่าง → คำนวณจาก field_map (ดึงจาก Parent SKU / SKU ลูก)
  */
 import { normalizeWebCollections, type WebCollection } from "@/lib/website-collections";
+import { cleanParents, flattenTree } from "@/lib/website-category-tree";
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
 
@@ -89,6 +90,8 @@ export interface WebCategoryDef {
   seoTitle?: string;
   /** 🔎 คำอธิบายใต้ชื่อใน Google (≤ 170 ตัว) — ว่าง = คำอธิบายหมวด (blurb) */
   seoDescription?: string;
+  /** 📂 หมวดแม่ (รหัส) — ว่าง = หมวดชั้นบน · ซ้อนได้ 2 ชั้น (lib/website-category-tree) · สินค้าในหมวดย่อยขึ้นในหมวดแม่ด้วย */
+  parent?: string | null;
 }
 
 /** r2 key ของรูปหมวด — ตัวอักษรที่ปลอดภัยเท่านั้น (ไม่ผ่าน = ไม่มีรูป) */
@@ -172,7 +175,7 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
   const catsRaw = Array.isArray(r.categories) ? (r.categories as unknown[]) : null;
   const seenKey = new Set<string>();
   const categories: WebCategoryDef[] = (catsRaw ?? [])
-    .slice(0, 40)
+    .slice(0, 80)
     .map((c) => {
       const o = (c ?? {}) as Record<string, unknown>;
       return {
@@ -187,10 +190,12 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
           : [],
         seoTitle: str(o.seoTitle).replace(/\s+/g, " ").trim().slice(0, 70),
         seoDescription: str(o.seoDescription).replace(/\s+/g, " ").trim().slice(0, 170),
+        parent: cleanCategoryKey(o.parent) || null,
       };
     })
     .filter((c) => c.key && c.label && !seenKey.has(c.key) && seenKey.add(c.key) !== undefined);
-  const cats = catsRaw ? categories : d.categories;
+  // 📂 หมวดย่อย: แม่ที่ใช้ไม่ได้ → เป็นหมวดชั้นบน · เรียง array แบบต้นไม้ (แม่ตามด้วยลูก) ให้ลำดับตรงกับที่เห็น
+  const cats = catsRaw ? flattenTree(cleanParents(categories)) : d.categories;
   const catKeys = cats.map((c) => c.key);
 
   // กฎจับหมวด: เก็บเฉพาะที่ชี้ไปหมวดที่ยังมีอยู่จริง (ลบหมวดแล้วกฎเก่าต้องไม่ค้าง)

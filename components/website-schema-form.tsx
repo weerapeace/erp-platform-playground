@@ -10,6 +10,7 @@
  * จัดกลุ่มช่องเป็นหมวด (เนื้อหา / รูป / ปุ่ม / การจัดวาง / สินค้า) · รองรับ showIf (โชว์เมื่อช่องอื่นเป็นค่าที่กำหนด)
  */
 import { ImageCropBox, CropZoom } from "@/components/image-crop-box";
+import { categoryChoiceLabel } from "@/lib/website-category-tree";
 import { useMemo } from "react";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
@@ -26,7 +27,8 @@ export interface SchemaFormContext {
   /** ชื่อร้าน (ใช้ในคำสั่งแนะนำ AI) */
   shopName?: string;
   /** หมวดสินค้าบนเว็บของร้าน (จากแท็บจับคู่ฟิลด์) */
-  categories: { key: string; label: string }[];
+  /** parent = หมวดแม่ (หมวดย่อย) — รายการเรียงแบบต้นไม้ */
+  categories: { key: string; label: string; parent?: string | null }[];
   /** Section ในหน้าที่กำลังจัด (ช่อง "กดแล้วไปที่ → เลื่อนไปส่วนอื่นในหน้านี้") */
   sections?: { id: string; label: string }[];
 }
@@ -376,7 +378,7 @@ export function SchemaField({
                     className={`rounded-full border px-2.5 py-1 text-xs ${i >= 0 ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-600 hover:border-slate-500"}`}
                   >
                     {i >= 0 && <span className="mr-1 tabular-nums">{i + 1}.</span>}
-                    {c.label}
+                    {categoryChoiceLabel(c)}
                   </button>
                 );
               })}
@@ -393,7 +395,7 @@ export function SchemaField({
           <select className={inputCls} value={s} onChange={(e) => onChange(e.target.value)}>
             <option value="">— เลือกหมวด —</option>
             {ctx.categories.map((c) => (
-              <option key={c.key} value={c.key}>{c.label}</option>
+              <option key={c.key} value={c.key}>{categoryChoiceLabel(c)}</option>
             ))}
           </select>
         </Field>

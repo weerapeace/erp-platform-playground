@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf } from "@/lib/website-links";
 import type { SchemaFormContext } from "@/components/website-schema-form";
+import { categoryChoiceLabel } from "@/lib/website-category-tree";
 
 type Kind = "none" | "page" | "category" | "product" | "section" | "url";
 
@@ -111,7 +112,7 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
             {!catKey && <option value="">— เลือกหมวด —</option>}
             {ctx.categories.map((c) => (
               <option key={c.key} value={c.key}>
-                {c.label}
+                {categoryChoiceLabel(c)}
               </option>
             ))}
           </select>

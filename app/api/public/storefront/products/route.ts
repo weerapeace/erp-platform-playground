@@ -36,6 +36,7 @@ import { rowToTone, tonesOfLabel, TONE_SELECT } from "@/lib/color-tone";
 import { productSlug } from "@/lib/website-links";
 import { badgeColorOf } from "@/lib/website-card-badges";
 import { readCardBadges } from "@/lib/website-card-badges-db";
+import { withParentCategories } from "@/lib/website-category-tree";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -221,8 +222,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         listedAt: typeof l.created_at === "string" ? l.created_at : null,
         unit: r.unit,
         category: r.category,
-        /** 📂 ทุกหมวดที่อยู่ (หลายหมวดได้ · ตัวแรก = category) — หน้าร้านกรองหมวดด้วยรายการนี้ */
-        categories: r.categories,
+        /** 📂 ทุกหมวดที่อยู่ (หลายหมวดได้ · ตัวแรก = category) + หมวดแม่ของหมวดย่อย (สินค้าในหมวดย่อยขึ้นในหน้าหมวดแม่ด้วย) — หน้าร้านกรองหมวดด้วยรายการนี้ */
+        categories: withParentCategories(fieldMap.categories, r.categories),
         badge: String(l.web_badge ?? "").trim(),
         /** 🏷 สีป้าย (ตามรายการป้ายของร้าน · ป้ายนอกรายการ = ไม่ส่ง → สีป้ายปกติของธีม) */
         badgeColor: badgeColorOf(cardBadges, l.web_badge as string | null) ?? undefined,

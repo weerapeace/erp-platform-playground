@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { categoryChoiceLabel } from "@/lib/website-category-tree";
 import { useToast } from "@/components/toast";
 import { contrastRatio, wcagLevel, WCAG_LABEL, suggestReadable, shades, darken } from "@/lib/color-utils";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
@@ -259,7 +260,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [sampleItems, setSampleItems] = useState<SampleItem[]>([]);
   const [liveProducts, setLiveProducts] = useState<(MegaEditorCtx["liveProducts"][number] & { collection?: string | null })[]>([]);
   // 🧭 หมวด(+รูป)/คอลเลกชัน/โทนสี ของร้าน (API สาธารณะชุดเดียวกับเว็บร้าน) — รายการอัตโนมัติในแผงเมนู
-  const [shopLists, setShopLists] = useState<{ categories: { key: string; label: string; imageKey: string | null }[]; collections: { id: string; slug: string; label: string; imageKey: string | null }[]; tones: { key: string; name: string; hex: string }[] } | null>(null);
+  const [shopLists, setShopLists] = useState<{ categories: { key: string; label: string; imageKey: string | null; parent?: string | null }[]; collections: { id: string; slug: string; label: string; imageKey: string | null }[]; tones: { key: string; name: string; hex: string }[] } | null>(null);
   useEffect(() => {
     fetch(`/api/public/storefront/site?shop=${encodeURIComponent(shopSlug)}`)
       .then((r) => r.json())
@@ -267,7 +268,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         const arr = (v: unknown) => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
         const str = (v: unknown) => (typeof v === "string" ? v : "");
         setShopLists({
-          categories: arr(j?.categories).map((c) => ({ key: str(c.key), label: str(c.label), imageKey: str(c.imageKey) || null })).filter((c) => c.key),
+          categories: arr(j?.categories).map((c) => ({ key: str(c.key), label: str(c.label), imageKey: str(c.imageKey) || null, parent: str(c.parent) || null })).filter((c) => c.key),
           collections: arr(j?.collections).map((c) => ({ id: str(c.id), slug: str(c.slug), label: str(c.title) || str(c.name), imageKey: str(c.bannerKey) || null })).filter((c) => c.slug),
           tones: arr(j?.colorTones).map((t) => ({ key: str(t.key), name: str(t.name), hex: str(t.hex) || "#888888" })).filter((t) => t.key),
         });
@@ -297,7 +298,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (!shopLists) return null;
     const inCat = (k: string) => liveProducts.filter((p) => p.category === k || (p.categories ?? []).includes(k)).length;
     return {
-      categories: shopLists.categories.map((c) => ({ ...c, count: inCat(c.key) })),
+      categories: shopLists.categories.filter((c) => !c.parent).map((c) => ({ key: c.key, label: c.label, imageKey: c.imageKey, count: inCat(c.key) })),
       collections: shopLists.collections.map((c) => ({ ...c, count: liveProducts.filter((p) => p.collection === c.id).length })),
       tones: shopLists.tones,
     };
@@ -1977,7 +1978,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                                       const on = it.categories.includes(c.key);
                                       return (
                                         <button key={c.key} onClick={() => setDetailItem(it.id, { categories: on ? it.categories.filter((k) => k !== c.key) : [...it.categories, c.key] })} className={`px-2.5 py-1 rounded-full border text-xs ${on ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
-                                          {on ? "✓ " : ""}{c.label}
+                                          {on ? "✓ " : ""}{categoryChoiceLabel(c)}
                                         </button>
                                       );
                                     })}
@@ -3690,7 +3691,7 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
         return (
           <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value })}>
             <option value="">— เลือกหมวด —</option>
-            {(choices.categories ?? []).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            {(choices.categories ?? []).map((c) => <option key={c.key} value={c.key}>{categoryChoiceLabel(c)}</option>)}
           </select>
         );
       case "product":
