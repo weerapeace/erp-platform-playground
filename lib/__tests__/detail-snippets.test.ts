@@ -73,3 +73,36 @@ describe("product-materials", () => {
     expect("care" in p).toBe(false);
   });
 });
+
+describe("detail-snippets — ขนาด/น้ำหนัก/ใส่ได้ (แท็บใหม่ในป๊อปแทรก)", () => {
+  it("ขนาด: ข้ามช่องว่าง/0 · ทศนิยมตัด 0 ท้าย · ไม่มีเลย = null", async () => {
+    const { sizeLine, weightLine, fitLine } = await import("@/lib/detail-snippets");
+    expect(sizeLine({ w: 30, h: "20", d: 10.5 }, "th")).toBe("ขนาด: กว้าง 30 × สูง 20 × หนา 10.5 ซม.");
+    expect(sizeLine({ w: 30, h: 0, d: "" }, "en")).toBe("Size: W 30 cm");
+    expect(sizeLine({}, "th")).toBeNull();
+    expect(weightLine(1250, "th")).toBe("น้ำหนัก: 1,250 กรัม");
+    expect(weightLine("450", "en")).toBe("Weight: 450 g");
+    expect(weightLine(0, "th")).toBeNull();
+    expect(fitLine(["iPad (11 นิ้ว)", "เอกสาร A4"], "th")).toBe("ใส่ได้: iPad (11 นิ้ว), เอกสาร A4");
+    expect(fitLine([], "en")).toBeNull();
+  });
+  it("รวมบรรทัด: เรียง ข้อความ → … → ขนาด → น้ำหนัก → ใส่ได้ · อังกฤษของ 'ใส่ได้' ขาด = นับว่าขาด", () => {
+    const out = composeLines({ phrases: [], materials: [], slots: [], size: { w: 30, h: 20 }, weight: 450, fits: { th: ["เอกสาร A4"], en: null } });
+    expect(out.th).toEqual(["- ขนาด: กว้าง 30 × สูง 20 ซม.", "- น้ำหนัก: 450 กรัม", "- ใส่ได้: เอกสาร A4"]);
+    expect(out.en).toEqual(["- Size: W 30 × H 20 cm", "- Weight: 450 g"]);
+    expect(out.enMissing).toBe(1);
+  });
+});
+
+describe("ใส่อะไรได้ — ขนาดฝั่งอังกฤษ", () => {
+  it("หน่วยไทย → อังกฤษ (ฝั่งไทยคงเดิม)", async () => {
+    const { fitLabels, fitSizeEn } = await import("@/lib/product-fits");
+    expect(fitSizeEn("11 นิ้ว")).toBe('11"');
+    expect(fitSizeEn("500 มล.")).toBe("500 ml");
+    expect(fitSizeEn("ถึง 6.7 นิ้ว")).toBe('up to 6.7"');
+    const id = "00000000-0000-0000-0000-000000000001";
+    const cat = [{ id, name: "ไอแพด", name_en: "iPad" }];
+    expect(fitLabels([{ id, size: "11 นิ้ว" }], cat, "en")).toEqual(['iPad (11")']);
+    expect(fitLabels([{ id, size: "11 นิ้ว" }], cat)).toEqual(["ไอแพด (11 นิ้ว)"]);
+  });
+});

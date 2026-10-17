@@ -40,6 +40,16 @@ export const fitSizeOptions = (item: Pick<FitItem, "sizes"> | null | undefined):
     .filter(Boolean)
     .slice(0, 20);
 
+/** ขนาดภาษาอังกฤษ: หน่วยไทยทั่วไป → อังกฤษ ("11 นิ้ว" → 11" · "500 มล." → 500 ml) · คำอื่นคงเดิม */
+export const fitSizeEn = (size: string): string =>
+  size
+    .replace(/\s*นิ้ว/g, '"')
+    .replace(/\s*ซม\.?/g, " cm")
+    .replace(/\s*มล\.?/g, " ml")
+    .replace(/\s*ลิตร/g, " L")
+    .replace(/^ถึง\s*/, "up to ")
+    .trim();
+
 /** ข้อความ "ใส่ได้" เช่น ["สมาร์ทโฟน (ถึง 6.7 นิ้ว)", "กระเป๋าสตางค์ (ใบยาว)"] — รายการที่ถูกลบ/ปิดไปแล้วจะถูกข้าม */
 export function fitLabels(fits: unknown, catalog: FitItem[], lang: "th" | "en" = "th"): string[] {
   const byId = new Map(catalog.map((c) => [c.id, c]));
@@ -48,7 +58,8 @@ export function fitLabels(fits: unknown, catalog: FitItem[], lang: "th" | "en" =
     const it = byId.get(f.id);
     if (!it || it.is_active === false) continue;
     const name = (lang === "en" && it.name_en?.trim()) || it.name;
-    out.push(f.size ? `${name} (${f.size})` : name);
+    const size = f.size ? (lang === "en" ? fitSizeEn(f.size) : f.size) : "";
+    out.push(size ? `${name} (${size})` : name);
   }
   return out;
 }

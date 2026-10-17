@@ -2838,21 +2838,43 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const langPair = (f: FieldDef) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "");
           const enKeys = new Set(baseVisible.map(langPair).filter(Boolean));
           // 📝 ปุ่ม "＋ แทรก" ข้างหัวข้อ (ทะเบียนฟิลด์ ui_style.insert_details) → แทรกช่องไทย + คู่อังกฤษ (ถ้ามี) ในคราวเดียว
-          //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (quickSave ทีละช่อง · audit ของกลางเหมือนดับเบิลคลิกแก้)
+          //   + แท็บขนาด/น้ำหนัก/ใส่อะไรได้ บันทึกกลับช่องของระเบียน (fields) — เฉพาะช่องที่ฟอร์มนี้มีและแก้ได้ (writable)
+          //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (PATCH ครั้งเดียวทุกช่อง · audit ของกลางที่ API)
+          const INSERT_WRITABLE = ["size_length_cm", "size_height_cm", "size_thickness_cm", "weight_g", "fits"];
           const insertBtn = (f: FieldDef, enKey: string): React.ReactNode => {
             if (!(f.uiStyle as Record<string, unknown> | undefined)?.insert_details) return null;
             if (!canEdit || f.readonly || (drawerMode === "view" && !editingId)) return null;
             const viewMode = drawerMode === "view";
+            const writable = INSERT_WRITABLE.filter((k) => effectiveFields.some((x) => x.key === k && !x.readonly));
             return (
               <DetailInsertButton thText={String(form[f.key] ?? "")} enText={enKey ? String(form[enKey] ?? "") : ""} hasEn={!!enKey}
                 saveLabel={viewMode ? tr("แทรกและบันทึก", "Insert & save") : undefined}
-                onApply={async ({ th, en }) => {
+                values={form} writable={writable}
+                onApply={async ({ th, en, fields }) => {
                   const withEn = !!enKey && en !== undefined;
-                  if (!viewMode) { updateForm({ [f.key]: th, ...(withEn ? { [enKey]: en } : {}) }); return true; }
-                  const e1 = await quickSave(f.key, th);
-                  if (e1) { fail(e1); return false; }
-                  if (withEn) { const e2 = await quickSave(enKey, en ?? ""); if (e2) { fail(e2); return false; } }
-                  flash(tr("แทรกรายละเอียดแล้ว", "Details inserted"));
+                  const patch: Record<string, unknown> = { [f.key]: th, ...(withEn ? { [enKey]: en } : {}), ...(fields ?? {}) };
+                  if (!viewMode) { updateForm(patch); return true; }
+                  // ตัวเลข: REST = number · แบบเก่า = string (เหมือน onInlineEdit)
+                  const body: Record<string, unknown> = {};
+                  for (const [k, v] of Object.entries(patch)) {
+                    const def = effectiveFields.find((x) => x.key === k);
+                    body[k] = def?.type === "number" && v != null && !isRest ? String(v) : v;
+                  }
+                  try {
+                    const res = await apiFetch(`${apiBase}${config.apiPath}/${editingId}`, {
+                      method: "PATCH", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ ...body, actor: user?.name }),
+                    });
+                    const json = await res.json();
+                    if (json.error) { fail(json.error); return false; }
+                  } catch (e) {
+                    fail(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed"));
+                    return false;
+                  }
+                  setForm((p) => ({ ...p, ...patch }));
+                  setRows((prev) => prev.map((r) => (r.id === editingId ? ({ ...r, ...patch } as Row) : r)));
+                  const extra = Object.keys(fields ?? {}).length;
+                  flash(extra ? tr(`แทรกรายละเอียดแล้ว + อัปเดต ${extra} ช่อง`, `Details inserted + ${extra} fields updated`) : tr("แทรกรายละเอียดแล้ว", "Details inserted"));
                   return true;
                 }} />
             );
