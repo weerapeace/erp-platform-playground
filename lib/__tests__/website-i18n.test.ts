@@ -65,6 +65,19 @@ describe("content-i18n — กฎกลาง", () => {
     expect(translationStatus(o.title, o.title_en, meta())).toBe("stale");
   });
 
+  it("อังกฤษที่กรอกตอนไทยยังว่าง แล้วค่อยเติมไทย = ใช้ได้ (ไม่ใช่ ไทยเปลี่ยน) · แปลมาแล้วไทยเปลี่ยนจริง = ไทยเปลี่ยน", () => {
+    // เขียนอังกฤษก่อน (ไทยว่าง) → เติมไทยทีหลัง
+    let o: Record<string, unknown> = { blurb: "" };
+    o = { ...o, ...translationPatch(o, "blurb", o.blurb, "Explore our wallets", false) };
+    o = { ...o, blurb: "ค้นพบกระเป๋าสตางค์" };
+    const m = () => (o._i18n as Record<string, { h: string; ai?: boolean }>).blurb;
+    expect(translationStatus(o.blurb, o.blurb_en, m())).toBe("ok");
+    // AI แปลตอนไทยว่าง (ไม่น่าเกิด) → ยังเป็น รอตรวจ ไม่ใช่ ไทยเปลี่ยน
+    expect(translationStatus("ค้นพบ", "Explore", { h: textFingerprint(""), ai: true })).toBe("ai");
+    // แปลจากไทยฉบับหนึ่ง แล้วไทยถูกแก้ = ไทยเปลี่ยน เหมือนเดิม
+    expect(translationStatus("ไทยใหม่", "Old", { h: textFingerprint("ไทยเก่า") })).toBe("stale");
+  });
+
   it("ล้างคำแปลจนว่าง = สถานะของช่องนั้นหายไปด้วย", () => {
     const o = { title: "ก", title_en: "A", _i18n: { title: { h: textFingerprint("ก"), ai: true } } };
     const p = translationPatch(o, "title", "ก", "", false);

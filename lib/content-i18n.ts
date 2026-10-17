@@ -67,10 +67,17 @@ export function readMeta(obj: Record<string, unknown> | null | undefined): I18nM
   return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as I18nMeta) : {};
 }
 
-/** สถานะคำแปลของ 1 ช่อง */
+/** ลายนิ้วมือของข้อความว่าง — กรอกอังกฤษตอนที่ไทยยังว่าง จะได้ค่านี้ */
+const EMPTY_FP = textFingerprint("");
+
+/**
+ * สถานะคำแปลของ 1 ช่อง
+ * "ไทยเปลี่ยน" (stale) = ไทยถูกแก้หลังแปลเท่านั้น — อังกฤษที่กรอกตอนไทยยังว่าง (เขียนอังกฤษก่อน แล้วค่อยเติมไทย)
+ * ไม่ได้แปลมาจากไทยฉบับไหน → ถือว่าใช้ได้ ไม่ขึ้น "ไทยเปลี่ยน" และปุ่ม "แปลที่ยังขาด" จะไม่เขียนทับ
+ */
 export function translationStatus(th: unknown, en: unknown, meta?: I18nMetaEntry | null): TranslationStatus {
   if (!hasText(en)) return "empty";
-  if (meta && hasText(th) && meta.h !== textFingerprint(th)) return "stale";
+  if (meta && hasText(th) && meta.h !== EMPTY_FP && meta.h !== textFingerprint(th)) return "stale";
   if (meta?.ai) return "ai";
   return "ok";
 }
