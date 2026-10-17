@@ -238,7 +238,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     else next.add(key);
     saveCollapsed(next);
   };
-  // เลือกหมวดย่อยที่ถูกพับอยู่ (เช่น เพิ่งสร้างหมวดย่อยใหม่) → กางแม่ให้เห็น
+  // เลือก/สร้างหมวดย่อยในกลุ่มที่พับอยู่ → กางแม่ให้เห็น (ทุกครั้งที่เปลี่ยนหมวดที่เลือก · พับเองทีหลังได้)
   useEffect(() => {
     if (sel?.parent && collapsed.has(sel.parent)) {
       const next = new Set(collapsed);
@@ -246,7 +246,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
       saveCollapsed(next);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel?.parent]);
+  }, [selKey]);
 
   /**
    * ↪ ย้าย (แทนที่หมวดนี้ด้วยหมวดปลายทาง — ตำแหน่งเดิม หมวดหลักยังเป็นหมวดหลัก) หรือ copy = เพิ่มเข้าอีกหมวด (คงหมวดนี้ไว้)
@@ -361,7 +361,9 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
             if (depth > 0 && c.parent && collapsed.has(c.parent) && c.key !== selKey) return null;
             const kids = depth === 0 ? kidsOf.get(c.key) ?? 0 : 0;
             const folded = kids > 0 && collapsed.has(c.key);
-            const lastOfGroup = c.key === selTop || c.parent === selTop ? folded || !rows[i + 1] || rows[i + 1].depth === 0 : false;
+            // ปุ่ม ➕ หมวดย่อย = ท้ายกลุ่มที่เห็นจริง: แม่พับ+เลือกแม่ → ใต้แม่ · แม่พับ+เลือกหมวดย่อย (ยังโชว์แถวเดียว) → ใต้หมวดย่อยนั้น
+            const parentFolded = depth > 0 && !!c.parent && collapsed.has(c.parent);
+            const lastOfGroup = c.key === selTop || c.parent === selTop ? (folded ? selKey === c.key : parentFolded || !rows[i + 1] || rows[i + 1].depth === 0) : false;
             return (
               <div key={c.key}>
                 <div
