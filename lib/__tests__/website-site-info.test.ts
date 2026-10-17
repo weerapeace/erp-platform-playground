@@ -147,6 +147,6 @@ describe("website-orders", () => {
   it("pickSku: ไม่มีตัวเลือก → ใช้ SKU ตัวแรก · รหัสมั่ว → ไม่พัง", () => {
     expect(pickSku(kids)).toMatchObject({ sku: { code: "X-01" }, variantLabel: null });
     expect(pickSku(kids, "custom-1")).toMatchObject({ sku: { code: "X-01" }, variantLabel: null });
-    expect(pickSku([], "sku-aaaaaaaa")).toEqual({ sku: null, variantLabel: null });
+    expect(pickSku([], "sku-aaaaaaaa")).toEqual({ sku: null, variantLabel: null, variantParts: [] });
   });
 });

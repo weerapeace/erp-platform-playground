@@ -1,6 +1,6 @@
 /**
  * 👤 ออเดอร์ของสมาชิก — /api/storefront-member/orders
- * GET  → { ok, orders: OrderView[] } (ผูกกับบัญชี + ออเดอร์เก่าที่อีเมลตรงกับอีเมลที่ยืนยันแล้ว)
+ * GET  [?lang=en] → { ok, orders: OrderView[] } (🌐 lang = ภาษาที่โชว์ชื่อสินค้า · ไม่ส่ง = ภาษาที่สั่ง) (ผูกกับบัญชี + ออเดอร์เก่าที่อีเมลตรงกับอีเมลที่ยืนยันแล้ว)
  * POST { orderNo, phone } → ผูกออเดอร์เก่าเข้าบัญชี (ต้องรู้ทั้งเลขที่และเบอร์ เหมือนหน้าตามออเดอร์ · ออเดอร์ที่ผูกคนอื่นแล้วผูกไม่ได้)
  *      ⭐ ออเดอร์ที่ "สำเร็จ" แล้วภายใน 12 เดือน = ได้แต้มย้อนหลัง (ถ้าร้านเปิดแต้มอยู่)
  * ด่าน: กุญแจภายใน + สมาชิก
@@ -10,6 +10,7 @@ import { guardMember, storefrontJson } from "@/lib/storefront-internal";
 import { memberOrderRows } from "@/lib/website-members-db";
 import { toOrderView, type ItemRow, type OrderRow } from "@/lib/website-orders";
 import { readSiteInfo } from "@/lib/website-site-info";
+import { customerLang } from "@/lib/customer-messages";
 import { syncOrderPoints } from "@/lib/member-points-db";
 
 export const dynamic = "force-dynamic";
@@ -20,12 +21,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rows = await memberOrderRows<OrderRow & { customer_id: string | null; customer_email: string | null }>(g.sb, g.shop.id, g.member, "*");
   if (!rows.length) return storefrontJson({ ok: true, orders: [] }, 200);
   const [{ data: items }, info] = await Promise.all([
-    g.sb.from("store_order_items").select("order_id, name, variant_label, unit_price, qty, line_total").in("order_id", rows.map((r) => r.id)).order("id"),
+    g.sb.from("store_order_items").select("order_id, name, variant_label, name_en, variant_label_en, unit_price, qty, line_total").in("order_id", rows.map((r) => r.id)).order("id"),
     readSiteInfo(g.sb, g.shop.id),
   ]);
   const byOrder = new Map<string, ItemRow[]>();
   for (const it of (items ?? []) as (ItemRow & { order_id: string })[]) byOrder.set(it.order_id, [...(byOrder.get(it.order_id) ?? []), it]);
-  return storefrontJson({ ok: true, orders: rows.map((r) => toOrderView(r, byOrder.get(r.id) ?? [], info)) }, 200);
+  const lang = new URL(request.url).searchParams.get("lang");
+  const view = lang ? customerLang(lang) : undefined;
+  return storefrontJson({ ok: true, orders: rows.map((r) => toOrderView(r, byOrder.get(r.id) ?? [], info, view)) }, 200);
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

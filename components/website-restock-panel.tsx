@@ -3,6 +3,7 @@
  * 🔔 รายชื่อ "แจ้งฉันเมื่อมีของ" (ของกลาง) — ลูกค้าฝากอีเมล/เบอร์/LINE ไว้ที่หน้าสินค้าที่ตั้ง "สินค้าหมด"
  *   ใช้ที่: แท็บ "🏪 ข้อมูลร้าน" (ทุกสินค้าของร้าน) · drawer สินค้าบนเว็บ (parentId = เฉพาะรุ่นนั้น ผ่าน RestockBadge)
  *   ทีมติดต่อเอง → ติ๊ก "แจ้งแล้ว" (เก็บเวลา+คนแจ้ง) · ยกเลิก · ลบ (ConfirmDialog) · คัดลอกช่องทาง
+ *   💬 คัดลอกข้อความ "ของเข้าแล้ว" ในภาษาที่ลูกค้าใช้ตอนฝากชื่อ (ป้าย EN = ลูกค้าหน้าอังกฤษ · ถ้อยคำ lib/customer-messages)
  * API: /api/website/restock · ตรวจค่า lib/website-restock · ตาราง store_restock_requests
  */
 import { useCallback, useEffect, useState } from "react";
@@ -11,6 +12,8 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { RESTOCK_CONTACTS, RESTOCK_STATUS_LABEL, formatRestockContact, type RestockContactType, type RestockStatus } from "@/lib/website-restock";
+import { localizedUrl, restockMessage } from "@/lib/customer-messages";
+import { productHref } from "@/lib/website-links";
 
 type Row = {
   id: string;
@@ -23,7 +26,10 @@ type Row = {
   notified_at: string | null;
   notified_by: string | null;
   created_at: string;
-  product: { code: string; name: string };
+  /** 🌐 ภาษาที่ลูกค้าใช้ตอนฝากชื่อ */
+  lang?: "th" | "en";
+  option_en?: string | null;
+  product: { code: string; name: string; name_en?: string };
 };
 type Counts = Record<RestockStatus, number>;
 type Scope = { shopId?: string; shopSlug?: string; parentId?: string };
@@ -43,6 +49,7 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
   const [err, setErr] = useState<string | null>(null);
   const [del, setDel] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
+  const [msgCtx, setMsgCtx] = useState<{ shopName: string; siteUrl: string | null }>({ shopName: "", siteUrl: null });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +58,7 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
       if (j.error) throw new Error(j.error);
       setRows(j.rows ?? []);
       setCounts(j.counts);
+      if (j.messaging) setMsgCtx(j.messaging);
       onCounts?.(j.counts);
       setErr(null);
     } catch (e) {
@@ -157,6 +165,28 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
                   )}
                   <button type="button" onClick={() => void copy(shown, t?.label ?? "")} className="text-[11px] text-slate-400 hover:text-slate-700" title="คัดลอก">📋</button>
                   {r.name && <span className="text-[11px] text-slate-400 truncate">· {r.name}</span>}
+                  {r.lang === "en" && <span className="text-[10px] px-1 rounded bg-sky-100 text-sky-700" title="ลูกค้าฝากชื่อจากหน้าเว็บภาษาอังกฤษ — ตอบเป็นภาษาอังกฤษ">EN</span>}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lang = r.lang === "en" ? "en" : "th";
+                      const text = restockMessage(
+                        {
+                          productName: (lang === "en" && r.product.name_en) || r.product.name || r.product.code,
+                          option: (lang === "en" && r.option_en) || r.option_label,
+                          productUrl: r.product.code ? localizedUrl(msgCtx.siteUrl, productHref(r.product.code), lang) : null,
+                          customerName: r.name,
+                        },
+                        { name: msgCtx.shopName },
+                        lang
+                      );
+                      void copy(text, lang === "en" ? "ข้อความแจ้ง (อังกฤษ)" : "ข้อความแจ้ง");
+                    }}
+                    className="text-[11px] text-slate-400 hover:text-slate-700 shrink-0"
+                    title={r.lang === "en" ? "คัดลอกข้อความ \"ของเข้าแล้ว\" ภาษาอังกฤษ" : "คัดลอกข้อความ \"ของเข้าแล้ว\""}
+                  >
+                    💬
+                  </button>
                 </div>
               );
             },

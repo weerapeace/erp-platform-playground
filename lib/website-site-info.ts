@@ -74,6 +74,7 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "promptpay_number", label: "เลขพร้อมเพย์", hint: "เบอร์โทรหรือเลขบัตรประชาชน/นิติบุคคล — ลูกค้าเห็นตอนสั่งซื้อ", group: "order", type: "text", isPublic: true },
   { key: "promptpay_name", label: "ชื่อบัญชีพร้อมเพย์", group: "order", type: "text", isPublic: true },
   { key: "order_note", label: "ข้อความแจ้งลูกค้าตอนสั่งซื้อ", hint: "เช่น จัดส่งภายใน 1-2 วันทำการหลังยืนยันยอด", group: "order", type: "text", isPublic: true, i18n: true },
+  { key: "order_email_enabled", label: "✉️ ส่งอีเมลแจ้งลูกค้าอัตโนมัติ", hint: "ส่งตอนสั่งซื้อ · ได้รับชำระเงิน · จัดส่งแล้ว · ยกเลิก · คืนเงิน — เป็นภาษาที่ลูกค้าใช้ตอนสั่ง (ไทย/อังกฤษ) · เฉพาะลูกค้าที่กรอกอีเมล · ต้องตั้งระบบส่งอีเมล (Resend) ก่อน · ปิดไว้ก็ยังกดส่ง/คัดลอกข้อความเองได้ในแท็บออเดอร์", group: "order", type: "bool", isPublic: false },
   { key: "order_prefix", label: "ตัวย่อเลขที่ออเดอร์", hint: "A-Z 0-9 ไม่เกิน 6 ตัว · เว้นว่าง = ใช้ตัวอักษรจากชื่อร้าน · เลขจะเป็น XX-256910-00001", group: "order", type: "text", isPublic: false },
 
   // ─── 🎀 ห่อของขวัญ (เว็บร้าน CheckoutClient · คิดค่าห่อใหม่ฝั่งเซิร์ฟเวอร์ calcGiftFee ใน createStorefrontOrder) ───
@@ -141,6 +142,7 @@ export interface SiteInfo {
   promptpay_number: string;
   promptpay_name: string;
   order_note: string;
+  order_email_enabled: boolean;
   order_prefix: string;
   gift_enabled: boolean;
   gift_fee: number;
@@ -195,6 +197,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   promptpay_number: "",
   promptpay_name: "",
   order_note: "",
+  order_email_enabled: false,
   order_prefix: "",
   gift_enabled: false,
   gift_fee: 0,

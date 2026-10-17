@@ -7,6 +7,8 @@
  * เปลี่ยนสถานะ / สถานะชำระเงิน / โน้ตภายใน — ทุกการแก้มี audit
  * 🎀 ออเดอร์ห่อของขวัญ: ป้ายในตาราง + กล่องข้อความการ์ด (คัดลอกได้) + เตือน "ไม่ใส่ราคาในกล่อง" (ตั้งบริการที่แท็บ 🏪 ข้อมูลร้าน)
  * ไม่มีปุ่มลบ: ออเดอร์มีเลขที่ที่ลูกค้าถืออยู่ → ใช้ "ยกเลิก" แทน (ยังค้นย้อนได้)
+ * 🌐 ป้าย EN = ลูกค้าสั่งจากหน้าภาษาอังกฤษ · 💬 ข้อความถึงลูกค้า (คัดลอกไปส่ง LINE/SMS · ✉️ ส่งอีเมล) เป็นภาษาของลูกค้าเสมอ
+ *    ถ้อยคำ lib/customer-messages · อีเมล lib/order-notify (อัตโนมัติเมื่อร้านเปิดที่แท็บ 🏪 ข้อมูลร้าน)
  * ข้อมูล: /api/website/orders
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,6 +19,7 @@ import { ERPModal } from "@/components/modal";
 import { CopyButton } from "@/components/copy-button";
 import { GiftCardPreview } from "@/components/website-gift-cards-editor";
 import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type OrderGiftCard } from "@/lib/website-gift-cards";
+import { CUSTOMER_LANG_LABEL, ORDER_EVENTS, currentOrderEvent, orderMessage, type OrderEvent } from "@/lib/customer-messages";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -48,6 +51,20 @@ type Order = {
   createdAt: string;
   erpSoNumber: string | null;
   skuCodes: string[];
+  /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง */
+  lang?: "th" | "en";
+  /** ชื่อสินค้าในภาษาของลูกค้า (ไว้ทำข้อความ) */
+  msgItems?: Line[];
+  promptpay?: { number: string; name: string } | null;
+};
+type Messaging = {
+  shopName: string;
+  siteUrl: string | null;
+  orderNote: { th: string; en: string };
+  contactLine: string;
+  contactPhone: string;
+  autoEmail: boolean;
+  emailReady: boolean;
 };
 type StatusDef = { key: string; label: string; tone: string };
 
@@ -67,6 +84,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
+  const [messaging, setMessaging] = useState<Messaging | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,6 +100,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
       setStatuses(j.statuses ?? []);
       setPayStatuses(j.paymentStatuses ?? []);
       setMethods(j.paymentMethods ?? {});
+      setMessaging(j.messaging ?? null);
     } catch {
       toast.error("โหลดออเดอร์ไม่สำเร็จ");
     } finally {
@@ -119,6 +138,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
       const ptsMsg = pts.map((p) => `${p.kind === "earn" ? "สมาชิกได้" : p.kind === "revoke" ? "เรียกคืน" : p.kind === "refund" ? "คืนแต้มที่ใช้" : "หักแต้มที่ใช้"} ${Math.abs(p.delta).toLocaleString("th-TH")} แต้ม`).join(" · ");
       toast.success(ptsMsg ? `${okMsg} · ⭐ ${ptsMsg}` : okMsg);
       if (j.warning) toast.error(j.warning);
+      // ✉️ แจ้งลูกค้าอัตโนมัติ: บอกผล (ส่งแล้ว/ทำไมไม่ได้ส่ง) — ร้านไม่ได้เปิด = เงียบ
+      if (j.notifyMsg) (j.notify?.sent ? toast.success : toast.error)(j.notifyMsg);
       await load();
     } catch {
       toast.error("บันทึกไม่สำเร็จ");
@@ -183,7 +204,10 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
               width: "11rem",
               cell: (o) => (
                 <div>
-                  <p className="font-mono text-xs font-semibold text-slate-800">{o.orderNo}</p>
+                  <p className="font-mono text-xs font-semibold text-slate-800">
+                    {o.orderNo}
+                    {o.lang === "en" && <span className="ml-1 font-sans text-[10px] px-1 rounded bg-sky-100 text-sky-700" title="ลูกค้าสั่งจากหน้าเว็บภาษาอังกฤษ">EN</span>}
+                  </p>
                   <p className="text-[11px] text-slate-400">{when(o.createdAt)}</p>
                   {o.giftWrap && (
                     <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200">
@@ -263,6 +287,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
               </span>
               <span className="text-xs text-slate-500">สั่งเมื่อ {when(open.createdAt)}</span>
               {open.erpSoNumber && <span className="text-xs text-slate-500">ใบสั่งขาย ERP: {open.erpSoNumber}</span>}
+              {open.lang === "en" && <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">🌐 ลูกค้าสั่งจากหน้าภาษาอังกฤษ — ตอบเป็นภาษาอังกฤษ</span>}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -349,6 +374,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
               </section>
             </div>
 
+            {messaging && <OrderMessageBox key={open.id} order={open} messaging={messaging} />}
+
             <section className="rounded-xl border border-slate-200 p-3 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
@@ -408,6 +435,96 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
         )}
       </ERPModal>
     </div>
+  );
+}
+
+/** 💬 ข้อความถึงลูกค้า (ภาษาของลูกค้า) — เลือกเรื่อง → ดูข้อความ → คัดลอกไปส่ง LINE/SMS หรือ ✉️ ส่งอีเมล */
+function OrderMessageBox({ order, messaging }: { order: Order; messaging: Messaging }) {
+  const toast = useToast();
+  const lang = order.lang === "en" ? "en" : "th";
+  const [ev, setEv] = useState<OrderEvent>(() => currentOrderEvent(order));
+  const [sending, setSending] = useState(false);
+  const msg = useMemo(
+    () =>
+      orderMessage(
+        ev,
+        {
+          orderNo: order.orderNo,
+          customerName: order.customerName,
+          paymentMethod: order.paymentMethod,
+          paymentStatus: order.paymentStatus,
+          items: order.msgItems ?? order.items,
+          subtotal: order.subtotal,
+          shippingFee: order.shippingFee,
+          discount: order.discount,
+          giftFee: order.giftFee,
+          pointsDiscount: order.pointsDiscount,
+          grandTotal: order.grandTotal,
+          note: order.note,
+          promptpay: order.promptpay ?? null,
+        },
+        {
+          name: messaging.shopName,
+          siteUrl: messaging.siteUrl,
+          orderNote: lang === "en" ? messaging.orderNote.en || messaging.orderNote.th : messaging.orderNote.th,
+          contactLine: messaging.contactLine,
+          contactPhone: messaging.contactPhone,
+        },
+        lang
+      ),
+    [ev, order, messaging, lang]
+  );
+  const canEmail = !!order.customerEmail && messaging.emailReady;
+  const sendEmail = async () => {
+    setSending(true);
+    try {
+      const j = await apiFetch("/api/website/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.id, notify: ev }),
+      }).then((r) => r.json());
+      if (j.ok) toast.success(j.message || "ส่งอีเมลแล้ว");
+      else toast.error(j.error || "ส่งอีเมลไม่สำเร็จ");
+    } catch {
+      toast.error("ส่งอีเมลไม่สำเร็จ");
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <section className="rounded-xl border border-slate-200 p-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-xs font-semibold text-slate-500">💬 ข้อความถึงลูกค้า</h4>
+        <span className={`text-[11px] px-2 py-0.5 rounded-full ${lang === "en" ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-600"}`}>ภาษา{CUSTOMER_LANG_LABEL[lang]}</span>
+        <select className="ml-auto rounded-lg border border-slate-200 px-2 py-1 text-xs" value={ev} onChange={(e) => setEv(e.target.value as OrderEvent)} aria-label="เรื่องที่จะแจ้ง">
+          {ORDER_EVENTS.map((x) => (
+            <option key={x.key} value={x.key}>{x.label}</option>
+          ))}
+        </select>
+      </div>
+      <textarea readOnly value={msg.text} rows={7} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700 font-sans" />
+      <div className="flex flex-wrap items-center gap-2">
+        <CopyButton value={msg.text} label="📋 คัดลอกข้อความ" />
+        <button
+          type="button"
+          disabled={!canEmail || sending}
+          onClick={() => void sendEmail()}
+          title={!order.customerEmail ? "ลูกค้าไม่ได้กรอกอีเมล" : !messaging.emailReady ? "ยังไม่ได้ตั้งค่าระบบส่งอีเมล" : `ส่งไปที่ ${order.customerEmail}`}
+          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-400 disabled:opacity-40"
+        >
+          {sending ? "กำลังส่ง…" : "✉️ ส่งอีเมล"}
+        </button>
+        <p className="text-[11px] text-slate-400">
+          {!order.customerEmail
+            ? "ลูกค้าไม่ได้กรอกอีเมล — คัดลอกไปส่ง LINE/SMS"
+            : !messaging.emailReady
+              ? "ยังไม่ได้ตั้งระบบส่งอีเมล (Resend) — คัดลอกไปส่งเองได้"
+              : messaging.autoEmail
+                ? "อีเมลอัตโนมัติ: เปิด (ส่งเองตอนสั่ง/ชำระ/จัดส่ง/ยกเลิก/คืนเงิน)"
+                : "อีเมลอัตโนมัติ: ปิด — เปิดได้ที่แท็บ 🏪 ข้อมูลร้าน"}
+        </p>
+      </div>
+    </section>
   );
 }
 

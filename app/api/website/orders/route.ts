@@ -3,6 +3,9 @@
  *
  * GET   ?shop=<slug>[&status=pending|...|all]  → รายการออเดอร์ของร้าน (ล่าสุด 300) พร้อมรายการสินค้า
  * PATCH { orderId, status?, paymentStatus?, note? } → เปลี่ยนสถานะ/สถานะจ่าย/โน้ตภายใน + audit
+ *       เปลี่ยนสถานะแล้ว → ✉️ อีเมลแจ้งลูกค้าอัตโนมัติในภาษาที่ลูกค้าสั่ง (ถ้าร้านเปิด · lib/order-notify) → ตอบ notify
+ * PATCH { orderId, notify: "<เรื่อง>" } → พนักงานกดส่งอีเมลแจ้งลูกค้าเอง (ไม่ต้องเปิดอัตโนมัติ)
+ * GET ส่ง messaging (ชื่อร้าน/ลิงก์เว็บ/ข้อความร้าน) + msgItems (ชื่อสินค้าภาษาลูกค้า) ให้ปุ่ม "📋 คัดลอกข้อความถึงลูกค้า"
  *
  * ไม่มีลบ: ออเดอร์เป็นเอกสารที่ลูกค้าถืออยู่ (มีเลขที่) จึงให้ "ยกเลิก" (status=cancelled) แทน
  * ⭐ เปลี่ยนสถานะออเดอร์ของสมาชิก = ปรับแต้มให้อัตโนมัติ (สำเร็จ = ได้แต้ม · ถอย/ยกเลิก = เรียกคืน · ยกเลิก = คืนแต้มที่ใช้) — lib/member-points-db
@@ -15,6 +18,11 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { ORDER_STATUSES, PAYMENT_STATUSES, PAYMENT_METHOD_LABEL, toOrderView } from "@/lib/website-orders";
 import { syncOrderPoints } from "@/lib/member-points-db";
+import { readSiteInfo } from "@/lib/website-site-info";
+import { loadShopSiteUrls } from "@/lib/website-site-url";
+import { emailConfigured } from "@/lib/email";
+import { ORDER_EVENTS, customerLang, orderEventOf, type OrderEvent } from "@/lib/customer-messages";
+import { notifyOrderCustomer, notifyNote, type NotifyResult } from "@/lib/order-notify";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -38,7 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
@@ -53,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (ids.length) {
     const { data: items } = await sb
       .from("store_order_items")
-      .select("order_id, name, variant_label, sku_code, unit_price, qty, line_total")
+      .select("order_id, name, variant_label, name_en, variant_label_en, sku_code, unit_price, qty, line_total")
       .in("order_id", ids)
       .order("id");
     for (const it of (items ?? []) as Record<string, unknown>[]) {
@@ -68,22 +76,36 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const counts: Record<string, number> = {};
   for (const r of (allStatus ?? []) as { status: string }[]) counts[r.status] = (counts[r.status] ?? 0) + 1;
 
+  // 💬 ข้อมูลประกอบข้อความถึงลูกค้า (ปุ่มคัดลอก/ส่งอีเมล ในรายละเอียดออเดอร์)
+  const [info, urls] = await Promise.all([readSiteInfo(sb, s.id), loadShopSiteUrls(sb, [s.id])]);
+
   return NextResponse.json({
     shop: s,
     counts,
     statuses: ORDER_STATUSES,
     paymentStatuses: PAYMENT_STATUSES,
     paymentMethods: PAYMENT_METHOD_LABEL,
+    messaging: {
+      shopName: s.name,
+      siteUrl: urls.get(s.id) ?? null,
+      orderNote: { th: info.order_note, en: info.order_note_en || "" },
+      contactLine: info.contact_line,
+      contactPhone: info.contact_phone,
+      autoEmail: info.order_email_enabled,
+      emailReady: emailConfigured(),
+    },
     orders: rows.map((r) => {
       const items = itemsByOrder.get(r.id as string) ?? [];
-      const view = toOrderView(
-        r as unknown as Parameters<typeof toOrderView>[0],
-        items as unknown as Parameters<typeof toOrderView>[1],
-        null
-      );
+      const row = r as unknown as Parameters<typeof toOrderView>[0];
+      const lines = items as unknown as Parameters<typeof toOrderView>[1];
+      // พนักงานเห็นชื่อไทยเสมอ · ข้อความถึงลูกค้าใช้ชื่อในภาษาที่ลูกค้าสั่ง
+      const view = toOrderView(row, lines, info, "th");
+      const lang = customerLang(r.lang);
       return {
         id: r.id,
         ...view,
+        lang,
+        msgItems: lang === "en" ? toOrderView(row, lines, null, "en").items : view.items,
         customerEmail: (r.customer_email as string | null) ?? "",
         erpSoNumber: (r.erp_so_number as string | null) ?? null,
         isMember: !!r.customer_id,
@@ -100,7 +122,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown } };
+  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; notify?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown } };
   try {
     body = await request.json();
   } catch {
@@ -109,6 +131,15 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // 🎴 ติ๊ก/เอาติ๊ก "พิมพ์การ์ดแล้ว" หลายออเดอร์พร้อมกัน (หน้า /print/gift-cards) — เก็บใน gift_card.printedAt/printedBy
   if (body.cardPrinted) return markCardsPrinted(body.cardPrinted, user?.id ?? null, user?.email ?? null);
   if (!body.orderId) return NextResponse.json({ error: "ต้องระบุ orderId" }, { status: 400 });
+
+  // ✉️ พนักงานกดส่งอีเมลแจ้งลูกค้าเอง (ภาษาของลูกค้า) — ไม่ขึ้นกับสวิตช์อัตโนมัติ
+  if (body.notify !== undefined) {
+    const ev = ORDER_EVENTS.find((e) => e.key === body.notify)?.key;
+    if (!ev) return NextResponse.json({ error: "เรื่องที่จะแจ้งไม่ถูกต้อง" }, { status: 400 });
+    const r = await notifyOrderCustomer(supabaseAdmin(), body.orderId, ev, { force: true, actorId: user?.id ?? null, actorName: user?.email ?? null });
+    if (r.reason === "not-found") return NextResponse.json({ error: "ไม่พบออเดอร์" }, { status: 404 });
+    return r.sent ? NextResponse.json({ ok: true, notify: r, message: notifyNote(r) }) : NextResponse.json({ ok: false, notify: r, error: notifyNote(r) });
+  }
 
   const patch: Record<string, unknown> = {};
   if (body.status !== undefined) {
@@ -155,8 +186,17 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     },
   });
 
-  if (points === null) return NextResponse.json({ ok: true, warning: "เปลี่ยนสถานะแล้ว แต่ปรับแต้มสมาชิกไม่สำเร็จ — ลองเปลี่ยนสถานะอีกครั้ง หรือปรับแต้มเองที่แท็บ 👥 สมาชิก" });
-  return NextResponse.json({ ok: true, points });
+  // ✉️ แจ้งลูกค้าอัตโนมัติ (ภาษาของลูกค้า · ร้านเปิดไว้ + ลูกค้ามีอีเมล) — พังไม่ล้มการเปลี่ยนสถานะ
+  let notify: NotifyResult | null = null;
+  const ev: OrderEvent | null = orderEventOf(
+    { status: b.status, paymentStatus: b.payment_status },
+    { status: (patch.status as string | undefined) ?? b.status, paymentStatus: (patch.payment_status as string | undefined) ?? b.payment_status }
+  );
+  if (ev) notify = await notifyOrderCustomer(sb, b.id, ev, { actorId: user?.id ?? null, actorName: user?.email ?? null }).catch(() => null);
+  const notifyMsg = notify && notify.reason !== "off" ? notifyNote(notify) : "";
+
+  if (points === null) return NextResponse.json({ ok: true, notify, notifyMsg, warning: "เปลี่ยนสถานะแล้ว แต่ปรับแต้มสมาชิกไม่สำเร็จ — ลองเปลี่ยนสถานะอีกครั้ง หรือปรับแต้มเองที่แท็บ 👥 สมาชิก" });
+  return NextResponse.json({ ok: true, points, notify, notifyMsg });
 }
 
 /** 🎴 ติ๊กว่าพิมพ์การ์ดแล้ว (printed=true) หรือเอาติ๊กออก — เฉพาะออเดอร์ที่มีการ์ด · audit ทีละใบ */

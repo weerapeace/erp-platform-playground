@@ -17,6 +17,7 @@ import { guardMember, guardStorefront, storefrontJson, type MemberRow } from "@/
 import { memberSummary } from "@/lib/website-members-db";
 import { sendEmail, emailDevEcho, type EmailMessage } from "@/lib/email";
 import { resetPasswordMessage, verifyEmailMessage } from "@/lib/member-emails";
+import { customerLang } from "@/lib/customer-messages";
 import {
   LOGIN_LOCK_MIN,
   LOGIN_MAX_FAILS,
@@ -115,6 +116,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!EMAIL_RE.test(email)) return storefrontJson({ ok: false, error: "กรุณากรอกอีเมลให้ถูกต้อง" }, 400);
     const origin = await trustedOrigin(sb, shop.id, body.origin);
     if (!origin) return storefrontJson({ ok: false, error: "โดเมนไม่ถูกต้อง" }, 400);
+    // 🌐 อีเมลเป็นภาษาของหน้าที่ลูกค้ากด · ลิงก์พากลับหน้า /en ด้วย
+    const lang = customerLang(body.lang);
+    const base = lang === "en" ? `${origin}/en` : origin;
     const { data: ex } = await sb.from("store_customers").select(COLS).eq("shop_id", shop.id).eq("email", email).neq("status", "deleted").maybeSingle();
     let m = ex as Row | null;
 
@@ -140,7 +144,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await ensurePasswordIdentity(sb, { id: m.id, shop_id: shop.id, email });
       const t = await issueToken(sb, m.id, "verify");
       if (!t.ok) return storefrontJson({ ok: false, error: t.error }, 429);
-      const r = await mail(verifyEmailMessage(email, shop.name, `${origin}/account/verify?token=${t.token}`));
+      const r = await mail(verifyEmailMessage(email, shop.name, `${base}/account/verify?token=${t.token}`, lang));
       if (!r.ok) return storefrontJson({ ok: false, error: emailError(r.error) }, 503);
       return storefrontJson({ ok: true, ...(r.devLink && emailDevEcho() ? { devLink: r.devLink } : {}) }, 200);
     }
@@ -150,7 +154,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (action === "resend" && !m.email_verified) {
         const t = await issueToken(sb, m.id, "verify");
         if (t.ok) {
-          const r = await mail(verifyEmailMessage(email, shop.name, `${origin}/account/verify?token=${t.token}`));
+          const r = await mail(verifyEmailMessage(email, shop.name, `${base}/account/verify?token=${t.token}`, lang));
           if (!r.ok && r.error === "email-not-configured") return storefrontJson({ ok: false, error: emailError(r.error) }, 503);
           if (r.ok && r.devLink && emailDevEcho()) return storefrontJson({ ok: true, devLink: r.devLink }, 200);
         }
@@ -158,7 +162,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (action === "forgot") {
         const t = await issueToken(sb, m.id, "reset");
         if (t.ok) {
-          const r = await mail(resetPasswordMessage(email, shop.name, `${origin}/account/reset?token=${t.token}`));
+          const r = await mail(resetPasswordMessage(email, shop.name, `${base}/account/reset?token=${t.token}`, lang));
           if (!r.ok && r.error === "email-not-configured") return storefrontJson({ ok: false, error: emailError(r.error) }, 503);
           if (r.ok && r.devLink && emailDevEcho()) return storefrontJson({ ok: true, devLink: r.devLink }, 200);
         }

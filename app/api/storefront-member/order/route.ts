@@ -5,9 +5,10 @@
  * ราคา/ส่วนลดคิดใหม่ฝั่งเซิร์ฟเวอร์เหมือนเดิมทุกอย่าง (lib/website-orders createStorefrontOrder)
  * ⭐ redeemPoints = แต้มที่ขอใช้ลด (ตรวจ + ตัดแต้มแบบล็อกแถวใน createStorefrontOrder)
  */
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { guardMember, storefrontJson } from "@/lib/storefront-internal";
 import { createStorefrontOrder } from "@/lib/website-orders";
+import { notifyOrderCustomer } from "@/lib/order-notify";
 
 export const dynamic = "force-dynamic";
 
@@ -20,5 +21,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!shop) return storefrontJson({ ok: false, error: "ไม่พบร้าน" }, 404);
   const r = await createStorefrontOrder(g.sb, shop as { id: string; slug: string; status: string; field_map: unknown }, body, { customerId: g.member.id, redeemPoints: Number((body as { redeemPoints?: unknown }).redeemPoints) || 0 });
   if (!r.ok) return storefrontJson({ ok: false, error: r.error }, r.status);
+  // ✉️ อีเมลยืนยันออเดอร์ในภาษาของลูกค้า (ถ้าร้านเปิด) — หลังตอบแล้ว (lib/order-notify)
+  const orderId = r.orderId;
+  after(() => notifyOrderCustomer(g.sb, orderId, "placed").catch((e) => console.error("[member-order] notify placed", e)));
   return storefrontJson({ ok: true, order: r.order }, 201);
 }

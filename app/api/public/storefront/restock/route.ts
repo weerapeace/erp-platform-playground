@@ -1,7 +1,7 @@
 /**
  * API สาธารณะ — 🔔 "แจ้งฉันเมื่อมีของ" : POST /api/public/storefront/restock
  *
- * body: { shop, productId, option?, contactType: "email"|"phone"|"line", contact, name? }
+ * body: { shop, productId, option?, contactType: "email"|"phone"|"line", contact, name?, lang?:"th"|"en" }  (🌐 lang = ภาษาที่ร้านใช้ตอบกลับ)
  *   → { ok:true, already?:true } · รับเฉพาะสินค้าที่เผยแพร่ของร้านนั้น และตั้ง "สินค้าหมด" อยู่
  * เก็บลง store_restock_requests (ฝากซ้ำขณะรอ = ไม่เพิ่มแถว) · ร้านดู/ติ๊กแจ้งแล้วที่ ERP (/api/website/restock)
  *
@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeRestockInput } from "@/lib/website-restock";
+import { customerLang } from "@/lib/customer-messages";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +30,7 @@ export async function OPTIONS(): Promise<NextResponse> {
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: { shop?: string; productId?: string; option?: string; contactType?: string; contact?: string; name?: string };
+  let body: { shop?: string; productId?: string; option?: string; contactType?: string; contact?: string; name?: string; lang?: string };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     contact_type: v.input.contactType,
     contact: v.input.contact,
     name: v.input.name,
+    lang: customerLang(body.lang),
   });
   if (error) {
     if (error.code === "23505") return json({ ok: true, already: true });   // ฝากซ้ำ = ถือว่าสำเร็จ

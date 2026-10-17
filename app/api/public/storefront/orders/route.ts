@@ -2,17 +2,20 @@
  * API สาธารณะ — รับออเดอร์จากเว็บร้าน : /api/public/storefront/orders
  *
  * POST { shop, items:[{productId, optionId?, option2Id?, qty}], customer:{name,phone,email?},
- *        ship:{addressLine, subdistrict?, district?, province?, postal?}, paymentMethod:"cod"|"promptpay", note? }
+ *        ship:{addressLine, subdistrict?, district?, province?, postal?}, paymentMethod:"cod"|"promptpay", note?, lang?:"th"|"en" }
  *      → { ok:true, order:{orderNo, grandTotal, promptpay, ...} }
- * GET  ?shop=<slug>&no=<เลขที่>&phone=<เบอร์>  → ลูกค้าตามออเดอร์ของตัวเอง (ต้องรู้ทั้งเลขที่และเบอร์)
+ *      🌐 lang = ภาษาหน้าเว็บที่ลูกค้าสั่ง → ออเดอร์จำไว้ · ✉️ อีเมลยืนยันส่งหลังตอบลูกค้า (ถ้าร้านเปิด — lib/order-notify)
+ * GET  ?shop=<slug>&no=<เลขที่>&phone=<เบอร์>[&lang=en]  → ลูกค้าตามออเดอร์ของตัวเอง (ต้องรู้ทั้งเลขที่และเบอร์)
  *
  * ⚠️ ไม่มี guardApi โดยเจตนา (ลูกค้าไม่ได้ล็อกอิน) + CORS
  * ปลอดภัยเพราะ: ราคาคิดใหม่ฝั่งเซิร์ฟเวอร์จาก lib/website-orders.ts เสมอ · รับเฉพาะสินค้าที่เผยแพร่ของร้านนั้น
  * · จำกัด 50 รายการ/ออเดอร์ · ไม่คืนข้อมูลลูกค้าคนอื่น
  */
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createStorefrontOrder, findStorefrontOrder } from "@/lib/website-orders";
+import { notifyOrderCustomer } from "@/lib/order-notify";
+import { customerLang } from "@/lib/customer-messages";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,6 +58,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const result = await createStorefrontOrder(ctx.sb, ctx.shop, body);
   if (!result.ok) return json({ ok: false, error: result.error }, result.status);
+  // ✉️ อีเมลยืนยันออเดอร์ (ภาษาของลูกค้า) — ทำหลังตอบหน้าเว็บแล้ว ลูกค้าไม่ต้องรอ · ไม่เปิด/ไม่มีอีเมล = ข้ามเงียบ
+  const orderId = result.orderId;
+  after(() => notifyOrderCustomer(ctx.sb, orderId, "placed").catch((e) => console.error("[orders] notify placed", e)));
   return json({ ok: true, order: result.order }, 201);
 }
 
@@ -69,7 +75,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const ctx = await loadShop(slug);
   if (!ctx) return json({ error: "ไม่พบร้าน" }, 404);
 
-  const order = await findStorefrontOrder(ctx.sb, ctx.shop.id, no, phone);
+  const lang = url.searchParams.get("lang");
+  const order = await findStorefrontOrder(ctx.sb, ctx.shop.id, no, phone, lang ? customerLang(lang) : undefined);
   if (!order) return json({ error: "ไม่พบออเดอร์ — ตรวจเลขที่และเบอร์โทรอีกครั้ง" }, 404);
   return json({ order });
 }

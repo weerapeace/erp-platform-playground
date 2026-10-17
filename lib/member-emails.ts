@@ -1,46 +1,67 @@
 /**
- * ✉️ แม่แบบอีเมลของระบบสมาชิกเว็บร้าน (ยืนยันอีเมล · ตั้งรหัสผ่านใหม่) — ภาษาไทย ทั้ง HTML และข้อความล้วน
- * ส่งด้วยของกลาง lib/email.ts · ลิงก์ชี้กลับโดเมนของร้านที่ลูกค้าใช้ (ตรวจกับ shop_domains แล้ว)
+ * ✉️ แม่แบบอีเมลของระบบสมาชิกเว็บร้าน (ยืนยันอีเมล · ตั้งรหัสผ่านใหม่) — 2 ภาษา ทั้ง HTML และข้อความล้วน
+ * ภาษา = ภาษาของหน้าที่ลูกค้ากดสมัคร/ขอรหัส (เว็บร้านส่ง lang มา · ไม่มี = ไทย)
+ * ส่งด้วยของกลาง lib/email.ts · หน้าตาจาก lib/email-layout.ts · ลิงก์ชี้กลับโดเมนของร้านที่ลูกค้าใช้ (ตรวจกับ shop_domains แล้ว)
  */
 import type { EmailMessage } from "@/lib/email";
+import { emailLayout } from "@/lib/email-layout";
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+type Lang = "th" | "en";
 
-function layout(shopName: string, title: string, lines: string[], button: { text: string; href: string }, foot: string): string {
-  return `<!doctype html><html lang="th"><body style="margin:0;background:#f5f5f4;font-family:Tahoma,'Noto Sans Thai',Arial,sans-serif;color:#1f2937">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 12px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;padding:32px">
-<tr><td style="font-size:14px;color:#6b7280;letter-spacing:.08em">${esc(shopName)}</td></tr>
-<tr><td style="padding-top:8px;font-size:22px;font-weight:700">${esc(title)}</td></tr>
-${lines.map((l) => `<tr><td style="padding-top:14px;font-size:15px;line-height:1.6">${esc(l)}</td></tr>`).join("")}
-<tr><td style="padding-top:24px"><a href="${esc(button.href)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:600">${esc(button.text)}</a></td></tr>
-<tr><td style="padding-top:18px;font-size:12px;color:#6b7280;word-break:break-all">หรือคัดลอกลิงก์นี้ไปเปิด: ${esc(button.href)}</td></tr>
-<tr><td style="padding-top:24px;font-size:12px;color:#9ca3af">${esc(foot)}</td></tr>
-</table></td></tr></table></body></html>`;
-}
-
-export function verifyEmailMessage(to: string, shopName: string, link: string): EmailMessage {
-  const title = "ยืนยันอีเมลของคุณ";
-  const lines = [`ขอบคุณที่สมัครสมาชิก ${shopName}`, "กดปุ่มด้านล่างเพื่อยืนยันอีเมลและเริ่มใช้บัญชี (ลิงก์ใช้ได้ 24 ชั่วโมง)"];
-  const foot = "ถ้าคุณไม่ได้สมัคร ไม่ต้องทำอะไร — บัญชีจะยังใช้ไม่ได้จนกว่าจะยืนยัน";
+function build(to: string, shopName: string, link: string, lang: Lang, c: { subject: string; title: string; lines: string[]; button: string; foot: string }): EmailMessage {
   return {
     to,
     fromName: shopName,
-    subject: `ยืนยันอีเมล — ${shopName}`,
-    html: layout(shopName, title, lines, { text: "ยืนยันอีเมล", href: link }, foot),
-    text: `${title}\n\n${lines.join("\n")}\n\n${link}\n\n${foot}`,
+    subject: `${c.subject} — ${shopName}`,
+    html: emailLayout({ lang, shopName, title: c.title, lines: c.lines, button: { text: c.button, href: link }, foot: c.foot }),
+    text: `${c.title}\n\n${c.lines.join("\n")}\n\n${link}\n\n${c.foot}`,
   };
 }
 
-export function resetPasswordMessage(to: string, shopName: string, link: string): EmailMessage {
-  const title = "ตั้งรหัสผ่านใหม่";
-  const lines = ["มีคำขอตั้งรหัสผ่านใหม่สำหรับบัญชีนี้", "กดปุ่มด้านล่างเพื่อตั้งรหัสผ่านใหม่ (ลิงก์ใช้ได้ 30 นาที ครั้งเดียว)"];
-  const foot = "ถ้าคุณไม่ได้ขอ ไม่ต้องทำอะไร — รหัสผ่านเดิมยังใช้ได้ตามปกติ";
-  return {
+export function verifyEmailMessage(to: string, shopName: string, link: string, lang: Lang = "th"): EmailMessage {
+  return build(
     to,
-    fromName: shopName,
-    subject: `ตั้งรหัสผ่านใหม่ — ${shopName}`,
-    html: layout(shopName, title, lines, { text: "ตั้งรหัสผ่านใหม่", href: link }, foot),
-    text: `${title}\n\n${lines.join("\n")}\n\n${link}\n\n${foot}`,
-  };
+    shopName,
+    link,
+    lang,
+    lang === "en"
+      ? {
+          subject: "Confirm your email",
+          title: "Confirm your email",
+          lines: [`Thank you for joining ${shopName}.`, "Tap the button below to confirm your email and start using your account (link valid for 24 hours)."],
+          button: "Confirm email",
+          foot: "If you didn't sign up, you can ignore this email — the account stays inactive until confirmed.",
+        }
+      : {
+          subject: "ยืนยันอีเมล",
+          title: "ยืนยันอีเมลของคุณ",
+          lines: [`ขอบคุณที่สมัครสมาชิก ${shopName}`, "กดปุ่มด้านล่างเพื่อยืนยันอีเมลและเริ่มใช้บัญชี (ลิงก์ใช้ได้ 24 ชั่วโมง)"],
+          button: "ยืนยันอีเมล",
+          foot: "ถ้าคุณไม่ได้สมัคร ไม่ต้องทำอะไร — บัญชีจะยังใช้ไม่ได้จนกว่าจะยืนยัน",
+        }
+  );
+}
+
+export function resetPasswordMessage(to: string, shopName: string, link: string, lang: Lang = "th"): EmailMessage {
+  return build(
+    to,
+    shopName,
+    link,
+    lang,
+    lang === "en"
+      ? {
+          subject: "Reset your password",
+          title: "Reset your password",
+          lines: ["We received a request to reset the password for this account.", "Tap the button below to set a new password (link valid for 30 minutes, one use only)."],
+          button: "Set new password",
+          foot: "If you didn't request this, you can ignore this email — your current password still works.",
+        }
+      : {
+          subject: "ตั้งรหัสผ่านใหม่",
+          title: "ตั้งรหัสผ่านใหม่",
+          lines: ["มีคำขอตั้งรหัสผ่านใหม่สำหรับบัญชีนี้", "กดปุ่มด้านล่างเพื่อตั้งรหัสผ่านใหม่ (ลิงก์ใช้ได้ 30 นาที ครั้งเดียว)"],
+          button: "ตั้งรหัสผ่านใหม่",
+          foot: "ถ้าคุณไม่ได้ขอ ไม่ต้องทำอะไร — รหัสผ่านเดิมยังใช้ได้ตามปกติ",
+        }
+  );
 }

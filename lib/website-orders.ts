@@ -35,6 +35,8 @@ import { normalizeOrderCard, readOrderCard, type OrderGiftCard } from "@/lib/web
 import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { writeAudit } from "@/lib/audit";
 import { beltDesignLine, type BeltDesignRow } from "@/lib/belt-builder-order";
+import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
+import { customerLang, type CustomerLang } from "@/lib/customer-messages";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -90,6 +92,8 @@ export interface PublicOrderInput {
   couponCode?: string;
   /** 🎀 ห่อของขวัญ — ค่าห่อคิดจากที่ร้านตั้ง (calcGiftFee) ไม่เชื่อตัวเลขจากหน้าเว็บ */
   gift?: { wrap: boolean; message?: string; hidePrice?: boolean; card?: unknown };
+  /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง (หน้า /en = "en") → ข้อความแจ้งลูกค้า/หน้าตามออเดอร์ใช้ภาษานี้ */
+  lang: CustomerLang;
 }
 
 export interface OrderLineView {
@@ -131,6 +135,8 @@ export interface OrderView {
   createdAt: string;
   /** ข้อมูลโอนเงิน (เฉพาะออเดอร์พร้อมเพย์ที่ยังไม่ชำระ) */
   promptpay: { number: string; name: string } | null;
+  /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง */
+  lang?: CustomerLang;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -206,6 +212,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       note: clean(r.note, 500) || undefined,
       couponCode: normalizeCouponCode(r.couponCode) || undefined,
       gift,
+      lang: customerLang(r.lang),
     },
   };
 }
@@ -227,7 +234,7 @@ export function pickSku(
   kids: ChildSku[],
   optionId?: string,
   option2Id?: string
-): { sku: ChildSku | null; variantLabel: string | null } {
+): { sku: ChildSku | null; variantLabel: string | null; variantParts: string[] } {
   const k1 = kidByOptionId(kids, optionId, "sku-");
   const k2 = kidByOptionId(kids, option2Id, "opt2-");
   let cands = kids;
@@ -243,7 +250,7 @@ export function pickSku(
     if (v) parts.push(v);
   }
   const sku = cands[0] ?? k1 ?? kids[0] ?? null;
-  return { sku, variantLabel: parts.length ? parts.join(" / ") : null };
+  return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts };
 }
 
 /** ชื่อตัวเลือกที่เจ้าของกรอกทับเองในหน้าจัดการ (web_options) — รหัสเป็นอะไรก็ได้ */
@@ -252,6 +259,11 @@ function customOptionLabel(listing: ListingRow, optionId?: string): string | nul
   if (!optionId || !wo?.items?.length) return null;
   const hit = wo.items.find((i) => i.id === optionId);
   return hit?.label ? clean(hit.label, 80) : null;
+}
+/** 🌐 ชื่ออังกฤษของตัวเลือกที่กรอกทับเอง (label_en · ไม่กรอก = "") */
+function customOptionLabelEn(listing: ListingRow, optionId?: string): string {
+  const wo = listing.web_options as { items?: { id?: string; label_en?: string }[] } | null | undefined;
+  return optionId ? clean(wo?.items?.find((i) => i.id === optionId)?.label_en, 80) : "";
 }
 
 // ─── สร้างออเดอร์ ───
@@ -268,6 +280,9 @@ type LineInsert = {
   parent_code: string | null;
   name: string;
   variant_label: string | null;
+  /** 🌐 ชื่อ/ตัวเลือกภาษาอังกฤษ ณ ตอนสั่ง (null = ใช้ไทย) — ลูกค้าหน้า /en เห็นอันนี้ · พนักงานเห็นไทยเสมอ */
+  name_en?: string | null;
+  variant_label_en?: string | null;
   unit_price: number;
   qty: number;
   line_total: number;
@@ -285,7 +300,7 @@ export function orderNoPrefix(info: SiteInfo, shopSlug: string, now = new Date()
 }
 
 export type CreateOrderResult =
-  | { ok: true; order: OrderView }
+  | { ok: true; order: OrderView; /** id ในฐานข้อมูล (ไว้แจ้งลูกค้า — ไม่ส่งให้หน้าเว็บ) */ orderId: string }
   | { ok: false; error: string; status: number };
 
 /**
@@ -311,7 +326,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     for (const d of (bd ?? []) as BeltDesignRow[]) beltById.set(d.id, d);
   }
 
-  const [{ data: listData }, { data: parents }, { data: children }] = await Promise.all([
+  const [{ data: listData }, { data: parents }, { data: children }, { data: swatchRows }] = await Promise.all([
     sb
       .from("store_listings")
       .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status")
@@ -319,7 +334,11 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       .in("parent_sku_id", parentIds),
     sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
     sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
+    // 🌐 ชื่อสีภาษาอังกฤษ (ทะเบียนสีกลาง) — เก็บคู่ไทยในรายการสินค้า ให้ลูกค้าหน้า /en เห็นภาษาเดียวกับตอนเลือก
+    sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
   ]);
+  const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
+  const enOf = (s: string) => swatches.english(s) || s;
 
   const listingByParent = new Map<string, ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null }>();
   for (const l of (listData ?? []) as (ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null })[]) {
@@ -371,7 +390,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     if (listing.web_stock_status === "out") return { ok: false, error: `สินค้า ${resolved.name} หมดแล้ว กรุณาเอาออกจากตะกร้า`, status: 409 };
 
     const picked = pickSku(kids, it.optionId, it.option2Id);
-    let variant = customOptionLabel(listing, it.optionId) ?? picked.variantLabel;
+    const custom = customOptionLabel(listing, it.optionId);
+    let variant = custom ?? picked.variantLabel;
+    let variantEn = custom ? customOptionLabelEn(listing, it.optionId) || enOf(custom) : picked.variantParts.length ? picked.variantParts.map(enOf).join(" / ") : null;
     // 🔤 ปั๊มชื่อ: ยอมเฉพาะรุ่นที่เปิดไว้ และข้อความ/แบบ/ตำแหน่งต้องผ่านตัวกรอง
     let personalize: PersonalizeChoice | null = null;
     if (it.personalize) {
@@ -379,6 +400,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       personalize = normalizePersonalizeChoice(it.personalize, cfg);
       if (!personalize) return { ok: false, error: `สินค้า ${resolved.name} ปั๊มชื่อไม่ได้ หรือข้อความไม่ถูกต้อง`, status: 409 };
       variant = [variant, personalizeLabel(personalize, cfg)].filter(Boolean).join(" · ");
+      variantEn = [variantEn, personalizeLabel(personalize, cfg, "en")].filter(Boolean).join(" · ");
     }
     const lineTotal = Math.round(price * it.qty * 100) / 100;
     subtotal += lineTotal;
@@ -389,6 +411,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       parent_code: parent.code ?? null,
       name: resolved.name,
       variant_label: variant,
+      // ช่อง name_en ที่กรอกเป็นไทย (ข้อมูลเก่า) = ไม่ถือเป็นชื่ออังกฤษ
+      name_en: resolved.name_en && !/[฀-๿]/.test(resolved.name_en) ? resolved.name_en : null,
+      variant_label_en: variantEn && variantEn !== variant ? variantEn : null,
       unit_price: price,
       qty: it.qty,
       line_total: lineTotal,
@@ -469,6 +494,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         grand_total: grandTotal,
         note: input.note ?? null,
         customer_id: opts.customerId ?? null,
+        lang: input.lang,
     };
     const ins = await sb.from("store_orders").insert(payload).select("id, order_no, created_at").maybeSingle();
     const insErr = ins.error;
@@ -528,8 +554,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
           postal: input.ship.postal ?? "",
         },
         items: lines.map((l) => ({
-          name: l.name,
-          variantLabel: l.variant_label,
+          name: (input.lang === "en" && l.name_en) || l.name,
+          variantLabel: (input.lang === "en" && l.variant_label_en) || l.variant_label,
           unitPrice: l.unit_price,
           qty: l.qty,
           lineTotal: l.line_total,
@@ -550,7 +576,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         note: input.note ?? "",
         createdAt: order.created_at,
         promptpay: promptpayFor(info, input.paymentMethod, "unpaid"),
+        lang: input.lang,
       },
+      orderId: order.id,
     };
   }
   return { ok: false, error: "ระบบไม่ว่าง กรุณาลองใหม่อีกครั้ง", status: 503 };
@@ -591,17 +619,22 @@ export type OrderRow = {
   grand_total: number | string;
   note: string | null;
   created_at: string;
+  lang?: string | null;
 };
 
 export type ItemRow = {
   name: string;
   variant_label: string | null;
+  name_en?: string | null;
+  variant_label_en?: string | null;
   unit_price: number | string;
   qty: number;
   line_total: number | string;
 };
 
-export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null): OrderView {
+/** viewLang = ภาษาที่จะโชว์ชื่อสินค้า (ไม่ส่ง = ภาษาที่ลูกค้าใช้ตอนสั่ง) · พนักงาน = "th" เสมอ */
+export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null, viewLang?: CustomerLang): OrderView {
+  const show = viewLang ?? customerLang(o.lang);
   return {
     orderNo: o.order_no,
     status: o.status,
@@ -617,8 +650,8 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
       postal: o.ship_postal ?? "",
     },
     items: items.map((i) => ({
-      name: i.name,
-      variantLabel: i.variant_label,
+      name: (show === "en" && i.name_en) || i.name,
+      variantLabel: (show === "en" && i.variant_label_en) || i.variant_label,
       unitPrice: num(i.unit_price),
       qty: i.qty,
       lineTotal: num(i.line_total),
@@ -639,6 +672,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     note: o.note ?? "",
     createdAt: o.created_at,
     promptpay: info ? promptpayFor(info, o.payment_method, o.payment_status) : null,
+    lang: customerLang(o.lang),
   };
 }
 
@@ -646,7 +680,8 @@ export async function findStorefrontOrder(
   sb: Admin,
   shopId: string,
   orderNo: string,
-  phone: string
+  phone: string,
+  viewLang?: CustomerLang
 ): Promise<OrderView | null> {
   const no = clean(orderNo, 40).toUpperCase();
   const ph = digits(phone);
@@ -659,8 +694,8 @@ export async function findStorefrontOrder(
   if (digits(row.customer_phone).slice(-9) !== ph.slice(-9)) return null;
 
   const [{ data: items }, info] = await Promise.all([
-    sb.from("store_order_items").select("name, variant_label, unit_price, qty, line_total").eq("order_id", row.id).order("id"),
+    sb.from("store_order_items").select("name, variant_label, name_en, variant_label_en, unit_price, qty, line_total").eq("order_id", row.id).order("id"),
     readSiteInfo(sb, shopId),
   ]);
-  return toOrderView(row, (items ?? []) as ItemRow[], info);
+  return toOrderView(row, (items ?? []) as ItemRow[], info, viewLang);
 }

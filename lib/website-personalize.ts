@@ -111,8 +111,12 @@ export function normalizePersonalizeChoice(raw: unknown, cfg: PersonalizeConfig 
   return { text, style, position: pos.key };
 }
 
-/** ป้ายสั้น ๆ ไว้โชว์ในตะกร้า/ออเดอร์: ปั๊ม "ANN" · พิมพ์ทอง · มุมขวาล่าง */
-export function personalizeLabel(c: PersonalizeChoice, cfg?: PersonalizeConfig | null): string {
+const STYLE_EN: Record<string, string> = { emboss: "Debossed", silver: "Silver foil", gold: "Gold foil" };
+const POSITION_EN: Record<string, string> = { center: "Center", right: "Bottom right" };
+
+/** ป้ายสั้น ๆ ไว้โชว์ในตะกร้า/ออเดอร์: ปั๊ม "ANN" · พิมพ์ทอง · มุมขวาล่าง · 🌐 lang "en" = Name stamp "ANN" · Gold foil · Bottom right */
+export function personalizeLabel(c: PersonalizeChoice, cfg?: PersonalizeConfig | null, lang: "th" | "en" = "th"): string {
+  if (lang === "en") return `Name stamp "${c.text}" · ${STYLE_EN[c.style] ?? c.style} · ${POSITION_EN[c.position] ?? c.position}`;
   const style = PERSONALIZE_STYLES.find((s) => s.value === c.style)?.label ?? c.style;
   const pos = cfg?.positions.find((p) => p.key === c.position)?.label ?? PERSONALIZE_POSITIONS.find((p) => p.key === c.position)?.label ?? c.position;
   return `ปั๊ม "${c.text}" · ${style} · ${pos}`;
