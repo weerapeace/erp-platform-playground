@@ -9,8 +9,9 @@
  *   • ลากแท็กไปวาง "ทับกลาง" แท็กอื่น → เป็นแท็กย่อย (Sub) ของแท็กนั้น
  *       = ย้ายเข้าหมวดย่อยชื่อเดียวกับแท็กแม่ (ยังไม่มีก็สร้างให้) เช่น ซิปไนล่อน #3 → ↳ ซิป
  *   • ลากหัวกลุ่มไปวาง "ทับกลาง" หัวกลุ่มอื่น → เป็นหมวดย่อยของกลุ่มนั้น · วางขอบบน/ล่าง = เรียงลำดับ
- *   • ชื่ออังกฤษของแท็ก (name_en) — โชว์คู่ชื่อไทย · แก้ในป๊อปแก้ชื่อ · ปุ่ม 🌐 แปลให้ / แปลที่ยังขาดทีเดียว
- *   • เพิ่ม / แก้ชื่อ / ลบ แท็ก และ กลุ่ม
+ *   • ชื่ออังกฤษ (name_en) ทั้งแท็กและกลุ่ม/หมวดย่อย — โชว์คู่ชื่อไทย · แก้ในป๊อปแก้ชื่อ · ปุ่ม 🌐 แปลให้ / แปลที่ยังขาดทีเดียว
+ *     แท็กแม่ ↔ หมวดย่อยชื่อเดียวกัน = คู่ผูกกัน → เปลี่ยนชื่อฝั่งไหน อีกฝั่งเปลี่ยนตาม
+ *   • เพิ่ม / แก้ชื่อ / ลบ แท็ก และ กลุ่ม (เพิ่ม/แก้ชื่อใช้ป๊อปในตัว ไม่ใช้ window.prompt)
  * บันทึกทันทีต่อการลากแต่ละครั้ง (optimistic + PATCH master-v2 ซึ่งเขียน audit log ให้)
  *
  * โครงกลุ่มมี 2 ชั้น (กลุ่มหลัก → หมวดย่อย) — ไม่ยอมให้ลากจนเกิดชั้นที่ 3 เพราะหน้าจอเลือกแท็กทุกที่โชว์ไม่ได้
@@ -27,7 +28,7 @@ import { translateContent } from "@/lib/content-translate";
 
 type Tag = { id: string; label: string; en: string; group_id: string | null; sort_order: number };
 type Grp = {
-  id: string; name: string; parent_group_id: string | null;
+  id: string; name: string; en: string; parent_group_id: string | null;
   single_select: boolean; sort_order: number; icon: string | null;
 };
 
@@ -35,7 +36,7 @@ const TOP = "__top__";    // คีย์ "ระดับบนสุด" (ไ�
 const NONE = "__none__";  // คีย์ "แท็กที่ยังไม่มีกลุ่ม"
 
 const GROUP_MODULE = "product_family_groups";
-const EN_FIELD = "name_en";   // ชื่ออังกฤษของแท็ก (product_families.name_en)
+const EN_FIELD = "name_en";   // ชื่ออังกฤษ (product_families.name_en / product_family_groups.name_en)
 
 type Hint =
   | { type: "tag"; container: string; beforeId: string | null }   // วางแท็กก่อน beforeId (null = ท้ายสุด)
@@ -44,8 +45,13 @@ type Hint =
   | { type: "groupInto"; targetId: string }                       // วางทับกลางหัวกลุ่ม = เป็นหมวดย่อย
   | null;
 type DragInfo = { kind: "tag" | "group"; id: string } | null;
-type EditState = { id: string; th: string; en: string } | null;
-type BulkRow = { id: string; th: string; en: string };
+// ป๊อปแก้ชื่อ ไทย+อังกฤษ: แก้แท็ก / แก้กลุ่ม / สร้างกลุ่มใหม่ (parentId = null → กลุ่มหลัก)
+type EditState =
+  | { mode: "tag"; id: string; th: string; en: string }
+  | { mode: "group"; id: string; th: string; en: string }
+  | { mode: "newGroup"; parentId: string | null; th: string; en: string }
+  | null;
+type BulkRow = { kind: "tag" | "group"; id: string; th: string; en: string };
 
 const norm = (s: string) => s.trim().toLowerCase();
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : "network");
@@ -110,7 +116,7 @@ export function TagOrganizerModal({
   const loadGroups = useCallback(async () => {
     const j = await apiFetch(`/api/master-v2/${GROUP_MODULE}?limit=500`).then((r) => r.json());
     setGroups(((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
-      id: String(g.id), name: String(g.name ?? ""),
+      id: String(g.id), name: String(g.name ?? ""), en: String(g[EN_FIELD] ?? "").trim(),
       parent_group_id: g.parent_group_id ? String(g.parent_group_id) : null,
       single_select: g.single_select === true, sort_order: Number(g.sort_order ?? 100),
       icon: g.icon ? String(g.icon) : null,
@@ -156,6 +162,11 @@ export function TagOrganizerModal({
     const top = containerKeyOf(p);
     if (top === NONE) return null;
     return groups.find((g) => g.parent_group_id === top && norm(g.name) === norm(p.label)) ?? null;
+  };
+  // กลับทาง: แท็กแม่ของหมวดย่อย (แท็กชื่อเดียวกันในกลุ่มแม่) — เปลี่ยนชื่อฝั่งไหนก็เปลี่ยนอีกฝั่งตาม
+  const tagOfSubGroup = (s: Grp) => {
+    if (!isSubGroup(s)) return null;
+    return tags.find((t) => t.group_id === s.parent_group_id && norm(t.label) === norm(s.name)) ?? null;
   };
   // กลุ่มที่ลากลงไปเป็นหมวดย่อยของ targetId ได้ไหม
   const canGroupInto = (dragId: string, targetId: string) => {
@@ -238,11 +249,11 @@ export function TagOrganizerModal({
         const order = (sibs.length ? Math.max(...sibs.map((s) => s.sort_order)) : 0) + 10;
         const j = await must(apiFetch(`/api/master-v2/${GROUP_MODULE}`, {
           method: "POST", headers: JSON_HEADERS,
-          body: JSON.stringify({ name: p.label, parent_group_id: topId, single_select: false, sort_order: order }),
+          body: JSON.stringify({ name: p.label, [EN_FIELD]: p.en || null, parent_group_id: topId, single_select: false, sort_order: order }),
         }));
         const id = (j.data as { id?: unknown } | undefined)?.id;
         if (!id) throw new Error("ไม่ได้รหัสหมวดย่อยกลับมา");
-        sub = { id: String(id), name: p.label, parent_group_id: topId, single_select: false, sort_order: order, icon: null };
+        sub = { id: String(id), name: p.label, en: p.en, parent_group_id: topId, single_select: false, sort_order: order, icon: null };
         const created = sub;
         setGroups((prev) => [...prev, created]);
       }
@@ -326,9 +337,35 @@ export function TagOrganizerModal({
     finally { setBusy(false); }
   };
 
-  const openEdit = (t: Tag) => { setEdit({ id: t.id, th: t.label, en: t.en }); setEditErr(null); };
-  const editTag = edit ? tags.find((t) => t.id === edit.id) ?? null : null;
-  const editDirty = !!(edit && editTag && (edit.th.trim() !== editTag.label || edit.en.trim() !== editTag.en));
+  const openEdit = (t: Tag) => { setEdit({ mode: "tag", id: t.id, th: t.label, en: t.en }); setEditErr(null); };
+  const openGroupEdit = (g: Grp) => { setEdit({ mode: "group", id: g.id, th: g.name, en: g.en }); setEditErr(null); };
+  const openNewGroup = (parentId: string | null) => { setEdit({ mode: "newGroup", parentId, th: "", en: "" }); setEditErr(null); };
+
+  // ค่าเดิมของสิ่งที่กำลังแก้ (ไว้เทียบว่าเปลี่ยนอะไร) + คู่ที่ผูกชื่อกัน (แท็กแม่ ↔ หมวดย่อย) ที่ต้องเปลี่ยนตาม
+  type Linked = { kind: "tag" | "group"; id: string; name: string; en: string };
+  const editInfo = ((): { orig: { th: string; en: string }; linked: Linked | null } | null => {
+    if (!edit) return null;
+    if (edit.mode === "newGroup") return { orig: { th: "", en: "" }, linked: null };
+    if (edit.mode === "tag") {
+      const t = tags.find((x) => x.id === edit.id); if (!t) return null;
+      const s = subGroupOfTag(t);
+      return { orig: { th: t.label, en: t.en }, linked: s ? { kind: "group", id: s.id, name: s.name, en: s.en } : null };
+    }
+    const g = groupById.get(edit.id); if (!g) return null;
+    const t = tagOfSubGroup(g);
+    return { orig: { th: g.name, en: g.en }, linked: t ? { kind: "tag", id: t.id, name: t.label, en: t.en } : null };
+  })();
+  const editDirty = !!(edit && editInfo && (edit.th.trim() !== editInfo.orig.th || edit.en.trim() !== editInfo.orig.en));
+  // ชื่อไทยเปลี่ยน → คู่ต้องเปลี่ยนตาม (ไม่งั้นหลุดกัน) · ชื่ออังกฤษ → ตามด้วยถ้าคู่ยังว่าง/เหมือนของเดิม (ไม่ทับที่ตั้งแยกไว้)
+  const linkedPatch = (): Record<string, unknown> => {
+    if (!edit || !editInfo?.linked) return {};
+    const { orig, linked } = editInfo;
+    const th = edit.th.trim(); const en = edit.en.trim();
+    const p: Record<string, unknown> = {};
+    if (th && th !== orig.th) p[linked.kind === "tag" ? labelField : "name"] = th;
+    if (en !== orig.en && (!linked.en || linked.en === orig.en)) p[EN_FIELD] = en || null;
+    return p;
+  };
   const closeEdit = () => {
     if (editDirty && !window.confirm("คุณมีข้อมูลที่ยังไม่ได้บันทึก\nต้องการออกโดยไม่บันทึกหรือไม่?")) return;
     setEdit(null);
@@ -343,22 +380,48 @@ export function TagOrganizerModal({
     finally { setTranslating(false); }
   };
   const saveEdit = async () => {
-    if (!edit || !editTag) return;
+    if (!edit || !editInfo) return;
     const th = edit.th.trim(); const en = edit.en.trim();
     if (!th) { setEditErr("ต้องใส่ชื่อไทย"); return; }
+
+    if (edit.mode === "newGroup") {
+      setBusy(true); setEditErr(null);
+      try {
+        await must(apiFetch(`/api/master-v2/${GROUP_MODULE}`, {
+          method: "POST", headers: JSON_HEADERS,
+          body: JSON.stringify({ name: th, [EN_FIELD]: en || null, parent_group_id: edit.parentId, single_select: false, sort_order: 100 }),
+        }));
+        setEdit(null); await loadGroups(); onChanged();
+      } catch (e) { setEditErr("เพิ่มกลุ่มไม่สำเร็จ: " + errMsg(e)); }
+      finally { setBusy(false); }
+      return;
+    }
+
+    const { orig, linked } = editInfo;
     const body: Record<string, unknown> = {};
-    if (th !== editTag.label) body[labelField] = th;
-    if (en !== editTag.en) body[EN_FIELD] = en || null;
+    if (th !== orig.th) body[edit.mode === "tag" ? labelField : "name"] = th;
+    if (en !== orig.en) body[EN_FIELD] = en || null;
     if (!Object.keys(body).length) { setEdit(null); return; }
-    // แท็กนี้มีหมวดย่อยผูกชื่ออยู่ (↳ ชื่อเดิม) → เปลี่ยนชื่อหมวดย่อยตาม ไม่งั้นแท็กย่อยหลุดจากแท็กแม่
-    const linked = th !== editTag.label ? subGroupOfTag(editTag) : null;
+    const lp = linkedPatch();
+    const id = edit.id;
     setBusy(true); setEditErr(null);
     try {
-      await must(patchTag(editTag.id, body));
-      setTags((p) => p.map((x) => (x.id === editTag.id ? { ...x, label: th, en } : x)));
-      if (linked) {
-        await must(patchGroup(linked.id, { name: th }));
-        setGroups((p) => p.map((g) => (g.id === linked.id ? { ...g, name: th } : g)));
+      if (edit.mode === "tag") {
+        await must(patchTag(id, body));
+        setTags((p) => p.map((x) => (x.id === id ? { ...x, label: th, en } : x)));
+      } else {
+        await must(patchGroup(id, body));
+        setGroups((p) => p.map((g) => (g.id === id ? { ...g, name: th, en } : g)));
+      }
+      if (linked && Object.keys(lp).length) {
+        const nTh = Object.keys(lp).some((k) => k !== EN_FIELD); const nEn = EN_FIELD in lp;
+        if (linked.kind === "group") {
+          await must(patchGroup(linked.id, lp));
+          setGroups((p) => p.map((g) => (g.id === linked.id ? { ...g, name: nTh ? th : g.name, en: nEn ? en : g.en } : g)));
+        } else {
+          await must(patchTag(linked.id, lp));
+          setTags((p) => p.map((t) => (t.id === linked.id ? { ...t, label: nTh ? th : t.label, en: nEn ? en : t.en } : t)));
+        }
       }
       setEdit(null); onChanged();
     } catch (e) { setEditErr("บันทึกไม่สำเร็จ: " + errMsg(e)); }
@@ -376,60 +439,57 @@ export function TagOrganizerModal({
   };
 
   // ---- ชื่ออังกฤษ: แปลที่ยังขาดทีเดียว → ให้ตรวจก่อนบันทึก ----
-  const missingEn = useMemo(() => tags.filter((t) => !t.en), [tags]);
+  // เรียงตามที่เห็นบนจอ (กลุ่ม → หมวดย่อย · แท็กตามกลุ่ม) ให้ตารางตรวจอ่านง่าย
+  const orderedGroups = useMemo(() => topGroups.flatMap((g) => [g, ...subsOf(g.id)]), [topGroups, subsOf]);
+  const missingGroupEn = useMemo(() => orderedGroups.filter((g) => !g.en), [orderedGroups]);
+  const missingTagEn = useMemo(
+    () => [...orderedGroups.flatMap((g) => tagsOf(g.id)), ...tagsOf(NONE)].filter((t) => !t.en),
+    [orderedGroups, tagsOf],
+  );
+  const missingCount = missingGroupEn.length + missingTagEn.length;
   const startBulk = async () => {
-    if (!missingEn.length) return;
+    // หมวดย่อยที่ผูกกับแท็กแม่ซึ่งมีชื่ออังกฤษแล้ว → ใช้ชื่อเดียวกัน ไม่ต้องแปลใหม่
+    const rows: BulkRow[] = [
+      ...missingGroupEn.map((g) => ({ kind: "group" as const, id: g.id, th: g.name, en: tagOfSubGroup(g)?.en ?? "" })),
+      ...missingTagEn.map((t) => ({ kind: "tag" as const, id: t.id, th: t.label, en: "" })),
+    ];
+    if (!rows.length) return;
+    const need = rows.filter((r) => !r.en);
     setTranslating(true); setErr(null);
     try {
-      const out = await translateContent(missingEn.map((t) => t.label));
-      setBulk(missingEn.map((t, i) => ({ id: t.id, th: t.label, en: out[i] ?? "" })));
+      const out = await translateContent(need.map((r) => r.th));
+      need.forEach((r, i) => { r.en = out[i] ?? ""; });
+      setBulk(rows);
     } catch (e) { setErr("แปลไม่สำเร็จ: " + errMsg(e)); }
     finally { setTranslating(false); }
   };
   const saveBulk = async () => {
     if (!bulk) return;
     const rows = bulk.map((r) => ({ ...r, en: r.en.trim() })).filter((r) => r.en);
+    const key = (r: BulkRow) => `${r.kind}:${r.id}`;
     setBusy(true); setErr(null);
     const failed = new Set<string>();
     await Promise.all(rows.map(async (r) => {
-      try { await must(patchTag(r.id, { [EN_FIELD]: r.en })); } catch { failed.add(r.id); }
+      try { await must((r.kind === "tag" ? patchTag : patchGroup)(r.id, { [EN_FIELD]: r.en })); }
+      catch { failed.add(key(r)); }
     }));
-    const saved = new Map(rows.filter((r) => !failed.has(r.id)).map((r) => [r.id, r.en]));
-    setTags((p) => p.map((t) => (saved.has(t.id) ? { ...t, en: saved.get(t.id)! } : t)));
+    const ok = rows.filter((r) => !failed.has(key(r)));
+    const tagEn = new Map(ok.filter((r) => r.kind === "tag").map((r) => [r.id, r.en]));
+    const grpEn = new Map(ok.filter((r) => r.kind === "group").map((r) => [r.id, r.en]));
+    setTags((p) => p.map((t) => (tagEn.has(t.id) ? { ...t, en: tagEn.get(t.id)! } : t)));
+    setGroups((p) => p.map((g) => (grpEn.has(g.id) ? { ...g, en: grpEn.get(g.id)! } : g)));
     setBusy(false);
-    if (saved.size) onChanged();
+    if (ok.length) onChanged();
     if (failed.size) {
-      setErr(`บันทึกชื่ออังกฤษไม่สำเร็จ ${failed.size} อัน: ${rows.filter((r) => failed.has(r.id)).map((r) => r.th).join(", ")}`);
-      setBulk((b) => (b ? b.filter((r) => failed.has(r.id)) : b));
+      setErr(`บันทึกชื่ออังกฤษไม่สำเร็จ ${failed.size} อัน: ${rows.filter((r) => failed.has(key(r))).map((r) => r.th).join(", ")}`);
+      setBulk((b) => (b ? b.filter((r) => failed.has(key(r))) : b));
     } else {
-      setBulk(null); setNote(`บันทึกชื่ออังกฤษ ${saved.size} แท็กแล้ว`);
+      const parts = [grpEn.size ? `กลุ่ม ${grpEn.size}` : "", tagEn.size ? `แท็ก ${tagEn.size}` : ""].filter(Boolean).join(" + ");
+      setBulk(null); setNote(`บันทึกชื่ออังกฤษ ${parts} แล้ว`);
     }
   };
 
-  // ---- CRUD กลุ่ม ----
-  const addGroup = async (parentId: string | null) => {
-    const n = window.prompt(parentId ? "ชื่อหมวดย่อยใหม่:" : "ชื่อกลุ่มใหม่:", ""); if (n == null) return;
-    const name = n.trim(); if (!name) return;
-    setBusy(true); setErr(null);
-    try {
-      await must(apiFetch(`/api/master-v2/${GROUP_MODULE}`, {
-        method: "POST", headers: JSON_HEADERS,
-        body: JSON.stringify({ name, parent_group_id: parentId, single_select: false, sort_order: 100 }),
-      }));
-      await loadGroups(); onChanged();
-    } catch (e) { setErr("เพิ่มกลุ่มไม่สำเร็จ: " + errMsg(e)); }
-    finally { setBusy(false); }
-  };
-  const renameGroup = async (g: Grp) => {
-    const n = window.prompt("แก้ชื่อกลุ่ม:", g.name); if (n == null) return;
-    const name = n.trim(); if (!name || name === g.name) return;
-    setBusy(true); setErr(null);
-    try {
-      await must(patchGroup(g.id, { name }));
-      setGroups((p) => p.map((x) => x.id === g.id ? { ...x, name } : x)); onChanged();
-    } catch (e) { setErr("แก้ชื่อกลุ่มไม่สำเร็จ: " + errMsg(e)); }
-    finally { setBusy(false); }
-  };
+  // ---- CRUD กลุ่ม (เพิ่ม/แก้ชื่อ ใช้ป๊อปแก้ชื่อ ไทย+อังกฤษ ด้านบน) ----
   const toggleSingle = async (g: Grp) => {
     setBusy(true); setErr(null);
     const next = !g.single_select;
@@ -565,14 +625,17 @@ export function TagOrganizerModal({
         <span className={`${isSub ? "text-xs text-slate-500" : "text-sm font-medium text-slate-700"}`}>
           {isSub ? "↳ " : (g.icon ? g.icon + " " : "")}{g.name}
         </span>
+        {g.en
+          ? <span className="text-[10px] text-slate-400 truncate max-w-[160px]">· {g.en}</span>
+          : <button type="button" onClick={() => openGroupEdit(g)} title="ยังไม่มีชื่ออังกฤษ — กดเพื่อใส่" className="text-[10px] text-amber-500 hover:underline">· ไม่มี EN</button>}
         <button type="button" onClick={() => toggleSingle(g)} title="สลับโหมดเลือก (หลายรายการ / เลือกได้ 1)"
           className={`text-[10px] rounded px-1 border ${g.single_select ? "text-amber-600 bg-amber-50 border-amber-100" : "text-slate-400 bg-white border-slate-200"}`}>
           {g.single_select ? "เลือกได้ 1" : "หลายรายการ"}
         </button>
         {into && <span className="pointer-events-none text-[10px] rounded bg-blue-600 text-white px-1.5 py-0.5">↳ ใส่เป็นหมวดย่อยของ “{g.name}”</span>}
         <div className="flex-1" />
-        <button type="button" onClick={() => renameGroup(g)} title="แก้ชื่อกลุ่ม" className="text-slate-300 hover:text-blue-600 opacity-0 group-hover/h:opacity-100">✎</button>
-        {!isSub && <button type="button" onClick={() => addGroup(g.id)} title="เพิ่มหมวดย่อย" className="text-slate-300 hover:text-blue-600 opacity-0 group-hover/h:opacity-100">＋↳</button>}
+        <button type="button" onClick={() => openGroupEdit(g)} title="แก้ชื่อกลุ่ม (ไทย / อังกฤษ)" className="text-slate-300 hover:text-blue-600 opacity-0 group-hover/h:opacity-100">✎</button>
+        {!isSub && <button type="button" onClick={() => openNewGroup(g.id)} title="เพิ่มหมวดย่อย" className="text-slate-300 hover:text-blue-600 opacity-0 group-hover/h:opacity-100">＋↳</button>}
         <button type="button" onClick={() => deleteGroup(g)} title="ลบกลุ่ม" className="text-slate-300 hover:text-red-500 opacity-0 group-hover/h:opacity-100">🗑️</button>
       </div>
     );
@@ -643,15 +706,15 @@ export function TagOrganizerModal({
           <div className="min-w-0">
             <h3 className="font-semibold text-slate-800">🗂️ จัดการแท็ก (ลากเพื่อย้าย/เรียง)</h3>
             <p className={`text-[11px] mt-0.5 ${drag ? "text-blue-600 font-medium" : "text-slate-400"}`}>{helpText}</p>
-            {!loading && tags.length > 0 && (
-              <div className="flex items-center gap-2 mt-1.5 text-[11px]">
-                <span className={missingEn.length ? "text-amber-600" : "text-emerald-600"}>
-                  🌐 ชื่ออังกฤษ {tags.length - missingEn.length}/{tags.length}
+            {!loading && (tags.length > 0 || orderedGroups.length > 0) && (
+              <div className="flex items-center gap-2 mt-1.5 text-[11px] flex-wrap">
+                <span className={missingCount ? "text-amber-600" : "text-emerald-600"}>
+                  🌐 ชื่ออังกฤษ — แท็ก {tags.length - missingTagEn.length}/{tags.length} · กลุ่ม {orderedGroups.length - missingGroupEn.length}/{orderedGroups.length}
                 </span>
-                {missingEn.length > 0 && (
+                {missingCount > 0 && (
                   <button type="button" onClick={() => void startBulk()} disabled={busy || translating}
                     className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-                    {translating && !edit ? "กำลังแปล…" : `แปลที่ยังขาด (${missingEn.length})`}
+                    {translating && !edit ? "กำลังแปล…" : `แปลที่ยังขาด (${missingCount})`}
                   </button>
                 )}
               </div>
@@ -692,15 +755,19 @@ export function TagOrganizerModal({
           </div>
           <button type="button" onClick={() => void addTag()} disabled={busy || !newTag.trim()}
             className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">+ เพิ่มแท็ก</button>
-          <button type="button" onClick={() => void addGroup(null)} disabled={busy}
+          <button type="button" onClick={() => openNewGroup(null)} disabled={busy}
             className="h-9 px-3 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">+ เพิ่มกลุ่ม</button>
         </div>
 
-        {/* ป๊อปแก้ชื่อแท็ก (ไทย + อังกฤษ) */}
-        {edit && editTag && (
+        {/* ป๊อปแก้ชื่อ ไทย + อังกฤษ (แท็ก / กลุ่ม / หมวดย่อย / เพิ่มกลุ่มใหม่) */}
+        {edit && editInfo && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/25 rounded-xl p-4" onClick={closeEdit}>
             <div className="bg-white rounded-xl shadow-xl p-4 w-[400px] max-w-full space-y-3" onClick={(e) => e.stopPropagation()}>
-              <div className="font-semibold text-slate-800 text-sm">✎ แก้ชื่อแท็ก</div>
+              <div className="font-semibold text-slate-800 text-sm">
+                {edit.mode === "tag" ? "✎ แก้ชื่อแท็ก"
+                  : edit.mode === "group" ? (groupById.get(edit.id) && isSubGroup(groupById.get(edit.id)!) ? "✎ แก้ชื่อหมวดย่อย" : "✎ แก้ชื่อกลุ่ม")
+                  : edit.parentId ? `＋ เพิ่มหมวดย่อยใน “${groupById.get(edit.parentId)?.name ?? ""}”` : "＋ เพิ่มกลุ่มใหม่"}
+              </div>
               <label className="block">
                 <span className="text-xs text-slate-500">ชื่อไทย</span>
                 <input autoFocus value={edit.th} onChange={(e) => setEdit({ ...edit, th: e.target.value })}
@@ -710,7 +777,7 @@ export function TagOrganizerModal({
               <label className="block">
                 <span className="text-xs text-slate-500">ชื่ออังกฤษ (EN) <span className="text-slate-400">— ใช้ลงขายต่างประเทศ / ให้ AI เขียนคำอังกฤษ</span></span>
                 <div className="mt-1 flex items-center h-9 border border-slate-200 rounded-md overflow-hidden">
-                  <input value={edit.en} onChange={(e) => setEdit({ ...edit, en: e.target.value })} placeholder="เช่น Wallet"
+                  <input value={edit.en} onChange={(e) => setEdit({ ...edit, en: e.target.value })} placeholder={edit.mode === "tag" ? "เช่น Wallet" : "เช่น Materials"}
                     onKeyDown={(e) => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") closeEdit(); }}
                     className="flex-1 min-w-0 h-full px-2 text-sm outline-none" />
                   <button type="button" onClick={() => void translateEdit()} disabled={!edit.th.trim() || translating}
@@ -719,14 +786,21 @@ export function TagOrganizerModal({
                   </button>
                 </div>
               </label>
-              {subGroupOfTag(editTag) && edit.th.trim() !== editTag.label && (
-                <p className="text-[11px] text-slate-400">หมวดย่อย “↳ {editTag.label}” จะเปลี่ยนชื่อตามให้ด้วย (แท็กย่อยยังผูกกับแท็กนี้)</p>
-              )}
+              {(() => {
+                const lk = editInfo.linked; const lp = linkedPatch(); const keys = Object.keys(lp);
+                if (!lk || !keys.length) return null;
+                const what = keys.length > 1 ? "ชื่อไทย + อังกฤษ" : keys[0] === EN_FIELD ? "ชื่ออังกฤษ" : "ชื่อไทย";
+                return (
+                  <p className="text-[11px] text-slate-400">
+                    {lk.kind === "group" ? `หมวดย่อย “↳ ${lk.name}”` : `แท็กแม่ “${lk.name}”`} จะเปลี่ยน{what}ตามให้ด้วย (ผูกชื่อกันอยู่)
+                  </p>
+                );
+              })()}
               {editErr && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1">{editErr}</div>}
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={closeEdit} className="h-9 px-4 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">ยกเลิก</button>
                 <button type="button" onClick={() => void saveEdit()} disabled={busy || !edit.th.trim()}
-                  className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+                  className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังบันทึก…" : edit.mode === "newGroup" ? "เพิ่ม" : "บันทึก"}</button>
               </div>
             </div>
           </div>
@@ -742,11 +816,20 @@ export function TagOrganizerModal({
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
                 {bulk.map((r, i) => (
-                  <div key={r.id} className="flex items-center gap-2">
-                    <span className="w-40 shrink-0 truncate text-sm text-slate-700" title={r.th}>{r.th}</span>
+                  <div key={`${r.kind}:${r.id}`}>
+                    {(i === 0 || bulk[i - 1].kind !== r.kind) && (
+                      <div className={`text-[11px] font-medium text-slate-400 ${i ? "pt-2" : ""} pb-1`}>
+                        {r.kind === "group" ? "🗂️ กลุ่ม / หมวดย่อย" : "🏷️ แท็ก"}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                    <span className="w-40 shrink-0 truncate text-sm text-slate-700" title={r.th}>
+                      {r.kind === "group" && groupById.get(r.id) && isSubGroup(groupById.get(r.id)!) ? "↳ " : ""}{r.th}
+                    </span>
                     <input value={r.en} placeholder="(เว้นว่าง = ไม่บันทึก)"
                       onChange={(e) => setBulk((b) => (b ? b.map((x, k) => (k === i ? { ...x, en: e.target.value } : x)) : b))}
                       className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-md" />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -755,7 +838,7 @@ export function TagOrganizerModal({
                   className="h-9 px-4 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">ยกเลิก</button>
                 <button type="button" onClick={() => void saveBulk()} disabled={busy || !bulk.some((r) => r.en.trim())}
                   className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
-                  {busy ? "กำลังบันทึก…" : `บันทึก ${bulk.filter((r) => r.en.trim()).length} แท็ก`}
+                  {busy ? "กำลังบันทึก…" : `บันทึก ${bulk.filter((r) => r.en.trim()).length} รายการ`}
                 </button>
               </div>
             </div>
