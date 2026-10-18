@@ -6,12 +6,19 @@
  *   relation_config = { kind:"computed", text_compute:"<name>" }
  *
  * แต่ละตัวมี describe (คำอธิบายภาษาคน) ไว้โชว์เป็น tooltip
+ * บางสูตรตั้งค่าได้ (configurable) — ค่าตั้งอยู่ใน relation_config ของฟิลด์นั้น ส่งเข้ามาเป็น cfg
  */
+import { buildNameFromParts, describeNameParts } from "@/lib/name-parts";
 
 export type TextComputeDef = {
   label: string;
   describe: string;
-  fn: (row: Record<string, unknown>) => string;
+  /** cfg = relation_config ของฟิลด์ (สำหรับสูตรที่ตั้งค่าได้) */
+  fn: (row: Record<string, unknown>, cfg?: Record<string, unknown> | null) => string;
+  /** สูตรที่ตั้งค่าได้: "name_parts" = เลือกชิ้นของชื่อ + เรียงลำดับ (components/name-parts-editor) */
+  configurable?: "name_parts";
+  /** คำอธิบายตามค่าที่ตั้งจริง (แทน describe) */
+  describeCfg?: (cfg?: Record<string, unknown> | null) => string;
 };
 
 // ตัดเลข 0 ท้าย (เหมือน Python :g) — 12.0 → "12", 9.7 → "9.7", 2.50 → "2.5"
@@ -97,25 +104,23 @@ TEXT_COMPUTES.platform_description = {
   },
 };
 
-// Parent SKU — Name Platform = ชื่อสินค้า + Code  (เช่น "Louis Montini (Burning Sand) กระเป๋า... TTM089")
+// Parent SKU — Name Platform = ประกอบจากชิ้นที่ตั้งไว้ (ค่าตั้งต้น ชื่อสินค้า + Code เช่น "Louis Montini (Burning Sand) กระเป๋า... TTM089")
+//   ตั้งชิ้น/ลำดับ/ตัวคั่นได้ที่ ⚙ ข้างหัวข้อ (แอดมิน) → relation_config.name_parts · กฎอยู่ที่ lib/name-parts
 TEXT_COMPUTES.name_platform_code = {
   label: "ชื่อแพลตฟอร์ม + รหัส",
   describe: "ชื่อสินค้า + รหัส (Code) ต่อท้าย — ใช้ Name Platform ถ้ามี ไม่งั้นใช้ Name Th",
-  fn: (r) => {
-    const base = trim(r.name_platform) || trim(r.name_th);
-    const code = trim(r.code);
-    return [base, code].filter(Boolean).join(" ");
-  },
+  configurable: "name_parts",
+  describeCfg: (cfg) => `ประกอบจาก: ${describeNameParts(cfg?.name_parts)}`,
+  fn: (r, cfg) => buildNameFromParts(r, cfg?.name_parts, "th"),
 };
 
-// Parent SKU — Name Platform (EN) = ชื่ออังกฤษ + Code (คู่ของ name_platform_code · ไม่ใช้ AI แปล)
+// Parent SKU — Name Platform (EN) = ชิ้นชุดเดียวกับฝั่งไทย แต่ชื่อใช้ Name En (ไม่ใช้ AI แปล)
 TEXT_COMPUTES.name_platform_code_en = {
   label: "ชื่อแพลตฟอร์ม + รหัส (EN)",
   describe: "Name En + รหัส (Code) ต่อท้าย — เวอร์ชันอังกฤษของ Name Platform (ไม่ต้องแปลด้วย AI)",
-  fn: (r) => {
-    const base = trim(r.name_en) || trim(r.name_platform) || trim(r.name_th);
-    return [base, trim(r.code)].filter(Boolean).join(" ");
-  },
+  configurable: "name_parts",
+  describeCfg: (cfg) => `ประกอบจาก (อังกฤษ): ${describeNameParts(cfg?.name_parts)}`,
+  fn: (r, cfg) => buildNameFromParts(r, cfg?.name_parts, "en"),
 };
 
 // Parent SKU — รายละเอียดแพลตฟอร์ม (EN): โครงเดียวกับฝั่งไทย แต่หยิบช่องอังกฤษ + ข้อความประจำเป็นอังกฤษ
@@ -182,13 +187,18 @@ TEXT_COMPUTES.china_bill_type = {
   },
 };
 
-export function computedTextValue(name: string | undefined | null, row: Record<string, unknown>): string | null {
+export function computedTextValue(name: string | undefined | null, row: Record<string, unknown>, cfg?: Record<string, unknown> | null): string | null {
   if (!name) return null;
   const def = TEXT_COMPUTES[name];
-  return def ? def.fn(row) : null;
+  return def ? def.fn(row, cfg) : null;
 }
 
-export function textComputeDescribe(name: string | undefined | null): string | null {
+export function textComputeDescribe(name: string | undefined | null, cfg?: Record<string, unknown> | null): string | null {
   if (!name) return null;
-  return TEXT_COMPUTES[name]?.describe ?? null;
+  const def = TEXT_COMPUTES[name];
+  if (!def) return null;
+  return def.describeCfg ? def.describeCfg(cfg) : def.describe;
 }
+
+/** สูตรนี้ตั้ง "ชิ้นของชื่อ" ได้ไหม (โชว์ปุ่ม ⚙ ข้างหัวข้อ) */
+export const isNamePartsCompute = (name: string | undefined | null): boolean => !!name && TEXT_COMPUTES[name]?.configurable === "name_parts";

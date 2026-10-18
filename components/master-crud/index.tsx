@@ -42,7 +42,7 @@ import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import { formatAmount, currencyLabel } from "@/lib/money";
 import { MoneyInput } from "@/components/money-input";
-import { computedTextValue, textComputeDescribe } from "@/lib/computed-text";
+import { computedTextValue, textComputeDescribe, isNamePartsCompute } from "@/lib/computed-text";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
 // 🧩 ทะเบียนหน้าดูเฉพาะโมดูล (config.detailView ตาม moduleKey) — ตัวหน้าโหลดเฉพาะตอนเปิดโมดูลนั้น
@@ -59,6 +59,8 @@ const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel
 const BankPicker = dynamic(() => import("@/components/bank-picker").then((m) => m.BankPicker), { ssr: false });
 // เพิ่มหลายรายการแบบ inline (โหลดตอนกดปุ่มเท่านั้น)
 const InlineCreatePanel = dynamic(() => import("@/components/master-crud/inline-create").then((m) => m.InlineCreatePanel), { ssr: false });
+// ⚙ ตั้ง "ชื่อประกอบจากอะไร" ข้างหัวข้อฟิลด์ computed ที่ตั้งได้ (เช่น Name Platform) — แอดมินเท่านั้น
+const NamePartsButton = dynamic(() => import("@/components/name-parts-editor").then((m) => m.NamePartsButton), { ssr: false });
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
 // แถบ "🛒 มาจาก Taobao" — ลิงก์ย้อนกลับไปยังรายการในกล่องพักที่จับคู่มาเป็นสินค้าตัวนี้
 const SkuTaobaoSource = dynamic(() => import("@/components/sku-taobao-source").then((m) => m.SkuTaobaoSource), { ssr: false });
@@ -185,7 +187,7 @@ function registryToFieldDef(
     customRender
       ?? (isComputed
           ? (_v: unknown, row?: Record<string, unknown>) => {
-              if (textCompute) return <span className="text-sm text-slate-800">{computedTextValue(textCompute, (row ?? {}) as Record<string, unknown>) ?? "—"}</span>;
+              if (textCompute) return <span className="text-sm text-slate-800">{computedTextValue(textCompute, (row ?? {}) as Record<string, unknown>, compCfg as Record<string, unknown> | undefined) ?? "—"}</span>;
               const n = computeField(compFormula, (row ?? {}) as Record<string, unknown>);
               return <span className="text-sm tabular-nums text-slate-800">{formatComputed(n, compFormat, compDecimals)}</span>;
             }
@@ -257,6 +259,7 @@ function registryToFieldDef(
     computeFormat:   compFormat,
     computeDecimals: compDecimals,
     textCompute:     textCompute,
+    textComputeCfg:  textCompute ? (compCfg as Record<string, unknown> | undefined) : undefined,
     summarize:       isComputed ? !!compCfg?.summary : undefined,
   };
 }
@@ -371,6 +374,8 @@ export type FieldDef = {
   formula?:   string;
   /** computed: สูตรข้อความสำเร็จรูป (lib/computed-text) — ให้ผลเป็นข้อความ */
   textCompute?: string;
+  /** computed: relation_config ทั้งก้อนของฟิลด์ (สูตรที่ตั้งค่าได้ เช่น name_parts ของ Name Platform) */
+  textComputeCfg?: Record<string, unknown>;
   /** computed: รูปแบบผลลัพธ์ */
   computeFormat?: ComputeFormat;
   /** computed: จำนวนทศนิยม */
@@ -2348,7 +2353,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         {f.type === "computed" ? (
           <div className="min-h-9 mt-0.5 flex items-start gap-2 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-md">
             <span className={`flex-1 ${f.textCompute ? "whitespace-pre-wrap break-words" : "tabular-nums"}`}>
-              {f.textCompute ? (computedTextValue(f.textCompute, form) ?? "—") : formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals)}
+              {f.textCompute ? (computedTextValue(f.textCompute, form, f.textComputeCfg) ?? "—") : formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals)}
             </span>
             <span className="text-[10px] text-slate-400 shrink-0 mt-0.5">{tr("∑ คำนวณอัตโนมัติ", "∑ Auto-calculated")}</span>
           </div>
@@ -2489,7 +2494,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     let copyText = "";
     if (f.type === "computed") {
       copyText = f.textCompute
-        ? (computedTextValue(f.textCompute, form) ?? "")
+        ? (computedTextValue(f.textCompute, form, f.textComputeCfg) ?? "")
         : formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals);
     } else {
       copyText = form[f.key] != null ? String(form[f.key]) : "";
@@ -2521,7 +2526,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         onSave={(val) => quickSave(f.key, val)} />;
     }
     if (f.type === "computed") {
-      if (f.textCompute) return <div className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{computedTextValue(f.textCompute, form) ?? "—"}</div>;
+      if (f.textCompute) return <div className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{computedTextValue(f.textCompute, form, f.textComputeCfg) ?? "—"}</div>;
       const n = computeField(f.formula, form);
       return <span className="text-sm tabular-nums font-medium text-slate-800" style={vs}>{formatComputed(n, f.computeFormat, f.computeDecimals)}</span>;
     }
@@ -2999,15 +3004,22 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 }} />
             );
           };
+          // ⚙ ชื่อประกอบจากอะไร (computed ที่ตั้งได้ เช่น Name Platform) — แอดมิน · บันทึกทั้งช่องไทย + คู่อังกฤษ → โหลดทะเบียนใหม่
+          const namePartsBtn = (f: FieldDef, en?: FieldDef): React.ReactNode => {
+            if (!isNamePartsCompute(f.textCompute) || !f.fieldId || !can("admin.field_registry.edit")) return null;
+            const enRef = en?.fieldId && isNamePartsCompute(en.textCompute) ? { id: en.fieldId, cfg: en.textComputeCfg } : undefined;
+            return <NamePartsButton field={{ id: f.fieldId, cfg: f.textComputeCfg }} enField={enRef} sample={form} fieldLabel={f.label} onSaved={() => refreshRegistry()} />;
+          };
           const visibleFields = baseVisible.flatMap((f) => {
                 if (enKeys.has(f.key)) return [];             // ช่องอังกฤษ: ไม่โชว์ที่ตำแหน่งเดิมของมัน
                 const pair = langPair(f);
                 const en = pair ? baseVisible.find((x) => x.key === pair) : undefined;
                 const btn = insertBtn(f, en ? pair : "");
-                if (!en) return [btn ? { ...f, labelAddon: btn } : f];   // ไม่มีคู่อังกฤษ (หรือยังไม่โชว์) → คงช่องไทยไว้
+                const gear = namePartsBtn(f, en);
+                if (!en) return [btn || gear ? { ...f, labelAddon: <>{btn}{gear}</> } : f];   // ไม่มีคู่อังกฤษ (หรือยังไม่โชว์) → คงช่องไทยไว้
                 const m = langField[f.key] ?? langMode;
                 const pill = <LangPill mode={m} enFilled={en.type === "computed" || String(form[pair] ?? "").trim() !== ""} onChange={(nm) => setLangField((p) => ({ ...p, [f.key]: nm }))} />;
-                const addon = <>{pill}{btn}</>;
+                const addon = <>{pill}{btn}{gear}</>;
                 return m === "th"
                   ? [{ ...f, labelAddon: addon }]
                   : [{ ...en, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? en.formSpan, labelAddon: addon }];
@@ -3713,7 +3725,7 @@ function gw12(f: { uiStyle?: Record<string, unknown>; formSpan?: number; type?: 
 function fieldHelpTip(f: FieldDef): string | null {
   if (f.type === "computed") {
     const auto = tr("ช่องคำนวณอัตโนมัติ", "Calculated automatically");
-    if (f.textCompute) return textComputeDescribe(f.textCompute) ?? auto;
+    if (f.textCompute) return textComputeDescribe(f.textCompute, f.textComputeCfg) ?? auto;
     if (f.formula) return tr(`คำนวณอัตโนมัติจากสูตร: ${f.formula}`, `Calculated from formula: ${f.formula}`);
     return auto;
   }
