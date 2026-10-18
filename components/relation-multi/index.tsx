@@ -20,7 +20,8 @@ import { BomEditorModal } from "@/components/bom-editor-modal";
 import { useAuth } from "@/components/auth";
 import { ConfirmDialog } from "@/components/modal";
 import type { SkuUsage } from "@/lib/sku-usage";
-import { downscaleImageWidth } from "@/lib/image-resize";
+import { ChildImageBoard, uploadImagesToRecord } from "./image-board";
+import { useViewPref } from "@/lib/use-view-pref";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน (master-crud import ไฟล์นี้อยู่)
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -902,7 +903,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
   const imageField = config.list_image_field;
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  // 🖼 มุมมองตารางลูก: ตาราง / รูปภาพ (การ์ดรูปทั้งหมดต่อแถว + ลากรูปลงได้) — จำต่อผู้ใช้ (ของกลาง useViewPref)
+  const viewPref = useViewPref(`relmulti_view:${moduleKey}`, ["table", "images"] as const, "table");
   const [dropRowId, setDropRowId]         = useState<string | null>(null);   // แถวที่กำลังลากรูปมาวาง (ไฮไลต์)
   const [uploadingRowId, setUploadingRowId] = useState<string | null>(null); // แถวที่กำลังอัปรูป (สปินเนอร์)
   // เปิดโมดัล "เพิ่มแบบ/ไซส์" — 1 ตัว = ให้สีนั้น · หลายตัว = ตารางสี × ไซส์ (ปุ่มระดับตาราง)
@@ -1085,43 +1088,20 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   // เปิดเฉพาะโหมดแก้ไข + ลูกมีฟิลด์รูป (imageField) เท่านั้น
   const entityType = config.target_table || moduleKey;
   const canDropImages = canEditRows && !!imageField && !!entityType;
-  const keyFromPublicUrl = (u: string): string | null => { try { return new URLSearchParams((u.split("?")[1]) ?? "").get("key"); } catch { return null; } };
   const dropImagesOnRow = async (r: Record<string, unknown>, files: FileList | File[]) => {
     const imgs = Array.from(files).filter((f) => (f.type || "").startsWith("image/"));
     if (!imgs.length || !imageField) return;
     const rowId = String(r.id);
     setUploadingRowId(rowId); setDropRowId(null);
-    let ok = 0; let firstKey: string | null = null;
-    for (const orig of imgs) {
-      try {
-        const file = await downscaleImageWidth(orig, 1500);   // ย่อด้านกว้าง ≤ 1500px
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("entity_type", entityType);
-        fd.append("entity_id", rowId);
-        fd.append("attachment_kind", "image_gallery");
-        fd.append("image_only", "1");
-        fd.append("max_items", "9");
-        if (user?.name) fd.append("actor", user.name);
-        const res = await apiFetch("/api/attachments", { method: "POST", body: fd });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || j.error) throw new Error(j.error || "อัปไม่สำเร็จ");
-        if (!firstKey) firstKey = keyFromPublicUrl(String(j.public_url ?? "")) ?? ((j.data as { file_path?: string } | null)?.file_path ?? null);
-        ok++;
-      } catch (e) { toast.error(e instanceof Error ? e.message : "อัปรูปไม่สำเร็จ"); }
-    }
-    // ตั้งรูปปกให้ลูก ถ้ายังไม่มีรูปปก → รูปย่อในแถวอัปเดตทันที (ใช้ bulk-update เหมือน inline edit)
-    if (firstKey && (r[imageField] == null || r[imageField] === "")) {
-      try {
-        await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ edits: [{ id: rowId, changes: { [imageField]: firstKey } }] }),
-        });
-      } catch { /* ตั้งรูปปกพลาดไม่เป็นไร รูปยังอยู่ในคลัง */ }
-    }
+    const { ok, errors } = await uploadImagesToRecord({ entityType, moduleKey, imageField, row: r, files: imgs, actor: user?.name ?? null });
+    errors.forEach((m) => toast.error(m));
     setUploadingRowId(null);
     if (ok) { toast.success(`เพิ่มรูปให้ ${String(r[titleField] ?? rowId)} ${ok} รูป`); load(); }
   };
+  // 🖼 โหมดรูปภาพ — ตารางที่มีฟิลด์รูป · ลากรูปลงได้ทันทีถ้าแก้ได้ (โหมดแก้ไข หรือสินค้าที่ผู้ใช้มีสิทธิ์แก้สินค้า — ไม่ต้องกด "แก้ไข")
+  const canImageMode = !!imageField && !!entityType && !!moduleKey;
+  const imageMode = canImageMode && viewPref.view === "images";
+  const canDropBoard = canImageMode && (canEditRows || (["skus_v2", "parent_skus_v2"].includes(entityType) && can("products.edit" as Parameters<typeof can>[0])));
   const [editCell, setEditCell] = useState<{ rowId: string; field: string } | null>(null);
   const [editVal, setEditVal] = useState("");
   const fkCol = config.target_fk_column ?? "";
@@ -1486,13 +1466,27 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 inline-flex items-center gap-1">＋ ไซส์/แบบ (หลายสี)</button>
   ) : null;
 
+  // 🖼 สลับ ตาราง / รูปภาพ — กดแล้วจำเป็นค่าเริ่มต้นของผู้ใช้คนนั้น (เปิดครั้งหน้าเจอแบบเดิม)
+  const viewToggle = canImageMode && (!config.list_display_mode || config.list_display_mode === "table") ? (
+    <div className="flex-shrink-0 inline-flex rounded-md border border-slate-200 overflow-hidden">
+      {(["table", "images"] as const).map((v) => (
+        <button key={v} type="button" onClick={() => { viewPref.setView(v); void viewPref.saveDefault(v); }}
+          title={v === "images" ? "โชว์รูปทั้งหมดของแต่ละรายการ + ลากรูปลงได้เลย" : "มุมมองตาราง"}
+          className={`h-6 px-2 text-[11px] font-medium ${v === "images" ? "border-l border-slate-200" : ""} ${viewPref.view === v ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}>
+          {v === "images" ? "🖼 รูปภาพ" : "📋 ตาราง"}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   // หัวข้อ + จำนวน (สำหรับ 360 view)
-  const header = (title || gearBtn || addBtn) ? (
+  const header = (title || gearBtn || addBtn || viewToggle) ? (
     <div className="flex items-center gap-1.5 mb-1.5">
       {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
       {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />
-      {collapseBtn}
+      {viewToggle}
+      {!imageMode && collapseBtn}
       {bulkVariantBtn}
       {colorBtn}
       {attachBtn}
@@ -1838,8 +1832,13 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   return (
     <>
       {header}
-      {list}
-      {dropHint}
+      {imageMode ? (
+        <ChildImageBoard rows={rows} titleField={titleField} entityType={entityType} moduleKey={moduleKey} imageField={imageField}
+          subtitle={(r) => { const v = r.color_th ?? r.color; return v ? String(v) : null; }}
+          canDrop={canDropBoard} actor={user?.name ?? null}
+          onOpen={(id) => setPeek({ id, edit: false })} onChanged={load} />
+      ) : list}
+      {!imageMode && dropHint}
       {rows.length < total && (
         <button type="button" onClick={loadMore} disabled={loadingMore}
           className="mt-1.5 w-full h-8 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">

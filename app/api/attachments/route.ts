@@ -3,6 +3,7 @@ import { r2PutObject, isR2Configured } from "@/lib/r2";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { captureImageAdd, editContextFromRequest, VERSIONED_TABLES } from "@/lib/record-versions";
+import { guardApi } from "@/lib/api-auth";
 
 // ---- Types ----
 
@@ -38,6 +39,20 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const entityType = searchParams.get("entity_type");
   const entityId   = searchParams.get("entity_id");
+  // หลายระเบียนทีเดียว (?entity_ids=a,b,c) — ตาราง SKU ลูกโหมดรูปภาพ · คืน { by_entity: { id: Attachment[] } } (เรียง is_primary → sort_order)
+  const entityIds = (searchParams.get("entity_ids") ?? "").split(",").map((s) => s.trim()).filter((s) => /^[0-9a-f-]{36}$/i.test(s)).slice(0, 200);
+  if (entityType && entityIds.length) {
+    const denied = await guardApi(request, "products.view");
+    if (denied) return denied;
+    const { data, error } = await supabaseAdmin().from("erp_playground_attachments")
+      .select("id, entity_type, entity_id, file_name, file_path, public_url, content_type, size_bytes, is_primary, sort_order, uploaded_by, created_at")
+      .eq("entity_type", entityType).in("entity_id", entityIds)
+      .order("is_primary", { ascending: false }).order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+    if (error) return NextResponse.json({ by_entity: {}, error: error.message }, { status: 500 });
+    const by: Record<string, Attachment[]> = {};
+    for (const a of (data ?? []) as Attachment[]) (by[a.entity_id] ??= []).push(a);
+    return NextResponse.json({ by_entity: by, error: null });
+  }
   if (!entityType || !entityId) {
     return NextResponse.json({ data: [], error: "entity_type & entity_id required" }, { status: 400 });
   }
