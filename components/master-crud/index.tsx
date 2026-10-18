@@ -44,6 +44,7 @@ import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula"
 import { formatAmount, currencyLabel } from "@/lib/money";
 import { MoneyInput } from "@/components/money-input";
 import { computedTextValue, textComputeDescribe, isNamePartsCompute } from "@/lib/computed-text";
+import { ScrollTabs } from "@/components/scroll-tabs";   // แถบแท็บยาวเกิน: กดแล้วเลื่อนให้อยู่กลาง + ปุ่ม ‹ ›
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
 // 🧩 ทะเบียนหน้าดูเฉพาะโมดูล (config.detailView ตาม moduleKey) — ตัวหน้าโหลดเฉพาะตอนเปิดโมดูลนั้น
@@ -3838,16 +3839,16 @@ function LayoutTabs({
   return (
     <div>
       {ordered.length > 1 && (
-        <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
+        <ScrollTabs activeKey={active} className="border-b border-slate-200">
           {ordered.map((o) => (
-            <button key={o.t.key} type="button" onClick={() => setActive(o.t.key)}
+            <button key={o.t.key} data-tab-key={o.t.key} type="button" onClick={() => setActive(o.t.key)}
               className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 o.t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
               {o.kind === "field" ? sectionIconNode(o.t.icon) : (o.t.icon && <span>{o.t.icon}</span>)}<span>{o.t.label}</span>
             </button>
           ))}
-        </div>
+        </ScrollTabs>
       )}
       {activeExtra ? (
         <div className="pt-3">{activeExtra.node}</div>
@@ -3970,13 +3971,14 @@ function SectionTabBar({
   onSelect: (k: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
+    <ScrollTabs activeKey={active} className="border-b border-slate-200">
       {grouped.map(([groupKey, groupFields]) => {
         const cfg = getGroupConfig(groupKey);
         const isActive = groupKey === active;
         return (
           <button
             key={groupKey}
+            data-tab-key={groupKey}
             type="button"
             onClick={() => onSelect(groupKey)}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
@@ -3991,7 +3993,7 @@ function SectionTabBar({
           </button>
         );
       })}
-    </div>
+    </ScrollTabs>
   );
 }
 
