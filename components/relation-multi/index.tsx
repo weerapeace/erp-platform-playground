@@ -22,6 +22,8 @@ import { ConfirmDialog } from "@/components/modal";
 import type { SkuUsage } from "@/lib/sku-usage";
 import { ChildImageBoard, uploadImagesToRecord } from "./image-board";
 import { useViewPref } from "@/lib/use-view-pref";
+import { CodeCheckMessages, useCodeCheck } from "@/components/code-check-hint";
+import { CODE_RULE_TABLES } from "@/lib/code-rules";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน (master-crud import ไฟล์นี้อยู่)
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -1341,6 +1343,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [newRow, setNewRow] = useState<Record<string, string>>({});
   const [newImg, setNewImg] = useState<string | null>(null);   // รูปปกของแถวที่กำลังเพิ่ม (r2 key)
   const [adding, setAdding] = useState(false);
+  // 🔤 รหัส SKU ใหม่: เช็กซ้ำสด (ไม่สนตัวพิมพ์) + เตือนพิมพ์เล็ก (ของกลาง lib/code-rules)
+  const codeRuleOn = titleField === "code" && (CODE_RULE_TABLES as readonly string[]).includes(entityType);
+  const newCodeCheck = useCodeCheck(codeRuleOn ? `/api/master-v2/${moduleKey}/check-code` : null, newRow[titleField] ?? "", null, codeRuleOn);
 
   // ไล่เลข code อัตโนมัติ = {parentCode}-{NN} (หาเลขถัดไปจากลูกที่มีอยู่ของ parent นี้)
   const genNextCode = async () => {
@@ -1350,7 +1355,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=500&offset=0&filters=${flt}`).then((r) => r.json());
       const childRows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
       const esc = parentCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const re = new RegExp(`^${esc}-(\\d+)$`);
+      const re = new RegExp(`^${esc}-(\\d+)$`, "i");   // ไม่สนตัวพิมพ์ — ลูกที่พิมพ์เล็กไว้ก็นับเลขต่อ (DB ถือว่ารหัสซ้ำแบบไม่สนตัวพิมพ์)
       let max = 0, width = 2;
       childRows.forEach((r) => {
         const m = re.exec(String(r[titleField] ?? ""));
@@ -1375,6 +1380,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const submitNewRow = async () => {
     const code = (newRow[titleField] ?? "").trim();
     if (!code || matchValue == null || !fk) return;
+    if (newCodeCheck.duplicate) { toast.error(`รหัส ${code} ซ้ำกับ ${newCodeCheck.duplicate.code} ที่มีอยู่แล้ว — เปลี่ยนรหัสก่อน`); return; }
     setAdding(true);
     try {
       const body: Record<string, unknown> = { [fk]: matchValue, [titleField]: code, is_active: true };
@@ -1802,10 +1808,18 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
                 })}
                 <td className="px-2 py-1.5 text-right">
                   <button type="button" onClick={() => void submitNewRow()} title="เพิ่ม (หรือกด Enter)"
-                    disabled={adding || !(newRow[titleField] ?? "").trim()}
+                    disabled={adding || !(newRow[titleField] ?? "").trim() || !!newCodeCheck.duplicate}
                     className="h-7 px-2 rounded-md text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40">
                     {adding ? "…" : "เพิ่ม"}
                   </button>
+                </td>
+              </tr>
+            )}
+            {showInlineAdd && codeRuleOn && (newCodeCheck.duplicate || newCodeCheck.warnings.length > 0) && (
+              <tr className="bg-amber-50/50">
+                <td colSpan={colCount} className="px-2 pb-1.5">
+                  <CodeCheckMessages compact check={newCodeCheck} onFix={(nv) => setNewRow((p) => ({ ...p, [titleField]: nv }))}
+                    onViewDup={(id) => setPeek({ id, edit: false })} />
                 </td>
               </tr>
             )}

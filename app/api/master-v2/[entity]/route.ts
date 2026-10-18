@@ -115,9 +115,12 @@ export function parseDupError(err: { message?: string | null; details?: string |
   if (!err) return null;
   const text = `${err.details ?? ""} ${err.message ?? ""}`;
   if (!/duplicate key|unique constraint|23505/i.test(text)) return null;
-  const m = /Key \(([^)]+)\)=\(([^)]*)\)/i.exec(text);   // เช่น "Key (code)=(JEAN08) already exists"
+  // เช่น "Key (code)=(JEAN08) already exists" · index แบบไม่สนตัวพิมพ์: "Key (upper(btrim(code)))=(MGN194-01)" → ช่อง code
+  const m = /Key \((.+?)\)=\(([^)]*)\)/i.exec(text);
   if (!m) return null;
-  return { field: m[1].split(",")[0].trim(), value: m[2] };
+  const first = m[1].split(",")[0].trim();
+  const field = /([a-z_][a-z0-9_]*)\)*$/i.exec(first)?.[1] ?? first;
+  return { field, value: m[2] };
 }
 
 export type ColFilter =

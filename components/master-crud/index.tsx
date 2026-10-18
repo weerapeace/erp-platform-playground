@@ -47,6 +47,8 @@ import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
 // 🧩 ทะเบียนหน้าดูเฉพาะโมดูล (config.detailView ตาม moduleKey) — ตัวหน้าโหลดเฉพาะตอนเปิดโมดูลนั้น
 import { RECORD_DETAIL_VIEWS } from "@/components/record-detail-views";
+import { CodeCheckMessages, useCodeCheck } from "@/components/code-check-hint";
+import { CODE_RULE_MODULES } from "@/lib/code-rules";
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
@@ -1195,6 +1197,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
   // กดดู record ที่เชื่อม (relation) แบบ popup ซ้อน → เปิด "drawer เก่าตัวจริง" ของโมดูลปลายทาง (MasterRecordDrawer)
   const [peek, setPeek] = useState<{ moduleKey: string; id: string } | null>(null);
+  // 🔤 รหัสสินค้า (Parent/SKU): เช็กซ้ำสดแบบไม่สนตัวพิมพ์ + เตือนพิมพ์เล็ก (ของกลาง lib/code-rules · components/code-check-hint)
+  const codeRuleOn = !!config.moduleKey && (CODE_RULE_MODULES as readonly string[]).includes(config.moduleKey);
+  const codeCheck = useCodeCheck(`${apiBase}${config.apiPath}/check-code`, String(form.code ?? ""), editingId ? String(editingId) : null, codeRuleOn && drawerMode === "edit");
 
   // การ์ดสรุปสถานะ (ของกลาง) — กรองตาราง client-side ตามสถานะที่กด
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -1541,6 +1546,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       if (keys.length === 0) continue;
       const errs = validateValue(form[f.key], keys, validationRules);
       if (errs.length > 0) { fErr[f.key] = errs; hasErr = true; }
+    }
+    // 🔤 รหัสซ้ำ (เช็กสดแล้วเจอ) → ไม่ต้องรอ DB ปฏิเสธ
+    if (codeRuleOn && codeCheck.duplicate) {
+      fErr.code = [...(fErr.code ?? []), tr(`รหัสซ้ำกับ ${codeCheck.duplicate.code} ที่มีอยู่แล้ว`, `Code duplicates ${codeCheck.duplicate.code}`)];
+      hasErr = true;
     }
     setFieldErrors(fErr);
     if (hasErr) {
@@ -2464,6 +2474,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         )}
         {/* บรรทัดข้อความสดใต้ช่อง (ของกลาง config.fieldHints) เช่น "เบิกได้อีก ฿1,200,000" */}
         {config.fieldHints?.[f.key]?.({ value: v, form, recordId: editingId, mode: drawerMode })}
+        {/* 🔤 รหัสสินค้า: เช็กซ้ำสด (ไม่สนตัวพิมพ์) + เตือนพิมพ์เล็ก/ช่องว่าง (ของกลาง lib/code-rules) */}
+        {f.key === "code" && codeRuleOn && drawerMode === "edit" && (
+          <CodeCheckMessages check={codeCheck} onFix={(nv) => updateForm({ code: nv })}
+            onViewDup={(id) => setPeek({ moduleKey: config.moduleKey!, id })} />
+        )}
         {hasErr && (
           <div className="text-[11px] text-red-600 mt-1 space-y-0.5 flex flex-col">
             {errs.map((m, i) => <span key={i} className="flex items-center gap-1">⚠ <span>{m}</span></span>)}
