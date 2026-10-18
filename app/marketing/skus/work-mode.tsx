@@ -4,7 +4,7 @@
  * 🛠 โหมดทำงาน (มุมมองที่ 3 ของหน้า SKU การตลาด) — จัดงานเป็นชุด แล้วติ๊กว่าแต่ละรุ่นทำถึงไหน
  *   ชิปงานด้านบน (ความคืบหน้า + กำหนดส่ง) → เลือกงาน → ตารางรุ่นในงาน: ราคา Clearance (฿/%) + เช็กลิสต์ + ความคืบหน้า
  *   ราคาใหม่เก็บในงานเท่านั้น ไม่แก้ราคาใน ERP · ติ๊กหลายรุ่นพร้อมกันได้ (แถบลอยล่างจอ)
- * ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · MoneyInput · SearchableSelect · HoverImage · ParentSkuMultiPickerModal · Toast
+ * ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · MoneyInput · SearchableSelect · HoverImage · MarketingSkuPickerModal (เลือกรุ่นแบบการ์ด) · Toast
  * กฎคำนวณ: lib/marketing/work-jobs.ts (มีเทสต์)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -16,7 +16,7 @@ import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SearchableSelect } from "@/components/searchable-select";
 import { MoneyInput } from "@/components/money-input";
 import { HoverImage } from "@/components/hover-image";
-import { ParentSkuMultiPickerModal, type ParentSkuPick } from "@/components/parent-sku-multi-picker";
+import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
@@ -111,6 +111,20 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
 
   const job = detail?.job ?? null;
   const items = useMemo(() => detail?.items ?? [], [detail]);
+  // ป๊อปเพิ่มรุ่น: เปิดที่แบรนด์ที่มีในงานมากสุด · รุ่นที่อยู่ในงานแล้วติ๊กซ้ำไม่ได้
+  const itemParentIds = useMemo(() => items.map((it) => it.parent_sku_id), [items]);
+  const jobBrandId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of items) if (it.brand_id) m.set(it.brand_id, (m.get(it.brand_id) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  }, [items]);
+  const loadCatalog = useCallback(async (): Promise<SkuPickerCatalog> => {
+    let j: { data?: SkuPickerCatalog; error?: string };
+    try { j = await (await apiFetch("/api/marketing/skus")).json(); }
+    catch { throw new Error("โหลดรายการรุ่นไม่สำเร็จ กรุณาลองใหม่"); }
+    if (j.error || !j.data) throw new Error(j.error || "โหลดรายการรุ่นไม่สำเร็จ กรุณาลองใหม่");
+    return j.data;
+  }, []);
   const steps = useMemo(() => job?.steps ?? [], [job]);
   const hasPrice = job ? kindInfo(job.kind).hasPrice : false;
   const prog = useMemo(() => jobProgress(items, steps), [items, steps]);
@@ -187,17 +201,26 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
     void saveItem(it, { base_price_min: v, base_price_max: v });
   };
 
-  const addModels = async (picks: ParentSkuPick[]) => {
-    setPickerOpen(false);
-    if (!job || !picks.length) return;
+  // ใส่รุ่นจากป๊อปเลือกรุ่น (ส่งทีละก้อน กันก้อนใหญ่เกิน) · คืน false = ป๊อปค้างไว้ให้ลองใหม่
+  const addModels = async (ids: string[]): Promise<boolean> => {
+    if (!job || !ids.length) return true;
     setBusy(true);
+    let added = 0, labeled = 0;
     try {
-      const d = await call(`/api/marketing/work-jobs/${job.id}/items`, "POST", { parent_sku_ids: picks.map((p) => p.id) });
-      toast.success(`ใส่ ${Number(d.added) || 0} รุ่นเข้างานแล้ว${Number(d.labeled) ? ` · เปลี่ยนป้าย ${d.labeled} รุ่น` : ""}`);
-      if (Number(d.labeled)) onLabelsChanged();
-      await loadDetail(job.id, true); void reload();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ใส่รุ่นไม่สำเร็จ"); }
-    finally { setBusy(false); }
+      for (let i = 0; i < ids.length; i += 200) {
+        const d = await call(`/api/marketing/work-jobs/${job.id}/items`, "POST", { parent_sku_ids: ids.slice(i, i + 200) });
+        added += Number(d.added) || 0; labeled += Number(d.labeled) || 0;
+      }
+      toast.success(`ใส่ ${added} รุ่นเข้างานแล้ว${labeled ? ` · เปลี่ยนป้าย ${labeled} รุ่น` : ""}`);
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ใส่รุ่นไม่สำเร็จ");
+      return false;
+    } finally {
+      if (labeled) onLabelsChanged();
+      if (added) { await loadDetail(job.id, true); void reload(); }
+      setBusy(false);
+    }
   };
 
   const confirmAsk = async () => {
@@ -479,8 +502,12 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
           void reload();
         }} />
 
-      <ParentSkuMultiPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onConfirm={(picks) => void addModels(picks)}
-        excludeCodes={items.map((it) => it.code)} title={`เพิ่มรุ่นเข้างาน “${job?.name ?? ""}”`} />
+      <MarketingSkuPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} title={`เพิ่มรุ่นเข้างาน “${job?.name ?? ""}”`}
+        description="ติ๊กได้หลายรุ่น (จำข้ามแท็บ/ข้ามหน้า) แล้วกดใส่เข้างานทีเดียว · รุ่นที่อยู่ในงานแล้วติ๊กซ้ำไม่ได้"
+        load={loadCatalog} takenIds={itemParentIds} startBrandId={jobBrandId}
+        taken={{ badge: "อยู่ในงานแล้ว", short: "ในงาน", hide: "ซ่อนที่อยู่ในงานแล้ว", row: "✓ อยู่แล้ว" }}
+        confirmText={(n) => (n ? `ใส่ ${n} รุ่นเข้างาน` : "ใส่เข้างาน")} busyText="กำลังใส่…"
+        onConfirm={addModels} tabPrefKey="marketing_work_add_tab" colsPrefKey="marketing-work-add" showFullPageLink={false} />
 
       <ConfirmDialog open={!!ask} onClose={() => setAsk(null)} loading={busy} onConfirm={() => void confirmAsk()} variant="danger"
         requireTyped={ask?.kind === "delete" && items.length >= 20 ? "CONFIRM" : undefined}

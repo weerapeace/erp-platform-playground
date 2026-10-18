@@ -57,7 +57,7 @@
 | ทำอะไร | ตรงไหน |
 |---|---|
 | สร้างงาน | ปุ่ม "🛠 ทำงาน" → "＋ สร้างงาน" · หรือติ๊กรุ่นในโหมดตาราง/การ์ด → แถบลอย "🛠 ใส่ในงาน…" → "＋ สร้างงานใหม่จากที่เลือก" (สร้างเสร็จพาไปที่งานนั้น) |
-| ใส่รุ่นเข้างาน | แถบลอย "🛠 ใส่ในงาน…" เลือกงาน · หรือในงานกด "＋ เพิ่มรุ่น" (รุ่นที่มีอยู่แล้วข้าม) |
+| ใส่รุ่นเข้างาน | แถบลอย "🛠 ใส่ในงาน…" เลือกงาน · หรือในงานกด "＋ เพิ่มรุ่น" → ป๊อปการ์ดแบบหน้านี้ (แยกแบรนด์ · กรองป้าย · ติ๊กหลายรุ่น · รุ่นที่อยู่ในงานแล้วติ๊กซ้ำไม่ได้) |
 | ติ๊กขั้นตอน | กดชิปขั้นตอนในแถว (ชี้ดูว่าใครติ๊ก/เมื่อไหร่) · ติ๊กหลายรุ่นพร้อมกัน: ติ๊กแถว → แถบลอย "✓ ติ๊กขั้นตอน…" / "↺ เอาติ๊กออก…" |
 | ส่วนลด (งาน Clearance) | ช่อง "ลด" + ปุ่ม ฿/% → ราคาใหม่คำนวณให้ · ลดเกิน 100% / เกินราคาเต็ม = ไม่ให้บันทึก |
 | ราคาเต็ม | ดึงจากราคาขาย (`skus_v2.list_price`) ของสีที่ยังเปิด **ตอนใส่เข้างาน** · สีราคาไม่เท่ากัน = โชว์เป็นช่วง (990–1,290) และราคาใหม่เป็นช่วง · ไม่มีราคา = ช่องให้กรอก · กดที่ตัวเลขเพื่อแก้ |
@@ -68,7 +68,7 @@
 **กฎที่เจ้าของเลือก (2026-10-18):**
 1. ราคาใหม่ **เก็บในงานเท่านั้น ไม่แก้ราคาใน ERP** — ทีมไปแก้ใน Lazada/Shopee แล้วติ๊กขั้นตอน
 2. ใส่รุ่นเข้างาน → **ติดป้ายหลักอัตโนมัติ** (งาน Clearance ตั้งต้น = "Clearance Products" · เปลี่ยน/ไม่ติดได้ในป๊อปงาน) · แทนป้ายเดิม มีประวัติ · เอารุ่นออกจากงาน ป้ายไม่เปลี่ยนกลับ
-3. **ผู้รับผิดชอบ + วันครบกำหนด ระดับงาน** (1 คน / 1 วัน) · เลยกำหนด = ตัวแดง + จุดแดงที่ชิปงาน
+3. **ผู้รับผิดชอบ + วันครบกำหนด ระดับงาน** (ผู้รับผิดชอบหลายคน/ทั้งทีมได้ ตั้งแต่ 2026-10-18 — `marketing_work_jobs.assignees` jsonb [{id,name}] · assignee_id/assignee_name = คนแรก · 1 วันครบกำหนด) · เลยกำหนด = ตัวแดง + จุดแดงที่ชิปงาน
 
 **ข้อมูล:** `marketing_work_jobs` (ชื่อ, kind clearance|website|custom, `steps` jsonb `[{key,label}]`, auto_label_id, assignee, due_date, status open|done|archived) · `marketing_work_job_items` (job × parent_sku unique, base_price_min/max, discount_value/unit baht|percent, `step_done` jsonb `{key:{at,by}}`) · RLS เปิดไม่มี policy (ผ่าน API เท่านั้น) · migration `202610230200_marketing_work_jobs.sql`
 - คีย์ขั้นตอน (s1, s2…) ไม่เปลี่ยนตอนแก้ชื่อ/ย้ายลำดับ → ที่ติ๊กไว้ไม่หาย
@@ -76,7 +76,7 @@
 
 **API:** `GET/POST /api/marketing/work-jobs` · `GET/PATCH/DELETE /api/marketing/work-jobs/[id]` · `POST/PATCH/DELETE /api/marketing/work-jobs/[id]/items` (PATCH `{item_ids, step_key, done}` = ติ๊ก · `{item_id, discount_value?, discount_unit?, base_price_min?, base_price_max?}` = ราคา) · ดู = marketing.sku.view · แก้ทุกอย่าง = marketing.sku.manage · audit `marketing.work.create|update|delete|items_add|items_remove|item_update|step` (+ `marketing.sku.update` ตอนติดป้ายอัตโนมัติ พร้อม `via: งาน "…"`)
 
-**โค้ด:** `app/marketing/skus/{work-mode,work-job-modal}.tsx` · กฎคำนวณ pure `lib/marketing/work-jobs.ts` (เทสต์ `lib/__tests__/marketing-work-jobs.test.ts`) · ฝั่งเซิร์ฟเวอร์ `lib/marketing/work-jobs-db.ts` · ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · UserPicker · DateInput · MoneyInput · SearchableSelect · HoverImage · ParentSkuMultiPickerModal
+**โค้ด:** `app/marketing/skus/{work-mode,work-job-modal}.tsx` · กฎคำนวณ pure `lib/marketing/work-jobs.ts` (เทสต์ `lib/__tests__/marketing-work-jobs.test.ts`) · ฝั่งเซิร์ฟเวอร์ `lib/marketing/work-jobs-db.ts` · ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · MultiUserPicker · DateInput · MoneyInput · SearchableSelect · HoverImage · **MarketingSkuPickerModal** (`components/marketing-sku-picker-modal.tsx` — ป๊อปเลือกรุ่นแบบการ์ด ใช้ร่วมกับ ➕ เพิ่มสินค้าเข้าเว็บ)
 
 ## ยังไม่ทำ
 - โหมดทำงาน ก้อนถัดไป: หน้าตั้งค่า "แบบงาน" (ขั้นตอนตั้งต้นแก้เองได้) · ผู้รับผิดชอบรายขั้นตอน · แจ้งเตือนใกล้ครบกำหนด
