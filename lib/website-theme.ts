@@ -147,7 +147,7 @@ export type RelatedSource = "category" | "collection" | "featured" | "bestseller
  * 🧩 ชิ้นส่วนในส่วน "ราคา · ตัวเลือก · ใส่ตะกร้า" — จัดลำดับ/คอลัมน์/จัดชิด/ขนาด/สี/ระยะห่าง ได้ต่อชิ้น (⚙️ ในแท็บหน้าสินค้า)
  * ชิ้นมาตรฐานมีอย่างละ 1 (price/desc/stock/qty/options/button/note) · "text" = ข้อความอิสระ เพิ่มได้หลายชิ้น
  */
-export type BuyItemKey = "price" | "desc" | "stock" | "qty" | "options" | "personalize" | "button" | "note" | "text";
+export type BuyItemKey = "price" | "desc" | "stock" | "qty" | "options" | "options2" | "personalize" | "button" | "note" | "text";
 export type BuyCol = "left" | "right";
 export type BuyAlign = "left" | "center" | "right";
 export type BuyGap = "sm" | "md" | "lg";
@@ -187,13 +187,18 @@ export interface BuyItem {
   field: string;
   /** desc: ปุ่ม "ดูเพิ่มเติม" เมื่อข้อความยาวเกินจำนวนบรรทัด */
   more: boolean;
+  /** options2: ลิงก์ 📏 ตารางไซส์ · ช่วงใต้ปุ่มไซส์ (เช่น 28–32″) · ตัวช่วย "กรอกรอบเอว → แนะนำไซส์" */
+  showGuide: boolean;
+  showFit: boolean;
+  showHelper: boolean;
 }
 export const BUY_ITEM_DEFS: Record<BuyItemKey, { label: string; hint: string; styles?: { value: string; label: string }[] }> = {
   price: { label: "ราคา", hint: "ราคา + หน่วย + ป้าย + ราคาเต็มขีดฆ่า" },
   desc: { label: "คำอธิบายย่อ", hint: "ตัดกี่บรรทัดตั้งได้ (ฉบับเต็มอยู่ในรายละเอียด)" },
   stock: { label: "สถานะสต๊อก", hint: "● พร้อมส่ง / เหลือน้อย / สั่งจอง", styles: [{ value: "text", label: "ข้อความ" }, { value: "badge", label: "ป้ายสี" }] },
   qty: { label: "จำนวน", hint: "ปุ่ม − 1 +" },
-  options: { label: "ตัวเลือก (สี/แบบ)", hint: "ตัวเลือกสี + ตัวเลือกที่ 2", styles: [{ value: "pills", label: "เม็ดยา (ชื่อ)" }, { value: "swatches", label: "วงกลมสี" }, { value: "tiles", label: "รูปสินค้า (ชี้แล้วโชว์ชื่อสี)" }, { value: "dropdown", label: "ดรอปดาวน์" }] },
+  options: { label: "ตัวเลือก (สี/แบบ)", hint: "ตัวเลือกสี · ปิดแถว ตัวเลือกที่ 2 = ไซส์มาอยู่ใต้สีแบบเดิม", styles: [{ value: "pills", label: "เม็ดยา (ชื่อ)" }, { value: "swatches", label: "วงกลมสี" }, { value: "tiles", label: "รูปสินค้า (ชี้แล้วโชว์ชื่อสี)" }, { value: "dropdown", label: "ดรอปดาวน์" }] },
+  options2: { label: "ตัวเลือกที่ 2 (ไซส์)", hint: "ไซส์/แบบ จากปุ่มตัวเลือกที่ 2 · ลิงก์ตารางไซส์ · ช่วงใต้ปุ่ม · ตัวช่วยแนะนำไซส์ (ปิดแถวนี้ = ไปอยู่ใต้ตัวเลือกสี)", styles: [{ value: "pills", label: "เม็ดยา" }, { value: "boxes", label: "ปุ่มเหลี่ยม" }, { value: "dropdown", label: "ดรอปดาวน์" }] },
   personalize: { label: "ปั๊มชื่อ (Personalize)", hint: "โชว์เฉพาะรุ่นที่เปิดปั๊มชื่อไว้ · พิมพ์ข้อความ + เลือกแบบ/ตำแหน่ง + รูปสด" },
   button: { label: "ปุ่มใส่ตะกร้า", hint: "ข้อความ / ทึบ-ขอบ / สีพื้น / เต็มความกว้าง", styles: [{ value: "fill", label: "ทึบ" }, { value: "outline", label: "ขอบ" }] },
   note: { label: "ข้อความใต้ปุ่ม", hint: "ขายส่ง / ค่าส่งจากข้อมูลร้าน / ข้อความ" },
@@ -205,6 +210,7 @@ const BUY_DEFAULT_ORDER: { key: BuyItemKey; col: BuyCol }[] = [
   { key: "stock", col: "left" },
   { key: "qty", col: "right" },
   { key: "options", col: "right" },
+  { key: "options2", col: "right" },
   { key: "personalize", col: "right" },
   { key: "button", col: "right" },
   { key: "note", col: "right" },
@@ -214,11 +220,12 @@ export function defaultBuyItem(key: BuyItemKey, col: BuyCol = "left", id?: strin
     id: id ?? (key === "text" ? `t${Date.now().toString(36).slice(-5)}` : key),
     key, enabled: true, col, align: "left", size: 100, color: null, gap: key === "price" ? "sm" : "md",
     showUnit: true, showBadge: true, showCompare: true, lines: 4, label: "",
-    style: key === "stock" ? "text" : key === "options" ? "pills" : key === "button" ? "fill" : "", bg: null, fullWidth: true, bold: false, text: "", field: "", more: true,
+    style: key === "stock" ? "text" : key === "options" || key === "options2" ? "pills" : key === "button" ? "fill" : "", bg: null, fullWidth: true, bold: false, text: "", field: "", more: true,
+    showGuide: true, showFit: true, showHelper: true,
   };
 }
 export const DEFAULT_BUY_ITEMS = (): BuyItem[] => BUY_DEFAULT_ORDER.map((d) => defaultBuyItem(d.key, d.col));
-const BUY_KEYS: BuyItemKey[] = ["price", "desc", "stock", "qty", "options", "personalize", "button", "note", "text"];
+const BUY_KEYS: BuyItemKey[] = ["price", "desc", "stock", "qty", "options", "options2", "personalize", "button", "note", "text"];
 /** อ่านรายการชิ้นส่วนจาก DB — ไม่มี (ค่าเก่า) = ชุดมาตรฐานโดยใช้สวิตช์เดิม (showUnit/showBadge/showStock/showShortDesc) */
 export function normalizeBuyItems(raw: unknown, legacy: { showUnit: boolean; showBadge: boolean; showStock: boolean; showShortDesc: boolean }): BuyItem[] {
   if (!Array.isArray(raw)) {
@@ -261,8 +268,20 @@ export function normalizeBuyItems(raw: unknown, legacy: { showUnit: boolean; sho
       text: typeof r.text === "string" ? r.text.slice(0, 500) : "",
       field: typeof r.field === "string" && /^[a-z0-9_]{0,60}$/i.test(r.field) ? r.field : "",
       more: r.more !== false,
+      showGuide: r.showGuide !== false,
+      showFit: r.showFit !== false,
+      showHelper: r.showHelper !== false,
     });
     if (out.length >= 20) break;
+  }
+  // 📐 ตัวเลือกที่ 2 (ไซส์) เป็นแถวใหม่ — ค่าที่บันทึกไว้ก่อนมีแถวนี้: แทรกต่อจาก "ตัวเลือก (สี/แบบ)" + ก๊อปคอลัมน์/จัดชิด/ขนาด/สี/ระยะ/เปิดปิด → หน้าตาเหมือนเดิม (เดิมไซส์อยู่ใต้สีในแถวเดียวกัน)
+  if (!seen.has("options2")) {
+    const i = out.findIndex((x) => x.key === "options");
+    if (i >= 0) {
+      const o = out[i];
+      out.splice(i + 1, 0, { ...defaultBuyItem("options2", o.col), enabled: o.enabled, align: o.align, size: o.size, color: o.color, gap: o.gap, style: o.style === "dropdown" ? "dropdown" : "pills" });
+      seen.add("options2");
+    }
   }
   // ชิ้นมาตรฐานที่หายไป (เช่น เพิ่มชนิดใหม่ทีหลัง) ต่อท้ายให้ครบ
   for (const d of BUY_DEFAULT_ORDER) if (!seen.has(d.key)) out.push(defaultBuyItem(d.key, d.col));

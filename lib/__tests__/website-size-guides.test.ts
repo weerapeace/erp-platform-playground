@@ -62,3 +62,25 @@ describe("ตัวกรองไซส์ (option2) ในหน้ารา�
     expect(normalizeShopFilters([...saved, { kind: "option2", label: "Size", enabled: true }]).find((f) => f.id === "option2")).toMatchObject({ enabled: true, label: "Size" });
   });
 });
+
+import { normalizeBuyItems } from "../website-theme";
+
+describe("แถว 'ตัวเลือกที่ 2 (ไซส์)' ในส่วนราคา-ตะกร้า", () => {
+  const legacy = { showUnit: true, showBadge: true, showStock: true, showShortDesc: true };
+  it("ค่าที่บันทึกก่อนมีแถวนี้: แทรกต่อจากตัวเลือกสี + ก๊อปหน้าตา (คอลัมน์/จัดชิด/ขนาด/สี/ระยะ) → เว็บเหมือนเดิม", () => {
+    const saved = [
+      { key: "price", col: "left" },
+      { key: "options", col: "right", align: "center", size: 120, color: "#112233", gap: "lg", style: "swatches" },
+      { key: "qty", col: "right" },
+      { key: "button", col: "right" },
+    ];
+    const items = normalizeBuyItems(saved, legacy);
+    const i = items.findIndex((x) => x.key === "options");
+    expect(items[i + 1]).toMatchObject({ key: "options2", col: "right", align: "center", size: 120, color: "#112233", gap: "lg", style: "pills", enabled: true, showGuide: true, showFit: true, showHelper: true });
+  });
+  it("บันทึกแถวนี้แล้ว = เก็บตามที่ตั้ง (ไม่แทรกซ้ำ)", () => {
+    const items = normalizeBuyItems([{ key: "options" }, { key: "qty" }, { key: "options2", style: "boxes", label: "Size", showHelper: false }], legacy);
+    expect(items.filter((x) => x.key === "options2")).toHaveLength(1);
+    expect(items.find((x) => x.key === "options2")).toMatchObject({ style: "boxes", label: "Size", showHelper: false, showGuide: true });
+  });
+});

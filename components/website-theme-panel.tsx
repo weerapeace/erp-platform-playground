@@ -2914,10 +2914,18 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                       {it.key === "options" && it.style === "swatches" && <div className="mt-1.5"><ColorSwatchButton /></div>}
                     </div>
                   )}
-                  {(it.key === "qty" || it.key === "options") && (
+                  {(it.key === "qty" || it.key === "options" || it.key === "options2") && (
                     <div>
-                      <label className={lbl}>ป้ายกำกับ (ว่าง = ค่าเดิม)</label>
-                      <input className={partInputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder={it.key === "qty" ? "จำนวน" : "สี / ตัวเลือก"} />
+                      <label className={lbl}>{it.key === "options2" ? "ป้ายกำกับ (ว่าง = ชื่อชุดจาก SKU เช่น ไซส์)" : "ป้ายกำกับ (ว่าง = ค่าเดิม)"}</label>
+                      <input className={partInputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder={it.key === "qty" ? "จำนวน" : it.key === "options2" ? "ไซส์" : "สี / ตัวเลือก"} />
+                    </div>
+                  )}
+                  {/* 📐 ตัวเลือกที่ 2 (ไซส์) — ส่วนเสริมจากตารางไซส์ (เว็บไซต์ → 📏 ตารางไซส์) · ไม่มีตารางของสินค้านั้น = ไม่โชว์เอง */}
+                  {it.key === "options2" && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <PartToggle label="ลิงก์ 📏 ตารางไซส์" on={it.showGuide} onChange={(v) => setItem(it.id, { showGuide: v })} />
+                      <PartToggle label="ช่วงใต้ปุ่มไซส์ (เช่น 28–32″)" on={it.showFit} onChange={(v) => setItem(it.id, { showFit: v })} />
+                      <PartToggle label="ตัวช่วยกรอกรอบเอว → แนะนำไซส์" on={it.showHelper} onChange={(v) => setItem(it.id, { showHelper: v })} />
                     </div>
                   )}
                   {it.key === "button" && (
