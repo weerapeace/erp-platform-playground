@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeCart, pickCartRecs, addBusinessDays, freeShipLine, DEFAULT_CART } from "@/lib/website-cart";
+import { normalizeCart, pickCartRecs, addBusinessDays, freeShipLine, recsAt, DEFAULT_CART } from "@/lib/website-cart";
 
 describe("website-cart", () => {
   it("normalizeCart: ค่าเริ่ม = หน้าตาเดิม · ค่าผิดกลับค่าเริ่ม · etaMax ≥ etaMin", () => {
@@ -37,5 +37,43 @@ describe("recsPos", () => {
     expect(normalizeCart({}).recsPos).toBe("bottom");
     for (const p of ["top", "afterItems", "bottom", "footer"]) expect(normalizeCart({ recsPos: p }).recsPos).toBe(p);
     expect(normalizeCart({ recsPos: "middle" }).recsPos).toBe("bottom");
+  });
+});
+
+describe("website-cart — สินค้าแนะนำหลายชุด + ไอคอน/ข้อความ + การ์ด", () => {
+  it("ข้อมูลเก่า (ช่อง recs* ชุดเดียว) → ชุดแรกเหมือนเดิม · หน้าตาเดิม (ลิ้นชักเลื่อนข้าง · /cart ตาราง · ใต้รายการ · ทุกครั้ง)", () => {
+    const c = normalizeCart({ recs: true, recsTitle: "ซื้อคู่กัน", recsSource: "manual", recsCodes: ["bbp10"], recsLimit: 4, recsFreeShip: false });
+    expect(c.recsSets).toHaveLength(1);
+    expect(c.recsSets[0]).toMatchObject({ on: true, title: "ซื้อคู่กัน", source: "manual", codes: ["BBP10"], limit: 4, freeShip: false, layout: "row", pageLayout: "grid", place: "bottom", when: "always", btnStyle: "outline" });
+    expect(normalizeCart({ recsPos: "top" }).recsSets[0].place).toBe("top"); // ตำแหน่งเดิมทั้งตะกร้า → ชุดแรก
+    expect(c.icons.gift).toBe("🎀");
+    expect(c.card).toBe(false);
+  });
+
+  it("หลายชุด ≤ 3 · ช่อง recs* = สำเนาชุดแรก · ค่ามั่ว = ค่าเริ่ม", () => {
+    const c = normalizeCart({ recsSets: [{ id: "a", on: true, title: "A", layout: "addon", place: "footer", when: "items", limit: 1 }, { id: "a", layout: "zz" }, {}, {}] });
+    expect(c.recsSets).toHaveLength(3);
+    expect(c.recsSets[0]).toMatchObject({ id: "a", layout: "addon", place: "footer", when: "items", limit: 1 });
+    expect(c.recsSets[1].layout).toBe("row");
+    expect(new Set(c.recsSets.map((x) => x.id)).size).toBe(3);
+    expect([c.recs, c.recsTitle, c.recsLimit]).toEqual([true, "A", 1]);
+  });
+
+  it("recsAt เลือกชุดตามตำแหน่ง + สถานะตะกร้า", () => {
+    const c = normalizeCart({ recsSets: [{ on: true, place: "bottom" }, { on: true, place: "footer", when: "items" }, { on: false, place: "bottom" }] });
+    expect(recsAt(c, "bottom", false)).toHaveLength(1);
+    expect(recsAt(c, "footer", false)).toHaveLength(0);
+    expect(recsAt(c, "footer", true)).toHaveLength(1);
+    expect(c.recsPos).toBe("bottom"); // สำเนาตำแหน่งชุดแรก (เว็บรุ่นที่อ่าน recsPos)
+    // ตะกร้าว่าง: ชุด "ติดเหนือยอดรวม" (โชว์ทุกครั้ง) ไปอยู่ท้ายรายการ
+    const e = normalizeCart({ recsSets: [{ on: true, place: "footer" }] });
+    expect([recsAt(e, "footer", false).length, recsAt(e, "bottom", false).length]).toEqual([0, 1]);
+  });
+
+  it("ไอคอน/ข้อความ ตั้งเองได้ · ว่าง = ไม่มีไอคอน", () => {
+    const c = normalizeCart({ card: true, icons: { gift: "🎁", card: "" }, labels: { card: "เขียนการ์ดวันเกิด" } });
+    expect(c.icons).toMatchObject({ gift: "🎁", card: "", note: "📝" });
+    expect(c.labels.card).toBe("เขียนการ์ดวันเกิด");
+    expect(c.card).toBe(true);
   });
 });

@@ -24,7 +24,7 @@ import {
   type OrderGiftCard,
 } from "@/lib/website-gift-cards";
 
-type Order = { id: string; orderNo: string; status: string; giftWrap?: boolean; giftMessage?: string; giftCard?: OrderGiftCard | null };
+type Order = { id: string; orderNo: string; status: string; giftWrap?: boolean; giftCardOnly?: boolean; giftMessage?: string; giftCard?: OrderGiftCard | null };
 
 function Inner() {
   const sp = useSearchParams();
@@ -45,7 +45,7 @@ function Inner() {
         apiFetch(`/api/website/gift-cards?shop=${encodeURIComponent(shop)}`).then((r) => r.json()),
       ]);
       if (o.error || c.error) return setErr(o.error ?? c.error);
-      const all = ((o.orders ?? []) as Order[]).filter((x) => x.giftWrap && x.giftCard && x.status !== "cancelled");
+      const all = ((o.orders ?? []) as Order[]).filter((x) => (x.giftWrap || x.giftCardOnly) && x.giftCard && x.status !== "cancelled");
       setOrders(ids.length ? all.filter((x) => ids.includes(x.id)) : all.filter((x) => !x.giftCard?.printedAt));
       setCfg(c.config as GiftCardConfig);
     } catch {

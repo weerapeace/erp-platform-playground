@@ -42,6 +42,10 @@ type Order = {
   pointsEarned?: number;
   giftWrap?: boolean;
   giftFee?: number;
+  /** 💌 ค่าการ์ดอวยพร (บริการแยกจากห่อ) */
+  giftCardFee?: number;
+  /** 💌 สั่งการ์ดแยก (ไม่ห่อก็ได้) */
+  giftCardOnly?: boolean;
   giftMessage?: string;
   giftHidePrice?: boolean;
   giftCard?: OrderGiftCard | null;
@@ -194,7 +198,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
               ? "ยังไม่มีออเดอร์จากเว็บร้านนี้ — เมื่อลูกค้ากดสั่งซื้อบนเว็บ รายการจะขึ้นที่นี่"
               : "ไม่มีออเดอร์ในสถานะนี้"
           }
-          searchText={(o) => `${o.giftWrap ? "ห่อของขวัญ " : ""}${o.orderNo} ${o.customerName} ${o.customerPhone} ${o.skuCodes.join(" ")} ${o.items.map((i) => i.name).join(" ")}`}
+          searchText={(o) => `${o.giftWrap ? "ห่อของขวัญ " : ""}${o.giftCardOnly ? "การ์ด " : ""}${o.orderNo} ${o.customerName} ${o.customerPhone} ${o.skuCodes.join(" ")} ${o.items.map((i) => i.name).join(" ")}`}
           searchPlaceholder="ค้นหา เลขที่ / ชื่อ / เบอร์ / รหัสสินค้า"
           onRowClick={(o) => setOpenId(o.id)}
           columns={[
@@ -209,9 +213,11 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                     {o.lang === "en" && <span className="ml-1 font-sans text-[10px] px-1 rounded bg-sky-100 text-sky-700" title="ลูกค้าสั่งจากหน้าเว็บภาษาอังกฤษ">EN</span>}
                   </p>
                   <p className="text-[11px] text-slate-400">{when(o.createdAt)}</p>
-                  {o.giftWrap && (
+                  {(o.giftWrap || o.giftCardOnly) && (
                     <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200">
-                      🎀 ต้องห่อของขวัญ{o.giftCard ? (o.giftCard.printedAt ? " · การ์ดพิมพ์แล้ว" : " · 🎴 รอพิมพ์การ์ด") : ""}
+                      {o.giftWrap ? "🎀 ต้องห่อของขวัญ" : "💌 ใส่การ์ดอวยพร"}
+                      {o.giftWrap && o.giftCardOnly ? " + การ์ด" : ""}
+                      {o.giftCard ? (o.giftCard.printedAt ? " · การ์ดพิมพ์แล้ว" : " · 🎴 รอพิมพ์การ์ด") : ""}
                     </span>
                   )}
                 </div>
@@ -306,9 +312,9 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 {open.note && (
                   <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mt-2">หมายเหตุ: {open.note}</p>
                 )}
-                {open.giftWrap && (
+                {(open.giftWrap || open.giftCardOnly) && (
                   <div className="mt-2 rounded-lg border border-pink-200 bg-pink-50 px-2.5 py-2 text-xs text-pink-800 space-y-1">
-                    <p className="font-semibold">🎀 ห่อเป็นของขวัญ</p>
+                    <p className="font-semibold">{open.giftWrap ? (open.giftCardOnly ? "🎀 ห่อเป็นของขวัญ + 💌 การ์ดอวยพร" : "🎀 ห่อเป็นของขวัญ") : "💌 ใส่การ์ดอวยพร (ไม่ห่อ)"}</p>
                     {open.giftHidePrice && <p className="font-medium text-rose-700">⚠️ ห้ามใส่ใบเสร็จ/ป้ายราคาในกล่อง (ส่งถึงผู้รับเป็นของขวัญ)</p>}
                     {open.giftMessage ? (
                       <div className="flex items-start gap-1.5">
@@ -362,6 +368,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                   <div className="flex justify-between"><span>ยอดสินค้า</span><span>{money(open.subtotal)}</span></div>
                   <div className="flex justify-between"><span>ค่าส่ง</span><span>{money(open.shippingFee)}</span></div>
                   {open.giftWrap && <div className="flex justify-between"><span>🎀 ค่าห่อของขวัญ</span><span>{open.giftFee ? money(open.giftFee) : "ฟรี"}</span></div>}
+                  {open.giftCardOnly && <div className="flex justify-between"><span>💌 ค่าการ์ดอวยพร</span><span>{open.giftCardFee ? money(open.giftCardFee) : "ฟรี"}</span></div>}
                   {open.discount > 0 && <div className="flex justify-between"><span>ส่วนลด{open.couponCode ? ` (${open.couponCode})` : ""}</span><span>-{money(open.discount)}</span></div>}
                   {(open.pointsDiscount ?? 0) > 0 && <div className="flex justify-between"><span>⭐ ใช้แต้ม {(open.pointsUsed ?? 0).toLocaleString("th-TH")} แต้ม</span><span>-{money(open.pointsDiscount ?? 0)}</span></div>}
                   <div className="flex justify-between text-sm font-semibold text-slate-900 pt-1"><span>ยอดรวม</span><span>{money(open.grandTotal)}</span></div>
@@ -458,6 +465,7 @@ function OrderMessageBox({ order, messaging }: { order: Order; messaging: Messag
           shippingFee: order.shippingFee,
           discount: order.discount,
           giftFee: order.giftFee,
+          giftCardFee: order.giftCardFee,
           pointsDiscount: order.pointsDiscount,
           grandTotal: order.grandTotal,
           note: order.note,

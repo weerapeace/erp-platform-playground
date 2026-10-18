@@ -84,6 +84,10 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "gift_desc", label: "รายละเอียดสั้น ๆ", hint: "บอกว่าได้อะไร เช่น กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ", group: "gift", type: "text", isPublic: true, placeholder: "กล่องของขวัญ ผูกโบว์ + การ์ดเขียนข้อความ", i18n: true },
   { key: "gift_allow_message", label: "ให้ลูกค้าเขียนข้อความบนการ์ด", hint: "ไม่เกิน 300 ตัวอักษร · โชว์ในออเดอร์ให้คนแพ็กเขียน/พิมพ์ใส่การ์ด", group: "gift", type: "bool", isPublic: true },
   { key: "gift_allow_hide_price", label: "ให้เลือก \"ไม่ใส่ราคา/ใบเสร็จในกล่อง\"", hint: "สำหรับส่งตรงถึงผู้รับเป็นของขวัญ", group: "gift", type: "bool", isPublic: true },
+  // 💌 การ์ดอวยพรแยกจากห่อ — ลูกค้าเลือกเขียนการ์ดได้โดยไม่ห่อ (คิดค่าการ์ดใหม่ฝั่งเซิร์ฟเวอร์ calcCardFee · เก็บ store_orders.gift_card_fee)
+  { key: "card_enabled", label: "💌 ขายการ์ดอวยพรแยก (ไม่ห่อก็เขียนการ์ดได้)", hint: "เปิดแล้ว ลูกค้าเห็นตัวเลือก \"เขียนการ์ด\" แยกจากห่อของขวัญ (ในตะกร้า + หน้าชำระเงิน) · ใช้ลาย/ขนาดการ์ดเดียวกับ ⚙ ตั้งค่าการ์ด", group: "gift", type: "bool", isPublic: true },
+  { key: "card_fee", label: "ค่าการ์ด (บาท ต่อออเดอร์)", hint: "0 = การ์ดฟรี", group: "gift", type: "number", isPublic: true, placeholder: "20" },
+  { key: "card_title", label: "ชื่อบริการการ์ดที่ลูกค้าเห็น", hint: "เว้นว่าง = เขียนการ์ดอวยพร", group: "gift", type: "text", isPublic: true, placeholder: "เขียนการ์ดอวยพร", i18n: true },
 
   // ─── 🎁 ป๊อปอัปลูกค้าใหม่ (เว็บร้าน src/components/layout/PromoPopup.tsx) ───
   { key: "promo_enabled", label: "เปิดป๊อปอัปแจกโค้ดลูกค้าใหม่", group: "promo", type: "bool", isPublic: true },
@@ -150,6 +154,9 @@ export interface SiteInfo {
   gift_desc: string;
   gift_allow_message: boolean;
   gift_allow_hide_price: boolean;
+  card_enabled: boolean;
+  card_fee: number;
+  card_title: string;
   promo_enabled: boolean;
   promo_code: string;
   promo_title: string;
@@ -205,6 +212,9 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   gift_desc: "",
   gift_allow_message: true,
   gift_allow_hide_price: true,
+  card_enabled: false,
+  card_fee: 0,
+  card_title: "",
   promo_enabled: false,
   promo_code: "",
   promo_title: "",
@@ -346,6 +356,12 @@ export function publicSiteInfo(info: SiteInfo): Omit<SiteInfo, "order_prefix" | 
 export function calcGiftFee(wrap: boolean, info: Pick<SiteInfo, "gift_enabled" | "gift_fee">): number {
   if (!wrap || !info.gift_enabled) return 0;
   return Math.max(0, Math.round(info.gift_fee * 100) / 100);
+}
+
+/** 💌 ค่าการ์ดอวยพร (บริการแยกจากห่อ) — ร้านปิดบริการ/ไม่ได้เลือก = 0 */
+export function calcCardFee(card: boolean, info: Pick<SiteInfo, "card_enabled" | "card_fee">): number {
+  if (!card || !info.card_enabled) return 0;
+  return Math.max(0, Math.round(info.card_fee * 100) / 100);
 }
 
 /** สวิตช์ฟีเจอร์ทดลองที่ร้านนี้เปิดอยู่ (key ขึ้นต้น beta_) — ใช้กรองคลัง Section ด้วย blockTypesFor() */

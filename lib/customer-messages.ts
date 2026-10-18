@@ -66,6 +66,8 @@ export interface MessageOrder {
   shippingFee: number;
   discount: number;
   giftFee?: number;
+  /** 💌 ค่าการ์ดอวยพร (บริการแยกจากห่อ) */
+  giftCardFee?: number;
   pointsDiscount?: number;
   grandTotal: number;
   /** หมายเหตุที่ลูกค้าเห็น (เช่น เลขพัสดุที่พนักงานใส่) */
@@ -108,6 +110,7 @@ const T = {
     shipping: "ค่าส่ง",
     free: "ฟรี",
     gift: "ค่าห่อของขวัญ",
+    card: "ค่าการ์ดอวยพร",
     discount: "ส่วนลด",
     points: "ใช้แต้ม",
     total: "ยอดรวม",
@@ -147,6 +150,7 @@ const T = {
     shipping: "Shipping",
     free: "Free",
     gift: "Gift wrapping",
+    card: "Greeting card",
     discount: "Discount",
     points: "Points",
     total: "Total",
@@ -195,6 +199,7 @@ export function orderMessage(ev: OrderEvent, o: MessageOrder, shop: MessageShop,
     table.push({ left: t.subtotal, right: money(o.subtotal) });
     table.push({ left: t.shipping, right: o.shippingFee ? money(o.shippingFee) : t.free });
     if (o.giftFee) table.push({ left: t.gift, right: money(o.giftFee) });
+    if (o.giftCardFee) table.push({ left: t.card, right: money(o.giftCardFee) });
     if (o.discount > 0) table.push({ left: t.discount, right: `-${money(o.discount)}` });
     if ((o.pointsDiscount ?? 0) > 0) table.push({ left: t.points, right: `-${money(o.pointsDiscount ?? 0)}` });
     table.push({ left: `${t.total} (${t.payment[o.paymentMethod] ?? o.paymentMethod})`, right: money(o.grandTotal), bold: true });

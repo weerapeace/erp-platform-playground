@@ -61,3 +61,32 @@ describe("createStorefrontOrder + 🎀 ห่อของขวัญ", () => {
     expect(tables.store_orders[0]).toMatchObject({ gift_message: null, gift_hide_price: false });
   });
 });
+
+describe("createStorefrontOrder + 💌 การ์ดอวยพรแยกจากห่อ", () => {
+  it("การ์ดอย่างเดียว (ไม่ห่อ): ค่าการ์ดจากที่ร้านตั้ง บวกยอดรวม · เก็บข้อความ · gift_wrap = false", async () => {
+    const { tables, db } = setup({ card_enabled: "1", card_fee: "20" });
+    const r = await createStorefrontOrder(db, SHOP, body({ addCard: true, message: "สุขสันต์วันเกิด", fee: 0 }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.order).toMatchObject({ giftWrap: false, giftFee: 0, giftCardFee: 20, giftCardOnly: true, giftMessage: "สุขสันต์วันเกิด", grandTotal: 1070 });
+    expect(tables.store_orders[0]).toMatchObject({ gift_wrap: false, gift_fee: 0, gift_card_fee: 20, gift_message: "สุขสันต์วันเกิด", grand_total: 1070 });
+  });
+
+  it("ห่อ + การ์ด: คิดทั้ง 2 อย่าง", async () => {
+    const { db } = setup({ gift_enabled: "1", gift_fee: "59", card_enabled: "1", card_fee: "20" });
+    const r = await createStorefrontOrder(db, SHOP, body({ wrap: true, addCard: true, message: "รักนะ" }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.order).toMatchObject({ giftWrap: true, giftFee: 59, giftCardFee: 20, giftCardOnly: true, grandTotal: 1129 });
+  });
+
+  it("ร้านปิดขายการ์ดแยก = ไม่รับ (บอกเหตุผล) · ไม่เลือกอะไร = ไม่มีค่าการ์ด", async () => {
+    const off = setup({ card_enabled: "0", card_fee: "20" });
+    const r = await createStorefrontOrder(off.db, SHOP, body({ addCard: true, message: "x" }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/การ์ด/);
+    const none = setup({ card_enabled: "1", card_fee: "20" });
+    const r2 = await createStorefrontOrder(none.db, SHOP, body());
+    expect(r2.ok && r2.order).toMatchObject({ giftCardFee: 0, giftCardOnly: false, grandTotal: 1050 });
+  });
+});

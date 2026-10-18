@@ -8,6 +8,55 @@ export type CartStyle = "drawer-right" | "drawer-left" | "modal";
 export type CartRecsSource = "auto" | "featured" | "manual";
 /** ตำแหน่งสินค้าแนะนำ: บนสุด · ต่อจากรายการสินค้า · ท้ายรายการ (เดิม) · ติดเหนือยอดรวม (เห็นตลอด) */
 export type CartRecsPos = "top" | "afterItems" | "bottom" | "footer";
+/** หน้าตาสินค้าแนะนำ: row เลื่อนข้าง · grid ตาราง · list แถวรายการ · addon ติ๊กเพิ่ม */
+export type CartRecsLayout = "row" | "grid" | "list" | "addon";
+/** ตำแหน่งของชุดสินค้าแนะนำ = CartRecsPos (บนสุด · ต่อจากรายการ · ท้ายรายการ เดิม · ติดเหนือยอดรวม) */
+export type CartRecsPlace = CartRecsPos;
+/** โชว์เมื่อ: always ทุกครั้ง (เดิม) · items เฉพาะมีของในตะกร้า · empty เฉพาะตะกร้าว่าง */
+export type CartRecsWhen = "always" | "items" | "empty";
+/** 🛍 สินค้าแนะนำ 1 ชุด (ตั้งได้สูงสุด 3 ชุด · แต่ละชุดตั้งที่มา/หัวข้อ/หน้าตา/ตำแหน่งเอง) */
+export interface CartRecsSet {
+  id: string;
+  on: boolean;
+  title: string;
+  source: CartRecsSource;
+  codes: string[];
+  limit: number;
+  /** ยอดยังไม่ถึงส่งฟรี → ดันสินค้าที่ราคาพอดีขึ้นก่อน */
+  freeShip: boolean;
+  /** หน้าตาในลิ้นชัก/หน้าต่าง */
+  layout: CartRecsLayout;
+  /** หน้าตาในหน้า /cart */
+  pageLayout: CartRecsLayout;
+  place: CartRecsPlace;
+  when: CartRecsWhen;
+  /** คอลัมน์ตาราง (หน้า /cart บนคอม) · 0 = อัตโนมัติ 2/4/6 ตามจอ (เดิม) */
+  cols: number;
+  imageSize: "sm" | "md" | "lg";
+  imageShape: "rounded" | "square" | "circle";
+  showName: boolean;
+  showPrice: boolean;
+  showCompare: boolean;
+  /** ข้อความปุ่ม ("" = "+ ใส่ตะกร้า") */
+  btnText: string;
+  /** outline ขอบมน (เดิม) · brand ทึบสีแบรนด์ · text ข้อความ */
+  btnStyle: "outline" | "brand" | "text";
+}
+/** ✨ ไอคอนของตัวเลือกในตะกร้า (อีโมจิ · "" = ไม่มีไอคอน) */
+export interface CartIcons {
+  coupon: string;
+  gift: string;
+  card: string;
+  note: string;
+  points: string;
+  eta: string;
+}
+/** ✨ ข้อความของตัวเลือกในตะกร้า ("" = ข้อความเริ่มต้น / ชื่อบริการในข้อมูลร้าน) */
+export interface CartLabels {
+  gift: string;
+  card: string;
+  note: string;
+}
 export interface CartTrustItem {
   icon: string;
   text: string;
@@ -46,6 +95,8 @@ export interface CartConfig {
   freeShipText: string;
   freeShipDone: string;
   /* ── 🛍 สินค้าแนะนำ ── */
+  /** ชุดสินค้าแนะนำ (≤ 3) — ตัวจริงที่เว็บร้านใช้ · ช่อง recs* ข้างล่าง = สำเนาของชุดแรก (ให้เว็บรุ่นเก่ายังอ่านได้) */
+  recsSets: CartRecsSet[];
   recs: boolean;
   recsTitle: string;
   /** auto = หมวดเดียวกับในตะกร้า + แนะนำ/ขายดี · featured = เฉพาะที่ติ๊กแนะนำ · manual = เลือกเอง (codes) */
@@ -65,6 +116,10 @@ export interface CartConfig {
   gift: boolean;
   /** 📝 หมายเหตุถึงร้าน (ไปต่อหน้าชำระเงิน) */
   note: boolean;
+  /** 💌 เขียนการ์ดในตะกร้า (ต้องเปิด "ขายการ์ดอวยพรแยก" ในข้อมูลร้าน) */
+  card: boolean;
+  icons: CartIcons;
+  labels: CartLabels;
   /** แถบความมั่นใจใต้ปุ่มสั่งซื้อ */
   trust: boolean;
   trustItems: CartTrustItem[];
@@ -81,6 +136,32 @@ export const DEFAULT_TRUST_ITEMS: CartTrustItem[] = [
   { icon: "🚚", text: "จัดส่งไว" },
   { icon: "↩️", text: "เปลี่ยนสินค้าได้" },
 ];
+
+export const DEFAULT_CART_ICONS: CartIcons = { coupon: "🎟️", gift: "🎀", card: "💌", note: "📝", points: "⭐", eta: "🚚" };
+export const DEFAULT_CART_LABELS: CartLabels = { gift: "", card: "", note: "" };
+/** ชุดแนะนำเริ่มต้น = หน้าตาเดิม (ลิ้นชักเลื่อนข้าง · หน้า /cart ตาราง · ใต้รายการ · ทุกครั้ง) */
+export const DEFAULT_RECS_SET: CartRecsSet = {
+  id: "s1",
+  on: false,
+  title: "คุณอาจชอบ",
+  source: "auto",
+  codes: [],
+  limit: 6,
+  freeShip: true,
+  layout: "row",
+  pageLayout: "grid",
+  place: "bottom",
+  when: "always",
+  cols: 0,
+  imageSize: "md",
+  imageShape: "rounded",
+  showName: true,
+  showPrice: true,
+  showCompare: true,
+  btnText: "",
+  btnStyle: "outline",
+};
+export const MAX_RECS_SETS = 3;
 
 export const DEFAULT_CART: CartConfig = {
   style: "drawer-right",
@@ -103,6 +184,7 @@ export const DEFAULT_CART: CartConfig = {
   freeShip: true,
   freeShipText: "อีก {amount} ส่งฟรี",
   freeShipDone: "🎉 ได้ส่งฟรีแล้ว",
+  recsSets: [{ ...DEFAULT_RECS_SET }],
   recs: false,
   recsTitle: "คุณอาจชอบ",
   recsSource: "auto",
@@ -114,6 +196,9 @@ export const DEFAULT_CART: CartConfig = {
   points: false,
   gift: false,
   note: false,
+  card: false,
+  icons: { ...DEFAULT_CART_ICONS },
+  labels: { ...DEFAULT_CART_LABELS },
   trust: false,
   trustItems: DEFAULT_TRUST_ITEMS,
   eta: false,
@@ -143,6 +228,17 @@ export const CART_RECS_POSITIONS: { value: CartRecsPos; label: string; hint: str
   { value: "bottom", label: "ท้ายรายการ (แบบเดิม)", hint: "ต่อจากโค้ดส่วนลด / หมายเหตุ — ต้องเลื่อนลงถึงจะเห็น" },
   { value: "footer", label: "ติดเหนือยอดรวม", hint: "เห็นตลอดไม่ต้องเลื่อน (การ์ดเล็กลง) · หน้า /cart = ใต้กล่องยอดรวม" },
 ];
+export const CART_RECS_LAYOUTS: { value: CartRecsLayout; label: string; hint: string }[] = [
+  { value: "row", label: "เลื่อนข้าง", hint: "การ์ดรูปเรียงแถวเดียว ปัดดูได้" },
+  { value: "grid", label: "ตาราง", hint: "การ์ดรูปหลายคอลัมน์" },
+  { value: "list", label: "แถวรายการ", hint: "รูปเล็ก + ชื่อ + ราคา + ปุ่ม เรียงลงมา" },
+  { value: "addon", label: "ติ๊กเพิ่ม", hint: "ช่องติ๊ก \"เพิ่ม +฿X\" — เหมาะกับของซื้อคู่ (ติ๊ก = ใส่ตะกร้า · เอาติ๊กออก = เอาออก)" },
+];
+export const CART_RECS_WHENS: { value: CartRecsWhen; label: string }[] = [
+  { value: "always", label: "ทุกครั้ง (เดิม)" },
+  { value: "items", label: "เฉพาะมีของในตะกร้า" },
+  { value: "empty", label: "เฉพาะตะกร้าว่าง" },
+];
 
 export const CART_RECS_SOURCES: { value: CartRecsSource; label: string; hint: string }[] = [
   { value: "auto", label: "อัตโนมัติ", hint: "หมวดเดียวกับของในตะกร้า + ที่ติ๊กแนะนำ/ขายดี (ไม่ซ้ำของในตะกร้า)" },
@@ -158,9 +254,66 @@ const int = (v: unknown, fb: number, lo: number, hi: number) => {
   return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : fb;
 };
 
+const codesOf = (v: unknown) =>
+  Array.isArray(v) ? [...new Set((v as unknown[]).map((c) => String(c ?? "").trim().toUpperCase()).filter((c) => /^[A-Z0-9._-]{1,40}$/.test(c)))].slice(0, 24) : [];
+const iconOf = (v: unknown, fb: string) => (typeof v === "string" ? v.trim().slice(0, 8) : fb);
+
+/** ชุดสินค้าแนะนำ 1 ชุด — ค่าแปลก/ไม่ได้ตั้ง = ค่าเริ่ม (หน้าตาเดิม) */
+export function normalizeRecsSet(raw: unknown, i = 0): CartRecsSet {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_RECS_SET;
+  const L = ["row", "grid", "list", "addon"] as const;
+  const id = typeof r.id === "string" && /^[A-Za-z0-9_-]{1,24}$/.test(r.id) ? r.id : `s${i + 1}`;
+  return {
+    id,
+    on: bool(r.on, d.on),
+    title: str(r.title, d.title, 40).trim(),
+    source: one(r.source, ["auto", "featured", "manual"] as const, d.source),
+    codes: codesOf(r.codes),
+    limit: int(r.limit, d.limit, 1, 12),
+    freeShip: bool(r.freeShip, d.freeShip),
+    layout: one(r.layout, L, d.layout),
+    pageLayout: one(r.pageLayout, L, d.pageLayout),
+    place: one(r.place, ["top", "afterItems", "bottom", "footer"] as const, d.place),
+    when: one(r.when, ["always", "items", "empty"] as const, d.when),
+    cols: [0, 2, 3, 4, 5, 6].includes(Number(r.cols)) ? Number(r.cols) : d.cols,
+    imageSize: one(r.imageSize, ["sm", "md", "lg"] as const, d.imageSize),
+    imageShape: one(r.imageShape, ["rounded", "square", "circle"] as const, d.imageShape),
+    showName: bool(r.showName, d.showName),
+    showPrice: bool(r.showPrice, d.showPrice),
+    showCompare: bool(r.showCompare, d.showCompare),
+    btnText: str(r.btnText, d.btnText, 30).trim(),
+    btnStyle: one(r.btnStyle, ["outline", "brand", "text"] as const, d.btnStyle),
+  };
+}
+
 export function normalizeCart(raw: unknown): CartConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_CART;
+  // 🛍 ชุดสินค้าแนะนำ — ข้อมูลเก่า (ยังไม่มี recsSets) = ชุดเดียวจากช่อง recs* เดิม
+  const setsRaw = Array.isArray(r.recsSets) ? (r.recsSets as unknown[]) : null;
+  const recsSets = setsRaw
+    ? setsRaw.slice(0, MAX_RECS_SETS).map((x, i) => normalizeRecsSet(x, i))
+    : [
+        normalizeRecsSet({
+          on: r.recs,
+          title: typeof r.recsTitle === "string" && r.recsTitle.trim() ? r.recsTitle : d.recsTitle,
+          source: r.recsSource,
+          codes: r.recsCodes,
+          limit: r.recsLimit,
+          freeShip: r.recsFreeShip,
+          place: r.recsPos,
+        }),
+      ];
+  // id ซ้ำ (ก๊อปมา) → เติมเลข
+  const seen = new Set<string>();
+  for (const [i, x] of recsSets.entries()) {
+    if (seen.has(x.id)) x.id = `s${i + 1}x`;
+    seen.add(x.id);
+  }
+  const first = recsSets[0];
+  const ic = (r.icons && typeof r.icons === "object" ? r.icons : {}) as Record<string, unknown>;
+  const lb = (r.labels && typeof r.labels === "object" ? r.labels : {}) as Record<string, unknown>;
   const etaMin = int(r.etaMin, d.etaMin, 0, 60);
   const trustRaw = Array.isArray(r.trustItems) ? (r.trustItems as unknown[]) : null;
   const trustItems = trustRaw
@@ -191,17 +344,29 @@ export function normalizeCart(raw: unknown): CartConfig {
     freeShip: bool(r.freeShip, d.freeShip),
     freeShipText: str(r.freeShipText, d.freeShipText, 80).trim() || d.freeShipText,
     freeShipDone: str(r.freeShipDone, d.freeShipDone, 80).trim() || d.freeShipDone,
-    recs: bool(r.recs, d.recs),
-    recsTitle: str(r.recsTitle, d.recsTitle, 40).trim() || d.recsTitle,
-    recsSource: one(r.recsSource, ["auto", "featured", "manual"] as const, d.recsSource),
-    recsCodes: Array.isArray(r.recsCodes) ? [...new Set((r.recsCodes as unknown[]).map((c) => String(c ?? "").trim().toUpperCase()).filter((c) => /^[A-Z0-9._-]{1,40}$/.test(c)))].slice(0, 24) : [],
-    recsLimit: int(r.recsLimit, d.recsLimit, 2, 12),
-    recsFreeShip: bool(r.recsFreeShip, d.recsFreeShip),
-    recsPos: one(r.recsPos, ["top", "afterItems", "bottom", "footer"] as const, d.recsPos),
+    recsSets,
+    // สำเนาชุดแรก (เว็บร้านรุ่นเก่าอ่านช่องพวกนี้)
+    recs: first ? first.on : false,
+    recsTitle: first?.title || d.recsTitle,
+    recsSource: first?.source ?? d.recsSource,
+    recsCodes: first?.codes ?? [],
+    recsLimit: first?.limit ?? d.recsLimit,
+    recsFreeShip: first?.freeShip ?? d.recsFreeShip,
+    recsPos: first?.place ?? d.recsPos,
     coupon: bool(r.coupon, d.coupon),
     points: bool(r.points, d.points),
     gift: bool(r.gift, d.gift),
     note: bool(r.note, d.note),
+    card: bool(r.card, d.card),
+    icons: {
+      coupon: iconOf(ic.coupon, d.icons.coupon),
+      gift: iconOf(ic.gift, d.icons.gift),
+      card: iconOf(ic.card, d.icons.card),
+      note: iconOf(ic.note, d.icons.note),
+      points: iconOf(ic.points, d.icons.points),
+      eta: iconOf(ic.eta, d.icons.eta),
+    },
+    labels: { gift: str(lb.gift, "", 60).trim(), card: str(lb.card, "", 60).trim(), note: str(lb.note, "", 60).trim() },
     trust: bool(r.trust, d.trust),
     trustItems,
     eta: bool(r.eta, d.eta),
@@ -209,6 +374,13 @@ export function normalizeCart(raw: unknown): CartConfig {
     etaMax: Math.max(etaMin, int(r.etaMax, d.etaMax, 0, 90)),
     etaText: str(r.etaText, d.etaText, 80).trim() || d.etaText,
   };
+}
+
+/** ชุดสินค้าแนะนำที่ต้องวาดตรงตำแหน่งนี้ (เปิดอยู่ · ตรงตำแหน่ง · ตรงสถานะตะกร้า) */
+export function recsAt(cfg: Pick<CartConfig, "recsSets">, place: CartRecsPlace, hasItems: boolean): CartRecsSet[] {
+  // ตะกร้าว่าง: ไม่มีรายการ/ยอดรวม → "ต่อจากรายการ" กับ "ติดเหนือยอดรวม" ไปอยู่ท้ายรายการ
+  const at = (x: CartRecsSet) => (!hasItems && (x.place === "afterItems" || x.place === "footer") ? "bottom" : x.place);
+  return cfg.recsSets.filter((x) => x.on && at(x) === place && (x.when === "always" || (x.when === "items" ? hasItems : !hasItems)));
 }
 
 /** ข้อความส่งฟรี: แทน {amount} */

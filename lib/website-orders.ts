@@ -28,7 +28,7 @@ import {
   type ListingRow,
 } from "@/lib/website-field-map";
 import { baseColor, cleanVariantOff, variantValue } from "@/lib/website-size-options";
-import { calcGiftFee, calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
+import { calcCardFee, calcGiftFee, calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
@@ -95,7 +95,7 @@ export interface PublicOrderInput {
   /** โค้ดส่วนลด (ตรวจ+คิดใหม่ฝั่งเซิร์ฟเวอร์เสมอ — lib/website-coupons) */
   couponCode?: string;
   /** 🎀 ห่อของขวัญ — ค่าห่อคิดจากที่ร้านตั้ง (calcGiftFee) ไม่เชื่อตัวเลขจากหน้าเว็บ */
-  gift?: { wrap: boolean; message?: string; hidePrice?: boolean; card?: unknown };
+  gift?: { wrap: boolean; /** 💌 การ์ดอวยพรแยกจากห่อ (ร้านเปิด card_enabled) */ addCard?: boolean; message?: string; hidePrice?: boolean; card?: unknown };
   /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง (หน้า /en = "en") → ข้อความแจ้งลูกค้า/หน้าตามออเดอร์ใช้ภาษานี้ */
   lang: CustomerLang;
 }
@@ -130,6 +130,10 @@ export interface OrderView {
   /** 🎀 ห่อของขวัญ (ไม่ห่อ = false / 0 / "") */
   giftWrap?: boolean;
   giftFee?: number;
+  /** 💌 ค่าการ์ดอวยพร (บริการแยกจากห่อ) — 0 = ไม่ได้ซื้อการ์ดแยก/การ์ดฟรี */
+  giftCardFee?: number;
+  /** 💌 สั่งการ์ดแยก (ไม่ห่อก็ได้) — ไม่ห่อ + มีข้อความ/การ์ด = true ด้วย */
+  giftCardOnly?: boolean;
   giftMessage?: string;
   giftHidePrice?: boolean;
   /** 🎴 การ์ด (ถึง/จาก/ลาย/ตัวหนังสือ) — ข้อความอยู่ giftMessage · ไม่มีการ์ด = null */
@@ -196,8 +200,9 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
 
   // 🎀 ห่อของขวัญ (ข้อความการ์ด ≤ 300 ตัว · ขึ้นบรรทัดใหม่ได้)
   const g = (r.gift ?? {}) as Record<string, unknown>;
-  const gift = g.wrap === true
-    ? { wrap: true, message: String(g.message ?? "").replace(/\r/g, "").trim().slice(0, 300) || undefined, hidePrice: g.hidePrice === true, card: g.card && typeof g.card === "object" ? g.card : undefined }
+  // 💌 การ์ดแยก (addCard) ส่งมาได้โดยไม่ห่อ
+  const gift = g.wrap === true || g.addCard === true
+    ? { wrap: g.wrap === true, ...(g.addCard === true ? { addCard: true } : {}), message: String(g.message ?? "").replace(/\r/g, "").trim().slice(0, 300) || undefined, hidePrice: g.hidePrice === true, card: g.card && typeof g.card === "object" ? g.card : undefined }
     : undefined;
 
   return {
@@ -461,13 +466,18 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const shippingFee = calcShippingFee(subtotal, info);
   // 🎀 ห่อของขวัญ: ร้านปิดบริการไปแล้วระหว่างลูกค้ากรอก = บอกให้เอาออก (ไม่เงียบห่อไม่ได้) · ข้อความ/ซ่อนราคา รับเฉพาะที่ร้านเปิดให้เลือก
   if (input.gift?.wrap && !info.gift_enabled) return { ok: false, error: "ร้านปิดบริการห่อของขวัญแล้ว — เอาตัวเลือกห่อของขวัญออกแล้วสั่งอีกครั้ง", status: 409 };
+  if (input.gift?.addCard && !info.card_enabled) return { ok: false, error: "ร้านปิดบริการการ์ดอวยพรแล้ว — เอาตัวเลือกเขียนการ์ดออกแล้วสั่งอีกครั้ง", status: 409 };
   const giftWrap = !!input.gift?.wrap;
+  // 💌 การ์ดแยก: ไม่ห่อก็เขียนการ์ดได้ · ค่าการ์ดคิดจากที่ร้านตั้ง (ไม่เชื่อหน้าเว็บ)
+  const cardOnly = !!input.gift?.addCard;
   const giftFee = calcGiftFee(giftWrap, info);
-  const giftMessage = giftWrap && info.gift_allow_message ? input.gift?.message ?? null : null;
-  const giftHidePrice = giftWrap && info.gift_allow_hide_price && !!input.gift?.hidePrice;
+  const giftCardFee = calcCardFee(cardOnly, info);
+  const msgOk = cardOnly || (giftWrap && info.gift_allow_message);
+  const giftMessage = msgOk ? input.gift?.message ?? null : null;
+  const giftHidePrice = (giftWrap || cardOnly) && info.gift_allow_hide_price && !!input.gift?.hidePrice;
   // 🎴 การ์ด: ตรวจความยาว/จำนวนบรรทัดตามที่ร้านตั้ง + ลาย/ตัวหนังสือต้องยังเปิดอยู่ (lib/website-gift-cards)
   let giftCard: OrderGiftCard | null = null;
-  if (giftWrap && info.gift_allow_message) {
+  if (msgOk) {
     const rc = normalizeOrderCard(input.gift?.card ?? null, await readGiftCards(sb, shop.id), giftMessage ?? "");
     if (!rc.ok) return { ok: false, error: rc.error, status: 400 };
     giftCard = rc.card;
@@ -491,7 +501,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     pointsUsed = rr.points;
     pointsDiscount = rr.discount;
   }
-  const grandTotal = Math.round((subtotal + shippingFee + giftFee - discount - pointsDiscount) * 100) / 100;
+  const grandTotal = Math.round((subtotal + shippingFee + giftFee + giftCardFee - discount - pointsDiscount) * 100) / 100;
 
   const prefix = orderNoPrefix(info, shop.slug);
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -525,6 +535,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         points_discount: pointsDiscount,
         gift_wrap: giftWrap,
         gift_fee: giftFee,
+        gift_card_fee: giftCardFee,
         gift_message: giftMessage,
         gift_hide_price: giftHidePrice,
         gift_card: giftCard,
@@ -606,6 +617,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         pointsEarned: 0,
         giftWrap,
         giftFee,
+        giftCardFee,
+        giftCardOnly: cardOnly || (!giftWrap && !!(giftMessage || giftCard)),
         giftMessage: giftMessage ?? "",
         giftHidePrice,
         giftCard,
@@ -650,6 +663,7 @@ export type OrderRow = {
   points_earned?: number | null;
   gift_wrap?: boolean | null;
   gift_fee?: number | string | null;
+  gift_card_fee?: number | string | null;
   gift_message?: string | null;
   gift_hide_price?: boolean | null;
   gift_card?: unknown;
@@ -702,6 +716,8 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     pointsEarned: num(o.points_earned),
     giftWrap: !!o.gift_wrap,
     giftFee: num(o.gift_fee),
+    giftCardFee: num(o.gift_card_fee),
+    giftCardOnly: num(o.gift_card_fee) > 0 || (!o.gift_wrap && !!(o.gift_message || o.gift_card)),
     giftMessage: o.gift_message ?? "",
     giftHidePrice: !!o.gift_hide_price,
     giftCard: readOrderCard(o.gift_card),
