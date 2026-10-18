@@ -9,6 +9,7 @@
 
 import { normalizeListing, DEFAULT_LISTING, type ListingConfig } from "@/lib/website-listing";
 import { normalizeCart, DEFAULT_CART, type CartConfig } from "@/lib/website-cart";
+import { normalizeCheckout, DEFAULT_CHECKOUT, type CheckoutConfig } from "@/lib/website-checkout";
 import { isGradStop } from "@/lib/website-gradient";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
@@ -908,6 +909,8 @@ export interface SiteTheme {
   listing: ListingConfig;
   /** 🛒 ดีไซน์ตะกร้า (ลิ้นชัก + หน้า /cart · lib/website-cart.ts) */
   cart: CartConfig;
+  /** 💳 ดีไซน์หน้าชำระเงิน + หน้าขอบคุณ (lib/website-checkout.ts) */
+  checkout: CheckoutConfig;
   /** ✨ การเคลื่อนไหวทั้งเว็บ: เปลี่ยนหน้า (จาง/เลื่อนขึ้น) + เลื่อนจอนุ่ม (ปิดเป็นค่าเริ่ม) — เว็บร้าน: app/template.tsx + SmoothScroll */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: {
@@ -1363,6 +1366,7 @@ export const DEFAULT_THEME: SiteTheme = {
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
   cart: { ...DEFAULT_CART },
+  checkout: { ...DEFAULT_CHECKOUT },
   page: { transition: "fade", smoothScroll: false },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
@@ -1558,6 +1562,7 @@ export const THEME_TEXT_KEYS = [
   "label", "badge", "title", "desc", "text", "caption", "moreLabel", "viewAllLabel", "promo", "placeholder",
   "titleText", "noteText", "saleText", "newText", "bestText", "recsTitle", "freeShipText", "freeShipDone", "etaText",
   "emptyText", "checkoutText", "heading", "subtitle",
+  "confirmText", "codLabel", "codHint", "promptpayLabel", "promptpayHint", "trustText", "thanksTitle", "thanksText",
 ] as const;
 
 /** ป้ายตำแหน่ง (ภาษาคน) ในตารางคำแปลของธีม */
@@ -1572,6 +1577,8 @@ const THEME_CRUMB: Record<string, string> = {
   saleText: "ป้ายลดราคา", newText: "ป้ายสินค้าใหม่", bestText: "ป้ายขายดี", recsTitle: "หัวข้อสินค้าแนะนำ",
   freeShipText: "ข้อความส่งฟรี", freeShipDone: "ข้อความถึงยอดส่งฟรี", etaText: "ข้อความเวลาส่ง", emptyText: "ข้อความว่าง",
   checkoutText: "ปุ่มชำระเงิน", heading: "หัวข้อ", subtitle: "คำอธิบาย",
+  checkout: "หน้าชำระเงิน", confirmText: "ปุ่มยืนยันคำสั่งซื้อ", codLabel: "ชื่อเก็บเงินปลายทาง", codHint: "คำอธิบายเก็บเงินปลายทาง",
+  promptpayLabel: "ชื่อโอนพร้อมเพย์", promptpayHint: "คำอธิบายโอนพร้อมเพย์", trustText: "แถบความมั่นใจ", thanksTitle: "หัวข้อหน้าขอบคุณ", thanksText: "ข้อความหน้าขอบคุณ",
 };
 export const themeCrumb = (field: string): string | null => THEME_CRUMB[field] ?? null;
 
@@ -1666,6 +1673,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
     footer: normalizeFooter(r.footer),
     listing: normalizeListing(r.listing),
     cart: normalizeCart(r.cart),
+    checkout: normalizeCheckout(r.checkout),
     page: (() => {
       const pg = (r.page ?? {}) as Record<string, unknown>;
       return { transition: pick(pg.transition, ["none", "fade", "rise"] as const, "fade"), smoothScroll: pg.smoothScroll === true };
@@ -1761,6 +1769,7 @@ export function mergeTheme(existing: unknown, incoming: unknown): Record<string,
     product: t.product,
     listing: t.listing,
     cart: t.cart,
+    checkout: t.checkout,
     // การเคลื่อนไหวทั้งเว็บ (เปลี่ยนหน้า/เลื่อนจอนุ่ม) — เดิมตกหล่น → บันทึกไม่ติด
     page: t.page,
   };

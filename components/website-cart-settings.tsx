@@ -15,7 +15,8 @@ const lbl = "block text-[11px] font-medium text-slate-500 mb-1";
 const input = "w-full h-8 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-400";
 const card = "rounded-xl border border-slate-200 bg-white p-4 space-y-3";
 
-function Card({ title, hint, children, on, onToggle }: { title: string; hint?: string; children?: ReactNode; on?: boolean; onToggle?: (v: boolean) => void }) {
+/** การ์ดตั้งค่า (หัว + คำอธิบาย + สวิตช์เปิด/ปิด) — ใช้ร่วมกับแท็บ 💳 หน้าชำระเงิน (website-checkout-settings) */
+export function Card({ title, hint, children, on, onToggle }: { title: string; hint?: string; children?: ReactNode; on?: boolean; onToggle?: (v: boolean) => void }) {
   return (
     <div className={card}>
       <div className="flex items-start gap-2">
@@ -35,7 +36,7 @@ function Card({ title, hint, children, on, onToggle }: { title: string; hint?: s
   );
 }
 
-function Check({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+export function Check({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
       <input type="checkbox" className="mt-0.5 w-4 h-4 accent-blue-600 shrink-0" checked={checked} onChange={(e) => onChange(e.target.checked)} />
@@ -47,7 +48,7 @@ function Check({ label, hint, checked, onChange }: { label: string; hint?: strin
   );
 }
 
-function Text({ label, value, onChange, placeholder, max = 80 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; max?: number }) {
+export function Text({ label, value, onChange, placeholder, max = 80 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; max?: number }) {
   return (
     <label className="block">
       <span className={lbl}>{label}</span>

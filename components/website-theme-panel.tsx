@@ -58,6 +58,8 @@ import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-picker
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
 import { CartSettings } from "@/components/website-cart-settings";
+import { CheckoutSettings, type CheckoutPayInfo } from "@/components/website-checkout-settings";
+import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import type { ProductMaterialView } from "@/lib/website-theme";
@@ -114,6 +116,8 @@ interface Theme {
   listing: ListingConfig;
   /** 🛒 ดีไซน์ตะกร้า (lib/website-cart) */
   cart: CartConfig;
+  /** 💳 ดีไซน์หน้าชำระเงิน (lib/website-checkout) */
+  checkout: CheckoutConfig;
   /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
@@ -139,6 +143,8 @@ interface Choices {
   detailSources?: { value: DetailSource; label: string; hint: string }[];
   /** บรรทัดอัตโนมัติของ "การจัดส่ง & ชำระเงิน" ตามข้อมูลร้านตอนนี้ */
   shippingAuto?: { key: ShippingAutoKey; text: string }[];
+  /** 💳 ช่องทางจ่ายที่เปิดอยู่ (เตือนในแท็บหน้าชำระเงิน) */
+  payInfo?: CheckoutPayInfo;
   specFields?: { key: string; label: string; group?: string }[];
   fieldGroups?: Record<string, string>;
   /** ฟิลด์รูปของ Parent SKU (แบนเนอร์ source = field) */
@@ -156,7 +162,7 @@ const FINE_COLOR_KEYS = Object.keys(FINE_COLOR_DEFAULTS) as (keyof typeof FINE_C
 const FINE_COLOR_LABEL = "สีละเอียด";
 /** บทบาทตัวอักษร — ธีมเก่าที่ยังไม่มีบทบาทใหม่ (เช่น เมนูย่อย) = ค่าเริ่มต้น */
 const roleOf = (t: { typography: Partial<Typography> }, k: TextRoleKey): TextRole => t.typography[k] ?? defaultTextRole(k);
-type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "cart" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "cart" | "checkout" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -170,6 +176,7 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "listing", label: "หน้ารายการสินค้า" },
   { k: "product", label: "หน้าสินค้า" },
   { k: "cart", label: "🛒 ตะกร้า" },
+  { k: "checkout", label: "💳 หน้าชำระเงิน" },
   { k: "shape", label: "รูปทรง" },
   { k: "history", label: "ประวัติ" },
 ];
@@ -189,11 +196,14 @@ const DEVICES: { k: Device; label: string; w: number; h: number; icon: string }[
   { k: "mobile", label: "มือถือ", w: 390, h: 844, icon: "📲" },
 ];
 
+/** path พรีวิว + ?preview=1 (path มี ?query อยู่แล้ว เช่น หน้าขอบคุณ = ต่อด้วย &) */
+const withPreview = (path: string) => `${path}${path.includes("?") ? "&" : "?"}preview=1`;
+
 /** ระดับการย่อพรีวิว — "fit" = ย่อให้พอดีกล่อง (เหมือนแท็บจัดหน้าแรก) */
 type Zoom = "fit" | 0.5 | 0.75 | 1;
 
 /** แท็บ → หน้าที่พรีวิว ("product" = สินค้าตัวอย่างของร้าน) · ไม่อยู่ในรายการ = อยู่หน้าเดิม */
-const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product" };
+const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", checkout: "/checkout" };
 
 const PAGES = [
   { path: "/", label: "หน้าแรก" },
@@ -203,6 +213,8 @@ const PAGES = [
   { path: "/contact", label: "ติดต่อ" },
   { path: "/cart", label: "ตะกร้า (เต็มหน้า)" },
   { path: "/new", label: "มาใหม่" },
+  { path: "/checkout", label: "หน้าชำระเงิน" },
+  { path: "/checkout?pv=thanks", label: "หน้าขอบคุณ (หลังสั่ง)" },
 ];
 
 const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Theme["fonts"]; radius: Radius } }[] = [
@@ -467,7 +479,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     const path = TAB_PREVIEW_PAGE[tab] === "product" ? (sampleProduct ? `/product/${sampleProduct}` : null) : TAB_PREVIEW_PAGE[tab] ?? null;
     if (!path) return;
     if (page !== path) setPage(path);
-    else if (siteUrl && iframeRef.current) iframeRef.current.src = `${siteUrl}${path}?preview=1`;
+    else if (siteUrl && iframeRef.current) iframeRef.current.src = `${siteUrl}${withPreview(path)}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, sampleProduct]);
 
@@ -674,6 +686,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     // หน้าสินค้า (Style/ชุดรายละเอียด/⚙️/ขนาดตัวอักษร/ค่ามือถือ) — เดิมไม่ถูกนับ ทำให้แถบล่างบอก "ไม่มีการเปลี่ยนแปลง" ทั้งที่แก้แล้ว
     if (!eq(theme.product, base.product)) out.push("หน้าสินค้า");
     if (!eq(theme.cart, base.cart)) out.push("ตะกร้า");
+    if (!eq(theme.checkout, base.checkout)) out.push("หน้าชำระเงิน");
     // ✨ การเคลื่อนไหว (แท็บรูปทรง) — เดิมไม่ถูกนับ
     if (!eq(theme.page, base.page)) out.push("การเคลื่อนไหว");
     return out;
@@ -798,7 +811,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const mobCount = mobileOverrideCount(mob);
 
   const dev = DEVICES.find((d) => d.k === device)!;
-  const previewSrc = siteUrl ? `${siteUrl}${page}?preview=1` : null;
+  const previewSrc = siteUrl ? `${siteUrl}${withPreview(page)}` : null;
   const scale = zoom === "fit" ? Math.min(1, Math.max(0.1, (boxW - 16) / dev.w)) : zoom;
   // สูงพอให้เนื้อเว็บเต็มกล่องหลังย่อแล้ว (ไม่งั้นเหลือที่ว่างข้างล่าง)
   const frameH = Math.max(dev.h, Math.round((boxH - 16) / scale));
@@ -857,6 +870,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "listing" && dirtyFields.includes("หน้ารายการสินค้า")) ||
     (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง") || dirtyFields.includes("การเคลื่อนไหว"))) ||
     (k === "cart" && dirtyFields.includes("ตะกร้า")) ||
+    (k === "checkout" && dirtyFields.includes("หน้าชำระเงิน")) ||
     (k === "product" && dirtyFields.includes("หน้าสินค้า"));
 
   // 🔤 เนื้อหาแท็บโลโก้ — ใช้ร่วม แท็บโลโก้ + ป๊อป ⚙ โลโก้ ในตำแหน่งชิ้นส่วน Header (ค่าเดียวกัน)
@@ -2182,6 +2196,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
           {/* ── 🛒 ตะกร้า: หน้าตา · รายการ · ท้ายตะกร้า · สินค้าแนะนำ · ฟังก์ชันเพิ่ม (components/website-cart-settings) ── */}
           {tab === "cart" && <CartSettings value={theme.cart} onChange={(cart) => apply({ ...theme, cart })} shopSlug={shopSlug} onPreviewPage={setPage} />}
+          {/* ── 💳 หน้าชำระเงิน: ข้อความ · ช่องกรอก · การจัดวาง · ช่องทางจ่าย · แถบความมั่นใจ · หน้าขอบคุณ (components/website-checkout-settings) ── */}
+          {tab === "checkout" && <CheckoutSettings value={theme.checkout} onChange={(checkout) => apply({ ...theme, checkout })} payInfo={choices?.payInfo} onPreviewPage={setPage} />}
 
           {tab === "shape" && (
             <>
