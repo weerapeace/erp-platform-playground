@@ -40,6 +40,8 @@ const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
 ];
 const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { ContentSourcesModal } from "@/components/website-content-sources";
+import { SHIPPING_SOURCE_ID, detailSourceValue, parseDetailSourceValue, type ContentSource, type ShippingAutoKey } from "@/lib/website-content-sources";
 import { SocialLinksModal } from "@/components/website-social-links";
 import { FULL_THEME_PRESETS, applyFullPreset, type BaseColors } from "@/lib/website-theme-presets";
 import { FINE_COLOR_DEFAULTS, SOFT_PCT_RANGE, tintPctOf, resolveOnBrand, ON_BRAND_DARK } from "@/lib/website-theme";
@@ -78,10 +80,13 @@ type ProductSection = import("@/lib/website-theme").ProductSection;
 type ProductGalleryStyle = "editorial" | "spotlight";
 type ProductDetailsStyle = "accordion" | "tabs" | "plain";
 type ProductDetailsOpen = "first" | "closed" | "all";
-type DetailSource = "description" | "fields" | "details" | "text" | "shipping" | "dimensions";
+type DetailSource = "description" | "fields" | "details" | "text" | "shipping" | "dimensions" | "custom";
 type DetailApply = "all" | "categories" | "products";
 type DetailOpen = "auto" | "open" | "closed";
-interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen; showInch?: boolean; sizeCompare?: boolean }
+interface DetailItem { id: string; label: string; source: DetailSource; fields: string[]; text: string; applyTo: DetailApply; categories: string[]; products: string[]; enabled: boolean; defaultOpen: DetailOpen; showInch?: boolean; sizeCompare?: boolean; sourceId?: string }
+/** 📚 แหล่งในช่อง "เอาข้อมูลจาก" แบ่ง 2 กลุ่ม — ดึงจากสินค้า (ลบไม่ได้) / ข้อความของร้าน (คลังแหล่งข้อมูล ⚙) */
+const PRODUCT_DETAIL_SOURCES: DetailSource[] = ["description", "fields", "details", "dimensions"];
+const SHOP_DETAIL_SOURCES: DetailSource[] = ["shipping", "text"];
 
 interface SampleItem { name: string; price: number; comparePrice: number | null; unit: string; category: string; badge: string; stock: string; images: string[]; swatches: { color?: string; img?: string }[] }
 
@@ -110,7 +115,7 @@ interface Theme {
   /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; contentSources: ContentSource[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts };
 }
 
 interface Choices {
@@ -130,6 +135,8 @@ interface Choices {
   productDetailsStyles?: { value: ProductDetailsStyle; label: string }[];
   productDetailsOpen?: { value: ProductDetailsOpen; label: string }[];
   detailSources?: { value: DetailSource; label: string; hint: string }[];
+  /** บรรทัดอัตโนมัติของ "การจัดส่ง & ชำระเงิน" ตามข้อมูลร้านตอนนี้ */
+  shippingAuto?: { key: ShippingAutoKey; text: string }[];
   specFields?: { key: string; label: string; group?: string }[];
   fieldGroups?: Record<string, string>;
   /** ฟิลด์รูปของ Parent SKU (แบนเนอร์ source = field) */
@@ -572,6 +579,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   };
   const detailDrag = useDragReorder((from, to) => theme && setProduct({ detailItems: moveItem(theme.product.detailItems, from, to) }));
   const [openDetail, setOpenDetail] = useState<string | null>(null);
+  // 📚 ป๊อปจัดการแหล่งข้อมูล (⚙ ข้างช่อง "เอาข้อมูลจาก") — เปิดจากหัวข้อไหน + เลือกแหล่งไหนไว้
+  const [srcMgr, setSrcMgr] = useState<{ focusId: string | null; itemId: string | null } | null>(null);
   // ป๊อปอัปเลือกฟิลด์ Parent SKU ให้หัวข้อไหน (id ของหัวข้อ) + คำค้น
   const [prodQuery, setProdQuery] = useState("");
   const setDetailItem = (id: string, patch: Partial<DetailItem>) =>
@@ -1933,6 +1942,19 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       const open = openDetail === it.id;
                       const src = (choices.detailSources ?? []).find((x) => x.value === it.source);
                       const scope = it.applyTo === "all" ? "ทุกสินค้า" : it.applyTo === "categories" ? `${it.categories.length} หมวด` : `${it.products.length} รุ่น`;
+                      // 📚 แหล่งที่ร้านเพิ่มเอง (custom) — หาไม่เจอ = ถูกลบไปแล้ว
+                      const contentSources = theme.product.contentSources ?? [];
+                      const customSrc = it.source === "custom" ? contentSources.find((s) => s.id === it.sourceId) : undefined;
+                      const srcLabel = it.source === "custom" ? (customSrc ? `📚 ${customSrc.name}` : "⚠️ แหล่งถูกลบแล้ว") : src?.label ?? it.source;
+                      // ตัวอย่างบรรทัดของแหล่ง "ข้อความของร้าน" (การจัดส่ง = อัตโนมัติที่ไม่ได้ซ่อน + ที่พิมพ์เพิ่ม)
+                      const shipSrc = contentSources.find((s) => s.id === SHIPPING_SOURCE_ID);
+                      const srcLines =
+                        it.source === "shipping"
+                          ? [
+                              ...(choices.shippingAuto ?? []).filter((a) => a.text && !(shipSrc?.hideAuto ?? []).includes(a.key)).map((a) => a.text),
+                              ...(shipSrc?.lines ?? []).map((l) => l.text.trim()).filter(Boolean),
+                            ]
+                          : (customSrc?.lines ?? []).map((l) => l.text.trim()).filter(Boolean);
                       return (
                         <li key={it.id} {...detailDrag.rowProps(i)} className={`rounded-lg border border-slate-200 bg-white ${detailDrag.rowCls(i)} ${it.enabled ? "" : "opacity-60"}`}>
                           <div className="flex items-center gap-2 px-2 py-1.5">
@@ -1940,7 +1962,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={it.enabled} onChange={(e) => setDetailItem(it.id, { enabled: e.target.checked })} title="แสดง/ซ่อนหัวข้อนี้" />
                             <button onClick={() => setOpenDetail(open ? null : it.id)} className="flex-1 min-w-0 text-left">
                               <span className={`block text-sm ${it.enabled ? "text-slate-800" : "line-through text-slate-400"}`}>{it.label}</span>
-                              <span className="block text-[11px] text-slate-400 truncate">{src?.label ?? it.source} · {scope}</span>
+                              <span className={`block text-[11px] truncate ${it.source === "custom" && !customSrc ? "text-amber-600" : "text-slate-400"}`}>{srcLabel} · {scope}</span>
                             </button>
                             {pv.detailsStyle === "accordion" && (
                               <select
@@ -1971,11 +1993,61 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                               </div>
                               <div>
                                 <label className={labelCls}>เอาข้อมูลจาก</label>
-                                <select className={inputCls} value={it.source} onChange={(e) => setDetailItem(it.id, { source: e.target.value as DetailSource })}>
-                                  {(choices.detailSources ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                                </select>
-                                {src?.hint && <p className="text-[11px] text-slate-400 mt-1">{src.hint}</p>}
+                                <div className="flex gap-1.5">
+                                  <select
+                                    className={inputCls}
+                                    value={detailSourceValue(it)}
+                                    onChange={(e) => {
+                                      const v = parseDetailSourceValue(e.target.value);
+                                      setDetailItem(it.id, { source: v.source as DetailSource, sourceId: v.sourceId });
+                                    }}
+                                  >
+                                    {it.source === "custom" && !customSrc && <option value={detailSourceValue(it)} disabled>⚠️ แหล่งถูกลบแล้ว — เลือกใหม่</option>}
+                                    <optgroup label="ดึงจากสินค้า">
+                                      {(choices.detailSources ?? []).filter((o) => PRODUCT_DETAIL_SOURCES.includes(o.value)).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </optgroup>
+                                    <optgroup label="ข้อความของร้าน">
+                                      {(choices.detailSources ?? []).filter((o) => SHOP_DETAIL_SOURCES.includes(o.value)).map((o) => <option key={o.value} value={o.value}>{o.value === "text" ? "ข้อความตายตัว (พิมพ์ในหัวข้อนี้)" : o.label}</option>)}
+                                      {contentSources.filter((s) => s.id !== SHIPPING_SOURCE_ID).map((s) => <option key={s.id} value={`custom:${s.id}`}>📚 {s.name}</option>)}
+                                    </optgroup>
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSrcMgr({ focusId: it.source === "custom" ? it.sourceId ?? null : it.source === "shipping" ? SHIPPING_SOURCE_ID : null, itemId: it.id })}
+                                    className="shrink-0 w-9 rounded-lg border border-slate-200 text-sm text-slate-500 hover:border-blue-400 hover:text-blue-700"
+                                    title="จัดการแหล่งข้อมูล — เพิ่ม / แก้ / ลบ"
+                                    aria-label="จัดการแหล่งข้อมูล"
+                                  >
+                                    ⚙
+                                  </button>
+                                </div>
+                                {it.source === "custom" ? (
+                                  <p className={`text-[11px] mt-1 ${customSrc ? "text-slate-400" : "text-amber-600"}`}>{customSrc ? "แหล่งที่ร้านเพิ่มเอง — แก้บรรทัดได้ที่ ⚙" : "แหล่งนี้ถูกลบไปแล้ว หัวข้อนี้จะไม่โชว์บนเว็บ — เลือกแหล่งใหม่"}</p>
+                                ) : (
+                                  src?.hint && <p className="text-[11px] text-slate-400 mt-1">{it.source === "shipping" ? `${src.hint} · ซ่อน/เพิ่มบรรทัดได้ที่ ⚙` : src.hint}</p>
+                                )}
                               </div>
+                              {(it.source === "shipping" || (it.source === "custom" && customSrc)) && (
+                                <div className="sm:col-span-2 rounded-lg bg-slate-50 px-3 py-2">
+                                  <div className="flex items-center justify-between gap-2 mb-1">
+                                    <span className="text-[11px] font-medium text-slate-500">ตัวอย่างบนเว็บ ({srcLines.length} บรรทัด)</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSrcMgr({ focusId: it.source === "shipping" ? SHIPPING_SOURCE_ID : it.sourceId ?? null, itemId: it.id })}
+                                      className="text-xs px-2 py-0.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-400 hover:text-blue-700"
+                                    >
+                                      ✏️ แก้เนื้อหา
+                                    </button>
+                                  </div>
+                                  {srcLines.length ? (
+                                    <ul className="space-y-0.5 text-xs text-slate-600">
+                                      {srcLines.map((l, n) => <li key={n}>• {l}</li>)}
+                                    </ul>
+                                  ) : (
+                                    <p className="text-xs text-amber-600">ยังไม่มีบรรทัด — หัวข้อนี้จะไม่โชว์บนเว็บ</p>
+                                  )}
+                                </div>
+                              )}
                               {it.source === "fields" && (
                                 <div className="sm:col-span-2">
                                   <label className={labelCls}>ฟิลด์ที่โชว์ ({it.fields.length}) — เรียงตามที่เลือก</label>
@@ -2072,6 +2144,28 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     })}
                     {!theme.product.detailItems.length && <li className="rounded-lg border border-dashed border-slate-300 py-4 text-center text-xs text-slate-400">ยังไม่มีหัวข้อ — กด "+ เพิ่มหัวข้อ"</li>}
                   </ul>
+                  {/* 📚 คลังแหล่งข้อมูล — แก้แล้วเข้าธีมทันที (บันทึกพร้อมธีม) */}
+                  {(() => {
+                    const pickItem = srcMgr?.itemId ? theme.product.detailItems.find((x) => x.id === srcMgr.itemId) : undefined;
+                    return (
+                      <ContentSourcesModal
+                        open={!!srcMgr}
+                        onClose={() => setSrcMgr(null)}
+                        sources={theme.product.contentSources ?? []}
+                        onChange={(contentSources) => setProduct({ contentSources })}
+                        items={theme.product.detailItems}
+                        productSources={(choices.detailSources ?? []).filter((o) => PRODUCT_DETAIL_SOURCES.includes(o.value))}
+                        shippingAuto={choices.shippingAuto}
+                        focusId={srcMgr?.focusId}
+                        pickFor={pickItem ? { label: pickItem.label, value: detailSourceValue(pickItem) } : null}
+                        onPick={(value) => {
+                          if (!pickItem) return;
+                          const v = parseDetailSourceValue(value);
+                          setDetailItem(pickItem.id, { source: v.source as DetailSource, sourceId: v.sourceId });
+                        }}
+                      />
+                    );
+                  })()}
                 </div>
               )}
 

@@ -16,6 +16,8 @@ import { normalizeFieldMap } from "@/lib/website-field-map";
 import { loadParentWebFields, loadParentImageFields, PARENT_FIELD_GROUP_LABEL } from "@/lib/website-parent-fields";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { readSiteInfo } from "@/lib/website-site-info";
+import { shippingAutoPreview } from "@/lib/website-content-sources";
 import {
   normalizeTheme,
   mergeTheme,
@@ -80,7 +82,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
 
   // ฟิลด์ Parent SKU ที่ให้เลือกโชว์บนเว็บ (ทุกฟิลด์จากทะเบียน ยกเว้นต้นทุน/ข้อมูลภายใน)
-  const [parentFields, imageFields] = await Promise.all([loadParentWebFields(sb), loadParentImageFields(sb)]);
+  const [parentFields, imageFields, siteInfo] = await Promise.all([loadParentWebFields(sb), loadParentImageFields(sb), readSiteInfo(sb, s.id)]);
   const hasDraft = s.theme_draft != null;
   const rawDomain = (dom as { domain: string } | null)?.domain ?? null;
   const siteUrl = rawDomain ? (rawDomain.startsWith("http") ? rawDomain : `https://${rawDomain}`) : null;
@@ -107,6 +109,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       productDetailsOpen: PRODUCT_DETAILS_OPEN,
       partChoices: PART_CHOICES,
       detailSources: DETAIL_SOURCES,
+      /** 📚 คลังแหล่งข้อมูล: บรรทัดอัตโนมัติของ "การจัดส่ง & ชำระเงิน" ตามข้อมูลร้านตอนนี้ (โชว์ 🔒 ในป๊อป) */
+      shippingAuto: shippingAutoPreview(siteInfo),
       specFields: parentFields.map((f) => ({ key: f.key, label: f.label, group: f.group })),
       fieldGroups: PARENT_FIELD_GROUP_LABEL,
       /** ฟิลด์รูปของ Parent SKU (แบนเนอร์เลือก "ฟิลด์รูปของ Parent SKU") */

@@ -13,6 +13,7 @@ import { isGradStop } from "@/lib/website-gradient";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
+import { normalizeContentSources, type ContentSource } from "@/lib/website-content-sources";
 import { defaultOverPages, normalizeOverPages, type OverPages } from "@/lib/website-header-over";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
@@ -482,8 +483,9 @@ export const PART_CHOICES = {
  * แต่ละหัวข้อเลือกได้ว่าเอาข้อมูลจากไหน และใช้กับรุ่นไหน (ทุกตัว / เฉพาะหมวด / เลือกเป็นรายตัว)
  * สินค้าที่ไม่มีข้อมูลในหัวข้อนั้น → หัวข้อหายไปเอง (เว็บร้านเป็นคนตัด)
  */
-export type DetailSource = "description" | "fields" | "details" | "text" | "shipping" | "dimensions";
-const DETAIL_SOURCE_KEYS: DetailSource[] = ["description", "fields", "details", "text", "shipping", "dimensions"];
+/** custom = แหล่งที่ร้านเพิ่มเองในคลังแหล่งข้อมูล (sourceId → theme.product.contentSources · lib/website-content-sources) */
+export type DetailSource = "description" | "fields" | "details" | "text" | "shipping" | "dimensions" | "custom";
+const DETAIL_SOURCE_KEYS: DetailSource[] = ["description", "fields", "details", "text", "shipping", "dimensions", "custom"];
 export type DetailApply = "all" | "categories" | "products";
 /** หัวข้อนี้เริ่มต้นพับหรือเปิด: auto = ตามค่ารวม (detailsOpen) · open = เปิดไว้ · closed = พับไว้ */
 export type DetailOpen = "auto" | "open" | "closed";
@@ -506,6 +508,8 @@ export interface ProductDetailItem {
   showInch?: boolean;
   /** source=dimensions: ปุ่ม 📏 เทียบขนาด · ไม่ตั้ง = โชว์ */
   sizeCompare?: boolean;
+  /** source=custom: id ของแหล่งใน theme.product.contentSources */
+  sourceId?: string;
 }
 /** ฟิลด์ของ Parent SKU ที่ให้เลือกโชว์บนเว็บ (API สาธารณะส่งเฉพาะชุดนี้ — ไม่มีต้นทุน/ข้อมูลภายใน) */
 export const PRODUCT_SPEC_FIELDS: { key: string; label: string; unit?: string }[] = [
@@ -570,6 +574,7 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
       defaultOpen: (["auto", "open", "closed"] as const).includes(r.defaultOpen as DetailOpen) ? (r.defaultOpen as DetailOpen) : "auto",
       ...(source === "dimensions" ? { showInch: r.showInch !== false, sizeCompare: r.sizeCompare !== false } : {}),
       ...(source === "fields" ? { sizeCompare: r.sizeCompare !== false } : {}),
+      ...(source === "custom" ? { sourceId: String(r.sourceId ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40) } : {}),
     });
     if (out.length >= 20) break;
   }
@@ -958,6 +963,8 @@ export interface SiteTheme {
     detailsOpen: ProductDetailsOpen;
     /** ชุดรายละเอียดสินค้า (หัวข้อพับเก็บ/แท็บ) */
     detailItems: ProductDetailItem[];
+    /** 📚 คลังแหล่งข้อมูล "ข้อความของร้าน" (การจัดส่ง + ที่ร้านเพิ่มเอง) — lib/website-content-sources */
+    contentSources: ContentSource[];
     /** ลำดับส่วนประกอบ (ครบทุกตัวเสมอ) */
     sections: ProductSection[];
     /** ส่วนที่ซ่อน (ซ่อนได้เฉพาะ details/banner/related) */
@@ -1335,7 +1342,7 @@ export const DEFAULT_THEME: SiteTheme = {
   cart: { ...DEFAULT_CART },
   page: { transition: "fade", smoothScroll: false },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -1535,7 +1542,7 @@ const THEME_CRUMB: Record<string, string> = {
   menu: "เมนู", items: "เมนูคอม", mobileItems: "เมนูมือถือ", children: "เมนูย่อย", panel: "แผงเมนูใหญ่", blocks: "กล่อง",
   links: "ลิงก์", groups: "กลุ่ม", cards: "การ์ด", tabs: "แท็บ", footer: "ท้ายเว็บ", columns: "คอลัมน์", bottomLinks: "ลิงก์แถวล่าง",
   header: "หัวเว็บ", button: "ปุ่ม", cart: "ตะกร้า", search: "ค้นหา", logo: "โลโก้", product: "หน้าสินค้า",
-  detailItems: "หัวข้อรายละเอียด", parts: "ส่วนประกอบ", buy: "ส่วนซื้อ", banner: "แบนเนอร์", related: "สินค้าที่เกี่ยวข้อง",
+  detailItems: "หัวข้อรายละเอียด", contentSources: "แหล่งข้อมูล", lines: "บรรทัด", parts: "ส่วนประกอบ", buy: "ส่วนซื้อ", banner: "แบนเนอร์", related: "สินค้าที่เกี่ยวข้อง",
   card: "การ์ดสินค้า", autoBadges: "ป้ายอัตโนมัติ", listing: "หน้ารายการสินค้า",
   label: "ชื่อ", badge: "ป้าย", title: "หัวข้อ", desc: "คำอธิบาย", text: "ข้อความ", caption: "คำบรรยาย", moreLabel: "ลิงก์ท้าย",
   viewAllLabel: "ดูทั้งหมด", promo: "แถบโปร", placeholder: "ข้อความในช่อง", titleText: "หัวข้อ", noteText: "หมายเหตุ",
@@ -1696,6 +1703,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       detailsStyle: pick(pd.detailsStyle, ["accordion", "tabs", "plain"] as const, pd.showTabs === false ? "plain" : d.product.detailsStyle),
       detailsOpen: pick(pd.detailsOpen, ["first", "closed", "all"] as const, d.product.detailsOpen),
       detailItems: normalizeDetailItems(pd.detailItems),
+      contentSources: normalizeContentSources(pd.contentSources),
       sections: normalizeProductSections(pd.sections, xIds),
       hidden: normalizeHiddenSections(pd.hidden, xIds),
       parts,
