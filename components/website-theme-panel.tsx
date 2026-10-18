@@ -257,6 +257,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   const [theme, setTheme] = useState<Theme | null>(null);
   const [published, setPublished] = useState<Theme | null>(null);
+  /** ค่าที่บันทึกล่าสุด (ร่างถ้ามี ไม่มี = ที่เผยแพร่) — ใช้ตัดสินว่า "ยังไม่บันทึก" (เทียบกับ published = บันทึกร่างแล้วก็ยังฟ้องค้าง) */
+  const [saved, setSaved] = useState<Theme | null>(null);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
   const [choices, setChoices] = useState<Choices | null>(null);
   const [lastVersion, setLastVersion] = useState<{ version_no: number; created_at: string } | null>(null);
@@ -354,6 +356,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         return;
       }
       setTheme(j.draft ?? j.published);
+      setSaved(j.draft ?? j.published);
       setPublished(j.published);
       setSiteUrl(j.shop?.siteUrl ?? null);
       setChoices(j.choices ?? null);
@@ -632,34 +635,36 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     return () => window.removeEventListener("message", onMsg);
   }, [theme]);
 
+  // ส่วนที่แก้แล้วยังไม่ได้บันทึก — เทียบกับที่บันทึกล่าสุด (ร่าง/เผยแพร่) ไม่ใช่กับที่เผยแพร่อยู่
   const dirtyFields = useMemo(() => {
-    if (!theme || !published) return [] as string[];
+    const base = saved;
+    if (!theme || !base) return [] as string[];
     const out: string[] = [];
-    for (const f of COLOR_FIELDS) if (theme.colors[f.key] !== published.colors[f.key]) out.push(f.label);
-    if (FINE_COLOR_KEYS.some((k) => theme.colors[k] !== published.colors[k])) out.push(FINE_COLOR_LABEL);
-    if (theme.fonts.display !== published.fonts.display) out.push("ฟอนต์หัวข้อ");
-    if (theme.fonts.body !== published.fonts.body) out.push("ฟอนต์เนื้อหา");
-    if (theme.radius !== published.radius) out.push("ความมนขอบ");
-    if (!eq(theme.typography, published.typography)) out.push("ตัวอักษร");
-    if (!eq(theme.shape, published.shape)) out.push("รูปทรง");
+    for (const f of COLOR_FIELDS) if (theme.colors[f.key] !== base.colors[f.key]) out.push(f.label);
+    if (FINE_COLOR_KEYS.some((k) => theme.colors[k] !== base.colors[k])) out.push(FINE_COLOR_LABEL);
+    if (theme.fonts.display !== base.fonts.display) out.push("ฟอนต์หัวข้อ");
+    if (theme.fonts.body !== base.fonts.body) out.push("ฟอนต์เนื้อหา");
+    if (theme.radius !== base.radius) out.push("ความมนขอบ");
+    if (!eq(theme.typography, base.typography)) out.push("ตัวอักษร");
+    if (!eq(theme.shape, base.shape)) out.push("รูปทรง");
     {
       const { placeholder: ph, ...lg } = theme.logo;
-      const { placeholder: php, ...lgp } = published.logo;
+      const { placeholder: php, ...lgp } = base.logo;
       if (!eq(lg, lgp)) out.push("โลโก้");
       if (!eq(ph, php)) out.push("รอรูปโหลด");
     }
-    if (!eq(theme.header, published.header)) out.push("Header");
-    if (!eq(theme.menu, published.menu)) out.push("เมนู");
-    if (!eq(theme.footer, published.footer)) out.push("Footer");
-    if (!eq(theme.listing, published.listing)) out.push("หน้ารายการสินค้า");
-    if (!eq(theme.card, published.card)) out.push("การ์ดสินค้า");
+    if (!eq(theme.header, base.header)) out.push("Header");
+    if (!eq(theme.menu, base.menu)) out.push("เมนู");
+    if (!eq(theme.footer, base.footer)) out.push("Footer");
+    if (!eq(theme.listing, base.listing)) out.push("หน้ารายการสินค้า");
+    if (!eq(theme.card, base.card)) out.push("การ์ดสินค้า");
     // หน้าสินค้า (Style/ชุดรายละเอียด/⚙️/ขนาดตัวอักษร/ค่ามือถือ) — เดิมไม่ถูกนับ ทำให้แถบล่างบอก "ไม่มีการเปลี่ยนแปลง" ทั้งที่แก้แล้ว
-    if (!eq(theme.product, published.product)) out.push("หน้าสินค้า");
-    if (!eq(theme.cart, published.cart)) out.push("ตะกร้า");
+    if (!eq(theme.product, base.product)) out.push("หน้าสินค้า");
+    if (!eq(theme.cart, base.cart)) out.push("ตะกร้า");
     // ✨ การเคลื่อนไหว (แท็บรูปทรง) — เดิมไม่ถูกนับ
-    if (!eq(theme.page, published.page)) out.push("การเคลื่อนไหว");
+    if (!eq(theme.page, base.page)) out.push("การเคลื่อนไหว");
     return out;
-  }, [theme, published]);
+  }, [theme, saved]);
 
   const isDirty = dirtyFields.length > 0;
   // แจ้งหน้าแม่: ยังไม่บันทึก → ถามก่อนสลับแท็บ (แถบล่างของหน้านี้ยังเป็นของตัวเอง: ร่าง/เผยแพร่)
@@ -678,18 +683,21 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const save = async (mode: "draft" | "publish") => {
     if (!theme) return;
     if (mode === "publish" && !confirm("ยืนยันเผยแพร่ธีมนี้ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที")) return;
+    // ค่าที่ส่งจริง — ถ้าแก้ต่อระหว่างรอบันทึก ส่วนที่แก้เพิ่มยังนับเป็น "ยังไม่บันทึก"
+    const sent = theme;
     setBusy(mode);
     try {
       const r = await apiFetch("/api/website/theme", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, theme, mode }),
+        body: JSON.stringify({ shopId, theme: sent, mode }),
       });
       const j = await r.json();
       if (!j.ok) {
         toast.error(j.error ?? "บันทึกไม่สำเร็จ");
         return;
       }
+      setSaved(sent);
       if (mode === "publish") {
         setPublished(j.theme);
         setHadDraft(false);
@@ -742,6 +750,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       const j = await r.json();
       if (j.ok) {
         apply(j.theme);
+        setSaved(j.theme); // เซิร์ฟเวอร์บันทึกเป็นร่างให้แล้ว
         setHadDraft(true);
         setTab("colors");
         toast.success(`กู้คืนเวอร์ชัน ${versionNo} เป็นร่างแล้ว`);
