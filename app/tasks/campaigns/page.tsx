@@ -2,7 +2,7 @@
 
 // ============================================================
 // Creative Campaigns — แคมเปญที่ครอบงาน creative
-// ของกลาง: StandaloneShell, ERPModal, ConfirmDialog, ERPForm*, UserPicker
+// ของกลาง: StandaloneShell, ConfirmDialog, CampaignCreateModal (ป๊อปสร้างแคมเปญ ใช้ร่วมกับ Wizard สร้างงาน)
 // ข้อมูลจาก /api/creative-campaigns (ดู app/tasks/data.ts)
 // ============================================================
 
@@ -11,13 +11,11 @@ import { useRouter } from "next/navigation";
 import { useT } from "@/components/i18n";
 import { useSWRLite, mutateSWR } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
-import { ERPModal, ConfirmDialog } from "@/components/modal";
-import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { UserPicker } from "@/components/pickers";
-import type { UserPickerValue } from "@/components/pickers";
+import { ConfirmDialog } from "@/components/modal";
 import { CAMPAIGN_STATUS, CampaignDrawer } from "./campaign-drawer";
+import { CampaignCreateModal } from "./campaign-create-modal";
 import {
-  listCampaigns, createCampaign, updateCampaign, deleteCampaign, listBrands,
+  listCampaigns, updateCampaign, deleteCampaign,
   type Campaign,
 } from "../data";
 import { listOptions, createOption, type Option } from "../use-options";
@@ -28,24 +26,14 @@ const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
-type FormState = { name: string; brand_id: string; category_id: string; objective: string; owner: UserPickerValue | null; start_date: string; end_date: string; note: string };
-const EMPTY: FormState = { name: "", brand_id: "", category_id: "", objective: "", owner: null, start_date: "", end_date: "", note: "" };
-
 export default function CampaignsPage() {
   const router = useRouter();
   const t = useT();
   const [modalOpen, setModalOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [formErr, setFormErr] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<Campaign | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [catFilter, setCatFilter] = useState<string>("");      // "" = ทุกหมวด · NO_CAT = ยังไม่จัดหมวด · id = หมวดนั้น
-  const [newCatOpen, setNewCatOpen] = useState(false);          // เพิ่มหมวดใหม่จากในฟอร์มสร้างแคมเปญ
-  const [newCatLabel, setNewCatLabel] = useState("");
-  const [catBusy, setCatBusy] = useState(false);
   // โหมด "🗂 จัดหมวด": ติ๊กเลือกหลายแคมเปญ → ย้ายเข้าหมวดทีเดียว · หรือเปลี่ยนหมวดรายใบจาก dropdown บนการ์ด
   const [manage, setManage] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -61,42 +49,14 @@ export default function CampaignsPage() {
 
   // ใช้ SWR คีย์เดียวกับหน้างาน → สลับ /tasks ↔ แคมเปญ ใช้ข้อมูลซ้ำ เห็นทันที
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
-  const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   // หมวดแคมเปญ (ของกลาง creative-options kind=campaign_category · เพิ่ม/แก้/เรียงที่ /tasks/settings → 📁 หมวดแคมเปญ)
   const catsSWR = useSWRLite("creative:campaign_categories", () => listOptions("campaign_category"));
   const categories: Option[] = useMemo(() => (catsSWR.data ?? []).filter((o) => o.is_active !== false).sort((a, b) => a.sort_order - b.sort_order), [catsSWR.data]);
   const campaigns = campaignsSWR.data ?? [];
-  const brands = brandsSWR.data ?? [];
   const loading = campaignsSWR.loading;
   const load = useCallback(async () => { await campaignsSWR.revalidate(true); }, [campaignsSWR]);
 
-  const update = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
-  const openCreate = () => { setForm({ ...EMPTY, start_date: new Date().toISOString().slice(0, 10) }); setDirty(false); setFormErr(null); setModalOpen(true); };
-
-  const save = async () => {
-    if (!form.name.trim()) { setFormErr(t("กรุณากรอกชื่อแคมเปญ", "Please enter a campaign name")); return; }
-    setSaving(true); setFormErr(null);
-    try {
-      await createCampaign({ name: form.name.trim(), brand_id: form.brand_id || null, category_id: form.category_id || null, objective: form.objective.trim() || null, owner_id: form.owner?.id ?? null, start_date: form.start_date || null, end_date: form.end_date || null, note: form.note.trim() || null });
-      setModalOpen(false); setDirty(false); pushToast("success", t("สร้างแคมเปญแล้ว", "Campaign created")); await load();
-    } catch (e) { setFormErr((e as Error).message); }
-    finally { setSaving(false); }
-  };
-
-  // เพิ่มหมวดใหม่จากในฟอร์ม (ไม่ต้องไปหน้า settings) → เลือกให้ทันที
-  const addCategory = async () => {
-    const label = newCatLabel.trim(); if (!label) return;
-    setCatBusy(true);
-    try {
-      const o = await createOption("campaign_category", label);
-      // ใส่เข้า cache ทันที (ไม่รอโหลดใหม่) → dropdown เห็นหมวดใหม่และเลือกให้เลย · แล้วค่อยโหลดสดเบื้องหลัง
-      mutateSWR<Option[]>("creative:campaign_categories", [...(catsSWR.data ?? []).filter((x) => x.id !== o.id), o]);
-      update({ category_id: o.id }); setNewCatLabel(""); setNewCatOpen(false);
-      pushToast("success", t(`เพิ่มหมวด "${o.label}" แล้ว`, `Category "${o.label}" added`));
-      void catsSWR.revalidate(true);
-    }
-    catch (e) { pushToast("error", (e as Error).message); } finally { setCatBusy(false); }
-  };
+  const openCreate = () => setModalOpen(true);
 
   // สร้างหมวดใหม่จากแถบย้าย (ไม่เลือกเข้าฟอร์ม) → คืน id
   const createCatQuick = async (): Promise<string | null> => {
@@ -272,35 +232,8 @@ export default function CampaignsPage() {
         </div>
       )}
 
-      {/* create modal */}
-      <ERPModal open={modalOpen} onClose={() => setModalOpen(false)} title={t("สร้างแคมเปญใหม่", "Create new campaign")} size="lg" hasUnsavedChanges={dirty}
-        footer={<>
-          <button onClick={() => setModalOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้างแคมเปญ", "Create campaign")}</button>
-        </>}>
-        {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
-        <ERPFormSection title={t("ข้อมูลแคมเปญ", "Campaign details")} columns={2}>
-          <ERPFormField label={t("ชื่อแคมเปญ", "Campaign name")} required span={2}><ERPInput value={form.name} onChange={(e) => update({ name: e.target.value })} placeholder={t("เช่น Shopee 7.7 / เปิดตัว Heart Bag", "e.g. Shopee 7.7 / Heart Bag launch")} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => update({ brand_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("หมวดแคมเปญ", "Category")}>
-            <div className="flex items-center gap-1.5">
-              <div className="min-w-0 flex-1"><ERPSelect value={form.category_id} options={[{ value: "", label: t("— ยังไม่จัดหมวด —", "— Uncategorized —") }, ...categories.map((c) => ({ value: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.label}` })), ...(form.category_id && !categories.some((c) => c.id === form.category_id) ? [{ value: form.category_id, label: t("(หมวดใหม่)", "(new category)") }] : [])]} onChange={(e) => update({ category_id: e.target.value })} /></div>
-              <button type="button" onClick={() => setNewCatOpen((o) => !o)} title={t("เพิ่มหมวดใหม่", "Add category")} className="h-9 shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 hover:bg-violet-100">＋ {t("หมวดใหม่", "New")}</button>
-            </div>
-            {newCatOpen && (
-              <div className="mt-1.5 flex items-center gap-1.5">
-                <input value={newCatLabel} onChange={(e) => setNewCatLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void addCategory(); } }} placeholder={t("ชื่อหมวด เช่น โปรโมชัน / เปิดตัวสินค้า", "Category name")} className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 text-sm" autoFocus />
-                <button type="button" onClick={() => void addCategory()} disabled={catBusy || !newCatLabel.trim()} className="h-9 rounded-lg bg-violet-600 px-3 text-xs font-medium text-white disabled:opacity-40">{catBusy ? "…" : t("เพิ่ม", "Add")}</button>
-              </div>
-            )}
-          </ERPFormField>
-          <ERPFormField label={t("ผู้ดูแลแคมเปญ", "Campaign owner")}><UserPicker value={form.owner} onChange={(v) => update({ owner: v })} disableCreate /></ERPFormField>
-          <ERPFormField label={t("เริ่ม", "Start")}><ERPInput type="date" value={form.start_date} onChange={(e) => update({ start_date: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("สิ้นสุด", "End")}><ERPInput type="date" value={form.end_date} onChange={(e) => update({ end_date: e.target.value })} /></ERPFormField>
-          <ERPFormField label={t("วัตถุประสงค์", "Objective")} span={2}><ERPTextarea value={form.objective} rows={2} onChange={(e) => update({ objective: e.target.value })} placeholder={t("เป้าหมายของแคมเปญ", "Campaign goal")} /></ERPFormField>
-          <ERPFormField label={t("หมายเหตุ", "Note")} span={2}><ERPTextarea value={form.note} rows={2} onChange={(e) => update({ note: e.target.value })} /></ERPFormField>
-        </ERPFormSection>
-      </ERPModal>
+      {/* create modal — ของกลาง CampaignCreateModal (ใช้ร่วมกับ Wizard สร้างงาน) */}
+      <CampaignCreateModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={() => void load()} pushToast={pushToast} />
 
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={onDelete}
         title={t("ลบแคมเปญ", "Delete campaign")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{delTarget?.name}</span> {t("ใช่ไหม? (งานในแคมเปญจะไม่ถูกลบ แต่จะไม่ผูกกับแคมเปญนี้)", "? (Tasks in this campaign will not be deleted but will be unlinked from it)")}</span>}

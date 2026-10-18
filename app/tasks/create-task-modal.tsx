@@ -20,10 +20,12 @@ import { ImageAttachKeys } from "@/components/image-attach";
 import { apiFetch } from "@/lib/api";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
+import { useAuth } from "@/components/auth";
 import {
   PRIORITY_META, priorityLabel, createTask, listTasks, listCampaigns, listBrands, listTemplates,
   type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
 } from "./data";
+import { CampaignCreateModal } from "./campaigns/campaign-create-modal";
 import { ArrangePrintEditor, specFromItems, specBasesFrom, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { ArrangePrintType } from "./data";
 
@@ -83,6 +85,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const { taskTypes, platforms } = useCreativeOptions();
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [newCampOpen, setNewCampOpen] = useState(false);   // ป๊อปสร้างแคมเปญใหม่ (ของกลาง CampaignCreateModal) — เปิดซ้อนบน Wizard
+  const { can } = useAuth();
+  const canCreateCampaign = can("tasks.create" as Parameters<typeof can>[0]);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [tplId, setTplId] = useState("");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -126,7 +131,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setNewCampOpen(false); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
   // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
   useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
@@ -277,6 +282,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   };
 
   return (
+    <>
     <ERPModal
       open={open} onClose={onClose} title={t("สร้างงานใหม่ (Wizard)","Create Task (Wizard)")} size="lg" hasUnsavedChanges={dirty}
       footer={<>
@@ -389,7 +395,13 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           <ERPFormField label={t("ประเภทงาน","Task type")} style={{ order: 0 }} className={hideCls("task_type")}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")} className={hideCls("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
           <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")} className={hideCls("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
-          {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")} className={hideCls("campaign_id")}><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></ERPFormField>}
+          {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")} className={hideCls("campaign_id")}>
+            <div className="flex items-center gap-1.5">
+              <div className="min-w-0 flex-1"><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></div>
+              {/* สร้างแคมเปญใหม่จากตรงนี้เลย (ไม่ต้องออกไปหน้าแคมเปญ) → สร้างเสร็จเลือกให้ทันที */}
+              {canCreateCampaign && <button type="button" onClick={() => setNewCampOpen(true)} title={t("สร้างแคมเปญใหม่","Create new campaign")} className="h-9 shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 hover:bg-violet-100">＋ {t("แคมเปญใหม่","New")}</button>}
+            </div>
+          </ERPFormField>}
           <ERPFormField label={t("ผู้รับผิดชอบ (เลือกได้หลายคน)","Assignee (multiple)")} span={2} style={orderStyle("assignee")} className={hideCls("assignee")}>
             <div className={wrapCls("assignee")}>
               <MultiUserPicker value={form.assignees} onChange={pickTaskAssignees} disableCreate />
@@ -565,6 +577,11 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       )}
 
     </ERPModal>
+    {/* ป๊อปสร้างแคมเปญ (ของกลาง) — แบรนด์ตั้งต้น = แบรนด์ที่เลือกในขั้นที่ 1 · สร้างเสร็จเลือกเข้าช่อง Campaign ทันที */}
+    <CampaignCreateModal open={open && newCampOpen} onClose={() => setNewCampOpen(false)} pushToast={pushToast}
+      initial={{ brand_id: form.brand_id || null }}
+      onCreated={(c) => { setCampaigns((p) => [c, ...p.filter((x) => x.id !== c.id)]); markTouched("campaign_id"); updateForm({ campaign_id: c.id }); }} />
+    </>
   );
 }
 
