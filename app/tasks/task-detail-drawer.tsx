@@ -343,7 +343,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
               {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
               <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees}
-                taskType={d.task_type} taskCreatedAt={d.created_at} parents={d.parent_skus ?? []} skus={d.skus ?? []} />
+                taskType={d.task_type} taskCreatedAt={d.created_at} parents={d.parent_skus ?? []} skus={d.skus ?? []}
+                onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }} />
 
               {/* สินค้าที่เกี่ยวข้อง (SKU m2m) */}
               {(() => {

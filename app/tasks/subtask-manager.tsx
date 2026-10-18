@@ -33,7 +33,7 @@ import { DirectEditPanel, DirectSubmitModal, useTaskChanges } from "./direct-edi
 import { DIRECT_TARGETS, isDirectTask, useProductModeCfg, type ProductModeCfg } from "./product-edit-mode";
 
 /** 🔁 ข้อมูลที่การ์ดงานย่อยต้องใช้ตัดสินว่าใช้โหมดใหม่ (แก้ที่สินค้า) ไหม + สินค้าของงาน */
-type DirectCtx = { modeCfg: ProductModeCfg | null; taskType: string | null; taskCreatedAt: string | null; parents: TaskParentRef[]; skus: TaskSkuRef[] };
+type DirectCtx = { modeCfg: ProductModeCfg | null; taskType: string | null; taskCreatedAt: string | null; parents: TaskParentRef[]; skus: TaskSkuRef[]; onAddParent?: (p: ParentSkuPickerValue) => Promise<void> };
 import { ArrangePrintEditor, itemsFromSpec, specFromItems, basesFromSpec, specBasesFrom, arrangeTotalText, arrangeSizeKey, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { AssetSize } from "@/app/api/assets/shared";
 
@@ -125,13 +125,15 @@ const isSubDone = (st: string) => st === "approved" || st === "posted" || st ===
 
 /** กล่องจัดการงานย่อยแบบครบ (โหลดเอง) — ใช้บน canvas/หน้าอื่นได้
  *  canApprove = เห็นปุ่มอนุมัติ (admin/ผจก./ผู้ตรวจ) · canManageAssignees = แก้ผู้รับผิดชอบได้ (admin/ผจก./คนสร้างงาน) */
-export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = false, canManageAssignees = false, taskType = null, taskCreatedAt = null, parents = [], skus = [] }: { taskId: string; brandId?: string | null; subCardStyle?: CSSProperties; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean;
+export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = false, canManageAssignees = false, taskType = null, taskCreatedAt = null, parents = [], skus = [], onAddParent }: { taskId: string; brandId?: string | null; subCardStyle?: CSSProperties; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean;
   /** 🔁 โหมดใหม่ (แก้ที่สินค้าในงาน) — ประเภทงาน + วันสร้าง (เทียบวันที่เปิดโหมด) + สินค้าของงาน */
-  taskType?: string | null; taskCreatedAt?: string | null; parents?: TaskParentRef[]; skus?: TaskSkuRef[] }) {
+  taskType?: string | null; taskCreatedAt?: string | null; parents?: TaskParentRef[]; skus?: TaskSkuRef[];
+  /** เลือก/สร้าง Parent SKU จากการ์ดงานย่อย → ผูกเข้างาน (หน้างานบันทึก + โหลดใหม่) */
+  onAddParent?: (p: ParentSkuPickerValue) => Promise<void> }) {
   const { user } = useAuth();
   const t = useT();
   const modeCfg = useProductModeCfg();
-  const direct: DirectCtx = { modeCfg, taskType, taskCreatedAt, parents, skus };
+  const direct: DirectCtx = { modeCfg, taskType, taskCreatedAt, parents, skus, onAddParent };
   const [subs, setSubs] = useState<CreativeSubtask[]>([]);
   const [typeMeta, setTypeMeta] = useState<TypeMeta>({});
   const [loading, setLoading] = useState(true);
@@ -780,7 +782,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
             {isDirect && (
               <>
                 <DirectEditPanel taskId={taskId} subId={sub.id} approveTarget={String(approveTarget)}
-                  parents={directCtx?.parents ?? []} skus={directCtx?.skus ?? []}
+                  parents={directCtx?.parents ?? []} skus={directCtx?.skus ?? []} onAddParent={directCtx?.onAddParent}
                   canEdit={canEditDirect} canUndo={canUndoDirect} onBeforeEdit={beforeDirectEdit}
                   changes={dChanges} error={dError} reloadChanges={reloadChanges} pushToast={pushToast} />
                 {canSubmit && (

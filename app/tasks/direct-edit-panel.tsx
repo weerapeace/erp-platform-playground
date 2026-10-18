@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
+import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -107,9 +108,11 @@ export function ChangeList({ changes, canUndo, onUndo, compact = false }: { chan
   );
 }
 
-export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, canEdit, canUndo, onBeforeEdit, changes, error, reloadChanges, pushToast }: {
+export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, canEdit, canUndo, onBeforeEdit, onAddParent, changes, error, reloadChanges, pushToast }: {
   taskId: string; subId: string; approveTarget: string;
   parents: TaskParentRef[]; skus: TaskSkuRef[];
+  /** เลือก/สร้าง Parent SKU จากการ์ด → ผูกเข้างาน (การ์ดเปิดหน้า Parent ให้ต่อทันที) · ไม่ส่ง = ไม่มีช่องเลือก */
+  onAddParent?: (p: ParentSkuPickerValue) => Promise<void>;
   /** แก้สินค้าได้ (ผู้รับผิดชอบ/ผู้ตรวจ ที่งานยังไม่ปิด) */
   canEdit: boolean;
   /** ย้อนรายการได้ (ผู้แก้เอง/ผู้ตรวจ) */
@@ -153,12 +156,29 @@ export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, c
   };
 
   const noProducts = parents.length === 0 && (!showSkus || skus.length === 0);
+  // เลือก/สร้าง Parent จากการ์ด → ผูกเข้างาน แล้วเปิดหน้า Parent ตัวนั้นทันที (ไปลากรูปลง SKU ต่อได้เลย)
+  const [adding, setAdding] = useState(false);
+  const [pickOpen, setPickOpen] = useState(false);
+  const pickParent = async (v: ParentSkuPickerValue | null) => {
+    if (!v || !onAddParent) return;
+    if (parents.some((p) => p.id === v.id)) { setPickOpen(false); void open("parent", v.id); return; }
+    setAdding(true);
+    try { await onAddParent(v); setPickOpen(false); await open("parent", v.id); }
+    catch (e) { pushToast("error", e instanceof Error ? e.message : t("ผูก Parent SKU ไม่สำเร็จ", "Couldn't link the Parent SKU")); }
+    finally { setAdding(false); }
+  };
+  const picker = onAddParent && canEdit ? (
+    <div className={`flex items-center gap-2 ${adding ? "opacity-60 pointer-events-none" : ""}`}>
+      <div className="min-w-0 flex-1"><ParentSkuPicker value={null} onChange={(v) => void pickParent(v)} placeholder={t("ค้นหา Parent SKU (รหัส / ชื่อ) หรือสร้างใหม่…", "Search a Parent SKU (code / name) or create new…")} /></div>
+      {adding && <span className="text-[11px] text-slate-400 shrink-0">{t("กำลังผูก…", "Linking…")}</span>}
+    </div>
+  ) : null;
   return (
     <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2.5">
       <p className="text-[11px] text-violet-700">🔁 {t("โหมดใหม่ — แก้ที่สินค้าได้เลย ระบบเก็บเวอร์ชันเก่าและสรุปสิ่งที่แก้ให้ผู้ตรวจ ไม่ต้องอัปโหลดซ้ำ", "New mode — edit the product directly. Old versions are kept and changes summarised for the reviewer. No re-upload needed.")}</p>
 
       {noProducts ? (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">{t("งานนี้ยังไม่ได้ผูก Parent SKU — เพิ่มที่ช่อง \"Parent SKU\" ของงานก่อน", "No Parent SKU linked yet — add one in the task's \"Parent SKU\" field first")}</p>
+        picker ?? <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">{t("งานนี้ยังไม่ได้ผูก Parent SKU — เพิ่มที่ช่อง \"Parent SKU\" ของงานก่อน", "No Parent SKU linked yet — add one in the task's \"Parent SKU\" field first")}</p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {parents.map((p) => (
@@ -176,8 +196,12 @@ export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, c
               ✏️ SKU <span className="font-mono text-slate-500">{s.code || s.name}</span>
             </button>
           ))}
+          {picker && !pickOpen && (
+            <button type="button" onClick={() => setPickOpen(true)} className="inline-flex items-center h-8 px-2.5 rounded-lg border border-dashed border-violet-300 text-xs text-violet-600 hover:bg-white">＋ {t("เพิ่ม Parent SKU", "Add Parent SKU")}</button>
+          )}
         </div>
       )}
+      {!noProducts && pickOpen && picker}
 
       <div>
         <p className="text-[11px] font-medium text-slate-500 mb-1">{t("สิ่งที่แก้ในงานนี้ (ระบบจดให้เอง)", "Changes made in this task (recorded automatically)")}</p>
