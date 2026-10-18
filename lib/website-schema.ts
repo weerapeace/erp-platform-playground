@@ -248,6 +248,8 @@ const FAQ_LAYOUTS: FieldOption[] = [
  * คู่กับช่อง crop (ส่วนที่เห็น/ซูม — cropRatio: "ratio") ได้
  */
 const LINE_FRAME_KEYS = ["rounded", "rect", "circle", "arch"];
+/** Section หมวดสินค้า: ช่องที่ใช้เฉพาะแบบ "การ์ดรูปใหญ่" */
+const TILE_ONLY: ShowIf = { key: "layout", eq: "tile" };
 const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: boolean; ratioHint?: string; autoFrame?: string }): FieldDef[] => [
   f("ratio", "สัดส่วนรูป", "select", {
     group: "layout",
@@ -1747,18 +1749,20 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         options: ["2", "3", "4", "5", "6"].map((v) => ({ v, l: `${v} คอลัมน์` })),
         showIf: { key: "layout", eq: ["icon", "tile"] },
       }),
-      f("ratio", "สัดส่วนรูป", "select", {
+      // 🖼 การ์ดรูปใหญ่: ชุดหน้าตารูปของกลาง (สัดส่วน · ทรงกรอบ · เส้นกรอบ + สี) — key ratio เดิม · ทรงเริ่ม "มุมมน" = หน้าตาเดิม
+      ...imageLookFields({ ratio: "4:5" }).map((fd) => ({
+        ...fd,
+        ...(fd.key === "frame" ? { hint: "ทรงโค้ง (วงกลม / โค้งประตู / หัวใจ) = ชื่อหมวดจัดกึ่งกลางให้เอง ไม่โดนตัดมุม" } : null),
+        showIf: fd.showIf ? [TILE_ONLY, ...(Array.isArray(fd.showIf) ? fd.showIf : [fd.showIf])] : TILE_ONLY,
+      })),
+      f("tileBg", "สีพื้นหลังการ์ด", "select", {
         group: "layout",
-        default: "4:5",
-        options: [
-          { v: "1:1", l: "จัตุรัส 1:1" },
-          { v: "4:5", l: "แนวตั้ง 4:5" },
-          { v: "3:4", l: "แนวตั้ง 3:4" },
-          { v: "4:3", l: "แนวนอน 4:3" },
-          { v: "16:9", l: "แนวนอนกว้าง 16:9" },
-        ],
-        showIf: { key: "layout", eq: "tile" },
+        default: "auto",
+        options: [{ v: "auto", l: "อัตโนมัติ (มีรูป = โปร่ง · ไม่มีรูป = สีแบรนด์จาง)" }, ...CANVAS_COLORS],
+        hint: "สีรอบรูป (เวลาย่อรูป/เห็นทั้งรูป) และการ์ดหมวดที่ไม่มีรูป — ให้ทุกการ์ดดูเป็นชุดเดียวกัน",
+        showIf: TILE_ONLY,
       }),
+      f("tileBgHex", "สีพื้นหลังการ์ด (เลือกเอง)", "color", { group: "layout", default: "", showIf: [TILE_ONLY, { key: "tileBg", eq: "custom" }] }),
       f("imgFit", "การวางรูปในการ์ด", "select", {
         group: "layout",
         default: "cover",
