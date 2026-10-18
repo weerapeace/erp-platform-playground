@@ -96,9 +96,10 @@ export function dimensionRows(r: DimensionRow, lang: "th" | "en" = "th"): Dimens
   const push = (key: string, th: string, eng: string, cm: number) => {
     if (cm) rows.push({ key, label: en ? eng : th, cm: `${cm} ${cmU}`, inch: `${cmToInch(cm)}"` });
   };
-  push("width", "กว้าง", "Width", num(r.size_length_cm));
+  // อังกฤษ = Length / Height / Width แบบเว็บแบรนด์นอก (เจ้าของเลือก 2026-10-18) · key คงเดิม (เว็บใช้ key คิดภาพเทียบขนาด/ตัวกรอง)
+  push("width", "กว้าง", "Length", num(r.size_length_cm));
   push("height", "สูง", "Height", num(r.size_height_cm));
-  push("thickness", "หนา", "Depth", num(r.size_thickness_cm));
+  push("thickness", "หนา", "Width", num(r.size_thickness_cm));
   push("handle", "ความสูงหูหิ้ว", "Handle drop", num(r.handle_drop_cm));
   const s1 = num(r.strap_drop_cm), s2 = num(r.strap_drop_max_cm);
   if (s1 && s2 && s2 > s1) {
@@ -119,4 +120,28 @@ export function productDimensions(
   const fits = fitLabels(r.fits, catalog, lang);
   const rows = dimensionRows(r, lang);
   return fits.length || rows.length ? { fits, rows } : undefined;
+}
+
+/**
+ * รวมขนาดไทย + อังกฤษเป็นก้อนเดียวตามกฎกลาง `<key>_en` (lib/content-i18n)
+ *   { fits, fits_en, rows: [{ label, label_en, cm, cm_en, inch }] }
+ * เว็บร้านหน้า /en สลับ `_en` เข้าที่เอง (localizeContent) — ไม่ต้องรู้จักก้อนนี้เป็นพิเศษ
+ * ทั้งสองภาษามาจากข้อมูลชุดเดียวกัน → จำนวนแถว/บรรทัดเท่ากันเสมอ (ไม่เท่า = ไม่ใส่อังกฤษ กันจับคู่ผิดบรรทัด)
+ */
+export type BilingualDimensions = {
+  fits: string[]; fits_en?: string[];
+  rows: (DimensionLine & { label_en?: string; cm_en?: string })[];
+};
+export function bilingualDimensions(
+  th: { fits: string[]; rows: DimensionLine[] } | undefined,
+  en: { fits: string[]; rows: DimensionLine[] } | undefined,
+): BilingualDimensions | undefined {
+  if (!th) return undefined;
+  const sameRows = !!en && en.rows.length === th.rows.length && en.rows.every((r, i) => r.key === th.rows[i].key);
+  const sameFits = !!en && en.fits.length === th.fits.length;
+  return {
+    fits: th.fits,
+    ...(sameFits && th.fits.length ? { fits_en: en!.fits } : {}),
+    rows: th.rows.map((r, i) => (sameRows ? { ...r, label_en: en!.rows[i].label, cm_en: en!.rows[i].cm } : r)),
+  };
 }

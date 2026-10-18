@@ -73,9 +73,9 @@ const imgUrl = (key: string, w = 240) => `/api/r2-image?key=${encodeURIComponent
 
 /** ช่องตัวเลขของสินค้า (คอลัมน์ size_length_cm = กว้าง ตามป้ายทุกที่) */
 const NUM_FIELDS = [
-  { k: "w", field: "size_length_cm", label: "กว้าง", en: "Width", unit: "ซม." },
+  { k: "w", field: "size_length_cm", label: "กว้าง", en: "Length", unit: "ซม." },
   { k: "h", field: "size_height_cm", label: "สูง", en: "Height", unit: "ซม." },
-  { k: "d", field: "size_thickness_cm", label: "หนา", en: "Depth", unit: "ซม." },
+  { k: "d", field: "size_thickness_cm", label: "หนา", en: "Width", unit: "ซม." },
   { k: "g", field: "weight_g", label: "น้ำหนัก", en: "Weight", unit: "กรัม" },
   { k: "hd", field: "handle_drop_cm", label: "หูหิ้ว", en: "Handle drop", unit: "ซม." },
   { k: "s1", field: "strap_drop_cm", label: "สายสะพาย", en: "Strap drop", unit: "ซม." },
