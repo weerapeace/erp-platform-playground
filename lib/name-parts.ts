@@ -4,7 +4,7 @@
  *
  * ตั้งได้ (เจ้าของขอ 2026-10-18 "เลือกได้ว่าจะมีค่าอะไรบ้าง และสลับตำแหน่งได้"):
  *   - ใช้ชิ้นไหนบ้าง: แบรนด์ / คอลเลกชัน / ชื่อสินค้า / รหัส / หมวดสินค้า / ข้อความพิมพ์เอง
- *   - เรียงลำดับ · ตัวคั่นระหว่างชิ้น
+ *   - เรียงลำดับ · ตัวคั่นระหว่างชิ้น (ตัวหลัก + ตั้งรายชิ้นได้) · ครอบชิ้นด้วยวงเล็บแบบต่าง ๆ เช่น (คอลเลกชัน) [รหัส]
  *   - ไม่ใส่ซ้ำ: ถ้า "ชื่อสินค้า" มีแบรนด์/รหัส/… อยู่แล้ว → ดึงออกจากชื่อ แล้ววางตามลำดับที่ตั้ง
  *     (ข้อมูลจริง 2026-10-18: 1,088/1,502 รุ่นมีรหัสในชื่อไทยอยู่แล้ว · สูตรเดิมต่อรหัสซ้ำ "… ONX05 ONX05")
  * เก็บที่ทะเบียนฟิลด์ relation_config.name_parts ของฟิลด์ computed (ไม่ต้องเพิ่มตาราง)
@@ -12,7 +12,9 @@
  */
 
 export type NamePartKey = "brand" | "collection" | "name" | "code" | "category" | "text";
-export type NamePart = { key: NamePartKey; text?: string; text_en?: string };
+export type NameWrap = "paren" | "square" | "lenticular" | "quote";
+/** wrap = ครอบชิ้นนี้ (ไม่มี = ธรรมดา) · before = ตัวคั่น "ก่อนชิ้นนี้" (ไม่มี = ใช้ตัวคั่นหลัก · ชิ้นแรกไม่ใช้) */
+export type NamePart = { key: NamePartKey; text?: string; text_en?: string; wrap?: NameWrap; before?: string };
 export type NamePartsConfig = { parts: NamePart[]; sep: string; dedupe: boolean };
 export type NameLang = "th" | "en";
 
@@ -29,9 +31,27 @@ export const NAME_SEPARATORS: { value: string; label: string }[] = [
   { value: " ", label: "เว้นวรรค" },
   { value: " - ", label: "ขีด ( - )" },
   { value: " | ", label: "ขีดตั้ง ( | )" },
+  { value: " / ", label: "ทับ ( / )" },
   { value: " · ", label: "จุดกลาง ( · )" },
   { value: ", ", label: "จุลภาค ( , )" },
+  { value: " : ", label: "ทวิภาค ( : )" },
+  { value: "", label: "ติดกัน (ไม่เว้น)" },
 ];
+
+/** ครอบชิ้นด้วยวงเล็บ/เครื่องหมาย */
+export const NAME_WRAPS: { value: NameWrap; label: string; open: string; close: string }[] = [
+  { value: "paren", label: "( วงเล็บ )", open: "(", close: ")" },
+  { value: "square", label: "[ วงเล็บเหลี่ยม ]", open: "[", close: "]" },
+  { value: "lenticular", label: "【 วงเล็บหนา 】", open: "【", close: "】" },
+  { value: "quote", label: "“ อัญประกาศ ”", open: "“", close: "”" },
+];
+
+/** ครอบข้อความ — ถ้าครอบด้วยแบบเดียวกันอยู่แล้วไม่ครอบซ้ำ */
+export function wrapText(text: string, wrap?: NameWrap): string {
+  const w = wrap ? NAME_WRAPS.find((x) => x.value === wrap) : undefined;
+  if (!w || !text) return text;
+  return text.startsWith(w.open) && text.endsWith(w.close) ? text : `${w.open}${text}${w.close}`;
+}
 
 /** ค่าตั้งต้น = แบบเดิม (ชื่อสินค้า + รหัส) แต่ไม่ใส่รหัสซ้ำ */
 export const DEFAULT_NAME_PARTS: NamePartsConfig = { parts: [{ key: "name" }, { key: "code" }], sep: " ", dedupe: true };
@@ -49,12 +69,18 @@ export function cleanNameParts(raw: unknown): NamePartsConfig {
     const key = (p as { key?: unknown })?.key as NamePartKey;
     if (!PART_KEYS.has(key) || seen.has(key)) continue;
     seen.add(key);
+    const wrapRaw = (p as { wrap?: unknown }).wrap;
+    const beforeRaw = (p as { before?: unknown }).before;
+    const fmt: Pick<NamePart, "wrap" | "before"> = {
+      ...(NAME_WRAPS.some((w) => w.value === wrapRaw) ? { wrap: wrapRaw as NameWrap } : {}),
+      ...(typeof beforeRaw === "string" && NAME_SEPARATORS.some((s) => s.value === beforeRaw) ? { before: beforeRaw } : {}),
+    };
     if (key === "text") {
       const text = str((p as { text?: unknown }).text).slice(0, MAX_TEXT);
       const text_en = str((p as { text_en?: unknown }).text_en).slice(0, MAX_TEXT);
       if (!text && !text_en) continue;   // ข้อความว่าง = ไม่มีชิ้นนี้
-      parts.push({ key, text, ...(text_en ? { text_en } : {}) });
-    } else parts.push({ key });
+      parts.push({ key, text, ...(text_en ? { text_en } : {}), ...fmt });
+    } else parts.push({ key, ...fmt });
   }
   if (!parts.length) return { ...DEFAULT_NAME_PARTS, parts: [...DEFAULT_NAME_PARTS.parts] };
   const sep = typeof r.sep === "string" && NAME_SEPARATORS.some((s) => s.value === r.sep) ? r.sep : DEFAULT_NAME_PARTS.sep;
@@ -111,7 +137,7 @@ export function tidyName(s: string): string {
 /** ประกอบชื่อตาม config (ไทย/อังกฤษ) */
 export function buildNameFromParts(row: Record<string, unknown>, cfg: unknown, lang: NameLang = "th"): string {
   const c = cleanNameParts(cfg);
-  const vals = c.parts.map((p) => ({ key: p.key, text: namePartText(p, row, lang) }));
+  const vals = c.parts.map((p) => ({ key: p.key, text: namePartText(p, row, lang), part: p }));
   if (c.dedupe) {
     const name = vals.find((v) => v.key === "name");
     if (name && name.text) {
@@ -121,12 +147,19 @@ export function buildNameFromParts(row: Record<string, unknown>, cfg: unknown, l
       name.text = tidyName(n);
     }
   }
-  return vals.map((v) => v.text).filter(Boolean).join(c.sep);
+  // ต่อชิ้น: ชิ้นว่างข้าม · ครอบตามที่ตั้ง · ตัวคั่นก่อนชิ้น = ของชิ้นนั้น (ถ้าตั้ง) ไม่งั้นตัวหลัก
+  let out = "";
+  for (const v of vals) {
+    if (!v.text) continue;
+    const piece = wrapText(v.text, v.part.wrap);
+    out = out ? out + (v.part.before ?? c.sep) + piece : piece;
+  }
+  return out;
 }
 
 /** สรุปเป็นภาษาคน เช่น "ชื่อสินค้า + รหัส (Code)" */
 export function describeNameParts(cfg: unknown): string {
   const c = cleanNameParts(cfg);
-  const label = (p: NamePart) => (p.key === "text" ? `“${p.text || p.text_en}”` : NAME_PART_DEFS.find((d) => d.key === p.key)?.label ?? p.key);
+  const label = (p: NamePart) => wrapText(p.key === "text" ? `“${p.text || p.text_en}”` : NAME_PART_DEFS.find((d) => d.key === p.key)?.label ?? p.key, p.wrap);
   return `${c.parts.map(label).join(" + ")}${c.dedupe ? " · ไม่ใส่ซ้ำ (ชื่อมีแบรนด์/รหัสอยู่แล้วจะดึงมาวางตามลำดับ)" : ""}`;
 }

@@ -2,6 +2,7 @@
 /**
  * ⚙ ตั้ง "ชื่อประกอบจากอะไร" (ของกลาง) — ปุ่มข้างหัวข้อฟิลด์ computed ที่ตั้งได้ (เช่น Name Platform ของ Parent SKU)
  *   ติ๊กเลือกชิ้น (แบรนด์/คอลเลกชัน/ชื่อสินค้า/รหัส/หมวด/ข้อความพิมพ์เอง) · ลาก ⠿ สลับตำแหน่ง · ตัวคั่น · ไม่ใส่ซ้ำ
+ *   รายชิ้น: ครอบด้วย ( ) [ ] 【 】 “ ” · ตัวคั่นก่อนชิ้นนั้น (ไม่ตั้ง = ตัวคั่นหลัก)
  *   ดูตัวอย่างสดจากสินค้าที่เปิดอยู่ (ไทย + อังกฤษ) ก่อนบันทึก
  * บันทึกลงทะเบียนฟิลด์ (relation_config.name_parts) ผ่าน PATCH /api/admin/field-registry-v2/[id]
  *   (สิทธิ์ admin.field_registry.edit + ประวัติใน erp_field_registry_audit) → มีผลกับทุกสินค้า ทุกคน
@@ -14,22 +15,29 @@ import { useToast } from "@/components/toast";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { apiFetch } from "@/lib/api";
 import {
-  buildNameFromParts, cleanNameParts, DEFAULT_NAME_PARTS, NAME_PART_DEFS, NAME_SEPARATORS,
-  type NamePartKey, type NamePartsConfig,
+  buildNameFromParts, cleanNameParts, DEFAULT_NAME_PARTS, NAME_PART_DEFS, NAME_SEPARATORS, NAME_WRAPS,
+  type NamePartKey, type NamePartsConfig, type NameWrap,
 } from "@/lib/name-parts";
 
 export type NamePartsFieldRef = { id: string; cfg?: Record<string, unknown> | null };
-type Row = { key: NamePartKey; on: boolean; text: string; text_en: string };
+/** wrap "" = ธรรมดา · before null = ใช้ตัวคั่นหลัก */
+type Row = { key: NamePartKey; on: boolean; text: string; text_en: string; wrap: NameWrap | ""; before: string | null };
 
 const toRows = (cfg: NamePartsConfig): Row[] => {
-  const on = cfg.parts.map((p) => ({ key: p.key, on: true, text: p.text ?? "", text_en: p.text_en ?? "" }));
-  const off = NAME_PART_DEFS.filter((d) => !cfg.parts.some((p) => p.key === d.key)).map((d) => ({ key: d.key, on: false, text: "", text_en: "" }));
+  const on = cfg.parts.map((p) => ({ key: p.key, on: true, text: p.text ?? "", text_en: p.text_en ?? "", wrap: p.wrap ?? "", before: p.before ?? null } as Row));
+  const off = NAME_PART_DEFS.filter((d) => !cfg.parts.some((p) => p.key === d.key)).map((d) => ({ key: d.key, on: false, text: "", text_en: "", wrap: "", before: null } as Row));
   return [...on, ...off];
 };
 const toCfg = (rows: Row[], sep: string, dedupe: boolean): NamePartsConfig => ({
-  parts: rows.filter((r) => r.on).map((r) => (r.key === "text" ? { key: r.key, text: r.text.trim(), ...(r.text_en.trim() ? { text_en: r.text_en.trim() } : {}) } : { key: r.key })),
+  parts: rows.filter((r) => r.on).map((r) => ({
+    key: r.key,
+    ...(r.key === "text" ? { text: r.text.trim(), ...(r.text_en.trim() ? { text_en: r.text_en.trim() } : {}) } : {}),
+    ...(r.wrap ? { wrap: r.wrap } : {}),
+    ...(r.before !== null ? { before: r.before } : {}),
+  })),
   sep, dedupe,
 });
+const MAIN_SEP = "__main";   // ค่าใน dropdown = ใช้ตัวคั่นหลัก
 
 /** ปุ่ม ⚙ เล็ก ๆ ข้างหัวข้อ → เปิดป๊อปตั้งค่า (ผู้เรียกเช็กสิทธิ์ก่อนโชว์) */
 export function NamePartsButton({ field, enField, sample, fieldLabel, onSaved }: {
@@ -121,10 +129,11 @@ function NamePartsModal({ field, enField, sample, fieldLabel, onClose, onSaved }
           <p className="mt-0.5 text-xs text-slate-500 break-words"><span className="mr-1 rounded bg-white px-1 text-[10px] font-semibold text-slate-400">EN</span>{previewEn || "—"}</p>
         </div>
 
-        {/* ชิ้นส่วน: ติ๊ก + ลากสลับ */}
+        {/* ชิ้นส่วน: ติ๊ก + ลากสลับ · ชิ้นที่ติ๊ก = เลือกครอบวงเล็บ + ตัวคั่นก่อนชิ้น */}
         <div className="space-y-1.5">
           {rows.map((r, i) => {
             const def = NAME_PART_DEFS.find((d) => d.key === r.key)!;
+            const isFirstOn = rows.findIndex((x) => x.on) === i;
             return (
               <div key={r.key} {...rowProps(i)}
                 className={`flex items-start gap-2 rounded-lg border px-2 py-1.5 ${r.on ? "border-slate-200 bg-white" : "border-dashed border-slate-200 bg-slate-50/60"} ${rowCls(i)}`}>
@@ -136,6 +145,22 @@ function NamePartsModal({ field, enField, sample, fieldLabel, onClose, onSaved }
                     <span className="block text-[11px] text-slate-400">{def.hint}</span>
                   </span>
                 </label>
+                {r.on && (
+                  <div className="flex shrink-0 flex-col gap-1">
+                    <select value={r.wrap} onChange={(e) => set(r.key, { wrap: e.target.value as NameWrap | "" })} title="ครอบชิ้นนี้ด้วยวงเล็บ/เครื่องหมาย"
+                      className="h-8 w-36 rounded-md border border-slate-200 bg-white px-1.5 text-xs text-slate-700">
+                      <option value="">ไม่ครอบ</option>
+                      {NAME_WRAPS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                    </select>
+                    {!isFirstOn && (
+                      <select value={r.before ?? MAIN_SEP} onChange={(e) => set(r.key, { before: e.target.value === MAIN_SEP ? null : e.target.value })} title="ตัวคั่นที่อยู่หน้าชิ้นนี้"
+                        className="h-8 w-36 rounded-md border border-slate-200 bg-white px-1.5 text-xs text-slate-700">
+                        <option value={MAIN_SEP}>คั่นหน้า: ตามตัวหลัก</option>
+                        {NAME_SEPARATORS.map((s) => <option key={s.label} value={s.value}>คั่นหน้า: {s.label}</option>)}
+                      </select>
+                    )}
+                  </div>
+                )}
                 {r.on && r.key === "text" && (
                   <div className="flex w-44 shrink-0 flex-col gap-1">
                     <input value={r.text} onChange={(e) => set(r.key, { text: e.target.value })} maxLength={60} placeholder="ข้อความ (ไทย)"
@@ -151,7 +176,7 @@ function NamePartsModal({ field, enField, sample, fieldLabel, onClose, onSaved }
 
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500">ตัวคั่นระหว่างชิ้น</span>
+            <span className="mb-1 block text-xs font-medium text-slate-500">ตัวคั่นหลัก (ชิ้นที่ไม่ได้ตั้ง “คั่นหน้า” เอง)</span>
             <select value={sep} onChange={(e) => setSep(e.target.value)} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
               {NAME_SEPARATORS.map((s) => <option key={s.label} value={s.value}>{s.label}</option>)}
             </select>

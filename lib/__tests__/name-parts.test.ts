@@ -40,6 +40,20 @@ describe("ชื่อประกอบ (Name Platform)", () => {
   });
 });
 
+describe("ครอบวงเล็บ + ตัวคั่นรายชิ้น", () => {
+  it("ครอบคอลเลกชันด้วย ( ) และรหัสด้วย [ ] · ตัวคั่นก่อนรหัส = ขีด", () => {
+    const cfg = { parts: [{ key: "brand" }, { key: "collection", wrap: "paren" }, { key: "name" }, { key: "code", wrap: "square", before: " - " }] };
+    expect(buildNameFromParts(ONX05, cfg)).toBe("Louis Montini (ONYX) กระเป๋าคาดอก Belt bag กระเป๋าผ้าไนล่อนผสมหนังวัวแท้ - [ONX05]");
+  });
+  it("ไม่ครอบซ้ำ ถ้าครอบอยู่แล้ว · ชิ้นแรกไม่ใส่ตัวคั่น", () => {
+    const cfg = { parts: [{ key: "code", wrap: "lenticular", before: " | " }, { key: "text", text: "(ของแท้)", wrap: "paren", before: "" }] };
+    expect(buildNameFromParts(ONX05, cfg)).toBe("【ONX05】(ของแท้)");
+  });
+  it("ค่าแปลกทิ้ง (wrap/before ที่ไม่รู้จัก)", () => {
+    expect(cleanNameParts({ parts: [{ key: "code", wrap: "x", before: "<b>" }] })).toEqual({ parts: [{ key: "code" }], sep: " ", dedupe: true });
+  });
+});
+
 describe("ล้างค่าตั้ง", () => {
   it("ชิ้นซ้ำ/ไม่รู้จัก/ข้อความว่าง ทิ้ง · ตัวคั่นแปลก = เว้นวรรค · ว่าง = ค่าตั้งต้น", () => {
     expect(cleanNameParts({ parts: [{ key: "code" }, { key: "code" }, { key: "x" }, { key: "text", text: "  " }], sep: "<b>" }))

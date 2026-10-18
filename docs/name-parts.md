@@ -8,6 +8,7 @@
 1. เปิดสินค้า (Parent SKU) → หัวข้อ **Name Platform** → กด **⚙** ข้าง TH/EN
 2. ติ๊กสิ่งที่จะอยู่ในชื่อ: แบรนด์ · คอลเลกชัน · ชื่อสินค้า · รหัส (Code) · หมวดสินค้า · ข้อความพิมพ์เอง
 3. ลาก **⠿** สลับตำแหน่ง · เลือกตัวคั่น · ดูตัวอย่างสดของสินค้าที่เปิดอยู่ (ไทย + อังกฤษ)
+   - รายชิ้น: **ครอบ** ด้วย ( ) [ ] 【 】 “ ” · **คั่นหน้า** ชิ้นนั้นด้วยตัวคั่นต่างจากตัวหลักได้ (เช่น ชื่อ - [รหัส])
 4. บันทึก → มีผลกับ **ทุกสินค้า** ทั้งช่องไทยและอังกฤษ
 
 **ไม่ใส่ซ้ำ** (เปิดไว้เป็นค่าตั้งต้น): ถ้าชื่อสินค้ามีแบรนด์/รหัส/คอลเลกชันอยู่แล้ว ระบบดึงคำนั้นออกจากชื่อ แล้ววางตามลำดับที่ตั้ง
@@ -16,7 +17,7 @@
 ## ข้อมูล / โค้ด
 - กฎ (pure + เทสต์): `lib/name-parts.ts` · `lib/__tests__/name-parts.test.ts`
 - สูตร computed ที่ตั้งได้: `lib/computed-text.ts` (`configurable: "name_parts"`) — `name_platform_code` (ไทย) · `name_platform_code_en` (อังกฤษ)
-- ค่าที่ตั้ง: ทะเบียนฟิลด์ `erp_module_fields.relation_config.name_parts` = `{ parts: [{key, text?, text_en?}], sep, dedupe }` (ไม่มีตารางใหม่)
+- ค่าที่ตั้ง: ทะเบียนฟิลด์ `erp_module_fields.relation_config.name_parts` = `{ parts: [{key, text?, text_en?, wrap?, before?}], sep, dedupe }` (wrap = paren|square|lenticular|quote · before = ตัวคั่นหน้าชิ้น) (ไม่มีตารางใหม่)
 - ป๊อปตั้งค่า: `components/name-parts-editor` (`NamePartsButton`) · โชว์ใน MasterCRUD ข้างหัวข้อฟิลด์ computed ที่ตั้งได้
 - ชิ้น "ชื่อสินค้า": ไทย = Name Platform ที่พิมพ์ไว้ (ถ้ามี) > Name Th · อังกฤษ = Name En > ฝั่งไทย
 
