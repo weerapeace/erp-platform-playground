@@ -14,7 +14,7 @@
  * ของกลาง: AssetPicker · MediaUploadField · PersonalizeEditor · ProductBannersEditor · footer-save (ปุ่มบันทึกแถบล่าง) · ColorSwatchButton
  * API: /api/parent-web-listings (guardApi products.edit + audit + ล้างแคชเว็บร้าน · ฟิลด์ชุดเดียวกับ lib/website-listing-patch)
  */
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { AssetPicker } from "@/components/asset-picker";
@@ -30,6 +30,7 @@ import { MediaUploadField, type MediaValue } from "@/components/media-upload-fie
 import { NAME_RULE_EXCLUSIVE, type NameRuleFlag } from "@/lib/website-field-map";
 import { uploadResizedImage } from "@/components/image-attach";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
+import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { useFooterSave } from "@/components/footer-save";
 import { CopyButton } from "@/components/copy-button";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
@@ -614,21 +615,12 @@ export function ParentWebListings({
           </div>
         </div>
         {s.webImages.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {s.webImages.map((k, i) => (
-              <div key={`${k}-${i}`} className="relative group">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={keyUrl(k)} alt="" className={`w-14 h-14 object-cover rounded-lg border ${i === 0 ? "border-orange-400 ring-1 ring-orange-300" : "border-slate-200"}`} />
-                {i === 0 && <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-orange-500 text-white rounded px-1">ปก</span>}
-                <button
-                  onClick={() => patchShop(s.shopId, { webImages: s.webImages.filter((_, j) => j !== i) })}
-                  className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 text-[10px] leading-none opacity-0 group-hover:opacity-100"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
+          <SortableThumbs
+            keys={s.webImages}
+            onChange={(next) => patchShop(s.shopId, { webImages: next })}
+            size="w-14 h-14"
+            badge={(i) => (i === 0 ? <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-orange-500 text-white rounded px-1">ปก</span> : null)}
+          />
         )}
       </div>
 
@@ -636,7 +628,7 @@ export function ParentWebListings({
       {data.variants.length > 0 && (
         <div>
           <div className="text-xs font-medium text-slate-600 mb-1.5">
-            ตัวเลือก (สี) — {data.variants.length} แบบ · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย
+            ตัวเลือก (สี) — {data.variants.length} แบบ · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง
           </div>
           {(() => {
             const all = colorLabels();
@@ -732,47 +724,13 @@ export function ParentWebListings({
 
                   {/* รูปเว็บที่เลือกไว้ของสีนี้ (เรียงตามลำดับที่จะโชว์) */}
                   {chosen.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pl-12">
-                      {chosen.map((k, i) => (
-                        <div key={`${k}-${i}`} className="relative group">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={keyUrl(k)} alt="" className={`w-12 h-12 object-cover rounded-lg border ${i === 0 ? "border-orange-400 ring-1 ring-orange-300" : "border-slate-200"}`} />
-                          <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-slate-700 text-white rounded px-1">{i + 1}</span>
-                          {i > 0 && (
-                            <button
-                              title="เลื่อนไปซ้าย"
-                              onClick={() => {
-                                const n = [...chosen];
-                                [n[i - 1], n[i]] = [n[i], n[i - 1]];
-                                setSkuImages(s, v.id, n);
-                              }}
-                              className="absolute bottom-0 left-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100"
-                            >
-                              ‹
-                            </button>
-                          )}
-                          {i < chosen.length - 1 && (
-                            <button
-                              title="เลื่อนไปขวา"
-                              onClick={() => {
-                                const n = [...chosen];
-                                [n[i + 1], n[i]] = [n[i], n[i + 1]];
-                                setSkuImages(s, v.id, n);
-                              }}
-                              className="absolute bottom-0 right-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100"
-                            >
-                              ›
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setSkuImages(s, v.id, chosen.filter((_, j) => j !== i))}
-                            className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 text-[10px] leading-none opacity-0 group-hover:opacity-100"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                    <SortableThumbs
+                      className="pl-12"
+                      keys={chosen}
+                      onChange={(next) => setSkuImages(s, v.id, next)}
+                      size="w-12 h-12"
+                      badge={(i) => <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-slate-700 text-white rounded px-1">{i + 1}</span>}
+                    />
                   )}
 
                   {/* 🎬 แผง Hero ของสีนี้ — คอม 16:9 · มือถือ 4:5 (ว่าง = ใช้ของคอม) · รูปหรือวิดีโอ */}
@@ -1287,5 +1245,46 @@ function LinkedPanel({ rows, onOpenParent }: { rows: LinkedRow[]; onOpenParent?:
         <span>สีฟ้า = พิมพ์ทับบนเว็บ · สีส้ม = ไม่มีแหล่งข้อมูล · เปลี่ยนแหล่งข้อมูลได้ที่ เว็บไซต์ → ⚙️ จับคู่ฟิลด์ / 🎨 ดีไซน์ → หน้าสินค้า</span>
       </div>
     </details>
+  );
+}
+
+/**
+ * แถวรูปย่อ — กดค้างที่รูปแล้วลากไปวางบนรูปอื่น = สลับตำแหน่ง (ของกลาง useDragReorder · เมาส์/นิ้วได้)
+ * + ‹ › เลื่อนทีละช่อง · ✕ เอาออก · รูปแรก = กรอบส้ม (รูปที่โชว์ก่อน)
+ */
+function SortableThumbs({ keys, onChange, size, badge, className = "" }: { keys: string[]; onChange: (next: string[]) => void; size: string; badge: (i: number) => ReactNode; className?: string }) {
+  const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => onChange(moveItem(keys, from, to)));
+  // ปุ่มบนรูปไม่เริ่มลาก (คลิกได้ตามปกติ)
+  const noDrag = { onPointerDown: (e: ReactPointerEvent) => e.stopPropagation() };
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${className}`}>
+      {keys.map((k, i) => (
+        <div
+          key={`${k}-${i}`}
+          {...rowProps(i)}
+          {...handleProps(i)}
+          onDragStart={(e) => e.preventDefault()}
+          title="กดค้างแล้วลากไปวางบนรูปอื่น เพื่อสลับตำแหน่ง"
+          className={`relative group rounded-lg cursor-grab active:cursor-grabbing select-none ${rowCls(i)}`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={keyUrl(k)} alt="" draggable={false} className={`${size} object-cover rounded-lg border ${i === 0 ? "border-orange-400 ring-1 ring-orange-300" : "border-slate-200"}`} />
+          {badge(i)}
+          {i > 0 && (
+            <button type="button" {...noDrag} title="เลื่อนไปซ้าย" onClick={() => onChange(moveItem(keys, i, i - 1))} className="absolute bottom-0 left-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">
+              ‹
+            </button>
+          )}
+          {i < keys.length - 1 && (
+            <button type="button" {...noDrag} title="เลื่อนไปขวา" onClick={() => onChange(moveItem(keys, i, i + 1))} className="absolute bottom-0 right-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">
+              ›
+            </button>
+          )}
+          <button type="button" {...noDrag} title="เอาออก" onClick={() => onChange(keys.filter((_, j) => j !== i))} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 text-[10px] leading-none opacity-0 group-hover:opacity-100">
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
