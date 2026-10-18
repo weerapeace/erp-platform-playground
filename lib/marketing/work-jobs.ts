@@ -5,7 +5,7 @@
  * แนวคิด: "งาน" 1 งาน = หลายรุ่น (Parent SKU) + ขั้นตอนชุดเดียวกัน (เช็กลิสต์) ติ๊กแยกทีละรุ่น
  *   - งาน Clearance: ใส่ส่วนลดต่อรุ่น (฿ หรือ %) → ราคาใหม่ "เก็บในงาน" ไม่แก้ราคาใน ERP
  *   - ใส่รุ่นเข้างาน → ติดป้ายหลักให้อัตโนมัติได้ (auto_label_id เช่น Clearance Products)
- *   - ผู้รับผิดชอบ + วันครบกำหนด อยู่ระดับงาน
+ *   - ผู้รับผิดชอบ (หลายคนได้) + วันครบกำหนด อยู่ระดับงาน
  * ตาราง: marketing_work_jobs · marketing_work_job_items
  */
 
@@ -14,6 +14,8 @@ export type WorkJobStatus = "open" | "done" | "archived";
 export type DiscountUnit = "baht" | "percent";
 export type WorkStep = { key: string; label: string };
 export type StepDone = Record<string, { at: string; by: string | null }>;
+/** ผู้รับผิดชอบงาน (ชื่อเก็บไว้ด้วย → โชว์ได้แม้คนนั้นปิดบัญชีภายหลัง) */
+export type JobAssignee = { id: string; name: string };
 
 export type WorkJob = {
   id: string;
@@ -21,6 +23,8 @@ export type WorkJob = {
   kind: WorkJobKind;
   steps: WorkStep[];
   auto_label_id: string | null;
+  /** ผู้รับผิดชอบหลายคน (ตัวจริง) — assignee_id/assignee_name = คนแรก เก็บไว้ให้ของเก่าอ่านได้ */
+  assignees: JobAssignee[];
   assignee_id: string | null;
   assignee_name: string | null;
   due_date: string | null;         // YYYY-MM-DD
@@ -66,6 +70,33 @@ export const isJobKind = (v: unknown): v is WorkJobKind => v === "clearance" || 
 export const MAX_STEPS = 20;
 export const MAX_STEP_LABEL = 60;
 export const MAX_JOB_NAME = 120;
+export const MAX_ASSIGNEES = 20;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** ล้างรายชื่อผู้รับผิดชอบที่ส่งมา: เฉพาะ id ที่เป็น uuid · ไม่ซ้ำ · ชื่อไม่เกิน 120 ตัว · ไม่เกิน MAX_ASSIGNEES คน */
+export function cleanAssignees(raw: unknown): JobAssignee[] {
+  if (!Array.isArray(raw)) return [];
+  const out: JobAssignee[] = [];
+  for (const r of raw) {
+    const id = String((r as { id?: unknown })?.id ?? "").trim();
+    if (!UUID_RE.test(id) || out.some((x) => x.id === id)) continue;
+    out.push({ id, name: String((r as { name?: unknown })?.name ?? "").trim().slice(0, 120) });
+    if (out.length >= MAX_ASSIGNEES) break;
+  }
+  return out;
+}
+
+/** อ่านผู้รับผิดชอบจากแถวในฐานข้อมูล — งานเก่า (ก่อนมีหลายคน) ใช้ assignee_id/assignee_name เดิม */
+export function assigneesOf(r: { assignees?: unknown; assignee_id?: unknown; assignee_name?: unknown }): JobAssignee[] {
+  const list = cleanAssignees(r.assignees);
+  if (list.length) return list;
+  const id = typeof r.assignee_id === "string" ? r.assignee_id : "";
+  return UUID_RE.test(id) ? [{ id, name: String(r.assignee_name ?? "").trim() }] : [];
+}
+
+/** ชื่อผู้รับผิดชอบสำหรับโชว์ เช่น "Mint, Toey" */
+export const assigneeNames = (list: JobAssignee[]) => list.map((a) => a.name || "?").join(", ");
 const STEP_KEY = /^[a-z0-9_-]{1,24}$/i;
 
 /** คีย์ขั้นตอนถัดไป (s1, s2, …) — คีย์ไม่เปลี่ยนตอนแก้ชื่อ/ย้ายลำดับ → ที่ติ๊กไว้ไม่หาย */

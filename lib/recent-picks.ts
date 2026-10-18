@@ -95,6 +95,22 @@ export function toggleFav<V extends WithId>(key: string, v: V, limit = FAV_LIMIT
   } catch { return loadFav<V>(key); }
 }
 
+/**
+ * เก็บไว้เฉพาะตัวที่ยังใช้ได้ ทั้ง "เคยใช้ล่าสุด" และ "ปักหมุด" (เช่น ตัดคนที่ลาออก/ปิดบัญชีแล้ว)
+ * fresh = รายการที่เซิร์ฟเวอร์ยืนยันว่ายังใช้ได้ (ข้อมูลล่าสุด → ชื่อที่เปลี่ยนก็อัปเดตตาม) · เขียนกลับลงเครื่องด้วย
+ */
+export function keepOnlyPicks<V extends WithId>(key: string, fresh: V[]): { recent: V[]; favs: V[] } {
+  const byId = new Map(fresh.filter((v) => v?.id).map((v) => [v.id, v]));
+  const fix = (list: V[]) => list.filter((x) => x?.id && byId.has(x.id)).map((x) => ({ ...x, ...byId.get(x.id)! }));
+  const recent = fix(loadRecent<V>(key));
+  const favs = fix(loadFav<V>(key));
+  try {
+    localStorage.setItem(key, JSON.stringify(recent));
+    localStorage.setItem(favKey(key), JSON.stringify(favs));
+  } catch { /* ignore */ }
+  return { recent, favs };
+}
+
 // ---- hook พร้อมใช้ ----
 
 /**

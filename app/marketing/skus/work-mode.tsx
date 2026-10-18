@@ -21,7 +21,7 @@ import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import {
-  discountProblem, dueState, fmtBaht, itemProgress, jobProgress, kindInfo, newPriceRange, shortThaiDate,
+  assigneeNames, discountProblem, dueState, fmtBaht, itemProgress, jobProgress, kindInfo, newPriceRange, shortThaiDate,
   type DiscountUnit, type WorkJob, type WorkJobItem,
 } from "@/lib/marketing/work-jobs";
 import { LabelBadge } from "./label-manager";
@@ -383,7 +383,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                   <span>{kindInfo(job.kind).label}</span>
-                  <span>👤 {job.assignee_name || <span className="text-slate-400">ยังไม่มีผู้รับผิดชอบ</span>}</span>
+                  <span>👤 {job.assignees?.length ? assigneeNames(job.assignees) : <span className="text-slate-400">ยังไม่มีผู้รับผิดชอบ</span>}</span>
                   {job.due_date ? (() => {
                     const ds = job.status === "open" ? dueState(job.due_date) : null;
                     return <span className={ds ? DUE_STYLE[ds] : ""}>📅 ครบกำหนด {shortThaiDate(job.due_date)}{ds && DUE_TEXT[ds] ? ` · ${DUE_TEXT[ds]}` : ""}</span>;

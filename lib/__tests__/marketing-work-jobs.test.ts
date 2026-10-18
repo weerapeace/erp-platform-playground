@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  assigneeNames, assigneesOf, cleanAssignees, MAX_ASSIGNEES,
   cleanSteps, discountProblem, discountedPrice, dueState, itemProgress, jobProgress, newPriceRange,
   nextStepKey, snapshotBasePrice, stepsFromLabels, kindInfo, shortThaiDate,
 } from "@/lib/marketing/work-jobs";
@@ -69,5 +70,28 @@ describe("วันครบกำหนด", () => {
   it("วันที่ไทยสั้น", () => {
     expect(shortThaiDate("2026-10-31")).toBe("31 ต.ค.");
     expect(shortThaiDate(null)).toBe("");
+  });
+});
+
+describe("ผู้รับผิดชอบหลายคน", () => {
+  const A = "a3b45ef9-cf7f-4fc2-a637-903c2f12e19e";
+  const B = "44947ba2-46e3-47d9-8751-f532bd3ca5cb";
+  it("ล้างค่าที่ส่งมา: id ต้องเป็น uuid · ไม่ซ้ำ · ชื่อตัดช่องว่าง", () => {
+    expect(cleanAssignees([{ id: A, name: " Khin " }, { id: A, name: "ซ้ำ" }, { id: "nut", name: "x" }, { id: B, name: "Mint" }]))
+      .toEqual([{ id: A, name: "Khin" }, { id: B, name: "Mint" }]);
+    expect(cleanAssignees(null)).toEqual([]);
+    expect(cleanAssignees("x")).toEqual([]);
+  });
+  it("จำกัดจำนวนคน", () => {
+    const many = Array.from({ length: MAX_ASSIGNEES + 5 }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, name: String(i) }));
+    expect(cleanAssignees(many)).toHaveLength(MAX_ASSIGNEES);
+  });
+  it("งานเก่า (คนเดียว) อ่านเป็นรายการได้ · มีรายการใหม่แล้วใช้รายการใหม่", () => {
+    expect(assigneesOf({ assignees: [], assignee_id: A, assignee_name: "Khin" })).toEqual([{ id: A, name: "Khin" }]);
+    expect(assigneesOf({ assignees: [{ id: B, name: "Mint" }, { id: A, name: "Khin" }], assignee_id: B })).toHaveLength(2);
+    expect(assigneesOf({ assignees: null, assignee_id: null })).toEqual([]);
+  });
+  it("ชื่อสำหรับโชว์", () => {
+    expect(assigneeNames([{ id: A, name: "Khin" }, { id: B, name: "Mint" }])).toBe("Khin, Mint");
   });
 });

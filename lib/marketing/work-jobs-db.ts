@@ -7,13 +7,13 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import {
-  jobProgress, round2, snapshotBasePrice,
+  assigneesOf, jobProgress, round2, snapshotBasePrice,
   type DiscountUnit, type StepDone, type WorkJob, type WorkJobItem, type WorkStep,
 } from "@/lib/marketing/work-jobs";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at";
+export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignees, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at";
 const ITEM_COLS = "id, job_id, parent_sku_id, base_price_min, base_price_max, discount_value, discount_unit, step_done, note, sort_order";
 const CHUNK = 200;
 
@@ -34,6 +34,7 @@ export function toJob(r: Record<string, unknown>): WorkJob {
     id: String(r.id), name: String(r.name ?? ""), kind: (r.kind as WorkJob["kind"]) ?? "custom",
     steps: Array.isArray(r.steps) ? (r.steps as WorkStep[]) : [],
     auto_label_id: (r.auto_label_id as string | null) ?? null,
+    assignees: assigneesOf(r),
     assignee_id: (r.assignee_id as string | null) ?? null, assignee_name: (r.assignee_name as string | null) ?? null,
     due_date: (r.due_date as string | null) ?? null, status: (r.status as WorkJob["status"]) ?? "open",
     note: (r.note as string | null) ?? null, created_by_name: (r.created_by_name as string | null) ?? null,

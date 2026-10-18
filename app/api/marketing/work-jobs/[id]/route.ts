@@ -3,7 +3,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { isUuid } from "@/lib/marketing/sku-list";
-import { cleanSteps, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
+import { assigneesOf, cleanAssignees, cleanSteps, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
 import { actorOf, JOB_COLS, loadJob, loadJobItems, toJob } from "@/lib/marketing/work-jobs-db";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   return NextResponse.json({ data: { job, items: r.items }, error: null });
 }
 
-// PATCH { name?, steps?, auto_label_id?, assignee_id?, assignee_name?, due_date?, status?, note? } → แก้หัวงาน
+// PATCH { name?, steps?, auto_label_id?, assignees?: [{id,name}], due_date?, status?, note? } → แก้หัวงาน (ยังรับ assignee_id แบบเดิมได้)
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   const denied = await guardApi(request, "marketing.sku.manage");
   if (denied) return denied;
@@ -45,10 +45,13 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     if (b.auto_label_id && !isUuid(b.auto_label_id)) return NextResponse.json({ data: null, error: "ป้ายไม่ถูกต้อง" }, { status: 400 });
     patch.auto_label_id = b.auto_label_id || null;
   }
-  if ("assignee_id" in b) {
-    if (b.assignee_id && !isUuid(b.assignee_id)) return NextResponse.json({ data: null, error: "ผู้รับผิดชอบไม่ถูกต้อง" }, { status: 400 });
-    patch.assignee_id = b.assignee_id || null;
-    patch.assignee_name = b.assignee_id ? String(b.assignee_name ?? "").trim().slice(0, 120) || null : null;
+  if ("assignees" in b || "assignee_id" in b) {
+    if (!("assignees" in b) && b.assignee_id && !isUuid(b.assignee_id)) return NextResponse.json({ data: null, error: "ผู้รับผิดชอบไม่ถูกต้อง" }, { status: 400 });
+    // ผู้รับผิดชอบหลายคน · คนแรก = assignee_id/assignee_name (ของเก่าอ่านได้)
+    const list = "assignees" in b ? cleanAssignees(b.assignees) : assigneesOf({ assignee_id: b.assignee_id, assignee_name: b.assignee_name });
+    patch.assignees = list;
+    patch.assignee_id = list[0]?.id ?? null;
+    patch.assignee_name = list[0]?.name || null;
   }
   if ("due_date" in b) {
     const due = b.due_date ? String(b.due_date) : null;

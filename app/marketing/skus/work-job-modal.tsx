@@ -3,12 +3,13 @@
 /**
  * ป๊อปสร้าง/แก้ "งาน" ของโหมดทำงาน (หน้า SKU การตลาด)
  *   ประเภทงาน (Clearance / ลงเว็บไซต์ / อื่น ๆ) → ได้ขั้นตอนตั้งต้นของแบบงาน แก้/เพิ่ม/ลบได้
- *   ผู้รับผิดชอบ + วันครบกำหนด (ระดับงาน) · ติดป้ายหลักอัตโนมัติตอนใส่รุ่น (Clearance = Clearance Products)
- * ของกลางที่ใช้: ERPModal · UserPicker · DateInput · SearchableSelect
+ *   ผู้รับผิดชอบ (หลายคน/ทั้งทีม) + วันครบกำหนด (ระดับงาน) · ติดป้ายหลักอัตโนมัติตอนใส่รุ่น (Clearance = Clearance Products)
+ * ของกลางที่ใช้: ERPModal · MultiUserPicker (ตัวเดียวกับงาน Creative) · DateInput · SearchableSelect
  */
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
-import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
+import type { UserPickerValue } from "@/components/pickers/master";
+import { MultiUserPicker } from "@/app/tasks/multi-user-picker";
 import { DateInput } from "@/components/date-input";
 import { SearchableSelect } from "@/components/searchable-select";
 import { apiFetch } from "@/lib/api";
@@ -27,7 +28,7 @@ const suggestName = (k: WorkJobKind) => {
 };
 
 type Form = {
-  kind: WorkJobKind; name: string; steps: WorkStep[]; assignee: UserPickerValue | null;
+  kind: WorkJobKind; name: string; steps: WorkStep[]; assignees: UserPickerValue[];
   due_date: string; auto_label_id: string; note: string;
 };
 
@@ -48,11 +49,11 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
   };
   const initial = (): Form => job ? {
     kind: job.kind, name: job.name, steps: job.steps,
-    assignee: job.assignee_id ? { id: job.assignee_id, code: null, name: job.assignee_name ?? "" } : null,
+    assignees: (job.assignees ?? []).map((a) => ({ id: a.id, code: null, name: a.name })),
     due_date: job.due_date ?? "", auto_label_id: job.auto_label_id ?? "", note: job.note ?? "",
   } : {
     kind: "clearance", name: suggestName("clearance"), steps: stepsFromLabels(kindInfo("clearance").steps),
-    assignee: null, due_date: "", auto_label_id: defaultLabel("clearance"), note: "",
+    assignees: [], due_date: "", auto_label_id: defaultLabel("clearance"), note: "",
   };
   const [form, setForm] = useState<Form>(initial);
   const [orig, setOrig] = useState<string>("");
@@ -100,7 +101,7 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
     if (steps.length === 0) { setErr("ใส่ขั้นตอนอย่างน้อย 1 ขั้น (เช่น ทำรูป / แก้ราคา Lazada)"); return; }
     const body = {
       name, steps, kind: form.kind,
-      assignee_id: form.assignee?.id ?? null, assignee_name: form.assignee?.name ?? null,
+      assignees: form.assignees.map((u) => ({ id: u.id, name: u.name })),
       due_date: form.due_date || null, auto_label_id: form.auto_label_id || null, note: form.note,
       ...(job ? {} : { parent_sku_ids: presetIds ?? [] }),
     };
@@ -158,9 +159,9 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <div className={rowLabel}>ผู้รับผิดชอบ</div>
-            <UserPicker value={form.assignee} onChange={(v) => set("assignee", v)} placeholder="เลือกคนรับผิดชอบ…" />
+          <div className="sm:col-span-2">
+            <div className={rowLabel}>ผู้รับผิดชอบ (เลือกได้หลายคน)</div>
+            <MultiUserPicker value={form.assignees} onChange={(v) => set("assignees", v)} disableCreate />
           </div>
           <div>
             <div className={rowLabel}>วันครบกำหนด</div>

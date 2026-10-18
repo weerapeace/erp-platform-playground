@@ -13,7 +13,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAuth, type Permission } from "@/components/auth";
 import { FloatingDropdown, PICKER_PANEL, PICKER_NAME_CLASS } from "@/components/floating-dropdown";
-import { loadRecent, pushRecent, loadFav, toggleFav } from "@/lib/recent-picks";   // "เคยใช้ล่าสุด" + ปักหมุด (ของกลาง)
+import { loadRecent, pushRecent, loadFav, toggleFav, keepOnlyPicks } from "@/lib/recent-picks";   // "เคยใช้ล่าสุด" + ปักหมุด (ของกลาง)
 
 // ---- Shared types ----
 
@@ -41,6 +41,11 @@ export type MasterPickerConfig<V extends MasterValue> = {
   secondaryRender?: SecondaryRender<V>;
   /** badge หรือ chip ข้างชื่อในแถวรายการ */
   badgeRender?:    SecondaryRender<V>;
+  /**
+   * ตรวจ "เคยใช้ล่าสุด / ปักหมุด" (จำไว้ในเครื่อง) กับเซิร์ฟเวอร์ทุกครั้งที่เปิด → ตัดตัวที่ปิดใช้งาน/ลบไปแล้วออก (เช่น คนลาออก)
+   * endpoint ต้องรองรับ `?ids=a,b,c` แล้วคืนเฉพาะตัวที่ยังใช้ได้
+   */
+  verifyRecent?:   boolean;
 };
 
 // ---- Icons ----
@@ -86,7 +91,23 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
     // outside-click จัดการโดย FloatingDropdown (รวม dropdown ที่อยู่ใน portal ด้วย)
 
     useEffect(() => {
-      if (open) { setRecent(loadRecent<V>(cfg.storageKey)); setFavs(loadFav<V>(cfg.storageKey)); }
+      if (!open) return;
+      const r = loadRecent<V>(cfg.storageKey), f = loadFav<V>(cfg.storageKey);
+      const ids = [...new Set([...r, ...f].map((v) => v?.id).filter(Boolean))];
+      if (!cfg.verifyRecent || !ids.length) { setRecent(r); setFavs(f); return; }
+      // ตรวจกับเซิร์ฟเวอร์ก่อนโชว์ — ตัวที่ปิดใช้งานแล้วไม่โผล่ (ตรวจไม่ได้ = โชว์ตามที่จำไว้)
+      let alive = true;
+      const endpoint = cfg.listEndpoint ?? `/api/master/${cfg.apiPath}`;
+      apiFetch(`${endpoint}?ids=${encodeURIComponent(ids.join(","))}`)
+        .then(async (res) => {
+          const json = await res.json();
+          if (!res.ok || json.error || !Array.isArray(json.data)) throw new Error("verify failed");
+          if (!alive) return;
+          const kept = keepOnlyPicks<V>(cfg.storageKey, json.data as V[]);
+          setRecent(kept.recent); setFavs(kept.favs);
+        })
+        .catch(() => { if (alive) { setRecent(r); setFavs(f); } });
+      return () => { alive = false; };
     }, [open]);
 
     const onToggleFav = useCallback((e: React.MouseEvent, v: V) => {
@@ -292,6 +313,7 @@ export const UserPicker = createMasterPicker<UserPickerValue>({
   searchPlaceholder: "ค้นหา ชื่อ / อีเมล...",
   createPermission: "employees.view",
   allowCreate: false,
+  verifyRecent: true,   // คนที่ปิดบัญชี/ลาออกแล้ว ไม่โผล่ใน "เคยใช้ล่าสุด/ปักหมุด"
   secondaryRender: v => v.email ? <span>{v.email}{v.role ? <span> · {v.role}</span> : null}</span> : null,
 });
 
