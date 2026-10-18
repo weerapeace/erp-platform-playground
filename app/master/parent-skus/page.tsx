@@ -15,6 +15,7 @@
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { parentSkuExtraTabs } from "@/components/master-crud/parent-sku-extra-tabs";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 
@@ -49,14 +50,6 @@ const ParentCompartmentsField = dynamic(
 );
 const ParentDescriptionImages = dynamic(
   () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
-  { ssr: false },
-);
-const ParentWebListings = dynamic(
-  () => import("@/components/parent-web-listings").then((m) => m.ParentWebListings),
-  { ssr: false },
-);
-const Parent360Overview = dynamic(
-  () => import("@/components/parent-360-overview").then((m) => m.Parent360Overview),
   { ssr: false },
 );
 
@@ -187,10 +180,8 @@ export default function ParentSKUsV2Page() {
       <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
     ),
     // แท็บ "📊 ภาพรวม" + "🛍 เว็บไซต์"
-    extraTabs: [
-      { key: "overview", label: "ภาพรวม", icon: "📊", render: ({ recordId }) => <Parent360Overview parentId={recordId} /> },
-      { key: "web", label: "เว็บไซต์", icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
-    ],
+    // แท็บพิเศษชุดกลาง (ภาพรวม/เว็บไซต์/แพลตฟอร์ม/ปัญหา) — ชุดเดียวกับ drawer ที่เปิดจากที่อื่น · เรียง/ซ่อนได้ในตัวออกแบบหน้า
+    extraTabs: parentSkuExtraTabs(),
   }), [actor]);
   return (
     <>

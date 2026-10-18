@@ -59,7 +59,13 @@ export type FormField = {
 
 // กลุ่ม B: layout ฟอร์ม (Tab -> Section -> columns) เก็บใน erp_modules.config.layout
 export type FormLayoutSection = { key: string; label: string; columns: number };
-export type FormLayoutTab = { key: string; label: string; icon?: string; sections: FormLayoutSection[] };
+export type FormLayoutTab = {
+  key: string; label: string; icon?: string; sections: FormLayoutSection[];
+  /** แท็บพิเศษจากโค้ด (config.extraTabs) — key = "x:<key ของแท็บพิเศษ>" · sections ว่าง · ใช้จำ "ตำแหน่ง" ที่ตั้งในตัวออกแบบหน้า */
+  extra?: boolean;
+  /** แท็บพิเศษที่ซ่อนไว้ (ไม่โชว์ในหน้าจริง) */
+  hidden?: boolean;
+};
 export type FormLayout = { tabs: FormLayoutTab[] } | null;
 
 export type FieldRegistryV2Response = {

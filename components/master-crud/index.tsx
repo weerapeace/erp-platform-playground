@@ -38,6 +38,7 @@ import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
+import { parentSkuExtraTabs } from "./parent-sku-extra-tabs";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import { formatAmount, currencyLabel } from "@/lib/money";
@@ -51,12 +52,9 @@ import { CodeCheckMessages, useCodeCheck } from "@/components/code-check-hint";
 import { CODE_RULE_MODULES } from "@/lib/code-rules";
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
-const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 // 🕘 ประวัติเวอร์ชันของสินค้า (Parent/SKU) — ดู/เทียบ/ย้อนกลับ (ของกลาง components/record-versions · lib/record-versions)
 const RecordVersionsPanel = dynamic(() => import("@/components/record-versions").then((m) => m.RecordVersionsPanel), { ssr: false });
 const VERSIONED_ENTITIES = new Set(["parent_skus_v2", "skus_v2"]);
-const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
-const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
 // ตัวเลือกธนาคารกลาง — ใช้กับฟิลด์ข้อความที่ตั้ง options.picker = "bank" (โหลดเฉพาะโมดูลที่ใช้)
 const BankPicker = dynamic(() => import("@/components/bank-picker").then((m) => m.BankPicker), { ssr: false });
 // เพิ่มหลายรายการแบบ inline (โหลดตอนกดปุ่มเท่านั้น)
@@ -3423,6 +3421,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           moduleLabel={config.title}
           moduleKey={config.moduleKey}
           tableId={config.tableId}
+          extraTabs={(config.extraTabs ?? []).map(({ key, label, icon, inTab }) => ({ key, label, icon, inTab }))}
           layout={registryLayout}
           sampleRows={rows.slice(0, 5) as Record<string, unknown>[]}
           searchSample={async (q: string) => {
@@ -3581,11 +3580,7 @@ export function MasterRecordDrawer({
         : undefined,
       // Parent SKU → แท็บ "🛍 เว็บไซต์" · SKU → แท็บ "🏪 ร้านที่จำหน่าย" (ของกลาง: โผล่ทุก drawer SKU ไม่ว่าเปิดจากตาราง/แท็ก/การ์ด)
       extraTabs: moduleKey === "parent-skus-v2"
-        ? [
-            { key: "web", label: tr("เว็บไซต์", "Website"), icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
-            { key: "platforms", label: tr("แพลตฟอร์ม", "Platforms"), icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
-            { key: "issues", label: tr("ปัญหา", "Issues"), icon: "⚠️", render: ({ recordId }) => <div className="p-3"><ParentIssuesPanel parentSkuId={recordId} editable bare /></div> },
-          ]
+        ? parentSkuExtraTabs()   // ชุดกลาง — ตรงกับหน้า /master/parent-skus (components/master-crud/parent-sku-extra-tabs)
         : moduleKey === "skus-v2"
         ? [
             // ฝังอยู่ในแท็บ "ราคา" (ข้อมูลซื้อทั้งหมดอยู่ที่เดียว) — ดู inTab ใน LayoutTabs
@@ -3810,12 +3805,24 @@ function LayoutTabs({
   sectionAction?: (groupKey: string, groupLabel: string, groupFields: FieldDef[]) => React.ReactNode;
 }) {
   // ซ่อนแท็บที่ไม่มี field จริง (เช่นแท็บ core ฝั่งขวาที่ core ถูกเรนเดอร์แยกซ้ายแล้ว)
-  const tabs = (layout.tabs ?? []).filter((t) => t.sections.some((s) => (byGroup.get(s.key)?.length ?? 0) > 0));
-  const [active, setActive] = useState<string>(tabs[0]?.key ?? extraTabs[0]?.key ?? "");
+  const tabs = (layout.tabs ?? []).filter((t) => !isExtraLayoutTab(t) && t.sections.some((s) => (byGroup.get(s.key)?.length ?? 0) > 0));
+  // แท็บพิเศษ (config.extraTabs): ตำแหน่ง/ซ่อน ตามแท็บว่าง "x:<key>" ใน layout (ตั้งในตัวออกแบบหน้า) · ไม่ได้ตั้ง = ต่อท้ายแบบเดิม
+  const extraPos = new Map((layout.tabs ?? []).filter(isExtraLayoutTab).map((t) => [extraKeyOf(t), t]));
+  const ownTabs = extraTabs.filter((t) => !t.inTab && !extraPos.get(t.key)?.hidden);
+  const ordered: ({ kind: "field"; t: NonNullable<FormLayout>["tabs"][number] } | { kind: "extra"; t: BoundTab })[] = [];
+  const placed = new Set<string>();
+  for (const t of layout.tabs ?? []) {
+    if (isExtraLayoutTab(t)) {
+      const ex = ownTabs.find((e) => e.key === extraKeyOf(t));
+      if (ex && !placed.has(ex.key)) { ordered.push({ kind: "extra", t: ex }); placed.add(ex.key); }
+    } else if (tabs.includes(t)) ordered.push({ kind: "field", t });
+  }
+  for (const ex of ownTabs) if (!placed.has(ex.key)) ordered.push({ kind: "extra", t: ex });
+  const orderedKeys = ordered.map((o) => o.t.key);
+  const [active, setActive] = useState<string>(orderedKeys[0] ?? "");
   useEffect(() => {
-    const keys = [...tabs.map((t) => t.key), ...extraTabs.map((t) => t.key)];
-    if (keys.length > 0 && !keys.includes(active)) setActive(keys[0]);
-  }, [tabs, extraTabs, active]);
+    if (orderedKeys.length > 0 && !orderedKeys.includes(active)) setActive(orderedKeys[0]);
+  }, [orderedKeys.join("|"), active]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const assigned = new Set<string>();
   tabs.forEach((t) => t.sections.forEach((s) => assigned.add(s.key)));
@@ -3823,7 +3830,6 @@ function LayoutTabs({
   byGroup.forEach((fs, g) => { if (!assigned.has(g)) leftover.push(...fs); });
 
   // แท็บพิเศษที่ตั้ง inTab → ไม่เป็นแท็บของตัวเอง แต่ไปแปะท้าย "แท็บที่ระบุ" (เช่นตารางร้านที่จำหน่ายอยู่ในแท็บราคา)
-  const ownTabs = extraTabs.filter((t) => !t.inTab);
   const activeExtra = ownTabs.find((t) => t.key === active);
   const cur = tabs.find((t) => t.key === active) ?? (activeExtra ? undefined : tabs[0]);
   if (!cur && !activeExtra) return null;
@@ -3831,22 +3837,14 @@ function LayoutTabs({
 
   return (
     <div>
-      {tabs.length + ownTabs.length > 1 && (
+      {ordered.length > 1 && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
-          {tabs.map((t) => (
-            <button key={t.key} type="button" onClick={() => setActive(t.key)}
+          {ordered.map((o) => (
+            <button key={o.t.key} type="button" onClick={() => setActive(o.t.key)}
               className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
-                t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
+                o.t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
-              {sectionIconNode(t.icon)}<span>{t.label}</span>
-            </button>
-          ))}
-          {ownTabs.map((t) => (
-            <button key={t.key} type="button" onClick={() => setActive(t.key)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
-                t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}>
-              {t.icon && <span>{t.icon}</span>}<span>{t.label}</span>
+              {o.kind === "field" ? sectionIconNode(o.t.icon) : (o.t.icon && <span>{o.t.icon}</span>)}<span>{o.t.label}</span>
             </button>
           ))}
         </div>
@@ -3889,6 +3887,9 @@ function LayoutTabs({
 
 // แท็บพิเศษที่ผูก ctx แล้ว (พร้อม node) — ใช้ส่งเข้า LayoutTabs
 type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string };
+// แท็บว่างใน layout ที่จำตำแหน่ง/ซ่อน ของแท็บพิเศษ (ตั้งในตัวออกแบบหน้า) — key "x:<key>"
+const isExtraLayoutTab = (t: { key: string; extra?: boolean }) => !!t.extra || t.key.startsWith("x:");
+const extraKeyOf = (t: { key: string }) => t.key.replace(/^x:/, "");
 
 function FormSections({
   fields, renderField, layout, extraTabs, sectionMode, sectionAction,

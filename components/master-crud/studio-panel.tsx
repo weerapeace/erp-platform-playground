@@ -92,7 +92,13 @@ function gmeta(k: string) { return GROUP_META[k] ?? { label: k, icon: "📁", or
 
 type Tab = "table" | "form" | "registry";
 // tab = ชื่อแท็บที่ section นี้อยู่ ("" = แท็บเดี่ยวของตัวเอง) → หลาย section ที่ tab เดียวกันอยู่แท็บเดียวกัน
-type SectionDef = { key: string; label: string; icon: string; columns: number; tab?: string };
+// extra = แท็บพิเศษจากโค้ด (config.extraTabs เช่น 🛍 เว็บไซต์) — key "x:<key>" · ไม่มีฟิลด์ · จัดได้แค่ตำแหน่ง/ซ่อน (hidden)
+type SectionDef = { key: string; label: string; icon: string; columns: number; tab?: string; extra?: boolean; hidden?: boolean };
+/** แท็บพิเศษของโมดูล (จาก config.extraTabs) — ส่งมาให้ตัวออกแบบเห็นแท็บเดียวกับหน้าจริง */
+export type StudioExtraTab = { key: string; label: string; icon?: string; inTab?: string };
+const EXTRA_PREFIX = "x:";
+// ฟิลด์ที่หน้าจริงไม่วางในแท็บ (รูปปกอยู่คอลัมน์ซ้าย/ด้านบนเสมอ) — แท็บที่มีแค่ฟิลด์พวกนี้ หน้าจริงจะไม่โชว์
+const NOT_IN_TABS = new Set(["cover_image_r2_key"]);
 
 // ไอคอนพื้นฐานให้เลือก + ตัวเรนเดอร์ (รองรับ emoji หรือรูปอัปโหลด "r2:<key>")
 const PRESET_ICONS = ["📋","📦","🔗","📝","📐","🏭","💰","🖼️","🟢","⚙️","🏷️","🧬","🤝","🧩","📊","🗂️","🛒","📍","🧾","🚚","🏗️","✂️","📁","⭐","🔢","🧰","🔀","🧷","📅","🔖","🧮","🏢","🪪","🎨","📒","🔧","📏","🧵","🧑‍💼","🔋"];
@@ -187,9 +193,11 @@ function SamplePicker({ label, searchSample, onPick, onClear }: { label: string;
 }
 
 export function StudioPanel({
-  fields, moduleLabel, moduleKey, tableId, layout, onClose, sampleRows = [], searchSample, loadSample,
+  fields, moduleLabel, moduleKey, tableId, layout, onClose, sampleRows = [], searchSample, loadSample, extraTabs = [],
 }: {
   fields:      StudioField[];
+  /** แท็บพิเศษจากโค้ดของโมดูล (เช่น 🛍 เว็บไซต์ / 🏬 แพลตฟอร์ม) — โชว์เป็นแท็บล็อก 🔒 ลากย้ายตำแหน่ง/ซ่อนได้ */
+  extraTabs?:  StudioExtraTab[];
   moduleLabel: string;
   moduleKey?:  string;
   tableId?:    string;        // สำหรับบันทึก Saved View จากแท็บตาราง
@@ -218,20 +226,31 @@ export function StudioPanel({
   // หมวด (section) — แก้ชื่อ/ลบ/สร้าง/เรียง/คอลัมน์ได้ · init จาก layout เดิม ไม่งั้น derive จาก group ของ field
   const [sections, setSections] = useState<SectionDef[]>(() => {
     // แตกทุก section จากทุกแท็บ — ถ้าแท็บมีหลาย section (หรือ key แท็บ≠section) → จำชื่อแท็บไว้ (tab)
-    const fromLayout: SectionDef[] = (layout?.tabs ?? []).flatMap((t) =>
-      (t.sections ?? []).map((s) => ({
+    const ownExtras = extraTabs.filter((e) => !e.inTab);
+    const extraSec = (e: StudioExtraTab, hidden = false): SectionDef =>
+      ({ key: EXTRA_PREFIX + e.key, label: e.label, icon: e.icon ?? "🔒", columns: 1, tab: "", extra: true, hidden });
+    const fromLayout: SectionDef[] = (layout?.tabs ?? []).flatMap((t) => {
+      // แท็บพิเศษที่เคยจัดตำแหน่งไว้ (ไม่มีในโมดูลแล้ว = ทิ้ง)
+      if (t.extra || t.key.startsWith(EXTRA_PREFIX)) {
+        const e = ownExtras.find((x) => EXTRA_PREFIX + x.key === t.key);
+        return e ? [extraSec(e, !!t.hidden)] : [];
+      }
+      return (t.sections ?? []).map((s) => ({
         key: s.key, label: s.label, icon: gmeta(s.key).icon, columns: s.columns ?? 2,
         tab: t.key === s.key ? "" : t.label,
-      })),
-    );
+      }));
+    });
     const have = new Set(fromLayout.map((s) => s.key));
     // group แปลก (orphan) ถูก map เป็น "other" → ไม่สร้างกล่องแยก แต่ต้องมีกล่อง "other" รองรับเสมอ
     const extra: SectionDef[] = Array.from(new Set(fields.map((f) => effGroup(f.groupKey))))
       .filter((k) => !have.has(k))
       .sort((a, b) => gmeta(a).order - gmeta(b).order)
       .map((k) => ({ key: k, label: gmeta(k).label, icon: gmeta(k).icon, columns: 2, tab: "" }));
-    return [...fromLayout, ...extra];
+    // แท็บพิเศษที่ยังไม่เคยจัด → ต่อท้าย (หน้าจริงก็ต่อท้ายแท็บฟิลด์เหมือนกัน)
+    const missingExtras = ownExtras.filter((e) => !have.has(EXTRA_PREFIX + e.key)).map((e) => extraSec(e));
+    return [...fromLayout, ...extra, ...missingExtras];
   });
+  const setExtraHidden = (key: string, hidden: boolean) => { setSections((p) => p.map((s) => s.key === key && s.extra ? { ...s, hidden } : s)); setDirty(true); };
   const setSectionTab = (key: string, tab: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, tab } : s)); setDirty(true); };
   const setCols = (key: string, n: number) => { setSections((p) => p.map((s) => s.key === key ? { ...s, columns: n } : s)); setDirty(true); };
   const renameSection = (key: string, label: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, label } : s)); setDirty(true); };
@@ -580,8 +599,9 @@ export function StudioPanel({
       // 2. layout ฟอร์ม → erp_modules.config.layout (Tab → Section)
       //    section ที่ตั้งชื่อแท็บเดียวกัน → รวมอยู่แท็บเดียว ; ไม่ตั้งแท็บ → เป็นแท็บเดี่ยวของตัวเอง
       if (moduleKey) {
-        const tabMap = new Map<string, { key: string; label: string; icon: string; sections: { key: string; label: string; columns: number }[] }>();
+        const tabMap = new Map<string, { key: string; label: string; icon: string; extra?: boolean; hidden?: boolean; sections: { key: string; label: string; columns: number }[] }>();
         for (const s of sections) {
+          if (s.extra) { tabMap.set(s.key, { key: s.key, label: s.label, icon: s.icon, extra: true, ...(s.hidden ? { hidden: true } : {}), sections: [] }); continue; }
           const tname = (s.tab ?? "").trim();
           const tk = tname ? `tab_${tname}` : s.key;
           const ent = tabMap.get(tk) ?? { key: tk, label: tname || s.label, icon: s.icon, sections: [] };
@@ -640,7 +660,7 @@ export function StudioPanel({
     if (overId.startsWith("tabsort:")) {
       const tk = overId.slice(8);
       const target = sections.find((s) => secTabKey(s) === tk);
-      if (target) { setItems((p) => p.map((i) => i.key === activeKey ? { ...i, groupKey: target.key } : i)); setDirty(true); }
+      if (target && !target.extra) { setItems((p) => p.map((i) => i.key === activeKey ? { ...i, groupKey: target.key } : i)); setDirty(true); }
       return;
     }
     setItems((prev) => {
@@ -680,7 +700,7 @@ export function StudioPanel({
     () => sections.map((s) => [s, items.filter((i) => groupOf(i.groupKey) === s.key)]),
     [sections, items, groupOf],
   );
-  const sectionOptions = useMemo(() => sections.map((s) => ({ key: s.key, label: s.label })), [sections]);
+  const sectionOptions = useMemo(() => sections.filter((s) => !s.extra).map((s) => ({ key: s.key, label: s.label })), [sections]);
 
   // preview data
   const visibleCols = items.filter((i) => i.isVisible);
@@ -810,7 +830,7 @@ export function StudioPanel({
             </>
           ) : (
             <FormEditor
-              formGroups={formGroups} sectionOptions={sectionOptions} sensors={sensors} onDragEnd={onDragEnd}
+              formGroups={formGroups.filter(([s]) => !s.extra)} sectionOptions={sectionOptions} sensors={sensors} onDragEnd={onDragEnd}
               onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
               settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)}
               onSetCols={setCols} onRename={renameSection} onSetIcon={setSectionIcon} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
@@ -857,7 +877,8 @@ export function StudioPanel({
               row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
               editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
               onPatch={patchItem} onRemoveField={(k)=>toggleForm(k)}
-              editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}), moveTab }} />
+              extraTabs={extraTabs}
+              editApi={{ sections: sections.filter((s) => !s.extra), renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}), moveTab, setExtraHidden }} />
           )}
         </div>
       </div>
@@ -1444,7 +1465,7 @@ function GridDrop({ id, children }: { id: string; children: React.ReactNode }) {
 }
 // หัวแท็บ — เป็นทั้ง drop zone (ลาก field มาจ่อ = ย้ายเข้าแท็บ) และ sortable (จับไอคอนลากสลับลำดับแท็บ)
 function CanvasTab({ t, active, editable, editApi, onClick }: {
-  t: { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] };
+  t: PreviewTab;
   active: boolean; editable?: boolean; editApi?: EditApi; onClick: ()=>void;
 }) {
   const { setNodeRef, setActivatorNodeRef, listeners, attributes, transform, transition, isDragging, isOver } =
@@ -1453,16 +1474,22 @@ function CanvasTab({ t, active, editable, editApi, onClick }: {
   const canDrag = editable && editApi;
   const [editing, setEditing] = useState(false);   // ดับเบิลคลิกชื่อ = เข้าโหมดแก้
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
+  const dim = t.extra ? t.hidden : !!t.ghost;   // หน้าจริงไม่โชว์แท็บนี้
+  const tip = t.extra
+    ? (t.hidden ? "🔒 แท็บพิเศษจากระบบ — ซ่อนอยู่ (หน้าจริงไม่โชว์)" : "🔒 แท็บพิเศษจากระบบ — ลากไอคอนเพื่อย้ายตำแหน่งได้")
+    : t.ghost ? `👻 หน้าจริงไม่โชว์แท็บนี้ — ${t.ghost}` : undefined;
   return (
-    <div ref={setNodeRef} style={style} onClick={onClick}
-      className={`flex items-center gap-1 px-2 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${active?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"} ${isOver && !isDragging?"bg-orange-100 ring-1 ring-orange-300 rounded-t":""}`}>
+    <div ref={setNodeRef} style={style} onClick={onClick} title={tip}
+      className={`flex items-center gap-1 px-2 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${active?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"} ${dim?"opacity-50":""} ${isOver && !isDragging && !t.extra?"bg-orange-100 ring-1 ring-orange-300 rounded-t":""}`}>
       {/* ไอคอน = จุดจับลากสลับแท็บ (กดค้างแล้วลาก) */}
       {canDrag
         ? <span ref={setActivatorNodeRef} {...listeners} {...attributes} onClick={(e)=>e.stopPropagation()}
             title="กดค้างที่ไอคอนแล้วลากเพื่อสลับลำดับแท็บ"
             className="cursor-grab active:cursor-grabbing touch-none select-none px-0.5 -ml-0.5 hover:text-orange-600">{iconNode(t.icon)}</span>
         : iconNode(t.icon)}
-      {canDrag
+      {t.extra
+        ? <span className={`px-1 ${t.hidden ? "line-through" : ""}`}>{t.label} <span className="text-[10px]">🔒</span></span>
+        : canDrag
         ? (editing
             ? <input autoFocus value={t.label} onClick={(e)=>e.stopPropagation()}
                 onChange={(e)=> named ? editApi!.renameTab(t.label, e.target.value) : editApi!.renameSection(t.entries[0][0].key, e.target.value)}
@@ -1472,9 +1499,13 @@ function CanvasTab({ t, active, editable, editApi, onClick }: {
             : <span onDoubleClick={(e)=>{ e.stopPropagation(); setEditing(true); }} title="ดับเบิลคลิกเพื่อเปลี่ยนชื่อ"
                 className="px-1 border border-transparent hover:border-slate-200 hover:bg-white/70 rounded cursor-text">{t.label}</span>)
         : <span>{t.label}</span>}
+      {!t.extra && t.ghost && <span className="text-[10px]" aria-label="หน้าจริงไม่โชว์">👻</span>}
     </div>
   );
 }
+
+// แท็บบน canvas (ตรงกับหน้าจริง) — แท็บฟิลด์ / แท็บพิเศษจากระบบ (extra) · ghost = เหตุผลที่หน้าจริงไม่โชว์แท็บฟิลด์นี้
+type PreviewTab = { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][]; extra?: boolean; hidden?: boolean; ghost?: string };
 
 type EditApi = {
   sections: SectionDef[];
@@ -1487,10 +1518,12 @@ type EditApi = {
   renameTab: (oldTab: string, newTab: string)=>void;
   moveField: (fieldKey: string, groupKey: string)=>void;
   moveTab: (tabKey: string, dir: -1 | 1)=>void;
+  setExtraHidden: (key: string, hidden: boolean)=>void;
 };
 
-function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, onRemoveField, editApi }: {
+function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, onRemoveField, editApi, extraTabs = [] }: {
   groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string;
+  extraTabs?: StudioExtraTab[];
   editable?: boolean; selectedKey?: string | null; onSelectField?: (k: string)=>void;
   onPatch?: (k: string, patch: Partial<StudioField>)=>void; onRemoveField?: (k: string)=>void;
   editApi?: EditApi;
@@ -1498,12 +1531,19 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
   const allTabNames = editApi ? [...new Set(editApi.sections.map((s)=>(s.tab??"").trim()).filter(Boolean))] : [];
   // จัด section เข้าแท็บ (ตรงกับฟอร์มจริง): tab เดียวกัน = แท็บเดียว, เว้นว่าง = แท็บเดี่ยว
   const tabs = useMemo(() => {
-    const m = new Map<string, { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] }>();
+    const m = new Map<string, PreviewTab>();
     for (const [sec, fs] of groups) {
       const tname = (sec.tab ?? "").trim();
       const tk = tname ? `tab_${tname}` : sec.key;
-      const ent = m.get(tk) ?? { key: tk, label: tname || sec.label, icon: sec.icon, entries: [] };
+      const ent = m.get(tk) ?? { key: tk, label: tname || sec.label, icon: sec.icon, entries: [], ...(sec.extra ? { extra: true, hidden: !!sec.hidden } : {}) };
       ent.entries.push([sec, fs]); m.set(tk, ent);
+    }
+    // แท็บฟิลด์ที่หน้าจริงจะซ่อน (ไม่มีฟิลด์ที่วางในแท็บได้) → บอกเหตุผล
+    for (const t of m.values()) {
+      if (t.extra) continue;
+      const all = t.entries.flatMap(([, fs]) => fs);
+      if (all.some((f) => !NOT_IN_TABS.has(f.key))) continue;
+      t.ghost = all.length ? "มีแค่รูปปก ซึ่งหน้าจริงแสดงไว้คอลัมน์ซ้าย/ด้านบนแทน" : "ยังไม่มีฟิลด์ในแท็บนี้";
     }
     return [...m.values()];
   }, [groups]);
@@ -1547,7 +1587,28 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
           )}
         </div>
       )}
-      {(cur?.entries ?? []).map(([sec, fs])=>{
+      {/* แท็บพิเศษจากระบบ: เนื้อหาไม่ใช่ฟิลด์ → บอกให้ชัด + ซ่อน/แสดงได้ */}
+      {cur?.extra && (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center">
+          <div className="text-2xl">{iconNode(cur.icon)}</div>
+          <div className="mt-1 text-sm font-medium text-slate-700">🔒 แท็บพิเศษจากระบบ — {cur.label}</div>
+          <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">เนื้อหาแท็บนี้เป็นหน้าจอสำเร็จรูป (ไม่ใช่ฟิลด์) จึงจัดฟิลด์ข้างในไม่ได้ · กดค้างที่ไอคอนบนหัวแท็บแล้วลากเพื่อย้ายตำแหน่ง</p>
+          {cur.hidden && <p className="mt-2 text-xs font-medium text-amber-600">ตอนนี้ซ่อนอยู่ — หน้าจริงไม่โชว์แท็บนี้</p>}
+          {editable && editApi && (
+            <button type="button" onClick={()=>editApi.setExtraHidden(cur.key, !cur.hidden)}
+              className="mt-3 h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:border-orange-300 hover:bg-orange-50">
+              {cur.hidden ? "👁 แสดงแท็บนี้ในหน้าจริง" : "🙈 ซ่อนแท็บนี้ในหน้าจริง"}
+            </button>
+          )}
+        </div>
+      )}
+      {/* แท็บฟิลด์ที่หน้าจริงไม่โชว์ */}
+      {cur && !cur.extra && cur.ghost && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          👻 หน้าจริงไม่โชว์แท็บนี้ — {cur.ghost}{editable ? " · ลากฟิลด์มาใส่ถ้าอยากให้โชว์ (หรือกด ✕ ลบกล่องทิ้ง)" : ""}
+        </div>
+      )}
+      {(cur?.extra ? [] : cur?.entries ?? []).map(([sec, fs])=>{
         const cols = sec.columns || 2;
         return (
           <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden mb-4">
@@ -1584,7 +1645,13 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
           </div>
         );
       })}
-      {editable && editApi && cur && (
+      {/* ส่วนพิเศษจากระบบที่ฝังท้ายแท็บนี้ (extraTabs ที่ตั้ง inTab) */}
+      {cur && !cur.extra && extraTabs.filter((e) => e.inTab === cur.key).map((e) => (
+        <div key={e.key} className="mb-4 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500">
+          🔒 {e.icon ? `${e.icon} ` : ""}{e.label} — ส่วนพิเศษจากระบบ แสดงท้ายแท็บนี้ในหน้าจริง (จัดในตัวออกแบบไม่ได้)
+        </div>
+      ))}
+      {editable && editApi && cur && !cur.extra && (
         <button type="button" onClick={()=>{
           // เพิ่มกล่องในแท็บปัจจุบัน: ทำให้กล่องในแท็บนี้ใช้ชื่อแท็บเดียวกัน แล้วเพิ่มกล่องใหม่เข้าแท็บนั้น
           const tname = cur.label;
