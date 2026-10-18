@@ -28,8 +28,12 @@ import { LabelBadge, LabelManagerModal } from "./label-manager";
 import { MarketingSkuGrid } from "./grid-view";
 import { VariantCount } from "./variant-count";
 import { BadgeEditor } from "./badge-editor";
+import { WorkMode, useWorkJobs } from "./work-mode";
+import { WorkJobModal } from "./work-job-modal";
+import { kindInfo } from "@/lib/marketing/work-jobs";
 
-const VIEWS = ["table", "grid"] as const;
+// table/grid = ดูและติดป้าย · work = 🛠 โหมดทำงาน (งานเป็นชุด + เช็กลิสต์ต่อรุ่น)
+const VIEWS = ["table", "grid", "work"] as const;
 type View = (typeof VIEWS)[number];
 const SORTS: { value: MarketingSkuSort; label: string }[] = [
   { value: "label", label: "เรียง: ตามป้าย" },
@@ -67,8 +71,12 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const [pageSize, setPageSize] = useState(100);
   // มุมมอง ตาราง/การ์ด — สลับแล้วจำเป็นค่าเริ่มต้นของฉัน (ของกลาง useViewPref)
   const { view, setView, saveDefault } = useViewPref<View>("marketing_skus_view", VIEWS, "table");
-  const pickView = (v: View) => { setView(v); void saveDefault(v); };
+  const pickView = (v: View) => { setView(v); void saveDefault(v); if (v === "work") setSelected(new Set()); };
   const { cols, setCols } = useGalleryColumns("marketing-skus", 5);
+  // งานของโหมดทำงาน — ใช้ทั้งในโหมดทำงาน และแถบ "ใส่ในงาน" ตอนติ๊กรุ่น
+  const work = useWorkJobs(canManage || view === "work");
+  const [focusJobId, setFocusJobId] = useState<string | null>(null);
+  const [newJobFor, setNewJobFor] = useState<string[] | null>(null);   // สร้างงานใหม่พร้อมรุ่นที่ติ๊กไว้
 
   useEffect(() => { setBrandTab(readTab()); }, []);
 
@@ -193,6 +201,35 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
     }
   };
 
+  // ใส่รุ่นที่ติ๊กเข้างานที่มีอยู่ (งานตั้งติดป้ายไว้ → ป้ายเปลี่ยนตาม)
+  const addToJob = async (jobId: string, ids: string[]) => {
+    const job = work.jobs.find((j) => j.id === jobId);
+    setBusy(true);
+    let added = 0, labeled = 0;
+    try {
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const r = await apiFetch(`/api/marketing/work-jobs/${jobId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_sku_ids: ids.slice(i, i + CHUNK) }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) throw new Error(j.error || "ใส่รุ่นเข้างานไม่สำเร็จ");
+        added += Number(j.data?.added) || 0; labeled += Number(j.data?.labeled) || 0;
+      }
+      const skipped = ids.length - added;
+      toast.success(`ใส่ ${added} รุ่นเข้างาน “${job?.name ?? ""}” แล้ว${skipped ? ` (มีอยู่แล้ว ${skipped})` : ""}${labeled ? ` · เปลี่ยนป้าย ${labeled} รุ่น` : ""} — ดูได้ที่โหมด 🛠 ทำงาน`);
+      setSelected(new Set());
+      void work.reload();
+    } catch (e) {
+      toast.error(`${e instanceof Error ? e.message : "ใส่รุ่นเข้างานไม่สำเร็จ"}${added ? ` (สำเร็จไปแล้ว ${added} รุ่น)` : ""}`);
+    } finally {
+      setBusy(false);
+      if (labeled) void load(true);
+    }
+  };
+  const jobOptions = useMemo(() => [
+    { value: "__pick", label: "🛠 ใส่ในงาน…" },
+    ...work.jobs.filter((j) => j.status === "open").map((j) => ({ value: j.id, label: j.name, badge: kindInfo(j.kind).icon, sub: `${j.item_count ?? 0} รุ่น` })),
+    { value: "__new", label: "＋ สร้างงานใหม่จากที่เลือก" },
+  ], [work.jobs]);
+
   const onActiveChange = useCallback((parentId: string, active: number) => {
     setData((d) => d && { ...d, items: d.items.map((it) => (it.parent_sku_id === parentId ? { ...it, sku_active: active } : it)) });
   }, []);
@@ -305,8 +342,8 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
           </div>
         ) : (
           <>
-            {/* แท็บแบรนด์ */}
-            <div className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-slate-200 -mx-4 px-4 sm:mx-0 sm:px-0">
+            {/* แท็บแบรนด์ (โหมดทำงาน: งานรวมได้หลายแบรนด์ → ไม่ใช้แท็บ) */}
+            {view !== "work" && <div className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-slate-200 -mx-4 px-4 sm:mx-0 sm:px-0">
               {[{ key: BRAND_ALL, label: "ทุกแบรนด์", color: null as string | null }, ...brandTabs].map((t) => {
                 const on = brandTab === t.key;
                 const n = t.key === BRAND_ALL ? items.length : brandCounts.get(t.key) ?? 0;
@@ -319,12 +356,13 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                   </button>
                 );
               })}
-            </div>
+            </div>}
 
             {/* ชิปกรองป้าย + สลับมุมมอง */}
             <div className="flex flex-wrap items-start gap-2">
               <div className="flex flex-1 flex-wrap gap-1.5">
-                {[{ key: LABEL_ALL, l: undefined as MarketingSkuLabel | undefined, text: "ทั้งหมด", n: inBrand.length },
+                {view === "work" && <span className="py-1 text-sm text-slate-500">🛠 โหมดทำงาน — จัดงานเป็นชุด (Clearance / ลงเว็บ / อื่น ๆ) แล้วติ๊กว่าแต่ละรุ่นทำถึงไหน</span>}
+                {view !== "work" && [{ key: LABEL_ALL, l: undefined as MarketingSkuLabel | undefined, text: "ทั้งหมด", n: inBrand.length },
                   ...labels.map((l) => ({ key: l.id, l, text: l.name, n: labelCounts.get(l.id) ?? 0 })),
                   { key: LABEL_NONE, l: undefined, text: "ยังไม่มีป้าย", n: labelCounts.get(LABEL_NONE) ?? 0 },
                 ].filter((c) => c.key === LABEL_ALL || c.n > 0 || labelFilter === c.key || (c.l && c.l.is_active)).map((c) => {
@@ -341,7 +379,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 })}
               </div>
               <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label="มุมมอง">
-                {([["table", "☰ ตาราง"], ["grid", "▦ การ์ด"]] as const).map(([v, text]) => (
+                {([["table", "☰ ตาราง"], ["grid", "▦ การ์ด"], ["work", "🛠 ทำงาน"]] as const).map(([v, text]) => (
                   <button key={v} type="button" onClick={() => pickView(v)} aria-pressed={view === v}
                     className={`h-7 rounded-md px-2.5 text-xs font-medium transition ${view === v ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{text}</button>
                 ))}
@@ -349,7 +387,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
             </div>
 
             {/* ค้นหา / เรียง (ใช้ร่วมตาราง+การ์ด) */}
-            <div className="flex flex-wrap items-center gap-2">
+            {view !== "work" && <div className="flex flex-wrap items-center gap-2">
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหารหัส / ชื่อรุ่น / หมายเหตุ…"
                 className="h-9 w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <select value={sort} onChange={(e) => setSort(e.target.value as MarketingSkuSort)}
@@ -366,9 +404,12 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               )}
               <span className="text-xs text-slate-400">{filtered.length.toLocaleString("th-TH")} รุ่น</span>
               {view === "grid" && <GalleryColumnsControl cols={cols} onChange={setCols} className="ml-auto hidden sm:inline-flex" />}
-            </div>
+            </div>}
 
-            {view === "grid" ? (
+            {view === "work" ? (
+              <WorkMode canManage={canManage} labels={labels} labelMap={labelMap} work={work} focusJobId={focusJobId}
+                onLabelsChanged={() => void load(true)} />
+            ) : view === "grid" ? (
               <MarketingSkuGrid
                 rows={pageRows} cols={cols} grouped={sort === "label"} labels={labels} labelMap={labelMap} brandMap={brandMap} showBrand={brandTab === BRAND_ALL}
                 canManage={canManage} busy={busy} labelOptions={labelOptions} selected={selected} onSelectedChange={setSelected}
@@ -391,13 +432,13 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               />
             )}
 
-            {filtered.length > PAGE_SIZES[0] && (
+            {view !== "work" && filtered.length > PAGE_SIZES[0] && (
               <Pager page={page} pageSize={pageSize} total={filtered.length} onPage={(p) => { setPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                 unitLabel="รุ่น" onPageSize={setPageSize} pageSizes={PAGE_SIZES} />
             )}
 
             {/* แถบคำสั่งหลายรายการ — ลอยติดขอบล่างจอ (ของกลาง) */}
-            {canManage && (
+            {canManage && view !== "work" && (
               <BulkActionBar count={selIds.length} unit="รุ่น" onClear={() => setSelected(new Set())}
                 extra={!allFilteredSelected && filtered.length > selIds.length ? (
                   <button type="button" onClick={() => setSelected(new Set(filtered.map((it) => it.parent_sku_id)))}
@@ -415,6 +456,10 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                       onChange={(v) => { if (v !== "__pick") void addBadgeBulk(selIds, v); }} />
                   </div>
                 )}
+                <div className="w-48 text-slate-800">
+                  <SearchableSelect value="__pick" options={jobOptions} disabled={busy}
+                    onChange={(v) => { if (v === "__new") setNewJobFor(selIds); else if (v !== "__pick") void addToJob(v, selIds); }} />
+                </div>
               </BulkActionBar>
             )}
           </>
@@ -444,6 +489,18 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
         title={`เปลี่ยนป้าย ${bulkAsk?.ids.length.toLocaleString("th-TH") ?? 0} รุ่น?`}
         message={`ทุกรุ่นที่เลือกจะถูกตั้งป้ายเป็น "${bulkLabelName}" (ป้ายเดิมจะถูกแทนที่ · มีประวัติให้ย้อนดูได้)`}
         confirmText="เปลี่ยนป้าย" />
+
+      {/* สร้างงานใหม่ พร้อมใส่รุ่นที่ติ๊กไว้ → พาไปโหมดทำงานที่งานนั้น */}
+      <WorkJobModal open={!!newJobFor} onClose={() => setNewJobFor(null)} job={null} labels={labels} presetIds={newJobFor ?? []}
+        onSaved={(job, info) => {
+          setNewJobFor(null);
+          toast.success(`สร้างงาน “${job.name}” แล้ว · ใส่ ${info.added} รุ่น${info.labeled ? ` · เปลี่ยนป้าย ${info.labeled} รุ่น` : ""}`);
+          setSelected(new Set());
+          setFocusJobId(job.id);
+          pickView("work");
+          void work.reload();
+          if (info.labeled) void load(true);
+        }} />
 
       <LabelManagerModal open={labelMgrOpen} onClose={() => setLabelMgrOpen(false)} labels={labels} badges={badgesWithUsage} canEdit={canLabels}
         onChanged={() => load(true)} />
