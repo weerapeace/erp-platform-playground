@@ -6,11 +6,17 @@
  * - การ์ดต่อแถวลูก: รหัส + สี + "รูปทั้งหมด" ในแกลเลอรีของตัวนั้น (ไม่ใช่แค่รูปปก) · กดรูป = ดูใหญ่ · กดรหัส = เปิดหน้าตัวนั้น
  * - ลากรูปจากเครื่องลงการ์ด = เพิ่มเข้าแกลเลอรีตัวนั้นทันที (ไม่ต้องกด "แก้ไข") — สิทธิ์ตามที่หน้าส่งมา (canDrop)
  * - โยนหลายรูปที่ช่องบนสุด → จับคู่ตามชื่อไฟล์ (lib/filename-code-match) → ป๊อปให้ตรวจ/แก้คู่ → ยืนยันค่อยอัป
+ * - ลากรูปสลับตำแหน่งในการ์ดเดียวกัน (useDragReorder group = id) · รูปแรก = รูปหลัก (รูปปก SKU — trigger erp_sync_cover_from_primary)
+ * - ✕ ลบรูป (สิทธิ์ attachments.delete + ยืนยันก่อน · DB เขียน audit · รูปสินค้าเก็บเป็นเวอร์ชัน ย้อนคืนได้ที่ 🕘)
+ *   ลบรูปหลัก → รูปถัดไปเป็นรูปหลักแทน · ไม่เหลือรูป → ล้างรูปปกที่ยังชี้รูปที่ลบ
  * อัปผ่านเส้นทางกลางเดิม (/api/attachments → R2 + ทะเบียนรูป · ย่อ 1500px · สูงสุด 9 รูป/ตัว · ตั้งรูปปกถ้ายังว่าง)
  * แก้จากในงาน (โหมดใหม่) → apiFetch แนบเลขงานให้เอง → ขึ้นใน "สิ่งที่แก้ในงานนี้" · รูปที่ลบภายหลังมีเวอร์ชันให้ย้อน
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { useAuth } from "@/components/auth";
+import { useDragReorder, moveItem } from "@/components/sortable-list";
+import { useCanHover } from "@/lib/use-can-hover";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { useFileDrop } from "@/components/file-drop";
 import { useToast } from "@/components/toast";
@@ -63,6 +69,34 @@ export async function uploadImagesToRecord(opts: {
 
 type Pending = { file: File; code: string | null; url: string };
 
+/** แถวรูปของ SKU เดียว — กด = ดูใหญ่ · ลาก = สลับตำแหน่ง (เฉพาะในการ์ดนี้) · ✕ = ลบ · รูปแรก = รูปหลัก */
+function ThumbStrip({ group, list, canEdit, canDelete, onView, onReorder, onDelete }: {
+  group: string; list: Att[]; canEdit: boolean; canDelete: boolean;
+  onView: (i: number) => void; onReorder: (from: number, to: number) => void; onDelete: (a: Att) => void;
+}) {
+  const { rowProps, handleProps, rowCls } = useDragReorder(onReorder, { group });
+  const canHover = useCanHover();
+  // ปุ่มลบ: จอที่มีเมาส์โชว์ตอนชี้ · จอสัมผัสโชว์ตลอด (ไม่มี hover)
+  const btnVis = canHover ? "opacity-0 group-hover/thumb:opacity-100 focus:opacity-100" : "";
+  return (
+    <>
+      {list.map((a, i) => (
+        <div key={a.id} {...(canEdit ? rowProps(i) : {})} className={`group/thumb relative h-14 w-14 rounded ${canEdit ? rowCls(i) : ""}`}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={thumb(a)} alt="" draggable={false} {...(canEdit ? handleProps(i) : {})}
+            onClick={() => onView(i)} title={canEdit ? "กด = ดูใหญ่ · ลาก = สลับตำแหน่ง (รูปแรก = รูปหลัก)" : "กดเพื่อดูใหญ่"}
+            className={`h-14 w-14 rounded object-cover border ${canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"} ${a.is_primary ? "border-amber-300" : "border-slate-200"}`} />
+          {a.is_primary && <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-amber-400/90 px-1 text-[8px] font-semibold leading-tight text-white">หลัก</span>}
+          {canDelete && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(a); }} title="ลบรูปนี้"
+              className={`absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white/95 text-[11px] leading-none text-rose-600 shadow hover:bg-rose-50 ${btnVis}`}>✕</button>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function ChildImageBoard({ rows, titleField, subtitle, entityType, moduleKey, imageField, canDrop, actor, onOpen, onChanged }: {
   rows: Row[]; titleField: string; subtitle?: (r: Row) => string | null;
   entityType: string; moduleKey: string; imageField?: string;
@@ -73,6 +107,10 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
   onChanged: () => void;
 }) {
   const toast = useToast();
+  const { can } = useAuth();
+  const canDelete = canDrop && can("attachments.delete");   // ลบรูป = admin/manager (DB ตรวจซ้ำ)
+  const [delAsk, setDelAsk] = useState<{ row: Row; att: Att } | null>(null);
+  const [delBusy, setDelBusy] = useState(false);
   const [imgs, setImgs] = useState<Record<string, Att[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -111,6 +149,68 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
     setBusyId(null);
     if (res.errors.length) toast.error(res.errors.slice(0, 3).join(" · "));
     if (res.ok) { toast.success(`เพิ่มรูปให้ ${codeOf(row)} ${res.ok} รูป`); await load(); onChanged(); }
+  };
+
+  // ตั้งรูปหลัก = รูปแรก (รูปปก SKU เปลี่ยนตาม — trigger ใน DB)
+  const makePrimary = async (attId: string) => {
+    const r = await apiFetch(`/api/attachments/${attId}`, { method: "PATCH" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.error) throw new Error(j.error || "ตั้งรูปหลักไม่สำเร็จ");
+  };
+
+  // ลากสลับตำแหน่ง: โชว์ทันที → บันทึกลำดับ · รูปที่ย้ายไปช่องแรก = รูปหลักใหม่
+  const reorder = async (row: Row, from: number, to: number) => {
+    const id = String(row.id);
+    const cur = imgs?.[id] ?? [];
+    const next = moveItem(cur, from, to);
+    if (next === cur) return;
+    const newFirst = next[0];
+    setImgs((m) => ({ ...(m ?? {}), [id]: next.map((a) => ({ ...a, is_primary: a.id === newFirst.id })) }));
+    setBusyId(id);
+    try {
+      const r = await apiFetch("/api/attachments/reorder", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_type: entityType, entity_id: id, ordered_ids: next.map((a) => a.id) }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || "บันทึกลำดับรูปไม่สำเร็จ");
+      if (!cur[0] || cur[0].id !== newFirst.id || !newFirst.is_primary) {
+        await makePrimary(newFirst.id);
+        toast.success(`${codeOf(row)}: ตั้งรูปหลักใหม่แล้ว (รูปแรก)`);
+        onChanged();
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกลำดับรูปไม่สำเร็จ");
+      await load();
+    } finally { setBusyId(null); }
+  };
+
+  const confirmDelete = async () => {
+    if (!delAsk) return;
+    const { row, att } = delAsk;
+    const id = String(row.id);
+    setDelBusy(true);
+    try {
+      const r = await apiFetch(`/api/attachments/${att.id}?actor=${encodeURIComponent(actor ?? "")}`, { method: "DELETE" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || "ลบรูปไม่สำเร็จ");
+      const rest = (imgs?.[id] ?? []).filter((x) => x.id !== att.id);
+      const wasCover = !!att.is_primary || (!!imageField && !!att.file_path && row[imageField] === att.file_path);
+      if (wasCover && rest.length) {
+        await makePrimary(rest[0].id).catch(() => {});   // รูปถัดไปเป็นรูปหลัก/รูปปกแทน
+      } else if (wasCover && imageField) {
+        // ไม่เหลือรูปแล้ว → ล้างรูปปกที่ยังชี้รูปที่ลบ
+        await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edits: [{ id, changes: { [imageField]: null } }] }),
+        }).catch(() => {});
+      }
+      toast.success(`ลบรูปของ ${codeOf(row)} แล้ว${j.kept_as_version ? " — ย้อนคืนได้ที่ 🕘 ประวัติในหน้า SKU" : ""}`);
+      setDelAsk(null);
+      await load(); onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ลบรูปไม่สำเร็จ");
+    } finally { setDelBusy(false); }
   };
 
   const openBulk = (files: File[]) => {
@@ -183,12 +283,10 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
                   <div className="h-14 rounded bg-slate-100 animate-pulse" />
                 ) : (
                   <div className="flex flex-wrap gap-1">
-                    {list.map((a, i) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img key={a.id} src={thumb(a)} alt="" draggable={false}
-                        onClick={() => setLb({ images: list.map((x) => ({ url: thumb(x, 1600), label: `${codeOf(r)}${x.is_primary ? " · รูปหลัก" : ""}` })), index: i })}
-                        className={`h-14 w-14 rounded object-cover border cursor-zoom-in ${a.is_primary ? "border-amber-300" : "border-slate-200"}`} />
-                    ))}
+                    <ThumbStrip group={id} list={list} canEdit={canDrop && busyId !== id} canDelete={canDelete && busyId !== id}
+                      onView={(i) => setLb({ images: list.map((x) => ({ url: thumb(x, 1600), label: `${codeOf(r)}${x.is_primary ? " · รูปหลัก" : ""}` })), index: i })}
+                      onReorder={(from, to) => void reorder(r, from, to)}
+                      onDelete={(a) => setDelAsk({ row: r, att: a })} />
                     {canDrop && list.length < MAX_PER_RECORD && (
                       <label className={`h-14 w-14 rounded border border-dashed flex items-center justify-center text-[10px] text-center leading-tight cursor-pointer ${over ? "border-violet-400 text-violet-600" : "border-slate-300 text-slate-400 hover:bg-slate-50"}`}>
                         {busyId === id ? <span className="w-4 h-4 border-2 border-slate-300 border-t-violet-600 rounded-full animate-spin" /> : list.length ? "＋" : "ลากรูป\nมาวาง"}
@@ -202,7 +300,17 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
           })}
         </div>
       )}
-      <p className="text-[10px] text-slate-400">💡 กดรูป = ดูใหญ่ · กดรหัส = เปิดหน้า SKU (ตั้งรูปหลัก/ลบ/เรียง) · ย่อรูป 1500px อัตโนมัติ · สูงสุด {MAX_PER_RECORD} รูปต่อ SKU</p>
+      <p className="text-[10px] text-slate-400">💡 กดรูป = ดูใหญ่{canDrop ? " · ลากรูป = สลับตำแหน่ง (รูปแรก = รูปหลัก/รูปปก)" : ""}{canDelete ? " · ✕ = ลบรูป" : ""} · กดรหัส = เปิดหน้า SKU · ย่อรูป 1500px อัตโนมัติ · สูงสุด {MAX_PER_RECORD} รูปต่อ SKU</p>
+
+      <ConfirmDialog open={!!delAsk} onClose={() => { if (!delBusy) setDelAsk(null); }} onConfirm={() => void confirmDelete()} loading={delBusy}
+        variant="danger" title="ลบรูปนี้?" confirmText="ลบรูป"
+        message={delAsk ? (
+          <span className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={thumb(delAsk.att, 160)} alt="" className="h-16 w-16 shrink-0 rounded object-cover border border-slate-200" />
+            <span>ลบรูปนี้ออกจาก <b className="font-mono">{codeOf(delAsk.row)}</b>{delAsk.att.is_primary ? " (รูปหลัก — รูปถัดไปจะเป็นรูปหลักแทน)" : ""} · ย้อนคืนได้ที่ 🕘 ประวัติในหน้า SKU</span>
+          </span>
+        ) : ""} />
 
       <ImageLightbox images={lb.images} index={lb.index} onClose={() => setLb((s) => ({ ...s, index: -1 }))} onIndex={(i) => setLb((s) => ({ ...s, index: i }))} />
 
