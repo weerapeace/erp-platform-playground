@@ -119,10 +119,10 @@ export const listingColumnsFrom = (c: { desktop: number; tablet: number; mobile:
 });
 
 /* ── 🧭 ตัวกรองหน้ารายการสินค้า (theme.listing.filters) — ตั้งใน ERP แท็บดีไซน์ → หน้ารายการสินค้า ──
- * ชนิด: หมวด · สี (โทนสีกลาง) · ช่วงราคา · ขนาด (จากด้านยาวสุด ซม.) · คอลเลกชัน · ใส่อะไรได้ · สถานะ (พร้อมส่ง/ลดราคา/ใหม่)
+ * ชนิด: หมวด · สี (โทนสีกลาง) · ช่วงราคา · ขนาด (จากด้านยาวสุด ซม.) · 📐 ไซส์ (ปุ่มไซส์ S/M/L = ตัวเลือกชุดที่ 2) · คอลเลกชัน · ใส่อะไรได้ · สถานะ (พร้อมส่ง/ลดราคา/ใหม่)
  *       · ฟิลด์สินค้า (attrs) — ค่าตรงตัว หรือ "กลุ่มคำ" (เช่น วัสดุ: ไนล่อน = มีคำว่า ไนล่อน/nylon)
  * เว็บร้านคำนวณตัวเลือก + จำนวนเอง (src/lib/shop-filters.ts) · กลุ่มที่ไม่มีตัวเลือกจะซ่อนเอง */
-export type ShopFilterKind = "category" | "color" | "price" | "size" | "collection" | "fits" | "status" | "field";
+export type ShopFilterKind = "category" | "color" | "price" | "size" | "option2" | "collection" | "fits" | "status" | "field";
 export interface ShopFilterKeyword {
   label: string;
   words: string[];
@@ -146,6 +146,7 @@ export const SHOP_FILTER_KIND_LABEL: Record<ShopFilterKind, string> = {
   color: "สี (โทน)",
   price: "ช่วงราคา",
   size: "ขนาด",
+  option2: "ไซส์ (ปุ่มไซส์)",
   collection: "คอลเลกชัน",
   fits: "ใส่อะไรได้",
   status: "สถานะ",
@@ -156,6 +157,8 @@ const BUILTIN_FILTERS: ShopFilter[] = [
   { id: "color", kind: "color", label: "สี", enabled: true, open: true },
   { id: "price", kind: "price", label: "ช่วงราคา", enabled: true, open: true },
   { id: "size", kind: "size", label: "ขนาด", enabled: true, open: false },
+  // 📐 ไซส์จากปุ่มไซส์ของสินค้า (S/M/L) — ไม่มีสินค้าที่มีไซส์ = ซ่อนเอง · ร้านที่บันทึกตัวกรองไว้แล้ว = ต่อท้ายแบบปิด (ต้องเปิดเองในแท็บนี้)
+  { id: "option2", kind: "option2", label: "ไซส์", enabled: true, open: false },
   {
     id: "f-materials",
     kind: "field",
@@ -182,7 +185,7 @@ export const DEFAULT_SIZE_BREAKS = [25, 40];
 
 /** เกลาค่าตัวกรอง — ไม่มีมาเลย = ชุดตั้งต้น · ชนิดในตัวที่หายไป = ต่อท้ายแบบปิดไว้ (เพิ่มชนิดใหม่ในอนาคตไม่ไปโผล่เอง) */
 export function normalizeShopFilters(raw: unknown, legacyColorOff = false): ShopFilter[] {
-  const KINDS: ShopFilterKind[] = ["category", "color", "price", "size", "collection", "fits", "status", "field"];
+  const KINDS: ShopFilterKind[] = ["category", "color", "price", "size", "option2", "collection", "fits", "status", "field"];
   const txt = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
   if (!Array.isArray(raw)) return DEFAULT_SHOP_FILTERS.map((f) => (f.kind === "color" && legacyColorOff ? { ...f, enabled: false } : { ...f, keywords: f.keywords?.map((k) => ({ ...k, words: [...k.words] })) }));
   const out: ShopFilter[] = [];

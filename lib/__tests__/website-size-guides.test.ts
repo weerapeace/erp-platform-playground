@@ -47,3 +47,18 @@ describe("website-size-guides", () => {
     expect(pub.rows[1]).toMatchObject({ size: "M", min: 32, max: 36 });
   });
 });
+
+import { normalizeShopFilters, DEFAULT_SHOP_FILTERS } from "../website-listing";
+
+describe("ตัวกรองไซส์ (option2) ในหน้ารายการสินค้า", () => {
+  it("ร้านใหม่ (ยังไม่เคยบันทึก) = มีตัวกรองไซส์เปิดอยู่ ต่อจาก 'ขนาด'", () => {
+    const ids = DEFAULT_SHOP_FILTERS.map((f) => f.id);
+    expect(ids.indexOf("option2")).toBe(ids.indexOf("size") + 1);
+    expect(normalizeShopFilters(undefined).find((f) => f.id === "option2")?.enabled).toBe(true);
+  });
+  it("ร้านที่บันทึกตัวกรองไว้แล้ว = ต่อท้ายแบบปิด (ไม่โผล่เอง) · บันทึกแบบเปิดแล้วเก็บไว้ได้", () => {
+    const saved = [{ kind: "category" }, { kind: "price" }];
+    expect(normalizeShopFilters(saved).find((f) => f.id === "option2")).toMatchObject({ enabled: false, label: "ไซส์" });
+    expect(normalizeShopFilters([...saved, { kind: "option2", label: "Size", enabled: true }]).find((f) => f.id === "option2")).toMatchObject({ enabled: true, label: "Size" });
+  });
+});
