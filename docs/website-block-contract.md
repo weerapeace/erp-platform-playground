@@ -115,6 +115,15 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
   - CSS `.gal-cap-on` `.gal-cap-hover` (จอสัมผัสเห็นตลอด) `.gal-card` ใน globals.css
 - ใช้อยู่: แกลเลอรีรูป · Section ใหม่ที่มีรูป+ข้อความรายรูป ให้ใช้ชุดนี้ ไม่เขียนเอง
 
+## 🛍 ลุคบุ๊กกดซื้อได้ — ปรับเพิ่ม 2026-10-18 (ค่าเริ่มทุกช่อง = หน้าตาเดิม)
+- จุดละหลายสินค้า: `spots[].code` สูงสุด 6 (ตัวแรก = หลัก · การ์ดเลื่อนดู ‹ 1/3 ›) · `spots[].label` ป้ายข้างจุด (ว่าง = ชื่อสินค้า)
+- สินค้าเพิ่มเติมไม่มีจุด: `more` (รหัสรุ่น ≤ 12) → อยู่ใน "รายการทั้งลุค" (แผงข้างรูปแบบรายการ / รายการใต้รูป / มือถือแบบรายการ)
+- รูป: `imgFrame` (rounded/rect) · แบบข้างรูป: `sideMode` (card เดิม / list รายการทั้งลุค + ราคารวม) · `imgWidth` 50/58(เดิม)/65/70 — รูปอยู่ขวาก็ได้ช่องกว้างตามที่ตั้ง
+- จุด: `dotColor` (white เดิม/ink/brand/brandDeep/custom+`dotHex`) · `dotSize` s/m(เดิม)/l · `dotPulse` auto(เฉพาะวงกลม เดิม)/on/off · `dotLabel` ป้ายชื่อข้างจุด
+- การ์ด: `cardBg` (auto เดิม/page/surface/white/brandSoft/custom+`cardHex`) · `cardAlign` · `addStyle` · `viewStyle` (outline เดิม/brand/dark/link) · `showTotal`+`totalText`
+- รายการใต้รูป: `listTitle` · `listStyle` grid(เดิม)/carousel (ProductsCarousel กลาง) · `listCols` auto(ธีม)/2–6 · มือถือ `mobileLayout` same/list (ซ่อนการ์ด/ป๊อป → รายการใต้รูป)
+- เว็บร้าน: `src/components/home/LookbookBody.tsx` (SpotCard · LookList · LookCard) · CSS `.lb-*` ใน globals.css (จุดใช้ตัวแปร `--lb-dot-*` · คอลัมน์ `--lb-fr`)
+
 ## ⭐ แม่แบบ Section + 🕘 ประวัติเวอร์ชัน
 - **แม่แบบ Section** — ตาราง `website_section_templates` (migration 202610150200 · RLS เปิด ไม่มี policy · เข้าผ่าน API service role เท่านั้น)
   - API `/api/website/section-templates` GET/POST/PATCH(ชื่อ)/DELETE · ทุกการกระทำลง audit · ผืนผ้าใบในแม่แบบบันทึกรูปถูกใช้ (module `website_section_template`)

@@ -256,3 +256,20 @@ describe("products: การ์ดในส่วนนี้", () => {
     expect(master.copyShopCard!({ showBadge: false, autoBadges: { sale: true } }).cardBadge).toBe(true);
   });
 });
+
+describe("ลุคบุ๊ก — ปรับได้เยอะ + หลายสินค้าต่อจุด + สินค้าเพิ่มเติม", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "lb", type: "lookbook", ...b }])[0] as unknown as Record<string, unknown> & { spots: Record<string, unknown>[] };
+
+  it("ลุคบุ๊กเก่า (จุดละ 1 สินค้า ไม่มีช่องใหม่) = ค่าเริ่มแบบเดิมทุกช่อง", () => {
+    const b = norm({ imageKey: "a/b.jpg", layout: "pop", dot: "dot", spots: [{ code: ["ROAR01"], pos: { x: 30, y: 40 }, popSide: "auto", note: "" }] });
+    expect(b).toMatchObject({ imgFrame: "rounded", sideMode: "card", imgWidth: "58", dotColor: "white", dotSize: "m", dotPulse: "auto", dotLabel: false, listStyle: "grid", listCols: "auto", mobileLayout: "same", more: [], cardBg: "auto", cardAlign: "left", addStyle: "brand", viewStyle: "outline" });
+    expect(b.spots[0]).toMatchObject({ code: ["ROAR01"], label: "" });
+  });
+
+  it("จุดเลือกได้ถึง 6 สินค้า · สินค้าเพิ่มเติม 12 · ค่ามั่ว = ค่าเริ่ม", () => {
+    const b = norm({ more: ["a1", "a2"], dotColor: "neon", sideMode: "list", spots: [{ code: ["p1", "p2", "p3", "p4", "p5", "p6", "p7"], label: "กระเป๋า", label_en: "Bag" }] });
+    expect(b.spots[0].code).toEqual(["p1", "p2", "p3", "p4", "p5", "p6"]);
+    expect(b.spots[0]).toMatchObject({ label: "กระเป๋า", label_en: "Bag" });
+    expect(b).toMatchObject({ more: ["a1", "a2"], dotColor: "white", sideMode: "list" });
+  });
+});

@@ -1245,6 +1245,14 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     fields: [
       ...headFields({ eyebrow: "Shop the look", title: "", subtitle: true }),
       image("imageKey", "รูปลุค", { required: true, requiredMessage: "ยังไม่ได้เลือกรูปลุค", hint: "รูปนายแบบ/ไลฟ์สไตล์ · โชว์เต็มรูปไม่ตัด · วางจุดในแต่ละ \"จุดบนรูป\" ด้านล่าง" }),
+      f("imgFrame", "มุมรูปลุค", "select", {
+        group: "media",
+        default: "rounded",
+        options: [
+          { v: "rounded", l: "มุมมน (ตามธีม)" },
+          { v: "rect", l: "เหลี่ยม" },
+        ],
+      }),
       f("layout", "รูปแบบ", "select", { group: "layout", default: "side", wide: true, display: "tiles", options: LOOKBOOK_LAYOUTS }),
       f("side", "รูปอยู่ด้าน", "select", {
         group: "layout",
@@ -1252,6 +1260,28 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         options: [
           { v: "left", l: "ซ้าย" },
           { v: "right", l: "ขวา" },
+        ],
+        showIf: { key: "layout", eq: "side" },
+      }),
+      f("sideMode", "แผงข้างรูป", "select", {
+        group: "layout",
+        default: "card",
+        options: [
+          { v: "card", l: "การ์ดสินค้าตัวที่กดจุด (แบบเดิม)" },
+          { v: "list", l: "รายการสินค้าทั้งลุค" },
+        ],
+        wide: true,
+        showIf: { key: "layout", eq: "side" },
+        hint: "รายการ = เห็นทุกชิ้นในลุค (รวมสินค้าเพิ่มเติม) · กดจุดแล้วแถวนั้นไฮไลต์",
+      }),
+      f("imgWidth", "ความกว้างรูป : แผง", "select", {
+        group: "layout",
+        default: "58",
+        options: [
+          { v: "50", l: "ครึ่ง-ครึ่ง" },
+          { v: "58", l: "รูปใหญ่กว่านิด (แบบเดิม)" },
+          { v: "65", l: "รูปใหญ่" },
+          { v: "70", l: "รูปใหญ่มาก" },
         ],
         showIf: { key: "layout", eq: "side" },
       }),
@@ -1264,7 +1294,65 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "num", l: "ตัวเลข 1 2 3" },
         ],
       }),
-      f("showList", "การ์ดสินค้าทุกจุดใต้รูป", "toggle", { group: "layout", default: false, hint: "เรียงสินค้าทุกจุดไว้ใต้รูปด้วย (ลูกค้าเห็นครบโดยไม่ต้องกดจุด)" }),
+      f("dotColor", "สีจุด", "select", {
+        group: "layout",
+        default: "white",
+        options: [
+          { v: "white", l: "ขาว (แบบเดิม)" },
+          { v: "ink", l: "สีตัวอักษรหลัก" },
+          { v: "brand", l: "สีแบรนด์" },
+          { v: "brandDeep", l: "สีแบรนด์เข้ม" },
+          { v: "custom", l: "สีเอง…" },
+        ],
+      }),
+      f("dotHex", "สีจุด (เลือกเอง)", "color", { group: "layout", default: "", showIf: { key: "dotColor", eq: "custom" } }),
+      f("dotSize", "ขนาดจุด", "select", {
+        group: "layout",
+        default: "m",
+        options: [
+          { v: "s", l: "เล็ก" },
+          { v: "m", l: "กลาง (แบบเดิม)" },
+          { v: "l", l: "ใหญ่" },
+        ],
+      }),
+      f("dotPulse", "จุดกะพริบ", "select", {
+        group: "layout",
+        default: "auto",
+        options: [
+          { v: "auto", l: "แบบเดิม (เฉพาะวงกลม)" },
+          { v: "on", l: "กะพริบทุกแบบ" },
+          { v: "off", l: "ไม่กะพริบ" },
+        ],
+      }),
+      f("dotLabel", "ป้ายชื่อสินค้าข้างจุด", "toggle", { group: "layout", default: false, hint: "ตั้งข้อความเองได้ที่แต่ละจุด" }),
+      f("showList", "รายการสินค้าใต้รูป", "toggle", { group: "layout", default: false, hint: "เรียงสินค้าทั้งลุค (ทุกจุด + สินค้าเพิ่มเติม) ไว้ใต้รูป" }),
+      text("listTitle", "หัวข้อรายการใต้รูป", { group: "layout", default: "", max: 80, placeholder: "เช่น สินค้าในลุคนี้", showIf: { key: "showList", eq: true }, hint: "ว่าง = ไม่มีหัวข้อ" }),
+      f("listStyle", "รายการใต้รูปแบบ", "select", {
+        group: "layout",
+        default: "grid",
+        options: [
+          { v: "grid", l: "ตาราง (แบบเดิม)" },
+          { v: "carousel", l: "เลื่อนข้าง" },
+        ],
+        showIf: { key: "showList", eq: true },
+      }),
+      f("listCols", "คอลัมน์ (จอคอม)", "select", {
+        group: "layout",
+        default: "auto",
+        options: [{ v: "auto", l: "ตามธีม (แบบเดิม)" }, ...["2", "3", "4", "5", "6"].map((v) => ({ v, l: `${v} คอลัมน์` }))],
+        showIf: [{ key: "showList", eq: true }, { key: "listStyle", eq: "grid" }],
+      }),
+      f("mobileLayout", "มือถือ", "select", {
+        group: "layout",
+        default: "same",
+        options: [
+          { v: "same", l: "เหมือนคอม (แบบเดิม)" },
+          { v: "list", l: "รูป + รายการสินค้าใต้รูป" },
+        ],
+        wide: true,
+        hint: "จอมือถือแคบ ป๊อปบนรูปอาจบังรูป — เลือก \"รายการ\" ให้กดง่ายขึ้น",
+      }),
+      f("more", "สินค้าเพิ่มเติมในลุค (ไม่ต้องวางจุด)", "products", { group: "products", max: 12, wide: true, hint: "โชว์ในรายการทั้งลุค (แผงข้างรูปแบบรายการ / รายการใต้รูป / มือถือแบบรายการ)" }),
       // 🃏 การ์ดสินค้าที่เด้ง/อยู่ข้างรูป — เลือกว่าจะโชว์อะไร
       f("cardSize", "ขนาดการ์ดป๊อป", "select", {
         group: "products",
@@ -1286,6 +1374,28 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "3:4", l: "แนวตั้ง 3:4" },
         ],
       }),
+      f("cardBg", "พื้นการ์ด / แผง", "select", {
+        group: "products",
+        default: "auto",
+        options: [
+          { v: "auto", l: "แบบเดิม" },
+          { v: "page", l: "สีพื้นเว็บ" },
+          { v: "surface", l: "สีพื้นการ์ด" },
+          { v: "white", l: "ขาว" },
+          { v: "brandSoft", l: "สีแบรนด์จาง" },
+          { v: "custom", l: "สีเอง…" },
+        ],
+        hint: "แบบเดิม = ป๊อปสีพื้นเว็บ · ข้างรูปไม่มีพื้น",
+      }),
+      f("cardHex", "พื้นการ์ด (เลือกเอง)", "color", { group: "products", default: "", showIf: { key: "cardBg", eq: "custom" } }),
+      f("cardAlign", "จัดข้อความในการ์ด", "select", {
+        group: "products",
+        default: "left",
+        options: [
+          { v: "left", l: "ชิดซ้าย" },
+          { v: "center", l: "กึ่งกลาง" },
+        ],
+      }),
       f("showImage", "รูปสินค้า", "toggle", { group: "products", default: true }),
       f("showName", "ชื่อสินค้า", "toggle", { group: "products", default: true }),
       f("showPrice", "ราคา", "toggle", { group: "products", default: true }),
@@ -1293,8 +1403,31 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       f("showDesc", "คำอธิบายย่อ (2 บรรทัด)", "toggle", { group: "products", default: false }),
       f("showAdd", "ปุ่มใส่ตะกร้า", "toggle", { group: "products", default: true }),
       text("addText", "ข้อความปุ่มใส่ตะกร้า", { group: "products", default: "ใส่ตะกร้า", max: 30, showIf: { key: "showAdd", eq: true } }),
+      f("addStyle", "หน้าตาปุ่มใส่ตะกร้า", "select", {
+        group: "products",
+        default: "brand",
+        options: [
+          { v: "brand", l: "ทึบสีแบรนด์ (แบบเดิม)" },
+          { v: "dark", l: "ทึบสีเข้ม" },
+          { v: "outline", l: "ขอบบาง" },
+        ],
+        showIf: { key: "showAdd", eq: true },
+      }),
       f("showView", "ปุ่มดูสินค้า", "toggle", { group: "products", default: true }),
       text("viewText", "ข้อความปุ่มดูสินค้า", { group: "products", default: "ดูสินค้า", max: 30, showIf: { key: "showView", eq: true } }),
+      f("viewStyle", "หน้าตาปุ่มดูสินค้า", "select", {
+        group: "products",
+        default: "outline",
+        options: [
+          { v: "outline", l: "ขอบบาง (แบบเดิม)" },
+          { v: "brand", l: "ทึบสีแบรนด์" },
+          { v: "dark", l: "ทึบสีเข้ม" },
+          { v: "link", l: "ข้อความขีดเส้นใต้" },
+        ],
+        showIf: { key: "showView", eq: true },
+      }),
+      f("showTotal", "ราคารวมทั้งลุค", "toggle", { group: "products", default: true, hint: "โชว์ท้ายรายการทั้งลุค (แผงข้างรูปแบบรายการ / มือถือแบบรายการ)" }),
+      text("totalText", "ข้อความราคารวม", { group: "products", default: "รวมทั้งลุค", max: 40, showIf: { key: "showTotal", eq: true } }),
     ],
     children: {
       key: "spots",
@@ -1303,7 +1436,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       icon: "📍",
       max: 12,
       fields: [
-        f("code", "สินค้าของจุดนี้", "products", { max: 1, wide: true }),
+        f("code", "สินค้าของจุดนี้ (เลือกได้หลายตัว)", "products", { max: 6, wide: true, hint: "ตัวแรก = ตัวหลัก · มากกว่า 1 ตัว = การ์ดเลื่อนดูได้ (‹ 1/3 ›)" }),
+        text("label", "ป้ายข้างจุด", { default: "", max: 40, placeholder: "ว่าง = ชื่อสินค้าตัวแรก", hint: "โชว์เมื่อเปิด \"ป้ายชื่อสินค้าข้างจุด\"" }),
         f("pos", "ตำแหน่งบนรูป", "point", { pointImage: "imageKey", wide: true }),
         f("popSide", "การ์ดเด้งด้านไหนของจุด", "select", {
           default: "auto",
@@ -1318,9 +1452,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         }),
         text("note", "ข้อความเพิ่มในการ์ด (ถ้ามี)", { default: "", max: 120, wide: true, placeholder: "เช่น สี Cherry Red · ขายดีอันดับ 1" }),
       ],
-      summary: (it) => (Array.isArray(it.code) && it.code.length ? String(it.code[0]) : "ยังไม่เลือกสินค้า"),
+      summary: (it) => (Array.isArray(it.code) && it.code.length ? `${it.code[0]}${it.code.length > 1 ? ` +${it.code.length - 1}` : ""}` : "ยังไม่เลือกสินค้า"),
     },
-    summary: (b) => count(arr(b.spots).length, "จุด"),
+    summary: (b) => `${count(arr(b.spots).length, "จุด")}${Array.isArray(b.more) && b.more.length ? ` · +${b.more.length} สินค้าเพิ่มเติม` : ""}`,
     validate: (b, label) => (arr(b.spots).some((x) => !(Array.isArray(x.code) && x.code.length)) ? [{ level: "warning", message: `${label}: บางจุดยังไม่เลือกสินค้า` }] : []),
   },
 

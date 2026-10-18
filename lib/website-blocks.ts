@@ -359,7 +359,30 @@ export interface LookbookBlock extends BlockBase {
   addText: string;
   showView: boolean;
   viewText: string;
-  spots: (ChildBase & { code: string[]; pos: { x: number; y: number }; popSide: "auto" | "right" | "left" | "top" | "bottom"; note: string })[];
+  /** 🛍 ปรับเพิ่ม 2026-10-18 — ค่าเริ่มทุกช่อง = หน้าตาเดิม */
+  imgFrame?: "rounded" | "rect";
+  sideMode?: "card" | "list";
+  imgWidth?: "50" | "58" | "65" | "70";
+  dotColor?: "white" | "ink" | "brand" | "brandDeep" | "custom";
+  dotHex?: string;
+  dotSize?: "s" | "m" | "l";
+  dotPulse?: "auto" | "on" | "off";
+  dotLabel?: boolean;
+  listTitle?: string;
+  listStyle?: "grid" | "carousel";
+  listCols?: string;
+  mobileLayout?: "same" | "list";
+  /** สินค้าเพิ่มเติมในลุค (ไม่มีจุด) — รหัสรุ่น */
+  more?: string[];
+  cardBg?: string;
+  cardHex?: string;
+  cardAlign?: "left" | "center";
+  addStyle?: "brand" | "dark" | "outline";
+  viewStyle?: "outline" | "brand" | "dark" | "link";
+  showTotal?: boolean;
+  totalText?: string;
+  /** code = หลายสินค้าต่อจุดได้ (ตัวแรก = หลัก) · label = ป้ายข้างจุด */
+  spots: (ChildBase & { code: string[]; label?: string; pos: { x: number; y: number }; popSide: "auto" | "right" | "left" | "top" | "bottom"; note: string })[];
 }
 /** 📖 การ์ดคอลเลกชัน (คอลเลกชันที่เปิดหน้าไว้ · แท็บ 🎞 คอลเลกชัน) */
 export interface CollectionsBlock extends BlockBase {
