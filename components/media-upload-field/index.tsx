@@ -5,12 +5,14 @@
  * - รูป: อัปโหลด / เลือกจากคลัง (AssetPicker) · วิดีโอ: MP4/WebM ไม่เกิน 4 MB (เช็กก่อนส่ง — Vercel รับไฟล์ได้ ~4.5 MB)
  * - พรีวิวในช่อง: รูป = ภาพ · วิดีโอ = เล่นเอง เงียบ วนซ้ำ
  * - ส่งผ่าน /api/admin/upload (สิทธิ์ files.upload) → ได้ r2 key
+ * - 📥 ลากรูป/วิดีโอจากเครื่องมาวางในช่องได้ (ของกลาง useFileDrop · หลายไฟล์ = ใช้ไฟล์แรก)
  * ใช้: <MediaUploadField label value={{kind,key}} onChange={(m) => …} allowVideo />
  */
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { useFileDrop, FileDropHint } from "@/components/file-drop";
 
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 
@@ -67,8 +69,16 @@ export function MediaUploadField({
     }
   };
 
+  const drop = useFileDrop((files) => void upload(files[0]), {
+    accept: allowVideo ? ["image/", "video/"] : "image/",
+    disabled: busy,
+    onReject: () => toast.error(allowVideo ? "ลากมาได้เฉพาะรูป หรือวิดีโอ MP4/WebM" : "ช่องนี้รับเฉพาะรูป"),
+    onBusy: () => toast.warning("กำลังอัปโหลดอยู่ — รอสักครู่แล้วลากใหม่"),
+  });
+
   return (
-    <div>
+    <div {...drop.zone("field")} className="relative">
+      <FileDropHint show={drop.over === "field"} label={`วาง${allowVideo ? "รูป/วิดีโอ" : "รูป"}เพื่ออัปโหลด — ${label}`} />
       <label className="block text-[11px] font-medium text-slate-500 mb-1">{label}</label>
       <div className="flex items-start gap-2">
         <div className="shrink-0 w-40 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center text-[11px] text-slate-400" style={{ aspectRatio: previewRatio }}>
@@ -80,7 +90,11 @@ export function MediaUploadField({
               <img src={keyUrl(value.key, 400)} alt="" className="w-full h-full object-cover" />
             )
           ) : (
-            "ยังไม่มี"
+            <span className="text-center leading-snug px-1">
+              ยังไม่มี
+              <br />
+              <span className="text-[10px] text-slate-300">ลาก{allowVideo ? "รูป/วิดีโอ" : "รูป"}มาวางได้</span>
+            </span>
           )}
         </div>
         <div className="flex flex-col gap-1.5 min-w-0">
