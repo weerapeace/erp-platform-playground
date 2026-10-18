@@ -1415,14 +1415,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3 mt-3">
-                <div>
-                  <label className={labelCls}>รูปในกรอบ</label>
-                  <select className={inputCls} value={theme.card.imageFit} onChange={(e) => setCard({ imageFit: e.target.value as Theme["card"]["imageFit"] })}>
-                    <option value="cover">เต็มกรอบ (ตัดขอบ)</option>
-                    <option value="contain">ย่อให้เห็นทั้งรูป</option>
-                  </select>
-                </div>
+              {/* "รูปในกรอบ" (เต็มกรอบ/เห็นทั้งรูป) ย้ายไปอยู่กลุ่ม 🖼 รูปบนการ์ด ข้างล่าง คู่กับสีพื้นหลัง/ระยะห่าง */}
+              <div className="grid gap-3 sm:grid-cols-2 mt-3">
                 <div>
                   <label className={labelCls}>ปุ่ม "เพิ่มลงตะกร้า" บนรูป</label>
                   <select className={inputCls} value={theme.card.quickAdd} onChange={(e) => setCard({ quickAdd: e.target.value as Theme["card"]["quickAdd"] })}>
@@ -3045,10 +3039,18 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
         <p className="text-[11px] text-slate-400 mt-1">ลด % คิดจาก “ราคาเต็มขีดฆ่า (fake_price)” · {"{pct}"} = เลขเปอร์เซ็นต์ · ใหม่ = นับจากวันที่เพิ่มรุ่นเข้าร้าน · ขายดี = อันดับยอดขายบนเว็บ (ยังไม่มีออเดอร์ = ยังไม่ขึ้น)</p>
       </div>
 
-      {/* 🖼 รูปบนการ์ด */}
-      <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
+      {/* 🖼 รูปบนการ์ด — รูปในกรอบ (ตัด/ไม่ตัด) · สีพื้นหลัง · ระยะห่างจากขอบ */}
+      <div className="grid gap-3 sm:grid-cols-3 mt-4 pt-3 border-t border-slate-100">
         <div>
-          <label className={labelCls}>🖼 สีพื้นหลังหลังรูปสินค้า</label>
+          <label className={labelCls}>🖼 รูปในกรอบ</label>
+          <select className={inputCls} value={card.imageFit} onChange={(e) => setCard({ imageFit: e.target.value as Theme["card"]["imageFit"] })}>
+            <option value="cover">เต็มกรอบ (ตัดขอบรูปให้เต็มช่อง)</option>
+            <option value="contain">โชว์เต็มรูป (ไม่ตัด · ย่อให้เห็นครบ)</option>
+          </select>
+          <p className="text-[11px] text-slate-400 mt-0.5">ไม่ตัด = เห็นสินค้าครบทั้งชิ้น · ช่องว่างรอบรูปใช้ “สีพื้นหลัง” ข้าง ๆ</p>
+        </div>
+        <div>
+          <label className={labelCls}>สีพื้นหลังหลังรูปสินค้า</label>
           <div className="flex items-center gap-2">
             <span className="flex-1"><ColorInput value={card.imageBg} onChange={(v) => setCard({ imageBg: v })} /></span>
             {card.imageBg && <button type="button" onClick={() => setCard({ imageBg: "" })} className="text-xs text-slate-500 hover:text-red-600">ล้าง (ตามสินค้า)</button>}
@@ -3058,7 +3060,7 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
         <div>
           <label className={labelCls}>ระยะห่างรูปจากขอบกรอบ</label>
           <WheelSelect value={card.imagePad == null ? "" : String(card.imagePad)} onChange={(e) => setCard({ imagePad: e.target.value === "" ? null : Number(e.target.value) })}>
-            <option value="">อัตโนมัติ (ย่อพอดี = เว้นนิดหน่อย · เต็มกรอบ = ชิดขอบ)</option>
+            <option value="">อัตโนมัติ (ไม่ตัด = เว้นนิดหน่อย · เต็มกรอบ = ชิดขอบ)</option>
             {[0, 2, 4, 6, 8, 12, 16].map((n) => <option key={n} value={n}>{n === 0 ? "ชิดขอบ (0)" : `${n}%`}</option>)}
           </WheelSelect>
         </div>
