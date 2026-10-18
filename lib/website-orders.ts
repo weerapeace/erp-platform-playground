@@ -21,6 +21,8 @@ import {
   nameRuleNeedsRefs,
   PARENT_SELECT,
   CHILD_SELECT,
+  skuUnitPrice,
+  sortKids,
   type ParentRow,
   type ChildSku,
   type ListingRow,
@@ -240,6 +242,8 @@ export function pickSku(
   option2Id?: string,
   opts: { requireOption2?: boolean; off?: Set<string>; label2?: string } = {}
 ): { sku: ChildSku | null; variantLabel: string | null; variantParts: string[]; error?: string } {
+  // เรียงแบบเดียวกับที่เว็บสร้างตัวเลือก (sortKids) → SKU ที่หยิบ = ตัวเดียวกับที่เว็บโชว์ราคา
+  kids = sortKids(kids);
   const k1 = kidByOptionId(kids, optionId, "sku-");
   const k2 = kidByOptionId(kids, option2Id, "opt2-");
   let cands = kids;
@@ -261,8 +265,8 @@ export function pickSku(
       if (!hit) return fail(`${label2} ${v} ไม่มี${parts[0] ? `ในสี ${parts[0]}` : "แล้ว"}`);
       return { sku: hit, variantLabel: [...parts, v].join(" / "), variantParts: [...parts, v] };
     }
-    // สีนี้ไม่มี SKU ไซส์ = ขายตัวหลักของสี (ไม่ต้องเลือกไซส์)
-    const sku = cands[0] ?? k1 ?? null;
+    // สีนี้ไม่มี SKU ไซส์ = ขายตัวหลักของสี (ไม่ต้องเลือกไซส์) — SKU ที่รหัสตัวเลือกอ้างก่อน
+    const sku = (k1 && !variantValue(k1) ? k1 : null) ?? cands.find((k) => !variantValue(k)) ?? cands[0] ?? null;
     return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts };
   }
   if (k2) {
@@ -270,7 +274,8 @@ export function pickSku(
     cands = cands.filter((k) => variantValue(k) === v);
     if (v) parts.push(v);
   }
-  const sku = cands[0] ?? k1 ?? kids[0] ?? null;
+  // ไม่มีตัวเลือกชุด 2 = SKU ที่รหัสตัวเลือกอ้างตรง ๆ (สีเดียวกันมีหลาย SKU ราคาต่างกัน → ต้องได้ตัวที่เว็บโชว์ราคา)
+  const sku = (k2 ? cands[0] : k1 ?? cands[0]) ?? kids[0] ?? null;
   return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts };
 }
 
@@ -409,8 +414,6 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       listing,
       parent.category_id ? catName.get(parent.category_id) ?? null : null
     );
-    const price = Math.round(resolved.price * 100) / 100;
-    if (price <= 0) return { ok: false, error: `สินค้า ${resolved.name} ยังไม่มีราคา กรุณาติดต่อร้าน`, status: 409 };
     // 🚫 ตั้ง "สินค้าหมด" ใน ERP แล้ว = รับออเดอร์ไม่ได้ (กันตะกร้าเก่าที่ใส่ไว้ก่อนของหมด)
     if (listing.web_stock_status === "out") return { ok: false, error: `สินค้า ${resolved.name} หมดแล้ว กรุณาเอาออกจากตะกร้า`, status: 409 };
 
@@ -421,6 +424,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       label2: resolved.options2?.label,
     });
     if (picked.error) return { ok: false, error: `สินค้า ${resolved.name}: ${picked.error}`, status: 409 };
+    // 💰 ราคาตาม SKU ที่ลูกค้าเลือกจริง — สูตรเดียวกับที่เว็บโชว์ (lib/website-field-map skuUnitPrice / variantPrices) · ราคาเว็บทับ/ตัวเลือกกรอกเอง = ราคารุ่น
+    const price = Math.round(skuUnitPrice(fieldMap, listing, picked.sku, resolved.price) * 100) / 100;
+    if (price <= 0) return { ok: false, error: `สินค้า ${resolved.name} ยังไม่มีราคา กรุณาติดต่อร้าน`, status: 409 };
     const custom = customOptionLabel(listing, it.optionId);
     let variant = custom ?? picked.variantLabel;
     let variantEn = custom ? customOptionLabelEn(listing, it.optionId) || enOf(custom) : picked.variantParts.length ? picked.variantParts.map(enOf).join(" / ") : null;

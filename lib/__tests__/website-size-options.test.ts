@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { baseColor, buildSizeGrid, cleanVariantOff, sortSizeLabels, colorAllOff } from "../website-size-options";
-import { normalizeFieldMap, resolveProduct, type ChildSku, type ParentRow } from "../website-field-map";
+import { normalizeFieldMap, resolveProduct, skuUnitPrice, type ChildSku, type ParentRow } from "../website-field-map";
 import { pickSku } from "../website-orders";
 
 /**
@@ -117,5 +117,68 @@ describe("pickSku + ไซส์ (ออเดอร์)", () => {
 
   it("สีที่ไม่มีไซส์ → ขายตัวหลักได้เลย", () => {
     expect(pickSku(kids, opt(ID(8)), undefined, strict)).toMatchObject({ sku: { code: "B-03" }, variantLabel: "เทา" });
+  });
+});
+
+/**
+ * 💰 ราคาตาม SKU ที่ลูกค้าเลือก — หน้าเว็บ (variantPrices) กับออเดอร์ (skuUnitPrice + pickSku) ต้องได้ราคาเดียวกัน
+ * แบบข้อมูลจริง: PI338 (IG) จำนวนรู × ขนาดรู ราคา 65–95 · PIX01 (Pixiedustie) สีเดียวกันมี 2 SKU 490/550
+ */
+describe("ราคาต่อ SKU", () => {
+  const map = normalizeFieldMap({ price: { source: "sku_max" }, options: { source: "sku_color", label: "จำนวนรู" }, options2: { source: "variant_option" } });
+  const parent = { id: "p", code: "PI338", name_th: "เครื่องเจาะ", fake_price: 0 } as ParentRow;
+  const pk = (n: number, code: string, holes: string, size: string, price: number): ChildSku => ({
+    id: ID(n), code, color: holes, list_price: price, cover_image_r2_key: null, attribute_values: vo(size, "ขนาดรู"),
+  });
+  const pi = [pk(1, "PI2.7-2", "2 รู", "2.7 mm.", 75), pk(2, "PI3-2", "2 รู", "3 mm.", 75), pk(3, "PI2.7-10", "10 รู", "2.7 mm.", 65), pk(4, "PI3-10", "10 รู", "3 mm.", 95)];
+
+  it("PI338: ราคาโชว์ = ต่ำสุด (เริ่มต้น) · ราคาต่อคู่ตรงกับ SKU · ออเดอร์คิดราคาเดียวกัน", () => {
+    const r = resolveProduct(map, parent, pi, null, null);
+    expect(r.price).toBe(65);
+    expect(r.priceVaries).toBe(true);
+    const two = r.options!.items.find((i) => i.label === "2 รู")!.id;
+    const ten = r.options!.items.find((i) => i.label === "10 รู")!.id;
+    const s27 = r.options2!.items.find((i) => i.label === "2.7 mm.")!.id;
+    const s3 = r.options2!.items.find((i) => i.label === "3 mm.")!.id;
+    expect(r.variantPrices).toEqual({ [`${two}|${s27}`]: { price: 75 }, [`${two}|${s3}`]: { price: 75 }, [`${ten}|${s27}`]: { price: 65 }, [`${ten}|${s3}`]: { price: 95 } });
+    // ออเดอร์: 10 รู + 3 mm. → PI3-10 ราคา 95 (เดิมคิดราคารุ่นทุกตัว)
+    const picked = pickSku(pi, ten, s3, { requireOption2: true });
+    expect(picked.sku?.code).toBe("PI3-10");
+    expect(skuUnitPrice(map, null, picked.sku, r.price)).toBe(95);
+    expect(skuUnitPrice(map, null, pickSku(pi, ten, s27, { requireOption2: true }).sku, r.price)).toBe(65);
+  });
+
+  it("PIX01: สีเดียวกัน 2 SKU (490/550) → เว็บและออเดอร์ใช้ SKU ที่ตัวเลือกอ้าง = 490 ทุกสี (ไม่ใช่ราคาสูงสุด 550)", () => {
+    const m1 = normalizeFieldMap({ price: { source: "sku_max" }, options: { source: "sku_color" } });
+    const kidsPix: ChildSku[] = [
+      { id: ID(11), code: "PIX01-01", color: "ดำ", list_price: 490, cover_image_r2_key: null },
+      { id: ID(12), code: "PIX01-01/1", color: "ดำ", list_price: 550, cover_image_r2_key: null },
+      { id: ID(13), code: "PIX01-02", color: "ขาว", list_price: 490, cover_image_r2_key: null },
+    ];
+    const r = resolveProduct(m1, parent, [kidsPix[1], kidsPix[0], kidsPix[2]], null, null);
+    expect(r.price).toBe(490);
+    expect(r.priceVaries).toBe(false);
+    expect(r.variantPrices).toBeUndefined();
+    // DB คืน SKU 550 มาก่อน → ออเดอร์ต้องยังได้ PIX01-01 (ตัวที่รหัสตัวเลือกอ้าง)
+    const black = r.options!.items[0].id;
+    const sku = pickSku([kidsPix[1], kidsPix[0], kidsPix[2]], black).sku;
+    expect(sku?.code).toBe("PIX01-01");
+    expect(skuUnitPrice(m1, null, sku, r.price)).toBe(490);
+  });
+
+  it("กรอกราคาเว็บทับ / ตัวเลือกกรอกเอง = ราคาเดียวทั้งรุ่น (ไม่คิดตาม SKU)", () => {
+    const r = resolveProduct(map, parent, pi, { web_price: 80 }, null);
+    expect(r.price).toBe(80);
+    expect(r.variantPrices).toBeUndefined();
+    expect(skuUnitPrice(map, { web_price: 80 }, pi[3], r.price)).toBe(80);
+    const custom = { web_options: { label: "แบบ", items: [{ id: "a", label: "A" }] } };
+    expect(skuUnitPrice(map, custom, pi[3], 70)).toBe(70);
+  });
+
+  it("ราคาขีดฆ่าต่อ SKU: fake_price ของ SKU ที่สูงกว่าราคาขาย", () => {
+    const k = [{ ...pi[0], fake_price: 100 }, pi[1], pi[2], pi[3]];
+    const r = resolveProduct(map, parent, k, null, null);
+    const first = Object.entries(r.variantPrices!).find(([, v]) => v.compare)!;
+    expect(first[1]).toEqual({ price: 75, compare: 100 });
   });
 });

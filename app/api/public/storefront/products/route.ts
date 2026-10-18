@@ -249,11 +249,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         price: r.price,
         /** ราคาเต็ม (ขีดฆ่า) — fake_price ของ Parent SKU หรือของ SKU ลูก · ส่งเฉพาะเมื่อสูงกว่าราคาขาย (resolveComparePrice) */
         comparePrice: resolveComparePrice(p.fake_price, kids, r.price),
-        /** ราคาแต่ละตัวเลือกไม่เท่ากัน (ราคามาจาก SKU ลูก + ไม่ได้กรอกราคาเว็บทับ) → การ์ดโชว์ "เริ่มต้น ฿…" ได้ */
-        priceVaries:
-          !(l.web_price != null && Number(l.web_price) > 0) &&
-          (fieldMap.price.source === "sku_min" || fieldMap.price.source === "sku_max") &&
-          new Set(kids.map((k) => Number(k.list_price)).filter((n) => n > 0)).size > 1,
+        /** ราคาแต่ละตัวเลือกไม่เท่ากัน (ราคามาจาก SKU ลูก + ไม่ได้กรอกราคาเว็บทับ) → การ์ดโชว์ "เริ่มต้น ฿…" ได้ · price = ราคาต่ำสุด */
+        priceVaries: r.priceVaries,
+        /**
+         * 💰 ราคาต่อตัวเลือก (บาท) { "sku-xxxxxxxx" | "sku-xxxxxxxx|opt2-yyyyyyyy": { price, compare? } } — เฉพาะเมื่อราคาไม่เท่ากัน
+         * เว็บเปลี่ยนราคาตามที่เลือก + ตะกร้าใช้ราคานี้ · ออเดอร์คิดซ้ำฝั่งเซิร์ฟเวอร์ด้วยสูตรเดียวกัน (skuUnitPrice)
+         */
+        ...(r.variantPrices ? { variantPrices: r.variantPrices } : {}),
         /** วันที่ขึ้นร้านนี้ (ป้าย "ใหม่" อัตโนมัติ) */
         listedAt: typeof l.created_at === "string" ? l.created_at : null,
         unit: r.unit,

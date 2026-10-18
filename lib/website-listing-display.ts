@@ -55,10 +55,8 @@ export function computeListingDisplay(a: {
   const display: ListingDisplay = {
     name: eff.name,
     price: eff.price,
-    priceVaries:
-      !(l.web_price != null && Number(l.web_price) > 0) &&
-      (a.fieldMap.price.source === "sku_min" || a.fieldMap.price.source === "sku_max") &&
-      new Set(a.kids.map((k) => Number(k.list_price)).filter((n) => n > 0)).size > 1,
+    // 💰 ราคาตาม SKU ที่เลือกไม่เท่ากัน (ตัวเดียวกับเว็บ) · price = ราคาต่ำสุด
+    priceVaries: eff.priceVaries,
     imageKey: eff.images[0] ?? null,
     imageCount: eff.images.length,
     colors: (eff.options?.items ?? []).map((it) => {

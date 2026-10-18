@@ -41,8 +41,9 @@ export const NAME_SOURCE_OPTIONS: { v: NameSource; l: string }[] = [
   { v: "code", l: "รหัสสินค้า (code)" },
 ];
 export const PRICE_SOURCE_OPTIONS: { v: PriceSource; l: string }[] = [
-  { v: "sku_max", l: "ราคาสูงสุดของ SKU ลูก (แนะนำ)" },
-  { v: "sku_min", l: "ราคาต่ำสุดของ SKU ลูก" },
+  // 💰 ราคาจาก SKU ลูก = คิดตาม SKU ที่ลูกค้าเลือกจริง (การ์ดโชว์ "เริ่มต้น" ราคาต่ำสุด) · สูงสุด/ต่ำสุด ใช้เฉพาะสินค้าที่ไม่มีตัวเลือก
+  { v: "sku_max", l: "ราคาตาม SKU ที่ลูกค้าเลือก (แนะนำ · ไม่มีตัวเลือก = สูงสุด)" },
+  { v: "sku_min", l: "ราคาตาม SKU ที่ลูกค้าเลือก (ไม่มีตัวเลือก = ต่ำสุด)" },
   { v: "final_price", l: "ราคาสุทธิ (final_price)" },
   { v: "sale_price", l: "ราคาขาย (sale_price)" },
   { v: "fake_price", l: "ราคาก่อนลด (fake_price)" },
@@ -583,6 +584,69 @@ function resolveOptions2(
 }
 
 /**
+ * 💰 คิดราคาตาม SKU ที่ลูกค้าเลือกได้ไหม — ไม่ได้กรอกราคาเว็บทับ + ร้านเอาราคาจาก SKU ลูก (sku_max/sku_min) + ไม่ได้กรอกตัวเลือกเอง
+ * ใช้ร่วม: resolveProduct (ราคาที่เว็บโชว์ต่อตัวเลือก) · lib/website-orders (ราคาในออเดอร์) — ห้ามคิดคนละสูตร
+ */
+export function perSkuPricing(map: FieldMap, listing: ListingRow | null | undefined): boolean {
+  const l = listing ?? {};
+  if (l.web_price != null && num(l.web_price) > 0) return false;
+  const wo = l.web_options as { items?: unknown } | null | undefined;
+  if (wo && Array.isArray(wo.items) && wo.items.length) return false;
+  return map.price.source === "sku_max" || map.price.source === "sku_min";
+}
+
+/** 💰 ราคาต่อหน่วยของ SKU ที่ลูกค้าเลือก · SKU ไม่มีราคา / คิดราคาระดับรุ่น = fallback (ราคารุ่น) */
+export function skuUnitPrice(map: FieldMap, listing: ListingRow | null | undefined, sku: Pick<ChildSku, "list_price"> | null | undefined, fallback: number): number {
+  return sku && perSkuPricing(map, listing) && num(sku.list_price) > 0 ? num(sku.list_price) : fallback;
+}
+
+/** ราคาของตัวเลือก 1 ชุด (บาท) · compare = ราคาเต็มขีดฆ่า (fake_price ของ SKU หรือของ Parent ที่สูงกว่า) */
+export type VariantPrice = { price: number; compare?: number };
+
+/**
+ * 💰 ราคาต่อตัวเลือก — คีย์ = รหัสที่เว็บใส่ตะกร้า: "sku-xxxxxxxx" หรือ "sku-xxxxxxxx|opt2-yyyyyyyy" (ไม่มีตัวเลือกสี = "default|opt2-…")
+ * SKU ที่ใช้ = ตัวเดียวกับที่ออเดอร์หยิบ (pickSku): สี = SKU ที่รหัสตัวเลือกอ้าง · สี×ไซส์ = ช่องในตาราง สี×ไซส์
+ */
+function resolveVariantPrices(
+  map: FieldMap,
+  parent: ParentRow,
+  kids: ChildSku[],
+  listing: ListingRow,
+  options: ResolvedProduct["options"],
+  options2: Options2 | null,
+  grid: SizeGrid | null,
+  fallback: number
+): Record<string, VariantPrice> {
+  const out: Record<string, VariantPrice> = {};
+  if (!perSkuPricing(map, listing) || (!options && !options2)) return out;
+  const pf = num(parent.fake_price);
+  const entry = (sku: ChildSku): VariantPrice => {
+    const price = skuUnitPrice(map, listing, sku, fallback);
+    const f = num(sku.fake_price);
+    const compare = f > price ? f : pf > price ? pf : 0;
+    return compare ? { price, compare } : { price };
+  };
+  const byId = new Map(kids.map((k) => [k.id, k]));
+  const byOption = (id: string) => kids.find((k) => k.id.startsWith(id.slice(4)));
+  for (const it of options?.items ?? [{ id: "default", label: "" }]) {
+    const row = options ? grid?.colors.find((c) => c.label === it.label) : undefined;
+    const sized = !!options2 && (options ? !!row && !row.free : true);
+    if (!sized) {
+      const k1 = options ? byOption(it.id) : undefined;
+      if (k1) out[it.id] = entry(k1);
+      continue;
+    }
+    for (const s of options2!.items) {
+      if (s.colors && !s.colors.includes(it.id)) continue;
+      const cell = row ? row.cells[s.label] : grid?.colors.map((c) => c.cells[s.label]).find((c) => c && !c.off);
+      const sku = cell && !cell.off ? byId.get(cell.skuId) : undefined;
+      if (sku) out[`${it.id}|${s.id}`] = entry(sku);
+    }
+  }
+  return out;
+}
+
+/**
  * หมวดของสินค้าบนเว็บ (หลายหมวดได้)
  * จัดเองแล้ว (web_categories เป็น array แม้ว่าง) = ใช้ตามนั้น เฉพาะหมวดที่ร้านยังมีอยู่ · ยังไม่เคยจัด (null) = หมวดเดียวแบบเดิม (legacy)
  */
@@ -610,6 +674,10 @@ export interface ResolvedProduct {
   options: { label: string; items: { id: string; label: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
   /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
   options2: Options2 | null;
+  /** 💰 ราคาต่อตัวเลือก (เฉพาะเมื่อแต่ละตัวเลือกราคาไม่เท่ากัน) — price ด้านบน = ราคาต่ำสุด ("เริ่มต้น") */
+  variantPrices?: Record<string, VariantPrice>;
+  /** ราคาแต่ละตัวเลือกไม่เท่ากัน → การ์ดโชว์ "เริ่มต้น ฿…" */
+  priceVaries: boolean;
 }
 
 /**
@@ -643,9 +711,10 @@ export function resolveProduct(
       : null;
   // 📐 ตัวเลือกชุดที่ 2 (ไซส์) — กรอกทับตัวเลือกเองในหน้าจัดการ = ตั้งใจคุมเอง → ไม่ยัดกลุ่ม 2 ตามไปด้วย จะกลายเป็นเลือกไม่ตรงของ
   let options2: Options2 | null = null;
+  let grid: SizeGrid | null = null;
   if (!listingOptions?.items?.length && map.options2.source === "variant_option") {
     const sorted = sortKids(kids);
-    const grid = buildSizeGrid(sorted, new Set(cleanVariantOff(l.web_variant_off)));
+    grid = buildSizeGrid(sorted, new Set(cleanVariantOff(l.web_variant_off)));
     if (grid && mappedOptions) {
       // สีที่ปิดไซส์ไว้ครบทุกไซส์ (ตาราง สี×ไซส์ ในแท็บ 🛍) = ไม่ขายสีนี้บนเว็บ
       const hidden = new Set(grid.colors.filter(colorAllOff).map((c) => c.label));
@@ -662,10 +731,20 @@ export function resolveProduct(
     ? fromTags
     : resolveCategories(map, l.web_categories, clean(l.web_category) || rule || map.category.default);
 
+  // 💰 ราคา: กรอกราคาเว็บทับ = ราคานั้นทุกตัวเลือก · ไม่งั้นคิดตาม SKU ที่เลือก → ราคาที่โชว์ = ต่ำสุดของตัวเลือกที่ซื้อได้จริง
+  const modelPrice = l.web_price != null && num(l.web_price) > 0 ? num(l.web_price) : resolvePrice(map, parent, kids);
+  const vp = resolveVariantPrices(map, parent, kids, l, listingOptions?.items?.length ? null : mappedOptions, options2, grid, modelPrice);
+  const vpList = Object.values(vp);
+  const price = vpList.length ? Math.min(...vpList.map((v) => v.price)) : modelPrice;
+  const priceVaries = new Set(vpList.map((v) => v.price)).size > 1;
+  const compareVaries = new Set(vpList.map((v) => v.compare ?? 0)).size > 1;
+
   return {
     name: clean(l.web_name) || resolveName(map, parent),
     name_en: resolveNameEn(map, parent),
-    price: l.web_price != null && num(l.web_price) > 0 ? num(l.web_price) : resolvePrice(map, parent, kids),
+    price,
+    priceVaries,
+    ...(priceVaries || compareVaries ? { variantPrices: vp } : {}),
     description: clean(l.web_description) || resolveDescription(map, parent),
     description_en: resolveDescriptionEn(map, parent),
     unit: clean(l.web_unit) || map.unit.default,
