@@ -61,10 +61,11 @@ describe("payroll register print", () => {
       social_security_employee: 558,
       net_pay: 3976.27,
     })).toMatchObject({
-      month_end_pay: 3976.27,
-      transfer_net_pay: 3976.27,
+      // จำนวนเต็มบาท (38c70ed1): ยอดโอนตัดเศษสตางค์ลง · เศษไปอยู่เงินสด → รวมยังได้ 10,602
+      month_end_pay: 3976,
+      transfer_net_pay: 3976,
       overtime_amount: 0,
-      cash_pay: 3625.73,
+      cash_pay: 3626,
       balance: 10602,
     });
   });
