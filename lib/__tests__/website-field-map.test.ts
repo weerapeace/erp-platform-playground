@@ -17,8 +17,25 @@ describe("normalizeFieldMap — รายการหมวดของร้า
     const m = normalizeFieldMap({
       categories: [{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน" }],
     });
-    // รูปหมวด / แบนเนอร์ / ลำดับสินค้า ยังไม่ตั้ง = ค่าว่าง (ไม่ทำให้หมวดเดิมเปลี่ยนหน้าตา)
-    expect(m.categories).toEqual([{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน", imageKey: null, bannerKey: null, order: [], seoTitle: "", seoDescription: "" }]);
+    // รูปหมวด / แบนเนอร์ / ลำดับสินค้า / หมวดแม่ ยังไม่ตั้ง = ค่าว่าง (ไม่ทำให้หมวดเดิมเปลี่ยนหน้าตา · parent null = หมวดชั้นบน)
+    expect(m.categories).toEqual([{ key: "tools", label: "เครื่องมือ", icon: "🔧", blurb: "เหล็กตอก มีดฝาน", imageKey: null, bannerKey: null, order: [], seoTitle: "", seoDescription: "", parent: null }]);
+  });
+
+  it("📂 หมวดย่อย: เก็บหมวดแม่ที่ใช้ได้ · แม่ไม่มีจริง = ชั้นบน · เรียงแม่ตามด้วยลูก", () => {
+    const m = normalizeFieldMap({
+      categories: [
+        { key: "punch", label: "เหล็กตอก", parent: "tools" },
+        { key: "leather", label: "หนัง" },
+        { key: "tools", label: "เครื่องมือ" },
+        { key: "lost", label: "หมวดหลง", parent: "deleted-cat" },
+      ],
+    });
+    expect(m.categories.map((c) => [c.key, c.parent])).toEqual([
+      ["leather", null],
+      ["tools", null],
+      ["punch", "tools"],
+      ["lost", null],
+    ]);
   });
 
   it("คำโปรยที่ไม่ใช่ข้อความ / ยาวเกิน ถูกจัดให้เรียบร้อย ไม่ทำให้หมวดหาย", () => {

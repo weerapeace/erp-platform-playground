@@ -12,7 +12,8 @@ describe("แผงเมนูใหญ่: แม่แบบตั้งต�
     const p = megaPreset("A", { categories: cats });
     expect(p.layout).toBe("columns");
     expect(p.blocks.map((b) => b.kind)).toEqual(["links", "products", "feature"]);
-    expect(p.blocks[0].links.map((l) => l.href)).toEqual(["/shop", "/shop?sort=new", "/c/backpack", "/c/tote"]);
+    // "มาใหม่" → หน้า /new (ชุดมาใหม่ · 2026-10-17) แทน /shop?sort=new
+    expect(p.blocks[0].links.map((l) => l.href)).toEqual(["/shop", "/new", "/c/backpack", "/c/tote"]);
     expect(megaHasContent(p)).toBe(true);
   });
   it("B = ไอคอน · กลุ่ม · จุดสี", () => {
