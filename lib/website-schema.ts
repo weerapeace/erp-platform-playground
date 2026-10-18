@@ -636,6 +636,17 @@ const HERO_BTN_GRID: FieldOption[] = [
 ];
 const HERO_BTN_FLOW: FieldOption = { v: "flow", l: "ใต้ข้อความ (แบบเดิม)", sketch: "pos-flow" };
 
+/** 🎞️ รูปทรงสไลด์ (ปุ่มรูปย่อ ss-*) — "height" = ความสูงเตี้ย/กลาง/สูง แบบเดิม · ตัวเลข = สัดส่วน กว้าง:สูง (กรอบครอปในชิ้นสไลด์ตามนี้) */
+const SLIDE_SHAPES: FieldOption[] = [
+  { v: "height", l: "ตามความสูง (แบบเดิม)", sketch: "ss-height", hint: "เตี้ย / กลาง / สูง" },
+  { v: "21:9", l: "กว้างพิเศษ 21:9", sketch: "ss-21-9" },
+  { v: "16:9", l: "แนวนอน 16:9", sketch: "ss-16-9" },
+  { v: "3:2", l: "แนวนอน 3:2", sketch: "ss-3-2" },
+  { v: "1:1", l: "จัตุรัส 1:1", sketch: "ss-1-1" },
+  { v: "4:5", l: "แนวตั้ง 4:5", sketch: "ss-4-5" },
+  { v: "full", l: "เต็มจอ", sketch: "ss-full", hint: "สูงเท่าหน้าจอ" },
+];
+
 /* ─────────── SECTION LIBRARY ─────────── */
 
 export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
@@ -1016,9 +1027,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
   slideshow: {
     type: "slideshow",
     meta: { label: "สไลด์โชว์", icon: "🎞️", hint: "รูปหลายใบเลื่อนสลับ + ข้อความบนรูป", group: "เนื้อหา" },
+    // เว็บร้าน: src/components/home/Slideshow.tsx · ค่าเริ่มทุกช่อง = หน้าตาเดิม (สไลด์ที่จัดไว้แล้วไม่เปลี่ยน)
     fields: [
-      f("autoplay", "เลื่อนอัตโนมัติ", "toggle", { group: "layout", default: true }),
-      f("interval", "เวลาต่อสไลด์ (วินาที)", "number", { group: "layout", default: 5, min: 2, numMax: 20 }),
+      f("shape", "รูปทรงสไลด์ (คอม)", "select", { group: "layout", default: "height", wide: true, display: "tiles", options: SLIDE_SHAPES, hint: "กรอบ \"ส่วนที่เห็น / ซูม\" ในแต่ละสไลด์เปลี่ยนตาม" }),
       f("height", "ความสูง", "select", {
         group: "layout",
         default: "medium",
@@ -1026,6 +1037,83 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "short", l: "เตี้ย" },
           { v: "medium", l: "กลาง" },
           { v: "tall", l: "สูง" },
+        ],
+        showIf: { key: "shape", eq: "height" },
+      }),
+      f("shapeMobile", "รูปทรงบนมือถือ", "select", {
+        group: "layout",
+        default: "same",
+        wide: true,
+        display: "tiles",
+        hint: "มือถือจอแคบ — แนวตั้ง 4:5 มักสวยกว่า (ใส่ \"รูปสไลด์ (มือถือ)\" แยกได้ในแต่ละสไลด์)",
+        options: [{ v: "same", l: "เหมือนคอม", sketch: "same" }, ...SLIDE_SHAPES.filter((o) => o.v !== "21:9"), { v: "3:4", l: "แนวตั้ง 3:4", sketch: "ss-3-4" }],
+      }),
+      f("width", "ความกว้าง", "select", {
+        group: "layout",
+        default: "full",
+        options: [
+          { v: "full", l: "เต็มความกว้างจอ (แบบเดิม)" },
+          { v: "contained", l: "อยู่ในกรอบ มุมมน" },
+        ],
+      }),
+      f("transition", "แบบเปลี่ยนสไลด์", "select", {
+        group: "layout",
+        default: "fade",
+        options: [
+          { v: "fade", l: "จางเข้า (แบบเดิม)" },
+          { v: "slide", l: "เลื่อนข้าง" },
+          { v: "zoom", l: "จาง + ซูมช้า ๆ" },
+          { v: "peek", l: "เลื่อนข้าง เห็นขอบสไลด์ข้าง ๆ" },
+        ],
+      }),
+      f("autoplay", "เลื่อนเองอัตโนมัติ", "toggle", { group: "layout", default: true, hint: "เอาเมาส์ชี้ = หยุด" }),
+      f("interval", "เวลาต่อสไลด์ (วินาที)", "number", { group: "layout", default: 5, min: 2, numMax: 20, showIf: { key: "autoplay", eq: true } }),
+      f("arrows", "ปุ่มเลื่อน ‹ ›", "select", {
+        group: "layout",
+        default: "always",
+        options: [
+          { v: "always", l: "โชว์ตลอด (แบบเดิม)" },
+          { v: "hover", l: "โผล่ตอนชี้เมาส์" },
+          { v: "none", l: "ไม่มี (ปัดนิ้ว / กดตัวบอก)" },
+        ],
+      }),
+      f("indicator", "ตัวบอกตำแหน่ง", "select", {
+        group: "layout",
+        default: "dots",
+        options: [
+          { v: "dots", l: "จุด (แบบเดิม)" },
+          { v: "lines", l: "ขีด" },
+          { v: "number", l: "ตัวเลข 1 / 5" },
+          { v: "progress", l: "แถบเวลา" },
+          { v: "none", l: "ไม่มี" },
+        ],
+      }),
+      f("navColor", "สีปุ่ม / ตัวบอก", "select", {
+        group: "layout",
+        default: "light",
+        options: [
+          { v: "light", l: "ขาว (แบบเดิม)" },
+          { v: "dark", l: "ดำ" },
+        ],
+        // มีปุ่มเลื่อน หรือ มีตัวบอกตำแหน่ง (ค่าของ 2 ช่องไม่ซ้ำกัน ยกเว้น none)
+        showIf: { key: "arrows", eq: ["always", "hover", "dots", "lines", "number", "progress"], orKey: "indicator" },
+      }),
+      f("titleSize", "ขนาดหัวข้อบนรูป", "select", {
+        group: "caption",
+        default: "m",
+        options: [
+          { v: "s", l: "เล็ก" },
+          { v: "m", l: "กลาง (แบบเดิม)" },
+          { v: "l", l: "ใหญ่" },
+          { v: "xl", l: "ใหญ่มาก" },
+        ],
+      }),
+      f("textColor", "สีตัวอักษร", "select", {
+        group: "caption",
+        default: "light",
+        options: [
+          { v: "light", l: "ขาว + สีทับดำ (แบบเดิม)" },
+          { v: "dark", l: "ดำ + สีทับขาว (รูปสว่าง)" },
         ],
       }),
     ],
@@ -1039,12 +1127,15 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       fields: [
         image("imageKey", "รูปสไลด์", { hint: "แนะนำกว้าง 1600px+" }),
         image("mobileImageKey", "รูปสไลด์ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · แนะนำแนวตั้ง" }),
-        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropBox: "16:7", hint: "กรอบ ≈ สไลด์บนจอคอม" }),
+        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "shape", cropBox: "16:7", hint: "กรอบ = รูปทรงสไลด์บนจอคอม (ตามความสูง / เต็มจอ ≈ 16:7)" }),
         text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200 }),
         text("eyebrow", "คำโปรยเล็ก", { default: "", max: 80 }),
         text("title", "หัวข้อบนรูป", { default: "", max: 120, wide: true }),
         text("subtitle", "คำอธิบาย", { default: "", max: 300, wide: true }),
         link("link", "ปุ่ม", "", ""),
+        f("wholeLink", "กดตรงไหนของสไลด์ก็ไปลิงก์ของปุ่ม", "toggle", { group: "action", default: false, hint: "ต้องใส่ปลายทางของปุ่ม" }),
+        // 📍 ตำแหน่งข้อความ 3×3 (ปุ่มรูปย่อ pos-* ของกลาง) · "auto" = ตาม "จัดข้อความ" ซ้าย/กลาง แบบเดิม
+        f("textPos", "ตำแหน่งข้อความ", "select", { group: "layout", default: "auto", wide: true, display: "tiles", options: [{ v: "auto", l: "แบบเดิม (ตามจัดข้อความ)" }, ...HERO_BTN_GRID] }),
         f("align", "จัดข้อความ", "select", {
           group: "layout",
           default: "left",
@@ -1052,8 +1143,17 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
             { v: "left", l: "ซ้าย" },
             { v: "center", l: "กลาง" },
           ],
+          showIf: { key: "textPos", eq: "auto" },
         }),
         f("overlay", "ความทึบของสีทับรูป (%)", "range", { group: "media", default: 35, min: 0, numMax: 90, step: 5 }),
+        f("overlayStyle", "แบบสีทับ", "select", {
+          group: "media",
+          default: "solid",
+          options: [
+            { v: "solid", l: "ทับทั้งรูป (แบบเดิม)" },
+            { v: "gradient", l: "ไล่สี เข้มด้านข้อความ" },
+          ],
+        }),
       ],
       summary: (it) => s(it.title) || (it.imageKey ? "สไลด์" : "ยังไม่เลือกรูป"),
     },

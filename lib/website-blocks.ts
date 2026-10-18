@@ -505,6 +505,16 @@ export interface SlideshowBlock extends BlockBase {
   autoplay: boolean;
   interval: number;
   height: "short" | "medium" | "tall";
+  /** 🎞️ รูปทรง: height = ตามความสูงแบบเดิม · สัดส่วน กว้าง:สูง · full = เต็มจอ (schema: SLIDE_SHAPES) */
+  shape?: "height" | "21:9" | "16:9" | "3:2" | "1:1" | "4:5" | "full";
+  shapeMobile?: "same" | "height" | "16:9" | "3:2" | "1:1" | "4:5" | "3:4" | "full";
+  width?: "full" | "contained";
+  transition?: "fade" | "slide" | "zoom" | "peek";
+  arrows?: "always" | "hover" | "none";
+  indicator?: "dots" | "lines" | "number" | "progress" | "none";
+  navColor?: "light" | "dark";
+  titleSize?: "s" | "m" | "l" | "xl";
+  textColor?: "light" | "dark";
   slides: (ChildBase & {
     imageKey: string | null;
     mobileImageKey: string | null;
@@ -515,6 +525,10 @@ export interface SlideshowBlock extends BlockBase {
     link: CtaLink;
     align: "left" | "center";
     overlay: number;
+    /** 📍 ตำแหน่งข้อความ 3×3 (auto = ตาม align) · สีทับไล่สี · กดทั้งสไลด์ = ลิงก์ของปุ่ม */
+    textPos?: string;
+    overlayStyle?: "solid" | "gradient";
+    wholeLink?: boolean;
   })[];
 }
 

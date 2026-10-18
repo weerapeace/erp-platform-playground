@@ -289,3 +289,21 @@ describe("ลุคบุ๊ก — ปรับได้เยอะ + หล�
     expect(b).toMatchObject({ more: ["a1", "a2"], dotColor: "white", sideMode: "list" });
   });
 });
+
+/** 🎞️ สไลด์โชว์ปรับได้เยอะขึ้น — สไลด์โชว์เดิม (ไม่มีช่องใหม่) ต้องได้ค่าเริ่ม = หน้าตาเดิมทุกอย่าง */
+describe("slideshow: รูปทรง / ปุ่มเลื่อน / ตัวบอก / แบบเปลี่ยน / ข้อความ", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "s", type: "slideshow", ...b }])[0] as unknown as Record<string, unknown> & { slides: Record<string, unknown>[] };
+
+  it("สไลด์โชว์เดิม = แบบเดิม", () => {
+    const s = norm({ autoplay: true, interval: 5, height: "tall", slides: [{ imageKey: "a/b.jpg", title: "t", align: "center", overlay: 40 }] });
+    expect(s).toMatchObject({ shape: "height", height: "tall", shapeMobile: "same", width: "full", transition: "fade", arrows: "always", indicator: "dots", navColor: "light", titleSize: "m", textColor: "light" });
+    expect(s.slides[0]).toMatchObject({ textPos: "auto", align: "center", overlay: 40, overlayStyle: "solid", wholeLink: false });
+  });
+
+  it("ค่าที่ตั้งถูกเก็บ · ค่ามั่ว = ค่าเริ่ม", () => {
+    const s = norm({ shape: "21:9", shapeMobile: "4:5", width: "contained", transition: "peek", arrows: "hover", indicator: "progress", navColor: "dark", titleSize: "xl", textColor: "dark", slides: [{ imageKey: "a/b.jpg", textPos: "bottom-right", overlayStyle: "gradient", wholeLink: true }] });
+    expect(s).toMatchObject({ shape: "21:9", shapeMobile: "4:5", width: "contained", transition: "peek", arrows: "hover", indicator: "progress", navColor: "dark", titleSize: "xl", textColor: "dark" });
+    expect(s.slides[0]).toMatchObject({ textPos: "bottom-right", overlayStyle: "gradient", wholeLink: true });
+    expect(norm({ shape: "7:3", transition: "spin", slides: [{ imageKey: "a/b.jpg", textPos: "nowhere" }] })).toMatchObject({ shape: "height", transition: "fade" });
+  });
+});

@@ -80,6 +80,15 @@ const SKETCHES: Record<string, { cols: number; rows: number; cells: Cell[] }> = 
       ]),
     ),
   ),
+  /* 🎞️ รูปทรงสไลด์ (สไลด์โชว์ shape): กล่องเข้มกลางช่อง = สัดส่วนกว้าง:สูง โดยประมาณ */
+  "ss-height": { cols: 13, rows: 1, cells: [{ c: 1, r: 1, cs: 13, h: 60, dark: true }] },
+  "ss-21-9": { cols: 13, rows: 1, cells: [{ c: 2, r: 1, cs: 11, dark: true }] },
+  "ss-16-9": { cols: 13, rows: 1, cells: [{ c: 3, r: 1, cs: 9, dark: true }] },
+  "ss-3-2": { cols: 13, rows: 1, cells: [{ c: 4, r: 1, cs: 7, dark: true }] },
+  "ss-1-1": { cols: 13, rows: 1, cells: [{ c: 5, r: 1, cs: 5, dark: true }] },
+  "ss-4-5": { cols: 13, rows: 1, cells: [{ c: 6, r: 1, cs: 3, h: 80, dark: true }] },
+  "ss-3-4": { cols: 13, rows: 1, cells: [{ c: 6, r: 1, cs: 3, h: 90, dark: true }] },
+  "ss-full": { cols: 13, rows: 1, cells: [{ c: 1, r: 1, cs: 13, dark: true }] },
   /* ใต้ข้อความ (แบบเดิม): บรรทัดข้อความ 2 แถบ + ปุ่มใต้ */
   "pos-flow": { cols: 3, rows: 3, cells: [{ c: 1, r: 1, cs: 2, h: 45, dim: true }, { c: 1, r: 2, cs: 2, h: 45, dim: true }, { c: 1, r: 3, h: 55, dark: true }] },
   /* กำหนดเอง: วางตรงไหนก็ได้ */
@@ -167,7 +176,9 @@ function ListEditor({ items, placeholder, max, onChange }: { items: string[]; pl
 function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value: unknown; onChange: (v: unknown) => void; item?: Record<string, unknown>; parent?: Record<string, unknown> }) {
   const key = fd.cropImage ? item?.[fd.cropImage] : null;
   // สัดส่วนกรอบ: จาก Section แม่ (ช่องในชิ้นย่อย) หรือจากตัวเอง (ช่องใน Section)
-  const ratio = String((fd.cropRatio ? parent?.[fd.cropRatio] ?? item?.[fd.cropRatio] : null) ?? fd.cropBox ?? "1:1");
+  const fromSec = fd.cropRatio ? parent?.[fd.cropRatio] ?? item?.[fd.cropRatio] : null;
+  // ค่าใน Section ที่ไม่ใช่สัดส่วน (เช่น สไลด์ "ตามความสูง" / "เต็มจอ") + มีกรอบประมาณ (cropBox) → ใช้กรอบประมาณ · ไม่มี = "ตามรูปจริง"
+  const ratio = String(fromSec != null && (/^\d+:\d+$/.test(String(fromSec)) || !fd.cropBox) ? fromSec : fd.cropBox ?? "1:1");
   const o = (value ?? {}) as Record<string, unknown>;
   const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50), zoom: Number(o.zoom ?? 100) };
   const m = /^(\d+):(\d+)$/.exec(ratio);

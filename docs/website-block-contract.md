@@ -155,6 +155,12 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ปิดสวิตช์หลัก → ฟอร์มก๊อปการ์ดของร้านที่เผยแพร่อยู่มาเป็นค่าเริ่ม (`FieldDef.copyShopCard` + `SchemaFormContext.themeCard` จาก `/api/website/layout` · `/api/website/pages?pageId=`) → แก้การ์ดของร้านทีหลังไม่ลามมาที่ Section นี้
 - เว็บร้าน: `src/lib/card-override.ts` (`cardOverrideOf` · `applyCardOverride`) + `src/components/shop/CardSettings.tsx` (`CardSettingsProvider` ห่อใน ProductsBlockBody · `useCardConfig()` แทน `useTheme().card`) — ProductCard · ProductTile · ProductsSpotlight อ่านค่าเดียวกัน ทุกรูปแบบการโชว์
 - ป้าย: เปิด = ตามที่ร้านตั้ง · ปิด = ไม่มีป้าย (สินค้าหมดขึ้นเสมอ) · ปุ่มตะกร้า/ดูด่วน: เปิด = แบบปุ่มของร้าน (ร้านปิดไว้ = โผล่ตอนชี้ / ปุ่มตามุมรูป)
+- แบบรูปนำ (`PRODUCT_TILE_LAYOUTS` = mosaic/lookbook/spotlight) ไม่มีป้าย/สต๊อก/หมวด/จุดสี/ปุ่ม → สวิตช์พวกนี้ `showIf` เฉพาะเมื่อคอมหรือมือถือเป็นการ์ดเต็ม (`CARD_LAYOUTS`) · เพิ่มรูปแบบใหม่ต้องใส่ลิสต์ใดลิสต์หนึ่ง (มี test กัน)
+
+## 🎞️ สไลด์โชว์ (slideshow)
+- ช่องใหม่ทุกช่องค่าเริ่ม = หน้าตาเดิม: `shape` (height/21:9/16:9/3:2/1:1/4:5/full · ปุ่มรูปย่อ `ss-*`) · `shapeMobile` (same + 3:4) · `width` (full/contained) · `transition` (fade/slide/zoom/peek) · `arrows` (always/hover/none) · `indicator` (dots/lines/number/progress/none) · `navColor` · `titleSize` · `textColor` · รายสไลด์ `textPos` (auto + 9 จุด `pos-*` ของกลาง) · `overlayStyle` (solid/gradient) · `wholeLink`
+- กรอบ crop ของชิ้นสไลด์ = `cropRatio: "shape"` ของ Section แม่ · ค่าไม่ใช่สัดส่วน (height/full) → ใช้ `cropBox` "16:7" (ของกลาง CropField: ค่า Section ไม่ใช่ N:N + มี cropBox = ใช้ cropBox)
+- เว็บร้าน `src/components/home/Slideshow.tsx` + CSS `.ss-*` (globals.css): รูปทรงคอม/มือถือแยกด้วยตัวแปร `--ss-ar/-m` `--ss-h/-m` `--ss-minh/-m` · ปัดนิ้ว · ชี้เมาส์ = หยุด · ลดการเคลื่อนไหว = ไม่เลื่อนเอง/ไม่ซูม · "อยู่ในกรอบ" ไม่นับเป็นรูปเต็มจอ (Header โปร่งใส)
 
 ## ⚡ พรีวิวสด (ตัวจัดหน้า → iframe เว็บร้าน)
 
