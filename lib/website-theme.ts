@@ -13,6 +13,7 @@ import { isGradStop } from "@/lib/website-gradient";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
+import { newDropHref } from "@/lib/website-links";
 import { normalizeContentSources, type ContentSource } from "@/lib/website-content-sources";
 import { defaultOverPages, normalizeOverPages, type OverPages } from "@/lib/website-header-over";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -1140,7 +1141,8 @@ export function normalizeZones(raw: unknown, legacy?: { menuAlign: MenuAlign; sh
   return z;
 }
 
-export type MenuKind = "home" | "shop" | "category" | "categories" | "product" | "page" | "contact" | "url";
+/** new = 🆕 หน้ามาใหม่ — value ดู NEW_DROP_LINKS (lib/website-links) · เว็บร้านต้องรู้จัก kind นี้ (storefront site-config) */
+export type MenuKind = "home" | "shop" | "category" | "categories" | "product" | "page" | "contact" | "new" | "url";
 export interface MenuItem {
   id: string;
   label: string;
@@ -1171,6 +1173,7 @@ export interface MenuConfig {
 export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "home", label: "หน้าแรก", hint: "/" },
   { value: "shop", label: "สินค้าทั้งหมด", hint: "/shop" },
+  { value: "new", label: "🆕 หน้ามาใหม่", hint: "/new · เลือกทุกชุด / ชุดล่าสุด / ชุดที่กำลังจะเปิด / ชุดที่ต้องการ" },
   { value: "category", label: "หมวดสินค้า", hint: "/c/…" },
   { value: "categories", label: "📂 หมวดทั้งหมด (อัตโนมัติ)", hint: "/shop + เมนูย่อย = ทุกหมวดในแท็บหมวดหมู่ (เพิ่มหมวดแล้วขึ้นเอง)" },
   { value: "product", label: "สินค้า 1 ตัว", hint: "/product/…" },
@@ -1218,6 +1221,7 @@ export function menuItemHref(it: { kind: MenuKind; value: string }): string {
     case "product": return it.value ? `/product/${it.value.toLowerCase()}` : "/shop";
     case "page": return it.value ? `/${it.value}` : "/";
     case "contact": return "/contact";
+    case "new": return newDropHref(it.value);
     default: return it.value || "/";
   }
 }

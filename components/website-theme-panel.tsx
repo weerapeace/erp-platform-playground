@@ -48,6 +48,8 @@ import { FINE_COLOR_DEFAULTS, SOFT_PCT_RANGE, tintPctOf, resolveOnBrand, ON_BRAN
 import { applySavedTheme } from "@/lib/website-saved-themes";
 import { SavedThemesCard } from "@/components/website-saved-themes";
 import { LinkTargetPicker } from "@/components/website-link-picker";
+import { NEW_DROP_LINKS } from "@/lib/website-links";
+import { DROP_STATUS_LABEL, type DropStatus } from "@/lib/website-new-drops";
 import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
@@ -143,6 +145,8 @@ interface Choices {
   imageFields?: { key: string; label: string }[];
   categories?: { key: string; label: string }[];
   products?: { code: string; name: string }[];
+  /** 🆕 ชุดมาใหม่ของร้าน (เมนู "หน้ามาใหม่" เลือกชุดเอง) — ล่าสุดก่อน */
+  newDrops?: { id: string; title: string; status: DropStatus }[];
 }
 
 /** ช่องสีที่เป็นสี (ไม่รวมความเข้มสีอ่อน softPct ที่เป็นตัวเลข) */
@@ -3862,6 +3866,28 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
             {pages.map((p) => <option key={p.slug} value={p.slug}>{p.title}</option>)}
           </select>
         );
+      case "new": {
+        // 🆕 ทุกชุด / ชุดล่าสุด / ชุดที่กำลังจะเปิด / เลือกชุดเอง (ชุดสร้างที่แท็บ 🆕 มาใหม่)
+        const drops = choices.newDrops ?? [];
+        const gone = !!it.value && !NEW_DROP_LINKS.some((l) => l.value === it.value) && !drops.some((d) => d.id === it.value);
+        return (
+          <>
+            <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value })}>
+              {NEW_DROP_LINKS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+              {drops.length > 0 && (
+                <optgroup label="เลือกชุดเอง">
+                  {drops.map((d) => <option key={d.id} value={d.id}>{d.title} · {DROP_STATUS_LABEL[d.status].th}</option>)}
+                </optgroup>
+              )}
+              {gone && <option value={it.value}>⚠️ ชุดที่เลือกไว้ถูกลบแล้ว — เลือกใหม่</option>}
+            </select>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {menuItemHref(it)}
+              {drops.length === 0 ? " · ยังไม่มีชุด — สร้างได้ที่แท็บ 🆕 มาใหม่" : ""}
+            </p>
+          </>
+        );
+      }
       case "url":
         return <input className={`${mini} w-full`} value={it.value} placeholder="https://… หรือ /path" onChange={(e) => setItem(it.id, { value: e.target.value })} />;
       default:

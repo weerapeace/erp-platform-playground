@@ -9,7 +9,8 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
-import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf } from "@/lib/website-links";
+import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf, newDropHref } from "@/lib/website-links";
+import { apiFetch } from "@/lib/api";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
 
@@ -54,10 +55,25 @@ function loadStorePages(shopSlug: string) {
   return pagesCache.get(shopSlug)!;
 }
 
+/** 🆕 ชุดมาใหม่ของร้าน (รวมที่ยังไม่เปิด) → ลิงก์ไปหน้าชุดนั้น /new/<id> — แคชต่อร้านในหน้านี้ */
+const dropsCache = new Map<string, Promise<{ id: string; title: string }[]>>();
+function loadNewDrops(shopSlug: string) {
+  if (!dropsCache.has(shopSlug))
+    dropsCache.set(
+      shopSlug,
+      apiFetch(`/api/website/new-drops?shop=${encodeURIComponent(shopSlug)}`)
+        .then((r) => r.json())
+        .then((j) => ((j?.drops as { id: string; title: string }[]) ?? []).filter((d) => d.id))
+        .catch(() => [])
+    );
+  return dropsCache.get(shopSlug)!;
+}
+
 export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value: string; onChange: (href: string) => void; ctx: SchemaFormContext; /** sm = ช่องเตี้ยตัวเล็ก (แผงตั้งค่าแน่น) */ size?: "sm" | "md" }) {
   const cls = size === "sm" ? clsSm : clsMd;
   const [kind, setKind] = useState<Kind>(() => kindOf(value));
   const [storePages, setStorePages] = useState<{ slug: string; title: string }[]>([]);
+  const [drops, setDrops] = useState<{ id: string; title: string }[]>([]);
   const [productCode, setProductCode] = useState<string>("");
 
   // ค่าเปลี่ยนจากข้างนอก (เช่น undo / เลือกชิ้นอื่น) → ชนิดตามค่าใหม่
@@ -66,12 +82,20 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
   useEffect(() => {
     let alive = true;
     void loadStorePages(ctx.shopSlug).then((p) => alive && setStorePages(p));
+    void loadNewDrops(ctx.shopSlug).then((d) => alive && setDrops(d));
     return () => {
       alive = false;
     };
   }, [ctx.shopSlug]);
 
-  const pages = useMemo(() => [...BASE_PAGES, ...storePages.map((p) => ({ href: `/${p.slug}`, label: `📄 ${p.title || p.slug}` }))], [storePages]);
+  const pages = useMemo(
+    () => [
+      ...BASE_PAGES,
+      ...drops.map((d) => ({ href: newDropHref(d.id), label: `🆕 ชุด: ${d.title}` })),
+      ...storePages.map((p) => ({ href: `/${p.slug}`, label: `📄 ${p.title || p.slug}` })),
+    ],
+    [storePages, drops]
+  );
   const catKey = categoryKeyOf(value) ?? "";
 
   const pickKind = (k: Kind) => {

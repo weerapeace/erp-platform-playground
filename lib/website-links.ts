@@ -37,6 +37,19 @@ export const BASE_PAGES: { href: string; label: string }[] = [
   { href: "/", label: "หน้าแรก" },
   { href: "/shop", label: "สินค้าทั้งหมด" },
   { href: "/new", label: "🆕 มาใหม่ (ชุดมาใหม่ · แท็บ 🆕 มาใหม่)" },
+  { href: "/new/latest", label: "🆕 มาใหม่ — ชุดล่าสุด (เปลี่ยนเองเมื่อมีชุดใหม่)" },
+  { href: "/new/soon", label: "🆕 มาใหม่ — ชุดที่กำลังจะเปิด" },
   { href: "/contact", label: "ติดต่อเรา" },
   { href: "/track", label: "ติดตามออเดอร์" },
 ];
+
+/**
+ * 🆕 ลิงก์หน้ามาใหม่ (เว็บร้าน app/new + app/new/[drop]) — ใช้ร่วม ตัวจัดเมนู (kind "new") + ตัวเลือก "กดแล้วไปที่"
+ *   value: "" = /new (ทุกชุด) · "latest" = ชุดล่าสุดที่เปิดแล้ว · "soon" = ชุดที่กำลังจะเปิด · <id ชุด> = ชุดนั้น
+ */
+export const NEW_DROP_LINKS: { value: string; label: string }[] = [
+  { value: "", label: "หน้ามาใหม่ทั้งหมด (ทุกชุด)" },
+  { value: "latest", label: "⭐ ชุดล่าสุด (เปลี่ยนเองเมื่อมีชุดใหม่)" },
+  { value: "soon", label: "⏳ ชุดที่กำลังจะเปิด (นับถอยหลัง)" },
+];
+export const newDropHref = (value: string) => (value ? `/new/${encodeURIComponent(value)}` : "/new");

@@ -18,6 +18,7 @@ import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { shippingAutoPreview } from "@/lib/website-content-sources";
+import { dropStatus } from "@/lib/website-new-drops";
 import {
   normalizeTheme,
   mergeTheme,
@@ -82,7 +83,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
 
   // ฟิลด์ Parent SKU ที่ให้เลือกโชว์บนเว็บ (ทุกฟิลด์จากทะเบียน ยกเว้นต้นทุน/ข้อมูลภายใน)
-  const [parentFields, imageFields, siteInfo] = await Promise.all([loadParentWebFields(sb), loadParentImageFields(sb), readSiteInfo(sb, s.id)]);
+  const [parentFields, imageFields, siteInfo, { data: dropRows }] = await Promise.all([
+    loadParentWebFields(sb),
+    loadParentImageFields(sb),
+    readSiteInfo(sb, s.id),
+    // 🆕 ชุดมาใหม่ของร้าน → ตัวจัดเมนู "หน้ามาใหม่" เลือกชุดเองได้
+    sb.from("store_new_drops").select("id, title, start_at, end_at").eq("shop_id", s.id).order("start_at", { ascending: false }).limit(100),
+  ]);
+  const newDrops = ((dropRows ?? []) as { id: string; title: string; start_at: string; end_at: string | null }[]).map((d) => ({
+    id: d.id,
+    title: d.title,
+    status: dropStatus({ startAt: d.start_at, endAt: d.end_at }),
+  }));
   const hasDraft = s.theme_draft != null;
   const rawDomain = (dom as { domain: string } | null)?.domain ?? null;
   const siteUrl = rawDomain ? (rawDomain.startsWith("http") ? rawDomain : `https://${rawDomain}`) : null;
@@ -118,6 +130,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // label_en = ชื่ออังกฤษของหมวด (ตัวจัดเมนู: ลิงก์หมวดที่ไม่ได้ตั้งชื่อเองบอกว่าจะโชว์อะไรบน /en)
       categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null, label_en: String((c as { label_en?: unknown }).label_en ?? "") })),
       products: webProducts,
+      newDrops,
       imageRatios: IMAGE_RATIOS,
       cardHovers: CARD_HOVERS,
     },
