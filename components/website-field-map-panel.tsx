@@ -8,13 +8,18 @@
  *
  * 📂 หมวดบนเว็บ: ที่นี่โชว์แค่สรุป — เพิ่ม/แก้/ลบ/เรียง/หมวดย่อย ทำที่แท็บ "📂 หมวดหมู่" ที่เดียว (รหัสหมวดเปลี่ยนไม่ได้ กันลิงก์เสีย)
  * 🔗 จับคู่หมวด ERP → หมวดเว็บ: ใช้กับสินค้าที่ยังไม่ได้จัดหมวดเอง (web_categories ว่าง เช่น สินค้าที่เพิ่งเพิ่มขึ้นเว็บ)
+ * 🏷️ แท็ก → หมวดเว็บ: การ์ดแยก (components/website-tag-category-rules) บันทึกทันทีผ่าน /api/website/tag-categories
+ *    มาก่อนกฎหมวด ERP · แถบบันทึกของหน้านี้ไม่แตะกฎแท็ก (server คงค่าจาก DB)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commonLabelEn } from "@/lib/content-i18n";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { NAME_SOURCE_OPTIONS, PRICE_SOURCE_OPTIONS, DESC_SOURCE_OPTIONS } from "@/lib/website-field-map";
-import { categoryTree, categoryChoiceLabel, childCategories, topCategories } from "@/lib/website-category-tree";
+import { childCategories, topCategories } from "@/lib/website-category-tree";
+// ช่องเลือกหมวดเว็บ (ต้นไม้ ↳) = ของกลาง — ใช้ชุดเดียวกับตารางกฎแท็กและป๊อป 🔗 ของแท็ก
+import { WebCategorySelect as WebCatSelect } from "@/components/website-category-select";
+import { WebsiteTagCategoryRules } from "@/components/website-tag-category-rules";
 import { SaveBar } from "@/components/save-bar";
 import { ERPModal } from "@/components/modal";
 import { FloatingDropdown } from "@/components/floating-dropdown";
@@ -48,9 +53,6 @@ type ListingStats = { total: number; auto: number };
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
-/** ช่องเลือกหมวดเว็บ: ไม่ล็อกความกว้าง/สีตัวอักษร (แถวที่ยังไม่จับคู่เป็นสีจาง) · ตัวเลือกในรายการสีปกติเสมอ */
-const selectCls =
-  "rounded-lg border px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 [&>option]:text-slate-800";
 const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 const cardCls = "rounded-xl border border-slate-200 bg-white p-4";
 
@@ -395,6 +397,9 @@ export function WebsiteFieldMapPanel({
         )}
       </div>
 
+      {/* 🏷️ แท็ก → หมวดบนเว็บ (มาก่อนกฎหมวด ERP · บันทึกทันที · ข้อมูลชุดเดียวกับป๊อป 🔗 ของแท็ก) */}
+      <WebsiteTagCategoryRules shopSlug={shopSlug} />
+
       {/* 🔗 จับคู่หมวด ERP → หมวดเว็บ (ใช้กับสินค้าที่ยังไม่ได้จัดหมวดเอง) */}
       <div className={cardCls}>
         <h3 className="text-sm font-semibold text-slate-800">จับคู่หมวด ERP → หมวดบนเว็บ</h3>
@@ -570,33 +575,6 @@ export function WebsiteFieldMapPanel({
   );
 }
 
-/** ช่องเลือกหมวดบนเว็บ — เรียงแบบต้นไม้ (หมวดย่อยมี ↳ นำหน้า ใต้หมวดแม่) · emptyLabel = มีตัวเลือก "ว่าง" (ใช้ค่าเริ่มต้น) */
-function WebCatSelect({
-  cats,
-  value,
-  onChange,
-  emptyLabel,
-  className = "w-full border-slate-200 text-slate-800",
-  ariaLabel,
-}: {
-  cats: CategoryDef[];
-  value: string;
-  onChange: (v: string) => void;
-  emptyLabel?: string;
-  className?: string;
-  ariaLabel?: string;
-}) {
-  return (
-    <select className={`${selectCls} ${className}`} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
-      {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
-      {categoryTree(cats).map(({ cat }) => (
-        <option key={cat.key} value={cat.key}>
-          {categoryChoiceLabel(cat)}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 /** 🌐 ช่องภาษาอังกฤษเล็ก ๆ ใต้ช่องไทย (หน้าเว็บ /en) — ว่าง = ใช้คำมาตรฐาน (ถ้ารู้จัก) ไม่งั้นโชว์ไทย */
 function EnInput({ value, th, onChange }: { value: string; th: string; onChange: (v: string) => void }) {

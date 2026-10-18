@@ -51,6 +51,8 @@ import { parseCompartments } from "@/lib/fit-check";
 import { CHILD_SELECT, type ChildSku } from "@/lib/website-field-map";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { categoryPathLabel } from "@/lib/website-category-tree";
+import { loadTagContext } from "@/lib/website-tag-categories-db";
+import { tagRuleCategories } from "@/lib/website-tag-categories";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -166,6 +168,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }))
   );
   type ShopRow = { id: string; name: string; slug: string; is_default: boolean; theme: unknown; theme_draft: unknown; field_map: unknown };
+  // 🏷️ แท็กของรุ่นนี้ (คิดหมวดจากกฎแท็กของแต่ละร้าน) — โหลดเฉพาะเมื่อมีร้านตั้งกฎไว้
+  const anyTagRules = ((shops ?? []) as ShopRow[]).some((s) => Object.keys(normalizeFieldMap(s.field_map).category.tagRules).length > 0);
+  const tagCtx = anyTagRules ? await loadTagContext(sb, [parentRow.id]) : null;
   const shopRows = ((shops ?? []) as ShopRow[]).map((s) => {
     const l = listingByShop.get(s.id);
     const rawSku = l?.web_sku_images && typeof l.web_sku_images === "object" && !Array.isArray(l.web_sku_images) ? (l.web_sku_images as Record<string, unknown>) : {};
@@ -189,7 +194,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     // 👁 ค่าอัตโนมัติ + ที่ลูกค้าเห็นจริง + สิ่งที่ต้องแก้ (ของกลาง — ตัวเดียวกับหน้า "สินค้าบนเว็บ")
-    const view = computeListingDisplay({ fieldMap, parent: parentRow, kids: webKids, listing: l ?? null, categoryName: catName, swatches, siteUrl: siteUrls.get(s.id) ?? null, code, fitCheck: fitShops.has(s.id) });
+    const tagCategories = tagCtx ? tagRuleCategories(fieldMap.category.tagRules, tagCtx.tagsOf(parentRow.id), tagCtx.depthOf) : undefined;
+    const view = computeListingDisplay({ fieldMap, parent: parentRow, kids: webKids, listing: l ?? null, categoryName: catName, swatches, siteUrl: siteUrls.get(s.id) ?? null, code, fitCheck: fitShops.has(s.id), tagCategories });
 
     return {
       shopId: s.id,

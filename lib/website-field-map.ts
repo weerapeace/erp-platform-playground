@@ -12,6 +12,7 @@
 import { normalizeWebCollections, type WebCollection } from "@/lib/website-collections";
 import { carryTranslations } from "@/lib/content-i18n";
 import { cleanParents, flattenTree } from "@/lib/website-category-tree";
+import { cleanTagRules, hasManualCategories } from "@/lib/website-tag-categories";
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
 
@@ -132,7 +133,8 @@ export interface FieldMap {
   options: { source: OptionSource; label: string };
   /** เว้น source เป็น "none" = สินค้านั้นมีตัวเลือกชั้นเดียว (ค่าเริ่มต้น ไม่กระทบของเดิม) */
   options2: { source: Option2Source; label: string };
-  category: { default: WebCategory; rules: Record<string, WebCategory> };
+  /** rules = ชื่อหมวด ERP → หมวดเว็บ · tagRules = 🏷️ รหัสแท็ก → หมวดเว็บ (มาก่อน rules · lib/website-tag-categories) */
+  category: { default: WebCategory; rules: Record<string, WebCategory>; tagRules: Record<string, WebCategory> };
   /** รายการหมวดของร้านนี้ — เจ้าของเพิ่ม/แก้/ลบเองได้ในแท็บจับคู่ฟิลด์ */
   categories: WebCategoryDef[];
   image: { useCover: boolean; source: ImageSource };
@@ -147,7 +149,7 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
   unit: { default: "ชิ้น" },
   options: { source: "sku_color", label: "แบบ/สี" },
   options2: { source: "none", label: "ตัวเลือกที่ 2" },
-  category: { default: "hardware", rules: {} },
+  category: { default: "hardware", rules: {}, tagRules: {} },
   categories: DEFAULT_WEB_CATEGORIES,
   image: { useCover: true, source: "parent" },
   collections: [],
@@ -230,7 +232,8 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
       source: pick(g("options2").source, ["variant_option", "none"] as Option2Source[], d.options2.source),
       label: str(g("options2").label, d.options2.label).slice(0, 60),
     },
-    category: { default: defaultCat, rules },
+    // 🏷️ กฎแท็ก → หมวด: ต้องผ่าน normalize ด้วย ไม่งั้นบันทึกหน้าอื่นแล้วกฎหาย (normalize เก็บเฉพาะช่องที่รู้จัก)
+    category: { default: defaultCat, rules, tagRules: cleanTagRules(g("category").tagRules, catKeys) },
     categories: cats,
     collections: normalizeWebCollections(r.collections),
     image: {
@@ -586,13 +589,16 @@ export interface ResolvedProduct {
 /**
  * ค่าที่จะแสดงบนเว็บจริง — listing ที่กรอกทับชนะเสมอ ที่เหลือคำนวณจาก field_map
  * @param categoryName ชื่อหมวดใน ERP (จาก product_categories) ใช้จับคู่เป็นหมวดเว็บ
+ * @param tagCategories 🏷️ หมวดจากกฎแท็กของสินค้านี้ (tagRuleCategories · ไม่ส่ง = ไม่ใช้กฎแท็ก เหมือนเดิม)
+ *   ลำดับหมวด: จัดเอง (web_categories/web_category) → กฎแท็ก → กฎหมวด ERP → หมวดตั้งต้นของร้าน
  */
 export function resolveProduct(
   map: FieldMap,
   parent: ParentRow,
   kids: ChildSku[],
   listing: ListingRow | null,
-  categoryName: string | null
+  categoryName: string | null,
+  tagCategories?: string[]
 ): ResolvedProduct {
   const l = listing ?? {};
 
@@ -611,7 +617,11 @@ export function resolveProduct(
       : null;
 
   const rule = categoryName ? map.category.rules[categoryName] : undefined;
-  const categories = resolveCategories(map, l.web_categories, clean(l.web_category) || rule || map.category.default);
+  const catKeys = new Set(map.categories.map((c) => c.key));
+  const fromTags = (tagCategories ?? []).filter((k) => catKeys.has(k));
+  const categories = !hasManualCategories(l) && fromTags.length
+    ? fromTags
+    : resolveCategories(map, l.web_categories, clean(l.web_category) || rule || map.category.default);
 
   return {
     name: clean(l.web_name) || resolveName(map, parent),

@@ -35,6 +35,7 @@ import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { listingPatchToRow, cleanCategoryList, type ListingPatch } from "@/lib/website-listing-patch";
 import { sanitizeBulkPatch } from "@/lib/website-listing-fields";
 import { computeListingDisplay } from "@/lib/website-listing-display";
+import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { readFitCheckShops } from "@/lib/website-site-info";
 
 export const dynamic = "force-dynamic";
@@ -156,6 +157,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // 🏷️ หมวดจากกฎแท็ก (ร้านไม่มีกฎ = ไม่ยิง query)
+  const tagCatsOf = await loadTagCategoryResolver(sb, fieldMap.category.tagRules, parentIds);
+
   const listings = rows.map((l) => {
     const p = parentById.get(l.parent_sku_id as string);
     const mp = mapParentById.get(l.parent_sku_id as string);
@@ -163,7 +167,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const kids = mp ? kidsByParent.get(mp.id) ?? [] : [];
     const catLabel = mp?.category_id ? catName.get(mp.category_id) ?? null : null;
     // 👁 ค่าอัตโนมัติ + ค่าที่ "ลูกค้าเห็นจริง" (ของกลาง — ตัวเดียวกับตัวตั้งค่าเว็บของสินค้า)
-    const view = mp ? computeListingDisplay({ fieldMap, parent: mp, kids, listing: l, categoryName: catLabel, swatches, siteUrl, code: p?.code ?? "", thumb, fitCheck }) : null;
+    const view = mp ? computeListingDisplay({ fieldMap, parent: mp, kids, listing: l, categoryName: catLabel, swatches, siteUrl, code: p?.code ?? "", thumb, fitCheck, tagCategories: tagCatsOf(mp.id) }) : null;
     const mapped = view?.mapped ?? null;
     const display = view?.display ?? null;
     return {

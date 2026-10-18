@@ -39,6 +39,7 @@ import { rowToTone, tonesOfLabel, TONE_SELECT } from "@/lib/color-tone";
 import { productSlug } from "@/lib/website-links";
 import { badgeColorOf } from "@/lib/website-card-badges";
 import { readCardBadges } from "@/lib/website-card-badges-db";
+import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
 import { findMaterialLinks, MATERIAL_SELECT, type MaterialRow } from "@/lib/product-materials";
 
@@ -196,6 +197,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const c of (cats ?? []) as { id: string; name: string }[]) catName.set(c.id, c.name);
   }
 
+  // 🏷️ หมวดจากกฎแท็ก (ร้านไม่มีกฎ = ไม่ยิง query) — lib/website-tag-categories
+  const tagCatsOf = await loadTagCategoryResolver(sb, fieldMap.category.tagRules, [...parentById.keys()]);
+
   // รูปเสิร์ฟผ่าน proxy สาธารณะของระบบ (/api/r2-image) — เว็บภายนอกใช้ URL นี้ได้เลย
   const origin = new URL(request.url).origin;
   const imageUrl = (key: string) => `${origin}/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -213,7 +217,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
       const kids = kidsByParent.get(p.id) ?? [];
       const cat = p.category_id ? catName.get(p.category_id) ?? null : null;
-      const r = resolveProduct(fieldMap, p, kids, l, cat);
+      const r = resolveProduct(fieldMap, p, kids, l, cat, tagCatsOf(p.id));
 
       const code = p.code ?? "";
       if (dropHidden.has(code.toUpperCase())) return null;
