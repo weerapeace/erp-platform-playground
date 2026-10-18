@@ -94,7 +94,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch, web_variant_off"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -297,11 +297,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               }),
             }
           : null,
-        /** ตัวเลือกกลุ่มที่ 2 (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง */
+        /**
+         * 📐 ตัวเลือกกลุ่มที่ 2 เช่น ไซส์ (null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว) — เว็บเก่าที่ยังไม่รู้จักจะข้ามไปเอง
+         * items[].colors = สีที่มีไซส์นี้ (ไม่อยู่ในรายการ = เว็บขีดฆ่า) · free = สีที่ไม่ต้องเลือกไซส์ (lib/website-size-options)
+         */
         options2: r.options2
           ? (() => {
-              const en = optLabel2En || commonLabelEn(r.options2.label);
-              return en ? { ...r.options2, label_en: en } : r.options2;
+              // 🌐 ชื่อชุด: ชื่อที่ร้านตั้งเอง → คำแปลที่ร้านตั้ง · ชื่อจาก SKU (ไซส์ / แบบพิมพ์) → คำมาตรฐาน
+              const en = (r.options2.label === fieldMap.options2.label && optLabel2En) || commonLabelEn(r.options2.label);
+              return {
+                ...r.options2,
+                ...(en ? { label_en: en } : {}),
+                items: r.options2.items.map((it) => {
+                  const itEn = commonLabelEn(it.label);
+                  return itEn ? { ...it, label_en: itEn } : it;
+                }),
+              };
             })()
           : r.options2,
         featured: Boolean(l.featured),

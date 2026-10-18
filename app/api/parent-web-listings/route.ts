@@ -15,6 +15,7 @@
  *
  * web_sku_images = { [skuId]: string[] }  รูปเว็บของสีนั้น (หลายรูปได้) — ค่าเก่าเป็น string เดี่ยว ยังอ่านได้
  * web_details    = { [detailItemId]: { show?: boolean, text?: string } }  ทับ "ชุดรายละเอียดสินค้า" ของธีมเฉพาะรุ่นนี้
+ * web_variant_off = [skuId]  📐 คู่ สี×ไซส์ ที่ปิดไว้บนเว็บร้านนั้น (GET ส่ง sizeGrid = ตาราง สี×ไซส์ จาก SKU ลูก · lib/website-size-options)
  * ของกลาง: guardApi(products.view/edit) + supabaseAdmin (store_* อยู่ DB เดียวกัน) + writeAudit + purgeStorefrontCache
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -48,8 +49,9 @@ import { listingPatchToRow, toKeyList, type ListingPatch } from "@/lib/website-l
 import { computeListingDisplay } from "@/lib/website-listing-display";
 import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
 import { parseCompartments } from "@/lib/fit-check";
-import { CHILD_SELECT, type ChildSku } from "@/lib/website-field-map";
-import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
+import { CHILD_SELECT, sortKids, type ChildSku } from "@/lib/website-field-map";
+import { SwatchIndex, rowToSwatchEntry, swatchCss, SWATCH_SELECT } from "@/lib/color-swatch";
+import { baseColor, buildSizeGrid, cleanVariantOff, variantOf } from "@/lib/website-size-options";
 import { categoryPathLabel } from "@/lib/website-category-tree";
 import { loadTagContext } from "@/lib/website-tag-categories-db";
 import { tagRuleCategories } from "@/lib/website-tag-categories";
@@ -81,7 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     sb.from("parent_skus_v2").select(PARENT_SELECT).eq("id", parentId).maybeSingle(),
     sb.from("store_listings").select("*").eq("parent_sku_id", parentId),
     sb.from("shops").select("id, name, slug, is_default, theme, theme_draft, field_map").order("is_default", { ascending: false }),
-    sb.from("skus_v2").select("id, code, color, list_price, cover_image_r2_key").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
+    sb.from("skus_v2").select("id, code, color, list_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
     loadParentWebFields(sb),
     loadShopSiteUrls(sb),
     // SKU ลูกแบบที่เว็บใช้ (คำนวณราคา/รูป/สีที่ลูกค้าเห็นจริง) + ทะเบียนสีกลาง (จุดสี)
@@ -94,7 +96,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ชื่อแบรนด์/คอลเลกชัน → ไว้คำนวณ "ชื่อที่เว็บจะใช้จริง" ตามกฎชื่อของแต่ละร้าน + โชว์เป็นป้ายบนปุ่มกฎ
   const parentRow = parent as unknown as ParentRow;
   await attachNameRefs(sb, [parentRow]);
-  const kids = (children ?? []) as Record<string, unknown>[];
+  // 📐 SKU ไซส์ (มี variant_option) ไม่ต้องมีแถวรูปของตัวเอง — เว็บใช้รูปของตัวหลักของสีนั้น (แถวรูปจะได้ไม่ซ้ำสีละหลายแถว)
+  const allKids = (children ?? []) as (Record<string, unknown> & { id: string; code: string | null; color: string | null })[];
+  const baseColors = new Set(allKids.filter((k) => !variantOf(k)).map((k) => baseColor(k)));
+  const kids = allKids.filter((k) => !variantOf(k) || !baseColors.has(baseColor(k)));
   const webKids = (mapKids ?? []) as ChildSku[];
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const catId = (parentRow as { category_id?: string | null }).category_id ?? null;
@@ -132,7 +137,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       id: k.id as string,
       code: (k.code as string) ?? "",
-      label: ((k.color as string | null) ?? "").trim() || `แบบ ${i + 1}`,
+      label: baseColor(k) || `แบบ ${i + 1}`,
       price: Number(k.list_price) || 0,
       qty: stock.get(k.id as string) ?? 0,
       erpImageKey: cover,
@@ -232,6 +237,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webStockStatus: (l?.web_stock_status as string | null) ?? "",
       webSwatch: (l?.web_swatch as string | null) ?? "",
       webOptions: (l?.web_options as unknown) ?? null,
+      /** 📐 คู่ สี×ไซส์ ที่ปิดไว้บนเว็บร้านนี้ (id SKU ไซส์) + ร้านเปิดใช้ตัวเลือกชุดที่ 2 อยู่ไหม (แท็บ ⚙️ จับคู่ฟิลด์) */
+      webVariantOff: cleanVariantOff(l?.web_variant_off),
+      options2On: fieldMap.options2.source === "variant_option",
       /** หมวดของร้านนี้ (แท็บ 📂 หมวดหมู่) */
       shopCategories: fieldMap.categories.map((c) => ({ key: c.key, label: categoryPathLabel(fieldMap.categories, c.key), icon: c.icon ?? "" })),
       /** ค่าที่เว็บใช้อัตโนมัติถ้าไม่กรอกทับ */
@@ -262,6 +270,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 
   const webFields = parentFields.map((f) => ({ key: f.key, label: f.label }));
+  // 📐 ตาราง สี×ไซส์ (เหมือนกันทุกร้าน — ร้านต่างกันแค่คู่ที่ปิดไว้ webVariantOff) · null = รุ่นนี้ไม่มี SKU ไซส์
+  const grid = buildSizeGrid(sortKids(webKids));
+  const sizeGrid = grid
+    ? {
+        ...grid,
+        colors: grid.colors.map((c) => {
+          const spec = swatches.resolve(c.label);
+          return { ...c, swatch: spec ? swatchCss(spec, (k) => `/api/r2-image?key=${encodeURIComponent(k)}&w=64`) : null };
+        }),
+      }
+    : null;
   return NextResponse.json({
     webFields,
     code,
@@ -281,6 +300,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       d: (parent as { size_thickness_cm?: unknown }).size_thickness_cm ?? null,
     },
     variants,
+    sizeGrid,
     shops: shopRows,
   });
 }

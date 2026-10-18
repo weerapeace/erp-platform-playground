@@ -164,7 +164,9 @@ const COMMON_EN: Record<string, string> = {
   แพ็ค: "pack", แพ็ก: "pack", ห่อ: "pack", ม้วน: "roll", เมตร: "m", หลา: "yd", ผืน: "sheet", แผ่น: "sheet", ขวด: "bottle",
   กระปุก: "jar", หลอด: "tube", "ตร.ฟุต": "sq ft",
   สี: "Colour", "แบบ/สี": "Style / colour", "แบบ / สี": "Style / colour", แบบ: "Style", ขนาด: "Size", ลาย: "Pattern",
-  ตัวเลือก: "Option", "ตัวเลือกที่ 2": "Option 2", วัสดุ: "Material", ไซซ์: "Size", ความยาว: "Length",
+  ตัวเลือก: "Option", "ตัวเลือกที่ 2": "Option 2", วัสดุ: "Material", ไซซ์: "Size", ไซส์: "Size", ความยาว: "Length",
+  // 📐 ตัวเลือกชุดที่ 2 ที่ใช้อยู่จริง (ชื่อชุด + ค่า) — lib/website-size-options
+  แบบพิมพ์: "Print", ขนาดรู: "Hole size", จำนวนรู: "Holes", พิมพ์จม: "Debossed", ฟอยล์เงิน: "Silver foil", ฟอยล์ทอง: "Gold foil",
 };
 export const commonLabelEn = (th: string): string => COMMON_EN[th.trim()] ?? "";
 

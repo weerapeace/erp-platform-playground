@@ -13,6 +13,7 @@ import { normalizeWebCollections, type WebCollection } from "@/lib/website-colle
 import { carryTranslations } from "@/lib/content-i18n";
 import { cleanParents, flattenTree } from "@/lib/website-category-tree";
 import { cleanTagRules, hasManualCategories } from "@/lib/website-tag-categories";
+import { baseColor, buildSizeGrid, cleanVariantOff, colorAllOff, type SizeGrid } from "@/lib/website-size-options";
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
 
@@ -324,6 +325,8 @@ export interface ListingRow {
   web_badge?: string | null;
   web_stock_status?: string | null;
   web_swatch?: string | null;
+  /** 📐 id ของ SKU ไซส์ที่ปิดไว้บนเว็บร้านนี้ (ตาราง สี×ไซส์ ในแท็บ 🛍 · lib/website-size-options) */
+  web_variant_off?: unknown;
 }
 
 /** คอลัมน์ที่ต้อง select จาก parent_skus_v2 ให้ resolver ทำงานได้ครบ */
@@ -490,7 +493,7 @@ function resolveDescription(map: FieldMap, parent: ParentRow): string {
 }
 
 /** เรียง SKU ลูกตาม color_index ถ้ามี — ไม่งั้นตัวเลือกบนเว็บจะสลับไปมาตามที่ DB คืนมา */
-const sortKids = (kids: ChildSku[]): ChildSku[] =>
+export const sortKids =(kids: ChildSku[]): ChildSku[] =>
   [...kids].sort((a, b) => {
     const ai = a.color_index ?? Number.MAX_SAFE_INTEGER;
     const bi = b.color_index ?? Number.MAX_SAFE_INTEGER;
@@ -523,7 +526,8 @@ function resolveOptions(
   const seen = new Set<string>();
   const items: { id: string; label: string; image?: string | null; images?: string[] }[] = [];
   for (const k of sortKids(kids)) {
-    const label = clean(k.color);
+    // สีของ SKU ไซส์ที่พิมพ์ "/L" ติดท้าย (ข้อมูลเก่า) → นับเป็นสีเดียวกับตัวหลัก
+    const label = baseColor(k);
     if (!label || seen.has(label)) continue;
     seen.add(label);
     // รูปของสีนั้น (r2 key) — เว็บร้านใช้สลับแกลเลอรีตอนกดเลือกสี (image = รูปแรก, images = ทั้งชุด)
@@ -534,26 +538,48 @@ function resolveOptions(
   return items.length ? { label: map.options.label || "แบบ/สี", items } : null;
 }
 
+/** ตัวเลือกชุดที่ 2 ที่ส่งให้เว็บ */
+export interface Options2 {
+  label: string;
+  /** colors = id ตัวเลือกชุดที่ 1 (สี) ที่มีไซส์นี้และเปิดขายอยู่ · ไม่มี = ใช้ได้กับทุกสี (ร้านไม่ได้ใช้ตัวเลือกสี) */
+  items: { id: string; label: string; colors?: string[] }[];
+  /** id สีที่ไม่มี SKU ไซส์เลย → ขายได้โดยไม่ต้องเลือกไซส์ */
+  free?: string[];
+}
+
 /**
- * ตัวเลือกกลุ่มที่ 2 — อ่านจาก attribute_values.variant_option
- * สินค้าที่มี 2 มิติจริง ๆ (เช่น ขนาดรู × จำนวนรู) จะเลือกได้ครบ ไม่ต้องยัดรวมเป็นลิสต์เดียว
+ * ตัวเลือกกลุ่มที่ 2 — อ่านจาก attribute_values.variant_option (ของกลาง lib/website-size-options)
+ * สินค้าที่มี 2 มิติจริง ๆ (เช่น สี × ไซส์ · ขนาดรู × จำนวนรู) จะเลือกได้ครบ ไม่ต้องยัดรวมเป็นลิสต์เดียว
+ * · เรียงไซส์ S < M < L < XL / ตัวเลขน้อยไปมาก · บอกว่าสีไหนมีไซส์ไหน (คู่ที่ไม่มี/ปิดไว้ → เว็บขีดฆ่า)
+ * · ชื่อชุดที่ติดมากับ SKU ชนะ (รุ่นหนึ่ง "ไซส์" อีกรุ่น "แบบพิมพ์" ในร้านเดียวกันได้) · ไม่ได้ตั้ง = ชื่อที่ร้านตั้งในแท็บจับคู่ฟิลด์
  */
-function resolveOptions2(map: FieldMap, kids: ChildSku[]): { label: string; items: { id: string; label: string }[] } | null {
-  if (map.options2.source !== "variant_option") return null;
-  const seen = new Set<string>();
-  const items: { id: string; label: string }[] = [];
-  let groupName = "";
-  for (const k of sortKids(kids)) {
-    const vo = (k.attribute_values as { variant_option?: { name?: unknown; value?: unknown } } | null)?.variant_option;
-    const label = clean(vo?.value);
-    if (!label || seen.has(label)) continue;
-    if (!groupName) groupName = clean(vo?.name);
-    seen.add(label);
-    items.push({ id: `opt2-${k.id.slice(0, 8)}`, label });
+function resolveOptions2(
+  map: FieldMap,
+  sorted: ChildSku[],
+  grid: SizeGrid | null,
+  colorIds: Map<string, string> | null
+): Options2 | null {
+  if (map.options2.source !== "variant_option" || !grid) return null;
+  // รหัสตัวเลือก = "opt2-" + 8 ตัวแรกของ SKU ตัวแรกที่มีไซส์นั้น (ตะกร้าเก่า/ออเดอร์อ้างรหัสนี้ — ห้ามเปลี่ยนสูตร)
+  const firstId = new Map<string, string>();
+  for (const k of sorted) {
+    const v = clean((k.attribute_values as { variant_option?: { value?: unknown } } | null)?.variant_option?.value);
+    if (v && !firstId.has(v)) firstId.set(v, k.id);
+  }
+  const items: Options2["items"] = [];
+  for (const size of grid.sizes) {
+    const id = firstId.get(size);
+    if (!id) continue;
+    const open = grid.colors.filter((c) => c.cells[size] && !c.cells[size].off);
+    if (!open.length) continue; // ไซส์นี้ปิดทุกสี = ไม่ต้องโชว์
+    const colors = colorIds ? open.map((c) => colorIds.get(c.label)).filter((x): x is string => !!x) : undefined;
+    if (colors && !colors.length) continue;
+    items.push({ id: `opt2-${id.slice(0, 8)}`, label: size, ...(colors ? { colors } : {}) });
     if (items.length >= 24) break;
   }
-  // ชื่อกลุ่มที่ตั้งไว้ใน ERP ชนะ ถ้าไม่ได้ตั้งค่อยใช้ชื่อที่ติดมากับ SKU
-  return items.length ? { label: map.options2.label || groupName || "ตัวเลือกที่ 2", items } : null;
+  if (!items.length) return null;
+  const free = colorIds ? grid.colors.filter((c) => c.free).map((c) => colorIds.get(c.label)).filter((x): x is string => !!x) : [];
+  return { label: grid.name || map.options2.label || "ตัวเลือกที่ 2", items, ...(free.length ? { free } : {}) };
 }
 
 /**
@@ -583,7 +609,7 @@ export interface ResolvedProduct {
   images: string[];
   options: { label: string; items: { id: string; label: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
   /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
-  options2: { label: string; items: { id: string; label: string }[] } | null;
+  options2: Options2 | null;
 }
 
 /**
@@ -610,11 +636,24 @@ export function resolveProduct(
     map.image.source === "skus" ? (kidImgs.length ? kidImgs : parentImages) : map.image.source === "both" ? [...new Set([...parentImages, ...kidImgs])] : parentImages;
   const listingImages = Array.isArray(l.web_images) ? (l.web_images as string[]).filter(Boolean) : [];
 
-  const mappedOptions = resolveOptions(map, kids, skuOverrides);
+  let mappedOptions = resolveOptions(map, kids, skuOverrides);
   const listingOptions =
     l.web_options && typeof l.web_options === "object"
       ? (l.web_options as { label: string; items: { id: string; label: string; swatch?: string | null }[] })
       : null;
+  // 📐 ตัวเลือกชุดที่ 2 (ไซส์) — กรอกทับตัวเลือกเองในหน้าจัดการ = ตั้งใจคุมเอง → ไม่ยัดกลุ่ม 2 ตามไปด้วย จะกลายเป็นเลือกไม่ตรงของ
+  let options2: Options2 | null = null;
+  if (!listingOptions?.items?.length && map.options2.source === "variant_option") {
+    const sorted = sortKids(kids);
+    const grid = buildSizeGrid(sorted, new Set(cleanVariantOff(l.web_variant_off)));
+    if (grid && mappedOptions) {
+      // สีที่ปิดไซส์ไว้ครบทุกไซส์ (ตาราง สี×ไซส์ ในแท็บ 🛍) = ไม่ขายสีนี้บนเว็บ
+      const hidden = new Set(grid.colors.filter(colorAllOff).map((c) => c.label));
+      if (hidden.size) mappedOptions = { ...mappedOptions, items: mappedOptions.items.filter((i) => !hidden.has(i.label)) };
+      if (!mappedOptions.items.length) mappedOptions = null;
+    }
+    options2 = resolveOptions2(map, sorted, grid, mappedOptions ? new Map(mappedOptions.items.map((i) => [i.label, i.id])) : null);
+  }
 
   const rule = categoryName ? map.category.rules[categoryName] : undefined;
   const catKeys = new Set(map.categories.map((c) => c.key));
@@ -634,7 +673,6 @@ export function resolveProduct(
     categories,
     images: listingImages.length ? listingImages : mappedImages,
     options: listingOptions?.items?.length ? listingOptions : mappedOptions,
-    // กรอกทับตัวเลือกเองในหน้าจัดการ = ตั้งใจคุมเอง → ไม่ยัดกลุ่ม 2 ตามไปด้วย จะกลายเป็นเลือกไม่ตรงของ
-    options2: listingOptions?.items?.length ? null : resolveOptions2(map, kids),
+    options2,
   };
 }

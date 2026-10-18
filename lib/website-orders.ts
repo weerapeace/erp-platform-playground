@@ -25,6 +25,7 @@ import {
   type ChildSku,
   type ListingRow,
 } from "@/lib/website-field-map";
+import { baseColor, cleanVariantOff, variantValue } from "@/lib/website-size-options";
 import { calcGiftFee, calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
@@ -220,9 +221,6 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
 
 // ─── เลือก SKU ลูกจากรหัสตัวเลือก ───
 
-const variantValue = (k: ChildSku): string =>
-  clean((k.attribute_values as { variant_option?: { value?: unknown } } | null)?.variant_option?.value);
-
 /** หา SKU ลูกจากรหัส "sku-xxxxxxxx" / "opt2-xxxxxxxx" ที่ API สินค้าเคยส่งไป */
 function kidByOptionId(kids: ChildSku[], optionId: string | undefined, prefix: string): ChildSku | undefined {
   if (!optionId || !optionId.startsWith(prefix)) return undefined;
@@ -231,19 +229,41 @@ function kidByOptionId(kids: ChildSku[], optionId: string | undefined, prefix: s
   return kids.find((k) => k.id.startsWith(head));
 }
 
+/**
+ * opts.requireOption2 = สินค้านี้มีตัวเลือกชุดที่ 2 บนเว็บ (ไซส์) → สีที่มี SKU ไซส์ต้องเลือกไซส์ และต้องเป็นคู่ที่มีจริง + ไม่ได้ปิดไว้ (opts.off)
+ *   ไม่ผ่าน = คืน error (ไม่ตกไปใช้ SKU ตัวหลักของสีแบบเงียบ ๆ — รหัสสินค้าในออเดอร์จะผิดตัว)
+ * ไม่ส่ง opts = แบบเดิม (ร้านที่ไม่ได้เปิดตัวเลือกชุดที่ 2)
+ */
 export function pickSku(
   kids: ChildSku[],
   optionId?: string,
-  option2Id?: string
-): { sku: ChildSku | null; variantLabel: string | null; variantParts: string[] } {
+  option2Id?: string,
+  opts: { requireOption2?: boolean; off?: Set<string>; label2?: string } = {}
+): { sku: ChildSku | null; variantLabel: string | null; variantParts: string[]; error?: string } {
   const k1 = kidByOptionId(kids, optionId, "sku-");
   const k2 = kidByOptionId(kids, option2Id, "opt2-");
   let cands = kids;
   const parts: string[] = [];
   if (k1) {
-    const color = clean(k1.color);
-    cands = cands.filter((k) => clean(k.color) === color);
+    // สีของ SKU ไซส์บางแถวพิมพ์ "/L" ติดท้าย (ข้อมูลเก่า) → เทียบด้วยสีที่ตัดแล้ว (ตัวเดียวกับที่เว็บใช้)
+    const color = baseColor(k1);
+    cands = cands.filter((k) => baseColor(k) === color);
     if (color) parts.push(color);
+  }
+  if (opts.requireOption2) {
+    const sized = cands.filter((k) => variantValue(k));
+    if (sized.length) {
+      const label2 = opts.label2 || "ตัวเลือก";
+      const fail = (error: string) => ({ sku: null, variantLabel: null, variantParts: [] as string[], error });
+      const v = k2 ? variantValue(k2) : "";
+      if (!v) return fail(`กรุณาเลือก${label2}`);
+      const hit = sized.find((k) => variantValue(k) === v && !opts.off?.has(k.id.toLowerCase()));
+      if (!hit) return fail(`${label2} ${v} ไม่มี${parts[0] ? `ในสี ${parts[0]}` : "แล้ว"}`);
+      return { sku: hit, variantLabel: [...parts, v].join(" / "), variantParts: [...parts, v] };
+    }
+    // สีนี้ไม่มี SKU ไซส์ = ขายตัวหลักของสี (ไม่ต้องเลือกไซส์)
+    const sku = cands[0] ?? k1 ?? null;
+    return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts };
   }
   if (k2) {
     const v = variantValue(k2);
@@ -330,7 +350,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const [{ data: listData }, { data: parents }, { data: children }, { data: swatchRows }, { data: dropRows }] = await Promise.all([
     sb
       .from("store_listings")
-      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status")
+      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status, web_variant_off")
       .eq("shop_id", shop.id)
       .in("parent_sku_id", parentIds),
     sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
@@ -394,7 +414,13 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     // 🚫 ตั้ง "สินค้าหมด" ใน ERP แล้ว = รับออเดอร์ไม่ได้ (กันตะกร้าเก่าที่ใส่ไว้ก่อนของหมด)
     if (listing.web_stock_status === "out") return { ok: false, error: `สินค้า ${resolved.name} หมดแล้ว กรุณาเอาออกจากตะกร้า`, status: 409 };
 
-    const picked = pickSku(kids, it.optionId, it.option2Id);
+    // 📐 มีตัวเลือกชุดที่ 2 (ไซส์) บนเว็บ → ต้องเป็นคู่ สี×ไซส์ ที่มีจริงและไม่ได้ปิดไว้ (lib/website-size-options)
+    const picked = pickSku(kids, it.optionId, it.option2Id, {
+      requireOption2: !!resolved.options2,
+      off: new Set(cleanVariantOff(listing.web_variant_off)),
+      label2: resolved.options2?.label,
+    });
+    if (picked.error) return { ok: false, error: `สินค้า ${resolved.name}: ${picked.error}`, status: 409 };
     const custom = customOptionLabel(listing, it.optionId);
     let variant = custom ?? picked.variantLabel;
     let variantEn = custom ? customOptionLabelEn(listing, it.optionId) || enOf(custom) : picked.variantParts.length ? picked.variantParts.map(enOf).join(" / ") : null;

@@ -6,7 +6,7 @@
  *   1) แท็บ "🛍 เว็บไซต์" ใน Parent SKU (drawer + หน้าเต็ม) → ทุกร้านที่ขายรุ่นนี้
  *   2) drawer หน้า "สินค้าบนเว็บ" (กดการ์ด/แถว) → shopId = เฉพาะร้านนั้น
  * แท็บต่อร้าน:
- *   🛒 ขายบนเว็บ — ขึ้นร้าน · แนะนำ · ชื่อ (+กฎชื่อร้าน) · ราคา · หมวด · หน่วย · สต๊อก · ป้าย · คำอธิบาย · ตัวเลือกกรอกเอง/สีตัวอย่าง
+ *   🛒 ขายบนเว็บ — ขึ้นร้าน · แนะนำ · ชื่อ (+กฎชื่อร้าน) · ราคา · หมวด · หน่วย · สต๊อก · ป้าย · 📐 ตาราง สี×ไซส์ · คำอธิบาย · ตัวเลือกกรอกเอง/สีตัวอย่าง
  *   🖼 รูป สี และรูปเปิด — รูปเปิด (Hero) · รูปรุ่น · รูปรายสี + จุดสีบนการ์ด/สีหลัก
  *   🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด — ตั้งเฉพาะรุ่นนี้ · 📐 ช่องใส่ของ (ของตัวสินค้า ทุกร้านเห็นเหมือนกัน · components/compartments-editor)
  *   ⚠️ ต้องแก้ — กฎกลาง lib/website-listing-health (ตัวเดียวกับป้ายเหลืองในหน้าสินค้าบนเว็บ) + ปุ่มพาไปแก้
@@ -42,6 +42,7 @@ import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { CardBadgeSelect } from "@/components/website-card-badges";
 import type { LinkedRow } from "@/lib/website-listing-linked";
 import { STOCK_STATUS_OPTIONS } from "@/lib/website-listing-fields";
+import { SizeGridEditor, type SizeGridView } from "@/components/website-size-grid";
 
 type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
@@ -81,6 +82,10 @@ type ShopState = {
   webStockStatus: string;
   webSwatch: string;
   webOptions: WebOptions;
+  /** 📐 คู่ สี×ไซส์ ที่ปิดไว้บนเว็บร้านนี้ (id SKU ไซส์) */
+  webVariantOff: string[];
+  /** ร้านเปิดใช้ตัวเลือกชุดที่ 2 อยู่ (แท็บ ⚙️ จับคู่ฟิลด์) */
+  options2On?: boolean;
   shopCategories: { key: string; label: string; icon: string }[];
   auto: { price: number; unit: string; description: string };
   display: { name: string; price: number; imageKey: string | null; imageCount: number; hero: boolean; productUrl: string | null } | null;
@@ -99,6 +104,8 @@ type Resp = {
   nameRefs: { brand: string | null; collection: string | null; code: string };
   adminUrl: string;
   variants: Variant[];
+  /** 📐 ตาราง สี×ไซส์ จาก SKU ลูก (null = รุ่นนี้ไม่มี SKU ไซส์) */
+  sizeGrid?: SizeGridView | null;
   shops: ShopState[];
   /** ฟิลด์ Parent SKU (ทะเบียนฟิลด์) ให้แบนเนอร์เลือกโชว์ */
   webFields?: { key: string; label: string }[];
@@ -125,7 +132,7 @@ const STOCKS = STOCK_STATUS_OPTIONS;
 const snapOf = (s: ShopState) =>
   JSON.stringify([
     s.published, s.featured, s.webPrice, s.webName, s.webDescription, s.webImages, s.webSkuImages, s.webDetails, s.webPersonalize, s.webBanners, s.webCardColors, s.webHero,
-    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions,
+    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [],
   ]);
 
 const MAX_SKU_IMAGES = 8;
@@ -334,6 +341,7 @@ export function ParentWebListings({
             webStockStatus: s.webStockStatus || "in",
             webSwatch: s.webSwatch,
             webOptions: s.webOptions,
+            webVariantOff: s.webVariantOff ?? [],
           },
         }),
       });
@@ -558,6 +566,11 @@ export function ParentWebListings({
             <CardBadgeSelect shopId={s.shopId} value={s.webBadge} onChange={(v) => patchShop(s.shopId, { webBadge: v })} />
           </label>
         </div>
+
+        {/* 📐 ไซส์ (ตัวเลือกชุดที่ 2) — เปิด/ปิดแต่ละคู่ สี×ไซส์ บนเว็บร้านนี้ · ตัวเลือกกรอกเอง = ไม่ใช้ไซส์จาก SKU */}
+        {data.sizeGrid && !s.webOptions?.items?.length && (
+          <SizeGridEditor grid={data.sizeGrid} off={s.webVariantOff ?? []} onChange={(next) => patchShop(s.shopId, { webVariantOff: next })} enabled={!!s.options2On} />
+        )}
 
         <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={s.auto.description || data.erpDescription || "—"} />
         {s.linked?.length ? <LinkedPanel rows={s.linked} onOpenParent={onOpenParent} /> : null}

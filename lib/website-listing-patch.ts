@@ -11,6 +11,7 @@ import { normalizePersonalize, type PersonalizeConfig } from "@/lib/website-pers
 import { normalizeBanners } from "@/lib/website-banners";
 import { normalizeCardColors, isEmptyCardColors } from "@/lib/website-card-colors";
 import { normalizeHero } from "@/lib/website-hero";
+import { cleanVariantOff } from "@/lib/website-size-options";
 
 export const LISTING_KEY_RE = /^[\w\-./%()]+$/; // r2 object key ที่ยอมรับ
 export const MAX_SKU_IMAGES = 8;
@@ -38,6 +39,8 @@ export type ListingPatch = {
   webBanners?: unknown;
   webCardColors?: unknown;
   webHero?: unknown;
+  /** 📐 id ของ SKU ไซส์ที่ปิดไว้บนเว็บร้านนี้ (ตาราง สี×ไซส์) · [] = เปิดทุกคู่ */
+  webVariantOff?: unknown;
 };
 
 /** รูปเว็บรายสี: รับได้ทั้งค่าเก่า (string เดี่ยว) และค่าใหม่ (string[]) → คืนเป็น string[] เสมอ */
@@ -108,5 +111,9 @@ export function listingPatchToRow(p: ListingPatch): Record<string, unknown> {
     row.web_card_colors = isEmptyCardColors(cc) ? null : cc;
   }
   if (p.webHero !== undefined) row.web_hero = normalizeHero(p.webHero);
+  if (p.webVariantOff !== undefined) {
+    const off = cleanVariantOff(p.webVariantOff);
+    row.web_variant_off = off.length ? off : null;
+  }
   return row;
 }

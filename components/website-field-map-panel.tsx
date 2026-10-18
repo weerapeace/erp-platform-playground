@@ -311,12 +311,12 @@ export function WebsiteFieldMapPanel({
             </select>
           </div>
           <div>
-            <label className={labelCls}>ชื่อชุดตัวเลือกที่ 2</label>
+            <label className={labelCls}>ชื่อชุดตัวเลือกที่ 2 (สำรอง)</label>
             <input
               className={inputCls}
               value={map.options2?.label ?? ""}
               onChange={(e) => patch({ options2: { ...(map.options2 ?? { source: "none" }), label: e.target.value } })}
-              placeholder="เว้นว่าง = ใช้ชื่อที่ตั้งไว้กับ SKU"
+              placeholder="ใช้เมื่อ SKU ไม่ได้ตั้งชื่อชุดไว้"
               disabled={(map.options2?.source ?? "none") === "none"}
             />
             {(map.options2?.source ?? "none") !== "none" && (
@@ -325,8 +325,9 @@ export function WebsiteFieldMapPanel({
           </div>
           {(map.options2?.source ?? "none") === "variant_option" && (
             <p className="sm:col-span-2 lg:col-span-3 text-[11px] text-slate-500">
-              ใช้กับสินค้าที่เลือก 2 อย่างถึงจะได้ของถูกตัว เช่น เครื่องมือเจาะหนัง = จำนวนรู × ขนาดรู ·
-              ค่ามาจากช่อง &quot;ตัวเลือกที่ 2&quot; ที่ตั้งไว้ตอนสร้าง SKU แบบเมทริกซ์
+              ใช้กับสินค้าที่เลือก 2 อย่างถึงจะได้ของถูกตัว เช่น เข็มขัด = สี × ไซส์ · เครื่องมือเจาะหนัง = จำนวนรู × ขนาดรู ·
+              ค่ามาจาก SKU ไซส์/แบบ (ปุ่ม ＋ เพิ่มแบบ/ไซส์ ในตาราง SKU ลูก) · ชื่อชุดที่ติดมากับ SKU (เช่น ไซส์ / แบบพิมพ์) ชนะช่องสำรอง ·
+              เปิด/ปิดแต่ละคู่ สี×ไซส์ ได้ในป๊อปตั้งค่าสินค้าบนเว็บ → 🛒 ขายบนเว็บ
             </p>
           )}
           <div className="flex items-end">
