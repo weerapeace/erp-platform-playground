@@ -295,6 +295,22 @@ export interface ProductsBlock extends BlockBase {
   bannerText?: string;
   bannerCta?: CtaLink;
   more: CtaLink;
+  /** 🃏 การ์ดในส่วนนี้ — true/ไม่มี = ตามการ์ดของร้าน · false = ใช้ค่า card* ด้านล่าง (schema: PRODUCT_CARD_FIELDS) */
+  cardUseShop?: boolean;
+  cardName?: boolean;
+  cardPrice?: boolean;
+  cardBadge?: boolean;
+  cardCompare?: boolean;
+  cardPriceFrom?: boolean;
+  cardUnit?: boolean;
+  cardCategory?: boolean;
+  cardStock?: boolean;
+  cardSwatches?: boolean;
+  cardColorCount?: boolean;
+  cardQuickAdd?: boolean;
+  cardQuickView?: boolean;
+  cardTitleLines?: "1" | "2" | "3";
+  cardAlign?: "left" | "center";
 }
 
 /** 🕰 ไทม์ไลน์ / เรื่องราวแบรนด์ */

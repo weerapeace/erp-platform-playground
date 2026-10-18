@@ -36,13 +36,15 @@ export interface SchemaFormContext {
   categories: { key: string; label: string; parent?: string | null; imageKey?: string | null; icon?: string }[];
   /** Section ในหน้าที่กำลังจัด (ช่อง "กดแล้วไปที่ → เลื่อนไปส่วนอื่นในหน้านี้") */
   sections?: { id: string; label: string }[];
+  /** 🃏 ค่าการ์ดสินค้าของร้านตอนนี้ (ธีม → การ์ดสินค้า) — ปิดสวิตช์ "ใช้การ์ดตามค่ากลางของร้าน" แล้วก๊อปมาเป็นค่าเริ่ม (FieldDef.copyShopCard) */
+  themeCard?: Record<string, unknown>;
 }
 
 export const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
 export const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 
-const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout", "caption"];
+const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout", "caption", "card"];
 
 /**
  * ภาพร่างเล็ก ๆ ของตัวเลือกแบบปุ่มรูปย่อ (FieldOption.sketch) — กล่องเทา ๆ บอกการจัดวางคร่าว ๆ
@@ -315,6 +317,16 @@ export function SchemaField(props: {
         <WebsiteCategoriesField shopSlug={props.ctx.shopSlug} categories={props.ctx.categories} value={Array.isArray(props.value) ? (props.value as string[]) : []} item={item} onPatch={onPatch} fieldKey={fd.key} />
       </FieldBox>
     );
+  // 📸 สวิตช์ "ใช้การ์ดตามค่ากลางของร้าน": ปิด → ก๊อปค่าการ์ดของร้านตอนนี้มาใส่ช่องในกลุ่ม (เริ่มจากหน้าตาเดิม) · ไม่มีค่าธีม = ใช้ค่าเริ่มของช่อง
+  if (fd.copyShopCard && onPatch) {
+    const copy = fd.copyShopCard;
+    const card = props.ctx.themeCard;
+    return (
+      <div className="sm:col-span-2">
+        <SchemaFieldInner {...props} onChange={(v) => onPatch(v === false && card ? { ...copy(card), [fd.key]: false } : { [fd.key]: v })} />
+      </div>
+    );
+  }
   const inner = <SchemaFieldInner {...props} />;
   // 🌐 อยู่ในแผงที่เปิดโหมด 2 ภาษา + ช่องนี้แปลได้ → ห่อด้วย widget กลาง (ช่องไทยข้างในหน้าตาเดิม)
   if (enabled && onPatch && item && isTranslatable(fd)) {

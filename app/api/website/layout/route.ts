@@ -20,6 +20,7 @@ import { normalizeBlocks, defaultLayout, blockTypesFor } from "@/lib/website-blo
 import { readShopBetas } from "@/lib/website-site-info";
 import { syncCanvasAssetUsages } from "@/lib/website-canvas-usage";
 import { normalizeFieldMap } from "@/lib/website-field-map";
+import { normalizeTheme } from "@/lib/website-theme";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, home_layout, home_layout_draft, field_map")
+    .select("id, name, slug, home_layout, home_layout_draft, field_map, theme")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
@@ -45,6 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     home_layout: unknown;
     home_layout_draft: unknown;
     field_map?: unknown;
+    theme?: unknown;
   };
 
   const { data: dom } = await sb.from("shop_domains").select("domain").eq("shop_id", s.id).limit(1).maybeSingle();
@@ -65,6 +67,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     blockTypes: blockTypesFor(await readShopBetas(sb, s.id)),
     /** หมวดสินค้าบนเว็บของร้าน — ช่อง "หมวด" ในบล็อกสินค้าใช้เลือก */
     categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null, imageKey: c.imageKey ?? null, icon: c.icon ?? "" })),
+    /** 🃏 การ์ดสินค้าของร้านที่เผยแพร่อยู่ — Section ตารางสินค้าปิด "ใช้การ์ดตามค่ากลาง" แล้วก๊อปไปเป็นค่าเริ่ม */
+    themeCard: normalizeTheme(s.theme).card,
   });
 }
 

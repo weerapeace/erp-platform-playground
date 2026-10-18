@@ -69,7 +69,7 @@ export type FieldType =
   | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
   | "point"; // จุดบนรูป { x, y } เป็น % — คลิกบนรูปเพื่อวาง · ต้องตั้ง pointImage
 
-export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "caption";
+export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "caption" | "card";
 
 export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
   content: "เนื้อหา",
@@ -78,6 +78,7 @@ export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
   layout: "การจัดวาง",
   products: "สินค้า",
   caption: "ข้อความประกอบรูป",
+  card: "🃏 การ์ดในส่วนนี้",
 };
 
 export interface FieldOption {
@@ -134,6 +135,11 @@ export interface FieldDef {
    * กติกากลาง: lib/content-i18n.ts · lib/website-i18n.ts
    */
   i18n?: boolean;
+  /**
+   * 📸 สวิตช์ "ใช้การ์ดตามค่ากลางของร้าน" (toggle): ตอนปิดสวิตช์ → ก๊อปค่าการ์ดของร้านตอนนี้ (ธีม → การ์ดสินค้า)
+   * มาใส่ช่องในกลุ่ม ให้เริ่มจากหน้าตาเดิมแล้วค่อยปิดทีละอย่าง · ฟอร์มส่งค่าธีมมาทาง ctx.themeCard
+   */
+  copyShopCard?: (card: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export interface ShowIf {
@@ -208,6 +214,71 @@ export interface SectionSchema {
 /* ─────────── ตัวช่วยประกาศ ─────────── */
 
 const f = (key: string, label: string, type: FieldType, extra: Partial<FieldDef> = {}): FieldDef => ({ key, label, type, ...extra });
+
+/**
+ * 🃏 การ์ดในส่วนนี้ (Section ตารางสินค้า) — เปิด/ปิดรายละเอียดบนการ์ดเฉพาะ Section นี้ ไม่กระทบการ์ดที่อื่น
+ * สวิตช์หลักเปิด (ค่าเริ่ม) = ตามค่ากลางของร้าน (ดีไซน์ → การ์ดสินค้า) เหมือนเดิมทุกอย่าง
+ * ปิด = ใช้ค่าในกลุ่มนี้ (ก๊อปจากการ์ดของร้านตอนปิด) · แก้การ์ดของร้านทีหลังไม่ลามมาที่ Section นี้
+ * เว็บร้าน: src/lib/card-settings.tsx (useCardConfig) — ทุกรูปแบบการโชว์ของ Section ใช้ค่าเดียวกัน
+ */
+const cardOn = { key: "cardUseShop", eq: false };
+const cardToggle = (key: string, label: string, def: boolean, hint?: string) => f(key, label, "toggle", { group: "card", default: def, showIf: cardOn, ...(hint ? { hint } : {}) });
+const PRODUCT_CARD_FIELDS: FieldDef[] = [
+  f("cardUseShop", "ใช้การ์ดตามค่ากลางของร้าน", "toggle", {
+    group: "card",
+    default: true,
+    wide: true,
+    hint: "ปิด = ตั้งเฉพาะ Section นี้ (เริ่มจากการ์ดของร้านตอนนี้)",
+    copyShopCard: (c) => ({
+      cardName: true,
+      cardPrice: true,
+      // ป้าย: เปิด = ตามที่ร้านตั้ง → ร้านไม่ได้เปิดป้ายชนิดไหนเลย = ปิด (หน้าตาเท่าเดิม)
+      cardBadge: c.showBadge !== false || ["sale", "new", "best"].some((k) => (c.autoBadges as Record<string, unknown> | undefined)?.[k] === true),
+      cardCompare: c.showCompare !== false,
+      cardPriceFrom: c.priceFrom === true,
+      cardUnit: c.showUnit !== false,
+      cardCategory: c.showCategory !== false,
+      cardStock: c.showStock !== false,
+      cardSwatches: c.showSwatches === true,
+      cardColorCount: c.showColorCount === true,
+      cardQuickAdd: c.quickAdd !== "none",
+      cardQuickView: !!c.quickView && c.quickView !== "none",
+      cardTitleLines: ["1", "2", "3"].includes(String(c.titleLines)) ? String(c.titleLines) : "2",
+      cardAlign: c.align === "center" ? "center" : "left",
+    }),
+  }),
+  cardToggle("cardName", "ชื่อสินค้า", true),
+  cardToggle("cardPrice", "ราคา", true),
+  cardToggle("cardBadge", "ป้ายบนรูป", true, "ลด % / ใหม่ / ขายดี · ป้ายหมดขึ้นเสมอ"),
+  cardToggle("cardCompare", "ราคาเต็มขีดฆ่า", true),
+  cardToggle("cardPriceFrom", "คำว่า \"เริ่มต้น\" หน้าราคา", false),
+  cardToggle("cardUnit", "หน่วย (/ ชิ้น)", true),
+  cardToggle("cardCategory", "ชื่อหมวด", true),
+  cardToggle("cardStock", "สถานะสต๊อก", true),
+  cardToggle("cardSwatches", "จุดสี", false),
+  cardToggle("cardColorCount", "จำนวนสี (4 สี)", false),
+  cardToggle("cardQuickAdd", "ปุ่มใส่ตะกร้าเร็ว", true),
+  cardToggle("cardQuickView", "ปุ่มดูด่วน", false),
+  f("cardTitleLines", "ชื่อยาวสุดกี่บรรทัด", "select", {
+    group: "card",
+    default: "2",
+    showIf: cardOn,
+    options: [
+      { v: "1", l: "1 บรรทัด" },
+      { v: "2", l: "2 บรรทัด" },
+      { v: "3", l: "3 บรรทัด" },
+    ],
+  }),
+  f("cardAlign", "จัดชิด", "select", {
+    group: "card",
+    default: "left",
+    showIf: cardOn,
+    options: [
+      { v: "left", l: "ชิดซ้าย" },
+      { v: "center", l: "กึ่งกลาง" },
+    ],
+  }),
+];
 const text = (key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "text", { max: 160, ...extra });
 const area = (key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "textarea", { max: 600, wide: true, ...extra });
 const link = (key: string, label: string, dText = "", dHref = "", extra: Partial<FieldDef> = {}) =>
@@ -1948,6 +2019,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       f("bannerText", "ข้อความบนแบนเนอร์", "textarea", { group: "layout", default: "", max: 300, showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),
       link("bannerCta", "ปุ่มบนแบนเนอร์", "ดูคอลเลกชัน", "/shop", { group: "layout", showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),
       link("more", "ปุ่ม \"ดูทั้งหมด\"", "ดูทั้งหมด", "/shop"),
+      ...PRODUCT_CARD_FIELDS,
     ],
     summary: (b) => {
       const src = s(b.source);

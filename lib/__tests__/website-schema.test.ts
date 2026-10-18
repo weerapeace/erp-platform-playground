@@ -226,3 +226,33 @@ describe("แกลเลอรี — ข้อความประกอบ�
     expect(g.items[0]).toMatchObject({ title: "ลุคทำงาน", title_en: "Office look", caption_en: "Desc", linkText: "ดูสินค้า →", linkText_en: "Shop →", href: "/shop" });
   });
 });
+
+/** 🃏 การ์ดในส่วนนี้ (Section ตารางสินค้า) — ค่าเริ่ม = ตามการ์ดของร้าน · ปิดสวิตช์ = ก๊อปค่าการ์ดของร้านมาเป็นค่าเริ่ม */
+describe("products: การ์ดในส่วนนี้", () => {
+  const fields = SECTION_SCHEMAS.products.fields;
+  const master = fields.find((x) => x.key === "cardUseShop")!;
+
+  it("Section เก่า (ไม่มีช่องการ์ด) = ตามการ์ดของร้าน", () => {
+    const [b] = normalizeBlocks([{ id: "p1", type: "products", source: "all" }]) as unknown as Record<string, unknown>[];
+    expect(b.cardUseShop).toBe(true);
+    expect(b.cardTitleLines).toBe("2");
+  });
+
+  it("ค่าที่ตั้งเองรอดการบันทึก", () => {
+    const [b] = normalizeBlocks([{ id: "p1", type: "products", source: "all", cardUseShop: false, cardPrice: false, cardSwatches: true, cardTitleLines: "1", cardAlign: "center" }]) as unknown as Record<string, unknown>[];
+    expect([b.cardUseShop, b.cardPrice, b.cardSwatches, b.cardTitleLines, b.cardAlign]).toEqual([false, false, true, "1", "center"]);
+  });
+
+  it("ก๊อปการ์ดค่าเริ่มของร้าน = ค่าเริ่มของทุกช่อง (ปิดสวิตช์แล้วหน้าตาเท่าเดิม)", () => {
+    const shopDefault = { titleLines: 2, showBadge: true, showStock: true, showCompare: true, showSwatches: false, showColorCount: false, priceFrom: false, quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left" };
+    const copied = master.copyShopCard!(shopDefault);
+    for (const [k, v] of Object.entries(copied)) expect([k, v]).toEqual([k, fields.find((x) => x.key === k)!.default]);
+    expect(Object.keys(copied).sort()).toEqual(fields.filter((x) => x.group === "card" && x.key !== "cardUseShop").map((x) => x.key).sort());
+  });
+
+  it("ก๊อปตามที่ร้านตั้งจริง", () => {
+    const c = master.copyShopCard!({ titleLines: 1, showBadge: false, autoBadges: { sale: false, new: false, best: false }, quickAdd: "none", quickView: "replace", showSwatches: true, align: "center" });
+    expect([c.cardBadge, c.cardQuickAdd, c.cardQuickView, c.cardSwatches, c.cardTitleLines, c.cardAlign]).toEqual([false, false, true, true, "1", "center"]);
+    expect(master.copyShopCard!({ showBadge: false, autoBadges: { sale: true } }).cardBadge).toBe(true);
+  });
+});

@@ -41,6 +41,8 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const [published, setPublished] = useState<Block[]>([]);
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
   const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
+  /** 🃏 การ์ดสินค้าของร้าน — Section ตารางสินค้าปิด "ใช้การ์ดตามค่ากลาง" แล้วก๊อปเป็นค่าเริ่ม */
+  const [themeCard, setThemeCard] = useState<Record<string, unknown> | undefined>(undefined);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
   const [shopName, setShopName] = useState<string>("");
   const [neverSet, setNeverSet] = useState(false);
@@ -74,6 +76,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       setPublished(j.published ?? []);
       setTypes(j.blockTypes ?? []);
       setCategories(j.categories ?? []);
+      setThemeCard(j.themeCard ?? undefined);
       setSiteUrl(j.shop?.siteUrl ?? null);
       setShopName(j.shop?.name ?? "");
       setNeverSet(Boolean(j.neverSet));
@@ -232,7 +235,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   };
 
   const previewSrc = siteUrl ? `${siteUrl}/?preview=1` : null;
-  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories }), [shopSlug, shopId, shopName, categories]);
+  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
 

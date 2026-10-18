@@ -20,6 +20,7 @@ import { normalizeBlocks, blockTypesFor } from "@/lib/website-blocks";
 import { readShopBetas } from "@/lib/website-site-info";
 import { syncCanvasAssetUsages } from "@/lib/website-canvas-usage";
 import { normalizeFieldMap } from "@/lib/website-field-map";
+import { normalizeTheme } from "@/lib/website-theme";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -53,9 +54,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const pageId = (url.searchParams.get("pageId") ?? "").trim();
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, name, slug, field_map").eq("slug", shopSlug).maybeSingle();
+  // ธีมโหลดเฉพาะตอนเปิดหน้าเดียว (ใช้ค่าการ์ดของร้าน) — รายการหน้าไม่ต้องใช้
+  const { data: shop } = await sb.from("shops").select(pageId ? "id, name, slug, field_map, theme" : "id, name, slug, field_map").eq("slug", shopSlug).maybeSingle();
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
-  const s = shop as { id: string; name: string; slug: string; field_map?: unknown };
+  const s = shop as unknown as { id: string; name: string; slug: string; field_map?: unknown; theme?: unknown };
   const categories = normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null, imageKey: c.imageKey ?? null, icon: c.icon ?? "" }));
 
   const { data: dom } = await sb.from("shop_domains").select("domain").eq("shop_id", s.id).limit(1).maybeSingle();
@@ -89,6 +91,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // Section ทดลอง (meta.beta) โชว์ในคลังเฉพาะร้านที่เปิดสวิตช์ในแท็บข้อมูลร้าน
       blockTypes: blockTypesFor(await readShopBetas(sb, s.id)),
       categories,
+      /** 🃏 การ์ดสินค้าของร้านที่เผยแพร่อยู่ (Section ตารางสินค้า ปิด "ใช้การ์ดตามค่ากลาง" → ก๊อปเป็นค่าเริ่ม) */
+      themeCard: normalizeTheme(s.theme).card,
     });
   }
 

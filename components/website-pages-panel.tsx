@@ -36,6 +36,8 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [pages, setPages] = useState<PageRow[]>([]);
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
   const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
+  /** 🃏 การ์ดสินค้าของร้าน — Section ตารางสินค้าปิด "ใช้การ์ดตามค่ากลาง" แล้วก๊อปเป็นค่าเริ่ม */
+  const [themeCard, setThemeCard] = useState<Record<string, unknown> | undefined>(undefined);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
   const [shopName, setShopName] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -116,6 +118,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       undoStack.current = [];
       redoStack.current = [];
       if (j.categories) setCategories(j.categories);
+      if (j.themeCard) setThemeCard(j.themeCard);
     } catch {
       toast.error("เปิดหน้าไม่สำเร็จ");
     }
@@ -277,7 +280,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     }
   };
 
-  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories }), [shopSlug, shopId, shopName, categories]);
+  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
 

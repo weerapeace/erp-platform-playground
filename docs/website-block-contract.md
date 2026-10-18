@@ -141,6 +141,12 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ไม่มีช่องสัดส่วน (รูปเต็มจอ) ใช้ `cropBox: "16:7"` = กรอบตายตัว ≈ แบนเนอร์บนจอคอม — ใช้ที่แบนเนอร์หลัก (Hero) · สไลด์ (รายสไลด์) · เว็บร้านวาดด้วย `cropStyle(crop)` (src/lib/image-crop.ts · ค่ากลาง = ไม่ใส่ style)
 - เว็บร้านวาดสูตรเดียวกัน: `object-fit: cover; object-position: x% y%; transform: scale(zoom/100); transform-origin: x% y%` (ใช้ที่แกลเลอรีรูป · รูปคู่ข้อความ · หลายคอลัมน์ · รูปภาพ · แบนเนอร์หลัก · สไลด์ · รูปพื้นหลังผืนผ้าใบใช้ ImageCropBox ตัวเดียวกัน)
 
+## 🃏 การ์ดในส่วนนี้ (Section ตารางสินค้า)
+- ERP `lib/website-schema.ts` `PRODUCT_CARD_FIELDS` (กลุ่ม `card`): สวิตช์หลัก `cardUseShop` (ค่าเริ่ม true = ตามการ์ดของร้าน ดีไซน์ → การ์ดสินค้า เหมือนเดิม) + สวิตช์ `cardName/cardPrice/cardBadge/cardCompare/cardPriceFrom/cardUnit/cardCategory/cardStock/cardSwatches/cardColorCount/cardQuickAdd/cardQuickView` + `cardTitleLines` ("1"–"3") + `cardAlign`
+- ปิดสวิตช์หลัก → ฟอร์มก๊อปการ์ดของร้านที่เผยแพร่อยู่มาเป็นค่าเริ่ม (`FieldDef.copyShopCard` + `SchemaFormContext.themeCard` จาก `/api/website/layout` · `/api/website/pages?pageId=`) → แก้การ์ดของร้านทีหลังไม่ลามมาที่ Section นี้
+- เว็บร้าน: `src/lib/card-override.ts` (`cardOverrideOf` · `applyCardOverride`) + `src/components/shop/CardSettings.tsx` (`CardSettingsProvider` ห่อใน ProductsBlockBody · `useCardConfig()` แทน `useTheme().card`) — ProductCard · ProductTile · ProductsSpotlight อ่านค่าเดียวกัน ทุกรูปแบบการโชว์
+- ป้าย: เปิด = ตามที่ร้านตั้ง · ปิด = ไม่มีป้าย (สินค้าหมดขึ้นเสมอ) · ปุ่มตะกร้า/ดูด่วน: เปิด = แบบปุ่มของร้าน (ร้านปิดไว้ = โผล่ตอนชี้ / ปุ่มตามุมรูป)
+
 ## ⚡ พรีวิวสด (ตัวจัดหน้า → iframe เว็บร้าน)
 
 - ERP `components/website-builder.tsx`: พรีวิวโหลดเสร็จ → ส่ง `storefront-live-hello` · เว็บร้านตอบ `storefront-live-ready` → ทุกครั้งที่แก้ ส่ง `storefront-blocks-live {blocks}` (รวบเป็น 1 ครั้งต่อเฟรม)
