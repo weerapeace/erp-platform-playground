@@ -78,6 +78,11 @@
 
 **โค้ด:** `app/marketing/skus/{work-mode,work-job-modal}.tsx` · กฎคำนวณ pure `lib/marketing/work-jobs.ts` (เทสต์ `lib/__tests__/marketing-work-jobs.test.ts`) · ฝั่งเซิร์ฟเวอร์ `lib/marketing/work-jobs-db.ts` · ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · MultiUserPicker · DateInput · MoneyInput · SearchableSelect · HoverImage · **MarketingSkuPickerModal** (`components/marketing-sku-picker-modal.tsx` — ป๊อปเลือกรุ่นแบบการ์ด ใช้ร่วมกับ ➕ เพิ่มสินค้าเข้าเว็บ)
 
+### 🛠 โหมดทำงาน รอบ 2 (2026-10-18)
+- มุมมอง ☰ ตาราง / ▦ การ์ด (จำรายคน `marketing_work_items_view`) · ค้นหาใช้ร่วมกัน · การ์ด: เรียงลำดับเดิม/รหัส/คืบหน้า · การ์ดต่อแถว (GalleryColumns) · หน้าละ 60
+- กดรุ่น (แถว/รูป/รหัส) = เปิด drawer สินค้าตัวจริง (MasterRecordDrawer · ◀ ▶ ตามรายการที่เห็น) · ปุ่ม 🛍 = drawer ตั้งค่าเว็บไซต์ทุกร้าน (ของกลาง `components/parent-web-drawer.tsx` ห่อ ParentWebListings)
+- ⊘ ขั้นตอนที่ "ไม่ต้องทำ" รายรุ่น: `marketing_work_job_items.step_skip` jsonb {key:{at,by}} (migration 202610230400) · ชิปเส้นประขีดฆ่า กดเพื่อกลับมาต้องทำ · ไม่นับในความคืบหน้า (itemProgress/jobProgress รับ skip · ข้ามทุกขั้น = เสร็จ) · ตั้งไม่ต้องทำ = เอาติ๊กขั้นนั้นออก · API PATCH items {item_ids, step_key, skip} + audit `marketing.work.skip` · แถบล่าง ⊘ ไม่ต้องทำ… / ↺ กลับมาต้องทำ…
+
 ## ยังไม่ทำ
 - โหมดทำงาน ก้อนถัดไป: หน้าตั้งค่า "แบบงาน" (ขั้นตอนตั้งต้นแก้เองได้) · ผู้รับผิดชอบรายขั้นตอน · แจ้งเตือนใกล้ครบกำหนด
 - ยอดขาย/ออเดอร์ 7·30 วัน ต่อรุ่น (ต้องผูกรหัส Shopee ↔ SKU ก่อน — ตอนนี้ผูกแล้ว 0)

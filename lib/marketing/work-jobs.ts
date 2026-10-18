@@ -6,6 +6,7 @@
  *   - งาน Clearance: ใส่ส่วนลดต่อรุ่น (฿ หรือ %) → ราคาใหม่ "เก็บในงาน" ไม่แก้ราคาใน ERP
  *   - ใส่รุ่นเข้างาน → ติดป้ายหลักให้อัตโนมัติได้ (auto_label_id เช่น Clearance Products)
  *   - ผู้รับผิดชอบ (หลายคนได้) + วันครบกำหนด อยู่ระดับงาน
+ *   - บางรุ่นไม่ต้องทำบางขั้นตอน → ตั้ง "ไม่ต้องทำ" รายรุ่น (step_skip) — ไม่นับในความคืบหน้า
  * ตาราง: marketing_work_jobs · marketing_work_job_items
  */
 
@@ -14,6 +15,8 @@ export type WorkJobStatus = "open" | "done" | "archived";
 export type DiscountUnit = "baht" | "percent";
 export type WorkStep = { key: string; label: string };
 export type StepDone = Record<string, { at: string; by: string | null }>;
+/** ขั้นตอนที่ "ไม่ต้องทำ" ของรุ่นนี้ (เช่น ของแถมไม่ต้อง Photoshoot) — โครงเดียวกับ StepDone */
+export type StepSkip = Record<string, { at: string; by: string | null }>;
 /** ผู้รับผิดชอบงาน (ชื่อเก็บไว้ด้วย → โชว์ได้แม้คนนั้นปิดบัญชีภายหลัง) */
 export type JobAssignee = { id: string; name: string };
 
@@ -54,6 +57,8 @@ export type WorkJobItem = {
   discount_value: number | null;
   discount_unit: DiscountUnit;
   step_done: StepDone;
+  /** ขั้นตอนที่ไม่ต้องทำสำหรับรุ่นนี้ */
+  step_skip: StepSkip;
   note: string | null;
   sort_order: number;
 };
@@ -170,21 +175,23 @@ export function snapshotBasePrice(childPrices: (number | null | undefined)[], pa
   return { min: null, max: null };
 }
 
-/** ความคืบหน้าของรุ่น (นับเฉพาะขั้นตอนที่ยังอยู่ในงาน — ลบขั้นตอนแล้วที่ติ๊กไว้ไม่นับ) */
-export function itemProgress(stepDone: StepDone, steps: WorkStep[]): { done: number; total: number; complete: boolean } {
-  const done = steps.filter((s) => !!stepDone?.[s.key]).length;
-  return { done, total: steps.length, complete: steps.length > 0 && done === steps.length };
+/** ความคืบหน้าของรุ่น (นับเฉพาะขั้นตอนที่ยังอยู่ในงาน และ "ต้องทำ" สำหรับรุ่นนี้ — ลบขั้นตอน/ตั้งไม่ต้องทำ = ไม่นับ)
+ *  ทุกขั้นตอนถูกตั้ง "ไม่ต้องทำ" = รุ่นนี้ไม่มีอะไรต้องทำ → นับว่าเสร็จ */
+export function itemProgress(stepDone: StepDone, steps: WorkStep[], stepSkip?: StepSkip | null): { done: number; total: number; skipped: number; complete: boolean } {
+  const need = steps.filter((s) => !stepSkip?.[s.key]);
+  const done = need.filter((s) => !!stepDone?.[s.key]).length;
+  return { done, total: need.length, skipped: steps.length - need.length, complete: steps.length > 0 && done === need.length };
 }
 
-/** ความคืบหน้าทั้งงาน */
-export function jobProgress(items: { step_done: StepDone }[], steps: WorkStep[]): { models: number; modelsDone: number; stepsDone: number; stepsTotal: number; pct: number } {
-  let modelsDone = 0, stepsDone = 0;
+/** ความคืบหน้าทั้งงาน (ขั้นตอนที่ "ไม่ต้องทำ" ไม่นับเป็นงาน) */
+export function jobProgress(items: { step_done: StepDone; step_skip?: StepSkip | null }[], steps: WorkStep[]): { models: number; modelsDone: number; stepsDone: number; stepsTotal: number; pct: number } {
+  let modelsDone = 0, stepsDone = 0, stepsTotal = 0;
   for (const it of items) {
-    const p = itemProgress(it.step_done, steps);
+    const p = itemProgress(it.step_done, steps, it.step_skip);
     stepsDone += p.done;
+    stepsTotal += p.total;
     if (p.complete) modelsDone++;
   }
-  const stepsTotal = items.length * steps.length;
   return { models: items.length, modelsDone, stepsDone, stepsTotal, pct: stepsTotal ? Math.round((stepsDone / stepsTotal) * 100) : 0 };
 }
 

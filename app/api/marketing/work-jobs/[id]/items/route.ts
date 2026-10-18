@@ -3,7 +3,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { cleanIds, isUuid } from "@/lib/marketing/sku-list";
-import { discountProblem, type DiscountUnit, type StepDone } from "@/lib/marketing/work-jobs";
+import { discountProblem, type DiscountUnit, type StepDone, type StepSkip } from "@/lib/marketing/work-jobs";
 import { actorOf, addItemsToJob, loadJob, parsePrice } from "@/lib/marketing/work-jobs-db";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +31,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 
 // PATCH
 //   { item_ids: string[], step_key, done: boolean }   → ติ๊ก/เอาติ๊กออก ขั้นตอนหนึ่ง (หลายรุ่นพร้อมกันได้)
+//   { item_ids: string[], step_key, skip: boolean }   → ตั้ง "ไม่ต้องทำ" / กลับมาต้องทำ ขั้นตอนหนึ่ง (หลายรุ่น)
 //   { item_id, discount_value?, discount_unit?, base_price_min?, base_price_max?, note? } → แก้ราคา/หมายเหตุของรุ่น
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   const denied = await guardApi(request, "marketing.sku.manage");
@@ -45,6 +46,36 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   const actor = await actorOf(request, admin);
   const now = new Date().toISOString();
 
+  // ── ตั้ง "ไม่ต้องทำ" ขั้นตอนนี้ สำหรับรุ่นที่เลือก (skip=true) / กลับมาต้องทำ (skip=false) ──
+  //   ตั้งไม่ต้องทำ → เอาติ๊ก "ทำแล้ว" ของขั้นนั้นออกด้วย (ไม่นับซ้ำ) · ความคืบหน้านับเฉพาะขั้นที่ต้องทำ
+  if ("step_key" in b && "skip" in b) {
+    const step = job.steps.find((s) => s.key === b.step_key);
+    if (!step) return bad("ไม่พบขั้นตอนนี้ในงาน (อาจถูกลบไปแล้ว) ลองโหลดหน้าใหม่");
+    const ids = cleanIds(b.item_ids, 1000);
+    if (!ids.length) return bad("ยังไม่ได้เลือกรุ่น");
+    const skip = b.skip === true;
+    const { data: rows, error } = await admin.from("marketing_work_job_items").select("id, parent_sku_id, step_done, step_skip").eq("job_id", id).in("id", ids);
+    if (error) return bad("โหลดรุ่นไม่สำเร็จ: " + error.message, 500);
+    let changed = 0;
+    for (const r of rows ?? []) {
+      const sk = { ...((r.step_skip as StepSkip) ?? {}) };
+      if (skip === !!sk[step.key]) continue;
+      const sd = { ...((r.step_done as StepDone) ?? {}) };
+      if (skip) { sk[step.key] = { at: now, by: actor.name }; delete sd[step.key]; }
+      else delete sk[step.key];
+      const { error: e2 } = await admin.from("marketing_work_job_items").update({ step_skip: sk, step_done: sd, updated_at: now }).eq("id", r.id);
+      if (e2) return bad(`บันทึกไม่สำเร็จ (สำเร็จไปแล้ว ${changed} รุ่น): ` + e2.message, 500);
+      changed++;
+    }
+    if (changed) {
+      await writeAudit(admin, {
+        action: "marketing.work.skip", entityType: "marketing_work_jobs", entityId: id, actorId: actor.id, actorName: actor.name,
+        metadata: { job_name: job.name, step: step.label, skip, item_ids: (rows ?? []).map((r) => r.id), parent_sku_ids: (rows ?? []).map((r) => r.parent_sku_id) },
+      });
+    }
+    return NextResponse.json({ data: { changed, at: now, by: actor.name }, error: null });
+  }
+
   // ── ติ๊กขั้นตอน ──
   if ("step_key" in b) {
     const step = job.steps.find((s) => s.key === b.step_key);
@@ -52,12 +83,13 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     const ids = cleanIds(b.item_ids, 1000);
     if (!ids.length) return bad("ยังไม่ได้เลือกรุ่น");
     const done = b.done === true;
-    const { data: rows, error } = await admin.from("marketing_work_job_items").select("id, parent_sku_id, step_done").eq("job_id", id).in("id", ids);
+    const { data: rows, error } = await admin.from("marketing_work_job_items").select("id, parent_sku_id, step_done, step_skip").eq("job_id", id).in("id", ids);
     if (error) return bad("โหลดรุ่นไม่สำเร็จ: " + error.message, 500);
     let changed = 0;
     for (const r of rows ?? []) {
       const cur = { ...((r.step_done as StepDone) ?? {}) };
       if (done === !!cur[step.key]) continue;
+      if (done && (r.step_skip as StepSkip | null)?.[step.key]) continue;   // ขั้นที่ตั้ง "ไม่ต้องทำ" ไว้ ติ๊กไม่ได้ (เอา "ไม่ต้องทำ" ออกก่อน)
       if (done) cur[step.key] = { at: now, by: actor.name };
       else delete cur[step.key];
       const { error: e2 } = await admin.from("marketing_work_job_items").update({ step_done: cur, updated_at: now }).eq("id", r.id);

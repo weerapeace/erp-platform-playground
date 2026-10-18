@@ -8,13 +8,13 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import {
   assigneesOf, jobProgress, round2, snapshotBasePrice,
-  type DiscountUnit, type StepDone, type WorkJob, type WorkJobItem, type WorkStep,
+  type DiscountUnit, type StepDone, type StepSkip, type WorkJob, type WorkJobItem, type WorkStep,
 } from "@/lib/marketing/work-jobs";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignees, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at";
-const ITEM_COLS = "id, job_id, parent_sku_id, base_price_min, base_price_max, discount_value, discount_unit, step_done, note, sort_order";
+const ITEM_COLS = "id, job_id, parent_sku_id, base_price_min, base_price_max, discount_value, discount_unit, step_done, step_skip, note, sort_order";
 const CHUNK = 200;
 
 export type Actor = { id: string | null; name: string | null };
@@ -53,14 +53,14 @@ export async function loadJobs(admin: Admin, includeArchived: boolean): Promise<
   const jobs = (data ?? []).map((r) => toJob(r as Record<string, unknown>)).sort((a, b) => rank[a.status] - rank[b.status]);
   if (!jobs.length) return { jobs };
   const ids = jobs.map((j) => j.id);
-  const byJob = new Map<string, { step_done: StepDone }[]>();
+  const byJob = new Map<string, { step_done: StepDone; step_skip: StepSkip }[]>();
   for (let i = 0; i < ids.length; i += CHUNK) {
-    const { data: its, error: e2 } = await admin.from("marketing_work_job_items").select("job_id, step_done").in("job_id", ids.slice(i, i + CHUNK)).limit(20_000);
+    const { data: its, error: e2 } = await admin.from("marketing_work_job_items").select("job_id, step_done, step_skip").in("job_id", ids.slice(i, i + CHUNK)).limit(20_000);
     if (e2) return { error: "โหลดความคืบหน้าไม่สำเร็จ: " + e2.message };
     for (const it of its ?? []) {
       const k = String(it.job_id);
       if (!byJob.has(k)) byJob.set(k, []);
-      byJob.get(k)!.push({ step_done: (it.step_done as StepDone) ?? {} });
+      byJob.get(k)!.push({ step_done: (it.step_done as StepDone) ?? {}, step_skip: (it.step_skip as StepSkip) ?? {} });
     }
   }
   return {
@@ -104,7 +104,7 @@ export async function loadJobItems(admin: Admin, jobId: string): Promise<{ items
         brand_id: (o.brand_id as string | null) ?? null, label_id: (o.label_id as string | null) ?? null,
         base_price_min: num(r.base_price_min), base_price_max: num(r.base_price_max),
         discount_value: num(r.discount_value), discount_unit: (r.discount_unit as DiscountUnit) ?? "percent",
-        step_done: (r.step_done as StepDone) ?? {}, note: (r.note as string | null) ?? null, sort_order: Number(r.sort_order) || 0,
+        step_done: (r.step_done as StepDone) ?? {}, step_skip: (r.step_skip as StepSkip) ?? {}, note: (r.note as string | null) ?? null, sort_order: Number(r.sort_order) || 0,
       };
     }),
   };

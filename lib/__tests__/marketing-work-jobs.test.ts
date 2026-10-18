@@ -50,7 +50,7 @@ describe("ขั้นตอน + ความคืบหน้า", () => {
   });
   it("นับเฉพาะขั้นตอนที่ยังอยู่ (ลบขั้นตอนแล้วไม่นับ)", () => {
     const done = { s1: { at: "t", by: null }, s3: { at: "t", by: null }, s9: { at: "t", by: null } };
-    expect(itemProgress(done, steps)).toEqual({ done: 2, total: 3, complete: false });
+    expect(itemProgress(done, steps)).toEqual({ done: 2, total: 3, skipped: 0, complete: false });
     const all = { s1: { at: "t", by: null }, s2: { at: "t", by: null }, s3: { at: "t", by: null } };
     expect(jobProgress([{ step_done: done }, { step_done: all }, { step_done: {} }], steps)).toEqual({ models: 3, modelsDone: 1, stepsDone: 5, stepsTotal: 9, pct: 56 });
     expect(jobProgress([], steps).pct).toBe(0);
@@ -93,5 +93,27 @@ describe("ผู้รับผิดชอบหลายคน", () => {
   });
   it("ชื่อสำหรับโชว์", () => {
     expect(assigneeNames([{ id: A, name: "Khin" }, { id: B, name: "Mint" }])).toBe("Khin, Mint");
+  });
+});
+
+describe("ขั้นตอนที่ไม่ต้องทำ (รายรุ่น)", () => {
+  const steps = [{ key: "s1", label: "Photoshoot" }, { key: "s2", label: "Description" }, { key: "s3", label: "ขึ้นเว็บ" }];
+  const at = { at: "2026-10-18T00:00:00Z", by: "Khin" };
+  it("ไม่นับขั้นที่ไม่ต้องทำ: 3 ขั้น ข้าม 1 → เต็ม 2", () => {
+    expect(itemProgress({ s2: at }, steps, { s1: at })).toEqual({ done: 1, total: 2, skipped: 1, complete: false });
+    expect(itemProgress({ s2: at, s3: at }, steps, { s1: at })).toEqual({ done: 2, total: 2, skipped: 1, complete: true });
+  });
+  it("ติ๊กค้างในขั้นที่ข้าม ไม่นับ", () => {
+    expect(itemProgress({ s1: at }, steps, { s1: at }).done).toBe(0);
+  });
+  it("ข้ามทุกขั้น = ไม่มีอะไรต้องทำ → นับว่าเสร็จ", () => {
+    expect(itemProgress({}, steps, { s1: at, s2: at, s3: at }).complete).toBe(true);
+  });
+  it("ไม่ส่ง skip = แบบเดิม", () => {
+    expect(itemProgress({ s1: at }, steps)).toEqual({ done: 1, total: 3, skipped: 0, complete: false });
+  });
+  it("ความคืบหน้าทั้งงาน: ตัวหารลดตามขั้นที่ข้าม", () => {
+    const p = jobProgress([{ step_done: { s1: at }, step_skip: { s2: at, s3: at } }, { step_done: {}, step_skip: {} }], steps);
+    expect(p).toEqual({ models: 2, modelsDone: 1, stepsDone: 1, stepsTotal: 4, pct: 25 });
   });
 });

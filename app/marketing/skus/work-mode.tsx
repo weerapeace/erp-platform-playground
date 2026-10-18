@@ -4,11 +4,13 @@
  * 🛠 โหมดทำงาน (มุมมองที่ 3 ของหน้า SKU การตลาด) — จัดงานเป็นชุด แล้วติ๊กว่าแต่ละรุ่นทำถึงไหน
  *   ชิปงานด้านบน (ความคืบหน้า + กำหนดส่ง) → เลือกงาน → ตารางรุ่นในงาน: ราคา Clearance (฿/%) + เช็กลิสต์ + ความคืบหน้า
  *   ราคาใหม่เก็บในงานเท่านั้น ไม่แก้ราคาใน ERP · ติ๊กหลายรุ่นพร้อมกันได้ (แถบลอยล่างจอ)
+ *   มุมมอง ☰ ตาราง / ▦ การ์ด (จำรายคน) · กดรุ่น = เปิด drawer สินค้า (◀ ▶ ตามรายการ) · 🛍 = drawer ตั้งค่าเว็บไซต์
+ *   ⊘ ที่ขั้นตอน = รุ่นนี้ไม่ต้องทำขั้นนี้ (ไม่นับในความคืบหน้า · กดที่ขั้นที่ข้ามเพื่อกลับมาต้องทำ)
  * ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · MoneyInput · SearchableSelect · HoverImage · MarketingSkuPickerModal (เลือกรุ่นแบบการ์ด) · Toast
  * กฎคำนวณ: lib/marketing/work-jobs.ts (มีเทสต์)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useToast } from "@/components/toast";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ConfirmDialog } from "@/components/modal";
@@ -17,6 +19,11 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { MoneyInput } from "@/components/money-input";
 import { HoverImage } from "@/components/hover-image";
 import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
+import { ParentWebDrawer } from "@/components/parent-web-drawer";
+import { Pager } from "@/components/pager";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
+import { useViewPref } from "@/lib/use-view-pref";
+import { useCanHover } from "@/lib/use-can-hover";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
@@ -27,7 +34,17 @@ import {
 import { LabelBadge } from "./label-manager";
 import { WorkJobModal } from "./work-job-modal";
 
+// drawer สินค้าตัวจริง (ทุกแท็บ) — โหลดเมื่อเปิดครั้งแรก
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+
 const JOB_KEY = "marketing-skus:work-job";
+const ITEM_VIEWS = ["table", "grid"] as const;
+const GRID_PAGE = 60;
+type GridSort = "order" | "code" | "prog_asc" | "prog_desc";
+const GRID_SORTS: { value: GridSort; label: string }[] = [
+  { value: "order", label: "เรียง: ลำดับเดิม" }, { value: "code", label: "เรียง: รหัสรุ่น" },
+  { value: "prog_asc", label: "เรียง: คืบหน้าน้อย → มาก" }, { value: "prog_desc", label: "เรียง: คืบหน้ามาก → น้อย" },
+];
 const readJob = () => { try { return localStorage.getItem(JOB_KEY) || ""; } catch { return ""; } };
 const saveJob = (v: string) => { try { localStorage.setItem(JOB_KEY, v); } catch { /* ignore */ } };
 
@@ -81,6 +98,15 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
   const [pickerOpen, setPickerOpen] = useState(false);
   const [ask, setAsk] = useState<{ kind: "delete" } | { kind: "remove"; ids: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  // มุมมองรุ่นในงาน (จำรายคน) · ค้นหาใช้ร่วมกันทั้ง 2 มุมมอง · drawer สินค้า / เว็บไซต์
+  const { view: itemView, setView: setItemView, saveDefault: saveItemView } = useViewPref("marketing_work_items_view", ITEM_VIEWS, "table");
+  const [q, setQ] = useState("");
+  const [gridSort, setGridSort] = useState<GridSort>("order");
+  const [gridPage, setGridPage] = useState(0);
+  const { cols: gridCols, setCols: setGridCols } = useGalleryColumns("marketing-work-grid", 5);
+  const [openParent, setOpenParent] = useState<string | null>(null);
+  const [webParent, setWebParent] = useState<string | null>(null);
+  const canHover = useCanHover();
 
   // เลือกงาน: ที่สั่งมา → ที่จำไว้ → งานแรกที่ยังทำอยู่
   useEffect(() => { if (focusJobId) { setJobId(focusJobId); saveJob(focusJobId); } }, [focusJobId]);
@@ -128,7 +154,22 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
   const steps = useMemo(() => job?.steps ?? [], [job]);
   const hasPrice = job ? kindInfo(job.kind).hasPrice : false;
   const prog = useMemo(() => jobProgress(items, steps), [items, steps]);
-  const rows = useMemo(() => (hideDone ? items.filter((it) => !itemProgress(it.step_done, steps).complete) : items), [items, steps, hideDone]);
+  const rows = useMemo(() => (hideDone ? items.filter((it) => !itemProgress(it.step_done, steps, it.step_skip).complete) : items), [items, steps, hideDone]);
+  // รายการที่เห็นจริง (ค้นหา) — ใช้กับการ์ด + ◀ ▶ ของ drawer
+  const term = q.trim().toLowerCase();
+  const shown = useMemo(() => (term ? rows.filter((it) => `${it.code} ${it.name}`.toLowerCase().includes(term)) : rows), [rows, term]);
+  const gridRows = useMemo(() => {
+    if (gridSort === "order") return shown;
+    const pr = (it: WorkJobItem) => { const p = itemProgress(it.step_done, steps, it.step_skip); return p.total ? p.done / p.total : 1; };
+    const out = [...shown];
+    if (gridSort === "code") out.sort((a, b) => a.code.localeCompare(b.code));
+    else out.sort((a, b) => (gridSort === "prog_asc" ? pr(a) - pr(b) : pr(b) - pr(a)));
+    return out;
+  }, [shown, gridSort, steps]);
+  useEffect(() => setGridPage(0), [term, gridSort, hideDone, jobId]);
+  const navIds = useMemo(() => (itemView === "grid" ? gridRows : shown).map((it) => it.parent_sku_id), [itemView, gridRows, shown]);
+  const itemByParent = useMemo(() => new Map(items.map((it) => [it.parent_sku_id, it])), [items]);
+  const webItem = webParent ? itemByParent.get(webParent) : undefined;
 
   // ── บันทึก ──
   const call = async (url: string, method: string, body: unknown) => {
@@ -157,6 +198,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
     setDetail((cur) => cur && {
       ...cur, items: cur.items.map((it) => {
         if (!ids.has(it.id)) return it;
+        if (done && it.step_skip?.[stepKey]) return it;   // ขั้นที่ไม่ต้องทำ ติ๊กไม่ได้
         const sd = { ...it.step_done };
         if (done) sd[stepKey] = sd[stepKey] ?? { at: now, by: null }; else delete sd[stepKey];
         return { ...it, step_done: sd };
@@ -166,6 +208,34 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
       const d = await call(`/api/marketing/work-jobs/${job.id}/items`, "PATCH", { item_ids: itemIds, step_key: stepKey, done });
       if (done) setDetail((cur) => cur && { ...cur, items: cur.items.map((it) => (ids.has(it.id) && it.step_done[stepKey]?.by == null ? { ...it, step_done: { ...it.step_done, [stepKey]: { at: d.at ?? now, by: d.by ?? null } } } : it)) });
       if (itemIds.length > 1) toast.success(`${done ? "ติ๊ก" : "เอาติ๊กออก"} ${Number(d.changed) || 0} รุ่นแล้ว`);
+      void reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      void loadDetail(job.id, true);
+    }
+  };
+
+  // ⊘ ไม่ต้องทำขั้นนี้ / กลับมาต้องทำ (หลายรุ่นได้) — ตั้งไม่ต้องทำ = เอาติ๊กของขั้นนั้นออกด้วย
+  const setSkip = async (itemIds: string[], stepKey: string, skip: boolean) => {
+    if (!job || !itemIds.length) return;
+    const now = new Date().toISOString();
+    const ids = new Set(itemIds);
+    const label = steps.find((s) => s.key === stepKey)?.label ?? "";
+    setDetail((cur) => cur && {
+      ...cur, items: cur.items.map((it) => {
+        if (!ids.has(it.id)) return it;
+        const sk = { ...(it.step_skip ?? {}) };
+        const sd = { ...it.step_done };
+        if (skip) { sk[stepKey] = sk[stepKey] ?? { at: now, by: null }; delete sd[stepKey]; } else delete sk[stepKey];
+        return { ...it, step_skip: sk, step_done: sd };
+      }),
+    });
+    try {
+      const d = await call(`/api/marketing/work-jobs/${job.id}/items`, "PATCH", { item_ids: itemIds, step_key: stepKey, skip });
+      const one = itemIds.length === 1 ? items.find((x) => x.id === itemIds[0])?.code : null;
+      toast.success(skip
+        ? `${one ?? `${Number(d.changed) || 0} รุ่น`}: ไม่ต้องทำ “${label}” แล้ว${one ? " · กดที่ขั้นตอนเพื่อกลับมาต้องทำ" : ""}`
+        : `${one ?? `${Number(d.changed) || 0} รุ่น`}: กลับมาต้องทำ “${label}” แล้ว`);
       void reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
@@ -244,21 +314,49 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
   };
 
   // ── คอลัมน์ ──
+  // ชิปขั้นตอน: ☐ ยังไม่ทำ · ✓ ทำแล้ว · ⊘ ไม่ต้องทำ (เส้นประ ขีดฆ่า) — มุมขวาบนของชิปที่ยังไม่ทำ มีปุ่ม ⊘ (ชี้แล้วโผล่ · จอสัมผัสโชว์จาง ๆ)
   const stepCell = (it: WorkJobItem) => (
-    <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+    <div className="flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
       {steps.map((s) => {
         const d = it.step_done[s.key];
+        const sk = it.step_skip?.[s.key];
+        if (sk) {
+          return (
+            <button key={s.key} type="button" disabled={!canManage}
+              title={`ไม่ต้องทำสำหรับรุ่นนี้${sk.by ? ` (ตั้งโดย ${sk.by})` : ""}${canManage ? " · กดเพื่อกลับมาต้องทำ" : ""}`}
+              onClick={() => void setSkip([it.id], s.key, false)}
+              className="inline-flex items-center gap-1 rounded-md border border-dashed border-slate-300 bg-slate-50 px-1.5 py-0.5 text-xs text-slate-400 enabled:hover:border-slate-500 enabled:hover:text-slate-600 disabled:cursor-default">
+              <span className="text-[11px] leading-none">⊘</span><span className="line-through">{s.label}</span>
+            </button>
+          );
+        }
         const tip = d ? `ทำแล้ว${d.by ? ` โดย ${d.by}` : ""} · ${new Date(d.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}` : "ยังไม่ได้ทำ";
         return (
-          <button key={s.key} type="button" disabled={!canManage} title={tip} aria-pressed={!!d}
-            onClick={() => void setStep([it.id], s.key, !d)}
-            className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs transition ${d ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500 enabled:hover:border-slate-400"} disabled:cursor-default`}>
-            <span className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] leading-none ${d ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300"}`}>{d ? "✓" : ""}</span>
-            {s.label}
-          </button>
+          <span key={s.key} className="group/step relative inline-flex">
+            <button type="button" disabled={!canManage} title={tip} aria-pressed={!!d}
+              onClick={() => void setStep([it.id], s.key, !d)}
+              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs transition ${d ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500 enabled:hover:border-slate-400"} disabled:cursor-default`}>
+              <span className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] leading-none ${d ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300"}`}>{d ? "✓" : ""}</span>
+              {s.label}
+            </button>
+            {canManage && !d && (
+              <button type="button" onClick={() => void setSkip([it.id], s.key, true)} title={`รุ่นนี้ไม่ต้องทำ “${s.label}”`} aria-label={`ไม่ต้องทำ ${s.label}`}
+                className={`absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] leading-none text-slate-400 shadow-sm hover:border-slate-500 hover:text-slate-700 ${canHover ? "opacity-0 group-hover/step:opacity-100 focus:opacity-100" : "opacity-60"}`}>⊘</button>
+            )}
+          </span>
         );
       })}
     </div>
+  );
+  const progText = (it: WorkJobItem) => {
+    const p = itemProgress(it.step_done, steps, it.step_skip);
+    return p.complete
+      ? <span className="text-xs font-medium text-emerald-600" title={p.skipped ? `ไม่ต้องทำ ${p.skipped} ขั้น` : undefined}>✓ เสร็จ</span>
+      : <span className="text-xs text-slate-500" title={p.skipped ? `ไม่นับขั้นที่ไม่ต้องทำ ${p.skipped} ขั้น` : undefined}>{p.done}/{p.total}{p.skipped ? <span className="text-slate-300"> ·⊘{p.skipped}</span> : null}</span>;
+  };
+  const webBtn = (it: WorkJobItem, cls = "") => (
+    <button type="button" title="ตั้งค่าเว็บไซต์ของรุ่นนี้ (ทุกร้าน)" onClick={(e) => { e.stopPropagation(); setWebParent(it.parent_sku_id); }}
+      className={`h-7 w-7 rounded text-sm hover:bg-violet-50 ${cls}`}>🛍</button>
   );
 
   const priceCell = (it: WorkJobItem) => {
@@ -318,8 +416,8 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
       key: "model", header: "รุ่น", width: "minmax(10rem,1.3fr)", sortValue: (it) => it.code, sortLabel: "รหัสรุ่น",
       cell: (it) => (
         <div className="min-w-0 space-y-0.5">
-          <Link href={`/master/parent-skus?open=${encodeURIComponent(it.parent_sku_id)}`} target="_blank" onClick={(e) => e.stopPropagation()}
-            className="text-sm font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || "(ไม่มีรหัส)"}</Link>
+          <button type="button" onClick={(e) => { e.stopPropagation(); setOpenParent(it.parent_sku_id); }} title="เปิดข้อมูลสินค้า"
+            className="text-left text-sm font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || "(ไม่มีรหัส)"}</button>
           <div className="truncate text-xs text-slate-500" title={it.name}>{it.name}</div>
           {it.label_id && labelMap.get(it.label_id) && <LabelBadge label={labelMap.get(it.label_id)} />}
         </div>
@@ -329,12 +427,10 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
     { key: "steps", header: "ขั้นตอน", width: "minmax(14rem,2.2fr)", cell: stepCell },
     {
       key: "prog", header: "คืบหน้า", width: "6rem", align: "center",
-      sortValue: (it) => itemProgress(it.step_done, steps).done, sortLabel: "ความคืบหน้า",
-      cell: (it) => {
-        const p = itemProgress(it.step_done, steps);
-        return p.complete ? <span className="text-xs font-medium text-emerald-600">✓ เสร็จ</span> : <span className="text-xs text-slate-500">{p.done}/{p.total}</span>;
-      },
+      sortValue: (it) => { const p = itemProgress(it.step_done, steps, it.step_skip); return p.total ? p.done / p.total : 1; }, sortLabel: "ความคืบหน้า",
+      cell: progText,
     },
+    { key: "web", header: "", width: "2.5rem", cell: (it) => webBtn(it) },
     ...(canManage ? [{
       key: "x", header: "", width: "2.5rem",
       cell: (it: WorkJobItem) => (
@@ -438,36 +534,112 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
             </div>
           </div>
 
-          {/* ตารางรุ่นในงาน */}
-          <MiniTable<WorkJobItem>
-            rows={rows}
-            columns={columns}
-            rowKey={(it) => it.id}
-            searchText={(it) => `${it.code} ${it.name}`}
-            searchPlaceholder="ค้นหารหัส / ชื่อรุ่นในงานนี้…"
-            selectable={canManage}
-            selected={selected}
-            onSelectedChange={setSelected}
-            countUnit="รุ่น"
-            storageKey={`marketing-work:${hasPrice ? "price" : "plain"}`}
-            resizable
-            actions={
-              <div className="flex items-center gap-2">
+          {/* รุ่นในงาน: ☰ ตาราง / ▦ การ์ด (คำค้นใช้ร่วมกัน) */}
+          {(() => {
+            const emptyEl = (
+              <div className="py-10 text-center text-sm text-slate-500">
+                {items.length === 0
+                  ? <>ยังไม่มีรุ่นในงานนี้ — กด “＋ เพิ่มรุ่น” หรือไปโหมดการ์ด/ตาราง ติ๊กรุ่น แล้วกด “ใส่ในงาน”</>
+                  : rows.length === 0 ? "ทุกรุ่นเสร็จแล้ว 🎉 (เอาติ๊ก “ซ่อนรุ่นที่เสร็จแล้ว” ออกเพื่อดูทั้งหมด)" : "ไม่พบรุ่นที่ค้นหา"}
+              </div>
+            );
+            const actionsEl = (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white" role="group" aria-label="มุมมอง">
+                  {ITEM_VIEWS.map((v) => (
+                    <button key={v} type="button" onClick={() => { setItemView(v); void saveItemView(v); }}
+                      className={`h-8 px-2.5 text-xs ${itemView === v ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{v === "table" ? "☰ ตาราง" : "▦ การ์ด"}</button>
+                  ))}
+                </span>
                 <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-500">
                   <input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300" />
                   ซ่อนรุ่นที่เสร็จแล้ว
                 </label>
                 {canManage && <button type="button" onClick={() => setPickerOpen(true)} disabled={busy} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50">＋ เพิ่มรุ่น</button>}
               </div>
-            }
-            emptyText={
-              <div className="py-10 text-center text-sm text-slate-500">
-                {items.length === 0
-                  ? <>ยังไม่มีรุ่นในงานนี้ — กด “＋ เพิ่มรุ่น” หรือไปโหมดการ์ด/ตาราง ติ๊กรุ่น แล้วกด “ใส่ในงาน”</>
-                  : "ทุกรุ่นเสร็จแล้ว 🎉 (เอาติ๊ก “ซ่อนรุ่นที่เสร็จแล้ว” ออกเพื่อดูทั้งหมด)"}
+            );
+            if (itemView === "table") return (
+              <MiniTable<WorkJobItem>
+                rows={rows}
+                columns={columns}
+                rowKey={(it) => it.id}
+                searchText={(it) => `${it.code} ${it.name}`}
+                searchPlaceholder="ค้นหารหัส / ชื่อรุ่นในงานนี้…"
+                searchValue={q}
+                onSearchChange={setQ}
+                selectable={canManage}
+                selected={selected}
+                onSelectedChange={setSelected}
+                onRowClick={(it) => setOpenParent(it.parent_sku_id)}
+                countUnit="รุ่น"
+                storageKey={`marketing-work:${hasPrice ? "price" : "plain"}`}
+                resizable
+                actions={actionsEl}
+                emptyText={emptyEl}
+              />
+            );
+            // ▦ การ์ด
+            const pageRows = gridRows.slice(gridPage * GRID_PAGE, (gridPage + 1) * GRID_PAGE);
+            const pageAllOn = pageRows.length > 0 && pageRows.every((it) => selected.has(it.id));
+            const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+            return (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหารหัส / ชื่อรุ่นในงานนี้…"
+                    className="h-9 min-w-[12rem] flex-1 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 sm:max-w-xs" />
+                  <select value={gridSort} onChange={(e) => setGridSort(e.target.value as GridSort)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">
+                    {GRID_SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                  <GalleryColumnsControl as="select" cols={gridCols} onChange={setGridCols} />
+                  {canManage && pageRows.length > 0 && (
+                    <button type="button" className="text-xs text-blue-600 hover:underline"
+                      onClick={() => setSelected((s) => { const n = new Set(s); for (const it of pageRows) { if (pageAllOn) n.delete(it.id); else n.add(it.id); } return n; })}>
+                      {pageAllOn ? "เอาติ๊กหน้านี้ออก" : `ติ๊กทั้งหน้านี้ (${pageRows.length})`}
+                    </button>
+                  )}
+                  <span className="text-xs text-slate-400">{gridRows.length.toLocaleString("th-TH")} รุ่น</span>
+                  <div className="ml-auto">{actionsEl}</div>
+                </div>
+                {gridRows.length === 0 ? emptyEl : (
+                  <div className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ ["--cols" as string]: gridCols } as React.CSSProperties}>
+                    {pageRows.map((it) => {
+                      const on = selected.has(it.id);
+                      const p = itemProgress(it.step_done, steps, it.step_skip);
+                      const img = r2ImageUrl(it.image_key, 300);
+                      return (
+                        <div key={it.id} className={`flex flex-col overflow-hidden rounded-xl border bg-white ${on ? "border-blue-500 ring-2 ring-blue-200" : p.complete ? "border-emerald-200" : "border-slate-200"}`}>
+                          <div className="relative aspect-square cursor-pointer bg-slate-100" onClick={() => setOpenParent(it.parent_sku_id)} title="เปิดข้อมูลสินค้า">
+                            {img && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={img} alt="" loading="lazy" className="h-full w-full object-cover" />
+                            )}
+                            {canManage && (
+                              <input type="checkbox" checked={on} onClick={(e) => e.stopPropagation()} onChange={() => toggleSel(it.id)} aria-label={`เลือก ${it.code}`}
+                                className="absolute left-2 top-2 h-4 w-4 accent-blue-600" />
+                            )}
+                            <span className="absolute right-1.5 top-1.5 rounded-full bg-white/95 shadow-sm">{webBtn(it)}</span>
+                            {p.complete && <span className="absolute bottom-1.5 left-1.5 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] text-white">✓ เสร็จ</span>}
+                          </div>
+                          <div className="flex flex-1 flex-col gap-1 p-2">
+                            <div className="flex items-center justify-between gap-1">
+                              <button type="button" onClick={() => setOpenParent(it.parent_sku_id)} title="เปิดข้อมูลสินค้า"
+                                className="truncate text-left font-mono text-xs font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || "(ไม่มีรหัส)"}</button>
+                              {progText(it)}
+                            </div>
+                            <p className="truncate text-[11px] text-slate-500" title={it.name}>{it.name}</p>
+                            {it.label_id && labelMap.get(it.label_id) && <div><LabelBadge label={labelMap.get(it.label_id)} /></div>}
+                            <div className="pt-0.5">{stepCell(it)}</div>
+                            {hasPrice && <div className="mt-1 border-t border-slate-100 pt-1.5">{priceCell(it)}</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {gridRows.length > GRID_PAGE && <Pager page={gridPage} pageSize={GRID_PAGE} total={gridRows.length} onPage={setGridPage} unitLabel="รุ่น" />}
               </div>
-            }
-          />
+            );
+          })()}
           {hasPrice && <p className="text-xs text-slate-400">ราคาใหม่เก็บในงานนี้เท่านั้น ไม่แก้ราคาในระบบ — แก้ราคาใน Lazada/Shopee แล้วติ๊กขั้นตอน · ราคาเต็ม = ราคาขายของสีที่ยังเปิดตอนใส่เข้างาน (กดที่ตัวเลขเพื่อแก้)</p>}
         </>
       ) : null}
@@ -484,6 +656,14 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
               <div className="w-44 text-slate-800">
                 <SearchableSelect value="__pick" options={[{ value: "__pick", label: "↺ เอาติ๊กออก…" }, ...stepOptions]}
                   onChange={(v) => { if (v !== "__pick") void setStep(selIds, v, false); }} />
+              </div>
+              <div className="w-44 text-slate-800">
+                <SearchableSelect value="__pick" options={[{ value: "__pick", label: "⊘ ไม่ต้องทำ…" }, ...stepOptions]}
+                  onChange={(v) => { if (v !== "__pick") void setSkip(selIds, v, true); }} />
+              </div>
+              <div className="w-44 text-slate-800">
+                <SearchableSelect value="__pick" options={[{ value: "__pick", label: "↺ กลับมาต้องทำ…" }, ...stepOptions]}
+                  onChange={(v) => { if (v !== "__pick") void setSkip(selIds, v, false); }} />
               </div>
             </>
           )}
@@ -508,6 +688,18 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
         taken={{ badge: "อยู่ในงานแล้ว", short: "ในงาน", hide: "ซ่อนที่อยู่ในงานแล้ว", row: "✓ อยู่แล้ว" }}
         confirmText={(n) => (n ? `ใส่ ${n} รุ่นเข้างาน` : "ใส่เข้างาน")} busyText="กำลังใส่…"
         onConfirm={addModels} tabPrefKey="marketing_work_add_tab" colsPrefKey="marketing-work-add" showFullPageLink={false} />
+
+      {/* 📦 drawer สินค้าตัวจริง (ทุกแท็บ) · ◀ ▶ ตามรายการที่เห็น · ปิด/แก้แล้วโหลดงานใหม่ (รหัส/ชื่อ/รูปอาจเปลี่ยน) */}
+      {openParent && (
+        <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParent} navIds={navIds}
+          onClose={() => { setOpenParent(null); if (job) void loadDetail(job.id, true); }}
+          onChanged={() => { if (job) void loadDetail(job.id, true); }} />
+      )}
+      {/* 🛍 ตั้งค่าเว็บไซต์ของรุ่น (ทุกร้าน — ตัวเดียวกับแท็บ 🛍 ใน Parent SKU) · เปิด Parent SKU ทับได้ */}
+      <ParentWebDrawer parentId={webParent} hidden={!!openParent}
+        code={webItem?.code} name={webItem?.name} imageUrl={webItem ? r2ImageUrl(webItem.image_key, 160) : null}
+        navIds={navIds} onNavigate={setWebParent} onClose={() => setWebParent(null)}
+        onOpenParent={(pid) => setOpenParent(pid)} />
 
       <ConfirmDialog open={!!ask} onClose={() => setAsk(null)} loading={busy} onConfirm={() => void confirmAsk()} variant="danger"
         requireTyped={ask?.kind === "delete" && items.length >= 20 ? "CONFIRM" : undefined}
