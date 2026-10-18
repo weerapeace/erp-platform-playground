@@ -73,13 +73,15 @@ export type CreatedTask = { id: string; task_no: string; title: string; subtasks
 // Step labels are rendered via t() inside the component
 const STEPS_TH = ["แบรนด์", "ข้อมูลงาน", "งานย่อย", "สินค้า"];
 
-export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCampaignId, lockedCampaignLabel }: {
+export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCampaignId, lockedCampaignLabel, presetCampaign }: {
   open: boolean;
   onClose: () => void;
   onCreated: (res: CreatedTask) => void;
   pushToast: (type: "success" | "error" | "info", m: string) => void;
   lockedCampaignId?: string;
   lockedCampaignLabel?: string;
+  /** เลือกแคมเปญ (+ แบรนด์ของแคมเปญ) ไว้ให้ก่อน แต่ยังเปลี่ยนได้ — ต่างจาก lockedCampaignId ที่ล็อกตาย (ใช้กับปุ่ม "＋ เพิ่มงาน" บนการ์ดแคมเปญหน้าภาพรวม) */
+  presetCampaign?: { id: string; name: string; brand_id: string | null } | null;
 }) {
   const t = useT();
   const { taskTypes, platforms } = useCreativeOptions();
@@ -131,7 +133,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setNewCampOpen(false); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? presetCampaign?.id ?? "", brand_id: presetCampaign?.brand_id ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setNewCampOpen(false); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId, presetCampaign?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
   // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
   useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
@@ -310,6 +312,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
 
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
       {lockedCampaignId && step === 1 && <div className="mb-4 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-lg text-sm text-slate-600">📣 Campaign: <span className="font-medium text-slate-800">{lockedCampaignLabel || t("แคมเปญนี้","this campaign")}</span></div>}
+      {!lockedCampaignId && presetCampaign && form.campaign_id === presetCampaign.id && step === 1 && <div className="mb-4 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-lg text-sm text-slate-600">📣 Campaign: <span className="font-medium text-slate-800">{presetCampaign.name}</span> <span className="text-xs text-slate-400">· {t("เลือกให้แล้ว เปลี่ยนได้ในขั้นข้อมูลงาน","Preselected — change it in Task info")}</span></div>}
 
       {/* STEP 1 — เลือกแบรนด์ + เทมเพลตของแบรนด์ */}
       {step === 1 && (

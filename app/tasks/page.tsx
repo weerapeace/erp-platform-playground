@@ -116,6 +116,7 @@ export default function TasksPage() {
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
+  const [createCampaign, setCreateCampaign] = useState<Campaign | null>(null);   // ปุ่ม "＋ เพิ่มงาน" บนการ์ดแคมเปญ → เลือกแคมเปญนั้นไว้ให้ใน Wizard
   const [quickOpen, setQuickOpen] = useState(false);   // งานด่วน (Quick Task)
   // คลังความรู้
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
@@ -216,7 +217,8 @@ export default function TasksPage() {
   }), [tasks, myTasks, reviewPending]);
 
   // ---- create ----
-  const openCreate = () => setCreateOpen(true);
+  const openCreate = () => { setCreateCampaign(null); setCreateOpen(true); };
+  const openCreateInCampaign = (c: Campaign) => { setCreateCampaign(c); setCreateOpen(true); };
   useNewParam(can("tasks.create" as Parameters<typeof can>[0]), openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   // ---- workflow (เส้นทาง + ชนิด อ่านจาก DB) — ใช้ของกลาง applyTaskTransition ----
@@ -293,6 +295,7 @@ export default function TasksPage() {
                 isAdmin={user?.role === "admin"}
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}
+                onCreateInCampaign={can("tasks.create" as Parameters<typeof can>[0]) ? openCreateInCampaign : undefined}
                 onQuickCreate={() => setQuickOpen(true)}
                 onOpenKnowledge={() => setKnowledgeOpen(true)}
                 onChanged={reload}
@@ -341,7 +344,7 @@ export default function TasksPage() {
       </div>
 
       {/* Create modal (ของกลาง — ใช้ร่วมกับ Campaign Canvas) */}
-      <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast}
+      <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast} presetCampaign={createCampaign}
         onCreated={async (newTask) => { pushToast("success", `${t("สร้างงาน", "Task created")} ${newTask.task_no}`); await reload(); }} />
 
       <QuickTaskModal open={quickOpen} onClose={() => setQuickOpen(false)} pushToast={pushToast}

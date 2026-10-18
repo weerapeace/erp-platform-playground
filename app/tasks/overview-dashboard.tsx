@@ -42,7 +42,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 export function OverviewDashboard({
   userName, userId, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, statusFilter = null, onClearStatusFilter, onStatusFilter, isAdmin,
   theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField, viewSwitcher,
-  onFilter, onOpenTask, onCreate, onQuickCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
+  onFilter, onOpenTask, onCreate, onCreateInCampaign, onQuickCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
 }: {
   userName?: string;
   userId?: string | null;
@@ -68,6 +68,8 @@ export function OverviewDashboard({
   onFilter: (f: OvFilter) => void;
   onOpenTask: (id: string) => void;
   onCreate: () => void;
+  /** ปุ่ม "＋ เพิ่มงาน" บนการ์ดแคมเปญ (ไม่ส่ง = ไม่มีสิทธิ์สร้างงาน → ซ่อนปุ่ม) */
+  onCreateInCampaign?: (c: Campaign) => void;
   onQuickCreate?: () => void;
   onOpenKnowledge: () => void;
   onChanged?: () => void | Promise<void>;
@@ -474,17 +476,28 @@ export function OverviewDashboard({
                     const st = CSTATUS[c.status];
                     const open = openByCampaign[c.id] ?? 0;
                     return (
-                      <a key={c.id} href={`/tasks/campaigns/${c.id}`} className="block w-full text-left p-3 rounded-lg border border-slate-100 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${st?.cls ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{st?.label() ?? c.status}</span>
-                          {open > 0 && <span className="text-[11px] text-slate-500">{open} {t("งานค้าง", "open")}</span>}
+                      <div key={c.id} className="rounded-lg border border-slate-100 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
+                        <a href={`/tasks/campaigns/${c.id}`} className="block w-full text-left px-3 pt-3 pb-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${st?.cls ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{st?.label() ?? c.status}</span>
+                            {open > 0 && <span className="text-[11px] text-slate-500">{open} {t("งานค้าง", "open")}</span>}
+                          </div>
+                          <p className="text-sm font-semibold text-slate-800 mt-1.5 line-clamp-2">{c.name}</p>
+                        </a>
+                        {/* แถวล่าง: แบรนด์/ช่วงวัน (กดแล้วเปิดแคมเปญเหมือนเดิม) + ปุ่มเพิ่มงานในแคมเปญนี้ (แยกจากลิงก์ ห้ามซ้อน <button> ใน <a>) */}
+                        <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
+                          <a href={`/tasks/campaigns/${c.id}`} className="flex min-w-0 items-center gap-2 text-[11px] text-slate-400 flex-wrap">
+                            {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
+                            {(c.start_date || c.end_date) && <span>🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
+                          </a>
+                          {onCreateInCampaign && (
+                            <button type="button" onClick={() => onCreateInCampaign(c)} title={t("สร้างงานใหม่ในแคมเปญนี้", "New task in this campaign")}
+                              className="shrink-0 inline-flex items-center h-7 px-2.5 rounded-md border border-violet-200 bg-white text-[11px] font-medium text-violet-700 hover:bg-violet-50">
+                              ＋ {t("เพิ่มงาน", "Add task")}
+                            </button>
+                          )}
                         </div>
-                        <p className="text-sm font-semibold text-slate-800 mt-1.5 line-clamp-2">{c.name}</p>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1 flex-wrap">
-                          {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
-                          {(c.start_date || c.end_date) && <span>🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
-                        </div>
-                      </a>
+                      </div>
                     );
                   })}
                 </div>
