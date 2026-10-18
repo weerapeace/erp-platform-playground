@@ -13,10 +13,24 @@ import { apiFetch } from "@/lib/api";
 
 export const PRODUCT_MODE_KEY = "tasks_product_edit_mode";
 export type ProductEditMode = "legacy" | "direct";
-export type ProductModeCfg = { types: Record<string, { mode: ProductEditMode; since: string | null }> };
+/** skip_subtasks = ชนิดงานย่อยที่ "ไม่ต้องสร้าง" ตอนสร้างงานใหม่ในโหมดใหม่ (ไม่ใส่ = ค่าเริ่มต้น DEFAULT_SKIP_SUBTASKS) */
+export type ProductModeCfg = { types: Record<string, { mode: ProductEditMode; since: string | null; skip_subtasks?: string[] }> };
 
 /** ชนิดงานย่อยที่ "แก้ที่สินค้า" ได้ (ปลายทาง = รูปสินค้า / รูป Description / ข้อความคำอธิบาย) */
 export const DIRECT_TARGETS = new Set(["sku_media", "description_media", "sku_description"]);
+/** โหมดใหม่ไม่ต้องมีงานย่อยพวกนี้ (แก้ที่สินค้าจากหน้างานได้เลย) — ปรับได้ต่อประเภทงานในหน้าตั้งค่า */
+export const DEFAULT_SKIP_SUBTASKS = ["images", "description_image", "description_text"];
+
+/** ประเภทงานนี้ตั้งเป็นโหมดใหม่อยู่ไหม (ใช้ตอนสร้างงานใหม่ — งานที่สร้างตอนนี้ผ่านเงื่อนไข since เสมอ) */
+export function isDirectType(cfg: ProductModeCfg | null, taskType: string | null | undefined): boolean {
+  return !!cfg && !!taskType && cfg.types[taskType]?.mode === "direct";
+}
+
+/** ชนิดงานย่อยที่ข้ามตอนสร้างงานใหม่ของประเภทนี้ (ไม่ใช่โหมดใหม่ = ไม่ข้ามอะไร) */
+export function skippedSubtaskTypes(cfg: ProductModeCfg | null, taskType: string | null | undefined): string[] {
+  if (!isDirectType(cfg, taskType)) return [];
+  return cfg!.types[taskType as string].skip_subtasks ?? DEFAULT_SKIP_SUBTASKS;
+}
 
 let cache: Promise<ProductModeCfg> | null = null;
 

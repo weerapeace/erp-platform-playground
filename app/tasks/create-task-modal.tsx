@@ -26,6 +26,7 @@ import {
   type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
 } from "./data";
 import { CampaignCreateModal } from "./campaigns/campaign-create-modal";
+import { skippedSubtaskTypes, useProductModeCfg } from "./product-edit-mode";
 import { ArrangePrintEditor, specFromItems, specBasesFrom, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { ArrangePrintType } from "./data";
 
@@ -66,7 +67,9 @@ const EMPTY_FORM: FormState = {
 };
 
 // แถวงานย่อยในขั้นที่ 2
-type SubRow = { include: boolean; title: string; description: string | null; required_before_next: boolean; assignees: { id: string; label: string }[]; type: string; config: SubtaskStepConfig };
+type SubRow = { include: boolean; title: string; description: string | null; required_before_next: boolean; assignees: { id: string; label: string }[]; type: string; config: SubtaskStepConfig;
+  /** 🔁 โหมดใหม่ปิดให้อัตโนมัติ (ประเภทงานนี้ตั้งว่าไม่ต้องมีงานย่อยชนิดนี้) · userSet = ผู้ใช้ติ๊กเองแล้ว ไม่ปรับให้อีก */
+  autoSkip?: boolean; userSet?: boolean };
 
 export type CreatedTask = { id: string; task_no: string; title: string; subtasks: { title: string }[] };
 
@@ -85,6 +88,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
 }) {
   const t = useT();
   const { taskTypes, platforms } = useCreativeOptions();
+  const modeCfg = useProductModeCfg();   // 🔁 โหมดใหม่ต่อประเภทงาน → งานย่อยบางชนิด "ไม่ต้องมี"
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [newCampOpen, setNewCampOpen] = useState(false);   // ป๊อปสร้างแคมเปญใหม่ (ของกลาง CampaignCreateModal) — เปิดซ้อนบน Wizard
@@ -207,18 +211,35 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       due_date: (offset != null && p.order_date) ? addDaysStr(p.order_date, offset) : p.due_date,
     }));
     setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []);
+    const skip = skippedSubtaskTypes(modeCfg, tpl.task_type ?? form.task_type);
     setSubs((tpl.steps ?? []).filter((s) => s.title?.trim()).map((s) => ({
-      include: true, title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next,
+      include: !skip.includes(s.type ?? "custom"), autoSkip: skip.includes(s.type ?? "custom"),
+      title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next,
       assignees: (s.assignee_ids ?? []).map((aid, i) => ({ id: aid, label: s.assignee_labels?.[i] ?? "ผู้ใช้" })),
       type: s.type ?? "custom", config: s.config ?? {},
     })));
   };
+  // เปลี่ยนประเภทงาน / ค่าตั้งโหลดเสร็จทีหลัง → ปรับงานย่อยที่ "ไม่ต้องมี" ให้ตรง (ไม่ทับอันที่ผู้ใช้ติ๊กเอง)
+  useEffect(() => {
+    const skip = skippedSubtaskTypes(modeCfg, form.task_type);
+    setSubs((rows) => {
+      let changed = false;
+      const out = rows.map((r) => {
+        if (r.userSet) return r;
+        const sk = skip.includes(r.type);
+        if (sk && r.include) { changed = true; return { ...r, include: false, autoSkip: true }; }
+        if (!sk && r.autoSkip) { changed = true; return { ...r, include: true, autoSkip: false }; }
+        return r;
+      });
+      return changed ? out : rows;
+    });
+  }, [modeCfg, form.task_type]);
 
   const addBlankSub = () => { setSubs((p) => [...p, { include: true, title: "", description: null, required_before_next: false, assignees: form.assignees.map((u) => ({ id: u.id, label: u.name })), type: "custom", config: {} }]); setDirty(true); };
   const addContentItem = () => { setContentItems((p) => [...p, { title: "", platforms: [] }]); setDirty(true); };
   const patchContentItem = (i: number, patch: Partial<TemplateContentItem>) => { setContentItems((p) => p.map((c, j) => j === i ? { ...c, ...patch } : c)); setDirty(true); };
   const removeContentItem = (i: number) => { setContentItems((p) => p.filter((_, j) => j !== i)); setDirty(true); };
-  const patchSub = (i: number, p: Partial<SubRow>) => { setSubs((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...p } : r))); setDirty(true); };
+  const patchSub = (i: number, p: Partial<SubRow>) => { const pp = "include" in p ? { ...p, userSet: true, autoSkip: false } : p; setSubs((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...pp } : r))); setDirty(true); };
   const removeSub = (i: number) => { setSubs((rows) => rows.filter((_, idx) => idx !== i)); setDirty(true); };
 
   // เปลี่ยนรายการเรียงพิมพ์ (จากของกลาง ArrangePrintEditor) → mark dirty
@@ -518,6 +539,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่มีงานย่อย — เลือกเทมเพลตในขั้นแรก หรือกด ปุ่ม เพิ่มงานย่อย (ข้ามได้ถ้าไม่ต้องการ)","No subtasks yet — choose a Template in step 1, or click Add subtask (optional)")}</div>
           ) : (
             <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+              {subs.some((r) => r.autoSkip) && (
+                <p className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5">🔁 {t("โหมดใหม่: งานย่อยที่ไม่ได้ติ๊ก = ไม่ต้องมี — แก้รูป/คำอธิบายที่สินค้าจากหน้างานได้เลย (ติ๊กถ้าอยากสร้าง · ตั้งค่าได้ที่ ตั้งค่า → ส่งงาน)", "New mode: unticked subtasks aren't needed — edit images/description on the product from the task page (tick to create anyway · configurable in Settings → Submit)")}</p>
+              )}
               {subs.map((row, i) => <SubRowEditor key={i} row={row} onChange={(p) => patchSub(i, p)} onRemove={() => removeSub(i)} />)}
             </div>
           )}
@@ -608,6 +632,7 @@ function SubRowEditor({ row, onChange, onRemove }: { row: SubRow; onChange: (p: 
         <input value={row.title} onChange={(e) => onChange({ title: e.target.value })} placeholder={t("ชื่องานย่อย","Subtask title")} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
         <button onClick={onRemove} className="text-slate-300 hover:text-red-500 text-sm px-1" title={t("ลบแถว","Remove row")}>✕</button>
       </div>
+      {row.autoSkip && !row.include && <p className="pl-6 text-[11px] text-violet-600">🔁 {t("โหมดใหม่: ไม่ต้องสร้าง — แก้ที่สินค้าจากหน้างานได้เลย", "New mode: not needed — edit the product from the task page")}</p>}
       {row.include && (
         <div className="pl-6 space-y-1.5">
           <div className="flex flex-wrap items-center gap-1.5">

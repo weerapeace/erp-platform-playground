@@ -27,6 +27,7 @@ import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, de
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
+import { TaskDirectPanel } from "./direct-edit-panel";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
@@ -340,6 +341,12 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 <p className="text-xs text-slate-400 mb-1">🖼 {t("แนบรูป (บรีฟ/อ้างอิง)", "Images (brief/reference)")}</p>
                 <ImageAttachKeys value={d.reference_images ?? []} onChange={(keys) => { void saveQuick({ reference_images: keys }, true); }} folder="creative-tasks" maxSize={800} />
               </div>
+
+              {/* 🔁 โหมดใหม่ + ไม่มีงานย่อยรูป/คำอธิบาย → แก้ที่สินค้าจากหน้างานเลย (สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจใช้สถานะงานปกติ) */}
+              <TaskDirectPanel task={d} pushToast={pushToast}
+                canEdit={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.created_by || user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
+                canUndo={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
+                onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }} />
 
               {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
               <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees}

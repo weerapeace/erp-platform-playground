@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { setEditContext, clearEditContext } from "@/lib/edit-context";
 import type { TaskParentRef, TaskSkuRef } from "./data";
+import { DEFAULT_SKIP_SUBTASKS, DIRECT_TARGETS, isDirectTask, useProductModeCfg } from "./product-edit-mode";
 
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
@@ -43,14 +44,15 @@ const keyOf = (x: unknown): string | null => (x && typeof x === "object" && type
 const isAdd = (c: TaskChange) => c.source === "gallery_add" || c.source === "description_image_add";
 
 /** โหลดสิ่งที่แก้ในงานย่อยนี้ (ไม่นับรายการ "ย้อนกลับ" — ผลของมันโชว์เป็นป้าย "ย้อนแล้ว" บนรายการเดิม) */
-export function useTaskChanges(taskId: string, subtaskId: string, enabled = true) {
+/** subtaskId = null → ทุกอย่างที่แก้ในงานนี้ (ระดับงาน — งานโหมดใหม่ที่ไม่มีงานย่อยสินค้า) */
+export function useTaskChanges(taskId: string, subtaskId: string | null, enabled = true) {
   const [changes, setChanges] = useState<TaskChange[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(async () => {
     if (!enabled) return;
     setError(null);
     try {
-      const r = await apiFetch(`/api/record-versions?task_id=${taskId}&subtask_id=${subtaskId}`);
+      const r = await apiFetch(`/api/record-versions?task_id=${taskId}${subtaskId ? `&subtask_id=${subtaskId}` : ""}`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
       setChanges(((j.changes ?? []) as TaskChange[]).filter((c) => c.source !== "restore"));
@@ -109,7 +111,7 @@ export function ChangeList({ changes, canUndo, onUndo, compact = false }: { chan
 }
 
 export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, canEdit, canUndo, onBeforeEdit, onAddParent, changes, error, reloadChanges, pushToast }: {
-  taskId: string; subId: string; approveTarget: string;
+  taskId: string; subId: string | null; approveTarget: string;
   parents: TaskParentRef[]; skus: TaskSkuRef[];
   /** เลือก/สร้าง Parent SKU จากการ์ด → ผูกเข้างาน (การ์ดเปิดหน้า Parent ให้ต่อทันที) · ไม่ส่ง = ไม่มีช่องเลือก */
   onAddParent?: (p: ParentSkuPickerValue) => Promise<void>;
@@ -144,7 +146,7 @@ export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, c
     try {
       const r = await apiFetch("/api/record-versions", {
         method: "POST", body: JSON.stringify({ version_id: undoTarget.id }),
-        headers: { "Content-Type": "application/json", "x-erp-task": taskId, "x-erp-subtask": subId },
+        headers: { "Content-Type": "application/json", "x-erp-task": taskId, ...(subId ? { "x-erp-subtask": subId } : {}) },
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.error) throw new Error(j.error || t("ย้อนกลับไม่สำเร็จ", "Undo failed"));
@@ -266,5 +268,31 @@ export function DirectSubmitModal({ changes, onClose, onConfirm }: { changes: Ta
         {err && <p className="text-xs text-red-600">⚠ {err}</p>}
       </div>
     </ERPModal>
+  );
+}
+
+/**
+ * 🔁 แผง "แก้ที่สินค้า" ระดับงาน — งานโหมดใหม่ที่ไม่มีงานย่อยรูป/รูปคำอธิบาย/เขียนคำอธิบาย (ตั้งค่า "ไม่ต้องมี")
+ * ตัวงานคือที่ทำงานเลย: เลือก/สร้าง Parent → แก้ที่สินค้า → สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจ/อนุมัติใช้สถานะของงานตามปกติ
+ * มีงานย่อยสินค้าอยู่แล้ว = ไม่โชว์ (การ์ดงานย่อยมีแผงของมันเอง)
+ */
+export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, pushToast }: {
+  task: { id: string; task_type: string | null; created_at: string; parent_skus?: TaskParentRef[]; skus?: TaskSkuRef[];
+    subtasks?: { subtask_type?: string | null; config?: { approve_target?: string } | null; status?: string }[] };
+  canEdit: boolean; canUndo: boolean;
+  onAddParent?: (p: ParentSkuPickerValue) => Promise<void>;
+  pushToast: ToastFn;
+}) {
+  const modeCfg = useProductModeCfg();
+  const hasProductSubs = (task.subtasks ?? []).some((s) => s.status !== "canceled"
+    && (DEFAULT_SKIP_SUBTASKS.includes(String(s.subtask_type ?? "")) || DIRECT_TARGETS.has(String(s.config?.approve_target ?? ""))));
+  const on = isDirectTask(modeCfg, task.task_type, task.created_at) && !hasProductSubs;
+  const { changes, error, reload } = useTaskChanges(task.id, null, on);
+  if (!on) return null;
+  return (
+    <DirectEditPanel taskId={task.id} subId={null} approveTarget="sku_media"
+      parents={task.parent_skus ?? []} skus={task.skus ?? []}
+      canEdit={canEdit} canUndo={canUndo} onBeforeEdit={async () => { /* ระดับงาน: ใช้สถานะงานตามปกติ */ }}
+      onAddParent={onAddParent} changes={changes} error={error} reloadChanges={reload} pushToast={pushToast} />
   );
 }
