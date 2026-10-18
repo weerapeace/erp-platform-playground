@@ -175,3 +175,22 @@ describe("validateBlocks", () => {
     expect(ids).not.toContain("pg-1");
   });
 });
+
+describe("Section หมวดสินค้า — รูปบนการ์ดรายหมวด (catImg)", () => {
+  it("เก็บเฉพาะรหัสหมวด + รูป r2 ที่ใช้ได้ · ค่าแปลก = ทิ้ง", () => {
+    const [b] = normalizeBlocks([
+      {
+        id: "c1",
+        type: "categories",
+        cats: ["Wallets", "belts"],
+        catImg: { Wallets: "assets/abc/wallet.jpg", belts: "javascript:alert(1)", "": "assets/x.jpg", bags: 123 },
+      },
+    ]) as unknown as { cats: string[]; catImg: Record<string, string> }[];
+    expect(b.cats).toEqual(["wallets", "belts"]);
+    expect(b.catImg).toEqual({ wallets: "assets/abc/wallet.jpg" });
+  });
+  it("บล็อกเก่าไม่มี catImg = {} (หน้าตาเดิม)", () => {
+    const [b] = normalizeBlocks([{ id: "c1", type: "categories" }]) as unknown as { catImg: unknown }[];
+    expect(b.catImg).toEqual({});
+  });
+});

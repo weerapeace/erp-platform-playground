@@ -63,6 +63,7 @@ export type FieldType =
   | "skus" // เลือก SKU ทีละตัว (รุ่น + สี) เก็บ "CODE:sku-xxxxxxxx"[] · ไม่มีสี = "CODE" (lib/website-sku-cards)
   | "category" // หมวดสินค้าบนเว็บของร้าน (key)
   | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
+  | "categoryImages" // รูปแทนรายหมวด { รหัสหมวด: r2 key } — ตั้งในช่อง categories ของ Section เดียวกัน (ไม่วาดช่องแยก · ต้อง hidden)
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
   | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
   | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
@@ -116,6 +117,8 @@ export interface FieldDef {
    * eq เป็น array = ค่าใดค่าหนึ่งในรายการ · ใส่หลายเงื่อนไขเป็น array = ต้องตรงทุกข้อ
    */
   showIf?: ShowIf | ShowIf[];
+  /** ไม่วาดในฟอร์ม (ค่าถูกแก้ผ่านช่องอื่น เช่น categoryImages แก้ในช่อง categories) — ยังเก็บ/ทำความสะอาดตามชนิดปกติ */
+  hidden?: boolean;
   /** ช่องชนิด crop: key ของรูปในชิ้นเดียวกัน (เช่น "imageKey") */
   cropImage?: string;
   /** ช่องชนิด crop: key ของสัดส่วนกรอบใน Section แม่ (ค่าแบบ "4:5" · "auto" = ตามรูป ไม่ต้องครอป) */
@@ -1622,7 +1625,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         ],
         hint: "รูปของแต่ละหมวดตั้งที่แท็บ 📂 หมวดหมู่ (ไม่มีรูป = ใช้ไอคอน)",
       }),
-      f("cats", "หมวดที่โชว์ (เรียงตามที่เลือก)", "categories", { group: "content", hint: "ไม่เลือก = ทุกหมวดหลัก ตามลำดับในแท็บ 📂 หมวดหมู่ (หมวดย่อยเลือกเพิ่มเองได้)" }),
+      f("cats", "หมวดที่โชว์", "categories", { group: "content", wide: true, hint: "ไม่เลือก = ทุกหมวดหลัก ตามลำดับในแท็บ 📂 หมวดหมู่ · ลาก ⠿ เรียงลำดับ · 🖼 = ตั้งรูปบนการ์ดเฉพาะ Section นี้ (ไม่ตั้ง = รูปหมวดจากแท็บ 📂)" }),
+      // รูปแทนรายหมวด (แก้ในช่อง "หมวดที่โชว์" ด้านบน) — หน้าร้านใช้แทน imageKey ของหมวด
+      f("catImg", "รูปบนการ์ดรายหมวด", "categoryImages", { group: "content", hidden: true, default: {} }),
       f("subs", "หมวดย่อยใต้การ์ด", "select", {
         group: "content",
         default: "none",
@@ -1896,6 +1901,8 @@ export function defaultForType(t: FieldType): unknown {
     case "skus":
     case "categories":
       return [];
+    case "categoryImages":
+      return {};
     case "crop":
       return { x: 50, y: 50, zoom: 100 };
     case "point":

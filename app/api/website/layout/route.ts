@@ -64,7 +64,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // Section ทดลอง (meta.beta) โชว์ในคลังเฉพาะร้านที่เปิดสวิตช์ในแท็บข้อมูลร้าน
     blockTypes: blockTypesFor(await readShopBetas(sb, s.id)),
     /** หมวดสินค้าบนเว็บของร้าน — ช่อง "หมวด" ในบล็อกสินค้าใช้เลือก */
-    categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null })),
+    categories: normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null, imageKey: c.imageKey ?? null, icon: c.icon ?? "" })),
   });
 }
 

@@ -24,6 +24,7 @@ import { FIELD_GROUP_LABEL, matchShowIf, type FieldDef, type FieldGroup } from "
 import { BilingualField, useContentLang, useTranslateOne } from "@/components/bilingual-field";
 import { confirmPatch, readMeta, translationPatch, translationStatus } from "@/lib/content-i18n";
 import { englishValue, isTranslatable, thaiValue } from "@/lib/website-i18n";
+import { WebsiteCategoriesField } from "@/components/website-categories-field";
 
 export interface SchemaFormContext {
   shopSlug: string;
@@ -31,8 +32,8 @@ export interface SchemaFormContext {
   /** ชื่อร้าน (ใช้ในคำสั่งแนะนำ AI) */
   shopName?: string;
   /** หมวดสินค้าบนเว็บของร้าน (จากแท็บจับคู่ฟิลด์) */
-  /** parent = หมวดแม่ (หมวดย่อย) — รายการเรียงแบบต้นไม้ */
-  categories: { key: string; label: string; parent?: string | null }[];
+  /** parent = หมวดแม่ (หมวดย่อย) — รายการเรียงแบบต้นไม้ · imageKey/icon = รูป/ไอคอนหมวด (ตัวเลือกหมวดโชว์รูปย่อ) */
+  categories: { key: string; label: string; parent?: string | null; imageKey?: string | null; icon?: string }[];
   /** Section ในหน้าที่กำลังจัด (ช่อง "กดแล้วไปที่ → เลื่อนไปส่วนอื่นในหน้านี้") */
   sections?: { id: string; label: string }[];
 }
@@ -302,6 +303,13 @@ export function SchemaField(props: {
 }) {
   const { enabled } = useContentLang();
   const { fd, item, onPatch } = props;
+  // 📂 หมวดที่โชว์ + รูปรายหมวด (แก้ 2 ช่องพร้อมกัน: cats + catImg) — ตัวเลือกหมวดของกลาง
+  if (fd.type === "categories" && onPatch && item)
+    return (
+      <FieldBox label={fd.label} hint={fd.hint ?? "ไม่เลือก = ทุกหมวด"} wide>
+        <WebsiteCategoriesField shopSlug={props.ctx.shopSlug} categories={props.ctx.categories} value={Array.isArray(props.value) ? (props.value as string[]) : []} item={item} onPatch={onPatch} fieldKey={fd.key} />
+      </FieldBox>
+    );
   const inner = <SchemaFieldInner {...props} />;
   // 🌐 อยู่ในแผงที่เปิดโหมด 2 ภาษา + ช่องนี้แปลได้ → ห่อด้วย widget กลาง (ช่องไทยข้างในหน้าตาเดิม)
   if (enabled && onPatch && item && isTranslatable(fd)) {
@@ -542,7 +550,7 @@ export function SchemaForm({
   /** ชิ้นย่อย: ไม่แยกหัวกลุ่ม */
   compact?: boolean;
 }) {
-  const visible = useMemo(() => fields.filter((fd) => matchShowIf(fd, value)), [fields, value]);
+  const visible = useMemo(() => fields.filter((fd) => !fd.hidden && matchShowIf(fd, value)), [fields, value]);
   const groups = useMemo(() => {
     const map = new Map<FieldGroup, FieldDef[]>();
     for (const fd of visible) {

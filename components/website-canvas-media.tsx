@@ -33,7 +33,8 @@ export function measureImage(key: string): Promise<{ w: number; h: number }> {
 }
 
 /** อัปโหลดไฟล์เข้าคลังไฟล์กลาง (กันไฟล์ซ้ำให้เอง) → คืน r2 key */
-async function uploadToLibrary(file: File, collectionId?: string): Promise<{ key: string; title: string }> {
+/** อัปโหลดรูปเข้าคลังรูป (assets) → r2 key — ตัวเดียวกับปุ่ม "อัปโหลดจากเครื่อง" ใน ImageChooser (ใช้ซ้ำได้ เช่น ลากรูปมาวาง) */
+export async function uploadToLibrary(file: File, collectionId?: string): Promise<{ key: string; title: string }> {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("title", file.name.replace(/\.[^.]+$/, ""));
@@ -62,25 +63,42 @@ export function ImageChooser({
   shopSlug,
   title = "เพิ่มรูป",
   onPick,
+  initialView = "menu",
+  categoryKeys,
+  categoryLabel,
+  note = "วางลงผืนตามสัดส่วนรูปจริง · ยังไม่มีกรอบ — แต่งกรอบทีหลังได้ที่ตัวรูป",
 }: {
   open: boolean;
   onClose: () => void;
   shopSlug: string;
   title?: string;
   onPick: (img: PickedImage) => void;
+  /** "products" = เปิดมาที่รูปสินค้าของร้านเลย */
+  initialView?: "menu" | "products";
+  /** โชว์เฉพาะสินค้าในหมวดเหล่านี้ก่อน (สลับดูทั้งร้านได้) — หมวดแม่นับสินค้าหมวดย่อยด้วย (API สาธารณะเติมหมวดแม่ให้) */
+  categoryKeys?: string[];
+  categoryLabel?: string;
+  /** ข้อความเล็กท้ายเมนู (null = ไม่โชว์) */
+  note?: string | null;
 }) {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [libOpen, setLibOpen] = useState(false);
   const [showProducts, setShowProducts] = useState(false);
-  const [products, setProducts] = useState<{ code: string; name: string; images: string[] }[] | null>(null);
+  const [products, setProducts] = useState<{ code: string; name: string; images: string[]; categories: string[] }[] | null>(null);
+  // กรองตามหมวด (ถ้าส่ง categoryKeys) — ปิดได้ด้วยปุ่ม "ดูสินค้าทั้งร้าน"
+  const [onlyCat, setOnlyCat] = useState(true);
 
   useEffect(() => {
     if (!open) {
       setShowProducts(false);
       setBusy(false);
+    } else {
+      setOnlyCat(true);
+      if (initialView === "products") openProducts();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const done = async (key: string, title?: string) => {
@@ -112,7 +130,7 @@ export function ImageChooser({
     if (products) return;
     fetch(`/api/public/storefront/products?shop=${encodeURIComponent(shopSlug)}`)
       .then((r) => r.json())
-      .then((j) => setProducts(((j?.products ?? []) as { code: string; name: string; images?: string[] }[]).map((p) => ({ code: p.code, name: p.name, images: p.images ?? [] }))))
+      .then((j) => setProducts(((j?.products ?? []) as { code: string; name: string; images?: string[]; categories?: string[] }[]).map((p) => ({ code: p.code, name: p.name, images: p.images ?? [], categories: p.categories ?? [] }))))
       .catch(() => setProducts([]));
   };
 
@@ -143,20 +161,34 @@ export function ImageChooser({
                 <span className="block text-xs text-slate-500">รูปของสินค้าที่ขายบนเว็บนี้</span>
               </span>
             </button>
-            <p className="text-[11px] text-slate-400 pt-1">วางลงผืนตามสัดส่วนรูปจริง · ยังไม่มีกรอบ — แต่งกรอบทีหลังได้ที่ตัวรูป</p>
+            {note && <p className="text-[11px] text-slate-400 pt-1">{note}</p>}
           </div>
         ) : (
           <div className="space-y-3">
-            <button onClick={() => setShowProducts(false)} className="text-xs text-slate-500 hover:text-blue-600">
-              ← กลับ
-            </button>
-            {products === null ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={() => setShowProducts(false)} className="text-xs text-slate-500 hover:text-blue-600">
+                ← กลับ
+              </button>
+              {categoryKeys?.length ? (
+                <span className="ml-auto flex items-center gap-1 text-xs">
+                  <button type="button" onClick={() => setOnlyCat(true)} className={`rounded-full border px-2.5 py-1 ${onlyCat ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
+                    เฉพาะหมวด {categoryLabel ?? ""}
+                  </button>
+                  <button type="button" onClick={() => setOnlyCat(false)} className={`rounded-full border px-2.5 py-1 ${!onlyCat ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
+                    ทั้งร้าน
+                  </button>
+                </span>
+              ) : null}
+            </div>
+            {(() => {
+              const shown = products && categoryKeys?.length && onlyCat ? products.filter((p) => p.categories.some((k) => categoryKeys.includes(k))) : products;
+              return shown === null ? (
               <p className="text-sm text-slate-400 py-8 text-center">กำลังโหลดสินค้า…</p>
-            ) : products.length === 0 ? (
-              <p className="text-sm text-slate-400 py-8 text-center">ร้านนี้ยังไม่มีสินค้าบนเว็บ</p>
+            ) : shown.length === 0 ? (
+              <p className="text-sm text-slate-400 py-8 text-center">{products?.length ? "ยังไม่มีสินค้าในหมวดนี้บนเว็บ — กด \"ทั้งร้าน\" เพื่อเลือกจากสินค้าอื่น" : "ร้านนี้ยังไม่มีสินค้าบนเว็บ"}</p>
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto">
-                {products.flatMap((p) =>
+                {shown.flatMap((p) =>
                   p.images.map((u, i) => {
                     const key = keyFromUrl(u);
                     if (!key) return null;
@@ -170,7 +202,8 @@ export function ImageChooser({
                   })
                 )}
               </div>
-            )}
+            );
+            })()}
           </div>
         )}
       </ERPModal>

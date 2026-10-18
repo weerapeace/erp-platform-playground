@@ -56,7 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: shop } = await sb.from("shops").select("id, name, slug, field_map").eq("slug", shopSlug).maybeSingle();
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const s = shop as { id: string; name: string; slug: string; field_map?: unknown };
-  const categories = normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null }));
+  const categories = normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null, imageKey: c.imageKey ?? null, icon: c.icon ?? "" }));
 
   const { data: dom } = await sb.from("shop_domains").select("domain").eq("shop_id", s.id).limit(1).maybeSingle();
   const rawDomain = (dom as { domain: string } | null)?.domain ?? null;

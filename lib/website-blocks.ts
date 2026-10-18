@@ -818,6 +818,18 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
     case "categories":
       return Array.isArray(v) ? [...new Set(v.map((c) => codeStr(c, 40).toLowerCase()).filter(Boolean))].slice(0, fd.max ?? 40) : [];
+    case "categoryImages": {
+      // { รหัสหมวด: r2 key } — รหัส/รูปที่ใช้ไม่ได้ถูกตัดทิ้ง · สูงสุด 80 หมวด (เท่ากับเพดานหมวดของร้าน)
+      const out: Record<string, string> = {};
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 80)) {
+          const key = codeStr(k, 40).toLowerCase();
+          const img = imgKey(x);
+          if (key && img) out[key] = img;
+        }
+      }
+      return out;
+    }
     case "skus":
       return Array.isArray(v) ? [...new Set(v.map((x) => skuRefStr(x)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
     case "datetime":
