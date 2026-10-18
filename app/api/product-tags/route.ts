@@ -1,6 +1,6 @@
 /**
  * /api/product-tags — แท็กประเภทสินค้า (product_families) แบบ 2 ภาษา + ติด/ปลดแท็กให้สินค้า
- *   GET  ?parent_id=            → { tags: [{id,name,name_en}], mine: [tag_id...] }
+ *   GET  ?parent_id=            → { tags: [{id,name,name_en,group_id}], mine: [tag_id...], groups: [{id,name,parent_group_id}] }
  *   POST { parent_id, tag_id, on }         → ติด (on=true) / ปลด (on=false)
  *   POST { tag_id, name_en }               → แก้ชื่ออังกฤษของแท็ก
  *
@@ -24,14 +24,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const parentId = (new URL(request.url).searchParams.get("parent_id") ?? "").trim();
   const admin = supabaseAdmin();
-  const [tagsRes, linkRes] = await Promise.all([
-    admin.from("product_families").select("id, name, name_en").eq("is_active", true).order("name", { ascending: true }),
+  const [tagsRes, linkRes, groupsRes] = await Promise.all([
+    admin.from("product_families").select("id, name, name_en, group_id").eq("is_active", true).order("name", { ascending: true }),
     parentId ? admin.from(JUNCTION).select("tgt_id").eq("src_id", parentId) : Promise.resolve({ data: [], error: null }),
+    // กลุ่ม → หน้าจอหา "แท็กแม่" ของแท็กย่อยได้ (lib/tag-hierarchy)
+    admin.from("product_family_groups").select("id, name, parent_group_id").eq("is_active", true),
   ]);
-  if (tagsRes.error) return NextResponse.json({ tags: [], mine: [], error: tagsRes.error.message }, { status: 400 });
+  if (tagsRes.error) return NextResponse.json({ tags: [], mine: [], groups: [], error: tagsRes.error.message }, { status: 400 });
   return NextResponse.json({
     tags: tagsRes.data ?? [],
     mine: ((linkRes.data ?? []) as { tgt_id: string }[]).map((r) => r.tgt_id),
+    groups: groupsRes.data ?? [],
     error: null,
   });
 }

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
 import { Spinner } from "@/components/spinner";
 
 /** ช่องข้อความที่ AI เขียนให้ — เรียงตามที่เห็นในฟอร์ม */
@@ -59,7 +60,7 @@ const CFG_FIELDS: { field: string; label: string; en: string; hint: string }[] =
 ];
 
 /** แท็กสินค้า 2 ภาษา (product_families) */
-type TagRow = { id: string; name: string; name_en?: string | null };
+type TagRow = { id: string; name: string; name_en?: string | null; group_id?: string | null };
 
 /**
  * เลือกโมเดล AI ที่ใช้เขียน (เก็บที่ ui_config key = ai_product_model)
@@ -131,31 +132,41 @@ function ModelPicker() {
  */
 function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () => void }) {
   const [all, setAll] = useState<TagRow[] | null>(null);
+  const [groups, setGroups] = useState<TagGroupLike[]>([]);
   const [mine, setMine] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string>("");
   const [open, setOpen] = useState(false);        // ดรอปดาวน์เลือกแท็ก
   const [search, setSearch] = useState("");
   const [msg, setMsg] = useState("");
+  const [info, setInfo] = useState("");
 
   const load = useCallback(async () => {
     try {
       const j = await apiFetch(`/api/product-tags?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json());
       setAll(((j.tags ?? []) as TagRow[]).filter((t) => t.id && t.name));
+      setGroups(((j.groups ?? []) as TagGroupLike[]).map((g) => ({ id: String(g.id), name: String(g.name ?? ""), parent_group_id: g.parent_group_id ? String(g.parent_group_id) : null })));
       setMine(new Set(((j.mine ?? []) as string[]).map(String)));
     } catch { setAll([]); }
   }, [parentId]);
   useEffect(() => { void load(); }, [load]);
 
+  const setTag = async (tagId: string, on: boolean) => {
+    const j = await apiFetch("/api/product-tags", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent_id: parentId, tag_id: tagId, on }),
+    }).then((r) => r.json());
+    if (j.error) throw new Error(j.error);
+    setMine((p) => { const n = new Set(p); if (on) n.add(tagId); else n.delete(tagId); return n; });
+  };
+  // ติดแท็กย่อย → ติดแท็กแม่ให้ด้วย (กฎกลาง lib/tag-hierarchy) · เอาแท็กแม่ออกเองได้
   const toggle = async (t: TagRow) => {
     const on = mine.has(t.id);
-    setBusy(t.id); setMsg("");
+    setBusy(t.id); setMsg(""); setInfo("");
     try {
-      const j = await apiFetch("/api/product-tags", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parent_id: parentId, tag_id: t.id, on: !on }),
-      }).then((r) => r.json());
-      if (j.error) throw new Error(j.error);
-      setMine((p) => { const n = new Set(p); if (on) n.delete(t.id); else n.add(t.id); return n; });
+      const parents = on ? [] : ancestorTagsOf(t.id, all ?? [], groups, (x) => x.name).filter((p) => !mine.has(p.id)).reverse();
+      for (const p of parents) await setTag(p.id, true);
+      await setTag(t.id, !on);
+      if (parents.length) setInfo(`ติดแท็กแม่ “${parents.map((p) => p.name).join(", ")}” ให้ด้วย (เอาออกได้)`);
       onChanged?.();
     } catch (e) { setMsg(e instanceof Error ? e.message : "เปลี่ยนแท็กไม่สำเร็จ"); }
     finally { setBusy(""); }
@@ -220,6 +231,7 @@ function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () =
         </div>
       </div>
       {msg && <p className="mt-1 text-[12px] text-rose-600">{msg}</p>}
+      {info && !msg && <p className="mt-1 text-[12px] text-emerald-600">✓ {info}</p>}
     </div>
   );
 }

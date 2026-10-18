@@ -14,6 +14,7 @@
 import { TagOrganizerModal } from "@/components/tag-organizer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { ancestorTagsOf } from "@/lib/tag-hierarchy";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { FamilyNavTabs } from "@/components/family-nav-tabs";
 import { IconPicker } from "@/components/icon-picker";
@@ -232,7 +233,7 @@ export default function TagsManagerPage() {
   const removeFromCart = useCallback((id: string) => { setCart((c) => c.filter((x) => x.id !== id)); setCartSel((p) => { const n = new Set(p); n.delete(id); return n; }); }, []);
   const toggleCartSel = useCallback((id: string) => setCartSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }), []);
   const removeSelectedFromCart = () => { setCart((c) => c.filter((x) => !cartSel.has(x.id))); setCartSel(new Set()); };
-  const addTag = (id: string) => setTagSet((s) => {
+  const addOneTag = (s: string[], id: string): string[] => {
     if (s.includes(id)) return s;
     const tag = allTags.find((t) => t.id === id);
     const grp = tag?.group_id ? groups.find((g) => g.id === tag.group_id) : null;
@@ -242,7 +243,10 @@ export default function TagsManagerPage() {
       return [...s.filter((tid) => !sameGroup.has(tid)), id];
     }
     return [...s, id];
-  });
+  };
+  // เลือกแท็กย่อย → ใส่แท็กแม่เข้าชุดให้ด้วย (กฎกลาง lib/tag-hierarchy) · เอาแท็กแม่ออกเองได้
+  const addTag = (id: string) => setTagSet((s) =>
+    [...ancestorTagsOf(id, allTags, groups, (t) => t.label).map((t) => t.id).reverse(), id].reduce(addOneTag, s));
   const removeTag = (id: string) => setTagSet((s) => s.filter((x) => x !== id));
 
   // สร้างแท็กใหม่ — ต้องใส่ชื่ออังกฤษด้วย (ใช้ตอนลงขายต่างประเทศ + ให้ AI เขียนคำอังกฤษให้ตรงศัพท์)
@@ -558,7 +562,7 @@ export default function TagsManagerPage() {
           </div>
           <div className="w-px self-stretch bg-slate-100 hidden md:block" />
           <div className="min-w-[260px]">
-            <div className="text-xs text-slate-500 mb-1">ชุดแท็กที่จะใส่ (ลากมาวางตรงนี้ได้)</div>
+            <div className="text-xs text-slate-500 mb-1">ชุดแท็กที่จะใส่ (ลากมาวางตรงนี้ได้ · เลือกแท็กย่อย = ใส่แท็กแม่ให้ด้วย)</div>
             <div className="flex flex-wrap gap-1.5 min-h-[28px] rounded-lg border border-dashed border-amber-200 p-1.5 mb-2">
               {tagSet.length === 0 && <span className="text-xs text-slate-300">— ยังไม่เลือกแท็ก —</span>}
               {tagSet.map((id) => (

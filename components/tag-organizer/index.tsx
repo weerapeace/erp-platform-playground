@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
+import { subGroupOfTag as findSubGroupOfTag, parentTagOfGroup } from "@/lib/tag-hierarchy";
 
 type Tag = { id: string; label: string; en: string; group_id: string | null; sort_order: number };
 type Grp = {
@@ -53,7 +54,6 @@ type EditState =
   | null;
 type BulkRow = { kind: "tag" | "group"; id: string; th: string; en: string };
 
-const norm = (s: string) => s.trim().toLowerCase();
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : "network");
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -157,17 +157,10 @@ export function TagOrganizerModal({
     const g = groupById.get(containerKeyOf(p));
     return !!g && !isSubGroup(g);
   };
-  // หมวดย่อยที่ผูกกับแท็กแม่ = ชื่อตรงกัน + อยู่ใต้กลุ่มเดียวกับแท็กแม่
-  const subGroupOfTag = (p: Tag) => {
-    const top = containerKeyOf(p);
-    if (top === NONE) return null;
-    return groups.find((g) => g.parent_group_id === top && norm(g.name) === norm(p.label)) ?? null;
-  };
-  // กลับทาง: แท็กแม่ของหมวดย่อย (แท็กชื่อเดียวกันในกลุ่มแม่) — เปลี่ยนชื่อฝั่งไหนก็เปลี่ยนอีกฝั่งตาม
-  const tagOfSubGroup = (s: Grp) => {
-    if (!isSubGroup(s)) return null;
-    return tags.find((t) => t.group_id === s.parent_group_id && norm(t.label) === norm(s.name)) ?? null;
-  };
+  // หมวดย่อยที่ผูกกับแท็กแม่ = ชื่อตรงกัน + อยู่ใต้กลุ่มเดียวกับแท็กแม่ (กฎกลาง lib/tag-hierarchy)
+  const subGroupOfTag = (p: Tag) => findSubGroupOfTag(p.label, containerKeyOf(p) === NONE ? null : p.group_id, groups);
+  // กลับทาง: แท็กแม่ของหมวดย่อย — เปลี่ยนชื่อฝั่งไหนก็เปลี่ยนอีกฝั่งตาม
+  const tagOfSubGroup = (s: Grp) => (isSubGroup(s) ? parentTagOfGroup(s, tags, (t) => t.label) : null);
   // กลุ่มที่ลากลงไปเป็นหมวดย่อยของ targetId ได้ไหม
   const canGroupInto = (dragId: string, targetId: string) => {
     if (dragId === targetId || isUnder(targetId, dragId)) return false;

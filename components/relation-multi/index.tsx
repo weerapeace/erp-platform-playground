@@ -14,6 +14,7 @@ import { tr } from "@/lib/lang";
 import { ImageInput } from "@/components/image-input";
 import { CopyButton } from "@/components/copy-button";
 import { TagOrganizerModal } from "@/components/tag-organizer";
+import { ancestorTagsOf } from "@/lib/tag-hierarchy";
 import { useToast } from "@/components/toast";
 import { BomEditorModal } from "@/components/bom-editor-modal";
 import { useAuth } from "@/components/auth";
@@ -203,15 +204,23 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   }, [opts, scopeOfGroup]);
 
   // toggle: ถ้าแท็กอยู่ในกลุ่ม "เลือกได้แค่ 1" → เอาแท็กอื่นใน scope เดียวกันออกก่อน
+  //   เลือกแท็กย่อย → เลือกแท็กแม่ให้ด้วย (lib/tag-hierarchy) · เอาแท็กแม่ออกทีหลังได้ ไม่กระทบแท็กย่อย
   const toggle = (id: string) => {
     if (loading) return;
     const cur = linkedRef.current;
     let next: string[];
     if (cur.includes(id)) next = cur.filter((x) => x !== id);
     else {
-      const sc = scopeOfTag(id);
-      const base = sc ? cur.filter((x) => scopeOfTag(x) !== sc) : cur;
-      next = [...base, id];
+      const chain = usesGroups ? ancestorTagsOf(id, opts, groups, (o) => o.label).map((o) => o.id) : [];
+      // ใส่จากแม่ลงมาลูก · ตัวที่ใส่ทีหลังไม่ไล่แท็กในสายเดียวกันออก (แม่-ลูกอยู่ scope เลือก 1 เดียวกันได้)
+      const addOne = (list: string[], a: string, keep: Set<string>) => {
+        if (list.includes(a)) return list;
+        const sc = scopeOfTag(a);
+        return [...(sc ? list.filter((x) => keep.has(x) || scopeOfTag(x) !== sc) : list), a];
+      };
+      next = cur;
+      const order = [...chain].reverse().concat(id);
+      order.forEach((a, i) => { next = addOne(next, a, new Set(order.slice(0, i))); });
     }
     linkedRef.current = next;
     onChange?.(next);
@@ -291,7 +300,10 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4" onClick={() => setPickerOpen(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-[480px] max-w-[94vw] max-h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">{pickTitle}</h3>
+              <div>
+                <h3 className="font-semibold text-slate-800">{pickTitle}</h3>
+                {usesGroups && <p className="text-[11px] text-slate-400 mt-0.5">เลือกแท็กย่อย (↳) = เลือกแท็กแม่ให้ด้วย · เอาแท็กแม่ออกเองได้</p>}
+              </div>
               <button type="button" onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
             </div>
             <div className="px-3 pt-3">
