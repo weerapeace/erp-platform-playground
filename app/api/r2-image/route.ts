@@ -2,6 +2,9 @@
  * R2 Image Proxy — F15 + F21
  *
  * GET /api/r2-image?key=<r2_key>
+ *   &w=<px>   ย่อให้กว้างไม่เกินนี้ (ไม่ขยาย · ถึง 3200) → webp
+ *   &q=<50-92> คุณภาพ webp (ไม่ใส่ = 75) — รูปใหญ่เต็มจอ (แบนเนอร์/สไลด์) ขอ 85 ให้คม
+ *   &meta=1   คืน JSON { width, height, bytes, type } ของไฟล์ต้นฉบับ (ฟอร์มเตือน "รูปเล็กไป")
  *
  * F21: ใช้ R2 native binding (env.R2_IMAGES.get) ตรงๆ — ไม่มี AWS SDK
  * → bundle เล็ก → ไม่ชน Worker 1102 + ไม่ต้อง sign URL
@@ -60,11 +63,30 @@ export async function GET(request: NextRequest): Promise<Response> {
     // ── ย่อรูปตามขนาดที่ขอ (?w=) — เฉพาะที่ย่อได้ (Vercel/Node มี sharp) ──
     // ย่อไม่ได้ (เช่น Cloudflare ไม่มี sharp) → ส่ง "รูปเดิม" แทน (ปลอดภัย)
     const ct0 = obj.httpMetadata?.contentType ?? "image/jpeg";
+    // 📏 ขนาดต้นฉบับ (ไม่ส่งรูป) — อ่านไม่ได้ (เช่น Cloudflare ไม่มี sharp / ไม่ใช่รูป) = {} เฉย ๆ
+    if (new URL(request.url).searchParams.get("meta") === "1") {
+      let info: Record<string, unknown> = {};
+      try {
+        if (ct0.startsWith("image/") && ct0 !== "image/svg+xml") {
+          const sharp = (await import("sharp")).default;
+          const m = await sharp(Buffer.from(await new Response(obj.body as ReadableStream).arrayBuffer())).metadata();
+          // EXIF หมุน 90° (5–8) = กว้าง/สูงสลับกันตอนแสดงผล
+          const swap = (m.orientation ?? 1) >= 5;
+          info = { width: swap ? m.height : m.width, height: swap ? m.width : m.height, bytes: obj.size, type: ct0 };
+        }
+      } catch {
+        /* ไม่รู้ขนาด */
+      }
+      return new Response(JSON.stringify(info), { status: 200, headers: { "Content-Type": "application/json", ...CACHE_HEADERS } });
+    }
     const wParam = Number(new URL(request.url).searchParams.get("w") || 0);
+    const qRaw = Number(new URL(request.url).searchParams.get("q") || 0);
+    const quality = qRaw >= 50 && qRaw <= 92 ? Math.round(qRaw) : 75;
     // sq=1 → บังคับสี่เหลี่ยมจัตุรัส (1:1) แบบ contain + พื้นขาว (ไม่ครอปสินค้าหาย) — ใช้กับรูปตัวเลือก LINE ที่ต้อง 1:1
     const sq = new URL(request.url).searchParams.get("sq") === "1";
     // ไม่ย่อ GIF (sharp→webp จะได้เฟรมเดียว = ภาพนิ่ง) → เสิร์ฟตัวเต็มให้ยังขยับได้
-    const canResize = wParam > 0 && wParam <= 2000 && ct0.startsWith("image/") && ct0 !== "image/svg+xml" && ct0 !== "image/gif";
+    // ถึง 3200px: แบนเนอร์/สไลด์เต็มจอบนจอคมชัดสูง (Retina) ต้องการรูปกว้าง ~2,500–3,000px
+    const canResize = wParam > 0 && wParam <= 3200 && ct0.startsWith("image/") && ct0 !== "image/svg+xml" && ct0 !== "image/gif";
     if (canResize) {
       try {
         const sharp = (await import("sharp")).default;
@@ -73,7 +95,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         // sq (รูปตัวเลือก LINE): 1:1 + LINE ไม่รับ webp ("Unsupported media type") → ออกเป็น JPEG · โหมดย่อทั่วไป → webp (เบากว่า)
         const out = sq
           ? await pipeline.resize({ width: wParam, height: wParam, fit: "contain", background: { r: 255, g: 255, b: 255 } }).jpeg({ quality: 82 }).toBuffer()
-          : await pipeline.resize({ width: wParam, withoutEnlargement: true }).webp({ quality: 75 }).toBuffer();
+          : await pipeline.resize({ width: wParam, withoutEnlargement: true }).webp({ quality }).toBuffer();
         const outType = sq ? "image/jpeg" : "image/webp";
         const body = new Uint8Array(out);   // Buffer → Uint8Array<ArrayBuffer> (BodyInit ที่ถูกชนิด)
         const res = new Response(body, {

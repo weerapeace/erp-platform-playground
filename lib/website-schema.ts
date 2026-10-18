@@ -140,6 +140,8 @@ export interface FieldDef {
    * มาใส่ช่องในกลุ่ม ให้เริ่มจากหน้าตาเดิมแล้วค่อยปิดทีละอย่าง · ฟอร์มส่งค่าธีมมาทาง ctx.themeCard
    */
   copyShopCard?: (card: Record<string, unknown>, item: Record<string, unknown>) => Record<string, unknown>;
+  /** ช่องรูป: ความกว้างขั้นต่ำที่ควรเป็น (px) — เล็กกว่า = ฟอร์มเตือน "รูปเล็กไป จะไม่คม" (ของกลาง ImageSizeNote) */
+  minPx?: number;
 }
 
 export interface ShowIf {
@@ -695,8 +697,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         options: [...HERO_BTN_GRID, HERO_BTN_FLOW, { v: "same", l: "เหมือนคอม", sketch: "same" }],
         hint: "รูปมือถือมักจัดคนละแบบ → เลือกแยกได้",
       }),
-      image("imageKey", "รูปพื้นหลัง", { hint: "แนะนำกว้าง 1600px+ · ไม่ใส่ = พื้นหลังไล่สีจากธีม" }),
-      image("mobileImageKey", "รูปพื้นหลัง (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · จอมือถือแคบ รูปแนวนอนจะโดนตัดข้าง แนะนำรูปแนวตั้ง 1080×1350+" }),
+      image("imageKey", "รูปพื้นหลัง", { hint: "แนะนำกว้าง 2400px+ (เต็มจอคมชัด) · ไม่ใส่ = พื้นหลังไล่สีจากธีม", minPx: 2400 }),
+      image("mobileImageKey", "รูปพื้นหลัง (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · จอมือถือแคบ รูปแนวนอนจะโดนตัดข้าง แนะนำรูปแนวตั้ง 1080×1350+", minPx: 1080 }),
       f("crop", "รูปพื้นหลัง: ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropBox: "16:7", hint: "กรอบ ≈ แบนเนอร์บนจอคอม (สูงจริงตามความสูงที่ตั้ง)" }),
       text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, hint: "มีผลกับ SEO" }),
       f("overlay", "ความทึบของสีทับรูป (%)", "range", { group: "media", default: 45, min: 0, numMax: 90, step: 5 }),
@@ -1125,8 +1127,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       min: 1,
       max: 10,
       fields: [
-        image("imageKey", "รูปสไลด์", { hint: "แนะนำกว้าง 1600px+" }),
-        image("mobileImageKey", "รูปสไลด์ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · แนะนำแนวตั้ง" }),
+        image("imageKey", "รูปสไลด์", { hint: "แนะนำกว้าง 2400px+ (เต็มจอคมชัด)", minPx: 2400 }),
+        image("mobileImageKey", "รูปสไลด์ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · แนะนำแนวตั้ง 1080×1350+", minPx: 1080 }),
         f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "shape", cropBox: "16:7", hint: "กรอบ = รูปทรงสไลด์บนจอคอม (ตามความสูง / เต็มจอ ≈ 16:7)" }),
         text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200 }),
         text("eyebrow", "คำโปรยเล็ก", { default: "", max: 80 }),

@@ -25,6 +25,7 @@ import { BilingualField, useContentLang, useTranslateOne } from "@/components/bi
 import { confirmPatch, readMeta, translationPatch, translationStatus } from "@/lib/content-i18n";
 import { englishValue, isTranslatable, thaiValue } from "@/lib/website-i18n";
 import { WebsiteCategoriesField } from "@/components/website-categories-field";
+import { ImageSizeNote } from "@/components/image-size-note";
 
 export interface SchemaFormContext {
   shopSlug: string;
@@ -483,6 +484,8 @@ function SchemaFieldInner({
       return (
         <div className={fd.wide !== false ? "sm:col-span-2" : ""}>
           <ImageUploadField label={fd.label} hint={fd.hint} value={(value as string | null) ?? null} onChange={(k) => onChange(k)} height={80} />
+          {/* 📏 ขนาดจริงของรูป + เตือนเมื่อเล็กไป (ช่องที่ตั้ง minPx เช่น รูปสไลด์/แบนเนอร์เต็มจอ) */}
+          {fd.minPx ? <ImageSizeNote imageKey={(value as string | null) ?? null} minPx={fd.minPx} what={fd.minPx >= 2000 ? "แสดงเต็มจอคอม" : "จอมือถือ"} /> : null}
         </div>
       );
     case "link":
