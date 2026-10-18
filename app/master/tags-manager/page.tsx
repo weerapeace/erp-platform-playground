@@ -12,6 +12,7 @@
  */
 
 import { TagOrganizerModal } from "@/components/tag-organizer";
+import { TagUsageModal } from "@/components/tag-usage";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ancestorTagsOf } from "@/lib/tag-hierarchy";
@@ -145,6 +146,7 @@ export default function TagsManagerPage() {
   const [newTagEn, setNewTagEn] = useState("");                                   // ชื่ออังกฤษของแท็กใหม่ (บังคับ)
   const [tagEnMap, setTagEnMap] = useState<Record<string, string>>({});           // id → ชื่ออังกฤษ
   const [enEdit, setEnEdit] = useState<{ id: string; name: string; en: string } | null>(null);
+  const [usageTagId, setUsageTagId] = useState<string | null>(null);              // 🔗 ป๊อปแท็กนี้ลิงก์กับอะไร
   const [tagMap, setTagMap] = useState<Record<string, string[]>>({});   // recId -> tagId[] (แท็กปัจจุบัน)
 
   const [applying, setApplying] = useState(false);
@@ -473,6 +475,7 @@ export default function TagsManagerPage() {
       {groupMgr && <GroupManager groups={groups} onClose={() => setGroupMgr(false)} onChanged={loadGroups} />}
       {tagMgr && <TagOrganizerModal moduleKey="product_families" labelField="name" onClose={() => setTagMgr(false)} onChanged={() => { loadTags(); loadGroups(); }} />}
       {prefixMgr && <SkuPrefixManager onClose={() => setPrefixMgr(false)} />}
+      <TagUsageModal tagId={usageTagId} onClose={() => setUsageTagId(null)} />
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -556,6 +559,8 @@ export default function TagsManagerPage() {
                     placeholder="ชื่ออังกฤษ เช่น Wallet" className="h-7 w-40 px-2 text-xs border border-slate-200 rounded-md" />
                   <button onClick={() => void saveTagEn()} className="h-7 px-2.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">บันทึก</button>
                   <button onClick={() => setEnEdit(null)} className="h-7 px-2 text-xs text-slate-500 hover:bg-white rounded-md">ยกเลิก</button>
+                  {/* 🔗 แท็กนี้ลิงก์อยู่กับอะไรบ้าง (สินค้า / หมวดบนเว็บ / กฎ AI) — ของกลาง TagUsageModal */}
+                  <button onClick={() => setUsageTagId(enEdit.id)} className="ml-auto h-7 px-2.5 text-xs rounded-md border border-blue-200 bg-white text-blue-700 hover:bg-blue-50">🔗 ดูว่าแท็กนี้ลิงก์กับอะไรบ้าง</button>
                 </div>
               )}
             </div>

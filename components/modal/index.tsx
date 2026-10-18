@@ -125,6 +125,8 @@ export interface ERPModalProps {
   embedded?: boolean;
   /** เปิดแบบเต็มจอไหม — ไม่ส่ง = ตามค่าที่ผู้ใช้กดไว้ล่าสุด (ค่าเริ่มต้นเต็มจอ) · false = ป๊อปนี้เปิดขนาดปกติเสมอ (ยังกดขยายเองได้) */
   defaultExpanded?: boolean;
+  /** ชั้นซ้อน (ค่าเริ่ม 50) — ป๊อปที่เปิดจากป๊อป portal ชั้นสูง (เช่น 🗂️ จัดการแท็ก z-210) ต้องสูงกว่าตัวที่เปิดมัน ไม่งั้นไปอยู่ข้างหลัง */
+  zIndex?: number;
 }
 
 export interface ConfirmDialogProps {
@@ -234,6 +236,7 @@ export function ERPModal({
   storageKey,
   embedded = false,
   defaultExpanded,
+  zIndex,
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -362,7 +365,7 @@ export function ERPModal({
     : undefined;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={zIndex ? { zIndex } : undefined}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 transition-opacity"

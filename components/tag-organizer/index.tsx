@@ -26,6 +26,7 @@ import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
 import { subGroupOfTag as findSubGroupOfTag, parentTagOfGroup } from "@/lib/tag-hierarchy";
+import { TagUsageModal } from "@/components/tag-usage";
 
 type Tag = { id: string; label: string; en: string; group_id: string | null; sort_order: number };
 type Grp = {
@@ -85,6 +86,7 @@ export function TagOrganizerModal({
   const [edit, setEdit] = useState<EditState>(null);
   const [editErr, setEditErr] = useState<string | null>(null);
   const [bulk, setBulk] = useState<BulkRow[] | null>(null);
+  const [usageTagId, setUsageTagId] = useState<string | null>(null);   // 🔗 ป๊อปแท็กนี้ลิงก์กับอะไร
 
   const dragRef = useRef<DragInfo>(null);
   const [drag, setDrag] = useState<DragInfo>(null);   // ให้จอวาดโซนวาง / จางตัวที่กำลังลาก
@@ -791,6 +793,10 @@ export function TagOrganizerModal({
               })()}
               {editErr && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1">{editErr}</div>}
               <div className="flex justify-end gap-2">
+                {edit.mode === "tag" && (
+                  <button type="button" onClick={() => setUsageTagId(edit.id)} title="สินค้าที่ติดแท็กนี้ · หมวดบนเว็บ · กฎ AI"
+                    className="mr-auto h-9 px-3 text-xs rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50">🔗 ลิงก์กับอะไรบ้าง</button>
+                )}
                 <button type="button" onClick={closeEdit} className="h-9 px-4 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">ยกเลิก</button>
                 <button type="button" onClick={() => void saveEdit()} disabled={busy || !edit.th.trim()}
                   className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังบันทึก…" : edit.mode === "newGroup" ? "เพิ่ม" : "บันทึก"}</button>
@@ -837,6 +843,9 @@ export function TagOrganizerModal({
             </div>
           </div>
         )}
+
+        {/* 🔗 แท็กนี้ลิงก์กับอะไร — อยู่ในการ์ด (กันคลิกในป๊อปทะลุไปปิดตัวจัดการแท็ก) · ชั้นสูงกว่าตัวจัดการ (z-210) */}
+        <TagUsageModal tagId={usageTagId} onClose={() => setUsageTagId(null)} zIndex={230} />
       </div>
     </div>,
     document.body,

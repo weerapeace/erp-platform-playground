@@ -46,6 +46,13 @@ export function useFooterSave(slot: FooterSaveSlot | null): boolean {
   return !!register;
 }
 
+/** ฝากปุ่มบันทึกจากตัวที่ "ไม่ได้อยู่ใต้" Provider เอง (เช่น MasterCRUD ฝากปุ่มบันทึกแท็กที่แก้ในหน้าดู)
+ *  วางคอมโพเนนต์นี้ไว้ใต้ <FooterSaveProvider> แล้วส่ง slot เข้ามา · null = ไม่ฝาก (ไม่มีปุ่ม) */
+export function FooterSaveRegistrar({ slot }: { slot: FooterSaveSlot | null }) {
+  useFooterSave(slot);
+  return null;
+}
+
 /** ฝั่ง host: รวมปุ่มที่แท็บฝากไว้ */
 export function useFooterSaveHost() {
   const [slots, setSlots] = useState<Record<string, FooterSaveSlot>>({});

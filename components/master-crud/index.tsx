@@ -13,7 +13,7 @@ import { PlaygroundShell, useShellPresent } from "@/components/playground-shell"
 import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
 import { Drawer, ConfirmDialog } from "@/components/modal";
-import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/components/footer-save";
+import { FooterSaveProvider, FooterSaveButton, FooterSaveRegistrar, useFooterSaveHost } from "@/components/footer-save";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
@@ -1008,6 +1008,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // กันเคส: ระหว่างเปิด drawer มีการแก้ค่าจากที่อื่น (เช่นแนบรูป → ระบบตั้งรูปปกให้)
   // แล้วกดบันทึกฟอร์ม → เดิมส่งทุกฟิลด์ทับ ทำให้ค่าที่เพิ่งเปลี่ยนหายกลับเป็นค่าเก่า
   const baseSnapRef = useRef<Record<string, unknown>>({});
+  // ลิงก์ m2m (เช่น แท็ก) ที่โหลดมาตอนเปิด/บันทึกล่าสุด — เทียบกับค่าบนจอ เพื่อรู้ว่า "แก้แท็กในหน้าดูแล้วยังไม่บันทึก"
+  const m2mBaseRef = useRef<Record<string, string[]>>({});
+  const [m2mVer, setM2mVer] = useState(0);            // ขยับเมื่อ m2mBaseRef เปลี่ยน (ให้จอคำนวณใหม่)
+  const [m2mSaving, setM2mSaving] = useState(false);
+  const openIdRef = useRef<string | null>(null);      // record ที่เปิดอยู่ล่าสุด (กันผลโหลดของ record ก่อนหน้ามาทับ)
   formRef.current = form;
   const [formErr,     setFormErr]     = useState<string | null>(null);
   const [dupHit, setDupHit] = useState<{ field: string; value: string } | null>(null);   // ค่าซ้ำล่าสุด → ปุ่ม "ดูตัวที่ซ้ำ"
@@ -1321,6 +1326,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     setEditingId(r.id);
     setFormErr(null); setDirty(false); setModalOpen(true); setDblEditKey(null);
     baseSnapRef.current = {};   // เริ่มจับค่าตั้งต้นใหม่ (ใช้ส่งเฉพาะฟิลด์ที่แก้จริงตอนบันทึก)
+    m2mBaseRef.current = {}; setM2mVer((v) => v + 1); openIdRef.current = String(r.id);
 
     // เริ่มด้วยค่าจาก list (compact projection) — กันฟอร์มว่างขณะรอ full row
     const partial: Record<string, unknown> = {};
@@ -1348,7 +1354,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       if (!junction) return;
       apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${r.id}`)
         .then(res => res.json())
-        .then(j => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: (j.links ?? []) } : p)))
+        .then(j => {
+          if (openIdRef.current !== String(r.id)) return;   // เลื่อนไป record อื่นแล้ว
+          const links = ((j.links ?? []) as unknown[]).map(String);
+          m2mBaseRef.current = { ...m2mBaseRef.current, [fd.key]: links }; setM2mVer((v) => v + 1);
+          setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: links } : p));
+        })
         .catch(() => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: [] } : p)));
     });
 
@@ -1457,6 +1468,54 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     </button>
   ) : null;
 
+  /**
+   * ผูก/ถอดลิงก์ m2m (เช่น แท็ก) ให้ตรงกับค่าในฟอร์ม — ใช้ทั้งปุ่มบันทึกหลัก และปุ่ม 💾 ตอนแก้แท็กในหน้าดู
+   * เทียบกับลิงก์จริงใน DB ทุกครั้ง (ไม่เชื่อค่าในเครื่อง) · คืนจำนวนที่ทำไม่สำเร็จ
+   */
+  const syncM2mLinks = async (srcId: string, onlyKeys?: string[]): Promise<number> => {
+    let failed = 0;
+    for (const fd of effectiveFields) {
+      if (fd.type !== "many2many") continue;
+      if (onlyKeys && !onlyKeys.includes(fd.key)) continue;
+      const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
+      const junction = String(rc.junction_table ?? "");
+      if (!junction) continue;
+      const want = Array.isArray(formRef.current[fd.key]) ? (formRef.current[fd.key] as string[]).map(String) : [];
+      let have: string[] = [];
+      try {
+        const gr = await apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${srcId}`).then((r) => r.json());
+        have = ((gr.links ?? []) as unknown[]).map(String);
+      } catch { /* ถือว่ายังไม่มีลิงก์ */ }
+      const send = async (method: "POST" | "DELETE", tgt: string) => {
+        const res = await apiFetch("/api/admin/schema/m2m-links", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: srcId, tgt_id: tgt }) }).catch(() => null);
+        if (!res || !res.ok) failed++;
+      };
+      for (const tgt of want.filter((x) => !have.includes(x))) await send("POST", tgt);
+      for (const tgt of have.filter((x) => !want.includes(x))) await send("DELETE", tgt);
+      m2mBaseRef.current = { ...m2mBaseRef.current, [fd.key]: want };
+    }
+    setM2mVer((v) => v + 1);
+    return failed;
+  };
+
+  // แก้แท็ก (m2m) ในหน้าดูแล้วยังไม่บันทึก → มีปุ่ม 💾 บันทึก ที่แถบล่าง + ถามก่อนปิด/เลื่อนรายการ
+  void m2mVer;   // ค่านี้ขยับเมื่อ m2mBaseRef เปลี่ยน → render ใหม่ให้เทียบค่าใหม่
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+  // ฟิลด์ m2m ที่ค่าบนจอต่างจากที่โหลดมา (เฉพาะที่โหลดสำเร็จ — โหลดพลาดจะไม่ถูกนับ กันบันทึกค่าว่างทับแท็กจริง)
+  const m2mChangedKeys = () => effectiveFields.filter((fd) => fd.type === "many2many" && Array.isArray(formRef.current[fd.key]) && m2mBaseRef.current[fd.key] !== undefined
+    && !sameSet((formRef.current[fd.key] as unknown[]).map(String), m2mBaseRef.current[fd.key])).map((fd) => fd.key);
+  const inlineM2mDirtyKeys = drawerMode === "view" && editingId ? m2mChangedKeys() : [];
+  const saveInlineM2m = async () => {
+    if (!editingId || !inlineM2mDirtyKeys.length) return;
+    setM2mSaving(true);
+    try {
+      const failed = await syncM2mLinks(String(editingId), inlineM2mDirtyKeys);
+      if (failed) notify.error(tr(`บันทึกไม่สำเร็จ ${failed} รายการ — ลองกดบันทึกอีกครั้ง`, `${failed} link(s) failed to save — try again`));
+      else { flash(tr("บันทึกแล้ว", "Saved")); setDirty(false); void refreshData(); }
+    } finally { setM2mSaving(false); }
+  };
+  const inlineM2mLabel = effectiveFields.filter((fd) => inlineM2mDirtyKeys.includes(fd.key)).map((fd) => fd.label).join(", ");
+
   const save = async () => {
     // 1. รัน validation rules per field — Sprint 13: skip field ที่ condition ไม่ผ่าน
     const fErr: Record<string, string[]> = {};
@@ -1517,6 +1576,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         for (const [k, v] of Object.entries(serialized)) if (norm(snap[k]) !== norm(v)) diff[k] = v;
         payload = diff;
         if (Object.keys(payload).length === 0) {
+          // คอลัมน์ไม่เปลี่ยน แต่แก้แท็ก (m2m) → บันทึกแท็กอย่างเดียว (เดิมขึ้น "ไม่มีการเปลี่ยนแปลง" แล้วแท็กที่แก้ไม่ถูกบันทึก)
+          const changed = m2mChangedKeys();
+          if (changed.length) {
+            const failed = await syncM2mLinks(String(editingId), changed);
+            if (failed) notify.error(tr(`บันทึกไม่สำเร็จ ${failed} รายการ — ลองกดบันทึกอีกครั้ง`, `${failed} link(s) failed to save — try again`));
+            else flash(tr("บันทึกแล้ว", "Saved"));
+            setDirty(false); setSaving(false); setDrawerMode("view"); void refreshData();
+            return;
+          }
           // ไม่มีอะไรเปลี่ยน → ไม่ต้องยิง (กัน API ตอบ "ไม่มี field ที่ต้อง update")
           flash(tr("ไม่มีการเปลี่ยนแปลง", "No changes")); setDirty(false); setSaving(false); setDrawerMode("view");
           return;
@@ -1539,26 +1607,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       setDirty(false);
       // ผูก/ถอดลิงก์ m2m ให้ตรงกับที่เลือก (widget mirror ค่าเข้า form แล้ว) — ทั้งสร้างและแก้ไข
       const srcId = String((json.data as Record<string, unknown> | undefined)?.id ?? editingId ?? "");
-      if (srcId) {
-        for (const fd of effectiveFields) {
-          if (fd.type !== "many2many") continue;
-          const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
-          const junction = String(rc.junction_table ?? "");
-          if (!junction) continue;
-          const want = Array.isArray(formRef.current[fd.key]) ? (formRef.current[fd.key] as string[]).map(String) : [];
-          let have: string[] = [];
-          try {
-            const gr = await apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${srcId}`).then((r) => r.json());
-            have = ((gr.links ?? []) as unknown[]).map(String);
-          } catch { /* ถือว่ายังไม่มีลิงก์ */ }
-          for (const tgt of want.filter((x) => !have.includes(x))) {
-            await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: srcId, tgt_id: tgt }) }).catch(() => {});
-          }
-          for (const tgt of have.filter((x) => !want.includes(x))) {
-            await apiFetch("/api/admin/schema/m2m-links", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: srcId, tgt_id: tgt }) }).catch(() => {});
-          }
-        }
-      }
+      // แก้ไข = เฉพาะ m2m ที่เปลี่ยนจริง (โหลดลิงก์พลาด → ไม่แตะ กันลบแท็กจริงทิ้ง) · สร้างใหม่ = ทุก m2m ที่เลือก
+      if (srcId) await syncM2mLinks(srcId, editingId ? m2mChangedKeys() : undefined);
       if (srcId && config.afterSave) {
         await config.afterSave({
           id: srcId,
@@ -2480,7 +2530,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       return <div className="text-sm text-slate-700 whitespace-pre-wrap break-words" style={vs}>{String(v)}</div>;
     }
     if (f.type === "many2many") {
-      // inline edit: เปิดแก้แท็กได้เลยในหน้า detail (ผูก/ถอดลิงก์บันทึกทันที ไม่ต้องกดเซฟ)
+      // inline edit: เปิดแก้แท็กได้เลยในหน้า detail → ค่าเข้า form แล้วมีปุ่ม 💾 บันทึก ที่แถบล่าง (saveInlineM2m)
+      //   (เดิมเขียนว่า "บันทึกทันที" แต่จริง ๆ ไม่ได้บันทึก — ปิด drawer แล้วแท็กที่แก้หาย · แก้ 2026-10-18)
       const inlineM2M = drawerMode === "view" && !!editingId && canEdit && !!f.inlineEditable && !f.readonly;
       return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={inlineM2M}
         value={Array.isArray(form[f.key]) ? (form[f.key] as string[]) : undefined}
@@ -2833,6 +2884,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       >
         {/* 💾 แท็บที่บันทึกแยกเอง (เช่น 🛍 เว็บไซต์) ฝากปุ่มบันทึกไว้ที่แถบล่าง — ของกลาง components/footer-save */}
         <FooterSaveProvider value={footerSave.register}>
+        {/* 💾 แก้แท็ก/ความสัมพันธ์หลายรายการในหน้าดู (ไม่ต้องกด "แก้ไข") → ปุ่มบันทึกที่แถบล่าง · ไม่มีอะไรเปลี่ยน = ไม่มีปุ่ม */}
+        <FooterSaveRegistrar slot={inlineM2mDirtyKeys.length || m2mSaving
+          ? { label: inlineM2mLabel || tr("แท็ก", "Tags"), dirty: inlineM2mDirtyKeys.length > 0, saving: m2mSaving, onSave: saveInlineM2m }
+          : null} />
         {/* 🧩 หน้าดูเฉพาะโมดูล (เช่น 🧵 วัสดุ) — แทนแถบภาษา + แท็บฟิลด์ เฉพาะตอนดูระเบียนที่บันทึกแล้ว · key = รีเซ็ตสถานะเมื่อเลื่อนรายการ */}
         {customDetailView && drawerMode === "view" && editingId ? (
           <div key={String(editingId)}>
