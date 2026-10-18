@@ -56,11 +56,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .filter((c) => c.count > 0)
     .sort((a, b) => b.count - a.count);
 
+  // สินค้าบนเว็บร้านนี้ที่ยังไม่ได้จัดหมวดเอง (web_categories + web_category ว่าง) = ใช้กฎจับคู่หมวด ERP/ค่าเริ่มต้น
+  // → การ์ดจับคู่บอกว่ากฎมีผลกับกี่รุ่น (อ่านไม่ได้ = ไม่โชว์ ไม่ทำให้หน้าเสีย)
+  const { data: ls, error: lsErr } = await sb
+    .from("store_listings")
+    .select("web_categories, web_category")
+    .eq("shop_id", shop.id)
+    .limit(5000);
+  const lsRows = (ls ?? []) as { web_categories: unknown; web_category: string | null }[];
+  const listingStats = lsErr
+    ? null
+    : { total: lsRows.length, auto: lsRows.filter((l) => !Array.isArray(l.web_categories) && !String(l.web_category ?? "").trim()).length };
+
   return NextResponse.json({
     shops: list.map((s) => ({ id: s.id, name: s.name, slug: s.slug, isDefault: s.is_default })),
     shop: { id: shop.id, name: shop.name, slug: shop.slug },
     fieldMap: normalizeFieldMap(shop.field_map),
     categories,
+    listingStats,
   });
 }
 

@@ -224,7 +224,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {tab === "newdrops" && shop && <WebsiteNewDropsPanel shopSlug={shop.slug} shopId={shop.id} />}
 
         {/* แท็บจับคู่ฟิลด์ */}
-        {tab === "fieldmap" && shop && <WebsiteFieldMapPanel shopSlug={shop.slug} shopId={shop.id} />}
+        {tab === "fieldmap" && shop && <WebsiteFieldMapPanel shopSlug={shop.slug} shopId={shop.id} onOpenCategories={() => goTab("categories")} />}
 
         {/* แท็บดีไซน์ (ธีม) */}
         {tab === "design" && shop && <WebsiteThemePanel shopSlug={shop.slug} shopId={shop.id} />}
