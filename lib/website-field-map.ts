@@ -299,6 +299,8 @@ export interface ChildSku {
   /** ลำดับที่อยากให้ตัวเลือกเรียง (น้อยไปมาก) — ไม่ตั้งไว้ = เรียงตามที่ DB คืนมา */
   color_index?: number | null;
   list_price: number | string | null;
+  /** ราคาเต็ม (ก่อนลด) ของ SKU ลูก — ใช้ทำราคาขีดฆ่าเมื่อ Parent SKU ไม่ได้กรอก (resolveComparePrice) */
+  fake_price?: number | string | null;
   cover_image_r2_key: string | null;
   /** มิติที่ 2 อยู่ใน attribute_values.variant_option = { name, value, code } */
   attribute_values?: Record<string, unknown> | null;
@@ -343,7 +345,23 @@ export function productSpecAttrs(p: ParentRow): Record<string, string> {
 }
 
 export const CHILD_SELECT =
-  "id, code, color, color_index, list_price, cover_image_r2_key, parent_sku_id, attribute_values";
+  "id, code, color, color_index, list_price, fake_price, cover_image_r2_key, parent_sku_id, attribute_values";
+
+/**
+ * 🏷 ราคาเต็มขีดฆ่า (comparePrice) ที่ส่งให้เว็บร้าน
+ *   1) fake_price ของ Parent SKU (ถ้าสูงกว่าราคาขาย)
+ *   2) ไม่มี → fake_price ของ SKU ลูก (ร้านส่วนใหญ่กรอกราคาเต็มไว้ที่ SKU ลูก) — ดู SKU ที่ราคาเท่าราคาที่โชว์ก่อน แล้วค่อยดูทุกตัว
+ *   ต้องสูงกว่าราคาขายเสมอ ไม่งั้น null (การ์ด/หน้าสินค้า/ตะกร้า/ป้ายลดราคา อ่านค่านี้ตัวเดียว)
+ */
+export function resolveComparePrice(parentFake: unknown, kids: Pick<ChildSku, "list_price" | "fake_price">[], price: number): number | null {
+  if (!(price > 0)) return null;
+  const pf = Number(parentFake);
+  if (pf > price) return pf;
+  const fakes = (list: Pick<ChildSku, "list_price" | "fake_price">[]) => list.map((k) => Number(k.fake_price)).filter((f) => Number.isFinite(f) && f > price);
+  const same = fakes(kids.filter((k) => Number(k.list_price) === price));
+  const pool = same.length ? same : fakes(kids);
+  return pool.length ? Math.max(...pool) : null;
+}
 
 const num = (v: unknown) => Number(v) || 0;
 const clean = (v: unknown) => String(v ?? "").trim();

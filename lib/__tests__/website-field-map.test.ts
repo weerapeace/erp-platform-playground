@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeFieldMap, DEFAULT_WEB_CATEGORIES } from "../website-field-map";
+import { normalizeFieldMap, DEFAULT_WEB_CATEGORIES, resolveComparePrice } from "../website-field-map";
 
 /**
  * หมวดสินค้าบนเว็บร้าน — เจ้าของเพิ่ม/แก้/ลบเองได้ (เก็บใน shops.field_map.categories)
@@ -69,5 +69,25 @@ describe("normalizeFieldMap — รายการหมวดของร้า
       category: { default: "หายไปแล้ว", rules: {} },
     });
     expect(m.category.default).toBe("first");
+  });
+});
+
+describe("resolveComparePrice — ราคาเต็มขีดฆ่า", () => {
+  it("Parent SKU กรอกไว้และสูงกว่า = ใช้ของ Parent", () => {
+    expect(resolveComparePrice(2490, [], 1190)).toBe(2490);
+  });
+  it("Parent ว่าง/0 → ใช้ของ SKU ลูก (ROAR01: 890 → 1,890)", () => {
+    expect(resolveComparePrice("0.0000", [{ list_price: "890", fake_price: "1890" }, { list_price: "890", fake_price: "1890" }], 890)).toBe(1890);
+    expect(resolveComparePrice(null, [{ list_price: 890, fake_price: 1690 }], 890)).toBe(1690);
+  });
+  it("ดู SKU ที่ราคาเท่าราคาที่โชว์ก่อน · ไม่มีค่อยดูทุกตัว", () => {
+    const kids = [{ list_price: 890, fake_price: 1290 }, { list_price: 990, fake_price: 1990 }];
+    expect(resolveComparePrice(0, kids, 890)).toBe(1290);
+    expect(resolveComparePrice(0, [{ list_price: 950, fake_price: 1500 }], 990)).toBe(1500);
+  });
+  it("ไม่สูงกว่าราคาขาย / ราคาขาย 0 = ไม่มีขีดฆ่า", () => {
+    expect(resolveComparePrice(0, [{ list_price: 890, fake_price: 890 }], 890)).toBeNull();
+    expect(resolveComparePrice(0, [{ list_price: 0, fake_price: 0 }], 890)).toBeNull();
+    expect(resolveComparePrice(1000, [], 0)).toBeNull();
   });
 });

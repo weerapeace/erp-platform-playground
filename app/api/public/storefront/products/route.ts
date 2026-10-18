@@ -20,6 +20,7 @@ import {
   attachNameRefs,
   nameRuleNeedsRefs,
   CHILD_SELECT,
+  resolveComparePrice,
   type ParentRow,
   type ChildSku,
 } from "@/lib/website-field-map";
@@ -242,8 +243,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         })(),
         /** ราคาเป็น "บาท" (ไม่ใช่สตางค์) */
         price: r.price,
-        /** ราคาเต็ม (ขีดฆ่า) จาก fake_price ของ Parent SKU — ส่งเฉพาะเมื่อสูงกว่าราคาขาย */
-        comparePrice: Number(p.fake_price) > r.price ? Number(p.fake_price) : null,
+        /** ราคาเต็ม (ขีดฆ่า) — fake_price ของ Parent SKU หรือของ SKU ลูก · ส่งเฉพาะเมื่อสูงกว่าราคาขาย (resolveComparePrice) */
+        comparePrice: resolveComparePrice(p.fake_price, kids, r.price),
         /** ราคาแต่ละตัวเลือกไม่เท่ากัน (ราคามาจาก SKU ลูก + ไม่ได้กรอกราคาเว็บทับ) → การ์ดโชว์ "เริ่มต้น ฿…" ได้ */
         priceVaries:
           !(l.web_price != null && Number(l.web_price) > 0) &&
