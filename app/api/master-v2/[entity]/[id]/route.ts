@@ -16,6 +16,7 @@ import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 import { r2MoveToTrash } from "@/lib/r2";
 import { r2KeyStillReferenced } from "@/lib/r2-refs";
+import { captureFieldVersions, diffVersionedFields, versionedColumnsIn } from "@/lib/record-versions";
 import { deleteRecordFilesFor } from "@/lib/record-files";
 
 export const dynamic = "force-dynamic";
@@ -102,12 +103,15 @@ async function _PATCH(
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์แก้ไขฟิลด์ที่ส่งมา" }, { status: 403 });
   }
 
-  // ของกลาง: ถ้ารูปปกถูกเปลี่ยน/ลบ → อ่าน key เดิมไว้ก่อน เพื่อย้ายเข้าถังขยะ R2 หลังบันทึกสำเร็จ
-  let oldCoverKey: string | null = null;
-  if ("cover_image_r2_key" in cleanPatch) {
-    const { data: prev } = await admin.from(cfg.table).select("cover_image_r2_key").eq("id", id).maybeSingle();
-    oldCoverKey = (prev?.cover_image_r2_key as string) || null;
+  // ของกลาง: อ่านค่าเดิมก่อนบันทึก — (1) รูปปกเก่า → ย้ายเข้าถังขยะ R2 หลังบันทึก (2) 🕘 จดเวอร์ชันเก่า (lib/record-versions)
+  const verCols = versionedColumnsIn(cfg.table, cleanPatch);
+  const prevCols = [...new Set([...verCols, ...("cover_image_r2_key" in cleanPatch ? ["cover_image_r2_key"] : [])])];
+  let before: Record<string, unknown> = {};
+  if (prevCols.length) {
+    const { data: prev } = await admin.from(cfg.table).select(prevCols.join(",")).eq("id", id).maybeSingle();
+    before = (prev as unknown as Record<string, unknown>) ?? {};
   }
+  const oldCoverKey: string | null = (before.cover_image_r2_key as string) || null;
 
   let { data, error } = await admin
     .from(cfg.table)
@@ -125,6 +129,14 @@ async function _PATCH(
   }
 
   if (error) return NextResponse.json({ error: friendlyDbError(error.message), dup: parseDupError(error) }, { status: 400 });
+
+  // 🕘 จดเวอร์ชันเก่า (ชื่อ/คำอธิบาย/รูปปก) — ต้องทำ "ก่อน" เช็กย้ายรูปปกเก่า → ไฟล์ปกเก่าถูกนับว่ายังใช้อยู่ ไม่ถูกทิ้ง
+  if (verCols.length) {
+    await captureFieldVersions(admin, {
+      table: cfg.table, id, changes: diffVersionedFields(cfg.table, before, cleanPatch),
+      actorId: user.id, actorName,
+    });
+  }
 
   // รูปปกเปลี่ยน/ลบ → ย้ายไฟล์เก่าเข้าถังขยะ R2 (ลบจริงด้วย lifecycle rule) ไม่ปล่อยขยะค้าง · ไม่ขวางการบันทึก
   // ⚠️ เช็กก่อนว่ายังมีที่อื่นอ้างอิงไฟล์เดิมอยู่ไหม — ไฟล์ R2 หนึ่งไฟล์ถูกใช้ร่วมกันได้หลายที่

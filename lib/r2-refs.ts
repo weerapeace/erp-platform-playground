@@ -24,6 +24,10 @@ const REF_COLUMNS: { table: string; column: string }[] = [
   { table: "erp_creative_tasks",       column: "cover_image_r2_key" },
   { table: "parent_sku_supply_data",   column: "image_r2_key" },
   { table: "offer_sheet_items",        column: "image_r2_key" },
+  // แกลเลอรีรูปสินค้า (ImageManager) — ปกเก่ามักอยู่ในแกลเลอรีด้วย (trigger ปก↔แกลเลอรี) เปลี่ยนปกแล้วห้ามย้ายไฟล์ที่แกลเลอรียังใช้
+  { table: "erp_playground_attachments", column: "file_path" },
+  // 🕘 เวอร์ชันเก่าของสินค้า (lib/record-versions) — รูปที่ถูกแทน/ลบแต่ยังเก็บไว้ให้ย้อนกลับ
+  { table: "entity_field_history",     column: "r2_key" },
 ];
 
 /**
