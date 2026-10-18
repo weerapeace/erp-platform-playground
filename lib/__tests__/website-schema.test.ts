@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SECTION_SCHEMAS, SECTION_TYPES, blankChild, sectionHasHeading } from "../website-schema";
+import { SECTION_SCHEMAS, SECTION_TYPES, blankChild, sectionHasHeading, matchShowIf, PRODUCT_TILE_LAYOUTS } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockSummary, BLOCK_META, DEFAULT_BLOCK_STYLE, type Block } from "../website-blocks";
 
 /**
@@ -245,15 +245,31 @@ describe("products: การ์ดในส่วนนี้", () => {
 
   it("ก๊อปการ์ดค่าเริ่มของร้าน = ค่าเริ่มของทุกช่อง (ปิดสวิตช์แล้วหน้าตาเท่าเดิม)", () => {
     const shopDefault = { titleLines: 2, showBadge: true, showStock: true, showCompare: true, showSwatches: false, showColorCount: false, priceFrom: false, quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left" };
-    const copied = master.copyShopCard!(shopDefault);
+    const copied = master.copyShopCard!(shopDefault, {});
     for (const [k, v] of Object.entries(copied)) expect([k, v]).toEqual([k, fields.find((x) => x.key === k)!.default]);
     expect(Object.keys(copied).sort()).toEqual(fields.filter((x) => x.group === "card" && x.key !== "cardUseShop").map((x) => x.key).sort());
   });
 
   it("ก๊อปตามที่ร้านตั้งจริง", () => {
-    const c = master.copyShopCard!({ titleLines: 1, showBadge: false, autoBadges: { sale: false, new: false, best: false }, quickAdd: "none", quickView: "replace", showSwatches: true, align: "center" });
+    const c = master.copyShopCard!({ titleLines: 1, showBadge: false, autoBadges: { sale: false, new: false, best: false }, quickAdd: "none", quickView: "replace", showSwatches: true, align: "center" }, { layout: "grid" });
     expect([c.cardBadge, c.cardQuickAdd, c.cardQuickView, c.cardSwatches, c.cardTitleLines, c.cardAlign]).toEqual([false, false, true, true, "1", "center"]);
-    expect(master.copyShopCard!({ showBadge: false, autoBadges: { sale: true } }).cardBadge).toBe(true);
+    expect(master.copyShopCard!({ showBadge: false, autoBadges: { sale: true } }, {}).cardBadge).toBe(true);
+  });
+
+  it("แบบรูปนำล้วน (ลุคบุ๊ก/โมเสก/สปอตไลต์): ซ่อนสวิตช์ที่ไทล์ไม่มี + ก๊อปตามหน้าตาไทล์", () => {
+    const vis = (b: Record<string, unknown>) => fields.filter((x) => x.group === "card" && matchShowIf(x, { cardUseShop: false, ...b })).map((x) => x.key);
+    expect(vis({ layout: "lookbook", layoutMobile: "same" })).not.toContain("cardBadge");
+    expect(vis({ layout: "lookbook", layoutMobile: "same" })).toContain("cardCompare");
+    expect(vis({ layout: "lookbook", layoutMobile: "grid" })).toContain("cardBadge"); // มือถือเป็นการ์ดเต็ม
+    expect(vis({ layout: "grid", layoutMobile: "spotlight" })).toContain("cardQuickAdd");
+    const c = master.copyShopCard!({ titleLines: 1, showCompare: true, showUnit: true, priceFrom: false, showColorCount: false, align: "center" }, { layout: "mosaic", layoutMobile: "same" });
+    expect([c.cardCompare, c.cardUnit, c.cardPriceFrom, c.cardColorCount, c.cardTitleLines, c.cardAlign]).toEqual([false, false, true, true, "2", "left"]);
+  });
+
+  it("รูปแบบการโชว์ทุกแบบถูกจัดเป็น การ์ดเต็ม หรือ รูปนำ (เพิ่มแบบใหม่แล้วลืม = แดง)", () => {
+    const opts = (fields.find((x) => x.key === "layout")!.options ?? []).map((o) => o.v);
+    const full = fields.find((x) => x.key === "cardBadge")!.showIf as { eq: string[] }[];
+    expect([...full[1].eq, ...PRODUCT_TILE_LAYOUTS].sort()).toEqual([...opts].sort());
   });
 });
 

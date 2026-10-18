@@ -139,7 +139,7 @@ export interface FieldDef {
    * 📸 สวิตช์ "ใช้การ์ดตามค่ากลางของร้าน" (toggle): ตอนปิดสวิตช์ → ก๊อปค่าการ์ดของร้านตอนนี้ (ธีม → การ์ดสินค้า)
    * มาใส่ช่องในกลุ่ม ให้เริ่มจากหน้าตาเดิมแล้วค่อยปิดทีละอย่าง · ฟอร์มส่งค่าธีมมาทาง ctx.themeCard
    */
-  copyShopCard?: (card: Record<string, unknown>) => Record<string, unknown>;
+  copyShopCard?: (card: Record<string, unknown>, item: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export interface ShowIf {
@@ -219,17 +219,26 @@ const f = (key: string, label: string, type: FieldType, extra: Partial<FieldDef>
  * 🃏 การ์ดในส่วนนี้ (Section ตารางสินค้า) — เปิด/ปิดรายละเอียดบนการ์ดเฉพาะ Section นี้ ไม่กระทบการ์ดที่อื่น
  * สวิตช์หลักเปิด (ค่าเริ่ม) = ตามค่ากลางของร้าน (ดีไซน์ → การ์ดสินค้า) เหมือนเดิมทุกอย่าง
  * ปิด = ใช้ค่าในกลุ่มนี้ (ก๊อปจากการ์ดของร้านตอนปิด) · แก้การ์ดของร้านทีหลังไม่ลามมาที่ Section นี้
- * เว็บร้าน: src/lib/card-settings.tsx (useCardConfig) — ทุกรูปแบบการโชว์ของ Section ใช้ค่าเดียวกัน
+ * เว็บร้าน: src/lib/card-override.ts + src/components/shop/CardSettings.tsx (useCardConfig) — ทุกรูปแบบการโชว์ของ Section ใช้ค่าเดียวกัน
+ *
+ * แบบ "รูปนำ" (ลุคบุ๊ก/โมเสก/สปอตไลต์ — ไทล์ ProductTile) มีแค่ ชื่อ · ราคา · "เริ่มต้น" · ราคาขีดฆ่า · หน่วย · จำนวนสี · บรรทัดชื่อ · จัดชิด
+ * → ป้าย/สต๊อก/หมวด/จุดสี/ปุ่ม โชว์เฉพาะเมื่อแบบคอมหรือมือถือเป็นการ์ดเต็ม (CARD_LAYOUTS) — กันกดแล้วพรีวิวไม่เปลี่ยน
  */
+const CARD_LAYOUTS = ["grid", "carousel", "feature", "rank", "tabs", "banner"];
+export const PRODUCT_TILE_LAYOUTS = ["mosaic", "lookbook", "spotlight"];
+/** Section นี้มีการ์ดเต็มบนจอใดจอหนึ่งไหม (ไม่มี = รูปนำล้วน) */
+const usesFullCards = (b: Record<string, unknown>) => CARD_LAYOUTS.includes(String(b.layout ?? "grid")) || CARD_LAYOUTS.includes(String(b.layoutMobile ?? "same"));
 const cardOn = { key: "cardUseShop", eq: false };
-const cardToggle = (key: string, label: string, def: boolean, hint?: string) => f(key, label, "toggle", { group: "card", default: def, showIf: cardOn, ...(hint ? { hint } : {}) });
+const fullCard = { key: "layout", eq: CARD_LAYOUTS, orKey: "layoutMobile" };
+const cardToggle = (key: string, label: string, def: boolean, hint?: string, onlyFull = false) =>
+  f(key, label, "toggle", { group: "card", default: def, showIf: onlyFull ? [cardOn, fullCard] : cardOn, ...(hint ? { hint } : {}) });
 const PRODUCT_CARD_FIELDS: FieldDef[] = [
   f("cardUseShop", "ใช้การ์ดตามค่ากลางของร้าน", "toggle", {
     group: "card",
     default: true,
     wide: true,
-    hint: "ปิด = ตั้งเฉพาะ Section นี้ (เริ่มจากการ์ดของร้านตอนนี้)",
-    copyShopCard: (c) => ({
+    hint: "ปิด = ตั้งเฉพาะ Section นี้ (เริ่มจากหน้าตาตอนนี้) · แบบรูปนำ (ลุคบุ๊ก/โมเสก/สปอตไลต์) ตั้งได้แค่ชื่อ-ราคา",
+    copyShopCard: (c, b) => ({
       cardName: true,
       cardPrice: true,
       // ป้าย: เปิด = ตามที่ร้านตั้ง → ร้านไม่ได้เปิดป้ายชนิดไหนเลย = ปิด (หน้าตาเท่าเดิม)
@@ -245,20 +254,22 @@ const PRODUCT_CARD_FIELDS: FieldDef[] = [
       cardQuickView: !!c.quickView && c.quickView !== "none",
       cardTitleLines: ["1", "2", "3"].includes(String(c.titleLines)) ? String(c.titleLines) : "2",
       cardAlign: c.align === "center" ? "center" : "left",
+      // รูปนำล้วน: เริ่มจากหน้าตาไทล์ตอนนี้ (มี "เริ่มต้น" + จำนวนสี · ไม่มีราคาขีดฆ่า/หน่วย · ชื่อ 2 บรรทัด ชิดซ้าย)
+      ...(usesFullCards(b) ? {} : { cardCompare: false, cardUnit: false, cardPriceFrom: true, cardColorCount: true, cardTitleLines: "2", cardAlign: "left" }),
     }),
   }),
   cardToggle("cardName", "ชื่อสินค้า", true),
   cardToggle("cardPrice", "ราคา", true),
-  cardToggle("cardBadge", "ป้ายบนรูป", true, "ลด % / ใหม่ / ขายดี · ป้ายหมดขึ้นเสมอ"),
+  cardToggle("cardBadge", "ป้ายบนรูป", true, "ลด % / ใหม่ / ขายดี · ป้ายหมดขึ้นเสมอ", true),
   cardToggle("cardCompare", "ราคาเต็มขีดฆ่า", true),
   cardToggle("cardPriceFrom", "คำว่า \"เริ่มต้น\" หน้าราคา", false),
   cardToggle("cardUnit", "หน่วย (/ ชิ้น)", true),
-  cardToggle("cardCategory", "ชื่อหมวด", true),
-  cardToggle("cardStock", "สถานะสต๊อก", true),
-  cardToggle("cardSwatches", "จุดสี", false),
+  cardToggle("cardCategory", "ชื่อหมวด", true, undefined, true),
+  cardToggle("cardStock", "สถานะสต๊อก", true, undefined, true),
+  cardToggle("cardSwatches", "จุดสี", false, undefined, true),
   cardToggle("cardColorCount", "จำนวนสี (4 สี)", false),
-  cardToggle("cardQuickAdd", "ปุ่มใส่ตะกร้าเร็ว", true),
-  cardToggle("cardQuickView", "ปุ่มดูด่วน", false),
+  cardToggle("cardQuickAdd", "ปุ่มใส่ตะกร้าเร็ว", true, undefined, true),
+  cardToggle("cardQuickView", "ปุ่มดูด่วน", false, undefined, true),
   f("cardTitleLines", "ชื่อยาวสุดกี่บรรทัด", "select", {
     group: "card",
     default: "2",

@@ -323,7 +323,7 @@ export function SchemaField(props: {
     const card = props.ctx.themeCard;
     return (
       <div className="sm:col-span-2">
-        <SchemaFieldInner {...props} onChange={(v) => onPatch(v === false && card ? { ...copy(card), [fd.key]: false } : { [fd.key]: v })} />
+        <SchemaFieldInner {...props} onChange={(v) => onPatch(v === false && card ? { ...copy(card, props.item ?? {}), [fd.key]: false } : { [fd.key]: v })} />
       </div>
     );
   }
