@@ -1,0 +1,36 @@
+# 🔁 งาน Creative โหมดใหม่: แก้ที่สินค้าในงานเลย
+
+## ใช้ทำอะไร
+งานสินค้าใหม่ / เพิ่มสี / แก้สี เดิมต้อง อัปรูปในงาน → เลือกตัวที่จะแทน → รอผู้ตรวจอนุมัติ → ระบบค่อยส่งเข้าสินค้า (หลายขั้นและซ้ำซ้อน)
+โหมดใหม่: กด **"✏️ แก้ที่สินค้า"** ในการ์ดงานย่อย → เปิดตัวแก้ Parent/SKU ตัวจริง (MasterRecordDrawer) แก้รูป/คำอธิบายได้เลย
+ระบบจด "สิ่งที่แก้ในงานนี้" ให้เอง (ก่อน → หลัง) ผู้ตรวจเห็นรายการเดียวกัน ไม่ผ่านกดย้อนกลับได้ทีละรายการ
+
+## เปิด/ปิด
+`/tasks/settings` แท็บ "📤 ส่งงาน" → ส่วน "🔁 วิธีทำงานสินค้า (ต่อประเภทงาน)" — โหมดเดิม / โหมดใหม่ ต่อประเภทงาน
+- เก็บที่ `ui_config` key `tasks_product_edit_mode` = `{ types: { <task_type>: { mode: "legacy" | "direct", since } } }`
+- เปิดโหมดใหม่ = จดเวลา `since` → ใช้กับงานที่ **สร้างหลังจากนั้น** เท่านั้น งานเก่าที่ทำค้างใช้วิธีเดิมจนจบ
+- งานย่อยที่เริ่มแบบใหม่แล้ว (`config.edit_mode = "direct"`) อยู่แบบใหม่ตลอด แม้ปิดโหมดทีหลัง · งานย่อยที่แนบรูปแบบเดิมไปแล้ว อยู่แบบเดิม
+
+## ใช้กับงานย่อยชนิดไหน
+เฉพาะปลายทาง `sku_media` (งานรูปภาพ) · `description_media` (งานรูปคำอธิบาย) · `sku_description` (งานเขียนคำอธิบาย) — `DIRECT_TARGETS` ใน `app/tasks/product-edit-mode.ts`
+งานเปลี่ยนปก / คอนเทนต์ / เรียงพิมพ์ / อื่น ๆ ใช้วิธีเดิมเสมอ
+
+## ทำงานยังไง
+1. การ์ดงานย่อย (`app/tasks/subtask-manager.tsx` → `SubtaskCard`) ตัดสิน `isDirect` → แสดง `DirectEditPanel` (`app/tasks/direct-edit-panel.tsx`) แทนป๊อปแนบรูปเดิม
+2. กด "แก้ที่สินค้า" ครั้งแรก → งานย่อยถูกตั้ง `config.edit_mode = "direct"` (+ เริ่มงานให้ถ้ายังไม่เริ่ม) → ตั้งบริบท `lib/edit-context` ({taskId, subtaskId})
+3. ระหว่างตัวแก้เปิด `apiFetch` แนบ header `x-erp-task` / `x-erp-subtask` → server (`editContextFromRequest`) จดเวอร์ชันพร้อม `task_id` + `meta.subtask_id`
+   - แก้ข้อความ/ปก (master-v2 PATCH) · ลบรูป (attachments DELETE / assets/description DELETE) → เวอร์ชันปกติ ([record-versions](record-versions.md))
+   - **เพิ่มรูป** (attachments POST / assets/description POST) → จดเฉพาะตอนมีเลขงาน (`captureImageAdd`, source `gallery_add` / `description_image_add`)
+4. สรุป: `GET /api/record-versions?task_id=&subtask_id=` (`listTaskVersions`) → รายการพร้อมรหัสสินค้า + `in_effect` (การเปลี่ยนนี้ยังมีผลอยู่ไหม)
+5. ส่งงาน = `DirectSubmitModal` ยืนยันรายการ (ไม่มีอะไรแก้ต้องติ๊กยืนยัน) → status `submitted`
+6. อนุมัติ → `applySubtaskSync` เห็น `edit_mode = "direct"` แล้ว **ข้าม** (ของถึงสินค้าแล้ว · กันคำอธิบายในงานไปต่อท้ายสินค้า)
+7. ย้อนรายการ (ผู้รับผิดชอบ/ผู้ตรวจ) = `POST /api/record-versions` (สิทธิ์ products.edit + สิทธิ์ระดับฟิลด์ · audit version_restore)
+
+## สิทธิ์
+- แก้สินค้า = สิทธิ์ `products.edit` ตามเดิม (ตัวแก้สินค้ากลางตรวจเอง) · ปุ่มในการ์ดเปิดให้ผู้รับผิดชอบ/ผู้ตรวจ ขณะงานยังไม่ปิด (ส่งแล้ว = ผู้ตรวจเท่านั้น)
+- ดูสรุปงาน = `tasks.view`
+
+## ⚠️ ข้อควรรู้
+- แก้แล้ว **ขึ้นสินค้าจริงทันที** — สินค้าที่ขายบนเว็บร้าน ลูกค้าเห็นภายในไม่กี่นาที (แนะนำเปิดกับ "สินค้าใหม่/เพิ่มสี" ก่อน)
+- รูป/คำอธิบายเฉพาะเว็บร้าน (ส่วน 🛍 เว็บไซต์ · store_listings) ยังไม่อยู่ในระบบเวอร์ชัน
+- งานที่ไม่ได้ผูก Parent SKU → การ์ดบอกให้ผูกก่อน

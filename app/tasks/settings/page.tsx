@@ -26,6 +26,7 @@ import type { UserPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
 import { UserPermOverrideButton } from "@/components/user-perm-override";
 import { CaptionPromptsManager } from "./caption-prompts";
+import { ProductModeManager } from "../product-mode-settings";
 import { tr } from "@/lib/lang";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 
@@ -89,7 +90,7 @@ export default function TaskSettingsPage() {
           : tab === "team" ? <TeamManager showToast={showToast} />
           : tab === "mysub" ? <MySubViewManager showToast={showToast} />
           : tab === "ai_prompt" ? <CaptionPromptsManager showToast={showToast} />
-          : tab === "submit" ? <SubmitRequiredManager showToast={showToast} />
+          : tab === "submit" ? <><ProductModeManager showToast={showToast} /><SubmitRequiredManager showToast={showToast} /></>
           : tab === "subtype" ? (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
               <div className="px-5 py-4 border-b border-slate-100"><h2 className="font-semibold text-slate-800">🧩 {t("ชนิดงานย่อย", "Subtask types")}</h2></div>

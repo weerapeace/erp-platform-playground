@@ -37,8 +37,18 @@ export type ImageFieldKey = "cover" | "gallery" | "description_images";
 const KEEP_TEXT = 10;
 const KEEP_IMAGE: Record<ImageFieldKey, number> = { cover: 10, gallery: 30, description_images: 30 };
 
-export type VersionSource = "master_edit" | "gallery_delete" | "description_image_remove" | "restore";
-export type VersionActor = { actorId?: string | null; actorName?: string | null; taskId?: string | null };
+export type VersionSource = "master_edit" | "gallery_delete" | "description_image_remove" | "restore" | "gallery_add" | "description_image_add";
+/** ผู้แก้ + งานที่เป็นต้นเหตุ (แก้จากในงาน Creative โหมดใหม่ → การ์ดงานสรุปสิ่งที่แก้ได้เอง) */
+export type VersionActor = { actorId?: string | null; actorName?: string | null; taskId?: string | null; subtaskId?: string | null };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** อ่านบริบท "แก้จากในงาน" ที่หน้าจอแนบมา (lib/edit-context → header x-erp-task / x-erp-subtask) */
+export function editContextFromRequest(request: Request): { taskId: string | null; subtaskId: string | null } {
+  const tk = (request.headers.get("x-erp-task") ?? "").trim();
+  const st = (request.headers.get("x-erp-subtask") ?? "").trim();
+  return { taskId: UUID_RE.test(tk) ? tk : null, subtaskId: UUID_RE.test(st) ? st : null };
+}
+const ctxMeta = (a: VersionActor) => (a.subtaskId ? { subtask_id: a.subtaskId } : {});
 
 export type FieldChange =
   | { kind: "field"; field_key: string; old_value: string | null; new_value: string | null }
@@ -88,6 +98,7 @@ export async function captureFieldVersions(
     r2_key: c.kind === "image" ? c.old_key : null,
     source: args.source ?? "master_edit",
     changed_by: args.actorId ?? null, actor_name: args.actorName ?? null, task_id: args.taskId ?? null,
+    meta: ctxMeta(args),
   }));
   try {
     const { error } = await admin.from(TABLE).insert(rows);
@@ -112,13 +123,40 @@ export async function captureImageVersion(
       entity_type: args.table, entity_id: args.id, field_key: args.fieldKey, kind: "image",
       old_value: { r2_key: key, ...(args.meta ?? {}) }, new_value: null, r2_key: key, source: args.source,
       changed_by: args.actorId ?? null, actor_name: args.actorName ?? null, task_id: args.taskId ?? null,
-      meta: args.meta ?? {},
+      meta: { ...(args.meta ?? {}), ...ctxMeta(args) },
     });
     if (error) { console.error("[record-versions] insert image version", error.message); return false; }
     await pruneVersions(admin, args.table, args.id, args.fieldKey);
     return true;
   } catch (e) {
     console.error("[record-versions] captureImageVersion", e);
+    return false;
+  }
+}
+
+/**
+ * จด "รูปที่เพิ่ม" — เฉพาะตอนแก้จากในงาน (มี taskId) เพื่อให้การ์ดงานสรุปได้ครบ (เพิ่ม/ลบ/แก้)
+ * แก้จากหน้า SKU ตรง ๆ ไม่จด (การเพิ่มรูปไม่มีอะไรให้ย้อน · ไม่ให้ประวัติรก)
+ */
+export async function captureImageAdd(
+  admin: Admin,
+  args: { table: string; id: string; fieldKey: "gallery" | "description_images"; r2Key: string; meta?: Record<string, unknown> } & VersionActor,
+): Promise<boolean> {
+  const key = norm(args.r2Key);
+  if (!key || !args.taskId || !VERSIONED_TEXT_FIELDS[args.table]) return false;
+  try {
+    const { error } = await admin.from(TABLE).insert({
+      entity_type: args.table, entity_id: args.id, field_key: args.fieldKey, kind: "image",
+      old_value: null, new_value: { r2_key: key, ...(args.meta ?? {}) }, r2_key: key,
+      source: args.fieldKey === "gallery" ? "gallery_add" : "description_image_add",
+      changed_by: args.actorId ?? null, actor_name: args.actorName ?? null, task_id: args.taskId,
+      meta: { ...(args.meta ?? {}), ...ctxMeta(args) },
+    });
+    if (error) { console.error("[record-versions] insert image add", error.message); return false; }
+    await pruneVersions(admin, args.table, args.id, args.fieldKey);
+    return true;
+  } catch (e) {
+    console.error("[record-versions] captureImageAdd", e);
     return false;
   }
 }
@@ -281,4 +319,54 @@ export async function listVersions(admin: Admin, table: string, id: string, opts
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return ((data ?? []) as Omit<RecordVersion, "image_url">[]).map((r) => ({ ...r, image_url: r.r2_key ? r2ImageUrl(r.r2_key) : null }));
+}
+
+export type TaskChange = RecordVersion & {
+  entity_type: string; entity_id: string; code: string | null; subtask_id: string | null;
+  is_current: boolean; current_value: string | null; in_effect: boolean;
+};
+
+/**
+ * 🔁 สิ่งที่แก้ในงานนี้ (ทุกสินค้า) — ใช้บนการ์ดงานย่อยโหมดใหม่ + ตอนผู้ตรวจอนุมัติ
+ * subtaskId ส่ง = เฉพาะที่แก้จากงานย่อยนั้น · รายการ "ย้อนกลับ" (source=restore) ไม่นับเป็นงานที่ทำ
+ */
+export async function listTaskVersions(admin: Admin, taskId: string, opts?: { subtaskId?: string | null }): Promise<TaskChange[]> {
+  let q = admin.from(TABLE)
+    .select("id, entity_type, entity_id, kind, field_key, old_value, new_value, r2_key, source, task_id, actor_name, changed_at, meta")
+    .eq("task_id", taskId).not("field_key", "is", null).order("changed_at", { ascending: false }).limit(300);
+  if (opts?.subtaskId) q = q.eq("meta->>subtask_id", opts.subtaskId);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as (Omit<RecordVersion, "image_url"> & { entity_type: string; entity_id: string; meta: Record<string, unknown> | null })[];
+  if (!rows.length) return [];
+
+  // รหัสสินค้า + สถานะปัจจุบันต่อสินค้า (บอกว่าแต่ละรายการ "ยังเป็นแบบนี้อยู่ไหม" และค่าตอนนี้)
+  const ents = [...new Map(rows.map((r) => [`${r.entity_type}:${r.entity_id}`, { table: r.entity_type, id: r.entity_id }])).values()]
+    .filter((e) => VERSIONED_TEXT_FIELDS[e.table]);
+  const codes = new Map<string, string | null>();
+  const states = new Map<string, CurrentState>();
+  await Promise.all(ents.map(async (e) => {
+    const k = `${e.table}:${e.id}`;
+    const [{ data: c }, st] = await Promise.all([
+      admin.from(e.table).select("code").eq("id", e.id).maybeSingle(),
+      loadCurrentState(admin, e.table, e.id),
+    ]);
+    codes.set(k, ((c as { code?: string | null } | null)?.code) ?? null);
+    states.set(k, st);
+  }));
+
+  return rows.map((r) => {
+    const k = `${r.entity_type}:${r.entity_id}`;
+    const st = states.get(k);
+    // รูปที่เพิ่ม: "ยังอยู่" = ยังอยู่ในสินค้า · อย่างอื่น: "ตรงกับตอนนี้" = ค่าเดิมยังเป็นค่าปัจจุบัน (เท่ากับยังไม่ได้เปลี่ยน/ย้อนไปแล้ว)
+    const isCurrent = st ? isVersionCurrent(r, st) : false;
+    const isAdd = r.source === "gallery_add" || r.source === "description_image_add";
+    return {
+      ...r, image_url: r.r2_key ? r2ImageUrl(r.r2_key) : null,
+      code: codes.get(k) ?? null, subtask_id: (r.meta?.subtask_id as string) ?? null,
+      is_current: isCurrent, current_value: r.kind === "field" ? (st?.text[r.field_key] ?? null) : null,
+      // การเปลี่ยนนี้ "ยังมีผลอยู่" ไหม — เพิ่มรูป: รูปยังอยู่ · แก้/ลบ: ค่าเดิมยังไม่ถูกย้อนกลับมา
+      in_effect: isAdd ? isCurrent : !isCurrent,
+    };
+  });
 }

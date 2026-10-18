@@ -684,6 +684,7 @@ export type SubtaskStepConfig = {
   post_type?: string;              // ประเภทคอนเทนต์
   platform_notes?: Record<string, string>;   // หมายเหตุ/รายละเอียดงาน ต่อแพลตฟอร์ม (เฉพาะคอนเทนต์นี้)
   arrange_print?: ArrangePrintSpec;   // งานเรียงพิมพ์: รูป Artwork + ขนาด+จำนวนต่อรูป
+  edit_mode?: "direct";            // 🔁 โหมดใหม่: แก้ที่สินค้าในงานเลย (อนุมัติแล้วไม่ส่งเข้าสินค้าซ้ำ — lib/subtask-sync)
 };
 
 // งานเรียงพิมพ์ (Arrange Print) — เก็บใน subtask.config.arrange_print

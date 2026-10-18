@@ -16,7 +16,7 @@ import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 import { r2MoveToTrash } from "@/lib/r2";
 import { r2KeyStillReferenced } from "@/lib/r2-refs";
-import { captureFieldVersions, diffVersionedFields, versionedColumnsIn } from "@/lib/record-versions";
+import { captureFieldVersions, diffVersionedFields, editContextFromRequest, versionedColumnsIn } from "@/lib/record-versions";
 import { deleteRecordFilesFor } from "@/lib/record-files";
 
 export const dynamic = "force-dynamic";
@@ -134,7 +134,7 @@ async function _PATCH(
   if (verCols.length) {
     await captureFieldVersions(admin, {
       table: cfg.table, id, changes: diffVersionedFields(cfg.table, before, cleanPatch),
-      actorId: user.id, actorName,
+      actorId: user.id, actorName, ...editContextFromRequest(request),
     });
   }
 

@@ -90,6 +90,8 @@ async function linkDescriptionImage(admin: any, parentId: string, r2Key: string,
 /** อนุมัติแล้ว -> ส่งข้อมูลเข้าสินค้า + บันทึก ledger */
 export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts: { actorId?: string | null }): Promise<SyncResult> {
   const cfg = (subtask.config ?? {}) as Record<string, any>;
+  // 🔁 โหมดใหม่ (แก้ที่สินค้าในงานเลย) — ของถึงสินค้าแล้วตอนแก้ + มีเวอร์ชันให้ย้อน → อนุมัติไม่ต้องส่งอะไรซ้ำ (กันคำอธิบายในงานไปต่อท้ายสินค้า)
+  if (cfg.edit_mode === "direct") return { pushed: 0, skipped: ["direct_mode"] };
   const target = String(cfg.approve_target ?? "none");
   const sel = subtask.image_sync_targets ?? null;
   const selTargets = buildSelectedTargets(sel);

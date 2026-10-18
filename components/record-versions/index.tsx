@@ -84,6 +84,7 @@ export function RecordVersionsPanel({ entityType, entityId, canRestore, fieldLab
       : fieldLabel(v.field_key);
   const sourceOf = (v: Version) =>
     v.source === "restore" ? t("ย้อนกลับ", "Restored")
+      : v.source === "gallery_add" || v.source === "description_image_add" ? t("เพิ่มรูป (จากงาน)", "Added (from task)")
       : v.source === "gallery_delete" ? t("ลบออก", "Removed")
       : v.source === "description_image_remove" ? t("เอาออก", "Removed")
       : t("แก้ไข", "Edited");
@@ -179,6 +180,8 @@ export function RecordVersionsPanel({ entityType, entityId, canRestore, fieldLab
                       <div className="mt-2 flex justify-end">
                         {v.is_current ? (
                           <span className="text-[11px] text-emerald-600">✓ {isImageGroup(v.field_key) && v.field_key !== "cover" ? t("อยู่ในสินค้าแล้ว", "Already in product") : t("ตรงกับตอนนี้", "Same as now")}</span>
+                        ) : v.source === "gallery_add" || v.source === "description_image_add" ? (
+                          <span className="text-[11px] text-slate-400">{t("รูปนี้ถูกเอาออกไปแล้ว", "This image was removed later")}</span>
                         ) : canRestore ? (
                           <button type="button" onClick={() => setConfirm(v)} className="h-7 px-2.5 rounded-md border border-violet-200 bg-white text-[11px] font-medium text-violet-700 hover:bg-violet-50">{actionText(v)}</button>
                         ) : null}

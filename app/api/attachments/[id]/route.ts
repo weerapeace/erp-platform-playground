@@ -3,7 +3,7 @@ import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { r2KeyStillReferenced } from "@/lib/r2-refs";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { captureImageVersion, VERSIONED_TABLES } from "@/lib/record-versions";
+import { captureImageVersion, editContextFromRequest, VERSIONED_TABLES } from "@/lib/record-versions";
 
 // ---- DELETE /api/attachments/[id]?actor=.. ----
 // ลบ metadata + ย้ายไฟล์ใน R2 เข้า trash/ (นโยบายกลาง: สำรอง 30 วันก่อนลบจริงด้วย lifecycle rule)
@@ -39,7 +39,7 @@ export async function DELETE(
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
     keptAsVersion = await captureImageVersion(admin, {
       table: row.entity_type as string, id: row.entity_id as string, fieldKey: "gallery", r2Key: filePath,
-      source: "gallery_delete", actorId: user?.id ?? null, actorName: actor || user?.email || null,
+      source: "gallery_delete", actorId: user?.id ?? null, actorName: actor || user?.email || null, ...editContextFromRequest(request),
       meta: { attachment_id: id, file_name: row.file_name ?? null, sort_order: row.sort_order ?? null, is_primary: !!row.is_primary },
     });
   }

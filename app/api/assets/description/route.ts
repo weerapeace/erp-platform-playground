@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { captureImageVersion } from "@/lib/record-versions";
+import { captureImageAdd, captureImageVersion, editContextFromRequest } from "@/lib/record-versions";
 import { buildRow, loadTags, loadUsageCounts, type AssetRow } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +65,19 @@ export async function POST(request: NextRequest) {
     asset_id: assetId, module: MODULE, record_id: parentId, record_label: null, field: null, sort_order: next,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // 🔁 เพิ่มรูป Description "จากในงาน" (โหมดใหม่) → จดไว้ให้การ์ดงานสรุปสิ่งที่แก้
+  const ctx = editContextFromRequest(request);
+  if (ctx.taskId) {
+    const { data: a } = await admin.from("assets").select("r2_key, file_name").eq("id", assetId).maybeSingle();
+    if (a?.r2_key) {
+      const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+      await captureImageAdd(admin, {
+        table: "parent_skus_v2", id: parentId, fieldKey: "description_images", r2Key: a.r2_key as string,
+        meta: { asset_id: assetId, file_name: a.file_name ?? null, sort_order: next },
+        actorId: user?.id ?? null, actorName: user?.email ?? null, ...ctx,
+      });
+    }
+  }
   return NextResponse.json({ ok: true, error: null });
 }
 
@@ -89,7 +102,7 @@ export async function DELETE(request: NextRequest) {
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
     await captureImageVersion(admin, {
       table: "parent_skus_v2", id: parentId, fieldKey: "description_images", r2Key: asset.r2_key as string,
-      source: "description_image_remove", actorId: user?.id ?? null, actorName: user?.email ?? null,
+      source: "description_image_remove", actorId: user?.id ?? null, actorName: user?.email ?? null, ...editContextFromRequest(request),
       meta: { asset_id: assetId, file_name: asset.file_name ?? null, sort_order: use.sort_order ?? null },
     });
   }

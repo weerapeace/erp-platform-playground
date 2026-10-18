@@ -27,7 +27,13 @@ import { platformLabel, useCreativeOptions } from "./use-options";
 import {
   listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes, subtaskTypeHint, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings, savePlatformSettings,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee, type ContentItem, type PlatformSettings, type ArrangePrintType,
+  type TaskParentRef, type TaskSkuRef,
 } from "./data";
+import { DirectEditPanel, DirectSubmitModal, useTaskChanges } from "./direct-edit-panel";
+import { DIRECT_TARGETS, isDirectTask, useProductModeCfg, type ProductModeCfg } from "./product-edit-mode";
+
+/** 🔁 ข้อมูลที่การ์ดงานย่อยต้องใช้ตัดสินว่าใช้โหมดใหม่ (แก้ที่สินค้า) ไหม + สินค้าของงาน */
+type DirectCtx = { modeCfg: ProductModeCfg | null; taskType: string | null; taskCreatedAt: string | null; parents: TaskParentRef[]; skus: TaskSkuRef[] };
 import { ArrangePrintEditor, itemsFromSpec, specFromItems, basesFromSpec, specBasesFrom, arrangeTotalText, arrangeSizeKey, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { AssetSize } from "@/app/api/assets/shared";
 
@@ -119,9 +125,13 @@ const isSubDone = (st: string) => st === "approved" || st === "posted" || st ===
 
 /** กล่องจัดการงานย่อยแบบครบ (โหลดเอง) — ใช้บน canvas/หน้าอื่นได้
  *  canApprove = เห็นปุ่มอนุมัติ (admin/ผจก./ผู้ตรวจ) · canManageAssignees = แก้ผู้รับผิดชอบได้ (admin/ผจก./คนสร้างงาน) */
-export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = false, canManageAssignees = false }: { taskId: string; brandId?: string | null; subCardStyle?: CSSProperties; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean }) {
+export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = false, canManageAssignees = false, taskType = null, taskCreatedAt = null, parents = [], skus = [] }: { taskId: string; brandId?: string | null; subCardStyle?: CSSProperties; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean;
+  /** 🔁 โหมดใหม่ (แก้ที่สินค้าในงาน) — ประเภทงาน + วันสร้าง (เทียบวันที่เปิดโหมด) + สินค้าของงาน */
+  taskType?: string | null; taskCreatedAt?: string | null; parents?: TaskParentRef[]; skus?: TaskSkuRef[] }) {
   const { user } = useAuth();
   const t = useT();
+  const modeCfg = useProductModeCfg();
+  const direct: DirectCtx = { modeCfg, taskType, taskCreatedAt, parents, skus };
   const [subs, setSubs] = useState<CreativeSubtask[]>([]);
   const [typeMeta, setTypeMeta] = useState<TypeMeta>({});
   const [loading, setLoading] = useState(true);
@@ -155,7 +165,7 @@ export function SubtaskManager({ taskId, subCardStyle, pushToast, canApprove = f
       </div>
       {loading ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <div className="space-y-2">
-          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} hasDescSibling={hasDescSubtask} subCardStyle={subCardStyle} />)}
+          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} hasDescSibling={hasDescSubtask} subCardStyle={subCardStyle} direct={direct} />)}
         </div>
       )}
       <AddSubtaskForm
@@ -456,7 +466,7 @@ export function ReviseModal({ fields, images, busy, onCancel, onConfirm }: {
 }
 
 // การ์ดงานย่อย — สถานะเป็นปุ่มกด (เริ่ม→ส่งงาน→อนุมัติ) + ผู้รับผิดชอบ + ไฟล์แนบ
-export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {}, hasDescSibling = false, subCardStyle }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta; hasDescSibling?: boolean; subCardStyle?: CSSProperties }) {
+export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {}, hasDescSibling = false, subCardStyle, direct: directCtx }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta; hasDescSibling?: boolean; subCardStyle?: CSSProperties; direct?: DirectCtx }) {
   const t = useT();
   const { user } = useAuth();
   const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
@@ -539,6 +549,23 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
     ...productGroups.flatMap((g) => g.keys.map((k) => ({ url: `/api/r2-image?key=${encodeURIComponent(k)}&w=1600`, label: g.label }))),
   ];
   const canSubmit = st === "in_progress"; // ส่งงานได้เฉพาะตอนกำลังทำ
+  // 🔁 โหมดใหม่ (แก้ที่สินค้าในงานเลย) — งานรูป/รูปคำอธิบาย/เขียนคำอธิบาย · ตามที่ตั้งต่อประเภทงาน (งานที่สร้างหลังเปิดโหมด)
+  //    งานย่อยที่เริ่มแบบใหม่แล้ว (config.edit_mode=direct) อยู่แบบใหม่ตลอด · ที่เคยแนบรูปแบบเดิมไปแล้ว อยู่แบบเดิม
+  const legacyUsed = imageAtts.length > 0 || productGroups.some((g) => g.keys.length > 0);
+  const isDirect = DIRECT_TARGETS.has(String(approveTarget)) && (cfg.edit_mode === "direct"
+    || (!legacyUsed && isDirectTask(directCtx?.modeCfg ?? null, directCtx?.taskType, directCtx?.taskCreatedAt)));
+  const { changes: dChanges, active: dActive, error: dError, reload: reloadChanges } = useTaskChanges(taskId, sub.id, isDirect);
+  const [directSubmitOpen, setDirectSubmitOpen] = useState(false);
+  const canEditDirect = isDirect && !isSubDone(st) && st !== "canceled"
+    && (canApprove || (st !== "submitted" && (sub.assignees.length === 0 || sub.assignees.some((a) => a.id === user?.id))));
+  const canUndoDirect = isDirect && !isSubDone(st) && st !== "canceled" && (canApprove || sub.assignees.some((a) => a.id === user?.id));
+  // เปิดตัวแก้ครั้งแรก → จำว่างานย่อยนี้ใช้แบบใหม่ (อนุมัติแล้วไม่ส่งซ้ำ) + เริ่มงานให้ถ้ายังไม่เริ่ม
+  const beforeDirectEdit = async () => {
+    const needStart = st === "todo" || st === "revision_requested";
+    if (cfg.edit_mode === "direct" && !needStart) return;
+    await updateSubtask(taskId, sub.id, { ...(needStart ? { status: "in_progress" } : {}), config: { ...cfg, edit_mode: "direct" } });
+    await reload();
+  };
   // งานที่ไม่รับรูป+ลิงก์ (เช่น เขียนคำอธิบาย) → ส่งงานโดยยืนยันรายละเอียด Platform แทนการแนบไฟล์
   const platformConfirm = !showImages && !showLinks;
   const contentApproved = sub.subtask_type === "content" && isSubDone(st); // คอนเทนต์อนุมัติแล้ว → โชว์ปุ่มโพสต์
@@ -582,7 +609,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {/* ปุ่ม action ตามสถานะ */}
         {st === "todo" && <button disabled={busy} onClick={() => patch({ status: "in_progress" })} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-2 py-0.5 hover:bg-blue-100 disabled:opacity-50">▶ {t("เริ่มงาน", "Start")}</button>}
         {st === "in_progress" && <span className="shrink-0 inline-flex items-center gap-1">
-          <button disabled={busy} onClick={openWork} className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-100 disabled:opacity-50">📤 {t("ส่งงาน", "Submit")}</button>
+          <button disabled={busy} onClick={isDirect ? () => setDirectSubmitOpen(true) : openWork} className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-100 disabled:opacity-50">📤 {t("ส่งงาน", "Submit")}</button>
           <button disabled={busy} onClick={async () => { await patch({ status: "todo" }); pushToast("info", t("ยกเลิกการเริ่มงานแล้ว", "Start canceled")); }} title={t("กดผิด? ยกเลิกการเริ่มงาน (ล้างผู้รับผิดชอบ)", "Misclick? Cancel start (clears assignee)")} className="text-xs text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">↩︎ {t("ยกเลิกเริ่ม", "Un-start")}</button>
         </span>}
         {st === "submitted" && (canApprove
@@ -606,7 +633,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-3 border-t border-slate-100">
-          {approveHint && (
+          {approveHint && !isDirect && (
             <div className={`inline-flex items-center gap-1.5 text-[11px] font-medium rounded-md border px-2.5 py-1 ${approveStyle?.cls ?? "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
               <span aria-hidden>{approveStyle?.icon ?? "↗"}</span>{approveHint}
             </div>
@@ -749,7 +776,21 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
                 ))}
               </div>
             )}
-            <div className="flex items-center gap-2">
+            {/* 🔁 โหมดใหม่: แก้ที่สินค้า + สรุปสิ่งที่แก้ + ส่งงานแบบยืนยันรายการ (แทนป๊อปแนบรูปเดิม) */}
+            {isDirect && (
+              <>
+                <DirectEditPanel taskId={taskId} subId={sub.id} approveTarget={String(approveTarget)}
+                  parents={directCtx?.parents ?? []} skus={directCtx?.skus ?? []}
+                  canEdit={canEditDirect} canUndo={canUndoDirect} onBeforeEdit={beforeDirectEdit}
+                  changes={dChanges} error={dError} reloadChanges={reloadChanges} pushToast={pushToast} />
+                {canSubmit && (
+                  <button type="button" onClick={() => setDirectSubmitOpen(true)} className="w-full h-9 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600">
+                    📤 {t("ส่งงาน", "Submit")}{dActive.length > 0 ? ` (${dActive.length} ${t("รายการที่แก้", "changes")})` : ""}
+                  </button>
+                )}
+              </>
+            )}
+            <div className={`flex items-center gap-2 ${isDirect ? "hidden" : ""}`}>
               {sub.subtask_type === "content" && <button onClick={() => setDetailsOpen(true)} title={t("รายละเอียด/สิ่งที่ต้องแนบ ต่อแพลตฟอร์ม", "Details / requirements per platform")} className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">📋 {t("รายละเอียดงาน", "Details")}</button>}
               {/* ปุ่มแนบ/ส่งงาน — เมื่อคอนเทนต์อนุมัติแล้ว จะย่อเป็นไอคอน+ชิดซ้าย ให้พื้นที่กับปุ่มโพสต์ */}
               <button onClick={openWork} title={t("จัดการไฟล์แนบ", "Manage attachments")} className={contentApproved
@@ -771,6 +812,15 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         ? <ContentSubmitModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canSubmit={canSubmit} onClose={() => setWorkOpen(false)} />
         : <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} canApprove={canApprove} approveTarget={String(approveTarget ?? "none")} hasDescSibling={hasDescSibling} onClose={() => setWorkOpen(false)} />)}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
+      {directSubmitOpen && (
+        <DirectSubmitModal changes={dChanges ?? []} onClose={() => setDirectSubmitOpen(false)}
+          onConfirm={async () => {
+            await updateSubtask(taskId, sub.id, { status: "submitted", config: { ...cfg, edit_mode: "direct" } });
+            setDirectSubmitOpen(false);
+            await reload();
+            pushToast("success", t("ส่งงานแล้ว — รอผู้ตรวจ", "Submitted — awaiting review"));
+          }} />
+      )}
       {contentOpen && sub.config?.content_id && <ContentDrawer contentId={String(sub.config.content_id)} brands={[]} onClose={() => setContentOpen(false)} onChanged={() => { void reload(); }} pushToast={pushToast} />}
       {detailsOpen && <ContentDetailsModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} onClose={() => setDetailsOpen(false)} />}
       {reviseOpen && <ReviseModal busy={busy} images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key as string, file_name: a.file_name }))}

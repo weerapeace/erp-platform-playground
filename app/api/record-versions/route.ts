@@ -4,6 +4,7 @@
  * GET  /api/record-versions?entity_type=parent_skus_v2&entity_id=<uuid>[&field_key=description][&limit=100]
  *      → { versions: (RecordVersion & { is_current })[], current: { field_key → ค่าปัจจุบัน } } เรียงใหม่ → เก่า
  *      guard products.view
+ * GET  /api/record-versions?task_id=<uuid>[&subtask_id=<uuid>] → { changes: TaskChange[] } สิ่งที่แก้ในงานนี้ (ทุกสินค้า) · guard tasks.view
  * POST /api/record-versions  { version_id }  → ย้อนกลับ/กู้คืนเวอร์ชันนั้น (ค่าปัจจุบันถูกจดเป็นเวอร์ชันใหม่ ย้อนกลับได้อีก)
  *      guard products.edit + สิทธิ์ระดับฟิลด์ (ฟิลด์ที่ role นี้แก้ไม่ได้ → 403) · audit version_restore
  */
@@ -13,7 +14,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { getFieldAccess } from "@/lib/field-permissions";
-import { COVER_COLUMN, isVersionCurrent, listVersions, loadCurrentState, restoreVersion, VERSIONED_TABLES } from "@/lib/record-versions";
+import { COVER_COLUMN, editContextFromRequest, isVersionCurrent, listTaskVersions, listVersions, loadCurrentState, restoreVersion, VERSIONED_TABLES } from "@/lib/record-versions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,9 +23,23 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FIELD = /^[a-z0-9_]+$/i;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const sp = new URL(request.url).searchParams;
+  // 🔁 สรุป "สิ่งที่แก้ในงานนี้" (การ์ดงานย่อยโหมดใหม่) — ?task_id=<uuid>[&subtask_id=<uuid>] · สิทธิ์ดูงาน
+  const taskId = (sp.get("task_id") ?? "").trim();
+  if (taskId) {
+    const denied = await guardApi(request, "tasks.view");
+    if (denied) return denied;
+    const subtaskId = (sp.get("subtask_id") ?? "").trim();
+    if (!UUID.test(taskId) || (subtaskId && !UUID.test(subtaskId))) return NextResponse.json({ error: "task_id/subtask_id ไม่ถูกต้อง" }, { status: 400 });
+    try {
+      const changes = await listTaskVersions(supabaseAdmin(), taskId, { subtaskId: subtaskId || null });
+      return NextResponse.json({ changes, error: null });
+    } catch (e) {
+      return NextResponse.json({ error: "โหลดสิ่งที่แก้ในงานไม่สำเร็จ กรุณาลองใหม่", detail: e instanceof Error ? e.message : null }, { status: 500 });
+    }
+  }
   const denied = await guardApi(request, "products.view");
   if (denied) return denied;
-  const sp = new URL(request.url).searchParams;
   const entityType = (sp.get("entity_type") ?? "").trim();
   const entityId = (sp.get("entity_id") ?? "").trim();
   const fieldKey = (sp.get("field_key") ?? "").trim();
@@ -71,7 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "คุณไม่มีสิทธิ์แก้ช่องนี้ จึงย้อนเวอร์ชันไม่ได้" }, { status: 403 });
   }
 
-  const res = await restoreVersion(admin, versionId, { actorId: user.id, actorName: user.email ?? null });
+  const res = await restoreVersion(admin, versionId, { actorId: user.id, actorName: user.email ?? null, ...editContextFromRequest(request) });
   if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
   if (!res.already) {
     await writeAudit(admin, {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { r2PutObject, isR2Configured } from "@/lib/r2";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { captureImageAdd, editContextFromRequest, VERSIONED_TABLES } from "@/lib/record-versions";
 
 // ---- Types ----
 
@@ -128,6 +130,15 @@ export async function POST(request: NextRequest) {
   });
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  // 🔁 เพิ่มรูปเข้าแกลเลอรีสินค้า "จากในงาน" (โหมดใหม่) → จดไว้ให้การ์ดงานสรุปสิ่งที่แก้ (แก้จากหน้า SKU ตรง ๆ ไม่จด)
+  const ctx = editContextFromRequest(request);
+  if (ctx.taskId && VERSIONED_TABLES.includes(entityType) && (file.type || "").startsWith("image/")) {
+    const { data: { user } } = await db.auth.getUser();
+    await captureImageAdd(supabaseAdmin(), {
+      table: entityType, id: entityId, fieldKey: "gallery", r2Key: path, meta: { file_name: file.name },
+      actorId: user?.id ?? null, actorName: actor || user?.email || null, ...ctx,
+    });
   }
   // public_url ระดับบนสุด — ให้ฝั่ง client (เช่น Tiptap แทรกรูป) ใช้ได้ทันทีไม่ต้อง re-fetch
   return NextResponse.json({ data, public_url: publicUrl, error: null });

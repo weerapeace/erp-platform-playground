@@ -2,6 +2,7 @@
 
 import { supabaseBrowser } from "./supabase-browser";
 import { markDirty } from "./refresh-bus";
+import { editContextHeaders } from "./edit-context";
 
 /**
  * fetch wrapper ที่แนบ access_token ของ user ปัจจุบันอัตโนมัติ
@@ -21,6 +22,8 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   const token = data.session?.access_token;
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  // 🔁 แก้สินค้าจากในงาน → แนบเลขงาน ให้ server จดเวอร์ชันพร้อมงานที่เป็นต้นเหตุ (lib/edit-context)
+  for (const [k, v] of Object.entries(editContextHeaders())) if (!headers.has(k)) headers.set(k, v);
   // กันทั้งระบบ: Cloudflare/OpenNext ตัด query string ที่ตัว "#" (มองเป็น fragment) → param หลัง "#" หาย
   // แทน %23 (=#) ในส่วน query ด้วย %20 (ช่องว่าง) ทุก request — ไม่มี param ไหนต้องการ "#" จริง
   const qi = input.indexOf("?");
