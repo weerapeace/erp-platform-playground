@@ -431,6 +431,23 @@ function canvasItemFields(): FieldDef[] {
   ];
 }
 
+/**
+ * 📍 ตำแหน่งปุ่มบนแบนเนอร์หลัก — 9 จุดบนแบนเนอร์ (ปุ่มรูปย่อ 3×3 · sketch "pos-*" ใน components/website-schema-form)
+ * + "flow" = ใต้ข้อความ (แบบเดิม) · เว็บร้าน src/components/home/Hero.tsx ต้องรู้จักค่าเดียวกัน
+ */
+const HERO_BTN_GRID: FieldOption[] = [
+  { v: "top-left", l: "บนซ้าย", sketch: "pos-top-left" },
+  { v: "top-center", l: "บนกลาง", sketch: "pos-top-center" },
+  { v: "top-right", l: "บนขวา", sketch: "pos-top-right" },
+  { v: "middle-left", l: "กลางซ้าย", sketch: "pos-middle-left" },
+  { v: "center", l: "กึ่งกลาง", sketch: "pos-center" },
+  { v: "middle-right", l: "กลางขวา", sketch: "pos-middle-right" },
+  { v: "bottom-left", l: "ล่างซ้าย", sketch: "pos-bottom-left" },
+  { v: "bottom-center", l: "ล่างกลาง", sketch: "pos-bottom-center" },
+  { v: "bottom-right", l: "ล่างขวา", sketch: "pos-bottom-right" },
+];
+const HERO_BTN_FLOW: FieldOption = { v: "flow", l: "ใต้ข้อความ (แบบเดิม)", sketch: "pos-flow" };
+
 /* ─────────── SECTION LIBRARY ─────────── */
 
 export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
@@ -462,6 +479,23 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       area("subtitle", "คำอธิบาย", { default: "", max: 600 }),
       link("primary", "ปุ่มหลัก", "ดูสินค้าทั้งหมด", "/shop"),
       link("secondary", "ปุ่มรอง", "", ""),
+      // 📍 ตำแหน่งปุ่มบนแบนเนอร์ (เว็บร้าน src/components/home/Hero.tsx) — ไม่ตั้ง = ใต้ข้อความเหมือนเดิม
+      f("btnPos", "ตำแหน่งปุ่ม (คอม)", "select", {
+        group: "action",
+        default: "flow",
+        display: "tiles",
+        options: [...HERO_BTN_GRID, HERO_BTN_FLOW, { v: "custom", l: "กำหนดเอง (เลื่อนเอง)", sketch: "pos-custom" }],
+        hint: "กดจุดบนแบนเนอร์ที่อยากวางปุ่ม · ดูผลในพรีวิวได้ทันที",
+      }),
+      f("btnX", "ปุ่ม: ซ้าย → ขวา (%)", "range", { group: "action", default: 50, min: 0, numMax: 100, step: 1, showIf: { key: "btnPos", eq: "custom" } }),
+      f("btnY", "ปุ่ม: บน → ล่าง (%)", "range", { group: "action", default: 80, min: 0, numMax: 100, step: 1, showIf: { key: "btnPos", eq: "custom" } }),
+      f("btnPosMobile", "ตำแหน่งปุ่ม (มือถือ)", "select", {
+        group: "action",
+        default: "same",
+        display: "tiles",
+        options: [...HERO_BTN_GRID, HERO_BTN_FLOW, { v: "same", l: "เหมือนคอม", sketch: "same" }],
+        hint: "รูปมือถือมักจัดคนละแบบ → เลือกแยกได้",
+      }),
       image("imageKey", "รูปพื้นหลัง", { hint: "แนะนำกว้าง 1600px+ · ไม่ใส่ = พื้นหลังไล่สีจากธีม" }),
       image("mobileImageKey", "รูปพื้นหลัง (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · จอมือถือแคบ รูปแนวนอนจะโดนตัดข้าง แนะนำรูปแนวตั้ง 1080×1350+" }),
       f("crop", "รูปพื้นหลัง: ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropBox: "16:7", hint: "กรอบ ≈ แบนเนอร์บนจอคอม (สูงจริงตามความสูงที่ตั้ง)" }),

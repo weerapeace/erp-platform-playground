@@ -68,6 +68,19 @@ const SKETCHES: Record<string, { cols: number; rows: number; cells: Cell[] }> = 
   "faq-center": { cols: 5, rows: 4, cells: [{ c: 2, r: 1, cs: 3, h: 70, dark: true }, ...[2, 3, 4].map((r) => ({ c: 2, r, cs: 3, h: 45 }))] },
   "faq-two": { cols: 4, rows: 4, cells: [{ c: 2, r: 1, cs: 2, h: 70, dark: true }, ...[2, 3, 4].flatMap((r) => [{ c: 1, r, cs: 2, h: 45 }, { c: 3, r, cs: 2, h: 45 }])] },
   "faq-tabs": { cols: 5, rows: 4, cells: [{ c: 2, r: 1, h: 55, dark: true }, { c: 3, r: 1, h: 55, dim: true }, { c: 4, r: 1, h: 55, dim: true }, ...[2, 3, 4].map((r) => ({ c: 2, r, cs: 3, h: 45 }))] },
+  /* 📍 ตำแหน่งปุ่มบนแบนเนอร์ (Hero btnPos): 3×3 จุด เข้ม = ตรงที่ปุ่มอยู่ */
+  ...Object.fromEntries(
+    (["top", "middle", "bottom"] as const).flatMap((rv, ri) =>
+      (["left", "center", "right"] as const).map((cv, ci) => [
+        rv === "middle" && cv === "center" ? "pos-center" : `pos-${rv}-${cv}`,
+        { cols: 3, rows: 3, cells: [1, 2, 3].flatMap((r) => [1, 2, 3].map((c) => ({ c, r, h: 55, dark: c === ci + 1 && r === ri + 1, dim: !(c === ci + 1 && r === ri + 1) }))) },
+      ]),
+    ),
+  ),
+  /* ใต้ข้อความ (แบบเดิม): บรรทัดข้อความ 2 แถบ + ปุ่มใต้ */
+  "pos-flow": { cols: 3, rows: 3, cells: [{ c: 1, r: 1, cs: 2, h: 45, dim: true }, { c: 1, r: 2, cs: 2, h: 45, dim: true }, { c: 1, r: 3, h: 55, dark: true }] },
+  /* กำหนดเอง: วางตรงไหนก็ได้ */
+  "pos-custom": { cols: 5, rows: 3, cells: [{ c: 1, r: 1, cs: 5, rs: 3, dim: true }, { c: 4, r: 3, h: 55, dark: true }] },
 };
 function LayoutSketch({ kind, on }: { kind: string; on: boolean }) {
   const sk = SKETCHES[kind];
