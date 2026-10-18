@@ -50,6 +50,9 @@ import { RECORD_DETAIL_VIEWS } from "@/components/record-detail-views";
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
+// 🕘 ประวัติเวอร์ชันของสินค้า (Parent/SKU) — ดู/เทียบ/ย้อนกลับ (ของกลาง components/record-versions · lib/record-versions)
+const RecordVersionsPanel = dynamic(() => import("@/components/record-versions").then((m) => m.RecordVersionsPanel), { ssr: false });
+const VERSIONED_ENTITIES = new Set(["parent_skus_v2", "skus_v2"]);
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
 const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
 // ตัวเลือกธนาคารกลาง — ใช้กับฟิลด์ข้อความที่ตั้ง options.picker = "bank" (โหลดเฉพาะโมดูลที่ใช้)
@@ -951,6 +954,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [editingId,   setEditingId]   = useState<string | null>(null);
   // Parent SKU ไม่มีรูปของตัวเอง → รูปตัวอย่างจาก SKU ลูกตัวแรก (โชว์ในกล่องแกลเลอรีตอนว่าง)
   const [parentFallbackImg, setParentFallbackImg] = useState<string | null>(null);
+  const [mediaRev, setMediaRev] = useState(0);   // 🕘 กู้รูปจากประวัติเวอร์ชันแล้ว → เปลี่ยนเลขให้แกลเลอรี/รูป Description โหลดใหม่
   useEffect(() => {
     if (config.mediaGallery?.entityType !== "parent_skus_v2" || !editingId) { setParentFallbackImg(null); return; }
     let cancelled = false;
@@ -3016,6 +3020,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           ) : null;
           // layout=gallery (เช่น Parent SKU) → ย้าย "รูปสินค้า" + Description ขึ้นคอลัมน์ซ้ายให้เห็นเด่น (ไม่ต้องเลื่อนหา)
           const galleryLeft = config.mediaGallery?.layout === "gallery";
+          // 🕘 ประวัติเวอร์ชัน — เฉพาะสินค้า (Parent/SKU) ที่บันทึกแล้ว · โหมดดู (โหมดแก้มีค่าที่ยังไม่บันทึกค้าง ย้อนแล้วจะสับสน)
+          const versionEntity = config.mediaGallery?.entityType && VERSIONED_ENTITIES.has(config.mediaGallery.entityType) ? config.mediaGallery.entityType : null;
+          const versionsEl = versionEntity && editingId && drawerMode === "view" ? (
+            <RecordVersionsPanel entityType={versionEntity} entityId={String(editingId)} canRestore={canEdit}
+              fieldLabel={(k) => effectiveFields.find((f) => f.key === k)?.label ?? k}
+              onRestored={async (fk) => { if (fk === "gallery" || fk === "description_images" || fk === "cover") setMediaRev((n) => n + 1); await reloadRecord(); }} />
+          ) : null;
           // แถบ custom เหนือฟอร์ม (เฉพาะตอนสร้างใหม่) เช่น แม่แบบสัญญา
           const createHeaderEl = (drawerMode === "edit" && !editingId && config.createFormHeader)
             ? <div className="mb-3">{config.createFormHeader({ form, updateForm })}</div>
@@ -3079,6 +3090,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {galleryLeft && config.mediaGallery && editingId ? (
                   // quick edit: จัดรูปได้เลยไม่ต้องกด "แก้ไข" (readonly = แค่ไม่มีสิทธิ์)
                   <ImageManager
+                    key={`gallery-${mediaRev}`}
                     entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
                     entityId={String(editingId)}
                     actor={user?.name ?? user?.email ?? undefined}
@@ -3115,11 +3127,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
                 {/* layout=gallery: ช่อง "รูป Description" อยู่ใต้แกลเลอรีในคอลัมน์ซ้าย (เห็นเด่น ไม่ต้องเลื่อน) */}
                 {galleryLeft && config.extraFormSection && (
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div key={`extra-${mediaRev}`} className="rounded-xl border border-slate-200 bg-white p-3">
                     {/* quick edit: เพิ่ม/จัดรูป Description ได้เลยในโหมดดู (เหมือนแกลเลอรีรูปสินค้า) — กั้นด้วยสิทธิ์อย่างเดียว */}
                     {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: !canEdit })}
                   </div>
                 )}
+
+                {/* 🕘 ประวัติเวอร์ชัน (ชื่อ/คำอธิบาย · รูปปก · รูปที่ถูกลบ) — ใต้รูป เห็นคู่กับของที่เปลี่ยน */}
+                {galleryLeft && versionsEl}
               </div>
 
               {/* ขวา: tabs (หมวดที่เหลือ) — gallery/description ปกติ (โมดูลที่ไม่ใช่ gallery layout) */}
@@ -3127,6 +3142,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 <div className="w-full md:order-3 rounded-xl border border-slate-200 bg-white p-3">
                   {editingId ? (
                     <ImageManager
+                      key={`gallery-${mediaRev}`}
                       entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
                       entityId={String(editingId)}
                       actor={user?.name ?? user?.email ?? undefined}
@@ -3150,10 +3166,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
               {/* section พิเศษต่อโมดูล (โมดูลที่ไม่ใช่ gallery layout — gallery layout ย้ายไปคอลัมน์ซ้ายแล้ว) */}
               {config.extraFormSection && !galleryLeft && (
-                <div className="w-full md:order-4 rounded-xl border border-slate-200 bg-white p-3">
+                <div key={`extra-${mediaRev}`} className="w-full md:order-4 rounded-xl border border-slate-200 bg-white p-3">
                   {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
                 </div>
               )}
+              {!galleryLeft && versionsEl && <div className="w-full md:order-4">{versionsEl}</div>}
 
               {/* ไฟล์แนบราย record (ของกลาง) — เก็บใน Supabase Storage, ลบ record ถาวร=ลบไฟล์ตาม */}
               {config.fileAttachments && (
