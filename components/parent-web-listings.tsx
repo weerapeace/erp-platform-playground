@@ -29,6 +29,7 @@ import { HERO_SIZE_HINT, heroOfSku, type ProductHero } from "@/lib/website-hero"
 import { MediaUploadField, type MediaValue } from "@/components/media-upload-field";
 import { NAME_RULE_EXCLUSIVE, type NameRuleFlag } from "@/lib/website-field-map";
 import { uploadResizedImage } from "@/components/image-attach";
+import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { useFooterSave } from "@/components/footer-save";
 import { CopyButton } from "@/components/copy-button";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
@@ -384,8 +385,25 @@ export function ParentWebListings({
   };
   const onUploadFiles = async (files: FileList | null) => {
     const t = uploadTo.current;
-    const imgs = Array.from(files ?? []).filter((f) => f.type.startsWith("image/"));
-    if (!t || !imgs.length) return;
+    if (t) await uploadFilesTo(t, Array.from(files ?? []));
+    if (fileRef.current) fileRef.current.value = "";
+  };
+  // 📥 ลากรูปจากเครื่องมาวางที่ "รูปบนเว็บ" หรือแถวสี = อัปโหลดเข้าที่นั้น (ของกลาง useFileDrop · key = "<shopId>:<target>")
+  const fileDrop = useFileDrop(
+    (files, key) => {
+      const i = key.indexOf(":");
+      void uploadFilesTo({ shopId: key.slice(0, i), target: key.slice(i + 1) }, files);
+    },
+    {
+      accept: "image/",
+      disabled: !!uploading,
+      onReject: () => toast.error("ลากมาได้เฉพาะไฟล์รูป (jpg / png / webp)"),
+      onBusy: () => toast.warning("กำลังอัปโหลดรูปชุดก่อนอยู่ — รอสักครู่แล้วลากใหม่"),
+    }
+  );
+  const uploadFilesTo = async (t: { shopId: string; target: string }, files: File[]) => {
+    const imgs = files.filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length) return;
     setUploading(`${t.shopId}:${t.target}`);
     const keys: string[] = [];
     for (const f of imgs) {
@@ -400,7 +418,6 @@ export function ParentWebListings({
       toast.success(`อัปโหลด ${keys.length} รูปแล้ว — กด 💾 บันทึก เพื่อขึ้นเว็บ`);
     }
     setUploading(null);
-    if (fileRef.current) fileRef.current.value = "";
   };
   const uploadBtn = (sid: string, target: string, cls: string) => {
     const busy = uploading === `${sid}:${target}`;
@@ -409,7 +426,7 @@ export function ParentWebListings({
         type="button"
         onClick={() => startUpload(sid, target)}
         disabled={!!uploading}
-        title="อัปโหลดรูปจากเครื่อง (เลือกได้หลายรูป · ย่อให้อัตโนมัติ · เก็บเข้าคลังไฟล์ด้วย)"
+        title="อัปโหลดรูปจากเครื่อง (เลือกได้หลายรูป · ย่อให้อัตโนมัติ · เก็บเข้าคลังไฟล์ด้วย) — หรือลากรูปมาวางที่แถวนี้ก็ได้"
         className={`${cls} disabled:opacity-50`}
       >
         {busy ? "กำลังอัป…" : "⬆ อัปโหลด"}
@@ -584,10 +601,11 @@ export function ParentWebListings({
         </div>
       </div>
 
-      {/* รูปเว็บ (รุ่น) */}
-      <div>
+      {/* รูปเว็บ (รุ่น) — 📥 ลากรูปจากเครื่องมาวางในกล่องนี้ = อัปโหลด */}
+      <div {...fileDrop.zone(`${s.shopId}:gallery`)} className="relative">
+        <FileDropHint show={fileDrop.over === `${s.shopId}:gallery`} label="วางรูปเพื่ออัปโหลดเป็นรูปบนเว็บ" />
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-medium text-slate-600">รูปบนเว็บ ({s.webImages.length}) — ว่าง = ใช้รูป ERP</span>
+          <span className="text-xs font-medium text-slate-600">รูปบนเว็บ ({s.webImages.length}) — ว่าง = ใช้รูป ERP · ลากรูปมาวางได้</span>
           <div className="flex items-center gap-1.5">
             {uploadBtn(s.shopId, "gallery", "text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2.5 py-1")}
             <button onClick={() => setPicker({ shopId: s.shopId, target: "gallery" })} className="text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2.5 py-1">
@@ -618,7 +636,7 @@ export function ParentWebListings({
       {data.variants.length > 0 && (
         <div>
           <div className="text-xs font-medium text-slate-600 mb-1.5">
-            ตัวเลือก (สี) — {data.variants.length} แบบ · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น
+            ตัวเลือก (สี) — {data.variants.length} แบบ · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย
           </div>
           {(() => {
             const all = colorLabels();
@@ -651,7 +669,8 @@ export function ParentWebListings({
               const on = cardShown(s, v.label);
               const isMain = !!s.webCardColors.main && sameColor(s.webCardColors.main, v.label);
               return (
-                <div key={v.id} className="p-2 bg-white space-y-1.5">
+                <div key={v.id} {...fileDrop.zone(`${s.shopId}:${v.id}`)} className="relative p-2 bg-white space-y-1.5">
+                  <FileDropHint show={fileDrop.over === `${s.shopId}:${v.id}`} label={`วางรูปเพื่ออัปโหลดเข้าสี ${v.label}`} />
                   <div className="flex items-center gap-2.5">
                     {v.erpImageKey ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1066,7 +1085,7 @@ export function ParentWebListings({
   const focus = shopId ? visibleShops[0] : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" {...fileDrop.guard}>
       {shopId ? (
         // ✳️ เฉพาะร้านเดียว (drawer หน้า "สินค้าบนเว็บ") — หัว/ปุ่มลิงก์อยู่ที่ drawer แล้ว
         !focus ? (
