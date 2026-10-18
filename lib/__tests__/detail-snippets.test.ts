@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeLines, enInsertAt, insertLines, materialLine, slotLine, slotText, splitLines } from "@/lib/detail-snippets";
+import { arrangeEn, arrangeRows, arrangeTh, composeLines, enInsertAt, insertLines, materialLine, moveNewBlock, newBlockAt, newRowKey, oldRowsMoved, slotLine, slotText, splitLines } from "@/lib/detail-snippets";
 import { findMaterialLinks, materialTerms, mentionsMaterial, publicMaterial, type MaterialRow } from "@/lib/product-materials";
 
 const card = { id: "c", name: "ช่องใส่บัตรเครดิต", name_en: "Card slot", kind: "slot", template_en: "{n} card slots" };
@@ -199,5 +199,36 @@ describe("รอบ 5 — ช่องด้านใน/นอก · อัง�
     expect(profileAllows(ps[0], "slot", "s2")).toBe(false);
     expect(profileAllows(ps[0], "phrase", "anything")).toBe(true);
     expect(profileAllows(null, "slot", "s2")).toBe(true);
+  });
+});
+
+describe("detail-snippets — ⠿ ลากสลับทุกบรรทัดในตัวอย่าง", () => {
+  const n = (s: string) => newRowKey(s);
+  it("ยังไม่ลาก = ก้อนบรรทัดใหม่ที่ตำแหน่ง at (เหมือน insertLines)", () => {
+    const rows = arrangeRows(3, [n("a"), n("b")], 1, null);
+    expect(rows).toEqual(["o:0", "n:a", "n:b", "o:1", "o:2"]);
+    expect(arrangeTh(rows, ["x", "y", "z"], (k) => k.slice(2)).join("\n")).toBe(insertLines("x\ny\nz", ["a", "b"], 1));
+    expect(newBlockAt(rows)).toBe(1);
+    expect(oldRowsMoved(rows)).toBe(false);
+  });
+  it("ลากแล้ว: ตัวที่เลิกเลือกหาย · ตัวใหม่ต่อท้ายบรรทัดใหม่ตัวสุดท้าย · บรรทัดเดิมครบเสมอ", () => {
+    const custom = ["o:2", "n:a", "o:0", "n:b", "o:1"];
+    const rows = arrangeRows(3, [n("a"), n("c")], 3, custom);
+    expect(rows).toEqual(["o:2", "n:a", "n:c", "o:0", "o:1"]);
+    expect(oldRowsMoved(rows)).toBe(true);
+    expect(newBlockAt(["o:0", "n:a", "o:1", "n:b"])).toBeNull();
+    // ยังไม่มีบรรทัดใหม่ในลำดับที่ลากไว้ → วางก่อนบรรทัดเดิมตัวแรกที่อยู่ตั้งแต่ตำแหน่ง at
+    expect(arrangeRows(2, [n("a")], 1, ["o:1"])).toEqual(["n:a", "o:1", "o:0"]);
+  });
+  it("ย้ายก้อนบรรทัดใหม่ (บนสุด/ท้ายสุด/คลิกช่อง) รักษาลำดับที่ลากไว้", () => {
+    expect(moveNewBlock(["o:1", "n:b", "o:0", "n:a"], 0)).toEqual(["n:b", "n:a", "o:1", "o:0"]);
+    expect(moveNewBlock(["n:a", "o:0", "o:1"], 2)).toEqual(["o:0", "o:1", "n:a"]);
+  });
+  it("อังกฤษ: บรรทัดเท่ากัน = เรียงตามไทย · ไม่เท่า = เดิม + ต่อท้าย", () => {
+    const rows = ["o:1", "n:a", "o:0"];
+    const en = (k: string) => (k === "n:a" ? "A" : null);
+    expect(arrangeEn(rows, ["x", "y"], ["X", "Y"], en)).toEqual(["Y", "A", "X"]);
+    expect(arrangeEn(rows, ["x", "y"], ["XY"], en)).toEqual(["XY", "A"]);
+    expect(arrangeEn(rows, ["x", "y"], ["X", "Y"], () => null)).toEqual(["Y", "X"]);
   });
 });

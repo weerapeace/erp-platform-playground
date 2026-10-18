@@ -26,10 +26,18 @@ import {
   DEFAULT_SLOT_TEMPLATE_EN,
   LINE_KIND_LABEL,
   alreadyMentions,
+  arrangeEn,
+  arrangeRows,
+  arrangeTh,
   composeLines,
-  enInsertAt,
-  insertLines,
+  isNewRow,
   isSlot,
+  moveNewBlock,
+  newBlockAt,
+  newRowKey,
+  oldRowIndex,
+  oldRowsMoved,
+  type RowKey,
   joinList,
   normalizeInsertTemplates,
   pickProfile,
@@ -326,21 +334,45 @@ function DetailInsertModal({
     fits: fitSeen && useFit ? fitEntries : null,
   };
   const out = composeLines(sel, tpl);
-  // ↑↓ สลับบรรทัดในตัวอย่าง (จำลำดับด้วยข้อความไทยเดิม · บรรทัดที่ยังไม่เคยจัด ต่อท้ายตามลำดับปกติ)
-  const [pairOrder, setPairOrder] = useState<string[]>([]);
-  const rank = (k: string) => {
-    const i = pairOrder.indexOf(k);
-    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  // ⠿ ลำดับทุกบรรทัดในตัวอย่าง (บรรทัดเดิม + บรรทัดใหม่ · lib/detail-snippets arrangeRows)
+  //   custom = null → ยังไม่เคยลาก: บรรทัดใหม่เป็นก้อนเดียวที่ตำแหน่ง at (เหมือนเดิม) · ลาก/↑↓ แล้ว = จำลำดับทั้งหมด
+  const [custom, setCustom] = useState<RowKey[] | null>(null);
+  const pairByKey = new Map(out.pairs.map((p) => [newRowKey(p.th), p]));
+  const rows = arrangeRows(lines.length, out.pairs.map((p) => newRowKey(p.th)), at, custom);
+  const pairs = rows.flatMap((k) => (isNewRow(k) && pairByKey.has(k) ? [pairByKey.get(k)!] : []));
+  const thOf = (k: RowKey) => {
+    const p = pairByKey.get(k);
+    return p ? edits.th[p.th] ?? p.th : null;
   };
-  const pairs = out.pairs.map((p, n) => ({ p, n })).sort((a, b) => rank(a.p.th) - rank(b.p.th) || a.n - b.n).map((x) => x.p);
+  const enOf = (k: RowKey) => {
+    const p = pairByKey.get(k);
+    return p?.en ? edits.en[p.en] ?? p.en : null;
+  };
   const finalTh = pairs.map((p) => edits.th[p.th] ?? p.th).filter((l) => l.trim());
   const finalEn = pairs.flatMap((p) => (p.en ? [edits.en[p.en] ?? p.en] : [])).filter((l) => l.trim());
+  const reordered = oldRowsMoved(rows);
+  const enAligned = enLines.length === lines.length;
+  // ตำแหน่งก้อนบรรทัดใหม่ (ไม่มีบรรทัดใหม่ = ตำแหน่งที่จะแทรก · กระจายอยู่หลายที่ = null)
+  const blockPos = pairs.length ? newBlockAt(rows) : at;
+  /** ย้ายบรรทัดใหม่ทั้งก้อนไปหลังบรรทัดเดิม oldBefore บรรทัด (บนสุด/ท้ายสุด/คลิกช่องระหว่างบรรทัด) */
+  const placeAt = (oldBefore: number) => {
+    setAt(oldBefore);
+    if (custom) setCustom(moveNewBlock(rows, oldBefore));
+  };
+  const dragRow = (from: number, to: number) => setCustom(moveItem(rows, from, to));
+  // ↑↓ บนบรรทัดใหม่: โชว์บรรทัดเดิม = ขยับทีละแถว · ซ่อนบรรทัดเดิม = สลับกับบรรทัดใหม่ตัวข้าง ๆ (เหมือนเดิม)
+  const newIdx = rows.map((r, n) => (isNewRow(r) ? n : -1)).filter((n) => n >= 0);
+  const canMove = (i: number, dir: -1 | 1) => (hideOld ? newIdx[newIdx.indexOf(i) + dir] !== undefined : i + dir >= 0 && i + dir < rows.length);
   const movePair = (i: number, dir: -1 | 1) => {
-    const keys = pairs.map((p) => p.th);
-    const j = i + dir;
-    if (j < 0 || j >= keys.length) return;
-    [keys[i], keys[j]] = [keys[j], keys[i]];
-    setPairOrder(keys);
+    if (!canMove(i, dir)) return;
+    if (!hideOld) {
+      setCustom(moveItem(rows, i, i + dir));
+      return;
+    }
+    const j = newIdx[newIdx.indexOf(i) + dir];
+    const next = [...rows];
+    [next[i], next[j]] = [next[j], next[i]];
+    setCustom(next);
   };
 
   // 🔄 ช่องของสินค้าที่จะบันทึกกลับ (เทียบค่าเดิม)
@@ -356,7 +388,7 @@ function DetailInsertModal({
     changes.push(`ใส่อะไรได้ (${fits.length} รายการ)`);
   }
   const picked = finalTh.length > 0;
-  const dirty = picked || changes.length > 0;
+  const dirty = picked || reordered || changes.length > 0;
   const enAppend = withEn && enLines.length > 0 && enLines.length !== lines.length;
 
   const needle = q.trim().toLowerCase();
@@ -379,7 +411,7 @@ function DetailInsertModal({
   const clearAll = () => {
     (["phrase", "material", "slot", "size", "fit"] as Tab[]).forEach(clearTab);
     setEdits({ th: {}, en: {} });
-    setPairOrder([]);
+    setCustom(null);
   };
   const tabCount = (t: Tab) =>
     t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
@@ -390,8 +422,10 @@ function DetailInsertModal({
       toast.warning("ยังไม่ได้เลือกรายละเอียด");
       return;
     }
-    const th = picked ? insertLines(thText, finalTh, at) : thText;
-    const en = picked && withEn && hasEn && finalEn.length ? insertLines(enText, finalEn, enInsertAt(thText, enText, at)) : undefined;
+    // ประกอบตามลำดับในตัวอย่าง (ไม่ได้ลาก = เหมือนแทรกก้อนที่ตำแหน่งเดิมทุกอย่าง) · อังกฤษ: ใส่บรรทัดใหม่ หรือบรรทัดเดิมถูกสลับ (บรรทัดเท่าไทย = สลับตาม)
+    const th = picked || reordered ? arrangeTh(rows, lines, thOf).join("\n") : thText;
+    const addEn = picked && withEn && hasEn && finalEn.length > 0;
+    const en = addEn || (hasEn && reordered && enAligned) ? arrangeEn(rows, lines, enLines, addEn ? enOf : () => null).join("\n") : undefined;
     setSaving(true);
     try {
       const ok = await onApply({ th, en, ...(changes.length ? { fields } : {}) });
@@ -473,15 +507,13 @@ function DetailInsertModal({
   const dupNote = (kind: LineKind) =>
     alreadyMentions(thText, kind, baseTpl) ? <span className="text-[11px] text-amber-700">⚠️ คำอธิบายมีเรื่อง &quot;{LINE_KIND_LABEL[kind]}&quot; อยู่แล้ว — อาจซ้ำ</span> : null;
 
-  // ─── ตัวอย่าง: ไทย = คลิกระหว่างบรรทัดเลือกตำแหน่ง · อังกฤษ = ดูอย่างเดียว (ตำแหน่งตามภาษาไทย) ───
-  const pvLines = view === "en" ? enLines : lines;
-  const pvOut = view === "en" ? (withEn ? pairs.flatMap((p) => (p.en ? [p.en] : [])) : []) : pairs.map((p) => p.th);
-  const pvEdits = view === "en" ? edits.en : edits.th;
-  const pvAt = view === "en" ? enInsertAt(thText, enText, at) : at;
+  // ─── ตัวอย่าง: ไทย = ลาก ⠿ สลับได้ทุกบรรทัด · คลิกช่องระหว่างบรรทัด = ย้ายบรรทัดใหม่ทั้งก้อน · อังกฤษ = ดูอย่างเดียว (เรียงตามไทย) ───
+  const { rowProps, handleProps, rowCls: dragCls } = useDragReorder(dragRow);
+  const firstNew = rows.findIndex(isNewRow);
   const hereRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     hereRef.current?.scrollIntoView({ block: "nearest" });
-  }, [pvAt, pvOut.length, view, hideOld]);
+  }, [firstNew, pairs.length, view, hideOld]);
   const setHide = (v: boolean) => {
     setHideOld(v);
     try {
@@ -500,57 +532,167 @@ function DetailInsertModal({
     });
     setEditing(null);
   };
+  const editInput = (key: string, orig: string, shown: string) => (
+    <input key={key} autoFocus defaultValue={shown} aria-label="แก้บรรทัดนี้"
+      onBlur={(e) => commitEdit(orig, e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); commitEdit(orig, (e.target as HTMLInputElement).value); }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditing(null); }
+      }}
+      className="my-0.5 h-7 w-full rounded border border-orange-300 bg-white px-1.5 text-[13px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-orange-400" />
+  );
+  const editedMark = (orig: string, edited: boolean) =>
+    edited ? (
+      <button type="button" onClick={() => commitEdit(orig, orig)} title="คืนเป็นข้อความเดิม" className="shrink-0 px-1 text-[11px] text-slate-400 hover:text-slate-700">แก้แล้ว ↺</button>
+    ) : (
+      <span className="hidden shrink-0 px-1 text-[11px] text-orange-400 group-hover:inline">✎</span>
+    );
 
-  const insertBlock = (
-    <div ref={hereRef} className="my-0.5 rounded-md border border-dashed border-orange-300 bg-orange-50 px-1 py-1" data-insert-here>
-      {pvOut.length ? (
-        pvOut.map((orig, i) => {
-          const shown = pvEdits[orig] ?? orig;
-          const k = `${view}:${orig}`;
-          return editing === k ? (
-            <input key={orig} autoFocus defaultValue={shown} aria-label="แก้บรรทัดนี้"
-              onBlur={(e) => commitEdit(orig, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); commitEdit(orig, (e.target as HTMLInputElement).value); }
-                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditing(null); }
-              }}
-              className="my-0.5 h-7 w-full rounded border border-orange-300 bg-white px-1.5 text-[13px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-orange-400" />
-          ) : (
-            <div key={orig} className="group flex items-start gap-1">
-              <button type="button" onClick={() => setEditing(k)} title="คลิกเพื่อแก้บรรทัดนี้ (เฉพาะรุ่นนี้)" data-insert-line
-                className={`flex-1 rounded px-1 text-left hover:bg-white ${shown.trim() ? "text-orange-700" : "text-slate-400 line-through"}`}>
-                {shown.trim() ? shown : orig}
-              </button>
-              {view === "th" && pvOut.length > 1 && (
-                <span className="flex shrink-0 items-center">
-                  <button type="button" onClick={() => movePair(i, -1)} disabled={i === 0} aria-label="ย้ายบรรทัดขึ้น" title="ย้ายขึ้น" data-insert-up
-                    className="rounded px-1 text-[12px] leading-5 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-20">↑</button>
-                  <button type="button" onClick={() => movePair(i, 1)} disabled={i === pvOut.length - 1} aria-label="ย้ายบรรทัดลง" title="ย้ายลง" data-insert-down
-                    className="rounded px-1 text-[12px] leading-5 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-20">↓</button>
-                </span>
-              )}
-              {pvEdits[orig] !== undefined ? (
-                <button type="button" onClick={() => commitEdit(orig, orig)} title="คืนเป็นข้อความเดิม" className="shrink-0 px-1 text-[11px] text-slate-400 hover:text-slate-700">แก้แล้ว ↺</button>
-              ) : (
-                <span className="hidden shrink-0 px-1 text-[11px] text-orange-400 group-hover:inline">✎</span>
-              )}
-            </div>
-          );
-        })
-      ) : (
-        <span className="px-1 text-[11.5px] text-orange-600">
-          {view === "en" && picked ? (withEn ? "ไม่มีบรรทัดอังกฤษ (รายการยังไม่มีชื่ออังกฤษ)" : "ไม่ได้ติ๊กใส่ภาษาอังกฤษ") : "⤵ บรรทัดใหม่จะอยู่ตรงนี้"}
+  /** บรรทัดใหม่ (สีส้ม): ⠿ ลาก · คลิกแก้ · ↑↓ — i = ตำแหน่งในลำดับทั้งหมด */
+  const newRowEl = (k: RowKey, i: number) => {
+    const p = pairByKey.get(k);
+    if (!p) return null;
+    const orig = p.th;
+    const shown = edits.th[orig] ?? orig;
+    const ek = `th:${orig}`;
+    return (
+      <div key={k} {...rowProps(i)} ref={i === firstNew ? hereRef : undefined} data-insert-here={i === firstNew ? "" : undefined} data-insert-row="new"
+        className={`group my-px flex items-start gap-0.5 rounded-md border border-dashed border-orange-300 bg-orange-50 px-0.5 ${dragCls(i)}`}>
+        <DragHandle {...handleProps(i)} title="ลากเพื่อสลับบรรทัด" className="pt-1 text-[13px]" />
+        {editing === ek ? (
+          editInput(ek, orig, shown)
+        ) : (
+          <button type="button" onClick={() => setEditing(ek)} title="คลิกเพื่อแก้บรรทัดนี้ (เฉพาะรุ่นนี้)" data-insert-line
+            className={`flex-1 rounded px-1 text-left hover:bg-white ${shown.trim() ? "text-orange-700" : "text-slate-400 line-through"}`}>
+            {shown.trim() ? shown : orig}
+          </button>
+        )}
+        <span className="flex shrink-0 items-center">
+          <button type="button" onClick={() => movePair(i, -1)} disabled={!canMove(i, -1)} aria-label="ย้ายบรรทัดขึ้น" title="ย้ายขึ้น" data-insert-up
+            className="rounded px-1 text-[12px] leading-5 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-20">↑</button>
+          <button type="button" onClick={() => movePair(i, 1)} disabled={!canMove(i, 1)} aria-label="ย้ายบรรทัดลง" title="ย้ายลง" data-insert-down
+            className="rounded px-1 text-[12px] leading-5 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-20">↓</button>
         </span>
-      )}
+        {editedMark(orig, edits.th[orig] !== undefined)}
+      </div>
+    );
+  };
+  /** บรรทัดเดิม: ⠿ ลากสลับได้ (บันทึกตอนกดแทรก) */
+  const oldRowEl = (k: RowKey, i: number) => (
+    <div key={k} {...rowProps(i)} data-insert-row="old" className={`flex items-start gap-0.5 rounded ${dragCls(i)}`}>
+      <DragHandle {...handleProps(i)} title="ลากเพื่อสลับบรรทัด" className="pt-px text-[13px]" />
+      <div className="flex-1 whitespace-pre-wrap px-1 text-slate-600">{lines[oldRowIndex(k)] || " "}</div>
     </div>
   );
-  const oldLine = (s: string, i: number) => <div key={`l${i}`} className="whitespace-pre-wrap px-2 text-slate-600">{s || " "}</div>;
-  const hiddenRow = (n: number, where: string) =>
-    n > 0 ? (
-      <button type="button" onClick={() => setHide(false)} className="my-0.5 w-full rounded px-2 py-0.5 text-left text-[11.5px] text-slate-400 hover:bg-slate-50" title="กดเพื่อโชว์บรรทัดเดิม">
-        ⋯ ซ่อน {n} บรรทัดเดิม{where}
-      </button>
-    ) : null;
+  const gapEl = (oldBefore: number, key: string) => (
+    <button key={key} type="button" onClick={() => placeAt(oldBefore)} title={pairs.length ? "ย้ายบรรทัดใหม่ทั้งหมดมาตรงนี้" : "แทรกตรงนี้"} data-insert-gap={oldBefore}
+      className="group flex h-2.5 w-full items-center rounded hover:h-5 hover:bg-orange-50">
+      <span className="hidden pl-5 text-[10.5px] text-orange-600 group-hover:inline">⤵ {pairs.length ? "ย้ายบรรทัดใหม่มาตรงนี้" : "แทรกตรงนี้"}</span>
+    </button>
+  );
+  const emptyMark = (
+    <div key="mark" ref={hereRef} data-insert-here className="my-0.5 rounded-md border border-dashed border-orange-300 bg-orange-50 px-2 py-1 text-[11.5px] text-orange-600">
+      ⤵ บรรทัดใหม่จะอยู่ตรงนี้
+    </div>
+  );
+  const hiddenRun = (n: number, i: number) => (
+    <button key={`h${i}`} type="button" {...rowProps(i)} onClick={() => setHide(false)} title="กดเพื่อโชว์บรรทัดเดิม (ลากบรรทัดสีส้มมาวางตรงนี้ได้)"
+      className={`my-0.5 w-full rounded px-2 py-0.5 text-left text-[11.5px] text-slate-400 hover:bg-slate-50 ${dragCls(i)}`}>
+      ⋯ ซ่อน {n} บรรทัดเดิม
+    </button>
+  );
+
+  // ไทย: วาดตามลำดับ rows · ซ่อนบรรทัดเดิม = รวบบรรทัดเดิมที่ติดกันเป็น "⋯ ซ่อน N" (ยังเป็นที่วางตอนลากได้)
+  const thBody: React.ReactNode[] = [];
+  {
+    let oldSeen = 0;
+    let runN = 0;
+    let runAt = -1;
+    const flush = () => {
+      if (runN > 0) thBody.push(hiddenRun(runN, runAt));
+      runN = 0;
+    };
+    rows.forEach((k, i) => {
+      if (isNewRow(k)) {
+        flush();
+        thBody.push(newRowEl(k, i));
+        return;
+      }
+      const markHere = !pairs.length && oldSeen === at;
+      if (markHere) {
+        flush();
+        thBody.push(emptyMark);
+      }
+      if (hideOld) {
+        if (runN === 0) runAt = i;
+        runN++;
+      } else {
+        if (!markHere && !(i > 0 && isNewRow(rows[i - 1]))) thBody.push(gapEl(oldSeen, `g${i}`));
+        thBody.push(oldRowEl(k, i));
+      }
+      oldSeen++;
+    });
+    flush();
+    if (!pairs.length && oldSeen === at) thBody.push(emptyMark);
+    else if (!hideOld && rows.length && !isNewRow(rows[rows.length - 1])) thBody.push(gapEl(oldSeen, "gend"));
+  }
+
+  // อังกฤษ (ดูอย่างเดียว · กติกาเดียวกับตอนบันทึก arrangeEn): บรรทัดเท่าไทย = เรียงตามไทย · ไม่เท่า = เดิม + บรรทัดใหม่ต่อท้าย
+  const enItems: { key: string; neu: boolean; text: string; orig: string }[] = (() => {
+    const neu = (k: RowKey) => {
+      const p = pairByKey.get(k);
+      return withEn && p?.en ? [{ key: k, neu: true, text: edits.en[p.en] ?? p.en, orig: p.en }] : [];
+    };
+    if (enAligned) return rows.flatMap((k) => (isNewRow(k) ? neu(k) : [{ key: k, neu: false, text: enLines[oldRowIndex(k)] ?? "", orig: "" }]));
+    return [...enLines.map((t, i) => ({ key: `o:${i}`, neu: false, text: t, orig: "" })), ...rows.filter(isNewRow).flatMap(neu)];
+  })();
+  const enBody: React.ReactNode[] = [];
+  {
+    let runN = 0;
+    let runKey = "";
+    const flush = () => {
+      if (runN > 0)
+        enBody.push(
+          <button key={`h${runKey}`} type="button" onClick={() => setHide(false)} title="กดเพื่อโชว์บรรทัดเดิม" className="my-0.5 w-full rounded px-2 py-0.5 text-left text-[11.5px] text-slate-400 hover:bg-slate-50">
+            ⋯ ซ่อน {runN} บรรทัดเดิม
+          </button>
+        );
+      runN = 0;
+    };
+    for (const it of enItems) {
+      if (it.neu) {
+        flush();
+        const ek = `en:${it.orig}`;
+        enBody.push(
+          editing === ek ? (
+            editInput(ek, it.orig, it.text)
+          ) : (
+            <div key={it.key} className="group my-px flex items-start gap-1 rounded-md border border-dashed border-orange-300 bg-orange-50 px-0.5">
+              <button type="button" onClick={() => setEditing(ek)} title="คลิกเพื่อแก้บรรทัดนี้ (เฉพาะรุ่นนี้)" data-insert-line
+                className={`flex-1 rounded px-1 text-left hover:bg-white ${it.text.trim() ? "text-orange-700" : "text-slate-400 line-through"}`}>
+                {it.text.trim() ? it.text : it.orig}
+              </button>
+              {editedMark(it.orig, edits.en[it.orig] !== undefined)}
+            </div>
+          )
+        );
+        continue;
+      }
+      if (hideOld) {
+        if (runN === 0) runKey = it.key;
+        runN++;
+        continue;
+      }
+      enBody.push(<div key={it.key} className="whitespace-pre-wrap px-2 text-slate-600">{it.text || " "}</div>);
+    }
+    flush();
+    if (picked && !enItems.some((x) => x.neu))
+      enBody.push(
+        <p key="none" className="my-0.5 rounded-md border border-dashed border-orange-300 bg-orange-50 px-2 py-1 text-[11.5px] text-orange-600">
+          {withEn ? "ไม่มีบรรทัดอังกฤษ (รายการยังไม่มีชื่ออังกฤษ)" : "ไม่ได้ติ๊กใส่ภาษาอังกฤษ"}
+        </p>
+      );
+  }
 
   return (
     <ERPModal
@@ -560,14 +702,15 @@ function DetailInsertModal({
       defaultExpanded={false}
       hasUnsavedChanges={dirty}
       title="แทรกรายละเอียด"
-      description="ซ้าย = เลือกรายละเอียด · ขวา = ตัวอย่างคำอธิบาย คลิกระหว่างบรรทัดเพื่อเลือกตำแหน่ง · คลิกบรรทัดสีส้มเพื่อแก้ก่อนแทรก"
+      description="ซ้าย = เลือกรายละเอียด · ขวา = ตัวอย่างคำอธิบาย ลาก ⠿ สลับบรรทัดได้ทุกบรรทัด · คลิกบรรทัดสีส้มเพื่อแก้ก่อนแทรก"
       footer={
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={clearAll} disabled={!dirty} className="h-9 rounded-lg px-2.5 text-sm text-slate-500 hover:bg-slate-100 disabled:opacity-40" data-insert-clear-all>
             ล้างทั้งหมด
           </button>
           <span className="mr-auto text-xs text-slate-500">
-            {picked ? `จะแทรก ${finalTh.length} บรรทัด` : "ยังไม่ได้เลือกบรรทัด"}
+            {picked ? `จะแทรก ${finalTh.length} บรรทัด` : reordered ? "จัดลำดับบรรทัดใหม่" : "ยังไม่ได้เลือกบรรทัด"}
+            {picked && reordered && " · จัดลำดับบรรทัดเดิมใหม่"}
             {changes.length > 0 && ` · อัปเดตช่องสินค้า ${changes.length} ช่อง`}
           </span>
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
@@ -867,8 +1010,8 @@ function DetailInsertModal({
               className={`rounded px-1.5 ${hideOld ? "bg-slate-800 text-white" : "hover:bg-slate-200/60"}`}>{hideOld ? "🙈 ซ่อนบรรทัดเดิม" : "👁 บรรทัดเดิม"}</button>
             {view === "th" && (
               <>
-                <button type="button" onClick={() => setAt(0)} className={`rounded px-1.5 ${at === 0 ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>บนสุด</button>
-                <button type="button" onClick={() => setAt(lines.length)} className={`rounded px-1.5 ${at === lines.length ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>ท้ายสุด</button>
+                <button type="button" onClick={() => placeAt(0)} title="ย้ายบรรทัดใหม่ทั้งหมดไปบนสุด" className={`rounded px-1.5 ${blockPos === 0 ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>บนสุด</button>
+                <button type="button" onClick={() => placeAt(lines.length)} title="ย้ายบรรทัดใหม่ทั้งหมดไปท้ายสุด" className={`rounded px-1.5 ${blockPos === lines.length ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>ท้ายสุด</button>
               </>
             )}
             {hasEn && (
@@ -881,33 +1024,25 @@ function DetailInsertModal({
             )}
           </div>
           <div className="max-h-[22rem] overflow-auto rounded-lg border border-slate-200 bg-white p-1.5 text-[13px] leading-snug" data-detail-insert-preview>
-            {hideOld ? (
-              <>
-                {hiddenRow(pvAt, " ด้านบน")}
-                {insertBlock}
-                {hiddenRow(pvLines.length - pvAt, " ด้านล่าง")}
-              </>
-            ) : (
-              Array.from({ length: pvLines.length + 1 }).map((_, i) => (
-                <Fragment key={i}>
-                  {i === pvAt ? (
-                    insertBlock
-                  ) : view === "th" ? (
-                    <button type="button" onClick={() => setAt(i)} title="แทรกตรงนี้" data-insert-gap={i}
-                      className="group flex h-3 w-full items-center rounded hover:h-5 hover:bg-orange-50">
-                      <span className="hidden pl-2 text-[10.5px] text-orange-600 group-hover:inline">⤵ แทรกตรงนี้</span>
-                    </button>
-                  ) : (
-                    <div className="h-1" />
-                  )}
-                  {i < pvLines.length && oldLine(pvLines[i], i)}
-                </Fragment>
-              ))
-            )}
-            {!pvLines.length && !hideOld && <p className="px-2 text-[11.5px] text-slate-400">{view === "en" ? "คำอธิบายอังกฤษยังว่าง" : "คำอธิบายยังว่าง — จะใส่เป็นบรรทัดแรก"}</p>}
+            {view === "th" ? thBody : enBody}
+            {!(view === "en" ? enLines : lines).length && !hideOld && <p className="px-2 text-[11.5px] text-slate-400">{view === "en" ? "คำอธิบายอังกฤษยังว่าง" : "คำอธิบายยังว่าง — จะใส่เป็นบรรทัดแรก"}</p>}
           </div>
-          {picked && <p className="text-[11px] text-slate-400">คลิกบรรทัดสีส้มเพื่อแก้คำเฉพาะรุ่นนี้ (ลบข้อความทั้งหมด = ไม่ใส่บรรทัดนั้น)</p>}
-          {view === "en" && <p className="text-[11px] text-slate-400">ตำแหน่งฝั่งอังกฤษตามภาษาไทย (บรรทัดไม่เท่ากัน = ต่อท้าย) · สลับเป็น &quot;ไทย&quot; เพื่อเลือกตำแหน่ง</p>}
+          {view === "th" && lines.length + pairs.length > 1 && (
+            <p className="text-[11px] text-slate-400">
+              ลาก ⠿ สลับได้ทุกบรรทัด{hideOld && lines.length ? " (กด 👁 บรรทัดเดิม เพื่อลากบรรทัดเดิมด้วย)" : ""}
+              {picked ? " · คลิกบรรทัดสีส้มเพื่อแก้คำเฉพาะรุ่นนี้ (ลบข้อความทั้งหมด = ไม่ใส่บรรทัดนั้น)" : ""}
+              {custom && (
+                <button type="button" onClick={() => setCustom(null)} className="ml-1 text-slate-500 underline hover:text-slate-800" data-insert-reset-order>↺ คืนลำดับเดิม</button>
+              )}
+            </p>
+          )}
+          {view === "en" && <p className="text-[11px] text-slate-400">ลำดับฝั่งอังกฤษตามภาษาไทย (บรรทัดไม่เท่ากัน = บรรทัดใหม่ต่อท้าย) · สลับเป็น &quot;ไทย&quot; เพื่อลากจัดลำดับ</p>}
+          {reordered && (
+            <p className="rounded-md bg-sky-50 px-2 py-1.5 text-[11.5px] text-sky-800" data-insert-reordered>
+              🔀 จัดลำดับบรรทัดเดิมใหม่ — บันทึกตอนกด &quot;{saveLabel ?? "แทรก"}&quot;
+              {hasEn && enText.trim() ? (enAligned ? " · คำอธิบายอังกฤษสลับตาม" : " · คำอธิบายอังกฤษบรรทัดไม่เท่าไทย = คงลำดับเดิม") : ""}
+            </p>
+          )}
 
           {changes.length > 0 && (
             <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[11.5px] text-amber-800" data-insert-writeback>

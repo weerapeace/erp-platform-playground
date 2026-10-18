@@ -400,3 +400,97 @@ export function composeLines(
   if (sel.fits?.length) push(fitLine(sel.fits, "th", tpl), fitLine(sel.fits, "en", tpl));
   return { th, en, enMissing, pairs };
 }
+
+/* ─────────── ⠿ จัดลำดับทุกบรรทัดในตัวอย่าง (บรรทัดเดิม + บรรทัดใหม่) ─────────── */
+
+/** แถวในตัวอย่าง: "o:<เลขบรรทัดเดิม>" หรือ "n:<ข้อความไทยของบรรทัดใหม่ (ก่อนแก้)>" */
+export type RowKey = string;
+export const oldRowKey = (i: number): RowKey => `o:${i}`;
+export const newRowKey = (th: string): RowKey => `n:${th}`;
+export const isNewRow = (k: RowKey) => k.startsWith("n:");
+export const oldRowIndex = (k: RowKey) => (k.startsWith("o:") ? Number(k.slice(2)) : -1);
+
+/**
+ * ลำดับแถวที่โชว์/บันทึก
+ *   custom = null (ยังไม่เคยลาก) → บรรทัดเดิมตามเดิม + บรรทัดใหม่เป็นก้อนเดียวที่ตำแหน่ง at
+ *   custom = ลำดับที่ลากไว้ → ตามนั้น (บรรทัดใหม่ที่ไม่ได้เลือกแล้วหายไป · ที่เพิ่งเลือกเพิ่ม ต่อท้ายบรรทัดใหม่ตัวสุดท้าย
+ *            ถ้ายังไม่มีบรรทัดใหม่ในลำดับ = วางที่ตำแหน่ง at)
+ */
+export function arrangeRows(oldCount: number, newKeys: RowKey[], at: number, custom: RowKey[] | null): RowKey[] {
+  const olds = Array.from({ length: oldCount }, (_, i) => oldRowKey(i));
+  const pos = Math.max(0, Math.min(Number.isFinite(at) ? Math.floor(at) : oldCount, oldCount));
+  if (!custom) return [...olds.slice(0, pos), ...newKeys, ...olds.slice(pos)];
+  const wantNew = new Set(newKeys);
+  const seen = new Set<RowKey>();
+  const rows = custom.filter((k) => {
+    if (seen.has(k)) return false;
+    const ok = isNewRow(k) ? wantNew.has(k) : oldRowIndex(k) >= 0 && oldRowIndex(k) < oldCount;
+    if (ok) seen.add(k);
+    return ok;
+  });
+  for (const k of olds) if (!seen.has(k)) rows.push(k);
+  const missing = newKeys.filter((k) => !seen.has(k));
+  if (missing.length) {
+    let lastNew = -1;
+    rows.forEach((k, i) => {
+      if (isNewRow(k)) lastNew = i;
+    });
+    const ins = lastNew >= 0 ? lastNew + 1 : (() => {
+      const i = rows.findIndex((k) => !isNewRow(k) && oldRowIndex(k) >= pos);
+      return i < 0 ? rows.length : i;
+    })();
+    rows.splice(ins, 0, ...missing);
+  }
+  return rows;
+}
+
+/** ย้ายบรรทัดใหม่ทั้งหมดเป็นก้อนเดียว ไปไว้หลังบรรทัดเดิม oldBefore บรรทัดแรก (ตามลำดับที่โชว์อยู่) — ปุ่มบนสุด/ท้ายสุด/คลิกระหว่างบรรทัด */
+export function moveNewBlock(rows: RowKey[], oldBefore: number): RowKey[] {
+  const news = rows.filter(isNewRow);
+  const olds = rows.filter((k) => !isNewRow(k));
+  const i = Math.max(0, Math.min(oldBefore, olds.length));
+  return [...olds.slice(0, i), ...news, ...olds.slice(i)];
+}
+
+/** บรรทัดใหม่อยู่ติดกันเป็นก้อน → มีบรรทัดเดิมอยู่ก่อนกี่บรรทัด (ไม่ติดกัน/ไม่มีบรรทัดใหม่ = null) */
+export function newBlockAt(rows: RowKey[]): number | null {
+  const idx = rows.map((k, i) => (isNewRow(k) ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length || idx[idx.length - 1] - idx[0] !== idx.length - 1) return null;
+  return idx[0];
+}
+
+/** ลากบรรทัดเดิมสลับกันแล้วหรือยัง (บรรทัดเดิมไม่เรียง 0,1,2… = จัดใหม่) */
+export function oldRowsMoved(rows: RowKey[]): boolean {
+  let prev = -1;
+  for (const k of rows) {
+    const i = oldRowIndex(k);
+    if (i < 0) continue;
+    if (i < prev) return true;
+    prev = i;
+  }
+  return false;
+}
+
+/** ประกอบข้อความไทยตามลำดับแถว — บรรทัดใหม่ใช้ข้อความ (แก้แล้ว) จาก newText · ว่าง = ไม่ใส่ */
+export function arrangeTh(rows: RowKey[], oldLines: string[], newText: (k: RowKey) => string | null): string[] {
+  return rows.flatMap((k) => {
+    if (!isNewRow(k)) return [oldLines[oldRowIndex(k)] ?? ""];
+    const t = newText(k);
+    return t && t.trim() ? [t] : [];
+  });
+}
+
+/**
+ * ประกอบข้อความอังกฤษ — กติกาเดียวกับ enInsertAt:
+ *   บรรทัดอังกฤษเท่าไทย (แปลบรรทัดต่อบรรทัด) → เรียงตามลำดับเดียวกับไทย (บรรทัดเดิมที่ลากสลับ ฝั่งอังกฤษสลับตาม)
+ *   ไม่เท่า → บรรทัดอังกฤษเดิมคงที่ + บรรทัดใหม่ต่อท้าย (ตามลำดับในไทย)
+ * newText = null ทุกตัว (ไม่ใส่อังกฤษ) → ได้แค่บรรทัดเดิม
+ */
+export function arrangeEn(rows: RowKey[], thOld: string[], enOld: string[], newText: (k: RowKey) => string | null): string[] {
+  const neu = (k: RowKey) => {
+    const t = newText(k);
+    return t && t.trim() ? [t] : [];
+  };
+  if (enOld.length === thOld.length) return rows.flatMap((k) => (isNewRow(k) ? neu(k) : [enOld[oldRowIndex(k)] ?? ""]));
+  return [...enOld, ...rows.filter(isNewRow).flatMap(neu)];
+}
