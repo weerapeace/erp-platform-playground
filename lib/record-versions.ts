@@ -185,6 +185,14 @@ export function isVersionCurrent(v: Pick<RecordVersion, "kind" | "field_key" | "
   return false;
 }
 
+/** ลำดับตอนกู้รูปกลับ — ช่องเดิมยังว่าง (ยังไม่มีรูปอื่นมาแทนที่ลำดับนั้น) = ใส่กลับที่เดิม · ไม่งั้นต่อท้าย */
+async function restoreSortOrder(admin: Admin, tbl: string, match: Record<string, string>, original: unknown): Promise<number> {
+  const { data } = await admin.from(tbl).select("sort_order").match(match);
+  const used = ((data ?? []) as { sort_order: number | null }[]).map((r) => r.sort_order).filter((n): n is number => typeof n === "number");
+  if (typeof original === "number" && Number.isInteger(original) && original >= 0 && !used.includes(original)) return original;
+  return (used.length ? Math.max(...used) : -1) + 1;
+}
+
 export type RestoreResult = { ok: true; already: boolean; table: string; entityId: string; fieldKey: string; kind: string } | { ok: false; error: string; status: number };
 
 /**
@@ -223,13 +231,12 @@ export async function restoreVersion(admin: Admin, versionId: string, actor: Ver
 
   if (fk === "gallery") {
     if (cur.gallery.size >= GALLERY_MAX) return { ok: false, error: `แกลเลอรีเต็มแล้ว (${GALLERY_MAX} รูป) — ลบรูปที่ไม่ใช้ก่อน แล้วค่อยกู้รูปนี้กลับ`, status: 409 };
-    const { data: mx } = await admin.from("erp_playground_attachments").select("sort_order")
-      .eq("entity_type", table).eq("entity_id", id).order("sort_order", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
     const meta = v.meta ?? {};
+    const sortOrder = await restoreSortOrder(admin, "erp_playground_attachments", { entity_type: table, entity_id: id }, meta.sort_order);
     const { error } = await admin.from("erp_playground_attachments").insert({
       entity_type: table, entity_id: id, file_name: (meta.file_name as string) || key.split("/").pop() || "image",
       file_path: key, public_url: `/api/r2-image?key=${encodeURIComponent(key)}`, content_type: ctFromKey(key),
-      is_primary: cur.gallery.size === 0, sort_order: ((mx?.sort_order as number | null) ?? -1) + 1, uploaded_by: actor.actorId ?? null,
+      is_primary: cur.gallery.size === 0, sort_order: sortOrder, uploaded_by: actor.actorId ?? null,
     });
     if (error) return { ok: false, error: "กู้รูปกลับเข้าแกลเลอรีไม่สำเร็จ กรุณาลองใหม่", status: 400 };
     return done(false);
@@ -253,10 +260,9 @@ export async function restoreVersion(admin: Admin, versionId: string, actor: Ver
       assetId = (na?.id as string) ?? null;
     }
     if (!assetId) return { ok: false, error: "กู้รูป Description ไม่สำเร็จ กรุณาลองใหม่", status: 400 };
-    const { data: mx } = await admin.from("asset_usages").select("sort_order")
-      .eq("module", DESC_MODULE).eq("record_id", id).order("sort_order", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+    const sortOrder = await restoreSortOrder(admin, "asset_usages", { module: DESC_MODULE, record_id: id }, v.meta?.sort_order);
     const { error } = await admin.from("asset_usages").insert({
-      asset_id: assetId, module: DESC_MODULE, record_id: id, record_label: null, field: null, sort_order: ((mx?.sort_order as number | null) ?? -1) + 1,
+      asset_id: assetId, module: DESC_MODULE, record_id: id, record_label: null, field: null, sort_order: sortOrder,
     });
     if (error) return { ok: false, error: "กู้รูป Description ไม่สำเร็จ กรุณาลองใหม่", status: 400 };
     return done(false);
