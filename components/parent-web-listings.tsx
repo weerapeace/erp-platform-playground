@@ -86,6 +86,10 @@ type ShopState = {
   webVariantOff: string[];
   /** ร้านเปิดใช้ตัวเลือกชุดที่ 2 อยู่ (แท็บ ⚙️ จับคู่ฟิลด์) */
   options2On?: boolean;
+  /** 📏 ตารางไซส์ที่เลือกทับ ("" = อัตโนมัติตามหมวด · "none" = ไม่แสดง · id) + รายการของร้าน + ตารางอัตโนมัติ */
+  webSizeGuide?: string;
+  sizeGuides?: { id: string; name: string }[];
+  autoSizeGuide?: string | null;
   shopCategories: { key: string; label: string; icon: string }[];
   auto: { price: number; unit: string; description: string };
   display: { name: string; price: number; imageKey: string | null; imageCount: number; hero: boolean; productUrl: string | null } | null;
@@ -132,7 +136,7 @@ const STOCKS = STOCK_STATUS_OPTIONS;
 const snapOf = (s: ShopState) =>
   JSON.stringify([
     s.published, s.featured, s.webPrice, s.webName, s.webDescription, s.webImages, s.webSkuImages, s.webDetails, s.webPersonalize, s.webBanners, s.webCardColors, s.webHero,
-    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [],
+    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [], s.webSizeGuide ?? "",
   ]);
 
 const MAX_SKU_IMAGES = 8;
@@ -342,6 +346,7 @@ export function ParentWebListings({
             webSwatch: s.webSwatch,
             webOptions: s.webOptions,
             webVariantOff: s.webVariantOff ?? [],
+            webSizeGuide: s.webSizeGuide ?? "",
           },
         }),
       });
@@ -570,6 +575,22 @@ export function ParentWebListings({
         {/* 📐 ไซส์ (ตัวเลือกชุดที่ 2) — เปิด/ปิดแต่ละคู่ สี×ไซส์ บนเว็บร้านนี้ · ตัวเลือกกรอกเอง = ไม่ใช้ไซส์จาก SKU */}
         {data.sizeGrid && !s.webOptions?.items?.length && (
           <SizeGridEditor grid={data.sizeGrid} off={s.webVariantOff ?? []} onChange={(next) => patchShop(s.shopId, { webVariantOff: next })} enabled={!!s.options2On} />
+        )}
+        {/* 📏 ตารางไซส์ของรุ่นนี้ — อัตโนมัติตามหมวด / เลือกเอง / ไม่แสดง (ตั้งตารางที่ เว็บไซต์ → 📏 ตารางไซส์) */}
+        {data.sizeGrid && !s.webOptions?.items?.length && (
+          <label className="flex items-center gap-2 flex-wrap text-xs text-slate-600">
+            <span>📏 ตารางไซส์บนหน้าสินค้า</span>
+            <select value={s.webSizeGuide ?? ""} onChange={(e) => patchShop(s.shopId, { webSizeGuide: e.target.value })} className="rounded-lg border border-slate-300 px-2 py-1 text-xs">
+              <option value="">อัตโนมัติตามหมวด ({s.autoSizeGuide ?? "ไม่มีตารางของหมวดนี้"})</option>
+              {(s.sizeGuides ?? []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+              <option value="none">ไม่แสดงตารางไซส์</option>
+            </select>
+            {!(s.sizeGuides ?? []).length && <span className="text-slate-400">ร้านนี้ยังไม่มีตารางไซส์ — ตั้งที่ เว็บไซต์ → 📏 ตารางไซส์</span>}
+          </label>
         )}
 
         <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={s.auto.description || data.erpDescription || "—"} />

@@ -52,6 +52,8 @@ import { parseCompartments } from "@/lib/fit-check";
 import { CHILD_SELECT, sortKids, type ChildSku } from "@/lib/website-field-map";
 import { SwatchIndex, rowToSwatchEntry, swatchCss, SWATCH_SELECT } from "@/lib/color-swatch";
 import { baseColor, buildSizeGrid, cleanVariantOff, variantOf } from "@/lib/website-size-options";
+import { resolveSizeGuide } from "@/lib/website-size-guides";
+import { readSizeGuidesMany } from "@/lib/website-size-guides-db";
 import { categoryPathLabel } from "@/lib/website-category-tree";
 import { loadTagContext } from "@/lib/website-tag-categories-db";
 import { tagRuleCategories } from "@/lib/website-tag-categories";
@@ -163,6 +165,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const listingByShop = new Map(((listings ?? []) as Record<string, unknown>[]).map((l) => [l.shop_id as string, l]));
   const fitShops = await readFitCheckShops(sb);
+  // 📏 ตารางไซส์ของแต่ละร้าน (เลือกทับรายรุ่นได้ · อัตโนมัติ = ตามหมวด)
+  const guidesByShop = await readSizeGuidesMany(sb, ((shops ?? []) as { id: string }[]).map((s) => s.id));
   // 🔗 ข้อมูลที่เชื่อม: ชื่อฟิลด์ (ทะเบียน → ชุดสเปก) + ค่าส่งของแต่ละร้าน
   const fieldLabelMap = new Map<string, string>([...PRODUCT_SPEC_FIELDS.map((f) => [f.key, f.label] as const), ...parentFields.map((f) => [f.key, f.label] as const)]);
   const fieldLabel = (k: string) => fieldLabelMap.get(k) ?? k;
@@ -240,6 +244,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       /** 📐 คู่ สี×ไซส์ ที่ปิดไว้บนเว็บร้านนี้ (id SKU ไซส์) + ร้านเปิดใช้ตัวเลือกชุดที่ 2 อยู่ไหม (แท็บ ⚙️ จับคู่ฟิลด์) */
       webVariantOff: cleanVariantOff(l?.web_variant_off),
       options2On: fieldMap.options2.source === "variant_option",
+      /** 📏 ตารางไซส์: ที่เลือกทับ ("" = อัตโนมัติ · "none" · id) + รายการของร้าน + ตารางที่ใช้อัตโนมัติตามหมวด */
+      webSizeGuide: typeof l?.web_size_guide === "string" ? (l.web_size_guide as string) : "",
+      sizeGuides: (guidesByShop.get(s.id) ?? []).map((g) => ({ id: g.id, name: g.name })),
+      autoSizeGuide: resolveSizeGuide(guidesByShop.get(s.id) ?? [], view.categories, fieldMap.categories, null)?.name ?? null,
       /** หมวดของร้านนี้ (แท็บ 📂 หมวดหมู่) */
       shopCategories: fieldMap.categories.map((c) => ({ key: c.key, label: categoryPathLabel(fieldMap.categories, c.key), icon: c.icon ?? "" })),
       /** ค่าที่เว็บใช้อัตโนมัติถ้าไม่กรอกทับ */

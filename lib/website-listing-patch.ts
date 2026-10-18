@@ -41,6 +41,8 @@ export type ListingPatch = {
   webHero?: unknown;
   /** 📐 id ของ SKU ไซส์ที่ปิดไว้บนเว็บร้านนี้ (ตาราง สี×ไซส์) · [] = เปิดทุกคู่ */
   webVariantOff?: unknown;
+  /** 📏 ตารางไซส์ของรุ่นนี้: "" = อัตโนมัติตามหมวด · "none" = ไม่แสดง · id ตาราง (lib/website-size-guides) */
+  webSizeGuide?: string | null;
 };
 
 /** รูปเว็บรายสี: รับได้ทั้งค่าเก่า (string เดี่ยว) และค่าใหม่ (string[]) → คืนเป็น string[] เสมอ */
@@ -111,6 +113,10 @@ export function listingPatchToRow(p: ListingPatch): Record<string, unknown> {
     row.web_card_colors = isEmptyCardColors(cc) ? null : cc;
   }
   if (p.webHero !== undefined) row.web_hero = normalizeHero(p.webHero);
+  if (p.webSizeGuide !== undefined) {
+    const g = String(p.webSizeGuide ?? "").trim().toLowerCase();
+    row.web_size_guide = /^[a-z0-9_-]{1,40}$/.test(g) ? g : null;
+  }
   if (p.webVariantOff !== undefined) {
     const off = cleanVariantOff(p.webVariantOff);
     row.web_variant_off = off.length ? off : null;

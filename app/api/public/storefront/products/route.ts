@@ -39,6 +39,8 @@ import { rowToTone, tonesOfLabel, TONE_SELECT } from "@/lib/color-tone";
 import { productSlug } from "@/lib/website-links";
 import { badgeColorOf } from "@/lib/website-card-badges";
 import { readCardBadges } from "@/lib/website-card-badges-db";
+import { publicSizeGuide, resolveSizeGuide } from "@/lib/website-size-guides";
+import { readSizeGuides } from "@/lib/website-size-guides-db";
 import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
 import { findMaterialLinks, MATERIAL_SELECT, type MaterialRow } from "@/lib/product-materials";
@@ -94,7 +96,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch, web_variant_off"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch, web_variant_off, web_size_guide"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -117,7 +119,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     loadParentImageFields(sb),
   ]);
   // 📏 รายการกลาง "ใส่อะไรได้บ้าง" + ✅ "รายละเอียดเพิ่ม (ติ๊ก)" (ตารางเล็ก) → หัวข้อ "ขนาด" / ต่อท้าย "รายละเอียดสินค้า"
-  const [{ data: fitRows }, { data: hlRows }, { data: toneRows }, cardBadges, { data: matRows }] = await Promise.all([
+  const [{ data: fitRows }, { data: hlRows }, { data: toneRows }, cardBadges, { data: matRows }, sizeGuides] = await Promise.all([
     sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order").eq("is_active", true).order("sort_order"),
     sb.from("product_highlight_items").select("id, name, name_en, is_active").eq("is_active", true).order("sort_order"),
     // 🎨 โทนสี (ของกลาง) → ตัวเลือกแต่ละสีบอกว่าอยู่โทนไหน (ปุ่ม "กรองตามสี" บนเว็บ · ดู lib/color-tone.ts)
@@ -126,6 +128,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     readCardBadges(sb, s.id),
     // 🧵 วัสดุ → ชื่อวัสดุในคำอธิบายลิงก์ไปหน้าวัสดุบนเว็บ (เฉพาะที่มีหน้าแล้ว · lib/product-materials)
     sb.from("product_materials").select(MATERIAL_SELECT).eq("is_active", true).order("sort_order"),
+    // 📏 ตารางไซส์ของร้าน (ตั้งต่อหมวด · ทับรายรุ่นได้) — lib/website-size-guides
+    readSizeGuides(sb, s.id),
   ]);
   const materials = (matRows ?? []) as MaterialRow[];
   const colorTones = ((toneRows ?? []) as Parameters<typeof rowToTone>[0][]).map(rowToTone);
@@ -256,6 +260,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
          * เว็บเปลี่ยนราคาตามที่เลือก + ตะกร้าใช้ราคานี้ · ออเดอร์คิดซ้ำฝั่งเซิร์ฟเวอร์ด้วยสูตรเดียวกัน (skuUnitPrice)
          */
         ...(r.variantPrices ? { variantPrices: r.variantPrices } : {}),
+        /**
+         * 📏 ตารางไซส์ของรุ่นนี้ (เฉพาะรุ่นที่มีไซส์) — ป๊อปตาราง + ช่วงใต้ปุ่มไซส์ (fitColumn) + ตัวช่วยแนะนำไซส์ (rows[].min/max)
+         * ทับรายรุ่น (web_size_guide) ชนะ ไม่งั้นตามหมวด (หมวดย่อยชนะหมวดแม่)
+         */
+        ...(() => {
+          if (!r.options2 || !sizeGuides.length) return {};
+          const g = resolveSizeGuide(sizeGuides, r.categories, fieldMap.categories, l.web_size_guide);
+          return g ? { sizeGuide: publicSizeGuide(g) } : {};
+        })(),
         /** วันที่ขึ้นร้านนี้ (ป้าย "ใหม่" อัตโนมัติ) */
         listedAt: typeof l.created_at === "string" ? l.created_at : null,
         unit: r.unit,
