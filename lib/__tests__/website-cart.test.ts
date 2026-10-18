@@ -30,3 +30,12 @@ describe("website-cart", () => {
     expect(freeShipLine("อีก {amount} ส่งฟรี", "฿200")).toBe("อีก ฿200 ส่งฟรี");
   });
 });
+
+/** 🛍 ตำแหน่งสินค้าแนะนำในตะกร้า — ค่าเดิม (ไม่มีช่องนี้) = ท้ายรายการแบบเดิม */
+describe("recsPos", () => {
+  it("ไม่ตั้ง = bottom · ตั้งได้ 4 แบบ · ค่ามั่ว = bottom", () => {
+    expect(normalizeCart({}).recsPos).toBe("bottom");
+    for (const p of ["top", "afterItems", "bottom", "footer"]) expect(normalizeCart({ recsPos: p }).recsPos).toBe(p);
+    expect(normalizeCart({ recsPos: "middle" }).recsPos).toBe("bottom");
+  });
+});

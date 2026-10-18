@@ -6,6 +6,8 @@
  */
 export type CartStyle = "drawer-right" | "drawer-left" | "modal";
 export type CartRecsSource = "auto" | "featured" | "manual";
+/** ตำแหน่งสินค้าแนะนำ: บนสุด · ต่อจากรายการสินค้า · ท้ายรายการ (เดิม) · ติดเหนือยอดรวม (เห็นตลอด) */
+export type CartRecsPos = "top" | "afterItems" | "bottom" | "footer";
 export interface CartTrustItem {
   icon: string;
   text: string;
@@ -52,6 +54,8 @@ export interface CartConfig {
   recsLimit: number;
   /** ยอดยังไม่ถึงส่งฟรี → ดันสินค้าที่ราคาพอดีให้ถึงส่งฟรีขึ้นก่อน */
   recsFreeShip: boolean;
+  /** อยู่ตรงไหนในตะกร้า (ลิ้นชัก + หน้า /cart) */
+  recsPos: CartRecsPos;
   /* ── ฟังก์ชันเพิ่ม ── */
   /** ช่องโค้ดส่วนลด (จำไปใช้ตอนชำระเงิน) */
   coupon: boolean;
@@ -105,6 +109,7 @@ export const DEFAULT_CART: CartConfig = {
   recsCodes: [],
   recsLimit: 6,
   recsFreeShip: true,
+  recsPos: "bottom",
   coupon: false,
   points: false,
   gift: false,
@@ -132,6 +137,13 @@ export const CART_IMAGE_SIZES: { value: CartConfig["imageSize"]; label: string; 
   { value: "md", label: "กลาง (เดิม)", px: 64 },
   { value: "lg", label: "ใหญ่", px: 88 },
 ];
+export const CART_RECS_POSITIONS: { value: CartRecsPos; label: string; hint: string }[] = [
+  { value: "top", label: "บนสุด", hint: "เห็นก่อนรายการสินค้า — ตะกร้าว่างก็ขึ้นบนสุด" },
+  { value: "afterItems", label: "ต่อจากรายการสินค้า", hint: "อยู่ก่อนโค้ดส่วนลด / หมายเหตุ / ห่อของขวัญ" },
+  { value: "bottom", label: "ท้ายรายการ (แบบเดิม)", hint: "ต่อจากโค้ดส่วนลด / หมายเหตุ — ต้องเลื่อนลงถึงจะเห็น" },
+  { value: "footer", label: "ติดเหนือยอดรวม", hint: "เห็นตลอดไม่ต้องเลื่อน (การ์ดเล็กลง) · หน้า /cart = ใต้กล่องยอดรวม" },
+];
+
 export const CART_RECS_SOURCES: { value: CartRecsSource; label: string; hint: string }[] = [
   { value: "auto", label: "อัตโนมัติ", hint: "หมวดเดียวกับของในตะกร้า + ที่ติ๊กแนะนำ/ขายดี (ไม่ซ้ำของในตะกร้า)" },
   { value: "featured", label: "เฉพาะที่ติ๊กแนะนำ", hint: "สินค้าที่ติ๊ก ⭐ แนะนำในหน้าสินค้าบนเว็บ" },
@@ -185,6 +197,7 @@ export function normalizeCart(raw: unknown): CartConfig {
     recsCodes: Array.isArray(r.recsCodes) ? [...new Set((r.recsCodes as unknown[]).map((c) => String(c ?? "").trim().toUpperCase()).filter((c) => /^[A-Z0-9._-]{1,40}$/.test(c)))].slice(0, 24) : [],
     recsLimit: int(r.recsLimit, d.recsLimit, 2, 12),
     recsFreeShip: bool(r.recsFreeShip, d.recsFreeShip),
+    recsPos: one(r.recsPos, ["top", "afterItems", "bottom", "footer"] as const, d.recsPos),
     coupon: bool(r.coupon, d.coupon),
     points: bool(r.points, d.points),
     gift: bool(r.gift, d.gift),

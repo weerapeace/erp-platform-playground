@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { Seg } from "@/components/website-block-editor";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
-import { CART_IMAGE_SIZES, CART_RECS_SOURCES, CART_STYLES, CART_WIDTHS, DEFAULT_TRUST_ITEMS, etaLine, freeShipLine, type CartConfig, type CartStyle } from "@/lib/website-cart";
+import { CART_IMAGE_SIZES, CART_RECS_POSITIONS, CART_RECS_SOURCES, CART_STYLES, CART_WIDTHS, DEFAULT_TRUST_ITEMS, etaLine, freeShipLine, type CartConfig, type CartStyle } from "@/lib/website-cart";
 
 const lbl = "block text-[11px] font-medium text-slate-500 mb-1";
 const input = "w-full h-8 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-400";
@@ -219,6 +219,11 @@ export function CartSettings({
             <span className={lbl}>จำนวนสูงสุด</span>
             <Seg value={String(c.recsLimit)} onChange={(v) => set({ recsLimit: Number(v) })} options={[2, 3, 4, 6, 8, 10, 12].map((n) => ({ v: String(n), l: String(n) }))} wheel />
           </div>
+        </div>
+        <div>
+          <span className={lbl}>ตำแหน่งในตะกร้า</span>
+          <Seg value={c.recsPos} onChange={(recsPos) => set({ recsPos })} options={CART_RECS_POSITIONS.map((s) => ({ v: s.value, l: s.label }))} />
+          <p className="text-[11px] text-slate-500 mt-1">{CART_RECS_POSITIONS.find((s) => s.value === c.recsPos)?.hint}</p>
         </div>
         <div>
           <span className={lbl}>เลือกสินค้าจาก</span>
