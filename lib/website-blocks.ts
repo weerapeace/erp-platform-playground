@@ -492,7 +492,26 @@ export interface GalleryBlock extends BlockBase {
   eyebrow: string;
   title: string;
   columns: number;
-  items: (ChildBase & { imageKey: string | null; alt: string; caption: string })[];
+  /** 📝 ข้อความประกอบรูป (imageCaptionFields ใน website-schema) — ค่าเริ่ม = ใต้รูปแบบเดิม */
+  capShow?: boolean;
+  capPos?: "below" | "card" | "overlay" | "hover";
+  capAlign?: "auto" | "left" | "center" | "right";
+  capGap?: "none" | "xs" | "sm" | "md" | "lg";
+  capTitleFont?: string;
+  capTitleSize?: "xs" | "s" | "m" | "l" | "xl";
+  capTitleWeight?: string;
+  capTitleColor?: string;
+  capTitleHex?: string;
+  capTitleUpper?: boolean;
+  capTextSize?: "xs" | "s" | "m" | "l";
+  capTextColor?: string;
+  capTextHex?: string;
+  capLinkStyle?: "text" | "button";
+  capShade?: number;
+  capCardBg?: string;
+  capCardHex?: string;
+  capMobile?: "all" | "title" | "none";
+  items: (ChildBase & { imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];
 }
 
 /** ปุ่มเดี่ยว — วางคั่นระหว่างเนื้อหาได้ทุกจุด */

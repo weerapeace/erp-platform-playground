@@ -69,7 +69,7 @@ export type FieldType =
   | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
   | "point"; // จุดบนรูป { x, y } เป็น % — คลิกบนรูปเพื่อวาง · ต้องตั้ง pointImage
 
-export type FieldGroup = "content" | "media" | "action" | "layout" | "products";
+export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "caption";
 
 export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
   content: "เนื้อหา",
@@ -77,6 +77,7 @@ export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
   action: "ปุ่ม / ลิงก์",
   layout: "การจัดวาง",
   products: "สินค้า",
+  caption: "ข้อความประกอบรูป",
 };
 
 export interface FieldOption {
@@ -301,6 +302,106 @@ const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: bool
     showIf: [{ key: "frame", eq: [...LINE_FRAME_KEYS, "auto"] }, { key: "border", eq: ["line", "double", "dotted"] }],
   }),
 ];
+
+/**
+ * 📝 ของกลาง: ชุดตั้งค่า "ข้อความประกอบรูป" ทั้ง Section — ใช้คู่กับชิ้นย่อยที่มี title / caption / linkText (+ href)
+ * key คงที่ cap* · ค่าเริ่ม = แบบเดิมของแกลเลอรี (ใต้รูป · ตัวเล็กสีรอง · ห่างรูปนิดเดียว) → บล็อกเก่าหน้าตาไม่เปลี่ยน
+ * สี/ฟอนต์ = ชุดเดียวกับผืนผ้าใบ (ตามธีมร้าน) · ขนาด = ชื่อสเกล (ไม่ใช่ px) · เว็บร้านวาดที่ src/components/home/ImageCaption.tsx
+ */
+const CAP_POSITIONS: FieldOption[] = [
+  { v: "below", l: "ใต้รูป", sketch: "cap-below", hint: "แบบเดิม" },
+  { v: "card", l: "การ์ดมีพื้น", sketch: "cap-card", hint: "รูป + ข้อความในกล่อง" },
+  { v: "overlay", l: "ซ้อนบนรูป", sketch: "cap-overlay", hint: "แถบมืดล่างรูป" },
+  { v: "hover", l: "โผล่ตอนชี้", sketch: "cap-hover", hint: "มือถือเห็นตลอด" },
+];
+const CAP_AUTO_COLOR: FieldOption = { v: "auto", l: "อัตโนมัติ" };
+const CAP_AUTO_HINT = "อัตโนมัติ = ใต้รูปตามธีม · บนรูปเป็นสีขาว";
+const imageCaptionFields = (): FieldDef[] => {
+  const on = { key: "capShow", eq: true };
+  const g = { group: "caption" as FieldGroup };
+  return [
+    f("capShow", "แสดงข้อความประกอบรูป", "toggle", { ...g, default: true }),
+    f("capPos", "ตำแหน่งข้อความ", "select", { ...g, default: "below", display: "tiles", options: CAP_POSITIONS, showIf: on, hint: "หัวข้อ / คำอธิบาย / ลิงก์ ใส่ทีละรูป (กดที่รูปในต้นไม้หรือพรีวิว)" }),
+    f("capAlign", "จัดข้อความ", "select", {
+      ...g,
+      default: "auto",
+      options: [
+        { v: "auto", l: "ตามรูปลักษณ์ Section" },
+        { v: "left", l: "ชิดซ้าย" },
+        { v: "center", l: "กึ่งกลาง" },
+        { v: "right", l: "ชิดขวา" },
+      ],
+      showIf: on,
+      hint: "ตามรูปลักษณ์ = ปกติชิดซ้าย (ตั้งที่แท็บรูปลักษณ์)",
+    }),
+    f("capGap", "ระยะห่างข้อความกับรูป", "select", {
+      ...g,
+      default: "sm",
+      options: [
+        { v: "none", l: "ชิดกัน" },
+        { v: "xs", l: "น้อยมาก" },
+        { v: "sm", l: "น้อย (แบบเดิม)" },
+        { v: "md", l: "กลาง" },
+        { v: "lg", l: "มาก" },
+      ],
+      showIf: on,
+    }),
+    f("capTitleFont", "ฟอนต์หัวข้อ", "select", { ...g, default: "display", options: CANVAS_FONTS, display: "font", showIf: on }),
+    f("capTitleSize", "ขนาดหัวข้อ", "select", {
+      ...g,
+      default: "m",
+      options: [
+        { v: "xs", l: "เล็กมาก" },
+        { v: "s", l: "เล็ก" },
+        { v: "m", l: "กลาง" },
+        { v: "l", l: "ใหญ่" },
+        { v: "xl", l: "ใหญ่มาก" },
+      ],
+      showIf: on,
+      hint: "ใหญ่/ใหญ่มาก ย่อลงเองบนมือถือ",
+    }),
+    f("capTitleWeight", "ความหนาหัวข้อ", "select", { ...g, default: "600", options: CANVAS_WEIGHTS, showIf: on }),
+    f("capTitleColor", "สีหัวข้อ", "select", { ...g, default: "auto", options: [CAP_AUTO_COLOR, ...CANVAS_COLORS], showIf: on, hint: CAP_AUTO_HINT }),
+    f("capTitleHex", "สีหัวข้อ (เลือกเอง)", "color", { ...g, default: "", showIf: [on, { key: "capTitleColor", eq: "custom" }] }),
+    f("capTitleUpper", "หัวข้อตัวพิมพ์ใหญ่ (อังกฤษ)", "toggle", { ...g, default: false, showIf: on }),
+    f("capTextSize", "ขนาดคำอธิบาย", "select", {
+      ...g,
+      default: "s",
+      options: [
+        { v: "xs", l: "เล็กมาก" },
+        { v: "s", l: "เล็ก (แบบเดิม)" },
+        { v: "m", l: "กลาง" },
+        { v: "l", l: "ใหญ่" },
+      ],
+      showIf: on,
+    }),
+    f("capTextColor", "สีคำอธิบาย", "select", { ...g, default: "auto", options: [CAP_AUTO_COLOR, ...CANVAS_COLORS], showIf: on, hint: CAP_AUTO_HINT }),
+    f("capTextHex", "สีคำอธิบาย (เลือกเอง)", "color", { ...g, default: "", showIf: [on, { key: "capTextColor", eq: "custom" }] }),
+    f("capLinkStyle", "หน้าตาลิงก์", "select", {
+      ...g,
+      default: "text",
+      options: [
+        { v: "text", l: "ข้อความขีดเส้นใต้" },
+        { v: "button", l: "ปุ่มขอบบาง" },
+      ],
+      showIf: on,
+      hint: "ลิงก์ = \"ข้อความลิงก์ใต้รูป\" ของแต่ละรูป",
+    }),
+    f("capShade", "ความเข้มแถบมืดบนรูป (%)", "range", { ...g, default: 45, min: 0, numMax: 90, step: 5, showIf: [on, { key: "capPos", eq: ["overlay", "hover"] }] }),
+    f("capCardBg", "สีพื้นการ์ด", "select", { ...g, default: "surface", options: CANVAS_COLORS, showIf: [on, { key: "capPos", eq: "card" }] }),
+    f("capCardHex", "สีพื้นการ์ด (เลือกเอง)", "color", { ...g, default: "", showIf: [on, { key: "capPos", eq: "card" }, { key: "capCardBg", eq: "custom" }] }),
+    f("capMobile", "มือถือ: ข้อความ", "select", {
+      ...g,
+      default: "all",
+      options: [
+        { v: "all", l: "เหมือนคอม" },
+        { v: "title", l: "หัวข้ออย่างเดียว" },
+        { v: "none", l: "ซ่อนข้อความ" },
+      ],
+      showIf: on,
+    }),
+  ];
+};
 
 const headFields = (opts: { eyebrow?: string; title?: string; subtitle?: boolean; subtitleMax?: number } = {}): FieldDef[] => [
   text("eyebrow", "คำโปรยเหนือหัวข้อ", { default: opts.eyebrow ?? "", max: 120, placeholder: "เช่น ขายดี" }),
@@ -685,6 +786,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       }),
       f("fullBleed", "รูปเต็มความกว้างจอ", "toggle", { group: "layout", default: false, hint: "ตารางรูปยืดเต็มจอ (หัวข้อยังอยู่ในกรอบปกติ)" }),
       f("hoverZoom", "ชี้แล้วรูปขยายนิด ๆ", "toggle", { group: "layout", default: true }),
+      ...imageCaptionFields(),
     ],
     children: {
       key: "items",
@@ -696,10 +798,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         image("imageKey", "รูป"),
         f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
         text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200 }),
-        text("caption", "ข้อความใต้รูป", { default: "", max: 200 }),
+        text("title", "หัวข้อใต้รูป", { default: "", max: 120, wide: true, hint: "หน้าตา/ตำแหน่ง ตั้งที่ Section แกลเลอรี → ข้อความประกอบรูป" }),
+        area("caption", "คำอธิบายใต้รูป", { default: "", max: 300 }),
         f("href", "กดรูปแล้วไปที่", "target", { group: "action", default: "", hint: "ว่าง = กดไม่ได้" }),
+        text("linkText", "ข้อความลิงก์ใต้รูป", { group: "action", default: "", max: 40, placeholder: "เช่น ดูสินค้า →", hint: "โชว์เมื่อตั้ง \"กดรูปแล้วไปที่\" แล้ว · ว่าง = ไม่มีลิงก์ใต้รูป" }),
       ],
-      summary: (it) => (it.imageKey ? s(it.caption) || s(it.alt) || "รูป" : "ยังไม่เลือกรูป"),
+      summary: (it) => (it.imageKey ? s(it.title) || s(it.caption) || s(it.alt) || "รูป" : "ยังไม่เลือกรูป"),
     },
     summary: (b) => count(arr(b.items).length, "รูป"),
     validate: (b, label) => {

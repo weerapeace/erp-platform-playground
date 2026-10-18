@@ -102,6 +102,19 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ใช้อยู่: แกลเลอรีรูป · รูปคู่ข้อความ (+ `imgSize` ความกว้างรูป %) · หลายคอลัมน์ (ค่าเริ่ม 4:3 มุมมน = แบบเดิม · ครอปรายคอลัมน์) · รูปภาพ (ค่าเริ่ม ratio "auto" ตามรูปจริง + frame "auto" = เต็มจอเหลี่ยม/อื่นมุมมน แบบเดิม · `mobileKey` รูปมือถือแยก) — Section ใหม่ที่มีรูปให้ใช้ชุดนี้ ไม่เขียนกรอบเอง
 - `autoFrame` = เพิ่มตัวเลือกทรง "อัตโนมัติ" (Section ตัดสินเองตามค่าอื่น) — เว็บร้านต้องแปลง "auto" เป็นทรงจริงก่อนส่งให้ FramedImage
 
+## 📝 ข้อความประกอบรูปของกลาง (imageCaptionFields + ImageCaption) — เพิ่ม 2026-10-18
+- ERP `lib/website-schema.ts` `imageCaptionFields()` = ช่องระดับ Section กลุ่มใหม่ **"ข้อความประกอบรูป"** (`FieldGroup` `caption` · ท้ายแท็บเนื้อหา):
+  `capShow` · `capPos` (below ใต้รูป / card การ์ดมีพื้น / overlay ซ้อนบนรูป / hover โผล่ตอนชี้ — ปุ่มรูปย่อ sketch `cap-*`) · `capAlign` (auto = ตามรูปลักษณ์ Section) · `capGap` ·
+  หัวข้อ `capTitleFont` (CANVAS_FONTS) `capTitleSize` (xs–xl) `capTitleWeight` `capTitleColor`+`capTitleHex` `capTitleUpper` · คำอธิบาย `capTextSize` (xs–l) `capTextColor`+`capTextHex` ·
+  `capLinkStyle` (text/button) · `capShade` (แถบมืดบนรูป %) · `capCardBg`+`capCardHex` · `capMobile` (all / title = หัวข้ออย่างเดียว / none = ซ่อน)
+  - สี "auto" = ใต้รูป/การ์ด ตามธีม (หัวข้อ ink · คำอธิบาย muted) · บนรูป = ขาว
+- ชิ้นย่อยต้องมี `title` (หัวข้อ) · `caption` (คำอธิบาย) · `linkText` (ข้อความลิงก์ — โชว์เมื่อมี `href`) → แปล 2 ภาษาได้เองตามกฎ `<key>_en`
+- **ค่าเริ่มทุกช่อง = แบบเดิมของแกลเลอรี** (ใต้รูป · 14px สีรอง · ห่าง 8px · เต็มจอเว้นขอบ 12px) — บล็อกเก่าที่มีแค่ `caption` หน้าตาเหมือนเดิมทุกพิกเซล
+- เว็บร้าน: ตัวแปลง `src/lib/image-caption.ts` (`captionLook` · `hasCaption` · `captionFontHref`) + ตัววาด `src/components/home/ImageCaption.tsx`
+  - บนรูป/ตอนชี้ = ส่งเป็น children ของ `FramedImage` (ตัดตามทรงกรอบ) · ทั้งรูปเป็นลิงก์ → ข้อความลิงก์เป็นแค่ป้าย (ห้าม `<a>` ซ้อน)
+  - CSS `.gal-cap-on` `.gal-cap-hover` (จอสัมผัสเห็นตลอด) `.gal-card` ใน globals.css
+- ใช้อยู่: แกลเลอรีรูป · Section ใหม่ที่มีรูป+ข้อความรายรูป ให้ใช้ชุดนี้ ไม่เขียนเอง
+
 ## ⭐ แม่แบบ Section + 🕘 ประวัติเวอร์ชัน
 - **แม่แบบ Section** — ตาราง `website_section_templates` (migration 202610150200 · RLS เปิด ไม่มี policy · เข้าผ่าน API service role เท่านั้น)
   - API `/api/website/section-templates` GET/POST/PATCH(ชื่อ)/DELETE · ทุกการกระทำลง audit · ผืนผ้าใบในแม่แบบบันทึกรูปถูกใช้ (module `website_section_template`)

@@ -205,3 +205,24 @@ describe("ตัวอักษรหัวข้อต่อ Section + มื�
     expect(sectionHasHeading("divider")).toBe(false);
   });
 });
+
+describe("แกลเลอรี — ข้อความประกอบรูป (cap*)", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "g", type: "gallery", ...b }])[0] as unknown as Record<string, unknown> & { items: Record<string, unknown>[] };
+
+  it("แกลเลอรีเก่า (ไม่มี cap*) = ใต้รูป ตัวเล็กสีรอง แบบเดิม · ข้อความใต้รูปเดิมยังอยู่", () => {
+    const g = norm({ title: "แกลเลอรี", items: [{ imageKey: "a/b.jpg", alt: "รูป", caption: "ข้อความเดิม" }] });
+    expect(g).toMatchObject({ capShow: true, capPos: "below", capAlign: "auto", capGap: "sm", capTextSize: "s", capTextColor: "auto", capTitleColor: "auto", capMobile: "all" });
+    expect(g.items[0]).toMatchObject({ caption: "ข้อความเดิม", title: "", linkText: "" });
+  });
+
+  it("ค่าที่ตั้งถูกเก็บ · ค่ามั่ว = ค่าเริ่ม · คำแปลรายรูป (_en) ไม่หายตอนบันทึก", () => {
+    const g = norm({
+      capPos: "overlay", capAlign: "center", capTitleFont: "Charm", capTitleSize: "xl", capTitleColor: "custom", capTitleHex: "#AA3366", capShade: 70, capMobile: "title",
+      capTextSize: "huge", capLinkStyle: "<b>", capCardBg: "nope",
+      items: [{ imageKey: "a/b.jpg", alt: "", title: "ลุคทำงาน", title_en: "Office look", caption: "คำอธิบาย", caption_en: "Desc", linkText: "ดูสินค้า →", linkText_en: "Shop →", href: "/shop" }],
+    });
+    expect(g).toMatchObject({ capPos: "overlay", capAlign: "center", capTitleFont: "Charm", capTitleSize: "xl", capTitleColor: "custom", capTitleHex: "#aa3366", capShade: 70, capMobile: "title" });
+    expect(g).toMatchObject({ capTextSize: "s", capLinkStyle: "text", capCardBg: "surface" });
+    expect(g.items[0]).toMatchObject({ title: "ลุคทำงาน", title_en: "Office look", caption_en: "Desc", linkText: "ดูสินค้า →", linkText_en: "Shop →", href: "/shop" });
+  });
+});

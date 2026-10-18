@@ -42,7 +42,7 @@ export const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
 export const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 
-const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout"];
+const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout", "caption"];
 
 /**
  * ภาพร่างเล็ก ๆ ของตัวเลือกแบบปุ่มรูปย่อ (FieldOption.sketch) — กล่องเทา ๆ บอกการจัดวางคร่าว ๆ
@@ -82,6 +82,11 @@ const SKETCHES: Record<string, { cols: number; rows: number; cells: Cell[] }> = 
   "pos-flow": { cols: 3, rows: 3, cells: [{ c: 1, r: 1, cs: 2, h: 45, dim: true }, { c: 1, r: 2, cs: 2, h: 45, dim: true }, { c: 1, r: 3, h: 55, dark: true }] },
   /* กำหนดเอง: วางตรงไหนก็ได้ */
   "pos-custom": { cols: 5, rows: 3, cells: [{ c: 1, r: 1, cs: 5, rs: 3, dim: true }, { c: 4, r: 3, h: 55, dark: true }] },
+  /* 📝 ข้อความประกอบรูป (แกลเลอรี capPos): เข้ม = รูป · อ่อน = ข้อความ · จาง = พื้นการ์ด (ชิ้นหลังวาดทับชิ้นก่อน) */
+  "cap-below": { cols: 2, rows: 3, cells: [{ c: 1, r: 1, rs: 2, dark: true }, { c: 2, r: 1, rs: 2, dark: true }, { c: 1, r: 3, h: 45 }, { c: 2, r: 3, h: 45 }] },
+  "cap-card": { cols: 2, rows: 3, cells: [{ c: 1, r: 1, rs: 3, dim: true }, { c: 2, r: 1, rs: 3, dim: true }, { c: 1, r: 1, rs: 2, dark: true, h: 85 }, { c: 2, r: 1, rs: 2, dark: true, h: 85 }, { c: 1, r: 3, h: 40 }, { c: 2, r: 3, h: 40 }] },
+  "cap-overlay": { cols: 2, rows: 3, cells: [{ c: 1, r: 1, rs: 3, dark: true }, { c: 2, r: 1, rs: 3, dark: true }, { c: 1, r: 3, h: 40 }, { c: 2, r: 3, h: 40 }] },
+  "cap-hover": { cols: 2, rows: 3, cells: [{ c: 1, r: 1, rs: 3, dark: true }, { c: 2, r: 1, rs: 3, dark: true }, { c: 2, r: 3, h: 40, dim: true }] },
 };
 function LayoutSketch({ kind, on }: { kind: string; on: boolean }) {
   const sk = SKETCHES[kind];
