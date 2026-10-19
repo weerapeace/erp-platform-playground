@@ -194,3 +194,26 @@ describe("Section หมวดสินค้า — รูปบนการ์
     expect(b.catImg).toEqual({});
   });
 });
+
+describe("Section วิดีโอ — อัปโหลดเอง + ตั้งค่าเพิ่ม", () => {
+  it("บล็อกเก่า (มีแค่ลิงก์) = ปกติ + ลิงก์ + พอดีอ่าน 16:9 (หน้าตาเดิม)", () => {
+    const [b] = normalizeBlocks([{ id: "v1", type: "video", url: "https://www.youtube.com/watch?v=abc123", title: "รีวิว", caption: "ดูคลิป" }]) as unknown as Record<string, unknown>[];
+    expect(b.url).toBe("https://www.youtube.com/watch?v=abc123");
+    expect(b.layout).toBe("standard");
+    expect(b.source).toBe("link");
+    expect(b.width).toBe("content");
+    expect(b.ratio).toBe("16:9");
+    expect(b.file).toBeNull();
+  });
+  it("ไฟล์คลิป: เก็บเฉพาะ r2 key ที่ใช้ได้", () => {
+    const ok = normalizeBlocks([{ id: "v2", type: "video", source: "upload", file: "storefront-videos/2026-10/1-2.mp4", fileMobile: "javascript:alert(1)" }])[0] as unknown as Record<string, unknown>;
+    expect(ok.file).toBe("storefront-videos/2026-10/1-2.mp4");
+    expect(ok.fileMobile).toBeNull();
+  });
+  it("ตรวจก่อนเผยแพร่: อัปโหลดแต่ยังไม่มีไฟล์ = error · ลิงก์ไม่ต้องมีไฟล์", () => {
+    const up = validateBlocks(normalizeBlocks([{ id: "v3", type: "video", enabled: true, source: "upload" }]));
+    expect(up.some((i) => i.level === "error" && i.message.includes("ยังไม่ได้อัปโหลดคลิป"))).toBe(true);
+    const link = validateBlocks(normalizeBlocks([{ id: "v4", type: "video", enabled: true, url: "https://youtu.be/abc" }]));
+    expect(link.some((i) => i.message.includes("อัปโหลด"))).toBe(false);
+  });
+});

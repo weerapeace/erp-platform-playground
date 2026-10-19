@@ -218,4 +218,72 @@ export async function r2GetObject(key: string): Promise<R2ObjectBodyLike> {
   return bucket.get(key);
 }
 
+/** S3 API ของ R2 (เฉพาะตอนรันนอก Cloudflare เช่น Vercel) — ไม่ได้ตั้ง env = null */
+function s3Access(bucketName = R2_BUCKET): { client: AwsClient; urlFor: (key: string) => string } | null {
+  const accountId = (process.env.R2_ACCOUNT_ID ?? "").trim();
+  const accessKeyId = (process.env.R2_ACCESS_KEY_ID ?? "").trim();
+  const secretAccessKey = (process.env.R2_SECRET_ACCESS_KEY ?? "").trim();
+  if (!accountId || !accessKeyId || !secretAccessKey) return null;
+  const client = new AwsClient({ accessKeyId, secretAccessKey, region: "auto", service: "s3" });
+  const base = `https://${accountId}.r2.cloudflarestorage.com/${bucketName}`;
+  return { client, urlFor: (key: string) => `${base}/${key.split("/").map(encodeURIComponent).join("/")}` };
+}
+
+export type R2RangeResult =
+  | { status: "ok"; body: ReadableStream; contentType: string; start: number; end: number; total: number }
+  | { status: "unsatisfiable"; total: number }
+  | null;
+
+/**
+ * 🎬 อ่านไฟล์เฉพาะช่วงไบต์ [start, end] (รวมปลาย) — ใช้เสิร์ฟวิดีโอทีละช่วง ไม่ต้องโหลดทั้งไฟล์
+ * (ไฟล์ใหญ่หลายสิบ MB เล่นได้ · ตอบทีละช่วงไม่เกินเพดานขนาดตอบกลับของ Vercel) · null = ไม่พบไฟล์
+ */
+export async function r2GetRange(key: string, start: number, end: number): Promise<R2RangeResult> {
+  const s3 = s3Access();
+  if (s3) {
+    const res = await s3.client.fetch(s3.urlFor(key), { method: "GET", headers: { range: `bytes=${start}-${end}` } });
+    if (res.status === 404) return null;
+    const cr = res.headers.get("content-range") ?? "";
+    const total = Number(/\/(\d+)$/.exec(cr)?.[1] ?? res.headers.get("content-length") ?? 0);
+    if (res.status === 416) return { status: "unsatisfiable", total };
+    if (!res.ok) throw new Error(`R2(S3) range ${res.status}`);
+    const m = /bytes (\d+)-(\d+)\//.exec(cr);
+    const ct = res.headers.get("content-type") ?? "application/octet-stream";
+    // 200 = ไฟล์เล็กกว่าช่วงที่ขอ / ไม่รองรับช่วง → ทั้งไฟล์
+    if (res.status === 200 || !m) return { status: "ok", body: res.body as ReadableStream, contentType: ct, start: 0, end: Math.max(0, total - 1), total };
+    return { status: "ok", body: res.body as ReadableStream, contentType: ct, start: Number(m[1]), end: Number(m[2]), total };
+  }
+  // บน Cloudflare: binding อ่านช่วงได้เอง
+  const bucket = (await getR2Binding()) as unknown as { get(k: string, o?: unknown): Promise<{ body: ReadableStream; size: number; httpMetadata?: { contentType?: string } } | null> } | null;
+  if (!bucket) throw new Error("R2 binding ไม่พร้อม (R2_IMAGES)");
+  const head = await bucket.get(key, { range: { offset: start, length: Math.max(1, end - start + 1) } });
+  if (!head) return null;
+  const total = head.size;
+  if (start >= total) return { status: "unsatisfiable", total };
+  return { status: "ok", body: head.body, contentType: head.httpMetadata?.contentType ?? "application/octet-stream", start, end: Math.min(end, total - 1), total };
+}
+
+/**
+ * 🔏 ลิงก์อัปโหลดตรงเข้า R2 (PUT · หมดอายุ expiresSec วินาที) — เบราว์เซอร์ส่งไฟล์ใหญ่ได้โดยไม่ผ่าน Vercel (เพดาน ~4.5 MB)
+ * ⚠️ ใช้ได้เมื่อ bucket ตั้ง CORS ให้ origin ของ ERP PUT ได้ (Cloudflare → R2 → bucket → Settings → CORS) · ไม่มี S3 env = null
+ */
+export async function r2PresignPut(key: string, expiresSec = 900): Promise<string | null> {
+  const s3 = s3Access();
+  if (!s3) return null;
+  const url = new URL(s3.urlFor(key));
+  url.searchParams.set("X-Amz-Expires", String(Math.max(60, Math.min(3600, Math.round(expiresSec)))));
+  const signed = await s3.client.sign(new Request(url.toString(), { method: "PUT" }), { aws: { signQuery: true } });
+  return signed.url;
+}
+
+/** ขนาดไฟล์ใน R2 (ไบต์) — null = ไม่พบ (ใช้ยืนยันว่าอัปโหลดตรงสำเร็จจริง) */
+export async function r2HeadSize(key: string): Promise<number | null> {
+  const r = await r2GetRange(key, 0, 0);
+  if (!r) return null;
+  if (r.status === "ok") {
+    try { await r.body.cancel(); } catch { /* noop */ }
+  }
+  return r.total;
+}
+
 /* eslint-enable @typescript-eslint/no-explicit-any */

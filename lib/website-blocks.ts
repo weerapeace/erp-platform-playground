@@ -888,6 +888,7 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
     case "toggle":
       return typeof v === "boolean" ? v : Boolean(fb);
     case "image":
+    case "videoFile":
       return imgKey(v);
     case "link":
       return linkVal(v, fb as CtaLink);
@@ -1048,7 +1049,7 @@ export function normalizeBlocks(raw: unknown): Block[] {
 
 const isEmptyValue = (fd: FieldDef, v: unknown): boolean => {
   if (fd.type === "list" || fd.type === "products" || fd.type === "skus" || fd.type === "categories") return !Array.isArray(v) || !v.filter((x) => (typeof x === "string" ? x.trim() : x)).length;
-  if (fd.type === "image") return !v;
+  if (fd.type === "image" || fd.type === "videoFile") return !v;
   if (fd.type === "link") return !String((v as CtaLink | undefined)?.text ?? "").trim();
   return !String(v ?? "").trim();
 };

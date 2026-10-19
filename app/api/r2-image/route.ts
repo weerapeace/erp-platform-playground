@@ -16,9 +16,53 @@
  */
 
 import { NextRequest } from "next/server";
-import { r2GetObject } from "@/lib/r2";
+import { r2GetObject, r2GetRange } from "@/lib/r2";
 
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
+
+/* 🎬 วิดีโอ: เสิร์ฟทีละช่วง (Range) ตรงจาก R2 — ไม่โหลดทั้งไฟล์ · ก้อนละ ≤ 4 MB (เพดานขนาดตอบกลับของ Vercel)
+ *    → คลิปที่อัปโหลดเองขนาดหลายสิบ MB เล่น/กรอได้ (Safari/iPhone ต้องการ Range เสมอ) */
+const VIDEO_KEY = /\.(mp4|webm|mov|m4v)$/i;
+const VIDEO_CHUNK = 4 * 1024 * 1024;
+const VIDEO_TYPE: Record<string, string> = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime" };
+const notFound = (key: string) => new Response(JSON.stringify({ error: "ไม่พบไฟล์", key }), { status: 404, headers: { "Content-Type": "application/json" } });
+async function videoResponse(key: string, range: string | null): Promise<Response | null> {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range ?? "");
+  const asked = !!(m && (m[1] || m[2]));
+  let start = 0;
+  let end = VIDEO_CHUNK - 1;
+  if (m && m[1]) {
+    start = Number(m[1]);
+    end = Math.min(m[2] ? Number(m[2]) : Infinity, start + VIDEO_CHUNK - 1);
+  } else if (m && m[2]) {
+    // "bytes=-N" = N ไบต์ท้ายไฟล์ → ต้องรู้ขนาดก่อน
+    const head = await r2GetRange(key, 0, 0);
+    if (!head) return notFound(key);
+    if (head.status === "ok") await head.body.cancel().catch(() => {});
+    const n = Math.min(Number(m[2]), VIDEO_CHUNK);
+    start = Math.max(0, head.total - n);
+    end = head.total - 1;
+  }
+  const r = await r2GetRange(key, start, end);
+  if (!r) return notFound(key);
+  if (r.status === "unsatisfiable") return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${r.total}` } });
+  const ext = key.split(".").pop()?.toLowerCase() ?? "";
+  const ct = r.contentType.startsWith("video/") ? r.contentType : VIDEO_TYPE[ext] ?? "video/mp4";
+  const headers = { "Content-Type": ct, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range" };
+  const whole = r.start === 0 && r.end >= r.total - 1;
+  // ไม่ได้ขอช่วง: ไฟล์เล็ก (ก้อนเดียวครบ) = 200 แบบเดิม · ไฟล์ใหญ่ = ส่งทั้งไฟล์แบบไหลต่อเนื่อง (stream)
+  if (!asked && whole) return new Response(r.body, { status: 200, headers: { ...headers, "Content-Length": String(r.total) } });
+  if (!asked) {
+    await r.body.cancel().catch(() => {});
+    const full = await r2GetObject(key);
+    if (!full) return notFound(key);
+    return new Response(full.body, { status: 200, headers: { ...headers, "Content-Length": String(r.total) } });
+  }
+  return new Response(r.body, {
+    status: 206,
+    headers: { ...headers, "Content-Length": String(r.end - r.start + 1), "Content-Range": `bytes ${r.start}-${r.end}/${r.total}` },
+  });
+}
 
 const CACHE_HEADERS = {
   "Cache-Control":     "public, max-age=3600, stale-while-revalidate=86400",
@@ -47,6 +91,15 @@ export async function GET(request: NextRequest): Promise<Response> {
     return new Response(JSON.stringify({ error: "invalid key" }), {
       status: 400, headers: { "Content-Type": "application/json" },
     });
+  }
+
+  if (VIDEO_KEY.test(key)) {
+    try {
+      const v = await videoResponse(key, request.headers.get("range"));
+      if (v) return v;
+    } catch {
+      /* อ่านทีละช่วงไม่ได้ (runtime นี้) → ใช้ทางเดิมด้านล่าง */
+    }
   }
 
   const edge = await getEdgeCache();

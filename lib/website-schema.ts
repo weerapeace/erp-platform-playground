@@ -63,6 +63,7 @@ export type FieldType =
   | "skus" // เลือก SKU ทีละตัว (รุ่น + สี) เก็บ "CODE:sku-xxxxxxxx"[] · ไม่มีสี = "CODE" (lib/website-sku-cards)
   | "category" // หมวดสินค้าบนเว็บของร้าน (key)
   | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
+  | "videoFile" // ไฟล์วิดีโอที่อัปโหลดเอง (r2 key) — ช่องอัปโหลดคลิป (ไฟล์เล็กผ่าน ERP · ไฟล์ใหญ่ส่งตรงเข้า R2)
   | "categoryImages" // รูปแทนรายหมวด { รหัสหมวด: r2 key } — ตั้งในช่อง categories ของ Section เดียวกัน (ไม่วาดช่องแยก · ต้อง hidden)
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
   | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
@@ -339,6 +340,25 @@ const FAQ_LAYOUTS: FieldOption[] = [
  * คู่กับช่อง crop (ส่วนที่เห็น/ซูม — cropRatio: "ratio") ได้
  */
 const LINE_FRAME_KEYS = ["rounded", "rect", "circle", "arch"];
+/** 🎬 Section วิดีโอ */
+const VIDEO_LINK: ShowIf = { key: "source", eq: ["link", "", undefined] };
+const VIDEO_UPLOAD: ShowIf = { key: "source", eq: "upload" };
+const VIDEO_RATIOS: FieldOption[] = [
+  { v: "16:9", l: "แนวนอน 16:9" },
+  { v: "21:9", l: "จอกว้าง 21:9" },
+  { v: "4:3", l: "แนวนอน 4:3" },
+  { v: "1:1", l: "จัตุรัส 1:1" },
+  { v: "4:5", l: "แนวตั้ง 4:5" },
+  { v: "9:16", l: "แนวตั้ง 9:16 (Reels / TikTok)" },
+];
+const VIDEO_TEXT_POS: FieldOption[] = [
+  { v: "top-left", l: "บนซ้าย" },
+  { v: "top-center", l: "บนกลาง" },
+  { v: "center-left", l: "กลางซ้าย" },
+  { v: "center", l: "กลางจอ" },
+  { v: "bottom-left", l: "ล่างซ้าย" },
+  { v: "bottom-center", l: "ล่างกลาง" },
+];
 /** Section หมวดสินค้า: ช่องที่ใช้เฉพาะแบบ "การ์ดรูปใหญ่" */
 const TILE_ONLY: ShowIf = { key: "layout", eq: "tile" };
 const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: boolean; ratioHint?: string; autoFrame?: string }): FieldDef[] => [
@@ -951,22 +971,116 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     summary: (b) => ({ line: "เส้นบาง", dots: "จุดไข่ปลา", space: "เว้นว่าง" } as Record<string, string>)[s(b.variant)] ?? "เส้นคั่น",
   },
 
+  // 🎬 วิดีโอ (2026-10-19 ขยาย): ลิงก์ YouTube/Vimeo หรืออัปโหลดเอง · 4 แบบแสดง · ตั้งการเล่น/สัดส่วน/กรอบ/ข้อความทับได้
+  //   บล็อกเก่า (มีแค่ url/title/caption) = ปกติ + ลิงก์ + กว้างพอดีอ่าน 16:9 → หน้าตาเดิม · เว็บร้านวาดที่ src/components/home/VideoSection.tsx
   video: {
     type: "video",
-    meta: { label: "วิดีโอ", icon: "🎬", hint: "ฝังคลิปจาก YouTube หรือ Vimeo", group: "พื้นฐาน" },
+    meta: { label: "วิดีโอ", icon: "🎬", hint: "คลิป YouTube/Vimeo หรืออัปโหลดเอง — ปกติ · พื้นหลัง+ข้อความทับ · คู่ข้อความ · กดเล่นในป๊อป", group: "พื้นฐาน" },
     fields: [
+      f("layout", "แบบแสดง", "select", {
+        group: "layout",
+        default: "standard",
+        wide: true,
+        options: [
+          { v: "standard", l: "ปกติ — หัวข้อ + คลิป" },
+          { v: "background", l: "วิดีโอพื้นหลัง + ข้อความ/ปุ่มทับ (เล่นเอง เงียบ วนซ้ำ)" },
+          { v: "split", l: "คลิปคู่ข้อความ (ซ้าย / ขวา)" },
+          { v: "popup", l: "รูปปก + ▶ กดแล้วเล่นในป๊อปพร้อมเสียง" },
+        ],
+      }),
+      f("source", "คลิปจาก", "select", {
+        group: "media",
+        default: "link",
+        wide: true,
+        options: [
+          { v: "link", l: "ลิงก์ YouTube / Vimeo" },
+          { v: "upload", l: "อัปโหลดไฟล์เอง (MP4 / WebM / MOV)" },
+        ],
+      }),
       f("url", "ลิงก์คลิป", "video", {
+        group: "media",
         default: "",
         wide: true,
         placeholder: "https://www.youtube.com/watch?v=…",
         hint: "รับเฉพาะ YouTube และ Vimeo",
         required: true,
         requiredMessage: "ยังไม่มีลิงก์คลิป (รับเฉพาะ YouTube และ Vimeo)",
+        showIf: VIDEO_LINK,
       }),
+      f("file", "ไฟล์คลิป", "videoFile", {
+        group: "media",
+        default: null,
+        wide: true,
+        hint: "≤ 4 MB อัปได้ทันที · ไฟล์ใหญ่ ≤ 200 MB ต้องเปิดสิทธิ์อัปโหลดใน Cloudflare ก่อน (ครั้งเดียว) · แนะนำ MP4 (H.264) 1080p",
+        required: true,
+        requiredMessage: "ยังไม่ได้อัปโหลดคลิป",
+        showIf: VIDEO_UPLOAD,
+      }),
+      f("fileMobile", "คลิปสำหรับมือถือ", "videoFile", { group: "media", default: null, wide: true, hint: "ไม่ใส่ = ใช้คลิปเดียวกัน · เช่น คลิปแนวตั้ง 9:16 ให้เต็มจอมือถือ", showIf: VIDEO_UPLOAD }),
+      image("poster", "รูปปก (ก่อนเล่น / ระหว่างโหลด)", { hint: "ไม่ใส่: YouTube ใช้รูปปกของคลิป · ไฟล์ที่อัปโหลดใช้ภาพแรกของคลิป" }),
+      // ▶ การเล่น
+      f("autoplay", "เล่นเองเมื่อเลื่อนมาถึง", "toggle", { group: "media", default: false, hint: "เล่นเอง = เริ่มแบบเงียบเสมอ (เบราว์เซอร์บังคับ)", showIf: { key: "layout", eq: ["standard", "split"] } }),
+      f("muted", "ปิดเสียงไว้ก่อน", "toggle", { group: "media", default: false, showIf: { key: "layout", eq: ["standard", "split"] } }),
+      f("loop", "เล่นวนซ้ำ", "toggle", { group: "media", default: false, showIf: { key: "layout", eq: ["standard", "split", "popup"] } }),
+      f("controls", "โชว์ปุ่มควบคุม (เล่น/หยุด/เสียง)", "toggle", { group: "media", default: true, showIf: { key: "layout", eq: ["standard", "split", "popup"] } }),
+      f("start", "เริ่มที่วินาที", "number", { group: "media", default: 0, min: 0, numMax: 36000, hint: "0 = ต้นคลิป" }),
+      f("end", "จบที่วินาที", "number", { group: "media", default: 0, min: 0, numMax: 36000, hint: "0 = จนจบคลิป · Vimeo ตั้งได้แค่จุดเริ่ม" }),
+      // ✍️ ข้อความ
+      text("eyebrow", "คำโปรยเหนือหัวข้อ", { default: "", max: 80 }),
       text("title", "หัวข้อ", { default: "", max: 160 }),
-      text("caption", "คำอธิบายใต้คลิป", { default: "", max: 300 }),
+      f("caption", "คำอธิบาย", "textarea", { group: "content", default: "", max: 400 }),
+      link("button", "ปุ่ม", "", "", { hint: "ว่าง = ไม่มีปุ่ม", showIf: { key: "layout", eq: ["standard", "background", "split"] } }),
+      // 📐 หน้าตา
+      f("ratio", "สัดส่วนคลิป", "select", { group: "layout", default: "16:9", options: VIDEO_RATIOS }),
+      f("mobileRatio", "สัดส่วนบนมือถือ", "select", { group: "layout", default: "same", options: [{ v: "same", l: "เหมือนจอคอม" }, ...VIDEO_RATIOS] }),
+      f("bgHeight", "ความสูงพื้นหลัง", "select", {
+        group: "layout",
+        default: "ratio",
+        options: [
+          { v: "ratio", l: "ตามสัดส่วนคลิป" },
+          { v: "60", l: "60% ของความสูงจอ" },
+          { v: "80", l: "80% ของความสูงจอ" },
+          { v: "100", l: "เต็มจอ" },
+        ],
+        showIf: { key: "layout", eq: "background" },
+      }),
+      f("width", "ความกว้าง", "select", {
+        group: "layout",
+        default: "content",
+        options: [
+          { v: "content", l: "พอดีอ่าน (แบบเดิม)" },
+          { v: "wide", l: "กว้างเท่าเนื้อหาเว็บ" },
+          { v: "full", l: "เต็มจอ ชิดขอบ" },
+        ],
+      }),
+      // กรอบ (ของกลาง imageLookFields — ไม่เอาสัดส่วนของชุดรูป ใช้สัดส่วนคลิปด้านบนแทน)
+      ...imageLookFields({ ratio: "16:9" }).filter((fd) => fd.key !== "ratio"),
+      f("side", "ตำแหน่งคลิป", "select", {
+        group: "layout",
+        default: "left",
+        options: [
+          { v: "left", l: "คลิปซ้าย · ข้อความขวา" },
+          { v: "right", l: "ข้อความซ้าย · คลิปขวา" },
+        ],
+        showIf: { key: "layout", eq: "split" },
+      }),
+      f("textPos", "ตำแหน่งข้อความบนคลิป", "select", { group: "layout", default: "bottom-left", options: VIDEO_TEXT_POS, showIf: { key: "layout", eq: "background" } }),
+      f("textColor", "สีข้อความบนคลิป", "select", {
+        group: "layout",
+        default: "light",
+        options: [
+          { v: "light", l: "ขาว (คลิปโทนเข้ม)" },
+          { v: "dark", l: "เข้ม (คลิปโทนอ่อน)" },
+        ],
+        showIf: { key: "layout", eq: "background" },
+      }),
+      f("shade", "ความมืดทับคลิป (%)", "range", { group: "layout", default: 30, min: 0, numMax: 80, step: 5, hint: "ให้อ่านข้อความง่ายขึ้น · 0 = ไม่มี", showIf: { key: "layout", eq: "background" } }),
     ],
-    summary: (b) => (s(b.url) ? s(b.title) || s(b.url) : "ยังไม่มีลิงก์คลิป"),
+    summary: (b) => {
+      const up = s(b.source) === "upload";
+      const has = up ? !!b.file : !!s(b.url);
+      return has ? s(b.title) || (up ? "คลิปที่อัปโหลด" : s(b.url)) : up ? "ยังไม่ได้อัปโหลดคลิป" : "ยังไม่มีลิงก์คลิป";
+    },
   },
 
   /* ── เนื้อหา ── */
@@ -2382,6 +2496,7 @@ export function defaultForType(t: FieldType): unknown {
     case "toggle":
       return false;
     case "image":
+    case "videoFile":
       return null;
     case "link":
       return { text: "", href: "" };
