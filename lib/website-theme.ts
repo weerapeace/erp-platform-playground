@@ -1310,8 +1310,8 @@ export interface FooterConfig {
   bottomAlign: "auto" | "left" | "center" | "split";
   copyrightText: string;
   /** โซเชียล: pill ป้ายชื่อ (เดิม) · icon ไอคอน · circle ไอคอนในวงกลม */
-  /** list = รายการตัวหนังสือแนวตั้ง (เหมือนคอลัมน์ลิงก์) */
-  socialStyle: "pill" | "icon" | "circle" | "list";
+  /** list = รายการตัวหนังสือแนวตั้ง (เหมือนคอลัมน์ลิงก์) · iconlist = รายการ ไอคอน + ชื่อ (ไอคอนขาวดำ = สีเดียวกับตัวหนังสือ) */
+  socialStyle: "pill" | "icon" | "circle" | "list" | "iconlist";
   /** 📱 มือถือ: หัวคอลัมน์กดพับ/กาง · จัดกึ่งกลาง */
   mobileCollapse: boolean;
   mobileCenter: boolean;
@@ -1321,6 +1321,8 @@ export interface FooterConfig {
   mobileCols: 1 | 2;
   /** 🖼 ตำแหน่งโลโก้: auto = ในคอลัมน์ "เกี่ยวกับร้าน" ถ้ามี ไม่มี = แถวบนสุด · column = ในคอลัมน์เท่านั้น · top = แถวบนสุดเสมอ */
   logoPlace: "auto" | "column" | "top";
+  /** 🖼 จัดโลโก้: auto = ตามการจัดข้อความท้ายเว็บ · left · center · right */
+  logoAlign: "auto" | "left" | "center" | "right";
   /** 📏 ระยะห่าง (px): ระหว่างคอลัมน์ 0–160 · ระหว่างแถว 0–120 · ระหว่างลิงก์ 0–32 · 2 หัวข้อที่ซ้อนกัน 0–96 · หัวข้อ→ลิงก์ 0–40 (-1 = อัตโนมัติ) */
   colGap: number;
   rowGap: number;
@@ -1362,7 +1364,7 @@ export const DEFAULT_FOOTER: FooterConfig = {
   bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left",
   logoShow: true, logoHeight: 40, logoVariant: "auto", logoChip: "auto", padY: "md", headingSize: "s", headingUpper: true, headingColor: "",
   linkSize: "m", linkColor: "", linkHover: "", divider: true, bottomAlign: "auto", copyrightText: "", socialStyle: "pill", mobileCollapse: false, mobileCenter: false, gridCols: 4, mobileCols: 1,
-  logoPlace: "auto", ...FOOTER_SPACING_DEFAULTS, colFit: "equal",
+  logoPlace: "auto", logoAlign: "auto", ...FOOTER_SPACING_DEFAULTS, colFit: "equal",
 };
 export function normalizeFooter(raw: unknown): FooterConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -1417,12 +1419,13 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     divider: r.divider !== false,
     bottomAlign: oneOf(r.bottomAlign, ["auto", "left", "center", "split"] as const, d.bottomAlign),
     copyrightText: typeof r.copyrightText === "string" ? r.copyrightText.trim().slice(0, 200) : "",
-    socialStyle: oneOf(r.socialStyle, ["pill", "icon", "circle", "list"] as const, d.socialStyle),
+    socialStyle: oneOf(r.socialStyle, ["pill", "icon", "circle", "list", "iconlist"] as const, d.socialStyle),
     mobileCollapse: r.mobileCollapse === true,
     mobileCenter: r.mobileCenter === true,
     gridCols: [0, 2, 3, 4, 5, 6].includes(Number(r.gridCols)) ? Number(r.gridCols) : d.gridCols,
     mobileCols: Number(r.mobileCols) === 2 ? 2 : 1,
     logoPlace: oneOf(r.logoPlace, ["auto", "column", "top"] as const, d.logoPlace),
+    logoAlign: oneOf(r.logoAlign, ["auto", "left", "center", "right"] as const, d.logoAlign),
     colGap: px(r.colGap, 0, 160, d.colGap),
     rowGap: px(r.rowGap, 0, 120, d.rowGap),
     linkGap: px(r.linkGap, 0, 32, d.linkGap),

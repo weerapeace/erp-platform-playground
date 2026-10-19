@@ -1404,6 +1404,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       <option value="icon">ไอคอน</option>
                       <option value="circle">ไอคอนในวงกลม</option>
                       <option value="list">รายการตัวหนังสือ (เหมือนลิงก์)</option>
+                      <option value="iconlist">รายการ ไอคอน + ชื่อ (ไอคอนขาวดำ)</option>
                     </select>
                     <button type="button" onClick={() => setFooterSocialOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline">🌐 แก้/เพิ่มลิงก์โซเชียล</button>
                     <SocialLinksModal
@@ -1430,13 +1431,39 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   const cols = theme.footer.columns;
                   const hasAbout = cols === null || cols.some((c) => c.kind === "about" && !c.hidden);
                   return (
-                    <div className="mb-3">
+                    <div className="mb-3 grid gap-3 sm:grid-cols-[2fr_1fr]">
+                      <div>
                       <label className={labelCls}>ตำแหน่งโลโก้</label>
                       <select className={inputCls} value={theme.footer.logoPlace} onChange={(e) => setFooter({ logoPlace: e.target.value as FooterConfig["logoPlace"] })}>
                         <option value="auto">อัตโนมัติ — ในคอลัมน์ “เกี่ยวกับร้าน” ถ้ามี · ไม่มี = แถวบนสุด{hasAbout ? "" : " (ตอนนี้: แถวบนสุด)"}</option>
                         <option value="top">แถวบนสุด เหนือคอลัมน์</option>
                         <option value="column">ในคอลัมน์ “เกี่ยวกับร้าน” เท่านั้น</option>
                       </select>
+                      </div>
+                      <div>
+                        <label className={labelCls}>จัดโลโก้</label>
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden h-[34px]">
+                          {(
+                            [
+                              ["auto", "อัตโนมัติ"],
+                              ["left", "⬅ ซ้าย"],
+                              ["center", "กลาง"],
+                              ["right", "ขวา ➡"],
+                            ] as const
+                          ).map(([v, l]) => (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={() => setFooter({ logoAlign: v })}
+                              className={`flex-1 text-[11px] border-r last:border-r-0 border-slate-200 ${theme.footer.logoAlign === v ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                              title={v === "auto" ? "ตามการจัดข้อความท้ายเว็บ (ซ้าย/กึ่งกลาง)" : undefined}
+                            >
+                              {l}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="sm:col-span-2">
                       {theme.footer.logoPlace === "column" && !hasAbout && (
                         <p className="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
                           ยังไม่มีคอลัมน์ “เกี่ยวกับร้าน” ที่โชว์อยู่ — โลโก้จะไม่ขึ้น ·{" "}
@@ -1445,6 +1472,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                           </button>
                         </p>
                       )}
+                      </div>
                     </div>
                   );
                 })()}
