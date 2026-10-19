@@ -29,6 +29,7 @@ import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
 import { TaskDirectPanel } from "./direct-edit-panel";
 import { TaskParentBox } from "./task-parent-box";
+import { WorkJobLinkBox } from "./work-job-link-box";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
@@ -348,6 +349,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 canEdit={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.created_by || user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
                 canUndo={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
                 onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }} />
+
+              {/* 🛠 งานชุดรุ่นที่ผูกกับงานนี้ (หน้า SKU การตลาด) — ไม่ผูก = ไม่โชว์ */}
+              <WorkJobLinkBox taskId={d.id} />
 
               {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
               <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees}

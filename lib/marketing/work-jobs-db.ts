@@ -6,6 +6,8 @@ import type { NextRequest } from "next/server";
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
+import { appBaseUrl, nextTaskNo, setTaskAssignees } from "@/lib/creative-tasks-server";
+import { defaultStatusKey } from "@/lib/creative-statuses-server";
 import {
   assigneesOf, jobProgress, round2, snapshotBasePrice,
   type DiscountUnit, type StepDone, type StepSkip, type WorkJob, type WorkJobItem, type WorkStep,
@@ -13,7 +15,7 @@ import {
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignees, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at";
+export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignees, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at, creative_task_id, creative_task:erp_creative_tasks!creative_task_id(task_no, is_active)";
 const ITEM_COLS = "id, job_id, parent_sku_id, base_price_min, base_price_max, discount_value, discount_unit, step_done, step_skip, note, sort_order";
 const CHUNK = 200;
 
@@ -30,6 +32,9 @@ export async function actorOf(request: NextRequest, admin: Admin): Promise<Actor
 const num = (v: unknown): number | null => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 export function toJob(r: Record<string, unknown>): WorkJob {
+  // งาน Creative ที่ผูกไว้ — ถูกลบ (is_active=false) = ถือว่ายังไม่ผูก (ส่งใหม่ได้)
+  const ct = (Array.isArray(r.creative_task) ? r.creative_task[0] : r.creative_task) as { task_no?: string | null; is_active?: boolean } | null;
+  const linked = !!r.creative_task_id && !!ct && ct.is_active !== false;
   return {
     id: String(r.id), name: String(r.name ?? ""), kind: (r.kind as WorkJob["kind"]) ?? "custom",
     steps: Array.isArray(r.steps) ? (r.steps as WorkStep[]) : [],
@@ -39,6 +44,8 @@ export function toJob(r: Record<string, unknown>): WorkJob {
     due_date: (r.due_date as string | null) ?? null, status: (r.status as WorkJob["status"]) ?? "open",
     note: (r.note as string | null) ?? null, created_by_name: (r.created_by_name as string | null) ?? null,
     created_at: String(r.created_at ?? ""), updated_at: String(r.updated_at ?? ""),
+    creative_task_id: linked ? String(r.creative_task_id) : null,
+    creative_task_no: linked ? (ct?.task_no ?? null) : null,
   };
 }
 
@@ -187,4 +194,85 @@ export function parsePrice(v: unknown): { ok: true; value: number | null } | { o
   const n = Number(v);
   if (!Number.isFinite(n) || n < 0 || n > 10_000_000) return { ok: false };
   return { ok: true, value: round2(n) };
+}
+
+// ── ↔ Task Manager (งาน Creative) ─────────────────────────────────────────
+
+/** % + สถานะของการ์ดงานใน Task Manager ตามงานชุดรุ่น
+ *  ปิดงาน = เสร็จ (100%) · เปิดใหม่ = กำลังทำ · เริ่มติ๊กแล้ว (งานยังรอคิว/พร้อมทำ) = กำลังทำ · ไม่ผูก = ไม่ทำอะไร */
+export async function syncLinkedTask(admin: Admin, jobId: string, actor?: Actor): Promise<void> {
+  const { data: job } = await admin.from("marketing_work_jobs").select("id, name, status, steps, creative_task_id").eq("id", jobId).maybeSingle();
+  if (!job?.creative_task_id) return;
+  const { data: task } = await admin.from("erp_creative_tasks").select("id, task_no, status, progress_percent, is_active").eq("id", job.creative_task_id).maybeSingle();
+  if (!task || task.is_active === false) return;
+  const { data: its } = await admin.from("marketing_work_job_items").select("step_done, step_skip").eq("job_id", jobId).limit(20_000);
+  const steps = Array.isArray(job.steps) ? (job.steps as WorkStep[]) : [];
+  const p = jobProgress(((its ?? []) as { step_done: StepDone | null; step_skip: StepSkip | null }[]).map((x) => ({ step_done: x.step_done ?? {}, step_skip: x.step_skip ?? {} })), steps);
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {};
+  const st = String(task.status ?? "");
+  if (job.status === "done" && st !== "done") { patch.status = "done"; patch.completed_at = now; }
+  else if (job.status === "open" && st === "done") { patch.status = "in_progress"; patch.completed_at = null; }
+  else if (job.status === "open" && p.stepsDone > 0 && (st === "backlog" || st === "ready")) patch.status = "in_progress";
+  const pct = job.status === "done" ? 100 : p.pct;
+  if (pct !== Number(task.progress_percent)) patch.progress_percent = pct;
+  if (!Object.keys(patch).length) return;
+  await admin.from("erp_creative_tasks").update({ ...patch, updated_at: now }).eq("id", task.id);
+  if (patch.status) {
+    await writeAudit(admin, {
+      action: "status_change", entityType: "creative_task", entityId: String(task.id), actorId: actor?.id ?? null, actorName: actor?.name ?? null,
+      metadata: { task_no: task.task_no, from: st, to: patch.status, reason: `ซิงก์จากงานชุดรุ่น “${job.name}”`, marketing_work_job_id: jobId },
+    });
+  }
+}
+
+/** สร้างงานใน Task Manager ผูกกับงานชุดรุ่น (ชื่อ · ผู้รับผิดชอบ · กำหนดส่ง · แบรนด์หลัก · ลิงก์กลับ) — ผูกอยู่แล้ว = คืนตัวเดิม */
+export async function createLinkedTask(admin: Admin, job: WorkJob, actor: Actor): Promise<{ taskId: string; taskNo: string | null; created: boolean } | { error: string }> {
+  if (job.creative_task_id) return { taskId: job.creative_task_id, taskNo: job.creative_task_no, created: false };
+  const { data: its } = await admin.from("marketing_work_job_items").select("parent_sku_id, step_done, step_skip").eq("job_id", job.id).limit(20_000);
+  const items = (its ?? []) as { parent_sku_id: string; step_done: StepDone | null; step_skip: StepSkip | null }[];
+  const p = jobProgress(items.map((x) => ({ step_done: x.step_done ?? {}, step_skip: x.step_skip ?? {} })), job.steps);
+  // แบรนด์ที่มีในงานมากสุด → ใส่ให้งาน (กรองตามแบรนด์ใน Task Manager ได้)
+  let brandId: string | null = null;
+  if (items.length) {
+    const ids = items.map((x) => x.parent_sku_id).slice(0, 1000);
+    const { data: ps } = await admin.from("parent_skus_v2").select("brand_id").in("id", ids);
+    const cnt = new Map<string, number>();
+    for (const r of (ps ?? []) as { brand_id: string | null }[]) if (r.brand_id) cnt.set(r.brand_id, (cnt.get(r.brand_id) ?? 0) + 1);
+    brandId = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  }
+  const status = job.status === "done" ? "done" : p.stepsDone > 0 ? "in_progress" : await defaultStatusKey(admin);
+  const link = `${appBaseUrl()}/marketing/skus?job=${job.id}`;
+  const description = [
+    `🛠 งานชุดรุ่นจากหน้า SKU การตลาด — ${items.length.toLocaleString("th-TH")} รุ่น`,
+    job.steps.length ? `ขั้นตอน: ${job.steps.map((s) => s.label).join(" → ")}` : "",
+    job.note ? `หมายเหตุ: ${job.note}` : "",
+    `ติ๊กความคืบหน้าที่: ${link}`,
+  ].filter(Boolean).join("\n");
+  const now = new Date().toISOString();
+  const row = (taskNo: string) => ({
+    task_no: taskNo, title: job.name, description, task_type: null, brand_id: brandId, priority: "normal", status,
+    progress_percent: job.status === "done" ? 100 : p.pct, assignee_id: job.assignees[0]?.id ?? null,
+    due_date: job.due_date, completed_at: status === "done" ? now : null, created_by: actor.id, assigned_by_id: actor.id,
+  });
+  let taskNo = await nextTaskNo(admin);
+  let { data: created, error } = await admin.from("erp_creative_tasks").insert(row(taskNo)).select("id, task_no").single();
+  if (error && /duplicate|unique/i.test(error.message)) {
+    taskNo = await nextTaskNo(admin);
+    ({ data: created, error } = await admin.from("erp_creative_tasks").insert(row(taskNo)).select("id, task_no").single());
+  }
+  if (error || !created) return { error: "สร้างงานใน Task Manager ไม่สำเร็จ: " + (error?.message ?? "") };
+  const taskId = String(created.id);
+  if (job.assignees.length) await setTaskAssignees(admin, taskId, job.assignees.map((a) => a.id));
+  const { error: e2 } = await admin.from("marketing_work_jobs").update({ creative_task_id: taskId, updated_at: now }).eq("id", job.id);
+  if (e2) return { error: `สร้างงาน ${created.task_no} แล้ว แต่ผูกกับงานชุดรุ่นไม่สำเร็จ: ${e2.message}` };
+  await writeAudit(admin, {
+    action: "create", entityType: "creative_task", entityId: taskId, actorId: actor.id, actorName: actor.name,
+    metadata: { task_no: created.task_no, title: job.name, from_marketing_work_job: job.id },
+  });
+  await writeAudit(admin, {
+    action: "marketing.work.link_task", entityType: "marketing_work_jobs", entityId: job.id, actorId: actor.id, actorName: actor.name,
+    metadata: { job_name: job.name, task_id: taskId, task_no: created.task_no },
+  });
+  return { taskId, taskNo: (created.task_no as string | null) ?? null, created: true };
 }

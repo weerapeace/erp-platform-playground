@@ -83,6 +83,14 @@
 - กดรุ่น (แถว/รูป/รหัส) = เปิด drawer สินค้าตัวจริง (MasterRecordDrawer · ◀ ▶ ตามรายการที่เห็น) · ปุ่ม 🛍 = drawer ตั้งค่าเว็บไซต์ทุกร้าน (ของกลาง `components/parent-web-drawer.tsx` ห่อ ParentWebListings)
 - ⊘ ขั้นตอนที่ "ไม่ต้องทำ" รายรุ่น: `marketing_work_job_items.step_skip` jsonb {key:{at,by}} (migration 202610230400) · ชิปเส้นประขีดฆ่า กดเพื่อกลับมาต้องทำ · ไม่นับในความคืบหน้า (itemProgress/jobProgress รับ skip · ข้ามทุกขั้น = เสร็จ) · ตั้งไม่ต้องทำ = เอาติ๊กขั้นนั้นออก · API PATCH items {item_ids, step_key, skip} + audit `marketing.work.skip` · แถบล่าง ⊘ ไม่ต้องทำ… / ↺ กลับมาต้องทำ…
 
+### 📋 งานชุดรุ่น ↔ Task Manager (2026-10-19)
+- เจ้าของขอ "อยากให้เพิ่มงานนี้ที่ Task Manager ได้ด้วย" → เลือก **ทั้งสองอย่าง**:
+  - หัวงานในโหมดทำงาน: **📋 ส่งเข้า Task Manager** → สร้างงาน Creative 1 ใบ (ชื่อ/ผู้รับผิดชอบ/กำหนดส่ง/แบรนด์หลัก/ลิงก์กลับ) ผูกด้วย `marketing_work_jobs.creative_task_id` (migration 202610230500 · on delete set null) · ผูกแล้วปุ่มกลายเป็นลิงก์ `CT-… ↗`
+  - หน้า Task Manager: ปุ่ม **🛠 งานชุดรุ่น** (สิทธิ์ marketing.sku.manage + tasks.create) → ป๊อปเดียวกับหน้านี้ (WorkJobModal) → ส่งเข้า Task Manager ให้เลย → เปิดการ์ด
+- ซิงก์ฝั่งเซิร์ฟเวอร์ `syncLinkedTask` (lib/marketing/work-jobs-db): หลังติ๊ก/ไม่ต้องทำ/ใส่รุ่น/เอาออก/ปิด-เปิดงาน → `progress_percent` ของการ์ด = % งานชุดรุ่น · ปิดงาน = สถานะ done · เปิดใหม่ = in_progress · เริ่มติ๊ก (การ์ดยังรอคิว/พร้อมทำ) = in_progress (+ audit)
+- drawer งานใน Task Manager: กล่อง 🛠 (app/tasks/work-job-link-box.tsx · GET /api/creative-tasks/[id]/work-job สิทธิ์ tasks.view) ความคืบหน้า + ปุ่มเปิดงานรุ่น (`/marketing/skus?job=<id>` → เปิดโหมดทำงานที่งานนั้น)
+- API: POST/DELETE `/api/marketing/work-jobs/[id]/task` (ส่งเข้า / เลิกผูก — เลิกผูกยังไม่มีปุ่ม)
+
 ## ยังไม่ทำ
 - โหมดทำงาน ก้อนถัดไป: หน้าตั้งค่า "แบบงาน" (ขั้นตอนตั้งต้นแก้เองได้) · ผู้รับผิดชอบรายขั้นตอน · แจ้งเตือนใกล้ครบกำหนด
 - ยอดขาย/ออเดอร์ 7·30 วัน ต่อรุ่น (ต้องผูกรหัส Shopee ↔ SKU ก่อน — ตอนนี้ผูกแล้ว 0)

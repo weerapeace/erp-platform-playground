@@ -6,6 +6,7 @@
  *   ราคาใหม่เก็บในงานเท่านั้น ไม่แก้ราคาใน ERP · ติ๊กหลายรุ่นพร้อมกันได้ (แถบลอยล่างจอ)
  *   มุมมอง ☰ ตาราง / ▦ การ์ด (จำรายคน) · กดรุ่น = เปิด drawer สินค้า (◀ ▶ ตามรายการ) · 🛍 = drawer ตั้งค่าเว็บไซต์
  *   ⊘ ที่ขั้นตอน = รุ่นนี้ไม่ต้องทำขั้นนี้ (ไม่นับในความคืบหน้า · กดที่ขั้นที่ข้ามเพื่อกลับมาต้องทำ)
+ *   📋 ส่งเข้า Task Manager = การ์ดงาน Creative 1 ใบผูกกับงานนี้ (% + สถานะ ซิงก์ฝั่งเซิร์ฟเวอร์ — lib/marketing/work-jobs-db)
  * ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · MoneyInput · SearchableSelect · HoverImage · MarketingSkuPickerModal (เลือกรุ่นแบบการ์ด) · Toast
  * กฎคำนวณ: lib/marketing/work-jobs.ts (มีเทสต์)
  */
@@ -293,6 +294,18 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
     }
   };
 
+  // 📋 ส่งเข้า Task Manager — สร้างการ์ดงานผูกกับงานนี้ (ผูกแล้วกดซ้ำ = คืนตัวเดิม)
+  const sendToTaskManager = async () => {
+    if (!job) return;
+    setBusy(true);
+    try {
+      const d = await call(`/api/marketing/work-jobs/${job.id}/task`, "POST", {});
+      toast.success(`ส่งเข้า Task Manager แล้ว${d.task_no ? ` (${d.task_no})` : ""} — ติ๊กที่นี่แล้ว % ที่การ์ดงานอัปเดตเอง`);
+      await loadDetail(job.id, true); void reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ส่งเข้า Task Manager ไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
   const confirmAsk = async () => {
     if (!job || !ask) return;
     setBusy(true);
@@ -511,14 +524,23 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                 </div>
                 {job.note && <p className="mt-1.5 whitespace-pre-line text-xs text-slate-600">📝 {job.note}</p>}
               </div>
-              {canManage && (
+              {(canManage || job.creative_task_id) && (
                 <div className="flex flex-wrap gap-1.5">
+                  {job.creative_task_id ? (
+                    <a href={`/tasks?task=${job.creative_task_id}`} title="เปิดการ์ดงานนี้ใน Task Manager (ความคืบหน้าซิงก์ให้อัตโนมัติ)"
+                      className="inline-flex h-8 items-center rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs text-violet-700 hover:bg-violet-100">📋 {job.creative_task_no ?? "Task Manager"} ↗</a>
+                  ) : canManage && (
+                    <button type="button" onClick={() => void sendToTaskManager()} disabled={busy} title="สร้างการ์ดงานใน Task Manager ผูกกับงานนี้ — ผู้รับผิดชอบ/กำหนดส่งเดียวกัน · % ความคืบหน้าอัปเดตเอง"
+                      className="h-8 rounded-lg border border-violet-200 px-3 text-xs text-violet-700 hover:bg-violet-50">📋 ส่งเข้า Task Manager</button>
+                  )}
+                  {canManage && <>
                   <button type="button" onClick={() => setModal({ job })} disabled={busy} className="h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50">✏️ แก้ไขงาน</button>
                   {job.status === "open"
                     ? <button type="button" onClick={() => void patchJob({ status: "done" }, "ปิดงานแล้ว")} disabled={busy} className="h-8 rounded-lg border border-emerald-200 px-3 text-xs text-emerald-700 hover:bg-emerald-50">✓ ปิดงาน</button>
                     : <button type="button" onClick={() => void patchJob({ status: "open" }, "เปิดงานอีกครั้งแล้ว")} disabled={busy} className="h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50">↺ เปิดงานอีกครั้ง</button>}
                   {job.status !== "archived" && <button type="button" onClick={() => void patchJob({ status: "archived" }, "เก็บงานแล้ว (ดูได้ที่ “แสดงงานที่เก็บแล้ว”)")} disabled={busy} className="h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-500 hover:bg-slate-50">📦 เก็บ</button>}
                   <button type="button" onClick={() => setAsk({ kind: "delete" })} disabled={busy} className="h-8 rounded-lg border border-red-200 px-3 text-xs text-red-600 hover:bg-red-50">🗑 ลบงาน</button>
+                  </>}
                 </div>
               )}
             </div>

@@ -7,6 +7,7 @@
  *   - ใส่รุ่นเข้างาน → ติดป้ายหลักให้อัตโนมัติได้ (auto_label_id เช่น Clearance Products)
  *   - ผู้รับผิดชอบ (หลายคนได้) + วันครบกำหนด อยู่ระดับงาน
  *   - บางรุ่นไม่ต้องทำบางขั้นตอน → ตั้ง "ไม่ต้องทำ" รายรุ่น (step_skip) — ไม่นับในความคืบหน้า
+ *   - ส่งเข้า Task Manager ได้ (งาน Creative 1 ใบ ผูกด้วย creative_task_id) → % ความคืบหน้า + สถานะ ซิงก์ไปที่การ์ดงาน
  * ตาราง: marketing_work_jobs · marketing_work_job_items
  */
 
@@ -36,6 +37,9 @@ export type WorkJob = {
   created_by_name: string | null;
   created_at: string;
   updated_at: string;
+  /** งานใน Task Manager ที่ผูกไว้ (null = ยังไม่ส่ง / งานนั้นถูกลบ) */
+  creative_task_id: string | null;
+  creative_task_no: string | null;
   /** สรุป (คำนวณตอนโหลดรายการงาน) */
   item_count?: number;
   item_done?: number;

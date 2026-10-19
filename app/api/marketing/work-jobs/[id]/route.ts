@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { isUuid } from "@/lib/marketing/sku-list";
 import { assigneesOf, cleanAssignees, cleanSteps, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
-import { actorOf, JOB_COLS, loadJob, loadJobItems, toJob } from "@/lib/marketing/work-jobs-db";
+import { actorOf, JOB_COLS, loadJob, loadJobItems, syncLinkedTask, toJob } from "@/lib/marketing/work-jobs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +78,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     action: "marketing.work.update", entityType: "marketing_work_jobs", entityId: id, actorId: actor.id, actorName: actor.name,
     metadata: { job_name: before.name, changes: patch, before: prev },
   });
+  if ("status" in patch || "steps" in patch) await syncLinkedTask(admin, id, actor);   // ปิด/เปิดงาน · เปลี่ยนขั้นตอน → การ์ดใน Task Manager
   return NextResponse.json({ data: { job: toJob(data as Record<string, unknown>) }, error: null });
 }
 

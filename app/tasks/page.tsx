@@ -24,6 +24,8 @@ import { WorkloadBoard } from "./workload-board";
 import { ReportBoard } from "./report-board";
 import { CreateTaskModal } from "./create-task-modal";
 import { QuickTaskModal } from "./quick-task-modal";
+import { WorkJobModal } from "../marketing/skus/work-job-modal";   // 🛠 งานชุดรุ่น (ป๊อปเดียวกับหน้า SKU การตลาด)
+import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
 import { AssigneeStack } from "./assignee-avatar";
@@ -118,6 +120,18 @@ export default function TasksPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createCampaign, setCreateCampaign] = useState<Campaign | null>(null);   // ปุ่ม "＋ เพิ่มงาน" บนการ์ดแคมเปญ → เลือกแคมเปญนั้นไว้ให้ใน Wizard
   const [quickOpen, setQuickOpen] = useState(false);   // งานด่วน (Quick Task)
+  // 🛠 งานชุดรุ่น (Clearance/ลงเว็บ) — สร้างที่นี่ได้ → ได้การ์ดงานใน Task Manager ผูกไว้ (ติ๊กรุ่นที่หน้า SKU การตลาด)
+  const [jobOpen, setJobOpen] = useState(false);
+  const [jobLabels, setJobLabels] = useState<MarketingSkuLabel[]>([]);
+  const canJob = can("marketing.sku.manage" as Parameters<typeof can>[0]) && can("tasks.create" as Parameters<typeof can>[0]);
+  const openJobCreate = async () => {
+    setJobOpen(true);
+    // ป้ายหลักไว้เลือก "ติดป้ายอัตโนมัติ" (Clearance = Clearance Products) — โหลดไม่ได้ก็สร้างงานได้ปกติ
+    try {
+      const j = await (await apiFetch("/api/marketing/sku-labels?kind=status")).json();
+      if (Array.isArray(j?.data)) setJobLabels(j.data as MarketingSkuLabel[]);
+    } catch { /* ignore */ }
+  };
   // คลังความรู้
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
@@ -247,6 +261,7 @@ export default function TasksPage() {
             <button onClick={() => setKnowledgeOpen(true)} className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📚 {t("ความรู้", "Knowledge")}</button>
             {user?.role === "admin" && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}>⚙️</a>}
             <button onClick={() => setQuickOpen(true)} className="h-10 px-4 text-amber-700 bg-amber-50 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-100 transition-colors">⚡ {t("งานด่วน", "Quick task")}</button>
+            {canJob && <button onClick={() => void openJobCreate()} title={t("งานเป็นชุดหลายรุ่น + เช็กลิสต์ต่อรุ่น (Clearance / ลงเว็บ) — ติ๊กที่หน้า SKU การตลาด", "Batch job over many models with a per-model checklist")} className="h-10 px-4 text-violet-700 bg-violet-50 border border-violet-200 text-sm font-medium rounded-lg hover:bg-violet-100 transition-colors">🛠 {t("งานชุดรุ่น", "Model batch")}</button>}
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
           </div>
         </div>
@@ -346,6 +361,24 @@ export default function TasksPage() {
       {/* Create modal (ของกลาง — ใช้ร่วมกับ Campaign Canvas) */}
       <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast} presetCampaign={createCampaign}
         onCreated={async (newTask) => { pushToast("success", `${t("สร้างงาน", "Task created")} ${newTask.task_no}`); await reload(); }} />
+
+      {/* 🛠 งานชุดรุ่น → สร้างงานแล้วส่งเข้า Task Manager ทันที (การ์ดผูกกัน · % ซิงก์เอง) → เปิดการ์ดให้ดู */}
+      {canJob && (
+        <WorkJobModal open={jobOpen} onClose={() => setJobOpen(false)} job={null} labels={jobLabels}
+          onSaved={async (job) => {
+            setJobOpen(false);
+            try {
+              const r = await apiFetch(`/api/marketing/work-jobs/${job.id}/task`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+              const j = await r.json().catch(() => ({}));
+              if (!r.ok || j.error) throw new Error(j.error || t("ส่งเข้า Task Manager ไม่สำเร็จ", "Could not add to Task Manager"));
+              pushToast("success", t(`สร้างงานชุดรุ่น “${job.name}” แล้ว (${j.data?.task_no ?? ""}) — กด “ใส่รุ่น” ในการ์ดเพื่อเลือกรุ่น`, `Batch job “${job.name}” created`));
+              await reload();
+              if (j.data?.task_id) setDetailId(String(j.data.task_id));
+            } catch (e) {
+              pushToast("error", `${t("สร้างงานชุดรุ่นแล้ว แต่", "Job created but")} ${e instanceof Error ? e.message : ""} — ${t("กด “📋 ส่งเข้า Task Manager” ที่หน้า SKU การตลาดได้", "use “Send to Task Manager” on the Marketing SKUs page")}`);
+            }
+          }} />
+      )}
 
       <QuickTaskModal open={quickOpen} onClose={() => setQuickOpen(false)} pushToast={pushToast}
         me={user ? ({ id: user.id, name: user.name } as UserPickerValue) : null}

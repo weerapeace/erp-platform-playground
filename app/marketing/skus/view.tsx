@@ -79,6 +79,12 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const [newJobFor, setNewJobFor] = useState<string[] | null>(null);   // สร้างงานใหม่พร้อมรุ่นที่ติ๊กไว้
 
   useEffect(() => { setBrandTab(readTab()); }, []);
+  // ลิงก์ ?job=<id> (จากการ์ดงานใน Task Manager) → เปิดโหมดทำงานที่งานนั้น (ไม่เปลี่ยนมุมมองตั้งต้นของคน)
+  useEffect(() => {
+    const jid = new URLSearchParams(window.location.search).get("job");
+    if (jid) { setFocusJobId(jid); setView("work"); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);

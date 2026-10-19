@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { cleanIds, isUuid } from "@/lib/marketing/sku-list";
 import { discountProblem, type DiscountUnit, type StepDone, type StepSkip } from "@/lib/marketing/work-jobs";
-import { actorOf, addItemsToJob, loadJob, parsePrice } from "@/lib/marketing/work-jobs-db";
+import { actorOf, addItemsToJob, loadJob, parsePrice, syncLinkedTask } from "@/lib/marketing/work-jobs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +24,10 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   const admin = supabaseAdmin();
   const job = await loadJob(admin, id);
   if (!job) return bad("ไม่พบงาน (อาจถูกลบไปแล้ว)", 404);
-  const r = await addItemsToJob(admin, job, ids, await actorOf(request, admin));
+  const actor = await actorOf(request, admin);
+  const r = await addItemsToJob(admin, job, ids, actor);
   if ("error" in r) return bad(r.error, 500);
+  if (r.added) await syncLinkedTask(admin, id, actor);
   return NextResponse.json({ data: r, error: null });
 }
 
@@ -73,6 +75,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         metadata: { job_name: job.name, step: step.label, skip, item_ids: (rows ?? []).map((r) => r.id), parent_sku_ids: (rows ?? []).map((r) => r.parent_sku_id) },
       });
     }
+    if (changed) await syncLinkedTask(admin, id, actor);   // การ์ดใน Task Manager: % + สถานะ
     return NextResponse.json({ data: { changed, at: now, by: actor.name }, error: null });
   }
 
@@ -102,6 +105,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         metadata: { job_name: job.name, step: step.label, done, item_ids: (rows ?? []).map((r) => r.id), parent_sku_ids: (rows ?? []).map((r) => r.parent_sku_id) },
       });
     }
+    if (changed) await syncLinkedTask(admin, id, actor);   // การ์ดใน Task Manager: % + สถานะ
     return NextResponse.json({ data: { changed, at: now, by: actor.name }, error: null });
   }
 
@@ -169,5 +173,6 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
     action: "marketing.work.items_remove", entityType: "marketing_work_jobs", entityId: id, actorId: actor.id, actorName: actor.name,
     metadata: { job_name: job.name, removed: rows ?? [] },
   });
+  await syncLinkedTask(admin, id, actor);
   return NextResponse.json({ data: { removed: (rows ?? []).length }, error: null });
 }
