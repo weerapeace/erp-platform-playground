@@ -39,6 +39,10 @@ const fill = (tpl: string, name: string, n: number) => tpl.replace(/\{name\}/g, 
 
 export type LineKind = "material" | "slot" | "slot_in" | "slot_out" | "fit" | "size" | "weight" | "handle" | "strap";
 export type BracketKind = "phrase" | "material" | "slot" | "fit";
+/** ชนิดบรรทัดที่จัดลำดับได้ = ข้อความสำเร็จรูป + บรรทัดที่มีคำนำหน้า */
+export type OrderKind = "phrase" | LineKind;
+/** ลำดับบรรทัดตั้งต้น (เหมือนเดิมก่อนมีตั้งค่า): ข้อความ → วัสดุ → ช่องนอก → ช่องใน → ช่อง → ขนาด → น้ำหนัก → หูหิ้ว → สาย → ใส่ได้ */
+export const DEFAULT_LINE_ORDER: OrderKind[] = ["phrase", "material", "slot_out", "slot_in", "slot", "size", "weight", "handle", "strap", "fit"];
 
 export type InsertTemplates = {
   /** คำเชื่อมรายการ: 2 รายการ = A{last}B · 3+ = A{sep}B{last}C */
@@ -47,6 +51,8 @@ export type InsertTemplates = {
   enInBrackets: Record<BracketKind, boolean>;
   /** คำนำหน้าบรรทัด (ว่าง = ไม่มี) */
   prefix: Record<LineKind, { th: string; en: string }>;
+  /** ลำดับบรรทัดที่แทรก (เจ้าของ 2026-10-19: "อยากให้เรียงลำดับบรรทัดตรงนี้ได้") — ลาก ⠿ ที่ ⚙️ รูปแบบบรรทัด */
+  order: OrderKind[];
   /** ชุดรายการตามประเภทสินค้า (เช่น กระเป๋าสตางค์ / เข็มขัด) — เลือกอัตโนมัติจากหมวดสินค้า */
   profiles: InsertProfile[];
 };
@@ -96,8 +102,18 @@ export const DEFAULT_INSERT_TEMPLATES: InsertTemplates = {
     handle: { th: "ความสูงหูหิ้ว:", en: "Handle drop:" },
     strap: { th: "ความยาวสายสะพาย:", en: "Strap drop:" },
   },
+  order: DEFAULT_LINE_ORDER,
   profiles: [],
 };
+
+/** ลำดับจาก DB → ครบทุกชนิดเสมอ (ชนิดที่ไม่รู้จัก/ซ้ำ = ทิ้ง · ชนิดที่ขาด = ต่อท้ายตามลำดับตั้งต้น) */
+export function normalizeLineOrder(raw: unknown): OrderKind[] {
+  const known = new Set<string>(DEFAULT_LINE_ORDER);
+  const out: OrderKind[] = [];
+  if (Array.isArray(raw)) for (const x of raw) if (typeof x === "string" && known.has(x) && !out.includes(x as OrderKind)) out.push(x as OrderKind);
+  for (const k of DEFAULT_LINE_ORDER) if (!out.includes(k)) out.push(k);
+  return out;
+}
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const strList = (v: unknown, max: number, ok?: (s: string) => boolean): string[] =>
@@ -175,6 +191,7 @@ export function normalizeInsertTemplates(raw: unknown): InsertTemplates {
     prefix: Object.fromEntries(
       (Object.keys(D.prefix) as LineKind[]).map((k) => [k, { th: str(p[k]?.th, D.prefix[k].th), en: str(p[k]?.en, D.prefix[k].en) }])
     ) as InsertTemplates["prefix"],
+    order: normalizeLineOrder(r.order),
     profiles: normalizeProfiles(r.profiles),
   };
 }
@@ -365,7 +382,7 @@ export function enInsertAt(thText: string | null | undefined, enText: string | n
   return en.length === th.length ? Math.min(at, en.length) : en.length;
 }
 
-/** เลือกอะไรไว้บ้าง → บรรทัดที่จะแทรก (ไทย + อังกฤษ) เรียง: ข้อความ → วัสดุ → ช่อง → ขนาด → น้ำหนัก → หูหิ้ว → สาย → ใส่ได้ */
+/** เลือกอะไรไว้บ้าง → บรรทัดที่จะแทรก (ไทย + อังกฤษ) เรียงตาม tpl.order (ตั้งต้น: ข้อความ → วัสดุ → ช่อง → ขนาด → น้ำหนัก → หูหิ้ว → สาย → ใส่ได้) */
 export function composeLines(
   sel: {
     phrases: SnippetItem[];
@@ -390,14 +407,20 @@ export function composeLines(
     if (e) en.push(withPrefix(e));
     else enMissing += 1;
   };
-  for (const p of sel.phrases) push(phraseText(p, "th", tpl), phraseText(p, "en", tpl));
-  push(materialLine(sel.materials, "th", tpl), materialLine(sel.materials, "en", tpl));
-  for (const g of slotGroups(sel.slots)) push(slotLine(g.picks, "th", tpl, g.kind), slotLine(g.picks, "en", tpl, g.kind));
-  if (sel.size) push(sizeLine(sel.size, "th", tpl), sizeLine(sel.size, "en", tpl));
-  if (sel.weight != null) push(weightLine(sel.weight, "th", tpl), weightLine(sel.weight, "en", tpl));
-  if (sel.handle != null) push(handleLine(sel.handle, "th", tpl), handleLine(sel.handle, "en", tpl));
-  if (sel.strap) push(strapLine(sel.strap.min, sel.strap.max, "th", tpl), strapLine(sel.strap.min, sel.strap.max, "en", tpl));
-  if (sel.fits?.length) push(fitLine(sel.fits, "th", tpl), fitLine(sel.fits, "en", tpl));
+  const slots = new Map(slotGroups(sel.slots).map((g) => [g.kind, g.picks]));
+  const emit: Record<OrderKind, () => void> = {
+    phrase: () => { for (const p of sel.phrases) push(phraseText(p, "th", tpl), phraseText(p, "en", tpl)); },
+    material: () => push(materialLine(sel.materials, "th", tpl), materialLine(sel.materials, "en", tpl)),
+    slot_out: () => { const g = slots.get("slot_out"); if (g) push(slotLine(g, "th", tpl, "slot_out"), slotLine(g, "en", tpl, "slot_out")); },
+    slot_in: () => { const g = slots.get("slot_in"); if (g) push(slotLine(g, "th", tpl, "slot_in"), slotLine(g, "en", tpl, "slot_in")); },
+    slot: () => { const g = slots.get("slot"); if (g) push(slotLine(g, "th", tpl, "slot"), slotLine(g, "en", tpl, "slot")); },
+    size: () => { if (sel.size) push(sizeLine(sel.size, "th", tpl), sizeLine(sel.size, "en", tpl)); },
+    weight: () => { if (sel.weight != null) push(weightLine(sel.weight, "th", tpl), weightLine(sel.weight, "en", tpl)); },
+    handle: () => { if (sel.handle != null) push(handleLine(sel.handle, "th", tpl), handleLine(sel.handle, "en", tpl)); },
+    strap: () => { if (sel.strap) push(strapLine(sel.strap.min, sel.strap.max, "th", tpl), strapLine(sel.strap.min, sel.strap.max, "en", tpl)); },
+    fit: () => { if (sel.fits?.length) push(fitLine(sel.fits, "th", tpl), fitLine(sel.fits, "en", tpl)); },
+  };
+  for (const k of normalizeLineOrder(tpl.order)) emit[k]();
   return { th, en, enMissing, pairs };
 }
 

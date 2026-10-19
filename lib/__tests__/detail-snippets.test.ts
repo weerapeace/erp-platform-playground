@@ -232,3 +232,23 @@ describe("detail-snippets — ⠿ ลากสลับทุกบรรทั�
     expect(arrangeEn(rows, ["x", "y"], ["X", "Y"], () => null)).toEqual(["Y", "X"]);
   });
 });
+
+describe("รอบ 8 — ลำดับบรรทัดตั้งได้ (⚙️ รูปแบบบรรทัด)", () => {
+  it("ไม่ตั้ง = ลำดับเดิม · ตั้งแล้ว = เรียงตามนั้น", async () => {
+    const { normalizeInsertTemplates, normalizeLineOrder, DEFAULT_LINE_ORDER } = await import("@/lib/detail-snippets");
+    const sel = { phrases: [{ id: "p", name: "ผลิตในประเทศไทย", name_en: "Made in Thailand" }], materials: [{ id: "m", name: "หนังวัวแท้", name_en: "Cowhide" }], slots: [], size: { w: 30, h: 20, d: 10 }, weight: 450, fits: [{ th: "เอกสาร A4" }] };
+    const base = composeLines(sel).th;
+    expect(base.map((l) => l.slice(2, 8))).toEqual(["ผลิตใน", "วัสดุ:", "ขนาด: ", "น้ำหนั", "ใส่ได้"]);
+    const tpl = normalizeInsertTemplates({ order: ["fit", "size", "phrase"] });
+    expect(tpl.order.slice(0, 3)).toEqual(["fit", "size", "phrase"]);
+    expect(tpl.order).toHaveLength(DEFAULT_LINE_ORDER.length);
+    expect(composeLines(sel, tpl).th.map((l) => l.slice(2, 8))).toEqual(["ใส่ได้", "ขนาด: ", "ผลิตใน", "วัสดุ:", "น้ำหนั"]);
+  });
+  it("ลำดับเพี้ยน = ทิ้งตัวที่ไม่รู้จัก/ซ้ำ · ที่ขาดต่อท้าย", async () => {
+    const { normalizeLineOrder, DEFAULT_LINE_ORDER } = await import("@/lib/detail-snippets");
+    expect(normalizeLineOrder(null)).toEqual(DEFAULT_LINE_ORDER);
+    const o = normalizeLineOrder(["strap", "x", "strap", 5, "phrase"]);
+    expect(o.slice(0, 2)).toEqual(["strap", "phrase"]);
+    expect(new Set(o).size).toBe(DEFAULT_LINE_ORDER.length);
+  });
+});

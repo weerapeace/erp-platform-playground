@@ -25,6 +25,8 @@ import {
   DEFAULT_SLOT_TEMPLATE,
   DEFAULT_SLOT_TEMPLATE_EN,
   LINE_KIND_LABEL,
+  DEFAULT_LINE_ORDER,
+  type OrderKind,
   alreadyMentions,
   arrangeEn,
   arrangeRows,
@@ -1121,7 +1123,15 @@ function DetailInsertModal({
 const SAMPLE = {
   material: [{ id: "a", name: "ผ้าไนล่อน", name_en: "Nylon" }, { id: "b", name: "หนังวัวแท้", name_en: "Genuine cowhide" }],
   slots: ["ช่องหลัก 2 ช่อง", "ช่องซิป 1 ช่อง", "ช่องใส่บัตร 4 ช่อง"],
+  // ตัวอย่างช่องครบ 3 ตำแหน่ง (นอก/ใน/ไม่ระบุ) — ให้เห็นลำดับบรรทัดทุกชนิด
+  slotPicks: [
+    { item: { id: "so", name: "ช่องซิปด้านหน้า", name_en: "Front zip pocket", kind: "slot", slot_side: "outside" }, n: 1 },
+    { item: { id: "si", name: "ช่องใส่บัตร", name_en: "card slot", kind: "slot", slot_side: "inside" }, n: 4 },
+    { item: { id: "sn", name: "ช่องใส่ปากกา", name_en: "pen slot", kind: "slot" }, n: 1 },
+  ],
 };
+/** ชื่อแถวในตารางลำดับบรรทัด (ข้อความสำเร็จรูป = ไม่มีคำนำหน้า) */
+const ORDER_LABEL = (k: OrderKind) => (k === "phrase" ? "ข้อความ (ติ๊ก)" : LINE_KIND_LABEL[k]);
 
 type CatalogLists = Record<CatalogKind, { id: string; name: string; name_en?: string | null }[]>;
 
@@ -1133,12 +1143,17 @@ function TemplateDialog({ value, catalogs, categories, onClose, onSaved }: { val
   const dirty = JSON.stringify(t) !== JSON.stringify(value);
   const setJoin = (k: keyof InsertTemplates["joiner"], v: string) => setT((p) => ({ ...p, joiner: { ...p.joiner, [k]: v } }));
   const setPre = (k: LineKind, lang: "th" | "en", v: string) => setT((p) => ({ ...p, prefix: { ...p.prefix, [k]: { ...p.prefix[k], [lang]: v } } }));
+  // ⠿ ลำดับบรรทัดที่แทรก (ลาก / ↑↓) — ตัวอย่างขวาเรียงตามทันที
+  const moveOrder = (from: number, to: number) => setT((p) => (to < 0 || to >= p.order.length ? p : { ...p, order: moveItem(p.order, from, to) }));
+  const orderChanged = JSON.stringify(t.order) !== JSON.stringify(DEFAULT_LINE_ORDER);
   const ex = composeLines(
     {
       phrases: [{ id: "p", name: "ผลิตในประเทศไทย", name_en: "Made in Thailand" }],
       materials: SAMPLE.material,
-      slots: [],
+      slots: SAMPLE.slotPicks,
       size: { w: 30, h: 20, d: 10 },
+      weight: 450,
+      handle: 12,
       strap: { min: 100, max: 120 },
       fits: [{ th: "แท็บเล็ต", en: "Tablet", size: "11 นิ้ว" }, { th: "เอกสาร A4", en: "A4 documents" }],
     },
@@ -1225,29 +1240,46 @@ function TemplateDialog({ value, catalogs, categories, onClose, onSaved }: { val
           </section>
 
           <section className="space-y-1.5">
-            <h4 className="text-xs font-semibold text-slate-600">คำนำหน้าบรรทัด <span className="font-normal text-slate-400">(เว้นว่าง = ไม่มีคำนำหน้า)</span></h4>
-            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1.5 text-[12px] text-slate-500">
-              {(Object.keys(LINE_KIND_LABEL) as LineKind[]).map((k) => (
-                <Fragment key={k}>
-                  <span>{LINE_KIND_LABEL[k]}</span>
-                  <input value={t.prefix[k].th} onChange={(e) => setPre(k, "th", e.target.value)} placeholder="(ไม่มี)" className={inp} aria-label={`คำนำหน้า ${LINE_KIND_LABEL[k]} ไทย`} />
-                  <input value={t.prefix[k].en} onChange={(e) => setPre(k, "en", e.target.value)} placeholder="(none)" className={inp} aria-label={`คำนำหน้า ${LINE_KIND_LABEL[k]} อังกฤษ`} />
-                </Fragment>
-              ))}
+            <div className="flex items-center gap-2">
+              <h4 className="text-xs font-semibold text-slate-600">ลำดับบรรทัด + คำนำหน้า <span className="font-normal text-slate-400">(ลาก ⠿ หรือ ↑↓ = เรียงบรรทัดที่แทรก · เว้นว่าง = ไม่มีคำนำหน้า)</span></h4>
+              {orderChanged && <button type="button" onClick={() => setT((p) => ({ ...p, order: DEFAULT_LINE_ORDER }))} className="ml-auto shrink-0 text-[11px] text-slate-500 hover:text-orange-600 hover:underline" data-order-reset>↺ ลำดับเดิม</button>}
+            </div>
+            <div className="space-y-1 text-[12px] text-slate-500" data-line-order>
+              <SortList items={t.order.map((k) => ({ id: k }))} onMove={moveOrder} render={(it, handle) => {
+                const k = it.id as OrderKind;
+                const i = t.order.indexOf(k);
+                return (
+                  <div className="grid grid-cols-[1rem_5.2rem_minmax(0,1fr)_minmax(0,1fr)_2.6rem] items-center gap-1.5" data-order-row={k}>
+                    <span className="flex justify-center">{handle}</span>
+                    <span className="truncate" title={ORDER_LABEL(k)}><span className="mr-1 text-[10px] text-slate-400">{i + 1}.</span>{ORDER_LABEL(k)}</span>
+                    {k === "phrase" ? (
+                      <span className="col-span-2 px-1 text-[11px] text-slate-400">บรรทัดละข้อ (ไม่มีคำนำหน้า) — เรียงตามลำดับที่กด</span>
+                    ) : (
+                      <>
+                        <input value={t.prefix[k].th} onChange={(e) => setPre(k, "th", e.target.value)} placeholder="(ไม่มี)" className={inp} aria-label={`คำนำหน้า ${LINE_KIND_LABEL[k]} ไทย`} />
+                        <input value={t.prefix[k].en} onChange={(e) => setPre(k, "en", e.target.value)} placeholder="(none)" className={inp} aria-label={`คำนำหน้า ${LINE_KIND_LABEL[k]} อังกฤษ`} />
+                      </>
+                    )}
+                    <span className="flex">
+                      <button type="button" disabled={i === 0} onClick={() => moveOrder(i, i - 1)} title="เลื่อนขึ้น" aria-label={`เลื่อน ${ORDER_LABEL(k)} ขึ้น`} className="h-6 w-5 rounded text-slate-400 hover:bg-slate-100 disabled:opacity-25">↑</button>
+                      <button type="button" disabled={i === t.order.length - 1} onClick={() => moveOrder(i, i + 1)} title="เลื่อนลง" aria-label={`เลื่อน ${ORDER_LABEL(k)} ลง`} className="h-6 w-5 rounded text-slate-400 hover:bg-slate-100 disabled:opacity-25">↓</button>
+                    </span>
+                  </div>
+                );
+              }} />
             </div>
           </section>
         </div>
 
         <div className="space-y-2 rounded-xl bg-slate-50 p-2.5 text-[12.5px] md:self-start" data-tpl-example>
           <h4 className="text-xs font-semibold text-slate-600">ตัวอย่าง</h4>
-          <div className="space-y-0.5 text-slate-700">
+          <div className="space-y-0.5 text-slate-700" data-tpl-example-th>
             {ex.th.map((l) => <div key={l}>{l}</div>)}
-            <div>- {slotEx.th}</div>
           </div>
           <div className="space-y-0.5 border-t border-slate-200 pt-2 text-slate-500">
             {ex.en.map((l) => <div key={l}>{l}</div>)}
-            <div>- {slotEx.en}</div>
           </div>
+          <p className="border-t border-slate-200 pt-2 text-[11px] text-slate-400">คำเชื่อม 3 รายการ: {slotEx.th} · {slotEx.en}</p>
         </div>
       </div>
       )}
