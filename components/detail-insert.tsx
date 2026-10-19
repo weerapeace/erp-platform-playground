@@ -806,8 +806,7 @@ function DetailInsertModal({
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                           {on && phraseIds.length > 1 && <ClickOrder n={phraseIds.indexOf(it.id) + 1} />}
-                          <span className={`flex-1 text-sm ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{it.name}</span>
-                          {it.name_en ? <span className="truncate text-[11px] text-slate-400">{it.name_en}</span> : <span className="text-[11px] text-slate-300">ไม่มีอังกฤษ</span>}
+                          <NameTwoLines th={it.name} en={it.name_en} on={on} />
                         </label>
                         {editBtn("phrase", it as unknown as Record<string, unknown>)}
                       </div>
@@ -829,8 +828,7 @@ function DetailInsertModal({
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setMatIds((p) => toggle(p, m.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                           {on && matIds.length > 1 && <ClickOrder n={matIds.indexOf(m.id) + 1} />}
-                          <span className={`text-sm ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{m.name}</span>
-                          {m.name_en && <span className="truncate text-[11px] text-slate-400">{m.name_en}</span>}
+                          <NameTwoLines th={m.name} en={m.name_en} on={on} />
                         </label>
                         {page ? (
                           <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title="เปิดหน้าวัสดุ (แก้คำอธิบาย/วิธีดูแล/รูปได้) — ชื่อวัสดุนี้บนเว็บกดมาหน้านี้"
@@ -862,8 +860,8 @@ function DetailInsertModal({
                       <div className={rowCls(n > 0)}>
                         {handle}
                         <span className={`min-w-0 flex-1 text-sm ${n > 0 ? "font-medium text-slate-800" : "text-slate-600"}`}>
-                          {it.name}
-                          {it.name_en ? <span className="ml-1.5 text-[11px] font-normal text-slate-400">{it.name_en}</span> : <span className="ml-1.5 text-[11px] font-normal text-slate-300">ไม่มีอังกฤษ</span>}
+                          <span className="block leading-snug">{it.name}</span>
+                          <span className={`block truncate text-[11px] font-normal leading-snug ${it.name_en ? "text-slate-400" : "text-slate-300"}`}>{it.name_en || "ไม่มีอังกฤษ"}</span>
                           {n > 0 && (
                             <span className="block text-[11px] font-normal text-slate-400">
                               → {slotText(it, n, "th", tpl)}
@@ -1459,6 +1457,16 @@ function ProfilesEditor({ profiles, onChange, catalogs, categories }: { profiles
         </div>
       )}
     </div>
+  );
+}
+
+/** ชื่อในรายการ: ไทยบน · อังกฤษตัวเล็กข้างล่าง (เจ้าของ 2026-10-19 "จะได้ดูสวย") */
+function NameTwoLines({ th, en, on }: { th: string; en?: string | null; on: boolean }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className={`block text-sm leading-snug ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{th}</span>
+      <span className={`block truncate text-[11px] leading-snug ${en ? "text-slate-400" : "text-slate-300"}`} title={en ?? ""}>{en || "ไม่มีอังกฤษ"}</span>
+    </span>
   );
 }
 
