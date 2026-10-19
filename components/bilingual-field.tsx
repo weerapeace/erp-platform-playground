@@ -328,6 +328,80 @@ export function BilingualText({
 }
 
 /**
+ * 🌐 ช่องข้อความเดี่ยวที่สลับตามสวิตช์ทั้งแผง — ใช้แทน <input>/<textarea> ที่ผูกกับ obj[k] (หน้าดีไซน์: ช่องในแถว/ช่องแคบ ขนาดเท่าเดิม)
+ *   โหมดไทย = แก้ obj[k] เหมือนเดิมทุกอย่าง · โหมด EN = แก้ obj[k_en] (กรอบม่วง · ไทยเป็นตัวจางในช่อง · ชี้ค้างเห็นไทยเต็ม)
+ *   onPatch ได้แพตช์ที่ต้องรวมเข้า obj ({k} หรือ {k_en, _i18n}) · ไม่มี ContentLangProvider = ช่องไทยแบบเดิม
+ *   แปลด้วย AI: ปุ่ม "แปลที่ยังขาด" ของแถบบนแผง (PathsLangBar / RecordLangBar)
+ */
+export function LangInput({
+  obj,
+  k,
+  onPatch,
+  multiline,
+  rows,
+  className = inputCls,
+  placeholder,
+  maxLength,
+  disabled,
+  ariaLabel,
+  enPlaceholder,
+  title,
+  style: styleProp,
+  autoFocus,
+  onKeyDown,
+}: {
+  obj: object;
+  k: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onPatch: (patch: { [key: string]: any }) => void;
+  multiline?: boolean;
+  rows?: number;
+  className?: string;
+  placeholder?: string;
+  maxLength?: number;
+  disabled?: boolean;
+  ariaLabel?: string;
+  /** โหมด EN + ไทยว่าง: ตัวอย่างในช่อง (เช่น ข้อความเริ่มต้นภาษาอังกฤษที่ลูกค้าจะเห็น) */
+  enPlaceholder?: string;
+  /** คำอธิบายตอนชี้ (โหมดไทย) — โหมด EN ใช้แสดงภาษาไทยแทน */
+  title?: string;
+  style?: React.CSSProperties;
+  autoFocus?: boolean;
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement | HTMLTextAreaElement>;
+}) {
+  const { lang, enabled } = useContentLang();
+  const o = obj as Record<string, unknown>;
+  const th = textOf(o[k]);
+  if (!enabled || lang === "th") {
+    const onText = (s: string) => onPatch({ [k]: s });
+    return multiline ? (
+      <textarea className={className} style={styleProp} autoFocus={autoFocus} onKeyDown={onKeyDown} title={title} rows={rows} value={th} placeholder={placeholder} maxLength={maxLength} disabled={disabled} aria-label={ariaLabel} onChange={(e) => onText(e.target.value)} />
+    ) : (
+      <input className={className} style={styleProp} autoFocus={autoFocus} onKeyDown={onKeyDown} title={title} value={th} placeholder={placeholder} maxLength={maxLength} disabled={disabled} aria-label={ariaLabel} onChange={(e) => onText(e.target.value)} />
+    );
+  }
+  const enRaw = o[enKey(k)];
+  const en = typeof enRaw === "string" ? enRaw : "";
+  const onEn = (s: string) => onPatch(translationPatch(o, k, th, s, false));
+  // ไทยเป็นตัวจางในช่อง (ยังไม่มีอังกฤษ = ลูกค้า /en เห็นไทยนี้) · ไทยว่าง = ใช้ตัวอย่างเดิม
+  const ph = th.trim() ? `🇹🇭 ${th}` : enPlaceholder ?? (placeholder ? `EN · ${placeholder}` : "English");
+  const style: React.CSSProperties = { ...styleProp, borderColor: "#a5b4fc", background: "rgba(238, 242, 255, 0.55)" };
+  const tip = th.trim() ? `ภาษาไทย: ${th}` : "ภาษาไทยยังว่าง";
+  const max = maxLength ? Math.ceil(maxLength * 1.5) : undefined;
+  return multiline ? (
+    <textarea className={className} style={style} autoFocus={autoFocus} onKeyDown={onKeyDown} title={tip} rows={rows} value={en} placeholder={ph} maxLength={max} disabled={disabled} aria-label={ariaLabel ? `${ariaLabel} (EN)` : undefined} lang="en" onChange={(e) => onEn(e.target.value)} />
+  ) : (
+    <input className={className} style={style} autoFocus={autoFocus} onKeyDown={onKeyDown} title={tip} value={en} placeholder={ph} maxLength={max} disabled={disabled} aria-label={ariaLabel ? `${ariaLabel} (EN)` : undefined} lang="en" onChange={(e) => onEn(e.target.value)} />
+  );
+}
+
+/** ป้าย "EN" เล็กต่อท้ายหัวข้อช่อง ตอนสลับเป็นภาษาอังกฤษ (ใช้กับหัวข้อช่องที่ผู้เรียกวาดเอง) */
+export function LangTag() {
+  const { lang, enabled } = useContentLang();
+  return enabled && lang === "en" ? <span className="ml-1 text-[10px] font-semibold text-indigo-600">EN</span> : null;
+}
+
+/**
  * 🌐 แถบสลับภาษาของ "1 รายการ" — ปุ่ม 🇹🇭 ไทย | 🇬🇧 EN + "อังกฤษ x/y" + 🌐 แปลที่ยังขาด
  * ใช้คู่กับ ContentLangProvider ที่ครอบการ์ดแก้รายการนั้น แล้วเปลี่ยนช่องข้อความเป็น BilingualText
  *   <ContentLangProvider><RecordLangBar value={cat} keys={["label","blurb"]} onPatch={(p) => patch(cat.key, p)} /> …</ContentLangProvider>

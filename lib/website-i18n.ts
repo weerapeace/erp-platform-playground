@@ -170,3 +170,14 @@ export function applySlotTranslations<T>(blocks: readonly T[], results: { slot: 
     return next as unknown as T;
   });
 }
+
+/** URL พรีวิวของเว็บร้าน → หน้าเดียวกันฉบับภาษาอังกฤษ (/en/...) — เว็บร้านรองรับ /en (proxy.ts) · ใช้ร่วม: ตัวจัดหน้า + หน้าดีไซน์ */
+export function previewInEnglish(src: string): string {
+  try {
+    const u = new URL(src);
+    if (u.pathname !== "/en" && !u.pathname.startsWith("/en/")) u.pathname = u.pathname === "/" ? "/en" : `/en${u.pathname}`;
+    return u.toString();
+  } catch {
+    return src;
+  }
+}

@@ -10,6 +10,7 @@
  *
  * ข้อมูล/กติกา: lib/website-content-sources · เว็บร้านวาดเป็นรายการจุด (storefront src/lib/product-details.ts)
  */
+import { LangInput } from "@/components/bilingual-field";
 import { useEffect, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
@@ -204,13 +205,14 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
               {current.lines.map((l, i) => (
                 <li key={l.id} {...drag.rowProps(i)} className={`flex items-center gap-1.5 rounded-lg ${drag.rowCls(i)}`}>
                   <DragHandle {...drag.handleProps(i)} />
-                  <input
+                  <LangInput
                     className={inputCls}
-                    value={l.text}
+                    obj={l}
+                    k="text"
                     maxLength={CONTENT_LINE_MAX}
                     autoFocus={focusLine === l.id}
                     placeholder={isShipping ? "เช่น จัดส่งภายใน 1–2 วันทำการ" : "พิมพ์ข้อความ 1 บรรทัด"}
-                    onChange={(e) => setLines(current.lines.map((x) => (x.id === l.id ? { ...x, text: e.target.value } : x)))}
+                    onPatch={(p) => setLines(current.lines.map((x) => (x.id === l.id ? { ...x, ...p } : x)))}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                         e.preventDefault();

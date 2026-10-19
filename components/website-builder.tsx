@@ -38,18 +38,10 @@ import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canv
 import { ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
 import { coverageOf, hasText, type ContentLang } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
-import { applySlotTranslations, collectTextSlots, slotSourceTexts, slotValueFrom, type TextSlot } from "@/lib/website-i18n";
+import { applySlotTranslations, collectTextSlots, previewInEnglish, slotSourceTexts, slotValueFrom, type TextSlot } from "@/lib/website-i18n";
 
-/** URL พรีวิวของเว็บร้าน → หน้าเดียวกันฉบับภาษาอังกฤษ (/en/...) — เว็บร้านต้องรองรับ /en (proxy.ts) */
-export function previewInEnglish(src: string): string {
-  try {
-    const u = new URL(src);
-    if (u.pathname !== "/en" && !u.pathname.startsWith("/en/")) u.pathname = u.pathname === "/" ? "/en" : `/en${u.pathname}`;
-    return u.toString();
-  } catch {
-    return src;
-  }
-}
+/** URL พรีวิวฉบับภาษาอังกฤษ — ของกลางย้ายไป lib/website-i18n (หน้าดีไซน์ใช้ด้วย) · ส่งต่อชื่อเดิมไว้ */
+export { previewInEnglish };
 
 export interface Selection {
   blockId: string;

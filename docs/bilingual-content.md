@@ -140,3 +140,9 @@ pickList(block, "messages", lang)
 - ของในตะกร้าจำชื่อตามภาษาตอนกดใส่
 - รายการ "เข็มขัดสั่งทำ" ในออเดอร์ยังเก็บชื่อไทยอย่างเดียว · ข้อความ error ตอนสั่งซื้อจาก ERP (เช่น "สินค้าหมดแล้ว") ยังเป็นไทย
 - ถ้อยคำแจ้งลูกค้าแก้ในโค้ด (`lib/customer-messages.ts`) — ยังไม่มีหน้าตั้งค่าให้แก้เอง
+
+## หน้าดีไซน์ (ธีม) — สวิตช์ ไทย | EN ทั้งหน้า (2026-10-19)
+- `website-theme-panel` ครอบ `ContentLangProvider` + แถบ `PathsLangBar` (components/translation-table) ใต้แถบแท็บ: สวิตช์ · อังกฤษ x/y ทั้งธีม (`THEME_TEXT_KEYS`) · 🌐 แปลที่ยังขาด (ติด AI รอตรวจ · ไม่ทับที่แก้เอง) · โหมด EN = พรีวิวหน้า `/en` (`previewInEnglish` ย้ายไป lib/website-i18n)
+- ของกลางใหม่ `LangInput` (bilingual-field): แทน `<input>/<textarea>` ที่ผูก `obj[k]` — ขนาดเท่าเดิม · EN = แก้ `k_en` (กรอบม่วง · ไทยเป็นตัวจาง · `enPlaceholder` = ค่าเริ่มอังกฤษ) · `onPatch` รวมแพตช์เข้า object เดิม
+- `Text` ของ website-cart-settings ส่ง `obj/k/onPatch` = 2 ภาษา (ตะกร้า + หน้าชำระเงิน) · `LangTag` = ป้าย EN ต่อหัวข้อช่อง
+- ⚠️ ช่องข้อความใหม่ในหน้าดีไซน์: ใช้ `LangInput` / `Text obj k onPatch` เสมอ + ใส่ชื่อช่องใน `THEME_TEXT_KEYS` (ไม่งั้นอังกฤษหายตอนบันทึก)

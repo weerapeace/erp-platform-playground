@@ -61,8 +61,8 @@ export function CheckoutSettings({
 
       <Card title="🔤 ข้อความ" hint="เว้นว่าง = ข้อความเริ่มต้น (โชว์จาง ๆ ในช่อง) · ภาษาอังกฤษแปลได้ที่ปุ่ม 🌐 EN ด้านบน">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text label="หัวหน้า" value={c.title} onChange={(title) => set({ title })} placeholder={PH("title")} max={60} />
-          <Text label="ปุ่มยืนยัน" value={c.confirmText} onChange={(confirmText) => set({ confirmText })} placeholder={PH("confirmText")} max={40} />
+          <Text label="หัวหน้า" obj={c} k="title" onPatch={set} placeholder={PH("title")} enPlaceholder={CHECKOUT_TEXT.title.en} max={60} />
+          <Text label="ปุ่มยืนยัน" obj={c} k="confirmText" onPatch={set} placeholder={PH("confirmText")} enPlaceholder={CHECKOUT_TEXT.confirmText.en} max={40} />
         </div>
       </Card>
 
@@ -96,10 +96,10 @@ export function CheckoutSettings({
 
       <Card title="💳 ช่องทางชำระเงิน" hint="ชื่อ/คำอธิบายที่ลูกค้าเห็น · เปิด-ปิดช่องทาง เลขบัญชี ค่าส่ง ตั้งที่แท็บ 🏪 ข้อมูลร้าน">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text label="เก็บเงินปลายทาง: ชื่อ" value={c.codLabel} onChange={(codLabel) => set({ codLabel })} placeholder={PH("codLabel")} max={40} />
-          <Text label="เก็บเงินปลายทาง: คำอธิบาย" value={c.codHint} onChange={(codHint) => set({ codHint })} placeholder={PH("codHint")} max={80} />
-          <Text label="โอนพร้อมเพย์: ชื่อ" value={c.promptpayLabel} onChange={(promptpayLabel) => set({ promptpayLabel })} placeholder={PH("promptpayLabel")} max={40} />
-          <Text label="โอนพร้อมเพย์: คำอธิบาย" value={c.promptpayHint} onChange={(promptpayHint) => set({ promptpayHint })} placeholder={PH("promptpayHint")} max={80} />
+          <Text label="เก็บเงินปลายทาง: ชื่อ" obj={c} k="codLabel" onPatch={set} placeholder={PH("codLabel")} enPlaceholder={CHECKOUT_TEXT.codLabel.en} max={40} />
+          <Text label="เก็บเงินปลายทาง: คำอธิบาย" obj={c} k="codHint" onPatch={set} placeholder={PH("codHint")} enPlaceholder={CHECKOUT_TEXT.codHint.en} max={80} />
+          <Text label="โอนพร้อมเพย์: ชื่อ" obj={c} k="promptpayLabel" onPatch={set} placeholder={PH("promptpayLabel")} enPlaceholder={CHECKOUT_TEXT.promptpayLabel.en} max={40} />
+          <Text label="โอนพร้อมเพย์: คำอธิบาย" obj={c} k="promptpayHint" onPatch={set} placeholder={PH("promptpayHint")} enPlaceholder={CHECKOUT_TEXT.promptpayHint.en} max={80} />
         </div>
         {payInfo && (
           <p className="text-[11px] text-slate-500">
@@ -109,13 +109,13 @@ export function CheckoutSettings({
       </Card>
 
       <Card title="🛡 แถบความมั่นใจใต้ปุ่มยืนยัน" hint="ข้อความสั้น ๆ ให้ลูกค้าอุ่นใจก่อนกดสั่ง" on={c.trust} onToggle={(trust) => set({ trust })}>
-        <Text label="ข้อความ (คั่นแต่ละข้อด้วย ·)" value={c.trustText} onChange={(trustText) => set({ trustText })} placeholder={PH("trustText")} max={160} />
+        <Text label="ข้อความ (คั่นแต่ละข้อด้วย ·)" obj={c} k="trustText" onPatch={set} placeholder={PH("trustText")} enPlaceholder={CHECKOUT_TEXT.trustText.en} max={160} />
       </Card>
 
       <Card title="🙏 หน้าขอบคุณ (หลังกดสั่ง)" hint="เลขที่ออเดอร์ · วิธีจ่าย · สรุปรายการ ยังโชว์ตามเดิม">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text label="หัวข้อ" value={c.thanksTitle} onChange={(thanksTitle) => set({ thanksTitle })} placeholder={PH("thanksTitle")} max={60} />
-          <Text label="ข้อความใต้หัวข้อ ({shop} = ชื่อร้าน)" value={c.thanksText} onChange={(thanksText) => set({ thanksText })} placeholder={PH("thanksText")} max={200} />
+          <Text label="หัวข้อ" obj={c} k="thanksTitle" onPatch={set} placeholder={PH("thanksTitle")} enPlaceholder={CHECKOUT_TEXT.thanksTitle.en} max={60} />
+          <Text label="ข้อความใต้หัวข้อ ({shop} = ชื่อร้าน)" obj={c} k="thanksText" onPatch={set} placeholder={PH("thanksText")} enPlaceholder={CHECKOUT_TEXT.thanksText.en} max={200} />
         </div>
         {onPreviewPage && (
           <button type="button" onClick={() => onPreviewPage("/checkout?pv=thanks")} className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-700">

@@ -5,6 +5,7 @@
  * เว็บร้านวาดที่ components/cart/* — ลิ้นชักตะกร้า + หน้า /cart ใช้ตัววาดเดียวกัน
  * พรีวิว: ตอนอยู่แท็บนี้ หน้าตั้งค่าสั่งให้เว็บในพรีวิวเปิดตะกร้าค้างไว้ (ตะกร้าว่าง = ใส่สินค้าตัวอย่างให้ดู ไม่ใส่ตะกร้าจริง)
  */
+import { LangInput, LangTag } from "@/components/bilingual-field";
 import { useState, type ReactNode } from "react";
 import { Seg } from "@/components/website-block-editor";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
@@ -66,11 +67,43 @@ export function Check({ label, hint, checked, onChange }: { label: string; hint?
   );
 }
 
-export function Text({ label, value, onChange, placeholder, max = 80 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; max?: number }) {
+/**
+ * ช่องข้อความมีหัวข้อ (ตะกร้า / หน้าชำระเงิน) — ส่ง obj + k + onPatch = สลับ ไทย | EN ตามสวิตช์ทั้งหน้าดีไซน์ (LangInput · เก็บ k_en)
+ * ส่ง value + onChange แบบเดิม = ช่องไทยอย่างเดียว
+ */
+export function Text({
+  label,
+  value,
+  onChange,
+  placeholder,
+  max = 80,
+  obj,
+  k,
+  onPatch,
+  enPlaceholder,
+}: {
+  label: string;
+  value?: string;
+  onChange?: (v: string) => void;
+  placeholder?: string;
+  max?: number;
+  obj?: object;
+  k?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onPatch?: (patch: { [key: string]: any }) => void;
+  enPlaceholder?: string;
+}) {
   return (
     <label className="block">
-      <span className={lbl}>{label}</span>
-      <input className={input} value={value} maxLength={max} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+      <span className={lbl}>
+        {label}
+        {obj && <LangTag />}
+      </span>
+      {obj && k && onPatch ? (
+        <LangInput className={input} obj={obj} k={k} onPatch={onPatch} maxLength={max} placeholder={placeholder} enPlaceholder={enPlaceholder} />
+      ) : (
+        <input className={input} value={value ?? ""} maxLength={max} placeholder={placeholder} onChange={(e) => onChange?.(e.target.value)} />
+      )}
     </label>
   );
 }
@@ -131,7 +164,7 @@ function RecsSetEditor({ value: r, onChange, shopSlug, index, onRemove, dragHand
       {r.on && (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Text label="หัวข้อ (ว่าง = ไม่มีหัวข้อ)" value={r.title} onChange={(title) => set({ title })} placeholder="คุณอาจชอบ / ซื้อคู่กัน" max={40} />
+            <Text label="หัวข้อ (ว่าง = ไม่มีหัวข้อ)" obj={r} k="title" onPatch={set} placeholder="คุณอาจชอบ / ซื้อคู่กัน" max={40} />
             <div>
               <span className={lbl}>จำนวนสูงสุด</span>
               <Seg value={String(r.limit)} onChange={(v) => set({ limit: Number(v) })} options={[1, 2, 3, 4, 6, 8, 10, 12].map((n) => ({ v: String(n), l: String(n) }))} wheel />
@@ -218,7 +251,7 @@ function RecsSetEditor({ value: r, onChange, shopSlug, index, onRemove, dragHand
           </div>
           {usesCards && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Text label="ข้อความปุ่ม (ว่าง = + ใส่ตะกร้า)" value={r.btnText} onChange={(btnText) => set({ btnText })} placeholder="+ ใส่ตะกร้า" max={30} />
+              <Text label="ข้อความปุ่ม (ว่าง = + ใส่ตะกร้า)" obj={r} k="btnText" onPatch={set} placeholder="+ ใส่ตะกร้า" max={30} />
               <div>
                 <span className={lbl}>หน้าตาปุ่ม</span>
                 <Seg value={r.btnStyle} onChange={(btnStyle) => set({ btnStyle })} options={[{ v: "outline", l: "ขอบมน (เดิม)" }, { v: "brand", l: "ทึบสีแบรนด์" }, { v: "text", l: "ข้อความ" }]} />
@@ -303,7 +336,7 @@ export function CartSettings({
             <span className={lbl}>ความกว้าง (มือถือ = เต็มจอเสมอ)</span>
             <Seg value={c.width} onChange={(width) => set({ width })} options={CART_WIDTHS.map((w) => ({ v: w.value, l: `${w.label} ${w.px}px` }))} wheel />
           </div>
-          <Text label="หัวข้อ" value={c.title} onChange={(title) => set({ title })} placeholder="ตะกร้า" max={40} />
+          <Text label="หัวข้อ" obj={c} k="title" onPatch={set} placeholder="ตะกร้า" max={40} />
         </div>
         <div>
           <span className={lbl}>กดไอคอนตะกร้าที่หัวเว็บ</span>
@@ -361,25 +394,25 @@ export function CartSettings({
       {/* ── ตอนว่าง ── */}
       <Card title="🫙 ตอนตะกร้าว่าง" hint="เปิดสินค้าแนะนำไว้ → ตอนว่างก็โชว์สินค้าแนะนำให้ด้วย">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text label="ข้อความ" value={c.emptyText} onChange={(emptyText) => set({ emptyText })} placeholder="ยังไม่มีสินค้าในตะกร้า" max={120} />
-          <Text label="ปุ่ม (เว้นว่าง = ข้อความเดิมของร้าน)" value={c.emptyButton} onChange={(emptyButton) => set({ emptyButton })} placeholder="เลือกซื้อสินค้า" max={40} />
+          <Text label="ข้อความ" obj={c} k="emptyText" onPatch={set} placeholder="ยังไม่มีสินค้าในตะกร้า" max={120} />
+          <Text label="ปุ่ม (เว้นว่าง = ข้อความเดิมของร้าน)" obj={c} k="emptyButton" onPatch={set} placeholder="เลือกซื้อสินค้า" max={40} />
         </div>
       </Card>
 
       {/* ── ท้ายตะกร้า ── */}
       <Card title="💳 ท้ายตะกร้า (ยอดรวม + ปุ่ม)">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text label="ปุ่มสั่งซื้อ" value={c.checkoutText} onChange={(checkoutText) => set({ checkoutText })} placeholder="ดำเนินการสั่งซื้อ" max={40} />
-          <Text label="ปุ่ม “เลือกซื้อต่อ” (เว้นว่าง = ไม่มีปุ่ม)" value={c.continueText} onChange={(continueText) => set({ continueText })} placeholder="เช่น เลือกซื้อต่อ" max={40} />
+          <Text label="ปุ่มสั่งซื้อ" obj={c} k="checkoutText" onPatch={set} placeholder="ดำเนินการสั่งซื้อ" max={40} />
+          <Text label="ปุ่ม “เลือกซื้อต่อ” (เว้นว่าง = ไม่มีปุ่ม)" obj={c} k="continueText" onPatch={set} placeholder="เช่น เลือกซื้อต่อ" max={40} />
         </div>
-        <Text label="ข้อความใต้ยอดรวม (เว้นว่าง = ไม่โชว์)" value={c.noteText} onChange={(noteText) => set({ noteText })} placeholder="ยังไม่รวมค่าจัดส่ง · คำนวณตอนชำระเงิน" max={120} />
+        <Text label="ข้อความใต้ยอดรวม (เว้นว่าง = ไม่โชว์)" obj={c} k="noteText" onPatch={set} placeholder="ยังไม่รวมค่าจัดส่ง · คำนวณตอนชำระเงิน" max={120} />
         <Check label="ปุ่ม “ล้างตะกร้า”" checked={c.showClear} onChange={(showClear) => set({ showClear })} />
       </Card>
 
       <Card title="🚚 แถบ “อีก ฿X ส่งฟรี”" hint="ยอดส่งฟรีตั้งที่แท็บ 🏪 ข้อมูลร้าน (ส่งฟรีเมื่อยอดถึง) — ยังไม่ตั้ง = ไม่โชว์แถบ" on={c.freeShip} onToggle={(freeShip) => set({ freeShip })}>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text label="ข้อความตอนยังไม่ถึง ({amount} = ยอดที่ขาด)" value={c.freeShipText} onChange={(freeShipText) => set({ freeShipText })} placeholder="อีก {amount} ส่งฟรี" />
-          <Text label="ข้อความตอนถึงแล้ว" value={c.freeShipDone} onChange={(freeShipDone) => set({ freeShipDone })} placeholder="🎉 ได้ส่งฟรีแล้ว" />
+          <Text label="ข้อความตอนยังไม่ถึง ({amount} = ยอดที่ขาด)" obj={c} k="freeShipText" onPatch={set} placeholder="อีก {amount} ส่งฟรี" />
+          <Text label="ข้อความตอนถึงแล้ว" obj={c} k="freeShipDone" onPatch={set} placeholder="🎉 ได้ส่งฟรีแล้ว" />
         </div>
         <p className="text-[11px] text-slate-500">
           ตัวอย่าง: <b className="text-slate-700">{fsSample}</b>
@@ -430,7 +463,7 @@ export function CartSettings({
             <IconInput label="ไอคอนห่อของขวัญ" value={icon("gift")} onChange={(v) => setIcon("gift", v)} />
             <div className="flex-1 min-w-0 space-y-1.5">
               <Check label="ห่อของขวัญ" hint="ติ๊กห่อในตะกร้า (ต้องเปิดห่อของขวัญในข้อมูลร้าน · ค่าห่อตั้งที่ข้อมูลร้าน)" checked={c.gift} onChange={(gift) => set({ gift })} />
-              {c.gift && <Text label="ข้อความ (ว่าง = ชื่อบริการในข้อมูลร้าน)" value={c.labels.gift} onChange={(v) => set({ labels: { ...c.labels, gift: v } })} placeholder="ห่อเป็นของขวัญ" max={60} />}
+              {c.gift && <Text label="ข้อความ (ว่าง = ชื่อบริการในข้อมูลร้าน)" obj={c.labels} k="gift" onPatch={(p) => set({ labels: { ...c.labels, ...p } })} placeholder="ห่อเป็นของขวัญ" max={60} />}
             </div>
           </div>
           <div className="flex items-start gap-2">
@@ -442,14 +475,14 @@ export function CartSettings({
                 checked={c.card}
                 onChange={(card) => set({ card })}
               />
-              {c.card && <Text label="ข้อความ (ว่าง = ชื่อบริการการ์ดในข้อมูลร้าน)" value={c.labels.card} onChange={(v) => set({ labels: { ...c.labels, card: v } })} placeholder="เขียนการ์ดอวยพร" max={60} />}
+              {c.card && <Text label="ข้อความ (ว่าง = ชื่อบริการการ์ดในข้อมูลร้าน)" obj={c.labels} k="card" onPatch={(p) => set({ labels: { ...c.labels, ...p } })} placeholder="เขียนการ์ดอวยพร" max={60} />}
             </div>
           </div>
           <div className="flex items-start gap-2">
             <IconInput label="ไอคอนหมายเหตุ" value={icon("note")} onChange={(v) => setIcon("note", v)} />
             <div className="flex-1 min-w-0 space-y-1.5">
               <Check label="หมายเหตุถึงร้าน" hint="เช่น โทรก่อนส่ง — ไปเติมช่องหมายเหตุหน้าชำระเงิน" checked={c.note} onChange={(note) => set({ note })} />
-              {c.note && <Text label="ข้อความ (ว่าง = เพิ่มหมายเหตุถึงร้าน)" value={c.labels.note} onChange={(v) => set({ labels: { ...c.labels, note: v } })} placeholder="เพิ่มหมายเหตุถึงร้าน" max={60} />}
+              {c.note && <Text label="ข้อความ (ว่าง = เพิ่มหมายเหตุถึงร้าน)" obj={c.labels} k="note" onPatch={(p) => set({ labels: { ...c.labels, ...p } })} placeholder="เพิ่มหมายเหตุถึงร้าน" max={60} />}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -468,7 +501,7 @@ export function CartSettings({
             <div key={i} {...drag.rowProps(i)} className={`flex items-center gap-2 ${drag.rowCls(i)}`}>
               <DragHandle {...drag.handleProps(i)} />
               <input className="w-14 shrink-0 h-8 rounded-lg border border-slate-200 px-1 text-center text-sm focus:outline-none focus:border-blue-400" value={it.icon} maxLength={8} onChange={(e) => setTrust(trust.map((x, j) => (j === i ? { ...x, icon: e.target.value } : x)))} aria-label="ไอคอน" />
-              <input className={`${input} min-w-0`} value={it.text} maxLength={60} placeholder="ข้อความ" onChange={(e) => setTrust(trust.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
+              <LangInput className={`${input} min-w-0`} obj={it} k="text" maxLength={60} placeholder="ข้อความ" onPatch={(p) => setTrust(trust.map((x, j) => (j === i ? { ...x, ...p } : x)))} />
               <button type="button" onClick={() => setTrust(trust.filter((_, j) => j !== i))} className="shrink-0 w-8 h-8 rounded-lg border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-300" title="ลบ">
                 ×
               </button>
@@ -499,7 +532,7 @@ export function CartSettings({
             <input type="number" min={c.etaMin} max={90} className={input} value={c.etaMax} onChange={(e) => set({ etaMax: Math.max(c.etaMin, Math.min(90, Number(e.target.value) || 0)) })} />
           </label>
           <div className="col-span-2">
-            <Text label="ข้อความ ({from} {to} = วันที่)" value={c.etaText} onChange={(etaText) => set({ etaText })} placeholder="ได้รับประมาณ {from} – {to}" />
+            <Text label="ข้อความ ({from} {to} = วันที่)" obj={c} k="etaText" onPatch={set} placeholder="ได้รับประมาณ {from} – {to}" />
           </div>
         </div>
         <p className="text-[11px] text-slate-500">

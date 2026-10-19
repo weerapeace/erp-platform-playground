@@ -5,6 +5,7 @@
  * ข้อมูล/ตัวกรอง: lib/website-header-els (มิเรอร์ storefront src/lib/header-els.ts) · เว็บร้านวาดที่ Navbar
  * มีตัวอย่างสดบนพื้นสีหัวเว็บจริง (สีพื้น/สีตัวอักษรของ Header + สีหลัก)
  */
+import { LangInput } from "@/components/bilingual-field";
 import type { ReactNode } from "react";
 import { WheelSelect } from "@/components/wheel-select";
 import { Seg } from "@/components/website-block-editor";
@@ -78,7 +79,7 @@ export function HeaderCartSettings({ value, onChange, theme }: { value: HeaderCa
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className={lbl}>คำข้างไอคอน (ไม่ใส่ = ไอคอนอย่างเดียว · มือถือซ่อนคำ)</span>
-          <input className={input} value={value.label} maxLength={20} placeholder="เช่น ตะกร้า / Cart" onChange={(e) => onChange({ label: e.target.value })} />
+          <LangInput className={input} obj={value} k="label" maxLength={20} placeholder="เช่น ตะกร้า / Cart" onPatch={onChange} />
         </label>
         <label className="block">
           <span className={lbl}>ขนาดไอคอน</span>
@@ -138,14 +139,14 @@ export function HeaderSearchSettings({ value, onChange, theme }: { value: Header
         {value.style === "iconText" && (
           <label className="block">
             <span className={lbl}>คำข้างไอคอน</span>
-            <input className={input} value={value.label} maxLength={20} placeholder="ค้นหา" onChange={(e) => onChange({ label: e.target.value })} />
+            <LangInput className={input} obj={value} k="label" maxLength={20} placeholder="ค้นหา" onPatch={onChange} />
           </label>
         )}
         {value.style === "box" && (
           <>
             <label className="block">
               <span className={lbl}>ข้อความในช่อง</span>
-              <input className={input} value={value.placeholder} maxLength={40} placeholder="ค้นหาสินค้า…" onChange={(e) => onChange({ placeholder: e.target.value })} />
+              <LangInput className={input} obj={value} k="placeholder" maxLength={40} placeholder="ค้นหาสินค้า…" onPatch={onChange} />
             </label>
             <label className="block">
               <span className={lbl}>ความกว้างช่อง</span>

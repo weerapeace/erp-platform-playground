@@ -10,6 +10,7 @@
  * ระหว่างแก้: ส่ง window event "website-menu-pin" → หน้าดีไซน์สั่งพรีวิวเปิดแผงของเมนูนี้ค้างไว้
  * ข้อมูล/ตัวกรอง: lib/website-mega-menu (มิเรอร์ storefront src/lib/mega-menu.ts)
  */
+import { LangInput } from "@/components/bilingual-field";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { categoryChoiceLabel, categoryTree } from "@/lib/website-category-tree";
@@ -276,14 +277,17 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                 const auto = !!c && !l.label.trim();
                 return (
                   <>
-                    <input
+                    <LangInput
                       className={`${mini} flex-1 min-w-0 ${l.bold ? "font-semibold" : ""} ${auto ? "placeholder:text-slate-700" : ""}`}
                       style={l.textColor ? { color: l.textColor } : undefined}
-                      value={l.label}
+                      obj={l}
+                      k="label"
                       maxLength={60}
                       placeholder={c ? `${c.label}` : "ชื่อลิงก์"}
+                      // ชื่อตามหมวด (ไม่ได้ตั้งเอง) → โหมด EN เห็นชื่อหมวดภาษาอังกฤษเป็นตัวจาง
+                      enPlaceholder={c ? String((c as { label_en?: string }).label_en || c.label) : undefined}
                       title={auto ? "ชื่อตามหมวด — เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · พิมพ์ทับ = ตั้งชื่อเอง" : undefined}
-                      onChange={(e) => set(l.id, { label: e.target.value })}
+                      onPatch={(p) => set(l.id, p)}
                     />
                     {auto ? (
                       <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700" title="ชื่อตามหมวด (ไทย/อังกฤษ) — เปลี่ยนชื่อหมวดในแท็บ 📂 หมวดหมู่ แล้วเมนูเปลี่ยนตามเอง">
@@ -330,8 +334,8 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                     <ImageUploadField label="รูปเล็ก" value={l.imageKey} onChange={(k) => set(l.id, { imageKey: k })} height={36} />
                   </span>
                 )}
-                <input className={`${mini} flex-1 min-w-[8rem]`} value={l.desc} maxLength={120} placeholder="คำอธิบายสั้น (ไม่ใส่ก็ได้)" onChange={(e) => set(l.id, { desc: e.target.value })} />
-                <input className={`${mini} w-20`} value={l.badge} maxLength={20} placeholder="ป้าย" title="ป้ายเล็ก เช่น ใหม่ / ลด" onChange={(e) => set(l.id, { badge: e.target.value })} />
+                <LangInput className={`${mini} flex-1 min-w-[8rem]`} obj={l} k="desc" maxLength={120} placeholder="คำอธิบายสั้น (ไม่ใส่ก็ได้)" onPatch={(p) => set(l.id, p)} />
+                <LangInput className={`${mini} w-20`} obj={l} k="badge" maxLength={20} placeholder="ป้าย" title="ป้ายเล็ก เช่น ใหม่ / ลด" onPatch={(p) => set(l.id, p)} />
               </div>
             )}
             {more && (
@@ -430,8 +434,8 @@ function CardsEditor({ cards, onChange, ctx }: { cards: MegaCard[]; onChange: (c
             <ImageUploadField label="รูป" value={c.imageKey} onChange={(k) => set(c.id, { imageKey: k })} height={44} />
           </div>
           <div className="flex-1 min-w-0 space-y-1">
-            <input className={`${mini} w-full`} value={c.title} maxLength={60} placeholder="ชื่อ เช่น Alpha Bravo" onChange={(e) => set(c.id, { title: e.target.value })} />
-            <input className={`${mini} w-full`} value={c.desc} maxLength={160} placeholder="คำอธิบายสั้น" onChange={(e) => set(c.id, { desc: e.target.value })} />
+            <LangInput className={`${mini} w-full`} obj={c} k="title" maxLength={60} placeholder="ชื่อ เช่น Alpha Bravo" onPatch={(p) => set(c.id, p)} />
+            <LangInput className={`${mini} w-full`} obj={c} k="desc" maxLength={160} placeholder="คำอธิบายสั้น" onPatch={(p) => set(c.id, p)} />
             <div className="flex items-center gap-1">
               <div className="flex-1 min-w-0">
                 <LinkField value={c.href} onChange={(href) => set(c.id, { href })} ctx={ctx.link} />
@@ -463,7 +467,7 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
         <LinkField value={b.titleHref} onChange={(titleHref) => set({ titleHref })} ctx={ctx.link} />
       </div>
       <IssueBadge href={b.titleHref} />
-      <input className={`${mini} flex-1 min-w-[9rem]`} value={b.moreLabel} maxLength={40} placeholder='ท้ายคอลัมน์ เช่น "ดูทั้งหมด →" (ไปลิงก์หัวคอลัมน์)' onChange={(e) => set({ moreLabel: e.target.value })} />
+      <LangInput className={`${mini} flex-1 min-w-[9rem]`} obj={b} k="moreLabel" maxLength={40} placeholder='ท้ายคอลัมน์ เช่น "ดูทั้งหมด →" (ไปลิงก์หัวคอลัมน์)' onPatch={set} />
     </div>
   );
   switch (b.kind) {
@@ -622,7 +626,7 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
           <div className="grid gap-2 sm:grid-cols-[9rem_1fr]">
             <ImageUploadField label="รูปเด่น" value={b.imageKey} onChange={(k) => set({ imageKey: k })} height={72} />
             <div className="space-y-1.5">
-              <input className={`${mini} w-full`} value={b.caption} maxLength={120} placeholder="ข้อความบนรูป เช่น “The Valérie” ดูคอลเลกชัน" onChange={(e) => set({ caption: e.target.value })} />
+              <LangInput className={`${mini} w-full`} obj={b} k="caption" maxLength={120} placeholder="ข้อความบนรูป เช่น “The Valérie” ดูคอลเลกชัน" onPatch={set} />
               <div className="flex items-center gap-1">
                 <div className="flex-1 min-w-0">
                   <LinkField value={b.href} onChange={(href) => set({ href })} ctx={ctx.link} />
@@ -664,7 +668,7 @@ function GroupsEditor({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBloc
         <div key={g.id} {...drag.rowProps(i)} className={`rounded-md border border-slate-200 bg-slate-50/60 p-1.5 ${drag.rowCls(i)}`}>
           <div className="flex items-center gap-1">
             <DragHandle {...drag.handleProps(i)} />
-            <input className={`${mini} flex-1 min-w-0 font-medium`} value={g.label} maxLength={60} placeholder="หัวข้อ เช่น กระเป๋าผู้หญิง" onChange={(e) => setG(g.id, { label: e.target.value })} />
+            <LangInput className={`${mini} flex-1 min-w-0 font-medium`} obj={g} k="label" maxLength={60} placeholder="หัวข้อ เช่น กระเป๋าผู้หญิง" onPatch={(p) => setG(g.id, p)} />
             <IssueBadge href={g.href} />
             <div className="w-36 shrink-0">
               <LinkField value={g.href} onChange={(href) => setG(g.id, { href })} ctx={ctx.link} />
@@ -756,7 +760,7 @@ function BlocksEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p
                 {KIND_ICON[b.kind]} {kind?.label}
                 {b.kind === "links" && b.auto ? " ⚡" : ""}
               </span>
-              <input className={`${mini} flex-1 min-w-0`} value={b.title} maxLength={60} placeholder="หัวคอลัมน์ (ไม่ใส่ก็ได้)" onChange={(e) => set(b.id, { title: e.target.value })} />
+              <LangInput className={`${mini} flex-1 min-w-0`} obj={b} k="title" maxLength={60} placeholder="หัวคอลัมน์ (ไม่ใส่ก็ได้)" onPatch={(p) => set(b.id, p)} />
               <WheelSelect value={b.span} onChange={(e) => set(b.id, { span: Number(e.target.value) })} title="ความกว้างของคอลัมน์นี้ (ชี้แล้วหมุนลูกกลิ้งได้)">
                 {range(MEGA_LIMITS.span[0], MEGA_LIMITS.span[1]).map((n) => (
                   <option key={n} value={n}>กว้าง {n} ส่วน</option>
@@ -844,7 +848,7 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
           <div key={t.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
             <div className="flex items-center gap-1.5 px-2 py-1.5">
               <DragHandle {...drag.handleProps(i)} />
-              <input className={`${mini} flex-1 min-w-0 font-medium`} value={t.label} maxLength={40} placeholder="ชื่อแท็บ เช่น EVERYDAY" onChange={(e) => set(t.id, { label: e.target.value })} />
+              <LangInput className={`${mini} flex-1 min-w-0 font-medium`} obj={t} k="label" maxLength={40} placeholder="ชื่อแท็บ เช่น EVERYDAY" onPatch={(p) => set(t.id, p)} />
               <IssueBadge href={t.href} />
               <div className="w-36 shrink-0">
                 <LinkField value={t.href} onChange={(href) => set(t.id, { href })} ctx={ctx.link} />
@@ -934,7 +938,7 @@ function PanelLook({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: M
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-slate-500 shrink-0">แถบข้อความใต้แผง</span>
-            <input className={`${mini} flex-1 min-w-[10rem]`} value={panel.promo} maxLength={120} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · ผ่อน 0% 10 เดือน" onChange={(e) => onChange({ ...panel, promo: e.target.value })} />
+            <LangInput className={`${mini} flex-1 min-w-[10rem]`} obj={panel} k="promo" maxLength={120} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · ผ่อน 0% 10 เดือน" onPatch={(p) => onChange({ ...panel, ...p })} />
             {panel.promo && (
               <div className="w-40">
                 <LinkField value={panel.promoHref} onChange={(promoHref) => onChange({ ...panel, promoHref })} ctx={ctx.link} />
@@ -1190,7 +1194,7 @@ export function MegaMenuEditor({ itemId, panel, onChange, ctx }: { itemId: strin
           {panel.layout === "tabs" ? <TabsEditor panel={panel} onChange={onChange} ctx={ctx} /> : <BlocksEditor panel={panel} onChange={onChange} ctx={ctx} />}
           <label className="flex items-center gap-2">
             <span className="text-[11px] text-slate-500 shrink-0">ลิงก์ท้ายแผง</span>
-            <input className={`${mini} flex-1`} value={panel.viewAllLabel} maxLength={40} placeholder='เช่น "ดูสินค้าทั้งหมด →" (ไม่ใส่ = ไม่โชว์ · ไปที่ลิงก์ของเมนูนี้)' onChange={(e) => onChange({ ...panel, viewAllLabel: e.target.value })} />
+            <LangInput className={`${mini} flex-1`} obj={panel} k="viewAllLabel" maxLength={40} placeholder='เช่น "ดูสินค้าทั้งหมด →" (ไม่ใส่ = ไม่โชว์ · ไปที่ลิงก์ของเมนูนี้)' onPatch={(p) => onChange({ ...panel, ...p })} />
           </label>
           <PanelLook panel={panel} onChange={onChange} ctx={ctx} />
         </div>

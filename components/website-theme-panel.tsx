@@ -24,7 +24,10 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart, type ImagePlaceholder } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
-import { TranslateButton } from "@/components/translation-table";
+import { PathsLangBar, TranslateButton } from "@/components/translation-table";
+import { ContentLangProvider, LangInput } from "@/components/bilingual-field";
+import { previewInEnglish } from "@/lib/website-i18n";
+import type { ContentLang } from "@/lib/content-i18n";
 import { THEME_TEXT_KEYS, themeCrumb } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
@@ -290,6 +293,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [tab, setTab] = useState<TabKey>("colors");
+  // 🌐 ภาษาที่กำลังแก้ทั้งหน้าดีไซน์ (ไทย | EN) — ช่องข้อความ LangInput / Text สลับตาม · พรีวิวเป็นหน้า /en
+  const [contentLang, setContentLang] = useState<ContentLang>("th");
   const [device, setDevice] = useState<Device>("desktop");
   const [zoom, setZoom] = useState<Zoom>("fit");
   const [page, setPage] = useState("/");
@@ -811,7 +816,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const mobCount = mobileOverrideCount(mob);
 
   const dev = DEVICES.find((d) => d.k === device)!;
-  const previewSrc = siteUrl ? `${siteUrl}${withPreview(page)}` : null;
+  const previewSrcTh = siteUrl ? `${siteUrl}${withPreview(page)}` : null;
+  // 🌐 กำลังแก้ภาษาอังกฤษ → พรีวิวหน้าเว็บฉบับ /en (ลูกค้าภาษาอังกฤษเห็นแบบนี้)
+  const previewSrc = previewSrcTh && contentLang === "en" ? previewInEnglish(previewSrcTh) : previewSrcTh;
   const scale = zoom === "fit" ? Math.min(1, Math.max(0.1, (boxW - 16) / dev.w)) : zoom;
   // สูงพอให้เนื้อเว็บเต็มกล่องหลังย่อแล้ว (ไม่งั้นเหลือที่ว่างข้างล่าง)
   const frameH = Math.max(dev.h, Math.round((boxH - 16) / scale));
@@ -896,7 +903,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           </div>
           <div>
             <label className={labelCls}>ชื่อร้าน</label>
-            <input className={inputCls} value={theme.logo.text} onChange={(e) => setLogo({ text: e.target.value })} />
+            <LangInput className={inputCls} obj={theme.logo} k="text" onPatch={setLogo} />
           </div>
         </div>
       </div>
@@ -950,6 +957,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   );
 
   return (
+    <ContentLangProvider lang={contentLang} onLangChange={setContentLang}>
     <div className="space-y-3">
       {/* แถบสถานะ */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
@@ -1006,6 +1014,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               description="แก้แล้วกด บันทึกร่าง / เผยแพร่ ของหน้านี้ตามปกติ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
             />
           </div>
+
+          {/* 🌐 สลับภาษาที่กำลังแก้ทั้งหน้า (เหมือนตัวจัดหน้า) — EN = ทุกช่องข้อความเป็นภาษาอังกฤษ + พรีวิวหน้า /en · แปลที่ยังขาดทั้งธีม */}
+          <PathsLangBar value={theme} onChange={(next) => apply(next)} keys={THEME_TEXT_KEYS} />
+          {contentLang === "en" && (
+            <p className="text-[11px] text-indigo-700 bg-indigo-50/60 border border-indigo-100 rounded-lg px-2.5 py-1.5">
+              🌐 กำลังแก้ภาษาอังกฤษ — ช่องกรอบม่วง = ข้อความที่ลูกค้าหน้า /en เห็น · ช่องที่ยังว่าง ลูกค้าเห็นภาษาไทย (ตัวจางในช่อง) · สี / รูป / สวิตช์ ใช้ร่วมกันทั้ง 2 ภาษา · พรีวิวขวาเป็นหน้า /en
+            </p>
+          )}
 
           {/* ── สี ── */}
           {tab === "colors" && (
@@ -1276,7 +1292,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
                 <div>
                   <label className={labelCls}>ข้อความปุ่มใน Header (ว่าง = ไม่มีปุ่ม)</label>
-                  <input className={inputCls} value={theme.header.button.text} maxLength={30} placeholder="เช่น ช้อปเลย" onChange={(e) => setHeader({ button: { ...theme.header.button, text: e.target.value } })} />
+                  <LangInput className={inputCls} obj={theme.header.button} k="text" maxLength={30} placeholder="เช่น ช้อปเลย" onPatch={(p) => setHeader({ button: { ...theme.header.button, ...p } })} />
                 </div>
                 <div>
                   <label className={labelCls}>ลิงก์ของปุ่ม</label>
@@ -2001,7 +2017,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             <div className="border-t border-slate-100 px-3 py-3 grid gap-3 sm:grid-cols-2">
                               <div>
                                 <label className={labelCls}>ชื่อหัวข้อ</label>
-                                <input className={inputCls} value={it.label} onChange={(e) => setDetailItem(it.id, { label: e.target.value })} maxLength={60} />
+                                <LangInput className={inputCls} obj={it} k="label" onPatch={(p) => setDetailItem(it.id, p)} maxLength={60} />
                               </div>
                               <div>
                                 <label className={labelCls}>เอาข้อมูลจาก</label>
@@ -2083,7 +2099,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                               {it.source === "text" && (
                                 <div className="sm:col-span-2">
                                   <label className={labelCls}>ข้อความ</label>
-                                  <textarea className={`${inputCls} min-h-[96px]`} value={it.text} onChange={(e) => setDetailItem(it.id, { text: e.target.value })} maxLength={4000} placeholder={"เช่น รับประกันงานเย็บ 6 เดือน\nเช็ดด้วยผ้าแห้ง หลีกเลี่ยงแสงแดดจัด"} />
+                                  <LangInput multiline className={`${inputCls} min-h-[96px]`} obj={it} k="text" onPatch={(p) => setDetailItem(it.id, p)} maxLength={4000} placeholder={"เช่น รับประกันงานเย็บ 6 เดือน\nเช็ดด้วยผ้าแห้ง หลีกเลี่ยงแสงแดดจัด"} />
                                   <p className="text-[11px] text-slate-400 mt-1">ขึ้นบรรทัดใหม่ได้ · ใช้กับทุกรุ่นที่เลือกด้านล่าง</p>
                                 </div>
                               )}
@@ -2451,6 +2467,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       </div>
 
     </div>
+    </ContentLangProvider>
   );
 }
 
@@ -2721,14 +2738,14 @@ function PartSettings({
             <select className={partInputCls} value={bn.titleSource} onChange={(e) => set({ titleSource: e.target.value as BannerPart["titleSource"] })}>
               {PART_CHOICES.bannerTitles.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            {bn.titleSource === "text" && <input className={`${partInputCls} mt-1.5`} value={bn.titleText} onChange={(e) => set({ titleText: e.target.value })} placeholder="หัวข้อแบนเนอร์" />}
+            {bn.titleSource === "text" && <LangInput className={`${partInputCls} mt-1.5`} obj={bn} k="titleText" onPatch={set} placeholder="หัวข้อแบนเนอร์" />}
           </div>
           <div>
             <label className={lbl}>ข้อความ</label>
             <select className={partInputCls} value={bn.textSource} onChange={(e) => set({ textSource: e.target.value as BannerPart["textSource"] })}>
               {PART_CHOICES.bannerTexts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            {bn.textSource === "text" && <textarea rows={3} className={`${partInputCls} mt-1.5`} value={bn.text} onChange={(e) => set({ text: e.target.value })} placeholder="ข้อความใต้หัวข้อ" />}
+            {bn.textSource === "text" && <LangInput multiline rows={3} className={`${partInputCls} mt-1.5`} obj={bn} k="text" onPatch={set} placeholder="ข้อความใต้หัวข้อ" />}
           </div>
           <div>
             <label className={lbl}>จัดวาง</label>
@@ -2777,7 +2794,7 @@ function PartSettings({
         </div>
         <div>
           <label className={lbl}>หัวข้อ (ว่าง = "สินค้าที่เกี่ยวข้อง")</label>
-          <input className={partInputCls} value={r.title} onChange={(e) => setPart("related", { title: e.target.value })} placeholder="เช่น คุณอาจชอบ · จับคู่กับรุ่นนี้" />
+          <LangInput className={partInputCls} obj={r} k="title" onPatch={(p) => setPart("related", p)} placeholder="เช่น คุณอาจชอบ · จับคู่กับรุ่นนี้" />
         </div>
         {r.source === "manual" && (
           <div>
@@ -2933,7 +2950,7 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                   {(it.key === "qty" || it.key === "options" || it.key === "options2") && (
                     <div>
                       <label className={lbl}>{it.key === "options2" ? "ป้ายกำกับ (ว่าง = ชื่อชุดจาก SKU เช่น ไซส์)" : "ป้ายกำกับ (ว่าง = ค่าเดิม)"}</label>
-                      <input className={partInputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder={it.key === "qty" ? "จำนวน" : it.key === "options2" ? "ไซส์" : "สี / ตัวเลือก"} />
+                      <LangInput className={partInputCls} obj={it} k="label" onPatch={(p) => setItem(it.id, p)} placeholder={it.key === "qty" ? "จำนวน" : it.key === "options2" ? "ไซส์" : "สี / ตัวเลือก"} />
                     </div>
                   )}
                   {/* 📐 ตัวเลือกที่ 2 (ไซส์) — ส่วนเสริมจากตารางไซส์ (เว็บไซต์ → 📏 ตารางไซส์) · ไม่มีตารางของสินค้านั้น = ไม่โชว์เอง */}
@@ -2948,7 +2965,7 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                     <div className="grid sm:grid-cols-2 gap-2">
                       <div>
                         <label className={lbl}>ข้อความบนปุ่ม (ว่าง = "ใส่ตะกร้า · ราคา")</label>
-                        <input className={partInputCls} value={it.label} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder="ใส่ตะกร้า · ฿890" />
+                        <LangInput className={partInputCls} obj={it} k="label" onPatch={(p) => setItem(it.id, p)} placeholder="ใส่ตะกร้า · ฿890" />
                       </div>
                       <div className="flex items-end gap-4 flex-wrap">
                         <div>
@@ -2966,14 +2983,14 @@ function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductParts["buy
                         {PART_CHOICES.buyNotes.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                       {buy.noteSource === "text" && (
-                        <input className={`${partInputCls} mt-1.5`} value={buy.noteText} onChange={(e) => onChange({ noteText: e.target.value })} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · จัดส่งใน 1–2 วัน" />
+                        <LangInput className={`${partInputCls} mt-1.5`} obj={buy} k="noteText" onPatch={onChange} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · จัดส่งใน 1–2 วัน" />
                       )}
                     </div>
                   )}
                   {it.key === "text" && (
                     <div>
                       <label className={lbl}>ข้อความ (ขึ้นบรรทัดใหม่ได้)</label>
-                      <textarea rows={3} className={partInputCls} value={it.text} onChange={(e) => setItem(it.id, { text: e.target.value })} placeholder={"✓ ส่งฟรีเมื่อครบ ฿1,500\n✓ รับประกันงานเย็บ 6 เดือน"} />
+                      <LangInput multiline rows={3} className={partInputCls} obj={it} k="text" onPatch={(p) => setItem(it.id, p)} placeholder={"✓ ส่งฟรีเมื่อครบ ฿1,500\n✓ รับประกันงานเย็บ 6 เดือน"} />
                       <div className="mt-1"><PartToggle label="ตัวหนา" on={it.bold} onChange={(v) => setItem(it.id, { bold: v })} /></div>
                     </div>
                   )}
@@ -3002,14 +3019,15 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
     color: string,
     param: React.ReactNode,
     set: (p: { on?: boolean; text?: string; color?: string }) => void,
-    placeholder: string
+    placeholder: string,
+    textKey: "saleText" | "newText" | "bestText"
   ) => (
     <div className={`flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 ${on ? "bg-white border border-slate-200" : "bg-slate-50"}`}>
       <label className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer w-24 shrink-0">
         <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={on} onChange={(e) => set({ on: e.target.checked })} />
         {label}
       </label>
-      <input className={`${mini} w-28`} value={text} maxLength={24} onChange={(e) => set({ text: e.target.value })} placeholder={placeholder} disabled={!on} />
+      <LangInput className={`${mini} w-28`} obj={ab} k={textKey} maxLength={24} onPatch={(p) => setAb(p)} placeholder={placeholder} disabled={!on} />
       {param}
       <span className="w-36"><ColorInput value={color} onChange={(v) => set({ color: v })} /></span>
       <span className="text-[11px] px-2 py-0.5 text-white" style={{ background: color, borderRadius: ab.shape === "pill" ? 99 : 3 }}>{text.replace("{pct}", "20") || placeholder}</span>
@@ -3028,7 +3046,7 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
               </WheelSelect>
             </label>,
             (p) => setAb({ ...(p.on !== undefined ? { sale: p.on } : {}), ...(p.text !== undefined ? { saleText: p.text } : {}), ...(p.color !== undefined ? { saleColor: p.color } : {}) }),
-            "ลด {pct}%")}
+            "ลด {pct}%", "saleText")}
           {badgeRow(ab.new, "สินค้าใหม่", ab.newText, ab.newColor,
             <label className="flex items-center gap-1 text-[11px] text-slate-500">ขึ้นเว็บภายใน
               <WheelSelect value={ab.newDays} disabled={!ab.new} onChange={(e) => setAb({ newDays: Number(e.target.value) })}>
@@ -3036,7 +3054,7 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
               </WheelSelect>
             </label>,
             (p) => setAb({ ...(p.on !== undefined ? { new: p.on } : {}), ...(p.text !== undefined ? { newText: p.text } : {}), ...(p.color !== undefined ? { newColor: p.color } : {}) }),
-            "ใหม่")}
+            "ใหม่", "newText")}
           {badgeRow(ab.best, "ขายดี", ab.bestText, ab.bestColor,
             <label className="flex items-center gap-1 text-[11px] text-slate-500">อันดับ 1 –
               <WheelSelect value={ab.bestTop} disabled={!ab.best} onChange={(e) => setAb({ bestTop: Number(e.target.value) })}>
@@ -3044,7 +3062,7 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
               </WheelSelect>
             </label>,
             (p) => setAb({ ...(p.on !== undefined ? { best: p.on } : {}), ...(p.text !== undefined ? { bestText: p.text } : {}), ...(p.color !== undefined ? { bestColor: p.color } : {}) }),
-            "ขายดี")}
+            "ขายดี", "bestText")}
         </div>
         <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-slate-600">
           <label className="flex items-center gap-1.5">มุมป้าย
@@ -3929,7 +3947,7 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
             <li key={it.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
               <div className="flex items-center gap-1.5 px-2 py-1.5">
                 <DragHandle {...drag.handleProps(i)} />
-                <input className={`${mini} flex-1 min-w-0`} value={it.label} maxLength={60} onChange={(e) => setItem(it.id, { label: e.target.value })} placeholder="ชื่อเมนู" />
+                <LangInput className={`${mini} flex-1 min-w-0`} obj={it} k="label" maxLength={60} onPatch={(p) => setItem(it.id, p)} placeholder="ชื่อเมนู" />
                 <select className={mini} value={it.kind} onChange={(e) => setItem(it.id, { kind: e.target.value as MenuKind, value: "" })}>
                   {MENU_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
                 </select>
@@ -3945,7 +3963,7 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
                     </div>
                     <div>
                       <label className="block text-[11px] text-slate-500 mb-1">ป้ายเล็ก (เช่น ใหม่ / ลด)</label>
-                      <input className={`${mini} w-full`} value={it.badge} maxLength={20} onChange={(e) => setItem(it.id, { badge: e.target.value })} />
+                      <LangInput className={`${mini} w-full`} obj={it} k="badge" maxLength={20} onPatch={(p) => setItem(it.id, p)} />
                     </div>
                   </div>
                   <ShowWindowFields from={it.showFrom} until={it.showUntil} onChange={(p) => setItem(it.id, p)} />
@@ -4015,7 +4033,7 @@ function FooterColumnsEditor({ columns, onChange, choices, pages }: { columns: F
                 <select className={mini} value={c.kind} onChange={(e) => setCol(c.id, { kind: e.target.value as FooterColKind })}>
                   {FOOTER_COL_DEFS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
                 </select>
-                <input className={`${mini} flex-1 min-w-0`} value={c.title} maxLength={60} placeholder={def.defaultTitle || "หัวข้อ (ไม่บังคับ)"} onChange={(e) => setCol(c.id, { title: e.target.value })} />
+                <LangInput className={`${mini} flex-1 min-w-0`} obj={c} k="title" maxLength={60} placeholder={def.defaultTitle || "หัวข้อ (ไม่บังคับ)"} onPatch={(p) => setCol(c.id, p)} />
                 <select className={mini} value={c.width} onChange={(e) => setCol(c.id, { width: Number(e.target.value) === 2 ? 2 : 1 })} title="ความกว้าง">
                   <option value={1}>กว้าง 1</option>
                   <option value={2}>กว้าง 2</option>
@@ -4029,7 +4047,7 @@ function FooterColumnsEditor({ columns, onChange, choices, pages }: { columns: F
                   {(c.kind === "text" || c.kind === "about" || c.kind === "newsletter") && (
                     <div>
                       <label className="block text-[11px] text-slate-500 mb-1">{c.kind === "about" ? "คำอธิบาย (ว่าง = ใช้คำอธิบายร้านจากแท็บข้อมูลร้าน)" : "ข้อความ"}</label>
-                      <textarea className="w-full rounded-lg border border-slate-200 text-xs px-2 py-1.5 bg-white text-slate-700" rows={3} value={c.text} onChange={(e) => setCol(c.id, { text: e.target.value })} />
+                      <LangInput multiline className="w-full rounded-lg border border-slate-200 text-xs px-2 py-1.5 bg-white text-slate-700" rows={3} obj={c} k="text" onPatch={(p) => setCol(c.id, p)} />
                     </div>
                   )}
                   {c.kind === "links" && (

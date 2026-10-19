@@ -165,3 +165,40 @@ export function TranslateButton<T>({
     </>
   );
 }
+
+/**
+ * 🌐 แถบภาษาของ "ทั้งแผง" (ข้อมูลซ้อนหลายชั้น เช่น ธีมทั้งก้อน) — สวิตช์ ไทย | EN + อังกฤษ x/y + 🌐 แปลที่ยังขาด
+ * ใช้ใน ContentLangProvider คู่กับช่อง LangInput / BilingualText · แปลด้วย AI แล้วติดป้าย "AI รอตรวจ" (ช่องที่แปล/แก้เองไม่ถูกทับ)
+ */
+export function PathsLangBar<T>({
+  value,
+  onChange,
+  keys,
+  className = "",
+}: {
+  value: T;
+  onChange: (next: T) => void;
+  keys: readonly string[];
+  className?: string;
+}) {
+  const slots = useMemo(() => collectTextPaths(value, keys), [value, keys]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const translateMissing = async () => {
+    const todo = slots.filter((s) => s.status === "empty" || s.status === "stale");
+    if (!todo.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await translateContent(todo.map((s) => s.th));
+      const results = todo.map((slot, i) => ({ slot, en: (out[i] ?? "").trim() })).filter((r) => r.en);
+      if (!results.length) throw new Error("แปลไม่สำเร็จ ลองใหม่อีกครั้ง");
+      onChange(applyPathTranslations(value, results, true));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "แปลไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <TranslationBar className={className} coverage={coverageOf(slots)} busy={busy} error={error} onTranslateMissing={() => void translateMissing()} />;
+}

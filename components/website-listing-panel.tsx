@@ -4,6 +4,7 @@
  * ของกลาง: useDragReorder/DragHandle (ลากเรียง) · ImageUploadField (อัปโหลดรูป) · ConfirmDialog (ลบ)
  * ตรรกะ/ค่าที่เลือกได้อยู่ lib/website-listing.ts · storefront วาดใน ShopClient + ListingInsertTile
  */
+import { LangInput } from "@/components/bilingual-field";
 import { useState } from "react";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
@@ -233,11 +234,11 @@ export function ListingPanel({
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div>
                       <label className={lbl}>หัวข้อทับรูป (ไม่บังคับ)</label>
-                      <input className={inputCls} value={x.title} maxLength={120} onChange={(e) => patch(x.id, { title: e.target.value })} placeholder="เช่น NEW ARRIVAL" />
+                      <LangInput className={inputCls} obj={x} k="title" maxLength={120} onPatch={(p) => patch(x.id, p)} placeholder="เช่น NEW ARRIVAL" />
                     </div>
                     <div>
                       <label className={lbl}>ข้อความรอง (ไม่บังคับ)</label>
-                      <input className={inputCls} value={x.text} maxLength={300} onChange={(e) => patch(x.id, { text: e.target.value })} placeholder="เช่น คอลเลกชันใหม่ ช้อปเลย →" />
+                      <LangInput className={inputCls} obj={x} k="text" maxLength={300} onPatch={(p) => patch(x.id, p)} placeholder="เช่น คอลเลกชันใหม่ ช้อปเลย →" />
                     </div>
                     {(x.title || x.text) && (
                       <>

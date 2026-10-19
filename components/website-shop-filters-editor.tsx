@@ -5,6 +5,7 @@
  * ฟิลด์สินค้า (ฟิลด์ Parent SKU ที่ส่งออกเว็บ) เพิ่มเป็นตัวกรองได้: ค่าตรงตัว หรือ "จัดกลุ่มด้วยคำ" (เช่น วัสดุ: หนัง = มีคำว่า หนัง/leather)
  * ของกลาง: useDragReorder/DragHandle · ColorToneButton (จัดโทนสี) · ตรรกะ/ค่าตั้งต้น lib/website-listing.ts · เว็บร้านคำนวณใน src/lib/shop-filters.ts
  */
+import { LangInput } from "@/components/bilingual-field";
 import { useState } from "react";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { ColorToneButton } from "@/components/color-tone-manager";
@@ -186,9 +187,11 @@ export function ShopFiltersEditor({
               <p className="text-[11px] text-slate-400">ตัวเลือกบนเว็บ = ชื่อกลุ่ม · สินค้าเข้ากลุ่มเมื่อค่าในฟิลด์มีคำใดคำหนึ่ง (ไม่สนตัวพิมพ์เล็ก/ใหญ่) · 1 สินค้าเข้าได้หลายกลุ่ม</p>
               {kws.map((k, i) => (
                 <div key={i} className="flex items-center gap-1.5">
-                  <input
-                    value={k.label}
-                    onChange={(e) => setKw(f, kws.map((x, j) => (j === i ? { ...x, label: e.target.value.slice(0, 40) } : x)))}
+                  <LangInput
+                    obj={k}
+                    k="label"
+                    maxLength={40}
+                    onPatch={(p) => setKw(f, kws.map((x, j) => (j === i ? { ...x, ...p } : x)))}
                     placeholder="ชื่อกลุ่ม เช่น หนัง"
                     className={`${inputCls} w-32`}
                   />
@@ -227,7 +230,7 @@ export function ShopFiltersEditor({
               <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
                 <DragHandle {...drag.handleProps(i)} />
                 <input type="checkbox" checked={f.enabled} onChange={(e) => patch(f.id, { enabled: e.target.checked })} className="w-4 h-4 accent-blue-600" title="เปิดใช้" />
-                <input value={f.label} onChange={(e) => patch(f.id, { label: e.target.value.slice(0, 40) })} className={`${inputCls} w-32`} aria-label="ชื่อที่ลูกค้าเห็น" />
+                <LangInput obj={f} k="label" maxLength={40} onPatch={(p) => patch(f.id, p)} className={`${inputCls} w-32`} ariaLabel="ชื่อที่ลูกค้าเห็น" />
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 whitespace-nowrap">
                   {f.kind === "field" ? `ฟิลด์: ${fieldLabel(f.field)}${f.mode === "keywords" ? " · กลุ่มคำ" : ""}` : SHOP_FILTER_KIND_LABEL[f.kind]}
                 </span>
