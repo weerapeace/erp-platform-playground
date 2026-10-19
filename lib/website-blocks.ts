@@ -381,8 +381,21 @@ export interface LookbookBlock extends BlockBase {
   viewStyle?: "outline" | "brand" | "dark" | "link";
   showTotal?: boolean;
   totalText?: string;
-  /** code = หลายสินค้าต่อจุดได้ (ตัวแรก = หลัก) · label = ป้ายข้างจุด */
-  spots: (ChildBase & { code: string[]; label?: string; pos: { x: number; y: number }; popSide: "auto" | "right" | "left" | "top" | "bottom"; note: string })[];
+  /** 🎞 สไลด์: single = ลุคเดียว (เดิม) · slides = หลายลุค (imageKey = ลุค 1 · imageKey2–6) · joinPrev = ต่อสไลด์กับลุคบุ๊กก่อนหน้า */
+  mode?: "single" | "slides";
+  imageKey2?: string | null;
+  imageKey3?: string | null;
+  imageKey4?: string | null;
+  imageKey5?: string | null;
+  imageKey6?: string | null;
+  lookNames?: string[];
+  joinPrev?: boolean;
+  slideNav?: "both" | "arrows" | "dots";
+  slideEffect?: "slide" | "fade";
+  slideAuto?: boolean;
+  slideSec?: number;
+  /** code = หลายสินค้าต่อจุดได้ (ตัวแรก = หลัก) · label = ป้ายข้างจุด · look = อยู่ลุคที่ ("1"–"6") */
+  spots: (ChildBase & { code: string[]; label?: string; look?: string; pos: { x: number; y: number }; popSide: "auto" | "right" | "left" | "top" | "bottom"; note: string })[];
 }
 /** 📖 การ์ดคอลเลกชัน (คอลเลกชันที่เปิดหน้าไว้ · แท็บ 🎞 คอลเลกชัน) */
 export interface CollectionsBlock extends BlockBase {

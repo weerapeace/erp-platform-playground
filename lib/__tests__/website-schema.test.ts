@@ -307,3 +307,21 @@ describe("slideshow: รูปทรง / ปุ่มเลื่อน / ต�
     expect(norm({ shape: "7:3", transition: "spin", slides: [{ imageKey: "a/b.jpg", textPos: "nowhere" }] })).toMatchObject({ shape: "height", transition: "fade" });
   });
 });
+
+describe("ลุคบุ๊กแบบสไลด์ (หลายลุคในกล่องเดียว + ต่อกล่องเป็นสไลด์)", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "lb", type: "lookbook", ...b }])[0] as unknown as Record<string, unknown> & { spots: Record<string, unknown>[] };
+
+  it("ลุคบุ๊กเก่า = ลุคเดียว ไม่ต่อสไลด์ · จุดอยู่ลุค 1", () => {
+    const b = norm({ imageKey: "a/b.jpg", spots: [{ code: ["ROAR01"], pos: { x: 30, y: 40 } }] });
+    expect(b).toMatchObject({ mode: "single", joinPrev: false, slideNav: "both", slideEffect: "slide", slideAuto: false, lookNames: [] });
+    expect(b.spots[0].look).toBe("1");
+  });
+
+  it("หลายลุค: รูปลุค 2–6 + ชื่อลุค (แปล EN ได้) + จุดเลือกลุค · ลุคที่ไม่มีรูป = เตือน", () => {
+    const b = norm({ mode: "slides", imageKey: "a/1.jpg", imageKey2: "a/2.jpg", lookNames: ["ลุคทำงาน", "ลุควันหยุด"], lookNames_en: ["Office", "Weekend"], spots: [{ code: ["A"], look: "2" }, { code: ["B"], look: "3" }, { code: ["C"], look: "9" }] });
+    expect(b).toMatchObject({ mode: "slides", imageKey2: "a/2.jpg", lookNames: ["ลุคทำงาน", "ลุควันหยุด"], lookNames_en: ["Office", "Weekend"] });
+    expect(b.spots.map((x) => x.look)).toEqual(["2", "3", "1"]);
+    const msgs = validateBlocks([b as unknown as Block]).map((x) => x.message).join(" ");
+    expect(msgs).toMatch(/ลุค 3/);
+  });
+});

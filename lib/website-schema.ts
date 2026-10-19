@@ -130,6 +130,13 @@ export interface FieldDef {
   /** ช่องชนิด point: key ของรูปใน Section แม่ (หรือชิ้นเดียวกัน) ที่ใช้คลิกวางจุด เช่น "imageKey" */
   pointImage?: string;
   /**
+   * ช่องชนิด point: key ในชิ้นเดียวกันที่บอก "ลุคที่" (เช่น "look" = "1".."6") → ใช้รูป `${pointImage}${n}` ของ Section แม่
+   * (ลุค 1 = pointImage เดิม) · จุดพี่น้องที่โชว์จาง ๆ = เฉพาะลุคเดียวกัน
+   */
+  pointLook?: string;
+  /** ชิ้นย่อย: โชว์ช่องนี้เฉพาะเมื่อ Section แม่มีค่าตามนี้ (เช่น { key: "mode", eq: "slides" }) */
+  showIfParent?: ShowIf | ShowIf[];
+  /**
    * 🌐 2 ภาษา — ช่องข้อความ (text/textarea/link/list) แปลได้อัตโนมัติ (เก็บอังกฤษใน `<key>_en`)
    * ใส่ false กับช่องที่ "ไม่ใช่ภาษา" เช่น รหัสกลุ่ม · ชื่อบัญชี IG · บันทึกช่วยจำที่ไม่แสดงบนเว็บ
    * กติกากลาง: lib/content-i18n.ts · lib/website-i18n.ts
@@ -1357,7 +1364,19 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     meta: { label: "ลุคบุ๊กกดซื้อได้", icon: "🛍", hint: "รูปนายแบบ + จุดกดดูสินค้า", group: "สินค้า" },
     fields: [
       ...headFields({ eyebrow: "Shop the look", title: "", subtitle: true }),
-      image("imageKey", "รูปลุค", { required: true, requiredMessage: "ยังไม่ได้เลือกรูปลุค", hint: "รูปนายแบบ/ไลฟ์สไตล์ · โชว์เต็มรูปไม่ตัด · วางจุดในแต่ละ \"จุดบนรูป\" ด้านล่าง" }),
+      f("mode", "จำนวนลุค", "select", {
+        group: "media",
+        default: "single",
+        wide: true,
+        options: [
+          { v: "single", l: "ลุคเดียว (แบบเดิม)" },
+          { v: "slides", l: "หลายลุค — เลื่อนเป็นสไลด์" },
+        ],
+        hint: "หลายลุค = ใส่รูปลุค 2–6 แล้วเลือกว่าแต่ละจุดอยู่ลุคไหน · อยากแยกกล่องทีละลุคก็ได้: ติ๊ก \"ต่อเป็นสไลด์กับลุคบุ๊กก่อนหน้า\" ที่กล่องถัดไป",
+      }),
+      image("imageKey", "รูปลุค", { required: true, requiredMessage: "ยังไม่ได้เลือกรูปลุค", hint: "รูปนายแบบ/ไลฟ์สไตล์ · โชว์เต็มรูปไม่ตัด · วางจุดในแต่ละ \"จุดบนรูป\" ด้านล่าง (หลายลุค = รูปลุค 1)" }),
+      ...[2, 3, 4, 5, 6].map((n) => image(`imageKey${n}`, `รูปลุค ${n}`, { showIf: { key: "mode", eq: "slides" }, hint: n === 2 ? "ว่าง = ไม่มีลุคนี้ (ข้ามไป)" : undefined })),
+      f("lookNames", "ชื่อลุค (บรรทัดละลุค เรียงตามลุค 1, 2, 3 …)", "list", { group: "media", max: 6, default: [], showIf: { key: "mode", eq: "slides" }, hint: "โชว์ใต้สไลด์ · ว่าง = ไม่มีชื่อ" }),
       f("imgFrame", "มุมรูปลุค", "select", {
         group: "media",
         default: "rounded",
@@ -1376,6 +1395,33 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         ],
         showIf: { key: "layout", eq: "side" },
       }),
+      f("joinPrev", "ต่อเป็นสไลด์กับลุคบุ๊กก่อนหน้า", "toggle", {
+        group: "layout",
+        default: false,
+        hint: "กล่องลุคบุ๊กที่ติดกันรวมเป็นสไลด์ชุดเดียวบนเว็บ (หัวข้อ/ปุ่มเลื่อน ใช้ของกล่องแรก) · แก้ลุคนี้ที่ต้นไม้ด้านซ้าย",
+      }),
+      f("slideNav", "สไลด์: ปุ่มเลื่อน", "select", {
+        group: "layout",
+        default: "both",
+        options: [
+          { v: "both", l: "ลูกศร ‹ › + จุด" },
+          { v: "arrows", l: "ลูกศรอย่างเดียว" },
+          { v: "dots", l: "จุดอย่างเดียว" },
+        ],
+        showIf: { key: "mode", eq: ["slides", true], orKey: "joinPrev" },
+        hint: "มือถือปัดซ้าย-ขวาได้เสมอ",
+      }),
+      f("slideEffect", "สไลด์: แบบเปลี่ยน", "select", {
+        group: "layout",
+        default: "slide",
+        options: [
+          { v: "slide", l: "เลื่อน" },
+          { v: "fade", l: "จางเปลี่ยน" },
+        ],
+        showIf: { key: "mode", eq: ["slides", true], orKey: "joinPrev" },
+      }),
+      f("slideAuto", "สไลด์: เลื่อนเอง", "toggle", { group: "layout", default: false, showIf: { key: "mode", eq: ["slides", true], orKey: "joinPrev" }, hint: "หยุดเมื่อลูกค้าชี้/แตะ" }),
+      f("slideSec", "เลื่อนทุก (วินาที)", "number", { group: "layout", default: 6, min: 3, numMax: 20, showIf: [{ key: "mode", eq: ["slides", true], orKey: "joinPrev" }, { key: "slideAuto", eq: true }] }),
       f("sideMode", "แผงข้างรูป", "select", {
         group: "layout",
         default: "card",
@@ -1551,7 +1597,13 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       fields: [
         f("code", "สินค้าของจุดนี้ (เลือกได้หลายตัว)", "products", { max: 6, wide: true, hint: "ตัวแรก = ตัวหลัก · มากกว่า 1 ตัว = การ์ดเลื่อนดูได้ (‹ 1/3 ›)" }),
         text("label", "ป้ายข้างจุด", { default: "", max: 40, placeholder: "ว่าง = ชื่อสินค้าตัวแรก", hint: "โชว์เมื่อเปิด \"ป้ายชื่อสินค้าข้างจุด\"" }),
-        f("pos", "ตำแหน่งบนรูป", "point", { pointImage: "imageKey", wide: true }),
+        f("look", "อยู่ลุคที่", "select", {
+          default: "1",
+          options: ["1", "2", "3", "4", "5", "6"].map((v) => ({ v, l: `ลุค ${v}` })),
+          showIfParent: { key: "mode", eq: "slides" },
+          hint: "จุดนี้อยู่บนรูปลุคไหน (ตั้งรูปลุคไว้ด้านบน)",
+        }),
+        f("pos", "ตำแหน่งบนรูป", "point", { pointImage: "imageKey", pointLook: "look", wide: true }),
         f("popSide", "การ์ดเด้งด้านไหนของจุด", "select", {
           default: "auto",
           options: [
@@ -1567,8 +1619,18 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       ],
       summary: (it) => (Array.isArray(it.code) && it.code.length ? `${it.code[0]}${it.code.length > 1 ? ` +${it.code.length - 1}` : ""}` : "ยังไม่เลือกสินค้า"),
     },
-    summary: (b) => `${count(arr(b.spots).length, "จุด")}${Array.isArray(b.more) && b.more.length ? ` · +${b.more.length} สินค้าเพิ่มเติม` : ""}`,
-    validate: (b, label) => (arr(b.spots).some((x) => !(Array.isArray(x.code) && x.code.length)) ? [{ level: "warning", message: `${label}: บางจุดยังไม่เลือกสินค้า` }] : []),
+    summary: (b) =>
+      `${b.mode === "slides" ? `${[1, 2, 3, 4, 5, 6].filter((n) => (n === 1 ? b.imageKey : b[`imageKey${n}`])).length} ลุค · ` : ""}${b.joinPrev ? "ต่อสไลด์ · " : ""}${count(arr(b.spots).length, "จุด")}${Array.isArray(b.more) && b.more.length ? ` · +${b.more.length} สินค้าเพิ่มเติม` : ""}`,
+    validate: (b, label) => {
+      const out: Omit<ValidationIssue, "blockId">[] = [];
+      if (arr(b.spots).some((x) => !(Array.isArray(x.code) && x.code.length))) out.push({ level: "warning", message: `${label}: บางจุดยังไม่เลือกสินค้า` });
+      // หลายลุค: จุดที่อยู่ลุคซึ่งยังไม่มีรูป = ลูกค้าไม่เห็น
+      if (b.mode === "slides") {
+        const miss = [...new Set(arr(b.spots).map((x) => String(x.look ?? "1")).filter((n) => n !== "1" && !b[`imageKey${n}`]))];
+        if (miss.length) out.push({ level: "warning", message: `${label}: มีจุดอยู่ลุค ${miss.join(", ")} แต่ยังไม่ได้ใส่รูปลุคนั้น` });
+      }
+      return out;
+    },
   },
 
   // 📰 โลโก้สื่อ / พาร์ตเนอร์ (2026-10-15) — เว็บร้าน: src/components/home/LogosSection.tsx

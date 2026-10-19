@@ -202,7 +202,10 @@ function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value:
 
 /** 📍 จุดบนรูป (ช่องชนิด point) — คลิกบนรูปของ Section แม่ (pointImage) เพื่อวางจุด · เก็บเป็น % */
 function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value: unknown; onChange: (v: unknown) => void; item?: Record<string, unknown>; parent?: Record<string, unknown> }) {
-  const key = fd.pointImage ? parent?.[fd.pointImage] ?? item?.[fd.pointImage] : null;
+  // ลุคที่ (pointLook) → รูป `${pointImage}${n}` ของ Section แม่ (ลุค 1 = pointImage เดิม)
+  const look = fd.pointLook ? String(item?.[fd.pointLook] ?? "1") : "1";
+  const imgKey = fd.pointImage ? (look !== "1" ? `${fd.pointImage}${look}` : fd.pointImage) : null;
+  const key = imgKey ? parent?.[imgKey] ?? item?.[imgKey] : null;
   const o = (value ?? {}) as Record<string, unknown>;
   const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50) };
   // จุดอื่นในชุดเดียวกัน (ชิ้นย่อยพี่น้องที่มีช่องนี้) → โชว์จาง ๆ ให้วางไม่ทับกัน
@@ -211,11 +214,17 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
     if (!Array.isArray(arr)) continue;
     for (const it of arr as Record<string, unknown>[]) {
       if (!it || typeof it !== "object" || it === item || (item?.id && it.id === item.id)) continue;
+      if (fd.pointLook && String(it[fd.pointLook] ?? "1") !== look) continue; // คนละลุค = ไม่ต้องโชว์
       const pv = it[fd.key] as { x?: unknown; y?: unknown } | undefined;
       if (pv && typeof pv === "object" && Number.isFinite(Number(pv.x)) && Number.isFinite(Number(pv.y))) siblings.push({ x: Number(pv.x), y: Number(pv.y) });
     }
   }
-  if (typeof key !== "string" || !key) return <Field label={fd.label} wide><p className="text-xs text-slate-400">เลือกรูปของ Section ก่อน แล้วค่อยคลิกวางจุด</p></Field>;
+  if (typeof key !== "string" || !key)
+    return (
+      <Field label={fd.label} wide>
+        <p className="text-xs text-slate-400">{look !== "1" ? `ใส่ "รูปลุค ${look}" ของ Section ก่อน แล้วค่อยคลิกวางจุด` : "เลือกรูปของ Section ก่อน แล้วค่อยคลิกวางจุด"}</p>
+      </Field>
+    );
   const pick = (e: React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const round = (n: number) => Math.max(0, Math.min(100, Math.round(n * 10) / 10));
@@ -581,7 +590,11 @@ export function SchemaForm({
   /** ชิ้นย่อย: ไม่แยกหัวกลุ่ม */
   compact?: boolean;
 }) {
-  const visible = useMemo(() => fields.filter((fd) => !fd.hidden && matchShowIf(fd, value)), [fields, value]);
+  // showIfParent = ช่องของชิ้นย่อยที่โชว์ตามค่าของ Section แม่ (เช่น "อยู่ลุคที่" เฉพาะลุคบุ๊กแบบหลายลุค)
+  const visible = useMemo(
+    () => fields.filter((fd) => !fd.hidden && matchShowIf(fd, value) && (!fd.showIfParent || matchShowIf({ ...fd, showIf: fd.showIfParent }, parent ?? {}))),
+    [fields, value, parent],
+  );
   const groups = useMemo(() => {
     const map = new Map<FieldGroup, FieldDef[]>();
     for (const fd of visible) {

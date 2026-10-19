@@ -123,6 +123,8 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - การ์ด: `cardBg` (auto เดิม/page/surface/white/brandSoft/custom+`cardHex`) · `cardAlign` · `addStyle` · `viewStyle` (outline เดิม/brand/dark/link) · `showTotal`+`totalText`
 - รายการใต้รูป: `listTitle` · `listStyle` grid(เดิม)/carousel (ProductsCarousel กลาง) · `listCols` auto(ธีม)/2–6 · มือถือ `mobileLayout` same/list (ซ่อนการ์ด/ป๊อป → รายการใต้รูป)
 - เว็บร้าน: `src/components/home/LookbookBody.tsx` (SpotCard · LookList · LookCard) · CSS `.lb-*` ใน globals.css (จุดใช้ตัวแปร `--lb-dot-*` · คอลัมน์ `--lb-fr`)
+- 🎞 **สไลด์ (2026-10-19)**: `mode` single/slides · `imageKey2`–`imageKey6` · `lookNames` (list · แปล EN ได้) · จุด `look` "1"–"6" (ช่องโชว์เฉพาะหลายลุค = `showIfParent` · วางจุดบนรูปลุคนั้น = `pointLook`) · `joinPrev` = ต่อสไลด์กับลุคบุ๊กก่อนหน้า (เว็บร้าน `parseBlocks` รวมเป็น `joined` ของกล่องแรก ไม่วาดแยก) · `slideNav` both/arrows/dots · `slideEffect` slide/fade · `slideAuto`+`slideSec` (ใช้ของกล่องแรกที่ตั้งสไลด์) · เว็บร้าน `LookSlider` + `LookView`
+- ของกลางใหม่ใน schema: `FieldDef.showIfParent` (ช่องของชิ้นย่อยโชว์ตามค่าของ Section แม่) · `FieldDef.pointLook` (ช่องจุดบนรูปเลือกรูป `${pointImage}${n}` ตามลุคของชิ้น)
 
 ## ⭐ แม่แบบ Section + 🕘 ประวัติเวอร์ชัน
 - **แม่แบบ Section** — ตาราง `website_section_templates` (migration 202610150200 · RLS เปิด ไม่มี policy · เข้าผ่าน API service role เท่านั้น)
