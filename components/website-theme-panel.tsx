@@ -23,7 +23,7 @@ import type { ListingConfig } from "@/lib/website-listing";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart, type ImagePlaceholder } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
-import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
+import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, cardImagePosition, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
 import { PathsLangBar, TranslateButton } from "@/components/translation-table";
 import { ContentLangProvider, LangInput } from "@/components/bilingual-field";
 import { previewInEnglish } from "@/lib/website-i18n";
@@ -3081,8 +3081,8 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
         <p className="text-[11px] text-slate-400 mt-1">ลด % คิดจาก “ราคาเต็มขีดฆ่า (fake_price)” · {"{pct}"} = เลขเปอร์เซ็นต์ · ใหม่ = นับจากวันที่เพิ่มรุ่นเข้าร้าน · ขายดี = อันดับยอดขายบนเว็บ (ยังไม่มีออเดอร์ = ยังไม่ขึ้น)</p>
       </div>
 
-      {/* 🖼 รูปบนการ์ด — รูปในกรอบ (ตัด/ไม่ตัด) · สีพื้นหลัง · ระยะห่างจากขอบ */}
-      <div className="grid gap-3 sm:grid-cols-3 mt-4 pt-3 border-t border-slate-100">
+      {/* 🖼 รูปบนการ์ด — รูปในกรอบ (ตัด/ไม่ตัด) · ตำแหน่งรูป · สีพื้นหลัง · ระยะห่างจากขอบ */}
+      <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
         <div>
           <label className={labelCls}>🖼 รูปในกรอบ</label>
           <select className={inputCls} value={card.imageFit} onChange={(e) => setCard({ imageFit: e.target.value as Theme["card"]["imageFit"] })}>
@@ -3090,6 +3090,29 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
             <option value="contain">โชว์เต็มรูป (ไม่ตัด · ย่อให้เห็นครบ)</option>
           </select>
           <p className="text-[11px] text-slate-400 mt-0.5">ไม่ตัด = เห็นสินค้าครบทั้งชิ้น · ช่องว่างรอบรูปใช้ “สีพื้นหลัง” ข้าง ๆ</p>
+        </div>
+        <div>
+          <label className={labelCls}>📍 ตำแหน่งรูปในกรอบ</label>
+          <select className={inputCls} value={card.imagePos} onChange={(e) => setCard({ imagePos: e.target.value as Theme["card"]["imagePos"] })}>
+            <option value="center">กึ่งกลาง (แบบเดิม)</option>
+            <option value="top">ชิดบน</option>
+            <option value="bottom">ชิดล่าง</option>
+            <option value="custom">กำหนดเอง (เลื่อนเอง)</option>
+          </select>
+          <p className="text-[11px] text-slate-400 mt-0.5">{card.imageFit === "contain" ? "ไม่ตัด = รูปไปวางชิดตรงนี้ในกรอบ" : "เต็มกรอบ = เลือกว่าเห็นส่วนไหนของรูป (เช่น ชิดบน = ไม่ตัดหัวสินค้า)"}</p>
+          {card.imagePos === "custom" && (
+            <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 px-2.5 py-2">
+              <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                <span className="w-20 shrink-0">ซ้าย ↔ ขวา {card.imagePosX}%</span>
+                <input type="range" min={0} max={100} step={1} value={card.imagePosX} onChange={(e) => setCard({ imagePosX: Number(e.target.value) })} className="flex-1" />
+              </label>
+              <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                <span className="w-20 shrink-0">บน ↕ ล่าง {card.imagePosY}%</span>
+                <input type="range" min={0} max={100} step={1} value={card.imagePosY} onChange={(e) => setCard({ imagePosY: Number(e.target.value) })} className="flex-1" />
+              </label>
+              <button type="button" onClick={() => setCard({ imagePosX: 50, imagePosY: 50 })} className="text-[11px] text-slate-500 hover:text-blue-600">↺ กลับกึ่งกลาง</button>
+            </div>
+          )}
         </div>
         <div>
           <label className={labelCls}>สีพื้นหลังหลังรูปสินค้า</label>
@@ -3476,11 +3499,11 @@ function SampleCard({ item, card, colors, fonts, radius, shape }: { item: Sample
       <div className="relative overflow-hidden" style={{ aspectRatio: RATIO_CSS[card.imageRatio] ?? "4 / 5", background: card.imageBg || "#eee", borderRadius: boxed ? undefined : r }}>
         {item.images[0] && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.images[0]} alt="" className={`absolute inset-0 w-full h-full transition-all duration-500 ${card.imageFit === "contain" ? "object-contain" : "object-cover"} ${card.imagePad == null && card.imageFit === "contain" ? "p-2" : ""}`} style={{ transform: hover && card.hover === "zoom" ? "scale(1.05)" : undefined, opacity: hover && swap ? 0 : 1, padding: card.imagePad != null ? `${card.imagePad}%` : undefined }} />
+          <img src={item.images[0]} alt="" className={`absolute inset-0 w-full h-full transition-all duration-500 ${card.imageFit === "contain" ? "object-contain" : "object-cover"} ${card.imagePad == null && card.imageFit === "contain" ? "p-2" : ""}`} style={{ transform: hover && card.hover === "zoom" ? "scale(1.05)" : undefined, opacity: hover && swap ? 0 : 1, padding: card.imagePad != null ? `${card.imagePad}%` : undefined, objectPosition: cardImagePosition(card) }} />
         )}
         {swap && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.images[1]} alt="" className={`absolute inset-0 w-full h-full transition-opacity duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ opacity: hover ? 1 : 0 }} />
+          <img src={item.images[1]} alt="" className={`absolute inset-0 w-full h-full transition-opacity duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ opacity: hover ? 1 : 0, objectPosition: cardImagePosition(card) }} />
         )}
         {card.showBadge && item.badge && <span className="absolute top-2 left-2 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white/90" style={{ color: colors.ink, letterSpacing: ".08em" }}>{item.badge}</span>}
         {card.autoBadges.sale && item.comparePrice && item.comparePrice > item.price && Math.round((1 - item.price / item.comparePrice) * 100) >= card.autoBadges.saleMin && (

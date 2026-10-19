@@ -935,6 +935,11 @@ export interface SiteTheme {
     /** 🖼 สีพื้นหลังหลังรูป ('' = ตามสินค้า) · ระยะขอบรูป % (null = อัตโนมัติ: ย่อพอดี 12px · เต็มกรอบ 0) */
     imageBg: string;
     imagePad: number | null;
+    /** 📍 ตำแหน่งรูปในกรอบ: center (เดิม) · top ชิดบน · bottom ชิดล่าง · custom = imagePosX/Y (% 0–100)
+     *  เต็มกรอบ = เลือกส่วนของรูปที่เห็น · ไม่ตัด = รูปไปชิดตรงนั้นในกรอบ */
+    imagePos: "center" | "top" | "bottom" | "custom";
+    imagePosX: number;
+    imagePosY: number;
     /** 🔤 ชื่อสินค้า: ตัวพิมพ์ใหญ่ · ความหนา · ระยะห่างตัวอักษร (1/100 em) */
     nameUpper: boolean;
     nameWeight: 400 | 500 | 600 | 700;
@@ -1368,7 +1373,7 @@ export const DEFAULT_THEME: SiteTheme = {
   cart: { ...DEFAULT_CART },
   checkout: { ...DEFAULT_CHECKOUT },
   page: { transition: "fade", smoothScroll: false },
-  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
+  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
@@ -1697,6 +1702,9 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       autoBadges: normalizeAutoBadges(cd.autoBadges),
       imageBg: typeof cd.imageBg === "string" && /^#[0-9a-f]{6}$/i.test(cd.imageBg) ? cd.imageBg : "",
       imagePad: typeof cd.imagePad === "number" && Number.isFinite(cd.imagePad) ? Math.min(20, Math.max(0, Math.round(cd.imagePad))) : null,
+      imagePos: pick(cd.imagePos, ["center", "top", "bottom", "custom"] as const, "center"),
+      imagePosX: num(cd.imagePosX, 50, 0, 100),
+      imagePosY: num(cd.imagePosY, 50, 0, 100),
       nameUpper: cd.nameUpper === true,
       nameWeight: ([400, 500, 600, 700] as const).includes(Number(cd.nameWeight) as 400) ? (Number(cd.nameWeight) as 400 | 500 | 600 | 700) : 500,
       nameTracking: num(cd.nameTracking, 0, 0, 20),
@@ -1753,6 +1761,14 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
  * รวมธีมใหม่เข้ากับค่าเดิมใน DB โดยไม่ลบคีย์ที่เราไม่รู้จัก
  * (สำคัญกับ Pixiedustie ที่มี vars/colors.panel ของตัวเอง)
  */
+/** 📍 ตำแหน่งรูปในกรอบของการ์ดสินค้า → ค่า CSS object-position (ใช้ทั้งพรีวิว ERP · เว็บร้านคำนวณแบบเดียวกันใน src/lib/card-image.ts) */
+export function cardImagePosition(card: Pick<SiteTheme["card"], "imagePos" | "imagePosX" | "imagePosY">): string {
+  if (card.imagePos === "top") return "50% 0%";
+  if (card.imagePos === "bottom") return "50% 100%";
+  if (card.imagePos === "custom") return `${card.imagePosX}% ${card.imagePosY}%`;
+  return "50% 50%";
+}
+
 export function mergeTheme(existing: unknown, incoming: unknown): Record<string, unknown> {
   const base = (existing ?? {}) as Record<string, unknown>;
   const baseColors = (base.colors ?? {}) as Record<string, unknown>;
