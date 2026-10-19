@@ -64,7 +64,10 @@ export type BlockType =
   | "collections"
   | "fitcheck"
   | "beltbuilder"
-  | "drop";
+  | "drop"
+  | "doc"
+  | "order-track"
+  | "contact-form";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -486,6 +489,39 @@ export interface RichTextBlock extends BlockBase {
   body: string;
 }
 
+/** 📜 เอกสาร/นโยบาย (ศูนย์ช่วยเหลือ) — ข้อความใส่ {shop} {email} ฯลฯ ได้ เว็บร้านแทนด้วยข้อมูลร้าน */
+export interface DocBlock extends BlockBase {
+  type: "doc";
+  title: string;
+  updated: string;
+  intro: string;
+  numbered: boolean;
+  width: "narrow" | "normal" | "wide";
+  sections: { id: string; enabled?: boolean; title: string; body: string }[];
+}
+
+/** 🚚 ติดตามคำสั่งซื้อ (ฟอร์มเลขที่+เบอร์ · สมาชิกเห็นคำสั่งซื้อตัวเอง) */
+export interface OrderTrackBlock extends BlockBase {
+  type: "order-track";
+  title: string;
+  intro: string;
+  showMemberOrders: boolean;
+  helpText: string;
+}
+
+/** ✉️ ฟอร์มติดต่อ → store_contact_messages (กล่องข้อความในแท็บข้อมูลร้าน) */
+export interface ContactFormBlock extends BlockBase {
+  type: "contact-form";
+  title: string;
+  intro: string;
+  topics: string;
+  askPhone: boolean;
+  phoneRequired: boolean;
+  showChannels: boolean;
+  buttonText: string;
+  successText: string;
+}
+
 export type ImageWidth = "full" | "wide" | "narrow";
 
 export interface ImageBlock extends BlockBase {
@@ -709,7 +745,10 @@ export type Block =
   | SpotlightBlock
   | StatsBlock
   | PersonalizeBlock
-  | CanvasBlock;
+  | CanvasBlock
+  | DocBlock
+  | OrderTrackBlock
+  | ContactFormBlock;
 
 /** ชิ้นบนผืนผ้าใบอิสระ — ช่องตามชนิด (kind) ดู canvasItemFields() ใน lib/website-schema.ts */
 export type CanvasItem = ChildBase & {
@@ -1063,8 +1102,8 @@ const isEmptyValue = (fd: FieldDef, v: unknown): boolean => {
   return !String(v ?? "").trim();
 };
 
-/** ตรวจปัญหาที่พบบ่อยก่อนเผยแพร่ (ไม่บังคับ — แค่เตือน) */
-export function validateBlocks(blocks: Block[]): ValidationIssue[] {
+/** ตรวจปัญหาที่พบบ่อยก่อนเผยแพร่ (ไม่บังคับ — แค่เตือน) · helpPage = หน้าในศูนย์ช่วยเหลือ (มีหัวแถวชื่อหน้าอยู่แล้ว ไม่ต้องมี Hero) */
+export function validateBlocks(blocks: Block[], opts: { helpPage?: boolean } = {}): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const active = blocks.filter((b) => b.enabled);
 
@@ -1072,7 +1111,7 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
 
   const heroes = active.filter((b) => b.type === "hero");
   // ผืนผ้าใบอิสระมักใช้เป็นหัวเว็บแทนแบนเนอร์ · 🆕 ชุดมาใหม่ที่โชว์แบนเนอร์ชุด (หน้า /new/<ชุด>) ก็เป็นหัวเรื่องแล้ว → ไม่ต้องเตือนว่าไม่มี Hero
-  const hasHeader = active.some((b) => b.type === "canvas" || (b.type === "drop" && b.banner !== "none"));
+  const hasHeader = opts.helpPage || active.some((b) => b.type === "canvas" || (b.type === "drop" && b.banner !== "none"));
   if (heroes.length === 0 && !hasHeader) issues.push({ blockId: null, level: "warning", message: "ไม่มีแบนเนอร์หลัก (Hero) — หน้าอาจดูไม่มีหัวเรื่อง" });
   if (heroes.length > 1) issues.push({ blockId: null, level: "warning", message: `มีแบนเนอร์หลัก ${heroes.length} อัน — ควรมีอันเดียวเพื่อ SEO` });
 

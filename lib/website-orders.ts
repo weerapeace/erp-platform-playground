@@ -41,6 +41,7 @@ import { beltDesignLine, type BeltDesignRow } from "@/lib/belt-builder-order";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { customerLang, type CustomerLang } from "@/lib/customer-messages";
 import { dropFromRow, hiddenDropCodes } from "@/lib/website-new-drops";
+import { trackingOf, type ParcelTracking } from "@/lib/parcel-tracking";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -145,6 +146,8 @@ export interface OrderView {
   promptpay: { number: string; name: string } | null;
   /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง */
   lang?: CustomerLang;
+  /** 🚚 เลขพัสดุ + ขนส่ง + ลิงก์ตามพัสดุ (ยังไม่กรอก = null) — lib/parcel-tracking */
+  tracking?: ParcelTracking | null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -671,6 +674,8 @@ export type OrderRow = {
   note: string | null;
   created_at: string;
   lang?: string | null;
+  tracking_no?: string | null;
+  tracking_carrier?: string | null;
 };
 
 export type ItemRow = {
@@ -726,6 +731,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     createdAt: o.created_at,
     promptpay: info ? promptpayFor(info, o.payment_method, o.payment_status) : null,
     lang: customerLang(o.lang),
+    tracking: trackingOf(o.tracking_carrier, o.tracking_no),
   };
 }
 

@@ -10,6 +10,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeBlocks } from "@/lib/website-blocks";
+import { cleanPageMeta } from "@/lib/website-help-center";
+
+const orUndef = (v: string) => v || undefined;
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -48,17 +51,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const s = shop as { id: string; status: string };
   if (s.status !== "active") return json({ pages: [] });
 
-  // รายการหน้า (ไว้ทำเมนู)
+  // รายการหน้า (ไว้ทำเมนู) — help = กลุ่มศูนย์ช่วยเหลือ (เว็บร้านไม่เอาไปใส่เมนูหลัก · ท้ายเว็บคอลัมน์ "ศูนย์ช่วยเหลือ" ใช้)
+  // 🌐 *_en → เว็บร้านสลับเป็นอังกฤษเองบนหน้า /en (กฎ <key>_en)
   if (!pageSlug) {
     const q = sb
       .from("store_pages")
-      .select("slug, title, status, sort_order")
+      .select("slug, title, status, seo, sort_order")
       .eq("shop_id", s.id)
       .eq("is_home", false)
-      .order("sort_order");
+      .order("sort_order")
+      .order("created_at");
     const { data } = preview ? await q : await q.eq("status", "published");
     return json({
-      pages: ((data ?? []) as { slug: string; title: string }[]).map((p) => ({ slug: p.slug, title: p.title })),
+      pages: ((data ?? []) as { slug: string; title: string; status: string; seo: unknown }[]).map((p) => {
+        const m = cleanPageMeta(p.seo);
+        // helpKey = ชื่อกลุ่มไทย (ไม่มีคู่ _en → ไม่ถูกสลับภาษา) ใช้จับคู่กับคอลัมน์ท้ายเว็บ · help = ชื่อที่โชว์ (สลับ EN ได้)
+        return { slug: p.slug, title: p.title, title_en: orUndef(m.name_en), help: orUndef(m.help), help_en: orUndef(m.help_en), helpKey: orUndef(m.help), ...(preview ? { status: p.status } : null) };
+      }),
     });
   }
 
@@ -83,11 +92,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (row.status !== "published" && !preview) return json({ error: "ไม่พบหน้านี้" }, 404);
 
   const layout = preview && row.draft_layout != null ? row.draft_layout : row.layout;
+  const meta = cleanPageMeta(row.seo);
+
+  // 🧭 หน้าในศูนย์ช่วยเหลือ → ส่งรายชื่อหน้าในกลุ่มเดียวกันไปทำเมนูซ้าย (พรีวิว = รวมร่าง)
+  let help: { group: string; group_en?: string; nav: { slug: string; title: string; title_en?: string }[] } | undefined;
+  if (meta.help) {
+    const nq = sb.from("store_pages").select("slug, title, status, seo").eq("shop_id", s.id).eq("is_home", false).eq("seo->>help", meta.help).order("sort_order").order("created_at");
+    const { data: navRows } = preview ? await nq : await nq.eq("status", "published");
+    help = {
+      group: meta.help,
+      group_en: orUndef(meta.help_en),
+      nav: ((navRows ?? []) as { slug: string; title: string; seo: unknown }[]).map((n) => ({ slug: n.slug, title: n.title, title_en: orUndef(cleanPageMeta(n.seo).name_en) })),
+    };
+  }
 
   return json({
     slug: row.slug,
     title: row.title,
-    seo: (row.seo ?? {}) as Record<string, string>,
+    title_en: orUndef(meta.name_en),
+    seo: { title: meta.title, description: meta.description, title_en: orUndef(meta.title_en), description_en: orUndef(meta.description_en) },
     layout: normalizeBlocks(layout),
+    help,
   });
 }

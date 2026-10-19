@@ -866,6 +866,74 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     validate: (b, label) => (!s(b.title) && !s(b.body) ? [{ level: "warning", message: `${label}: ยังไม่มีเนื้อหา` }] : []),
   },
 
+  /* ── 🧭 ศูนย์ช่วยเหลือ (2026-10-19) — ใช้ในหน้า Privacy / Terms / จัดส่ง-คืน / ติดตาม / ติดต่อ (แม่แบบ lib/website-help-center.ts) ── */
+  doc: {
+    type: "doc",
+    meta: { label: "เอกสาร / นโยบาย", icon: "📜", hint: "ข้อความยาวแบ่งเป็นหัวข้อ เช่น นโยบายความเป็นส่วนตัว ข้อกำหนด การจัดส่ง-คืนสินค้า", group: "เนื้อหา" },
+    fields: [
+      text("title", "หัวข้อเอกสาร", { default: "", max: 160, wide: true, hint: "ว่าง = ไม่โชว์ (หน้าในศูนย์ช่วยเหลือมีชื่อหน้าอยู่แล้ว)" }),
+      text("updated", "บรรทัดวันที่อัปเดต", { default: "", max: 80, placeholder: "อัปเดตล่าสุด 19 ตุลาคม 2569" }),
+      area("intro", "ย่อหน้าเปิด", { default: "", max: 3000, hint: "ใส่ {shop} {email} {phone} {line} {address} ได้ — ระบบแทนด้วยข้อมูลร้านให้เอง" }),
+      f("numbered", "ใส่เลขหน้าหัวข้อ (1. 2. 3.)", "toggle", { group: "layout", default: true }),
+      f("width", "ความกว้าง", "select", {
+        group: "layout",
+        default: "normal",
+        options: [
+          { v: "narrow", l: "แคบ (อ่านง่าย)" },
+          { v: "normal", l: "ปกติ" },
+          { v: "wide", l: "กว้าง" },
+        ],
+      }),
+    ],
+    children: {
+      key: "sections",
+      label: "หัวข้อในเอกสาร",
+      itemLabel: "หัวข้อ",
+      icon: "§",
+      min: 1,
+      max: 40,
+      fields: [
+        text("title", "หัวข้อ", { default: "หัวข้อ", max: 160, wide: true }),
+        area("body", "เนื้อหา", {
+          default: "",
+          max: 6000,
+          hint: "ขึ้นบรรทัดใหม่ได้ · บรรทัดว่าง = ย่อหน้าใหม่ · ขึ้นต้นด้วย - = ข้อย่อย · [ข้อความ](/contact) = ลิงก์ · ใส่ {shop} {email} {phone} {line} {address} {free_shipping} {shipping_fee} ได้ (ข้อมูลร้านว่าง = บรรทัดนั้นไม่โชว์)",
+        }),
+      ],
+      summary: (it) => s(it.title) || s(it.body).slice(0, 40) || "หัวข้อ",
+    },
+    summary: (b) => s(b.title) || `${arr(b.sections).length} หัวข้อ`,
+    validate: (b, label) => (!arr(b.sections).some((x) => s(x.title) || s(x.body)) && !s(b.intro) ? [{ level: "warning", message: `${label}: ยังไม่มีเนื้อหา` }] : []),
+  },
+
+  "order-track": {
+    type: "order-track",
+    meta: { label: "ติดตามคำสั่งซื้อ", icon: "🚚", hint: "ลูกค้ากรอกเลขที่ + เบอร์ ดูสถานะ/เลขพัสดุ · สมาชิกที่ล็อกอินเห็นคำสั่งซื้อของตัวเองทันที", group: "เนื้อหา" },
+    fields: [
+      text("title", "หัวข้อ", { default: "", max: 120, wide: true, hint: "ว่าง = ไม่โชว์" }),
+      area("intro", "คำอธิบาย", { default: "กรอกเลขที่คำสั่งซื้อและเบอร์โทรที่ใช้สั่ง เพื่อดูสถานะและเลขพัสดุ", max: 400 }),
+      f("showMemberOrders", "สมาชิกที่ล็อกอินอยู่ เห็นรายการคำสั่งซื้อของตัวเอง", "toggle", { default: true }),
+      area("helpText", "ข้อความใต้ฟอร์ม", { default: "", max: 300, placeholder: "เช่น ไม่พบคำสั่งซื้อ? ทักเราทาง LINE" }),
+    ],
+    summary: (b) => s(b.title) || "ฟอร์มติดตามคำสั่งซื้อ",
+  },
+
+  "contact-form": {
+    type: "contact-form",
+    meta: { label: "ฟอร์มติดต่อ", icon: "✉️", hint: "ลูกค้ากรอกชื่อ/อีเมล/ข้อความ → เข้ากล่องข้อความใน ERP (แท็บ 🏪 ข้อมูลร้าน)", group: "เนื้อหา" },
+    fields: [
+      text("title", "หัวข้อ", { default: "", max: 120, wide: true, hint: "ว่าง = ไม่โชว์" }),
+      area("intro", "คำอธิบาย", { default: "ส่งข้อความถึงเรา ทีมงานจะตอบกลับภายใน 1 วันทำการ", max: 400 }),
+      area("topics", "หัวข้อให้ลูกค้าเลือก (บรรทัดละ 1)", { default: "สอบถามสินค้า\nคำสั่งซื้อ / การจัดส่ง\nเปลี่ยน / คืนสินค้า\nอื่น ๆ", max: 600, hint: "ว่าง = ไม่มีช่องเลือกหัวข้อ" }),
+      f("askPhone", "มีช่องเบอร์โทร", "toggle", { default: true }),
+      f("phoneRequired", "เบอร์โทรต้องกรอก", "toggle", { default: false, showIf: { key: "askPhone", eq: true } }),
+      f("showChannels", "โชว์ช่องทางติดต่ออื่น (โทร / LINE / อีเมล) ด้านข้าง", "toggle", { group: "layout", default: true }),
+      text("buttonText", "ข้อความปุ่ม", { group: "action", default: "ส่งข้อความ", max: 40 }),
+      area("successText", "ข้อความเมื่อส่งสำเร็จ", { default: "ได้รับข้อความแล้ว ขอบคุณที่ติดต่อเรา เราจะตอบกลับโดยเร็วที่สุด", max: 300 }),
+    ],
+    summary: (b) => s(b.title) || "ฟอร์มติดต่อ",
+  },
+
   image: {
     type: "image",
     meta: { label: "รูปภาพ / แบนเนอร์รูป", icon: "🏞️", hint: "รูปเดี่ยว + คำบรรยาย + ลิงก์", group: "พื้นฐาน" },

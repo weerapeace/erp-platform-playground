@@ -4,7 +4,9 @@
  * GET    ?shop=<slug>                                → รายการหน้า + ชนิดบล็อก
  * GET    ?shop=<slug>&pageId=<id>                    → หน้าเดียว (พร้อมบล็อก + ร่าง)
  * POST   { shopId, slug, title }                     → สร้างหน้าใหม่
- * PUT    { pageId, blocks?, seo?, title?, mode }     → บันทึกร่าง / เผยแพร่
+ * POST   { shopId, template: "help-center" }        → 🧭 สร้างชุดศูนย์ช่วยเหลือ (เฉพาะหน้าที่ยังไม่มี · เป็นร่าง) — lib/website-help-center.ts
+ * PUT    { pageId, blocks?, seo?, title?, mode }     → บันทึกร่าง / เผยแพร่ (seo = ข้อมูลเสริมของหน้า: SEO 2 ภาษา · ชื่ออังกฤษ · กลุ่มศูนย์ช่วยเหลือ)
+ * PUT    { pageId, sortOrder }                       → ย้ายลำดับ (เมนูซ้ายของศูนย์ช่วยเหลือเรียงตามนี้)
  * DELETE ?pageId=<id>                                → ลบหน้า (ห้ามลบหน้าแรก)
  *
  * ใช้ตาราง store_pages (มีอยู่เดิม): layout = เผยแพร่ · draft_layout = ร่าง
@@ -21,6 +23,7 @@ import { readShopBetas } from "@/lib/website-site-info";
 import { syncCanvasAssetUsages } from "@/lib/website-canvas-usage";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { normalizeTheme } from "@/lib/website-theme";
+import { cleanPageMeta, HELP_CENTER_PAGES, buildHelpPage } from "@/lib/website-help-center";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,7 +35,8 @@ export const revalidate = 0;
  */
 const RESERVED = new Set([
   "shop", "product", "checkout", "quote", "api", "_next", "cart", "home",
-  "about", "contact", "gallery", "oem",
+  // contact = หน้าในโค้ดที่ "ยอมให้หน้าเว็บชื่อเดียวกันมาแทน" (ศูนย์ช่วยเหลือ · เหมือน privacy/track) จึงไม่อยู่ในรายการนี้
+  "about", "gallery", "oem",
 ]);
 
 const cleanSlug = (v: unknown) =>
@@ -82,7 +86,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         slug: row.slug,
         title: row.title,
         status: row.status,
-        seo: (row.seo ?? {}) as Record<string, string>,
+        seo: cleanPageMeta(row.seo),
         published: normalizeBlocks(row.layout),
         draft: row.draft_layout != null ? normalizeBlocks(row.draft_layout) : null,
         hasDraft: row.draft_layout != null,
@@ -99,7 +103,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // รายการหน้า (ไม่รวมหน้าแรก)
   const { data: pages } = await sb
     .from("store_pages")
-    .select("id, slug, title, status, layout, draft_layout, sort_order, updated_at")
+    .select("id, slug, title, status, seo, layout, draft_layout, sort_order, updated_at")
     .eq("shop_id", s.id)
     .eq("is_home", false)
     .order("sort_order")
@@ -112,8 +116,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       slug: p.slug,
       title: p.title,
       status: p.status,
-      blocks: Array.isArray(p.layout) ? (p.layout as unknown[]).length : 0,
+      blocks: Array.isArray(p.layout) && (p.layout as unknown[]).length ? (p.layout as unknown[]).length : Array.isArray(p.draft_layout) ? (p.draft_layout as unknown[]).length : 0,
       hasDraft: p.draft_layout != null,
+      help: cleanPageMeta(p.seo).help,
+      sortOrder: Number(p.sort_order ?? 0),
       updatedAt: p.updated_at,
     })),
     // Section ทดลอง (meta.beta) โชว์ในคลังเฉพาะร้านที่เปิดสวิตช์ในแท็บข้อมูลร้าน
@@ -128,11 +134,47 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { shopId?: string; slug?: string; title?: string };
+  let body: { shopId?: string; slug?: string; title?: string; template?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
+  }
+
+  // 🧭 ชุดศูนย์ช่วยเหลือ — สร้างเฉพาะหน้าที่ยังไม่มี (slug ซ้ำ = ข้าม ไม่ทับของเดิม) · เป็นร่างทั้งหมด (layout ว่าง · เนื้อหาอยู่ draft_layout)
+  if (body.template === "help-center") {
+    if (!body.shopId) return NextResponse.json({ error: "ต้องระบุ shopId" }, { status: 400 });
+    const sb = supabaseAdmin();
+    const { data: existing } = await sb.from("store_pages").select("slug, sort_order").eq("shop_id", body.shopId);
+    const rows = (existing ?? []) as { slug: string; sort_order: number | null }[];
+    const have = new Set(rows.map((r) => r.slug));
+    let order = rows.reduce((m, r) => Math.max(m, Number(r.sort_order ?? 0)), 0);
+    const created: string[] = [];
+    const skipped: string[] = [];
+    for (const t of HELP_CENTER_PAGES) {
+      if (have.has(t.slug)) {
+        skipped.push(t.slug);
+        continue;
+      }
+      const pg = buildHelpPage(t);
+      order += 1;
+      const { data: row, error } = await sb
+        .from("store_pages")
+        .insert({ shop_id: body.shopId, slug: pg.slug, title: pg.title, page_type: "static", status: "draft", is_home: false, seo: pg.seo, layout: [], draft_layout: pg.blocks, sort_order: order })
+        .select("id")
+        .maybeSingle();
+      if (error || !row) return NextResponse.json({ error: `สร้างหน้า /${t.slug} ไม่สำเร็จ`, created, skipped }, { status: 500 });
+      created.push(t.slug);
+      await writeAudit(sb, {
+        action: "create",
+        entityType: "store_page",
+        entityId: (row as { id: string }).id,
+        actorId: user?.id ?? null,
+        actorName: user?.email ?? null,
+        metadata: { slug: t.slug, title: t.title, template: "help-center" },
+      });
+    }
+    return NextResponse.json({ ok: true, created, skipped });
   }
 
   const slug = cleanSlug(body.slug);
@@ -188,9 +230,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   let body: {
     pageId?: string;
     blocks?: unknown;
-    seo?: { title?: string; description?: string };
+    seo?: Record<string, unknown>;
     title?: string;
     mode?: string;
+    sortOrder?: number;
   };
   try {
     body = await request.json();
@@ -205,8 +248,9 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.title !== undefined) patch.title = text(body.title, 120);
-  if (body.seo !== undefined)
-    patch.seo = { title: text(body.seo?.title, 160), description: text(body.seo?.description, 320) };
+  // seo = ข้อมูลเสริมทั้งก้อน (SEO 2 ภาษา · ชื่ออังกฤษ · กลุ่มศูนย์ช่วยเหลือ) — lib/website-help-center.ts cleanPageMeta
+  if (body.seo !== undefined) patch.seo = cleanPageMeta(body.seo);
+  if (typeof body.sortOrder === "number" && Number.isFinite(body.sortOrder)) patch.sort_order = Math.max(0, Math.min(100000, Math.round(body.sortOrder)));
 
   if (blocks) {
     if (publish) {

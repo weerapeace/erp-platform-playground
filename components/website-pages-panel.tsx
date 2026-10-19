@@ -23,12 +23,27 @@ type PageRow = {
   blocks: number;
   hasDraft: boolean;
   updatedAt: string;
+  /** 🧭 กลุ่มศูนย์ช่วยเหลือ ("" = หน้าธรรมดา) */
+  help?: string;
+  sortOrder?: number;
 };
+
+/** ข้อมูลเสริมของหน้า (store_pages.seo) — ตรงกับ lib/website-help-center.ts PageMeta */
+type Meta = { title: string; description: string; title_en: string; description_en: string; name_en: string; help: string; help_en: string };
+const EMPTY_META: Meta = { title: "", description: "", title_en: "", description_en: "", name_en: "", help: "", help_en: "" };
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
 const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** แบ่งรายการหน้า: หน้าทั่วไปก่อน แล้วตามด้วยกลุ่มศูนย์ช่วยเหลือ (ลำดับในกลุ่ม = sort_order ที่ API เรียงมาแล้ว) */
+function groupPages(pages: PageRow[]): { name: string; pages: PageRow[] }[] {
+  const plain = pages.filter((p) => !p.help);
+  const groups = new Map<string, PageRow[]>();
+  for (const p of pages) if (p.help) groups.set(p.help, [...(groups.get(p.help) ?? []), p]);
+  return [...(plain.length ? [{ name: "", pages: plain }] : []), ...[...groups.entries()].map(([name, list]) => ({ name, pages: list }))];
+}
 
 export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
@@ -46,7 +61,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [editId, setEditId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editSlug, setEditSlug] = useState("");
-  const [seo, setSeo] = useState<{ title: string; description: string }>({ title: "", description: "" });
+  const [seo, setSeo] = useState<Meta>(EMPTY_META);
+  // ค่าที่บันทึกแล้วของชื่อหน้า/ข้อมูลเสริม — เทียบเพื่อรู้ว่า "แก้ตั้งค่าหน้าแล้วยังไม่บันทึก"
+  const [savedMeta, setSavedMeta] = useState<{ title: string; seo: Meta }>({ title: "", seo: EMPTY_META });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [savedBlocks, setSavedBlocks] = useState<Block[]>([]);
   const [publishedBlocks, setPublishedBlocks] = useState<Block[]>([]);
@@ -108,7 +125,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       setEditId(id);
       setEditTitle(p.title ?? "");
       setEditSlug(p.slug ?? "");
-      setSeo({ title: p.seo?.title ?? "", description: p.seo?.description ?? "" });
+      const meta = { ...EMPTY_META, ...(p.seo ?? {}) };
+      setSeo(meta);
+      setSavedMeta({ title: p.title ?? "", seo: meta });
       setBlocks(initial);
       setSavedBlocks(initial);
       setPublishedBlocks(p.published ?? []);
@@ -224,6 +243,47 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     }
   };
 
+  // 🧭 สร้างชุดศูนย์ช่วยเหลือ (หน้าที่ยังไม่มี · เป็นร่าง)
+  const [creatingHelp, setCreatingHelp] = useState(false);
+  const createHelpCenter = async () => {
+    if (!confirm("สร้างชุดศูนย์ช่วยเหลือ?\n\nจะสร้างหน้า: นโยบายความเป็นส่วนตัว · ข้อกำหนดและเงื่อนไข · คำถามที่พบบ่อย · ติดตามคำสั่งซื้อ · ติดต่อเรา · การจัดส่งและการคืนสินค้า (ไทย + อังกฤษ)\nหน้าที่มีอยู่แล้วจะไม่ถูกแตะ · ทุกหน้าเป็นร่าง ตรวจแล้วกดเผยแพร่เอง")) return;
+    setCreatingHelp(true);
+    try {
+      const r = await apiFetch("/api/website/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, template: "help-center" }) });
+      const j = await r.json();
+      if (!j.ok) {
+        toast.error(j.error ?? "สร้างไม่สำเร็จ");
+        return;
+      }
+      toast.success(j.created?.length ? `สร้าง ${j.created.length} หน้าแล้ว (ร่าง) — เปิดตรวจแล้วกดเผยแพร่ได้เลย` : "มีครบทุกหน้าอยู่แล้ว ไม่ได้สร้างเพิ่ม");
+      await loadList();
+    } catch {
+      toast.error("เชื่อมต่อไม่ได้");
+    } finally {
+      setCreatingHelp(false);
+    }
+  };
+
+  // ↑↓ ย้ายลำดับในกลุ่ม (เมนูซ้ายของศูนย์ช่วยเหลือเรียงตามนี้) — สลับ sort_order กับหน้าข้างเคียง
+  const movePage = async (list: PageRow[], i: number, dir: -1 | 1) => {
+    const a = list[i];
+    const b = list[i + dir];
+    if (!a || !b) return;
+    const base = Math.min(...list.map((p) => p.sortOrder ?? 0));
+    const order = list.map((p) => p.id);
+    [order[i], order[i + dir]] = [order[i + dir], order[i]];
+    try {
+      await Promise.all(
+        order.map((id, k) =>
+          apiFetch("/api/website/pages", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pageId: id, sortOrder: base + k }) })
+        )
+      );
+      await loadList();
+    } catch {
+      toast.error("ย้ายลำดับไม่สำเร็จ");
+    }
+  };
+
   const removePage = async (p: PageRow) => {
     if (!confirm(`ลบหน้า "${p.title}" (/${p.slug}) ถาวร?`)) return;
     try {
@@ -262,6 +322,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
         return;
       }
       setSavedBlocks(blocks);
+      setSavedMeta({ title: editTitle, seo });
       setSavedAt(new Date());
       if (mode === "publish") {
         setPublishedBlocks(blocks);
@@ -287,21 +348,50 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   /* ── หน้าจอแก้ไขหน้าเดียว ── */
   if (editId) {
     const previewSrc = siteUrl ? `${siteUrl}/${editSlug}?preview=1` : null;
-    const issues = [...validateBlocks(blocks as never), ...dataIssues];
-    const unpublished = hasDraft || dirty || !eq(blocks, publishedBlocks);
+    const issues = [...validateBlocks(blocks as never, { helpPage: !!seo.help.trim() }), ...dataIssues];
+    const metaDirty = editTitle !== savedMeta.title || !eq(seo, savedMeta.seo);
+    const unpublished = hasDraft || dirty || metaDirty || !eq(blocks, publishedBlocks);
     return (
       <div className="space-y-3">
         {showSeo && (
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
               <div>
-                <label className={labelCls}>ชื่อหน้า (แสดงในเมนู)</label>
+                <label className={labelCls}>ชื่อหน้า (ไทย)</label>
                 <input className={inputCls} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>ชื่อหน้า (อังกฤษ · หน้า /en)</label>
+                <input className={inputCls} value={seo.name_en} maxLength={120} onChange={(e) => setSeo({ ...seo, name_en: e.target.value })} placeholder="เช่น Privacy Policy" />
               </div>
               <div>
                 <label className={labelCls}>ที่อยู่หน้า (แก้ไม่ได้หลังสร้าง)</label>
                 <input className={inputCls} value={`/${editSlug}`} disabled />
               </div>
+            </div>
+
+            {/* 🧭 ศูนย์ช่วยเหลือ: อยู่ในกลุ่ม = เว็บวาดเมนูซ้าย (หน้าอื่นในกลุ่ม) + เนื้อหาขวา · ไม่ขึ้นเมนูหลักอัตโนมัติ */}
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
+              <p className="text-xs font-medium text-slate-700">🧭 ศูนย์ช่วยเหลือ</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">ใส่กลุ่ม = หน้านี้โชว์แบบเมนูซ้าย (หน้าอื่นในกลุ่มเดียวกัน) + เนื้อหาขวา และไม่ขึ้นเมนูหลักเอง · ท้ายเว็บใช้คอลัมน์ “ศูนย์ช่วยเหลือ (อัตโนมัติ)” ดึงทั้งกลุ่ม</p>
+              <div className="grid gap-3 sm:grid-cols-2 mt-2">
+                <div>
+                  <label className={labelCls}>กลุ่ม (ไทย) — ว่าง = หน้าธรรมดา</label>
+                  <input className={inputCls} list="help-groups" value={seo.help} maxLength={40} onChange={(e) => setSeo({ ...seo, help: e.target.value })} placeholder="เช่น ข้อกฎหมาย · ช่วยเหลือ" />
+                  <datalist id="help-groups">
+                    {[...new Set(pages.map((p) => p.help).filter(Boolean))].map((g) => (
+                      <option key={g} value={g} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className={labelCls}>กลุ่ม (อังกฤษ)</label>
+                  <input className={inputCls} value={seo.help_en} maxLength={40} disabled={!seo.help.trim()} onChange={(e) => setSeo({ ...seo, help_en: e.target.value })} placeholder="เช่น Legal · Support" />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className={labelCls}>ชื่อหน้าใน Google (SEO title)</label>
                 <input className={inputCls} value={seo.title} onChange={(e) => setSeo({ ...seo, title: e.target.value })} placeholder={editTitle} />
@@ -310,7 +400,16 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <label className={labelCls}>คำอธิบายใน Google (SEO description)</label>
                 <input className={inputCls} value={seo.description} onChange={(e) => setSeo({ ...seo, description: e.target.value })} placeholder="สรุปเนื้อหาหน้านี้สั้น ๆ" />
               </div>
+              <div>
+                <label className={labelCls}>SEO title (อังกฤษ)</label>
+                <input className={inputCls} value={seo.title_en} onChange={(e) => setSeo({ ...seo, title_en: e.target.value })} placeholder={seo.name_en || "English title"} />
+              </div>
+              <div>
+                <label className={labelCls}>SEO description (อังกฤษ)</label>
+                <input className={inputCls} value={seo.description_en} onChange={(e) => setSeo({ ...seo, description_en: e.target.value })} placeholder="Short English summary" />
+              </div>
             </div>
+            <p className="text-[11px] text-slate-400">ชื่อหน้า / กลุ่ม / SEO บันทึกพร้อมปุ่ม “บันทึกร่าง” หรือ “เผยแพร่”</p>
           </div>
         )}
 
@@ -329,7 +428,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
               <>
                 <button
                   onClick={() => {
-                    if (dirty && !confirm("มีการแก้ที่ยังไม่บันทึก ออกโดยไม่บันทึก?")) return;
+                    if ((dirty || metaDirty) && !confirm("มีการแก้ที่ยังไม่บันทึก ออกโดยไม่บันทึก?")) return;
                     setEditId(null);
                   }}
                   className="text-xs text-slate-500 hover:text-blue-600 mr-1"
@@ -338,9 +437,10 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
                   ← หน้าทั้งหมด
                 </button>
                 <span className="text-sm font-medium text-slate-800 truncate max-w-[180px]" title={`/${editSlug}`}>{editTitle}</span>
-                <button onClick={() => setShowSeo((v) => !v)} className={`h-7 px-2 rounded-lg border text-[11px] ${showSeo ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`} title="ชื่อหน้า & SEO">
-                  🔎 SEO
+                <button onClick={() => setShowSeo((v) => !v)} className={`h-7 px-2 rounded-lg border text-[11px] ${showSeo ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`} title="ชื่อหน้า 2 ภาษา · กลุ่มศูนย์ช่วยเหลือ · SEO">
+                  ⚙ ตั้งค่าหน้า
                 </button>
+                {seo.help && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="อยู่ในศูนย์ช่วยเหลือ">🧭 {seo.help}</span>}
               </>
             ),
             dirty: unpublished,
@@ -393,14 +493,24 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     <div className="space-y-3">
       <div className="rounded-xl bg-blue-50/60 border border-blue-200 px-4 py-2.5">
         <p className="text-sm text-slate-700">สร้างหน้าเพิ่มเองได้ เช่น โปรโมชัน · วิธีสั่งซื้อ · นโยบายจัดส่ง · เกี่ยวกับเรา</p>
-        <p className="text-xs text-slate-500 mt-0.5">หน้าแรกจัดที่แท็บ &quot;🧱 หน้าแรก&quot; · หน้าที่สร้างจะขึ้นเป็นเมนูบนเว็บอัตโนมัติเมื่อเผยแพร่</p>
+        <p className="text-xs text-slate-500 mt-0.5">หน้าแรกจัดที่แท็บ &quot;🧱 หน้าแรก&quot; · หน้าที่สร้างจะขึ้นเป็นเมนูบนเว็บอัตโนมัติเมื่อเผยแพร่ (ยกเว้นหน้าในศูนย์ช่วยเหลือ — ใช้คอลัมน์ท้ายเว็บ “ศูนย์ช่วยเหลือ” แทน)</p>
       </div>
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-sm text-slate-500">{pages.length} หน้า</span>
-        <button onClick={() => setShowNew((v) => !v)} className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
-          {showNew ? "ปิด" : "+ สร้างหน้าใหม่"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void createHelpCenter()}
+            disabled={creatingHelp}
+            className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm hover:bg-indigo-100 disabled:opacity-50"
+            title="สร้างหน้า Privacy / Terms / FAQ / ติดตามคำสั่งซื้อ / ติดต่อเรา / จัดส่ง-คืนสินค้า (ไทย+อังกฤษ) เป็นร่าง"
+          >
+            {creatingHelp ? "กำลังสร้าง…" : "🧭 สร้างชุดศูนย์ช่วยเหลือ"}
+          </button>
+          <button onClick={() => setShowNew((v) => !v)} className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
+            {showNew ? "ปิด" : "+ สร้างหน้าใหม่"}
+          </button>
+        </div>
       </div>
 
       {showNew && (
@@ -424,10 +534,24 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
           <button onClick={() => setShowNew(true)} className="mt-3 text-sm text-blue-600 hover:underline">+ สร้างหน้าแรกของคุณ</button>
         </div>
       ) : (
+        groupPages(pages).map((g) => (
+        <div key={g.name || "_plain"} className="space-y-2">
+          {g.name ? (
+            <p className="pt-2 text-xs font-medium text-indigo-700">🧭 ศูนย์ช่วยเหลือ · {g.name} <span className="font-normal text-slate-400">— ลำดับนี้ = เมนูซ้ายบนเว็บ (กด ↑↓ ย้าย)</span></p>
+          ) : (
+            <p className="pt-2 text-xs font-medium text-slate-500">📄 หน้าทั่วไป</p>
+          )}
         <ul className="space-y-2">
-          {pages.map((p) => (
+          {g.pages.map((p, i) => (
             <li key={p.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-              <span className="text-lg">📄</span>
+              {g.name ? (
+                <span className="flex flex-col -my-1">
+                  <button type="button" disabled={i === 0} onClick={() => void movePage(g.pages, i, -1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title="ย้ายขึ้น">▲</button>
+                  <button type="button" disabled={i === g.pages.length - 1} onClick={() => void movePage(g.pages, i, 1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title="ย้ายลง">▼</button>
+                </span>
+              ) : (
+                <span className="text-lg">📄</span>
+              )}
               <button onClick={() => void openPage(p.id)} className="flex-1 min-w-0 text-left">
                 <span className="block text-sm font-medium text-slate-800 truncate">{p.title}</span>
                 <span className="block text-[11px] text-slate-400">
@@ -446,6 +570,8 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             </li>
           ))}
         </ul>
+        </div>
+        ))
       )}
     </div>
   );

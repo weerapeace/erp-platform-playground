@@ -320,13 +320,15 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       .catch(() => setShopLists(null));
   }, [shopSlug]);
   // หน้าที่สร้างเอง (ไว้ให้เมนูลิงก์ถึง)
-  const [storePages, setStorePages] = useState<{ slug: string; title: string }[]>([]);
+  // preview=1 → รวมหน้าที่ยังเป็นร่าง (help = ชื่อกลุ่มศูนย์ช่วยเหลือ ไว้ให้คอลัมน์ท้ายเว็บ "ศูนย์ช่วยเหลือ" เลือกกลุ่ม)
+  const [storePages, setStorePages] = useState<{ slug: string; title: string; help?: string; status?: string }[]>([]);
   useEffect(() => {
-    fetch(`/api/public/storefront/page?shop=${encodeURIComponent(shopSlug)}`)
+    fetch(`/api/public/storefront/page?shop=${encodeURIComponent(shopSlug)}&preview=1`)
       .then((r) => r.json())
       .then((j) => setStorePages((j?.pages as { slug: string; title: string }[]) ?? []))
       .catch(() => setStorePages([]));
   }, [shopSlug]);
+  const [footerSocialOpen, setFooterSocialOpen] = useState(false);
   const [versions, setVersions] = useState<{ versionNo: number; createdAt: string; theme: Theme }[]>([]);
 
   const undoStack = useRef<Theme[]>([]);
@@ -1401,7 +1403,16 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       <option value="pill">ป้ายชื่อ (แบบเดิม)</option>
                       <option value="icon">ไอคอน</option>
                       <option value="circle">ไอคอนในวงกลม</option>
+                      <option value="list">รายการตัวหนังสือ (เหมือนลิงก์)</option>
                     </select>
+                    <button type="button" onClick={() => setFooterSocialOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline">🌐 แก้/เพิ่มลิงก์โซเชียล</button>
+                    <SocialLinksModal
+                      open={footerSocialOpen}
+                      onClose={() => setFooterSocialOpen(false)}
+                      shopSlug={shopSlug}
+                      shopId={shopId}
+                      onSaved={() => setTimeout(() => { if (iframeRef.current) iframeRef.current.src = iframeRef.current.src; }, 1500)}
+                    />
                   </div>
                 </div>
               </div>
@@ -1454,7 +1465,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </div>
                 ) : (
                   <>
-                    <FooterColumnsEditor columns={theme.footer.columns} onChange={(columns) => setFooter({ columns })} choices={choices} pages={storePages} />
+                    <FooterColumnsEditor columns={theme.footer.columns} onChange={(columns) => setFooter({ columns })} choices={choices} pages={storePages} onEditSocial={() => setFooterSocialOpen(true)} />
                     <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => { if (confirm("กลับไปใช้ท้ายเว็บแบบอัตโนมัติ? (คอลัมน์ที่จัดไว้จะหาย)")) setFooter({ columns: null }); }}>กลับไปใช้แบบอัตโนมัติ</button>
                   </>
                 )}
@@ -4163,8 +4174,14 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
 }
 
 /* ─────────── Footer: คอลัมน์ ─────────── */
-function FooterColumnsEditor({ columns, onChange, choices, pages }: { columns: FooterColumn[]; onChange: (c: FooterColumn[]) => void; choices: Choices; pages: { slug: string; title: string }[] }) {
+function FooterColumnsEditor({ columns, onChange, choices, pages, onEditSocial }: { columns: FooterColumn[]; onChange: (c: FooterColumn[]) => void; choices: Choices; pages: { slug: string; title: string; help?: string }[]; onEditSocial?: () => void }) {
   const drag = useDragReorder((from, to) => onChange(moveItem(columns, from, to)));
+  // 🧭 กลุ่มศูนย์ช่วยเหลือที่มีอยู่ (จากหน้าเว็บที่ตั้งกลุ่มไว้) + จำนวนหน้า
+  const helpGroups = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const p of pages) if (p.help) m.set(p.help, [...(m.get(p.help) ?? []), p.title]);
+    return [...m.entries()].map(([name, titles]) => ({ name, titles }));
+  }, [pages]);
   const [openId, setOpenId] = useState<string | null>(null);
   const setCol = (id: string, patch: Partial<FooterColumn>) => onChange(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
@@ -4217,6 +4234,31 @@ function FooterColumnsEditor({ columns, onChange, choices, pages }: { columns: F
                       <label className="block text-[11px] text-slate-500 mb-1">ลิงก์ (ว่าง = อัตโนมัติ)</label>
                       <MenuEditor items={c.links} onChange={(links) => setCol(c.id, { links })} choices={choices} pages={pages} depth={1} />
                       <button type="button" className="mt-2 text-[11px] text-blue-600 hover:underline" onClick={() => setCol(c.id, { links: [...c.links, newMenuItem("ลิงก์ใหม่", "page")] })}>+ เพิ่มลิงก์</button>
+                    </div>
+                  )}
+                  {c.kind === "social" && onEditSocial && (
+                    <button type="button" onClick={onEditSocial} className="text-[11px] px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400">🌐 แก้/เพิ่มลิงก์โซเชียล</button>
+                  )}
+                  {c.kind === "help" && (
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1">กลุ่มที่จะโชว์</label>
+                      {helpGroups.length ? (
+                        <select className="w-full rounded-lg border border-slate-200 text-xs px-2 py-1.5 bg-white text-slate-700" value={c.text} onChange={(e) => setCol(c.id, { text: e.target.value })}>
+                          <option value="">— เลือกกลุ่ม —</option>
+                          {helpGroups.map((g) => (
+                            <option key={g.name} value={g.name}>
+                              {g.name} ({g.titles.length} หน้า)
+                            </option>
+                          ))}
+                          {c.text && !helpGroups.some((g) => g.name === c.text) && <option value={c.text}>{c.text} (ยังไม่มีหน้า)</option>}
+                        </select>
+                      ) : (
+                        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">ยังไม่มีหน้าที่อยู่ในกลุ่มศูนย์ช่วยเหลือ — ไปที่แท็บ 📄 หน้าเว็บ แล้วกด “🧭 สร้างชุดศูนย์ช่วยเหลือ” หรือตั้งกลุ่มให้หน้าที่มีอยู่</p>
+                      )}
+                      {(() => {
+                        const g = helpGroups.find((x) => x.name === c.text);
+                        return g ? <p className="mt-1 text-[11px] text-slate-400">ลิงก์ที่จะขึ้น: {g.titles.join(" · ")}</p> : null;
+                      })()}
                     </div>
                   )}
                 </div>

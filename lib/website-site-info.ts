@@ -63,6 +63,9 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "social_facebook", label: "Facebook (ลิงก์)", group: "contact", type: "text", isPublic: true },
   { key: "social_instagram", label: "Instagram (ลิงก์)", group: "contact", type: "text", isPublic: true },
   { key: "social_tiktok", label: "TikTok (ลิงก์)", group: "contact", type: "text", isPublic: true },
+  { key: "social_x", label: "X / Twitter (ลิงก์)", group: "contact", type: "text", isPublic: true },
+  { key: "social_pinterest", label: "Pinterest (ลิงก์)", group: "contact", type: "text", isPublic: true },
+  { key: "social_youtube", label: "YouTube (ลิงก์)", group: "contact", type: "text", isPublic: true },
   { key: "social_shopee", label: "Shopee (ลิงก์)", group: "contact", type: "text", isPublic: true },
   { key: "social_lazada", label: "Lazada (ลิงก์)", group: "contact", type: "text", isPublic: true },
 
@@ -137,6 +140,9 @@ export interface SiteInfo {
   social_facebook: string;
   social_instagram: string;
   social_tiktok: string;
+  social_x: string;
+  social_pinterest: string;
+  social_youtube: string;
   social_shopee: string;
   social_lazada: string;
   shipping_flat: number;
@@ -195,6 +201,9 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   social_facebook: "",
   social_instagram: "",
   social_tiktok: "",
+  social_x: "",
+  social_pinterest: "",
+  social_youtube: "",
   social_shopee: "",
   social_lazada: "",
   shipping_flat: 50,
@@ -239,6 +248,9 @@ const URL_KEYS = new Set([
   "social_facebook",
   "social_instagram",
   "social_tiktok",
+  "social_x",
+  "social_pinterest",
+  "social_youtube",
   "social_shopee",
   "social_lazada",
 ]);

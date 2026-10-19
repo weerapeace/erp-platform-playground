@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
 import { RestockCard } from "@/components/website-restock-panel";
+import { ContactInboxCard } from "@/components/website-contact-inbox";
 import { SaveBar } from "@/components/save-bar";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { BilingualText, ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
@@ -40,6 +41,7 @@ const cardCls = "rounded-xl border border-slate-200 bg-white p-4";
 
 /** แท็บรายชื่อ (ไม่ใช่ช่องตั้งค่า) — ต่อท้ายแท็บหมวดข้อมูลร้าน */
 const LIST_TABS = [
+  { key: "messages", label: "📨 ข้อความลูกค้า" },
   { key: "subscribers", label: "📬 รับข่าวสาร" },
   { key: "restock", label: "🔔 รอแจ้งของเข้า" },
 ];
@@ -85,8 +87,11 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
   const dirty = useMemo(() => JSON.stringify(saved) !== JSON.stringify(info), [saved, info]);
 
   // 🗂 แท็บ: ทีละหมวด เต็มความกว้าง (เดิมการ์ดเรียง 2 คอลัมน์ รก) · ว่าง/หาไม่เจอ = หมวดแรก
+  // ลิงก์จากกระดิ่ง (เช่น ข้อความลูกค้าใหม่) ส่ง ?sub=messages มา → เปิดแท็บย่อยนั้นก่อน
   const [tab, setTabState] = useState<string>(() => {
     try {
+      const sub = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("sub") : null;
+      if (sub && LIST_TABS.some((l) => l.key === sub)) return sub;
       return localStorage.getItem(TAB_KEY) ?? "";
     } catch {
       return "";
@@ -218,6 +223,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
         ))}
       </ScrollTabs>
 
+      {active === "messages" && <ContactInboxCard shopSlug={shopSlug} cardCls={cardCls} />}
       {active === "subscribers" && <SubscribersCard shopSlug={shopSlug} defaultOpen />}
       {active === "restock" && <RestockCard shopSlug={shopSlug} cardCls={cardCls} defaultOpen />}
 

@@ -2,7 +2,7 @@
  * ออเดอร์จากเว็บร้าน (ฝั่ง ERP) — /api/website/orders (แท็บ "🧾 ออเดอร์")
  *
  * GET   ?shop=<slug>[&status=pending|...|all]  → รายการออเดอร์ของร้าน (ล่าสุด 300) พร้อมรายการสินค้า
- * PATCH { orderId, status?, paymentStatus?, note? } → เปลี่ยนสถานะ/สถานะจ่าย/โน้ตภายใน + audit
+ * PATCH { orderId, status?, paymentStatus?, note?, trackingNo?, trackingCarrier? } → เปลี่ยนสถานะ/สถานะจ่าย/โน้ต/🚚 เลขพัสดุ + audit
  *       เปลี่ยนสถานะแล้ว → ✉️ อีเมลแจ้งลูกค้าอัตโนมัติในภาษาที่ลูกค้าสั่ง (ถ้าร้านเปิด · lib/order-notify) → ตอบ notify
  * PATCH { orderId, notify: "<เรื่อง>" } → พนักงานกดส่งอีเมลแจ้งลูกค้าเอง (ไม่ต้องเปิดอัตโนมัติ)
  * GET ส่ง messaging (ชื่อร้าน/ลิงก์เว็บ/ข้อความร้าน) + msgItems (ชื่อสินค้าภาษาลูกค้า) ให้ปุ่ม "📋 คัดลอกข้อความถึงลูกค้า"
@@ -23,6 +23,7 @@ import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { emailConfigured } from "@/lib/email";
 import { ORDER_EVENTS, customerLang, orderEventOf, type OrderEvent } from "@/lib/customer-messages";
 import { notifyOrderCustomer, notifyNote, type NotifyResult } from "@/lib/order-notify";
+import { cleanCarrier, cleanTrackingNo } from "@/lib/parcel-tracking";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
@@ -122,7 +123,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; notify?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown } };
+  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string; notify?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown } };
   try {
     body = await request.json();
   } catch {
@@ -151,16 +152,21 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     patch.payment_status = body.paymentStatus;
   }
   if (body.note !== undefined) patch.note = String(body.note).trim().slice(0, 1000) || null;
+  // 🚚 เลขพัสดุ (ว่าง = ลบเลข) — ลูกค้าเห็นในหน้า ติดตามคำสั่งซื้อ / บัญชีสมาชิก / อีเมลจัดส่งแล้ว
+  if (body.trackingNo !== undefined) {
+    patch.tracking_no = cleanTrackingNo(body.trackingNo) || null;
+    patch.tracking_carrier = patch.tracking_no ? cleanCarrier(body.trackingCarrier) || "other" : null;
+  }
   if (!Object.keys(patch).length) return NextResponse.json({ error: "ไม่มีอะไรให้แก้" }, { status: 400 });
 
   const sb = supabaseAdmin();
   const { data: before } = await sb
     .from("store_orders")
-    .select("id, shop_id, order_no, status, payment_status, note")
+    .select("id, shop_id, order_no, status, payment_status, note, tracking_no, tracking_carrier")
     .eq("id", body.orderId)
     .maybeSingle();
   if (!before) return NextResponse.json({ error: "ไม่พบออเดอร์" }, { status: 404 });
-  const b = before as { id: string; shop_id: string; order_no: string; status: string; payment_status: string; note: string | null };
+  const b = before as { id: string; shop_id: string; order_no: string; status: string; payment_status: string; note: string | null; tracking_no: string | null; tracking_carrier: string | null };
 
   const { error } = await sb.from("store_orders").update(patch).eq("id", b.id);
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
@@ -180,7 +186,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     metadata: {
       orderNo: b.order_no,
       shopId: b.shop_id,
-      before: { status: b.status, paymentStatus: b.payment_status, note: b.note },
+      before: { status: b.status, paymentStatus: b.payment_status, note: b.note, trackingNo: b.tracking_no, trackingCarrier: b.tracking_carrier },
       after: patch,
       ...(points?.length ? { points } : {}),
     },

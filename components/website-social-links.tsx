@@ -1,6 +1,7 @@
 "use client";
 /**
- * 🌐 ป๊อปตั้งค่าโซเชียลมีเดียของร้าน (ของกลาง) — แก้ลิงก์ Facebook / Instagram / TikTok / LINE / Shopee / Lazada
+ * 🌐 ป๊อปตั้งค่าโซเชียลมีเดียของร้าน (ของกลาง) — แก้ลิงก์ Instagram / Facebook / TikTok / X / Pinterest / YouTube / LINE / Shopee / Lazada
+ * ลำดับในรายการนี้ = ลำดับที่โชว์บนเว็บ (ท้ายเว็บ "ติดตามเรา")
  * เก็บที่ "ข้อมูลร้าน" (store_settings · lib/website-site-info.ts) = ชุดเดียวกับแท็บ 🏪 ข้อมูลร้าน
  * ใช้ร่วม: หัวเว็บ (ชิ้น "โซเชียล") · ท้ายเว็บ · หน้าติดต่อ · ลิ้นชักเมนูมือถือ
  * บันทึกทันทีแบบแก้เฉพาะช่องเหล่านี้ (PUT /api/website/settings { patch }) — ไม่ต้องรอเผยแพร่ดีไซน์ · มี audit ที่ API
@@ -10,17 +11,20 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 
-type SocialKey = "social_facebook" | "social_instagram" | "social_tiktok" | "contact_line_url" | "social_shopee" | "social_lazada";
+type SocialKey = "social_facebook" | "social_instagram" | "social_tiktok" | "social_x" | "social_pinterest" | "social_youtube" | "contact_line_url" | "social_shopee" | "social_lazada";
 const SOCIALS: { key: SocialKey; label: string; icon: string; placeholder: string }[] = [
-  { key: "social_facebook", label: "Facebook", icon: "📘", placeholder: "https://facebook.com/ชื่อเพจ" },
   { key: "social_instagram", label: "Instagram", icon: "📸", placeholder: "https://instagram.com/ชื่อบัญชี" },
+  { key: "social_facebook", label: "Facebook", icon: "📘", placeholder: "https://facebook.com/ชื่อเพจ" },
   { key: "social_tiktok", label: "TikTok", icon: "🎵", placeholder: "https://tiktok.com/@ชื่อบัญชี" },
-  { key: "contact_line_url", label: "LINE", icon: "💬", placeholder: "https://lin.ee/xxxx" },
+  { key: "social_x", label: "X (Twitter)", icon: "✖️", placeholder: "https://x.com/ชื่อบัญชี" },
+  { key: "social_pinterest", label: "Pinterest", icon: "📌", placeholder: "https://pinterest.com/ชื่อบัญชี" },
+  { key: "social_youtube", label: "YouTube", icon: "▶️", placeholder: "https://youtube.com/@ชื่อช่อง" },
+  { key: "contact_line_url", label: "LINE Official", icon: "💬", placeholder: "https://lin.ee/xxxx" },
   { key: "social_shopee", label: "Shopee", icon: "🛍️", placeholder: "https://shopee.co.th/ชื่อร้าน" },
   { key: "social_lazada", label: "Lazada", icon: "🛒", placeholder: "https://lazada.co.th/shop/ชื่อร้าน" },
 ];
 type Links = Record<SocialKey, string>;
-const EMPTY: Links = { social_facebook: "", social_instagram: "", social_tiktok: "", contact_line_url: "", social_shopee: "", social_lazada: "" };
+const EMPTY = Object.fromEntries(SOCIALS.map((s) => [s.key, ""])) as Links;
 
 /** ลิงก์ต้องขึ้นต้นด้วย http(s):// (ไม่เดาให้ — เตือนว่าต้องใส่อะไร) */
 const badLink = (v: string) => v.trim() !== "" && !/^https?:\/\/\S+$/i.test(v.trim());

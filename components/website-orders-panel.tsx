@@ -20,6 +20,7 @@ import { CopyButton } from "@/components/copy-button";
 import { GiftCardPreview } from "@/components/website-gift-cards-editor";
 import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type OrderGiftCard } from "@/lib/website-gift-cards";
 import { CUSTOMER_LANG_LABEL, ORDER_EVENTS, currentOrderEvent, orderMessage, type OrderEvent } from "@/lib/customer-messages";
+import { PARCEL_CARRIERS, cleanTrackingNo, type ParcelTracking } from "@/lib/parcel-tracking";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -60,6 +61,8 @@ type Order = {
   /** ชื่อสินค้าในภาษาของลูกค้า (ไว้ทำข้อความ) */
   msgItems?: Line[];
   promptpay?: { number: string; name: string } | null;
+  /** 🚚 เลขพัสดุ (ยังไม่กรอก = null) */
+  tracking?: ParcelTracking | null;
 };
 type Messaging = {
   shopName: string;
@@ -88,6 +91,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
+  const [trackNo, setTrackNo] = useState("");
+  const [trackCarrier, setTrackCarrier] = useState("");
   const [messaging, setMessaging] = useState<Messaging | null>(null);
 
   const load = useCallback(async () => {
@@ -120,6 +125,10 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   useEffect(() => {
     setNoteDraft(open?.note ?? "");
   }, [open?.id, open?.note]);
+  useEffect(() => {
+    setTrackNo(open?.tracking?.number ?? "");
+    setTrackCarrier(open?.tracking?.carrier ?? "");
+  }, [open?.id, open?.tracking?.number, open?.tracking?.carrier]);
 
   const tone = (list: StatusDef[], key: string) => list.find((s) => s.key === key)?.tone ?? "bg-slate-100 text-slate-600";
   const label = (list: StatusDef[], key: string) => list.find((s) => s.key === key)?.label ?? key;
@@ -416,6 +425,31 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                   </select>
                 </div>
               </div>
+              {/* 🚚 เลขพัสดุ — ลูกค้าเห็นเลข + ปุ่มตามพัสดุ (หน้า ติดตามคำสั่งซื้อ / บัญชีสมาชิก / ข้อความ "จัดส่งแล้ว") */}
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">🚚 เลขพัสดุ (ลูกค้าเห็น + กดตามพัสดุได้)</label>
+                <div className="flex flex-wrap gap-2">
+                  <select className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" value={trackCarrier} onChange={(e) => setTrackCarrier(e.target.value)}>
+                    <option value="">— เลือกขนส่ง —</option>
+                    {PARCEL_CARRIERS.map((c) => (
+                      <option key={c.key} value={c.key}>{c.label}</option>
+                    ))}
+                  </select>
+                  <input className="flex-1 min-w-[10rem] rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm uppercase" value={trackNo} onChange={(e) => setTrackNo(e.target.value)} placeholder="เช่น TH1234567890" />
+                  <button
+                    disabled={busy || (cleanTrackingNo(trackNo) === (open.tracking?.number ?? "") && (trackCarrier || "") === (open.tracking?.carrier ?? "")) || (!!cleanTrackingNo(trackNo) && !trackCarrier)}
+                    onClick={() => void patch(open.id, { trackingNo: trackNo, trackingCarrier: trackCarrier }, cleanTrackingNo(trackNo) ? "บันทึกเลขพัสดุแล้ว" : "ลบเลขพัสดุแล้ว")}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-sm disabled:opacity-40"
+                  >
+                    บันทึก
+                  </button>
+                </div>
+                {!!cleanTrackingNo(trackNo) && !trackCarrier && <p className="text-[11px] text-amber-700 mt-1">เลือกขนส่งก่อน — ลูกค้าจะได้กดตามพัสดุได้ถูกเว็บ</p>}
+                {open.tracking?.url && (
+                  <a href={open.tracking.url} target="_blank" rel="noreferrer" className="inline-block mt-1 text-[11px] text-blue-600 hover:underline">↗ ลองเปิดหน้าตามพัสดุ</a>
+                )}
+                {open.status !== "shipped" && open.status !== "completed" && !!open.tracking && <p className="text-[11px] text-slate-400 mt-1">ใส่เลขแล้ว — เปลี่ยนสถานะเป็น “จัดส่งแล้ว” เพื่อแจ้งลูกค้า (ข้อความแนบเลขพัสดุให้เอง)</p>}
+              </div>
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">หมายเหตุ (ลูกค้าเห็นตอนตามออเดอร์)</label>
                 <div className="flex gap-2">
@@ -423,7 +457,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                     className="flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
                     value={noteDraft}
                     onChange={(e) => setNoteDraft(e.target.value)}
-                    placeholder="เช่น เลขพัสดุ Kerry TH1234567890"
+                    placeholder="เช่น ส่งพร้อมของแถม / นัดรับหน้าร้าน (เลขพัสดุใส่ช่องด้านบน)"
                   />
                   <button
                     disabled={busy || noteDraft === (open.note ?? "")}
@@ -470,6 +504,7 @@ function OrderMessageBox({ order, messaging }: { order: Order; messaging: Messag
           grandTotal: order.grandTotal,
           note: order.note,
           promptpay: order.promptpay ?? null,
+          tracking: order.tracking ?? null,
         },
         {
           name: messaging.shopName,

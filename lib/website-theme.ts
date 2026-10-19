@@ -1256,7 +1256,8 @@ export function menuItemHref(it: { kind: MenuKind; value: string }): string {
 }
 
 /* ───────── Footer (แท็บ "Footer") ───────── */
-export type FooterColKind = "about" | "links" | "contact" | "social" | "newsletter" | "text";
+/** help = ลิงก์ทุกหน้าใน "กลุ่มศูนย์ช่วยเหลือ" (ชื่อกลุ่มเก็บที่ text · ตั้งกลุ่มที่แท็บหน้าเว็บ) — เพิ่มหน้าในกลุ่ม ลิงก์ขึ้นเอง */
+export type FooterColKind = "about" | "links" | "contact" | "social" | "newsletter" | "text" | "help";
 export interface FooterColumn {
   id: string;
   kind: FooterColKind;
@@ -1307,7 +1308,8 @@ export interface FooterConfig {
   bottomAlign: "auto" | "left" | "center" | "split";
   copyrightText: string;
   /** โซเชียล: pill ป้ายชื่อ (เดิม) · icon ไอคอน · circle ไอคอนในวงกลม */
-  socialStyle: "pill" | "icon" | "circle";
+  /** list = รายการตัวหนังสือแนวตั้ง (เหมือนคอลัมน์ลิงก์) */
+  socialStyle: "pill" | "icon" | "circle" | "list";
   /** 📱 มือถือ: หัวคอลัมน์กดพับ/กาง · จัดกึ่งกลาง */
   mobileCollapse: boolean;
   mobileCenter: boolean;
@@ -1316,7 +1318,8 @@ export const FOOTER_COL_DEFS: { key: FooterColKind; label: string; hint: string;
   { key: "about", label: "เกี่ยวกับร้าน", hint: "โลโก้ + คำอธิบายร้าน (จากแท็บข้อมูลร้าน หรือพิมพ์ทับ)", defaultTitle: "" },
   { key: "links", label: "ลิงก์", hint: "รายการลิงก์ — ว่างไว้ = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ตามสถานะ)", defaultTitle: "เมนู" },
   { key: "contact", label: "ติดต่อ", hint: "โทร / LINE / อีเมล / ที่อยู่ / เวลาทำการ จากแท็บข้อมูลร้าน", defaultTitle: "ติดต่อ" },
-  { key: "social", label: "โซเชียล", hint: "ปุ่ม Facebook / IG / TikTok / Shopee / Lazada ที่กรอกไว้", defaultTitle: "ติดตามเรา" },
+  { key: "social", label: "โซเชียล", hint: "Instagram / Facebook / TikTok / X / Pinterest / YouTube / LINE / Shopee / Lazada ที่กรอกไว้ (ช่องว่าง = ไม่โชว์) · กดแล้วเปิดลิงก์ในแท็บใหม่", defaultTitle: "ติดตามเรา" },
+  { key: "help", label: "ศูนย์ช่วยเหลือ (อัตโนมัติ)", hint: "ลิงก์ทุกหน้าในกลุ่มที่เลือก (ตั้งกลุ่มที่แท็บ 📄 หน้าเว็บ › ⚙ ตั้งค่าหน้า) — เพิ่ม/ลบหน้าในกลุ่ม ลิงก์ที่นี่เปลี่ยนเอง", defaultTitle: "" },
   { key: "newsletter", label: "รับข่าวสาร", hint: "ช่องกรอกอีเมล (ตอนนี้ยังเป็นตัวอย่าง ไม่ได้เก็บอีเมลจริง)", defaultTitle: "รับข่าวสาร & โปรโมชัน" },
   { key: "text", label: "ข้อความอิสระ", hint: "หัวข้อ + ข้อความหลายบรรทัด เช่น นโยบาย / เวลาจัดส่ง", defaultTitle: "" },
 ];
@@ -1392,7 +1395,7 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     divider: r.divider !== false,
     bottomAlign: oneOf(r.bottomAlign, ["auto", "left", "center", "split"] as const, d.bottomAlign),
     copyrightText: typeof r.copyrightText === "string" ? r.copyrightText.trim().slice(0, 200) : "",
-    socialStyle: oneOf(r.socialStyle, ["pill", "icon", "circle"] as const, d.socialStyle),
+    socialStyle: oneOf(r.socialStyle, ["pill", "icon", "circle", "list"] as const, d.socialStyle),
     mobileCollapse: r.mobileCollapse === true,
     mobileCenter: r.mobileCenter === true,
   };

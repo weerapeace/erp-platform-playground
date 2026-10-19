@@ -73,6 +73,8 @@ export interface MessageOrder {
   /** หมายเหตุที่ลูกค้าเห็น (เช่น เลขพัสดุที่พนักงานใส่) */
   note: string;
   promptpay: { number: string; name: string } | null;
+  /** 🚚 เลขพัสดุ (lib/parcel-tracking) — มี = แนบในข้อความ "จัดส่งแล้ว" */
+  tracking?: { carrierLabel: string; number: string; url: string | null } | null;
 }
 
 export interface MessageShop {
@@ -191,6 +193,11 @@ export function orderMessage(ev: OrderEvent, o: MessageOrder, shop: MessageShop,
   const e = t.ev[ev](o);
   const lines = [t.hello(o.customerName), ...e.lines];
   if (ev === "placed" && shop.orderNote?.trim()) lines.push(shop.orderNote.trim());
+  if (ev === "shipped" && o.tracking?.number) {
+    const tr = o.tracking;
+    lines.push(`${lang === "en" ? "Tracking number" : "เลขพัสดุ"}: ${tr.carrierLabel ? `${tr.carrierLabel} ` : ""}${tr.number}`);
+    if (tr.url) lines.push(`${lang === "en" ? "Track your parcel" : "ตามพัสดุ"}: ${tr.url}`);
+  }
   if ((ev === "shipped" || ev === "preparing") && o.note.trim()) lines.push(`${t.noteFromShop}: ${o.note.trim()}`);
 
   const table: CustomerMessage["table"] = [];
