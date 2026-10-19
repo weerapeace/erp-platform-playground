@@ -19,6 +19,7 @@ import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useTickCatalog } from "@/components/tick-list-field";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { useViewPref } from "@/lib/use-view-pref";
+import { parseVariants, resolvePhrase, variantSearchText, variantsOf, VARIANT_MODE_LABEL, type VariantMode } from "@/lib/phrase-variants";
 import { uploadResizedImage } from "@/components/image-attach";
 import { useSWRLite } from "@/lib/swr-lite";
 import {
@@ -265,6 +266,12 @@ function DetailInsertModal({
   const [tab, setTab] = useState<Tab>("phrase");
   const [q, setQ] = useState("");
   const [phraseIds, setPhraseIds] = useState<string[]>([]);
+  // 📝 ข้อความหลายแบบ: ชื่อแบบที่เลือกต่อข้อความ (ว่าง = แบบแรก) — เลือกแบบแล้วติ๊กข้อนั้นให้เอง
+  const [phrasePick, setPhrasePick] = useState<Record<string, string>>({});
+  const choosePhrase = (id: string, label: string) => {
+    setPhrasePick((p) => ({ ...p, [id]: label }));
+    setPhraseIds((p) => (p.includes(id) ? p : [...p, id]));
+  };
   const [matIds, setMatIds] = useState<string[]>([]);
   const [slotN, setSlotN] = useState<Record<string, string>>({});
   const [at, setAt] = useState(lines.length);
@@ -339,7 +346,7 @@ function DetailInsertModal({
     return it ? [{ th: it.name, en: it.name_en, size: p.size }] : [];
   });
   const sel = {
-    phrases: byClick(phraseIds, phraseItems),
+    phrases: byClick(phraseIds, phraseItems).map((x) => resolvePhrase(x, phrasePick[x.id])),
     materials: byClick(matIds, visMats),
     slots: slotItems.map((item) => ({ item, n: Math.floor(Number(slotN[item.id])) || 0 })).filter((p) => p.n > 0),
     size: sizeSeen && use.size && has("w") ? { w: num.w, h: num.h, d: num.d } : null,
@@ -408,10 +415,11 @@ function DetailInsertModal({
 
   const needle = q.trim().toLowerCase();
   const match = (x: { name: string; name_en?: string | null }) => !needle || `${x.name} ${x.name_en ?? ""}`.toLowerCase().includes(needle);
+  const matchPhrase = (x: SnippetItem) => !needle || variantSearchText(x).toLowerCase().includes(needle);
 
   // ล้าง: แท็บรายการ = เอาที่เลือกออก · ขนาด/ใส่อะไรได้ = คืนค่าเดิมของสินค้า + ไม่ใส่บรรทัด (ไม่ลบข้อมูลจริง)
   const clearTab = (t: Tab) => {
-    if (t === "phrase") setPhraseIds([]);
+    if (t === "phrase") { setPhraseIds([]); setPhrasePick({}); }
     if (t === "material") setMatIds([]);
     if (t === "slot") setSlotN({});
     if (t === "size") {
@@ -798,21 +806,41 @@ function DetailInsertModal({
             <div className="max-h-[22rem] space-y-1 overflow-auto pr-1">
               {tab === "phrase" && (
                 <>
-                  <SortList items={phraseItems.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("phrase", phraseItems, f, t)} render={(it, handle) => {
+                  <SortList items={phraseItems.filter(matchPhrase)} disabled={!!needle} onMove={(f, t) => void reorder("phrase", phraseItems, f, t)} render={(it, handle) => {
                     const on = phraseIds.includes(it.id);
+                    const v = variantsOf(it);
+                    const shown = resolvePhrase(it, phrasePick[it.id]);
                     return (
-                      <div className={rowCls(on)}>
+                      <div className={rowCls(on)} data-phrase-row={it.id}>
                         {handle}
-                        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                          <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
-                          {on && phraseIds.length > 1 && <ClickOrder n={phraseIds.indexOf(it.id) + 1} />}
-                          <NameTwoLines th={it.name} en={it.name_en} on={on} />
-                        </label>
+                        <div className="min-w-0 flex-1">
+                          {v && (
+                            <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-slate-500" data-phrase-variant={v.mode}>
+                              <span className="font-medium text-slate-600">{it.name}</span>
+                              {v.mode === "select" ? (
+                                <select value={phrasePick[it.id] || v.variants[0].label} onChange={(e) => choosePhrase(it.id, e.target.value)} aria-label={`เลือกแบบ ${it.name}`}
+                                  className="h-6 rounded border border-slate-200 bg-white px-1 text-[11.5px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-orange-400">
+                                  {v.variants.map((x) => <option key={x.label} value={x.label}>{x.label}</option>)}
+                                </select>
+                              ) : (
+                                <label className="inline-flex cursor-pointer items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-700">
+                                  <input type="checkbox" checked={phrasePick[it.id] === v.variants[1].label} onChange={(e) => choosePhrase(it.id, e.target.checked ? v.variants[1].label : "")} className="h-3.5 w-3.5 accent-orange-500" aria-label={`${it.name}: ${v.variants[1].label}`} />
+                                  {v.variants[1].label}
+                                </label>
+                              )}
+                            </div>
+                          )}
+                          <label className="flex min-w-0 cursor-pointer items-center gap-2">
+                            <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
+                            {on && phraseIds.length > 1 && <ClickOrder n={phraseIds.indexOf(it.id) + 1} />}
+                            <NameTwoLines th={shown.name} en={shown.name_en} on={on} />
+                          </label>
+                        </div>
                         {editBtn("phrase", it as unknown as Record<string, unknown>)}
                       </div>
                     );
                   }} />
-                  {!phraseItems.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบข้อความ</p>}
+                  {!phraseItems.filter(matchPhrase).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบข้อความ</p>}
                   {addBtn("phrase", "ข้อความ")}
                 </>
               )}
@@ -1566,6 +1594,26 @@ function CatalogItemDialog({
   const [translating, setTranslating] = useState(false);
   const [askDelete, setAskDelete] = useState(false);
   const [side, setSide] = useState(s("slot_side"));
+  // 📝 ข้อความหลายแบบ: ข้อความเดียว / Dropdown หลายแบบ / ติ๊กสลับ 2 แบบ (lib/phrase-variants)
+  type VRow = { label: string; th: string; en: string };
+  const vInit = useMemo(() => parseVariants(item?.variant_mode, item?.variants), []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const vRowsInit = useMemo<VRow[]>(
+    () => (vInit ? vInit.variants.map((x) => ({ label: x.label, th: x.th, en: x.en ?? "" })) : [{ label: "", th: s("name"), en: s("name_en") }, { label: "", th: "", en: "" }]),
+    [] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const [vMode, setVMode] = useState<"one" | VariantMode>(vInit?.mode ?? "one");
+  const [vRows, setVRows] = useState<VRow[]>(vRowsInit);
+  const [vTranslating, setVTranslating] = useState<number | null>(null);
+  const vDirty = vMode !== (vInit?.mode ?? "one") || (vMode !== "one" && JSON.stringify(vRows) !== JSON.stringify(vRowsInit));
+  const setVRow = (i: number, patch: Partial<VRow>) => setVRows((p) => p.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const translateRow = async (i: number) => {
+    const th = vRows[i]?.th.trim();
+    if (!th) { toast.warning("พิมพ์ประโยคไทยก่อน"); return; }
+    setVTranslating(i);
+    try { const [en] = await translateContent([th]); if (en) setVRow(i, { en }); else toast.warning("แปลไม่ได้ — พิมพ์เองได้เลย"); }
+    catch { toast.error("แปลไม่สำเร็จ — พิมพ์เองได้เลย"); }
+    finally { setVTranslating(null); }
+  };
   const fileRef = useRef<HTMLInputElement | null>(null);
   const id = item ? String(item.id) : "";
   const catalog = catalogOf(kind);
@@ -1577,7 +1625,7 @@ function CatalogItemDialog({
   );
   const [inProfiles, setInProfiles] = useState<string[]>(inInit);
   const profilesDirty = JSON.stringify([...inProfiles].sort()) !== JSON.stringify([...inInit].sort());
-  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key") || side !== s("slot_side") || profilesDirty || dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || soft !== (item?.is_soft === true) || sdDirty;
+  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key") || side !== s("slot_side") || profilesDirty || dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || soft !== (item?.is_soft === true) || sdDirty || vDirty;
 
   const translate = async () => {
     if (!name.trim()) {
@@ -1625,6 +1673,21 @@ function CatalogItemDialog({
     }
     const body: Record<string, unknown> = { name: n, name_en: nameEn.trim() || null };
     if (kind === "slot") Object.assign(body, { template: tpl.trim() || null, template_en: tplEn.trim() || null, slot_side: side || null });
+    if (kind === "phrase") {
+      if (vMode === "one") Object.assign(body, { variant_mode: null, variants: null });
+      else {
+        const rows = (vMode === "toggle" ? vRows.slice(0, 2) : vRows)
+          .map((r, i) => ({ label: vMode === "toggle" && i === 0 ? "" : r.label.trim(), th: r.th.trim(), en: r.en.trim() || null }))
+          .filter((r) => r.th);
+        const labels = rows.map((r) => r.label).filter(Boolean);
+        if (new Set(labels).size !== labels.length) { toast.warning("ชื่อแบบซ้ำกัน — ตั้งชื่อไม่ให้ซ้ำ"); return; }
+        if (!parseVariants(vMode, rows)) {
+          toast.warning(vMode === "toggle" ? "ใส่ประโยคทั้ง 2 แบบ และชื่อช่องติ๊ก (เช่น ทอลาย)" : "ต้องมีอย่างน้อย 2 แบบ และทุกแบบต้องมีชื่อแบบ + ประโยคไทย");
+          return;
+        }
+        Object.assign(body, { variant_mode: vMode, variants: rows });
+      }
+    }
     if (kind === "fit") {
       const dimsChanged = dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || sdDirty;
       // เก็บเฉพาะตัวเลือกที่ยังอยู่ในรายการขนาด + ครบ 3 ด้าน
@@ -1729,11 +1792,47 @@ function CatalogItemDialog({
               </div>
             </div>
           )}
+          {kind === "phrase" && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">แบบข้อความ</label>
+              <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-[12.5px]" data-phrase-mode>
+                {([["one", "ข้อความเดียว"], ["select", VARIANT_MODE_LABEL.select], ["toggle", VARIANT_MODE_LABEL.toggle]] as const).map(([m, l], i) => (
+                  <button key={m} type="button" onClick={() => setVMode(m)} data-phrase-mode-opt={m}
+                    className={`px-3 py-1.5 ${i ? "border-l border-slate-200" : ""} ${vMode === m ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+                ))}
+              </div>
+            </div>
+          )}
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">ชื่อ (ไทย)</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">{kind === "phrase" && vMode !== "one" ? "ชื่อหัวข้อ (เช่น ซิป · ผ้าซับใน)" : "ชื่อ (ไทย)"}</label>
             <input value={name} onChange={(e) => setName(e.target.value)} maxLength={160} autoFocus placeholder={PLACEHOLDER[kind].th} className={input} />
           </div>
-          <div>
+          {kind === "phrase" && vMode !== "one" && (
+            <div className="space-y-1.5 rounded-lg bg-slate-50 p-2.5" data-phrase-variants>
+              <p className="text-[11.5px] text-slate-500">{vMode === "select" ? "แต่ละแบบ = ทั้งประโยค · แบบแรก = ค่าเริ่ม" : "ไม่ติ๊ก = ประโยคแรก · ติ๊ก = ประโยคที่ 2"} · อังกฤษว่างได้</p>
+              {(vMode === "toggle" ? vRows.slice(0, 2) : vRows).map((r, i) => (
+                <div key={i} className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-start gap-1.5" data-variant-row={i}>
+                  {vMode === "toggle" && i === 0
+                    ? <span className="pt-2 text-[12px] text-slate-500">ไม่ติ๊ก</span>
+                    : <input value={r.label} onChange={(e) => setVRow(i, { label: e.target.value.slice(0, 40) })} placeholder={vMode === "toggle" ? "ชื่อช่องติ๊ก" : `แบบ ${i + 1}`} aria-label={`ชื่อแบบ ${i + 1}`} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-orange-400" />}
+                  <div className="space-y-1">
+                    <input value={r.th} onChange={(e) => setVRow(i, { th: e.target.value.slice(0, 300) })} placeholder="ประโยคไทย" aria-label={`ประโยคไทย แบบ ${i + 1}`} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    <div className="flex gap-1">
+                      <input value={r.en} onChange={(e) => setVRow(i, { en: e.target.value.slice(0, 300) })} placeholder="ประโยคอังกฤษ" aria-label={`ประโยคอังกฤษ แบบ ${i + 1}`} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      <button type="button" onClick={() => void translateRow(i)} disabled={vTranslating !== null} className="h-8 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50">{vTranslating === i ? "…" : "🌐"}</button>
+                    </div>
+                  </div>
+                  {vMode === "select" && vRows.length > 2
+                    ? <button type="button" onClick={() => setVRows((p) => p.filter((_, j) => j !== i))} title="ลบแบบนี้" aria-label={`ลบแบบ ${i + 1}`} className="h-8 w-7 rounded text-slate-300 hover:bg-rose-50 hover:text-rose-600">✕</button>
+                    : <span className="w-7" />}
+                </div>
+              ))}
+              {vMode === "select" && vRows.length < 12 && (
+                <button type="button" onClick={() => setVRows((p) => [...p, { label: "", th: "", en: "" }])} className="text-[12px] text-orange-600 hover:underline" data-variant-add>＋ เพิ่มแบบ</button>
+              )}
+            </div>
+          )}
+          <div className={kind === "phrase" && vMode !== "one" ? "hidden" : ""}>
             <label className="mb-1 block text-xs font-medium text-slate-600">ชื่ออังกฤษ <span className="font-normal text-slate-400">(ฝั่งคำอธิบายอังกฤษ / เว็บ /en)</span></label>
             <div className="flex gap-1.5">
               <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} maxLength={160} placeholder={PLACEHOLDER[kind].en} className={input} />

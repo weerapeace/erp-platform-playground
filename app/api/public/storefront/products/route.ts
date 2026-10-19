@@ -121,7 +121,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 📏 รายการกลาง "ใส่อะไรได้บ้าง" + ✅ "รายละเอียดเพิ่ม (ติ๊ก)" (ตารางเล็ก) → หัวข้อ "ขนาด" / ต่อท้าย "รายละเอียดสินค้า"
   const [{ data: fitRows }, { data: hlRows }, { data: toneRows }, cardBadges, { data: matRows }, sizeGuides] = await Promise.all([
     sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order").eq("is_active", true).order("sort_order"),
-    sb.from("product_highlight_items").select("id, name, name_en, is_active").eq("is_active", true).order("sort_order"),
+    sb.from("product_highlight_items").select("id, name, name_en, is_active, variant_mode, variants").eq("is_active", true).order("sort_order"),
     // 🎨 โทนสี (ของกลาง) → ตัวเลือกแต่ละสีบอกว่าอยู่โทนไหน (ปุ่ม "กรองตามสี" บนเว็บ · ดู lib/color-tone.ts)
     sb.from("erp_color_tones").select(TONE_SELECT).eq("is_active", true).order("sort_order"),
     // 🏷 ป้ายบนการ์ดของร้าน (ชื่อ + สี) → badgeColor ของแต่ละสินค้า

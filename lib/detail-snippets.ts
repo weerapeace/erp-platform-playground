@@ -24,6 +24,9 @@ export type SnippetItem = {
   slot_side?: string | null;
   sort_order?: number | null;
   is_active?: boolean | null;
+  /** ข้อความหลายแบบ (lib/phrase-variants) — null = ข้อความเดียว */
+  variant_mode?: string | null;
+  variants?: unknown;
 };
 
 export type MaterialPick = { id: string; name: string; name_en?: string | null };

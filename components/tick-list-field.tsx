@@ -16,6 +16,7 @@ import { useSWRLite } from "@/lib/swr-lite";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { parseFits, fitSizeOptions, fitLabels, type FitItem, type FitPick } from "@/lib/product-fits";
+import { resolvePhrase, variantsOf } from "@/lib/phrase-variants";
 
 export type TickListConfig = {
   /** ตารางกลาง = module key ใน /api/master-v2 (เช่น product_fit_items) */
@@ -102,13 +103,28 @@ export function TickListPicker({ cfg, value, onChange, disabled }: { cfg: TickLi
         {list.map((it) => {
           const on = picks.find((p) => p.id === it.id);
           const sizes = cfg.withSizes ? fitSizeOptions(it) : [];
+          // 📝 ข้อความหลายแบบ (รายละเอียดเพิ่ม): เลือกแบบในแถว · เก็บชื่อแบบใน size (ว่าง = แบบแรก) · บนเว็บขึ้นทั้งประโยคของแบบนั้น
+          const v = variantsOf(it);
+          const shown = v ? resolvePhrase(it, on?.size) : it;
           return (
             <div key={it.id}
               className={`flex min-h-10 items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${on ? "border-orange-300 bg-orange-50" : "border-slate-200 hover:bg-slate-50"}`}>
               <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                 <input type="checkbox" checked={!!on} disabled={disabled} onChange={() => toggle(it)} className="h-4 w-4 shrink-0 accent-orange-500" />
-                <span className={`text-sm ${cfg.columns === 1 ? "" : "truncate"} ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{it.name}</span>
+                <span className={`text-sm ${cfg.columns === 1 ? "" : "truncate"} ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{shown.name}</span>
               </label>
+              {v && on && (v.mode === "select" ? (
+                <select value={on.size || v.variants[0].label} disabled={disabled} onChange={(e) => setSize(it.id, e.target.value === v.variants[0].label ? "" : e.target.value)} aria-label={`เลือกแบบ ${it.name}`}
+                  className="h-7 max-w-[8.5rem] shrink-0 rounded-md border border-orange-200 bg-white px-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-orange-400">
+                  {v.variants.map((x) => <option key={x.label} value={x.label}>{x.label}</option>)}
+                </select>
+              ) : (
+                <label className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs text-slate-700">
+                  <input type="checkbox" checked={on.size === v.variants[1].label} disabled={disabled} onChange={(e) => setSize(it.id, e.target.checked ? v.variants[1].label : "")} className="h-3.5 w-3.5 accent-orange-500" />
+                  {v.variants[1].label}
+                </label>
+              ))}
+              {v && !on && <span className="shrink-0 text-[11px] text-slate-400">{v.mode === "select" ? `${v.variants.length} แบบ` : "ติ๊กสลับ"}</span>}
               {sizes.length > 0 && (on ? (
                 <select value={on.size ?? ""} disabled={disabled} onChange={(e) => setSize(it.id, e.target.value)}
                   className="h-7 max-w-[8.5rem] shrink-0 rounded-md border border-orange-200 bg-white px-1.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-orange-400">

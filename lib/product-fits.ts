@@ -7,8 +7,11 @@
  * ใช้ที่: ตัวเลือกในฟอร์ม Parent SKU (components/parent-fit-picker) · บล็อก "ขนาด" บนเว็บร้าน
  */
 
+import { pickVariant } from "./phrase-variants";
+
 export type FitPick = { id: string; size?: string | null };
-export type FitItem = { id: string; name: string; name_en?: string | null; sizes?: string | null; sort_order?: number | null; is_active?: boolean | null };
+/** variant_mode/variants = ข้อความหลายแบบ (เฉพาะ product_highlight_items — lib/phrase-variants) */
+export type FitItem = { id: string; name: string; name_en?: string | null; sizes?: string | null; sort_order?: number | null; is_active?: boolean | null; variant_mode?: unknown; variants?: unknown };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -83,6 +86,9 @@ export function fitLabels(fits: unknown, catalog: FitItem[], lang: "th" | "en" =
   for (const f of parseFits(fits)) {
     const it = byId.get(f.id);
     if (!it || it.is_active === false) continue;
+    // ข้อความหลายแบบ (รายละเอียดเพิ่ม ติ๊ก): size = ชื่อแบบที่เลือก → ขึ้นทั้งประโยคของแบบนั้น (ไม่มีวงเล็บขนาด)
+    const v = pickVariant(it, f.size);
+    if (v) { out.push((lang === "en" && v.en) || v.th); continue; }
     const name = (lang === "en" && it.name_en?.trim()) || it.name;
     const size = f.size ? (lang === "en" ? fitSizeEn(f.size) : f.size) : "";
     out.push(size ? `${name} (${size})` : name);
