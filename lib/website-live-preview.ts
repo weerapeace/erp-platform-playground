@@ -11,7 +11,7 @@
  */
 type AnyBlock = { id: string; type: string; enabled?: boolean; visibility?: unknown; style?: unknown } & Record<string, unknown>;
 
-export const LIVE_RELOAD_TYPES: readonly string[] = ["featured", "products", "personalize", "beltbuilder"];
+export const LIVE_RELOAD_TYPES: readonly string[] = ["featured", "products", "personalize", "beltbuilder", "drop"];
 
 /** แบบเดิม (พรีวิวไม่รับค่าสด): ทุกอย่างยกเว้นเนื้อในผืนผ้าใบ */
 export function previewStructureSig(blocks: AnyBlock[]): string {

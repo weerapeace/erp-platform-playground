@@ -12,7 +12,7 @@ type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
 export async function syncCanvasAssetUsages(
   sb: Admin,
-  opts: { module: "website_home" | "website_page" | "website_canvas_template" | "website_section_template"; recordId: string; recordLabel: string; field: "draft" | "live" | "data"; blocks: unknown }
+  opts: { module: "website_home" | "website_page" | "website_drop_page" | "website_canvas_template" | "website_section_template"; recordId: string; recordLabel: string; field: "draft" | "live" | "data"; blocks: unknown }
 ): Promise<void> {
   try {
     const { module, recordId, recordLabel, field } = opts;

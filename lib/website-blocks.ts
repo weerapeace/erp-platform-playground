@@ -63,7 +63,8 @@ export type BlockType =
   | "logos"
   | "collections"
   | "fitcheck"
-  | "beltbuilder";
+  | "beltbuilder"
+  | "drop";
 
 /** ซ่อน/แสดงแยกตามขนาดจอ */
 export interface Visibility {
@@ -336,6 +337,13 @@ export interface CountdownBlock extends BlockBase {
   layout: "bar" | "center";
   tone: "dark" | "light" | "brand";
   showDays: boolean;
+}
+/** 🆕 ชุดมาใหม่ — แบนเนอร์ + นับถอยหลัง + สินค้าในชุด (this = ชุดของหน้า /new/<ชุด> · หน้าอื่น = ชุดล่าสุด) */
+export interface DropBlock extends BlockBase {
+  type: "drop";
+  which: "this" | "latest" | "soon";
+  banner: "big" | "small" | "none";
+  showProducts: boolean;
 }
 /** 🛍 ลุคบุ๊กกดซื้อได้ — spots[].pos = % บนรูป */
 export interface LookbookBlock extends BlockBase {
@@ -678,6 +686,7 @@ export type Block =
   | FaqBlock
   | TimelineBlock
   | CountdownBlock
+  | DropBlock
   | LookbookBlock
   | LogosBlock
   | CollectionsBlock
@@ -1062,8 +1071,9 @@ export function validateBlocks(blocks: Block[]): ValidationIssue[] {
   if (!active.length) issues.push({ blockId: null, level: "error", message: "ยังไม่มีบล็อกที่เปิดใช้งาน — หน้าจะว่างเปล่า" });
 
   const heroes = active.filter((b) => b.type === "hero");
-  // ผืนผ้าใบอิสระมักใช้เป็นหัวเว็บแทนแบนเนอร์ → มีแล้วไม่ต้องเตือนว่าไม่มี Hero
-  if (heroes.length === 0 && !active.some((b) => b.type === "canvas")) issues.push({ blockId: null, level: "warning", message: "ไม่มีแบนเนอร์หลัก (Hero) — หน้าอาจดูไม่มีหัวเรื่อง" });
+  // ผืนผ้าใบอิสระมักใช้เป็นหัวเว็บแทนแบนเนอร์ · 🆕 ชุดมาใหม่ที่โชว์แบนเนอร์ชุด (หน้า /new/<ชุด>) ก็เป็นหัวเรื่องแล้ว → ไม่ต้องเตือนว่าไม่มี Hero
+  const hasHeader = active.some((b) => b.type === "canvas" || (b.type === "drop" && b.banner !== "none"));
+  if (heroes.length === 0 && !hasHeader) issues.push({ blockId: null, level: "warning", message: "ไม่มีแบนเนอร์หลัก (Hero) — หน้าอาจดูไม่มีหัวเรื่อง" });
   if (heroes.length > 1) issues.push({ blockId: null, level: "warning", message: `มีแบนเนอร์หลัก ${heroes.length} อัน — ควรมีอันเดียวเพื่อ SEO` });
 
   for (const b of active) {

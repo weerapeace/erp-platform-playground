@@ -45,7 +45,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!shopId) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const { data, error } = await sb.from("store_new_drops").select(COLS).eq("shop_id", shopId).order("start_at", { ascending: false }).limit(200);
   if (error) return NextResponse.json({ error: "โหลดชุดมาใหม่ไม่สำเร็จ", drops: [] }, { status: 500 });
-  return NextResponse.json({ drops: ((data ?? []) as Record<string, unknown>[]).map(dropFromRow) });
+  // 🧱 ชุดไหนจัดหน้าเองแล้ว / มีร่างค้าง (ป้ายบนการ์ด) — ดึงแค่ id ไม่ดึง Section ทั้งก้อน
+  const [{ data: pub }, { data: dr }] = await Promise.all([
+    sb.from("store_new_drops").select("id").eq("shop_id", shopId).not("layout", "is", null),
+    sb.from("store_new_drops").select("id").eq("shop_id", shopId).not("draft_layout", "is", null),
+  ]);
+  const pubIds = new Set(((pub ?? []) as { id: string }[]).map((r) => r.id));
+  const draftIds = new Set(((dr ?? []) as { id: string }[]).map((r) => r.id));
+  return NextResponse.json({
+    drops: ((data ?? []) as Record<string, unknown>[]).map(dropFromRow),
+    pages: Object.fromEntries([...new Set([...pubIds, ...draftIds])].map((id) => [id, { custom: pubIds.has(id), draft: draftIds.has(id) }])),
+  });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
