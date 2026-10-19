@@ -3113,6 +3113,19 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
               <button type="button" onClick={() => setCard({ imagePosX: 50, imagePosY: 50 })} className="text-[11px] text-slate-500 hover:text-blue-600">↺ กลับกึ่งกลาง</button>
             </div>
           )}
+          {/* 🔍 ขนาดรูปในกรอบ — ย่อ/ขยายรอบจุดตำแหน่งที่เลือก (ชิดบน = ย่อแล้วยังชิดบน) */}
+          <div className="mt-2">
+            <label className="flex items-center justify-between text-[11px] font-medium text-slate-500 mb-0.5">
+              <span>🔍 ขนาดรูปในกรอบ ({card.imageScale}%)</span>
+              {card.imageScale !== 100 && (
+                <button type="button" onClick={() => setCard({ imageScale: 100 })} className="font-normal text-slate-500 hover:text-blue-600">
+                  ↺ 100%
+                </button>
+              )}
+            </label>
+            <input type="range" min={50} max={200} step={5} value={card.imageScale} onChange={(e) => setCard({ imageScale: Number(e.target.value) })} className="w-full" />
+            <p className="text-[11px] text-slate-400">น้อยกว่า 100 = ย่อรูป เห็นพื้นรอบ · มากกว่า 100 = ซูมเข้า (ตัดขอบเพิ่ม)</p>
+          </div>
         </div>
         <div>
           <label className={labelCls}>สีพื้นหลังหลังรูปสินค้า</label>
@@ -3499,11 +3512,11 @@ function SampleCard({ item, card, colors, fonts, radius, shape }: { item: Sample
       <div className="relative overflow-hidden" style={{ aspectRatio: RATIO_CSS[card.imageRatio] ?? "4 / 5", background: card.imageBg || "#eee", borderRadius: boxed ? undefined : r }}>
         {item.images[0] && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.images[0]} alt="" className={`absolute inset-0 w-full h-full transition-all duration-500 ${card.imageFit === "contain" ? "object-contain" : "object-cover"} ${card.imagePad == null && card.imageFit === "contain" ? "p-2" : ""}`} style={{ transform: hover && card.hover === "zoom" ? "scale(1.05)" : undefined, opacity: hover && swap ? 0 : 1, padding: card.imagePad != null ? `${card.imagePad}%` : undefined, objectPosition: cardImagePosition(card) }} />
+          <img src={item.images[0]} alt="" className={`absolute inset-0 w-full h-full transition-all duration-500 ${card.imageFit === "contain" ? "object-contain" : "object-cover"} ${card.imagePad == null && card.imageFit === "contain" ? "p-2" : ""}`} style={{ transform: hover && card.hover === "zoom" ? "scale(1.05)" : undefined, opacity: hover && swap ? 0 : 1, padding: card.imagePad != null ? `${card.imagePad}%` : undefined, objectPosition: cardImagePosition(card), scale: card.imageScale !== 100 ? String(card.imageScale / 100) : undefined, transformOrigin: cardImagePosition(card) }} />
         )}
         {swap && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.images[1]} alt="" className={`absolute inset-0 w-full h-full transition-opacity duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ opacity: hover ? 1 : 0, objectPosition: cardImagePosition(card) }} />
+          <img src={item.images[1]} alt="" className={`absolute inset-0 w-full h-full transition-opacity duration-500 ${card.imageFit === "contain" ? "object-contain p-2" : "object-cover"}`} style={{ opacity: hover ? 1 : 0, objectPosition: cardImagePosition(card), scale: card.imageScale !== 100 ? String(card.imageScale / 100) : undefined, transformOrigin: cardImagePosition(card) }} />
         )}
         {card.showBadge && item.badge && <span className="absolute top-2 left-2 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white/90" style={{ color: colors.ink, letterSpacing: ".08em" }}>{item.badge}</span>}
         {card.autoBadges.sale && item.comparePrice && item.comparePrice > item.price && Math.round((1 - item.price / item.comparePrice) * 100) >= card.autoBadges.saleMin && (

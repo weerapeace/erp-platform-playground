@@ -940,6 +940,8 @@ export interface SiteTheme {
     imagePos: "center" | "top" | "bottom" | "custom";
     imagePosX: number;
     imagePosY: number;
+    /** 🔍 ขนาดรูปในกรอบ % (100 = ปกติ · น้อยกว่า = ย่อเห็นพื้นรอบ · มากกว่า = ซูมเข้า) — ย่อ/ขยายรอบจุดตำแหน่งรูปด้านบน */
+    imageScale: number;
     /** 🔤 ชื่อสินค้า: ตัวพิมพ์ใหญ่ · ความหนา · ระยะห่างตัวอักษร (1/100 em) */
     nameUpper: boolean;
     nameWeight: 400 | 500 | 600 | 700;
@@ -1373,7 +1375,7 @@ export const DEFAULT_THEME: SiteTheme = {
   cart: { ...DEFAULT_CART },
   checkout: { ...DEFAULT_CHECKOUT },
   page: { transition: "fade", smoothScroll: false },
-  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
+  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, imageScale: 100, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
@@ -1705,6 +1707,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       imagePos: pick(cd.imagePos, ["center", "top", "bottom", "custom"] as const, "center"),
       imagePosX: num(cd.imagePosX, 50, 0, 100),
       imagePosY: num(cd.imagePosY, 50, 0, 100),
+      imageScale: num(cd.imageScale, 100, 50, 200),
       nameUpper: cd.nameUpper === true,
       nameWeight: ([400, 500, 600, 700] as const).includes(Number(cd.nameWeight) as 400) ? (Number(cd.nameWeight) as 400 | 500 | 600 | 700) : 500,
       nameTracking: num(cd.nameTracking, 0, 0, 20),
