@@ -5,7 +5,7 @@
  * เว็บร้านวาดที่ components/cart/* — ลิ้นชักตะกร้า + หน้า /cart ใช้ตัววาดเดียวกัน
  * พรีวิว: ตอนอยู่แท็บนี้ หน้าตั้งค่าสั่งให้เว็บในพรีวิวเปิดตะกร้าค้างไว้ (ตะกร้าว่าง = ใส่สินค้าตัวอย่างให้ดู ไม่ใส่ตะกร้าจริง)
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Seg } from "@/components/website-block-editor";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
@@ -110,6 +110,8 @@ function RecsSetEditor({ value: r, onChange, shopSlug, index, onRemove, dragHand
   const layouts = CART_RECS_LAYOUTS.map((o) => ({ v: o.value, l: o.label }));
   const hint = (v: string) => CART_RECS_LAYOUTS.find((o) => o.value === v)?.hint;
   const usesCards = r.layout !== "addon" || r.pageLayout !== "addon";
+  // หน้าตาช่องเดียว = เปลี่ยนทั้งลิ้นชัก + หน้า /cart (พรีวิวเปิดหน้าไหนก็เห็นผล) · กด "ตั้งหน้า /cart แยก" เมื่ออยากให้ต่างกัน
+  const [split, setSplit] = useState(r.layout !== r.pageLayout);
   return (
     <div className={`rounded-xl border p-3 space-y-3 ${r.on ? "border-blue-200 bg-blue-50/30" : "border-slate-200 bg-slate-50/60"}`}>
       <div className="flex items-center gap-2">
@@ -147,18 +149,41 @@ function RecsSetEditor({ value: r, onChange, shopSlug, index, onRemove, dragHand
               {!r.codes.length && <p className="text-[11px] text-amber-700 mt-1">⚠ ยังไม่ได้เลือกรุ่น — ลูกค้าจะไม่เห็นชุดนี้</p>}
             </div>
           )}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <span className={lbl}>หน้าตาในลิ้นชัก/หน้าต่าง</span>
-              <Seg value={r.layout} onChange={(layout) => set({ layout })} options={layouts} />
-              <p className="text-[11px] text-slate-500 mt-1">{hint(r.layout)}</p>
+          {split ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <span className={lbl}>หน้าตาในลิ้นชัก/หน้าต่าง</span>
+                <Seg value={r.layout} onChange={(layout) => set({ layout })} options={layouts} />
+                <p className="text-[11px] text-slate-500 mt-1">{hint(r.layout)}</p>
+              </div>
+              <div>
+                <span className={lbl}>หน้าตาในหน้า /cart</span>
+                <Seg value={r.pageLayout} onChange={(pageLayout) => set({ pageLayout })} options={layouts} />
+                <p className="text-[11px] text-slate-500 mt-1">{hint(r.pageLayout)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  set({ pageLayout: r.layout });
+                  setSplit(false);
+                }}
+                className="sm:col-span-2 text-left text-xs text-blue-600 hover:underline"
+              >
+                ↺ ใช้หน้าตาเดียวกันทั้งลิ้นชักและหน้า /cart
+              </button>
             </div>
+          ) : (
             <div>
-              <span className={lbl}>หน้าตาในหน้า /cart</span>
-              <Seg value={r.pageLayout} onChange={(pageLayout) => set({ pageLayout })} options={layouts} />
-              <p className="text-[11px] text-slate-500 mt-1">{hint(r.pageLayout)}</p>
+              <span className={lbl}>หน้าตา (ลิ้นชัก + หน้า /cart)</span>
+              <Seg value={r.layout} onChange={(layout) => set({ layout, pageLayout: layout })} options={layouts} />
+              <p className="text-[11px] text-slate-500 mt-1">
+                {hint(r.layout)} ·{" "}
+                <button type="button" onClick={() => setSplit(true)} className="text-blue-600 hover:underline">
+                  ตั้งหน้า /cart แยก
+                </button>
+              </p>
             </div>
-          </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <span className={lbl}>ตำแหน่ง</span>
