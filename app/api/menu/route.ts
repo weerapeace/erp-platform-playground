@@ -4,7 +4,7 @@
  * GET            → รายการเมนู (default: เฉพาะ active; ?all=1 = ทั้งหมด สำหรับหน้าจัดการ)
  * POST {items}   → นำเข้าหลายเมนู (seed จาก default) — upsert ตาม href
  * POST {item}    → เพิ่มเมนูเดียว
- * PATCH {id,patch}→ แก้เมนู
+ * PATCH {id,patch}→ แก้เมนู (มีประวัติใน audit_logs · patch.audience = ใครเห็นเมนูนี้ — lib/menu-audience)
  * DELETE ?id=    → ลบเมนู
  *
  * อ่านได้ทุก user (authenticated) — เขียนต้องมีสิทธิ์ admin.users
@@ -12,6 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
+import { cleanAudience } from "@/lib/menu-audience";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -74,8 +76,21 @@ export async function PATCH(request: NextRequest) {
   if (!body.id || !body.patch) return NextResponse.json({ error: "ต้องมี id + patch" }, { status: 400 });
   const { id: _drop, ...patch } = body.patch as Record<string, unknown>;
   void _drop;
-  const { data, error } = await supabaseAdmin().from("erp_menu_items").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", body.id).select("*").single();
+  if ("audience" in patch) patch.audience = cleanAudience(patch.audience);   // ว่าง = null (ทุกคนเห็น)
+  const admin = supabaseAdmin();
+  const { data: before } = await admin.from("erp_menu_items").select("*").eq("id", body.id).maybeSingle();
+  const { data, error } = await admin.from("erp_menu_items").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", body.id).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ประวัติ: ช่องที่เปลี่ยนจริง (ก่อน → หลัง)
+  const prev = (before ?? {}) as Record<string, unknown>;
+  const changes = Object.fromEntries(Object.keys(patch).filter((k) => JSON.stringify(prev[k] ?? null) !== JSON.stringify(patch[k] ?? null)).map((k) => [k, { from: prev[k] ?? null, to: patch[k] ?? null }]));
+  if (Object.keys(changes).length) {
+    const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+    await writeAudit(admin, {
+      action: "menu.update", entityType: "erp_menu_items", entityId: body.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { label: prev.label ?? null, href: prev.href ?? null, changes },
+    });
+  }
   return NextResponse.json({ data, error: null });
 }
 

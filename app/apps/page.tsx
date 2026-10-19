@@ -22,6 +22,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ColorInput } from "@/components/color-picker";
 import { uploadResizedImage } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { menuVisibleTo } from "@/lib/menu-audience";
 
 // ธีมหน้าแรกรายคน (เก็บใน user_ui_prefs key=launcher_theme)
 type LauncherTheme = { bg: string | null; bgGradient: { from: string; to: string } | null; bgImage: string | null; accent: string | null; font: string | null };
@@ -289,6 +290,7 @@ export default function AppLauncherPage() {
       .filter((r) => r.is_active && r.show_in_launcher
         && r.href !== "/apps"   // ไม่โชว์การ์ด launcher เอง (ลิงก์มาหน้าเดิม → กดแล้วเหมือนไม่ทำงาน)
         && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0]))
+        && menuVisibleTo(r.audience, user)   // 👁 ใครเห็นเมนูไหน
         // เมนูที่สังกัดแอปถูกล็อก → ซ่อน (เว้นแต่สังกัดแอปอื่นที่เข้าได้ด้วย)
         && (!hasGroups || !r.app_keys?.length || r.app_keys.some((k) => okApps.has(k))))
       .map((r, i) => ({

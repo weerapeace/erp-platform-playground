@@ -22,12 +22,15 @@ import { GlobalSearch } from "@/components/global-search";
 import { getSearchScope } from "@/lib/search-scopes";
 import { useSearchHotkey } from "@/lib/search-hotkey";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, type DeviceLayout } from "@/components/device-view";
+import { menuVisibleTo } from "@/lib/menu-audience";
 
+// ⚙️ ตั้งค่าแอป (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป · โหลดเมื่อกดครั้งแรก
+const AppSettingsPanel = dynamic(() => import("@/components/app-settings-panel").then((m) => m.AppSettingsPanel), { ssr: false });
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
 });
 
-type MenuItem = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null; parent_id?: string | null; section?: string };
+type MenuItem = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null; parent_id?: string | null; section?: string; audience?: unknown };
 // ไอคอนเมนู: รูปอัปโหลด (icon_url) > อิโมจิ
 function MItemIcon({ it, cls }: { it: MenuItem; cls: string }) {
   if (it.icon_url) {
@@ -56,6 +59,9 @@ export default function StandaloneApp() {
   const [app, setApp] = useState<AppGroup | null>(null);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [active, setActive] = useState(0);
+  const [allItems, setAllItems] = useState<MenuItem[]>([]);   // เมนูทั้งหมดของแอป (ไม่กรองตามคนดู) — ใช้ในหน้าตั้งค่า
+  const [settingsOn, setSettingsOn] = useState(false);          // ⚙️ เปิดหน้าตั้งค่าอยู่
+  const [menuRev, setMenuRev] = useState(0);                    // บันทึกตั้งค่าแล้ว → โหลดเมนูใหม่ (ข้ามแคช)
   const [loaded, setLoaded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);   // เปิด drawer เมนูของแอป (☰ iPad / "เพิ่มเติม" มือถือ)
   const [openMenu, setOpenMenu] = useState<string | null>(null);   // เมนูแม่ที่กำลังกาง dropdown (แถบบน จอกว้าง)
@@ -75,14 +81,16 @@ export default function StandaloneApp() {
     let alive = true;
     Promise.all([
       apiFetch("/api/menu/apps").then((r) => r.json()),
-      apiFetch("/api/menu").then((r) => r.json()),
+      apiFetch(menuRev ? `/api/menu?_=${menuRev}` : "/api/menu").then((r) => r.json()),
     ]).then(([aj, mj]) => {
       if (!alive) return;
       const ag = (aj.data ?? []).find((x: AppGroup) => x.key === appKey) ?? null;
       setApp(ag);
+      setAllItems(((mj.data ?? []) as MenuItem[]).filter((m) => m.is_active && m.show_in_sidebar && (m.app_keys ?? []).includes(appKey)).sort((a, b) => a.sort_order - b.sort_order));
       const its = ((mj.data ?? []) as MenuItem[])
         .filter((m) => m.is_active && m.show_in_sidebar && (m.app_keys ?? []).includes(appKey)
-          && (!m.permission_key || can(m.permission_key as Parameters<typeof can>[0])))
+          && (!m.permission_key || can(m.permission_key as Parameters<typeof can>[0]))
+          && menuVisibleTo(m.audience, user))   // 👁 ใครเห็นเมนูไหน (ตั้งที่ ⚙️ ตั้งค่า)
         .sort((a, b) => a.sort_order - b.sort_order);
       setItems(its);
       // ครั้งแรกครั้งเดียว: คืนหน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก) ไม่งั้นใช้ default landing
@@ -109,7 +117,7 @@ export default function StandaloneApp() {
     return () => { alive = false; };
     // ใช้ ready (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [appKey, ready]);
+  }, [appKey, ready, menuRev]);
 
   // จำหน้าลึกในกรอบ (iframe) ทุก 1.5วิ → refresh แล้วกลับมาหน้าเดิม (ฝั่ง browser ล้วน ไม่กิน CPU worker)
   useEffect(() => {
@@ -156,7 +164,9 @@ export default function StandaloneApp() {
   );
 
   const cur = items[active];
-  const activeId = cur?.id;
+  const canAdmin = can("admin.users");
+  const showSettings = settingsOn && canAdmin;
+  const activeId = showSettings ? undefined : cur?.id;
   // ---- เมนูซ้อนชั้น (nested / dropdown) ----
   // เมนูหลัก = ไม่มีแม่ หรือแม่ไม่อยู่ในลิสต์ (เช่นแม่ถูกซ่อน) · ลูก = จัดตาม parent_id
   const idInList = new Set(items.map((it) => it.id));
@@ -183,7 +193,7 @@ export default function StandaloneApp() {
   const onBar = barItems.some((it) => it.id === activeId || kidsOf(it.id).some((k) => k.id === activeId));
 
   // กดเมนู → ไปหน้าหลักของเมนูนั้น (ล้างหน้าลึกที่จำไว้)
-  const goto = (i: number) => { setActive(i); setDeepSrc(null); lastSavedRef.current = ""; try { sessionStorage.removeItem(`appdeep:${appKey}`); } catch { /* noop */ } setMoreOpen(false); };
+  const goto = (i: number) => { setSettingsOn(false); setActive(i); setDeepSrc(null); lastSavedRef.current = ""; try { sessionStorage.removeItem(`appdeep:${appKey}`); } catch { /* noop */ } setMoreOpen(false); };
   // หน้า custom โหลดผ่าน iframe → ส่ง embed=1 ให้ shell ในหน้านั้นซ่อน sidebar/แถบ App ของตัวเอง (กันเมนูซ้อน)
   // ถ้ามีหน้าลึกที่จำไว้และเป็นของเมนูนี้ → เปิดหน้าลึกนั้น (กัน refresh เด้งหน้าแรก)
   const baseHref = cur ? cur.href.split("?")[0] : "";
@@ -229,6 +239,13 @@ export default function StandaloneApp() {
                   </button>
                 );
               })}
+              {/* ⚙️ ตั้งค่าแอปนี้ (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป */}
+              {canAdmin && (
+                <button onClick={() => { setOpenMenu(null); setSettingsOn(true); }} title="ตั้งค่าแอปนี้ — ใครเห็นเมนูไหน"
+                  className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-sm whitespace-nowrap transition-colors ${showSettings ? "bg-white/25 font-semibold" : "text-white/85 hover:bg-white/12"}`}>
+                  ⚙️ ตั้งค่า
+                </button>
+              )}
             </nav>
           )}
 
@@ -281,7 +298,10 @@ export default function StandaloneApp() {
 
       {/* เนื้อหาเต็มกว้าง */}
       <main className="flex-1 min-w-0 flex flex-col min-h-0">
-        {(() => {
+        {showSettings ? (
+          <AppSettingsPanel appKey={appKey} appLabel={app?.label ?? appKey} items={allItems}
+            onSaved={() => setMenuRev((n) => n + 1)} />
+        ) : (() => {
           const content = (<>
         {moduleKey ? (
           <div className="flex-1 overflow-y-auto">
@@ -378,6 +398,12 @@ export default function StandaloneApp() {
                   </div>
                 );
               })}
+              {canAdmin && (
+                <button onClick={() => { setSettingsOn(true); closeDrawer(); }}
+                  className={`mt-1 w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 border-t border-slate-100 ${showSettings ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
+                  <span className="w-6 text-center text-lg">⚙️</span><span className="truncate">ตั้งค่า (ใครเห็นเมนูไหน)</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

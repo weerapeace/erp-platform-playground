@@ -22,6 +22,7 @@ import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { DevicePreviewButton } from "@/components/device-preview";
 import { cachedGetJson } from "@/lib/shell-cache";
+import { menuVisibleTo } from "@/lib/menu-audience";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
 // เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
@@ -202,6 +203,8 @@ export type MenuRow = {
   module_key?: string | null;   // โมดูลที่เมนูนี้ผูก (สำหรับหมวด ⚙ ตั้งค่า) — ตั้งที่ /admin/menu
   parent_id?: string | null;   // เมนูแม่ — ถ้ามี เมนูนี้เป็นลูกโผล่ใน dropdown ของแม่ (null = เมนูหลัก)
   search_keywords?: string[];  // คำค้นเพิ่ม/คำพ้อง สำหรับ Global Search (เช่น "ค่าส่ง" → ร้านขนส่ง/เรทค่าส่ง) — ตั้งที่ /admin/menu
+  /** 👁 ใครเห็นเมนูนี้ (ตำแหน่ง/รายคน) — lib/menu-audience · null = ทุกคน */
+  audience?: unknown;
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
@@ -486,7 +489,8 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     if (!menuRows) return null;
     const its = menuRows
       .filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(key)
-        && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0])))
+        && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0]))
+        && menuVisibleTo(r.audience, user))
       .sort((a, b) => a.sort_order - b.sort_order);
     // หน้า default ของบางแอป (override ลำดับเมนู) — เช่น เปิด "ผลิต" ให้ไปใบสั่งผลิต (MO) ก่อน
     const pref = APP_DEFAULT_HREF[key];
@@ -535,7 +539,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   // กลุ่มเมนูที่จะแสดง: จากทะเบียน (ถ้ามี) ไม่งั้น default — แล้วกรองตามสิทธิ์ + show_in_sidebar
   const navGroupsToShow = (() => {
     const fromRegistry = menuRows && menuRows.length > 0;
-    let rows = fromRegistry ? menuRows!.filter((r) => r.is_active && r.show_in_sidebar) : null;
+    let rows = fromRegistry ? menuRows!.filter((r) => r.is_active && r.show_in_sidebar && menuVisibleTo(r.audience, user)) : null;   // 👁 ใครเห็นเมนูไหน
     // กรองตามโมดูลใหญ่ (App) ที่เลือก — ถ้ามี App + เลือกอยู่
     if (rows && activeApp && appGroups.length > 0) {
       rows = rows.filter((r) => (r.app_keys ?? []).includes(activeApp))
