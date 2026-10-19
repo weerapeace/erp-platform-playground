@@ -1563,6 +1563,8 @@ export const THEME_TEXT_KEYS = [
   "titleText", "noteText", "saleText", "newText", "bestText", "recsTitle", "freeShipText", "freeShipDone", "etaText",
   "emptyText", "checkoutText", "heading", "subtitle",
   "confirmText", "codLabel", "codHint", "promptpayLabel", "promptpayHint", "trustText", "thanksTitle", "thanksText",
+  // ตะกร้า: ปุ่มเลือกซื้อต่อ / ปุ่มตอนว่าง / ปุ่มชุดสินค้าแนะนำ / ข้อความตัวเลือก (ห่อของขวัญ·การ์ดอวยพร·หมายเหตุ) · คำโปรยหัวหน้ารายการสินค้า
+  "continueText", "emptyButton", "btnText", "gift", "card", "note", "eyebrow",
 ] as const;
 
 /** ป้ายตำแหน่ง (ภาษาคน) ในตารางคำแปลของธีม */
@@ -1571,7 +1573,9 @@ const THEME_CRUMB: Record<string, string> = {
   links: "ลิงก์", groups: "กลุ่ม", cards: "การ์ด", tabs: "แท็บ", footer: "ท้ายเว็บ", columns: "คอลัมน์", bottomLinks: "ลิงก์แถวล่าง",
   header: "หัวเว็บ", button: "ปุ่ม", cart: "ตะกร้า", search: "ค้นหา", logo: "โลโก้", product: "หน้าสินค้า",
   detailItems: "หัวข้อรายละเอียด", contentSources: "แหล่งข้อมูล", lines: "บรรทัด", parts: "ส่วนประกอบ", buy: "ส่วนซื้อ", banner: "แบนเนอร์", related: "สินค้าที่เกี่ยวข้อง",
-  card: "การ์ดสินค้า", autoBadges: "ป้ายอัตโนมัติ", listing: "หน้ารายการสินค้า",
+  card: "การ์ด", autoBadges: "ป้ายอัตโนมัติ", listing: "หน้ารายการสินค้า",
+  recsSets: "ชุดสินค้าแนะนำ", labels: "ข้อความตัวเลือก", continueText: "ปุ่มเลือกซื้อต่อ", emptyButton: "ปุ่มตอนตะกร้าว่าง", btnText: "ปุ่มใส่ตะกร้า",
+  gift: "ห่อของขวัญ", note: "หมายเหตุ", eyebrow: "คำโปรย",
   label: "ชื่อ", badge: "ป้าย", title: "หัวข้อ", desc: "คำอธิบาย", text: "ข้อความ", caption: "คำบรรยาย", moreLabel: "ลิงก์ท้าย",
   viewAllLabel: "ดูทั้งหมด", promo: "แถบโปร", placeholder: "ข้อความในช่อง", titleText: "หัวข้อ", noteText: "หมายเหตุ",
   saleText: "ป้ายลดราคา", newText: "ป้ายสินค้าใหม่", bestText: "ป้ายขายดี", recsTitle: "หัวข้อสินค้าแนะนำ",

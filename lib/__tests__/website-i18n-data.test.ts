@@ -120,3 +120,27 @@ describe("ข้อมูลร้าน (store_settings) 2 ภาษา", () =>
     expect(pub._i18n).toBeUndefined();
   });
 });
+
+/** 🌐 ข้อความตะกร้า/หน้ารายการที่เพิ่มทีหลัง — ภาษาอังกฤษต้องไม่หายตอนบันทึก + ตารางคำแปลเห็น (เดิมหาย: ปุ่มเลือกซื้อต่อ ฯลฯ) */
+describe("ธีม: ข้อความตะกร้าที่เพิ่มทีหลังมีภาษาอังกฤษได้", () => {
+  const raw = {
+    cart: {
+      continueText: "เลือกซื้อต่อ", continueText_en: "Continue shopping",
+      emptyButton: "ไปเลือกสินค้า", emptyButton_en: "Shop now",
+      labels: { gift: "ห่อเป็นของขวัญ", gift_en: "Gift wrap", card: "เขียนการ์ด", card_en: "Add a card", note: "ฝากถึงร้าน", note_en: "Note" },
+    },
+    listing: { header: { eyebrow: "คอลเลกชันใหม่", eyebrow_en: "New collection" } },
+  };
+  it("normalizeTheme เก็บ _en ไว้", () => {
+    const t = normalizeTheme(raw) as unknown as Record<string, Record<string, unknown>>;
+    expect(t.cart.continueText_en).toBe("Continue shopping");
+    expect(t.cart.emptyButton_en).toBe("Shop now");
+    expect((t.cart.labels as Record<string, unknown>).gift_en).toBe("Gift wrap");
+    expect((t.cart.labels as Record<string, unknown>).card_en).toBe("Add a card");
+    expect(((t.listing.header ?? {}) as Record<string, unknown>).eyebrow_en).toBe("New collection");
+  });
+  it("ตารางคำแปลเห็นช่องเหล่านี้", () => {
+    const paths = collectTextPaths(normalizeTheme(raw), THEME_TEXT_KEYS).map((s) => [...s.path, s.key].join("."));
+    for (const p of ["cart.continueText", "cart.emptyButton", "cart.labels.gift", "cart.labels.card", "cart.labels.note", "listing.header.eyebrow"]) expect(paths).toContain(p);
+  });
+});
