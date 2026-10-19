@@ -1331,9 +1331,15 @@ export interface FooterConfig {
   headGap: number;
   /** ความกว้างคอลัมน์: equal = เท่ากันเต็มความกว้าง (เดิม) · content = ชิดกันตามเนื้อหา */
   colFit: "equal" | "content";
+  /** 📏 ขอบบน / ขอบล่างของท้ายเว็บ (px 0–200 · -1 = ตาม padY) · คอลัมน์ ↔ แถวล่าง © (px 0–160) */
+  padTop: number;
+  padBottom: number;
+  bottomGap: number;
 }
+/** padY (แบบเร็ว) → px — เว็บร้านใช้ค่าเดียวกัน (src/lib/site-config FOOTER_PAD_PX) */
+export const FOOTER_PAD_PX: Record<"sm" | "md" | "lg" | "xl", number> = { sm: 32, md: 56, lg: 80, xl: 112 };
 /** 📏 ค่าเริ่มของระยะห่าง = หน้าตาเดิมก่อนมีช่องตั้ง (ใช้กับปุ่ม "กลับค่าเริ่ม") */
-export const FOOTER_SPACING_DEFAULTS = { colGap: 40, rowGap: 40, linkGap: 10, stackGap: 32, headGap: -1 } as const;
+export const FOOTER_SPACING_DEFAULTS = { colGap: 40, rowGap: 40, linkGap: 10, stackGap: 32, headGap: -1, padTop: -1, padBottom: -1, bottomGap: 48 } as const;
 export const FOOTER_COL_DEFS: { key: FooterColKind; label: string; hint: string; defaultTitle: string }[] = [
   { key: "about", label: "เกี่ยวกับร้าน", hint: "โลโก้ + คำอธิบายร้าน (จากแท็บข้อมูลร้าน หรือพิมพ์ทับ)", defaultTitle: "" },
   { key: "links", label: "ลิงก์", hint: "รายการลิงก์ — ว่างไว้ = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ตามสถานะ)", defaultTitle: "เมนู" },
@@ -1432,6 +1438,9 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     stackGap: px(r.stackGap, 0, 96, d.stackGap),
     headGap: Number(r.headGap) === -1 ? -1 : px(r.headGap, 0, 40, d.headGap),
     colFit: oneOf(r.colFit, ["equal", "content"] as const, d.colFit),
+    padTop: Number(r.padTop) === -1 ? -1 : px(r.padTop, 0, 200, d.padTop),
+    padBottom: Number(r.padBottom) === -1 ? -1 : px(r.padBottom, 0, 200, d.padBottom),
+    bottomGap: px(r.bottomGap, 0, 160, d.bottomGap),
   };
 }
 

@@ -31,7 +31,7 @@ import type { ContentLang } from "@/lib/content-i18n";
 import { THEME_TEXT_KEYS, themeCrumb } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
-import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
+import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, FOOTER_PAD_PX, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
@@ -1361,8 +1361,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </select>
                   </div>
                   <div>
-                    <label className={labelCls}>ระยะบน-ล่าง</label>
-                    <select className={inputCls} value={theme.footer.padY} onChange={(e) => setFooter({ padY: e.target.value as FooterConfig["padY"] })}>
+                    <label className={labelCls}>ระยะบน-ล่าง (แบบเร็ว · ละเอียดที่การ์ด 📏)</label>
+                    <select className={inputCls} value={theme.footer.padY} onChange={(e) => setFooter({ padY: e.target.value as FooterConfig["padY"], padTop: -1, padBottom: -1 })}>
                       <option value="sm">แคบ</option>
                       <option value="md">ปกติ (แบบเดิม)</option>
                       <option value="lg">กว้าง</option>
@@ -1515,7 +1515,30 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     ↺ ค่าเริ่ม
                   </button>
                 </div>
-                <p className="text-xs text-slate-500 mb-3">ปรับแล้วดูพรีวิวด้านขวาได้ทันที · ระยะบน-ล่างของท้ายเว็บตั้งที่ “ระยะบน-ล่าง” ด้านบน</p>
+                <p className="text-xs text-slate-500 mb-3">ปรับแล้วดูพรีวิวด้านขวาได้ทันที</p>
+                {/* ขอบบน/ล่าง: ยังไม่เคยเลื่อน (-1) = ตาม "ระยะบน-ล่าง (แบบเร็ว)" ด้านบน */}
+                <div className="grid gap-x-4 gap-y-3 sm:grid-cols-3 mb-3 pb-3 border-b border-slate-100">
+                  {(
+                    [
+                      { k: "padTop", l: "ขอบบน (เหนือเนื้อหา)", max: 200 },
+                      { k: "padBottom", l: "ขอบล่าง (ใต้แถว ©)", max: 200 },
+                    ] as const
+                  ).map((s) => {
+                    const v = theme.footer[s.k] >= 0 ? theme.footer[s.k] : FOOTER_PAD_PX[theme.footer.padY];
+                    return (
+                      <div key={s.k}>
+                        <label className={labelCls}>
+                          {s.l} ({v}px)
+                        </label>
+                        <input type="range" min={0} max={s.max} step={4} value={v} onChange={(e) => setFooter({ [s.k]: Number(e.target.value) } as Partial<FooterConfig>)} className="w-full" />
+                      </div>
+                    );
+                  })}
+                  <div>
+                    <label className={labelCls}>คอลัมน์ ↔ แถวล่าง © ({theme.footer.bottomGap}px)</label>
+                    <input type="range" min={0} max={160} step={4} value={theme.footer.bottomGap} onChange={(e) => setFooter({ bottomGap: Number(e.target.value) })} className="w-full" />
+                  </div>
+                </div>
                 <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
                   {(
                     [
