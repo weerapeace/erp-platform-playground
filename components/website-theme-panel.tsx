@@ -1358,12 +1358,91 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       <option value="center">กึ่งกลาง (เหมาะกับ 1-2 คอลัมน์)</option>
                     </select>
                   </div>
+                  <div>
+                    <label className={labelCls}>ระยะบน-ล่าง</label>
+                    <select className={inputCls} value={theme.footer.padY} onChange={(e) => setFooter({ padY: e.target.value as FooterConfig["padY"] })}>
+                      <option value="sm">แคบ</option>
+                      <option value="md">ปกติ (แบบเดิม)</option>
+                      <option value="lg">กว้าง</option>
+                      <option value="xl">กว้างมาก</option>
+                    </select>
+                  </div>
                 </div>
+
+                {/* 🔤 หัวคอลัมน์ + ลิงก์ */}
+                <h4 className="text-xs font-semibold text-slate-600 mt-4 mb-2 pt-3 border-t border-slate-100">🔤 หัวคอลัมน์ & ลิงก์</h4>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <label className={labelCls}>ขนาดหัวคอลัมน์</label>
+                    <select className={inputCls} value={theme.footer.headingSize} onChange={(e) => setFooter({ headingSize: e.target.value as FooterConfig["headingSize"] })}>
+                      <option value="s">เล็ก ตัวห่าง (แบบเดิม)</option>
+                      <option value="m">กลาง</option>
+                      <option value="l">ใหญ่</option>
+                    </select>
+                    <label className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                      <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={theme.footer.headingUpper} onChange={(e) => setFooter({ headingUpper: e.target.checked })} />
+                      ตัวพิมพ์ใหญ่ (อังกฤษ)
+                    </label>
+                  </div>
+                  <ColorField label="สีหัวคอลัมน์" value={theme.footer.headingColor} onChange={(hex) => setFooter({ headingColor: hex })} emptyLabel="อัตโนมัติ (เท่าสีตัวอักษร)" />
+                  <div>
+                    <label className={labelCls}>ขนาดลิงก์ / ข้อความ</label>
+                    <select className={inputCls} value={theme.footer.linkSize} onChange={(e) => setFooter({ linkSize: e.target.value as FooterConfig["linkSize"] })}>
+                      <option value="s">เล็ก</option>
+                      <option value="m">ปกติ (แบบเดิม)</option>
+                      <option value="l">ใหญ่</option>
+                    </select>
+                  </div>
+                  <ColorField label="สีลิงก์ / ข้อความ" value={theme.footer.linkColor} onChange={(hex) => setFooter({ linkColor: hex })} emptyLabel="อัตโนมัติ (จางกว่าหัวข้อ)" />
+                  <ColorField label="สีลิงก์ตอนชี้" value={theme.footer.linkHover} onChange={(hex) => setFooter({ linkHover: hex })} emptyLabel="อัตโนมัติ (สว่างขึ้น)" />
+                  <div>
+                    <label className={labelCls}>โซเชียลแสดงเป็น</label>
+                    <select className={inputCls} value={theme.footer.socialStyle} onChange={(e) => setFooter({ socialStyle: e.target.value as FooterConfig["socialStyle"] })}>
+                      <option value="pill">ป้ายชื่อ (แบบเดิม)</option>
+                      <option value="icon">ไอคอน</option>
+                      <option value="circle">ไอคอนในวงกลม</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 🖼 โลโก้ท้ายเว็บ */}
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">🖼 โลโก้ท้ายเว็บ</h3>
+                <p className="text-xs text-slate-500 mb-3">อยู่ในคอลัมน์ &quot;เกี่ยวกับร้าน&quot; · รูปโลโก้ (รวม &quot;โลโก้สำหรับพื้นเข้ม&quot;) ตั้งที่แท็บ โลโก้</p>
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-3">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.logoShow} onChange={(e) => setFooter({ logoShow: e.target.checked })} />
+                  แสดงโลโก้
+                </label>
+                {theme.footer.logoShow && (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className={labelCls}>ความสูงโลโก้ ({theme.footer.logoHeight}px)</label>
+                      <input type="range" min={16} max={120} step={2} value={theme.footer.logoHeight} onChange={(e) => setFooter({ logoHeight: Number(e.target.value) })} className="w-full" />
+                    </div>
+                    <div>
+                      <label className={labelCls}>ใช้รูปโลโก้</label>
+                      <select className={inputCls} value={theme.footer.logoVariant} onChange={(e) => setFooter({ logoVariant: e.target.value as FooterConfig["logoVariant"] })}>
+                        <option value="auto">อัตโนมัติ (พื้นเข้ม = โลโก้สำหรับพื้นเข้ม)</option>
+                        <option value="normal">โลโก้ปกติ</option>
+                        <option value="dark">โลโก้สำหรับพื้นเข้ม</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>กล่องรองโลโก้</label>
+                      <select className={inputCls} value={theme.footer.logoChip} onChange={(e) => setFooter({ logoChip: e.target.value as FooterConfig["logoChip"] })}>
+                        <option value="auto">อัตโนมัติ (ขาว เฉพาะโลโก้เข้มบนพื้นเข้ม)</option>
+                        <option value="none">ไม่มี</option>
+                        <option value="white">กล่องขาว</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">คอลัมน์</h3>
-                <p className="text-xs text-slate-500 mb-3">เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง (ทั้งแถวมี 4 ช่อง) · มือถือเรียงลงมาทีละคอลัมน์</p>
+                <p className="text-xs text-slate-500 mb-3">เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง (ทั้งแถวมี 4 ช่อง) · กด ⤵ ซ้อนใต้ = 2 หัวข้อในคอลัมน์เดียว · มือถือเรียงลงมาทีละคอลัมน์</p>
                 {theme.footer.columns === null ? (
                   <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
                     ตอนนี้ใช้แบบ<b>อัตโนมัติ</b>: โลโก้ + คำอธิบายร้าน (2 ช่อง) · เมนู · ติดต่อ
@@ -1387,6 +1466,27 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.showCopyright} onChange={(e) => setFooter({ showCopyright: e.target.checked })} />
                   แสดง © ปี + ชื่อร้าน (ข้อความท้ายเว็บตั้งที่แท็บข้อมูลร้าน)
                 </label>
+                {theme.footer.showCopyright && (
+                  <div className="mb-3">
+                    <label className={labelCls}>ข้อความ © (ว่าง = แบบเดิม · ใส่ {"{year}"} = ปีปัจจุบัน · {"{shop}"} = ชื่อร้าน)</label>
+                    <LangInput className={inputCls} obj={theme.footer} k="copyrightText" maxLength={200} placeholder="© {year} {shop}. สงวนลิขสิทธิ์." onPatch={(p) => setFooter(p as Partial<FooterConfig>)} />
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2 mb-3">
+                  <div>
+                    <label className={labelCls}>จัดแถวล่างสุด</label>
+                    <select className={inputCls} value={theme.footer.bottomAlign} onChange={(e) => setFooter({ bottomAlign: e.target.value as FooterConfig["bottomAlign"] })}>
+                      <option value="auto">อัตโนมัติ (แบบเดิม)</option>
+                      <option value="left">ชิดซ้ายทั้งหมด</option>
+                      <option value="center">กึ่งกลาง</option>
+                      <option value="split">ซ้าย-ขวา (ข้อความซ้าย · ไอคอนชำระเงินขวา)</option>
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer sm:mt-6">
+                    <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.divider} onChange={(e) => setFooter({ divider: e.target.checked })} />
+                    เส้นคั่นเหนือแถวล่างสุด
+                  </label>
+                </div>
                 <label className={labelCls}>ไอคอนช่องทางชำระเงิน</label>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 mb-3">
                   {PAYMENT_ICONS.map((pm) => (
@@ -1399,6 +1499,19 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <label className={labelCls}>ลิงก์แถวล่าง (เช่น นโยบายความเป็นส่วนตัว · เงื่อนไข)</label>
                 <MenuEditor items={theme.footer.bottomLinks} onChange={(bottomLinks) => setFooter({ bottomLinks })} choices={choices} pages={storePages} depth={1} />
                 <button type="button" className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:border-slate-500" onClick={() => setFooter({ bottomLinks: [...theme.footer.bottomLinks, newMenuItem("ลิงก์ใหม่", "page")] })}>+ เพิ่มลิงก์</button>
+              </div>
+
+              {/* 📱 มือถือ */}
+              <div className={cardCls}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">📱 บนมือถือ</h3>
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.mobileCollapse} onChange={(e) => setFooter({ mobileCollapse: e.target.checked })} />
+                  หัวคอลัมน์กดพับ/กางได้ (ท้ายเว็บสั้นลง ไม่ต้องเลื่อนยาว)
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.mobileCenter} onChange={(e) => setFooter({ mobileCenter: e.target.checked })} />
+                  จัดกึ่งกลางบนมือถือ (จอคอมตามที่ตั้งด้านบน)
+                </label>
               </div>
             </>
           )}
@@ -4055,22 +4168,35 @@ function FooterColumnsEditor({ columns, onChange, choices, pages }: { columns: F
   const [openId, setOpenId] = useState<string | null>(null);
   const setCol = (id: string, patch: Partial<FooterColumn>) => onChange(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
-  const used = columns.reduce((n, c) => n + c.width, 0);
+  // คอลัมน์ที่ "วางต่อใต้คอลัมน์ก่อนหน้า" ไม่กินช่องเพิ่ม (คอลัมน์แรกซ้อนไม่ได้)
+  const used = columns.reduce((n, c, i) => n + (c.stack && i > 0 ? 0 : c.width), 0);
   return (
     <div>
       <ul className="space-y-1">
         {columns.map((c, i) => {
           const def = FOOTER_COL_DEFS.find((d) => d.key === c.kind)!;
           const open = openId === c.id;
+          const stacked = c.stack && i > 0;
           return (
-            <li key={c.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
+            <li key={c.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${stacked ? "ml-6" : ""} ${drag.rowCls(i)}`}>
               <div className="flex items-center gap-1.5 px-2 py-1.5">
                 <DragHandle {...drag.handleProps(i)} />
+                {stacked && <span className="text-slate-300 text-xs -ml-0.5" title="อยู่ใต้คอลัมน์ก่อนหน้า (คอลัมน์เดียวกัน)">↳</span>}
                 <select className={mini} value={c.kind} onChange={(e) => setCol(c.id, { kind: e.target.value as FooterColKind })}>
                   {FOOTER_COL_DEFS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
                 </select>
                 <LangInput className={`${mini} flex-1 min-w-0`} obj={c} k="title" maxLength={60} placeholder={def.defaultTitle || "หัวข้อ (ไม่บังคับ)"} onPatch={(p) => setCol(c.id, p)} />
-                <select className={mini} value={c.width} onChange={(e) => setCol(c.id, { width: Number(e.target.value) === 2 ? 2 : 1 })} title="ความกว้าง">
+                {i > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCol(c.id, { stack: !c.stack })}
+                    title={stacked ? "แยกเป็นคอลัมน์ใหม่" : "วางต่อใต้คอลัมน์ก่อนหน้า (2 หัวข้อในคอลัมน์เดียว)"}
+                    className={`h-7 shrink-0 rounded-lg border px-1.5 text-[11px] ${stacked ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
+                  >
+                    {stacked ? "↳ ซ้อนอยู่" : "⤵ ซ้อนใต้"}
+                  </button>
+                )}
+                <select className={mini} value={c.width} disabled={stacked} onChange={(e) => setCol(c.id, { width: Number(e.target.value) === 2 ? 2 : 1 })} title={stacked ? "ความกว้างตามคอลัมน์บนสุดของกลุ่ม" : "ความกว้าง"}>
                   <option value={1}>กว้าง 1</option>
                   <option value={2}>กว้าง 2</option>
                 </select>

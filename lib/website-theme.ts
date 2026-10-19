@@ -1268,6 +1268,8 @@ export interface FooterColumn {
   links: MenuItem[];
   /** กว้าง 1 หรือ 2 ช่อง */
   width: 1 | 2;
+  /** วางต่อใต้คอลัมน์ก่อนหน้า (2 หัวข้อใน 1 คอลัมน์) — ไม่กินช่องเพิ่ม · ความกว้างตามคอลัมน์บนสุดของกลุ่ม */
+  stack: boolean;
 }
 export type FooterBg = "ink" | "surface" | "brand" | "custom";
 export type PaymentIcon = "visa" | "mastercard" | "promptpay" | "cod" | "truemoney" | "shopee" | "lazada" | "line";
@@ -1283,6 +1285,32 @@ export interface FooterConfig {
   payments: PaymentIcon[];
   bottomLinks: MenuItem[];
   align: "left" | "center";
+  /* ── 2026-10-19 ตั้งละเอียดขึ้น (ค่าเริ่ม = หน้าตาเดิม) · เว็บร้านวาดที่ src/components/layout/Footer.tsx ── */
+  /** 🖼 โลโก้ในคอลัมน์ "เกี่ยวกับร้าน": โชว์ · สูง px · ใช้รูปไหน (auto = พื้นเข้มใช้โลโก้พื้นเข้มถ้ามี) · กล่องรองโลโก้ (auto = ขาวเฉพาะพื้นเข้มที่ไม่มีโลโก้พื้นเข้ม) */
+  logoShow: boolean;
+  logoHeight: number;
+  logoVariant: "auto" | "normal" | "dark";
+  logoChip: "auto" | "none" | "white";
+  /** 📏 ระยะบน-ล่าง */
+  padY: "sm" | "md" | "lg" | "xl";
+  /** 🔤 หัวคอลัมน์: s = ตัวเล็กห่าง (แบบเดิม) · m · l · ตัวพิมพ์ใหญ่ · สี ("" = อัตโนมัติ) */
+  headingSize: "s" | "m" | "l";
+  headingUpper: boolean;
+  headingColor: string;
+  /** 🔗 ลิงก์/ข้อความ: ขนาด · สี · สีตอนชี้ ("" = อัตโนมัติ) */
+  linkSize: "s" | "m" | "l";
+  linkColor: string;
+  linkHover: string;
+  /** เส้นคั่นเหนือแถวล่างสุด */
+  divider: boolean;
+  /** แถวล่างสุด: auto (เดิม) · left · center · split (ซ้าย-ขวา) · ข้อความ © เอง ({year} {shop}) */
+  bottomAlign: "auto" | "left" | "center" | "split";
+  copyrightText: string;
+  /** โซเชียล: pill ป้ายชื่อ (เดิม) · icon ไอคอน · circle ไอคอนในวงกลม */
+  socialStyle: "pill" | "icon" | "circle";
+  /** 📱 มือถือ: หัวคอลัมน์กดพับ/กาง · จัดกึ่งกลาง */
+  mobileCollapse: boolean;
+  mobileCenter: boolean;
 }
 export const FOOTER_COL_DEFS: { key: FooterColKind; label: string; hint: string; defaultTitle: string }[] = [
   { key: "about", label: "เกี่ยวกับร้าน", hint: "โลโก้ + คำอธิบายร้าน (จากแท็บข้อมูลร้าน หรือพิมพ์ทับ)", defaultTitle: "" },
@@ -1308,8 +1336,12 @@ export const PAYMENT_ICONS: { value: PaymentIcon; label: string }[] = [
   { value: "shopee", label: "Shopee" },
   { value: "lazada", label: "Lazada" },
 ];
-export const newFooterColumn = (kind: FooterColKind = "links"): FooterColumn => ({ id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, title: "", text: "", links: [], width: kind === "about" ? 2 : 1 });
-export const DEFAULT_FOOTER: FooterConfig = { bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left" };
+export const newFooterColumn = (kind: FooterColKind = "links"): FooterColumn => ({ id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, title: "", text: "", links: [], width: kind === "about" ? 2 : 1, stack: false });
+export const DEFAULT_FOOTER: FooterConfig = {
+  bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left",
+  logoShow: true, logoHeight: 40, logoVariant: "auto", logoChip: "auto", padY: "md", headingSize: "s", headingUpper: true, headingColor: "",
+  linkSize: "m", linkColor: "", linkHover: "", divider: true, bottomAlign: "auto", copyrightText: "", socialStyle: "pill", mobileCollapse: false, mobileCenter: false,
+};
 export function normalizeFooter(raw: unknown): FooterConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_FOOTER;
@@ -1327,11 +1359,16 @@ export function normalizeFooter(raw: unknown): FooterConfig {
             text: typeof c.text === "string" ? c.text.slice(0, 2000) : "",
             links: normalizeMenu({ items: c.links }).items ?? [],
             width: c.width === 2 ? 2 : 1,
+            // คอลัมน์แรกซ้อนใต้ใครไม่ได้
+            stack: i > 0 && c.stack === true,
           } as FooterColumn;
         })
         .filter((c): c is FooterColumn => !!c)
-        .slice(0, 6)
+        .slice(0, 10)
+        .map((c, i) => (i === 0 && c.stack ? { ...c, stack: false } : c))
     : null;
+  const hex = (v: unknown) => (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : "");
+  const lh = Number(r.logoHeight);
   return {
     bg: oneOf(r.bg, ["ink", "surface", "brand", "custom"] as const, d.bg),
     bgColor: typeof r.bgColor === "string" && /^#[0-9a-fA-F]{6}$/.test(r.bgColor) ? r.bgColor : d.bgColor,
@@ -1341,6 +1378,23 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     payments: Array.isArray(r.payments) ? (r.payments.filter((v) => PAYMENT_ICONS.some((p) => p.value === v)) as PaymentIcon[]) : [],
     bottomLinks: normalizeMenu({ items: r.bottomLinks }).items ?? [],
     align: oneOf(r.align, ["left", "center"] as const, d.align),
+    logoShow: r.logoShow !== false,
+    logoHeight: Number.isFinite(lh) && lh > 0 ? Math.max(16, Math.min(120, Math.round(lh))) : d.logoHeight,
+    logoVariant: oneOf(r.logoVariant, ["auto", "normal", "dark"] as const, d.logoVariant),
+    logoChip: oneOf(r.logoChip, ["auto", "none", "white"] as const, d.logoChip),
+    padY: oneOf(r.padY, ["sm", "md", "lg", "xl"] as const, d.padY),
+    headingSize: oneOf(r.headingSize, ["s", "m", "l"] as const, d.headingSize),
+    headingUpper: r.headingUpper !== false,
+    headingColor: hex(r.headingColor),
+    linkSize: oneOf(r.linkSize, ["s", "m", "l"] as const, d.linkSize),
+    linkColor: hex(r.linkColor),
+    linkHover: hex(r.linkHover),
+    divider: r.divider !== false,
+    bottomAlign: oneOf(r.bottomAlign, ["auto", "left", "center", "split"] as const, d.bottomAlign),
+    copyrightText: typeof r.copyrightText === "string" ? r.copyrightText.trim().slice(0, 200) : "",
+    socialStyle: oneOf(r.socialStyle, ["pill", "icon", "circle"] as const, d.socialStyle),
+    mobileCollapse: r.mobileCollapse === true,
+    mobileCenter: r.mobileCenter === true,
   };
 }
 
@@ -1572,6 +1626,8 @@ export const THEME_TEXT_KEYS = [
   "confirmText", "codLabel", "codHint", "promptpayLabel", "promptpayHint", "trustText", "thanksTitle", "thanksText",
   // ตะกร้า: ปุ่มเลือกซื้อต่อ / ปุ่มตอนว่าง / ปุ่มชุดสินค้าแนะนำ / ข้อความตัวเลือก (ห่อของขวัญ·การ์ดอวยพร·หมายเหตุ) · คำโปรยหัวหน้ารายการสินค้า
   "continueText", "emptyButton", "btnText", "gift", "card", "note", "eyebrow",
+  // ท้ายเว็บ: ข้อความ © ที่พิมพ์เอง
+  "copyrightText",
 ] as const;
 
 /** ป้ายตำแหน่ง (ภาษาคน) ในตารางคำแปลของธีม */
