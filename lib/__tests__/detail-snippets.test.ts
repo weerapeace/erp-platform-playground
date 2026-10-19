@@ -272,3 +272,12 @@ describe("รอบ 10 — 🌿 Lifestyle / อื่นๆ", () => {
     expect(q).toContain("กระเป๋าหนัง");
   });
 });
+
+describe("รอบ 11 — ⧉ คัดลอกจากรุ่นอื่น", () => {
+  it("บรรทัดที่คัดลอกคงรูปเดิม (ไม่เติม - ) และอยู่ก่อนบรรทัดอื่น", () => {
+    const r = composeLines({ phrases: [{ id: "p", name: "กันน้ำ", name_en: "Water resistant" }], materials: [], slots: [], copied: [{ th: "ขนาด 20 x 10 ซม.", en: "Size 20 x 10 cm" }, { th: "- ผ้าซับในเนื้อดี", en: null }, { th: "  ", en: null }] });
+    expect(r.th).toEqual(["ขนาด 20 x 10 ซม.", "- ผ้าซับในเนื้อดี", "- กันน้ำ"]);
+    expect(r.en).toEqual(["Size 20 x 10 cm", "- Water resistant"]);
+    expect(r.enMissing).toBe(1);
+  });
+});

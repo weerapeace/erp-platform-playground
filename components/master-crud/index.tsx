@@ -2989,6 +2989,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <DetailInsertButton thText={String(form[f.key] ?? "")} enText={enKey ? String(form[enKey] ?? "") : ""} hasEn={!!enKey}
                 saveLabel={viewMode ? tr("แทรกและบันทึก", "Insert & save") : undefined}
                 values={form} writable={writable}
+                fieldKey={f.key} enFieldKey={enKey || undefined}
+                copyFromApi={config.moduleKey === "parent-skus-v2" ? `${apiBase}${config.apiPath}` : undefined} currentId={editingId ?? null}
                 onApply={async ({ th, en, fields }) => {
                   const withEn = !!enKey && en !== undefined;
                   const patch: Record<string, unknown> = { [f.key]: th, ...(withEn ? { [enKey]: en } : {}), ...(fields ?? {}) };

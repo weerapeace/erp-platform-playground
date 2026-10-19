@@ -425,6 +425,8 @@ export function composeLines(
     fits?: FitEntry[] | null;
     /** 🌿 Lifestyle / อื่นๆ — บรรทัดละข้อ (ข้อความของสไตล์ + พิมพ์เอง) */
     lifestyle?: { th: string; en: string | null }[] | null;
+    /** ⧉ คัดลอกจากรุ่นอื่น — ใส่ตามต้นฉบับ (ไม่เติม "- ") ก่อนบรรทัดอื่น */
+    copied?: { th: string; en: string | null }[] | null;
   },
   tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES
 ): { th: string[]; en: string[]; enMissing: number; pairs: { th: string; en: string | null }[] } {
@@ -439,6 +441,14 @@ export function composeLines(
     if (e) en.push(withPrefix(e));
     else enMissing += 1;
   };
+  // ⧉ บรรทัดที่คัดลอกมา: คงรูปเดิม (ไม่เติมคำนำหน้า "- ") · อยู่ก่อนบรรทัดอื่น (ลากย้ายในตัวอย่างได้)
+  for (const c of sel.copied ?? []) {
+    const t = c.th.trim();
+    if (!t) continue;
+    const e = c.en?.trim() || null;
+    th.push(t); pairs.push({ th: t, en: e });
+    if (e) en.push(e); else enMissing += 1;
+  }
   const slots = new Map(slotGroups(sel.slots).map((g) => [g.kind, g.picks]));
   const emit: Record<OrderKind, () => void> = {
     phrase: () => { for (const p of sel.phrases) push(phraseText(p, "th", tpl), phraseText(p, "en", tpl)); },

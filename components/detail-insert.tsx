@@ -19,6 +19,7 @@ import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useTickCatalog } from "@/components/tick-list-field";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { useViewPref } from "@/lib/use-view-pref";
+import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { parseVariants, resolvePhrase, variantSearchText, variantsOf, VARIANT_MODE_LABEL, type VariantMode } from "@/lib/phrase-variants";
 import { uploadResizedImage } from "@/components/image-attach";
 import { useSWRLite } from "@/lib/swr-lite";
@@ -171,6 +172,10 @@ export function DetailInsertButton({
   values,
   writable,
   onApply,
+  fieldKey,
+  enFieldKey,
+  copyFromApi,
+  currentId,
 }: {
   thText: string;
   enText: string;
@@ -183,6 +188,11 @@ export function DetailInsertButton({
   /** ช่องที่ป๊อปบันทึกกลับได้ (มีในฟอร์ม + แก้ได้) — ไม่มี = ไม่โชว์แท็บนั้น */
   writable?: string[];
   onApply: (next: DetailInsertResult) => Promise<boolean> | boolean;
+  /** ⧉ คัดลอกจากรุ่นอื่น: ชื่อช่องไทย/อังกฤษในระเบียน + API ระเบียน (เช่น /api/master-v2/parent-skus) · ไม่ส่ง = ไม่มีปุ่ม */
+  fieldKey?: string;
+  enFieldKey?: string;
+  copyFromApi?: string;
+  currentId?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -210,6 +220,7 @@ export function DetailInsertButton({
           writable={writable ?? []}
           onApply={onApply}
           onClose={() => setOpen(false)}
+          copyFrom={copyFromApi && fieldKey ? { api: copyFromApi, fieldKey, enFieldKey: enFieldKey ?? null, currentId: currentId ?? null } : null}
         />
       )}
     </>
@@ -225,6 +236,7 @@ function DetailInsertModal({
   writable,
   onApply,
   onClose,
+  copyFrom,
 }: {
   thText: string;
   enText: string;
@@ -234,6 +246,7 @@ function DetailInsertModal({
   writable: string[];
   onApply: (next: DetailInsertResult) => Promise<boolean> | boolean;
   onClose: () => void;
+  copyFrom?: CopyFromCfg | null;
 }) {
   const toast = useToast();
   const { data: snipRows, loading: snipLoading, revalidate: reloadSnips, mutate: mutateSnips } = useTickCatalog(SNIP);
@@ -295,6 +308,12 @@ function DetailInsertModal({
   const [view, setView] = useState<"th" | "en">("th");
   const [hideOld, setHideOld] = useState(readHide);
   const fitSize = useViewPref<FitSize>("detail_insert_fit_size", FIT_SIZES, "m");
+  // 🔤 รายการ: ซ่อนชื่ออังกฤษเป็นค่าเริ่ม (เจ้าของ 2026-10-19 "ดูรก") · กด EN สลับดู — จำต่อคน
+  const enPref = useViewPref<"hide" | "show">("detail_insert_show_en", ["hide", "show"] as const, "hide");
+  const showEn = enPref.view === "show";
+  // ⧉ บรรทัดที่คัดลอกจากรุ่นอื่น (ใส่ก่อนบรรทัดอื่น · ลากย้ายในตัวอย่างได้)
+  const [copied, setCopied] = useState<{ th: string; en: string | null }[]>([]);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<{ kind: CatalogKind; item: Record<string, unknown> | null } | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
@@ -370,6 +389,7 @@ function DetailInsertModal({
     handle: sizeSeen && use.handle && has("hd") ? num.hd : null,
     strap: sizeSeen && use.strap && (has("s1") || has("s2")) ? { min: num.s1, max: num.s2 } : null,
     fits: fitSeen && useFit ? fitEntries : null,
+    copied,
     lifestyle: [...byClick(lifeIds, lifeItems).map((x) => ({ th: x.name, en: x.name_en ?? null })), ...freeLines(lifeTh, lifeEn)],
   };
   const out = composeLines(sel, tpl);
@@ -453,6 +473,7 @@ function DetailInsertModal({
     (["phrase", "material", "slot", "size", "fit", "lifestyle"] as Tab[]).forEach(clearTab);
     setEdits({ th: {}, en: {} });
     setCustom(null);
+    setCopied([]);
   };
   const tabCount = (t: Tab) =>
     t === "lifestyle" ? sel.lifestyle.length : t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
@@ -819,7 +840,22 @@ function DetailInsertModal({
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา…"
                 className="h-8 w-28 rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
             )}
+            <button type="button" onClick={() => { const v = showEn ? "hide" : "show"; enPref.setView(v); void enPref.saveDefault(v); }} aria-pressed={showEn} data-insert-show-en
+              title={showEn ? "ซ่อนชื่ออังกฤษในรายการ" : "แสดงชื่ออังกฤษในรายการ"}
+              className={`h-7 shrink-0 rounded-md border px-2 text-[11.5px] font-medium ${showEn ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>EN</button>
           </div>
+          {copyFrom && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setCopyOpen(true)} data-insert-copy-from
+                className="h-7 rounded-md border border-slate-200 px-2.5 text-[12px] text-slate-700 hover:bg-slate-50">⧉ คัดลอกจากรุ่นอื่น</button>
+              {copied.length > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-[11.5px] text-orange-700" data-insert-copied>
+                  คัดลอกมา {copied.length} บรรทัด
+                  <button type="button" onClick={() => setCopied([])} title="เอาบรรทัดที่คัดลอกออก" aria-label="เอาบรรทัดที่คัดลอกออก" className="text-orange-400 hover:text-rose-600">✕</button>
+                </span>
+              )}
+            </div>
+          )}
           {(bracketKind || dupKind) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               {bracketKind && (
@@ -845,10 +881,13 @@ function DetailInsertModal({
                     return (
                       <div className={rowCls(on)} data-phrase-row={it.id}>
                         {handle}
-                        <div className="min-w-0 flex-1">
+                        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                          <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
+                          {on && phraseIds.length > 1 && <ClickOrder n={phraseIds.indexOf(it.id) + 1} />}
+                          <NameTwoLines th={shown.name} en={shown.name_en} on={on} showEn={showEn} />
+                        </label>
                           {v && (
-                            <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-slate-500" data-phrase-variant={v.mode}>
-                              <span className="font-medium text-slate-600">{it.name}</span>
+                            <div className="flex shrink-0 items-center text-[11.5px] text-slate-500" data-phrase-variant={v.mode} title={it.name}>
                               {v.mode === "select" ? (
                                 <select value={phrasePick[it.id] || v.variants[0].label} onChange={(e) => choosePhrase(it.id, e.target.value)} aria-label={`เลือกแบบ ${it.name}`}
                                   className="h-6 rounded border border-slate-200 bg-white px-1 text-[11.5px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-orange-400">
@@ -862,12 +901,6 @@ function DetailInsertModal({
                               )}
                             </div>
                           )}
-                          <label className="flex min-w-0 cursor-pointer items-center gap-2">
-                            <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
-                            {on && phraseIds.length > 1 && <ClickOrder n={phraseIds.indexOf(it.id) + 1} />}
-                            <NameTwoLines th={shown.name} en={shown.name_en} on={on} />
-                          </label>
-                        </div>
                         {editBtn("phrase", it as unknown as Record<string, unknown>)}
                       </div>
                     );
@@ -888,7 +921,7 @@ function DetailInsertModal({
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setMatIds((p) => toggle(p, m.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                           {on && matIds.length > 1 && <ClickOrder n={matIds.indexOf(m.id) + 1} />}
-                          <NameTwoLines th={m.name} en={m.name_en} on={on} />
+                          <NameTwoLines th={m.name} en={m.name_en} on={on} showEn={showEn} />
                         </label>
                         {page ? (
                           <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title="เปิดหน้าวัสดุ (แก้คำอธิบาย/วิธีดูแล/รูปได้) — ชื่อวัสดุนี้บนเว็บกดมาหน้านี้"
@@ -921,7 +954,7 @@ function DetailInsertModal({
                         {handle}
                         <span className={`min-w-0 flex-1 text-sm ${n > 0 ? "font-medium text-slate-800" : "text-slate-600"}`}>
                           <span className="block leading-snug">{it.name}</span>
-                          <span className={`block truncate text-[11px] font-normal leading-snug ${it.name_en ? "text-slate-400" : "text-slate-300"}`}>{it.name_en || "ไม่มีอังกฤษ"}</span>
+                          {showEn && <span className={`block truncate text-[11px] font-normal leading-snug ${it.name_en ? "text-slate-400" : "text-slate-300"}`}>{it.name_en || "ไม่มีอังกฤษ"}</span>}
                           {n > 0 && (
                             <span className="block text-[11px] font-normal text-slate-400">
                               → {slotText(it, n, "th", tpl)}
@@ -1035,7 +1068,7 @@ function DetailInsertModal({
                           <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                             <input type="checkbox" checked={on} onChange={() => setLifeIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                             {on && lifeIds.length > 1 && <ClickOrder n={lifeIds.indexOf(it.id) + 1} />}
-                            <NameTwoLines th={it.name} en={it.name_en} on={on} />
+                            <NameTwoLines th={it.name} en={it.name_en} on={on} showEn={showEn} />
                           </label>
                           {editBtn("lifestyle", it as unknown as Record<string, unknown>)}
                         </div>
@@ -1099,7 +1132,7 @@ function DetailInsertModal({
                               {it.image_key ? <img src={imgUrl(it.image_key, 160)} alt="" className="h-full w-full object-contain" /> : <span className="text-xl opacity-40">🎒</span>}
                             </div>
                             <div className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-700" title={it.name}>{it.name}</div>
-                            {fitSize.view !== "s" && <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>}
+                            {showEn && fitSize.view !== "s" && <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>}
                             {(() => {
                               const c = fitCheck(it, pick?.size);
                               const dims = c.t ? `${c.t.w}×${c.t.h}×${c.t.d}` : "";
@@ -1210,6 +1243,13 @@ function DetailInsertModal({
         </div>
       </div>
 
+      {copyOpen && copyFrom && (
+        <CopyFromDialog cfg={copyFrom} hasEn={hasEn} showEn={showEn} currentTh={thText} onClose={() => setCopyOpen(false)}
+          onPick={(picked) => {
+            setCopied((p) => [...p, ...picked.filter((x) => !p.some((y) => y.th === x.th))]);
+            setCopyOpen(false);
+          }} />
+      )}
       {editor && (
         <CatalogItemDialog
           kind={editor.kind}
@@ -1579,12 +1619,89 @@ function ProfilesEditor({ profiles, onChange, catalogs, categories }: { profiles
   );
 }
 
-/** ชื่อในรายการ: ไทยบน · อังกฤษตัวเล็กข้างล่าง (เจ้าของ 2026-10-19 "จะได้ดูสวย") */
-function NameTwoLines({ th, en, on }: { th: string; en?: string | null; on: boolean }) {
+/* ─────────── ⧉ คัดลอกจากรุ่นอื่น ─────────── */
+
+type CopyFromCfg = { api: string; fieldKey: string; enFieldKey: string | null; currentId: string | null };
+
+/** เลือกรุ่น → อ่านคำอธิบาย (ไทย + อังกฤษ) ของรุ่นนั้น → ติ๊กบรรทัด → ใส่ลงตัวอย่าง (ยังไม่บันทึกจนกด แทรก) */
+function CopyFromDialog({ cfg, hasEn, showEn, currentTh, onClose, onPick }: {
+  cfg: CopyFromCfg; hasEn: boolean; showEn: boolean; currentTh: string;
+  onClose: () => void; onPick: (lines: { th: string; en: string | null }[]) => void;
+}) {
+  const [src, setSrc] = useState<ParentSkuPickerValue | null>(null);
+  const [rows, setRows] = useState<{ th: string; en: string | null; has: boolean }[] | null>(null);
+  const [enLoose, setEnLoose] = useState<string[]>([]);   // อังกฤษบรรทัดไม่เท่าไทย = จับคู่ไม่ได้ (โชว์ให้ดูอย่างเดียว)
+  const [pick, setPick] = useState<Set<number>>(new Set());
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const mine = useMemo(() => new Set(splitLines(currentTh).map((l) => l.trim())), [currentTh]);
+  const load = async (v: ParentSkuPickerValue | null) => {
+    setSrc(v); setRows(null); setErr(null); setPick(new Set()); setEnLoose([]);
+    if (!v) return;
+    if (cfg.currentId && v.id === cfg.currentId) { setErr("นี่คือรุ่นที่เปิดอยู่ — เลือกรุ่นอื่น"); return; }
+    setLoading(true);
+    try {
+      const j = await apiFetch(`${cfg.api}/${encodeURIComponent(v.id)}`).then((r) => r.json());
+      const rec = (j?.data ?? {}) as Record<string, unknown>;
+      const th = splitLines(String(rec[cfg.fieldKey] ?? ""));
+      const en = cfg.enFieldKey ? splitLines(String(rec[cfg.enFieldKey] ?? "")) : [];
+      const paired = en.length === th.length;
+      const list = th.map((t, i) => ({ th: t, en: paired ? en[i] ?? null : null, has: mine.has(t.trim()) }));
+      setRows(list);
+      setEnLoose(paired ? [] : en);
+      setPick(new Set(list.flatMap((x, i) => (x.has ? [] : [i]))));
+    } catch { setErr("โหลดคำอธิบายของรุ่นนี้ไม่สำเร็จ — ลองใหม่"); }
+    finally { setLoading(false); }
+  };
+  const flip = (i: number) => setPick((p) => { const n = new Set(p); if (n.has(i)) n.delete(i); else n.add(i); return n; });
+  const chosen = (rows ?? []).filter((_, i) => pick.has(i));
   return (
-    <span className="min-w-0 flex-1">
+    <ERPModal open onClose={onClose} size="md" defaultExpanded={false} title="⧉ คัดลอกจากรุ่นอื่น"
+      description="เลือกรุ่น → ติ๊กบรรทัดที่ต้องการ → ใส่ลงตัวอย่าง (ยังไม่บันทึกจนกด แทรก)"
+      footer={<div className="flex w-full items-center gap-2">
+        <span className="flex-1 text-[11.5px] text-slate-500">{rows ? `เลือก ${chosen.length} จาก ${rows.length} บรรทัด` : ""}</span>
+        <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">ยกเลิก</button>
+        <button type="button" onClick={() => onPick(chosen.map(({ th, en }) => ({ th, en })))} disabled={!chosen.length} data-copy-apply
+          className="h-9 rounded-lg bg-orange-500 px-4 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">ใส่ {chosen.length} บรรทัด</button>
+      </div>}>
+      <div className="space-y-2 text-sm" data-copy-dialog>
+        <ParentSkuPicker value={src} onChange={(v) => void load(v)} disableCreate placeholder="ค้นหารุ่น (รหัส / ชื่อ)…" />
+        {err && <p className="rounded-md bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700">⚠ {err}</p>}
+        {loading && <div className="space-y-1.5" aria-busy="true">{[0, 1, 2].map((i) => <div key={i} className="h-8 animate-pulse rounded-md bg-slate-100" />)}</div>}
+        {rows && !loading && (rows.length === 0 ? (
+          <p className="py-4 text-center text-xs text-slate-400">รุ่นนี้ยังไม่มีคำอธิบาย</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 text-[11.5px] text-slate-500">
+              <button type="button" onClick={() => setPick(new Set(rows.map((_, i) => i)))} className="hover:text-orange-600 hover:underline">เลือกทั้งหมด</button>
+              <button type="button" onClick={() => setPick(new Set())} className="hover:text-orange-600 hover:underline">ไม่เลือก</button>
+              {hasEn && cfg.enFieldKey && <span className="ml-auto">{enLoose.length ? "อังกฤษบรรทัดไม่ตรงกับไทย — คัดลอกเฉพาะไทย" : "อังกฤษคัดลอกคู่กันให้"}</span>}
+            </div>
+            <div className="max-h-80 space-y-1 overflow-auto pr-1">
+              {rows.map((r, i) => (
+                <label key={i} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-1.5 ${pick.has(i) ? "border-orange-300 bg-orange-50" : "border-slate-200 hover:bg-slate-50"}`} data-copy-row={i}>
+                  <input type="checkbox" checked={pick.has(i)} onChange={() => flip(i)} className="mt-0.5 h-4 w-4 shrink-0 accent-orange-500" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] leading-snug text-slate-700">{r.th}</span>
+                    {showEn && r.en && <span className="block truncate text-[11px] leading-snug text-slate-400">{r.en}</span>}
+                  </span>
+                  {r.has && <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[10.5px] text-slate-500">มีแล้ว</span>}
+                </label>
+              ))}
+            </div>
+          </>
+        ))}
+      </div>
+    </ERPModal>
+  );
+}
+
+/** ชื่อในรายการ: ไทยบน · อังกฤษตัวเล็กข้างล่าง (เจ้าของ 2026-10-19 "จะได้ดูสวย") */
+function NameTwoLines({ th, en, on, showEn = true }: { th: string; en?: string | null; on: boolean; showEn?: boolean }) {
+  return (
+    <span className="min-w-0 flex-1" title={!showEn && en ? en : undefined}>
       <span className={`block text-sm leading-snug ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{th}</span>
-      <span className={`block truncate text-[11px] leading-snug ${en ? "text-slate-400" : "text-slate-300"}`} title={en ?? ""}>{en || "ไม่มีอังกฤษ"}</span>
+      {showEn && <span className={`block truncate text-[11px] leading-snug ${en ? "text-slate-400" : "text-slate-300"}`} title={en ?? ""}>{en || "ไม่มีอังกฤษ"}</span>}
     </span>
   );
 }
