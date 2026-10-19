@@ -26,9 +26,8 @@ export interface ProductHero extends HeroPair {
 export const HERO_SIZE_HINT = {
   desktop: "แนะนำ 2560×1440 px (16:9) อย่างน้อย 1920×1080 · วางจุดสำคัญไว้กลางภาพ",
   mobile: "แนะนำ 1080×1350 px (4:5) · ว่าง = ใช้ของคอม",
-  video: "วิดีโอ MP4 ไม่เกิน 4 MB · 6–10 วินาที · ไม่มีเสียง (เล่นเอง วนซ้ำ)",
+  video: "วิดีโอ MP4 ไม่เกิน 200 MB (แนะนำ ≤ 15 MB ให้เปิดไว) · 6–10 วินาที · ไม่มีเสียง (เล่นเอง วนซ้ำ)",
 };
-export const HERO_VIDEO_MAX_BYTES = 4 * 1024 * 1024;
 
 const KEY_RE = /^[\w\-./%()]+$/;
 function media(raw: unknown): HeroMedia | null {

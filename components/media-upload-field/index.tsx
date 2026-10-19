@@ -2,23 +2,23 @@
 /**
  * MediaUploadField — อัปโหลด "รูป หรือ วิดีโอสั้น" ช่องเดียว (ของกลาง)
  * --------------------------------------------------------------------------
- * - รูป: อัปโหลด / เลือกจากคลัง (AssetPicker) · วิดีโอ: MP4/WebM ไม่เกิน 4 MB (เช็กก่อนส่ง — Vercel รับไฟล์ได้ ~4.5 MB)
+ * - รูป: อัปโหลด / เลือกจากคลัง (AssetPicker) · วิดีโอ: MP4/WebM (เล่นได้ทุกเครื่อง)
+ * - ขนาด: ≤ 4 MB ส่งผ่าน ERP ทันที · ใหญ่กว่านั้น (วิดีโอ ≤ 200 MB · รูป ≤ 20 MB) ส่งตรงเข้า R2 มีแถบ % + ยกเลิกได้
+ *   (ของกลาง lib/media-upload · ⚠️ ไฟล์ใหญ่ต้องเปิด CORS ของ bucket ก่อน 1 ครั้ง — ยังไม่เปิด = ขึ้นข้อความบอกวิธี)
  * - พรีวิวในช่อง: รูป = ภาพ · วิดีโอ = เล่นเอง เงียบ วนซ้ำ
- * - ส่งผ่าน /api/admin/upload (สิทธิ์ files.upload) → ได้ r2 key
  * - 📥 ลากรูป/วิดีโอจากเครื่องมาวางในช่องได้ (ของกลาง useFileDrop · หลายไฟล์ = ใช้ไฟล์แรก)
  * ใช้: <MediaUploadField label value={{kind,key}} onChange={(m) => …} allowVideo />
  */
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
+import { MediaUploadError, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
 
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 
 export interface MediaValue { kind: "image" | "video"; key: string }
 
-const MAX_BYTES = 4 * 1024 * 1024;
 const keyUrl = (key: string, w?: number) => `/api/r2-image?key=${encodeURIComponent(key)}${w ? `&w=${w}` : ""}`;
 
 export function MediaUploadField({
@@ -41,37 +41,41 @@ export function MediaUploadField({
 }) {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
+  /** กำลังอัปโหลด · pct = ไฟล์ใหญ่ (มีแถบ %) · null = ไฟล์เล็ก (รอสั้น ๆ) */
+  const [busy, setBusy] = useState<{ pct: number | null } | null>(null);
+  const handleRef = useRef<UploadHandle | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const upload = async (file: File) => {
     const isVideo = file.type.startsWith("video/");
     if (isVideo && !allowVideo) return toast.error("ช่องนี้รับเฉพาะรูป");
-    if (file.size > MAX_BYTES) {
-      return toast.error(`ไฟล์ใหญ่เกิน 4 MB (${(file.size / 1024 / 1024).toFixed(1)} MB) — ${isVideo ? "ตัดคลิปให้สั้นลง/ลดความละเอียด (แนะนำ 6–10 วินาที 1920×1080 ไม่มีเสียง)" : "ย่อรูปก่อนอัปโหลด"}`);
-    }
-    setBusy(true);
+    if (file.type === "video/quicktime") toast.warning("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)");
+    setProblem(null);
+    setBusy({ pct: null });
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("folder", folder);
-      const r = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-      const j = await r.json().catch(() => ({ error: r.status === 413 ? "ไฟล์ใหญ่เกินที่ระบบรับได้" : "อัปโหลดไม่สำเร็จ" }));
-      if (j.r2_key) {
-        onChange({ kind: isVideo ? "video" : "image", key: j.r2_key });
-        toast.success("อัปโหลดแล้ว");
-      } else toast.error(j.error ?? "อัปโหลดไม่สำเร็จ");
-    } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      const key = await uploadMediaFile(file, {
+        folder,
+        onStart: (h) => (handleRef.current = h),
+        onProgress: (pct) => setBusy({ pct }),
+      });
+      onChange({ kind: isVideo ? "video" : "image", key });
+      toast.success("อัปโหลดแล้ว");
+    } catch (e) {
+      const err = e instanceof MediaUploadError ? e : null;
+      if (err?.code === "aborted") toast.info(err.message);
+      else if (err?.code === "blocked") setProblem(err.message);
+      else toast.error(err?.message ?? "เชื่อมต่อไม่ได้");
     } finally {
-      setBusy(false);
+      handleRef.current = null;
+      setBusy(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   };
 
   const drop = useFileDrop((files) => void upload(files[0]), {
     accept: allowVideo ? ["image/", "video/"] : "image/",
-    disabled: busy,
+    disabled: !!busy,
     onReject: () => toast.error(allowVideo ? "ลากมาได้เฉพาะรูป หรือวิดีโอ MP4/WebM" : "ช่องนี้รับเฉพาะรูป"),
     onBusy: () => toast.warning("กำลังอัปโหลดอยู่ — รอสักครู่แล้วลากใหม่"),
   });
@@ -99,12 +103,23 @@ export function MediaUploadField({
         </div>
         <div className="flex flex-col gap-1.5 min-w-0">
           <input ref={inputRef} type="file" accept={allowVideo ? "image/*,video/mp4,video/webm" : "image/*"} className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-          <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:border-blue-400 disabled:opacity-50">
-            {busy ? "กำลังอัปโหลด…" : allowVideo ? "⬆ อัปโหลดรูป/วิดีโอ" : "⬆ อัปโหลดรูป"}
+          <button type="button" disabled={!!busy} onClick={() => inputRef.current?.click()} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:border-blue-400 disabled:opacity-50">
+            {busy ? (busy.pct != null ? `กำลังอัปโหลด ${busy.pct}%` : "กำลังอัปโหลด…") : allowVideo ? "⬆ อัปโหลดรูป/วิดีโอ" : "⬆ อัปโหลดรูป"}
           </button>
+          {busy?.pct != null && (
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-blue-100">
+                <div className="h-full bg-blue-500 transition-all" style={{ width: `${busy.pct}%` }} />
+              </div>
+              <button type="button" onClick={() => handleRef.current?.abort()} className="shrink-0 text-[11px] text-rose-500 hover:underline">
+                ยกเลิก
+              </button>
+            </div>
+          )}
           <button type="button" onClick={() => setPickerOpen(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:border-slate-400">🖼 เลือกรูปจากคลัง</button>
           {value && <button type="button" onClick={() => onChange(null)} className="text-[11px] text-rose-500 hover:underline text-left">เอาออก</button>}
           {hint && <p className="text-[10px] text-slate-400 leading-snug">{hint}</p>}
+          {problem && <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">⚠️ {problem}</p>}
         </div>
       </div>
       {pickerOpen && (

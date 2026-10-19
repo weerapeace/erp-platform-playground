@@ -3,26 +3,22 @@
 /**
  * 🎬 ช่อง "ไฟล์คลิป" (ชนิด videoFile ใน schema เว็บ) — อัปโหลดวิดีโอเอง แล้วเก็บ r2 key
  *
- * - ไฟล์ ≤ 4 MB → /api/admin/upload (ทางเดิม · ใช้ได้ทันที)
- * - ไฟล์ใหญ่ ≤ 200 MB → ขอลิงก์จาก /api/website/video-upload แล้วเบราว์เซอร์ส่งไฟล์ตรงเข้า R2 (มีแถบ %)
- *   ⚠️ ต้องตั้ง CORS ของ bucket R2 ก่อน (docs/website-video.md) — ยังไม่ตั้ง = ขึ้นข้อความบอกวิธี ไม่พังเงียบ
+ * - ไฟล์ ≤ 4 MB ส่งผ่าน ERP ทันที · ไฟล์ใหญ่ ≤ 200 MB ส่งตรงเข้า R2 (มีแถบ %) — ของกลาง lib/media-upload (ตัวเดียวกับ MediaUploadField)
+ *   ⚠️ ไฟล์ใหญ่ต้องตั้ง CORS ของ bucket R2 ก่อน (docs/website-video.md) — ยังไม่ตั้ง = ขึ้นข้อความบอกวิธี ไม่พังเงียบ
  * - ลากไฟล์มาวางได้ (ของกลาง useFileDrop) · ดูคลิปที่อัปแล้วได้ในช่อง · เปลี่ยน / เอาออก
  */
 import { useRef, useState } from "react";
-import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
+import { MediaUploadError, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
 
-const SMALL = 4 * 1024 * 1024;
-const MAX = 200 * 1024 * 1024;
 const TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 const url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
-const mb = (n: number) => `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 
 export function WebsiteVideoField({ value, onChange }: { value: string | null; onChange: (key: string | null) => void }) {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
-  const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const xhrRef = useRef<UploadHandle | null>(null);
   const [busy, setBusy] = useState<{ name: string; pct: number | null } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -30,51 +26,21 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
     if (!file) return;
     setProblem(null);
     if (!TYPES.includes(file.type)) return toast.error("รับเฉพาะไฟล์วิดีโอ MP4 / WebM / MOV");
-    if (file.size > MAX) return toast.error(`ไฟล์ใหญ่เกิน 200 MB (${mb(file.size)}) — คลิปยาวให้ใช้ลิงก์ YouTube/Vimeo แทน`);
     if (file.type === "video/quicktime") toast.warning("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)");
     setBusy({ name: file.name, pct: null });
     try {
-      if (file.size <= SMALL) {
-        // ไฟล์เล็ก: ทางเดิม (ผ่าน ERP)
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("folder", "storefront-videos");
-        const r = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-        const j = await r.json().catch(() => ({ error: r.status === 413 ? "ไฟล์ใหญ่เกินที่ระบบรับได้" : "อัปโหลดไม่สำเร็จ" }));
-        if (!j.r2_key) throw new Error(j.error ?? "อัปโหลดไม่สำเร็จ");
-        onChange(j.r2_key as string);
-      } else {
-        // ไฟล์ใหญ่: ขอลิงก์ แล้วส่งตรงเข้า R2 (ไม่ผ่าน ERP)
-        const r = await apiFetch("/api/website/video-upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: file.name, type: file.type, size: file.size }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j.url) throw new Error(j.error ?? "ขอสิทธิ์อัปโหลดไม่สำเร็จ");
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhrRef.current = xhr;
-          xhr.open("PUT", j.url as string);
-          xhr.setRequestHeader("Content-Type", file.type);
-          xhr.upload.onprogress = (e) => e.lengthComputable && setBusy({ name: file.name, pct: Math.round((e.loaded / e.total) * 100) });
-          xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`ที่เก็บไฟล์ตอบ ${xhr.status}`)));
-          // status 0 = เบราว์เซอร์ถูกกันไม่ให้ส่ง (ยังไม่ได้เปิด CORS ของ bucket) หรือเน็ตหลุด
-          xhr.onerror = () => reject(new Error("CORS"));
-          xhr.onabort = () => reject(new Error("ABORT"));
-          xhr.send(file);
-        });
-        onChange(j.key as string);
-      }
+      const key = await uploadMediaFile(file, {
+        folder: "storefront-videos",
+        onStart: (h) => (xhrRef.current = h),
+        onProgress: (pct) => setBusy({ name: file.name, pct }),
+      });
+      onChange(key);
       toast.success("อัปโหลดคลิปแล้ว — กดบันทึก/เผยแพร่เพื่อขึ้นเว็บ");
     } catch (e) {
-      const m = (e as Error).message;
-      if (m === "ABORT") toast.info("ยกเลิกการอัปโหลดแล้ว");
-      else if (m === "CORS")
-        setProblem(
-          `ไฟล์ใหญ่ (${mb(file.size)}) ยังอัปไม่ได้ — ต้องเปิดสิทธิ์อัปโหลดไฟล์ใหญ่ใน Cloudflare ก่อน 1 ครั้ง (ขั้นตอนในคู่มือ "วิดีโอเว็บ") · ระหว่างนี้ใช้คลิป ≤ 4 MB หรือลิงก์ YouTube`
-        );
-      else toast.error(m || "อัปโหลดไม่สำเร็จ");
+      const err = e instanceof MediaUploadError ? e : null;
+      if (err?.code === "aborted") toast.info(err.message);
+      else if (err?.code === "blocked") setProblem(`${err.message} หรือลิงก์ YouTube`);
+      else toast.error(err?.message || "อัปโหลดไม่สำเร็จ");
     } finally {
       xhrRef.current = null;
       setBusy(null);

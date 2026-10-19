@@ -23,6 +23,10 @@
 - **≤ 4 MB** → ส่งผ่าน ERP (`/api/admin/upload` โฟลเดอร์ `storefront-videos`) — ใช้ได้ทันที
 - **> 4 MB ถึง 200 MB** → เบราว์เซอร์ส่งตรงเข้า R2 ด้วยลิงก์ที่ ERP เซ็นให้ (Vercel รับ request ได้แค่ ~4.5 MB)
   - ⚠️ ต้องเปิด CORS ของ bucket ก่อน 1 ครั้ง — ยังไม่เปิด = ช่องอัปโหลดขึ้นข้อความบอกวิธี (คลิปเดิมไม่หาย)
+- **ของกลาง** `lib/media-upload.ts` (`uploadMediaFile` — เลือกทางเล็ก/ใหญ่ · แถบ % · ยกเลิก · error `blocked` = ยังไม่เปิด CORS) + เพดาน `lib/media-upload-limits.ts` (pure · ใช้ทั้งหน้าจอและ API)
+  - ใช้โดย `WebsiteVideoField` (Section วิดีโอ) และ `MediaUploadField` (รูปเปิดหน้าสินค้า Hero · รูปปกชุดมาใหม่ · ช่องรูป/วิดีโอทั่วไป)
+  - เพดาน: วิดีโอ MP4/WebM/MOV ≤ 200 MB · รูป JPG/PNG/WebP ≤ 20 MB · GIF/PDF ยังเป็น ≤ 4 MB (ทางเดิม)
+  - ไฟล์ที่มาทางใหญ่ **ไม่ลงคลังกลาง (assets) อัตโนมัติ** (ERP ไม่เห็นเนื้อไฟล์) — ไฟล์ ≤ 4 MB ลงเหมือนเดิม
 
 ### ⚙️ เปิดอัปโหลดไฟล์ใหญ่ (เจ้าของ/แอดมินทำใน Cloudflare · ~5 นาที · ทำครั้งเดียว)
 1. เข้า Cloudflare dashboard → **R2 Object Storage** → bucket **odoo-product-images**
