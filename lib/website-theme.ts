@@ -1271,6 +1271,8 @@ export interface FooterColumn {
   width: 1 | 2;
   /** วางต่อใต้คอลัมน์ก่อนหน้า (2 หัวข้อใน 1 คอลัมน์) — ไม่กินช่องเพิ่ม · ความกว้างตามคอลัมน์บนสุดของกลุ่ม */
   stack: boolean;
+  /** 👁 ปิดตา = ซ่อนจากเว็บชั่วคราว (ไม่ต้องลบ · ไม่นับช่อง) */
+  hidden: boolean;
 }
 export type FooterBg = "ink" | "surface" | "brand" | "custom";
 export type PaymentIcon = "visa" | "mastercard" | "promptpay" | "cod" | "truemoney" | "shopee" | "lazada" | "line";
@@ -1313,6 +1315,10 @@ export interface FooterConfig {
   /** 📱 มือถือ: หัวคอลัมน์กดพับ/กาง · จัดกึ่งกลาง */
   mobileCollapse: boolean;
   mobileCenter: boolean;
+  /** 🧱 คอลัมน์ต่อแถว (จอคอม): 0 = อัตโนมัติ (เท่าจำนวนช่องที่ใช้ → เต็มความกว้าง) · 2–6 · ค่าเริ่ม 4 = แบบเดิม */
+  gridCols: number;
+  /** 📱 คอลัมน์ต่อแถวบนมือถือ: 1 (เดิม) หรือ 2 */
+  mobileCols: 1 | 2;
 }
 export const FOOTER_COL_DEFS: { key: FooterColKind; label: string; hint: string; defaultTitle: string }[] = [
   { key: "about", label: "เกี่ยวกับร้าน", hint: "โลโก้ + คำอธิบายร้าน (จากแท็บข้อมูลร้าน หรือพิมพ์ทับ)", defaultTitle: "" },
@@ -1339,11 +1345,11 @@ export const PAYMENT_ICONS: { value: PaymentIcon; label: string }[] = [
   { value: "shopee", label: "Shopee" },
   { value: "lazada", label: "Lazada" },
 ];
-export const newFooterColumn = (kind: FooterColKind = "links"): FooterColumn => ({ id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, title: "", text: "", links: [], width: kind === "about" ? 2 : 1, stack: false });
+export const newFooterColumn = (kind: FooterColKind = "links"): FooterColumn => ({ id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, title: "", text: "", links: [], width: kind === "about" ? 2 : 1, stack: false, hidden: false });
 export const DEFAULT_FOOTER: FooterConfig = {
   bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left",
   logoShow: true, logoHeight: 40, logoVariant: "auto", logoChip: "auto", padY: "md", headingSize: "s", headingUpper: true, headingColor: "",
-  linkSize: "m", linkColor: "", linkHover: "", divider: true, bottomAlign: "auto", copyrightText: "", socialStyle: "pill", mobileCollapse: false, mobileCenter: false,
+  linkSize: "m", linkColor: "", linkHover: "", divider: true, bottomAlign: "auto", copyrightText: "", socialStyle: "pill", mobileCollapse: false, mobileCenter: false, gridCols: 4, mobileCols: 1,
 };
 export function normalizeFooter(raw: unknown): FooterConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -1364,6 +1370,7 @@ export function normalizeFooter(raw: unknown): FooterConfig {
             width: c.width === 2 ? 2 : 1,
             // คอลัมน์แรกซ้อนใต้ใครไม่ได้
             stack: i > 0 && c.stack === true,
+            hidden: c.hidden === true,
           } as FooterColumn;
         })
         .filter((c): c is FooterColumn => !!c)
@@ -1398,6 +1405,8 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     socialStyle: oneOf(r.socialStyle, ["pill", "icon", "circle", "list"] as const, d.socialStyle),
     mobileCollapse: r.mobileCollapse === true,
     mobileCenter: r.mobileCenter === true,
+    gridCols: [0, 2, 3, 4, 5, 6].includes(Number(r.gridCols)) ? Number(r.gridCols) : d.gridCols,
+    mobileCols: Number(r.mobileCols) === 2 ? 2 : 1,
   };
 }
 

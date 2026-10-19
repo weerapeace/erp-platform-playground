@@ -143,6 +143,17 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     }
   };
 
+  // 🔗 ลิงก์ ?tab=pages&page=<slug> (เช่น ปุ่ม ✎ แก้ ในคอลัมน์ท้ายเว็บ "ศูนย์ช่วยเหลือ") → เปิดหน้านั้นให้เลย (ครั้งแรกครั้งเดียว)
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (autoOpened.current || loading || !pages.length) return;
+    autoOpened.current = true;
+    const want = new URLSearchParams(window.location.search).get("page");
+    const p = want ? pages.find((x) => x.slug === want) : null;
+    if (p) void openPage(p.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, pages]);
+
   const apply = useCallback((next: Block[]) => {
     setBlocks((prev) => {
       undoStack.current = [...undoStack.current.slice(-49), prev];

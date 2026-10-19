@@ -1453,7 +1453,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">คอลัมน์</h3>
-                <p className="text-xs text-slate-500 mb-3">เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง (ทั้งแถวมี 4 ช่อง) · กด ⤵ ซ้อนใต้ = 2 หัวข้อในคอลัมน์เดียว · มือถือเรียงลงมาทีละคอลัมน์</p>
+                <p className="text-xs text-slate-500 mb-3">เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง · กด ⤵ ซ้อนใต้ = 2 หัวข้อในคอลัมน์เดียว · 👁 ปิดตา = ซ่อนชั่วคราว (ไม่ลบ) · จำนวนคอลัมน์ต่อแถว (คอม/มือถือ) ตั้งได้ด้านล่าง</p>
                 {theme.footer.columns === null ? (
                   <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
                     ตอนนี้ใช้แบบ<b>อัตโนมัติ</b>: โลโก้ + คำอธิบายร้าน (2 ช่อง) · เมนู · ติดต่อ
@@ -1465,7 +1465,16 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </div>
                 ) : (
                   <>
-                    <FooterColumnsEditor columns={theme.footer.columns} onChange={(columns) => setFooter({ columns })} choices={choices} pages={storePages} onEditSocial={() => setFooterSocialOpen(true)} />
+                    <FooterColumnsEditor
+                      columns={theme.footer.columns}
+                      onChange={(columns) => setFooter({ columns })}
+                      choices={choices}
+                      pages={storePages}
+                      onEditSocial={() => setFooterSocialOpen(true)}
+                      shopSlug={shopSlug}
+                      grid={{ gridCols: theme.footer.gridCols, mobileCols: theme.footer.mobileCols }}
+                      onGrid={(p) => setFooter(p)}
+                    />
                     <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => { if (confirm("กลับไปใช้ท้ายเว็บแบบอัตโนมัติ? (คอลัมน์ที่จัดไว้จะหาย)")) setFooter({ columns: null }); }}>กลับไปใช้แบบอัตโนมัติ</button>
                   </>
                 )}
@@ -4174,19 +4183,39 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
 }
 
 /* ─────────── Footer: คอลัมน์ ─────────── */
-function FooterColumnsEditor({ columns, onChange, choices, pages, onEditSocial }: { columns: FooterColumn[]; onChange: (c: FooterColumn[]) => void; choices: Choices; pages: { slug: string; title: string; help?: string }[]; onEditSocial?: () => void }) {
+function FooterColumnsEditor({
+  columns,
+  onChange,
+  choices,
+  pages,
+  onEditSocial,
+  shopSlug,
+  grid,
+  onGrid,
+}: {
+  columns: FooterColumn[];
+  onChange: (c: FooterColumn[]) => void;
+  choices: Choices;
+  pages: { slug: string; title: string; help?: string }[];
+  onEditSocial?: () => void;
+  shopSlug?: string;
+  /** 🧱 คอลัมน์ต่อแถว (คอม/มือถือ) */
+  grid?: { gridCols: number; mobileCols: 1 | 2 };
+  onGrid?: (p: { gridCols?: number; mobileCols?: 1 | 2 }) => void;
+}) {
   const drag = useDragReorder((from, to) => onChange(moveItem(columns, from, to)));
-  // 🧭 กลุ่มศูนย์ช่วยเหลือที่มีอยู่ (จากหน้าเว็บที่ตั้งกลุ่มไว้) + จำนวนหน้า
+  // 🧭 กลุ่มศูนย์ช่วยเหลือที่มีอยู่ (จากหน้าเว็บที่ตั้งกลุ่มไว้) + หน้าในกลุ่ม (กด ✎ เปิดแก้หน้านั้นในแท็บใหม่)
   const helpGroups = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const p of pages) if (p.help) m.set(p.help, [...(m.get(p.help) ?? []), p.title]);
-    return [...m.entries()].map(([name, titles]) => ({ name, titles }));
+    const m = new Map<string, { slug: string; title: string }[]>();
+    for (const p of pages) if (p.help) m.set(p.help, [...(m.get(p.help) ?? []), { slug: p.slug, title: p.title }]);
+    return [...m.entries()].map(([name, list]) => ({ name, titles: list.map((x) => x.title), list }));
   }, [pages]);
   const [openId, setOpenId] = useState<string | null>(null);
   const setCol = (id: string, patch: Partial<FooterColumn>) => onChange(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
-  // คอลัมน์ที่ "วางต่อใต้คอลัมน์ก่อนหน้า" ไม่กินช่องเพิ่ม (คอลัมน์แรกซ้อนไม่ได้)
-  const used = columns.reduce((n, c, i) => n + (c.stack && i > 0 ? 0 : c.width), 0);
+  // คอลัมน์ที่ "วางต่อใต้คอลัมน์ก่อนหน้า" ไม่กินช่องเพิ่ม (คอลัมน์แรกซ้อนไม่ได้) · 👁 ปิดตา = ไม่นับ (เว็บร้านนับแบบเดียวกัน)
+  const visible = columns.filter((c) => !c.hidden);
+  const used = visible.reduce((n, c, i) => n + (c.stack && i > 0 ? 0 : c.width), 0);
   return (
     <div>
       <ul className="space-y-1">
@@ -4195,8 +4224,8 @@ function FooterColumnsEditor({ columns, onChange, choices, pages, onEditSocial }
           const open = openId === c.id;
           const stacked = c.stack && i > 0;
           return (
-            <li key={c.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${stacked ? "ml-6" : ""} ${drag.rowCls(i)}`}>
-              <div className="flex items-center gap-1.5 px-2 py-1.5">
+            <li key={c.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} ${c.hidden ? "bg-slate-50" : "bg-white"} ${stacked ? "ml-6" : ""} ${drag.rowCls(i)}`}>
+              <div className={`flex items-center gap-1.5 px-2 py-1.5 ${c.hidden ? "[&>*:not(.eye-btn)]:opacity-40" : ""}`}>
                 <DragHandle {...drag.handleProps(i)} />
                 {stacked && <span className="text-slate-300 text-xs -ml-0.5" title="อยู่ใต้คอลัมน์ก่อนหน้า (คอลัมน์เดียวกัน)">↳</span>}
                 <select className={mini} value={c.kind} onChange={(e) => setCol(c.id, { kind: e.target.value as FooterColKind })}>
@@ -4217,6 +4246,16 @@ function FooterColumnsEditor({ columns, onChange, choices, pages, onEditSocial }
                   <option value={1}>กว้าง 1</option>
                   <option value={2}>กว้าง 2</option>
                 </select>
+                {/* 👁 เปิด-ปิดตา: ซ่อนจากเว็บชั่วคราว ไม่ต้องลบ (ค่าที่ตั้งไว้ยังอยู่) */}
+                <button
+                  type="button"
+                  onClick={() => setCol(c.id, { hidden: !c.hidden })}
+                  className={`eye-btn h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border text-sm ${c.hidden ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
+                  title={c.hidden ? "ซ่อนอยู่ — กดเพื่อโชว์บนเว็บ" : "โชว์อยู่ — กดเพื่อซ่อน (ไม่ลบ)"}
+                  aria-pressed={!c.hidden}
+                >
+                  {c.hidden ? "🙈" : "👁"}
+                </button>
                 <button type="button" onClick={() => setOpenId(open ? null : c.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500 hover:border-slate-400"}`} title="ตั้งค่าเพิ่ม">✎</button>
                 <button type="button" onClick={() => onChange(columns.filter((x) => x.id !== c.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">✕</button>
               </div>
@@ -4257,7 +4296,25 @@ function FooterColumnsEditor({ columns, onChange, choices, pages, onEditSocial }
                       )}
                       {(() => {
                         const g = helpGroups.find((x) => x.name === c.text);
-                        return g ? <p className="mt-1 text-[11px] text-slate-400">ลิงก์ที่จะขึ้น: {g.titles.join(" · ")}</p> : null;
+                        if (!g) return null;
+                        return (
+                          <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-2">
+                            <p className="text-[11px] text-slate-500 mb-1">ลิงก์ที่จะขึ้น (ชื่อ/ลำดับ/เนื้อหา แก้ที่แท็บ 📄 หน้าเว็บ — กด ✎ เปิดแก้หน้านั้นในแท็บใหม่)</p>
+                            <ul className="space-y-0.5">
+                              {g.list.map((p) => (
+                                <li key={p.slug} className="flex items-center gap-2 text-xs text-slate-700">
+                                  <span className="flex-1 truncate">{p.title}</span>
+                                  <span className="text-[10px] text-slate-400">/{p.slug}</span>
+                                  {shopSlug && (
+                                    <a href={`/website/${encodeURIComponent(shopSlug)}?tab=pages&page=${encodeURIComponent(p.slug)}`} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline" title="เปิดแก้หน้านี้ในแท็บใหม่">
+                                      ✎ แก้
+                                    </a>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
                       })()}
                     </div>
                   )}
@@ -4267,10 +4324,40 @@ function FooterColumnsEditor({ columns, onChange, choices, pages, onEditSocial }
           );
         })}
       </ul>
-      <div className="flex items-center gap-3 mt-2">
+      <div className="flex flex-wrap items-center gap-3 mt-2">
         <button type="button" className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700" onClick={() => { const c = newFooterColumn(); onChange([...columns, c]); setOpenId(c.id); }}>+ เพิ่มคอลัมน์</button>
-        <span className="text-[11px] text-slate-400">ใช้ไป {used} / 4 ช่องต่อแถว{used > 4 ? " — เกินจะขึ้นแถวใหม่" : ""}</span>
+        {(() => {
+          // 🧱 อัตโนมัติ = แถวละเท่าจำนวนช่องที่ใช้ (สูงสุด 6) → เต็มความกว้างพอดี
+          const per = grid?.gridCols ? grid.gridCols : Math.min(6, Math.max(1, used));
+          return (
+            <span className="text-[11px] text-slate-400">
+              ใช้ไป {used} ช่อง · แถวละ {per} คอลัมน์{used > per ? " — เกินจะขึ้นแถวใหม่" : used < per ? ` — เหลือที่ว่าง ${per - used} ช่อง` : " — พอดีแถว"}
+            </span>
+          );
+        })()}
       </div>
+      {grid && onGrid && (
+        <div className="grid gap-3 sm:grid-cols-2 mt-3 pt-3 border-t border-slate-100">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">🧱 คอลัมน์ต่อแถว (จอคอม)</label>
+            <select className="w-full rounded-lg border border-slate-200 text-sm px-2.5 py-1.5 bg-white text-slate-700" value={grid.gridCols} onChange={(e) => onGrid({ gridCols: Number(e.target.value) })}>
+              <option value={0}>อัตโนมัติ — เท่าที่ใช้ เต็มความกว้าง (ตอนนี้ {Math.min(6, Math.max(1, used))})</option>
+              {[2, 3, 4, 5, 6].map((n) => (
+                <option key={n} value={n}>
+                  {n} คอลัมน์{n === 4 ? " (แบบเดิม)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">📱 คอลัมน์ต่อแถว (มือถือ)</label>
+            <select className="w-full rounded-lg border border-slate-200 text-sm px-2.5 py-1.5 bg-white text-slate-700" value={grid.mobileCols} onChange={(e) => onGrid({ mobileCols: Number(e.target.value) === 2 ? 2 : 1 })}>
+              <option value={1}>1 คอลัมน์ (เรียงลงมา · แบบเดิม)</option>
+              <option value={2}>2 คอลัมน์ (คู่กัน · ช่องกว้าง 2 เต็มแถว)</option>
+            </select>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
