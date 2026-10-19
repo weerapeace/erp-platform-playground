@@ -27,6 +27,7 @@ import { englishValue, isTranslatable, thaiValue } from "@/lib/website-i18n";
 import { WebsiteCategoriesField } from "@/components/website-categories-field";
 import { WebsiteVideoField } from "@/components/website-video-field";
 import { ImageSizeNote } from "@/components/image-size-note";
+import { RangeInput } from "@/components/range-input";
 
 export interface SchemaFormContext {
   shopSlug: string;
@@ -443,7 +444,8 @@ function SchemaFieldInner({
     case "range":
       return (
         <Field label={`${fd.label}: ${Number(value) || 0}`} hint={fd.hint} wide={fd.wide}>
-          <input type="range" className="w-full accent-blue-600" value={Number(value) || 0} min={fd.min ?? 0} max={fd.numMax ?? 100} step={fd.step ?? 1} onChange={(e) => onChange(Number(e.target.value))} />
+          {/* แถบเลื่อน + ช่องพิมพ์ตัวเลข (ของกลาง RangeInput · พิมพ์ได้ในช่วง min–numMax ของช่อง) */}
+          <RangeInput value={Number(value) || 0} min={fd.min ?? 0} max={fd.numMax ?? 100} step={fd.step ?? 1} onChange={(v) => onChange(v)} />
         </Field>
       );
     case "select":

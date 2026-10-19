@@ -31,7 +31,7 @@ import type { ContentLang } from "@/lib/content-i18n";
 import { THEME_TEXT_KEYS, themeCrumb } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
-import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, FOOTER_PAD_PX, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
+import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, FOOTER_GAP_MAX, FOOTER_PAD_PX, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
@@ -57,6 +57,7 @@ import { CopyButton } from "@/components/copy-button";
 import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { FontSelect } from "@/components/font-select";
+import { RangeInput } from "@/components/range-input";
 import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
@@ -896,7 +897,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           </div>
           <div>
             <label className={labelCls}>ความสูงโลโก้ · {theme.logo.height}px</label>
-            <input type="range" min={16} max={200} value={theme.logo.height} onChange={(e) => setLogo({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+            <RangeInput min={16} max={200} value={theme.logo.height} onChange={(v) => setLogo({ height: v })} className="w-full accent-blue-600" />
             <p className="text-[11px] text-slate-500 mt-1">Header สูงขึ้นตามโลโก้ให้เอง · บนมือถือโลโก้สูงสุด 80px</p>
           </div>
           <div>
@@ -1185,7 +1186,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className={labelCls}>ความสูง · {theme.header.height}px</label>
-                  <input type="range" min={48} max={240} value={theme.header.height} onChange={(e) => setHeader({ height: Number(e.target.value) })} className="w-full accent-blue-600" />
+                  <RangeInput min={48} max={240} value={theme.header.height} onChange={(v) => setHeader({ height: v })} className="w-full accent-blue-600" />
                 </div>
                 <div>
                   <label className={labelCls}>สีพื้นหลัง</label>
@@ -1373,6 +1374,29 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
                 {/* 🔤 หัวคอลัมน์ + ลิงก์ */}
                 <h4 className="text-xs font-semibold text-slate-600 mt-4 mb-2 pt-3 border-t border-slate-100">🔤 หัวคอลัมน์ & ลิงก์</h4>
+                {/* 🔤 ฟอนต์ท้ายเว็บ ("" = ตามธีมแบบเดิม) — เว็บร้านโหลดฟอนต์ที่เลือกให้เอง (themeFontNames) */}
+                <div className="grid gap-3 sm:grid-cols-2 mb-3">
+                  <div>
+                    <label className={labelCls}>ฟอนต์หัวคอลัมน์</label>
+                    <FontSelect
+                      value={theme.footer.headingFont}
+                      onChange={(v) => setFooter({ headingFont: v })}
+                      options={webFontOptions([{ value: "", label: "ตามธีม (แบบเดิม)", family: `"${theme.footer.headingSize === "l" ? theme.fonts.display : theme.fonts.body}", sans-serif` }])}
+                      googleFonts={WEB_FONT_NAMES}
+                      sample="ติดต่อเรา · CONTACT"
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>ฟอนต์ข้อความ / ลิงก์</label>
+                    <FontSelect
+                      value={theme.footer.textFont}
+                      onChange={(v) => setFooter({ textFont: v })}
+                      options={webFontOptions([{ value: "", label: "ตามธีม (แบบเดิม)", family: `"${theme.fonts.body}", sans-serif` }])}
+                      googleFonts={WEB_FONT_NAMES}
+                      sample="สินค้าทั้งหมด · Shipping 123"
+                    />
+                  </div>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>
                     <label className={labelCls}>ขนาดหัวคอลัมน์</label>
@@ -1480,7 +1504,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div>
                       <label className={labelCls}>ความสูงโลโก้ ({theme.footer.logoHeight}px)</label>
-                      <input type="range" min={16} max={120} step={2} value={theme.footer.logoHeight} onChange={(e) => setFooter({ logoHeight: Number(e.target.value) })} className="w-full" />
+                      <RangeInput min={16} max={120} step={2} value={theme.footer.logoHeight} onChange={(v) => setFooter({ logoHeight: v })} className="w-full" />
                     </div>
                     <div>
                       <label className={labelCls}>ใช้รูปโลโก้</label>
@@ -1530,13 +1554,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         <label className={labelCls}>
                           {s.l} ({v}px)
                         </label>
-                        <input type="range" min={0} max={s.max} step={4} value={v} onChange={(e) => setFooter({ [s.k]: Number(e.target.value) } as Partial<FooterConfig>)} className="w-full" />
+                        <RangeInput min={0} max={s.max} step={4} hardMax={FOOTER_GAP_MAX} unit="px" value={v} onChange={(v) => setFooter({ [s.k]: v } as Partial<FooterConfig>)} className="w-full" />
                       </div>
                     );
                   })}
                   <div>
                     <label className={labelCls}>คอลัมน์ ↔ แถวล่าง © ({theme.footer.bottomGap}px)</label>
-                    <input type="range" min={0} max={160} step={4} value={theme.footer.bottomGap} onChange={(e) => setFooter({ bottomGap: Number(e.target.value) })} className="w-full" />
+                    <RangeInput min={0} max={160} step={4} hardMax={FOOTER_GAP_MAX} unit="px" value={theme.footer.bottomGap} onChange={(v) => setFooter({ bottomGap: v })} className="w-full" />
                   </div>
                 </div>
                 <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
@@ -1552,19 +1576,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       <label className={labelCls}>
                         {s.l} ({theme.footer[s.k]}px)
                       </label>
-                      <input type="range" min={s.min} max={s.max} step={s.step} value={theme.footer[s.k]} onChange={(e) => setFooter({ [s.k]: Number(e.target.value) } as Partial<FooterConfig>)} className="w-full" />
+                      <RangeInput min={s.min} max={s.max} step={s.step} hardMax={FOOTER_GAP_MAX} unit="px" value={theme.footer[s.k]} onChange={(v) => setFooter({ [s.k]: v } as Partial<FooterConfig>)} className="w-full" />
                     </div>
                   ))}
                   <div>
                     <label className={labelCls}>หัวข้อ → ลิงก์แรก ({theme.footer.headGap < 0 ? "อัตโนมัติ" : `${theme.footer.headGap}px`})</label>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="range"
+                      <RangeInput
                         min={0}
                         max={40}
                         step={1}
+                        hardMax={FOOTER_GAP_MAX}
+                        unit="px"
                         value={theme.footer.headGap < 0 ? 16 : theme.footer.headGap}
-                        onChange={(e) => setFooter({ headGap: Number(e.target.value) })}
+                        onChange={(v) => setFooter({ headGap: v })}
                         className={`flex-1 ${theme.footer.headGap < 0 ? "opacity-40" : ""}`}
                       />
                       {theme.footer.headGap >= 0 && (
@@ -1789,11 +1814,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className="grid gap-3 sm:grid-cols-2 mt-3">
                 <div>
                   <label className={labelCls}>ขนาดชื่อสินค้า ({theme.card.nameSize}%)</label>
-                  <input type="range" min={60} max={180} step={5} value={theme.card.nameSize} onChange={(e) => setCard({ nameSize: Number(e.target.value) })} className="w-full" />
+                  <RangeInput min={60} max={180} step={5} value={theme.card.nameSize} onChange={(v) => setCard({ nameSize: v })} className="w-full" />
                 </div>
                 <div>
                   <label className={labelCls}>ขนาดราคา ({theme.card.priceSize}%)</label>
-                  <input type="range" min={60} max={180} step={5} value={theme.card.priceSize} onChange={(e) => setCard({ priceSize: Number(e.target.value) })} className="w-full" />
+                  <RangeInput min={60} max={180} step={5} value={theme.card.priceSize} onChange={(v) => setCard({ priceSize: v })} className="w-full" />
                 </div>
               </div>
 
@@ -3370,11 +3395,11 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
             <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 px-2.5 py-2">
               <label className="flex items-center gap-2 text-[11px] text-slate-600">
                 <span className="w-20 shrink-0">ซ้าย ↔ ขวา {card.imagePosX}%</span>
-                <input type="range" min={0} max={100} step={1} value={card.imagePosX} onChange={(e) => setCard({ imagePosX: Number(e.target.value) })} className="flex-1" />
+                <RangeInput min={0} max={100} step={1} value={card.imagePosX} onChange={(v) => setCard({ imagePosX: v })} className="flex-1" />
               </label>
               <label className="flex items-center gap-2 text-[11px] text-slate-600">
                 <span className="w-20 shrink-0">บน ↕ ล่าง {card.imagePosY}%</span>
-                <input type="range" min={0} max={100} step={1} value={card.imagePosY} onChange={(e) => setCard({ imagePosY: Number(e.target.value) })} className="flex-1" />
+                <RangeInput min={0} max={100} step={1} value={card.imagePosY} onChange={(v) => setCard({ imagePosY: v })} className="flex-1" />
               </label>
               <button type="button" onClick={() => setCard({ imagePosX: 50, imagePosY: 50 })} className="text-[11px] text-slate-500 hover:text-blue-600">↺ กลับกึ่งกลาง</button>
             </div>
@@ -3389,7 +3414,7 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
                 </button>
               )}
             </label>
-            <input type="range" min={50} max={200} step={5} value={card.imageScale} onChange={(e) => setCard({ imageScale: Number(e.target.value) })} className="w-full" />
+            <RangeInput min={50} max={200} step={5} value={card.imageScale} onChange={(v) => setCard({ imageScale: v })} className="w-full" />
             <p className="text-[11px] text-slate-400">น้อยกว่า 100 = ย่อรูป เห็นพื้นรอบ · มากกว่า 100 = ซูมเข้า (ตัดขอบเพิ่ม)</p>
           </div>
         </div>
@@ -3507,11 +3532,11 @@ function PlaceholderSettings({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] text-slate-500">ความจาง ({value.opacity}%)</label>
-                  <input type="range" min={4} max={40} step={2} value={value.opacity} onChange={(e) => onChange({ opacity: Number(e.target.value) })} className="w-full" />
+                  <RangeInput min={4} max={40} step={2} value={value.opacity} onChange={(v) => onChange({ opacity: v })} className="w-full" />
                 </div>
                 <div>
                   <label className="block text-[11px] text-slate-500">ขนาดโลโก้ ({value.size}% ของกรอบ)</label>
-                  <input type="range" min={20} max={70} step={2} value={value.size} onChange={(e) => onChange({ size: Number(e.target.value) })} className="w-full" />
+                  <RangeInput min={20} max={70} step={2} value={value.size} onChange={(v) => onChange({ size: v })} className="w-full" />
                 </div>
               </div>
               <ImageUploadField label="โลโก้สำหรับจุดนี้ (ว่าง = ใช้โลโก้หลัก)" hint="แนะนำโลโก้สีเดียว พื้นใส" value={value.imageKey} onChange={(key) => onChange({ imageKey: key })} height={44} />
@@ -3660,7 +3685,7 @@ function FineColorsCard({
           <div>
             <p className="text-[11px] font-semibold text-slate-600 mb-1">ความเข้มสีอ่อน (พื้นป้าย/กล่องเน้น)</p>
             <div className="flex items-center gap-3">
-              <input type="range" min={SOFT_PCT_RANGE.min} max={SOFT_PCT_RANGE.max} value={c.softPct} onChange={(e) => setSoft(Number(e.target.value))} className="flex-1" aria-label="ความเข้มสีอ่อน" />
+              <RangeInput min={SOFT_PCT_RANGE.min} max={SOFT_PCT_RANGE.max} value={c.softPct} onChange={(v) => setSoft(v)} className="flex-1" ariaLabel="ความเข้มสีอ่อน" />
               <span className="text-xs text-slate-600 w-10 text-right">{c.softPct}%</span>
               {c.softPct !== d.softPct && (
                 <button type="button" onClick={() => setSoft(d.softPct)} className="text-[11px] text-slate-400 hover:text-slate-700" title={`กลับค่าเริ่มต้น ${d.softPct}%`}>
@@ -3914,15 +3939,15 @@ function TextRoleEditor({ def, value, pub, theme, onChange, onReset }: { def: (t
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label className={labelCls}>🖥 ขนาดบนคอม ({value.size}%)</label>
-              <input type="range" min={50} max={250} step={5} value={value.size} onChange={(e) => onChange({ size: Number(e.target.value) })} className="w-full" onMouseEnter={() => setMobile(false)} />
+              <RangeInput min={50} max={250} step={5} value={value.size} onChange={(v) => onChange({ size: v })} className="w-full" onMouseEnter={() => setMobile(false)} />
             </div>
             <div>
               <label className={labelCls}>📱 ขนาดบนมือถือ ({value.sizeMobile ? `${value.sizeMobile}%` : "เท่าคอม"})</label>
-              <input type="range" min={0} max={250} step={5} value={value.sizeMobile} onChange={(e) => onChange({ sizeMobile: Number(e.target.value) })} className="w-full" onMouseEnter={() => setMobile(true)} />
+              <RangeInput min={0} max={250} step={5} value={value.sizeMobile} onChange={(v) => onChange({ sizeMobile: v })} className="w-full" onMouseEnter={() => setMobile(true)} />
             </div>
             <div>
               <label className={labelCls}>ระยะห่างตัวอักษร ({value.spacing / 100}em)</label>
-              <input type="range" min={-10} max={40} step={1} value={value.spacing} onChange={(e) => onChange({ spacing: Number(e.target.value) })} className="w-full" />
+              <RangeInput min={-10} max={40} step={1} value={value.spacing} onChange={(v) => onChange({ spacing: v })} className="w-full" />
             </div>
           </div>
           {def.key !== "button" && (

@@ -1300,6 +1300,9 @@ export interface FooterConfig {
   headingSize: "s" | "m" | "l";
   headingUpper: boolean;
   headingColor: string;
+  /** 🔤 ฟอนต์หัวคอลัมน์ / ข้อความ+ลิงก์ ("" = ตามธีมแบบเดิม · ชื่อจาก FONT_NAMES) */
+  headingFont: string;
+  textFont: string;
   /** 🔗 ลิงก์/ข้อความ: ขนาด · สี · สีตอนชี้ ("" = อัตโนมัติ) */
   linkSize: "s" | "m" | "l";
   linkColor: string;
@@ -1323,7 +1326,7 @@ export interface FooterConfig {
   logoPlace: "auto" | "column" | "top";
   /** 🖼 จัดโลโก้: auto = ตามการจัดข้อความท้ายเว็บ · left · center · right */
   logoAlign: "auto" | "left" | "center" | "right";
-  /** 📏 ระยะห่าง (px): ระหว่างคอลัมน์ 0–160 · ระหว่างแถว 0–120 · ระหว่างลิงก์ 0–32 · 2 หัวข้อที่ซ้อนกัน 0–96 · หัวข้อ→ลิงก์ 0–40 (-1 = อัตโนมัติ) */
+  /** 📏 ระยะห่าง (px 0–999 · แถบเลื่อนถึงค่าปกติ พิมพ์ตัวเลขเกินได้): ระหว่างคอลัมน์ · ระหว่างแถว · ระหว่างลิงก์ · 2 หัวข้อที่ซ้อนกัน · หัวข้อ→ลิงก์ (-1 = อัตโนมัติ) */
   colGap: number;
   rowGap: number;
   linkGap: number;
@@ -1331,7 +1334,7 @@ export interface FooterConfig {
   headGap: number;
   /** ความกว้างคอลัมน์: equal = เท่ากันเต็มความกว้าง (เดิม) · content = ชิดกันตามเนื้อหา */
   colFit: "equal" | "content";
-  /** 📏 ขอบบน / ขอบล่างของท้ายเว็บ (px 0–200 · -1 = ตาม padY) · คอลัมน์ ↔ แถวล่าง © (px 0–160) */
+  /** 📏 ขอบบน / ขอบล่างของท้ายเว็บ (px 0–999 · -1 = ตาม padY) · คอลัมน์ ↔ แถวล่าง © (px 0–999) */
   padTop: number;
   padBottom: number;
   bottomGap: number;
@@ -1339,6 +1342,8 @@ export interface FooterConfig {
 /** padY (แบบเร็ว) → px — เว็บร้านใช้ค่าเดียวกัน (src/lib/site-config FOOTER_PAD_PX) */
 export const FOOTER_PAD_PX: Record<"sm" | "md" | "lg" | "xl", number> = { sm: 32, md: 56, lg: 80, xl: 112 };
 /** 📏 ค่าเริ่มของระยะห่าง = หน้าตาเดิมก่อนมีช่องตั้ง (ใช้กับปุ่ม "กลับค่าเริ่ม") */
+/** 📏 เพดานระยะห่างท้ายเว็บที่พิมพ์เองได้ (แถบเลื่อนยังสั้นตามค่าปกติ) — เว็บร้านใช้ค่าเดียวกัน */
+export const FOOTER_GAP_MAX = 999;
 export const FOOTER_SPACING_DEFAULTS = { colGap: 40, rowGap: 40, linkGap: 10, stackGap: 32, headGap: -1, padTop: -1, padBottom: -1, bottomGap: 48 } as const;
 export const FOOTER_COL_DEFS: { key: FooterColKind; label: string; hint: string; defaultTitle: string }[] = [
   { key: "about", label: "เกี่ยวกับร้าน", hint: "โลโก้ + คำอธิบายร้าน (จากแท็บข้อมูลร้าน หรือพิมพ์ทับ)", defaultTitle: "" },
@@ -1368,7 +1373,7 @@ export const PAYMENT_ICONS: { value: PaymentIcon; label: string }[] = [
 export const newFooterColumn = (kind: FooterColKind = "links"): FooterColumn => ({ id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, title: "", text: "", links: [], width: kind === "about" ? 2 : 1, stack: false, hidden: false });
 export const DEFAULT_FOOTER: FooterConfig = {
   bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left",
-  logoShow: true, logoHeight: 40, logoVariant: "auto", logoChip: "auto", padY: "md", headingSize: "s", headingUpper: true, headingColor: "",
+  logoShow: true, logoHeight: 40, logoVariant: "auto", logoChip: "auto", padY: "md", headingSize: "s", headingUpper: true, headingColor: "", headingFont: "", textFont: "",
   linkSize: "m", linkColor: "", linkHover: "", divider: true, bottomAlign: "auto", copyrightText: "", socialStyle: "pill", mobileCollapse: false, mobileCenter: false, gridCols: 4, mobileCols: 1,
   logoPlace: "auto", logoAlign: "auto", ...FOOTER_SPACING_DEFAULTS, colFit: "equal",
 };
@@ -1419,6 +1424,8 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     headingSize: oneOf(r.headingSize, ["s", "m", "l"] as const, d.headingSize),
     headingUpper: r.headingUpper !== false,
     headingColor: hex(r.headingColor),
+    headingFont: typeof r.headingFont === "string" && FONT_NAMES.includes(r.headingFont) ? r.headingFont : "",
+    textFont: typeof r.textFont === "string" && FONT_NAMES.includes(r.textFont) ? r.textFont : "",
     linkSize: oneOf(r.linkSize, ["s", "m", "l"] as const, d.linkSize),
     linkColor: hex(r.linkColor),
     linkHover: hex(r.linkHover),
@@ -1432,15 +1439,15 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     mobileCols: Number(r.mobileCols) === 2 ? 2 : 1,
     logoPlace: oneOf(r.logoPlace, ["auto", "column", "top"] as const, d.logoPlace),
     logoAlign: oneOf(r.logoAlign, ["auto", "left", "center", "right"] as const, d.logoAlign),
-    colGap: px(r.colGap, 0, 160, d.colGap),
-    rowGap: px(r.rowGap, 0, 120, d.rowGap),
-    linkGap: px(r.linkGap, 0, 32, d.linkGap),
-    stackGap: px(r.stackGap, 0, 96, d.stackGap),
-    headGap: Number(r.headGap) === -1 ? -1 : px(r.headGap, 0, 40, d.headGap),
+    colGap: px(r.colGap, 0, FOOTER_GAP_MAX, d.colGap),
+    rowGap: px(r.rowGap, 0, FOOTER_GAP_MAX, d.rowGap),
+    linkGap: px(r.linkGap, 0, FOOTER_GAP_MAX, d.linkGap),
+    stackGap: px(r.stackGap, 0, FOOTER_GAP_MAX, d.stackGap),
+    headGap: Number(r.headGap) === -1 ? -1 : px(r.headGap, 0, FOOTER_GAP_MAX, d.headGap),
     colFit: oneOf(r.colFit, ["equal", "content"] as const, d.colFit),
-    padTop: Number(r.padTop) === -1 ? -1 : px(r.padTop, 0, 200, d.padTop),
-    padBottom: Number(r.padBottom) === -1 ? -1 : px(r.padBottom, 0, 200, d.padBottom),
-    bottomGap: px(r.bottomGap, 0, 160, d.bottomGap),
+    padTop: Number(r.padTop) === -1 ? -1 : px(r.padTop, 0, FOOTER_GAP_MAX, d.padTop),
+    padBottom: Number(r.padBottom) === -1 ? -1 : px(r.padBottom, 0, FOOTER_GAP_MAX, d.padBottom),
+    bottomGap: px(r.bottomGap, 0, FOOTER_GAP_MAX, d.bottomGap),
   };
 }
 
