@@ -236,9 +236,9 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
   );
 }
 
-/** การ์ดในแท็บ "🏪 ข้อมูลร้าน" — ทุกสินค้าของร้าน */
-export function RestockCard({ shopSlug, cardCls }: { shopSlug: string; cardCls: string }) {
-  const [open, setOpen] = useState(false);
+/** การ์ดในแท็บ "🏪 ข้อมูลร้าน" (แท็บย่อย 🔔 รอแจ้งของเข้า) — ทุกสินค้าของร้าน · defaultOpen = เปิดรายชื่อเลย */
+export function RestockCard({ shopSlug, cardCls, defaultOpen = false }: { shopSlug: string; cardCls: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [n, setN] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;

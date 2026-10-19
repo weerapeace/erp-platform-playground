@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
 import { RestockCard } from "@/components/website-restock-panel";
 import { SaveBar } from "@/components/save-bar";
+import { ScrollTabs } from "@/components/scroll-tabs";
 import { BilingualText, ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
 import { coverageOf, needsTranslation, readMeta, translationPatch, translationStatus } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
@@ -36,6 +37,14 @@ const inputCls =
   "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
 const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 const cardCls = "rounded-xl border border-slate-200 bg-white p-4";
+
+/** แท็บรายชื่อ (ไม่ใช่ช่องตั้งค่า) — ต่อท้ายแท็บหมวดข้อมูลร้าน */
+const LIST_TABS = [
+  { key: "subscribers", label: "📬 รับข่าวสาร" },
+  { key: "restock", label: "🔔 รอแจ้งของเข้า" },
+];
+/** จำแท็บล่าสุด (เครื่องนี้) — เปิดมาอีกครั้งอยู่แท็บเดิม */
+const TAB_KEY = "website-info-tab";
 
 export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
@@ -74,6 +83,28 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
   }, [load]);
 
   const dirty = useMemo(() => JSON.stringify(saved) !== JSON.stringify(info), [saved, info]);
+
+  // 🗂 แท็บ: ทีละหมวด เต็มความกว้าง (เดิมการ์ดเรียง 2 คอลัมน์ รก) · ว่าง/หาไม่เจอ = หมวดแรก
+  const [tab, setTabState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(TAB_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const setTab = (k: string) => {
+    setTabState(k);
+    try {
+      localStorage.setItem(TAB_KEY, k);
+    } catch {
+      /* โหมดส่วนตัว — ไม่จำก็ได้ */
+    }
+  };
+  const groupTabs = groups.filter((g) => fields.some((f) => f.group === g.key));
+  const active = groupTabs.some((g) => g.key === tab) || LIST_TABS.some((l) => l.key === tab) ? tab : groupTabs[0]?.key ?? "";
+  // หมวดที่มีช่องแก้แล้วยังไม่บันทึก (รวมช่องอังกฤษ) → จุดบนแท็บ
+  const groupDirty = (g: string) =>
+    fields.some((f) => f.group === g && [f.key, `${f.key}_en`].some((k) => JSON.stringify(saved[k] ?? null) !== JSON.stringify(info[k] ?? null)));
 
   const save = async () => {
     setSaving(true);
@@ -160,8 +191,6 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
         </div>
       </div>
 
-      <SubscribersCard shopSlug={shopSlug} />
-      <RestockCard shopSlug={shopSlug} cardCls={cardCls} />
       <GiftCardsEditor open={cardsOpen} onClose={() => setCardsOpen(false)} shopSlug={shopSlug} shopId={shopId} />
 
       <ContentLangProvider>
@@ -171,15 +200,36 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
           <TranslationBar coverage={coverageOf(i18nSlots)} busy={txBusy} error={txError} onTranslateMissing={() => void translateMissing()} />
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {groups.map((g) => {
+      {/* 🗂 แถบแท็บ (ของกลาง ScrollTabs) — หมวดข้อมูลร้าน + รายชื่อ · ● = แก้แล้วยังไม่บันทึก */}
+      <ScrollTabs activeKey={active} className="border-b border-slate-200">
+        {[...groupTabs.map((g) => ({ key: g.key, label: g.label, dot: groupDirty(g.key) })), ...LIST_TABS.map((l) => ({ ...l, dot: false }))].map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            data-tab-key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`shrink-0 px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
+              active === t.key ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            {t.label}
+            {t.dot && <span className="ml-1 text-amber-500" title="มีการแก้ที่ยังไม่บันทึก">●</span>}
+          </button>
+        ))}
+      </ScrollTabs>
+
+      {active === "subscribers" && <SubscribersCard shopSlug={shopSlug} defaultOpen />}
+      {active === "restock" && <RestockCard shopSlug={shopSlug} cardCls={cardCls} defaultOpen />}
+
+      <div>
+        {groupTabs.map((g) => {
           const list = fields.filter((f) => f.group === g.key);
-          if (!list.length) return null;
+          if (g.key !== active) return null;
           return (
-            <section key={g.key} className={`${cardCls} ${g.key === "contact" ? "lg:row-span-2" : ""}`}>
+            <section key={g.key} className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800">{g.label}</h3>
               <p className="text-[11px] text-slate-500 mt-0.5 mb-3">{g.hint}</p>
-              <div className={`grid gap-3 ${g.key === "contact" ? "sm:grid-cols-2" : ""}`}>
+              <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
                 {list.map((f) =>
                   f.i18n ? (
                     <BilingualText
@@ -236,7 +286,7 @@ function Field({
 }) {
   if (f.type === "bool") {
     return (
-      <label className="flex items-center gap-2 text-sm text-slate-800 py-1 cursor-pointer">
+      <label className="sm:col-span-2 flex items-center gap-2 text-sm text-slate-800 py-1 cursor-pointer">
         <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} className="w-4 h-4" />
         <span>{f.label}</span>
         {f.hint && <span className="text-[11px] text-slate-400">— {f.hint}</span>}
@@ -274,11 +324,11 @@ function Field({
 type Subscriber = { id: string; email: string; source: string; created_at: string };
 
 /** รายชื่อสมัครรับข่าวสาร (จากบล็อก "สมัครรับข่าวสาร" บนเว็บ) — ดู/ลบ/ก๊อปอีเมล */
-function SubscribersCard({ shopSlug }: { shopSlug: string }) {
+function SubscribersCard({ shopSlug, defaultOpen = false }: { shopSlug: string; defaultOpen?: boolean }) {
   const toast = useToast();
   const [rows, setRows] = useState<Subscriber[]>([]);
   const [total, setTotal] = useState(0);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
