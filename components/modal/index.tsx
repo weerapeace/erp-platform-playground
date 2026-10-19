@@ -1,8 +1,12 @@
 "use client";
 
-import React, { useEffect, useCallback, useState, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useCallback, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { refreshIfDirty } from "@/lib/refresh-bus";
+import { autoLayoutKey, getLayoutPref, prefetchLayoutPrefs, setLayoutPref, syncLayoutPrefs } from "@/lib/modal-layout-pref";
+
+// ตั้งขนาดป๊อปตามที่จำไว้ "ก่อนวาดจอ" (ไม่กระพริบ) — ฝั่ง server ไม่มีจอ ใช้ useEffect แทน
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 /**
  * useRefreshOnClose (ของกลาง) — เมื่อ overlay ปิด (open: true → false) หลังมีการบันทึก/ลบจริง
@@ -119,11 +123,14 @@ export interface ERPModalProps {
   closeOnBackdrop?: boolean;
   /** ให้ผู้ใช้ลากปรับขนาด popup เองได้ (มุมขวาล่าง) — default: true */
   resizable?: boolean;
-  /** key สำหรับจำขนาดที่ผู้ใช้ปรับไว้ใน localStorage (เช่น "journal-modal") */
+  /**
+   * ชื่อคงที่ของป๊อปนี้ สำหรับ "จำขนาด/ขยายเต็มจอ ต่อคน" (เช่น "journal-modal") — ใช้ร่วมได้ทุกหน้า
+   * ไม่ส่ง = ระบบตั้งชื่อเองจากหน้า + หัวป๊อป (ตัดชื่อรายการหลัง " — " ทิ้ง) · ป๊อป sm ไม่จำ เว้นแต่ส่ง key นี้
+   */
   storageKey?: string;
   /** โหมดฝังในกรอบอื่น (เช่น iframe) — เต็มกรอบ ไม่มี backdrop/กล่องลอย/หัวปุ่ม (ตัวครอบภายนอกคุมหัว+ปิด) กัน popup ซ้อน popup */
   embedded?: boolean;
-  /** เปิดแบบเต็มจอไหม — ไม่ส่ง = ตามค่าที่ผู้ใช้กดไว้ล่าสุด (ค่าเริ่มต้นเต็มจอ) · false = ป๊อปนี้เปิดขนาดปกติเสมอ (ยังกดขยายเองได้) */
+  /** ค่าเริ่มต้นของป๊อปนี้ (ก่อนผู้ใช้ปรับเอง) — ไม่ส่ง = เต็มจอ · false = เปิดขนาดปกติ · ผู้ใช้กดขยาย/ย่อเมื่อไหร่ ระบบจำค่าของคนนั้นแทน */
   defaultExpanded?: boolean;
   /** ชั้นซ้อน (ค่าเริ่ม 50) — ป๊อปที่เปิดจากป๊อป portal ชั้นสูง (เช่น 🗂️ จัดการแท็ก z-210) ต้องสูงกว่าตัวที่เปิดมัน ไม่งั้นไปอยู่ข้างหลัง */
   zIndex?: number;
@@ -166,8 +173,14 @@ const SIZE_CLASS: Record<ModalSize, string> = {
   xl: "max-w-4xl",
 };
 
-/** คีย์จำ "เปิดป๊อปเต็มจอไหม" ของผู้ใช้เครื่องนี้ — ไม่มีค่า = เต็มจอ (ค่าเริ่มต้นตามเจ้าของสั่ง) */
+/**
+ * คีย์เก่า: จำ "เปิดป๊อปเต็มจอไหม" ค่าเดียวรวมทุกป๊อป (ก่อน 2026-10-19) — ตอนนี้อ่านอย่างเดียว เป็นค่าเริ่มต้นของป๊อปที่ยังไม่เคยปรับ
+ * ไม่มีค่า = เต็มจอ (เจ้าของสั่ง 2026-09-04) · ค่าที่ผู้ใช้ปรับรายป๊อปเก็บใน lib/modal-layout-pref
+ */
 const EXPANDED_PREF_KEY = "erp-modal-expanded";
+function legacyExpanded(): boolean {
+  try { const v = localStorage.getItem(EXPANDED_PREF_KEY); return v == null ? true : v === "1"; } catch { return true; }
+}
 
 const DRAWER_SIZE: Record<string, string> = {
   sm: "max-w-xs",
@@ -240,30 +253,44 @@ export function ERPModal({
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
-  // เจ้าของสั่ง (2026-09-04): "ทุก popup เปิด default เป็นเต็มจอ" — จำค่าที่ผู้ใช้กดย่อ/ขยายล่าสุดไว้ (localStorage)
+  // เจ้าของสั่ง (2026-09-04): "ทุก popup เปิด default เป็นเต็มจอ" · (2026-10-19): "ขยายแล้วให้จำของแต่ละคนไว้"
+  // → ขยาย/ย่อ + ขนาดที่ลากเอง จำ "ต่อคน ต่อป๊อป" (lib/modal-layout-pref) · เปิดครั้งหน้าได้ขนาดเดิม
   // ป๊อปเล็ก (size="sm" = ยืนยัน/ถามสั้น ๆ) ไม่ขยาย เพราะเต็มจอแล้วอ่านยากกว่า
-  const [expanded, setExpanded] = useState<boolean>(() => {
-    if (size === "sm") return false;
-    if (defaultExpanded !== undefined) return defaultExpanded;
-    try { const v = localStorage.getItem(EXPANDED_PREF_KEY); return v == null ? true : v === "1"; } catch { return true; }
-  });
+  const [legacyExp] = useState(legacyExpanded);   // อ่านครั้งเดียวพอ (ไม่อ่าน localStorage ทุก render)
+  const baseExpanded = size === "sm" ? false : (defaultExpanded ?? legacyExp);   // ค่าเริ่มต้นก่อนผู้ใช้ปรับ
+  const [expanded, setExpanded] = useState<boolean>(baseExpanded);
   // ขนาดที่ผู้ใช้ลากเอง (null = ใช้ preset). { w, h } เป็น px
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const dimsRef = useRef(dims);
+  dimsRef.current = dims;
+  const prefKey = useRef<string | null>(null);   // key ที่ใช้จำ — ตั้งตอนเปิด (หัวป๊อปเปลี่ยนระหว่างเปิดก็ยังจำที่เดิม)
   const resizing = useRef(false);
   const resizeAxis = useRef<"x" | "y" | "both">("both");   // ลากขอบขวา=x / ขอบล่าง=y / มุม=both
   const panelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => { setMounted(true); prefetchLayoutPrefs(); }, []);
   useRefreshOnClose(open);
 
-  // โหลดขนาดที่จำไว้
-  useEffect(() => {
-    if (!storageKey) return;
-    try {
-      const saved = localStorage.getItem(`erp-modal-${storageKey}`);
-      if (saved) { const d = JSON.parse(saved); if (d?.w && d?.h) setDims(d); }
-    } catch { /* ignore */ }
-  }, [storageKey]);
+  // เปิดป๊อป → ใช้ขนาดที่คนนี้จำไว้ของป๊อปนี้ (ก่อนวาดจอ)
+  useIsoLayoutEffect(() => {
+    if (!open || embedded) return;
+    const key = storageKey ? `m:k:${storageKey}` : size === "sm" ? null : autoLayoutKey("m", title, size);
+    prefKey.current = key;
+    if (key) void syncLayoutPrefs();
+    const p = key ? getLayoutPref(key) : undefined;
+    setExpanded(size !== "sm" && p?.x !== undefined ? p.x : baseExpanded);
+    let d = p?.w && p?.h ? { w: p.w, h: p.h } : null;
+    if (!d && storageKey) {
+      // ขนาดที่จำไว้แบบเก่า (ก่อนมีสมุดจำกลาง) — ยังใช้ได้จนกว่าจะปรับใหม่
+      try { const o = JSON.parse(localStorage.getItem(`erp-modal-${storageKey}`) ?? "null"); if (o?.w && o?.h) d = { w: o.w, h: o.h }; } catch { /* ignore */ }
+    }
+    setDims(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const dropLegacySize = () => {
+    if (storageKey) { try { localStorage.removeItem(`erp-modal-${storageKey}`); } catch { /* ignore */ } }
+  };
 
   // ลากปรับขนาด — มุมขวาล่างตามเคอร์เซอร์ (popup จัดกึ่งกลาง → คำนวณจาก center)
   useEffect(() => {
@@ -275,24 +302,23 @@ export function ERPModal({
       const w = Math.round(Math.max(320, Math.min(2 * (e.clientX - cx), window.innerWidth * 0.98)));
       const h = Math.round(Math.max(200, Math.min(2 * (e.clientY - cy), window.innerHeight * 0.96)));
       const ax = resizeAxis.current;
-      setDims((d) => {
-        const base = d ?? { w, h };
-        return { w: ax === "y" ? base.w : w, h: ax === "x" ? base.h : h };
-      });
+      const base = dimsRef.current ?? { w, h };
+      const next = { w: ax === "y" ? base.w : w, h: ax === "x" ? base.h : h };
+      dimsRef.current = next;   // ให้ตอนปล่อยเมาส์จำค่าล่าสุดจริง (ไม่ต้องรอ render)
+      setDims(next);
     };
     const onUp = () => {
       if (!resizing.current) return;
       resizing.current = false;
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
-      if (storageKey) {
-        try { setDims((d) => { if (d) localStorage.setItem(`erp-modal-${storageKey}`, JSON.stringify(d)); return d; }); }
-        catch { /* ignore */ }
-      }
+      const d = dimsRef.current;
+      if (d && prefKey.current) { setLayoutPref(prefKey.current, { w: d.w, h: d.h }); dropLegacySize(); }
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
     return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, resizable, storageKey]);
 
   const startResize = (e: React.MouseEvent, axis: "x" | "y" | "both" = "both") => {
@@ -300,16 +326,34 @@ export function ERPModal({
     // ถ้ายังไม่เคยตั้งขนาด → เริ่มจากขนาดจริงปัจจุบันของ panel
     if (!dims && panelRef.current) {
       const r = panelRef.current.getBoundingClientRect();
-      setDims({ w: Math.round(r.width), h: Math.round(r.height) });
+      const start = { w: Math.round(r.width), h: Math.round(r.height) };
+      dimsRef.current = start;
+      setDims(start);
     }
     resizeAxis.current = axis;
     resizing.current = true;
     document.body.style.userSelect = "none";
     document.body.style.cursor = axis === "x" ? "ew-resize" : axis === "y" ? "ns-resize" : "nwse-resize";
   };
+  // ดับเบิลคลิกแถบลาก → ล้างเฉพาะขนาดที่ลากเอง (กลับขนาดมาตรฐาน)
   const resetSize = () => {
     setDims(null);
-    if (storageKey) { try { localStorage.removeItem(`erp-modal-${storageKey}`); } catch { /* ignore */ } }
+    if (prefKey.current) setLayoutPref(prefKey.current, { w: undefined, h: undefined });
+    dropLegacySize();
+  };
+  // ปุ่ม ⤢ — ขยาย/ย่อ แล้วจำไว้ให้ป๊อปนี้ (เก็บเฉพาะเมื่อต่างจากค่าเริ่มต้น)
+  const toggleExpanded = () => {
+    const n = !expanded;
+    setExpanded(n);
+    if (prefKey.current && size !== "sm") setLayoutPref(prefKey.current, { x: n === baseExpanded ? undefined : n });
+  };
+  // ปุ่ม ↺ คืนขนาดเดิม — ลืมทุกอย่างที่จำไว้ของป๊อปนี้ (ขยาย/ย่อ + ขนาดที่ลาก) กลับเป็นค่าเริ่มต้นของระบบ
+  const canReset = !!dims || expanded !== baseExpanded;
+  const resetLayout = () => {
+    setDims(null);
+    setExpanded(baseExpanded);
+    if (prefKey.current) setLayoutPref(prefKey.current, null);
+    dropLegacySize();
   };
 
   const handleClose = useCallback(() => {
@@ -393,10 +437,11 @@ export function ERPModal({
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
           </div>
           <div className="ml-4 flex-shrink-0 flex items-center gap-1">
-            {usingCustom && (
+            {canReset && (
               <button
-                onClick={resetSize}
-                title="รีเซ็ตขนาด"
+                onClick={resetLayout}
+                title="คืนขนาดเดิม (ล้างขนาดที่จำไว้ของป๊อปนี้)"
+                aria-label="คืนขนาดเดิม"
                 className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -405,8 +450,9 @@ export function ERPModal({
               </button>
             )}
             <button
-              onClick={() => setExpanded((v) => { const n = !v; try { localStorage.setItem(EXPANDED_PREF_KEY, n ? "1" : "0"); } catch { /* ignore */ } return n; })}
-              title={expanded ? "ย่อหน้าต่าง (จำไว้เป็นค่าเริ่มต้น)" : "ขยายหน้าต่าง (จำไว้เป็นค่าเริ่มต้น)"}
+              onClick={toggleExpanded}
+              title={expanded ? "ย่อหน้าต่าง (จำไว้ให้ป๊อปนี้ครั้งหน้า)" : "ขยายเต็มจอ (จำไว้ให้ป๊อปนี้ครั้งหน้า)"}
+              aria-label={expanded ? "ย่อหน้าต่าง" : "ขยายเต็มจอ"}
               className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
             >
               {expanded ? (
@@ -605,44 +651,62 @@ export function Drawer({
   children,
   footer,
   hasUnsavedChanges = false,
-  storageKey = "erp-drawer-width",
+  storageKey,
   defaultWidth,
   headerActions,
 }: DrawerProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // F22: resizable width — ลากขอบซ้าย, จำค่าใน localStorage
+  // F22: resizable width — ลากขอบซ้าย · จำต่อคน ต่อ drawer (lib/modal-layout-pref เดียวกับ ERPModal)
+  // ไม่ส่ง storageKey = จำต่อหน้า+ขนาด (หัว drawer มักเป็นชื่อรายการ เลยไม่ใช้ตั้งชื่อ) · ดับเบิลคลิกขอบ = คืนความกว้างเดิม
   const defaultW = defaultWidth ?? (size === "sm" ? 360 : size === "lg" ? 560 : size === "xl" ? 760 : 440);
   const [width, setWidth] = useState(defaultW);
+  const widthRef = useRef(width);
+  widthRef.current = width;
+  const prefKey = useRef<string | null>(null);
+  const legacyKey = storageKey ?? "erp-drawer-width";   // ที่จำแบบเก่า (localStorage เครื่องนี้) — ใช้จนกว่าจะปรับใหม่
   const resizing = useRef(false);
 
-  useEffect(() => {
-    setMounted(true);
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) setWidth(Math.max(320, Math.min(Number(saved), 1200)));
-    } catch { /* ignore */ }
-  }, [storageKey]);
+  useEffect(() => { setMounted(true); prefetchLayoutPrefs(); }, []);
   useRefreshOnClose(open);
+
+  useIsoLayoutEffect(() => {
+    if (!open) return;
+    const key = storageKey ? `d:k:${storageKey}` : autoLayoutKey("d", "", size);
+    prefKey.current = key;
+    void syncLayoutPrefs();
+    let w = getLayoutPref(key)?.w;
+    if (!w) { try { const s = Number(localStorage.getItem(legacyKey)); if (s > 0) w = s; } catch { /* ignore */ } }
+    setWidth(w ? Math.max(320, Math.min(w, 1600)) : defaultW);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onMove = (e: MouseEvent) => {
       if (!resizing.current) return;
-      setWidth(Math.max(320, Math.min(window.innerWidth - e.clientX, window.innerWidth - 40)));
+      const w = Math.max(320, Math.min(window.innerWidth - e.clientX, window.innerWidth - 40));
+      widthRef.current = w;
+      setWidth(w);
     };
     const onUp = () => {
       if (!resizing.current) return;
       resizing.current = false;
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
-      try { localStorage.setItem(storageKey, String(width)); } catch { /* ignore */ }
+      if (prefKey.current) setLayoutPref(prefKey.current, { w: widthRef.current });
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
     return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
-  }, [open, width, storageKey]);
+  }, [open]);
+
+  const resetWidth = () => {
+    setWidth(defaultW);
+    if (prefKey.current) setLayoutPref(prefKey.current, null);
+    try { localStorage.removeItem(legacyKey); } catch { /* ignore */ }
+  };
 
   const handleClose = useCallback(() => {
     if (hasUnsavedChanges) {
@@ -684,8 +748,9 @@ export function Drawer({
             document.body.style.userSelect = "none";
             document.body.style.cursor = "ew-resize";
           }}
+          onDoubleClick={resetWidth}
           className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize bg-transparent hover:bg-orange-300 active:bg-orange-400 transition-colors z-10 group"
-          title="ลากเพื่อปรับความกว้าง"
+          title="ลากเพื่อปรับความกว้าง (จำไว้ให้ครั้งหน้า) · ดับเบิลคลิก = คืนความกว้างเดิม"
         >
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-slate-300 group-hover:bg-orange-400" />
         </div>
