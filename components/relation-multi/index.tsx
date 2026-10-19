@@ -25,6 +25,8 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { CodeCheckMessages, useCodeCheck } from "@/components/code-check-hint";
 import { CODE_RULE_TABLES } from "@/lib/code-rules";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
+// 🏷 ป๊อปใส่ Fake Price ตามสูตร (ของกลาง) — โหลดเมื่อกดปุ่ม
+const FakePriceDialog = nextDynamic(() => import("@/components/fake-price-dialog").then((m) => m.FakePriceDialog), { ssr: false });
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน (master-crud import ไฟล์นี้อยู่)
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
@@ -1443,6 +1445,33 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     </div>
   ) : null;
 
+  // 🏷 ใส่ Fake Price ตามสูตร (เจ้าของขอ 2026-10-19) — ตารางลูกที่มีทั้งราคาขาย (list_price) และ fake_price + แก้ได้
+  //    ทำกับ "ทุกแถว" ของใบนี้ · บันทึกผ่าน bulk-update กลาง (products.edit + audit)
+  const [fakeRows, setFakeRows] = useState<{ id: string; code: string; sale: unknown; fake: unknown }[] | null>(null);
+  const fakePair = canAdd && rows.some((r) => "fake_price" in r) && rows.some((r) => "list_price" in r);
+  const openFakePrice = async () => {
+    const all = await fetchAllRows();
+    setFakeRows((all.length ? all : rows).map((r) => ({ id: String(r.id), code: String(r[titleField] ?? r.id), sale: r.list_price, fake: r.fake_price })));
+  };
+  const applyFakePrices = async (edits: { id: string; fake_price: number }[]) => {
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edits: edits.map((e) => ({ id: e.id, changes: { fake_price: e.fake_price } })) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { toast.error("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return false; }
+      toast.success(`ใส่ Fake Price แล้ว ${edits.length} ตัว`);
+      load();
+      return true;
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); return false; }
+  };
+  const fakeBtn = fakePair ? (
+    <button type="button" onClick={() => void openFakePrice()} title="ใส่ Fake Price (ราคาเต็มขีดฆ่า) ทุกตัวตามสูตร — เลือก/เพิ่มสูตรได้ ดูตัวอย่างก่อนบันทึก"
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1" data-fake-price-btn>🏷 ใส่ Fake Price</button>
+  ) : null;
+  const fakeModal = fakeRows ? <FakePriceDialog rows={fakeRows} onApply={applyFakePrices} onClose={() => setFakeRows(null)} /> : null;
+
   // ปุ่มพับ/ขยายทุกกลุ่มพร้อมกัน — ตารางที่มีไซส์เยอะ (11 สี × 3 ไซส์ = 44 แถว) ต้องพับดูภาพรวมได้
   const groupBaseIds = config.list_group_field
     ? rows.filter((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !(av && av.variant_option); }).map((r) => String(r.id))
@@ -1495,6 +1524,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       {!imageMode && collapseBtn}
       {bulkVariantBtn}
       {colorBtn}
+      {fakeBtn}
       {attachBtn}
       {addBtn}
       {gearBtn}
@@ -1534,7 +1564,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         {peek && moduleKey && (
           <MasterRecordDrawer moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
-        {pickerModal}{createModal}{deleteDialog}{attachModal}
+        {pickerModal}{createModal}{deleteDialog}{attachModal}{fakeModal}
       </>
     );
   }
@@ -1573,7 +1603,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         {peek && moduleKey && (
           <MasterRecordDrawer moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
-        {pickerModal}{createModal}{deleteDialog}{attachModal}
+        {pickerModal}{createModal}{deleteDialog}{attachModal}{fakeModal}
       </>
     );
   }
@@ -1877,7 +1907,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           onDone={(ok, skip) => { setVariantBases(null); if (ok) { toast.success(`สร้าง ${ok} รายการ${skip ? ` · ข้าม ${skip} (ซ้ำ/พลาด)` : ""}`); load(); } else toast.error("ไม่ได้สร้าง (ซ้ำ/พลาด/ว่าง)"); }} />
       )}
       {createModal}{deleteDialog}
-      {attachModal}
+      {attachModal}{fakeModal}
     </>
   );
 }
