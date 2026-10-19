@@ -40,6 +40,32 @@ export const fitSizeOptions = (item: Pick<FitItem, "sizes"> | null | undefined):
     .filter(Boolean)
     .slice(0, 20);
 
+/** ขนาดของ (ซม.) ต่อตัวเลือกขนาด — product_fit_items.size_dims = { "ถึง 6.1 นิ้ว": { w, h, d }, ... } */
+export type FitDims = { w: number; h: number; d: number };
+export type SizeDims = Record<string, FitDims>;
+
+/** อ่าน size_dims (object หรือ JSON string) → เฉพาะขนาดที่ครบ 3 ด้านและเป็นบวก */
+export function parseSizeDims(raw: unknown): SizeDims {
+  let v: unknown = raw;
+  if (typeof v === "string") { try { v = JSON.parse(v); } catch { return {}; } }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const out: SizeDims = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    const key = k.trim();
+    if (!key || !x || typeof x !== "object") continue;
+    const r = x as Record<string, unknown>;
+    const w = Number(r.w), h = Number(r.h), d = Number(r.d);
+    if (w > 0 && h > 0 && d > 0) out[key] = { w, h, d };
+  }
+  return out;
+}
+
+/** ขนาดของตามตัวเลือกที่เลือก (ไม่เลือก / ไม่มีขนาดของตัวเลือกนั้น = null → ใช้ขนาดหลักของรายการ) */
+export function sizeDimsFor(raw: unknown, size: string | null | undefined): FitDims | null {
+  const k = (size ?? "").trim();
+  return k ? parseSizeDims(raw)[k] ?? null : null;
+}
+
 /** ขนาดภาษาอังกฤษ: หน่วยไทยทั่วไป → อังกฤษ ("11 นิ้ว" → 11" · "500 มล." → 500 ml) · คำอื่นคงเดิม */
 export const fitSizeEn = (size: string): string =>
   size

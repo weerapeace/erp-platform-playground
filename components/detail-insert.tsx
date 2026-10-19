@@ -52,7 +52,7 @@ import {
   type SnippetItem,
 } from "@/lib/detail-snippets";
 import { hasMaterialPage, type MaterialRow } from "@/lib/product-materials";
-import { fitSizeOptions, parseFits, type FitItem, type FitPick } from "@/lib/product-fits";
+import { fitSizeOptions, parseFits, parseSizeDims, sizeDimsFor, type FitItem, type FitPick } from "@/lib/product-fits";
 import { translateContent } from "@/lib/content-translate";
 import { bestFit, fitTargetOf, parseCompartments, type Compartment } from "@/lib/fit-check";
 
@@ -61,7 +61,7 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
 
 type Tab = "phrase" | "material" | "slot" | "size" | "fit";
 type CatalogKind = "phrase" | "slot" | "material" | "fit";
-type FitRow = FitItem & { kind?: string | null; image_key?: string | null; width_cm?: number | null; height_cm?: number | null; depth_cm?: number | null; is_soft?: boolean | null; size_estimated?: boolean | null };
+type FitRow = FitItem & { kind?: string | null; image_key?: string | null; width_cm?: number | null; height_cm?: number | null; depth_cm?: number | null; is_soft?: boolean | null; size_estimated?: boolean | null; size_dims?: unknown };
 
 const SNIP = "product_highlight_items";
 const MAT = "product_materials";
@@ -86,7 +86,7 @@ type SizeLine = "size" | "weight" | "handle" | "strap";
 const SIZE_LINE_KEYS: Record<SizeLine, NumK[]> = { size: ["w", "h", "d"], weight: ["g"], handle: ["hd"], strap: ["s1", "s2"] };
 
 const TABS: { key: Tab; label: string; hint: string }[] = [
-  { key: "phrase", label: "📝 ข้อความ", hint: "ติ๊กได้หลายข้อ — ได้บรรทัดละข้อ" },
+  { key: "phrase", label: "📝 ข้อความ", hint: "ติ๊กได้หลายข้อ — ได้บรรทัดละข้อ เรียงตามลำดับที่กด" },
   { key: "material", label: "🧵 วัสดุ", hint: "ติ๊กได้หลายตัว — รวมเป็นบรรทัดเดียว · วัสดุที่มีหน้า ลูกค้ากดดูบนเว็บได้" },
   { key: "slot", label: "🔢 ช่อง", hint: "พิมพ์แค่จำนวน — ช่องที่ใส่ตัวเลขรวมเป็นบรรทัดเดียว" },
   { key: "size", label: "📏 ขนาด/น้ำหนัก", hint: "ดึงค่าจากช่องของสินค้ามาให้ · แก้ตรงนี้ = แก้ช่องของสินค้าด้วย" },
@@ -307,25 +307,31 @@ function DetailInsertModal({
   const outer: Compartment | null = Number(num.w) > 0 && Number(num.h) > 0 && Number(num.d) > 0 ? { id: "outer", name: "ขนาดนอก", w: Number(num.w), h: Number(num.h), d: Number(num.d) } : null;
   const boxes: Compartment[] = comps && comps.length ? comps : outer ? [outer] : [];
   const boxBasis = comps && comps.length ? "inner" : outer ? "outer" : "none";
-  const fitCheck = (it: FitRow) => {
-    const t = fitTargetOf(it as Parameters<typeof fitTargetOf>[0]);
+  //    เลือกขนาด (เช่น สมาร์ทโฟน ถึง 6.7 นิ้ว) → ใช้ขนาดของตัวเลือกนั้น (size_dims) · ไม่เลือก/ไม่มี = ขนาดหลักของรายการ
+  const fitCheck = (it: FitRow, size?: string | null) => {
+    const sd = sizeDimsFor(it.size_dims, size);
+    const t = fitTargetOf((sd ? { ...it, width_cm: sd.w, height_cm: sd.h, depth_cm: sd.d } : it) as Parameters<typeof fitTargetOf>[0]);
     if (!t) return { kind: "nosize" as const, t: null };
     if (!boxes.length) return { kind: "nobag" as const, t };
     const r = bestFit(t, boxes);
     return r ? { kind: r.status, t } : { kind: "no" as const, t };
   };
-  const badFits = fitItems.filter((it) => fits.some((p) => p.id === it.id) && fitCheck(it).kind === "no");
+  const badFits = fits.flatMap((p) => {
+    const it = fitItems.find((x) => x.id === p.id);
+    return it && fitCheck(it, p.size).kind === "no" ? [p.size ? `${it.name} ${p.size}` : it.name] : [];
+  });
 
-  // บรรทัดเรียงตามลำดับรายการ (ลาก ⠿ จัดได้) ไม่ใช่ลำดับที่ติ๊ก
-  const fitEntries = fitItems
-    .map((it) => {
-      const p = fits.find((x) => x.id === it.id);
-      return p ? { th: it.name, en: it.name_en, size: p.size } : null;
-    })
-    .filter((x): x is { th: string; en: string | null | undefined; size: string | null | undefined } => !!x);
+  // บรรทัดเรียงตาม "ลำดับที่กด" (เจ้าของ 2026-10-19: กดอันไหนก่อน ขึ้นอันนั้นก่อน ไม่ต้องเรียงตามรายการ)
+  //   ข้อความ = บรรทัดละข้อตามลำดับกด · วัสดุ/ใส่อะไรได้ = ชื่อในบรรทัดเรียงตามลำดับกด (ใส่อะไรได้: ของที่สินค้ามีอยู่แล้วมาก่อน)
+  //   ช่อง ยังเรียง ด้านนอก → ด้านใน → ไม่ระบุ (เจ้าของขอไว้ c02cb342) · ลาก ⠿ ในรายการ = จัดลำดับการโชว์ในรายการเท่านั้น
+  const byClick = <T extends { id: string }>(ids: string[], items: T[]) => ids.flatMap((id) => items.filter((x) => x.id === id));
+  const fitEntries = fits.flatMap((p) => {
+    const it = fitItems.find((x) => x.id === p.id);
+    return it ? [{ th: it.name, en: it.name_en, size: p.size }] : [];
+  });
   const sel = {
-    phrases: phraseItems.filter((x) => phraseIds.includes(x.id)),
-    materials: visMats.filter((x) => matIds.includes(x.id)),
+    phrases: byClick(phraseIds, phraseItems),
+    materials: byClick(matIds, visMats),
     slots: slotItems.map((item) => ({ item, n: Math.floor(Number(slotN[item.id])) || 0 })).filter((p) => p.n > 0),
     size: sizeSeen && use.size && has("w") ? { w: num.w, h: num.h, d: num.d } : null,
     weight: sizeSeen && use.weight && has("g") ? num.g : null,
@@ -451,7 +457,7 @@ function DetailInsertModal({
     setFits((p) => p.filter((x) => x.id !== id));
   };
 
-  // ⠿ ลากจัดลำดับรายการกลาง (ทุกสินค้าใช้ลำดับเดียวกัน · บรรทัดที่แทรกเรียงตามนี้) — เขียน sort_order เฉพาะแถวที่เปลี่ยน
+  // ⠿ ลากจัดลำดับรายการกลาง (ทุกสินค้าใช้ลำดับเดียวกัน · ลำดับการโชว์ในรายการ — บรรทัดที่แทรกเรียงตามลำดับที่กด) — เขียน sort_order เฉพาะแถวที่เปลี่ยน
   const reorder = async (k: CatalogKind, visible: { id: string }[], from: number, to: number) => {
     const full = (k === "material" ? mats : k === "fit" ? ((fitRows ?? []) as FitRow[]) : snips) as unknown as { id: string; sort_order?: number | null }[];
     const vis = new Set(visible.map((x) => x.id));
@@ -790,6 +796,7 @@ function DetailInsertModal({
                         {handle}
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
+                          {on && phraseIds.length > 1 && <ClickOrder n={phraseIds.indexOf(it.id) + 1} />}
                           <span className={`flex-1 text-sm ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{it.name}</span>
                           {it.name_en ? <span className="truncate text-[11px] text-slate-400">{it.name_en}</span> : <span className="text-[11px] text-slate-300">ไม่มีอังกฤษ</span>}
                         </label>
@@ -812,6 +819,7 @@ function DetailInsertModal({
                         {handle}
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setMatIds((p) => toggle(p, m.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
+                          {on && matIds.length > 1 && <ClickOrder n={matIds.indexOf(m.id) + 1} />}
                           <span className={`text-sm ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{m.name}</span>
                           {m.name_en && <span className="truncate text-[11px] text-slate-400">{m.name_en}</span>}
                         </label>
@@ -942,7 +950,7 @@ function DetailInsertModal({
                   </div>
                   {badFits.length > 0 && (
                     <p className="rounded-md bg-rose-50 px-2 py-1 text-[11.5px] text-rose-700" data-fit-warn>
-                      ⚠️ เลือกไว้แต่ขนาดอาจไม่พอ: {badFits.map((x) => x.name).join(", ")} — ตรวจขนาดกระเป๋า/ของอีกครั้ง
+                      ⚠️ เลือกไว้แต่ขนาดอาจไม่พอ: {badFits.join(", ")} — ตรวจขนาดกระเป๋า/ของอีกครั้ง
                     </p>
                   )}
                   <div className="grid grid-cols-3 gap-1 sm:grid-cols-5" data-insert-fit-grid>
@@ -959,12 +967,12 @@ function DetailInsertModal({
                             <div className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-700" title={it.name}>{it.name}</div>
                             <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>
                             {(() => {
-                              const c = fitCheck(it);
+                              const c = fitCheck(it, pick?.size);
                               const dims = c.t ? `${c.t.w}×${c.t.h}×${c.t.d}` : "";
                               const tone = c.kind === "roomy" ? "text-emerald-700" : c.kind === "snug" ? "text-amber-700" : c.kind === "no" ? "text-rose-600" : "text-slate-400";
                               const mark = c.kind === "roomy" ? "✓ ใส่ได้" : c.kind === "snug" ? "≈ พอดี" : c.kind === "no" ? "⚠️ ไม่พอ" : c.kind === "nosize" ? "ไม่มีขนาด" : "";
                               return (
-                                <div className={`truncate text-[9.5px] leading-tight ${tone}`} data-fit-check={c.kind} title={c.kind === "nosize" ? "ใส่ขนาดของที่ ✏️ เพื่อให้ระบบตรวจว่าใส่ได้ไหม" : `${dims} ซม.`}>
+                                <div className={`truncate text-[9.5px] leading-tight ${tone}`} data-fit-check={c.kind} title={c.kind === "nosize" ? "ใส่ขนาดของที่ ✏️ เพื่อให้ระบบตรวจว่าใส่ได้ไหม" : `${pick?.size ? `${pick.size}: ` : ""}${dims} ซม.${c.t?.estimated ? " (ค่าประมาณ)" : ""}`}>
                                   {mark}{dims ? ` · ${dims}` : ""}
                                 </div>
                               );
@@ -977,7 +985,11 @@ function DetailInsertModal({
                             <select aria-label={`ขนาด ${it.name}`} value={pick.size ?? ""} onChange={(e) => setFits((p) => p.map((x) => (x.id === it.id ? (e.target.value ? { id: it.id, size: e.target.value } : { id: it.id }) : x)))}
                               className="mt-0.5 h-6 w-full rounded border border-slate-200 px-0.5 text-[10.5px]">
                               <option value="">ไม่ระบุขนาด</option>
-                              {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                              {opts.map((o) => {
+                                const oc = fitCheck(it, o);
+                                const m = oc.kind === "roomy" ? " ✓" : oc.kind === "snug" ? " ≈ พอดี" : oc.kind === "no" ? " ⚠️ ไม่พอ" : "";
+                                return <option key={o} value={o}>{o}{m}</option>;
+                              })}
                             </select>
                           )}
                         </div>
@@ -1400,6 +1412,11 @@ function ProfilesEditor({ profiles, onChange, catalogs, categories }: { profiles
   );
 }
 
+/** เลขลำดับที่กด (บรรทัดที่แทรกเรียงตามเลขนี้) */
+function ClickOrder({ n }: { n: number }) {
+  return <span title={`กดเป็นลำดับที่ ${n} — บรรทัดเรียงตามลำดับที่กด`} data-click-order={n} className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-semibold leading-none text-white">{n}</span>;
+}
+
 /* ─────────── ⠿ ลิสต์ลากจัดลำดับ (ใช้ของกลาง useDragReorder) ─────────── */
 
 function SortList<T extends { id: string }>({
@@ -1475,6 +1492,17 @@ function CatalogItemDialog({
   const [dimH, setDimH] = useState(s("height_cm"));
   const [dimD, setDimD] = useState(s("depth_cm"));
   const [soft, setSoft] = useState(item?.is_soft === true);
+  // 📐 ขนาดของต่อตัวเลือกขนาด (size_dims) — เช่น สมาร์ทโฟน ถึง 6.1 / 6.7 นิ้ว ยาวไม่เท่ากัน
+  type DimStr = { w: string; h: string; d: string };
+  const sdInit = useMemo<Record<string, DimStr>>(
+    () => Object.fromEntries(Object.entries(parseSizeDims(item?.size_dims)).map(([k, v]) => [k, { w: String(v.w), h: String(v.h), d: String(v.d) }])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const [sizeDims, setSizeDims] = useState<Record<string, DimStr>>(sdInit);
+  const sizeList = fitSizeOptions({ sizes });
+  const sdDirty = JSON.stringify(sizeDims) !== JSON.stringify(sdInit);
+  const dimNum = (v: string | undefined) => (Number(v) > 0 ? Math.round(Number(v) * 10) / 10 : null);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [translating, setTranslating] = useState(false);
@@ -1491,7 +1519,7 @@ function CatalogItemDialog({
   );
   const [inProfiles, setInProfiles] = useState<string[]>(inInit);
   const profilesDirty = JSON.stringify([...inProfiles].sort()) !== JSON.stringify([...inInit].sort());
-  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key") || side !== s("slot_side") || profilesDirty || dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || soft !== (item?.is_soft === true);
+  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key") || side !== s("slot_side") || profilesDirty || dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || soft !== (item?.is_soft === true) || sdDirty;
 
   const translate = async () => {
     if (!name.trim()) {
@@ -1540,9 +1568,14 @@ function CatalogItemDialog({
     const body: Record<string, unknown> = { name: n, name_en: nameEn.trim() || null };
     if (kind === "slot") Object.assign(body, { template: tpl.trim() || null, template_en: tplEn.trim() || null, slot_side: side || null });
     if (kind === "fit") {
-      const dim = (v: string) => (Number(v) > 0 ? Math.round(Number(v) * 10) / 10 : null);
-      const dimsChanged = dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm");
-      Object.assign(body, { sizes: sizes.trim() || null, image_key: imageKey || null, width_cm: dim(dimW), height_cm: dim(dimH), depth_cm: dim(dimD), is_soft: soft, ...(dimsChanged ? { size_estimated: false } : {}) });
+      const dimsChanged = dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || sdDirty;
+      // เก็บเฉพาะตัวเลือกที่ยังอยู่ในรายการขนาด + ครบ 3 ด้าน
+      const sd = Object.fromEntries(sizeList.flatMap((k) => {
+        const v = sizeDims[k];
+        const w = dimNum(v?.w), h = dimNum(v?.h), d = dimNum(v?.d);
+        return w && h && d ? [[k, { w, h, d }]] : [];
+      }));
+      Object.assign(body, { sizes: sizes.trim() || null, image_key: imageKey || null, width_cm: dimNum(dimW), height_cm: dimNum(dimH), depth_cm: dimNum(dimD), is_soft: soft, size_dims: Object.keys(sd).length ? sd : null, ...(dimsChanged ? { size_estimated: false } : {}) });
     }
     if (!item) Object.assign(body, { sort_order: 500, is_active: true, ...(kind === "phrase" || kind === "slot" ? { kind } : {}) });
     setBusy(true);
@@ -1713,6 +1746,27 @@ function CatalogItemDialog({
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">ขนาดให้เลือก <span className="font-normal text-slate-400">(คั่นด้วยจุลภาค · ไม่มี = เว้นว่าง)</span></label>
               <input value={sizes} onChange={(e) => setSizes(e.target.value)} placeholder="เช่น 11 นิ้ว, 13 นิ้ว" className={input} />
+              {sizeList.length > 0 && (
+                <div className="mt-2 space-y-1 rounded-lg bg-slate-50 p-2" data-fit-size-dims>
+                  <p className="text-[11.5px] text-slate-500">ขนาดของแต่ละตัวเลือก (ซม.) — ใช้ตรวจตอนเลือกขนาดนั้น · เว้นว่าง = ใช้ขนาดของด้านบน</p>
+                  {sizeList.map((k) => {
+                    const v = sizeDims[k] ?? { w: "", h: "", d: "" };
+                    const set = (f: keyof DimStr, x: string) => setSizeDims((p) => ({ ...p, [k]: { ...v, [f]: x.replace(/[^\d.]/g, "").slice(0, 6) } }));
+                    return (
+                      <div key={k} className="flex flex-wrap items-center gap-1.5 text-[12px] text-slate-500">
+                        <span className="w-24 truncate font-medium text-slate-700" title={k}>{k}</span>
+                        {([["กว้าง", "w"], ["สูง", "h"], ["หนา", "d"]] as const).map(([l, f]) => (
+                          <label key={f} className="flex items-center gap-1">
+                            {l}
+                            <input value={v[f]} onChange={(e) => set(f, e.target.value)} inputMode="decimal" placeholder="0" aria-label={`${k} ${l} (ซม.)`}
+                              className="h-7 w-14 rounded-md border border-slate-200 bg-white px-1.5 text-right text-sm tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
           {kind === "material" && item && (

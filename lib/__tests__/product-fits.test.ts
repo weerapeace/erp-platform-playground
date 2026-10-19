@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bilingualDimensions, dimensionRows, productDimensions, type FitItem } from "../product-fits";
+import { bilingualDimensions, dimensionRows, parseSizeDims, productDimensions, sizeDimsFor, type FitItem } from "../product-fits";
 
 /** 📏 หัวข้อ "ขนาด" บนเว็บ — ไทย + อังกฤษ (`_en`) จากข้อมูลชุดเดียวกัน */
 const bag = { size_length_cm: 23, size_height_cm: 15, size_thickness_cm: 14, handle_drop_cm: 13, strap_drop_cm: 60 };
@@ -47,5 +47,21 @@ describe("bilingualDimensions", () => {
     const d = bilingualDimensions(th, { fits: [], rows: th.rows.slice(1) })!;
     expect(d.rows.every((r) => r.label_en === undefined)).toBe(true);
     expect(bilingualDimensions(undefined, undefined)).toBeUndefined();
+  });
+});
+
+/** 📐 ขนาดของต่อตัวเลือก (สมาร์ทโฟน 6.1 / 6.7 นิ้ว ยาวไม่เท่ากัน) */
+describe("size_dims", () => {
+  const raw = { "ถึง 6.1 นิ้ว": { w: 7.2, h: 14.8, d: 0.8 }, "ถึง 6.7 นิ้ว": { w: 7.8, h: "16.1", d: 0.8 }, "พัง": { w: 0, h: 1, d: 1 } };
+  it("อ่านเฉพาะขนาดที่ครบ 3 ด้าน (string JSON ก็ได้)", () => {
+    expect(Object.keys(parseSizeDims(raw))).toEqual(["ถึง 6.1 นิ้ว", "ถึง 6.7 นิ้ว"]);
+    expect(parseSizeDims(JSON.stringify(raw))["ถึง 6.7 นิ้ว"]).toEqual({ w: 7.8, h: 16.1, d: 0.8 });
+    expect(parseSizeDims(null)).toEqual({});
+    expect(parseSizeDims("not json")).toEqual({});
+  });
+  it("ขนาดตามตัวเลือกที่เลือก · ไม่เลือก/ไม่มี = null", () => {
+    expect(sizeDimsFor(raw, " ถึง 6.1 นิ้ว ")).toEqual({ w: 7.2, h: 14.8, d: 0.8 });
+    expect(sizeDimsFor(raw, "ถึง 6.9 นิ้ว")).toBeNull();
+    expect(sizeDimsFor(raw, null)).toBeNull();
   });
 });
