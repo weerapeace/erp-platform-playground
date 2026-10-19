@@ -33,7 +33,8 @@ export const HIGHLIGHT_CFG: TickListConfig = {
   addPlaceholder: "เช่น ผลิตในประเทศไทย",
   emptyHint: "ติ๊กข้อที่ตรงกับสินค้านี้",
   // ชนิด "ช่อง + ตัวเลข" ต้องใส่จำนวน → ใช้ปุ่ม "＋ แทรก" ที่ Description (components/detail-insert) ไม่ใช่ติ๊ก
-  hide: (x) => x.kind === "slot",
+  // 🌿 สไตล์ / ข้อความ Lifestyle = เลือกในแท็บ Lifestyle ของปุ่ม "＋ แทรก" (ไม่ใช่รายละเอียดติ๊ก)
+  hide: (x) => x.kind === "slot" || x.kind === "style" || x.kind === "lifestyle",
 };
 
 type FieldProps = {

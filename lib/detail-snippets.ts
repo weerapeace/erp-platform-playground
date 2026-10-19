@@ -42,10 +42,10 @@ const fill = (tpl: string, name: string, n: number) => tpl.replace(/\{name\}/g, 
 
 export type LineKind = "material" | "slot" | "slot_in" | "slot_out" | "fit" | "size" | "weight" | "handle" | "strap";
 export type BracketKind = "phrase" | "material" | "slot" | "fit";
-/** ชนิดบรรทัดที่จัดลำดับได้ = ข้อความสำเร็จรูป + บรรทัดที่มีคำนำหน้า */
-export type OrderKind = "phrase" | LineKind;
-/** ลำดับบรรทัดตั้งต้น (เหมือนเดิมก่อนมีตั้งค่า): ข้อความ → วัสดุ → ช่องนอก → ช่องใน → ช่อง → ขนาด → น้ำหนัก → หูหิ้ว → สาย → ใส่ได้ */
-export const DEFAULT_LINE_ORDER: OrderKind[] = ["phrase", "material", "slot_out", "slot_in", "slot", "size", "weight", "handle", "strap", "fit"];
+/** ชนิดบรรทัดที่จัดลำดับได้ = ข้อความสำเร็จรูป + Lifestyle + บรรทัดที่มีคำนำหน้า */
+export type OrderKind = "phrase" | "lifestyle" | LineKind;
+/** ลำดับบรรทัดตั้งต้น (เหมือนเดิมก่อนมีตั้งค่า): ข้อความ → วัสดุ → ช่องนอก → ช่องใน → ช่อง → ขนาด → น้ำหนัก → หูหิ้ว → สาย → ใส่ได้ → Lifestyle */
+export const DEFAULT_LINE_ORDER: OrderKind[] = ["phrase", "material", "slot_out", "slot_in", "slot", "size", "weight", "handle", "strap", "fit", "lifestyle"];
 
 export type InsertTemplates = {
   /** คำเชื่อมรายการ: 2 รายการ = A{last}B · 3+ = A{sep}B{last}C */
@@ -60,9 +60,9 @@ export type InsertTemplates = {
   profiles: InsertProfile[];
 };
 
-export type InsertTab = "phrase" | "material" | "slot" | "size" | "fit";
-export type CatalogKind = "phrase" | "material" | "slot" | "fit";
-export const INSERT_TABS: InsertTab[] = ["phrase", "material", "slot", "size", "fit"];
+export type InsertTab = "phrase" | "material" | "slot" | "size" | "fit" | "lifestyle";
+export type CatalogKind = "phrase" | "material" | "slot" | "fit" | "style" | "lifestyle";
+export const INSERT_TABS: InsertTab[] = ["phrase", "material", "slot", "size", "fit", "lifestyle"];
 /** ช่องตัวเลขในแท็บขนาด (กว้าง สูง หนา น้ำหนัก หูหิ้ว สาย สายยาวสุด) */
 export const INSERT_SIZE_KEYS = ["w", "h", "d", "g", "hd", "s1", "s2"] as const;
 
@@ -138,7 +138,7 @@ export function normalizeProfiles(raw: unknown): InsertProfile[] {
       id,
       name,
       categoryIds: strList(r.categoryIds, 100),
-      tabs: Array.isArray(r.tabs) ? (strList(r.tabs, 5, (s) => (INSERT_TABS as string[]).includes(s)) as InsertTab[]) : null,
+      tabs: Array.isArray(r.tabs) ? (strList(r.tabs, INSERT_TABS.length, (s) => (INSERT_TABS as string[]).includes(s)) as InsertTab[]) : null,
       items,
       sizeFields: Array.isArray(r.sizeFields) ? strList(r.sizeFields, 7, (s) => (INSERT_SIZE_KEYS as readonly string[]).includes(s)) : null,
     });
@@ -219,6 +219,33 @@ const thWithEn = (th: string, en: string | null | undefined, on: boolean) => {
 /* ─────────── บรรทัดแต่ละแบบ ─────────── */
 
 export const isSlot = (it: Pick<SnippetItem, "kind">): boolean => it.kind === "slot";
+/** ข้อความสำเร็จรูป (ไม่ใช่ ช่อง / สไตล์ / ข้อความ Lifestyle) */
+export const isPhrase = (it: Pick<SnippetItem, "kind">): boolean => !it.kind || it.kind === "phrase";
+/** 🌿 แท็บ Lifestyle: สไตล์ = kind style · ข้อความ = kind lifestyle (parent_id = สไตล์) */
+export const isStyle = (it: Pick<SnippetItem, "kind">): boolean => it.kind === "style";
+export const isLifestyle = (it: Pick<SnippetItem, "kind">): boolean => it.kind === "lifestyle";
+
+/** ข้อความที่พิมพ์เอง (บรรทัดละข้อ) → บรรทัด Lifestyle · อังกฤษจับคู่ตามลำดับบรรทัด (ขาด = ไม่มีอังกฤษ) */
+export function freeLines(th: string, en: string): { th: string; en: string | null }[] {
+  const t = th.split(/\r?\n/).map((x) => x.replace(/^\s*[-•]\s*/, "").trim());
+  const e = en.split(/\r?\n/).map((x) => x.replace(/^\s*[-•]\s*/, "").trim());
+  return t.flatMap((x, i) => (x ? [{ th: x, en: e[i] || null }] : []));
+}
+
+/** prompt ถาม ChatGPT ให้คิดข้อความ Lifestyle (คัดลอกไปวาง) */
+export function lifestylePrompt(o: { product?: string | null; style?: { name: string; name_en?: string | null } | null; examples?: string[]; description?: string | null; count?: number }): string {
+  const n = o.count ?? 10;
+  const lines = [
+    `ช่วยคิดข้อความไลฟ์สไตล์สั้น ๆ สำหรับใส่ในคำอธิบายสินค้า ${n} ข้อ (บรรทัดละ 1 ข้อ ขึ้นต้นด้วย "- ")`,
+    o.product ? `สินค้า: ${o.product}` : "",
+    o.style ? `สไตล์: ${o.style.name}${o.style.name_en ? ` (${o.style.name_en})` : ""}` : "สไตล์: (ตามความเหมาะสมของสินค้า)",
+    o.examples?.length ? `ตัวอย่างโทนที่ใช้อยู่:\n${o.examples.slice(0, 5).map((x) => `- ${x}`).join("\n")}` : "",
+    o.description?.trim() ? `คำอธิบายสินค้าตอนนี้:\n"""\n${o.description.trim().slice(0, 1500)}\n"""` : "",
+    "ขอภาษาไทยเป็นกันเอง สั้น กระชับ ไม่เกิน 1 บรรทัดต่อข้อ ไม่ซ้ำกับตัวอย่าง",
+    "แล้วตามด้วยคำแปลภาษาอังกฤษของทุกข้อ เรียงลำดับเดียวกัน (หัวข้อ English)",
+  ];
+  return lines.filter(Boolean).join("\n\n");
+}
 
 /** ข้อความสำเร็จรูป · อังกฤษไม่มี = null (ข้ามบรรทัดนั้นในฝั่งอังกฤษ) */
 export function phraseText(it: SnippetItem, lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): string | null {
@@ -396,6 +423,8 @@ export function composeLines(
     handle?: unknown;
     strap?: { min?: unknown; max?: unknown } | null;
     fits?: FitEntry[] | null;
+    /** 🌿 Lifestyle / อื่นๆ — บรรทัดละข้อ (ข้อความของสไตล์ + พิมพ์เอง) */
+    lifestyle?: { th: string; en: string | null }[] | null;
   },
   tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES
 ): { th: string[]; en: string[]; enMissing: number; pairs: { th: string; en: string | null }[] } {
@@ -422,6 +451,7 @@ export function composeLines(
     handle: () => { if (sel.handle != null) push(handleLine(sel.handle, "th", tpl), handleLine(sel.handle, "en", tpl)); },
     strap: () => { if (sel.strap) push(strapLine(sel.strap.min, sel.strap.max, "th", tpl), strapLine(sel.strap.min, sel.strap.max, "en", tpl)); },
     fit: () => { if (sel.fits?.length) push(fitLine(sel.fits, "th", tpl), fitLine(sel.fits, "en", tpl)); },
+    lifestyle: () => { for (const l of sel.lifestyle ?? []) push(clean(l.th) || null, clean(l.en) || null); },
   };
   for (const k of normalizeLineOrder(tpl.order)) emit[k]();
   return { th, en, enMissing, pairs };

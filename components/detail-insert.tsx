@@ -36,6 +36,11 @@ import {
   composeLines,
   isNewRow,
   isSlot,
+  isPhrase,
+  isStyle,
+  isLifestyle,
+  freeLines,
+  lifestylePrompt,
   moveNewBlock,
   newBlockAt,
   newRowKey,
@@ -63,8 +68,8 @@ import { bestFit, fitTargetOf, parseCompartments, type Compartment } from "@/lib
 // กด "🔗 มีหน้า" ที่วัสดุ = เปิดระเบียนวัสดุ (drawer ตัวจริงของหน้า master · แก้คำอธิบาย/วิธีดูแล/รูปได้) — ต้อง dynamic กัน import วนกับ master-crud
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
-type Tab = "phrase" | "material" | "slot" | "size" | "fit";
-type CatalogKind = "phrase" | "slot" | "material" | "fit";
+type Tab = "phrase" | "material" | "slot" | "size" | "fit" | "lifestyle";
+type CatalogKind = "phrase" | "slot" | "material" | "fit" | "style" | "lifestyle";
 type FitRow = FitItem & { kind?: string | null; image_key?: string | null; width_cm?: number | null; height_cm?: number | null; depth_cm?: number | null; is_soft?: boolean | null; size_estimated?: boolean | null; size_dims?: unknown };
 
 const SNIP = "product_highlight_items";
@@ -95,6 +100,7 @@ const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: "slot", label: "🔢 ช่อง", hint: "พิมพ์แค่จำนวน — ช่องที่ใส่ตัวเลขรวมเป็นบรรทัดเดียว" },
   { key: "size", label: "📏 ขนาด/น้ำหนัก", hint: "ดึงค่าจากช่องของสินค้ามาให้ · แก้ตรงนี้ = แก้ช่องของสินค้าด้วย" },
   { key: "fit", label: "🎒 ใส่อะไรได้", hint: "กดการ์ดเพื่อเลือก (เลือกขนาดได้) · เลือกตรงนี้ = แก้ช่อง \"ใส่อะไรได้บ้าง\" ของสินค้าด้วย" },
+  { key: "lifestyle", label: "🌿 Lifestyle / อื่นๆ", hint: "เลือกสไตล์ → ติ๊กข้อความ (บรรทัดละข้อ เรียงตามลำดับที่กด) · พิมพ์เองได้ · คัดลอก prompt ไปถาม ChatGPT" },
 ];
 
 export type DetailInsertResult = {
@@ -240,7 +246,10 @@ function DetailInsertModal({
   const mats = (matRows ?? []) as unknown as MaterialRow[];
   // ตุ๊กตา/ฟิกเกอร์ = ระบบคำนวณจากช่องใส่ของเอง (ไม่ติ๊ก — เหมือน FIT_CFG)
   const allFits = ((fitRows ?? []) as FitRow[]).filter((x) => x.kind !== "doll");
-  const allPhrase = snips.filter((x) => !isSlot(x));
+  const allPhrase = snips.filter(isPhrase);
+  // 🌿 Lifestyle: สไตล์ (kind style) + ข้อความของแต่ละสไตล์ (kind lifestyle · parent_id)
+  const styles = snips.filter(isStyle);
+  const lifeItems = snips.filter(isLifestyle) as (SnippetItem & { parent_id?: string | null })[];
   const allSlot = snips.filter(isSlot);
 
   // 🗂 ชุดรายการตามประเภทสินค้า (⚙️ › ชุดตามประเภท) — เลือกให้เองจากหมวดของสินค้า · สลับได้ในป๊อป
@@ -266,6 +275,13 @@ function DetailInsertModal({
   const [tab, setTab] = useState<Tab>("phrase");
   const [q, setQ] = useState("");
   const [phraseIds, setPhraseIds] = useState<string[]>([]);
+  // 🌿 Lifestyle: สไตล์ที่เปิดดู · ข้อความที่ติ๊ก (ลำดับกด · ข้ามสไตล์ได้) · ข้อความพิมพ์เอง
+  const [styleId, setStyleId] = useState<string | null>(null);
+  const [lifeIds, setLifeIds] = useState<string[]>([]);
+  const [lifeTh, setLifeTh] = useState("");
+  const [lifeEn, setLifeEn] = useState("");
+  const curStyle = styles.find((x) => x.id === styleId) ?? styles[0] ?? null;
+  const styleItems = curStyle ? lifeItems.filter((x) => x.parent_id === curStyle.id) : [];
   // 📝 ข้อความหลายแบบ: ชื่อแบบที่เลือกต่อข้อความ (ว่าง = แบบแรก) — เลือกแบบแล้วติ๊กข้อนั้นให้เอง
   const [phrasePick, setPhrasePick] = useState<Record<string, string>>({});
   const choosePhrase = (id: string, label: string) => {
@@ -275,7 +291,7 @@ function DetailInsertModal({
   const [matIds, setMatIds] = useState<string[]>([]);
   const [slotN, setSlotN] = useState<Record<string, string>>({});
   const [at, setAt] = useState(lines.length);
-  const [withEn, setWithEn] = useState(hasEn && enText.trim() !== "");
+  const [withEn, setWithEn] = useState(hasEn);   // ค่าเริ่ม = ติ๊ก (เจ้าของ 2026-10-19)
   const [view, setView] = useState<"th" | "en">("th");
   const [hideOld, setHideOld] = useState(readHide);
   const fitSize = useViewPref<FitSize>("detail_insert_fit_size", FIT_SIZES, "m");
@@ -354,6 +370,7 @@ function DetailInsertModal({
     handle: sizeSeen && use.handle && has("hd") ? num.hd : null,
     strap: sizeSeen && use.strap && (has("s1") || has("s2")) ? { min: num.s1, max: num.s2 } : null,
     fits: fitSeen && useFit ? fitEntries : null,
+    lifestyle: [...byClick(lifeIds, lifeItems).map((x) => ({ th: x.name, en: x.name_en ?? null })), ...freeLines(lifeTh, lifeEn)],
   };
   const out = composeLines(sel, tpl);
   // ⠿ ลำดับทุกบรรทัดในตัวอย่าง (บรรทัดเดิม + บรรทัดใหม่ · lib/detail-snippets arrangeRows)
@@ -420,6 +437,7 @@ function DetailInsertModal({
   // ล้าง: แท็บรายการ = เอาที่เลือกออก · ขนาด/ใส่อะไรได้ = คืนค่าเดิมของสินค้า + ไม่ใส่บรรทัด (ไม่ลบข้อมูลจริง)
   const clearTab = (t: Tab) => {
     if (t === "phrase") { setPhraseIds([]); setPhrasePick({}); }
+    if (t === "lifestyle") { setLifeIds([]); setLifeTh(""); setLifeEn(""); }
     if (t === "material") setMatIds([]);
     if (t === "slot") setSlotN({});
     if (t === "size") {
@@ -432,12 +450,12 @@ function DetailInsertModal({
     }
   };
   const clearAll = () => {
-    (["phrase", "material", "slot", "size", "fit"] as Tab[]).forEach(clearTab);
+    (["phrase", "material", "slot", "size", "fit", "lifestyle"] as Tab[]).forEach(clearTab);
     setEdits({ th: {}, en: {} });
     setCustom(null);
   };
   const tabCount = (t: Tab) =>
-    t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
+    t === "lifestyle" ? sel.lifestyle.length : t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
   const tabDirty = (t: Tab) => tabCount(t) > 0 || (t === "size" && numFields.some((f) => num[f.k] !== numOrig[f.k])) || (t === "fit" && JSON.stringify(fits) !== JSON.stringify(fitOrig));
 
   const apply = async () => {
@@ -465,6 +483,8 @@ function DetailInsertModal({
     if (k === "phrase") setPhraseIds((p) => [...p, id]);
     if (k === "material") setMatIds((p) => [...p, id]);
     if (k === "fit") setFits((p) => [...p, { id }]);
+    if (k === "lifestyle") setLifeIds((p) => [...p, id]);
+    if (k === "style") setStyleId(id);
   };
   const onDeleted = async (k: CatalogKind, id: string) => {
     await reloadOf(k);
@@ -472,6 +492,18 @@ function DetailInsertModal({
     setMatIds((p) => p.filter((x) => x !== id));
     setSlotN((p) => ({ ...p, [id]: "" }));
     setFits((p) => p.filter((x) => x.id !== id));
+    setLifeIds((p) => p.filter((x) => x !== id));
+  };
+  // 📋 prompt ถาม ChatGPT (ชื่อสินค้า + สไตล์ + ตัวอย่างข้อความ + คำอธิบายตอนนี้)
+  const copyPrompt = async () => {
+    const product = [values.name_th, values.code].map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean).join(" · ");
+    const text = lifestylePrompt({ product: product || null, style: curStyle ? { name: curStyle.name, name_en: curStyle.name_en } : null, examples: styleItems.map((x) => x.name), description: thText });
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("คัดลอก prompt แล้ว — วางใน ChatGPT ได้เลย");
+    } catch {
+      window.prompt("คัดลอกข้อความนี้ไปวางใน ChatGPT", text);
+    }
   };
 
   // ⠿ ลากจัดลำดับรายการกลาง (ทุกสินค้าใช้ลำดับเดียวกัน · ลำดับการโชว์ในรายการ — บรรทัดที่แทรกเรียงตามลำดับที่กด) — เขียน sort_order เฉพาะแถวที่เปลี่ยน
@@ -974,6 +1006,62 @@ function DetailInsertModal({
                 </div>
               )}
 
+              {tab === "lifestyle" && (
+                <>
+                  <div className="flex flex-wrap items-center gap-1" data-life-styles>
+                    {styles.map((st) => {
+                      const on = st.id === curStyle?.id;
+                      const n = lifeIds.filter((id) => lifeItems.some((x) => x.id === id && x.parent_id === st.id)).length;
+                      return (
+                        <span key={st.id} className="inline-flex items-center">
+                          <button type="button" onClick={() => setStyleId(st.id)} data-life-style={st.id} aria-pressed={on} title={st.name_en ?? undefined}
+                            className={`h-7 rounded-full border px-2.5 text-[12px] ${on ? "border-orange-400 bg-orange-50 font-medium text-orange-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                            {st.name}{n ? ` · ${n}` : ""}
+                          </button>
+                          {on && editBtn("style", st as unknown as Record<string, unknown>)}
+                        </span>
+                      );
+                    })}
+                    <button type="button" onClick={() => setEditor({ kind: "style", item: null })} className="h-7 rounded-full border border-dashed border-orange-300 px-2.5 text-[12px] text-orange-600 hover:bg-orange-50">＋ สไตล์ใหม่</button>
+                  </div>
+                  {curStyle?.name_en && <p className="px-1 text-[11px] text-slate-400">{curStyle.name_en}</p>}
+                  {!styles.length && <p className="py-2 text-center text-xs text-slate-400">ยังไม่มีสไตล์ — กด &quot;＋ สไตล์ใหม่&quot;</p>}
+                  {curStyle && (
+                    <SortList items={styleItems.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("lifestyle", styleItems, f, t)} render={(it, handle) => {
+                      const on = lifeIds.includes(it.id);
+                      return (
+                        <div className={rowCls(on)} data-life-row={it.id}>
+                          {handle}
+                          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                            <input type="checkbox" checked={on} onChange={() => setLifeIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
+                            {on && lifeIds.length > 1 && <ClickOrder n={lifeIds.indexOf(it.id) + 1} />}
+                            <NameTwoLines th={it.name} en={it.name_en} on={on} />
+                          </label>
+                          {editBtn("lifestyle", it as unknown as Record<string, unknown>)}
+                        </div>
+                      );
+                    }} />
+                  )}
+                  {curStyle && !styleItems.filter(match).length && <p className="py-2 text-center text-xs text-slate-400">ยังไม่มีข้อความในสไตล์นี้</p>}
+                  {curStyle && addBtn("lifestyle", `ข้อความ (${curStyle.name})`)}
+                  <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 p-2" data-life-free>
+                    <p className="text-[11.5px] font-medium text-slate-600">✍️ อื่น ๆ — พิมพ์เอง <span className="font-normal text-slate-400">(บรรทัดละข้อ)</span></p>
+                    <textarea value={lifeTh} onChange={(e) => setLifeTh(e.target.value)} rows={2} placeholder="เช่น ใส่ไปคาเฟ่ก็ปัง ใส่ไปทำงานก็ดี" aria-label="ข้อความพิมพ์เอง ไทย"
+                      className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    {hasEn && (
+                      <textarea value={lifeEn} onChange={(e) => setLifeEn(e.target.value)} rows={2} placeholder="อังกฤษ (บรรทัดตรงกับไทย) — เว้นว่างได้" aria-label="ข้อความพิมพ์เอง อังกฤษ"
+                        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button type="button" onClick={() => void copyPrompt()} data-life-prompt
+                        className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-700 hover:bg-slate-100">📋 คัดลอก prompt ถาม ChatGPT</button>
+                      <a href="https://chatgpt.com/" target="_blank" rel="noreferrer" className="text-[11.5px] text-slate-500 hover:text-blue-600 hover:underline">เปิด ChatGPT ↗</a>
+                    </div>
+                    <p className="text-[10.5px] text-slate-400">prompt มีชื่อสินค้า + สไตล์ที่เลือก + คำอธิบายตอนนี้ · ได้คำตอบแล้ววางกลับในช่องด้านบน (บรรทัดละข้อ)</p>
+                  </div>
+                </>
+              )}
+
               {tab === "fit" && (
                 <>
                   <div className="rounded-md bg-slate-50 px-2 py-1 text-[11.5px] text-slate-600" data-fit-bag>
@@ -1053,7 +1141,7 @@ function DetailInsertModal({
               )}
             </div>
           )}
-          {(tab === "phrase" || tab === "slot" || tab === "material" || tab === "fit") && (
+          {(tab === "phrase" || tab === "slot" || tab === "material" || tab === "fit" || tab === "lifestyle") && (
             <a href={`/m/${catalogOf(tab === "slot" ? "slot" : tab)}`} target="_blank" rel="noreferrer" className="block text-right text-[11px] text-slate-400 hover:text-blue-600 hover:underline">
               ดูรายการกลางทั้งหมด (รวมที่ลบไปแล้ว) ↗
             </a>
@@ -1126,9 +1214,11 @@ function DetailInsertModal({
         <CatalogItemDialog
           kind={editor.kind}
           item={editor.item}
-          existing={editor.kind === "material" ? mats : editor.kind === "fit" ? allFits : editor.kind === "slot" ? allSlot : allPhrase}
+          existing={editor.kind === "material" ? mats : editor.kind === "fit" ? allFits : editor.kind === "slot" ? allSlot : editor.kind === "style" ? styles : editor.kind === "lifestyle" ? styleItems : allPhrase}
           profiles={baseTpl.profiles}
-          allIds={(editor.kind === "material" ? mats : editor.kind === "fit" ? allFits : editor.kind === "slot" ? allSlot : allPhrase).map((x) => x.id)}
+          allIds={(editor.kind === "material" ? mats : editor.kind === "fit" ? allFits : editor.kind === "slot" ? allSlot : editor.kind === "style" ? styles : editor.kind === "lifestyle" ? lifeItems : allPhrase).map((x) => x.id)}
+          parentId={curStyle?.id ?? null}
+          styles={styles}
           currentProfileId={profile?.id ?? null}
           onProfiles={saveProfiles}
           onClose={() => setEditor(null)}
@@ -1149,7 +1239,7 @@ function DetailInsertModal({
       {tplOpen && (
         <TemplateDialog
           value={baseTpl}
-          catalogs={{ phrase: allPhrase, material: mats, slot: allSlot, fit: allFits }}
+          catalogs={{ phrase: allPhrase, material: mats, slot: allSlot, fit: allFits, style: styles, lifestyle: lifeItems }}
           categories={categories}
           onClose={() => setTplOpen(false)}
           onSaved={() => {
@@ -1175,7 +1265,7 @@ const SAMPLE = {
   ],
 };
 /** ชื่อแถวในตารางลำดับบรรทัด (ข้อความสำเร็จรูป = ไม่มีคำนำหน้า) */
-const ORDER_LABEL = (k: OrderKind) => (k === "phrase" ? "ข้อความ (ติ๊ก)" : LINE_KIND_LABEL[k]);
+const ORDER_LABEL = (k: OrderKind) => (k === "phrase" ? "ข้อความ (ติ๊ก)" : k === "lifestyle" ? "Lifestyle / อื่นๆ" : LINE_KIND_LABEL[k]);
 
 type CatalogLists = Record<CatalogKind, { id: string; name: string; name_en?: string | null }[]>;
 
@@ -1200,6 +1290,7 @@ function TemplateDialog({ value, catalogs, categories, onClose, onSaved }: { val
       handle: 12,
       strap: { min: 100, max: 120 },
       fits: [{ th: "แท็บเล็ต", en: "Tablet", size: "11 นิ้ว" }, { th: "เอกสาร A4", en: "A4 documents" }],
+      lifestyle: [{ th: "อินสไปร์จากยุค 2000s สไตล์สาวแซ่บ", en: "Inspired by bold 2000s looks" }],
     },
     t
   );
@@ -1296,8 +1387,8 @@ function TemplateDialog({ value, catalogs, categories, onClose, onSaved }: { val
                   <div className="grid grid-cols-[1rem_5.2rem_minmax(0,1fr)_minmax(0,1fr)_2.6rem] items-center gap-1.5" data-order-row={k}>
                     <span className="flex justify-center">{handle}</span>
                     <span className="truncate" title={ORDER_LABEL(k)}><span className="mr-1 text-[10px] text-slate-400">{i + 1}.</span>{ORDER_LABEL(k)}</span>
-                    {k === "phrase" ? (
-                      <span className="col-span-2 px-1 text-[11px] text-slate-400">บรรทัดละข้อ (ไม่มีคำนำหน้า) — เรียงตามลำดับที่กด</span>
+                    {k === "phrase" || k === "lifestyle" ? (
+                      <span className="col-span-2 px-1 text-[11px] text-slate-400">{k === "lifestyle" ? "บรรทัดละข้อ (ไม่มีคำนำหน้า) — ข้อความของสไตล์ + พิมพ์เอง" : "บรรทัดละข้อ (ไม่มีคำนำหน้า) — เรียงตามลำดับที่กด"}</span>
                     ) : (
                       <>
                         <input value={t.prefix[k].th} onChange={(e) => setPre(k, "th", e.target.value)} placeholder="(ไม่มี)" className={inp} aria-label={`คำนำหน้า ${LINE_KIND_LABEL[k]} ไทย`} />
@@ -1333,7 +1424,7 @@ function TemplateDialog({ value, catalogs, categories, onClose, onSaved }: { val
 
 /* ─────────── 🗂 ชุดรายการตามประเภทสินค้า ─────────── */
 
-const KIND_TITLE: Record<CatalogKind, string> = { phrase: "📝 ข้อความ", material: "🧵 วัสดุ", slot: "🔢 ช่อง", fit: "🎒 ใส่อะไรได้" };
+const KIND_TITLE: Record<CatalogKind, string> = { phrase: "📝 ข้อความ", material: "🧵 วัสดุ", slot: "🔢 ช่อง", fit: "🎒 ใส่อะไรได้", style: "🌿 สไตล์", lifestyle: "🌿 Lifestyle" };
 
 function ProfilesEditor({ profiles, onChange, catalogs, categories }: { profiles: InsertProfile[]; onChange: (p: InsertProfile[]) => void; catalogs: CatalogLists; categories: CategoryRow[] }) {
   const [selId, setSelId] = useState<string | null>(profiles[0]?.id ?? null);
@@ -1535,12 +1626,14 @@ function SortList<T extends { id: string }>({
 
 /* ─────────── ✏️ ป๊อปแก้/เพิ่ม/ลบ รายการกลาง ─────────── */
 
-const KIND_LABEL: Record<CatalogKind, string> = { phrase: "ข้อความสำเร็จรูป", slot: "ช่อง", material: "วัสดุ", fit: "ของที่ใส่ได้" };
+const KIND_LABEL: Record<CatalogKind, string> = { phrase: "ข้อความสำเร็จรูป", slot: "ช่อง", material: "วัสดุ", fit: "ของที่ใส่ได้", style: "สไตล์", lifestyle: "ข้อความ Lifestyle" };
 const PLACEHOLDER: Record<CatalogKind, { th: string; en: string }> = {
   phrase: { th: "เช่น ผลิตในประเทศไทย", en: "Made in Thailand" },
   slot: { th: "เช่น ช่องใส่บัตรเครดิต", en: "card slot" },
   material: { th: "เช่น หนังวัวแท้", en: "Genuine cowhide" },
   fit: { th: "เช่น iPad", en: "iPad" },
+  style: { th: "เช่น Y2K", en: "Y2K" },
+  lifestyle: { th: "เช่น อินสไปร์จากยุค 2000s สไตล์สาวแซ่บ", en: "Inspired by bold 2000s looks" },
 };
 
 function CatalogItemDialog({
@@ -1554,6 +1647,8 @@ function CatalogItemDialog({
   onClose,
   onSaved,
   onDeleted,
+  parentId,
+  styles,
 }: {
   kind: CatalogKind;
   item: Record<string, unknown> | null;
@@ -1565,9 +1660,14 @@ function CatalogItemDialog({
   onClose: () => void;
   onSaved: (id: string, created: boolean) => void;
   onDeleted: (id: string) => void;
+  /** 🌿 ข้อความ Lifestyle ใหม่ → ใส่ในสไตล์นี้ */
+  parentId?: string | null;
+  styles?: { id: string; name: string }[];
 }) {
   const toast = useToast();
   const s = (k: string) => String(item?.[k] ?? "");
+  const styleInit = String(item?.parent_id ?? parentId ?? "");
+  const [styleSel, setStyleSel] = useState(styleInit);
   const [name, setName] = useState(s("name"));
   const [nameEn, setNameEn] = useState(s("name_en"));
   const [tpl, setTpl] = useState(s("template"));
@@ -1625,7 +1725,7 @@ function CatalogItemDialog({
   );
   const [inProfiles, setInProfiles] = useState<string[]>(inInit);
   const profilesDirty = JSON.stringify([...inProfiles].sort()) !== JSON.stringify([...inInit].sort());
-  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key") || side !== s("slot_side") || profilesDirty || dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || soft !== (item?.is_soft === true) || sdDirty || vDirty;
+  const dirty = name !== s("name") || nameEn !== s("name_en") || tpl !== s("template") || tplEn !== s("template_en") || sizes !== s("sizes") || imageKey !== s("image_key") || side !== s("slot_side") || profilesDirty || dimW !== s("width_cm") || dimH !== s("height_cm") || dimD !== s("depth_cm") || soft !== (item?.is_soft === true) || sdDirty || vDirty || (kind === "lifestyle" && styleSel !== styleInit);
 
   const translate = async () => {
     if (!name.trim()) {
@@ -1673,6 +1773,10 @@ function CatalogItemDialog({
     }
     const body: Record<string, unknown> = { name: n, name_en: nameEn.trim() || null };
     if (kind === "slot") Object.assign(body, { template: tpl.trim() || null, template_en: tplEn.trim() || null, slot_side: side || null });
+    if (kind === "lifestyle") {
+      if (!styleSel) { toast.warning("เลือกสไตล์ก่อน"); return; }
+      body.parent_id = styleSel;
+    }
     if (kind === "phrase") {
       if (vMode === "one") Object.assign(body, { variant_mode: null, variants: null });
       else {
@@ -1698,7 +1802,7 @@ function CatalogItemDialog({
       }));
       Object.assign(body, { sizes: sizes.trim() || null, image_key: imageKey || null, width_cm: dimNum(dimW), height_cm: dimNum(dimH), depth_cm: dimNum(dimD), is_soft: soft, size_dims: Object.keys(sd).length ? sd : null, ...(dimsChanged ? { size_estimated: false } : {}) });
     }
-    if (!item) Object.assign(body, { sort_order: 500, is_active: true, ...(kind === "phrase" || kind === "slot" ? { kind } : {}) });
+    if (!item) Object.assign(body, { sort_order: 500, is_active: true, ...(kind === "phrase" || kind === "slot" || kind === "style" || kind === "lifestyle" ? { kind } : {}) });
     setBusy(true);
     try {
       const r = await apiFetch(item ? `/api/master-v2/${catalog}/${id}` : `/api/master-v2/${catalog}`, {
@@ -1852,7 +1956,16 @@ function CatalogItemDialog({
               </div>
             </div>
           )}
-          {profiles.length > 0 && (
+          {kind === "lifestyle" && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">สไตล์</label>
+              <select value={styleSel} onChange={(e) => setStyleSel(e.target.value)} aria-label="สไตล์" className={`${input} bg-white`} data-life-style-select>
+                <option value="">— เลือกสไตล์ —</option>
+                {(styles ?? []).map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+              </select>
+            </div>
+          )}
+          {profiles.length > 0 && kind !== "style" && kind !== "lifestyle" && (
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">ใช้กับชุด <span className="font-normal text-slate-400">(โชว์รายการนี้ในป๊อปของสินค้าประเภทไหน)</span></label>
               <div className="flex flex-wrap gap-1" data-item-profiles>

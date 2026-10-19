@@ -252,3 +252,23 @@ describe("รอบ 8 — ลำดับบรรทัดตั้งได้
     expect(new Set(o).size).toBe(DEFAULT_LINE_ORDER.length);
   });
 });
+
+describe("รอบ 10 — 🌿 Lifestyle / อื่นๆ", () => {
+  it("ข้อความของสไตล์ + พิมพ์เอง = บรรทัดละข้อ (อังกฤษจับคู่ตามบรรทัด) · อยู่ท้ายตามลำดับตั้งต้น", async () => {
+    const { freeLines } = await import("@/lib/detail-snippets");
+    const free = freeLines("- ใส่ไปคาเฟ่ก็ปัง\n\nใส่ไปทำงานก็ดี", "Cafe-ready\n");
+    expect(free).toEqual([{ th: "ใส่ไปคาเฟ่ก็ปัง", en: "Cafe-ready" }, { th: "ใส่ไปทำงานก็ดี", en: null }]);
+    const r = composeLines({ phrases: [{ id: "p", name: "กันน้ำ", name_en: "Water resistant" }], materials: [], slots: [], lifestyle: [{ th: "อินสไปร์จากยุค 2000s", en: "Inspired by the 2000s" }, ...free] });
+    expect(r.th).toEqual(["- กันน้ำ", "- อินสไปร์จากยุค 2000s", "- ใส่ไปคาเฟ่ก็ปัง", "- ใส่ไปทำงานก็ดี"]);
+    expect(r.en).toEqual(["- Water resistant", "- Inspired by the 2000s", "- Cafe-ready"]);
+    expect(r.enMissing).toBe(1);
+  });
+  it("prompt ถาม ChatGPT มีสินค้า + สไตล์ + ตัวอย่าง + คำอธิบาย", async () => {
+    const { lifestylePrompt } = await import("@/lib/detail-snippets");
+    const q = lifestylePrompt({ product: "กระเป๋า PIX33", style: { name: "Y2K", name_en: "Y2K" }, examples: ["อินสไปร์จากยุค 2000s"], description: "กระเป๋าหนัง" });
+    expect(q).toContain("สินค้า: กระเป๋า PIX33");
+    expect(q).toContain("สไตล์: Y2K (Y2K)");
+    expect(q).toContain("- อินสไปร์จากยุค 2000s");
+    expect(q).toContain("กระเป๋าหนัง");
+  });
+});
