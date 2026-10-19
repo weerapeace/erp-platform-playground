@@ -18,6 +18,7 @@ import { useToast } from "@/components/toast";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useTickCatalog } from "@/components/tick-list-field";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
+import { useViewPref } from "@/lib/use-view-pref";
 import { uploadResizedImage } from "@/components/image-attach";
 import { useSWRLite } from "@/lib/swr-lite";
 import {
@@ -106,6 +107,11 @@ const numStr = (v: unknown): string => {
   const n = Number(v);
   return v == null || v === "" || !isFinite(n) || n <= 0 ? "" : String(Math.round(n * 100) / 100);
 };
+/** 🖼 ขนาดรูปการ์ด "ใส่อะไรได้" (เจ้าของ 2026-10-19 "ขอที่ตั้งขนาดรูป") — จำต่อคน (ของกลาง useViewPref) */
+const FIT_SIZES = ["s", "m", "l"] as const;
+type FitSize = (typeof FIT_SIZES)[number];
+const FIT_SIZE_LABEL: Record<FitSize, string> = { s: "เล็ก", m: "กลาง", l: "ใหญ่" };
+const FIT_GRID: Record<FitSize, string> = { s: "grid-cols-4 sm:grid-cols-7", m: "grid-cols-3 sm:grid-cols-5", l: "grid-cols-2 sm:grid-cols-3" };
 const toggle = (ids: string[], id: string) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
 const readHide = () => {
   try {
@@ -265,6 +271,7 @@ function DetailInsertModal({
   const [withEn, setWithEn] = useState(hasEn && enText.trim() !== "");
   const [view, setView] = useState<"th" | "en">("th");
   const [hideOld, setHideOld] = useState(readHide);
+  const fitSize = useViewPref<FitSize>("detail_insert_fit_size", FIT_SIZES, "m");
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<{ kind: CatalogKind; item: Record<string, unknown> | null } | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
@@ -955,7 +962,18 @@ function DetailInsertModal({
                       ⚠️ เลือกไว้แต่ขนาดอาจไม่พอ: {badFits.join(", ")} — ตรวจขนาดกระเป๋า/ของอีกครั้ง
                     </p>
                   )}
-                  <div className="grid grid-cols-3 gap-1 sm:grid-cols-5" data-insert-fit-grid>
+                  <div className="flex items-center justify-end gap-1.5 text-[11px] text-slate-500" data-fit-size>
+                    🖼 ขนาดรูป
+                    <span className="inline-flex overflow-hidden rounded-md border border-slate-200">
+                      {FIT_SIZES.map((z) => (
+                        <button key={z} type="button" onClick={() => { fitSize.setView(z); void fitSize.saveDefault(z); }} aria-pressed={fitSize.view === z} data-fit-size-opt={z}
+                          className={`px-2 py-0.5 ${z !== "s" ? "border-l border-slate-200" : ""} ${fitSize.view === z ? "bg-orange-50 font-medium text-orange-700" : "bg-white hover:bg-slate-50"}`}>
+                          {FIT_SIZE_LABEL[z]}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                  <div className={`grid gap-1 ${FIT_GRID[fitSize.view]}`} data-insert-fit-grid>
                     <SortList items={fitItems.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("fit", fitItems, f, t)} render={(it, handle) => {
                       const pick = fits.find((p) => p.id === it.id);
                       const opts = fitSizeOptions(it);
@@ -967,7 +985,7 @@ function DetailInsertModal({
                               {it.image_key ? <img src={imgUrl(it.image_key, 160)} alt="" className="h-full w-full object-contain" /> : <span className="text-xl opacity-40">🎒</span>}
                             </div>
                             <div className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-700" title={it.name}>{it.name}</div>
-                            <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>
+                            {fitSize.view !== "s" && <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>}
                             {(() => {
                               const c = fitCheck(it, pick?.size);
                               const dims = c.t ? `${c.t.w}×${c.t.h}×${c.t.d}` : "";
