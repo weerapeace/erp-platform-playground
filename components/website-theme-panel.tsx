@@ -31,7 +31,7 @@ import type { ContentLang } from "@/lib/content-i18n";
 import { THEME_TEXT_KEYS, themeCrumb } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
-import { FOOTER_COL_DEFS, FOOTER_BGS, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
+import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
@@ -1420,11 +1420,34 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               {/* 🖼 โลโก้ท้ายเว็บ */}
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">🖼 โลโก้ท้ายเว็บ</h3>
-                <p className="text-xs text-slate-500 mb-3">อยู่ในคอลัมน์ &quot;เกี่ยวกับร้าน&quot; · รูปโลโก้ (รวม &quot;โลโก้สำหรับพื้นเข้ม&quot;) ตั้งที่แท็บ โลโก้</p>
+                <p className="text-xs text-slate-500 mb-3">รูปโลโก้ (รวม &quot;โลโก้สำหรับพื้นเข้ม&quot;) ตั้งที่แท็บ โลโก้</p>
                 <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-3">
                   <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.logoShow} onChange={(e) => setFooter({ logoShow: e.target.checked })} />
                   แสดงโลโก้
                 </label>
+                {theme.footer.logoShow && (() => {
+                  // 🖼 ตำแหน่งโลโก้ — เคยพลาด: จัดคอลัมน์เองไม่มี "เกี่ยวกับร้าน" = โลโก้หายเงียบ → อัตโนมัติขึ้นแถวบนให้ + เตือนเมื่อบังคับ "ในคอลัมน์" แต่ไม่มีคอลัมน์นั้น
+                  const cols = theme.footer.columns;
+                  const hasAbout = cols === null || cols.some((c) => c.kind === "about" && !c.hidden);
+                  return (
+                    <div className="mb-3">
+                      <label className={labelCls}>ตำแหน่งโลโก้</label>
+                      <select className={inputCls} value={theme.footer.logoPlace} onChange={(e) => setFooter({ logoPlace: e.target.value as FooterConfig["logoPlace"] })}>
+                        <option value="auto">อัตโนมัติ — ในคอลัมน์ “เกี่ยวกับร้าน” ถ้ามี · ไม่มี = แถวบนสุด{hasAbout ? "" : " (ตอนนี้: แถวบนสุด)"}</option>
+                        <option value="top">แถวบนสุด เหนือคอลัมน์</option>
+                        <option value="column">ในคอลัมน์ “เกี่ยวกับร้าน” เท่านั้น</option>
+                      </select>
+                      {theme.footer.logoPlace === "column" && !hasAbout && (
+                        <p className="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                          ยังไม่มีคอลัมน์ “เกี่ยวกับร้าน” ที่โชว์อยู่ — โลโก้จะไม่ขึ้น ·{" "}
+                          <button type="button" className="underline" onClick={() => setFooter({ logoPlace: "auto" })}>
+                            เปลี่ยนเป็นอัตโนมัติ
+                          </button>
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
                 {theme.footer.logoShow && (
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div>
@@ -1449,6 +1472,65 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* 📏 ระยะห่าง — ค่าเริ่ม = หน้าตาเดิม (FOOTER_SPACING_DEFAULTS) */}
+              <div className={cardCls}>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-slate-800">📏 ระยะห่าง</h3>
+                  <button
+                    type="button"
+                    className="ml-auto text-[11px] text-slate-500 hover:text-blue-600 hover:underline"
+                    onClick={() => setFooter({ ...FOOTER_SPACING_DEFAULTS, colFit: "equal" })}
+                    title="กลับเป็นระยะแบบเดิม"
+                  >
+                    ↺ ค่าเริ่ม
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mb-3">ปรับแล้วดูพรีวิวด้านขวาได้ทันที · ระยะบน-ล่างของท้ายเว็บตั้งที่ “ระยะบน-ล่าง” ด้านบน</p>
+                <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                  {(
+                    [
+                      { k: "colGap", l: "ระหว่างคอลัมน์ (แนวนอน)", min: 0, max: 160, step: 4 },
+                      { k: "rowGap", l: "ระหว่างแถว (แนวตั้ง · โลโก้แถวบน↔คอลัมน์)", min: 0, max: 120, step: 4 },
+                      { k: "linkGap", l: "ระหว่างลิงก์ในคอลัมน์", min: 0, max: 32, step: 1 },
+                      { k: "stackGap", l: "ระหว่าง 2 หัวข้อที่ซ้อนกัน (⤵)", min: 0, max: 96, step: 2 },
+                    ] as const
+                  ).map((s) => (
+                    <div key={s.k}>
+                      <label className={labelCls}>
+                        {s.l} ({theme.footer[s.k]}px)
+                      </label>
+                      <input type="range" min={s.min} max={s.max} step={s.step} value={theme.footer[s.k]} onChange={(e) => setFooter({ [s.k]: Number(e.target.value) } as Partial<FooterConfig>)} className="w-full" />
+                    </div>
+                  ))}
+                  <div>
+                    <label className={labelCls}>หัวข้อ → ลิงก์แรก ({theme.footer.headGap < 0 ? "อัตโนมัติ" : `${theme.footer.headGap}px`})</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={40}
+                        step={1}
+                        value={theme.footer.headGap < 0 ? 16 : theme.footer.headGap}
+                        onChange={(e) => setFooter({ headGap: Number(e.target.value) })}
+                        className={`flex-1 ${theme.footer.headGap < 0 ? "opacity-40" : ""}`}
+                      />
+                      {theme.footer.headGap >= 0 && (
+                        <button type="button" className="text-[11px] text-slate-500 hover:underline" onClick={() => setFooter({ headGap: -1 })}>
+                          อัตโนมัติ
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>ความกว้างคอลัมน์ (จอคอม)</label>
+                    <select className={inputCls} value={theme.footer.colFit} onChange={(e) => setFooter({ colFit: e.target.value as FooterConfig["colFit"] })}>
+                      <option value="equal">เท่ากัน เต็มความกว้าง (แบบเดิม)</option>
+                      <option value="content">ชิดกันตามเนื้อหา (ห่างเท่า “ระหว่างคอลัมน์”)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               <div className={cardCls}>

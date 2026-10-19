@@ -1319,7 +1319,19 @@ export interface FooterConfig {
   gridCols: number;
   /** 📱 คอลัมน์ต่อแถวบนมือถือ: 1 (เดิม) หรือ 2 */
   mobileCols: 1 | 2;
+  /** 🖼 ตำแหน่งโลโก้: auto = ในคอลัมน์ "เกี่ยวกับร้าน" ถ้ามี ไม่มี = แถวบนสุด · column = ในคอลัมน์เท่านั้น · top = แถวบนสุดเสมอ */
+  logoPlace: "auto" | "column" | "top";
+  /** 📏 ระยะห่าง (px): ระหว่างคอลัมน์ 0–160 · ระหว่างแถว 0–120 · ระหว่างลิงก์ 0–32 · 2 หัวข้อที่ซ้อนกัน 0–96 · หัวข้อ→ลิงก์ 0–40 (-1 = อัตโนมัติ) */
+  colGap: number;
+  rowGap: number;
+  linkGap: number;
+  stackGap: number;
+  headGap: number;
+  /** ความกว้างคอลัมน์: equal = เท่ากันเต็มความกว้าง (เดิม) · content = ชิดกันตามเนื้อหา */
+  colFit: "equal" | "content";
 }
+/** 📏 ค่าเริ่มของระยะห่าง = หน้าตาเดิมก่อนมีช่องตั้ง (ใช้กับปุ่ม "กลับค่าเริ่ม") */
+export const FOOTER_SPACING_DEFAULTS = { colGap: 40, rowGap: 40, linkGap: 10, stackGap: 32, headGap: -1 } as const;
 export const FOOTER_COL_DEFS: { key: FooterColKind; label: string; hint: string; defaultTitle: string }[] = [
   { key: "about", label: "เกี่ยวกับร้าน", hint: "โลโก้ + คำอธิบายร้าน (จากแท็บข้อมูลร้าน หรือพิมพ์ทับ)", defaultTitle: "" },
   { key: "links", label: "ลิงก์", hint: "รายการลิงก์ — ว่างไว้ = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ตามสถานะ)", defaultTitle: "เมนู" },
@@ -1350,10 +1362,13 @@ export const DEFAULT_FOOTER: FooterConfig = {
   bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left",
   logoShow: true, logoHeight: 40, logoVariant: "auto", logoChip: "auto", padY: "md", headingSize: "s", headingUpper: true, headingColor: "",
   linkSize: "m", linkColor: "", linkHover: "", divider: true, bottomAlign: "auto", copyrightText: "", socialStyle: "pill", mobileCollapse: false, mobileCenter: false, gridCols: 4, mobileCols: 1,
+  logoPlace: "auto", ...FOOTER_SPACING_DEFAULTS, colFit: "equal",
 };
 export function normalizeFooter(raw: unknown): FooterConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_FOOTER;
+  // ระยะห่าง px (ไม่ใช่ตัวเลข = ค่าเริ่ม · เกินช่วง = ตัดให้อยู่ในช่วง) — ช่วงเดียวกับเว็บร้าน (src/lib/site-config normalizeFooter)
+  const px = (v: unknown, min: number, max: number, fb: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fb);
   const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
   const cols = Array.isArray(r.columns)
     ? (r.columns as unknown[])
@@ -1407,6 +1422,13 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     mobileCenter: r.mobileCenter === true,
     gridCols: [0, 2, 3, 4, 5, 6].includes(Number(r.gridCols)) ? Number(r.gridCols) : d.gridCols,
     mobileCols: Number(r.mobileCols) === 2 ? 2 : 1,
+    logoPlace: oneOf(r.logoPlace, ["auto", "column", "top"] as const, d.logoPlace),
+    colGap: px(r.colGap, 0, 160, d.colGap),
+    rowGap: px(r.rowGap, 0, 120, d.rowGap),
+    linkGap: px(r.linkGap, 0, 32, d.linkGap),
+    stackGap: px(r.stackGap, 0, 96, d.stackGap),
+    headGap: Number(r.headGap) === -1 ? -1 : px(r.headGap, 0, 40, d.headGap),
+    colFit: oneOf(r.colFit, ["equal", "content"] as const, d.colFit),
   };
 }
 
