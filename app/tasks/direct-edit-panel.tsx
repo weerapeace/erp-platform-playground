@@ -19,7 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { setEditContext, clearEditContext } from "@/lib/edit-context";
 import type { TaskParentRef, TaskSkuRef } from "./data";
-import { DEFAULT_SKIP_SUBTASKS, DIRECT_TARGETS, isDirectTask, useProductModeCfg } from "./product-edit-mode";
+import { DEFAULT_SKIP_SUBTASKS, DIRECT_TARGETS, isDirectTask, useProductModeCfg, type ProductModeCfg } from "./product-edit-mode";
 
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
@@ -276,17 +276,25 @@ export function DirectSubmitModal({ changes, onClose, onConfirm }: { changes: Ta
  * ตัวงานคือที่ทำงานเลย: เลือก/สร้าง Parent → แก้ที่สินค้า → สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจ/อนุมัติใช้สถานะของงานตามปกติ
  * มีงานย่อยสินค้าอยู่แล้ว = ไม่โชว์ (การ์ดงานย่อยมีแผงของมันเอง)
  */
+type DirectPanelTask = {
+  id: string; task_type: string | null; created_at: string; parent_skus?: TaskParentRef[]; skus?: TaskSkuRef[];
+  subtasks?: { subtask_type?: string | null; config?: { approve_target?: string } | null; status?: string }[];
+};
+/** แผงระดับงานโผล่ไหม (โหมดใหม่ + ไม่มีงานย่อยสินค้า) — ใช้ร่วมกับกล่อง Parent SKU ใน drawer กันช่องเลือก Parent ซ้ำ 2 ที่ */
+export function isTaskDirectPanelOn(cfg: ProductModeCfg | null, task: DirectPanelTask): boolean {
+  const hasProductSubs = (task.subtasks ?? []).some((s) => s.status !== "canceled"
+    && (DEFAULT_SKIP_SUBTASKS.includes(String(s.subtask_type ?? "")) || DIRECT_TARGETS.has(String(s.config?.approve_target ?? ""))));
+  return isDirectTask(cfg, task.task_type, task.created_at) && !hasProductSubs;
+}
+
 export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, pushToast }: {
-  task: { id: string; task_type: string | null; created_at: string; parent_skus?: TaskParentRef[]; skus?: TaskSkuRef[];
-    subtasks?: { subtask_type?: string | null; config?: { approve_target?: string } | null; status?: string }[] };
+  task: DirectPanelTask;
   canEdit: boolean; canUndo: boolean;
   onAddParent?: (p: ParentSkuPickerValue) => Promise<void>;
   pushToast: ToastFn;
 }) {
   const modeCfg = useProductModeCfg();
-  const hasProductSubs = (task.subtasks ?? []).some((s) => s.status !== "canceled"
-    && (DEFAULT_SKIP_SUBTASKS.includes(String(s.subtask_type ?? "")) || DIRECT_TARGETS.has(String(s.config?.approve_target ?? ""))));
-  const on = isDirectTask(modeCfg, task.task_type, task.created_at) && !hasProductSubs;
+  const on = isTaskDirectPanelOn(modeCfg, task);
   const { changes, error, reload } = useTaskChanges(task.id, null, on);
   if (!on) return null;
   return (

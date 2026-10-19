@@ -48,12 +48,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true }),
     admin.from("erp_creative_comments").select("*").eq("task_id", id).order("created_at", { ascending: true }),
     admin.from("erp_creative_attachments").select("*").eq("task_id", id).order("created_at", { ascending: true }),
-    admin.from("erp_creative_task_skus").select("sku:skus_v2!sku_id(id, code, name_th, color, color_th, list_price, cover_image_r2_key)").eq("task_id", id),
+    // parent = Parent SKU ของ SKU ลูก → drawer ใช้เป็น "ค่าแนะนำ" ตอนงานยังไม่ผูก Parent
+    admin.from("erp_creative_task_skus").select("sku:skus_v2!sku_id(id, code, name_th, color, color_th, list_price, cover_image_r2_key, parent:parent_skus_v2!parent_sku_id(id, code, name_th, cover_image_r2_key))").eq("task_id", id),
     admin.from("erp_creative_task_parent_skus").select("parent:parent_skus_v2!parent_sku_id(id, code, name_th, cover_image_r2_key)").eq("task_id", id),
     admin.from("erp_creative_content").select("id", { count: "exact", head: true }).eq("task_id", id).eq("is_active", true),
   ]);
 
-  const skus = ((skuLinks ?? []) as Record<string, unknown>[]).map((l) => { const s = (Array.isArray(l.sku) ? l.sku[0] : l.sku) as Record<string, unknown> | null; return s ? { id: s.id, code: s.code, name: s.name_th, color: (s.color_th as string) ?? (s.color as string) ?? null, price: s.list_price, image_key: s.cover_image_r2_key } : null; }).filter(Boolean);
+  const skus = ((skuLinks ?? []) as Record<string, unknown>[]).map((l) => {
+    const s = (Array.isArray(l.sku) ? l.sku[0] : l.sku) as Record<string, unknown> | null;
+    if (!s) return null;
+    const p = (Array.isArray(s.parent) ? s.parent[0] : s.parent) as Record<string, unknown> | null;
+    return { id: s.id, code: s.code, name: s.name_th, color: (s.color_th as string) ?? (s.color as string) ?? null, price: s.list_price, image_key: s.cover_image_r2_key,
+      parent: p ? { id: p.id, code: p.code, name: p.name_th, image_key: p.cover_image_r2_key ?? null } : null };
+  }).filter(Boolean);
   const parent_skus = ((parentLinks ?? []) as Record<string, unknown>[]).map((l) => { const p = (Array.isArray(l.parent) ? l.parent[0] : l.parent) as Record<string, unknown> | null; return p ? { id: p.id, code: p.code, name: p.name_th, image_key: p.cover_image_r2_key ?? null } : null; }).filter(Boolean);
 
   const subRows = (subtasks ?? []) as Record<string, unknown>[];

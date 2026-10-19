@@ -81,8 +81,9 @@ export type CreativeAttachment = {
   content_type: string | null; size_bytes: number | null; created_at: string;
 };
 
-export type TaskSkuRef = { id: string; code: string | null; name: string | null; color?: string | null; price?: number | null; image_key?: string | null };
 export type TaskParentRef = { id: string; code: string | null; name: string | null; image_key?: string | null };
+/** parent = Parent SKU ของ SKU ลูกตัวนี้ (มาจาก GET งาน) — ใช้แนะนำตอนงานยังไม่ผูก Parent */
+export type TaskSkuRef = { id: string; code: string | null; name: string | null; color?: string | null; price?: number | null; image_key?: string | null; parent?: TaskParentRef | null };
 export type TaskDetail = CreativeTask & {
   subtasks: CreativeSubtask[];
   comments: CreativeComment[];

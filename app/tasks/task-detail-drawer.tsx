@@ -28,6 +28,7 @@ import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
 import { TaskDirectPanel } from "./direct-edit-panel";
+import { TaskParentBox } from "./task-parent-box";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
@@ -135,7 +136,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   pushToast: ToastFn;
 }) {
   const { taskTypes, platforms: platformOpts } = useCreativeOptions();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const { statuses: allStatuses } = useCreativeStatuses();   // รายการสถานะทั้งหมด (สำหรับ admin ตั้งอิสระ)
   const t = useT();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -352,6 +353,11 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees}
                 taskType={d.task_type} taskCreatedAt={d.created_at} parents={d.parent_skus ?? []} skus={d.skus ?? []}
                 onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }} />
+
+              {/* 📦 Parent SKU — เห็นทันทีใกล้ "สินค้าที่เกี่ยวข้อง" · ยังไม่มี = แนะนำจาก SKU ลูก / เลือก / สร้างใหม่ แล้วผูกเข้างาน */}
+              <TaskParentBox task={d} pushToast={pushToast} onOpen={setOpenParentId}
+                canEdit={!isClosed && can("tasks.edit" as Parameters<typeof can>[0])}
+                onSetParents={async (ids) => { await updateTask(d.id, { parent_sku_ids: ids }); await refresh(); }} />
 
               {/* สินค้าที่เกี่ยวข้อง (SKU m2m) */}
               {(() => {
@@ -718,7 +724,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           })}
         </div>
       </div>
-      {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
+      {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => { void load(); }} />}
       <ConfirmDialog open={!!linkDel} onClose={() => setLinkDel(null)} variant="danger"
         onConfirm={async () => { const x = linkDel; setLinkDel(null); if (!x) return; try { await deleteAttachment(d.id, x.id); await load(); pushToast("success", t("ลบลิงก์แล้ว", "Link removed")); } catch (e) { pushToast("error", (e as Error).message); } }}
         title={t("ลบลิงก์แนบนี้?", "Remove this link?")} message={t(`ลิงก์ "${linkDel?.name ?? ""}" จะถูกเอาออกจากงานนี้ (ไฟล์ปลายทางไม่ถูกลบ)`, `"${linkDel?.name ?? ""}" will be removed from this task (the file itself is not deleted).`)}
