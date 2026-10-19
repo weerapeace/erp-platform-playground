@@ -10,7 +10,7 @@
 import { useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
-import { MediaUploadError, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
+import { MediaUploadError, normalizeMediaFile, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
 
 const TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 const url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -22,8 +22,10 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
   const [busy, setBusy] = useState<{ name: string; pct: number | null } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
+  const upload = async (picked: File | undefined) => {
+    if (!picked) return;
+    // ชนิดจริงจากหัวไฟล์ (บางเครื่องส่ง MP4 มาไม่บอกชนิด)
+    const file = await normalizeMediaFile(picked);
     setProblem(null);
     if (!TYPES.includes(file.type)) return toast.error("รับเฉพาะไฟล์วิดีโอ MP4 / WebM / MOV");
     if (file.type === "video/quicktime") toast.warning("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)");
@@ -58,7 +60,7 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
   return (
     <div {...drop.zone("v")} className="relative space-y-2">
       <FileDropHint show={drop.over === "v"} label="วางคลิปเพื่ออัปโหลด" />
-      <input ref={fileRef} type="file" accept="video/mp4,video/webm,video/quicktime" className="hidden" onChange={(e) => void upload(e.target.files?.[0])} />
+      <input ref={fileRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov" className="hidden" onChange={(e) => void upload(e.target.files?.[0])} />
       {value ? (
         <video key={value} src={url(value)} className="w-full max-h-52 rounded-lg bg-black" controls muted playsInline preload="metadata" />
       ) : (

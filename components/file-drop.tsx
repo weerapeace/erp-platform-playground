@@ -16,6 +16,7 @@
  * ไม่ทำ: อัปโหลดเอง (ส่งไฟล์ให้ callback ของหน้า — หน้าใช้ uploadResizedImage/ช่องทางเดิมของมัน)
  */
 import { useRef, useState, type DragEvent } from "react";
+import { typeFromName } from "@/lib/media-upload-limits";
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
@@ -33,7 +34,9 @@ export function useFileDrop(
   const accepts = (f: File) => {
     const a = opts.accept;
     if (!a) return true;
-    return (Array.isArray(a) ? a : [a]).some((p) => f.type.startsWith(p));
+    // บางเครื่องไม่บอกชนิดไฟล์ (type ว่าง เช่น MP4) → เดาจากนามสกุล
+    const t = f.type && f.type !== "application/octet-stream" ? f.type : typeFromName(f.name);
+    return (Array.isArray(a) ? a : [a]).some((p) => t.startsWith(p));
   };
 
   const zone = (key: string) => ({

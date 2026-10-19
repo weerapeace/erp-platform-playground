@@ -5,16 +5,37 @@
  * - ไฟล์ใหญ่ (วิดีโอ ≤ 200 MB · รูป ≤ 20 MB) → ขอลิงก์จาก /api/website/video-upload แล้วเบราว์เซอร์ส่งไฟล์ตรงเข้า R2 (มีแถบ %)
  *   เหตุผล: Vercel รับ request ได้ ~4.5 MB · ⚠️ ทางนี้ต้องตั้ง CORS ของ bucket R2 ก่อน 1 ครั้ง (docs/website-video.md)
  *   ยังไม่ตั้ง = โยน MediaUploadError("blocked") ให้หน้าจอบอกวิธี — ไม่พังเงียบ
+ * - ชนิดไฟล์ดูจาก "หัวไฟล์" ก่อนเสมอ (normalizeMediaFile) — บางเครื่องส่ง MP4 มาไม่บอกชนิด
+ * - รูปนิ่ง (JPG/PNG/WebP/BMP/AVIF) ใหญ่เกิน 4 MB → ย่อให้อัตโนมัติ (≤ 3200 px · WebP) แล้วส่งทางเล็ก — ใช้ได้เลยไม่ต้องรอ CORS
  * ⚠️ ห้าม import ไฟล์นี้จาก API route (ใช้ apiFetch / XMLHttpRequest ของเบราว์เซอร์)
  */
 import { apiFetch } from "@/lib/api";
-import { SMALL_UPLOAD_BYTES, fileMb, uploadMaxBytes } from "@/lib/media-upload-limits";
+import { SMALL_UPLOAD_BYTES, fileMb, uploadMaxBytes, resolveMediaType, sniffMediaType } from "@/lib/media-upload-limits";
+import { SHRINKABLE_IMAGE_TYPES, shrinkImageToFit } from "@/lib/image-resize";
 
 export { SMALL_UPLOAD_BYTES, BIG_VIDEO_MAX_BYTES, BIG_IMAGE_MAX_BYTES, fileMb, uploadMaxBytes } from "@/lib/media-upload-limits";
+
+/**
+ * ใส่ชนิดไฟล์ที่ถูกต้อง (ดูจากหัวไฟล์ → ชนิดที่เบราว์เซอร์บอก → นามสกุล)
+ * บางเครื่องส่ง MP4 มาแบบไม่บอกชนิด → เคยถูกนึกว่าเป็นรูปและตัดที่ 4 MB · เรียกก่อนตัดสินว่า "รูป/วิดีโอ" เสมอ
+ */
+export async function normalizeMediaFile(file: File): Promise<File> {
+  let head = new Uint8Array(0);
+  try {
+    head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  } catch {
+    /* อ่านหัวไฟล์ไม่ได้ = ใช้ชนิดที่เบราว์เซอร์บอก */
+  }
+  const type = resolveMediaType(file.type, sniffMediaType(head), file.name);
+  return type && type !== file.type ? new File([file], file.name, { type, lastModified: file.lastModified }) : file;
+}
 
 /** ข้อความเมื่อไฟล์เกินเพดาน */
 export function tooBigMessage(file: { type: string; size: number }): string {
   const isVideo = file.type.startsWith("video/");
+  if (file.type === "image/gif") return `GIF ใหญ่เกิน 4 MB (${fileMb(file.size)}) — แนะนำใช้วิดีโอ MP4 แทน (ไฟล์เล็กกว่ามาก ภาพคมกว่า)`;
+  if (!isVideo && !file.type.startsWith("image/")) return `ไฟล์ชนิดนี้ (${file.type || "ไม่รู้จัก"} · ${fileMb(file.size)}) อัปเป็นรูป/วิดีโอไม่ได้ — ใช้ MP4 / WebM หรือรูป JPG / PNG / WebP`;
+  if (!isVideo && !SHRINKABLE_IMAGE_TYPES.includes(file.type)) return `รูปชนิด ${file.type.replace("image/", "").toUpperCase()} ใหญ่เกิน 4 MB (${fileMb(file.size)}) — บันทึกเป็น JPG / PNG ก่อน (ระบบย่อให้อัตโนมัติ)`;
   return `ไฟล์ใหญ่เกิน ${fileMb(uploadMaxBytes(file.type))} (${fileMb(file.size)}) — ${isVideo ? "ตัดคลิปให้สั้นลง/ลดความละเอียด หรือใช้ลิงก์ YouTube/Vimeo" : "ย่อรูปก่อนอัปโหลด"}`;
 }
 
@@ -37,12 +58,21 @@ export interface UploadHandle {
 
 /**
  * อัปโหลด 1 ไฟล์ → คืน r2 key
- * onProgress(pct) = เฉพาะไฟล์ใหญ่ (0–100) · onStart(handle) = ได้ปุ่มยกเลิก
+ * - ชนิดไฟล์ดูจากหัวไฟล์ (normalizeMediaFile) · รูปนิ่งใหญ่เกิน 4 MB = ย่ออัตโนมัติ (ด้านยาว ≤ 3200 px · WebP) → ส่งทางเล็ก ไม่ต้องรอ CORS
+ * onProgress(pct) = เฉพาะไฟล์ใหญ่ (0–100) · onStart(handle) = ได้ปุ่มยกเลิก · onNotice = ข้อความแจ้ง (เช่น ย่อรูปให้แล้ว)
  */
 export async function uploadMediaFile(
-  file: File,
-  opts: { folder: string; onProgress?: (pct: number) => void; onStart?: (h: UploadHandle) => void },
+  input: File,
+  opts: { folder: string; onProgress?: (pct: number) => void; onStart?: (h: UploadHandle) => void; onNotice?: (msg: string) => void },
 ): Promise<string> {
+  let file = await normalizeMediaFile(input);
+  if (file.size > SMALL_UPLOAD_BYTES && SHRINKABLE_IMAGE_TYPES.includes(file.type)) {
+    const s = await shrinkImageToFit(file, SMALL_UPLOAD_BYTES);
+    if (s) {
+      opts.onNotice?.(`ย่อรูปให้อัตโนมัติ ${fileMb(file.size)} → ${fileMb(s.file.size)} (${s.width}×${s.height} px) — ยังคมพอสำหรับเว็บ`);
+      file = s.file;
+    }
+  }
   if (file.size > uploadMaxBytes(file.type)) throw new MediaUploadError("failed", tooBigMessage(file));
 
   if (file.size <= SMALL_UPLOAD_BYTES) {

@@ -13,7 +13,7 @@ import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useToast } from "@/components/toast";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
-import { MediaUploadError, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
+import { MediaUploadError, normalizeMediaFile, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
 
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 
@@ -47,7 +47,9 @@ export function MediaUploadField({
   const [problem, setProblem] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const upload = async (file: File) => {
+  const upload = async (picked: File) => {
+    // ชนิดจริงจากหัวไฟล์ (บางเครื่องส่ง MP4 มาไม่บอกชนิด → เคยถูกนึกว่าเป็นรูป)
+    const file = await normalizeMediaFile(picked);
     const isVideo = file.type.startsWith("video/");
     if (isVideo && !allowVideo) return toast.error("ช่องนี้รับเฉพาะรูป");
     if (file.type === "video/quicktime") toast.warning("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)");
@@ -58,6 +60,7 @@ export function MediaUploadField({
         folder,
         onStart: (h) => (handleRef.current = h),
         onProgress: (pct) => setBusy({ pct }),
+        onNotice: (m) => toast.info(m),
       });
       onChange({ kind: isVideo ? "video" : "image", key });
       toast.success("อัปโหลดแล้ว");
@@ -102,7 +105,7 @@ export function MediaUploadField({
           )}
         </div>
         <div className="flex flex-col gap-1.5 min-w-0">
-          <input ref={inputRef} type="file" accept={allowVideo ? "image/*,video/mp4,video/webm" : "image/*"} className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+          <input ref={inputRef} type="file" accept={allowVideo ? "image/*,video/mp4,video/webm,.mp4,.m4v,.webm" : "image/*"} className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
           <button type="button" disabled={!!busy} onClick={() => inputRef.current?.click()} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:border-blue-400 disabled:opacity-50">
             {busy ? (busy.pct != null ? `กำลังอัปโหลด ${busy.pct}%` : "กำลังอัปโหลด…") : allowVideo ? "⬆ อัปโหลดรูป/วิดีโอ" : "⬆ อัปโหลดรูป"}
           </button>
