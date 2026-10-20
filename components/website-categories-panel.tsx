@@ -732,8 +732,8 @@ function ImageSlot({ label, k, aspect, onPick, onClear }: { label: string; k?: s
   );
 }
 
-/** สร้างหมวดใหม่: ชื่อ + รหัสในลิงก์ (เดาจากชื่อภาษาอังกฤษ · ชื่อไทย = ต้องตั้งเอง) */
-function NewCategoryModal({ open, onClose, taken, onCreate, parentLabel, suggestPrefix = "" }: { open: boolean; onClose: () => void; taken: string[]; onCreate: (c: WebCategoryDef) => void; /** สร้างเป็นหมวดย่อยใต้หมวดนี้ */ parentLabel?: string | null; /** หมวดย่อย: รหัสขึ้นต้นด้วยรหัสแม่ (กันชนกับหมวดอื่น) */ suggestPrefix?: string }) {
+/** สร้างหมวดใหม่: ชื่อ + รหัสในลิงก์ (เดาจากชื่อภาษาอังกฤษ · ชื่อไทย = ต้องตั้งเอง) — ใช้ซ้ำในหน้า 🗂 จัดหมวด (website-category-sorter) */
+export function NewCategoryModal({ open, onClose, taken, onCreate, parentLabel, suggestPrefix = "" }: { open: boolean; onClose: () => void; taken: string[]; onCreate: (c: WebCategoryDef) => void; /** สร้างเป็นหมวดย่อยใต้หมวดนี้ */ parentLabel?: string | null; /** หมวดย่อย: รหัสขึ้นต้นด้วยรหัสแม่ (กันชนกับหมวดอื่น) */ suggestPrefix?: string }) {
   const [label, setLabel] = useState("");
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);

@@ -4,7 +4,8 @@
  * WebsiteListingsPanel — แท็บ "สินค้าบนเว็บ" ของหน้าจัดการเว็บร้าน (/website/<slug>)
  * --------------------------------------------------------------------------
  * - ตัวกรองบน: ทั้งหมด · ขึ้นเว็บ · ซ่อนอยู่ · แนะนำ · ⚠️ ต้องแก้ (นับจากกฎกลาง lib/website-listing-health)
- * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด (จำต่อคนด้วย useViewPref)
+ * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด/🗂 จัดหมวด (จำต่อคนด้วย useViewPref)
+ * - 🗂 จัดหมวด = components/website-category-sorter (ขั้น 1 ใส่หมวดหลักจากหมวด ERP · ขั้น 2 กระดานจัดหมวดย่อย) — ทั้งร้าน ไม่สนตัวกรอง
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
  * - กดการ์ด/แถว/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
@@ -30,6 +31,7 @@ import { WebsiteListingsMassEdit } from "@/components/website-listings-mass-edit
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 // ⚠️ ต้อง dynamic — master-crud import relation-multi อยู่ (import ตรงจะวนกัน) ดู memory unify_drawer
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+const WebsiteCategorySorter = dynamic(() => import("@/components/website-category-sorter").then((m) => m.WebsiteCategorySorter), { ssr: false });
 
 export type ShopInfo = { id: string; name: string; slug: string; isDefault: boolean; siteUrl?: string | null };
 
@@ -69,6 +71,8 @@ export type Listing = {
   erpPrice: number;
   erpDescription: string;
   erpImageKey: string | null;
+  /** 🗂 ชื่อหมวดใน ERP (หน้าจัดหมวด ขั้น 1) */
+  erpCategory?: string | null;
   published: boolean;
   featured: boolean;
   sortOrder: number;
@@ -92,7 +96,7 @@ export type Listing = {
 export type CategoryDef = { key: string; label: string; icon: string; parent?: string | null };
 
 type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit";
-const VIEWS = ["list", "grid"] as const;
+const VIEWS = ["list", "grid", "sort"] as const;
 
 const baht = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH")}`;
 const inputCls =
@@ -332,7 +336,8 @@ export function WebsiteListingsPanel({
       {/* แถบสรุป + ปุ่มเพิ่ม */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          {FILTERS.map((f) => {
+          {view === "sort" && <span className="text-sm text-slate-600">🗂 จัดหมวดสินค้าทั้งร้าน ({listings.length} ตัว)</span>}
+          {view !== "sort" && FILTERS.map((f) => {
             const on = filter === f.k;
             const n = counts[f.k];
             return (
@@ -367,6 +372,7 @@ export function WebsiteListingsPanel({
       {/* ค้นหา + หมวด + มุมมอง */}
       {listings.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-3">
+          {view === "sort" ? <span className="flex-1" /> : <>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ หรือ รหัส เช่น BBP10" className={`${inputCls} flex-1 min-w-[180px]`} />
           <select value={cat} onChange={(e) => setCat(e.target.value)} className={`${inputCls} w-auto`}>
             <option value="">ทุกหมวด</option>
@@ -377,6 +383,7 @@ export function WebsiteListingsPanel({
             ))}
             <option value="__none">ไม่อยู่หมวดไหน</option>
           </select>
+          </>}
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
             {VIEWS.map((v) => (
               <button
@@ -386,10 +393,10 @@ export function WebsiteListingsPanel({
                   setView(v);
                   void saveDefault(v);
                 }}
-                title={v === "list" ? "มุมมองรายการ" : "มุมมองการ์ด (แบบหน้าเว็บ)"}
+                title={v === "list" ? "มุมมองรายการ" : v === "grid" ? "มุมมองการ์ด (แบบหน้าเว็บ)" : "จัดหมวดแบบเร็ว — ใส่หมวดหลักจาก ERP + กระดานจัดหมวดย่อย"}
                 className={`px-3 py-1.5 text-xs ${view === v ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
               >
-                {v === "list" ? "☰ รายการ" : "▦ การ์ด"}
+                {v === "list" ? "☰ รายการ" : v === "grid" ? "▦ การ์ด" : "🗂 จัดหมวด"}
               </button>
             ))}
           </div>
@@ -410,6 +417,16 @@ export function WebsiteListingsPanel({
             + เพิ่มสินค้าเข้าเว็บ
           </button>
         </div>
+      ) : view === "sort" ? (
+        <WebsiteCategorySorter
+          shop={shop}
+          listings={listings}
+          setListings={setListings}
+          categories={categories}
+          reload={reload}
+          onOpen={(id) => setOpen(id)}
+          paused={!!open || !!parentOpen}
+        />
       ) : !shown.length ? (
         <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center">
           <p className="text-slate-400 text-sm">ไม่พบสินค้า ลองเปลี่ยนคำค้นหรือตัวกรอง</p>
@@ -574,7 +591,7 @@ export function WebsiteListingsPanel({
 
       {/* ☑️ ทำหลายรายการพร้อมกัน — แถบลอยล่างจอ (ของกลาง) */}
       <BulkActionBar
-        count={sel.size}
+        count={view === "sort" ? 0 : sel.size}
         unit="รายการ"
         onClear={() => setSel(new Set())}
         extra={

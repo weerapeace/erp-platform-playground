@@ -6,6 +6,8 @@
  * GET  ?shop=<slug>&search=<q>   → ค้นหาสินค้า ERP (parent_skus_v2) ที่ยังไม่อยู่ในร้านนั้น (ไว้กดเพิ่ม)
  * POST { shopId, parentId, action:"add"|"remove" }  → เพิ่ม/เอาออกจากร้าน
  * POST { shopId, parentIds:[], action:"addMany", publish? } → เพิ่มหลายรุ่นพร้อมกัน (ป๊อปเพิ่มสินค้าเข้าเว็บ · ค่าเริ่มต้น = ซ่อนไว้ก่อน)
+ * POST { shopId, action:"applyErpMap", map:{ ชื่อหมวด ERP: รหัสหมวดเว็บ | "" } } → 🗂 จำกฎ (field_map.category.rules) + ใส่หมวดให้สินค้าที่ยังไม่ได้จัดหมวดเอง
+ * POST { shopId, action:"addCategory", newCategory:{ key, label, parent? } } → 🗂 เพิ่มหมวด (ต่อท้ายกลุ่มแม่ใน field_map.categories · ไม่ทับช่องอื่น)
  * POST { shopId, parentId, patch:{...} }            → แก้ข้อมูลเวอร์ชันเว็บ (store_listings)
  *
  * ของกลาง: guardApi(products.view/edit) + supabaseAdmin (store_* อยู่ DB เดียวกัน) + writeAudit
@@ -180,6 +182,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       erpPrice: p ? erpPrice(p) : 0,
       erpDescription: (p?.platform_description ?? p?.description ?? "") || "",
       erpImageKey: p?.cover_image_r2_key ?? null,
+      /** 🗂 ชื่อหมวดใน ERP (หน้าจัดหมวด ขั้น 1 จัดกลุ่มด้วยค่านี้) */
+      erpCategory: catLabel,
       published: Boolean(l.is_published),
       featured: Boolean(l.featured),
       sortOrder: Number(l.sort_order) || 0,
@@ -241,7 +245,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string; parentIds?: unknown; order?: unknown; publish?: unknown };
+  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string; parentIds?: unknown; order?: unknown; publish?: unknown; map?: unknown; newCategory?: unknown };
   try {
     b = await request.json();
   } catch {
@@ -309,7 +313,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const it of items) {
       const { error } = await sb
         .from("store_listings")
-        .update({ web_categories: cleanCategoryList(it.categories), updated_at: new Date().toISOString() })
+        .update({ web_categories: it.categories === null ? null : cleanCategoryList(it.categories), updated_at: new Date().toISOString() })
         .eq("shop_id", b.shopId)
         .eq("parent_sku_id", it.parentId!);
       if (!error) ok++;
@@ -319,10 +323,106 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       entityType: "store_listing",
       entityId: b.shopId,
       ...actor,
-      metadata: { kind: "web_categories", category: b.category ?? null, count: ok, items: items.map((it) => ({ parentId: it.parentId, categories: cleanCategoryList(it.categories) })) },
+      metadata: { kind: "web_categories", category: b.category ?? null, count: ok, items: items.map((it) => ({ parentId: it.parentId, categories: it.categories === null ? null : cleanCategoryList(it.categories) })) },
     });
     if (ok < items.length) return NextResponse.json({ ok: false, error: `บันทึกได้ ${ok}/${items.length} รายการ` }, { status: 500 });
     return NextResponse.json({ ok: true, count: ok });
+  }
+
+  // 🗂 เพิ่มหมวดจากหน้าจัดหมวด — อ่าน-แก้-เขียน field_map.categories ที่นี่ (ไม่ส่ง field_map ทั้งก้อนจากหน้าจอ กันทับของคนอื่น)
+  //    หมวดย่อยต่อท้ายกลุ่มแม่ (ลำดับใน array = ลำดับบนเว็บ) · รหัสซ้ำ/แม่ไม่ใช่หมวดชั้นบน = ไม่รับ
+  if (b.action === "addCategory") {
+    const nc = (b.newCategory && typeof b.newCategory === "object" ? b.newCategory : {}) as { key?: unknown; label?: unknown; parent?: unknown };
+    const key = cleanCategoryKey(nc.key);
+    const label = String(nc.label ?? "").trim().slice(0, 60);
+    const parent = cleanCategoryKey(nc.parent) || null;
+    if (!b.shopId || !key || !label) return NextResponse.json({ error: "ต้องระบุ shopId + ชื่อหมวด + รหัส" }, { status: 400 });
+    const { data: shopRow } = await sb.from("shops").select("id, field_map").eq("id", b.shopId).maybeSingle();
+    if (!shopRow) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
+    const raw = (shopRow.field_map && typeof shopRow.field_map === "object" ? shopRow.field_map : {}) as Record<string, unknown>;
+    const list = (Array.isArray(raw.categories) ? raw.categories : normalizeFieldMap(raw).categories) as { key?: string; parent?: string | null }[];
+    if (list.some((c) => c?.key === key)) return NextResponse.json({ error: "รหัสนี้มีแล้ว — ตั้งใหม่" }, { status: 409 });
+    if (parent && !list.some((c) => c?.key === parent && !c.parent)) return NextResponse.json({ error: "หมวดแม่ต้องเป็นหมวดชั้นบน" }, { status: 400 });
+    const def = { key, label, icon: "", blurb: "", imageKey: null, bannerKey: null, parent };
+    let at = list.length;
+    if (parent) {
+      const pi = list.findIndex((c) => c?.key === parent);
+      at = pi + 1;
+      while (at < list.length && list[at]?.parent === parent) at++;
+    }
+    const next = [...list.slice(0, at), def, ...list.slice(at)];
+    const { error } = await sb.from("shops").update({ field_map: { ...raw, categories: next } }).eq("id", b.shopId);
+    if (error) return NextResponse.json({ error: "เพิ่มหมวดไม่สำเร็จ" }, { status: 500 });
+    await writeAudit(sb, { action: "update", entityType: "shop_field_map", entityId: b.shopId, ...actor, metadata: { kind: "add_web_category", category: def } });
+    return NextResponse.json({ ok: true, category: def });
+  }
+
+  // 🗂 ขั้น 1 ⚡ ใส่หมวดหลักจากหมวด ERP — จำกฎไว้ใช้กับสินค้าใหม่ (field_map.category.rules · อ่าน-แก้-เขียนที่นี่ ไม่ทับช่องอื่น)
+  //    + ใส่หมวดให้สินค้าที่ "ยังไม่ได้จัดหมวดเอง" (web_categories ว่าง/null และไม่มี web_category) ที่หมวด ERP อยู่ในกฎที่ส่งมา
+  if (b.action === "applyErpMap") {
+    if (!b.shopId || !b.map || typeof b.map !== "object") return NextResponse.json({ error: "ต้องระบุ shopId + map" }, { status: 400 });
+    const { data: shopRow } = await sb.from("shops").select("id, field_map").eq("id", b.shopId).maybeSingle();
+    if (!shopRow) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
+    const fm = normalizeFieldMap(shopRow.field_map);
+    const catKeys = new Set(fm.categories.map((c) => c.key));
+    const parentOf = new Map(fm.categories.map((c) => [c.key, c.parent && catKeys.has(c.parent) ? c.parent : null]));
+    const changes = Object.entries(b.map as Record<string, unknown>)
+      .slice(0, 100)
+      .map(([name, key]) => [String(name).trim().slice(0, 120), typeof key === "string" ? key.trim() : ""] as const)
+      .filter(([name, key]) => name && (!key || catKeys.has(key)));
+    const rules = { ...fm.category.rules };
+    for (const [name, key] of changes) {
+      if (key) rules[name] = key;
+      else delete rules[name];
+    }
+    // เขียนเฉพาะ category.rules ลง field_map ดิบ (ช่องอื่น/คำแปลคงเดิม)
+    const raw = (shopRow.field_map && typeof shopRow.field_map === "object" ? shopRow.field_map : {}) as Record<string, unknown>;
+    const rawCat = (raw.category && typeof raw.category === "object" ? raw.category : {}) as Record<string, unknown>;
+    const { error: fmErr } = await sb.from("shops").update({ field_map: { ...raw, category: { ...rawCat, rules } } }).eq("id", b.shopId);
+    if (fmErr) return NextResponse.json({ error: "บันทึกกฎหมวดไม่สำเร็จ" }, { status: 500 });
+
+    // สินค้าที่ยังไม่ได้จัดหมวดเอง + หมวด ERP ของรุ่น
+    const want = new Map(changes.filter(([, key]) => key));
+    const { data: rowsL } = await sb.from("store_listings").select("parent_sku_id, web_categories, web_category").eq("shop_id", b.shopId).limit(5000);
+    const unsorted = ((rowsL ?? []) as { parent_sku_id: string; web_categories: string[] | null; web_category: string | null }[]).filter(
+      (r) => !(Array.isArray(r.web_categories) && r.web_categories.length) && !String(r.web_category ?? "").trim(),
+    );
+    const pids = unsorted.map((r) => r.parent_sku_id);
+    const byKey = new Map<string, string[]>();
+    for (let i = 0; i < pids.length; i += 300) {
+      const { data: ps } = await sb.from("parent_skus_v2").select("id, category_id").in("id", pids.slice(i, i + 300));
+      const cIds = [...new Set(((ps ?? []) as { category_id: string | null }[]).map((x) => x.category_id).filter(Boolean))] as string[];
+      const { data: cs } = cIds.length ? await sb.from("product_categories").select("id, name").in("id", cIds) : { data: [] };
+      const cName = new Map(((cs ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]));
+      for (const x of (ps ?? []) as { id: string; category_id: string | null }[]) {
+        const key = x.category_id ? want.get(cName.get(x.category_id) ?? "") : undefined;
+        if (key) byKey.set(key, [...(byKey.get(key) ?? []), x.id]);
+      }
+    }
+    let count = 0;
+    const done: string[] = [];
+    for (const [key, ids] of byKey) {
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: up, error } = await sb
+          .from("store_listings")
+          .update({ web_categories: parentOf.get(key) ? [parentOf.get(key)!, key] : [key], updated_at: new Date().toISOString() })
+          .eq("shop_id", b.shopId)
+          .in("parent_sku_id", ids.slice(i, i + 300))
+          .select("parent_sku_id");
+        if (!error) {
+          count += up?.length ?? 0;
+          done.push(...((up ?? []) as { parent_sku_id: string }[]).map((x) => x.parent_sku_id));
+        }
+      }
+    }
+    await writeAudit(sb, {
+      action: "update",
+      entityType: "store_listing",
+      entityId: b.shopId,
+      ...actor,
+      metadata: { kind: "erp_category_map", map: Object.fromEntries(changes), rulesBefore: fm.category.rules, rulesAfter: rules, count, parentIds: done },
+    });
+    return NextResponse.json({ ok: true, count, rules, parentIds: done });
   }
 
   if (!b.shopId || !b.parentId) return NextResponse.json({ error: "ต้องระบุ shopId + parentId" }, { status: 400 });
