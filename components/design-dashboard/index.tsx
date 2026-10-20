@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent } from "react";
+import type { DragEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { AuditLogEntry } from "@/app/api/audit-logs/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
@@ -11,6 +11,7 @@ import { apiFetch } from "@/lib/api";
 import { buildStatusMeta, isOwnBrandJob, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
+import { SheetHoverWrap, SheetHoverSettingsButton, useSheetHoverPref } from "./sheet-hover";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { usePermission } from "@/components/auth";
 import { CampaignBoardPicker, useCanSendToBoard, SEND_TO_BOARD_MAX } from "@/components/campaign-board-send";
@@ -155,6 +156,11 @@ function sheetCoverUrl(sheet: DesignSheetListItem): string | null {
   return withImageWidth(sheet.cover_url, 220);
 }
 
+// ชี้ที่การ์ดเปิดอยู่ = รูปบนการ์ดไม่เด้งรูปใหญ่เอง (กันเด้งซ้อนกับกล่อง 🪟 ชี้ที่การ์ด) · ปิด = ชี้ที่รูปแบบเดิม
+function CoverPreview({ off, url, children }: { off: boolean; url: string | null; children: ReactNode }) {
+  return off ? <>{children}</> : <HoverPreview url={url} previewW={640}>{children}</HoverPreview>;
+}
+
 function CardDeadline({ tone, label }: { tone: Tone; label: string }) {
   const styles: Record<Tone, string> = {
     danger: "bg-rose-500 text-rose-700",
@@ -292,6 +298,9 @@ export function DesignDashboard() {
     setCardSize(size);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_card_size", value: size }) }).catch(() => {});
   };
+  // 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (ของกลาง components/hover-card) — ตั้งค่าต่อคน
+  const hoverPref = useSheetHoverPref();
+  const hoverOn = hoverPref.on && hoverPref.fields.length > 0;
   const changeViewMode = (mode: "board" | "gallery") => {
     setViewMode(mode);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_view_mode", value: mode }) }).catch(() => {});
@@ -577,20 +586,21 @@ export function DesignDashboard() {
                     const picked = pickedIds.has(sheet.id);
                     const activate = () => (pickMode ? togglePicked(sheet.id) : openDetail(sheet.id));
                     return (
+                      <SheetHoverWrap key={sheet.id} sheet={sheet} pref={hoverPref} status={st} own={sheetIsOwn(sheet)} className="h-full"
+                        deadline={{ label: deadlineLabel(sheet, statusMeta), tone: deadlineTone(sheet, statusMeta) }}>
                       <div
-                        key={sheet.id}
                         role="button"
                         tabIndex={0}
                         onClick={activate}
                         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
                         data-gg-task-card
-                        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : `${sheet.code} • ${sheet.name}`}
-                        className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
+                        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : hoverOn ? undefined : `${sheet.code} • ${sheet.name}`}
+                        className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
                       >
                         {pickMode && <PickBadge checked={picked} />}
                         <BrandSlot theme={brandTheme} id="task_corner" />
                         {coverUrl ? (
-                          <HoverPreview url={sheet.cover_url} previewW={640}>
+                          <CoverPreview off={hoverOn} url={sheet.cover_url}>
                             {/* รูปเต็มใบ (object-contain) ไม่ crop — กรอบ 1:1 */}
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -601,7 +611,7 @@ export function DesignDashboard() {
                               decoding="async"
                               className="aspect-square w-full bg-slate-50 object-contain"
                             />
-                          </HoverPreview>
+                          </CoverPreview>
                         ) : (
                           <div data-gg-cover className="flex aspect-square w-full items-center justify-center" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
                             <BrandSlot theme={brandTheme} id="task_placeholder" size="max-h-16" />
@@ -632,6 +642,7 @@ export function DesignDashboard() {
                           )}
                         </div>
                       </div>
+                      </SheetHoverWrap>
                     );
   };
   // การ์ดบนบอร์ด (ลากเปลี่ยนสถานะได้บนจอคอม) — 2 ขนาดตาม cardSize:
@@ -646,11 +657,11 @@ export function DesignDashboard() {
     const row = cardSize === "row";
     const activate = () => { if (isMoving) return; if (pickMode) togglePicked(sheet.id); else openDetail(sheet.id); };
     const cover = coverUrl ? (
-      <HoverPreview url={sheet.cover_url} previewW={640}>
+      <CoverPreview off={hoverOn} url={sheet.cover_url}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img data-gg-cover src={coverUrl} alt={sheet.name} loading="lazy" decoding="async"
           className={row ? "h-10 w-10 shrink-0 rounded border border-slate-100 bg-slate-50 object-contain" : "mb-1.5 aspect-square w-full rounded-md border border-slate-100 bg-slate-50 object-contain"} />
-      </HoverPreview>
+      </CoverPreview>
     ) : (
       <div data-gg-cover className={row ? "flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-100" : "mb-1.5 flex aspect-square items-center justify-center overflow-hidden rounded-md border border-slate-100"}
         style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
@@ -666,8 +677,9 @@ export function DesignDashboard() {
       </div>
     );
     return (
+      <SheetHoverWrap key={sheet.id} sheet={sheet} pref={hoverPref} status={statusInfo.get(sheet.status)} own={sheetIsOwn(sheet)} off={!!draggingSheetId || isMoving}
+        deadline={{ label: deadlineLabel(sheet, statusMeta), tone: deadlineTone(sheet, statusMeta) }}>
       <div
-        key={sheet.id}
         role="button"
         tabIndex={0}
         onClick={activate}
@@ -677,7 +689,7 @@ export function DesignDashboard() {
         onDragStart={(event) => handleCardDragStart(event, sheet)}
         onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
         aria-busy={isMoving}
-        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : isDesktop ? `${sheet.code} • ${sheet.name} — ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด` : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
+        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : hoverOn && isDesktop ? undefined : isDesktop ? `${sheet.code} • ${sheet.name} — ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด` : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
         className={`relative overflow-hidden rounded-lg border bg-white shadow-[2px_2px_0_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 ${row ? "flex items-center gap-2 p-1.5" : "block p-1.5"} ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
       >
         {pickMode && <PickBadge checked={picked} />}
@@ -704,6 +716,7 @@ export function DesignDashboard() {
           </>
         )}
       </div>
+      </SheetHoverWrap>
     );
   };
   // มือถือ: สถานะที่เลือกดูอยู่ (ค่าเริ่มต้น = คอลัมน์แรก)
@@ -1094,6 +1107,8 @@ export function DesignDashboard() {
                     </FloatingDropdown>
                   </div>
                 )}
+                {/* 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (ตั้งค่าต่อคน) — จอคอมเท่านั้น (ทัชไม่เด้ง) */}
+                {isDesktop && <SheetHoverSettingsButton pref={hoverPref} />}
                 {/* ขนาดการ์ดบนบอร์ด: ▦ การ์ดเล็ก / ☰ แถวย่อ — จำรายคน (เฉพาะมุมมองบอร์ด) */}
                 {viewMode === "board" && (
                   <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5" title="ขนาดการ์ดบนบอร์ด (จำค่าของคุณ)">
