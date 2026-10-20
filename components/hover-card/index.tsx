@@ -8,7 +8,7 @@
  *   - HoverRow       — แถว "หัวข้อ : ค่า" ในกล่อง
  * ใช้ที่: บอร์ดงาน (app/tasks/task-hover-card) · Design Dashboard (components/design-dashboard/sheet-hover)
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "@/components/i18n";
 import { useCanHover } from "@/lib/use-can-hover";
@@ -38,7 +38,9 @@ export function HoverCardWrap({ enabled, off, image, images, details, hint, clas
   const canHover = useCanHover();
   const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [box, setBox] = useState<{ left: number; top: number; w: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // mid = กึ่งกลางการ์ด (แนวตั้ง) — วัดความสูงกล่องจริงหลังวาด แล้วจัด top ใหม่ไม่ให้ล้นจอ
+  const [box, setBox] = useState<{ left: number; top: number; w: number; mid: number } | null>(null);
   const active = enabled && canHover && !off;
   const pics = image ? [] : (images ?? []).filter(Boolean).slice(0, 4);
   const hasImg = !!image || pics.length > 0;
@@ -60,8 +62,17 @@ export function HoverCardWrap({ enabled, off, image, images, details, hint, clas
     let top = r.top + r.height / 2 - h / 2;
     if (top < pad) top = pad;
     if (top + h > vh - pad) top = Math.max(pad, vh - h - pad);
-    setBox({ left, top, w });
+    setBox({ left, top, w, mid: r.top + r.height / 2 });
   };
+  // เนื้อหายาวกว่าที่กะไว้ (เช่น เปิดโชว์หลายอย่าง) → จัดตำแหน่งตามความสูงจริง ไม่ให้ล้นขอบล่าง/บน
+  useLayoutEffect(() => {
+    const el = panelRef.current; if (!box || !el) return;
+    const pad = 10, vh = window.innerHeight, h = el.offsetHeight;
+    let top = box.mid - h / 2;
+    if (top + h > vh - pad) top = vh - h - pad;
+    if (top < pad) top = pad;
+    if (Math.abs(top - box.top) > 1) setBox({ ...box, top });
+  }, [box]);
   useEffect(() => () => clear(), []);
   useEffect(() => { if (!active) close(); }, [active]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -80,7 +91,7 @@ export function HoverCardWrap({ enabled, off, image, images, details, hint, clas
       onMouseDown={active ? close : undefined}>
       {children}
       {active && box && typeof document !== "undefined" && createPortal(
-        <div style={{ position: "fixed", left: box.left, top: box.top, width: box.w, zIndex: 9999 }} data-hover-card
+        <div ref={panelRef} style={{ position: "fixed", left: box.left, top: box.top, width: box.w, maxHeight: "calc(100vh - 20px)", zIndex: 9999 }} data-hover-card
           className="pointer-events-none overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
           <div className={`flex ${hasImg ? "flex-row" : "flex-col"}`}>
             {hasImg && (

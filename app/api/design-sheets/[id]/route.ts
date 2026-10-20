@@ -77,6 +77,7 @@ type PatchBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
   status?: string; order_date?: string | null; deadline?: string | null; appointment_date?: string | null; drive_link?: string | null;
   is_active?: boolean; parent_sku_code?: string | null; parent_sku_codes?: string[];
+  waiting_for?: string | null;    // ⏳ รออะไรอยู่ (พิมพ์เอง)
   cost_extra?: CostExtra[] | Record<string, CostExtra[]>;   // array (เดิม) หรือ object แยกตาม Parent (ข้อ 7)
   parent_sku_drafts?: string[];   // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
   profit_splits?: Record<string, { name?: string; type?: string; value?: number; on?: boolean }[]>;   // แบ่งกำไรทั้งใบ (ต่อแท็บ Parent)
@@ -110,6 +111,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.deadline !== undefined)   patch.deadline = body.deadline || null;
   if (body.appointment_date !== undefined) patch.appointment_date = body.appointment_date || null;
   if (body.drive_link !== undefined) patch.drive_link = body.drive_link?.trim() || null;
+  if (body.waiting_for !== undefined) patch.waiting_for = String(body.waiting_for ?? "").trim().slice(0, 300) || null;
   if (body.is_active !== undefined)  patch.is_active = !!body.is_active;
   if (body.cost_extra !== undefined) {
     // ค่าใช้จ่ายเพิ่ม — array (เดิม) เก็บเป็น array · object (แยก Parent) เก็บเป็น object {parentKey: [...]}
