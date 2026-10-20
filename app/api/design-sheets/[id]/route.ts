@@ -32,7 +32,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("design_sheets")
-    .select("*, brand:brands!brand_id(name, color)").eq("id", id).single();
+    .select("*, brand:brands!brand_id(name, color, is_customer_job)").eq("id", id).single();
   if (error) return NextResponse.json({ data: null, error: friendlyDbError(error.message) }, { status: 404 });
   // resolve รหัส Parent SKU → id → ทำ chip เป็นลิงก์เปิด Parent SKU ได้
   const row = data as Record<string, unknown>;

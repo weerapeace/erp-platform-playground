@@ -21,6 +21,7 @@ export const revalidate = 0;
 export type DesignSheetListItem = {
   id: string; code: string; name: string;
   brand_id: string | null; brand_name: string | null; brand_color: string | null;
+  brand_is_customer_job: boolean | null;   // 👤 งานลูกค้า (null = ไม่ระบุแบรนด์) — แยกมุมมองงานลูกค้า / แบรนด์เรา
   status: string; order_date: string | null; deadline: string | null;
   drive_link: string | null; note: string | null; is_active: boolean;
   detail_excerpt: string | null;   // ตัวอย่างข้อความจาก "รายละเอียดงาน" (ตัด HTML แล้ว) ไว้โชว์บนการ์ด
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   let q = admin.from("design_sheets")
-    .select("id, code, name, brand_id, status, order_date, deadline, drive_link, note, detail, is_active, updated_at, parent_sku_codes, brand:brands!brand_id(name, color)", { count: "exact" })
+    .select("id, code, name, brand_id, status, order_date, deadline, drive_link, note, detail, is_active, updated_at, parent_sku_codes, brand:brands!brand_id(name, color, is_customer_job)", { count: "exact" })
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + Math.max(limit, idList.length) - 1);
   if (idList.length) q = q.in("id", idList);
@@ -112,11 +113,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const r of (ql.data ?? []) as Array<Record<string, unknown>>) withQuote.add(String(r.sheet_id));
   }
   const items: DesignSheetListItem[] = rows.map((r) => {
-    const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
+    const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null; is_customer_job?: boolean | null } | null;
     const id = String(r.id);
     return {
       id, code: String(r.code), name: String(r.name),
       brand_id: (r.brand_id as string) ?? null, brand_name: b?.name ?? null, brand_color: b?.color ?? null,
+      brand_is_customer_job: b ? !!b.is_customer_job : null,
       status: String(r.status ?? "design"), order_date: (r.order_date as string) ?? null, deadline: (r.deadline as string) ?? null,
       drive_link: (r.drive_link as string) ?? null, note: (r.note as string) ?? null, is_active: !!r.is_active,
       detail_excerpt: excerptHtml(r.detail as string | null),

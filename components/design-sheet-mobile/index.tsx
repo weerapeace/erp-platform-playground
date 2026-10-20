@@ -18,7 +18,7 @@ import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/r
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import { apiFetch } from "@/lib/api";
-import { buildStatusMeta, QUOTE_STATUS, QUOTE_STATUS_OPTS, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { buildStatusMeta, isOwnBrandJob, statusOptsFor, QUOTE_STATUS, QUOTE_STATUS_OPTS, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -47,7 +47,7 @@ function parseCostExtra(raw: unknown): Record<string, CostExtra[]> {
 
 type Sheet = {
   id: string; code: string; name: string; status: string;
-  brand_id: string | null; brand: { name: string; color: string | null } | null;
+  brand_id: string | null; brand: { name: string; color: string | null; is_customer_job?: boolean | null } | null;
   order_date: string | null; deadline: string | null; appointment_date: string | null;
   drive_link: string | null; note: string | null; detail: string | null;
   parent_sku_refs: { code: string; id: string }[]; parent_sku_drafts?: string[] | null;
@@ -537,7 +537,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
           <div className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl bg-white p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
             <div className="mb-2 text-sm font-semibold text-slate-800">เปลี่ยนสถานะ</div>
-            {statusMeta.opts.map(([key, label]) => {
+            {/* แบรนด์เรา = ไม่มีสถานะ "เฉพาะงานลูกค้า" (กฎกลางเดียวกับบอร์ด/ป๊อปอัป) */}
+            {statusOptsFor(statusMeta, isOwnBrandJob(sheet.brand), sheet.status).map(([key, label]) => {
               const on = key === sheet.status; const color = statusMeta.colorHex[key] ?? "#94a3b8";
               return (
                 <button key={key} type="button" onClick={() => { setStatusSheet(false); if (!on) void patchField({ status: key }, "สถานะ"); }}

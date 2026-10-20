@@ -5,6 +5,8 @@
 // ใช้กับ entity ไหนก็ได้ (ส่ง entityType) — อ่าน/แก้ erp_workflow_states ผ่าน /api/admin/workflows
 // เพิ่ม / แก้ชื่อ / เปลี่ยนสี / สลับลำดับ / ตั้งเป็นสถานะปิดงาน / ลบ — แล้วกดบันทึกทีเดียว
 // ใช้: <WorkflowStatusManager open={x} onClose={..} entityType="design_sheet" actor={email} onChanged={reload} />
+// customerOnlyOption = โชว์ช่อง "👤 เฉพาะงานลูกค้า" (erp_workflow_states.customer_only) — แบรนด์เรา (brands.is_customer_job = false)
+//   ไม่เห็นสถานะนั้น · กฎกลางอยู่ที่ lib/design-sheets-meta (isOwnBrandJob / statusOptsFor) · ไม่ส่งค่า = DB คงค่าเดิม
 // ============================================================
 
 import { useEffect, useState } from "react";
@@ -23,10 +25,11 @@ const COLORS: { key: Color; label: string; hex: string }[] = [
   { key: "purple",  label: "ม่วง",   hex: "#a855f7" },
 ];
 
-type Row = { id: string | null; state_key: string; label: string; color: Color; is_terminal: boolean };
+// lock_edit พกไว้ส่งกลับตอนบันทึก (ป๊อปนี้ไม่มีช่องแก้ แต่ต้องไม่ไปล้างค่าที่ตั้งไว้ใน /admin/workflows)
+type Row = { id: string | null; state_key: string; label: string; color: Color; is_terminal: boolean; lock_edit: boolean; customer_only: boolean };
 
 export function WorkflowStatusManager({
-  open, onClose, entityType, actor, onChanged,
+  open, onClose, entityType, actor, onChanged, customerOnlyOption = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -35,6 +38,8 @@ export function WorkflowStatusManager({
   actor?: string | null;
   /** เรียกหลังบันทึกสำเร็จ เพื่อให้หน้าหลักโหลดสถานะใหม่ */
   onChanged?: () => void;
+  /** โชว์ช่องติ๊ก "เฉพาะงานลูกค้า" (เช่น ใบงานออกแบบ — แบรนด์เราไม่มีขั้นส่งลูกค้า) */
+  customerOnlyOption?: boolean;
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<Row[]>([]);
@@ -52,7 +57,7 @@ export function WorkflowStatusManager({
         if (!alive) return;
         const full = j.data as WorkflowFull | null;
         const states = (full?.states ?? []).slice().sort((a, b) => a.sort_order - b.sort_order);
-        setRows(states.map((s) => ({ id: s.id, state_key: s.state_key, label: s.label, color: s.color, is_terminal: s.is_terminal })));
+        setRows(states.map((s) => ({ id: s.id, state_key: s.state_key, label: s.label, color: s.color, is_terminal: s.is_terminal, lock_edit: !!s.lock_edit, customer_only: !!s.customer_only })));
       })
       .catch(() => { if (alive) toast.error("โหลดสถานะไม่สำเร็จ"); })
       .finally(() => { if (alive) setLoading(false); });
@@ -73,7 +78,7 @@ export function WorkflowStatusManager({
     const used = new Set(rows.map((r) => r.state_key));
     let key = ""; let n = rows.length + 1;
     do { key = `state_${n}`; n++; } while (used.has(key));
-    setRows((list) => [...list, { id: null, state_key: key, label: "", color: "slate", is_terminal: false }]);
+    setRows((list) => [...list, { id: null, state_key: key, label: "", color: "slate", is_terminal: false, lock_edit: false, customer_only: false }]);
   };
 
   const save = async () => {
@@ -91,7 +96,8 @@ export function WorkflowStatusManager({
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ kind: "state", actor: actor ?? null, state: {
             id: r.id, entity_type: entityType, state_key: r.state_key, label: r.label.trim(),
-            color: r.color, is_terminal: r.is_terminal, sort_order: (i + 1) * 10,
+            color: r.color, is_terminal: r.is_terminal, lock_edit: r.lock_edit, sort_order: (i + 1) * 10,
+            ...(customerOnlyOption ? { customer_only: r.customer_only } : {}),
           } }),
         });
         const j = await res.json(); if (j.error) throw new Error(j.error);
@@ -142,6 +148,13 @@ export function WorkflowStatusManager({
                 <input type="checkbox" checked={r.is_terminal} onChange={(e) => setRow(i, { is_terminal: e.target.checked })} className="rounded border-slate-300" />
                 ปิดงาน
               </label>
+              {customerOnlyOption && (
+                <label title="ติ๊ก = สถานะนี้มีเฉพาะงานลูกค้า · แบรนด์เรา (ไม่ได้ติ๊ก 👤 งานลูกค้า ในหน้าแบรนด์) จะไม่เห็นบนบอร์ดและเลือกไม่ได้"
+                  className="inline-flex items-center gap-1 text-xs text-violet-700 cursor-pointer select-none whitespace-nowrap">
+                  <input type="checkbox" checked={r.customer_only} onChange={(e) => setRow(i, { customer_only: e.target.checked })} className="rounded border-slate-300" />
+                  👤 เฉพาะงานลูกค้า
+                </label>
+              )}
               <button onClick={() => removeRow(i)} title="ลบสถานะ" className="h-8 w-8 text-rose-500 hover:bg-rose-50 rounded-lg">🗑</button>
             </div>
           ))}

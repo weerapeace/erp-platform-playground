@@ -31,7 +31,7 @@ import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-d
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
 import { RichTextEditor } from "@/components/rich-text";
 import type { Attachment } from "@/app/api/attachments/route";
-import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import type { SkuPickerValue } from "@/components/pickers";
@@ -54,7 +54,7 @@ import dynamic from "next/dynamic";
 // แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 
-type Brand = { id: string; name: string; color: string | null };
+type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 type CostExtra = { label: string; amount: number };
 // ค่าใช้จ่ายเพิ่มเริ่มต้น (แก้/ลบ/เพิ่มได้)
 const DEFAULT_COST_EXTRA: CostExtra[] = [
@@ -1761,7 +1761,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 <span className="text-[11px] text-slate-500">สถานะ</span>
                 <select value={form.status} onChange={(e) => patch({ status: e.target.value })} disabled={!canEdit}
                   className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
-                  {wfMeta.opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  {/* แบรนด์เรา (ไม่ได้ติ๊ก 👤 งานลูกค้า) = ไม่มีสถานะ "เฉพาะงานลูกค้า" (กฎกลาง statusOptsFor) */}
+                  {statusOptsFor(wfMeta, isOwnBrandJob(brands.find((b) => b.id === form.brand_id)), form.status).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   {/* สถานะเดิมของใบนี้ที่ถูกลบออกจาก workflow แล้ว — ยังโชว์ให้เลือกค้างไว้ได้ ไม่พัง */}
                   {form.status && !wfMeta.map[form.status] && <option value={form.status}>{form.status} (สถานะเก่า)</option>}
                 </select>
@@ -2343,7 +2344,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
 {/* จัดการสถานะงาน (โซนบนกระดาน) — เปิดจากปุ่มบนหน้า Canvas */}
       <WorkflowStatusManager open={statusMgr} onClose={() => setStatusMgr(false)}
-        entityType="design_sheet" actor={user?.email ?? null} onChanged={reloadStatuses} />
+        entityType="design_sheet" actor={user?.email ?? null} onChanged={reloadStatuses} customerOnlyOption />
 
       {/* Wizard สร้าง Parent SKU + SKU ลูก จากใบงาน */}
         {presentOpen && form?.id && <DesignSheetPresentPanel sheetId={form.id} open={presentOpen} onClose={() => setPresentOpen(false)} />}

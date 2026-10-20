@@ -22,6 +22,8 @@ export type WorkflowState = {
   is_terminal: boolean;
   lock_edit:   boolean;
   sort_order:  number;
+  /** ใช้เฉพาะงานลูกค้า — แบรนด์เรา (brands.is_customer_job = false) ไม่เห็นสถานะนี้ */
+  customer_only?: boolean;
 };
 
 export type WorkflowTransition = {
@@ -95,6 +97,8 @@ export async function PATCH(request: NextRequest) {
       p_lock_edit:   s.lock_edit ?? false,
       p_sort_order:  s.sort_order ?? 100,
       p_actor:       body.actor ?? null,
+      // ไม่ส่งมา = คงค่าเดิมในฐานข้อมูล (หน้าที่ไม่รู้จักช่องนี้ จะไม่ไปล้างค่า)
+      p_customer_only: typeof s.customer_only === "boolean" ? s.customer_only : null,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ data, error: null });

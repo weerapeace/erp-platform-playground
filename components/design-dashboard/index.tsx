@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import type { AuditLogEntry } from "@/app/api/audit-logs/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { apiFetch } from "@/lib/api";
-import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { buildStatusMeta, isOwnBrandJob, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { FloatingDropdown } from "@/components/floating-dropdown";
@@ -46,6 +46,7 @@ type BrandSummary = {
   total: number;
   active: number;
   urgent: number;
+  own: boolean;   // แบรนด์เรา (ไม่ได้ติ๊ก 👤 งานลูกค้า ในหน้าแบรนด์)
 };
 
 type StatusColumn = {
@@ -53,7 +54,17 @@ type StatusColumn = {
   label: string;
   color: string;
   old?: boolean;
+  notForOwn?: boolean;   // สถานะเฉพาะงานลูกค้า แต่มีงานแบรนด์เราค้างอยู่ → โชว์พร้อมคำเตือน (งานไม่หายเงียบ ๆ)
 };
+
+// แถบแบรนด์แบ่ง 2 กลุ่ม (เจ้าของเลือก: ไม่ปนกัน) — งานลูกค้า = บอร์ดครบทุกสถานะ · แบรนด์เรา = ตัดสถานะ "เฉพาะงานลูกค้า"
+type BrandGroup = "customer" | "own";
+const GROUP_KEY: Record<BrandGroup, string> = { customer: "GROUP:customer", own: "GROUP:own" };
+const GROUP_LABEL: Record<BrandGroup, { title: string; all: string; icon: string }> = {
+  customer: { title: "งานลูกค้า", all: "ทั้งหมดงานลูกค้า", icon: "👤" },
+  own: { title: "แบรนด์เรา", all: "ทั้งหมดแบรนด์เรา", icon: "🏷️" },
+};
+const BRAND_GROUPS: BrandGroup[] = ["customer", "own"];
 
 const DEFAULT_BRAND_COLOR = "#94a3b8";
 // คอลัมน์สถานะที่ "ซ่อนเป็นค่าเริ่มต้น" บนบอร์ด (เจ้าของขอ: ยกเลิก + ทำตัวอย่างใบเดียว) — ผู้ใช้เปิดกลับได้ จำรายคน
@@ -76,6 +87,11 @@ function brandKeyOf(sheet: DesignSheetListItem): string {
 
 function brandNameOf(sheet: DesignSheetListItem): string {
   return sheet.brand_name ?? "ไม่ระบุแบรนด์";
+}
+
+// ใบงานนี้เป็นของแบรนด์เราไหม (กฎกลาง isOwnBrandJob) — ไม่ระบุแบรนด์ = งานลูกค้า
+function sheetIsOwn(sheet: DesignSheetListItem): boolean {
+  return isOwnBrandJob(sheet.brand_id && sheet.brand_is_customer_job !== null ? { is_customer_job: sheet.brand_is_customer_job } : null);
 }
 
 function daysUntil(date: string | null): number | null {
@@ -184,7 +200,7 @@ export function DesignDashboard() {
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
-  const [selectedBrandKey, setSelectedBrandKey] = useState("ALL");
+  const [selectedBrandKey, setSelectedBrandKey] = useState(GROUP_KEY.customer);   // แบรนด์เดียว หรือ "ทั้งกลุ่ม" (GROUP_KEY)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -217,8 +233,9 @@ export function DesignDashboard() {
       : galleryGridStyle
   ), [isPhone, layout, galleryCols, galleryGridStyle]);
   const [brandLogos, setBrandLogos] = useState<Record<string, string>>({});   // brand id → logo R2 key (จาก /api/brands)
-  const [othersOpen, setOthersOpen] = useState(false);                        // ดรอปดาวน์ "แบรนด์อื่นๆ"
-  const othersAnchorRef = useRef<HTMLDivElement>(null);                       // จุดยึดของดรอปดาวน์ (ให้ของกลางลอยทับได้ ไม่โดนการ์ดข้างล่างบัง)
+  const [othersOpen, setOthersOpen] = useState<BrandGroup | null>(null);      // ดรอปดาวน์ "แบรนด์อื่นๆ" ของกลุ่มไหน
+  // จุดยึดของดรอปดาวน์ต่อกลุ่ม (ให้ของกลางลอยทับได้ ไม่โดนการ์ดข้างล่างบัง)
+  const othersAnchorRefs = { customer: useRef<HTMLDivElement>(null), own: useRef<HTMLDivElement>(null) };
   // โหลดโลโก้แบรนด์ (จาก /master/brands → brands.logo_url) มาโชว์ในการ์ดแบรนด์แถวบน
   useEffect(() => {
     let alive = true;
@@ -355,6 +372,7 @@ export function DesignDashboard() {
         total: 0,
         active: 0,
         urgent: 0,
+        own: sheetIsOwn(sheet),
       };
       current.total += 1;
       if (!statusMeta.finished.has(sheet.status)) current.active += 1;
@@ -364,11 +382,18 @@ export function DesignDashboard() {
     return Array.from(map.values()).sort((a, b) => b.active - a.active || a.name.localeCompare(b.name, "th"));
   }, [sheets, statusMeta]);
 
+  const isGroupKey = selectedBrandKey === GROUP_KEY.customer || selectedBrandKey === GROUP_KEY.own;
   useEffect(() => {
-    if (selectedBrandKey !== "ALL" && !brandSummaries.some((brand) => brand.key === selectedBrandKey)) {
-      setSelectedBrandKey("ALL");
+    if (loading) return;   // ยังโหลดไม่เสร็จ (ยังไม่มีแบรนด์) — อย่าเพิ่งรีเซ็ต
+    if (!isGroupKey && !brandSummaries.some((brand) => brand.key === selectedBrandKey)) {
+      setSelectedBrandKey(GROUP_KEY.customer);
     }
-  }, [brandSummaries, selectedBrandKey]);
+  }, [brandSummaries, selectedBrandKey, isGroupKey, loading]);
+  const selectedBrand = brandSummaries.find((brand) => brand.key === selectedBrandKey) ?? null;
+  // กลุ่มที่กำลังดู: เลือกแบรนด์เดียว = กลุ่มของแบรนด์นั้น · เลือก "ทั้งหมด" ของกลุ่ม = กลุ่มนั้น
+  const selectedGroup: BrandGroup = selectedBrand ? (selectedBrand.own ? "own" : "customer") : selectedBrandKey === GROUP_KEY.own ? "own" : "customer";
+  const ownView = selectedGroup === "own";
+  const scopeLabel = selectedBrand ? selectedBrand.name : GROUP_LABEL[selectedGroup].all;
 
   const statusColumns = useMemo<StatusColumn[]>(() => {
     const known = new Set<string>();
@@ -386,7 +411,8 @@ export function DesignDashboard() {
   const filteredSheets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return sheets.filter((sheet) => {
-      if (selectedBrandKey !== "ALL" && brandKeyOf(sheet) !== selectedBrandKey) return false;
+      if (isGroupKey) { if (sheetIsOwn(sheet) !== (selectedBrandKey === GROUP_KEY.own)) return false; }
+      else if (brandKeyOf(sheet) !== selectedBrandKey) return false;
       if (q && !`${sheet.code} ${sheet.name} ${sheet.brand_name ?? ""}`.toLowerCase().includes(q)) return false;
       if (quickFilter === "active" && statusMeta.finished.has(sheet.status)) return false;
       if (quickFilter === "urgent" && !isUrgent(sheet, statusMeta)) return false;
@@ -394,23 +420,35 @@ export function DesignDashboard() {
       if (quickFilter === "closed" && !statusMeta.finished.has(sheet.status)) return false;
       return true;
     });
-  }, [selectedBrandKey, sheets, search, quickFilter, statusMeta]);
+  }, [selectedBrandKey, isGroupKey, sheets, search, quickFilter, statusMeta]);
 
-  const selectedBrand = brandSummaries.find((brand) => brand.key === selectedBrandKey) ?? null;
-  // แถวแบรนด์แนวนอน: โชว์ 4 อันดับแรก (ตามงานกำลังเดิน) + ที่เหลือไปอยู่ดรอปดาวน์ "อื่นๆ"
+  // แถวแบรนด์แนวนอน แยก 2 กลุ่ม: แต่ละกลุ่มโชว์ 4 อันดับแรก (ตามงานกำลังเดิน) + ที่เหลือไปอยู่ดรอปดาวน์ "อื่นๆ" ของกลุ่มนั้น
   const orderedAll = useMemo(() => {
     const idx = (k: string) => { const i = brandPrefs.order.indexOf(k); return i === -1 ? 1e6 : i; };
     return [...brandSummaries].sort((a, b) => (idx(a.key) - idx(b.key)) || (b.active - a.active));
   }, [brandSummaries, brandPrefs.order]);
-  const visibleBrands = orderedAll.filter((b) => !brandPrefs.hidden.includes(b.key));
-  const hiddenBrands = orderedAll.filter((b) => brandPrefs.hidden.includes(b.key));
-  const topBrands = visibleBrands.slice(0, 4);          // โชว์ 4 อันดับแรกที่ไม่ซ่อน
-  const otherBrands = [...visibleBrands.slice(4), ...hiddenBrands];   // ที่เหลือ + ที่ซ่อน → ไปอยู่ "อื่นๆ"
-  const othersSelected = otherBrands.find((b) => b.key === selectedBrandKey) ?? null;
+  const groupView = (group: BrandGroup) => {
+    const inGroup = orderedAll.filter((b) => b.own === (group === "own"));
+    const visible = inGroup.filter((b) => !brandPrefs.hidden.includes(b.key));
+    const hidden = inGroup.filter((b) => brandPrefs.hidden.includes(b.key));
+    const others = [...visible.slice(4), ...hidden];   // ที่เหลือ + ที่ซ่อน → ไปอยู่ "อื่นๆ"
+    return {
+      top: visible.slice(0, 4),                        // โชว์ 4 อันดับแรกที่ไม่ซ่อน
+      others,
+      othersSelected: others.find((b) => b.key === selectedBrandKey) ?? null,
+      active: inGroup.reduce((n, b) => n + b.active, 0),
+      total: inGroup.reduce((n, b) => n + b.total, 0),
+      count: inGroup.length,
+    };
+  };
+  const groups = { customer: groupView("customer"), own: groupView("own") };
+  const topBrands = [...groups.customer.top, ...groups.own.top];   // ใช้ในป๊อปตั้งค่าแบรนด์ (ป้าย "โชว์")
   const moveBrand = (key: string, dir: -1 | 1) => {
     const keys = orderedAll.map((b) => b.key);
-    const i = keys.indexOf(key); const j = i + dir;
-    if (i < 0 || j < 0 || j >= keys.length) return;
+    const i = keys.indexOf(key); if (i < 0) return;
+    let j = i + dir;
+    while (j >= 0 && j < keys.length && orderedAll[j].own !== orderedAll[i].own) j += dir;   // สลับเฉพาะในกลุ่มเดียวกัน
+    if (j < 0 || j >= keys.length) return;
     [keys[i], keys[j]] = [keys[j], keys[i]];
     saveBrandPrefs({ ...brandPrefs, order: keys });
   };
@@ -428,13 +466,16 @@ export function DesignDashboard() {
   const activeJobs = filteredSheets.filter((sheet) => !statusMeta.finished.has(sheet.status)).length;
   const urgentJobs = filteredSheets.filter((sheet) => isUrgent(sheet, statusMeta)).length;
   const finishedJobs = filteredSheets.filter((sheet) => statusMeta.finished.has(sheet.status)).length;
-  const visibleTotal = selectedBrand ? selectedBrand.total : total;
+  const visibleTotal = selectedBrand ? selectedBrand.total : groups[selectedGroup].total;
   const loadedLimitNote = total > sheets.length ? `แสดงล่าสุด ${sheets.length.toLocaleString("th-TH")} จาก ${total.toLocaleString("th-TH")} งาน` : "ข้อมูลจากระบบจริง";
 
   const allBoardColumns = statusColumns.map((column) => ({
     ...column,
     sheets: filteredSheets.filter((sheet) => sheet.status === column.key),
-  }));
+  }))
+    // แบรนด์เรา: ตัดสถานะ "เฉพาะงานลูกค้า" (ตั้งที่ปุ่มจัดการสถานะ) — ถ้ามีงานค้างอยู่ในสถานะนั้น โชว์ต่อพร้อมเตือน งานไม่หาย
+    .filter((column) => !ownView || !statusMeta.customerOnly.has(column.key) || column.sheets.length > 0)
+    .map((column) => (ownView && statusMeta.customerOnly.has(column.key) ? { ...column, notForOwn: true } : column));
   // บอร์ด/แท็บสถานะมือถือ ใช้เฉพาะคอลัมน์ที่ไม่ได้ซ่อน · ที่ซ่อนไว้เปิดกลับได้จากปุ่ม 👁 (สถิติด้านบนยังนับทุกสถานะ)
   const hiddenSet = new Set(hiddenCols);
   const boardColumns = allBoardColumns.filter((c) => !hiddenSet.has(c.key));
@@ -497,7 +538,7 @@ export function DesignDashboard() {
   }
 
   function handleColumnDragOver(event: DragEvent<HTMLDivElement>, column: StatusColumn) {
-    if (column.old || movingSheetId) return;
+    if (column.old || column.notForOwn || movingSheetId) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (dropTargetStatus !== column.key) setDropTargetStatus(column.key);
@@ -510,7 +551,7 @@ export function DesignDashboard() {
   }
 
   function handleColumnDrop(event: DragEvent<HTMLDivElement>, column: StatusColumn) {
-    if (column.old) return;
+    if (column.old || column.notForOwn) return;
     event.preventDefault();
     const sheetId = event.dataTransfer.getData("text/plain");
     setDropTargetStatus(null);
@@ -598,7 +639,7 @@ export function DesignDashboard() {
               <BrandSlot theme={brandTheme} id="header_left" className="shrink-0" />
               <div className="min-w-0">
                 <h1 className="truncate text-lg font-semibold leading-tight text-slate-900">แผนที่ภารกิจงานออกแบบ</h1>
-                <p className="truncate text-[11px] text-slate-400">{selectedBrand ? selectedBrand.name : "ทุกแบรนด์"} · {activeJobs} งานเดินอยู่{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} ใกล้ครบ</span></> : null}</p>
+                <p className="truncate text-[11px] text-slate-400">{scopeLabel} · {activeJobs} งานเดินอยู่{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} ใกล้ครบ</span></> : null}</p>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef}>
@@ -676,23 +717,31 @@ export function DesignDashboard() {
 
         {/* แบรนด์: แถวบนสุด (เต็มกว้าง) */}
         {isPhone ? (
-          /* ── มือถือ: แบรนด์เป็นชิปแถวเดียวเลื่อนซ้าย-ขวา (ตั้งค่าแบรนด์อยู่ในเมนู ⋯) ── */
-          <div className="-mx-3 mb-3 flex gap-1.5 overflow-x-auto px-3 pb-1">
-            <button type="button" onClick={() => setSelectedBrandKey("ALL")}
-              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
-              ทั้งหมด <span className="opacity-60">{brandSummaries.reduce((n, b) => n + b.active, 0)}</span>
-            </button>
-            {[...topBrands, ...otherBrands].map((brand) => {
-              const selected = selectedBrandKey === brand.key;
+          /* ── มือถือ: แบรนด์เป็นชิป 2 แถว (งานลูกค้า / แบรนด์เรา) แต่ละแถวเลื่อนซ้าย-ขวา (ตั้งค่าแบรนด์อยู่ในเมนู ⋯) ── */
+          <div className="mb-3 space-y-1.5">
+            {BRAND_GROUPS.map((group) => {
+              const g = groups[group];
+              const allOn = selectedBrandKey === GROUP_KEY[group];
               return (
-                <button key={brand.key} type="button" onClick={() => setSelectedBrandKey(brand.key)}
-                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border py-0 pl-1 pr-2.5 text-xs font-medium ${selected ? "bg-white text-slate-900" : "border-slate-200 bg-white text-slate-600"}`}
-                  style={selected ? { borderColor: brand.color, boxShadow: `0 0 0 1.5px ${brand.color}` } : undefined}>
-                  {brandMark(brand, "h-6 w-6")}
-                  <span className="max-w-[110px] truncate">{brand.name}</span>
-                  <span className="opacity-60">{brand.active}</span>
-                  {brand.urgent > 0 && <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />}
-                </button>
+                <div key={group} className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 pb-1">
+                  <button type="button" onClick={() => setSelectedBrandKey(GROUP_KEY[group])}
+                    className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium ${allOn ? "border-slate-900 bg-slate-900 text-white" : group === "own" ? "border-teal-200 bg-teal-50 text-teal-800" : "border-violet-200 bg-violet-50 text-violet-800"}`}>
+                    {GROUP_LABEL[group].icon} {GROUP_LABEL[group].all} <span className="opacity-60">{g.active}</span>
+                  </button>
+                  {[...g.top, ...g.others].map((brand) => {
+                    const selected = selectedBrandKey === brand.key;
+                    return (
+                      <button key={brand.key} type="button" onClick={() => setSelectedBrandKey(brand.key)}
+                        className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border py-0 pl-1 pr-2.5 text-xs font-medium ${selected ? "bg-white text-slate-900" : "border-slate-200 bg-white text-slate-600"}`}
+                        style={selected ? { borderColor: brand.color, boxShadow: `0 0 0 1.5px ${brand.color}` } : undefined}>
+                        {brandMark(brand, "h-6 w-6")}
+                        <span className="max-w-[110px] truncate">{brand.name}</span>
+                        <span className="opacity-60">{brand.active}</span>
+                        {brand.urgent > 0 && <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />}
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
@@ -702,7 +751,7 @@ export function DesignDashboard() {
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-slate-800">แบรนด์จากงานจริง</h2>
-              <p className="text-xs text-slate-400">คลิกเพื่อกรองบอร์ด</p>
+              <p className="text-xs text-slate-400">คลิกเพื่อกรองบอร์ด · แยกงานลูกค้า / แบรนด์เรา ตามช่อง 👤 งานลูกค้า ใน<a href="/master/brands" className="text-blue-600 hover:underline">หน้าแบรนด์</a></p>
             </div>
             <div className="flex items-center gap-2">
               <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
@@ -711,60 +760,74 @@ export function DesignDashboard() {
             </div>
           </div>
 
-          {/* จอคอม = ห่อบรรทัด · แท็บเล็ต/มือถือ = แถวเดียวเลื่อนซ้าย-ขวา (การ์ดแบรนด์ไม่กินพื้นที่แนวตั้ง) */}
-          <div className={isDesktop ? "flex flex-wrap items-stretch gap-2" : "flex items-stretch gap-2 overflow-x-auto pb-1 [&>*]:shrink-0"}>
+          {/* 2 กลุ่ม (งานลูกค้า / แบรนด์เรา) ไม่ปนกัน — แต่ละกลุ่มมีปุ่ม "ทั้งหมด" ของตัวเอง
+              จอคอม = ห่อบรรทัด · แท็บเล็ต = แถวละกลุ่ม เลื่อนซ้าย-ขวา (การ์ดแบรนด์ไม่กินพื้นที่แนวตั้ง) */}
+          <div className="flex items-stretch gap-2">
             <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
-              className="flex flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ เพิ่มงาน</button>
+              className="flex shrink-0 flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ เพิ่มงาน</button>
 
-            <button data-gg-all-button onClick={() => setSelectedBrandKey("ALL")}
-              className={`flex flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-              <span className="text-sm font-semibold">ทั้งหมด</span>
-              <span className="text-[11px] opacity-70">{activeJobs} งานเดินอยู่</span>
-            </button>
+            <div className="min-w-0 flex-1 space-y-2">
+              {BRAND_GROUPS.map((group) => {
+                const g = groups[group];
+                const allOn = selectedBrandKey === GROUP_KEY[group];
+                const anchorRef = othersAnchorRefs[group];
+                return (
+                  <div key={group} data-gg-brand-group={group}
+                    className={isDesktop ? "flex flex-wrap items-stretch gap-2" : "flex items-stretch gap-2 overflow-x-auto pb-1 [&>*]:shrink-0"}>
+                    <button data-gg-all-button onClick={() => setSelectedBrandKey(GROUP_KEY[group])}
+                      title={group === "own" ? "แบรนด์ของเราเอง — บอร์ดไม่มีขั้นส่งลูกค้า" : "งานที่ทำให้ลูกค้า — บอร์ดครบทุกขั้น"}
+                      className={`flex min-w-[150px] flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${allOn ? "border-slate-900 bg-slate-900 text-white" : group === "own" ? "border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100" : "border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100"}`}>
+                      <span className="text-sm font-semibold">{GROUP_LABEL[group].icon} {GROUP_LABEL[group].all}</span>
+                      <span className="text-[11px] opacity-70">{g.active} งานเดินอยู่</span>
+                    </button>
 
-            {topBrands.map((brand) => {
-              const selected = selectedBrandKey === brand.key;
-              return (
-                <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
-                  onClick={() => setSelectedBrandKey(brand.key)}
-                  className={`flex items-center rounded-xl border bg-white text-left transition hover:-translate-y-0.5 ${isPhone ? "gap-2 px-3 py-2" : "gap-3 px-4 py-3"}`}
-                  style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
-                  {brandMark(brand, isPhone ? "h-9 w-9" : "h-12 w-12")}
-                  <div className="min-w-0">
-                    <div className={`truncate font-semibold text-slate-800 ${isPhone ? "max-w-[120px] text-sm" : "max-w-[170px] text-base"}`}>{brand.name}</div>
-                    <div className="text-xs text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
+                    {g.top.map((brand) => {
+                      const selected = selectedBrandKey === brand.key;
+                      return (
+                        <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
+                          onClick={() => setSelectedBrandKey(brand.key)}
+                          className={`flex items-center rounded-xl border bg-white text-left transition hover:-translate-y-0.5 ${isPhone ? "gap-2 px-3 py-2" : "gap-3 px-4 py-3"}`}
+                          style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
+                          {brandMark(brand, isPhone ? "h-9 w-9" : "h-12 w-12")}
+                          <div className="min-w-0">
+                            <div className={`truncate font-semibold text-slate-800 ${isPhone ? "max-w-[120px] text-sm" : "max-w-[170px] text-base"}`}>{brand.name}</div>
+                            <div className="text-xs text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+
+                    {g.others.length > 0 && (
+                      // ⚠️ รายการ "แบรนด์อื่นๆ" ต้องใช้ FloatingDropdown ของกลาง (portal → body + fixed)
+                      // ของเดิมเป็น absolute z-30 อยู่ในแถบแบรนด์ → โดนการ์ดสรุปข้างล่างทับ ("จม") มองไม่เห็นรายการ
+                      <div className="relative" data-brands-others ref={anchorRef}>
+                        <button onClick={() => setOthersOpen((o) => (o === group ? null : group))}
+                          className={`flex h-full flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${g.othersSelected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                          <span className="max-w-[140px] truncate text-sm font-semibold">{g.othersSelected ? g.othersSelected.name : "แบรนด์อื่นๆ"} ▾</span>
+                          <span className="text-[11px] opacity-70">{g.othersSelected ? `${g.othersSelected.active} เดิน` : `อีก ${g.others.length} แบรนด์`}</span>
+                        </button>
+                        <FloatingDropdown anchorRef={anchorRef} open={othersOpen === group} onClose={() => setOthersOpen(null)} minWidth={240} maxWidth={320}>
+                          <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
+                            {g.others.map((brand) => (
+                              <button key={brand.key} onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(null); }}
+                                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
+                                {brandMark(brand, "h-6 w-6")}
+                                <span className="min-w-0 flex-1 truncate text-slate-700">{brand.name}</span>
+                                <span className="text-[11px] text-slate-400">{brand.active}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </FloatingDropdown>
+                      </div>
+                    )}
+
+                    {!loading && g.count === 0 && (
+                      <div className="flex items-center rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-400">ยังไม่มีใบงานของ{GROUP_LABEL[group].title}</div>
+                    )}
                   </div>
-                </button>
-              );
-            })}
-
-            {otherBrands.length > 0 && (
-              // ⚠️ รายการ "แบรนด์อื่นๆ" ต้องใช้ FloatingDropdown ของกลาง (portal → body + fixed)
-              // ของเดิมเป็น absolute z-30 อยู่ในแถบแบรนด์ → โดนการ์ดสรุปข้างล่างทับ ("จม") มองไม่เห็นรายการ
-              <div className="relative" data-brands-others ref={othersAnchorRef}>
-                <button onClick={() => setOthersOpen((o) => !o)}
-                  className={`flex h-full flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${othersSelected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                  <span className="max-w-[140px] truncate text-sm font-semibold">{othersSelected ? othersSelected.name : "แบรนด์อื่นๆ"} ▾</span>
-                  <span className="text-[11px] opacity-70">{othersSelected ? `${othersSelected.active} เดิน` : `อีก ${otherBrands.length} แบรนด์`}</span>
-                </button>
-                <FloatingDropdown anchorRef={othersAnchorRef} open={othersOpen} onClose={() => setOthersOpen(false)} minWidth={240} maxWidth={320}>
-                  <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
-                    {otherBrands.map((brand) => (
-                      <button key={brand.key} onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(false); }}
-                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
-                        {brandMark(brand, "h-6 w-6")}
-                        <span className="min-w-0 flex-1 truncate text-slate-700">{brand.name}</span>
-                        <span className="text-[11px] text-slate-400">{brand.active}</span>
-                      </button>
-                    ))}
-                  </div>
-                </FloatingDropdown>
-              </div>
-            )}
-
-            {!loading && brandSummaries.length === 0 && (
-              <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-center text-sm text-slate-400">ยังไม่มีใบงานที่ผูกแบรนด์</div>
-            )}
+                );
+              })}
+            </div>
           </div>
           <BrandSlot theme={brandTheme} id="sidebar_bottom" />
         </aside>
@@ -779,22 +842,34 @@ export function DesignDashboard() {
                 <button onClick={() => setBrandSettingsOpen(false)} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
               </div>
               <div className="flex-1 overflow-auto p-3">
-                <p className="mb-2 text-[11px] text-slate-400">เรียงลำดับด้วยลูกศร ▲▼ · กด 👁 เพื่อซ่อน (ที่ซ่อนไปอยู่ใน &ldquo;แบรนด์อื่นๆ&rdquo;) · โชว์ 4 อันดับแรกที่ไม่ซ่อนเป็นการ์ด · บันทึกอัตโนมัติ (เฉพาะคุณ)</p>
-                {orderedAll.map((brand, i) => {
-                  const hidden = brandPrefs.hidden.includes(brand.key);
-                  const isTop = topBrands.some((b) => b.key === brand.key);
+                <p className="mb-2 text-[11px] text-slate-400">เรียงลำดับด้วยลูกศร ▲▼ · กด 👁 เพื่อซ่อน (ที่ซ่อนไปอยู่ใน &ldquo;แบรนด์อื่นๆ&rdquo;) · แต่ละกลุ่มโชว์ 4 อันดับแรกที่ไม่ซ่อนเป็นการ์ด · บันทึกอัตโนมัติ (เฉพาะคุณ)</p>
+                <p className="mb-3 rounded-md bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
+                  แบรนด์ไหนเป็น &ldquo;งานลูกค้า&rdquo; หรือ &ldquo;แบรนด์เรา&rdquo; ตั้งที่ช่อง 👤 งานลูกค้า ใน <a href="/master/brands" className="text-blue-600 hover:underline">หน้าแบรนด์</a> (มีผลกับทุกคน) · แบรนด์เราจะไม่เห็นสถานะที่ติ๊ก &ldquo;เฉพาะงานลูกค้า&rdquo; ในปุ่มจัดการสถานะ
+                </p>
+                {BRAND_GROUPS.map((group) => {
+                  const list = orderedAll.filter((b) => b.own === (group === "own"));
+                  if (list.length === 0) return null;
                   return (
-                    <div key={brand.key} className={`mb-1 flex items-center gap-2 rounded-lg border px-2 py-1.5 ${hidden ? "border-slate-100 bg-slate-50 opacity-70" : "border-slate-200"}`}>
-                      <div className="flex flex-col text-[10px] leading-none">
-                        <button onClick={() => moveBrand(brand.key, -1)} disabled={i === 0} className="py-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-25">▲</button>
-                        <button onClick={() => moveBrand(brand.key, 1)} disabled={i === orderedAll.length - 1} className="py-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-25">▼</button>
-                      </div>
-                      {brandMark(brand, "h-7 w-7")}
-                      <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{brand.name}</span>
-                      <span className="text-[11px] text-slate-400">{brand.active} เดิน</span>
-                      {isTop && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">โชว์</span>}
-                      <button onClick={() => toggleHiddenBrand(brand.key)} title={hidden ? "เลิกซ่อน" : "ซ่อน"}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-slate-100">{hidden ? "🙈" : "👁"}</button>
+                    <div key={group} className="mb-3">
+                      <div className={`mb-1 text-xs font-semibold ${group === "own" ? "text-teal-700" : "text-violet-700"}`}>{GROUP_LABEL[group].icon} {GROUP_LABEL[group].title}</div>
+                      {list.map((brand, i) => {
+                        const hidden = brandPrefs.hidden.includes(brand.key);
+                        const isTop = topBrands.some((b) => b.key === brand.key);
+                        return (
+                          <div key={brand.key} className={`mb-1 flex items-center gap-2 rounded-lg border px-2 py-1.5 ${hidden ? "border-slate-100 bg-slate-50 opacity-70" : "border-slate-200"}`}>
+                            <div className="flex flex-col text-[10px] leading-none">
+                              <button onClick={() => moveBrand(brand.key, -1)} disabled={i === 0} className="py-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-25">▲</button>
+                              <button onClick={() => moveBrand(brand.key, 1)} disabled={i === list.length - 1} className="py-0.5 text-slate-400 hover:text-slate-700 disabled:opacity-25">▼</button>
+                            </div>
+                            {brandMark(brand, "h-7 w-7")}
+                            <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{brand.name}</span>
+                            <span className="text-[11px] text-slate-400">{brand.active} เดิน</span>
+                            {isTop && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">โชว์</span>}
+                            <button onClick={() => toggleHiddenBrand(brand.key)} title={hidden ? "เลิกซ่อน" : "ซ่อน"}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-slate-100">{hidden ? "🙈" : "👁"}</button>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -812,7 +887,7 @@ export function DesignDashboard() {
               <><LoadingCard /><LoadingCard /><LoadingCard /><LoadingCard /></>
             ) : (
               [
-                ["งานทั้งหมด", visibleTotal, selectedBrand ? selectedBrand.name : loadedLimitNote],
+                ["งานทั้งหมด", visibleTotal, total > sheets.length ? loadedLimitNote : scopeLabel],
                 ["กำลังเดินงาน", activeJobs, "ยังไม่จบหรือยกเลิก"],
                 ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
                 ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
@@ -845,7 +920,7 @@ export function DesignDashboard() {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-800">เส้นทางสถานะจาก Workflow กลาง</h2>
-                  <p className="text-xs text-slate-400">{selectedBrand ? selectedBrand.name : "ทุกแบรนด์"} • {filteredSheets.length.toLocaleString("th-TH")} งานที่โหลดมา</p>
+                  <p className="text-xs text-slate-400">{scopeLabel} • {filteredSheets.length.toLocaleString("th-TH")} งานที่โหลดมา</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -970,7 +1045,7 @@ export function DesignDashboard() {
                             className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${on ? "text-white" : "bg-white text-slate-700"}`}
                             style={on ? { backgroundColor: column.color, borderColor: column.color } : { borderColor: `${column.color}66` }}>
                             {!on && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: column.color }} />}
-                            {column.label}
+                            {column.notForOwn && "⚠ "}{column.label}
                             <span className={on ? "opacity-80" : "text-slate-400"}>{column.sheets.length}</span>
                           </button>
                         );
@@ -1032,6 +1107,11 @@ export function DesignDashboard() {
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
                             <div className="text-[11px] text-slate-400">{column.sheets.length} งาน</div>
+                            {column.notForOwn && (
+                              <div className="mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-snug text-amber-700" title="สถานะนี้ติ๊ก “เฉพาะงานลูกค้า” ไว้ — งานแบรนด์เราที่ค้างอยู่ตรงนี้ เปิดใบงานแล้วเปลี่ยนสถานะได้">
+                                ⚠ ขั้นนี้ใช้กับงานลูกค้า — ย้ายงานออกได้
+                              </div>
+                            )}
                           </div>
                           <div className="min-h-[128px] space-y-2">
                             {shown.map((sheet) => {
@@ -1210,6 +1290,7 @@ export function DesignDashboard() {
           entityType="design_sheet"
           actor={null}
           onChanged={refreshDashboard}
+          customerOnlyOption
         />
       )}
 

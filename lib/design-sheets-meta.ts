@@ -35,25 +35,43 @@ const DS_STATUS_HEX: Record<string, string> = {
   design: "#94a3b8", sent_customer: "#3b82f6", revising: "#f59e0b", costing: "#a855f7",
   quoted: "#6366f1", approved: "#10b981", sku_created: "#a855f7", cancelled: "#f43f5e",
 };
-export type WfStatusRow = { state_key: string; label: string; color: string; is_terminal: boolean };
+export type WfStatusRow = { state_key: string; label: string; color: string; is_terminal: boolean; customer_only?: boolean };
 export type StatusMeta = {
   map: Record<string, { label: string; cls: string }>;
   opts: ReadonlyArray<readonly [string, string]>;
   finished: Set<string>;                 // สถานะปิดงาน (is_terminal) — เลิกเตือน deadline
   colorHex: Record<string, string>;      // state_key → สีจริง (หัวโซน Canvas)
+  customerOnly: Set<string>;             // สถานะ "ใช้เฉพาะงานลูกค้า" (ติ๊กในปุ่มจัดการสถานะ) — แบรนด์เราไม่เห็น
 };
+// ชุด fallback (ยังไม่มีสถานะใน workflow) — ขั้นส่งลูกค้ามีเฉพาะงานลูกค้า
+const DS_CUSTOMER_ONLY = new Set(["quoted", "sent_customer"]);
 /** แปลงสถานะจาก workflow เป็นชุดที่หน้าจอใช้ — ไม่มีข้อมูล = ใช้ชุด fallback ในโค้ด */
 export function buildStatusMeta(rows: WfStatusRow[] | null | undefined): StatusMeta {
-  if (!rows || rows.length === 0) return { map: DS_STATUS, opts: DS_STATUS_OPTS, finished: DS_FINISHED, colorHex: DS_STATUS_HEX };
+  if (!rows || rows.length === 0) return { map: DS_STATUS, opts: DS_STATUS_OPTS, finished: DS_FINISHED, colorHex: DS_STATUS_HEX, customerOnly: DS_CUSTOMER_ONLY };
   const map: Record<string, { label: string; cls: string }> = {};
   const colorHex: Record<string, string> = {};
   const finished = new Set<string>();
+  const customerOnly = new Set<string>();
   for (const r of rows) {
     map[r.state_key] = { label: r.label, cls: WF_COLOR_CLS[r.color] ?? WF_COLOR_CLS.slate };
     colorHex[r.state_key] = WF_COLOR_HEX[r.color] ?? WF_COLOR_HEX.slate;
     if (r.is_terminal) finished.add(r.state_key);
+    if (r.customer_only) customerOnly.add(r.state_key);
   }
-  return { map, opts: rows.map((r) => [r.state_key, r.label] as const), finished, colorHex };
+  return { map, opts: rows.map((r) => [r.state_key, r.label] as const), finished, colorHex, customerOnly };
+}
+
+// ---- งานลูกค้า vs แบรนด์เรา (กฎกลาง — บอร์ด / ป๊อปอัปใบงาน / หน้ามือถือ ใช้ตัวเดียวกัน) ----
+/** งานของ "แบรนด์เรา" = แบรนด์ที่ไม่ได้ติ๊ก 👤 งานลูกค้า (หน้าแบรนด์) ·
+ *  ไม่ระบุแบรนด์ / ยังไม่รู้ข้อมูลแบรนด์ = นับเป็นงานลูกค้า (เห็นครบทุกสถานะ งานไม่หาย) */
+export function isOwnBrandJob(brand: { is_customer_job?: boolean | null } | null | undefined): boolean {
+  return !!brand && !brand.is_customer_job;
+}
+/** สถานะที่เลือกได้ — แบรนด์เรา = ตัดสถานะ "ใช้เฉพาะงานลูกค้า" ออก
+ *  (ยกเว้นสถานะที่ใบนี้อยู่ตอนนี้ — โชว์ค้างไว้ ข้อมูลไม่หาย) */
+export function statusOptsFor(meta: StatusMeta, ownBrand: boolean, current?: string | null): ReadonlyArray<readonly [string, string]> {
+  if (!ownBrand) return meta.opts;
+  return meta.opts.filter(([k]) => !meta.customerOnly.has(k) || k === current);
 }
 /** ป้ายสถานะที่ไม่รู้จัก (เช่น สถานะถูกลบออกจาก workflow แล้ว) — โชว์ key เดิมสีเทา ข้อมูลไม่หาย */
 export const UNKNOWN_STATUS_CLS = "bg-slate-100 text-slate-400";
