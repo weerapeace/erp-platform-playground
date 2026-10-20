@@ -4,6 +4,8 @@
  * AssetPicker — ของกลาง "ตัวเลือกรูปจากคลังกลาง" (เสียบในโมดูลไหนก็ได้)
  *
  * 2 แท็บ: เลือกจากคลัง (ค้น/ฟิลเตอร์/เลือกหลายรูป) · อัปโหลดใหม่ (ลากวาง → เด้งเข้าคลัง + เลือกให้เลย)
+ * 🎬 kinds={["image","video"]} = ปุ่มสลับ 🖼 รูป | 🎬 วิดีโอ บนสุด (ช่องที่รับได้ทั้ง 2 ชนิด) · typeFilter="video" = คลังวิดีโออย่างเดียว
+ *    วิดีโอเห็นภาพเฟรมแรก + ชี้แล้วเล่น (ของกลาง VideoThumb) · อัปวิดีโอ/ไฟล์ใหญ่ผ่านตัวอัปโหลดกลาง (lib/media-upload · ถึง 200 MB)
  * คืนรายการ AssetRow ที่เลือกผ่าน onSelect — โมดูลเจ้าของเอาไปเก็บ + เรียก /api/assets/usages บันทึก "ถูกใช้ที่ไหน"
  *
  * ตัวอย่าง:
@@ -20,6 +22,8 @@ import { type AssetType } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { type AssetRow } from "@/app/api/assets/shared";
+import { VideoThumb } from "@/components/video-thumb";
+import { MediaUploadError, SMALL_UPLOAD_BYTES, normalizeMediaFile, uploadMediaAsset } from "@/lib/media-upload";
 
 const TYPE_ICON: Record<AssetType, string> = { image: "🖼️", design: "🎨", document: "📄", video: "🎬", other: "📦" };
 const TYPE_FILTERS: { key: string; label: string }[] = [
@@ -32,7 +36,8 @@ export type AssetPickerProps = {
   onClose: () => void;
   onSelect: (assets: AssetRow[]) => void;
   multiple?: boolean;
-  typeFilter?: AssetType;          // ล็อกให้เลือกได้เฉพาะชนิดนี้ (เช่น "image")
+  typeFilter?: AssetType;          // ล็อกให้เลือกได้เฉพาะชนิดนี้ (เช่น "image" · "video")
+  kinds?: AssetType[];             // 🎬 ชนิดที่เลือกได้ (≥ 2 = ปุ่มสลับบนสุด เช่น ["image","video"]) — ตัวแรก = เปิดมาที่หน้านี้
   title?: string;
   contextLabel?: string;           // ข้อความบอกว่าเลือกให้ record ไหน
   defaultSource?: string;          // ที่มาเริ่มต้น เช่น "artwork" (เปิดมาที่คลัง Artwork เลย)
@@ -41,7 +46,11 @@ export type AssetPickerProps = {
   lockCollectionName?: string;     // ล็อกให้เลือกได้เฉพาะอัลบั้มชื่อนี้ (ซ่อนตัวกรอง+แท็บอัปโหลด) เช่น "งานพิมพ์ DFT UV (Printed)"
 };
 
-export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder, lockCollectionName }: AssetPickerProps) {
+const KIND_LABEL: Partial<Record<AssetType, string>> = { image: "🖼 รูป", video: "🎬 วิดีโอ", document: "📄 เอกสาร", design: "🎨 ออกแบบ" };
+
+export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, kinds, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder, lockCollectionName }: AssetPickerProps) {
+  const firstKind = typeFilter ?? kinds?.[0] ?? "";
+  const kindTabs = !typeFilter && (kinds?.length ?? 0) > 1 ? kinds! : null;
   const toast = useToast();
   const [tab, setTab] = useState<"library" | "upload">("library");
   const [rows, setRows] = useState<AssetRow[]>([]);
@@ -50,7 +59,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [loadingMore, setLoadingMore] = useState(false);
   const PAGE = 120;
   const [search, setSearch] = useState(defaultSearch ?? "");
-  const [type, setType] = useState(typeFilter ?? "");
+  const [type, setType] = useState<string>(firstKind);
   const [source, setSource] = useState(defaultSource ?? "");          // ที่มา: ""=อัปเอง · artwork · odoo_product · all
   const [collectionId, setCollectionId] = useState(""); // อัลบั้ม
   const [tagId, setTagId] = useState("");            // แท็ก
@@ -60,7 +69,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [actor, setActor] = useState<string | null>(null);
 
   useEffect(() => { supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {}); }, []);
-  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(defaultSearch ?? ""); setType(typeFilter ?? ""); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); } }, [open, typeFilter, defaultSource, defaultSearch]);
+  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(defaultSearch ?? ""); setType(firstKind); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); } }, [open, firstKind, defaultSource, defaultSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // โหลดรายการอัลบั้ม + แท็ก (ไว้ทำตัวกรอง) — ครั้งเดียวตอนเปิด
   useEffect(() => {
@@ -130,14 +139,14 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   if (!open) return null;
 
   return (
-    <ERPModal open onClose={onClose} title={title ?? "เลือกรูปจากคลัง"} description={contextLabel} size="lg"
+    <ERPModal open onClose={onClose} title={title ?? (typeFilter === "video" ? "เลือกวิดีโอจากคลัง" : kindTabs ? "เลือกจากคลัง" : "เลือกรูปจากคลัง")} description={contextLabel} size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-sm text-indigo-600 font-medium">{selected.size > 0 ? `เลือกแล้ว ${selected.size} รูป` : "ยังไม่ได้เลือก"}</span>
+          <span className="text-sm text-indigo-600 font-medium">{selected.size > 0 ? `เลือกแล้ว ${selected.size} ${type === "video" ? "คลิป" : type === "image" ? "รูป" : "ไฟล์"}` : "ยังไม่ได้เลือก"}</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
             <button onClick={confirm} disabled={selected.size === 0}
-              className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">ใช้รูปที่เลือก</button>
+              className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{type === "video" ? "ใช้วิดีโอที่เลือก" : type === "image" ? "ใช้รูปที่เลือก" : "ใช้ไฟล์ที่เลือก"}</button>
           </div>
         </div>
       }>
@@ -153,11 +162,21 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
 
       {tab === "library" ? (
         <>
+          {kindTabs && (
+            <div className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist" aria-label="ชนิดไฟล์">
+              {kindTabs.map((k) => (
+                <button key={k} role="tab" aria-selected={type === k} onClick={() => { setType(k); setSelected(new Map()); }}
+                  className={`h-8 px-4 text-sm rounded-md ${type === k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>
+                  {KIND_LABEL[k] ?? k}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()}
               placeholder="ค้นหา ชื่อไฟล์…"
               className="flex-1 min-w-[140px] h-8 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            {!typeFilter && TYPE_FILTERS.map((f) => (
+            {!typeFilter && !kindTabs && TYPE_FILTERS.map((f) => (
               <button key={f.key} onClick={() => setType(f.key)}
                 className={`h-8 px-2.5 text-[12px] rounded-lg border ${type === f.key ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "bg-white border-slate-200 text-slate-600"}`}>{f.label}</button>
             ))}
@@ -195,7 +214,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           {loading ? (
             <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>
           ) : rows.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 text-sm">ไม่พบไฟล์ — ลองเปลี่ยนคำค้น หรืออัปโหลดใหม่</div>
+            <div className="py-12 text-center text-slate-400 text-sm">{type === "video" ? "ยังไม่มีวิดีโอในคลัง — กดแท็บ ⬆ อัปโหลดใหม่ (MP4 / WebM ถึง 200 MB)" : "ไม่พบไฟล์ — ลองเปลี่ยนคำค้น หรืออัปโหลดใหม่"}</div>
           ) : (
             <div className="grid gap-2 max-h-[360px] overflow-auto pr-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
               {rows.map((a) => {
@@ -213,6 +232,8 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
                           <img src={withImageWidth(a.url, 240) ?? a.url} alt={a.title} loading="lazy" className="w-full h-full object-cover" />
                         </div>
                       </HoverPreview>
+                    ) : a.asset_type === "video" ? (
+                      <VideoThumb url={a.url} className="h-20" />
                     ) : (
                       <div className="h-20 bg-slate-100 flex items-center justify-center overflow-hidden">
                         <span className="text-2xl">{TYPE_ICON[a.asset_type]}</span>
@@ -240,14 +261,18 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           )}
         </>
       ) : (
-        <UploadTab actor={actor} typeFilter={typeFilter}
+        <UploadTab actor={actor} typeFilter={typeFilter} kinds={kinds}
           onUploaded={(assets) => {
             setSelected((m) => {
               const n = new Map(multiple ? m : []);
               for (const a of assets) { if (!multiple) n.clear(); n.set(a.id, a); if (!multiple) break; }
               return n;
             });
-            setTab("library"); void load();
+            // อัปวิดีโอ (ป๊อปที่มีปุ่มสลับ รูป | วิดีโอ) → ไปหน้าวิดีโอ ให้เห็นคลิปที่เพิ่งอัปและถูกเลือกอยู่ (เปลี่ยนชนิด = โหลดใหม่เอง)
+            const kind = assets[0]?.asset_type;
+            if (kindTabs && kind && kindTabs.includes(kind) && kind !== type) setType(kind);
+            else void load();
+            setTab("library");
             toast.success(`อัปแล้ว ${assets.length} ไฟล์ — เลือกให้อัตโนมัติ`);
           }} />
       )}
@@ -255,11 +280,15 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   );
 }
 
-function UploadTab({ actor, typeFilter, onUploaded }: {
-  actor: string | null; typeFilter?: AssetType; onUploaded: (assets: AssetRow[]) => void;
+function UploadTab({ actor, typeFilter, kinds, onUploaded }: {
+  actor: string | null; typeFilter?: AssetType; kinds?: AssetType[]; onUploaded: (assets: AssetRow[]) => void;
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  /** ไฟล์ใหญ่/วิดีโอ: แถบ % ของไฟล์ที่กำลังส่ง */
+  const [pct, setPct] = useState<{ name: string; pct: number | null } | null>(null);
+  const allowed: AssetType[] | null = typeFilter ? [typeFilter] : kinds ?? null;
+  const accept = allowed ? allowed.map((k) => (k === "image" ? "image/*" : k === "video" ? "video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov" : "")).filter(Boolean).join(",") || undefined : undefined;
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -275,8 +304,32 @@ function UploadTab({ actor, typeFilter, onUploaded }: {
   const handle = async (files: FileList | File[]) => {
     setBusy(true);
     const done: AssetRow[] = [];
-    for (const file of Array.from(files)) {
-      if (typeFilter === "image" && !file.type.startsWith("image/")) { toast.error(`${file.name} ไม่ใช่รูปภาพ — ข้าม`); continue; }
+    for (const picked of Array.from(files)) {
+      // ชนิดจริงจากหัวไฟล์ (บางเครื่องส่ง MP4 มาไม่บอกชนิด)
+      const file = await normalizeMediaFile(picked);
+      const isVideo = file.type.startsWith("video/");
+      if (allowed && !allowed.some((k) => (k === "image" ? file.type.startsWith("image/") : k === "video" ? isVideo : true))) {
+        toast.error(`${file.name} — ช่องนี้รับเฉพาะ${allowed.map((k) => KIND_LABEL[k] ?? k).join(" / ")} · ข้าม`);
+        continue;
+      }
+      // 🎬 วิดีโอ / ไฟล์ใหญ่กว่า 4 MB → ตัวอัปโหลดกลาง (ส่งตรงเข้าที่เก็บไฟล์ · ลงคลังเอง · กันไฟล์ซ้ำ)
+      if (isVideo || file.size > SMALL_UPLOAD_BYTES) {
+        try {
+          setPct({ name: file.name, pct: null });
+          const r = await uploadMediaAsset(file, {
+            folder: isVideo ? "storefront-videos" : "storefront-images",
+            onProgress: (p) => setPct({ name: file.name, pct: p }),
+            onNotice: (m) => toast.info(m),
+          });
+          if (r.asset) done.push(r.asset);
+          else toast.warning(`${file.name} อัปแล้ว แต่ยังไม่ขึ้นในคลัง — ลองกดรีเฟรชคลัง`);
+        } catch (e) {
+          toast.error(e instanceof MediaUploadError || e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ");
+        } finally {
+          setPct(null);
+        }
+        continue;
+      }
       try {
         const fd = new FormData();
         fd.append("file", file);
@@ -302,9 +355,14 @@ function UploadTab({ actor, typeFilter, onUploaded }: {
       className={`cursor-pointer rounded-xl border-2 border-dashed p-10 text-center ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}
     >
       <div className="text-4xl mb-2">{busy ? "⏳" : "⬆️"}</div>
-      <p className="text-sm font-medium text-slate-700">{busy ? "กำลังอัปโหลด…" : "ลากไฟล์มาวาง หรือ คลิกเลือก"}</p>
-      <p className="text-[12px] text-slate-400 mt-1">อัปแล้วจะเข้าคลังกลาง + ถูกเลือกให้อัตโนมัติ</p>
-      <input ref={inputRef} type="file" multiple={true} accept={typeFilter === "image" ? "image/*" : undefined}
+      <p className="text-sm font-medium text-slate-700">{busy ? (pct ? `กำลังอัปโหลด ${pct.name}${pct.pct != null ? ` · ${pct.pct}%` : "…"}` : "กำลังอัปโหลด…") : "ลากไฟล์มาวาง หรือ คลิกเลือก"}</p>
+      {pct?.pct != null && (
+        <div className="mx-auto mt-2 h-1.5 w-56 overflow-hidden rounded-full bg-indigo-100">
+          <div className="h-full bg-indigo-500 transition-all" style={{ width: `${pct.pct}%` }} />
+        </div>
+      )}
+      <p className="text-[12px] text-slate-400 mt-1">อัปแล้วจะเข้าคลังกลาง + ถูกเลือกให้อัตโนมัติ{!allowed || allowed.includes("video") ? " · วิดีโอ MP4 / WebM ถึง 200 MB" : ""}</p>
+      <input ref={inputRef} type="file" multiple={true} accept={accept}
         className="hidden" onChange={(e) => e.target.files && handle(e.target.files)} />
     </div>
   );

@@ -41,6 +41,8 @@ export async function GET(request: NextRequest) {
   const offset = Number(sp.get("offset") ?? 0) || 0;
   const hasFolder = sp.get("has_folder") === "1";   // เฉพาะที่มีโฟลเดอร์ Drive แล้ว (master_url มี /folders/)
   const folder    = (sp.get("folder") ?? "").replace(/[^a-zA-Z0-9_-]/g, "");   // เฉพาะรูปในโฟลเดอร์ Drive นี้ (folder id)
+  const byKey     = (sp.get("key") ?? "").trim();   // หา 1 รายการจาก r2_key (ตัวอัปโหลดกลาง → เลือกไฟล์ที่เพิ่งอัป)
+  const byId      = (sp.get("id") ?? "").trim();
 
   const admin = supabaseAdmin();
 
@@ -70,6 +72,8 @@ export async function GET(request: NextRequest) {
   if (artworkType) q = q.contains("artwork_types", JSON.stringify([artworkType]));
   if (printType) q = q.eq("print_type", printType);
   if (type) q = q.eq("asset_type", type);
+  if (byKey) q = q.eq("r2_key", byKey);
+  if (byId) q = q.eq("id", byId);
   if (collectionId === "none") q = q.is("collection_id", null);
   if (collAssetIds) q = q.in("id", collAssetIds);
   if (tagAssetIds) q = q.in("id", tagAssetIds);

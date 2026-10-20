@@ -28,6 +28,8 @@ import { AssetPicker } from "@/components/asset-picker";
 import { Pager } from "@/components/pager";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { HoverPreview } from "@/components/hover-image";
+import { VideoThumb } from "@/components/video-thumb";
+import { MediaUploadError, SMALL_UPLOAD_BYTES, normalizeMediaFile, uploadMediaAsset } from "@/lib/media-upload";
 import { ParentSkuMultiPickerModal } from "@/components/parent-sku-multi-picker";
 import { DriveFolderFiles } from "@/components/drive-folder-files";
 import { HelpButton } from "@/components/help-guides";
@@ -797,6 +799,9 @@ function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder 
             {isImage(a) && !broken ? (
               <img src={withImageWidth(a.url, 320) ?? a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)}
                 className="max-w-full max-h-full object-contain" />
+            ) : a.asset_type === "video" ? (
+              // 🎬 วิดีโอ: เฟรมแรก + ชี้แล้วเล่นเงียบ + ความยาวคลิป (ของกลาง VideoThumb)
+              <VideoThumb url={a.url} className="w-full h-full" fit="contain" />
             ) : (
               <span className="text-3xl">{TYPE_ICON[a.asset_type]}</span>
             )}
@@ -871,8 +876,24 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
       if (next[i].status === "done" || next[i].status === "dup") { done++; continue; }
       next[i] = { ...next[i], status: "uploading" }; setItems([...next]);
       try {
+        // 🎬 วิดีโอ (ทุกขนาด) / ไฟล์ใหญ่กว่า 4 MB → ตัวอัปโหลดกลาง (วิดีโอถึง 200 MB · มีแถบ % · ลงคลังเอง · ชื่อ+ขนาดซ้ำ = ใช้ไฟล์เดิม)
+        const real = await normalizeMediaFile(next[i].file);
+        const realVideo = real.type.startsWith("video/");
+        const shrunk = !realVideo && resizeW > 0 ? await downscaleImageWidth(real, resizeW) : real;
+        if (realVideo || (shrunk.size > SMALL_UPLOAD_BYTES && shrunk.type.startsWith("image/"))) {
+          const idx = i;
+          const r = await uploadMediaAsset(shrunk, {
+            folder: realVideo ? "storefront-videos" : "storefront-images",
+            library: { tags: tagsStr.split(",").map((x) => x.trim()).filter(Boolean), collectionId: collectionId || undefined },
+            onProgress: (p) => { next[idx] = { ...next[idx], msg: `${p}%` }; setItems([...next]); },
+          });
+          next[i] = { ...next[i], status: r.duplicate ? "dup" : "done", msg: r.duplicate ? t("มีอยู่แล้ว — ใช้ตัวเดิม", "Already exists — reused") : undefined };
+          done++;
+          setItems([...next]);
+          continue;
+        }
         // ย่อด้านกว้างตามที่เลือก (0 = ขนาดจริง ไม่ย่อ) · ไฟล์ที่ไม่ใช่รูป/เล็กกว่าอยู่แล้ว = ผ่านไปเลย
-        const upFile = resizeW > 0 ? await downscaleImageWidth(next[i].file, resizeW) : next[i].file;
+        const upFile = shrunk;
         const fd = new FormData();
         fd.append("file", upFile);
         if (tagsStr.trim()) fd.append("tags", tagsStr.trim());
@@ -886,7 +907,7 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
         next[i] = { ...next[i], status: j.duplicate ? "dup" : "done", msg: j.duplicate ? t("มีอยู่แล้ว — ใช้ตัวเดิม", "Already exists — reused") : undefined };
         done++;
       } catch (e) {
-        next[i] = { ...next[i], status: "error", msg: e instanceof Error ? e.message : t("ผิดพลาด", "Error") };
+        next[i] = { ...next[i], status: "error", msg: e instanceof MediaUploadError || e instanceof Error ? e.message : t("ผิดพลาด", "Error") };
       }
       setItems([...next]);
     }
@@ -899,7 +920,7 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
     <ERPModal open onClose={onClose} title={t("อัปโหลดไฟล์เข้าคลัง", "Upload files to library")} size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-[12px] text-slate-400">{t("รองรับ รูป / PDF / ไฟล์ออกแบบ / วิดีโอ · ไม่เกิน 25MB ต่อไฟล์", "Supports images / PDF / design files / video · max 25MB per file")}</span>
+          <span className="text-[12px] text-slate-400">{t("รองรับ รูป / PDF / ไฟล์ออกแบบ / วิดีโอ · วิดีโอถึง 200MB · ไฟล์อื่นไม่เกิน 25MB", "Supports images / PDF / design files / video · video up to 200MB · others max 25MB")}</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
             <button onClick={upload} disabled={busy || items.length === 0}
@@ -935,7 +956,7 @@ function UploadModal({ actor, collections, onClose, onDone, initialFiles, defaul
                 it.status === "uploading" ? "text-indigo-600" : "text-slate-400"
               }>
                 {it.status === "done" ? t("✓ เสร็จ", "✓ Done") : it.status === "dup" ? t("ซ้ำ — ใช้ตัวเดิม", "Duplicate — reused") :
-                 it.status === "error" ? `✕ ${it.msg ?? t("ผิดพลาด", "Error")}` : it.status === "uploading" ? t("กำลังอัป…", "Uploading…") : formatBytes(it.file.size)}
+                 it.status === "error" ? `✕ ${it.msg ?? t("ผิดพลาด", "Error")}` : it.status === "uploading" ? `${t("กำลังอัป…", "Uploading…")}${it.msg ? ` ${it.msg}` : ""}` : formatBytes(it.file.size)}
               </span>
             </div>
           ))}
@@ -1220,6 +1241,8 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids
                 <img src={withImageWidth(d.url, 768) ?? d.url} alt={d.title} className="max-w-full max-h-[360px] object-contain" />
                 <span className="absolute bottom-2 right-2 text-[11px] px-2 py-0.5 rounded-md bg-black/55 text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">{t("🔍 ดูรูปใหญ่", "🔍 View larger")}</span>
               </button>
+            ) : d.asset_type === "video" ? (
+              <video src={d.url} controls playsInline preload="metadata" className="max-w-full max-h-[360px] rounded-lg bg-black" />
             ) : <div className="text-center"><div className="text-5xl">{TYPE_ICON[d.asset_type]}</div><p className="text-[11px] text-slate-400 mt-2">{(d.ext ?? "").toUpperCase()}</p></div>}
           </div>
 

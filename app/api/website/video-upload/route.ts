@@ -5,7 +5,8 @@
  *   วิดีโอ ≤ 200 MB · รูป JPG/PNG/WebP ≤ 20 MB (lib/media-upload-limits) · folder ต้องอยู่ใน BIG_UPLOAD_FOLDERS
  *   ไฟล์ ≤ 4 MB ให้ใช้ /api/admin/upload ตามเดิม (ไม่ต้องตั้งอะไรเพิ่ม) — ของกลาง lib/media-upload เลือกทางให้เอง
  *   ⚠️ ทางนี้ใช้ได้เมื่อ bucket R2 ตั้ง CORS ให้ ERP PUT ได้ (ดู docs/website-video.md) — ยังไม่ตั้ง = เบราว์เซอร์อัปโหลดไม่ผ่าน
- *   ไฟล์ทางนี้ไม่ลงคลังกลาง (assets) อัตโนมัติ — ERP ไม่ได้เห็นเนื้อไฟล์
+ *   📚 ไฟล์ชื่อ + ขนาดเดียวกันอยู่ในคลังแล้ว → คืน { key เดิม, existing: true } ไม่ต้องอัปซ้ำ
+ *   อัปเสร็จแล้วตัวอัปโหลดกลางเรียก /api/assets/register ให้ลงคลัง (ERP ไม่เห็นเนื้อไฟล์ จึงกันซ้ำด้วยชื่อ+ขนาด)
  *
  * ของกลาง: guardApi(files.upload) · writeAudit · lib/r2 (r2PresignPut) · lib/media-upload-limits
  */
@@ -44,6 +45,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: `ไฟล์ใหญ่เกิน ${fileMb(max)} (${fileMb(size)}) — ${isVideo ? "คลิปยาวให้ใช้ลิงก์ YouTube/Vimeo" : "ย่อรูปก่อนอัปโหลด"}` }, { status: 400 });
   const folder = BIG_UPLOAD_FOLDERS.includes(String(body.folder)) ? String(body.folder) : isVideo ? "storefront-videos" : "storefront-images";
 
+  // 📚 มีไฟล์นี้ในคลังแล้ว (ชื่อ + ขนาดเท่ากันเป๊ะ) → ใช้ไฟล์เดิม ไม่ต้องส่งซ้ำ
+  if (name) {
+    const { data: dup } = await supabaseAdmin().from("assets").select("id, r2_key").eq("status", "active").eq("file_name", name).eq("size_bytes", size).limit(1).maybeSingle();
+    if (dup?.r2_key) return NextResponse.json({ key: dup.r2_key, existing: true, assetId: dup.id });
+  }
+
   const key = `${folder}/${new Date().toISOString().slice(0, 7)}/${Date.now()}-${Math.floor(Math.random() * 1e6)}.${ext}`;
   const url = await r2PresignPut(key, 900);
   if (!url) return NextResponse.json({ error: "ระบบตอนนี้อัปโหลดไฟล์ใหญ่ไม่ได้ (ยังไม่ได้ตั้งกุญแจ R2) — ใช้ไฟล์ ≤ 4 MB หรือลิงก์ YouTube" }, { status: 503 });
@@ -51,10 +58,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   await writeAudit(supabaseAdmin(), {
     action: "create",
     entityType: isVideo ? "storefront_video" : "storefront_image",
-    entityId: key,
+    // entity_id เป็น uuid → key ของไฟล์ต้องอยู่ใน metadata (เดิมใส่ entityId แล้วหายเงียบ = ตามไฟล์ย้อนหลังไม่ได้)
+    entityId: null,
     actorId: user?.id ?? null,
     actorName: user?.email ?? null,
-    metadata: { name, type, size, folder, via: "presigned-put" },
+    metadata: { r2_key: key, name, type, size, folder, via: "presigned-put" },
   });
   return NextResponse.json({ key, url, maxBytes: max });
 }

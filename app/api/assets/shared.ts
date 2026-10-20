@@ -11,6 +11,17 @@ import type { AssetType } from "@/lib/assets";
 
 export type Db = ReturnType<typeof supabaseAdmin>;
 
+/** 🏷 แท็กในคลังกลางตาม "ที่มา" (folder ของไฟล์ที่อัป) — ไม่อยู่ในรายการ = ใช้ชื่อ folder ตรง ๆ · ใช้ร่วม /api/admin/upload + /api/assets/register */
+export const LIBRARY_FOLDER_LABEL: Record<string, string> = {
+  "parent-skus": "สินค้า (Parent)", "skus": "สินค้า (SKU)",
+  "app-icons": "ไอคอนแอป", "section-icons": "ไอคอนหมวด", "overview-theme": "ธีมภาพรวม",
+  "design-sheets": "งานออกแบบ", "uploads": "อัปทั่วไป",
+  "storefront-hero": "รูปเปิดหน้าสินค้า (เว็บ)", "storefront-products": "รูปสินค้า (เว็บ)",
+  "storefront-videos": "วิดีโอเว็บ", "storefront-images": "รูปเว็บ", "storefront-drops": "ปกชุดมาใหม่ (เว็บ)",
+  "color-swatches": "จุดสี (ทะเบียนสี)",
+  "belt-parts": "ชิ้นส่วนเข็มขัด (Belt Builder)",
+};
+
 // ไซส์ artwork: กว้าง×ยาว + ชื่อกำกับ + หน่วย (เลือกได้ต่อไซส์)
 export type AssetSizeUnit = "cm" | "mm" | "in" | "px";
 export type AssetSize = { label: string; w: number | null; h: number | null; unit: AssetSizeUnit };
@@ -86,7 +97,7 @@ export type AssetUsage = {
 export type AssetDetail = AssetRow & { usages: AssetUsage[]; collection_ids: string[]; brand_id: string | null };
 
 /** dict columns ที่ดึงจากตาราง assets */
-type AssetDbRow = {
+export type AssetDbRow = {
   id: string; title: string; file_name: string; r2_key: string; asset_type: AssetType;
   content_type: string | null; ext: string | null; size_bytes: number | null;
   width: number | null; height: number | null; description: string | null;

@@ -2,7 +2,8 @@
 /**
  * MediaUploadField — อัปโหลด "รูป หรือ วิดีโอสั้น" ช่องเดียว (ของกลาง)
  * --------------------------------------------------------------------------
- * - รูป: อัปโหลด / เลือกจากคลัง (AssetPicker) · วิดีโอ: MP4/WebM (เล่นได้ทุกเครื่อง)
+ * - รูป / วิดีโอ: อัปโหลด หรือ 📁 เลือกจากคลัง (AssetPicker · ช่องที่รับวิดีโอ = ปุ่มสลับ 🖼 รูป | 🎬 วิดีโอ) · วิดีโอ: MP4/WebM (เล่นได้ทุกเครื่อง)
+ * - อัปที่ไหนก็เข้าคลังกลางเอง (ของกลาง lib/media-upload) — ไฟล์ซ้ำ (ชื่อ+ขนาดเท่ากัน) ใช้ไฟล์เดิม
  * - ขนาด: ≤ 4 MB ส่งผ่าน ERP ทันที · ใหญ่กว่านั้น (วิดีโอ ≤ 200 MB · รูป ≤ 20 MB) ส่งตรงเข้า R2 มีแถบ % + ยกเลิกได้
  *   (ของกลาง lib/media-upload · ⚠️ ไฟล์ใหญ่ต้องเปิด CORS ของ bucket ก่อน 1 ครั้ง — ยังไม่เปิด = ขึ้นข้อความบอกวิธี)
  * - พรีวิวในช่อง: รูป = ภาพ · วิดีโอ = เล่นเอง เงียบ วนซ้ำ
@@ -119,7 +120,7 @@ export function MediaUploadField({
               </button>
             </div>
           )}
-          <button type="button" onClick={() => setPickerOpen(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:border-slate-400">🖼 เลือกรูปจากคลัง</button>
+          <button type="button" onClick={() => setPickerOpen(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:border-slate-400">{allowVideo ? "📁 เลือกจากคลัง (รูป/วิดีโอ)" : "🖼 เลือกรูปจากคลัง"}</button>
           {value && <button type="button" onClick={() => onChange(null)} className="text-[11px] text-rose-500 hover:underline text-left">เอาออก</button>}
           {hint && <p className="text-[10px] text-slate-400 leading-snug">{hint}</p>}
           {problem && <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">⚠️ {problem}</p>}
@@ -129,11 +130,12 @@ export function MediaUploadField({
         <AssetPicker
           open
           onClose={() => setPickerOpen(false)}
-          typeFilter="image"
-          title={`เลือกรูป — ${label}`}
+          typeFilter={allowVideo ? undefined : "image"}
+          kinds={allowVideo ? ["image", "video"] : undefined}
+          title={`${allowVideo ? "เลือกรูป / วิดีโอ" : "เลือกรูป"} — ${label}`}
           onSelect={(rows) => {
-            const key = rows[0]?.r2_key;
-            if (key) onChange({ kind: "image", key });
+            const a = rows[0];
+            if (a?.r2_key) onChange({ kind: a.asset_type === "video" ? "video" : "image", key: a.r2_key });
             setPickerOpen(false);
           }}
         />

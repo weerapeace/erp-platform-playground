@@ -45,6 +45,15 @@
 4. ลองอัปคลิปที่ใหญ่กว่า 4 MB ในช่อง "ไฟล์คลิป" — เห็นแถบ % วิ่งจนจบ = ใช้ได้แล้ว
 - ความหมาย: อนุญาตเฉพาะหน้า ERP ตัวจริงให้ "ส่งไฟล์เข้า" (PUT) เท่านั้น — ไม่ได้เปิดให้ใครอ่าน/ลบไฟล์ · ลิงก์อัปโหลดแต่ละครั้งหมดอายุใน 15 นาที และได้เฉพาะคนที่มีสิทธิ์ files.upload
 
+## 📚 คลังวิดีโอ (2026-10-20)
+- อัปวิดีโอ/รูปที่ไหนก็ **ลงคลังกลาง (/master/assets) เอง**: ทางเล็ก = /api/admin/upload (กันซ้ำด้วย checksum · คืน asset_id) · ทางใหญ่ = เบราว์เซอร์ส่งตรงเข้า R2 แล้ว lib/media-upload เรียก **POST /api/assets/register** (ตรวจไฟล์มีจริง + ขนาดจาก R2 · key ต้องอยู่ใน BIG_UPLOAD_FOLDERS · แท็กตามที่มา LIBRARY_FOLDER_LABEL)
+- กันอัปซ้ำทางใหญ่: /api/website/video-upload เจอไฟล์ชื่อ+ขนาดเท่ากันในคลัง → คืน { key เดิม, existing } ไม่ส่งซ้ำ (onNotice บอกผู้ใช้)
+- uploadMediaAsset(file, { folder, library: { tags, collectionId } }) → { key, asset, duplicate } ใช้ในป๊อปเลือกจากคลัง + หน้าคลัง
+- ป๊อป AssetPicker: kinds={["image","video"]} = ปุ่มสลับ 🖼 รูป | 🎬 วิดีโอ · typeFilter="video" = คลังวิดีโออย่างเดียว · ภาพย่อวิดีโอของกลาง components/video-thumb (เฟรมแรก · ชี้แล้วเล่น · ความยาว)
+- ช่องที่มีปุ่ม 📁 เลือกจากคลัง: WebsiteVideoField (Section วิดีโอ · คลิปอย่างเดียว) · MediaUploadField allowVideo (รูปเปิดหน้าสินค้า Hero · ปกชุดมาใหม่ · รูป/วิดีโอ)
+- หน้าคลัง: กริดเห็นภาพย่อวิดีโอ · รายละเอียดเล่นได้ · อัปวิดีโอถึง 200 MB (ตัวอัปโหลดกลาง)
+- audit ทางใหญ่: entity_id เป็น uuid → key อยู่ใน metadata.r2_key (เดิมหาย)
+
 ## ข้อจำกัด
 - .MOV บางไฟล์ (HEVC) เล่นบน Chrome/Android ไม่ได้ — แนะนำ MP4 (H.264)
 - ไฟล์ใหญ่กว่า 200 MB / คลิปยาว → ใช้ลิงก์ YouTube หรือ Vimeo

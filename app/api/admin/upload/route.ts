@@ -15,32 +15,25 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2PutObject, r2DeleteObject } from "@/lib/r2";
 import { writeAudit } from "@/lib/audit";
 import { detectAssetType, extOf, sha256Hex } from "@/lib/assets";
-import { attachTags } from "@/app/api/assets/shared";
+import { LIBRARY_FOLDER_LABEL, attachTags } from "@/app/api/assets/shared";
 
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "video/mp4", "video/webm", "video/quicktime", "application/json"]);
 const MAX_SIZE = 10 * 1024 * 1024;        // 10 MB (รูป/PDF บิล/ใบรับ)
 const MAX_SIZE_VIDEO = 25 * 1024 * 1024;  // 25 MB (วิดีโอสั้น — คลิปยาวให้ใช้ลิงก์ YouTube/TikTok/Drive)
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 
-// แท็กในคลังกลางตาม "ที่มา" (folder) — ใส่ชื่ออ่านง่าย ไม่งั้นใช้ชื่อ folder ตรง ๆ
-const LIBRARY_FOLDER_LABEL: Record<string, string> = {
-  "parent-skus": "สินค้า (Parent)", "skus": "สินค้า (SKU)",
-  "app-icons": "ไอคอนแอป", "section-icons": "ไอคอนหมวด", "overview-theme": "ธีมภาพรวม",
-  "design-sheets": "งานออกแบบ", "uploads": "อัปทั่วไป",
-  "storefront-hero": "รูปเปิดหน้าสินค้า (เว็บ)", "storefront-products": "รูปสินค้า (เว็บ)",
-  "color-swatches": "จุดสี (ทะเบียนสี)",
-  "belt-parts": "ชิ้นส่วนเข็มขัด (Belt Builder)",
-};
+// แท็กในคลังกลางตาม "ที่มา" (folder) — ของกลาง LIBRARY_FOLDER_LABEL (app/api/assets/shared)
 
 // ลงทะเบียนไฟล์ที่เพิ่งอัปเข้าคลังกลาง (assets) อัตโนมัติ — กันซ้ำด้วย checksum · ห้าม throw (best-effort)
-async function registerToLibrary(p: { buffer: ArrayBuffer; key: string; file: File; folder: string; uploadedBy: string | null }): Promise<void> {
+// คืน id ของรายการในคลัง (ไฟล์ซ้ำ = id ตัวเดิม · duplicate) ให้ตัวอัปโหลดกลางเลือกจากคลังต่อได้ (lib/media-upload uploadMediaAsset)
+async function registerToLibrary(p: { buffer: ArrayBuffer; key: string; file: File; folder: string; uploadedBy: string | null }): Promise<{ id: string; duplicate: boolean } | null> {
   try {
     const admin = supabaseAdmin();
     const checksum = await sha256Hex(p.buffer);
     const tag = LIBRARY_FOLDER_LABEL[p.folder] ?? p.folder;
     // ไฟล์เดิม (เนื้อหาเดียวกัน) อยู่ในคลังแล้ว → ไม่ลงซ้ำ แค่เพิ่มแท็กที่มา
     const { data: dup } = await admin.from("assets").select("id").eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
-    if (dup?.id) { if (tag) await attachTags(admin, dup.id as string, [tag]); return; }
+    if (dup?.id) { if (tag) await attachTags(admin, dup.id as string, [tag]); return { id: dup.id as string, duplicate: true }; }
     const { data: ins } = await admin.from("assets").insert({
       title: p.file.name, file_name: p.file.name, r2_key: p.key,
       asset_type: detectAssetType(p.file.type, p.file.name),
@@ -48,7 +41,8 @@ async function registerToLibrary(p: { buffer: ArrayBuffer; key: string; file: Fi
       checksum, status: "active", source: "upload", uploaded_by: p.uploadedBy,
     }).select("id").maybeSingle();
     if (ins?.id && tag) await attachTags(admin, ins.id as string, [tag]);
-  } catch { /* คลังมีปัญหา ไม่ให้กระทบการอัปโหลด */ }
+    return ins?.id ? { id: ins.id as string, duplicate: false } : null;
+  } catch { /* คลังมีปัญหา ไม่ให้กระทบการอัปโหลด */ return null; }
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -93,7 +87,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await r2PutObject(key, buffer, contentType);
     // ของกลาง: ทุกรูปที่อัปผ่านตัวนี้ → ลงคลังกลาง /master/assets อัตโนมัติ (กันซ้ำ · best-effort)
     // เว้นเมื่อส่ง no_library=1 (เช่นรูปแคปกระดานส่ง LINE — ไม่อยากให้รกคลัง)
-    if (formData.get("no_library") !== "1") await registerToLibrary({ buffer, key, file, folder, uploadedBy: user.email ?? user.id });
+    const lib = formData.get("no_library") !== "1" ? await registerToLibrary({ buffer, key, file, folder, uploadedBy: user.email ?? user.id }) : null;
     await writeAudit(supabaseAdmin(), {
       action: "upload",
       entityType: "file",
@@ -106,6 +100,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       r2_key:       key,
       content_type: contentType,
       size:         file.size,
+      /** รายการในคลังกลาง (ไฟล์ซ้ำ = รายการเดิม) — null = ไม่ได้ลงคลัง */
+      asset_id:     lib?.id ?? null,
+      duplicate:    lib?.duplicate ?? false,
       error:        null,
     });
   } catch (e) {

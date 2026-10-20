@@ -7,11 +7,14 @@
  *   ยังไม่ตั้ง = โยน MediaUploadError("blocked") ให้หน้าจอบอกวิธี — ไม่พังเงียบ
  * - ชนิดไฟล์ดูจาก "หัวไฟล์" ก่อนเสมอ (normalizeMediaFile) — บางเครื่องส่ง MP4 มาไม่บอกชนิด
  * - รูปนิ่ง (JPG/PNG/WebP/BMP/AVIF) ใหญ่เกิน 4 MB → ย่อให้อัตโนมัติ (≤ 3200 px · WebP) แล้วส่งทางเล็ก — ใช้ได้เลยไม่ต้องรอ CORS
+ * - 📚 ทุกไฟล์ลงคลังกลาง (assets) เอง: ทางเล็ก = /api/admin/upload · ทางใหญ่ = /api/assets/register หลังส่งเสร็จ
+ *   ไฟล์ชื่อ+ขนาดเดียวกันอยู่ในคลังแล้ว = ใช้ไฟล์เดิม ไม่ส่งซ้ำ · uploadMediaAsset() คืนรายการในคลังให้ป๊อปเลือกจากคลังใช้ต่อ
  * ⚠️ ห้าม import ไฟล์นี้จาก API route (ใช้ apiFetch / XMLHttpRequest ของเบราว์เซอร์)
  */
 import { apiFetch } from "@/lib/api";
 import { SMALL_UPLOAD_BYTES, fileMb, uploadMaxBytes, resolveMediaType, sniffMediaType } from "@/lib/media-upload-limits";
 import { SHRINKABLE_IMAGE_TYPES, shrinkImageToFit } from "@/lib/image-resize";
+import type { AssetRow } from "@/app/api/assets/shared";
 
 export { SMALL_UPLOAD_BYTES, BIG_VIDEO_MAX_BYTES, BIG_IMAGE_MAX_BYTES, fileMb, uploadMaxBytes } from "@/lib/media-upload-limits";
 
@@ -61,10 +64,33 @@ export interface UploadHandle {
  * - ชนิดไฟล์ดูจากหัวไฟล์ (normalizeMediaFile) · รูปนิ่งใหญ่เกิน 4 MB = ย่ออัตโนมัติ (ด้านยาว ≤ 3200 px · WebP) → ส่งทางเล็ก ไม่ต้องรอ CORS
  * onProgress(pct) = เฉพาะไฟล์ใหญ่ (0–100) · onStart(handle) = ได้ปุ่มยกเลิก · onNotice = ข้อความแจ้ง (เช่น ย่อรูปให้แล้ว)
  */
-export async function uploadMediaFile(
+type UploadOpts = { folder: string; onProgress?: (pct: number) => void; onStart?: (h: UploadHandle) => void; onNotice?: (msg: string) => void };
+
+export async function uploadMediaFile(input: File, opts: UploadOpts): Promise<string> {
+  return (await uploadCore(input, opts)).key;
+}
+
+/**
+ * 📚 อัปโหลด 1 ไฟล์แล้วคืน "รายการในคลังกลาง" ด้วย (ป๊อปเลือกจากคลัง / หน้าคลัง) — ติดแท็ก/ใส่อัลบั้มให้ได้
+ * asset = null เมื่อลงคลังไม่สำเร็จ (ไฟล์ยังอัปแล้ว ใช้ key ได้)
+ */
+export async function uploadMediaAsset(
   input: File,
-  opts: { folder: string; onProgress?: (pct: number) => void; onStart?: (h: UploadHandle) => void; onNotice?: (msg: string) => void },
-): Promise<string> {
+  opts: UploadOpts & { library?: { tags?: string[]; collectionId?: string } },
+): Promise<{ key: string; asset: AssetRow | null; duplicate: boolean }> {
+  const r = await uploadCore(input, opts);
+  if (!r.assetId) return { key: r.key, asset: null, duplicate: r.duplicate };
+  try {
+    for (const tag of opts.library?.tags ?? []) if (tag.trim()) await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "tag", asset_ids: [r.assetId], tag: tag.trim() }) });
+    if (opts.library?.collectionId) await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "move", asset_ids: [r.assetId], collection_id: opts.library.collectionId }) });
+    const j = await (await apiFetch(`/api/assets?id=${encodeURIComponent(r.assetId)}&source=all&status=active`)).json();
+    return { key: r.key, asset: ((j.data ?? [])[0] as AssetRow | undefined) ?? null, duplicate: r.duplicate };
+  } catch {
+    return { key: r.key, asset: null, duplicate: r.duplicate };
+  }
+}
+
+async function uploadCore(input: File, opts: UploadOpts): Promise<{ key: string; assetId: string | null; duplicate: boolean }> {
   let file = await normalizeMediaFile(input);
   if (file.size > SMALL_UPLOAD_BYTES && SHRINKABLE_IMAGE_TYPES.includes(file.type)) {
     const s = await shrinkImageToFit(file, SMALL_UPLOAD_BYTES);
@@ -82,7 +108,7 @@ export async function uploadMediaFile(
     const r = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
     const j = await r.json().catch(() => ({ error: r.status === 413 ? "ไฟล์ใหญ่เกินที่ระบบรับได้" : "อัปโหลดไม่สำเร็จ" }));
     if (!j.r2_key) throw new MediaUploadError("failed", j.error ?? "อัปโหลดไม่สำเร็จ");
-    return j.r2_key as string;
+    return { key: j.r2_key as string, assetId: (j.asset_id as string | null) ?? null, duplicate: j.duplicate === true };
   }
 
   // ไฟล์ใหญ่: ขอลิงก์ (สิทธิ์ files.upload · หมดอายุ 15 นาที) แล้วส่งตรงเข้า R2 ไม่ผ่าน ERP
@@ -92,6 +118,11 @@ export async function uploadMediaFile(
     body: JSON.stringify({ name: file.name, type: file.type, size: file.size, folder: opts.folder }),
   });
   const j = await r.json().catch(() => ({}));
+  // 📚 ไฟล์นี้อยู่ในคลังแล้ว (ชื่อ + ขนาดเท่ากัน) → ใช้ไฟล์เดิม ไม่ต้องส่งซ้ำ
+  if (r.ok && j.existing && j.key) {
+    opts.onNotice?.(`มีไฟล์ "${file.name}" ในคลังแล้ว — ใช้ไฟล์เดิม ไม่ต้องอัปซ้ำ`);
+    return { key: j.key as string, assetId: (j.assetId as string | null) ?? null, duplicate: true };
+  }
   if (!r.ok || !j.url) throw new MediaUploadError("failed", j.error ?? "ขอสิทธิ์อัปโหลดไม่สำเร็จ");
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -105,5 +136,16 @@ export async function uploadMediaFile(
     opts.onStart?.({ abort: () => xhr.abort() });
     xhr.send(file);
   });
-  return j.key as string;
+  // 📚 ลงคลังกลาง (ERP ไม่เห็นเนื้อไฟล์ทางนี้ → แจ้งให้ลงทะเบียน) · ลงไม่สำเร็จ = ไฟล์ยังใช้ได้ แค่ไม่อยู่ในคลัง
+  let assetId: string | null = null;
+  let duplicate = false;
+  try {
+    const reg = await apiFetch("/api/assets/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: j.key, name: file.name, type: file.type }) });
+    const rj = await reg.json().catch(() => ({}));
+    assetId = (rj.data?.id as string | undefined) ?? null;
+    duplicate = rj.duplicate === true;
+  } catch {
+    /* ลงคลังไม่ได้ ไม่กระทบการอัปโหลด */
+  }
+  return { key: j.key as string, assetId, duplicate };
 }

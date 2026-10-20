@@ -6,11 +6,15 @@
  * - ไฟล์ ≤ 4 MB ส่งผ่าน ERP ทันที · ไฟล์ใหญ่ ≤ 200 MB ส่งตรงเข้า R2 (มีแถบ %) — ของกลาง lib/media-upload (ตัวเดียวกับ MediaUploadField)
  *   ⚠️ ไฟล์ใหญ่ต้องตั้ง CORS ของ bucket R2 ก่อน (docs/website-video.md) — ยังไม่ตั้ง = ขึ้นข้อความบอกวิธี ไม่พังเงียบ
  * - ลากไฟล์มาวางได้ (ของกลาง useFileDrop) · ดูคลิปที่อัปแล้วได้ในช่อง · เปลี่ยน / เอาออก
+ * - 📁 เลือกจากคลัง (ของกลาง AssetPicker หน้าวิดีโอ) — คลิปที่อัปที่ไหนก็อยู่ในคลัง ใช้ซ้ำได้ทุกร้าน/ทุก Section
  */
 import { useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useToast } from "@/components/toast";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { MediaUploadError, normalizeMediaFile, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
+
+const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 
 const TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 const url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -21,6 +25,7 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
   const xhrRef = useRef<UploadHandle | null>(null);
   const [busy, setBusy] = useState<{ name: string; pct: number | null } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const upload = async (picked: File | undefined) => {
     if (!picked) return;
@@ -35,6 +40,7 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
         folder: "storefront-videos",
         onStart: (h) => (xhrRef.current = h),
         onProgress: (pct) => setBusy({ name: file.name, pct }),
+        onNotice: (m) => toast.info(m),
       });
       onChange(key);
       toast.success("อัปโหลดคลิปแล้ว — กดบันทึก/เผยแพร่เพื่อขึ้นเว็บ");
@@ -72,9 +78,14 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
           >
             <span className="text-2xl">🎬</span>
             <span className="text-sm font-medium text-slate-700">ลากคลิปมาวาง หรือกดเลือกไฟล์</span>
-            <span className="text-[11px] text-slate-400">MP4 / WebM / MOV · ≤ 4 MB อัปได้ทันที · ใหญ่สุด 200 MB</span>
+            <span className="text-[11px] text-slate-400">MP4 / WebM / MOV · ใหญ่สุด 200 MB · อัปแล้วเข้าคลังให้เอง</span>
           </button>
         )
+      )}
+      {!value && !busy && (
+        <button type="button" onClick={() => setPickerOpen(true)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-blue-400">
+          📁 เลือกคลิปจากคลัง
+        </button>
       )}
 
       {busy && (
@@ -100,11 +111,31 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
           <button type="button" onClick={() => fileRef.current?.click()} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 hover:border-blue-400">
             ⬆ เปลี่ยนคลิป
           </button>
+          <button type="button" onClick={() => setPickerOpen(true)} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 hover:border-blue-400">
+            📁 เลือกจากคลัง
+          </button>
           <button type="button" onClick={() => onChange(null)} className="text-rose-500 hover:underline">
             เอาออก
           </button>
           <span className="text-[11px] text-slate-400">หรือลากคลิปใหม่มาวางที่ช่องนี้</span>
         </div>
+      )}
+      {pickerOpen && (
+        <AssetPicker
+          open
+          onClose={() => setPickerOpen(false)}
+          typeFilter="video"
+          title="เลือกคลิปจากคลัง"
+          onSelect={(rows) => {
+            const key = rows[0]?.r2_key;
+            if (key) {
+              setProblem(null);
+              onChange(key);
+              toast.success("เลือกคลิปแล้ว — กดบันทึก/เผยแพร่เพื่อขึ้นเว็บ");
+            }
+            setPickerOpen(false);
+          }}
+        />
       )}
     </div>
   );
