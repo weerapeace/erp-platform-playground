@@ -9,7 +9,7 @@
  *
  * ข้อมูล: /api/website/theme · /api/website/theme/versions · อัปโหลดรูปผ่าน /api/admin/upload (R2)
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
 import { useReportUnsaved } from "@/components/save-bar";
@@ -31,6 +31,7 @@ import type { ContentLang } from "@/lib/content-i18n";
 import { THEME_TEXT_KEYS, themeCrumb } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
+import { pageLinkIssue, helpColumnIssue, countLinkWarnings, type PageInfo, type LinkIssue } from "@/lib/website-link-health";
 import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, FOOTER_GAP_MAX, FOOTER_PAD_PX, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 
@@ -325,10 +326,15 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   // หน้าที่สร้างเอง (ไว้ให้เมนูลิงก์ถึง)
   // preview=1 → รวมหน้าที่ยังเป็นร่าง (help = ชื่อกลุ่มศูนย์ช่วยเหลือ ไว้ให้คอลัมน์ท้ายเว็บ "ศูนย์ช่วยเหลือ" เลือกกลุ่ม)
   const [storePages, setStorePages] = useState<{ slug: string; title: string; help?: string; status?: string }[]>([]);
+  // 🩺 โหลดสำเร็จแล้วเท่านั้นถึงเตือน "ไม่ขึ้นเว็บจริง" (โหลดพลาด = ไม่รู้ = ไม่เตือนมั่ว)
+  const [pagesReady, setPagesReady] = useState(false);
   useEffect(() => {
     fetch(`/api/public/storefront/page?shop=${encodeURIComponent(shopSlug)}&preview=1`)
       .then((r) => r.json())
-      .then((j) => setStorePages((j?.pages as { slug: string; title: string }[]) ?? []))
+      .then((j) => {
+        setStorePages((j?.pages as { slug: string; title: string }[]) ?? []);
+        setPagesReady(Array.isArray(j?.pages));
+      })
       .catch(() => setStorePages([]));
   }, [shopSlug]);
   const [footerSocialOpen, setFooterSocialOpen] = useState(false);
@@ -963,6 +969,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   return (
     <ContentLangProvider lang={contentLang} onLangChange={setContentLang}>
+    <PageHealthCtx.Provider value={pagesReady ? storePages : null}>
     <div className="space-y-3">
       {/* แถบสถานะ */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
@@ -1614,6 +1621,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">คอลัมน์</h3>
                 <p className="text-xs text-slate-500 mb-3">เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง · กด ⤵ ซ้อนใต้ = 2 หัวข้อในคอลัมน์เดียว · 👁 ปิดตา = ซ่อนชั่วคราว (ไม่ลบ) · จำนวนคอลัมน์ต่อแถว (คอม/มือถือ) ตั้งได้ด้านล่าง</p>
+                <FooterHealthSummary columns={theme.footer.columns ?? []} bottomLinks={theme.footer.bottomLinks} shopSlug={shopSlug} />
                 {theme.footer.columns === null ? (
                   <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
                     ตอนนี้ใช้แบบ<b>อัตโนมัติ</b>: โลโก้ + คำอธิบายร้าน (2 ช่อง) · เมนู · ติดต่อ
@@ -2770,6 +2778,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       </div>
 
     </div>
+    </PageHealthCtx.Provider>
     </ContentLangProvider>
   );
 }
@@ -4168,8 +4177,60 @@ function MenuSettings({ menu, setMenu, choices, pages, megaCtx, typo }: { menu: 
 }
 
 /* ─────────── เมนู: รายการ + รายการย่อย (ลึก 1 ชั้น) ─────────── */
-function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = false, megaCtx }: { items: MenuItem[]; onChange: (items: MenuItem[]) => void; choices: Choices; pages: { slug: string; title: string }[]; depth?: number; parentMega?: boolean; /** มี = เมนูบนสุดเลือกแผงเมนูใหญ่ A/B/C ได้ */ megaCtx?: MegaEditorCtx }) {
+/* ─────────── 🩺 เตือน "ไม่ขึ้นเว็บจริง" (lib/website-link-health) ─────────── */
+/** รายการหน้า (รวมร่าง + status) — null = ยังโหลดไม่เสร็จ/โหลดพลาด → ไม่เตือน */
+const PageHealthCtx = createContext<PageInfo[] | null>(null);
+
+function IssueNote({ issue, className = "" }: { issue: LinkIssue; className?: string }) {
+  return (
+    <p className={`rounded-md border px-2 py-1 text-[11px] ${issue.level === "warn" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-500"} ${className}`}>
+      {issue.level === "warn" ? "⚠️ " : "ℹ️ "}
+      {issue.text}
+    </p>
+  );
+}
+
+/** ปัญหาของคอลัมน์ท้ายเว็บ 1 คอลัมน์ (ตรงกับเว็บร้าน: คอลัมน์ศูนย์ช่วยเหลือไม่มีหน้าที่เผยแพร่ = ซ่อน) */
+function footerColumnIssue(c: FooterColumn, pages: PageInfo[]): LinkIssue | null {
+  if (c.kind === "help") return helpColumnIssue(c.text, pages);
+  if (c.kind === "links") {
+    const n = countLinkWarnings(c.links, pages);
+    return n ? { level: "warn", text: `ลิงก์ ${n} อันพาไปหน้าที่ยังไม่มี/ยังเป็นร่าง — ลูกค้ากดแล้วจะเจอ "ไม่พบหน้า" (กด ✎ ดูทีละลิงก์)` } : null;
+  }
+  return null;
+}
+
+/** กล่องสรุปบนการ์ดคอลัมน์ท้ายเว็บ — บอกว่าเว็บจริงจะต่างจากพรีวิวตรงไหน */
+function FooterHealthSummary({ columns, bottomLinks, shopSlug }: { columns: FooterColumn[]; bottomLinks: MenuItem[]; shopSlug: string }) {
+  const health = useContext(PageHealthCtx);
+  if (!health) return null;
+  const shown = columns.filter((c) => !c.hidden);
+  const hiddenCols = shown.filter((c) => c.kind === "help" && helpColumnIssue(c.text, health)?.level === "warn");
+  const badLinks = shown.filter((c) => c.kind === "links").reduce((n, c) => n + countLinkWarnings(c.links, health), 0) + countLinkWarnings(bottomLinks, health);
+  if (!hiddenCols.length && !badLinks) return null;
+  const name = (c: FooterColumn) => `“${c.title || c.text || "ศูนย์ช่วยเหลือ"}”`;
+  return (
+    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1">
+      <p className="font-medium">⚠️ บนเว็บจริงตอนนี้ ท้ายเว็บจะไม่เหมือนพรีวิว</p>
+      <ul className="list-disc pl-4 space-y-0.5">
+        {hiddenCols.length > 0 && <li>คอลัมน์ {hiddenCols.map(name).join(", ")} จะไม่ขึ้น — หน้าในกลุ่มยังเป็นร่าง/ยังไม่มีหน้า</li>}
+        {badLinks > 0 && <li>ลิงก์ {badLinks} อันพาไปหน้าที่ยังไม่มี/ยังเป็นร่าง — ลูกค้ากดแล้วจะเจอ “ไม่พบหน้า”</li>}
+      </ul>
+      <p className="text-amber-800">
+        พรีวิวด้านขวาโชว์หน้าที่ยังเป็นร่างด้วย เลยดูเหมือนครบ · ดูป้าย ⚠️ ที่แต่ละแถว ·{" "}
+        <a href={`/website/${encodeURIComponent(shopSlug)}?tab=pages`} target="_blank" rel="noreferrer" className="font-medium text-blue-700 hover:underline">
+          📄 ไปเผยแพร่ที่แท็บหน้าเว็บ ↗
+        </a>
+      </p>
+    </div>
+  );
+}
+
+function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = false, megaCtx }: { items: MenuItem[]; onChange: (items: MenuItem[]) => void; choices: Choices; pages: { slug: string; title: string; status?: string }[]; depth?: number; parentMega?: boolean; /** มี = เมนูบนสุดเลือกแผงเมนูใหญ่ A/B/C ได้ */ megaCtx?: MegaEditorCtx }) {
   const drag = useDragReorder((from, to) => onChange(moveItem(items, from, to)));
+  // 🩺 ลิงก์ชนิดหน้า → หน้าที่ไม่มี/ยังเป็นร่าง = ลูกค้ากดแล้วเจอไม่พบหน้า (พรีวิวโชว์ร่างด้วย เลยดูเหมือนปกติ)
+  const health = useContext(PageHealthCtx);
+  const issueOf = (it: MenuItem) => (health && it.kind === "page" ? pageLinkIssue(it.value, health) : null);
   const [openId, setOpenId] = useState<string | null>(null);
   const setItem = (id: string, patch: Partial<MenuItem>) => onChange(items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
@@ -4202,7 +4263,8 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
         return (
           <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value })}>
             <option value="">— เลือกหน้า —</option>
-            {pages.map((p) => <option key={p.slug} value={p.slug}>{p.title}</option>)}
+            {pages.map((p) => <option key={p.slug} value={p.slug}>{p.title}{p.status && p.status !== "published" ? " (ร่าง)" : ""}</option>)}
+            {it.value && !pages.some((p) => p.slug === it.value) && <option value={it.value}>⚠️ /{it.value} (ยังไม่มีหน้านี้)</option>}
           </select>
         );
       case "new": {
@@ -4238,17 +4300,20 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
       <ul className="space-y-1">
         {items.map((it, i) => {
           const open = openId === it.id;
+          const iss = issueOf(it);
+          const kidWarn = health && it.children.length ? countLinkWarnings(it.children, health) : 0;
           return (
-            <li key={it.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
+            <li key={it.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : iss?.level === "warn" ? "border-amber-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
               <div className="flex items-center gap-1.5 px-2 py-1.5">
                 <DragHandle {...drag.handleProps(i)} />
                 <LangInput className={`${mini} flex-1 min-w-0`} obj={it} k="label" maxLength={60} onPatch={(p) => setItem(it.id, p)} placeholder="ชื่อเมนู" />
                 <select className={mini} value={it.kind} onChange={(e) => setItem(it.id, { kind: e.target.value as MenuKind, value: "" })}>
                   {MENU_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
                 </select>
-                <button type="button" onClick={() => setOpenId(open ? null : it.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500 hover:border-slate-400"}`} title="ตั้งค่าเพิ่ม">✎{it.children.length ? ` ${it.children.length}` : ""}</button>
+                <button type="button" onClick={() => setOpenId(open ? null : it.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : kidWarn ? "border-amber-300 text-amber-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`} title={kidWarn ? `ตั้งค่าเพิ่ม · เมนูย่อย ${kidWarn} อันพาไปหน้าที่ยังไม่มี/เป็นร่าง` : "ตั้งค่าเพิ่ม"}>✎{it.children.length ? ` ${it.children.length}` : ""}{kidWarn ? " ⚠️" : ""}</button>
                 <button type="button" onClick={() => onChange(items.filter((x) => x.id !== it.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">✕</button>
               </div>
+              {iss && <IssueNote issue={iss} className="mx-2 mb-1.5" />}
               {open && (
                 <div className="px-3 pb-3 pt-1 border-t border-slate-100 space-y-2">
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -4322,7 +4387,7 @@ function FooterColumnsEditor({
   columns: FooterColumn[];
   onChange: (c: FooterColumn[]) => void;
   choices: Choices;
-  pages: { slug: string; title: string; help?: string }[];
+  pages: { slug: string; title: string; help?: string; status?: string }[];
   onEditSocial?: () => void;
   shopSlug?: string;
   /** 🧱 คอลัมน์ต่อแถว (คอม/มือถือ) */
@@ -4332,10 +4397,13 @@ function FooterColumnsEditor({
   const drag = useDragReorder((from, to) => onChange(moveItem(columns, from, to)));
   // 🧭 กลุ่มศูนย์ช่วยเหลือที่มีอยู่ (จากหน้าเว็บที่ตั้งกลุ่มไว้) + หน้าในกลุ่ม (กด ✎ เปิดแก้หน้านั้นในแท็บใหม่)
   const helpGroups = useMemo(() => {
-    const m = new Map<string, { slug: string; title: string }[]>();
-    for (const p of pages) if (p.help) m.set(p.help, [...(m.get(p.help) ?? []), { slug: p.slug, title: p.title }]);
-    return [...m.entries()].map(([name, list]) => ({ name, titles: list.map((x) => x.title), list }));
+    const m = new Map<string, { slug: string; title: string; status?: string }[]>();
+    for (const p of pages) if (p.help) m.set(p.help, [...(m.get(p.help) ?? []), { slug: p.slug, title: p.title, status: p.status }]);
+    return [...m.entries()].map(([name, list]) => ({ name, titles: list.map((x) => x.title), list, drafts: list.filter((x) => x.status && x.status !== "published").length }));
   }, [pages]);
+  // 🩺 คอลัมน์ที่จะไม่ขึ้นเว็บจริง / มีลิงก์ไปหน้าที่ยังไม่มี-เป็นร่าง (ปิดตาไว้ = ตั้งใจซ่อน ไม่เตือน)
+  const health = useContext(PageHealthCtx);
+  const colIssue = (c: FooterColumn) => (health && !c.hidden ? footerColumnIssue(c, health) : null);
   const [openId, setOpenId] = useState<string | null>(null);
   const setCol = (id: string, patch: Partial<FooterColumn>) => onChange(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
@@ -4385,6 +4453,10 @@ function FooterColumnsEditor({
                 <button type="button" onClick={() => setOpenId(open ? null : c.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500 hover:border-slate-400"}`} title="ตั้งค่าเพิ่ม">✎</button>
                 <button type="button" onClick={() => onChange(columns.filter((x) => x.id !== c.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">✕</button>
               </div>
+              {(() => {
+                const iss = colIssue(c);
+                return iss ? <IssueNote issue={iss} className="mx-2 mb-1.5" /> : null;
+              })()}
               {open && (
                 <div className="px-3 pb-3 pt-1 border-t border-slate-100 space-y-2">
                   <p className="text-[11px] text-slate-400">{def.hint}</p>
@@ -4412,7 +4484,7 @@ function FooterColumnsEditor({
                           <option value="">— เลือกกลุ่ม —</option>
                           {helpGroups.map((g) => (
                             <option key={g.name} value={g.name}>
-                              {g.name} ({g.titles.length} หน้า)
+                              {g.name} ({g.titles.length} หน้า{g.drafts ? ` · ร่าง ${g.drafts}` : ""})
                             </option>
                           ))}
                           {c.text && !helpGroups.some((g) => g.name === c.text) && <option value={c.text}>{c.text} (ยังไม่มีหน้า)</option>}
@@ -4430,6 +4502,11 @@ function FooterColumnsEditor({
                               {g.list.map((p) => (
                                 <li key={p.slug} className="flex items-center gap-2 text-xs text-slate-700">
                                   <span className="flex-1 truncate">{p.title}</span>
+                                  {p.status && (p.status === "published" ? (
+                                    <span className="rounded bg-emerald-50 px-1.5 text-[10px] text-emerald-700">ขึ้นเว็บแล้ว</span>
+                                  ) : (
+                                    <span className="rounded bg-amber-100 px-1.5 text-[10px] text-amber-800" title="ลูกค้ายังไม่เห็น — เผยแพร่ที่แท็บ 📄 หน้าเว็บ">ร่าง</span>
+                                  ))}
                                   <span className="text-[10px] text-slate-400">/{p.slug}</span>
                                   {shopSlug && (
                                     <a href={`/website/${encodeURIComponent(shopSlug)}?tab=pages&page=${encodeURIComponent(p.slug)}`} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline" title="เปิดแก้หน้านี้ในแท็บใหม่">
