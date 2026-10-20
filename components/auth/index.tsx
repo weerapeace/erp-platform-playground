@@ -37,6 +37,7 @@ export type Permission =
   | "roles.view" | "admin.roles"
   | "comments.view" | "comments.create" | "comments.edit"
   | "notification_rules.view" | "admin.notification_rules"
+  | "admin.email_reports"
   | "so.view" | "so.create" | "so.edit" | "so.confirm" | "so.ship" | "so.complete" | "so.cancel" | "so.delete"
   | "qt.view" | "qt.create" | "qt.edit" | "qt.send" | "qt.accept" | "qt.reject" | "qt.cancel"
   | "cn.view" | "cn.create" | "cn.cancel"
@@ -96,7 +97,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "validation.view", "admin.validation",
     "roles.view", "admin.roles",
     "comments.view", "comments.create", "comments.edit",
-    "notification_rules.view", "admin.notification_rules",
+    "notification_rules.view", "admin.notification_rules", "admin.email_reports",
     "so.view", "so.create", "so.edit", "so.confirm", "so.ship", "so.complete", "so.cancel", "so.delete",
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
     "cn.view", "cn.create", "cn.cancel",

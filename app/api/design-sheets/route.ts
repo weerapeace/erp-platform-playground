@@ -14,6 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { isValidDsStatus } from "./shared";
+import { designSheetCoverMap } from "@/lib/design-sheet-covers";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -51,22 +52,8 @@ async function nextDsNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string
   return `DS-${yr}-${String((count ?? 0) + 1).padStart(4, "0")}`;
 }
 
-/** รูปหลักของแต่ละใบงาน — เลือก is_primary ก่อน ไม่มีก็เอารูปแรก (เฉพาะไฟล์รูป) */
-async function coverMap(admin: ReturnType<typeof supabaseAdmin>, ids: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
-  if (ids.length === 0) return map;
-  const { data } = await admin.from("erp_playground_attachments")
-    .select("entity_id, public_url, content_type, is_primary, sort_order, created_at")
-    .eq("entity_type", "design_sheet").in("entity_id", ids)
-    .order("is_primary", { ascending: false }).order("sort_order", { ascending: true }).order("created_at", { ascending: true });
-  for (const a of (data ?? []) as Array<Record<string, unknown>>) {
-    const eid = String(a.entity_id);
-    const ct = (a.content_type as string) ?? "";
-    if (!ct.startsWith("image/")) continue;
-    if (!map.has(eid)) map.set(eid, String(a.public_url));
-  }
-  return map;
-}
+/** รูปหลักของแต่ละใบงาน — ของกลาง lib/design-sheet-covers (อีเมลรายงานงานค้างใช้ตัวเดียวกัน) */
+const coverMap = designSheetCoverMap;
 
 // ---- GET list ----
 export async function GET(request: NextRequest): Promise<NextResponse> {

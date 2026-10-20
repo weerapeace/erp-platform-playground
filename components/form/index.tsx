@@ -126,6 +126,48 @@ export function ERPInput({ error, leftIcon, className = "", ...props }: ERPInput
   );
 }
 
+// ---- เวลา 24 ชม. (ใช้ร่วม ERPDateTime24 / ERPTime24) ----
+/** รับทั้ง "18:00" "18.00" "1800" "930" "9" → "18:00" / "09:30" / "09:00" · ไม่ถูกต้อง = null */
+export function parseTime24(raw: string): string | null {
+  const txt = raw.trim();
+  if (!txt) return null;
+  let h = -1, mi = -1;
+  if (/^\d+$/.test(txt)) {
+    if (txt.length <= 2) { h = Number(txt); mi = 0; }
+    else if (txt.length === 3) { h = Number(txt[0]); mi = Number(txt.slice(1)); }
+    else if (txt.length === 4) { h = Number(txt.slice(0, 2)); mi = Number(txt.slice(2)); }
+  } else {
+    const m = /^(\d{1,2})[:.](\d{1,2})$/.exec(txt);
+    if (m) { h = Number(m[1]); mi = Number(m[2]); }
+  }
+  if (h < 0 || mi < 0 || h > 23 || mi > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
+}
+
+/** ช่องเวลาอย่างเดียว แบบ 24 ชม. (ค่า "HH:MM") — แทน <input type="time"> ที่โชว์ AM/PM ตามภาษาเครื่อง */
+export function ERPTime24({ value, onChange, className = "", disabled }: {
+  value: string; onChange: (v: string) => void; className?: string; disabled?: boolean;
+}) {
+  const [text, setText] = useState(value);
+  useEffect(() => { setText(value); }, [value]);
+  const commit = (raw: string) => {
+    const t = parseTime24(raw);
+    if (!t) { setText(value); return; }
+    setText(t);
+    if (t !== value) onChange(t);
+  };
+  return (
+    <div className={`flex items-center gap-1.5 ${className}`}>
+      <input type="text" inputMode="numeric" value={text} disabled={disabled} placeholder="HH:MM"
+        onChange={(e) => setText(e.target.value)} onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+        title="เวลา 24 ชั่วโมง เช่น 08:00 (พิมพ์ 800 ก็ได้)"
+        className="w-[76px] h-9 px-2 text-sm text-center tabular-nums border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400" />
+      <span className="text-xs text-slate-400 shrink-0">น.</span>
+    </div>
+  );
+}
+
 // ---- DateTime (24 ชม.) ----
 // <input type="datetime-local"> โชว์ AM/PM ตามภาษาของเบราว์เซอร์ บังคับไม่ได้ → แยกเป็น วันที่ + ช่องเวลา HH:MM (24 ชม.)
 // ค่าเข้า/ออกยังเป็น "YYYY-MM-DDTHH:mm" เหมือนเดิม (เปลี่ยนตัวกรอกอย่างเดียว) · พิมพ์ 1800 / 18.00 / 18:0 → 18:00 ให้เอง
@@ -136,23 +178,9 @@ export function ERPDateTime24({ value, onChange, defaultTime = "10:00", classNam
   const time = (value ?? "").length >= 16 ? value.slice(11, 16) : "";
   const [timeText, setTimeText] = useState(time);
   useEffect(() => { setTimeText(time); }, [time]);
-  const pad = (n: number) => String(n).padStart(2, "0");
   const commitTime = (raw: string) => {
-    const txt = raw.trim();
-    if (!txt) { setTimeText(time); return; }
-    // รับทั้ง "18:00" "18.00" "1800" "930" "9" → 18:00 / 09:30 / 09:00
-    let h = -1, mi = -1;
-    if (/^\d+$/.test(txt)) {
-      if (txt.length <= 2) { h = Number(txt); mi = 0; }
-      else if (txt.length === 3) { h = Number(txt[0]); mi = Number(txt.slice(1)); }
-      else if (txt.length === 4) { h = Number(txt.slice(0, 2)); mi = Number(txt.slice(2)); }
-    } else {
-      const m = /^(\d{1,2})[:.](\d{1,2})$/.exec(txt);
-      if (m) { h = Number(m[1]); mi = Number(m[2]); }
-    }
-    if (h < 0 || mi < 0) { setTimeText(time); return; }
-    if (h > 23 || mi > 59) { setTimeText(time); return; }
-    const t = `${pad(h)}:${pad(mi)}`;
+    const t = parseTime24(raw);
+    if (!t) { setTimeText(time); return; }
     setTimeText(t);
     if (date) onChange(`${date}T${t}`);
   };
