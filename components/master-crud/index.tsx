@@ -3028,8 +3028,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             const kind = textComputeConfigKind(f.textCompute);
             if (!kind || !f.fieldId || !can("admin.field_registry.edit")) return null;
             const enRef = en?.fieldId && textComputeConfigKind(en.textCompute) === kind ? { id: en.fieldId, cfg: en.textComputeCfg } : undefined;
-            const Btn = kind === "desc_blocks" ? DescBlocksButton : NamePartsButton;
-            return <Btn field={{ id: f.fieldId, cfg: f.textComputeCfg }} enField={enRef} sample={form} fieldLabel={f.label} onSaved={() => refreshRegistry()} />;
+            if (kind === "desc_blocks") {
+              // แทรก/ตั้งเงื่อนไขได้ทุกฟิลด์ของโมดูล (จากทะเบียน) — เว้นฟิลด์ลับ (ต้นทุน ฯลฯ) และชนิดที่เป็นตาราง/รูป/สูตร
+              const descFields = effectiveFields
+                .filter((x) => !x.sensitive && !["one2many", "many2many", "image", "computed"].includes(x.type))
+                .map((x) => ({ key: x.key, label: x.label, type: x.type, options: x.options, optionLabels: x.optionLabels }));
+              return <DescBlocksButton field={{ id: f.fieldId, cfg: f.textComputeCfg }} enField={enRef} sample={form} fields={descFields} fieldLabel={f.label} onSaved={() => refreshRegistry()} />;
+            }
+            return <NamePartsButton field={{ id: f.fieldId, cfg: f.textComputeCfg }} enField={enRef} sample={form} fieldLabel={f.label} onSaved={() => refreshRegistry()} />;
           };
           const visibleFields = baseVisible.flatMap((f) => {
                 if (enKeys.has(f.key)) return [];             // ช่องอังกฤษ: ไม่โชว์ที่ตำแหน่งเดิมของมัน

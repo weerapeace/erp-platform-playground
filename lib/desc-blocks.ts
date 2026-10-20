@@ -7,14 +7,29 @@
  *   - บล็อกข้อมูลจากสินค้า (บทนำ/รายละเอียด/ขนาด/…) ว่าง = ข้ามเอง
  *   - บล็อกข้อความ (Notes/เปลี่ยนสินค้า/เงื่อนไขสั่งซื้อ/ติดตามร้าน + พิมพ์เองเพิ่มได้) แก้ข้อความไทย/อังกฤษได้
  *     ใส่ตัวแทนได้: {แบรนด์} {รับประกัน} {รหัส} {ชื่อสินค้า}
+ *   - เจ้าของขอเพิ่ม 2026-10-20 "ต้องเลือกได้ทุก field ห้าม hardcode, และมี if ด้วย"
+ *     → แทรกได้ทุกฟิลด์ด้วย {คีย์ฟิลด์} เช่น {brand_name} {weight_g} (relation โชว์ชื่อ ไม่ใช่ id)
+ *     → ทุกบล็อกตั้ง "ถ้า…" ได้ (ทุกข้อ/ข้อใดข้อหนึ่ง) · บล็อกข้อความมี "ไม่ตรงเงื่อนไข → ข้อความแทน"
  * เก็บที่ทะเบียนฟิลด์ relation_config.desc_blocks · ยังไม่ตั้ง = ใช้สูตรเดิมในโค้ด (lib/computed-text) ไม่เปลี่ยนอะไร
  * ตัวตั้งค่า = components/desc-blocks-editor
  */
 
+import { readRelationLabel } from "@/lib/relation";
+
 export type DescLang = "th" | "en";
 export type DescBlockKey = "intro" | "details" | "size_desc" | "how_to_size" | "size_line" | "special" | "notes" | "warranty" | "exchange" | "ordering" | "follow" | "text";
 export type DescGap = "blank" | "line";
-export type DescBlock = { id: string; key: DescBlockKey; on: boolean; gap: DescGap; text?: string; text_en?: string };
+/** เงื่อนไข: มีค่า · ว่าง · เท่ากับ · ไม่เท่ากับ · มีคำว่า · ไม่มีคำว่า · มากกว่า · น้อยกว่า · ติ๊ก · ไม่ติ๊ก */
+export type DescOp = "filled" | "empty" | "eq" | "neq" | "contains" | "not_contains" | "gt" | "lt" | "true" | "false";
+export type DescRule = { field: string; op: DescOp; value?: string };
+export type DescWhen = { match: "all" | "any"; rules: DescRule[] };
+export type DescBlock = {
+  id: string; key: DescBlockKey; on: boolean; gap: DescGap; text?: string; text_en?: string;
+  /** แสดงบล็อกนี้เมื่อ… (ไม่มี = แสดงเสมอ) */
+  when?: DescWhen;
+  /** บล็อกข้อความ: ไม่ตรงเงื่อนไข → ใช้ข้อความนี้แทน (ว่าง = ข้ามบล็อก) */
+  else_text?: string; else_text_en?: string;
+};
 export type DescBlocksConfig = { blocks: DescBlock[] };
 
 type Def = { label: string; hint: string; kind: "field" | "text" | "auto"; th?: string; en?: string };
@@ -51,11 +66,29 @@ export const DESC_BLOCK_DEFS: Record<DescBlockKey, Def> = {
   text: { label: "ข้อความพิมพ์เอง", hint: "เพิ่มได้หลายอัน · อังกฤษว่าง = ไม่ใส่ในฉบับอังกฤษ", kind: "text" },
 };
 
-/** ตัวแทนที่ใส่ในบล็อกข้อความได้ (โชว์เป็นปุ่มแทรกในตัวตั้งค่า) */
-export const DESC_PLACEHOLDERS: { token: string; label: string }[] = [
-  { token: "{แบรนด์}", label: "แบรนด์" }, { token: "{รับประกัน}", label: "รับประกัน" },
-  { token: "{รหัส}", label: "รหัสสินค้า" }, { token: "{ชื่อสินค้า}", label: "ชื่อสินค้า" },
+/** ตัวแทนพิเศษ (มีตรรกะเพิ่มจากค่าในฟิลด์) — ฟิลด์อื่นทุกตัวใส่ได้ด้วย {คีย์ฟิลด์} */
+export const DESC_PLACEHOLDERS: { token: string; label: string; hint: string }[] = [
+  { token: "{แบรนด์}", label: "แบรนด์", hint: "ชื่อแบรนด์" },
+  { token: "{รับประกัน}", label: "รับประกัน", hint: "อังกฤษแปลให้ (1 ปี → 1 year(s)) · ไม่มีรับประกัน = ว่าง" },
+  { token: "{รหัส}", label: "รหัสสินค้า", hint: "Code" },
+  { token: "{ชื่อสินค้า}", label: "ชื่อสินค้า", hint: "อังกฤษใช้ Name En (ว่าง = ชื่อไทย)" },
 ];
+const SPECIAL = new Set(DESC_PLACEHOLDERS.map((p) => p.token.slice(1, -1)));
+
+/** เงื่อนไขที่เลือกได้ (ตัวตั้งค่ากรองตามชนิดฟิลด์) */
+export const DESC_OPS: { op: DescOp; label: string; value: boolean; for: "any" | "number" | "boolean" | "text" }[] = [
+  { op: "filled", label: "มีค่า", value: false, for: "any" },
+  { op: "empty", label: "ว่าง", value: false, for: "any" },
+  { op: "eq", label: "เท่ากับ", value: true, for: "any" },
+  { op: "neq", label: "ไม่เท่ากับ", value: true, for: "any" },
+  { op: "contains", label: "มีคำว่า", value: true, for: "text" },
+  { op: "not_contains", label: "ไม่มีคำว่า", value: true, for: "text" },
+  { op: "gt", label: "มากกว่า", value: true, for: "number" },
+  { op: "lt", label: "น้อยกว่า", value: true, for: "number" },
+  { op: "true", label: "ติ๊ก (เปิด)", value: false, for: "boolean" },
+  { op: "false", label: "ไม่ติ๊ก (ปิด)", value: false, for: "boolean" },
+];
+const OPS = new Set(DESC_OPS.map((o) => o.op));
 
 const b = (key: DescBlockKey, gap: DescGap): DescBlock => ({ id: key, key, on: true, gap });
 /** ค่าตั้งต้น = โครงเดียวกับสูตรเดิม (บทนำ · รายละเอียด · ขนาด · พิเศษ · Notes · รับประกัน · เปลี่ยนสินค้า · สั่งซื้อ · ติดตามร้าน) */
@@ -66,6 +99,7 @@ export const DEFAULT_DESC_BLOCKS: DescBlock[] = [
 
 const KEYS = new Set(Object.keys(DESC_BLOCK_DEFS));
 const MAX_TEXT = 3000;
+const FIELD_RE = /^[A-Za-z0-9_]{1,64}$/;   // คีย์ฟิลด์ (อังกฤษ) — {คำไทยอื่น} ที่ไม่ใช่ตัวแทนพิเศษ คงไว้ตามที่พิมพ์
 const s = (v: unknown): string => (v == null ? "" : String(v));
 const trim = (v: unknown): string => s(v).trim();
 
@@ -90,9 +124,33 @@ export function cleanDescBlocks(raw: unknown): DescBlocksConfig {
       if (te) blk.text_en = te;
       if (key === "text" && !t.trim() && !te.trim()) continue;   // ข้อความพิมพ์เองว่าง = ไม่มีบล็อกนี้
     }
+    const when = cleanWhen(o.when);
+    if (when) {
+      blk.when = when;
+      if (def.kind === "text") {
+        const et = s(o.else_text).slice(0, MAX_TEXT), ete = s(o.else_text_en).slice(0, MAX_TEXT);
+        if (et.trim()) blk.else_text = et;
+        if (ete.trim()) blk.else_text_en = ete;
+      }
+    }
     blocks.push(blk);
   }
   return { blocks: blocks.length ? blocks : DEFAULT_DESC_BLOCKS.map((x) => ({ ...x })) };
+}
+
+function cleanWhen(raw: unknown): DescWhen | undefined {
+  const w = (raw && typeof raw === "object" ? raw : null) as { match?: unknown; rules?: unknown } | null;
+  if (!w || !Array.isArray(w.rules)) return undefined;
+  const rules: DescRule[] = [];
+  for (const x of w.rules.slice(0, 10)) {
+    const r = (x ?? {}) as Record<string, unknown>;
+    const field = trim(r.field), op = r.op as DescOp;
+    if (!(FIELD_RE.test(field) || SPECIAL.has(field)) || !OPS.has(op)) continue;
+    const rule: DescRule = { field, op };
+    if (DESC_OPS.find((o) => o.op === op)?.value) rule.value = s(r.value).slice(0, 200);
+    rules.push(rule);
+  }
+  return rules.length ? { match: w.match === "any" ? "any" : "all", rules } : undefined;
 }
 
 // ── ข้อมูลจากสินค้า ──
@@ -124,20 +182,90 @@ export function sizeLineOf(row: Record<string, unknown>, lang: DescLang): string
   return "";
 }
 
-/** แทนตัวแทนในข้อความ · ช่องว่างซ้อนในบรรทัดยุบเหลือช่องเดียว (แบรนด์ว่าง) */
+/** ค่าเดียวเป็นข้อความอ่านได้ (ไม่ต้องรู้ชนิดฟิลด์) — ใช่/ไม่ใช่ · ตัวเลขมีจุลภาค · วันที่ วว/ดด/ปปปป · รายการคั่น , */
+function formatValue(v: unknown, lang: DescLang): string {
+  if (v == null) return "";
+  if (typeof v === "boolean") return lang === "en" ? (v ? "Yes" : "No") : (v ? "ใช่" : "ไม่ใช่");
+  if (typeof v === "number") return isFinite(v) ? v.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "";
+  if (Array.isArray(v)) return v.map((x) => formatValue(x, lang)).filter(Boolean).join(", ");
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return formatValue(o.label ?? o.name ?? o.title ?? o.value ?? o.text ?? null, lang);
+  }
+  const str = String(v).trim();
+  const d = /^(\d{4})-(\d{2})-(\d{2})(?:[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(str);
+  return d ? `${d[3]}/${d[2]}/${d[1]}` : str;
+}
+
+/** ค่าของฟิลด์ (หรือตัวแทนพิเศษ) เป็นข้อความ — relation (…_id) ใช้ชื่อจาก {base}_label / {base}_name */
+export function descFieldValue(row: Record<string, unknown>, key: string, lang: DescLang): string {
+  switch (key) {
+    case "แบรนด์": return trim(row.brand_name) || trim(row.brand_label);
+    case "รับประกัน": return warrantyOf(row, lang);
+    case "รหัส": return trim(row.code);
+    case "ชื่อสินค้า": return lang === "en" ? trim(row.name_en) || trim(row.name_th) : trim(row.name_th);
+    default: break;
+  }
+  const rel = readRelationLabel(row, key);
+  if (rel) return rel.trim();
+  return formatValue(row[key], lang);
+}
+
+/** แทนตัวแทนในข้อความ ({คีย์ฟิลด์} ทุกตัว + ตัวแทนพิเศษ) · ช่องว่างซ้อนในบรรทัดยุบเหลือช่องเดียว (ค่าว่าง) */
 export function fillDescText(text: string, row: Record<string, unknown>, lang: DescLang): string {
-  const brand = trim(row.brand_name) || trim(row.brand_label);
-  const name = lang === "en" ? trim(row.name_en) || trim(row.name_th) : trim(row.name_th);
   return text
-    .replace(/\{แบรนด์\}/g, brand).replace(/\{รับประกัน\}/g, warrantyOf(row, lang))
-    .replace(/\{รหัส\}/g, trim(row.code)).replace(/\{ชื่อสินค้า\}/g, name)
+    .replace(/\{([^{}\s]{1,64})\}/g, (m, k: string) => (SPECIAL.has(k) || FIELD_RE.test(k) ? descFieldValue(row, k, lang) : m))
     .split("\n").map((l) => l.replace(/ {2,}/g, " ").replace(/\s+$/, "")).join("\n");
+}
+
+/** คีย์ฟิลด์ที่ใช้ในข้อความ (ไว้โชว์คำอธิบายใต้ช่อง) */
+export function descTokensIn(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/\{([^{}\s]{1,64})\}/g)) if ((SPECIAL.has(m[1]) || FIELD_RE.test(m[1])) && !out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+const norm = (v: string): string => v.trim().toLowerCase();
+/** เงื่อนไขข้อเดียวจริงไหม (เทียบกับค่าที่อ่านได้ + ค่าดิบ) */
+export function descRuleTrue(rule: DescRule, row: Record<string, unknown>): boolean {
+  const raw = row[rule.field];
+  const disp = descFieldValue(row, rule.field, "th");
+  const val = s(rule.value);
+  const isZero = typeof raw !== "boolean" && raw != null && raw !== "" && Number(raw) === 0;
+  const filled = typeof raw === "boolean" ? raw : disp !== "" && !isZero;
+  const same = norm(disp) === norm(val) || (raw != null && typeof raw !== "object" && norm(String(raw)) === norm(val));
+  const n = Number(raw), nv = Number(val);
+  const nums = raw != null && raw !== "" && isFinite(n) && val.trim() !== "" && isFinite(nv);
+  const truthy = raw === true || raw === 1 || raw === "true";
+  switch (rule.op) {
+    case "filled": return filled;
+    case "empty": return !filled;
+    case "eq": return same;
+    case "neq": return !same;
+    case "contains": return !!val.trim() && norm(disp).includes(norm(val));
+    case "not_contains": return !val.trim() || !norm(disp).includes(norm(val));
+    case "gt": return nums && n > nv;
+    case "lt": return nums && n < nv;
+    case "true": return truthy;
+    case "false": return !truthy;
+    default: return true;
+  }
+}
+/** เงื่อนไขของบล็อกผ่านไหม (ไม่มีเงื่อนไข = ผ่าน) */
+export function descWhenTrue(when: DescWhen | undefined, row: Record<string, unknown>): boolean {
+  if (!when || !when.rules.length) return true;
+  return when.match === "any" ? when.rules.some((r) => descRuleTrue(r, row)) : when.rules.every((r) => descRuleTrue(r, row));
 }
 
 /** ข้อความของบล็อกเดียว ("" = ข้าม) */
 export function renderDescBlock(blk: DescBlock, row: Record<string, unknown>, lang: DescLang): string {
   const def = DESC_BLOCK_DEFS[blk.key];
   const en = lang === "en";
+  if (!descWhenTrue(blk.when, row)) {
+    // ไม่ตรงเงื่อนไข: บล็อกข้อความที่ตั้ง "ข้อความแทน" → ใช้ข้อความนั้น · อื่น ๆ = ข้าม
+    const alt = def.kind === "text" ? (en ? blk.else_text_en : blk.else_text) : "";
+    return alt ? fillDescText(alt, row, lang).trim() : "";
+  }
   switch (blk.key) {
     case "intro": return s(en ? row.introduction_en : row.introduction).trim();
     case "details": {
@@ -175,5 +303,6 @@ export function buildDescription(row: Record<string, unknown>, cfg: unknown, lan
 export function describeDescBlocks(cfg: unknown): string {
   const on = cleanDescBlocks(cfg).blocks.filter((x) => x.on);
   const names = on.map((x) => DESC_BLOCK_DEFS[x.key].label);
-  return `${names.slice(0, 4).join(" → ")}${names.length > 4 ? " → …" : ""} (${on.length} บล็อก)`;
+  const conds = on.filter((x) => x.when).length;
+  return `${names.slice(0, 4).join(" → ")}${names.length > 4 ? " → …" : ""} (${on.length} บล็อก${conds ? ` · มีเงื่อนไข ${conds}` : ""})`;
 }
