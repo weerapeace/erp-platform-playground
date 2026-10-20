@@ -127,10 +127,16 @@ export interface MegaPanel {
   layout: MegaLayout;
   blocks: MegaBlock[];
   tabs: MegaTab[];
-  /** แบบแท็บ: การ์ดต่อแถว */
+  /** แบบแท็บ: การ์ดต่อแถว (0 = อัตโนมัติ — เต็มแถวตามจำนวนการ์ดของแท็บนั้น · สูงสุด 6) */
   cardsPerRow: number;
   /** ลิงก์ "ดูทั้งหมด" ท้ายแผง ("" = ไม่โชว์) */
   viewAllLabel: string;
+  /** แบบแท็บ: การ์ด "ดูทั้งหมด" ต่อท้ายการ์ดของทุกแท็บ (ไปที่ลิงก์ของแท็บนั้น) */
+  viewAllCard: boolean;
+  /** ข้อความบนการ์ดดูทั้งหมด ("" = "ดูทั้งหมด") */
+  viewAllCardLabel: string;
+  /** รูปพื้นการ์ดดูทั้งหมด (ไม่ใส่ = พื้นสีอ่อนของธีม + ลูกศร) */
+  viewAllCardImageKey: string | null;
   /** ขนาดแผง: เต็มความกว้างจอ / กล่องลอยใต้เมนู */
   width: "full" | "box";
   /** สีพื้นแผง ("" = สีพื้นการ์ดของธีม) */
@@ -316,6 +322,18 @@ export function cloneMegaBlock(b: MegaBlock): MegaBlock {
 /** ลิงก์หมวด (ตรงกับเว็บร้าน /c/<key>) */
 export const megaCategoryHref = (key: string) => (key ? `/c/${encodeURIComponent(key)}` : "/shop");
 
+/** แบบแท็บ: จำนวนคอลัมน์การ์ดของแท็บที่มี n ใบ (รวมการ์ดดูทั้งหมด) — อัตโนมัติ (0) = เต็มแถวพอดีจำนวนการ์ด สูงสุด 6 */
+export function megaTabCols(cardsPerRow: number, n: number): number {
+  return cardsPerRow > 0 ? cardsPerRow : Math.max(1, Math.min(6, n));
+}
+
+/** การ์ด "ดูทั้งหมด" ท้ายแท็บ (ไปลิงก์ของแท็บ · แท็บไม่มีลิงก์ = ลิงก์ของเมนู) — ปิด/ไม่มีลิงก์ = null */
+export function megaViewAllCard(p: Pick<MegaPanel, "viewAllCard" | "viewAllCardLabel" | "viewAllCardImageKey">, tabHref: string, itemHref = ""): MegaCard | null {
+  const href = tabHref || itemHref;
+  if (!p.viewAllCard || !href) return null;
+  return { id: "view-all", title: p.viewAllCardLabel || "ดูทั้งหมด", desc: "", href, imageKey: p.viewAllCardImageKey };
+}
+
 /** รหัสหมวดจากลิงก์หมวด (/c/<รหัส> หรือ /shop?cat=<รหัส>) — ไม่ใช่ลิงก์หมวด = null */
 export function megaCategoryKeyOf(href: string): string | null {
   const m = /^\/c\/([^/?#]+)\/?(?:[?#].*)?$/.exec(href) ?? /^\/shop\?(?:.*&)?cat=([^&#]+)/.exec(href);
@@ -341,7 +359,23 @@ export function megaLinkLabel(l: Pick<MegaLink, "label" | "href">, labels?: Reco
 /** แผงตั้งต้นจากแม่แบบ — เติมหมวดของร้านให้เลย (แก้ต่อได้ทุกอย่าง) */
 export function megaPreset(template: MegaTemplate, ctx: { categories: { key: string; label: string; imageKey?: string | null }[] }): MegaPanel {
   const cats = ctx.categories.slice(0, 8);
-  const base: MegaPanel = { template, layout: template === "C" ? "tabs" : "columns", blocks: [], tabs: [], cardsPerRow: 4, viewAllLabel: "", width: "full", bg: "", divider: false, promo: "", promoHref: "", mobileHideMedia: false };
+  const base: MegaPanel = {
+    template,
+    layout: template === "C" ? "tabs" : "columns",
+    blocks: [],
+    tabs: [],
+    cardsPerRow: 4,
+    viewAllLabel: "",
+    viewAllCard: false,
+    viewAllCardLabel: "",
+    viewAllCardImageKey: null,
+    width: "full",
+    bg: "",
+    divider: false,
+    promo: "",
+    promoHref: "",
+    mobileHideMedia: false,
+  };
   if (template === "A") {
     const list = newMegaBlock("links", "");
     list.links = [newMegaLink("ดูทั้งหมด", "/shop"), newMegaLink("มาใหม่", "/new"), ...cats.map((c) => newMegaLink("", megaCategoryHref(c.key)))];
@@ -486,8 +520,11 @@ export function normalizeMegaPanel(raw: unknown): MegaPanel | null {
     tabs: arr(r.tabs, MEGA_LIMITS.tabs)
       .map((t, ti) => ({ id: id(t.id, "t", ti), label: str(t.label, 40), href: cleanHref(t.href), cards: cleanCards(t.cards) }))
       .filter((t) => t.label),
-    cardsPerRow: int(r.cardsPerRow, 4, MEGA_LIMITS.cardsPerRow[0], MEGA_LIMITS.cardsPerRow[1]),
+    cardsPerRow: r.cardsPerRow === 0 || r.cardsPerRow === "0" ? 0 : int(r.cardsPerRow, 4, MEGA_LIMITS.cardsPerRow[0], MEGA_LIMITS.cardsPerRow[1]),
     viewAllLabel: str(r.viewAllLabel, 40),
+    viewAllCard: r.viewAllCard === true,
+    viewAllCardLabel: str(r.viewAllCardLabel, 40),
+    viewAllCardImageKey: key(r.viewAllCardImageKey),
     width: oneOf(r.width, ["full", "box"] as const, "full"),
     bg: hex(r.bg),
     divider: r.divider === true,
@@ -612,7 +649,12 @@ export function megaLinkIssue(href: string, ctx: { categories: Set<string>; prod
   const h = href.trim();
   if (!h) return "ยังไม่ได้ใส่ลิงก์";
   const cat = /^\/c\/([^/?#]+)/.exec(h);
-  if (cat) return ctx.categories.has(decodeURIComponent(cat[1])) ? null : "หมวดนี้ไม่มีแล้ว";
+  if (cat) {
+    if (!ctx.categories.has(decodeURIComponent(cat[1]))) return "หมวดนี้ไม่มีแล้ว";
+    // ต้องอยู่ทั้ง 2 หมวด (?also=<หมวด>) — หมวดที่ 2 หายไปแล้ว = เตือน
+    const also = /[?&]also=([^&#]+)/.exec(h);
+    return also && !decodeURIComponent(also[1]).split(",").every((k) => ctx.categories.has(k)) ? "หมวดที่ 2 ไม่มีแล้ว" : null;
+  }
   const prod = /^\/product\/([^/?#]+)/.exec(h);
   if (prod) return ctx.products.has(decodeURIComponent(prod[1]).toLowerCase()) ? null : "สินค้านี้ไม่ได้อยู่บนเว็บแล้ว";
   const col = /^\/collection\/([^/?#]+)/.exec(h);

@@ -837,11 +837,30 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
       <label className="flex items-center gap-2">
         <span className="text-[11px] text-slate-500">การ์ดต่อแถว</span>
         <WheelSelect value={panel.cardsPerRow} onChange={(e) => onChange({ ...panel, cardsPerRow: Number(e.target.value) })}>
+          <option value={0}>อัตโนมัติ</option>
           {range(MEGA_LIMITS.cardsPerRow[0], MEGA_LIMITS.cardsPerRow[1]).map((n) => (
             <option key={n} value={n}>{n} ใบ</option>
           ))}
         </WheelSelect>
+        {panel.cardsPerRow === 0 && <span className="text-[10px] text-slate-400">เต็มแถวพอดีจำนวนการ์ดของแต่ละแท็บ (2 ใบ = เต็ม 2 · 3 ใบ = เต็ม 3 · สูงสุด 6)</span>}
       </label>
+      {/* ➕ การ์ด "ดูทั้งหมด" ต่อท้ายทุกแท็บ — ไปที่ลิงก์ของแท็บนั้น (นับรวมในการ์ดต่อแถวอัตโนมัติ) */}
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-1.5 space-y-1.5">
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input type="checkbox" checked={!!panel.viewAllCard} onChange={(e) => onChange({ ...panel, viewAllCard: e.target.checked })} />
+          ➕ การ์ด &quot;ดูทั้งหมด&quot; ท้ายทุกแท็บ
+          <span className="text-[10px] text-slate-400">กดแล้วไปที่ลิงก์ของแท็บนั้น</span>
+        </label>
+        {panel.viewAllCard && (
+          <div className="flex items-start gap-2">
+            <LangInput className={`${mini} flex-1 min-w-0`} obj={panel} k="viewAllCardLabel" maxLength={40} placeholder='ข้อความบนการ์ด (ไม่ใส่ = "ดูทั้งหมด")' onPatch={(p) => onChange({ ...panel, ...p })} />
+            <div className="w-44 shrink-0">
+              <ImageUploadField label="รูปพื้นการ์ด (ไม่ใส่ก็ได้)" value={panel.viewAllCardImageKey ?? null} onChange={(k) => onChange({ ...panel, viewAllCardImageKey: k })} height={44} />
+            </div>
+          </div>
+        )}
+        {panel.viewAllCard && tabs.some((t) => !t.href) && <p className="text-[10px] text-amber-600">แท็บที่ยังไม่ใส่ลิงก์ = การ์ดดูทั้งหมดไปที่ลิงก์ของเมนูนี้แทน</p>}
+      </div>
       {tabs.map((t, i) => {
         const open = openId === t.id;
         return (
@@ -853,7 +872,9 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
               <div className="w-36 shrink-0">
                 <LinkField value={t.href} onChange={(href) => set(t.id, { href })} ctx={ctx.link} />
               </div>
-              <span className="text-[10px] text-slate-400 shrink-0">{t.cards.length} การ์ด</span>
+              <span className="text-[10px] text-slate-400 shrink-0">
+                {t.cards.length} การ์ด{panel.viewAllCard ? " + ดูทั้งหมด" : ""}
+              </span>
               <button type="button" onClick={() => setOpenId(open ? null : t.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500"}`}>
                 {open ? "▲" : "▼"}
               </button>

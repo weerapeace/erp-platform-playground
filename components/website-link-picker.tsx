@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
-import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf, newDropHref } from "@/lib/website-links";
+import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf, categoryAlsoOf, newDropHref } from "@/lib/website-links";
 import { apiFetch } from "@/lib/api";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
@@ -97,6 +97,7 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
     [storePages, drops]
   );
   const catKey = categoryKeyOf(value) ?? "";
+  const catAlso = categoryAlsoOf(value);
 
   const pickKind = (k: Kind) => {
     setKind(k);
@@ -132,14 +133,35 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
 
       {kind === "category" &&
         (ctx.categories.length ? (
-          <select className={cls} value={catKey} onChange={(e) => onChange(categoryHref(e.target.value))}>
-            {!catKey && <option value="">— เลือกหมวด —</option>}
-            {ctx.categories.map((c) => (
-              <option key={c.key} value={c.key}>
-                {categoryChoiceLabel(c)}
-              </option>
-            ))}
-          </select>
+          <>
+            <select className={cls} value={catKey} onChange={(e) => onChange(categoryHref(e.target.value, catAlso))}>
+              {!catKey && <option value="">— เลือกหมวด —</option>}
+              {ctx.categories.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {categoryChoiceLabel(c)}
+                </option>
+              ))}
+            </select>
+            {/* ➕ หมวดที่ 2: เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด (เช่น เข็มขัด + ผู้ชาย) */}
+            {catKey && (
+              <select
+                className={`${cls} ${catAlso ? "" : "text-slate-400"}`}
+                value={catAlso}
+                onChange={(e) => onChange(categoryHref(catKey, e.target.value))}
+                title="โชว์เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด"
+              >
+                <option value="">＋ และต้องอยู่ในหมวด… (ไม่บังคับ)</option>
+                {ctx.categories
+                  .filter((c) => c.key !== catKey)
+                  .map((c) => (
+                    <option key={c.key} value={c.key}>
+                      และอยู่ใน: {categoryChoiceLabel(c)}
+                    </option>
+                  ))}
+              </select>
+            )}
+            {catAlso && <p className="text-[10px] text-slate-500">โชว์เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด</p>}
+          </>
         ) : (
           <p className="text-[11px] text-amber-600">ร้านนี้ยังไม่ได้ตั้งหมวดสินค้าบนเว็บ (แท็บจับคู่ฟิลด์)</p>
         ))}

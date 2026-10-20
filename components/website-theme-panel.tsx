@@ -4218,10 +4218,19 @@ function MenuEditor({ items, onChange, choices, pages, depth = 0, parentMega = f
     switch (it.kind) {
       case "category":
         return (
-          <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value })}>
-            <option value="">— เลือกหมวด —</option>
-            {(choices.categories ?? []).map((c) => <option key={c.key} value={c.key}>{categoryChoiceLabel(c)}</option>)}
-          </select>
+          <div className="space-y-1">
+            <select className={`${mini} w-full`} value={it.value} onChange={(e) => setItem(it.id, { value: e.target.value, also: e.target.value === it.also ? "" : it.also })}>
+              <option value="">— เลือกหมวด —</option>
+              {(choices.categories ?? []).map((c) => <option key={c.key} value={c.key}>{categoryChoiceLabel(c)}</option>)}
+            </select>
+            {/* ➕ หมวดที่ 2: เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด (ลิงก์ /c/<หมวด>?also=<หมวด2>) */}
+            {it.value && (
+              <select className={`${mini} w-full ${it.also ? "" : "text-slate-400"}`} value={it.also ?? ""} onChange={(e) => setItem(it.id, { also: e.target.value })} title="โชว์เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด">
+                <option value="">＋ และต้องอยู่ในหมวด… (ไม่บังคับ)</option>
+                {(choices.categories ?? []).filter((c) => c.key !== it.value).map((c) => <option key={c.key} value={c.key}>และอยู่ใน: {categoryChoiceLabel(c)}</option>)}
+              </select>
+            )}
+          </div>
         );
       case "product":
         return (

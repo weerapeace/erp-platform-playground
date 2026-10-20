@@ -17,7 +17,23 @@ export const siteUrlFromDomain = (domain: string | null | undefined): string | n
 /** ลิงก์เต็มหน้าสินค้าบนเว็บร้าน (ร้านยังไม่มีโดเมน = null) */
 export const productPageUrl = (siteUrl: string | null, code: string): string | null =>
   siteUrl && code ? `${siteUrl}${productHref(code)}` : null;
-export const categoryHref = (key: string) => `/c/${encodeURIComponent(key)}`;
+/**
+ * ลิงก์หน้าหมวด /c/<หมวด> · also = "ต้องอยู่ในหมวดนี้ด้วย" (เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด) → /c/<หมวด>?also=<หมวด2>
+ * เว็บร้านอ่าน ?also= ที่หน้า /c/<หมวด> (ShopView) — ต้องตรงกัน
+ */
+export const categoryHref = (key: string, also?: string | null) =>
+  `/c/${encodeURIComponent(key)}${also && also !== key ? `?also=${encodeURIComponent(also)}` : ""}`;
+
+/** หมวดที่ 2 ของลิงก์หมวด (?also=) — ไม่มี = "" */
+export function categoryAlsoOf(href: string): string {
+  const m = /^\/c\/[^?#]+\?(?:[^#]*&)?also=([^&#]+)/.exec(href);
+  if (!m) return "";
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
 
 /** ลิงก์นี้เป็นหน้าหมวดไหม → รหัสหมวด (รู้จักทั้ง /c/<key> แบบใหม่ และ /shop?cat=<key> แบบเก่า) · ไม่ใช่ = null */
 export function categoryKeyOf(href: string): string | null {

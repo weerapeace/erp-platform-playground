@@ -14,7 +14,7 @@ import { isGradStop } from "@/lib/website-gradient";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
-import { newDropHref } from "@/lib/website-links";
+import { newDropHref, categoryHref } from "@/lib/website-links";
 import { normalizeContentSources, type ContentSource } from "@/lib/website-content-sources";
 import { defaultOverPages, normalizeOverPages, type OverPages } from "@/lib/website-header-over";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
@@ -1178,6 +1178,8 @@ export interface MenuItem {
   kind: MenuKind;
   /** category = key หมวด · product = รหัส Parent SKU · page = slug หน้า · url = ลิงก์ */
   value: string;
+  /** category: หมวดที่ 2 — เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด ("" = หมวดเดียว) */
+  also: string;
   /** ป้ายเล็กท้ายชื่อ เช่น "ใหม่" "ลด" */
   badge: string;
   /** รายการย่อยแบบ Mega (แผงกว้างมีรูป) แทน dropdown */
@@ -1210,7 +1212,7 @@ export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "contact", label: "ติดต่อ", hint: "/contact" },
   { value: "url", label: "ลิงก์อื่น", hint: "URL ภายนอก/ภายใน" },
 ];
-export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, badge: "", mega: false, imageKey: null, children: [], panel: null, showFrom: "", showUntil: "" });
+export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, also: "", badge: "", mega: false, imageKey: null, children: [], panel: null, showFrom: "", showUntil: "" });
 function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
   if (!Array.isArray(raw)) return [];
   const out: MenuItem[] = [];
@@ -1225,6 +1227,7 @@ function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
       label,
       kind,
       value: typeof r.value === "string" ? r.value.trim().slice(0, 500) : "",
+      also: kind === "category" && typeof r.also === "string" ? r.also.trim().slice(0, 100) : "",
       badge: typeof r.badge === "string" ? r.badge.trim().slice(0, 20) : "",
       mega: r.mega === true,
       imageKey: typeof r.imageKey === "string" && /^[\w./-]+$/.test(r.imageKey) ? r.imageKey : null,
@@ -1241,12 +1244,12 @@ export function normalizeMenu(raw: unknown): MenuConfig {
   return { items: Array.isArray(r.items) ? normalizeMenuItems(r.items, 0) : null, mobileItems: Array.isArray(r.mobileItems) ? normalizeMenuItems(r.mobileItems, 0) : null, behavior: normalizeMenuBehavior(r.behavior) };
 }
 /** ลิงก์ของรายการเมนู (ตรงกับฝั่งเว็บร้าน) */
-export function menuItemHref(it: { kind: MenuKind; value: string }): string {
+export function menuItemHref(it: { kind: MenuKind; value: string; also?: string }): string {
   switch (it.kind) {
     case "home": return "/";
     case "shop": return "/shop";
     case "categories": return "/shop";
-    case "category": return it.value ? `/c/${encodeURIComponent(it.value)}` : "/shop";
+    case "category": return it.value ? categoryHref(it.value, it.also) : "/shop";
     case "product": return it.value ? `/product/${it.value.toLowerCase()}` : "/shop";
     case "page": return it.value ? `/${it.value}` : "/";
     case "contact": return "/contact";
@@ -1673,7 +1676,7 @@ const pick = <T extends string>(v: unknown, allowed: readonly T[], fallback: T):
  * เพิ่มช่องข้อความใหม่ในธีม = เพิ่มชื่อที่นี่ (ตารางคำแปล + ตัวทำความสะอาดใช้รายการนี้ร่วมกัน)
  */
 export const THEME_TEXT_KEYS = [
-  "label", "badge", "title", "desc", "text", "caption", "moreLabel", "viewAllLabel", "promo", "placeholder",
+  "label", "badge", "title", "desc", "text", "caption", "moreLabel", "viewAllLabel", "viewAllCardLabel", "promo", "placeholder",
   "titleText", "noteText", "saleText", "newText", "bestText", "recsTitle", "freeShipText", "freeShipDone", "etaText",
   "emptyText", "checkoutText", "heading", "subtitle",
   "confirmText", "codLabel", "codHint", "promptpayLabel", "promptpayHint", "trustText", "thanksTitle", "thanksText",
@@ -1693,7 +1696,7 @@ const THEME_CRUMB: Record<string, string> = {
   recsSets: "ชุดสินค้าแนะนำ", labels: "ข้อความตัวเลือก", continueText: "ปุ่มเลือกซื้อต่อ", emptyButton: "ปุ่มตอนตะกร้าว่าง", btnText: "ปุ่มใส่ตะกร้า",
   gift: "ห่อของขวัญ", note: "หมายเหตุ", eyebrow: "คำโปรย",
   label: "ชื่อ", badge: "ป้าย", title: "หัวข้อ", desc: "คำอธิบาย", text: "ข้อความ", caption: "คำบรรยาย", moreLabel: "ลิงก์ท้าย",
-  viewAllLabel: "ดูทั้งหมด", promo: "แถบโปร", placeholder: "ข้อความในช่อง", titleText: "หัวข้อ", noteText: "หมายเหตุ",
+  viewAllLabel: "ดูทั้งหมด", viewAllCardLabel: "การ์ดดูทั้งหมด", promo: "แถบโปร", placeholder: "ข้อความในช่อง", titleText: "หัวข้อ", noteText: "หมายเหตุ",
   saleText: "ป้ายลดราคา", newText: "ป้ายสินค้าใหม่", bestText: "ป้ายขายดี", recsTitle: "หัวข้อสินค้าแนะนำ",
   freeShipText: "ข้อความส่งฟรี", freeShipDone: "ข้อความถึงยอดส่งฟรี", etaText: "ข้อความเวลาส่ง", emptyText: "ข้อความว่าง",
   checkoutText: "ปุ่มชำระเงิน", heading: "หัวข้อ", subtitle: "คำอธิบาย",
