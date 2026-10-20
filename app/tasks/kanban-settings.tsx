@@ -59,6 +59,34 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
           ))}
         </div>
       </div>
+      {cfg.cover && (
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-slate-500">{t("รูปปก", "Cover image")}</div>
+          <SegRow label={t("ตำแหน่ง", "Position")} value={cfg.coverPos ?? "top"} onChange={(v) => set({ coverPos: v })}
+            options={[["top", t("บนการ์ด", "On top")], ["side", t("ข้างซ้าย", "Left side")]]} />
+          <SegRow label={t("การแสดง", "Fit")} value={cfg.coverFit ?? "cover"} onChange={(v) => set({ coverFit: v })}
+            options={[["cover", t("ครอปเต็มกรอบ", "Crop to fill")], ["contain", t("เห็นทั้งรูป", "Whole image")]]} />
+          <SegRow label={t("ขนาด", "Size")} value={cfg.coverSize ?? "auto"} onChange={(v) => set({ coverSize: v })}
+            options={[["auto", t("อัตโนมัติ", "Auto")], ["sm", t("เล็ก", "S")], ["md", t("กลาง", "M")], ["lg", t("ใหญ่", "L")], ["square", t("จัตุรัส", "Square")]]} />
+        </div>
+      )}
+      <SegRow label={t("ระยะห่างการ์ด", "Card spacing")} value={cfg.cardGap ?? "normal"} onChange={(v) => set({ cardGap: v })}
+        options={[["tight", t("ชิด", "Tight")], ["normal", t("ปกติ", "Normal")], ["loose", t("ห่าง", "Loose")], ["xloose", t("ห่างมาก", "Extra")]]} />
+    </div>
+  );
+}
+
+// แถวปุ่มเลือก 1 ค่า (ใช้ในตั้งค่ารูปปก/ระยะห่าง)
+function SegRow<V extends string>({ label, value, options, onChange }: { label: string; value: V; options: [V, string][]; onChange: (v: V) => void }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[11px] text-slate-400 w-20 shrink-0">{label}</span>
+      <div className="inline-flex flex-wrap gap-1">
+        {options.map(([v, l]) => (
+          <button key={v} type="button" onClick={() => onChange(v)}
+            className={`h-7 px-2 rounded-md border text-xs ${value === v ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -74,7 +102,7 @@ export function KanbanSettings({ cfg, onChange, accent, wip }: { cfg: KanbanThem
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-40 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-xl p-3">
+          <div className="absolute right-0 z-40 mt-1 w-80 max-h-[75vh] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-3">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-slate-700">⚙️ {wip ? t("ตั้งค่า WIP", "WIP settings") : t("ตั้งค่า Kanban", "Kanban settings")}</p>
               <button onClick={() => setOpen(false)} className="text-slate-300 hover:text-slate-600 text-xs">✕</button>

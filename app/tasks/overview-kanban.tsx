@@ -47,8 +47,15 @@ function dueDiffDays(due: string): number {
   return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
 }
 
-// ตัวเลือกเสริมของการ์ด (มุมมอง WIP ใช้) — ป้ายสถานะ / กำหนดส่งแบบนับวัน / ความสูงรูปปก
-type CardExtra = { statusPill?: boolean; relDue?: boolean; coverCls?: string };
+// ตัวเลือกเสริมของการ์ด (มุมมอง WIP ใช้) — ป้ายสถานะ / กำหนดส่งแบบนับวัน / ความสูงรูปปก / ความกว้างรูปที่โหลด
+type CardExtra = { statusPill?: boolean; relDue?: boolean; coverCls?: string; imgW?: number };
+
+// รูปปกปรับได้ต่อคน (KanbanTheme): ขนาด · ครอปเต็มกรอบ/เห็นทั้งรูป · อยู่บน/ข้างซ้าย
+const COVER_TOP_H: Record<string, string> = { sm: "h-16", md: "h-28", lg: "h-44", square: "aspect-square" };
+const COVER_SIDE_BOX: Record<string, string> = { auto: "w-16 h-16", sm: "w-12 h-12", md: "w-16 h-16", lg: "w-24 h-24", square: "w-20 h-20" };
+// ระยะห่างระหว่างการ์ด (px) — ใช้ทั้งบอร์ดการ์ดและ WIP
+const CARD_GAP_PX: Record<string, number> = { tight: 4, normal: 8, loose: 14, xloose: 22 };
+export const cardGapPx = (cfg: KanbanTheme) => CARD_GAP_PX[cfg.cardGap ?? "normal"] ?? 8;
 
 // ───────── การ์ด ─────────
 function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: KanbanTheme; dragging?: boolean; extra?: CardExtra }) {
@@ -59,7 +66,11 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
   // คอลัมน์ที่จบแล้ว (เสร็จ/ยกเลิก) ไม่โชว์รูปปก — เหลือแค่ตัวอักษร+ผู้รับผิดชอบ
   const showImages = cfg.cover && !isTerminal(task.status);
   const cover = showImages ? coverKey(task) : null;
-  const coverUrl = cover ? r2ImageUrl(cover, 320) : null;
+  const size = cfg.coverSize ?? "auto";
+  const coverUrl = cover ? r2ImageUrl(cover, size === "lg" || size === "square" ? Math.max(extra?.imgW ?? 320, 480) : extra?.imgW ?? 320) : null;
+  const side = cfg.coverPos === "side" && !!coverUrl;   // รูปเล็กข้างซ้าย (ข้อความอยู่ขวา)
+  const fitCls = cfg.coverFit === "contain" ? "object-contain bg-white" : "object-cover bg-slate-50";   // contain = เห็นทั้งรูป ไม่ครอป
+  const topH = COVER_TOP_H[size] ?? extra?.coverCls ?? (compact ? "h-12" : "h-20");
   // งานเรียงพิมพ์ไม่ผูกสินค้า → ไม่มีรูปปก แต่มี "รูป Artwork ที่จะพิมพ์" → โชว์เป็นแถวรูปเล็กแทน
   const artKeys = showImages && !coverUrl ? (task.arrange_image_keys ?? []) : [];
   const artMax = compact ? 4 : 6;
@@ -71,10 +82,10 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
   return (
     <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
       style={brandBorder ? { borderColor: String(bc), borderLeftWidth: 3 } : undefined}>
-      {coverUrl && (
+      {coverUrl && !side && (
         <HoverPreview url={r2ImageUrl(cover)} previewW={640}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${extra?.coverCls ?? (compact ? "h-12" : "h-20")} w-full object-cover bg-slate-50 border-b border-slate-100`} />
+          <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${topH} w-full ${fitCls} border-b border-slate-100`} />
         </HoverPreview>
       )}
       {/* งานเรียงพิมพ์ — แถวรูป Artwork ที่จะพิมพ์ (เล็ก หลายตัว · ชี้เมาส์ดูใหญ่) */}
@@ -92,13 +103,21 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
           )}
         </div>
       )}
-      <div className={compact ? "p-2" : "p-2.5"}>
-        <div className={`flex items-center justify-between gap-2 ${compact ? "mb-1" : "mb-1.5"}`}>
+      <div className={`${compact ? "p-2" : "p-2.5"} ${side ? "flex gap-2.5 items-start" : ""}`}>
+        {side && (
+          <HoverPreview url={r2ImageUrl(cover)} previewW={640}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={coverUrl!} alt="" loading="lazy" decoding="async" className={`${COVER_SIDE_BOX[size] ?? COVER_SIDE_BOX.auto} shrink-0 rounded-md border border-slate-200 ${fitCls}`} />
+          </HoverPreview>
+        )}
+        <div className={side ? "flex-1 min-w-0" : undefined}>
+        {/* flex-wrap: การ์ดแคบ (3 คอลัมน์/รูปข้างซ้าย) เลขที่งานตกบรรทัดใหม่ ไม่ทับป้าย */}
+        <div className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 ${compact ? "mb-1" : "mb-1.5"}`}>
           <div className="flex items-center gap-1 min-w-0">
             {cfg.priority && pr && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>}
             {cfg.taskType !== false && task.task_type && <TaskTypeChip code={task.task_type} />}
           </div>
-          {showTaskNo && <span className="font-mono text-[10px] text-slate-400 shrink-0">{task.task_no}</span>}
+          {showTaskNo && <span className="font-mono text-[10px] text-slate-400 shrink-0 ml-auto">{task.task_no}</span>}
         </div>
         <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{task.title}</p>
         {showSku && task.sku_code && <p className="text-[11px] text-slate-400 line-clamp-1 mt-1">📦 {task.sku_code}{task.sku_name ? ` · ${task.sku_name}` : ""}</p>}
@@ -125,6 +144,7 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
             <div className="h-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${task.progress_percent}%` }} /></div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
@@ -156,7 +176,7 @@ function Column({ col, tasks, cfg, accent, animCls, onCardClick, limit, onShowAl
         </div>
         <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{tasks.length}</span>
       </div>
-      <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>
+      <div ref={setNodeRef} style={{ gap: cardGapPx(cfg) }} className={`flex-1 min-h-[120px] flex flex-col p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>
         {shown.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={cfg} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}
         {hidden > 0 && (
           <button type="button" onClick={onShowAll}
@@ -310,7 +330,8 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   const cols = cfg.wipCols ?? 2;
   const bigCfg: KanbanTheme = { ...cfg, sku: false };   // WIP ไม่โชว์บรรทัดสินค้า (เจ้าของเลือก)
   const smallCfg: KanbanTheme = { ...cfg, sku: false, cover: false, progress: false, brand: false, taskNo: false, taskType: false, compact: true };
-  const bigExtra: CardExtra = { statusPill: true, relDue: true, coverCls: WIP_COVER_CLS[cols] };
+  const bigExtra: CardExtra = { statusPill: true, relDue: true, coverCls: WIP_COVER_CLS[cols], imgW: cols === 1 ? 640 : 400 };
+  const gap = cardGapPx(cfg);
   const smallExtra: CardExtra = { relDue: true };
   // สีแถบหัวช่อง = สีสถานะที่ผู้ใช้ตั้งเอง (ถ้ามี)
   const barOf = (key: string) => statusColors?.[key]?.c1 || undefined;
@@ -353,7 +374,7 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
         </div>
       }>
       {activeShown.length === 0 ? empty(t("ไม่มีงานค้างในกลุ่มนี้ 🎉", "Nothing in progress here 🎉")) : (
-        <div className="grid gap-2 items-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+        <div className="grid items-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap }}>
           {activeShown.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={bigCfg} extra={bigExtra} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}
         </div>
       )}
@@ -362,7 +383,7 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   const smallLane = (key: string, list: CreativeTask[], emptyMsg: string, alert?: boolean) => (
     <WipLane key={key} id={key} label={statusMeta(key).label} count={list.length} dotClass={statusMeta(key).dot} barColor={barOf(key) ?? (alert ? "#f87171" : undefined)} alert={alert} dragFrom={activeTask?.status}>
       {list.length === 0 ? empty(emptyMsg) : (
-        <div className="space-y-2">{list.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={smallCfg} extra={smallExtra} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}</div>
+        <div className="flex flex-col" style={{ gap }}>{list.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={smallCfg} extra={smallExtra} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}</div>
       )}
     </WipLane>
   );
