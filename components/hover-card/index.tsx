@@ -136,7 +136,7 @@ export function HoverFieldsPicker<K extends string>({ on, onToggle, fields, valu
   const flip = (k: K) => onChange(cur.includes(k) ? cur.filter((x) => x !== k) : fields.map((f) => f.key).filter((x) => x === k || cur.includes(x)));
   return (
     <div className={`space-y-1.5 rounded-lg border border-violet-100 bg-violet-50/40 p-2 ${className ?? ""}`} data-hover-card-settings>
-      <div className="text-xs font-semibold text-violet-700">🪟 {t("ชี้ที่การ์ด", "Card hover")}</div>
+      <div className="text-xs font-semibold text-violet-700">🪟 {t("Hover การ์ด (ชี้เมาส์ที่การ์ด)", "Card hover")}</div>
       <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600">
         <input type="checkbox" checked={on} onChange={(e) => onToggle(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
         {t("โชว์รูปใหญ่ + รายละเอียด เมื่อชี้ที่การ์ด", "Show large image + details on hover")}

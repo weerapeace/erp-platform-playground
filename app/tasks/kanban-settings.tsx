@@ -34,7 +34,7 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
     <div className="space-y-3">
       {/* 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (แทนชี้ที่รูป) — เลือกได้ว่าจะโชว์อะไร */}
       <div className="space-y-1.5 rounded-lg border border-violet-100 bg-violet-50/40 p-2" data-hover-card-settings>
-        <div className="text-xs font-semibold text-violet-700">🪟 {t("ชี้ที่การ์ด", "Card hover")}</div>
+        <div className="text-xs font-semibold text-violet-700">🪟 {t("Hover การ์ด (ชี้เมาส์ที่การ์ด)", "Card hover")}</div>
         <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600">
           <input type="checkbox" checked={cfg.hoverCard !== false} onChange={(e) => set({ hoverCard: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
           {t("โชว์รูปใหญ่ + รายละเอียดงาน เมื่อชี้ที่การ์ด", "Show large image + task details on hover")}

@@ -10,7 +10,7 @@
 | หน้า | ไฟล์ห่อ | ตั้งค่าที่ไหน | เก็บค่า |
 |---|---|---|---|
 | บอร์ดงาน (Tasks) | `app/tasks/task-hover-card.tsx` (`TaskHoverWrap`) | ⚙️ ตั้งค่า มุมขวาบนของบอร์ด (กล่องม่วงบนสุด) | ธีมบอร์ดต่อคน `KanbanTheme.hoverCard / hoverFields` |
-| Design Dashboard | `components/design-dashboard/sheet-hover.tsx` (`SheetHoverWrap`) | ปุ่ม `🪟 ชี้ที่การ์ด ▾` บนแถบเครื่องมือ (จอคอม) | `user_ui_prefs` key `design_dashboard_hover` = `{ on, fields }` |
+| Design Dashboard | `components/design-dashboard/sheet-hover.tsx` (`SheetHoverWrap`) | ปุ่ม `⚙️ ตั้งค่า Hover ▾` บนแถบเครื่องมือ (จอคอม) | `user_ui_prefs` key `design_dashboard_hover` = `{ on, fields }` |
 
 ## ชิ้นส่วน
 - `HoverCardWrap` — ห่อการ์ด · props: `enabled`, `off` (เช่น กำลังลาก), `image` (url รูปใหญ่) หรือ `images` (สูงสุด 4 รูปเล็ก), `details()` (เรียกตอนเปิดเท่านั้น), `hint`
@@ -32,4 +32,4 @@
 ## เพิ่มให้หน้าใหม่
 1. ทำไฟล์ห่อของหน้า (เหมือน `sheet-hover.tsx`): รายการ field (`HoverFieldDef[]`) + ค่าเริ่มต้น + hook เก็บค่าต่อคน + `details()`
 2. ห่อการ์ดด้วย wrap ของหน้า (ย้าย `key` ไปไว้ที่ wrap) · ส่ง `off` ตอนลาก
-3. วางปุ่มตั้งค่าที่หาเจอง่าย (เจ้าของเคยหาไม่เจอเมื่อซ่อนลึก)
+3. วางปุ่มตั้งค่าที่หาเจอง่าย และชื่อปุ่มต้องมีคำว่า "ตั้งค่า" + "Hover" (เจ้าของหาไม่เจอมา 2 ครั้ง: ครั้งแรกซ่อนลึกใน ⚙️ · ครั้งที่สองชื่อปุ่ม "🪟 ชี้ที่การ์ด" ไม่รู้ว่าเป็นปุ่มตั้งค่า)

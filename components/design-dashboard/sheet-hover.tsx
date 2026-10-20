@@ -4,7 +4,8 @@
  * 🪟 Design Dashboard: ชี้ที่การ์ดใบงาน = กล่องรูปใหญ่ + รายละเอียดงาน (เจ้าของ 2026-10-20: "อยากได้ที่หน้า design dashboard ด้วย" — แบบเดียวกับบอร์ดงาน)
  *   - กล่องลอย/ตำแหน่ง/ชิปตั้งค่า = ของกลาง components/hover-card
  *   - ตั้งค่าต่อคน (user_ui_prefs key design_dashboard_hover = { on, fields }) · ไม่เคยตั้ง = เปิด + DEFAULT_SHEET_HOVER_FIELDS
- *   - ปุ่มตั้งค่า "🪟 ชี้ที่การ์ด ▾" บนแถบเครื่องมือ (จอคอมเท่านั้น — ทัชไม่เด้งอยู่แล้ว)
+ *   - ปุ่มตั้งค่า "⚙️ ตั้งค่า Hover ▾" บนแถบเครื่องมือ (จอคอมเท่านั้น — ทัชไม่เด้งอยู่แล้ว)
+ *     (เดิมชื่อ "🪟 ชี้ที่การ์ด" — เจ้าของหาไม่เจอ เพราะไม่รู้ว่าเป็นปุ่มตั้งค่า → ชื่อต้องมีคำว่า "ตั้งค่า" + "Hover")
  * ใช้ที่: การ์ดบอร์ด (renderBoardCard) + การ์ดรูปใหญ่ (renderGalleryCard) ใน components/design-dashboard
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -98,7 +99,7 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
   const img = has("image") ? withImageWidth(sheet.cover_url, 640) : null;
   return (
     <HoverCardWrap enabled={pref.on && pref.fields.length > 0} off={off} className={className} image={img}
-      hint="เลือกสิ่งที่โชว์: ปุ่ม 🪟 ชี้ที่การ์ด บนแถบเครื่องมือ"
+      hint="เลือกสิ่งที่โชว์: ปุ่ม ⚙️ ตั้งค่า Hover บนแถบเครื่องมือ"
       details={() => {
         const anyStep = sheet.has_cost || sheet.has_quote || sheet.parent_count > 0;
         const detail = (sheet.detail_excerpt ?? "").trim();
@@ -160,9 +161,9 @@ export function SheetHoverSettingsButton({ pref }: { pref: SheetHoverPref }) {
   return (
     <div className="relative" ref={anchorRef}>
       <button type="button" onClick={() => setOpen((o) => !o)} data-sheet-hover-settings-btn
-        title="ชี้ที่การ์ดแล้วโชว์รูปใหญ่ + รายละเอียดงาน — เลือกได้ว่าจะโชว์อะไร (จำค่าของคุณ)"
+        title="ตั้งค่า Hover: ชี้ที่การ์ดแล้วโชว์รูปใหญ่ + รายละเอียดงาน — เลือกได้ว่าจะโชว์อะไร (จำค่าของคุณ)"
         className={`h-9 rounded-md border px-3 text-xs font-medium transition ${pref.on ? "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-        🪟 ชี้ที่การ์ด{pref.on ? "" : " (ปิด)"} ▾
+        ⚙️ ตั้งค่า Hover{pref.on ? "" : " (ปิดอยู่)"} ▾
       </button>
       <FloatingDropdown anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} minWidth={300} maxWidth={360}>
         <div className="rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xl">
