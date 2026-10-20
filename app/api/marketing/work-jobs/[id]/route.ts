@@ -4,7 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { isUuid } from "@/lib/marketing/sku-list";
 import { assigneesOf, cleanAssignees, cleanSteps, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
-import { actorOf, JOB_COLS, loadJob, loadJobItems, syncLinkedTask, toJob } from "@/lib/marketing/work-jobs-db";
+import { actorOf, countWorkNotes, JOB_COLS, loadJob, loadJobItems, syncLinkedTask, toJob } from "@/lib/marketing/work-jobs-db";
+import { WORK_NOTE_ENTITY } from "@/lib/marketing/work-jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,8 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   if (!job) return NextResponse.json({ data: null, error: "ไม่พบงาน (อาจถูกลบไปแล้ว)" }, { status: 404 });
   const r = await loadJobItems(admin, id);
   if ("error" in r) return NextResponse.json({ data: null, error: r.error }, { status: 500 });
-  return NextResponse.json({ data: { job, items: r.items }, error: null });
+  const jobNotes = await countWorkNotes(admin, WORK_NOTE_ENTITY.job, [id]);
+  return NextResponse.json({ data: { job: { ...job, note_count: jobNotes.get(id) ?? 0 }, items: r.items }, error: null });
 }
 
 // PATCH { name?, steps?, auto_label_id?, assignees?: [{id,name}], due_date?, status?, note? } → แก้หัวงาน (ยังรับ assignee_id แบบเดิมได้)

@@ -7,6 +7,7 @@
  *   มุมมอง ☰ ตาราง / ▦ การ์ด (จำรายคน) · กดรุ่น = เปิด drawer สินค้า (◀ ▶ ตามรายการ) · 🛍 = drawer ตั้งค่าเว็บไซต์
  *   ⊘ ที่ขั้นตอน = รุ่นนี้ไม่ต้องทำขั้นนี้ (ไม่นับในความคืบหน้า · กดที่ขั้นที่ข้ามเพื่อกลับมาต้องทำ)
  *   📋 ส่งเข้า Task Manager = การ์ดงาน Creative 1 ใบผูกกับงานนี้ (% + สถานะ ซิงก์ฝั่งเซิร์ฟเวอร์ — lib/marketing/work-jobs-db)
+ *   📝 จดหมายเหตุ รายรุ่น/ทั้งงาน (ความคิดเห็นกลาง) + ⚠️ ติดปัญหา (ป้ายแดง · ตัวกรอง · นับในหัวงาน) — work-notes-modal.tsx
  * ของกลางที่ใช้: MiniTable · BulkActionBar · ERPModal/ConfirmDialog · MoneyInput · SearchableSelect · HoverImage · MarketingSkuPickerModal (เลือกรุ่นแบบการ์ด) · Toast
  * กฎคำนวณ: lib/marketing/work-jobs.ts (มีเทสต์)
  */
@@ -34,6 +35,7 @@ import {
 } from "@/lib/marketing/work-jobs";
 import { LabelBadge } from "./label-manager";
 import { WorkJobModal } from "./work-job-modal";
+import { WorkNotesModal, type WorkNotesTarget } from "./work-notes-modal";
 
 // drawer สินค้าตัวจริง (ทุกแท็บ) — โหลดเมื่อเปิดครั้งแรก
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -93,6 +95,8 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hideDone, setHideDone] = useState(false);
+  const [issueOnly, setIssueOnly] = useState(false);   // ⚠️ เฉพาะรุ่นที่ติดปัญหา
+  const [notes, setNotes] = useState<WorkNotesTarget | null>(null);   // 📝 ป๊อปจดหมายเหตุ
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Drafts>({});
   const [modal, setModal] = useState<{ job: WorkJob | null } | null>(null);
@@ -155,7 +159,9 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
   const steps = useMemo(() => job?.steps ?? [], [job]);
   const hasPrice = job ? kindInfo(job.kind).hasPrice : false;
   const prog = useMemo(() => jobProgress(items, steps), [items, steps]);
-  const rows = useMemo(() => (hideDone ? items.filter((it) => !itemProgress(it.step_done, steps, it.step_skip).complete) : items), [items, steps, hideDone]);
+  const issueCount = useMemo(() => items.filter((it) => it.issue_open).length, [items]);
+  const rows = useMemo(() => items.filter((it) =>
+    (!hideDone || !itemProgress(it.step_done, steps, it.step_skip).complete) && (!issueOnly || it.issue_open)), [items, steps, hideDone, issueOnly]);
   // รายการที่เห็นจริง (ค้นหา) — ใช้กับการ์ด + ◀ ▶ ของ drawer
   const term = q.trim().toLowerCase();
   const shown = useMemo(() => (term ? rows.filter((it) => `${it.code} ${it.name}`.toLowerCase().includes(term)) : rows), [rows, term]);
@@ -167,7 +173,8 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
     else out.sort((a, b) => (gridSort === "prog_asc" ? pr(a) - pr(b) : pr(b) - pr(a)));
     return out;
   }, [shown, gridSort, steps]);
-  useEffect(() => setGridPage(0), [term, gridSort, hideDone, jobId]);
+  useEffect(() => setGridPage(0), [term, gridSort, hideDone, issueOnly, jobId]);
+  useEffect(() => { if (issueOnly && issueCount === 0) setIssueOnly(false); }, [issueOnly, issueCount]);   // แก้ครบแล้ว → กลับไปดูทั้งหมด
   const navIds = useMemo(() => (itemView === "grid" ? gridRows : shown).map((it) => it.parent_sku_id), [itemView, gridRows, shown]);
   const itemByParent = useMemo(() => new Map(items.map((it) => [it.parent_sku_id, it])), [items]);
   const webItem = webParent ? itemByParent.get(webParent) : undefined;
@@ -371,6 +378,23 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
     <button type="button" title="ตั้งค่าเว็บไซต์ของรุ่นนี้ (ทุกร้าน)" onClick={(e) => { e.stopPropagation(); setWebParent(it.parent_sku_id); }}
       className={`h-7 w-7 rounded text-sm hover:bg-violet-50 ${cls}`}>🛍</button>
   );
+  // 📝 จดหมายเหตุ (ตัวเลข = จำนวนข้อความ) · ⚠️ ป้ายติดปัญหา (กดเปิดจดหมายเหตุ)
+  const noteBtn = (it: WorkJobItem) => (
+    <button type="button" onClick={(e) => { e.stopPropagation(); setNotes({ kind: "item", item: it }); }}
+      title={it.note_count ? `จดหมายเหตุ ${it.note_count} ข้อความ` : "เขียนจดหมายเหตุ (เช่น ติดปัญหาอะไร)"}
+      className={`inline-flex h-6 items-center gap-0.5 rounded-md border px-1.5 text-[11px] ${it.note_count ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100" : "border-transparent text-slate-300 hover:border-slate-200 hover:text-slate-600"}`}>
+      📝{it.note_count ? <span className="font-medium">{it.note_count}</span> : null}
+    </button>
+  );
+  const issueChip = (it: WorkJobItem) => it.issue_open ? (
+    <button type="button" onClick={(e) => { e.stopPropagation(); setNotes({ kind: "item", item: it }); }}
+      title={`ติดปัญหา${it.issue_by ? ` · ตั้งโดย ${it.issue_by}` : ""} — กดดูจดหมายเหตุ`}
+      className="inline-flex h-6 items-center rounded-md bg-red-600 px-1.5 text-[11px] font-medium text-white hover:bg-red-700">⚠️ ติดปัญหา</button>
+  ) : null;
+  const onIssueChanged = (itemId: string, patch: Pick<WorkJobItem, "issue_open" | "issue_at" | "issue_by">) => {
+    setDetail((cur) => cur && { ...cur, items: cur.items.map((x) => (x.id === itemId ? { ...x, ...patch } : x)) });
+    void reload();   // ชิปงาน: ตัวเลข ⚠️
+  };
 
   const priceCell = (it: WorkJobItem) => {
     const dr = drafts[it.id] ?? {};
@@ -433,6 +457,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
             className="text-left text-sm font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || "(ไม่มีรหัส)"}</button>
           <div className="truncate text-xs text-slate-500" title={it.name}>{it.name}</div>
           {it.label_id && labelMap.get(it.label_id) && <LabelBadge label={labelMap.get(it.label_id)} />}
+          {issueChip(it)}
         </div>
       ),
     },
@@ -443,6 +468,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
       sortValue: (it) => { const p = itemProgress(it.step_done, steps, it.step_skip); return p.total ? p.done / p.total : 1; }, sortLabel: "ความคืบหน้า",
       cell: progText,
     },
+    { key: "notes", header: "📝", width: "3.5rem", align: "center", sortValue: (it) => (it.issue_open ? 10_000 : 0) + it.note_count, sortLabel: "จดหมายเหตุ / ติดปัญหา", cell: (it) => noteBtn(it) },
     { key: "web", header: "", width: "2.5rem", cell: (it) => webBtn(it) },
     ...(canManage ? [{
       key: "x", header: "", width: "2.5rem",
@@ -474,6 +500,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
               <span className={on ? "text-slate-300" : "text-slate-400"}>{j.item_done ?? 0}/{j.item_count ?? 0}</span>
               {j.status === "done" && <span className={on ? "text-emerald-300" : "text-emerald-600"}>✓</span>}
               {ds === "overdue" && <span className={`h-1.5 w-1.5 rounded-full ${on ? "bg-red-300" : "bg-red-500"}`} title="เลยกำหนด" />}
+              {!!j.issue_count && <span className={on ? "text-red-300" : "text-red-600"} title={`ติดปัญหา ${j.issue_count} รุ่น`}>⚠️{j.issue_count}</span>}
             </button>
           );
         })}
@@ -524,8 +551,10 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                 </div>
                 {job.note && <p className="mt-1.5 whitespace-pre-line text-xs text-slate-600">📝 {job.note}</p>}
               </div>
-              {(canManage || job.creative_task_id) && (
+              {(
                 <div className="flex flex-wrap gap-1.5">
+                  <button type="button" onClick={() => setNotes({ kind: "job", job })} title="จดหมายเหตุของทั้งงาน (เช่น ติดรอรูป/ติดรอราคา)"
+                    className={`h-8 rounded-lg border px-3 text-xs ${job.note_count ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>📝 จดหมายเหตุงาน{job.note_count ? ` (${job.note_count})` : ""}</button>
                   {job.creative_task_id ? (
                     <a href={`/tasks?task=${job.creative_task_id}`} title="เปิดการ์ดงานนี้ใน Task Manager (ความคืบหน้าซิงก์ให้อัตโนมัติ)"
                       className="inline-flex h-8 items-center rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs text-violet-700 hover:bg-violet-100">📋 {job.creative_task_no ?? "Task Manager"} ↗</a>
@@ -547,7 +576,13 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
             {/* ความคืบหน้า */}
             <div className="mt-3">
               <div className="flex justify-between text-xs text-slate-500">
-                <span>รุ่นที่เสร็จ {prog.modelsDone}/{prog.models} · ขั้นตอน {prog.stepsDone}/{prog.stepsTotal}</span>
+                <span>
+                  รุ่นที่เสร็จ {prog.modelsDone}/{prog.models} · ขั้นตอน {prog.stepsDone}/{prog.stepsTotal}
+                  {issueCount > 0 && (
+                    <button type="button" onClick={() => setIssueOnly(true)} title="ดูเฉพาะรุ่นที่ติดปัญหา"
+                      className="ml-2 font-medium text-red-600 hover:underline">⚠️ ติดปัญหา {issueCount} รุ่น</button>
+                  )}
+                </span>
                 <span className="font-medium text-slate-700">{prog.pct}%</span>
               </div>
               <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -562,7 +597,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
               <div className="py-10 text-center text-sm text-slate-500">
                 {items.length === 0
                   ? <>ยังไม่มีรุ่นในงานนี้ — กด “＋ เพิ่มรุ่น” หรือไปโหมดการ์ด/ตาราง ติ๊กรุ่น แล้วกด “ใส่ในงาน”</>
-                  : rows.length === 0 ? "ทุกรุ่นเสร็จแล้ว 🎉 (เอาติ๊ก “ซ่อนรุ่นที่เสร็จแล้ว” ออกเพื่อดูทั้งหมด)" : "ไม่พบรุ่นที่ค้นหา"}
+                  : rows.length === 0 ? (issueOnly ? "ไม่มีรุ่นที่ติดปัญหา 🎉" : "ทุกรุ่นเสร็จแล้ว 🎉 (เอาติ๊ก “ซ่อนรุ่นที่เสร็จแล้ว” ออกเพื่อดูทั้งหมด)") : "ไม่พบรุ่นที่ค้นหา"}
               </div>
             );
             const actionsEl = (
@@ -577,6 +612,12 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                   <input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300" />
                   ซ่อนรุ่นที่เสร็จแล้ว
                 </label>
+                {(issueCount > 0 || issueOnly) && (
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-red-600">
+                    <input type="checkbox" checked={issueOnly} onChange={(e) => setIssueOnly(e.target.checked)} className="h-3.5 w-3.5 rounded border-red-300 accent-red-600" />
+                    ⚠️ เฉพาะที่ติดปัญหา ({issueCount})
+                  </label>
+                )}
                 {canManage && <button type="button" onClick={() => setPickerOpen(true)} disabled={busy} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50">＋ เพิ่มรุ่น</button>}
               </div>
             );
@@ -629,7 +670,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                       const p = itemProgress(it.step_done, steps, it.step_skip);
                       const img = r2ImageUrl(it.image_key, 300);
                       return (
-                        <div key={it.id} className={`flex flex-col overflow-hidden rounded-xl border bg-white ${on ? "border-blue-500 ring-2 ring-blue-200" : p.complete ? "border-emerald-200" : "border-slate-200"}`}>
+                        <div key={it.id} className={`flex flex-col overflow-hidden rounded-xl border bg-white ${on ? "border-blue-500 ring-2 ring-blue-200" : it.issue_open ? "border-red-300 ring-1 ring-red-200" : p.complete ? "border-emerald-200" : "border-slate-200"}`}>
                           <div className="relative aspect-square cursor-pointer bg-slate-100" onClick={() => setOpenParent(it.parent_sku_id)} title="เปิดข้อมูลสินค้า">
                             {img && (
                               // eslint-disable-next-line @next/next/no-img-element
@@ -649,7 +690,11 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                               {progText(it)}
                             </div>
                             <p className="truncate text-[11px] text-slate-500" title={it.name}>{it.name}</p>
-                            {it.label_id && labelMap.get(it.label_id) && <div><LabelBadge label={labelMap.get(it.label_id)} /></div>}
+                            <div className="flex flex-wrap items-center gap-1">
+                              {it.label_id && labelMap.get(it.label_id) && <LabelBadge label={labelMap.get(it.label_id)} />}
+                              {issueChip(it)}
+                              <span className="ml-auto">{noteBtn(it)}</span>
+                            </div>
                             <div className="pt-0.5">{stepCell(it)}</div>
                             {hasPrice && <div className="mt-1 border-t border-slate-100 pt-1.5">{priceCell(it)}</div>}
                           </div>
@@ -722,6 +767,12 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
         code={webItem?.code} name={webItem?.name} imageUrl={webItem ? r2ImageUrl(webItem.image_key, 160) : null}
         navIds={navIds} onNavigate={setWebParent} onClose={() => setWebParent(null)}
         onOpenParent={(pid) => setOpenParent(pid)} />
+
+      {/* 📝 จดหมายเหตุ — ปิดแล้วโหลดตัวเลขใหม่ */}
+      {job && (
+        <WorkNotesModal target={notes} jobId={job.id} canManage={canManage} onIssueChanged={onIssueChanged}
+          onClose={() => { setNotes(null); void loadDetail(job.id, true); }} />
+      )}
 
       <ConfirmDialog open={!!ask} onClose={() => setAsk(null)} loading={busy} onConfirm={() => void confirmAsk()} variant="danger"
         requireTyped={ask?.kind === "delete" && items.length >= 20 ? "CONFIRM" : undefined}

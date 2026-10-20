@@ -35,6 +35,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 //   { item_ids: string[], step_key, done: boolean }   → ติ๊ก/เอาติ๊กออก ขั้นตอนหนึ่ง (หลายรุ่นพร้อมกันได้)
 //   { item_ids: string[], step_key, skip: boolean }   → ตั้ง "ไม่ต้องทำ" / กลับมาต้องทำ ขั้นตอนหนึ่ง (หลายรุ่น)
 //   { item_id, discount_value?, discount_unit?, base_price_min?, base_price_max?, note? } → แก้ราคา/หมายเหตุของรุ่น
+//   { item_id, issue: boolean }                     → ⚠️ ตั้ง/ปลด "ติดปัญหา" (ข้อความไปเขียนในจดหมายเหตุ = ความคิดเห็นกลาง)
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   const denied = await guardApi(request, "marketing.sku.manage");
   if (denied) return denied;
@@ -107,6 +108,23 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     }
     if (changed) await syncLinkedTask(admin, id, actor);   // การ์ดใน Task Manager: % + สถานะ
     return NextResponse.json({ data: { changed, at: now, by: actor.name }, error: null });
+  }
+
+  // ── ⚠️ ติดปัญหา / แก้แล้ว ของรุ่นเดียว ──
+  if ("issue" in b) {
+    if (!isUuid(b.item_id)) return bad("ไม่พบรุ่นในงาน");
+    const open = b.issue === true;
+    const { data: it } = await admin.from("marketing_work_job_items").select("id, parent_sku_id, issue_open").eq("id", b.item_id).eq("job_id", id).maybeSingle();
+    if (!it) return bad("ไม่พบรุ่นในงาน (อาจถูกเอาออกไปแล้ว)", 404);
+    if (!!it.issue_open === open) return NextResponse.json({ data: { changed: 0 }, error: null });
+    const patch = open ? { issue_open: true, issue_at: now, issue_by: actor.name } : { issue_open: false, issue_at: null, issue_by: null };
+    const { error } = await admin.from("marketing_work_job_items").update({ ...patch, updated_at: now }).eq("id", it.id);
+    if (error) return bad("บันทึกไม่สำเร็จ: " + error.message, 500);
+    await writeAudit(admin, {
+      action: "marketing.work.issue", entityType: "marketing_work_jobs", entityId: id, actorId: actor.id, actorName: actor.name,
+      metadata: { job_name: job.name, item_id: it.id, parent_sku_id: it.parent_sku_id, issue_open: open },
+    });
+    return NextResponse.json({ data: { changed: 1, ...patch }, error: null });
   }
 
   // ── แก้ราคา / หมายเหตุ ของรุ่นเดียว ──

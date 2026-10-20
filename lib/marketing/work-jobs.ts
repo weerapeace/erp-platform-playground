@@ -44,6 +44,10 @@ export type WorkJob = {
   item_count?: number;
   item_done?: number;
   step_done_count?: number;
+  /** รุ่นที่ติดปัญหาอยู่ (ป้าย ⚠️ ที่ชิปงาน) */
+  issue_count?: number;
+  /** จำนวนจดหมายเหตุของ "ทั้งงาน" (โหลดเฉพาะตอนเปิดงาน) */
+  note_count?: number;
 };
 
 export type WorkJobItem = {
@@ -65,7 +69,16 @@ export type WorkJobItem = {
   step_skip: StepSkip;
   note: string | null;
   sort_order: number;
+  /** ⚠️ ติดปัญหาระหว่างทำ (ตั้ง/ปลดในป๊อปจดหมายเหตุ) */
+  issue_open: boolean;
+  issue_at: string | null;
+  issue_by: string | null;
+  /** จำนวนจดหมายเหตุของรุ่นนี้ (ระบบความคิดเห็นกลาง erp_comments) */
+  note_count: number;
 };
+
+/** จดหมายเหตุ = ความคิดเห็นกลาง (erp_comments · components/comment-thread) — entity_type ของโหมดทำงาน */
+export const WORK_NOTE_ENTITY = { item: "marketing_work_job_item", job: "marketing_work_job" } as const;
 
 /** แบบงานตั้งต้น (ก้อนนี้ตั้งในโค้ด · ก้อนถัดไปทำหน้าตั้งค่าแบบงานเอง) */
 export const JOB_KINDS: { kind: WorkJobKind; label: string; icon: string; defaultName: string; steps: string[]; hasPrice: boolean; autoLabel: RegExp | null }[] = [

@@ -9,14 +9,24 @@ import { writeAudit } from "@/lib/audit";
 import { appBaseUrl, nextTaskNo, setTaskAssignees } from "@/lib/creative-tasks-server";
 import { defaultStatusKey } from "@/lib/creative-statuses-server";
 import {
-  assigneesOf, jobProgress, round2, snapshotBasePrice,
+  assigneesOf, jobProgress, round2, snapshotBasePrice, WORK_NOTE_ENTITY,
   type DiscountUnit, type StepDone, type StepSkip, type WorkJob, type WorkJobItem, type WorkStep,
 } from "@/lib/marketing/work-jobs";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignees, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at, creative_task_id, creative_task:erp_creative_tasks!creative_task_id(task_no, is_active)";
-const ITEM_COLS = "id, job_id, parent_sku_id, base_price_min, base_price_max, discount_value, discount_unit, step_done, step_skip, note, sort_order";
+const ITEM_COLS = "id, job_id, parent_sku_id, base_price_min, base_price_max, discount_value, discount_unit, step_done, step_skip, note, sort_order, issue_open, issue_at, issue_by";
+
+/** นับจดหมายเหตุ (ความคิดเห็นกลาง erp_comments ที่ยังไม่ลบ) ต่อ entity — ใช้ทำตัวเลข 📝 */
+export async function countWorkNotes(admin: Admin, entityType: string, ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data } = await admin.from("erp_comments").select("entity_id").eq("entity_type", entityType).in("entity_id", ids.slice(i, i + CHUNK)).is("deleted_at", null).limit(20_000);
+    for (const r of data ?? []) { const k = String(r.entity_id); out.set(k, (out.get(k) ?? 0) + 1); }
+  }
+  return out;
+}
 const CHUNK = 200;
 
 export type Actor = { id: string | null; name: string | null };
@@ -61,19 +71,21 @@ export async function loadJobs(admin: Admin, includeArchived: boolean): Promise<
   if (!jobs.length) return { jobs };
   const ids = jobs.map((j) => j.id);
   const byJob = new Map<string, { step_done: StepDone; step_skip: StepSkip }[]>();
+  const issues = new Map<string, number>();
   for (let i = 0; i < ids.length; i += CHUNK) {
-    const { data: its, error: e2 } = await admin.from("marketing_work_job_items").select("job_id, step_done, step_skip").in("job_id", ids.slice(i, i + CHUNK)).limit(20_000);
+    const { data: its, error: e2 } = await admin.from("marketing_work_job_items").select("job_id, step_done, step_skip, issue_open").in("job_id", ids.slice(i, i + CHUNK)).limit(20_000);
     if (e2) return { error: "โหลดความคืบหน้าไม่สำเร็จ: " + e2.message };
     for (const it of its ?? []) {
       const k = String(it.job_id);
       if (!byJob.has(k)) byJob.set(k, []);
       byJob.get(k)!.push({ step_done: (it.step_done as StepDone) ?? {}, step_skip: (it.step_skip as StepSkip) ?? {} });
+      if (it.issue_open) issues.set(k, (issues.get(k) ?? 0) + 1);
     }
   }
   return {
     jobs: jobs.map((j) => {
       const p = jobProgress(byJob.get(j.id) ?? [], j.steps);
-      return { ...j, item_count: p.models, item_done: p.modelsDone, step_done_count: p.stepsDone };
+      return { ...j, item_count: p.models, item_done: p.modelsDone, step_done_count: p.stepsDone, issue_count: issues.get(j.id) ?? 0 };
     }),
   };
 }
@@ -89,6 +101,7 @@ export async function loadJobItems(admin: Admin, jobId: string): Promise<{ items
     .order("sort_order").order("created_at").limit(5000);
   if (error) return { error: "โหลดรุ่นในงานไม่สำเร็จ: " + error.message };
   const rows = (data ?? []) as Record<string, unknown>[];
+  const noteCount = await countWorkNotes(admin, WORK_NOTE_ENTITY.item, rows.map((r) => String(r.id)));
   const pids = [...new Set(rows.map((r) => String(r.parent_sku_id)))];
   const info = new Map<string, Record<string, unknown>>();
   for (let i = 0; i < pids.length; i += CHUNK) {
@@ -112,6 +125,8 @@ export async function loadJobItems(admin: Admin, jobId: string): Promise<{ items
         base_price_min: num(r.base_price_min), base_price_max: num(r.base_price_max),
         discount_value: num(r.discount_value), discount_unit: (r.discount_unit as DiscountUnit) ?? "percent",
         step_done: (r.step_done as StepDone) ?? {}, step_skip: (r.step_skip as StepSkip) ?? {}, note: (r.note as string | null) ?? null, sort_order: Number(r.sort_order) || 0,
+        issue_open: r.issue_open === true, issue_at: (r.issue_at as string | null) ?? null, issue_by: (r.issue_by as string | null) ?? null,
+        note_count: noteCount.get(String(r.id)) ?? 0,
       };
     }),
   };
