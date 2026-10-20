@@ -24,8 +24,10 @@ export type PageTheme = { mode: "none" | "color" | "image"; color: string; image
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
 // มุมมองงานหลัก: Kanban การ์ด (ลากเปลี่ยนสถานะ) หรือ ตาราง · ปรับการจัดกลุ่ม + ข้อมูลบนการ์ดได้
 export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
-export type KanbanView = "kanban" | "table" | "calendar";
-export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; taskType?: boolean; compact?: boolean };
+// wip = บอร์ดงานค้าง: ช่องใหญ่ (รอคิว+พร้อมทำ+กำลังทำ) + ช่องเล็ก รอตรวจ / ต้องแก้
+export type KanbanView = "kanban" | "table" | "calendar" | "wip";
+export type WipCols = 1 | 2 | 3;
+export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; taskType?: boolean; compact?: boolean; wipCols?: WipCols };
 export type CardAlign = "left" | "center" | "right";
 export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
 // สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)
@@ -563,12 +565,12 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("มุมมองงานหลัก", "Main task view")}</div>
         {/* เลือกแบบ Kanban / ตาราง */}
         <div className="flex items-center gap-2 mb-3">
-          {([["kanban", t("📋 การ์ด Kanban", "📋 Kanban cards")], ["table", t("▦ ตาราง", "▦ Table")], ["calendar", t("🗓 ปฏิทิน", "🗓 Calendar")]] as const).map(([m, label]) => (
+          {([["kanban", t("📋 การ์ด Kanban", "📋 Kanban cards")], ["wip", t("🚧 WIP งานค้าง", "🚧 WIP")], ["table", t("▦ ตาราง", "▦ Table")], ["calendar", t("🗓 ปฏิทิน", "🗓 Calendar")]] as const).map(([m, label]) => (
             <button key={m} onClick={() => setKanban({ view: m })} className={`h-8 px-3 text-sm rounded-lg border ${theme.kanban.view === m ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
           ))}
         </div>
-        {theme.kanban.view === "kanban" && (
-          <KanbanSettingsControls cfg={theme.kanban} onChange={(k) => onChange({ ...theme, kanban: k })} />
+        {(theme.kanban.view === "kanban" || theme.kanban.view === "wip") && (
+          <KanbanSettingsControls cfg={theme.kanban} onChange={(k) => onChange({ ...theme, kanban: k })} wip={theme.kanban.view === "wip"} />
         )}
       </section>
 

@@ -10,11 +10,11 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
-import { OverviewKanban, coverKey } from "./overview-kanban";
+import { OverviewKanban, WipBoard, isWipStatus, coverKey } from "./overview-kanban";
 import { AssigneeStack } from "./assignee-avatar";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { ReviewQueueView } from "./review-queue-view";
-import { KanbanSettings } from "./kanban-settings";
+import { KanbanSettings, WipColsControl } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
 import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
@@ -24,7 +24,7 @@ import { isOverdue, updateTask, bulkUpdateTasks, PRIORITY_META, priorityLabel, t
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
-import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign } from "./overview-customizer";
+import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign, type KanbanView } from "./overview-customizer";
 import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
 import { GifPokeModal } from "./gif-poke-modal";
 import { GifPokeLayer } from "./gif-poke-layer";
@@ -86,7 +86,7 @@ export function OverviewDashboard({
   const [typeFilter, setTypeFilter] = useState("");    // ประเภทงาน (Tab) — "" = ทั้งหมด
   const [brandFilter, setBrandFilter] = useState("");  // แบรนด์ (ชิป) — "" = ทั้งหมด
   const [kanbanSearch, setKanbanSearch] = useState(""); // ค้นหาในบอร์ด Kanban
-  const setKanbanView = (v: "kanban" | "table" | "calendar") => onThemeChange({ ...theme, kanban: { ...theme.kanban, view: v } });
+  const setKanbanView = (v: KanbanView) => onThemeChange({ ...theme, kanban: { ...theme.kanban, view: v } });
 
   // งานของฉัน = งานหลักของฉัน ∪ งานที่มีงานย่อย (subtask) ของฉัน
   const myTaskIds = useMemo(() => {
@@ -405,29 +405,35 @@ export function OverviewDashboard({
           ) : (<>
           <div className="flex items-center justify-between gap-2">
             {theme.kanban.view !== "table"
-              ? <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">{filterLabel} ({kanbanTasks.length})
+              ? <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">{theme.kanban.view === "wip" ? `🚧 WIP · ${filterLabel}` : filterLabel} ({theme.kanban.view === "wip" ? kanbanTasks.filter((tk) => isWipStatus(tk.status)).length : kanbanTasks.length})
                   {statusFilter && onClearStatusFilter && <button type="button" onClick={onClearStatusFilter} className="text-[11px] font-normal text-violet-600 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-50">✕ {t("ล้างตัวกรองสถานะ", "Clear status filter")}</button>}
                 </p>
               : statusFilter && onClearStatusFilter
                 ? <button type="button" onClick={onClearStatusFilter} className="text-[11px] text-violet-600 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-50">✕ {filterLabel} — {t("ล้างตัวกรอง", "Clear filter")}</button>
                 : <span />}
             <div className="flex items-center gap-2">
-              {theme.kanban.view === "kanban" && (
+              {(theme.kanban.view === "kanban" || theme.kanban.view === "wip") && (
                 <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
                   placeholder={t("ค้นหาในบอร์ด...", "Search board...")}
                   className="h-8 w-40 max-w-[40vw] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
               )}
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-                {([["kanban", "📋", t("การ์ด", "Cards")], ["calendar", "🗓", t("ปฏิทิน", "Calendar")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
+                {([["kanban", "📋", t("การ์ด", "Cards")], ["wip", "🚧", "WIP"], ["calendar", "🗓", t("ปฏิทิน", "Calendar")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
                   const on = theme.kanban.view === v;
                   return <button key={v} onClick={() => setKanbanView(v)} style={on ? { background: theme.accent } : undefined}
                     className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
                 })}
               </div>
-              {theme.kanban.view === "kanban" && <KanbanSettings cfg={theme.kanban} onChange={(k) => onThemeChange({ ...theme, kanban: k })} accent={theme.accent} />}
+              {theme.kanban.view === "wip" && <WipColsControl value={theme.kanban.wipCols ?? 2} onChange={(n) => onThemeChange({ ...theme, kanban: { ...theme.kanban, wipCols: n } })} accent={theme.accent} />}
+              {(theme.kanban.view === "kanban" || theme.kanban.view === "wip") && <KanbanSettings cfg={theme.kanban} onChange={(k) => onThemeChange({ ...theme, kanban: k })} accent={theme.accent} wip={theme.kanban.view === "wip"} />}
             </div>
           </div>
-          {theme.kanban.view === "kanban" ? (
+          {theme.kanban.view === "wip" ? (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <WipBoard tasks={kanbanTasks} cfg={theme.kanban} accent={theme.accent} statusColors={theme.statusColors} anim={theme.anim}
+                onMoveStatus={onMoveStatus} onCardClick={onOpenTask} />
+            </div>
+          ) : theme.kanban.view === "kanban" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
               <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent} statusColors={theme.statusColors} anim={theme.anim}
                 onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask}
