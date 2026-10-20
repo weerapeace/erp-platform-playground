@@ -6,6 +6,8 @@
  *       เปลี่ยนสถานะแล้ว → ✉️ อีเมลแจ้งลูกค้าอัตโนมัติในภาษาที่ลูกค้าสั่ง (ถ้าร้านเปิด · lib/order-notify) → ตอบ notify
  * PATCH { orderId, notify: "<เรื่อง>" } → พนักงานกดส่งอีเมลแจ้งลูกค้าเอง (ไม่ต้องเปิดอัตโนมัติ)
  * PATCH { slipId, slipAction: "approve"|"reject", reason? } → 💳 พนักงานยืนยันรับเงิน / ปฏิเสธสลิป (lib/website-payments-server)
+ * PATCH { bulk: { orderIds, status } | { tracking:[{orderId,trackingNo,carrier}], markShipped } } → 📦 ทำทีละหลายใบ (ทีละใบผ่าน applyOne — audit/แต้ม/แจ้งลูกค้าครบ)
+ * GET ส่ง counts.toPack (📦 พร้อมแพ็ก — lib/website-fulfillment) + sender (ผู้ส่งบนใบปะหน้า)
  * GET ส่ง slips (สลิปที่ลูกค้าแนบ + ลิงก์ดูรูป 15 นาที) ต่อออเดอร์ + slipAuto (สถานะตรวจอัตโนมัติของร้าน)
  * GET ส่ง messaging (ชื่อร้าน/ลิงก์เว็บ/ข้อความร้าน) + msgItems (ชื่อสินค้าภาษาลูกค้า) ให้ปุ่ม "📋 คัดลอกข้อความถึงลูกค้า"
  *
@@ -28,6 +30,7 @@ import { notifyOrderCustomer, notifyNote, type NotifyResult } from "@/lib/order-
 import { cleanCarrier, cleanTrackingNo } from "@/lib/parcel-tracking";
 import { slipsForOrders, slipVerifierConfigured, staffDecideSlip } from "@/lib/website-payments-server";
 import { AUTO_RESULT, SLIP_REJECT_REASONS, SLIP_STATUS } from "@/lib/website-payments";
+import { isReadyToPack } from "@/lib/website-fulfillment";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -77,11 +80,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // นับทุกสถานะไว้โชว์ตัวเลขบนตัวกรอง (นับจากทั้งร้าน ไม่ใช่แค่หน้าที่กรอง) · 💳 verifying = รอตรวจเงิน
-  const { data: allStatus } = await sb.from("store_orders").select("status, payment_status").eq("shop_id", s.id);
+  const { data: allStatus } = await sb.from("store_orders").select("status, payment_status, payment_method").eq("shop_id", s.id);
   const counts: Record<string, number> = {};
-  for (const r of (allStatus ?? []) as { status: string; payment_status: string }[]) {
+  for (const r of (allStatus ?? []) as { status: string; payment_status: string; payment_method: string }[]) {
     counts[r.status] = (counts[r.status] ?? 0) + 1;
     if (r.payment_status === "verifying" && r.status !== "cancelled") counts.verifying = (counts.verifying ?? 0) + 1;
+    if (isReadyToPack({ status: r.status, paymentMethod: r.payment_method, paymentStatus: r.payment_status })) counts.toPack = (counts.toPack ?? 0) + 1;
   }
   const slips = await slipsForOrders(sb, ids);
 
@@ -104,6 +108,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       autoEmail: info.order_email_enabled,
       emailReady: emailConfigured(),
     },
+    /** 📦 ผู้ส่งบนใบปะหน้า (ชื่อร้าน + เบอร์/ที่อยู่จากแท็บข้อมูลร้าน) */
+    sender: { name: s.name, phone: info.contact_phone, address: info.contact_address },
     // 🤖 ตรวจสลิปอัตโนมัติ: ร้านเปิดไหม + มีรหัส EasySlip ใน env ไหม (ไม่บอกค่ารหัส)
     slipAuto: { enabled: info.slip_auto_verify, configured: slipVerifierConfigured(), uploadEnabled: info.slip_upload_enabled },
     orders: rows.map((r) => {
@@ -135,7 +141,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string; notify?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown }; slipId?: string; slipAction?: string; reason?: string };
+  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string; notify?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown }; slipId?: string; slipAction?: string; reason?: string; bulk?: { orderIds?: unknown; status?: unknown; tracking?: unknown; markShipped?: unknown } };
   try {
     body = await request.json();
   } catch {
@@ -150,6 +156,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
     return NextResponse.json({ ok: true, paymentStatus: r.paymentStatus });
   }
+  // 📦 ทำทีละหลายใบ (เปลี่ยนสถานะ / ใส่เลขพัสดุ + จัดส่งแล้ว)
+  if (body.bulk) return bulkApply(user, body.bulk);
   if (!body.orderId) return NextResponse.json({ error: "ต้องระบุ orderId" }, { status: 400 });
 
   // ✉️ พนักงานกดส่งอีเมลแจ้งลูกค้าเอง (ภาษาของลูกค้า) — ไม่ขึ้นกับสวิตช์อัตโนมัติ
@@ -161,13 +169,23 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return r.sent ? NextResponse.json({ ok: true, notify: r, message: notifyNote(r) }) : NextResponse.json({ ok: false, notify: r, error: notifyNote(r) });
   }
 
+  const r = await applyOne(supabaseAdmin(), user, body as OnePatch);
+  return NextResponse.json(r.json, { status: r.status });
+}
+
+
+type OnePatch = { orderId: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string };
+type Actor = { id?: string; email?: string } | null;
+
+/** แก้ 1 ออเดอร์ (สถานะ/สถานะจ่าย/โน้ต/เลขพัสดุ) + แต้มสมาชิก + audit + แจ้งลูกค้า — ใช้ทั้ง PATCH ทีละใบและทีละหลายใบ */
+async function applyOne(sb: ReturnType<typeof supabaseAdmin>, user: Actor, body: OnePatch): Promise<{ status: number; json: Record<string, unknown> }> {
   const patch: Record<string, unknown> = {};
   if (body.status !== undefined) {
-    if (!STATUS_KEYS.has(body.status as never)) return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 });
+    if (!STATUS_KEYS.has(body.status as never)) return { status: 400, json: { error: "สถานะไม่ถูกต้อง" } };
     patch.status = body.status;
   }
   if (body.paymentStatus !== undefined) {
-    if (!PAY_KEYS.has(body.paymentStatus as never)) return NextResponse.json({ error: "สถานะชำระเงินไม่ถูกต้อง" }, { status: 400 });
+    if (!PAY_KEYS.has(body.paymentStatus as never)) return { status: 400, json: { error: "สถานะชำระเงินไม่ถูกต้อง" } };
     patch.payment_status = body.paymentStatus;
   }
   if (body.note !== undefined) patch.note = String(body.note).trim().slice(0, 1000) || null;
@@ -176,19 +194,18 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     patch.tracking_no = cleanTrackingNo(body.trackingNo) || null;
     patch.tracking_carrier = patch.tracking_no ? cleanCarrier(body.trackingCarrier) || "other" : null;
   }
-  if (!Object.keys(patch).length) return NextResponse.json({ error: "ไม่มีอะไรให้แก้" }, { status: 400 });
+  if (!Object.keys(patch).length) return { status: 400, json: { error: "ไม่มีอะไรให้แก้" } };
 
-  const sb = supabaseAdmin();
   const { data: before } = await sb
     .from("store_orders")
     .select("id, shop_id, order_no, status, payment_status, note, tracking_no, tracking_carrier")
     .eq("id", body.orderId)
     .maybeSingle();
-  if (!before) return NextResponse.json({ error: "ไม่พบออเดอร์" }, { status: 404 });
+  if (!before) return { status: 404, json: { error: "ไม่พบออเดอร์" } };
   const b = before as { id: string; shop_id: string; order_no: string; status: string; payment_status: string; note: string | null; tracking_no: string | null; tracking_carrier: string | null };
 
   const { error } = await sb.from("store_orders").update(patch).eq("id", b.id);
-  if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+  if (error) return { status: 500, json: { error: "บันทึกไม่สำเร็จ" } };
 
   // ⭐ แต้มสมาชิก: ปรับตามสถานะใหม่ (ไม่ใช่สมาชิก = ไม่มีอะไร) · พังไม่ล้มการเปลี่ยนสถานะ แต่บอกพนักงาน
   let points: { kind: string; delta: number }[] | null = [];
@@ -220,8 +237,29 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (ev) notify = await notifyOrderCustomer(sb, b.id, ev, { actorId: user?.id ?? null, actorName: user?.email ?? null }).catch(() => null);
   const notifyMsg = notify && notify.reason !== "off" ? notifyNote(notify) : "";
 
-  if (points === null) return NextResponse.json({ ok: true, notify, notifyMsg, warning: "เปลี่ยนสถานะแล้ว แต่ปรับแต้มสมาชิกไม่สำเร็จ — ลองเปลี่ยนสถานะอีกครั้ง หรือปรับแต้มเองที่แท็บ 👥 สมาชิก" });
-  return NextResponse.json({ ok: true, points, notify, notifyMsg });
+  if (points === null) return { status: 200, json: { ok: true, notify, notifyMsg, warning: "เปลี่ยนสถานะแล้ว แต่ปรับแต้มสมาชิกไม่สำเร็จ — ลองเปลี่ยนสถานะอีกครั้ง หรือปรับแต้มเองที่แท็บ 👥 สมาชิก" } };
+  return { status: 200, json: { ok: true, points, notify, notifyMsg } };
+}
+
+/** 📦 ทำหลายออเดอร์ทีละใบผ่าน applyOne (สูงสุด 200 ใบ/ครั้ง) — คืนจำนวนที่สำเร็จ + รายการที่ไม่สำเร็จพร้อมเหตุผล */
+async function bulkApply(user: Actor, raw: { orderIds?: unknown; status?: unknown; tracking?: unknown; markShipped?: unknown }): Promise<NextResponse> {
+  const sb = supabaseAdmin();
+  const results: { orderId: string; ok: boolean; error?: string }[] = [];
+  if (Array.isArray(raw.tracking)) {
+    for (const t of (raw.tracking as { orderId?: unknown; trackingNo?: unknown; carrier?: unknown }[]).slice(0, 200)) {
+      if (typeof t?.orderId !== "string" || !cleanTrackingNo(t.trackingNo)) continue;
+      const r = await applyOne(sb, user, { orderId: t.orderId, trackingNo: String(t.trackingNo), trackingCarrier: String(t.carrier ?? ""), ...(raw.markShipped === true ? { status: "shipped" } : {}) });
+      results.push({ orderId: t.orderId, ok: r.status === 200, error: r.status === 200 ? undefined : String(r.json.error ?? "") });
+    }
+  } else if (typeof raw.status === "string" && Array.isArray(raw.orderIds)) {
+    if (!STATUS_KEYS.has(raw.status as never)) return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 });
+    for (const id of (raw.orderIds as unknown[]).slice(0, 200)) {
+      if (typeof id !== "string") continue;
+      const r = await applyOne(sb, user, { orderId: id, status: raw.status });
+      results.push({ orderId: id, ok: r.status === 200, error: r.status === 200 ? undefined : String(r.json.error ?? "") });
+    }
+  } else return NextResponse.json({ error: "ไม่มีอะไรให้ทำ" }, { status: 400 });
+  return NextResponse.json({ ok: true, done: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok) });
 }
 
 /** 🎴 ติ๊กว่าพิมพ์การ์ดแล้ว (printed=true) หรือเอาติ๊กออก — เฉพาะออเดอร์ที่มีการ์ด · audit ทีละใบ */

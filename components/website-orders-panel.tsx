@@ -10,6 +10,7 @@
  * 🌐 ป้าย EN = ลูกค้าสั่งจากหน้าภาษาอังกฤษ · 💬 ข้อความถึงลูกค้า (คัดลอกไปส่ง LINE/SMS · ✉️ ส่งอีเมล) เป็นภาษาของลูกค้าเสมอ
  *    ถ้อยคำ lib/customer-messages · อีเมล lib/order-notify (อัตโนมัติเมื่อร้านเปิดที่แท็บ 🏪 ข้อมูลร้าน)
  * 💳 สลิปโอน: ตัวกรอง "💳 รอตรวจเงิน" + กล่องสลิป (SlipReviewBox) ในรายละเอียด — ยืนยันรับเงิน/ปฏิเสธ (lib/website-payments*)
+ * 📦 แพ็กของ: ตัวกรอง "📦 พร้อมแพ็ก" · ติ๊กหลายใบ → พิมพ์ใบปะหน้า+ใบแพ็ก (/print/web-orders) / กำลังเตรียมของ · 🚚 ใส่เลขพัสดุหลายใบ (lib/website-fulfillment)
  * ข้อมูล: /api/website/orders
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,6 +24,9 @@ import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type Orde
 import { CUSTOMER_LANG_LABEL, ORDER_EVENTS, currentOrderEvent, orderMessage, type OrderEvent } from "@/lib/customer-messages";
 import { PARCEL_CARRIERS, cleanTrackingNo, type ParcelTracking } from "@/lib/parcel-tracking";
 import { SlipReviewBox, type SlipMeta, type SlipView } from "@/components/website-slip-review";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { BulkTrackingModal } from "@/components/website-bulk-tracking";
+import { isReadyToPack } from "@/lib/website-fulfillment";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -104,12 +108,14 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   const [messaging, setMessaging] = useState<Messaging | null>(null);
   const [slipMeta, setSlipMeta] = useState<SlipMeta | null>(null);
   const [slipAuto, setSlipAuto] = useState<{ enabled: boolean; configured: boolean; uploadEnabled: boolean } | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [trackOpen, setTrackOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       // 💳 "รอตรวจเงิน" เป็นสถานะชำระเงิน ไม่ใช่สถานะออเดอร์ → โหลดทั้งหมดแล้วกรองในหน้าจอ
-      const r = await apiFetch(`/api/website/orders?shop=${encodeURIComponent(shopSlug)}&status=${encodeURIComponent(filter === "verifying" ? "all" : filter)}`);
+      const r = await apiFetch(`/api/website/orders?shop=${encodeURIComponent(shopSlug)}&status=${encodeURIComponent(filter === "verifying" || filter === "toPack" ? "all" : filter)}`);
       const j = await r.json();
       if (j.error) {
         toast.error(j.error);
@@ -175,7 +181,27 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   };
 
   const total = statuses.reduce((a, s) => a + (counts[s.key] ?? 0), 0);
-  const shown = filter === "verifying" ? orders.filter((o) => o.paymentStatus === "verifying") : orders;
+  const shown = filter === "verifying" ? orders.filter((o) => o.paymentStatus === "verifying") : filter === "toPack" ? orders.filter(isReadyToPack) : orders;
+  // 📦 ทำหลายใบ: เปลี่ยนสถานะ (ทีละใบผ่าน API — audit/แต้ม/แจ้งลูกค้าครบเหมือนทีละใบ)
+  const bulkStatus = async (status: string, label: string) => {
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/website/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bulk: { orderIds: [...sel], status } }),
+      }).then((r) => r.json());
+      if (!j.ok) return toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+      toast.success(`${label} ${j.done} ออเดอร์${j.failed?.length ? ` · ไม่สำเร็จ ${j.failed.length}` : ""}`);
+      setSel(new Set());
+      await load();
+    } catch {
+      toast.error("บันทึกไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const printHref = (ids?: string[]) => `/print/web-orders?shop=${encodeURIComponent(shopSlug)}${ids?.length ? `&ids=${ids.join(",")}` : ""}`;
   // 💳 พนักงานยืนยันรับเงิน / ปฏิเสธสลิป
   const decideSlip = async (slipId: string, action: "approve" | "reject", reason?: string) => {
     setBusy(true);
@@ -220,15 +246,24 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
             {s.label} <span className="opacity-60">{counts[s.key] ?? 0}</span>
           </Chip>
         ))}
+        <Chip active={filter === "toPack"} onClick={() => setFilter("toPack")}>
+          📦 พร้อมแพ็ก <span className={(counts.toPack ?? 0) > 0 && filter !== "toPack" ? "rounded-full bg-blue-500 px-1.5 text-white" : "opacity-60"}>{counts.toPack ?? 0}</span>
+        </Chip>
         <Chip active={filter === "verifying"} onClick={() => setFilter("verifying")}>
           💳 รอตรวจเงิน <span className={(counts.verifying ?? 0) > 0 && filter !== "verifying" ? "rounded-full bg-amber-400 px-1.5 text-white" : "opacity-60"}>{counts.verifying ?? 0}</span>
         </Chip>
+        <a href={printHref()} target="_blank" rel="noopener" className="ml-auto text-xs px-2.5 py-1 rounded-full border border-blue-200 bg-white text-blue-700 hover:bg-blue-50" title="ใบปะหน้า + ใบแพ็ก ของทุกออเดอร์ที่พร้อมแพ็ก">
+          🖨 พิมพ์ใบปะหน้า
+        </a>
+        <button type="button" onClick={() => setTrackOpen(true)} className="text-xs px-2.5 py-1 rounded-full border border-slate-200 bg-white text-slate-700 hover:border-slate-400">
+          🚚 ใส่เลขพัสดุหลายใบ
+        </button>
         {cardsWaiting > 0 && (
-          <a href={`/print/gift-cards?shop=${encodeURIComponent(shopSlug)}`} target="_blank" rel="noopener" className="ml-auto text-xs px-2.5 py-1 rounded-full border border-pink-300 bg-pink-50 text-pink-700 hover:bg-pink-100">
+          <a href={`/print/gift-cards?shop=${encodeURIComponent(shopSlug)}`} target="_blank" rel="noopener" className="text-xs px-2.5 py-1 rounded-full border border-pink-300 bg-pink-50 text-pink-700 hover:bg-pink-100">
             🎴 พิมพ์การ์ดที่รอ ({cardsWaiting})
           </a>
         )}
-        <button onClick={() => void load()} className={`${cardsWaiting > 0 ? "" : "ml-auto "}text-xs text-slate-500 hover:text-blue-600 px-2 py-1`}>
+        <button onClick={() => void load()} className="text-xs text-slate-500 hover:text-blue-600 px-2 py-1">
           ↻ รีเฟรช
         </button>
       </div>
@@ -244,12 +279,17 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
         <MiniTable<Order>
           rows={shown}
           rowKey={(o) => o.id}
+          selectable
+          selected={sel}
+          onSelectedChange={setSel}
           countUnit="ออเดอร์"
           emptyText={
             filter === "all"
               ? "ยังไม่มีออเดอร์จากเว็บร้านนี้ — เมื่อลูกค้ากดสั่งซื้อบนเว็บ รายการจะขึ้นที่นี่"
               : filter === "verifying"
                 ? "ไม่มีสลิปรอตรวจ — ลูกค้าแนบสลิปเมื่อไร (และระบบตรวจอัตโนมัติไม่ผ่าน) จะขึ้นที่นี่"
+                : filter === "toPack"
+                  ? "ไม่มีออเดอร์ที่พร้อมแพ็ก — ออเดอร์ที่จ่ายแล้ว (หรือเก็บปลายทาง) และยังไม่ส่งจะขึ้นที่นี่"
                 : "ไม่มีออเดอร์ในสถานะนี้"
           }
           searchText={(o) => `${o.giftWrap ? "ห่อของขวัญ " : ""}${o.giftCardOnly ? "การ์ด " : ""}${o.orderNo} ${o.customerName} ${o.customerPhone} ${o.skuCodes.join(" ")} ${o.items.map((i) => i.name).join(" ")}`}
@@ -343,6 +383,14 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
           ]}
         />
       )}
+
+      {/* 📦 ทำหลายใบ */}
+      <BulkActionBar count={sel.size} unit="ออเดอร์" onClear={() => setSel(new Set())}>
+        <a href={printHref([...sel])} target="_blank" rel="noopener" className="h-9 inline-flex items-center rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700">🖨 ใบปะหน้า + ใบแพ็ก</a>
+        <button type="button" disabled={busy} onClick={() => void bulkStatus("preparing", "เปลี่ยนเป็นกำลังเตรียมของ")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40">📦 กำลังเตรียมของ</button>
+        <button type="button" onClick={() => setTrackOpen(true)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">🚚 ใส่เลขพัสดุ</button>
+      </BulkActionBar>
+      <BulkTrackingModal open={trackOpen} onClose={() => setTrackOpen(false)} orders={orders} onDone={() => { setSel(new Set()); void load(); }} />
 
       {/* รายละเอียดออเดอร์ */}
       <ERPModal open={Boolean(open)} onClose={() => setOpenId(null)} title={open ? `ออเดอร์ ${open.orderNo}` : ""} size="lg">
