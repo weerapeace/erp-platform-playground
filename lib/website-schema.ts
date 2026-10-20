@@ -1079,7 +1079,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         group: "media",
         default: null,
         wide: true,
-        hint: "≤ 4 MB อัปได้ทันที · ไฟล์ใหญ่ ≤ 200 MB ต้องเปิดสิทธิ์อัปโหลดใน Cloudflare ก่อน (ครั้งเดียว) · แนะนำ MP4 (H.264) 1080p",
+        hint: "อัปไฟล์ได้ถึง 200 MB (เข้าคลังให้เอง) หรือกด 📁 เลือกคลิปเดิมจากคลัง · แนะนำ MP4 (H.264) 1080p",
         required: true,
         requiredMessage: "ยังไม่ได้อัปโหลดคลิป",
         showIf: VIDEO_UPLOAD,
