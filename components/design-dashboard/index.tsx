@@ -281,6 +281,17 @@ export function DesignDashboard() {
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_hidden_cols", value: next }) }).catch(() => {});
   };
   const toggleHiddenCol = (key: string) => saveHiddenCols(hiddenCols.includes(key) ? hiddenCols.filter((k) => k !== key) : [...hiddenCols, key]);
+  // ขนาดการ์ดบนบอร์ด (เจ้าของขอ compact): ▦ การ์ดเล็ก (เรียงหลายใบในคอลัมน์กว้าง) / ☰ แถวย่อ (รูปจิ๋ว+ชื่อ) — จำรายคน
+  const [cardSize, setCardSize] = useState<"compact" | "row">("compact");
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_card_size").then((r) => r.json())
+      .then((j) => { const v = j?.value; if (v === "compact" || v === "row") setCardSize(v); })
+      .catch(() => {});
+  }, []);
+  const changeCardSize = (size: "compact" | "row") => {
+    setCardSize(size);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_card_size", value: size }) }).catch(() => {});
+  };
   const changeViewMode = (mode: "board" | "gallery") => {
     setViewMode(mode);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_view_mode", value: mode }) }).catch(() => {});
@@ -623,6 +634,78 @@ export function DesignDashboard() {
                       </div>
                     );
   };
+  // การ์ดบนบอร์ด (ลากเปลี่ยนสถานะได้บนจอคอม) — 2 ขนาดตาม cardSize:
+  //   compact = รูปจัตุรัส + ชื่อ + เลขที่/กำหนดส่ง (ไม่มีกล่องโน้ตสูงคงที่แบบเดิม — โน้ตเป็น 📝 ชี้ดูได้)
+  //   row     = รูปจิ๋ว 40px ซ้าย + ชื่อ/เลขที่/กำหนดส่ง ขวา (เห็นงานเยอะสุดต่อจอ · ชี้รูปแล้วขยายได้)
+  const renderBoardCard = (sheet: DesignSheetListItem) => {
+    const brandColor = safeColor(sheet.brand_color);
+    const coverUrl = sheetCoverUrl(sheet);
+    const isDragging = draggingSheetId === sheet.id;
+    const isMoving = movingSheetId === sheet.id;
+    const picked = pickedIds.has(sheet.id);
+    const row = cardSize === "row";
+    const activate = () => { if (isMoving) return; if (pickMode) togglePicked(sheet.id); else openDetail(sheet.id); };
+    const cover = coverUrl ? (
+      <HoverPreview url={sheet.cover_url} previewW={640}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img data-gg-cover src={coverUrl} alt={sheet.name} loading="lazy" decoding="async"
+          className={row ? "h-10 w-10 shrink-0 rounded border border-slate-100 bg-slate-50 object-contain" : "mb-1.5 aspect-square w-full rounded-md border border-slate-100 bg-slate-50 object-contain"} />
+      </HoverPreview>
+    ) : (
+      <div data-gg-cover className={row ? "flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-100" : "mb-1.5 flex aspect-square items-center justify-center overflow-hidden rounded-md border border-slate-100"}
+        style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
+        <BrandSlot theme={brandTheme} id="task_placeholder" size={row ? "max-h-6" : "max-h-10"} />
+      </div>
+    );
+    const noteIcon = sheet.note ? <span className="shrink-0 cursor-help text-[11px]" title={`📝 ${sheet.note}`}>📝</span> : null;
+    const tags = (sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
+      <div className="mt-1 flex flex-wrap gap-1 text-[9px]">
+        {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">ตีราคา</span>}
+        {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">มีราคา</span>}
+        {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">มี SKU</span>}
+      </div>
+    );
+    return (
+      <div
+        key={sheet.id}
+        role="button"
+        tabIndex={0}
+        onClick={activate}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
+        data-gg-task-card
+        draggable={isDesktop && !movingSheetId && !pickMode}   /* ทัชลากไม่ได้ → เปลี่ยนสถานะผ่านป๊อปอัปรายละเอียดแทน */
+        onDragStart={(event) => handleCardDragStart(event, sheet)}
+        onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
+        aria-busy={isMoving}
+        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : isDesktop ? `${sheet.code} • ${sheet.name} — ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด` : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
+        className={`relative overflow-hidden rounded-lg border bg-white shadow-[2px_2px_0_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 ${row ? "flex items-center gap-2 p-1.5" : "block p-1.5"} ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
+      >
+        {pickMode && <PickBadge checked={picked} />}
+        <BrandSlot theme={brandTheme} id="task_corner" />
+        {cover}
+        {row ? (
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xs font-semibold text-slate-800">{sheet.name}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
+              <span className="truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
+              <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="line-clamp-2 text-xs font-semibold leading-snug text-slate-800">{sheet.name}</div>
+            <div className="mt-1 flex items-center gap-1 whitespace-nowrap">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
+              <span className="min-w-0 truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
+              <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
+            </div>
+            {tags}
+          </>
+        )}
+      </div>
+    );
+  };
   // มือถือ: สถานะที่เลือกดูอยู่ (ค่าเริ่มต้น = คอลัมน์แรก)
   const phoneCol = boardColumns.find((c) => c.key === phoneStatus) ?? boardColumns[0] ?? null;
   const menuItem = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-slate-700 hover:bg-slate-50";
@@ -653,6 +736,9 @@ export function DesignDashboard() {
                   <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 รีเฟรชข้อมูล</button>
                   {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 ปรับธีม {selectedBrand?.name}</button>}
                   <button type="button" className={menuItem} onClick={() => { setStatusMgr(true); setMoreOpen(false); }}>🔀 จัดการสถานะ</button>
+                  <button type="button" className={menuItem} onClick={() => { changeCardSize(cardSize === "row" ? "compact" : "row"); setMoreOpen(false); }}>
+                    {cardSize === "row" ? "▦ การ์ดเล็ก (มีรูป)" : "☰ การ์ดแถวย่อ"}
+                  </button>
                   {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else setPickMode(true); setMoreOpen(false); }}>{pickMode ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}</button>}
                   <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ ตั้งค่าแบรนด์</button>
                 </div>
@@ -1008,8 +1094,17 @@ export function DesignDashboard() {
                     </FloatingDropdown>
                   </div>
                 )}
+                {/* ขนาดการ์ดบนบอร์ด: ▦ การ์ดเล็ก / ☰ แถวย่อ — จำรายคน (เฉพาะมุมมองบอร์ด) */}
+                {viewMode === "board" && (
+                  <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5" title="ขนาดการ์ดบนบอร์ด (จำค่าของคุณ)">
+                    {([["compact", "▦ การ์ดเล็ก"], ["row", "☰ แถวย่อ"]] as const).map(([key, label]) => (
+                      <button key={key} type="button" onClick={() => changeCardSize(key)}
+                        className={`h-8 rounded px-2.5 text-xs font-medium transition ${cardSize === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+                    ))}
+                  </div>
+                )}
                 {/* สลับมุมมอง: บอร์ด Kanban ↔ การ์ดรูปใหญ่ (แกลเลอรี) — จำค่ารายคน */}
-                <div className={`flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 ${viewMode === "gallery" ? "" : "ml-auto"}`}>
+                <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
                   {([["board", "🗂️ บอร์ด"], ["gallery", "🖼️ การ์ดรูปใหญ่"]] as const).map(([key, label]) => (
                     <button key={key} type="button" onClick={() => changeViewMode(key)}
                       className={`h-8 rounded px-2.5 text-xs font-medium transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
@@ -1052,7 +1147,9 @@ export function DesignDashboard() {
                       })}
                     </div>
                     {phoneCol && phoneCol.sheets.length > 0 ? (
-                      <div className="grid grid-cols-2 gap-2">{phoneCol.sheets.map(renderGalleryCard)}</div>
+                      cardSize === "row"
+                        ? <div className="space-y-1.5">{phoneCol.sheets.map(renderBoardCard)}</div>
+                        : <div className="grid grid-cols-2 gap-2">{phoneCol.sheets.map(renderGalleryCard)}</div>
                     ) : (
                       <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-6 text-center text-xs text-slate-400">ไม่มีงานในสถานะนี้</div>
                     )}
@@ -1079,7 +1176,8 @@ export function DesignDashboard() {
                     style={isDesktop ? { gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))` } : undefined}>
                     {boardColumns.map((column, index) => {
                       const expanded = expandedCols.has(column.key);
-                      const shown = expanded ? column.sheets : column.sheets.slice(0, 8);
+                      const limit = cardSize === "row" ? 12 : 9;   // โชว์กี่ใบก่อนกด "ดูอีก" (การ์ดเล็ก 9 = 3×3 พอดีคอลัมน์กว้าง)
+                      const shown = expanded ? column.sheets : column.sheets.slice(0, limit);
                       const hiddenCount = Math.max(0, column.sheets.length - shown.length);
                       const isDropTarget = dropTargetStatus === column.key;
                       return (
@@ -1114,72 +1212,13 @@ export function DesignDashboard() {
                             )}
                           </div>
                           <div className="min-h-[128px] space-y-2">
-                            {shown.map((sheet) => {
-                              const brandColor = safeColor(sheet.brand_color);
-                              const coverUrl = sheetCoverUrl(sheet);
-                              const isDragging = draggingSheetId === sheet.id;
-                              const isMoving = movingSheetId === sheet.id;
-                              const picked = pickedIds.has(sheet.id);
-                              const activate = () => { if (isMoving) return; if (pickMode) togglePicked(sheet.id); else openDetail(sheet.id); };
-                              return (
-                                <div
-                                  key={sheet.id}
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={activate}
-                                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
-                                  data-gg-task-card
-                                  draggable={isDesktop && !movingSheetId && !pickMode}   /* ทัชลากไม่ได้ → เปลี่ยนสถานะผ่านป๊อปอัปรายละเอียดแทน */
-                                  onDragStart={(event) => handleCardDragStart(event, sheet)}
-                                  onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
-                                  aria-busy={isMoving}
-                                  title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : isDesktop ? "ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด" : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
-                                  className={`relative block overflow-hidden rounded-lg border bg-white p-2.5 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
-                                >
-                                  {pickMode && <PickBadge checked={picked} />}
-                                  <BrandSlot theme={brandTheme} id="task_corner" />
-                                  {coverUrl ? (
-                                    <HoverPreview url={sheet.cover_url} previewW={640}>
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
-                                        data-gg-cover
-                                        src={coverUrl}
-                                        alt={sheet.name}
-                                        loading="lazy"
-                                        decoding="async"
-                                        className="mb-2 aspect-square w-full rounded-md border border-slate-100 bg-slate-50 object-contain"
-                                      />
-                                    </HoverPreview>
-                                  ) : (
-                                    <div data-gg-cover className="mb-2 flex aspect-square items-center justify-center overflow-hidden rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
-                                      <BrandSlot theme={brandTheme} id="task_placeholder" size="max-h-14" />
-                                    </div>
-                                  )}
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
-                                    <span className="font-mono text-[11px] text-slate-400">{sheet.code}</span>
-                                  </div>
-                                  <div className="mt-0.5 line-clamp-2 h-[34px] text-[13px] font-semibold leading-snug text-slate-800" title={sheet.name}>{sheet.name}</div>
-                                  <div className="mt-1 h-[44px] overflow-hidden">
-                                    {sheet.note && (
-                                      <div className="line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-600" title={sheet.note}>📝 {sheet.note}</div>
-                                    )}
-                                    {sheet.detail_excerpt && (
-                                      <div className="mt-1 line-clamp-1 text-[11px] leading-snug text-slate-400" title={sheet.detail_excerpt}>{sheet.detail_excerpt}</div>
-                                    )}
-                                  </div>
-                                  <div className="mt-2 flex h-[18px] items-center justify-between gap-2 whitespace-nowrap">
-                                    <span className="truncate text-[11px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
-                                    <span className="shrink-0"><CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
-                                  </div>
-                                  <div className="mt-2 flex h-[20px] items-center gap-1 overflow-hidden text-[10px] text-slate-400">
-                                    {sheet.has_cost && <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-600">ตีราคาแล้ว</span>}
-                                    {sheet.has_quote && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-600">มีราคา</span>}
-                                    {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-600">มี SKU</span>}
-                                  </div>
-                                </div>
-                              );
-                            })}
+                            {shown.length > 0 && (
+                              /* ▦ การ์ดเล็ก = กริดในคอลัมน์ (การ์ด ~130px+ · คอลัมน์กว้างเรียงได้หลายใบ) · ☰ แถวย่อ = ซ้อนแถวละใบ */
+                              <div className={cardSize === "row" ? "space-y-1.5" : "grid gap-2"}
+                                style={cardSize === "row" ? undefined : { gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
+                                {shown.map(renderBoardCard)}
+                              </div>
+                            )}
                             {shown.length === 0 && (
                               <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-center text-xs text-slate-400">
                                 ไม่มีงานในสถานะนี้
@@ -1191,7 +1230,7 @@ export function DesignDashboard() {
                                 ＋ ดูอีก {hiddenCount.toLocaleString("th-TH")} งาน
                               </button>
                             )}
-                            {expanded && column.sheets.length > 8 && (
+                            {expanded && column.sheets.length > limit && (
                               <button type="button" onClick={() => setExpandedCols((s) => { const n = new Set(s); n.delete(column.key); return n; })}
                                 className="w-full rounded-lg p-1.5 text-center text-[11px] text-slate-400 hover:text-slate-600">
                                 ย่อ ▲
