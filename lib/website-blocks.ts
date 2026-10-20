@@ -222,7 +222,11 @@ export interface HeroBlock extends BlockBase {
   imageAlt: string;
   /** ความทึบของสีดำที่ทับรูป 0–90 (%) */
   overlay: number;
-  /** วิดีโอพื้นหลัง (mp4/webm) — ว่าง = ใช้รูป */
+  /** วิดีโอพื้นหลังที่อัปโหลด/เลือกจากคลัง (r2 key) — มี = ใช้ก่อนลิงก์ videoUrl */
+  videoFile: string | null;
+  /** คลิปสำหรับจอมือถือ (r2 key · เช่น แนวตั้ง) — ว่าง = ใช้คลิปเดียวกับคอม */
+  videoFileMobile: string | null;
+  /** วิดีโอพื้นหลัง (ลิงก์ mp4/webm) — ว่าง = ใช้รูป */
   videoUrl: string;
   parallax: boolean;
   height: HeroHeight;

@@ -729,12 +729,25 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       f("crop", "รูปพื้นหลัง: ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropBox: "16:7", hint: "กรอบ ≈ แบนเนอร์บนจอคอม (สูงจริงตามความสูงที่ตั้ง)" }),
       text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, hint: "มีผลกับ SEO" }),
       f("overlay", "ความทึบของสีทับรูป (%)", "range", { group: "media", default: 45, min: 0, numMax: 90, step: 5 }),
-      f("videoUrl", "วิดีโอพื้นหลัง (ลิงก์ .mp4 / .webm)", "href", {
+      // 🎬 วิดีโอพื้นหลัง: อัปโหลด / เลือกจากคลัง (ช่องคลิปกลาง videoFile ตัวเดียวกับ Section วิดีโอ) · ลิงก์เดิมยังใช้ได้
+      f("videoFile", "วิดีโอพื้นหลัง (อัปโหลด / เลือกจากคลัง)", "videoFile", {
+        group: "media",
+        default: null,
+        wide: true,
+        hint: "เล่นวนเงียบ ๆ แทนรูป (รูปพื้นหลังโชว์ระหว่างโหลด) · อัปได้ถึง 200 MB หรือกด 📁 เลือกคลิปเดิมจากคลัง · แนะนำ MP4 6–10 วินาที ≤ 15 MB ไม่มีเสียง",
+      }),
+      f("videoFileMobile", "วิดีโอพื้นหลัง (มือถือ)", "videoFile", {
+        group: "media",
+        default: null,
+        wide: true,
+        hint: "ไม่ใส่ = ใช้คลิปเดียวกับคอม · จอมือถือแคบ คลิปแนวนอนจะโดนตัดข้าง แนะนำคลิปแนวตั้ง 4:5 / 9:16",
+      }),
+      f("videoUrl", "หรือ ลิงก์วิดีโอ (.mp4 / .webm)", "href", {
         group: "media",
         default: "",
         wide: true,
         placeholder: "https://…/clip.mp4",
-        hint: "ใส่แล้วจะเล่นวนเงียบ ๆ แทนรูป (รูปใช้โชว์ระหว่างโหลด) · แนะนำไม่เกิน 5 MB",
+        hint: "ใช้เมื่อคลิปอยู่ที่อื่น · มีคลิปที่อัปไว้ด้านบน = ใช้คลิปนั้นก่อน",
       }),
       f("parallax", "พื้นหลังเลื่อนช้ากว่าเนื้อหา (Parallax)", "toggle", { group: "layout", default: false }),
       f("height", "ความสูง", "select", {
