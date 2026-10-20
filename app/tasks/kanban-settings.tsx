@@ -32,6 +32,35 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
   const set = (p: Partial<KanbanTheme>) => onChange({ ...cfg, ...p });
   return (
     <div className="space-y-3">
+      {/* 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (แทนชี้ที่รูป) — เลือกได้ว่าจะโชว์อะไร */}
+      <div className="space-y-1.5 rounded-lg border border-violet-100 bg-violet-50/40 p-2" data-hover-card-settings>
+        <div className="text-xs font-semibold text-violet-700">🪟 {t("ชี้ที่การ์ด", "Card hover")}</div>
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600">
+          <input type="checkbox" checked={cfg.hoverCard !== false} onChange={(e) => set({ hoverCard: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
+          {t("โชว์รูปใหญ่ + รายละเอียดงาน เมื่อชี้ที่การ์ด", "Show large image + task details on hover")}
+        </label>
+        {cfg.hoverCard !== false && (() => {
+          const cur = cfg.hoverFields ?? DEFAULT_HOVER_FIELDS;
+          const flip = (k: HoverField) => set({ hoverFields: cur.includes(k) ? cur.filter((x) => x !== k) : HOVER_FIELDS.map((f) => f.key).filter((x) => x === k || cur.includes(x)) });
+          return (
+            <div className="pl-5">
+              <div className="flex flex-wrap gap-1">
+                {HOVER_FIELDS.map((f) => {
+                  const on = cur.includes(f.key);
+                  return (
+                    <button key={f.key} type="button" onClick={() => flip(f.key)} aria-pressed={on} data-hover-field={f.key}
+                      className={`h-7 rounded-full border px-2.5 text-xs ${on ? "border-violet-300 bg-violet-50 font-medium text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                      {on ? "✓ " : ""}{t(f.th, f.en)}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">{t("ชี้เมาส์ค้างที่การ์ดครู่หนึ่ง · มือถือ/แท็บเล็ตไม่เด้ง · ปิดอยู่ = ชี้ที่รูปเห็นรูปใหญ่แบบเดิม", "Rest the mouse on a card · not on touch screens · off = old image-only preview")}</p>
+              {cfg.hoverFields && <button type="button" onClick={() => set({ hoverFields: undefined })} className="mt-0.5 text-[11px] text-slate-400 hover:text-violet-600">↺ {t("ค่าเริ่มต้น", "Default")}</button>}
+            </div>
+          );
+        })()}
+      </div>
       {wip ? (
         <div>
           <div className="text-xs font-medium text-slate-500 mb-1">{t("การ์ดในช่อง \"กำลังดำเนินการ\"", "Cards in the in-progress lane")}</div>
@@ -71,34 +100,6 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
             options={[["auto", t("อัตโนมัติ", "Auto")], ["sm", t("เล็ก", "S")], ["md", t("กลาง", "M")], ["lg", t("ใหญ่", "L")], ["square", t("จัตุรัส", "Square")]]} />
         </div>
       )}
-      {/* 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (แทนชี้ที่รูป) — เลือกได้ว่าจะโชว์อะไร */}
-      <div className="space-y-1.5" data-hover-card-settings>
-        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600">
-          <input type="checkbox" checked={cfg.hoverCard !== false} onChange={(e) => set({ hoverCard: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
-          {t("ชี้ที่การ์ด = โชว์รูปใหญ่ + รายละเอียดงาน", "Hover a card = large image + task details")}
-        </label>
-        {cfg.hoverCard !== false && (() => {
-          const cur = cfg.hoverFields ?? DEFAULT_HOVER_FIELDS;
-          const flip = (k: HoverField) => set({ hoverFields: cur.includes(k) ? cur.filter((x) => x !== k) : HOVER_FIELDS.map((f) => f.key).filter((x) => x === k || cur.includes(x)) });
-          return (
-            <div className="pl-5">
-              <div className="flex flex-wrap gap-1">
-                {HOVER_FIELDS.map((f) => {
-                  const on = cur.includes(f.key);
-                  return (
-                    <button key={f.key} type="button" onClick={() => flip(f.key)} aria-pressed={on} data-hover-field={f.key}
-                      className={`h-7 rounded-full border px-2.5 text-xs ${on ? "border-violet-300 bg-violet-50 font-medium text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-                      {on ? "✓ " : ""}{t(f.th, f.en)}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="mt-1 text-[11px] text-slate-400">{t("ชี้เมาส์ค้างที่การ์ดครู่หนึ่ง · มือถือ/แท็บเล็ตไม่เด้ง · ปิดอยู่ = ชี้ที่รูปเห็นรูปใหญ่แบบเดิม", "Rest the mouse on a card · not on touch screens · off = old image-only preview")}</p>
-              {cfg.hoverFields && <button type="button" onClick={() => set({ hoverFields: undefined })} className="mt-0.5 text-[11px] text-slate-400 hover:text-violet-600">↺ {t("ค่าเริ่มต้น", "Default")}</button>}
-            </div>
-          );
-        })()}
-      </div>
       <SegRow label={t("ขนาดการ์ด", "Card size")} value={cfg.cardScale ?? "md"} onChange={(v) => set({ cardScale: v })}
         options={[["sm", t("เล็ก", "Small")], ["md", t("ปกติ", "Normal")], ["lg", t("ใหญ่", "Large")]]} />
       <SegRow label={t("ระยะห่างการ์ด", "Card spacing")} value={cfg.cardGap ?? "normal"} onChange={(v) => set({ cardGap: v })}

@@ -162,6 +162,7 @@ function HoverBody({ task, fields, imgKey, artKeys }: { task: CreativeTask; fiel
         {has("description") && desc && (
           <p className="line-clamp-6 whitespace-pre-wrap border-t border-slate-100 pt-1.5 text-[12px] leading-relaxed text-slate-600">{desc}</p>
         )}
+        <p className="pt-1 text-[10.5px] text-slate-300">{t("เลือกสิ่งที่โชว์: ⚙️ ตั้งค่า มุมขวาบนของบอร์ด", "Choose what shows: ⚙️ Settings, top-right of the board")}</p>
       </div>
     </div>
   );
