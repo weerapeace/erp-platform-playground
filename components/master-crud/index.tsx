@@ -43,7 +43,7 @@ import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import { formatAmount, currencyLabel } from "@/lib/money";
 import { MoneyInput } from "@/components/money-input";
-import { computedTextValue, textComputeDescribe, isNamePartsCompute } from "@/lib/computed-text";
+import { computedTextValue, textComputeDescribe, textComputeConfigKind } from "@/lib/computed-text";
 import { ScrollTabs } from "@/components/scroll-tabs";   // แถบแท็บยาวเกิน: กดแล้วเลื่อนให้อยู่กลาง + ปุ่ม ‹ ›
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
@@ -62,6 +62,8 @@ const BankPicker = dynamic(() => import("@/components/bank-picker").then((m) => 
 const InlineCreatePanel = dynamic(() => import("@/components/master-crud/inline-create").then((m) => m.InlineCreatePanel), { ssr: false });
 // ⚙ ตั้ง "ชื่อประกอบจากอะไร" ข้างหัวข้อฟิลด์ computed ที่ตั้งได้ (เช่น Name Platform) — แอดมินเท่านั้น
 const NamePartsButton = dynamic(() => import("@/components/name-parts-editor").then((m) => m.NamePartsButton), { ssr: false });
+// ⚙ แก้สูตรคำอธิบายเป็นบล็อก (เช่น Platform Description) — เปิด/ปิด/เรียง/แก้ข้อความ
+const DescBlocksButton = dynamic(() => import("@/components/desc-blocks-editor").then((m) => m.DescBlocksButton), { ssr: false });
 const SkuSupplierList = dynamic(() => import("@/components/sku-supplier-list").then((m) => m.SkuSupplierList), { ssr: false });
 // แถบ "🛒 มาจาก Taobao" — ลิงก์ย้อนกลับไปยังรายการในกล่องพักที่จับคู่มาเป็นสินค้าตัวนี้
 const SkuTaobaoSource = dynamic(() => import("@/components/sku-taobao-source").then((m) => m.SkuTaobaoSource), { ssr: false });
@@ -3020,11 +3022,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 }} />
             );
           };
-          // ⚙ ชื่อประกอบจากอะไร (computed ที่ตั้งได้ เช่น Name Platform) — แอดมิน · บันทึกทั้งช่องไทย + คู่อังกฤษ → โหลดทะเบียนใหม่
+          // ⚙ แก้สูตร computed ที่ตั้งได้ — แอดมิน · บันทึกทั้งช่องไทย + คู่อังกฤษ → โหลดทะเบียนใหม่
+          //   name_parts = ชื่อประกอบจากอะไร (Name Platform) · desc_blocks = คำอธิบายเป็นบล็อก (Platform Description)
           const namePartsBtn = (f: FieldDef, en?: FieldDef): React.ReactNode => {
-            if (!isNamePartsCompute(f.textCompute) || !f.fieldId || !can("admin.field_registry.edit")) return null;
-            const enRef = en?.fieldId && isNamePartsCompute(en.textCompute) ? { id: en.fieldId, cfg: en.textComputeCfg } : undefined;
-            return <NamePartsButton field={{ id: f.fieldId, cfg: f.textComputeCfg }} enField={enRef} sample={form} fieldLabel={f.label} onSaved={() => refreshRegistry()} />;
+            const kind = textComputeConfigKind(f.textCompute);
+            if (!kind || !f.fieldId || !can("admin.field_registry.edit")) return null;
+            const enRef = en?.fieldId && textComputeConfigKind(en.textCompute) === kind ? { id: en.fieldId, cfg: en.textComputeCfg } : undefined;
+            const Btn = kind === "desc_blocks" ? DescBlocksButton : NamePartsButton;
+            return <Btn field={{ id: f.fieldId, cfg: f.textComputeCfg }} enField={enRef} sample={form} fieldLabel={f.label} onSaved={() => refreshRegistry()} />;
           };
           const visibleFields = baseVisible.flatMap((f) => {
                 if (enKeys.has(f.key)) return [];             // ช่องอังกฤษ: ไม่โชว์ที่ตำแหน่งเดิมของมัน

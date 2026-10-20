@@ -9,14 +9,16 @@
  * บางสูตรตั้งค่าได้ (configurable) — ค่าตั้งอยู่ใน relation_config ของฟิลด์นั้น ส่งเข้ามาเป็น cfg
  */
 import { buildNameFromParts, describeNameParts } from "@/lib/name-parts";
+import { buildDescription, describeDescBlocks } from "@/lib/desc-blocks";
 
 export type TextComputeDef = {
   label: string;
   describe: string;
   /** cfg = relation_config ของฟิลด์ (สำหรับสูตรที่ตั้งค่าได้) */
   fn: (row: Record<string, unknown>, cfg?: Record<string, unknown> | null) => string;
-  /** สูตรที่ตั้งค่าได้: "name_parts" = เลือกชิ้นของชื่อ + เรียงลำดับ (components/name-parts-editor) */
-  configurable?: "name_parts";
+  /** สูตรที่ตั้งค่าได้: "name_parts" = เลือกชิ้นของชื่อ + เรียงลำดับ (components/name-parts-editor)
+   *  "desc_blocks" = คำอธิบายเป็นบล็อก เปิด/ปิด/เรียง/แก้ข้อความ (components/desc-blocks-editor) */
+  configurable?: "name_parts" | "desc_blocks";
   /** คำอธิบายตามค่าที่ตั้งจริง (แทน describe) */
   describeCfg?: (cfg?: Record<string, unknown> | null) => string;
 };
@@ -46,10 +48,14 @@ export const TEXT_COMPUTES: Record<string, TextComputeDef> = {
 const trim = (v: unknown): string => String(v ?? "").trim();
 
 // Parent SKU — รายละเอียดแพลตฟอร์ม (แปลงจากสูตร Odoo x_studio_description_platform)
+//   ⚙ ตั้งเป็นบล็อกได้ (relation_config.desc_blocks — lib/desc-blocks) · ยังไม่ตั้ง = สูตรเดิมด้านล่างทุกตัวอักษร
 TEXT_COMPUTES.platform_description = {
   label: "รายละเอียดแพลตฟอร์ม",
+  configurable: "desc_blocks",
+  describeCfg: (cfg) => (cfg?.desc_blocks ? `ประกอบจากบล็อก (ตั้งที่ ⚙): ${describeDescBlocks(cfg.desc_blocks)}` : TEXT_COMPUTES.platform_description.describe),
   describe: "ประกอบข้อความขายอัตโนมัติ: บทนำ + รายละเอียดสินค้า + คำอธิบายขนาด/วิธีวัด + ขนาด/น้ำหนัก + คำอธิบายพิเศษ + Notes (รับประกัน) + เงื่อนไขการสั่งซื้อ (ใส่ชื่อแบรนด์ให้) — ดึงจากช่องบนใบ + ตารางเชื่อม (คำอธิบายขนาด/พิเศษ/แบรนด์)",
-  fn: (r) => {
+  fn: (r, cfg) => {
+    if (cfg?.desc_blocks) return buildDescription(r, cfg.desc_blocks, "th");
     const intro       = String(r.introduction ?? "");
     const detail      = String(r.description ?? "");
     const customSize  = trim(r.custom_size);
@@ -126,8 +132,11 @@ TEXT_COMPUTES.name_platform_code_en = {
 // Parent SKU — รายละเอียดแพลตฟอร์ม (EN): โครงเดียวกับฝั่งไทย แต่หยิบช่องอังกฤษ + ข้อความประจำเป็นอังกฤษ
 TEXT_COMPUTES.platform_description_en = {
   label: "รายละเอียดแพลตฟอร์ม (EN)",
+  configurable: "desc_blocks",
+  describeCfg: (cfg) => (cfg?.desc_blocks ? `ประกอบจากบล็อก (อังกฤษ · ตั้งที่ ⚙): ${describeDescBlocks(cfg.desc_blocks)}` : TEXT_COMPUTES.platform_description_en.describe),
   describe: "เวอร์ชันอังกฤษของ Platform Description — ใช้ Introduction En / English Description + เงื่อนไขการสั่งซื้อฉบับอังกฤษ (ไม่ต้องแปลด้วย AI)",
-  fn: (r) => {
+  fn: (r, cfg) => {
+    if (cfg?.desc_blocks) return buildDescription(r, cfg.desc_blocks, "en");
     const intro  = String(r.introduction_en ?? "");
     const detail = String(r.english_description ?? "");
     const customSize  = trim(r.custom_size);
@@ -202,3 +211,5 @@ export function textComputeDescribe(name: string | undefined | null, cfg?: Recor
 
 /** สูตรนี้ตั้ง "ชิ้นของชื่อ" ได้ไหม (โชว์ปุ่ม ⚙ ข้างหัวข้อ) */
 export const isNamePartsCompute = (name: string | undefined | null): boolean => !!name && TEXT_COMPUTES[name]?.configurable === "name_parts";
+/** สูตรนี้ตั้งค่าแบบไหนได้ (null = ตั้งไม่ได้) — ใช้เลือกป๊อป ⚙ ที่ตรงชนิด */
+export const textComputeConfigKind = (name: string | undefined | null): TextComputeDef["configurable"] | null => (name ? TEXT_COMPUTES[name]?.configurable ?? null : null);
