@@ -19,7 +19,16 @@ const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) =
 const TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 const url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
 
-export function WebsiteVideoField({ value, onChange }: { value: string | null; onChange: (key: string | null) => void }) {
+export function WebsiteVideoField({
+  value,
+  onChange,
+  slot,
+}: {
+  value: string | null;
+  onChange: (key: string | null) => void;
+  /** ชื่อช่อง (เช่น "🖥 คลิปสำหรับคอม") โชว์ในกรอบว่างด้วย — เลื่อนจนหัวข้อหลุดจอก็ยังรู้ว่าเป็นช่องไหน */
+  slot?: string;
+}) {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const xhrRef = useRef<UploadHandle | null>(null);
@@ -77,6 +86,7 @@ export function WebsiteVideoField({ value, onChange }: { value: string | null; o
             className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center hover:border-blue-400"
           >
             <span className="text-2xl">🎬</span>
+            {slot && <span className="text-xs font-semibold text-blue-700">{slot} · ยังไม่มีคลิป</span>}
             <span className="text-sm font-medium text-slate-700">ลากคลิปมาวาง หรือกดเลือกไฟล์</span>
             <span className="text-[11px] text-slate-400">MP4 / WebM / MOV · ใหญ่สุด 200 MB · อัปแล้วเข้าคลังให้เอง</span>
           </button>

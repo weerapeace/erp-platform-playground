@@ -1134,6 +1134,9 @@ export function validateBlocks(blocks: Block[], opts: { helpPage?: boolean } = {
     for (const fd of schema.fields) {
       if (!fd.required) continue;
       if (!matchShowIf(fd, rec)) continue;
+      // อย่างใดอย่างหนึ่ง (requiredOr) — ช่องคู่มีค่าแล้ว = ผ่าน (เช่น มีคลิปมือถือ ไม่ต้องมีคลิปคอม)
+      const alt = fd.requiredOr ? schema.fields.find((x) => x.key === fd.requiredOr) : undefined;
+      if (alt && !isEmptyValue(alt, rec[alt.key])) continue;
       if (isEmptyValue(fd, rec[fd.key]))
         issues.push({ blockId: b.id, level: "error", message: `${label}: ${fd.requiredMessage ?? `ยังไม่ได้กรอก "${fd.label}"`}` });
     }

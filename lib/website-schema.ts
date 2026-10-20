@@ -115,6 +115,8 @@ export interface FieldDef {
   required?: boolean;
   /** ข้อความตอนตรวจไม่ผ่าน (ไม่ใส่ = สร้างจาก label) */
   requiredMessage?: string;
+  /** required แบบ "อย่างใดอย่างหนึ่ง": ช่องนี้ว่างได้ถ้าช่อง key นี้มีค่า (เช่น คลิปคอมว่างได้ถ้ามีคลิปมือถือ) */
+  requiredOr?: string;
   /**
    * โชว์เฉพาะเมื่อช่องอื่นมีค่าตามนี้ เช่น { key: "source", eq: "manual" }
    * eq เป็น array = ค่าใดค่าหนึ่งในรายการ · ใส่หลายเงื่อนไขเป็น array = ต้องตรงทุกข้อ
@@ -730,17 +732,17 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, hint: "มีผลกับ SEO" }),
       f("overlay", "ความทึบของสีทับรูป (%)", "range", { group: "media", default: 45, min: 0, numMax: 90, step: 5 }),
       // 🎬 วิดีโอพื้นหลัง: อัปโหลด / เลือกจากคลัง (ช่องคลิปกลาง videoFile ตัวเดียวกับ Section วิดีโอ) · ลิงก์เดิมยังใช้ได้
-      f("videoFile", "วิดีโอพื้นหลัง (อัปโหลด / เลือกจากคลัง)", "videoFile", {
+      f("videoFile", "🖥 วิดีโอพื้นหลัง — คอม (อัปโหลด / เลือกจากคลัง)", "videoFile", {
         group: "media",
         default: null,
         wide: true,
-        hint: "เล่นวนเงียบ ๆ แทนรูป (รูปพื้นหลังโชว์ระหว่างโหลด) · อัปได้ถึง 200 MB หรือกด 📁 เลือกคลิปเดิมจากคลัง · แนะนำ MP4 6–10 วินาที ≤ 15 MB ไม่มีเสียง",
+        hint: "เล่นวนเงียบ ๆ แทนรูป (รูปพื้นหลังโชว์ระหว่างโหลด) · อัปได้ถึง 200 MB หรือกด 📁 เลือกคลิปเดิมจากคลัง · แนะนำ MP4 แนวนอน 16:9 · 6–10 วินาที ≤ 15 MB ไม่มีเสียง",
       }),
-      f("videoFileMobile", "วิดีโอพื้นหลัง (มือถือ)", "videoFile", {
+      f("videoFileMobile", "📱 วิดีโอพื้นหลัง — มือถือ", "videoFile", {
         group: "media",
         default: null,
         wide: true,
-        hint: "ไม่ใส่ = ใช้คลิปเดียวกับคอม · จอมือถือแคบ คลิปแนวนอนจะโดนตัดข้าง แนะนำคลิปแนวตั้ง 4:5 / 9:16",
+        hint: "ไม่ใส่ = มือถือใช้คลิปคอม · ใส่แค่ช่องนี้ = มือถือเล่นคลิป คอมโชว์รูปพื้นหลัง · แนะนำคลิปแนวตั้ง 4:5 / 9:16",
       }),
       f("videoUrl", "หรือ ลิงก์วิดีโอ (.mp4 / .webm)", "href", {
         group: "media",
@@ -1088,16 +1090,23 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         requiredMessage: "ยังไม่มีลิงก์คลิป (รับเฉพาะ YouTube และ Vimeo)",
         showIf: VIDEO_LINK,
       }),
-      f("file", "ไฟล์คลิป", "videoFile", {
+      f("file", "🖥 คลิปสำหรับคอม (คลิปหลัก)", "videoFile", {
         group: "media",
         default: null,
         wide: true,
         hint: "อัปไฟล์ได้ถึง 200 MB (เข้าคลังให้เอง) หรือกด 📁 เลือกคลิปเดิมจากคลัง · แนะนำ MP4 (H.264) 1080p",
         required: true,
-        requiredMessage: "ยังไม่ได้อัปโหลดคลิป",
+        requiredOr: "fileMobile",
+        requiredMessage: "ยังไม่ได้อัปโหลดคลิป (ใส่คลิปคอมหรือมือถืออย่างน้อย 1 คลิป)",
         showIf: VIDEO_UPLOAD,
       }),
-      f("fileMobile", "คลิปสำหรับมือถือ", "videoFile", { group: "media", default: null, wide: true, hint: "ไม่ใส่ = ใช้คลิปเดียวกัน · เช่น คลิปแนวตั้ง 9:16 ให้เต็มจอมือถือ", showIf: VIDEO_UPLOAD }),
+      f("fileMobile", "📱 คลิปสำหรับมือถือ", "videoFile", {
+        group: "media",
+        default: null,
+        wide: true,
+        hint: "ไม่ใส่ = มือถือใช้คลิปคอม · ใส่แค่ช่องนี้ = คอมก็เล่นคลิปนี้ · เช่น คลิปแนวตั้ง 9:16 ให้เต็มจอมือถือ",
+        showIf: VIDEO_UPLOAD,
+      }),
       image("poster", "รูปปก (ก่อนเล่น / ระหว่างโหลด)", { hint: "ไม่ใส่: YouTube ใช้รูปปกของคลิป · ไฟล์ที่อัปโหลดใช้ภาพแรกของคลิป" }),
       // ▶ การเล่น
       f("autoplay", "เล่นเองเมื่อเลื่อนมาถึง", "toggle", { group: "media", default: false, hint: "เล่นเอง = เริ่มแบบเงียบเสมอ (เบราว์เซอร์บังคับ)", showIf: { key: "layout", eq: ["standard", "split"] } }),

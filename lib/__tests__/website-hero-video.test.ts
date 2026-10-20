@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { normalizeBlocks, newBlock } from "../website-blocks";
+import { normalizeBlocks, newBlock, validateBlocks } from "../website-blocks";
+
+/** 🎬 Section วิดีโอแบบอัปโหลด: ใส่คลิปคอมหรือมือถืออย่างน้อย 1 คลิป (requiredOr) — เจ้าของใส่แค่คลิปมือถือแล้วโดนกันเผยแพร่ */
+describe("Section วิดีโอ: คลิปคอม/มือถือ อย่างใดอย่างหนึ่ง", () => {
+  const vid = (extra: Record<string, unknown>) => normalizeBlocks([{ id: "v", type: "video", source: "upload", ...extra }]);
+  const noClip = (extra: Record<string, unknown>) => validateBlocks(vid(extra)).some((i) => i.level === "error" && i.message.includes("ยังไม่ได้อัปโหลดคลิป"));
+  it("ไม่มีคลิปเลย = error", () => expect(noClip({})).toBe(true));
+  it("มีแค่คลิปมือถือ = ผ่าน", () => expect(noClip({ fileMobile: "storefront-videos/2026-10/1-m.mp4" })).toBe(false));
+  it("มีคลิปคอม = ผ่าน", () => expect(noClip({ file: "storefront-videos/2026-10/1-d.mp4" })).toBe(false));
+});
 
 /** 🎬 แบนเนอร์หลัก: วิดีโอพื้นหลังอัปโหลด/เลือกจากคลังได้ (ช่องคลิปกลาง videoFile) · ลิงก์เดิมยังใช้ได้ */
 describe("Hero วิดีโอพื้นหลัง", () => {

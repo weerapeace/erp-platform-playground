@@ -503,7 +503,7 @@ function SchemaFieldInner({
     case "videoFile":
       return (
         <Field label={fd.label} hint={fd.hint} wide>
-          <WebsiteVideoField value={(value as string | null) ?? null} onChange={(k) => onChange(k)} />
+          <WebsiteVideoField value={(value as string | null) ?? null} onChange={(k) => onChange(k)} slot={fd.label.replace(/\s*\([^)]*\)\s*$/, "")} />
         </Field>
       );
     case "link":
