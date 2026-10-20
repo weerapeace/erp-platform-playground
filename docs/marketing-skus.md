@@ -92,6 +92,14 @@
 - drawer งานใน Task Manager: กล่อง 🛠 (app/tasks/work-job-link-box.tsx · GET /api/creative-tasks/[id]/work-job สิทธิ์ tasks.view) ความคืบหน้า + ปุ่มเปิดงานรุ่น (`/marketing/skus?job=<id>` → เปิดโหมดทำงานที่งานนั้น)
 - API: POST/DELETE `/api/marketing/work-jobs/[id]/task` (ส่งเข้า / เลิกผูก — เลิกผูกยังไม่มีปุ่ม)
 
+### 🌐 โหมดภาษาอังกฤษ (2026-10-20)
+- เจ้าของขอ "ขอโหมดภาษาอังกฤษด้วย" (ทีมพม่าอ่านไทยไม่คล่อง) → ใช้ระบบภาษากลางเดิม (`useT()` / `tr()` จาก `components/i18n` · `lib/lang`) **ไม่ทำระบบใหม่**
+- ปุ่ม **TH / EN** ที่หัวหน้า (ข้าง 🏷️ ตั้งค่าป้าย) — ตัวเดียวกับเมนูโปรไฟล์ · จำในเครื่อง/เบราว์เซอร์นั้น (localStorage `erp-lang`) · ใช้กับทุกหน้าที่รองรับ
+- แปลข้อความระบบทั้ง 3 มุมมอง + ป๊อป (สร้าง/แก้ไขงาน · ตั้งค่าป้าย · ป้ายเสริม · สี/แบบ · ＋ เพิ่มรุ่น · หมายเหตุ · 📝 จดหมายเหตุ/⚠️ ติดปัญหา · ยืนยันต่าง ๆ) · ชื่อสีในป๊อปสีใช้ `skus_v2.color` (อังกฤษ) เมื่อเป็น EN (API variants ส่ง `color_en`)
+- แบบงานตั้งต้น: `JOB_KINDS` มี `label_en / defaultName_en / steps_en` → คนใช้ EN สร้างงานใหม่ ได้ชื่อ/ขั้นตอนตั้งต้นเป็นอังกฤษ (เซิร์ฟเวอร์ยังใช้ไทย) · helper `kindLabel / kindDefaultName / kindSteps / shortDate`
+- ของกลางที่ได้ 2 ภาษาไปด้วย (ทุกหน้าที่ใช้): MiniTable · BulkActionBar · GalleryColumns · SearchableSelect · ERPModal/ConfirmDialog/Drawer (ข้อความระบบ) · Master pickers (`components/pickers/master.tsx` — config `label_en / emptyLabel_en / searchPlaceholder_en`) · MarketingSkuPickerModal · ParentWebDrawer (กรอบ) · CommentThread (กล่องความคิดเห็น)
+- **ไม่แปล (ข้อมูลที่คนพิมพ์):** ชื่อสินค้า · ชื่องาน · ชื่อขั้นตอน · ชื่อป้าย/ป้ายเสริม (ตาราง `marketing_sku_labels` ไม่มีช่องชื่ออังกฤษ) · หมายเหตุ · ข้อความ error ที่มาจากเซิร์ฟเวอร์ (API ตอบไทย)
+
 ## ยังไม่ทำ
 - โหมดทำงาน ก้อนถัดไป: หน้าตั้งค่า "แบบงาน" (ขั้นตอนตั้งต้นแก้เองได้) · ผู้รับผิดชอบรายขั้นตอน · แจ้งเตือนใกล้ครบกำหนด
 - ยอดขาย/ออเดอร์ 7·30 วัน ต่อรุ่น (ต้องผูกรหัส Shopee ↔ SKU ก่อน — ตอนนี้ผูกแล้ว 0)

@@ -14,6 +14,8 @@ import { Pager } from "@/components/pager";
 import { useViewPref } from "@/lib/use-view-pref";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import type { MarketingBrand, MarketingSkuItem, MarketingSkuLabel } from "@/lib/marketing/sku-list";
 
 export type SkuPickerItem = MarketingSkuItem & { category_id?: string | null };
@@ -36,15 +38,17 @@ const TABS = ["mkt", "list"] as const;
 const ALL = "__all";
 const NONE = "__none";
 const PAGE_SIZE = 60;
-const TAKEN_DEFAULT: SkuPickerTakenText = { badge: "เพิ่มแล้ว", short: "เพิ่มแล้ว", hide: "ซ่อนที่เพิ่มแล้ว", row: "✓ อยู่แล้ว" };
+// ค่าเริ่มต้นตามภาษาที่เลือก (เรียกตอน render — ผู้เรียกส่งคำของตัวเองมาแทนได้)
+const takenDefault = (t: (th: string, en: string) => string): SkuPickerTakenText =>
+  ({ badge: t("เพิ่มแล้ว", "Added"), short: t("เพิ่มแล้ว", "Added"), hide: t("ซ่อนที่เพิ่มแล้ว", "Hide added"), row: t("✓ อยู่แล้ว", "✓ Added") });
 
 const chip = (on: boolean) =>
   `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`;
 
 export function MarketingSkuPickerModal({
-  open, onClose, title, description = "ติ๊กได้หลายรุ่น (จำข้ามแท็บ/ข้ามหน้า) แล้วกดยืนยันทีเดียว",
-  load, takenIds, taken = TAKEN_DEFAULT, startBrandId = null, warn, footerExtra,
-  confirmText, busyText = "กำลังบันทึก…", onConfirm, tabPrefKey, colsPrefKey, showFullPageLink = true,
+  open, onClose, title, description: descriptionProp,
+  load, takenIds, taken: takenProp, startBrandId = null, warn, footerExtra,
+  confirmText, busyText: busyTextProp, onConfirm, tabPrefKey, colsPrefKey, showFullPageLink = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -71,6 +75,10 @@ export function MarketingSkuPickerModal({
   colsPrefKey: string;
   showFullPageLink?: boolean;
 }) {
+  const t = useT();
+  const description = descriptionProp ?? t("ติ๊กได้หลายรุ่น (จำข้ามแท็บ/ข้ามหน้า) แล้วกดยืนยันทีเดียว", "Tick as many models as you like (kept across tabs/pages), then confirm once");
+  const taken = takenProp ?? takenDefault(t);
+  const busyText = busyTextProp ?? t("กำลังบันทึก…", "Saving…");
   const { view: tab, setView: setTab, saveDefault } = useViewPref(tabPrefKey, TABS, "mkt");
   const [cat, setCatalog] = useState<SkuPickerCatalog | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -92,7 +100,7 @@ export function MarketingSkuPickerModal({
       setCatalog(c);
       setBrand(c.startBrandId ?? startBrandId ?? ALL);
     } catch (e) {
-      setErr(e instanceof Error && e.message ? e.message : "โหลดรายการสินค้าไม่สำเร็จ");
+      setErr(e instanceof Error && e.message ? e.message : tr("โหลดรายการสินค้าไม่สำเร็จ", "Couldn't load the product list"));
     }
   }, [load, startBrandId]);
   useEffect(() => {
@@ -188,16 +196,16 @@ export function MarketingSkuPickerModal({
     return (
       <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 min-w-0">
         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: l?.color || "#cbd5e1" }} />
-        <span className="truncate">{l?.name ?? "ยังไม่ติดป้าย"}</span>
+        <span className="truncate">{l?.name ?? t("ยังไม่ติดป้าย", "No label yet")}</span>
       </span>
     );
   };
   const colors = (i: SkuPickerItem) => (
-    <span className={`text-[11px] whitespace-nowrap ${i.sku_total && i.sku_active < i.sku_total / 2 ? "text-amber-700" : "text-slate-500"}`} title="สี/แบบที่ยังเปิดใช้ / ทั้งหมด">
+    <span className={`text-[11px] whitespace-nowrap ${i.sku_total && i.sku_active < i.sku_total / 2 ? "text-amber-700" : "text-slate-500"}`} title={t("สี/แบบที่ยังเปิดใช้ / ทั้งหมด", "Active colors/variants / total")}>
       🎨 {i.sku_active}/{i.sku_total}
     </span>
   );
-  const brandName = (id: string) => (id === ALL ? "ทุกแบรนด์" : id === NONE ? "ไม่มีแบรนด์" : brandMap.get(id)?.name ?? "?");
+  const brandName = (id: string) => (id === ALL ? t("ทุกแบรนด์", "All brands") : id === NONE ? t("ไม่มีแบรนด์", "No brand") : brandMap.get(id)?.name ?? "?");
   const brandOrder = [...brandCount.entries()].filter(([k]) => k !== NONE).sort((a, b) => b[1] - a[1]).map(([k]) => k);
   const listCols = "grid-cols-[28px_40px_minmax(0,1fr)_9rem_4.5rem_5.5rem]";
 
@@ -213,17 +221,17 @@ export function MarketingSkuPickerModal({
         <div className="flex w-full flex-wrap items-center gap-2">
           <div className="flex-1 min-w-[12rem]">
             <p className="text-sm font-medium text-slate-800">
-              {sel.size ? `เลือกแล้ว ${sel.size} รุ่น` : "ยังไม่ได้เลือก"}
+              {sel.size ? t(`เลือกแล้ว ${sel.size} รุ่น`, `${sel.size} models selected`) : t("ยังไม่ได้เลือก", "Nothing selected")}
               {sel.size > 0 && <span className="font-normal text-slate-500"> · {selItems.slice(0, 6).map((i) => i.code).join(", ")}{sel.size > 6 ? "…" : ""}</span>}
               {sel.size > 0 && (
                 <button type="button" onClick={() => setSel(new Set())} className="ml-2 text-xs text-slate-400 hover:text-rose-600">
-                  ล้าง
+                  {t("ล้าง", "Clear")}
                 </button>
               )}
             </p>
             {warn && warnItems.length > 0 && (
               <p className="text-[11px] text-amber-700">
-                ⚠️ {warnItems.length} รุ่นติดป้าย {[...new Set(warnItems.map((i) => labelMap.get(i.label_id!)?.name))].join(" / ")} ({warnItems.slice(0, 4).map((i) => i.code).join(", ")}) — {warn.note}
+                ⚠️ {t(`${warnItems.length} รุ่นติดป้าย`, `${warnItems.length} models labelled`)} {[...new Set(warnItems.map((i) => labelMap.get(i.label_id!)?.name))].join(" / ")} ({warnItems.slice(0, 4).map((i) => i.code).join(", ")}) — {warn.note}
               </p>
             )}
           </div>
@@ -238,7 +246,7 @@ export function MarketingSkuPickerModal({
         <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {err}{" "}
           <button type="button" onClick={() => void doLoad()} className="underline">
-            ลองใหม่
+            {t("ลองใหม่", "Try again")}
           </button>
         </div>
       ) : !cat ? (
@@ -251,22 +259,22 @@ export function MarketingSkuPickerModal({
         <div className="space-y-3">
           {/* แท็บ + ลิงก์หน้าเต็ม */}
           <div className="flex items-end gap-1 border-b border-slate-200">
-            {TABS.map((t) => (
+            {TABS.map((tb) => (
               <button
-                key={t}
+                key={tb}
                 type="button"
                 onClick={() => {
-                  setTab(t);
-                  void saveDefault(t);
+                  setTab(tb);
+                  void saveDefault(tb);
                 }}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === t ? "border-slate-900 font-medium text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === tb ? "border-slate-900 font-medium text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800"}`}
               >
-                {t === "mkt" ? "🎯 SKU การตลาด" : "☰ รายการสินค้า"}
+                {tb === "mkt" ? t("🎯 SKU การตลาด", "🎯 Marketing SKUs") : t("☰ รายการสินค้า", "☰ Product list")}
               </button>
             ))}
             {showFullPageLink && (
               <a href="/marketing/skus" target="_blank" rel="noopener" className="ml-auto pb-2 text-xs text-blue-600 hover:underline">
-                เปิดหน้า SKU การตลาดเต็ม ↗
+                {t("เปิดหน้า SKU การตลาดเต็ม ↗", "Open full Marketing SKUs page ↗")}
               </a>
             )}
           </div>
@@ -275,7 +283,7 @@ export function MarketingSkuPickerModal({
           {tab === "mkt" ? (
             <>
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                แบรนด์:
+                {t("แบรนด์:", "Brand:")}
                 {brandOrder.map((id) => (
                   <button key={id} type="button" className={chip(brand === id)} onClick={() => setBrand(id)}>
                     {brandMap.get(id)?.color && <span className="w-2 h-2 rounded-full" style={{ background: brandMap.get(id)!.color! }} />}
@@ -284,16 +292,16 @@ export function MarketingSkuPickerModal({
                 ))}
                 {brandCount.has(NONE) && (
                   <button type="button" className={chip(brand === NONE)} onClick={() => setBrand(NONE)}>
-                    ไม่มีแบรนด์ {brandCount.get(NONE)}
+                    {t("ไม่มีแบรนด์", "No brand")} {brandCount.get(NONE)}
                   </button>
                 )}
                 <button type="button" className={chip(brand === ALL)} onClick={() => setBrand(ALL)}>
-                  ทุกแบรนด์
+                  {t("ทุกแบรนด์", "All brands")}
                 </button>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <button type="button" className={chip(label === ALL)} onClick={() => setLabel(ALL)}>
-                  ทั้งหมด <b className="font-medium">{inBrand.length}</b>
+                  {t("ทั้งหมด", "All")} <b className="font-medium">{inBrand.length}</b>
                   <span className="text-[10px] opacity-60">· {taken.short} {inBrand.filter((i) => onShop.has(i.parent_sku_id)).length}</span>
                 </button>
                 {cat.labels
@@ -307,7 +315,7 @@ export function MarketingSkuPickerModal({
                   ))}
                 {labelStats.has(NONE) && (
                   <button type="button" className={chip(label === NONE)} onClick={() => setLabel(NONE)}>
-                    ยังไม่ติดป้าย <b className="font-medium">{labelStats.get(NONE)!.n}</b>
+                    {t("ยังไม่ติดป้าย", "No label yet")} <b className="font-medium">{labelStats.get(NONE)!.n}</b>
                   </button>
                 )}
               </div>
@@ -315,29 +323,29 @@ export function MarketingSkuPickerModal({
           ) : (
             <div className="flex flex-wrap gap-2">
               <select value={brand} onChange={(e) => setBrand(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
-                <option value={ALL}>ทุกแบรนด์</option>
+                <option value={ALL}>{t("ทุกแบรนด์", "All brands")}</option>
                 {brandOrder.map((id) => (
                   <option key={id} value={id}>
                     {brandName(id)} ({brandCount.get(id)})
                   </option>
                 ))}
-                {brandCount.has(NONE) && <option value={NONE}>ไม่มีแบรนด์</option>}
+                {brandCount.has(NONE) && <option value={NONE}>{t("ไม่มีแบรนด์", "No brand")}</option>}
               </select>
               {hasCategories && (
                 <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
-                  <option value={ALL}>ทุกหมวด</option>
+                  <option value={ALL}>{t("ทุกหมวด", "All categories")}</option>
                   {cat.categories!.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
                   ))}
-                  <option value={NONE}>ไม่มีหมวด</option>
+                  <option value={NONE}>{t("ไม่มีหมวด", "No category")}</option>
                 </select>
               )}
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นรหัส หรือ ชื่อ เช่น BPU04, Nikita" className="h-9 flex-1 min-w-[12rem] rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นรหัส หรือ ชื่อ เช่น BPU04, Nikita", "Search code or name e.g. BPU04, Nikita")} className="h-9 flex-1 min-w-[12rem] rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400" />
             <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
               <input type="checkbox" checked={hideOn} onChange={(e) => setHideOn(e.target.checked)} className="w-4 h-4 accent-blue-600" />
               {taken.hide}
@@ -345,14 +353,14 @@ export function MarketingSkuPickerModal({
             {tab === "mkt" && <GalleryColumnsControl as="select" cols={cols} onChange={setCols} />}
             {pageSelectable.length > 0 && (
               <button type="button" onClick={togglePage} className="text-xs text-blue-600 hover:underline">
-                {pageAllOn ? "เอาติ๊กหน้านี้ออก" : `ติ๊กทั้งหน้านี้ (${pageSelectable.length})`}
+                {pageAllOn ? t("เอาติ๊กหน้านี้ออก", "Untick this page") : t(`ติ๊กทั้งหน้านี้ (${pageSelectable.length})`, `Tick this page (${pageSelectable.length})`)}
               </button>
             )}
           </div>
 
           {/* รายการ */}
           {!filtered.length ? (
-            <p className="py-10 text-center text-sm text-slate-400">ไม่พบสินค้า ลองเปลี่ยนป้าย/แบรนด์ หรือคำค้น</p>
+            <p className="py-10 text-center text-sm text-slate-400">{t("ไม่พบสินค้า ลองเปลี่ยนป้าย/แบรนด์ หรือคำค้น", "No products found — try another label/brand or search")}</p>
           ) : tab === "mkt" ? (
             <div className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ ["--cols" as string]: cols } as React.CSSProperties}>
               {pageRows.map((i) => {
@@ -401,11 +409,11 @@ export function MarketingSkuPickerModal({
           ) : (
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <div className={`grid ${listCols} items-center gap-2 border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500`}>
-                <input type="checkbox" checked={pageAllOn} onChange={togglePage} className="w-4 h-4 accent-blue-600" aria-label="ติ๊กทั้งหน้า" />
+                <input type="checkbox" checked={pageAllOn} onChange={togglePage} className="w-4 h-4 accent-blue-600" aria-label={t("ติ๊กทั้งหน้า", "Tick whole page")} />
                 <span />
-                <span>รุ่น</span>
-                <span>ป้ายการตลาด</span>
-                <span>สีเหลือ</span>
+                <span>{t("รุ่น", "Model")}</span>
+                <span>{t("ป้ายการตลาด", "Marketing label")}</span>
+                <span>{t("สีเหลือ", "Colors left")}</span>
                 <span>{taken.short}</span>
               </div>
               {pageRows.map((i) => {
@@ -439,7 +447,7 @@ export function MarketingSkuPickerModal({
               })}
             </div>
           )}
-          {filtered.length > PAGE_SIZE && <Pager page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} unitLabel="รุ่น" />}
+          {filtered.length > PAGE_SIZE && <Pager page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} unitLabel={t("รุ่น", "models")} />}
         </div>
       )}
     </ERPModal>

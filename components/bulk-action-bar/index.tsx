@@ -17,8 +17,9 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/components/i18n";
 
-export function BulkActionBar({ count, unit = "รายการ", onClear, extra, children }: {
+export function BulkActionBar({ count, unit: unitProp, onClear, extra, children }: {
   /** จำนวนที่เลือก (0 = ซ่อน) */
   count: number;
   /** หน่วยนับ เช่น "รุ่น" "ใบ" */
@@ -30,6 +31,8 @@ export function BulkActionBar({ count, unit = "รายการ", onClear, ext
   /** ปุ่มคำสั่ง (ชิดขวา) */
   children?: ReactNode;
 }) {
+  const t = useT();
+  const unit = unitProp ?? t("รายการ", "items");
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   if (count <= 0) return null;
@@ -38,17 +41,17 @@ export function BulkActionBar({ count, unit = "รายการ", onClear, ext
     <>
       <div aria-hidden className="h-52 xl:h-24" />
       {mounted && createPortal(
-        <div role="region" aria-label="คำสั่งสำหรับรายการที่เลือก"
+        <div role="region" aria-label={t("คำสั่งสำหรับรายการที่เลือก", "Actions for selected items")}
           className="fixed inset-x-0 z-40 flex justify-center px-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] xl:bottom-5 pointer-events-none">
           <div className="pointer-events-auto flex w-full max-w-4xl flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-slate-700 bg-slate-900/95 px-4 py-2.5 text-white shadow-2xl shadow-slate-900/30 backdrop-blur animate-[bulkbar-in_.18s_ease-out]">
             <span className="inline-flex items-center gap-2 text-sm font-semibold">
               <span className="flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs">{count.toLocaleString("th-TH")}</span>
-              {unit}ที่เลือก
+              {t(`${unit}ที่เลือก`, `${unit} selected`)}
             </span>
             {extra && <span className="text-xs text-slate-300">{extra}</span>}
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {children}
-              <button type="button" onClick={onClear} title="ล้างที่เลือก" aria-label="ล้างที่เลือก"
+              <button type="button" onClick={onClear} title={t("ล้างที่เลือก", "Clear selection")} aria-label={t("ล้างที่เลือก", "Clear selection")}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 hover:bg-white/10 hover:text-white">✕</button>
             </div>
           </div>

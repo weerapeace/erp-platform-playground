@@ -24,6 +24,7 @@
  *   />
  */
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useT } from "@/components/i18n";
 
 export type MiniColumn<T> = {
   key: string;
@@ -87,14 +88,20 @@ type Dir = "asc" | "desc";
 
 export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
-    rows, columns, rowKey, searchText, searchPlaceholder = "ค้นหา…", searchValue, onSearchChange,
-    groupBy, groupLabel = "จัดกลุ่ม", defaultGrouped = true, groupOrder,
+    rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange,
+    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder,
     selectable, selected, onSelectedChange, onRowClick,
-    title, actions, countUnit = "รายการ",
-    emptyText = "ไม่มีข้อมูล", noMatchText,
+    title, actions, countUnit: countUnitProp,
+    emptyText: emptyTextProp, noMatchText,
     dense, maxHeightClass = "", className = "", footnote,
     resizable, storageKey,
   } = props;
+  // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
+  const t = useT();
+  const searchPlaceholder = searchPlaceholderProp ?? t("ค้นหา…", "Search…");
+  const groupLabel = groupLabelProp ?? t("จัดกลุ่ม", "Group");
+  const countUnit = countUnitProp ?? t("รายการ", "items");
+  const emptyText = emptyTextProp ?? t("ไม่มีข้อมูล", "No data");
 
   const sortable = columns.filter((c) => c.sortValue);
   const [qInner, setQInner] = useState("");
@@ -159,10 +166,11 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const groups = useMemo<{ name: string; rows: T[] }[]>(() => {
     if (!groupBy || !grouped) return [{ name: "", rows: sorted }];
     const map = new Map<string, T[]>();
-    for (const r of sorted) { const g = groupBy(r) || "ไม่ระบุ"; (map.get(g) ?? map.set(g, []).get(g)!).push(r); }
+    const none = t("ไม่ระบุ", "Unspecified");
+    for (const r of sorted) { const g = groupBy(r) || none; (map.get(g) ?? map.set(g, []).get(g)!).push(r); }
     return [...map.entries()].map(([name, rs]) => ({ name, rows: rs }))
       .sort((a, b) => (groupOrder ? groupOrder(a.name) - groupOrder(b.name) : 0) || a.name.localeCompare(b.name, "th"));
-  }, [sorted, groupBy, grouped, groupOrder]);
+  }, [sorted, groupBy, grouped, groupOrder, t]);
 
   // คลิกหัวคอลัมน์เพื่อเรียง (เฉพาะคอลัมน์ที่มี sortValue) — สลับ asc/desc
   const toggleSort = (key: string) => {
@@ -191,13 +199,13 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       {columns.map((c) => {
         const canSort = !!c.sortValue;
         const active = sortKey === c.key;
-        const handle = resizable ? <span onMouseDown={startResize(c.key)} title="ลากเพื่อปรับความกว้าง" className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-rose-300/70" /> : null;
+        const handle = resizable ? <span onMouseDown={startResize(c.key)} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-rose-300/70" /> : null;
         const wrapCls = `flex items-center gap-1 ${resizable ? "relative overflow-hidden pr-2" : ""} ${alignCls(c.align)}`;
         const head = resizable ? <span className="truncate">{c.header}</span> : c.header;   // truncate เฉพาะตอน resizable (กันกระทบตารางเดิม)
         if (!canSort) return <span key={c.key} className={wrapCls}>{head}{handle}</span>;
         return (
           <span key={c.key} className={wrapCls}>
-            <button type="button" onClick={() => toggleSort(c.key)} title="คลิกเพื่อเรียง" className={`inline-flex items-center gap-1 min-w-0 hover:text-slate-900 ${active ? "text-rose-600" : ""}`}>
+            <button type="button" onClick={() => toggleSort(c.key)} title={t("คลิกเพื่อเรียง", "Click to sort")} className={`inline-flex items-center gap-1 min-w-0 hover:text-slate-900 ${active ? "text-rose-600" : ""}`}>
               {head}
               <span className="text-[9px] leading-none shrink-0">{active ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
             </button>
@@ -248,21 +256,21 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
           {sortable.length > 0 && (
             <>
               <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600">
-                <option value="">เรียง: ลำดับเดิม</option>
-                {sortable.map((c) => <option key={c.key} value={c.key}>เรียง: {c.sortLabel ?? (typeof c.header === "string" ? c.header : c.key)}</option>)}
+                <option value="">{t("เรียง: ลำดับเดิม", "Sort: original order")}</option>
+                {sortable.map((c) => <option key={c.key} value={c.key}>{t("เรียง:", "Sort:")} {c.sortLabel ?? (typeof c.header === "string" ? c.header : c.key)}</option>)}
               </select>
               {sortKey && (
-                <button onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))} title="สลับทิศ" className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-500">{dir === "asc" ? "▲ น้อย→มาก" : "▼ มาก→น้อย"}</button>
+                <button onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))} title={t("สลับทิศ", "Reverse")} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-500">{dir === "asc" ? t("▲ น้อย→มาก", "▲ Low→High") : t("▼ มาก→น้อย", "▼ High→Low")}</button>
               )}
             </>
           )}
           {groupBy && (
             <button onClick={() => setGrouped((g) => !g)} className={`h-8 px-3 text-sm rounded-lg border ${grouped ? "bg-rose-50 border-rose-200 text-rose-600" : "bg-white border-slate-200 text-slate-500"}`}>
-              {grouped ? `▦ ${groupLabel}` : "▤ ไม่จัดกลุ่ม"}
+              {grouped ? `▦ ${groupLabel}` : t("▤ ไม่จัดกลุ่ม", "▤ No grouping")}
             </button>
           )}
           {resizable && Object.keys(widths).length > 0 && (
-            <button onClick={resetWidths} title="คืนความกว้างคอลัมน์เป็นค่าเริ่มต้น" className="h-8 px-2 text-xs text-slate-400 hover:text-slate-600 underline">รีเซ็ตความกว้าง</button>
+            <button onClick={resetWidths} title={t("คืนความกว้างคอลัมน์เป็นค่าเริ่มต้น", "Reset column widths to default")} className="h-8 px-2 text-xs text-slate-400 hover:text-slate-600 underline">{t("รีเซ็ตความกว้าง", "Reset widths")}</button>
           )}
         </div>
       )}
@@ -270,7 +278,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       {total === 0 ? (
         <div className="text-center py-16 text-slate-300">{emptyText}</div>
       ) : shown === 0 ? (
-        <div className="text-center py-16 text-slate-300">{noMatchText ? noMatchText(q) : `ไม่พบรายการที่ตรงกับ “${q}”`}</div>
+        <div className="text-center py-16 text-slate-300">{noMatchText ? noMatchText(q) : t(`ไม่พบรายการที่ตรงกับ “${q}”`, `Nothing matches “${q}”`)}</div>
       ) : (
         <div className="border border-slate-200 rounded-xl overflow-hidden">
           {HeaderCell}

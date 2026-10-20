@@ -26,7 +26,7 @@ export type MarketingBrand = { id: string; name: string; color: string | null };
 
 /** SKU ย่อย (สี/แบบ) ของรุ่น — "SKU ที่เหลือ" = เปิดในระบบ (is_active) และการตลาดไม่ได้ปิด (mk_off)
  *  mk_off = ทีมการตลาดปิดสีนี้เฉพาะหน้าการตลาด (สียังขาย/สั่งซื้อ/ผลิตได้ปกติ) */
-export type MarketingSkuVariant = { id?: string; code: string; color: string | null; is_active: boolean; image_key: string | null; mk_off?: boolean };
+export type MarketingSkuVariant = { id?: string; code: string; color: string | null; color_en?: string | null; is_active: boolean; image_key: string | null; mk_off?: boolean };
 
 export type MarketingSkuItem = {
   parent_sku_id: string;

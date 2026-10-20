@@ -11,13 +11,14 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/components/i18n";
 
 export type SelectOption = { value: string; label: string; badge?: string; sub?: string; searchText?: string };
 
 type Pos = { left: number; top: number; width: number; openUp: boolean };
 
 export function SearchableSelect({
-  value, options, onChange, placeholder = "— เลือก —", disabled, className, onCreate, createLabel = "เพิ่มใหม่", initialQuery,
+  value, options, onChange, placeholder: placeholderProp, disabled, className, onCreate, createLabel: createLabelProp, initialQuery,
 }: {
   value: string;
   options: SelectOption[];
@@ -31,6 +32,9 @@ export function SearchableSelect({
   /** เปิด dropdown มาพร้อมคำค้นตั้งต้น (เช่น ดึงชื่อจากหมายเหตุ) — ผู้ใช้ลบ/แก้ได้ */
   initialQuery?: string;
 }) {
+  const t = useT();
+  const placeholder = placeholderProp ?? t("— เลือก —", "— Select —");
+  const createLabel = createLabelProp ?? t("เพิ่มใหม่", "Add new");
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const openMenu = () => { setQ(initialQuery ?? ""); setOpen(true); };   // seed คำค้นทุกครั้งที่เปิด
@@ -86,11 +90,11 @@ export function SearchableSelect({
           <div className="fixed z-[1001] bg-white border border-slate-200 rounded-lg shadow-xl"
             style={{ left: pos.left, top: pos.top, width: pos.width, transform: pos.openUp ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
             <div className="p-2 border-b border-slate-100">
-              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา…"
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหา…", "Search…")}
                 className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div className="max-h-60 overflow-y-auto py-1">
-              {filtered.length === 0 && !onCreate && <div className="px-3 py-2 text-xs text-slate-400">ไม่พบรายการ</div>}
+              {filtered.length === 0 && !onCreate && <div className="px-3 py-2 text-xs text-slate-400">{t("ไม่พบรายการ", "No matches")}</div>}
               {filtered.map((o) => (
                 <button key={o.value} type="button"
                   onClick={() => { onChange(o.value); close(); }}

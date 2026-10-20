@@ -9,7 +9,9 @@
  *   - บางรุ่นไม่ต้องทำบางขั้นตอน → ตั้ง "ไม่ต้องทำ" รายรุ่น (step_skip) — ไม่นับในความคืบหน้า
  *   - ส่งเข้า Task Manager ได้ (งาน Creative 1 ใบ ผูกด้วย creative_task_id) → % ความคืบหน้า + สถานะ ซิงก์ไปที่การ์ดงาน
  * ตาราง: marketing_work_jobs · marketing_work_job_items
+ * 2 ภาษา: ข้อความระบบใช้ tr("ไทย","English") ของกลาง (lib/lang) — ฝั่งเซิร์ฟเวอร์ได้ไทยเสมอ
  */
+import { getLang, tr } from "@/lib/lang";
 
 export type WorkJobKind = "clearance" | "website" | "custom";
 export type WorkJobStatus = "open" | "done" | "archived";
@@ -80,13 +82,20 @@ export type WorkJobItem = {
 /** จดหมายเหตุ = ความคิดเห็นกลาง (erp_comments · components/comment-thread) — entity_type ของโหมดทำงาน */
 export const WORK_NOTE_ENTITY = { item: "marketing_work_job_item", job: "marketing_work_job" } as const;
 
-/** แบบงานตั้งต้น (ก้อนนี้ตั้งในโค้ด · ก้อนถัดไปทำหน้าตั้งค่าแบบงานเอง) */
-export const JOB_KINDS: { kind: WorkJobKind; label: string; icon: string; defaultName: string; steps: string[]; hasPrice: boolean; autoLabel: RegExp | null }[] = [
-  { kind: "clearance", label: "Clearance (ล้างสต็อก)", icon: "🏷️", defaultName: "Clearance", steps: ["ทำรูปป้ายลดราคา", "แก้ราคา Lazada", "แก้ราคา Shopee"], hasPrice: true, autoLabel: /clearance/i },
-  { kind: "website", label: "ลงเว็บไซต์", icon: "🌐", defaultName: "ลงเว็บไซต์", steps: ["ถ่ายรูปใหม่", "เขียนรายละเอียด", "ขึ้นเว็บ"], hasPrice: false, autoLabel: null },
-  { kind: "custom", label: "งานอื่น ๆ", icon: "🛠️", defaultName: "", steps: [], hasPrice: false, autoLabel: null },
+/** แบบงานตั้งต้น (ก้อนนี้ตั้งในโค้ด · ก้อนถัดไปทำหน้าตั้งค่าแบบงานเอง)
+ *  label/defaultName/steps = ไทย (เซิร์ฟเวอร์ใช้) · *_en = อังกฤษ → หน้าจอใช้ kindLabel/kindDefaultName/kindSteps (ตามภาษาที่เลือก) */
+export const JOB_KINDS: { kind: WorkJobKind; label: string; label_en: string; icon: string; defaultName: string; defaultName_en: string; steps: string[]; steps_en: string[]; hasPrice: boolean; autoLabel: RegExp | null }[] = [
+  { kind: "clearance", label: "Clearance (ล้างสต็อก)", label_en: "Clearance (stock sale)", icon: "🏷️", defaultName: "Clearance", defaultName_en: "Clearance",
+    steps: ["ทำรูปป้ายลดราคา", "แก้ราคา Lazada", "แก้ราคา Shopee"], steps_en: ["Make sale-price image", "Update Lazada price", "Update Shopee price"], hasPrice: true, autoLabel: /clearance/i },
+  { kind: "website", label: "ลงเว็บไซต์", label_en: "Website listing", icon: "🌐", defaultName: "ลงเว็บไซต์", defaultName_en: "Website",
+    steps: ["ถ่ายรูปใหม่", "เขียนรายละเอียด", "ขึ้นเว็บ"], steps_en: ["New photoshoot", "Write description", "Publish on website"], hasPrice: false, autoLabel: null },
+  { kind: "custom", label: "งานอื่น ๆ", label_en: "Other", icon: "🛠️", defaultName: "", defaultName_en: "", steps: [], steps_en: [], hasPrice: false, autoLabel: null },
 ];
 export const kindInfo = (k: WorkJobKind) => JOB_KINDS.find((x) => x.kind === k) ?? JOB_KINDS[2];
+/** ชื่อประเภทงาน / ชื่องานตั้งต้น / ขั้นตอนตั้งต้น ตามภาษาที่เลือก (หน้าจอใช้ — เรียกตอน render) */
+export const kindLabel = (k: WorkJobKind) => { const i = kindInfo(k); return tr(i.label, i.label_en); };
+export const kindDefaultName = (k: WorkJobKind) => { const i = kindInfo(k); return tr(i.defaultName, i.defaultName_en); };
+export const kindSteps = (k: WorkJobKind) => { const i = kindInfo(k); return getLang() === "en" ? i.steps_en : i.steps; };
 export const isJobKind = (v: unknown): v is WorkJobKind => v === "clearance" || v === "website" || v === "custom";
 
 export const MAX_STEPS = 20;
@@ -167,9 +176,9 @@ export function discountedPrice(base: number | null, value: number | null, unit:
 /** ส่วนลดใช้ได้ไหม: % ต้อง 0–100 · ฿ ต้องไม่เกินราคาเต็ม (ราคาเต็มสูงสุด ถ้ามีช่วง ใช้ตัวต่ำสุดตรวจ) · ติดลบไม่ได้ */
 export function discountProblem(baseMin: number | null, value: number | null, unit: DiscountUnit): string | null {
   if (value == null) return null;
-  if (!Number.isFinite(value) || value < 0) return "ส่วนลดต้องไม่ติดลบ";
-  if (unit === "percent" && value > 100) return "ลดได้ไม่เกิน 100%";
-  if (unit === "baht" && baseMin != null && value > baseMin) return "ลดเกินราคาเต็ม";
+  if (!Number.isFinite(value) || value < 0) return tr("ส่วนลดต้องไม่ติดลบ", "Discount can't be negative");
+  if (unit === "percent" && value > 100) return tr("ลดได้ไม่เกิน 100%", "Discount can't exceed 100%");
+  if (unit === "baht" && baseMin != null && value > baseMin) return tr("ลดเกินราคาเต็ม", "Discount is more than the full price");
   return null;
 }
 
@@ -230,6 +239,14 @@ export function dueState(due: string | null, today: string = localDateKey()): "o
 export function shortThaiDate(iso: string | null): string {
   if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "";
   const m = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  return `${Number(iso.slice(8, 10))} ${m[Number(iso.slice(5, 7)) - 1]}`;
+}
+
+/** วันที่สั้น ๆ ตามภาษาที่เลือก: ไทย "31 ต.ค." · อังกฤษ "31 Oct" */
+export function shortDate(iso: string | null): string {
+  if (getLang() !== "en") return shortThaiDate(iso);
+  if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "";
+  const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${Number(iso.slice(8, 10))} ${m[Number(iso.slice(5, 7)) - 1]}`;
 }
 

@@ -11,6 +11,7 @@ import { useState } from "react";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/components/footer-save";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 
@@ -29,6 +30,7 @@ export function ParentWebDrawer({ parentId, code, name, imageUrl, navIds, onNavi
   hidden?: boolean;
 }) {
   const toast = useToast();
+  const t = useT();
   const save = useFooterSaveHost();
   const [pending, setPending] = useState<{ to: string | null } | null>(null);
   const idx = parentId && navIds ? navIds.indexOf(parentId) : -1;
@@ -40,19 +42,19 @@ export function ParentWebDrawer({ parentId, code, name, imageUrl, navIds, onNavi
   };
   const openParent = () => {
     if (!parentId || !onOpenParent) return;
-    if (save.anyDirty) { toast.info("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU"); return; }
+    if (save.anyDirty) { toast.info(t("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU", "Save your changes first, then open the Parent SKU")); return; }
     onOpenParent(parentId);
   };
 
   return (
     <>
       <Drawer open={!!parentId && !hidden} onClose={() => go(null)} size="xl"
-        title={parentId ? `🛍 เว็บไซต์ — ${code || "สินค้า"}` : ""}
+        title={parentId ? `🛍 ${t("เว็บไซต์", "Website")} — ${code || t("สินค้า", "Product")}` : ""}
         description={name ? `${name}${idx >= 0 && navIds ? ` · ${idx + 1}/${navIds.length}` : ""}` : ""}
         hasUnsavedChanges={save.anyDirty}
         footer={
           <>
-            <button type="button" onClick={() => go(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">ปิด</button>
+            <button type="button" onClick={() => go(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">{t("ปิด", "Close")}</button>
             <FooterSaveButton host={save} />
           </>
         }>
@@ -68,14 +70,14 @@ export function ParentWebDrawer({ parentId, code, name, imageUrl, navIds, onNavi
                 <p className="truncate text-xs text-slate-500" title={name}>{name}</p>
               </div>
               {onOpenParent && (
-                <button type="button" onClick={openParent} title="เปิดข้อมูลสินค้าเต็ม (ทุกแท็บ)"
-                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-slate-500">📦 เปิด Parent SKU</button>
+                <button type="button" onClick={openParent} title={t("เปิดข้อมูลสินค้าเต็ม (ทุกแท็บ)", "Open the full product record (all tabs)")}
+                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-slate-500">📦 {t("เปิด Parent SKU", "Open Parent SKU")}</button>
               )}
               {navIds && navIds.length > 1 && (
                 <div className="flex shrink-0 gap-1">
-                  <button type="button" disabled={idx <= 0} onClick={() => go(navIds[idx - 1] ?? null)} title="รุ่นก่อนหน้า" aria-label="รุ่นก่อนหน้า"
+                  <button type="button" disabled={idx <= 0} onClick={() => go(navIds[idx - 1] ?? null)} title={t("รุ่นก่อนหน้า", "Previous model")} aria-label={t("รุ่นก่อนหน้า", "Previous model")}
                     className="h-8 w-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30">◀</button>
-                  <button type="button" disabled={idx < 0 || idx >= navIds.length - 1} onClick={() => go(navIds[idx + 1] ?? null)} title="รุ่นถัดไป" aria-label="รุ่นถัดไป"
+                  <button type="button" disabled={idx < 0 || idx >= navIds.length - 1} onClick={() => go(navIds[idx + 1] ?? null)} title={t("รุ่นถัดไป", "Next model")} aria-label={t("รุ่นถัดไป", "Next model")}
                     className="h-8 w-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30">▶</button>
                 </div>
               )}
@@ -88,8 +90,8 @@ export function ParentWebDrawer({ parentId, code, name, imageUrl, navIds, onNavi
       </Drawer>
       <ConfirmDialog open={!!pending} onClose={() => setPending(null)} variant="danger"
         onConfirm={() => { const to = pending?.to ?? null; setPending(null); if (to) onNavigate?.(to); else onClose(); }}
-        title="มีข้อมูลที่ยังไม่บันทึก" message="ต้องการออกโดยไม่บันทึกหรือไม่? (กด อยู่ต่อ แล้วกด 💾 บันทึก ที่แถบล่างก่อนได้)"
-        confirmText="ออกโดยไม่บันทึก" cancelText="อยู่ต่อ" />
+        title={t("มีข้อมูลที่ยังไม่บันทึก", "You have unsaved changes")} message={t("ต้องการออกโดยไม่บันทึกหรือไม่? (กด อยู่ต่อ แล้วกด 💾 บันทึก ที่แถบล่างก่อนได้)", "Leave without saving? (click Stay, then 💾 Save in the bottom bar first)")}
+        confirmText={t("ออกโดยไม่บันทึก", "Leave without saving")} cancelText={t("อยู่ต่อ", "Stay")} />
     </>
   );
 }

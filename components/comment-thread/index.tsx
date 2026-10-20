@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAuth, usePermission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";   // 2 ภาษา (สลับภาษา = รีโหลดหน้า → อ่านตอน render พอ)
 import type { Comment, CommentsResponse } from "@/app/api/comments/route";
 import type { MentionUser } from "@/app/api/mention-search/route";
 
@@ -10,11 +11,11 @@ import type { MentionUser } from "@/app/api/mention-search/route";
 
 function relTime(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60)    return "เมื่อสักครู่";
-  if (diff < 3600)  return `${Math.floor(diff/60)} นาทีที่แล้ว`;
-  if (diff < 86400) return `${Math.floor(diff/3600)} ชม.ที่แล้ว`;
-  if (diff < 86400*7) return `${Math.floor(diff/86400)} วันที่แล้ว`;
-  return new Date(iso).toLocaleDateString("th-TH", { day:"numeric", month:"short" });
+  if (diff < 60)    return tr("เมื่อสักครู่", "just now");
+  if (diff < 3600)  return tr(`${Math.floor(diff/60)} นาทีที่แล้ว`, `${Math.floor(diff/60)} min ago`);
+  if (diff < 86400) return tr(`${Math.floor(diff/3600)} ชม.ที่แล้ว`, `${Math.floor(diff/3600)} h ago`);
+  if (diff < 86400*7) return tr(`${Math.floor(diff/86400)} วันที่แล้ว`, `${Math.floor(diff/86400)} d ago`);
+  return new Date(iso).toLocaleDateString(tr("th-TH", "en-GB"), { day:"numeric", month:"short" });
 }
 
 // ---- Body renderer: highlight @mentions ----
@@ -47,7 +48,7 @@ export type CommentThreadProps = {
   maxHeight?: number;
 };
 
-export function CommentThread({ entityType, entityId, title = "💬 ความคิดเห็น", maxHeight = 400 }: CommentThreadProps) {
+export function CommentThread({ entityType, entityId, title, maxHeight = 400 }: CommentThreadProps) {
   const { user } = useAuth();
   const canView   = usePermission("comments.view");
   const canCreate = usePermission("comments.create");
@@ -79,7 +80,7 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
       const json: CommentsResponse = await res.json();
       if (json.error) throw new Error(json.error);
       setItems(json.data);
-    } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
+    } catch (err) { setError(err instanceof Error ? err.message : tr("โหลดไม่ได้", "Couldn't load")); }
     finally { setLoading(false); }
   }, [entityType, entityId, canView]);
   useEffect(() => { load(); }, [load]);
@@ -140,7 +141,7 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
       if (json.error) throw new Error(json.error);
       setDraft("");
       await load();
-    } catch (err) { setError(err instanceof Error ? err.message : "โพสไม่สำเร็จ"); }
+    } catch (err) { setError(err instanceof Error ? err.message : tr("โพสไม่สำเร็จ", "Couldn't post")); }
     finally { setPosting(false); }
   };
 
@@ -158,16 +159,16 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
       if (json.error) throw new Error(json.error);
       cancelEdit();
       await load();
-    } catch (err) { setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
+    } catch (err) { setError(err instanceof Error ? err.message : tr("บันทึกไม่สำเร็จ", "Couldn't save")); }
   };
   const remove = async (c: Comment) => {
-    if (!confirm("ลบ comment นี้?")) return;
+    if (!confirm(tr("ลบ comment นี้?", "Delete this comment?"))) return;
     try {
       const res = await apiFetch(`/api/comments?id=${c.id}&actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       await load();
-    } catch (err) { setError(err instanceof Error ? err.message : "ลบไม่สำเร็จ"); }
+    } catch (err) { setError(err instanceof Error ? err.message : tr("ลบไม่สำเร็จ", "Couldn't delete")); }
   };
 
   // keyboard nav ใน mention dropdown
@@ -197,7 +198,7 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
     <div className="bg-white border border-slate-200 rounded-xl">
       <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-700">
-          {title} <span className="text-xs font-normal text-slate-400">({items.filter(c => !c.deleted_at).length})</span>
+          {title ?? tr("💬 ความคิดเห็น", "💬 Comments")} <span className="text-xs font-normal text-slate-400">({items.filter(c => !c.deleted_at).length})</span>
         </h3>
       </div>
 
@@ -208,7 +209,7 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
         {loading ? (
           <div className="space-y-2">{[0,1].map(i => <div key={i} className="h-12 bg-slate-100 rounded animate-pulse" />)}</div>
         ) : sorted.length === 0 ? (
-          <div className="text-center py-6 text-xs text-slate-400">ยังไม่มี comment — เป็นคนแรก!</div>
+          <div className="text-center py-6 text-xs text-slate-400">{tr("ยังไม่มี comment — เป็นคนแรก!", "No comments yet — be the first!")}</div>
         ) : (
           <ul className="space-y-2">
             {sorted.map(c => {
@@ -224,11 +225,11 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
                     <div className="flex items-baseline gap-2 flex-wrap">
                       <span className="text-xs font-semibold text-slate-700">{c.user_name ?? c.user_email}</span>
                       <span className="text-[10px] text-slate-400" title={c.created_at}>{relTime(c.created_at)}</span>
-                      {c.edited && <span className="text-[10px] text-slate-400">(แก้แล้ว)</span>}
+                      {c.edited && <span className="text-[10px] text-slate-400">{tr("(แก้แล้ว)", "(edited)")}</span>}
                       {isMe && !isDeleted && canEdit && !isEditing && (
                         <>
-                          <button onClick={() => startEdit(c)} className="text-[10px] text-slate-400 hover:text-blue-600">แก้</button>
-                          <button onClick={() => remove(c)}   className="text-[10px] text-slate-400 hover:text-red-600">ลบ</button>
+                          <button onClick={() => startEdit(c)} className="text-[10px] text-slate-400 hover:text-blue-600">{tr("แก้", "Edit")}</button>
+                          <button onClick={() => remove(c)}   className="text-[10px] text-slate-400 hover:text-red-600">{tr("ลบ", "Delete")}</button>
                         </>
                       )}
                     </div>
@@ -237,8 +238,8 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
                         <textarea value={editDraft} onChange={e => setEditDraft(e.target.value)} rows={2}
                           className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
                         <div className="flex gap-1.5 mt-1">
-                          <button onClick={saveEdit} className="h-6 px-3 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">บันทึก</button>
-                          <button onClick={cancelEdit} className="h-6 px-3 text-xs text-slate-500 hover:bg-slate-50 rounded">ยกเลิก</button>
+                          <button onClick={saveEdit} className="h-6 px-3 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">{tr("บันทึก", "Save")}</button>
+                          <button onClick={cancelEdit} className="h-6 px-3 text-xs text-slate-500 hover:bg-slate-50 rounded">{tr("ยกเลิก", "Cancel")}</button>
                         </div>
                       </div>
                     ) : (
@@ -260,14 +261,14 @@ export function CommentThread({ entityType, entityId, title = "💬 ความ
             value={draft}
             onChange={e => onDraftChange(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="เขียน comment... (พิมพ์ @ เพื่อ mention, ⌘/Ctrl+Enter เพื่อส่ง)"
+            placeholder={tr("เขียน comment... (พิมพ์ @ เพื่อ mention, ⌘/Ctrl+Enter เพื่อส่ง)", "Write a comment... (type @ to mention, ⌘/Ctrl+Enter to send)")}
             rows={2}
             className="w-full px-3 py-2 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
           <div className="flex items-center gap-2 mt-2">
             <button onClick={submit} disabled={!draft.trim() || posting}
               className="h-8 px-4 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-              {posting ? "..." : "ส่ง"}
+              {posting ? "..." : tr("ส่ง", "Send")}
             </button>
             <span className="text-[10px] text-slate-400">⌘/Ctrl+Enter</span>
           </div>

@@ -9,6 +9,7 @@
 import { type CSSProperties } from "react";
 import Link from "next/link";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
+import { useT } from "@/components/i18n";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { MarketingBrand, MarketingSkuItem, MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { LabelBadge } from "./label-manager";
@@ -40,6 +41,7 @@ export function MarketingSkuGrid({
   onBadgeCreated: (badge: MarketingSkuLabel) => void;
   emptyText: React.ReactNode;
 }) {
+  const t = useT();
   if (rows.length === 0) return <div className="rounded-xl border border-slate-200 bg-white">{emptyText}</div>;
 
   // จัดกลุ่มตามป้าย ตามลำดับป้าย · ไม่มีป้ายไว้ท้าย
@@ -64,11 +66,11 @@ export function MarketingSkuGrid({
           <section key={g.key}>
             <div className={`flex items-center gap-2 ${g.key === "__all" ? "" : "mb-2"}`}>
               {canManage && g.key !== "__all" && (
-                <input type="checkbox" checked={allOn} onChange={(e) => toggle(ids, e.target.checked)} title="เลือกทั้งกลุ่ม"
+                <input type="checkbox" checked={allOn} onChange={(e) => toggle(ids, e.target.checked)} title={t("เลือกทั้งกลุ่ม", "Select the whole group")}
                   className="h-4 w-4 rounded border-slate-300" />
               )}
               {g.key !== "__all" && <LabelBadge label={g.label} />}
-              {g.key !== "__all" && <span className="text-xs text-slate-400">{g.rows.length} รุ่น</span>}
+              {g.key !== "__all" && <span className="text-xs text-slate-400">{g.rows.length} {t("รุ่น", "models")}</span>}
             </div>
             <div className="grid grid-cols-2 gap-3 sm:[grid-template-columns:var(--mk-cols)]" style={gridStyle}>
               {g.rows.map((it) => {
@@ -99,11 +101,11 @@ export function MarketingSkuGrid({
                     <div className="flex flex-1 flex-col gap-1.5 p-2.5">
                       <div className="flex items-center gap-1.5">
                         <Link href={`/master/parent-skus?open=${encodeURIComponent(it.parent_sku_id)}`} target="_blank"
-                          className="truncate text-sm font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || "(ไม่มีรหัส)"}</Link>
+                          className="truncate text-sm font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || t("(ไม่มีรหัส)", "(no code)")}</Link>
                         {showBrand && (
-                          <span className="ml-auto inline-flex min-w-0 items-center gap-1 text-[11px] text-slate-500" title={brand?.name ?? "ไม่มีแบรนด์"}>
+                          <span className="ml-auto inline-flex min-w-0 items-center gap-1 text-[11px] text-slate-500" title={brand?.name ?? t("ไม่มีแบรนด์", "No brand")}>
                             <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: brand?.color || "#cbd5e1" }} />
-                            <span className="truncate">{brand?.name ?? "ไม่มีแบรนด์"}</span>
+                            <span className="truncate">{brand?.name ?? t("ไม่มีแบรนด์", "No brand")}</span>
                           </span>
                         )}
                       </div>
@@ -117,7 +119,7 @@ export function MarketingSkuGrid({
                       </div>
                       <button type="button" disabled={!canManage} onClick={() => onEditNote(it)} title={it.note ?? ""}
                         className="truncate rounded px-1 py-0.5 text-left text-[11px] text-slate-600 enabled:hover:bg-slate-100">
-                        {it.note || (canManage ? <span className="text-slate-300">✏️ เพิ่มหมายเหตุ</span> : <span className="text-slate-300">-</span>)}
+                        {it.note || (canManage ? <span className="text-slate-300">✏️ {t("เพิ่มหมายเหตุ", "Add note")}</span> : <span className="text-slate-300">-</span>)}
                       </button>
                     </div>
                   </div>

@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import { Popover } from "@/components/popover";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 
@@ -32,6 +33,7 @@ export function BadgeEditor({ parentId, value, badges, canManage, onSaved, onCre
   /** overlay = วางทับรูป (ชิปใหญ่ขึ้นนิด มีเงา) · inline = ในตาราง */
   variant?: "overlay" | "inline";
 }) {
+  const t = useT();
   const badgeMap = useMemo(() => new Map(badges.map((b) => [b.id, b])), [badges]);
   const chips = value.map((id) => badgeMap.get(id)).filter((b): b is MarketingSkuLabel => !!b);
 
@@ -44,12 +46,12 @@ export function BadgeEditor({ parentId, value, badges, canManage, onSaved, onCre
   return (
     <Popover align="left" panelClassName="w-64 overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
       trigger={(toggle, open) => (
-        <button type="button" onClick={(e) => { e.stopPropagation(); toggle(); }} aria-expanded={open} title="กดเพื่อติด/เอาออก ป้ายเสริม"
+        <button type="button" onClick={(e) => { e.stopPropagation(); toggle(); }} aria-expanded={open} title={t("กดเพื่อติด/เอาออก ป้ายเสริม", "Click to add/remove badges")}
           className="flex max-w-full flex-wrap items-center gap-1 text-left">
           {chips.map((b) => <BadgeChip key={b.id} badge={b} size={variant === "overlay" ? "sm" : "xs"} />)}
           {chips.length === 0 && (
             <span className={`rounded-full border border-dashed px-1.5 py-px text-[10px] ${variant === "overlay" ? "border-slate-300 bg-white/90 text-slate-500 sm:opacity-0 sm:group-hover:opacity-100" : "border-slate-300 text-slate-400 hover:text-slate-600"}`}>
-              ＋ ป้ายเสริม
+              ＋ {t("ป้ายเสริม", "Badge")}
             </span>
           )}
         </button>
@@ -64,6 +66,7 @@ function BadgePanel({ parentId, value, badges, onSaved, onCreated }: {
   onSaved: (parentId: string, badgeIds: string[]) => void; onCreated: (badge: MarketingSkuLabel) => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const active = badges.filter((b) => b.is_active);
@@ -76,9 +79,9 @@ function BadgePanel({ parentId, value, badges, onSaved, onCreated }: {
     try {
       const r = await apiFetch("/api/marketing/skus/badges", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_sku_ids: [parentId], badge_ids: next, mode: "set" }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      if (!r.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Couldn't save"));
       onSaved(parentId, (j.data?.badges_by_parent?.[parentId] as string[]) ?? next);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Couldn't save")); }
     finally { setBusy(false); }
   };
 
@@ -90,22 +93,22 @@ function BadgePanel({ parentId, value, badges, onSaved, onCreated }: {
     try {
       const r = await apiFetch("/api/marketing/sku-labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "badge", name: term, color: "#0ea5e9" }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j.error) throw new Error(j.error || "สร้างป้ายไม่สำเร็จ");
+      if (!r.ok || j.error) throw new Error(j.error || t("สร้างป้ายไม่สำเร็จ", "Couldn't create the badge"));
       const badge = j.data as MarketingSkuLabel;
       onCreated(badge);
       setQ("");
       setBusy(false);
       await save([...value, badge.id]);
-      toast.success(`เพิ่มป้ายเสริม "${badge.name}" แล้ว`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างป้ายไม่สำเร็จ"); setBusy(false); }
+      toast.success(t(`เพิ่มป้ายเสริม "${badge.name}" แล้ว`, `Badge "${badge.name}" added`));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างป้ายไม่สำเร็จ", "Couldn't create the badge")); setBusy(false); }
   };
 
   return (
     <div onClick={(e) => e.stopPropagation()}>
-      <div className="px-1 pb-1.5 text-xs font-semibold text-slate-700">ป้ายเสริม <span className="font-normal text-slate-400">(ติดได้หลายป้าย)</span></div>
+      <div className="px-1 pb-1.5 text-xs font-semibold text-slate-700">{t("ป้ายเสริม", "Badges")} <span className="font-normal text-slate-400">{t("(ติดได้หลายป้าย)", "(several allowed)")}</span></div>
       <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus maxLength={60} disabled={busy}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } }}
-        placeholder="ค้นหา หรือพิมพ์คำใหม่แล้วกด Enter"
+        placeholder={t("ค้นหา หรือพิมพ์คำใหม่แล้วกด Enter", "Search, or type a new word and press Enter")}
         className="mb-1.5 h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
       <div className="max-h-60 space-y-0.5 overflow-auto">
         {shown.map((b) => {
@@ -117,12 +120,12 @@ function BadgePanel({ parentId, value, badges, onSaved, onCreated }: {
             </label>
           );
         })}
-        {shown.length === 0 && !term && <div className="px-1 py-2 text-center text-xs text-slate-400">ยังไม่มีป้ายเสริม พิมพ์คำแล้วกด Enter เพื่อสร้าง</div>}
+        {shown.length === 0 && !term && <div className="px-1 py-2 text-center text-xs text-slate-400">{t("ยังไม่มีป้ายเสริม พิมพ์คำแล้วกด Enter เพื่อสร้าง", "No badges yet — type a word and press Enter to create one")}</div>}
       </div>
       {term && !exact && (
         <button type="button" onClick={() => void create()} disabled={busy}
           className="mt-1 w-full rounded-lg border border-dashed border-blue-300 bg-blue-50 px-2 py-1.5 text-left text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-50">
-          ＋ สร้างป้ายเสริม &quot;{term}&quot; แล้วติดให้รุ่นนี้
+          ＋ {t("สร้างป้ายเสริม", "Create badge")} &quot;{term}&quot; {t("แล้วติดให้รุ่นนี้", "and add it to this model")}
         </button>
       )}
     </div>

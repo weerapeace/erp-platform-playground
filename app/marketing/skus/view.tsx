@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/toast";
+import { useT, LangToggle } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -35,11 +37,12 @@ import { kindInfo } from "@/lib/marketing/work-jobs";
 // table/grid = ดูและติดป้าย · work = 🛠 โหมดทำงาน (งานเป็นชุด + เช็กลิสต์ต่อรุ่น)
 const VIEWS = ["table", "grid", "work"] as const;
 type View = (typeof VIEWS)[number];
-const SORTS: { value: MarketingSkuSort; label: string }[] = [
-  { value: "label", label: "เรียง: ตามป้าย" },
-  { value: "code", label: "เรียง: รหัส A→Z" },
-  { value: "sku_low", label: "เรียง: SKU ที่เหลือน้อยก่อน" },
-  { value: "updated", label: "เรียง: แก้ป้าย/หมายเหตุล่าสุด" },
+// 2 ภาษา: ข้อความระบบห่อ t("ไทย","English") (ของกลาง components/i18n) · ข้อมูลที่คนพิมพ์ (ชื่อรุ่น/ป้าย/หมายเหตุ) ไม่แปล
+const sortOptions = (t: (th: string, en: string) => string): { value: MarketingSkuSort; label: string }[] => [
+  { value: "label", label: t("เรียง: ตามป้าย", "Sort: by label") },
+  { value: "code", label: t("เรียง: รหัส A→Z", "Sort: code A→Z") },
+  { value: "sku_low", label: t("เรียง: SKU ที่เหลือน้อยก่อน", "Sort: fewest SKUs left first") },
+  { value: "updated", label: t("เรียง: แก้ป้าย/หมายเหตุล่าสุด", "Sort: recently edited label/note") },
 ];
 const PAGE_SIZES = [50, 100, 200];
 const BULK_CONFIRM_AT = 20;     // เปลี่ยนป้ายเกินนี้ → ถามยืนยัน
@@ -53,6 +56,7 @@ const saveTab = (v: string) => { try { localStorage.setItem(TAB_KEY, v); } catch
 /** ตัวหน้าจอ (ไม่มีเชลล์) — สิทธิ์ส่งเข้ามาจาก page.tsx */
 export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean; canLabels: boolean }) {
   const toast = useToast();
+  const t = useT();
 
   const [data, setData] = useState<MarketingSkuListData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,10 +96,10 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
     try {
       const r = await apiFetch("/api/marketing/skus");
       const j = await r.json();
-      if (!r.ok || j.error) { setErr(j.error || "โหลดข้อมูลไม่สำเร็จ"); if (!silent) setData(null); }
+      if (!r.ok || j.error) { setErr(j.error || tr("โหลดข้อมูลไม่สำเร็จ", "Couldn't load data")); if (!silent) setData(null); }
       else setData(j.data as MarketingSkuListData);
     } catch {
-      setErr("เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่");
+      setErr(tr("เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่", "Something went wrong while loading. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -121,9 +125,9 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
     const tabs = [...brandCounts.keys()].filter((k) => k !== BRAND_NONE)
       .map((id) => ({ key: id, label: brandMap.get(id)?.name ?? "?", color: brandMap.get(id)?.color ?? null }))
       .sort((a, b) => (brandCounts.get(b.key) ?? 0) - (brandCounts.get(a.key) ?? 0) || a.label.localeCompare(b.label, "th"));
-    if (brandCounts.has(BRAND_NONE)) tabs.push({ key: BRAND_NONE, label: "ไม่มีแบรนด์", color: null });
+    if (brandCounts.has(BRAND_NONE)) tabs.push({ key: BRAND_NONE, label: t("ไม่มีแบรนด์", "No brand"), color: null });
     return tabs;
-  }, [brandCounts, brandMap]);
+  }, [brandCounts, brandMap, t]);
   // แท็บที่จำไว้หายไป (เช่น แบรนด์ถูกปิด) → กลับทุกแบรนด์
   useEffect(() => { if (data && brandTab !== BRAND_ALL && !brandCounts.has(brandTab)) setBrandTab(BRAND_ALL); }, [data, brandTab, brandCounts]);
 
@@ -150,9 +154,10 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const patch = async (body: Record<string, unknown>) => {
     const r = await apiFetch("/api/marketing/skus", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+    if (!r.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Couldn't save"));
     return j.data ?? {};
   };
+  const doneSoFar = (n: number) => (n ? t(` (สำเร็จไปแล้ว ${n} รุ่น)`, ` (${n} models already done)`) : "");
 
   const applyLabel = async (ids: string[], label_id: string | null) => {
     setBusy(true);
@@ -164,9 +169,9 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
       }
       const set = new Set(ids);
       setData((d) => d && { ...d, items: d.items.map((it) => (set.has(it.parent_sku_id) ? { ...it, label_id, updated_at: new Date().toISOString() } : it)) });
-      if (ids.length > 1) { toast.success(`เปลี่ยนป้าย ${done} รุ่นแล้ว`); setSelected(new Set()); }
+      if (ids.length > 1) { toast.success(t(`เปลี่ยนป้าย ${done} รุ่นแล้ว`, `Label changed on ${done} models`)); setSelected(new Set()); }
     } catch (e) {
-      toast.error(`${e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"}${done ? ` (สำเร็จไปแล้ว ${done} รุ่น)` : ""}`);
+      toast.error(`${e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Couldn't save")}${doneSoFar(done)}`);
     } finally {
       setBusy(false);
       void load(true);
@@ -194,13 +199,14 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
       for (let i = 0; i < ids.length; i += CHUNK) {
         const r = await apiFetch("/api/marketing/skus/badges", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_sku_ids: ids.slice(i, i + CHUNK), badge_ids: [badgeId], mode: "add" }) });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+        if (!r.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Couldn't save"));
         done += Number(j.data?.updated) || 0;
       }
-      toast.success(`ติดป้ายเสริม "${badgeMap.get(badgeId)?.name ?? ""}" ให้ ${done} รุ่นแล้ว`);
+      const bn = badgeMap.get(badgeId)?.name ?? "";
+      toast.success(t(`ติดป้ายเสริม "${bn}" ให้ ${done} รุ่นแล้ว`, `Added badge "${bn}" to ${done} models`));
       setSelected(new Set());
     } catch (e) {
-      toast.error(`${e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"}${done ? ` (สำเร็จไปแล้ว ${done} รุ่น)` : ""}`);
+      toast.error(`${e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Couldn't save")}${doneSoFar(done)}`);
     } finally {
       setBusy(false);
       void load(true);
@@ -216,25 +222,28 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
       for (let i = 0; i < ids.length; i += CHUNK) {
         const r = await apiFetch(`/api/marketing/work-jobs/${jobId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_sku_ids: ids.slice(i, i + CHUNK) }) });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok || j.error) throw new Error(j.error || "ใส่รุ่นเข้างานไม่สำเร็จ");
+        if (!r.ok || j.error) throw new Error(j.error || t("ใส่รุ่นเข้างานไม่สำเร็จ", "Couldn't add models to the job"));
         added += Number(j.data?.added) || 0; labeled += Number(j.data?.labeled) || 0;
       }
       const skipped = ids.length - added;
-      toast.success(`ใส่ ${added} รุ่นเข้างาน “${job?.name ?? ""}” แล้ว${skipped ? ` (มีอยู่แล้ว ${skipped})` : ""}${labeled ? ` · เปลี่ยนป้าย ${labeled} รุ่น` : ""} — ดูได้ที่โหมด 🛠 ทำงาน`);
+      const jn = job?.name ?? "";
+      toast.success(t(
+        `ใส่ ${added} รุ่นเข้างาน “${jn}” แล้ว${skipped ? ` (มีอยู่แล้ว ${skipped})` : ""}${labeled ? ` · เปลี่ยนป้าย ${labeled} รุ่น` : ""} — ดูได้ที่โหมด 🛠 ทำงาน`,
+        `Added ${added} models to “${jn}”${skipped ? ` (${skipped} already in it)` : ""}${labeled ? ` · label changed on ${labeled}` : ""} — see 🛠 Work mode`));
       setSelected(new Set());
       void work.reload();
     } catch (e) {
-      toast.error(`${e instanceof Error ? e.message : "ใส่รุ่นเข้างานไม่สำเร็จ"}${added ? ` (สำเร็จไปแล้ว ${added} รุ่น)` : ""}`);
+      toast.error(`${e instanceof Error ? e.message : t("ใส่รุ่นเข้างานไม่สำเร็จ", "Couldn't add models to the job")}${doneSoFar(added)}`);
     } finally {
       setBusy(false);
       if (labeled) void load(true);
     }
   };
   const jobOptions = useMemo(() => [
-    { value: "__pick", label: "🛠 ใส่ในงาน…" },
-    ...work.jobs.filter((j) => j.status === "open").map((j) => ({ value: j.id, label: j.name, badge: kindInfo(j.kind).icon, sub: `${j.item_count ?? 0} รุ่น` })),
-    { value: "__new", label: "＋ สร้างงานใหม่จากที่เลือก" },
-  ], [work.jobs]);
+    { value: "__pick", label: t("🛠 ใส่ในงาน…", "🛠 Add to job…") },
+    ...work.jobs.filter((j) => j.status === "open").map((j) => ({ value: j.id, label: j.name, badge: kindInfo(j.kind).icon, sub: t(`${j.item_count ?? 0} รุ่น`, `${j.item_count ?? 0} models`) })),
+    { value: "__new", label: t("＋ สร้างงานใหม่จากที่เลือก", "＋ New job from selection") },
+  ], [work.jobs, t]);
 
   const onActiveChange = useCallback((parentId: string, active: number) => {
     setData((d) => d && { ...d, items: d.items.map((it) => (it.parent_sku_id === parentId ? { ...it, sku_active: active } : it)) });
@@ -245,46 +254,46 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
     setBusy(true);
     try {
       await patch({ parent_sku_ids: [noteEdit.item.parent_sku_id], note: noteEdit.text });
-      toast.success("บันทึกหมายเหตุแล้ว");
+      toast.success(t("บันทึกหมายเหตุแล้ว", "Note saved"));
       setNoteEdit(null);
       void load(true);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Couldn't save")); }
     finally { setBusy(false); }
   };
 
   const labelOptions = useMemo(() => [
-    { value: "", label: "— ไม่มีป้าย —" },
+    { value: "", label: t("— ไม่มีป้าย —", "— No label —") },
     ...labels.filter((l) => l.is_active).map((l) => ({ value: l.id, label: l.name, badge: l.icon ?? undefined })),
-  ], [labels]);
+  ], [labels, t]);
   const groupOrder = useCallback((name: string) => labels.find((l) => l.name === name)?.sort_order ?? Number.MAX_SAFE_INTEGER, [labels]);
 
   // ── columns ── (เรียงด้วยเมนู "เรียง" ด้านบน — ใช้ร่วมทุกหน้า/ทั้งการ์ด)
   const columns: MiniColumn<MarketingSkuItem>[] = [
     { key: "img", header: "", width: "3.25rem", cell: (it) => <HoverImage url={r2ImageUrl(it.image_key, 96)} size={40} previewSize={320} rounded="rounded-lg" /> },
     {
-      key: "model", header: "รุ่น", width: "minmax(12rem,2fr)",
+      key: "model", header: t("รุ่น", "Model"), width: "minmax(12rem,2fr)",
       cell: (it) => (
         <div className="min-w-0">
           <Link href={`/master/parent-skus?open=${encodeURIComponent(it.parent_sku_id)}`} target="_blank"
-            className="text-sm font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || "(ไม่มีรหัส)"}</Link>
+            className="text-sm font-semibold text-slate-800 hover:text-blue-700 hover:underline">{it.code || t("(ไม่มีรหัส)", "(no code)")}</Link>
           <div className="text-xs text-slate-500 truncate" title={it.name}>{it.name}</div>
         </div>
       ),
     },
     ...(brandTab === BRAND_ALL ? [{
-      key: "brand", header: "แบรนด์", width: "minmax(7rem,1fr)",
+      key: "brand", header: t("แบรนด์", "Brand"), width: "minmax(7rem,1fr)",
       cell: (it: MarketingSkuItem) => {
         const b = it.brand_id ? brandMap.get(it.brand_id) : undefined;
         return b ? (
           <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
             <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color || "#94a3b8" }} />{b.name}
           </span>
-        ) : <span className="text-xs text-slate-400">ไม่มีแบรนด์</span>;
+        ) : <span className="text-xs text-slate-400">{t("ไม่มีแบรนด์", "No brand")}</span>;
       },
     }] : []),
-    { key: "variants", header: "SKU ที่เหลือ", width: "8rem", cell: (it) => <VariantCount parentId={it.parent_sku_id} active={it.sku_active} total={it.sku_total} canManage={canManage} onActiveChange={onActiveChange} /> },
+    { key: "variants", header: t("SKU ที่เหลือ", "SKUs left"), width: "8rem", cell: (it) => <VariantCount parentId={it.parent_sku_id} active={it.sku_active} total={it.sku_total} canManage={canManage} onActiveChange={onActiveChange} /> },
     {
-      key: "label", header: "ป้าย", width: "minmax(10rem,1.3fr)",
+      key: "label", header: t("ป้าย", "Label"), width: "minmax(10rem,1.3fr)",
       cell: (it) => canManage ? (
         <div onClick={(e) => e.stopPropagation()}>
           <SearchableSelect value={it.label_id && labelMap.has(it.label_id) ? it.label_id : ""} options={labelOptions}
@@ -294,15 +303,15 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
       ) : <LabelBadge label={it.label_id ? labelMap.get(it.label_id) : undefined} />,
     },
     {
-      key: "badges", header: "ป้ายเสริม", width: "minmax(8rem,1.2fr)",
+      key: "badges", header: t("ป้ายเสริม", "Badges"), width: "minmax(8rem,1.2fr)",
       cell: (it) => <BadgeEditor parentId={it.parent_sku_id} value={it.badge_ids} badges={badges} canManage={canManage} onSaved={onBadgesSaved} onCreated={onBadgeCreated} />,
     },
     {
-      key: "note", header: "หมายเหตุ", width: "minmax(8rem,1.5fr)",
+      key: "note", header: t("หมายเหตุ", "Note"), width: "minmax(8rem,1.5fr)",
       cell: (it) => (
         <button type="button" disabled={!canManage} onClick={(e) => { e.stopPropagation(); setNoteEdit({ item: it, text: it.note ?? "" }); }}
-          className="w-full text-left text-xs text-slate-600 truncate rounded px-1 py-0.5 enabled:hover:bg-slate-100" title={it.note ?? (canManage ? "เพิ่มหมายเหตุ" : "")}>
-          {it.note || (canManage ? <span className="text-slate-300">✏️ เพิ่มหมายเหตุ</span> : "-")}
+          className="w-full text-left text-xs text-slate-600 truncate rounded px-1 py-0.5 enabled:hover:bg-slate-100" title={it.note ?? (canManage ? t("เพิ่มหมายเหตุ", "Add note") : "")}>
+          {it.note || (canManage ? <span className="text-slate-300">✏️ {t("เพิ่มหมายเหตุ", "Add note")}</span> : "-")}
         </button>
       ),
     },
@@ -312,10 +321,11 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   const allFilteredSelected = filtered.length > 0 && filtered.every((it) => selected.has(it.parent_sku_id));
   const emptyText = (
     <div className="py-10 text-center text-sm text-slate-500">
-      {q.trim() ? `ไม่พบรุ่นที่ตรงกับ "${q.trim()}" ลองเปลี่ยนคำค้นหา` : "ไม่มีรุ่นในกลุ่มนี้"}
+      {q.trim() ? t(`ไม่พบรุ่นที่ตรงกับ "${q.trim()}" ลองเปลี่ยนคำค้นหา`, `No models match "${q.trim()}" — try another search`) : t("ไม่มีรุ่นในกลุ่มนี้", "No models in this group")}
     </div>
   );
-  const bulkLabelName = bulkAsk ? (bulkAsk.labelId ? labelMap.get(bulkAsk.labelId)?.name ?? "?" : "ไม่มีป้าย (ล้างป้าย)") : "";
+  const bulkLabelName = bulkAsk ? (bulkAsk.labelId ? labelMap.get(bulkAsk.labelId)?.name ?? "?" : t("ไม่มีป้าย (ล้างป้าย)", "No label (clear label)")) : "";
+  const nBulk = bulkAsk?.ids.length.toLocaleString("th-TH") ?? "0";
 
   return (
     <>
@@ -323,11 +333,15 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3 max-w-6xl mx-auto">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">🎯 SKU การตลาด</h1>
-            <p className="text-sm text-slate-500 mt-1">ทุกรุ่นสินค้า แยกตามแบรนด์ · ติดป้ายกลุ่มได้ 1 ป้ายต่อรุ่น</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">🎯 {t("SKU การตลาด", "Marketing SKUs")}</h1>
+            <p className="text-sm text-slate-500 mt-1">{t("ทุกรุ่นสินค้า แยกตามแบรนด์ · ติดป้ายกลุ่มได้ 1 ป้ายต่อรุ่น", "All product models by brand · 1 group label per model")}</p>
           </div>
-          <button type="button" onClick={() => setLabelMgrOpen(true)}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">🏷️ {canLabels ? "ตั้งค่าป้าย" : "ดูป้าย"}</button>
+          <div className="flex items-center gap-2">
+            {/* สลับภาษา (ของกลาง — จำในเครื่องนี้ ใช้ทุกหน้าที่รองรับ) */}
+            <LangToggle />
+            <button type="button" onClick={() => setLabelMgrOpen(true)}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">🏷️ {canLabels ? t("ตั้งค่าป้าย", "Label settings") : t("ดูป้าย", "View labels")}</button>
+          </div>
         </div>
       </div>
 
@@ -338,26 +352,26 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
           <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
             <div className="text-3xl mb-2">⚠️</div>
             <div className="text-sm text-red-700">{err}</div>
-            <button onClick={() => load()} className="mt-3 rounded-lg border border-red-200 bg-white text-red-700 px-4 py-1.5 text-sm font-medium hover:bg-red-50">ลองใหม่</button>
+            <button onClick={() => load()} className="mt-3 rounded-lg border border-red-200 bg-white text-red-700 px-4 py-1.5 text-sm font-medium hover:bg-red-50">{t("ลองใหม่", "Try again")}</button>
           </div>
         ) : items.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
             <div className="text-5xl mb-3">📦</div>
-            <h2 className="text-lg font-semibold text-slate-800">ยังไม่มีรุ่นสินค้าที่เปิดใช้งาน</h2>
-            <p className="text-sm text-slate-500 mt-1">เพิ่ม/เปิดใช้งาน Parent SKU ที่หน้าสินค้าก่อน แล้วรุ่นจะขึ้นที่นี่อัตโนมัติ</p>
+            <h2 className="text-lg font-semibold text-slate-800">{t("ยังไม่มีรุ่นสินค้าที่เปิดใช้งาน", "No active product models yet")}</h2>
+            <p className="text-sm text-slate-500 mt-1">{t("เพิ่ม/เปิดใช้งาน Parent SKU ที่หน้าสินค้าก่อน แล้วรุ่นจะขึ้นที่นี่อัตโนมัติ", "Add or activate a Parent SKU on the product page first — it will show up here automatically")}</p>
           </div>
         ) : (
           <>
             {/* แท็บแบรนด์ (โหมดทำงาน: งานรวมได้หลายแบรนด์ → ไม่ใช้แท็บ) */}
             {view !== "work" && <div className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-slate-200 -mx-4 px-4 sm:mx-0 sm:px-0">
-              {[{ key: BRAND_ALL, label: "ทุกแบรนด์", color: null as string | null }, ...brandTabs].map((t) => {
-                const on = brandTab === t.key;
-                const n = t.key === BRAND_ALL ? items.length : brandCounts.get(t.key) ?? 0;
+              {[{ key: BRAND_ALL, label: t("ทุกแบรนด์", "All brands"), color: null as string | null }, ...brandTabs].map((tab) => {
+                const on = brandTab === tab.key;
+                const n = tab.key === BRAND_ALL ? items.length : brandCounts.get(tab.key) ?? 0;
                 return (
-                  <button key={t.key} type="button" onClick={() => pickTab(t.key)}
+                  <button key={tab.key} type="button" onClick={() => pickTab(tab.key)}
                     className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 text-sm border-b-2 -mb-px transition-colors ${on ? "border-blue-600 text-blue-700 font-semibold" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
-                    {t.color && <span className="w-2 h-2 rounded-full" style={{ background: t.color }} />}
-                    {t.label}
+                    {tab.color && <span className="w-2 h-2 rounded-full" style={{ background: tab.color }} />}
+                    {tab.label}
                     <span className={`rounded-full px-1.5 text-[11px] ${on ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500"}`}>{n.toLocaleString("th-TH")}</span>
                   </button>
                 );
@@ -367,10 +381,10 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
             {/* ชิปกรองป้าย + สลับมุมมอง */}
             <div className="flex flex-wrap items-start gap-2">
               <div className="flex flex-1 flex-wrap gap-1.5">
-                {view === "work" && <span className="py-1 text-sm text-slate-500">🛠 โหมดทำงาน — จัดงานเป็นชุด (Clearance / ลงเว็บ / อื่น ๆ) แล้วติ๊กว่าแต่ละรุ่นทำถึงไหน</span>}
-                {view !== "work" && [{ key: LABEL_ALL, l: undefined as MarketingSkuLabel | undefined, text: "ทั้งหมด", n: inBrand.length },
+                {view === "work" && <span className="py-1 text-sm text-slate-500">{t("🛠 โหมดทำงาน — จัดงานเป็นชุด (Clearance / ลงเว็บ / อื่น ๆ) แล้วติ๊กว่าแต่ละรุ่นทำถึงไหน", "🛠 Work mode — group models into jobs (Clearance / Website / other), then tick how far each model has got")}</span>}
+                {view !== "work" && [{ key: LABEL_ALL, l: undefined as MarketingSkuLabel | undefined, text: t("ทั้งหมด", "All"), n: inBrand.length },
                   ...labels.map((l) => ({ key: l.id, l, text: l.name, n: labelCounts.get(l.id) ?? 0 })),
-                  { key: LABEL_NONE, l: undefined, text: "ยังไม่มีป้าย", n: labelCounts.get(LABEL_NONE) ?? 0 },
+                  { key: LABEL_NONE, l: undefined, text: t("ยังไม่มีป้าย", "No label yet"), n: labelCounts.get(LABEL_NONE) ?? 0 },
                 ].filter((c) => c.key === LABEL_ALL || c.n > 0 || labelFilter === c.key || (c.l && c.l.is_active)).map((c) => {
                   const on = labelFilter === c.key;
                   return (
@@ -384,8 +398,8 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                   );
                 })}
               </div>
-              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label="มุมมอง">
-                {([["table", "☰ ตาราง"], ["grid", "▦ การ์ด"], ["work", "🛠 ทำงาน"]] as const).map(([v, text]) => (
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("มุมมอง", "View")}>
+                {([["table", t("☰ ตาราง", "☰ Table")], ["grid", t("▦ การ์ด", "▦ Cards")], ["work", t("🛠 ทำงาน", "🛠 Work")]] as const).map(([v, text]) => (
                   <button key={v} type="button" onClick={() => pickView(v)} aria-pressed={view === v}
                     className={`h-7 rounded-md px-2.5 text-xs font-medium transition ${view === v ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{text}</button>
                 ))}
@@ -394,21 +408,21 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
 
             {/* ค้นหา / เรียง (ใช้ร่วมตาราง+การ์ด) */}
             {view !== "work" && <div className="flex flex-wrap items-center gap-2">
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหารหัส / ชื่อรุ่น / หมายเหตุ…"
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("🔍 ค้นหารหัส / ชื่อรุ่น / หมายเหตุ…", "🔍 Search code / model name / note…")}
                 className="h-9 w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <select value={sort} onChange={(e) => setSort(e.target.value as MarketingSkuSort)}
                 className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">
-                {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                {sortOptions(t).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
               {badges.length > 0 && (
-                <select value={badgeFilter} onChange={(e) => setBadgeFilter(e.target.value)} aria-label="กรองป้ายเสริม"
+                <select value={badgeFilter} onChange={(e) => setBadgeFilter(e.target.value)} aria-label={t("กรองป้ายเสริม", "Filter badges")}
                   className={`h-9 rounded-lg border px-2 text-sm ${badgeFilter ? "border-blue-400 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700"}`}>
-                  <option value="">ป้ายเสริม: ทั้งหมด</option>
+                  <option value="">{t("ป้ายเสริม: ทั้งหมด", "Badges: all")}</option>
                   {badges.map((b) => <option key={b.id} value={b.id}>{b.icon ? `${b.icon} ` : ""}{b.name} ({badgeUsage.get(b.id) ?? 0})</option>)}
-                  <option value="__none">ยังไม่มีป้ายเสริม</option>
+                  <option value="__none">{t("ยังไม่มีป้ายเสริม", "No badge yet")}</option>
                 </select>
               )}
-              <span className="text-xs text-slate-400">{filtered.length.toLocaleString("th-TH")} รุ่น</span>
+              <span className="text-xs text-slate-400">{filtered.length.toLocaleString("th-TH")} {t("รุ่น", "models")}</span>
               {view === "grid" && <GalleryColumnsControl cols={cols} onChange={setCols} className="ml-auto hidden sm:inline-flex" />}
             </div>}
 
@@ -425,13 +439,13 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 rows={pageRows}
                 columns={columns}
                 rowKey={(it) => it.parent_sku_id}
-                groupBy={sort === "label" ? (it) => labelMap.get(it.label_id ?? "")?.name ?? "ยังไม่มีป้าย" : undefined}
-                groupLabel="ป้าย"
+                groupBy={sort === "label" ? (it) => labelMap.get(it.label_id ?? "")?.name ?? t("ยังไม่มีป้าย", "No label yet") : undefined}
+                groupLabel={t("ป้าย", "Label")}
                 groupOrder={groupOrder}
                 selectable={canManage}
                 selected={selected}
                 onSelectedChange={setSelected}
-                countUnit="รุ่น"
+                countUnit={t("รุ่น", "models")}
                 storageKey="marketing-skus"
                 resizable
                 emptyText={emptyText}
@@ -440,25 +454,25 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
 
             {view !== "work" && filtered.length > PAGE_SIZES[0] && (
               <Pager page={page} pageSize={pageSize} total={filtered.length} onPage={(p) => { setPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                unitLabel="รุ่น" onPageSize={setPageSize} pageSizes={PAGE_SIZES} />
+                unitLabel={t("รุ่น", "models")} onPageSize={setPageSize} pageSizes={PAGE_SIZES} />
             )}
 
             {/* แถบคำสั่งหลายรายการ — ลอยติดขอบล่างจอ (ของกลาง) */}
             {canManage && view !== "work" && (
-              <BulkActionBar count={selIds.length} unit="รุ่น" onClear={() => setSelected(new Set())}
+              <BulkActionBar count={selIds.length} unit={t("รุ่น", "models")} onClear={() => setSelected(new Set())}
                 extra={!allFilteredSelected && filtered.length > selIds.length ? (
                   <button type="button" onClick={() => setSelected(new Set(filtered.map((it) => it.parent_sku_id)))}
-                    className="underline underline-offset-2 hover:text-white">เลือกทั้งหมด {filtered.length.toLocaleString("th-TH")} รุ่นที่กรองอยู่</button>
+                    className="underline underline-offset-2 hover:text-white">{t(`เลือกทั้งหมด ${filtered.length.toLocaleString("th-TH")} รุ่นที่กรองอยู่`, `Select all ${filtered.length.toLocaleString("th-TH")} filtered models`)}</button>
                 ) : null}>
-                <span className="text-xs text-slate-300">เปลี่ยนป้ายเป็น</span>
+                <span className="text-xs text-slate-300">{t("เปลี่ยนป้ายเป็น", "Change label to")}</span>
                 <div className="w-52 text-slate-800">
-                  <SearchableSelect value="__pick" options={[{ value: "__pick", label: "— เลือกป้าย —" }, ...labelOptions]}
+                  <SearchableSelect value="__pick" options={[{ value: "__pick", label: t("— เลือกป้าย —", "— Pick a label —") }, ...labelOptions]}
                     onChange={(v) => { if (v !== "__pick") setLabel(selIds, v || null); }} disabled={busy} />
                 </div>
                 {badges.length > 0 && (
                   <div className="w-44 text-slate-800">
                     <SearchableSelect value="__pick" disabled={busy}
-                      options={[{ value: "__pick", label: "＋ ติดป้ายเสริม" }, ...badges.filter((b) => b.is_active).map((b) => ({ value: b.id, label: b.name, badge: b.icon ?? undefined }))]}
+                      options={[{ value: "__pick", label: t("＋ ติดป้ายเสริม", "＋ Add badge") }, ...badges.filter((b) => b.is_active).map((b) => ({ value: b.id, label: b.name, badge: b.icon ?? undefined }))]}
                       onChange={(v) => { if (v !== "__pick") void addBadgeBulk(selIds, v); }} />
                   </div>
                 )}
@@ -473,18 +487,18 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
       </div>
 
       {/* หมายเหตุ */}
-      <ERPModal open={!!noteEdit} onClose={() => !busy && setNoteEdit(null)} title={`หมายเหตุ — ${noteEdit?.item.code ?? ""}`} size="sm"
+      <ERPModal open={!!noteEdit} onClose={() => !busy && setNoteEdit(null)} title={`${t("หมายเหตุ", "Note")} — ${noteEdit?.item.code ?? ""}`} size="sm"
         hasUnsavedChanges={!!noteEdit && (noteEdit.text ?? "") !== (noteEdit.item.note ?? "")}
         footer={
           <div className="flex justify-end gap-2 w-full">
-            <button onClick={() => setNoteEdit(null)} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={saveNote} disabled={busy} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+            <button onClick={() => setNoteEdit(null)} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={saveNote} disabled={busy} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
           </div>
         }>
         <textarea value={noteEdit?.text ?? ""} onChange={(e) => setNoteEdit((n) => n && { ...n, text: e.target.value })} rows={4} maxLength={500} autoFocus
-          placeholder="เช่น ดันช่วง 11.11, รอรูปใหม่, ราคาโปร ฿590"
+          placeholder={t("เช่น ดันช่วง 11.11, รอรูปใหม่, ราคาโปร ฿590", "e.g. push for 11.11, waiting for new photos, promo price ฿590")}
           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        <div className="text-right text-[11px] text-slate-400">{(noteEdit?.text ?? "").length}/500 · ลบข้อความทั้งหมดแล้วบันทึก = ลบหมายเหตุ</div>
+        <div className="text-right text-[11px] text-slate-400">{(noteEdit?.text ?? "").length}/500 · {t("ลบข้อความทั้งหมดแล้วบันทึก = ลบหมายเหตุ", "clear the text and save = delete the note")}</div>
       </ERPModal>
 
       {/* ยืนยันเปลี่ยนป้ายหลายรุ่น */}
@@ -492,15 +506,16 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
         onConfirm={async () => { if (bulkAsk) { await applyLabel(bulkAsk.ids, bulkAsk.labelId); setBulkAsk(null); } }}
         variant={bulkAsk && bulkAsk.ids.length >= BULK_TYPED_AT ? "danger" : "default"}
         requireTyped={bulkAsk && bulkAsk.ids.length >= BULK_TYPED_AT ? "CONFIRM" : undefined}
-        title={`เปลี่ยนป้าย ${bulkAsk?.ids.length.toLocaleString("th-TH") ?? 0} รุ่น?`}
-        message={`ทุกรุ่นที่เลือกจะถูกตั้งป้ายเป็น "${bulkLabelName}" (ป้ายเดิมจะถูกแทนที่ · มีประวัติให้ย้อนดูได้)`}
-        confirmText="เปลี่ยนป้าย" />
+        title={t(`เปลี่ยนป้าย ${nBulk} รุ่น?`, `Change the label on ${nBulk} models?`)}
+        message={t(`ทุกรุ่นที่เลือกจะถูกตั้งป้ายเป็น "${bulkLabelName}" (ป้ายเดิมจะถูกแทนที่ · มีประวัติให้ย้อนดูได้)`, `All selected models will get the label "${bulkLabelName}" (replaces the old label · history is kept)`)}
+        confirmText={t("เปลี่ยนป้าย", "Change label")} />
 
       {/* สร้างงานใหม่ พร้อมใส่รุ่นที่ติ๊กไว้ → พาไปโหมดทำงานที่งานนั้น */}
       <WorkJobModal open={!!newJobFor} onClose={() => setNewJobFor(null)} job={null} labels={labels} presetIds={newJobFor ?? []}
         onSaved={(job, info) => {
           setNewJobFor(null);
-          toast.success(`สร้างงาน “${job.name}” แล้ว · ใส่ ${info.added} รุ่น${info.labeled ? ` · เปลี่ยนป้าย ${info.labeled} รุ่น` : ""}`);
+          toast.success(t(`สร้างงาน “${job.name}” แล้ว · ใส่ ${info.added} รุ่น${info.labeled ? ` · เปลี่ยนป้าย ${info.labeled} รุ่น` : ""}`,
+            `Job “${job.name}” created · ${info.added} models added${info.labeled ? ` · label changed on ${info.labeled}` : ""}`));
           setSelected(new Set());
           setFocusJobId(job.id);
           pickView("work");

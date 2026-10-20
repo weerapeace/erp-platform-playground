@@ -11,6 +11,7 @@
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/components/i18n";
 
 export const GALLERY_COL_OPTIONS = [3, 4, 5, 6, 8] as const;
 export type GalleryCols = (typeof GALLERY_COL_OPTIONS)[number];
@@ -43,21 +44,22 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
 export function GalleryColumnsControl({ cols, onChange, options = GALLERY_COL_OPTIONS, className = "", as = "buttons" }: {
   cols: number; onChange: (n: GalleryCols) => void; options?: readonly GalleryCols[]; className?: string; as?: "buttons" | "select";
 }) {
+  const t = useT();
   if (as === "select") {
     return (
-      <label className={`inline-flex items-center gap-1.5 text-xs text-slate-500 ${className}`} title="จำนวนการ์ดต่อแถว">
+      <label className={`inline-flex items-center gap-1.5 text-xs text-slate-500 ${className}`} title={t("จำนวนการ์ดต่อแถว", "Cards per row")}>
         <span aria-hidden>▦</span>
         <select value={cols} onChange={(e) => onChange(Number(e.target.value) as GalleryCols)} className="h-8 rounded-lg border border-slate-200 bg-white px-1.5 text-xs text-slate-700">
-          {options.map((n) => <option key={n} value={n}>{n} ต่อแถว</option>)}
+          {options.map((n) => <option key={n} value={n}>{t(`${n} ต่อแถว`, `${n} per row`)}</option>)}
         </select>
       </label>
     );
   }
   return (
-    <div className={`inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 ${className}`} title="จำนวนการ์ดต่อแถว">
+    <div className={`inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 ${className}`} title={t("จำนวนการ์ดต่อแถว", "Cards per row")}>
       <span className="px-1 text-[13px] leading-none text-slate-400" aria-hidden>▦</span>
       {options.map((n) => (
-        <button key={n} type="button" onClick={() => onChange(n)} aria-label={`${n} การ์ดต่อแถว`} aria-pressed={cols === n}
+        <button key={n} type="button" onClick={() => onChange(n)} aria-label={t(`${n} การ์ดต่อแถว`, `${n} cards per row`)} aria-pressed={cols === n}
           className={`h-7 w-7 rounded text-xs font-medium transition ${cols === n ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{n}</button>
       ))}
     </div>

@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth, type Permission } from "@/components/auth";
 import { FloatingDropdown, PICKER_PANEL, PICKER_NAME_CLASS } from "@/components/floating-dropdown";
 import { loadRecent, pushRecent, loadFav, toggleFav, keepOnlyPicks } from "@/lib/recent-picks";   // "เคยใช้ล่าสุด" + ปักหมุด (ของกลาง)
+import { useT } from "@/components/i18n";   // 2 ภาษา: *_en ใน config (ไม่ใส่ = ใช้ไทย)
 
 // ---- Shared types ----
 
@@ -33,6 +34,10 @@ export type MasterPickerConfig<V extends MasterValue> = {
   label:          string;                  // 'ลูกค้า', 'พนักงาน', ...
   emptyLabel:     string;                  // 'ไม่พบลูกค้า'
   searchPlaceholder: string;
+  /** ภาษาอังกฤษ (โหมด EN) — เช่น label_en 'customer' (ตัวเล็ก ใช้ต่อประโยค "Select customer...") */
+  label_en?:      string;
+  emptyLabel_en?: string;
+  searchPlaceholder_en?: string;
   createPermission: Permission;            // 'customers.create'
   allowCreate?:   boolean;
   /** field ที่จะส่งไป POST ตอนสร้างใหม่ (default แค่ name) */
@@ -61,7 +66,7 @@ const IconLoader  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="
 
 export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfig<V>) {
   return function MasterPicker({
-    value, onChange, placeholder = `เลือก${cfg.label}...`, disabled, error, disableCreate, onAddNew,
+    value, onChange, placeholder: placeholderProp, disabled, error, disableCreate, onAddNew,
   }: {
     value: V | null;
     onChange: (v: V | null) => void;
@@ -77,6 +82,9 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
     onAddNew?: (query: string) => void;
   }) {
     const { can } = useAuth();
+    const t = useT();
+    const labelEn = cfg.label_en ?? cfg.label;
+    const placeholder = placeholderProp ?? t(`เลือก${cfg.label}...`, `Select ${labelEn}...`);
     const [open, setOpen]       = useState(false);
     const [query, setQuery]     = useState("");
     const [results, setResults] = useState<V[]>([]);
@@ -119,7 +127,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
       if (!open) return;
       let active = true;
       setLoading(true);
-      const t = setTimeout(async () => {
+      const timer = setTimeout(async () => {
         try {
           const endpoint = cfg.listEndpoint ?? `/api/master/${cfg.apiPath}`;
           const res = await apiFetch(`${endpoint}?search=${encodeURIComponent(query)}&limit=10`);
@@ -128,7 +136,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
         } catch { if (active) setResults([]); }
         finally { if (active) setLoading(false); }
       }, 300);
-      return () => { active = false; clearTimeout(t); };
+      return () => { active = false; clearTimeout(timer); };
     }, [query, open]);
 
     const select = useCallback((v: V) => {
@@ -177,7 +185,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
           {cfg.secondaryRender && <div className="text-xs text-slate-400 mt-0.5">{cfg.secondaryRender(v)}</div>}
         </button>
         <button type="button" onClick={(e) => onToggleFav(e, v)}
-          title={favIds.has(v.id) ? "เอาออกจากรายการโปรด" : "ปักหมุดเป็นรายการโปรด"}
+          title={favIds.has(v.id) ? t("เอาออกจากรายการโปรด", "Remove from favorites") : t("ปักหมุดเป็นรายการโปรด", "Pin as favorite")}
           className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-amber-50 ${
             favIds.has(v.id) ? "text-amber-400" : "text-slate-300 hover:text-amber-400"
           }`}>
@@ -207,7 +215,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
             <div className="p-2 border-b border-slate-100 relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconSearch /></span>
               <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
-                placeholder={cfg.searchPlaceholder}
+                placeholder={t(cfg.searchPlaceholder, cfg.searchPlaceholder_en ?? "Search...")}
                 className="w-full h-8 pl-7 pr-3 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
 
@@ -215,19 +223,19 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
               {loading ? (
                 <div className="px-3 py-4 flex items-center justify-center text-slate-400"><IconLoader /></div>
               ) : list.length === 0 && !showCreate ? (
-                <div className="px-3 py-4 text-center text-sm text-slate-400">{cfg.emptyLabel}</div>
+                <div className="px-3 py-4 text-center text-sm text-slate-400">{t(cfg.emptyLabel, cfg.emptyLabel_en ?? "No results")}</div>
               ) : query.trim() ? (
                 list.map(renderRow)
               ) : (
                 <>
-                  {favs.length > 0 && <div className="px-3 py-1 text-xs text-amber-500">★ รายการโปรด</div>}
+                  {favs.length > 0 && <div className="px-3 py-1 text-xs text-amber-500">★ {t("รายการโปรด", "Favorites")}</div>}
                   {favs.map(renderRow)}
                   {recentItems.length > 0 && (
-                    <div className="px-3 py-1 text-xs text-slate-400">⏱ เคยใช้ล่าสุด</div>
+                    <div className="px-3 py-1 text-xs text-slate-400">⏱ {t("เคยใช้ล่าสุด", "Recently used")}</div>
                   )}
                   {recentItems.map(renderRow)}
                   {defaultItems.length > 0 && (
-                    <div className="px-3 py-1 text-xs text-slate-400">รายการทั้งหมด</div>
+                    <div className="px-3 py-1 text-xs text-slate-400">{t("รายการทั้งหมด", "All")}</div>
                   )}
                   {defaultItems.map(renderRow)}
                 </>
@@ -237,7 +245,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
                 <button type="button" onClick={createNew} disabled={creating}
                   className="w-full px-3 py-2.5 flex items-center gap-2 text-sm text-blue-600 hover:bg-blue-50 border-t border-slate-100 disabled:opacity-50">
                   {creating ? <IconLoader /> : <span className="text-lg leading-none">＋</span>}
-                  สร้าง{cfg.label}ใหม่ &quot;{query.trim()}&quot;
+                  {t(`สร้าง${cfg.label}ใหม่`, `Create new ${labelEn}`)} &quot;{query.trim()}&quot;
                 </button>
               )}
 
@@ -247,7 +255,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
                   onClick={() => { setOpen(false); onAddNew(query.trim()); }}
                   className="w-full px-3 py-2.5 flex items-center gap-2 text-sm text-blue-700 bg-blue-50/60 hover:bg-blue-100 border-t border-slate-200">
                   <span className="text-lg leading-none">＋</span>
-                  เพิ่ม{cfg.label}ใหม่ <span className="text-xs text-blue-500">(กรอกข้อมูลครบ)</span>
+                  {t(`เพิ่ม${cfg.label}ใหม่`, `Add new ${labelEn}`)} <span className="text-xs text-blue-500">{t("(กรอกข้อมูลครบ)", "(full form)")}</span>
                 </button>
               )}
             </div>
@@ -272,6 +280,7 @@ export const CustomerPicker = createMasterPicker<CustomerPickerValue>({
   label:      "ลูกค้า",
   emptyLabel: "ไม่พบลูกค้า",
   searchPlaceholder: "ค้นหา รหัส / ชื่อ / เบอร์...",
+  label_en: "customer", emptyLabel_en: "No customers found", searchPlaceholder_en: "Search code / name / phone...",
   createPermission: "customers.create",
   allowCreate: false,
   secondaryRender: v => (
@@ -292,6 +301,7 @@ export const EmployeePicker = createMasterPicker<EmployeePickerValue>({
   label:      "พนักงาน",
   emptyLabel: "ไม่พบพนักงาน",
   searchPlaceholder: "ค้นหา รหัส / ชื่อ / อีเมล / แผนก...",
+  label_en: "employee", emptyLabel_en: "No employees found", searchPlaceholder_en: "Search code / name / email / department...",
   createPermission: "employees.create",
   secondaryRender: v => (
     <>
@@ -311,6 +321,7 @@ export const UserPicker = createMasterPicker<UserPickerValue>({
   label:      "ผู้ใช้",
   emptyLabel: "ไม่พบผู้ใช้ (คนที่ login ได้)",
   searchPlaceholder: "ค้นหา ชื่อ / อีเมล...",
+  label_en: "user", emptyLabel_en: "No users found (people who can log in)", searchPlaceholder_en: "Search name / email...",
   createPermission: "employees.view",
   allowCreate: false,
   verifyRecent: true,   // คนที่ปิดบัญชี/ลาออกแล้ว ไม่โผล่ใน "เคยใช้ล่าสุด/ปักหมุด"
@@ -326,6 +337,7 @@ export const WarehousePicker = createMasterPicker<WarehousePickerValue>({
   label:      "คลังสินค้า",
   emptyLabel: "ไม่พบคลังสินค้า",
   searchPlaceholder: "ค้นหา รหัส / ชื่อ / สาขา...",
+  label_en: "warehouse", emptyLabel_en: "No warehouses found", searchPlaceholder_en: "Search code / name / branch...",
   createPermission: "warehouses.create",
   secondaryRender: v => (
     <>
@@ -344,6 +356,7 @@ export const DepartmentPicker = createMasterPicker<DepartmentPickerValue>({
   label:      "แผนก",
   emptyLabel: "ไม่พบแผนก",
   searchPlaceholder: "ค้นหา รหัส / ชื่อแผนก...",
+  label_en: "department", emptyLabel_en: "No departments found", searchPlaceholder_en: "Search code / department name...",
   createPermission: "departments.create",
   secondaryRender: v => v.manager_name ? <span>👤 {v.manager_name}</span> : null,
 });
@@ -360,6 +373,7 @@ export const UnitPicker = createMasterPicker<UnitPickerValue>({
   label:      "หน่วยนับ",
   emptyLabel: "ไม่พบหน่วยนับ",
   searchPlaceholder: "ค้นหา ชื่อ / สัญลักษณ์...",
+  label_en: "unit", emptyLabel_en: "No units found", searchPlaceholder_en: "Search name / symbol...",
   createPermission: "units.create",
   badgeRender: v => v.symbol ? <span className="text-[10px] font-mono bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{v.symbol}</span> : null,
   secondaryRender: v => v.category ? <span className="text-slate-400">{UNIT_CAT_LABEL[v.category] ?? v.category}</span> : null,
@@ -380,6 +394,7 @@ export const TaxPicker = createMasterPicker<TaxPickerValue>({
   label:      "ภาษี",
   emptyLabel: "ไม่พบภาษี",
   searchPlaceholder: "ค้นหา ชื่อ / ประเภทภาษี...",
+  label_en: "tax", emptyLabel_en: "No taxes found", searchPlaceholder_en: "Search name / tax type...",
   createPermission: "taxes.create",
   badgeRender: v => v.tax_type ? <span className={`text-[10px] px-1.5 py-0.5 rounded ${TAX_COLOR[v.tax_type] ?? "bg-slate-100"}`}>{v.tax_type}</span> : null,
   secondaryRender: v => (

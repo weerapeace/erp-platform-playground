@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { Popover } from "@/components/popover";
 import { HoverImage } from "@/components/hover-image";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { MarketingSkuVariant } from "@/lib/marketing/sku-list";
@@ -21,18 +22,19 @@ export function VariantCount({ parentId, active, total, compact = false, canMana
   /** หลังกดเปิด/ปิดสี → แจ้งจำนวนที่เหลือใหม่ให้หน้ารายการอัปเดตตัวเลข */
   onActiveChange?: (parentId: string, active: number) => void;
 }) {
-  if (total === 0) return <span className="text-xs text-slate-400" title="รุ่นนี้ยังไม่มี SKU ย่อย">ไม่มี SKU ย่อย</span>;
+  const t = useT();
+  if (total === 0) return <span className="text-xs text-slate-400" title={t("รุ่นนี้ยังไม่มี SKU ย่อย", "This model has no child SKUs yet")}>{t("ไม่มี SKU ย่อย", "No child SKUs")}</span>;
 
   const tone = active === 0 ? "border-red-200 bg-red-50 text-red-700"
     : active < total ? "border-amber-200 bg-amber-50 text-amber-800"
     : "border-slate-200 bg-white text-slate-700";
-  const text = active === 0 ? "ไม่เหลือแล้ว" : `${active}/${total} แบบ`;
+  const text = active === 0 ? t("ไม่เหลือแล้ว", "None left") : t(`${active}/${total} แบบ`, `${active}/${total} variants`);
 
   return (
     <Popover align="left" panelClassName="w-80 overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
       trigger={(toggle, open) => (
         <button type="button" onClick={(e) => { e.stopPropagation(); toggle(); }} aria-expanded={open}
-          title={canManage ? "กดดู/เปิด-ปิด สี/แบบ" : "กดดูรายการสี/แบบ"}
+          title={canManage ? t("กดดู/เปิด-ปิด สี/แบบ", "Click to view / turn colors on-off") : t("กดดูรายการสี/แบบ", "Click to view colors/variants")}
           className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border font-medium ${compact ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"} ${tone} hover:brightness-95`}>
           🎨 {text}<span className="opacity-50">▾</span>
         </button>
@@ -46,6 +48,7 @@ function VariantList({ parentId, canManage, onActiveChange }: {
   parentId: string; canManage: boolean; onActiveChange?: (parentId: string, active: number) => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [variants, setVariants] = useState<MarketingSkuVariant[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);   // sku id ที่กำลังบันทึก ("__all" = ทั้งรุ่น)
@@ -54,8 +57,9 @@ function VariantList({ parentId, canManage, onActiveChange }: {
     let cancel = false;
     apiFetch(`/api/marketing/skus/variants?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json())
       .then((j) => { if (cancel) return; if (j.error) setErr(j.error); else setVariants(j.data as MarketingSkuVariant[]); })
-      .catch(() => { if (!cancel) setErr("โหลดไม่สำเร็จ กรุณาลองใหม่"); });
+      .catch(() => { if (!cancel) setErr(t("โหลดไม่สำเร็จ กรุณาลองใหม่", "Couldn't load. Please try again.")); });
     return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parentId]);
 
   const flip = async (v: MarketingSkuVariant) => {
@@ -66,12 +70,12 @@ function VariantList({ parentId, canManage, onActiveChange }: {
     try {
       const r = await apiFetch("/api/marketing/skus/variants", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: v.id, open }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      if (!r.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Couldn't save"));
       setVariants(j.data.variants as MarketingSkuVariant[]);
       onActiveChange?.(parentId, Number(j.data.summary?.active) || 0);
     } catch (e) {
       setVariants((list) => list && list.map((x) => (x.id === v.id ? { ...x, mk_off: open } : x)));   // ย้อนสวิตช์กลับค่าเดิม
-      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Couldn't save"));
     } finally {
       setSaving(null);
     }
@@ -86,12 +90,12 @@ function VariantList({ parentId, canManage, onActiveChange }: {
     try {
       const r = await apiFetch("/api/marketing/skus/variants", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_id: parentId, all: true, open }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      if (!r.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Couldn't save"));
       setVariants(j.data.variants as MarketingSkuVariant[]);
       onActiveChange?.(parentId, Number(j.data.summary?.active) || 0);
     } catch (e) {
       setVariants(before);
-      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Couldn't save"));
     } finally {
       setSaving(null);
     }
@@ -106,18 +110,18 @@ function VariantList({ parentId, canManage, onActiveChange }: {
     <div onClick={(e) => e.stopPropagation()}>
       <div className="sticky -top-2 z-10 -mx-2 -mt-2 mb-1.5 border-b border-slate-100 bg-white px-3 pb-2 pt-2">
         <div className="flex items-center justify-between text-xs">
-          <span className="font-semibold text-slate-700">สี/แบบของรุ่นนี้</span>
-          {variants && <span className="text-slate-400">เหลือ {left} จาก {variants.length}</span>}
+          <span className="font-semibold text-slate-700">{t("สี/แบบของรุ่นนี้", "Colors/variants of this model")}</span>
+          {variants && <span className="text-slate-400">{t(`เหลือ ${left} จาก ${variants.length}`, `${left} of ${variants.length} left`)}</span>}
         </div>
         {canManage && toggleable.length > 1 && (
           <div className="mt-1.5 flex gap-1.5">
             <button type="button" onClick={() => void flipAll(true)} disabled={!!saving || allOn}
               className="h-7 flex-1 rounded-md border border-emerald-200 bg-emerald-50 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">
-              {saving === "__all" ? "…" : "✓ เปิดทั้งหมด"}
+              {saving === "__all" ? "…" : t("✓ เปิดทั้งหมด", "✓ All on")}
             </button>
             <button type="button" onClick={() => void flipAll(false)} disabled={!!saving || allOff}
               className="h-7 flex-1 rounded-md border border-slate-200 bg-white text-[11px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-              {saving === "__all" ? "…" : "✕ ปิดทั้งหมด"}
+              {saving === "__all" ? "…" : t("✕ ปิดทั้งหมด", "✕ All off")}
             </button>
           </div>
         )}
@@ -133,22 +137,22 @@ function VariantList({ parentId, canManage, onActiveChange }: {
                 <div key={v.code} className={`flex items-center gap-2 rounded-lg px-1.5 py-1 ${on ? "" : "bg-slate-50"}`}>
                   <span className={on ? "" : "opacity-40 grayscale"}><HoverImage url={r2ImageUrl(v.image_key, 80)} size={30} rounded="rounded-md" /></span>
                   <div className="min-w-0 flex-1">
-                    <div className={`truncate text-xs font-medium ${on ? "text-slate-700" : "text-slate-400 line-through"}`}>{v.color || "-"}</div>
+                    <div className={`truncate text-xs font-medium ${on ? "text-slate-700" : "text-slate-400 line-through"}`}>{t(v.color || "-", v.color_en || v.color || "-")}</div>
                     <div className="truncate text-[11px] text-slate-400">{v.code}</div>
                   </div>
                   {locked ? (
-                    <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500" title="ปิดที่หน้า SKU — เปิดได้ที่หน้า SKU เท่านั้น">🔒 ปิดในระบบ</span>
+                    <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500" title={t("ปิดที่หน้า SKU — เปิดได้ที่หน้า SKU เท่านั้น", "Turned off on the SKU page — can only be turned on there")}>🔒 {t("ปิดในระบบ", "Off in system")}</span>
                   ) : canManage ? (
                     <button type="button" role="switch" aria-checked={on} disabled={saving === v.id} onClick={() => void flip(v)}
-                      title={on ? "กดเพื่อปิดสีนี้ (เฉพาะการตลาด)" : "กดเพื่อเปิดสีนี้"}
+                      title={on ? t("กดเพื่อปิดสีนี้ (เฉพาะการตลาด)", "Click to turn this color off (marketing only)") : t("กดเพื่อเปิดสีนี้", "Click to turn this color on")}
                       className="flex items-center gap-1.5 disabled:opacity-60">
-                      <span className={`text-[11px] font-medium ${on ? "text-emerald-700" : "text-slate-400"}`}>{on ? "เปิด" : "ปิด"}</span>
+                      <span className={`text-[11px] font-medium ${on ? "text-emerald-700" : "text-slate-400"}`}>{on ? t("เปิด", "On") : t("ปิด", "Off")}</span>
                       <span className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors ${on ? "bg-emerald-500" : "bg-slate-300"}`}>
                         <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
                       </span>
                     </button>
                   ) : (
-                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${on ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{on ? "เปิด" : "ปิด (การตลาด)"}</span>
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${on ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{on ? t("เปิด", "On") : t("ปิด (การตลาด)", "Off (marketing)")}</span>
                   )}
                 </div>
               );
@@ -156,7 +160,7 @@ function VariantList({ parentId, canManage, onActiveChange }: {
           </div>
         )}
       <p className="mt-1.5 border-t border-slate-100 px-1 pt-1.5 text-[10px] leading-4 text-slate-400">
-        เปิด/ปิดตรงนี้มีผล<b className="font-semibold">เฉพาะหน้าการตลาด</b> — สียังเปิดใบขาย/สั่งซื้อ/ผลิตได้ปกติ · 🔒 = ปิดที่หน้า SKU (ทั้งระบบ)
+        {t("เปิด/ปิดตรงนี้มีผล", "On/off here affects ")}<b className="font-semibold">{t("เฉพาะหน้าการตลาด", "marketing pages only")}</b>{t(" — สียังเปิดใบขาย/สั่งซื้อ/ผลิตได้ปกติ · 🔒 = ปิดที่หน้า SKU (ทั้งระบบ)", " — the color can still be sold/ordered/produced as normal · 🔒 = turned off on the SKU page (whole system)")}
       </p>
     </div>
   );

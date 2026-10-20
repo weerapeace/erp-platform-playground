@@ -3,6 +3,7 @@
 import React, { useEffect, useLayoutEffect, useCallback, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { refreshIfDirty } from "@/lib/refresh-bus";
+import { tr } from "@/lib/lang";   // ข้อความระบบ 2 ภาษา (ภาษาเปลี่ยน = รีโหลดหน้า → อ่านตอน render พอ)
 import { autoLayoutKey, getLayoutPref, prefetchLayoutPrefs, setLayoutPref, syncLayoutPrefs } from "@/lib/modal-layout-pref";
 
 // ตั้งขนาดป๊อปตามที่จำไว้ "ก่อนวาดจอ" (ไม่กระพริบ) — ฝั่ง server ไม่มีจอ ใช้ useEffect แทน
@@ -206,8 +207,8 @@ function UnsavedChangesDialog({
         <div className="flex gap-3 mb-4">
           <span className="text-amber-500 mt-0.5 flex-shrink-0"><IconAlertTriangle /></span>
           <div>
-            <p className="font-semibold text-slate-900">มีข้อมูลที่ยังไม่ได้บันทึก</p>
-            <p className="text-sm text-slate-500 mt-1">ต้องการออกโดยไม่บันทึกหรือไม่?</p>
+            <p className="font-semibold text-slate-900">{tr("มีข้อมูลที่ยังไม่ได้บันทึก", "You have unsaved changes")}</p>
+            <p className="text-sm text-slate-500 mt-1">{tr("ต้องการออกโดยไม่บันทึกหรือไม่?", "Leave without saving?")}</p>
           </div>
         </div>
         <div className="flex gap-2 justify-end">
@@ -215,13 +216,13 @@ function UnsavedChangesDialog({
             onClick={onStay}
             className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
-            อยู่ต่อ
+            {tr("อยู่ต่อ", "Stay")}
           </button>
           <button
             onClick={onLeave}
             className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition-colors"
           >
-            ออกโดยไม่บันทึก
+            {tr("ออกโดยไม่บันทึก", "Leave without saving")}
           </button>
         </div>
       </div>
@@ -440,8 +441,8 @@ export function ERPModal({
             {canReset && (
               <button
                 onClick={resetLayout}
-                title="คืนขนาดเดิม (ล้างขนาดที่จำไว้ของป๊อปนี้)"
-                aria-label="คืนขนาดเดิม"
+                title={tr("คืนขนาดเดิม (ล้างขนาดที่จำไว้ของป๊อปนี้)", "Reset size (forget this popup's saved size)")}
+                aria-label={tr("คืนขนาดเดิม", "Reset size")}
                 className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -451,8 +452,8 @@ export function ERPModal({
             )}
             <button
               onClick={toggleExpanded}
-              title={expanded ? "ย่อหน้าต่าง (จำไว้ให้ป๊อปนี้ครั้งหน้า)" : "ขยายเต็มจอ (จำไว้ให้ป๊อปนี้ครั้งหน้า)"}
-              aria-label={expanded ? "ย่อหน้าต่าง" : "ขยายเต็มจอ"}
+              title={expanded ? tr("ย่อหน้าต่าง (จำไว้ให้ป๊อปนี้ครั้งหน้า)", "Shrink (remembered for this popup)") : tr("ขยายเต็มจอ (จำไว้ให้ป๊อปนี้ครั้งหน้า)", "Full screen (remembered for this popup)")}
+              aria-label={expanded ? tr("ย่อหน้าต่าง", "Shrink") : tr("ขยายเต็มจอ", "Full screen")}
               className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
             >
               {expanded ? (
@@ -499,7 +500,7 @@ export function ERPModal({
             <div
               onMouseDown={(e) => startResize(e, "x")}
               onDoubleClick={resetSize}
-              title="ลากเพื่อปรับความกว้าง"
+              title={tr("ลากเพื่อปรับความกว้าง", "Drag to resize width")}
               className="absolute top-8 bottom-8 -right-1.5 w-3 cursor-ew-resize z-20 group flex items-center justify-center"
             >
               <div className="w-1 h-12 rounded-full bg-slate-300 group-hover:bg-orange-400 transition-colors" />
@@ -508,7 +509,7 @@ export function ERPModal({
             <div
               onMouseDown={(e) => startResize(e, "y")}
               onDoubleClick={resetSize}
-              title="ลากเพื่อปรับความสูง"
+              title={tr("ลากเพื่อปรับความสูง", "Drag to resize height")}
               className="absolute -bottom-1.5 left-8 right-8 h-3 cursor-ns-resize z-20 group flex items-center justify-center"
             >
               <div className="h-1 w-12 rounded-full bg-slate-300 group-hover:bg-orange-400 transition-colors" />
@@ -517,7 +518,7 @@ export function ERPModal({
             <div
               onMouseDown={(e) => startResize(e, "both")}
               onDoubleClick={resetSize}
-              title="ลากเพื่อปรับขนาด · ดับเบิลคลิกเพื่อรีเซ็ต"
+              title={tr("ลากเพื่อปรับขนาด · ดับเบิลคลิกเพื่อรีเซ็ต", "Drag to resize · double-click to reset")}
               className="absolute -bottom-1 -right-1 w-7 h-7 cursor-nwse-resize z-30 group flex items-end justify-end p-1"
             >
               <svg className="text-slate-400 group-hover:text-orange-500 transition-colors"
@@ -541,8 +542,8 @@ export function ConfirmDialog({
   onConfirm,
   title,
   message,
-  confirmText = "ยืนยัน",
-  cancelText = "ยกเลิก",
+  confirmText = tr("ยืนยัน", "Confirm"),
+  cancelText = tr("ยกเลิก", "Cancel"),
   variant = "default",
   loading = false,
   requireTyped,
@@ -594,7 +595,7 @@ export function ConfirmDialog({
               {requireTyped && (
                 <div className="mt-4">
                   <p className="text-xs text-slate-500 mb-1.5">
-                    พิมพ์ <span className="font-mono font-bold text-slate-700">{requireTyped}</span> เพื่อยืนยัน
+                    {tr("พิมพ์", "Type")} <span className="font-mono font-bold text-slate-700">{requireTyped}</span> {tr("เพื่อยืนยัน", "to confirm")}
                   </p>
                   <input
                     type="text"
@@ -750,7 +751,7 @@ export function Drawer({
           }}
           onDoubleClick={resetWidth}
           className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize bg-transparent hover:bg-orange-300 active:bg-orange-400 transition-colors z-10 group"
-          title="ลากเพื่อปรับความกว้าง (จำไว้ให้ครั้งหน้า) · ดับเบิลคลิก = คืนความกว้างเดิม"
+          title={tr("ลากเพื่อปรับความกว้าง (จำไว้ให้ครั้งหน้า) · ดับเบิลคลิก = คืนความกว้างเดิม", "Drag to resize (remembered) · double-click = reset width")}
         >
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-slate-300 group-hover:bg-orange-400" />
         </div>

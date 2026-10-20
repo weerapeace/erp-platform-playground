@@ -23,7 +23,8 @@ async function loadVariants(parentId: string): Promise<{ data?: MarketingSkuVari
   const off = new Set((offs ?? []).map((o) => o.sku_id as string));
   return {
     data: (data ?? []).map((v) => ({
-      id: v.id as string, code: v.code ?? "", color: v.color_th || v.color || null,
+      // color = ชื่อไทย (ไม่มีใช้อังกฤษ) · color_en = skus_v2.color (อังกฤษ) ให้หน้าจอโหมดภาษาอังกฤษ
+      id: v.id as string, code: v.code ?? "", color: v.color_th || v.color || null, color_en: v.color || v.color_th || null,
       is_active: v.is_active !== false, image_key: v.cover_image_r2_key ?? null, mk_off: off.has(v.id as string),
     })),
   };
