@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
+import { TaskHoverWrap, DEFAULT_HOVER_FIELDS } from "./task-hover-card";
 import { AssigneeStack } from "./assignee-avatar";
 import { taskTypeLabel } from "./use-options";
 import { TaskTypeChip } from "./task-type-chip";
@@ -89,14 +90,16 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
   const brandBorder = cfg.brandBorder && bc && /^#[0-9a-fA-F]{6}$/.test(String(bc));
   const showSku = cfg.sku !== false, showTaskNo = cfg.taskNo !== false;
   const phIcon = <span className="text-2xl opacity-40 grayscale" aria-hidden>🖼️</span>;
+  // 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียด (ตั้งค่าต่อคน) · เปิดอยู่ = ไม่เด้งพรีวิวรูปเดี่ยวซ้ำ
+  const hoverOn = cfg.hoverCard !== false;
+  const preview = (url: string | null | undefined, w: number, node: ReactNode) => (hoverOn ? node : <HoverPreview url={url} previewW={w}>{node}</HoverPreview>);
   return (
+    <TaskHoverWrap task={task} enabled={hoverOn} fields={cfg.hoverFields ?? DEFAULT_HOVER_FIELDS} off={dragging} className={fill ? "h-full" : undefined}>
     <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${fill ? "h-full flex flex-col" : ""} ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
       style={{ ...(brandBorder ? { borderColor: String(bc), borderLeftWidth: 3 } : {}), ...(scale !== 1 ? { zoom: scale } : {}) }}>
-      {coverUrl && !side && (
-        <HoverPreview url={r2ImageUrl(cover)} previewW={640}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${topH} w-full shrink-0 ${fitCls} border-b border-slate-100`} />
-        </HoverPreview>
+      {coverUrl && !side && preview(r2ImageUrl(cover), 640,
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${topH} w-full shrink-0 ${fitCls} border-b border-slate-100`} />
       )}
       {showPh && !side && (
         <div className={`${topH} w-full shrink-0 flex items-center justify-center bg-slate-50 border-b border-slate-100`} title={t("ยังไม่มีรูป", "No image yet")}>{phIcon}</div>
@@ -105,11 +108,11 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
       {artShown.length > 0 && (
         <div className="flex items-center gap-1 border-b border-slate-100 bg-slate-50/70 px-1.5 py-1.5">
           {artShown.map((k) => (
-            <HoverPreview key={k} url={r2ImageUrl(k)} previewW={520}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
+            <span key={k}>{preview(r2ImageUrl(k), 520,
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={r2ImageUrl(k, 160) ?? undefined} alt="" loading="lazy" decoding="async"
                 className={`${compact ? "h-8 w-8" : "h-10 w-10"} rounded border border-slate-200 bg-white object-contain`} />
-            </HoverPreview>
+            )}</span>
           ))}
           {artKeys.length > artShown.length && (
             <span className="text-[10px] font-medium text-slate-400">+{artKeys.length - artShown.length}</span>
@@ -117,11 +120,9 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
         </div>
       )}
       <div className={`${compact ? "p-2" : "p-2.5"} ${side ? "flex gap-2.5 items-start" : fill ? "flex flex-col" : ""} ${fill ? "flex-1" : ""}`}>
-        {side && coverUrl && (
-          <HoverPreview url={r2ImageUrl(cover)} previewW={640}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${sideBox} shrink-0 rounded-md border border-slate-200 ${fitCls}`} />
-          </HoverPreview>
+        {side && coverUrl && preview(r2ImageUrl(cover), 640,
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${sideBox} shrink-0 rounded-md border border-slate-200 ${fitCls}`} />
         )}
         {side && !coverUrl && (
           <div className={`${sideBox} shrink-0 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center`} title={t("ยังไม่มีรูป", "No image yet")}>{phIcon}</div>
@@ -166,6 +167,7 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
         </div>
       </div>
     </div>
+    </TaskHoverWrap>
   );
 }
 

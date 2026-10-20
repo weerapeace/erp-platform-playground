@@ -14,6 +14,7 @@ import { FontSelect } from "@/components/font-select";
 import { tr } from "@/lib/lang";
 import { KanbanSettingsControls } from "./kanban-settings";
 import { useCreativeStatuses } from "./use-statuses";
+import type { HoverField } from "./task-hover-card";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
@@ -33,7 +34,9 @@ export type CardGap = "tight" | "normal" | "loose" | "xloose";
 export type CardScale = "sm" | "md" | "lg";   // ขนาดการ์ดทั้งใบ (ย่อ/ปกติ/ขยาย)
 // WIP: wipSort due = เรียงตามกำหนดส่ง / manual = ลำดับที่ฉันลากจัดเอง (wipOrder = task id เรียงตามที่จัด)
 export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; taskType?: boolean; compact?: boolean; wipCols?: WipCols;
-  coverSize?: CoverSize; coverFit?: "cover" | "contain"; coverPos?: "top" | "side"; cardGap?: CardGap; cardScale?: CardScale; wipSort?: "due" | "manual"; wipOrder?: string[] };
+  coverSize?: CoverSize; coverFit?: "cover" | "contain"; coverPos?: "top" | "side"; cardGap?: CardGap; cardScale?: CardScale; wipSort?: "due" | "manual"; wipOrder?: string[];
+  /** 🪟 ชี้ที่การ์ด = กล่องรูปใหญ่ + รายละเอียด (ไม่ตั้ง = เปิด) · hoverFields = สิ่งที่โชว์ (ไม่ตั้ง = DEFAULT_HOVER_FIELDS) — app/tasks/task-hover-card */
+  hoverCard?: boolean; hoverFields?: HoverField[] };
 export type CardAlign = "left" | "center" | "right";
 export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
 // สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)
