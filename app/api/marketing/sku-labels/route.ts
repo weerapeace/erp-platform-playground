@@ -20,7 +20,7 @@ const dupMsg = (e: { code?: string; message: string }) =>
   e.code === "23505" ? "มีป้ายชื่อนี้อยู่แล้ว" : "บันทึกไม่สำเร็จ: " + e.message;
 const toKind = (v: unknown): "status" | "badge" | "pillar" => (v === "badge" ? "badge" : v === "pillar" ? "pillar" : "status");
 
-type LabelInput = { name?: unknown; icon?: unknown; color?: unknown; description?: unknown; is_active?: unknown };
+type LabelInput = { name?: unknown; name_en?: unknown; icon?: unknown; color?: unknown; description?: unknown; is_active?: unknown };
 
 function pickFields(b: LabelInput, requireName: boolean): { fields: Record<string, unknown>; error?: string } {
   const f: Record<string, unknown> = {};
@@ -29,6 +29,11 @@ function pickFields(b: LabelInput, requireName: boolean): { fields: Record<strin
     if (!name) return { fields: f, error: "ต้องใส่ชื่อป้าย" };
     if (name.length > 60) return { fields: f, error: "ชื่อป้ายยาวเกิน 60 ตัวอักษร" };
     f.name = name;
+  }
+  if ("name_en" in b) {
+    const en = String(b.name_en ?? "").trim();
+    if (en.length > 60) return { fields: f, error: "ชื่ออังกฤษยาวเกิน 60 ตัวอักษร" };
+    f.name_en = en || null;   // ว่าง = โหมด EN ใช้ชื่อไทย
   }
   if ("icon" in b) f.icon = String(b.icon ?? "").trim().slice(0, 8) || null;
   if ("color" in b) f.color = cleanColor(b.color);
@@ -41,14 +46,14 @@ export async function GET(request: NextRequest) {
   const denied = await guardApi(request, "marketing.sku.view");
   if (denied) return denied;
   const kind = new URL(request.url).searchParams.get("kind");
-  let q = supabaseAdmin().from("marketing_sku_labels").select("id, kind, name, icon, color, description, sort_order, is_active");
+  let q = supabaseAdmin().from("marketing_sku_labels").select("id, kind, name, name_en, icon, color, description, sort_order, is_active");
   if (kind === "status" || kind === "badge" || kind === "pillar") q = q.eq("kind", kind);
   const { data, error } = await q.order("sort_order").order("name");
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
   return NextResponse.json({ data: data ?? [], error: null });
 }
 
-// POST { kind?, name, icon?, color?, description? } → เพิ่มป้าย (ต่อท้ายลำดับของชนิดนั้น)
+// POST { kind?, name, name_en?, icon?, color?, description? } → เพิ่มป้าย (ต่อท้ายลำดับของชนิดนั้น)
 export async function POST(request: NextRequest) {
   let body: LabelInput & { kind?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ data: null, error: "invalid JSON" }, { status: 400 }); }
@@ -62,7 +67,7 @@ export async function POST(request: NextRequest) {
   const { data: last } = await admin.from("marketing_sku_labels").select("sort_order").eq("kind", kind).order("sort_order", { ascending: false }).limit(1).maybeSingle();
   const { data, error } = await admin.from("marketing_sku_labels")
     .insert({ color: "#64748b", ...fields, kind, sort_order: (Number(last?.sort_order) || 0) + 10 })
-    .select("id, kind, name, icon, color, description, sort_order, is_active").single();
+    .select("id, kind, name, name_en, icon, color, description, sort_order, is_active").single();
   if (error) return NextResponse.json({ data: null, error: dupMsg(error) }, { status: 400 });
 
   const { actorId, actorName } = await actor(request);
@@ -70,7 +75,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ data, error: null });
 }
 
-// PATCH { id, name?, icon?, color?, description? } → แก้ป้าย
+// PATCH { id, name?, name_en?, icon?, color?, description? } → แก้ป้าย
 // PATCH { order: string[] }                      → เรียงลำดับใหม่ (ตามลำดับ id ที่ส่งมา)
 export async function PATCH(request: NextRequest) {
   const denied = await guardApi(request, "marketing.label.manage");
@@ -96,11 +101,11 @@ export async function PATCH(request: NextRequest) {
   if (vErr) return NextResponse.json({ data: null, error: vErr }, { status: 400 });
   if (Object.keys(fields).length === 0) return NextResponse.json({ data: null, error: "ไม่มีอะไรให้แก้" }, { status: 400 });
 
-  const { data: before } = await admin.from("marketing_sku_labels").select("name, icon, color, description, is_active").eq("id", body.id).maybeSingle();
+  const { data: before } = await admin.from("marketing_sku_labels").select("name, name_en, icon, color, description, is_active").eq("id", body.id).maybeSingle();
   if (!before) return NextResponse.json({ data: null, error: "ไม่พบป้าย (อาจถูกลบไปแล้ว)" }, { status: 404 });
   const { data, error } = await admin.from("marketing_sku_labels")
     .update({ ...fields, updated_at: new Date().toISOString() }).eq("id", body.id)
-    .select("id, kind, name, icon, color, description, sort_order, is_active").single();
+    .select("id, kind, name, name_en, icon, color, description, sort_order, is_active").single();
   if (error) return NextResponse.json({ data: null, error: dupMsg(error) }, { status: 400 });
 
   await writeAudit(admin, { action: "marketing.label.update", entityType: "marketing_sku_labels", entityId: body.id, actorId, actorName, metadata: { before, after: fields } });

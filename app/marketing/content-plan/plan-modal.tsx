@@ -9,6 +9,7 @@
  * ของกลาง: ERPModal · ConfirmDialog · ParentSkuPicker · FileMultiInput · ERPDateTime24 (เวลา 24 ชม.) · SearchableSelect · PlatformIcon · Toast
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLang } from "@/components/i18n";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { FileMultiInput } from "@/components/file-multi-input";
@@ -17,7 +18,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { SearchableSelect } from "@/components/searchable-select";
 import { useToast } from "@/components/toast";
 import { createContent, updateContent, deleteContent, createTask, POST_TYPES, splitPostTypes, joinPostTypes, type ContentItem, type BrandOption } from "@/app/tasks/data";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { CONTENT_GOALS, dateKeyOf, timeOf, toScheduledIso, stageOf, STAGE_META, placementId, parsePlacement, platformsFromPlacements, type PlacementType } from "@/lib/marketing/content-plan";
 
 /** is_active = เปิดอยู่ในหน้าแพลตฟอร์มกลาง (ปิดอยู่ก็ยังเลือกในแผนได้ ถ้าติ๊กไว้ในตั้งค่าหน้าแผน) */
@@ -76,6 +77,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
   /** ⚙️ เปิดตั้งค่าหน้าวางแผน (ซ้อนบนการ์ดนี้) */
   onOpenSettings: () => void;
 }) {
+  useLang();   // ฟังการสลับภาษา → ชื่อป้าย/แนว (labelName) เปลี่ยนตาม (หน้าแรกวาดเป็นไทยก่อน แล้วค่อยสลับ)
   const toast = useToast();
   const [d, setD] = useState<Draft>(() => toDraft(item, defaults));
   const [busy, setBusy] = useState(false);
@@ -183,7 +185,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
       <div className="min-w-0">{body}{hint && <div className="mt-1 text-[11px] text-slate-400">{hint}</div>}</div>
     </div>
   );
-  const pillarOptions = [{ value: "", label: "— ไม่ระบุแนว —" }, ...pillars.filter((p) => p.is_active || p.id === d.pillar_id).map((p) => ({ value: p.id, label: p.name, badge: p.icon ?? undefined }))];
+  const pillarOptions = [{ value: "", label: "— ไม่ระบุแนว —" }, ...pillars.filter((p) => p.is_active || p.id === d.pillar_id).map((p) => ({ value: p.id, label: labelName(p), badge: p.icon ?? undefined }))];
   const goalOptions = [{ value: "", label: "— ไม่ระบุ —" }, ...CONTENT_GOALS.map((g) => ({ value: g.key, label: g.label, badge: g.icon }))];
   const brandOptions = [{ value: "", label: "— ไม่ระบุแบรนด์ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))];
   const pillar = d.pillar_id ? pillars.find((p) => p.id === d.pillar_id) : undefined;
@@ -223,7 +225,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
         {/* ── ตัวไอเดีย: หัวข้อ + บรีฟ ── */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            {pillar && <span className="h-6 w-1.5 flex-shrink-0 rounded-full" style={{ background: pillar.color }} title={pillar.name} />}
+            {pillar && <span className="h-6 w-1.5 flex-shrink-0 rounded-full" style={{ background: pillar.color }} title={labelName(pillar)} />}
             <input value={d.title} onChange={(e) => set({ title: e.target.value })} disabled={ro || locked} maxLength={200} autoFocus={!item}
               placeholder="ไอเดียคืออะไร? เช่น BBP08 แมตช์ชุดไปเที่ยว"
               className="w-full border-0 border-b border-transparent bg-transparent px-0 py-1 text-lg font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 hover:border-slate-200 focus:border-blue-500 focus:outline-none focus:ring-0 disabled:text-slate-700" />

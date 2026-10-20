@@ -16,7 +16,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
-import type { MarketingBrand, MarketingSkuItem, MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingBrand, type MarketingSkuItem, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 
 export type SkuPickerItem = MarketingSkuItem & { category_id?: string | null };
 export type SkuPickerCatalog = {
@@ -196,7 +196,7 @@ export function MarketingSkuPickerModal({
     return (
       <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 min-w-0">
         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: l?.color || "#cbd5e1" }} />
-        <span className="truncate">{l?.name ?? t("ยังไม่ติดป้าย", "No label yet")}</span>
+        <span className="truncate">{l ? labelName(l) : t("ยังไม่ติดป้าย", "No label yet")}</span>
       </span>
     );
   };
@@ -231,7 +231,7 @@ export function MarketingSkuPickerModal({
             </p>
             {warn && warnItems.length > 0 && (
               <p className="text-[11px] text-amber-700">
-                ⚠️ {t(`${warnItems.length} รุ่นติดป้าย`, `${warnItems.length} models labelled`)} {[...new Set(warnItems.map((i) => labelMap.get(i.label_id!)?.name))].join(" / ")} ({warnItems.slice(0, 4).map((i) => i.code).join(", ")}) — {warn.note}
+                ⚠️ {t(`${warnItems.length} รุ่นติดป้าย`, `${warnItems.length} models labelled`)} {[...new Set(warnItems.map((i) => labelName(labelMap.get(i.label_id!))))].join(" / ")} ({warnItems.slice(0, 4).map((i) => i.code).join(", ")}) — {warn.note}
               </p>
             )}
           </div>
@@ -309,7 +309,7 @@ export function MarketingSkuPickerModal({
                   .map((l) => (
                     <button key={l.id} type="button" className={chip(label === l.id)} onClick={() => setLabel(l.id)}>
                       <span className="w-2 h-2 rounded-full" style={{ background: l.color || "#cbd5e1" }} />
-                      {l.name} <b className="font-medium">{labelStats.get(l.id)!.n}</b>
+                      {labelName(l)} <b className="font-medium">{labelStats.get(l.id)!.n}</b>
                       <span className="text-[10px] opacity-60">· {taken.short} {labelStats.get(l.id)!.web}</span>
                     </button>
                   ))}
@@ -385,7 +385,7 @@ export function MarketingSkuPickerModal({
                         <span className="absolute right-1.5 top-1.5 flex max-w-[70%] flex-wrap justify-end gap-1">
                           {i.badge_ids.map((b) => badgeMap.get(b)).filter(Boolean).slice(0, 3).map((b) => (
                             <span key={b!.id} className="rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white" style={{ background: b!.color || "#64748b" }}>
-                              {b!.name}
+                              {labelName(b)}
                             </span>
                           ))}
                         </span>

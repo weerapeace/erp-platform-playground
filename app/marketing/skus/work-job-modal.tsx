@@ -15,7 +15,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { getLang } from "@/lib/lang";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import {
   JOB_KINDS, kindInfo, kindDefaultName, kindLabel, kindSteps, nextStepKey, stepsFromLabels, MAX_JOB_NAME, MAX_STEPS, MAX_STEP_LABEL,
   type WorkJob, type WorkJobKind, type WorkStep,
@@ -97,7 +97,7 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
 
   const labelOptions = useMemo(() => [
     { value: "", label: t("— ไม่ติดป้าย —", "— No label —") },
-    ...labels.filter((l) => l.is_active || l.id === form.auto_label_id).map((l) => ({ value: l.id, label: l.name, badge: l.icon ?? undefined })),
+    ...labels.filter((l) => l.is_active || l.id === form.auto_label_id).map((l) => ({ value: l.id, label: labelName(l), badge: l.icon ?? undefined })),
   ], [labels, form.auto_label_id, t]);
 
   const save = async () => {

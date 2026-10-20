@@ -8,15 +8,17 @@
 import { useMemo, useState } from "react";
 import { Popover } from "@/components/popover";
 import { useToast } from "@/components/toast";
-import { useT } from "@/components/i18n";
+import { useT, useLang } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 
-export function BadgeChip({ badge, size = "sm" }: { badge: Pick<MarketingSkuLabel, "name" | "icon" | "color">; size?: "xs" | "sm" }) {
+export function BadgeChip({ badge, size = "sm" }: { badge: Pick<MarketingSkuLabel, "name" | "name_en" | "icon" | "color">; size?: "xs" | "sm" }) {
+  useLang();   // ฟังการสลับภาษา (ชิปนี้ไม่มีข้อความระบบ แต่ชื่อป้ายต้องเปลี่ยนตาม)
+  const name = labelName(badge);
   return (
     <span className={`inline-flex max-w-full items-center gap-0.5 truncate rounded-full font-semibold text-white shadow-sm ${size === "xs" ? "px-1.5 py-px text-[10px]" : "px-2 py-0.5 text-[11px]"}`}
-      style={{ background: badge.color }} title={badge.name}>
-      {badge.icon && <span>{badge.icon}</span>}<span className="truncate">{badge.name}</span>
+      style={{ background: badge.color }} title={name}>
+      {badge.icon && <span>{badge.icon}</span>}<span className="truncate">{name}</span>
     </span>
   );
 }
@@ -71,8 +73,10 @@ function BadgePanel({ parentId, value, badges, onSaved, onCreated }: {
   const [busy, setBusy] = useState(false);
   const active = badges.filter((b) => b.is_active);
   const term = q.trim();
-  const shown = term ? active.filter((b) => b.name.toLowerCase().includes(term.toLowerCase())) : active;
-  const exact = active.some((b) => b.name.toLowerCase() === term.toLowerCase());
+  // ค้นได้ทั้งชื่อไทยและอังกฤษ · พิมพ์ตรงชื่อไหนก็ตาม = มีอยู่แล้ว (ไม่สร้างป้ายซ้ำ)
+  const names = (b: MarketingSkuLabel) => [b.name, b.name_en ?? ""].map((x) => x.toLowerCase());
+  const shown = term ? active.filter((b) => names(b).some((x) => x.includes(term.toLowerCase()))) : active;
+  const exact = active.some((b) => names(b).includes(term.toLowerCase()));
 
   const save = async (next: string[]) => {
     setBusy(true);
@@ -99,7 +103,7 @@ function BadgePanel({ parentId, value, badges, onSaved, onCreated }: {
       setQ("");
       setBusy(false);
       await save([...value, badge.id]);
-      toast.success(t(`เพิ่มป้ายเสริม "${badge.name}" แล้ว`, `Badge "${badge.name}" added`));
+      toast.success(t(`เพิ่มป้ายเสริม "${badge.name}" แล้ว`, `Badge "${labelName(badge)}" added`));
     } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างป้ายไม่สำเร็จ", "Couldn't create the badge")); setBusy(false); }
   };
 

@@ -8,12 +8,13 @@
  * ของกลาง: ERPModal · ConfirmDialog · PlatformIcon · POST_TYPES · Toast
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLang } from "@/components/i18n";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { PlatformIcon } from "@/components/platform-icon";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { POST_TYPES, type BrandOption, type ContentItem } from "@/app/tasks/data";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { WEEKDAYS_TH, targetProgress, shortThaiDate, dowLabel, type PlanTarget, type PlanSlot, type SlotDraft, type PlacementType } from "@/lib/marketing/content-plan";
 import type { PlatformOpt } from "./plan-modal";
 
@@ -149,6 +150,7 @@ const normTime = (raw: string) => {
 };
 
 export function SlotsEditor({ brandId, platforms, pillars, canEdit, onChanged }: { brandId: string; platforms: PlatformOpt[]; pillars: MarketingSkuLabel[]; canEdit: boolean; onChanged: () => void }) {
+  useLang();   // ฟังการสลับภาษา → ชื่อป้าย/แนว (labelName) เปลี่ยนตาม (หน้าแรกวาดเป็นไทยก่อน แล้วค่อยสลับ)
   const toast = useToast();
   const [rows, setRows] = useState<PlanSlot[] | null>(null);
   const [forms, setForms] = useState<Record<string, SlotDraftForm>>({});
@@ -192,7 +194,7 @@ export function SlotsEditor({ brandId, platforms, pillars, canEdit, onChanged }:
       </select>
       <select value={f.pillar_id} onChange={(e) => set({ pillar_id: e.target.value })} disabled={disabled} className={`${input} w-32`}>
         <option value="">แนว…</option>
-        {pillars.filter((p) => p.is_active || p.id === f.pillar_id).map((p) => <option key={p.id} value={p.id}>{p.icon ? `${p.icon} ` : ""}{p.name}</option>)}
+        {pillars.filter((p) => p.is_active || p.id === f.pillar_id).map((p) => <option key={p.id} value={p.id}>{p.icon ? `${p.icon} ` : ""}{labelName(p)}</option>)}
       </select>
       <input value={f.title} onChange={(e) => set({ title: e.target.value })} disabled={disabled} maxLength={200} placeholder="หัวข้อ เช่น สินค้าใหม่ประจำสัปดาห์"
         className={`${input} min-w-[12rem] flex-1`} />

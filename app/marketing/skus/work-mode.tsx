@@ -30,7 +30,7 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { useCanHover } from "@/lib/use-can-hover";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import {
   assigneeNames, discountProblem, dueState, fmtBaht, itemProgress, jobProgress, kindInfo, kindLabel, newPriceRange, shortDate,
   type DiscountUnit, type WorkJob, type WorkJobItem,
@@ -561,7 +561,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                     const dt = dueText(t);
                     return <span className={ds ? DUE_STYLE[ds] : ""}>📅 {t("ครบกำหนด", "Due")} {shortDate(job.due_date)}{ds && dt[ds] ? ` · ${dt[ds]}` : ""}</span>;
                   })() : <span className="text-slate-400">📅 {t("ไม่มีกำหนดส่ง", "No due date")}</span>}
-                  {job.auto_label_id && labelMap.get(job.auto_label_id) && <span>{t("ใส่รุ่นแล้วติดป้าย", "Models added get label")} “{labelMap.get(job.auto_label_id)!.name}”</span>}
+                  {job.auto_label_id && labelMap.get(job.auto_label_id) && <span>{t("ใส่รุ่นแล้วติดป้าย", "Models added get label")} “{labelName(labelMap.get(job.auto_label_id))}”</span>}
                 </div>
                 {job.note && <p className="mt-1.5 whitespace-pre-line text-xs text-slate-600">📝 {job.note}</p>}
               </div>

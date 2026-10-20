@@ -38,6 +38,7 @@
 - `erp_creative_content` + `pillar_id` (→ `marketing_sku_labels`, kind `pillar`, ลบแนว → null) · `goal` (check 4 ค่า) · `brief` · `ref_image_keys text[]`
 - แนวคอนเทนต์ = `marketing_sku_labels.kind = 'pillar'` (ตารางป้ายการตลาดเดียวกับป้ายหลัก/ป้ายเสริมของ SKU) · ตั้งค่าที่ "🧭 ตั้งค่าแนว" (`LabelManagerModal kinds={["pillar"]}`)
 - ตั้งต้น 7 แนว: โชว์สินค้า · ไลฟ์สไตล์ · รีวิว/UGC · สอนใช้/ทริค · โปรโมชั่น · เบื้องหลัง · เทรนด์
+- ชื่อแนวมีช่อง English (`name_en`) — โหมด EN โชว์ผ่าน `labelName()` (ดู docs/marketing-skus.md)
 - migration `202610111000_content_planning.sql` (+ เมนู sort 13 ในแอปการตลาด, permission_key `tasks.view`)
 - API: ใช้ `/api/creative-content` เดิม (SELECT/EDITABLE/POST เพิ่ม 4 ช่อง + ตรวจ goal/brief/รูป) · แนว `/api/marketing/sku-labels?kind=pillar`
 - ตัวช่วย pure `lib/marketing/content-plan.ts`: stageOf · วันที่ตามเวลาเครื่อง (ห้าม toISOString ตัดวัน) · toScheduledIso

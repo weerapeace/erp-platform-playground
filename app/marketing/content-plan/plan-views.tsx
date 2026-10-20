@@ -5,9 +5,10 @@
  * ลากการ์ด (HTML5 drag) → วางช่องวัน = เปลี่ยนวัน (คงเวลาเดิม) · วางกล่องไอเดีย = เอาวันออก · วางคอลัมน์บอร์ด = เปลี่ยนขั้น
  */
 import { useState, type DragEvent, type ReactNode } from "react";
+import { useLang } from "@/components/i18n";
 import { PlatformIcon } from "@/components/platform-icon";
 import { POST_TYPES, splitPostTypes, type ContentItem } from "@/app/tasks/data";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import {
   PLAN_STAGES, STAGE_META, GOAL_META, stageOf, dateKeyOf, timeOf, addDays, localDateKey, parseDateKey, dowLabel, shortThaiDate,
   placementLabelsFor, type PlanStage, type PlacementType,
@@ -42,6 +43,7 @@ export function PlanCard({ item, pillar, compact = false, showDate = false, canE
   /** ป้ายประเภทการลง เช่น "🏪 แต่งร้าน" (ในแถวช่องทาง) */
   placementText?: string;
 }) {
+  useLang();   // ฟังการสลับภาษา → ชื่อป้าย/แนว (labelName) เปลี่ยนตาม (หน้าแรกวาดเป็นไทยก่อน แล้วค่อยสลับ)
   const stage = stageOf(item) ?? "idea";
   const st = STAGE_META[stage];
   const types = splitPostTypes(item.post_type);
@@ -50,7 +52,7 @@ export function PlanCard({ item, pillar, compact = false, showDate = false, canE
   const dk = dateKeyOf(item.scheduled_at);
   return (
     <button type="button" onClick={() => onOpen(item)} {...dragProps(item.id, canEdit)}
-      title={`${item.title}${pillar ? ` · ${pillar.name}` : ""}${goal ? ` · ${goal.label}` : ""} · ${st.label}`}
+      title={`${item.title}${pillar ? ` · ${labelName(pillar)}` : ""}${goal ? ` · ${goal.label}` : ""} · ${st.label}`}
       className="group block w-full rounded-lg border border-slate-200 bg-white text-left shadow-sm transition hover:border-slate-400 hover:shadow"
       style={{ borderLeft: `4px solid ${pillar?.color ?? "#cbd5e1"}` }}>
       <div className={`flex gap-1.5 ${compact ? "p-1.5" : "p-2"}`}>
@@ -62,7 +64,7 @@ export function PlanCard({ item, pillar, compact = false, showDate = false, canE
             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
             {types.map((t) => <span key={t}>{TYPE_ICON[t] ?? "•"}</span>)}
             {pillar?.icon && <span>{pillar.icon}</span>}
-            {!compact && pillar && <span className="truncate">{pillar.name}</span>}
+            {!compact && pillar && <span className="truncate">{labelName(pillar)}</span>}
             {showDate && dk && <span className="ml-auto whitespace-nowrap text-slate-400">{shortThaiDate(dk)} {timeOf(item.scheduled_at)}</span>}
             {!showDate && !compact && item.scheduled_at && <span className="ml-auto text-slate-400">{timeOf(item.scheduled_at)}</span>}
           </div>

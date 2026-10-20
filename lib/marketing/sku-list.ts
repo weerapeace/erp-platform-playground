@@ -8,12 +8,16 @@
 
 /** ชนิดป้าย: status = ป้ายหลัก (1 ป้าย/รุ่น เช่น Hero/Clearance) · badge = ป้ายเสริม (หลายป้าย/รุ่น โชว์บนรูป)
  *  · pillar = แนวคอนเทนต์ (หน้าวางแผนคอนเทนต์ — ผูกกับ erp_creative_content.pillar_id) */
+import { tr } from "@/lib/lang";
+
 export type MarketingLabelKind = "status" | "badge" | "pillar";
 
 export type MarketingSkuLabel = {
   id: string;
   kind?: MarketingLabelKind;
   name: string;
+  /** ชื่ออังกฤษ (ไม่บังคับ) — โหมด EN โชว์ชื่อนี้ ว่าง = ใช้ชื่อไทย */
+  name_en?: string | null;
   icon: string | null;
   color: string;
   description: string | null;
@@ -21,6 +25,13 @@ export type MarketingSkuLabel = {
   is_active: boolean;
   usage_count?: number;
 };
+
+/** ชื่อป้ายตามภาษาที่เลือก (ป้ายหลัก / ป้ายเสริม / แนวคอนเทนต์) — ทุกที่ที่โชว์ชื่อป้ายใช้ตัวนี้
+ *  โหมด EN + ยังไม่กรอกชื่ออังกฤษ = โชว์ชื่อไทยเดิม (ไม่เดาคำแปลให้) */
+export function labelName(l: Pick<MarketingSkuLabel, "name" | "name_en"> | null | undefined): string {
+  if (!l) return "";
+  return tr(l.name, l.name_en?.trim() || l.name);
+}
 
 export type MarketingBrand = { id: string; name: string; color: string | null };
 

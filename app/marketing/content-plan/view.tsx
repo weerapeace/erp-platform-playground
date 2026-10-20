@@ -7,6 +7,7 @@
  *   🔔 ต้องเตรียม (รอบเปลี่ยน) · ใช้เป็นแท็บ "วางแผน" ในปฏิทินคอนเทนต์ (embedded = ไม่มีหัวหน้าของตัวเอง)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLang } from "@/components/i18n";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useToast } from "@/components/toast";
@@ -14,7 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
 import { listContent, listBrands, updateContent, type ContentItem, type BrandOption } from "@/app/tasks/data";
 import { useCreativeOptions } from "@/app/tasks/use-options";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import {
   stageOf, statusForStage, dateKeyOf, timeOf, toScheduledIso, localDateKey, weekStart, addDays, shortThaiDate, parseDateKey,
   type PlanStage,
@@ -42,6 +43,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
   /** ฝังเป็นแท็บในปฏิทินคอนเทนต์ — ไม่โชว์หัวข้อหน้าของตัวเอง (ปุ่มตั้งค่า/ไอเดียใหม่ย้ายไปแถวเครื่องมือ) */
   embedded?: boolean;
 }) {
+  useLang();   // ฟังการสลับภาษา → ชื่อป้าย/แนว (labelName) เปลี่ยนตาม (หน้าแรกวาดเป็นไทยก่อน แล้วค่อยสลับ)
   const toast = useToast();
   // ช่องทาง = ทุกแพลตฟอร์มจากหน้าแพลตฟอร์มกลาง (รวมที่ปิดอยู่ — เลือกใช้ในแผนได้) · ยังไม่ตั้งค่า = โชว์เฉพาะที่เปิดอยู่
   const { allPlatforms, reload: reloadOptions } = useCreativeOptions();
@@ -296,7 +298,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
                   <button key={p.id} type="button" onClick={() => setPillarFilter(on ? "" : p.id)}
                     className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${on ? "text-white" : "bg-white text-slate-600 hover:border-slate-400"}`}
                     style={on ? { background: p.color, borderColor: p.color } : { borderColor: `${p.color}88` }}>
-                    {p.icon && <span>{p.icon}</span>}{p.name}<span className={on ? "text-white/80" : "text-slate-400"}>{n}</span>
+                    {p.icon && <span>{p.icon}</span>}{labelName(p)}<span className={on ? "text-white/80" : "text-slate-400"}>{n}</span>
                   </button>
                 );
               })}

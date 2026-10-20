@@ -23,7 +23,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useViewPref } from "@/lib/use-view-pref";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import {
-  BRAND_ALL, BRAND_NONE, LABEL_ALL, LABEL_NONE, countBy, sortMarketingSkus,
+  BRAND_ALL, BRAND_NONE, LABEL_ALL, LABEL_NONE, countBy, labelName, sortMarketingSkus,
   type MarketingSkuItem, type MarketingSkuLabel, type MarketingSkuListData, type MarketingSkuSort,
 } from "@/lib/marketing/sku-list";
 import { LabelBadge, LabelManagerModal } from "./label-manager";
@@ -202,7 +202,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
         if (!r.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Couldn't save"));
         done += Number(j.data?.updated) || 0;
       }
-      const bn = badgeMap.get(badgeId)?.name ?? "";
+      const bn = labelName(badgeMap.get(badgeId));
       toast.success(t(`ติดป้ายเสริม "${bn}" ให้ ${done} รุ่นแล้ว`, `Added badge "${bn}" to ${done} models`));
       setSelected(new Set());
     } catch (e) {
@@ -263,9 +263,9 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
 
   const labelOptions = useMemo(() => [
     { value: "", label: t("— ไม่มีป้าย —", "— No label —") },
-    ...labels.filter((l) => l.is_active).map((l) => ({ value: l.id, label: l.name, badge: l.icon ?? undefined })),
+    ...labels.filter((l) => l.is_active).map((l) => ({ value: l.id, label: labelName(l), badge: l.icon ?? undefined })),
   ], [labels, t]);
-  const groupOrder = useCallback((name: string) => labels.find((l) => l.name === name)?.sort_order ?? Number.MAX_SAFE_INTEGER, [labels]);
+  const groupOrder = useCallback((name: string) => labels.find((l) => labelName(l) === name)?.sort_order ?? Number.MAX_SAFE_INTEGER, [labels]);
 
   // ── columns ── (เรียงด้วยเมนู "เรียง" ด้านบน — ใช้ร่วมทุกหน้า/ทั้งการ์ด)
   const columns: MiniColumn<MarketingSkuItem>[] = [
@@ -324,7 +324,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
       {q.trim() ? t(`ไม่พบรุ่นที่ตรงกับ "${q.trim()}" ลองเปลี่ยนคำค้นหา`, `No models match "${q.trim()}" — try another search`) : t("ไม่มีรุ่นในกลุ่มนี้", "No models in this group")}
     </div>
   );
-  const bulkLabelName = bulkAsk ? (bulkAsk.labelId ? labelMap.get(bulkAsk.labelId)?.name ?? "?" : t("ไม่มีป้าย (ล้างป้าย)", "No label (clear label)")) : "";
+  const bulkLabelName = bulkAsk ? (bulkAsk.labelId ? labelName(labelMap.get(bulkAsk.labelId)) || "?" : t("ไม่มีป้าย (ล้างป้าย)", "No label (clear label)")) : "";
   const nBulk = bulkAsk?.ids.length.toLocaleString("th-TH") ?? "0";
 
   return (
@@ -383,7 +383,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               <div className="flex flex-1 flex-wrap gap-1.5">
                 {view === "work" && <span className="py-1 text-sm text-slate-500">{t("🛠 โหมดทำงาน — จัดงานเป็นชุด (Clearance / ลงเว็บ / อื่น ๆ) แล้วติ๊กว่าแต่ละรุ่นทำถึงไหน", "🛠 Work mode — group models into jobs (Clearance / Website / other), then tick how far each model has got")}</span>}
                 {view !== "work" && [{ key: LABEL_ALL, l: undefined as MarketingSkuLabel | undefined, text: t("ทั้งหมด", "All"), n: inBrand.length },
-                  ...labels.map((l) => ({ key: l.id, l, text: l.name, n: labelCounts.get(l.id) ?? 0 })),
+                  ...labels.map((l) => ({ key: l.id, l, text: labelName(l), n: labelCounts.get(l.id) ?? 0 })),
                   { key: LABEL_NONE, l: undefined, text: t("ยังไม่มีป้าย", "No label yet"), n: labelCounts.get(LABEL_NONE) ?? 0 },
                 ].filter((c) => c.key === LABEL_ALL || c.n > 0 || labelFilter === c.key || (c.l && c.l.is_active)).map((c) => {
                   const on = labelFilter === c.key;
@@ -418,7 +418,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 <select value={badgeFilter} onChange={(e) => setBadgeFilter(e.target.value)} aria-label={t("กรองป้ายเสริม", "Filter badges")}
                   className={`h-9 rounded-lg border px-2 text-sm ${badgeFilter ? "border-blue-400 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700"}`}>
                   <option value="">{t("ป้ายเสริม: ทั้งหมด", "Badges: all")}</option>
-                  {badges.map((b) => <option key={b.id} value={b.id}>{b.icon ? `${b.icon} ` : ""}{b.name} ({badgeUsage.get(b.id) ?? 0})</option>)}
+                  {badges.map((b) => <option key={b.id} value={b.id}>{b.icon ? `${b.icon} ` : ""}{labelName(b)} ({badgeUsage.get(b.id) ?? 0})</option>)}
                   <option value="__none">{t("ยังไม่มีป้ายเสริม", "No badge yet")}</option>
                 </select>
               )}
@@ -439,7 +439,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 rows={pageRows}
                 columns={columns}
                 rowKey={(it) => it.parent_sku_id}
-                groupBy={sort === "label" ? (it) => labelMap.get(it.label_id ?? "")?.name ?? t("ยังไม่มีป้าย", "No label yet") : undefined}
+                groupBy={sort === "label" ? (it) => labelName(labelMap.get(it.label_id ?? "")) || t("ยังไม่มีป้าย", "No label yet") : undefined}
                 groupLabel={t("ป้าย", "Label")}
                 groupOrder={groupOrder}
                 selectable={canManage}
@@ -472,7 +472,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 {badges.length > 0 && (
                   <div className="w-44 text-slate-800">
                     <SearchableSelect value="__pick" disabled={busy}
-                      options={[{ value: "__pick", label: t("＋ ติดป้ายเสริม", "＋ Add badge") }, ...badges.filter((b) => b.is_active).map((b) => ({ value: b.id, label: b.name, badge: b.icon ?? undefined }))]}
+                      options={[{ value: "__pick", label: t("＋ ติดป้ายเสริม", "＋ Add badge") }, ...badges.filter((b) => b.is_active).map((b) => ({ value: b.id, label: labelName(b), badge: b.icon ?? undefined }))]}
                       onChange={(v) => { if (v !== "__pick") void addBadgeBulk(selIds, v); }} />
                   </div>
                 )}

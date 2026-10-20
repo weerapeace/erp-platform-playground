@@ -18,7 +18,7 @@ const PAGE = 1000;   // PostgREST คืนได้สูงสุด 1000 แ�
 
 export async function loadMarketingSkuList(admin: Admin): Promise<{ data: MarketingSkuListData } | { error: string }> {
   const [labelsRes, brandsRes] = await Promise.all([
-    admin.from("marketing_sku_labels").select("id, kind, name, icon, color, description, sort_order, is_active").order("sort_order").order("name"),
+    admin.from("marketing_sku_labels").select("id, kind, name, name_en, icon, color, description, sort_order, is_active").order("sort_order").order("name"),
     admin.from("brands").select("id, name, color").eq("is_active", true).order("name"),
   ]);
   if (labelsRes.error || brandsRes.error) return { error: "โหลดข้อมูลไม่สำเร็จ: " + (labelsRes.error || brandsRes.error)!.message };

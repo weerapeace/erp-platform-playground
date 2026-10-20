@@ -2,7 +2,7 @@
 
 /**
  * ตั้งค่าป้ายการตลาด 2 แท็บ: ป้ายหลัก (Hero / Clearance … 1 ป้าย/รุ่น) · ป้ายเสริม (ชิปบนรูป หลายป้าย/รุ่น)
- *   เพิ่ม · แก้ (ชื่อ/ไอคอน/สี/คำอธิบาย) · ลากเรียงลำดับ · ลบ (รุ่นที่ติดป้ายนั้นกลายเป็น "ยังไม่มีป้าย")
+ *   เพิ่ม · แก้ (ชื่อ/ชื่ออังกฤษ/ไอคอน/สี/คำอธิบาย) · ลากเรียงลำดับ · ลบ (รุ่นที่ติดป้ายนั้นกลายเป็น "ยังไม่มีป้าย")
  * ของกลาง: ERPModal · ConfirmDialog · ColorInput · useDragReorder/DragHandle · Toast
  */
 import { useEffect, useState } from "react";
@@ -12,23 +12,23 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
-import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 
-export function LabelBadge({ label }: { label?: Pick<MarketingSkuLabel, "name" | "icon" | "color"> }) {
+export function LabelBadge({ label }: { label?: Pick<MarketingSkuLabel, "name" | "name_en" | "icon" | "color"> }) {
   const t = useT();
   if (!label) return <span className="text-xs text-slate-400">{t("ยังไม่มีป้าย", "No label yet")}</span>;
   return (
     <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
       style={{ background: `${label.color}1f`, color: label.color, border: `1px solid ${label.color}55` }}>
-      {label.icon && <span>{label.icon}</span>}{label.name}
+      {label.icon && <span>{label.icon}</span>}{labelName(label)}
     </span>
   );
 }
 
-type Draft = { name: string; icon: string; color: string; description: string };
-const toDraft = (l: MarketingSkuLabel): Draft => ({ name: l.name, icon: l.icon ?? "", color: l.color, description: l.description ?? "" });
-const EMPTY: Draft = { name: "", icon: "", color: "#0ea5e9", description: "" };
-const same = (a: Draft, b: Draft) => a.name === b.name && a.icon === b.icon && a.color === b.color && a.description === b.description;
+type Draft = { name: string; name_en: string; icon: string; color: string; description: string };
+const toDraft = (l: MarketingSkuLabel): Draft => ({ name: l.name, name_en: l.name_en ?? "", icon: l.icon ?? "", color: l.color, description: l.description ?? "" });
+const EMPTY: Draft = { name: "", name_en: "", icon: "", color: "#0ea5e9", description: "" };
+const same = (a: Draft, b: Draft) => a.name === b.name && a.name_en === b.name_en && a.icon === b.icon && a.color === b.color && a.description === b.description;
 
 export type LabelKind = "status" | "badge" | "pillar";
 type Kind = LabelKind;
@@ -86,7 +86,7 @@ export function LabelListEditor({ kind, items, canEdit, onChanged, onDirtyChange
   const doDelete = async () => {
     if (!delTarget) return;
     const res = await send("DELETE", `/api/marketing/sku-labels?id=${delTarget.id}`);
-    if (res) { toast.success(t(`ลบป้าย "${delTarget.name}" แล้ว`, `Label "${delTarget.name}" deleted`)); setDelTarget(null); onChanged(); }
+    if (res) { toast.success(t(`ลบป้าย "${delTarget.name}" แล้ว`, `Label "${labelName(delTarget)}" deleted`)); setDelTarget(null); onChanged(); }
   };
   const usage = delTarget?.usage_count ?? 0;
 
@@ -116,8 +116,10 @@ export function LabelListEditor({ kind, items, canEdit, onChanged, onDirtyChange
                   {canEdit && <DragHandle {...handleProps(i)} title={t("ลากเพื่อเรียงลำดับ", "Drag to reorder")} />}
                   <input value={d.icon} onChange={(e) => set({ icon: e.target.value })} disabled={!canEdit} maxLength={8} placeholder="🔥"
                     className={`${input} w-12 text-center`} title={t("ไอคอน (อีโมจิ)", "Icon (emoji)")} />
-                  <input value={d.name} onChange={(e) => set({ name: e.target.value })} disabled={!canEdit} maxLength={60} placeholder={t("ชื่อป้าย", "Label name")}
-                    className={`${input} flex-1 min-w-[10rem]`} />
+                  <input value={d.name} onChange={(e) => set({ name: e.target.value })} disabled={!canEdit} maxLength={60} placeholder={t("ชื่อป้าย (ไทย)", "Label name (Thai)")}
+                    className={`${input} flex-1 min-w-[10rem]`} title={t("ชื่อป้าย (ภาษาไทย)", "Label name (Thai)")} />
+                  <input value={d.name_en} onChange={(e) => set({ name_en: e.target.value })} disabled={!canEdit} maxLength={60} placeholder={t("English (ไม่บังคับ)", "English (optional)")}
+                    className={`${input} flex-1 min-w-[8rem]`} title={t("ชื่ออังกฤษ — โชว์ตอนกด EN · ว่าง = ใช้ชื่อไทย", "English name — shown in EN mode · empty = use the Thai name")} />
                   <div className="w-36">{canEdit ? <ColorInput value={d.color} onChange={(c) => set({ color: c })} /> : <span className="inline-block w-6 h-6 rounded-md border border-slate-200" style={{ background: d.color }} />}</div>
                   <span className="text-xs text-slate-400 w-16 text-right">{l.usage_count ?? 0} {kind === "pillar" ? t("ชิ้น", "pcs") : t("รุ่น", "models")}</span>
                   {canEdit && (
@@ -132,7 +134,7 @@ export function LabelListEditor({ kind, items, canEdit, onChanged, onDirtyChange
                 <div className="mt-2 flex items-center gap-2 pl-0 sm:pl-8">
                   <input value={d.description} onChange={(e) => set({ description: e.target.value })} disabled={!canEdit} maxLength={200}
                     placeholder={t("คำอธิบาย (ไม่บังคับ) เช่น สินค้าตัวชูโรง ดันขายเต็มที่", "Description (optional) e.g. hero product, push hard")} className={`${input} flex-1 text-xs h-8`} />
-                  <LabelBadge label={{ name: d.name || t("ตัวอย่าง", "Preview"), icon: d.icon || null, color: d.color }} />
+                  <LabelBadge label={{ name: d.name || t("ตัวอย่าง", "Preview"), name_en: d.name_en, icon: d.icon || null, color: d.color }} />
                 </div>
               </div>
             );
@@ -144,8 +146,10 @@ export function LabelListEditor({ kind, items, canEdit, onChanged, onDirtyChange
               <div className="flex flex-wrap items-center gap-2">
                 <input value={adding.icon} onChange={(e) => setAdding({ ...adding, icon: e.target.value })} maxLength={8} placeholder="⭐"
                   className={`${input} w-12 text-center`} />
-                <input value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} maxLength={60} placeholder={t("ชื่อป้าย เช่น New Arrival", "Label name e.g. New Arrival")}
+                <input value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} maxLength={60} placeholder={t("ชื่อป้าย (ไทย) เช่น สินค้าใหม่", "Label name (Thai) e.g. สินค้าใหม่")}
                   onKeyDown={(e) => { if (e.key === "Enter") void addRow(); }} className={`${input} flex-1 min-w-[10rem]`} />
+                <input value={adding.name_en} onChange={(e) => setAdding({ ...adding, name_en: e.target.value })} maxLength={60} placeholder={t("English เช่น New Arrival", "English e.g. New Arrival")}
+                  onKeyDown={(e) => { if (e.key === "Enter") void addRow(); }} className={`${input} flex-1 min-w-[8rem]`} />
                 <div className="w-36"><ColorInput value={adding.color} onChange={(c) => setAdding({ ...adding, color: c })} /></div>
                 <button type="button" onClick={addRow} disabled={busy || !adding.name.trim()}
                   className="h-9 rounded-lg bg-slate-800 px-3 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-30">{t("เพิ่มป้าย", "Add label")}</button>
@@ -157,7 +161,7 @@ export function LabelListEditor({ kind, items, canEdit, onChanged, onDirtyChange
         </div>
 
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={doDelete} loading={busy} variant="danger"
-        title={t(`ลบป้าย "${delTarget?.name ?? ""}"?`, `Delete label "${delTarget?.name ?? ""}"?`)}
+        title={t(`ลบป้าย "${delTarget?.name ?? ""}"?`, `Delete label "${labelName(delTarget)}"?`)}
         message={usage > 0
           ? (delTarget?.kind === "pillar"
             ? t(`มี ${usage} ชิ้นคอนเทนต์ที่ใช้แนวนี้ — จะกลายเป็น "ไม่ระบุแนว" (ตัวคอนเทนต์ไม่ถูกลบ)`, `${usage} content pieces use this pillar — they'll become "no pillar" (the content isn't deleted)`)
