@@ -43,8 +43,17 @@ import { CardBadgeSelect } from "@/components/website-card-badges";
 import type { LinkedRow } from "@/lib/website-listing-linked";
 import { STOCK_STATUS_OPTIONS } from "@/lib/website-listing-fields";
 import { SizeGridEditor, type SizeGridView } from "@/components/website-size-grid";
+import { MoneyInput } from "@/components/money-input";
+import { renameCardColor } from "@/lib/website-card-colors";
 
-type Variant = { id: string; code: string; label: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
+/**
+ * label = ชื่อสีที่เว็บโชว์ (ไทยก่อน) · colorTh/colorEn = ค่าดิบใน SKU (สี (ไทย) / ช่อง Color) ให้แก้ในแถวสี
+ * labelEn = ชื่ออังกฤษที่เว็บ /en ใช้ตอนนี้ (Color ถ้าเป็นอังกฤษ → ทะเบียนสีกลาง)
+ */
+type Variant = { id: string; code: string; label: string; colorTh: string; colorEn: string; labelEn: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
+/** ✏️ ค่าที่กำลังแก้ในแถวสี (ยังไม่บันทึก) — price เป็นข้อความดิบจาก MoneyInput */
+type SkuDraft = { colorTh: string; colorEn: string; price: string };
+const THAI_RE = /[฀-๿]/;
 type DetailItemInfo = { id: string; label: string; source: string; enabled: boolean; defaultLabel: string };
 type OptionItem = { id: string; label: string; swatch?: string | null };
 type WebOptions = { label: string; items: OptionItem[] } | null;
@@ -192,6 +201,9 @@ export function ParentWebListings({
   const [tabOf, setTabOf] = useState<Record<string, Tab>>({});
   // ค่าที่บันทึกล่าสุดต่อร้าน (เทียบหา "มีของแก้ค้าง" → ปุ่ม 💾 บันทึก แถบล่าง)
   const [savedSnap, setSavedSnap] = useState<Record<string, string>>({});
+  // ✏️ ชื่อสี/ราคา SKU ที่แก้ค้างในแถวสี (key = sku id) + กำลังบันทึก
+  const [skuDraft, setSkuDraft] = useState<Record<string, SkuDraft>>({});
+  const [savingSkus, setSavingSkus] = useState(false);
 
   /** silent = ดึงค่าใหม่หลังบันทึก (ไม่ขึ้น "กำลังโหลด" ทั้งแผง) */
   const load = useCallback(
@@ -279,6 +291,50 @@ export function ParentWebListings({
     } catch {
       patchShop(s.shopId, { nameRule: s.nameRule });
       toast.error("บันทึกกฎชื่อไม่สำเร็จ");
+    }
+  };
+
+  // ✏️ ชื่อสี ไทย/อังกฤษ + ราคา ของ SKU — แก้ในแถวสี แล้วบันทึกพร้อมปุ่ม 💾 แถบล่าง (แก้ที่ SKU ใน ERP จริง · ทุกร้านเห็น)
+  const draftOf = (v: Variant): SkuDraft => skuDraft[v.id] ?? { colorTh: v.colorTh, colorEn: v.colorEn, price: v.price ? String(v.price) : "" };
+  const draftChanged = (v: Variant, d: SkuDraft) => d.colorTh.trim() !== v.colorTh || d.colorEn.trim() !== v.colorEn || (d.price.trim() !== "" && Number(d.price) !== v.price);
+  const setDraft = (v: Variant, p: Partial<SkuDraft>) => setSkuDraft((m) => ({ ...m, [v.id]: { ...draftOf(v), ...p } }));
+  const dirtySkus = (data?.variants ?? []).filter((v) => skuDraft[v.id] && draftChanged(v, skuDraft[v.id]));
+  /** บันทึกชื่อสี/ราคาที่แก้ → คืนชื่อสีที่เว็บโชว์ที่เปลี่ยน (ให้การตั้งค่าการ์ดตามไป) · null = ไม่สำเร็จ */
+  const saveSkus = async (): Promise<{ from: string; to: string }[] | null> => {
+    if (!parentId || !dirtySkus.length) return [];
+    for (const v of dirtySkus) {
+      const d = skuDraft[v.id];
+      if (d.price.trim() !== "" && !(Number(d.price) > 0)) {
+        toast.error(`ราคา ${v.code} ต้องมากกว่า 0`);
+        return null;
+      }
+    }
+    setSavingSkus(true);
+    try {
+      const r = await apiFetch("/api/parent-web-listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parentId,
+          action: "skuFields",
+          items: dirtySkus.map((v) => {
+            const d = skuDraft[v.id];
+            return { skuId: v.id, colorTh: d.colorTh.trim(), colorEn: d.colorEn.trim(), ...(d.price.trim() !== "" ? { price: Number(d.price) } : {}) };
+          }),
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        toast.error(j?.error || "บันทึกชื่อสี/ราคาไม่สำเร็จ");
+        return null;
+      }
+      toast.success(`บันทึกชื่อสี/ราคา ${dirtySkus.length} สีแล้ว — แก้ที่ SKU ใน ERP (ทุกร้านเห็นค่าใหม่)`);
+      return (j.renames ?? []) as { from: string; to: string }[];
+    } catch {
+      toast.error("เชื่อมต่อไม่ได้");
+      return null;
+    } finally {
+      setSavingSkus(false);
     }
   };
 
@@ -451,16 +507,38 @@ export function ParentWebListings({
   // 💾 ปุ่มบันทึกอยู่แถบล่างของหน้าต่าง (ของกลาง footer-save) — เทียบกับค่าที่บันทึกล่าสุดต่อร้าน
   const visibleShops = (data?.shops ?? []).filter((s) => !shopId || s.shopId === shopId);
   const dirtyShops = visibleShops.filter((s) => s.listed && savedSnap[s.shopId] !== undefined && snapOf(s) !== savedSnap[s.shopId]);
-  const saveDirty = async () => {
-    let any = false;
-    for (const s of dirtyShops) any = (await saveShop(s)) || any;
-    // ดึงค่าใหม่ (ชื่อ/ราคาที่ลูกค้าเห็น · สิ่งที่ต้องแก้) + บอกหน้าที่เปิดอยู่
-    if (any) {
+  /** ชื่อสีที่เว็บโชว์เปลี่ยน → การตั้งค่าการ์ดของร้านที่แก้ค้างต้องใช้ชื่อใหม่ด้วย (ไม่งั้นบันทึกร้านทับชื่อเก่ากลับ) */
+  const withRenames = (s: ShopState, renames: { from: string; to: string }[]): ShopState => {
+    const cc = renames.reduce((c, r) => renameCardColor(c, r.from, r.to), s.webCardColors);
+    return cc === s.webCardColors ? s : { ...s, webCardColors: cc };
+  };
+  /** ปุ่มบันทึกในกล่องร้าน (เปิดนอก drawer) — ชื่อสี/ราคา SKU + ร้านนี้ */
+  const saveOne = async (s: ShopState) => {
+    const renames = await saveSkus();
+    if (renames === null) return;
+    const ok = await saveShop(withRenames(s, renames));
+    if (ok || dirtySkus.length) {
       await load(true);
+      if (dirtySkus.length) setSkuDraft({});
       onChanged?.();
     }
   };
-  const inFooter = useFooterSave(parentId && data ? { label: "เว็บไซต์", dirty: dirtyShops.length > 0, saving: savingShop !== null, onSave: saveDirty } : null);
+  const saveDirty = async () => {
+    // ✏️ ชื่อสี/ราคา SKU ก่อน — ไม่สำเร็จ = หยุด (ไม่บันทึกครึ่ง ๆ)
+    const renames = await saveSkus();
+    if (renames === null) return;
+    let any = dirtySkus.length > 0;
+    for (const s of dirtyShops) any = (await saveShop(withRenames(s, renames))) || any;
+    // ดึงค่าใหม่ (ชื่อ/ราคาที่ลูกค้าเห็น · สิ่งที่ต้องแก้) + บอกหน้าที่เปิดอยู่ · ล้างค่าที่แก้ค้างหลังได้ค่าใหม่ (ช่องไม่กระพริบกลับค่าเก่า)
+    if (any) {
+      await load(true);
+      if (dirtySkus.length) setSkuDraft({});
+      onChanged?.();
+    }
+  };
+  const inFooter = useFooterSave(
+    parentId && data ? { label: "เว็บไซต์", dirty: dirtyShops.length > 0 || dirtySkus.length > 0, saving: savingShop !== null || savingSkus, onSave: saveDirty } : null
+  );
 
   if (!parentId) return <div className="text-sm text-slate-400 py-8 text-center">บันทึกรุ่นก่อน แล้วค่อยตั้งค่าการขายบนเว็บ</div>;
   if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
@@ -673,7 +751,7 @@ export function ParentWebListings({
       {data.variants.length > 0 && (
         <div>
           <div className="text-xs font-medium text-slate-600 mb-1.5">
-            ตัวเลือก (สี) — {data.variants.length} แบบ · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง
+            ตัวเลือก (สี) — {data.variants.length} แบบ · ✏️ แก้ชื่อสี ไทย/EN + ราคา ในแถวได้เลย (แก้ที่ SKU ใน ERP — ทุกร้านเห็น · กด 💾 บันทึก) · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง
           </div>
           {(() => {
             const all = colorLabels();
@@ -715,12 +793,64 @@ export function ParentWebListings({
                     ) : (
                       <div className="w-10 h-10 rounded bg-slate-100 shrink-0" />
                     )}
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm text-slate-800 truncate">{v.label}</div>
-                      <div className="text-xs text-slate-400">
-                        {v.code} · {baht(v.price)} · สต๊อก {v.qty} · รูปใน SKU {v.gallery.length}
-                      </div>
-                    </div>
+                    {/* ✏️ ชื่อสี ไทย / อังกฤษ + ราคา — แก้ที่ SKU ใน ERP (บันทึกด้วยปุ่ม 💾 แถบล่าง) */}
+                    {(() => {
+                      const d = draftOf(v);
+                      const changed = !!skuDraft[v.id] && draftChanged(v, d);
+                      const enTyped = d.colorEn.trim();
+                      const enHint = !enTyped || THAI_RE.test(enTyped) ? (v.labelEn ? `เว็บ EN ตอนนี้: ${v.labelEn} (แปลจากทะเบียนสี)` : "ว่าง = เว็บ EN ใช้ชื่อไทย") : "";
+                      const box = "flex items-center border border-slate-200 rounded-lg bg-white focus-within:border-orange-400 focus-within:ring-1 focus-within:ring-orange-200";
+                      const tag = "text-[10px] font-medium text-slate-400 pl-2 pr-1 shrink-0";
+                      return (
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <label className={`${box} w-44 max-w-full`} title="ชื่อสีภาษาไทย (ช่อง สี (ไทย) ของ SKU) — เว็บหน้าไทยโชว์ชื่อนี้ · ว่าง = ใช้ชื่ออังกฤษ">
+                              <span className={tag}>ไทย</span>
+                              <input
+                                value={d.colorTh}
+                                maxLength={80}
+                                placeholder={v.colorEn || "ชื่อสีไทย"}
+                                onChange={(e) => setDraft(v, { colorTh: e.target.value })}
+                                aria-label={`ชื่อสีภาษาไทย ${v.code}`}
+                                className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 py-1 pr-2 outline-none"
+                              />
+                            </label>
+                            <label className={`${box} w-44 max-w-full`} title="ชื่อสีภาษาอังกฤษ (ช่อง Color ของ SKU) — เว็บหน้า /en โชว์ชื่อนี้ · เป็นภาษาไทย/ว่าง = แปลจากทะเบียนสีกลาง">
+                              <span className={tag}>EN</span>
+                              <input
+                                value={d.colorEn}
+                                maxLength={80}
+                                placeholder={v.labelEn || "Color name"}
+                                onChange={(e) => setDraft(v, { colorEn: e.target.value })}
+                                aria-label={`ชื่อสีภาษาอังกฤษ ${v.code}`}
+                                className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 py-1 pr-2 outline-none"
+                              />
+                            </label>
+                            <label className={`${box} w-28`} title="ราคาขายของ SKU นี้ (ราคากลาง ใช้ทุกช่องทาง)">
+                              <span className={tag}>฿</span>
+                              <MoneyInput
+                                value={d.price}
+                                onChange={(raw) => setDraft(v, { price: raw })}
+                                placeholder="ราคา"
+                                className="min-w-0 w-full bg-transparent text-sm text-right text-slate-800 py-1 pr-2 outline-none tabular-nums"
+                              />
+                            </label>
+                            {changed && (
+                              <span className="flex items-center gap-1 text-[11px] text-amber-600">
+                                ● ยังไม่บันทึก
+                                <button type="button" onClick={() => setSkuDraft((m) => { const n = { ...m }; delete n[v.id]; return n; })} className="text-slate-400 hover:text-slate-600 underline">
+                                  คืนค่าเดิม
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400">
+                            {v.code} · สต๊อก {v.qty} · รูปใน SKU {v.gallery.length}
+                            {enHint && <span className="text-slate-400"> · 🌐 {enHint}</span>}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
                       <button
                         type="button"
@@ -1068,16 +1198,16 @@ export function ParentWebListings({
         {/* อยู่ในหน้าต่าง (drawer) = ปุ่มบันทึกอยู่แถบล่างแล้ว · เปิดนอก drawer = ปุ่มในกล่องตามเดิม */}
         <div className="mt-3">
           {inFooter ? (
-            dirtyShops.some((d) => d.shopId === s.shopId) && (
+            (dirtyShops.some((d) => d.shopId === s.shopId) || dirtySkus.length > 0) && (
               <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">มีการแก้ไขที่ยังไม่บันทึก — กด 💾 บันทึก ที่แถบล่าง</div>
             )
           ) : (
             <button
-              onClick={() => void saveShop(s).then((ok) => ok && (void load(true), onChanged?.()))}
-              disabled={savingShop === s.shopId}
+              onClick={() => void saveOne(s)}
+              disabled={savingShop === s.shopId || savingSkus}
               className="bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm rounded-lg px-5 py-2"
             >
-              {savingShop === s.shopId ? "กำลังบันทึก…" : "บันทึก"}
+              {savingShop === s.shopId || savingSkus ? "กำลังบันทึก…" : "บันทึก"}
             </button>
           )}
         </div>

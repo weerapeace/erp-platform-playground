@@ -6,6 +6,8 @@
  *                    + SKU ลูก (สต๊อก + รูปปก + แกลเลอรีรูปของ SKU ให้เลือกเป็นรูปเว็บรายสี) + ยอดขายเว็บ
  * POST { parentId, shopId, action:"add" }      → เพิ่มรุ่นเข้าร้านนั้น (ปิดไว้ก่อน)
  * POST { parentId, shopId, patch:{...} }        → แก้ override ของร้านนั้น (store_listings) แล้วสั่งเว็บร้านล้างแคช
+ * POST { parentId, action:"skuFields", items:[{ skuId, colorTh?, colorEn?, price? }] }
+ *                                               → ✏️ แก้ชื่อสี ไทย/อังกฤษ + ราคาขาย ที่ SKU ใน ERP จริง (lib/website-sku-fields · สิทธิ์ฟิลด์ + audit + การ์ดสีตาม)
  * POST { parentId, shopId, action:"nameRule", nameRule:{removeBrand?,removeCollection?,removeCode?,removeParens?,removeParenMarks?} }
  *                                               → กฎชื่อของร้าน (shops.field_map.name — ใช้ทุกสินค้าในร้าน)
  * GET คืน autoName ต่อร้าน = ชื่อที่เว็บใช้จริงเมื่อเว้นช่องชื่อว่าง (resolveName ตัวเดียวกับเว็บ)
@@ -25,8 +27,10 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeBanners } from "@/lib/website-banners";
-import { normalizeCardColors } from "@/lib/website-card-colors";
+import { isEmptyCardColors, normalizeCardColors, renameCardColor } from "@/lib/website-card-colors";
 import { normalizeHero } from "@/lib/website-hero";
+import { parseSkuFieldsInput, planSkuFields, type SkuFieldsRow } from "@/lib/website-sku-fields";
+import { getFieldAccess } from "@/lib/field-permissions";
 import { productPageUrl } from "@/lib/website-links";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
@@ -51,7 +55,7 @@ import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
 import { parseCompartments } from "@/lib/fit-check";
 import { CHILD_SELECT, sortKids, type ChildSku } from "@/lib/website-field-map";
 import { SwatchIndex, rowToSwatchEntry, swatchCss, SWATCH_SELECT } from "@/lib/color-swatch";
-import { baseColor, buildSizeGrid, cleanVariantOff, variantOf } from "@/lib/website-size-options";
+import { baseColor, baseColorEn, buildSizeGrid, cleanVariantOff, variantOf } from "@/lib/website-size-options";
 import { resolveSizeGuide } from "@/lib/website-size-guides";
 import { readSizeGuidesMany } from "@/lib/website-size-guides-db";
 import { categoryPathLabel } from "@/lib/website-category-tree";
@@ -85,7 +89,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     sb.from("parent_skus_v2").select(PARENT_SELECT).eq("id", parentId).maybeSingle(),
     sb.from("store_listings").select("*").eq("parent_sku_id", parentId),
     sb.from("shops").select("id, name, slug, is_default, theme, theme_draft, field_map").order("is_default", { ascending: false }),
-    sb.from("skus_v2").select("id, code, color, list_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
+    sb.from("skus_v2").select("id, code, color, color_th, list_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
     loadParentWebFields(sb),
     loadShopSiteUrls(sb),
     // SKU ลูกแบบที่เว็บใช้ (คำนวณราคา/รูป/สีที่ลูกค้าเห็นจริง) + ทะเบียนสีกลาง (จุดสี)
@@ -99,7 +103,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const parentRow = parent as unknown as ParentRow;
   await attachNameRefs(sb, [parentRow]);
   // 📐 SKU ไซส์ (มี variant_option) ไม่ต้องมีแถวรูปของตัวเอง — เว็บใช้รูปของตัวหลักของสีนั้น (แถวรูปจะได้ไม่ซ้ำสีละหลายแถว)
-  const allKids = (children ?? []) as (Record<string, unknown> & { id: string; code: string | null; color: string | null })[];
+  const allKids = (children ?? []) as (Record<string, unknown> & { id: string; code: string | null; color: string | null; color_th: string | null })[];
   const baseColors = new Set(allKids.filter((k) => !variantOf(k)).map((k) => baseColor(k)));
   const kids = allKids.filter((k) => !variantOf(k) || !baseColors.has(baseColor(k)));
   const webKids = (mapKids ?? []) as ChildSku[];
@@ -136,10 +140,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const variants = kids.map((k, i) => {
     const cover = (k.cover_image_r2_key as string | null) ?? null;
     const extra = gallery.get(k.id as string) ?? [];
+    const label = baseColor(k);
     return {
       id: k.id as string,
       code: (k.code as string) ?? "",
-      label: baseColor(k) || `แบบ ${i + 1}`,
+      /** ชื่อสีที่เว็บโชว์ (ไทยก่อน) — ตัวเดียวกับเว็บ (lib/website-size-options baseColor) */
+      label: label || `แบบ ${i + 1}`,
+      /** ✏️ ค่าดิบใน SKU ให้แก้ในแถวสี: สี (ไทย) = color_th · ชื่ออังกฤษ = color (ช่อง Color) */
+      colorTh: String(k.color_th ?? "").trim(),
+      colorEn: String(k.color ?? "").trim(),
+      /** 🌐 ชื่ออังกฤษที่เว็บใช้ตอนนี้ (ช่อง Color ถ้าเป็นอังกฤษ → ไม่งั้นทะเบียนสีกลาง · ว่าง = ใช้ชื่อไทย) */
+      labelEn: baseColorEn(k) || (label ? swatches.english(label) : ""),
       price: Number(k.list_price) || 0,
       qty: stock.get(k.id as string) ?? 0,
       erpImageKey: cover,
@@ -320,11 +331,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  let b: { parentId?: string; shopId?: string; action?: string; patch?: Patch; nameRule?: Record<string, unknown> };
+  let b: { parentId?: string; shopId?: string; action?: string; patch?: Patch; nameRule?: Record<string, unknown>; items?: unknown };
   try {
     b = await request.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
+  }
+
+  // ✏️ แก้ชื่อสี (ไทย/อังกฤษ) + ราคาขาย ของ SKU ลูก จากแถวสี — แก้ที่ SKU ใน ERP จริง (ไม่ผูกร้าน)
+  if (b.action === "skuFields") {
+    if (!b.parentId) return NextResponse.json({ error: "ต้องระบุ parentId" }, { status: 400 });
+    return saveSkuFields(request, supabaseAdmin(), b.parentId, b.items, user);
   }
   if (!b.parentId || !b.shopId) return NextResponse.json({ error: "ต้องระบุ parentId + shopId" }, { status: 400 });
 
@@ -369,4 +386,68 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // เว็บร้านแคชรายการสินค้าไว้ → สั่งล้างให้เห็นผลทันที (ล้มเหลว = เว็บอัปเดตเองใน ≤60 วิ)
   const purged = await purgeStorefrontCache(sb, b.shopId);
   return NextResponse.json({ ok: true, purged });
+}
+
+/**
+ * ✏️ action "skuFields" — { parentId, items:[{ skuId, colorTh?, colorEn?, price? }] }
+ * สี (ไทย) → color_th · ชื่ออังกฤษ → color (ช่อง Color) · ราคา → list_price — ของกลาง lib/website-sku-fields (กฎ + SKU ไซส์ตาม + กันชื่อซ้ำ)
+ * เคารพสิทธิ์ระดับฟิลด์ของ skus_v2 (ทะเบียนฟิลด์กลาง) · audit ค่าเก่า/ใหม่ทีละ SKU · ชื่อในการตั้งค่าการ์ดทุกร้านเปลี่ยนตาม · ล้างแคชเว็บร้าน
+ */
+async function saveSkuFields(
+  request: NextRequest,
+  sb: ReturnType<typeof supabaseAdmin>,
+  parentId: string,
+  rawItems: unknown,
+  user: { id: string; email?: string | null } | null
+): Promise<NextResponse> {
+  const inputs = parseSkuFieldsInput(rawItems);
+  if (typeof inputs === "string") return NextResponse.json({ error: inputs }, { status: 400 });
+
+  const { data: rows, error: loadErr } = await sb
+    .from("skus_v2")
+    .select("id, code, color, color_th, list_price, attribute_values")
+    .eq("parent_sku_id", parentId)
+    .eq("is_active", true);
+  if (loadErr) return NextResponse.json({ error: "โหลด SKU ไม่สำเร็จ" }, { status: 500 });
+  const plan = planSkuFields((rows ?? []) as SkuFieldsRow[], inputs);
+  if ("error" in plan) return NextResponse.json({ error: plan.error }, { status: 400 });
+  if (!plan.updates.length) return NextResponse.json({ ok: true, updated: 0 });
+
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ช่องที่ role นี้แก้ไม่ได้ = ไม่บันทึกเลยทั้งชุด (ไม่บันทึกครึ่ง ๆ)
+  const access = await getFieldAccess(request, sb, "skus_v2");
+  const blocked = [...new Set(plan.updates.flatMap((u) => Object.keys(u.patch)))].filter((c) => access.readonlyCols.includes(c));
+  if (blocked.length) {
+    const names: Record<string, string> = { color_th: "สี (ไทย)", color: "ชื่อสีอังกฤษ", list_price: "ราคาขาย" };
+    return NextResponse.json({ error: `คุณไม่มีสิทธิ์แก้ ${blocked.map((c) => names[c] ?? c).join(", ")} ของ SKU` }, { status: 403 });
+  }
+
+  for (const u of plan.updates) {
+    const { error } = await sb.from("skus_v2").update(u.patch).eq("id", u.id).eq("parent_sku_id", parentId);
+    if (error) return NextResponse.json({ error: `บันทึก ${u.code} ไม่สำเร็จ` }, { status: 500 });
+    await writeAudit(sb, {
+      action: "update",
+      entityType: "skus_v2",
+      entityId: u.id,
+      actorId: user?.id ?? null,
+      actorName: user?.email ?? null,
+      metadata: { via: "web_listing_color_row", parent_sku_id: parentId, sku_code: u.code, changes: u.changes },
+    });
+  }
+
+  // ชื่อสีที่เว็บโชว์เปลี่ยน → ชื่อในการตั้งค่าการ์ด (สีที่โชว์/สีหลัก) ทุกร้านเปลี่ยนตาม ไม่งั้นสีนั้นหลุดจากการ์ด
+  const { data: lst } = await sb.from("store_listings").select("shop_id, web_card_colors").eq("parent_sku_id", parentId);
+  const listings = (lst ?? []) as { shop_id: string; web_card_colors: unknown }[];
+  if (plan.renames.length) {
+    for (const l of listings) {
+      const cur = normalizeCardColors(l.web_card_colors);
+      const next = plan.renames.reduce((cc, r) => renameCardColor(cc, r.from, r.to), cur);
+      if (next === cur) continue;
+      await sb.from("store_listings").update({ web_card_colors: isEmptyCardColors(next) ? null : next }).eq("shop_id", l.shop_id).eq("parent_sku_id", parentId);
+      await writeAudit(sb, { action: "update", entityType: "store_listing", entityId: parentId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { shopId: l.shop_id, kind: "card_colors_rename", renames: plan.renames } });
+    }
+  }
+  // เว็บร้านที่ขายรุ่นนี้ล้างแคช → เห็นชื่อ/ราคาใหม่ทันที (ล้มเหลว = อัปเดตเองใน ≤60 วิ)
+  const shopIds = [...new Set(listings.map((l) => l.shop_id))];
+  const purged = (await Promise.all(shopIds.map((id) => purgeStorefrontCache(sb, id)))).every(Boolean);
+  return NextResponse.json({ ok: true, updated: plan.updates.length, renames: plan.renames, purged });
 }

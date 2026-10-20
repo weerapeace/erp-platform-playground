@@ -34,6 +34,23 @@ export function normalizeCardColors(raw: unknown): CardColors {
 export const isEmptyCardColors = (c: CardColors) => c.colors === null && c.main === null;
 
 /**
+ * ✏️ เปลี่ยนชื่อสี (แก้ชื่อสีไทยของ SKU) → ชื่อในการตั้งค่าการ์ดต้องตามไปด้วย ไม่งั้นสีนั้นหลุดจากการ์ด
+ * ไม่มีชื่อเดิมอยู่ = คืนตัวเดิม (เทียบด้วย === ได้ว่าเปลี่ยนไหม)
+ */
+export function renameCardColor(cc: CardColors, from: string, to: string): CardColors {
+  const f = norm(from);
+  const t = to.trim();
+  if (!f || !t || f === norm(t)) return cc;
+  const hitColors = cc.colors?.some((c) => norm(c) === f) ?? false;
+  const hitMain = !!cc.main && norm(cc.main) === f;
+  if (!hitColors && !hitMain) return cc;
+  return {
+    colors: cc.colors ? [...new Set(cc.colors.map((c) => (norm(c) === f ? t : c)))] : null,
+    main: hitMain ? t : cc.main,
+  };
+}
+
+/**
  * แปลงเป็น id ตัวเลือกของสินค้าบนเว็บ (ใช้ใน products API)
  * @returns show = id ที่โชว์บนการ์ด (เรียงตามที่ตั้ง) · main = id สีหลัก — ไม่ได้ตั้ง/หาไม่เจอ = undefined
  */

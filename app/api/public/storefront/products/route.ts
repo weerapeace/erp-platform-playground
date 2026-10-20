@@ -298,8 +298,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               })(),
               items: r.options.items.map((it) => {
                 const spec = it.swatch ? null : swatches.resolve(it.label);
-                // 🌐 ชื่อสีภาษาอังกฤษจากทะเบียนสีกลาง (กรมท่า → Navy · สีผสมแปลทีละคำ)
-                const labelEn = swatches.english(it.label);
+                // 🌐 ชื่อสีภาษาอังกฤษ: ช่อง Color ของ SKU (แก้ได้ในแถวสีของแท็บ 🛍) → ไม่มี = ทะเบียนสีกลาง (กรมท่า → Navy · สีผสมแปลทีละคำ)
+                const labelEn = it.label_en || swatches.english(it.label);
                 return {
                   ...it,
                   ...(labelEn ? { label_en: labelEn } : {}),

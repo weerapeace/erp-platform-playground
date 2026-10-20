@@ -13,7 +13,7 @@ import { normalizeWebCollections, type WebCollection } from "@/lib/website-colle
 import { carryTranslations } from "@/lib/content-i18n";
 import { cleanParents, flattenTree } from "@/lib/website-category-tree";
 import { cleanTagRules, hasManualCategories } from "@/lib/website-tag-categories";
-import { baseColor, buildSizeGrid, cleanVariantOff, colorAllOff, type SizeGrid } from "@/lib/website-size-options";
+import { baseColor, baseColorEn, buildSizeGrid, cleanVariantOff, colorAllOff, type SizeGrid } from "@/lib/website-size-options";
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
 
@@ -300,7 +300,10 @@ export interface ParentRow {
 export interface ChildSku {
   id: string;
   code: string | null;
+  /** ชื่อสีหลัก / ภาษาอังกฤษ (ช่อง Color) — เว็บหน้า /en ใช้ชื่อนี้ */
   color: string | null;
+  /** ชื่อสีภาษาไทย — เว็บโชว์ชื่อนี้ (ว่าง = color) · lib/website-size-options baseColor */
+  color_th?: string | null;
   /** ลำดับที่อยากให้ตัวเลือกเรียง (น้อยไปมาก) — ไม่ตั้งไว้ = เรียงตามที่ DB คืนมา */
   color_index?: number | null;
   list_price: number | string | null;
@@ -352,7 +355,7 @@ export function productSpecAttrs(p: ParentRow): Record<string, string> {
 }
 
 export const CHILD_SELECT =
-  "id, code, color, color_index, list_price, fake_price, cover_image_r2_key, parent_sku_id, attribute_values";
+  "id, code, color, color_th, color_index, list_price, fake_price, cover_image_r2_key, parent_sku_id, attribute_values";
 
 /**
  * 🏷 ราคาเต็มขีดฆ่า (comparePrice) ที่ส่งให้เว็บร้าน
@@ -522,18 +525,20 @@ function resolveOptions(
   map: FieldMap,
   kids: ChildSku[],
   overrides: Record<string, string[]>
-): { label: string; items: { id: string; label: string; image?: string | null; images?: string[] }[] } | null {
+): { label: string; items: { id: string; label: string; label_en?: string; image?: string | null; images?: string[] }[] } | null {
   if (map.options.source !== "sku_color") return null;
   const seen = new Set<string>();
-  const items: { id: string; label: string; image?: string | null; images?: string[] }[] = [];
+  const items: { id: string; label: string; label_en?: string; image?: string | null; images?: string[] }[] = [];
   for (const k of sortKids(kids)) {
-    // สีของ SKU ไซส์ที่พิมพ์ "/L" ติดท้าย (ข้อมูลเก่า) → นับเป็นสีเดียวกับตัวหลัก
+    // สีของ SKU ไซส์ที่พิมพ์ "/L" ติดท้าย (ข้อมูลเก่า) → นับเป็นสีเดียวกับตัวหลัก · ชื่อไทย (สี (ไทย)) ก่อน
     const label = baseColor(k);
     if (!label || seen.has(label)) continue;
     seen.add(label);
+    // 🌐 ชื่ออังกฤษจากช่อง Color ของ SKU (ไม่มี/เป็นไทย = ไม่ส่ง → products API แปลจากทะเบียนสีกลาง)
+    const en = baseColorEn(k);
     // รูปของสีนั้น (r2 key) — เว็บร้านใช้สลับแกลเลอรีตอนกดเลือกสี (image = รูปแรก, images = ทั้งชุด)
     const imgs = kidImages(k, overrides);
-    items.push({ id: `sku-${k.id.slice(0, 8)}`, label, image: imgs[0] ?? null, images: imgs.length ? imgs : undefined });
+    items.push({ id: `sku-${k.id.slice(0, 8)}`, label, ...(en && en !== label ? { label_en: en } : {}), image: imgs[0] ?? null, images: imgs.length ? imgs : undefined });
     if (items.length >= 24) break;
   }
   return items.length ? { label: map.options.label || "แบบ/สี", items } : null;
@@ -671,7 +676,8 @@ export interface ResolvedProduct {
   /** ทุกหมวดที่สินค้านี้อยู่ (หน้าร้านกรองหมวดด้วยรายการนี้) */
   categories: string[];
   images: string[];
-  options: { label: string; items: { id: string; label: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
+  /** items[].label = ชื่อสีไทย · label_en = ชื่ออังกฤษจาก SKU (ไม่มี = products API แปลจากทะเบียนสีกลาง) */
+  options: { label: string; items: { id: string; label: string; label_en?: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
   /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
   options2: Options2 | null;
   /** 💰 ราคาต่อตัวเลือก (เฉพาะเมื่อแต่ละตัวเลือกราคาไม่เท่ากัน) — price ด้านบน = ราคาต่ำสุด ("เริ่มต้น") */

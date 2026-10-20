@@ -15,11 +15,15 @@
 export interface SizeKid {
   id: string;
   code: string | null;
+  /** ชื่อสีหลัก / ภาษาอังกฤษ (ช่อง "Color" ของ SKU) */
   color: string | null;
+  /** ชื่อสีภาษาไทย (ช่อง "สี (ไทย)" ของ SKU) — เว็บโชว์ชื่อนี้ก่อน · ว่าง = ใช้ color · select ที่ไม่ได้ดึงมา = แบบเดิม */
+  color_th?: string | null;
   attribute_values?: Record<string, unknown> | null;
 }
 
 const clean = (v: unknown) => String(v ?? "").trim();
+const THAI = /[฀-๿]/;
 
 /** variant_option ของ SKU (ไม่มี = SKU ตัวหลักของสี) */
 export function variantOf(k: SizeKid): { name: string; value: string; code: string } | null {
@@ -32,15 +36,23 @@ export const variantValue = (k: SizeKid): string => variantOf(k)?.value ?? "";
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** ตัด "/L" หรือ " / L" (ไซส์ของ SKU นี้) ท้ายชื่อสี */
+const stripVariant = (c: string, v: string): string => (!c || !v ? c : c.replace(new RegExp(`\\s*/\\s*${escapeRe(v)}$`, "i"), "").trim() || c);
+
 /**
- * สีของ SKU สำหรับจัดกลุ่ม — ตัด "/L" หรือ " / L" ท้ายชื่อสีที่ข้อมูลเก่าพิมพ์ไซส์ติดมา
+ * ชื่อสีของ SKU ที่เว็บโชว์ (ภาษาไทย) + ใช้จัดกลุ่มตัวเลือก — สี (ไทย) ก่อน · ว่าง = ช่อง Color
+ * ตัด "/L" หรือ " / L" ท้ายชื่อสีที่ข้อมูลเก่าพิมพ์ไซส์ติดมา
  * (เช่น "Brown/Smooth Leather/L" → "Brown/Smooth Leather") ไม่งั้นจุดสีบนเว็บจะงอกซ้ำตามจำนวนไซส์
+ * ⚠️ ทุกจุด (ตัวเลือกเว็บ · ตาราง สี×ไซส์ · ออเดอร์ · แท็บ 🛍) ต้องใช้ฟังก์ชันนี้ตัวเดียว ไม่งั้นสีกับไซส์จับคู่กันไม่ติด
  */
 export function baseColor(k: SizeKid): string {
-  const c = clean(k.color);
-  const v = variantValue(k);
-  if (!c || !v) return c;
-  return c.replace(new RegExp(`\\s*/\\s*${escapeRe(v)}$`, "i"), "").trim() || c;
+  return stripVariant(clean(k.color_th) || clean(k.color), variantValue(k));
+}
+
+/** 🌐 ชื่อสีภาษาอังกฤษของ SKU (ช่อง Color) — ว่าง / เป็นภาษาไทย = "" (ให้ทะเบียนสีกลางแปลแทน) */
+export function baseColorEn(k: SizeKid): string {
+  const c = stripVariant(clean(k.color), variantValue(k));
+  return THAI.test(c) ? "" : c;
 }
 
 /** ลำดับไซส์มาตรฐาน (ตัวพิมพ์ใหญ่ ไม่มีช่องว่าง) */

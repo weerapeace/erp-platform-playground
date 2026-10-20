@@ -27,7 +27,7 @@ import {
   type ChildSku,
   type ListingRow,
 } from "@/lib/website-field-map";
-import { baseColor, cleanVariantOff, variantValue } from "@/lib/website-size-options";
+import { baseColor, baseColorEn, cleanVariantOff, variantValue } from "@/lib/website-size-options";
 import { calcCardFee, calcGiftFee, calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
@@ -249,7 +249,7 @@ export function pickSku(
   optionId?: string,
   option2Id?: string,
   opts: { requireOption2?: boolean; off?: Set<string>; label2?: string } = {}
-): { sku: ChildSku | null; variantLabel: string | null; variantParts: string[]; error?: string } {
+): { sku: ChildSku | null; variantLabel: string | null; variantParts: string[]; colorEn?: string; error?: string } {
   // เรียงแบบเดียวกับที่เว็บสร้างตัวเลือก (sortKids) → SKU ที่หยิบ = ตัวเดียวกับที่เว็บโชว์ราคา
   kids = sortKids(kids);
   const k1 = kidByOptionId(kids, optionId, "sku-");
@@ -262,6 +262,9 @@ export function pickSku(
     cands = cands.filter((k) => baseColor(k) === color);
     if (color) parts.push(color);
   }
+  // 🌐 ชื่อสีภาษาอังกฤษของสีที่เลือก (ช่อง Color ของ SKU) — ว่าง = ให้ทะเบียนสีกลางแปลจากชื่อไทย
+  const en = k1 ? baseColorEn(k1) : "";
+  const colorEn = en ? { colorEn: en } : {};
   if (opts.requireOption2) {
     const sized = cands.filter((k) => variantValue(k));
     if (sized.length) {
@@ -271,11 +274,11 @@ export function pickSku(
       if (!v) return fail(`กรุณาเลือก${label2}`);
       const hit = sized.find((k) => variantValue(k) === v && !opts.off?.has(k.id.toLowerCase()));
       if (!hit) return fail(`${label2} ${v} ไม่มี${parts[0] ? `ในสี ${parts[0]}` : "แล้ว"}`);
-      return { sku: hit, variantLabel: [...parts, v].join(" / "), variantParts: [...parts, v] };
+      return { sku: hit, variantLabel: [...parts, v].join(" / "), variantParts: [...parts, v], ...colorEn };
     }
     // สีนี้ไม่มี SKU ไซส์ = ขายตัวหลักของสี (ไม่ต้องเลือกไซส์) — SKU ที่รหัสตัวเลือกอ้างก่อน
     const sku = (k1 && !variantValue(k1) ? k1 : null) ?? cands.find((k) => !variantValue(k)) ?? cands[0] ?? null;
-    return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts };
+    return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts, ...colorEn };
   }
   if (k2) {
     const v = variantValue(k2);
@@ -284,7 +287,7 @@ export function pickSku(
   }
   // ไม่มีตัวเลือกชุด 2 = SKU ที่รหัสตัวเลือกอ้างตรง ๆ (สีเดียวกันมีหลาย SKU ราคาต่างกัน → ต้องได้ตัวที่เว็บโชว์ราคา)
   const sku = (k2 ? cands[0] : k1 ?? cands[0]) ?? kids[0] ?? null;
-  return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts };
+  return { sku, variantLabel: parts.length ? parts.join(" / ") : null, variantParts: parts, ...colorEn };
 }
 
 /** ชื่อตัวเลือกที่เจ้าของกรอกทับเองในหน้าจัดการ (web_options) — รหัสเป็นอะไรก็ได้ */
@@ -437,7 +440,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     if (price <= 0) return { ok: false, error: `สินค้า ${resolved.name} ยังไม่มีราคา กรุณาติดต่อร้าน`, status: 409 };
     const custom = customOptionLabel(listing, it.optionId);
     let variant = custom ?? picked.variantLabel;
-    let variantEn = custom ? customOptionLabelEn(listing, it.optionId) || enOf(custom) : picked.variantParts.length ? picked.variantParts.map(enOf).join(" / ") : null;
+    let variantEn = custom ? customOptionLabelEn(listing, it.optionId) || enOf(custom) : picked.variantParts.length ? picked.variantParts.map((p, i) => (i === 0 && picked.colorEn) || enOf(p)).join(" / ") : null;
     // 🔤 ปั๊มชื่อ: ยอมเฉพาะรุ่นที่เปิดไว้ และข้อความ/แบบ/ตำแหน่งต้องผ่านตัวกรอง
     let personalize: PersonalizeChoice | null = null;
     if (it.personalize) {
