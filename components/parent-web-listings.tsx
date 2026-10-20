@@ -118,7 +118,7 @@ type Resp = {
   outer?: { w: unknown; h: unknown; d: unknown };
 };
 
-type Tab = "sell" | "media" | "extra" | "fix";
+type Tab = "sell" | "detail" | "extra" | "fix";
 
 /** ปุ่มกฎชื่อ — ป้ายโชว์คำที่จะถูกลบจริงของรุ่นนี้ */
 const NAME_RULE_CHIPS: { flag: NameRuleFlag; label: string; ref?: keyof Resp["nameRefs"] }[] = [
@@ -153,7 +153,7 @@ const inputCls = "w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-s
 const labelCls = "block text-xs text-slate-500 mb-1";
 
 /** ปัญหาแต่ละชนิด → ไปแก้ที่แท็บไหน */
-const FIX_TAB: Record<ListingIssue["key"], Tab> = { no_price: "sell", no_category: "sell", no_image: "media", color_no_image: "media", swatch_missing: "fix", no_compartments: "extra" };
+const FIX_TAB: Record<ListingIssue["key"], Tab> = { no_price: "sell", no_category: "sell", no_image: "sell", color_no_image: "sell", swatch_missing: "fix", no_compartments: "extra" };
 
 export function ParentWebListings({
   parentId,
@@ -471,62 +471,16 @@ export function ParentWebListings({
     const cats = s.webCategories ?? s.categories;
     return (
       <div className="space-y-3">
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-end gap-4 flex-wrap">
+          <div className="flex items-center gap-4 flex-wrap flex-1 min-w-0 pb-2">
           <Toggle label={s.published ? "ขึ้นเว็บอยู่" : "ซ่อนอยู่ (ลูกค้าไม่เห็น)"} on={s.published} onClick={() => patchShop(s.shopId, { published: !s.published })} />
           <button type="button" onClick={() => patchShop(s.shopId, { featured: !s.featured })} className={`text-xs flex items-center gap-1 ${s.featured ? "text-amber-500" : "text-slate-400 hover:text-amber-400"}`}>
             <span className="text-base leading-none">★</span> สินค้าแนะนำ
           </button>
-        </div>
-        <div className="grid sm:grid-cols-[1fr_10rem] gap-2">
-          <div>
-            <Field label="ชื่อบนเว็บ (ว่าง = ใช้ชื่ออัตโนมัติด้านล่าง)" value={s.webName} onChange={(v) => patchShop(s.shopId, { webName: v })} placeholder={s.autoName} />
-            {/* กฎชื่อของร้าน: ประกอบชื่ออัตโนมัติจากชื่อใน ERP โดยตัดส่วนที่ไม่ต้องการออก */}
-            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] text-slate-400" title="ตั้งครั้งเดียว ใช้กับทุกสินค้าในร้านนี้ (แก้ได้ที่ เว็บไซต์ → จับคู่ฟิลด์ ด้วย)">
-                กฎชื่อร้านนี้:
-              </span>
-              {NAME_RULE_CHIPS.map((c) => {
-                const ref = c.ref ? data.nameRefs[c.ref] : null;
-                if (c.ref && !ref) return null; // รุ่นนี้ไม่มีแบรนด์/คอลเลกชัน → ไม่ต้องโชว์ปุ่ม
-                const on = s.nameRule[c.flag];
-                return (
-                  <button
-                    key={c.flag}
-                    type="button"
-                    onClick={() => toggleNameRule(s, c.flag)}
-                    className={`text-[11px] rounded-full border px-2 py-0.5 ${on ? "bg-slate-700 border-slate-700 text-white" : "border-slate-300 text-slate-500 hover:bg-slate-100"}`}
-                  >
-                    {on ? "✓ " : ""}
-                    {c.label}
-                    {ref ? ` "${ref}"` : ""}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 min-w-0">
-              <span className="truncate flex-1 min-w-0" title={s.autoName}>
-                {s.webName.trim() ? (
-                  "⚠️ ใช้ชื่อที่พิมพ์เอง — แก้ชื่อที่ Parent SKU แล้วเว็บจะไม่เปลี่ยนตาม"
-                ) : (
-                  <>
-                    ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span>
-                  </>
-                )}
-              </span>
-              {s.webName.trim() ? (
-                <button type="button" onClick={() => patchShop(s.shopId, { webName: "" })} className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50" title="ลบชื่อที่พิมพ์ — กลับไปใช้ชื่ออัตโนมัติ (เปลี่ยนตาม Parent SKU)">
-                  ↺ กลับเป็นอัตโนมัติ
-                </button>
-              ) : (
-                s.autoName && (
-                  <button type="button" onClick={() => patchShop(s.shopId, { webName: s.autoName })} className="shrink-0 rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-blue-700 hover:bg-blue-100" title="เติมชื่ออัตโนมัติลงช่อง แล้วแก้ต่อได้">
-                    ↓ ใช้ชื่อนี้
-                  </button>
-                )
-              )}
-            </div>
           </div>
-          <NumField label={`ราคาเว็บ (ว่าง = ${s.auto.price > 0 ? baht(s.auto.price) : "ราคาปกติ"})`} value={s.webPrice} onChange={(v) => patchShop(s.shopId, { webPrice: v })} />
+          <div className="w-44 shrink-0">
+            <NumField label={`ราคาเว็บ (ว่าง = ${s.auto.price > 0 ? baht(s.auto.price) : "ราคาปกติ"})`} value={s.webPrice} onChange={(v) => patchShop(s.shopId, { webPrice: v })} />
+          </div>
         </div>
 
         <div>
@@ -550,27 +504,8 @@ export function ParentWebListings({
           )}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-3">
-          <Field label={`หน่วยขาย${s.auto.unit ? ` (อัตโนมัติ: ${s.auto.unit})` : ""}`} value={s.webUnit} onChange={(v) => patchShop(s.shopId, { webUnit: v })} placeholder={s.auto.unit || "ชิ้น / ใบ / หลา"} />
-          <label className="block">
-            <span className={`${labelCls} flex items-center gap-1.5 flex-wrap`}>
-              สถานะสต๊อกบนเว็บ
-              {/* 🔔 ลูกค้าที่ฝากให้แจ้งเมื่อมีของ (โชว์เมื่อมีคนรอ) */}
-              {parentId && <RestockBadge shopId={s.shopId} parentId={parentId} soldOut={(s.webStockStatus || "in") === "out"} />}
-            </span>
-            <select value={s.webStockStatus || "in"} onChange={(e) => patchShop(s.shopId, { webStockStatus: e.target.value })} className={inputCls}>
-              {STOCKS.map((x) => (
-                <option key={x.value} value={x.value}>
-                  {x.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className={labelCls}>ป้ายบนการ์ด</span>
-            <CardBadgeSelect shopId={s.shopId} value={s.webBadge} onChange={(v) => patchShop(s.shopId, { webBadge: v })} />
-          </label>
-        </div>
+        {/* 🖼 รูป สี และรูปเปิด (เดิมแยกแท็บ — เจ้าของขอรวมไว้หน้านี้ 2026-10-20) */}
+        {renderMedia(s)}
 
         {/* 📐 ไซส์ (ตัวเลือกชุดที่ 2) — เปิด/ปิดแต่ละคู่ สี×ไซส์ บนเว็บร้านนี้ · ตัวเลือกกรอกเอง = ไม่ใช้ไซส์จาก SKU */}
         {data.sizeGrid && !s.webOptions?.items?.length && (
@@ -592,31 +527,107 @@ export function ParentWebListings({
             {!(s.sizeGuides ?? []).length && <span className="text-slate-400">ร้านนี้ยังไม่มีตารางไซส์ — ตั้งที่ เว็บไซต์ → 📏 ตารางไซส์</span>}
           </label>
         )}
-
-        <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={s.auto.description || data.erpDescription || "—"} />
-        {s.linked?.length ? <LinkedPanel rows={s.linked} onOpenParent={onOpenParent} /> : null}
-
-        {/* ตัวเลือกกรอกเอง + สีตัวอย่าง — ใช้กับร้านวัสดุ (ร้านกระเป๋าใช้สีจาก SKU อัตโนมัติ) */}
-        <details className="rounded-lg border border-slate-200 bg-white px-3 py-2" open={!!(s.webOptions?.items?.length || s.webSwatch)}>
-          <summary className="cursor-pointer text-xs text-slate-500">ตั้งค่าเพิ่มเติม (ตัวเลือกกรอกเอง · สีตัวอย่างแทนรูป)</summary>
-          <div className="grid gap-2 sm:grid-cols-3 mt-2">
-            <Field label="ชื่อชุดตัวเลือก" value={s.webOptions?.label ?? ""} onChange={(v) => patchShop(s.shopId, { webOptions: { label: v, items: s.webOptions?.items ?? [] } })} placeholder="ความหนา / สี" />
-            <div className="sm:col-span-2">
-              <span className={labelCls}>ตัวเลือก (คั่นด้วยจุลภาค · ว่าง = ใช้สีจาก SKU อัตโนมัติ)</span>
-              <ItemsInput value={s.webOptions} onCommit={(items) => patchShop(s.shopId, { webOptions: items.length ? { label: s.webOptions?.label || "ตัวเลือก", items } : null })} />
-            </div>
-            <div className="sm:col-span-3">
-              <span className={labelCls}>สีตัวอย่าง (ใช้แทนรูปจนกว่าจะมีรูปจริง)</span>
-              <div className="flex items-center gap-2">
-                <input value={s.webSwatch} onChange={(e) => patchShop(s.shopId, { webSwatch: e.target.value })} placeholder="#C89A5B หรือ linear-gradient(...)" className={inputCls} />
-                <span className="shrink-0 w-9 h-9 rounded-lg border border-slate-200" style={s.webSwatch ? { background: s.webSwatch } : { background: "#f1f5f9" }} />
-              </div>
-            </div>
-          </div>
-        </details>
       </div>
     );
   };
+
+  /* ───────── 📝 รายละเอียดบนเว็บ: ชื่อ · หน่วย/สต๊อก/ป้าย · คำอธิบาย · ข้อมูลที่เชื่อม · ตั้งค่าเพิ่มเติม ───────── */
+  const renderDetail = (s: ShopState) => (
+    <div className="space-y-3">
+      <div>
+        <Field label="ชื่อบนเว็บ (ว่าง = ใช้ชื่ออัตโนมัติด้านล่าง)" value={s.webName} onChange={(v) => patchShop(s.shopId, { webName: v })} placeholder={s.autoName} />
+        {/* กฎชื่อของร้าน: ประกอบชื่ออัตโนมัติจากชื่อใน ERP โดยตัดส่วนที่ไม่ต้องการออก */}
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] text-slate-400" title="ตั้งครั้งเดียว ใช้กับทุกสินค้าในร้านนี้ (แก้ได้ที่ เว็บไซต์ → จับคู่ฟิลด์ ด้วย)">
+            กฎชื่อร้านนี้:
+          </span>
+          {NAME_RULE_CHIPS.map((c) => {
+            const ref = c.ref ? data.nameRefs[c.ref] : null;
+            if (c.ref && !ref) return null; // รุ่นนี้ไม่มีแบรนด์/คอลเลกชัน → ไม่ต้องโชว์ปุ่ม
+            const on = s.nameRule[c.flag];
+            return (
+              <button
+                key={c.flag}
+                type="button"
+                onClick={() => toggleNameRule(s, c.flag)}
+                className={`text-[11px] rounded-full border px-2 py-0.5 ${on ? "bg-slate-700 border-slate-700 text-white" : "border-slate-300 text-slate-500 hover:bg-slate-100"}`}
+              >
+                {on ? "✓ " : ""}
+                {c.label}
+                {ref ? ` "${ref}"` : ""}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 min-w-0">
+          <span className="truncate flex-1 min-w-0" title={s.autoName}>
+            {s.webName.trim() ? (
+              "⚠️ ใช้ชื่อที่พิมพ์เอง — แก้ชื่อที่ Parent SKU แล้วเว็บจะไม่เปลี่ยนตาม"
+            ) : (
+              <>
+                ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span>
+              </>
+            )}
+          </span>
+          {s.webName.trim() ? (
+            <button type="button" onClick={() => patchShop(s.shopId, { webName: "" })} className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50" title="ลบชื่อที่พิมพ์ — กลับไปใช้ชื่ออัตโนมัติ (เปลี่ยนตาม Parent SKU)">
+              ↺ กลับเป็นอัตโนมัติ
+            </button>
+          ) : (
+            s.autoName && (
+              <button type="button" onClick={() => patchShop(s.shopId, { webName: s.autoName })} className="shrink-0 rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-blue-700 hover:bg-blue-100" title="เติมชื่ออัตโนมัติลงช่อง แล้วแก้ต่อได้">
+                ↓ ใช้ชื่อนี้
+              </button>
+            )
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Field label={`หน่วยขาย${s.auto.unit ? ` (อัตโนมัติ: ${s.auto.unit})` : ""}`} value={s.webUnit} onChange={(v) => patchShop(s.shopId, { webUnit: v })} placeholder={s.auto.unit || "ชิ้น / ใบ / หลา"} />
+        <label className="block">
+          <span className={`${labelCls} flex items-center gap-1.5 flex-wrap`}>
+            สถานะสต๊อกบนเว็บ
+            {/* 🔔 ลูกค้าที่ฝากให้แจ้งเมื่อมีของ (โชว์เมื่อมีคนรอ) */}
+            {parentId && <RestockBadge shopId={s.shopId} parentId={parentId} soldOut={(s.webStockStatus || "in") === "out"} />}
+          </span>
+          <select value={s.webStockStatus || "in"} onChange={(e) => patchShop(s.shopId, { webStockStatus: e.target.value })} className={inputCls}>
+            {STOCKS.map((x) => (
+              <option key={x.value} value={x.value}>
+                {x.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className={labelCls}>ป้ายบนการ์ด</span>
+          <CardBadgeSelect shopId={s.shopId} value={s.webBadge} onChange={(v) => patchShop(s.shopId, { webBadge: v })} />
+        </label>
+      </div>
+
+      <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={s.auto.description || data.erpDescription || "—"} />
+      {s.linked?.length ? <LinkedPanel rows={s.linked} onOpenParent={onOpenParent} /> : null}
+
+      {/* ตัวเลือกกรอกเอง + สีตัวอย่าง — ใช้กับร้านวัสดุ (ร้านกระเป๋าใช้สีจาก SKU อัตโนมัติ) */}
+      <details className="rounded-lg border border-slate-200 bg-white px-3 py-2" open={!!(s.webOptions?.items?.length || s.webSwatch)}>
+        <summary className="cursor-pointer text-xs text-slate-500">ตั้งค่าเพิ่มเติม (ตัวเลือกกรอกเอง · สีตัวอย่างแทนรูป)</summary>
+        <div className="grid gap-2 sm:grid-cols-3 mt-2">
+          <Field label="ชื่อชุดตัวเลือก" value={s.webOptions?.label ?? ""} onChange={(v) => patchShop(s.shopId, { webOptions: { label: v, items: s.webOptions?.items ?? [] } })} placeholder="ความหนา / สี" />
+          <div className="sm:col-span-2">
+            <span className={labelCls}>ตัวเลือก (คั่นด้วยจุลภาค · ว่าง = ใช้สีจาก SKU อัตโนมัติ)</span>
+            <ItemsInput value={s.webOptions} onCommit={(items) => patchShop(s.shopId, { webOptions: items.length ? { label: s.webOptions?.label || "ตัวเลือก", items } : null })} />
+          </div>
+          <div className="sm:col-span-3">
+            <span className={labelCls}>สีตัวอย่าง (ใช้แทนรูปจนกว่าจะมีรูปจริง)</span>
+            <div className="flex items-center gap-2">
+              <input value={s.webSwatch} onChange={(e) => patchShop(s.shopId, { webSwatch: e.target.value })} placeholder="#C89A5B หรือ linear-gradient(...)" className={inputCls} />
+              <span className="shrink-0 w-9 h-9 rounded-lg border border-slate-200" style={s.webSwatch ? { background: s.webSwatch } : { background: "#f1f5f9" }} />
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
 
   /* ───────── 🖼 รูป สี และรูปเปิด ───────── */
   const renderMedia = (s: ShopState) => (
@@ -1023,7 +1034,7 @@ export function ParentWebListings({
   /* ───────── แท็บต่อร้าน ───────── */
   const TABS: { k: Tab; l: (s: ShopState) => string }[] = [
     { k: "sell", l: () => "🛒 ขายบนเว็บ" },
-    { k: "media", l: () => "🖼 รูป สี และรูปเปิด" },
+    { k: "detail", l: () => "📝 รายละเอียดบนเว็บ" },
     { k: "extra", l: () => "🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด" },
     { k: "fix", l: (s) => (s.issues.length ? `⚠️ ต้องแก้ (${s.issues.length})` : "✅ ครบแล้ว") },
   ];
@@ -1050,7 +1061,7 @@ export function ParentWebListings({
           })}
         </div>
         {t === "sell" && renderSell(s)}
-        {t === "media" && renderMedia(s)}
+        {t === "detail" && renderDetail(s)}
         {t === "extra" && renderExtra(s)}
         {t === "fix" && renderFix(s)}
 
