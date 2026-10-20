@@ -28,7 +28,7 @@ import {
   type ListingRow,
 } from "@/lib/website-field-map";
 import { baseColor, baseColorEn, cleanVariantOff, variantValue } from "@/lib/website-size-options";
-import { calcCardFee, calcGiftFee, calcShippingFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
+import { calcCardFee, calcGiftFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
@@ -43,6 +43,8 @@ import { customerLang, type CustomerLang } from "@/lib/customer-messages";
 import { dropFromRow, hiddenDropCodes } from "@/lib/website-new-drops";
 import { trackingOf, type ParcelTracking } from "@/lib/parcel-tracking";
 import { AUTO_RESULT, rejectReasonText, type AutoResult } from "@/lib/website-payments";
+import { defaultMethodId, quoteMethod } from "@/lib/website-shipping";
+import { readShipping } from "@/lib/website-shipping-db";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -102,6 +104,8 @@ export interface PublicOrderInput {
   gift?: { wrap: boolean; /** 💌 การ์ดอวยพรแยกจากห่อ (ร้านเปิด card_enabled) */ addCard?: boolean; message?: string; hidePrice?: boolean; card?: unknown };
   /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง (หน้า /en = "en") → ข้อความแจ้งลูกค้า/หน้าตามออเดอร์ใช้ภาษานี้ */
   lang: CustomerLang;
+  /** 🚚 วิธีจัดส่งที่ลูกค้าเลือก (id ใน store_settings.shipping_methods) — ไม่ส่ง = วิธีแรกที่ใช้ได้ (เว็บรุ่นเก่า) */
+  shippingMethodId?: string;
 }
 
 export interface OrderLineView {
@@ -155,6 +159,10 @@ export interface OrderView {
   lang?: CustomerLang;
   /** 🚚 เลขพัสดุ + ขนส่ง + ลิงก์ตามพัสดุ (ยังไม่กรอก = null) — lib/parcel-tracking */
   tracking?: ParcelTracking | null;
+  /** 🚚 วิธีจัดส่งที่เลือก (ออเดอร์เก่า = null) · box = กล่องที่ระบบแนะนำ */
+  shippingMethod?: { id: string; label: string; box: string | null } | null;
+  /** ค่าธรรมเนียมเก็บเงินปลายทาง (รวมใน grandTotal แล้ว · ไม่มี = 0) */
+  codFee?: number;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -202,7 +210,9 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
 
   const s = (r.ship ?? {}) as Record<string, unknown>;
   const addressLine = clean(s.addressLine, 500);
-  if (addressLine.length < 5) return { ok: false, error: "กรุณากรอกที่อยู่จัดส่ง" };
+  // 🚚 ระบุวิธีส่งมา = ตรวจที่อยู่ทีหลังตามชนิดวิธี (รับเองที่ร้านไม่ต้องมีที่อยู่) — createStorefrontOrder
+  const shippingMethodId = clean(r.shippingMethodId, 40).replace(/[^a-z0-9_-]/gi, "");
+  if (addressLine.length < 5 && !shippingMethodId) return { ok: false, error: "กรุณากรอกที่อยู่จัดส่ง" };
   const postal = digits(s.postal).slice(0, 5);
 
   const pm = clean(r.paymentMethod, 20);
@@ -232,6 +242,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       couponCode: normalizeCouponCode(r.couponCode) || undefined,
       gift,
       lang: customerLang(r.lang),
+      ...(shippingMethodId ? { shippingMethodId } : {}),
     },
   };
 }
@@ -476,7 +487,21 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   }
 
   subtotal = Math.round(subtotal * 100) / 100;
-  const shippingFee = calcShippingFee(subtotal, info);
+  // 🚚 วิธีจัดส่ง + ค่าส่ง: คิดใหม่ฝั่งเซิร์ฟเวอร์จากที่ร้านตั้ง (lib/website-shipping) — ไม่เชื่อยอดจากหน้าเว็บ
+  //    ร้านที่ยังไม่ตั้งวิธีส่ง = วิธีเดียวจากค่าส่งเหมาเดิม → ยอดเท่าเดิมทุกบาท
+  const shipCfg = await readShipping(sb, shop.id, info);
+  const postal = input.ship.postal ?? "";
+  const cod = input.paymentMethod === "cod";
+  const methodId = input.shippingMethodId || defaultMethodId(shipCfg, { postal, cod });
+  const method = shipCfg.methods.find((m) => m.id === methodId && m.enabled);
+  if (!method) return { ok: false, error: input.shippingMethodId ? "วิธีจัดส่งที่เลือกปิดไปแล้ว — เลือกวิธีอื่นแล้วสั่งอีกครั้ง" : "ไม่มีวิธีจัดส่งที่ใช้ได้กับที่อยู่นี้ — กรุณาติดต่อร้าน", status: 409 };
+  if (method.kind === "ship" && input.ship.addressLine.length < 5) return { ok: false, error: "กรุณากรอกที่อยู่จัดส่ง", status: 400 };
+  const totalQty = input.items.reduce((a, i) => a + i.qty, 0);
+  const quote = quoteMethod(method, { subtotal, qty: totalQty, postal, cod }, shipCfg);
+  if (quote.reason === "area") return { ok: false, error: `${method.name} ส่งไม่ถึงรหัสไปรษณีย์ ${postal} — เลือกวิธีส่งอื่น`, status: 400 };
+  if (quote.reason === "cod") return { ok: false, error: `${method.name} เก็บเงินปลายทางไม่ได้ — เลือกโอนพร้อมเพย์ หรือวิธีส่งอื่น`, status: 400 };
+  const shippingFee = quote.fee;
+  const codFee = quote.codFee;
   // 🎀 ห่อของขวัญ: ร้านปิดบริการไปแล้วระหว่างลูกค้ากรอก = บอกให้เอาออก (ไม่เงียบห่อไม่ได้) · ข้อความ/ซ่อนราคา รับเฉพาะที่ร้านเปิดให้เลือก
   if (input.gift?.wrap && !info.gift_enabled) return { ok: false, error: "ร้านปิดบริการห่อของขวัญแล้ว — เอาตัวเลือกห่อของขวัญออกแล้วสั่งอีกครั้ง", status: 409 };
   if (input.gift?.addCard && !info.card_enabled) return { ok: false, error: "ร้านปิดบริการการ์ดอวยพรแล้ว — เอาตัวเลือกเขียนการ์ดออกแล้วสั่งอีกครั้ง", status: 409 };
@@ -514,7 +539,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     pointsUsed = rr.points;
     pointsDiscount = rr.discount;
   }
-  const grandTotal = Math.round((subtotal + shippingFee + giftFee + giftCardFee - discount - pointsDiscount) * 100) / 100;
+  const grandTotal = Math.round((subtotal + shippingFee + codFee + giftFee + giftCardFee - discount - pointsDiscount) * 100) / 100;
 
   const prefix = orderNoPrefix(info, shop.slug);
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -542,6 +567,10 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         payment_status: "unpaid",
         subtotal,
         shipping_fee: shippingFee,
+        shipping_method: method.id,
+        shipping_method_label: method.name,
+        shipping_box: quote.box || null,
+        cod_fee: codFee,
         discount,
         coupon_code: coupon?.code ?? null,
         points_used: pointsUsed,
@@ -623,6 +652,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         })),
         subtotal,
         shippingFee,
+        shippingMethod: { id: method.id, label: (input.lang === "en" && method.name_en) || method.name, box: quote.box || null },
+        codFee,
         discount,
         couponCode: coupon?.code ?? null,
         pointsUsed,
@@ -677,6 +708,10 @@ export type OrderRow = {
   ship_postal: string | null;
   subtotal: number | string;
   shipping_fee: number | string;
+  shipping_method?: string | null;
+  shipping_method_label?: string | null;
+  shipping_box?: string | null;
+  cod_fee?: number | string | null;
   discount: number | string;
   coupon_code?: string | null;
   points_used?: number | null;
@@ -732,6 +767,8 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     })),
     subtotal: num(o.subtotal),
     shippingFee: num(o.shipping_fee),
+    shippingMethod: o.shipping_method ? { id: o.shipping_method, label: o.shipping_method_label ?? o.shipping_method, box: o.shipping_box ?? null } : null,
+    codFee: num(o.cod_fee),
     discount: num(o.discount),
     couponCode: o.coupon_code ?? null,
     pointsUsed: num(o.points_used),

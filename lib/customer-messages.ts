@@ -64,6 +64,10 @@ export interface MessageOrder {
   items: { name: string; variantLabel: string | null; qty: number; lineTotal: number }[];
   subtotal: number;
   shippingFee: number;
+  /** 🚚 วิธีจัดส่งที่เลือก (lib/website-shipping) — มี = ต่อท้ายบรรทัดค่าส่ง */
+  shippingMethod?: { label: string } | null;
+  /** ค่าธรรมเนียมเก็บปลายทาง */
+  codFee?: number;
   discount: number;
   giftFee?: number;
   /** 💌 ค่าการ์ดอวยพร (บริการแยกจากห่อ) */
@@ -204,7 +208,8 @@ export function orderMessage(ev: OrderEvent, o: MessageOrder, shop: MessageShop,
   if (e.items) {
     for (const i of o.items) table.push({ left: `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ""} ×${i.qty}`, right: money(i.lineTotal) });
     table.push({ left: t.subtotal, right: money(o.subtotal) });
-    table.push({ left: t.shipping, right: o.shippingFee ? money(o.shippingFee) : t.free });
+    table.push({ left: o.shippingMethod?.label ? `${t.shipping} (${o.shippingMethod.label})` : t.shipping, right: o.shippingFee ? money(o.shippingFee) : t.free });
+    if (o.codFee) table.push({ left: lang === "en" ? "COD fee" : "ค่าธรรมเนียมเก็บปลายทาง", right: money(o.codFee) });
     if (o.giftFee) table.push({ left: t.gift, right: money(o.giftFee) });
     if (o.giftCardFee) table.push({ left: t.card, right: money(o.giftCardFee) });
     if (o.discount > 0) table.push({ left: t.discount, right: `-${money(o.discount)}` });

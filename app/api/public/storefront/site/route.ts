@@ -15,6 +15,7 @@ import { normalizeFieldMap } from "@/lib/website-field-map";
 import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
 import { fitTargetOf, type FitTarget } from "@/lib/fit-check";
 import { readGiftCards } from "@/lib/website-gift-cards-db";
+import { publicShipping, readShipping } from "@/lib/website-shipping-db";
 import { couponLabel, evaluateCoupon } from "@/lib/website-coupons";
 import { couponUsage, loadCouponByCode } from "@/lib/website-coupons-db";
 import { buildBeltBuilderPayload } from "@/lib/belt-builder-public";
@@ -72,7 +73,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   };
 
   // ข้อมูลร้าน (คำโปรย/ติดต่อ/ค่าส่ง/ช่องทางจ่าย) — ส่งเฉพาะชุดสาธารณะ
-  const info: ReturnType<typeof publicSiteInfo> & { promo_label?: string } = publicSiteInfo(await readSiteInfo(sb, s.id));
+  const fullInfo = await readSiteInfo(sb, s.id);
+  const info: ReturnType<typeof publicSiteInfo> & { promo_label?: string } = publicSiteInfo(fullInfo);
+  // 🚚 วิธีจัดส่ง (lib/website-shipping) — เว็บรุ่นเก่าที่ยังใช้ค่าส่งเหมา: เทียบค่าส่ง/ส่งฟรีจากวิธีส่งถึงบ้านวิธีแรก ให้ตะกร้าบอกตรงกับตอนสั่ง
+  const shipping = publicShipping(await readShipping(sb, s.id, fullInfo));
+  const firstShip = shipping.methods.find((m) => m.kind === "ship");
+  if (!shipping.legacy && firstShip) {
+    info.shipping_flat = firstShip.fee.kind === "flat" ? firstShip.fee.amount : Math.min(...firstShip.fee.tiers.map((t) => t.fee));
+    info.free_shipping_min = firstShip.freeMin;
+  }
   // 🎁 ป๊อปอัปลูกค้าใหม่: แนบคำอธิบายส่วนลดของโค้ด · คูปองปิด/หมดอายุ/ไม่มีจริง = ปิดป๊อปอัปให้เอง (ไม่แจกโค้ดที่ใช้ไม่ได้)
   if (info.promo_enabled) {
     const cp = info.promo_code ? await loadCouponByCode(sb, s.id, info.promo_code) : null;
@@ -130,6 +139,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      * เว็บรุ่นเก่าที่ยังไม่รู้จักฟิลด์นี้จะข้ามไปเอง
      */
     info,
+    /** 🚚 วิธีจัดส่งที่เปิด + กติกาค่าส่ง + รหัสไปรษณีย์ห่างไกล — เว็บร้านคิดค่าส่งด้วยไฟล์มิเรอร์ lib/website-shipping.ts (ERP คิดใหม่ตอนรับออเดอร์เสมอ) */
+    shipping,
     /** ป้ายชื่อฟิลด์สเปก (key → label) ให้เว็บร้านวาดตาราง "วัสดุและขนาด" */
     specFields: (await loadParentWebFields(sb)).map((f) => ({ key: f.key, label: f.label })),
     /**

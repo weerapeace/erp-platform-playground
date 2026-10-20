@@ -67,6 +67,10 @@ type Order = {
   tracking?: ParcelTracking | null;
   /** 📎 สลิปที่ลูกค้าแนบ (ล่าสุดก่อน) */
   slips?: SlipView[];
+  /** 🚚 วิธีจัดส่งที่ลูกค้าเลือก + กล่องแนะนำ (ออเดอร์เก่า = null) */
+  shippingMethod?: { id: string; label: string; box: string | null } | null;
+  /** ค่าธรรมเนียมเก็บปลายทาง */
+  codFee?: number;
 };
 type Messaging = {
   shopName: string;
@@ -283,6 +287,11 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 <div>
                   <p className="text-sm text-slate-800">{o.customerName}</p>
                   <p className="text-[11px] text-slate-500">{o.customerPhone}</p>
+                  {o.shippingMethod && (
+                    <p className="text-[11px] text-slate-500" title="วิธีจัดส่งที่ลูกค้าเลือก · กล่องที่ระบบแนะนำ">
+                      🚚 {o.shippingMethod.label}{o.shippingMethod.box ? ` · กล่อง ${o.shippingMethod.box}` : ""}
+                    </p>
+                  )}
                 </div>
               ),
               sortValue: (o) => o.customerName,
@@ -419,7 +428,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 </ul>
                 <div className="mt-2 pt-2 border-t border-slate-200 space-y-0.5 text-xs text-slate-600">
                   <div className="flex justify-between"><span>ยอดสินค้า</span><span>{money(open.subtotal)}</span></div>
-                  <div className="flex justify-between"><span>ค่าส่ง</span><span>{money(open.shippingFee)}</span></div>
+                  <div className="flex justify-between"><span>ค่าส่ง{open.shippingMethod ? ` (${open.shippingMethod.label}${open.shippingMethod.box ? ` · กล่อง ${open.shippingMethod.box}` : ""})` : ""}</span><span>{money(open.shippingFee)}</span></div>
+                  {(open.codFee ?? 0) > 0 && <div className="flex justify-between"><span>ค่าธรรมเนียมเก็บปลายทาง</span><span>{money(open.codFee ?? 0)}</span></div>}
                   {open.giftWrap && <div className="flex justify-between"><span>🎀 ค่าห่อของขวัญ</span><span>{open.giftFee ? money(open.giftFee) : "ฟรี"}</span></div>}
                   {open.giftCardOnly && <div className="flex justify-between"><span>💌 ค่าการ์ดอวยพร</span><span>{open.giftCardFee ? money(open.giftCardFee) : "ฟรี"}</span></div>}
                   {open.discount > 0 && <div className="flex justify-between"><span>ส่วนลด{open.couponCode ? ` (${open.couponCode})` : ""}</span><span>-{money(open.discount)}</span></div>}
@@ -545,6 +555,8 @@ function OrderMessageBox({ order, messaging }: { order: Order; messaging: Messag
           items: order.msgItems ?? order.items,
           subtotal: order.subtotal,
           shippingFee: order.shippingFee,
+          shippingMethod: order.shippingMethod ?? null,
+          codFee: order.codFee ?? 0,
           discount: order.discount,
           giftFee: order.giftFee,
           giftCardFee: order.giftCardFee,

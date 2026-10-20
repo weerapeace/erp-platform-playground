@@ -70,8 +70,8 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "social_lazada", label: "Lazada (ลิงก์)", group: "contact", type: "text", isPublic: true },
 
   // ─── การสั่งซื้อ ───
-  { key: "shipping_flat", label: "ค่าส่งเหมา (บาท)", hint: "0 = ส่งฟรีทุกออเดอร์", group: "order", type: "number", isPublic: true },
-  { key: "free_shipping_min", label: "ส่งฟรีเมื่อยอดถึง (บาท)", hint: "0 = ไม่มีเงื่อนไขส่งฟรี", group: "order", type: "number", isPublic: true },
+  { key: "shipping_flat", label: "ค่าส่งเหมา (บาท)", hint: "0 = ส่งฟรีทุกออเดอร์ · ⚠️ ตั้งหลายวิธีส่งที่แท็บ 🚚 การจัดส่ง แล้วช่องนี้ไม่ใช้ (ใช้เฉพาะร้านที่ยังไม่ตั้งวิธีส่ง)", group: "order", type: "number", isPublic: true },
+  { key: "free_shipping_min", label: "ส่งฟรีเมื่อยอดถึง (บาท)", hint: "0 = ไม่มีเงื่อนไขส่งฟรี · ⚠️ ตั้งวิธีส่งที่แท็บ 🚚 การจัดส่ง แล้วใช้ค่าส่งฟรีของแต่ละวิธีแทน", group: "order", type: "number", isPublic: true },
   { key: "pay_cod", label: "รับเก็บเงินปลายทาง (COD)", group: "order", type: "bool", isPublic: true },
   { key: "pay_promptpay", label: "รับโอนพร้อมเพย์", group: "order", type: "bool", isPublic: true },
   { key: "promptpay_number", label: "เลขพร้อมเพย์", hint: "เบอร์โทรหรือเลขบัตรประชาชน/นิติบุคคล — ลูกค้าเห็นตอนสั่งซื้อ", group: "order", type: "text", isPublic: true },

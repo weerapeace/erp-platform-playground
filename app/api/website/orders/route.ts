@@ -51,7 +51,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, shipping_method, shipping_method_label, shipping_box, cod_fee, discount, coupon_code, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
