@@ -43,7 +43,16 @@ export type ListingPatch = {
   webVariantOff?: unknown;
   /** 📏 ตารางไซส์ของรุ่นนี้: "" = อัตโนมัติตามหมวด · "none" = ไม่แสดง · id ตาราง (lib/website-size-guides) */
   webSizeGuide?: string | null;
+  /** 🔗 สินค้าที่เกี่ยวข้องที่เลือกเองรายรุ่น (รหัส Parent SKU · เรียงตามที่เลือก) · [] / null = ใช้กฎกลางของธีม */
+  webRelated?: unknown;
 };
+
+/** 🔗 รหัสรุ่นของ "สินค้าที่เกี่ยวข้อง" รายรุ่น — ตัวพิมพ์ใหญ่ ไม่ซ้ำ ≤ 12 (ไม่ใช่รหัสของตัวเอง — ผู้เรียกตัดเอง) */
+export const MAX_WEB_RELATED = 12;
+export const cleanRelatedCodes = (v: unknown): string[] =>
+  Array.isArray(v)
+    ? [...new Set(v.map((c) => String(c ?? "").trim().toUpperCase()).filter((c) => /^[A-Z0-9][A-Z0-9._-]{0,39}$/.test(c)))].slice(0, MAX_WEB_RELATED)
+    : [];
 
 /** รูปเว็บรายสี: รับได้ทั้งค่าเก่า (string เดี่ยว) และค่าใหม่ (string[]) → คืนเป็น string[] เสมอ */
 export const toKeyList = (v: unknown): string[] => {
@@ -120,6 +129,10 @@ export function listingPatchToRow(p: ListingPatch): Record<string, unknown> {
   if (p.webVariantOff !== undefined) {
     const off = cleanVariantOff(p.webVariantOff);
     row.web_variant_off = off.length ? off : null;
+  }
+  if (p.webRelated !== undefined) {
+    const codes = cleanRelatedCodes(p.webRelated);
+    row.web_related = codes.length ? codes : null;
   }
   return row;
 }

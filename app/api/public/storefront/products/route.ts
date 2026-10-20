@@ -44,6 +44,7 @@ import { readSizeGuides } from "@/lib/website-size-guides-db";
 import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
 import { findMaterialLinks, MATERIAL_SELECT, type MaterialRow } from "@/lib/product-materials";
+import { cleanRelatedCodes } from "@/lib/website-listing-patch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch, web_variant_off, web_size_guide"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch, web_variant_off, web_size_guide, web_related"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -268,6 +269,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           if (!r.options2 || !sizeGuides.length) return {};
           const g = resolveSizeGuide(sizeGuides, r.categories, fieldMap.categories, l.web_size_guide);
           return g ? { sizeGuide: publicSizeGuide(g) } : {};
+        })(),
+        /** 🔗 สินค้าที่เกี่ยวข้องที่เลือกเองรายรุ่น (รหัสรุ่น เรียงตามที่เลือก · กฎ "📌 เลือกเองรายรุ่น" ของธีม) — ไม่ได้เลือก = ไม่ส่ง */
+        ...(() => {
+          const own = String(p.code ?? "").toUpperCase();
+          const codes = cleanRelatedCodes(l.web_related).filter((c) => c !== own);
+          return codes.length ? { related: codes } : {};
         })(),
         /** วันที่ขึ้นร้านนี้ (ป้าย "ใหม่" อัตโนมัติ) */
         listedAt: typeof l.created_at === "string" ? l.created_at : null,

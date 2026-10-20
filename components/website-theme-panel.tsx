@@ -62,6 +62,7 @@ import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-picker
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
 import { CartSettings } from "@/components/website-cart-settings";
+import { RelatedSettings } from "@/components/website-related-settings";
 import { CheckoutSettings, type CheckoutPayInfo } from "@/components/website-checkout-settings";
 import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
@@ -166,7 +167,7 @@ const FINE_COLOR_KEYS = Object.keys(FINE_COLOR_DEFAULTS) as (keyof typeof FINE_C
 const FINE_COLOR_LABEL = "สีละเอียด";
 /** บทบาทตัวอักษร — ธีมเก่าที่ยังไม่มีบทบาทใหม่ (เช่น เมนูย่อย) = ค่าเริ่มต้น */
 const roleOf = (t: { typography: Partial<Typography> }, k: TextRoleKey): TextRole => t.typography[k] ?? defaultTextRole(k);
-type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "cart" | "checkout" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "related" | "cart" | "checkout" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -179,6 +180,7 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "card", label: "การ์ดสินค้า" },
   { k: "listing", label: "หน้ารายการสินค้า" },
   { k: "product", label: "หน้าสินค้า" },
+  { k: "related", label: "🔗 แนะนำสินค้า" },
   { k: "cart", label: "🛒 ตะกร้า" },
   { k: "checkout", label: "💳 หน้าชำระเงิน" },
   { k: "shape", label: "รูปทรง" },
@@ -207,7 +209,7 @@ const withPreview = (path: string) => `${path}${path.includes("?") ? "&" : "?"}p
 type Zoom = "fit" | 0.5 | 0.75 | 1;
 
 /** แท็บ → หน้าที่พรีวิว ("product" = สินค้าตัวอย่างของร้าน) · ไม่อยู่ในรายการ = อยู่หน้าเดิม */
-const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", checkout: "/checkout" };
+const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", related: "product", checkout: "/checkout" };
 
 const PAGES = [
   { path: "/", label: "หน้าแรก" },
@@ -881,7 +883,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง") || dirtyFields.includes("การเคลื่อนไหว"))) ||
     (k === "cart" && dirtyFields.includes("ตะกร้า")) ||
     (k === "checkout" && dirtyFields.includes("หน้าชำระเงิน")) ||
-    (k === "product" && dirtyFields.includes("หน้าสินค้า"));
+    ((k === "product" || k === "related") && dirtyFields.includes("หน้าสินค้า"));
 
   // 🔤 เนื้อหาแท็บโลโก้ — ใช้ร่วม แท็บโลโก้ + ป๊อป ⚙ โลโก้ ในตำแหน่งชิ้นส่วน Header (ค่าเดียวกัน)
   const logoSettings = (
@@ -2184,7 +2186,15 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                           />
                         )}
                         {partOpen && k === "details" && <p className="mt-2 text-[11px] text-slate-400">เนื้อหา/หัวข้อของรายละเอียด ตั้งที่กล่อง &quot;ชุดรายละเอียดสินค้า&quot; ด้านล่าง</p>}
-                        {partOpen && k !== "details" && (
+                        {partOpen && (k === "related" || k === "recent") &&
+                          (isMobileEdit ? (
+                            <p className="mt-2 text-[11px] text-slate-400">กฎ/หัวข้อ/จำนวน ใช้ร่วมกับคอม (ตั้งที่โหมด 🖥 คอม หรือแท็บ 🔗 แนะนำสินค้า) · ซ่อน/แสดงบนมือถือ กด 👁️</p>
+                          ) : (
+                            <div className="mt-2">
+                              <RelatedSettings only={k} product={theme.product} onChange={setProduct} shopSlug={shopSlug} />
+                            </div>
+                          ))}
+                        {partOpen && k !== "details" && k !== "related" && k !== "recent" && (
                           <PartSettings
                             part={k}
                             parts={pv.parts}
@@ -2502,6 +2512,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           )}
 
           {/* ── 🛒 ตะกร้า: หน้าตา · รายการ · ท้ายตะกร้า · สินค้าแนะนำ · ฟังก์ชันเพิ่ม (components/website-cart-settings) ── */}
+          {/* ── 🔗 แนะนำสินค้า: สินค้าที่เกี่ยวข้อง (กฎหลายชั้น) + 👀 ดูล่าสุด (components/website-related-settings) ── */}
+          {tab === "related" && <RelatedSettings product={theme.product} onChange={setProduct} shopSlug={shopSlug} />}
           {tab === "cart" && <CartSettings value={theme.cart} onChange={(cart) => apply({ ...theme, cart })} shopSlug={shopSlug} onPreviewPage={setPage} />}
           {/* ── 💳 หน้าชำระเงิน: ข้อความ · ช่องกรอก · การจัดวาง · ช่องทางจ่าย · แถบความมั่นใจ · หน้าขอบคุณ (components/website-checkout-settings) ── */}
           {tab === "checkout" && <CheckoutSettings value={theme.checkout} onChange={(checkout) => apply({ ...theme, checkout })} payInfo={choices?.payInfo} onPreviewPage={setPage} />}
@@ -2849,7 +2861,6 @@ function PartSettings({
   /** มือถือ: คัดลอกชุดราคา-ตะกร้าของคอมมาตั้งแยก */
   onCopyBuyToMobile?: () => void;
 }) {
-  const [q, setQ] = useState("");
   const lbl = "block text-[11px] text-slate-500 mb-1";
   const mobileCount = (k: "gallery" | "buy" | "banner" | "related") =>
     !mobile ? 0 : k === "buy" ? (mobile.buyItems ? 1 : 0) + (mobile.buyColumns ? 1 : 0) + Object.keys(mobile.buy).length : Object.keys(mobile[k]).length;
@@ -3061,59 +3072,7 @@ function PartSettings({
       </div>
     );
   }
-  if (part === "related") {
-    const r = parts.related;
-    const ql = q.trim().toLowerCase();
-    const list = products.filter((p) => !ql || p.code.toLowerCase().includes(ql) || p.name.toLowerCase().includes(ql)).slice(0, 30);
-    const toggle = (code: string) => setPart("related", { codes: r.codes.includes(code) ? r.codes.filter((c) => c !== code) : [...r.codes, code] });
-    return (
-      <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-        {mobileNote("related")}
-        <div className="grid sm:grid-cols-[1fr_auto] gap-2">
-          <div>
-            <label className={lbl}>เอาสินค้าจาก</label>
-            <select className={partInputCls} value={r.source} onChange={(e) => setPart("related", { source: e.target.value as ProductParts["related"]["source"] })}>
-              {PART_CHOICES.relatedSources.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={lbl}>จำนวน</label>
-            <WheelSelect value={r.count} onChange={(e) => setPart("related", { count: Number(e.target.value) })}>
-              {[2, 3, 4, 6, 8].map((n) => <option key={n} value={n}>{n} ชิ้น</option>)}
-            </WheelSelect>
-          </div>
-        </div>
-        <div>
-          <label className={lbl}>หัวข้อ (ว่าง = "สินค้าที่เกี่ยวข้อง")</label>
-          <LangInput className={partInputCls} obj={r} k="title" onPatch={(p) => setPart("related", p)} placeholder="เช่น คุณอาจชอบ · จับคู่กับรุ่นนี้" />
-        </div>
-        {r.source === "manual" && (
-          <div>
-            <label className={lbl}>เลือกรุ่น ({r.codes.length} รุ่น) — เรียงตามที่เลือก</label>
-            {r.codes.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-1.5">
-                {r.codes.map((c) => (
-                  <button key={c} type="button" onClick={() => toggle(c)} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200" title="เอาออก">{c} ✕</button>
-                ))}
-              </div>
-            )}
-            <input className={partInputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส / ชื่อรุ่น" />
-            <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-slate-100 divide-y divide-slate-50">
-              {list.map((p) => (
-                <label key={p.code} className="flex items-center gap-2 px-2 py-1 text-xs cursor-pointer hover:bg-slate-50">
-                  <input type="checkbox" className="accent-blue-600" checked={r.codes.includes(p.code.toUpperCase())} onChange={() => toggle(p.code.toUpperCase())} />
-                  <span className="font-mono text-slate-500">{p.code}</span>
-                  <span className="truncate text-slate-700">{p.name}</span>
-                </label>
-              ))}
-              {list.length === 0 && <div className="px-2 py-2 text-[11px] text-slate-400">ไม่พบรุ่น</div>}
-            </div>
-          </div>
-        )}
-        <p className="text-[11px] text-slate-400">ถ้าสินค้าตามแหล่งที่เลือกมีไม่ครบจำนวน ระบบเติมด้วยสินค้าหมวดเดียวกันให้ · "ขายดี" นับจากออเดอร์บนเว็บ ยังไม่มีออเดอร์ = เติมด้วยหมวดเดียวกัน</p>
-      </div>
-    );
-  }
+  // 🔗 "related" / 👀 "recent" ตั้งที่ components/website-related-settings (การ์ดเดียวกับแท็บ 🔗 แนะนำสินค้า)
   return null;
 }
 

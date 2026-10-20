@@ -49,7 +49,7 @@ import {
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { normalizePersonalize } from "@/lib/website-personalize";
-import { listingPatchToRow, toKeyList, type ListingPatch } from "@/lib/website-listing-patch";
+import { cleanRelatedCodes, listingPatchToRow, toKeyList, type ListingPatch } from "@/lib/website-listing-patch";
 import { computeListingDisplay } from "@/lib/website-listing-display";
 import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
 import { parseCompartments } from "@/lib/fit-check";
@@ -257,6 +257,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       options2On: fieldMap.options2.source === "variant_option",
       /** 📏 ตารางไซส์: ที่เลือกทับ ("" = อัตโนมัติ · "none" · id) + รายการของร้าน + ตารางที่ใช้อัตโนมัติตามหมวด */
       webSizeGuide: typeof l?.web_size_guide === "string" ? (l.web_size_guide as string) : "",
+      /** 🔗 สินค้าที่เกี่ยวข้องที่เลือกเองรายรุ่น (รหัสรุ่น) — [] = ใช้กฎกลางของธีม */
+      webRelated: cleanRelatedCodes(l?.web_related),
       sizeGuides: (guidesByShop.get(s.id) ?? []).map((g) => ({ id: g.id, name: g.name })),
       autoSizeGuide: resolveSizeGuide(guidesByShop.get(s.id) ?? [], view.categories, fieldMap.categories, null)?.name ?? null,
       /** หมวดของร้านนี้ (แท็บ 📂 หมวดหมู่) */

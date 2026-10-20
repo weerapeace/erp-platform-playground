@@ -44,6 +44,7 @@ import type { LinkedRow } from "@/lib/website-listing-linked";
 import { STOCK_STATUS_OPTIONS } from "@/lib/website-listing-fields";
 import { SizeGridEditor, type SizeGridView } from "@/components/website-size-grid";
 import { MoneyInput } from "@/components/money-input";
+import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { renameCardColor } from "@/lib/website-card-colors";
 
 /**
@@ -97,6 +98,8 @@ type ShopState = {
   options2On?: boolean;
   /** 📏 ตารางไซส์ที่เลือกทับ ("" = อัตโนมัติตามหมวด · "none" = ไม่แสดง · id) + รายการของร้าน + ตารางอัตโนมัติ */
   webSizeGuide?: string;
+  /** 🔗 สินค้าที่เกี่ยวข้องที่เลือกเองรายรุ่น (รหัสรุ่น เรียงตามที่เลือก) — [] = ใช้กฎกลางของธีม */
+  webRelated?: string[];
   sizeGuides?: { id: string; name: string }[];
   autoSizeGuide?: string | null;
   shopCategories: { key: string; label: string; icon: string }[];
@@ -145,7 +148,7 @@ const STOCKS = STOCK_STATUS_OPTIONS;
 const snapOf = (s: ShopState) =>
   JSON.stringify([
     s.published, s.featured, s.webPrice, s.webName, s.webDescription, s.webImages, s.webSkuImages, s.webDetails, s.webPersonalize, s.webBanners, s.webCardColors, s.webHero,
-    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [], s.webSizeGuide ?? "",
+    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [], s.webSizeGuide ?? "", s.webRelated ?? [],
   ]);
 
 const MAX_SKU_IMAGES = 8;
@@ -403,6 +406,7 @@ export function ParentWebListings({
             webOptions: s.webOptions,
             webVariantOff: s.webVariantOff ?? [],
             webSizeGuide: s.webSizeGuide ?? "",
+            webRelated: s.webRelated ?? [],
           },
         }),
       });
@@ -994,6 +998,23 @@ export function ParentWebListings({
     const fitShown = fitOpen || (s.fitCheck && comps === null);
     return (
       <div className="space-y-3">
+        {/* 🔗 สินค้าที่เกี่ยวข้องของรุ่นนี้ — ขึ้นก่อนตามกฎ "📌 เลือกเองรายรุ่น" (หน้าดีไซน์ → แท็บ 🔗 แนะนำสินค้า) · ว่าง = ใช้กฎกลาง */}
+        <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-medium text-slate-600">
+              🔗 สินค้าที่เกี่ยวข้องของรุ่นนี้
+              {(s.webRelated ?? []).length > 0 && <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">เลือกไว้ {(s.webRelated ?? []).length} รุ่น</span>}
+            </span>
+            <span className="text-[11px] text-slate-400">ขึ้นก่อนในหัวข้อ &quot;สินค้าที่เกี่ยวข้อง&quot; ของหน้าสินค้านี้ · ไม่เลือก = ใช้กฎกลาง (หน้าดีไซน์ → 🔗 แนะนำสินค้า)</span>
+          </div>
+          <WebsiteProductPicker
+            shopSlug={s.slug}
+            value={s.webRelated ?? []}
+            max={12}
+            onChange={(codes) => patchShop(s.shopId, { webRelated: codes.filter((c) => c.toUpperCase() !== data.code.toUpperCase()) })}
+          />
+        </div>
+
         {/* 📐 ช่องใส่ของ (ขนาดด้านใน) — ของตัวสินค้า ทุกร้านใช้ร่วม · คำนวณว่าใส่ตุ๊กตา/ของอะไรได้ (lib/fit-check) */}
         <div className="rounded-lg border border-slate-200" data-fit-section>
           <button type="button" onClick={() => setFitOpen((v) => !v)} className="w-full flex items-center justify-between px-3 py-2 text-left">
@@ -1165,7 +1186,7 @@ export function ParentWebListings({
   const TABS: { k: Tab; l: (s: ShopState) => string }[] = [
     { k: "sell", l: () => "🛒 ขายบนเว็บ" },
     { k: "detail", l: () => "📝 รายละเอียดบนเว็บ" },
-    { k: "extra", l: () => "🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด" },
+    { k: "extra", l: () => "🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด · 🔗 เกี่ยวข้อง" },
     { k: "fix", l: (s) => (s.issues.length ? `⚠️ ต้องแก้ (${s.issues.length})` : "✅ ครบแล้ว") },
   ];
   const renderBody = (s: ShopState) => {

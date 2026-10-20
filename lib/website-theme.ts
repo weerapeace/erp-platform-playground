@@ -145,6 +145,29 @@ export type BannerTextSource = "description" | "introduction" | "english_descrip
 export type BuyNoteSource = "wholesale" | "shipping" | "text" | "none";
 export type RelatedSource = "category" | "collection" | "featured" | "bestseller" | "manual" | "random";
 /**
+ * 🔗 กฎเชื่อม "สินค้าที่เกี่ยวข้อง" (เรียงลำดับได้ · ทำตามลำดับจนครบจำนวน) — มิเรอร์ storefront src/lib/site-config.ts + src/lib/related.ts
+ *   pinned = เลือกเองรายรุ่น (แท็บ 🛍 เว็บไซต์ ของสินค้า · store_listings.web_related) · manual = รายการเดียวกันทุกหน้า (เลือกในแท็บนี้)
+ */
+export type RelatedRule = "pinned" | "collection" | "category" | "material" | "price" | "featured" | "bestseller" | "new" | "manual" | "random";
+export const RELATED_RULES: { value: RelatedRule; label: string; hint: string }[] = [
+  { value: "pinned", label: "📌 เลือกเองรายรุ่น", hint: "ตั้งในแท็บ 🛍 เว็บไซต์ ของแต่ละสินค้า → 🔗 สินค้าที่เกี่ยวข้องของรุ่นนี้ (รุ่นที่ไม่ได้ตั้ง = ข้ามไปกฎถัดไป)" },
+  { value: "collection", label: "🧵 คอลเลกชันเดียวกัน", hint: "ฟิลด์คอลเลกชันใน Parent SKU" },
+  { value: "category", label: "📂 หมวดเดียวกัน", hint: "หมวดหลักเดียวกันก่อน แล้วค่อยหมวดอื่นที่อยู่ร่วมกัน (รวมหมวดแม่)" },
+  { value: "material", label: "🧶 วัสดุเดียวกัน", hint: "วัสดุที่ผูกไว้กับสินค้า (หน้าวัสดุ)" },
+  { value: "price", label: "💰 ราคาใกล้กัน", hint: "ราคาห่างไม่เกิน ±30% · ใกล้สุดก่อน" },
+  { value: "featured", label: "★ สินค้าแนะนำ", hint: "รุ่นที่ติ๊ก ★ แนะนำ" },
+  { value: "bestseller", label: "🔥 ขายดี", hint: "จากยอดสั่งซื้อบนเว็บ" },
+  { value: "new", label: "🆕 มาใหม่", hint: "รุ่นที่เพิ่มขึ้นเว็บล่าสุด" },
+  { value: "manual", label: "✋ รายการที่เลือกไว้ (ทุกหน้าเหมือนกัน)", hint: "เลือกรุ่นด้านล่าง — โชว์ชุดเดียวกันทุกหน้าสินค้า" },
+  { value: "random", label: "🎲 สุ่ม", hint: "สุ่มคงที่ต่อสินค้า (ไม่เปลี่ยนทุกครั้งที่โหลด)" },
+];
+const RELATED_RULE_KEYS = RELATED_RULES.map((r) => r.value);
+/** ธีมเก่า (เลือกได้แหล่งเดียว) → กฎ: เลือกเองรายรุ่นก่อน แล้วแหล่งเดิม */
+export const rulesFromSource = (s: RelatedSource): RelatedRule[] => ["pinned", s];
+/** แหล่งเดิมที่เว็บรุ่นเก่าเข้าใจ (เก็บคู่ไว้ — เว็บที่ยังไม่อัปเดตยังโชว์ใกล้เคียง) */
+export const legacySourceOf = (rules: RelatedRule[]): RelatedSource =>
+  (rules.find((r) => (["category", "collection", "featured", "bestseller", "manual", "random"] as string[]).includes(r)) as RelatedSource | undefined) ?? "category";
+/**
  * 🧩 ชิ้นส่วนในส่วน "ราคา · ตัวเลือก · ใส่ตะกร้า" — จัดลำดับ/คอลัมน์/จัดชิด/ขนาด/สี/ระยะห่าง ได้ต่อชิ้น (⚙️ ในแท็บหน้าสินค้า)
  * ชิ้นมาตรฐานมีอย่างละ 1 (price/desc/stock/qty/options/button/note) · "text" = ข้อความอิสระ เพิ่มได้หลายชิ้น
  */
@@ -299,8 +322,14 @@ export interface ProductParts {
   banner: BannerPart;
   /** ➕ แบนเนอร์เพิ่ม (ปุ่ม "เพิ่มแบนเนอร์" ใต้ลำดับส่วนประกอบ) — อยู่ในลำดับเป็น `banner:<id>` · ไม่ถูกแบนเนอร์รายรุ่นทับ */
   extraBanners: ExtraBanner[];
-  /** codes = รหัส Parent SKU (ตัวพิมพ์ใหญ่) เมื่อ source=manual · count 2–8 · title ว่าง = ใช้ข้อความเดิมของเว็บ */
-  related: { source: RelatedSource; codes: string[]; count: number; title: string };
+  /**
+   * 🔗 สินค้าที่เกี่ยวข้อง — rules = กฎเรียงลำดับ (ทำตามลำดับจนครบ count) · fill = ไม่ครบเติมด้วยสินค้าอื่น
+   * codes = รหัส Parent SKU (ตัวพิมพ์ใหญ่) ของกฎ manual · count 2–8 · title ว่าง = ใช้ข้อความเดิมของเว็บ
+   * source = แหล่งเดียวแบบเดิม (เก็บคู่ให้เว็บรุ่นเก่า · คำนวณจาก rules)
+   */
+  related: { source: RelatedSource; rules: RelatedRule[]; fill: boolean; codes: string[]; count: number; title: string };
+  /** 👀 สินค้าที่ดูล่าสุด (ส่วน "recent" ของหน้าสินค้า · เปิด/ปิดด้วยลำดับส่วนประกอบ) — title ว่าง = ข้อความเดิมของเว็บ · count 2–12 */
+  recent: { title: string; count: number };
 }
 export interface BannerPart {
   imageSource: BannerImageSource;
@@ -333,7 +362,8 @@ export const DEFAULT_PARTS: ProductParts = {
   buy: { showUnit: true, showBadge: true, showStock: true, showShortDesc: true, noteSource: "wholesale", noteText: "", columns: 2, items: DEFAULT_BUY_ITEMS() },
   banner: { ...DEFAULT_BANNER },
   extraBanners: [],
-  related: { source: "category", codes: [], count: 4, title: "" },
+  related: { source: "category", rules: rulesFromSource("category"), fill: true, codes: [], count: 4, title: "" },
+  recent: { title: "", count: 4 },
 };
 /** แบนเนอร์เพิ่มตัวใหม่ — ค่าเริ่มต้นใช้รูปที่ 3 ของสินค้า (รูปที่ 2 แบนเนอร์หลักใช้ไปแล้ว) */
 export const newExtraBanner = (n: number): ExtraBanner => ({
@@ -379,6 +409,7 @@ export function normalizeParts(raw: unknown): ProductParts {
   const g = r.gallery ?? {};
   const b = r.buy ?? {};
   const rl = r.related ?? {};
+  const rc = r.recent ?? {};
   const seenX = new Set<string>();
   const extraBanners: ExtraBanner[] = [];
   for (const x of Array.isArray(r.extraBanners) ? (r.extraBanners as unknown as unknown[]) : []) {
@@ -418,11 +449,27 @@ export function normalizeParts(raw: unknown): ProductParts {
     },
     banner: normalizeBannerPart(r.banner),
     extraBanners,
-    related: {
-      source: one(rl.source, ["category", "collection", "featured", "bestseller", "manual", "random"] as const, d.related.source),
-      codes: (Array.isArray(rl.codes) ? rl.codes : []).filter((c): c is string => typeof c === "string" && c.trim().length > 0).map((c) => c.trim().toUpperCase()).slice(0, 24),
-      count: Number.isFinite(n) ? Math.min(8, Math.max(2, Math.round(n))) : d.related.count,
-      title: text(rl.title, 80),
+    related: (() => {
+      const source = one(rl.source, ["category", "collection", "featured", "bestseller", "manual", "random"] as const, d.related.source);
+      // ธีมเก่าไม่มี rules = แปลงจากแหล่งเดิม (หน้าเว็บเหมือนเดิม + รุ่นที่เลือกเองขึ้นก่อน) · [] = ไม่ใช้กฎ (เติมสินค้าอื่นอย่างเดียว)
+      const rules = Array.isArray(rl.rules)
+        ? [...new Set((rl.rules as unknown[]).filter((x): x is RelatedRule => typeof x === "string" && (RELATED_RULE_KEYS as string[]).includes(x)))]
+        : rulesFromSource(source);
+      return {
+        source: Array.isArray(rl.rules) ? legacySourceOf(rules) : source,
+        rules,
+        fill: rl.fill !== false,
+        codes: (Array.isArray(rl.codes) ? rl.codes : []).filter((c): c is string => typeof c === "string" && c.trim().length > 0).map((c) => c.trim().toUpperCase()).slice(0, 24),
+        count: Number.isFinite(n) ? Math.min(8, Math.max(2, Math.round(n))) : d.related.count,
+        title: text(rl.title, 80),
+      };
+    })(),
+    recent: {
+      title: text(rc.title, 80),
+      count: (() => {
+        const c = Number(rc.count);
+        return Number.isFinite(c) ? Math.min(12, Math.max(2, Math.round(c))) : d.recent.count;
+      })(),
     },
   };
 }
@@ -602,7 +649,7 @@ export function normalizeDetailItems(raw: unknown): ProductDetailItem[] {
   return out;
 }
 /** ส่วนประกอบของหน้าสินค้าแบบโชว์เคส — ลากจัดลำดับ/ซ่อนได้ในแท็บหน้าสินค้า */
-export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related" | `banner:${string}`;
+export type ProductSection = "gallery" | "buy" | "details" | "banner" | "related" | "recent" | `banner:${string}`;
 
 /**
  * 📐 กรอบของแต่ละส่วนประกอบหน้าสินค้า (ของกลาง ใช้ได้ทุกส่วน) — ความกว้าง + ระยะห่างด้านบน
@@ -634,7 +681,7 @@ export function normalizePartBox(raw: unknown): Record<string, PartBox> {
   const out: Record<string, PartBox> = {};
   if (!raw || typeof raw !== "object") return out;
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (!/^(gallery|buy|details|banner|related|banner:[\w-]{1,40})$/.test(k) || !v || typeof v !== "object") continue;
+    if (!/^(gallery|buy|details|banner|related|recent|banner:[\w-]{1,40})$/.test(k) || !v || typeof v !== "object") continue;
     const o = v as Record<string, unknown>;
     const width = PART_WIDTH_OPTIONS.some((x) => x.value === o.width) ? (o.width as PartWidth) : "auto";
     const spaceTop = PART_SPACE_OPTIONS.some((x) => x.value === o.spaceTop) ? (o.spaceTop as PartSpace) : "auto";
@@ -643,7 +690,7 @@ export function normalizePartBox(raw: unknown): Record<string, PartBox> {
   }
   return out;
 }
-export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related"];
+export const PRODUCT_SECTION_ORDER: ProductSection[] = ["gallery", "buy", "details", "banner", "related", "recent"];
 
 
 /**
@@ -734,7 +781,7 @@ export function normalizeMobile(raw: unknown, extraIds: string[] = []): ProductM
     detailsOpen: pick(r.detailsOpen, ["first", "closed", "all"] as const),
     itemsOpen,
     sections: Array.isArray(r.sections) ? normalizeProductSections(r.sections, extraIds) : null,
-    hidden: Array.isArray(r.hidden) ? normalizeHiddenSections(r.hidden, extraIds) : null,
+    hidden: Array.isArray(r.hidden) ? normalizeHiddenSections(r.hidden, extraIds, r.sections) : null,
     gallery,
     buy,
     buyItems,
@@ -1501,15 +1548,23 @@ export function normalizeProductSections(raw: unknown, extraIds: string[] = []):
       out.push(v as ProductSection);
     }
   }
-  for (const k of PRODUCT_SECTION_ORDER) if (!seen.has(k)) out.push(k);
+  // 👀 "ดูล่าสุด" แยกจาก "สินค้าที่เกี่ยวข้อง" ทีหลัง (2026-10-20) — ลำดับเก่าที่ยังไม่มี = ต่อหลังสินค้าที่เกี่ยวข้อง (ที่เดิมของมัน)
+  for (const k of PRODUCT_SECTION_ORDER) if (!seen.has(k) && k !== "recent") out.push(k);
+  if (!seen.has("recent")) out.splice(out.indexOf("related") + 1, 0, "recent");
   // แบนเนอร์เพิ่มที่ยังไม่อยู่ในลำดับ (เช่น ลำดับมือถือที่ตั้งไว้ก่อนเพิ่มแบนเนอร์) → ต่อหลังแบนเนอร์หลัก
   for (const k of extras) if (!seen.has(k)) out.splice(out.indexOf("banner") + 1, 0, k);
   return out;
 }
-const HIDEABLE: ProductSection[] = ["details", "banner", "related"];
-export function normalizeHiddenSections(raw: unknown, extraIds: string[] = []): ProductSection[] {
+const HIDEABLE: ProductSection[] = ["details", "banner", "related", "recent"];
+/**
+ * @param rawSections ลำดับดิบจาก DB — ลำดับเก่าที่ยังไม่มี "recent" + ซ่อน "related" ไว้ = เดิม "ดูล่าสุด" หายไปด้วย → ซ่อน recent ตาม (หน้าเว็บไม่เปลี่ยน)
+ */
+export function normalizeHiddenSections(raw: unknown, extraIds: string[] = [], rawSections?: unknown): ProductSection[] {
   const ok = new Set<string>([...HIDEABLE, ...extraIds.map(extraBannerSection)]);
-  return (Array.isArray(raw) ? raw : []).filter((v): v is ProductSection => typeof v === "string" && ok.has(v));
+  const out = (Array.isArray(raw) ? raw : []).filter((v): v is ProductSection => typeof v === "string" && ok.has(v));
+  const hadRecent = Array.isArray(rawSections) && rawSections.includes("recent");
+  if (!hadRecent && out.includes("related") && !out.includes("recent")) out.push("recent");
+  return [...new Set(out)];
 }
 
 /** แคตตาล็อกฟอนต์ Google ที่เลือกได้ (thai=false → ฟอนต์อังกฤษ ตัวไทยจะใช้ฟอนต์สำรอง) · weights = น้ำหนักที่มีจริง (ใช้สร้างลิงก์โหลด) */
@@ -1623,7 +1678,8 @@ export const PRODUCT_SECTIONS: { value: ProductSection; label: string; hint: str
   { value: "buy", label: "ราคา · ตัวเลือก · ใส่ตะกร้า", hint: "ราคา/คำอธิบายสั้น ซ้าย · จำนวน/สี/ปุ่ม ขวา", hideable: false },
   { value: "details", label: "รายละเอียด / จุดเด่น", hint: "แท็บหรือเรียงต่อกัน ตามตัวเลือกด้านบน", hideable: true },
   { value: "banner", label: "แบนเนอร์หลัก", hint: "รูปตามที่ตั้งใน ⚙️ · รุ่นที่ตั้งแบนเนอร์เองใช้ของรุ่นนั้น", hideable: true },
-  { value: "related", label: "สินค้าที่เกี่ยวข้อง (คุณอาจชอบ)", hint: "เลือกแหล่ง/จำนวน/หัวข้อใน ⚙️ · ต่อด้วย สินค้าที่ดูล่าสุด", hideable: true },
+  { value: "related", label: "สินค้าที่เกี่ยวข้อง (คุณอาจชอบ)", hint: "กฎเชื่อมสินค้า/จำนวน/หัวข้อ ใน ⚙️ หรือแท็บ 🔗 แนะนำสินค้า", hideable: true },
+  { value: "recent", label: "👀 สินค้าที่ดูล่าสุด", hint: "รุ่นที่ลูกค้าเคยเปิดดู (จำในเครื่องลูกค้า · ยังไม่เคยดูตัวอื่น = ไม่โชว์)", hideable: true },
 ];
 
 export const PRODUCT_IMAGE_BGS: { value: ProductImageBg; label: string }[] = [
@@ -1691,7 +1747,7 @@ const THEME_CRUMB: Record<string, string> = {
   menu: "เมนู", items: "เมนูคอม", mobileItems: "เมนูมือถือ", children: "เมนูย่อย", panel: "แผงเมนูใหญ่", blocks: "กล่อง",
   links: "ลิงก์", groups: "กลุ่ม", cards: "การ์ด", tabs: "แท็บ", footer: "ท้ายเว็บ", columns: "คอลัมน์", bottomLinks: "ลิงก์แถวล่าง",
   header: "หัวเว็บ", button: "ปุ่ม", cart: "ตะกร้า", search: "ค้นหา", logo: "โลโก้", product: "หน้าสินค้า",
-  detailItems: "หัวข้อรายละเอียด", contentSources: "แหล่งข้อมูล", lines: "บรรทัด", parts: "ส่วนประกอบ", buy: "ส่วนซื้อ", banner: "แบนเนอร์", related: "สินค้าที่เกี่ยวข้อง",
+  detailItems: "หัวข้อรายละเอียด", contentSources: "แหล่งข้อมูล", lines: "บรรทัด", parts: "ส่วนประกอบ", buy: "ส่วนซื้อ", banner: "แบนเนอร์", related: "สินค้าที่เกี่ยวข้อง", recent: "สินค้าที่ดูล่าสุด",
   card: "การ์ด", autoBadges: "ป้ายอัตโนมัติ", listing: "หน้ารายการสินค้า",
   recsSets: "ชุดสินค้าแนะนำ", labels: "ข้อความตัวเลือก", continueText: "ปุ่มเลือกซื้อต่อ", emptyButton: "ปุ่มตอนตะกร้าว่าง", btnText: "ปุ่มใส่ตะกร้า",
   gift: "ห่อของขวัญ", note: "หมายเหตุ", eyebrow: "คำโปรย",
@@ -1863,7 +1919,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       detailItems: normalizeDetailItems(pd.detailItems),
       contentSources: normalizeContentSources(pd.contentSources),
       sections: normalizeProductSections(pd.sections, xIds),
-      hidden: normalizeHiddenSections(pd.hidden, xIds),
+      hidden: normalizeHiddenSections(pd.hidden, xIds, pd.sections),
       parts,
       partBox: normalizePartBox(pd.partBox),
       mobile: normalizeMobile(pd.mobile, xIds),
