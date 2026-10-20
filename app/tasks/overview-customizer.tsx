@@ -26,12 +26,14 @@ export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: b
 export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
 // wip = บอร์ดงานค้าง: ช่องใหญ่ (รอคิว+พร้อมทำ+กำลังทำ) + ช่องเล็ก รอตรวจ / ต้องแก้
 export type KanbanView = "kanban" | "table" | "calendar" | "wip";
-export type WipCols = 1 | 2 | 3;
+export type WipCols = 1 | 2 | 3 | 4 | 5 | 6;
 // รูปปกบนการ์ด: ขนาด (auto = ตามมุมมอง) · fit cover=ครอปเต็มกรอบ / contain=เห็นทั้งรูป · pos top=บนการ์ด / side=รูปเล็กข้างซ้าย
 export type CoverSize = "auto" | "sm" | "md" | "lg" | "square";
 export type CardGap = "tight" | "normal" | "loose" | "xloose";
+export type CardScale = "sm" | "md" | "lg";   // ขนาดการ์ดทั้งใบ (ย่อ/ปกติ/ขยาย)
+// WIP: wipSort due = เรียงตามกำหนดส่ง / manual = ลำดับที่ฉันลากจัดเอง (wipOrder = task id เรียงตามที่จัด)
 export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; taskType?: boolean; compact?: boolean; wipCols?: WipCols;
-  coverSize?: CoverSize; coverFit?: "cover" | "contain"; coverPos?: "top" | "side"; cardGap?: CardGap };
+  coverSize?: CoverSize; coverFit?: "cover" | "contain"; coverPos?: "top" | "side"; cardGap?: CardGap; cardScale?: CardScale; wipSort?: "due" | "manual"; wipOrder?: string[] };
 export type CardAlign = "left" | "center" | "right";
 export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
 // สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)

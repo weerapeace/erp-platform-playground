@@ -10,13 +10,13 @@ import { useState } from "react";
 import { useT } from "@/components/i18n";
 import type { KanbanTheme, WipCols } from "./overview-customizer";
 
-// ปุ่มเลือกจำนวนคอลัมน์การ์ดในช่องใหญ่ของมุมมอง WIP (1–3) — ใช้ทั้งบนบอร์ดและในตั้งค่า
+// ปุ่มเลือกจำนวนคอลัมน์การ์ดในช่องใหญ่ของมุมมอง WIP (1–6 · มากขึ้น = การ์ดเล็กลง) — ใช้ทั้งบนบอร์ดและในตั้งค่า
 export function WipColsControl({ value, onChange, accent }: { value: WipCols; onChange: (v: WipCols) => void; accent?: string }) {
   const t = useT();
   return (
     <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm" title={t("จำนวนคอลัมน์การ์ดในช่อง \"กำลังดำเนินการ\"", "Card columns in the in-progress lane")}>
       <span className="px-1.5 text-[11px] text-slate-400">{t("คอลัมน์", "Cols")}</span>
-      {([1, 2, 3] as const).map((n) => {
+      {([1, 2, 3, 4, 5, 6] as const).map((n) => {
         const on = value === n;
         return <button key={n} type="button" onClick={() => onChange(n)} style={on ? { background: accent || "#7c3aed" } : undefined}
           className={`h-7 min-w-[28px] px-2 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{n}</button>;
@@ -70,6 +70,8 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
             options={[["auto", t("อัตโนมัติ", "Auto")], ["sm", t("เล็ก", "S")], ["md", t("กลาง", "M")], ["lg", t("ใหญ่", "L")], ["square", t("จัตุรัส", "Square")]]} />
         </div>
       )}
+      <SegRow label={t("ขนาดการ์ด", "Card size")} value={cfg.cardScale ?? "md"} onChange={(v) => set({ cardScale: v })}
+        options={[["sm", t("เล็ก", "Small")], ["md", t("ปกติ", "Normal")], ["lg", t("ใหญ่", "Large")]]} />
       <SegRow label={t("ระยะห่างการ์ด", "Card spacing")} value={cfg.cardGap ?? "normal"} onChange={(v) => set({ cardGap: v })}
         options={[["tight", t("ชิด", "Tight")], ["normal", t("ปกติ", "Normal")], ["loose", t("ห่าง", "Loose")], ["xloose", t("ห่างมาก", "Extra")]]} />
     </div>

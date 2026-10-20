@@ -431,7 +431,7 @@ export function OverviewDashboard({
           {theme.kanban.view === "wip" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
               <WipBoard tasks={kanbanTasks} cfg={theme.kanban} accent={theme.accent} statusColors={theme.statusColors} anim={theme.anim}
-                onMoveStatus={onMoveStatus} onCardClick={onOpenTask} />
+                onMoveStatus={onMoveStatus} onCardClick={onOpenTask} onCfgChange={(k) => onThemeChange({ ...theme, kanban: k })} />
             </div>
           ) : theme.kanban.view === "kanban" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">

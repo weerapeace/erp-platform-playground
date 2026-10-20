@@ -12,6 +12,7 @@ import { useT } from "@/components/i18n";
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   useDraggable, useDroppable, type DragStartEvent, type DragEndEvent,
+  pointerWithin, rectIntersection, type CollisionDetection,
 } from "@dnd-kit/core";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
@@ -48,7 +49,11 @@ function dueDiffDays(due: string): number {
 }
 
 // ตัวเลือกเสริมของการ์ด (มุมมอง WIP ใช้) — ป้ายสถานะ / กำหนดส่งแบบนับวัน / ความสูงรูปปก / ความกว้างรูปที่โหลด
-type CardExtra = { statusPill?: boolean; relDue?: boolean; coverCls?: string; imgW?: number };
+// placeholder = ไม่มีรูป → กล่องไอคอนแทน (การ์ดหน้าตาเท่ากัน) · fill = การ์ดยืดเต็มช่องกริด (สูงเท่ากันทุกใบ)
+type CardExtra = { statusPill?: boolean; relDue?: boolean; coverCls?: string; imgW?: number; placeholder?: boolean; fill?: boolean };
+
+// ขนาดการ์ด (ย่อ/ขยายทั้งใบ — ตัวอักษร รูป ระยะใน) ต่อคน
+const CARD_SCALE: Record<string, number> = { sm: 0.85, md: 1, lg: 1.15 };
 
 // รูปปกปรับได้ต่อคน (KanbanTheme): ขนาด · ครอปเต็มกรอบ/เห็นทั้งรูป · อยู่บน/ข้างซ้าย
 const COVER_TOP_H: Record<string, string> = { sm: "h-16", md: "h-28", lg: "h-44", square: "aspect-square" };
@@ -68,25 +73,33 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
   const cover = showImages ? coverKey(task) : null;
   const size = cfg.coverSize ?? "auto";
   const coverUrl = cover ? r2ImageUrl(cover, size === "lg" || size === "square" ? Math.max(extra?.imgW ?? 320, 480) : extra?.imgW ?? 320) : null;
-  const side = cfg.coverPos === "side" && !!coverUrl;   // รูปเล็กข้างซ้าย (ข้อความอยู่ขวา)
   const fitCls = cfg.coverFit === "contain" ? "object-contain bg-white" : "object-cover bg-slate-50";   // contain = เห็นทั้งรูป ไม่ครอป
   const topH = COVER_TOP_H[size] ?? extra?.coverCls ?? (compact ? "h-12" : "h-20");
+  const sideBox = COVER_SIDE_BOX[size] ?? COVER_SIDE_BOX.auto;
   // งานเรียงพิมพ์ไม่ผูกสินค้า → ไม่มีรูปปก แต่มี "รูป Artwork ที่จะพิมพ์" → โชว์เป็นแถวรูปเล็กแทน
   const artKeys = showImages && !coverUrl ? (task.arrange_image_keys ?? []) : [];
   const artMax = compact ? 4 : 6;
   const artShown = artKeys.slice(0, artMax);
+  const showPh = !!extra?.placeholder && showImages && !coverUrl && artShown.length === 0;   // ไม่มีรูปเลย → ไอคอนแทน
+  const side = cfg.coverPos === "side" && (!!coverUrl || showPh);   // รูปเล็กข้างซ้าย (ข้อความอยู่ขวา)
+  const fill = !!extra?.fill;
+  const scale = CARD_SCALE[cfg.cardScale ?? "md"] ?? 1;
   // กรอบสีตามแบรนด์ (ถ้าเปิด + แบรนด์มีสี hex)
   const bc = task.brand_color;
   const brandBorder = cfg.brandBorder && bc && /^#[0-9a-fA-F]{6}$/.test(String(bc));
   const showSku = cfg.sku !== false, showTaskNo = cfg.taskNo !== false;
+  const phIcon = <span className="text-2xl opacity-40 grayscale" aria-hidden>🖼️</span>;
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
-      style={brandBorder ? { borderColor: String(bc), borderLeftWidth: 3 } : undefined}>
+    <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${fill ? "h-full flex flex-col" : ""} ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
+      style={{ ...(brandBorder ? { borderColor: String(bc), borderLeftWidth: 3 } : {}), ...(scale !== 1 ? { zoom: scale } : {}) }}>
       {coverUrl && !side && (
         <HoverPreview url={r2ImageUrl(cover)} previewW={640}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${topH} w-full ${fitCls} border-b border-slate-100`} />
+          <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${topH} w-full shrink-0 ${fitCls} border-b border-slate-100`} />
         </HoverPreview>
+      )}
+      {showPh && !side && (
+        <div className={`${topH} w-full shrink-0 flex items-center justify-center bg-slate-50 border-b border-slate-100`} title={t("ยังไม่มีรูป", "No image yet")}>{phIcon}</div>
       )}
       {/* งานเรียงพิมพ์ — แถวรูป Artwork ที่จะพิมพ์ (เล็ก หลายตัว · ชี้เมาส์ดูใหญ่) */}
       {artShown.length > 0 && (
@@ -103,14 +116,17 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
           )}
         </div>
       )}
-      <div className={`${compact ? "p-2" : "p-2.5"} ${side ? "flex gap-2.5 items-start" : ""}`}>
-        {side && (
+      <div className={`${compact ? "p-2" : "p-2.5"} ${side ? "flex gap-2.5 items-start" : fill ? "flex flex-col" : ""} ${fill ? "flex-1" : ""}`}>
+        {side && coverUrl && (
           <HoverPreview url={r2ImageUrl(cover)} previewW={640}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={coverUrl!} alt="" loading="lazy" decoding="async" className={`${COVER_SIDE_BOX[size] ?? COVER_SIDE_BOX.auto} shrink-0 rounded-md border border-slate-200 ${fitCls}`} />
+            <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${sideBox} shrink-0 rounded-md border border-slate-200 ${fitCls}`} />
           </HoverPreview>
         )}
-        <div className={side ? "flex-1 min-w-0" : undefined}>
+        {side && !coverUrl && (
+          <div className={`${sideBox} shrink-0 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center`} title={t("ยังไม่มีรูป", "No image yet")}>{phIcon}</div>
+        )}
+        <div className={`${side ? "flex-1 min-w-0" : ""} ${fill ? "flex flex-col flex-1 self-stretch" : ""}`}>
         {/* flex-wrap: การ์ดแคบ (3 คอลัมน์/รูปข้างซ้าย) เลขที่งานตกบรรทัดใหม่ ไม่ทับป้าย */}
         <div className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 ${compact ? "mb-1" : "mb-1.5"}`}>
           <div className="flex items-center gap-1 min-w-0">
@@ -129,6 +145,8 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
         {extra?.statusPill && (() => { const m = statusMeta(task.status); return (
           <div className="mt-1.5"><span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span></div>
         ); })()}
+        {/* ผู้รับผิดชอบ/กำหนดส่ง/ความคืบหน้า ชิดล่างเสมอ (การ์ดสูงเท่ากัน แถวล่างตรงกัน) */}
+        <div className={fill ? "mt-auto" : undefined}>
         {(cfg.assignee || cfg.due) && (
           <div className="flex items-center justify-between gap-2 mt-2">
             {cfg.assignee ? <AssigneeStack list={task.assignees} size={20} /> : <span />}
@@ -144,6 +162,7 @@ function CardBody({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: Kan
             <div className="h-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${task.progress_percent}%` }} /></div>
           </div>
         )}
+        </div>
         </div>
       </div>
     </div>
@@ -285,7 +304,29 @@ export const isWipStatus = (s?: string | null) => !!s && (WIP_ACTIVE_STATUSES.in
 
 const laneTarget = (lane: string) => (lane === WIP_LANE ? WIP_LANE_TARGET : lane);
 const laneOf = (status: string) => (WIP_ACTIVE_STATUSES.includes(status) ? WIP_LANE : status);
-const WIP_COVER_CLS: Record<number, string> = { 1: "h-40", 2: "h-28", 3: "h-20" };
+const WIP_COVER_CLS: Record<number, string> = { 1: "h-40", 2: "h-28", 3: "h-20", 4: "h-20", 5: "h-16", 6: "h-16" };
+const WIP_LANE_IDS = new Set([WIP_LANE, WIP_REVIEW, WIP_FIX]);
+// ลากแล้วชี้อยู่บนการ์ดใบไหน = จะสลับไปที่ตำแหน่งนั้น · ไม่ได้ชี้การ์ด = วางลงช่อง (เปลี่ยนสถานะ)
+const wipCollision: CollisionDetection = (args) => {
+  const within = pointerWithin(args).filter((c) => c.id !== args.active.id);
+  const cards = within.filter((c) => !WIP_LANE_IDS.has(String(c.id)));
+  if (cards.length) return cards;
+  if (within.length) return within;
+  return rectIntersection(args).filter((c) => c.id !== args.active.id);
+};
+
+// การ์ดใน WIP = ลากได้ + เป็นจุดวางได้ (วางทับการ์ดอื่น = สลับตำแหน่ง)
+function WipCard({ task, cfg, extra, animCls, onClick, dropHint }: { task: CreativeTask; cfg: KanbanTheme; extra: CardExtra; animCls?: string; onClick: () => void; dropHint?: boolean }) {
+  const drag = useDraggable({ id: task.id });
+  const drop = useDroppable({ id: task.id });
+  const setRef = (el: HTMLElement | null) => { drag.setNodeRef(el); drop.setNodeRef(el); };
+  return (
+    <div ref={setRef} {...drag.listeners} {...drag.attributes} onClick={onClick}
+      className={`h-full rounded-lg cursor-grab active:cursor-grabbing touch-none ${animCls ?? ""} ${drag.isDragging ? "opacity-40" : ""} ${dropHint && drop.isOver ? "ring-2 ring-violet-400 ring-offset-2" : ""}`}>
+      <CardBody task={task} cfg={cfg} extra={extra} />
+    </div>
+  );
+}
 
 function WipLane({ id, label, count, barColor, dotClass, wide, minWidth, alert, dragFrom, children, chips }: {
   id: string; label: string; count: number; barColor?: string; dotClass?: string; wide?: boolean; minWidth?: number; alert?: boolean;
@@ -313,7 +354,7 @@ function WipLane({ id, label, count, barColor, dotClass, wide, minWidth, alert, 
   );
 }
 
-export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus, onCardClick }: {
+export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus, onCardClick, onCfgChange }: {
   tasks: CreativeTask[];
   cfg: KanbanTheme;
   accent: string;
@@ -321,6 +362,7 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   anim?: AnimTheme;
   onMoveStatus: (taskId: string, toKey: string) => void;
   onCardClick: (id: string) => void;
+  onCfgChange?: (c: KanbanTheme) => void;   // บันทึกลำดับที่ลากจัดเอง (ต่อคน)
 }) {
   const t = useT();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -328,54 +370,108 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const animCls = `${anim?.hover ? "ov-hover" : ""} ${anim?.entrance ? "ov-enter" : ""}`.trim();
   const cols = cfg.wipCols ?? 2;
+  const manual = cfg.wipSort === "manual";
   const bigCfg: KanbanTheme = { ...cfg, sku: false };   // WIP ไม่โชว์บรรทัดสินค้า (เจ้าของเลือก)
   const smallCfg: KanbanTheme = { ...cfg, sku: false, cover: false, progress: false, brand: false, taskNo: false, taskType: false, compact: true };
-  const bigExtra: CardExtra = { statusPill: true, relDue: true, coverCls: WIP_COVER_CLS[cols], imgW: cols === 1 ? 640 : 400 };
+  // การ์ดช่องใหญ่: ไม่มีรูป → ไอคอนแทน + ยืดเต็มช่อง = ทุกใบสูงเท่ากัน
+  const bigExtra: CardExtra = { statusPill: true, relDue: true, coverCls: WIP_COVER_CLS[cols], imgW: cols === 1 ? 640 : 400, placeholder: true, fill: true };
+  const smallExtra: CardExtra = { relDue: true, fill: true };
   const gap = cardGapPx(cfg);
-  const smallExtra: CardExtra = { relDue: true };
   // สีแถบหัวช่อง = สีสถานะที่ผู้ใช้ตั้งเอง (ถ้ามี)
   const barOf = (key: string) => statusColors?.[key]?.c1 || undefined;
 
-  // เรียง: กำหนดส่งเก่าสุดก่อน (ไม่มีกำหนดไว้ท้าย) → ความสำคัญสูงก่อน
-  const lanes = useMemo(() => {
-    const sorted = tasks.filter((x) => isWipStatus(x.status)).sort((a, b) =>
-      (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999") || (PRIORITY_RANK[a.priority as CreativePriority] ?? 9) - (PRIORITY_RANK[b.priority as CreativePriority] ?? 9));
-    return {
-      active: sorted.filter((x) => WIP_ACTIVE_STATUSES.includes(x.status)),
-      review: sorted.filter((x) => x.status === WIP_REVIEW),
-      fix: sorted.filter((x) => x.status === WIP_FIX),
-    };
-  }, [tasks]);
+  // เรียง 2 แบบ: ⏰ กำหนดส่ง (เก่าสุดก่อน → ความสำคัญสูงก่อน) หรือ ✋ ลำดับของฉัน (ลากจัดเอง · งานใหม่ที่ยังไม่ได้จัดขึ้นบนสุด)
+  const sorted = useMemo(() => {
+    const byDue = (a: CreativeTask, b: CreativeTask) =>
+      (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999") || (PRIORITY_RANK[a.priority as CreativePriority] ?? 9) - (PRIORITY_RANK[b.priority as CreativePriority] ?? 9);
+    const list = tasks.filter((x) => isWipStatus(x.status));
+    if (!manual) return list.sort(byDue);
+    const idx = new Map((cfg.wipOrder ?? []).map((id, i) => [id, i]));
+    return list.sort((a, b) => {
+      const ia = idx.get(a.id), ib = idx.get(b.id);
+      if (ia == null && ib == null) return byDue(a, b);
+      if (ia == null) return -1;
+      if (ib == null) return 1;
+      return ia - ib;
+    });
+  }, [tasks, manual, cfg.wipOrder]);
+  const lanes = useMemo(() => ({
+    active: sorted.filter((x) => WIP_ACTIVE_STATUSES.includes(x.status)),
+    review: sorted.filter((x) => x.status === WIP_REVIEW),
+    fix: sorted.filter((x) => x.status === WIP_FIX),
+  }), [sorted]);
   const activeShown = subFilter ? lanes.active.filter((x) => x.status === subFilter) : lanes.active;
   const activeTask = tasks.find((x) => x.id === activeId) ?? null;
+
+  // บันทึกลำดับใหม่: ลำดับที่เห็นตอนนี้ (ย้ายใบที่ลาก) + ของเดิมที่ซ่อนจากตัวกรองต่อท้าย (ไม่หาย)
+  const saveOrder = (dragId: string, overId: string) => {
+    const ids = sorted.map((x) => x.id);
+    const from = ids.indexOf(dragId), to = ids.indexOf(overId);
+    if (from < 0 || to < 0 || from === to) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    const seen = new Set(ids);
+    const rest = (cfg.wipOrder ?? []).filter((id) => !seen.has(id) && tasks.some((x) => x.id === id));
+    onCfgChange?.({ ...cfg, wipSort: "manual", wipOrder: [...ids, ...rest] });
+  };
 
   const onDragStart = (e: DragStartEvent) => setActiveId(String(e.active.id));
   const onDragEnd = (e: DragEndEvent) => {
     setActiveId(null);
     const overId = e.over?.id ? String(e.over.id) : undefined;
     const task = tasks.find((x) => x.id === String(e.active.id));
-    if (!overId || !task || laneOf(task.status) === overId) return;   // วางช่องเดิม = ไม่เปลี่ยน
-    onMoveStatus(task.id, laneTarget(overId));
+    if (!overId || !task) return;
+    const overTask = WIP_LANE_IDS.has(overId) ? null : tasks.find((x) => x.id === overId);
+    const toLane = overTask ? laneOf(overTask.status) : overId;
+    const crossLane = laneOf(task.status) !== toLane;
+    // ข้ามช่อง = เปลี่ยนสถานะ (ถ้าเส้นทางไม่อนุญาต ระบบเดิมแจ้งเตือนเอง และไม่ย้ายลำดับ)
+    if (crossLane) {
+      const target = laneTarget(toLane);
+      onMoveStatus(task.id, target);
+      if (!canTransitionTo(task.status, target)) return;
+    }
+    // วางทับการ์ด = สลับตำแหน่ง (จำต่อคน) · ลากจัดในช่องเดียวกัน = เปลี่ยนเป็น "ลำดับของฉัน" อัตโนมัติ
+    // (ข้ามช่องตอนเรียงตามกำหนดส่ง = แค่เปลี่ยนสถานะ ไม่สลับโหมดเรียงให้)
+    if (overTask && onCfgChange && (manual || !crossLane)) saveOrder(task.id, overTask.id);
   };
 
   const empty = (msg: string) => <div className="h-16 flex items-center justify-center text-center px-2 text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">{msg}</div>;
+  const grid = (n: number) => ({ display: "grid", gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))`, gridAutoRows: "1fr", gap });   // 1fr = ทุกแถวสูงเท่ากัน
 
   // ชิปกรอง: ทั้งหมด → กำลังทำ → พร้อมทำ → รอคิว (ใกล้เสร็จสุดก่อน)
   const subChips: [string, string, number][] = [["", t("ทั้งหมด", "All"), lanes.active.length], ...[...WIP_ACTIVE_STATUSES].reverse().map((s): [string, string, number] => [s, statusMeta(s).label, lanes.active.filter((x) => x.status === s).length])];
+  const sortBtn = (v: "due" | "manual", label: string, title: string) => {
+    const on = (v === "manual") === manual;
+    return <button type="button" title={title} onClick={() => onCfgChange?.({ ...cfg, wipSort: v })}
+      className={`h-6 px-2 text-[11px] font-medium rounded-md ${on ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-700"}`}>{label}</button>;
+  };
   const activeLane = (
-    <WipLane key={WIP_LANE} id={WIP_LANE} wide minWidth={cols * 220} label={t("กำลังดำเนินการ", "In progress")} count={lanes.active.length} barColor={accent} dragFrom={activeTask?.status}
+    <WipLane key={WIP_LANE} id={WIP_LANE} wide minWidth={cols * (cols > 3 ? 180 : 220)} label={t("กำลังดำเนินการ", "In progress")} count={lanes.active.length} barColor={accent} dragFrom={activeTask?.status}
       chips={
-        <div className="flex flex-wrap gap-1 mt-1.5">
-          {subChips.map(([k, label, n]) => {
-            const on = subFilter === k;
-            return <button key={k || "all"} type="button" onClick={() => setSubFilter(k)} style={on ? { background: accent, borderColor: accent } : undefined}
-              className={`h-6 px-2 rounded-full border text-[11px] font-medium ${on ? "text-white" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{label} {n}</button>;
-          })}
+        <div className="flex flex-wrap items-center justify-between gap-1.5 mt-1.5">
+          <div className="flex flex-wrap gap-1">
+            {subChips.map(([k, label, n]) => {
+              const on = subFilter === k;
+              return <button key={k || "all"} type="button" onClick={() => setSubFilter(k)} style={on ? { background: accent, borderColor: accent } : undefined}
+                className={`h-6 px-2 rounded-full border text-[11px] font-medium ${on ? "text-white" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{label} {n}</button>;
+            })}
+          </div>
+          {onCfgChange && (
+            <div className="flex items-center gap-1">
+              <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                {sortBtn("due", t("⏰ กำหนดส่ง", "⏰ Due date"), t("เรียงตามกำหนดส่ง เก่าสุดก่อน", "Sort by due date, oldest first"))}
+                {sortBtn("manual", t("✋ ลำดับของฉัน", "✋ My order"), t("ลากการ์ดไปวางทับใบอื่นเพื่อสลับตำแหน่ง — จำแยกแต่ละคน", "Drag a card onto another to reorder — saved per person"))}
+              </div>
+              {manual && (cfg.wipOrder?.length ?? 0) > 0 && (
+                <button type="button" onClick={() => onCfgChange({ ...cfg, wipOrder: [] })} title={t("ล้างลำดับที่จัดไว้ กลับไปเรียงตามกำหนดส่ง", "Clear my order")}
+                  className="h-6 px-1.5 text-[11px] text-slate-400 hover:text-slate-600">↺ {t("รีเซ็ต", "Reset")}</button>
+              )}
+            </div>
+          )}
         </div>
       }>
       {activeShown.length === 0 ? empty(t("ไม่มีงานค้างในกลุ่มนี้ 🎉", "Nothing in progress here 🎉")) : (
-        <div className="grid items-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap }}>
-          {activeShown.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={bigCfg} extra={bigExtra} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}
+        <div style={grid(cols)}>
+          {activeShown.map((tk) => <WipCard key={tk.id} task={tk} cfg={bigCfg} extra={bigExtra} animCls={animCls} dropHint={!!activeId} onClick={() => onCardClick(tk.id)} />)}
         </div>
       )}
     </WipLane>
@@ -383,7 +479,7 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   const smallLane = (key: string, list: CreativeTask[], emptyMsg: string, alert?: boolean) => (
     <WipLane key={key} id={key} label={statusMeta(key).label} count={list.length} dotClass={statusMeta(key).dot} barColor={barOf(key) ?? (alert ? "#f87171" : undefined)} alert={alert} dragFrom={activeTask?.status}>
       {list.length === 0 ? empty(emptyMsg) : (
-        <div className="flex flex-col" style={{ gap }}>{list.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={smallCfg} extra={smallExtra} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}</div>
+        <div style={grid(1)}>{list.map((tk) => <WipCard key={tk.id} task={tk} cfg={smallCfg} extra={smallExtra} animCls={animCls} dropHint={!!activeId} onClick={() => onCardClick(tk.id)} />)}</div>
       )}
     </WipLane>
   );
@@ -393,7 +489,7 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   const ordered = lanes.fix.length > 0 ? [fixLane, activeLane, reviewLane] : [activeLane, reviewLane, fixLane];
 
   return (
-    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
+    <DndContext sensors={sensors} collisionDetection={wipCollision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
       <div className="flex gap-3 overflow-x-auto p-3 items-stretch">{ordered}</div>
       <DragOverlay dropAnimation={null}>{activeTask ? <div className="w-60"><CardBody task={activeTask} cfg={smallCfg} extra={smallExtra} dragging /></div> : null}</DragOverlay>
     </DndContext>
