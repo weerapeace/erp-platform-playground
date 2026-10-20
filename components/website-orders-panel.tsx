@@ -9,6 +9,7 @@
  * ไม่มีปุ่มลบ: ออเดอร์มีเลขที่ที่ลูกค้าถืออยู่ → ใช้ "ยกเลิก" แทน (ยังค้นย้อนได้)
  * 🌐 ป้าย EN = ลูกค้าสั่งจากหน้าภาษาอังกฤษ · 💬 ข้อความถึงลูกค้า (คัดลอกไปส่ง LINE/SMS · ✉️ ส่งอีเมล) เป็นภาษาของลูกค้าเสมอ
  *    ถ้อยคำ lib/customer-messages · อีเมล lib/order-notify (อัตโนมัติเมื่อร้านเปิดที่แท็บ 🏪 ข้อมูลร้าน)
+ * 💳 สลิปโอน: ตัวกรอง "💳 รอตรวจเงิน" + กล่องสลิป (SlipReviewBox) ในรายละเอียด — ยืนยันรับเงิน/ปฏิเสธ (lib/website-payments*)
  * ข้อมูล: /api/website/orders
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,6 +22,7 @@ import { GiftCardPreview } from "@/components/website-gift-cards-editor";
 import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type OrderGiftCard } from "@/lib/website-gift-cards";
 import { CUSTOMER_LANG_LABEL, ORDER_EVENTS, currentOrderEvent, orderMessage, type OrderEvent } from "@/lib/customer-messages";
 import { PARCEL_CARRIERS, cleanTrackingNo, type ParcelTracking } from "@/lib/parcel-tracking";
+import { SlipReviewBox, type SlipMeta, type SlipView } from "@/components/website-slip-review";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -63,6 +65,8 @@ type Order = {
   promptpay?: { number: string; name: string } | null;
   /** 🚚 เลขพัสดุ (ยังไม่กรอก = null) */
   tracking?: ParcelTracking | null;
+  /** 📎 สลิปที่ลูกค้าแนบ (ล่าสุดก่อน) */
+  slips?: SlipView[];
 };
 type Messaging = {
   shopName: string;
@@ -94,11 +98,14 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   const [trackNo, setTrackNo] = useState("");
   const [trackCarrier, setTrackCarrier] = useState("");
   const [messaging, setMessaging] = useState<Messaging | null>(null);
+  const [slipMeta, setSlipMeta] = useState<SlipMeta | null>(null);
+  const [slipAuto, setSlipAuto] = useState<{ enabled: boolean; configured: boolean; uploadEnabled: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await apiFetch(`/api/website/orders?shop=${encodeURIComponent(shopSlug)}&status=${encodeURIComponent(filter)}`);
+      // 💳 "รอตรวจเงิน" เป็นสถานะชำระเงิน ไม่ใช่สถานะออเดอร์ → โหลดทั้งหมดแล้วกรองในหน้าจอ
+      const r = await apiFetch(`/api/website/orders?shop=${encodeURIComponent(shopSlug)}&status=${encodeURIComponent(filter === "verifying" ? "all" : filter)}`);
       const j = await r.json();
       if (j.error) {
         toast.error(j.error);
@@ -110,6 +117,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
       setPayStatuses(j.paymentStatuses ?? []);
       setMethods(j.paymentMethods ?? {});
       setMessaging(j.messaging ?? null);
+      setSlipMeta(j.slipMeta ?? null);
+      setSlipAuto(j.slipAuto ?? null);
     } catch {
       toast.error("โหลดออเดอร์ไม่สำเร็จ");
     } finally {
@@ -161,7 +170,29 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
     }
   };
 
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const total = statuses.reduce((a, s) => a + (counts[s.key] ?? 0), 0);
+  const shown = filter === "verifying" ? orders.filter((o) => o.paymentStatus === "verifying") : orders;
+  // 💳 พนักงานยืนยันรับเงิน / ปฏิเสธสลิป
+  const decideSlip = async (slipId: string, action: "approve" | "reject", reason?: string) => {
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/website/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slipId, slipAction: action, reason }),
+      }).then((r) => r.json());
+      if (!j.ok) {
+        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        return;
+      }
+      toast.success(action === "approve" ? "ยืนยันรับเงินแล้ว — ออเดอร์เป็น ชำระแล้ว" : "แจ้งลูกค้าแล้วว่าสลิปไม่ถูกต้อง");
+      await load();
+    } catch {
+      toast.error("บันทึกไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
   // 🎴 การ์ดที่รอพิมพ์ (ในรายการที่โหลดอยู่) + ตั้งค่าการ์ดของร้าน (โหลดเมื่อเปิดออเดอร์ที่มีการ์ด — ไว้วาดพรีวิว)
   const cardsWaiting = orders.filter((o) => o.giftCard && !o.giftCard.printedAt && o.status !== "cancelled").length;
   const [cardCfg, setCardCfg] = useState<GiftCardConfig | null>(null);
@@ -185,6 +216,9 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
             {s.label} <span className="opacity-60">{counts[s.key] ?? 0}</span>
           </Chip>
         ))}
+        <Chip active={filter === "verifying"} onClick={() => setFilter("verifying")}>
+          💳 รอตรวจเงิน <span className={(counts.verifying ?? 0) > 0 && filter !== "verifying" ? "rounded-full bg-amber-400 px-1.5 text-white" : "opacity-60"}>{counts.verifying ?? 0}</span>
+        </Chip>
         {cardsWaiting > 0 && (
           <a href={`/print/gift-cards?shop=${encodeURIComponent(shopSlug)}`} target="_blank" rel="noopener" className="ml-auto text-xs px-2.5 py-1 rounded-full border border-pink-300 bg-pink-50 text-pink-700 hover:bg-pink-100">
             🎴 พิมพ์การ์ดที่รอ ({cardsWaiting})
@@ -195,17 +229,24 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
         </button>
       </div>
 
+      {slipAuto?.enabled && !slipAuto.configured && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          🤖 เปิด "ตรวจสลิปอัตโนมัติ" ไว้แล้ว แต่ยังไม่ได้ใส่รหัส <span className="font-mono">EASYSLIP_API_KEY</span> ใน Vercel — ตอนนี้ทุกสลิปเข้าคิว 💳 รอตรวจเงิน ให้ตรวจเอง
+        </p>
+      )}
       {loading ? (
         <p className="text-sm text-slate-500 py-8 text-center">กำลังโหลดออเดอร์…</p>
       ) : (
         <MiniTable<Order>
-          rows={orders}
+          rows={shown}
           rowKey={(o) => o.id}
           countUnit="ออเดอร์"
           emptyText={
             filter === "all"
               ? "ยังไม่มีออเดอร์จากเว็บร้านนี้ — เมื่อลูกค้ากดสั่งซื้อบนเว็บ รายการจะขึ้นที่นี่"
-              : "ไม่มีออเดอร์ในสถานะนี้"
+              : filter === "verifying"
+                ? "ไม่มีสลิปรอตรวจ — ลูกค้าแนบสลิปเมื่อไร (และระบบตรวจอัตโนมัติไม่ผ่าน) จะขึ้นที่นี่"
+                : "ไม่มีออเดอร์ในสถานะนี้"
           }
           searchText={(o) => `${o.giftWrap ? "ห่อของขวัญ " : ""}${o.giftCardOnly ? "การ์ด " : ""}${o.orderNo} ${o.customerName} ${o.customerPhone} ${o.skuCodes.join(" ")} ${o.items.map((i) => i.name).join(" ")}`}
           searchPlaceholder="ค้นหา เลขที่ / ชื่อ / เบอร์ / รหัสสินค้า"
@@ -273,7 +314,10 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                   <span className={`text-[11px] px-2 py-0.5 rounded-full ${tone(payStatuses, o.paymentStatus)}`}>
                     {label(payStatuses, o.paymentStatus)}
                   </span>
-                  <span className="text-[11px] text-slate-500">{methods[o.paymentMethod] ?? o.paymentMethod}</span>
+                  <span className="text-[11px] text-slate-500">
+                    {methods[o.paymentMethod] ?? o.paymentMethod}
+                    {(o.slips?.length ?? 0) > 0 && <span className="ml-1" title="ลูกค้าแนบสลิปแล้ว">📎{o.slips!.length}</span>}
+                  </span>
                 </div>
               ),
               sortValue: (o) => o.paymentStatus,
@@ -389,6 +433,10 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 </div>
               </section>
             </div>
+
+            {slipMeta && (open.slips?.length ?? 0) > 0 && (
+              <SlipReviewBox slips={open.slips ?? []} meta={slipMeta} orderTotal={open.grandTotal} busy={busy} onDecide={decideSlip} />
+            )}
 
             {messaging && <OrderMessageBox key={open.id} order={open} messaging={messaging} />}
 

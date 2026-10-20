@@ -42,13 +42,15 @@ import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch
 import { customerLang, type CustomerLang } from "@/lib/customer-messages";
 import { dropFromRow, hiddenDropCodes } from "@/lib/website-new-drops";
 import { trackingOf, type ParcelTracking } from "@/lib/parcel-tracking";
+import { AUTO_RESULT, rejectReasonText, type AutoResult } from "@/lib/website-payments";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 // ─── สถานะ (ชุดเดียวกับเว็บ Pixiedustie เดิม จะได้ดูออเดอร์รวมกันได้) ───
 
 export type OrderStatus = "pending" | "preparing" | "shipped" | "completed" | "cancelled";
-export type PaymentStatus = "unpaid" | "paid" | "refunded";
+/** verifying = ลูกค้าแนบสลิปแล้ว รอตรวจ (lib/website-payments) */
+export type PaymentStatus = "unpaid" | "verifying" | "paid" | "refunded";
 export type PaymentMethod = "cod" | "promptpay";
 
 export const ORDER_STATUSES: { key: OrderStatus; label: string; tone: string }[] = [
@@ -61,6 +63,7 @@ export const ORDER_STATUSES: { key: OrderStatus; label: string; tone: string }[]
 
 export const PAYMENT_STATUSES: { key: PaymentStatus; label: string; tone: string }[] = [
   { key: "unpaid", label: "ยังไม่ชำระ", tone: "bg-rose-100 text-rose-700" },
+  { key: "verifying", label: "แจ้งโอนแล้ว · รอตรวจ", tone: "bg-amber-100 text-amber-800" },
   { key: "paid", label: "ชำระแล้ว", tone: "bg-emerald-100 text-emerald-800" },
   { key: "refunded", label: "คืนเงินแล้ว", tone: "bg-slate-200 text-slate-600" },
 ];
@@ -144,6 +147,10 @@ export interface OrderView {
   createdAt: string;
   /** ข้อมูลโอนเงิน (เฉพาะออเดอร์พร้อมเพย์ที่ยังไม่ชำระ) */
   promptpay: { number: string; name: string } | null;
+  /** 📎 ลูกค้าแนบสลิปตอนนี้ได้ไหม (พร้อมเพย์ + ยังไม่ชำระ/รอตรวจ + ร้านเปิดแนบสลิป) */
+  slipUpload?: boolean;
+  /** 📎 สลิปล่าสุดที่ลูกค้าแนบ (ยังไม่เคยแนบ = null) — message = ข้อความภาษาลูกค้า */
+  slip?: { status: string; uploadedAt: string; message: string } | null;
   /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง */
   lang?: CustomerLang;
   /** 🚚 เลขพัสดุ + ขนส่ง + ลิงก์ตามพัสดุ (ยังไม่กรอก = null) — lib/parcel-tracking */
@@ -632,12 +639,20 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         note: input.note ?? "",
         createdAt: order.created_at,
         promptpay: promptpayFor(info, input.paymentMethod, "unpaid"),
+        slipUpload: slipUploadFor(info, input.paymentMethod, "unpaid"),
+        slip: null,
         lang: input.lang,
       },
       orderId: order.id,
     };
   }
   return { ok: false, error: "ระบบไม่ว่าง กรุณาลองใหม่อีกครั้ง", status: 503 };
+}
+
+/** 📎 แนบสลิปได้: ออเดอร์พร้อมเพย์ที่ยังไม่ชำระ/รอตรวจ + ร้านเปิดแนบสลิป
+ *  (ไม่บังคับมีเลขพร้อมเพย์ — ร้านที่ยังไม่ตั้งเลขส่งบัญชีให้ลูกค้าทางแชท ลูกค้าก็แนบสลิปที่หน้าติดตามออเดอร์ได้) */
+export function slipUploadFor(info: SiteInfo, method: string, paymentStatus: string): boolean {
+  return method === "promptpay" && (paymentStatus === "unpaid" || paymentStatus === "verifying") && info.slip_upload_enabled;
 }
 
 function promptpayFor(info: SiteInfo, method: string, paymentStatus: string): OrderView["promptpay"] {
@@ -733,6 +748,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     note: o.note ?? "",
     createdAt: o.created_at,
     promptpay: info ? promptpayFor(info, o.payment_method, o.payment_status) : null,
+    slipUpload: info ? slipUploadFor(info, o.payment_method, o.payment_status) : false,
     lang: customerLang(o.lang),
     tracking: trackingOf(o.tracking_carrier, o.tracking_no),
   };
@@ -755,9 +771,25 @@ export async function findStorefrontOrder(
   // เทียบ 9 หลักท้าย — กันเคสกรอก 0 นำ / +66 ไม่เหมือนกัน
   if (digits(row.customer_phone).slice(-9) !== ph.slice(-9)) return null;
 
-  const [{ data: items }, info] = await Promise.all([
+  const [{ data: items }, info, { data: slips }] = await Promise.all([
     sb.from("store_order_items").select("name, variant_label, name_en, variant_label_en, unit_price, qty, line_total").eq("order_id", row.id).order("id"),
     readSiteInfo(sb, shopId),
+    sb.from("store_payments").select("status, auto_result, reject_reason, slip_uploaded_at").eq("order_id", row.id).not("slip_path", "is", null).order("slip_uploaded_at", { ascending: false }).limit(1),
   ]);
-  return toOrderView(row, (items ?? []) as ItemRow[], info, viewLang);
+  const view = toOrderView(row, (items ?? []) as ItemRow[], info, viewLang);
+  const last = ((slips ?? []) as { status: string; auto_result: string | null; reject_reason: string | null; slip_uploaded_at: string | null }[])[0];
+  view.slip = last ? { status: last.status, uploadedAt: last.slip_uploaded_at ?? "", message: slipCustomerMessage(last, viewLang ?? customerLang(row.lang)) } : null;
+  return view;
+}
+
+/** 📎 ข้อความถึงลูกค้าเรื่องสลิปล่าสุด (ภาษาลูกค้า) */
+function slipCustomerMessage(s: { status: string; auto_result: string | null; reject_reason: string | null }, lang: CustomerLang): string {
+  const en = lang === "en";
+  if (s.status === "verified") return en ? "Payment received — thank you!" : "ได้รับชำระเงินแล้ว ขอบคุณค่ะ";
+  if (s.status === "rejected") {
+    const why = rejectReasonText(s.reject_reason, en ? "en" : "th");
+    return en ? `The shop couldn't confirm your slip${why ? ` (${why})` : ""}. Please upload a new one or contact the shop.` : `ร้านยังยืนยันสลิปไม่ได้${why ? ` (${why})` : ""} — แนบสลิปใหม่ หรือติดต่อร้าน`;
+  }
+  const r = AUTO_RESULT[(s.auto_result ?? "off") as AutoResult] ?? AUTO_RESULT.off;
+  return en ? r.customer.en : r.customer.th;
 }

@@ -76,6 +76,9 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "pay_promptpay", label: "รับโอนพร้อมเพย์", group: "order", type: "bool", isPublic: true },
   { key: "promptpay_number", label: "เลขพร้อมเพย์", hint: "เบอร์โทรหรือเลขบัตรประชาชน/นิติบุคคล — ลูกค้าเห็นตอนสั่งซื้อ", group: "order", type: "text", isPublic: true },
   { key: "promptpay_name", label: "ชื่อบัญชีพร้อมเพย์", group: "order", type: "text", isPublic: true },
+  // 💳 สลิปโอน (ของกลาง lib/website-payments*.ts · เว็บร้าน SlipUpload) — เจ้าของเลือก A+B 2026-10-20
+  { key: "slip_upload_enabled", label: "📎 ให้ลูกค้าแนบสลิปบนเว็บ (หลังโอนพร้อมเพย์)", hint: "ลูกค้าแนบสลิปได้ทั้งหน้าขอบคุณหลังสั่ง และหน้าติดตามคำสั่งซื้อ · สลิปเข้าแท็บ 🧾 ออเดอร์ (ตัวกรอง 💳 รอตรวจเงิน) · ปิด = ลูกค้าส่งสลิปทางแชทเหมือนเดิม", group: "order", type: "bool", isPublic: true },
+  { key: "slip_auto_verify", label: "🤖 ตรวจสลิปอัตโนมัติ (EasySlip)", hint: "ระบบเช็กยอดเงิน + บัญชีผู้รับ + สลิปซ้ำ ผ่านครบ = ออเดอร์เป็น 'ชำระแล้ว' ทันที · ไม่ผ่าน = เข้าคิวให้พนักงานตรวจ (ระบบไม่ปฏิเสธสลิปเอง) · ต้องสมัคร easyslip.com + ลงทะเบียนบัญชีรับเงินของร้านในเว็บ EasySlip + ใส่รหัส EASYSLIP_API_KEY ใน Vercel ก่อน", group: "order", type: "bool", isPublic: false },
   { key: "order_note", label: "ข้อความแจ้งลูกค้าตอนสั่งซื้อ", hint: "เช่น จัดส่งภายใน 1-2 วันทำการหลังยืนยันยอด", group: "order", type: "text", isPublic: true, i18n: true },
   { key: "order_email_enabled", label: "✉️ ส่งอีเมลแจ้งลูกค้าอัตโนมัติ", hint: "ส่งตอนสั่งซื้อ · ได้รับชำระเงิน · จัดส่งแล้ว · ยกเลิก · คืนเงิน — เป็นภาษาที่ลูกค้าใช้ตอนสั่ง (ไทย/อังกฤษ) · เฉพาะลูกค้าที่กรอกอีเมล · ต้องตั้งระบบส่งอีเมล (Resend) ก่อน · ปิดไว้ก็ยังกดส่ง/คัดลอกข้อความเองได้ในแท็บออเดอร์", group: "order", type: "bool", isPublic: false },
   { key: "order_prefix", label: "ตัวย่อเลขที่ออเดอร์", hint: "A-Z 0-9 ไม่เกิน 6 ตัว · เว้นว่าง = ใช้ตัวอักษรจากชื่อร้าน · เลขจะเป็น XX-256910-00001", group: "order", type: "text", isPublic: false },
@@ -151,6 +154,8 @@ export interface SiteInfo {
   pay_promptpay: boolean;
   promptpay_number: string;
   promptpay_name: string;
+  slip_upload_enabled: boolean;
+  slip_auto_verify: boolean;
   order_note: string;
   order_email_enabled: boolean;
   order_prefix: string;
@@ -212,6 +217,8 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   pay_promptpay: true,
   promptpay_number: "",
   promptpay_name: "",
+  slip_upload_enabled: true,
+  slip_auto_verify: false,
   order_note: "",
   order_email_enabled: false,
   order_prefix: "",

@@ -5,6 +5,8 @@
  * PATCH { orderId, status?, paymentStatus?, note?, trackingNo?, trackingCarrier? } → เปลี่ยนสถานะ/สถานะจ่าย/โน้ต/🚚 เลขพัสดุ + audit
  *       เปลี่ยนสถานะแล้ว → ✉️ อีเมลแจ้งลูกค้าอัตโนมัติในภาษาที่ลูกค้าสั่ง (ถ้าร้านเปิด · lib/order-notify) → ตอบ notify
  * PATCH { orderId, notify: "<เรื่อง>" } → พนักงานกดส่งอีเมลแจ้งลูกค้าเอง (ไม่ต้องเปิดอัตโนมัติ)
+ * PATCH { slipId, slipAction: "approve"|"reject", reason? } → 💳 พนักงานยืนยันรับเงิน / ปฏิเสธสลิป (lib/website-payments-server)
+ * GET ส่ง slips (สลิปที่ลูกค้าแนบ + ลิงก์ดูรูป 15 นาที) ต่อออเดอร์ + slipAuto (สถานะตรวจอัตโนมัติของร้าน)
  * GET ส่ง messaging (ชื่อร้าน/ลิงก์เว็บ/ข้อความร้าน) + msgItems (ชื่อสินค้าภาษาลูกค้า) ให้ปุ่ม "📋 คัดลอกข้อความถึงลูกค้า"
  *
  * ไม่มีลบ: ออเดอร์เป็นเอกสารที่ลูกค้าถืออยู่ (มีเลขที่) จึงให้ "ยกเลิก" (status=cancelled) แทน
@@ -24,6 +26,8 @@ import { emailConfigured } from "@/lib/email";
 import { ORDER_EVENTS, customerLang, orderEventOf, type OrderEvent } from "@/lib/customer-messages";
 import { notifyOrderCustomer, notifyNote, type NotifyResult } from "@/lib/order-notify";
 import { cleanCarrier, cleanTrackingNo } from "@/lib/parcel-tracking";
+import { slipsForOrders, slipVerifierConfigured, staffDecideSlip } from "@/lib/website-payments-server";
+import { AUTO_RESULT, SLIP_REJECT_REASONS, SLIP_STATUS } from "@/lib/website-payments";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -72,10 +76,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // นับทุกสถานะไว้โชว์ตัวเลขบนตัวกรอง (นับจากทั้งร้าน ไม่ใช่แค่หน้าที่กรอง)
-  const { data: allStatus } = await sb.from("store_orders").select("status").eq("shop_id", s.id);
+  // นับทุกสถานะไว้โชว์ตัวเลขบนตัวกรอง (นับจากทั้งร้าน ไม่ใช่แค่หน้าที่กรอง) · 💳 verifying = รอตรวจเงิน
+  const { data: allStatus } = await sb.from("store_orders").select("status, payment_status").eq("shop_id", s.id);
   const counts: Record<string, number> = {};
-  for (const r of (allStatus ?? []) as { status: string }[]) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  for (const r of (allStatus ?? []) as { status: string; payment_status: string }[]) {
+    counts[r.status] = (counts[r.status] ?? 0) + 1;
+    if (r.payment_status === "verifying" && r.status !== "cancelled") counts.verifying = (counts.verifying ?? 0) + 1;
+  }
+  const slips = await slipsForOrders(sb, ids);
 
   // 💬 ข้อมูลประกอบข้อความถึงลูกค้า (ปุ่มคัดลอก/ส่งอีเมล ในรายละเอียดออเดอร์)
   const [info, urls] = await Promise.all([readSiteInfo(sb, s.id), loadShopSiteUrls(sb, [s.id])]);
@@ -86,6 +94,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     statuses: ORDER_STATUSES,
     paymentStatuses: PAYMENT_STATUSES,
     paymentMethods: PAYMENT_METHOD_LABEL,
+    slipMeta: { statuses: SLIP_STATUS, autoResults: AUTO_RESULT, rejectReasons: SLIP_REJECT_REASONS },
     messaging: {
       shopName: s.name,
       siteUrl: urls.get(s.id) ?? null,
@@ -95,6 +104,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       autoEmail: info.order_email_enabled,
       emailReady: emailConfigured(),
     },
+    // 🤖 ตรวจสลิปอัตโนมัติ: ร้านเปิดไหม + มีรหัส EasySlip ใน env ไหม (ไม่บอกค่ารหัส)
+    slipAuto: { enabled: info.slip_auto_verify, configured: slipVerifierConfigured(), uploadEnabled: info.slip_upload_enabled },
     orders: rows.map((r) => {
       const items = itemsByOrder.get(r.id as string) ?? [];
       const row = r as unknown as Parameters<typeof toOrderView>[0];
@@ -111,6 +122,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         erpSoNumber: (r.erp_so_number as string | null) ?? null,
         isMember: !!r.customer_id,
         skuCodes: items.map((i) => i.sku_code).filter(Boolean),
+        slips: slips.get(r.id as string) ?? [],
       };
     }),
   });
@@ -123,7 +135,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string; notify?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown } };
+  let body: { orderId?: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string; notify?: string; cardPrinted?: { orderIds?: unknown; printed?: unknown }; slipId?: string; slipAction?: string; reason?: string };
   try {
     body = await request.json();
   } catch {
@@ -131,6 +143,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
   // 🎴 ติ๊ก/เอาติ๊ก "พิมพ์การ์ดแล้ว" หลายออเดอร์พร้อมกัน (หน้า /print/gift-cards) — เก็บใน gift_card.printedAt/printedBy
   if (body.cardPrinted) return markCardsPrinted(body.cardPrinted, user?.id ?? null, user?.email ?? null);
+  // 💳 ยืนยันรับเงิน / สลิปไม่ถูกต้อง
+  if (body.slipId) {
+    if (body.slipAction !== "approve" && body.slipAction !== "reject") return NextResponse.json({ error: "คำสั่งไม่ถูกต้อง" }, { status: 400 });
+    const r = await staffDecideSlip(supabaseAdmin(), { slipId: body.slipId, action: body.slipAction, reason: body.reason ?? null, actorId: user?.id ?? null, actorName: user?.email ?? null });
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+    return NextResponse.json({ ok: true, paymentStatus: r.paymentStatus });
+  }
   if (!body.orderId) return NextResponse.json({ error: "ต้องระบุ orderId" }, { status: 400 });
 
   // ✉️ พนักงานกดส่งอีเมลแจ้งลูกค้าเอง (ภาษาของลูกค้า) — ไม่ขึ้นกับสวิตช์อัตโนมัติ
