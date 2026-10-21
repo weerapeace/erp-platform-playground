@@ -1910,6 +1910,91 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     },
   },
 
+  // 🚶 รันเวย์ลุค (2026-10-21 · อ้างอิง Marc Jacobs "Runway Experience") — เว็บร้าน: src/components/home/RunwayBody.tsx
+  //   ลุคปัจจุบันชัดใหญ่ด้านหน้า · ลุคถัดไปเรียงแถวด้านหลัง (เล็กลง + จาง/เบลอ) · การ์ดสินค้าของลุคข้าง ๆ (♡ + ใส่ตะกร้า)
+  runway: {
+    type: "runway",
+    meta: { label: "รันเวย์ลุค (เดินแบบทีละลุค)", icon: "🚶", hint: "ลุคปัจจุบันชัดด้านหน้า ลุคถัดไปเรียงแถวด้านหลัง · การ์ดสินค้าของลุคข้าง ๆ", group: "สินค้า" },
+    fields: [
+      ...headFields({ eyebrow: "", title: "Spring Summer 2026", subtitle: true }),
+      text("lookLabel", "คำหน้าเลขลุค", { default: "LOOK", max: 20, placeholder: "LOOK / ลุคที่", hint: "โชว์มุมล่าง เช่น LOOK 03" }),
+      text("shopAllText", "ปุ่มดูสินค้าทั้งลุค", { default: "Shop the look", max: 40, hint: "ว่าง = ไม่มีปุ่ม" }),
+      f("depth", "ลุคถัดไปที่เห็นด้านหลัง", "select", {
+        group: "layout",
+        default: "3",
+        options: [
+          { v: "2", l: "2 ลุค" },
+          { v: "3", l: "3 ลุค" },
+          { v: "4", l: "4 ลุค" },
+        ],
+      }),
+      f("queueSide", "แถวลุคด้านหลังอยู่", "select", {
+        group: "layout",
+        default: "left",
+        options: [
+          { v: "left", l: "ซ้าย (แบบรูปอ้างอิง)" },
+          { v: "right", l: "ขวา" },
+        ],
+      }),
+      f("blur", "ลุคด้านหลัง", "select", {
+        group: "layout",
+        default: "soft",
+        options: [
+          { v: "soft", l: "เบลอนิด + จาง (แบบรูปอ้างอิง)" },
+          { v: "strong", l: "เบลอมาก + จาง" },
+          { v: "none", l: "ไม่เบลอ (จางอย่างเดียว)" },
+        ],
+      }),
+      f("height", "ความสูงเวที", "select", {
+        group: "layout",
+        default: "tall",
+        options: [
+          { v: "md", l: "ปกติ" },
+          { v: "tall", l: "สูง" },
+          { v: "screen", l: "เต็มจอ" },
+        ],
+      }),
+      f("panel", "การ์ดสินค้าของลุค", "select", {
+        group: "layout",
+        default: "right",
+        options: [
+          { v: "right", l: "แผงขวา (แบบรูปอ้างอิง)" },
+          { v: "left", l: "แผงซ้าย" },
+          { v: "none", l: "ไม่มีแผง (กดปุ่มดูสินค้าทั้งลุค)" },
+        ],
+        hint: "มือถือ: การ์ดเลื่อนข้างอยู่ใต้เวทีเสมอ",
+      }),
+      f("showPrice", "โชว์ราคาในการ์ด", "toggle", { group: "layout", default: true }),
+      f("showHeart", "ปุ่ม ♡ ถูกใจ", "toggle", { group: "layout", default: true, hint: "ใช้รายการโปรดของเว็บ (ร้านต้องเปิดรายการโปรดไว้)" }),
+      f("auto", "เดินลุคเอง", "toggle", { group: "layout", default: false, hint: "หยุดเมื่อลูกค้าชี้/แตะ" }),
+      f("autoSec", "เปลี่ยนลุคทุก (วินาที)", "number", { group: "layout", default: 5, min: 3, numMax: 20, showIf: { key: "auto", eq: true } }),
+    ],
+    children: {
+      key: "looks",
+      label: "ลุค",
+      itemLabel: "ลุค",
+      icon: "🚶",
+      max: 30,
+      fields: [
+        image("imageKey", "รูปลุค (เต็มตัว)", { required: true, requiredMessage: "ยังไม่ได้ใส่รูปลุค", hint: "แนะนำ PNG ตัดพื้น หรือพื้นเรียบสีเดียวกันทุกลุค · ถ่ายเต็มตัว มุมเดียวกัน แถวด้านหลังจะเรียงสวย" }),
+        text("name", "ชื่อลุค (ถ้ามี)", { default: "", max: 60, placeholder: "เช่น Pink Metallic" }),
+        f("products", "สินค้าในลุคนี้", "products", { max: 6, wide: true, hint: "โชว์ในแผงการ์ดข้างเวที · ♡ + ใส่ตะกร้าได้" }),
+      ],
+      summary: (it) => `${s(it.name) || (it.imageKey ? "ลุค" : "(ยังไม่ใส่รูป)")}${Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : ""}`,
+    },
+    summary: (b) => `${count(arr(b.looks).length, "ลุค")} · แถว${b.queueSide === "right" ? "ขวา" : "ซ้าย"} ${s(b.depth) || "3"}`,
+    validate: (b, label) => {
+      const out: Omit<ValidationIssue, "blockId">[] = [];
+      const looks = arr(b.looks).filter((x) => x.enabled !== false);
+      if (looks.length < 2) out.push({ level: "warning", message: `${label}: ควรมีอย่างน้อย 2 ลุค (ลุคเดียวจะไม่มีแถวด้านหลัง)` });
+      const noImg = looks.filter((x) => !x.imageKey).length;
+      if (noImg) out.push({ level: "warning", message: `${label}: ${noImg} ลุคยังไม่ได้ใส่รูป` });
+      const noProd = looks.filter((x) => !(Array.isArray(x.products) && x.products.length)).length;
+      if (noProd && b.panel !== "none") out.push({ level: "warning", message: `${label}: ${noProd} ลุคยังไม่ได้เลือกสินค้า (แผงการ์ดจะว่าง)` });
+      return out;
+    },
+  },
+
   // 📰 โลโก้สื่อ / พาร์ตเนอร์ (2026-10-15) — เว็บร้าน: src/components/home/LogosSection.tsx
   logos: {
     type: "logos",

@@ -60,6 +60,7 @@ export type BlockType =
   | "timeline"
   | "countdown"
   | "lookbook"
+  | "runway"
   | "logos"
   | "collections"
   | "fitcheck"
@@ -353,6 +354,25 @@ export interface DropBlock extends BlockBase {
   showProducts: boolean;
 }
 /** 🛍 ลุคบุ๊กกดซื้อได้ — spots[].pos = % บนรูป */
+/** 🚶 รันเวย์ลุค — looks[] = รูปเต็มตัว + ชื่อ + สินค้า (รหัสรุ่น) · ลุคถัดไปเรียงแถวด้านหลัง (เว็บร้าน RunwayBody) */
+export interface RunwayBlock extends BlockBase {
+  type: "runway";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  lookLabel: string;
+  shopAllText: string;
+  depth: "2" | "3" | "4";
+  queueSide: "left" | "right";
+  blur: "soft" | "strong" | "none";
+  height: "md" | "tall" | "screen";
+  panel: "right" | "left" | "none";
+  showPrice: boolean;
+  showHeart: boolean;
+  auto: boolean;
+  autoSec: number;
+  looks: (ChildBase & { imageKey: string | null; name: string; products: string[] })[];
+}
 export interface LookbookBlock extends BlockBase {
   type: "lookbook";
   eyebrow: string;
@@ -732,6 +752,7 @@ export type Block =
   | CountdownBlock
   | DropBlock
   | LookbookBlock
+  | RunwayBlock
   | LogosBlock
   | CollectionsBlock
   | FitCheckBlock

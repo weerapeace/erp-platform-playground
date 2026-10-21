@@ -354,3 +354,25 @@ describe("ลุคบุ๊กแบบสไลด์ (หลายลุค�
     expect(matchShowIf(fd("cardSize"), single)).toBe(false);
   });
 });
+
+describe("🚶 รันเวย์ลุค (2026-10-21)", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "rw", type: "runway", ...b }])[0] as unknown as Record<string, unknown> & { looks: Record<string, unknown>[] };
+
+  it("ค่าเริ่ม = แบบรูปอ้างอิง (แถวซ้าย 3 ลุค เบลอนิด แผงขวา) · ค่ามั่ว = ค่าเริ่ม", () => {
+    expect(norm({})).toMatchObject({ lookLabel: "LOOK", shopAllText: "Shop the look", depth: "3", queueSide: "left", blur: "soft", height: "tall", panel: "right", showPrice: true, showHeart: true, auto: false });
+    expect(norm({ depth: "9", queueSide: "up", blur: "x", panel: "top" })).toMatchObject({ depth: "3", queueSide: "left", blur: "soft", panel: "right" });
+    expect(norm({ depth: "2", queueSide: "right", blur: "none", panel: "none", autoSec: 99 })).toMatchObject({ depth: "2", queueSide: "right", blur: "none", panel: "none", autoSec: 20 });
+  });
+
+  it("ลุค: รูป + ชื่อ + สินค้า ≤ 6 · สรุป/เตือน", () => {
+    const b = norm({ looks: [{ imageKey: "a/1.png", name: "Pink", products: ["A", "B", "C", "D", "E", "F", "G"] }, { imageKey: null, products: [] }] });
+    expect(b.looks[0]).toMatchObject({ imageKey: "a/1.png", name: "Pink" });
+    expect((b.looks[0].products as string[]).length).toBeLessThanOrEqual(6);
+    expect(blockSummary(b)).toMatch(/2 ลุค/);
+    const msgs = validateBlocks([b as unknown as Block]).map((x) => x.message).join(" ");
+    expect(msgs).toMatch(/1 ลุคยังไม่ได้ใส่รูป/);
+    expect(msgs).toMatch(/1 ลุคยังไม่ได้เลือกสินค้า/);
+    const one = validateBlocks([norm({ looks: [{ imageKey: "a.png", products: ["A"] }] }) as unknown as Block]).map((x) => x.message).join(" ");
+    expect(one).toMatch(/อย่างน้อย 2 ลุค/);
+  });
+});
