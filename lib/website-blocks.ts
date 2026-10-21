@@ -26,6 +26,7 @@ import { sanitizeCustomHtml } from "@/lib/website-html";
 import { sanitizeTranslations } from "@/lib/website-i18n";
 import { sanitizeGradient, type GradientValue } from "@/lib/website-gradient";
 import { CANVAS_COLORS, CANVAS_FONTS, CANVAS_WEIGHTS } from "@/lib/website-canvas";
+import { normalizeFrameShape } from "@/lib/website-frames";
 
 export type { ValidationIssue };
 
@@ -1049,6 +1050,8 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
     case "image":
     case "videoFile":
       return imgKey(v);
+    case "frameShape":
+      return normalizeFrameShape(v);
     case "link":
       return linkVal(v, fb as CtaLink);
     case "color":

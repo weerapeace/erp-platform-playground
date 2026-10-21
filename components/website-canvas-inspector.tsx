@@ -16,6 +16,7 @@ import { CanvasShape } from "@/components/website-canvas-shapes";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { VideoThumb } from "@/components/video-thumb";
+import { CustomFrameGrid } from "@/components/website-frame-builder";
 import {
   CANVAS_BUTTON_VARIANTS,
   CANVAS_FRAME_PRESETS,
@@ -43,7 +44,7 @@ import { GradientPicker } from "@/components/website-gradient-picker";
 import { CanvasBgPositioner } from "@/components/website-canvas-bg-position";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
 // สีธีม/จุดสี/ฟอนต์ = ของกลาง (ใช้ร่วมกับแผง "🔤 ตัวอักษร" ของทุก Section)
-import { ColorSwatches, FontPickList, softOf, type ThemeColors } from "@/components/website-text-pickers";
+import { ColorSwatches, FontPickList, softOf, swatchesOf, type ThemeColors } from "@/components/website-text-pickers";
 export { softOf, swatchesOf, type ThemeColors } from "@/components/website-text-pickers";
 
 export type CanvasAlign = "top" | "left" | "middle" | "center" | "bottom" | "right" | "distribute-h" | "distribute-v";
@@ -386,6 +387,8 @@ export function CanvasInspector({
   const kind = String(item.kind ?? "text");
   const num = (k: string, fb: number) => (Number.isFinite(Number(item[k])) ? Number(item[k]) : fb);
   const str = (k: string) => String(item[k] ?? "");
+  // เส้นรอบกรอบใช้ไม่ได้: ทรงลาย (ขอบหยัก/แสตมป์/โพลารอยด์) + ทรงจากรูป PNG ในคลังกรอบ (ไม่มีเส้นทางให้วาดตาม)
+  const noLineFrame = CANVAS_NO_LINE_FRAMES.includes(str("frame")) || (str("frame") === "custom" && !item.frameShape);
   const colorPick = (key: string, hexKey: string) => (v: string, hex?: string) => onPatchItem(hex ? { [key]: v, [hexKey]: hex } : { [key]: v });
 
   const mb = canvasMobileBox(item);
@@ -625,7 +628,9 @@ export function CanvasInspector({
               })}
             </div>
           </div>
-          {!CANVAS_NO_LINE_FRAMES.includes(str("frame")) && (
+          {/* 🗂 กรอบของฉัน (คลังกรอบที่สร้างเอง) + ＋ สร้างกรอบเอง */}
+          <CustomFrameGrid item={item} shopSlug={ctx.shopSlug} shopId={ctx.shopId} swatches={swatchesOf(theme).map((x) => ({ v: x.v, hex: x.hex }))} onPatchItem={onPatchItem} />
+          {!noLineFrame && (
             <div>
               <H>เส้นรอบกรอบ</H>
               <div className="flex gap-1">
@@ -664,7 +669,7 @@ export function CanvasInspector({
               </>
             )}
           </div>
-          {str("border") && str("border") !== "none" && !CANVAS_NO_LINE_FRAMES.includes(str("frame")) && (
+          {str("border") && str("border") !== "none" && !noLineFrame && (
             <>
               <div>
                 <H>สีเส้นกรอบ</H>

@@ -77,6 +77,8 @@ const CACHE_HEADERS = {
   "Cache-Control":     "public, max-age=3600, stale-while-revalidate=86400",
   "CDN-Cache-Control": "public, max-age=86400",
   "X-Content-Type-Options": "nosniff",
+  // 🖼 รูปสาธารณะ — เว็บร้าน (คนละโดเมน) ใช้เป็น CSS mask-image ได้ (ทรงกรอบจากรูป PNG · เบราว์เซอร์บังคับ CORS กับ mask)
+  "Access-Control-Allow-Origin": "*",
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

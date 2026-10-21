@@ -298,7 +298,7 @@ describe("canvas รอบ 5", () => {
   });
   it("ทรงกรอบใหม่ใน schema ครบตามที่เว็บร้านรู้จัก + ทรง mask มีเส้นทาง", async () => {
     const { CANVAS_FRAMES, CANVAS_FRAME_PATHS, CANVAS_FRAME_PRESETS, canvasFrameMask } = await import("../website-canvas");
-    expect(CANVAS_FRAMES.map((o) => o.v)).toEqual(["rect", "rounded", "ellipse", "arch", "heart", "star", "hexagon", "cloud", "blob", "scallop", "stamp", "polaroid", "mat"]);
+    expect(CANVAS_FRAMES.map((o) => o.v)).toEqual(["rect", "rounded", "ellipse", "arch", "heart", "star", "hexagon", "cloud", "blob", "scallop", "stamp", "polaroid", "mat", "custom"]);
     for (const k of Object.keys(CANVAS_FRAME_PATHS)) expect(canvasFrameMask(k)).toMatch(/^url\("data:image\/svg\+xml,/);
     expect(canvasFrameMask("rect")).toBeNull();
     expect(CANVAS_FRAME_PRESETS.every((p) => CANVAS_FRAMES.some((o) => o.v === p.patch.frame))).toBe(true);

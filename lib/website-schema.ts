@@ -74,7 +74,8 @@ export type FieldType =
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
   | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
   | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
-  | "point"; // จุดบนรูป { x, y } เป็น % — คลิกบนรูปเพื่อวาง · ต้องตั้ง pointImage
+  | "point" // จุดบนรูป { x, y } เป็น % — คลิกบนรูปเพื่อวาง · ต้องตั้ง pointImage
+  | "frameShape"; // 🖼 ทรงกรอบที่อัปเอง { vb, parts } (เส้นทาง SVG ที่ผ่านตัวกรอง · lib/website-frames) — ตั้งผ่านตัวสร้างกรอบ (hidden)
 
 export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "caption" | "card";
 
@@ -755,6 +756,9 @@ function canvasItemFields(): FieldDef[] {
     f("videoKey", "คลิป", "videoFile", { default: null, wide: true, showIf: isVideo, hint: "MP4 / WebM / MOV ถึง 200 MB · เล่นเองแบบเงียบ วนซ้ำ · เลือกจากคลังวิดีโอได้" }),
     image("posterKey", "รูปปกคลิป (ก่อนเล่น)", { showIf: isVideo, hint: "ว่าง = ภาพแรกของคลิป" }),
     f("frame", "ทรงรูป", "select", { group: "media", default: "rect", options: CANVAS_FRAMES, showIf: isMedia }),
+    /* 🖼 ทรงที่สร้างเอง (frame = "custom") — ตั้งผ่านตัวสร้างกรอบในแผงขวา ไม่วาดช่องในฟอร์ม */
+    f("frameShape", "ทรงกรอบที่อัปเอง", "frameShape", { group: "media", default: null, hidden: true }),
+    image("maskKey", "ทรงกรอบจากรูป PNG", { hidden: true }),
     image("overlayKey", "กรอบจากรูป (PNG พื้นใส วางทับรูป)", { showIf: isImage, hint: "อัปโหลดกรอบของร้านเองได้ (เช่น กรอบวินเทจจาก Canva) — ว่าง = ไม่มี" }),
     f("overlayInset", "รูปห่างขอบกรอบ (%)", "range", { group: "media", default: 12, min: 0, numMax: 40, showIf: isImage }),
     f("fit", "การจัดรูปในกรอบ", "select", {
@@ -3129,6 +3133,7 @@ export function defaultForType(t: FieldType): unknown {
       return false;
     case "image":
     case "videoFile":
+    case "frameShape":
       return null;
     case "link":
       return { text: "", href: "" };

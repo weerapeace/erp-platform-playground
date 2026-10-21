@@ -10,6 +10,7 @@ import type { CSSProperties } from "react";
 import { CanvasShape } from "@/components/website-canvas-shapes";
 import { swatchesOf, softOf, type ThemeColors } from "@/components/website-canvas-inspector";
 import { CANVAS_WIDTH, canvasFrameMask } from "@/lib/website-canvas";
+import { frameShapeMaskCss, normalizeFrameShape } from "@/lib/website-frames";
 
 const num = (v: unknown, fb: number) => (Number.isFinite(Number(v)) ? Number(v) : fb);
 
@@ -66,7 +67,9 @@ export function CanvasMiniPreview({
           const frame = String(it.frame ?? "rect");
           const radius = frame === "ellipse" ? "50%" : frame === "arch" ? "9999px 9999px 0 0" : frame === "rounded" ? Math.min(num(it.w, 100), num(it.h, 100)) * 0.08 * k : 0;
           const key = typeof it.imageKey === "string" && it.imageKey ? it.imageKey : null;
-          const mask = canvasFrameMask(frame);
+          // 🖼 ทรงที่สร้างเอง (คลังกรอบ): เส้นทาง SVG หรือรูป PNG พื้นใส
+          const custom = frame === "custom" ? normalizeFrameShape(it.frameShape) : null;
+          const mask = custom ? frameShapeMaskCss(custom) : frame === "custom" && typeof it.maskKey === "string" && it.maskKey ? `url("/api/r2-image?key=${encodeURIComponent(it.maskKey)}&w=300")` : canvasFrameMask(frame);
           const overlay = typeof it.overlayKey === "string" && it.overlayKey ? it.overlayKey : null;
           if (overlay)
             return (

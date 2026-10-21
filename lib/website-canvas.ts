@@ -48,6 +48,7 @@ export const CANVAS_FRAMES: FieldOption[] = [
   { v: "stamp", l: "แสตมป์" },
   { v: "polaroid", l: "โพลารอยด์" },
   { v: "mat", l: "ขอบหนาสองชั้น" },
+  { v: "custom", l: "ทรงที่สร้างเอง (คลังกรอบ)" },
 ];
 
 /**
@@ -533,6 +534,8 @@ export function canvasImageKeys(blocks: unknown): string[] {
       if (it?.kind === "image" && typeof it.imageKey === "string" && it.imageKey) out.add(it.imageKey);
       // กรอบจากรูปที่ร้านอัปโหลด (วางทับรูป)
       if (it?.kind === "image" && typeof it.overlayKey === "string" && it.overlayKey) out.add(it.overlayKey);
+      // 🖼 ทรงกรอบจากรูป PNG (คลังกรอบ · ตัดรูปตามทรง)
+      if (it?.kind === "image" && it.frame === "custom" && typeof it.maskKey === "string" && it.maskKey) out.add(it.maskKey);
       // 🎬 คลิป + รูปปกของคลิป
       if (it?.kind === "video" && typeof it.videoKey === "string" && it.videoKey) out.add(it.videoKey);
       if (it?.kind === "video" && typeof it.posterKey === "string" && it.posterKey) out.add(it.posterKey);
