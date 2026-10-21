@@ -6,6 +6,8 @@
 import { couponFromRow, couponLabel, evaluateCoupon, normalizeCouponCode, type CouponResult, type CouponUsage, type StoreCoupon } from "@/lib/website-coupons";
 import { memberStats, readTiers } from "@/lib/member-points-db";
 import type { MemberTier } from "@/lib/member-points";
+import { referralCoupon, samePhone9 } from "@/lib/website-referral";
+import { readSiteInfo } from "@/lib/website-site-info";
 
 type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
@@ -69,8 +71,19 @@ export async function couponUsage(sb: Admin, coupon: StoreCoupon, rawPhone?: unk
 
 /** ตรวจโค้ดของร้าน + คิดส่วนลด (ไม่พบโค้ด = บอกตรง ๆ) · memberId = สมาชิกที่เข้าสู่ระบบ (มาจากด่านกุญแจภายในเท่านั้น) */
 export async function checkCoupon(sb: Admin, shopId: string, rawCode: unknown, subtotal: number, rawPhone?: unknown, memberId?: string | null): Promise<CouponResult & { coupon?: StoreCoupon }> {
-  const coupon = await loadCouponByCode(sb, shopId, rawCode);
+  let coupon = await loadCouponByCode(sb, shopId, rawCode);
   if (!coupon) return { ok: false, error: "ไม่พบโค้ดนี้ — ตรวจตัวสะกดอีกครั้ง" };
+  // 🎁 โค้ดชวนเพื่อน: ค่าจากที่ตั้งร้านตอนนี้ · ร้านปิด = เหมือนไม่มีโค้ด · ใช้โค้ดของตัวเองไม่ได้ (บัญชีเดียวกัน/เบอร์เดียวกัน)
+  if (coupon.referrerId) {
+    const info = await readSiteInfo(sb, shopId);
+    if (!info.referral_enabled) return { ok: false, error: "ไม่พบโค้ดนี้ — ตรวจตัวสะกดอีกครั้ง" };
+    if (memberId && memberId === coupon.referrerId) return { ok: false, error: "ใช้โค้ดชวนเพื่อนของตัวเองไม่ได้ — ส่งให้เพื่อนใช้นะ" };
+    if (rawPhone) {
+      const { data: ref } = await sb.from("store_customers").select("phone").eq("id", coupon.referrerId).maybeSingle();
+      if (samePhone9((ref as { phone: string | null } | null)?.phone, rawPhone)) return { ok: false, error: "ใช้โค้ดชวนเพื่อนของตัวเองไม่ได้ — ส่งให้เพื่อนใช้นะ" };
+    }
+    coupon = referralCoupon(coupon, info);
+  }
   const usage = await couponUsage(sb, coupon, rawPhone, memberId);
   const r = evaluateCoupon(coupon, subtotal, usage);
   return r.ok ? { ...r, coupon } : r;

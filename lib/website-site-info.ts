@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "redirects";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "redirects";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -45,6 +45,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "chat", label: "💬 ปุ่มแชทลอย", hint: "ปุ่มกลมมุมจอทุกหน้า (ยกเว้นหน้าชำระเงิน) กดแล้วเลือกทัก LINE / Messenger / โทร · ใช้ลิงก์จากกลุ่ม 📞 ช่องทางติดต่อ — ช่องไหนว่าง ปุ่มนั้นไม่โชว์" },
   { key: "reviews", label: "⭐ รีวิวสินค้า", hint: "ลูกค้าให้ดาว + เขียน + แนบรูป ที่หน้าสินค้า · ทุกรีวิวต้องผ่านการตรวจในแท็บ ⭐ รีวิว ก่อนขึ้นเว็บ (เว้นแต่เปิดอนุมัติอัตโนมัติ) · ดาวเฉลี่ยขึ้นในผลค้นหา Google ด้วย" },
   { key: "preorder", label: "📦 สั่งจอง (พรีออเดอร์) + มัดจำ", hint: "สินค้าที่ตั้งสถานะสต็อก “พรีออเดอร์” ในแท็บสินค้าบนเว็บ · เปิดมัดจำแล้ว ออเดอร์ที่มีของพรีออเดอร์ต้องโอนพร้อมเพย์ (ไม่มีเก็บปลายทาง) จ่ายมัดจำก่อน ที่เหลือจ่ายก่อนจัดส่ง · ระบบตรวจสลิปตามยอดที่ต้องจ่ายแต่ละรอบ" },
+  { key: "referral", label: "🎁 ชวนเพื่อน (โค้ดแนะนำ)", hint: "สมาชิกทุกคนได้โค้ดชวนเพื่อนของตัวเอง (หน้าบัญชี) · เพื่อนใช้โค้ดตอนสั่งครั้งแรก = ได้ส่วนลด · ออเดอร์ของเพื่อนสำเร็จ = คนชวนได้แต้ม (ต้องเปิดระบบแต้ม) · 1 เบอร์ใช้โค้ดชวนเพื่อนได้ครั้งเดียว ใช้โค้ดตัวเองไม่ได้" },
   { key: "redirects", label: "🔀 ย้ายลิงก์เก่า (Redirect)", hint: "ลิงก์เก่าที่ลูกค้า/Google ยังเข้ามา (เช่น จากเว็บเดิม หรือสินค้าที่เปลี่ยนชื่อ) → พาไปหน้าใหม่อัตโนมัติ ไม่เจอหน้า 404 · Google ย้ายคะแนนตามไปด้วย (301)" },
   { key: "search", label: "🔍 ค้นหาสินค้า", hint: "ช่องค้นหาบนเว็บพิมพ์ผิดนิดหน่อยก็เจอ · ใส่คำที่หมายถึงสิ่งเดียวกันให้ค้นเจอทั้งคู่ · ด้านล่างมีรายการคำที่ลูกค้าค้นแล้วไม่เจอ (ไว้เติมคำ/เพิ่มสินค้า)" },
 ];
@@ -162,6 +163,12 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "preorder_deposit_enabled", label: "เก็บมัดจำสินค้าพรีออเดอร์", hint: "ปิด = สั่งจองจ่ายเต็มเหมือนสินค้าปกติ", group: "preorder", type: "bool", isPublic: true },
   { key: "preorder_deposit_pct", label: "มัดจำกี่ % ของยอดออเดอร์", hint: "10–90 · แนะนำ 30–50", group: "preorder", type: "number", isPublic: true, placeholder: "30" },
   { key: "preorder_note", label: "ข้อความถึงลูกค้า (หน้าสินค้า/ชำระเงิน)", hint: "เช่น สินค้าพรีออเดอร์ ผลิตและจัดส่งภายใน 15–30 วัน · ยอดที่เหลือโอนก่อนจัดส่ง", group: "preorder", type: "text", isPublic: true, i18n: true },
+
+  // ─── 🎁 ชวนเพื่อน (lib/website-referral · โค้ด = แถวใน store_coupons ที่มี referrer_id) ───
+  { key: "referral_enabled", label: "เปิดโค้ดชวนเพื่อน", hint: "ปิด = โค้ดชวนเพื่อนใช้ไม่ได้ (โค้ดเดิมยังอยู่ เปิดกลับมาใช้ได้)", group: "referral", type: "bool", isPublic: true },
+  { key: "referral_friend_discount", label: "เพื่อนได้ส่วนลด (บาท)", hint: "ลดจากยอดสินค้าออเดอร์แรกของเพื่อน", group: "referral", type: "number", isPublic: true, placeholder: "100" },
+  { key: "referral_min_subtotal", label: "ยอดสินค้าขั้นต่ำของเพื่อน (บาท)", hint: "0 = ไม่มีขั้นต่ำ", group: "referral", type: "number", isPublic: true, placeholder: "0" },
+  { key: "referral_reward_points", label: "คนชวนได้แต้ม", hint: "ให้เมื่อออเดอร์ของเพื่อน “สำเร็จ” (ครั้งเดียวต่อออเดอร์) · ต้องเปิดระบบแต้ม", group: "referral", type: "number", isPublic: true, placeholder: "100" },
 
   // ─── 🔀 ย้ายลิงก์เก่า (เว็บร้าน not-found → redirect 301 · กติกา cleanRedirects) ───
   {
@@ -335,6 +342,10 @@ export interface SiteInfo {
   preorder_deposit_enabled: boolean;
   preorder_deposit_pct: number;
   preorder_note: string;
+  referral_enabled: boolean;
+  referral_friend_discount: number;
+  referral_min_subtotal: number;
+  referral_reward_points: number;
   redirects: string;
   _i18n?: I18nMeta;
 }
@@ -421,6 +432,10 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   preorder_deposit_enabled: false,
   preorder_deposit_pct: 30,
   preorder_note: "",
+  referral_enabled: false,
+  referral_friend_discount: 100,
+  referral_min_subtotal: 0,
+  referral_reward_points: 100,
   redirects: "",
 };
 
@@ -490,7 +505,7 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     const v = m.get(f.key);
     const fb = d[f.key as keyof SiteInfo];
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
-    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") ? Math.max(0, Math.min(10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
+    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") ? Math.max(0, Math.min(f.key.startsWith("referral_") ? 100000 : 10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
     else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
     else if (f.key === "redirects") out[f.key] = cleanRedirects(v);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);

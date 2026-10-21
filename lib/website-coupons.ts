@@ -36,6 +36,8 @@ export interface StoreCoupon {
   minTier: string | null;
   active: boolean;
   note: string;
+  /** 🎁 โค้ดชวนเพื่อนของสมาชิกคนนี้ (lib/website-referral) · null = คูปองปกติ */
+  referrerId?: string | null;
 }
 
 /** โค้ด: ตัวใหญ่ A-Z 0-9 - _ ยาว 3–30 (ลูกค้าพิมพ์เล็ก/มีช่องว่าง ก็ใช้ได้) */
@@ -171,6 +173,7 @@ export function couponFromRow(r: Record<string, unknown>): StoreCoupon {
     minTier: (r.min_tier as string | null) ?? null,
     active: r.active !== false,
     note: String(r.note ?? ""),
+    referrerId: (r.referrer_id as string | null | undefined) ?? null,
   };
 }
 

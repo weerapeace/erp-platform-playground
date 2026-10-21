@@ -1,7 +1,7 @@
 /**
  * ฐานข้อมูลจำลองในหน่วยความจำ สำหรับ test ตัวเชื่อม DB (ไม่แตะฐานข้อมูลจริง — ห้ามสร้างออเดอร์/คูปองทดสอบใน DB จริง)
  * รองรับเท่าที่โค้ดเราใช้: select (ไม่สนคอลัมน์ · แถวต้องมีตารางลูกที่ embed ใส่มาเอง) · eq/neq/in/gte/is/or/like · order/limit · maybeSingle · count
- * เขียน: insert (แถวเดียว/หลายแถว · ใส่ id/created_at ให้ถ้าไม่มี · ต่อ .select().maybeSingle() ได้) · delete().eq() — แก้ตาราง tables ที่ส่งมาเลย (test อ่านผลได้)
+ * เขียน: insert (แถวเดียว/หลายแถว · ใส่ id/created_at ให้ถ้าไม่มี · ต่อ .select().maybeSingle() ได้) · delete().eq() · update(patch).eq()(.select()) — แก้ตาราง tables ที่ส่งมาเลย (test อ่านผลได้)
  * rpc = ฟังก์ชันที่ test ส่งมาเอง (เลียนแบบฟังก์ชัน DB จริง)
  */
 export type Row = Record<string, unknown>;
@@ -26,9 +26,16 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
     let head = false;
     let inserted: Row[] | null = null;
     let del = false;
-    const rows = () => inserted ?? (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+    let upd: Row | null = null;
+    let updated: Row[] | null = null;
+    const rows = () => updated ?? inserted ?? (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
     const run = () => {
       if (del) tables[table] = (tables[table] ?? []).filter((r) => !filters.every((f) => f(r)));
+      // แก้แถวที่ตรงเงื่อนไข "ครั้งเดียว" (ตอน await) → ผลลัพธ์ = แถวที่ถูกแก้ (เหมือน .update().select())
+      if (upd && !updated) {
+        updated = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+        for (const r of updated) Object.assign(r, upd);
+      }
     };
     const q = {
       insert: (v: Row | Row[]) => {
@@ -38,6 +45,7 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
         return q;
       },
       delete: () => ((del = true), q),
+      update: (patch: Row) => ((upd = patch), q),
       like: (c: string, pat: string) => {
         const re = new RegExp("^" + pat.split("%").map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
         filters.push((r) => re.test(String(r[c] ?? "")));

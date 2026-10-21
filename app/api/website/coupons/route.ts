@@ -38,7 +38,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const { data: shop } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
-  const { data, error } = await sb.from(TABLE).select("*").eq("shop_id", (shop as { id: string }).id).order("created_at", { ascending: false });
+  // โค้ดชวนเพื่อนของสมาชิก (referrer_id) ไม่โชว์ในรายการคูปอง — มีคนละ 1 โค้ด จะรกตาราง (ตั้งค่าที่ 🏪 ข้อมูลร้าน › 🎁)
+  const { data, error } = await sb.from(TABLE).select("*").eq("shop_id", (shop as { id: string }).id).is("referrer_id", null).order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: "โหลดคูปองไม่สำเร็จ" }, { status: 500 });
   const coupons = ((data ?? []) as Record<string, unknown>[]).map(couponFromRow);
   const used = await couponUseCounts(sb, coupons.map((c) => c.id));

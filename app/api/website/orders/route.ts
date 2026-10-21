@@ -23,6 +23,7 @@ import { writeAudit } from "@/lib/audit";
 import { ORDER_STATUSES, PAYMENT_STATUSES, PAYMENT_METHOD_LABEL, toOrderView, orderStatusLabel, paymentStatusLabel } from "@/lib/website-orders";
 import { moveError } from "@/lib/website-order-status";
 import { syncOrderPoints } from "@/lib/member-points-db";
+import { rewardReferral } from "@/lib/website-referral-db";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { emailConfigured } from "@/lib/email";
@@ -231,6 +232,8 @@ async function applyOne(sb: ReturnType<typeof supabaseAdmin>, user: Actor, body:
   let points: { kind: string; delta: number }[] | null = [];
   if (patch.status !== undefined && patch.status !== b.status) {
     points = await syncOrderPoints(sb, b.id, `staff:${user?.email ?? user?.id ?? "unknown"}`).then((r) => r?.rows ?? null).catch(() => null);
+    // 🎁 ออเดอร์ที่ใช้โค้ดชวนเพื่อน "สำเร็จ" → คนชวนได้แต้ม (ครั้งเดียวต่อออเดอร์ · lib/website-referral-db)
+    if (patch.status === "completed") await rewardReferral(sb, b.id, `staff:${user?.email ?? user?.id ?? "unknown"}`).catch((e) => console.error("[orders] referral reward", e));
   }
 
   await writeAudit(sb, {
