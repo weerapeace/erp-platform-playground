@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -42,6 +42,9 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
     label: "📊 วัดผล & โฆษณา",
     hint: "ใส่รหัสแล้ววัดผลได้ทันที: ผู้เข้าชม · ดูสินค้า · ใส่ตะกร้า · เริ่มชำระ · ซื้อสำเร็จ · ค้นหา · ถูกใจ · เว็บขอความยินยอมคุกกี้ (PDPA) ก่อนเริ่มเก็บเสมอ — ไม่กรอกเลย = ไม่มีแบนเนอร์คุกกี้ · ไม่เก็บอะไร",
   },
+  { key: "chat", label: "💬 ปุ่มแชทลอย", hint: "ปุ่มกลมมุมจอทุกหน้า (ยกเว้นหน้าชำระเงิน) กดแล้วเลือกทัก LINE / Messenger / โทร · ใช้ลิงก์จากกลุ่ม 📞 ช่องทางติดต่อ — ช่องไหนว่าง ปุ่มนั้นไม่โชว์" },
+  { key: "reviews", label: "⭐ รีวิวสินค้า", hint: "ลูกค้าให้ดาว + เขียน + แนบรูป ที่หน้าสินค้า · ทุกรีวิวต้องผ่านการตรวจในแท็บ ⭐ รีวิว ก่อนขึ้นเว็บ (เว้นแต่เปิดอนุมัติอัตโนมัติ) · ดาวเฉลี่ยขึ้นในผลค้นหา Google ด้วย" },
+  { key: "search", label: "🔍 ค้นหาสินค้า", hint: "ช่องค้นหาบนเว็บพิมพ์ผิดนิดหน่อยก็เจอ · ใส่คำที่หมายถึงสิ่งเดียวกันให้ค้นเจอทั้งคู่ · ด้านล่างมีรายการคำที่ลูกค้าค้นแล้วไม่เจอ (ไว้เติมคำ/เพิ่มสินค้า)" },
 ];
 
 export const SITE_INFO_FIELDS: SiteInfoField[] = [
@@ -135,6 +138,34 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
     type: "text",
     isPublic: false,
   },
+
+  // ─── 💬 ปุ่มแชทลอย (เว็บร้าน src/components/layout/FloatingChat.tsx) ───
+  { key: "chat_enabled", label: "เปิดปุ่มแชทลอยมุมจอ", hint: "ต้องมีลิงก์ LINE / Facebook / เบอร์โทร ในกลุ่ม 📞 อย่างน้อย 1 ช่อง", group: "chat", type: "bool", isPublic: true },
+  { key: "chat_label", label: "ข้อความข้างปุ่ม", hint: "เว้นว่าง = 'แชทกับเรา'", group: "chat", type: "text", isPublic: true, placeholder: "แชทกับเรา", i18n: true },
+  { key: "chat_greeting", label: "ข้อความทักทาย (โชว์ตอนกดปุ่ม)", hint: "เช่น สอบถามสินค้า/ไซส์ ทักมาได้เลย ตอบไวในเวลาทำการ", group: "chat", type: "textarea", isPublic: true, i18n: true },
+  { key: "chat_messenger_url", label: "ลิงก์ Messenger", hint: "เว้นว่าง = สร้างจากลิงก์ Facebook ให้เอง (m.me/ชื่อเพจ)", group: "chat", type: "text", isPublic: true, placeholder: "https://m.me/yourpage" },
+  { key: "chat_phone", label: "มีปุ่มโทรหาร้าน", hint: "ใช้เบอร์จากกลุ่ม 📞", group: "chat", type: "bool", isPublic: true },
+  { key: "chat_left", label: "วางมุมซ้าย (ปกติมุมขวา)", group: "chat", type: "bool", isPublic: true },
+
+  // ─── ⭐ รีวิวสินค้า (ERP lib/website-reviews*.ts · แท็บ ⭐ รีวิว · เว็บร้าน ProductReviews / หน้า /review) ───
+  { key: "reviews_enabled", label: "เปิดรีวิวสินค้าบนเว็บ", hint: "ปิดทีหลัง รีวิวที่มีอยู่ไม่หาย (แค่ซ่อนจากเว็บ)", group: "reviews", type: "bool", isPublic: true },
+  { key: "reviews_buyers_only", label: "เฉพาะคนที่ซื้อแล้วเท่านั้น", hint: "ลูกค้ายืนยันด้วยเลขออเดอร์ + เบอร์โทร (หรือกดลิงก์ในอีเมลขอบคุณ) · รีวิวมีป้าย ✓ ซื้อจริง · ปิด = ใครก็รีวิวได้ (ต้องตรวจทุกอัน)", group: "reviews", type: "bool", isPublic: true },
+  { key: "reviews_auto_approve", label: "อนุมัติอัตโนมัติ (ไม่ต้องตรวจก่อน)", hint: "เฉพาะรีวิวจากคนซื้อจริงที่ให้ 4–5 ดาว · ที่เหลือยังรอตรวจในแท็บ ⭐ รีวิว", group: "reviews", type: "bool", isPublic: true },
+  { key: "reviews_points", label: "ให้แต้มสมาชิกเมื่อรีวิวผ่าน (แต้ม)", hint: "0 = ไม่ให้ · ได้เฉพาะสมาชิกที่ซื้อจริง ครั้งเดียวต่อรีวิว · ต้องเปิดระบบแต้ม", group: "reviews", type: "number", isPublic: true, placeholder: "0" },
+  { key: "reviews_photo_points", label: "แต้มเพิ่มเมื่อแนบรูป", hint: "บวกเพิ่มจากด้านบน · 0 = ไม่ให้", group: "reviews", type: "number", isPublic: true, placeholder: "0" },
+  { key: "reviews_show_cards", label: "โชว์ดาวบนการ์ดสินค้า", hint: "เฉพาะสินค้าที่มีรีวิวแล้ว", group: "reviews", type: "bool", isPublic: true },
+  { key: "reviews_request_email", label: "ชวนรีวิวในอีเมลขอบคุณ (ออเดอร์สำเร็จ)", hint: "ต้องเปิดอีเมลแจ้งออเดอร์ในกลุ่ม 🧾 และร้านมีโดเมนแล้ว · มีปุ่ม \"รีวิวสินค้า\" ในหน้าตามออเดอร์ด้วยเสมอ", group: "reviews", type: "bool", isPublic: false },
+
+  // ─── 🔍 ค้นหาสินค้า (เว็บร้าน src/lib/search.ts) ───
+  {
+    key: "search_synonyms",
+    label: "คำที่หมายถึงกันเอง",
+    hint: "บรรทัดละ 1 กลุ่ม คั่นด้วยจุลภาค เช่น  กระเป๋าสตางค์, wallet, กระเป๋าเงิน  → ค้นคำไหนก็เจอทั้งกลุ่ม (ภาษาไทย/อังกฤษ/คำเรียกของลูกค้า)",
+    group: "search",
+    type: "textarea",
+    isPublic: true,
+    placeholder: "กระเป๋าสตางค์, wallet, กระเป๋าเงิน\nเข็มขัด, belt",
+  },
 ];
 
 /** ช่องความลับ (ไม่ส่งกลับไปหน้าจอ ERP แบบเต็ม — โชว์ SECRET_MASK แทน · บันทึกค่า mask = คงค่าเดิม) */
@@ -167,6 +198,17 @@ export function cleanTrackingId(key: string, v: unknown): string {
   let s = String(v ?? "").trim().replace(/\s+/g, "");
   s = key === "line_tag_id" ? s.toLowerCase() : s.toUpperCase();
   return re.test(s) ? s : "";
+}
+
+/** 🔍 คำพ้อง: บรรทัดละกลุ่ม คั่นด้วย , (รับ ، ; / ด้วย) · ตัดคำว่าง/ซ้ำ · กลุ่มต้องมี ≥2 คำ · สูงสุด 100 กลุ่ม (กติกาเดียวกับเว็บร้าน src/lib/search.ts parseSynonyms) */
+export function cleanSynonyms(v: unknown): string {
+  const lines: string[] = [];
+  for (const line of String(v ?? "").split(/\r?\n/)) {
+    const words = [...new Set(line.split(/[,،;]/).map((w) => w.trim().replace(/\s+/g, " ").slice(0, 40)).filter(Boolean))];
+    if (words.length >= 2) lines.push(words.join(", "));
+    if (lines.length >= 100) break;
+  }
+  return lines.join("\n").slice(0, 4000);
 }
 
 export const SITE_INFO_KEYS = SITE_INFO_FIELDS.map((f) => f.key);
@@ -241,6 +283,20 @@ export interface SiteInfo {
   tiktok_pixel_id: string;
   line_tag_id: string;
   meta_capi_token: string;
+  chat_enabled: boolean;
+  chat_label: string;
+  chat_greeting: string;
+  chat_messenger_url: string;
+  chat_phone: boolean;
+  chat_left: boolean;
+  reviews_enabled: boolean;
+  reviews_buyers_only: boolean;
+  reviews_auto_approve: boolean;
+  reviews_points: number;
+  reviews_photo_points: number;
+  reviews_show_cards: boolean;
+  reviews_request_email: boolean;
+  search_synonyms: string;
   _i18n?: I18nMeta;
 }
 
@@ -309,9 +365,24 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   tiktok_pixel_id: "",
   line_tag_id: "",
   meta_capi_token: "",
+  chat_enabled: false,
+  chat_label: "",
+  chat_greeting: "",
+  chat_messenger_url: "",
+  chat_phone: false,
+  chat_left: false,
+  reviews_enabled: false,
+  reviews_buyers_only: true,
+  reviews_auto_approve: false,
+  reviews_points: 0,
+  reviews_photo_points: 0,
+  reviews_show_cards: true,
+  reviews_request_email: true,
+  search_synonyms: "",
 };
 
 const URL_KEYS = new Set([
+  "chat_messenger_url",
   "contact_line_url",
   "social_facebook",
   "social_instagram",
@@ -376,7 +447,8 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     const v = m.get(f.key);
     const fb = d[f.key as keyof SiteInfo];
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
-    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : toNum(v, fb as number);
+    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") ? Math.max(0, Math.min(10000, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
+    else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);
     else if (f.key === "promo_code") out[f.key] = normalizeCouponCode(v);
     else if (f.key in TRACK_ID) out[f.key] = cleanTrackingId(f.key, v);

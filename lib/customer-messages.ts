@@ -89,6 +89,8 @@ export interface MessageShop {
   orderNote?: string;
   contactLine?: string;
   contactPhone?: string;
+  /** ⭐ ลิงก์รีวิวสินค้าของออเดอร์นี้ (lib/review-token · มีเฉพาะร้านที่เปิดรีวิว + ชวนรีวิวในอีเมล) → ข้อความ "สำเร็จ" ใช้ปุ่มรีวิวแทนปุ่มตามออเดอร์ */
+  reviewUrl?: string | null;
 }
 
 export interface CustomerMessage {
@@ -203,6 +205,8 @@ export function orderMessage(ev: OrderEvent, o: MessageOrder, shop: MessageShop,
     if (tr.url) lines.push(`${lang === "en" ? "Track your parcel" : "ตามพัสดุ"}: ${tr.url}`);
   }
   if ((ev === "shipped" || ev === "preparing") && o.note.trim()) lines.push(`${t.noteFromShop}: ${o.note.trim()}`);
+  const review = ev === "completed" && shop.reviewUrl ? shop.reviewUrl : null;
+  if (review) lines.push(lang === "en" ? "Got a minute? Tell us what you think — your review helps other shoppers choose." : "ถ้าสะดวก ช่วยรีวิวสินค้าให้หน่อยนะคะ รีวิวของคุณช่วยให้ลูกค้าคนอื่นตัดสินใจง่ายขึ้น");
 
   const table: CustomerMessage["table"] = [];
   if (e.items) {
@@ -225,12 +229,13 @@ export function orderMessage(ev: OrderEvent, o: MessageOrder, shop: MessageShop,
     "",
     ...lines,
     ...(table.length ? ["", ...table.map((r) => `${r.bold ? "" : "• "}${r.left}  ${r.right}`)] : []),
-    ...(href ? ["", `${t.trackText}: ${href}`] : []),
+    ...(review ? ["", `${lang === "en" ? "Review your items" : "รีวิวสินค้า"}: ${review}`] : href ? ["", `${t.trackText}: ${href}`] : []),
     "",
     foot,
   ].join("\n");
 
-  return { subject: `${e.subject} — ${shop.name}`, title: e.title, lines, table, link: href ? { text: t.track, href } : null, foot, text };
+  const link = review ? { text: lang === "en" ? "⭐ Review your items" : "⭐ รีวิวสินค้า", href: review } : href ? { text: t.track, href } : null;
+  return { subject: `${e.subject} — ${shop.name}`, title: e.title, lines, table, link, foot, text };
 }
 
 /** อีเมลแจ้งออเดอร์ (HTML + ข้อความล้วน) */

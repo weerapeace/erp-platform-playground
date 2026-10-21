@@ -19,6 +19,9 @@ import { createStorefrontOrder, findStorefrontOrder } from "@/lib/website-orders
 import { notifyOrderCustomer } from "@/lib/order-notify";
 import { clientIp, parseTracking, sendMetaPurchase } from "@/lib/meta-capi";
 import { customerLang } from "@/lib/customer-messages";
+import { readSiteInfo } from "@/lib/website-site-info";
+import { issueReviewToken } from "@/lib/review-token";
+import { REVIEWABLE_ORDER_STATUSES } from "@/lib/website-reviews";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -100,5 +103,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const lang = url.searchParams.get("lang");
   const order = await findStorefrontOrder(ctx.sb, ctx.shop.id, no, phone, lang ? customerLang(lang) : undefined);
   if (!order) return json({ error: "ไม่พบออเดอร์ — ตรวจเลขที่และเบอร์โทรอีกครั้ง" }, 404);
-  return json({ order });
+  // ⭐ ส่งแล้ว/สำเร็จ + ร้านเปิดรีวิว → แนบรหัสลิงก์รีวิว (ปุ่ม "รีวิวสินค้า" ในหน้าตามออเดอร์ · ผ่านด่านเลขออเดอร์+เบอร์มาแล้ว)
+  let reviewToken: string | null = null;
+  if ((REVIEWABLE_ORDER_STATUSES as readonly string[]).includes(order.status)) {
+    const info = await readSiteInfo(ctx.sb, ctx.shop.id);
+    if (info.reviews_enabled) {
+      const { data: row } = await ctx.sb.from("store_orders").select("id").eq("shop_id", ctx.shop.id).eq("order_no", order.orderNo).maybeSingle();
+      reviewToken = row ? issueReviewToken((row as { id: string }).id) : null;
+    }
+  }
+  return json({ order, reviewToken });
 }

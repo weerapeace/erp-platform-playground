@@ -266,6 +266,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
                 </div>
               )}
               {g.key === "tracking" && <FeedLinks siteUrl={siteUrl} />}
+              {g.key === "search" && <SearchTermsBox shopId={shopId} />}
               {g.key === "order" && (
                 <p className="text-[11px] text-slate-500 mt-3 rounded-lg bg-slate-50 px-3 py-2">
                   เลขที่ออเดอร์ของร้านนี้จะขึ้นต้นด้วย <span className="font-mono font-semibold text-slate-800">{prefix}-</span>{" "}
@@ -316,6 +317,62 @@ function FeedLinks({ siteUrl }: { siteUrl: string | null }) {
         );
       })}
       <p className="text-[10px] text-slate-500">ร้านปิดเว็บชั่วคราวอยู่ = ฟีดว่าง (ไม่ยิงแอดไปหน้าที่ลูกค้าเข้าไม่ได้)</p>
+    </div>
+  );
+}
+
+/** 🔍 คำที่ลูกค้าค้นบนเว็บ 30 วันล่าสุด (/api/website/search-terms) — หาไม่เจอ = ไว้เติมคำพ้อง/เพิ่มสินค้า */
+function SearchTermsBox({ shopId }: { shopId: string }) {
+  const toast = useToast();
+  const [notFound, setNotFound] = useState(true);
+  const [terms, setTerms] = useState<{ q: string; hits: number; lastResults: number; lastDay: string }[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setTerms(null);
+    apiFetch(`/api/website/search-terms?shopId=${encodeURIComponent(shopId)}&days=30${notFound ? "&notFound=1" : ""}`)
+      .then((r) => r.json())
+      .then((j) => alive && setTerms(j.terms ?? []))
+      .catch(() => alive && setTerms([]));
+    return () => {
+      alive = false;
+    };
+  }, [shopId, notFound]);
+  return (
+    <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="flex-1 text-[11px] font-semibold text-slate-700">🔍 คำที่ลูกค้าค้น (30 วันล่าสุด)</p>
+        {(["notFound", "all"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setNotFound(k === "notFound")}
+            className={`rounded-md border px-2 py-0.5 text-[11px] ${notFound === (k === "notFound") ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-600"}`}
+          >
+            {k === "notFound" ? "หาไม่เจอ" : "ทั้งหมด"}
+          </button>
+        ))}
+      </div>
+      {terms === null ? (
+        <p className="mt-2 text-[11px] text-slate-400">กำลังโหลด…</p>
+      ) : terms.length === 0 ? (
+        <p className="mt-2 text-[11px] text-slate-500">{notFound ? "ยังไม่มีคำที่ค้นแล้วไม่เจอ 👍" : "ยังไม่มีคนค้นในช่วงนี้"}</p>
+      ) : (
+        <ul className="mt-2 flex flex-wrap gap-1.5">
+          {terms.map((t) => (
+            <li key={t.q}>
+              <button
+                type="button"
+                title={`ค้น ${t.hits} ครั้ง · ครั้งล่าสุด ${t.lastDay} เจอ ${t.lastResults} ชิ้น — กดเพื่อคัดลอกไปใส่คำพ้อง`}
+                onClick={() => navigator.clipboard?.writeText(t.q).then(() => toast.success(`คัดลอก "${t.q}" แล้ว`), () => undefined)}
+                className={`rounded-full border bg-white px-2 py-0.5 text-[11px] hover:border-blue-500 ${t.lastResults === 0 ? "border-red-200 text-red-700" : "border-slate-200 text-slate-700"}`}
+              >
+                {t.q} <span className="text-slate-400">×{t.hits}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-[10px] text-slate-500">สีแดง = ครั้งล่าสุดหาไม่เจอ · เอาคำนี้ไปจับคู่กับคำที่มีในชื่อสินค้าในช่องคำพ้องด้านบน หรือเพิ่มสินค้าที่ลูกค้าตามหา · ไม่เก็บว่าใครค้น</p>
     </div>
   );
 }

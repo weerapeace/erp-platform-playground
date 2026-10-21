@@ -15,6 +15,7 @@ import { readSiteInfo } from "@/lib/website-site-info";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { AUTO_EMAIL_EVENTS, customerLang, orderEmail, type OrderEvent } from "@/lib/customer-messages";
 import { toOrderView, type ItemRow, type OrderRow } from "@/lib/website-orders";
+import { reviewUrl } from "@/lib/review-token";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -63,9 +64,12 @@ export async function notifyOrderCustomer(
   const view = toOrderView(row, (items ?? []) as ItemRow[], info, lang);
   const en = lang === "en";
   const pick = (k: string) => String((en ? info[`${k}_en` as `${string}_en`] : "") || (info as unknown as Record<string, unknown>)[k] || "");
+  const siteUrl = urls.get(row.shop_id) ?? null;
   const mail = orderEmail(to, event, view, {
     name: (shop as { name?: string } | null)?.name ?? "",
-    siteUrl: urls.get(row.shop_id) ?? null,
+    siteUrl,
+    // ⭐ อีเมลขอบคุณ (สำเร็จ) ชวนรีวิว — ร้านเปิดรีวิว + เปิดชวนในอีเมล
+    reviewUrl: event === "completed" && info.reviews_enabled && info.reviews_request_email ? reviewUrl(siteUrl, row.id, lang) : null,
     orderNote: pick("order_note"),
     contactLine: info.contact_line,
     contactPhone: info.contact_phone,

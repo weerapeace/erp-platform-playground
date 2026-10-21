@@ -29,7 +29,7 @@ import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, produ
 import { normalizePersonalize } from "@/lib/website-personalize";
 import { productDimensions, bilingualDimensions, fitLabels, type FitItem, type DimensionRow } from "@/lib/product-fits";
 import { fitNames, fitTargetOf, parseCompartments, withFitLines, type FitTarget } from "@/lib/fit-check";
-import { readFitCheckShops } from "@/lib/website-site-info";
+import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
 import { normalizeBanners } from "@/lib/website-banners";
 import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
@@ -45,6 +45,7 @@ import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
 import { findMaterialLinks, MATERIAL_SELECT, type MaterialRow } from "@/lib/product-materials";
 import { cleanRelatedCodes } from "@/lib/website-listing-patch";
+import { ratingSummaries } from "@/lib/website-reviews-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -193,6 +194,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       [...qtyByCode.entries()].sort((a, b) => b[1] - a[1]).forEach(([c], i) => salesRank.set(c, i + 1));
     }
   }
+
+  // ⭐ ดาวเฉลี่ยต่อรุ่น (ร้านเปิดรีวิว · เฉพาะรีวิวที่ขึ้นเว็บ · lib/website-reviews-server)
+  //   ส่งเฉพาะร้านที่เปิด "โชว์ดาวบนการ์ด" (หน้าสินค้าดึงรีวิวเองแยกต่างหาก)
+  const revInfo = await readSiteInfo(sb, s.id);
+  const ratings = revInfo.reviews_enabled && revInfo.reviews_show_cards ? await ratingSummaries(sb, s.id) : new Map<string, { avg: number; count: number }>();
 
   // ชื่อหมวดใน ERP (ใช้จับคู่เป็นหมวดเว็บ)
   const catIds = [...new Set(((parents ?? []) as ParentRow[]).map((p) => p.category_id).filter(Boolean))] as string[];
@@ -370,6 +376,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         collectionName: p.collection_id ? collName.get(p.collection_id) ?? null : null,
         /** อันดับขายดีบนเว็บ (1 = ขายดีสุด) — ไม่มี = ยังไม่เคยขาย */
         salesRank: salesRank.get(code.toUpperCase()) ?? null,
+        /** ⭐ ดาวเฉลี่ย + จำนวนรีวิว (ยังไม่มีรีวิว/ร้านปิดรีวิว = ไม่ส่ง) */
+        rating: ratings.get(code.toUpperCase()),
         /** จับคู่รายละเอียดหน้าเว็บเฉพาะรุ่น { itemId: { show, text } } — ไม่มี = ตามชุดรายละเอียดกลางของธีม */
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
         /** ปั๊มชื่อ (null = รุ่นนี้ปั๊มไม่ได้) */
