@@ -51,7 +51,10 @@ export function useCreativeStatuses() {
     try {
       const j = await cachedJson<{ statuses?: Status[]; transitions?: Transition[]; error?: string }>("/api/creative-statuses", force ? 0 : 5 * 60 * 1000);
       if (j.error) throw new Error(j.error);
-      const st = (j.statuses as Status[]) ?? [], tr = (j.transitions as Transition[]) ?? [];
+      const st = (j.statuses as Status[]) ?? [];
+      // ตัดเส้นทางที่พาไปสถานะที่ "ปิดใช้แล้ว" (API ส่งเฉพาะสถานะที่เปิดใช้) — เดิมปุ่มแรกของงานอนุมัติแล้วพาไป "เผยแพร่" ที่ปิดใช้ → งานปิดไม่ลง
+      const live = new Set(st.map((s) => s.key));
+      const tr = ((j.transitions as Transition[]) ?? []).filter((t) => !st.length || live.has(t.to_key));
       setRegistry(st, tr); setStatuses(st); setTransitions(tr);
     } catch { /* คงค่า fallback */ }
     finally { setLoading(false); }

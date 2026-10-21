@@ -116,9 +116,17 @@ export function withinThisWeek(t: { due_date: string | null; status: string }): 
   return diff >= 0 && diff <= 7 && t.status !== "done" && t.status !== "cancelled";
 }
 
+/** Error ที่มีรหัสจาก server (เช่น code "open_subtasks") — ให้หน้าเว็บถามต่อได้แทนแค่โชว์ข้อความ */
+export type ApiError = Error & { code?: string; status?: number; data?: Record<string, unknown> };
+
 async function jsonOrThrow(res: Response): Promise<Record<string, unknown>> {
   const j = await res.json().catch(() => ({ error: "เครือข่ายผิดพลาด" }));
-  if (!res.ok || j.error) throw new Error((j.error as string) || `HTTP ${res.status}`);
+  if (!res.ok || j.error) {
+    const err = new Error((j.error as string) || `HTTP ${res.status}`) as ApiError;
+    err.status = res.status; err.data = j;
+    if (typeof j.code === "string") err.code = j.code;
+    throw err;
+  }
   return j;
 }
 
@@ -167,12 +175,13 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   return j.data as CreativeTask;
 }
 
-export async function transitionTask(id: string, to: string, comment?: string, force?: boolean): Promise<CreativeTask> {
-  return updateTask(id, { action: "transition", to, comment, force });
+// closeOpenSubtasks = ยืนยันแล้วว่า "ปิดงานได้ งานย่อยที่ค้างให้ยกเลิก" (server ตอบ 409 code open_subtasks ถ้ายังไม่ยืนยัน)
+export async function transitionTask(id: string, to: string, comment?: string, force?: boolean, closeOpenSubtasks?: boolean): Promise<CreativeTask> {
+  return updateTask(id, { action: "transition", to, comment, force, ...(closeOpenSubtasks ? { close_open_subtasks: true } : {}) });
 }
 
-export async function approveTask(id: string, action: "approve" | "reject" | "revise", comment?: string, to?: string): Promise<CreativeTask> {
-  return updateTask(id, { action, comment, to });
+export async function approveTask(id: string, action: "approve" | "reject" | "revise", comment?: string, to?: string, closeOpenSubtasks?: boolean): Promise<CreativeTask> {
+  return updateTask(id, { action, comment, to, ...(closeOpenSubtasks ? { close_open_subtasks: true } : {}) });
 }
 
 export async function deleteTask(id: string): Promise<void> {

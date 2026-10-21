@@ -11,7 +11,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
+import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap, taskLink, materializeContentSubtasks, isSubtaskWorker } from "@/lib/creative-tasks-server";
+import { terminalStatusKeys } from "@/lib/creative-statuses-server";
 import { applySubtaskSync, reverseSubtaskSync, restoreSkuImagesBackup } from "@/lib/subtask-sync";
 import { approvalLink } from "@/lib/approval-token";
 import { renderPrompt } from "@/lib/subtask-prompt";
@@ -290,10 +291,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const admin = supabaseAdmin();
   // งานแม่ (ผู้สร้าง + ผู้ตรวจ) + รายชื่อผู้ตรวจ (m2m) + role ผู้ใช้ — ใช้คุมสิทธิ์ละเอียด
   const [{ data: parent }, role, reviewerSet, { data: curSub }] = await Promise.all([
-    admin.from("erp_creative_tasks").select("created_by, reviewer_id, task_no, title").eq("id", id).maybeSingle(),
+    admin.from("erp_creative_tasks").select("created_by, reviewer_id, task_no, title, status").eq("id", id).maybeSingle(),
     currentRole(request),
     userIdsReviewers(admin, id),
-    admin.from("erp_creative_subtasks").select("status").eq("id", subtaskId).maybeSingle(),
+    admin.from("erp_creative_subtasks").select("status, assignee_id").eq("id", subtaskId).maybeSingle(),
   ]);
   const wasApproved = ((curSub as { status?: string } | null)?.status) === "approved";
   const isManager = role === "admin" || role === "manager";
@@ -325,10 +326,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // เคสจริง: เผลอกด Start แล้วไม่ได้ทำ → กดออก งานต้องกลับไปรอคนมารับ ไม่ค้างเป็น "กำลังทำ" ที่ไม่มีใครทำ
       let backToTodo = false;
       const { data: leftA } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);
-      if (((leftA ?? []) as unknown[]).length === 0 && status === "in_progress") {
+      const left = ((leftA ?? []) as { user_id: string }[]).map((r) => r.user_id);
+      if (left.length === 0 && status === "in_progress") {
         await admin.from("erp_creative_subtasks").update({ status: "todo", updated_at: new Date().toISOString() }).eq("id", subtaskId);
         backToTodo = true;
       }
+      // ช่องผู้รับผิดชอบเดี่ยว (ระบบเก่า) ยังเป็นชื่อเรา → ย้ายเป็นคนที่เหลือ (ไม่งั้นงานยังโผล่ใน "งานย่อยของฉัน")
+      if (((curSub as { assignee_id?: string | null } | null)?.assignee_id) === user.id)
+        await admin.from("erp_creative_subtasks").update({ assignee_id: left[0] ?? null }).eq("id", subtaskId);
       await writeAudit(admin, { action: "subtask:self_leave", entityType: "creative_subtask", entityId: subtaskId, actorId: user.id, actorName: user.email ?? null, metadata: { task_id: id, back_to_todo: backToTodo } });
     }
     await recomputeTaskStatusFromSubtasks(admin, id);
@@ -361,6 +366,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์ขอแก้งานย่อยนี้" }, { status: 403 });
   if (patch.status === "canceled" && !(isManager || await canPerm(request, "task_subtask.cancel")))
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์ยกเลิกงานย่อยนี้" }, { status: 403 });
+  // ⑧ งานหลักปิดแล้ว (เสร็จ/ยกเลิก) → ห้ามส่ง/อนุมัติงานย่อยต่อ (กันรูป/ข้อความเก่าถูกดันเข้าหน้าสินค้าทับของใหม่)
+  if ((patch.status === "approved" || patch.status === "submitted") && parent?.status && (await terminalStatusKeys(admin)).has(String(parent.status)))
+    return NextResponse.json({ error: "งานหลักปิดไปแล้ว — ส่ง/อนุมัติงานย่อยต่อไม่ได้ (ถ้าจำเป็นให้ย้อนสถานะงานหลักก่อน)" }, { status: 400 });
+  // ⑨ ห้ามอนุมัติงานที่ตัวเองเป็นคนทำ — ยกเว้นหัวหน้า/แอดมิน หรือผู้มีสิทธิ์ "อนุมัติงานย่อย"
+  if (patch.status === "approved" && user?.id && !isManager && !(await canPerm(request, "task_subtask.approve"))
+    && await isSubtaskWorker(admin, subtaskId, user.id, (curSub as { assignee_id?: string | null } | null)?.assignee_id ?? null))
+    return NextResponse.json({ error: "อนุมัติงานที่ตัวเองทำไม่ได้ — ให้ผู้ตรวจคนอื่นหรือหัวหน้าเป็นคนอนุมัติ" }, { status: 403 });
   // ย้อนสถานะงานย่อยที่ "อนุมัติแล้ว" (เช่น approved → submitted) — เฉพาะ admin/ผจก./ผู้ตรวจ
   if (wasApproved && patch.status && patch.status !== "approved" && !(isManager || isReviewer || await canPerm(request, "task_subtask.approve")))
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์ย้อนสถานะงานย่อยที่อนุมัติแล้ว" }, { status: 403 });
@@ -404,14 +416,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (patch.status === "in_progress" && user?.id && !Array.isArray(body.assignee_ids)) {
     // เก็บ "ผู้รับผิดชอบเดิมทั้งหมด" ก่อนเริ่ม ไว้ใน config.pre_start_assignees → ใช้คืนทั้งหมดตอนยกเลิกเริ่ม
     const [{ data: curRow }, { data: curA }] = await Promise.all([
-      admin.from("erp_creative_subtasks").select("config").eq("id", subtaskId).eq("task_id", id).maybeSingle(),
+      admin.from("erp_creative_subtasks").select("config, assignee_id").eq("id", subtaskId).eq("task_id", id).maybeSingle(),
       admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId),
     ]);
-    const before = ((curA ?? []) as { user_id: string }[]).map((r) => r.user_id).filter(Boolean);
+    const legacy = (curRow as { assignee_id?: string | null } | null)?.assignee_id ?? null;
+    const junction = ((curA ?? []) as { user_id: string }[]).map((r) => r.user_id).filter(Boolean);
+    const before = junction.length ? junction : (legacy ? [legacy] : []);
     const prevCfg = (((curRow as { config?: Record<string, unknown> } | null)?.config) ?? {}) as Record<string, unknown>;
     patch.config = { ...prevCfg, pre_start_assignees: before };
-    // เริ่มงาน = คนกดเป็นผู้ทำคนเดียว (ลบคนอื่น)
+    // เริ่มงาน = คนกดเป็นผู้ทำคนเดียว (ลบคนอื่น) + ช่องผู้รับผิดชอบเดี่ยวเป็นคนนี้ด้วย (เดิมค้างชื่อคนเก่า → งานไปโผล่ใน "งานย่อยของฉัน" ของคนอื่น)
     await setSubtaskAssignees(admin, subtaskId, [user.id]);
+    patch.assignee_id = user.id;
   } else if (patch.status === "todo" && user?.id && !Array.isArray(body.assignee_ids)) {
     const { data: cur } = await admin.from("erp_creative_subtasks").select("status, assignee_id, config").eq("id", subtaskId).eq("task_id", id).maybeSingle();
     const curStatus = (cur as { status?: string } | null)?.status;
@@ -421,8 +436,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const prevCfg = (((cur as { config?: Record<string, unknown> } | null)?.config) ?? {}) as Record<string, unknown>;
     const snapshot = Array.isArray(prevCfg.pre_start_assignees) ? (prevCfg.pre_start_assignees as string[]).filter(Boolean) : null;
     const def = (cur as { assignee_id?: string | null } | null)?.assignee_id ?? null;
-    const restore = snapshot && snapshot.length ? snapshot : (def ? [def] : []);
+    // def = คนที่กดเริ่ม (ระบบใหม่ตั้งไว้ตอนเริ่ม) → ไม่ใช่ "เจ้าของเดิม" ห้ามคืนเป็นตัวเอง
+    const restore = snapshot && snapshot.length ? snapshot : (def && def !== user.id ? [def] : []);
     await setSubtaskAssignees(admin, subtaskId, restore);
+    patch.assignee_id = restore[0] ?? null;
     // ล้าง snapshot หลังคืนค่าแล้ว
     const restCfg: Record<string, unknown> = { ...prevCfg };
     delete restCfg.pre_start_assignees;

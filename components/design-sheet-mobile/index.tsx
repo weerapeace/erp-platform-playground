@@ -25,6 +25,7 @@ import { useToast } from "@/components/toast";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 import { QuoteRounds } from "@/components/design-sheet-detail/quote-rounds";
+import { sanitizeRichHtml } from "@/lib/sanitize-html";
 
 // ป๊อปอัปเต็ม (ของกลางเดิม) โหลดเฉพาะตอนกด "แก้ไขเต็ม"
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
@@ -421,7 +422,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         <div className={sectionCls}>
           <div className="mb-1 text-xs font-semibold text-slate-600">📄 รายละเอียดงาน</div>
           <div className={`prose prose-sm max-w-none text-sm text-slate-700 [&_img]:max-w-full [&_img]:rounded-md ${detailOpen ? "" : "max-h-40 overflow-hidden"}`}
-            dangerouslySetInnerHTML={{ __html: sheet.detail }} />
+            dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(sheet.detail) }} />
           <button type="button" onClick={() => setDetailOpen((o) => !o)} className="mt-1 text-xs font-medium text-blue-600">{detailOpen ? "ย่อ ▲" : "ดูทั้งหมด ▼"}</button>
         </div>
       )}

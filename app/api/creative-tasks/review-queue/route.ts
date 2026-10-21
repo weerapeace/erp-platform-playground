@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { subtaskAssigneesMap } from "@/lib/creative-tasks-server";
+import { terminalStatusKeys } from "@/lib/creative-statuses-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,15 +18,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
   const admin = supabaseAdmin();
 
+  // งานหลักที่ปิดแล้ว (เสร็จ/ยกเลิก) → งานย่อย "รอตรวจ" ของงานนั้นไม่นับ/ไม่โชว์ (เคยค้าง 43 ชิ้น = 80% ของคิว)
+  const terminal = await terminalStatusKeys(admin);
+
   // ?count=1 → นับจำนวน (รอตรวจ/อนุมัติแล้ว) เฉพาะงานที่ยัง active — เบา ไม่ดึงรูป/แบรนด์
   if (new URL(request.url).searchParams.get("count") === "1") {
     const { data: cs } = await admin.from("erp_creative_subtasks").select("status, task_id").in("status", ["submitted", "approved"]).limit(2000);
     const cr = (cs ?? []) as { status: string; task_id: string }[];
     const tIds = [...new Set(cr.map((r) => r.task_id))];
-    const { data: tk } = tIds.length ? await admin.from("erp_creative_tasks").select("id").in("id", tIds).neq("is_active", false) : { data: [] as { id: string }[] };
-    const active = new Set(((tk ?? []) as { id: string }[]).map((t) => String(t.id)));
+    // .not("is_active","is",false) — ไม่ตัดแถวที่ is_active เป็น null ทิ้ง (.neq ตัดทิ้ง)
+    const { data: tk } = tIds.length ? await admin.from("erp_creative_tasks").select("id, status").in("id", tIds).not("is_active", "is", false) : { data: [] as { id: string; status: string }[] };
+    const taskStatus = new Map(((tk ?? []) as { id: string; status: string }[]).map((t) => [String(t.id), t.status]));
     let pending = 0, approved = 0;
-    for (const r of cr) { if (!active.has(String(r.task_id))) continue; if (r.status === "approved") approved++; else pending++; }
+    for (const r of cr) {
+      const st = taskStatus.get(String(r.task_id)); if (st === undefined) continue;
+      if (r.status === "approved") approved++; else if (!terminal.has(st)) pending++;
+    }
     return NextResponse.json({ pending, approved, error: null });
   }
 
@@ -41,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const taskIds = [...new Set(rows.map((r) => r.task_id))];
   const subIds = rows.map((r) => r.id);
   const [{ data: tasks }, aMap, { data: atts }] = await Promise.all([
-    admin.from("erp_creative_tasks").select("id, task_no, title, description, brand_id, is_active").in("id", taskIds),
+    admin.from("erp_creative_tasks").select("id, task_no, title, description, brand_id, is_active, status").in("id", taskIds),
     subtaskAssigneesMap(admin, subIds),
     admin.from("erp_creative_attachments").select("subtask_id, r2_key, file_name, kind").in("subtask_id", subIds),
   ]);
@@ -73,6 +81,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const out = rows.map((r) => {
     const tk = taskMap.get(String(r.task_id)); if (!tk) return null;   // งานถูกลบ/ปิด → ข้าม
+    if (r.status === "submitted" && terminal.has(String(tk.status))) return null;   // รอตรวจ แต่งานหลักจบไปแล้ว → ไม่ใช่งานที่ต้องตรวจ
     const br = tk.brand_id ? brandMap.get(String(tk.brand_id)) : null;
     const ist = r.image_sync_targets;
     return {

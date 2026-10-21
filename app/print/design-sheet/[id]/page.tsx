@@ -15,6 +15,7 @@ import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { Attachment } from "@/app/api/attachments/route";
+import { sanitizeRichHtml } from "@/lib/sanitize-html";
 
 const thaiDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -29,7 +30,7 @@ type Sheet = Record<string, unknown> & { brand?: { name?: string } | Array<{ nam
 
 function buildData(sheet: Sheet, comments: DesignSheetComment[], images: Attachment[], origin: string, statusMeta: StatusMeta, canvasUrl: string | null): Record<string, unknown> {
   const brand = (Array.isArray(sheet.brand) ? sheet.brand[0] : sheet.brand) as { name?: string } | null;
-  const detail = String(sheet.detail ?? "").trim();
+  const detail = sanitizeRichHtml(String(sheet.detail ?? "").trim());   // HTML จากผู้ใช้ → ล้างสคริปต์ก่อนใส่ใบพิมพ์ (ใบพิมพ์รันในหน้าเว็บเรา)
   // ภาพถ่ายกระดานวาด (CanvasSketch) — แปะไว้ในบล็อก "รายละเอียดงาน"
   const canvasImg = canvasUrl
     ? `<img src="${esc(absUrl(canvasUrl, origin))}" style="max-width:100%;max-height:320px;object-fit:contain;border:1px solid #e2e8f0;border-radius:6px;display:block;margin-bottom:6px;" />`

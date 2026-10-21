@@ -10,12 +10,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenTask, validateTaskFields } from "../shared";
-import { canTransition as canTransitionDB, getStatusMeta } from "@/lib/creative-statuses-server";
-import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap, setTaskAssignees, taskAssigneesMap, setTaskReviewers, taskReviewersMap, userLabelMap } from "@/lib/creative-tasks-server";
+import { canTransition as canTransitionDB, findTransition, getStatusMeta, REVIEW_KINDS } from "@/lib/creative-statuses-server";
+import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap, setTaskAssignees, taskAssigneesMap, setTaskReviewers, taskReviewersMap, userLabelMap, userIdsReviewers } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,6 +28,36 @@ const EDITABLE = new Set([
   "drive_folder_url", "final_asset_url", "published_url", "blocker_reason",
   "cover_image_r2_key", "reference_html", "reference_images",
 ]);
+
+// งานย่อยที่ยัง "ไม่จบ" — ถ้าปิดงานหลักทั้งที่ยังมีพวกนี้ จะค้างในคิวรอตรวจ/งานของฉันไปตลอด (เคยค้าง 43 ชิ้น)
+const OPEN_SUB_STATUSES = ["todo", "in_progress", "submitted", "revision_requested"];
+
+/**
+ * ด่านก่อนปิดงานหลัก (ไปสถานะจบ เช่น เสร็จ/ยกเลิก)
+ * - ยังมีงานย่อยค้าง + ไม่ได้ยืนยัน → 409 code "open_subtasks" (หน้าเว็บถามผู้ใช้ก่อน)
+ * - ยืนยันแล้ว (close_open_subtasks: true) → ยกเลิกงานย่อยที่ค้างให้ + บันทึกประวัติ แล้วค่อยปิดงาน
+ */
+async function guardOpenSubtasks(
+  admin: ReturnType<typeof supabaseAdmin>, taskId: string, confirmed: boolean, actor: { id: string | null; email: string | null },
+): Promise<NextResponse | null> {
+  const { data } = await admin.from("erp_creative_subtasks").select("id, title, status").eq("task_id", taskId).in("status", OPEN_SUB_STATUSES);
+  const open = (data ?? []) as { id: string; title: string | null; status: string }[];
+  if (!open.length) return null;
+  const submitted = open.filter((s) => s.status === "submitted").length;
+  if (!confirmed) {
+    return NextResponse.json({
+      error: `ยังมีงานย่อยที่ยังไม่จบ ${open.length} ชิ้น${submitted ? ` (รอตรวจ ${submitted} ชิ้น)` : ""} — ถ้าปิดงาน งานย่อยเหล่านี้จะถูกยกเลิก`,
+      code: "open_subtasks", open: open.length, submitted,
+    }, { status: 409 });
+  }
+  const { error } = await admin.from("erp_creative_subtasks").update({ status: "canceled", updated_at: new Date().toISOString() }).in("id", open.map((s) => s.id));
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAudit(admin, {
+    action: "subtask:auto_cancel", entityType: "creative_task", entityId: taskId, actorId: actor.id, actorName: actor.email,
+    metadata: { reason: "task_closed", count: open.length, submitted, subtasks: open.map((s) => ({ id: s.id, title: s.title, status_from: s.status })) },
+  });
+  return null;
+}
 
 async function loadTask(admin: ReturnType<typeof supabaseAdmin>, id: string) {
   const { data, error } = await admin.from("erp_creative_tasks").select(SELECT).eq("id", id).maybeSingle();
@@ -110,14 +140,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let notifyTarget: { empId: string | null; eventType: string; title: string } | null = null;
 
   if (action === "transition") {
-    // เปลี่ยนสถานะตาม workflow (อ่านจาก DB) — force=true ข้ามกฎ (โหมดย้ายอิสระบน Canvas)
+    // เปลี่ยนสถานะตาม workflow (อ่านจาก DB) — force=true ข้ามกฎ (โหมดย้ายอิสระบน Canvas / แอดมินตั้งสถานะ)
     const to = String(body.to ?? "");
     const from = String(current.status);
     const force = body.force === true;
     const meta = await getStatusMeta(admin, to);
-    if (force && !meta) return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 });
-    if (!force && !(await canTransitionDB(admin, from, to))) {
-      return NextResponse.json({ error: `เปลี่ยนสถานะจาก "${from}" ไป "${to}" ไม่ได้` }, { status: 400 });
+    if (force) {
+      // ข้ามขั้นตอนได้เฉพาะผู้มีสิทธิ์อนุมัติงาน — กันพนักงานลากงานตัวเองข้ามไป "อนุมัติแล้ว/เสร็จ"
+      if (!(await apiCan(request, "tasks.approve"))) return NextResponse.json({ error: "ย้ายสถานะแบบข้ามขั้นตอน ต้องมีสิทธิ์ \"อนุมัติงาน\"" }, { status: 403 });
+      if (!meta) return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 });
+    } else {
+      const tr = await findTransition(admin, from, to);
+      if (!tr) return NextResponse.json({ error: `เปลี่ยนสถานะจาก "${from}" ไป "${to}" ไม่ได้` }, { status: 400 });
+      // เส้นทางชนิด อนุมัติ/ไม่ผ่าน/ให้แก้ = การตัดสินผลงาน → ต้องมีสิทธิ์อนุมัติงาน (เดิมใช้แค่สิทธิ์แก้งาน = กดผ่านงานตัวเองได้)
+      if (REVIEW_KINDS.has(tr.kind) && !(await apiCan(request, "tasks.approve")))
+        return NextResponse.json({ error: "การอนุมัติ/ตีกลับงาน ต้องมีสิทธิ์ \"อนุมัติงาน\"" }, { status: 403 });
+    }
+    if (meta?.is_terminal) {
+      const blocked = await guardOpenSubtasks(admin, id, body.close_open_subtasks === true, { id: user?.id ?? null, email: user?.email ?? null });
+      if (blocked) return blocked;
     }
     patch.status = to;
     patch.progress_percent = meta ? meta.progress_percent : current.progress_percent;
@@ -137,6 +178,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     patch.approval_status = approvalMap[action];
     if (to) {
       const meta = await getStatusMeta(admin, to);
+      if (meta?.is_terminal) {
+        const blocked = await guardOpenSubtasks(admin, id, body.close_open_subtasks === true, { id: user?.id ?? null, email: user?.email ?? null });
+        if (blocked) return blocked;
+      }
       patch.status = to;
       patch.progress_percent = meta ? meta.progress_percent : current.progress_percent;
       if (meta?.is_terminal) patch.completed_at = new Date().toISOString();
@@ -153,6 +198,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // ── ตรวจข้อมูลก่อนบันทึก (วันที่/ความสำคัญ/เปอร์เซ็นต์) — กันข้อมูลเพี้ยนเข้า DB ──
     const vErr = validateTaskFields(body);
     if (vErr) return NextResponse.json({ error: vErr }, { status: 400 });
+    // ── ผู้ตรวจ = คนที่กดผ่านงานย่อยได้ → ตั้ง/เปลี่ยนได้เฉพาะคนสร้างงาน หรือผู้มีสิทธิ์อนุมัติงาน ──
+    //    (กันพนักงานใส่ชื่อตัวเองเป็นผู้ตรวจ แล้วกดผ่านงานเพื่อดันรูป/ข้อความเข้าหน้าสินค้า) · เช็กก่อนเขียนอะไรลง DB
+    const wantRev = Array.isArray(body.reviewer_ids) ? [...new Set((body.reviewer_ids as string[]).filter(Boolean))] : null;
+    const curRev = wantRev ? await userIdsReviewers(admin, id) : null;
+    const revChanged = (!!wantRev && !!curRev && (wantRev.length !== curRev.size || wantRev.some((u) => !curRev.has(u))))
+      || ("reviewer_id" in body && ((body.reviewer_id as string | null) || null) !== ((current.reviewer_id as string | null) ?? null))
+      || ("approver_id" in body && ((body.approver_id as string | null) || null) !== ((current.approver_id as string | null) ?? null));
+    if (revChanged && user?.id !== current.created_by && !(await apiCan(request, "tasks.approve")))
+      return NextResponse.json({ error: "เปลี่ยนผู้ตรวจได้เฉพาะคนสร้างงาน หรือผู้มีสิทธิ์ \"อนุมัติงาน\"" }, { status: 403 });
     // แก้ฟิลด์ทั่วไป — เฉพาะ field ที่อนุญาต
     for (const [k, v] of Object.entries(body)) {
       if (k === "action" || k === "actor") continue;

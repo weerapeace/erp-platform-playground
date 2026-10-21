@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ERPModal, ConfirmDialog, Drawer, ApprovalDialog } from "@/components/modal";
+import { askText, askConfirm } from "@/components/modal/ask-dialog";
 
 export default function PopupPlaygroundPage() {
   const [modal, setModal] = useState<string | null>(null);
@@ -32,6 +33,8 @@ export default function PopupPlaygroundPage() {
     { id: "approve", label: "Approval Dialog",          desc: "อนุมัติ / ปฏิเสธ + เหตุผล",           icon: "🔐" },
     { id: "loading", label: "Modal + Loading",          desc: "แสดง loading ขณะ submit",              icon: "⏳" },
     { id: "lg",      label: "Modal ขนาด Large",         desc: "ใช้สำหรับเนื้อหาเยอะ",                icon: "🔲" },
+    { id: "askText", label: "askText (ถามเหตุผล)",      desc: "เรียกจากฟังก์ชัน · ยกเลิก = ไม่ทำต่อ", icon: "💬" },
+    { id: "askConfirm", label: "askConfirm (ถามยืนยัน)", desc: "เรียกจากฟังก์ชัน · แทน window.confirm", icon: "❓" },
   ];
 
   return (
@@ -61,8 +64,14 @@ export default function PopupPlaygroundPage() {
           {demos.map((d) => (
             <button
               key={d.id}
-              onClick={() => {
-                if (d.id === "drawer") setDrawerOpen(true);
+              onClick={async () => {
+                if (d.id === "askText") {
+                  const r = await askText({ title: "เหตุผลที่ไม่ผ่าน", message: "CT-202610-0001 ถ่ายรูปสินค้าใหม่", placeholder: "เช่น รูปไม่ตรงบรีฟ", required: true, variant: "danger", confirmText: "ไม่ผ่าน" });
+                  setLastAction(r === null ? "askText → กดยกเลิก (null) — ไม่ทำต่อ" : `askText → "${r}"`);
+                } else if (d.id === "askConfirm") {
+                  const ok = await askConfirm({ title: "ยังมีงานย่อยที่ยังไม่จบ", message: "งานย่อยค้าง 3 ชิ้น — ถ้าปิดงาน งานย่อยเหล่านี้จะถูกยกเลิก", variant: "danger", confirmText: "ยกเลิกงานย่อยแล้วปิดงาน", cancelText: "กลับไปตรวจก่อน" });
+                  setLastAction(`askConfirm → ${ok ? "ยืนยัน (true)" : "ยกเลิก (false)"}`);
+                } else if (d.id === "drawer") setDrawerOpen(true);
                 else if (d.id === "approve") setApprovalOpen(true);
                 else if (d.id === "form") setUnsavedModal(true);
                 else setModal(d.id);

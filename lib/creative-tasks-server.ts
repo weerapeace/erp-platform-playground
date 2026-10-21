@@ -609,6 +609,14 @@ export async function userIdsReviewers(admin: Admin, taskId: string): Promise<Se
   return new Set(((data ?? []) as { user_id: string }[]).map((r) => String(r.user_id)));
 }
 
+/** user เป็น "คนทำ" งานย่อยนี้ไหม (ผู้รับผิดชอบหลายคน หรือช่องเดี่ยวระบบเก่า) — ใช้กันอนุมัติงานตัวเอง (หน้าเว็บ + ลิงก์ LINE) */
+export async function isSubtaskWorker(admin: Admin, subtaskId: string, userId: string, legacyAssigneeId?: string | null): Promise<boolean> {
+  const { data } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);
+  const ids = ((data ?? []) as { user_id: string }[]).map((r) => String(r.user_id));
+  // มีรายชื่อหลายคนแล้ว = เชื่อรายชื่อนั้น (ช่องเดี่ยวของเก่าอาจค้างชื่อคนเดิม) · ไม่มีเลย = ดูช่องเดี่ยว
+  return ids.length ? ids.includes(userId) : (!!legacyAssigneeId && legacyAssigneeId === userId);
+}
+
 /**
  * เลื่อนสถานะ "งานหลัก" อัตโนมัติตามสถานะ "งานย่อย" — ใช้กับงานที่มีงานย่อยเท่านั้น
  * แมปคีย์เส้นทางหลักจาก workflow เอง (ทนต่อการเปลี่ยน label/คีย์):

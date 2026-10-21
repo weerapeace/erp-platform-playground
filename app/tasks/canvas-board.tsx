@@ -13,6 +13,7 @@ import { useT } from "@/components/i18n";
 import { FontSelect } from "@/components/font-select";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
+import { useAuth } from "@/components/auth";
 import {
   PRIORITY_META, priorityLabel, isOverdue,
   type CreativeTask, type CreativePriority,
@@ -94,6 +95,9 @@ export function CanvasBoard({
   ], [t]);
   const columns = useMemo(() => statuses.map((s) => s.key), [statuses]);
   const [freeMove, setFreeMove] = useState(false);   // ย้ายอิสระ (ข้ามกฎ workflow)
+  // ย้ายอิสระ = ข้ามขั้นตอนตรวจได้ → เฉพาะผู้มีสิทธิ์ "อนุมัติงาน" (server เช็กซ้ำ)
+  const { can } = useAuth();
+  const canFreeMove = can("tasks.approve" as Parameters<typeof can>[0]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Interaction>(null);
@@ -412,7 +416,7 @@ export function CanvasBoard({
         <ToolBtn onClick={resetLayout} title={t("จัดเรียงการ์ดใหม่", "Reset card layout")}>↺</ToolBtn>
         <ToolBtn onClick={toggleFs} title={isMax ? t("ย่อกลับ (Esc)", "Restore (Esc)") : t("ขยายเต็มหน้าต่าง", "Fullscreen")}>{isMax ? "🗗" : "⛶"}</ToolBtn>
         <Sep />
-        <ToolBtn active={freeMove} onClick={() => setFreeMove(f => !f)} title={freeMove ? t("ย้ายอิสระ: เปิด — ลากไปสถานะไหนก็ได้ (ข้าม workflow)", "Free move: ON — drag to any status (bypass workflow)") : t("ย้ายอิสระ: ปิด — ลากตามเส้นทาง workflow", "Free move: OFF — follow workflow transitions")}>{freeMove ? "🔓" : "🔒"}</ToolBtn>
+        {canFreeMove && <ToolBtn active={freeMove} onClick={() => setFreeMove(f => !f)} title={freeMove ? t("ย้ายอิสระ: เปิด — ลากไปสถานะไหนก็ได้ (ข้าม workflow)", "Free move: ON — drag to any status (bypass workflow)") : t("ย้ายอิสระ: ปิด — ลากตามเส้นทาง workflow", "Free move: OFF — follow workflow transitions")}>{freeMove ? "🔓" : "🔒"}</ToolBtn>}
         {onAddTask && <button onClick={onAddTask} title={t("เพิ่มงานใหม่", "Add task")} className="h-8 px-2.5 ml-0.5 flex items-center gap-1 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">＋ {t("งาน", "Task")}</button>}
       </div>
       {/* ปุ่มออกจากเต็มจอ (ลอยมุมขวาบน) */}

@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
-import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
+import { approvedStatusKeys, defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
 import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, arrangeImagesMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask, validateTaskFields } from "./shared";
 
@@ -112,6 +112,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const status = (body.status as string) || (await defaultStatusKey(admin));
   const statusMeta = await getStatusMeta(admin, status);
+  // สถานะตอนสร้าง (ถ้าส่งมาเอง): ต้องเป็นสถานะที่เปิดใช้ · ห้ามสร้างงานที่ "จบแล้ว" หรือ "ผ่านการตรวจแล้ว" ตั้งแต่แรก (= ข้ามขั้นตอนตรวจ)
+  if (body.status) {
+    if (!statusMeta) return NextResponse.json({ error: `ไม่พบสถานะ "${status}"` }, { status: 400 });
+    if (statusMeta.is_terminal || (await approvedStatusKeys(admin)).has(status))
+      return NextResponse.json({ error: `สร้างงานในสถานะ "${statusMeta.label}" ไม่ได้ — สร้างแล้วเดินตามขั้นตอนตรวจงานก่อน` }, { status: 400 });
+  }
   const progress = typeof body.progress_percent === "number" ? body.progress_percent : (statusMeta?.progress_percent ?? 0);
 
   const insertRow = (taskNo: string) => ({

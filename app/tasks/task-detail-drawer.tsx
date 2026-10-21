@@ -40,9 +40,10 @@ import { DriveFolderModal } from "./drive-folder-modal";
 import { runBgJob } from "@/lib/bg-jobs";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
+import { applyTaskTransition } from "./task-actions";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
-  getTask, updateTask, transitionTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
+  getTask, updateTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
@@ -214,7 +215,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   }
   const d = detail;
   const isClosed = isTerminal(d.status);
-  const actions = transitionsFrom(d.status);
+  // ปุ่ม อนุมัติ/ไม่ผ่าน/ให้แก้ = ตัดสินผลงาน → โชว์เฉพาะผู้มีสิทธิ์ "อนุมัติงาน" (server เช็กซ้ำอีกชั้น)
+  const canApproveTask = can("tasks.approve" as Parameters<typeof can>[0]);
+  const actions = transitionsFrom(d.status).filter((a) => canApproveTask || !["approve", "reject", "revise"].includes(a.kind));
   // ปุ่ม "ส่งงาน" = การเปลี่ยนสถานะไปข้างหน้า (ไม่ใช่ อนุมัติ/ตีกลับ/บล็อก) — ใช้กับเด้งเตือนหลังแนบงาน
   const forwardAction = actions.find((a) => !["approve", "reject", "revise", "block"].includes(a.kind));
   // สิทธิ์งานย่อย: ผจก./admin = จัดการได้หมด · ผู้ตรวจ = อนุมัติได้ · คนสร้างงาน = แก้ผู้รับผิดชอบได้
@@ -225,7 +228,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
   // admin: บังคับตั้งสถานะใดก็ได้ (force ข้ามกฎ workflow) — บันทึก audit ฝั่ง server
-  const handleForceStatus = async (toKey: string) => { setBusy(true); try { await transitionTask(d.id, toKey, undefined, true); await refresh(); pushToast("success", t("เปลี่ยนสถานะแล้ว", "Status changed")); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  // ผ่านของกลาง applyTaskTransition → ถ้ายังมีงานย่อยค้างตอนปิดงาน จะถามก่อน (ไม่ปล่อยงานย่อยค้างในคิวตรวจ)
+  const handleForceStatus = async (toKey: string) => { setBusy(true); try { if (await applyTaskTransition(d, toKey, { pushToast, force: true })) await refresh(); } finally { setBusy(false); } };
   // แก้/ลบคอมเมนต์ — แก้ได้เฉพาะของตัวเอง · ลบได้ของตัวเอง (แอดมิน/ผู้จัดการลบของคนอื่นได้)
   const saveCommentEdit = async () => {
     if (!cmtEdit || !cmtEdit.body.trim()) return;

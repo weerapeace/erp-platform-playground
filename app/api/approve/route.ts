@@ -10,7 +10,8 @@ import { writeAudit } from "@/lib/audit";
 import { verifyApprovalToken, APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { verifyLineIdToken } from "@/lib/line-employee-portal-db";
 import { applySubtaskSync, reverseSubtaskSync, restoreSkuImagesBackup } from "@/lib/subtask-sync";
-import { userIdsReviewers, recomputeTaskStatusFromSubtasks } from "@/lib/creative-tasks-server";
+import { userIdsReviewers, recomputeTaskStatusFromSubtasks, isSubtaskWorker } from "@/lib/creative-tasks-server";
+import { terminalStatusKeys } from "@/lib/creative-statuses-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -96,12 +97,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!sub) return NextResponse.json({ error: "ไม่พบงานย่อยนี้" }, { status: 404 });
   const row = sub as Record<string, unknown>;
   const taskId = String(row.task_id);
-  const { data: parent } = await admin.from("erp_creative_tasks").select("created_by, reviewer_id").eq("id", taskId).maybeSingle();
+  const { data: parent } = await admin.from("erp_creative_tasks").select("created_by, reviewer_id, status").eq("id", taskId).maybeSingle();
   const reviewerSet = await userIdsReviewers(admin, taskId);
   const isManager = me.role === "admin" || me.role === "manager";
   const isReviewer = reviewerSet.has(me.id) || me.id === ((parent as { reviewer_id?: string } | null)?.reviewer_id ?? "");
-  const isCreator = me.id === ((parent as { created_by?: string } | null)?.created_by ?? "");
-  if (!(isManager || isReviewer || isCreator)) return NextResponse.json({ error: "คุณไม่มีสิทธิ์ตรวจงานนี้" }, { status: 403 });
+  // กติกาเดียวกับหน้าเว็บ (PATCH subtasks): ตรวจได้เฉพาะหัวหน้า/แอดมิน หรือผู้ตรวจของงาน (คนสร้างงานไม่ได้ตรวจเองอัตโนมัติ)
+  if (!(isManager || isReviewer)) return NextResponse.json({ error: "คุณไม่มีสิทธิ์ตรวจงานนี้" }, { status: 403 });
+  if (row.status !== "submitted" && !(action === "approve" && row.status === "approved"))
+    return NextResponse.json({ error: "งานย่อยนี้ไม่ได้อยู่ในสถานะรอตรวจแล้ว" }, { status: 400 });
+  const parentStatus = String((parent as { status?: string } | null)?.status ?? "");
+  if (parentStatus && (await terminalStatusKeys(admin)).has(parentStatus))
+    return NextResponse.json({ error: "งานหลักปิดไปแล้ว — อนุมัติ/ตีกลับงานย่อยต่อไม่ได้" }, { status: 400 });
+  if (action === "approve" && !isManager && await isSubtaskWorker(admin, v.subtaskId, me.id, (row.assignee_id as string | null) ?? null))
+    return NextResponse.json({ error: "อนุมัติงานที่ตัวเองทำไม่ได้ — ให้ผู้ตรวจคนอื่นหรือหัวหน้าเป็นคนอนุมัติ" }, { status: 403 });
 
   if (action === "approve") {
     if (row.status === "approved") return NextResponse.json({ ok: true, already: true, error: null });

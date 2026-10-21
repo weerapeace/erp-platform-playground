@@ -1,12 +1,15 @@
 /**
- * GET /api/creative-tasks/my-subtasks — งานย่อยที่มอบหมายให้ฉัน (ยังไม่เสร็จ + งานแม่ยัง active)
- * รวมจาก junction m2m (erp_creative_subtask_assignees.user_id) + legacy single (subtasks.assignee_id)
+ * GET /api/creative-tasks/my-subtasks — งานย่อยที่มอบหมายให้ฉัน (ยังไม่เสร็จ/ไม่ยกเลิก + งานแม่ยัง active และยังไม่ปิด)
+ * ใช้ junction m2m (erp_creative_subtask_assignees.user_id) เป็นหลัก
+ * ช่องเดี่ยวระบบเก่า (subtasks.assignee_id) นับเฉพาะงานย่อยที่ "ยังไม่มีรายชื่อใน junction เลย"
+ * (เดิมรวมทั้งคู่ → คนที่เคยถูกตั้งไว้แต่คนอื่นกดเริ่มทำไปแล้ว ยังเห็นงานนั้นค้างในรายการของตัวเอง)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
+import { terminalStatusKeys } from "@/lib/creative-statuses-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,24 +21,34 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!me) return NextResponse.json({ data: [], error: null });
 
   const admin = supabaseAdmin();
-  const [{ data: links }, { data: legacy }] = await Promise.all([
+  const [{ data: links }, { data: legacy }, terminal] = await Promise.all([
     admin.from("erp_creative_subtask_assignees").select("subtask_id").eq("user_id", me),
     admin.from("erp_creative_subtasks").select("id").eq("assignee_id", me),
+    terminalStatusKeys(admin),
   ]);
+  const legacyIds = ((legacy ?? []) as { id: string }[]).map((r) => r.id);
+  const { data: legacyWithList } = legacyIds.length
+    ? await admin.from("erp_creative_subtask_assignees").select("subtask_id").in("subtask_id", legacyIds)
+    : { data: [] as { subtask_id: string }[] };
+  const hasList = new Set(((legacyWithList ?? []) as { subtask_id: string }[]).map((r) => String(r.subtask_id)));
   const ids = [...new Set([
     ...((links ?? []) as { subtask_id: string }[]).map((r) => r.subtask_id),
-    ...((legacy ?? []) as { id: string }[]).map((r) => r.id),
+    ...legacyIds.filter((id) => !hasList.has(String(id))),
   ])];
   if (!ids.length) return NextResponse.json({ data: [], error: null });
 
   const { data, error } = await admin.from("erp_creative_subtasks")
     .select("id, title, title_en, status, due_date, required_before_next, subtask_type, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority, cover_image_r2_key)")
     .in("id", ids)
-    .not("status", "in", "(done,posted,approved)")
+    .not("status", "in", "(done,posted,approved,canceled)")
     .order("due_date", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 
-  const rows = ((data ?? []) as Record<string, unknown>[]).map((r) => {
+  const rows = ((data ?? []) as Record<string, unknown>[]).filter((r) => {
+    // งานหลักปิดแล้ว (เสร็จ/ยกเลิก) → งานย่อยไม่ใช่งานที่ต้องทำอีก
+    const t = (Array.isArray(r.task) ? r.task[0] : r.task) as Record<string, unknown> | null;
+    return !(t?.status && terminal.has(String(t.status)));
+  }).map((r) => {
     const t = (Array.isArray(r.task) ? r.task[0] : r.task) as Record<string, unknown> | null;
     return {
       id: r.id, title: r.title, title_en: r.title_en ?? null, status: r.status, due_date: r.due_date, required_before_next: r.required_before_next,
