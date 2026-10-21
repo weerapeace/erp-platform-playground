@@ -667,7 +667,7 @@ function ProductHistory({ entityId }: { entityId: string }) {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetch(`/api/audit-logs?entity_id=${entityId}&limit=50`)
+    apiFetch(`/api/audit-logs?entity_id=${entityId}&limit=50`)
       .then(r => r.json())
       .then((json: AuditLogsResponse) => { if (active) setEntries(json.data ?? []); })
       .catch(() => {})

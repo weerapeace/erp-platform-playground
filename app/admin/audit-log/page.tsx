@@ -5,6 +5,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { ActivityFeed } from "@/components/activity-feed";
 import type { ActivityEntry } from "@/components/activity-feed";
 import { usePermission, AccessDenied } from "@/components/auth";
+import { apiFetch } from "@/lib/api";
 import type { AuditLogsResponse } from "@/app/api/audit-logs/route";
 
 const ACTION_FILTERS = [
@@ -27,7 +28,7 @@ export default function AuditLogPage() {
     try {
       const params = new URLSearchParams({ limit: "100" });
       if (action) params.set("action", action);
-      const res = await fetch(`/api/audit-logs?${params}`);
+      const res = await apiFetch(`/api/audit-logs?${params}`);
       const json: AuditLogsResponse = await res.json();
       if (json.error) throw new Error(json.error);
       setEntries(json.data);

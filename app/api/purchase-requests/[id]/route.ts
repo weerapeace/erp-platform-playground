@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { guardApi } from "@/lib/api-auth";
 import type { PRLine } from "../route";
 
 // ---- GET /api/purchase-requests/[id] (detail + lines) ----
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await guardApi(request, "pr.view"); if (denied) return denied;
   const { id } = await params;
-  const { data, error } = await supabase.rpc("erp_playground_pr_get", { p_id: id });
+  const { data, error } = await supabaseAdmin().rpc("erp_playground_pr_get", { p_id: id });
 
   if (error) {
     console.error("[api/purchase-requests/[id]] GET", error);

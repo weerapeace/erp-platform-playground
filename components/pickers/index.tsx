@@ -235,7 +235,7 @@ export function ProductPicker({ value, onChange, placeholder = "เลือก�
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/playground-products?search=${encodeURIComponent(query)}&limit=10`);
+        const res = await apiFetch(`/api/playground-products?search=${encodeURIComponent(query)}&limit=10`);
         const json = await res.json();
         if (active) setResults((json.data ?? []) as ProductPickerValue[]);
       } catch { if (active) setResults([]); }

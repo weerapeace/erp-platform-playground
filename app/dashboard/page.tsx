@@ -181,8 +181,8 @@ export default function DashboardPage() {
   const loadOverview = useCallback(() => {
     setErrStats(false);
     Promise.all([
-      fetch("/api/dashboard").then(r => r.json()) as Promise<DashboardResponse>,
-      fetch("/api/audit-logs?limit=8").then(r => r.json()) as Promise<AuditLogsResponse>,
+      apiFetch("/api/dashboard").then(r => r.json()) as Promise<DashboardResponse>,
+      apiFetch("/api/audit-logs?limit=8").then(r => r.json()) as Promise<AuditLogsResponse>,
     ]).then(([d, a]) => {
       if (d.data) setStats(d.data); else setErrStats(true);
       setActivity(a.data ?? []);

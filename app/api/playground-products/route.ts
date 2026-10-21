@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { guardApi } from "@/lib/api-auth";
 
 // ---- Types ----
 
@@ -39,7 +40,9 @@ export async function GET(request: NextRequest) {
   const limit  = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "200")));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0"));
 
-  const { data, error } = await supabase.rpc("erp_playground_products_list", {
+  const denied = await guardApi(request, "products.view"); if (denied) return denied;
+
+  const { data, error } = await supabaseAdmin().rpc("erp_playground_products_list", {
     p_search: search || null,
     p_limit:  limit,
     p_offset: offset,

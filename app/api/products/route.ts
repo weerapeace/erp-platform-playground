@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
 import type { ApiProduct, ApiProductsResponse } from "@/types/products";
 
 export type { ApiProduct, ApiProductsResponse };
@@ -11,11 +12,11 @@ export type { ApiProduct, ApiProductsResponse };
 //   page    — page number (default: 1)
 //   limit   — rows per page (default: 100, max: 500)
 //
-// Data is fetched via erp_playground_get_products() — a SECURITY DEFINER
-// PostgreSQL function that safely exposes public-safe product catalog fields
-// without requiring direct table access or the service_role key.
+// Data is fetched via erp_playground_get_products() (SECURITY DEFINER) ผ่าน service_role
+// ต้องล็อกอิน (products.view) — ฟังก์ชันนี้ปิดสิทธิ์คนนอกแล้ว (audit 2026-10-21)
 
 export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { searchParams } = new URL(request.url);
 
   const search = searchParams.get("search") ?? "";
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "100")));
   const offset = (page - 1) * limit;
 
-  const { data, error } = await supabase.rpc("erp_playground_get_products", {
+  const { data, error } = await supabaseAdmin().rpc("erp_playground_get_products", {
     p_search: search || null,
     p_limit: limit,
     p_offset: offset,

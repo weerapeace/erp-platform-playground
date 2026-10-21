@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
 
 // ---- Types ----
 
@@ -28,8 +29,9 @@ export type DashboardResponse = {
 
 // ---- GET /api/dashboard ----
 
-export async function GET() {
-  const { data, error } = await supabase.rpc("erp_playground_dashboard_stats");
+export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  const { data, error } = await supabaseAdmin().rpc("erp_playground_dashboard_stats");
 
   if (error) {
     console.error("[api/dashboard] GET", error);

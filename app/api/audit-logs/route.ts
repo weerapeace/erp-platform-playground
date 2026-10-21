@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
+import { auditLogPermissionFor } from "@/lib/audit-log-access";
 
 // ---- Types ----
 
@@ -27,6 +29,7 @@ export type AuditLogsResponse = {
 //   entity_id   — เฉพาะ record เดียว (uuid)
 //   action      — create | update | delete
 //   limit / offset
+// สิทธิ์: ดูทั้งระบบ/หมวดอ่อนไหว = admin.audit_log · ประวัติรายการเดียว/หมวดทั่วไป = พนักงานที่ล็อกอิน (lib/audit-log-access)
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -36,7 +39,9 @@ export async function GET(request: NextRequest) {
   const limit  = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "100")));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0"));
 
-  const { data, error } = await supabase.rpc("erp_playground_get_audit_logs", {
+  const denied = await guardApi(request, auditLogPermissionFor({ entityType, entityId })); if (denied) return denied;
+
+  const { data, error } = await supabaseAdmin().rpc("erp_playground_get_audit_logs", {
     p_entity_type: entityType || null,
     p_entity_id:   entityId   || null,
     p_action:      action     || null,
