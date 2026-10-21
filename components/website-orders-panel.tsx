@@ -85,6 +85,9 @@ type Order = {
   codFee?: number;
   /** 📈 รอบที่สั่งมาจากไหน (google/facebook/…) — ออเดอร์ก่อนชุด 8 = null */
   source?: string | null;
+  /** 🧾 ลูกค้าขอใบกำกับภาษีเต็มรูป (lib/website-tax-invoice) · เลขที่ออกแล้ว */
+  taxInvoice?: { kind: "person" | "company"; name: string; taxId: string; branch: string; address: string; email?: string } | null;
+  taxInvoiceNo?: string | null;
 };
 type Messaging = {
   shopName: string;
@@ -112,6 +115,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CustomerRef | null>(null);
+  const [issuing, setIssuing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [trackNo, setTrackNo] = useState("");
@@ -329,6 +333,11 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                     {o.lang === "en" && <span className="ml-1 font-sans text-[10px] px-1 rounded bg-sky-100 text-sky-700" title="ลูกค้าสั่งจากหน้าเว็บภาษาอังกฤษ">EN</span>}
                   </p>
                   <p className="text-[11px] text-slate-400">{when(o.createdAt)}</p>
+                  {o.taxInvoice && (
+                    <span className="inline-block mt-0.5 mr-1 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200" data-tax-badge>
+                      {o.taxInvoiceNo ? "🧾 ออกใบกำกับแล้ว" : "🧾 ขอใบกำกับภาษี"}
+                    </span>
+                  )}
                   {(o.giftWrap || o.giftCardOnly) && (
                     <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200">
                       {o.giftWrap ? "🎀 ต้องห่อของขวัญ" : "💌 ใส่การ์ดอวยพร"}
@@ -478,6 +487,45 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 </p>
                 {open.note && (
                   <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mt-2">หมายเหตุ: {open.note}</p>
+                )}
+                {open.taxInvoice && (
+                  <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-2 text-xs text-indigo-900 space-y-1" data-tax-request>
+                    <p className="font-semibold">🧾 ลูกค้าขอใบกำกับภาษีเต็มรูป{open.taxInvoiceNo ? ` · เลขที่ ${open.taxInvoiceNo}` : ""}</p>
+                    <p>
+                      {open.taxInvoice.name}
+                      {open.taxInvoice.kind === "company" ? ` (${open.taxInvoice.branch === "00000" ? "สำนักงานใหญ่" : `สาขาที่ ${open.taxInvoice.branch}`})` : " (บุคคลธรรมดา)"}
+                    </p>
+                    <p>เลขผู้เสียภาษี {open.taxInvoice.taxId} {open.taxInvoice.email ? `· ส่งใบที่ ${open.taxInvoice.email}` : ""}</p>
+                    <p className="whitespace-pre-line">{open.taxInvoice.address}</p>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {open.taxInvoiceNo ? (
+                        <a href={`/print/web-tax-invoice?id=${open.id}`} target="_blank" rel="noopener" className="inline-block rounded-md bg-indigo-600 px-2.5 py-1 font-medium text-white hover:bg-indigo-700">🖨 พิมพ์ใบกำกับภาษี</a>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={issuing || open.status === "cancelled"}
+                          onClick={async () => {
+                            setIssuing(true);
+                            try {
+                              const j = await apiFetch("/api/website/orders/tax-invoice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: open.id }) }).then((r) => r.json());
+                              if (!j.ok) toast.error(j.error ?? "ออกเลขไม่สำเร็จ");
+                              else {
+                                toast.success(`ออกใบกำกับภาษีเลขที่ ${j.no} แล้ว`);
+                                await load();
+                              }
+                            } finally {
+                              setIssuing(false);
+                            }
+                          }}
+                          className="inline-block rounded-md bg-indigo-600 px-2.5 py-1 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                          data-issue-tax
+                        >
+                          {issuing ? "กำลังออกเลข…" : "ออกเลขใบกำกับภาษี"}
+                        </button>
+                      )}
+                    </div>
+                    {!open.taxInvoiceNo && <p className="text-[11px] text-indigo-700/80">ออกเลขแล้วแก้ไม่ได้ — ตรวจชื่อ/เลขผู้เสียภาษีก่อน · หัวกระดาษ = บริษัทที่ตั้งในข้อมูลร้าน › 🧾</p>}
+                  </div>
                 )}
                 {(open.giftWrap || open.giftCardOnly) && (
                   <div className="mt-2 rounded-lg border border-pink-200 bg-pink-50 px-2.5 py-2 text-xs text-pink-800 space-y-1">

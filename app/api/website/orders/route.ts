@@ -56,7 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, shipping_method, shipping_method_label, shipping_box, cod_fee, discount, coupon_code, promos, deposit_amount, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier, source"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, shipping_method, shipping_method_label, shipping_box, cod_fee, discount, coupon_code, promos, deposit_amount, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier, source, tax_invoice, tax_invoice_no, tax_invoice_at"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
@@ -130,6 +130,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         erpSoNumber: (r.erp_so_number as string | null) ?? null,
         isMember: !!r.customer_id,
         source: (r.source as string | null) ?? null,
+        // 🧾 ขอใบกำกับภาษี + เลขที่ออกแล้ว (null = ยังไม่ออก)
+        taxInvoice: (r.tax_invoice as Record<string, unknown> | null) ?? null,
+        taxInvoiceNo: (r.tax_invoice_no as string | null) ?? null,
         skuCodes: items.map((i) => i.sku_code).filter(Boolean),
         slips: slips.get(r.id as string) ?? [],
       };

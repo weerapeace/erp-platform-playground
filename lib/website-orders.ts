@@ -50,6 +50,7 @@ import { readLivePromotions } from "@/lib/website-promotions-db";
 import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
 import { cleanAb, cleanSource } from "@/lib/website-web-stats";
+import { cleanTaxInvoice, type TaxInvoiceRequest } from "@/lib/website-tax-invoice";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -141,6 +142,8 @@ export interface PublicOrderInput {
   source?: string;
   /** 🧪 กลุ่ม A/B ที่ลูกค้าเห็นในรอบนั้น */
   ab?: Record<string, "A" | "B">;
+  /** 🧾 ขอใบกำกับภาษีเต็มรูป (ร้านเปิด tax_invoice_enabled) */
+  taxInvoice?: TaxInvoiceRequest;
 }
 
 export interface OrderLineView {
@@ -258,6 +261,8 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
 
   const pm = clean(r.paymentMethod, 20);
   if (pm !== "cod" && pm !== "promptpay") return { ok: false, error: "กรุณาเลือกวิธีชำระเงิน" };
+  const tax = cleanTaxInvoice(r.taxInvoice);
+  if (!tax.ok) return { ok: false, error: tax.error };
 
   // 🎀 ห่อของขวัญ (ข้อความการ์ด ≤ 300 ตัว · ขึ้นบรรทัดใหม่ได้)
   const g = (r.gift ?? {}) as Record<string, unknown>;
@@ -286,6 +291,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       ...(shippingMethodId ? { shippingMethodId } : {}),
       ...(r.source ? { source: cleanSource(r.source) } : {}),
       ...(cleanAb(r.ab) ? { ab: cleanAb(r.ab)! } : {}),
+      ...(tax.value ? { taxInvoice: tax.value } : {}),
     },
   };
 }
@@ -665,6 +671,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         // 📈 แหล่งที่มา + กลุ่ม A/B (migration 202610291700 · เว็บรุ่นเก่าไม่ส่ง = ไม่ใส่ช่อง)
         ...(input.source ? { source: input.source } : {}),
         ...(input.ab ? { ab: input.ab } : {}),
+        // 🧾 ขอใบกำกับภาษี — เก็บเฉพาะร้านที่เปิดรับคำขอ (ปิดไปแล้ว = ไม่เก็บ ไม่ล้มออเดอร์)
+        ...(input.taxInvoice && info.tax_invoice_enabled ? { tax_invoice: input.taxInvoice } : {}),
     };
     const ins = await sb.from("store_orders").insert(payload).select("id, order_no, created_at").maybeSingle();
     const insErr = ins.error;

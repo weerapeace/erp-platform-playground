@@ -85,6 +85,8 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "free_shipping_min", label: "ส่งฟรีเมื่อยอดถึง (บาท)", hint: "0 = ไม่มีเงื่อนไขส่งฟรี · ⚠️ ตั้งวิธีส่งที่แท็บ 🚚 การจัดส่ง แล้วใช้ค่าส่งฟรีของแต่ละวิธีแทน", group: "order", type: "number", isPublic: true },
   { key: "pay_cod", label: "รับเก็บเงินปลายทาง (COD)", group: "order", type: "bool", isPublic: true },
   { key: "pay_promptpay", label: "รับโอนพร้อมเพย์", group: "order", type: "bool", isPublic: true },
+  { key: "tax_invoice_enabled", label: "🧾 ให้ลูกค้าขอใบกำกับภาษีเต็มรูปตอนสั่ง", hint: "หน้าชำระเงินมีช่องติ๊กขอใบกำกับ (ชื่อ · เลขผู้เสียภาษี 13 หลัก · สาขา · ที่อยู่) → ออกใบจากรายละเอียดออเดอร์ใน ERP (หัวกระดาษบริษัทที่เลือกด้านล่าง)", group: "order", type: "bool", isPublic: true },
+  { key: "tax_invoice_company", label: "🧾 บริษัทที่ออกใบกำกับ (รหัสบริษัท)", hint: "รหัสบริษัทจากหน้า ERP › ตั้งค่า › บริษัท (เช่น LM) — ว่าง = บริษัทหลัก · ใช้เป็นหัวกระดาษ + ชุดเลขที่ใบกำกับ", group: "order", type: "text", isPublic: false, placeholder: "ว่าง = บริษัทหลัก" },
   { key: "promptpay_number", label: "เลขพร้อมเพย์", hint: "เบอร์โทรหรือเลขบัตรประชาชน/นิติบุคคล — ลูกค้าเห็นตอนสั่งซื้อ", group: "order", type: "text", isPublic: true },
   { key: "promptpay_name", label: "ชื่อบัญชีพร้อมเพย์", group: "order", type: "text", isPublic: true },
   // 💳 สลิปโอน (ของกลาง lib/website-payments*.ts · เว็บร้าน SlipUpload) — เจ้าของเลือก A+B 2026-10-20
@@ -342,6 +344,8 @@ export interface SiteInfo {
   preorder_deposit_enabled: boolean;
   preorder_deposit_pct: number;
   preorder_note: string;
+  tax_invoice_enabled: boolean;
+  tax_invoice_company: string;
   referral_enabled: boolean;
   referral_friend_discount: number;
   referral_min_subtotal: number;
@@ -432,6 +436,8 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   preorder_deposit_enabled: false,
   preorder_deposit_pct: 30,
   preorder_note: "",
+  tax_invoice_enabled: false,
+  tax_invoice_company: "",
   referral_enabled: false,
   referral_friend_discount: 100,
   referral_min_subtotal: 0,
