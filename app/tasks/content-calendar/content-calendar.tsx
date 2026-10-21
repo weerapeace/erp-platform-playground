@@ -48,7 +48,7 @@ const ContentPlanView = dynamic(() => import("@/app/marketing/content-plan/view"
   ssr: false, loading: () => <div className="px-4 sm:px-8 py-5 space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 rounded-xl bg-slate-100 animate-pulse" />)}</div>,
 });
 // drawer/ป๊อปที่มีตัวพิมพ์ข้อความ (rich text) — โหลดเมื่อเปิดใช้จริง (เดิมลากโค้ดคอนเทนต์ ~2,400 บรรทัด + drawer งาน มาตอนเปิดหน้า)
-const ContentDrawer = dynamic(() => import("../content/content").then((m) => m.ContentDrawer), { ssr: false });
+const ContentDrawer = dynamic(() => import("../content/content-drawer").then((m) => m.ContentDrawer), { ssr: false });
 const ContentCreateModal = dynamic(() => import("../content/content-create-modal").then((m) => m.ContentCreateModal), { ssr: false });
 const TaskDetailDrawer = dynamic(() => import("../task-detail-drawer").then((m) => m.TaskDetailDrawer), { ssr: false });
 const CreateTaskModal = dynamic(() => import("../create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });

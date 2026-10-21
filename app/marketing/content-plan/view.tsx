@@ -31,7 +31,7 @@ import { RefreshPanel, useRefreshRules, refreshRuleLabel } from "./plan-refresh"
 import { refreshStatuses, bangkokDateKey, placementId, type RefreshStatus } from "@/lib/marketing/content-plan";
 
 // รายละเอียดเต็ม/แคปชั่น = ContentDrawer ตัวเดิม (โหลดเมื่อเปิด)
-const ContentDrawer = dynamic(() => import("@/app/tasks/content/content").then((m) => m.ContentDrawer), { ssr: false });
+const ContentDrawer = dynamic(() => import("@/app/tasks/content/content-drawer").then((m) => m.ContentDrawer), { ssr: false });
 
 const VIEWS = ["week", "month", "board"] as const;
 type View = (typeof VIEWS)[number];

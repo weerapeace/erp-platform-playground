@@ -69,7 +69,7 @@ const KnowledgeDrawer = dynamic(() => import("../../knowledge-drawer").then((m) 
 const CampaignDrawer = dynamic(() => import("../campaign-drawer").then((m) => m.CampaignDrawer), { ssr: false });
 const CreateTaskModal = dynamic(() => import("../../create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
 const TaskDetailDrawer = dynamic(() => import("../../task-detail-drawer").then((m) => m.TaskDetailDrawer), { ssr: false });
-const ContentDrawer = dynamic(() => import("../../content/content").then((m) => m.ContentDrawer), { ssr: false });
+const ContentDrawer = dynamic(() => import("../../content/content-drawer").then((m) => m.ContentDrawer), { ssr: false });
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 // ป๊อปอัปใบงานออกแบบ = ของกลางตัวเดียวกับที่ Design Dashboard ใช้ (ดู/แก้/เปลี่ยนสถานะ/สร้างใหม่) — โหลดเฉพาะตอนใช้
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });

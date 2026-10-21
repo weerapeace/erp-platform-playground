@@ -20,7 +20,7 @@ import {
   type ContentItem, type ContentStatus, type BrandOption, postTypeLabel,
 } from "./data";
 
-const ContentDrawer = dynamic(() => import("./content/content").then((m) => m.ContentDrawer), { ssr: false });
+const ContentDrawer = dynamic(() => import("./content/content-drawer").then((m) => m.ContentDrawer), { ssr: false });
 type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 
 function StatusChip({ status }: { status: ContentStatus }) {
