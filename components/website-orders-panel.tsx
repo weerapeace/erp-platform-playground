@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { MiniTable } from "@/components/mini-table";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { CopyButton } from "@/components/copy-button";
 import { GiftCardPreview } from "@/components/website-gift-cards-editor";
 import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type OrderGiftCard } from "@/lib/website-gift-cards";
@@ -27,6 +27,7 @@ import { SlipReviewBox, type SlipMeta, type SlipView } from "@/components/websit
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { BulkTrackingModal } from "@/components/website-bulk-tracking";
 import { isReadyToPack } from "@/lib/website-fulfillment";
+import { canMove, needsConfirm, type StatusKind } from "@/lib/website-order-status";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -151,6 +152,17 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
 
   const tone = (list: StatusDef[], key: string) => list.find((s) => s.key === key)?.tone ?? "bg-slate-100 text-slate-600";
   const label = (list: StatusDef[], key: string) => list.find((s) => s.key === key)?.label ?? key;
+
+  // 🔁 เปลี่ยนสถานะ: เลือกได้เฉพาะขั้นที่อนุญาต (lib/website-order-status) · จัดส่ง/สำเร็จ/ยกเลิก/รับเงิน/คืนเงิน = ถามยืนยันก่อน
+  const [confirmMove, setConfirmMove] = useState<{ orderId: string; orderNo: string; kind: StatusKind; to: string; hasTracking: boolean } | null>(null);
+  const applyMove = (orderId: string, kind: StatusKind, to: string) =>
+    kind === "status" ? patch(orderId, { status: to }, "เปลี่ยนสถานะแล้ว") : patch(orderId, { paymentStatus: to }, "อัปเดตสถานะชำระเงินแล้ว");
+  const askMove = (o: { id: string; orderNo: string; status: string; paymentStatus: string; tracking?: unknown }, kind: StatusKind, to: string) => {
+    const from = kind === "status" ? o.status : o.paymentStatus;
+    if (from === to) return;
+    if (needsConfirm(kind, from, to)) setConfirmMove({ orderId: o.id, orderNo: o.orderNo, kind, to, hasTracking: !!o.tracking });
+    else void applyMove(o.id, kind, to);
+  };
 
   const patch = async (orderId: string, body: Record<string, unknown>, okMsg: string) => {
     setBusy(true);
@@ -391,6 +403,35 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
         <button type="button" onClick={() => setTrackOpen(true)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">🚚 ใส่เลขพัสดุ</button>
       </BulkActionBar>
       <BulkTrackingModal open={trackOpen} onClose={() => setTrackOpen(false)} orders={orders} onDone={() => { setSel(new Set()); void load(); }} />
+      {/* 🔁 ยืนยันก่อนเปลี่ยนสถานะสำคัญ (ลูกค้าอาจได้อีเมลแจ้ง · บางสถานะย้อนไม่ได้) */}
+      <ConfirmDialog
+        open={!!confirmMove}
+        onClose={() => setConfirmMove(null)}
+        onConfirm={() => {
+          const m = confirmMove;
+          setConfirmMove(null);
+          if (m) void applyMove(m.orderId, m.kind, m.to);
+        }}
+        loading={busy}
+        variant={confirmMove?.to === "cancelled" || confirmMove?.to === "refunded" ? "danger" : "default"}
+        title={confirmMove ? `${confirmMove.orderNo} → ${label(confirmMove.kind === "status" ? statuses : payStatuses, confirmMove.to)}` : ""}
+        confirmText={confirmMove ? `เปลี่ยนเป็น “${label(confirmMove.kind === "status" ? statuses : payStatuses, confirmMove.to)}”` : "ยืนยัน"}
+        cancelText="ยังไม่เปลี่ยน"
+        message={
+          confirmMove ? (
+            <div className="space-y-1.5 text-sm text-slate-600">
+              {confirmMove.to === "shipped" && <p>ลูกค้าจะเห็นสถานะ “จัดส่งแล้ว” {confirmMove.hasTracking ? "พร้อมเลขพัสดุ" : "— ⚠️ ยังไม่ได้ใส่เลขพัสดุ"}</p>}
+              {confirmMove.to === "completed" && <p>ออเดอร์จะจบ เปลี่ยนสถานะต่อไม่ได้ · สมาชิกได้แต้ม (ถ้าร้านเปิดแต้ม)</p>}
+              {confirmMove.to === "cancelled" && <p>ยกเลิกแล้วเปลี่ยนกลับไม่ได้ · ลูกค้าจะเห็นสถานะ “ยกเลิก” · แต้มที่ใช้คืนให้สมาชิก</p>}
+              {confirmMove.to === "paid" && <p>ยืนยันว่าได้รับเงินครบแล้ว</p>}
+              {confirmMove.to === "refunded" && <p>คืนเงินแล้วเปลี่ยนสถานะชำระเงินต่อไม่ได้</p>}
+              {confirmMove.to !== "completed" && <p className="text-xs text-slate-400">ถ้าร้านเปิดอีเมลแจ้งอัตโนมัติ ลูกค้าที่มีอีเมลจะได้อีเมลแจ้งเรื่องนี้</p>}
+            </div>
+          ) : (
+            ""
+          )
+        }
+      />
 
       {/* รายละเอียดออเดอร์ */}
       <ERPModal open={Boolean(open)} onClose={() => setOpenId(null)} title={open ? `ออเดอร์ ${open.orderNo}` : ""} size="lg">
@@ -506,13 +547,9 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                     className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
                     value={open.status}
                     disabled={busy}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      if (next === "cancelled" && !confirm(`ยกเลิกออเดอร์ ${open.orderNo}?\nลูกค้าจะเห็นสถานะ "ยกเลิก" ตอนตามออเดอร์`)) return;
-                      void patch(open.id, { status: next }, "เปลี่ยนสถานะแล้ว");
-                    }}
+                    onChange={(e) => askMove(open, "status", e.target.value)}
                   >
-                    {statuses.map((s) => (
+                    {statuses.filter((s) => canMove("status", open.status, s.key)).map((s) => (
                       <option key={s.key} value={s.key}>{s.label}</option>
                     ))}
                   </select>
@@ -523,9 +560,9 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                     className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
                     value={open.paymentStatus}
                     disabled={busy}
-                    onChange={(e) => void patch(open.id, { paymentStatus: e.target.value }, "อัปเดตสถานะชำระเงินแล้ว")}
+                    onChange={(e) => askMove(open, "payment", e.target.value)}
                   >
-                    {payStatuses.map((s) => (
+                    {payStatuses.filter((s) => canMove("payment", open.paymentStatus, s.key)).map((s) => (
                       <option key={s.key} value={s.key}>{s.label}</option>
                     ))}
                   </select>

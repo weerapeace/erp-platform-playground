@@ -8,6 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { overLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,6 +27,9 @@ export async function OPTIONS(): Promise<NextResponse> {
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // 🔒 กันยิงรัว (lib/rate-limit · audit 2026-10-21)
+  const limited = await overLimit(request, [{ name: "subscribe:ip", limit: 10, windowSec: 3600 }]);
+  if (limited) return json({ ok: false, error: limited }, 429);
   let body: { shop?: string; email?: string; source?: string };
   try {
     body = (await request.json()) as typeof body;

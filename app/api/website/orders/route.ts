@@ -20,7 +20,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { ORDER_STATUSES, PAYMENT_STATUSES, PAYMENT_METHOD_LABEL, toOrderView } from "@/lib/website-orders";
+import { ORDER_STATUSES, PAYMENT_STATUSES, PAYMENT_METHOD_LABEL, toOrderView, orderStatusLabel, paymentStatusLabel } from "@/lib/website-orders";
+import { moveError } from "@/lib/website-order-status";
 import { syncOrderPoints } from "@/lib/member-points-db";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
@@ -174,7 +175,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 
-type OnePatch = { orderId: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string };
+/** softShip = มาจาก "ใส่เลขพัสดุ + จัดส่งแล้ว" หลายใบ: ออเดอร์ที่สำเร็จไปแล้ว บันทึกแค่เลขพัสดุ ไม่ย้อนสถานะ */
+type OnePatch = { orderId: string; status?: string; paymentStatus?: string; note?: string; trackingNo?: string; trackingCarrier?: string; softShip?: boolean };
 type Actor = { id?: string; email?: string } | null;
 
 /** แก้ 1 ออเดอร์ (สถานะ/สถานะจ่าย/โน้ต/เลขพัสดุ) + แต้มสมาชิก + audit + แจ้งลูกค้า — ใช้ทั้ง PATCH ทีละใบและทีละหลายใบ */
@@ -203,6 +205,23 @@ async function applyOne(sb: ReturnType<typeof supabaseAdmin>, user: Actor, body:
     .maybeSingle();
   if (!before) return { status: 404, json: { error: "ไม่พบออเดอร์" } };
   const b = before as { id: string; shop_id: string; order_no: string; status: string; payment_status: string; note: string | null; tracking_no: string | null; tracking_carrier: string | null };
+
+  // 🔁 เส้นทางสถานะ (lib/website-order-status) — กันข้ามขั้น/ย้อนผิด · เลือกสถานะเดิมซ้ำ = ไม่ต้องเปลี่ยน
+  if (patch.status !== undefined) {
+    if (patch.status === b.status || (body.softShip && b.status === "completed")) delete patch.status;
+    else {
+      const err = moveError("status", b.status, String(patch.status), orderStatusLabel);
+      if (err) return { status: 400, json: { error: err } };
+    }
+  }
+  if (patch.payment_status !== undefined) {
+    if (patch.payment_status === b.payment_status) delete patch.payment_status;
+    else {
+      const err = moveError("payment", b.payment_status, String(patch.payment_status), paymentStatusLabel);
+      if (err) return { status: 400, json: { error: err } };
+    }
+  }
+  if (!Object.keys(patch).length) return { status: 200, json: { ok: true, unchanged: true } };
 
   const { error } = await sb.from("store_orders").update(patch).eq("id", b.id);
   if (error) return { status: 500, json: { error: "บันทึกไม่สำเร็จ" } };
@@ -248,7 +267,7 @@ async function bulkApply(user: Actor, raw: { orderIds?: unknown; status?: unknow
   if (Array.isArray(raw.tracking)) {
     for (const t of (raw.tracking as { orderId?: unknown; trackingNo?: unknown; carrier?: unknown }[]).slice(0, 200)) {
       if (typeof t?.orderId !== "string" || !cleanTrackingNo(t.trackingNo)) continue;
-      const r = await applyOne(sb, user, { orderId: t.orderId, trackingNo: String(t.trackingNo), trackingCarrier: String(t.carrier ?? ""), ...(raw.markShipped === true ? { status: "shipped" } : {}) });
+      const r = await applyOne(sb, user, { orderId: t.orderId, trackingNo: String(t.trackingNo), trackingCarrier: String(t.carrier ?? ""), ...(raw.markShipped === true ? { status: "shipped", softShip: true } : {}) });
       results.push({ orderId: t.orderId, ok: r.status === 200, error: r.status === 200 ? undefined : String(r.json.error ?? "") });
     }
   } else if (typeof raw.status === "string" && Array.isArray(raw.orderIds)) {

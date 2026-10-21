@@ -9,6 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { overLimit } from "@/lib/rate-limit";
 import { normalizeRestockInput } from "@/lib/website-restock";
 import { customerLang } from "@/lib/customer-messages";
 
@@ -36,6 +37,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch {
     return json({ ok: false, error: "ข้อมูลไม่ถูกต้อง" }, 400);
   }
+  // 🔒 กันยิงรัว (lib/rate-limit · audit 2026-10-21)
+  const limited = await overLimit(request, [{ name: "restock:ip", limit: 10, windowSec: 3600 }], body.lang);
+  if (limited) return json({ ok: false, error: limited }, 429);
   const slug = String(body.shop ?? "").trim();
   const productId = String(body.productId ?? "").trim();
   if (!slug) return json({ ok: false, error: "ต้องระบุ shop" }, 400);

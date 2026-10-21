@@ -35,6 +35,36 @@ describe("sanitizeCustomHtml", () => {
     expect(out).toContain("<p>x</p>");
   });
 
+  it("🔒 แท็กซ้อนหลอก (ตัดแท็กปลอมแล้วกลายเป็นแท็กอันตราย) ไม่หลุด — audit 2026-10-21", () => {
+    for (const payload of [
+      `<<x>img src=x onerror=alert(1)>`,
+      `<scr<script>x</script>ipt>alert(1)</scr<script>x</script>ipt>`,
+      `<<p>script>alert(1)<</p>/script>`,
+      `<a href="/x">ok</a><<b>img onerror=alert(1) src=/a.png>`,
+      `<!-<!---->-><img src=/a.png onerror=alert(1)>`,
+      `<style onload=alert(1)>.a{}`,
+    ]) {
+      const out = sanitizeCustomHtml(payload);
+      expect(out, payload).not.toMatch(/<script/i);
+      expect(out, payload).not.toMatch(/<[^>]*\son[a-z]+\s*=/i);
+    }
+  });
+
+  it("🔒 CSS ปิดแท็ก style หลอก (</sty</stylele>) ไม่หลุดออกจาก <style>", () => {
+    const out = sanitizeCustomHtml(`<style>.a{color:red}</sty</stylele><img src=/a.png onerror=alert(1)></style>`);
+    expect(out).not.toMatch(/onerror/i);
+  });
+
+  it("ล้างซ้ำได้ผลเดิม (เนื้อหาปกติไม่เพี้ยน) · rel ไม่งอกซ้ำ", () => {
+    const html = `<section class="hero"><h1 style="color:#c08b9c">ร้าน</h1><a href="https://x.com" target="_blank" rel="nofollow">ลิงก์</a><img src="/a.png" alt="รูป" /><br/><video controls src="https://v.mp4"></video><svg viewBox="0 0 10 10"><path d="M0 0L10 10"/></svg><style>.hero h1{font-size:2rem}</style></section>`;
+    const once = sanitizeCustomHtml(html);
+    expect(sanitizeCustomHtml(once)).toBe(once);
+    expect(once.match(/rel=/g)?.length).toBe(1);
+    expect(once).toContain('rel="noopener noreferrer"');
+    expect(once).toContain('<h1 style="color:#c08b9c">ร้าน</h1>');
+    expect(once).not.toContain("&lt;");
+  });
+
   it("ว่าง/ยาวเกิน จัดการได้", () => {
     expect(sanitizeCustomHtml("")).toBe("");
     expect(sanitizeCustomHtml("<p>" + "ก".repeat(100), 50).length).toBeLessThanOrEqual(60);

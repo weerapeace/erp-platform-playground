@@ -11,6 +11,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { overLimit } from "@/lib/rate-limit";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { submitSlip } from "@/lib/website-payments-server";
 
@@ -32,6 +33,9 @@ export async function OPTIONS(): Promise<NextResponse> {
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // 🔒 กันยิงรัว (lib/rate-limit · audit 2026-10-21)
+  const limited = await overLimit(request, [{ name: "slip:ip", limit: 10, windowSec: 600 }]);
+  if (limited) return json({ ok: false, error: limited, errorEn: "Too many requests. Please wait a moment and try again." }, 429);
   let form: FormData;
   try {
     form = await request.formData();

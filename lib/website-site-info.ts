@@ -45,7 +45,7 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "site_description", label: "คำอธิบายร้าน (SEO)", hint: "2-3 ประโยค โชว์ใต้ชื่อเว็บใน Google และท้ายเว็บ", group: "shop", type: "textarea", isPublic: true, i18n: true },
   { key: "footer_note", label: "ข้อความท้ายเว็บ", hint: "เช่น เลขทะเบียนพาณิชย์ หรือ 'จัดส่งทั่วไทย'", group: "shop", type: "text", isPublic: true, i18n: true },
   // ─── ปิดเว็บชั่วคราว (ปุ่มลัดอยู่หัวหน้า /website/<slug> · components/website-open-toggle.tsx) ───
-  { key: "site_closed", label: "ปิดเว็บชั่วคราว (ลูกค้าเห็นหน้า 'เร็ว ๆ นี้')", hint: "ทุกโดเมนของร้านนี้ · พรีวิวใน ERP ยังเห็นเว็บเต็ม · ระบบรับออเดอร์ยังทำงาน", group: "shop", type: "bool", isPublic: true },
+  { key: "site_closed", label: "ปิดเว็บชั่วคราว (ลูกค้าเห็นหน้า 'เร็ว ๆ นี้')", hint: "ทุกโดเมนของร้านนี้ · พรีวิวใน ERP ยังเห็นเว็บเต็ม · ระหว่างปิด เว็บไม่รับคำสั่งซื้อ", group: "shop", type: "bool", isPublic: true },
   { key: "closed_title", label: "หัวข้อหน้ารอเปิด", hint: "เว้นว่าง = 'เร็ว ๆ นี้'", group: "shop", type: "text", isPublic: true, placeholder: "เร็ว ๆ นี้", i18n: true },
   { key: "closed_message", label: "ข้อความหน้ารอเปิด", hint: "เว้นว่าง = '<ชื่อร้าน> กำลังเตรียมเว็บใหม่ให้พร้อม…' · ช่องทางติดต่อที่กรอกไว้จะโชว์ใต้ข้อความ", group: "shop", type: "textarea", isPublic: true, i18n: true },
   // ─── ฟีเจอร์ทดลอง: เปิดให้ร้านนี้เห็น Section ทดลองในคลังของตัวจัดหน้า (SectionMeta.beta ใน lib/website-schema.ts) ───

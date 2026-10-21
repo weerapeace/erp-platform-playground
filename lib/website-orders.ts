@@ -362,12 +362,16 @@ export type CreateOrderResult =
  * opts.customerId = สมาชิกที่ล็อกอิน (มาจากเว็บร้านฝั่งเซิร์ฟเวอร์ผ่านด่านกุญแจภายในเท่านั้น — ห้ามรับจากเบราว์เซอร์ตรง ๆ)
  * opts.redeemPoints = ⭐ แต้มที่สมาชิกขอใช้ลดราคา (สมาชิกเท่านั้น · ตรวจ + ตัดแต้มแบบล็อกแถวที่นี่ · lib/member-points)
  */
-export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unknown, opts: { customerId?: string | null; redeemPoints?: number } = {}): Promise<CreateOrderResult> {
+export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unknown, opts: { customerId?: string | null; redeemPoints?: number; allowClosed?: boolean } = {}): Promise<CreateOrderResult> {
+  // 🔒 ร้านปิดเว็บอยู่ = ไม่รับออเดอร์ (ทั้งลูกค้าทั่วไปและสมาชิก — ทางเดียวที่สร้างออเดอร์) · เช็กก่อนตรวจข้อมูล
+  //    เดิมปิดเว็บแล้วยังรับออเดอร์ (ใครก็เติม ?preview=1 สั่งได้) — audit 2026-10-21 · allowClosed = ทดลองสั่งผ่านลิงก์พรีวิวที่มีรหัส
+  const info = await readSiteInfo(sb, shop.id);
+  if (info.site_closed && !opts.allowClosed) return { ok: false, error: "ร้านยังไม่เปิดรับคำสั่งซื้อทางเว็บ กรุณาลองใหม่เมื่อร้านเปิด", status: 403 };
+
   const v = validateOrderInput(raw);
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const input = v.input;
 
-  const info = await readSiteInfo(sb, shop.id);
   if (input.paymentMethod === "cod" && !info.pay_cod) return { ok: false, error: "ร้านนี้ไม่รับเก็บเงินปลายทาง", status: 400 };
   if (input.paymentMethod === "promptpay" && !info.pay_promptpay) return { ok: false, error: "ร้านนี้ไม่รับโอนพร้อมเพย์", status: 400 };
 

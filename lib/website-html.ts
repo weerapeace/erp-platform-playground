@@ -42,7 +42,9 @@ function cleanStyleAttr(v: string): string {
 }
 
 export function cleanCss(css: string): string {
-  let s = css.replace(/<\/style/gi, "");
+  // ตัด "</style" ซ้ำจนหมด — ตัดรอบเดียวถูกหลอกได้ ("</sty</stylele" → "</style")
+  let s = css;
+  for (let prev = ""; prev !== s; ) { prev = s; s = s.replace(/<\/style/gi, ""); }
   if (BAD_CSS.test(s)) {
     // ตัดบรรทัดที่มีของอันตรายทิ้ง แทนที่จะทิ้งทั้งก้อน (AI ชอบใส่ @import ฟอนต์มาบรรทัดแรก)
     s = s
@@ -55,6 +57,7 @@ export function cleanCss(css: string): string {
 
 function cleanAttrs(raw: string, tag: string): string {
   const out: string[] = [];
+  let blank = false;
   const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw))) {
@@ -72,17 +75,33 @@ function cleanAttrs(raw: string, tag: string): string {
       val = cleanStyleAttr(val);
       if (!val) continue;
     }
-    if (lower === "target" && val === "_blank") out.push('rel="noopener noreferrer"');
+    if (lower === "target" && val === "_blank") blank = true;
     const safe = val.replace(/"/g, "&quot;");
     out.push(m[2] === undefined && m[3] === undefined && m[4] === undefined && tag !== "video" ? name : `${name}="${safe}"`);
   }
-  return out.length ? " " + out.join(" ") : "";
+  // target=_blank → rel="noopener noreferrer" ตัวเดียวท้ายสุด (ล้างซ้ำกี่รอบก็ได้ผลเดิม ไม่งอก rel ซ้ำ)
+  const attrs = blank ? [...out.filter((a) => !/^rel(=|$)/i.test(a)), 'rel="noopener noreferrer"'] : out;
+  return attrs.length ? " " + attrs.join(" ") : "";
 }
 
-/** ล้าง HTML ที่วางมา — คืน HTML ที่เหลือเฉพาะของที่ยอมให้แสดง */
+/**
+ * ล้าง HTML ที่วางมา — คืน HTML ที่เหลือเฉพาะของที่ยอมให้แสดง
+ * 🔒 ล้างวนจนผลไม่เปลี่ยน (audit 2026-10-21): ล้างรอบเดียวถูกหลอกได้ — ตัดแท็กปลอมทิ้งแล้วชิ้นที่เหลือประกอบเป็นแท็กอันตรายใหม่
+ *    เช่น `<<x>img src=x onerror=…>` · ยังเปลี่ยนไม่หยุดใน 5 รอบ = จงใจซ้อนหลายชั้น → แสดงเป็นข้อความธรรมดา
+ */
 export function sanitizeCustomHtml(input: unknown, max = 40000): string {
   let s = String(input ?? "").slice(0, max);
   if (!s.trim()) return "";
+  for (let i = 0; i < 5; i++) {
+    const next = sanitizeOnce(s);
+    if (next === s) return s.trim();
+    s = next;
+  }
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+}
+
+function sanitizeOnce(input: string): string {
+  let s = input;
 
   // ถอดคอมเมนต์ + แท็กอันตรายทั้งก้อน
   s = s.replace(/<!--[\s\S]*?-->/g, "");
@@ -98,14 +117,15 @@ export function sanitizeCustomHtml(input: unknown, max = 40000): string {
   s = s.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>/g, (whole, slash: string, name: string, attrs: string) => {
     const tag = name;
     const lower = tag.toLowerCase();
-    if (lower === "style") return whole; // ล้างไปแล้วด้านบน
+    // เนื้อใน <style> ล้างไปแล้วด้านบน · ตัวแท็กเองห้ามมี attribute (เช่น <style onload=…> ที่ไม่มีแท็กปิด)
+    if (lower === "style") return slash ? "</style>" : "<style>";
     if (!ALLOWED_TAGS.has(tag) && !ALLOWED_TAGS.has(lower)) return "";
     if (slash) return `</${tag}>`;
     const selfClose = /\/\s*$/.test(attrs);
     return `<${tag}${cleanAttrs(attrs.replace(/\/\s*$/, ""), lower)}${selfClose ? " /" : ""}>`;
   });
 
-  return s.trim();
+  return s;
 }
 
 /**

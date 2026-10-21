@@ -16,8 +16,11 @@ export async function purgeStorefrontCache(sb: Admin, shopId: string): Promise<b
     const raw = (dom as { domain: string } | null)?.domain ?? null;
     if (!raw) return false;
     const base = raw.startsWith("http") ? raw : `https://${raw}`;
+    // 🔒 แนบกุญแจภายใน (ถ้าตั้งไว้) — เว็บร้านที่ตั้ง STOREFRONT_INTERNAL_KEY จะยอมล้างแคชเฉพาะคำสั่งจาก ERP
+    const key = process.env.STOREFRONT_INTERNAL_KEY?.trim();
     const res = await fetch(`${base.replace(/\/$/, "")}/api/revalidate?shop=${encodeURIComponent(slug)}`, {
       method: "POST",
+      headers: key ? { "x-storefront-key": key } : undefined,
       signal: AbortSignal.timeout(5000),
     });
     return res.ok;

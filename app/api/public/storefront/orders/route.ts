@@ -13,6 +13,7 @@
  */
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { overLimit } from "@/lib/rate-limit";
 import { createStorefrontOrder, findStorefrontOrder } from "@/lib/website-orders";
 import { notifyOrderCustomer } from "@/lib/order-notify";
 import { customerLang } from "@/lib/customer-messages";
@@ -49,6 +50,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch {
     return json({ ok: false, error: "ข้อมูลไม่ถูกต้อง" }, 400);
   }
+  // 🔒 กันยิงรัว (lib/rate-limit · audit 2026-10-21) — ต่อ IP 10 ครั้ง/10 นาที + ต่อเบอร์ 5 ครั้ง/10 นาที
+  const phoneKey = String((body.customer as { phone?: unknown } | undefined)?.phone ?? "").replace(/\D/g, "");
+  const limited = await overLimit(
+    request,
+    [
+      { name: "orders:ip", limit: 10, windowSec: 600 },
+      { name: "orders:phone", limit: 5, windowSec: 600, key: phoneKey },
+    ],
+    String(body.lang ?? ""),
+  );
+  if (limited) return json({ ok: false, error: limited }, 429);
 
   const slug = String(body.shop ?? new URL(request.url).searchParams.get("shop") ?? "").trim();
   if (!slug) return json({ ok: false, error: "ต้องระบุ shop" }, 400);
@@ -65,6 +77,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  // 🔒 กันไล่เดาเลขออเดอร์ (lib/rate-limit · audit 2026-10-21)
+  const limited = await overLimit(request, [{ name: "order-lookup:ip", limit: 30, windowSec: 600 }]);
+  if (limited) return json({ error: limited }, 429);
   const url = new URL(request.url);
   const slug = (url.searchParams.get("shop") ?? "").trim();
   const no = (url.searchParams.get("no") ?? "").trim();

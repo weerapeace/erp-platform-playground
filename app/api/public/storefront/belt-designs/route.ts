@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { overLimit } from "@/lib/rate-limit";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { buildBeltBuilderPayload, ENGRAVING_FONTS, ENGRAVING_POSITIONS } from "@/lib/belt-builder-public";
 import { GENDERS, pickSizeRule, strapLengthCm, totalPrice, type Gender } from "@/lib/belt-builder";
@@ -43,6 +44,9 @@ async function loadShop(slug: string) {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // 🔒 กันยิงรัว (lib/rate-limit · audit 2026-10-21)
+  const limited = await overLimit(request, [{ name: "belt-design:ip", limit: 20, windowSec: 3600 }]);
+  if (limited) return json({ ok: false, error: limited }, 429);
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; } catch { return json({ ok: false, error: "ข้อมูลไม่ถูกต้อง" }, 400); }
   const slug = String(body.shop ?? new URL(request.url).searchParams.get("shop") ?? "").trim();
