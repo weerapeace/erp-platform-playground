@@ -419,3 +419,25 @@ describe("🗂 ตารางสินค้า › แท็บตามรุ
     expect(show("tabBody", { layout: "carousel", layoutMobile: "same" })).toBe(false);
   });
 });
+
+describe("🗂 แท็บรุ่น รอบ 2 — รูปบนแท็บ · แถบแท็บ · การ์ดต่อแถวมือถือ", () => {
+  const roar = { id: "p-roar2", type: "products", source: "skus", skus: ["ROAR01:sku-0cfd0cfd"], layout: "tabs", tabBy: "parent" };
+  it("ค่าเริ่ม = หน้าตาเดิม (วงกลม · ขนาดอัตโนมัติ · แถบเลื่อน · ทุกแท็บ · มือถืออัตโนมัติ)", () => {
+    const [n] = normalizeBlocks([roar]) as unknown as Record<string, unknown>[];
+    expect([n.tabThumbShape, n.tabThumbSize, n.tabThumbSizeM, n.tabNav, n.tabMax, n.tabColsM]).toEqual(["circle", 0, 0, "scroll", 0, "auto"]);
+    expect(n.tabThumbs).toEqual([]);
+  });
+  it("ตั้งค่าได้ + ค่าเกินถูกตัด", () => {
+    const [n] = normalizeBlocks([{ ...roar, tabThumbs: ["ROAR01:sku-ac866485", "ROAR02:sku-3f45d491"], tabThumbShape: "rounded", tabThumbSize: 500, tabThumbSizeM: 40, tabNav: "arrows", tabMax: 4, tabColsM: "2" }]) as unknown as Record<string, unknown>[];
+    expect(n.tabThumbs).toEqual(["ROAR01:sku-ac866485", "ROAR02:sku-3f45d491"]);
+    expect([n.tabThumbShape, n.tabThumbSize, n.tabThumbSizeM, n.tabNav, n.tabMax, n.tabColsM]).toEqual(["rounded", 120, 40, "arrows", 4, "2"]);
+  });
+  it("ช่องรูปโชว์เฉพาะแท็บที่มีรูป · ช่องต่อท้ายเต็มแถว (ไม่ถูกบีบ)", () => {
+    const fields = SECTION_SCHEMAS.products.fields;
+    const fd = (key: string) => fields.find((f) => f.key === key)!;
+    expect(matchShowIf(fd("tabThumbs"), { layout: "tabs", tabBy: "parent", tabStyle: "img" })).toBe(true);
+    expect(matchShowIf(fd("tabThumbs"), { layout: "tabs", tabBy: "parent", tabStyle: "txt" })).toBe(false);
+    expect(matchShowIf(fd("tabNav"), { layout: "tabs", tabBy: "cat" })).toBe(true);
+    expect(fd("tabRest").wide).toBe(true);
+  });
+});

@@ -324,6 +324,8 @@ const PRODUCT_LAYOUTS: FieldOption[] = [
 
 /** รูปแบบ "แท็บ" ใช้บนคอมหรือมือถือ (ช่องตั้งค่าแท็บโชว์เมื่อแบบใดแบบหนึ่งเป็นแท็บ) */
 const TABS_LAYOUT: ShowIf = { key: "layout", eq: "tabs", orKey: "layoutMobile" };
+/** แท็บรุ่นที่มีรูป (รูป+ชื่อ / รูปอย่างเดียว) → ช่องตั้งรูปบนแท็บ */
+const TAB_PIC: ShowIf[] = [TABS_LAYOUT, { key: "tabBy", eq: "parent" }, { key: "tabStyle", eq: ["both", "img"] }];
 
 /** 🛍 ลุคบุ๊กกดซื้อได้ — เว็บร้านวาดที่ src/components/home/LookbookBody.tsx */
 const LOOKBOOK_LAYOUTS: FieldOption[] = [
@@ -2668,7 +2670,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { key: "autoplay", eq: true },
         ],
       }),
-      f("columns", "คอลัมน์ (ตารางบนคอม)", "number", { group: "layout", default: 4, min: 2, numMax: 5, showIf: { key: "layout", eq: ["grid", "rank", "tabs"] } }),
+      f("columns", "คอลัมน์ (ตารางบนคอม)", "number", { group: "layout", default: 4, min: 2, numMax: 5, hint: "แบบแท็บ: = การ์ดต่อแถวบนคอม ทั้งตารางและเลื่อนข้าง", showIf: { key: "layout", eq: ["grid", "rank", "tabs"] } }),
       f("side", "ตัวเด่น / แบนเนอร์ อยู่ด้าน", "select", {
         group: "layout",
         default: "left",
@@ -2728,13 +2730,34 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         hint: "ชื่อบนแท็บตัดคำที่ทุกแท็บมีเหมือนกันออกเอง (เช่น ชื่อคอลเลกชัน)",
         showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }],
       }),
+      f("tabThumbs", "รูปบนแท็บ (เลือก SKU ต่อรุ่น)", "skus", {
+        group: "layout",
+        default: [],
+        max: 12,
+        wide: true,
+        hint: "แท็บใช้รูปของสีที่เลือก · รุ่นที่ไม่ได้เลือก = รูปปก Parent · เลือกได้รุ่นละ 1 SKU (ซ้ำ = ใช้ตัวแรก)",
+        showIf: TAB_PIC,
+      }),
+      f("tabThumbShape", "ทรงรูปบนแท็บ", "select", {
+        group: "layout",
+        default: "circle",
+        options: [
+          { v: "circle", l: "วงกลม (เดิม)" },
+          { v: "rounded", l: "สี่เหลี่ยมมุมมน" },
+          { v: "square", l: "สี่เหลี่ยม" },
+        ],
+        showIf: TAB_PIC,
+      }),
+      f("tabThumbSize", "ขนาดรูปบนแท็บ (คอม · px)", "range", { group: "layout", default: 0, min: 0, numMax: 120, step: 2, hint: "0 = อัตโนมัติ (รูป+ชื่อ 30 · รูปอย่างเดียว 52)", showIf: TAB_PIC }),
+      f("tabThumbSizeM", "ขนาดรูปบนแท็บ (มือถือ · px)", "range", { group: "layout", default: 0, min: 0, numMax: 120, step: 2, hint: "0 = 80% ของขนาดบนคอม", showIf: TAB_PIC }),
       f("tabRest", "ต่อท้ายด้วย SKU รุ่นอื่น", "toggle", {
         group: "layout",
         default: false,
         hint: "กดแท็บรุ่นแล้ว โชว์ SKU ของรุ่นนั้นก่อน ตามด้วย SKU อื่นใน Section นี้",
+        wide: true,
         showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }],
       }),
-      f("tabRestSep", "คั่นด้วยคำว่า \"รุ่นอื่น\"", "toggle", { group: "layout", default: true, showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }, { key: "tabRest", eq: true }] }),
+      f("tabRestSep", "คั่นด้วยคำว่า \"รุ่นอื่น\"", "toggle", { group: "layout", default: true, wide: true, showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }, { key: "tabRest", eq: true }] }),
       f("tabAll", "มีแท็บ \"ทั้งหมด\" เป็นแท็บแรก", "toggle", { group: "layout", default: true, hint: "ใช้สินค้าตาม \"ดึงสินค้าจาก\"", showIf: TABS_LAYOUT }),
       f("tabBody", "ใต้แท็บโชว์แบบ", "select", {
         group: "layout",
@@ -2743,8 +2766,31 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "grid", l: "ตาราง (แบบเดิม)" },
           { v: "carousel", l: "เลื่อนข้าง" },
         ],
+        hint: "การ์ดต่อแถวบนคอม = ช่อง \"คอลัมน์\" (ใช้ทั้งตารางและเลื่อนข้าง)",
         showIf: TABS_LAYOUT,
       }),
+      f("tabColsM", "การ์ดต่อแถวบนมือถือ", "select", {
+        group: "layout",
+        default: "auto",
+        options: [
+          { v: "auto", l: "อัตโนมัติ (แบบเดิม)" },
+          { v: "1", l: "1 ใบ" },
+          { v: "2", l: "2 ใบ" },
+          { v: "3", l: "3 ใบ" },
+        ],
+        hint: "เลื่อนข้าง = เห็นเต็ม N ใบ + ขอบใบถัดไป",
+        showIf: TABS_LAYOUT,
+      }),
+      f("tabNav", "แถบแท็บ", "select", {
+        group: "layout",
+        default: "scroll",
+        options: [
+          { v: "scroll", l: "เลื่อนด้วยนิ้ว/เมาส์ (แบบเดิม)" },
+          { v: "arrows", l: "มีปุ่มลูกศร ◀ ▶ (โผล่เมื่อแท็บล้นจอ)" },
+        ],
+        showIf: TABS_LAYOUT,
+      }),
+      f("tabMax", "จำนวนแท็บที่โชว์", "number", { group: "layout", default: 0, min: 0, numMax: 30, hint: "0 = ทุกแท็บ · ตั้งไว้ = ที่เกินรวมเป็นปุ่ม \"+N\" กดแล้วกางออก (นับรวมแท็บทั้งหมด)", showIf: TABS_LAYOUT }),
       f("bannerImage", "รูปแบนเนอร์", "image", { group: "layout", default: null, hint: "แนะนำแนวตั้ง 4:5 · ว่าง = ใช้รูปสินค้าตัวแรก", showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),
       f("bannerEyebrow", "คำโปรยบนแบนเนอร์", "text", { group: "layout", default: "คอลเลกชันใหม่", max: 60, showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),
       f("bannerTitle", "หัวข้อบนแบนเนอร์", "text", { group: "layout", default: "", max: 80, showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),

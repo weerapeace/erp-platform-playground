@@ -309,6 +309,19 @@ export interface ProductsBlock extends BlockBase {
   tabRestSep?: boolean;
   /** ใต้แท็บ: ตาราง (เดิม) / เลื่อนข้าง */
   tabBody?: "grid" | "carousel";
+  /** รูปบนแท็บรุ่น: SKU ต่อรุ่น "CODE:sku-xxxxxxxx" (ไม่เลือก = รูปปก Parent) */
+  tabThumbs?: string[];
+  tabThumbShape?: "circle" | "rounded" | "square";
+  /** px · 0 = อัตโนมัติ (รูป+ชื่อ 30 · รูปอย่างเดียว 52) */
+  tabThumbSize?: number;
+  /** px · 0 = 80% ของขนาดบนคอม */
+  tabThumbSizeM?: number;
+  /** การ์ดต่อแถวบนมือถือใต้แท็บ */
+  tabColsM?: "auto" | "1" | "2" | "3";
+  /** แถบแท็บ: เลื่อน (เดิม) / มีลูกศร ◀ ▶ */
+  tabNav?: "scroll" | "arrows";
+  /** จำนวนแท็บที่โชว์ (0 = ทั้งหมด · ที่เกิน = ปุ่ม +N) */
+  tabMax?: number;
   /** แบนเนอร์ + สินค้า */
   bannerImage?: string | null;
   bannerEyebrow?: string;
