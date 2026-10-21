@@ -136,9 +136,9 @@ export function MemberPointsModal({ member, onClose, onChanged }: { member: { id
   );
 }
 
-type TierDraft = { key: string; name: string; minSpend: string; earnMultiplier: string; color: string };
-const toDraft = (t: MemberTier): TierDraft => ({ key: t.key, name: t.name, minSpend: String(t.minSpend), earnMultiplier: String(t.earnMultiplier), color: t.color });
-const fromDraft = (d: TierDraft) => ({ key: d.key || undefined, name: d.name, minSpend: Number(d.minSpend.replace(/,/g, "")), earnMultiplier: Number(d.earnMultiplier), color: d.color });
+type TierDraft = { key: string; name: string; minSpend: string; earnMultiplier: string; color: string; discountPct: string; freeShipping: boolean };
+const toDraft = (t: MemberTier): TierDraft => ({ key: t.key, name: t.name, minSpend: String(t.minSpend), earnMultiplier: String(t.earnMultiplier), color: t.color, discountPct: t.discountPct ? String(t.discountPct) : "", freeShipping: t.freeShipping === true });
+const fromDraft = (d: TierDraft) => ({ key: d.key || undefined, name: d.name, minSpend: Number(d.minSpend.replace(/,/g, "")), earnMultiplier: Number(d.earnMultiplier), color: d.color, discountPct: d.discountPct.trim() === "" ? 0 : Number(d.discountPct), freeShipping: d.freeShipping });
 
 export function MemberTiersModal({ open, shopSlug, onClose, onSaved }: { open: boolean; shopSlug: string; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
@@ -216,31 +216,36 @@ export function MemberTiersModal({ open, shopSlug, onClose, onSaved }: { open: b
             </div>
           )}
           {rows.length > 0 && (
-            <div className="grid grid-cols-[2.5rem_1fr_9rem_5.5rem_2rem] gap-2 items-center text-[11px] text-slate-500">
+            <div className="grid grid-cols-[2.5rem_minmax(7rem,1fr)_8rem_4.5rem_4.5rem_3.5rem_2rem] gap-2 items-center text-[11px] text-slate-500">
               <span>สี</span>
               <span>ชื่อระดับ</span>
               <span className="text-right">ยอดซื้อ 12 เดือน ≥ (฿)</span>
               <span className="text-right">ได้แต้ม ×</span>
+              <span className="text-right" title="ลด % ทุกออเดอร์ (จากยอดหลังโปร ก่อนคูปอง)">🎁 ลด %</span>
+              <span className="text-center">ส่งฟรี</span>
               <span />
             </div>
           )}
           {rows.map((t, i) => (
-            <div key={i} className="grid grid-cols-[2.5rem_1fr_9rem_5.5rem_2rem] gap-2 items-center" data-tier-row>
+            <div key={i} className="grid grid-cols-[2.5rem_minmax(7rem,1fr)_8rem_4.5rem_4.5rem_3.5rem_2rem] gap-2 items-center" data-tier-row>
               <ColorInput value={t.color} onChange={(c) => set(i, { color: c })} allowText={false} />
               <input aria-label="ชื่อระดับ" value={t.name} onChange={(e) => set(i, { name: e.target.value })} maxLength={30} placeholder="ชื่อระดับ เช่น Gold" className="h-9 px-3 rounded-lg border border-slate-200 text-sm" />
               <MoneyInput value={t.minSpend} onChange={(v) => set(i, { minSpend: v })} placeholder="0" title="ยอดซื้อ 12 เดือนขั้นต่ำ (บาท)" className="h-9 w-full px-2 rounded-lg border border-slate-200 text-sm text-right" />
               <input aria-label="ตัวคูณแต้ม" type="number" step="0.1" min={1} max={10} value={t.earnMultiplier} onChange={(e) => set(i, { earnMultiplier: e.target.value })} className="h-9 w-full px-2 rounded-lg border border-slate-200 text-sm text-right" />
+              <input aria-label="ส่วนลดสมาชิก %" type="number" step="1" min={0} max={50} value={t.discountPct} placeholder="0" onChange={(e) => set(i, { discountPct: e.target.value })} className="h-9 w-full px-2 rounded-lg border border-slate-200 text-sm text-right" />
+              <label className="flex justify-center"><input aria-label="ส่งฟรี" type="checkbox" checked={t.freeShipping} onChange={(e) => set(i, { freeShipping: e.target.checked })} className="w-4 h-4 accent-amber-500" /></label>
               <button type="button" aria-label={`ลบระดับ ${t.name}`} onClick={() => setRows((r) => (r ? r.filter((_, j) => j !== i) : r))} className="h-8 w-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50">
                 ✕
               </button>
             </div>
           ))}
           {rows.length > 0 && rows.length < 10 && (
-            <button type="button" onClick={() => setRows((r) => [...(r ?? []), { key: "", name: "", minSpend: "", earnMultiplier: "1", color: "#9CA3AF" }])} className="h-8 px-3 rounded-lg border border-dashed border-slate-300 text-sm text-slate-600">
+            <button type="button" onClick={() => setRows((r) => [...(r ?? []), { key: "", name: "", minSpend: "", earnMultiplier: "1", color: "#9CA3AF", discountPct: "", freeShipping: false }])} className="h-8 px-3 rounded-lg border border-dashed border-slate-300 text-sm text-slate-600">
               ＋ เพิ่มระดับ
             </button>
           )}
           <p className="text-[11px] text-slate-400">ควรมีระดับที่ยอด ฿0 (ระดับเริ่มต้น) · เปลี่ยนระดับแล้วมีผลกับแต้มของออเดอร์ที่สำเร็จหลังจากนี้ (แต้มที่ได้ไปแล้วไม่เปลี่ยน)</p>
+          <p className="text-[11px] text-slate-400">🎁 สิทธิ์ (ลด % / ส่งฟรี) ใช้กับออเดอร์ใหม่ของสมาชิกที่ล็อกอินสั่ง ขณะเปิดระบบแต้ม · ลดจากยอดหลังโปรโมชัน ก่อนคูปอง · ใบออเดอร์มีบรรทัด "สิทธิ์สมาชิก …"</p>
         </div>
       )}
     </ERPModal>

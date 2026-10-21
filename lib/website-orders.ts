@@ -32,8 +32,8 @@ import { calcCardFee, calcGiftFee, orderPrefixFor, readSiteInfo, type SiteInfo }
 import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
-import { pointsConfigFrom, validateRedeem } from "@/lib/member-points";
-import { pointsBalance, redeemForOrder } from "@/lib/member-points-db";
+import { pointsConfigFrom, tierPerkDiscount, validateRedeem } from "@/lib/member-points";
+import { memberTierNow, pointsBalance, redeemForOrder } from "@/lib/member-points-db";
 import { normalizeOrderCard, readOrderCard, type OrderGiftCard } from "@/lib/website-gift-cards";
 import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { writeAudit } from "@/lib/audit";
@@ -547,6 +547,11 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   subtotal = Math.round(subtotal * 100) / 100;
   // 🏷 ⚡ ลดต่อชิ้นก่อน แล้วโปรตะกร้าที่ลดได้มากสุด 1 ตัว (เข็มขัดสั่งทำไม่ร่วมโปร)
   const promo = evaluatePromotions(promos, promoLines);
+  // 🎁 สิทธิ์ตามระดับสมาชิก (สมาชิก + ร้านเปิดแต้ม): ลด % จากยอดหลังโปร (ก่อนคูปอง) + ส่งฟรี — สูตรเดียวกับเว็บร้าน (CheckoutClient)
+  //    บันทึกเป็นบรรทัดหนึ่งใน promos (id ขึ้นต้น member: · kind เป็นช่องบังคับ ใช้ "tier") → ใบออเดอร์/รายงานเห็นเหมือนโปรอื่น
+  const memberTier = opts.customerId && pointsConfigFrom(info).enabled ? await memberTierNow(sb, shop.id, opts.customerId) : null;
+  const tierDiscount = tierPerkDiscount(Math.max(0, subtotal - promo.total), memberTier);
+  const appliedPromos = tierDiscount > 0 && memberTier ? [...promo.applied, { id: `member:${memberTier.key}`, name: `สิทธิ์สมาชิก ${memberTier.name} −${memberTier.discountPct}%`, kind: "tier" as const, amount: tierDiscount }] : promo.applied;
   // 🚚 วิธีจัดส่ง + ค่าส่ง: คิดใหม่ฝั่งเซิร์ฟเวอร์จากที่ร้านตั้ง (lib/website-shipping) — ไม่เชื่อยอดจากหน้าเว็บ
   //    ร้านที่ยังไม่ตั้งวิธีส่ง = วิธีเดียวจากค่าส่งเหมาเดิม → ยอดเท่าเดิมทุกบาท
   const shipCfg = await readShipping(sb, shop.id, info);
@@ -560,7 +565,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const quote = quoteMethod(method, { subtotal, qty: totalQty, postal, cod }, shipCfg);
   if (quote.reason === "area") return { ok: false, error: `${method.name} ส่งไม่ถึงรหัสไปรษณีย์ ${postal} — เลือกวิธีส่งอื่น`, status: 400 };
   if (quote.reason === "cod") return { ok: false, error: `${method.name} เก็บเงินปลายทางไม่ได้ — เลือกโอนพร้อมเพย์ หรือวิธีส่งอื่น`, status: 400 };
-  const shippingFee = quote.fee;
+  const shippingFee = memberTier?.freeShipping ? 0 : quote.fee;
   const codFee = quote.codFee;
   // 🎀 ห่อของขวัญ: ร้านปิดบริการไปแล้วระหว่างลูกค้ากรอก = บอกให้เอาออก (ไม่เงียบห่อไม่ได้) · ข้อความ/ซ่อนราคา รับเฉพาะที่ร้านเปิดให้เลือก
   if (input.gift?.wrap && !info.gift_enabled) return { ok: false, error: "ร้านปิดบริการห่อของขวัญแล้ว — เอาตัวเลือกห่อของขวัญออกแล้วสั่งอีกครั้ง", status: 409 };
@@ -589,13 +594,13 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       const names = promo.applied.filter((a) => promos.find((p) => p.id === a.id)?.rule.noCoupon).map((a) => a.name).join(", ");
       return { ok: false, error: `โค้ดส่วนลด ${input.couponCode}: ใช้คู่กับโปรโมชัน “${names}” ไม่ได้ — เอาโค้ดออกแล้วสั่งต่อได้ (ได้ส่วนลดโปรแทน)`, status: 400 };
     }
-    const cr = await checkCoupon(sb, shop.id, input.couponCode, Math.max(0, subtotal - promo.total), input.customer.phone, opts.customerId ?? null);
+    const cr = await checkCoupon(sb, shop.id, input.couponCode, Math.max(0, subtotal - promo.total - tierDiscount), input.customer.phone, opts.customerId ?? null);
     if (!cr.ok) return { ok: false, error: `โค้ดส่วนลด ${input.couponCode}: ${cr.error}`, status: 400 };
     couponDiscount = cr.discount;
     coupon = cr.coupon ?? null;
   }
   // ส่วนลดรวม = โปรโมชัน + คูปอง (รายงาน/แต้มอ่านช่องนี้ช่องเดียว) · แยกรายการโปรเก็บใน promos
-  const discount = Math.round((promo.total + couponDiscount) * 100) / 100;
+  const discount = Math.round((promo.total + tierDiscount + couponDiscount) * 100) / 100;
   // ⭐ ใช้แต้มลดราคา (สมาชิกเท่านั้น · หลังคูปอง) — ตรวจกับยอดคงเหลือตอนนี้ แล้วตัดจริงแบบล็อกแถวหลังบันทึกออเดอร์
   let pointsUsed = 0;
   let pointsDiscount = 0;
@@ -643,7 +648,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         cod_fee: codFee,
         discount,
         coupon_code: coupon?.code ?? null,
-        promos: promo.applied.length ? promo.applied : null,
+        promos: appliedPromos.length ? appliedPromos : null,
         deposit_amount: depositAmount > 0 ? depositAmount : null,
         points_used: pointsUsed,
         points_discount: pointsDiscount,
@@ -731,7 +736,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         codFee,
         discount,
         couponCode: coupon?.code ?? null,
-        promos: promo.applied.map((a) => ({ name: a.name, amount: a.amount })),
+        promos: appliedPromos.map((a) => ({ name: a.name, amount: a.amount })),
         depositAmount: depositAmount > 0 ? depositAmount : undefined,
         amountDue: depositAmount > 0 ? depositAmount : grandTotal,
         pointsUsed,

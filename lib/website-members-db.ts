@@ -127,3 +127,18 @@ export async function memberOrderRows<T extends { id: string; customer_id: strin
   }
   return rows.sort((a, b) => String((b as unknown as { created_at: string }).created_at).localeCompare(String((a as unknown as { created_at: string }).created_at))).slice(0, limit);
 }
+
+/** 🎯 วันสั่งล่าสุดของสมาชิก (ไม่นับยกเลิก) — แบ่งกลุ่ม "ห่างหาย" (lib/website-member-segments) · ดึงทีละ 1,000 แถว */
+export async function lastOrderDates(sb: Admin, customerIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < customerIds.length; i += 200) {
+    const ids = customerIds.slice(i, i + 200);
+    for (let from = 0; from < 20000; from += 1000) {
+      const { data } = await sb.from("store_orders").select("customer_id, created_at").in("customer_id", ids).neq("status", "cancelled").order("created_at", { ascending: false }).range(from, from + 999);
+      const rows = (data ?? []) as { customer_id: string; created_at: string }[];
+      for (const r of rows) if (!out.has(r.customer_id)) out.set(r.customer_id, r.created_at);
+      if (rows.length < 1000) break;
+    }
+  }
+  return out;
+}

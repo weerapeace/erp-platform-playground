@@ -8,6 +8,7 @@
  * ยังไม่ได้ตั้งค่าการเข้าสู่ระบบที่เว็บร้าน = ยังไม่มีใครสมัครได้ (บอกวิธีเปิดในกล่องว่าง)
  * ⭐ แต้ม/ระดับ: คอลัมน์แต้ม (กด = ประวัติ + ปรับแต้ม) · ปุ่ม "ระดับสมาชิก" มุมขวาบน — components/website-member-points
  * 👤 กดแถว = ประวัติลูกค้าหน้าเดียว (components/website-customer-profile)
+ * 🎯 ปุ่มกลุ่มลูกค้า (รับข่าวสาร/ซื้อซ้ำ/ยังไม่ซื้อ/ห่างหาย/ระดับ) + ส่งออก CSV เฉพาะคนที่ยินยอม — lib/website-member-segments
  */
 import { useCallback, useEffect, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
@@ -18,6 +19,7 @@ import { PROVIDER_LABEL, type MemberProvider } from "@/lib/website-members";
 import { MemberPointsModal, MemberTiersModal } from "@/components/website-member-points";
 import { WebsiteCustomerProfile, type CustomerRef } from "@/components/website-customer-profile";
 import type { MemberTier } from "@/lib/member-points";
+import { MEMBER_SEGMENTS, inSegment } from "@/lib/website-member-segments";
 
 type Member = {
   id: string;
@@ -35,6 +37,7 @@ type Member = {
   orderTotal: number;
   points: number;
   spend12m: number;
+  lastOrderAt: string | null;
   tier: { key: string; name: string; color: string } | null;
 };
 
@@ -52,6 +55,8 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
   const [pointsOf, setPointsOf] = useState<Member | null>(null);
   const [tierEdit, setTierEdit] = useState(false);
   const [profile, setProfile] = useState<CustomerRef | null>(null);
+  const [seg, setSeg] = useState("all");
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/members?shop=${encodeURIComponent(shopSlug)}`)
@@ -89,22 +94,69 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
     }
   };
 
+  // 🎯 ส่งออกกลุ่มที่เลือก — เซิร์ฟเวอร์ตัดคนที่ไม่ยินยอมรับข่าวสารออกเสมอ + บันทึก audit
+  const exportCsv = async (list: Member[]) => {
+    setExporting(true);
+    try {
+      const r = await apiFetch("/api/website/members/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shop: shopSlug, ids: list.map((m) => m.id), segment: seg }) });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        toast.error(j.error ?? "ส่งออกไม่สำเร็จ");
+        return;
+      }
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `members-${shopSlug}-${seg.replace(/[^a-z0-9-]/gi, "-")}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast.success("ส่งออกแล้ว (เฉพาะคนที่ยินยอมรับข่าวสาร)");
+    } catch {
+      toast.error("เชื่อมต่อไม่ได้");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (rows === null) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  const segOpts = [...MEMBER_SEGMENTS.map((x) => ({ key: x.key as string, label: x.label, hint: x.hint })), ...tiers.map((t) => ({ key: `tier:${t.key}`, label: `⭐ ${t.name}`, hint: `ระดับ ${t.name}` }))];
+  const shown = rows.filter((m) => inSegment(m, seg));
+  const optInShown = shown.filter((m) => m.marketingOptIn && m.status === "active").length;
   // แสดงคอลัมน์แต้ม/ระดับเมื่อร้านเปิดแต้ม หรือเคยมีแต้ม/ตั้งระดับไว้ (ปิดทีหลังแต้มเดิมยังอยู่)
   const showPoints = pointsOn || tiers.length > 0 || rows.some((r) => r.points !== 0);
 
   return (
     <div className="space-y-3">
+      {rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" data-member-segments>
+          {segOpts.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              title={o.hint}
+              onClick={() => setSeg(o.key)}
+              className={`h-8 px-3 rounded-full text-xs border ${seg === o.key ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+            >
+              {o.label} <span className="opacity-70">{rows.filter((m) => inSegment(m, o.key)).length}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <MiniTable<Member>
         title="👥 สมาชิกเว็บร้าน"
-        rows={rows}
+        rows={shown}
         rowKey={(r) => r.id}
         onRowClick={(r) => setProfile({ customerId: r.id, name: r.name })}
         countUnit="คน"
         actions={
+          <span className="flex flex-wrap gap-1.5">
+          <button type="button" disabled={exporting || !optInShown} onClick={() => void exportCsv(shown)} className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs disabled:opacity-40" title="ส่งออกเฉพาะคนที่ยินยอมรับข่าวสาร (PDPA)" data-export-members>
+            {exporting ? "กำลังส่งออก…" : `⬇️ ส่งออก CSV (${optInShown} คนที่รับข่าวสาร)`}
+          </button>
           <button type="button" onClick={() => setTierEdit(true)} className="h-8 px-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs" data-open-tiers>
             ⭐ ระดับสมาชิก{tiers.length ? ` (${tiers.length})` : ""}
           </button>
+          </span>
         }
         searchText={(r) => `${r.name} ${r.email ?? ""} ${r.phone}`}
         searchPlaceholder="ค้นหาชื่อ / อีเมล / เบอร์"

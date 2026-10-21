@@ -1,7 +1,7 @@
 /**
  * ⭐ ระดับสมาชิกของร้าน (ERP แท็บสมาชิก) — /api/website/members/tiers
  * GET ?shop=<slug> → { tiers, suggested }
- * PUT { shop, tiers: [{ key?, name, minSpend, earnMultiplier, color }] } → แทนทั้งชุด (ตรวจด้วย sanitizeTiers) + audit
+ * PUT { shop, tiers: [{ key?, name, minSpend, earnMultiplier, color, discountPct?, freeShipping? }] } → แทนทั้งชุด (ตรวจด้วย sanitizeTiers) + audit
  *   ไม่มีระดับเลย = ไม่โชว์ระดับ (ทุกคนได้แต้มตัวคูณ 1)
  * ด่าน: guardApi (พนักงาน)
  */
@@ -44,7 +44,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const keys = v.tiers.map((t) => t.key);
   if (v.tiers.length) {
     const { error } = await sb.from("store_member_tiers").upsert(
-      v.tiers.map((t, i) => ({ shop_id: shop.id, key: t.key, name: t.name, min_spend: t.minSpend, earn_multiplier: t.earnMultiplier, color: t.color, sort: i, updated_at: now })),
+      v.tiers.map((t, i) => ({ shop_id: shop.id, key: t.key, name: t.name, min_spend: t.minSpend, earn_multiplier: t.earnMultiplier, color: t.color, discount_pct: t.discountPct ?? 0, free_shipping: t.freeShipping === true, sort: i, updated_at: now })),
       { onConflict: "shop_id,key" }
     );
     if (error) return NextResponse.json({ error: "บันทึกระดับไม่สำเร็จ" }, { status: 500 });

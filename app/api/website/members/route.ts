@@ -14,6 +14,7 @@ import type { MemberProvider } from "@/lib/website-members";
 import { memberStats, readTiers } from "@/lib/member-points-db";
 import { tierFor } from "@/lib/member-points";
 import { readSiteInfo } from "@/lib/website-site-info";
+import { lastOrderDates } from "@/lib/website-members-db";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: "โหลดสรุปสมาชิกไม่สำเร็จ" }, { status: 500 });
   }
-  const [{ data: idents }, tiers, info] = await Promise.all([
+  const [{ data: idents }, tiers, info, lastOrder] = await Promise.all([
     ids.length ? sb.from("store_customer_identities").select("customer_id, provider").in("customer_id", ids) : Promise.resolve({ data: [] }),
     readTiers(sb, shopId),
     readSiteInfo(sb, shopId),
+    lastOrderDates(sb, ids).catch(() => new Map<string, string>()),
   ]);
   const prov = new Map<string, Set<MemberProvider>>();
   for (const i of (idents ?? []) as { customer_id: string; provider: MemberProvider }[]) prov.set(i.customer_id, (prov.get(i.customer_id) ?? new Set()).add(i.provider));
@@ -68,6 +70,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         orderTotal: stats.get(r.id)?.orderTotal ?? 0,
         points: stats.get(r.id)?.balance ?? 0,
         spend12m: stats.get(r.id)?.spend12m ?? 0,
+        lastOrderAt: lastOrder.get(r.id) ?? null,
         tier: (() => {
           const t = tierFor(stats.get(r.id)?.spend12m ?? 0, tiers).tier;
           return t ? { key: t.key, name: t.name, color: t.color } : null;

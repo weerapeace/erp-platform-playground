@@ -26,6 +26,10 @@ export interface MemberTier {
   minSpend: number;
   earnMultiplier: number;
   color: string;
+  /** 🎁 สิทธิ์: ลด % ทุกออเดอร์ (0–50 · คิดจากยอดหลังโปร ก่อนคูปอง) — ไม่ตั้ง = 0 */
+  discountPct?: number;
+  /** 🎁 สิทธิ์: ส่งฟรี (ค่าเก็บปลายทางยังคิด) */
+  freeShipping?: boolean;
 }
 
 export const DEFAULT_POINTS: Omit<PointsConfig, "enabled"> = { earnUnit: 100, pointValue: 1, maxRedeemPct: 50, minRedeem: 10 };
@@ -34,6 +38,16 @@ export const SUGGESTED_TIERS: MemberTier[] = [
   { key: "silver", name: "Silver", minSpend: 5000, earnMultiplier: 1.5, color: "#94A3B8" },
   { key: "gold", name: "Gold", minSpend: 15000, earnMultiplier: 2, color: "#D4A017" },
 ];
+
+/**
+ * 🎁 ส่วนลดตามระดับสมาชิก (บาท) จากยอดหลังโปรโมชัน — สูตรเดียวกับเว็บร้าน (CheckoutClient tierBaht)
+ * ไม่มีระดับ / ระดับไม่มีส่วนลด = 0
+ */
+export function tierPerkDiscount(base: number, tier: Pick<MemberTier, "discountPct"> | null | undefined): number {
+  const pct = Number(tier?.discountPct) || 0;
+  if (pct <= 0 || !(base > 0)) return 0;
+  return Math.round(base * Math.min(50, pct)) / 100;
+}
 
 /** ค่าจากที่ตั้ง (SiteInfo) → config ที่ปลอดภัย (ค่าเพี้ยน = ค่าแนะนำ) */
 export function pointsConfigFrom(info: { points_enabled?: boolean; points_earn_unit?: number; points_value?: number; points_max_redeem_pct?: number; points_min_redeem?: number }): PointsConfig {
@@ -124,7 +138,9 @@ export function sanitizeTiers(raw: unknown): { ok: true; tiers: MemberTier[] } |
     if (!(minSpend >= 0)) return { ok: false, error: `${name}: ยอดซื้อขั้นต่ำต้องเป็นตัวเลข ≥ 0` };
     if (!(mult >= 1 && mult <= 10)) return { ok: false, error: `${name}: ตัวคูณแต้มต้องอยู่ระหว่าง 1–10` };
     const color = /^#[0-9a-fA-F]{6}$/.test(String(r?.color ?? "")) ? String(r.color) : "#9CA3AF";
-    out.push({ key, name, minSpend, earnMultiplier: mult, color });
+    const discountPct = r?.discountPct === undefined || r?.discountPct === "" ? 0 : Number(r.discountPct);
+    if (!(discountPct >= 0 && discountPct <= 50)) return { ok: false, error: `${name}: ส่วนลดสมาชิกต้องอยู่ระหว่าง 0–50%` };
+    out.push({ key, name, minSpend, earnMultiplier: mult, color, discountPct: Math.round(discountPct * 100) / 100, freeShipping: r?.freeShipping === true });
   }
   return { ok: true, tiers: out.sort((a, b) => a.minSpend - b.minSpend) };
 }

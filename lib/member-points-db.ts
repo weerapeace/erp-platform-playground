@@ -22,14 +22,22 @@ export const LEDGER_KIND_LABEL: Record<LedgerKind, string> = {
 };
 
 export async function readTiers(sb: Admin, shopId: string): Promise<MemberTier[]> {
-  const { data } = await sb.from("store_member_tiers").select("key, name, min_spend, earn_multiplier, color").eq("shop_id", shopId).order("min_spend");
-  return ((data ?? []) as { key: string; name: string; min_spend: number | string; earn_multiplier: number | string; color: string }[]).map((t) => ({
+  const { data } = await sb.from("store_member_tiers").select("key, name, min_spend, earn_multiplier, color, discount_pct, free_shipping").eq("shop_id", shopId).order("min_spend");
+  return ((data ?? []) as { key: string; name: string; min_spend: number | string; earn_multiplier: number | string; color: string; discount_pct?: number | string | null; free_shipping?: boolean | null }[]).map((t) => ({
     key: t.key,
     name: t.name,
     minSpend: n(t.min_spend),
     earnMultiplier: n(t.earn_multiplier) || 1,
     color: t.color,
+    discountPct: n(t.discount_pct),
+    freeShipping: t.free_shipping === true,
   }));
+}
+
+/** 🎁 ระดับปัจจุบันของสมาชิก (ยอดซื้อ 12 เดือน) — ใช้คิดสิทธิ์ตอนสั่งซื้อ · ไม่มีระดับ = null */
+export async function memberTierNow(sb: Admin, shopId: string, customerId: string): Promise<MemberTier | null> {
+  const [tiers, stats] = await Promise.all([readTiers(sb, shopId), memberStats(sb, [customerId])]);
+  return tierFor(stats.get(customerId)?.spend12m ?? 0, tiers).tier;
 }
 
 export interface MemberStats {
