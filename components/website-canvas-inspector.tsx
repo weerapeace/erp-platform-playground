@@ -14,6 +14,8 @@ import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasShape } from "@/components/website-canvas-shapes";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
+import { WebsiteProductPicker } from "@/components/website-product-picker";
+import { VideoThumb } from "@/components/video-thumb";
 import {
   CANVAS_BUTTON_VARIANTS,
   CANVAS_FRAME_PRESETS,
@@ -127,6 +129,7 @@ export function CanvasInspector({
   mobile,
   onReplay,
   onPickFrame,
+  onReplaceVideo,
 }: {
   block: Block;
   item: ChildBlock | null;
@@ -152,6 +155,8 @@ export function CanvasInspector({
   onAlign: (to: CanvasAlign) => void;
   /** เข้าโหมดครอปบนผืน (ลากรูปในกรอบ) */
   onCrop: () => void;
+  /** 🎬 เปลี่ยนคลิปของชิ้นวิดีโอ (ป๊อปคลังวิดีโอ) */
+  onReplaceVideo?: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const spec = SECTION_SCHEMAS.canvas.children!;
@@ -430,7 +435,7 @@ export function CanvasInspector({
         </div>
       </div>
 
-      {(kind === "image" || kind === "shape") && (
+      {(kind === "image" || kind === "shape" || kind === "video") && (
         <div>
           <H>พลิก</H>
           <div className="flex gap-1.5">
@@ -459,6 +464,62 @@ export function CanvasInspector({
             <button onClick={() => onPatchItem({ cropZoom: 100, cropX: 50, cropY: 50 })} className="text-[11px] text-slate-500 hover:text-blue-600">↺ รีเซ็ตครอป</button>
           )}
           <p className="text-[10px] text-slate-400 mt-1">ตัดขอบรูป = ลากจุดจับที่มุม/ขอบของกรอบ · ซูม/เลื่อน = ตรงนี้ หรือกด &quot;ลากบนผืน&quot;</p>
+        </div>
+      )}
+
+      {kind === "video" && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            {item.videoKey ? (
+              <VideoThumb url={`/api/r2-image?key=${encodeURIComponent(str("videoKey"))}`} className="w-24 h-16 rounded-lg border border-slate-200" />
+            ) : (
+              <span className="w-24 h-16 rounded-lg border border-dashed border-slate-300 text-[10px] text-slate-400 flex items-center justify-center">ยังไม่มีคลิป</span>
+            )}
+            <button onClick={() => onReplaceVideo?.()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:border-blue-500">🎬 {item.videoKey ? "เปลี่ยนคลิป" : "เลือกคลิป"}</button>
+          </div>
+          <p className="text-[10px] text-slate-400">เล่นเองแบบเงียบ วนซ้ำ (เบราว์เซอร์บังคับให้เงียบถ้าเล่นเอง) · รูปปกก่อนเล่น + ตำแหน่งเป๊ะ ๆ = &quot;ตั้งค่าละเอียด&quot; ด้านล่าง</p>
+          <div>
+            <H>ทรงคลิป</H>
+            <div className="flex flex-wrap gap-1">
+              {(
+                [
+                  ["rect", "สี่เหลี่ยม"],
+                  ["rounded", "มุมมน"],
+                  ["ellipse", "วงรี"],
+                  ["arch", "โค้งประตู"],
+                ] as const
+              ).map(([v, l]) => (
+                <button key={v} className={seg(str("frame") === v)} onClick={() => onPatchItem({ frame: v })}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-1">
+            <button className={seg(str("fit") !== "contain")} onClick={() => onPatchItem({ fit: "cover" })}>เต็มกรอบ</button>
+            <button className={seg(str("fit") === "contain")} onClick={() => onPatchItem({ fit: "contain" })}>ทั้งคลิป (ไม่ตัด)</button>
+          </div>
+        </div>
+      )}
+
+      {(kind === "image" || kind === "video") && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="flex-1 text-[11px] font-semibold text-emerald-800">🛍 สินค้าใน{kind === "video" ? "คลิป" : "รูป"}นี้</span>
+            {Array.isArray(item.products) && item.products.length > 0 && <span className="text-[10px] text-emerald-700">{item.products.length} ตัว</span>}
+          </div>
+          <WebsiteProductPicker
+            shopSlug={ctx.shopSlug}
+            value={Array.isArray(item.products) ? (item.products as string[]) : []}
+            max={6}
+            onChange={(codes) => onPatchItem({ products: codes })}
+          />
+          <p className="text-[10px] text-slate-500">ลูกค้ากด{kind === "video" ? "คลิป" : "รูป"}นี้ = การ์ดสินค้าเด้งขึ้นมา (หลายตัวเลื่อนดู ‹ 1/3 ›) · มีสินค้าแล้ว &quot;กดแล้วไปที่&quot; จะไม่ใช้</p>
+          {Array.isArray(item.products) && item.products.length > 0 && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input type="checkbox" className="accent-emerald-600" checked={item.shopIcon !== false} onChange={(e) => onPatchItem({ shopIcon: e.target.checked })} /> ไอคอน 🛍 มุม{kind === "video" ? "คลิป" : "รูป"} (บอกลูกค้าว่ากดซื้อได้)
+            </label>
+          )}
         </div>
       )}
 

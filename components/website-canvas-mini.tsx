@@ -101,6 +101,19 @@ export function CanvasMiniPreview({
             </div>
           );
         }
+        // 🎬 วิดีโอ: ภาพย่อ = รูปปก (ถ้ามี) หรือกล่องเข้ม + ▶ (ไม่โหลดคลิปในการ์ดแม่แบบ)
+        if (kind === "video") {
+          const poster = typeof it.posterKey === "string" && it.posterKey ? it.posterKey : null;
+          const frame = String(it.frame ?? "rect");
+          const radius = frame === "ellipse" ? "50%" : frame === "arch" ? "9999px 9999px 0 0" : frame === "rounded" ? Math.min(num(it.w, 100), num(it.h, 100)) * 0.08 * k : 0;
+          return (
+            <div key={String(it.id ?? i)} style={{ ...box, borderRadius: radius, overflow: "hidden", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {poster && <img src={`/api/r2-image?key=${encodeURIComponent(poster)}&w=300`} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+              <span style={{ position: "relative", color: "#fff", fontSize: Math.max(8, 28 * k) }}>▶</span>
+            </div>
+          );
+        }
         if (kind === "shape") {
           const color = colorOf(theme, it.color, it.colorHex);
           return (

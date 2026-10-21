@@ -30,6 +30,7 @@ import {
   CANVAS_FRAMES,
   CANVAS_HOVERS,
   CANVAS_KINDS,
+  CANVAS_SHOP_MAX,
   CANVAS_LOOPS,
   CANVAS_SHAPES,
   CANVAS_SPEEDS,
@@ -537,6 +538,9 @@ function canvasItemFields(): FieldDef[] {
   const isButton = { key: "kind", eq: "button" };
   const isImage = { key: "kind", eq: "image" };
   const isShape = { key: "kind", eq: "shape" };
+  const isVideo = { key: "kind", eq: "video" };
+  /** รูป/วิดีโอ = ทรงกรอบ/การจัดในกรอบ/สินค้าในรูป ใช้ร่วมกัน */
+  const isMedia = { key: "kind", eq: ["image", "video"] };
   const typed = { key: "kind", eq: ["text", "button"] };
   const colored = { key: "kind", eq: ["text", "button", "shape"] };
   const framed = [isImage, { key: "border", eq: CANVAS_BORDERS_ON }];
@@ -578,7 +582,10 @@ function canvasItemFields(): FieldDef[] {
     /* รูป */
     image("imageKey", "รูป", { showIf: isImage, hint: "PNG พื้นใสก็ได้ (เช่น สติกเกอร์/โลโก้)" }),
     text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, showIf: isImage, hint: "มีผลกับ SEO" }),
-    f("frame", "ทรงรูป", "select", { group: "media", default: "rect", options: CANVAS_FRAMES, showIf: isImage }),
+    /* 🎬 วิดีโอ (เล่นวนแบบเงียบ · ปกก่อนเล่น) */
+    f("videoKey", "คลิป", "videoFile", { default: null, wide: true, showIf: isVideo, hint: "MP4 / WebM / MOV ถึง 200 MB · เล่นเองแบบเงียบ วนซ้ำ · เลือกจากคลังวิดีโอได้" }),
+    image("posterKey", "รูปปกคลิป (ก่อนเล่น)", { showIf: isVideo, hint: "ว่าง = ภาพแรกของคลิป" }),
+    f("frame", "ทรงรูป", "select", { group: "media", default: "rect", options: CANVAS_FRAMES, showIf: isMedia }),
     image("overlayKey", "กรอบจากรูป (PNG พื้นใส วางทับรูป)", { showIf: isImage, hint: "อัปโหลดกรอบของร้านเองได้ (เช่น กรอบวินเทจจาก Canva) — ว่าง = ไม่มี" }),
     f("overlayInset", "รูปห่างขอบกรอบ (%)", "range", { group: "media", default: 12, min: 0, numMax: 40, showIf: isImage }),
     f("fit", "การจัดรูปในกรอบ", "select", {
@@ -588,7 +595,7 @@ function canvasItemFields(): FieldDef[] {
         { v: "cover", l: "เต็มกรอบ (อาจตัดขอบ)" },
         { v: "contain", l: "ทั้งรูป (ไม่ตัด)" },
       ],
-      showIf: isImage,
+      showIf: isMedia,
     }),
     f("border", "เส้นกรอบรอบรูป", "select", { group: "media", default: "none", options: CANVAS_BORDERS, showIf: isImage }),
     f("borderColor", "สีกรอบ", "select", { group: "media", default: "brand", options: CANVAS_COLORS, showIf: framed }),
@@ -599,14 +606,17 @@ function canvasItemFields(): FieldDef[] {
     f("cropZoom", "ซูมรูปในกรอบ (%)", "range", { group: "media", default: 100, min: 100, numMax: 400, step: 5, showIf: isImage }),
     f("cropX", "จุดที่เห็น แนวนอน (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, showIf: isImage }),
     f("cropY", "จุดที่เห็น แนวตั้ง (%)", "range", { group: "media", default: 50, min: 0, numMax: 100, showIf: isImage }),
-    f("flipH", "พลิกซ้าย-ขวา", "toggle", { group: "media", default: false, showIf: { key: "kind", eq: ["image", "shape"] } }),
-    f("flipV", "พลิกบน-ล่าง", "toggle", { group: "media", default: false, showIf: { key: "kind", eq: ["image", "shape"] } }),
+    f("flipH", "พลิกซ้าย-ขวา", "toggle", { group: "media", default: false, showIf: { key: "kind", eq: ["image", "shape", "video"] } }),
+    f("flipV", "พลิกบน-ล่าง", "toggle", { group: "media", default: false, showIf: { key: "kind", eq: ["image", "shape", "video"] } }),
 
     /* ของตกแต่ง */
     f("shape", "ลาย", "select", { default: "bow", options: CANVAS_SHAPES, showIf: isShape }),
     f("outline", "แบบเส้น (ไม่ทึบ)", "toggle", { default: false, showIf: isShape }),
     f("strokeWidth", "ความหนาเส้น", "number", { default: 2, min: 1, numMax: 24, showIf: isShape }),
 
+    /* 🛍 สินค้าในรูป/คลิป (2026-10-21 · ลุคบุ๊กแบบวางอิสระ) — กดชิ้นบนเว็บ = การ์ดสินค้าเด้ง (ชนะ "กดแล้วไปที่") */
+    f("products", "สินค้าในรูปนี้ (กดรูปแล้วการ์ดสินค้าเด้ง)", "products", { group: "action", max: CANVAS_SHOP_MAX, wide: true, showIf: isMedia, hint: "หลายตัว = การ์ดเลื่อนดูได้ ‹ 1/3 › · มีสินค้า = กดรูปแล้วการ์ดเด้ง (ไม่ไปลิงก์)" }),
+    f("shopIcon", "ไอคอน 🛍 มุมรูป (บอกว่ากดซื้อได้)", "toggle", { group: "action", default: true, showIf: isMedia }),
     /* ลิงก์ (ทุกชนิด) */
     f("href", "กดแล้วไปที่", "target", { group: "action", default: "", wide: true }),
     f("newTab", "เปิดในแท็บใหม่", "toggle", { group: "action", default: false }),
@@ -615,7 +625,7 @@ function canvasItemFields(): FieldDef[] {
     f("x", "ซ้าย (X)", "number", { group: "layout", default: 100, min: -1200, numMax: 2400 }),
     f("y", "บน (Y)", "number", { group: "layout", default: 100, min: -600, numMax: 4800 }),
     f("w", "กว้าง", "number", { group: "layout", default: 400, min: 4, numMax: 2400 }),
-    f("h", "สูง", "number", { group: "layout", default: 80, min: 4, numMax: 4800, showIf: { key: "kind", eq: ["image", "button", "shape"] } }),
+    f("h", "สูง", "number", { group: "layout", default: 80, min: 4, numMax: 4800, showIf: { key: "kind", eq: ["image", "button", "shape", "video"] } }),
     f("rotate", "หมุน (องศา)", "range", { group: "layout", default: 0, min: -180, numMax: 180 }),
     f("opacity", "ความทึบ (%)", "range", { group: "layout", default: 100, min: 5, numMax: 100, step: 5 }),
     f("hideMobile", "ซ่อนบนมือถือ", "toggle", { group: "layout", default: false }),
@@ -627,7 +637,7 @@ function canvasItemFields(): FieldDef[] {
     f("loop", "ขยับตลอดเวลา", "select", { group: "layout", default: "", options: CANVAS_LOOPS }),
     f("loopSpeed", "ความเร็วการขยับ", "select", { group: "layout", default: "normal", options: CANVAS_SPEEDS, showIf: { key: "loop", eq: CANVAS_LOOPS.map((o) => o.v).filter(Boolean) } }),
     f("hover", "ตอนเอาเมาส์ชี้ (คอม)", "select", { group: "layout", default: "", options: CANVAS_HOVERS, hint: "มือถือไม่มีเมาส์ จะไม่เห็นเอฟเฟกต์นี้" }),
-    f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
+    f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape", "video"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
     text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, i18n: false, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
 
     /* มือถือแบบจัดเอง (Section ตั้ง "มือถือ: จัดเอง") — ผืนมือถือกว้าง 400 · กว้าง 0 = ยังไม่ได้จัด (ใช้ค่าย่อจากคอม) */

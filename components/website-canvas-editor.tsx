@@ -18,6 +18,8 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasInspector, type CanvasAlign, type CanvasMultiAction } from "@/components/website-canvas-inspector";
 import { usePreviewFonts, useShopTheme } from "@/components/website-text-pickers";
 import { ImageChooser, DecorLibrary, type PickedImage } from "@/components/website-canvas-media";
+import dynamic from "next/dynamic";
+import type { AssetRow } from "@/app/api/assets/shared";
 import { CanvasTemplates } from "@/components/website-canvas-templates";
 import { useCanvasBridge, reorderLayer, reorderLayerMany, duplicateItems, newGroupId } from "@/components/website-canvas-tools";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
@@ -110,6 +112,8 @@ export function CanvasEditor({
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [panel, setPanel] = useState<Panel>(null);
   const [chooser, setChooser] = useState<null | { mode: "add" | "replace" | "bg"; childId?: string }>(null);
+  // 🎬 เลือกคลิปจากคลังวิดีโอ (อัปโหลดใหม่ได้ในป๊อปเดียวกัน) — เพิ่มชิ้นวิดีโอ / เปลี่ยนคลิปของชิ้นเดิม
+  const [videoPick, setVideoPick] = useState<null | { mode: "add" | "replace"; childId?: string }>(null);
   const [decorOpen, setDecorOpen] = useState(false);
   const [linkFor, setLinkFor] = useState<string | null>(null);
   // สีธีม/ฟอนต์ของร้าน (ของกลาง — ใช้วาดจุดสี/ตัวอย่างฟอนต์ให้ตรงเว็บจริง)
@@ -148,6 +152,7 @@ export function CanvasEditor({
       if (bid !== blockId) return;
       onSelect({ blockId: bid, childId });
       if (action === "replace-image") setChooser({ mode: "replace", childId });
+      else if (action === "replace-video") setVideoPick({ mode: "replace", childId });
       else if (action === "link") setLinkFor(childId);
       else if (action === "pick-frame") setFrameFor(childId);
     },
@@ -283,6 +288,22 @@ export function CanvasEditor({
     });
   };
 
+  const onVideoPicked = async (assets: AssetRow[]) => {
+    const a = assets[0];
+    const pick = videoPick;
+    setVideoPick(null);
+    if (!a?.r2_key || !pick) return;
+    const size = await videoSize(`/api/r2-image?key=${encodeURIComponent(a.r2_key)}`);
+    if (pick.mode === "replace" && pick.childId) {
+      const it = items.find((x) => x.id === pick.childId);
+      const w = Number(it?.w) || 480;
+      patchChild(blockId, pick.childId, { videoKey: a.r2_key, h: Math.max(40, Math.round((w * size.h) / Math.max(1, size.w))) });
+    } else {
+      const { w, h } = fitImageBox(size.w, size.h, 480, 480);
+      addItem("video", { videoKey: a.r2_key, w, h });
+    }
+  };
+
   const onPicked = (img: PickedImage) => {
     if (!chooser) return;
     // รูปพื้นหลังใหม่ = เริ่มที่กลางรูป ไม่ซูม (ตำแหน่งเดิมเป็นของรูปเก่า)
@@ -312,6 +333,8 @@ export function CanvasEditor({
     else if (a === "add-button") setPanel("button");
     else if (a === "add-shape") setDecorOpen(true);
     else if (a === "replace-image" && target.childId) setChooser({ mode: "replace", childId: target.childId });
+    else if (a === "add-video") setVideoPick({ mode: "add" });
+    else if (a === "replace-video" && target.childId) setVideoPick({ mode: "replace", childId: target.childId });
     else if (a === "link" && target.childId) setLinkFor(target.childId);
     else if (a === "templates") setTemplatesOpen(true);
     else if (a === "pick-frame" && target.childId) setFrameFor(target.childId);
@@ -364,6 +387,7 @@ export function CanvasEditor({
             {/* ซ้าย: เพิ่มชิ้น */}
             <div className="relative border-r border-slate-200 bg-white p-1.5 space-y-1">
               {railBtn("🖼️", "รูป", () => setChooser({ mode: "add" }))}
+              {railBtn("🎬", "วิดีโอ", () => setVideoPick({ mode: "add" }))}
               {railBtn("🔤", "ข้อความ", () => setPanel((p) => (p === "text" ? null : "text")), panel === "text")}
               {railBtn("🔘", "ปุ่ม", () => setPanel((p) => (p === "button" ? null : "button")), panel === "button")}
               {railBtn("🎀", "ตกแต่ง", () => setDecorOpen(true))}
@@ -513,6 +537,7 @@ export function CanvasEditor({
                   onPatchItem={(p) => selItem && patchChild(blockId, selItem.id, p)}
                   onPatchBlock={(p) => patchBlock(blockId, p)}
                   onReplaceImage={() => selItem && setChooser({ mode: "replace", childId: selItem.id })}
+                  onReplaceVideo={() => selItem && setVideoPick({ mode: "replace", childId: selItem.id })}
                   onPickBgImage={() => setChooser({ mode: "bg" })}
                   onLayer={(to) => selItem && patchBlock(blockId, { items: reorderLayer(items, selItem.id, to) })}
                   onAlign={alignTo}
@@ -538,6 +563,15 @@ export function CanvasEditor({
         fontNames={fontNames}
         onApply={applyTemplate}
       />
+      {videoPick && (
+        <AssetPicker
+          open
+          onClose={() => setVideoPick(null)}
+          typeFilter="video"
+          title={videoPick.mode === "replace" ? "เปลี่ยนคลิป" : "เพิ่มวิดีโอบนผืน"}
+          onSelect={(assets) => void onVideoPicked(assets)}
+        />
+      )}
       <ImageChooser
         open={!!chooser}
         onClose={() => setChooser(null)}
@@ -587,4 +621,24 @@ export function CanvasEditor({
       </ERPModal>
     </>
   );
+}
+
+const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
+
+/** ขนาดจริงของคลิป (อ่านแค่ส่วนหัวไฟล์) — อ่านไม่ได้/ช้าเกิน 6 วิ = 16:9 */
+function videoSize(url: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    const done = (w: number, h: number) => {
+      clearTimeout(t);
+      v.removeAttribute("src");
+      resolve(w > 0 && h > 0 ? { w, h } : { w: 16, h: 9 });
+    };
+    const t = setTimeout(() => done(0, 0), 6000);
+    v.preload = "metadata";
+    v.muted = true;
+    v.onloadedmetadata = () => done(v.videoWidth, v.videoHeight);
+    v.onerror = () => done(0, 0);
+    v.src = url;
+  });
 }

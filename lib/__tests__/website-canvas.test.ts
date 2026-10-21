@@ -442,3 +442,40 @@ describe("ชุดหน้าตารูปของกลาง (imageLookFi
     }
   });
 });
+
+describe("🛍 ลุคบุ๊กแบบวางอิสระ: วิดีโอ + สินค้าในรูป (2026-10-21)", () => {
+  const norm = (items: Record<string, unknown>[]) =>
+    (normalizeBlocks([{ id: "c1", type: "canvas", items }])[0] as unknown as { items: Record<string, unknown>[] }).items;
+
+  it("ชิ้นวิดีโอ: เก็บคลิป/ปก/ทรง/สินค้า · ชนิดเดิมไม่เปลี่ยน", () => {
+    const [v, img, txt] = norm([
+      { id: "v", kind: "video", videoKey: "storefront-videos/2026-10/a.mp4", posterKey: "a/p.jpg", frame: "rounded", fit: "contain", products: ["ROAR02", "TTM130"], shopIcon: false, w: 300, h: 400 },
+      { id: "i", kind: "image", imageKey: "a/b.jpg", products: ["ROAR01"] },
+      { id: "t", kind: "text", text: "hi" },
+    ]);
+    expect(v).toMatchObject({ kind: "video", videoKey: "storefront-videos/2026-10/a.mp4", posterKey: "a/p.jpg", frame: "rounded", fit: "contain", products: ["ROAR02", "TTM130"], shopIcon: false, h: 400 });
+    expect(img).toMatchObject({ kind: "image", products: ["ROAR01"], shopIcon: true });
+    expect(txt.kind).toBe("text");
+  });
+
+  it("สินค้าในรูป ≤ 6 · ช่องโชว์เฉพาะรูป/วิดีโอ", () => {
+    const [img] = norm([{ id: "i", kind: "image", products: ["A", "B", "C", "D", "E", "F", "G", "H"] }]);
+    expect((img.products as string[]).length).toBeLessThanOrEqual(6);
+    const fields = SECTION_SCHEMAS.canvas.children!.fields;
+    const fd = (k: string) => fields.find((x) => x.key === k) as FieldDef;
+    expect(matchShowIf(fd("products"), { kind: "image" })).toBe(true);
+    expect(matchShowIf(fd("products"), { kind: "video" })).toBe(true);
+    expect(matchShowIf(fd("products"), { kind: "text" })).toBe(false);
+    expect(matchShowIf(fd("videoKey"), { kind: "video" })).toBe(true);
+    expect(matchShowIf(fd("videoKey"), { kind: "image" })).toBe(false);
+    expect(matchShowIf(fd("frame"), { kind: "video" })).toBe(true);
+  });
+
+  it("ค่าเริ่มของชิ้นวิดีโอ · สรุปในต้นไม้ · เตือนเมื่อยังไม่ใส่คลิป · คลิป/ปก นับเป็น 'ถูกใช้'", () => {
+    expect(canvasItemPreset("video")).toMatchObject({ kind: "video", w: 480, h: 270, frame: "rect", fit: "cover" });
+    expect(canvasItemSummary({ kind: "video", videoKey: "a.mp4", products: ["A", "B"] })).toBe("🎬 วิดีโอ · 🛍 2");
+    expect(canvasItemSummary({ kind: "image", imageKey: "a.jpg", alt: "ลุค", products: ["A"] })).toBe("🖼️ ลุค · 🛍 1");
+    expect(validateCanvas({ height: 560, items: [{ kind: "video", x: 10, y: 10, w: 100 }] }, "ผืน").map((x) => x.message).join(" ")).toMatch(/ยังไม่ได้ใส่คลิป/);
+    expect(canvasImageKeys([{ type: "canvas", items: [{ kind: "video", videoKey: "v.mp4", posterKey: "p.jpg" }] }])).toEqual(["v.mp4", "p.jpg"]);
+  });
+});

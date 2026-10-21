@@ -19,16 +19,19 @@ export const CANVAS_WIDTH = 1200;
 /** ความกว้างผืนมือถือแบบจัดเอง (หน่วยของ mx/my/mw/mh/msize) — ⚠️ ตรงกับ CANVAS_MW ของเว็บร้าน */
 export const CANVAS_MOBILE_WIDTH = 400;
 
-export type CanvasKind = "image" | "text" | "button" | "shape";
+export type CanvasKind = "image" | "text" | "button" | "shape" | "video";
 
 export const CANVAS_KINDS: FieldOption[] = [
   { v: "image", l: "🖼️ รูป" },
   { v: "text", l: "🔤 ข้อความ" },
   { v: "button", l: "🔘 ปุ่ม" },
   { v: "shape", l: "🎀 ของตกแต่ง" },
+  { v: "video", l: "🎬 วิดีโอ" },
 ];
 
-export const CANVAS_KIND_ICON: Record<CanvasKind, string> = { image: "🖼️", text: "🔤", button: "🔘", shape: "🎀" };
+export const CANVAS_KIND_ICON: Record<CanvasKind, string> = { image: "🖼️", text: "🔤", button: "🔘", shape: "🎀", video: "🎬" };
+/** 🛍 สินค้าที่ผูกกับรูป/วิดีโอได้สูงสุด (กดชิ้นบนเว็บ = การ์ดสินค้าเด้ง · ‹ 1/3 ›) */
+export const CANVAS_SHOP_MAX = 6;
 
 /** ทรงของรูป — ⚠️ ตรงกับ CANVAS_FRAMES ของเว็บร้าน */
 export const CANVAS_FRAMES: FieldOption[] = [
@@ -223,6 +226,9 @@ export function canvasItemPreset(kind: CanvasKind, n = 0): Record<string, unknow
       return { kind, label: "เลือกดูสินค้า", href: "/shop", x: 100 + off, y: 420 + off, w: 220, h: 54, font: "body", size: 16, weight: "600", variant: "brand" };
     case "shape":
       return { kind, shape: "bow", color: "brand", x: 860 + off, y: 40 + off, w: 96, h: 72, hideMobile: true };
+    case "video":
+      // คลิปเล่นวนแบบเงียบ — ขนาดจริงตั้งตามสัดส่วนคลิปตอนเพิ่ม (website-canvas-editor)
+      return { kind, x: 360 + off, y: 60 + off, w: 480, h: 270, frame: "rect", fit: "cover" };
     default:
       return { kind: "text", text: "หัวข้อของคุณ", font: "display", size: 56, weight: "500", lineHeight: 115, x: 100 + off, y: 120 + off, w: 560, h: 80, color: "ink" };
   }
@@ -441,6 +447,9 @@ export function canvasImageKeys(blocks: unknown): string[] {
       if (it?.kind === "image" && typeof it.imageKey === "string" && it.imageKey) out.add(it.imageKey);
       // กรอบจากรูปที่ร้านอัปโหลด (วางทับรูป)
       if (it?.kind === "image" && typeof it.overlayKey === "string" && it.overlayKey) out.add(it.overlayKey);
+      // 🎬 คลิป + รูปปกของคลิป
+      if (it?.kind === "video" && typeof it.videoKey === "string" && it.videoKey) out.add(it.videoKey);
+      if (it?.kind === "video" && typeof it.posterKey === "string" && it.posterKey) out.add(it.posterKey);
     }
   }
   return [...out];
@@ -455,7 +464,9 @@ export function canvasItemSummary(it: Record<string, unknown>): string {
   const lock = it.locked ? " 🔒" : "";
   if (kind === "text") return `${icon} ${s(it.text).split("\n")[0].slice(0, 40) || "(ข้อความว่าง)"}${lock}`;
   if (kind === "button") return `${icon} ${s(it.label) || "(ปุ่มไม่มีข้อความ)"}${s(it.href) ? ` → ${s(it.href)}` : ""}${lock}`;
-  if (kind === "image") return `${icon} ${s(it.alt) || (it.imageKey ? "รูป" : "(ยังไม่ใส่รูป)")}${lock}`;
+  const shop = Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : "";
+  if (kind === "image") return `${icon} ${s(it.alt) || (it.imageKey ? "รูป" : "(ยังไม่ใส่รูป)")}${shop}${lock}`;
+  if (kind === "video") return `${icon} ${it.videoKey ? "วิดีโอ" : "(ยังไม่ใส่คลิป)"}${shop}${lock}`;
   return `${icon} ${CANVAS_SHAPE_LABEL[s(it.shape)] ?? "ของตกแต่ง"}${lock}`;
 }
 
@@ -470,6 +481,7 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
     const kind = s(it.kind);
     if (kind === "image" && !it.imageKey) out.push({ level: "warning", message: `${name}: ยังไม่ได้ใส่รูป` });
     if (kind === "image" && it.imageKey && !s(it.alt)) out.push({ level: "warning", message: `${name}: รูปยังไม่มีคำบรรยาย (Alt) — มีผลกับ SEO` });
+    if (kind === "video" && !it.videoKey) out.push({ level: "warning", message: `${name}: ยังไม่ได้ใส่คลิป` });
     if (kind === "button" && !s(it.label)) out.push({ level: "error", message: `${name}: ปุ่มยังไม่มีข้อความ` });
     if (kind === "button" && !s(it.href)) out.push({ level: "warning", message: `${name}: ปุ่มยังไม่ได้ตั้ง "กดแล้วไปที่"` });
     if (kind === "text" && !s(it.text)) out.push({ level: "warning", message: `${name}: ข้อความว่าง` });
