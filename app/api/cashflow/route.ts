@@ -130,13 +130,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (incomeBasis === "billing" || incomeBasis === "both") {
     const [bnRes, bnLineRes, soCoRes] = await Promise.all([
       db.from("erp_playground_billing_notes")
-        .select("id, bill_number, status, customer_name, bill_date, due_date, grand_total, amount_due, paid_at")
+        .select("id, bill_number, status, customer_name, bill_date, due_date, grand_total, amount_due, paid_at, company_id")
         .neq("status", "cancelled").is("paid_at", null).lte("bill_date", to).limit(5000),
       db.from("erp_playground_billing_note_lines").select("billing_note_id, so_id").limit(20000),
       db.from("erp_playground_sales_orders").select("id, company_id").not("company_id", "is", null).limit(20000),
     ]);
 
-    // ใบวางบิลยังไม่มีช่องบริษัทของตัวเอง → ดูจากใบขายที่อยู่ข้างใน (ทุกใบเป็นบริษัทเดียวกัน = ของบริษัทนั้น)
+    // บริษัทของใบวางบิล = ช่อง company_id ของใบ (trigger ตั้งตามใบขายข้างในให้) · ใช้ใบขายข้างในเช็กซ้ำว่าไม่ปนกัน
     const soCompany = new Map<string, string>();
     for (const r of soCoRes.data ?? []) soCompany.set(String(r.id), String(r.company_id));
     const bnCompanies = new Map<string, Set<string>>();
@@ -176,7 +176,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           : b.status === "draft" ? "ใบวางบิลยังเป็นร่าง" : undefined,
         href: openLink("/billing-notes", String(b.id)),
         movable: true, docId: String(b.id),
-        companyId: bnCos.length === 1 ? co(bnCos[0]) : null,
+        companyId: bnCos.length > 1 ? null : co(b.company_id) ?? (bnCos.length === 1 ? co(bnCos[0]) : null),
       });
     }
   }
@@ -254,7 +254,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   {
     const poRes = await db
       .from("purchase_orders_v2")
-      .select("id, po_no, seller_name, seller_partner_id, order_date, payment_due_date, currency, grand_total, paid_amount_thb, payment_status")
+      .select("id, po_no, seller_name, seller_partner_id, order_date, payment_due_date, currency, grand_total, paid_amount_thb, payment_status, company_id")
       .eq("is_active", true).neq("payment_status", "paid").limit(5000);
 
     let guessed = 0;
@@ -292,7 +292,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         note: isRmb ? `ยอดจริง ¥${num(p.grand_total).toLocaleString("th-TH")} × เรต ${rmbRate}` : undefined,
         href: openLink("/purchasing/po-list", String(p.id)),
         movable: true, docId: String(p.id),
-        companyId: null,   // ใบซื้อยังไม่มีช่องบริษัท — อยู่กอง "ยังไม่ระบุ" จนกว่าจะเพิ่มช่อง (เฟส 2)
+        companyId: co(p.company_id),
       });
     }
     if (guessed > 0) {
@@ -557,7 +557,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   {
     const cbRes = await db
       .from("china_bills")
-      .select("id, supplier_id, amount_rmb, fee_rmb, rate, amount_thb, bill_date, transfer_date, status, is_shipping")
+      .select("id, supplier_id, amount_rmb, fee_rmb, rate, amount_thb, bill_date, transfer_date, status, is_shipping, company_id")
       .eq("is_active", true).neq("status", "โอนแล้ว").limit(2000);
 
     let noRate = 0;
@@ -583,7 +583,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         note: num(b.amount_thb) > 0 ? undefined : `¥${(num(b.amount_rmb) + num(b.fee_rmb)).toLocaleString("th-TH")} × เรต ${rate}`,
         href: "/app/china-pay",
         movable: true, docId: String(b.id),
-        companyId: null,   // บิลจีนยังไม่มีช่องบริษัท (เฟส 2)
+        companyId: co(b.company_id),
       });
     }
     if (noRate > 0) {

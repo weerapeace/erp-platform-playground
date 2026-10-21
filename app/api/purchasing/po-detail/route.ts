@@ -56,6 +56,8 @@ export type PoDetail = {
   /** ภาษีมูลค่าเพิ่ม */
   vat_rate: number;
   vat_included: boolean;
+  /** ใบซื้อของบริษัทไหน (companies) — ใช้แยกกระแสเงินสดรายบริษัท */
+  company_id: string | null;
   /** ยอดก่อนภาษี / ภาษี — คิดด้วยของกลาง lib/po-total */
   subtotal: number;
   vat_amount: number;
@@ -79,7 +81,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const dailyRateDate = ((rateRes.data as { rate_date?: string } | null)?.rate_date) ?? null;
 
   const { data: po, error } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, fx_rate, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note, vat_rate, vat_included")
+    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, fx_rate, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note, vat_rate, vat_included, company_id")
     .eq("id", id).single();
   if (error || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
 
@@ -178,6 +180,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     status: (p.status as string) ?? null,
     vat_rate: num(p.vat_rate),
     vat_included: !!p.vat_included,
+    company_id: (p.company_id as string) ?? null,
     subtotal: poTotals.subtotal,
     vat_amount: poTotals.vat,
     seller_info: sellerInfo,

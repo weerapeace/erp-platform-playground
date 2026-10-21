@@ -20,6 +20,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { computePoTotals } from "@/lib/po-total";
+import { checkCompanyId } from "@/lib/company-check";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,6 +35,8 @@ type InHeader = {
   currency?: string; vat_rate?: number; vat_included?: boolean;
   /** เรท ฿ ต่อ 1 หยวน ล็อกไว้ที่ใบ (null = ใช้เรทรายวันล่าสุด) */
   fx_rate?: number | null;
+  /** ใบซื้อของบริษัทไหน (ใช้แยกกระแสเงินสดรายบริษัท) */
+  company_id?: string | null;
 };
 type Body = { po_id?: string; header?: InHeader; lines?: InLine[]; line_qty?: { id?: string; qty?: number }[] };
 // สถานะบรรทัดที่ถือว่า "ปิดแล้ว" (สะกดเดียวกับ cancel-line / receivable)
@@ -96,6 +99,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     patch.vat_rate = r;
   }
   if (h.vat_included !== undefined) patch.vat_included = !!h.vat_included;
+  if (h.company_id !== undefined) {
+    const company = await checkCompanyId(admin, h.company_id);
+    if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
+    if (company.companyId) patch.company_id = company.companyId;   // ล้างเป็นว่างไม่ได้ — ใบซื้อต้องมีบริษัทเสมอ
+  }
 
   const currency = String(patch.currency ?? cur.currency ?? "THB");
 

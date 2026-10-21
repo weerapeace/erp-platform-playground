@@ -18,6 +18,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { checkCompanyId } from "@/lib/company-check";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,8 @@ type Body = {
   seller_name?: string; seller_partner_id?: string | null; currency?: string;
   order_date?: string; expected_date?: string | null; note?: string;
   lines?: InLine[]; actor?: string;
+  /** ใบซื้อของบริษัทไหน — ว่าง = บริษัทตั้งต้น (DB เติมให้) */
+  company_id?: string | null;
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -71,6 +74,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (numErr || !poNo) return NextResponse.json({ error: "ออกเลข PO ไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
 
   const grandTotal = lines.reduce((a, l) => a + num(l.qty) * num(l.price), 0);
+  const company = await checkCompanyId(admin, body.company_id);
+  if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
 
   const { data: po, error: poErr } = await admin.from("purchase_orders_v2").insert({
     po_no: poNo,
@@ -83,6 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     grand_total: grandTotal,
     requester: actor,
     note: str(body.note) || null,
+    company_id: company.companyId,
   }).select("id, po_no").single();
   if (poErr || !po) return NextResponse.json({ error: "สร้างใบสั่งซื้อไม่สำเร็จ: " + (poErr?.message ?? "") }, { status: 500 });
 

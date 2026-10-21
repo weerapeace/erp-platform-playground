@@ -14,6 +14,7 @@ import { SupplierWizard } from "@/components/supplier-wizard";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { CompanySelect, useCompanies } from "@/components/company-filter";
 import type { SkuPickerValue } from "@/components/pickers";
 
 type Line = {
@@ -40,6 +41,12 @@ export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onC
   const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [expectedDate, setExpectedDate] = useState("");
   const [note, setNote] = useState("");
+  const companies = useCompanies();
+  const [companyId, setCompanyId] = useState<string | null>(null);
+  // ยังไม่เลือก = บริษัทตั้งต้น (ISG) — ให้เห็นในช่องเลยว่าจะลงบริษัทไหน
+  useEffect(() => {
+    if (!companyId && companies.length) setCompanyId(companies.find((c) => c.isDefault)?.id ?? companies[0].id);
+  }, [companies, companyId]);
   const [lines, setLines] = useState<Line[]>([emptyLine()]);
   const [saving, setSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -107,6 +114,7 @@ export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onC
           order_date: orderDate,
           expected_date: expectedDate || null,
           note: note.trim() || null,
+          company_id: companyId,
           lines: validLines.map((l) => ({
             item_sku_id: l.item_sku_id,
             item_name: l.item_name.trim(),
@@ -125,7 +133,7 @@ export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onC
     } finally {
       setSaving(false);
     }
-  }, [canSave, seller, sellerId, currency, orderDate, expectedDate, note, validLines, toast, onCreated]);
+  }, [canSave, seller, sellerId, currency, orderDate, expectedDate, note, companyId, validLines, toast, onCreated]);
 
   const sym = currency === "RMB" ? "¥" : "฿";
 
@@ -189,6 +197,12 @@ export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onC
               <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น สั่งด่วน / ซัพขอใบ PO"
                 className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
             </div>
+            {companies.length > 1 && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">ใบซื้อของบริษัท</label>
+                <CompanySelect companies={companies} value={companyId} onChange={(id) => id && setCompanyId(id)} className="w-full" />
+              </div>
+            )}
           </div>
 
           {/* รายการสินค้า */}

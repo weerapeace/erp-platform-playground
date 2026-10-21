@@ -28,7 +28,7 @@ import { formatDate } from "@/lib/date";
 import {
   CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MANUAL_CATEGORIES, THB, THBShort, manualScheduleLabel,
   addDaysISO, buildDailySeries, filterEventsByCompany, firstNegativeDay, monthLabelTH, openingForCompany,
-  todayISO, totalsByMonth, unassignedBySource,
+  todayISO, totalsByMonth, unassignedBySource, isCompanyAssignable, COMPANY_ASSIGNABLE,
   type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
 import { COMPANY_ALL, COMPANY_NONE, companyLabel, matchCompany, type CompanyRef } from "@/lib/company-filter";
@@ -36,6 +36,7 @@ import type { CashflowApiData } from "@/app/api/cashflow/route";
 import type { OpeningBalance } from "@/app/api/cashflow/opening-balances/route";
 import type { LoanReconcileRow } from "@/app/api/cashflow/loan-reallocate/route";
 import type { ManualItem } from "@/app/api/cashflow/manual-items/route";
+import type { AssignResult } from "@/app/api/cashflow/assign-company/route";
 
 const ALL_SOURCES = Object.keys(CASHFLOW_SOURCE) as CashflowSource[];
 const RANGES = [
@@ -71,6 +72,7 @@ export default function CashflowPage() {
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showWarnings, setShowWarnings] = useState(true);
+  const [assignMsg, setAssignMsg] = useState<string | null>(null);
 
   useEffect(() => { setPrefs(loadPrefs()); }, []);
   const savePrefs = (next: Prefs) => {
@@ -148,6 +150,44 @@ export default function CashflowPage() {
   const inWindow = useMemo(() => series.days.flatMap((d) => d.events), [series.days]);
   const inBilling = inWindow.filter((e) => e.source === "billing_note").reduce((s, e) => s + e.amount, 0);
   const inSO = inWindow.filter((e) => e.source === "sales_order").reduce((s, e) => s + e.amount, 0);
+
+  /**
+   * ตั้งบริษัทหลายใบพร้อมกัน — ใช้ "แก้หลายรายการ" ของตารางกลาง (มีหน้ายืนยัน + ดูก่อนบันทึกให้แล้ว)
+   * ใบขาย/ใบวางบิล/เงินเดือน/รายการประจำ เปลี่ยนจากที่นี่ไม่ได้ → นับเป็นข้าม และบอกเหตุผล
+   */
+  const bulkAssignCompany = async (edits: { row: Row; changes: Record<string, unknown> }[]) => {
+    setAssignMsg(null);
+    const byCompany = new Map<string, { source: string; docId: string }[]>();
+    let skipped = 0;
+    for (const { row, changes } of edits) {
+      const cid = String(changes.companyId ?? "");
+      if (!cid || cid === row.companyId) continue;
+      if (!isCompanyAssignable(row.source) || !row.docId) { skipped += 1; continue; }
+      byCompany.set(cid, [...(byCompany.get(cid) ?? []), { source: row.source, docId: row.docId }]);
+    }
+    let ok = 0, failed = skipped;
+    for (const [cid, items] of byCompany) {
+      try {
+        const res = await apiFetch("/api/cashflow/assign-company", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items, company_id: cid }),
+        });
+        const j = await res.json();
+        if (j?.error) { failed += items.length; setAssignMsg(`⚠️ ${j.error}`); continue; }
+        const r = j.data as AssignResult;
+        ok += r.updated + r.unchanged;
+        failed += r.failed.length;
+      } catch { failed += items.length; }
+    }
+    setAssignMsg(
+      `✅ ตั้งบริษัทแล้ว ${ok} รายการ` +
+      (skipped ? ` · ข้าม ${skipped} รายการที่ต้องแก้ที่หน้าของมันเอง (ใบขาย / ใบวางบิล / เงินเดือน / รายการประจำ)` : "") +
+      (failed - skipped > 0 ? ` · ไม่สำเร็จ ${failed - skipped} รายการ` : ""),
+    );
+    load();
+    return { success: ok, failed };
+  };
 
   const columns = useMemo<ColumnDef<Row>[]>(() => [
     {
@@ -392,13 +432,22 @@ export default function CashflowPage() {
             {/* ---------- กราฟรายเดือน ---------- */}
             <MonthChart months={months} startBalance={series.startBalance} />
 
+            {assignMsg && (
+              <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-700 flex items-center justify-between gap-3">
+                <span>{assignMsg}</span>
+                <button onClick={() => setAssignMsg(null)} className="text-slate-400 hover:text-slate-600" aria-label="ปิด">✕</button>
+              </div>
+            )}
+
             {/* ---------- ตารางรายการ (ตารางกลาง) ---------- */}
             <DataTable<Row>
               data={rows}
               columns={columns}
               tableId="cashflow-events"
               title="รายการเงินเข้า-เงินออกทั้งหมด"
-              description="เรียงตามวันที่ · คอลัมน์เงินคงเหลือคือยอดสะสมหลังรายการนั้น"
+              description={canManage && companies.length > 0
+                ? `เรียงตามวันที่ · คอลัมน์เงินคงเหลือคือยอดสะสมหลังรายการนั้น · ติ๊กหลายรายการแล้วกด “แก้หลายรายการ” เพื่อตั้งบริษัท (${Object.values(COMPANY_ASSIGNABLE).map((c) => c!.label).join(" / ")})`
+                : "เรียงตามวันที่ · คอลัมน์เงินคงเหลือคือยอดสะสมหลังรายการนั้น"}
               loading={loading}
               emptyMessage="ไม่มีรายการเงินเข้า-ออกในช่วงนี้"
               searchPlaceholder="ค้นหาเลขเอกสาร / ชื่อคู่ค้า…"
@@ -406,6 +455,11 @@ export default function CashflowPage() {
               exportFilename={companyFilter === COMPANY_ALL ? "cashflow" : `cashflow-${companyLabel(companies, companyFilter === COMPANY_NONE ? null : companyFilter)}`}
               exportEntityType="cashflow"
               selectable
+              bulkEditFields={canManage && companies.length > 0
+                ? [{ key: "companyId", label: "บริษัท", type: "select", options: companies.map((c) => ({ value: c.id, label: c.name || c.code })) }]
+                : []}
+              onBulkEdit={canManage && companies.length > 0 ? bulkAssignCompany : undefined}
+              bulkRowLabel={(r) => `${r.ref} · ${r.party}`}
               pageSize={50}
               onRetry={load}
             />

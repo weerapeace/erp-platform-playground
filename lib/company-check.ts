@@ -18,3 +18,21 @@ export async function checkCompanyId(
   if (!data) return { error: "ไม่พบบริษัทนี้ในทะเบียน — อาจถูกลบไปแล้ว ลองโหลดหน้าใหม่" };
   return { companyId: v };
 }
+
+/**
+ * ใบขายที่จะรวมเป็นเอกสารเดียว (ใบวางบิล) ต้องเป็นของบริษัทเดียวกัน — ใบกำกับภาษี/หัวบิลแยกบริษัท รวมกันไม่ได้
+ * คืนข้อความไทยถ้าปนกัน · null = ใช้ได้
+ */
+export async function checkSameCompanySOs(
+  db: ReturnType<typeof supabaseAdmin>,
+  soIds: unknown,
+): Promise<string | null> {
+  const ids = (Array.isArray(soIds) ? soIds : []).map((x) => String(x ?? "")).filter((x) => UUID_RE.test(x));
+  if (ids.length < 2) return null;
+  const { data } = await db.from("erp_playground_sales_orders").select("company_id").in("id", ids);
+  const coIds = [...new Set((data ?? []).map((r) => r.company_id).filter(Boolean).map(String))];
+  if (coIds.length <= 1) return null;
+  const { data: cos } = await db.from("companies").select("name").in("id", coIds);
+  const names = (cos ?? []).map((c) => String(c.name ?? "")).filter(Boolean);
+  return `ใบวางบิลรวมใบขายต่างบริษัทไม่ได้ (${names.join(" / ")}) — แยกเป็นใบวางบิลของแต่ละบริษัท`;
+}

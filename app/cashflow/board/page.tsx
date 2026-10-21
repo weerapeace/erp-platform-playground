@@ -23,7 +23,7 @@ import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { InfoHint } from "@/components/info-hint";
 import { DateInput } from "@/components/date-input";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
-import { CompanyFilterChips, CompanyTag, useCompanyFilter } from "@/components/company-filter";
+import { CompanyFilterChips, CompanySelect, CompanyTag, useCompanyFilter } from "@/components/company-filter";
 import { UnassignedNotice } from "@/components/cashflow/unassigned-notice";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
@@ -31,12 +31,14 @@ import {
   CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MOVABLE_SOURCES, THB,
   addDaysISO, buildDailySeries, endOfMonthISO, filterEventsByCompany, formatDayMonthTH, monthLabelTH,
   openingForCompany, parseISO, summarizeByCompany, summarizeDays, toISO, todayISO, unassignedBySource,
+  companyEditHint, isCompanyAssignable,
   type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
 import { COMPANY_ALL, COMPANY_NONE, companyLabel, type CompanyRef } from "@/lib/company-filter";
 import type { CashflowApiData } from "@/app/api/cashflow/route";
 import type { PlanResult } from "@/app/api/cashflow/plan/route";
 import type { BoardNote } from "@/app/api/cashflow/notes/route";
+import type { AssignResult } from "@/app/api/cashflow/assign-company/route";
 
 const RANGES = [
   { days: 45,  label: "6 สัปดาห์" },
@@ -93,6 +95,8 @@ export default function CashBoardPage() {
   const from = todayISO();
   const to = addDaysISO(from, rangeDays);
 
+  /** true = โหลดใหม่โดยเก็บการ์ดที่ลองลากไว้ (ยังไม่ยืนยัน) — ใช้หลังตั้งบริษัท/แปะโน้ต */
+  const keepPendingRef = useRef(false);
   const load = useCallback(() => {
     setLoading(true); setError(null);
     Promise.all([
@@ -101,7 +105,11 @@ export default function CashBoardPage() {
     ])
       .then(([cf, nt]) => {
         if (cf?.error) setError(cf.error);
-        else { setData(cf.data as CashflowApiData); setPending({}); setSelected(new Set()); }
+        else {
+          setData(cf.data as CashflowApiData);
+          if (!keepPendingRef.current) { setPending({}); setSelected(new Set()); }
+        }
+        keepPendingRef.current = false;
         if (!nt?.error) setNotes((nt.data ?? []) as BoardNote[]);
       })
       .catch(() => setError("โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่"))
@@ -206,9 +214,12 @@ export default function CashBoardPage() {
 
   const notesByDay = useMemo(() => {
     const m = new Map<string, BoardNote[]>();
-    for (const n of notes) m.set(n.note_date, [...(m.get(n.note_date) ?? []), n]);
+    for (const n of notes) {
+      if (n.company_id && companyFilter !== COMPANY_ALL && n.company_id !== companyFilter) continue;
+      m.set(n.note_date, [...(m.get(n.note_date) ?? []), n]);
+    }
     return m;
-  }, [notes]);
+  }, [notes, companyFilter]);
 
   const movedEvents = useMemo(
     () => (data?.events ?? []).filter((e) => pending[e.id] && pending[e.id] !== e.date),
@@ -294,6 +305,27 @@ export default function CashBoardPage() {
     finally { setSaving(false); }
   };
 
+  // ---- ตั้งบริษัทให้การ์ด (เขียนลงเอกสารต้นทางทันที — ไม่ต้องรอยืนยันเหมือนเลื่อนวัน) ----
+  const assignCompany = async (ev: CashflowEvent, companyId: string | null) => {
+    if (!companyId || !ev.docId || companyId === ev.companyId) return;
+    setSaving(true); setError(null); setSaveMsg(null);
+    try {
+      const res = await apiFetch("/api/cashflow/assign-company", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [{ source: ev.source, docId: ev.docId }], company_id: companyId }),
+      });
+      const j = await res.json();
+      if (j?.error) { setError(j.error); return; }
+      const r = j.data as AssignResult;
+      if (r.failed.length) { setError(r.failed[0].reason); return; }
+      setSaveMsg(`ตั้ง ${ev.ref} เป็นของ ${companyLabel(companies, companyId, "full")} แล้ว`);
+      keepPendingRef.current = true;
+      load();
+    } catch { setError("ตั้งบริษัทไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
   // ---- โน้ต ----
   const saveNote = async () => {
     if (!noteEdit) return;
@@ -304,11 +336,15 @@ export default function CashBoardPage() {
       const res = await apiFetch("/api/cashflow/notes", {
         method: noteEdit.id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: noteEdit.id, note_date: noteEdit.note_date, body, color: noteEdit.color ?? "yellow" }),
+        body: JSON.stringify({
+          id: noteEdit.id, note_date: noteEdit.note_date, body, color: noteEdit.color ?? "yellow",
+          company_id: noteEdit.company_id ?? null,
+        }),
       });
       const j = await res.json();
       if (j?.error) { setError(j.error); return; }
       setNoteEdit(null);
+      keepPendingRef.current = true;
       load();
     } catch { setError("บันทึกโน้ตไม่สำเร็จ"); }
     finally { setSaving(false); }
@@ -507,7 +543,11 @@ export default function CashBoardPage() {
               onOver={setOverDay} onDrop={drop} onToggleSelect={toggleSelect} onSelectDay={selectDay}
               onOpenDetail={setDetailId}
               onToggleGroup={(k) => setOpenGroups((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; })}
-              onAddNote={(day) => setNoteEdit({ note_date: day, body: "", color: "yellow" })}
+              onAddNote={(day) => setNoteEdit({
+                note_date: day, body: "", color: "yellow",
+                // แปะตอนดูบริษัทไหน = โน้ตของบริษัทนั้น · ดูทั้งกลุ่ม = โน้ตรวม
+                company_id: companyFilter !== COMPANY_ALL && companyFilter !== COMPANY_NONE ? companyFilter : null,
+              })}
               onEditNote={(n) => setNoteEdit({ ...n })}
             />
           )}
@@ -550,6 +590,9 @@ export default function CashBoardPage() {
         originalDate={detailEvent ? (data?.events.find((e) => e.id === detailEvent.id)?.date ?? null) : null}
         selected={detailEvent ? selected.has(detailEvent.id) : false}
         companies={companies}
+        canManage={canManage}
+        saving={saving}
+        onAssignCompany={assignCompany}
         onClose={() => setDetailId(null)}
         onMove={moveOne}
         onToggleSelect={toggleSelect}
@@ -592,6 +635,16 @@ export default function CashBoardPage() {
               placeholder="เช่น คุยกับร้านแล้ว เลื่อนได้อีก 2 อาทิตย์ / รอเช็คเคลียร์"
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-blue-400 resize-y"
             />
+            {companies.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">ของบริษัท</span>
+                <CompanySelect companies={companies} value={noteEdit.company_id ?? null}
+                               onChange={(id) => setNoteEdit({ ...noteEdit, company_id: id })} className="flex-1 !h-8" />
+              </div>
+            )}
+            {companies.length > 0 && !noteEdit.company_id && (
+              <p className="text-[11px] text-slate-400 -mt-1">ไม่ระบุบริษัท = โน้ตโชว์ทุกมุมมอง</p>
+            )}
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500">สี</span>
               {Object.entries(NOTE_COLORS).map(([key, c]) => (
@@ -692,11 +745,14 @@ const LegendRow = ({ color, text }: { color: string; text: string }) => (
  * รายละเอียดการ์ด — กดที่การ์ดแล้วเปิดอันนี้
  * บอกครบว่าเงินก้อนนี้คืออะไร ทำไมถึงตกวันนี้ และเลื่อนได้ไหม (เลื่อนจากในนี้ได้เลย ไม่ต้องลาก)
  */
-function CardDetailModal({ ev, originalDate, selected, companies, onClose, onMove, onToggleSelect }: {
+function CardDetailModal({ ev, originalDate, selected, companies, canManage, saving, onAssignCompany, onClose, onMove, onToggleSelect }: {
   ev: CashflowEvent | null;
   originalDate: string | null;
   selected: boolean;
   companies: CompanyRef[];
+  canManage: boolean;
+  saving: boolean;
+  onAssignCompany: (ev: CashflowEvent, companyId: string | null) => void;
   onClose: () => void;
   onMove: (id: string, day: string) => void;
   onToggleSelect: (id: string) => void;
@@ -752,8 +808,21 @@ function CardDetailModal({ ev, originalDate, selected, companies, onClose, onMov
           <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 text-sm">
             {companies.length > 0 && (
               <Row label="บริษัท">
-                <CompanyTag companies={companies} companyId={ev.companyId} mode="full" className="text-[11px]" />
-                {!ev.companyId && <span className="ml-2 text-xs text-amber-700">ดูทีละบริษัทจะไม่ถูกนับ</span>}
+                {canManage && isCompanyAssignable(ev.source) ? (
+                  <span className="flex items-center gap-2 flex-wrap">
+                    <CompanySelect companies={companies} value={ev.companyId} disabled={saving}
+                                   onChange={(id) => onAssignCompany(ev, id)} className="!h-8" />
+                    {ev.source === "loan" && <span className="text-[11px] text-slate-500">เปลี่ยนทั้งสัญญา (ทุกงวด)</span>}
+                  </span>
+                ) : (
+                  <>
+                    <CompanyTag companies={companies} companyId={ev.companyId} mode="full" className="text-[11px]" />
+                    {companyEditHint(ev.source as CashflowSource) && (
+                      <span className="ml-2 text-xs text-slate-500">{companyEditHint(ev.source as CashflowSource)}</span>
+                    )}
+                  </>
+                )}
+                {!ev.companyId && <p className="mt-1 text-xs text-amber-700">ยังไม่ระบุบริษัท — ดูทีละบริษัทจะไม่ถูกนับ</p>}
               </Row>
             )}
             <Row label="วันที่เงินเข้า/ออก">
@@ -988,6 +1057,7 @@ function Board(p: BoardProps) {
                   <button key={n.id} onClick={() => p.canManage && p.onEditNote(n)}
                           className={`text-left text-[11px] leading-snug rounded-md border px-2 py-1.5 whitespace-pre-wrap ${
                             NOTE_COLORS[n.color]?.card ?? NOTE_COLORS.yellow.card} ${p.canManage ? "hover:brightness-95" : "cursor-default"}`}>
+                    {p.showCompany && n.company_id && <CompanyTag companies={p.companies} companyId={n.company_id} className="mr-1 align-middle" />}
                     📝 {n.body}
                   </button>
                 ))}

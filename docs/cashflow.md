@@ -217,11 +217,22 @@
 | แหล่ง | บริษัทมาจาก |
 |---|---|
 | ใบขาย | `erp_playground_sales_orders.company_id` |
-| ใบวางบิล | ใบขายที่อยู่ข้างใน (ทุกใบบริษัทเดียวกัน → บริษัทนั้น · ปนกัน → ยังไม่ระบุ) |
+| ใบวางบิล | `erp_playground_billing_notes.company_id` — **trigger ตั้งตามใบขายข้างในให้เอง** (แก้รายการ / ใบขายเปลี่ยนบริษัท → ตามไปด้วย) · API ห้ามรวมใบขายต่างบริษัทในใบเดียว |
 | เงินเดือน | งวดเงินเดือน `payroll_periods.company_id` · **ประมาณการก็แยกบริษัท** (เฉลี่ย 3 วันจ่ายล่าสุดของบริษัทนั้น) |
 | เงินกู้ / OD / บัตร | `company_id` ที่สัญญา (`loan_contracts` / `od_facilities` / `debt_cards`) |
 | รายการประจำ / เงินในบัญชี | `company_id` — เลือกได้ใน ⚙️ ตั้งค่า |
-| ใบซื้อ / บิลจีน | **ยังไม่มีช่อง** → อยู่กอง "ยังไม่ระบุ" ทั้งหมด (เฟส 2 จะเพิ่ม) |
+| ใบซื้อ / บิลจีน | `purchase_orders_v2.company_id` / `china_bills.company_id` (เฟส 2) — **ใบเก่าทั้งหมดตั้งเป็น ISG** (เจ้าของสั่ง) · ใบใหม่ไม่ระบุ → trigger เติมบริษัทตั้งต้น |
+| โน้ตบนกระดาน | `cashflow_board_notes.company_id` — ว่าง = โชว์ทุกมุมมอง · แปะตอนดูบริษัทไหน = ของบริษัทนั้น |
+
+### เปลี่ยนบริษัทของรายการ (เฟส 2)
+
+- ตาราง `/cashflow` → ติ๊กหลายรายการ → **"แก้หลายรายการ"** → ช่องบริษัท (ตารางกลาง มีหน้าดูก่อนบันทึกให้)
+- กระดาน → กดการ์ด → ช่อง "บริษัท" ในป๊อป (บันทึกทันที ไม่ทิ้งการ์ดที่ลองลากไว้)
+- ใบสั่งซื้อ → ป๊อปใบสั่งซื้อ ✎ แก้ไข / ฟอร์มสร้างใบสั่งซื้อเอง มีช่อง "ใบซื้อของบริษัท"
+- API `POST /api/cashflow/assign-company` (สิทธิ์ `cashflow.manage`) · ทะเบียน `COMPANY_ASSIGNABLE` ใน lib/cashflow:
+  ใบซื้อ · บิลจีน · เงินกู้ (งวดผ่อน → เปลี่ยนทั้งสัญญา) · OD · บัตร — audit ทุกใบ (บริษัทเดิม → ใหม่)
+- **เปลี่ยนจากหน้านี้ไม่ได้:** ใบขาย (บริษัท = หัวบิล/เลขใบกำกับ ต้องแก้ที่หน้าใบขาย) · ใบวางบิล (ตามใบขาย) · เงินเดือน (ตามงวด) · รายการประจำ (⚙️ ตั้งค่า)
+- migration: `supabase/migrations/202610212000_company_on_purchase_docs.sql`
 
 ### กติกาที่ห้ามเปลี่ยน
 
@@ -233,14 +244,15 @@
 ### ของกลางที่ใช้
 
 - [`lib/company-filter.ts`](../lib/company-filter.ts) — ตัวกรอง ทั้งกลุ่ม/บริษัท/ยังไม่ระบุ + สีประจำบริษัท + ชื่อ (ไม่ผูกกับกระแสเงินสด ใช้กับหน้าอื่นได้)
-- [`components/company-filter`](../components/company-filter/index.tsx) — `CompanyFilterChips` · `CompanyTag` · `CompanySelect` · `useCompanyFilter()`
-- [`lib/company-check.ts`](../lib/company-check.ts) — API ตรวจว่า `company_id` ที่ส่งมามีอยู่ในทะเบียนจริง
+- [`components/company-filter`](../components/company-filter/index.tsx) — `CompanyFilterChips` · `CompanyTag` · `CompanySelect` · `useCompanyFilter()` · `useCompanies()`
+- [`lib/company-check.ts`](../lib/company-check.ts) — API ตรวจว่า `company_id` ที่ส่งมามีอยู่ในทะเบียนจริง · `checkSameCompanySOs` กันใบวางบิลรวมใบขายต่างบริษัท
 - `lib/cashflow.ts` — `filterEventsByCompany` · `openingForCompany` · `summarizeByCompany` · `unassignedBySource` · `summarizeDays`
 - [`components/cashflow/unassigned-notice.tsx`](../components/cashflow/unassigned-notice.tsx) — แถบเตือน "ยังไม่ระบุบริษัท"
 
-### ยังไม่ทำ (เฟส 2–3)
+### ยังไม่ทำ (เฟส 3)
 
-- เพิ่มช่องบริษัทให้ใบซื้อ / ใบวางบิล / บิลจีน / โน้ตบนกระดาน + หน้า "จัดบริษัทให้รายการที่ยังไม่ระบุ" (ติ๊กหลายใบ)
+- ~~ช่องบริษัทให้ใบซื้อ / ใบวางบิล / บิลจีน / โน้ต + ตั้งบริษัทหลายใบ~~ **เฟส 2 ทำแล้ว (2026-10-21)**
+- แอปเงินจีน (/app/china-pay) ยังไม่มีช่องเลือกบริษัทตอนสร้างบิล (ใบใหม่ = ISG · เปลี่ยนได้จากหน้ากระแสเงินสด)
 - โอนเงินระหว่างบริษัท (การ์ดคู่ ออกจาก A เข้า B · ดูทั้งกลุ่มหักกันเป็นศูนย์)
 - มุมมองแถวละบริษัท · สิทธิ์ดูทีละบริษัท · ทะเบียนบัญชีธนาคารต่อบริษัท
 

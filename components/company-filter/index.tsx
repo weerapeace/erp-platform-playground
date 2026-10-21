@@ -7,16 +7,39 @@
  *   <CompanyTag>          ป้ายสีบริษัทเล็ก ๆ บนการ์ด/แถวตาราง
  *   <CompanySelect>       ช่องเลือกบริษัทในฟอร์ม (มีตัวเลือก "ยังไม่ระบุ")
  *   useCompanyFilter()    จำว่าเลือกบริษัทไหนไว้ (ต่อเครื่อง) — หลายหน้าใช้ key เดียวกันได้ เลือกที่หน้าหนึ่ง อีกหน้าตามไปด้วย
+ *   useCompanies()        โหลดรายชื่อบริษัทให้ฟอร์ม (ใบซื้อ ฯลฯ)
  *
  * ทะเบียนบริษัทมาจากตาราง companies (ตั้งค่าที่ /admin/companies) — เพิ่มบริษัทที่ 3 ได้เองไม่ต้องแก้โค้ด
  * กติกาตัวกรอง/สีอยู่ที่ lib/company-filter.ts
- * ใช้ที่: /cashflow · /cashflow/board
+ * ใช้ที่: /cashflow · /cashflow/board · ใบสั่งซื้อ (สร้าง/แก้ไข)
  */
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api";
 import {
   COMPANY_ALL, COMPANY_NONE, UNASSIGNED_TONE, companyLabel, companyTone, validCompanyFilter,
   type CompanyFilter, type CompanyRef,
 } from "@/lib/company-filter";
+
+/**
+ * รายชื่อบริษัทที่ใช้งานอยู่ (สำหรับฟอร์มที่ไม่ได้ดึงบริษัทมากับข้อมูลเอง เช่น ใบซื้อ)
+ * จำไว้ทั้งหน้า — เปิดป๊อปซ้ำไม่ต้องโหลดใหม่ · โหลดไม่ได้ = รายการว่าง (ฟอร์มซ่อนช่องบริษัทเอง)
+ */
+let companiesCache: Promise<CompanyRef[]> | null = null;
+export function useCompanies(): CompanyRef[] {
+  const [list, setList] = useState<CompanyRef[]>([]);
+  useEffect(() => {
+    let alive = true;
+    companiesCache ??= apiFetch("/api/admin/companies")
+      .then((r) => r.json())
+      .then((j) => ((j?.data ?? []) as { id: string; company_code: string | null; name: string | null; is_default: boolean | null; status: string | null }[])
+        .filter((c) => (c.status ?? "active") !== "inactive")
+        .map((c) => ({ id: String(c.id), code: String(c.company_code ?? ""), name: String(c.name ?? c.company_code ?? ""), isDefault: !!c.is_default })))
+      .catch(() => { companiesCache = null; return []; });
+    companiesCache.then((l) => { if (alive) setList(l); });
+    return () => { alive = false; };
+  }, []);
+  return list;
+}
 
 /** จำบริษัทที่เลือกไว้ใน localStorage — บริษัทถูกปิดไปแล้ว = กลับไปดูทั้งกลุ่มเอง */
 export function useCompanyFilter(storageKey: string, companies: CompanyRef[]) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { checkSameCompanySOs } from "@/lib/company-check";
 import { guardApi } from "@/lib/api-auth";
 import { deleteDraftSalesDoc } from "@/lib/sales-doc-delete";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -66,6 +67,11 @@ export async function PATCH(
   let body: { header?: Record<string, unknown>; so_ids?: string[]; actor?: string };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  if (Array.isArray(body.so_ids)) {
+    const mixed = await checkSameCompanySOs(supabaseAdmin(), body.so_ids);
+    if (mixed) return NextResponse.json({ error: mixed }, { status: 400 });
+  }
 
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_billing_note_update", {
     p_id: id, p_header: body.header ?? {}, p_so_ids: body.so_ids ?? null, p_actor: body.actor ?? null,

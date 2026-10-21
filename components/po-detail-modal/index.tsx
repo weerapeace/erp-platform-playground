@@ -28,6 +28,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth, usePermission } from "@/components/auth";
 import { computePoTotals } from "@/lib/po-total";
 import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
+import { CompanySelect, CompanyTag, useCompanies } from "@/components/company-filter";
 
 const baht = (n: number | null | undefined) => `฿${Math.round(Number(n ?? 0)).toLocaleString("th-TH")}`;
 const thDate = (iso: string | null | undefined) =>
@@ -80,6 +81,8 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
   // สกุลของใบ (สลับ ฿/¥ ได้) + เรทแปลงบาท (ว่าง = ใช้เรทรายวันล่าสุด)
   const [currency, setCurrency] = useState<"THB" | "RMB">("THB");
   const [fxRate, setFxRate] = useState("");
+  const companies = useCompanies();
+  const [companyId, setCompanyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,6 +127,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
     setVatIncluded(!!d.vat_included);
     setCurrency(isCNY(d.currency) ? "RMB" : "THB");
     setFxRate(d.fx_source === "po" && d.fx_rate ? String(d.fx_rate) : "");
+    setCompanyId(d.company_id ?? null);
     setLines(d.lines.map((l) => ({
       key: newKey(), id: l.id, name: l.name, qty: String(l.qty),
       uom: l.uom ?? "", price: String(l.price || ""), received: l.received,
@@ -180,6 +184,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
             vat_included: vatIncluded,
             currency,
             fx_rate: currency === "RMB" && n2(fxRate) > 0 ? n2(fxRate) : null,
+            ...(companyId ? { company_id: companyId } : {}),
           },
           lines: lines.filter((l) => l.name.trim() && n2(l.qty) > 0).map((l) => ({
             id: l.id, item_name: l.name.trim(), qty: n2(l.qty),
@@ -196,7 +201,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
       onSaved?.();
     } catch { setErr("บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง"); }
     finally { setSaving(false); }
-  }, [d, seller, orderDate, expectedDate, note, vatRate, vatIncluded, currency, fxRate, lines, load, onSaved]);
+  }, [d, seller, orderDate, expectedDate, note, vatRate, vatIncluded, currency, fxRate, companyId, lines, load, onSaved]);
 
   const inp = "h-8 px-2 text-sm border border-slate-200 rounded-md";
   const lbl = "block text-[11px] font-medium text-slate-500 mb-0.5";
@@ -262,6 +267,10 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
               <input type="date" value={orderDate ? orderDate.slice(0, 10) : ""} onChange={(e) => setOrderDate(e.target.value)} className={inp + " w-full"} /></div>
             <div><label className={lbl}>กำหนดของเข้า</label>
               <input type="date" value={expectedDate ? expectedDate.slice(0, 10) : ""} onChange={(e) => setExpectedDate(e.target.value)} className={inp + " w-full"} /></div>
+            {companies.length > 1 && (
+              <div className="col-span-2"><label className={lbl}>ใบซื้อของบริษัท</label>
+                <CompanySelect companies={companies} value={companyId} onChange={(id) => id && setCompanyId(id)} className="w-full !h-9" /></div>
+            )}
           </div>
 
           {/* สกุลเงิน + เรท — บางใบคิดเป็นบาท บางใบเป็นหยวน สลับได้ · สลับแล้ว "ไม่แปลงตัวเลขราคาให้" ต้องใส่ราคาตามสกุลใหม่เอง */}
@@ -384,6 +393,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                 <span className="tabular-nums">{sym}{fmt(d.vat_amount)}</span>
               </div>
             )}
+            {companies.length > 1 && <div><span className="text-slate-400">บริษัท </span><CompanyTag companies={companies} companyId={d.company_id} mode="full" className="text-[11px] align-middle" /></div>}
             {d.order_date && <div><span className="text-slate-400">วันที่สั่ง </span>{thDate(d.order_date)}</div>}
             {d.payment_status === "paid"
               ? <div className="text-emerald-700 font-medium">✓ จ่ายแล้ว {d.paid_date ? thDate(d.paid_date) : ""}{d.paid_amount_thb ? ` · ${baht(d.paid_amount_thb)}` : ""}</div>

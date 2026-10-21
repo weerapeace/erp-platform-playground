@@ -21,6 +21,9 @@ import {
   summarizeByCompany,
   summarizeDays,
   unassignedBySource,
+  COMPANY_ASSIGNABLE,
+  companyEditHint,
+  isCompanyAssignable,
 } from "@/lib/cashflow";
 import {
   COMPANY_ALL, COMPANY_NONE, UNASSIGNED_TONE, companyLabel, companyTone, validCompanyFilter, type CompanyRef,
@@ -269,5 +272,26 @@ describe("cashflow — แยกบริษัท", () => {
     expect(companyLabel([ISG, LM], "lm")).toBe("LOUIS");
     expect(companyLabel([ISG, LM], "lm", "full")).toBe("หลุยส์ มอนตินี่");
     expect(companyLabel([ISG, LM], "x")).toBe("ยังไม่ระบุ");
+  });
+});
+
+describe("cashflow — ตั้งบริษัทจากหน้ากระแสเงินสด (เฟส 2)", () => {
+  it("ตั้งได้: ใบซื้อ / บิลจีน / เงินกู้ / OD / บัตร", () => {
+    for (const s of ["purchase_order", "china", "loan", "od_interest", "card"]) expect(isCompanyAssignable(s), s).toBe(true);
+  });
+
+  it("ห้ามตั้งจากที่นี่: ใบขาย (หัวบิล/เลขใบกำกับ) · ใบวางบิล (ตามใบขาย) · เงินเดือน · รายการประจำ — และต้องบอกว่าไปแก้ที่ไหน", () => {
+    for (const s of ["sales_order", "billing_note", "payroll", "manual"] as const) {
+      expect(isCompanyAssignable(s), s).toBe(false);
+      expect(companyEditHint(s).length, s).toBeGreaterThan(0);
+    }
+  });
+
+  it("ทุกชนิดที่ตั้งได้ต้องระบุตารางที่มีช่อง company_id (API ใช้ชื่อนี้เขียนลง DB ตรง ๆ)", () => {
+    for (const [key, cfg] of Object.entries(COMPANY_ASSIGNABLE)) {
+      expect(cfg!.table, key).toMatch(/^[a-z0-9_]+$/);
+      expect(cfg!.label.length, key).toBeGreaterThan(0);
+    }
+    expect(COMPANY_ASSIGNABLE.loan?.viaInstallment).toBe(true);   // การ์ดเงินกู้คืองวดผ่อน → ต้องไปแก้ที่สัญญา
   });
 });

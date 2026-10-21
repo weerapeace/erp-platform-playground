@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { checkSameCompanySOs } from "@/lib/company-check";
 import { creditNotesForSoIds, sumCredit, type LinkedCreditNote } from "@/lib/credit-note-link";
 
 // ---- Types ----
@@ -106,6 +108,10 @@ export async function POST(request: NextRequest) {
   let body: CreateBody;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  // ใบกำกับ/หัวบิลแยกบริษัท → ใบวางบิลเดียวรวมใบขายต่างบริษัทไม่ได้ (บริษัทของใบวางบิล = บริษัทของใบขายข้างใน)
+  const mixed = await checkSameCompanySOs(supabaseAdmin(), body.so_ids);
+  if (mixed) return NextResponse.json({ error: mixed }, { status: 400 });
 
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_billing_note_create", {
     p_header: body.header ?? {}, p_so_ids: body.so_ids ?? [], p_actor: body.actor ?? null,

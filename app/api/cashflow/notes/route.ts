@@ -2,8 +2,8 @@
  * โน้ตแปะวันบนกระดานเงินสด (/cashflow/board)
  *
  *   GET    ?from=&to=              → โน้ตในช่วงวันที่
- *   POST   { note_date, body, color } → แปะโน้ตใหม่
- *   PATCH  { id, body?, color?, note_date? } → แก้ / ย้ายไปวันอื่น
+ *   POST   { note_date, body, color, company_id? } → แปะโน้ตใหม่ (company_id ว่าง = โชว์ทุกมุมมอง)
+ *   PATCH  { id, body?, color?, note_date?, company_id? } → แก้ / ย้ายไปวันอื่น / เปลี่ยนบริษัท
  *   DELETE ?id=                    → ลอกออก (ปิดใช้งาน ไม่ลบจริง)
  *
  * ไว้จดสิ่งที่ไม่ใช่ตัวเลข เช่น "รอเช็คเคลียร์" / "คุยกับร้านแล้ว เลื่อนได้อีก 2 อาทิตย์"
@@ -14,6 +14,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { checkCompanyId } from "@/lib/company-check";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,9 +30,11 @@ export type BoardNote = {
   body: string;
   color: string;
   created_by: string | null;
+  /** โน้ตของบริษัทไหน — null = โชว์ทุกมุมมอง */
+  company_id: string | null;
 };
 
-const SELECT = "id, note_date, body, color, created_by";
+const SELECT = "id, note_date, body, color, created_by, company_id";
 const str = (v: unknown) => (v == null ? "" : String(v)).trim();
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -65,10 +68,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!text) return NextResponse.json({ error: "โน้ตว่างเปล่า — พิมพ์ข้อความก่อน" }, { status: 400 });
 
   const admin = supabaseAdmin();
+  const company = await checkCompanyId(admin, body.company_id);
+  if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
+
   const { data, error } = await admin
     .from("cashflow_board_notes")
     .insert({
-      note_date: noteDate, body: text,
+      note_date: noteDate, body: text, company_id: company.companyId,
       color: COLORS.has(str(body.color)) ? str(body.color) : "yellow",
       created_by: user?.email ?? null, updated_by: user?.email ?? null,
     })
@@ -108,6 +114,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
 
   const admin = supabaseAdmin();
+  if (body.company_id !== undefined) {
+    const company = await checkCompanyId(admin, body.company_id);
+    if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
+    patch.company_id = company.companyId;
+  }
   const { data, error } = await admin
     .from("cashflow_board_notes").update(patch).eq("id", id).select(SELECT).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

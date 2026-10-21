@@ -431,6 +431,35 @@ export function summarizeByCompany(
   return out;
 }
 
+/**
+ * แหล่งที่ "ตั้งบริษัท" จากหน้ากระแสเงินสดได้ (ติ๊กหลายใบในตาราง / กดการ์ดบนกระดาน) + ตารางที่เก็บบริษัท
+ * viaInstallment = รายการเป็นงวดผ่อน ต้องไปแก้ที่สัญญาเงินกู้ (ทุกงวดของสัญญาเปลี่ยนตาม)
+ * ไม่อยู่ในนี้ = แก้ที่อื่นเท่านั้น:
+ *   ใบขาย → หน้าใบขาย (บริษัท = หัวบิล/เลขใบกำกับ ห้ามเปลี่ยนเงียบ ๆ จากที่นี่)
+ *   ใบวางบิล → ตามใบขายข้างในอัตโนมัติ · เงินเดือน → งวดเงินเดือน · รายการประจำ → ⚙️ ตั้งค่า
+ */
+export const COMPANY_ASSIGNABLE: Partial<Record<CashflowSource, { table: string; label: string; viaInstallment?: boolean }>> = {
+  purchase_order: { table: "purchase_orders_v2", label: "ใบซื้อ" },
+  china:          { table: "china_bills",        label: "บิลจีน" },
+  loan:           { table: "loan_contracts",     label: "สัญญาเงินกู้ (ทุกงวด)", viaInstallment: true },
+  od_interest:    { table: "od_facilities",      label: "วงเงิน OD" },
+  card:           { table: "debt_cards",         label: "บัตรเครดิต" },
+};
+
+export const isCompanyAssignable = (s: string): boolean => !!COMPANY_ASSIGNABLE[s as CashflowSource];
+
+/** บอกว่ารายการนี้ไปเปลี่ยนบริษัทได้ที่ไหน (กรณีเปลี่ยนจากหน้ากระแสเงินสดไม่ได้) */
+export function companyEditHint(source: CashflowSource): string {
+  if (isCompanyAssignable(source)) return "";
+  switch (source) {
+    case "sales_order":  return "เปลี่ยนบริษัทได้ที่หน้าใบขาย (บริษัทคือหัวบิลบนใบกำกับ)";
+    case "billing_note": return "ตามใบขายที่อยู่ในใบวางบิลอัตโนมัติ";
+    case "payroll":      return "ตามงวดเงินเดือน";
+    case "manual":       return "แก้ได้ที่ ⚙️ ตั้งค่า → รายจ่าย/รายรับประจำ";
+    default:             return "";
+  }
+}
+
 /** แยกนับรายการที่ยังไม่ระบุบริษัทตามแหล่ง — ใช้บอกผู้ใช้ว่าต้องไปตั้งที่ไหน */
 export function unassignedBySource(events: CashflowEvent[], to: string): { source: CashflowSource; count: number; in: number; out: number }[] {
   return totalsBySource(events.filter((e) => !e.companyId && e.date <= to));
