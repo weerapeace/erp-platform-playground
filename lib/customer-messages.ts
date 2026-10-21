@@ -69,6 +69,8 @@ export interface MessageOrder {
   /** ค่าธรรมเนียมเก็บปลายทาง */
   codFee?: number;
   discount: number;
+  /** 🏷 โปรโมชันที่ใช้ (รวมอยู่ใน discount แล้ว) — โชว์แยกบรรทัด · ที่เหลือ = คูปอง */
+  promos?: { name: string; amount: number }[];
   giftFee?: number;
   /** 💌 ค่าการ์ดอวยพร (บริการแยกจากห่อ) */
   giftCardFee?: number;
@@ -216,7 +218,10 @@ export function orderMessage(ev: OrderEvent, o: MessageOrder, shop: MessageShop,
     if (o.codFee) table.push({ left: lang === "en" ? "COD fee" : "ค่าธรรมเนียมเก็บปลายทาง", right: money(o.codFee) });
     if (o.giftFee) table.push({ left: t.gift, right: money(o.giftFee) });
     if (o.giftCardFee) table.push({ left: t.card, right: money(o.giftCardFee) });
-    if (o.discount > 0) table.push({ left: t.discount, right: `-${money(o.discount)}` });
+    // 🏷 โปรโมชันแยกบรรทัด · ส่วนที่เหลือของ discount = คูปอง
+    const promoSum = (o.promos ?? []).reduce((s, p) => s + p.amount, 0);
+    for (const p of o.promos ?? []) table.push({ left: `🏷 ${p.name}`, right: `-${money(p.amount)}` });
+    if (o.discount - promoSum > 0.004) table.push({ left: t.discount, right: `-${money(Math.round((o.discount - promoSum) * 100) / 100)}` });
     if ((o.pointsDiscount ?? 0) > 0) table.push({ left: t.points, right: `-${money(o.pointsDiscount ?? 0)}` });
     table.push({ left: `${t.total} (${t.payment[o.paymentMethod] ?? o.paymentMethod})`, right: money(o.grandTotal), bold: true });
   }

@@ -17,6 +17,7 @@ import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
 import { fitTargetOf, type FitTarget } from "@/lib/fit-check";
 import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { publicShipping, readShipping } from "@/lib/website-shipping-db";
+import { readPublicPromotions } from "@/lib/website-promotions-db";
 import { couponLabel, evaluateCoupon } from "@/lib/website-coupons";
 import { couponUsage, loadCouponByCode } from "@/lib/website-coupons-db";
 import { buildBeltBuilderPayload } from "@/lib/belt-builder-public";
@@ -141,6 +142,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      * เว็บรุ่นเก่าที่ยังไม่รู้จักฟิลด์นี้จะข้ามไปเอง
      */
     info,
+    /** 🏷 โปรโมชันอัตโนมัติที่เปิด + ยังไม่หมดเวลา — เว็บร้านโชว์ป้าย/ราคา ⚡/ส่วนลดในตะกร้า ด้วยไฟล์มิเรอร์ src/lib/promotions.ts (ERP คิดใหม่ตอนรับออเดอร์เสมอ) */
+    promotions: await readPublicPromotions(sb, s.id),
     /** 🚚 วิธีจัดส่งที่เปิด + กติกาค่าส่ง + รหัสไปรษณีย์ห่างไกล — เว็บร้านคิดค่าส่งด้วยไฟล์มิเรอร์ lib/website-shipping.ts (ERP คิดใหม่ตอนรับออเดอร์เสมอ) */
     shipping,
     /** ป้ายชื่อฟิลด์สเปก (key → label) ให้เว็บร้านวาดตาราง "วัสดุและขนาด" */

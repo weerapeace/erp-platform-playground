@@ -45,6 +45,8 @@ type Order = {
   shippingFee: number;
   discount: number;
   couponCode?: string | null;
+  /** 🏷 โปรโมชันที่ใช้ (รวมใน discount แล้ว) */
+  promos?: { name: string; amount: number }[];
   pointsUsed?: number;
   pointsDiscount?: number;
   pointsEarned?: number;
@@ -521,7 +523,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                   {(open.codFee ?? 0) > 0 && <div className="flex justify-between"><span>ค่าธรรมเนียมเก็บปลายทาง</span><span>{money(open.codFee ?? 0)}</span></div>}
                   {open.giftWrap && <div className="flex justify-between"><span>🎀 ค่าห่อของขวัญ</span><span>{open.giftFee ? money(open.giftFee) : "ฟรี"}</span></div>}
                   {open.giftCardOnly && <div className="flex justify-between"><span>💌 ค่าการ์ดอวยพร</span><span>{open.giftCardFee ? money(open.giftCardFee) : "ฟรี"}</span></div>}
-                  {open.discount > 0 && <div className="flex justify-between"><span>ส่วนลด{open.couponCode ? ` (${open.couponCode})` : ""}</span><span>-{money(open.discount)}</span></div>}
+                  {(open.promos ?? []).map((p) => <div key={p.name} className="flex justify-between text-emerald-700"><span>🏷 {p.name}</span><span>-{money(p.amount)}</span></div>)}
+                  {open.discount - (open.promos ?? []).reduce((s, p) => s + p.amount, 0) > 0.004 && <div className="flex justify-between"><span>ส่วนลด{open.couponCode ? ` (${open.couponCode})` : ""}</span><span>-{money(Math.round((open.discount - (open.promos ?? []).reduce((s, p) => s + p.amount, 0)) * 100) / 100)}</span></div>}
                   {(open.pointsDiscount ?? 0) > 0 && <div className="flex justify-between"><span>⭐ ใช้แต้ม {(open.pointsUsed ?? 0).toLocaleString("th-TH")} แต้ม</span><span>-{money(open.pointsDiscount ?? 0)}</span></div>}
                   <div className="flex justify-between text-sm font-semibold text-slate-900 pt-1"><span>ยอดรวม</span><span>{money(open.grandTotal)}</span></div>
                   {open.isMember && (

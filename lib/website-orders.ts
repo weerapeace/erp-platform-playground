@@ -45,6 +45,10 @@ import { trackingOf, type ParcelTracking } from "@/lib/parcel-tracking";
 import { AUTO_RESULT, rejectReasonText, type AutoResult } from "@/lib/website-payments";
 import { defaultMethodId, quoteMethod } from "@/lib/website-shipping";
 import { readShipping } from "@/lib/website-shipping-db";
+import { evaluatePromotions, type PromoLine } from "@/lib/website-promotions";
+import { readLivePromotions } from "@/lib/website-promotions-db";
+import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
+import { withParentCategories } from "@/lib/website-category-tree";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -130,6 +134,8 @@ export interface OrderView {
   discount: number;
   /** โค้ดส่วนลดที่ใช้ (ไม่มี = null) */
   couponCode?: string | null;
+  /** 🏷 โปรโมชันอัตโนมัติที่ใช้ (รวมอยู่ใน discount แล้ว · ส่วนของคูปอง = discount − ผลรวมนี้) */
+  promos?: { name: string; amount: number }[];
   /** ⭐ แต้มที่ใช้ลด + เป็นเงินเท่าไร (ไม่ได้ใช้ = 0) */
   pointsUsed?: number;
   pointsDiscount?: number;
@@ -423,6 +429,12 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     for (const c of (cats ?? []) as { id: string; name: string }[]) catName.set(c.id, c.name);
   }
 
+  // 🏷 โปรโมชันอัตโนมัติที่ใช้ได้ตอนนี้ (lib/website-promotions) — คิดใหม่ที่นี่เสมอ ไม่เชื่อยอดจากหน้าเว็บ
+  //    หมวดของสินค้าต้องคิดแบบเดียวกับหน้าเว็บ (กฎแท็ก + หมวดแม่) ถึงจะตรงกับโปรที่ตั้งตามหมวด
+  const promos = await readLivePromotions(sb, shop.id);
+  const tagCatsOf = promos.some((p) => p.rule.scope.mode === "categories") ? await loadTagCategoryResolver(sb, fieldMap.category.tagRules, [...parentById.keys()]) : null;
+  const promoLines: PromoLine[] = [];
+
   const lines: LineInsert[] = [];
   let subtotal = 0;
   for (const it of input.items) {
@@ -445,7 +457,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       parent,
       kids,
       listing,
-      parent.category_id ? catName.get(parent.category_id) ?? null : null
+      parent.category_id ? catName.get(parent.category_id) ?? null : null,
+      tagCatsOf ? tagCatsOf(parent.id) : undefined
     );
     // 🚫 ตั้ง "สินค้าหมด" ใน ERP แล้ว = รับออเดอร์ไม่ได้ (กันตะกร้าเก่าที่ใส่ไว้ก่อนของหมด)
     if (listing.web_stock_status === "out") return { ok: false, error: `สินค้า ${resolved.name} หมดแล้ว กรุณาเอาออกจากตะกร้า`, status: 409 };
@@ -488,9 +501,12 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       qty: it.qty,
       line_total: lineTotal,
     });
+    promoLines.push({ code: parent.code ?? "", categories: withParentCategories(fieldMap.categories, resolved.categories), unitPrice: price, qty: it.qty });
   }
 
   subtotal = Math.round(subtotal * 100) / 100;
+  // 🏷 ⚡ ลดต่อชิ้นก่อน แล้วโปรตะกร้าที่ลดได้มากสุด 1 ตัว (เข็มขัดสั่งทำไม่ร่วมโปร)
+  const promo = evaluatePromotions(promos, promoLines);
   // 🚚 วิธีจัดส่ง + ค่าส่ง: คิดใหม่ฝั่งเซิร์ฟเวอร์จากที่ร้านตั้ง (lib/website-shipping) — ไม่เชื่อยอดจากหน้าเว็บ
   //    ร้านที่ยังไม่ตั้งวิธีส่ง = วิธีเดียวจากค่าส่งเหมาเดิม → ยอดเท่าเดิมทุกบาท
   const shipCfg = await readShipping(sb, shop.id, info);
@@ -525,14 +541,21 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     giftCard = rc.card;
   }
   // 🎟️ โค้ดส่วนลด: ตรวจ + คิดใหม่ที่นี่เสมอ (ไม่เชื่อยอดจากหน้าเว็บ) · ใช้ไม่ได้ = ไม่รับออเดอร์ บอกเหตุผล (ลูกค้าเอาโค้ดออกแล้วสั่งต่อได้)
-  let discount = 0;
+  //    คิดจากยอดหลังโปรโมชัน · โปรที่ตั้ง "ใช้คู่คูปองไม่ได้" = ไม่รับโค้ด (บอกชื่อโปร)
+  let couponDiscount = 0;
   let coupon: StoreCoupon | null = null;
   if (input.couponCode) {
-    const cr = await checkCoupon(sb, shop.id, input.couponCode, subtotal, input.customer.phone, opts.customerId ?? null);
+    if (promo.blocksCoupon) {
+      const names = promo.applied.filter((a) => promos.find((p) => p.id === a.id)?.rule.noCoupon).map((a) => a.name).join(", ");
+      return { ok: false, error: `โค้ดส่วนลด ${input.couponCode}: ใช้คู่กับโปรโมชัน “${names}” ไม่ได้ — เอาโค้ดออกแล้วสั่งต่อได้ (ได้ส่วนลดโปรแทน)`, status: 400 };
+    }
+    const cr = await checkCoupon(sb, shop.id, input.couponCode, Math.max(0, subtotal - promo.total), input.customer.phone, opts.customerId ?? null);
     if (!cr.ok) return { ok: false, error: `โค้ดส่วนลด ${input.couponCode}: ${cr.error}`, status: 400 };
-    discount = cr.discount;
+    couponDiscount = cr.discount;
     coupon = cr.coupon ?? null;
   }
+  // ส่วนลดรวม = โปรโมชัน + คูปอง (รายงาน/แต้มอ่านช่องนี้ช่องเดียว) · แยกรายการโปรเก็บใน promos
+  const discount = Math.round((promo.total + couponDiscount) * 100) / 100;
   // ⭐ ใช้แต้มลดราคา (สมาชิกเท่านั้น · หลังคูปอง) — ตรวจกับยอดคงเหลือตอนนี้ แล้วตัดจริงแบบล็อกแถวหลังบันทึกออเดอร์
   let pointsUsed = 0;
   let pointsDiscount = 0;
@@ -577,6 +600,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         cod_fee: codFee,
         discount,
         coupon_code: coupon?.code ?? null,
+        promos: promo.applied.length ? promo.applied : null,
         points_used: pointsUsed,
         points_discount: pointsDiscount,
         gift_wrap: giftWrap,
@@ -624,10 +648,10 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     }
 
     // บันทึกการใช้คูปอง (นับจำนวนครั้ง/เบอร์ละครั้ง) — พังก็ไม่ล้มออเดอร์ (ยอดลดถูกบันทึกในออเดอร์แล้ว) แค่ log
-    if (coupon && discount > 0) {
+    if (coupon && couponDiscount > 0) {
       const { error: redErr } = await sb
         .from("store_coupon_redemptions")
-        .insert({ coupon_id: coupon.id, shop_id: shop.id, order_id: order.id, customer_phone: input.customer.phone, discount });
+        .insert({ coupon_id: coupon.id, shop_id: shop.id, order_id: order.id, customer_phone: input.customer.phone, discount: couponDiscount });
       if (redErr) console.error("[website-orders] coupon redemption", redErr);
     }
 
@@ -660,6 +684,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         codFee,
         discount,
         couponCode: coupon?.code ?? null,
+        promos: promo.applied.map((a) => ({ name: a.name, amount: a.amount })),
         pointsUsed,
         pointsDiscount,
         pointsEarned: 0,
@@ -718,6 +743,7 @@ export type OrderRow = {
   cod_fee?: number | string | null;
   discount: number | string;
   coupon_code?: string | null;
+  promos?: unknown;
   points_used?: number | null;
   points_discount?: number | string | null;
   points_earned?: number | null;
@@ -775,6 +801,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     codFee: num(o.cod_fee),
     discount: num(o.discount),
     couponCode: o.coupon_code ?? null,
+    promos: Array.isArray(o.promos) ? (o.promos as { name?: unknown; amount?: unknown }[]).map((x) => ({ name: String(x.name ?? ""), amount: num(x.amount as number) })).filter((x) => x.name && x.amount > 0) : [],
     pointsUsed: num(o.points_used),
     pointsDiscount: num(o.points_discount),
     pointsEarned: num(o.points_earned),

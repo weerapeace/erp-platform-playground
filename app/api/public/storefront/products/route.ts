@@ -181,17 +181,37 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // อันดับขายดี (จากออเดอร์บนเว็บของร้านนี้ ไม่รวมยกเลิก) — ส่งเป็น "อันดับ" ไม่ส่งจำนวนจริง
   const salesRank = new Map<string, number>();
+  // 🛍 ซื้อคู่กันบ่อย: รุ่นที่อยู่ในออเดอร์เดียวกันบ่อยสุด 3 อันดับ (ออเดอร์ล่าสุด 2,000 ใบ) — หน้าสินค้า "ซื้อคู่กันบ่อย"
+  const boughtWith = new Map<string, string[]>();
   {
     const { data: orders } = await sb.from("store_orders").select("id").eq("shop_id", s.id).neq("status", "cancelled").order("created_at", { ascending: false }).limit(2000);
     const orderIds = ((orders ?? []) as { id: string }[]).map((o) => o.id);
     if (orderIds.length) {
-      const { data: items } = await sb.from("store_order_items").select("parent_code, qty").in("order_id", orderIds);
+      const { data: items } = await sb.from("store_order_items").select("order_id, parent_code, qty").in("order_id", orderIds);
       const qtyByCode = new Map<string, number>();
       for (const it of (items ?? []) as { parent_code: string | null; qty: number | string | null }[]) {
         const c = (it.parent_code ?? "").toUpperCase();
         if (c) qtyByCode.set(c, (qtyByCode.get(c) ?? 0) + (Number(it.qty) || 0));
       }
       [...qtyByCode.entries()].sort((a, b) => b[1] - a[1]).forEach(([c], i) => salesRank.set(c, i + 1));
+      const codesByOrder = new Map<string, Set<string>>();
+      for (const it of (items ?? []) as { order_id: string; parent_code: string | null }[]) {
+        const c = (it.parent_code ?? "").toUpperCase();
+        if (!c) continue;
+        const set = codesByOrder.get(it.order_id) ?? new Set<string>();
+        set.add(c);
+        codesByOrder.set(it.order_id, set);
+      }
+      const pair = new Map<string, Map<string, number>>();
+      for (const set of codesByOrder.values()) {
+        if (set.size < 2 || set.size > 12) continue;
+        for (const a of set) for (const b of set) if (a !== b) {
+          const m = pair.get(a) ?? new Map<string, number>();
+          m.set(b, (m.get(b) ?? 0) + 1);
+          pair.set(a, m);
+        }
+      }
+      for (const [a, m] of pair) boughtWith.set(a, [...m.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([c]) => c));
     }
   }
 
@@ -378,6 +398,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         salesRank: salesRank.get(code.toUpperCase()) ?? null,
         /** ⭐ ดาวเฉลี่ย + จำนวนรีวิว (ยังไม่มีรีวิว/ร้านปิดรีวิว = ไม่ส่ง) */
         rating: ratings.get(code.toUpperCase()),
+        /** 🛍 ซื้อคู่กันบ่อย (รหัสรุ่น · จากออเดอร์จริง · ยังไม่มี = ไม่ส่ง) */
+        boughtWith: boughtWith.get(code.toUpperCase()),
         /** จับคู่รายละเอียดหน้าเว็บเฉพาะรุ่น { itemId: { show, text } } — ไม่มี = ตามชุดรายละเอียดกลางของธีม */
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
         /** ปั๊มชื่อ (null = รุ่นนี้ปั๊มไม่ได้) */
