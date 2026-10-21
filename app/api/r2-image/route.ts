@@ -16,9 +16,18 @@
  */
 
 import { NextRequest } from "next/server";
-import { r2GetObject, r2GetRange } from "@/lib/r2";
+import { isSafeR2Key, r2GetObject, r2GetRange } from "@/lib/r2";
 
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
+
+/* 🔒 ไฟล์ที่เบราว์เซอร์ "รันได้" (HTML/SVG/XML/JS) ถ้ามีคนเปิดตรง ๆ → ห้ามรันสคริปต์ (CSP sandbox)
+ *    ทุกไฟล์ห้ามให้เบราว์เซอร์เดาชนิดเอง (nosniff) · <img src> แสดงผลเหมือนเดิม (หัวพวกนี้มีผลเฉพาะตอนเปิดเป็นหน้า) */
+const ACTIVE_TYPE = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|text\/javascript|application\/javascript|application\/x-javascript)\b/i;
+function activeTypeHeaders(contentType: string): Record<string, string> {
+  return ACTIVE_TYPE.test(contentType)
+    ? { "Content-Security-Policy": "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'" }
+    : {};
+}
 
 /* 🎬 วิดีโอ: เสิร์ฟทีละช่วง (Range) ตรงจาก R2 — ไม่โหลดทั้งไฟล์ · ก้อนละ ≤ 4 MB (เพดานขนาดตอบกลับของ Vercel)
  *    → คลิปที่อัปโหลดเองขนาดหลายสิบ MB เล่น/กรอได้ (Safari/iPhone ต้องการ Range เสมอ) */
@@ -48,7 +57,7 @@ async function videoResponse(key: string, range: string | null): Promise<Respons
   if (r.status === "unsatisfiable") return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${r.total}` } });
   const ext = key.split(".").pop()?.toLowerCase() ?? "";
   const ct = r.contentType.startsWith("video/") ? r.contentType : VIDEO_TYPE[ext] ?? "video/mp4";
-  const headers = { "Content-Type": ct, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range" };
+  const headers = { "Content-Type": ct, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range", "X-Content-Type-Options": "nosniff" };
   const whole = r.start === 0 && r.end >= r.total - 1;
   // ไม่ได้ขอช่วง: ไฟล์เล็ก (ก้อนเดียวครบ) = 200 แบบเดิม · ไฟล์ใหญ่ = ส่งทั้งไฟล์แบบไหลต่อเนื่อง (stream)
   if (!asked && whole) return new Response(r.body, { status: 200, headers: { ...headers, "Content-Length": String(r.total) } });
@@ -67,6 +76,7 @@ async function videoResponse(key: string, range: string | null): Promise<Respons
 const CACHE_HEADERS = {
   "Cache-Control":     "public, max-age=3600, stale-while-revalidate=86400",
   "CDN-Cache-Control": "public, max-age=86400",
+  "X-Content-Type-Options": "nosniff",
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -85,9 +95,10 @@ async function getEdgeCache(): Promise<{ cache: any; waitUntil: (p: Promise<unkn
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
-  // F17: ไม่ต้อง auth — Cloudflare Access protects URL (image proxy = read-only CDN)
+  // ไม่ต้องล็อกอิน: หน้าร้านทุกร้านโหลดรูปสินค้าผ่านเส้นนี้ (ข้ามโดเมน) · ⚠️ บน Vercel ไม่มี Cloudflare Access กั้นแล้ว
+  // กันได้แค่ "ต้องรู้ชื่อไฟล์" + ห้าม "." / ".." (ทะลุ bucket) — ไฟล์ส่วนตัวควรย้ายไปใช้ลิงก์ชั่วคราว (audit 2026-10-21 S5)
   const key = new URL(request.url).searchParams.get("key");
-  if (!key || !SAFE_KEY.test(key)) {
+  if (!key || !SAFE_KEY.test(key) || !isSafeR2Key(key)) {
     return new Response(JSON.stringify({ error: "invalid key" }), {
       status: 400, headers: { "Content-Type": "application/json" },
     });
@@ -161,9 +172,10 @@ export async function GET(request: NextRequest): Promise<Response> {
         // ย่อไม่ได้ → ดึงรูปเดิมใหม่ (stream เดิมอาจถูกอ่านไปแล้ว) แล้วส่ง original
         const fresh = await r2GetObject(key);
         if (fresh) {
+          const freshType = fresh.httpMetadata?.contentType ?? ct0;
           const res = new Response(fresh.body, {
             status: 200,
-            headers: { "Content-Type": fresh.httpMetadata?.contentType ?? ct0, "Content-Length": String(fresh.size), ...CACHE_HEADERS },
+            headers: { "Content-Type": freshType, "Content-Length": String(fresh.size), ...CACHE_HEADERS, ...activeTypeHeaders(freshType) },
           });
           if (edge) { try { edge.waitUntil(edge.cache.put(request, res.clone())); } catch { /* noop */ } }
           return res;
@@ -174,7 +186,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     // 🎬 วิดีโอ (เช่น รูปเปิดหน้าสินค้า ≤ 4 MB): รองรับ Range — Safari/iPhone ขอไฟล์ทีละช่วง (206) ถ้าไม่รองรับจะไม่เล่นเลย
     // ไม่ให้ CDN เก็บ (206 ปน 200 แล้วเสิร์ฟผิดช่วงได้) · เบราว์เซอร์เก็บเองได้ 1 ชม.
     if (ct0.startsWith("video/")) {
-      const vHeaders = { "Content-Type": ct0, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range" };
+      const vHeaders = { "Content-Type": ct0, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range", "X-Content-Type-Options": "nosniff" };
       const buf = new Uint8Array(await new Response(obj.body as ReadableStream).arrayBuffer());
       const total = buf.byteLength;
       const m = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") ?? "");
@@ -198,6 +210,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         "Content-Type":   ct0,
         "Content-Length": String(obj.size),
         ...CACHE_HEADERS,
+        ...activeTypeHeaders(ct0),
       },
     });
     // เก็บลง edge cache เบื้องหลัง (ไม่หน่วง response) — รอบหน้าเสิร์ฟจาก edge ไม่แตะ worker

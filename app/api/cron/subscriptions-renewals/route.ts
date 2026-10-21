@@ -2,7 +2,7 @@
  * /api/cron/subscriptions-renewals — เช็ค subscription ที่ใกล้ต่ออายุ แล้วแจ้งเตือน
  *
  * เรียกได้ 3 ทาง:
- *   1. Vercel Cron (header x-vercel-cron) — ตั้งใน vercel.json (รายวัน)
+ *   1. Vercel Cron — ตรวจด้วย lib/cron-auth (ตั้ง CRON_SECRET แล้วเชื่อแค่รหัสนี้ · ยังไม่ตั้ง = เชื่อ header x-vercel-cron) — ตั้งใน vercel.json (รายวัน)
  *   2. CRON_SECRET (Authorization: Bearer <CRON_SECRET>) ถ้าตั้ง env ไว้
  *   3. แอดมินกดปุ่ม "ทดสอบแจ้งเตือน" (guardApi subscriptions.edit)
  *
@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { isTrustedCron } from "@/lib/cron-auth";
 import {
   nextRenewal, daysUntil, fmtCost, RENEWAL_THRESHOLDS, type Subscription,
 } from "@/lib/subscriptions";
@@ -92,10 +93,7 @@ async function runCheck(): Promise<{ checked: number; due: Due[]; lineSent: bool
 }
 
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const isVercelCron = request.headers.get("x-vercel-cron") != null;
-  const secretOk = !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
-  if (!isVercelCron && !secretOk) {
+  if (!isTrustedCron(request)) {
     const guard = await guardApi(request, "subscriptions.edit"); // แอดมินกดทดสอบเองได้
     if (guard) return guard;
   }

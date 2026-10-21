@@ -8,8 +8,9 @@
  * - รองรับเฉพาะรูป (jpg/png/webp)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { r2GetObject } from "@/lib/r2";
+import { isSafeR2Key, r2GetObject } from "@/lib/r2";
 import { getAi } from "@/lib/ai";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,10 +35,13 @@ function extractJson(text: string): Record<string, unknown> | null {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // ต้องล็อกอิน (แบบเดียวกับ china-pay/balance) — กันคนนอกใช้ AI (เสียเงิน) อ่านไฟล์ใน R2
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ" }, { status: 401 });
   let body: { key?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const key = String(body.key ?? "");
-  if (!key || !SAFE_KEY.test(key)) return NextResponse.json({ error: "key ไม่ถูกต้อง" }, { status: 400 });
+  if (!key || !SAFE_KEY.test(key) || !isSafeR2Key(key)) return NextResponse.json({ error: "key ไม่ถูกต้อง" }, { status: 400 });
   if (key.toLowerCase().endsWith(".pdf")) return NextResponse.json({ error: "ไฟล์ PDF อ่านอัตโนมัติไม่ได้ — เลือกบิลเอง", amount: null, account: "", name: "" }, { status: 200 });
 
   const ai = await getAi();

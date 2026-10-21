@@ -43,6 +43,20 @@ export const R2_PUBLIC_URL   = (process.env.R2_PUBLIC_URL ?? "").replace(/^﻿/,
 //   (สร้าง "R2 API Token" ใน Cloudflare dashboard → Manage R2 API Tokens)
 // ถ้าไม่ครบ → คืน null → ระบบกลับไปใช้ binding (บน Cloudflare) ตามเดิม
 // คืน object หน้าตาเดียวกับ R2 binding → ฟังก์ชัน put/get/delete ด้านล่างใช้ได้โดยไม่ต้องแก้
+
+/**
+ * 🔒 ชื่อไฟล์ R2 ต้องไม่มีช่วง "." หรือ ".." — URL ของ S3 จะยุบ path แล้ว "ทะลุ" ไปอ่าน/เขียน bucket อื่นได้
+ * (audit 2026-10-21) · ใช้ทั้งตอนสร้าง URL (กันทุกจุดที่แตะ R2) และในหน้า API ที่รับ key จากผู้ใช้
+ */
+export function isSafeR2Key(key: string): boolean {
+  return !!key && !key.split("/").some((seg) => seg === "." || seg === "..");
+}
+
+function assertSafeR2Key(key: string): string {
+  if (!isSafeR2Key(key)) throw new Error(`R2 key ไม่ปลอดภัย: ${key.slice(0, 80)}`);
+  return key;
+}
+
 function makeS3Bucket(bucketName: string): R2BucketLike | null {
   const accountId       = (process.env.R2_ACCOUNT_ID ?? "").trim();
   const accessKeyId     = (process.env.R2_ACCESS_KEY_ID ?? "").trim();
@@ -51,7 +65,7 @@ function makeS3Bucket(bucketName: string): R2BucketLike | null {
 
   const client = new AwsClient({ accessKeyId, secretAccessKey, region: "auto", service: "s3" });
   const base = `https://${accountId}.r2.cloudflarestorage.com/${bucketName}`;
-  const urlFor = (key: string) => `${base}/${key.split("/").map(encodeURIComponent).join("/")}`;
+  const urlFor = (key: string) => `${base}/${assertSafeR2Key(key).split("/").map(encodeURIComponent).join("/")}`;
 
   return {
     async get(key: string): Promise<R2ObjectBodyLike> {
@@ -226,7 +240,7 @@ function s3Access(bucketName = R2_BUCKET): { client: AwsClient; urlFor: (key: st
   if (!accountId || !accessKeyId || !secretAccessKey) return null;
   const client = new AwsClient({ accessKeyId, secretAccessKey, region: "auto", service: "s3" });
   const base = `https://${accountId}.r2.cloudflarestorage.com/${bucketName}`;
-  return { client, urlFor: (key: string) => `${base}/${key.split("/").map(encodeURIComponent).join("/")}` };
+  return { client, urlFor: (key: string) => `${base}/${assertSafeR2Key(key).split("/").map(encodeURIComponent).join("/")}` };
 }
 
 export type R2RangeResult =

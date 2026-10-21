@@ -6,7 +6,7 @@
  *   2) ใบสั่งผลิต (manufacturing_orders) ที่ยังเปิดอยู่ → กันเคส "เลยกำหนดแต่ยังไม่ได้จ่ายงานเลย"
  *
  * เรียกได้ 3 ทาง (ล้อ /api/cron/subscriptions-renewals):
- *   1. Vercel Cron (header x-vercel-cron) — ตั้งใน vercel.json
+ *   1. Vercel Cron — ตรวจด้วย lib/cron-auth (ตั้ง CRON_SECRET แล้วเชื่อแค่รหัสนี้ · ยังไม่ตั้ง = เชื่อ header x-vercel-cron) — ตั้งใน vercel.json
  *   2. CRON_SECRET (Authorization: Bearer <CRON_SECRET>)
  *   3. คนคุมบอร์ดกดทดสอบเอง (guardApi work_board.dispatch) — ?dry=1 = ดูผลเฉย ๆ ไม่ส่งจริง
  *
@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { isTrustedCron } from "@/lib/cron-auth";
 import { notifyEvent, pushLineTpl, pushLineText, boardLink } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
@@ -120,10 +121,7 @@ async function send(items: DueItem[]): Promise<{ line: number; bell: boolean }> 
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const secret = process.env.CRON_SECRET;
-  const isVercelCron = request.headers.get("x-vercel-cron") != null;
-  const secretOk = !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
-  if (!isVercelCron && !secretOk) {
+  if (!isTrustedCron(request)) {
     const guard = await guardApi(request, "work_board.dispatch");   // คนคุมบอร์ดกดทดสอบเองได้
     if (guard) return guard;
   }

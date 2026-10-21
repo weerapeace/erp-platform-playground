@@ -28,6 +28,12 @@ const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const IMAGE_GALLERY_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const IMAGE_GALLERY_MAX_ITEMS = 9;
 
+// ชื่อหมวด/รหัสรายการถูกใช้เป็นโฟลเดอร์ใน R2 → รับเฉพาะตัวอักษรปลอดภัย (กัน "../" เขียนข้ามโฟลเดอร์/bucket)
+// ตรวจกับไฟล์แนบเดิม 9,388 ไฟล์แล้วเข้ากฎนี้ครบ (2026-10-21)
+const SAFE_ENTITY_TYPE = /^[a-z0-9_]{1,64}$/;
+const SAFE_ENTITY_ID = /^[A-Za-z0-9_-]{1,80}$/;
+const SAFE_EXT = /^[a-z0-9]{1,10}$/;
+
 function readPositiveInt(value: FormDataEntryValue | null, fallback: number) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
@@ -69,6 +75,8 @@ export async function GET(request: NextRequest) {
 // upload ไป R2 → บันทึก metadata ใน Supabase → คืน attachment row
 
 export async function POST(request: NextRequest) {
+  // ตรวจสิทธิ์ก่อนรับไฟล์ — เดิมเก็บไฟล์ลง R2 ก่อนแล้วค่อยรู้ว่าไม่มีสิทธิ์ (คนนอกยัดไฟล์ได้)
+  const denied = await guardApi(request, "files.upload"); if (denied) return denied;
   if (!(await isR2Configured())) {
     return NextResponse.json(
       { error: "ยังไม่ได้ตั้งค่า Cloudflare R2 (binding R2_IMAGES ไม่พร้อม)" },
@@ -96,6 +104,9 @@ export async function POST(request: NextRequest) {
   if (!file || !entityType || !entityId) {
     return NextResponse.json({ error: "ต้องมี file, entity_type, entity_id" }, { status: 400 });
   }
+  if (!SAFE_ENTITY_TYPE.test(entityType) || !SAFE_ENTITY_ID.test(entityId)) {
+    return NextResponse.json({ error: "entity_type / entity_id ไม่ถูกต้อง" }, { status: 400 });
+  }
   if (imageOnly && !(file.type || "").startsWith("image/")) {
     return NextResponse.json({ error: "รับเฉพาะไฟล์รูปภาพเท่านั้น" }, { status: 400 });
   }
@@ -122,7 +133,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const ext  = (file.name.split(".").pop() || "bin").toLowerCase();
+  const rawExt = (file.name.split(".").pop() || "").toLowerCase();
+  const ext  = SAFE_EXT.test(rawExt) ? rawExt : "bin";
   const rand = Math.random().toString(36).slice(2, 8);
   const path = `${entityType}/${entityId}/${Date.now()}-${rand}.${ext}`;
 

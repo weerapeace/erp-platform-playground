@@ -7,7 +7,9 @@
  *  3) route นี้จะจับ source.groupId แล้วบันทึกลง china_app_settings (line_config.group_id) อัตโนมัติ
  *
  * - ตอบ 200 เสมอ (LINE ต้องการ)
- * - ⚠️ path นี้ต้อง "ยกเว้น" จาก Cloudflare Access (ให้ LINE เรียกได้โดยไม่ต้องล็อกอิน)
+ * - เรียกได้โดยไม่ต้องล็อกอิน (LINE เป็นคนเรียก) → 🔒 ก่อนบันทึกจะถามกลับไปที่ LINE ด้วยโทเคนบอทของเราว่า
+ *   "บอทอยู่ในกลุ่ม/ห้องนี้จริงไหม" — คนนอกยิงปลอมด้วย ID มั่ว ๆ จะไม่ผ่าน (audit 2026-10-21 S7)
+ *   ยังไม่มี channel secret ในระบบ → ตรวจลายเซ็น x-line-signature ไม่ได้ · ถ้าเพิ่มทีหลังให้ตรวจลายเซ็นด้วย
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -24,13 +26,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try { body = await request.json(); } catch { return NextResponse.json({ ok: true }); }
 
   const events = Array.isArray(body.events) ? body.events : [];
-  const gid = events.map(e => e.source?.groupId || e.source?.roomId).find(Boolean);
-  if (!gid) return NextResponse.json({ ok: true });   // ไม่มี group/room — ตอบผ่าน
+  const src = events.map(e => e.source).find(s => s?.groupId || s?.roomId);
+  const gid = src?.groupId || src?.roomId;
+  if (!gid || !/^[A-Za-z0-9]{10,80}$/.test(gid)) return NextResponse.json({ ok: true });   // ไม่มี group/room — ตอบผ่าน
 
   try {
     const admin = supabaseAdmin();
     const { data: row } = await admin.from("china_app_settings").select("id, sval").eq("skey", "line_config").maybeSingle();
     const cur = (row?.sval ?? {}) as Record<string, unknown>;
+    if (cur.group_id === gid) return NextResponse.json({ ok: true });   // กลุ่มเดิม ไม่ต้องบันทึกซ้ำ
+    const token = typeof cur.token === "string" ? cur.token : "";
+    if (!token) return NextResponse.json({ ok: true });   // ยังไม่ได้ตั้งโทเคนบอท → ตรวจไม่ได้ ไม่บันทึก
+    const check = src?.groupId
+      ? `https://api.line.me/v2/bot/group/${encodeURIComponent(gid)}/summary`
+      : `https://api.line.me/v2/bot/room/${encodeURIComponent(gid)}/members/count`;
+    const verified = await fetch(check, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok).catch(() => false);
+    if (!verified) return NextResponse.json({ ok: true });   // บอทไม่ได้อยู่ในกลุ่มนี้ = คำขอปลอม
     const next = { ...cur, group_id: gid, group_captured_at: new Date().toISOString() };
     if (row?.id) await admin.from("china_app_settings").update({ sval: next }).eq("id", row.id);
     else await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
