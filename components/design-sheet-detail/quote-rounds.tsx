@@ -25,6 +25,13 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d: string | null) => { if (!d) return "—"; const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }); };
 const qtyKey = (q: number | null | undefined) => (q == null ? "" : String(q));
 
+/** กำไรรวมของขั้นจำนวนนั้น = กำไร/ชิ้น × จำนวน (เจ้าของขอ 2026-10-21 "อยากได้ เพิ่มทั้งหมด xx บาท") */
+function TotalMargin({ margin, qty }: { margin: number; qty: number | null | undefined }) {
+  if (qty == null || !Number.isFinite(margin)) return null;
+  const t = margin * qty;
+  return <div className={`text-[10px] tabular-nums whitespace-nowrap ${upDown(t)}`} title={`กำไรรวม = ${sgn(margin)}/ชิ้น × ${fmtInt(qty)} ชิ้น`}>รวม {sgn(t)} บาท</div>;
+}
+
 type Size = { key: string; label: string };
 type Batch = { batch: number; part: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
 
@@ -227,6 +234,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
                                   {sgn(margin)}{pct != null ? ` (${pct.toFixed(0)}%)` : ""}
                                 </div>
                               )}
+                              {margin != null && <TotalMargin margin={margin} qty={q.qty} />}
                               <div className="flex items-center justify-end gap-1 mt-0.5">
                                 {vs != null && <span className={`text-[10px] ${vs === 0 ? "text-slate-300" : "text-slate-500"}`} title={`ครั้งที่ ${prev?.batch} เสนอ ${fmtBaht(pOff)}`}>{vs === 0 ? "=" : sgn(vs)}</span>}
                                 {canEdit
@@ -342,6 +350,7 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
                         <input type="number" min={0} step="any" disabled={!on} value={v} onChange={(e) => setCells((m) => ({ ...m, [key(s.key, qty)]: e.target.value }))} placeholder="—"
                           className="h-8 w-24 px-1.5 text-sm text-right border border-blue-300 bg-white rounded-md font-medium text-blue-700 disabled:bg-slate-50" />
                         {margin != null && <div className={`text-[10px] tabular-nums ${upDown(margin)}`}>{sgn(margin)}{n ? ` (${((margin / n) * 100).toFixed(0)}%)` : ""}</div>}
+                        {margin != null && <TotalMargin margin={margin} qty={qty} />}
                       </td>
                     );
                   })}
@@ -353,7 +362,7 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
         </table>
       </div>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-blue-200 bg-blue-50/60">
-        <span className="text-[11px] text-slate-500">ช่องว่าง = ไม่เสนอขั้นนั้น · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน{costDirty ? " · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน" : ""}</span>
+        <span className="text-[11px] text-slate-500">ช่องว่าง = ไม่เสนอขั้นนั้น · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน · "รวม" = กำไรทั้งขั้นจำนวน (กำไร/ชิ้น × จำนวน){costDirty ? " · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน" : ""}</span>
         <div className="flex gap-1.5">
           <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">ยกเลิก</button>
           <button type="button" onClick={() => void save()} disabled={saving} className="h-8 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : `💾 บันทึกครั้งที่ ${nextBatch}`}</button>
