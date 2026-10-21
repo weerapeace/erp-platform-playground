@@ -2,7 +2,7 @@
  * ยอดเงินสด/เงินฝากตั้งต้น — จุดเริ่มของเส้นเงินคงเหลือในหน้า /cashflow
  *
  *   GET                      → รายการบัญชีทั้งหมดที่ยังใช้งาน
- *   POST   { label, amount, as_of_date?, note? }   → เพิ่มบัญชี
+ *   POST   { label, amount, as_of_date?, note?, company_id? }   → เพิ่มบัญชี (company_id = บัญชีของบริษัทไหน)
  *   PATCH  { id, ... }                              → แก้
  *   DELETE ?id=                                     → ปิดใช้งาน (ไม่ลบจริง — เก็บประวัติไว้)
  *
@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { todayISO } from "@/lib/cashflow";
+import { checkCompanyId } from "@/lib/company-check";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,7 +27,11 @@ export type OpeningBalance = {
   as_of_date: string;
   note: string | null;
   sort_order: number;
+  /** บัญชีนี้เป็นของบริษัทไหน — null = ยังไม่ระบุ (นับเฉพาะตอนดูรวมทั้งกลุ่ม) */
+  company_id: string | null;
 };
+
+const SELECT = "id, label, amount, as_of_date, note, sort_order, company_id";
 
 const str = (v: unknown): string => (v == null ? "" : String(v)).trim();
 const numOrNull = (v: unknown): number | null => {
@@ -41,7 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data, error } = await supabaseAdmin()
     .from("cashflow_opening_balances")
-    .select("id, label, amount, as_of_date, note, sort_order")
+    .select(SELECT)
     .eq("is_active", true)
     .order("sort_order")
     .order("created_at");
@@ -65,25 +70,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (amount === null) return NextResponse.json({ error: "ยอดเงินต้องเป็นตัวเลข" }, { status: 400 });
 
   const admin = supabaseAdmin();
+  const company = await checkCompanyId(admin, body.company_id);
+  if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
+
   const { data, error } = await admin
     .from("cashflow_opening_balances")
     .insert({
       label,
       amount,
+      company_id: company.companyId,
       as_of_date: str(body.as_of_date) || todayISO(),
       note: str(body.note) || null,
       sort_order: Number(body.sort_order) || 0,
       created_by: user?.email ?? null,
       updated_by: user?.email ?? null,
     })
-    .select("id, label, amount, as_of_date, note, sort_order")
+    .select(SELECT)
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   await writeAudit(admin, {
     action: "create", entityType: "cashflow_opening_balances", entityId: String((data as { id: string }).id),
-    actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { label, amount },
+    actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { label, amount, company_id: company.companyId },
   });
   return NextResponse.json({ data: data as OpeningBalance, error: null });
 }
@@ -102,7 +111,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: before } = await admin
-    .from("cashflow_opening_balances").select("label, amount, as_of_date").eq("id", id).maybeSingle();
+    .from("cashflow_opening_balances").select("label, amount, as_of_date, company_id").eq("id", id).maybeSingle();
   if (!before) return NextResponse.json({ error: "ไม่พบบัญชีนี้" }, { status: 404 });
 
   // แก้เฉพาะช่องที่ส่งมาจริง (ไม่เขียนทับช่องอื่นเป็นค่าว่าง)
@@ -120,10 +129,15 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (body.as_of_date !== undefined) patch.as_of_date = str(body.as_of_date) || todayISO();
   if (body.note !== undefined) patch.note = str(body.note) || null;
   if (body.sort_order !== undefined) patch.sort_order = Number(body.sort_order) || 0;
+  if (body.company_id !== undefined) {
+    const company = await checkCompanyId(admin, body.company_id);
+    if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
+    patch.company_id = company.companyId;
+  }
 
   const { data, error } = await admin
     .from("cashflow_opening_balances").update(patch).eq("id", id)
-    .select("id, label, amount, as_of_date, note, sort_order").single();
+    .select(SELECT).single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 

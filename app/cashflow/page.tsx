@@ -8,6 +8,7 @@
  * คำสั่งขาย · จัดซื้อ · เงินเดือน · หนี้ (เงินกู้/OD) · โอนเงินจีน
  *
  * หน้านี้ไม่แก้ข้อมูลต้นทางเลย — ยกเว้น "ยอดเงินในบัญชี" ที่ผู้ใช้กรอกเองเพื่อใช้เป็นจุดเริ่มของกราฟ
+ * เลือกดูทีละบริษัทได้ (ปุ่มชุดเดียวกับกระดาน /cashflow/board — เลือกที่หน้าไหน อีกหน้าตามไปด้วย)
  * สูตรรวมยอด/สีแหล่งที่มาอยู่ที่ lib/cashflow.ts (ของกลาง) — ห้ามเขียนซ้ำในไฟล์นี้
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -20,13 +21,17 @@ import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
 import { InfoHint } from "@/components/info-hint";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
+import { CompanyFilterChips, CompanySelect, CompanyTag, useCompanyFilter } from "@/components/company-filter";
+import { UnassignedNotice } from "@/components/cashflow/unassigned-notice";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import {
   CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MANUAL_CATEGORIES, THB, THBShort, manualScheduleLabel,
-  addDaysISO, buildDailySeries, firstNegativeDay, monthLabelTH, todayISO, totalsByMonth,
+  addDaysISO, buildDailySeries, filterEventsByCompany, firstNegativeDay, monthLabelTH, openingForCompany,
+  todayISO, totalsByMonth, unassignedBySource,
   type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
+import { COMPANY_ALL, COMPANY_NONE, companyLabel, matchCompany, type CompanyRef } from "@/lib/company-filter";
 import type { CashflowApiData } from "@/app/api/cashflow/route";
 import type { OpeningBalance } from "@/app/api/cashflow/opening-balances/route";
 import type { LoanReconcileRow } from "@/app/api/cashflow/loan-reallocate/route";
@@ -94,16 +99,30 @@ export default function CashflowPage() {
 
   useEffect(() => { if (canView) load(); }, [canView, load]);
 
-  // ---- กรองตามแหล่งที่ผู้ใช้เปิดไว้ แล้วคำนวณเส้นเงินคงเหลือ ----
+  // ---- แยกบริษัท (จำที่เลือกไว้ร่วมกับกระดาน) ----
+  const companies: CompanyRef[] = useMemo(() => data?.meta.companies ?? [], [data]);
+  const [companyFilter, setCompanyFilter] = useCompanyFilter("erp-cashflow-company", companies);
+  const accounts = useMemo(
+    () => (data?.meta.openingAccounts ?? []).filter((a) => matchCompany(a.company_id, companyFilter)),
+    [data, companyFilter],
+  );
+  const opening = useMemo(() => openingForCompany(accounts, COMPANY_ALL), [accounts]);
+  const openingAsOf = accounts.length ? accounts.map((a) => a.as_of_date).sort().slice(-1)[0] : null;
+  const filterName = companyFilter === COMPANY_ALL ? "ทั้งกลุ่ม" : companyLabel(companies, companyFilter === COMPANY_NONE ? null : companyFilter, "full");
+
+  // ---- กรองตามแหล่งที่ผู้ใช้เปิดไว้ + บริษัท แล้วคำนวณเส้นเงินคงเหลือ ----
   const offSet = useMemo(() => new Set(prefs.off), [prefs.off]);
-  const events = useMemo(
+  const sourceEvents = useMemo(
     () => (data?.events ?? []).filter((e) => !offSet.has(e.source)),
     [data, offSet],
   );
+  const events = useMemo(() => filterEventsByCompany(sourceEvents, companyFilter), [sourceEvents, companyFilter]);
+  const unassigned = useMemo(() => unassignedBySource(sourceEvents, to), [sourceEvents, to]);
+  const unassignedCount = unassigned.reduce((s, u) => s + u.count, 0);
 
   const series = useMemo(
-    () => buildDailySeries(events, data?.meta.openingBalance ?? 0, from, to),
-    [events, data, from, to],
+    () => buildDailySeries(events, opening, from, to),
+    [events, opening, from, to],
   );
 
   const rows: Row[] = useMemo(() => {
@@ -152,6 +171,11 @@ export default function CashflowPage() {
         );
       },
     },
+    {
+      id: "company", header: "บริษัท", size: 90,
+      accessorFn: (r) => companyLabel(companies, r.companyId),
+      cell: ({ row }) => <CompanyTag companies={companies} companyId={row.original.companyId} />,
+    },
     { id: "ref", accessorKey: "ref", header: "เอกสาร", size: 170 },
     { id: "party", accessorKey: "party", header: "คู่ค้า / เจ้าหนี้", size: 220 },
     {
@@ -189,7 +213,7 @@ export default function CashflowPage() {
         <span className="text-xs text-slate-500">{row.original.note || row.original.dateNote || "—"}</span>
       ),
     },
-  ], []);
+  ], [companies]);
 
   if (permsReady && !canView) {
     return <PlaygroundShell><AccessDenied message="หน้ากระแสเงินสดเปิดให้เฉพาะผู้ที่มีสิทธิ์ดูข้อมูลการเงิน" /></PlaygroundShell>;
@@ -260,6 +284,13 @@ export default function CashflowPage() {
             );
           })}
         </div>
+
+        {companies.length > 0 && (
+          <div className="mt-3">
+            <CompanyFilterChips companies={companies} value={companyFilter} onChange={setCompanyFilter}
+                                unassignedCount={unassignedCount} />
+          </div>
+        )}
       </div>
 
       <div className="px-4 md:px-8 py-6 space-y-5">
@@ -300,12 +331,17 @@ export default function CashflowPage() {
               </div>
             )}
 
+            {companyFilter !== COMPANY_ALL && (
+              <UnassignedNotice rows={unassigned} viewingNone={companyFilter === COMPANY_NONE}
+                                onShowNone={() => setCompanyFilter(COMPANY_NONE)} />
+            )}
+
             {/* ---------- การ์ดสรุป ---------- */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card label="เงินในบัญชีตอนนี้"
-                    value={THB(data.meta.openingBalance)}
-                    sub={data.meta.openingAsOf ? `ยอด ณ ${formatDate(data.meta.openingAsOf)}` : "ยังไม่ได้กรอก — กด ⚙️ ตั้งค่า"}
-                    tone={data.meta.openingBalance > 0 ? "text-slate-900" : "text-slate-400"} />
+              <Card label={companyFilter === COMPANY_ALL ? "เงินในบัญชีตอนนี้" : `เงินในบัญชี · ${filterName}`}
+                    value={THB(opening)}
+                    sub={openingAsOf ? `ยอด ณ ${formatDate(openingAsOf)} · ${accounts.length} บัญชี` : "ยังไม่ได้กรอก — กด ⚙️ ตั้งค่า"}
+                    tone={opening > 0 ? "text-slate-900" : "text-slate-400"} />
               <Card label="เงินเข้าที่คาดว่าจะได้"
                     value={THB(inTotal)}
                     sub={`วางบิลแล้ว ${THB(inBilling)} · ใบขาย ${THB(inSO)}`}
@@ -367,7 +403,7 @@ export default function CashflowPage() {
               emptyMessage="ไม่มีรายการเงินเข้า-ออกในช่วงนี้"
               searchPlaceholder="ค้นหาเลขเอกสาร / ชื่อคู่ค้า…"
               searchableKeys={["ref", "party", "note"]}
-              exportFilename="cashflow"
+              exportFilename={companyFilter === COMPANY_ALL ? "cashflow" : `cashflow-${companyLabel(companies, companyFilter === COMPANY_NONE ? null : companyFilter)}`}
               exportEntityType="cashflow"
               selectable
               pageSize={50}
@@ -385,6 +421,7 @@ export default function CashflowPage() {
         onPrefsChange={savePrefs}
         rmbRateSource={data?.meta.rmbRateSource ?? ""}
         rmbRateInUse={data?.meta.rmbRate ?? 0}
+        companies={companies}
         onSaved={load}
       />
     </PlaygroundShell>
@@ -582,7 +619,7 @@ function MonthChart({
 
 /** ป๊อปอัปตั้งค่า: ยอดเงินในบัญชี + ค่าที่ใช้เดาวันจ่าย/วันรับเงิน */
 function SettingsModal({
-  open, onClose, canManage, prefs, onPrefsChange, rmbRateSource, rmbRateInUse, onSaved,
+  open, onClose, canManage, prefs, onPrefsChange, rmbRateSource, rmbRateInUse, companies, onSaved,
 }: {
   open: boolean;
   onClose: () => void;
@@ -591,6 +628,7 @@ function SettingsModal({
   onPrefsChange: (p: Prefs) => void;
   rmbRateSource: string;
   rmbRateInUse: number;
+  companies: CompanyRef[];
   onSaved: () => void;
 }) {
   const [accounts, setAccounts] = useState<OpeningBalance[]>([]);
@@ -600,6 +638,7 @@ function SettingsModal({
   const [newLabel, setNewLabel] = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [newDate, setNewDate] = useState(todayISO());
+  const [newCompany, setNewCompany] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<OpeningBalance | null>(null);
 
   const loadAccounts = useCallback(() => {
@@ -620,7 +659,7 @@ function SettingsModal({
       const res = await apiFetch("/api/cashflow/opening-balances", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: newLabel.trim(), amount: Number(newAmount || 0), as_of_date: newDate }),
+        body: JSON.stringify({ label: newLabel.trim(), amount: Number(newAmount || 0), as_of_date: newDate, company_id: newCompany }),
       });
       const j = await res.json();
       if (j?.error) { setErr(j.error); return; }
@@ -656,6 +695,11 @@ function SettingsModal({
   };
 
   const total = accounts.reduce((s, a) => s + Number(a.amount || 0), 0);
+  /** รวมแยกบริษัท — เห็นทันทีว่าบริษัทไหนยังไม่ได้กรอก */
+  const totalsByCompany = [...companies.map((c) => c.id), null].map((id) => ({
+    id, amount: accounts.filter((a) => (a.company_id ?? null) === id).reduce((s, a) => s + Number(a.amount || 0), 0),
+    count: accounts.filter((a) => (a.company_id ?? null) === id).length,
+  })).filter((t) => t.id !== null || t.count > 0);
 
   return (
     <>
@@ -669,7 +713,10 @@ function SettingsModal({
               <h3 className="font-semibold text-slate-800">💰 เงินในบัญชีตอนนี้</h3>
               <InfoHint>ระบบยังไม่ได้ต่อกับธนาคาร จึงต้องบอกก่อนว่าตอนนี้มีเงินอยู่เท่าไหร่ กราฟถึงจะบอกได้ว่าเงินจะพอไหม · ใส่ได้หลายบัญชี ระบบจะรวมยอดให้เอง</InfoHint>
             </div>
-            <p className="text-xs text-slate-500 mb-3">อัปเดตเมื่อไหร่ก็ได้ — ยิ่งใส่ตรงกับยอดจริง กราฟยิ่งเชื่อถือได้</p>
+            <p className="text-xs text-slate-500 mb-3">
+              อัปเดตเมื่อไหร่ก็ได้ — ยิ่งใส่ตรงกับยอดจริง กราฟยิ่งเชื่อถือได้
+              {companies.length > 0 && " · ระบุบริษัทของแต่ละบัญชีด้วย จะได้ดูเงินแยกบริษัทได้"}
+            </p>
 
             {loading && <p className="text-sm text-slate-400 py-2">กำลังโหลด…</p>}
 
@@ -700,6 +747,11 @@ function SettingsModal({
                       <DateInput value={a.as_of_date} disabled={!canManage}
                                  onChange={(iso) => iso !== a.as_of_date && patch(a.id, { as_of_date: iso })} />
                     </div>
+                    {companies.length > 0 && (
+                      <CompanySelect companies={companies} value={a.company_id} disabled={!canManage}
+                                     onChange={(id) => id !== (a.company_id ?? null) && patch(a.id, { company_id: id })}
+                                     className="w-44 !h-8" />
+                    )}
                     {canManage && (
                       <button onClick={() => setDeleteTarget(a)}
                               className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded" title="เอาบัญชีนี้ออก">
@@ -708,6 +760,18 @@ function SettingsModal({
                     )}
                   </div>
                 ))}
+                {companies.length > 0 && (
+                  <div className="flex items-center gap-x-4 gap-y-1 flex-wrap px-3 py-2 bg-slate-50/60 text-xs">
+                    {totalsByCompany.map((t) => (
+                      <span key={t.id ?? "none"} className="flex items-center gap-1.5">
+                        <CompanyTag companies={companies} companyId={t.id} />
+                        {t.count
+                          ? <b className="tabular-nums text-slate-700">{THB(t.amount)}</b>
+                          : <span className="text-amber-700">ยังไม่ได้กรอก</span>}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center justify-between px-3 py-2 bg-slate-50 text-sm">
                   <span className="text-slate-500">รวมทุกบัญชี</span>
                   <span className="font-bold tabular-nums text-slate-800">{THB(total)}</span>
@@ -732,6 +796,12 @@ function SettingsModal({
                   <label className="block text-xs text-slate-500 mb-1">ยอด ณ วันที่</label>
                   <DateInput value={newDate} onChange={setNewDate} />
                 </div>
+                {companies.length > 0 && (
+                  <div className="w-44">
+                    <label className="block text-xs text-slate-500 mb-1">บัญชีของบริษัท</label>
+                    <CompanySelect companies={companies} value={newCompany} onChange={setNewCompany} className="w-full" />
+                  </div>
+                )}
                 <button onClick={add} disabled={saving}
                         className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
                   {saving ? "กำลังเพิ่ม…" : "+ เพิ่มบัญชี"}
@@ -772,7 +842,7 @@ function SettingsModal({
           </section>
 
           {/* ---- รายการที่กรอกเอง ---- */}
-          <ManualItemsSection canManage={canManage} onChanged={onSaved} />
+          <ManualItemsSection canManage={canManage} companies={companies} onChanged={onSaved} />
         </div>
       </ERPModal>
 
@@ -793,7 +863,7 @@ function SettingsModal({
  * รายจ่าย/รายรับประจำที่ไม่มีเอกสารในระบบ — ค่าเช่า · ค่าน้ำไฟ · ภาษี · ประกันสังคม
  * ถ้าไม่ใส่ตรงนี้ ยอด "เงินออก" บนกระแสเงินสดจะต่ำกว่าความจริงทุกเดือน
  */
-function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onChanged: () => void }) {
+function ManualItemsSection({ canManage, companies, onChanged }: { canManage: boolean; companies: CompanyRef[]; onChanged: () => void }) {
   const [items, setItems] = useState<ManualItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -808,6 +878,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
   const [repeatKind, setRepeatKind] = useState<"once" | "monthly">("monthly");
   const [dayOfMonth, setDayOfMonth] = useState("1");
   const [onceDate, setOnceDate] = useState(todayISO());
+  const [companyId, setCompanyId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true); setErr(null);
@@ -820,7 +891,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
 
   useEffect(load, [load]);
 
-  const resetForm = () => { setEditId(null); setLabel(""); setAmount(""); };
+  const resetForm = () => { setEditId(null); setLabel(""); setAmount(""); };   // บริษัทคงไว้ — กรอกหลายรายการของบริษัทเดียวกันติดกันได้เร็ว
   // ✏️ แก้ไข = เอาค่าเดิมมาใส่ฟอร์มด้านล่าง แล้วบันทึกทับรายการเดิม (ค่าเช่าขึ้น ไม่ต้องลบแล้วเพิ่มใหม่)
   const startEdit = (i: ManualItem) => {
     setErr(null); setEditId(i.id);
@@ -830,6 +901,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
     setRepeatKind(i.repeat_kind === "once" ? "once" : "monthly");
     setDayOfMonth(i.day_of_month != null ? String(i.day_of_month) : "1");
     setOnceDate(i.once_date || todayISO());
+    setCompanyId(i.company_id ?? null);
   };
 
   const add = async () => {
@@ -844,6 +916,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
           repeat_kind: repeatKind,
           day_of_month: repeatKind === "monthly" ? Number(dayOfMonth) : null,
           once_date: repeatKind === "once" ? onceDate : null,
+          company_id: companyId,
         }),
       });
       const j = await res.json();
@@ -898,6 +971,7 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
                 i.direction === "in" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
                 {i.direction === "in" ? "เข้า" : "ออก"}
               </span>
+              {companies.length > 0 && <CompanyTag companies={companies} companyId={i.company_id} className="shrink-0" />}
               <span className="flex-1 min-w-0 truncate text-slate-700">
                 {i.label}
                 {i.category && <span className="ml-1.5 text-[11px] text-slate-400">{i.category}</span>}
@@ -935,6 +1009,12 @@ function ManualItemsSection({ canManage, onChanged }: { canManage: boolean; onCh
                    placeholder="เช่น ค่าเช่าโรงงาน"
                    className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-blue-400" />
           </div>
+          {companies.length > 0 && (
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-slate-500 mb-1">เป็นของบริษัท</label>
+              <CompanySelect companies={companies} value={companyId} onChange={setCompanyId} className="w-full" />
+            </div>
+          )}
           <div>
             <label className="block text-xs text-slate-500 mb-1">หมวด</label>
             <select value={category} onChange={(e) => setCategory(e.target.value)}

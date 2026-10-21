@@ -10,6 +10,7 @@
  *
  * ห้ามเขียนสูตรรวมยอด/สีแหล่งที่มาซ้ำในหน้า UI — เพิ่มที่นี่ที่เดียว ทุกหน้าจะเปลี่ยนตาม
  */
+import { COMPANY_ALL, COMPANY_NONE, matchCompany, type CompanyFilter, type CompanyRef } from "@/lib/company-filter";
 
 // ============================================================
 // ชนิดข้อมูล
@@ -66,6 +67,11 @@ export type CashflowEvent = {
   movable?: boolean;
   /** id เอกสารต้นทาง — ใช้ตอนบันทึกวันใหม่ (ไม่ใช่ id ของ event) */
   docId?: string;
+  /**
+   * เงินก้อนนี้เป็นของบริษัทไหนในกลุ่ม (id ในตาราง companies)
+   * null = ยังไม่ระบุ — ห้ามเดาเป็นบริษัทตั้งต้น ไม่งั้นยอดของบริษัทนั้นจะเกินจริงเงียบ ๆ
+   */
+  companyId?: string | null;
 };
 
 /** ชนิดเอกสารที่กระดานเลื่อนวันให้ได้ + ช่องที่เก็บวันนั้นในฐานข้อมูล */
@@ -222,6 +228,29 @@ export function buildDailySeries(
   return { days, carriedIn, carriedOut, startBalance };
 }
 
+export type SeriesSummary = {
+  in: number;
+  out: number;
+  /** เงินคงเหลือต่ำสุดในช่วง (นับยอดเริ่มด้วย) */
+  low: number;
+  lowDay: string | null;
+  /** จำนวนวัน (ที่มีรายการ) ที่เงินคงเหลือติดลบ — ตัวชี้วัดหลักของกระดาน ไม่ใช่ยอดต่ำสุด */
+  red: number;
+  redFirst: string | null;
+};
+
+/** สรุปเส้นเงินคงเหลือ — ใช้ร่วมกันทั้งกระดานรวมและสรุปรายบริษัท */
+export function summarizeDays(days: CashflowDay[], startBalance: number): SeriesSummary {
+  let inAmt = 0, outAmt = 0, low = startBalance, lowDay: string | null = null, red = 0;
+  let redFirst: string | null = null;
+  for (const d of days) {
+    inAmt += d.in; outAmt += d.out;
+    if (d.balance < low) { low = d.balance; lowDay = d.date; }
+    if (d.balance < 0) { red += 1; if (!redFirst) redFirst = d.date; }
+  }
+  return { in: inAmt, out: outAmt, low, lowDay, red, redFirst };
+}
+
 /** วันแรกที่เงินคงเหลือติดลบ (null = ไม่ติดลบเลยในช่วงนี้) */
 export function firstNegativeDay(days: CashflowDay[]): CashflowDay | null {
   return days.find((d) => d.balance < 0) ?? null;
@@ -337,4 +366,72 @@ const TH_MONTHS_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "
 export function formatDayMonthTH(iso: string): string {
   const d = parseISO(iso);
   return `${d.getUTCDate()} ${TH_MONTHS_SHORT[d.getUTCMonth()]}`;
+}
+
+
+// ============================================================
+// แยกบริษัท — กลุ่มมีหลายบริษัท (ไอ.เอส.จี. / หลุยส์ / …)
+// กติกาตัวกรอง + สีประจำบริษัท อยู่ที่ของกลาง lib/company-filter.ts
+// ============================================================
+
+/** เฉพาะรายการของบริษัทที่เลือก ("all" = ทั้งกลุ่ม · "none" = ยังไม่ระบุบริษัท) */
+export function filterEventsByCompany(events: CashflowEvent[], filter: CompanyFilter): CashflowEvent[] {
+  return filter === COMPANY_ALL ? events : events.filter((e) => matchCompany(e.companyId, filter));
+}
+
+/** ยอดเงินในบัญชีตั้งต้นของบริษัทที่เลือก — บัญชีที่ยังไม่ระบุบริษัทนับเฉพาะตอนดูทั้งกลุ่ม / ยังไม่ระบุ */
+export function openingForCompany(
+  accounts: { company_id?: string | null; amount: number }[],
+  filter: CompanyFilter,
+): number {
+  return accounts
+    .filter((a) => matchCompany(a.company_id ?? null, filter))
+    .reduce((s, a) => s + (Number(a.amount) || 0), 0);
+}
+
+export type CompanyCashSummary = SeriesSummary & {
+  /** id บริษัท หรือ "none" = กองยังไม่ระบุ */
+  key: string;
+  company: CompanyRef | null;
+  opening: number;
+  /** กรอกเงินในบัญชีของบริษัทนี้ไว้หรือยัง — ยังไม่กรอก = เส้นเงินคงเหลือเริ่มจากศูนย์ เชื่อไม่ได้ */
+  accountCount: number;
+  /** จำนวนรายการที่ตกในช่วง (ไม่นับที่เลยปลายช่วง) */
+  count: number;
+};
+
+/**
+ * สรุปแยกบริษัท — แต่ละบริษัทมีเส้นเงินคงเหลือของตัวเอง (ยอดตั้งต้นของตัวเอง + รายการของตัวเอง)
+ * รวมทั้งกลุ่มเงินอาจพอ แต่บริษัทเล็กอาจขาดอยู่คนเดียว — ต้องดูแยกถึงจะเห็น
+ * คืนทุกบริษัทในทะเบียน (แม้ไม่มีรายการ) + กอง "ยังไม่ระบุ" เฉพาะเมื่อมีของค้างอยู่
+ */
+export function summarizeByCompany(
+  events: CashflowEvent[],
+  accounts: { company_id?: string | null; amount: number }[],
+  companies: CompanyRef[],
+  from: string,
+  to: string,
+): CompanyCashSummary[] {
+  const keys: { key: string; company: CompanyRef | null }[] = [
+    ...companies.map((c) => ({ key: c.id, company: c })),
+    { key: COMPANY_NONE, company: null },
+  ];
+  const out: CompanyCashSummary[] = [];
+  for (const { key, company } of keys) {
+    const evs = filterEventsByCompany(events, key).filter((e) => e.date <= to);
+    const accs = accounts.filter((a) => matchCompany(a.company_id ?? null, key));
+    if (!company && !evs.length && !accs.length) continue;
+    const opening = accs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+    const series = buildDailySeries(evs, opening, from, to);
+    out.push({
+      key, company, opening, accountCount: accs.length, count: evs.length,
+      ...summarizeDays(series.days, series.startBalance),
+    });
+  }
+  return out;
+}
+
+/** แยกนับรายการที่ยังไม่ระบุบริษัทตามแหล่ง — ใช้บอกผู้ใช้ว่าต้องไปตั้งที่ไหน */
+export function unassignedBySource(events: CashflowEvent[], to: string): { source: CashflowSource; count: number; in: number; out: number }[] {
+  return totalsBySource(events.filter((e) => !e.companyId && e.date <= to));
 }

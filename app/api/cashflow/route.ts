@@ -22,6 +22,7 @@ import {
   addDaysISO, dayOfMonthISO, endOfMonthISO, manualDateInMonth, manualScheduleLabel, monthsBetween, todayISO,
   type CashflowEvent,
 } from "@/lib/cashflow";
+import type { CompanyRef } from "@/lib/company-filter";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,7 +41,9 @@ export type CashflowMeta = {
   supplierDefaultDays: number;
   openingBalance: number;
   openingAsOf: string | null;
-  openingAccounts: { id: string; label: string; amount: number; as_of_date: string }[];
+  openingAccounts: { id: string; label: string; amount: number; as_of_date: string; company_id: string | null }[];
+  /** บริษัทในกลุ่ม (เรียงตามทะเบียน) — ใช้ทำปุ่มสลับบริษัท + สีป้ายบนการ์ด */
+  companies: CompanyRef[];
   warnings: CashflowWarning[];
 };
 
@@ -72,11 +75,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ------------------------------------------------------------
   // ข้อมูลตั้งต้นที่ใช้ร่วมกัน — คู่ค้า (เครดิต) + เรตหยวน + ยอดเงินตั้งต้น
   // ------------------------------------------------------------
-  const [partnersRes, chinaRateRes, openingRes] = await Promise.all([
+  const [partnersRes, chinaRateRes, openingRes, companiesRes] = await Promise.all([
     db.from("partners_v2").select("id, display_name, name_th, code, payment_terms_days, sales_credit_term, purchase_credit_term").limit(5000),
     db.from("china_bills").select("rate, bill_date").not("rate", "is", null).order("bill_date", { ascending: false }).limit(1),
-    db.from("cashflow_opening_balances").select("id, label, amount, as_of_date").eq("is_active", true).order("sort_order").limit(200),
+    db.from("cashflow_opening_balances").select("id, label, amount, as_of_date, company_id").eq("is_active", true).order("sort_order").limit(200),
+    db.from("companies").select("id, company_code, name, is_default, status, sort_order").order("sort_order").limit(100),
   ]);
+
+  // ทะเบียนบริษัท — เก็บทุกบริษัทไว้ก่อน (รวมที่ปิดใช้งาน) เผื่อเอกสารเก่ายังอ้างถึง · ส่งออกเฉพาะที่ใช้อยู่ + ที่มีรายการจริง
+  type CompanyRow = { id: string; company_code: string | null; name: string | null; is_default: boolean | null; status: string | null };
+  const allCompanies = ((companiesRes.data ?? []) as CompanyRow[]).map((c) => ({
+    ref: { id: String(c.id), code: String(c.company_code ?? ""), name: String(c.name ?? c.company_code ?? ""), isDefault: !!c.is_default } as CompanyRef,
+    active: (c.status ?? "active") !== "inactive",
+  }));
+  const knownCompany = new Set(allCompanies.map((c) => c.ref.id));
+  /** id บริษัทที่ใช้ได้ — ค่าที่ไม่อยู่ในทะเบียนถือว่า "ยังไม่ระบุ" (ห้ามเดาเป็นบริษัทตั้งต้น) */
+  const co = (id: unknown): string | null => (id && knownCompany.has(String(id)) ? String(id) : null);
 
   type PartnerRow = {
     id: string; display_name: string | null; name_th: string | null; code: string | null;
@@ -96,6 +110,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const openingAccounts = (openingRes.data ?? []).map((r) => ({
     id: String(r.id), label: String(r.label ?? ""), amount: num(r.amount), as_of_date: String(r.as_of_date ?? ""),
+    company_id: co(r.company_id),
   }));
   const openingBalance = openingAccounts.reduce((s, a) => s + a.amount, 0);
   const openingAsOf = openingAccounts.length
@@ -113,16 +128,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ------------------------------------------------------------
   const soCoveredByBilling = new Set<string>();
   if (incomeBasis === "billing" || incomeBasis === "both") {
-    const [bnRes, bnLineRes] = await Promise.all([
+    const [bnRes, bnLineRes, soCoRes] = await Promise.all([
       db.from("erp_playground_billing_notes")
         .select("id, bill_number, status, customer_name, bill_date, due_date, grand_total, amount_due, paid_at")
         .neq("status", "cancelled").is("paid_at", null).lte("bill_date", to).limit(5000),
       db.from("erp_playground_billing_note_lines").select("billing_note_id, so_id").limit(20000),
+      db.from("erp_playground_sales_orders").select("id, company_id").not("company_id", "is", null).limit(20000),
     ]);
+
+    // ใบวางบิลยังไม่มีช่องบริษัทของตัวเอง → ดูจากใบขายที่อยู่ข้างใน (ทุกใบเป็นบริษัทเดียวกัน = ของบริษัทนั้น)
+    const soCompany = new Map<string, string>();
+    for (const r of soCoRes.data ?? []) soCompany.set(String(r.id), String(r.company_id));
+    const bnCompanies = new Map<string, Set<string>>();
 
     const liveBnIds = new Set((bnRes.data ?? []).map((b) => String(b.id)));
     for (const l of bnLineRes.data ?? []) {
-      if (l.so_id && liveBnIds.has(String(l.billing_note_id))) soCoveredByBilling.add(String(l.so_id));
+      if (l.so_id && liveBnIds.has(String(l.billing_note_id))) {
+        soCoveredByBilling.add(String(l.so_id));
+        const c = soCompany.get(String(l.so_id));
+        if (c) {
+          const set = bnCompanies.get(String(l.billing_note_id)) ?? new Set<string>();
+          set.add(c);
+          bnCompanies.set(String(l.billing_note_id), set);
+        }
+      }
     }
 
     for (const b of bnRes.data ?? []) {
@@ -130,6 +159,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       if (amount <= 0) continue;
       const hasDue = !!b.due_date;
       const date = String(b.due_date || b.bill_date || today).slice(0, 10);
+      const bnCos = [...(bnCompanies.get(String(b.id)) ?? [])];
       events.push({
         id: `bn:${b.id}`,
         date,
@@ -141,9 +171,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         amount,
         dateConfident: hasDue,
         dateNote: hasDue ? undefined : "ใบวางบิลนี้ไม่ได้ระบุวันครบกำหนด — ใช้วันที่วางบิลแทน",
-        note: b.status === "draft" ? "ใบวางบิลยังเป็นร่าง" : undefined,
+        note: bnCos.length > 1
+          ? "ใบวางบิลนี้รวมใบขายหลายบริษัท — ระบบแยกบริษัทให้ไม่ได้"
+          : b.status === "draft" ? "ใบวางบิลยังเป็นร่าง" : undefined,
         href: openLink("/billing-notes", String(b.id)),
         movable: true, docId: String(b.id),
+        companyId: bnCos.length === 1 ? co(bnCos[0]) : null,
       });
     }
   }
@@ -154,7 +187,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (incomeBasis === "so" || incomeBasis === "both") {
     const soRes = await db
       .from("erp_playground_sales_orders")
-      .select("id, so_number, status, customer_id, customer_name, order_date, expected_ship_date, expected_payment_date, grand_total, amount_due")
+      .select("id, so_number, status, customer_id, customer_name, order_date, expected_ship_date, expected_payment_date, grand_total, amount_due, company_id")
       .in("status", SO_ACTIVE_STATUSES).limit(5000);
 
     let guessed = 0;
@@ -191,6 +224,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             : `ลูกค้ารายนี้ยังไม่ได้ตั้งเครดิต — ระบบใช้ค่าเริ่มต้น ${customerDefaultDays} วัน`,
         href: openLink("/sales-orders", String(s.id)),
         movable: true, docId: String(s.id),
+        companyId: co(s.company_id),
       });
     }
     if (guessed > 0) {
@@ -258,6 +292,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         note: isRmb ? `ยอดจริง ¥${num(p.grand_total).toLocaleString("th-TH")} × เรต ${rmbRate}` : undefined,
         href: openLink("/purchasing/po-list", String(p.id)),
         movable: true, docId: String(p.id),
+        companyId: null,   // ใบซื้อยังไม่มีช่องบริษัท — อยู่กอง "ยังไม่ระบุ" จนกว่าจะเพิ่มช่อง (เฟส 2)
       });
     }
     if (guessed > 0) {
@@ -281,10 +316,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 4) เงินออก — เงินเดือน (รอบที่ทำไว้แล้ว + ประมาณการเดือนที่ยังไม่ได้ทำ)
   // ------------------------------------------------------------
   {
-    const [batchRes, lineRes] = await Promise.all([
-      db.from("payment_batches").select("id, batch_no, batch_type, payment_date, status").limit(2000),
+    const [batchRes, lineRes, periodRes] = await Promise.all([
+      db.from("payment_batches").select("id, batch_no, batch_type, payment_date, status, payroll_period_id").limit(2000),
       db.from("payment_batch_lines").select("payment_batch_id, paid_amount, gross_amount").limit(50000),
+      db.from("payroll_periods").select("id, company_id").limit(5000),
     ]);
+
+    // รอบเงินเดือนแยกบริษัทอยู่แล้ว (ที่งวดเงินเดือน payroll_periods.company_id)
+    const periodCompany = new Map<string, string | null>();
+    for (const r of periodRes.data ?? []) periodCompany.set(String(r.id), co(r.company_id));
 
     const sumByBatch = new Map<string, number>();
     for (const l of lineRes.data ?? []) {
@@ -292,16 +332,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       sumByBatch.set(k, (sumByBatch.get(k) ?? 0) + (num(l.paid_amount) || num(l.gross_amount)));
     }
 
-    type Batch = { id: string; batch_no: string | null; batch_type: string | null; payment_date: string | null; status: string | null };
+    type Batch = {
+      id: string; batch_no: string | null; batch_type: string | null; payment_date: string | null;
+      status: string | null; payroll_period_id: string | null;
+    };
     const batches = ((batchRes.data ?? []) as Batch[]).filter((b) => b.status !== "cancelled");
+    const batchCompany = (b: Batch) => periodCompany.get(String(b.payroll_period_id ?? "")) ?? null;
 
-    /** เดือน+ชนิดที่มีรอบจ่ายอยู่แล้ว — เดือนไหนมีของจริงแล้วห้ามใส่ประมาณการซ้ำ */
+    /** เดือน+ชนิด+บริษัท ที่มีรอบจ่ายอยู่แล้ว — ห้ามใส่ประมาณการซ้ำ (แต่ ISG ทำรอบแล้ว ไม่ได้แปลว่าหลุยส์ทำแล้ว) */
     const covered = new Set<string>();
     let pastUnmarked = 0;
     for (const b of batches) {
       const date = String(b.payment_date ?? "").slice(0, 10);
       if (!date) continue;
-      covered.add(`${date.slice(0, 7)}|${b.batch_type ?? "other"}`);
+      covered.add(`${date.slice(0, 7)}|${b.batch_type ?? "other"}|${batchCompany(b) ?? "none"}`);
 
       const amount = sumByBatch.get(String(b.id)) ?? 0;
       if (amount <= 0 || date > to) continue;
@@ -320,6 +364,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         dateConfident: true,
         note: b.status === "draft" ? "รอบนี้ยังเป็นร่าง ยังไม่อนุมัติ" : undefined,
         href: "/payroll/payments",
+        companyId: batchCompany(b),
       });
     }
 
@@ -332,34 +377,36 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       });
     }
 
-    // ประมาณการเดือนที่ยังไม่ได้ทำรอบ — เฉลี่ยจากรอบชนิดเดียวกัน 3 รอบล่าสุดที่มียอดจริง
-    const avgByType = new Map<string, number>();
-    for (const type of ["mid_month", "month_end"]) {
-      const recent = batches
-        .filter((b) => (b.batch_type ?? "") === type && (sumByBatch.get(String(b.id)) ?? 0) > 0)
-        .sort((a, b) => String(b.payment_date).localeCompare(String(a.payment_date)))
-        .slice(0, 3);
-      if (!recent.length) continue;
-      // รอบเดียวกันอาจถูกแตกเป็นหลายใบ (คนละบริษัท) → รวมยอดของ "วันจ่ายเดียวกัน" ก่อนค่อยเฉลี่ย
-      const byDate = new Map<string, number>();
-      for (const b of recent) {
-        const d = String(b.payment_date);
-        byDate.set(d, (byDate.get(d) ?? 0) + (sumByBatch.get(String(b.id)) ?? 0));
-      }
-      const vals = [...byDate.values()];
-      avgByType.set(type, vals.reduce((s, v) => s + v, 0) / vals.length);
+    // ประมาณการเดือนที่ยังไม่ได้ทำรอบ — เฉลี่ยแยกบริษัท จาก 3 วันจ่ายล่าสุดของชนิดเดียวกันที่มียอดจริง
+    // (บริษัทเดียวกันอาจแตกรอบเดียวเป็นหลายใบ → รวมยอดของ "วันจ่ายเดียวกัน" ก่อนค่อยเฉลี่ย)
+    const byGroup = new Map<string, { type: string; companyId: string | null; byDate: Map<string, number> }>();
+    for (const b of batches) {
+      const type = b.batch_type ?? "";
+      if (type !== "mid_month" && type !== "month_end") continue;
+      const amt = sumByBatch.get(String(b.id)) ?? 0;
+      if (amt <= 0 || !b.payment_date) continue;
+      const companyId = batchCompany(b);
+      const key = `${type}|${companyId ?? "none"}`;
+      const g = byGroup.get(key) ?? { type, companyId, byDate: new Map<string, number>() };
+      const d = String(b.payment_date).slice(0, 10);
+      g.byDate.set(d, (g.byDate.get(d) ?? 0) + amt);
+      byGroup.set(key, g);
     }
+    const averages = [...byGroup.values()].map((g) => {
+      const recent = [...g.byDate.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 3).map(([, v]) => v);
+      return { type: g.type, companyId: g.companyId, avg: recent.reduce((s, v) => s + v, 0) / recent.length };
+    });
 
     let estimated = 0;
     for (const monthStart of monthsBetween(from, to)) {
       const ym = monthStart.slice(0, 7);
-      for (const [type, avg] of avgByType) {
-        if (covered.has(`${ym}|${type}`)) continue;
+      for (const { type, companyId, avg } of averages) {
+        if (covered.has(`${ym}|${type}|${companyId ?? "none"}`)) continue;
         const date = type === "mid_month" ? dayOfMonthISO(monthStart, 15) : endOfMonthISO(monthStart);
         if (date < from || date > to) continue;
         estimated += 1;
         events.push({
-          id: `pay-est:${ym}:${type}`,
+          id: `pay-est:${ym}:${type}:${companyId ?? "none"}`,
           date,
           direction: "out",
           source: "payroll",
@@ -369,8 +416,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           amount: Math.round(avg),
           dateConfident: false,
           dateNote: type === "mid_month" ? "ปกติจ่ายกลางเดือน" : "ปกติจ่ายสิ้นเดือน",
-          note: "ยังไม่ได้ทำรอบจ่ายเดือนนี้ — เฉลี่ยจาก 3 รอบล่าสุด",
+          note: "ยังไม่ได้ทำรอบจ่ายเดือนนี้ — เฉลี่ยจาก 3 รอบล่าสุดของบริษัทนี้",
           href: "/payroll/payments",
+          companyId,
         });
       }
     }
@@ -397,10 +445,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           .select("id, loan_contract_id, installment_no, due_date, total_due, total_paid, payment_status")
           .in("schedule_version_id", activeVersions).eq("is_active", true).neq("payment_status", "paid")
           .lte("due_date", to).limit(5000),
-        db.from("loan_contracts").select("id, loan_code, loan_name").limit(2000),
+        db.from("loan_contracts").select("id, loan_code, loan_name, company_id").limit(2000),
       ]);
 
-      const contracts = new Map<string, { loan_code: string | null; loan_name: string | null }>();
+      const contracts = new Map<string, { loan_code: string | null; loan_name: string | null; company_id: string | null }>();
       for (const c of contractRes.data ?? []) contracts.set(String(c.id), c);
 
       let overdue = 0;
@@ -424,6 +472,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           note: date < today ? "เลยกำหนดชำระแล้ว" : undefined,
           href: openLink("/loan-installments", String(i.id)),
           docId: String(i.id),
+          companyId: co(c?.company_id),
         });
       }
       if (overdue > 0) {
@@ -443,7 +492,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   {
     const cardRes = await db
       .from("debt_cards")
-      .select("id, card_name, lender_name, statement_balance, paid_amount, minimum_due, due_date, status")
+      .select("id, card_name, lender_name, statement_balance, paid_amount, minimum_due, due_date, status, company_id")
       .eq("is_active", true).neq("status", "paid").not("due_date", "is", null).lte("due_date", to).limit(500);
     for (const k of cardRes.data ?? []) {
       const amount = Math.max(0, num(k.statement_balance) - num(k.paid_amount));
@@ -462,6 +511,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         note: date < today ? "เลยกำหนดชำระแล้ว — ถ้าจ่ายแล้วให้กรอก 'จ่ายแล้ว' ที่บัตร" : (num(k.minimum_due) > 0 && num(k.minimum_due) < amount ? `ขั้นต่ำ ${num(k.minimum_due).toLocaleString("th-TH")}` : undefined),
         href: openLink("/debt-cards", String(k.id)),
         docId: String(k.id),
+        companyId: co(k.company_id),
       });
     }
   }
@@ -472,7 +522,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   {
     const odRes = await db
       .from("od_facilities")
-      .select("id, od_code, lender_name, estimated_interest_this_month, current_used_amount")
+      .select("id, od_code, lender_name, estimated_interest_this_month, current_used_amount, company_id")
       .eq("is_active", true).limit(500);
 
     for (const od of odRes.data ?? []) {
@@ -495,6 +545,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           note: "ประมาณการจากยอดที่ใช้อยู่ปัจจุบัน",
           href: openLink("/od-facilities", String(od.id)),
           docId: String(od.id),
+          companyId: co(od.company_id),
         });
       }
     }
@@ -532,6 +583,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         note: num(b.amount_thb) > 0 ? undefined : `¥${(num(b.amount_rmb) + num(b.fee_rmb)).toLocaleString("th-TH")} × เรต ${rate}`,
         href: "/app/china-pay",
         movable: true, docId: String(b.id),
+        companyId: null,   // บิลจีนยังไม่มีช่องบริษัท (เฟส 2)
       });
     }
     if (noRate > 0) {
@@ -551,7 +603,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   {
     const miRes = await db
       .from("cashflow_manual_items")
-      .select("id, label, direction, amount, category, repeat_kind, day_of_month, once_date, start_date, end_date, note")
+      .select("id, label, direction, amount, category, repeat_kind, day_of_month, once_date, start_date, end_date, note, company_id")
       .eq("is_active", true).limit(1000);
 
     const items = miRes.data ?? [];
@@ -579,6 +631,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           href: "/cashflow",
           // แก้ที่ตั้งค่าเท่านั้น — ถ้าให้ลากบนกระดานจะกลายเป็นแก้ "รอบ" ทั้งชุดโดยไม่ตั้งใจ
           movable: false,
+          companyId: co(m.company_id),
         });
       };
 
@@ -603,13 +656,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   events.sort((a, b) => (a.date === b.date ? b.amount - a.amount : a.date.localeCompare(b.date)));
 
+  // ส่งออกบริษัทที่ใช้อยู่ + บริษัทที่ปิดไปแล้วแต่ยังมีเงินค้าง (ไม่งั้นรายการพวกนั้นจะหายจากทุกปุ่ม)
+  const usedCompany = new Set<string>();
+  for (const e of events) if (e.companyId) usedCompany.add(e.companyId);
+  for (const a of openingAccounts) if (a.company_id) usedCompany.add(a.company_id);
+  const companies = allCompanies.filter((c) => c.active || usedCompany.has(c.ref.id)).map((c) => c.ref);
+
   const data: CashflowApiData = {
     from,
     to,
     events,
     meta: {
       rmbRate, rmbRateSource, customerDefaultDays, supplierDefaultDays,
-      openingBalance, openingAsOf, openingAccounts, warnings,
+      openingBalance, openingAsOf, openingAccounts, companies, warnings,
     },
   };
   return NextResponse.json({ data, error: null });

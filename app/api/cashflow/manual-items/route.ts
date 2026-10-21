@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { todayISO } from "@/lib/cashflow";
+import { checkCompanyId } from "@/lib/company-check";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,6 +35,8 @@ export type ManualItem = {
   start_date: string | null;
   end_date: string | null;
   note: string | null;
+  /** รายการนี้เป็นของบริษัทไหน — null = ยังไม่ระบุ */
+  company_id: string | null;
 };
 
 const str = (v: unknown) => (v == null ? "" : String(v)).trim();
@@ -43,7 +46,7 @@ const money = (v: unknown) => {
 };
 const dateOrNull = (v: unknown) => (DATE_RE.test(str(v)) ? str(v) : null);
 
-const SELECT = "id, label, direction, amount, category, repeat_kind, day_of_month, once_date, start_date, end_date, note";
+const SELECT = "id, label, direction, amount, category, repeat_kind, day_of_month, once_date, start_date, end_date, note, company_id";
 
 /** แปลง body → แถวที่พร้อมเขียน · คืนข้อความไทยถ้าข้อมูลไม่ครบ */
 function buildRow(body: Record<string, unknown>): { row: Record<string, unknown> } | { error: string } {
@@ -112,6 +115,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if ("error" in built) return NextResponse.json({ error: built.error }, { status: 400 });
 
   const admin = supabaseAdmin();
+  const company = await checkCompanyId(admin, body.company_id);
+  if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
+  built.row.company_id = company.companyId;
+
   const { data, error } = await admin
     .from("cashflow_manual_items")
     .insert({ ...built.row, created_by: user?.email ?? null, updated_by: user?.email ?? null })
@@ -145,6 +152,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // ตรวจทั้งใบเสมอ (รวมค่าเดิมที่ไม่ได้ส่งมา) — กันเคสแก้ครึ่งใบแล้วเงื่อนไขวันขัดกัน
   const built = buildRow({ ...(before as Record<string, unknown>), ...body });
   if ("error" in built) return NextResponse.json({ error: built.error }, { status: 400 });
+  const company = await checkCompanyId(admin, body.company_id !== undefined ? body.company_id : (before as { company_id?: string | null }).company_id);
+  if ("error" in company) return NextResponse.json({ error: company.error }, { status: 400 });
+  built.row.company_id = company.companyId;
 
   const { data, error } = await admin
     .from("cashflow_manual_items")

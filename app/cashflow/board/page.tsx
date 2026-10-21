@@ -11,6 +11,8 @@
  *  - แปะโน้ตบนวันได้ (เรื่องที่ไม่ใช่ตัวเลข เช่น "คุยกับร้านแล้ว เลื่อนได้")
  *  - เส้นน้ำเงิน = เงินคงเหลือ · ช่องแดง = วันที่เงินติดลบ
  *  - กด "ยืนยัน" ถึงจะเขียนวันใหม่ลงเอกสารจริง
+ *  - เลือกดูทีละบริษัทได้ (ไอ.เอส.จี. / หลุยส์ / ยังไม่ระบุ) — แต่ละบริษัทมีเงินในบัญชีและเส้นเงินคงเหลือของตัวเอง
+ *    ลากการ์ด = เลื่อนวันเท่านั้น ไม่เปลี่ยนบริษัท
  *
  * ใช้ข้อมูลชุดเดียวกับหน้า /cashflow (API /api/cashflow) และสูตรจาก lib/cashflow.ts
  */
@@ -21,13 +23,17 @@ import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { InfoHint } from "@/components/info-hint";
 import { DateInput } from "@/components/date-input";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
+import { CompanyFilterChips, CompanyTag, useCompanyFilter } from "@/components/company-filter";
+import { UnassignedNotice } from "@/components/cashflow/unassigned-notice";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import {
   CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MOVABLE_SOURCES, THB,
-  addDaysISO, buildDailySeries, endOfMonthISO, formatDayMonthTH, monthLabelTH, parseISO, toISO, todayISO,
+  addDaysISO, buildDailySeries, endOfMonthISO, filterEventsByCompany, formatDayMonthTH, monthLabelTH,
+  openingForCompany, parseISO, summarizeByCompany, summarizeDays, toISO, todayISO, unassignedBySource,
   type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
+import { COMPANY_ALL, COMPANY_NONE, companyLabel, type CompanyRef } from "@/lib/company-filter";
 import type { CashflowApiData } from "@/app/api/cashflow/route";
 import type { PlanResult } from "@/app/api/cashflow/plan/route";
 import type { BoardNote } from "@/app/api/cashflow/notes/route";
@@ -57,7 +63,7 @@ const shortTHB = (n: number) => {
 /** การ์ด 1 ใบ หรือกองที่รวมของร้านเดียวกันไว้ */
 type BoardCard =
   | { kind: "single"; key: string; ev: CashflowEvent }
-  | { kind: "group"; key: string; party: string; events: CashflowEvent[]; total: number; direction: "in" | "out"; movable: boolean };
+  | { kind: "group"; key: string; party: string; events: CashflowEvent[]; total: number; direction: "in" | "out"; movable: boolean; companyId: string | null };
 
 export default function CashBoardPage() {
   const canView = usePermission("cashflow.view");
@@ -104,16 +110,35 @@ export default function CashBoardPage() {
 
   useEffect(() => { if (canView) load(); }, [canView, load]);
 
-  const events: CashflowEvent[] = useMemo(
+  // ---- แยกบริษัท — ทะเบียนบริษัทมากับข้อมูลกระแสเงินสด (จำที่เลือกไว้ร่วมกับหน้าตาราง /cashflow) ----
+  const companies: CompanyRef[] = useMemo(() => data?.meta.companies ?? [], [data]);
+  const [companyFilter, setCompanyFilterRaw] = useCompanyFilter("erp-cashflow-company", companies);
+  const setCompanyFilter = (f: string) => { setSelected(new Set()); setCompanyFilterRaw(f); };
+  const accounts = useMemo(() => data?.meta.openingAccounts ?? [], [data]);
+
+  /** ทุกบริษัท + วันที่ลองเลื่อนไว้ — ใช้ทำสรุปแยกบริษัท */
+  const allEvents: CashflowEvent[] = useMemo(
     () => (data?.events ?? []).map((e) => (pending[e.id] ? { ...e, date: pending[e.id] } : e)),
     [data, pending],
   );
+  /** เฉพาะบริษัทที่เลือกดูอยู่ — ทุกอย่างบนกระดานคิดจากชุดนี้ */
+  const events = useMemo(() => filterEventsByCompany(allEvents, companyFilter), [allEvents, companyFilter]);
 
-  const opening = data?.meta.openingBalance ?? 0;
+  const opening = useMemo(() => openingForCompany(accounts, companyFilter), [accounts, companyFilter]);
   const series = useMemo(() => buildDailySeries(events, opening, from, to), [events, opening, from, to]);
-  const baseSeries = useMemo(() => buildDailySeries(data?.events ?? [], opening, from, to), [data, opening, from, to]);
-  const stats = useMemo(() => summarize(series.days, series.startBalance), [series]);
-  const baseStats = useMemo(() => summarize(baseSeries.days, baseSeries.startBalance), [baseSeries]);
+  const baseSeries = useMemo(
+    () => buildDailySeries(filterEventsByCompany(data?.events ?? [], companyFilter), opening, from, to),
+    [data, companyFilter, opening, from, to],
+  );
+  const stats = useMemo(() => summarizeDays(series.days, series.startBalance), [series]);
+  const baseStats = useMemo(() => summarizeDays(baseSeries.days, baseSeries.startBalance), [baseSeries]);
+  const companySummaries = useMemo(
+    () => summarizeByCompany(allEvents, accounts, companies, from, to),
+    [allEvents, accounts, companies, from, to],
+  );
+  const unassigned = useMemo(() => unassignedBySource(allEvents, to), [allEvents, to]);
+  const unassignedCount = unassigned.reduce((s, u) => s + u.count, 0);
+  const filterName = companyFilter === COMPANY_ALL ? "ทั้งกลุ่ม" : companyLabel(companies, companyFilter === COMPANY_NONE ? null : companyFilter, "full");
 
   const days = useMemo(() => {
     const out: string[] = [];
@@ -143,7 +168,7 @@ export default function CashBoardPage() {
       }
       const buckets = new Map<string, CashflowEvent[]>();
       for (const ev of list) {
-        const k = `${ev.direction}|${ev.party}`;
+        const k = `${ev.direction}|${ev.companyId ?? ""}|${ev.party}`;
         buckets.set(k, [...(buckets.get(k) ?? []), ev]);
       }
       const cards: BoardCard[] = [];
@@ -154,6 +179,7 @@ export default function CashBoardPage() {
           total: evs.reduce((s, e) => s + e.amount, 0),
           direction: evs[0].direction,
           movable: evs.every((e) => e.movable),
+          companyId: evs[0].companyId ?? null,
         });
       }
       cards.sort((a, b) => (b.kind === "group" ? b.total : b.ev.amount) - (a.kind === "group" ? a.total : a.ev.amount));
@@ -359,12 +385,21 @@ export default function CashBoardPage() {
             </span>
           )}
         </div>
+
+        {companies.length > 0 && (
+          <div className="mt-3">
+            <CompanyFilterChips companies={companies} value={companyFilter} onChange={setCompanyFilter}
+                                unassignedCount={unassignedCount} />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[264px_minmax(0,1fr)] min-h-[70vh]">
         <aside className="bg-white border-b xl:border-b-0 xl:border-r border-slate-200 p-4 space-y-4">
           <div className="space-y-2">
-            <p className="text-[11px] tracking-wider uppercase text-slate-400">สรุปช่วงนี้</p>
+            <p className="text-[11px] tracking-wider uppercase text-slate-400">
+              สรุปช่วงนี้{companies.length > 0 && <span className="normal-case tracking-normal text-slate-600"> · {filterName}</span>}
+            </p>
             <Stat label="เงินเข้า" value={THB(stats.in)} tone="text-emerald-600" />
             <Stat label="เงินออก" value={THB(stats.out)} tone="text-rose-600" />
             <Stat label="เงินเหลือน้อยสุด" value={THB(stats.low)}
@@ -374,6 +409,11 @@ export default function CashBoardPage() {
                   sub={stats.redFirst ? `เริ่มติดลบ ${formatDayMonthTH(stats.redFirst)}` : "เงินพอตลอดช่วง"}
                   tone={stats.red ? "text-red-600" : "text-emerald-600"} box={stats.red ? "warn" : "good"} />
           </div>
+
+          {companySummaries.length > 1 && (
+            <CompanySummaryList rows={companySummaries} companies={companies}
+                                value={companyFilter} onPick={setCompanyFilter} />
+          )}
 
           {movedEvents.length > 0 && (
             <div className="rounded-lg border border-blue-300 bg-blue-50 p-3">
@@ -412,6 +452,7 @@ export default function CashBoardPage() {
             <div className="flex items-center gap-2"><span className="w-4 border-t-2 border-blue-600 shrink-0" /> เส้นเงินคงเหลือ</div>
             <LegendRow color="bg-red-400" text="ช่องแดง = เงินติดลบวันนั้น" />
             <LegendRow color="bg-amber-300" text="โน้ตแปะวัน — กด ＋ ที่หัวคอลัมน์" />
+            {companies.length > 0 && <LegendRow color="bg-sky-300" text="ป้ายเล็กบนการ์ด = เป็นของบริษัทไหน" />}
           </div>
 
           <div className="text-xs text-slate-500 border-t border-slate-100 pt-3">
@@ -428,7 +469,7 @@ export default function CashBoardPage() {
           </div>
 
           <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-3">
-            เงินตั้งต้น <b className="text-slate-600 tabular-nums">{THB(opening)}</b>
+            เงินตั้งต้น{companyFilter !== COMPANY_ALL && ` (${filterName})`} <b className="text-slate-600 tabular-nums">{THB(opening)}</b>
             {" · "}<Link href="/cashflow" className="text-blue-600 underline">ตั้งค่า + รายจ่ายประจำ</Link>
           </p>
         </aside>
@@ -441,6 +482,17 @@ export default function CashBoardPage() {
             </div>
           )}
           {saveMsg && <div className="m-4 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm text-emerald-700">✅ {saveMsg}</div>}
+          {data && companyFilter !== COMPANY_ALL && unassignedCount > 0 && (
+            <UnassignedNotice rows={unassigned} viewingNone={companyFilter === COMPANY_NONE}
+                              onShowNone={() => setCompanyFilter(COMPANY_NONE)} className="mx-4 mt-4" />
+          )}
+          {data && companyFilter !== COMPANY_ALL && companyFilter !== COMPANY_NONE
+            && !accounts.some((a) => a.company_id === companyFilter) && (
+            <div className="mx-4 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-800">
+              ⚠️ ยังไม่ได้กรอกเงินในบัญชีของ <b>{filterName}</b> — เส้นเงินคงเหลือเริ่มจาก ฿0 ตัวเลขยังเชื่อไม่ได้ ·{" "}
+              <Link href="/cashflow" className="underline">ไปกรอกที่ ⚙️ ตั้งค่า</Link>
+            </div>
+          )}
           {loading && !data && <div className="text-center text-slate-400 py-24">กำลังจัดของขึ้นกระดาน…</div>}
 
           {data && (
@@ -449,6 +501,7 @@ export default function CashBoardPage() {
               levelByDay={levelByDay} balanceByDay={balanceByDay} today={from}
               dragIds={dragIds} overDay={overDay} pending={pending} selected={selected}
               openGroups={openGroups} canManage={canManage}
+              companies={companies} showCompany={companyFilter === COMPANY_ALL}
               originalDate={(id) => data.events.find((e) => e.id === id)?.date ?? ""}
               onDragStart={startDrag} onDragEnd={() => { setDragIds(null); setOverDay(null); }}
               onOver={setOverDay} onDrop={drop} onToggleSelect={toggleSelect} onSelectDay={selectDay}
@@ -496,6 +549,7 @@ export default function CashBoardPage() {
         ev={detailEvent}
         originalDate={detailEvent ? (data?.events.find((e) => e.id === detailEvent.id)?.date ?? null) : null}
         selected={detailEvent ? selected.has(detailEvent.id) : false}
+        companies={companies}
         onClose={() => setDetailId(null)}
         onMove={moveOne}
         onToggleSelect={toggleSelect}
@@ -557,15 +611,64 @@ export default function CashBoardPage() {
 // ชิ้นส่วนย่อย
 // ============================================================
 
-function summarize(days: { date: string; in: number; out: number; balance: number }[], start: number) {
-  let inAmt = 0, outAmt = 0, low = start, lowDay: string | null = null, red = 0;
-  let redFirst: string | null = null;
-  for (const d of days) {
-    inAmt += d.in; outAmt += d.out;
-    if (d.balance < low) { low = d.balance; lowDay = d.date; }
-    if (d.balance < 0) { red += 1; if (!redFirst) redFirst = d.date; }
-  }
-  return { in: inAmt, out: outAmt, low, lowDay, red, redFirst };
+/**
+ * สรุปแยกบริษัท — แต่ละบริษัทมีเส้นเงินคงเหลือของตัวเอง
+ * รวมทั้งกลุ่มเงินอาจพอ แต่บริษัทเล็กอาจขาดอยู่คนเดียว · กดแถวเพื่อสลับไปดูบริษัทนั้น
+ */
+function CompanySummaryList({ rows, companies, value, onPick }: {
+  rows: ReturnType<typeof summarizeByCompany>;
+  companies: CompanyRef[];
+  value: string;
+  onPick: (key: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5 border-t border-slate-100 pt-3">
+      <p className="text-[11px] tracking-wider uppercase text-slate-400 flex items-center gap-1">
+        แยกบริษัท
+        <InfoHint>แต่ละบริษัทคิดจากเงินในบัญชีของตัวเอง + รายการของตัวเอง · กดแถวเพื่อดูกระดานของบริษัทนั้น</InfoHint>
+      </p>
+      {rows.map((r) => {
+        const on = value === r.key;
+        if (!r.company) {
+          return (
+            <button key={r.key} type="button" onClick={() => onPick(r.key)}
+                    className={`w-full text-left rounded-lg border p-2 text-xs transition-colors ${
+                      on ? "border-amber-400 bg-amber-50" : "border-amber-200 bg-amber-50/50 hover:bg-amber-50"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <CompanyTag companies={companies} companyId={null} />
+                <span className="text-amber-800">{r.count} รายการ</span>
+              </div>
+              <p className="mt-1 text-amber-800/80">
+                ไม่ถูกนับตอนดูทีละบริษัท{r.out > 0 && <> · ออก <b className="tabular-nums">{THB(r.out)}</b></>}
+                {r.in > 0 && <> · เข้า <b className="tabular-nums">{THB(r.in)}</b></>}
+              </p>
+            </button>
+          );
+        }
+        return (
+          <button key={r.key} type="button" onClick={() => onPick(r.key)}
+                  className={`w-full text-left rounded-lg border p-2 text-xs transition-colors ${
+                    on ? "border-slate-800 ring-1 ring-slate-800 bg-white" : r.red ? "border-red-200 bg-red-50/60 hover:bg-red-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <CompanyTag companies={companies} companyId={r.key} />
+                <span className="truncate text-slate-700">{r.company.name}</span>
+              </span>
+            </div>
+            <div className="mt-1.5 grid grid-cols-2 gap-x-2 text-[11px]">
+              <span className="text-slate-500">เหลือน้อยสุด</span>
+              <span className={`text-right tabular-nums font-semibold ${r.low < 0 ? "text-red-600" : "text-slate-800"}`}>{THB(r.low)}</span>
+              <span className="text-slate-500">วันติดลบ</span>
+              <span className={`text-right tabular-nums ${r.red ? "text-red-600 font-semibold" : "text-emerald-600"}`}>{r.red} วัน</span>
+            </div>
+            {r.accountCount === 0 && (
+              <p className="mt-1 text-[10.5px] text-amber-700">⚠️ ยังไม่กรอกเงินในบัญชี — เริ่มจาก ฿0</p>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function Stat({ label, value, sub, tone, box }: {
@@ -589,10 +692,11 @@ const LegendRow = ({ color, text }: { color: string; text: string }) => (
  * รายละเอียดการ์ด — กดที่การ์ดแล้วเปิดอันนี้
  * บอกครบว่าเงินก้อนนี้คืออะไร ทำไมถึงตกวันนี้ และเลื่อนได้ไหม (เลื่อนจากในนี้ได้เลย ไม่ต้องลาก)
  */
-function CardDetailModal({ ev, originalDate, selected, onClose, onMove, onToggleSelect }: {
+function CardDetailModal({ ev, originalDate, selected, companies, onClose, onMove, onToggleSelect }: {
   ev: CashflowEvent | null;
   originalDate: string | null;
   selected: boolean;
+  companies: CompanyRef[];
   onClose: () => void;
   onMove: (id: string, day: string) => void;
   onToggleSelect: (id: string) => void;
@@ -646,6 +750,12 @@ function CardDetailModal({ ev, originalDate, selected, onClose, onMove, onToggle
 
           {/* ---- วันที่ ---- */}
           <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 text-sm">
+            {companies.length > 0 && (
+              <Row label="บริษัท">
+                <CompanyTag companies={companies} companyId={ev.companyId} mode="full" className="text-[11px]" />
+                {!ev.companyId && <span className="ml-2 text-xs text-amber-700">ดูทีละบริษัทจะไม่ถูกนับ</span>}
+              </Row>
+            )}
             <Row label="วันที่เงินเข้า/ออก">
               <span className="font-medium">{formatDate(ev.date)}</span>
               {moved && (
@@ -731,6 +841,9 @@ type BoardProps = {
   selected: Set<string>;
   openGroups: Set<string>;
   canManage: boolean;
+  companies: CompanyRef[];
+  /** ดูทั้งกลุ่ม = โชว์ป้ายบริษัทบนการ์ด (ดูบริษัทเดียวไม่ต้องโชว์ ซ้ำทุกใบ) */
+  showCompany: boolean;
   originalDate: (id: string) => string;
   onDragStart: (ids: string[]) => void;
   onDragEnd: () => void;
@@ -882,6 +995,7 @@ function Board(p: BoardProps) {
                 {cards.map((c) =>
                   c.kind === "single" ? (
                     <Card key={c.key} ev={c.ev}
+                          companies={p.showCompany ? p.companies : null}
                           dragging={!!p.dragIds?.includes(c.ev.id)}
                           checked={p.selected.has(c.ev.id)}
                           movedFrom={p.pending[c.ev.id] ? p.originalDate(c.ev.id) : null}
@@ -889,6 +1003,7 @@ function Board(p: BoardProps) {
                           onToggleSelect={p.onToggleSelect} onOpenDetail={p.onOpenDetail} />
                   ) : (
                     <GroupCard key={c.key} card={c} open={p.openGroups.has(c.key)}
+                               companies={p.showCompany ? p.companies : null}
                                dragging={!!p.dragIds?.some((id) => c.events.some((e) => e.id === id))}
                                selected={p.selected} pending={p.pending} originalDate={p.originalDate}
                                onToggle={() => p.onToggleGroup(c.key)}
@@ -907,8 +1022,10 @@ function Board(p: BoardProps) {
   );
 }
 
-function Card({ ev, dragging, checked, movedFrom, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
+function Card({ ev, companies, dragging, checked, movedFrom, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
   ev: CashflowEvent; dragging: boolean; checked: boolean; movedFrom: string | null;
+  /** null = ไม่โชว์ป้ายบริษัท */
+  companies: CompanyRef[] | null;
   onDragStart: (ids: string[]) => void; onDragEnd: () => void;
   onToggleSelect: (id: string) => void; onOpenDetail: (id: string) => void;
 }) {
@@ -958,16 +1075,18 @@ function Card({ ev, dragging, checked, movedFrom, onDragStart, onDragEnd, onTogg
         </span>
       </div>
       <p className="text-[11.5px] text-slate-700 mt-0.5 line-clamp-2 leading-snug">{ev.party}</p>
-      <p className="text-[10px] text-slate-400 mt-px">
-        {ev.ref}{movedFrom && <span className="text-blue-600"> · เลื่อนจาก {formatDayMonthTH(movedFrom)}</span>}
+      <p className="text-[10px] text-slate-400 mt-px flex items-center gap-1 flex-wrap">
+        {companies && companies.length > 0 && <CompanyTag companies={companies} companyId={ev.companyId} />}
+        <span>{ev.ref}{movedFrom && <span className="text-blue-600"> · เลื่อนจาก {formatDayMonthTH(movedFrom)}</span>}</span>
       </p>
     </div>
   );
 }
 
 /** กองการ์ดของร้านเดียวกันในวันเดียวกัน — ลากทั้งกองได้ กดเพื่อกางดูรายใบ */
-function GroupCard({ card, open, dragging, selected, pending, originalDate, onToggle, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
+function GroupCard({ card, companies, open, dragging, selected, pending, originalDate, onToggle, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
   card: Extract<BoardCard, { kind: "group" }>;
+  companies: CompanyRef[] | null;
   open: boolean; dragging: boolean;
   selected: Set<string>; pending: Record<string, string>;
   originalDate: (id: string) => string;
@@ -1003,13 +1122,16 @@ function GroupCard({ card, open, dragging, selected, pending, originalDate, onTo
           </span>
         </div>
         <p className="text-[11.5px] text-slate-700 mt-0.5 line-clamp-2 leading-snug">{card.party}</p>
-        <p className="text-[10px] text-slate-400 mt-px">{open ? "▲ ซ่อนรายใบ" : "▼ กดดูรายใบ"}</p>
+        <p className="text-[10px] text-slate-400 mt-px flex items-center gap-1">
+          {companies && companies.length > 0 && <CompanyTag companies={companies} companyId={card.companyId} />}
+          <span>{open ? "▲ ซ่อนรายใบ" : "▼ กดดูรายใบ"}</span>
+        </p>
       </div>
 
       {open && (
         <div className="pl-2 space-y-1.5 border-l-2 border-slate-200">
           {card.events.map((ev) => (
-            <Card key={ev.id} ev={ev} dragging={false} checked={selected.has(ev.id)}
+            <Card key={ev.id} ev={ev} companies={companies} dragging={false} checked={selected.has(ev.id)}
                   movedFrom={pending[ev.id] ? originalDate(ev.id) : null}
                   onDragStart={onDragStart} onDragEnd={onDragEnd}
                   onToggleSelect={onToggleSelect} onOpenDetail={onOpenDetail} />

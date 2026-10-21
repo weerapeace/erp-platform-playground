@@ -16,7 +16,15 @@ import {
   totalsByMonth,
   totalsBySource,
   type CashflowEvent,
+  filterEventsByCompany,
+  openingForCompany,
+  summarizeByCompany,
+  summarizeDays,
+  unassignedBySource,
 } from "@/lib/cashflow";
+import {
+  COMPANY_ALL, COMPANY_NONE, UNASSIGNED_TONE, companyLabel, companyTone, validCompanyFilter, type CompanyRef,
+} from "@/lib/company-filter";
 
 /** ตัวช่วยสร้างรายการเงินแบบสั้น ๆ ในเทสต์ */
 const ev = (
@@ -189,5 +197,77 @@ describe("cashflow — การ์ดไหนเลื่อนวันได
       expect(cfg!.dateField, key).toMatch(/^[a-z0-9_]+$/);
       expect(cfg!.label.length, key).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("cashflow — แยกบริษัท", () => {
+  const ISG: CompanyRef = { id: "isg", code: "ISG", name: "ไอ.เอส.จี. เทรดดิ้ง", isDefault: true };
+  const LM: CompanyRef = { id: "lm", code: "LOUIS", name: "หลุยส์ มอนตินี่", isDefault: false };
+  const of = (e: CashflowEvent, companyId: string | null): CashflowEvent => ({ ...e, companyId });
+
+  const events = [
+    of(ev("a", "2026-09-05", "in", 1000), "isg"),
+    of(ev("b", "2026-09-06", "out", 300, "payroll"), "lm"),
+    of(ev("c", "2026-09-07", "out", 200, "purchase_order"), null),
+  ];
+  const accounts = [
+    { company_id: "isg", amount: 500 },
+    { company_id: "lm", amount: 100 },
+    { company_id: null, amount: 50 },
+  ];
+
+  it("ตัวกรอง: ทั้งกลุ่ม / บริษัทเดียว / ยังไม่ระบุ", () => {
+    expect(filterEventsByCompany(events, COMPANY_ALL).map((e) => e.id)).toEqual(["a", "b", "c"]);
+    expect(filterEventsByCompany(events, "isg").map((e) => e.id)).toEqual(["a"]);
+    expect(filterEventsByCompany(events, COMPANY_NONE).map((e) => e.id)).toEqual(["c"]);
+  });
+
+  it("ยังไม่ระบุบริษัท ต้องไม่ถูกนับเป็นของบริษัทตั้งต้น (ไม่งั้นยอด ISG เกินจริงเงียบ ๆ)", () => {
+    expect(filterEventsByCompany(events, "isg").some((e) => !e.companyId)).toBe(false);
+    expect(openingForCompany(accounts, "isg")).toBe(500);
+  });
+
+  it("ยอดตั้งต้น: ทั้งกลุ่มรวมทุกบัญชี · บัญชีไม่ระบุบริษัทนับเฉพาะกองยังไม่ระบุ", () => {
+    expect(openingForCompany(accounts, COMPANY_ALL)).toBe(650);
+    expect(openingForCompany(accounts, "lm")).toBe(100);
+    expect(openingForCompany(accounts, COMPANY_NONE)).toBe(50);
+  });
+
+  it("สรุปรายบริษัท: แต่ละบริษัทมีเส้นเงินของตัวเอง — หลุยส์ติดลบได้แม้ทั้งกลุ่มยังบวก", () => {
+    const rows = summarizeByCompany(events, accounts, [ISG, LM], "2026-09-01", "2026-09-30");
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+    expect(byKey.isg.low).toBe(500);
+    expect(byKey.isg.red).toBe(0);
+    expect(byKey.lm.low).toBe(-200);
+    expect(byKey.lm.red).toBe(1);
+    expect(byKey[COMPANY_NONE].count).toBe(1);
+    // ทั้งกลุ่ม: 650 + 1000 - 300 - 200 = 1150 → ไม่ติดลบเลย
+    const all = buildDailySeries(events, 650, "2026-09-01", "2026-09-30");
+    expect(summarizeDays(all.days, all.startBalance).red).toBe(0);
+  });
+
+  it("บริษัทที่ยังไม่มีรายการก็ต้องโผล่ (จะได้เห็นว่ายังไม่กรอกเงินในบัญชี) · กองยังไม่ระบุโผล่เฉพาะตอนมีของ", () => {
+    const rows = summarizeByCompany([], [], [ISG, LM], "2026-09-01", "2026-09-30");
+    expect(rows.map((r) => r.key)).toEqual(["isg", "lm"]);
+    expect(rows[0].accountCount).toBe(0);
+  });
+
+  it("นับรายการยังไม่ระบุแยกตามแหล่ง — บอกได้ว่าต้องไปตั้งที่ไหน", () => {
+    expect(unassignedBySource(events, "2026-09-30")).toEqual([{ source: "purchase_order", in: 0, out: 200, count: 1 }]);
+  });
+
+  it("ตัวกรองที่จำไว้แต่บริษัทถูกปิดไปแล้ว → กลับไปดูทั้งกลุ่ม", () => {
+    expect(validCompanyFilter("isg", [ISG])).toBe("isg");
+    expect(validCompanyFilter("gone", [ISG])).toBe(COMPANY_ALL);
+    expect(validCompanyFilter(null, [ISG])).toBe(COMPANY_ALL);
+    expect(validCompanyFilter(COMPANY_NONE, [ISG])).toBe(COMPANY_NONE);
+  });
+
+  it("สี/ชื่อบริษัท: ไล่ตามลำดับในทะเบียน · ไม่รู้จัก = ยังไม่ระบุ", () => {
+    expect(companyTone([ISG, LM], "isg")).not.toEqual(companyTone([ISG, LM], "lm"));
+    expect(companyTone([ISG, LM], null)).toEqual(UNASSIGNED_TONE);
+    expect(companyLabel([ISG, LM], "lm")).toBe("LOUIS");
+    expect(companyLabel([ISG, LM], "lm", "full")).toBe("หลุยส์ มอนตินี่");
+    expect(companyLabel([ISG, LM], "x")).toBe("ยังไม่ระบุ");
   });
 });
