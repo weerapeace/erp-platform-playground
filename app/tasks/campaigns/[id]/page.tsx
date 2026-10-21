@@ -39,6 +39,7 @@ import { getLang } from "@/lib/lang";
 import { computeGrid, indexToCol } from "@/lib/canvas-formula";
 import { TableDrawer } from "../../table-drawer";
 import { usePushToast, type ToastVariant } from "@/components/toast";
+import { SearchMultiPick, type SearchPage } from "@/components/search-multi-pick";
 
 // แปลข้อความบน "การ์ด" (ฟังก์ชัน module-level ไม่มี hook) — อ่านภาษาปัจจุบันตรง ๆ · การ์ดจะ re-sync ตอนสลับภาษา
 const tt = (th: string, en: string) => (getLang() === "en" ? en : th);
@@ -1344,57 +1345,27 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
 
 const PICK_PAGE = 30;   // โหลดทีละ 30 + ปุ่มโหลดเพิ่ม (เดิมตัดที่ 30 แล้วไม่มีทางเห็นตัวที่เหลือ เช่นค้น WK เจอ 40 เห็นแค่ 30)
 
-// เลือก Parent SKU หลายอัน (ค้นหา + checkbox + รูป)
+// ดึงหน้าผลค้นหาของตัวเลือกหลายตัว — เรียกไม่สำเร็จ = โยน error ให้ SearchMultiPick แสดง
+async function pickPage<T>(url: string, map: (r: Record<string, unknown>) => T): Promise<SearchPage<T>> {
+  const res = await apiFetch(url);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+  return { rows: ((j.data ?? []) as Record<string, unknown>[]).map(map), total: Number(j.total ?? 0) };
+}
+
+// เลือก Parent SKU หลายอัน (ค้นหา + checkbox + รูป) — ของกลาง SearchMultiPick
+const mapParentRow = (r: Record<string, unknown>): ParentSkuVal => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null });
 function ParentSkuMultiPick({ selected, onChange }: { selected: ParentSkuVal[]; onChange: (v: ParentSkuVal[]) => void }) {
   const t = useT();
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ParentSkuVal[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [more, setMore] = useState(false);
-  const mapRow = (r: Record<string, unknown>): ParentSkuVal => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null });
-  const fetchPage = async (q: string, offset: number) => {
-    const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset) })}`);
-    const j = await res.json();
-    return { rows: ((j.data ?? []) as Record<string, unknown>[]).map(mapRow), total: Number(j.total ?? 0) };
-  };
-  useEffect(() => {
-    let active = true; setLoading(true);
-    const tmr = setTimeout(async () => {
-      try { const { rows, total: tt } = await fetchPage(query, 0); if (active) { setResults(rows); setTotal(tt); } }
-      catch { if (active) { setResults([]); setTotal(0); } } finally { if (active) setLoading(false); }
-    }, 250);
-    return () => { active = false; clearTimeout(tmr); };
-  }, [query]);
-  const loadMore = async () => {
-    setMore(true);
-    try { const { rows } = await fetchPage(query, results.length); setResults((p) => [...p, ...rows]); }
-    catch { /* ignore */ } finally { setMore(false); }
-  };
-  const toggle = (s: ParentSkuVal) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
   return (
-    <div className="space-y-2">
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("🔍 ค้นหา Parent SKU / ชื่อ...", "🔍 Search Parent SKU / name...")} className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm" />
-      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
-      <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
-        {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("กำลังค้นหา...", "Searching...")}</p>
-          : results.length === 0 ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("ไม่พบ Parent SKU", "No Parent SKU found")}</p>
-          : results.map((s) => { const on = selected.some((x) => x.id === s.id); return (
-            <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-teal-50/40" : ""}`}>
-              <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-teal-600 pointer-events-none" />
-              {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">🧬</span>}
-              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
-            </button>
-          ); })}
-        {!loading && results.length > 0 && results.length < total && (
-          <button onClick={loadMore} disabled={more} className="w-full px-3 py-2 text-xs text-teal-700 bg-teal-50/60 hover:bg-teal-50 disabled:opacity-50">
-            {more ? t("กำลังโหลด…", "Loading…") : `${t("โหลดเพิ่ม", "Load more")} (${t("แสดง", "showing")} ${results.length}/${total})`}
-          </button>
-        )}
-      </div>
-      {!loading && total > 0 && <p className="text-[11px] text-slate-400">{t("พบ", "Found")} {total} {t("รายการ", "items")}{results.length < total ? ` · ${t("แสดง", "showing")} ${results.length}` : ""}</p>}
-    </div>
+    <SearchMultiPick<ParentSkuVal> selected={selected} onChange={onChange} tone="teal" getId={(s) => s.id} chipLabel={(s) => s.code}
+      placeholder={t("🔍 ค้นหา Parent SKU / ชื่อ...", "🔍 Search Parent SKU / name...")} emptyText={t("ไม่พบ Parent SKU", "No Parent SKU found")}
+      fetchPage={(q, offset) => pickPage(`/api/pickers/parent-skus?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset) })}`, mapParentRow)}
+      renderRow={(s) => <>
+        {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">🧬</span>}
+        <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+        <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+      </>} />
   );
 }
 
@@ -1541,121 +1512,45 @@ function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSkuVal[]; 
   );
 }
 
-// เลือก SKU หลายอัน (ค้นหา + checkbox)
+// เลือก SKU หลายอัน (ค้นหา + checkbox) — ของกลาง SearchMultiPick
+const mapSkuRow = (r: Record<string, unknown>): SkuPickerValue => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), color: r.color != null ? String(r.color) : null, list_price: r.list_price == null ? null : Number(r.list_price), image_key: r.image_key == null ? null : String(r.image_key), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null });
 function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onChange: (v: SkuPickerValue[]) => void }) {
   const t = useT();
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SkuPickerValue[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [more, setMore] = useState(false);
-  const mapRow = (r: Record<string, unknown>): SkuPickerValue => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), color: r.color != null ? String(r.color) : null, list_price: r.list_price == null ? null : Number(r.list_price), image_key: r.image_key == null ? null : String(r.image_key), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null });
-  const fetchPage = async (q: string, offset: number) => {
-    const res = await apiFetch(`/api/pickers/skus?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset), sales_only: "false" })}`);
-    const j = await res.json();
-    return { rows: ((j.data ?? []) as Record<string, unknown>[]).map(mapRow), total: Number(j.total ?? 0) };
-  };
-  useEffect(() => {
-    let active = true; setLoading(true);
-    const tmr = setTimeout(async () => {
-      try { const { rows, total: tt } = await fetchPage(query, 0); if (active) { setResults(rows); setTotal(tt); } }
-      catch { if (active) { setResults([]); setTotal(0); } } finally { if (active) setLoading(false); }
-    }, 250);
-    return () => { active = false; clearTimeout(tmr); };
-  }, [query]);
-  const loadMore = async () => {
-    setMore(true);
-    try { const { rows } = await fetchPage(query, results.length); setResults((p) => [...p, ...rows]); }
-    catch { /* ignore */ } finally { setMore(false); }
-  };
-  const toggle = (s: SkuPickerValue) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
   return (
-    <div className="space-y-2">
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("🔍 ค้นหา SKU / ชื่อสินค้า...", "🔍 Search SKU / product name...")} className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm" />
-      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-violet-50 text-violet-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
-      <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
-        {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("กำลังค้นหา...", "Searching...")}</p>
-          : results.length === 0 ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("ไม่พบ SKU", "No SKU found")}</p>
-          : results.map((s) => { const on = selected.some((x) => x.id === s.id); return (
-            <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-violet-50/40" : ""}`}>
-              <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-violet-600 pointer-events-none" />
-              {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">📦</span>}
-              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
-              {s.color && <span className="text-[10px] text-slate-400 shrink-0">{s.color}</span>}
-              {s.list_price != null && <span className="text-xs text-slate-400 shrink-0">{Number(s.list_price).toLocaleString()}฿</span>}
-            </button>
-          ); })}
-        {!loading && results.length > 0 && results.length < total && (
-          <button onClick={loadMore} disabled={more} className="w-full px-3 py-2 text-xs text-violet-700 bg-violet-50/60 hover:bg-violet-50 disabled:opacity-50">
-            {more ? t("กำลังโหลด…", "Loading…") : `${t("โหลดเพิ่ม", "Load more")} (${t("แสดง", "showing")} ${results.length}/${total})`}
-          </button>
-        )}
-      </div>
-      {!loading && total > 0 && <p className="text-[11px] text-slate-400">{t("พบ", "Found")} {total} {t("รายการ", "items")}{results.length < total ? ` · ${t("แสดง", "showing")} ${results.length}` : ""}</p>}
-    </div>
+    <SearchMultiPick<SkuPickerValue> selected={selected} onChange={onChange} tone="violet" getId={(s) => s.id} chipLabel={(s) => s.code}
+      placeholder={t("🔍 ค้นหา SKU / ชื่อสินค้า...", "🔍 Search SKU / product name...")} emptyText={t("ไม่พบ SKU", "No SKU found")}
+      fetchPage={(q, offset) => pickPage(`/api/pickers/skus?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset), sales_only: "false" })}`, mapSkuRow)}
+      renderRow={(s) => <>
+        {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">📦</span>}
+        <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+        <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+        {s.color && <span className="text-[10px] text-slate-400 shrink-0">{s.color}</span>}
+        {s.list_price != null && <span className="text-xs text-slate-400 shrink-0">{Number(s.list_price).toLocaleString()}฿</span>}
+      </>} />
   );
 }
 
-// เลือกใบงานออกแบบหลายใบ (ค้นหา + checkbox + รูปหน้าปก) — ข้อมูลชุดเดียวกับ Design Dashboard
+// เลือกใบงานออกแบบหลายใบ (ค้นหา + checkbox + รูปหน้าปก) — ข้อมูลชุดเดียวกับ Design Dashboard · ของกลาง SearchMultiPick
 function DesignSheetMultiPick({ selected, onChange, statusLabel }: {
   selected: DesignSheetListItem[];
   onChange: (v: DesignSheetListItem[]) => void;
   statusLabel: (status?: string | null) => string | null;
 }) {
   const t = useT();
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<DesignSheetListItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [more, setMore] = useState(false);
-  const fetchPage = async (q: string, offset: number) => {
-    const res = await apiFetch(`/api/design-sheets?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset), archived: "0", sort_by: "updated_at", sort_dir: "desc" })}`);
-    const j = await res.json();
-    return { rows: ((j.data ?? []) as DesignSheetListItem[]), total: Number(j.total ?? 0) };
-  };
-  useEffect(() => {
-    let active = true; setLoading(true);
-    const tmr = setTimeout(async () => {
-      try { const { rows, total: tt } = await fetchPage(query, 0); if (active) { setResults(rows); setTotal(tt); } }
-      catch { if (active) { setResults([]); setTotal(0); } } finally { if (active) setLoading(false); }
-    }, 250);
-    return () => { active = false; clearTimeout(tmr); };
-  }, [query]);
-  const loadMore = async () => {
-    setMore(true);
-    try { const { rows } = await fetchPage(query, results.length); setResults((p) => [...p, ...rows]); }
-    catch { /* ignore */ } finally { setMore(false); }
-  };
-  const toggle = (s: DesignSheetListItem) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
   return (
-    <div className="space-y-2">
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("🔍 ค้นหารหัสใบงาน (DS-...) / ชื่องาน...", "🔍 Search sheet code (DS-...) / name...")} className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm" />
-      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
-      <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
-        {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("กำลังค้นหา...", "Searching...")}</p>
-          : results.length === 0 ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("ไม่พบใบงานออกแบบ", "No design sheet found")}</p>
-          : results.map((s) => { const on = selected.some((x) => x.id === s.id); const cover = withImageWidth(s.cover_url, 72); return (
-            <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-indigo-50/40" : ""}`}>
-              <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-indigo-600 pointer-events-none" />
-              {cover
-                // eslint-disable-next-line @next/next/no-img-element
-                ? <img src={cover} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" />
-                : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">📐</span>}
-              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
-              {s.brand_name && <span className="text-[10px] text-slate-400 shrink-0">{s.brand_name}</span>}
-              <span className="text-[10px] text-indigo-500 shrink-0">{statusLabel(s.status)}</span>
-            </button>
-          ); })}
-        {!loading && results.length > 0 && results.length < total && (
-          <button onClick={loadMore} disabled={more} className="w-full px-3 py-2 text-xs text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 disabled:opacity-50">
-            {more ? t("กำลังโหลด…", "Loading…") : `${t("โหลดเพิ่ม", "Load more")} (${t("แสดง", "showing")} ${results.length}/${total})`}
-          </button>
-        )}
-      </div>
-      {!loading && total > 0 && <p className="text-[11px] text-slate-400">{t("พบ", "Found")} {total} {t("รายการ", "items")}{results.length < total ? ` · ${t("แสดง", "showing")} ${results.length}` : ""}</p>}
-    </div>
+    <SearchMultiPick<DesignSheetListItem> selected={selected} onChange={onChange} tone="indigo" getId={(s) => s.id} chipLabel={(s) => s.code}
+      placeholder={t("🔍 ค้นหารหัสใบงาน (DS-...) / ชื่องาน...", "🔍 Search sheet code (DS-...) / name...")} emptyText={t("ไม่พบใบงานออกแบบ", "No design sheet found")}
+      fetchPage={(q, offset) => pickPage(`/api/design-sheets?${new URLSearchParams({ search: q, limit: String(PICK_PAGE), offset: String(offset), archived: "0", sort_by: "updated_at", sort_dir: "desc" })}`, (r) => r as unknown as DesignSheetListItem)}
+      renderRow={(s) => { const cover = withImageWidth(s.cover_url, 72); return <>
+        {cover
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={cover} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" />
+          : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">📐</span>}
+        <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+        <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+        {s.brand_name && <span className="text-[10px] text-slate-400 shrink-0">{s.brand_name}</span>}
+        <span className="text-[10px] text-indigo-500 shrink-0">{statusLabel(s.status)}</span>
+      </>; }} />
   );
 }
 

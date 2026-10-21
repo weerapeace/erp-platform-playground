@@ -56,6 +56,7 @@ import { useT } from "@/components/i18n";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { usePushToast, type ToastVariant } from "@/components/toast";
 import { subStatusDot, subStatusLabel } from "../subtask-status";
+import { BrandSelect } from "@/components/brand-select";
 
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -1092,10 +1093,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     <label className="text-[11px] text-slate-400">{t("แบรนด์", "Brand")}</label>
                     <div className="flex items-center gap-2">
                       <span className="h-3 w-3 rounded-full border border-slate-200 shrink-0" style={{ background: (brands.find((b) => b.id === brandId)?.color) || "#e2e8f0" }} />
-                      <select value={brandId ?? ""} onChange={(e) => { setBrandTouched(true); setBrandId(e.target.value || null); }} className="flex-1 h-8 border border-slate-200 rounded-lg px-2 text-xs bg-white">
-                        <option value="">{t("— เดาจากสินค้าอัตโนมัติ —", "— Auto from product —")}</option>
-                        {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </select>
+                      <BrandSelect plain brands={brands} value={brandId} onChange={(v) => { setBrandTouched(true); setBrandId(v || null); }} emptyLabel={t("— เดาจากสินค้าอัตโนมัติ —", "— Auto from product —")} className="flex-1 h-8 border border-slate-200 rounded-lg px-2 text-xs bg-white" />
                     </div>
                   </div>
                 </div>

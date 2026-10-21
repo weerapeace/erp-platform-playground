@@ -10,6 +10,7 @@ import { PromptEditor } from "@/components/prompt-editor";
 import { useT } from "@/components/i18n";
 import { listBrands, listSubtaskTypes, listBrandPrompts, saveBrandPrompt, type BrandOption, type SubtaskType } from "../data";
 import { type PushToast } from "@/components/toast";
+import { BrandSelect } from "@/components/brand-select";
 
 type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 
@@ -47,10 +48,7 @@ export function BrandPromptsTab({ pushToast }: { pushToast: ToastFn }) {
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <span className="text-sm text-slate-600">{t("เลือกแบรนด์", "Brand")}:</span>
-        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white min-w-[200px]">
-          {brands.length === 0 && <option value="">—</option>}
-          {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        <BrandSelect plain brands={brands} value={brandId} onChange={setBrandId} emptyLabel={brands.length === 0 ? "—" : null} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white min-w-[200px]" />
       </div>
       <p className="text-xs text-slate-400 mb-3">{t("ตั้ง prompt เฉพาะแบรนด์นี้ — เว้นว่าง = ใช้ค่าเริ่มต้นของชนิดงาน · คลิกปุ่มตัวแปรใต้ช่องเพื่อแทรก (เช่น ชื่อแบรนด์ ราคา สี) ไม่ต้องพิมพ์ {{ }} เอง", "Per-brand prompt — empty = use type default · click variable chips to insert")}</p>
       {loading ? <div className="py-10 text-center text-slate-400 text-sm">{t("กำลังโหลด...", "Loading...")}</div> : (

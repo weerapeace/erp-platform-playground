@@ -10,6 +10,7 @@ import { listBrands, type BrandOption } from "../data";
 import { useCreativeOptions } from "../use-options";
 import { useT } from "@/components/i18n";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { BrandSelect } from "@/components/brand-select";
 
 type Row = { id: string; brand_id: string | null; platform: string | null; prompt: string; updated_at: string };
 const ALL = "__all__";   // ค่าใน dropdown ที่หมายถึง "ทุก…" (= null ใน DB)
@@ -147,10 +148,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
         <div className="flex flex-wrap items-end gap-2">
           <label className="block">
             <span className="text-[11px] font-medium text-slate-500 block mb-0.5">{t("แบรนด์", "Brand")}</span>
-            <select value={brandSel} onChange={(e) => setBrandSel(e.target.value)} className={sel}>
-              <option value={ALL}>{t("ทุกแบรนด์", "All brands")}</option>
-              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            <BrandSelect plain brands={brands} value={brandSel} onChange={setBrandSel} emptyLabel={t("ทุกแบรนด์", "All brands")} emptyValue={ALL} className={sel} />
           </label>
           <label className="block">
             <span className="text-[11px] font-medium text-slate-500 block mb-0.5">{t("แพลตฟอร์ม", "Platform")}</span>

@@ -44,6 +44,7 @@ import { applyTaskTransition } from "./task-actions";
 import { StatusBadge, PriorityBadge } from "./task-badges";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { type PushToast } from "@/components/toast";
+import { BrandSelect } from "@/components/brand-select";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
   getTask, updateTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
@@ -510,7 +511,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
                     <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={priorityOptions()} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
-                    <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><BrandSelect brands={brands} value={ef.brand_id} onChange={(v) => setEf({ ...ef, brand_id: v })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></div>
                     <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
                     <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ / ผู้ตรวจ (หลายคน) แก้ที่ช่องในโหมดดู", "Edit assignees / reviewers (multiple) in view mode")}</div>
                   </div>
@@ -554,7 +555,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   {/* แบรนด์ — โลโก้เด่น */}
                   {!isHidden(dth, "brand") && (<div style={{ order: tOrderOf("brand") }}>{qf === "brand" ? (
                     <div><p className="text-xs text-slate-400 mb-0.5">{t("แบรนด์", "Brand")}</p>
-                      <div className="flex items-start gap-1"><div className="flex-1"><ERPSelect value={d.brand_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => saveQuick({ brand_id: e.target.value || null })} /></div>
+                      <div className="flex items-start gap-1"><div className="flex-1"><BrandSelect brands={brands} value={d.brand_id} onChange={(v) => saveQuick({ brand_id: v || null })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></div>
                         <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
                     </div>
                   ) : d.brand_id ? (

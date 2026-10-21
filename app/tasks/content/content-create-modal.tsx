@@ -14,6 +14,7 @@ import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "../use-options";
 import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
 import { ExtraProductsEditor, extraToPayload, childToSkuValue, skuValueToChild, toggleChildSelection, type ExtraProduct } from "./content-products-editor";
+import { BrandSelect } from "@/components/brand-select";
 import {
   createContent, getRecommendedTimes, POST_TYPES, postTypeLabel, joinPostTypes,
   getParentSkuChildren, resolveBrandFromProduct, type ParentSkuChild,
@@ -174,7 +175,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
             </button>
           ); })}</div>
         </ERPFormField>
-        <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => pickBrand(e.target.value, true)} /></ERPFormField>
+        <ERPFormField label={t("แบรนด์", "Brand")}><BrandSelect brands={brands} value={form.brand_id} onChange={(v) => pickBrand(v, true)} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></ERPFormField>
         <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
         <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")} span={2}>
           <ERPDateTime24 value={form.scheduled_at} onChange={(v) => upd({ scheduled_at: v })} />

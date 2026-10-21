@@ -29,6 +29,7 @@ import { CampaignCreateModal } from "./campaigns/campaign-create-modal";
 import { skippedSubtaskTypes, useProductModeCfg } from "./product-edit-mode";
 import { ArrangePrintEditor, specFromItems, specBasesFrom, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { ArrangePrintType } from "./data";
+import { BrandSelect } from "@/components/brand-select";
 
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
@@ -418,7 +419,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           {/* ประเภทงาน — ปักไว้ลำดับ 2 เสมอ (ต่อจากชื่องาน) ไม่ให้เลื่อนตอนกรอก */}
           <ERPFormField label={t("ประเภทงาน","Task type")} style={{ order: 0 }} className={hideCls("task_type")}><ERPSelect className={ctrlCls("task_type")} value={form.task_type} placeholder={t("— เลือกประเภท —","— select —")} options={taskTypes} onChange={(e) => { markTouched("task_type"); updateForm({ task_type: e.target.value }); }} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญ","Priority")} style={orderStyle("priority")} className={hideCls("priority")}><ERPSelect className={ctrlCls("priority")} value={form.priority} options={priorityOptions()} onChange={(e) => { markTouched("priority"); updateForm({ priority: e.target.value as CreativePriority }); }} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")} className={hideCls("brand_id")}><ERPSelect className={ctrlCls("brand_id")} value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => { markTouched("brand_id"); updateForm({ brand_id: e.target.value }); }} /></ERPFormField>
+          <ERPFormField label={t("แบรนด์","Brand")} style={orderStyle("brand_id")} className={hideCls("brand_id")}><BrandSelect className={ctrlCls("brand_id")} brands={brands} value={form.brand_id} onChange={(v) => { markTouched("brand_id"); updateForm({ brand_id: v }); }} emptyLabel={`— ${t("ไม่ระบุ","Not specified")} —`} /></ERPFormField>
           {!lockedCampaignId && <ERPFormField label="Campaign" style={orderStyle("campaign_id")} className={hideCls("campaign_id")}>
             <div className="flex items-center gap-1.5">
               <div className="min-w-0 flex-1"><ERPSelect className={ctrlCls("campaign_id")} value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => { markTouched("campaign_id"); updateForm({ campaign_id: e.target.value }); }} /></div>

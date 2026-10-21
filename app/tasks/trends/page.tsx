@@ -14,6 +14,7 @@ import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
 import { TREND_HEAT, TREND_PLATFORMS, heatMeta, TREND_CHECKLIST } from "@/lib/creative-trends-meta";
 import { listTrends, createTrend, listBrands, type TrendItem } from "../data";
+import { BrandSelect } from "@/components/brand-select";
 
 type FormState = {
   title: string; summary: string; heat: string; brand_id: string;
@@ -158,11 +159,8 @@ export default function TrendsPage() {
             </label>
             <label className="block">
               <span className="text-xs text-slate-500">{t("แบรนด์", "Brand")}</span>
-              <select value={form.brand_id} onChange={(e) => setForm({ ...form, brand_id: e.target.value })}
-                className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
-                <option value="">— {t("ใช้ได้ทุกแบรนด์", "All brands")} —</option>
-                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+              <BrandSelect plain brands={brands} value={form.brand_id} onChange={(v) => setForm({ ...form, brand_id: v })} emptyLabel={`— ${t("ใช้ได้ทุกแบรนด์", "All brands")} —`}
+                className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm" />
             </label>
             <label className="block">
               <span className="text-xs text-slate-500">{t("เริ่มใช้", "Starts")}</span>

@@ -21,6 +21,7 @@ import { CAMPAIGN_STATUS } from "./campaign-status";
 import { DrawerShell } from "@/components/modal";
 import { askText } from "@/components/modal/ask-dialog";
 import type { ToastVariant } from "@/components/toast";
+import { BrandSelect } from "@/components/brand-select";
 // ย้ายค่าคงที่ไป ./campaign-status (ไฟล์เล็ก) — re-export ไว้ให้ที่ import เดิมยังใช้ได้
 export { CAMPAIGN_STATUS };
 
@@ -90,7 +91,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 <div className="space-y-3">
                   <div><label className="text-xs text-slate-400">{t("ชื่อแคมเปญ", "Campaign name")}</label><ERPInput value={ef.name} onChange={(e) => setEf({ ...ef, name: e.target.value })} /></div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} placeholder={t("— ไม่ระบุ —", "— None —")} options={brands.map((b) => ({ value: b.id, label: b.name }))} /></div>
+                    <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><BrandSelect brands={brands} value={ef.brand_id} onChange={(v) => setEf({ ...ef, brand_id: v })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></div>
                     <div><label className="text-xs text-slate-400">{t("ผู้ดูแล", "Owner")}</label><UserPicker value={ef.owner} onChange={(v) => setEf({ ...ef, owner: v })} disableCreate /></div>
                     <div><label className="text-xs text-slate-400">{t("หมวดแคมเปญ", "Category")}</label><ERPSelect value={ef.category_id} onChange={(e) => setEf({ ...ef, category_id: e.target.value })} placeholder={t("— ยังไม่จัดหมวด —", "— Uncategorized —")} options={categories.map((c) => ({ value: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.label}` }))} /></div>
                     <div><label className="text-xs text-slate-400">{t("เริ่ม", "Start")}</label><ERPInput type="date" value={ef.start_date} onChange={(e) => setEf({ ...ef, start_date: e.target.value })} /></div>

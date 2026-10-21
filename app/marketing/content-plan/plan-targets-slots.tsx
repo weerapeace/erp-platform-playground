@@ -18,6 +18,7 @@ import { POST_TYPES, type BrandOption, type ContentItem } from "@/app/tasks/data
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { WEEKDAYS_TH, targetProgress, shortThaiDate, dowLabel, type PlanTarget, type PlanSlot, type SlotDraft, type PlacementType } from "@/lib/marketing/content-plan";
 import type { PlatformOpt } from "./plan-modal";
+import { BrandSelect as CentralBrandSelect } from "@/components/brand-select";
 
 const TYPE_META = Object.fromEntries(POST_TYPES.map((t) => [t.value, t]));
 /** ชื่อวันภาษาอังกฤษ (ลำดับเดียวกับ WEEKDAYS_TH · index 0 = จันทร์) — ใช้ตอนสลับเป็นภาษาอังกฤษ */
@@ -43,9 +44,7 @@ export function BrandSelect({ brands, value, onChange }: { brands: BrandOption[]
   return (
     <label className="flex items-center gap-2 text-sm text-slate-600">
       {t("แบรนด์", "Brand")}
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={`${input} min-w-[12rem]`}>
-        {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-      </select>
+      <CentralBrandSelect plain brands={brands} value={value} onChange={onChange} className={`${input} min-w-[12rem]`} />
     </label>
   );
 }

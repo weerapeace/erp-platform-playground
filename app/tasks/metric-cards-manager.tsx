@@ -9,6 +9,7 @@ import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
 import { CARD_COLORS } from "./overview-customizer";
 import { describeCond, type MetricDef, type MetricCond, type MetricDue } from "./metrics";
+import { BrandSelect } from "@/components/brand-select";
 
 type Opt = { value: string; label: string };
 const COLOR_NAMES = Object.keys(CARD_COLORS);
@@ -104,10 +105,7 @@ export function MetricCardsManager({ open, metrics, onChange, onClose, typeOptio
             <option value="">{t("— ทุกประเภทงาน —", "— Any type —")}</option>
             {typeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          <select value={draft.cond.brandId ?? ""} onChange={(e) => setCond({ brandId: e.target.value || undefined })} className={sel}>
-            <option value="">{t("— ทุกแบรนด์ —", "— Any brand —")}</option>
-            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+          <BrandSelect plain brands={brands} value={draft.cond.brandId} onChange={(v) => setCond({ brandId: v || undefined })} emptyLabel={t("— ทุกแบรนด์ —", "— Any brand —")} className={sel} />
           <select value={draft.cond.due ?? ""} onChange={(e) => setCond({ due: (e.target.value || undefined) as MetricDue })} className={`${sel} col-span-2`}>
             {dueOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>

@@ -20,6 +20,7 @@ import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { TREND_CHECKLIST, TREND_HEAT, TREND_PLATFORMS, heatMeta, trendProgress, type TrendChecklist } from "@/lib/creative-trends-meta";
 import { getTrend, updateTrend, deleteTrend, listBrands, type TrendItem } from "../../data";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { BrandSelect } from "@/components/brand-select";
 
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
@@ -212,11 +213,8 @@ export default function TrendBoardPage() {
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="text-[11px] text-slate-500">{t("แบรนด์", "Brand")}</span>
-                  <select value={trend?.brand_id ?? ""} onChange={(e) => void patch({ brand_id: e.target.value || null })}
-                    className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-1 text-xs">
-                    <option value="">— {t("ทุกแบรนด์", "All")} —</option>
-                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
+                  <BrandSelect plain brands={brands} value={trend?.brand_id} onChange={(v) => void patch({ brand_id: v || null })} emptyLabel={`— ${t("ทุกแบรนด์", "All")} —`}
+                    className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-1 text-xs" />
                 </label>
                 <label className="block">
                   <span className="text-[11px] text-slate-500">{t("ใช้ได้ถึง", "Ends")}</span>

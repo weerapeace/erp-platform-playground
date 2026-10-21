@@ -12,6 +12,7 @@ import { ERPInput } from "@/components/form";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { createContent, addContentAttachment, type BrandOption } from "../data";
+import { BrandSelect } from "@/components/brand-select";
 
 type Props = {
   open: boolean; onClose: () => void;
@@ -86,10 +87,7 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
         {!defaultBrandId && brands.length > 0 && (
           <label className="block">
             <span className="text-xs text-slate-500">{t("แบรนด์", "Brand")}</span>
-            <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm">
-              <option value="">{t("— ไม่ระบุ —", "— None —")}</option>
-              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            <BrandSelect plain brands={brands} value={brandId} onChange={setBrandId} emptyLabel={t("— ไม่ระบุ —", "— None —")} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm" />
           </label>
         )}
         <div>

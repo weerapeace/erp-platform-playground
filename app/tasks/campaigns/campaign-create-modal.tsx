@@ -16,6 +16,7 @@ import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { listBrands, createCampaign, type Campaign } from "../data";
 import { listOptions, createOption, type Option } from "../use-options";
+import { BrandSelect } from "@/components/brand-select";
 
 type FormState = { name: string; brand_id: string; category_id: string; objective: string; owner: UserPickerValue | null; start_date: string; end_date: string; note: string };
 const EMPTY: FormState = { name: "", brand_id: "", category_id: "", objective: "", owner: null, start_date: "", end_date: "", note: "" };
@@ -105,7 +106,7 @@ export function CampaignCreateModal({ open, onClose, onCreated, pushToast, initi
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
       <ERPFormSection title={t("ข้อมูลแคมเปญ", "Campaign details")} columns={2}>
         <ERPFormField label={t("ชื่อแคมเปญ", "Campaign name")} required span={2}><ERPInput value={form.name} autoFocus onChange={(e) => update({ name: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void save(); } }} placeholder={t("เช่น Shopee 7.7 / เปิดตัว Heart Bag", "e.g. Shopee 7.7 / Heart Bag launch")} /></ERPFormField>
-        <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name })), ...(form.brand_id && !brands.some((b) => b.id === form.brand_id) ? [{ value: form.brand_id, label: t("(กำลังโหลด…)", "(loading…)") }] : [])]} onChange={(e) => update({ brand_id: e.target.value })} /></ERPFormField>
+        <ERPFormField label={t("แบรนด์", "Brand")}><BrandSelect brands={brands} value={form.brand_id} onChange={(v) => update({ brand_id: v })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></ERPFormField>
         <ERPFormField label={t("หมวดแคมเปญ", "Category")}>
           <div className="flex items-center gap-1.5">
             <div className="min-w-0 flex-1"><ERPSelect value={form.category_id} options={[{ value: "", label: t("— ยังไม่จัดหมวด —", "— Uncategorized —") }, ...categories.map((c) => ({ value: c.id, label: `${c.icon ? `${c.icon} ` : ""}${c.label}` })), ...(form.category_id && !categories.some((c) => c.id === form.category_id) ? [{ value: form.category_id, label: t("(หมวดใหม่)", "(new category)") }] : [])]} onChange={(e) => update({ category_id: e.target.value })} /></div>

@@ -28,6 +28,7 @@ import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { usePushToast, type ToastVariant } from "@/components/toast";
+import { BrandSelect } from "@/components/brand-select";
 
 const FREQ =[{ value: "daily", label: () => tr("รายวัน", "Daily") }, { value: "weekly", label: () => tr("รายสัปดาห์", "Weekly") }, { value: "monthly", label: () => tr("รายเดือน", "Monthly") }];
 const FREQ_LABEL = (): Record<string, string> => Object.fromEntries(FREQ.map((f) => [f.value, f.label()]));
@@ -195,7 +196,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
           </ERPFormField>
           <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setFormD((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS()} onChange={(e) => setFormD((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setFormD((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("แบรนด์", "Brand")}><BrandSelect brands={brands} value={form.brand_id} onChange={(v) => setFormD((f) => ({ ...f, brand_id: v }))} emptyLabel={`— ${t("ไม่ระบุ", "None")} —`} /></ERPFormField>
           <ERPFormField label={t("งานนี้ไม่เกี่ยวกับแบรนด์", "Not brand-specific")} hint={t("ติ๊กสำหรับงานที่ไม่ผูกแบรนด์ เช่น งานเรียงพิมพ์ — จะโชว์เฉพาะตอนเลือก “ไม่ระบุแบรนด์” ไม่ไปเกะกะในแบรนด์อื่น", "For work not tied to a brand (e.g. arrange print) — only shown when “No brand” is selected")}>
             <label className="flex items-center gap-2 cursor-pointer h-8">
               <input type="checkbox" checked={form.no_brand_only} onChange={(e) => setFormD((f) => ({ ...f, no_brand_only: e.target.checked }))} className="w-4 h-4 accent-violet-600" />
@@ -366,7 +367,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
           <ERPFormField label={t("ผู้รับผิดชอบ", "Assignee")}><UserPicker value={assignee} onChange={setAssignee} disableCreate /></ERPFormField>
           <ERPFormField label={t("ความถี่", "Frequency")} hint={t("ตั้งว่าให้สร้างงานซ้ำแบบไหน: รายวัน / รายสัปดาห์ / รายเดือน", "How often to repeat: daily / weekly / monthly")}><ERPSelect value={form.frequency} options={FREQ.map((f) => ({ value: f.value, label: f.label() }))} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ทุก ๆ (รอบ)", "Every (cycles)")} hint={t("เว้นกี่รอบถึงสร้างครั้งถัดไป เช่น 2 + รายสัปดาห์ = ทุก 2 สัปดาห์", "Gap between runs, e.g. 2 + weekly = every 2 weeks")}><ERPInput type="number" value={String(form.interval_n)} onChange={(e) => setForm((f) => ({ ...f, interval_n: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setForm((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("แบรนด์", "Brand")}><BrandSelect brands={brands} value={form.brand_id} onChange={(v) => setForm((f) => ({ ...f, brand_id: v }))} emptyLabel={`— ${t("ไม่ระบุ", "None")} —`} /></ERPFormField>
           <ERPFormField label={t("แคมเปญ", "Campaign")}><ERPSelect value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => setForm((f) => ({ ...f, campaign_id: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("เริ่ม", "Start")} hint={t("วันแรกที่เริ่มสร้างงานตามรอบ (ว่าง = วันนี้)", "First date to start generating tasks (blank = today)")}><ERPInput type="date" value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("สิ้นสุด (ถ้ามี)", "End (if any)")} hint={t("วันที่หยุดสร้างงาน — เว้นว่างได้ถ้าทำไปเรื่อยๆ", "Date to stop generating — leave blank to run forever")}><ERPInput type="date" value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} /></ERPFormField>
