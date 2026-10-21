@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -44,6 +44,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   },
   { key: "chat", label: "💬 ปุ่มแชทลอย", hint: "ปุ่มกลมมุมจอทุกหน้า (ยกเว้นหน้าชำระเงิน) กดแล้วเลือกทัก LINE / Messenger / โทร · ใช้ลิงก์จากกลุ่ม 📞 ช่องทางติดต่อ — ช่องไหนว่าง ปุ่มนั้นไม่โชว์" },
   { key: "reviews", label: "⭐ รีวิวสินค้า", hint: "ลูกค้าให้ดาว + เขียน + แนบรูป ที่หน้าสินค้า · ทุกรีวิวต้องผ่านการตรวจในแท็บ ⭐ รีวิว ก่อนขึ้นเว็บ (เว้นแต่เปิดอนุมัติอัตโนมัติ) · ดาวเฉลี่ยขึ้นในผลค้นหา Google ด้วย" },
+  { key: "preorder", label: "📦 สั่งจอง (พรีออเดอร์) + มัดจำ", hint: "สินค้าที่ตั้งสถานะสต็อก “พรีออเดอร์” ในแท็บสินค้าบนเว็บ · เปิดมัดจำแล้ว ออเดอร์ที่มีของพรีออเดอร์ต้องโอนพร้อมเพย์ (ไม่มีเก็บปลายทาง) จ่ายมัดจำก่อน ที่เหลือจ่ายก่อนจัดส่ง · ระบบตรวจสลิปตามยอดที่ต้องจ่ายแต่ละรอบ" },
   { key: "search", label: "🔍 ค้นหาสินค้า", hint: "ช่องค้นหาบนเว็บพิมพ์ผิดนิดหน่อยก็เจอ · ใส่คำที่หมายถึงสิ่งเดียวกันให้ค้นเจอทั้งคู่ · ด้านล่างมีรายการคำที่ลูกค้าค้นแล้วไม่เจอ (ไว้เติมคำ/เพิ่มสินค้า)" },
 ];
 
@@ -155,6 +156,11 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "reviews_photo_points", label: "แต้มเพิ่มเมื่อแนบรูป", hint: "บวกเพิ่มจากด้านบน · 0 = ไม่ให้", group: "reviews", type: "number", isPublic: true, placeholder: "0" },
   { key: "reviews_show_cards", label: "โชว์ดาวบนการ์ดสินค้า", hint: "เฉพาะสินค้าที่มีรีวิวแล้ว", group: "reviews", type: "bool", isPublic: true },
   { key: "reviews_request_email", label: "ชวนรีวิวในอีเมลขอบคุณ (ออเดอร์สำเร็จ)", hint: "ต้องเปิดอีเมลแจ้งออเดอร์ในกลุ่ม 🧾 และร้านมีโดเมนแล้ว · มีปุ่ม \"รีวิวสินค้า\" ในหน้าตามออเดอร์ด้วยเสมอ", group: "reviews", type: "bool", isPublic: false },
+
+  // ─── 📦 สั่งจอง + มัดจำ (lib/website-orders depositFor · amountDue) ───
+  { key: "preorder_deposit_enabled", label: "เก็บมัดจำสินค้าพรีออเดอร์", hint: "ปิด = สั่งจองจ่ายเต็มเหมือนสินค้าปกติ", group: "preorder", type: "bool", isPublic: true },
+  { key: "preorder_deposit_pct", label: "มัดจำกี่ % ของยอดออเดอร์", hint: "10–90 · แนะนำ 30–50", group: "preorder", type: "number", isPublic: true, placeholder: "30" },
+  { key: "preorder_note", label: "ข้อความถึงลูกค้า (หน้าสินค้า/ชำระเงิน)", hint: "เช่น สินค้าพรีออเดอร์ ผลิตและจัดส่งภายใน 15–30 วัน · ยอดที่เหลือโอนก่อนจัดส่ง", group: "preorder", type: "text", isPublic: true, i18n: true },
 
   // ─── 🔍 ค้นหาสินค้า (เว็บร้าน src/lib/search.ts) ───
   {
@@ -297,6 +303,9 @@ export interface SiteInfo {
   reviews_show_cards: boolean;
   reviews_request_email: boolean;
   search_synonyms: string;
+  preorder_deposit_enabled: boolean;
+  preorder_deposit_pct: number;
+  preorder_note: string;
   _i18n?: I18nMeta;
 }
 
@@ -379,6 +388,9 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   reviews_show_cards: true,
   reviews_request_email: true,
   search_synonyms: "",
+  preorder_deposit_enabled: false,
+  preorder_deposit_pct: 30,
+  preorder_note: "",
 };
 
 const URL_KEYS = new Set([
@@ -447,7 +459,7 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     const v = m.get(f.key);
     const fb = d[f.key as keyof SiteInfo];
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
-    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") ? Math.max(0, Math.min(10000, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
+    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") ? Math.max(0, Math.min(10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
     else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);
     else if (f.key === "promo_code") out[f.key] = normalizeCouponCode(v);

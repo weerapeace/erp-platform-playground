@@ -12,6 +12,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrderCustomer } from "@/lib/order-notify";
+import { amountDue, paidNext } from "@/lib/website-orders";
 import {
   AUTO_RESULT,
   SLIP_BUCKET,
@@ -64,10 +65,12 @@ type OrderLite = {
   payment_status: string;
   customer_phone: string;
   grand_total: number | string;
+  /** 📦 มัดจำพรีออเดอร์ (null = จ่ายเต็ม) */
+  deposit_amount?: number | string | null;
 };
 
 export type SubmitSlipResult =
-  | { ok: true; paymentStatus: "paid" | "verifying"; result: AutoResult; message: { th: string; en: string } }
+  | { ok: true; paymentStatus: "paid" | "verifying" | "partial"; result: AutoResult; message: { th: string; en: string } }
   | { ok: false; status: number; error: string; errorEn: string };
 
 const fail = (status: number, error: string, errorEn: string): SubmitSlipResult => ({ ok: false, status, error, errorEn });
@@ -87,7 +90,7 @@ export async function submitSlip(
 
   const { data: o } = await sb
     .from("store_orders")
-    .select("id, shop_id, order_no, status, payment_method, payment_status, customer_phone, grand_total")
+    .select("id, shop_id, order_no, status, payment_method, payment_status, customer_phone, grand_total, deposit_amount")
     .eq("shop_id", args.shopId)
     .eq("order_no", no)
     .maybeSingle();
@@ -114,7 +117,8 @@ export async function submitSlip(
     return fail(500, "อัปโหลดสลิปไม่สำเร็จ กรุณาลองใหม่", "Couldn't upload the slip. Please try again.");
   }
 
-  const total = Number(order.grand_total) || 0;
+  // 💸 ยอดที่ต้องโอนรอบนี้ (มัดจำ / ที่เหลือ / เต็ม) — ระบบตรวจสลิปเทียบยอดนี้ (lib/website-orders amountDue)
+  const total = amountDue(order);
   const now = new Date().toISOString();
   const { data: ins, error: insErr } = await sb
     .from("store_payments")
@@ -158,7 +162,8 @@ export async function submitSlip(
     })
     .eq("id", slipId);
 
-  const nextPay = passed ? "paid" : "verifying";
+  // ผ่าน: มัดจำ → "มัดจำแล้ว" · ที่เหลือ/เต็ม → "ชำระแล้ว" · ไม่ผ่าน (รอพนักงาน): มัดจำแล้วคงเดิม ไม่งั้น "รอตรวจ"
+  const nextPay = passed ? paidNext(order) : order.payment_status === "partial" ? "partial" : "verifying";
   if (order.payment_status !== nextPay) await sb.from("store_orders").update({ payment_status: nextPay }).eq("id", order.id);
 
   await writeAudit(sb, {
@@ -177,7 +182,7 @@ export async function submitSlip(
   });
 
   // ✉️ ผ่านอัตโนมัติ = แจ้งลูกค้า "ได้รับชำระเงินแล้ว" (ตามสวิตช์อีเมลอัตโนมัติของร้าน)
-  if (passed) await notifyOrderCustomer(sb, order.id, "paid", { actorName: AUTO_ACTOR }).catch(() => null);
+  if (passed && nextPay === "paid") await notifyOrderCustomer(sb, order.id, "paid", { actorName: AUTO_ACTOR }).catch(() => null);
 
   return { ok: true, paymentStatus: nextPay, result: decision.result, message: AUTO_RESULT[decision.result].customer };
 }
@@ -254,15 +259,16 @@ export async function staffDecideSlip(
   const { data: s } = await sb.from("store_payments").select("id, order_id, status").eq("id", args.slipId).maybeSingle();
   const slip = s as { id: string; order_id: string; status: string } | null;
   if (!slip) return { ok: false, status: 404, error: "ไม่พบสลิป" };
-  const { data: o } = await sb.from("store_orders").select("id, shop_id, order_no, payment_status").eq("id", slip.order_id).maybeSingle();
-  const order = o as { id: string; shop_id: string; order_no: string; payment_status: string } | null;
+  const { data: o } = await sb.from("store_orders").select("id, shop_id, order_no, payment_status, grand_total, deposit_amount").eq("id", slip.order_id).maybeSingle();
+  const order = o as { id: string; shop_id: string; order_no: string; payment_status: string; grand_total: number | string; deposit_amount: number | string | null } | null;
   if (!order) return { ok: false, status: 404, error: "ไม่พบออเดอร์ของสลิปนี้" };
   const now = new Date().toISOString();
 
   let nextPay = order.payment_status;
   if (args.action === "approve") {
     await sb.from("store_payments").update({ status: "verified", verified_at: now, verified_by: args.actorId ?? args.actorName, verified_by_name: args.actorName, reject_reason: null }).eq("id", slip.id);
-    if (order.payment_status !== "refunded") nextPay = "paid";
+    // 📦 ออเดอร์มัดจำที่ยังไม่จ่าย → "มัดจำแล้ว" (รอยอดที่เหลือ) · นอกนั้น → "ชำระแล้ว"
+    if (order.payment_status !== "refunded") nextPay = paidNext(order);
   } else {
     const reason = SLIP_REJECT_REASONS.some((r) => r.key === args.reason) ? args.reason! : null;
     if (!reason) return { ok: false, status: 400, error: "เลือกเหตุผลที่สลิปไม่ถูกต้องก่อน (ลูกค้าจะเห็นข้อความนี้)" };

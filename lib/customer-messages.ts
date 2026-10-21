@@ -71,6 +71,9 @@ export interface MessageOrder {
   discount: number;
   /** 🏷 โปรโมชันที่ใช้ (รวมอยู่ใน discount แล้ว) — โชว์แยกบรรทัด · ที่เหลือ = คูปอง */
   promos?: { name: string; amount: number }[];
+  /** 📦 มัดจำพรีออเดอร์ + ยอดที่ต้องโอนรอบนี้ (ไม่มีมัดจำ = ไม่ส่ง) */
+  depositAmount?: number;
+  amountDue?: number;
   giftFee?: number;
   /** 💌 ค่าการ์ดอวยพร (บริการแยกจากห่อ) */
   giftCardFee?: number;
@@ -138,7 +141,7 @@ const T = {
           o.paymentStatus === "paid"
             ? `ชำระเงินแล้ว ${money(o.grandTotal)}`
             : o.paymentMethod === "promptpay" && o.promptpay
-              ? `กรุณาโอน ${money(o.grandTotal)} ผ่านพร้อมเพย์ ${o.promptpay.number}${o.promptpay.name ? ` (${o.promptpay.name})` : ""} แล้วส่งสลิปให้ร้าน`
+              ? `กรุณาโอน${o.depositAmount ? "มัดจำ" : ""} ${money(o.amountDue ?? o.grandTotal)} ผ่านพร้อมเพย์ ${o.promptpay.number}${o.promptpay.name ? ` (${o.promptpay.name})` : ""} แล้วส่งสลิปให้ร้าน`
               : o.paymentMethod === "cod"
                 ? `ชำระเงินปลายทาง ${money(o.grandTotal)} ตอนรับสินค้า`
                 : `ยอดชำระ ${money(o.grandTotal)}`,
@@ -178,7 +181,7 @@ const T = {
           o.paymentStatus === "paid"
             ? `Payment received: ${money(o.grandTotal)}.`
             : o.paymentMethod === "promptpay" && o.promptpay
-              ? `Please transfer ${money(o.grandTotal)} via PromptPay ${o.promptpay.number}${o.promptpay.name ? ` (${o.promptpay.name})` : ""} and send us the slip.`
+              ? `Please transfer ${o.depositAmount ? "the deposit of " : ""}${money(o.amountDue ?? o.grandTotal)} via PromptPay ${o.promptpay.number}${o.promptpay.name ? ` (${o.promptpay.name})` : ""} and send us the slip.`
               : o.paymentMethod === "cod"
                 ? `Please pay ${money(o.grandTotal)} in cash on delivery.`
                 : `Amount due: ${money(o.grandTotal)}.`,
@@ -201,6 +204,11 @@ export function orderMessage(ev: OrderEvent, o: MessageOrder, shop: MessageShop,
   const e = t.ev[ev](o);
   const lines = [t.hello(o.customerName), ...e.lines];
   if (ev === "placed" && shop.orderNote?.trim()) lines.push(shop.orderNote.trim());
+  // 📦 พรีออเดอร์: บอกยอดที่เหลือ (โอนก่อนจัดส่ง)
+  if (ev === "placed" && o.depositAmount && o.depositAmount < o.grandTotal) {
+    const rest = money(Math.round((o.grandTotal - o.depositAmount) * 100) / 100);
+    lines.push(lang === "en" ? `Pre-order: the remaining ${rest} is due before shipping.` : `สินค้าพรีออเดอร์ — ยอดที่เหลือ ${rest} โอนก่อนจัดส่ง`);
+  }
   if (ev === "shipped" && o.tracking?.number) {
     const tr = o.tracking;
     lines.push(`${lang === "en" ? "Tracking number" : "เลขพัสดุ"}: ${tr.carrierLabel ? `${tr.carrierLabel} ` : ""}${tr.number}`);

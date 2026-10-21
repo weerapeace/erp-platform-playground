@@ -56,7 +56,7 @@ type Admin = ReturnType<typeof supabaseAdmin>;
 
 export type OrderStatus = "pending" | "preparing" | "shipped" | "completed" | "cancelled";
 /** verifying = ลูกค้าแนบสลิปแล้ว รอตรวจ (lib/website-payments) */
-export type PaymentStatus = "unpaid" | "verifying" | "paid" | "refunded";
+export type PaymentStatus = "unpaid" | "verifying" | "partial" | "paid" | "refunded";
 export type PaymentMethod = "cod" | "promptpay";
 
 export const ORDER_STATUSES: { key: OrderStatus; label: string; tone: string }[] = [
@@ -70,9 +70,35 @@ export const ORDER_STATUSES: { key: OrderStatus; label: string; tone: string }[]
 export const PAYMENT_STATUSES: { key: PaymentStatus; label: string; tone: string }[] = [
   { key: "unpaid", label: "ยังไม่ชำระ", tone: "bg-rose-100 text-rose-700" },
   { key: "verifying", label: "แจ้งโอนแล้ว · รอตรวจ", tone: "bg-amber-100 text-amber-800" },
+  // 📦 พรีออเดอร์: จ่ายมัดจำแล้ว รอยอดที่เหลือ (ยังไม่นับว่าพร้อมส่ง)
+  { key: "partial", label: "มัดจำแล้ว · รอยอดที่เหลือ", tone: "bg-sky-100 text-sky-800" },
   { key: "paid", label: "ชำระแล้ว", tone: "bg-emerald-100 text-emerald-800" },
   { key: "refunded", label: "คืนเงินแล้ว", tone: "bg-slate-200 text-slate-600" },
 ];
+
+/**
+ * 📦 มัดจำพรีออเดอร์: ร้านเปิด + ออเดอร์มีของพรีออเดอร์ → มัดจำ = % ของยอดรวม (ปัด 2 ตำแหน่ง · อย่างน้อย ฿1) · ไม่เข้าเงื่อนไข = 0
+ */
+export function depositFor(info: Pick<SiteInfo, "preorder_deposit_enabled" | "preorder_deposit_pct">, hasPreorder: boolean, grandTotal: number): number {
+  if (!info.preorder_deposit_enabled || !hasPreorder || !(grandTotal > 0)) return 0;
+  const pct = Math.max(10, Math.min(90, Number(info.preorder_deposit_pct) || 30));
+  return Math.min(grandTotal, Math.max(1, Math.round(grandTotal * pct) / 100));
+}
+
+/** ยอดที่ลูกค้าต้องโอน "รอบนี้" — มัดจำ (ยังไม่จ่าย/รอตรวจ) · ที่เหลือ (มัดจำแล้ว) · จ่ายครบ/คืนเงิน = 0 · ออเดอร์ปกติ = ยอดรวม */
+export function amountDue(o: { grand_total: number | string; deposit_amount?: number | string | null; payment_status: string }): number {
+  const total = Number(o.grand_total) || 0;
+  const dep = Number(o.deposit_amount) || 0;
+  if (o.payment_status === "paid" || o.payment_status === "refunded") return 0;
+  if (dep > 0 && dep < total) return o.payment_status === "partial" ? Math.round((total - dep) * 100) / 100 : dep;
+  return total;
+}
+
+/** สลิปผ่าน (อัตโนมัติ/พนักงานยืนยัน) → สถานะถัดไป: ออเดอร์มัดจำที่ยังไม่จ่าย = มัดจำแล้ว · นอกนั้น = ชำระแล้ว */
+export function paidNext(o: { deposit_amount?: number | string | null; payment_status: string; grand_total: number | string }): "partial" | "paid" {
+  const dep = Number(o.deposit_amount) || 0;
+  return dep > 0 && dep < (Number(o.grand_total) || 0) && (o.payment_status === "unpaid" || o.payment_status === "verifying") ? "partial" : "paid";
+}
 
 export const PAYMENT_METHOD_LABEL: Record<string, string> = {
   cod: "เก็บเงินปลายทาง",
@@ -136,6 +162,10 @@ export interface OrderView {
   couponCode?: string | null;
   /** 🏷 โปรโมชันอัตโนมัติที่ใช้ (รวมอยู่ใน discount แล้ว · ส่วนของคูปอง = discount − ผลรวมนี้) */
   promos?: { name: string; amount: number }[];
+  /** 📦 มัดจำพรีออเดอร์ (ไม่มี = จ่ายเต็ม) */
+  depositAmount?: number;
+  /** 💸 ยอดที่ต้องโอนรอบนี้ (มัดจำ / ที่เหลือ / 0 = จ่ายครบ) — QR พร้อมเพย์ใช้ยอดนี้ */
+  amountDue?: number;
   /** ⭐ แต้มที่ใช้ลด + เป็นเงินเท่าไร (ไม่ได้ใช้ = 0) */
   pointsUsed?: number;
   pointsDiscount?: number;
@@ -434,6 +464,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const promos = await readLivePromotions(sb, shop.id);
   const tagCatsOf = promos.some((p) => p.rule.scope.mode === "categories") ? await loadTagCategoryResolver(sb, fieldMap.category.tagRules, [...parentById.keys()]) : null;
   const promoLines: PromoLine[] = [];
+  // 📦 มีของพรีออเดอร์ในออเดอร์ไหม (มัดจำ · depositFor)
+  let hasPreorder = false;
 
   const lines: LineInsert[] = [];
   let subtotal = 0;
@@ -462,6 +494,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     );
     // 🚫 ตั้ง "สินค้าหมด" ใน ERP แล้ว = รับออเดอร์ไม่ได้ (กันตะกร้าเก่าที่ใส่ไว้ก่อนของหมด)
     if (listing.web_stock_status === "out") return { ok: false, error: `สินค้า ${resolved.name} หมดแล้ว กรุณาเอาออกจากตะกร้า`, status: 409 };
+    if (listing.web_stock_status === "preorder") hasPreorder = true;
 
     // 📐 มีตัวเลือกชุดที่ 2 (ไซส์) บนเว็บ → ต้องเป็นคู่ สี×ไซส์ ที่มีจริงและไม่ได้ปิดไว้ (lib/website-size-options)
     const picked = pickSku(kids, it.optionId, it.option2Id, {
@@ -567,6 +600,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     pointsDiscount = rr.discount;
   }
   const grandTotal = Math.round((subtotal + shippingFee + codFee + giftFee + giftCardFee - discount - pointsDiscount) * 100) / 100;
+  // 📦 มัดจำพรีออเดอร์ (ร้านเปิด) — ต้องโอนพร้อมเพย์ (เก็บปลายทางไม่มีมัดจำ) · ที่เหลือโอนก่อนจัดส่ง
+  const depositAmount = depositFor(info, hasPreorder, grandTotal);
+  if (depositAmount > 0 && input.paymentMethod !== "promptpay") return { ok: false, error: "มีสินค้าพรีออเดอร์ — ต้องโอนพร้อมเพย์เพื่อชำระมัดจำ (เลือกโอนพร้อมเพย์แล้วสั่งอีกครั้ง)", status: 400 };
 
   const prefix = orderNoPrefix(info, shop.slug);
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -601,6 +637,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         discount,
         coupon_code: coupon?.code ?? null,
         promos: promo.applied.length ? promo.applied : null,
+        deposit_amount: depositAmount > 0 ? depositAmount : null,
         points_used: pointsUsed,
         points_discount: pointsDiscount,
         gift_wrap: giftWrap,
@@ -685,6 +722,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         discount,
         couponCode: coupon?.code ?? null,
         promos: promo.applied.map((a) => ({ name: a.name, amount: a.amount })),
+        depositAmount: depositAmount > 0 ? depositAmount : undefined,
+        amountDue: depositAmount > 0 ? depositAmount : grandTotal,
         pointsUsed,
         pointsDiscount,
         pointsEarned: 0,
@@ -712,11 +751,12 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
 /** 📎 แนบสลิปได้: ออเดอร์พร้อมเพย์ที่ยังไม่ชำระ/รอตรวจ + ร้านเปิดแนบสลิป
  *  (ไม่บังคับมีเลขพร้อมเพย์ — ร้านที่ยังไม่ตั้งเลขส่งบัญชีให้ลูกค้าทางแชท ลูกค้าก็แนบสลิปที่หน้าติดตามออเดอร์ได้) */
 export function slipUploadFor(info: SiteInfo, method: string, paymentStatus: string): boolean {
-  return method === "promptpay" && (paymentStatus === "unpaid" || paymentStatus === "verifying") && info.slip_upload_enabled;
+  return method === "promptpay" && (paymentStatus === "unpaid" || paymentStatus === "verifying" || paymentStatus === "partial") && info.slip_upload_enabled;
 }
 
 function promptpayFor(info: SiteInfo, method: string, paymentStatus: string): OrderView["promptpay"] {
-  if (method !== "promptpay" || paymentStatus !== "unpaid" || !info.promptpay_number) return null;
+  // ยังไม่จ่าย / มัดจำแล้ว (เหลือยอดที่ต้องโอน) = โชว์ QR
+  if (method !== "promptpay" || (paymentStatus !== "unpaid" && paymentStatus !== "partial") || !info.promptpay_number) return null;
   return { number: info.promptpay_number, name: info.promptpay_name };
 }
 
@@ -744,6 +784,7 @@ export type OrderRow = {
   discount: number | string;
   coupon_code?: string | null;
   promos?: unknown;
+  deposit_amount?: number | string | null;
   points_used?: number | null;
   points_discount?: number | string | null;
   points_earned?: number | null;
@@ -801,6 +842,8 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     codFee: num(o.cod_fee),
     discount: num(o.discount),
     couponCode: o.coupon_code ?? null,
+    depositAmount: num(o.deposit_amount) > 0 ? num(o.deposit_amount) : undefined,
+    amountDue: amountDue({ grand_total: o.grand_total, deposit_amount: o.deposit_amount, payment_status: o.payment_status }),
     promos: Array.isArray(o.promos) ? (o.promos as { name?: unknown; amount?: unknown }[]).map((x) => ({ name: String(x.name ?? ""), amount: num(x.amount as number) })).filter((x) => x.name && x.amount > 0) : [],
     pointsUsed: num(o.points_used),
     pointsDiscount: num(o.points_discount),

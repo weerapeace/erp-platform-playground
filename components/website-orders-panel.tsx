@@ -47,6 +47,9 @@ type Order = {
   couponCode?: string | null;
   /** 🏷 โปรโมชันที่ใช้ (รวมใน discount แล้ว) */
   promos?: { name: string; amount: number }[];
+  /** 📦 มัดจำพรีออเดอร์ + ยอดที่ลูกค้าต้องโอนรอบนี้ */
+  depositAmount?: number;
+  amountDue?: number;
   pointsUsed?: number;
   pointsDiscount?: number;
   pointsEarned?: number;
@@ -527,6 +530,13 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                   {open.discount - (open.promos ?? []).reduce((s, p) => s + p.amount, 0) > 0.004 && <div className="flex justify-between"><span>ส่วนลด{open.couponCode ? ` (${open.couponCode})` : ""}</span><span>-{money(Math.round((open.discount - (open.promos ?? []).reduce((s, p) => s + p.amount, 0)) * 100) / 100)}</span></div>}
                   {(open.pointsDiscount ?? 0) > 0 && <div className="flex justify-between"><span>⭐ ใช้แต้ม {(open.pointsUsed ?? 0).toLocaleString("th-TH")} แต้ม</span><span>-{money(open.pointsDiscount ?? 0)}</span></div>}
                   <div className="flex justify-between text-sm font-semibold text-slate-900 pt-1"><span>ยอดรวม</span><span>{money(open.grandTotal)}</span></div>
+                  {(open.depositAmount ?? 0) > 0 && (
+                    <div className="rounded-md bg-sky-50 px-2 py-1.5 text-[11px] text-sky-900 space-y-0.5">
+                      <div className="flex justify-between"><span>📦 มัดจำพรีออเดอร์</span><span>{money(open.depositAmount ?? 0)}</span></div>
+                      <div className="flex justify-between"><span>ยอดที่เหลือ (โอนก่อนจัดส่ง)</span><span>{money(Math.round((open.grandTotal - (open.depositAmount ?? 0)) * 100) / 100)}</span></div>
+                      {(open.amountDue ?? 0) > 0 && <div className="flex justify-between font-semibold"><span>ลูกค้าต้องโอนตอนนี้</span><span>{money(open.amountDue ?? 0)}</span></div>}
+                    </div>
+                  )}
                   {open.isMember && (
                     <div className="pt-1 text-[11px] text-amber-700">
                       👤 ออเดอร์สมาชิก · {(open.pointsEarned ?? 0) > 0 ? `⭐ ได้ ${(open.pointsEarned ?? 0).toLocaleString("th-TH")} แต้มแล้ว` : "ได้แต้มเมื่อเปลี่ยนเป็น “สำเร็จ” (ถ้าร้านเปิดแต้ม)"}

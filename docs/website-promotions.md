@@ -41,3 +41,13 @@
 
 ERP: `lib/website-promotions.ts` (กฎ · มีเทสต์) · `lib/website-promotions-db.ts` · `/api/website/promotions` · `components/website-promotions-panel.tsx` · `lib/website-orders.ts` (คิดตอนรับออเดอร์) · migration `202610291400_store_promotions`
 เว็บร้าน: `src/lib/promotions.ts` (**มิเรอร์ — แก้กฎที่ ERP แล้วคัดลอกทับ**) · `src/lib/promo-context.tsx` · `ProductPromos.tsx` · `BoughtTogether.tsx` · `CartSummary.tsx` · `CheckoutClient.tsx`
+
+## 📦 สั่งจอง (พรีออเดอร์) + มัดจำ (ชุด 3b)
+
+ตั้งที่ ERP › ข้อมูลร้าน › กลุ่ม **📦 สั่งจอง + มัดจำ** (ค่าเริ่ม ปิด) — ใช้กับสินค้าที่ตั้งสถานะสต็อก "พรีออเดอร์" ในแท็บสินค้าบนเว็บ
+
+- ออเดอร์ที่มีของพรีออเดอร์ → มัดจำ = % ของยอดรวม (10–90 · อย่างน้อย ฿1) · **ต้องโอนพร้อมเพย์** (เก็บปลายทางถูกซ่อน · ERP ไม่รับถ้าส่งมา)
+- สถานะชำระ: ยังไม่ชำระ → (สลิปมัดจำผ่าน) **มัดจำแล้ว · รอยอดที่เหลือ** → (สลิปยอดที่เหลือผ่าน) ชำระแล้ว
+- QR พร้อมเพย์/ระบบตรวจสลิปใช้ "ยอดที่ต้องโอนรอบนี้" (`amountDue`) · หน้าตามออเดอร์โชว์ QR ยอดที่เหลือเมื่อมัดจำแล้ว
+- ออเดอร์มัดจำแล้วยังไม่นับว่า "พร้อมแพ็ก" จนกว่าจะชำระครบ · อีเมลยืนยันบอกยอดมัดจำ + ยอดที่เหลือ
+- `store_orders.deposit_amount` (migration 202610291500) · กฎ `depositFor / amountDue / paidNext` ใน lib/website-orders.ts (มีเทสต์)
