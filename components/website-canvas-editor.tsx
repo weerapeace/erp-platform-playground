@@ -137,6 +137,26 @@ export function CanvasEditor({
 
   const post = (msg: Record<string, unknown>) => iframeRef.current?.contentWindow?.postMessage(msg, "*");
 
+  // 🌀 ลองเลื่อนดู: พรีวิวขยับตามการเลื่อนจริง (ลากชิ้นไม่ได้ระหว่างนั้น) · พรีวิวโหลดใหม่ = ส่งสถานะซ้ำ
+  const [scrollPreview, setScrollPreview] = useState(false);
+  const scrollPreviewRef = useRef(scrollPreview);
+  scrollPreviewRef.current = scrollPreview;
+  useEffect(() => {
+    post({ type: "storefront-canvas-scrollfx", blockId, on: scrollPreview });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollPreview, blockId]);
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow || (e.data as { type?: string } | null)?.type !== "storefront-preview-loaded" || !scrollPreviewRef.current) return;
+      window.setTimeout(() => post({ type: "storefront-canvas-scrollfx", blockId, on: true }), 300);
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blockId]);
+  /** 🔍 เล่นท่า "กดแล้วขยาย" ของชิ้นนี้ในพรีวิว (ไม่เปลี่ยนหน้า) */
+  const expandDemo = (childId: string) => post({ type: "storefront-canvas-expand-demo", blockId, childId });
+
   // แผงชั้น: ลากสลับ (ของกลาง useDragReorder) — รายการแสดงกลับด้าน (บน = หน้าสุด) จึงกลับก่อน/หลังย้าย
   const layerDrag = useDragReorder((from, to) => {
     patchBlock(blockId, { items: moveItem([...items].reverse(), from, to).reverse() });
@@ -551,6 +571,9 @@ export function CanvasEditor({
                   mobile={mobileCtl}
                   onReplay={replay}
                   onPickFrame={() => selItem && setFrameFor(selItem.id)}
+                  scrollPreview={scrollPreview}
+                  onScrollPreview={setScrollPreview}
+                  onExpandDemo={expandDemo}
                 />
               </div>
             </div>

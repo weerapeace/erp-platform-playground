@@ -36,6 +36,10 @@ import {
   CANVAS_SPEEDS,
   CANVAS_TEXT_BGS,
   CANVAS_WEIGHTS,
+  CANVAS_EXPANDS,
+  CANVAS_MAX_HEIGHT,
+  CANVAS_SFX_FADES,
+  CANVAS_SFX_ZOOMS,
   canvasItemPreset,
   canvasItemSummary,
   validateCanvas,
@@ -782,13 +786,24 @@ function canvasItemFields(): FieldDef[] {
     /* 🛍 สินค้าในรูป/คลิป (2026-10-21 · ลุคบุ๊กแบบวางอิสระ) — กดชิ้นบนเว็บ = การ์ดสินค้าเด้ง (ชนะ "กดแล้วไปที่") */
     f("products", "สินค้าในรูปนี้ (กดรูปแล้วการ์ดสินค้าเด้ง)", "products", { group: "action", max: CANVAS_SHOP_MAX, wide: true, showIf: isMedia, hint: "หลายตัว = การ์ดเลื่อนดูได้ ‹ 1/3 › · มีสินค้า = กดรูปแล้วการ์ดเด้ง (ไม่ไปลิงก์)" }),
     f("shopIcon", "ไอคอน 🛍 มุมรูป (บอกว่ากดซื้อได้)", "toggle", { group: "action", default: true, showIf: isMedia }),
+    /* 🔍 กดรูป/คลิปแล้วขยาย (2026-10-21 · เว็บร้าน CanvasStory / lib/canvas-expand) — ชนะการ์ดสินค้าและลิงก์ธรรมดา */
+    f("expand", "กดแล้วขยาย", "select", {
+      group: "action",
+      default: "",
+      options: CANVAS_EXPANDS,
+      showIf: isMedia,
+      hint: "เต็มจอ = รูปขยายเต็มจอแล้วเปลี่ยนไปหน้าที่ตั้งใน \"กดแล้วไปที่\" · ครึ่งจอ = รูปขยายครึ่งซ้าย เนื้อหา/สินค้าในรูปขึ้นฝั่งขวา",
+    }),
+    text("expTitle", "เรื่องราว: หัวข้อ", { group: "action", default: "", max: 120, showIf: [isMedia, { key: "expand", eq: "story" }], hint: "ว่าง = ใช้คำบรรยายรูป (Alt)" }),
+    area("expText", "เรื่องราว: ข้อความ", { group: "action", default: "", max: 1500, showIf: [isMedia, { key: "expand", eq: "story" }] }),
+    text("expCta", "เรื่องราว: ข้อความบนปุ่ม", { group: "action", default: "", max: 40, showIf: [isMedia, { key: "expand", eq: "story" }], hint: "ปุ่มพาไปที่ \"กดแล้วไปที่\" (ไม่ตั้งลิงก์ = ไม่มีปุ่ม) · ว่าง = ดูเพิ่มเติม" }),
     /* ลิงก์ (ทุกชนิด) */
     f("href", "กดแล้วไปที่", "target", { group: "action", default: "", wide: true }),
     f("newTab", "เปิดในแท็บใหม่", "toggle", { group: "action", default: false }),
 
     /* ตำแหน่ง/ขนาด — ลากในพรีวิวแทนได้ */
     f("x", "ซ้าย (X)", "number", { group: "layout", default: 100, min: -1200, numMax: 2400 }),
-    f("y", "บน (Y)", "number", { group: "layout", default: 100, min: -600, numMax: 4800 }),
+    f("y", "บน (Y)", "number", { group: "layout", default: 100, min: -600, numMax: CANVAS_MAX_HEIGHT + 1200 }),
     f("w", "กว้าง", "number", { group: "layout", default: 400, min: 4, numMax: 2400 }),
     f("h", "สูง", "number", { group: "layout", default: 80, min: 4, numMax: 4800, showIf: { key: "kind", eq: ["image", "button", "shape", "video"] } }),
     f("rotate", "หมุน (องศา)", "range", { group: "layout", default: 0, min: -180, numMax: 180 }),
@@ -802,6 +817,12 @@ function canvasItemFields(): FieldDef[] {
     f("loop", "ขยับตลอดเวลา", "select", { group: "layout", default: "", options: CANVAS_LOOPS }),
     f("loopSpeed", "ความเร็วการขยับ", "select", { group: "layout", default: "normal", options: CANVAS_SPEEDS, showIf: { key: "loop", eq: CANVAS_LOOPS.map((o) => o.v).filter(Boolean) } }),
     f("hover", "ตอนเอาเมาส์ชี้ (คอม)", "select", { group: "layout", default: "", options: CANVAS_HOVERS, hint: "มือถือไม่มีเมาส์ จะไม่เห็นเอฟเฟกต์นี้" }),
+    /* 🌀 ขยับตามการเลื่อนจอ (เว็บร้าน src/lib/canvas-scroll.ts) — มือถือขยับครึ่งเดียว · พรีวิวไม่ขยับจนกด "🌀 ลองเลื่อนดู" ในหน้าแก้เต็มจอ */
+    f("sfxSpeed", "ตอนเลื่อนจอ: ความเร็ว (ลบ = ช้ากว่า ลอยค้าง · บวก = เร็วกว่า)", "range", { group: "layout", default: 0, min: -100, numMax: 100, step: 5, hint: "0 = เลื่อนไปพร้อมหน้าเว็บตามปกติ" }),
+    f("sfxFade", "ตอนเลื่อนจอ: จาง", "select", { group: "layout", default: "", options: CANVAS_SFX_FADES }),
+    f("sfxZoom", "ตอนเลื่อนจอ: ซูม", "select", { group: "layout", default: "", options: CANVAS_SFX_ZOOMS }),
+    f("sfxRotate", "ตอนเลื่อนจอ: หมุน (องศาต่อการเลื่อน 1 จอ)", "range", { group: "layout", default: 0, min: -90, numMax: 90, step: 5 }),
+    f("sfxPin", "ตอนเลื่อนจอ: ค้างอยู่กับที่จนเลื่อนพ้นผืน", "toggle", { group: "layout", default: false, hint: "เหมาะกับหัวข้อตัวใหญ่ด้านหลัง · มือถือแบบเรียงอัตโนมัติจะไม่ค้าง" }),
     f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape", "video"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
     text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, i18n: false, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
 
@@ -971,7 +992,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         group: "layout",
         default: 560,
         min: 120,
-        numMax: 2400,
+        numMax: CANVAS_MAX_HEIGHT,
         step: 10,
         hint: "หน่วยเดียวกับตำแหน่งชิ้น (ผืนกว้าง 1200) · ลากแถบใต้ผืนในพรีวิวก็ได้",
       }),

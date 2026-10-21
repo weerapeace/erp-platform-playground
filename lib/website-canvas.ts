@@ -133,6 +133,92 @@ export function canvasStagger<T extends Record<string, unknown> & { id: string }
   return items.map((it) => (delay.has(it.id) ? { ...it, anim: s(it.anim) || "fade-up", animDelay: delay.get(it.id) } : it));
 }
 
+/** ความสูงผืนคอมสูงสุด (หน่วย) — ผืนยาวหลายจอสำหรับแกลเลอรีที่ขยับตามการเลื่อน · ⚠️ ตรงกับ CANVAS_MAX_H ของเว็บร้าน */
+export const CANVAS_MAX_HEIGHT = 6000;
+
+/**
+ * 🌀 ขยับตามการเลื่อนจอ (เว็บร้าน src/lib/canvas-scroll.ts) — ⚠️ ค่าตรงกับ CANVAS_SFX_* ของเว็บร้าน
+ *   sfxSpeed -100..100 (ลบ = ช้ากว่าการเลื่อน ลอยค้าง · บวก = เร็วกว่า ขึ้นไปก่อน) · sfxFade · sfxZoom · sfxRotate (องศาต่อการเลื่อน 1 จอ) · sfxPin
+ *   มือถือขยับครึ่งเดียวอัตโนมัติ · ผู้ใช้ตั้ง "ลดการเคลื่อนไหว" = ไม่ขยับ · ตัวจัดหน้าไม่ขยับ (ยกเว้นกด "ลองเลื่อนดู")
+ */
+/** out = จางตอนเลื่อนขึ้นไปใกล้ขอบบน · inout = ค่อย ๆ ชัดตอนโผล่จากขอบล่าง + จางตอนออก */
+export const CANVAS_SFX_FADES: FieldOption[] = [
+  { v: "", l: "ไม่จาง" },
+  { v: "out", l: "จางตอนออก" },
+  { v: "inout", l: "ชัดตอนเข้า·จางตอนออก" },
+];
+export const CANVAS_SFX_ZOOMS: FieldOption[] = [
+  { v: "", l: "ไม่ซูม" },
+  { v: "grow", l: "ค่อย ๆ ใหญ่ขึ้น" },
+  { v: "shrink", l: "ค่อย ๆ เล็กลง" },
+];
+/** ความเร็วแบบด่วน (ปุ่มบนแถบลอยของเว็บร้านใช้ชุดเดียวกัน) */
+export const CANVAS_SFX_SPEED_PRESETS: { v: number; l: string }[] = [
+  { v: -60, l: "ลอยค้าง" },
+  { v: -40, l: "ช้ากว่า" },
+  { v: 0, l: "ปกติ" },
+  { v: 40, l: "เร็วกว่า" },
+  { v: 70, l: "เร็วมาก" },
+];
+/** 🔍 กดรูป/คลิปแล้วขยาย — ⚠️ ค่าตรงกับ CANVAS_EXPANDS ของเว็บร้าน */
+export const CANVAS_EXPANDS: FieldOption[] = [
+  { v: "", l: "ปกติ (ไปลิงก์/การ์ดสินค้า)" },
+  { v: "full", l: "เต็มจอ → ไปหน้าลิงก์" },
+  { v: "story", l: "ครึ่งจอ + เรื่องราว" },
+];
+
+const SFX_KEYS = ["sfxSpeed", "sfxFade", "sfxZoom", "sfxRotate", "sfxPin"] as const;
+/** ชิ้นนี้ขยับตามการเลื่อนจอไหม */
+export const canvasHasScrollFx = (it: Record<string, unknown>): boolean => SFX_KEYS.some((k) => (k === "sfxSpeed" || k === "sfxRotate" ? Number(it[k]) || 0 : it[k]));
+
+/**
+ * 🌀 "ทำทั้งผืนแบบเลื่อนแล้วมีมิติ" (แบบเว็บนิตยสาร: รูปกระจาย ขยับเร็วช้าไม่เท่ากัน จางตอนออก)
+ *   รูป/คลิป = ความเร็วสลับกันตามลำดับบน→ล่าง + จางตอนออก · ของตกแต่ง = เร็ว/ช้ามากสลับกัน
+ *   ข้อความตัวใหญ่ (≥ 72) = หัวข้อพื้นหลัง → ค้างไว้ระหว่างเลื่อน + ค่อย ๆ จาง
+ *   ข้อความ/ปุ่มอื่น = ขยับตามรูปที่อยู่ใกล้สุด (คำบรรยายติดไปกับรูป) · คืนรายการใหม่ (ลำดับชั้นเดิม) · ids ว่าง = ทุกชิ้น
+ */
+export function canvasScrollGallery<T extends Record<string, unknown> & { id: string }>(items: T[], ids?: string[]): T[] {
+  const pick = (it: T) => !ids || ids.includes(it.id);
+  const num = (v: unknown) => Number(v) || 0;
+  const center = (it: T) => ({ x: num(it.x) + num(it.w) / 2, y: num(it.y) + num(it.h) / 2 });
+  const SPEEDS = [-30, 35, 15, -20, 30, -10];
+  const media = items.filter((it) => pick(it) && (it.kind === "image" || it.kind === "video")).sort((a, b) => num(a.y) - num(b.y) || num(a.x) - num(b.x));
+  const patch = new Map<string, Record<string, unknown>>();
+  media.forEach((it, i) => patch.set(it.id, { sfxSpeed: SPEEDS[i % SPEEDS.length], sfxFade: "out", sfxZoom: "", sfxRotate: 0, sfxPin: false }));
+  let shapeN = 0;
+  for (const it of items) {
+    if (!pick(it) || patch.has(it.id)) continue;
+    if (it.kind === "shape") {
+      patch.set(it.id, { sfxSpeed: shapeN++ % 2 ? -50 : 55, sfxFade: "", sfxZoom: "", sfxRotate: 0, sfxPin: false });
+      continue;
+    }
+    if (it.kind === "text" && num(it.size) >= 72) {
+      patch.set(it.id, { sfxSpeed: 0, sfxFade: "out", sfxZoom: "", sfxRotate: 0, sfxPin: true });
+      continue;
+    }
+    // คำบรรยาย/ปุ่ม: ติดไปกับรูปที่ใกล้สุด (ไม่เกิน 360 หน่วย) · ไม่มีรูปใกล้ = นิ่ง
+    const c = center(it);
+    let best: T | null = null;
+    let bestD = 360;
+    for (const m of media) {
+      const mc = center(m);
+      const d = Math.hypot(mc.x - c.x, mc.y - c.y);
+      if (d < bestD) {
+        bestD = d;
+        best = m;
+      }
+    }
+    const src = best ? patch.get(best.id)! : { sfxSpeed: 0, sfxFade: "" };
+    patch.set(it.id, { sfxSpeed: src.sfxSpeed, sfxFade: src.sfxFade, sfxZoom: "", sfxRotate: 0, sfxPin: false });
+  }
+  return items.map((it) => (patch.has(it.id) ? { ...it, ...patch.get(it.id) } : it));
+}
+
+/** ล้างการขยับตามการเลื่อนจอ (ids ว่าง = ทุกชิ้น) */
+export function canvasScrollClear<T extends Record<string, unknown> & { id: string }>(items: T[], ids?: string[]): T[] {
+  return items.map((it) => (!ids || ids.includes(it.id) ? { ...it, sfxSpeed: 0, sfxFade: "", sfxZoom: "", sfxRotate: 0, sfxPin: false } : it));
+}
+
 /** เส้นกรอบรอบรูป (เว้นระยะจากรูปได้ = กรอบลอย แบบเว็บสายวินเทจ) */
 export const CANVAS_BORDERS: FieldOption[] = [
   { v: "none", l: "ไม่มี" },
@@ -461,7 +547,8 @@ const s = (v: unknown) => String(v ?? "").trim();
 export function canvasItemSummary(it: Record<string, unknown>): string {
   const kind = (s(it.kind) || "text") as CanvasKind;
   const icon = CANVAS_KIND_ICON[kind] ?? "🧩";
-  const lock = it.locked ? " 🔒" : "";
+  // 🌀 ขยับตามการเลื่อน · 🔍 กดแล้วขยาย — ต่อท้ายให้เห็นในต้นไม้ว่าชิ้นไหนมีลูกเล่น
+  const lock = `${canvasHasScrollFx(it) ? " 🌀" : ""}${(kind === "image" || kind === "video") && s(it.expand) ? " 🔍" : ""}${it.locked ? " 🔒" : ""}`;
   if (kind === "text") return `${icon} ${s(it.text).split("\n")[0].slice(0, 40) || "(ข้อความว่าง)"}${lock}`;
   if (kind === "button") return `${icon} ${s(it.label) || "(ปุ่มไม่มีข้อความ)"}${s(it.href) ? ` → ${s(it.href)}` : ""}${lock}`;
   const shop = Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : "";
@@ -485,6 +572,13 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
     if (kind === "button" && !s(it.label)) out.push({ level: "error", message: `${name}: ปุ่มยังไม่มีข้อความ` });
     if (kind === "button" && !s(it.href)) out.push({ level: "warning", message: `${name}: ปุ่มยังไม่ได้ตั้ง "กดแล้วไปที่"` });
     if (kind === "text" && !s(it.text)) out.push({ level: "warning", message: `${name}: ข้อความว่าง` });
+    // 🔍 กดแล้วขยาย: เต็มจอต้องมีหน้าปลายทางในเว็บ · ครึ่งจอต้องมีอะไรให้ดู
+    const media = kind === "image" || kind === "video";
+    const href = s(it.href);
+    if (media && it.expand === "full" && (!href.startsWith("/") || it.newTab === true))
+      out.push({ level: "warning", message: `${name}: "ขยายเต็มจอแล้วไปหน้าที่ลิงก์ไว้" ต้องตั้ง "กดแล้วไปที่" เป็นหน้าในเว็บ (ไม่เปิดแท็บใหม่) — ตอนนี้กดแล้วจะไม่ขยาย` });
+    if (media && it.expand === "story" && !s(it.expTitle) && !s(it.expText) && !(Array.isArray(it.products) && it.products.length) && !href)
+      out.push({ level: "warning", message: `${name}: "ขยายครึ่งจอ + เรื่องราว" ยังไม่มีหัวข้อ/ข้อความ/สินค้า — ฝั่งขวาจะว่าง` });
     const x = Number(it.x) || 0;
     const y = Number(it.y) || 0;
     const w = Number(it.w) || 0;

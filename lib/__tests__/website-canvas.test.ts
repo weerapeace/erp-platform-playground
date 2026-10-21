@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { matchShowIf, SECTION_SCHEMAS, type FieldDef } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockTypesFor, safeTarget, type Block } from "../website-blocks";
-import { canvasItemPreset, canvasItemSummary, validateCanvas, CANVAS_SHAPE_LABEL, CANVAS_FRAME_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_BUTTON_PRESETS, fitImageBox, canvasImageKeys } from "../website-canvas";
+import { canvasItemPreset, canvasItemSummary, validateCanvas, CANVAS_SHAPE_LABEL, CANVAS_FRAME_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_BUTTON_PRESETS, fitImageBox, canvasImageKeys, CANVAS_MAX_HEIGHT, canvasHasScrollFx, canvasScrollGallery, canvasScrollClear } from "../website-canvas";
 import { productHref, productSlug, categoryHref, sectionHref, categoryKeyOf } from "../website-links";
 
 /**
@@ -68,7 +68,7 @@ describe("canvas section", () => {
         ],
       },
     ]) as unknown as Record<string, unknown>[];
-    expect(b.height).toBe(2400);
+    expect(b.height).toBe(CANVAS_MAX_HEIGHT);
     const [a, c] = b.items as Record<string, unknown>[];
     expect(a).toMatchObject({ x: -1200, y: 51, w: 4, rotate: 180, href: "", frame: "rect" });
     expect(c).toMatchObject({ kind: "text", shape: "bow", href: "/shop" });
@@ -477,5 +477,76 @@ describe("🛍 ลุคบุ๊กแบบวางอิสระ: วิด
     expect(canvasItemSummary({ kind: "image", imageKey: "a.jpg", alt: "ลุค", products: ["A"] })).toBe("🖼️ ลุค · 🛍 1");
     expect(validateCanvas({ height: 560, items: [{ kind: "video", x: 10, y: 10, w: 100 }] }, "ผืน").map((x) => x.message).join(" ")).toMatch(/ยังไม่ได้ใส่คลิป/);
     expect(canvasImageKeys([{ type: "canvas", items: [{ kind: "video", videoKey: "v.mp4", posterKey: "p.jpg" }] }])).toEqual(["v.mp4", "p.jpg"]);
+  });
+});
+
+describe("🌀 ขยับตามการเลื่อนจอ + 🔍 กดแล้วขยาย (2026-10-21)", () => {
+  const norm = (items: Record<string, unknown>[], extra: Record<string, unknown> = {}) =>
+    normalizeBlocks([{ id: "c1", type: "canvas", ...extra, items }])[0] as unknown as { height: number; items: Record<string, unknown>[] };
+
+  it("บันทึกแล้วค่าไม่หาย (ความเร็วติดลบได้ · จำกัดช่วง · ค่าแปลกตกเป็นค่าเริ่ม)", () => {
+    const [a, b] = norm([
+      { id: "a", kind: "image", sfxSpeed: -40, sfxFade: "inout", sfxZoom: "grow", sfxRotate: 15, sfxPin: true, expand: "story", expTitle: "ฤดูร้อน", expText: "เล่าเรื่อง", expCta: "ช้อปลุคนี้" },
+      { id: "b", kind: "text", sfxSpeed: 999, sfxFade: "boom", sfxZoom: 3, sfxRotate: -500 },
+    ]).items;
+    expect(a).toMatchObject({ sfxSpeed: -40, sfxFade: "inout", sfxZoom: "grow", sfxRotate: 15, sfxPin: true, expand: "story", expTitle: "ฤดูร้อน", expText: "เล่าเรื่อง", expCta: "ช้อปลุคนี้" });
+    expect(b).toMatchObject({ sfxSpeed: 100, sfxFade: "", sfxZoom: "", sfxRotate: -90, sfxPin: false });
+  });
+
+  it("ผืนสูงได้ถึง 6000 · ชิ้นวางลึกได้", () => {
+    const blk = norm([{ id: "a", kind: "image", y: 5200 }], { height: 9000 });
+    expect(blk.height).toBe(CANVAS_MAX_HEIGHT);
+    expect(blk.items[0].y).toBe(5200);
+  });
+
+  it("ช่องเรื่องราวโชว์เฉพาะรูป/คลิปที่ตั้ง 'ครึ่งจอ + เรื่องราว'", () => {
+    const fd = (k: string) => SECTION_SCHEMAS.canvas.children!.fields.find((x) => x.key === k) as FieldDef;
+    expect(matchShowIf(fd("expand"), { kind: "image" })).toBe(true);
+    expect(matchShowIf(fd("expand"), { kind: "text" })).toBe(false);
+    expect(matchShowIf(fd("expTitle"), { kind: "video", expand: "story" })).toBe(true);
+    expect(matchShowIf(fd("expTitle"), { kind: "video", expand: "full" })).toBe(false);
+    expect(matchShowIf(fd("sfxSpeed"), { kind: "shape" })).toBe(true);
+  });
+
+  it("canvasHasScrollFx + สรุปในต้นไม้มี 🌀/🔍", () => {
+    expect(canvasHasScrollFx({ sfxSpeed: 0, sfxFade: "", sfxRotate: 0 })).toBe(false);
+    expect(canvasHasScrollFx({ sfxSpeed: -20 })).toBe(true);
+    expect(canvasHasScrollFx({ sfxPin: true })).toBe(true);
+    expect(canvasItemSummary({ kind: "image", imageKey: "a.jpg", alt: "ลุค", sfxSpeed: 30, expand: "full" })).toBe("🖼️ ลุค 🌀 🔍");
+    // ชิ้นที่ไม่มีลูกเล่น = สรุปเหมือนเดิม
+    expect(canvasItemSummary({ kind: "image", imageKey: "a.jpg", alt: "ลุค" })).toBe("🖼️ ลุค");
+  });
+
+  it("ทำทั้งผืนแบบนิตยสาร: รูปเร็ว-ช้าสลับ + จาง · หัวข้อใหญ่ค้าง · คำบรรยายติดรูปใกล้สุด · ของตกแต่งเร็ว/ช้ามาก", () => {
+    const items = [
+      { id: "big", kind: "text", size: 96, x: 500, y: 60, w: 600, h: 120 },
+      { id: "i1", kind: "image", x: 60, y: 40, w: 300, h: 220 },
+      { id: "cap1", kind: "text", size: 14, x: 380, y: 80, w: 200, h: 40 },
+      { id: "i2", kind: "image", x: 600, y: 400, w: 340, h: 220 },
+      { id: "v3", kind: "video", x: 100, y: 800, w: 300, h: 400 },
+      { id: "s1", kind: "shape", x: 1000, y: 900, w: 60, h: 60 },
+      { id: "far", kind: "button", x: 560, y: 2000, w: 200, h: 50 },
+    ];
+    const out = Object.fromEntries(canvasScrollGallery(items).map((it) => [it.id, it as Record<string, unknown>]));
+    expect(out.big).toMatchObject({ sfxPin: true, sfxFade: "out" });
+    expect(out.i1).toMatchObject({ sfxSpeed: -30, sfxFade: "out" });
+    expect(out.i2).toMatchObject({ sfxSpeed: 35, sfxFade: "out" });
+    expect(out.v3).toMatchObject({ sfxSpeed: 15, sfxFade: "out" });
+    expect(out.cap1).toMatchObject({ sfxSpeed: -30, sfxFade: "out" });
+    expect(out.s1.sfxSpeed).toBe(55);
+    expect(out.far).toMatchObject({ sfxSpeed: 0, sfxFade: "" });
+    // ลำดับชั้นเดิม + ล้างได้
+    expect(canvasScrollGallery(items).map((x) => x.id)).toEqual(items.map((x) => x.id));
+    expect(canvasScrollClear(canvasScrollGallery(items)).some((x) => canvasHasScrollFx(x))).toBe(false);
+  });
+
+  it("เตือน: ขยายเต็มจอแต่ไม่มีหน้าปลายทางในเว็บ · เรื่องราวว่าง", () => {
+    const msg = (it: Record<string, unknown>) => validateCanvas({ height: 560, items: [{ kind: "image", imageKey: "a.jpg", alt: "a", x: 10, y: 10, w: 100, ...it }] }, "ผืน").map((x) => x.message).join(" ");
+    expect(msg({ expand: "full" })).toMatch(/ต้องตั้ง "กดแล้วไปที่"/);
+    expect(msg({ expand: "full", href: "https://x.co" })).toMatch(/ต้องตั้ง "กดแล้วไปที่"/);
+    expect(msg({ expand: "full", href: "/shop", newTab: true })).toMatch(/ต้องตั้ง "กดแล้วไปที่"/);
+    expect(msg({ expand: "full", href: "/shop" })).not.toMatch(/กดแล้วไปที่/);
+    expect(msg({ expand: "story" })).toMatch(/ฝั่งขวาจะว่าง/);
+    expect(msg({ expand: "story", expTitle: "หัวข้อ" })).not.toMatch(/ฝั่งขวาจะว่าง/);
   });
 });

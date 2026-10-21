@@ -13,7 +13,7 @@
  * คำนวณด้วย canvasBgWindow (lib/website-canvas.ts) — สูตรเดียวกับเว็บร้าน (object-position + scale รอบจุดเดียวกัน)
  */
 import { ImageCropBox } from "@/components/image-crop-box";
-import { CANVAS_BG_DEFAULT, CANVAS_BG_REF_PHONE, CANVAS_BG_REF_WIDTH, CANVAS_MOBILE_WIDTH, CANVAS_WIDTH } from "@/lib/website-canvas";
+import { CANVAS_BG_DEFAULT, CANVAS_BG_REF_PHONE, CANVAS_BG_REF_WIDTH, CANVAS_MAX_HEIGHT, CANVAS_MOBILE_WIDTH, CANVAS_WIDTH } from "@/lib/website-canvas";
 
 export interface CanvasBgPos {
   fit: "cover" | "contain";
@@ -83,7 +83,7 @@ export function CanvasBgPositioner({
 
   // กล่องที่รูปไปอยู่บนเว็บ: คอม = กว้างเต็มจออ้างอิง × สูงตามผืน (ผืนกว้างสุด 1200)
   // มือถือ = ผืนมือถือจัดเอง (กว้าง 400 × ความสูงที่ตั้ง) · เรียงอัตโนมัติ = สัดส่วนจอโทรศัพท์โดยประมาณ (สูงจริงตามจำนวนชิ้น)
-  const height = n(block.height, 560, 120, 2400);
+  const height = n(block.height, 560, 120, CANVAS_MAX_HEIGHT);
   const desk = { w: CANVAS_BG_REF_WIDTH, h: (height * Math.min(CANVAS_BG_REF_WIDTH, CANVAS_WIDTH)) / CANVAS_WIDTH };
   const phone = mobileCustomLayout ? { w: CANVAS_MOBILE_WIDTH, h: n(block.mobileHeight, 800, 120, 8000) } : CANVAS_BG_REF_PHONE;
   const box = mobile ? phone : desk;

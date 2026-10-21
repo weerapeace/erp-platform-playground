@@ -18,7 +18,7 @@
  * ตัววาดผืน + การลากอยู่ที่เว็บร้าน src/components/home/CanvasSection.tsx
  */
 import { useEffect, useRef, type MutableRefObject, type RefObject } from "react";
-import { CANVAS_MOBILE_WIDTH, CANVAS_WIDTH } from "@/lib/website-canvas";
+import { CANVAS_MAX_HEIGHT, CANVAS_MOBILE_WIDTH, CANVAS_WIDTH } from "@/lib/website-canvas";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { sanitizeField } from "@/lib/website-blocks";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
@@ -124,7 +124,7 @@ export function useCanvasBridge(opts: {
           const byId = new Map(d.items.filter((x) => typeof x?.id === "string").map((x) => [x.id as string, livePatch(x)]));
           p.items = list.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it));
         }
-        const h = clampInt(d.height, 120, 2400);
+        const h = clampInt(d.height, 120, CANVAS_MAX_HEIGHT);
         if (h !== null) p.height = h;
         const mh = clampInt(d.mobileHeight, 120, 8000);
         if (mh !== null) p.mobileHeight = mh;

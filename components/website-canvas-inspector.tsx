@@ -24,10 +24,18 @@ import {
   CANVAS_SHAPES,
   CANVAS_SPEEDS,
   CANVAS_WEIGHTS,
+  CANVAS_EXPANDS,
+  CANVAS_MAX_HEIGHT,
+  CANVAS_SFX_FADES,
+  CANVAS_SFX_SPEED_PRESETS,
+  CANVAS_SFX_ZOOMS,
   canvasEntrancesFor,
   canvasFrameMask,
+  canvasHasScrollFx,
   canvasHoversFor,
   canvasMobileBox,
+  canvasScrollClear,
+  canvasScrollGallery,
   canvasStagger,
 } from "@/lib/website-canvas";
 import { GRAD_DIRS, GRADIENT_PRESETS, type GradThemeHex } from "@/lib/website-gradient";
@@ -130,11 +138,19 @@ export function CanvasInspector({
   onReplay,
   onPickFrame,
   onReplaceVideo,
+  scrollPreview = false,
+  onScrollPreview,
+  onExpandDemo,
 }: {
   block: Block;
   item: ChildBlock | null;
   /** เล่น "โผล่ตอนเลื่อนมาเจอ" ในพรีวิว (ไม่ระบุ = ทั้งผืน) */
   onReplay?: (ids?: string[]) => void;
+  /** 🌀 "ลองเลื่อนดู" เปิดอยู่ไหม (พรีวิวขยับตามการเลื่อนจริง · ลากชิ้นไม่ได้ระหว่างนั้น) */
+  scrollPreview?: boolean;
+  onScrollPreview?: (on: boolean) => void;
+  /** 🔍 เล่นท่า "กดแล้วขยาย" ของชิ้นนี้ในพรีวิว (ไม่เปลี่ยนหน้า) */
+  onExpandDemo?: (id: string) => void;
   /** เปิดคลังกรอบรูปของร้าน (PNG วางทับรูป) */
   onPickFrame?: () => void;
   /** เลือกหลายชิ้น (≥ 2) → แสดงแผงหลายชิ้นแทน */
@@ -230,7 +246,7 @@ export function CanvasInspector({
       <div className="space-y-4">
         <p className="text-sm font-semibold text-slate-800">ทั้งผืน</p>
         <p className="text-[11px] text-slate-500 -mt-2">คลิกชิ้นบนผืนเพื่อแก้ทีละชิ้น · คลิกที่ว่างเพื่อกลับมาตรงนี้</p>
-        <Slider label="ความสูงผืน" value={Number(block.height) || 560} min={120} max={1600} step={10} onChange={(n) => onPatchBlock({ height: n })} />
+        <Slider label="ความสูงผืน" value={Number(block.height) || 560} min={120} max={CANVAS_MAX_HEIGHT} step={10} onChange={(n) => onPatchBlock({ height: n })} />
         <div>
           <H>สีพื้นผืน (เต็มความกว้างจอ)</H>
           <div className="flex flex-wrap gap-1.5">
@@ -284,6 +300,30 @@ export function CanvasInspector({
             </button>
           </div>
           <p className="text-[10px] text-slate-500">ตั้งทีละชิ้นได้ที่ &quot;✨ เคลื่อนไหว&quot; บนแถบลอย หรือแผงนี้ตอนเลือกชิ้น</p>
+          {/* 🌀 ขยับตามการเลื่อนจอ ทั้งผืน */}
+          <div className="border-t border-violet-200 pt-2 space-y-1.5">
+            <H>🌀 ตอนเลื่อนจอ (รูปขยับเร็ว-ช้าไม่เท่ากัน)</H>
+            <button
+              onClick={() => {
+                onPatchBlock({ items: canvasScrollGallery(items) });
+                onScrollPreview?.(true);
+              }}
+              className="w-full rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100"
+            >
+              🌀 ทำทั้งผืนแบบเลื่อนแล้วมีมิติ (แบบนิตยสาร)
+            </button>
+            <div className="flex gap-1.5">
+              <button className={seg(scrollPreview)} onClick={() => onScrollPreview?.(!scrollPreview)}>
+                {scrollPreview ? "⏸ หยุดลองเลื่อน" : "▶ ลองเลื่อนดู"}
+              </button>
+              <button className={seg(false)} disabled={!items.some(canvasHasScrollFx)} onClick={() => onPatchBlock({ items: canvasScrollClear(items) })}>
+                ล้างการขยับ
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500">
+              ลองเลื่อนดู = เลื่อนพรีวิวขึ้น-ลงเพื่อดูของจริง (ระหว่างนี้ลากชิ้นไม่ได้) · ได้ผลดีกับผืนสูงหลายจอ วางรูปกระจายซ้าย-ขวา · ตัวหนังสือใหญ่ (≥ 72) จะค้างเป็นหัวข้อพื้นหลัง
+            </p>
+          </div>
         </div>
         <div>
           <H>รูปพื้นหลังผืน</H>
@@ -519,6 +559,42 @@ export function CanvasInspector({
             <label className="flex items-center gap-1.5 text-xs text-slate-600">
               <input type="checkbox" className="accent-emerald-600" checked={item.shopIcon !== false} onChange={(e) => onPatchItem({ shopIcon: e.target.checked })} /> ไอคอน 🛍 มุม{kind === "video" ? "คลิป" : "รูป"} (บอกลูกค้าว่ากดซื้อได้)
             </label>
+          )}
+        </div>
+      )}
+
+      {/* 🔍 กดแล้วขยาย (รูป/คลิป) — ชนะการ์ดสินค้าและลิงก์ธรรมดา */}
+      {(kind === "image" || kind === "video") && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50/40 p-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="flex-1 text-[11px] font-semibold text-sky-800">🔍 กด{kind === "video" ? "คลิป" : "รูป"}แล้วขยาย</span>
+            {str("expand") && (
+              <button onClick={() => onExpandDemo?.(item.id)} className="text-[11px] text-sky-700 hover:underline">
+                ▶ ลองกดดู
+              </button>
+            )}
+          </div>
+          <Chips
+            options={CANVAS_EXPANDS}
+            value={str("expand")}
+            onPick={(v) => {
+              onPatchItem({ expand: v });
+              if (v) window.setTimeout(() => onExpandDemo?.(item.id), 300);
+            }}
+          />
+          {str("expand") === "full" && (!str("href").startsWith("/") || item.newTab === true) && (
+            <p className="rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800">ตั้ง &quot;กดแล้วไปที่&quot; (ด้านล่าง) เป็นหน้าในเว็บ ไม่เปิดแท็บใหม่ — ไม่งั้นบนเว็บจริงกดแล้วจะไม่ขยาย</p>
+          )}
+          {str("expand") === "full" && <p className="text-[10px] text-slate-500">{kind === "video" ? "คลิป" : "รูป"}ค่อย ๆ ขยายเต็มจอ แล้วเปลี่ยนเป็นหน้าที่ลิงก์ไว้ใต้ภาพ</p>}
+          {str("expand") === "story" && (
+            <>
+              <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("expTitle")} maxLength={120} placeholder="หัวข้อ เช่น คอลเลกชันฤดูร้อน (ว่าง = ใช้คำบรรยายรูป)" onChange={(e) => onPatchItem({ expTitle: e.target.value })} />
+              <textarea className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" rows={4} value={str("expText")} maxLength={1500} placeholder="เล่าเรื่องสั้น ๆ ของภาพนี้" onChange={(e) => onPatchItem({ expText: e.target.value })} />
+              <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("expCta")} maxLength={40} placeholder="ข้อความบนปุ่ม (ว่าง = ดูเพิ่มเติม)" onChange={(e) => onPatchItem({ expCta: e.target.value })} />
+              <p className="text-[10px] text-slate-500">
+                {kind === "video" ? "คลิป" : "รูป"}ขยายเต็มครึ่งซ้ายของจอ (มือถือ = ครึ่งบน) เนื้อหาขึ้นอีกฝั่ง · สินค้าใน{kind === "video" ? "คลิป" : "รูป"}ด้านบนจะขึ้นในนั้นด้วย · ปุ่มพาไปที่ &quot;กดแล้วไปที่&quot; (ไม่ตั้ง = ไม่มีปุ่ม)
+              </p>
+            </>
           )}
         </div>
       )}
@@ -768,6 +844,41 @@ export function CanvasInspector({
           <Chips options={canvasHoversFor(kind)} value={str("hover")} onPick={(v) => onPatchItem({ hover: v })} />
         </div>
         {str("anim") === "type" && <p className="text-[10px] text-violet-700">พิมพ์ทีละตัว: ความเร็ว = เร็ว/ปกติ/ช้า ด้านบน · ข้อความยาวเกิน 400 ตัวจะใช้ &quot;ค่อย ๆ ขึ้นมา&quot; แทน</p>}
+        {/* 🌀 ขยับตามการเลื่อนจอ (เว็บร้าน lib/canvas-scroll) */}
+        <div className="border-t border-violet-200 pt-2 space-y-2">
+          <div className="flex items-center">
+            <span className="flex-1 text-[11px] font-semibold text-violet-800">🌀 ตอนเลื่อนจอ</span>
+            <button onClick={() => onScrollPreview?.(!scrollPreview)} className="text-[11px] text-violet-700 hover:underline">
+              {scrollPreview ? "⏸ หยุดลอง" : "▶ ลองเลื่อนดู"}
+            </button>
+          </div>
+          <div>
+            <H>ความเร็วเทียบการเลื่อนหน้าเว็บ</H>
+            <div className="grid grid-cols-5 gap-1">
+              {CANVAS_SFX_SPEED_PRESETS.map((o) => (
+                <button key={o.v} type="button" onClick={() => onPatchItem({ sfxSpeed: o.v })} className={`px-1 py-1.5 text-[11px] rounded-md border ${num("sfxSpeed", 0) === o.v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                  {o.l}
+                </button>
+              ))}
+            </div>
+            <Slider label="ปรับละเอียด (ลบ = ช้ากว่า · บวก = เร็วกว่า)" value={num("sfxSpeed", 0)} min={-100} max={100} step={5} onChange={(n) => onPatchItem({ sfxSpeed: n })} />
+          </div>
+          <div>
+            <H>จางตามตำแหน่งบนจอ</H>
+            <Chips options={CANVAS_SFX_FADES} value={str("sfxFade")} onPick={(v) => onPatchItem({ sfxFade: v })} />
+          </div>
+          <div>
+            <H>ซูมตามการเลื่อน</H>
+            <Chips options={CANVAS_SFX_ZOOMS} value={str("sfxZoom")} onPick={(v) => onPatchItem({ sfxZoom: v })} />
+          </div>
+          <Slider label="หมุนตามการเลื่อน (ต่อ 1 จอ)" value={num("sfxRotate", 0)} min={-90} max={90} step={5} unit="°" onChange={(n) => onPatchItem({ sfxRotate: n })} />
+          <button className={`${seg(item.sfxPin === true)} w-full`} onClick={() => onPatchItem({ sfxPin: !item.sfxPin })}>
+            📌 {item.sfxPin ? "ค้างอยู่กับที่ระหว่างเลื่อนผืน (กดเพื่อเลิก)" : "ค้างอยู่กับที่ระหว่างเลื่อนผืน"}
+          </button>
+          <p className="text-[10px] text-slate-500">
+            ค้าง = อยู่ที่เดิมบนจอจนเลื่อนพ้นผืน (เหมาะกับหัวข้อตัวใหญ่ด้านหลัง) · มือถือขยับครึ่งเดียวให้เอง · ลูกค้าที่ตั้งเครื่อง &quot;ลดการเคลื่อนไหว&quot; จะเห็นนิ่ง
+          </p>
+        </div>
       </div>
 
       {/* ทุกชนิด */}
