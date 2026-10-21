@@ -109,6 +109,10 @@ export async function POST(request: NextRequest) {
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
+  // ตรวจตัวตนก่อนเรียกตัวตรวจบริษัท (ตัวตรวจใช้สิทธิ์ระบบ — คนนอกห้ามใช้ถามข้อมูลใบขาย)
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ" }, { status: 401 });
+
   // ใบกำกับ/หัวบิลแยกบริษัท → ใบวางบิลเดียวรวมใบขายต่างบริษัทไม่ได้ (บริษัทของใบวางบิล = บริษัทของใบขายข้างใน)
   const mixed = await checkSameCompanySOs(supabaseAdmin(), body.so_ids);
   if (mixed) return NextResponse.json({ error: mixed }, { status: 400 });
