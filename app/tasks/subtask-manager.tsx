@@ -15,7 +15,7 @@ import { useProductModeCfg } from "./product-edit-mode";
 import type { PushToast } from "@/components/toast";
 import { SUBTASK_STATUS, SUBTASK_STATUS_STEPS, isSubDone, subStatusLabel } from "./subtask-status";
 import { AddSubtaskForm, ReviseModal } from "./subtask-forms";
-import { SubtaskCard, TypeMeta, DirectCtx } from "./subtask-card";
+import { SubtaskCard, type TypeMeta, type DirectCtx } from "./subtask-card";
 export { SubtaskCard } from "./subtask-card";   // ย้ายไป subtask-card.tsx — re-export กันโค้ดเดิมที่อ้างจากไฟล์นี้
 export { AddSubtaskForm, ReviseModal } from "./subtask-forms";   // ย้ายไป subtask-forms.tsx — re-export กันโค้ดเดิมที่อ้างจากไฟล์นี้
 
