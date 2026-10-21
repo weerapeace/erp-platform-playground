@@ -51,6 +51,12 @@ export interface Selection {
 export type Device = "desktop" | "tablet" | "mobile";
 type Zoom = "fit" | 0.5 | 0.75 | 1;
 
+/** เว็บร้านต้องตอบ "โหลดเสร็จ" (storefront-preview-loaded) ภายในเวลานี้ ไม่งั้นถือว่าค้าง
+ *  (วัดจริง 2026-10-21: เว็บตอบ 1–2.5 วิ แต่สคริปต์หน้าร้านพร้อม 5–12 วิในตัวจัดหน้า → ตั้งเผื่อ ไม่โหลดซ้ำตอนแค่ช้า) */
+const PREVIEW_TIMEOUT_MS = 20_000;
+/** โหลดนานเกินนี้ → ป้ายบอกว่า "ช้ากว่าปกติ" */
+const PREVIEW_SLOW_MS = 8_000;
+
 export const DEVICES: { k: Device; w: number; h: number; icon: string; label: string }[] = [
   { k: "desktop", w: 1440, h: 900, icon: "🖥️", label: "คอมพิวเตอร์" },
   { k: "tablet", w: 768, h: 1024, icon: "📱", label: "แท็บเล็ต" },
@@ -210,16 +216,27 @@ export function WebsiteBuilder({
   const serverTypesRef = useRef<string[] | null>(null);
   const loadedBlocks = useRef<Block[] | null>(null);
   useEffect(() => {
+    // ครั้งแรก (เพิ่งเปิดตัวจัดหน้า) = iframe กำลังโหลดร่างล่าสุดอยู่แล้ว → แค่จำไว้ ไม่สั่งโหลดซ้ำ (เดิมเปิดมาโหลด 2 รอบ)
+    if (!loadedBlocks.current) { loadedBlocks.current = blocksRef.current; return; }
     const live = liveRef.current;
     const st = serverTypesRef.current;
-    if (loadedBlocks.current && previewReloadSig(loadedBlocks.current, live, st) === previewReloadSig(blocksRef.current, live, st)) return;
+    if (previewReloadSig(loadedBlocks.current, live, st) === previewReloadSig(blocksRef.current, live, st)) return;
     loadedBlocks.current = blocksRef.current;
+    autoRetried.current = false;
     setNonce((n) => n + 1);
   }, [previewVersion]);
   const reloadPreview = () => {
     loadedBlocks.current = blocksRef.current;
+    autoRetried.current = false;   // กดเอง = เริ่มนับใหม่ (ลองเองได้อีก 1 ครั้ง)
     setNonce((n) => n + 1);
   };
+  // ⏳ ตัวเฝ้าพรีวิว — บางครั้ง iframe ค้างขาวทั้งจอ (เจ้าของเจอ 2026-10-21 · กด ↻ แล้วขึ้น)
+  //   เว็บร้านตอบ storefront-preview-loaded ทุกครั้งที่โหลดเสร็จ → ไม่ตอบใน PREVIEW_TIMEOUT_MS = ค้าง → โหลดใหม่เอง 1 ครั้ง → ยังไม่ขึ้น = บอกผู้ใช้
+  const [previewPhase, setPreviewPhase] = useState<"loading" | "ready" | "failed">("loading");
+  const [showLoading, setShowLoading] = useState(false);   // ป้าย "กำลังโหลด" (โชว์เมื่อเกิน 1.2 วิ — โหลดเร็วไม่กระพริบ)
+  const [loadSlow, setLoadSlow] = useState(false);          // เกิน PREVIEW_SLOW_MS
+  const autoRetried = useRef(false);
+  const previewAnswered = useRef(false);   // รอบโหลดนี้เว็บร้านตอบ "โหลดเสร็จ" แล้ว (ตัวจับเวลาต้องเช็ก — ไม่งั้นโหลดซ้ำทั้งที่ขึ้นแล้ว)
   // โหลดพรีวิวใหม่ = ยังไม่รู้ว่ารับค่าสดได้ไหม (รอถามใหม่ตอนโหลดเสร็จ)
   useEffect(() => {
     liveRef.current = false;
@@ -467,6 +484,9 @@ export function WebsiteBuilder({
         return;
       }
       if (d.type === "storefront-preview-loaded") {
+        previewAnswered.current = true;
+        setPreviewPhase("ready");
+        autoRetried.current = false;
         // พรีวิวโหลดใหม่ → ไฮไลต์+เลื่อนไปที่ที่เลือกอยู่ หรือคืนตำแหน่งเลื่อนเดิม
         const sel = selectionRef.current;
         const win = iframeRef.current?.contentWindow;
@@ -791,6 +811,22 @@ export function WebsiteBuilder({
 
   /** 🌐 แผงแก้ภาษาอังกฤษ → พรีวิวหน้า /en ของเว็บร้าน (สลับกลับไทย = กลับหน้าเดิม) */
   const shownSrc = previewSrc && contentLang === "en" ? previewInEnglish(previewSrc) : previewSrc;
+  // src เปลี่ยน (โหลดใหม่/สลับภาษา) = เริ่มเฝ้าใหม่
+  useEffect(() => {
+    if (!shownSrc) return;
+    previewAnswered.current = false;
+    setPreviewPhase("loading");
+    setShowLoading(false);
+    setLoadSlow(false);
+    const tShow = window.setTimeout(() => setShowLoading(true), 1200);
+    const tSlow = window.setTimeout(() => setLoadSlow(true), PREVIEW_SLOW_MS);
+    const tDead = window.setTimeout(() => {
+      if (previewAnswered.current) return;   // ขึ้นแล้ว
+      if (!autoRetried.current) { autoRetried.current = true; setNonce((n) => n + 1); }   // ค้าง → โหลดใหม่เอง 1 ครั้ง
+      else setPreviewPhase((p) => (p === "loading" ? "failed" : p));
+    }, PREVIEW_TIMEOUT_MS);
+    return () => { window.clearTimeout(tShow); window.clearTimeout(tSlow); window.clearTimeout(tDead); };
+  }, [nonce, shownSrc]);
 
   const dev = DEVICES.find((d) => d.k === device)!;
   const scale = zoom === "fit" ? Math.min(1, (boxW - 16) / dev.w) : zoom;
@@ -987,6 +1023,26 @@ export function WebsiteBuilder({
         <div className="h-full flex flex-col items-center justify-center text-sm text-slate-400 px-6 text-center gap-1">
           <span>ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้</span>
           <span className="text-[11px]">เมื่อเว็บร้านขึ้น Vercel แล้ว ใส่โดเมนในตาราง shop_domains พรีวิวจะขึ้นที่นี่</span>
+        </div>
+      )}
+      {/* ⏳ กำลังโหลด (ไม่บังพรีวิว) · ❗ โหลดไม่ขึ้นหลังลองเองแล้ว → ปุ่มลองใหม่ / เปิดแท็บใหม่ */}
+      {previewSrc && previewPhase === "loading" && showLoading && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-slate-900/80 px-3 py-1 text-xs text-white shadow">
+          <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400 align-middle" />
+          กำลังโหลดพรีวิว…{autoRetried.current ? " (ลองโหลดใหม่ให้แล้ว)" : loadSlow ? " (เว็บร้านช้ากว่าปกติ)" : ""}
+        </div>
+      )}
+      {previewSrc && previewPhase === "failed" && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70 p-4">
+          <div className="max-w-sm rounded-xl border border-slate-200 bg-white p-4 text-center shadow-lg">
+            <p className="text-sm font-medium text-slate-800">พรีวิวโหลดไม่ขึ้น</p>
+            <p className="mt-1 text-xs text-slate-500">เว็บร้านตอบช้าหรือค้าง (ลองโหลดใหม่ให้แล้ว 1 ครั้ง) — กดลองใหม่ หรือเปิดดูในแท็บใหม่</p>
+            <div className="mt-3 flex justify-center gap-2">
+              <button onClick={reloadPreview} className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700">↻ ลองใหม่</button>
+              <a href={shownSrc ?? previewSrc} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50">↗ เปิดในแท็บใหม่</a>
+              <button onClick={() => setPreviewPhase("ready")} className="h-8 rounded-lg px-2 text-xs text-slate-400 hover:text-slate-700" title="ซ่อนข้อความนี้">ปิด</button>
+            </div>
+          </div>
         </div>
       )}
       {/* แผ่นใสทับพรีวิวตอนลาก — iframe รับเหตุการณ์เมาส์เองไม่ได้ ต้องให้แผ่นนี้รับแทนแล้วส่งพิกัดเข้าไป */}
