@@ -16,11 +16,11 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 type WebOption = { id: string; label: string; image?: string | null; images?: string[] };
 /** API สาธารณะส่งตัวเลือกสีเป็น { label, items } (เว็บร้านแปลงเป็น options[] เอง) */
 type WebProduct = { code?: string; slug: string; name: string; images?: string[]; options?: { label?: string; items?: WebOption[] } | WebOption[] | null; category?: string; categories?: string[] };
-type SkuRow = { ref: string; code: string; name: string; color: string; image: string | null; cat: string };
+export type SkuRow = { ref: string; code: string; name: string; color: string; image: string | null; cat: string };
 
 /** SKU ที่เผยแพร่ของร้าน — แคชต่อร้าน (โหลดใหม่เมื่อเปิดป๊อปเลือก) */
 const cache = new Map<string, Promise<SkuRow[]>>();
-function loadSkus(shopSlug: string, fresh = false): Promise<SkuRow[]> {
+export function loadSkus(shopSlug: string, fresh = false): Promise<SkuRow[]> {
   if (fresh || !cache.has(shopSlug)) {
     cache.set(
       shopSlug,

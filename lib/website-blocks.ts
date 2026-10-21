@@ -311,6 +311,8 @@ export interface ProductsBlock extends BlockBase {
   tabBody?: "grid" | "carousel";
   /** รูปบนแท็บรุ่น: SKU ต่อรุ่น "CODE:sku-xxxxxxxx" (ไม่เลือก = รูปปก Parent) */
   tabThumbs?: string[];
+  /** รูปบนแท็บรุ่นที่อัปโหลด/เลือกจากคลัง { รหัสรุ่น: r2 key } — มาก่อน tabThumbs */
+  tabImages?: Record<string, string>;
   tabThumbShape?: "circle" | "rounded" | "square";
   /** px · 0 = อัตโนมัติ (รูป+ชื่อ 30 · รูปอย่างเดียว 52) */
   tabThumbSize?: number;
@@ -1075,6 +1077,18 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
     }
     case "skus":
       return Array.isArray(v) ? [...new Set(v.map((x) => skuRefStr(x)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
+    case "productImages": {
+      // { รหัสรุ่น: r2 key } — รหัส/รูปที่ใช้ไม่ได้ถูกตัดทิ้ง · สูงสุด 24 รุ่น
+      const out: Record<string, string> = {};
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 24)) {
+          const code = codeStr(k);
+          const img = imgKey(x);
+          if (code && img) out[code] = img;
+        }
+      }
+      return out;
+    }
     case "datetime":
       // วันเวลาไทย "YYYY-MM-DDTHH:mm" — รูปแบบอื่น = ว่าง
       return typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v.trim()) ? v.trim() : "";

@@ -353,6 +353,45 @@ export function SchemaField(props: {
         <WebsiteCategoriesField shopSlug={props.ctx.shopSlug} categories={props.ctx.categories} value={Array.isArray(props.value) ? (props.value as string[]) : []} item={item} onPatch={onPatch} fieldKey={fd.key} />
       </FieldBox>
     );
+  // 🖼 ช่องสินค้าที่ตั้งรูปรายรุ่นได้ (เช่น แท็บรุ่นสินค้า) — แก้ 3 ช่องพร้อมกัน: รหัสรุ่น + รูปอัปโหลด/คลัง (images) + รูปจาก SKU (skus)
+  if (fd.type === "products" && fd.rowImages && onPatch && item) {
+    const { images: imgKey, skus: skuKey } = fd.rowImages;
+    const raw = item[imgKey];
+    const imgs = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, string>;
+    const skus = Array.isArray(item[skuKey]) ? (item[skuKey] as string[]) : [];
+    const codeOf = (ref: string) => ref.split(":")[0].toUpperCase();
+    const codes = Array.isArray(props.value) ? (props.value as string[]) : [];
+    return (
+      <FieldBox label={fd.label} hint={fd.hint} wide>
+        <WebsiteProductPicker
+          shopSlug={props.ctx.shopSlug}
+          value={codes}
+          max={fd.max}
+          onChange={(next) => {
+            const keep = new Set(next.map((c) => c.toUpperCase()));
+            onPatch({
+              [fd.key]: next,
+              [imgKey]: Object.fromEntries(Object.entries(imgs).filter(([c]) => keep.has(c.toUpperCase()))),
+              [skuKey]: skus.filter((r) => keep.has(codeOf(r))),
+            });
+          }}
+          rowImages={{
+            images: imgs,
+            skus,
+            onSet: (code, pick) => {
+              const up = code.toUpperCase();
+              const restImgs = Object.fromEntries(Object.entries(imgs).filter(([c]) => c.toUpperCase() !== up));
+              const restSkus = skus.filter((r) => codeOf(r) !== up);
+              onPatch({
+                [imgKey]: pick?.key ? { ...restImgs, [code]: pick.key } : restImgs,
+                [skuKey]: pick?.sku ? [...restSkus, pick.sku] : restSkus,
+              });
+            },
+          }}
+        />
+      </FieldBox>
+    );
+  }
   // 📸 สวิตช์ "ใช้การ์ดตามค่ากลางของร้าน": ปิด → ก๊อปค่าการ์ดของร้านตอนนี้มาใส่ช่องในกลุ่ม (เริ่มจากหน้าตาเดิม) · ไม่มีค่าธีม = ใช้ค่าเริ่มของช่อง
   if (fd.copyShopCard && onPatch) {
     const copy = fd.copyShopCard;
@@ -498,11 +537,14 @@ function SchemaFieldInner({
         </Field>
       );
     case "toggle":
+      // ข้อความอธิบายอยู่ใต้ชื่อ (เดิมอยู่บรรทัดเดียวกัน → ช่องแคบแล้วชื่อสวิตช์ถูกบีบเรียงลงทีละคำ) · wide = เต็มแถว
       return (
-        <label className="flex items-center gap-2 text-sm text-slate-700 py-1.5 cursor-pointer">
-          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-          <span>{fd.label}</span>
-          {fd.hint && <span className="text-[11px] text-slate-400">— {fd.hint}</span>}
+        <label className={`flex items-start gap-2 text-sm text-slate-700 py-1.5 cursor-pointer ${fd.wide ? "sm:col-span-2" : ""}`}>
+          <input type="checkbox" className="mt-0.5 w-4 h-4 shrink-0 accent-blue-600" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
+          <span className="min-w-0">
+            <span>{fd.label}</span>
+            {fd.hint && <span className="block text-[11px] leading-snug text-slate-400">{fd.hint}</span>}
+          </span>
         </label>
       );
     case "image":

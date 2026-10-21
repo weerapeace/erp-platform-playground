@@ -514,3 +514,20 @@ describe("🗂 แท็บรุ่น รอบ 2 — รูปบนแท็
     expect(fd("tabRest").wide).toBe(true);
   });
 });
+
+describe("🗂 แท็บรุ่น รอบ 3 — รูปบนแท็บรายรุ่น (อัปโหลด/คลัง) ตั้งที่แถว", () => {
+  it("tabImages เก็บ { รหัสรุ่น: r2 key } · ค่าแปลก ๆ ถูกตัดทิ้ง · tabThumbs เดิมยังอยู่", () => {
+    const [n] = normalizeBlocks([
+      { id: "p-roar3", type: "products", layout: "tabs", tabBy: "parent", tabParents: ["ROAR01", "ROAR02"], tabThumbs: ["ROAR01:sku-0cfd0cfd"], tabImages: { ROAR02: "assets/abc/tab.jpg", ROAR01: "javascript:alert(1)", "": "assets/x.jpg" } },
+    ]) as unknown as Record<string, unknown>[];
+    expect(n.tabImages).toEqual({ ROAR02: "assets/abc/tab.jpg" });
+    expect(n.tabThumbs).toEqual(["ROAR01:sku-0cfd0cfd"]);
+  });
+  it("ช่องรุ่นที่เป็นแท็บตั้งรูปที่แถว (rowImages) · ช่องรูปแยกซ่อนไว้", () => {
+    const fields = SECTION_SCHEMAS.products.fields;
+    const fd = (key: string) => fields.find((f) => f.key === key)!;
+    expect(fd("tabParents").rowImages).toEqual({ images: "tabImages", skus: "tabThumbs" });
+    expect(fd("tabImages").hidden).toBe(true);
+    expect(fd("tabThumbs").hidden).toBe(true);
+  });
+});

@@ -66,6 +66,7 @@ export type FieldType =
   | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
   | "videoFile" // ไฟล์วิดีโอที่อัปโหลดเอง (r2 key) — ช่องอัปโหลดคลิป (ไฟล์เล็กผ่าน ERP · ไฟล์ใหญ่ส่งตรงเข้า R2)
   | "categoryImages" // รูปแทนรายหมวด { รหัสหมวด: r2 key } — ตั้งในช่อง categories ของ Section เดียวกัน (ไม่วาดช่องแยก · ต้อง hidden)
+  | "productImages" // รูปรายรุ่น { รหัสรุ่น: r2 key } — ตั้งที่แถวของช่อง products ที่มี rowImages (ไม่วาดช่องแยก · ต้อง hidden)
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
   | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
   | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
@@ -151,6 +152,11 @@ export interface FieldDef {
    * มาใส่ช่องในกลุ่ม ให้เริ่มจากหน้าตาเดิมแล้วค่อยปิดทีละอย่าง · ฟอร์มส่งค่าธีมมาทาง ctx.themeCard
    */
   copyShopCard?: (card: Record<string, unknown>, item: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * ช่อง products: 🖼 ตั้งรูปรายรุ่นที่แถว (รูป SKU / อัปโหลด / คลัง / ↺ รูปปก) — images = ช่อง productImages (รูปอัปโหลด/คลัง)
+   * · skus = ช่อง skus (เลือกรูปจาก SKU ของรุ่น · รุ่นละ 1) · เอารุ่นออก = ล้างรูปของรุ่นนั้นทั้ง 2 ช่อง
+   */
+  rowImages?: { images: string; skus: string };
   /** ช่องรูป: ความกว้างขั้นต่ำที่ควรเป็น (px) — เล็กกว่า = ฟอร์มเตือน "รูปเล็กไป จะไม่คม" (ของกลาง ImageSizeNote) */
   minPx?: number;
 }
@@ -2961,9 +2967,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         default: [],
         max: 12,
         wide: true,
-        hint: "ว่าง = รุ่นของสินค้าใน Section นี้ (เรียงตามลำดับ) · กดแท็บ = SKU ของรุ่นนั้นที่ Section นี้เลือกไว้ (ไม่ได้เลือกไว้ = ทุกสีของรุ่น)",
+        hint: "ว่าง = รุ่นของสินค้าใน Section นี้ (เรียงตามลำดับ) · กดแท็บ = SKU ของรุ่นนั้นที่ Section นี้เลือกไว้ (ไม่ได้เลือกไว้ = ทุกสีของรุ่น) · 🖼 ที่แถว = เลือกรูปบนแท็บ (รูป SKU / อัปโหลด / คลัง)",
+        rowImages: { images: "tabImages", skus: "tabThumbs" },
         showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }],
       }),
+      // 🖼 รูปบนแท็บที่อัปโหลด/เลือกจากคลัง { รหัสรุ่น: r2 key } — ตั้งที่แถวของ "รุ่นที่เป็นแท็บ" (มาก่อนรูป SKU)
+      f("tabImages", "รูปบนแท็บรายรุ่น", "productImages", { group: "layout", hidden: true, default: {} }),
       f("tabStyle", "หน้าตาแท็บ", "select", {
         group: "layout",
         default: "both",
@@ -2980,6 +2989,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         default: [],
         max: 12,
         wide: true,
+        // ตั้งที่แถวของ "รุ่นที่เป็นแท็บ" (🖼) แทนแล้ว — ซ่อนช่องนี้ ข้อมูลเดิมยังใช้ได้
+        hidden: true,
         hint: "แท็บใช้รูปของสีที่เลือก · รุ่นที่ไม่ได้เลือก = รูปปก Parent · เลือกได้รุ่นละ 1 SKU (ซ้ำ = ใช้ตัวแรก)",
         showIf: TAB_PIC,
       }),
@@ -3106,6 +3117,7 @@ export function defaultForType(t: FieldType): unknown {
     case "categories":
       return [];
     case "categoryImages":
+    case "productImages":
       return {};
     case "crop":
       return { x: 50, y: 50, zoom: 100 };
