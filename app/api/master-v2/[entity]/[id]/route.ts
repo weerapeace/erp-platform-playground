@@ -18,6 +18,7 @@ import { r2MoveToTrash } from "@/lib/r2";
 import { r2KeyStillReferenced } from "@/lib/r2-refs";
 import { captureFieldVersions, diffVersionedFields, editContextFromRequest, versionedColumnsIn } from "@/lib/record-versions";
 import { deleteRecordFilesFor } from "@/lib/record-files";
+import { hasSecretFields, keepSecretsOnWrite, maskSecretRows } from "@/lib/settings-secrets";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,7 +38,8 @@ async function _GET(
   if (denied) return denied;   // ตรวจสิทธิ์ก่อนคืนข้อมูลเสมอ (data fetch อยู่จังหวะถัดไป)
   if (!cfg) return NextResponse.json({ data: null, error: "entity ไม่รองรับ" }, { status: 400 });
 
-  const supabase = supabaseFromRequest(request);
+  // ตารางที่มีความลับ (เช่น โทเคน LINE) → อ่านฝั่ง server แล้วปิดค่าก่อนส่ง
+  const supabase = hasSecretFields(cfg.table) ? supabaseAdmin() : supabaseFromRequest(request);
   // ⚡ ยิงขนาน: ดึงแถว + สิทธิ์ระดับฟิลด์ (ทั้งคู่ใช้ cfg แต่ไม่ขึ้นต่อกัน)
   const [rowRes, access] = await Promise.all([
     supabase.from(cfg.table).select(cfg.selectColumns).eq("id", id).single(),
@@ -48,7 +50,7 @@ async function _GET(
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
   // relation labels ต้องรอ row ก่อน (ใช้ค่าจากแถว)
   const [row] = await resolveRelationLabels(supabase, cfg, [processed]);
-  const [safe] = stripHidden([row as Record<string, unknown>], access.hiddenCols);
+  const [safe] = maskSecretRows(cfg.table, stripHidden([row as Record<string, unknown>], access.hiddenCols));
   return NextResponse.json({ data: safe, error: null });
 }
 
@@ -98,7 +100,8 @@ async function _PATCH(
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
   const access = await getFieldAccess(request, admin, cfg.table);
   const { clean: cleanPatch0, skipped } = stripReadonly(patch, access.readonlyCols);
-  const cleanPatch = stripGenerated(cleanPatch0);   // คอลัมน์ที่ DB คำนวณเอง ห้ามส่งไป (ไม่งั้น Postgres ปฏิเสธทั้งคำสั่ง)
+  // คอลัมน์ที่ DB คำนวณเอง ห้ามส่งไป (ไม่งั้น Postgres ปฏิเสธทั้งคำสั่ง) · ค่าความลับที่ส่งกลับมาเป็น •••• = คงค่าเดิม
+  const cleanPatch = await keepSecretsOnWrite(admin, cfg.table, id, stripGenerated(cleanPatch0));
   if (Object.keys(cleanPatch).length === 0) {
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์แก้ไขฟิลด์ที่ส่งมา" }, { status: 403 });
   }
@@ -158,7 +161,7 @@ async function _PATCH(
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
   // คืนชื่อ relation (label) ด้วย → หน้า detail โชว์ชื่อทันทีหลังบันทึก (ไม่ใช่รหัส)
   const [row] = await resolveRelationLabels(supabaseFromRequest(request), cfg, [processed]);
-  const [safe] = stripHidden([row as Record<string, unknown>], access.hiddenCols);
+  const [safe] = maskSecretRows(cfg.table, stripHidden([row as Record<string, unknown>], access.hiddenCols));
   return NextResponse.json({ data: safe, error: null });
 }
 

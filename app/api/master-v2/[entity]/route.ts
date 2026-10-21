@@ -17,6 +17,7 @@ import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
+import { hasSecretFields, keepSecretsOnWrite, maskSecretRows } from "@/lib/settings-secrets";
 
 // อ่าน/เขียนสดเสมอ — ข้อมูล master + module config เปลี่ยน runtime, ห้าม cache
 export const dynamic = "force-dynamic";
@@ -611,7 +612,8 @@ async function _GET(
   // F12b: Supabase PostgREST hard-caps ที่ db.max_rows (default 1000)
   //       → loop fetch batch ละ 1000 จน reach limit หรือหมด
   const selectCols = cfg.listColumns ?? cfg.selectColumns;
-  const supabase = supabaseFromRequest(request);
+  // ตารางที่มีความลับ (เช่น โทเคน LINE) → อ่านฝั่ง server แล้วปิดค่าก่อนส่ง (ไม่พึ่งสิทธิ์อ่านตรงของผู้ใช้ใน DB)
+  const supabase = hasSecretFields(cfg.table) ? supabaseAdmin() : supabaseFromRequest(request);
 
   // ── กรอง SKU ตามแท็กผ่าน RPC แล้วดึงเฉพาะหน้านั้น (รองรับแท็กที่มีของเป็นพัน) ──
   if (useRpcTags) {
@@ -638,7 +640,7 @@ async function _GET(
     const processed = cfg.postProcess ? ordered.map(cfg.postProcess) : ordered;
     const rows = await resolveRelationLabels(supabase, cfg, processed);
     const { hiddenCols } = await fieldAccessP;
-    return NextResponse.json({ data: stripHidden(rows, hiddenCols), total, error: null }, { headers: { "x-row-count": String(rows.length) } });
+    return NextResponse.json({ data: maskSecretRows(cfg.table, stripHidden(rows, hiddenCols)), total, error: null }, { headers: { "x-row-count": String(rows.length) } });
   }
 
   const BATCH = 1000;
@@ -684,7 +686,7 @@ async function _GET(
   const rows = await resolveRelationLabels(supabase, cfg, processed);
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์เห็นออกจาก response (รันขนานไว้แล้ว)
   const { hiddenCols } = await fieldAccessP;
-  return NextResponse.json({ data: stripHidden(rows, hiddenCols), total: totalCount || rows.length, error: null }, { headers: { "x-row-count": String(rows.length) } });
+  return NextResponse.json({ data: maskSecretRows(cfg.table, stripHidden(rows, hiddenCols)), total: totalCount || rows.length, error: null }, { headers: { "x-row-count": String(rows.length) } });
 }
 
 // ---- POST — create ----
@@ -729,7 +731,7 @@ async function _POST(
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
   const access = await getFieldAccess(request, admin, cfg.table);
   const { clean: cleanPayload0 } = stripReadonly(payload, access.readonlyCols);
-  const cleanPayload = stripGenerated(cleanPayload0);   // คอลัมน์ที่ DB คำนวณเอง ห้ามส่งไป
+  const cleanPayload = await keepSecretsOnWrite(admin, cfg.table, null, stripGenerated(cleanPayload0));   // คอลัมน์ที่ DB คำนวณเอง ห้ามส่งไป · ค่าความลับที่ถูกปิดไว้ (••••) ไม่บันทึก
 
   let { data, error } = await admin
     .from(cfg.table)
@@ -757,7 +759,7 @@ async function _POST(
   });
 
   const row = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
-  const [safeRow] = stripHidden([row as Record<string, unknown>], access.hiddenCols);
+  const [safeRow] = maskSecretRows(cfg.table, stripHidden([row as Record<string, unknown>], access.hiddenCols));
   return NextResponse.json({ data: safeRow, error: null });
 }
 
