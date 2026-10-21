@@ -212,7 +212,15 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
   const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50) };
   // จุดอื่นในชุดเดียวกัน (ชิ้นย่อยพี่น้องที่มีช่องนี้) → โชว์จาง ๆ ให้วางไม่ทับกัน
   const siblings: { x: number; y: number }[] = [];
-  for (const arr of Object.values(parent ?? {})) {
+  const isPt = (pv: unknown): pv is { x: unknown; y: unknown } => !!pv && typeof pv === "object" && Number.isFinite(Number((pv as { x?: unknown }).x)) && Number.isFinite(Number((pv as { y?: unknown }).y));
+  // รูปเป็นของชิ้นนี้เอง (เช่น ลุคของรันเวย์ — แต่ละลุคคนละรูป) → จุดพี่น้อง = จุดอื่นในชิ้นเดียวกัน · ข้ามจุดที่ยังไม่เคยวาง (กลางรูปพอดี)
+  const ownImage = !!imgKey && parent?.[imgKey] == null && item?.[imgKey] != null;
+  if (ownImage)
+    for (const [k, pv] of Object.entries(item ?? {})) {
+      if (k === fd.key || !isPt(pv) || (Number(pv.x) === 50 && Number(pv.y) === 50)) continue;
+      siblings.push({ x: Number(pv.x), y: Number(pv.y) });
+    }
+  else for (const arr of Object.values(parent ?? {})) {
     if (!Array.isArray(arr)) continue;
     for (const it of arr as Record<string, unknown>[]) {
       if (!it || typeof it !== "object" || it === item || (item?.id && it.id === item.id)) continue;

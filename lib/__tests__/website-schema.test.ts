@@ -387,6 +387,37 @@ describe("🚶 รันเวย์ลุค (2026-10-21)", () => {
     expect(matchShowIf(fd("autoSec"), { scroll: false, auto: true })).toBe(true);
     expect(blockSummary(norm({ scroll: true }))).toMatch(/เลื่อนจอ/);
   });
+
+  it("พื้นหลัง/ขนาดคน/เงา/ตัวหนังสือใหญ่/ซูม: ค่าเริ่ม + ค่าเพี้ยนถูกตัด", () => {
+    expect(norm({})).toMatchObject({ bg: "solid", bgColor: "", floorHeight: 24, bgImage: null, bgDim: 30, figSize: 88, figLift: 0, shadow: "soft", zoom: true, bigText: "", bigTextPos: "middle" });
+    expect(norm({ bg: "x", bgColor: "red", figSize: 500, figLift: -9, shadow: "?", bigText: "SS26" })).toMatchObject({ bg: "solid", bgColor: "", figSize: 100, figLift: 0, shadow: "soft", bigText: "SS26" });
+    expect(norm({ bg: "floor", bgColor: "#F1EFE8", floorColor: "#d3d1c7" })).toMatchObject({ bg: "floor", bgColor: "#f1efe8", floorColor: "#d3d1c7" });
+    const fd = (k: string) => SECTION_SCHEMAS.runway.fields.find((x) => x.key === k)!;
+    expect(matchShowIf(fd("floorColor"), { bg: "floor" })).toBe(true);
+    expect(matchShowIf(fd("bgImage"), { bg: "solid" })).toBe(false);
+    const warn = validateBlocks([norm({ bg: "image", looks: [{ imageKey: "a.png", products: ["A"] }, { imageKey: "b.png", products: ["B"] }] }) as unknown as Block]).map((x) => x.message).join(" ");
+    expect(warn).toMatch(/ยังไม่ได้ใส่รูป$|พื้นหลังแบบรูปภาพ/);
+  });
+
+  it("รายลุค: ขนาด/ยก/สีพื้น + จุดกดบนตัวนางแบบ (สูงสุด 3 จุด · จุดละ ≤ 2 สินค้า)", () => {
+    const b = norm({
+      looks: [
+        { imageKey: "a.png", products: ["A"], size: 400, lift: -99, bgColor: "#FBEAF0", spots: "2", spot1: { x: 30, y: 60 }, spot1Products: ["A", "B", "C"], spot2: { x: 150, y: "x" }, spot2Products: [] },
+        { imageKey: "b.png", products: ["B"], spots: "9" },
+      ],
+    });
+    expect(b.looks[0]).toMatchObject({ size: 150, lift: -20, bgColor: "#fbeaf0", spots: "2", spot1: { x: 30, y: 60 }, spot2: { x: 100, y: 50 } });
+    expect((b.looks[0].spot1Products as string[]).length).toBe(2);
+    expect(b.looks[1]).toMatchObject({ size: 100, lift: 0, bgColor: "", spots: "0" });
+    expect(blockSummary(b)).toMatch(/2 ลุค/);
+    const kid = SECTION_SCHEMAS.runway.children!;
+    expect(kid.summary(b.looks[0])).toMatch(/📍 2/);
+    const fd = (k: string) => kid.fields.find((x) => x.key === k)!;
+    expect(matchShowIf(fd("spot2"), { spots: "1" })).toBe(false);
+    expect(matchShowIf(fd("spot3Products"), { spots: "3" })).toBe(true);
+    const msgs = validateBlocks([b as unknown as Block]).map((x) => x.message).join(" ");
+    expect(msgs).toMatch(/1 จุดกดยังไม่ได้เลือกสินค้า/);
+  });
 });
 
 describe("🗂 ตารางสินค้า › แท็บตามรุ่นสินค้า (Parent SKU)", () => {

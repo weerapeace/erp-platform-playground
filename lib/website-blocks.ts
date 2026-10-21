@@ -398,7 +398,36 @@ export interface RunwayBlock extends BlockBase {
   autoSec: number;
   scroll: boolean;
   scrollPace: "sm" | "md" | "lg";
-  looks: (ChildBase & { imageKey: string | null; name: string; products: string[] })[];
+  bigText: string;
+  bigTextColor: string;
+  bigTextPos: "top" | "middle" | "bottom";
+  bg: "solid" | "floor" | "image";
+  bgColor: string;
+  floorColor: string;
+  floorHeight: number;
+  bgImage: string | null;
+  bgDim: number;
+  figSize: number;
+  figLift: number;
+  shadow: "soft" | "strong" | "none";
+  zoom: boolean;
+  looks: (ChildBase & {
+    imageKey: string | null;
+    name: string;
+    products: string[];
+    /** % ขนาดคน/ยกขึ้น เฉพาะลุคนี้ (คูณ/บวกกับค่าทั้ง Section) */
+    size: number;
+    lift: number;
+    bgColor: string;
+    /** จุดกดบนตัวนางแบบ 0–3 · spotN = % บนรูปลุค · spotNProducts = รหัสรุ่น */
+    spots: "0" | "1" | "2" | "3";
+    spot1: { x: number; y: number };
+    spot1Products: string[];
+    spot2: { x: number; y: number };
+    spot2Products: string[];
+    spot3: { x: number; y: number };
+    spot3Products: string[];
+  })[];
 }
 export interface LookbookBlock extends BlockBase {
   type: "lookbook";

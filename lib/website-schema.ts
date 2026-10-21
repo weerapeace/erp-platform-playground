@@ -1924,6 +1924,46 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       ...headFields({ eyebrow: "", title: "Spring Summer 2026", subtitle: true }),
       text("lookLabel", "คำหน้าเลขลุค", { default: "LOOK", max: 20, placeholder: "LOOK / ลุคที่", hint: "โชว์มุมล่าง เช่น LOOK 03" }),
       text("shopAllText", "ปุ่มดูสินค้าทั้งลุค", { default: "Shop the look", max: 40, hint: "ว่าง = ไม่มีปุ่ม" }),
+      // ตัวหนังสือใหญ่จาง ๆ หลังนางแบบ (ชื่อคอลเลกชัน)
+      text("bigText", "ตัวหนังสือใหญ่ด้านหลัง", { default: "", max: 24, placeholder: "เช่น SS26", hint: "อยู่หลังนางแบบ · ว่าง = ไม่มี" }),
+      f("bigTextColor", "สีตัวหนังสือใหญ่", "color", { default: "", hint: "ว่าง = สีตัวหนังสือแบบจาง ๆ" }),
+      f("bigTextPos", "ตัวหนังสือใหญ่อยู่", "select", {
+        default: "middle",
+        options: [
+          { v: "top", l: "ด้านบน" },
+          { v: "middle", l: "กลางเวที" },
+          { v: "bottom", l: "ด้านล่าง" },
+        ],
+      }),
+      // 🎨 พื้นหลังเวที — คลุมทั้งเวที + แผงการ์ด (การ์ดอยู่บนพื้นเดียวกัน) · ลุคตั้งสีพื้นเองได้ (สีค่อย ๆ เปลี่ยนตามลุค)
+      f("bg", "พื้นหลังเวที", "select", {
+        group: "media",
+        default: "solid",
+        options: [
+          { v: "solid", l: "สีเดียว" },
+          { v: "floor", l: "ผนัง + พื้น (แบบรันเวย์)" },
+          { v: "image", l: "รูปภาพ" },
+        ],
+      }),
+      f("bgColor", "สีพื้นหลัง", "color", { group: "media", default: "", hint: "ว่าง = สีพื้นการ์ดของธีม · ลุคตั้งสีของตัวเองได้" }),
+      f("floorColor", "สีพื้นเวที", "color", { group: "media", default: "", showIf: { key: "bg", eq: "floor" }, hint: "ว่าง = เข้มกว่าผนังนิดหน่อย" }),
+      f("floorHeight", "ความสูงพื้น (%)", "range", { group: "media", default: 24, min: 8, numMax: 50, showIf: { key: "bg", eq: "floor" } }),
+      image("bgImage", "รูปพื้นหลัง", { showIf: { key: "bg", eq: "image" }, hint: "รูปสตูดิโอ/รันเวย์แนวนอน" }),
+      f("bgDim", "ทำให้รูปพื้นหลังจางลง (%)", "range", { group: "media", default: 30, min: 0, numMax: 90, step: 5, showIf: { key: "bg", eq: "image" }, hint: "จางด้วยสีพื้นหลัง · นางแบบเด่นขึ้น" }),
+      // 🧍 รูปนางแบบ (PNG) — ขนาด/ยกขึ้นทั้ง Section · ลุคปรับเพิ่ม/ลดเองได้
+      f("figSize", "ขนาดคนในเวที (%)", "range", { group: "layout", default: 88, min: 50, numMax: 100, hint: "% ของความสูงเวที · ลุคไหนสูงไม่เท่าเพื่อน ปรับที่ลุคนั้น" }),
+      f("figLift", "ยกคนขึ้นจากขอบล่าง (%)", "range", { group: "layout", default: 0, min: 0, numMax: 30 }),
+      f("shadow", "เงาใต้เท้า", "select", {
+        group: "layout",
+        default: "soft",
+        options: [
+          { v: "soft", l: "จาง ๆ" },
+          { v: "strong", l: "ชัด" },
+          { v: "none", l: "ไม่มี" },
+        ],
+        hint: "รูป PNG ตัดพื้นจะดูยืนบนพื้นจริง ไม่ลอย",
+      }),
+      f("zoom", "กดนางแบบตัวหน้า = ขยายดูรูปเต็ม", "toggle", { group: "layout", default: true, hint: "แตะซ้ำเพื่อซูมดูรายละเอียดกระเป๋า" }),
       f("depth", "ลุคถัดไปที่เห็นด้านหลัง", "select", {
         group: "layout",
         default: "3",
@@ -1996,8 +2036,29 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         image("imageKey", "รูปลุค (เต็มตัว)", { required: true, requiredMessage: "ยังไม่ได้ใส่รูปลุค", hint: "แนะนำ PNG ตัดพื้น หรือพื้นเรียบสีเดียวกันทุกลุค · ถ่ายเต็มตัว มุมเดียวกัน แถวด้านหลังจะเรียงสวย" }),
         text("name", "ชื่อลุค (ถ้ามี)", { default: "", max: 60, placeholder: "เช่น Pink Metallic" }),
         f("products", "สินค้าในลุคนี้", "products", { max: 6, wide: true, hint: "โชว์ในแผงการ์ดข้างเวที · ♡ + ใส่ตะกร้าได้" }),
+        // PNG แต่ละรูปขอบเหลือไม่เท่ากัน → ปรับรายลุคให้คนสูง/ยืนพื้นเท่ากัน (คูณกับค่าทั้ง Section)
+        f("size", "ขนาดคน ลุคนี้ (%)", "range", { default: 100, min: 50, numMax: 150, step: 5, hint: "คนดูเล็ก/ใหญ่กว่าลุคอื่น ปรับตรงนี้" }),
+        f("lift", "ยกขึ้น / ลดลง ลุคนี้ (%)", "range", { default: 0, min: -20, numMax: 30, hint: "+ ยกขึ้น · − ลดลง (ขอบล่างของ PNG เหลือเยอะ เท้าลอย)" }),
+        f("bgColor", "สีพื้นหลังตอนโชว์ลุคนี้", "color", { default: "", hint: "ว่าง = สีพื้นหลังของ Section · เปลี่ยนลุคแล้วสีค่อย ๆ เปลี่ยน" }),
+        // 📍 จุดกดบนตัวนางแบบ (ชี้ที่กระเป๋า → การ์ดเด้ง) — คลิกบนรูปลุคนี้เพื่อวางจุด
+        f("spots", "จุดกดบนตัวนางแบบ", "select", {
+          default: "0",
+          options: [
+            { v: "0", l: "ไม่มี" },
+            { v: "1", l: "1 จุด" },
+            { v: "2", l: "2 จุด" },
+            { v: "3", l: "3 จุด" },
+          ],
+          hint: "ลูกค้ากดจุด = การ์ดสินค้าเด้ง",
+        }),
+        f("spot1", "จุดที่ 1 — ตำแหน่ง", "point", { pointImage: "imageKey", wide: true, showIf: { key: "spots", eq: ["1", "2", "3"] } }),
+        f("spot1Products", "จุดที่ 1 — สินค้า", "products", { max: 2, wide: true, showIf: { key: "spots", eq: ["1", "2", "3"] } }),
+        f("spot2", "จุดที่ 2 — ตำแหน่ง", "point", { pointImage: "imageKey", wide: true, showIf: { key: "spots", eq: ["2", "3"] } }),
+        f("spot2Products", "จุดที่ 2 — สินค้า", "products", { max: 2, wide: true, showIf: { key: "spots", eq: ["2", "3"] } }),
+        f("spot3", "จุดที่ 3 — ตำแหน่ง", "point", { pointImage: "imageKey", wide: true, showIf: { key: "spots", eq: "3" } }),
+        f("spot3Products", "จุดที่ 3 — สินค้า", "products", { max: 2, wide: true, showIf: { key: "spots", eq: "3" } }),
       ],
-      summary: (it) => `${s(it.name) || (it.imageKey ? "ลุค" : "(ยังไม่ใส่รูป)")}${Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : ""}`,
+      summary: (it) => `${s(it.name) || (it.imageKey ? "ลุค" : "(ยังไม่ใส่รูป)")}${Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : ""}${Number(it.spots) > 0 ? ` · 📍 ${it.spots}` : ""}`,
     },
     summary: (b) => `${count(arr(b.looks).length, "ลุค")} · แถว${b.queueSide === "right" ? "ขวา" : "ซ้าย"} ${s(b.depth) || "3"}${b.scroll === true ? " · เลื่อนจอ" : ""}`,
     validate: (b, label) => {
@@ -2008,6 +2069,10 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       if (noImg) out.push({ level: "warning", message: `${label}: ${noImg} ลุคยังไม่ได้ใส่รูป` });
       const noProd = looks.filter((x) => !(Array.isArray(x.products) && x.products.length)).length;
       if (noProd && b.panel !== "none") out.push({ level: "warning", message: `${label}: ${noProd} ลุคยังไม่ได้เลือกสินค้า (แผงการ์ดจะว่าง)` });
+      // จุดกดที่ยังไม่ผูกสินค้า = ลูกค้าไม่เห็นจุดนั้น
+      const emptySpots = looks.reduce((n, x) => n + [1, 2, 3].filter((i) => i <= Number(x.spots || 0) && !(Array.isArray(x[`spot${i}Products`]) && (x[`spot${i}Products`] as unknown[]).length)).length, 0);
+      if (emptySpots) out.push({ level: "warning", message: `${label}: ${emptySpots} จุดกดยังไม่ได้เลือกสินค้า (จุดนั้นจะไม่โชว์)` });
+      if (b.bg === "image" && !b.bgImage) out.push({ level: "warning", message: `${label}: เลือกพื้นหลังแบบรูปภาพ แต่ยังไม่ได้ใส่รูป` });
       return out;
     },
   },
