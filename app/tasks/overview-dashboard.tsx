@@ -11,16 +11,14 @@ import Link from "next/link";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
-import { OverviewKanban, WipBoard, isWipStatus, coverKey } from "./overview-kanban";
-import { AssigneeStack } from "./assignee-avatar";
-import { r2ImageUrl } from "@/lib/r2-image";
+import { OverviewKanban, WipBoard, isWipStatus } from "./overview-kanban";
+import { TaskCard, taskCardCfg } from "./task-card";
 import { ReviewQueueView } from "./review-queue-view";
 import { KanbanSettings, WipColsControl } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
 import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
-import { TaskTypeChip } from "./task-type-chip";
 import { isOverdue, updateTask, bulkUpdateTasks, PRIORITY_META, priorityLabel, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
@@ -637,37 +635,14 @@ function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent, columns
   );
 }
 
+// การ์ด "งานของฉัน" — การ์ดงานกลาง (./task-card) · ⭐ + แถบสีซ้าย = งานที่มีแค่ฉันรับผิดชอบ
+const MY_CARD_CFG = taskCardCfg({ cover: true, brand: true, assignee: true, due: true, priority: true, taskNo: true, taskType: true, hoverCard: false });
 function MyTaskCard({ task, solo, onClick, accent }: { task: CreativeTask; solo?: boolean; onClick: () => void; accent?: string }) {
   const t = useT();
-  const pr = PRIORITY_META[task.priority as CreativePriority];
-  const overdue = isOverdue(task);
-  const st = statusMeta(task.status);
-  const cover = coverKey(task);
-  const coverUrl = cover ? r2ImageUrl(cover, 320) : null;
   return (
-    <button onClick={onClick} className="text-left bg-white rounded-lg border border-slate-200 overflow-hidden hover:border-violet-300 hover:shadow-sm transition"
-      style={solo ? { borderLeftWidth: 3, borderLeftColor: accent || "#7c3aed" } : undefined}>
-      {coverUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={coverUrl} alt="" loading="lazy" decoding="async" className="w-full h-20 object-cover bg-slate-50 border-b border-slate-100" />
-      )}
-      <div className="p-2.5">
-      <div className="flex items-center gap-1 mb-1 flex-wrap">
-        {solo && <span className="text-[10px]" title={t("มีแค่ฉัน", "Only me")}>⭐</span>}
-        {pr && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>}
-        {task.task_type && <TaskTypeChip code={task.task_type} />}
-        <span className="ml-auto font-mono text-[10px] text-slate-400 shrink-0">{task.task_no}</span>
-      </div>
-      <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{task.title}</p>
-      {task.brand_label && <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-500"><span className="h-2 w-2 rounded-full" style={{ background: task.brand_color || "#cbd5e1" }} />{task.brand_label}</div>}
-      <div className="flex items-center justify-between gap-2 mt-2">
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-slate-50 border border-slate-200 text-slate-500">{st.label}</span>
-        <div className="flex items-center gap-2">
-          <AssigneeStack list={task.assignees} size={18} />
-          {task.due_date && <span className={`text-[11px] ${overdue ? "text-red-600 font-semibold" : "text-slate-400"}`}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>}
-        </div>
-      </div>
-      </div>
+    <button type="button" onClick={onClick} className="text-left">
+      <TaskCard task={task} cfg={MY_CARD_CFG} extra={{ statusPill: true, accentLeft: solo ? accent || "#7c3aed" : undefined,
+        badge: solo ? <span className="text-[10px]" title={t("มีแค่ฉัน", "Only me")}>⭐</span> : undefined }} />
     </button>
   );
 }

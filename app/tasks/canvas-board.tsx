@@ -14,12 +14,10 @@ import { FontSelect } from "@/components/font-select";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
 import { useAuth } from "@/components/auth";
-import {
-  PRIORITY_META, priorityLabel, isOverdue,
-  type CreativeTask, type CreativePriority,
-} from "./data";
+import type { CreativeTask } from "./data";
 import { statusMeta, canTransitionTo, type Status } from "./use-statuses";
 import { useToast } from "@/components/toast";
+import { TaskCard, taskCardCfg } from "./task-card";
 
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
@@ -676,29 +674,12 @@ function IconAlign({ align }: { align: Align }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">{lines.map((d, i) => <path key={i} d={d} />)}</svg>;
 }
 
+// การ์ดบนกระดาน — การ์ดงานกลาง (./task-card): ป้ายสถานะ · เลขที่งาน · ชื่อ · สินค้า · ความสำคัญ · ผู้รับผิดชอบ · กำหนดส่ง · ความคืบหน้า
+const CANVAS_CARD_CFG = taskCardCfg({ assignee: true, due: true, priority: true, progress: true, sku: true, taskNo: true, hoverCard: false });
 function CanvasCard({ task }: { task: CreativeTask }) {
-  useT();   // subscribe ภาษา
-  const pr = PRIORITY_META[task.priority as CreativePriority] ?? PRIORITY_META.normal;
-  const m = statusMeta(task.status);
-  const overdue = isOverdue(task);
   return (
-    <div className="bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-300 p-3 cursor-grab active:cursor-grabbing select-none">
-      <div className="flex items-center justify-between gap-2 mb-1.5">
-        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${m.cls}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}
-        </span>
-        <span className="font-mono text-[10px] text-slate-400">{task.task_no}</span>
-      </div>
-      <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 mb-1.5">{task.title}</p>
-      {task.sku_code && <p className="text-[11px] text-slate-400 line-clamp-1 mb-1">📦 {task.sku_code}</p>}
-      <div className="flex items-center justify-between gap-2 text-[11px]">
-        <span className={`px-1.5 py-0.5 rounded-full border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>
-        <span className="text-slate-500 line-clamp-1">👤 {task.assignee_label || "—"}</span>
-      </div>
-      <div className="flex items-center gap-2 mt-1.5">
-        <div className="h-1 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${task.progress_percent}%` }} /></div>
-        {task.due_date && <span className={`text-[11px] ${overdue ? "text-red-600 font-semibold" : "text-slate-400"}`}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>}
-      </div>
+    <div className="cursor-grab active:cursor-grabbing select-none">
+      <TaskCard task={task} cfg={CANVAS_CARD_CFG} extra={{ statusPill: true }} />
     </div>
   );
 }

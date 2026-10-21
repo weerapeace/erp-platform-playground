@@ -57,6 +57,7 @@ import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { usePushToast, type ToastVariant } from "@/components/toast";
 import { subStatusDot, subStatusLabel } from "../subtask-status";
 import { BrandSelect } from "@/components/brand-select";
+import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -184,14 +185,9 @@ export function ContentPageView() {
       </div>
 
       <div className="px-4 sm:px-8 py-6">
-        {loading ? <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+        {loading ? <LoadingState />
           : loadError ? (
-            <div className="bg-white rounded-xl border border-red-200 p-12 text-center">
-              <div className="text-4xl mb-3">⚠️</div>
-              <p className="text-slate-700 font-medium">{t("โหลดข้อมูลไม่สำเร็จ", "Failed to load")}</p>
-              <p className="text-slate-400 text-sm mt-1">{t("เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Connection or network problem")}</p>
-              <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
-            </div>
+            <ErrorState onRetry={() => void load()} />
           )
           : view === "templates" ? (
             <div>
@@ -200,11 +196,7 @@ export function ContentPageView() {
                 <button onClick={createTpl} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแม่แบบ", "New Template")}</button>
               </div>
               {templates.length === 0 ? (
-                <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-                  <div className="text-4xl mb-3">🧩</div>
-                  <p className="text-slate-600 font-medium">{t("ยังไม่มีแม่แบบคอนเทนต์", "No content templates yet")}</p>
-                  <p className="text-slate-400 text-sm mt-1">{t('สร้างใหม่ หรือกด "บันทึกเป็นเทมเพลต" จากคอนเทนต์ที่มีอยู่', 'Create one, or click "Save as Template" from existing content')}</p>
-                </div>
+                <EmptyState icon="🧩" title={t("ยังไม่มีแม่แบบคอนเทนต์", "No content templates yet")} hint={t('สร้างใหม่ หรือกด "บันทึกเป็นเทมเพลต" จากคอนเทนต์ที่มีอยู่', 'Create one, or click "Save as Template" from existing content')} />
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {templates.map((c) => (
@@ -227,11 +219,7 @@ export function ContentPageView() {
           )
           : view === "calendar" ? <MonthCalendar items={items} onOpen={(id) => setDetailId(id)} />
           : items.length === 0 ? (
-            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-              <div className="text-4xl mb-3">📱</div>
-              <p className="text-slate-600 font-medium">{t("ยังไม่มีคอนเทนต์", "No content yet")}</p>
-              <button onClick={openCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "Create Content")}</button>
-            </div>
+            <EmptyState icon="📱" title={t("ยังไม่มีคอนเทนต์", "No content yet")} action={{ label: <>＋ {t("สร้างคอนเทนต์", "Create Content")}</>, onClick: openCreate }} />
           ) : view === "table" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               {selected.size > 0 && (

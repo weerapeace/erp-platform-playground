@@ -11,6 +11,7 @@ import { isTerminal } from "./use-statuses";
 import { isOverdue, type CreativeTask, type SubtaskAssignee } from "./data";
 import { AssigneeAvatar } from "./assignee-avatar";
 import { StatusBadge } from "./task-badges";
+import { EmptyState } from "@/components/state-views";
 
 type Row = { person: SubtaskAssignee; open: number; overdue: number; tasks: CreativeTask[] };
 
@@ -36,7 +37,7 @@ export function WorkloadBoard({ tasks, onCardClick }: { tasks: CreativeTask[]; o
   const maxOpen = Math.max(1, ...rows.map((r) => r.open));
 
   if (rows.length === 0 && unassigned.length === 0) {
-    return <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">{t("ไม่มีงานค้างในระบบ 🎉", "No open tasks 🎉")}</div>;
+    return <EmptyState title={t("ไม่มีงานค้างในระบบ 🎉", "No open tasks 🎉")} />;
   }
 
   return (

@@ -29,6 +29,7 @@ import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { usePushToast, type ToastVariant } from "@/components/toast";
 import { BrandSelect } from "@/components/brand-select";
+import { EmptyState, LoadingState } from "@/components/state-views";
 
 const FREQ =[{ value: "daily", label: () => tr("รายวัน", "Daily") }, { value: "weekly", label: () => tr("รายสัปดาห์", "Weekly") }, { value: "monthly", label: () => tr("รายเดือน", "Monthly") }];
 const FREQ_LABEL = (): Record<string, string> => Object.fromEntries(FREQ.map((f) => [f.value, f.label()]));
@@ -136,8 +137,8 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
         <p className="text-sm text-slate-500">{t("แม่แบบงานพร้อมขั้นตอน (subtask) — ใช้สร้างงานหรือผูกกับงานประจำ", "Task templates with subtasks — use to create tasks or link to recurring rules")}</p>
         <button onClick={openNew} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างเทมเพลต", "Create Template")}</button>
       </div>
-      {loading ? <div className="py-16 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
-        : items.length === 0 ? <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">{t("ยังไม่มีเทมเพลต", "No templates yet")}</div>
+      {loading ? <LoadingState />
+        : items.length === 0 ? <EmptyState title={t("ยังไม่มีเทมเพลต", "No templates yet")} />
         : (
           // จัดกลุ่มการ์ดตามแบรนด์
           <div className="space-y-6">
@@ -331,8 +332,8 @@ function RecurringTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
         <p className="text-sm text-slate-500">{t("กฎสร้างงานซ้ำ — เปิดหน้านี้จะสร้างงานที่ถึงรอบให้อัตโนมัติ", "Recurring rules — opening this page auto-creates tasks that are due")}</p>
         <button onClick={openNew} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างงานประจำ", "Create Recurring Rule")}</button>
       </div>
-      {loading ? <div className="py-16 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
-        : items.length === 0 ? <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-500">{t("ยังไม่มีงานประจำ", "No recurring rules yet")}</div>
+      {loading ? <LoadingState />
+        : items.length === 0 ? <EmptyState title={t("ยังไม่มีงานประจำ", "No recurring rules yet")} />
         : (
           <div className="space-y-3">
             {items.map((r) => (

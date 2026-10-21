@@ -22,6 +22,7 @@ import {
 import { listOptions, createOption, type Option } from "../use-options";
 import { askText } from "@/components/modal/ask-dialog";
 import { usePushToast } from "@/components/toast";
+import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 
 // drawer แคมเปญ (มีตัวพิมพ์ข้อความ + drawer งาน) โหลดเมื่อเปิดดูจริง
 const CampaignDrawer = dynamic(() => import("./campaign-drawer").then((m) => m.CampaignDrawer), { ssr: false });
@@ -123,21 +124,11 @@ export default function CampaignsPage() {
 
       <div className={`px-8 py-6 ${manage ? "pb-28" : ""}`}>
         {loading ? (
-          <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+          <LoadingState />
         ) : campaignsSWR.error && campaigns.length === 0 ? (
-          <div className="bg-white rounded-xl border border-red-200 p-12 text-center">
-            <div className="text-4xl mb-3">⚠️</div>
-            <p className="text-slate-700 font-medium">{t("โหลดข้อมูลไม่สำเร็จ", "Failed to load")}</p>
-            <p className="text-slate-400 text-sm mt-1">{t("เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Connection or network problem")}</p>
-            <button onClick={() => void load()} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
-          </div>
+          <ErrorState onRetry={() => void load()} />
         ) : campaigns.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-            <div className="text-4xl mb-3">📣</div>
-            <p className="text-slate-600 font-medium">{t("ยังไม่มีแคมเปญ", "No campaigns yet")}</p>
-            <p className="text-slate-400 text-sm mt-1">{t('สร้างแคมเปญเพื่อจัดกลุ่มงาน creative เช่น "Shopee 7.7" หรือ "เปิดตัวสินค้าใหม่"', 'Create a campaign to group creative tasks, e.g. "Shopee 7.7" or "New product launch"')}</p>
-            <button onClick={openCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแคมเปญ", "Create campaign")}</button>
-          </div>
+          <EmptyState icon="📣" title={t("ยังไม่มีแคมเปญ", "No campaigns yet")} hint={t('สร้างแคมเปญเพื่อจัดกลุ่มงาน creative เช่น "Shopee 7.7" หรือ "เปิดตัวสินค้าใหม่"', 'Create a campaign to group creative tasks, e.g. "Shopee 7.7" or "New product launch"')} action={{ label: <>＋ {t("สร้างแคมเปญ", "Create campaign")}</>, onClick: openCreate }} />
         ) : (
           <div className="space-y-6">
             {/* ตัวกรองหมวด */}

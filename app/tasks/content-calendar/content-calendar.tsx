@@ -41,6 +41,7 @@ import dynamic from "next/dynamic";
 import { useRefreshRules } from "@/app/marketing/content-plan/plan-refresh";
 import { refreshStatuses, bangkokDateKey, REFRESH_ALERT_STATES } from "@/lib/marketing/content-plan";
 import { usePushToast } from "@/components/toast";
+import { ErrorState, LoadingState } from "@/components/state-views";
 
 // แท็บวางแผน โหลดเมื่อกดเข้า (ไม่ถ่วงแท็บคอนเทนต์/งาน)
 const ContentPlanView = dynamic(() => import("@/app/marketing/content-plan/view").then((m) => m.ContentPlanView), {
@@ -730,14 +731,9 @@ export function ContentCalendarView() {
 
       <div className="px-4 sm:px-8 py-6">
         {/* สถานะโหลด/ผิดพลาด — โหลดพลาดต้องไม่โชว์เป็นปฏิทินว่าง */}
-        {loading && <div className="py-16 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>}
+        {loading && <LoadingState />}
         {!loading && loadError && (
-          <div className="bg-white rounded-xl border border-red-200 p-12 text-center">
-            <div className="text-4xl mb-3">⚠️</div>
-            <p className="text-slate-700 font-medium">{t("โหลดข้อมูลไม่สำเร็จ", "Failed to load")}</p>
-            <p className="text-slate-400 text-sm mt-1">{t("เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Connection or network problem")}</p>
-            <button onClick={reload} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">↻ {t("ลองใหม่", "Retry")}</button>
-          </div>
+          <ErrorState onRetry={reload} />
         )}
         {!loading && !loadError && (<>
         {/* แบนเนอร์แบรนด์ (แต่งหน้า) */}

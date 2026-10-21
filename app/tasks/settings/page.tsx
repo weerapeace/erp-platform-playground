@@ -32,6 +32,7 @@ import { tr } from "@/lib/lang";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
+import { EmptyState, LoadingState } from "@/components/state-views";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
@@ -88,10 +89,7 @@ export default function TaskSettingsPage() {
 
       <div className="px-8 py-6">
         {!canSettings ? (
-          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-            <div className="text-4xl mb-3">🔒</div>
-            <p className="text-slate-700 font-medium">{t("หน้านี้สำหรับหัวหน้า / ผู้ดูแลระบบ (สิทธิ์ตั้งค่าแอปจัดการงาน)", "This page needs the task-app settings permission (managers / admins).")}</p>
-          </div>
+          <EmptyState icon="🔒" title={t("หน้านี้สำหรับหัวหน้า / ผู้ดูแลระบบ (สิทธิ์ตั้งค่าแอปจัดการงาน)", "This page needs the task-app settings permission (managers / admins).")} />
         ) : tab === "perm" ? <PermissionMatrix showToast={showToast} />
           : tab === "status" ? <StatusManager showToast={showToast} />
           : tab === "transition" ? <TransitionManager showToast={showToast} />
@@ -175,7 +173,7 @@ function PermissionMatrix({ showToast }: { showToast: (m: string) => void }) {
     } finally { setSavingCell(null); }
   };
 
-  if (loading) return <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>;
+  if (loading) return <LoadingState />;
   if (err) return <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-red-700">{t("โหลดไม่สำเร็จ", "Failed to load")}: {err} <button onClick={load} className="underline ml-2">{t("ลองใหม่", "Retry")}</button></div>;
 
   return (

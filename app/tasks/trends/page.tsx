@@ -15,6 +15,7 @@ import { ERPModal } from "@/components/modal";
 import { TREND_HEAT, TREND_PLATFORMS, heatMeta, TREND_CHECKLIST } from "@/lib/creative-trends-meta";
 import { listTrends, createTrend, listBrands, type TrendItem } from "../data";
 import { BrandSelect } from "@/components/brand-select";
+import { EmptyState, LoadingState } from "@/components/state-views";
 
 type FormState = {
   title: string; summary: string; heat: string; brand_id: string;
@@ -105,18 +106,12 @@ export default function TrendsPage() {
 
       <div className="px-8 py-6">
         {trendsSWR.loading && trends.length === 0 ? (
-          <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+          <LoadingState />
         ) : shown.length === 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-            <div className="mb-3 text-4xl">🔥</div>
-            <p className="font-medium text-slate-600">{trends.length === 0 ? t("ยังไม่มีเทรนด์", "No trends yet") : t("ไม่พบเทรนด์ที่ตรงกับตัวกรอง", "No trends match the filter")}</p>
-            <p className="mt-1 text-sm text-slate-400">
-              {t('สร้างเทรนด์เพื่อเก็บโทนสี ภาพอ้างอิง และเลย์เอาต์ไว้ที่เดียว เช่น "โทนพาสเทลหน้าร้อน" หรือ "คลิปรีวิวมือถือ"',
+          <EmptyState icon="🔥" title={trends.length === 0 ? t("ยังไม่มีเทรนด์", "No trends yet") : t("ไม่พบเทรนด์ที่ตรงกับตัวกรอง", "No trends match the filter")}
+            hint={t('สร้างเทรนด์เพื่อเก็บโทนสี ภาพอ้างอิง และเลย์เอาต์ไว้ที่เดียว เช่น "โทนพาสเทลหน้าร้อน" หรือ "คลิปรีวิวมือถือ"',
                  'Create a trend to keep palette, references and layout in one place')}
-            </p>
-            <button onClick={() => { setForm(EMPTY); setErr(null); setModalOpen(true); }}
-              className="mt-4 h-9 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700">＋ {t("สร้างเทรนด์", "New trend")}</button>
-          </div>
+            action={{ label: <>＋ {t("สร้างเทรนด์", "New trend")}</>, onClick: () => { setForm(EMPTY); setErr(null); setModalOpen(true); } }} />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {shown.map((x) => <TrendCard key={x.id} trend={x} onOpen={() => router.push(`/tasks/trends/${x.id}`)} />)}

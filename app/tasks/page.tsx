@@ -50,6 +50,7 @@ import { TaskTypeChip } from "./task-type-chip";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import { usePushToast } from "@/components/toast";
 import { subStatusDot, subStatusLabel } from "./subtask-status";
+import { EmptyState } from "@/components/state-views";
 import {
   PRIORITY_RANK, PRIORITY_META, priorityLabel, isOverdue,
   listTasks, deleteTask, updateTask,
@@ -470,12 +471,7 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
 
   if (ordered.length === 0 && subtasks.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-        <div className="text-4xl mb-3">🎉</div>
-        <p className="text-slate-600 font-medium">{t("ไม่มีงานค้างในคิวของคุณ", "Your queue is clear")}</p>
-        <p className="text-slate-400 text-sm mt-1">{t("งาน/งานย่อยที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง", "Tasks and subtasks assigned to you will appear here, sorted by priority and due date")}</p>
-        <button onClick={onCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างงาน", "New task")}</button>
-      </div>
+      <EmptyState icon="🎉" title={t("ไม่มีงานค้างในคิวของคุณ", "Your queue is clear")} hint={t("งาน/งานย่อยที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง", "Tasks and subtasks assigned to you will appear here, sorted by priority and due date")} action={{ label: <>＋ {t("สร้างงาน", "New task")}</>, onClick: onCreate }} />
     );
   }
 

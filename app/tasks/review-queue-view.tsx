@@ -20,6 +20,7 @@ import { useT } from "@/components/i18n";
 import { ConnectionError } from "@/components/connection-error";
 import { usePushToast } from "@/components/toast";
 import { subStatusBadge, subStatusLabel } from "./subtask-status";
+import { EmptyState, LoadingState } from "@/components/state-views";
 
 type Img = { r2_key: string; file_name: string | null };
 type Dest = { id: string; code: string };
@@ -178,12 +179,9 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
         <span className="text-sm text-slate-400">{rows.length} {t("รายการ", "items")}</span>
       </div>
       {loadFailed && items === null ? <ConnectionError onRetry={() => void retry()} retrying={retrying} />
-        : items === null ? <div className="py-16 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+        : items === null ? <LoadingState />
         : rows.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-            <div className="text-4xl mb-3">✅</div>
-            <p className="text-slate-600 font-medium">{t("ไม่มีงานรอตรวจ", "Nothing awaiting review")}</p>
-          </div>
+          <EmptyState icon="✅" title={t("ไม่มีงานรอตรวจ", "Nothing awaiting review")} />
         ) : (() => {
           const stMeta = (s: string) => ({ label: subStatusLabel(s), cls: subStatusBadge(s) });   // ป้ายสถานะงานย่อย — ของกลาง
           const pending = rows.filter((r) => r.status !== "approved");
