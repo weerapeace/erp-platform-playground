@@ -32,6 +32,7 @@ import { THEME_TEXT_KEYS, themeCrumb } from "@/lib/website-theme";
 import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, type Typography, type TextRole, type TextRoleKey, type Shape } from "@/lib/website-theme";
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
 import { pageLinkIssue, helpColumnIssue, countLinkWarnings, type PageInfo, type LinkIssue } from "@/lib/website-link-health";
+import { CARD_LOOKS } from "@/lib/website-card-looks";
 import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, FOOTER_GAP_MAX, FOOTER_PAD_PX, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 
@@ -1712,6 +1713,17 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <div className={cardCls}>
               <h3 className="text-sm font-semibold text-slate-800 mb-3">การ์ดสินค้า</h3>
 
+              {/* 🃏 ชุดสำเร็จรูป — กดทีเดียวตั้งหลายช่อง แล้วปรับต่อเองได้ (lib/website-card-looks · ใช้ชุดเดียวกับ "การ์ดในส่วนนี้" ของ Section) */}
+              <label className={labelCls}>ชุดหน้าตาสำเร็จรูป</label>
+              <div className="flex flex-wrap gap-2 mb-1">
+                {CARD_LOOKS.map((l) => (
+                  <button key={l.key} type="button" onClick={() => setCard({ ...(l.card as Partial<Theme["card"]>), ...(l.card.showBadge === false ? { autoBadges: { ...theme.card.autoBadges, sale: false, new: false, best: false } } : null) })} title={l.hint} className="px-3.5 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 hover:border-blue-500 hover:text-blue-700">
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 mb-4">กดแล้วตั้งช่องด้านล่างให้ทีเดียว (ปรับต่อทีละช่องได้ · กด ↶ ย้อนได้ถ้าไม่ชอบ)</p>
+
               <label className={labelCls}>รูปแบบการ์ด</label>
               <div className="flex flex-wrap gap-2 mb-4">
                 {choices.cardPresets.map((p) => (
@@ -1835,6 +1847,26 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
               </div>
 
+              <div className="grid gap-3 sm:grid-cols-2 mt-3">
+                <div>
+                  <label className={labelCls}>ชื่อ-ราคา</label>
+                  <select className={inputCls} value={theme.card.infoLayout} onChange={(e) => setCard({ infoLayout: e.target.value as Theme["card"]["infoLayout"] })}>
+                    <option value="stack">ราคาอยู่ใต้ชื่อ (แบบเดิม)</option>
+                    <option value="split">ชื่อซ้าย · ราคาขวา บรรทัดเดียวกัน</option>
+                  </select>
+                  {theme.card.infoLayout === "split" && <p className="text-[11px] text-slate-400 mt-0.5">ชื่อยาวตัดเหลือ 1 บรรทัด · ราคาชิดขวาเสมอ</p>}
+                </div>
+                <div>
+                  <label className={labelCls}>ความหนาราคา</label>
+                  <WheelSelect value={theme.card.priceWeight} onChange={(e) => setCard({ priceWeight: Number(e.target.value) as Theme["card"]["priceWeight"] })}>
+                    <option value={400}>บาง</option>
+                    <option value={500}>กลาง</option>
+                    <option value={600}>หนา (แบบเดิม)</option>
+                    <option value={700}>หนามาก</option>
+                  </WheelSelect>
+                </div>
+              </div>
+
               <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 pt-3 border-t border-slate-100">
                 {([
                   ["showBadge", "ป้าย (ขายดี/แนะนำ)"],
@@ -1858,12 +1890,31 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <div className="mt-3 rounded-lg bg-slate-50 p-3 space-y-2">
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                     <label className="flex items-center gap-2 text-sm text-slate-700">
+                      ตำแหน่ง
+                      <WheelSelect value={theme.card.swatchPos} onChange={(e) => setCard({ swatchPos: e.target.value as Theme["card"]["swatchPos"] })}>
+                        <option value="below">ใต้ราคา (แบบเดิม)</option>
+                        <option value="name">ขวาของชื่อ (1 ช่อง + จำนวนที่เหลือ)</option>
+                      </WheelSelect>
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      ทรง
+                      <WheelSelect value={theme.card.swatchShape} onChange={(e) => setCard({ swatchShape: e.target.value as Theme["card"]["swatchShape"] })}>
+                        <option value="circle">วงกลม (แบบเดิม)</option>
+                        <option value="square">สี่เหลี่ยม</option>
+                        <option value="rounded">มุมมน</option>
+                      </WheelSelect>
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    {theme.card.swatchPos !== "name" && (
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
                       จุดสีสูงสุด
                       <WheelSelect value={theme.card.swatchMax} onChange={(e) => setCard({ swatchMax: Number(e.target.value) })}>
                         {[3, 4, 5, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n} จุด</option>)}
                       </WheelSelect>
                       <span className="text-[11px] text-slate-400">เกินโชว์ +N</span>
                     </label>
+                    )}
                     <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                       <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.card.swatchSwap} onChange={(e) => setCard({ swatchSwap: e.target.checked })} />
                       ชี้ (คอม) / แตะ (มือถือ) จุดสี แล้วรูปการ์ดเปลี่ยนเป็นสีนั้น
@@ -3795,15 +3846,36 @@ function SampleCard({ item, card, colors, fonts, radius, shape }: { item: Sample
           {card.showCategory && <span className="uppercase tracking-wider" style={{ color: colors.muted }}>{item.category}</span>}
           {card.showStock && <span className="inline-flex items-center gap-1" style={{ color: stock.color }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: stock.color }} />{stock.text}</span>}
         </div>
-        <div className="leading-snug" style={{ fontFamily: fonts.display, color: hover ? colors.link || colors.brand : colors.ink, fontWeight: card.nameWeight, textTransform: card.nameUpper ? "uppercase" : undefined, letterSpacing: card.nameTracking ? `${card.nameTracking / 100}em` : undefined, fontSize: `${0.8 * card.nameSize / 100}rem`, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: card.titleLines, overflow: "hidden" }}>{item.name}</div>
-        <div className="mt-1" style={{ fontSize: `${0.82 * card.priceSize / 100}rem` }}>
-          <span className="font-semibold" style={{ fontFamily: fonts.display, color: (onSale && colors.sale) || colors.price || colors.ink }}>฿{item.price.toLocaleString("th-TH")}</span>
-          {card.showCompare && item.comparePrice && item.comparePrice > item.price && <s className="ml-1.5 text-[0.8em]" style={{ color: colors.muted }}>฿{item.comparePrice.toLocaleString("th-TH")}</s>}
-          {card.showUnit && <span className="text-[0.8em]" style={{ color: colors.muted }}> / {item.unit}</span>}
-        </div>
-        {card.showSwatches && item.swatches.length > 0 && (
+        {(() => {
+          // 🃏 ชื่อ-ราคา: split = บรรทัดเดียว (ชื่อตัด 1 บรรทัด · ราคาขวา) · จุดสีข้างชื่อ = 1 ช่อง + "+N"
+          const split = card.infoLayout === "split";
+          const swR = card.swatchShape === "square" ? "0" : card.swatchShape === "rounded" ? "3px" : "999px";
+          const name = <div className="leading-snug min-w-0" style={{ fontFamily: fonts.display, color: hover ? colors.link || colors.brand : colors.ink, fontWeight: card.nameWeight, textTransform: card.nameUpper ? "uppercase" : undefined, letterSpacing: card.nameTracking ? `${card.nameTracking / 100}em` : undefined, fontSize: `${0.8 * card.nameSize / 100}rem`, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: split ? 1 : card.titleLines, overflow: "hidden" }}>{item.name}</div>;
+          const price = (
+            <div className={split ? "shrink-0" : "mt-1"} style={{ fontSize: `${0.82 * card.priceSize / 100}rem` }}>
+              <span style={{ fontFamily: fonts.display, fontWeight: card.priceWeight, color: (onSale && colors.sale) || colors.price || colors.ink }}>฿{item.price.toLocaleString("th-TH")}</span>
+              {card.showCompare && item.comparePrice && item.comparePrice > item.price && <s className="ml-1.5 text-[0.8em]" style={{ color: colors.muted }}>฿{item.comparePrice.toLocaleString("th-TH")}</s>}
+              {card.showUnit && <span className="text-[0.8em]" style={{ color: colors.muted }}> / {item.unit}</span>}
+            </div>
+          );
+          const nameSw = card.showSwatches && card.swatchPos === "name" && item.swatches.length > 0 && (
+            <span className="inline-flex shrink-0 items-center gap-1">
+              <span className="inline-block w-3 h-3 bg-cover bg-center" style={{ borderRadius: swR, background: item.swatches[0].color, backgroundImage: item.swatches[0].color ? undefined : `url(${item.swatches[0].img})`, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.15)" }} />
+              {item.swatches.length > 1 && <span className="text-[9px]" style={{ color: colors.muted }}>+{item.swatches.length - 1}</span>}
+            </span>
+          );
+          return split ? (
+            <div className="flex items-baseline justify-between gap-2">{name}{nameSw}{price}</div>
+          ) : (
+            <>
+              {nameSw ? <div className="flex items-center justify-between gap-2">{name}{nameSw}</div> : name}
+              {price}
+            </>
+          );
+        })()}
+        {card.showSwatches && card.swatchPos !== "name" && item.swatches.length > 0 && (
           <div className={`flex items-center gap-1 mt-1.5 ${card.align === "center" ? "justify-center" : ""}`}>
-            {item.swatches.slice(0, card.swatchMax).map((c, i) => <span key={i} className="inline-block w-3 h-3 rounded-full bg-cover bg-center" style={{ background: c.color, backgroundImage: c.color ? undefined : `url(${c.img})`, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.15)" }} />)}
+            {item.swatches.slice(0, card.swatchMax).map((c, i) => <span key={i} className="inline-block w-3 h-3 bg-cover bg-center" style={{ borderRadius: card.swatchShape === "square" ? 0 : card.swatchShape === "rounded" ? 3 : 999, background: c.color, backgroundImage: c.color ? undefined : `url(${c.img})`, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.15)" }} />)}
             {item.swatches.length > card.swatchMax && <span className="text-[9px]" style={{ color: colors.muted }}>+{item.swatches.length - card.swatchMax}</span>}
           </div>
         )}

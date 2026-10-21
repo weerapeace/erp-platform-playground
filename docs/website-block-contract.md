@@ -175,6 +175,7 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ปิดสวิตช์หลัก → ฟอร์มก๊อปการ์ดของร้านที่เผยแพร่อยู่มาเป็นค่าเริ่ม (`FieldDef.copyShopCard` + `SchemaFormContext.themeCard` จาก `/api/website/layout` · `/api/website/pages?pageId=`) → แก้การ์ดของร้านทีหลังไม่ลามมาที่ Section นี้
 - เว็บร้าน: `src/lib/card-override.ts` (`cardOverrideOf` · `applyCardOverride`) + `src/components/shop/CardSettings.tsx` (`CardSettingsProvider` ห่อใน ProductsBlockBody · `useCardConfig()` แทน `useTheme().card`) — ProductCard · ProductTile · ProductsSpotlight อ่านค่าเดียวกัน ทุกรูปแบบการโชว์
 - ป้าย: เปิด = ตามที่ร้านตั้ง · ปิด = ไม่มีป้าย (สินค้าหมดขึ้นเสมอ) · ปุ่มตะกร้า/ดูด่วน: เปิด = แบบปุ่มของร้าน (ร้านปิดไว้ = โผล่ตอนชี้ / ปุ่มตามุมรูป)
+- 2026-10-21: ชุดหน้าตาสำเร็จรูป A (เรียบหรู ชื่อ-ราคาบรรทัดเดียว) / B (แกลเลอรี + ช่องสีข้างชื่อ) = `lib/website-card-looks.ts` (ใช้ทั้ง ดีไซน์ → การ์ดสินค้า และช่อง `cardLook` ของ Section — select แบบปุ่ม `FieldDef.presets`) · ช่องใหม่ราย Section `cardInfo` stack|split · `cardPriceWeight` · `cardSwatchPos` below|name · `cardSwatchShape` · `cardNameUpper` ↔ ธีม `infoLayout` `priceWeight` `swatchPos` `swatchShape` `nameUpper` (เว็บร้าน ProductCard)
 - แบบรูปนำ (`PRODUCT_TILE_LAYOUTS` = mosaic/lookbook/spotlight) ไม่มีป้าย/สต๊อก/หมวด/จุดสี/ปุ่ม → สวิตช์พวกนี้ `showIf` เฉพาะเมื่อคอมหรือมือถือเป็นการ์ดเต็ม (`CARD_LAYOUTS`) · เพิ่มรูปแบบใหม่ต้องใส่ลิสต์ใดลิสต์หนึ่ง (มี test กัน)
 
 ## 🗂 แท็บตามรุ่นสินค้า (Section ตารางสินค้า · รูปแบบ "แท็บ") — 2026-10-21

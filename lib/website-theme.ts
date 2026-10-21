@@ -1009,6 +1009,14 @@ export interface SiteTheme {
     nameSize: number;
     priceSize: number;
     imageFit: CardImageFit;
+    /** 🃏 ชื่อ-ราคา: stack = ราคาใต้ชื่อ (เดิม) · split = ชื่อซ้าย ราคาขวาบรรทัดเดียวกัน (ชื่อตัด 1 บรรทัด) */
+    infoLayout: "stack" | "split";
+    /** ความหนาราคา (เดิม 600) */
+    priceWeight: 400 | 500 | 600 | 700;
+    /** จุดสี: below = ใต้ราคา (เดิม) · name = ขวาของชื่อ 1 ช่อง + "+N" */
+    swatchPos: "below" | "name";
+    /** ทรงจุดสี: วงกลม (เดิม) · สี่เหลี่ยม · มุมมน */
+    swatchShape: "circle" | "square" | "rounded";
   };
   /** หน้าสินค้า: classic = รูปซ้าย ข้อมูลขวา · showcase = ชื่อรุ่นใหญ่ + รูปกลางจอ (ดู storefront ProductShowcase) */
   product: {
@@ -1532,7 +1540,7 @@ export const DEFAULT_THEME: SiteTheme = {
   cart: { ...DEFAULT_CART },
   checkout: { ...DEFAULT_CHECKOUT },
   page: { transition: "fade", smoothScroll: false },
-  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, imageScale: 100, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover" },
+  card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, imageScale: 100, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover", infoLayout: "stack", priceWeight: 600, swatchPos: "below", swatchShape: "circle" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
 };
 
@@ -1894,6 +1902,10 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       nameSize: num(cd.nameSize, d.card.nameSize, 60, 180),
       priceSize: num(cd.priceSize, d.card.priceSize, 60, 180),
       imageFit: pick(cd.imageFit, ["cover", "contain"] as const, d.card.imageFit),
+      infoLayout: pick(cd.infoLayout, ["stack", "split"] as const, "stack"),
+      priceWeight: ([400, 500, 600, 700] as const).includes(Number(cd.priceWeight) as 400) ? (Number(cd.priceWeight) as 400 | 500 | 600 | 700) : 600,
+      swatchPos: pick(cd.swatchPos, ["below", "name"] as const, "below"),
+      swatchShape: pick(cd.swatchShape, ["circle", "square", "rounded"] as const, "circle"),
     },
     product: {
       layout: pick(pd.layout, ["classic", "showcase"] as const, d.product.layout),

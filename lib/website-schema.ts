@@ -45,6 +45,7 @@ import {
   validateCanvas,
 } from "@/lib/website-canvas";
 import { GRAD_DIRS } from "@/lib/website-gradient";
+import { CARD_LOOKS, cardLookToSection } from "@/lib/website-card-looks";
 
 /* ─────────── ชนิดช่องตั้งค่า ─────────── */
 
@@ -164,6 +165,8 @@ export interface FieldDef {
    * · skus = ช่อง skus (เลือกรูปจาก SKU ของรุ่น · รุ่นละ 1) · เอารุ่นออก = ล้างรูปของรุ่นนั้นทั้ง 2 ช่อง
    */
   rowImages?: { images: string; skus: string };
+  /** ช่อง select แบบ "ปุ่มชุดสำเร็จรูป": เลือกค่าไหน = ตั้งหลายช่องตาม presets[ค่า] แล้วช่องนี้กลับเป็นค่าเริ่ม (ไม่จำว่าเลือกชุดไหน) */
+  presets?: Record<string, Record<string, unknown>>;
   /** ช่องรูป: ความกว้างขั้นต่ำที่ควรเป็น (px) — เล็กกว่า = ฟอร์มเตือน "รูปเล็กไป จะไม่คม" (ของกลาง ImageSizeNote) */
   minPx?: number;
 }
@@ -259,6 +262,15 @@ const fullCard = { key: "layout", eq: CARD_LAYOUTS, orKey: "layoutMobile" };
 const cardToggle = (key: string, label: string, def: boolean, hint?: string, onlyFull = false) =>
   f(key, label, "toggle", { group: "card", default: def, showIf: onlyFull ? [cardOn, fullCard] : cardOn, ...(hint ? { hint } : {}) });
 const PRODUCT_CARD_FIELDS: FieldDef[] = [
+  // 🃏 ชุดหน้าตาสำเร็จรูป (ปุ่มกดทีเดียว) — ค่าชุดเดียวกับ ดีไซน์ → การ์ดสินค้า (lib/website-card-looks) · เลือกแล้วตั้งช่องด้านล่าง + กลับเป็น "—"
+  f("cardLook", "ชุดหน้าตาสำเร็จรูป", "select", {
+    group: "card",
+    default: "",
+    wide: true,
+    hint: "เลือกแล้วตั้งการ์ดของ Section นี้ให้ทีเดียว (ปรับต่อทีละช่องได้)",
+    options: [{ v: "", l: "— เลือกชุด —" }, ...CARD_LOOKS.map((l) => ({ v: l.key, l: l.label }))],
+    presets: Object.fromEntries(CARD_LOOKS.map((l) => [l.key, cardLookToSection(l.card)])),
+  }),
   f("cardUseShop", "ใช้การ์ดตามค่ากลางของร้าน", "toggle", {
     group: "card",
     default: true,
@@ -280,6 +292,11 @@ const PRODUCT_CARD_FIELDS: FieldDef[] = [
       cardQuickView: !!c.quickView && c.quickView !== "none",
       cardTitleLines: ["1", "2", "3"].includes(String(c.titleLines)) ? String(c.titleLines) : "2",
       cardAlign: c.align === "center" ? "center" : "left",
+      cardInfo: c.infoLayout === "split" ? "split" : "stack",
+      cardSwatchPos: c.swatchPos === "name" ? "name" : "below",
+      cardSwatchShape: ["square", "rounded"].includes(String(c.swatchShape)) ? String(c.swatchShape) : "circle",
+      cardPriceWeight: ["400", "500", "600", "700"].includes(String(c.priceWeight)) ? String(c.priceWeight) : "600",
+      cardNameUpper: c.nameUpper === true,
       // รูปนำล้วน: เริ่มจากหน้าตาไทล์ตอนนี้ (มี "เริ่มต้น" + จำนวนสี · ไม่มีราคาขีดฆ่า/หน่วย · ชื่อ 2 บรรทัด ชิดซ้าย)
       ...(usesFullCards(b) ? {} : { cardCompare: false, cardUnit: false, cardPriceFrom: true, cardColorCount: true, cardTitleLines: "2", cardAlign: "left" }),
     }),
@@ -315,6 +332,46 @@ const PRODUCT_CARD_FIELDS: FieldDef[] = [
       { v: "center", l: "กึ่งกลาง" },
     ],
   }),
+  f("cardInfo", "ชื่อ-ราคา", "select", {
+    group: "card",
+    default: "stack",
+    showIf: [cardOn, fullCard],
+    options: [
+      { v: "stack", l: "ราคาใต้ชื่อ (แบบเดิม)" },
+      { v: "split", l: "ชื่อซ้าย · ราคาขวา บรรทัดเดียว" },
+    ],
+  }),
+  f("cardPriceWeight", "ความหนาราคา", "select", {
+    group: "card",
+    default: "600",
+    showIf: [cardOn, fullCard],
+    options: [
+      { v: "400", l: "บาง" },
+      { v: "500", l: "กลาง" },
+      { v: "600", l: "หนา (แบบเดิม)" },
+      { v: "700", l: "หนามาก" },
+    ],
+  }),
+  f("cardSwatchPos", "ตำแหน่งจุดสี", "select", {
+    group: "card",
+    default: "below",
+    showIf: [cardOn, fullCard, { key: "cardSwatches", eq: true }],
+    options: [
+      { v: "below", l: "ใต้ราคา (แบบเดิม)" },
+      { v: "name", l: "ขวาของชื่อ (1 ช่อง + จำนวนที่เหลือ)" },
+    ],
+  }),
+  f("cardSwatchShape", "ทรงจุดสี", "select", {
+    group: "card",
+    default: "circle",
+    showIf: [cardOn, fullCard, { key: "cardSwatches", eq: true }],
+    options: [
+      { v: "circle", l: "วงกลม (แบบเดิม)" },
+      { v: "square", l: "สี่เหลี่ยม" },
+      { v: "rounded", l: "มุมมน" },
+    ],
+  }),
+  cardToggle("cardNameUpper", "ชื่อตัวพิมพ์ใหญ่ (ชื่ออังกฤษ)", false, undefined, true),
 ];
 const text = (key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "text", { max: 160, ...extra });
 const area = (key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "textarea", { max: 600, wide: true, ...extra });

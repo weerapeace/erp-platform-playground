@@ -353,6 +353,11 @@ export function SchemaField(props: {
         <WebsiteCategoriesField shopSlug={props.ctx.shopSlug} categories={props.ctx.categories} value={Array.isArray(props.value) ? (props.value as string[]) : []} item={item} onPatch={onPatch} fieldKey={fd.key} />
       </FieldBox>
     );
+  // 🃏 ช่องเลือก "ชุดสำเร็จรูป" (presets) — เลือกแล้วตั้งหลายช่องทีเดียว + ช่องนี้กลับเป็นค่าเริ่ม (ทำงานเหมือนปุ่ม)
+  if (fd.presets && onPatch) {
+    const presets = fd.presets;
+    return <SchemaFieldInner {...props} value={fd.default ?? ""} onChange={(v) => presets[String(v)] && onPatch({ ...presets[String(v)], [fd.key]: fd.default ?? "" })} />;
+  }
   // 🖼 ช่องสินค้าที่ตั้งรูปรายรุ่นได้ (เช่น แท็บรุ่นสินค้า) — แก้ 3 ช่องพร้อมกัน: รหัสรุ่น + รูปอัปโหลด/คลัง (images) + รูปจาก SKU (skus)
   if (fd.type === "products" && fd.rowImages && onPatch && item) {
     const { images: imgKey, skus: skuKey } = fd.rowImages;

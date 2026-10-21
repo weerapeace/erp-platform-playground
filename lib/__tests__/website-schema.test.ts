@@ -289,7 +289,7 @@ describe("products: การ์ดในส่วนนี้", () => {
     const shopDefault = { titleLines: 2, showBadge: true, showStock: true, showCompare: true, showSwatches: false, showColorCount: false, priceFrom: false, quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left" };
     const copied = master.copyShopCard!(shopDefault, {});
     for (const [k, v] of Object.entries(copied)) expect([k, v]).toEqual([k, fields.find((x) => x.key === k)!.default]);
-    expect(Object.keys(copied).sort()).toEqual(fields.filter((x) => x.group === "card" && x.key !== "cardUseShop").map((x) => x.key).sort());
+    expect(Object.keys(copied).sort()).toEqual(fields.filter((x) => x.group === "card" && x.key !== "cardUseShop" && !x.presets).map((x) => x.key).sort());
   });
 
   it("ก๊อปตามที่ร้านตั้งจริง", () => {
@@ -535,5 +535,27 @@ describe("🗂 แท็บรุ่น รอบ 3 — รูปบนแท็
     expect(fd("tabParents").rowImages).toEqual({ images: "tabImages", skus: "tabThumbs" });
     expect(fd("tabImages").hidden).toBe(true);
     expect(fd("tabThumbs").hidden).toBe(true);
+  });
+});
+
+describe("🃏 ชุดหน้าตาการ์ดสำเร็จรูป A/B (ทั้งร้าน + ราย Section)", () => {
+  it("ชุดของ Section ตั้งเฉพาะช่องที่มีจริง และทุกค่าเป็นตัวเลือกที่ใช้ได้", () => {
+    const fields = SECTION_SCHEMAS.products.fields;
+    const look = fields.find((x) => x.key === "cardLook")!;
+    for (const [key, patch] of Object.entries(look.presets!)) {
+      for (const [k, v] of Object.entries(patch)) {
+        const fd = fields.find((x) => x.key === k);
+        expect([key, k, !!fd]).toEqual([key, k, true]);
+        if (fd!.type === "select") expect([key, k, fd!.options!.some((o) => o.v === v)]).toEqual([key, k, true]);
+        if (fd!.type === "toggle") expect(typeof v).toBe("boolean");
+      }
+      expect(patch.cardUseShop).toBe(false);
+    }
+    expect(look.presets!.editorial.cardInfo).toBe("split");
+    expect([look.presets!.gallery.cardSwatchPos, look.presets!.gallery.cardSwatchShape]).toEqual(["name", "square"]);
+  });
+  it("ค่าเริ่ม = การ์ดเดิม (ราคาใต้ชื่อ · ราคาหนา · จุดสีกลมใต้ราคา)", () => {
+    const [n] = normalizeBlocks([{ id: "p-card", type: "products" }]) as unknown as Record<string, unknown>[];
+    expect([n.cardInfo, n.cardPriceWeight, n.cardSwatchPos, n.cardSwatchShape, n.cardNameUpper, n.cardLook]).toEqual(["stack", "600", "below", "circle", false, ""]);
   });
 });
