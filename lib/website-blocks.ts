@@ -383,6 +383,8 @@ export interface RunwayBlock extends BlockBase {
   showHeart: boolean;
   auto: boolean;
   autoSec: number;
+  scroll: boolean;
+  scrollPace: "sm" | "md" | "lg";
   looks: (ChildBase & { imageKey: string | null; name: string; products: string[] })[];
 }
 export interface LookbookBlock extends BlockBase {

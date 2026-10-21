@@ -1969,8 +1969,20 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       }),
       f("showPrice", "โชว์ราคาในการ์ด", "toggle", { group: "layout", default: true }),
       f("showHeart", "ปุ่ม ♡ ถูกใจ", "toggle", { group: "layout", default: true, hint: "ใช้รายการโปรดของเว็บ (ร้านต้องเปิดรายการโปรดไว้)" }),
-      f("auto", "เดินลุคเอง", "toggle", { group: "layout", default: false, hint: "หยุดเมื่อลูกค้าชี้/แตะ" }),
-      f("autoSec", "เปลี่ยนลุคทุก (วินาที)", "number", { group: "layout", default: 5, min: 3, numMax: 20, showIf: { key: "auto", eq: true } }),
+      // เลื่อนจอแล้วลุคเดิน (แบบเว็บอ้างอิง) — เวทีค้างบนจอ เลื่อนลง = ลุคถัดไป · เปิดแล้วไม่ใช้ "เดินลุคเอง" (สองอย่างแย่งกันเปลี่ยนลุค)
+      f("scroll", "เลื่อนหน้าจอแล้วลุคเดิน", "toggle", { group: "layout", default: false, hint: "ลูกค้าเลื่อนลง = ลุคถัดไป · เวทีค้างบนจอจนครบทุกลุค แล้วหน้าเว็บค่อยเลื่อนต่อ" }),
+      f("scrollPace", "เลื่อนนานแค่ไหนต่อ 1 ลุค", "select", {
+        group: "layout",
+        default: "md",
+        options: [
+          { v: "sm", l: "สั้น (ลุคเปลี่ยนไว)" },
+          { v: "md", l: "ปกติ" },
+          { v: "lg", l: "ยาว (ลุคเปลี่ยนช้า)" },
+        ],
+        showIf: { key: "scroll", eq: true },
+      }),
+      f("auto", "เดินลุคเอง", "toggle", { group: "layout", default: false, hint: "หยุดเมื่อลูกค้าชี้/แตะ", showIf: { key: "scroll", eq: false } }),
+      f("autoSec", "เปลี่ยนลุคทุก (วินาที)", "number", { group: "layout", default: 5, min: 3, numMax: 20, showIf: [{ key: "scroll", eq: false }, { key: "auto", eq: true }] }),
     ],
     children: {
       key: "looks",
@@ -1985,7 +1997,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       ],
       summary: (it) => `${s(it.name) || (it.imageKey ? "ลุค" : "(ยังไม่ใส่รูป)")}${Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : ""}`,
     },
-    summary: (b) => `${count(arr(b.looks).length, "ลุค")} · แถว${b.queueSide === "right" ? "ขวา" : "ซ้าย"} ${s(b.depth) || "3"}`,
+    summary: (b) => `${count(arr(b.looks).length, "ลุค")} · แถว${b.queueSide === "right" ? "ขวา" : "ซ้าย"} ${s(b.depth) || "3"}${b.scroll === true ? " · เลื่อนจอ" : ""}`,
     validate: (b, label) => {
       const out: Omit<ValidationIssue, "blockId">[] = [];
       const looks = arr(b.looks).filter((x) => x.enabled !== false);

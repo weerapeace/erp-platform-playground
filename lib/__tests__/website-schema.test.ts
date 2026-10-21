@@ -375,6 +375,18 @@ describe("🚶 รันเวย์ลุค (2026-10-21)", () => {
     const one = validateBlocks([norm({ looks: [{ imageKey: "a.png", products: ["A"] }] }) as unknown as Block]).map((x) => x.message).join(" ");
     expect(one).toMatch(/อย่างน้อย 2 ลุค/);
   });
+
+  it("เลื่อนจอแล้วลุคเดิน: ค่าเริ่มปิด · เปิดแล้วซ่อน 'เดินลุคเอง' (แย่งกันเปลี่ยนลุค) · โชว์ระยะเลื่อน", () => {
+    expect(norm({})).toMatchObject({ scroll: false, scrollPace: "md" });
+    expect(norm({ scroll: true, scrollPace: "zz" })).toMatchObject({ scroll: true, scrollPace: "md" });
+    const fd = (k: string) => SECTION_SCHEMAS.runway.fields.find((x) => x.key === k)!;
+    const on = { scroll: true, auto: true };
+    expect(matchShowIf(fd("scrollPace"), on)).toBe(true);
+    expect(matchShowIf(fd("auto"), on)).toBe(false);
+    expect(matchShowIf(fd("autoSec"), on)).toBe(false);
+    expect(matchShowIf(fd("autoSec"), { scroll: false, auto: true })).toBe(true);
+    expect(blockSummary(norm({ scroll: true }))).toMatch(/เลื่อนจอ/);
+  });
 });
 
 describe("🗂 ตารางสินค้า › แท็บตามรุ่นสินค้า (Parent SKU)", () => {
