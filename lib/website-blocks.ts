@@ -27,6 +27,7 @@ import { sanitizeTranslations } from "@/lib/website-i18n";
 import { sanitizeGradient, type GradientValue } from "@/lib/website-gradient";
 import { CANVAS_COLORS, CANVAS_FONTS, CANVAS_WEIGHTS } from "@/lib/website-canvas";
 import { normalizeFrameShape } from "@/lib/website-frames";
+import { cleanExpId } from "@/lib/website-web-stats";
 
 export type { ValidationIssue };
 
@@ -185,6 +186,22 @@ export interface BlockBase {
   enabled: boolean;
   visibility: Visibility;
   style: BlockStyle;
+  /** 🧪 ทดสอบ A/B — Section ที่ชื่อการทดสอบเดียวกัน: ลูกค้าครึ่งหนึ่งเห็นแบบ A อีกครึ่งเห็นแบบ B (ไม่ตั้ง = เห็นทุกคน) */
+  ab?: BlockAb;
+}
+
+export interface BlockAb {
+  /** ชื่อการทดสอบ a-z0-9- (lib/website-web-stats cleanExpId) */
+  exp: string;
+  variant: "A" | "B";
+}
+
+/** ค่า ab จากที่บันทึก → ใช้ได้ / ไม่ใช้ (null) */
+export function sanitizeAb(v: unknown): BlockAb | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const exp = cleanExpId(o.exp);
+  return exp && (o.variant === "A" || o.variant === "B") ? { exp, variant: o.variant } : null;
 }
 
 /** ชิ้นย่อย (Block ใน Section) — มีรหัส + เปิด/ปิด + ซ่อนตามจอ ได้เหมือนบล็อกระดับบน */
@@ -1210,6 +1227,8 @@ export function normalizeBlocks(raw: unknown): Block[] {
       visibility: vis(b.visibility),
       style: sanitizeStyle(b.style),
     };
+    const ab = sanitizeAb(b.ab);
+    if (ab) block.ab = ab;
     for (const fd of schema.fields) block[fd.key] = sanitizeField(fd, b[fd.key]);
     sanitizeTranslations(schema.fields, b, block); // 🌐 ภาษาอังกฤษ (`<key>_en`) — ไม่งั้นถูกทิ้งตอนบันทึก
     if (schema.children) block[schema.children.key] = sanitizeChildren(schema.children, b[schema.children.key], id);
@@ -1240,6 +1259,17 @@ export function validateBlocks(blocks: Block[], opts: { helpPage?: boolean } = {
   const hasHeader = opts.helpPage || active.some((b) => b.type === "canvas" || (b.type === "drop" && b.banner !== "none"));
   if (heroes.length === 0 && !hasHeader) issues.push({ blockId: null, level: "warning", message: "ไม่มีแบนเนอร์หลัก (Hero) — หน้าอาจดูไม่มีหัวเรื่อง" });
   if (heroes.length > 1) issues.push({ blockId: null, level: "warning", message: `มีแบนเนอร์หลัก ${heroes.length} อัน — ควรมีอันเดียวเพื่อ SEO` });
+
+  // 🧪 A/B: ชื่อการทดสอบเดียวกันต้องมีทั้งแบบ A และ B (มีแบบเดียว = คนอีกครึ่งไม่เห็น Section นี้เลย)
+  const abSeen = new Map<string, Set<string>>();
+  for (const b of active) if (b.ab) abSeen.set(b.ab.exp, (abSeen.get(b.ab.exp) ?? new Set()).add(b.ab.variant));
+  for (const [exp, vs] of abSeen) {
+    if (vs.size < 2) {
+      const only = [...vs][0];
+      const first = active.find((b) => b.ab?.exp === exp);
+      issues.push({ blockId: first?.id ?? null, level: "warning", message: `ทดสอบ A/B "${exp}" มีแค่แบบ ${only} — ต้องมีแบบ ${only === "A" ? "B" : "A"} ด้วย ไม่งั้นลูกค้าครึ่งหนึ่งไม่เห็น Section นี้` });
+    }
+  }
 
   for (const b of active) {
     const schema = SECTION_SCHEMAS[b.type];

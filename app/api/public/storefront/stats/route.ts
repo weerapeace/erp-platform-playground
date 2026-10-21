@@ -1,0 +1,46 @@
+/**
+ * API สาธารณะ — 📈 ตัวนับสถิติเว็บร้าน : POST /api/public/storefront/stats { shop, ev: [{ m, d }] }
+ * นับรายวันในตาราง store_web_stats (ตัวเลขรวม · ไม่เก็บว่าใครเข้า ไม่เก็บ IP) → ERP › เว็บไซต์ › 📈 สถิติ
+ * เว็บร้านรวมหลายตัวนับส่งทีเดียว (src/lib/site-stats.ts · sendBeacon) · ≤20 ตัวต่อครั้ง · กันยิงรัวต่อ IP
+ * ไม่มี guardApi โดยเจตนา + CORS (เหมือน search-log) · ตัวนับที่ไม่รู้จักทิ้ง — lib/website-web-stats cleanStatEvents
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { overLimit } from "@/lib/rate-limit";
+import { cleanStatEvents } from "@/lib/website-web-stats";
+
+export const dynamic = "force-dynamic";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+export async function OPTIONS(): Promise<NextResponse> {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
+
+const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const limited = await overLimit(request, [{ name: "web-stats:ip", limit: 240, windowSec: 600 }]);
+  if (limited) return json({ ok: false }, 429);
+  let body: Record<string, unknown>;
+  try {
+    // sendBeacon ส่งเป็น text/plain → อ่านเป็นข้อความแล้วแปลงเอง
+    body = JSON.parse(await request.text()) as Record<string, unknown>;
+  } catch {
+    return json({ ok: false }, 400);
+  }
+  const events = cleanStatEvents(body.ev);
+  if (!events.length) return json({ ok: true, skipped: true });
+  const sb = supabaseAdmin();
+  const { data } = await sb.from("shops").select("id, status").eq("slug", String(body.shop ?? "").trim()).maybeSingle();
+  const shop = data as { id: string; status: string } | null;
+  if (!shop || shop.status !== "active") return json({ ok: false }, 404);
+  const { error } = await sb.rpc("store_web_stat_bump" as never, { p_shop: shop.id, p_events: events } as never);
+  if (error) console.error("[web-stats]", error.message);
+  return json({ ok: !error });
+}

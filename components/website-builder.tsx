@@ -34,6 +34,7 @@ import { SaveSectionTemplateDialog, SectionTemplateGroup } from "@/components/we
 import { StylePanel, makeBlock, visibilityLabel, ALL_VISIBLE, type Block, type ChildBlock, type BlockTypeInfo, type Visibility } from "@/components/website-block-editor";
 import { useCanvasBridge, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/components/website-canvas-tools";
 import { previewReloadSig } from "@/lib/website-live-preview";
+import { cleanExpId } from "@/lib/website-web-stats";
 import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canvas-editor";
 import { ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
 import { coverageOf, hasText, type ContentLang } from "@/lib/content-i18n";
@@ -97,10 +98,17 @@ export interface BuilderToolbar {
 
 const uidCopy = (type: string) => `${type}-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
 const deepCopy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
-/** สำเนา Section ที่ได้ id ใหม่ทั้งตัวและชิ้นย่อย (ทำสำเนา · ใส่จากแม่แบบ) — ไม่ชนกับของเดิมบนหน้า */
+/** 🧪 ค่าทดสอบ A/B ของ Section (Block ในตัวแก้เป็นแบบหลวม) */
+const abOf = (b: Block): { exp: string; variant: "A" | "B" } | null => {
+  const a = b.ab as { exp?: unknown; variant?: unknown } | undefined;
+  return a && typeof a.exp === "string" && (a.variant === "A" || a.variant === "B") ? { exp: a.exp, variant: a.variant } : null;
+};
+
+/** สำเนา Section ที่ได้ id ใหม่ทั้งตัวและชิ้นย่อย (ทำสำเนา · ใส่จากแม่แบบ) — ไม่ชนกับของเดิมบนหน้า · ไม่ติดค่าทดสอบ A/B ไปด้วย */
 const freshCopy = (b: Block): Block => {
   const copy = deepCopy(b);
   copy.id = uidCopy(String(copy.type));
+  delete copy.ab;
   const c = childrenOf(copy);
   if (c) copy[c.spec.key] = c.list.map((it) => ({ ...it, id: newChildId(c.spec.key) }));
   return copy;
@@ -328,6 +336,28 @@ export function WebsiteBuilder({
       onSelect({ blockId: copy.id });
     },
     [onChange, onSelect]
+  );
+
+  // 🧪 ทดสอบ A/B: Section นี้เป็นแบบ A + ทำสำเนาเป็นแบบ B ต่อท้าย (ชื่อการทดสอบเดียวกัน) → แก้แบบ B ได้เลย
+  const makeAbPair = useCallback(
+    (id: string) => {
+      const cur = blocksRef.current;
+      const i = cur.findIndex((b) => b.id === id);
+      if (i < 0) return;
+      const exp = cleanExpId(`ab-${cur[i].id}`) || "ab-test";
+      const copy = { ...freshCopy(cur[i]), ab: { exp, variant: "B" as const } };
+      const next = [...cur];
+      next[i] = { ...cur[i], ab: { exp, variant: "A" as const } };
+      next.splice(i + 1, 0, copy);
+      onChange(next);
+      onSelect({ blockId: copy.id });
+    },
+    [onChange, onSelect]
+  );
+  // เปลี่ยนชื่อการทดสอบ = เปลี่ยนทุก Section ที่อยู่ในการทดสอบเดียวกัน (ไม่งั้นคู่ A/B หลุดจากกัน)
+  const renameAb = useCallback(
+    (from: string, to: string) => onChange(blocksRef.current.map((b) => (abOf(b)?.exp === from ? { ...b, ab: { ...abOf(b)!, exp: to } } : b))),
+    [onChange]
   );
 
   const removeSection = useCallback(
@@ -1132,6 +1162,7 @@ export function WebsiteBuilder({
                       {schema ? blockSummary(b) : "บล็อกของระบบเดิม"}
                       {c && !isOpen && ` · ${c.spec.itemLabel} ${c.list.length}`}
                       {visibilityLabel(b.visibility) && ` · ${visibilityLabel(b.visibility)}`}
+                      {abOf(b) && ` · 🧪 ${abOf(b)!.exp} แบบ ${abOf(b)!.variant}`}
                     </span>
                   </span>
                   {hasIssue && <span className="text-[10px] text-red-500" title="มีจุดที่ควรแก้">●</span>}
@@ -1263,6 +1294,42 @@ export function WebsiteBuilder({
     </div>
   );
 
+  const abRow = (b: Block) => {
+    const ab = abOf(b);
+    const seg = (v: "A" | "B") => (
+      <button key={v} onClick={() => ab && patchBlock(b.id, { ab: { ...ab, variant: v } })} className={`px-3 py-1 text-xs rounded-md ${ab?.variant === v ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+        แบบ {v}
+      </button>
+    );
+    return (
+      <div className="pt-3 border-t border-slate-200 space-y-2" data-ab-settings>
+        <p className="text-[11px] font-medium text-slate-500">🧪 ทดสอบ A/B</p>
+        {!ab ? (
+          <>
+            <p className="text-[11px] text-slate-500 leading-relaxed">ลองแบบใหม่โดยไม่เสี่ยง — ลูกค้าครึ่งหนึ่งเห็น Section นี้ (แบบ A) อีกครึ่งเห็นสำเนาที่แก้แล้ว (แบบ B) · ดูว่าแบบไหนขายดีกว่าที่แท็บ 📈 สถิติ</p>
+            <button onClick={() => makeAbPair(b.id)} className="w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100">
+              🧪 สร้างแบบ B จาก Section นี้
+            </button>
+          </>
+        ) : (
+          <>
+            <label className="block">
+              <span className="block text-[11px] text-slate-500 mb-1">ชื่อการทดสอบ (อังกฤษ/ตัวเลข · ชื่อนี้ขึ้นในแท็บสถิติ)</span>
+              <input
+                value={ab.exp}
+                onChange={(e) => renameAb(ab.exp, e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 30))}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs font-mono"
+              />
+            </label>
+            <div className="inline-flex rounded-lg border border-slate-200 p-0.5">{seg("A")}{seg("B")}</div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">จบการทดสอบ: ลบ Section แบบที่แพ้ แล้วกด "เลิกทดสอบ" ที่แบบที่ชนะ (ทุกคนจะเห็นแบบนั้น)</p>
+            <button onClick={() => patchBlock(b.id, { ab: undefined })} className="text-xs text-rose-600 hover:underline">เลิกทดสอบ Section นี้</button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const props = !selBlock ? (
     <div className="h-full flex flex-col items-center justify-center text-center text-sm text-slate-400 px-6 gap-1">
       <span className="text-3xl">👆</span>
@@ -1349,6 +1416,7 @@ export function WebsiteBuilder({
           <div className="space-y-4">
             <StylePanel value={styleOf(selBlock)} onChange={(style) => patchBlock(selBlock.id, { style })} mode="style" hasHeading={sectionHasHeading(selBlock.type)} theme={shopLook.theme} fontNames={shopLook.fontNames} />
             {visibilityRow(selBlock.visibility, (k, val) => setVis(selBlock.id, k, val))}
+            {abRow(selBlock)}
           </div>
         )}
         {propTab === "motion" && (

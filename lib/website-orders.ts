@@ -49,6 +49,7 @@ import { evaluatePromotions, type PromoLine } from "@/lib/website-promotions";
 import { readLivePromotions } from "@/lib/website-promotions-db";
 import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
+import { cleanAb, cleanSource } from "@/lib/website-web-stats";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -136,6 +137,10 @@ export interface PublicOrderInput {
   lang: CustomerLang;
   /** 🚚 วิธีจัดส่งที่ลูกค้าเลือก (id ใน store_settings.shipping_methods) — ไม่ส่ง = วิธีแรกที่ใช้ได้ (เว็บรุ่นเก่า) */
   shippingMethodId?: string;
+  /** 📈 รอบเข้าเว็บที่สั่งมาจากไหน (google/facebook/line/direct/…) — เว็บรุ่นเก่าไม่ส่ง = null */
+  source?: string;
+  /** 🧪 กลุ่ม A/B ที่ลูกค้าเห็นในรอบนั้น */
+  ab?: Record<string, "A" | "B">;
 }
 
 export interface OrderLineView {
@@ -279,6 +284,8 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       gift,
       lang: customerLang(r.lang),
       ...(shippingMethodId ? { shippingMethodId } : {}),
+      ...(r.source ? { source: cleanSource(r.source) } : {}),
+      ...(cleanAb(r.ab) ? { ab: cleanAb(r.ab)! } : {}),
     },
   };
 }
@@ -650,6 +657,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         note: input.note ?? null,
         customer_id: opts.customerId ?? null,
         lang: input.lang,
+        // 📈 แหล่งที่มา + กลุ่ม A/B (migration 202610291700 · เว็บรุ่นเก่าไม่ส่ง = ไม่ใส่ช่อง)
+        ...(input.source ? { source: input.source } : {}),
+        ...(input.ab ? { ab: input.ab } : {}),
     };
     const ins = await sb.from("store_orders").insert(payload).select("id, order_no, created_at").maybeSingle();
     const insErr = ins.error;
