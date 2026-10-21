@@ -43,7 +43,7 @@ const TYPE_FILTERS: { key: string; label: string; en: string }[] = [
   { key: "design", label: "🎨 ไฟล์ออกแบบ", en: "🎨 Design files" },
   { key: "document", label: "📄 เอกสาร", en: "📄 Documents" },
   { key: "video", label: "🎬 วิดีโอ", en: "🎬 Videos" },
-];   // ชนิด artwork จาก lookup กลาง (erp_lookups type=artwork_type)
+];
 
 export function AssetLibrary() {
   const t = useT();
@@ -670,8 +670,7 @@ function SideItem({ active, onClick, label, count, icon }: {
       {count != null && count > 0 && <span className="text-[11px] text-slate-400">{count}</span>}
     </button>
   );
-}   // ค่ามาตรฐานเมื่อรูปไม่ได้ฝัง DPI ไว้ (งานเรา export ขนาดจริง 300 DPI)
-   // ไฟล์ ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
+}
 
 // ── ของกลาง: เปิดป๊อปอัปรายละเอียด/แก้ไฟล์คลังกลาง จากที่ไหนก็ได้ (โหลด collections/artTypes/actor ให้เอง) ──
 export function AssetDetailPopup({ assetId, onClose, onChanged }: { assetId: string; onClose: () => void; onChanged?: () => void }) {

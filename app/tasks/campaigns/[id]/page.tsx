@@ -812,5 +812,5 @@ export default function CampaignCanvasPage() {
 
     </StandaloneShell>
   );
-}   // โหลดทีละ 30 + ปุ่มโหลดเพิ่ม (เดิมตัดที่ 30 แล้วไม่มีทางเห็นตัวที่เหลือ เช่นค้น WK เจอ 40 เห็นแค่ 30)
+}
 

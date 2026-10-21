@@ -7,12 +7,12 @@ import { type AssetSize } from "@/app/api/assets/shared";
 
 export const TYPE_ICON: Record<AssetType, string> = { image: "🖼️", design: "🎨", document: "📄", video: "🎬", other: "📦" };
 
-export type LookupItem = { id: string; name: string };
+export type LookupItem = { id: string; name: string };   // ชนิด artwork จาก lookup กลาง (erp_lookups type=artwork_type)
 
 export const isImage = (a: { asset_type: AssetType }) => a.asset_type === "image";
 
 // ── แกะขนาดจริง (cm) จากรูป: px ÷ DPI × 2.54 ──
-export const DEFAULT_DPI = 300;
+export const DEFAULT_DPI = 300;   // ค่ามาตรฐานเมื่อรูปไม่ได้ฝัง DPI ไว้ (งานเรา export ขนาดจริง 300 DPI)
 
 // อ่าน DPI ที่ฝังในไฟล์รูป (JPEG JFIF/APP0 · PNG pHYs) — ไม่มี = null
 export async function readImageDpi(file: File): Promise<number | null> {
@@ -100,7 +100,7 @@ export function commonNameSeed(titles: string[]): string {
 
 // ── ของกลาง: อัปไฟล์ต้นฉบับ + ก็อปรูป preview ขึ้น Google Drive (ใช้ทั้งตอนสร้างใหม่ + หน้ารายละเอียด) ──
 // สร้างโฟลเดอร์ตามชื่องาน (ใต้แบรนด์/ชนิด) → ตั้งชื่อไฟล์ตามชื่องาน → ก็อปรูปตัวอย่างเข้าโฟลเดอร์ด้วย (เปิดดูลายจาก Drive ได้เลย)
-export const DRIVE_MAX_PROXY = 4 * 1024 * 1024;
+export const DRIVE_MAX_PROXY = 4 * 1024 * 1024;   // ไฟล์ ≤4MB อัปผ่านแอป · ใหญ่กว่า = อัปเอง (ลิมิต body Vercel)
 
 export const drivePreviewExt = (f: File) => f.type === "image/jpeg" ? ".jpg" : f.type === "image/webp" ? ".webp" : (f.name.match(/\.[^.]+$/)?.[0] || ".png");
 
