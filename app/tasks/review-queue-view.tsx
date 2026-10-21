@@ -18,8 +18,9 @@ import { listReviewQueue, updateSubtask, type ReviewQueueItem } from "./data";
 import { ReviseModal } from "./subtask-manager";
 import { useT } from "@/components/i18n";
 import { ConnectionError } from "@/components/connection-error";
+import { usePushToast } from "@/components/toast";
+import { subStatusBadge, subStatusLabel } from "./subtask-status";
 
-type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type Img = { r2_key: string; file_name: string | null };
 type Dest = { id: string; code: string };
 // รายละเอียด Platform ที่คนทำส่ง (งานเขียนคำอธิบาย) — โหลดจาก ?platform=1 เหมือนป๊อปส่งงาน
@@ -41,7 +42,6 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [lb, setLb] = useState(-1);
   const [search, setSearch] = useState("");
-  const [toasts, setToasts] = useState<Toast[]>([]);
   // สถานะ popup ที่แก้ได้ (เรียงรูป / ปลายทาง / ยืนยันอนุมัติ)
   const [imgs, setImgs] = useState<Img[]>([]);
   const [destParents, setDestParents] = useState<Dest[]>([]);
@@ -54,10 +54,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
   const [galLb, setGalLb] = useState<{ images: { url: string; label: string | null }[]; index: number }>({ images: [], index: -1 });   // ซูมรูปเดิมในสินค้า (แยกจาก imgs งานส่ง)
   const [platParents, setPlatParents] = useState<PlatParent[] | null>(null);   // รายละเอียด Platform ที่ส่ง (งานเขียนคำอธิบาย)
 
-  const pushToast = useCallback((type: Toast["type"], message: string) => {
-    const id = Date.now() + Math.random(); setToasts((p) => [...p, { id, type, message }]);
-    setTimeout(() => setToasts((p) => p.filter((x) => x.id !== id)), 3500);
-  }, []);
+  const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   // โหลดพลาด → โชว์หน้าเชื่อมต่อไม่ได้ + ปุ่มลองใหม่ (เดิมตั้งเป็นรายการว่าง → ขึ้น "ไม่มีงานรอตรวจ" ทั้งที่จริงโหลดไม่ได้)
   const [loadFailed, setLoadFailed] = useState(false);
@@ -188,9 +185,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
             <p className="text-slate-600 font-medium">{t("ไม่มีงานรอตรวจ", "Nothing awaiting review")}</p>
           </div>
         ) : (() => {
-          const stMeta = (s: string) => s === "approved" ? { label: t("อนุมัติแล้ว", "Approved"), cls: "bg-emerald-50 text-emerald-700 border-emerald-200" }
-            : s === "revision_requested" ? { label: t("ขอแก้", "Revision"), cls: "bg-orange-50 text-orange-700 border-orange-200" }
-            : { label: t("รออนุมัติ", "Pending"), cls: "bg-amber-50 text-amber-700 border-amber-200" };
+          const stMeta = (s: string) => ({ label: subStatusLabel(s), cls: subStatusBadge(s) });   // ป้ายสถานะงานย่อย — ของกลาง
           const pending = rows.filter((r) => r.status !== "approved");
           const approved = rows.filter((r) => r.status === "approved");
           const groupTable = (title: string, list: ReviewQueueItem[]) => list.length === 0 ? null : (
@@ -395,9 +390,6 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
           onCancel={() => setReviseOpen(false)} onConfirm={doRevise} />
       )}
 
-      <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
-        {toasts.map((x) => <div key={x.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${x.type === "success" ? "bg-emerald-600" : x.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{x.message}</div>)}
-      </div>
     </div>
   );
 }

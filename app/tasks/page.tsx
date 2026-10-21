@@ -48,6 +48,8 @@ import { type MetricDef } from "./metrics";
 import { taskTypeLabel } from "./use-options";
 import { TaskTypeChip } from "./task-type-chip";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
+import { usePushToast } from "@/components/toast";
+import { subStatusDot, subStatusLabel } from "./subtask-status";
 import {
   PRIORITY_RANK, PRIORITY_META, priorityLabel, isOverdue,
   listTasks, deleteTask, updateTask,
@@ -87,24 +89,6 @@ function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
   { accessorKey: "progress_percent", header: t("คืบหน้า", "Progress"), size: 90, cell: ({ getValue }) => { const v = (getValue() as number) ?? 0; return <div className="flex items-center gap-1.5"><div className="h-1.5 w-12 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${v}%` }} /></div><span className="text-[11px] text-slate-400">{v}%</span></div>; } },
   { accessorKey: "due_date", header: t("กำหนดส่ง", "Due date"), size: 110, cell: ({ row }) => { const row0 = row.original; if (!row0.due_date) return <span className="text-xs text-slate-400">—</span>; const od = isOverdue(row0); return <span className={`text-xs ${od ? "text-red-600 font-semibold" : "text-slate-500"}`}>{od && "⚠ "}{row0.due_date}</span>; } },
 ]; }
-
-// ============================================================
-// Toast
-// ============================================================
-type Toast = { id: number; type: "success" | "error" | "info"; message: string };
-function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
-  const color = { success: "bg-emerald-600", error: "bg-red-600", info: "bg-slate-800" };
-  return (
-    <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
-      {toasts.map((t) => (
-        <div key={t.id} className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${color[t.type]}`}>
-          <span>{t.type === "success" ? "✓" : t.type === "error" ? "⚠️" : "ℹ️"}</span>{t.message}
-          <button onClick={() => onDismiss(t.id)} className="ml-2 opacity-70 hover:opacity-100">✕</button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /** true ตั้งแต่ครั้งแรกที่ open เป็น true แล้วค้างไว้ — ใช้หน่วงโหลดโค้ดป๊อปจนกว่าจะเปิดใช้จริง */
 function useSeenOnce(open: boolean): boolean {
@@ -155,13 +139,7 @@ export default function TasksPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
 
 
-  // toasts
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const pushToast = useCallback((type: Toast["type"], message: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((p) => [...p, { id, type, message }]);
-    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
-  }, []);
+  const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   // โหลดข้อมูลแบบ stale-while-revalidate (ของกลาง) — กลับเข้าหน้านี้ใหม่ = โชว์ทันที แล้วอัปเดตเงียบ
   // poll ทุก 45 วิ (เฉพาะตอนเปิดแท็บ · กลับมาที่แท็บ = โหลดใหม่ทันที · มีคนแก้ในหน้านี้ = broadcast ให้ทุกจอทันที)
@@ -420,7 +398,6 @@ export default function TasksPage() {
       {/* คลังความรู้ — แก้ไขได้ (ของกลางในโมดูล) */}
       {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={canSettings} pushToast={pushToast} />}
 
-      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
       <BgJobsDock />
     </StandaloneShell>
   );
@@ -480,9 +457,6 @@ function ViewSwitcher({ view, setView, t, onHero }: {
 // ============================================================
 // Queue View — หน้าพนักงาน ปุ่มใหญ่ งานตัวเองเด่น
 // ============================================================
-// สี/ป้ายสถานะงานย่อย (ให้ตรงกับ SUB_STEPS ในงานย่อย)
-const SUB_STATUS_LABEL: Record<string, string> = { todo: "ยังไม่เริ่ม", in_progress: "กำลังทำ", submitted: "รออนุมัติ", approved: "อนุมัติแล้ว", doing: "กำลังทำ", done: "อนุมัติแล้ว", posted: "อนุมัติแล้ว" };
-const SUB_STATUS_DOT: Record<string, string> = { todo: "bg-slate-400", in_progress: "bg-blue-500", submitted: "bg-amber-500", approved: "bg-emerald-500", doing: "bg-blue-500", done: "bg-emerald-500", posted: "bg-emerald-500" };
 
 function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
   tasks: CreativeTask[]; subtasks: MySubtask[]; mySubView: MySubView; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void;
@@ -518,10 +492,10 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
                 <div className="space-y-1.5">
                   {g.items.map((s) => (
                     <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 cursor-pointer" onClick={() => onOpen(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}>
-                      <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_STATUS_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
+                      <span className={`h-2 w-2 rounded-full shrink-0 ${subStatusDot(s.status)}`} title={subStatusLabel(s.status)} />
                       <div className="flex-1 min-w-0">
                         <span className="text-sm text-slate-700">{s.title}</span>
-                        <span className="ml-2 text-[10px] text-slate-400">{SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
+                        <span className="ml-2 text-[10px] text-slate-400">{subStatusLabel(s.status)}</span>
                         {s.priority && s.priority !== "normal" && <span className="ml-2 text-[10px] text-slate-400">· {priorityLabel(s.priority as CreativePriority)}</span>}
                         {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must complete first")}</span>}
                         <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>

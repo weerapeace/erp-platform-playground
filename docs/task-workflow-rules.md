@@ -28,3 +28,11 @@
 
 ## แจ้งเตือนกำหนดส่ง (`lib/creative-reminders.ts`)
 สรุปวันละครั้งต่อคนต่อชนิด (เกินกำหนด / ใกล้กำหนด) · ไม่เตือนงานจบแล้วและงานที่ผ่านการตรวจแล้ว · "วันนี้" ตามเวลาไทย
+
+## ป้าย/สีสถานะงานย่อย (`app/tasks/subtask-status.ts`)
+แหล่งเดียวของป้าย 2 ภาษา · จุดสี · ป้ายกรอบ · ลำดับเรียง — `subStatusLabel` `subStatusDot` `subStatusBadge` `subStatusRank` `isSubDone` `normalizeSubStatus`
+- ค่าเก่าในฐานข้อมูล `doing/done/posted` แปลงเป็น `in_progress/approved` ให้เอง
+- ห้ามเขียนแผนที่สถานะงานย่อยเองในหน้าใหม่ (เดิมมี 6 ชุดไม่ตรงกัน → หน้าคิวงานโชว์ "ยังไม่เริ่ม" ให้งานที่ถูกขอแก้)
+
+## แจ้งเตือนมุมจอ
+ทุกหน้าในแอปจัดการงานใช้ toast กลาง (`components/toast`) — หน้าที่ส่ง `pushToast(type, msg)` ต่อให้ลูก ใช้ `usePushToast()` · ชนิด prop ใช้ `PushToast` / `ToastVariant` · ห้ามทำกองแจ้งเตือนเองในหน้า

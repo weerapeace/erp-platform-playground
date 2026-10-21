@@ -17,6 +17,7 @@ import { useT } from "@/components/i18n";
 import { platformLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import type { FormField } from "@/app/api/admin/field-registry-v2/route";
+import { type ToastVariant } from "@/components/toast";
 import {
   listContent, getContent, listContentAttachments, updateContent, getPlatformSettings, savePlatformSettings, listSubtasks, updateSubtask,
   getPublishConfig, savePublishConfig,
@@ -25,7 +26,6 @@ import {
 
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
-type Toast = { type: "success" | "error" | "info"; message: string };
 type ParentRef = { id: string; code: string | null; name?: string | null };
 type Row = { content: ContentDetail; images: ContentAttachment[] };
 // ฟิลด์ที่ "คัดลอกไปลงโพสต์" ได้ (ตัด relation/รูป/ไฟล์ ออก)
@@ -43,7 +43,7 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
   taskPlatforms?: string[];
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
-  pushToast: (type: Toast["type"], m: string) => void;
+  pushToast: (type: ToastVariant, m: string) => void;
 }) {
   const t = useT();
   useCreativeOptions();   // โหลด meta แพลตฟอร์ม (ไอคอน/สี) ให้ PlatformChip
@@ -239,7 +239,7 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
 }
 
 // เลือกคอลัมน์ Parent SKU ที่จะโชว์ใน popup เผยแพร่ (ของกลาง · ว่าง = อัตโนมัติ)
-function FieldPickerModal({ selected, onClose, onSaved, pushToast }: { selected: string[]; onClose: () => void; onSaved: (cols: string[]) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function FieldPickerModal({ selected, onClose, onSaved, pushToast }: { selected: string[]; onClose: () => void; onSaved: (cols: string[]) => void; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const [regs, setRegs] = useState<FormField[]>([]);
   const [picked, setPicked] = useState<string[]>(selected);

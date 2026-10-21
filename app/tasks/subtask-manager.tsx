@@ -37,6 +37,8 @@ type DirectCtx = { modeCfg: ProductModeCfg | null; taskType: string | null; task
 import { ArrangePrintEditor, itemsFromSpec, specFromItems, basesFromSpec, specBasesFrom, arrangeTotalText, arrangeSizeKey, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { AssetSize } from "@/app/api/assets/shared";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
+import type { PushToast } from "@/components/toast";
+import { SUBTASK_STATUS, SUBTASK_STATUS_STEPS, isSubDone, subStatusDot, subStatusLabel } from "./subtask-status";
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -46,7 +48,7 @@ const ContentDrawer = dynamic(() => import("./content/content").then((m) => m.Co
 // อวตาร/ชิปผู้รับผิดชอบ — ของกลาง (แยกไฟล์เบา) · re-export กันโค้ดเดิมที่เคยอ้างจากไฟล์นี้
 export { AssigneeAvatar, AssigneeChip };
 
-type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+type ToastFn = PushToast;
 
 // งานเรียงพิมพ์ในหน้างาน — แสดง/แก้รายการ (รูป+ขนาด+จำนวน) + บันทึกลง subtask.config
 function ArrangePrintSubtaskPanel({ sub, taskId, reload, pushToast }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn }) {
@@ -111,18 +113,10 @@ const APPROVE_TARGET_STYLE: Record<string, { icon: string; cls: string }> = {
   description_media: { icon: "🖼️", cls: "bg-purple-50 text-purple-700 border-purple-200" },
 };
 
-// ④ สถานะงานย่อย: ยังไม่เริ่ม → กำลังทำ → ส่งงาน(รออนุมัติ) → อนุมัติ (ไม่มี "โพสต์แล้ว" แล้ว)
-export const SUB_STEPS = [
-  { key: "todo",               label: () => tr("ยังไม่เริ่ม", "Not started"), dot: "bg-slate-400" },
-  { key: "in_progress",        label: () => tr("กำลังทำ", "In progress"),     dot: "bg-blue-500" },
-  { key: "submitted",          label: () => tr("รออนุมัติ", "Pending approval"),   dot: "bg-amber-500" },
-  { key: "approved",           label: () => tr("อนุมัติแล้ว", "Approved"), dot: "bg-emerald-500" },
-  { key: "revision_requested", label: () => tr("ขอแก้", "Revision requested"),       dot: "bg-orange-500" },
-  { key: "canceled",           label: () => tr("ยกเลิก", "Canceled"),      dot: "bg-slate-300" },
-];
-const subStepLabel = (st: string) => SUB_STEPS.find((s) => s.key === st)?.label() ?? (st === "posted" || st === "done" ? tr("อนุมัติแล้ว", "Approved") : tr("ยังไม่เริ่ม", "Not started"));
-const subStepDot = (st: string) => (SUB_STEPS.find((s) => s.key === st)?.dot ?? ((st === "posted" || st === "done") ? "bg-emerald-500" : "bg-slate-400"));
-const isSubDone = (st: string) => st === "approved" || st === "posted" || st === "done";
+// ④ สถานะงานย่อย: ยังไม่เริ่ม → กำลังทำ → ส่งงาน(รออนุมัติ) → อนุมัติ — ป้าย/สีมาจากของกลาง ./subtask-status
+export const SUB_STEPS = SUBTASK_STATUS_STEPS.map((key) => ({ key, label: () => subStatusLabel(key), dot: SUBTASK_STATUS[key].dot }));
+const subStepLabel = subStatusLabel;
+const subStepDot = subStatusDot;
 
 /** กล่องจัดการงานย่อยแบบครบ (โหลดเอง) — ใช้บน canvas/หน้าอื่นได้
  *  canApprove = เห็นปุ่มอนุมัติ (admin/ผจก./ผู้ตรวจ) · canManageAssignees = แก้ผู้รับผิดชอบได้ (admin/ผจก./คนสร้างงาน) */

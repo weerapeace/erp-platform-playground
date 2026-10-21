@@ -30,12 +30,10 @@ import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
 import { GifPokeModal } from "./gif-poke-modal";
 import { GifPokeLayer } from "./gif-poke-layer";
 import type { UserPickerValue } from "@/components/pickers";
+import { subStatusDot, subStatusLabel } from "./subtask-status";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
-// ป้าย/จุดสีสถานะงานย่อย (ให้ตรงกับ SUB_STEPS ในงานย่อย) — ใช้ตอนกดการ์ด "งานของฉัน" โชว์งานย่อย
-const SUB_LABEL: Record<string, string> = { todo: "ยังไม่เริ่ม", in_progress: "กำลังทำ", submitted: "รออนุมัติ", approved: "อนุมัติแล้ว", revision_requested: "ขอแก้", canceled: "ยกเลิก", doing: "กำลังทำ", done: "อนุมัติแล้ว", posted: "อนุมัติแล้ว" };
-const SUB_DOT: Record<string, string> = { todo: "bg-slate-400", in_progress: "bg-blue-500", submitted: "bg-amber-500", approved: "bg-emerald-500", revision_requested: "bg-orange-500", canceled: "bg-slate-300", doing: "bg-blue-500", done: "bg-emerald-500", posted: "bg-emerald-500" };
 
 export type OvFilter = "all" | "mine" | "review" | "overdue";
 type Counts = { total: number; mine: number; overdue: number; review: number };
@@ -320,12 +318,7 @@ export function OverviewDashboard({
                   {g.label && <p className="text-[11px] font-semibold text-slate-500 mb-1">{g.label} ({g.items.length})</p>}
                   <div className="space-y-1.5">
                     {g.items.map((s) => {
-                      const statusText = s.status === "in_progress" || s.status === "doing" ? t("กำลังทำ", "In progress")
-                        : s.status === "submitted" ? t("รออนุมัติ", "Pending review")
-                        : s.status === "approved" || s.status === "done" || s.status === "posted" ? t("อนุมัติแล้ว", "Approved")
-                        : s.status === "revision_requested" ? t("ขอแก้", "Revision")
-                        : s.status === "canceled" ? t("ยกเลิก", "Canceled")
-                        : t("ยังไม่เริ่ม", "Not started");
+                      const statusText = subStatusLabel(s.status);
                       const remain = s.due_date ? Math.ceil((new Date(`${s.due_date}T23:59:59`).getTime() - Date.now()) / 86400000) : null;
                       const remainText = remain == null ? "" : remain < 0 ? t(`เกินกำหนด ${-remain} วัน`, `${-remain}d overdue`) : remain === 0 ? t("ครบกำหนดวันนี้", "Due today") : t(`เหลือ ${remain} วัน`, `${remain}d left`);
                       return (
@@ -335,7 +328,7 @@ export function OverviewDashboard({
                         {s.cover_image_r2_key
                           ? <img src={`/api/r2-image?key=${encodeURIComponent(s.cover_image_r2_key)}&w=80`} alt="" className="h-9 w-9 rounded object-cover border border-slate-100 shrink-0" />
                           : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🖼️</span>}
-                        <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={statusText} />
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${subStatusDot(s.status)}`} title={statusText} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-sm font-semibold text-slate-800">{s.task_title || t("(ไม่มีชื่องาน)", "(untitled)")}</span>

@@ -5,8 +5,9 @@ import { transitionBetween, statusMeta } from "./use-statuses";
 import { approveTask, transitionTask, type ApiError, type CreativeTask } from "./data";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { tr as lang } from "@/lib/lang";
+import { type PushToast } from "@/components/toast";
 
-type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 
 /**
  * ส่งคำสั่งเปลี่ยนสถานะ — ถ้า server ตอบว่า "ปิดงานไม่ได้ ยังมีงานย่อยค้าง" (409 open_subtasks)

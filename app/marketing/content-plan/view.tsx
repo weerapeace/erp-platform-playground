@@ -11,7 +11,7 @@ import { useLang, useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useToast } from "@/components/toast";
+import { useToast, usePushToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
 import { listContent, listBrands, updateContent, type ContentItem, type BrandOption } from "@/app/tasks/data";
@@ -180,7 +180,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
     try { await updateContent(id, { status }); toast.success(t("ย้ายขั้นแล้ว", "Stage changed")); }
     catch (e) { patchLocal(id, { status: before }); toast.error(e instanceof Error ? e.message : t("ย้ายขั้นไม่สำเร็จ", "Couldn't change stage")); }
   };
-  const pushToast = useCallback((type: "success" | "error" | "info", m: string) => { (type === "error" ? toast.error : type === "success" ? toast.success : toast.info)(m); }, [toast]);
+  const pushToast = usePushToast();   // รูปแบบ pushToast(type, msg) ผ่าน toast กลาง
 
   const openNew = (date?: string | null, platform?: string | null) => canCreate && setModal({ item: null, date: date ?? null, platform: platform ?? null });
   const openItem = (c: ContentItem) => setModal({ item: c });

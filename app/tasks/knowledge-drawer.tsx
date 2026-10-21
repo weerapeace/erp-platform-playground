@@ -12,8 +12,9 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useT } from "@/components/i18n";
 import { DrawerShell } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import type { ToastVariant } from "@/components/toast";
 
-type ToastType = "success" | "error" | "info";
+type ToastType = ToastVariant;   // ชนิดกลาง (components/toast)
 
 export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () => void; canEdit: boolean; pushToast: (type: ToastType, m: string) => void }) {
   const t = useT();

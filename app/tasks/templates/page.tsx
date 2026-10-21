@@ -27,21 +27,16 @@ import { TeamFill } from "../team-picker";
 import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
+import { usePushToast, type ToastVariant } from "@/components/toast";
 
 const FREQ =[{ value: "daily", label: () => tr("รายวัน", "Daily") }, { value: "weekly", label: () => tr("รายสัปดาห์", "Weekly") }, { value: "monthly", label: () => tr("รายเดือน", "Monthly") }];
 const FREQ_LABEL = (): Record<string, string> => Object.fromEntries(FREQ.map((f) => [f.value, f.label()]));
 const PRIORITY_OPTIONS = () => Object.entries(PRIORITY_META).map(([v, m]) => ({ value: v, label: tr(m.label, m.label_en ?? m.label) }));
-type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
 export default function TemplatesPage() {
   const t = useT();
   const [tab, setTab] = useState<"templates" | "recurring" | "prompts">("templates");
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const pushToast = useCallback((type: Toast["type"], message: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((p) => [...p, { id, type, message }]);
-    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
-  }, []);
+  const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   return (
     <StandaloneShell title={t("เทมเพลต & งานประจำ", "Templates & Recurring")} icon="🔁" accent="violet">
@@ -64,9 +59,6 @@ export default function TemplatesPage() {
         {tab === "templates" ? <TemplatesTab pushToast={pushToast} /> : tab === "recurring" ? <RecurringTab pushToast={pushToast} /> : <BrandPromptsTab pushToast={pushToast} />}
       </div>
 
-      <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
-        {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}
-      </div>
     </StandaloneShell>
   );
 }
@@ -76,7 +68,7 @@ export default function TemplatesPage() {
 // ============================================================
 const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "", require_parent_sku: false, icon: "", no_brand_only: false };
 
-function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
+function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) => void }) {
   const t = useT();
   const { taskTypes, platforms } = useCreativeOptions();
   const [items, setItems] = useState<TaskTemplate[]>([]);
@@ -281,7 +273,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
 // Recurring tab
 // ============================================================
 const EMPTY_REC = { name: "", template_id: "", frequency: "weekly", interval_n: "1", brand_id: "", campaign_id: "", start_date: "", end_date: "", description: "", task_type: "", priority: "normal", platforms: [] as string[], due_day: "" };
-function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
+function RecurringTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) => void }) {
   const t = useT();
   const { taskTypes, platforms: platformOpts } = useCreativeOptions();
   const [items, setItems] = useState<RecurringRule[]>([]);

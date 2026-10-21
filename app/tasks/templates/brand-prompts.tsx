@@ -9,8 +9,9 @@ import { useCallback, useEffect, useState } from "react";
 import { PromptEditor } from "@/components/prompt-editor";
 import { useT } from "@/components/i18n";
 import { listBrands, listSubtaskTypes, listBrandPrompts, saveBrandPrompt, type BrandOption, type SubtaskType } from "../data";
+import { type PushToast } from "@/components/toast";
 
-type ToastFn = (t: "success" | "error" | "info", m: string) => void;
+type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 
 export function BrandPromptsTab({ pushToast }: { pushToast: ToastFn }) {
   const t = useT();

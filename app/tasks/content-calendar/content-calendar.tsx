@@ -40,6 +40,7 @@ import { useAuth } from "@/components/auth";
 import dynamic from "next/dynamic";
 import { useRefreshRules } from "@/app/marketing/content-plan/plan-refresh";
 import { refreshStatuses, bangkokDateKey, REFRESH_ALERT_STATES } from "@/lib/marketing/content-plan";
+import { usePushToast } from "@/components/toast";
 
 // แท็บวางแผน โหลดเมื่อกดเข้า (ไม่ถ่วงแท็บคอนเทนต์/งาน)
 const ContentPlanView = dynamic(() => import("@/app/marketing/content-plan/view").then((m) => m.ContentPlanView), {
@@ -51,7 +52,6 @@ const ContentCreateModal = dynamic(() => import("../content/content-create-modal
 const TaskDetailDrawer = dynamic(() => import("../task-detail-drawer").then((m) => m.TaskDetailDrawer), { ssr: false });
 const CreateTaskModal = dynamic(() => import("../create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
 
-type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type CalMode = "content" | "task" | "plan";
 /** รายการบนปฏิทิน (รูปกลางของทั้งคอนเทนต์และงาน) — แผงปฏิทินไม่ต้องรู้ว่าเป็นชนิดไหน */
 type CalEntry = {
@@ -254,7 +254,6 @@ export function ContentCalendarView() {
   const [statusFilter, setStatusFilter] = useState<string>("all");   // "all" | สถานะ (ตามโหมด)
   const [notReady, setNotReady] = useState(false);   // ⚠ ยังไม่พร้อม = โพสต์ที่ยังขาดแคปชั่นหรือรูปในแพลตฟอร์มใดแพลตฟอร์มหนึ่ง (ใช้ร่วมกับตัวกรองอื่นได้)
   const [offset, setOffset] = useState(0);                          // เลื่อนเดือน (0 = เดือนนี้)
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [taskCreateOpen, setTaskCreateOpen] = useState(false);
   const [createDate, setCreateDate] = useState<string | null>(null);   // วันตั้งโพสต์ prefill (จากช่องที่คลิก)
@@ -276,11 +275,7 @@ export function ContentCalendarView() {
   useEffect(() => { if (!canHover) return; const off = () => setQuickView(null); window.addEventListener("scroll", off, true); return () => window.removeEventListener("scroll", off, true); }, [canHover]);
   // (เอาออก 2026-10-14) เดิมหมุนลูกกลิ้งบนปฏิทิน = เปลี่ยนเดือน — เจ้าของขอให้เลื่อนหน้าธรรมดา ใช้ปุ่ม ‹ › เปลี่ยนเดือนแทน
 
-  const pushToast = useCallback((type: Toast["type"], message: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((p) => [...p, { id, type, message }]);
-    setTimeout(() => setToasts((p) => p.filter((x) => x.id !== id)), 3500);
-  }, []);
+  const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   // ใช้ cache ร่วมกับหน้าคอนเทนต์/หน้างาน (key เดียวกัน) — เข้าหน้านี้เห็นทันที · งานโหลดเฉพาะตอนอยู่โหมดงาน
   const itemsSWR = useSWRLite("creative:content", () => listContent());
@@ -986,9 +981,6 @@ export function ContentCalendarView() {
         ) : null;
       })()}
 
-      <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
-        {toasts.map((x) => <div key={x.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${x.type === "success" ? "bg-emerald-600" : x.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{x.message}</div>)}
-      </div>
     </StandaloneShell>
   );
 }

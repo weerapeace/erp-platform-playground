@@ -20,11 +20,21 @@ export type ToastApi = {
   info: (msg: string) => void;
 };
 
+export type ToastVariant = Variant;
+/** รูปแบบ pushToast("success", "บันทึกแล้ว") — ส่งต่อเป็น prop ให้ลูก ๆ ได้ */
+export type PushToast = (type: ToastVariant, msg: string) => void;
+
 const ToastCtx = createContext<ToastApi | null>(null);
 
 const NOOP: ToastApi = { show: () => {}, success: () => {}, error: () => {}, warning: () => {}, info: () => {} };
 export function useToast(): ToastApi {
   return useContext(ToastCtx) ?? NOOP;   // fallback no-op ถ้าอยู่นอก provider (กันพัง)
+}
+
+/** ตัวช่วยสำหรับหน้าที่ใช้รูปแบบ pushToast(type, msg) อยู่แล้ว — แสดงผ่าน toast กลางตัวเดียวกัน (ไม่ต้องทำกองแจ้งเตือนเองในหน้า) */
+export function usePushToast(): PushToast {
+  const toast = useToast();
+  return useCallback((type: ToastVariant, msg: string) => toast.show(msg, type), [toast]);
 }
 
 const STYLE: Record<Variant, { bg: string; icon: string }> = {

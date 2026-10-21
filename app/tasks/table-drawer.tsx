@@ -6,8 +6,8 @@ import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { computeGrid, indexToCol } from "@/lib/canvas-formula";
 import { DrawerShell } from "@/components/modal";
+import { type ToastVariant } from "@/components/toast";
 
-type Toast = { type: "success" | "error" | "info"; message: string };
 type Grid = string[][];
 
 export function TableDrawer({ tableId, onClose, onSaved, onDeleted, pushToast }: {
@@ -15,7 +15,7 @@ export function TableDrawer({ tableId, onClose, onSaved, onDeleted, pushToast }:
   onClose: () => void;
   onSaved: (t: { id: string; title: string; data: Grid }) => void;   // หลังบันทึก → ให้กระดาน re-render การ์ด
   onDeleted: (tableId: string) => void;                              // ลบตาราง → เอาการ์ดออก
-  pushToast: (type: Toast["type"], m: string) => void;
+  pushToast: (type: ToastVariant, m: string) => void;
 }) {
   const t = useT();
   const [title, setTitle] = useState("");

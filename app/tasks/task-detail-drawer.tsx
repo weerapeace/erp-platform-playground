@@ -43,13 +43,14 @@ import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./
 import { applyTaskTransition } from "./task-actions";
 import { StatusBadge, PriorityBadge } from "./task-badges";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { type PushToast } from "@/components/toast";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
   getTask, updateTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
-type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 // ผู้รับผิดชอบ (หลายคน) จัดการแยกที่ MultiAssigneeField ในโหมดดู — ฟอร์มแก้ไขเต็มไม่มี assignee แล้ว (กันรีเซ็ตหลายคน)
 type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[] };

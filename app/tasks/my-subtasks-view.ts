@@ -3,11 +3,9 @@
 // จัดกลุ่ม: ไม่จัด / ตามสถานะ · เรียงหลายชั้น เช่น 1.ความสำคัญ 2.กำหนดส่ง
 // ============================================================
 import { apiFetch } from "@/lib/api";
-import { getLang } from "@/lib/lang";
 import { PRIORITY_RANK, type MySubtask } from "./data";
+import { normalizeSubStatus, subStatusLabel, subStatusRank } from "./subtask-status";
 
-// แปล 2 ภาษา (module scope) — reactive เมื่อ component เรียก arrange ใหม่ตอนเปลี่ยนภาษา
-const tr = (th: string, en: string) => (getLang() === "en" ? en : th);
 
 export type MySubSort = "priority" | "deadline" | "status" | "none";
 export type MySubGroupBy = "none" | "status";
@@ -20,28 +18,13 @@ export function mergeMySubView(v: unknown): MySubView {
   return { groupBy: o.groupBy ?? DEFAULT_MYSUB_VIEW.groupBy, sort1: o.sort1 ?? DEFAULT_MYSUB_VIEW.sort1, sort2: o.sort2 ?? DEFAULT_MYSUB_VIEW.sort2 };
 }
 
-// ลำดับสถานะงานย่อย: กำลังทำบนสุด → ยังไม่เริ่ม → รออนุมัติ → ขอแก้ → อื่น ๆ → ยกเลิก
-const STATUS_RANK: Record<string, number> = { in_progress: 0, doing: 0, todo: 1, submitted: 2, revision_requested: 3, approved: 4, done: 4, posted: 4, canceled: 5 };
-const statusRank = (s: string) => STATUS_RANK[s] ?? 9;
-// ป้ายสถานะ 2 ภาษา (tr = module scope, reactive เมื่อ component เรียกใหม่)
-const statusLabel = (s: string): string => {
-  switch (s) {
-    case "todo": return tr("ยังไม่เริ่ม", "Not started");
-    case "in_progress": case "doing": return tr("กำลังทำ", "In progress");
-    case "submitted": return tr("รออนุมัติ", "Pending approval");
-    case "revision_requested": return tr("ขอแก้", "Revision requested");
-    case "approved": return tr("อนุมัติแล้ว", "Approved");
-    case "done": case "posted": return tr("เสร็จ", "Done");
-    case "canceled": return tr("ยกเลิก", "Canceled");
-    default: return s;
-  }
-};
+// ลำดับ/ป้ายสถานะงานย่อย — ของกลาง ./subtask-status (กำลังทำบนสุด → ยังไม่เริ่ม → รออนุมัติ → ขอแก้ → อนุมัติ → ยกเลิก)
 
 // ค่าจัดเรียงต่อ 1 field (น้อย = มาก่อน)
 function sortVal(s: MySubtask, key: MySubSort): number | string {
   if (key === "priority") return -(PRIORITY_RANK[(s.priority ?? "normal") as keyof typeof PRIORITY_RANK] ?? 0); // สูงก่อน
   if (key === "deadline") return s.due_date || "9999-12-31"; // ใกล้ก่อน (ว่าง = ท้ายสุด)
-  if (key === "status") return statusRank(s.status);
+  if (key === "status") return subStatusRank(s.status);
   return 0;
 }
 function cmp(a: MySubtask, b: MySubtask, key: MySubSort): number {
@@ -58,10 +41,11 @@ export function arrangeMySubtasks(list: MySubtask[], cfg: MySubView): MySubGroup
   if (cfg.groupBy !== "status") return [{ key: "all", label: "", items: sorted }];
   const groups = new Map<string, MySubGroup>();
   for (const s of sorted) {
-    const g = groups.get(s.status) ?? { key: s.status, label: statusLabel(s.status), items: [] };
-    g.items.push(s); groups.set(s.status, g);
+    const k = normalizeSubStatus(s.status);
+    const g = groups.get(k) ?? { key: k, label: subStatusLabel(k), items: [] };
+    g.items.push(s); groups.set(k, g);
   }
-  return [...groups.values()].sort((a, b) => statusRank(a.key) - statusRank(b.key));
+  return [...groups.values()].sort((a, b) => subStatusRank(a.key) - subStatusRank(b.key));
 }
 
 // ---- โหลด/บันทึก config กลาง (ui_config) ----

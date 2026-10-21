@@ -31,6 +31,7 @@ import { ProductModeManager } from "../product-mode-settings";
 import { tr } from "@/lib/lang";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { useToast } from "@/components/toast";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
@@ -52,8 +53,8 @@ export default function TaskSettingsPage() {
   });
   // ไม่มีสิทธิ์แท็บสิทธิ์ → เริ่มที่แท็บประเภทงานแทน
   const tab: Tab = tabRaw === "perm" && !canPermTab ? "task_type" : tabRaw;
-  const [toast, setToast] = useState<string | null>(null);
-  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
+  const toast = useToast();
+  const showToast = useCallback((m: string) => toast.info(m), [toast]);   // แจ้งผ่าน toast กลาง (components/toast)
 
   return (
     <StandaloneShell title={t("ตั้งค่างาน Creative", "Creative Task Settings")} icon="⚙️" accent="violet">
@@ -122,7 +123,6 @@ export default function TaskSettingsPage() {
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : tab === "campaign_category" ? t("หมวดแคมเปญ", "Campaign categories") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
       </div>
 
-      {toast && <div className="fixed bottom-6 right-6 z-[70] px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white bg-slate-800">{toast}</div>}
     </StandaloneShell>
   );
 }

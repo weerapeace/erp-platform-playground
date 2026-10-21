@@ -54,11 +54,12 @@ import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, de
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
+import { usePushToast, type ToastVariant } from "@/components/toast";
+import { subStatusDot, subStatusLabel } from "../subtask-status";
 
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
-type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
 function StatusBadge({ status }: { status: ContentStatus }) {
   useT();   // subscribe ภาษา
@@ -85,17 +86,12 @@ export function ContentPageView() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkAi, setBulkAi] = useState(false);       // ป๊อป "AI เขียนแคปชั่น" ของรายการที่เลือก
   const [bulkAiBusy, setBulkAiBusy] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
 
   // create modal (ฟอร์ม/logic ย้ายไปของกลาง ContentCreateModal แล้ว)
   const [open, setOpen] = useState(false);
   const [iconEditId, setIconEditId] = useState<string | null>(null);   // แม่แบบที่กำลังเปลี่ยนไอคอน
 
-  const pushToast = useCallback((type: Toast["type"], message: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((p) => [...p, { id, type, message }]);
-    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
-  }, []);
+  const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   // SWR (stale-while-revalidate) — กลับเข้าหน้านี้ใหม่เห็นทันที + ใช้ brands/campaigns ร่วมกับหน้าอื่น
   const itemsSWR = useSWRLite("creative:content", () => listContent());
@@ -336,9 +332,6 @@ export function ContentPageView() {
           onClose={() => setBulkAi(false)} onRun={(extra, overwrite) => bulkAiWrite(extra, overwrite)} />
       )}
 
-      <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
-        {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}
-      </div>
     </StandaloneShell>
   );
 }
@@ -400,7 +393,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   contentId: string; brands: BrandOption[];
   onClose: () => void; onChanged: () => void; onDelete?: (c: ContentItem) => void;
   onDeleted?: (contentId: string) => void;   // ลบสำเร็จแล้ว → ให้ผู้เรียกจัดการต่อ (เช่น เอาการ์ดออกจากกระดาน)
-  pushToast: (type: Toast["type"], m: string) => void;
+  pushToast: (type: ToastVariant, m: string) => void;
 }) {
   const t = useT();
   const { platforms } = useCreativeOptions();
@@ -511,10 +504,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const cLabelOf = (k: string) => CONTENT_SECTIONS.find((s) => s.key === k)?.label ?? k;
   const coll = (k: string) => isCollapsed(dth, k);
   const toggleColl = (k: string) => dthUpdate({ collapsed: toggleCollapsedList(dth, k) });
-  const tmBadge = (s: string) => s === "approved" ? { label: t("อนุมัติ", "OK"), cls: "bg-emerald-500" }
-    : s === "submitted" ? { label: t("รออนุมัติ", "Pending"), cls: "bg-amber-500" }
-    : s === "revision_requested" ? { label: t("ตีกลับ", "Revise"), cls: "bg-orange-500" }
-    : { label: t("ร่าง", "Draft"), cls: "bg-slate-400" };
+  const tmBadge = (s: string) => ({ label: subStatusLabel(s), cls: subStatusDot(s) });   // ป้ายสถานะงานย่อยบนรูป — ของกลาง
   const bodyRef = useRef<HTMLDivElement>(null);
   const leftPctRef = useRef(38);
   const [leftPct, setLeftPctState] = useState(38);
@@ -1436,7 +1426,7 @@ function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLi
   onAddLink: (url: string) => Promise<void>;
   onAddDriveVideo: (link: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  pushToast: (type: Toast["type"], m: string) => void;
+  pushToast: (type: ToastVariant, m: string) => void;
 }) {
   const t = useT();
   const [linkUrl, setLinkUrl] = useState("");
@@ -1529,7 +1519,7 @@ function LinkPreviewCard({ att, onDelete }: { att: ContentAttachment; onDelete: 
 }
 
 // ช่องกรอก hashtag พร้อม typeahead (กรองจากคลัง + เพิ่มใหม่เข้าคลังได้)
-function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value: string | null; onChange: (v: string) => void; brandId: string | null; platform: string; pushToast: (type: Toast["type"], m: string) => void }) {
+function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value: string | null; onChange: (v: string) => void; brandId: string | null; platform: string; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const [tags, setTags] = useState<Hashtag[]>([]);
   const [focus, setFocus] = useState(false);
@@ -1684,7 +1674,7 @@ export function postFormatLabel(platform: string, key: string | undefined, t: (t
 }
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPullFrom, open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, connInfo, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast, pageName, avatarUrl }: { open?: boolean; pageName?: string | null; avatarUrl?: string | null; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; connInfo?: { connected: boolean; label: string; href: string }; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: Toast["type"], m: string) => void;
+function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPullFrom, open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, connInfo, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast, pageName, avatarUrl }: { open?: boolean; pageName?: string | null; avatarUrl?: string | null; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; connInfo?: { connected: boolean; label: string; href: string }; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: ToastVariant, m: string) => void;
   paths?: PathItem[]; onAddPath?: (path: string) => Promise<void>;   // 📂 path ไฟล์ของโพสต์ (คัดลอกจากหัวการ์ด)
   fallbackImages?: string[];                                          // รูปที่จะลงเมื่อยังไม่ได้เลือกรูปให้แพลตฟอร์มนี้ (= รูปแนบของโพสต์ เหมือนตอนกดโพสต์จริง)
   onPullFrom?: () => void;                                            // ⇈ ดึงแคปชั่นจากแพลตฟอร์มอื่น
@@ -2107,7 +2097,7 @@ function RowMenu({ items, label, up = false }: { items: { label: string; onClick
 
 // ตั้งค่าต่อแพลตฟอร์ม (ค่ากลาง): แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์ / โน้ตบอกคนทำงาน
 // โมดอลจัดการ "คลังแฮชแท็ก" — ดู/เพิ่ม/แก้ (กดที่ข้อความ)/ลบ/ค้นหา · แฮชแท็กในคลังจะขึ้น typeahead ในช่อง #hashtag
-function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string | null; onClose: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string | null; onClose: () => void; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const [tags, setTags] = useState<Hashtag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2181,7 +2171,7 @@ function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string 
 }
 
 // โมดอลตั้ง "เวลาแนะนำการโพสต์" ต่อวัน (จันทร์-อาทิตย์) — เก็บค่ากลาง ใช้เตือนตอนเลือกวันโพสต์
-function RecommendedTimesModal({ initial, onClose, onSaved, pushToast }: { initial: RecommendedTimes; onClose: () => void; onSaved: (v: RecommendedTimes) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function RecommendedTimesModal({ initial, onClose, onSaved, pushToast }: { initial: RecommendedTimes; onClose: () => void; onSaved: (v: RecommendedTimes) => void; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const [times, setTimes] = useState<RecommendedTimes>(() => { const o: RecommendedTimes = {}; for (const [k, v] of Object.entries(initial)) o[k] = v.map((it) => ({ ...it })); return o; });
   const [busy, setBusy] = useState(false);
@@ -2240,7 +2230,7 @@ function RecommendedTimesModal({ initial, onClose, onSaved, pushToast }: { initi
   );
 }
 
-function PlatformSettingsModal({ platforms, templates, settings, onClose, onSaved, pushToast }: { platforms: { value: string; label: string }[]; templates: CaptionTemplate[]; settings: PlatformSettings; onClose: () => void; onSaved: (v: PlatformSettings) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function PlatformSettingsModal({ platforms, templates, settings, onClose, onSaved, pushToast }: { platforms: { value: string; label: string }[]; templates: CaptionTemplate[]; settings: PlatformSettings; onClose: () => void; onSaved: (v: PlatformSettings) => void; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const [val, setVal] = useState<PlatformSettings>(settings);
   const [saving, setSaving] = useState(false);
@@ -2288,7 +2278,7 @@ function PlatformSettingsModal({ platforms, templates, settings, onClose, onSave
 }
 
 // ตั้งค่าแม่แบบแคปชั่น + ช่องทางร้าน (ต่อแบรนด์ หรือ ค่ากลาง)
-function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushToast }: { brandId: string | null; brandLabel: string | null; onClose: () => void; onSaved: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushToast }: { brandId: string | null; brandLabel: string | null; onClose: () => void; onSaved: () => void; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
   const [channels, setChannels] = useState<ShopChannel[]>([]);
@@ -2371,7 +2361,7 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
 }
 
 // ตั้งค่าพรอมต์ตั้งต้น + แฮชแท็กเริ่มต้น (ต่อแบรนด์ + ต่อแพลตฟอร์ม + ตัวรวม)
-function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClose, onSaved, pushToast }: { cfg: CaptionConfig; brandId: string | null; brandLabel: string | null; platforms: { value: string; label: string }[]; onClose: () => void; onSaved: (v: CaptionConfig) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClose, onSaved, pushToast }: { cfg: CaptionConfig; brandId: string | null; brandLabel: string | null; platforms: { value: string; label: string }[]; onClose: () => void; onSaved: (v: CaptionConfig) => void; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const [val, setVal] = useState<CaptionConfig>(cfg);
   const [saving, setSaving] = useState(false);

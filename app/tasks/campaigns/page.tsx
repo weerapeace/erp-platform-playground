@@ -21,6 +21,7 @@ import {
 } from "../data";
 import { listOptions, createOption, type Option } from "../use-options";
 import { askText } from "@/components/modal/ask-dialog";
+import { usePushToast } from "@/components/toast";
 
 // drawer แคมเปญ (มีตัวพิมพ์ข้อความ + drawer งาน) โหลดเมื่อเปิดดูจริง
 const CampaignDrawer = dynamic(() => import("./campaign-drawer").then((m) => m.CampaignDrawer), { ssr: false });
@@ -29,7 +30,6 @@ const NO_CAT = "__none__";   // ตัวกรอง/กลุ่ม "ยัง
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
-type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
 export default function CampaignsPage() {
   const router = useRouter();
@@ -37,7 +37,6 @@ export default function CampaignsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<Campaign | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [catFilter, setCatFilter] = useState<string>("");      // "" = ทุกหมวด · NO_CAT = ยังไม่จัดหมวด · id = หมวดนั้น
   // โหมด "🗂 จัดหมวด": ติ๊กเลือกหลายแคมเปญ → ย้ายเข้าหมวดทีเดียว · หรือเปลี่ยนหมวดรายใบจาก dropdown บนการ์ด
   const [manage, setManage] = useState(false);
@@ -46,11 +45,7 @@ export default function CampaignsPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [movingId, setMovingId] = useState<string | null>(null);
 
-  const pushToast = useCallback((type: Toast["type"], message: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((p) => [...p, { id, type, message }]);
-    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
-  }, []);
+  const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   // ใช้ SWR คีย์เดียวกับหน้างาน → สลับ /tasks ↔ แคมเปญ ใช้ข้อมูลซ้ำ เห็นทันที
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
@@ -246,9 +241,6 @@ export default function CampaignsPage() {
 
       {detailId && <CampaignDrawer campaignId={detailId} onClose={() => setDetailId(null)} onChanged={load} pushToast={pushToast} />}
 
-      <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
-        {toasts.map((t) => <div key={t.id} className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}><span>{t.type === "success" ? "✓" : t.type === "error" ? "⚠️" : "ℹ️"}</span>{t.message}</div>)}
-      </div>
     </StandaloneShell>
   );
 }

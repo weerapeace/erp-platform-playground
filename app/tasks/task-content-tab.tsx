@@ -13,6 +13,7 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions, platformLabel } from "./use-options";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { type PushToast } from "@/components/toast";
 import {
   CONTENT_STATUS_META, POST_TYPES, contentStatusLabel,
   listContent, createContent, updateContent,
@@ -20,7 +21,7 @@ import {
 } from "./data";
 
 const ContentDrawer = dynamic(() => import("./content/content").then((m) => m.ContentDrawer), { ssr: false });
-type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 
 function StatusChip({ status }: { status: ContentStatus }) {
   useT();   // subscribe ภาษา

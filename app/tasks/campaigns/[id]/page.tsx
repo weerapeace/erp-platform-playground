@@ -38,6 +38,7 @@ import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
 import { getLang } from "@/lib/lang";
 import { computeGrid, indexToCol } from "@/lib/canvas-formula";
 import { TableDrawer } from "../../table-drawer";
+import { usePushToast, type ToastVariant } from "@/components/toast";
 
 // แปลข้อความบน "การ์ด" (ฟังก์ชัน module-level ไม่มี hook) — อ่านภาษาปัจจุบันตรง ๆ · การ์ดจะ re-sync ตอนสลับภาษา
 const tt = (th: string, en: string) => (getLang() === "en" ? en : th);
@@ -72,7 +73,6 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 // ป๊อปอัปใบงานออกแบบ = ของกลางตัวเดียวกับที่ Design Dashboard ใช้ (ดู/แก้/เปลี่ยนสถานะ/สร้างใหม่) — โหลดเฉพาะตอนใช้
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
 
-type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type ParentSkuVal = { id: string; code: string; name: string; image_url: string | null };
 // การ์ด "SKU การตลาด" = รุ่น (Parent SKU) + ป้ายการตลาด + ป้ายเสริม + สีที่เหลือ — ข้อมูลจากหน้า /marketing/skus (API /api/marketing/skus)
 type MktSkuVal = { id: string; code: string; name: string; image_url: string | null; label: string | null; label_color: string | null; badges: string[]; sku_active: number; sku_total: number; note: string | null };
@@ -505,9 +505,8 @@ export default function CampaignCanvasPage() {
   const { platforms: platformOpts } = useCreativeOptions();
   const { user, can } = useAuth();
   const [fs, setFs] = useState(false); // เต็มจอ
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const sketchRef = useRef<CanvasSketchControls | null>(null);
-  const pushToast = useCallback((type: Toast["type"], message: string) => { const tid = Date.now() + Math.random(); setToasts((q) => [...q, { id: tid, type, message }]); setTimeout(() => setToasts((q) => q.filter((t) => t.id !== tid)), 3500); }, []);
+  const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   const load = useCallback(async () => { try { setDetail(await getCampaign(id)); } catch (e) { setErr((e as Error).message); } }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -1137,15 +1136,12 @@ export default function CampaignCanvasPage() {
 
       {drawerOpen && <CampaignDrawer campaignId={id} onClose={() => setDrawerOpen(false)} onChanged={load} pushToast={pushToast} />}
 
-      <div className="fixed bottom-6 right-6 z-[80] flex flex-col gap-2">
-        {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}
-      </div>
     </StandaloneShell>
   );
 }
 
 // Drawer รูปจากคลัง (snapshot บนการ์ด): รูปใหญ่ + ข้อมูล + คัดลอก location / เปิดลิงก์
-function AssetCardDrawer({ data, onClose, pushToast }: { data: Record<string, unknown>; onClose: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+function AssetCardDrawer({ data, onClose, pushToast }: { data: Record<string, unknown>; onClose: () => void; pushToast: (type: ToastVariant, m: string) => void }) {
   const t = useT();
   const title = String(data.title ?? "");
   const url = data.url ? String(data.url) : null;

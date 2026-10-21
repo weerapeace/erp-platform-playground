@@ -20,10 +20,11 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { setEditContext, clearEditContext } from "@/lib/edit-context";
 import type { TaskParentRef, TaskSkuRef } from "./data";
 import { DEFAULT_SKIP_SUBTASKS, DIRECT_TARGETS, isDirectTask, useProductModeCfg, type ProductModeCfg } from "./product-edit-mode";
+import { type PushToast } from "@/components/toast";
 
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
-type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 export type TaskChange = {
   id: string; entity_type: string; entity_id: string; code: string | null; subtask_id: string | null;
   kind: "field" | "image"; field_key: string; old_value: unknown; new_value: unknown; r2_key: string | null; image_url: string | null;

@@ -20,10 +20,11 @@ import { RichTextEditor } from "@/components/rich-text";
 import { CAMPAIGN_STATUS } from "./campaign-status";
 import { DrawerShell } from "@/components/modal";
 import { askText } from "@/components/modal/ask-dialog";
+import type { ToastVariant } from "@/components/toast";
 // ย้ายค่าคงที่ไป ./campaign-status (ไฟล์เล็ก) — re-export ไว้ให้ที่ import เดิมยังใช้ได้
 export { CAMPAIGN_STATUS };
 
-type ToastType = "success" | "error" | "info";
+type ToastType = ToastVariant;   // ชนิดกลาง (components/toast)
 
 export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { campaignId: string; onClose: () => void; onChanged?: () => void; pushToast: (type: ToastType, m: string) => void }) {
   const t = useT();

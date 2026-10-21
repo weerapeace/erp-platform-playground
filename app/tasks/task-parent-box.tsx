@@ -20,8 +20,9 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useProductModeCfg } from "./product-edit-mode";
 import { isTaskDirectPanelOn } from "./direct-edit-panel";
 import type { TaskDetail, TaskParentRef } from "./data";
+import { type PushToast } from "@/components/toast";
 
-type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 
 export function TaskParentBox({ task, canEdit, onSetParents, onOpen, pushToast }: {
   task: TaskDetail;
