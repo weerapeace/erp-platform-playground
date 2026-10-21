@@ -28,6 +28,7 @@ import { WebsiteCouponsPanel } from "@/components/website-coupons-panel";
 import { WebsiteMembersPanel } from "@/components/website-members-panel";
 import { WebsiteReviewsPanel } from "@/components/website-reviews-panel";
 import { WebsiteStatsPanel } from "@/components/website-stats-panel";
+import { WebsiteReturnsPanel } from "@/components/website-returns-panel";
 import { WebsitePromotionsPanel } from "@/components/website-promotions-panel";
 import { WebsiteTranslationCenter } from "@/components/website-translation-center";
 import { WebsiteOpenToggle } from "@/components/website-open-toggle";
@@ -50,7 +51,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  type TabKey = "listings" | "categories" | "collections" | "newdrops" | "sizeguides" | "fieldmap" | "design" | "layout" | "pages" | "info" | "shipping" | "i18n" | "orders" | "coupons" | "members" | "reviews" | "promotions" | "stats";
+  type TabKey = "listings" | "categories" | "collections" | "newdrops" | "sizeguides" | "fieldmap" | "design" | "layout" | "pages" | "info" | "shipping" | "i18n" | "orders" | "coupons" | "members" | "reviews" | "promotions" | "stats" | "returns";
   const [tab, setTab] = useState<TabKey>("listings");
   // ⚠️ สลับแท็บตอนแท็บเดิมยังไม่บันทึก → ถามก่อน (เดิมของที่แก้หายเงียบ)
   const guard = useUnsavedGuardHost();
@@ -64,7 +65,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   // ลิงก์จากที่อื่น (เช่น ป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") เปิดแท็บที่ระบุ ?tab= · ⚠️ ไม่ใช้ useSearchParams (อยู่ใน PlaygroundShell)
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    const ok = ["listings", "categories", "collections", "fieldmap", "design", "layout", "pages", "info", "shipping", "i18n", "orders", "coupons", "members", "reviews", "promotions", "stats"] as const;
+    const ok = ["listings", "categories", "collections", "fieldmap", "design", "layout", "pages", "info", "shipping", "i18n", "orders", "coupons", "members", "reviews", "promotions", "stats", "returns"] as const;
     if (t && (ok as readonly string[]).includes(t)) setTab(t as (typeof ok)[number]);
   }, []);
 
@@ -179,6 +180,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               { k: "shipping", l: "🚚 การจัดส่ง" },
               { k: "i18n", l: "🌐 แปลภาษา" },
               { k: "orders", l: "🧾 ออเดอร์" },
+              { k: "returns", l: "↩️ คืน/เปลี่ยน" },
               { k: "coupons", l: "🎟️ คูปอง" },
               { k: "promotions", l: "🏷 โปรโมชัน" },
               { k: "members", l: "👥 สมาชิก" },
@@ -262,6 +264,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {/* ⭐ ตรวจ/ตอบรีวิวสินค้า (ตั้งค่าที่แท็บข้อมูลร้าน กลุ่ม ⭐) */}
         {tab === "reviews" && shop && <WebsiteReviewsPanel shopSlug={shop.slug} shopId={shop.id} />}
         {tab === "stats" && shop && <WebsiteStatsPanel shopId={shop.id} />}
+        {tab === "returns" && shop && <WebsiteReturnsPanel shopSlug={shop.slug} />}
         </UnsavedGuardProvider>
       </div>
     </PlaygroundShell>

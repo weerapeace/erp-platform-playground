@@ -3,7 +3,7 @@
  * POST { orderId } (products.edit) → ออกเลขที่ใบกำกับ ครั้งเดียวต่อออเดอร์ (ออกแล้ว = คืนเลขเดิม) + audit
  *   เลขชุดของเว็บต่อบริษัทต่อเดือน: <รหัสบริษัท>-TI<ปปดด>-00001 (แยกจากใบสั่งขาย กันเลขชน · unique index ใน DB)
  * GET ?id=<orderId> (products.view) → { doc } ข้อมูลพร้อมพิมพ์ (lib/website-tax-invoice-print) — ยังไม่ออกเลข = 409
- * บริษัทบนหัวกระดาษ: ข้อมูลร้าน › 🧾 รหัสบริษัท (tax_invoice_company) · ว่าง = บริษัทหลัก (companies.is_default)
+ * บริษัทบนหัวกระดาษ: ข้อมูลร้าน › 🧾 รหัสบริษัท (tax_invoice_company) — ต้องตั้งก่อนออกใบ (ไม่เดาบริษัทหลักให้ · ใบกำกับผิดบริษัท = ปัญหาภาษี)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -21,18 +21,15 @@ type Admin = ReturnType<typeof supabaseAdmin>;
 type CompanyRow = Record<string, unknown> & { id: string; company_code: string | null; name_th: string | null; name_en: string | null; phone: string | null; tax_id: string | null; tax_branch: string | null; vat_registered: boolean | null };
 const UUID = /^[0-9a-f-]{36}$/i;
 
-/** บริษัทของใบกำกับ: เคยออกแล้วใช้บริษัทเดิม · ไม่งั้นรหัสที่ตั้งในข้อมูลร้าน · ไม่มี = บริษัทหลัก */
+/** บริษัทของใบกำกับ: เคยออกแล้วใช้บริษัทเดิม · ไม่งั้นรหัสที่ตั้งในข้อมูลร้าน · ไม่ได้ตั้ง/รหัสผิด = null (ไม่เดาให้) */
 async function companyFor(sb: Admin, shopId: string, fixedId: string | null): Promise<CompanyRow | null> {
   if (fixedId) {
     const { data } = await sb.from("companies").select("*").eq("id", fixedId).maybeSingle();
     if (data) return data as CompanyRow;
   }
   const code = String((await readSiteInfo(sb, shopId)).tax_invoice_company ?? "").trim();
-  if (code) {
-    const { data } = await sb.from("companies").select("*").eq("company_code", code).maybeSingle();
-    if (data) return data as CompanyRow;
-  }
-  const { data } = await sb.from("companies").select("*").eq("is_default", true).maybeSingle();
+  if (!code) return null;
+  const { data } = await sb.from("companies").select("*").ilike("company_code", code).maybeSingle();
   return (data as CompanyRow | null) ?? null;
 }
 
@@ -58,7 +55,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!order.tax_invoice) return NextResponse.json({ error: "ออเดอร์นี้ลูกค้าไม่ได้ขอใบกำกับภาษี" }, { status: 400 });
   if (order.status === "cancelled") return NextResponse.json({ error: "ออเดอร์ยกเลิกแล้ว — ออกใบกำกับไม่ได้" }, { status: 409 });
   const company = await companyFor(sb, order.shop_id, null);
-  if (!company) return NextResponse.json({ error: "ยังไม่มีข้อมูลบริษัท — ตั้งที่ ERP › ตั้งค่า › บริษัท ก่อน" }, { status: 409 });
+  if (!company) return NextResponse.json({ error: "ยังไม่ได้เลือกบริษัทที่ออกใบกำกับ — ตั้ง “รหัสบริษัท” ที่แท็บ 🏪 ข้อมูลร้าน › ออเดอร์ ก่อน (รหัสดูได้ที่ ERP › ตั้งค่า › บริษัท)" }, { status: 409 });
 
   const prefix = prefixOf(company.company_code);
   for (let attempt = 0; attempt < 8; attempt++) {

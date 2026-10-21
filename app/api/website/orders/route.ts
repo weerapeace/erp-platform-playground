@@ -228,6 +228,8 @@ async function applyOne(sb: ReturnType<typeof supabaseAdmin>, user: Actor, body:
   }
   if (!Object.keys(patch).length) return { status: 200, json: { ok: true, unchanged: true } };
 
+  // ↩️ เปลี่ยนเป็น "สำเร็จ" = วันที่ลูกค้าได้รับของ (นับวันขอคืน/เปลี่ยน · lib/website-returns returnDeadline)
+  if (patch.status === "completed" && b.status !== "completed") patch.completed_at = new Date().toISOString();
   const { error } = await sb.from("store_orders").update(patch).eq("id", b.id);
   if (error) return { status: 500, json: { error: "บันทึกไม่สำเร็จ" } };
 

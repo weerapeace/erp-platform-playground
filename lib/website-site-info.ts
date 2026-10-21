@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "redirects";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "returns" | "redirects";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -46,6 +46,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "reviews", label: "⭐ รีวิวสินค้า", hint: "ลูกค้าให้ดาว + เขียน + แนบรูป ที่หน้าสินค้า · ทุกรีวิวต้องผ่านการตรวจในแท็บ ⭐ รีวิว ก่อนขึ้นเว็บ (เว้นแต่เปิดอนุมัติอัตโนมัติ) · ดาวเฉลี่ยขึ้นในผลค้นหา Google ด้วย" },
   { key: "preorder", label: "📦 สั่งจอง (พรีออเดอร์) + มัดจำ", hint: "สินค้าที่ตั้งสถานะสต็อก “พรีออเดอร์” ในแท็บสินค้าบนเว็บ · เปิดมัดจำแล้ว ออเดอร์ที่มีของพรีออเดอร์ต้องโอนพร้อมเพย์ (ไม่มีเก็บปลายทาง) จ่ายมัดจำก่อน ที่เหลือจ่ายก่อนจัดส่ง · ระบบตรวจสลิปตามยอดที่ต้องจ่ายแต่ละรอบ" },
   { key: "referral", label: "🎁 ชวนเพื่อน (โค้ดแนะนำ)", hint: "สมาชิกทุกคนได้โค้ดชวนเพื่อนของตัวเอง (หน้าบัญชี) · เพื่อนใช้โค้ดตอนสั่งครั้งแรก = ได้ส่วนลด · ออเดอร์ของเพื่อนสำเร็จ = คนชวนได้แต้ม (ต้องเปิดระบบแต้ม) · 1 เบอร์ใช้โค้ดชวนเพื่อนได้ครั้งเดียว ใช้โค้ดตัวเองไม่ได้" },
+  { key: "returns", label: "↩️ ขอคืน/เปลี่ยนสินค้า", hint: "ลูกค้ากด “ขอคืน/เปลี่ยนสินค้า” จากหน้าตามออเดอร์ (ออเดอร์ที่ส่งแล้ว/สำเร็จ ภายในกี่วันหลังได้รับของ) เลือกชิ้น + เหตุผล + แนบรูป → ร้านตอบในแท็บ ↩️ คืน/เปลี่ยน · ระบบไม่คืนเงิน/ไม่ตัดสต็อกให้เอง" },
   { key: "redirects", label: "🔀 ย้ายลิงก์เก่า (Redirect)", hint: "ลิงก์เก่าที่ลูกค้า/Google ยังเข้ามา (เช่น จากเว็บเดิม หรือสินค้าที่เปลี่ยนชื่อ) → พาไปหน้าใหม่อัตโนมัติ ไม่เจอหน้า 404 · Google ย้ายคะแนนตามไปด้วย (301)" },
   { key: "search", label: "🔍 ค้นหาสินค้า", hint: "ช่องค้นหาบนเว็บพิมพ์ผิดนิดหน่อยก็เจอ · ใส่คำที่หมายถึงสิ่งเดียวกันให้ค้นเจอทั้งคู่ · ด้านล่างมีรายการคำที่ลูกค้าค้นแล้วไม่เจอ (ไว้เติมคำ/เพิ่มสินค้า)" },
 ];
@@ -85,8 +86,8 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "free_shipping_min", label: "ส่งฟรีเมื่อยอดถึง (บาท)", hint: "0 = ไม่มีเงื่อนไขส่งฟรี · ⚠️ ตั้งวิธีส่งที่แท็บ 🚚 การจัดส่ง แล้วใช้ค่าส่งฟรีของแต่ละวิธีแทน", group: "order", type: "number", isPublic: true },
   { key: "pay_cod", label: "รับเก็บเงินปลายทาง (COD)", group: "order", type: "bool", isPublic: true },
   { key: "pay_promptpay", label: "รับโอนพร้อมเพย์", group: "order", type: "bool", isPublic: true },
-  { key: "tax_invoice_enabled", label: "🧾 ให้ลูกค้าขอใบกำกับภาษีเต็มรูปตอนสั่ง", hint: "หน้าชำระเงินมีช่องติ๊กขอใบกำกับ (ชื่อ · เลขผู้เสียภาษี 13 หลัก · สาขา · ที่อยู่) → ออกใบจากรายละเอียดออเดอร์ใน ERP (หัวกระดาษบริษัทที่เลือกด้านล่าง)", group: "order", type: "bool", isPublic: true },
-  { key: "tax_invoice_company", label: "🧾 บริษัทที่ออกใบกำกับ (รหัสบริษัท)", hint: "รหัสบริษัทจากหน้า ERP › ตั้งค่า › บริษัท (เช่น LM) — ว่าง = บริษัทหลัก · ใช้เป็นหัวกระดาษ + ชุดเลขที่ใบกำกับ", group: "order", type: "text", isPublic: false, placeholder: "ว่าง = บริษัทหลัก" },
+  { key: "tax_invoice_enabled", label: "🧾 ให้ลูกค้าขอใบกำกับภาษีเต็มรูปตอนสั่ง", hint: "หน้าชำระเงินมีช่องติ๊กขอใบกำกับ (ชื่อ · เลขผู้เสียภาษี 13 หลัก · สาขา · ที่อยู่) → ออกใบจากรายละเอียดออเดอร์ใน ERP (หัวกระดาษบริษัทตามรหัสด้านล่าง — ต้องตั้งก่อน)", group: "order", type: "bool", isPublic: true },
+  { key: "tax_invoice_company", label: "🧾 บริษัทที่ออกใบกำกับ (รหัสบริษัท)", hint: "รหัสบริษัทจากหน้า ERP › ตั้งค่า › บริษัท (เช่น LOUIS, ISG) — ต้องตั้งก่อนออกใบกำกับ · ใช้เป็นหัวกระดาษ + ชุดเลขที่ใบกำกับ", group: "order", type: "text", isPublic: false, placeholder: "เช่น LOUIS" },
   { key: "promptpay_number", label: "เลขพร้อมเพย์", hint: "เบอร์โทรหรือเลขบัตรประชาชน/นิติบุคคล — ลูกค้าเห็นตอนสั่งซื้อ", group: "order", type: "text", isPublic: true },
   { key: "promptpay_name", label: "ชื่อบัญชีพร้อมเพย์", group: "order", type: "text", isPublic: true },
   // 💳 สลิปโอน (ของกลาง lib/website-payments*.ts · เว็บร้าน SlipUpload) — เจ้าของเลือก A+B 2026-10-20
@@ -171,6 +172,11 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "referral_friend_discount", label: "เพื่อนได้ส่วนลด (บาท)", hint: "ลดจากยอดสินค้าออเดอร์แรกของเพื่อน", group: "referral", type: "number", isPublic: true, placeholder: "100" },
   { key: "referral_min_subtotal", label: "ยอดสินค้าขั้นต่ำของเพื่อน (บาท)", hint: "0 = ไม่มีขั้นต่ำ", group: "referral", type: "number", isPublic: true, placeholder: "0" },
   { key: "referral_reward_points", label: "คนชวนได้แต้ม", hint: "ให้เมื่อออเดอร์ของเพื่อน “สำเร็จ” (ครั้งเดียวต่อออเดอร์) · ต้องเปิดระบบแต้ม", group: "referral", type: "number", isPublic: true, placeholder: "100" },
+
+  // ─── ↩️ ขอคืน/เปลี่ยนสินค้า (lib/website-returns · returnDeadline) ───
+  { key: "returns_enabled", label: "เปิดให้ลูกค้าขอคืน/เปลี่ยนทางเว็บ", group: "returns", type: "bool", isPublic: true },
+  { key: "returns_days", label: "ขอได้ภายในกี่วันหลังได้รับของ", hint: "1–90 · นับจากวันที่ตั้งออเดอร์เป็น “สำเร็จ” (ยังไม่ตั้ง = ประมาณวันสั่ง + 7 วัน)", group: "returns", type: "number", isPublic: true, placeholder: "14" },
+  { key: "returns_note", label: "เงื่อนไขที่ลูกค้าเห็นตอนขอ", hint: "เช่น สินค้าต้องอยู่ในสภาพเดิม มีป้ายครบ · ค่าส่งกลับลูกค้าออก (ยกเว้นสินค้าชำรุด/ส่งผิด)", group: "returns", type: "text", isPublic: true, i18n: true },
 
   // ─── 🔀 ย้ายลิงก์เก่า (เว็บร้าน not-found → redirect 301 · กติกา cleanRedirects) ───
   {
@@ -346,6 +352,9 @@ export interface SiteInfo {
   preorder_note: string;
   tax_invoice_enabled: boolean;
   tax_invoice_company: string;
+  returns_enabled: boolean;
+  returns_days: number;
+  returns_note: string;
   referral_enabled: boolean;
   referral_friend_discount: number;
   referral_min_subtotal: number;
@@ -438,6 +447,9 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   preorder_note: "",
   tax_invoice_enabled: false,
   tax_invoice_company: "",
+  returns_enabled: false,
+  returns_days: 14,
+  returns_note: "",
   referral_enabled: false,
   referral_friend_discount: 100,
   referral_min_subtotal: 0,
@@ -511,7 +523,7 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     const v = m.get(f.key);
     const fb = d[f.key as keyof SiteInfo];
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
-    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") ? Math.max(0, Math.min(f.key.startsWith("referral_") ? 100000 : 10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
+    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") ? Math.max(0, Math.min(f.key.startsWith("referral_") ? 100000 : 10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "returns_days" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
     else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
     else if (f.key === "redirects") out[f.key] = cleanRedirects(v);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);

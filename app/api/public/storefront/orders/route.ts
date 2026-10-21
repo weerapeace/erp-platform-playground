@@ -105,12 +105,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!order) return json({ error: "ไม่พบออเดอร์ — ตรวจเลขที่และเบอร์โทรอีกครั้ง" }, 404);
   // ⭐ ส่งแล้ว/สำเร็จ + ร้านเปิดรีวิว → แนบรหัสลิงก์รีวิว (ปุ่ม "รีวิวสินค้า" ในหน้าตามออเดอร์ · ผ่านด่านเลขออเดอร์+เบอร์มาแล้ว)
   let reviewToken: string | null = null;
-  if ((REVIEWABLE_ORDER_STATUSES as readonly string[]).includes(order.status)) {
+  // ↩️ ส่งแล้ว/สำเร็จ + ร้านเปิดคืน/เปลี่ยน → ลิงก์หน้าขอคืน/เปลี่ยน (ลายเซ็นชุดเดียวกับลิงก์รีวิว · หน้านั้นตรวจกำหนดวันเอง)
+  let returnToken: string | null = null;
+  const delivered = (REVIEWABLE_ORDER_STATUSES as readonly string[]).includes(order.status);
+  const returnable = order.status === "shipped" || order.status === "completed";
+  if (delivered || returnable) {
     const info = await readSiteInfo(ctx.sb, ctx.shop.id);
-    if (info.reviews_enabled) {
+    if ((delivered && info.reviews_enabled) || (returnable && info.returns_enabled)) {
       const { data: row } = await ctx.sb.from("store_orders").select("id").eq("shop_id", ctx.shop.id).eq("order_no", order.orderNo).maybeSingle();
-      reviewToken = row ? issueReviewToken((row as { id: string }).id) : null;
+      const token = row ? issueReviewToken((row as { id: string }).id) : null;
+      if (delivered && info.reviews_enabled) reviewToken = token;
+      if (returnable && info.returns_enabled) returnToken = token;
     }
   }
-  return json({ order, reviewToken });
+  return json({ order, reviewToken, returnToken });
 }

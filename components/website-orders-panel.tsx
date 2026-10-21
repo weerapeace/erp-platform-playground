@@ -524,7 +524,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                         </button>
                       )}
                     </div>
-                    {!open.taxInvoiceNo && <p className="text-[11px] text-indigo-700/80">ออกเลขแล้วแก้ไม่ได้ — ตรวจชื่อ/เลขผู้เสียภาษีก่อน · หัวกระดาษ = บริษัทที่ตั้งในข้อมูลร้าน › 🧾</p>}
+                    {!open.taxInvoiceNo && <p className="text-[11px] text-indigo-700/80">ออกเลขแล้วแก้ไม่ได้ — ตรวจชื่อ/เลขผู้เสียภาษีก่อน · หัวกระดาษ = บริษัทตามรหัสที่ตั้งในข้อมูลร้าน › ออเดอร์ › 🧾 (ต้องตั้งก่อน)</p>}
                   </div>
                 )}
                 {(open.giftWrap || open.giftCardOnly) && (
