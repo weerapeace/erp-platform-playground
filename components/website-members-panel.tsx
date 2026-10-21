@@ -7,6 +7,7 @@
  * ข้อมูล /api/website/members · สมาชิกสมัครเองที่เว็บร้าน (Google/LINE/Facebook/อีเมล) — ERP ดูและระงับได้ แก้ข้อมูลแทนลูกค้าไม่ได้
  * ยังไม่ได้ตั้งค่าการเข้าสู่ระบบที่เว็บร้าน = ยังไม่มีใครสมัครได้ (บอกวิธีเปิดในกล่องว่าง)
  * ⭐ แต้ม/ระดับ: คอลัมน์แต้ม (กด = ประวัติ + ปรับแต้ม) · ปุ่ม "ระดับสมาชิก" มุมขวาบน — components/website-member-points
+ * 👤 กดแถว = ประวัติลูกค้าหน้าเดียว (components/website-customer-profile)
  */
 import { useCallback, useEffect, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
@@ -15,6 +16,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { PROVIDER_LABEL, type MemberProvider } from "@/lib/website-members";
 import { MemberPointsModal, MemberTiersModal } from "@/components/website-member-points";
+import { WebsiteCustomerProfile, type CustomerRef } from "@/components/website-customer-profile";
 import type { MemberTier } from "@/lib/member-points";
 
 type Member = {
@@ -49,6 +51,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
   const [pointsOn, setPointsOn] = useState(false);
   const [pointsOf, setPointsOf] = useState<Member | null>(null);
   const [tierEdit, setTierEdit] = useState(false);
+  const [profile, setProfile] = useState<CustomerRef | null>(null);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/members?shop=${encodeURIComponent(shopSlug)}`)
@@ -96,6 +99,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
         title="👥 สมาชิกเว็บร้าน"
         rows={rows}
         rowKey={(r) => r.id}
+        onRowClick={(r) => setProfile({ customerId: r.id, name: r.name })}
         countUnit="คน"
         actions={
           <button type="button" onClick={() => setTierEdit(true)} className="h-8 px-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs" data-open-tiers>
@@ -162,7 +166,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
                   sortLabel: "แต้ม",
                   cell: (r: Member) => (
                     <span className="flex flex-col items-end gap-0.5">
-                      <button type="button" onClick={() => setPointsOf(r)} className="text-sm tabular-nums text-amber-700 hover:underline" data-points-of={r.id} title="ดูประวัติ / ปรับแต้ม">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setPointsOf(r); }} className="text-sm tabular-nums text-amber-700 hover:underline" data-points-of={r.id} title="ดูประวัติ / ปรับแต้ม">
                         {r.points.toLocaleString("th-TH")}
                       </button>
                       {r.tier && (
@@ -184,7 +188,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
             width: "5rem",
             align: "right",
             cell: (r) => (
-              <button type="button" onClick={() => setAsk(r)} className={`h-7 px-2 text-[11px] rounded-md border ${r.status === "blocked" ? "border-emerald-300 text-emerald-700" : "border-slate-200 text-red-600 hover:border-red-300"}`}>
+              <button type="button" onClick={(e) => { e.stopPropagation(); setAsk(r); }} className={`h-7 px-2 text-[11px] rounded-md border ${r.status === "blocked" ? "border-emerald-300 text-emerald-700" : "border-slate-200 text-red-600 hover:border-red-300"}`}>
                 {r.status === "blocked" ? "เปิดบัญชี" : "ระงับ"}
               </button>
             ),
@@ -193,6 +197,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
         footnote={`ออเดอร์/ยอดซื้อ = ออเดอร์ที่ผูกกับบัญชี (ไม่นับที่ยกเลิก) · สมาชิกแก้ข้อมูลตัวเองที่หน้าเว็บ ‘บัญชีของฉัน’${showPoints ? " · ⭐ กดตัวเลขแต้มเพื่อดูประวัติ/ปรับแต้ม · ระดับคิดจากยอดซื้อ 12 เดือน" : " · ⭐ เปิดแต้มสะสมที่แท็บ 🏪 ข้อมูลร้าน"}`}
       />
       <MemberPointsModal member={pointsOf} onClose={() => setPointsOf(null)} onChanged={load} />
+      <WebsiteCustomerProfile shopSlug={shopSlug} who={profile} onClose={() => setProfile(null)} />
       <MemberTiersModal open={tierEdit} shopSlug={shopSlug} onClose={() => setTierEdit(false)} onSaved={load} />
       <ConfirmDialog
         open={!!ask}

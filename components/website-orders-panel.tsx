@@ -28,6 +28,8 @@ import { BulkActionBar } from "@/components/bulk-action-bar";
 import { BulkTrackingModal } from "@/components/website-bulk-tracking";
 import { isReadyToPack } from "@/lib/website-fulfillment";
 import { canMove, needsConfirm, type StatusKind } from "@/lib/website-order-status";
+import { WebsiteCustomerProfile, type CustomerRef } from "@/components/website-customer-profile";
+import { sourceLabel } from "@/lib/website-web-stats";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -81,6 +83,8 @@ type Order = {
   shippingMethod?: { id: string; label: string; box: string | null } | null;
   /** ค่าธรรมเนียมเก็บปลายทาง */
   codFee?: number;
+  /** 📈 รอบที่สั่งมาจากไหน (google/facebook/…) — ออเดอร์ก่อนชุด 8 = null */
+  source?: string | null;
 };
 type Messaging = {
   shopName: string;
@@ -107,6 +111,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   const [filter, setFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<CustomerRef | null>(null);
   const [busy, setBusy] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [trackNo, setTrackNo] = useState("");
@@ -449,13 +454,19 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
               </span>
               <span className="text-xs text-slate-500">สั่งเมื่อ {when(open.createdAt)}</span>
               {open.erpSoNumber && <span className="text-xs text-slate-500">ใบสั่งขาย ERP: {open.erpSoNumber}</span>}
+              {open.source && <span className="text-xs text-slate-500">มาจาก {sourceLabel(open.source)}</span>}
               {open.lang === "en" && <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">🌐 ลูกค้าสั่งจากหน้าภาษาอังกฤษ — ตอบเป็นภาษาอังกฤษ</span>}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <section className="rounded-xl border border-slate-200 p-3">
                 <h4 className="text-xs font-semibold text-slate-500 mb-1.5">ผู้รับ / ที่อยู่จัดส่ง</h4>
-                <p className="font-medium text-slate-800">{open.customerName}</p>
+                <p className="font-medium text-slate-800 flex flex-wrap items-center gap-2">
+                  {open.customerName}
+                  <button type="button" onClick={() => setProfile({ phone: open.customerPhone, name: open.customerName })} className="text-xs font-normal text-blue-600 hover:underline" data-open-profile>
+                    👤 ประวัติลูกค้าคนนี้
+                  </button>
+                </p>
                 <p className="text-slate-600">
                   โทร {open.customerPhone}
                   {open.customerEmail ? ` · ${open.customerEmail}` : ""}
@@ -631,6 +642,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
           </div>
         )}
       </ERPModal>
+      <WebsiteCustomerProfile shopSlug={shopSlug} who={profile} onClose={() => setProfile(null)} />
     </div>
   );
 }
