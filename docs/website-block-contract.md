@@ -159,6 +159,11 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ป้าย: เปิด = ตามที่ร้านตั้ง · ปิด = ไม่มีป้าย (สินค้าหมดขึ้นเสมอ) · ปุ่มตะกร้า/ดูด่วน: เปิด = แบบปุ่มของร้าน (ร้านปิดไว้ = โผล่ตอนชี้ / ปุ่มตามุมรูป)
 - แบบรูปนำ (`PRODUCT_TILE_LAYOUTS` = mosaic/lookbook/spotlight) ไม่มีป้าย/สต๊อก/หมวด/จุดสี/ปุ่ม → สวิตช์พวกนี้ `showIf` เฉพาะเมื่อคอมหรือมือถือเป็นการ์ดเต็ม (`CARD_LAYOUTS`) · เพิ่มรูปแบบใหม่ต้องใส่ลิสต์ใดลิสต์หนึ่ง (มี test กัน)
 
+## 🗂 แท็บตามรุ่นสินค้า (Section ตารางสินค้า · รูปแบบ "แท็บ") — 2026-10-21
+- ERP `lib/website-schema.ts` (โชว์เมื่อคอม/มือถือเป็น "แท็บ" · `TABS_LAYOUT`): `tabBy` cat (เดิม) | parent · `tabParents` (รหัสรุ่น สูงสุด 12 · ว่าง = รุ่นของสินค้าใน Section) · `tabStyle` both | img | txt · `tabRest` (ต่อท้าย SKU รุ่นอื่น) · `tabRestSep` (คำคั่น "รุ่นอื่น"/"More styles") · `tabBody` grid (เดิม) | carousel — ค่าเริ่มทุกช่อง = หน้าตาเดิม
+- เว็บร้าน `src/lib/product-tabs.ts` (`parentTabs` · `trimCommonWords` ตัดคำนำหน้าที่ทุกแท็บมีเหมือนกัน) → `ProductsTabs` (แท็บรูป/ชื่อ · ตาราง/เลื่อนข้าง) · `ProductsCarousel` รับ `sepAt/sepLabel` · CSS `.ptab-*` `.ptabs-sep` `.pc-sep`
+- กดแท็บรุ่น: Section "เลือก SKU เอง" = เฉพาะสีที่เลือก · แหล่งอื่น/รุ่นที่ไม่ได้เลือกสีไว้ = ทุกสีของรุ่น · ต่อท้าย = การ์ด SKU อื่นใน Section
+
 ## 🎞️ สไลด์โชว์ (slideshow)
 - ช่องใหม่ทุกช่องค่าเริ่ม = หน้าตาเดิม: `shape` (height/21:9/16:9/3:2/1:1/4:5/full · ปุ่มรูปย่อ `ss-*`) · `shapeMobile` (same + 3:4) · `width` (full/contained) · `transition` (fade/slide/zoom/peek) · `arrows` (always/hover/none) · `indicator` (dots/lines/number/progress/none) · `navColor` · `titleSize` · `textColor` · รายสไลด์ `textPos` (auto + 9 จุด `pos-*` ของกลาง) · `overlayStyle` (solid/gradient) · `wholeLink`
 - กรอบ crop ของชิ้นสไลด์ = `cropRatio: "shape"` ของ Section แม่ · ค่าไม่ใช่สัดส่วน (height/full) → ใช้ `cropBox` "16:7" (ของกลาง CropField: ค่า Section ไม่ใช่ N:N + มี cropBox = ใช้ cropBox)

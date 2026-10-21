@@ -376,3 +376,34 @@ describe("🚶 รันเวย์ลุค (2026-10-21)", () => {
     expect(one).toMatch(/อย่างน้อย 2 ลุค/);
   });
 });
+
+describe("🗂 ตารางสินค้า › แท็บตามรุ่นสินค้า (Parent SKU)", () => {
+  const roar = { id: "p-roar", type: "products", source: "skus", skus: ["ROAR01:sku-0cfd0cfd", "ROAR02:sku-3f45d491"], layout: "tabs" };
+  it("Section แท็บเดิม (ไม่มี tabBy) = แท็บตามหมวด หน้าตาเดิม", () => {
+    const [n] = normalizeBlocks([{ ...roar, tabCats: ["bags"] }]) as unknown as Record<string, unknown>[];
+    expect(n.tabBy).toBe("cat");
+    expect(n.tabCats).toEqual(["bags"]);
+    expect(n.tabBody).toBe("grid");
+    expect(n.tabRest).toBe(false);
+    expect(n.tabStyle).toBe("both");
+  });
+  it("ค่าที่ตั้ง: รุ่นที่เป็นแท็บ (สูงสุด 12) · ค่าแปลก ๆ = ค่าเริ่ม", () => {
+    const codes = Array.from({ length: 15 }, (_, i) => `ROAR${String(i + 1).padStart(2, "0")}`);
+    const [n] = normalizeBlocks([{ ...roar, tabBy: "parent", tabParents: codes, tabStyle: "huge", tabBody: "carousel", tabRest: true }]) as unknown as Record<string, unknown>[];
+    expect(n.tabBy).toBe("parent");
+    expect((n.tabParents as string[]).length).toBe(12);
+    expect(n.tabStyle).toBe("both");
+    expect(n.tabBody).toBe("carousel");
+    expect(n.tabRest).toBe(true);
+    expect(n.tabRestSep).toBe(true);
+  });
+  it("ช่องตั้งค่าแท็บรุ่นโชว์เฉพาะตอนเลือกแบ่งตามรุ่น (คอมหรือมือถือเป็นแท็บ)", () => {
+    const fields = SECTION_SCHEMAS.products.fields;
+    const show = (key: string, b: Record<string, unknown>) => matchShowIf(fields.find((f) => f.key === key)!, b);
+    expect(show("tabParents", { layout: "tabs", tabBy: "parent" })).toBe(true);
+    expect(show("tabParents", { layout: "tabs", tabBy: "cat" })).toBe(false);
+    expect(show("tabCats", { layout: "grid", layoutMobile: "tabs", tabBy: "cat" })).toBe(true);
+    expect(show("tabRestSep", { layout: "tabs", tabBy: "parent", tabRest: false })).toBe(false);
+    expect(show("tabBody", { layout: "carousel", layoutMobile: "same" })).toBe(false);
+  });
+});

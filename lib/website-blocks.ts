@@ -297,6 +297,18 @@ export interface ProductsBlock extends BlockBase {
   /** แท็บตามหมวด: หมวดที่เป็นแท็บ (ว่าง = ทุกหมวดที่มีสินค้า) + มีแท็บ "ทั้งหมด" ไหม */
   tabCats?: string[];
   tabAll?: boolean;
+  /** 🗂 แบ่งแท็บตาม หมวด (เดิม) / รุ่นสินค้า (Parent SKU) */
+  tabBy?: "cat" | "parent";
+  /** รุ่นที่เป็นแท็บ (รหัสรุ่น · ว่าง = รุ่นของสินค้าใน Section) */
+  tabParents?: string[];
+  /** หน้าตาแท็บรุ่น: รูป+ชื่อ / รูปอย่างเดียว / ชื่ออย่างเดียว */
+  tabStyle?: "both" | "img" | "txt";
+  /** กดแท็บรุ่นแล้ว ต่อท้ายด้วย SKU รุ่นอื่นใน Section */
+  tabRest?: boolean;
+  /** คั่นด้วยคำว่า "รุ่นอื่น" */
+  tabRestSep?: boolean;
+  /** ใต้แท็บ: ตาราง (เดิม) / เลื่อนข้าง */
+  tabBody?: "grid" | "carousel";
   /** แบนเนอร์ + สินค้า */
   bannerImage?: string | null;
   bannerEyebrow?: string;

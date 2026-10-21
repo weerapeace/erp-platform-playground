@@ -318,9 +318,12 @@ const PRODUCT_LAYOUTS: FieldOption[] = [
   { v: "lookbook", l: "ลุคบุ๊ก รูปใหญ่", sketch: "lookbook", hint: "รูปเต็ม ชื่อ/ราคาบนรูป" },
   { v: "spotlight", l: "สปอตไลต์", sketch: "spotlight", hint: "ตัวกลางใหญ่ เลื่อนทีละตัว" },
   { v: "rank", l: "อันดับขายดี", sketch: "rank", hint: "เลขอันดับ 01–05 ตัวใหญ่" },
-  { v: "tabs", l: "แท็บตามหมวด", sketch: "tabs", hint: "กดแท็บสลับหมวด" },
+  { v: "tabs", l: "แท็บ (หมวด / รุ่น)", sketch: "tabs", hint: "กดแท็บสลับหมวด หรือรุ่นสินค้า" },
   { v: "banner", l: "แบนเนอร์ + สินค้า", sketch: "banner", hint: "รูปแคมเปญ + สินค้าข้างกัน" },
 ];
+
+/** รูปแบบ "แท็บ" ใช้บนคอมหรือมือถือ (ช่องตั้งค่าแท็บโชว์เมื่อแบบใดแบบหนึ่งเป็นแท็บ) */
+const TABS_LAYOUT: ShowIf = { key: "layout", eq: "tabs", orKey: "layoutMobile" };
 
 /** 🛍 ลุคบุ๊กกดซื้อได้ — เว็บร้านวาดที่ src/components/home/LookbookBody.tsx */
 const LOOKBOOK_LAYOUTS: FieldOption[] = [
@@ -2682,8 +2685,54 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         wide: true,
         showIf: { key: "layout", eq: "rank", orKey: "layoutMobile" },
       }),
-      f("tabCats", "หมวดที่เป็นแท็บ", "categories", { group: "layout", default: [], max: 8, wide: true, hint: "ว่าง = ทุกหมวดที่มีสินค้า", showIf: { key: "layout", eq: "tabs", orKey: "layoutMobile" } }),
-      f("tabAll", "มีแท็บ \"ทั้งหมด\" เป็นแท็บแรก", "toggle", { group: "layout", default: true, hint: "ใช้สินค้าตาม \"ดึงสินค้าจาก\"", showIf: { key: "layout", eq: "tabs", orKey: "layoutMobile" } }),
+      // 🗂 แท็บ: แบ่งตามหมวด (เดิม) หรือรุ่นสินค้า (Parent SKU — กดแท็บแล้วโชว์ SKU ของรุ่นนั้น) · เว็บร้าน src/components/home/ProductsTabs.tsx + src/lib/product-tabs.ts
+      f("tabBy", "แบ่งแท็บตาม", "select", {
+        group: "layout",
+        default: "cat",
+        wide: true,
+        options: [
+          { v: "cat", l: "หมวด (แบบเดิม)" },
+          { v: "parent", l: "รุ่นสินค้า (Parent SKU) — กดแท็บแล้วโชว์ SKU ของรุ่นนั้น" },
+        ],
+        showIf: TABS_LAYOUT,
+      }),
+      f("tabCats", "หมวดที่เป็นแท็บ", "categories", { group: "layout", default: [], max: 8, wide: true, hint: "ว่าง = ทุกหมวดที่มีสินค้า", showIf: [TABS_LAYOUT, { key: "tabBy", eq: "cat" }] }),
+      f("tabParents", "รุ่นที่เป็นแท็บ (เรียงตามที่เลือก)", "products", {
+        group: "layout",
+        default: [],
+        max: 12,
+        wide: true,
+        hint: "ว่าง = รุ่นของสินค้าใน Section นี้ (เรียงตามลำดับ) · กดแท็บ = SKU ของรุ่นนั้นที่ Section นี้เลือกไว้ (ไม่ได้เลือกไว้ = ทุกสีของรุ่น)",
+        showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }],
+      }),
+      f("tabStyle", "หน้าตาแท็บ", "select", {
+        group: "layout",
+        default: "both",
+        options: [
+          { v: "both", l: "รูป + ชื่อ" },
+          { v: "img", l: "รูปอย่างเดียว (วงกลม · ชี้ดูชื่อ)" },
+          { v: "txt", l: "ชื่ออย่างเดียว" },
+        ],
+        hint: "ชื่อบนแท็บตัดคำที่ทุกแท็บมีเหมือนกันออกเอง (เช่น ชื่อคอลเลกชัน)",
+        showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }],
+      }),
+      f("tabRest", "ต่อท้ายด้วย SKU รุ่นอื่น", "toggle", {
+        group: "layout",
+        default: false,
+        hint: "กดแท็บรุ่นแล้ว โชว์ SKU ของรุ่นนั้นก่อน ตามด้วย SKU อื่นใน Section นี้",
+        showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }],
+      }),
+      f("tabRestSep", "คั่นด้วยคำว่า \"รุ่นอื่น\"", "toggle", { group: "layout", default: true, showIf: [TABS_LAYOUT, { key: "tabBy", eq: "parent" }, { key: "tabRest", eq: true }] }),
+      f("tabAll", "มีแท็บ \"ทั้งหมด\" เป็นแท็บแรก", "toggle", { group: "layout", default: true, hint: "ใช้สินค้าตาม \"ดึงสินค้าจาก\"", showIf: TABS_LAYOUT }),
+      f("tabBody", "ใต้แท็บโชว์แบบ", "select", {
+        group: "layout",
+        default: "grid",
+        options: [
+          { v: "grid", l: "ตาราง (แบบเดิม)" },
+          { v: "carousel", l: "เลื่อนข้าง" },
+        ],
+        showIf: TABS_LAYOUT,
+      }),
       f("bannerImage", "รูปแบนเนอร์", "image", { group: "layout", default: null, hint: "แนะนำแนวตั้ง 4:5 · ว่าง = ใช้รูปสินค้าตัวแรก", showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),
       f("bannerEyebrow", "คำโปรยบนแบนเนอร์", "text", { group: "layout", default: "คอลเลกชันใหม่", max: 60, showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),
       f("bannerTitle", "หัวข้อบนแบนเนอร์", "text", { group: "layout", default: "", max: 80, showIf: { key: "layout", eq: "banner", orKey: "layoutMobile" } }),
