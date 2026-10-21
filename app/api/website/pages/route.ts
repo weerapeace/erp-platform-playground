@@ -35,7 +35,7 @@ export const revalidate = 0;
  * (about/contact/gallery/oem = หน้าที่เว็บ IG International มีอยู่แล้ว)
  */
 const RESERVED = new Set([
-  "shop", "product", "checkout", "quote", "api", "_next", "cart", "home",
+  "shop", "product", "checkout", "quote", "api", "_next", "cart", "home", "blog", "review", "feeds",
   // contact = หน้าในโค้ดที่ "ยอมให้หน้าเว็บชื่อเดียวกันมาแทน" (ศูนย์ช่วยเหลือ · เหมือน privacy/track) จึงไม่อยู่ในรายการนี้
   "about", "gallery", "oem",
 ]);
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (pageId) {
     const { data: p } = await sb
       .from("store_pages")
-      .select("id, slug, title, status, seo, layout, draft_layout, sort_order, updated_at")
+      .select("id, slug, title, status, page_type, seo, layout, draft_layout, sort_order, updated_at")
       .eq("id", pageId)
       .eq("shop_id", s.id)
       .maybeSingle();
@@ -87,6 +87,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         slug: row.slug,
         title: row.title,
         status: row.status,
+        /** static = หน้าเว็บ · post = 📝 บทความ (อยู่ที่ /blog/<slug>) */
+        pageType: row.page_type === "post" ? "post" : "static",
         seo: cleanPageMeta(row.seo),
         published: normalizeBlocks(row.layout),
         draft: row.draft_layout != null ? normalizeBlocks(row.draft_layout) : null,
@@ -104,7 +106,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // รายการหน้า (ไม่รวมหน้าแรก)
   const { data: pages } = await sb
     .from("store_pages")
-    .select("id, slug, title, status, seo, layout, draft_layout, sort_order, updated_at")
+    .select("id, slug, title, status, page_type, seo, layout, draft_layout, sort_order, updated_at")
     .eq("shop_id", s.id)
     .eq("is_home", false)
     .order("sort_order")
@@ -120,6 +122,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       blocks: Array.isArray(p.layout) && (p.layout as unknown[]).length ? (p.layout as unknown[]).length : Array.isArray(p.draft_layout) ? (p.draft_layout as unknown[]).length : 0,
       hasDraft: p.draft_layout != null,
       help: cleanPageMeta(p.seo).help,
+      pageType: p.page_type === "post" ? "post" : "static",
+      publishAt: cleanPageMeta(p.seo).publishAt,
       sortOrder: Number(p.sort_order ?? 0),
       updatedAt: p.updated_at,
     })),
@@ -135,7 +139,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { shopId?: string; slug?: string; title?: string; template?: string };
+  let body: { shopId?: string; slug?: string; title?: string; template?: string; pageType?: string };
   try {
     body = await request.json();
   } catch {
@@ -199,7 +203,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       shop_id: body.shopId,
       slug,
       title,
-      page_type: "static",
+      // 📝 บทความ (บล็อก /blog/<slug>) ใช้ตัวจัดหน้าเดียวกับหน้าเว็บ · ไม่ขึ้นเมนูอัตโนมัติ
+      page_type: body.pageType === "post" ? "post" : "static",
       status: "draft",
       is_home: false,
       seo: {},

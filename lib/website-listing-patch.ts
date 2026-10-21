@@ -45,6 +45,8 @@ export type ListingPatch = {
   webSizeGuide?: string | null;
   /** 🔗 สินค้าที่เกี่ยวข้องที่เลือกเองรายรุ่น (รหัส Parent SKU · เรียงตามที่เลือก) · [] / null = ใช้กฎกลางของธีม */
   webRelated?: unknown;
+  /** 🔎 SEO รายสินค้า {title, description, title_en, description_en} */
+  webSeo?: unknown;
 };
 
 /** 🔗 รหัสรุ่นของ "สินค้าที่เกี่ยวข้อง" รายรุ่น — ตัวพิมพ์ใหญ่ ไม่ซ้ำ ≤ 12 (ไม่ใช่รหัสของตัวเอง — ผู้เรียกตัดเอง) */
@@ -134,5 +136,21 @@ export function listingPatchToRow(p: ListingPatch): Record<string, unknown> {
     const codes = cleanRelatedCodes(p.webRelated);
     row.web_related = codes.length ? codes : null;
   }
+  if (p.webSeo !== undefined) row.web_seo = cleanListingSeo(p.webSeo);
   return row;
+}
+
+export interface ListingSeo {
+  title: string;
+  description: string;
+  title_en: string;
+  description_en: string;
+}
+
+/** 🔎 SEO รายสินค้า: ตัดช่องว่าง/แท็ก · ชื่อ ≤ 120 · คำอธิบาย ≤ 320 · ว่างทั้งหมด = null (ใช้ชื่อ/คำอธิบายสินค้า) */
+export function cleanListingSeo(raw: unknown): ListingSeo | null {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const s = (v: unknown, max: number) => String(v ?? "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().slice(0, max);
+  const out = { title: s(o.title, 120), description: s(o.description, 320), title_en: s(o.title_en, 120), description_en: s(o.description_en, 320) };
+  return out.title || out.description || out.title_en || out.description_en ? out : null;
 }

@@ -100,6 +100,8 @@ type ShopState = {
   webSizeGuide?: string;
   /** 🔗 สินค้าที่เกี่ยวข้องที่เลือกเองรายรุ่น (รหัสรุ่น เรียงตามที่เลือก) — [] = ใช้กฎกลางของธีม */
   webRelated?: string[];
+  /** 🔎 SEO รายสินค้า (ว่าง = ใช้ชื่อ/คำอธิบายสินค้า) */
+  webSeo?: { title: string; description: string; title_en: string; description_en: string } | null;
   sizeGuides?: { id: string; name: string }[];
   autoSizeGuide?: string | null;
   shopCategories: { key: string; label: string; icon: string }[];
@@ -148,7 +150,7 @@ const STOCKS = STOCK_STATUS_OPTIONS;
 const snapOf = (s: ShopState) =>
   JSON.stringify([
     s.published, s.featured, s.webPrice, s.webName, s.webDescription, s.webImages, s.webSkuImages, s.webDetails, s.webPersonalize, s.webBanners, s.webCardColors, s.webHero,
-    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [], s.webSizeGuide ?? "", s.webRelated ?? [],
+    s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [], s.webSizeGuide ?? "", s.webRelated ?? [], s.webSeo ?? null,
   ]);
 
 const MAX_SKU_IMAGES = 8;
@@ -407,6 +409,7 @@ export function ParentWebListings({
             webVariantOff: s.webVariantOff ?? [],
             webSizeGuide: s.webSizeGuide ?? "",
             webRelated: s.webRelated ?? [],
+            webSeo: s.webSeo ?? null,
           },
         }),
       });
@@ -1013,6 +1016,35 @@ export function ParentWebListings({
             max={12}
             onChange={(codes) => patchShop(s.shopId, { webRelated: codes.filter((c) => c.toUpperCase() !== data.code.toUpperCase()) })}
           />
+        </div>
+
+        {/* 🔎 SEO ของรุ่นนี้ — ชื่อ/คำอธิบายใน Google + ตอนแชร์ลิงก์ · ว่าง = ใช้ชื่อ/คำอธิบายสินค้า */}
+        <div className="rounded-lg border border-slate-200 p-3 space-y-2" data-web-seo>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-medium text-slate-600">🔎 SEO ของรุ่นนี้ (Google · แชร์ลิงก์)</span>
+            <span className="text-[11px] text-slate-400">ว่าง = ใช้ชื่อสินค้า/คำอธิบายบนเว็บตามเดิม · ชื่อไม่เกิน ~60 ตัว · คำอธิบาย ~150 ตัวกำลังดี</span>
+          </div>
+          {(() => {
+            const seo = s.webSeo ?? { title: "", description: "", title_en: "", description_en: "" };
+            const set = (k: keyof typeof seo, v: string) => patchShop(s.shopId, { webSeo: { ...seo, [k]: v } });
+            const cnt = (v: string, max: number) => <span className={`text-[10px] ${v.length > max ? "text-amber-600" : "text-slate-400"}`}>{v.length}/{max}</span>;
+            return (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block text-[11px] text-slate-500">ชื่อใน Google {cnt(seo.title, 60)}
+                  <input value={seo.title} maxLength={120} onChange={(e) => set("title", e.target.value)} placeholder={s.display?.name ?? s.webName} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                </label>
+                <label className="block text-[11px] text-slate-500">ชื่อใน Google (อังกฤษ)
+                  <input value={seo.title_en} maxLength={120} onChange={(e) => set("title_en", e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                </label>
+                <label className="block text-[11px] text-slate-500">คำอธิบายใน Google {cnt(seo.description, 160)}
+                  <textarea value={seo.description} maxLength={320} rows={2} onChange={(e) => set("description", e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                </label>
+                <label className="block text-[11px] text-slate-500">คำอธิบายใน Google (อังกฤษ)
+                  <textarea value={seo.description_en} maxLength={320} rows={2} onChange={(e) => set("description_en", e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                </label>
+              </div>
+            );
+          })()}
         </div>
 
         {/* 📐 ช่องใส่ของ (ขนาดด้านใน) — ของตัวสินค้า ทุกร้านใช้ร่วม · คำนวณว่าใส่ตุ๊กตา/ของอะไรได้ (lib/fit-check) */}

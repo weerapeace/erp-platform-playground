@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "redirects";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -45,6 +45,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "chat", label: "💬 ปุ่มแชทลอย", hint: "ปุ่มกลมมุมจอทุกหน้า (ยกเว้นหน้าชำระเงิน) กดแล้วเลือกทัก LINE / Messenger / โทร · ใช้ลิงก์จากกลุ่ม 📞 ช่องทางติดต่อ — ช่องไหนว่าง ปุ่มนั้นไม่โชว์" },
   { key: "reviews", label: "⭐ รีวิวสินค้า", hint: "ลูกค้าให้ดาว + เขียน + แนบรูป ที่หน้าสินค้า · ทุกรีวิวต้องผ่านการตรวจในแท็บ ⭐ รีวิว ก่อนขึ้นเว็บ (เว้นแต่เปิดอนุมัติอัตโนมัติ) · ดาวเฉลี่ยขึ้นในผลค้นหา Google ด้วย" },
   { key: "preorder", label: "📦 สั่งจอง (พรีออเดอร์) + มัดจำ", hint: "สินค้าที่ตั้งสถานะสต็อก “พรีออเดอร์” ในแท็บสินค้าบนเว็บ · เปิดมัดจำแล้ว ออเดอร์ที่มีของพรีออเดอร์ต้องโอนพร้อมเพย์ (ไม่มีเก็บปลายทาง) จ่ายมัดจำก่อน ที่เหลือจ่ายก่อนจัดส่ง · ระบบตรวจสลิปตามยอดที่ต้องจ่ายแต่ละรอบ" },
+  { key: "redirects", label: "🔀 ย้ายลิงก์เก่า (Redirect)", hint: "ลิงก์เก่าที่ลูกค้า/Google ยังเข้ามา (เช่น จากเว็บเดิม หรือสินค้าที่เปลี่ยนชื่อ) → พาไปหน้าใหม่อัตโนมัติ ไม่เจอหน้า 404 · Google ย้ายคะแนนตามไปด้วย (301)" },
   { key: "search", label: "🔍 ค้นหาสินค้า", hint: "ช่องค้นหาบนเว็บพิมพ์ผิดนิดหน่อยก็เจอ · ใส่คำที่หมายถึงสิ่งเดียวกันให้ค้นเจอทั้งคู่ · ด้านล่างมีรายการคำที่ลูกค้าค้นแล้วไม่เจอ (ไว้เติมคำ/เพิ่มสินค้า)" },
 ];
 
@@ -162,6 +163,17 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "preorder_deposit_pct", label: "มัดจำกี่ % ของยอดออเดอร์", hint: "10–90 · แนะนำ 30–50", group: "preorder", type: "number", isPublic: true, placeholder: "30" },
   { key: "preorder_note", label: "ข้อความถึงลูกค้า (หน้าสินค้า/ชำระเงิน)", hint: "เช่น สินค้าพรีออเดอร์ ผลิตและจัดส่งภายใน 15–30 วัน · ยอดที่เหลือโอนก่อนจัดส่ง", group: "preorder", type: "text", isPublic: true, i18n: true },
 
+  // ─── 🔀 ย้ายลิงก์เก่า (เว็บร้าน not-found → redirect 301 · กติกา cleanRedirects) ───
+  {
+    key: "redirects",
+    label: "รายการลิงก์ที่ย้าย",
+    hint: "บรรทัดละ 1 คู่: ลิงก์เก่า -> ลิงก์ใหม่ เช่น  /products/roar-bag -> /product/roar01  ·  ลิงก์ใหม่ใส่เต็ม https://… ก็ได้ · ใช้กับลิงก์ที่เว็บหาไม่เจอเท่านั้น (หน้าที่มีอยู่จริงไม่ถูกย้าย)",
+    group: "redirects",
+    type: "textarea",
+    isPublic: true,
+    placeholder: "/products/roar-bag -> /product/roar01\n/collections/new -> /new",
+  },
+
   // ─── 🔍 ค้นหาสินค้า (เว็บร้าน src/lib/search.ts) ───
   {
     key: "search_synonyms",
@@ -215,6 +227,23 @@ export function cleanSynonyms(v: unknown): string {
     if (lines.length >= 100) break;
   }
   return lines.join("\n").slice(0, 4000);
+}
+
+/** 🔀 ย้ายลิงก์: บรรทัดละคู่ "/เก่า -> /ใหม่" (รับ → หรือเว้นวรรคด้วย) · เก่าต้องขึ้นต้น / · ใหม่ = /… หรือ https://… · ตัดซ้ำ/วนกลับตัวเอง · สูงสุด 300 คู่ (กติกาเดียวกับเว็บร้าน src/lib/redirects.ts) */
+export function cleanRedirects(v: unknown): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of String(v ?? "").split(/\r?\n/)) {
+    const m = /^\s*(\/\S*)\s*(?:->|→|=>|\s)\s*(\/\S*|https?:\/\/\S+)\s*$/.exec(line);
+    if (!m) continue;
+    const from = m[1].replace(/\/+$/, "") || "/";
+    const to = m[2];
+    if (from === "/" || seen.has(from.toLowerCase()) || from === to.replace(/\/+$/, "")) continue;
+    seen.add(from.toLowerCase());
+    out.push(`${from.slice(0, 300)} -> ${to.slice(0, 500)}`);
+    if (out.length >= 300) break;
+  }
+  return out.join("\n");
 }
 
 export const SITE_INFO_KEYS = SITE_INFO_FIELDS.map((f) => f.key);
@@ -306,6 +335,7 @@ export interface SiteInfo {
   preorder_deposit_enabled: boolean;
   preorder_deposit_pct: number;
   preorder_note: string;
+  redirects: string;
   _i18n?: I18nMeta;
 }
 
@@ -391,6 +421,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   preorder_deposit_enabled: false,
   preorder_deposit_pct: 30,
   preorder_note: "",
+  redirects: "",
 };
 
 const URL_KEYS = new Set([
@@ -461,6 +492,7 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
     else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") ? Math.max(0, Math.min(10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
     else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
+    else if (f.key === "redirects") out[f.key] = cleanRedirects(v);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);
     else if (f.key === "promo_code") out[f.key] = normalizeCouponCode(v);
     else if (f.key in TRACK_ID) out[f.key] = cleanTrackingId(f.key, v);

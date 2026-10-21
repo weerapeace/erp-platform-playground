@@ -29,6 +29,16 @@ export interface PageMeta {
   /** กลุ่มศูนย์ช่วยเหลือ ("" = หน้าธรรมดา) */
   help: string;
   help_en: string;
+  /** ⏰ เผยแพร่อัตโนมัติเมื่อถึงเวลา (ISO · "" = ทันทีที่กดเผยแพร่) — ก่อนเวลา เว็บซ่อนหน้านี้ (พรีวิวยังเห็น) */
+  publishAt: string;
+  /** 🎯 หน้า Landing: ซ่อนหัวเว็บ/ท้ายเว็บ (หน้าแคมเปญ/โฆษณา) */
+  bare: boolean;
+  /** 📝 บทความ (page_type post): รูปปก r2 key · สรุปสั้น · แท็ก · ผู้เขียน */
+  cover: string;
+  excerpt: string;
+  excerpt_en: string;
+  tags: string[];
+  author: string;
 }
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -44,7 +54,22 @@ export function cleanPageMeta(raw: unknown): PageMeta {
     name_en: str(o.name_en, 120),
     help: str(o.help, 40),
     help_en: str(o.help_en, 40),
+    publishAt: (() => {
+      const v = str(o.publishAt, 40);
+      return v && !Number.isNaN(new Date(v).getTime()) ? new Date(v).toISOString() : "";
+    })(),
+    bare: o.bare === true,
+    cover: /^[\w./-]{1,300}$/.test(str(o.cover, 300)) && !str(o.cover, 300).includes("..") ? str(o.cover, 300) : "",
+    excerpt: str(o.excerpt, 400),
+    excerpt_en: str(o.excerpt_en, 400),
+    tags: [...new Set((Array.isArray(o.tags) ? o.tags : String(o.tags ?? "").split(",")).map((t) => String(t).trim().slice(0, 30)).filter(Boolean))].slice(0, 10),
+    author: str(o.author, 60),
   };
+}
+
+/** หน้านี้ถึงเวลาเผยแพร่แล้วไหม (publishAt ว่าง = ใช่) */
+export function pageLive(meta: Pick<PageMeta, "publishAt">, now: Date = new Date()): boolean {
+  return !meta.publishAt || new Date(meta.publishAt).getTime() <= now.getTime();
 }
 
 /* ─────────── แม่แบบชุดหน้า ─────────── */

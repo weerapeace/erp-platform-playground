@@ -42,7 +42,7 @@ describe("🧭 ชุดศูนย์ช่วยเหลือ (แม่แ
   });
 
   it("cleanPageMeta: ข้อมูลเก่า (มีแค่ title/description) ได้ช่องใหม่เป็นค่าว่าง", () => {
-    expect(cleanPageMeta({ title: "  A ", description: "B" })).toEqual({ title: "A", description: "B", title_en: "", description_en: "", name_en: "", help: "", help_en: "" });
+    expect(cleanPageMeta({ title: "  A ", description: "B" })).toEqual({ title: "A", description: "B", title_en: "", description_en: "", name_en: "", help: "", help_en: "", publishAt: "", bare: false, cover: "", excerpt: "", excerpt_en: "", tags: [], author: "" });
     expect(cleanPageMeta(null).help).toBe("");
   });
 });
