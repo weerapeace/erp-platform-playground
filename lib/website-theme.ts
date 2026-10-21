@@ -11,6 +11,7 @@ import { normalizeListing, DEFAULT_LISTING, type ListingConfig } from "@/lib/web
 import { normalizeCart, DEFAULT_CART, type CartConfig } from "@/lib/website-cart";
 import { normalizeCheckout, DEFAULT_CHECKOUT, type CheckoutConfig } from "@/lib/website-checkout";
 import { isGradStop } from "@/lib/website-gradient";
+import { normalizeProductLuxe, type ProductLuxe } from "@/lib/website-product-luxe";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
@@ -90,8 +91,14 @@ export interface ProductExtras {
   lightbox: boolean;
   /** แถบ/ตัวนับบอกว่าดูรูปที่เท่าไรแล้ว */
   progress: boolean;
+  /** คอม: แถบรูปย่อข้างชุดรูป กดแล้วเลื่อนไปรูปนั้น (แบบ Saint Laurent) */
+  thumbs: boolean;
+  /** รูปเปิดหน้าสินค้า (Hero รูป/วิดีโอ) เป็นชิ้นแรกของชุดรูป (ภาพเรียงลง / 3 คอลัมน์) */
+  heroVideo: boolean;
+  /** คอม: ชี้รูปแล้วขยายตามตำแหน่งเมาส์ */
+  hoverZoom: boolean;
 }
-export const DEFAULT_PRODUCT_EXTRAS: ProductExtras = { stickyBuy: true, pairWith: true, lightbox: true, progress: true };
+export const DEFAULT_PRODUCT_EXTRAS: ProductExtras = { stickyBuy: true, pairWith: true, lightbox: true, progress: true, thumbs: true, heroVideo: true, hoverZoom: true };
 export type ProductTitleStyle = "serif" | "display";
 export type ProductImageBg = "tint" | "surface" | "none";
 /** พื้นหลังหลังรูปสินค้า: preset = สีตามตัวเลือก (imageBg) · color = สีเดียวที่เลือกเอง · gradient = ไล่สี 2 สี · image = รูป (imageBgKey) */
@@ -130,11 +137,13 @@ export const GRADIENT_ANGLES: { value: number; label: string }[] = [
 /** แกลเลอรีรูปของแบบโชว์เคส: editorial = เลื่อนซ้าย-ขวาเต็มจอ+ซูม (แบบ gucci) · spotlight = รูปเดียวบนวงกลม */
 export type ProductGalleryStyle = "editorial" | "spotlight";
 /** 🧵 กดชื่อวัสดุในรายละเอียดสินค้า → page หน้าเต็ม · drawer แผงจากขวา · modal ป๊อปกลางจอ (เว็บร้าน components/materials/MaterialViewer) */
-export type ProductMaterialView = "page" | "drawer" | "modal";
+/** off = ชื่อวัสดุไม่เป็นลิงก์ (ข้อความธรรมดา · ไม่มีปุ่มวัสดุในแถบงานคราฟต์) */
+export type ProductMaterialView = "page" | "drawer" | "modal" | "off";
 export const MATERIAL_VIEWS: { value: ProductMaterialView; label: string; hint: string }[] = [
   { value: "drawer", label: "แผงเลื่อนจากขวา", hint: "แนะนำ · ลูกค้าอยู่หน้าสินค้าต่อ · มือถือเลื่อนขึ้นจากล่าง" },
   { value: "modal", label: "ป๊อปกลางจอ แบบนิตยสาร", hint: "รูปผิววัสดุซ้าย ข้อความขวา · เด่นสุดเมื่อมีรูปวัสดุ" },
   { value: "page", label: "ไปหน้าวัสดุเต็ม", hint: "เปิดหน้าใหม่ /materials/… รูปเต็มจอ + เรื่องราว (ค่าเดิม)" },
+  { value: "off", label: "ปิด — ไม่ทำเป็นลิงก์", hint: "ชื่อวัสดุเป็นข้อความธรรมดา กดไม่ได้ · ไม่มีปุ่มวัสดุในแถบงานคราฟต์" },
 ];
 /** รายละเอียดสินค้า: accordion = พับเก็บ · tabs = แท็บ · plain = เรียงต่อกัน */
 export type ProductDetailsStyle = "accordion" | "tabs" | "plain";
@@ -1079,6 +1088,8 @@ export interface SiteTheme {
     fonts: ProductFonts;
     /** ✨ ของเสริมของ Style ใหม่ (ภาพเรียงลง / 3 คอลัมน์ / เรื่องราว) */
     extras: ProductExtras;
+    /** 🏛 ปรับหน้าตาของ Style ใหม่ (ชุดรูป · สัดส่วน · รูปเต็มจอ · แถบงานคราฟต์ · แถวความมั่นใจ) — lib/website-product-luxe */
+    luxe: ProductLuxe;
   };
 }
 
@@ -1558,7 +1569,7 @@ export const DEFAULT_THEME: SiteTheme = {
   checkout: { ...DEFAULT_CHECKOUT },
   page: { transition: "fade", smoothScroll: false },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, imageScale: 100, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover", infoLayout: "stack", priceWeight: 600, swatchPos: "below", swatchShape: "circle" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS }, extras: { ...DEFAULT_PRODUCT_EXTRAS } },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS }, extras: { ...DEFAULT_PRODUCT_EXTRAS }, luxe: normalizeProductLuxe(null) },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -1785,6 +1796,7 @@ const THEME_CRUMB: Record<string, string> = {
   freeShipText: "ข้อความส่งฟรี", freeShipDone: "ข้อความถึงยอดส่งฟรี", etaText: "ข้อความเวลาส่ง", emptyText: "ข้อความว่าง",
   checkoutText: "ปุ่มชำระเงิน", heading: "หัวข้อ", subtitle: "คำอธิบาย",
   checkout: "หน้าชำระเงิน", confirmText: "ปุ่มยืนยันคำสั่งซื้อ", codLabel: "ชื่อเก็บเงินปลายทาง", codHint: "คำอธิบายเก็บเงินปลายทาง",
+  luxe: "Style หน้าสินค้า", craft: "แถบงานคราฟต์", trust: "แถวความมั่นใจ",
   promptpayLabel: "ชื่อโอนพร้อมเพย์", promptpayHint: "คำอธิบายโอนพร้อมเพย์", trustText: "แถบความมั่นใจ", thanksTitle: "หัวข้อหน้าขอบคุณ", thanksText: "ข้อความหน้าขอบคุณ",
 };
 export const themeCrumb = (field: string): string | null => THEME_CRUMB[field] ?? null;
@@ -1944,7 +1956,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       })(),
       showTabs: pd.showTabs !== false,
       galleryStyle: pick(pd.galleryStyle, ["editorial", "spotlight"] as const, d.product.galleryStyle),
-      materialView: pick(pd.materialView, ["page", "drawer", "modal"] as const, d.product.materialView),
+      materialView: pick(pd.materialView, ["page", "drawer", "modal", "off"] as const, d.product.materialView),
       // ค่าที่บันทึกก่อนมี detailsStyle: showTabs=false เคยหมายถึง "เรียงต่อกัน"
       detailsStyle: pick(pd.detailsStyle, ["accordion", "tabs", "plain"] as const, pd.showTabs === false ? "plain" : d.product.detailsStyle),
       detailsOpen: pick(pd.detailsOpen, ["first", "closed", "all"] as const, d.product.detailsOpen),
@@ -1963,8 +1975,12 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
           pairWith: x.pairWith !== false,
           lightbox: x.lightbox !== false,
           progress: x.progress !== false,
+          thumbs: x.thumbs !== false,
+          heroVideo: x.heroVideo !== false,
+          hoverZoom: x.hoverZoom !== false,
         };
       })(),
+      luxe: normalizeProductLuxe(pd.luxe),
     },
   };
 }

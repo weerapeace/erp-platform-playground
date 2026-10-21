@@ -70,6 +70,8 @@ import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
+import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
+import type { ProductLuxe } from "@/lib/website-product-luxe";
 import type { ProductMaterialView } from "@/lib/website-theme";
 import type { OverPages } from "@/lib/website-header-over";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
@@ -130,7 +132,7 @@ interface Theme {
   /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; contentSources: ContentSource[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts; extras: ProductExtras };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; contentSources: ContentSource[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts; extras: ProductExtras; luxe: ProductLuxe };
 }
 
 interface Choices {
@@ -2075,7 +2077,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <MaterialViewSetting value={theme.product.materialView} onChange={(materialView) => setProduct({ materialView })} brand={theme.colors.brand} />
 
               {SHOWCASE_FAMILY.includes(theme.product.layout) && theme.product.layout !== "showcase" && (
-                <ProductExtrasSetting value={theme.product.extras} onChange={(x) => setProduct({ extras: { ...theme.product.extras, ...x } })} layout={theme.product.layout} />
+                <>
+                  <ProductLuxeSetting value={theme.product.luxe} onChange={(x) => setProduct({ luxe: { ...theme.product.luxe, ...x } })} layout={theme.product.layout as "stack" | "columns" | "story"} colors={theme.colors} />
+                  <ProductExtrasSetting value={theme.product.extras} onChange={(x) => setProduct({ extras: { ...theme.product.extras, ...x } })} layout={theme.product.layout} />
+                </>
               )}
 
               {SHOWCASE_FAMILY.includes(theme.product.layout) && (
@@ -2329,6 +2334,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                             onImageFit={setImageFitValue}
                             pcImageFitLabel={fitLabel(theme.product.imageFit, theme.product.imageSize)}
                             onGalleryPreset={() => setProduct({ galleryStyle: "editorial", imageFit: "contain", imageSize: 90, parts: { ...theme.product.parts, gallery: { ...theme.product.parts.gallery, width: "full", height: "screen", perView: 2 } } })}
+                            luxe={theme.product.layout !== "showcase"}
                             extra={xb}
                             setExtra={xb ? (p) => setExtraBanner(xb.id, p) : undefined}
                             previewBg={theme.colors.page}
@@ -2952,6 +2958,7 @@ function PartSettings({
   mobile = null,
   onResetMobile,
   onCopyBuyToMobile,
+  luxe = false,
 }: {
   part: ProductSection;
   parts: ProductParts;
@@ -2979,6 +2986,8 @@ function PartSettings({
   onResetMobile?: (k: "gallery" | "buy" | "banner" | "related") => void;
   /** มือถือ: คัดลอกชุดราคา-ตะกร้าของคอมมาตั้งแยก */
   onCopyBuyToMobile?: () => void;
+  /** Style จากเว็บแบรนด์หรู (ภาพเรียงลง / 3 คอลัมน์ / เรื่องราว) — ช่องของแกลเลอรีโชว์เคส (กี่รูป/กว้าง/สูง/แถบลอยล่างรูป) ไม่ใช้ → ซ่อน */
+  luxe?: boolean;
 }) {
   const lbl = "block text-[11px] text-slate-500 mb-1";
   const mobileCount = (k: "gallery" | "buy" | "banner" | "related") =>
@@ -2995,7 +3004,8 @@ function PartSettings({
     return (
       <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
         {mobileNote("gallery")}
-        {!mobile && (
+        {luxe && <p className="text-[11px] text-blue-700 bg-blue-50 rounded-lg px-2 py-1">🏛 Style นี้: ชุดรูป 1/2 คอลัมน์ · ความกว้าง · ความสูง · ช่องห่างรูป ตั้งที่กล่อง &quot;ปรับหน้าตา Style นี้&quot; ด้านบน</p>}
+        {!mobile && !luxe && (
         <div>
           <label className={lbl}>จอคอมโชว์กี่รูปพร้อมกัน (แกลเลอรีเลื่อนซ้าย-ขวา · มือถือทีละรูปเสมอ)</label>
           <WheelSelect value={g.perView} onChange={(e) => setPart("gallery", { perView: Number(e.target.value) === 2 ? 2 : 1 })}>
@@ -3027,6 +3037,7 @@ function PartSettings({
             {imageFitValue === "cover" && <p className="text-[11px] text-amber-600 mt-1">⚠️ รูปจะถูกตัดบน-ล่าง/ซ้าย-ขวาให้เต็มกรอบ — เลือก “เห็นรูปครบทั้งใบ” ถ้าไม่อยากให้ตัด</p>}
           </div>
         )}
+        {!luxe && (
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={lbl}>ความกว้างแกลเลอรี</label>
@@ -3041,16 +3052,17 @@ function PartSettings({
             </WheelSelect>
           </div>
         </div>
-        {!mobile && onGalleryPreset && (
+        )}
+        {!mobile && !luxe && onGalleryPreset && (
           <button type="button" onClick={onGalleryPreset} className="w-full text-xs rounded-lg border border-dashed border-blue-300 text-blue-700 py-1.5 hover:bg-blue-50">
             ✨ ตั้งแบบเต็มจอ (Gucci): เต็มขอบจอ · สูงเต็มจอ · 2 รูปคู่กัน · เห็นรูปครบทั้งใบ (ไม่ตัดรูป)
           </button>
         )}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <PartToggle label="เส้นทางหน้า (หน้าแรก / สินค้า / หมวด)" on={g.showBreadcrumb} onChange={(v) => setPart("gallery", { showBreadcrumb: v })} />
-          <PartToggle label="ชื่อรุ่นตัวใหญ่เหนือรูป" on={g.showTitle} onChange={(v) => setPart("gallery", { showTitle: v })} />
+          <PartToggle label={luxe ? "ชื่อรุ่น (ในแผงข้อมูล)" : "ชื่อรุ่นตัวใหญ่เหนือรูป"} on={g.showTitle} onChange={(v) => setPart("gallery", { showTitle: v })} />
           <PartToggle label="ชื่อรองใต้ชื่อรุ่น" on={g.showSubtitle} onChange={(v) => setPart("gallery", { showSubtitle: v })} />
-          {!mobile && <PartToggle label="แถบลอยล่างรูป (ชื่อ · สี · ราคา · ใส่ตะกร้า) — หายเมื่อเลื่อนลง (จอคอม)" on={g.bar} onChange={(v) => setPart("gallery", { bar: v })} />}
+          {!mobile && !luxe && <PartToggle label="แถบลอยล่างรูป (ชื่อ · สี · ราคา · ใส่ตะกร้า) — หายเมื่อเลื่อนลง (จอคอม)" on={g.bar} onChange={(v) => setPart("gallery", { bar: v })} />}
         </div>
         <p className="text-[11px] text-slate-400">รูปมาจากไหน (ปก Parent / SKU ลูก) ตั้งที่แท็บ ⚙️ จับคู่ฟิลด์ · รูปรายสีหลายรูป ตั้งที่ Parent SKU → แท็บ 🛍 เว็บไซต์</p>
       </div>

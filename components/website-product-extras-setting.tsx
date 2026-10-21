@@ -11,6 +11,9 @@ const ITEMS: { key: keyof ProductExtras; icon: string; label: string; hint: stri
   { key: "pairWith", icon: "🧩", label: "ส่วน \"ใส่คู่กับ\"", hint: "สินค้าที่เกี่ยวข้อง 3 ชิ้นแรก (ตามกฎ 🔗 แนะนำสินค้า) โชว์ใกล้ปุ่มซื้อ · ที่เหลืออยู่ในส่วน \"คุณอาจชอบ\"" },
   { key: "lightbox", icon: "🔍", label: "กดรูปดูเต็มจอ + ซูม", hint: "กดรูปไหนก็ได้ เปิดดูทั้งชุดเต็มจอ แตะรูปเพื่อซูม" },
   { key: "progress", icon: "▮", label: "แถบบอกตำแหน่งรูป", hint: "เส้นบาง ๆ + ตัวนับ 1/4 บอกว่าดูรูปที่เท่าไรแล้ว (มือถือ = แถบใต้รูปที่ปัด)" },
+  { key: "thumbs", icon: "▦", label: "แถบรูปย่อกดกระโดด (คอม)", hint: "รูปเล็กเรียงข้างชุดรูป กดแล้วเลื่อนไปรูปนั้นทันที (แบบ Saint Laurent)" },
+  { key: "heroVideo", icon: "🎬", label: "รูปเปิดหน้าสินค้าอยู่ในชุดรูป", hint: "รุ่นที่ตั้งรูปเปิด (รูป/วิดีโอ) ไว้ = ชิ้นแรกของชุดรูป (ภาพเรียงลง / 3 คอลัมน์) · วิดีโอเล่นเอง เงียบ วนซ้ำ" },
+  { key: "hoverZoom", icon: "🔎", label: "ชี้รูปแล้วซูม (คอม)", hint: "เอาเมาส์วางบนรูป รูปขยายตามตำแหน่งเมาส์ ดูผิวหนัง/ตะเข็บใกล้ ๆ" },
 ];
 
 export function ProductExtrasSetting({ value, onChange, layout }: { value: ProductExtras; onChange: (v: Partial<ProductExtras>) => void; layout: ProductLayout }) {
