@@ -58,6 +58,8 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [cardsOpen, setCardsOpen] = useState(false);
+  /** ที่อยู่เว็บจริงของร้าน (ลิงก์ฟีดสินค้า) · ยังไม่ผูกโดเมน = null */
+  const [siteUrl, setSiteUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,6 +75,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       setSaved(j.info ?? {});
       setInfo(j.info ?? {});
       setPrefix(j.effectiveOrderPrefix ?? "");
+      setSiteUrl(j.siteUrl ?? null);
     } catch {
       toast.error("โหลดข้อมูลร้านไม่สำเร็จ");
     } finally {
@@ -262,6 +265,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
                   </button>
                 </div>
               )}
+              {g.key === "tracking" && <FeedLinks siteUrl={siteUrl} />}
               {g.key === "order" && (
                 <p className="text-[11px] text-slate-500 mt-3 rounded-lg bg-slate-50 px-3 py-2">
                   เลขที่ออเดอร์ของร้านนี้จะขึ้นต้นด้วย <span className="font-mono font-semibold text-slate-800">{prefix}-</span>{" "}
@@ -277,6 +281,41 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
 
       {/* 💾 แถบบันทึก (ของกลาง) — หน้านี้ยาว ปุ่มบนสุดเลื่อนหายไป */}
       <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => setInfo(saved)} note="บันทึกแล้วเว็บร้านเปลี่ยนภายใน ~1 นาที" />
+    </div>
+  );
+}
+
+/** 📦 ฟีดสินค้า (เว็บร้าน /feeds/*.xml — รูปแบบ Google ที่ Meta/TikTok รับได้) — ลิงก์ไปวางใน Merchant Center / Commerce Manager / TikTok Catalog */
+const FEEDS = [
+  { file: "google.xml", label: "Google Merchant Center", where: "Merchant Center › ผลิตภัณฑ์ › ฟีด › เพิ่มฟีด › ดึงข้อมูลตามกำหนดเวลา (วันละครั้ง)" },
+  { file: "facebook.xml", label: "Meta (Facebook/IG) Catalog", where: "Commerce Manager › แคตตาล็อก › แหล่งข้อมูล › ฟีดข้อมูล › URL ตามกำหนดเวลา" },
+  { file: "tiktok.xml", label: "TikTok Catalog", where: "TikTok Ads Manager › Assets › Catalogs › Add products › Data feed (URL)" },
+];
+function FeedLinks({ siteUrl }: { siteUrl: string | null }) {
+  const toast = useToast();
+  if (!siteUrl) return <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">📦 ฟีดสินค้า: ร้านนี้ยังไม่ได้ผูกโดเมน — ผูกโดเมนก่อนแล้วลิงก์ฟีดจะขึ้นตรงนี้</p>;
+  const base = siteUrl.replace(/\/$/, "");
+  return (
+    <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2.5 space-y-2">
+      <p className="text-[11px] font-semibold text-slate-700">📦 ฟีดสินค้า (อัปเดตเองตามสินค้าที่เผยแพร่ · ราคา/สต็อก/รูปทุกสี)</p>
+      {FEEDS.map((f) => {
+        const url = `${base}/feeds/${f.file}`;
+        return (
+          <div key={f.file} className="flex flex-wrap items-center gap-2">
+            <span className="w-44 text-[11px] text-slate-600">{f.label}</span>
+            <code className="flex-1 min-w-[12rem] truncate rounded bg-white border border-slate-200 px-2 py-1 text-[11px] text-slate-800">{url}</code>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard?.writeText(url).then(() => toast.success("คัดลอกลิงก์ฟีดแล้ว"), () => toast.error("คัดลอกไม่สำเร็จ"))}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] hover:border-blue-500"
+            >
+              📋 คัดลอก
+            </button>
+            <p className="basis-full pl-0 sm:pl-[11.5rem] text-[10px] text-slate-500">{f.where}</p>
+          </div>
+        );
+      })}
+      <p className="text-[10px] text-slate-500">ร้านปิดเว็บชั่วคราวอยู่ = ฟีดว่าง (ไม่ยิงแอดไปหน้าที่ลูกค้าเข้าไม่ได้)</p>
     </div>
   );
 }

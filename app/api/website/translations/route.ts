@@ -17,7 +17,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeBlocks, defaultLayout } from "@/lib/website-blocks";
 import { normalizeTheme } from "@/lib/website-theme";
 import { normalizeFieldMap, type FieldMap } from "@/lib/website-field-map";
-import { readSiteInfo } from "@/lib/website-site-info";
+import { maskSiteInfoSecrets, readSiteInfo } from "@/lib/website-site-info";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -98,7 +98,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     theme: { published: normalizeTheme(s.theme), draft: s.theme_draft != null ? normalizeTheme(s.theme_draft) : null },
     fieldMap,
     collections: fieldMap.collections.map((c) => ({ ...c, name: nameOf.get(c.id) ?? "" })),
-    info,
+    info: maskSiteInfoSecrets(info),
     products,
   });
 }

@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -37,6 +37,11 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "fit", label: "📐 เช็คขนาด (ใส่ตุ๊กตา/ของ)", hint: "คำนวณจาก \"ช่องใส่ของ\" (ขนาดด้านใน) ของแต่ละรุ่น กับขนาดตุ๊กตาในทะเบียน \"ใส่อะไรได้บ้าง\" · เปิดแล้วรุ่นที่ยังไม่วัดช่องจะขึ้นในแท็บ ⚠️ ต้องแก้ + ตัวกรอง 📐 ยังไม่วัดช่อง ในแท็บสินค้าบนเว็บ · ตัวกรองหน้ารวมสินค้าเว็บ = เปิดกลุ่ม \"ใส่อะไรได้\" ในแท็บหน้ารายการสินค้า" },
   { key: "belt", label: "🧵 ออกแบบเข็มขัด (Belt Builder)", hint: "ลูกค้าประกอบเข็มขัดเองบนเว็บ (สายหนัง/หัว/หู/สลักชื่อ/ไซซ์) · ชิ้นส่วนและกติกาไซซ์ตั้งที่เมนู 🌐 เว็บไซต์ → ออกแบบเข็มขัด · เปิดแล้ววาง Section \"ออกแบบเข็มขัด\" ในหน้าใดก็ได้ หรือใช้หน้า /belt-builder ของเว็บ" },
   { key: "promo", label: "🎁 ป๊อปอัปลูกค้าใหม่", hint: "โผล่ครั้งเดียวต่อผู้เข้าชม (ไม่โผล่หน้าชำระเงิน) · แจกโค้ดจากแท็บ 🎟️ คูปอง — สร้างคูปองก่อนแล้วใส่โค้ดที่นี่" },
+  {
+    key: "tracking",
+    label: "📊 วัดผล & โฆษณา",
+    hint: "ใส่รหัสแล้ววัดผลได้ทันที: ผู้เข้าชม · ดูสินค้า · ใส่ตะกร้า · เริ่มชำระ · ซื้อสำเร็จ · ค้นหา · ถูกใจ · เว็บขอความยินยอมคุกกี้ (PDPA) ก่อนเริ่มเก็บเสมอ — ไม่กรอกเลย = ไม่มีแบนเนอร์คุกกี้ · ไม่เก็บอะไร",
+  },
 ];
 
 export const SITE_INFO_FIELDS: SiteInfoField[] = [
@@ -116,7 +121,53 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "belt_lead_time", label: "ระยะเวลาทำ (ข้อความ)", hint: "โชว์ใต้ราคา เช่น ทำ 7–10 วันทำการ", group: "belt", type: "text", isPublic: true, placeholder: "ทำ 7–10 วันทำการ", i18n: true },
   { key: "fit_check_enabled", label: "เปิดเช็คขนาด (ใส่ตุ๊กตา/ของได้ไหม)", hint: "รอบนี้: ERP คำนวณ + เตือนรุ่นที่ยังไม่วัด · หน้าเช็คขนาดบนเว็บจะตามมาในรอบถัดไป", group: "fit", type: "bool", isPublic: true },
   { key: "points_min_redeem", label: "ใช้ขั้นต่ำครั้งละกี่แต้ม", hint: "กันใช้ทีละนิด เช่น 10", group: "points", type: "number", isPublic: true, placeholder: "10" },
+
+  // ─── 📊 วัดผล & โฆษณา (เว็บร้าน src/lib/analytics.ts — โหลดหลังลูกค้ายินยอมคุกกี้เท่านั้น) ───
+  { key: "ga4_id", label: "Google Analytics 4 — Measurement ID", hint: "จาก GA4 › ผู้ดูแลระบบ › สตรีมข้อมูล · ขึ้นต้นด้วย G-", group: "tracking", type: "text", isPublic: true, placeholder: "G-XXXXXXXXXX" },
+  { key: "meta_pixel_id", label: "Meta (Facebook/IG) Pixel ID", hint: "ตัวเลขจาก Events Manager › แหล่งข้อมูล", group: "tracking", type: "text", isPublic: true, placeholder: "1234567890123456" },
+  { key: "tiktok_pixel_id", label: "TikTok Pixel ID", hint: "จาก TikTok Ads Manager › Events › Web Events", group: "tracking", type: "text", isPublic: true, placeholder: "CXXXXXXXXXXXXXXXXXXX" },
+  { key: "line_tag_id", label: "LINE Tag ID", hint: "จาก LINE Ads Manager › เครื่องมือ › LINE Tag (รหัสแท็ก)", group: "tracking", type: "text", isPublic: true, placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+  {
+    key: "meta_capi_token",
+    label: "🔒 Meta Conversions API — Access Token",
+    hint: "ส่งยอดซื้อจากเซิร์ฟเวอร์ตรงไป Meta (แม่นกว่าเมื่อลูกค้าใช้ iPhone/บล็อกโฆษณา) · Events Manager › การตั้งค่า › สร้างโทเค็นเข้าถึง · เก็บเป็นความลับ ไม่ส่งออกหน้าเว็บ · ใช้คู่กับ Pixel ID ด้านบน",
+    group: "tracking",
+    type: "text",
+    isPublic: false,
+  },
 ];
+
+/** ช่องความลับ (ไม่ส่งกลับไปหน้าจอ ERP แบบเต็ม — โชว์ SECRET_MASK แทน · บันทึกค่า mask = คงค่าเดิม) */
+export const SITE_INFO_SECRET_KEYS = ["meta_capi_token"] as const;
+export const SITE_INFO_SECRET_MASK = "••••••••";
+
+/** ส่งกลับหน้าจอ ERP: ช่องความลับที่มีค่า = mask (ไม่โชว์ของจริง) */
+export function maskSiteInfoSecrets<T extends object>(info: T): T {
+  const out: Record<string, unknown> = { ...(info as Record<string, unknown>) };
+  for (const k of SITE_INFO_SECRET_KEYS) if (out[k]) out[k] = SITE_INFO_SECRET_MASK;
+  return out as T;
+}
+/** หน้าจอส่ง mask กลับมา (ไม่ได้แก้ช่องนั้น) = ใช้ค่าเดิม */
+export function restoreMaskedSecrets(raw: Record<string, unknown>, before: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...raw };
+  for (const k of SITE_INFO_SECRET_KEYS) if (out[k] === SITE_INFO_SECRET_MASK) out[k] = before[k] ?? "";
+  return out;
+}
+
+/** รหัสวัดผล: รูปแบบที่ผู้ให้บริการใช้จริง — ผิดรูป = ไม่เก็บ (กันโค้ด/ข้อความแปลกไปอยู่ในสคริปต์หน้าเว็บ) */
+const TRACK_ID: Record<string, RegExp> = {
+  ga4_id: /^G-[A-Z0-9]{4,16}$/,
+  meta_pixel_id: /^\d{8,20}$/,
+  tiktok_pixel_id: /^[A-Z0-9]{10,32}$/,
+  line_tag_id: /^[a-f0-9-]{8,64}$/,
+};
+export function cleanTrackingId(key: string, v: unknown): string {
+  const re = TRACK_ID[key];
+  if (!re) return "";
+  let s = String(v ?? "").trim().replace(/\s+/g, "");
+  s = key === "line_tag_id" ? s.toLowerCase() : s.toUpperCase();
+  return re.test(s) ? s : "";
+}
 
 export const SITE_INFO_KEYS = SITE_INFO_FIELDS.map((f) => f.key);
 
@@ -185,6 +236,11 @@ export interface SiteInfo {
   belt_engraving_fee: number;
   belt_engraving_max: number;
   belt_lead_time: string;
+  ga4_id: string;
+  meta_pixel_id: string;
+  tiktok_pixel_id: string;
+  line_tag_id: string;
+  meta_capi_token: string;
   _i18n?: I18nMeta;
 }
 
@@ -248,6 +304,11 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   belt_engraving_fee: 0,
   belt_engraving_max: 12,
   belt_lead_time: "",
+  ga4_id: "",
+  meta_pixel_id: "",
+  tiktok_pixel_id: "",
+  line_tag_id: "",
+  meta_capi_token: "",
 };
 
 const URL_KEYS = new Set([
@@ -318,6 +379,8 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : toNum(v, fb as number);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);
     else if (f.key === "promo_code") out[f.key] = normalizeCouponCode(v);
+    else if (f.key in TRACK_ID) out[f.key] = cleanTrackingId(f.key, v);
+    else if (f.key === "meta_capi_token") out[f.key] = String(v ?? "").trim().replace(/\s+/g, "").slice(0, 600);
     else if (URL_KEYS.has(f.key)) out[f.key] = cleanUrl(v);
     else out[f.key] = String(v ?? "").trim().slice(0, f.type === "textarea" ? 1000 : 200);
   }

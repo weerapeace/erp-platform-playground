@@ -17,6 +17,7 @@ import { overLimit } from "@/lib/rate-limit";
 import { verifyPreviewKey } from "@/lib/storefront-preview-key";
 import { createStorefrontOrder, findStorefrontOrder } from "@/lib/website-orders";
 import { notifyOrderCustomer } from "@/lib/order-notify";
+import { clientIp, parseTracking, sendMetaPurchase } from "@/lib/meta-capi";
 import { customerLang } from "@/lib/customer-messages";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +76,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ✉️ อีเมลยืนยันออเดอร์ (ภาษาของลูกค้า) — ทำหลังตอบหน้าเว็บแล้ว ลูกค้าไม่ต้องรอ · ไม่เปิด/ไม่มีอีเมล = ข้ามเงียบ
   const orderId = result.orderId;
   after(() => notifyOrderCustomer(ctx.sb, orderId, "placed").catch((e) => console.error("[orders] notify placed", e)));
+  // 📊 ยอดซื้อไป Meta จากเซิร์ฟเวอร์ (ลูกค้ายินยอมคุกกี้การตลาด + ร้านตั้งโทเค็น · lib/meta-capi)
+  const tracking = parseTracking(body.tracking);
+  const ip = clientIp(request);
+  after(() => sendMetaPurchase(ctx.sb, ctx.shop.id, orderId, tracking, ip).catch((e) => console.error("[orders] meta capi", e)));
   return json({ ok: true, order: result.order }, 201);
 }
 

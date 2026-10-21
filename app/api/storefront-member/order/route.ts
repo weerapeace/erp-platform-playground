@@ -9,6 +9,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { guardMember, storefrontJson } from "@/lib/storefront-internal";
 import { createStorefrontOrder } from "@/lib/website-orders";
 import { notifyOrderCustomer } from "@/lib/order-notify";
+import { parseTracking, sendMetaPurchase } from "@/lib/meta-capi";
 
 export const dynamic = "force-dynamic";
 
@@ -24,5 +25,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ✉️ อีเมลยืนยันออเดอร์ในภาษาของลูกค้า (ถ้าร้านเปิด) — หลังตอบแล้ว (lib/order-notify)
   const orderId = r.orderId;
   after(() => notifyOrderCustomer(g.sb, orderId, "placed").catch((e) => console.error("[member-order] notify placed", e)));
+  // 📊 ยอดซื้อไป Meta จากเซิร์ฟเวอร์ (ลูกค้ายินยอมคุกกี้การตลาด + ร้านตั้งโทเค็น) · ทางนี้มาจากเซิร์ฟเวอร์เว็บร้าน = ไม่มี IP ลูกค้า
+  const tracking = parseTracking((body as { tracking?: unknown }).tracking);
+  after(() => sendMetaPurchase(g.sb, g.shop.id, orderId, tracking, null).catch((e) => console.error("[member-order] meta capi", e)));
   return storefrontJson({ ok: true, order: r.order }, 201);
 }

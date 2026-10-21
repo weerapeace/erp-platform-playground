@@ -21,7 +21,11 @@ import {
   readSiteInfo,
   siteInfoToRows,
   orderPrefixFor,
+  maskSiteInfoSecrets,
+  restoreMaskedSecrets,
+  SITE_INFO_SECRET_KEYS,
 } from "@/lib/website-site-info";
+import { loadShopSiteUrls } from "@/lib/website-site-url";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,13 +41,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const s = shop as { id: string; name: string; slug: string };
 
   const info = await readSiteInfo(sb, s.id);
+  // ที่อยู่เว็บจริงของร้าน (โชว์ลิงก์ฟีดสินค้าในกลุ่ม 📊 วัดผล & โฆษณา)
+  const siteUrl = (await loadShopSiteUrls(sb, [s.id])).get(s.id) ?? null;
   return NextResponse.json({
     shop: s,
-    info,
+    // 🔒 ช่องความลับ (โทเค็น) = mask — หน้าจอไม่เห็นของจริง · ส่ง mask กลับมา = คงค่าเดิม
+    info: maskSiteInfoSecrets(info),
     /** ตัวย่อที่ระบบจะใช้จริงถ้าช่อง order_prefix เว้นว่าง */
     effectiveOrderPrefix: orderPrefixFor(info, s.slug),
     fields: SITE_INFO_FIELDS,
     groups: SITE_INFO_GROUPS,
+    siteUrl,
   });
 }
 
@@ -70,7 +78,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
   const before = await readSiteInfo(sb, s.id);
   const patch = body.patch && typeof body.patch === "object" && !Array.isArray(body.patch) ? (body.patch as Record<string, unknown>) : null;
-  const info = normalizeSiteInfo(patch ? { ...before, ...patch } : body.info);
+  const raw = patch ? { ...before, ...patch } : body.info && typeof body.info === "object" ? (body.info as Record<string, unknown>) : {};
+  const info = normalizeSiteInfo(restoreMaskedSecrets(raw, before as unknown as Record<string, unknown>));
   // patch ที่ไม่แตะป๊อปอัป ไม่ต้องตรวจคูปองซ้ำ (กันบันทึกโซเชียลไม่ได้เพราะคูปองเก่ามีปัญหา)
   if (info.promo_enabled && (!patch || Object.keys(patch).some((k) => k.startsWith("promo_")))) {
     if (!info.promo_code) return NextResponse.json({ error: "เปิดป๊อปอัปลูกค้าใหม่แล้ว แต่ยังไม่ได้ใส่โค้ดที่แจก" }, { status: 400 });
@@ -91,7 +100,9 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   // เก็บเฉพาะช่องที่เปลี่ยน จะได้ไล่ย้อนได้ว่าใครแก้อะไร
   const changed: Record<string, { from: unknown; to: unknown }> = {};
   for (const k of Object.keys(info) as (keyof typeof info)[]) {
-    if (before[k] !== info[k]) changed[k] = { from: before[k], to: info[k] };
+    if (before[k] === info[k]) continue;
+    // 🔒 ความลับไม่ลงประวัติ — บอกแค่ว่าเปลี่ยน
+    changed[k] = (SITE_INFO_SECRET_KEYS as readonly string[]).includes(k as string) ? { from: before[k] ? "(มีค่า)" : "", to: info[k] ? "(ตั้งค่าใหม่)" : "" } : { from: before[k], to: info[k] };
   }
   await writeAudit(sb, {
     action: "update",
@@ -105,5 +116,5 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   // ข้อมูลร้านมีผลกับทุกหน้า (ท้ายเว็บ/ติดต่อ/ปิดเว็บชั่วคราว) → สั่งเว็บร้านล้างแคชทันที
   const purged = await purgeStorefrontCache(sb, s.id);
 
-  return NextResponse.json({ ok: true, info, effectiveOrderPrefix: orderPrefixFor(info, s.slug), purged });
+  return NextResponse.json({ ok: true, info: maskSiteInfoSecrets(info), effectiveOrderPrefix: orderPrefixFor(info, s.slug), purged });
 }
