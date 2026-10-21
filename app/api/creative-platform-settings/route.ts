@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,11 +25,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   let body: { settings?: Record<string, unknown> };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const { error } = await supabaseAdmin().from("ui_config")
     .upsert({ key: KEY, value: body.settings ?? {}, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAuditFor(request, supabaseAdmin(), { action: "settings_update", entityType: "ui_config", entityId: null, metadata: { key: KEY } });
   return NextResponse.json({ ok: true, error: null });
 }

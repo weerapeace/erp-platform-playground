@@ -92,7 +92,7 @@ function normalizeContent(raw?: ContentItem[]): Record<string, unknown>[] {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.create"); if (denied) return denied;
+  const denied = await guardApi(request, "task_template.create"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: Body;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }

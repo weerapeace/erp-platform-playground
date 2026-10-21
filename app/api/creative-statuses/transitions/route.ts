@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
@@ -11,7 +12,7 @@ export const revalidate = 0;
 
 // upsert เส้นทาง (from→to) พร้อมป้าย+ชนิด
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: { from_key?: string; to_key?: string; label?: string; kind?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();

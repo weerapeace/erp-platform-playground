@@ -9,9 +9,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { QUOTE_STATUSES } from "../shared";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
+import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   ]);
   const batch = ((lastB?.[0]?.batch as number | null) ?? 0) + 1;
   let round = ((lastR?.[0]?.round as number | undefined) ?? 0);
-  const quote_date = body.quote_date || new Date().toISOString().slice(0, 10);
+  const quote_date = body.quote_date || todayBangkok();
   const note = body.note?.trim() || null;
   const rows = cells.map((c) => ({
     sheet_id: id, batch, round: ++round, quote_date, note, created_by: user?.id ?? null,
@@ -70,6 +71,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.status !== undefined) { if (!(QUOTE_STATUSES as readonly string[]).includes(body.status ?? "")) return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 }); patch.status = body.status; }
   const { data, error } = await supabaseAdmin().from("design_sheet_quotes").update(patch).eq("sheet_id", id).eq("batch", batch).select("id");
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAuditFor(request, supabaseAdmin(), { action: "quote_batch_update", entityType: "design_sheet", entityId: id, metadata: { batch, changes: Object.keys(patch).filter((k) => k !== "updated_at"), status: body.status ?? null, cells: data?.length ?? 0 } });
   return NextResponse.json({ updated: data?.length ?? 0, error: null });
 }
 

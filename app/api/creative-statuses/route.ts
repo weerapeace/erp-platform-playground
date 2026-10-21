@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: { label?: string; label_en?: string; color?: string; progress_percent?: number; is_terminal?: boolean; is_approval_gate?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }

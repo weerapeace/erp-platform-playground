@@ -57,15 +57,48 @@ export function CalendarBoard({ tasks, onCardClick }: { tasks: CreativeTask[]; o
         {noDue > 0 && <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">{t("ยังไม่กำหนดส่ง", "No due date")}: {noDue}</span>}
       </div>
 
+      {/* 📱 มือถือ (จอแคบ) — แสดงเป็นรายการตามวัน แทนตาราง 7 ช่องที่แคบจนอ่านชื่องานไม่ออก */}
+      <div className="sm:hidden divide-y divide-slate-100">
+        {(() => {
+          const days = Array.from({ length: daysInMonth }, (_, i) => i + 1)
+            .map((day) => ({ day, dateStr: `${cursor.y}-${pad(cursor.m + 1)}-${pad(day)}` }))
+            .filter((d) => (byDate.get(d.dateStr) ?? []).length > 0);
+          if (!days.length) return <p className="px-4 py-8 text-center text-sm text-slate-400">{t("เดือนนี้ไม่มีงานที่ครบกำหนด", "No tasks due this month")}</p>;
+          return days.map(({ day, dateStr }) => {
+            const dow = (startDow + day - 1) % 7;
+            return (
+              <div key={dateStr} className="px-3 py-2">
+                <div className={`mb-1 text-xs font-semibold ${dateStr === todayStr ? "text-violet-700" : dow === 0 || dow === 6 ? "text-rose-400" : "text-slate-500"}`}>
+                  {(t("th", "en") === "th" ? DOW_TH : DOW_EN)[dow]} {day}{dateStr === todayStr ? ` · ${t("วันนี้", "Today")}` : ""}
+                </div>
+                <div className="space-y-1">
+                  {(byDate.get(dateStr) ?? []).map((tk) => {
+                    const m = statusMeta(tk.status);
+                    const od = isOverdue(tk);
+                    return (
+                      <button key={tk.id} onClick={() => onCardClick(tk.id)}
+                        className={`w-full text-left text-sm leading-snug rounded-lg px-2 py-1.5 border ${od ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
+                        <span className={`inline-block h-2 w-2 rounded-full mr-1.5 align-middle ${m.dot}`} />
+                        {tk.task_no ? <span className="mr-1 font-mono text-[11px] text-slate-400">{tk.task_no}</span> : null}{tk.title}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          });
+        })()}
+      </div>
+
       {/* หัวคอลัมน์วัน */}
-      <div className="grid grid-cols-7 border-b border-slate-100">
+      <div className="hidden sm:grid grid-cols-7 border-b border-slate-100">
         {(t("th", "en") === "th" ? DOW_TH : DOW_EN).map((d, i) => (
           <div key={i} className={`text-center text-xs font-medium py-1.5 ${i === 0 || i === 6 ? "text-rose-400" : "text-slate-400"}`}>{d}</div>
         ))}
       </div>
 
       {/* ช่องวัน */}
-      <div className="grid grid-cols-7">
+      <div className="hidden sm:grid grid-cols-7">
         {cells.map((day, idx) => {
           if (day === null) return <div key={idx} className="min-h-[96px] border-b border-r border-slate-50 bg-slate-50/40" />;
           const dateStr = `${cursor.y}-${pad(cursor.m + 1)}-${pad(day)}`;

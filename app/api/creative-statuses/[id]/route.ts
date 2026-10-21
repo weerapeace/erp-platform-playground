@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
@@ -12,7 +13,7 @@ export const revalidate = 0;
 const EDITABLE = new Set(["label", "label_en", "color", "sort_order", "progress_percent", "is_terminal", "is_approval_gate", "is_default", "is_active"]);
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: Record<string, unknown>;
@@ -30,7 +31,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();

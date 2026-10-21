@@ -35,3 +35,11 @@ export function formatDateTime(value: unknown): string {
   const mi = String(d.getMinutes()).padStart(2, "0");
   return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
 }
+
+/**
+ * "วันนี้" แบบ YYYY-MM-DD ตามเวลาไทย (+07:00) — ใช้ได้ทั้งหน้าเว็บและ server (Vercel เป็นเวลาสากล)
+ * ห้ามใช้ new Date().toISOString().slice(0, 10) หาวันนี้ — ช่วงเที่ยงคืนถึง 7 โมงเช้าจะได้ "เมื่อวาน"
+ */
+export function todayBangkok(now: Date = new Date()): string {
+  return new Date(now.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}

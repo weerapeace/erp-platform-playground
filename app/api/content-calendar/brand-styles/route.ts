@@ -7,6 +7,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   let body: { brand_id?: string; accent_color?: string | null; bg_image_key?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const brandId = (body.brand_id ?? "").trim();
@@ -35,5 +37,6 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   };
   const { error } = await admin.from("content_calendar_brand_style").upsert(row, { onConflict: "brand_id" });
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAuditFor(request, admin, { action: "brand_style_update", entityType: "content_calendar_brand_style", entityId: brandId, metadata: { accent_color: row.accent_color, bg_image_key: row.bg_image_key } });
   return NextResponse.json({ data: row, error: null });
 }

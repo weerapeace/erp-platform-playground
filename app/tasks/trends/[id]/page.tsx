@@ -9,6 +9,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
@@ -50,6 +51,8 @@ export default function TrendBoardPage() {
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sideOpen, setSideOpen] = useState(true);
+  // จอเล็ก (มือถือ/แท็บเล็ตแนวตั้ง) → เริ่มแบบพับแผงข้าง ให้กระดานได้พื้นที่เต็ม (เดิมแผง 330px เปิดค้าง บังกระดาน)
+  useEffect(() => { if (window.innerWidth < 1024) setSideOpen(false); }, []);
   const [boardOpen, setBoardOpen] = useState(false);          // ป๊อปเลือกแคมเปญปลายทาง
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   const sketchRef = useRef<CanvasSketchControls | null>(null);
@@ -104,7 +107,7 @@ export default function TrendBoardPage() {
       {/* หัวเรื่อง */}
       <div className="border-b border-slate-200 bg-white px-6 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <a href="/tasks/trends" className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">← {t("เทรนด์ทั้งหมด", "All trends")}</a>
+          <Link href="/tasks/trends" className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">← {t("เทรนด์ทั้งหมด", "All trends")}</Link>
           <input value={trend?.title ?? ""} onChange={(e) => setTrend((x) => (x ? { ...x, title: e.target.value } : x))}
             onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== "" ) void patch({ title: v }); }}
             title={t("แก้ชื่อเทรนด์ได้เลย", "Edit the trend name")}
@@ -138,7 +141,7 @@ export default function TrendBoardPage() {
         </div>
       </div>
 
-      <div className="flex gap-3 px-4 py-2">
+      <div className="flex flex-col gap-3 px-4 py-2 lg:flex-row">
         {/* กระดาน */}
         <div className="min-w-0 flex-1">
           {id && <CanvasSketch entityType="creative_trend" entityId={id} height="calc(100vh - 200px)" controlsRef={sketchRef} onReady={onBoardReady} collab stickyTop={128} />}
@@ -148,7 +151,7 @@ export default function TrendBoardPage() {
             ⚠️ แถบนี้ต้อง "ไม่ยืดหน้าให้สูงเกินจอ" — CanvasSketch คิดความสูงกระดานจาก (ความสูงจอ − ส่วนที่ไม่ใช่กระดาน)
             ถ้าปล่อยให้แถบขวายาวกว่าจอ กระดานจะถูกบีบเหลือขั้นต่ำ (เคยเจอ: เหลือ ~360px) → ล็อกสูงแล้วให้เลื่อนในตัวมันเอง */}
         {sideOpen && (
-          <aside className="w-[330px] shrink-0 space-y-3 overflow-y-auto pr-1" style={{ maxHeight: "calc(100vh - 180px)" }}>
+          <aside className="w-full shrink-0 space-y-3 overflow-y-auto pr-1 lg:w-[330px]" style={{ maxHeight: "calc(100vh - 180px)" }}>
             <div className="rounded-xl border border-slate-200 bg-white p-3">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-800">✅ {t("สิ่งที่ต้องมีในเทรนด์", "What this trend needs")}</h3>

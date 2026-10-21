@@ -7,6 +7,7 @@
 // ============================================================
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import Link from "next/link";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -40,7 +41,7 @@ export type OvFilter = "all" | "mine" | "review" | "overdue";
 type Counts = { total: number; mine: number; overdue: number; review: number };
 
 export function OverviewDashboard({
-  userName, userId, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, statusFilter = null, onClearStatusFilter, onStatusFilter, isAdmin,
+  userName, userId, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, statusFilter = null, onClearStatusFilter, onStatusFilter, isAdmin, canSettings,
   theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField, viewSwitcher,
   onFilter, onOpenTask, onCreate, onCreateInCampaign, onQuickCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
 }: {
@@ -58,6 +59,7 @@ export function OverviewDashboard({
   onClearStatusFilter?: () => void;
   onStatusFilter?: (statusKey: string) => void;
   isAdmin: boolean;
+  canSettings?: boolean;   // ปุ่มลัด ⚙️ ตั้งค่า — ตามสิทธิ์ตั้งค่าแอป (ไม่ส่ง = ใช้ isAdmin แบบเดิม)
   theme: OverviewTheme;
   canUpload: boolean;
   onThemeChange: (t: OverviewTheme) => void;
@@ -273,7 +275,7 @@ export function OverviewDashboard({
               <ShortcutPill icon="🟡" label={t("คิวรอตรวจ", "Review queue")} href="/tasks/review" />
               <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
               <ShortcutPill icon="🔥" label={t("เทรนด์", "Trends")} href="/tasks/trends" />
-              {isAdmin && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
+              {(canSettings ?? isAdmin) && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
             </div>
           )}
         </div>
@@ -467,14 +469,14 @@ export function OverviewDashboard({
           <section className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col lg:w-72 lg:shrink-0">
             <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
               <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
-              <a href="/tasks/campaigns" style={{ color: theme.accent }} className="text-xs font-medium hover:underline">{t("ดูทั้งหมด", "See all")} →</a>
+              <Link href="/tasks/campaigns" style={{ color: theme.accent }} className="text-xs font-medium hover:underline">{t("ดูทั้งหมด", "See all")} →</Link>
             </div>
             <div className="p-2">
               {activeCampaigns.length === 0 ? (
                 <div className="py-8 text-center">
                   <div className="text-3xl mb-1">📣</div>
                   <p className="text-slate-500 text-sm">{t("ยังไม่มีแคมเปญที่กำลังทำ", "No active campaigns")}</p>
-                  <a href="/tasks/campaigns" className="mt-3 inline-flex items-center h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</a>
+                  <Link href="/tasks/campaigns" className="mt-3 inline-flex items-center h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</Link>
                 </div>
               ) : (
                 <div className="space-y-1.5">

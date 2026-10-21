@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
+import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const admin = supabaseAdmin();
   const { data: row, error } = await admin.from("design_sheet_comments").insert({
-    sheet_id: id, comment_date: body.comment_date || new Date().toISOString().slice(0, 10),
+    sheet_id: id, comment_date: body.comment_date || todayBangkok(),
     body: text, created_by: user?.id ?? null,
   }).select("id").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });

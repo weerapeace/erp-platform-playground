@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 import { writeAudit } from "@/lib/audit";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   let body: { map?: Record<string, string[]>; formats?: Record<string, Record<string, string>> };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();

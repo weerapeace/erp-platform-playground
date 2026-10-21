@@ -216,7 +216,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   // สิทธิ์งานย่อย: ผจก./admin = จัดการได้หมด · ผู้ตรวจ = อนุมัติได้ · คนสร้างงาน = แก้ผู้รับผิดชอบได้
   const isManager = user?.role === "admin" || user?.role === "manager";
   const isAdmin = user?.role === "admin";   // ย้อน/ตั้งสถานะอิสระได้เฉพาะ admin
-  const canApproveSub = isManager || (!!user?.id && (user.id === d.reviewer_id || (d.reviewers ?? []).some((r) => r.id === user.id)));
+  // + สิทธิ์ "อนุมัติงานย่อย" ที่ติ๊กให้ในหน้าตั้งค่า (เดิมดูแค่ตำแหน่ง → ติ๊กให้แล้วปุ่มก็ไม่ขึ้น ทั้งที่ server ยอม)
+  const canApproveSub = isManager || can("task_subtask.approve" as Parameters<typeof can>[0]) || (!!user?.id && (user.id === d.reviewer_id || (d.reviewers ?? []).some((r) => r.id === user.id)));
   const canManageAssignees = isManager || (!!user?.id && user.id === d.created_by);
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };

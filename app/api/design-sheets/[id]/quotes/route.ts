@@ -13,6 +13,7 @@ import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { QUOTE_STATUSES } from "./shared";
 
 import { summarizeCostChanges, type SnapExtraMap, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
+import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     costSnapshotId = (latest?.id as string | undefined) ?? null;
   }
   const { data: row, error } = await admin.from("design_sheet_quotes").insert({
-    sheet_id: id, round, quote_date: body.quote_date || new Date().toISOString().slice(0, 10),
+    sheet_id: id, round, quote_date: body.quote_date || todayBangkok(),
     price, offered_price: offered, qty, status, note: body.note?.trim() || null, created_by: user?.id ?? null,
     parent_code: body.parent_code == null ? null : String(body.parent_code),   // ไซส์ที่เสนอ ("" = ทั่วไป)
     cost_snapshot_id: costSnapshotId, batch,

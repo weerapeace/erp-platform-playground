@@ -4,6 +4,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       }));
     if (rows.length) { const { error } = await admin.from("erp_help_guide_steps").insert(rows); if (error) return NextResponse.json({ error: error.message }, { status: 500 }); }
   }
+  await writeAuditFor(request, admin, { action: "update", entityType: "help_guide", entityId: id, metadata: { changes: Object.keys(patch), steps_replaced: Array.isArray(b.steps) } });
   return NextResponse.json({ data: { ok: true }, error: null });
 }
 
@@ -50,5 +52,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_help_guides").update({ is_active: false }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await writeAuditFor(request, admin, { action: "delete", entityType: "help_guide", entityId: id, metadata: {} });
   return NextResponse.json({ data: { deleted: true }, error: null });
 }

@@ -9,7 +9,10 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,19 +59,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const admin = supabaseAdmin();
   let body: { group_id?: string; test?: boolean; clear?: boolean; templates?: Record<string, string> };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const { id, cfg } = await readCfg(admin);
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const audit = (action: string, metadata: Record<string, unknown>) => writeAudit(admin, { action, entityType: "line_config", entityId: id ?? null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { slot: "creative", ...metadata } });
 
-  // บันทึกแม่แบบข้อความ (merge — เก็บเฉพาะที่ตั้งค่า, ว่าง = ใช้ค่าเริ่มต้น)
+  // บันทึกแม่แบบข้อความ — แก้เฉพาะคีย์ที่ส่งมา (ว่าง = ลบ → ใช้ค่าเริ่มต้น) · คีย์อื่นคงไว้
+  // (เดิมแทนที่ templates ทั้งก้อน → แม่แบบของบอร์ดผลิต/ระบบอื่นที่อยู่ก้อนเดียวกันหายหมด)
   if (body.templates && typeof body.templates === "object") {
-    const clean: Record<string, string> = {};
-    for (const [k, v] of Object.entries(body.templates)) if (typeof v === "string" && v.trim()) clean[k] = v;
-    const next: LineCfg = { ...cfg, templates: clean };
+    const merged: Record<string, string> = { ...(cfg.templates ?? {}) };
+    for (const [k, v] of Object.entries(body.templates)) {
+      if (typeof v === "string" && v.trim()) merged[k] = v; else delete merged[k];
+    }
+    const next: LineCfg = { ...cfg, templates: merged };
     if (id) await admin.from("china_app_settings").update({ sval: next }).eq("id", id);
     else await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
+    await audit("line_templates_update", { keys: Object.keys(body.templates) });
     return NextResponse.json({ ok: true, savedTemplates: true, error: null });
   }
 
@@ -90,6 +99,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const groups = { ...(cfg.groups ?? {}) }; delete groups.creative;
     const next: LineCfg = { ...cfg, groups };
     if (id) await admin.from("china_app_settings").update({ sval: next }).eq("id", id);
+    await audit("line_group_clear", { from: cfg.groups?.creative ?? null });
     return NextResponse.json({ ok: true, cleared: true, error: null });
   }
 
@@ -99,5 +109,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const next: LineCfg = { ...cfg, groups: { ...(cfg.groups ?? {}), creative: gid } };
   if (id) await admin.from("china_app_settings").update({ sval: next }).eq("id", id);
   else await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
+  await audit("line_group_set", { from: cfg.groups?.creative ?? null, to: gid });
   return NextResponse.json({ ok: true, saved: gid, error: null });
 }

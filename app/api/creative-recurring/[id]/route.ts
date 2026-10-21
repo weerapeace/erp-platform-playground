@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { runRule, type RecurringRule, type Template } from "@/lib/creative-recurring";
 
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const r = rule as RecurringRule;
     const upTo = r.next_run ?? r.start_date;
     const res = await runRule(admin, r, tpl, upTo);
+    await writeAuditFor(request, admin, { action: "recurring_run_now", entityType: "creative_recurring", entityId: id, metadata: { created: res.created } });   // คนที่กด "รันตอนนี้" (ประวัติในงานที่สร้างยังเป็นชื่อเจ้าของกฎ)
     return NextResponse.json({ created: res.created, error: null });
   }
   return NextResponse.json({ error: "action ไม่ถูกต้อง" }, { status: 400 });

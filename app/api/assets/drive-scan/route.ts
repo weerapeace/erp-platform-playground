@@ -8,6 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { driveConfigured, driveListChildFolders, driveListImages, parseDriveFolderId } from "@/lib/google-drive";
 
@@ -94,6 +95,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         newCount: c.newCount, total: c.total,
       });
     });
+    await writeAuditFor(request, admin, { action: "drive_scan_import", entityType: "assets", entityId: null, metadata: { brand_id: brandId, scanned: workList.length, new_images: newImages } });
     return NextResponse.json({ folders, scanned: workList.length, newImages, error: null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Google Drive error" }, { status: 500 });

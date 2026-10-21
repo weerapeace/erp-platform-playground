@@ -8,6 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildRow, loadTags, loadUsageCounts, type AssetRow } from "../shared";
 
@@ -182,5 +183,6 @@ export async function POST(request: NextRequest) {
       .eq("module", module).eq("record_id", record_id).eq("asset_id", ordered_asset_ids[i]);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  await writeAuditFor(request, admin, { action: "asset_reorder", entityType: "asset_usages", entityId: null, metadata: { module, record_id, count: ordered_asset_ids.length } });
   return NextResponse.json({ ok: true, error: null });
 }

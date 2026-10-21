@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
 import { employeeLabelMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
@@ -42,5 +43,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     name, member_ids: Array.isArray(body.member_ids) ? body.member_ids : [], sort_order: maxSort + 10, created_by: user?.id ?? null,
   }).select("id, name, member_ids, sort_order").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAuditFor(request, admin, { action: "create", entityType: "creative_team", entityId: (data as { id?: string } | null)?.id ?? null, metadata: { name } });
   return NextResponse.json({ data, error: null });
 }

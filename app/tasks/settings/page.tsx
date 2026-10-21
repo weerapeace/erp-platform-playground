@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";
 import { apiFetch } from "@/lib/api";
 import { listOptions, createOption, updateOption, deleteOption, type Option } from "../use-options";
 import { listStatuses, createStatus, updateStatus, deleteStatus, setTransition, deleteTransition, type Status, type Transition } from "../use-statuses";
@@ -38,13 +39,18 @@ const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "
 
 export default function TaskSettingsPage() {
   const t = useT();
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-  const [tab, setTab] = useState<Tab>(() => {
+  const { can } = useAuth();
+  // เข้าหน้าตั้งค่าได้ตามสิทธิ์ "ตั้งค่าแอปจัดการงาน" (หัวหน้า + แอดมิน · ติ๊กเพิ่มรายคนได้) — ตรงกับที่ server ตรวจ (เดิมเช็กตำแหน่ง admin ตรง ๆ)
+  const canSettings = can(TASKS_SETTINGS_PERM as Parameters<typeof can>[0]);
+  // แท็บ 🔑 สิทธิ์ = แก้ตารางสิทธิ์ของทุกตำแหน่ง → เฉพาะผู้มีสิทธิ์จัดการตำแหน่ง (server ตรวจ admin.roles อีกชั้น)
+  const canPermTab = can("admin.roles" as Parameters<typeof can>[0]);
+  const [tabRaw, setTab] = useState<Tab>(() => {
     if (typeof window === "undefined") return "perm";
     const q = new URLSearchParams(window.location.search).get("tab") as Tab | null;
     return q && ALL_TABS.includes(q) ? q : "perm";
   });
+  // ไม่มีสิทธิ์แท็บสิทธิ์ → เริ่มที่แท็บประเภทงานแทน
+  const tab: Tab = tabRaw === "perm" && !canPermTab ? "task_type" : tabRaw;
   const [toast, setToast] = useState<string | null>(null);
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
@@ -58,9 +64,9 @@ export default function TaskSettingsPage() {
           </div>
           <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">← {t("กลับไปงาน", "Back to Tasks")}</a>
         </div>
-        {isAdmin && (
+        {canSettings && (
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
-            <TabBtn active={tab === "perm"} onClick={() => setTab("perm")}>🔑 {t("สิทธิ์", "Permissions")}</TabBtn>
+            {canPermTab && <TabBtn active={tab === "perm"} onClick={() => setTab("perm")}>🔑 {t("สิทธิ์", "Permissions")}</TabBtn>}
             <TabBtn active={tab === "task_type"} onClick={() => setTab("task_type")}>🏷️ {t("ประเภทงาน", "Task Types")}</TabBtn>
             <TabBtn active={tab === "platform"} onClick={() => setTab("platform")}>📱 {t("แพลตฟอร์ม", "Platforms")}</TabBtn>
             <TabBtn active={tab === "campaign_category"} onClick={() => setTab("campaign_category")}>📁 {t("หมวดแคมเปญ", "Campaign categories")}</TabBtn>
@@ -79,10 +85,10 @@ export default function TaskSettingsPage() {
       </div>
 
       <div className="px-8 py-6">
-        {!isAdmin ? (
+        {!canSettings ? (
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
             <div className="text-4xl mb-3">🔒</div>
-            <p className="text-slate-700 font-medium">{t("หน้านี้สำหรับผู้ดูแลระบบ (admin) เท่านั้น", "This page is for admins only.")}</p>
+            <p className="text-slate-700 font-medium">{t("หน้านี้สำหรับหัวหน้า / ผู้ดูแลระบบ (สิทธิ์ตั้งค่าแอปจัดการงาน)", "This page needs the task-app settings permission (managers / admins).")}</p>
           </div>
         ) : tab === "perm" ? <PermissionMatrix showToast={showToast} />
           : tab === "status" ? <StatusManager showToast={showToast} />

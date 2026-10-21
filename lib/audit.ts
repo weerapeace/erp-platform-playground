@@ -9,6 +9,7 @@
  *          แต่ถ้าเขียนพลาดจะ console.error เสมอ (ไม่เงียบเหมือนของเดิมที่ best-effort)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -47,6 +48,17 @@ export async function writeAudit(admin: Admin, entry: AuditEntry): Promise<boole
     return false;
   }
   return true;
+}
+
+/**
+ * เขียน audit โดยหา "ใครทำ" จาก request เอง (token ผู้ใช้) — สำหรับ API route ที่ไม่ได้ดึง user มาไว้แล้ว
+ * หา user ไม่ได้ = บันทึกแบบไม่ระบุผู้ทำ (ไม่ throw)
+ */
+export async function writeAuditFor(request: Request, admin: Admin, entry: Omit<AuditEntry, "actorId" | "actorName">): Promise<boolean> {
+  let actorId: string | null = null, actorName: string | null = null;
+  try { const { data: { user } } = await supabaseFromRequest(request).auth.getUser(); actorId = user?.id ?? null; actorName = user?.email ?? null; }
+  catch { /* ไม่มีตัวตน */ }
+  return writeAudit(admin, { ...entry, actorId, actorName });
 }
 
 /** เขียน audit หลายรายการพร้อมกัน (เช่น อนุมัติหลายใบ = 1 แถวต่อใบ) — คืนจำนวนที่เขียนได้ */

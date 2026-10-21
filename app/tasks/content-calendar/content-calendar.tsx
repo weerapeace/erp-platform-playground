@@ -16,6 +16,7 @@ import { useSWRLite } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
+import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
 import {
   listContent, listBrands, listCampaigns, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes,
   CONTENT_STATUS_META, contentStatusLabel, type BrandCalStyle, type ContentStatus,
@@ -369,7 +370,7 @@ export function ContentCalendarView() {
   const days = new Date(year, month + 1, 0).getDate();
   const ym = `${year}-${String(month + 1).padStart(2, "0")}`;
   const monthName = base.toLocaleDateString(t("th-TH", "en-US"), { month: "long", year: "numeric" });
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = todayBangkok();
   // ตัวเลขบนชิปตัวกรอง: นับเฉพาะรายการ "ของเดือนที่เปิดอยู่" — แบรนด์นับทั้งเดือน · แพลตฟอร์ม/สถานะนับในแบรนด์ที่เลือก
   const counts = useMemo(() => {
     const all = entries.filter((e) => e.dateKey && e.dateKey.slice(0, 7) === ym);
@@ -779,10 +780,25 @@ export function ContentCalendarView() {
         <div className="flex gap-4 items-start flex-col lg:flex-row">
           {/* ตารางปฏิทิน */}
           <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm p-3 sm:p-4">
-            <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-medium text-slate-400 mb-1.5">
+            {/* 📱 มือถือ (จอแคบ) — รายการตามวัน (เฉพาะวันที่มีของ) แทนตาราง 7 ช่องที่แคบจนอ่านไม่ออก · กดหัววัน = เพิ่มลงวันนั้น */}
+            <div className="sm:hidden divide-y divide-slate-100">
+              {(() => {
+                const filled = Array.from({ length: days }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`).filter((k) => (byDay[k] ?? []).length > 0);
+                if (!filled.length) return <p className="py-8 text-center text-sm text-slate-400">{t("เดือนนี้ยังไม่มีรายการ", "Nothing scheduled this month")}</p>;
+                return filled.map((key) => (
+                  <div key={key} className="py-2">
+                    <button type="button" onClick={() => setDayPick(key)} className={`mb-1 text-xs font-semibold ${key === todayKey ? "text-violet-700" : "text-slate-500"}`}>
+                      {weekdays[(first + Number(key.slice(8, 10)) - 1) % 7]} {Number(key.slice(8, 10))}{key === todayKey ? ` · ${t("วันนี้", "Today")}` : ""} <span className="text-slate-300">＋</span>
+                    </button>
+                    <div className="space-y-1">{(byDay[key] ?? []).map((e) => <Chip key={e.id} e={e} />)}</div>
+                  </div>
+                ));
+              })()}
+            </div>
+            <div className="hidden sm:grid grid-cols-7 gap-1.5 text-center text-xs font-medium text-slate-400 mb-1.5">
               {weekdays.map((d) => <div key={d} className="py-1">{d}</div>)}
             </div>
-            <div className="grid grid-cols-7 gap-1.5">
+            <div className="hidden sm:grid grid-cols-7 gap-1.5">
               {Array.from({ length: first }).map((_, i) => <div key={`e${i}`} />)}
               {Array.from({ length: days }).map((_, i) => {
                 const day = i + 1;

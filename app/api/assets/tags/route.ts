@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { actorId } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
     .upsert({ name, color: body.color ?? null }, { onConflict: "name", ignoreDuplicates: false })
     .select("id, name, color").maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await writeAuditFor(request, admin, { action: "create", entityType: "asset_tag", entityId: (data as { id?: string } | null)?.id ?? null, metadata: { name: (data as { name?: string } | null)?.name ?? null } });
   return NextResponse.json({ data, error: null });
 }
 

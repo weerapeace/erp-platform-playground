@@ -284,8 +284,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
-  const { error } = await admin.from("erp_creative_tasks").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
+  const now = new Date().toISOString();
+  const { error } = await admin.from("erp_creative_tasks").update({ is_active: false, updated_at: now }).eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
-  await writeAudit(admin, { action: "delete", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: {} });
+  // คอนเทนต์ที่ผูกงานนี้ → ลบตาม (แบบซ่อน กู้ได้) — ป๊อปยืนยันบอกผู้ใช้ไว้แล้วว่า "รวมคอนเทนต์ที่ผูกอยู่"
+  // (เดิมไม่ได้ลบจริง → คอนเทนต์ของงานที่ลบค้างโชว์ในปฏิทินเป็นเศษ)
+  const { data: gone } = await admin.from("erp_creative_content").update({ is_active: false, updated_at: now }).eq("task_id", id).eq("is_active", true).select("id");
+  const contentIds = ((gone ?? []) as { id: string }[]).map((c) => c.id);
+  await writeAudit(admin, { action: "delete", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { content_deleted: contentIds.length, content_ids: contentIds } });
   return NextResponse.json({ success: true, error: null });
 }

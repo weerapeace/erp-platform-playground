@@ -9,7 +9,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM, costRestricted } from "@/lib/cost-access";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,6 +26,7 @@ export type SupplierPriceRow = {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  if (!(await apiCan(request, COST_PERM))) return costRestricted();   // ไม่มีสิทธิ์ดูต้นทุน → ว่าง
   const sp = new URL(request.url).searchParams;
   const supplierId = (sp.get("supplier_id") ?? "").trim();
   const q = (sp.get("q") ?? "").trim();

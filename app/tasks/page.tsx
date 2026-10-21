@@ -8,6 +8,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { StandaloneShell } from "@/components/standalone-shell";
@@ -22,6 +23,7 @@ import { KanbanSettings } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { StatusBadge, PriorityBadge } from "./task-badges";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";
 
 // ⚡ ของหนักที่ไม่ต้องใช้ตอนเปิดหน้า (ป๊อป/drawer/กระดานที่เลือกดูทีหลัง) → โหลดเมื่อเปิดใช้จริง
 //    (เดิม import ตรง → หน้า /tasks โหลดโค้ด ~664KB เกือบ 3 เท่าหน้าทั่วไป · drawer ลากตัวพิมพ์ข้อความ ~150KB มาด้วย)
@@ -116,6 +118,7 @@ function useSeenOnce(open: boolean): boolean {
 // ============================================================
 export default function TasksPage() {
   const { user, can } = useAuth();
+  const canSettings = can(TASKS_SETTINGS_PERM as Parameters<typeof can>[0]);   // ตั้งค่าแอป/คลังความรู้ = ตามสิทธิ์ (เดิมเช็กตำแหน่งตรง ๆ)
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const { statuses } = useCreativeStatuses();
@@ -274,11 +277,11 @@ export default function TasksPage() {
             <p className="text-slate-500 mt-1">{t("ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ", "Photo · Retouch · Banner · Video · Listing · Social — central table · workflow · approval")}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <a href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 {t("แคมเปญ", "Campaigns")}</a>
+            <Link href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 {t("แคมเปญ", "Campaigns")}</Link>
             <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 {t("คอนเทนต์", "Content")}</a>
             <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔁 {t("เทมเพลต", "Templates")}</a>
             <button onClick={() => setKnowledgeOpen(true)} className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📚 {t("ความรู้", "Knowledge")}</button>
-            {user?.role === "admin" && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}>⚙️</a>}
+            {canSettings && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}>⚙️</a>}
             <button onClick={() => setQuickOpen(true)} className="h-10 px-4 text-amber-700 bg-amber-50 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-100 transition-colors">⚡ {t("งานด่วน", "Quick task")}</button>
             {canJob && <button onClick={() => void openJobCreate()} title={t("งานเป็นชุดหลายรุ่น + เช็กลิสต์ต่อรุ่น (Clearance / ลงเว็บ) — ติ๊กที่หน้า SKU การตลาด", "Batch job over many models with a per-model checklist")} className="h-10 px-4 text-violet-700 bg-violet-50 border border-violet-200 text-sm font-medium rounded-lg hover:bg-violet-100 transition-colors">🛠 {t("งานชุดรุ่น", "Model batch")}</button>}
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
@@ -327,6 +330,7 @@ export default function TasksPage() {
                 onMoveStatus={(taskId, to) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to); }}
                 onSetField={async (taskId, field, value) => { try { await updateTask(taskId, { [field]: value }); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
                 isAdmin={user?.role === "admin"}
+                canSettings={canSettings}
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}
                 onCreateInCampaign={can("tasks.create" as Parameters<typeof can>[0]) ? openCreateInCampaign : undefined}
@@ -414,7 +418,7 @@ export default function TasksPage() {
       )}
 
       {/* คลังความรู้ — แก้ไขได้ (ของกลางในโมดูล) */}
-      {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={user?.role === "admin" || user?.role === "manager"} pushToast={pushToast} />}
+      {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={canSettings} pushToast={pushToast} />}
 
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
       <BgJobsDock />

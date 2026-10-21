@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -52,5 +53,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     sort_order: ((mx?.sort_order as number | undefined) ?? 0) + 1,
   }).select("id, guide_key, title, icon, description, category, sort_order").single();
   if (error) return NextResponse.json({ error: /duplicate|unique/i.test(error.message) ? "guide_key ซ้ำ" : error.message }, { status: 400 });
+  await writeAuditFor(request, admin, { action: "create", entityType: "help_guide", entityId: (data as { id?: string } | null)?.id ?? null, metadata: { title: (data as { title?: string } | null)?.title ?? null } });
   return NextResponse.json({ data: { ...data, steps: [] }, error: null });
 }

@@ -1718,7 +1718,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 <button onClick={() => setSkuWizard(true)} title="สร้าง Parent SKU + SKU ลูก จากใบงานนี้"
                   className="h-9 px-3 inline-flex items-center text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">🪄 สร้าง SKU</button>
               )}
-              {canEdit && (
+              {/* ลบถาวร = ลบทั้งใบ + comment + ราคา (กู้ไม่ได้) → ต้องมีสิทธิ์ "ลบข้อมูลสินค้า" (server เช็กซ้ำ) */}
+              {canEdit && can("products.delete" as Parameters<typeof can>[0]) && (
                 <button onClick={() => { if (form?.id) setHardDelTarget({ id: form.id, code: form.code ?? "", name: form.name ?? "" }); }}
                   title="ลบใบงานถาวร + ย้ายรูปเข้าถังขยะ R2"
                   className="h-9 px-3 inline-flex items-center text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">🗑 ลบถาวร</button>

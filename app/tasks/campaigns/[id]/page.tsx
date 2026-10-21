@@ -7,6 +7,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useT, useLang } from "@/components/i18n";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -27,6 +28,7 @@ import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { CAMPAIGN_STATUS } from "../campaign-status";
 import type { CreatedTask } from "../../create-task-modal";
 import { applyTaskTransition } from "../../task-actions";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";
 import { useCreativeOptions } from "../../use-options";
 import { getCampaign, updateCampaign, deleteTask, createContent, getContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
 import { AssetPicker } from "@/components/asset-picker";
@@ -501,7 +503,7 @@ export default function CampaignCanvasPage() {
   const [assetView, setAssetView] = useState<Record<string, unknown> | null>(null); // การ์ดรูปที่กดดู
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const { platforms: platformOpts } = useCreativeOptions();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const [fs, setFs] = useState(false); // เต็มจอ
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sketchRef = useRef<CanvasSketchControls | null>(null);
@@ -815,7 +817,7 @@ export default function CampaignCanvasPage() {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">
             <a href="/tasks" title={t("กลับหน้าแรก (คลิกกลาง = เปิดแท็บใหม่)", "Home (middle-click = new tab)")} className="h-8 px-2.5 inline-flex items-center gap-1 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">🏠 <span className="hidden sm:inline">{t("หน้าแรก", "Home")}</span></a>
-            <a href="/tasks/campaigns" className="text-sm text-slate-500 hover:text-slate-800">{t("แคมเปญ", "Campaigns")}</a>
+            <Link href="/tasks/campaigns" className="text-sm text-slate-500 hover:text-slate-800">{t("แคมเปญ", "Campaigns")}</Link>
             <span className="text-slate-300">›</span>
             <span className="font-semibold text-slate-900 truncate">{name}</span>
             {detail && (
@@ -1011,7 +1013,7 @@ export default function CampaignCanvasPage() {
 
       {/* ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง */}
       {parentRecId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={parentRecId} onClose={() => setParentRecId(null)} onChanged={() => {}} />}
-      {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={user?.role === "admin" || user?.role === "manager"} pushToast={pushToast} />}
+      {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={can(TASKS_SETTINGS_PERM as Parameters<typeof can>[0])} pushToast={pushToast} />}
 
       {/* เลือกรูปจากคลังกลาง (ของกลาง AssetPicker) → กล่องเลือกข้อมูลที่จะดึง → วางการ์ด */}
       <AssetPicker open={assetOpen} onClose={() => setAssetOpen(false)} multiple typeFilter="image"

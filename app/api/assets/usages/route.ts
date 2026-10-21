@@ -11,12 +11,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { writeAudit } from "@/lib/audit";
+
+// ผูก/ล้าง "ไฟล์นี้ถูกใช้ที่ไหน" = กันไฟล์ถูกลบจากคลัง → ต้องมีสิทธิ์แก้คลังไฟล์ (เดิมแค่ดู = ล้างรูปคำอธิบายสินค้าได้)
+const WRITE_PERM = "assets.edit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: NextRequest) {
-  const denied = await guardApi(request, "assets.view");
+  const denied = await guardApi(request, WRITE_PERM);
   if (denied) return denied;
 
   let b: { module?: string; record_id?: string; record_label?: string; field?: string | null; asset_ids?: string[]; r2_keys?: string[] };
@@ -51,11 +56,13 @@ export async function POST(request: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  await writeAudit(admin, { action: "asset_usage_sync", entityType: "asset_usages", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { module, record_id: recordId, field, linked: assetIds.length } });
   return NextResponse.json({ ok: true, linked: assetIds.length, error: null });
 }
 
 export async function DELETE(request: NextRequest) {
-  const denied = await guardApi(request, "assets.view");
+  const denied = await guardApi(request, WRITE_PERM);
   if (denied) return denied;
 
   const sp = new URL(request.url).searchParams;
@@ -69,5 +76,7 @@ export async function DELETE(request: NextRequest) {
   if (field !== null) q = field === "" ? q.is("field", null) : q.eq("field", field);
   const { error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  await writeAudit(admin, { action: "asset_usage_clear", entityType: "asset_usages", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { module, record_id: recordId, field } });
   return NextResponse.json({ ok: true, error: null });
 }

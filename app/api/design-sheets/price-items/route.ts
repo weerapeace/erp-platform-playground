@@ -6,7 +6,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM, costRestricted } from "@/lib/cost-access";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,7 @@ export type PriceGroup = {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  if (!(await apiCan(request, COST_PERM))) return costRestricted({ groups: [] });   // ไม่มีสิทธิ์ดูต้นทุน → ว่าง
   const { data, error } = await supabaseAdmin().from("design_price_items")
     .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, updated_at, price_updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
     .eq("is_active", true).order("name", { ascending: true }).limit(1000);

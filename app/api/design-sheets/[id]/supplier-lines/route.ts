@@ -10,7 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM, costRestricted } from "@/lib/cost-access";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import type { SupplierLine, ProfitSplit } from "@/lib/supplier-quote";
@@ -31,6 +32,7 @@ const cleanSplits = (raw: unknown): ProfitSplit[] =>
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  if (!(await apiCan(request, COST_PERM))) return costRestricted();   // ไม่มีสิทธิ์ดูต้นทุน → ว่าง
   const { id } = await params;
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("design_sheet_supplier_lines").select(COLS)
@@ -52,7 +54,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const denied = await guardApi(request, COST_PERM); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: { lines?: SupplierLine[] };

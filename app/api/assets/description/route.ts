@@ -7,6 +7,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { captureImageAdd, captureImageVersion, editContextFromRequest } from "@/lib/record-versions";
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+  await writeAuditFor(request, admin, { action: "description_image_add", entityType: "parent_skus_v2", entityId: parentId, metadata: { asset_id: assetId } });
   return NextResponse.json({ ok: true, error: null });
 }
 
@@ -106,5 +108,6 @@ export async function DELETE(request: NextRequest) {
       meta: { asset_id: assetId, file_name: asset.file_name ?? null, sort_order: use.sort_order ?? null },
     });
   }
+  await writeAuditFor(request, admin, { action: "description_image_remove", entityType: "parent_skus_v2", entityId: parentId, metadata: { asset_id: assetId } });
   return NextResponse.json({ ok: true, error: null });
 }

@@ -11,7 +11,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM } from "@/lib/cost-access";
 import { writeAudit } from "@/lib/audit";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
@@ -68,7 +69,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     from_sheet: String(s.design_sheet_id ?? "") === id,
   })).sort((a, b) => (a.parent_code ?? "").localeCompare(b.parent_code ?? "") || a.code.localeCompare(b.code));
 
-  return NextResponse.json({ data: { ...data, parent_sku_refs, linked_skus }, error: null });
+  // ค่าใช้จ่ายเพิ่ม/แบ่งกำไร = ข้อมูลต้นทุน → ไม่มีสิทธิ์ดูต้นทุน ตัดออก (เดิมซ่อนแค่หน้าจอ)
+  const costHidden = !(await apiCan(request, COST_PERM));
+  const safe = costHidden ? { ...data, cost_extra: null, profit_splits: null } : data;
+  return NextResponse.json({ data: { ...safe, parent_sku_refs, linked_skus, ...(costHidden ? { cost_restricted: true } : {}) }, error: null });
 }
 
 // field ที่แก้ได้ (whitelist)
@@ -97,6 +101,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let body: PatchBody;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  // คนไม่มีสิทธิ์ดูต้นทุนได้ค่าว่างไป → ห้ามบันทึกฟิลด์ต้นทุนกลับมา (กันเขียนทับของจริงด้วยค่าว่าง)
+  if ((body.cost_extra !== undefined || body.profit_splits !== undefined) && !(await apiCan(request, COST_PERM))) {
+    delete body.cost_extra; delete body.profit_splits;
+  }
 
   const patch: Record<string, unknown> = {};
   if (body.name !== undefined) {
@@ -202,6 +210,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const hard = new URL(request.url).searchParams.get("hard") === "1";
+  // ลบถาวร (กู้ไม่ได้ · ลบ comment/ตีราคา/เสนอราคาตาม) → ต้องมีสิทธิ์ลบ ไม่ใช่แค่สิทธิ์แก้ไข · เก็บเข้ากรุ (soft) ใช้สิทธิ์แก้ไขตามเดิม
+  if (hard && !(await apiCan(request, "products.delete")))
+    return NextResponse.json({ error: "ลบใบงานถาวรต้องมีสิทธิ์ \"ลบข้อมูล\" — ใช้ \"เก็บเข้ากรุ\" แทนได้" }, { status: 403 });
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
 

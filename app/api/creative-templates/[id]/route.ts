@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, "task_template.edit"); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: Record<string, unknown>;
@@ -46,7 +46,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.delete"); if (denied) return denied;
+  const denied = await guardApi(request, "task_template.delete"); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();

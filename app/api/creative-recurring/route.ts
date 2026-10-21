@@ -11,6 +11,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { employeeLabelMap } from "@/lib/creative-tasks-server";
 import { runAllDue } from "@/lib/creative-recurring";
+import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const name = (body.name ?? "").trim();
   if (!name) return NextResponse.json({ error: "กรุณาใส่ชื่อกฎงานประจำ" }, { status: 400 });
-  const start = body.start_date || new Date().toISOString().slice(0, 10);
+  const start = body.start_date || todayBangkok();
 
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_creative_recurring").insert({

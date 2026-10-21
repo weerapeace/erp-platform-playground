@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 import { driveConfigured, driveGetFolder } from "@/lib/google-drive";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const admin = supabaseAdmin();
   let body: { input?: string; clear?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -51,6 +53,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (body.clear) {
     if (id) await admin.from("china_app_settings").update({ sval: {} }).eq("id", id);
+    await writeAuditFor(request, admin, { action: "cover_folder_clear", entityType: "china_app_settings", entityId: null, metadata: { skey: SKEY } });
     return NextResponse.json({ ok: true, cleared: true, error: null });
   }
 
@@ -66,5 +69,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const cfg: Cfg = { folder_id: folder.id, name: folder.name, url: folder.webViewLink };
   if (id) await admin.from("china_app_settings").update({ sval: cfg }).eq("id", id);
   else await admin.from("china_app_settings").insert({ skey: SKEY, sval: cfg });
+  await writeAuditFor(request, admin, { action: "cover_folder_set", entityType: "china_app_settings", entityId: null, metadata: { skey: SKEY, ...cfg } });
   return NextResponse.json({ ok: true, ...cfg, error: null });
 }

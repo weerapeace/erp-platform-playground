@@ -51,11 +51,15 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export function localDateKey(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
-/** scheduled_at (ISO) → "YYYY-MM-DD" ตามเวลาเครื่อง · ว่าง/ผิด = null */
+// ── scheduled_at (วัน-เวลาโพสต์คอนเทนต์) — ข้อตกลงทั้งระบบ: เก็บ "เวลาไทยตามนาฬิกา" ตรง ๆ (ไม่แปลงเขตเวลา) ──
+//    ป๊อปคอนเทนต์/ปฏิทิน/สร้างคอนเทนต์/Story/แคมเปญ บันทึก "YYYY-MM-DDTHH:MM" และอ่านด้วยการตัดข้อความมาตลอด
+//    → โมดูลวางแผนต้องใช้ข้อตกลงเดียวกัน (เดิมแปลงเป็นเวลาสากล → โพสต์ช่วงเย็นไปโผล่วันถัดไป / ที่สร้างจากแผนเพี้ยน 7 ชม.)
+const SCHED_RE = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/;
+/** scheduled_at → "YYYY-MM-DD" (เวลาไทยตามนาฬิกา) · ว่าง/ผิด = null */
 export function dateKeyOf(iso: string | null | undefined): string | null {
   if (!iso) return null;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : localDateKey(d);
+  const m = SCHED_RE.exec(iso);
+  return m ? m[1] : null;
 }
 /** "YYYY-MM-DD" → Date เที่ยงคืนเวลาเครื่อง */
 export function parseDateKey(key: string): Date {
@@ -74,18 +78,16 @@ export function weekStart(key: string): string {
   d.setDate(d.getDate() - dow);
   return localDateKey(d);
 }
-/** วัน + เวลา (HH:MM) ตามเวลาเครื่อง → ISO (UTC) สำหรับบันทึก scheduled_at */
+/** วัน + เวลาไทย (HH:MM) → ค่าที่บันทึกใน scheduled_at (รูปเดียวกับป๊อปคอนเทนต์ "YYYY-MM-DDTHH:MM:00") */
 export function toScheduledIso(dateKey: string, time = "10:00"): string {
   const [hh, mm] = time.split(":").map(Number);
-  const d = parseDateKey(dateKey);
-  d.setHours(hh || 0, mm || 0, 0, 0);
-  return d.toISOString();
+  return `${dateKey}T${pad(hh || 0)}:${pad(mm || 0)}:00`;
 }
-/** เวลา HH:MM ของ scheduled_at ตามเวลาเครื่อง (เพื่อคงเวลาเดิมตอนลากเปลี่ยนวัน) */
+/** เวลา HH:MM ของ scheduled_at (เวลาไทยตามนาฬิกา — เพื่อคงเวลาเดิมตอนลากเปลี่ยนวัน) */
 export function timeOf(iso: string | null | undefined, fallback = "10:00"): string {
   if (!iso) return fallback;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? fallback : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const m = SCHED_RE.exec(iso);
+  return m ? m[2] : fallback;
 }
 
 const TH_DOW = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
@@ -156,7 +158,7 @@ export function targetProgress(t: PlanTarget, items: ProgressItem[], month: stri
     if (c.brand_id !== t.brand_id || c.status === "cancelled" || !c.scheduled_at) continue;
     if (t.placement_type ? !(c.placements ?? []).includes(placementId(t.placement_type, t.platform)) : !(c.platforms ?? []).includes(t.platform)) continue;
     if (t.post_type && !String(c.post_type ?? "").split(",").map((x) => x.trim()).includes(t.post_type)) continue;
-    if (bangkokDateKey(c.scheduled_at).slice(0, 7) !== month) continue;
+    if ((dateKeyOf(c.scheduled_at) ?? "").slice(0, 7) !== month) continue;   // วันโพสต์ = เวลาไทยตามนาฬิกา (ข้อตกลง scheduled_at)
     planned++;
     if (c.status === "published") published++;
   }
@@ -258,7 +260,7 @@ const dayDiff = (a: string, b: string) => Math.round((parseDateKey(a).getTime() 
 export function refreshStatus(rule: RefreshRule, items: RefreshItem[], todayKey: string): RefreshStatus {
   let lastDone: string | null = null;
   const upcoming: { id: string; title: string; date: string }[] = [];
-  const matched = items.filter((c) => refreshRuleMatches(rule, c)).map((c) => ({ c, date: bangkokDateKey(c.scheduled_at!) }));
+  const matched = items.filter((c) => refreshRuleMatches(rule, c)).map((c) => ({ c, date: dateKeyOf(c.scheduled_at) ?? "" })).filter((x) => x.date);
   for (const { c, date } of matched) {
     if (date <= todayKey && DONE_STATUSES.has(String(c.status))) { if (!lastDone || date > lastDone) lastDone = date; }
   }

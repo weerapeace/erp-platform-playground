@@ -4,6 +4,8 @@
 // ============================================================
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
+import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
+import { isTerminal } from "./use-statuses";
 
 export type {
   CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus,
@@ -105,15 +107,17 @@ export type Campaign = {
 export type BrandOption = { id: string; name: string; color: string | null; logo_url?: string | null };
 
 // ---- helpers ----
-function today(): string { return new Date().toISOString().slice(0, 10); }
+function today(): string { return todayBangkok(); }
 
+// งานจบแล้ว = สถานะที่ตั้งเป็น "จบงาน" ใน DB (isTerminal) · ยังโหลดสถานะไม่เสร็จ → ใช้รายการเดิมสำรอง
+const isClosed = (status: string) => isTerminal(status) || status === "done" || status === "cancelled" || status === "published";
 export function isOverdue(t: { due_date: string | null; status: string }): boolean {
-  return !!t.due_date && t.due_date < today() && t.status !== "done" && t.status !== "cancelled" && t.status !== "published";
+  return !!t.due_date && t.due_date < today() && !isClosed(t.status);
 }
 export function withinThisWeek(t: { due_date: string | null; status: string }): boolean {
   if (!t.due_date) return false;
   const diff = (new Date(t.due_date).getTime() - new Date(today()).getTime()) / 86400000;
-  return diff >= 0 && diff <= 7 && t.status !== "done" && t.status !== "cancelled";
+  return diff >= 0 && diff <= 7 && !isClosed(t.status);
 }
 
 /** Error ที่มีรหัสจาก server (เช่น code "open_subtasks") — ให้หน้าเว็บถามต่อได้แทนแค่โชว์ข้อความ */

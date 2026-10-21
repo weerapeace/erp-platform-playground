@@ -59,7 +59,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const admin = supabaseAdmin();
   // ── ล็อกคอนเทนต์ที่ "เผยแพร่แล้ว" — แก้เนื้อหาหลักไม่ได้ (แก้ได้เฉพาะสถานะโพสต์/ลิงก์/โน้ต) จนกว่าจะย้อนสถานะ ──
   const LOCKED_WHEN_PUBLISHED = ["title", "brand_id", "campaign_id", "sku_id", "parent_sku_id", "product_name", "products", "post_type", "platforms", "discount_value", "discount_is_percent", "captions", "color_source"];
-  const { data: curC } = await admin.from("erp_creative_content").select("status, parent_sku_id").eq("id", id).maybeSingle();
+  const { data: curC } = await admin.from("erp_creative_content").select("status, parent_sku_id, platforms").eq("id", id).maybeSingle();
   const curStatus = (curC as { status?: string } | null)?.status ?? "";
   const unlocking = "status" in body && body.status !== "published";   // กำลังย้อนสถานะออกจากเผยแพร่ = ปลดล็อก
   if (curStatus === "published" && !unlocking) {
@@ -78,6 +78,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // m2m ผู้รับผิดชอบ: ตั้ง assignee_id (เดี่ยว) = คนแรก ให้ back-compat
   if (Array.isArray((body as { assignee_ids?: string[] }).assignee_ids)) { const arr = (body as { assignee_ids: string[] }).assignee_ids; patch.assignee_ids = arr; patch.assignee_id = arr[0] ?? null; }
   if (patch.status === "published" && !("published_url" in patch && !patch.published_url)) patch.published_at = new Date().toISOString();
+  // ── สถานะตามการติ๊ก "โพสต์แล้ว" รายแพลตฟอร์ม — ติ๊กครบทุกแพลตฟอร์ม (ข้ามได้) = เผยแพร่แล้ว · เอาติ๊กออก = กลับเป็นพร้อมโพสต์ ──
+  //    (เดิมติ๊กโพสต์ครบแล้วสถานะยังเป็น "ร่าง" ตลอด → ปฏิทิน/แผน/รายงานนับว่ายังไม่ได้โพสต์) · ส่ง status มาเองด้วย = เชื่อค่าที่ส่ง
+  if (patch.post_status && typeof patch.post_status === "object" && !("status" in body)) {
+    const plats = ((Array.isArray(patch.platforms) ? patch.platforms : (curC as { platforms?: string[] } | null)?.platforms) ?? []).filter(Boolean) as string[];
+    const ps = patch.post_status as Record<string, string>;
+    const allDone = plats.length > 0 && plats.every((p) => ps[p] === "posted" || ps[p] === "skip");
+    const anyPosted = plats.some((p) => ps[p] === "posted");
+    if (allDone && anyPosted && curStatus !== "published" && curStatus !== "cancelled") { patch.status = "published"; patch.published_at = new Date().toISOString(); }
+    else if (!allDone && curStatus === "published") patch.status = "ready";
+  }
 
   if (Object.keys(patch).length > 1 || !body.captions) {
     const { error } = await admin.from("erp_creative_content").update(patch).eq("id", id);

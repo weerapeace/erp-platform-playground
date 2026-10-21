@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stageOf, datesForWeekday, bangkokDateKey, bangkokIso, planSlotsForMonth, targetProgress, type PlanSlot, type PlanTarget } from "@/lib/marketing/content-plan";
+import { stageOf, datesForWeekday, bangkokDateKey, bangkokIso, planSlotsForMonth, targetProgress, dateKeyOf, timeOf, toScheduledIso, type PlanSlot, type PlanTarget } from "@/lib/marketing/content-plan";
 
 describe("content-plan helpers", () => {
   it("stageOf: ขั้นคิดจากสถานะเดิม", () => {
@@ -34,12 +34,12 @@ describe("content-plan helpers", () => {
   it("targetProgress: นับตามแบรนด์ + ช่องทาง + รูปแบบ + เดือน (เวลาไทย)", () => {
     const t: PlanTarget = { id: "t", brand_id: "b", platform: "instagram", post_type: "reel", monthly_count: 8 };
     const items = [
-      { brand_id: "b", platforms: ["instagram"], post_type: "reel", scheduled_at: bangkokIso("2026-10-05", "10:00"), status: "draft" },
-      { brand_id: "b", platforms: ["instagram", "tiktok"], post_type: "image,reel", scheduled_at: bangkokIso("2026-10-31", "23:30"), status: "published" },
-      { brand_id: "b", platforms: ["instagram"], post_type: "image", scheduled_at: bangkokIso("2026-10-06", "10:00"), status: "draft" },     // รูปแบบไม่ตรง
-      { brand_id: "b", platforms: ["instagram"], post_type: "reel", scheduled_at: bangkokIso("2026-11-01", "00:30"), status: "draft" },      // เดือนหน้า
-      { brand_id: "b", platforms: ["instagram"], post_type: "reel", scheduled_at: bangkokIso("2026-10-07", "10:00"), status: "cancelled" },  // ยกเลิก
-      { brand_id: "x", platforms: ["instagram"], post_type: "reel", scheduled_at: bangkokIso("2026-10-07", "10:00"), status: "draft" },      // แบรนด์อื่น
+      { brand_id: "b", platforms: ["instagram"], post_type: "reel", scheduled_at: toScheduledIso("2026-10-05", "10:00"), status: "draft" },
+      { brand_id: "b", platforms: ["instagram", "tiktok"], post_type: "image,reel", scheduled_at: toScheduledIso("2026-10-31", "23:30"), status: "published" },
+      { brand_id: "b", platforms: ["instagram"], post_type: "image", scheduled_at: toScheduledIso("2026-10-06", "10:00"), status: "draft" },     // รูปแบบไม่ตรง
+      { brand_id: "b", platforms: ["instagram"], post_type: "reel", scheduled_at: toScheduledIso("2026-11-01", "00:30"), status: "draft" },      // เดือนหน้า
+      { brand_id: "b", platforms: ["instagram"], post_type: "reel", scheduled_at: toScheduledIso("2026-10-07", "10:00"), status: "cancelled" },  // ยกเลิก
+      { brand_id: "x", platforms: ["instagram"], post_type: "reel", scheduled_at: toScheduledIso("2026-10-07", "10:00"), status: "draft" },      // แบรนด์อื่น
       { brand_id: "b", platforms: ["instagram"], post_type: "reel", scheduled_at: null, status: "draft" },                                   // ยังไม่ลงวัน
     ];
     expect(targetProgress(t, items, "2026-10")).toEqual({ planned: 2, published: 1 });
@@ -70,5 +70,23 @@ describe("placements (ลงที่ไหน แบบแบ่งประเ
     const pl = ["shop_decor:shopee", "product:shopee", "story:facebook"];
     expect(placementLabelsFor(pl, "shopee", DEFAULT_PLACEMENTS)).toEqual(["🏪 แต่งร้าน", "🛍️ ในสินค้า"]);
     expect(placementLabelsFor(pl, null, DEFAULT_PLACEMENTS)).toEqual(["🏪 แต่งร้าน", "🛍️ ในสินค้า", "📱 Story"]);
+  });
+});
+
+describe("scheduled_at = เวลาไทยตามนาฬิกา (ข้อตกลงเดียวกับป๊อปคอนเทนต์/ปฏิทิน)", () => {
+  it("อ่านได้ทั้งค่าที่บันทึกจากฟอร์ม และค่าที่ DB ส่งกลับ (+00:00)", () => {
+    expect(dateKeyOf("2026-10-21T18:00")).toBe("2026-10-21");
+    expect(dateKeyOf("2026-10-21T18:00:00+00:00")).toBe("2026-10-21");   // โพสต์ 6 โมงเย็น ไม่เลื่อนไปวันถัดไป
+    expect(timeOf("2026-10-21T18:00:00+00:00")).toBe("18:00");
+    expect(dateKeyOf(null)).toBeNull();
+    expect(dateKeyOf("bad")).toBeNull();
+    expect(timeOf(undefined, "09:00")).toBe("09:00");
+  });
+  it("toScheduledIso → รูปเดียวกับฟอร์ม และอ่านกลับได้ค่าเดิม", () => {
+    const v = toScheduledIso("2026-10-31", "23:30");
+    expect(v).toBe("2026-10-31T23:30:00");
+    expect(dateKeyOf(v)).toBe("2026-10-31");
+    expect(timeOf(v)).toBe("23:30");
+    expect(toScheduledIso("2026-01-05", "9:5")).toBe("2026-01-05T09:05:00");
   });
 });

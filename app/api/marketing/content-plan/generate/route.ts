@@ -13,7 +13,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { nextContentNo } from "@/lib/creative-tasks-server";
 import { isUuid } from "@/lib/marketing/sku-list";
-import { planSlotsForMonth, bangkokDateKey, bangkokIso, type PlanSlot } from "@/lib/marketing/content-plan";
+import { planSlotsForMonth, bangkokDateKey, dateKeyOf, toScheduledIso, type PlanSlot } from "@/lib/marketing/content-plan";
 
 export const dynamic = "force-dynamic";
 
@@ -41,9 +41,9 @@ export async function POST(request: NextRequest) {
   const nextMonth = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
   const { data: exist, error: eErr } = await admin.from("erp_creative_content").select("plan_slot_id, scheduled_at")
     .in("plan_slot_id", slots.map((s) => s.id)).eq("is_active", true)
-    .gte("scheduled_at", bangkokIso(`${month}-01`, "00:00")).lt("scheduled_at", bangkokIso(`${nextMonth}-01`, "00:00"));
+    .gte("scheduled_at", toScheduledIso(`${month}-01`, "00:00")).lt("scheduled_at", toScheduledIso(`${nextMonth}-01`, "00:00"));
   if (eErr) return NextResponse.json({ data: null, error: "ตรวจของเดิมไม่สำเร็จ: " + eErr.message }, { status: 500 });
-  const existing = new Set((exist ?? []).filter((r) => r.scheduled_at).map((r) => `${r.plan_slot_id}|${bangkokDateKey(r.scheduled_at as string)}`));
+  const existing = new Set((exist ?? []).filter((r) => r.scheduled_at).map((r) => `${r.plan_slot_id}|${dateKeyOf(r.scheduled_at as string)}`));
 
   const plan = planSlotsForMonth(slots, month, existing, bangkokDateKey(new Date()));
   if (plan.create.length > MAX_CREATE) return NextResponse.json({ data: null, error: `สร้างได้ครั้งละไม่เกิน ${MAX_CREATE} ชิ้น (ตอนนี้ ${plan.create.length}) — ลดสล็อตก่อน` }, { status: 400 });
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     return plan.create.map((c, i) => ({
       content_no: `${prefix}${String(start + i).padStart(4, "0")}`, title: c.title, brand_id: brandId,
       platforms: [c.platform], post_type: c.post_type, pillar_id: c.pillar_id, status: "draft",
-      scheduled_at: bangkokIso(c.date, c.time), plan_slot_id: c.slot_id, is_template: false, created_by: user?.id ?? null,
+      scheduled_at: toScheduledIso(c.date, c.time), plan_slot_id: c.slot_id, is_template: false, created_by: user?.id ?? null,
     }));
   };
   let { error } = await admin.from("erp_creative_content").insert(rowsFrom(await nextContentNo(admin)));

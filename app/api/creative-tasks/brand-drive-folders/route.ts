@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
+import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
 import { driveConfigured, driveGetFolder } from "@/lib/google-drive";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
+  const denied = await guardApi(request, TASKS_SETTINGS_PERM); if (denied) return denied;
   const admin = supabaseAdmin();
   let body: { brand_id?: string; input?: string; clear?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -62,6 +64,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (body.clear) {
     const next = { ...map }; delete next[brandId];
     await save(next);
+    await writeAuditFor(request, admin, { action: "brand_drive_folder_clear", entityType: "brands", entityId: brandId, metadata: {} });
     return NextResponse.json({ ok: true, cleared: true, error: null });
   }
 
@@ -76,5 +79,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const next: Map = { ...map, [brandId]: { folder_id: folder.id, name: folder.name, url: folder.webViewLink } };
   await save(next);
+  await writeAuditFor(request, admin, { action: "brand_drive_folder_set", entityType: "brands", entityId: brandId, metadata: { folder_id: folder.id, folder_name: folder.name } });
   return NextResponse.json({ ok: true, brand_id: brandId, folder_id: folder.id, folder_name: folder.name, folder_url: folder.webViewLink, error: null });
 }

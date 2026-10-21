@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { writeAuditFor } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,6 +20,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v;
   const { data, error } = await supabaseAdmin().from("erp_creative_teams").update(patch).eq("id", id).select("id, name, member_ids, sort_order").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAuditFor(request, supabaseAdmin(), { action: "update", entityType: "creative_team", entityId: id, metadata: { changes: Object.keys(patch).filter((k) => k !== "updated_at") } });
   return NextResponse.json({ data, error: null });
 }
 
@@ -27,5 +29,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
   const { error } = await supabaseAdmin().from("erp_creative_teams").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAuditFor(request, supabaseAdmin(), { action: "delete", entityType: "creative_team", entityId: id, metadata: {} });
   return NextResponse.json({ ok: true, error: null });
 }

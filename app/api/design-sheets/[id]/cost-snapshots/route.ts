@@ -9,8 +9,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM, costRestricted } from "@/lib/cost-access";
+import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import type { SnapExtraMap, SnapLine, SnapTotals } from "@/lib/design-sheet-cost-snapshot";
 
@@ -27,6 +28,7 @@ const LIST_COLS = "id, sheet_id, taken_at, taken_by, taken_by_name, label, total
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  if (!(await apiCan(request, COST_PERM))) return costRestricted();   // ไม่มีสิทธิ์ดูต้นทุน → ว่าง
   const { id } = await params;
   const sid = request.nextUrl.searchParams.get("id");
   const admin = supabaseAdmin();
@@ -48,7 +50,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const denied = await guardApi(request, COST_PERM); if (denied) return denied;
   const { id } = await params;
   let body: { id?: string; label?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -56,11 +58,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const label = (body.label ?? "").toString().trim().slice(0, 120) || null;
   const { error } = await supabaseAdmin().from("design_sheet_cost_snapshots").update({ label }).eq("sheet_id", id).eq("id", body.id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAuditFor(request, supabaseAdmin(), { action: "cost_snapshot_label", entityType: "design_sheet", entityId: id, metadata: { snapshot_id: body.id, label } });
   return NextResponse.json({ ok: true, label, error: null });
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const denied = await guardApi(request, COST_PERM); if (denied) return denied;
   const { id } = await params;
   const sid = request.nextUrl.searchParams.get("id");
   if (!sid) return NextResponse.json({ error: "ต้องระบุ id เวอร์ชัน" }, { status: 400 });
