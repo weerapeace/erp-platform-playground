@@ -1,0 +1,41 @@
+# 📋 สรุปงาน (ใบงานออกแบบ) — ของกลาง
+
+ปุ่ม **📋 สรุปงาน** บนบอร์ด "แผนที่ภารกิจงานออกแบบ" → ติ๊กเลือกใบงานที่ยังไม่ปิด → ป๊อปจัดสรุป → พิมพ์ / PDF / คัดลอกเป็นรูป (วาง LINE) / บันทึกไว้เปิดแก้-ส่งซ้ำ
+
+## ใช้เมื่อไหร่
+- สรุปงานหลายใบให้ลูกค้าดู (ฉบับลูกค้า) หรือคุยกันในทีม (ฉบับภายใน)
+- ใบงานเดียวมีหลายชิ้น (เช่น "กระเป๋าแบรนด์คุณเต้ง 3 ใบ") → ติ๊ก "แยกเป็นรายการตามรูป" = 1 รูป 1 แถว ตั้งชื่อ/หมายเหตุต่อแถว
+- ไม่ใช้กับ: ใบนำเสนอ A4 ทีละใบ (ใช้ `components/design-sheet-present`) · รายงานส่งอีเมลอัตโนมัติ (ใช้ `/admin/email-reports`)
+
+## โครง
+| ส่วน | ไฟล์ |
+|---|---|
+| ชนิดข้อมูล · คอลัมน์ · ตรวจค่า · แตกแถว · หน้าตาสรุป (HTML ชุดเดียว) | `lib/design-sheet-summary.ts` |
+| แปลง HTML → PNG (SVG foreignObject ไม่มีไลบรารีเพิ่ม) | `lib/html-to-png.ts` |
+| คัดลอก/ดาวน์โหลดรูปที่สร้างเอง | `lib/image-clipboard.ts` (`copyBlobToClipboard`, `downloadBlob`) |
+| ป๊อปจัดสรุป | `components/design-sheet-summary/index.tsx` (`DesignSheetSummaryBuilder`) |
+| รายการสรุปที่บันทึกไว้ (ดรอปดาวน์) | `components/design-sheet-summary/list-menu.tsx` |
+| API | `app/api/design-sheet-summaries/` GET/POST · `[id]` GET/PATCH/DELETE |
+| ตาราง | `design_sheet_summaries` (migration `202610280100_design_sheet_summaries.sql`) |
+| ใครเรียก API (audit) | `lib/request-actor.ts` |
+
+## ข้อมูลที่เก็บ
+`items = [{ sheet_id, images: ["/api/r2-image?key=…"], split, labels: [], notes: [] }]`
+- split=false → 1 แถว (labels[0] = ชื่อแทนชื่อใบงาน, notes[0] = หมายเหตุ)
+- split=true → 1 แถวต่อรูป (labels[i]/notes[i])
+- ชื่อ/สถานะ/กำหนดส่งของใบงาน **ดึงสดตอนเปิด** · ใบที่ปิดภายหลังยังอยู่ในสรุป (ฉบับภายในมีป้าย "ปิดงานแล้ว")
+
+## ฉบับลูกค้า vs ภายใน
+- ฉบับลูกค้าซ่อนคอลัมน์ภายในเสมอ: ไม่ขยับกี่วัน · โน้ตภายใน (โน้ตจากใบงาน) · รายละเอียดงาน (ตั้งที่ `SUMMARY_COLUMNS[].internalOnly`)
+- ไม่มีต้นทุน/ราคาตีราคาในสรุปนี้เลย (ไม่ดึงมา)
+- "หมายเหตุ" ต่อแถวพิมพ์เองในป๊อป → โชว์ได้ทั้ง 2 ฉบับ
+
+## สิทธิ์ / ประวัติ
+- ดู: `products.view` · สร้าง/แก้/ลบ: `products.edit` (เท่ากับคนที่แก้ใบงานบนบอร์ดได้)
+- audit `design_sheet_summary`: create / update (ก่อน-หลัง) / delete · ลบ = `is_active=false`
+- จำ "ข้อมูลที่โชว์" ต่อคน: user-prefs key `ds_summary_columns`
+
+## ข้อจำกัด
+- คัดลอกเป็นรูป: Chrome/Edge ใช้ได้ · Safari บางรุ่นอาจไม่ยอมแปลง → ใช้ "ดาวน์โหลดรูป" หรือ "พิมพ์/PDF" แทน
+- ฟอนต์ในรูปใช้ฟอนต์ที่มีในเครื่อง
+- ส่งอีเมล = รอบ 2 (ต้องตั้ง Resend ก่อน — docs/resend-setup.md)

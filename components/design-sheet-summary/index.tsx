@@ -1,0 +1,425 @@
+"use client";
+
+// ============================================================
+// 📋 ป๊อปจัดสรุปงาน (ใบงานออกแบบ) — ของกลาง
+// ซ้าย: ชื่อ · ฉบับลูกค้า/ภายใน · ข้อมูลที่โชว์ · ต่อใบงาน: เลือกรูป + "แยกเป็นรายการตามรูป" + ชื่อ/หมายเหตุต่อแถว
+// ขวา: ตัวอย่างจริง (หน้าตาเดียวกับพิมพ์/รูป) + 🖨 พิมพ์/PDF · 🖼 คัดลอกเป็นรูป · ⬇ ดาวน์โหลดรูป
+// บันทึก/แก้/ลบ ผ่าน /api/design-sheet-summaries (audit) · ข้อมูลใบงานดึงสดจาก /api/design-sheets?ids=
+// ใช้: <DesignSheetSummaryBuilder open summaryId={id|null} initialSheetIds={[...]} onClose onChanged />
+// ============================================================
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ERPModal } from "@/components/modal";
+import { ERPInput } from "@/components/form";
+import { SearchableSelect } from "@/components/searchable-select";
+import { PrintDocLinkButton } from "@/components/report";
+import { useToast } from "@/components/toast";
+import { usePermission } from "@/components/auth";
+import { apiFetch } from "@/lib/api";
+import { withImageWidth } from "@/lib/r2-image";
+import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { htmlToPngBlob } from "@/lib/html-to-png";
+import { canCopyImage, copyBlobToClipboard, downloadBlob } from "@/lib/image-clipboard";
+import {
+  AUDIENCE_LABEL, DEFAULT_SUMMARY_COLUMNS, SUMMARY_COLUMNS, normalizeSummaryDoc, renderSummaryBody, renderSummaryHtml,
+  type SavedSummary, type SummaryAudience, type SummaryDoc, type SummaryItem, type SummarySheetInfo,
+} from "@/lib/design-sheet-summary";
+import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
+import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route";
+
+const PREF_KEY = "ds_summary_columns";
+const todayLabel = () => new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", timeZone: "Asia/Bangkok" });
+const emptyItem = (sheet_id: string): SummaryItem => ({ sheet_id, images: [], split: false, labels: [], notes: [] });
+
+function toInfo(s: DesignSheetListItem, meta: StatusMeta): SummarySheetInfo {
+  return {
+    id: s.id, code: s.code, name: s.name, brand_name: s.brand_name, brand_color: s.brand_color,
+    status: s.status, status_label: meta.map[s.status]?.label ?? s.status, status_color: meta.colorHex[s.status] ?? "#94a3b8",
+    closed: meta.finished.has(s.status), deadline: s.deadline, updated_at: s.updated_at, note: s.note, detail_excerpt: s.detail_excerpt,
+  };
+}
+
+export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [], onClose, onChanged }: {
+  open: boolean;
+  /** เปิดสรุปที่บันทึกไว้ (null = สรุปใหม่จาก initialSheetIds) */
+  summaryId: string | null;
+  initialSheetIds?: string[];
+  onClose: () => void;
+  /** หลังบันทึก/ลบ — ให้หน้าแม่โหลดรายการใหม่ */
+  onChanged?: () => void;
+}) {
+  const canEdit = usePermission("products.edit");
+  const toast = useToast();
+  const [savedId, setSavedId] = useState<string | null>(summaryId);
+  const [doc, setDoc] = useState<SummaryDoc>({ title: "", audience: "internal", columns: DEFAULT_SUMMARY_COLUMNS.internal, items: [], note: "" });
+  const [touched, setTouched] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [meta, setMeta] = useState<StatusMeta>(() => buildStatusMeta(null));
+  const [sheetRows, setSheetRows] = useState<Record<string, DesignSheetListItem>>({});
+  const [images, setImages] = useState<Record<string, DesignSheetImage[] | "loading" | "error">>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [imgBusy, setImgBusy] = useState<"copy" | "download" | null>(null);
+  const [addOptions, setAddOptions] = useState<{ value: string; label: string; sub?: string }[] | null>(null);
+  const isNew = !savedId;
+  const defaultsApplied = useRef<Set<string>>(new Set());
+
+  // ── โหลดสรุป (หรือเริ่มใหม่) + สถานะ + ข้อมูลใบงาน ──
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setSavedId(summaryId); setTouched(false); setError(null); setConfirmDelete(false); setLoadErr(null); setLoading(true);
+    defaultsApplied.current = new Set();
+    (async () => {
+      const stJson = await apiFetch("/api/design-sheets/statuses").then((r) => r.json()).catch(() => ({ data: [] }));
+      if (alive) setMeta(buildStatusMeta((stJson.data ?? []) as WfStatusRow[]));
+      let next: SummaryDoc;
+      if (summaryId) {
+        const j = await apiFetch(`/api/design-sheet-summaries/${summaryId}`).then((r) => r.json());
+        if (j.error || !j.data) throw new Error(j.error || "ไม่พบสรุปนี้");
+        const s = j.data as SavedSummary;
+        next = { title: s.title, audience: s.audience, columns: s.columns, items: s.items, note: s.note };
+        s.items.forEach((it) => defaultsApplied.current.add(it.sheet_id));   // สรุปเก่า: ไม่เติมรูปให้เอง
+      } else {
+        const pref = await apiFetch(`/api/user-prefs?key=${PREF_KEY}`).then((r) => r.json()).catch(() => null);
+        const cols = Array.isArray(pref?.value) && pref.value.length ? (pref.value as string[]) : DEFAULT_SUMMARY_COLUMNS.internal;
+        next = { title: `สรุปงาน ${todayLabel()}`, audience: "internal", columns: cols, items: [...new Set(initialSheetIds)].map(emptyItem), note: "" };
+      }
+      if (!alive) return;
+      setDoc(next);
+      await loadSheets(next.items.map((i) => i.sheet_id));
+    })().catch((e) => { if (alive) setLoadErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, summaryId]);
+
+  async function loadSheets(ids: string[]) {
+    const need = ids.filter((id) => !sheetRows[id]);
+    if (need.length) {
+      const res = await apiFetch(`/api/design-sheets?ids=${need.join(",")}&limit=${need.length}`);
+      if (!res.ok) throw new Error("โหลดข้อมูลใบงานไม่สำเร็จ กรุณาลองใหม่");
+      const j = await res.json();
+      const add: Record<string, DesignSheetListItem> = {};
+      for (const s of (j.data ?? []) as DesignSheetListItem[]) add[s.id] = s;
+      setSheetRows((m) => ({ ...m, ...add }));
+    }
+    // รูปของแต่ละใบ (ทีละ 6 ใบ ไม่ยิงพร้อมกันหมด)
+    const queue = ids.filter((id) => !images[id]);
+    setImages((m) => { const n = { ...m }; for (const id of queue) n[id] = "loading"; return n; });
+    for (let i = 0; i < queue.length; i += 6) {
+      await Promise.all(queue.slice(i, i + 6).map(async (id) => {
+        try {
+          const res = await apiFetch(`/api/design-sheets/${id}/images`);
+          if (!res.ok) throw new Error(String(res.status));
+          const j = await res.json();
+          setImages((m) => ({ ...m, [id]: Array.isArray(j.data) ? (j.data as DesignSheetImage[]) : [] }));
+        } catch { setImages((m) => ({ ...m, [id]: "error" })); }
+      }));
+    }
+  }
+
+  // สรุปใหม่: ใบที่ยังไม่เลือกรูป → เลือกรูปแรกให้ 1 รูป (เปลี่ยนได้)
+  useEffect(() => {
+    setDoc((d) => {
+      let changed = false;
+      const items = d.items.map((it) => {
+        const imgs = images[it.sheet_id];
+        if (defaultsApplied.current.has(it.sheet_id) || !Array.isArray(imgs)) return it;
+        defaultsApplied.current.add(it.sheet_id);
+        if (it.images.length || imgs.length === 0) return it;
+        changed = true;
+        return { ...it, images: [imgs[0].url] };
+      });
+      return changed ? { ...d, items } : d;
+    });
+  }, [images]);
+
+  const sheets = useMemo(() => {
+    const m = new Map<string, SummarySheetInfo>();
+    for (const [id, s] of Object.entries(sheetRows)) m.set(id, toInfo(s, meta));
+    return m;
+  }, [sheetRows, meta]);
+  const html = useMemo(() => renderSummaryHtml(doc, sheets), [doc, sheets]);
+
+  const edit = (fn: (d: SummaryDoc) => SummaryDoc) => { setDoc((d) => fn(d)); setTouched(true); setError(null); };
+  const editItem = (sheetId: string, fn: (it: SummaryItem) => SummaryItem) => edit((d) => ({ ...d, items: d.items.map((it) => (it.sheet_id === sheetId ? fn(it) : it)) }));
+  const toggleImage = (sheetId: string, url: string) => editItem(sheetId, (it) => {
+    const p = it.images.indexOf(url);
+    if (p >= 0) {
+      const images = it.images.filter((_, i) => i !== p);
+      const drop = <T,>(a: T[]) => a.filter((_, i) => i !== p);
+      return { ...it, images, labels: it.split ? drop(it.labels) : it.labels, notes: it.split ? drop(it.notes) : it.notes, split: it.split && images.length >= 2 };
+    }
+    return { ...it, images: [...it.images, url] };
+  });
+  const setSplit = (sheetId: string, split: boolean) => editItem(sheetId, (it) => ({ ...it, split, labels: [], notes: split ? [] : it.notes.slice(0, 1) }));
+  const setText = (sheetId: string, field: "labels" | "notes", i: number, v: string) => editItem(sheetId, (it) => {
+    const arr = [...it[field]]; while (arr.length <= i) arr.push(""); arr[i] = v; return { ...it, [field]: arr };
+  });
+  const moveItem = (idx: number, dir: -1 | 1) => edit((d) => {
+    const j = idx + dir; if (j < 0 || j >= d.items.length) return d;
+    const items = [...d.items]; [items[idx], items[j]] = [items[j], items[idx]]; return { ...d, items };
+  });
+  const removeItem = (sheetId: string) => edit((d) => ({ ...d, items: d.items.filter((it) => it.sheet_id !== sheetId) }));
+  const toggleColumn = (key: string) => edit((d) => ({ ...d, columns: d.columns.includes(key) ? d.columns.filter((c) => c !== key) : [...d.columns, key] }));
+
+  // ＋ เพิ่มใบงาน (เฉพาะที่ยังไม่ปิด) — โหลดรายการตอนกดครั้งแรก
+  const loadAddOptions = async () => {
+    if (addOptions) return;
+    const j = await apiFetch("/api/design-sheets?limit=500&archived=0&sort_by=updated_at&sort_dir=desc").then((r) => r.json()).catch(() => ({ data: [] }));
+    setAddOptions(((j.data ?? []) as DesignSheetListItem[]).filter((s) => !meta.finished.has(s.status))
+      .map((s) => ({ value: s.id, label: `${s.code} ${s.name}`, sub: s.brand_name ?? undefined })));
+  };
+  const addSheet = (id: string) => {
+    if (!id || doc.items.some((it) => it.sheet_id === id)) return;
+    edit((d) => ({ ...d, items: [...d.items, emptyItem(id)] }));
+    loadSheets([id]).catch((e) => toast.error(e instanceof Error ? e.message : "โหลดข้อมูลใบงานไม่สำเร็จ"));
+  };
+
+  const save = async () => {
+    if (saving || !canEdit) return;
+    const parsed = normalizeSummaryDoc(doc);
+    if ("error" in parsed) { setError(parsed.error); return; }
+    setSaving(true); setError(null);
+    try {
+      const res = await apiFetch(savedId ? `/api/design-sheet-summaries/${savedId}` : "/api/design-sheet-summaries", {
+        method: savedId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed.value),
+      });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      const s = j.data as SavedSummary;
+      setSavedId(s.id); setTouched(false);
+      // จำ "ข้อมูลที่โชว์" ไว้ใช้กับสรุปใหม่ครั้งหน้า (รายคน)
+      void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: PREF_KEY, value: s.columns }) }).catch(() => {});
+      toast.success(isNew ? "บันทึกสรุปแล้ว — เปิดอีกครั้งได้จากปุ่ม 📋 สรุปงาน" : "บันทึกการแก้ไขแล้ว");
+      onChanged?.();
+    } catch (e) { setError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setSaving(false); }
+  };
+
+  const doDelete = async () => {
+    if (!savedId) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/design-sheet-summaries/${savedId}`, { method: "DELETE" });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "ลบไม่สำเร็จ");
+      toast.success(`ลบสรุป "${doc.title}" แล้ว`);
+      onChanged?.(); onClose();
+    } catch (e) { setError(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setSaving(false); setConfirmDelete(false); }
+  };
+
+  // รูปสรุป — เรียก copy ทันทีใน onClick (ส่ง Promise ให้ clipboard) เพื่อคงสิทธิ์ของการกด
+  const fileBase = (doc.title || "สรุปงาน").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60);
+  const makePng = () => htmlToPngBlob(renderSummaryBody(doc, sheets), { width: 960 });
+  const copyImage = async () => {
+    setImgBusy("copy");
+    try { await copyBlobToClipboard(makePng()); toast.success("คัดลอกรูปสรุปแล้ว — ไปวาง (Ctrl+V) ใน LINE ได้เลย"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกรูปไม่สำเร็จ ลองดาวน์โหลดแทน"); }
+    finally { setImgBusy(null); }
+  };
+  const downloadImage = async () => {
+    setImgBusy("download");
+    try { downloadBlob(await makePng(), `${fileBase}.png`); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "สร้างรูปไม่สำเร็จ"); }
+    finally { setImgBusy(null); }
+  };
+
+  const chip = (on: boolean) => `h-8 rounded-lg border px-2.5 text-xs font-medium transition ${on ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
+  const label = "block text-xs font-medium text-slate-600 mb-1";
+  const actBtn = "inline-flex h-8 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50";
+  const customer = doc.audience === "customer";
+
+  return (
+    <ERPModal open={open} onClose={onClose} size="xl" storageKey="ds-summary-builder" hasUnsavedChanges={touched}
+      title={isNew ? "📋 สรุปงาน (ใหม่)" : `📋 สรุปงาน — ${doc.title || "ไม่มีชื่อ"}`}
+      description="เลือกข้อมูลและรูปที่จะโชว์ · ใบที่มีหลายชิ้นแยกเป็นหลายแถวได้ · ด้านขวาคือหน้าตาจริงตอนพิมพ์/ทำรูป"
+      footer={
+        <div className="flex w-full flex-wrap items-center gap-2">
+          {canEdit && savedId && (confirmDelete ? (
+            <span className="inline-flex items-center gap-1.5 text-sm text-rose-700">
+              ลบสรุปนี้?
+              <button onClick={() => void doDelete()} disabled={saving} className="h-8 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700">ลบเลย</button>
+              <button onClick={() => setConfirmDelete(false)} className="h-8 rounded-lg border border-slate-300 px-3 text-xs text-slate-600">ไม่ลบ</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} className="h-8 rounded-lg px-2 text-xs text-rose-600 hover:bg-rose-50">🗑 ลบสรุปนี้</button>
+          ))}
+          <span className="ml-auto" />
+          {error && <span className="text-sm text-rose-600">⚠ {error}</span>}
+          {!canEdit && <span className="text-xs text-slate-400">ดูได้อย่างเดียว (ไม่มีสิทธิ์แก้ใบงาน)</span>}
+          <button onClick={onClose} disabled={saving} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ปิด</button>
+          {canEdit && (
+            <button onClick={() => void save()} disabled={saving || loading} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "กำลังบันทึก..." : "💾 บันทึกสรุป"}</button>
+          )}
+        </div>
+      }>
+      {loadErr ? (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-6 text-center text-sm text-rose-700">⚠ {loadErr}</div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+          {/* ── ตั้งค่า ── */}
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <div>
+                <label className={label}>ชื่อสรุป</label>
+                <ERPInput value={doc.title} onChange={(e) => edit((d) => ({ ...d, title: e.target.value }))} placeholder="เช่น สรุปส่งคุณเต้ง 21 ต.ค." />
+              </div>
+              <div>
+                <label className={label}>ฉบับ</label>
+                <div className="flex gap-1">
+                  {(["internal", "customer"] as SummaryAudience[]).map((a) => (
+                    <button key={a} type="button" onClick={() => edit((d) => ({ ...d, audience: a }))} className={chip(doc.audience === a)}>
+                      {a === "customer" ? "👤 " : "🏠 "}{AUDIENCE_LABEL[a]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {customer && (
+              <div className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">👤 ฉบับลูกค้า: ระบบซ่อน "ไม่ขยับกี่วัน" · "โน้ตภายใน" · "รายละเอียดงาน" ให้เอง และไม่มีต้นทุน/ราคาในสรุปนี้เลย</div>
+            )}
+
+            <div>
+              <label className={label}>ข้อมูลที่โชว์ <span className="font-normal text-slate-400">(ระบบจำไว้ใช้ครั้งหน้า)</span></label>
+              <div className="flex flex-wrap gap-1">
+                {SUMMARY_COLUMNS.map((c) => {
+                  const hidden = customer && c.internalOnly;
+                  return (
+                    <button key={c.key} type="button" onClick={() => toggleColumn(c.key)} title={hidden ? "ฉบับลูกค้าไม่โชว์ข้อมูลนี้" : c.hint}
+                      className={`${chip(doc.columns.includes(c.key) && !hidden)} ${hidden ? "line-through opacity-50" : ""}`}>{c.label}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className={label}>ข้อความหัวเอกสาร <span className="font-normal text-slate-400">(ถ้ามี)</span></label>
+              <textarea value={doc.note} onChange={(e) => edit((d) => ({ ...d, note: e.target.value }))} rows={2} placeholder="เช่น อัปเดตงานประจำสัปดาห์ · ขอคอนเฟิร์มสีภายในวันศุกร์"
+                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-slate-600">ใบงานในสรุป ({doc.items.length})</label>
+              </div>
+              {loading && doc.items.length === 0 ? (
+                <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-24 animate-pulse rounded-lg bg-slate-100" />)}</div>
+              ) : (
+                <div className="space-y-2">
+                  {doc.items.map((it, idx) => {
+                    const s = sheets.get(it.sheet_id);
+                    const imgs = images[it.sheet_id];
+                    const canSplit = it.images.length >= 2;
+                    return (
+                      <div key={it.sheet_id} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                        <div className="flex items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-slate-800">{s ? <><span className="font-mono text-[11px] text-slate-400">{s.code}</span> {s.name}</> : "กำลังโหลด..."}</div>
+                            {s && (
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                                <span className="rounded-full px-1.5 py-0.5" style={{ color: s.status_color, backgroundColor: `${s.status_color}1a` }}>{s.status_label}</span>
+                                {s.brand_name && <span>{s.brand_name}</span>}
+                                {s.closed && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">ปิดงานแล้ว</span>}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-0.5 text-slate-400">
+                            <button type="button" onClick={() => moveItem(idx, -1)} disabled={idx === 0} title="เลื่อนขึ้น" className="h-7 w-7 rounded hover:bg-slate-100 disabled:opacity-30">▲</button>
+                            <button type="button" onClick={() => moveItem(idx, 1)} disabled={idx === doc.items.length - 1} title="เลื่อนลง" className="h-7 w-7 rounded hover:bg-slate-100 disabled:opacity-30">▼</button>
+                            <button type="button" onClick={() => removeItem(it.sheet_id)} title="เอาใบนี้ออกจากสรุป" aria-label="เอาออก" className="h-7 w-7 rounded text-rose-500 hover:bg-rose-50">✕</button>
+                          </div>
+                        </div>
+
+                        <div className="mt-2">
+                          {imgs === "loading" || imgs === undefined ? (
+                            <div className="flex gap-1.5">{[0, 1, 2].map((i) => <div key={i} className="h-14 w-14 animate-pulse rounded-md bg-slate-100" />)}</div>
+                          ) : imgs === "error" ? (
+                            <div className="text-xs text-rose-600">โหลดรูปไม่สำเร็จ</div>
+                          ) : imgs.length === 0 ? (
+                            <div className="text-xs text-slate-400">ใบงานนี้ยังไม่มีรูป</div>
+                          ) : (
+                            <>
+                              <div className="mb-1 text-[11px] text-slate-400">กดรูปเพื่อเลือก ({imgs.length} รูป · เลือก {it.images.length})</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {imgs.map((im) => {
+                                  const order = it.images.indexOf(im.url);
+                                  return (
+                                    <button key={im.key} type="button" onClick={() => toggleImage(it.sheet_id, im.url)} title={im.source_label}
+                                      className={`relative h-14 w-14 overflow-hidden rounded-md border-2 ${order >= 0 ? "border-blue-500" : "border-transparent opacity-70 hover:opacity-100"}`}>
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={withImageWidth(im.url, 120) ?? im.url} alt="" loading="lazy" className="h-full w-full bg-slate-50 object-cover" />
+                                      {order >= 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold text-white">{order + 1}</span>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        <label className={`mt-2 flex items-center gap-2 text-xs ${canSplit ? "cursor-pointer text-slate-700" : "text-slate-400"}`} title={canSplit ? "" : "เลือกรูปอย่างน้อย 2 รูปก่อน"}>
+                          <input type="checkbox" checked={it.split} disabled={!canSplit} onChange={(e) => setSplit(it.sheet_id, e.target.checked)} className="h-4 w-4" />
+                          แยกเป็นรายการตามรูป <span className="text-slate-400">(1 รูป = 1 แถว เช่น กระเป๋า 3 ใบในงานเดียว)</span>
+                        </label>
+
+                        {it.split ? (
+                          <div className="mt-2 space-y-1.5">
+                            {it.images.map((url, i) => (
+                              <div key={url} className="grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1.5">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={withImageWidth(url, 80) ?? url} alt="" className="h-7 w-7 rounded border border-slate-200 object-cover" />
+                                <input value={it.labels[i] ?? ""} onChange={(e) => setText(it.sheet_id, "labels", i, e.target.value)} placeholder={`ชื่อชิ้นที่ ${i + 1}`}
+                                  className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                <input value={it.notes[i] ?? ""} onChange={(e) => setText(it.sheet_id, "notes", i, e.target.value)} placeholder="หมายเหตุ (ถ้ามี)"
+                                  className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                            <input value={it.labels[0] ?? ""} onChange={(e) => setText(it.sheet_id, "labels", 0, e.target.value)} placeholder={s ? `ชื่อที่โชว์ (เว้นว่าง = ${s.name})` : "ชื่อที่โชว์"}
+                              className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            <input value={it.notes[0] ?? ""} onChange={(e) => setText(it.sheet_id, "notes", 0, e.target.value)} placeholder="หมายเหตุ (ถ้ามี)"
+                              className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {canEdit && (
+                    <div onFocusCapture={() => void loadAddOptions()} onMouseDownCapture={() => void loadAddOptions()}>
+                      <SearchableSelect value="" onChange={addSheet} placeholder="＋ เพิ่มใบงาน (เฉพาะที่ยังไม่ปิด)..."
+                        options={(addOptions ?? []).filter((o) => !doc.items.some((it) => it.sheet_id === o.value))} />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── ตัวอย่าง + พิมพ์ / รูป ── */}
+          <div className="min-w-0 lg:sticky lg:top-0 lg:self-start">
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+              <span className="mr-auto text-xs font-semibold text-slate-700">ตัวอย่าง ({AUDIENCE_LABEL[doc.audience]})</span>
+              <PrintDocLinkButton html={html} fileName={fileBase} className={actBtn}>🖨 พิมพ์ / PDF</PrintDocLinkButton>
+              {canCopyImage() && (
+                <button type="button" onClick={() => void copyImage()} disabled={!!imgBusy || doc.items.length === 0} className={actBtn}>
+                  {imgBusy === "copy" ? "กำลังทำรูป..." : "🖼 คัดลอกเป็นรูป"}</button>
+              )}
+              <button type="button" onClick={() => void downloadImage()} disabled={!!imgBusy || doc.items.length === 0} className={actBtn}>
+                {imgBusy === "download" ? "กำลังทำรูป..." : "⬇ ดาวน์โหลดรูป"}</button>
+            </div>
+            <iframe title="ตัวอย่างสรุปงาน" srcDoc={html} className="h-[600px] w-full rounded-lg border border-slate-200 bg-slate-100" />
+            <p className="mt-1.5 text-[11px] text-slate-400">พิมพ์ / PDF / รูป ใช้ค่าที่ตั้งอยู่ตอนนี้ได้เลย (ยังไม่บันทึกก็ได้) · คัดลอกรูปแล้ววางใน LINE ด้วย Ctrl+V</p>
+          </div>
+        </div>
+      )}
+    </ERPModal>
+  );
+}

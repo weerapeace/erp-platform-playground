@@ -52,8 +52,20 @@ function jpgName(name: string): string {
 /** ดาวน์โหลดรูปเป็นไฟล์ JPG */
 export async function downloadImageAsJpg(url: string, filename: string): Promise<void> {
   const blob = await imageToBlob(url, "image/jpeg", 0.95);
+  downloadBlob(blob, jpgName(filename));
+}
+
+/** คัดลอกรูปที่สร้างเอง (PNG Blob เช่น จาก lib/html-to-png) ลง clipboard
+ *  ส่ง Promise<Blob> ได้เลย (เรียกใน onClick ทันที ไม่ต้อง await ก่อน) → คงสิทธิ์ user gesture ระหว่างแปลงรูป */
+export async function copyBlobToClipboard(blob: Blob | Promise<Blob>): Promise<void> {
+  if (!canCopyImage()) throw new Error("เบราว์เซอร์นี้ไม่รองรับการคัดลอกรูป (ลองดาวน์โหลดแทน)");
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": Promise.resolve(blob) })]);
+}
+
+/** ดาวน์โหลด Blob เป็นไฟล์ (ชื่อไฟล์ใส่นามสกุลมาเอง) */
+export function downloadBlob(blob: Blob, filename: string): void {
   const href = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = href; a.download = jpgName(filename); document.body.appendChild(a); a.click(); a.remove();
+  a.href = href; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(href), 1000);
 }

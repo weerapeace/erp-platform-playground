@@ -15,6 +15,7 @@ import { SheetHoverWrap, SheetHoverSettingsButton, useSheetHoverPref } from "./s
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { usePermission } from "@/components/auth";
 import { CampaignBoardPicker, useCanSendToBoard, SEND_TO_BOARD_MAX } from "@/components/campaign-board-send";
+import { SummaryListMenu } from "@/components/design-sheet-summary/list-menu";
 import { RecordTasksButton } from "@/components/record-tasks";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { wfIconSlotId } from "@/lib/brand-theme";
@@ -31,6 +32,9 @@ const WorkflowStatusManager = dynamic(
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
 // แผงลอย "📄 ใบนำเสนอ A4" — mount ที่ระดับบอร์ด (ปิดป๊อปอัปใบงานแล้วแผงยังอยู่ ดูบอร์ดไปจัดใบไป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
+// ป๊อป "📋 สรุปงาน" (ของกลาง design-sheet-summary) — โหลดเฉพาะตอนเปิด
+const DesignSheetSummaryBuilder = dynamic(() => import("@/components/design-sheet-summary").then((m) => m.DesignSheetSummaryBuilder), { ssr: false });
+const SUMMARY_MAX = 100;   // ใบงานต่อสรุป (ตรงกับกฎ normalizeSummaryDoc)
 
 type Tone = "danger" | "warn" | "good" | "done" | "normal";
 
@@ -189,6 +193,15 @@ function PickBadge({ checked }: { checked: boolean }) {
   );
 }
 
+// ทับการ์ดที่เลือกไม่ได้ในโหมดสรุปงาน (ปิดงานแล้ว) — จางลง + บอกเหตุผล
+function NoPickVeil() {
+  return (
+    <span className="pointer-events-none absolute inset-0 z-10 flex items-start justify-end bg-white/60 p-1">
+      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">ปิดงานแล้ว</span>
+    </span>
+  );
+}
+
 function LoadingCard() {
   return (
     <div className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -335,12 +348,26 @@ export function DesignDashboard() {
   };
   const [quickFilter, setQuickFilter] = useState<"all" | "active" | "urgent" | "soon" | "closed">("all");
 
-  // ── โหมดเลือกใบงานเพื่อส่งขึ้นกระดานแคมเปญ (ตัวเลือกแคมเปญ = ของกลาง campaign-board-send) ──
+  // ── โหมดติ๊กเลือกใบงาน — ใช้ 2 งาน: 🎨 ส่งขึ้นกระดานแคมเปญ (ของกลาง campaign-board-send) / 📋 สรุปงาน (ของกลาง design-sheet-summary) ──
   const [pickMode, setPickMode] = useState(false);
+  const [pickPurpose, setPickPurpose] = useState<"board" | "summary">("board");
   const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
   const [campaignPickOpen, setCampaignPickOpen] = useState(false);
-  const togglePicked = (id: string) => setPickedIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // สรุปงาน: เลือกได้เฉพาะใบที่ยังไม่ปิดงาน (เจ้าของขอ)
+  const canPick = (sheet: DesignSheetListItem) => pickPurpose !== "summary" || !statusMeta.finished.has(sheet.status);
+  const togglePicked = (id: string) => {
+    const sheet = sheets.find((s) => s.id === id);
+    if (sheet && !canPick(sheet)) return;
+    setPickedIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  };
   const exitPickMode = () => { setPickMode(false); setPickedIds(new Set()); setCampaignPickOpen(false); };
+  const startPick = (purpose: "board" | "summary") => { setPickPurpose(purpose); setPickedIds(new Set()); setPickMode(true); };
+  // ป๊อปสรุปงาน + ดรอปดาวน์ "สรุปที่บันทึกไว้"
+  const [summaryBuilder, setSummaryBuilder] = useState<{ id: string | null; sheetIds: string[] } | null>(null);
+  const [summaryMenuOpen, setSummaryMenuOpen] = useState(false);
+  const [summaryReload, setSummaryReload] = useState(0);
+  const summaryAnchorRef = useRef<HTMLDivElement>(null);
+  const openSummary = (id: string | null, sheetIds: string[] = []) => { setSummaryMenuOpen(false); setMoreOpen(false); setSummaryBuilder({ id, sheetIds }); };
 
   useEffect(() => {
     let alive = true;
@@ -597,7 +624,7 @@ export function DesignDashboard() {
                         title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : hoverOn ? undefined : `${sheet.code} • ${sheet.name}`}
                         className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
                       >
-                        {pickMode && <PickBadge checked={picked} />}
+                        {pickMode && (canPick(sheet) ? <PickBadge checked={picked} /> : <NoPickVeil />)}
                         <BrandSlot theme={brandTheme} id="task_corner" />
                         {coverUrl ? (
                           <CoverPreview off={hoverOn} url={sheet.cover_url}>
@@ -692,7 +719,7 @@ export function DesignDashboard() {
         title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : hoverOn && isDesktop ? undefined : isDesktop ? `${sheet.code} • ${sheet.name} — ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด` : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
         className={`relative overflow-hidden rounded-lg border bg-white shadow-[2px_2px_0_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 ${row ? "flex items-center gap-2 p-1.5" : "block p-1.5"} ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
       >
-        {pickMode && <PickBadge checked={picked} />}
+        {pickMode && (canPick(sheet) ? <PickBadge checked={picked} /> : <NoPickVeil />)}
         <BrandSlot theme={brandTheme} id="task_corner" />
         {cover}
         {row ? (
@@ -752,7 +779,9 @@ export function DesignDashboard() {
                   <button type="button" className={menuItem} onClick={() => { changeCardSize(cardSize === "row" ? "compact" : "row"); setMoreOpen(false); }}>
                     {cardSize === "row" ? "▦ การ์ดเล็ก (มีรูป)" : "☰ การ์ดแถวย่อ"}
                   </button>
-                  {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else setPickMode(true); setMoreOpen(false); }}>{pickMode ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}</button>}
+                  {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else startPick("board"); setMoreOpen(false); }}>{pickMode ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}</button>}
+                  {canEdit && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("summary"); setMoreOpen(false); }}>📋 สรุปงานใหม่ (เลือกใบงาน)</button>}
+                  {canEdit && <button type="button" className={menuItem} onClick={() => { setMoreOpen(false); setSummaryMenuOpen(true); }}>📂 สรุปที่บันทึกไว้</button>}
                   <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ ตั้งค่าแบรนด์</button>
                 </div>
               </FloatingDropdown>
@@ -1070,11 +1099,23 @@ export function DesignDashboard() {
                 </div>
                 {/* ส่งใบงานขึ้นกระดานวางแผน (Campaign Canvas) — ติ๊กเลือกหลายใบแล้วส่งทีเดียว */}
                 {canTasks && (
-                  <button type="button" onClick={() => (pickMode ? exitPickMode() : setPickMode(true))}
+                  <button type="button" onClick={() => (pickMode && pickPurpose === "board" ? exitPickMode() : startPick("board"))}
                     title="ติ๊กเลือกใบงานแล้วส่งขึ้นกระดานวางแผนของแคมเปญ"
-                    className={`h-9 rounded-md border px-3 text-xs font-medium transition ${pickMode ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}>
-                    {pickMode ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}
+                    className={`h-9 rounded-md border px-3 text-xs font-medium transition ${pickMode && pickPurpose === "board" ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}>
+                    {pickMode && pickPurpose === "board" ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}
                   </button>
+                )}
+                {/* 📋 สรุปงาน: สรุปใหม่ (ติ๊กเลือกใบที่ยังไม่ปิด) / เปิดสรุปที่บันทึกไว้ — ป๊อปของกลาง design-sheet-summary */}
+                {canEdit && (
+                  <div className="relative" ref={summaryAnchorRef}>
+                    {pickMode && pickPurpose === "summary" ? (
+                      <button type="button" onClick={exitPickMode}
+                        className="h-9 rounded-md border border-teal-600 bg-teal-600 px-3 text-xs font-medium text-white">✕ ออกจากโหมดสรุป</button>
+                    ) : (
+                      <button type="button" onClick={() => setSummaryMenuOpen((o) => !o)} title="สรุปงานที่เลือก → พิมพ์ / PDF / คัดลอกเป็นรูป"
+                        className="h-9 rounded-md border border-teal-200 bg-white px-3 text-xs font-medium text-teal-700 hover:bg-teal-50">📋 สรุปงาน ▾</button>
+                    )}
+                  </div>
                 )}
                 {/* เลือกจำนวนการ์ดต่อแถว (ของกลาง) — เฉพาะมุมมองแกลเลอรี */}
                 {viewMode === "gallery" && !isPhone && (
@@ -1309,14 +1350,24 @@ export function DesignDashboard() {
       {pickMode && createPortal(
         <div className="fixed inset-x-0 bottom-0 z-[80] border-t border-indigo-200 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_rgba(15,23,42,0.10)] backdrop-blur">
           <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-3">
-            <span className="text-sm font-semibold text-slate-800">🎨 เลือกไว้ {pickedIds.size.toLocaleString("th-TH")} ใบ</span>
-            <span className="text-xs text-slate-400">กดการ์ดเพื่อเลือก · ส่งได้ครั้งละไม่เกิน {SEND_TO_BOARD_MAX} ใบ</span>
+            <span className="text-sm font-semibold text-slate-800">{pickPurpose === "summary" ? "📋" : "🎨"} เลือกไว้ {pickedIds.size.toLocaleString("th-TH")} ใบ</span>
+            <span className="text-xs text-slate-400">
+              {pickPurpose === "summary"
+                ? `กดการ์ดเพื่อเลือก · เฉพาะใบที่ยังไม่ปิดงาน · ไม่เกิน ${SUMMARY_MAX} ใบ`
+                : `กดการ์ดเพื่อเลือก · ส่งได้ครั้งละไม่เกิน ${SEND_TO_BOARD_MAX} ใบ`}
+            </span>
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <button onClick={() => setPickedIds(new Set(filteredSheets.map((s) => s.id).slice(0, SEND_TO_BOARD_MAX)))}
-                title={`เลือกทุกใบที่ผ่านตัวกรอง/คำค้นตอนนี้ (${Math.min(filteredSheets.length, SEND_TO_BOARD_MAX)} ใบ)`}
-                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                เลือกทั้งหมดที่กรองอยู่
-              </button>
+              {(() => {
+                const max = pickPurpose === "summary" ? SUMMARY_MAX : SEND_TO_BOARD_MAX;
+                const pickable = filteredSheets.filter(canPick);
+                return (
+                  <button onClick={() => setPickedIds(new Set(pickable.map((s) => s.id).slice(0, max)))}
+                    title={`เลือกทุกใบที่ผ่านตัวกรอง/คำค้นตอนนี้ (${Math.min(pickable.length, max)} ใบ)`}
+                    className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                    เลือกทั้งหมดที่กรองอยู่
+                  </button>
+                );
+              })()}
               <button onClick={() => setPickedIds(new Set())} disabled={pickedIds.size === 0}
                 className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
                 ล้างที่เลือก
@@ -1324,10 +1375,17 @@ export function DesignDashboard() {
               <button onClick={exitPickMode} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
                 ออกจากโหมด
               </button>
-              <button onClick={() => setCampaignPickOpen(true)} disabled={pickedIds.size === 0}
-                className="h-9 rounded-md bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
-                ส่งขึ้นกระดาน →
-              </button>
+              {pickPurpose === "summary" ? (
+                <button onClick={() => { const ids = Array.from(pickedIds).slice(0, SUMMARY_MAX); exitPickMode(); openSummary(null, ids); }} disabled={pickedIds.size === 0}
+                  className="h-9 rounded-md bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-40">
+                  จัดสรุป →
+                </button>
+              ) : (
+                <button onClick={() => setCampaignPickOpen(true)} disabled={pickedIds.size === 0}
+                  className="h-9 rounded-md bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
+                  ส่งขึ้นกระดาน →
+                </button>
+              )}
             </div>
           </div>
         </div>,
@@ -1336,6 +1394,15 @@ export function DesignDashboard() {
 
       {/* เลือกแคมเปญปลายทาง (ของกลาง) */}
       <CampaignBoardPicker open={campaignPickOpen} onClose={() => setCampaignPickOpen(false)} sheetIds={Array.from(pickedIds)} />
+
+      {/* 📋 ดรอปดาวน์สรุปงาน (สรุปใหม่ + สรุปที่บันทึกไว้) — จอคอมยึดปุ่มในแถบเครื่องมือ · มือถือยึดปุ่ม ⋯ */}
+      <FloatingDropdown anchorRef={isPhone ? moreAnchorRef : summaryAnchorRef} open={summaryMenuOpen} onClose={() => setSummaryMenuOpen(false)} minWidth={300} maxWidth={380}>
+        <SummaryListMenu reloadKey={summaryReload} onNew={() => { setSummaryMenuOpen(false); startPick("summary"); }} onOpen={(id) => openSummary(id)} />
+      </FloatingDropdown>
+      {summaryBuilder && (
+        <DesignSheetSummaryBuilder open summaryId={summaryBuilder.id} initialSheetIds={summaryBuilder.sheetIds}
+          onClose={() => setSummaryBuilder(null)} onChanged={() => setSummaryReload((k) => k + 1)} />
+      )}
 
       {statusMgr && (
         <WorkflowStatusManager
