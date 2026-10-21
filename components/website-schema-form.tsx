@@ -135,12 +135,17 @@ function BareField({ children }: { label: string; hint?: string; children: React
 }
 
 /** ปุ่ม/ลิงก์ = ข้อความ + ปลายทาง (เลือกจากรายการ: หน้า/หมวด/สินค้า/ส่วนในหน้า/ลิงก์นอก — ของกลาง LinkTargetPicker) */
+/** ฟอนต์ตัวพิมพ์ดีดของเครื่อง (ไม่ต้องโหลดเพิ่ม) — ตรงกับ MONO_STACK ของเว็บร้าน (GalleryStrip) */
+const MONO_FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 /** 🔤 ช่องฟอนต์ของ Section (CANVAS_FONTS) — โชว์ฟอนต์หัวข้อ/เนื้อหาของร้านจริง */
 function SchemaFontField({ fd, value, onChange, ctx }: { fd: FieldDef; value: string; onChange: (v: unknown) => void; ctx: SchemaFormContext }) {
   const { fontNames } = useShopTheme(ctx.shopSlug);
+  // ตัวเลือกเพิ่มที่ช่องนี้ประกาศเอง (นอก CANVAS_FONTS) วางไว้บนสุด — เช่น "mono" ของแถวรูปลุคบุ๊ก
+  const base = canvasFontOptions(fontNames);
+  const extra = (fd.options ?? []).filter((o) => !base.some((b) => b.value === o.v)).map((o) => ({ value: o.v, label: o.l, family: o.v === "mono" ? MONO_FONT_STACK : `"${o.v}", sans-serif` }));
   return (
     <Field label={fd.label} hint={fd.hint} wide={fd.wide}>
-      <FontSelect value={value} onChange={(v) => onChange(v)} options={canvasFontOptions(fontNames)} googleFonts={canvasFontNames(fontNames)} />
+      <FontSelect value={value} onChange={(v) => onChange(v)} options={[...extra, ...base]} googleFonts={canvasFontNames(fontNames)} />
     </Field>
   );
 }

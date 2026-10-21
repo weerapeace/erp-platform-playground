@@ -227,6 +227,48 @@ describe("แกลเลอรี — ข้อความประกอบ�
   });
 });
 
+/** 🖼️ แกลเลอรีแบบแถวรูปลุคบุ๊ก (layout strip) — ชี้แล้วรูปขยาย */
+describe("แกลเลอรี — แถวรูปลุคบุ๊ก (strip*)", () => {
+  const fields = SECTION_SCHEMAS.gallery.fields;
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "g", type: "gallery", ...b }])[0] as unknown as Record<string, unknown> & { items: Record<string, unknown>[] };
+  const shown = (b: Record<string, unknown>) => fields.filter((x) => matchShowIf(x, b)).map((x) => x.key);
+
+  it("แกลเลอรีเก่า = ตารางแบบเดิม · ช่องแถวรูปซ่อน", () => {
+    const g = norm({ items: [{ imageKey: "a/b.jpg", alt: "รูป" }] });
+    expect(g.layout).toBe("grid");
+    const vis = shown(g);
+    expect(vis).toEqual(expect.arrayContaining(["columns", "gap", "hoverZoom", "capShow", "capPos"]));
+    expect(vis.some((k) => k.startsWith("strip"))).toBe(false);
+  });
+
+  it("แถวรูป: ช่องตาราง + ชุด cap* ซ่อน · ช่องแถวรูปโชว์ · ค่าเริ่ม = แบบรูปอ้างอิง", () => {
+    const g = norm({ layout: "strip", items: [{ imageKey: "a/b.jpg", alt: "รูป" }] });
+    expect(g).toMatchObject({ stripEffect: "soft", stripW: 120, stripZoom: 240, stripCap: "top", stripNum: "paren", stripFont: "mono", stripUpper: true, stripMove: "still", stripMobile: "tap", stripFade: true });
+    const vis = shown(g);
+    expect(vis).toEqual(expect.arrayContaining(["ratio", "frame", "fullBleed", "stripEffect", "stripW", "stripCap", "stripNum", "stripFont"]));
+    for (const k of ["columns", "gap", "hoverZoom", "capShow", "capPos", "capTitleFont"]) expect(vis).not.toContain(k);
+    expect(vis).not.toContain("stripAutoSpeed"); // โชว์เมื่อเลือกเลื่อนเอง
+    expect(shown({ ...g, stripMove: "auto" })).toContain("stripAutoSpeed");
+    // ไม่มีข้อความ = ซ่อนช่องหน้าตาข้อความ
+    expect(shown({ ...g, stripCap: "none" })).not.toContain("stripFont");
+  });
+
+  it("ค่ามั่ว/เกินช่วง = ค่าเริ่ม/ตัดเข้าช่วง", () => {
+    const g = norm({ layout: "strip", stripEffect: "wobble", stripW: 9999, stripZoom: 10, stripMove: "<x>", items: [] });
+    expect(g.stripEffect).toBe("soft");
+    expect(g.stripMove).toBe("still");
+    expect(Number(g.stripW)).toBeLessThanOrEqual(260);
+    expect(Number(g.stripZoom)).toBeGreaterThanOrEqual(130);
+  });
+
+  it("รูปจากสินค้า: นับเป็นรูป (ไม่ error) และไม่เตือน Alt", () => {
+    const v = (items: Record<string, unknown>[]) => validateBlocks(normalizeBlocks([{ id: "g", type: "gallery", layout: "strip", items }]) as Block[]).map((x) => x.message);
+    expect(v([{ code: ["ROAR01"] }]).join("|")).not.toMatch(/ยังไม่มีรูป|Alt/);
+    expect(v([]).join("|")).toMatch(/ยังไม่มีรูปในแกลเลอรี/);
+    expect(norm({ items: [{ code: ["ROAR01", "X2"] }] }).items[0].code).toEqual(["ROAR01"]);
+  });
+});
+
 /** 🃏 การ์ดในส่วนนี้ (Section ตารางสินค้า) — ค่าเริ่ม = ตามการ์ดของร้าน · ปิดสวิตช์ = ก๊อปค่าการ์ดของร้านมาเป็นค่าเริ่ม */
 describe("products: การ์ดในส่วนนี้", () => {
   const fields = SECTION_SCHEMAS.products.fields;

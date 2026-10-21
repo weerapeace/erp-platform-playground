@@ -114,6 +114,24 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
   - บนรูป/ตอนชี้ = ส่งเป็น children ของ `FramedImage` (ตัดตามทรงกรอบ) · ทั้งรูปเป็นลิงก์ → ข้อความลิงก์เป็นแค่ป้าย (ห้าม `<a>` ซ้อน)
   - CSS `.gal-cap-on` `.gal-cap-hover` (จอสัมผัสเห็นตลอด) `.gal-card` ใน globals.css
 - ใช้อยู่: แกลเลอรีรูป · Section ใหม่ที่มีรูป+ข้อความรายรูป ให้ใช้ชุดนี้ ไม่เขียนเอง
+- `imageCaptionFields({ showIf })` = ซ่อนทั้งชุดตามเงื่อนไข (แกลเลอรีแบบแถวรูปใช้ชุดข้อความ `strip*` ของตัวเอง)
+
+## 🖼️ แกลเลอรีแบบ "แถวรูปลุคบุ๊ก" (layout strip) — เพิ่ม 2026-10-21 · อ้างอิง RUE STUDIO "Explore FF24"
+- ใช้ทำอะไร: รูปเล็กเรียงแถวกลางจอ · ชี้ (คอม) / แตะ (มือถือ) รูปไหน รูปนั้นขยาย + เลข (01) + หัวข้อ/คำอธิบาย/ราคา/ข้อความลิงก์ · กดแล้วไปลิงก์
+- ทำไมไม่ใช่ Section ใหม่/ลุคบุ๊กกดซื้อได้: แกลเลอรีมีรูป+ข้อความ+ลิงก์รายรูป (target) + แปล 2 ภาษาครบแล้ว · ลุคบุ๊กกดซื้อได้ = จุดวางสินค้าบนรูป ≤ 6 รูป ไม่เข้ากัน
+- ERP `lib/website-schema.ts` แกลเลอรี: `layout` grid (เดิม) / strip · ช่องตาราง (`columns` `gap` `hoverZoom` + ชุด cap*) ซ่อนเมื่อแถวรูป (`GAL_GRID`) · `galleryStripFields()`:
+  `stripEffect` soft/bounce/bend (รูปข้าง ๆ เอียงรับ)/lens (รูปข้าง ๆ ใหญ่ตาม) · `stripW` `stripWMobile` (px รูปปกติ) · `stripZoom` (% ตอนขยาย) · `stripGap` (px) · `stripSpeed` ·
+  `stripStart` middle (ค่าเริ่ม)/first/none · `stripFade` ขอบจาง · `stripDim` none/fade/gray · `stripMove` still/drag/auto + `stripAutoSpeed` · `stripMobile` tap/center ·
+  ข้อความ (กลุ่ม caption): `stripCap` top/bottom/on/none · `stripNum` (01)/01/01 / 09/none · `stripAlign` · `stripFont` (mono + CANVAS_FONTS) · `stripTextSize` · `stripUpper` · `stripColor`+`stripHex` · `stripPrice`
+- รายรูป: `code` (products ≤ 1) = ใช้รูปแรก (parentImages ก่อน) / ชื่อ / ลิงก์หน้าสินค้า เมื่อไม่ได้ใส่เอง (ใช้ได้ทั้งแบบตาราง) · ตรวจก่อนเผยแพร่นับเป็นรูป ไม่เตือน Alt
+- สัดส่วนรูปใช้ช่อง `ratio` ร่วม (แถวรูป: "ตามรูปจริง" = 3:4) · ทรงกรอบ/เส้นกรอบชุดเดิม (FramedImage)
+- เว็บร้าน: `src/components/home/GalleryStrip.tsx` (client) · `src/lib/gallery-items.ts` (`resolveGalleryItems` · `galleryNeedsProducts` · `r2KeyOf`) · `GalleryView.tsx` (เว็บจริง ดึงสินค้าเมื่อมีรูปจากสินค้า — ทับ PURE_REGISTRY ใน SERVER_REGISTRY) · LiveBlocks ส่ง `data.products`
+  - ขนาด = ตัวแปร CSS `.gs-*` ใน globals.css: กว้าง `--gs-w × --k` (JS ตั้ง `--k` `--tilt` ต่อรูป) · สูงตาม aspect-ratio · แถวจองความสูงตอนขยาย (+ `--gs-ct/--gs-cb` ที่ของข้อความ) → หน้าไม่กระตุก
+  - คลิก: ฟัง `window` ช่วง capture (NavProgress ดักคลิกที่ document capture ก่อน React) — ลากเลื่อนแล้วไม่ไปลิงก์ · มือถือแตะแรก = ขยาย
+  - เมาส์นิ่งแต่รูปเลื่อนมาใต้เมาส์ (ตอนรูปอื่นหด/ขยาย) ไม่นับเป็นการชี้ (`hoverAt`) — กันสลับวน · โฟกัสคีย์บอร์ด (:focus-visible) = ขยาย
+  - เลื่อนเอง: ชุดรูปซ้ำ (copies) + rAF `scrollLeft` วนทีละชุด · หยุดเมื่อชี้/แตะ/ลาก/โฟกัส/พ้นจอ · ⚠️ เบราว์เซอร์ปัด scrollLeft เป็นพิกเซลจอ → นับตำแหน่งเอง (อย่าอ่านกลับทุกเฟรม ไม่งั้นค้าง)
+  - ลดการเคลื่อนไหว (prefers-reduced-motion) = ไม่มีแอนิเมชัน + ไม่เลื่อนเอง · รูปขอ srcset ตามขนาดตอนขยาย (ไม่เบลอ) + lazy
+- ทดสอบ: mock `C:/erp-local/sf-hoverlb-mock.mjs` (:3240) + preview "sf-hoverlb" (:3241) · e2e headless `<scratchpad>/cdp/e2e-strip.mjs` (23 ข้อ คอม/มือถือ/ลดการเคลื่อนไหว)
 
 ## 🛍 ลุคบุ๊กกดซื้อได้ — ปรับเพิ่ม 2026-10-18 (ค่าเริ่มทุกช่อง = หน้าตาเดิม)
 - จุดละหลายสินค้า: `spots[].code` สูงสุด 6 (ตัวแรก = หลัก · การ์ดเลื่อนดู ‹ 1/3 ›) · `spots[].label` ป้ายข้างจุด (ว่าง = ชื่อสินค้า)

@@ -437,10 +437,13 @@ const CAP_POSITIONS: FieldOption[] = [
 ];
 const CAP_AUTO_COLOR: FieldOption = { v: "auto", l: "อัตโนมัติ" };
 const CAP_AUTO_HINT = "อัตโนมัติ = ใต้รูปตามธีม · บนรูปเป็นสีขาว";
-const imageCaptionFields = (): FieldDef[] => {
+const imageCaptionFields = (opts: { showIf?: ShowIf } = {}): FieldDef[] => {
   const on = { key: "capShow", eq: true };
   const g = { group: "caption" as FieldGroup };
-  return [
+  // เงื่อนไขเพิ่มของทั้งชุด (เช่น แกลเลอรีแบบตารางเท่านั้น — แบบแถวรูปมีชุดข้อความของตัวเอง)
+  const extra = opts.showIf;
+  const withExtra = (fd: FieldDef): FieldDef => (extra ? { ...fd, showIf: fd.showIf ? [extra, ...(Array.isArray(fd.showIf) ? fd.showIf : [fd.showIf])] : extra } : fd);
+  return ([
     f("capShow", "แสดงข้อความประกอบรูป", "toggle", { ...g, default: true }),
     f("capPos", "ตำแหน่งข้อความ", "select", { ...g, default: "below", display: "tiles", options: CAP_POSITIONS, showIf: on, hint: "หัวข้อ / คำอธิบาย / ลิงก์ ใส่ทีละรูป (กดที่รูปในต้นไม้หรือพรีวิว)" }),
     f("capAlign", "จัดข้อความ", "select", {
@@ -521,6 +524,157 @@ const imageCaptionFields = (): FieldDef[] => {
       ],
       showIf: on,
     }),
+  ] as FieldDef[]).map(withExtra);
+};
+
+/**
+ * 🖼️ แกลเลอรีแบบ "แถวรูปลุคบุ๊ก" (layout strip) — รูปเล็กเรียงแถว ชี้/แตะรูปไหน รูปนั้นขยาย + เลข (01) + ข้อความ · กดไปลิงก์
+ * เว็บร้านวาดที่ src/components/home/GalleryStrip.tsx · ข้อความรายรูปใช้ title / caption / linkText เดียวกับแบบตาราง
+ * ข้อความมีชุดตั้งค่าของตัวเอง (strip*) ค่าเริ่ม = ตัวเล็กแบบพิมพ์ดีด ตัวพิมพ์ใหญ่ (แบบรูปอ้างอิง) — ชุด cap* ใช้กับแบบตารางเท่านั้น
+ */
+const GAL_GRID: ShowIf = { key: "layout", eq: ["grid", "", undefined] };
+const GAL_STRIP: ShowIf = { key: "layout", eq: "strip" };
+const galleryStripFields = (): FieldDef[] => {
+  const st = { showIf: GAL_STRIP };
+  const cap = { group: "caption" as FieldGroup };
+  const capOn: ShowIf[] = [GAL_STRIP, { key: "stripCap", eq: ["top", "bottom", "on"] }];
+  return [
+    f("stripEffect", "ลักษณะตอนขยาย", "select", {
+      group: "layout",
+      default: "soft",
+      options: [
+        { v: "soft", l: "นุ่ม" },
+        { v: "bounce", l: "เด้ง" },
+        { v: "bend", l: "บิดโค้งนิด ๆ (รูปข้าง ๆ เอียงรับ)" },
+        { v: "lens", l: "แว่นขยาย (รูปข้าง ๆ ใหญ่ตามนิดหน่อย)" },
+      ],
+      ...st,
+    }),
+    f("stripW", "ขนาดรูปปกติ — จอคอม (px)", "range", { group: "layout", default: 120, min: 60, numMax: 260, step: 10, ...st, hint: "ความกว้างของรูปเล็กแต่ละรูป" }),
+    f("stripWMobile", "ขนาดรูปปกติ — มือถือ (px)", "range", { group: "layout", default: 72, min: 40, numMax: 160, step: 4, ...st }),
+    f("stripZoom", "ตอนขยาย ใหญ่ขึ้น (%)", "range", { group: "layout", default: 240, min: 130, numMax: 400, step: 10, ...st, hint: "200 = ใหญ่เป็น 2 เท่าของรูปปกติ" }),
+    f("stripGap", "ระยะห่างระหว่างรูป (px)", "range", { group: "layout", default: 10, min: 0, numMax: 40, step: 2, ...st }),
+    f("stripSpeed", "ความไวตอนขยาย", "select", {
+      group: "layout",
+      default: "normal",
+      options: [
+        { v: "fast", l: "เร็ว" },
+        { v: "normal", l: "ปกติ" },
+        { v: "slow", l: "ช้า นุ่มนวล" },
+        { v: "slower", l: "ช้ามาก" },
+      ],
+      ...st,
+    }),
+    f("stripStart", "ตอนยังไม่มีใครชี้", "select", {
+      group: "layout",
+      default: "middle",
+      options: [
+        { v: "middle", l: "รูปกลางแถวขยายรอไว้ (แบบรูปอ้างอิง)" },
+        { v: "first", l: "รูปแรกขยายรอไว้" },
+        { v: "none", l: "ทุกรูปเล็กเท่ากัน" },
+      ],
+      ...st,
+      hint: "ขยายรอไว้ = ลูกค้าเห็นข้อความทันที และรู้ว่าชี้/แตะรูปได้ · แบบเลื่อนเอง = ไม่ขยายรอ",
+    }),
+    f("stripFade", "ขอบซ้าย-ขวาค่อย ๆ จางหาย", "toggle", { group: "layout", default: true, ...st }),
+    f("stripDim", "รูปอื่นตอนมีรูปขยาย", "select", {
+      group: "layout",
+      default: "none",
+      options: [
+        { v: "none", l: "เหมือนเดิม" },
+        { v: "fade", l: "จางลง" },
+        { v: "gray", l: "ขาวดำ + จางลง" },
+      ],
+      ...st,
+    }),
+    f("stripMove", "การเลื่อนแถว", "select", {
+      group: "layout",
+      default: "still",
+      options: [
+        { v: "still", l: "อยู่กับที่ (รูปเกินจอ = เลื่อนข้างได้)" },
+        { v: "drag", l: "ลากเลื่อนด้วยเมาส์ได้" },
+        { v: "auto", l: "เลื่อนเองช้า ๆ วนไม่จบ (หยุดเมื่อชี้)" },
+      ],
+      wide: true,
+      ...st,
+      hint: "มือถือปัดเลื่อนได้ทุกแบบ · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว = ไม่เลื่อนเอง",
+    }),
+    f("stripAutoSpeed", "เลื่อนเองเร็วแค่ไหน", "select", {
+      group: "layout",
+      default: "normal",
+      options: [
+        { v: "slow", l: "ช้า" },
+        { v: "normal", l: "ปกติ" },
+        { v: "fast", l: "เร็ว" },
+      ],
+      showIf: [GAL_STRIP, { key: "stripMove", eq: "auto" }],
+    }),
+    f("stripMobile", "มือถือ (ไม่มีเมาส์)", "select", {
+      group: "layout",
+      default: "tap",
+      options: [
+        { v: "tap", l: "แตะ 1 ครั้ง = ขยาย · แตะซ้ำ = ไปลิงก์" },
+        { v: "center", l: "ปัดแล้วรูปกลางจอขยายเอง · แตะ = ไปลิงก์" },
+      ],
+      wide: true,
+      ...st,
+      hint: "แบบรูปกลางจอ ไม่เลื่อนเอง (ลูกค้าปัดเอง)",
+    }),
+    // ✍️ ข้อความ (เลข + หัวข้อ + คำอธิบาย + ลิงก์ ของรูปที่ขยาย)
+    f("stripCap", "ข้อความของรูปที่ขยาย อยู่ตรงไหน", "select", {
+      ...cap,
+      default: "top",
+      options: [
+        { v: "top", l: "เหนือรูป (แบบรูปอ้างอิง)" },
+        { v: "bottom", l: "ใต้รูป" },
+        { v: "on", l: "บนรูป (แถบมืดด้านล่าง)" },
+        { v: "none", l: "ไม่มีข้อความ" },
+      ],
+      ...st,
+      hint: "หัวข้อ / คำอธิบาย / ข้อความลิงก์ ใส่ทีละรูป · รูปจากสินค้า = ใช้ชื่อสินค้าถ้าไม่ได้ใส่หัวข้อ",
+    }),
+    f("stripNum", "เลขลำดับ", "select", {
+      ...cap,
+      default: "paren",
+      options: [
+        { v: "paren", l: "(01)" },
+        { v: "plain", l: "01" },
+        { v: "of", l: "01 / 09" },
+        { v: "none", l: "ไม่มีเลข" },
+      ],
+      showIf: capOn,
+    }),
+    f("stripAlign", "จัดข้อความ", "select", {
+      ...cap,
+      default: "left",
+      options: [
+        { v: "left", l: "ชิดซ้ายของรูป" },
+        { v: "center", l: "กึ่งกลางรูป" },
+      ],
+      showIf: capOn,
+    }),
+    f("stripFont", "ฟอนต์ข้อความ", "select", {
+      ...cap,
+      default: "mono",
+      options: [{ v: "mono", l: "ตัวพิมพ์ดีด (mono) — แบบรูปอ้างอิง" }, ...CANVAS_FONTS],
+      display: "font",
+      showIf: capOn,
+    }),
+    f("stripTextSize", "ขนาดข้อความ", "select", {
+      ...cap,
+      default: "xs",
+      options: [
+        { v: "xs", l: "เล็กมาก (แบบรูปอ้างอิง)" },
+        { v: "s", l: "เล็ก" },
+        { v: "m", l: "กลาง" },
+        { v: "l", l: "ใหญ่" },
+      ],
+      showIf: capOn,
+    }),
+    f("stripUpper", "ตัวพิมพ์ใหญ่ทั้งหมด (อังกฤษ)", "toggle", { ...cap, default: true, showIf: capOn }),
+    f("stripColor", "สีข้อความ", "select", { ...cap, default: "auto", options: [{ v: "auto", l: "อัตโนมัติ (บนรูป = ขาว)" }, ...CANVAS_COLORS], showIf: capOn }),
+    f("stripHex", "สีข้อความ (เลือกเอง)", "color", { ...cap, default: "", showIf: [...capOn, { key: "stripColor", eq: "custom" }] }),
+    f("stripPrice", "โชว์ราคา (รูปที่เลือกจากสินค้า)", "toggle", { ...cap, default: false, showIf: capOn }),
   ];
 };
 
@@ -989,13 +1143,25 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     validate: (b, label) => (b.imageKey && !s(b.alt) ? [{ level: "warning", message: `${label}: ยังไม่มีคำบรรยายรูป (Alt)` }] : []),
   },
 
+  // 🖼️ แกลเลอรีรูป — 2 แบบ: ตาราง (แบบเดิม) · แถวรูปชี้แล้วขยาย (ลุคบุ๊ก 2026-10-21 · อ้างอิง RUE STUDIO "Explore FF24")
+  //   เว็บร้าน: GalleryBlockView.tsx (ตาราง) · GalleryStrip.tsx (แถวรูป) · รายรูปเลือกสินค้าได้ (code) = ใช้รูปแรก/ชื่อ/ลิงก์ของสินค้า
   gallery: {
     type: "gallery",
-    meta: { label: "แกลเลอรีรูป", icon: "🖼️", hint: "หลายรูปเรียงเป็นตาราง", group: "พื้นฐาน" },
+    meta: { label: "แกลเลอรีรูป", icon: "🖼️", hint: "หลายรูปเรียงเป็นตาราง · หรือแถวรูปลุคบุ๊ก ชี้แล้วรูปขยาย กดไปลิงก์", group: "พื้นฐาน" },
     fields: [
       ...headFields({ title: "แกลเลอรี" }),
-      f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 3, min: 1, numMax: 6 }),
-      ...imageLookFields({ ratio: "1:1", allowAuto: true, ratioHint: "ตัดรูปเป็นสัดส่วนนี้ — เลือกส่วนที่เห็น/ซูมได้ทีละรูป (กดที่รูปในพรีวิว/ต้นไม้)" }),
+      f("layout", "รูปแบบ", "select", {
+        group: "layout",
+        default: "grid",
+        wide: true,
+        options: [
+          { v: "grid", l: "ตารางรูป (แบบเดิม)" },
+          { v: "strip", l: "แถวรูปลุคบุ๊ก — ชี้แล้วรูปขยาย + ข้อความ" },
+        ],
+        hint: "แถวรูป = รูปเล็กเรียงแถวกลางจอ ชี้/แตะรูปไหน รูปนั้นขยายพร้อมเลข (01) + ข้อความ กดแล้วไปลิงก์ · แนะนำสัดส่วนรูปแนวตั้ง 3:4 หรือ 2:3",
+      }),
+      f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 3, min: 1, numMax: 6, showIf: GAL_GRID }),
+      ...imageLookFields({ ratio: "1:1", allowAuto: true, ratioHint: "ตัดรูปเป็นสัดส่วนนี้ — เลือกส่วนที่เห็น/ซูมได้ทีละรูป (กดที่รูปในพรีวิว/ต้นไม้) · แถวรูป: ตามรูปจริง = 3:4" }),
       f("gap", "ระยะห่างระหว่างรูป", "select", {
         group: "layout",
         default: "md",
@@ -1005,10 +1171,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "md", l: "กลาง" },
           { v: "lg", l: "มาก" },
         ],
+        showIf: GAL_GRID,
       }),
-      f("fullBleed", "รูปเต็มความกว้างจอ", "toggle", { group: "layout", default: false, hint: "ตารางรูปยืดเต็มจอ (หัวข้อยังอยู่ในกรอบปกติ)" }),
-      f("hoverZoom", "ชี้แล้วรูปขยายนิด ๆ", "toggle", { group: "layout", default: true }),
-      ...imageCaptionFields(),
+      f("fullBleed", "รูปเต็มความกว้างจอ", "toggle", { group: "layout", default: false, hint: "รูปยืดเต็มจอ (หัวข้อยังอยู่ในกรอบปกติ)" }),
+      f("hoverZoom", "ชี้แล้วรูปขยายนิด ๆ", "toggle", { group: "layout", default: true, showIf: GAL_GRID }),
+      ...galleryStripFields(),
+      ...imageCaptionFields({ showIf: GAL_GRID }),
     ],
     children: {
       key: "items",
@@ -1017,6 +1185,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       icon: "🏞️",
       max: 24,
       fields: [
+        f("code", "ใช้รูปจากสินค้า (ไม่บังคับ)", "products", {
+          group: "media",
+          max: 1,
+          wide: true,
+          hint: "เลือกสินค้า = ใช้รูปแรก + ชื่อ + ลิงก์ไปหน้าสินค้าให้เอง · ใส่รูป/หัวข้อ/ลิงก์ด้านล่างเอง = ใช้ของที่ใส่แทน",
+        }),
         image("imageKey", "รูป"),
         f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
         text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200 }),
@@ -1025,13 +1199,19 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         f("href", "กดรูปแล้วไปที่", "target", { group: "action", default: "", hint: "ว่าง = กดไม่ได้" }),
         text("linkText", "ข้อความลิงก์ใต้รูป", { group: "action", default: "", max: 40, placeholder: "เช่น ดูสินค้า →", hint: "โชว์เมื่อตั้ง \"กดรูปแล้วไปที่\" แล้ว · ว่าง = ไม่มีลิงก์ใต้รูป" }),
       ],
-      summary: (it) => (it.imageKey ? s(it.title) || s(it.caption) || s(it.alt) || "รูป" : "ยังไม่เลือกรูป"),
+      summary: (it) => {
+        const code = Array.isArray(it.code) && it.code.length ? String(it.code[0]) : "";
+        if (!it.imageKey && !code) return "ยังไม่เลือกรูป";
+        return s(it.title) || s(it.caption) || s(it.alt) || (code ? `🛍 ${code}` : "รูป");
+      },
     },
-    summary: (b) => count(arr(b.items).length, "รูป"),
+    summary: (b) => `${b.layout === "strip" ? "แถวรูปลุคบุ๊ก · " : ""}${count(arr(b.items).length, "รูป")}`,
     validate: (b, label) => {
-      const withImg = arr(b.items).filter((i) => i.imageKey);
+      const hasCode = (i: Record<string, unknown>) => Array.isArray(i.code) && i.code.length > 0;
+      const withImg = arr(b.items).filter((i) => i.imageKey || hasCode(i));
       if (!withImg.length) return [{ level: "error", message: `${label}: ยังไม่มีรูปในแกลเลอรี` }];
-      return withImg.some((i) => !s(i.alt)) ? [{ level: "warning", message: `${label}: บางรูปยังไม่มีคำบรรยาย (Alt)` }] : [];
+      // รูปจากสินค้า = ใช้ชื่อสินค้าเป็นคำบรรยายให้เอง
+      return withImg.some((i) => !hasCode(i) && !s(i.alt)) ? [{ level: "warning", message: `${label}: บางรูปยังไม่มีคำบรรยาย (Alt)` }] : [];
     },
   },
 

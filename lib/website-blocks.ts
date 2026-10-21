@@ -705,7 +705,31 @@ export interface GalleryBlock extends BlockBase {
   capCardBg?: string;
   capCardHex?: string;
   capMobile?: "all" | "title" | "none";
-  items: (ChildBase & { imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];
+  /** 🖼️ grid = ตาราง (แบบเดิม) · strip = แถวรูปลุคบุ๊ก ชี้แล้วขยาย (ช่อง strip* — galleryStripFields ใน website-schema) */
+  layout?: "grid" | "strip";
+  stripEffect?: "soft" | "bounce" | "bend" | "lens";
+  stripW?: number;
+  stripWMobile?: number;
+  stripZoom?: number;
+  stripGap?: number;
+  stripSpeed?: "fast" | "normal" | "slow" | "slower";
+  stripStart?: "first" | "middle" | "none";
+  stripFade?: boolean;
+  stripDim?: "none" | "fade" | "gray";
+  stripMove?: "still" | "drag" | "auto";
+  stripAutoSpeed?: "slow" | "normal" | "fast";
+  stripMobile?: "tap" | "center";
+  stripCap?: "top" | "bottom" | "on" | "none";
+  stripNum?: "paren" | "plain" | "of" | "none";
+  stripAlign?: "left" | "center";
+  stripFont?: string;
+  stripTextSize?: "xs" | "s" | "m" | "l";
+  stripUpper?: boolean;
+  stripColor?: string;
+  stripHex?: string;
+  stripPrice?: boolean;
+  /** รายรูป: code = รหัสรุ่นสินค้า (≤1) → รูปแรก/ชื่อ/ลิงก์ของสินค้า เมื่อไม่ได้ใส่เอง */
+  items: (ChildBase & { code?: string[]; imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];
 }
 
 /** ปุ่มเดี่ยว — วางคั่นระหว่างเนื้อหาได้ทุกจุด */
