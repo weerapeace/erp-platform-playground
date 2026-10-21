@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import type { AuditLogEntry } from "@/app/api/audit-logs/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
+import { useT } from "@/components/i18n";
 import { buildStatusMeta, isOwnBrandJob, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
@@ -66,8 +68,8 @@ type StatusColumn = {
 type BrandGroup = "customer" | "own";
 const GROUP_KEY: Record<BrandGroup, string> = { customer: "GROUP:customer", own: "GROUP:own" };
 const GROUP_LABEL: Record<BrandGroup, { title: string; all: string; icon: string }> = {
-  customer: { title: "งานลูกค้า", all: "ทั้งหมดงานลูกค้า", icon: "👤" },
-  own: { title: "แบรนด์เรา", all: "ทั้งหมดแบรนด์เรา", icon: "🏷️" },
+  customer: { get title() { return tr("งานลูกค้า", "Customer jobs"); }, get all() { return tr("ทั้งหมดงานลูกค้า", "All customer jobs"); }, icon: "👤" },
+  own: { get title() { return tr("แบรนด์เรา", "Our brands"); }, get all() { return tr("ทั้งหมดแบรนด์เรา", "All our brands"); }, icon: "🏷️" },
 };
 const BRAND_GROUPS: BrandGroup[] = ["customer", "own"];
 
@@ -91,7 +93,7 @@ function brandKeyOf(sheet: DesignSheetListItem): string {
 }
 
 function brandNameOf(sheet: DesignSheetListItem): string {
-  return sheet.brand_name ?? "ไม่ระบุแบรนด์";
+  return sheet.brand_name ?? tr("ไม่ระบุแบรนด์", "No brand");
 }
 
 // ใบงานนี้เป็นของแบรนด์เราไหม (กฎกลาง isOwnBrandJob) — ไม่ระบุแบรนด์ = งานลูกค้า
@@ -124,13 +126,13 @@ function deadlineTone(sheet: DesignSheetListItem, statusMeta: StatusMeta): Tone 
 }
 
 function deadlineLabel(sheet: DesignSheetListItem, statusMeta: StatusMeta): string {
-  if (statusMeta.finished.has(sheet.status)) return "ปิดงาน";
+  if (statusMeta.finished.has(sheet.status)) return tr("ปิดงาน", "Closed");
   const days = daysUntil(sheet.deadline);
-  if (days === null) return "ไม่มีกำหนด";
-  if (days < 0) return `เกิน ${Math.abs(days)} วัน`;
-  if (days === 0) return "วันนี้";
-  if (days === 1) return "พรุ่งนี้";
-  return `${days} วัน`;
+  if (days === null) return tr("ไม่มีกำหนด", "No deadline");
+  if (days < 0) return tr(`เกิน ${Math.abs(days)} วัน`, `${Math.abs(days)}d overdue`);
+  if (days === 0) return tr("วันนี้", "Today");
+  if (days === 1) return tr("พรุ่งนี้", "Tomorrow");
+  return tr(`${days} วัน`, `${days}d`);
 }
 
 function formatDateTime(value: string): string {
@@ -140,11 +142,11 @@ function formatDateTime(value: string): string {
 }
 
 function auditActionLabel(action: string): string {
-  if (action === "create") return "สร้าง";
-  if (action === "update") return "แก้ไข";
-  if (action === "delete") return "ลบ";
-  if (action === "archive") return "เก็บเข้ากรุ";
-  if (action === "restore") return "กู้คืน";
+  if (action === "create") return tr("สร้าง", "Created");
+  if (action === "update") return tr("แก้ไข", "Edited");
+  if (action === "delete") return tr("ลบ", "Deleted");
+  if (action === "archive") return tr("เก็บเข้ากรุ", "Archived");
+  if (action === "restore") return tr("กู้คืน", "Restored");
   return action;
 }
 
@@ -152,7 +154,7 @@ function auditText(row: AuditLogEntry): string {
   const metadata = row.metadata ?? {};
   const code = typeof metadata.code === "string" ? metadata.code : null;
   const name = typeof metadata.name === "string" ? metadata.name : null;
-  const label = code || name || row.entity_id?.slice(0, 8) || "รายการ";
+  const label = code || name || row.entity_id?.slice(0, 8) || tr("รายการ", "item");
   return `${auditActionLabel(row.action)} ${label}`;
 }
 
@@ -195,9 +197,10 @@ function PickBadge({ checked }: { checked: boolean }) {
 
 // ทับการ์ดที่เลือกไม่ได้ในโหมดสรุปงาน (ปิดงานแล้ว) — จางลง + บอกเหตุผล
 function NoPickVeil() {
+  const t = useT();
   return (
     <span className="pointer-events-none absolute inset-0 z-10 flex items-start justify-end bg-white/60 p-1">
-      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">ปิดงานแล้ว</span>
+      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">{t("ปิดงานแล้ว", "Closed")}</span>
     </span>
   );
 }
@@ -213,6 +216,7 @@ function LoadingCard() {
 }
 
 export function DesignDashboard() {
+  const t = useT();
   const canEdit = usePermission("products.edit");
   const canTasks = useCanSendToBoard();   // มีสิทธิ์เข้าแอปงาน (ที่กระดานแคมเปญอยู่) ไหม — ไม่มี = ไม่โชว์ปุ่ม
   const [sheets, setSheets] = useState<DesignSheetListItem[]>([]);
@@ -386,9 +390,9 @@ export function DesignDashboard() {
         });
       const [listJson, statusJson] = await Promise.all([
         apiFetch(`/api/design-sheets?limit=${DASHBOARD_LIMIT}&archived=0&sort_by=updated_at&sort_dir=desc`)
-          .then((response) => readApi<ListResponse>(response, "โหลดใบงานไม่สำเร็จ")),
+          .then((response) => readApi<ListResponse>(response, tr("โหลดใบงานไม่สำเร็จ", "Couldn't load design sheets"))),
         apiFetch("/api/design-sheets/statuses")
-          .then((response) => readApi<StatusResponse>(response, "โหลดสถานะไม่สำเร็จ")),
+          .then((response) => readApi<StatusResponse>(response, tr("โหลดสถานะไม่สำเร็จ", "Couldn't load statuses"))),
       ]);
 
       if (!alive) return;
@@ -400,7 +404,7 @@ export function DesignDashboard() {
     loadDashboard()
       .catch((e) => {
         if (!alive) return;
-        setError(e instanceof Error ? e.message : "โหลดข้อมูลจริงไม่สำเร็จ");
+        setError(e instanceof Error ? e.message : tr("โหลดข้อมูลจริงไม่สำเร็จ", "Couldn't load data"));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -455,7 +459,7 @@ export function DesignDashboard() {
     const oldStatuses = Array.from(new Set(sheets.map((sheet) => sheet.status).filter((status) => !known.has(status))));
     return [
       ...columns,
-      ...oldStatuses.map((key) => ({ key, label: `สถานะเดิม: ${key}`, color: "#94a3b8", old: true })),
+      ...oldStatuses.map((key) => ({ key, label: tr(`สถานะเดิม: ${key}`, `Old status: ${key}`), color: "#94a3b8", old: true })),
     ];
   }, [sheets, statusMeta]);
 
@@ -518,7 +522,7 @@ export function DesignDashboard() {
   const urgentJobs = filteredSheets.filter((sheet) => isUrgent(sheet, statusMeta)).length;
   const finishedJobs = filteredSheets.filter((sheet) => statusMeta.finished.has(sheet.status)).length;
   const visibleTotal = selectedBrand ? selectedBrand.total : groups[selectedGroup].total;
-  const loadedLimitNote = total > sheets.length ? `แสดงล่าสุด ${sheets.length.toLocaleString("th-TH")} จาก ${total.toLocaleString("th-TH")} งาน` : "ข้อมูลจากระบบจริง";
+  const loadedLimitNote = total > sheets.length ? t(`แสดงล่าสุด ${sheets.length.toLocaleString("th-TH")} จาก ${total.toLocaleString("th-TH")} งาน`, `Showing latest ${sheets.length.toLocaleString("th-TH")} of ${total.toLocaleString("th-TH")} jobs`) : t("ข้อมูลจากระบบจริง", "Live data");
 
   const allBoardColumns = statusColumns.map((column) => ({
     ...column,
@@ -569,11 +573,11 @@ export function DesignDashboard() {
         body: JSON.stringify({ status: nextStatus }),
       });
       const json = await response.json() as { error?: string | null };
-      if (!response.ok || json.error) throw new Error(json.error || "\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08");
-      setMoveMessage({ type: "success", text: `\u0e22\u0e49\u0e32\u0e22 ${sheet.code} \u0e44\u0e1b ${nextLabel} \u0e41\u0e25\u0e49\u0e27` });
+      if (!response.ok || json.error) throw new Error(json.error || t("\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08", "Couldn't move status"));
+      setMoveMessage({ type: "success", text: t(`\u0e22\u0e49\u0e32\u0e22 ${sheet.code} \u0e44\u0e1b ${nextLabel} \u0e41\u0e25\u0e49\u0e27`, `Moved ${sheet.code} to ${nextLabel}`) });
     } catch (e) {
       setSheets(previousSheets);
-      setMoveMessage({ type: "error", text: e instanceof Error ? e.message : "\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08" });
+      setMoveMessage({ type: "error", text: e instanceof Error ? e.message : t("\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08", "Couldn't move status") });
     } finally {
       setMovingSheetId(null);
       setDraggingSheetId(null);
@@ -625,7 +629,7 @@ export function DesignDashboard() {
                         onClick={activate}
                         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
                         data-gg-task-card
-                        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : hoverOn ? undefined : `${sheet.code} • ${sheet.name}`}
+                        title={pickMode ? t("กดเพื่อเลือก/ยกเลิกเลือก", "Click to select/deselect") : hoverOn ? undefined : `${sheet.code} • ${sheet.name}`}
                         className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
                       >
                         {pickMode && (canPick(sheet) ? <PickBadge checked={picked} /> : <NoPickVeil />)}
@@ -661,14 +665,14 @@ export function DesignDashboard() {
                             </span>
                           )}
                           <div className="mt-auto flex items-center justify-between gap-1.5 pt-0.5">
-                            <span className="truncate text-[10px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
+                            <span className="truncate text-[10px] text-slate-400">{sheet.brand_name ?? t("ไม่ระบุ", "None")}</span>
                             <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
                           </div>
                           {(sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
                             <div className="flex flex-wrap gap-1 text-[9px] text-slate-400">
-                              {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">ตีราคา</span>}
-                              {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">มีราคา</span>}
-                              {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">มี SKU</span>}
+                              {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">{t("ตีราคา", "Costed")}</span>}
+                              {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">{t("มีราคา", "Quoted")}</span>}
+                              {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">{t("มี SKU", "Has SKU")}</span>}
                             </div>
                           )}
                         </div>
@@ -702,9 +706,9 @@ export function DesignDashboard() {
     const noteIcon = sheet.note ? <span className="shrink-0 cursor-help text-[11px]" title={`📝 ${sheet.note}`}>📝</span> : null;
     const tags = (sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
       <div className="mt-1 flex flex-wrap gap-1 text-[9px]">
-        {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">ตีราคา</span>}
-        {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">มีราคา</span>}
-        {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">มี SKU</span>}
+        {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">{t("ตีราคา", "Costed")}</span>}
+        {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">{t("มีราคา", "Quoted")}</span>}
+        {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">{t("มี SKU", "Has SKU")}</span>}
       </div>
     );
     return (
@@ -720,7 +724,7 @@ export function DesignDashboard() {
         onDragStart={(event) => handleCardDragStart(event, sheet)}
         onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
         aria-busy={isMoving}
-        title={pickMode ? "กดเพื่อเลือก/ยกเลิกเลือก" : hoverOn && isDesktop ? undefined : isDesktop ? `${sheet.code} • ${sheet.name} — ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด` : "แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)"}
+        title={pickMode ? t("กดเพื่อเลือก/ยกเลิกเลือก", "Click to select/deselect") : hoverOn && isDesktop ? undefined : isDesktop ? `${sheet.code} • ${sheet.name} — ${t("ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด", "drag to change status or click to open")}` : t("แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)", "Tap to open (change status in the popup)")}
         className={`relative overflow-hidden rounded-lg border bg-white shadow-[2px_2px_0_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 ${row ? "flex items-center gap-2 p-1.5" : "block p-1.5"} ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
       >
         {pickMode && (canPick(sheet) ? <PickBadge checked={picked} /> : <NoPickVeil />)}
@@ -765,28 +769,28 @@ export function DesignDashboard() {
             <div className="flex min-w-0 items-center gap-2">
               <BrandSlot theme={brandTheme} id="header_left" className="shrink-0" />
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold leading-tight text-slate-900">แผนที่ภารกิจงานออกแบบ</h1>
-                <p className="truncate text-[11px] text-slate-400">{scopeLabel} · {activeJobs} งานเดินอยู่{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} ใกล้ครบ</span></> : null}</p>
+                <h1 className="truncate text-lg font-semibold leading-tight text-slate-900">{t("แผนที่ภารกิจงานออกแบบ", "Design mission map")}</h1>
+                <p className="truncate text-[11px] text-slate-400">{scopeLabel} · {activeJobs} {t("งานเดินอยู่", "active")}{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} {t("ใกล้ครบ", "due soon")}</span></> : null}</p>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef}>
               <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
-              <button type="button" onClick={() => setMoreOpen((o) => !o)} title="เมนูเพิ่มเติม" aria-label="เมนูเพิ่มเติม"
+              <button type="button" onClick={() => setMoreOpen((o) => !o)} title={t("เมนูเพิ่มเติม", "More menu")} aria-label={t("เมนูเพิ่มเติม", "More menu")}
                 className={`flex h-9 w-9 items-center justify-center rounded-md border text-lg leading-none ${moreOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>⋯</button>
               <FloatingDropdown anchorRef={moreAnchorRef} open={moreOpen} onClose={() => setMoreOpen(false)} minWidth={224} maxWidth={280}>
                 <div className="rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
                   <div className="px-1 py-0.5"><RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} /></div>
-                  <a href="/master/design-sheets" className={menuItem}>📄 กลับ Design Sheets</a>
-                  <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 รีเฟรชข้อมูล</button>
-                  {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 ปรับธีม {selectedBrand?.name}</button>}
-                  <button type="button" className={menuItem} onClick={() => { setStatusMgr(true); setMoreOpen(false); }}>🔀 จัดการสถานะ</button>
+                  <a href="/master/design-sheets" className={menuItem}>📄 {t("กลับ Design Sheets", "Back to Design Sheets")}</a>
+                  <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 {t("รีเฟรชข้อมูล", "Refresh data")}</button>
+                  {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 {t("ปรับธีม", "Theme")} {selectedBrand?.name}</button>}
+                  <button type="button" className={menuItem} onClick={() => { setStatusMgr(true); setMoreOpen(false); }}>🔀 {t("จัดการสถานะ", "Manage statuses")}</button>
                   <button type="button" className={menuItem} onClick={() => { changeCardSize(cardSize === "row" ? "compact" : "row"); setMoreOpen(false); }}>
-                    {cardSize === "row" ? "▦ การ์ดเล็ก (มีรูป)" : "☰ การ์ดแถวย่อ"}
+                    {cardSize === "row" ? t("▦ การ์ดเล็ก (มีรูป)", "▦ Small cards (with image)") : t("☰ การ์ดแถวย่อ", "☰ Compact rows")}
                   </button>
-                  {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else startPick("board"); setMoreOpen(false); }}>{pickMode ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}</button>}
-                  {canEdit && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("summary"); setMoreOpen(false); }}>📋 สรุปงานใหม่ (เลือกใบงาน)</button>}
-                  {canEdit && <button type="button" className={menuItem} onClick={() => { setMoreOpen(false); setSummaryMenuOpen(true); }}>📂 สรุปที่บันทึกไว้</button>}
-                  <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ ตั้งค่าแบรนด์</button>
+                  {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else startPick("board"); setMoreOpen(false); }}>{pickMode ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}</button>}
+                  {canEdit && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("summary"); setMoreOpen(false); }}>📋 {t("สรุปงานใหม่ (เลือกใบงาน)", "New summary (pick sheets)")}</button>}
+                  {canEdit && <button type="button" className={menuItem} onClick={() => { setMoreOpen(false); setSummaryMenuOpen(true); }}>📂 {t("สรุปที่บันทึกไว้", "Saved summaries")}</button>}
+                  <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ {t("ตั้งค่าแบรนด์", "Brand settings")}</button>
                 </div>
               </FloatingDropdown>
             </div>
@@ -800,9 +804,9 @@ export function DesignDashboard() {
               <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.8)]" />
               Live design sheets dashboard
             </div>
-            <h1 className="text-2xl font-semibold text-slate-900">แผนที่ภารกิจงานออกแบบ</h1>
+            <h1 className="text-2xl font-semibold text-slate-900">{t("แผนที่ภารกิจงานออกแบบ", "Design mission map")}</h1>
             <p className="mt-1 max-w-3xl text-sm text-slate-500">
-              ดึงใบงาน แบรนด์ และสถานะจากระบบจริงก่อน แล้วค่อยปรับหน้าตาเฉพาะแบรนด์ในขั้นถัดไป
+              {t("ดึงใบงาน แบรนด์ และสถานะจากระบบจริงก่อน แล้วค่อยปรับหน้าตาเฉพาะแบรนด์ในขั้นถัดไป", "Live design sheets, brands and statuses from the system; brand-specific looks come next")}
             </p>
             </div>
           </div>
@@ -812,24 +816,24 @@ export function DesignDashboard() {
             <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact={!isDesktop} />
             <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
             <a data-gg-action href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
-              กลับ Design Sheets
+              {t("กลับ Design Sheets", "Back to Design Sheets")}
             </a>
             <button
               data-gg-action
               onClick={refreshDashboard}
               className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white"
             >
-              รีเฟรชข้อมูล
+              {t("รีเฟรชข้อมูล", "Refresh data")}
             </button>
             {selectedBrandId && (
-              <button data-gg-action onClick={() => setThemeBuilderOpen(true)} title={`ปรับธีมของ ${selectedBrand?.name ?? "แบรนด์"}`}
+              <button data-gg-action onClick={() => setThemeBuilderOpen(true)} title={t(`ปรับธีมของ ${selectedBrand?.name ?? "แบรนด์"}`, `Adjust theme for ${selectedBrand?.name ?? "brand"}`)}
                 className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
-                🎨 ปรับธีม
+                🎨 {t("ปรับธีม", "Theme")}
               </button>
             )}
             <button data-gg-action="primary" onClick={() => setCreateOpen(true)}
               className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
-              ＋ เพิ่มงาน
+              ＋ {t("เพิ่มงาน", "Add job")}
             </button>
           </div>
         </div>
@@ -837,7 +841,7 @@ export function DesignDashboard() {
 
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            โหลดข้อมูลจริงไม่สำเร็จ: {error}
+            {t("โหลดข้อมูลจริงไม่สำเร็จ", "Couldn't load data")}: {error}
           </div>
         )}
 
@@ -882,12 +886,12 @@ export function DesignDashboard() {
           <BrandSlot theme={brandTheme} id="sidebar_top" />
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800">แบรนด์จากงานจริง</h2>
-              <p className="text-xs text-slate-400">คลิกเพื่อกรองบอร์ด · แยกงานลูกค้า / แบรนด์เรา ตามช่อง 👤 งานลูกค้า ใน<a href="/master/brands" className="text-blue-600 hover:underline">หน้าแบรนด์</a></p>
+              <h2 className="text-sm font-semibold text-slate-800">{t("แบรนด์จากงานจริง", "Brands from live jobs")}</h2>
+              <p className="text-xs text-slate-400">{t("คลิกเพื่อกรองบอร์ด · แยกงานลูกค้า / แบรนด์เรา ตามช่อง 👤 งานลูกค้า ใน", "Click to filter the board · split into customer jobs / our brands by the 👤 Customer job box on the ")}<a href="/master/brands" className="text-blue-600 hover:underline">{t("หน้าแบรนด์", "Brands page")}</a></p>
             </div>
             <div className="flex items-center gap-2">
-              <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
-              <button onClick={() => setBrandSettingsOpen(true)} title="ตั้งค่าแบรนด์ (เรียงลำดับ / ซ่อน-โชว์)"
+              <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} {t("แบรนด์", "brands")}</span>
+              <button onClick={() => setBrandSettingsOpen(true)} title={t("ตั้งค่าแบรนด์ (เรียงลำดับ / ซ่อน-โชว์)", "Brand settings (order / show-hide)")}
                 className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️</button>
             </div>
           </div>
@@ -895,8 +899,8 @@ export function DesignDashboard() {
           {/* 2 กลุ่ม (งานลูกค้า / แบรนด์เรา) ไม่ปนกัน — แต่ละกลุ่มมีปุ่ม "ทั้งหมด" ของตัวเอง
               จอคอม = ห่อบรรทัด · แท็บเล็ต = แถวละกลุ่ม เลื่อนซ้าย-ขวา (การ์ดแบรนด์ไม่กินพื้นที่แนวตั้ง) */}
           <div className="flex items-stretch gap-2">
-            <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
-              className="flex shrink-0 flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ เพิ่มงาน</button>
+            <button data-gg-action onClick={() => setCreateOpen(true)} title={t("สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)", "Create a new job (pick or add a brand in the form)")}
+              className="flex shrink-0 flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ {t("เพิ่มงาน", "Add job")}</button>
 
             <div className="min-w-0 flex-1 space-y-2">
               {BRAND_GROUPS.map((group) => {
@@ -907,10 +911,10 @@ export function DesignDashboard() {
                   <div key={group} data-gg-brand-group={group}
                     className={isDesktop ? "flex flex-wrap items-stretch gap-2" : "flex items-stretch gap-2 overflow-x-auto pb-1 [&>*]:shrink-0"}>
                     <button data-gg-all-button onClick={() => setSelectedBrandKey(GROUP_KEY[group])}
-                      title={group === "own" ? "แบรนด์ของเราเอง — บอร์ดไม่มีขั้นส่งลูกค้า" : "งานที่ทำให้ลูกค้า — บอร์ดครบทุกขั้น"}
+                      title={group === "own" ? t("แบรนด์ของเราเอง — บอร์ดไม่มีขั้นส่งลูกค้า", "Our own brands — board has no customer-delivery steps") : t("งานที่ทำให้ลูกค้า — บอร์ดครบทุกขั้น", "Jobs for customers — board shows every step")}
                       className={`flex min-w-[150px] flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${allOn ? "border-slate-900 bg-slate-900 text-white" : group === "own" ? "border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100" : "border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100"}`}>
                       <span className="text-sm font-semibold">{GROUP_LABEL[group].icon} {GROUP_LABEL[group].all}</span>
-                      <span className="text-[11px] opacity-70">{g.active} งานเดินอยู่</span>
+                      <span className="text-[11px] opacity-70">{g.active} {t("งานเดินอยู่", "active")}</span>
                     </button>
 
                     {g.top.map((brand) => {
@@ -923,7 +927,7 @@ export function DesignDashboard() {
                           {brandMark(brand, isPhone ? "h-9 w-9" : "h-12 w-12")}
                           <div className="min-w-0">
                             <div className={`truncate font-semibold text-slate-800 ${isPhone ? "max-w-[120px] text-sm" : "max-w-[170px] text-base"}`}>{brand.name}</div>
-                            <div className="text-xs text-slate-400">{brand.active} เดิน{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} ใกล้ครบ</span></> : null}</div>
+                            <div className="text-xs text-slate-400">{brand.active} {t("เดิน", "active")}{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} {t("ใกล้ครบ", "due soon")}</span></> : null}</div>
                           </div>
                         </button>
                       );
@@ -935,8 +939,8 @@ export function DesignDashboard() {
                       <div className="relative" data-brands-others ref={anchorRef}>
                         <button onClick={() => setOthersOpen((o) => (o === group ? null : group))}
                           className={`flex h-full flex-col justify-center rounded-lg border px-3 py-2 text-left transition ${g.othersSelected ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                          <span className="max-w-[140px] truncate text-sm font-semibold">{g.othersSelected ? g.othersSelected.name : "แบรนด์อื่นๆ"} ▾</span>
-                          <span className="text-[11px] opacity-70">{g.othersSelected ? `${g.othersSelected.active} เดิน` : `อีก ${g.others.length} แบรนด์`}</span>
+                          <span className="max-w-[140px] truncate text-sm font-semibold">{g.othersSelected ? g.othersSelected.name : t("แบรนด์อื่นๆ", "Other brands")} ▾</span>
+                          <span className="text-[11px] opacity-70">{g.othersSelected ? `${g.othersSelected.active} ${t("เดิน", "active")}` : t(`อีก ${g.others.length} แบรนด์`, `${g.others.length} more brands`)}</span>
                         </button>
                         <FloatingDropdown anchorRef={anchorRef} open={othersOpen === group} onClose={() => setOthersOpen(null)} minWidth={240} maxWidth={320}>
                           <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
@@ -954,7 +958,7 @@ export function DesignDashboard() {
                     )}
 
                     {!loading && g.count === 0 && (
-                      <div className="flex items-center rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-400">ยังไม่มีใบงานของ{GROUP_LABEL[group].title}</div>
+                      <div className="flex items-center rounded-lg border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-400">{t("ยังไม่มีใบงานของ", "No jobs yet for ")}{GROUP_LABEL[group].title}</div>
                     )}
                   </div>
                 );
@@ -970,13 +974,13 @@ export function DesignDashboard() {
           <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={() => setBrandSettingsOpen(false)}>
             <div className="flex max-h-[85vh] w-[440px] max-w-full flex-col rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-                <div className="text-base font-semibold text-slate-800">⚙️ ตั้งค่าแบรนด์</div>
+                <div className="text-base font-semibold text-slate-800">⚙️ {t("ตั้งค่าแบรนด์", "Brand settings")}</div>
                 <button onClick={() => setBrandSettingsOpen(false)} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
               </div>
               <div className="flex-1 overflow-auto p-3">
-                <p className="mb-2 text-[11px] text-slate-400">เรียงลำดับด้วยลูกศร ▲▼ · กด 👁 เพื่อซ่อน (ที่ซ่อนไปอยู่ใน &ldquo;แบรนด์อื่นๆ&rdquo;) · แต่ละกลุ่มโชว์ 4 อันดับแรกที่ไม่ซ่อนเป็นการ์ด · บันทึกอัตโนมัติ (เฉพาะคุณ)</p>
+                <p className="mb-2 text-[11px] text-slate-400">{t("เรียงลำดับด้วยลูกศร ▲▼ · กด 👁 เพื่อซ่อน (ที่ซ่อนไปอยู่ใน “แบรนด์อื่นๆ”) · แต่ละกลุ่มโชว์ 4 อันดับแรกที่ไม่ซ่อนเป็นการ์ด · บันทึกอัตโนมัติ (เฉพาะคุณ)", "Reorder with ▲▼ · press 👁 to hide (hidden ones go to “Other brands”) · each group shows its top 4 visible brands as cards · saved automatically (just for you)")}</p>
                 <p className="mb-3 rounded-md bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
-                  แบรนด์ไหนเป็น &ldquo;งานลูกค้า&rdquo; หรือ &ldquo;แบรนด์เรา&rdquo; ตั้งที่ช่อง 👤 งานลูกค้า ใน <a href="/master/brands" className="text-blue-600 hover:underline">หน้าแบรนด์</a> (มีผลกับทุกคน) · แบรนด์เราจะไม่เห็นสถานะที่ติ๊ก &ldquo;เฉพาะงานลูกค้า&rdquo; ในปุ่มจัดการสถานะ
+                  {t("แบรนด์ไหนเป็น “งานลูกค้า” หรือ “แบรนด์เรา” ตั้งที่ช่อง 👤 งานลูกค้า ใน ", "Whether a brand is a “Customer job” or “Our brand” is set by the 👤 Customer job box on the ")}<a href="/master/brands" className="text-blue-600 hover:underline">{t("หน้าแบรนด์", "Brands page")}</a> {t("(มีผลกับทุกคน) · แบรนด์เราจะไม่เห็นสถานะที่ติ๊ก “เฉพาะงานลูกค้า” ในปุ่มจัดการสถานะ", "(applies to everyone) · our brands won't see statuses marked “Customer jobs only” in Manage statuses")}
                 </p>
                 {BRAND_GROUPS.map((group) => {
                   const list = orderedAll.filter((b) => b.own === (group === "own"));
@@ -995,9 +999,9 @@ export function DesignDashboard() {
                             </div>
                             {brandMark(brand, "h-7 w-7")}
                             <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{brand.name}</span>
-                            <span className="text-[11px] text-slate-400">{brand.active} เดิน</span>
-                            {isTop && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">โชว์</span>}
-                            <button onClick={() => toggleHiddenBrand(brand.key)} title={hidden ? "เลิกซ่อน" : "ซ่อน"}
+                            <span className="text-[11px] text-slate-400">{brand.active} {t("เดิน", "active")}</span>
+                            {isTop && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">{t("โชว์", "Shown")}</span>}
+                            <button onClick={() => toggleHiddenBrand(brand.key)} title={hidden ? t("เลิกซ่อน", "Unhide") : t("ซ่อน", "Hide")}
                               className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-slate-100">{hidden ? "🙈" : "👁"}</button>
                           </div>
                         );
@@ -1005,7 +1009,7 @@ export function DesignDashboard() {
                     </div>
                   );
                 })}
-                {orderedAll.length === 0 && <div className="py-6 text-center text-sm text-slate-300">ยังไม่มีแบรนด์</div>}
+                {orderedAll.length === 0 && <div className="py-6 text-center text-sm text-slate-300">{t("ยังไม่มีแบรนด์", "No brands yet")}</div>}
               </div>
             </div>
           </div>,
@@ -1019,10 +1023,10 @@ export function DesignDashboard() {
               <><LoadingCard /><LoadingCard /><LoadingCard /><LoadingCard /></>
             ) : (
               [
-                ["งานทั้งหมด", visibleTotal, total > sheets.length ? loadedLimitNote : scopeLabel],
-                ["กำลังเดินงาน", activeJobs, "ยังไม่จบหรือยกเลิก"],
-                ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
-                ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
+                [t("งานทั้งหมด", "All jobs"), visibleTotal, total > sheets.length ? loadedLimitNote : scopeLabel],
+                [t("กำลังเดินงาน", "In progress"), activeJobs, t("ยังไม่จบหรือยกเลิก", "Not finished or cancelled")],
+                [t("ใกล้ครบกำหนด", "Due soon"), urgentJobs, t("ควรไล่สถานะวันนี้", "Follow up today")],
+                [t("ปิดงานแล้ว", "Closed"), finishedJobs, t("อนุมัติ / ตั้ง SKU / ยกเลิก", "Approved / SKU set / Cancelled")],
               ].map(([label, value, hint], index) => (
                 <div key={label} data-gg-stat-card className={`relative overflow-hidden rounded-lg border border-white/70 bg-white/80 shadow-sm backdrop-blur ${isPhone ? "px-1 py-1.5 text-center" : "px-3 py-2"}`}>
                   <BrandSlot theme={brandTheme} id={`stat_icon_${index}`} />
@@ -1051,21 +1055,21 @@ export function DesignDashboard() {
               {!isPhone && (
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-800">เส้นทางสถานะจาก Workflow กลาง</h2>
-                  <p className="text-xs text-slate-400">{scopeLabel} • {filteredSheets.length.toLocaleString("th-TH")} งานที่โหลดมา</p>
+                  <h2 className="text-sm font-semibold text-slate-800">{t("เส้นทางสถานะจาก Workflow กลาง", "Status path from the central Workflow")}</h2>
+                  <p className="text-xs text-slate-400">{scopeLabel} • {filteredSheets.length.toLocaleString("th-TH")} {t("งานที่โหลดมา", "jobs loaded")}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-2 text-xs text-slate-500">
-                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-500" /> ด่วน</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> ใกล้ครบ</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> ปิดงาน</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-500" /> {t("ด่วน", "Urgent")}</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> {t("ใกล้ครบ", "Due soon")}</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> {t("ปิดงาน", "Closed")}</span>
                   </div>
                   <button
                     data-gg-action
                     onClick={() => setStatusMgr(true)}
                     className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
                   >
-                    จัดการสถานะ
+                    {t("จัดการสถานะ", "Manage statuses")}
                   </button>
                 </div>
               </div>
@@ -1075,17 +1079,17 @@ export function DesignDashboard() {
                 /* ── มือถือ: ค้นหาเต็มแถว + สลับบอร์ด/แกลเลอรี (ไอคอน) · ตัวกรองด่วนเป็นชิปเลื่อนซ้าย-ขวา ── */
                 <div className="mb-3 space-y-2">
                   <div className="flex items-center gap-2">
-                    <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="🔍 ค้นหารหัส / ชื่องาน..."
+                    <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("🔍 ค้นหารหัส / ชื่องาน...", "🔍 Search code / job name...")}
                       className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
                     <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
-                      {([["board", "🗂️", "บอร์ดตามสถานะ"], ["gallery", "🖼️", "การ์ดรูปใหญ่"]] as const).map(([key, icon, label]) => (
+                      {([["board", "🗂️", t("บอร์ดตามสถานะ", "Board by status")], ["gallery", "🖼️", t("การ์ดรูปใหญ่", "Large image cards")]] as const).map(([key, icon, label]) => (
                         <button key={key} type="button" onClick={() => changeViewMode(key)} title={label} aria-label={label}
                           className={`h-8 w-9 rounded text-sm transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600"}`}>{icon}</button>
                       ))}
                     </div>
                   </div>
                   <div className="-mx-3 flex gap-1 overflow-x-auto px-3 pb-1">
-                    {([["all", "ทั้งหมด"], ["active", "🛠 กำลังทำ"], ["urgent", "🔴 ด่วน"], ["soon", "🟠 ใกล้กำหนด"], ["closed", "✅ ปิดงาน"]] as const).map(([key, label]) => (
+                    {([["all", t("ทั้งหมด", "All")], ["active", t("🛠 กำลังทำ", "🛠 In progress")], ["urgent", t("🔴 ด่วน", "🔴 Urgent")], ["soon", t("🟠 ใกล้กำหนด", "🟠 Due soon")], ["closed", t("✅ ปิดงาน", "✅ Closed")]] as const).map(([key, label]) => (
                       <button key={key} type="button" onClick={() => setQuickFilter(key)}
                         className={`h-8 shrink-0 rounded-full border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{label}</button>
                     ))}
@@ -1093,10 +1097,10 @@ export function DesignDashboard() {
                 </div>
               ) : (
               <div className="mb-4 flex flex-wrap items-center gap-2">
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="🔍 ค้นหารหัส / ชื่องาน / แบรนด์..."
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("🔍 ค้นหารหัส / ชื่องาน / แบรนด์...", "🔍 Search code / job name / brand...")}
                   className="h-9 min-w-[180px] flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
                 <div className="flex flex-wrap items-center gap-1">
-                  {([["all", "ทั้งหมด"], ["active", "🛠 กำลังทำ"], ["urgent", "🔴 ด่วน"], ["soon", "🟠 ใกล้กำหนด"], ["closed", "✅ ปิดงาน"]] as const).map(([key, label]) => (
+                  {([["all", t("ทั้งหมด", "All")], ["active", t("🛠 กำลังทำ", "🛠 In progress")], ["urgent", t("🔴 ด่วน", "🔴 Urgent")], ["soon", t("🟠 ใกล้กำหนด", "🟠 Due soon")], ["closed", t("✅ ปิดงาน", "✅ Closed")]] as const).map(([key, label]) => (
                     <button key={key} type="button" onClick={() => setQuickFilter(key)}
                       className={`h-9 rounded-md border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                   ))}
@@ -1104,9 +1108,9 @@ export function DesignDashboard() {
                 {/* ส่งใบงานขึ้นกระดานวางแผน (Campaign Canvas) — ติ๊กเลือกหลายใบแล้วส่งทีเดียว */}
                 {canTasks && (
                   <button type="button" onClick={() => (pickMode && pickPurpose === "board" ? exitPickMode() : startPick("board"))}
-                    title="ติ๊กเลือกใบงานแล้วส่งขึ้นกระดานวางแผนของแคมเปญ"
+                    title={t("ติ๊กเลือกใบงานแล้วส่งขึ้นกระดานวางแผนของแคมเปญ", "Select sheets and send them to a campaign planning board")}
                     className={`h-9 rounded-md border px-3 text-xs font-medium transition ${pickMode && pickPurpose === "board" ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}>
-                    {pickMode && pickPurpose === "board" ? "✕ ออกจากโหมดเลือก" : "🎨 ส่งขึ้นกระดาน"}
+                    {pickMode && pickPurpose === "board" ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}
                   </button>
                 )}
                 {/* 📋 สรุปงาน: สรุปใหม่ (ติ๊กเลือกใบที่ยังไม่ปิด) / เปิดสรุปที่บันทึกไว้ — ป๊อปของกลาง design-sheet-summary */}
@@ -1114,10 +1118,10 @@ export function DesignDashboard() {
                   <div className="relative" ref={summaryAnchorRef}>
                     {pickMode && pickPurpose === "summary" ? (
                       <button type="button" onClick={exitPickMode}
-                        className="h-9 rounded-md border border-teal-600 bg-teal-600 px-3 text-xs font-medium text-white">✕ ออกจากโหมดสรุป</button>
+                        className="h-9 rounded-md border border-teal-600 bg-teal-600 px-3 text-xs font-medium text-white">✕ {t("ออกจากโหมดสรุป", "Exit summary mode")}</button>
                     ) : (
-                      <button type="button" onClick={() => setSummaryMenuOpen((o) => !o)} title="สรุปงานที่เลือก → พิมพ์ / PDF / คัดลอกเป็นรูป"
-                        className="h-9 rounded-md border border-teal-200 bg-white px-3 text-xs font-medium text-teal-700 hover:bg-teal-50">📋 สรุปงาน ▾</button>
+                      <button type="button" onClick={() => setSummaryMenuOpen((o) => !o)} title={t("สรุปงานที่เลือก → พิมพ์ / PDF / คัดลอกเป็นรูป", "Summarize selected jobs → print / PDF / copy as image")}
+                        className="h-9 rounded-md border border-teal-200 bg-white px-3 text-xs font-medium text-teal-700 hover:bg-teal-50">📋 {t("สรุปงาน", "Summary")} ▾</button>
                     )}
                   </div>
                 )}
@@ -1129,13 +1133,13 @@ export function DesignDashboard() {
                 {viewMode === "board" && (
                   <div className="relative" ref={hideColsAnchorRef}>
                     <button type="button" onClick={() => setHideColsOpen((o) => !o)}
-                      title={hiddenBoardColumns.length ? `ซ่อนอยู่: ${hiddenBoardColumns.map((c) => c.label).join(", ")}` : "เลือกคอลัมน์สถานะที่จะโชว์บนบอร์ด"}
+                      title={hiddenBoardColumns.length ? `${t("ซ่อนอยู่", "Hidden")}: ${hiddenBoardColumns.map((c) => c.label).join(", ")}` : t("เลือกคอลัมน์สถานะที่จะโชว์บนบอร์ด", "Choose status columns to show on the board")}
                       className={`h-9 rounded-md border px-3 text-xs font-medium transition ${hiddenBoardColumns.length ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                      👁 {hiddenBoardColumns.length ? `ซ่อน ${hiddenBoardColumns.length} คอลัมน์` : "คอลัมน์"} ▾
+                      👁 {hiddenBoardColumns.length ? t(`ซ่อน ${hiddenBoardColumns.length} คอลัมน์`, `${hiddenBoardColumns.length} hidden`) : t("คอลัมน์", "Columns")} ▾
                     </button>
                     <FloatingDropdown anchorRef={hideColsAnchorRef} open={hideColsOpen} onClose={() => setHideColsOpen(false)} minWidth={260} maxWidth={320}>
                       <div className="rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xl">
-                        <div className="px-2 py-1 text-[11px] font-medium text-slate-500">คอลัมน์สถานะบนบอร์ด (ติ๊ก = โชว์)</div>
+                        <div className="px-2 py-1 text-[11px] font-medium text-slate-500">{t("คอลัมน์สถานะบนบอร์ด (ติ๊ก = โชว์)", "Status columns on the board (checked = shown)")}</div>
                         {allBoardColumns.map((c) => (
                           <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
                             <input type="checkbox" checked={!hiddenSet.has(c.key)} onChange={() => toggleHiddenCol(c.key)} className="h-4 w-4" />
@@ -1145,8 +1149,8 @@ export function DesignDashboard() {
                           </label>
                         ))}
                         <div className="mt-1 flex gap-1 border-t border-slate-100 pt-1.5">
-                          <button type="button" onClick={() => saveHiddenCols([])} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">แสดงทั้งหมด</button>
-                          <button type="button" onClick={() => saveHiddenCols(DEFAULT_HIDDEN_COLS)} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">ค่าเริ่มต้น</button>
+                          <button type="button" onClick={() => saveHiddenCols([])} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("แสดงทั้งหมด", "Show all")}</button>
+                          <button type="button" onClick={() => saveHiddenCols(DEFAULT_HIDDEN_COLS)} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("ค่าเริ่มต้น", "Default")}</button>
                         </div>
                       </div>
                     </FloatingDropdown>
@@ -1156,8 +1160,8 @@ export function DesignDashboard() {
                 {isDesktop && <SheetHoverSettingsButton pref={hoverPref} />}
                 {/* ขนาดการ์ดบนบอร์ด: ▦ การ์ดเล็ก / ☰ แถวย่อ — จำรายคน (เฉพาะมุมมองบอร์ด) */}
                 {viewMode === "board" && (
-                  <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5" title="ขนาดการ์ดบนบอร์ด (จำค่าของคุณ)">
-                    {([["compact", "▦ การ์ดเล็ก"], ["row", "☰ แถวย่อ"]] as const).map(([key, label]) => (
+                  <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5" title={t("ขนาดการ์ดบนบอร์ด (จำค่าของคุณ)", "Card size on the board (remembered for you)")}>
+                    {([["compact", t("▦ การ์ดเล็ก", "▦ Small cards")], ["row", t("☰ แถวย่อ", "☰ Compact rows")]] as const).map(([key, label]) => (
                       <button key={key} type="button" onClick={() => changeCardSize(key)}
                         className={`h-8 rounded px-2.5 text-xs font-medium transition ${cardSize === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                     ))}
@@ -1165,7 +1169,7 @@ export function DesignDashboard() {
                 )}
                 {/* สลับมุมมอง: บอร์ด Kanban ↔ การ์ดรูปใหญ่ (แกลเลอรี) — จำค่ารายคน */}
                 <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
-                  {([["board", "🗂️ บอร์ด"], ["gallery", "🖼️ การ์ดรูปใหญ่"]] as const).map(([key, label]) => (
+                  {([["board", t("🗂️ บอร์ด", "🗂️ Board")], ["gallery", t("🖼️ การ์ดรูปใหญ่", "🖼️ Large cards")]] as const).map(([key, label]) => (
                     <button key={key} type="button" onClick={() => changeViewMode(key)}
                       className={`h-8 rounded px-2.5 text-xs font-medium transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                   ))}
@@ -1180,7 +1184,7 @@ export function DesignDashboard() {
               ) : filteredSheets.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-400">
                   <BrandSlot theme={brandTheme} id="page_empty" />
-                  ยังไม่มีใบงานสำหรับตัวกรองนี้
+                  {t("ยังไม่มีใบงานสำหรับตัวกรองนี้", "No sheets match this filter")}
                 </div>
               ) : viewMode === "gallery" ? (
                 /* ── มุมมองการ์ดรูปใหญ่ (แกลเลอรี): เห็นรูปงานเต็มใบ ไม่โดนตัด · จำนวนต่อแถวเลือกได้ · เรียงตามอัปเดตล่าสุด ── */
@@ -1211,7 +1215,7 @@ export function DesignDashboard() {
                         ? <div className="space-y-1.5">{phoneCol.sheets.map(renderBoardCard)}</div>
                         : <div className="grid grid-cols-2 gap-2">{phoneCol.sheets.map(renderGalleryCard)}</div>
                     ) : (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-6 text-center text-xs text-slate-400">ไม่มีงานในสถานะนี้</div>
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-6 text-center text-xs text-slate-400">{t("ไม่มีงานในสถานะนี้", "No jobs in this status")}</div>
                     )}
                   </div>
                 ) : (
@@ -1259,15 +1263,15 @@ export function DesignDashboard() {
                           <div data-gg-column-header className={`${isDesktop ? "sticky top-16 z-10" : ""} mb-3 rounded-lg border px-2 py-2 text-center shadow-sm`} style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%), #ffffff` }}>
                             <BrandSlot theme={brandTheme} id={wfIconSlotId(column.key)} w={96} size="w-7 h-7" className="absolute left-1 top-1" />
                             {isDesktop && (
-                              <button type="button" onClick={() => toggleHiddenCol(column.key)} title={`ซ่อนคอลัมน์ "${column.label}" (เปิดกลับได้ที่ปุ่ม 👁)`}
+                              <button type="button" onClick={() => toggleHiddenCol(column.key)} title={t(`ซ่อนคอลัมน์ "${column.label}" (เปิดกลับได้ที่ปุ่ม 👁)`, `Hide column "${column.label}" (bring it back with the 👁 button)`)}
                                 className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded text-[11px] text-slate-300 hover:bg-slate-100 hover:text-slate-600">✕</button>
                             )}
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
-                            <div className="text-[11px] text-slate-400">{column.sheets.length} งาน</div>
+                            <div className="text-[11px] text-slate-400">{column.sheets.length} {t("งาน", "jobs")}</div>
                             {column.notForOwn && (
-                              <div className="mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-snug text-amber-700" title="สถานะนี้ติ๊ก “เฉพาะงานลูกค้า” ไว้ — งานแบรนด์เราที่ค้างอยู่ตรงนี้ เปิดใบงานแล้วเปลี่ยนสถานะได้">
-                                ⚠ ขั้นนี้ใช้กับงานลูกค้า — ย้ายงานออกได้
+                              <div className="mt-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] leading-snug text-amber-700" title={t("สถานะนี้ติ๊ก “เฉพาะงานลูกค้า” ไว้ — งานแบรนด์เราที่ค้างอยู่ตรงนี้ เปิดใบงานแล้วเปลี่ยนสถานะได้", "This status is marked “Customer jobs only” — open our-brand jobs stuck here to change their status")}>
+                                ⚠ {t("ขั้นนี้ใช้กับงานลูกค้า — ย้ายงานออกได้", "This step is for customer jobs — move jobs out")}
                               </div>
                             )}
                           </div>
@@ -1281,19 +1285,19 @@ export function DesignDashboard() {
                             )}
                             {shown.length === 0 && (
                               <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-center text-xs text-slate-400">
-                                ไม่มีงานในสถานะนี้
+                                {t("ไม่มีงานในสถานะนี้", "No jobs in this status")}
                               </div>
                             )}
                             {hiddenCount > 0 && (
                               <button type="button" onClick={() => setExpandedCols((s) => new Set(s).add(column.key))}
                                 className="w-full rounded-lg border border-dashed border-slate-200 bg-white/70 p-2 text-center text-xs text-blue-600 hover:border-blue-300 hover:bg-blue-50">
-                                ＋ ดูอีก {hiddenCount.toLocaleString("th-TH")} งาน
+                                ＋ {t(`ดูอีก ${hiddenCount.toLocaleString("th-TH")} งาน`, `Show ${hiddenCount.toLocaleString("th-TH")} more`)}
                               </button>
                             )}
                             {expanded && column.sheets.length > limit && (
                               <button type="button" onClick={() => setExpandedCols((s) => { const n = new Set(s); n.delete(column.key); return n; })}
                                 className="w-full rounded-lg p-1.5 text-center text-[11px] text-slate-400 hover:text-slate-600">
-                                ย่อ ▲
+                                {t("ย่อ", "Collapse")} ▲
                               </button>
                             )}
                           </div>
@@ -1311,15 +1315,15 @@ export function DesignDashboard() {
                 <div className="flex items-center gap-3">
                   <BrandSlot theme={brandTheme} id="audit_badge" />
                   <div>
-                    <h2 className="text-sm font-semibold">{isPhone ? "📜 ประวัติล่าสุด" : "ประวัติจาก Audit Log กลาง"}</h2>
-                    {!isPhone && <p className="mt-1 text-xs text-slate-300">อ่านจากประวัติจริงของใบงานออกแบบ</p>}
+                    <h2 className="text-sm font-semibold">{isPhone ? t("📜 ประวัติล่าสุด", "📜 Recent history") : t("ประวัติจาก Audit Log กลาง", "History from the central Audit Log")}</h2>
+                    {!isPhone && <p className="mt-1 text-xs text-slate-300">{t("อ่านจากประวัติจริงของใบงานออกแบบ", "Read from the real history of design sheets")}</p>}
                   </div>
                 </div>
-                <span data-gg-audit-count className="rounded-md bg-white/10 px-2 py-1 text-xs text-slate-200">{auditRows.length} รายการล่าสุด</span>
+                <span data-gg-audit-count className="rounded-md bg-white/10 px-2 py-1 text-xs text-slate-200">{auditRows.length} {t("รายการล่าสุด", "latest entries")}</span>
               </div>
               {auditRows.length === 0 ? (
                 <div data-gg-audit-row className="mt-3 rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-                  ยังไม่มีประวัติที่โหลดได้ หรือระบบยังไม่เปิดสิทธิ์อ่านประวัติในหน้านี้
+                  {t("ยังไม่มีประวัติที่โหลดได้ หรือระบบยังไม่เปิดสิทธิ์อ่านประวัติในหน้านี้", "No history to show yet, or you don't have permission to read history here")}
                 </div>
               ) : (
                 <div className={`mt-3 grid gap-3 ${isDesktop ? "grid-cols-3" : isPhone ? "grid-cols-1" : "grid-cols-2"}`}>
@@ -1327,7 +1331,7 @@ export function DesignDashboard() {
                     <div key={row.id} data-gg-audit-row className="rounded-lg border border-white/10 bg-white/5 p-3">
                       <div className="mb-2 flex items-center gap-2">
                         <span data-gg-audit-dot className="block h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.8)]" />
-                        <span className="text-[11px] text-slate-400">{formatDateTime(row.created_at)} • {row.actor_name || "ระบบ"}</span>
+                        <span className="text-[11px] text-slate-400">{formatDateTime(row.created_at)} • {row.actor_name || t("ระบบ", "System")}</span>
                       </div>
                       <div className="text-xs font-medium text-white">{auditText(row)}</div>
                       <div className="mt-1 text-[11px] text-slate-400">{row.entity_type}</div>
@@ -1340,7 +1344,7 @@ export function DesignDashboard() {
         </div>
         {/* มือถือ: ปุ่ม ＋ ลอยมุมล่างขวา (ซ่อนตอนอยู่โหมดเลือกส่งขึ้นกระดาน — แถบล่างใช้พื้นที่นั้น) */}
         {isPhone && !pickMode && (
-          <button type="button" onClick={() => setCreateOpen(true)} title="เพิ่มงานใหม่" aria-label="เพิ่มงานใหม่"
+          <button type="button" onClick={() => setCreateOpen(true)} title={t("เพิ่มงานใหม่", "Add new job")} aria-label={t("เพิ่มงานใหม่", "Add new job")}
             className="fixed bottom-5 right-4 z-[60] flex h-[52px] w-[52px] items-center justify-center rounded-full bg-slate-900 text-2xl leading-none text-white shadow-lg shadow-slate-900/30 active:scale-95">＋</button>
         )}
       </div>
@@ -1354,11 +1358,11 @@ export function DesignDashboard() {
       {pickMode && createPortal(
         <div className="fixed inset-x-0 bottom-0 z-[80] border-t border-indigo-200 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_rgba(15,23,42,0.10)] backdrop-blur">
           <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-3">
-            <span className="text-sm font-semibold text-slate-800">{pickPurpose === "summary" ? "📋" : "🎨"} เลือกไว้ {pickedIds.size.toLocaleString("th-TH")} ใบ</span>
+            <span className="text-sm font-semibold text-slate-800">{pickPurpose === "summary" ? "📋" : "🎨"} {t(`เลือกไว้ ${pickedIds.size.toLocaleString("th-TH")} ใบ`, `${pickedIds.size.toLocaleString("th-TH")} selected`)}</span>
             <span className="text-xs text-slate-400">
               {pickPurpose === "summary"
-                ? `กดการ์ดเพื่อเลือก · เฉพาะใบที่ยังไม่ปิดงาน · ไม่เกิน ${SUMMARY_MAX} ใบ`
-                : `กดการ์ดเพื่อเลือก · ส่งได้ครั้งละไม่เกิน ${SEND_TO_BOARD_MAX} ใบ`}
+                ? t(`กดการ์ดเพื่อเลือก · เฉพาะใบที่ยังไม่ปิดงาน · ไม่เกิน ${SUMMARY_MAX} ใบ`, `Click cards to select · open sheets only · up to ${SUMMARY_MAX}`)
+                : t(`กดการ์ดเพื่อเลือก · ส่งได้ครั้งละไม่เกิน ${SEND_TO_BOARD_MAX} ใบ`, `Click cards to select · up to ${SEND_TO_BOARD_MAX} per send`)}
             </span>
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {(() => {
@@ -1366,28 +1370,28 @@ export function DesignDashboard() {
                 const pickable = filteredSheets.filter(canPick);
                 return (
                   <button onClick={() => setPickedIds(new Set(pickable.map((s) => s.id).slice(0, max)))}
-                    title={`เลือกทุกใบที่ผ่านตัวกรอง/คำค้นตอนนี้ (${Math.min(pickable.length, max)} ใบ)`}
+                    title={t(`เลือกทุกใบที่ผ่านตัวกรอง/คำค้นตอนนี้ (${Math.min(pickable.length, max)} ใบ)`, `Select every sheet matching the current filter/search (${Math.min(pickable.length, max)})`)}
                     className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                    เลือกทั้งหมดที่กรองอยู่
+                    {t("เลือกทั้งหมดที่กรองอยู่", "Select all filtered")}
                   </button>
                 );
               })()}
               <button onClick={() => setPickedIds(new Set())} disabled={pickedIds.size === 0}
                 className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-                ล้างที่เลือก
+                {t("ล้างที่เลือก", "Clear selection")}
               </button>
               <button onClick={exitPickMode} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                ออกจากโหมด
+                {t("ออกจากโหมด", "Exit mode")}
               </button>
               {pickPurpose === "summary" ? (
                 <button onClick={() => { const ids = Array.from(pickedIds).slice(0, SUMMARY_MAX); exitPickMode(); openSummary(null, ids); }} disabled={pickedIds.size === 0}
                   className="h-9 rounded-md bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-40">
-                  จัดสรุป →
+                  {t("จัดสรุป", "Build summary")} →
                 </button>
               ) : (
                 <button onClick={() => setCampaignPickOpen(true)} disabled={pickedIds.size === 0}
                   className="h-9 rounded-md bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
-                  ส่งขึ้นกระดาน →
+                  {t("ส่งขึ้นกระดาน", "Send to board")} →
                 </button>
               )}
             </div>
@@ -1434,7 +1438,7 @@ export function DesignDashboard() {
 
       {/* Brand Theme Builder — ปรับธีมของแบรนด์ที่เลือก · เผยแพร่แล้วโหลดธีมใหม่ */}
       {themeBuilderOpen && selectedBrandId && (
-        <BrandThemeBuilder brandId={selectedBrandId} brandName={selectedBrand?.name ?? "แบรนด์"}
+        <BrandThemeBuilder brandId={selectedBrandId} brandName={selectedBrand?.name ?? t("แบรนด์", "Brand")}
           statuses={statusColumns.map((c) => ({ key: c.key, label: c.label }))}
           brands={brandSummaries.filter((b) => b.id && b.id !== selectedBrandId).map((b) => ({ id: b.id as string, name: b.name }))}
           open={themeBuilderOpen} onClose={() => setThemeBuilderOpen(false)}

@@ -15,6 +15,8 @@ import { withImageWidth } from "@/lib/r2-image";
 import { QUOTE_STATUS } from "@/lib/design-sheets-meta";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { HoverCardWrap, HoverFieldsPicker, HoverRow, type HoverFieldDef } from "@/components/hover-card";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 export type SheetHoverField =
   | "image" | "name" | "code" | "status" | "waiting" | "brand" | "jobType" | "orderDate" | "deadline"
@@ -81,13 +83,13 @@ const TONE_CLS: Record<Tone, string> = {
 function fmtDate(v: string | null): string | null {
   const m = v?.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return v || null;
-  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])));
+  return new Intl.DateTimeFormat(tr("th-TH", "en-US"), { dateStyle: "medium", timeZone: "UTC" }).format(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])));
 }
 const fmtNum = (n: number) => new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 }).format(n);
 function fmtDateTime(v: string | null): string | null {
   if (!v) return null;
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? v : new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(d);
+  return Number.isNaN(d.getTime()) ? v : new Intl.DateTimeFormat(tr("th-TH", "en-US"), { dateStyle: "medium", timeStyle: "short" }).format(d);
 }
 
 /** ห่อการ์ดใบงาน — off = ไม่เด้ง (เช่น กำลังลาก/กำลังย้าย) */
@@ -101,11 +103,12 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
   className?: string;
   children: ReactNode;
 }) {
+  const t = useT();
   const has = (k: SheetHoverField) => pref.fields.includes(k);
   const img = has("image") ? withImageWidth(sheet.cover_url, 640) : null;
   return (
     <HoverCardWrap enabled={pref.on && pref.fields.length > 0} off={off} className={className} image={img}
-      hint="เลือกสิ่งที่โชว์: ปุ่ม ⚙️ ตั้งค่า Hover บนแถบเครื่องมือ"
+      hint={t("เลือกสิ่งที่โชว์: ปุ่ม ⚙️ ตั้งค่า Hover บนแถบเครื่องมือ", "Choose what to show: ⚙️ Hover settings button on the toolbar")}
       details={() => {
         const anyStep = sheet.has_cost || sheet.has_quote || sheet.parent_count > 0;
         const detail = (sheet.detail_excerpt ?? "").trim();
@@ -129,67 +132,67 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
             {has("name") && <p className="text-[15px] font-semibold leading-snug text-slate-900">{sheet.name}</p>}
             {has("waiting") && waiting && (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12.5px] leading-snug text-amber-800">
-                <span className="font-semibold">⏳ รออยู่:</span> {waiting}
+                <span className="font-semibold">⏳ {t("รออยู่", "Waiting")}:</span> {waiting}
               </p>
             )}
             {has("brand") && (
-              <HoverRow label="แบรนด์">
-                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: sheet.brand_color || "#cbd5e1" }} />{sheet.brand_name ?? "ไม่ระบุแบรนด์"}</span>
+              <HoverRow label={t("แบรนด์", "Brand")}>
+                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: sheet.brand_color || "#cbd5e1" }} />{sheet.brand_name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
               </HoverRow>
             )}
-            {has("jobType") && <HoverRow label="ประเภท">{own ? "งานแบรนด์เรา" : "งานลูกค้า"}</HoverRow>}
-            {has("orderDate") && sheet.order_date && <HoverRow label="วันที่สั่ง">{fmtDate(sheet.order_date)}</HoverRow>}
+            {has("jobType") && <HoverRow label={t("ประเภท", "Type")}>{own ? t("งานแบรนด์เรา", "Our brand job") : t("งานลูกค้า", "Customer job")}</HoverRow>}
+            {has("orderDate") && sheet.order_date && <HoverRow label={t("วันที่สั่ง", "Order date")}>{fmtDate(sheet.order_date)}</HoverRow>}
             {has("deadline") && (
-              <HoverRow label="กำหนดส่ง">
+              <HoverRow label={t("กำหนดส่ง", "Deadline")}>
                 {sheet.deadline && <span className="mr-1.5">{fmtDate(sheet.deadline)}</span>}
                 <span className={TONE_CLS[deadline.tone]}>{deadline.tone === "danger" ? "⚠ " : ""}{deadline.label}</span>
               </HoverRow>
             )}
             {has("steps") && (
-              <HoverRow label="ความคืบหน้า">
+              <HoverRow label={t("ความคืบหน้า", "Progress")}>
                 {anyStep ? (
                   <span className="flex flex-wrap gap-1 text-[11px]">
-                    {sheet.has_cost && <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-600">ตีราคาแล้ว</span>}
-                    {sheet.has_quote && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-600">มีราคาแล้ว</span>}
-                    {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-600">มี SKU ({sheet.parent_count})</span>}
+                    {sheet.has_cost && <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-600">{t("ตีราคาแล้ว", "Costed")}</span>}
+                    {sheet.has_quote && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-600">{t("มีราคาแล้ว", "Quoted")}</span>}
+                    {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-600">{t("มี SKU", "Has SKU")} ({sheet.parent_count})</span>}
                   </span>
-                ) : <span className="text-slate-400">ยังไม่ตีราคา / ยังไม่มี SKU</span>}
+                ) : <span className="text-slate-400">{t("ยังไม่ตีราคา / ยังไม่มี SKU", "Not costed / no SKU yet")}</span>}
               </HoverRow>
             )}
             {has("quoteStatus") && (
-              <HoverRow label="สถานะตีราคา">
+              <HoverRow label={t("สถานะตีราคา", "Quote status")}>
                 {quote ? (
                   <span className="inline-flex flex-wrap items-center gap-1">
-                    <span>เสนอครั้งที่ {quote.no}</span>
+                    <span>{t("เสนอครั้งที่", "Quote #")} {quote.no}</span>
                     <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${quote.status === "mixed" ? "bg-amber-50 text-amber-700" : (QUOTE_STATUS[quote.status] ?? QUOTE_STATUS.pending).cls}`}>
-                      {quote.status === "mixed" ? "◐ ผลต่างกันในครั้งนี้" : (QUOTE_STATUS[quote.status] ?? QUOTE_STATUS.pending).label}
+                      {quote.status === "mixed" ? t("◐ ผลต่างกันในครั้งนี้", "◐ Mixed results this round") : (QUOTE_STATUS[quote.status] ?? QUOTE_STATUS.pending).label}
                     </span>
                     {quote.date && <span className="text-[11px] text-slate-400">{fmtDate(quote.date)}</span>}
                   </span>
-                ) : sheet.has_cost ? <span className="text-violet-600">ตีราคาแล้ว · ยังไม่เสนอราคา</span>
-                  : <span className="text-slate-400">ยังไม่ตีราคา</span>}
+                ) : sheet.has_cost ? <span className="text-violet-600">{t("ตีราคาแล้ว · ยังไม่เสนอราคา", "Costed · not quoted yet")}</span>
+                  : <span className="text-slate-400">{t("ยังไม่ตีราคา", "Not costed yet")}</span>}
               </HoverRow>
             )}
             {has("quotePrice") && priced.length > 0 && (
-              <HoverRow label="ราคาที่เสนอ">
+              <HoverRow label={t("ราคาที่เสนอ", "Offered price")}>
                 <span className="block space-y-0.5">
                   {priced.slice(0, 6).map((c, i) => {
-                    const what = [c.size, c.qty != null ? `${fmtNum(c.qty)} ชิ้น` : null, c.label].filter(Boolean).join(" · ");
+                    const what = [c.size, c.qty != null ? `${fmtNum(c.qty)} ${t("ชิ้น", "pcs")}` : null, c.label].filter(Boolean).join(" · ");
                     return (
                       <span key={i} className="flex items-baseline justify-between gap-2">
-                        <span className="min-w-0 truncate text-[11.5px] text-slate-500">{what || (priced.length > 1 ? `ราคา ${i + 1}` : "")}</span>
+                        <span className="min-w-0 truncate text-[11.5px] text-slate-500">{what || (priced.length > 1 ? `${t("ราคา", "Price")} ${i + 1}` : "")}</span>
                         <span className="shrink-0 font-semibold text-slate-800">฿{fmtNum(c.price)}</span>
                       </span>
                     );
                   })}
-                  {priced.length > 6 && <span className="block text-[11px] text-slate-400">+ อีก {priced.length - 6} ราคา (ดูในแท็บเสนอราคา)</span>}
+                  {priced.length > 6 && <span className="block text-[11px] text-slate-400">+ {t(`อีก ${priced.length - 6} ราคา (ดูในแท็บเสนอราคา)`, `${priced.length - 6} more prices (see the Quotes tab)`)}</span>}
                 </span>
               </HoverRow>
             )}
-            {has("updated") && sheet.updated_at && <HoverRow label="แก้ล่าสุด">{fmtDateTime(sheet.updated_at)}</HoverRow>}
+            {has("updated") && sheet.updated_at && <HoverRow label={t("แก้ล่าสุด", "Last updated")}>{fmtDateTime(sheet.updated_at)}</HoverRow>}
             {has("comments") && comments.length > 0 && (
               <div className="space-y-1 rounded-md bg-sky-50 px-2 py-1.5">
-                <div className="text-[11px] font-semibold text-sky-700">💬 Comment ลูกค้า (ล่าสุด)</div>
+                <div className="text-[11px] font-semibold text-sky-700">💬 {t("Comment ลูกค้า (ล่าสุด)", "Customer comments (latest)")}</div>
                 {comments.slice(0, 2).map((c, i) => (
                   <p key={i} className="line-clamp-3 whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700">
                     {c.date && <span className="mr-1 text-[11px] text-sky-600">{fmtDate(c.date)}</span>}{c.body}
@@ -211,14 +214,15 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
 
 /** ปุ่ม "⚙️ ตั้งค่า Hover ▾" + ป๊อปตั้งค่า (เปิด/ปิด + เลือกสิ่งที่โชว์) */
 export function SheetHoverSettingsButton({ pref }: { pref: SheetHoverPref }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   return (
     <div className="relative" ref={anchorRef}>
       <button type="button" onClick={() => setOpen((o) => !o)} data-sheet-hover-settings-btn
-        title="ตั้งค่า Hover: ชี้ที่การ์ดแล้วโชว์รูปใหญ่ + รายละเอียดงาน — เลือกได้ว่าจะโชว์อะไร (จำค่าของคุณ)"
+        title={t("ตั้งค่า Hover: ชี้ที่การ์ดแล้วโชว์รูปใหญ่ + รายละเอียดงาน — เลือกได้ว่าจะโชว์อะไร (จำค่าของคุณ)", "Hover settings: point at a card to see a large image + job details — choose what to show (remembered for you)")}
         className={`h-9 rounded-md border px-3 text-xs font-medium transition ${pref.on ? "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-        ⚙️ ตั้งค่า Hover{pref.on ? "" : " (ปิดอยู่)"} ▾
+        ⚙️ {t("ตั้งค่า Hover", "Hover settings")}{pref.on ? "" : t(" (ปิดอยู่)", " (off)")} ▾
       </button>
       <FloatingDropdown anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} minWidth={300} maxWidth={360}>
         <div className="rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xl">

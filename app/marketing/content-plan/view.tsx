@@ -7,7 +7,8 @@
  *   🔔 ต้องเตรียม (รอบเปลี่ยน) · ใช้เป็นแท็บ "วางแผน" ในปฏิทินคอนเทนต์ (embedded = ไม่มีหัวหน้าของตัวเอง)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLang } from "@/components/i18n";
+import { useLang, useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useToast } from "@/components/toast";
@@ -44,6 +45,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
   embedded?: boolean;
 }) {
   useLang();   // ฟังการสลับภาษา → ชื่อป้าย/แนว (labelName) เปลี่ยนตาม (หน้าแรกวาดเป็นไทยก่อน แล้วค่อยสลับ)
+  const t = useT();
   const toast = useToast();
   // ช่องทาง = ทุกแพลตฟอร์มจากหน้าแพลตฟอร์มกลาง (รวมที่ปิดอยู่ — เลือกใช้ในแผนได้) · ยังไม่ตั้งค่า = โชว์เฉพาะที่เปิดอยู่
   const { allPlatforms, reload: reloadOptions } = useCreativeOptions();
@@ -85,7 +87,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
       setItems(c);
       setBrands(b);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ");
+      setErr(e instanceof Error ? e.message : tr("โหลดข้อมูลไม่สำเร็จ", "Couldn't load data"));
     }
   }, []);
   const loadSettings = useCallback(async () => {
@@ -150,15 +152,15 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
     const plats = c.platforms ?? [];
     const newPlats = platform && !plats.includes(platform) && plats.length === 0 ? [platform] : plats;   // ยังไม่มีช่องทาง → ใส่ช่องทางของแถวที่วาง
     if (newAt === c.scheduled_at && newPlats === plats) return;
-    if (c.status === "published" && newPlats !== plats) { toast.warning("โพสต์แล้ว — เปลี่ยนช่องทางไม่ได้"); return; }
+    if (c.status === "published" && newPlats !== plats) { toast.warning(t("โพสต์แล้ว — เปลี่ยนช่องทางไม่ได้", "Already posted — channel can't be changed")); return; }
     const before = { scheduled_at: c.scheduled_at, platforms: c.platforms };
     patchLocal(id, { scheduled_at: newAt, platforms: newPlats });
     try {
       await updateContent(id, newPlats !== plats ? { scheduled_at: newAt, platforms: newPlats } : { scheduled_at: newAt });
-      toast.success(date ? `ย้ายไป ${shortThaiDate(date)} แล้ว` : "ย้ายกลับกล่องไอเดียแล้ว");
+      toast.success(date ? t(`ย้ายไป ${shortThaiDate(date)} แล้ว`, `Moved to ${shortThaiDate(date)}`) : t("ย้ายกลับกล่องไอเดียแล้ว", "Moved back to the idea box"));
     } catch (e) {
       patchLocal(id, before);
-      toast.error(e instanceof Error ? e.message : "ย้ายไม่สำเร็จ");
+      toast.error(e instanceof Error ? e.message : t("ย้ายไม่สำเร็จ", "Couldn't move"));
     }
   };
   const changeStage = async (id: string, stage: PlanStage) => {
@@ -166,17 +168,17 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
     if (!c || stageOf(c) === stage) return;
     if (stage === "making") {
       if (c.task_id) return;
-      toast.info("ส่งเข้า \"กำลังทำ\" ด้วยปุ่ม 🎬 ส่งเป็นงาน ในการ์ด (ระบบจะสร้างงานให้ทีม Creative)");
+      toast.info(t("ส่งเข้า \"กำลังทำ\" ด้วยปุ่ม 🎬 ส่งเป็นงาน ในการ์ด (ระบบจะสร้างงานให้ทีม Creative)", "Move to \"Making\" with the 🎬 Send as task button on the card (a task is created for the Creative team)"));
       setModal({ item: c });
       return;
     }
-    if (stage === "idea" && c.task_id) { toast.warning("ไอเดียนี้ส่งเป็นงานแล้ว — ถอดงานได้ที่ 📝 รายละเอียด"); return; }
+    if (stage === "idea" && c.task_id) { toast.warning(t("ไอเดียนี้ส่งเป็นงานแล้ว — ถอดงานได้ที่ 📝 รายละเอียด", "This idea is already a task — unlink it in 📝 Details")); return; }
     const status = statusForStage(stage);
     if (!status) return;
     const before = c.status;
     patchLocal(id, { status: status as ContentItem["status"] });
-    try { await updateContent(id, { status }); toast.success("ย้ายขั้นแล้ว"); }
-    catch (e) { patchLocal(id, { status: before }); toast.error(e instanceof Error ? e.message : "ย้ายขั้นไม่สำเร็จ"); }
+    try { await updateContent(id, { status }); toast.success(t("ย้ายขั้นแล้ว", "Stage changed")); }
+    catch (e) { patchLocal(id, { status: before }); toast.error(e instanceof Error ? e.message : t("ย้ายขั้นไม่สำเร็จ", "Couldn't change stage")); }
   };
   const pushToast = useCallback((type: "success" | "error" | "info", m: string) => { (type === "error" ? toast.error : type === "success" ? toast.success : toast.info)(m); }, [toast]);
 
@@ -202,7 +204,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
   const navBtn = "h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-600 hover:bg-slate-50";
   const periodLabel = view === "week"
     ? `${shortThaiDate(anchorWeek)} – ${shortThaiDate(addDays(anchorWeek, 6))}`
-    : parseDateKey(`${anchorMonth}-01`).toLocaleDateString("th-TH", { month: "long", year: "numeric" });
+    : parseDateKey(`${anchorMonth}-01`).toLocaleDateString(t("th-TH", "en-US"), { month: "long", year: "numeric" });
   const shift = (n: number) => {
     if (view === "week") setAnchorWeek((w) => addDays(w, 7 * n));
     else { const d = parseDateKey(`${anchorMonth}-01`); d.setMonth(d.getMonth() + n); setAnchorMonth(localDateKey(d).slice(0, 7)); }
@@ -217,12 +219,12 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
       {!embedded && <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3 max-w-7xl mx-auto">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">🗓️ วางแผนคอนเทนต์</h1>
-            <p className="text-sm text-slate-500 mt-1">จะลงอะไร แนวไหน ลงที่ไหน · ข้อมูลชุดเดียวกับ <Link href="/tasks/content-calendar" className="text-blue-600 hover:underline">ปฏิทินคอนเทนต์</Link> ของทีม Creative</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">🗓️ {t("วางแผนคอนเทนต์", "Content planning")}</h1>
+            <p className="text-sm text-slate-500 mt-1">{t("จะลงอะไร แนวไหน ลงที่ไหน · ข้อมูลชุดเดียวกับ", "What to post, which pillar, where · same data as the")} <Link href="/tasks/content-calendar" className="text-blue-600 hover:underline">{t("ปฏิทินคอนเทนต์", "Content calendar")}</Link> {t("ของทีม Creative", "of the Creative team")}</p>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setSettings("platforms")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">⚙️ ตั้งค่า</button>
-            {canCreate && <button type="button" onClick={() => openNew()} className="h-9 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white hover:bg-blue-700">＋ ไอเดียใหม่</button>}
+            <button type="button" onClick={() => setSettings("platforms")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">⚙️ {t("ตั้งค่า", "Settings")}</button>
+            {canCreate && <button type="button" onClick={() => openNew()} className="h-9 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white hover:bg-blue-700">＋ {t("ไอเดียใหม่", "New idea")}</button>}
           </div>
         </div>
       </div>}
@@ -232,7 +234,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
           <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
             <div className="text-3xl mb-2">⚠️</div>
             <div className="text-sm text-red-700">{err}</div>
-            <button onClick={() => load()} className="mt-3 rounded-lg border border-red-200 bg-white text-red-700 px-4 py-1.5 text-sm font-medium hover:bg-red-50">ลองใหม่</button>
+            <button onClick={() => load()} className="mt-3 rounded-lg border border-red-200 bg-white text-red-700 px-4 py-1.5 text-sm font-medium hover:bg-red-50">{t("ลองใหม่", "Try again")}</button>
           </div>
         ) : !items ? (
           <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-16 rounded-xl bg-slate-100 animate-pulse" />)}</div>
@@ -240,7 +242,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
           <>
             {/* แท็บแบรนด์ */}
             <div className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-slate-200">
-              <button type="button" onClick={() => pickBrand("")} className={tabBtn(!brandTab)}>ทุกแบรนด์ <span className="rounded-full bg-slate-100 px-1.5 text-[11px] text-slate-500">{live.length}</span></button>
+              <button type="button" onClick={() => pickBrand("")} className={tabBtn(!brandTab)}>{t("ทุกแบรนด์", "All brands")} <span className="rounded-full bg-slate-100 px-1.5 text-[11px] text-slate-500">{live.length}</span></button>
               {brands.filter((b) => brandCounts.has(b.id) || brandTab === b.id).sort((a, b) => (brandCounts.get(b.id) ?? 0) - (brandCounts.get(a.id) ?? 0)).map((b) => (
                 <button key={b.id} type="button" onClick={() => pickBrand(b.id)} className={tabBtn(brandTab === b.id)}>
                   <span className="h-2 w-2 rounded-full" style={{ background: b.color ?? "#94a3b8" }} />{b.name}
@@ -251,30 +253,30 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
 
             {/* แถบเครื่องมือ: มุมมอง · ช่วงเวลา · ค้นหา */}
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label="มุมมอง">
-                {([["week", "สัปดาห์"], ["month", "เดือน"], ["board", "บอร์ดตามขั้น"]] as const).map(([v, t]) => (
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("มุมมอง", "View")}>
+                {([["week", t("สัปดาห์", "Week")], ["month", t("เดือน", "Month")], ["board", t("บอร์ดตามขั้น", "Board by stage")]] as const).map(([v, t]) => (
                   <button key={v} type="button" onClick={() => pickView(v)} aria-pressed={view === v} className={seg(view === v)}>{t}</button>
                 ))}
               </div>
               {view !== "board" && (
                 <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => shift(-1)} className={navBtn} aria-label="ก่อนหน้า">‹</button>
-                  <button type="button" onClick={goToday} className={navBtn}>วันนี้</button>
-                  <button type="button" onClick={() => shift(1)} className={navBtn} aria-label="ถัดไป">›</button>
+                  <button type="button" onClick={() => shift(-1)} className={navBtn} aria-label={t("ก่อนหน้า", "Previous")}>‹</button>
+                  <button type="button" onClick={goToday} className={navBtn}>{t("วันนี้", "Today")}</button>
+                  <button type="button" onClick={() => shift(1)} className={navBtn} aria-label={t("ถัดไป", "Next")}>›</button>
                   <span className="ml-1 text-sm font-semibold text-slate-700">{periodLabel}</span>
                 </div>
               )}
               {canCreate && (
                 <button type="button" onClick={() => setGenOpen(true)} disabled={!brandTab}
-                  title={brandTab ? `ลงไอเดียตามสล็อตประจำสัปดาห์ของ ${brandName} ทั้งเดือน` : "เลือกแท็บแบรนด์ก่อน (สล็อตตั้งแยกต่อแบรนด์)"}
-                  className="h-8 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40">⚡ สร้างแผนจากสล็อต</button>
+                  title={brandTab ? t(`ลงไอเดียตามสล็อตประจำสัปดาห์ของ ${brandName} ทั้งเดือน`, `Fill the whole month with ideas from ${brandName}'s weekly slots`) : t("เลือกแท็บแบรนด์ก่อน (สล็อตตั้งแยกต่อแบรนด์)", "Pick a brand tab first (slots are set per brand)")}
+                  className="h-8 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40">⚡ {t("สร้างแผนจากสล็อต", "Build plan from slots")}</button>
               )}
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหาหัวข้อ / รหัส / บรีฟ…"
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("🔍 ค้นหาหัวข้อ / รหัส / บรีฟ…", "🔍 Search title / code / brief…")}
                 className="ml-auto h-9 w-full sm:w-64 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               {embedded && (
                 <>
-                  <button type="button" onClick={() => setSettings("platforms")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">⚙️ ตั้งค่า</button>
-                  {canCreate && <button type="button" onClick={() => openNew()} className="h-9 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white hover:bg-blue-700">＋ ไอเดียใหม่</button>}
+                  <button type="button" onClick={() => setSettings("platforms")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">⚙️ {t("ตั้งค่า", "Settings")}</button>
+                  {canCreate && <button type="button" onClick={() => openNew()} className="h-9 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white hover:bg-blue-700">＋ {t("ไอเดียใหม่", "New idea")}</button>}
                 </>
               )}
             </div>
@@ -287,10 +289,10 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
 
             {/* แนวคอนเทนต์: กรอง + สรุปจำนวนในช่วงที่ดู */}
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs text-slate-500">{view === "board" ? "แนวคอนเทนต์" : `แนวในช่วงนี้ (${inRange.length} ชิ้น)`}</span>
+              <span className="mr-1 text-xs text-slate-500">{view === "board" ? t("แนวคอนเทนต์", "Content pillars") : t(`แนวในช่วงนี้ (${inRange.length} ชิ้น)`, `Pillars in this period (${inRange.length} items)`)}</span>
               <button type="button" onClick={() => setPillarFilter("")}
-                className={`rounded-full border px-3 py-1 text-xs ${!pillarFilter ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}>ทั้งหมด</button>
-              {[...pillars.filter((p) => p.is_active || mix.has(p.id)), { id: "__none", name: "ไม่ระบุแนว", icon: null, color: "#cbd5e1" } as MarketingSkuLabel].map((p) => {
+                className={`rounded-full border px-3 py-1 text-xs ${!pillarFilter ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}>{t("ทั้งหมด", "All")}</button>
+              {[...pillars.filter((p) => p.is_active || mix.has(p.id)), { id: "__none", name: "ไม่ระบุแนว", name_en: "No pillar", icon: null, color: "#cbd5e1" } as MarketingSkuLabel].map((p) => {
                 const on = pillarFilter === p.id;
                 const n = mix.get(p.id) ?? 0;
                 if (p.id === "__none" && n === 0 && !on) return null;
@@ -319,8 +321,8 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
                   onDrop={(id) => void move(id, null, null)} />
               </div>
             )}
-            {view === "week" && brandFiltered && <p className="text-xs text-slate-400">แสดงเฉพาะช่องทางที่แบรนด์นี้ลง ({rowPlatforms.length}) · ปรับได้ที่ ⚙️ ตั้งค่า → ช่องทาง → ตั้งค่าต่อแบรนด์</p>}
-            {canEdit && view !== "board" && <p className="text-xs text-slate-400">ลากการ์ดไปวางช่องวันเพื่อเปลี่ยนวัน (เวลาเดิมคงไว้) · ลากกลับกล่องไอเดีย = เอาวันออก · กด ＋ ในช่องเพื่อเพิ่มไอเดียลงวันนั้น</p>}
+            {view === "week" && brandFiltered && <p className="text-xs text-slate-400">{t(`แสดงเฉพาะช่องทางที่แบรนด์นี้ลง (${rowPlatforms.length}) · ปรับได้ที่ ⚙️ ตั้งค่า → ช่องทาง → ตั้งค่าต่อแบรนด์`, `Showing only channels this brand posts to (${rowPlatforms.length}) · change in ⚙️ Settings → Channels → Per-brand settings`)}</p>}
+            {canEdit && view !== "board" && <p className="text-xs text-slate-400">{t("ลากการ์ดไปวางช่องวันเพื่อเปลี่ยนวัน (เวลาเดิมคงไว้) · ลากกลับกล่องไอเดีย = เอาวันออก · กด ＋ ในช่องเพื่อเพิ่มไอเดียลงวันนั้น", "Drag a card onto a day to change its date (time is kept) · drag back to the idea box to remove the date · press ＋ in a cell to add an idea on that day")}</p>}
           </>
         )}
       </div>

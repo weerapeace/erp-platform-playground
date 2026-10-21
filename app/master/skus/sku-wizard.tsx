@@ -14,12 +14,13 @@ import { SupplierWizard } from "@/components/supplier-wizard";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
+import { useT } from "@/components/i18n";
 import { SkuPrefixManager } from "@/components/sku-prefix-manager";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
 
 // ป้ายชื่อคอลัมน์ที่ override จากทะเบียน (ให้ตรงภาษาคน) — ใช้ทั้งเดี่ยว/ชุด
 const LABEL_OVERRIDE: Record<string, string> = {
-  standard_price: "ราคาซื้อ", rmb_cost: "ราคาซื้อ (หยวน) RMB", fabric_width_cm: "หน้ากว้าง",
+  get standard_price() { return tr("ราคาซื้อ", "Purchase price"); }, get rmb_cost() { return tr("ราคาซื้อ (หยวน) RMB", "Purchase price (RMB)"); }, get fabric_width_cm() { return tr("หน้ากว้าง", "Fabric width"); },
 };
 
 // แยกรหัสเป็น prefix + เลขท้าย (เช่น "LEA-SAF-028" → {prefix:"LEA-SAF-", num:28, pad:3})
@@ -75,6 +76,7 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
   /** สร้างรายการใหม่ "ในกล่องนี้เลย" จากคำที่พิมพ์ (สำหรับ master เล็ก ๆ เช่น หน่วยนับ) — คืน id+ชื่อ แล้วเลือกให้ทันที */
   quickCreate?: { entity: string; field: string; label?: string };
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [opts, setOpts] = useState<PickerOpt[]>([]);
@@ -87,7 +89,7 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
     try {
       const res = await apiFetch(`/api/master-v2/${quickCreate.entity}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [quickCreate.field]: name }) });
       const j = await res.json();
-      if (!res.ok || j.error) { setCreateErr(String(j.error ?? "สร้างไม่สำเร็จ")); return; }
+      if (!res.ok || j.error) { setCreateErr(String(j.error ?? t("สร้างไม่สำเร็จ", "Couldn't create"))); return; }
       const row = (j.data ?? {}) as Record<string, unknown>;
       onChange(String(row.id), String(row[quickCreate.field] ?? name));
       setOpen(false); setQ("");
@@ -123,10 +125,10 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
       </button>
       {open && (
         <div className="absolute z-20 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl">
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา..."
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหา...", "Search...")}
               className="w-full h-8 px-2 text-sm border-b border-slate-100 focus:outline-none" />
             <div className="max-h-56 overflow-y-auto py-1">
-              {value && <button type="button" onClick={() => { onChange(null, ""); setOpen(false); }} className="w-full px-3 py-1.5 text-left text-xs text-rose-500 hover:bg-rose-50">✕ ล้าง</button>}
+              {value && <button type="button" onClick={() => { onChange(null, ""); setOpen(false); }} className="w-full px-3 py-1.5 text-left text-xs text-rose-500 hover:bg-rose-50">✕ {t("ล้าง", "Clear")}</button>}
               {/* ⭐ ใช้บ่อยในประเภทนี้ — ปักหมุดบนสุด */}
               {(() => {
                 const s = q.trim().toLowerCase();
@@ -134,7 +136,7 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
                 if (pf.length === 0) return null;
                 return (
                   <>
-                    <div className="px-3 pt-1 pb-0.5 text-[10px] text-amber-600">⭐ ใช้บ่อยในประเภทนี้</div>
+                    <div className="px-3 pt-1 pb-0.5 text-[10px] text-amber-600">⭐ {t("ใช้บ่อยในประเภทนี้", "Often used in this type")}</div>
                     {pf.map((p) => (
                       <button key={"pin-" + p.id} type="button" onClick={() => { onChange(p.id, p.label); setOpen(false); setQ(""); }}
                         className="w-full px-3 py-1.5 text-left text-sm hover:bg-amber-50 truncate flex items-center gap-1">
@@ -151,14 +153,14 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
                   {o.label}{o.secondary ? <span className="text-slate-400"> · {o.secondary}</span> : null}
                 </button>
               ))}
-              {opts.length === 0 && (pinned ?? []).length === 0 && <div className="px-3 py-2 text-xs text-slate-400">— ไม่พบ —</div>}
+              {opts.length === 0 && (pinned ?? []).length === 0 && <div className="px-3 py-2 text-xs text-slate-400">{t("— ไม่พบ —", "— Not found —")}</div>}
               {/* สร้างใหม่ในกล่องนี้เลย — โชว์เมื่อพิมพ์คำที่ยังไม่มีในรายการ (ชื่อตรงกันเป๊ะ = ไม่ต้องสร้างซ้ำ) */}
               {quickCreate && q.trim() && !opts.some((o) => o.label.trim().toLowerCase() === q.trim().toLowerCase()) && (
                 <>
                   <div className="border-t border-slate-100 my-1" />
                   <button type="button" disabled={creating} onClick={() => { void doQuickCreate(); }}
                     className="w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 truncate disabled:opacity-60">
-                    {creating ? "กำลังสร้าง..." : <>➕ {quickCreate.label ?? "สร้างใหม่"}: <strong>“{q.trim()}”</strong></>}
+                    {creating ? t("กำลังสร้าง...", "Creating...") : <>➕ {quickCreate.label ?? t("สร้างใหม่", "Create new")}: <strong>“{q.trim()}”</strong></>}
                   </button>
                   {createErr && <div className="px-3 py-1.5 text-[11px] text-red-600 bg-red-50 border-t border-red-100">⚠ {createErr}</div>}
                 </>
@@ -169,7 +171,7 @@ function AsyncPick({ table, label, secondary, value, valueLabel, onChange, place
                   <div className="border-t border-slate-100 my-1" />
                   <button type="button" onClick={() => { const t = q.trim(); setOpen(false); setQ(""); onAddNew(t); }}
                     className="w-full px-3 py-1.5 text-left text-sm text-blue-600 hover:bg-blue-50 truncate">
-                    ➕ {addNewLabel ?? "เพิ่มใหม่"}{q.trim() ? ` “${q.trim()}”` : ""}
+                    ➕ {addNewLabel ?? t("เพิ่มใหม่", "Add new")}{q.trim() ? ` “${q.trim()}”` : ""}
                   </button>
                 </>
               )}
@@ -194,6 +196,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   /** ค่าเริ่มต้นของฟอร์ม "เพิ่มทีละตัว" (เช่น name_th / rmb_cost / purchase_link) — มีค่า = ข้ามหน้าเลือกโหมด ไปโหมดเดี่ยวเลย */
   prefill?: Record<string, unknown>;
 }) {
+  const t = useT();
   const toast = useToast();
   // key เสถียรของ prefill (ผู้เรียกส่ง object ใหม่ทุก render) — กัน effect ด้านล่างรันซ้ำไม่รู้จบ
   const prefillKey = useMemo(() => (prefill ? JSON.stringify(prefill) : ""), [prefill]);
@@ -216,7 +219,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   // ตัวเลือกประเภท (แท็ก) สำหรับ SearchableSelect
   const tagOptions = useMemo<SelectOption[]>(() => tags.map((t) => ({
     value: t.id, label: t.name,
-    sub: `${t.group_name ? t.group_name + " · " : ""}${t.code_prefix ? t.code_prefix : "ยังไม่ตั้งรหัส"}`,
+    sub: `${t.group_name ? t.group_name + " · " : ""}${t.code_prefix ? t.code_prefix : tr("ยังไม่ตั้งรหัส", "No code prefix yet")}`,
   })), [tags]);
 
   // context ของประเภท (หน้ากว้าง/ผู้ขายที่ใช้บ่อย) — ใช้ทั้งเดี่ยว/ชุด
@@ -226,7 +229,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
       .then((j) => setCtx({ fabric_widths: j.fabric_widths ?? [], sellers: j.sellers ?? [] }))
       .catch(() => setCtx({ fabric_widths: [], sellers: [] }));
   }, []);
-  const sellerPins = useMemo(() => ctx.sellers.map((s) => ({ id: s.id, label: s.name ?? "(ไม่มีชื่อ)" })), [ctx.sellers]);
+  const sellerPins = useMemo(() => ctx.sellers.map((s) => ({ id: s.id, label: s.name ?? tr("(ไม่มีชื่อ)", "(no name)") })), [ctx.sellers]);
 
   // โหลดประเภท(แท็ก) ทั้งหมด (รวมที่ยังไม่ตั้ง prefix) — ใช้ tag-prefix
   const loadTags = useCallback(() => {
@@ -268,7 +271,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   // คอลัมน์ที่จะ render จริง (ตามลำดับ catalog, code มาก่อนเสมอ)
   const shownCols = useMemo(() => {
     const map = new Map(catalog.map((c) => [c.key, c]));
-    const code = map.get("code") ?? { key: "code", label: "รหัส SKU", type: "text" as const };
+    const code = map.get("code") ?? { key: "code", label: tr("รหัส SKU", "SKU code"), type: "text" as const };
     const rest = colKeys.filter((k) => k !== "code" && map.has(k)).map((k) => map.get(k)!);
     return [code, ...rest];
   }, [catalog, colKeys]);
@@ -422,7 +425,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
 
   const submit = async (rows: Row[], tagId: string | null) => {
     const valid = rows.filter((r) => String(r.values.code ?? "").trim());
-    if (valid.length === 0) { toast.error("กรอกรหัส SKU อย่างน้อย 1 ตัว"); return; }
+    if (valid.length === 0) { toast.error(t("กรอกรหัส SKU อย่างน้อย 1 ตัว", "Enter at least 1 SKU code")); return; }
     // B: แทนแม่แบบชื่อ [สี]/[รหัส] → ค่าจริง แล้วตรวจว่าไม่มี placeholder ค้าง
     const built = valid.map((r) => {
       const nm = applyNameTemplate(String(r.values.name_th ?? ""), String(r.values.color ?? ""), String(r.values.code ?? ""));
@@ -430,7 +433,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
       return { ...r, values };
     });
     const bad = built.find((r) => PLACEHOLDER_RE.test(String(r.values.name_th ?? "")));
-    if (bad) { toast.error(`ชื่อ SKU "${bad.values.code}" ยังมี [สี] หรือ [รหัส] ที่ยังไม่เติม — กรอกสี/รหัสให้ครบก่อน`); return; }
+    if (bad) { toast.error(t(`ชื่อ SKU "${bad.values.code}" ยังมี [สี] หรือ [รหัส] ที่ยังไม่เติม — กรอกสี/รหัสให้ครบก่อน`, `SKU "${bad.values.code}" name still has an unfilled [สี] or [รหัส] — fill in the color/code first`)); return; }
     setSaving(true);
     try {
       const res = await apiFetch("/api/skus/wizard-create", {
@@ -438,10 +441,10 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
         body: JSON.stringify({ rows: built.map((r) => ({ values: r.values, family_tag_ids: [tagId].filter(Boolean) })) }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(`สร้าง ${j.created} SKU แล้ว`);
+      toast.success(t(`สร้าง ${j.created} SKU แล้ว`, `Created ${j.created} SKUs`));
       reset();
       onCreated({ created: Number(j.created ?? 0), ids: (j.ids ?? []) as string[], skus: (j.skus ?? []) as { id: string; code: string }[] });
-    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้าง SKU ไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้าง SKU ไม่สำเร็จ", "Couldn't create SKUs")); }
     finally { setSaving(false); }
   };
 
@@ -449,7 +452,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   const cell = (col: ColDef, val: unknown, lbl: string | undefined, onVal: (v: unknown, lbl?: string) => void) => {
     if (col.type === "relation" && col.rel)
       return <AsyncPick table={col.rel.table} label={col.rel.label} secondary={col.rel.secondary} value={(val as string) || null} valueLabel={lbl} onChange={(id, l) => onVal(id, l)} placeholder={col.label}
-        addNewLabel={col.rel.table === "partners_v2" ? "เพิ่มผู้ขายใหม่" : undefined}
+        addNewLabel={col.rel.table === "partners_v2" ? t("เพิ่มผู้ขายใหม่", "Add new supplier") : undefined}
         onAddNew={col.rel.table === "partners_v2" ? (typed: string) => setNewSupplier({ name: typed, apply: (id: string, l: string) => onVal(id, l) }) : undefined} />;
     if (col.type === "boolean")
       return <input type="checkbox" checked={!!val} onChange={(e) => onVal(e.target.checked)} className="h-4 w-4 accent-blue-600" />;
@@ -460,16 +463,16 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
 
   return (
     <ERPModal open={open} onClose={close} size={step === "batch" ? "xl" : "lg"}
-      title={step === "choose" ? "เพิ่ม SKU" : step === "single" ? "เพิ่ม SKU (ทีละตัว)" : "เพิ่ม SKU (เป็นชุด)"}
-      description={step === "choose" ? "เลือกวิธีเพิ่ม — ระบบมีตัวช่วยกันส่งผิด/มั่ว/พลาด" : undefined}
+      title={step === "choose" ? t("เพิ่ม SKU", "Add SKU") : step === "single" ? t("เพิ่ม SKU (ทีละตัว)", "Add SKU (one at a time)") : t("เพิ่ม SKU (เป็นชุด)", "Add SKUs (batch)")}
+      description={step === "choose" ? t("เลือกวิธีเพิ่ม — ระบบมีตัวช่วยกันส่งผิด/มั่ว/พลาด", "Choose how to add — built-in helpers prevent mistakes") : undefined}
       footer={step === "choose" ? undefined : (
         <div className="flex justify-between w-full">
-          <button onClick={() => setStep("choose")} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">← ย้อนกลับ</button>
+          <button onClick={() => setStep("choose")} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">← {t("ย้อนกลับ", "Back")}</button>
           <div className="flex gap-2">
-            {step === "batch" && <button onClick={addBatchRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">＋ เพิ่มแถว</button>}
-            <button onClick={close} disabled={saving} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+            {step === "batch" && <button onClick={addBatchRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">＋ {t("เพิ่มแถว", "Add row")}</button>}
+            <button onClick={close} disabled={saving} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
             <button onClick={() => step === "single" ? submit([single], sTag) : submit(lines, bTag)} disabled={saving}
-              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังสร้าง..." : "สร้าง SKU"}</button>
+              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังสร้าง...", "Creating...") : t("สร้าง SKU", "Create SKU")}</button>
           </div>
         </div>
       )}>
@@ -479,13 +482,13 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
         <div className="grid grid-cols-2 gap-3 py-2">
           <button onClick={() => setStep("single")} className="p-5 border-2 border-slate-200 rounded-xl hover:border-blue-400 hover:bg-blue-50/40 text-left">
             <div className="text-2xl">➕</div>
-            <div className="mt-2 font-semibold text-slate-800">เพิ่มเดี่ยว</div>
-            <div className="text-xs text-slate-500 mt-1">ทีละตัว มีตัวช่วยรหัสอัตโนมัติตามประเภท เหมาะตอนเพิ่มสินค้าใหม่ทีละชิ้น</div>
+            <div className="mt-2 font-semibold text-slate-800">{t("เพิ่มเดี่ยว", "Add one")}</div>
+            <div className="text-xs text-slate-500 mt-1">{t("ทีละตัว มีตัวช่วยรหัสอัตโนมัติตามประเภท เหมาะตอนเพิ่มสินค้าใหม่ทีละชิ้น", "One at a time, with automatic codes by type — good for adding a single new product")}</div>
           </button>
           <button onClick={() => setStep("batch")} className="p-5 border-2 border-slate-200 rounded-xl hover:border-blue-400 hover:bg-blue-50/40 text-left">
             <div className="text-2xl">📋</div>
-            <div className="mt-2 font-semibold text-slate-800">เพิ่มเป็นชุด</div>
-            <div className="text-xs text-slate-500 mt-1">หลายตัวพร้อมกันแบบตาราง + เลือกคอลัมน์ได้ + เติมลงล่าง</div>
+            <div className="mt-2 font-semibold text-slate-800">{t("เพิ่มเป็นชุด", "Add a batch")}</div>
+            <div className="text-xs text-slate-500 mt-1">{t("หลายตัวพร้อมกันแบบตาราง + เลือกคอลัมน์ได้ + เติมลงล่าง", "Many at once in a table + pick columns + fill down")}</div>
           </button>
         </div>
       )}
@@ -494,16 +497,16 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
       {step === "single" && (
         <div className="space-y-3">
           <div>
-            <span className="text-xs text-slate-500">ประเภท (Tag) — ใช้เสนอรหัสให้</span>
+            <span className="text-xs text-slate-500">{t("ประเภท (Tag) — ใช้เสนอรหัสให้", "Type (Tag) — used to suggest a code")}</span>
             <div className="mt-0.5 flex gap-1.5">
-              <div className="flex-1"><SearchableSelect value={sTag ?? ""} options={tagOptions} placeholder="— เลือกประเภท (พิมพ์ค้นหาได้) —"
+              <div className="flex-1"><SearchableSelect value={sTag ?? ""} options={tagOptions} placeholder={t("— เลือกประเภท (พิมพ์ค้นหาได้) —", "— Select a type (type to search) —")}
                 onChange={(v) => { const nv = v || null; setSTag(nv); if (nv) { loadSuggest(nv); prefillFromTag(nv); loadContext(nv); } else { setSug(null); setTagCodes([]); setCtx({ fabric_widths: [], sellers: [] }); } }} /></div>
               {/* ℹ️ tooltip: ทุกตระกูลรหัสที่ SKU ในแท็กนี้ใช้จริง (hover ดู ไม่ใช่ปุ่มเลือก) */}
               {tagCodes.length > 0 && (
                 <div className="relative group flex items-center">
-                  <span className="h-9 px-2 inline-flex items-center gap-1 text-sm border border-blue-200 bg-blue-50 text-blue-600 rounded-lg cursor-pointer hover:bg-blue-100 whitespace-nowrap">🔢 ตระกูลรหัส ({tagCodes.length}) ▾</span>
+                  <span className="h-9 px-2 inline-flex items-center gap-1 text-sm border border-blue-200 bg-blue-50 text-blue-600 rounded-lg cursor-pointer hover:bg-blue-100 whitespace-nowrap">🔢 {t("ตระกูลรหัส", "Code families")} ({tagCodes.length}) ▾</span>
                   <div className="invisible group-hover:visible absolute right-0 top-full z-30 mt-1 w-80 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-1.5 text-xs">
-                    <div className="text-slate-400 px-1 pb-1">กดเลือกตระกูลรหัสที่จะใช้ (หรือพิมพ์เอง)</div>
+                    <div className="text-slate-400 px-1 pb-1">{t("กดเลือกตระกูลรหัสที่จะใช้ (หรือพิมพ์เอง)", "Pick the code family to use (or type your own)")}</div>
                     {(() => { const tagObj = sTag ? tags.find((x) => x.id === sTag) : undefined; return tagCodes.map((c) => {
                       // ชื่อ default (สะอาด): รายตระกูล → ของประเภท → ว่าง
                       const dn = cleanNameLabel(tagObj?.prefix_defaults?.[c.prefix]?.name || tagObj?.default_name || "");
@@ -516,15 +519,15 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
                             <span className="text-emerald-600 font-medium whitespace-nowrap ml-auto shrink-0">→ {c.suggested}</span>
                             <span className="text-slate-300 shrink-0">{c.count}</span>
                           </div>
-                          <div className="text-[10px] text-slate-400 truncate">ล่าสุด {c.latest_code}{!dn && c.latest_name ? ` · ${c.latest_name}` : ""}</div>
+                          <div className="text-[10px] text-slate-400 truncate">{t("ล่าสุด", "Latest")} {c.latest_code}{!dn && c.latest_name ? ` · ${c.latest_name}` : ""}</div>
                         </button>
                       );
                     }); })()}
                   </div>
                 </div>
               )}
-              <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
-                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ จัดการรหัสนำหน้า</button>
+              <button type="button" onClick={() => setPrefixMgr(true)} title={t("ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท", "Set/edit the code prefix for each type")}
+                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ {t("จัดการรหัสนำหน้า", "Manage code prefixes")}</button>
             </div>
           </div>
 
@@ -532,59 +535,59 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
             <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-2 text-xs space-y-1">
               {sug.error ? <div className="text-amber-600">⚠ {sug.error}</div> : <>
                 <div className="flex items-center gap-2">
-                  <span className="text-slate-500">ถัดไปของประเภทนี้:</span>
-                  {sug.this_suggested && <button onClick={() => setSV("code", sug.this_suggested!)} className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium hover:bg-emerald-200">{sug.this_suggested} ใช้เลย</button>}
-                  {sug.this_latest && <span className="text-slate-400">(ล่าสุด {sug.this_latest})</span>}
+                  <span className="text-slate-500">{t("ถัดไปของประเภทนี้:", "Next for this type:")}</span>
+                  {sug.this_suggested && <button onClick={() => setSV("code", sug.this_suggested!)} className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium hover:bg-emerald-200">{sug.this_suggested} {t("ใช้เลย", "Use")}</button>}
+                  {sug.this_latest && <span className="text-slate-400">({t("ล่าสุด", "latest")} {sug.this_latest})</span>}
                 </div>
-                {sug.group_latest && <div className="text-slate-400">ล่าสุดทั้งหมวด{sug.group_name ? ` "${sug.group_name}"` : ""}: {sug.group_latest}</div>}
+                {sug.group_latest && <div className="text-slate-400">{t("ล่าสุดทั้งหมวด", "Latest in group")}{sug.group_name ? ` "${sug.group_name}"` : ""}: {sug.group_latest}</div>}
               </>}
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-2">
-            <label className="block"><span className="text-xs text-slate-500">รหัส SKU *</span>
-              <input value={(single.values.code as string) ?? ""} onChange={(e) => setSV("code", e.target.value)} placeholder="เช่น LEA-SAF-028" className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
-            <label className="block"><span className="text-xs text-slate-500">ชื่อ (ไทย) <span className="text-[10px] text-slate-400">— ใส่ [สี] [รหัส] เป็นตัวแปรได้</span></span>
+            <label className="block"><span className="text-xs text-slate-500">{t("รหัส SKU", "SKU code")} *</span>
+              <input value={(single.values.code as string) ?? ""} onChange={(e) => setSV("code", e.target.value)} placeholder={t("เช่น LEA-SAF-028", "e.g. LEA-SAF-028")} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
+            <label className="block"><span className="text-xs text-slate-500">{t("ชื่อ (ไทย)", "Name (Thai)")} <span className="text-[10px] text-slate-400">{t("— ใส่ [สี] [รหัส] เป็นตัวแปรได้", "— [สี] (color) and [รหัส] (code) work as variables")}</span></span>
               <input value={(single.values.name_th as string) ?? ""} onChange={(e) => setSV("name_th", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" />
               {(() => {
                 const nm = String(single.values.name_th ?? "");
                 if (!PLACEHOLDER_RE.test(nm)) return null;
                 const preview = applyNameTemplate(nm, String(single.values.color ?? ""), String(single.values.code ?? ""));
                 const left = PLACEHOLDER_RE.test(preview);
-                return <span className={`block text-[10px] mt-0.5 ${left ? "text-amber-600" : "text-emerald-600"}`}>→ {preview}{left ? " · ยังไม่ครบ (กรอกสี/รหัส)" : ""}</span>;
+                return <span className={`block text-[10px] mt-0.5 ${left ? "text-amber-600" : "text-emerald-600"}`}>→ {preview}{left ? t(" · ยังไม่ครบ (กรอกสี/รหัส)", " · incomplete (fill in color/code)") : ""}</span>;
               })()}</label>
-            <label className="block"><span className="text-xs text-slate-500">สี</span>
-              <input value={(single.values.color as string) ?? ""} onChange={(e) => setSV("color", e.target.value)} placeholder="ดำ/แดง..." className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
-            <label className="block"><span className="text-xs text-slate-500">หน้ากว้าง (ซม. — กรณีผ้า)</span>
+            <label className="block"><span className="text-xs text-slate-500">{t("สี", "Color")}</span>
+              <input value={(single.values.color as string) ?? ""} onChange={(e) => setSV("color", e.target.value)} placeholder={t("ดำ/แดง...", "Black/Red...")} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
+            <label className="block"><span className="text-xs text-slate-500">{t("หน้ากว้าง (ซม. — กรณีผ้า)", "Width (cm — for fabric)")}</span>
               <input type="number" step="any" value={(single.values.fabric_width_cm as string) ?? ""} onChange={(e) => setSV("fabric_width_cm", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
               {ctx.fabric_widths.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1 mt-1">
-                  <span className="text-[10px] text-slate-400">ใช้บ่อย:</span>
+                  <span className="text-[10px] text-slate-400">{t("ใช้บ่อย:", "Often used:")}</span>
                   {ctx.fabric_widths.map((w) => (
                     <button key={w} type="button" onClick={() => setSV("fabric_width_cm", String(w))}
                       className="px-1.5 py-0.5 text-[11px] rounded border border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50">{w}</button>
                   ))}
                 </div>
               )}</label>
-            <label className="block"><span className="text-xs text-slate-500">หน่วย (Uom)</span>
-              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder="เลือกหน่วย" quickCreate={{ entity: "uoms", field: "name", label: "เพิ่มหน่วยใหม่" }} /></div></label>
-            <label className="block"><span className="text-xs text-slate-500">ผู้ขาย</span>
-              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" pinned={sellerPins} value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder="เลือกผู้ขาย"
-                addNewLabel="เพิ่มผู้ขายใหม่"
+            <label className="block"><span className="text-xs text-slate-500">{t("หน่วย (Uom)", "Unit (UoM)")}</span>
+              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder={t("เลือกหน่วย", "Select unit")} quickCreate={{ entity: "uoms", field: "name", label: t("เพิ่มหน่วยใหม่", "Add new unit") }} /></div></label>
+            <label className="block"><span className="text-xs text-slate-500">{t("ผู้ขาย", "Supplier")}</span>
+              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" pinned={sellerPins} value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder={t("เลือกผู้ขาย", "Select supplier")}
+                addNewLabel={t("เพิ่มผู้ขายใหม่", "Add new supplier")}
                 onAddNew={(typed: string) => setNewSupplier({ name: typed, apply: (id: string, lbl: string) => setSV("seller_partner_id", id, lbl) })} /></div></label>
-            <label className="block"><span className="text-xs text-slate-500">ราคาซื้อ</span>
+            <label className="block"><span className="text-xs text-slate-500">{t("ราคาซื้อ", "Purchase price")}</span>
               <input type="number" step="any" value={(single.values.standard_price as string) ?? ""} onChange={(e) => setSV("standard_price", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
-              <span className="block text-[10px] text-slate-400 mt-0.5">คำนวณจาก ราคาซื้อหยวน × {rmbRate} (แก้ทับเองได้)</span></label>
-            <label className="block"><span className="text-xs text-slate-500">ราคาซื้อ (หยวน) RMB</span>
+              <span className="block text-[10px] text-slate-400 mt-0.5">{t(`คำนวณจาก ราคาซื้อหยวน × ${rmbRate} (แก้ทับเองได้)`, `Calculated as RMB price × ${rmbRate} (you can override it)`)}</span></label>
+            <label className="block"><span className="text-xs text-slate-500">{t("ราคาซื้อ (หยวน) RMB", "Purchase price (RMB)")}</span>
               <input type="number" step="any" value={(single.values.rmb_cost as string) ?? ""} onChange={(e) => onRmbChange(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
             <div className="col-span-2 flex items-center gap-1.5 text-[11px] text-slate-400">
-              <span>เรตหยวน→บาท:</span>
+              <span>{t("เรตหยวน→บาท:", "RMB→THB rate:")}</span>
               <input type="number" step="any" value={rmbRate} onChange={(e) => setRmbRate(Number(e.target.value) || 0)} onBlur={saveRate}
-                title="ตั้งเรตแปลงหยวนเป็นบาท (ใช้ร่วมทั้งระบบ) · บันทึกเมื่อออกจากช่อง" className="w-16 h-7 px-1.5 text-right border border-slate-200 rounded" />
-              <span>× ราคาซื้อหยวน = ราคาซื้อ (บาท)</span>
+                title={t("ตั้งเรตแปลงหยวนเป็นบาท (ใช้ร่วมทั้งระบบ) · บันทึกเมื่อออกจากช่อง", "Set the RMB to THB rate (shared system-wide) · saved when you leave the field")} className="w-16 h-7 px-1.5 text-right border border-slate-200 rounded" />
+              <span>{t("× ราคาซื้อหยวน = ราคาซื้อ (บาท)", "× RMB price = purchase price (THB)")}</span>
             </div>
           </div>
-          <p className="text-[11px] text-slate-400">Barcode จะตั้งให้เท่ากับรหัส SKU อัตโนมัติ</p>
+          <p className="text-[11px] text-slate-400">{t("Barcode จะตั้งให้เท่ากับรหัส SKU อัตโนมัติ", "Barcode is set to the SKU code automatically")}</p>
         </div>
       )}
 
@@ -592,27 +595,27 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
       {step === "batch" && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
-            <label className="block"><span className="text-xs text-slate-500">ประเภท (Tag) ทั้งชุด</span>
-              <div className="mt-0.5 w-48"><SearchableSelect value={bTag ?? ""} options={tagOptions} placeholder="— ไม่ระบุ (ค้นหาได้) —" onChange={(v) => applyBatchTag(v || null)} /></div></label>
+            <label className="block"><span className="text-xs text-slate-500">{t("ประเภท (Tag) ทั้งชุด", "Type (Tag) for the whole batch")}</span>
+              <div className="mt-0.5 w-48"><SearchableSelect value={bTag ?? ""} options={tagOptions} placeholder={t("— ไม่ระบุ (ค้นหาได้) —", "— None (searchable) —")} onChange={(v) => applyBatchTag(v || null)} /></div></label>
             {batchCodes.length > 1 && (
-              <label className="block"><span className="text-xs text-slate-500">ตระกูลรหัส *</span>
-                <div className="mt-0.5 w-48"><SearchableSelect value={bCodePrefix ?? ""} placeholder="— เลือกตระกูล —"
+              <label className="block"><span className="text-xs text-slate-500">{t("ตระกูลรหัส", "Code family")} *</span>
+                <div className="mt-0.5 w-48"><SearchableSelect value={bCodePrefix ?? ""} placeholder={t("— เลือกตระกูล —", "— Select family —")}
                   options={batchCodes.map((c) => { const bt = bTag ? tags.find((x) => x.id === bTag) : undefined;
                     const dn = cleanNameLabel(bt?.prefix_defaults?.[c.prefix]?.name || bt?.default_name || "");
-                    return { value: c.prefix, label: dn ? `${dn} · ${c.prefix}` : c.prefix, sub: `ถัดไป ${c.suggested}` }; })}
+                    return { value: c.prefix, label: dn ? `${dn} · ${c.prefix}` : c.prefix, sub: `${t("ถัดไป", "Next")} ${c.suggested}` }; })}
                   onChange={(v) => v && applyBatchCode(v)} /></div></label>
             )}
-            <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
-              className="h-8 px-3 text-sm border border-slate-200 rounded text-slate-600 hover:bg-white whitespace-nowrap">⚙️ จัดการรหัสนำหน้า</button>
+            <button type="button" onClick={() => setPrefixMgr(true)} title={t("ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท", "Set/edit the code prefix for each type")}
+              className="h-8 px-3 text-sm border border-slate-200 rounded text-slate-600 hover:bg-white whitespace-nowrap">⚙️ {t("จัดการรหัสนำหน้า", "Manage code prefixes")}</button>
             {/* ตัวเลือกคอลัมน์ (จากทะเบียน field) */}
             <div className="relative">
-              <button onClick={() => setColMenu((o) => !o)} className="h-8 px-3 text-sm border border-slate-200 rounded bg-white text-slate-600 hover:bg-slate-50">🧩 เลือกคอลัมน์ ({shownCols.length})</button>
+              <button onClick={() => setColMenu((o) => !o)} className="h-8 px-3 text-sm border border-slate-200 rounded bg-white text-slate-600 hover:bg-slate-50">🧩 {t("เลือกคอลัมน์", "Columns")} ({shownCols.length})</button>
               {colMenu && <>
                 <div className="fixed inset-0 z-10" onClick={() => setColMenu(false)} />
                 <div className="absolute z-20 mt-1 w-64 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-1">
                   <div className="flex justify-between px-2 py-1 text-[11px] text-slate-400">
-                    <button onClick={() => saveColKeys(DEFAULT_COLS)} className="hover:text-blue-600">รีเซ็ต default</button>
-                    <span>{catalog.length} ฟิลด์</span>
+                    <button onClick={() => saveColKeys(DEFAULT_COLS)} className="hover:text-blue-600">{t("รีเซ็ต default", "Reset to default")}</button>
+                    <span>{catalog.length} {t("ฟิลด์", "fields")}</span>
                   </div>
                   {catalog.map((c) => {
                     const on = c.key === "code" || colKeys.includes(c.key);
@@ -629,7 +632,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
                 </div>
               </>}
             </div>
-            <div className="text-xs text-slate-400 ml-auto">เติมลงล่าง = ก๊อปค่าจากแถวแรกไปทุกแถว (กด ↓ ที่หัวคอลัมน์)</div>
+            <div className="text-xs text-slate-400 ml-auto">{t("เติมลงล่าง = ก๊อปค่าจากแถวแรกไปทุกแถว (กด ↓ ที่หัวคอลัมน์)", "Fill down = copy the first row's value to every row (press ↓ in the column header)")}</div>
           </div>
 
           <div className="overflow-x-auto">
@@ -640,7 +643,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
                   {shownCols.map((c) => (
                     <th key={c.key} className="border border-slate-200 px-2 py-1 text-left min-w-[120px] whitespace-nowrap">
                       {LABEL_OVERRIDE[c.key] ?? c.label}{c.key === "code" ? " *" : ""}{" "}
-                      {c.key !== "code" && <button type="button" onClick={() => fillDown(c.key)} title="เติมลงล่าง" className="text-blue-500 hover:text-blue-700">↓</button>}
+                      {c.key !== "code" && <button type="button" onClick={() => fillDown(c.key)} title={t("เติมลงล่าง", "Fill down")} className="text-blue-500 hover:text-blue-700">↓</button>}
                     </th>
                   ))}
                   <th className="border border-slate-200 px-1 py-1 w-8"></th>
@@ -661,7 +664,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
               </tbody>
             </table>
           </div>
-          <p className="text-[11px] text-slate-400">Barcode = รหัส SKU อัตโนมัติ · ประเภททั้งชุดจะผูกเป็นแท็กให้ทุกแถว · คอลัมน์ที่เลือกจะถูกจำไว้</p>
+          <p className="text-[11px] text-slate-400">{t("Barcode = รหัส SKU อัตโนมัติ · ประเภททั้งชุดจะผูกเป็นแท็กให้ทุกแถว · คอลัมน์ที่เลือกจะถูกจำไว้", "Barcode = SKU code automatically · the batch type is tagged on every row · your column choice is remembered")}</p>
         </div>
       )}
 
@@ -671,7 +674,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
       {newSupplier && (
         <SupplierWizard role="supplier" initialName={newSupplier.name}
           onClose={() => setNewSupplier(null)}
-          onCreated={(pn) => { newSupplier.apply(pn.id, pn.name); setNewSupplier(null); toast.success(`เพิ่มผู้ขาย “${pn.name}” แล้ว`); }} />
+          onCreated={(pn) => { newSupplier.apply(pn.id, pn.name); setNewSupplier(null); toast.success(t(`เพิ่มผู้ขาย “${pn.name}” แล้ว`, `Supplier “${pn.name}” added`)); }} />
       )}
     </ERPModal>
   );

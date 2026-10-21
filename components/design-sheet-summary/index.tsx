@@ -15,6 +15,8 @@ import { PrintDocLinkButton } from "@/components/report";
 import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
+import { useT } from "@/components/i18n";
 import { withImageWidth } from "@/lib/r2-image";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { htmlToPngBlob } from "@/lib/html-to-png";
@@ -37,6 +39,7 @@ function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
   onAdd: (ids: string[]) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [list, setList] = useState<DesignSheetListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -48,7 +51,7 @@ function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
     apiFetch("/api/design-sheets?limit=500&archived=0&sort_by=updated_at&sort_dir=desc")
       .then(async (r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then((j) => { if (alive) setList((j.data ?? []) as DesignSheetListItem[]); })
-      .catch(() => { if (alive) setError("โหลดรายการใบงานไม่สำเร็จ กรุณาลองใหม่"); });
+      .catch(() => { if (alive) setError(tr("โหลดรายการใบงานไม่สำเร็จ กรุณาลองใหม่", "Couldn't load design sheets. Try again.")); });
     return () => { alive = false; };
   }, []);
   const term = q.trim().toLowerCase();
@@ -58,7 +61,7 @@ function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
 
   return (
     <div ref={boxRef} className="mb-2 rounded-lg border border-teal-200 bg-teal-50/40 p-2">
-      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหาเลขที่ / ชื่องาน / แบรนด์..."
+      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("🔍 ค้นหาเลขที่ / ชื่องาน / แบรนด์...", "🔍 Search no. / job name / brand...")}
         className="mb-2 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
       <div className="max-h-72 space-y-1 overflow-auto">
         {error ? (
@@ -66,7 +69,7 @@ function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
         ) : list === null ? (
           [0, 1, 2].map((i) => <div key={i} className="h-11 animate-pulse rounded-md bg-white" />)
         ) : rows.length === 0 ? (
-          <div className="py-4 text-center text-xs text-slate-400">{term ? "ไม่พบใบงานที่ตรงคำค้น" : "ใบงานที่ยังไม่ปิดอยู่ในสรุปครบแล้ว"}</div>
+          <div className="py-4 text-center text-xs text-slate-400">{term ? t("ไม่พบใบงานที่ตรงคำค้น", "No sheets match your search") : t("ใบงานที่ยังไม่ปิดอยู่ในสรุปครบแล้ว", "All open sheets are already in this summary")}</div>
         ) : rows.map((s) => {
           const on = picked.includes(s.id);
           const color = meta.colorHex[s.status] ?? "#94a3b8";
@@ -91,10 +94,10 @@ function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
         })}
       </div>
       <div className="mt-2 flex items-center justify-end gap-2">
-        <span className="mr-auto text-[11px] text-slate-500">{picked.length ? `เลือกไว้ ${picked.length} ใบ` : "กดเพื่อเลือก (หลายใบได้)"}</span>
-        <button type="button" onClick={onClose} className="h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-600">ยกเลิก</button>
+        <span className="mr-auto text-[11px] text-slate-500">{picked.length ? t(`เลือกไว้ ${picked.length} ใบ`, `${picked.length} selected`) : t("กดเพื่อเลือก (หลายใบได้)", "Click to select (multiple allowed)")}</span>
+        <button type="button" onClick={onClose} className="h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-600">{t("ยกเลิก", "Cancel")}</button>
         <button type="button" onClick={() => onAdd(picked)} disabled={picked.length === 0}
-          className="h-8 rounded-lg bg-teal-600 px-3 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-40">＋ เพิ่ม {picked.length || ""} ใบ</button>
+          className="h-8 rounded-lg bg-teal-600 px-3 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-40">＋ {t(`เพิ่ม ${picked.length || ""} ใบ`, `Add ${picked.length || ""}`)}</button>
       </div>
     </div>
   );
@@ -102,10 +105,11 @@ function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
 
 /** หมายเหตุหลายบรรทัด (Enter = ขึ้นบรรทัดใหม่) — สูงตามจำนวนบรรทัด 2–6 · ลากขยายเองได้ */
 function NoteBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const t = useT();
   const lines = (value.match(/\n/g)?.length ?? 0) + 1;
   return (
     <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={Math.min(6, Math.max(2, lines))}
-      placeholder="หมายเหตุ (ถ้ามี) · กด Enter ขึ้นบรรทัดใหม่ได้"
+      placeholder={t("หมายเหตุ (ถ้ามี) · กด Enter ขึ้นบรรทัดใหม่ได้", "Note (optional) · Enter for a new line")}
       className="w-full resize-y rounded-md border border-slate-200 px-2 py-1.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500" />
   );
 }
@@ -127,6 +131,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
   /** หลังบันทึก/ลบ — ให้หน้าแม่โหลดรายการใหม่ */
   onChanged?: () => void;
 }) {
+  const t = useT();
   const canEdit = usePermission("products.edit");
   const toast = useToast();
   const [savedId, setSavedId] = useState<string | null>(summaryId);
@@ -157,7 +162,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
       let next: SummaryDoc;
       if (summaryId) {
         const j = await apiFetch(`/api/design-sheet-summaries/${summaryId}`).then((r) => r.json());
-        if (j.error || !j.data) throw new Error(j.error || "ไม่พบสรุปนี้");
+        if (j.error || !j.data) throw new Error(j.error || tr("ไม่พบสรุปนี้", "Summary not found"));
         const s = j.data as SavedSummary;
         next = { title: s.title, audience: s.audience, columns: s.columns, items: s.items, note: s.note };
         s.items.forEach((it) => defaultsApplied.current.add(it.sheet_id));   // สรุปเก่า: ไม่เติมรูปให้เอง
@@ -169,7 +174,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
       if (!alive) return;
       setDoc(next);
       await loadSheets(next.items.map((i) => i.sheet_id));
-    })().catch((e) => { if (alive) setLoadErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); })
+    })().catch((e) => { if (alive) setLoadErr(e instanceof Error ? e.message : tr("โหลดไม่สำเร็จ", "Couldn't load")); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,7 +184,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
     const need = ids.filter((id) => !sheetRows[id]);
     if (need.length) {
       const res = await apiFetch(`/api/design-sheets?ids=${need.join(",")}&limit=${need.length}`);
-      if (!res.ok) throw new Error("โหลดข้อมูลใบงานไม่สำเร็จ กรุณาลองใหม่");
+      if (!res.ok) throw new Error(t("โหลดข้อมูลใบงานไม่สำเร็จ กรุณาลองใหม่", "Couldn't load sheet data. Try again."));
       const j = await res.json();
       const add: Record<string, DesignSheetListItem> = {};
       for (const s of (j.data ?? []) as DesignSheetListItem[]) add[s.id] = s;
@@ -262,8 +267,8 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
     const fresh = ids.filter((id) => !doc.items.some((it) => it.sheet_id === id));
     if (fresh.length === 0) return;
     edit((d) => ({ ...d, items: [...d.items, ...fresh.map(emptyItem)] }));
-    loadSheets(fresh).catch((e) => toast.error(e instanceof Error ? e.message : "โหลดข้อมูลใบงานไม่สำเร็จ"));
-    toast.success(`เพิ่ม ${fresh.length} ใบงานลงสรุปแล้ว`);
+    loadSheets(fresh).catch((e) => toast.error(e instanceof Error ? e.message : t("โหลดข้อมูลใบงานไม่สำเร็จ", "Couldn't load sheet data")));
+    toast.success(t(`เพิ่ม ${fresh.length} ใบงานลงสรุปแล้ว`, `Added ${fresh.length} sheets to the summary`));
     setAddOpen(false);
   };
 
@@ -281,14 +286,14 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
         method: savedId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed.value),
       });
       const j = await res.json();
-      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      if (!res.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Couldn't save"));
       const s = j.data as SavedSummary;
       setSavedId(s.id); setTouched(false);
       // จำ "ข้อมูลที่โชว์" ไว้ใช้กับสรุปใหม่ครั้งหน้า (รายคน)
       void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: PREF_KEY, value: s.columns }) }).catch(() => {});
-      toast.success(isNew ? "บันทึกสรุปแล้ว — เปิดอีกครั้งได้จากปุ่ม 📋 สรุปงาน" : "บันทึกการแก้ไขแล้ว");
+      toast.success(isNew ? t("บันทึกสรุปแล้ว — เปิดอีกครั้งได้จากปุ่ม 📋 สรุปงาน", "Summary saved — reopen it from the 📋 Summary button") : t("บันทึกการแก้ไขแล้ว", "Changes saved"));
       onChanged?.();
-    } catch (e) { setError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ กรุณาลองใหม่"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ กรุณาลองใหม่", "Couldn't save. Try again.")); }
     finally { setSaving(false); }
   };
 
@@ -298,10 +303,10 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
     try {
       const res = await apiFetch(`/api/design-sheet-summaries/${savedId}`, { method: "DELETE" });
       const j = await res.json();
-      if (!res.ok || j.error) throw new Error(j.error || "ลบไม่สำเร็จ");
-      toast.success(`ลบสรุป "${doc.title}" แล้ว`);
+      if (!res.ok || j.error) throw new Error(j.error || t("ลบไม่สำเร็จ", "Couldn't delete"));
+      toast.success(t(`ลบสรุป "${doc.title}" แล้ว`, `Deleted summary "${doc.title}"`));
       onChanged?.(); onClose();
-    } catch (e) { setError(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Couldn't delete")); }
     finally { setSaving(false); setConfirmDelete(false); }
   };
 
@@ -310,14 +315,14 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
   const makePng = () => htmlToPngBlob(renderSummaryBody(doc, sheets), { width: 960 });
   const copyImage = async () => {
     setImgBusy("copy");
-    try { await copyBlobToClipboard(makePng()); toast.success("คัดลอกรูปสรุปแล้ว — ไปวาง (Ctrl+V) ใน LINE ได้เลย"); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกรูปไม่สำเร็จ ลองดาวน์โหลดแทน"); }
+    try { await copyBlobToClipboard(makePng()); toast.success(t("คัดลอกรูปสรุปแล้ว — ไปวาง (Ctrl+V) ใน LINE ได้เลย", "Summary image copied — paste it (Ctrl+V) into LINE")); }
+    catch (e) { toast.error(e instanceof Error ? e.message : t("คัดลอกรูปไม่สำเร็จ ลองดาวน์โหลดแทน", "Couldn't copy the image — try downloading instead")); }
     finally { setImgBusy(null); }
   };
   const downloadImage = async () => {
     setImgBusy("download");
     try { downloadBlob(await makePng(), `${fileBase}.png`); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "สร้างรูปไม่สำเร็จ"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างรูปไม่สำเร็จ", "Couldn't create the image")); }
     finally { setImgBusy(null); }
   };
 
@@ -328,26 +333,26 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
 
   return (
     <ERPModal open={open} onClose={onClose} size="xl" storageKey="ds-summary-builder" hasUnsavedChanges={touched}
-      title={isNew ? "📋 สรุปงาน (ใหม่)" : `📋 สรุปงาน — ${doc.title || "ไม่มีชื่อ"}`}
-      description="เลือกข้อมูลและรูปที่จะโชว์ · ใบที่มีหลายชิ้นแยกเป็นหลายแถวได้ · ด้านขวาคือหน้าตาจริงตอนพิมพ์/ทำรูป"
+      title={isNew ? t("📋 สรุปงาน (ใหม่)", "📋 Job summary (new)") : `📋 ${t("สรุปงาน", "Job summary")} — ${doc.title || t("ไม่มีชื่อ", "Untitled")}`}
+      description={t("เลือกข้อมูลและรูปที่จะโชว์ · ใบที่มีหลายชิ้นแยกเป็นหลายแถวได้ · ด้านขวาคือหน้าตาจริงตอนพิมพ์/ทำรูป", "Choose the info and images to show · sheets with several pieces can be split into rows · the right side is the real print/image preview")}
       footer={
         <div className="flex w-full flex-wrap items-center gap-2">
           {canEdit && savedId && (confirmDelete ? (
             <span className="inline-flex items-center gap-1.5 text-sm text-rose-700">
-              ลบสรุปนี้?
-              <button onClick={() => void doDelete()} disabled={saving} className="h-8 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700">ลบเลย</button>
-              <button onClick={() => setConfirmDelete(false)} className="h-8 rounded-lg border border-slate-300 px-3 text-xs text-slate-600">ไม่ลบ</button>
+              {t("ลบสรุปนี้?", "Delete this summary?")}
+              <button onClick={() => void doDelete()} disabled={saving} className="h-8 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700">{t("ลบเลย", "Delete")}</button>
+              <button onClick={() => setConfirmDelete(false)} className="h-8 rounded-lg border border-slate-300 px-3 text-xs text-slate-600">{t("ไม่ลบ", "Keep")}</button>
             </span>
           ) : (
-            <button onClick={() => setConfirmDelete(true)} className="h-8 rounded-lg px-2 text-xs text-rose-600 hover:bg-rose-50">🗑 ลบสรุปนี้</button>
+            <button onClick={() => setConfirmDelete(true)} className="h-8 rounded-lg px-2 text-xs text-rose-600 hover:bg-rose-50">🗑 {t("ลบสรุปนี้", "Delete summary")}</button>
           ))}
           <span className="ml-auto" />
           {error && <span className="text-sm text-rose-600">⚠ {error}</span>}
-          {!canEdit && <span className="text-xs text-slate-400">ดูได้อย่างเดียว (ไม่มีสิทธิ์แก้ใบงาน)</span>}
-          <button onClick={onClose} disabled={saving} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ปิด</button>
+          {!canEdit && <span className="text-xs text-slate-400">{t("ดูได้อย่างเดียว (ไม่มีสิทธิ์แก้ใบงาน)", "View only (no permission to edit sheets)")}</span>}
+          <button onClick={onClose} disabled={saving} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">{t("ปิด", "Close")}</button>
           {canEdit && (
             <button onClick={() => void save()} disabled={saving || loading} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-              {saving ? "กำลังบันทึก..." : "💾 บันทึกสรุป"}</button>
+              {saving ? t("กำลังบันทึก...", "Saving...") : t("💾 บันทึกสรุป", "💾 Save summary")}</button>
           )}
         </div>
       }>
@@ -359,11 +364,11 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
               <div>
-                <label className={label}>ชื่อสรุป</label>
-                <ERPInput value={doc.title} onChange={(e) => edit((d) => ({ ...d, title: e.target.value }))} placeholder="เช่น สรุปส่งคุณเต้ง 21 ต.ค." />
+                <label className={label}>{t("ชื่อสรุป", "Summary name")}</label>
+                <ERPInput value={doc.title} onChange={(e) => edit((d) => ({ ...d, title: e.target.value }))} placeholder={t("เช่น สรุปส่งคุณเต้ง 21 ต.ค.", "e.g. Summary for Teng, 21 Oct")} />
               </div>
               <div>
-                <label className={label}>ฉบับ</label>
+                <label className={label}>{t("ฉบับ", "Version")}</label>
                 <div className="flex gap-1">
                   {(["internal", "customer"] as SummaryAudience[]).map((a) => (
                     <button key={a} type="button" onClick={() => edit((d) => ({ ...d, audience: a }))} className={chip(doc.audience === a)}>
@@ -374,16 +379,16 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
               </div>
             </div>
             {customer && (
-              <div className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">👤 ฉบับลูกค้า: ระบบซ่อน "ไม่ขยับกี่วัน" · "โน้ตภายใน" · "รายละเอียดงาน" ให้เอง และไม่มีต้นทุน/ราคาในสรุปนี้เลย</div>
+              <div className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">👤 {t("ฉบับลูกค้า: ระบบซ่อน \"ไม่ขยับกี่วัน\" · \"โน้ตภายใน\" · \"รายละเอียดงาน\" ให้เอง และไม่มีต้นทุน/ราคาในสรุปนี้เลย", "Customer version: \"days idle\", \"internal note\" and \"job details\" are hidden automatically, and no cost/price appears in this summary")}</div>
             )}
 
             <div>
-              <label className={label}>ข้อมูลที่โชว์ <span className="font-normal text-slate-400">(ระบบจำไว้ใช้ครั้งหน้า)</span></label>
+              <label className={label}>{t("ข้อมูลที่โชว์", "Info to show")} <span className="font-normal text-slate-400">{t("(ระบบจำไว้ใช้ครั้งหน้า)", "(remembered for next time)")}</span></label>
               <div className="flex flex-wrap gap-1">
                 {SUMMARY_COLUMNS.map((c) => {
                   const hidden = customer && c.internalOnly;
                   return (
-                    <button key={c.key} type="button" onClick={() => toggleColumn(c.key)} title={hidden ? "ฉบับลูกค้าไม่โชว์ข้อมูลนี้" : c.hint}
+                    <button key={c.key} type="button" onClick={() => toggleColumn(c.key)} title={hidden ? t("ฉบับลูกค้าไม่โชว์ข้อมูลนี้", "Not shown in the customer version") : c.hint}
                       className={`${chip(doc.columns.includes(c.key) && !hidden)} ${hidden ? "line-through opacity-50" : ""}`}>{c.label}</button>
                   );
                 })}
@@ -391,18 +396,18 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
             </div>
 
             <div>
-              <label className={label}>ข้อความหัวเอกสาร <span className="font-normal text-slate-400">(ถ้ามี)</span></label>
-              <textarea value={doc.note} onChange={(e) => edit((d) => ({ ...d, note: e.target.value }))} rows={2} placeholder="เช่น อัปเดตงานประจำสัปดาห์ · ขอคอนเฟิร์มสีภายในวันศุกร์"
+              <label className={label}>{t("ข้อความหัวเอกสาร", "Header text")} <span className="font-normal text-slate-400">{t("(ถ้ามี)", "(optional)")}</span></label>
+              <textarea value={doc.note} onChange={(e) => edit((d) => ({ ...d, note: e.target.value }))} rows={2} placeholder={t("เช่น อัปเดตงานประจำสัปดาห์ · ขอคอนเฟิร์มสีภายในวันศุกร์", "e.g. Weekly update · please confirm colors by Friday")}
                 className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
 
             <div>
               <div className="mb-1 flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-slate-600">ใบงานในสรุป ({doc.items.length})</label>
+                <label className="text-xs font-medium text-slate-600">{t("ใบงานในสรุป", "Sheets in summary")} ({doc.items.length})</label>
                 {canEdit && (
                   <button type="button" onClick={() => setAddOpen((o) => !o)}
                     className={`h-7 rounded-lg border px-2.5 text-xs font-medium ${addOpen ? "border-slate-900 bg-slate-900 text-white" : "border-teal-300 bg-teal-50 text-teal-800 hover:bg-teal-100"}`}>
-                    {addOpen ? "✕ ปิดตัวเลือก" : "＋ เพิ่มใบงาน"}
+                    {addOpen ? t("✕ ปิดตัวเลือก", "✕ Close picker") : t("＋ เพิ่มใบงาน", "＋ Add sheets")}
                   </button>
                 )}
               </div>
@@ -421,19 +426,19 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
                       <div key={it.sheet_id} className="rounded-lg border border-slate-200 bg-white p-2.5">
                         <div className="flex items-start gap-2">
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-slate-800">{s ? <><span className="font-mono text-[11px] text-slate-400">{s.code}</span> {s.name}</> : "กำลังโหลด..."}</div>
+                            <div className="truncate text-sm font-medium text-slate-800">{s ? <><span className="font-mono text-[11px] text-slate-400">{s.code}</span> {s.name}</> : t("กำลังโหลด...", "Loading...")}</div>
                             {s && (
                               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                                 <span className="rounded-full px-1.5 py-0.5" style={{ color: s.status_color, backgroundColor: `${s.status_color}1a` }}>{s.status_label}</span>
                                 {s.brand_name && <span>{s.brand_name}</span>}
-                                {s.closed && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">ปิดงานแล้ว</span>}
+                                {s.closed && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{t("ปิดงานแล้ว", "Closed")}</span>}
                               </div>
                             )}
                           </div>
                           <div className="flex shrink-0 items-center gap-0.5 text-slate-400">
-                            <button type="button" onClick={() => moveItem(idx, -1)} disabled={idx === 0} title="เลื่อนขึ้น" className="h-7 w-7 rounded hover:bg-slate-100 disabled:opacity-30">▲</button>
-                            <button type="button" onClick={() => moveItem(idx, 1)} disabled={idx === doc.items.length - 1} title="เลื่อนลง" className="h-7 w-7 rounded hover:bg-slate-100 disabled:opacity-30">▼</button>
-                            <button type="button" onClick={() => removeItem(it.sheet_id)} title="เอาใบนี้ออกจากสรุป" aria-label="เอาออก" className="h-7 w-7 rounded text-rose-500 hover:bg-rose-50">✕</button>
+                            <button type="button" onClick={() => moveItem(idx, -1)} disabled={idx === 0} title={t("เลื่อนขึ้น", "Move up")} className="h-7 w-7 rounded hover:bg-slate-100 disabled:opacity-30">▲</button>
+                            <button type="button" onClick={() => moveItem(idx, 1)} disabled={idx === doc.items.length - 1} title={t("เลื่อนลง", "Move down")} className="h-7 w-7 rounded hover:bg-slate-100 disabled:opacity-30">▼</button>
+                            <button type="button" onClick={() => removeItem(it.sheet_id)} title={t("เอาใบนี้ออกจากสรุป", "Remove this sheet from the summary")} aria-label={t("เอาออก", "Remove")} className="h-7 w-7 rounded text-rose-500 hover:bg-rose-50">✕</button>
                           </div>
                         </div>
 
@@ -441,12 +446,12 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
                           {imgs === "loading" || imgs === undefined ? (
                             <div className="flex gap-1.5">{[0, 1, 2].map((i) => <div key={i} className="h-14 w-14 animate-pulse rounded-md bg-slate-100" />)}</div>
                           ) : imgs === "error" ? (
-                            <div className="text-xs text-rose-600">โหลดรูปไม่สำเร็จ</div>
+                            <div className="text-xs text-rose-600">{t("โหลดรูปไม่สำเร็จ", "Couldn't load images")}</div>
                           ) : imgs.length === 0 ? (
-                            <div className="text-xs text-slate-400">ใบงานนี้ยังไม่มีรูป</div>
+                            <div className="text-xs text-slate-400">{t("ใบงานนี้ยังไม่มีรูป", "This sheet has no images yet")}</div>
                           ) : (
                             <>
-                              <div className="mb-1 text-[11px] text-slate-400">กดรูปเพื่อเลือก ({imgs.length} รูป · เลือก {it.images.length})</div>
+                              <div className="mb-1 text-[11px] text-slate-400">{t(`กดรูปเพื่อเลือก (${imgs.length} รูป · เลือก ${it.images.length})`, `Click images to select (${imgs.length} images · ${it.images.length} selected)`)}</div>
                               <div className="flex flex-wrap gap-1.5">
                                 {imgs.map((im) => {
                                   const order = it.images.indexOf(im.url);
@@ -467,16 +472,16 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
                         {/* ชื่อสินค้า — เติมชื่อใบงานไว้ให้ แก้ได้เลย (เฉพาะในสรุปนี้ ไม่เปลี่ยนชื่อใบงานจริง) */}
                         <div className="mt-2">
                           <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] text-slate-500">
-                            <span>ชื่อสินค้า{it.split ? " (ชื่อหลัก)" : ""} <span className="text-slate-400">· แก้เฉพาะในสรุปนี้ ชื่อใบงานจริงไม่เปลี่ยน</span></span>
-                            {titleEdited(it, s) && <button type="button" onClick={() => resetTitle(it.sheet_id)} className="shrink-0 text-blue-600 hover:underline">↺ ใช้ชื่อเดิม</button>}
+                            <span>{t("ชื่อสินค้า", "Product name")}{it.split ? t(" (ชื่อหลัก)", " (main name)") : ""} <span className="text-slate-400">· {t("แก้เฉพาะในสรุปนี้ ชื่อใบงานจริงไม่เปลี่ยน", "edits apply to this summary only; the sheet name stays the same")}</span></span>
+                            {titleEdited(it, s) && <button type="button" onClick={() => resetTitle(it.sheet_id)} className="shrink-0 text-blue-600 hover:underline">↺ {t("ใช้ชื่อเดิม", "Use original name")}</button>}
                           </div>
-                          <input value={titleValue(it, s)} onChange={(e) => setTitle(it.sheet_id, e.target.value)} placeholder={s?.name ?? "ชื่อสินค้า"}
+                          <input value={titleValue(it, s)} onChange={(e) => setTitle(it.sheet_id, e.target.value)} placeholder={s?.name ?? t("ชื่อสินค้า", "Product name")}
                             className="h-8 w-full rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                         </div>
 
-                        <label className={`mt-2 flex items-center gap-2 text-xs ${canSplit ? "cursor-pointer text-slate-700" : "text-slate-400"}`} title={canSplit ? "" : "เลือกรูปอย่างน้อย 2 รูปก่อน"}>
+                        <label className={`mt-2 flex items-center gap-2 text-xs ${canSplit ? "cursor-pointer text-slate-700" : "text-slate-400"}`} title={canSplit ? "" : t("เลือกรูปอย่างน้อย 2 รูปก่อน", "Select at least 2 images first")}>
                           <input type="checkbox" checked={it.split} disabled={!canSplit} onChange={(e) => setSplit(it.sheet_id, e.target.checked)} className="h-4 w-4" />
-                          แยกเป็นรายการตามรูป <span className="text-slate-400">(1 รูป = 1 แถว เช่น กระเป๋า 3 ใบในงานเดียว)</span>
+                          {t("แยกเป็นรายการตามรูป", "Split into rows by image")} <span className="text-slate-400">{t("(1 รูป = 1 แถว เช่น กระเป๋า 3 ใบในงานเดียว)", "(1 image = 1 row, e.g. 3 bags in one job)")}</span>
                         </label>
 
                         {it.split ? (
@@ -486,7 +491,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img src={withImageWidth(url, 80) ?? url} alt="" className="h-7 w-7 rounded border border-slate-200 object-cover" />
                                 <div className="space-y-1">
-                                  <input value={it.labels[i] ?? ""} onChange={(e) => setText(it.sheet_id, "labels", i, e.target.value)} placeholder={`ชื่อชิ้นที่ ${i + 1} (ต่อท้ายชื่อหลัก)`}
+                                  <input value={it.labels[i] ?? ""} onChange={(e) => setText(it.sheet_id, "labels", i, e.target.value)} placeholder={t(`ชื่อชิ้นที่ ${i + 1} (ต่อท้ายชื่อหลัก)`, `Piece ${i + 1} name (appended to the main name)`)}
                                     className="h-8 w-full rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
                                   <NoteBox value={it.notes[i] ?? ""} onChange={(v) => setText(it.sheet_id, "notes", i, v)} />
                                 </div>
@@ -504,7 +509,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
                   {canEdit && !addOpen && (
                     <button type="button" onClick={() => setAddOpen(true)}
                       className="w-full rounded-lg border border-dashed border-teal-300 bg-teal-50/40 py-2 text-xs font-medium text-teal-800 hover:bg-teal-50">
-                      ＋ เพิ่มใบงานลงสรุป (ลืมเลือกตอนติ๊กบนบอร์ด)
+                      ＋ {t("เพิ่มใบงานลงสรุป (ลืมเลือกตอนติ๊กบนบอร์ด)", "Add sheets to the summary (missed while picking on the board)")}
                     </button>
                   )}
                 </div>
@@ -515,17 +520,17 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
           {/* ── ตัวอย่าง + พิมพ์ / รูป ── */}
           <div className="min-w-0 lg:sticky lg:top-0 lg:self-start">
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-              <span className="mr-auto text-xs font-semibold text-slate-700">ตัวอย่าง ({AUDIENCE_LABEL[doc.audience]})</span>
-              <PrintDocLinkButton html={html} fileName={fileBase} className={actBtn}>🖨 พิมพ์ / PDF</PrintDocLinkButton>
+              <span className="mr-auto text-xs font-semibold text-slate-700">{t("ตัวอย่าง", "Preview")} ({AUDIENCE_LABEL[doc.audience]})</span>
+              <PrintDocLinkButton html={html} fileName={fileBase} className={actBtn}>🖨 {t("พิมพ์ / PDF", "Print / PDF")}</PrintDocLinkButton>
               {canCopyImage() && (
                 <button type="button" onClick={() => void copyImage()} disabled={!!imgBusy || doc.items.length === 0} className={actBtn}>
-                  {imgBusy === "copy" ? "กำลังทำรูป..." : "🖼 คัดลอกเป็นรูป"}</button>
+                  {imgBusy === "copy" ? t("กำลังทำรูป...", "Creating image...") : t("🖼 คัดลอกเป็นรูป", "🖼 Copy as image")}</button>
               )}
               <button type="button" onClick={() => void downloadImage()} disabled={!!imgBusy || doc.items.length === 0} className={actBtn}>
-                {imgBusy === "download" ? "กำลังทำรูป..." : "⬇ ดาวน์โหลดรูป"}</button>
+                {imgBusy === "download" ? t("กำลังทำรูป...", "Creating image...") : t("⬇ ดาวน์โหลดรูป", "⬇ Download image")}</button>
             </div>
-            <iframe title="ตัวอย่างสรุปงาน" srcDoc={html} className="h-[600px] w-full rounded-lg border border-slate-200 bg-slate-100" />
-            <p className="mt-1.5 text-[11px] text-slate-400">พิมพ์ / PDF / รูป ใช้ค่าที่ตั้งอยู่ตอนนี้ได้เลย (ยังไม่บันทึกก็ได้) · คัดลอกรูปแล้ววางใน LINE ด้วย Ctrl+V</p>
+            <iframe title={t("ตัวอย่างสรุปงาน", "Summary preview")} srcDoc={html} className="h-[600px] w-full rounded-lg border border-slate-200 bg-slate-100" />
+            <p className="mt-1.5 text-[11px] text-slate-400">{t("พิมพ์ / PDF / รูป ใช้ค่าที่ตั้งอยู่ตอนนี้ได้เลย (ยังไม่บันทึกก็ได้) · คัดลอกรูปแล้ววางใน LINE ด้วย Ctrl+V", "Print / PDF / image use the current settings (no need to save first) · copy the image and paste it into LINE with Ctrl+V")}</p>
           </div>
         </div>
       )}

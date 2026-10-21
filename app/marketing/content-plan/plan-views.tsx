@@ -5,7 +5,7 @@
  * ลากการ์ด (HTML5 drag) → วางช่องวัน = เปลี่ยนวัน (คงเวลาเดิม) · วางกล่องไอเดีย = เอาวันออก · วางคอลัมน์บอร์ด = เปลี่ยนขั้น
  */
 import { useState, type DragEvent, type ReactNode } from "react";
-import { useLang } from "@/components/i18n";
+import { useLang, useT } from "@/components/i18n";
 import { PlatformIcon } from "@/components/platform-icon";
 import { POST_TYPES, splitPostTypes, type ContentItem } from "@/app/tasks/data";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
@@ -86,6 +86,7 @@ export function WeekView({ start, items, platforms, allPlatforms, placementTypes
   canEdit: boolean; onOpen: (c: ContentItem) => void; onAdd: (date: string, platform: string | null) => void;
   onMove: (id: string, date: string | null, platform: string | null) => void;
 }) {
+  const t = useT();
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const today = localDateKey(new Date());
   const inWeek = items.filter((c) => { const k = dateKeyOf(c.scheduled_at); return k && k >= days[0] && k <= days[6]; });
@@ -94,8 +95,8 @@ export function WeekView({ start, items, platforms, allPlatforms, placementTypes
   const hiddenUsed = [...new Set(inWeek.flatMap((c) => c.platforms ?? []))].filter((k) => !shown.has(k));
   const allByKey = new Map(allPlatforms.map((p) => [p.value, p]));
   const rows = [...platforms.map((p) => ({ key: p.value, label: p.label, p })),
-    ...hiddenUsed.map((k) => ({ key: k, label: `${allByKey.get(k)?.label ?? k} (ซ่อนอยู่)`, p: allByKey.get(k) ?? ({ value: k, label: k } as PlatformOpt) })),
-    ...(inWeek.some((c) => !(c.platforms ?? []).length) ? [{ key: NO_PLATFORM, label: "ยังไม่เลือกช่องทาง", p: null as PlatformOpt | null }] : [])];
+    ...hiddenUsed.map((k) => ({ key: k, label: `${allByKey.get(k)?.label ?? k} ${t("(ซ่อนอยู่)", "(hidden)")}`, p: allByKey.get(k) ?? ({ value: k, label: k } as PlatformOpt) })),
+    ...(inWeek.some((c) => !(c.platforms ?? []).length) ? [{ key: NO_PLATFORM, label: t("ยังไม่เลือกช่องทาง", "No channel yet"), p: null as PlatformOpt | null }] : [])];
   const cellItems = (day: string, row: string) => inWeek.filter((c) => dateKeyOf(c.scheduled_at) === day
     && (row === NO_PLATFORM ? !(c.platforms ?? []).length : (c.platforms ?? []).includes(row)));
 
@@ -144,13 +145,14 @@ function DayCell({ today, items, pillarOf, canEdit, onOpen, onAdd, onDrop, label
   labelOf?: (c: ContentItem) => string;
   onOpen: (c: ContentItem) => void; onAdd: () => void; onDrop: (id: string) => void; minH?: string; children?: ReactNode;
 }) {
+  const t = useT();
   const { over, props } = useDrop(onDrop, canEdit);
   return (
     <div {...props} className={`group/cell relative ${minH} space-y-1 border-b border-l border-slate-100 p-1 ${today ? "bg-blue-50/40" : ""} ${over ? "bg-blue-100 ring-2 ring-inset ring-blue-400" : ""}`}>
       {children}
       {items.map((c) => <PlanCard key={c.id} item={c} pillar={pillarOf(c)} compact canEdit={canEdit} onOpen={onOpen} placementText={labelOf?.(c) || undefined} />)}
       {canEdit && (
-        <button type="button" onClick={onAdd} title="เพิ่มไอเดียลงช่องนี้"
+        <button type="button" onClick={onAdd} title={t("เพิ่มไอเดียลงช่องนี้", "Add an idea to this cell")}
           className="w-full rounded-md border border-dashed border-transparent py-0.5 text-[11px] text-slate-300 hover:border-slate-300 hover:text-slate-500 group-hover/cell:text-slate-400 max-sm:text-slate-400">＋</button>
       )}
     </div>
@@ -163,6 +165,7 @@ export function MonthView({ ym, items, pillarOf, canEdit, onOpen, onAdd, onMove 
   canEdit: boolean; onOpen: (c: ContentItem) => void; onAdd: (date: string, platform: string | null) => void;
   onMove: (id: string, date: string | null, platform: string | null) => void;
 }) {
+  const t = useT();
   const first = parseDateKey(`${ym}-01`);
   const gridStart = addDays(`${ym}-01`, -((first.getDay() + 6) % 7));
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
@@ -172,7 +175,7 @@ export function MonthView({ ym, items, pillarOf, canEdit, onOpen, onAdd, onMove 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
       <div className="grid min-w-[760px] grid-cols-7">
-        {["จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส.", "อา."].map((d) => <div key={d} className="border-b border-slate-200 bg-slate-50 py-1.5 text-center text-xs text-slate-600">{d}</div>)}
+        {[t("จ.", "Mon"), t("อ.", "Tue"), t("พ.", "Wed"), t("พฤ.", "Thu"), t("ศ.", "Fri"), t("ส.", "Sat"), t("อา.", "Sun")].map((d) => <div key={d} className="border-b border-slate-200 bg-slate-50 py-1.5 text-center text-xs text-slate-600">{d}</div>)}
         {days.map((d) => {
           const inMonth = d.startsWith(ym);
           return (
@@ -207,6 +210,7 @@ function BoardColumn({ stage, items, pillarOf, canEdit, onOpen, onDrop }: {
   stage: PlanStage; items: ContentItem[]; pillarOf: (c: ContentItem) => MarketingSkuLabel | undefined; canEdit: boolean;
   onOpen: (c: ContentItem) => void; onDrop: (id: string) => void;
 }) {
+  const t = useT();
   const s = STAGE_META[stage];
   const { over, props } = useDrop(onDrop, canEdit);
   return (
@@ -216,7 +220,7 @@ function BoardColumn({ stage, items, pillarOf, canEdit, onOpen, onDrop }: {
       </div>
       <div className="max-h-[65vh] min-h-[8rem] space-y-1.5 overflow-y-auto p-2">
         {items.map((c) => <PlanCard key={c.id} item={c} pillar={pillarOf(c)} showDate canEdit={canEdit} onOpen={onOpen} />)}
-        {items.length === 0 && <div className="py-6 text-center text-xs text-slate-400">ว่าง</div>}
+        {items.length === 0 && <div className="py-6 text-center text-xs text-slate-400">{t("ว่าง", "Empty")}</div>}
       </div>
     </div>
   );
@@ -227,16 +231,17 @@ export function BacklogPanel({ items, pillarOf, canEdit, onOpen, onAdd, onDrop }
   items: ContentItem[]; pillarOf: (c: ContentItem) => MarketingSkuLabel | undefined; canEdit: boolean;
   onOpen: (c: ContentItem) => void; onAdd: () => void; onDrop: (id: string) => void;
 }) {
+  const t = useT();
   const { over, props } = useDrop(onDrop, canEdit);
   return (
     <aside {...props} className={`rounded-xl border bg-white ${over ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200"}`}>
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-        <span className="text-sm font-semibold text-slate-700">💡 ไอเดียยังไม่ลงวัน <span className="font-normal text-slate-400">{items.length}</span></span>
-        {canEdit && <button type="button" onClick={onAdd} className="rounded-md px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50">＋ เพิ่ม</button>}
+        <span className="text-sm font-semibold text-slate-700">💡 {t("ไอเดียยังไม่ลงวัน", "Unscheduled ideas")} <span className="font-normal text-slate-400">{items.length}</span></span>
+        {canEdit && <button type="button" onClick={onAdd} className="rounded-md px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50">＋ {t("เพิ่ม", "Add")}</button>}
       </div>
       <div className="max-h-[60vh] space-y-1.5 overflow-y-auto p-2">
         {items.map((c) => <PlanCard key={c.id} item={c} pillar={pillarOf(c)} canEdit={canEdit} onOpen={onOpen} />)}
-        {items.length === 0 && <div className="py-6 text-center text-xs text-slate-400">ยังไม่มีไอเดียค้าง{canEdit ? " — กด ＋ เพิ่ม หรือลากการ์ดมาวางที่นี่" : ""}</div>}
+        {items.length === 0 && <div className="py-6 text-center text-xs text-slate-400">{t("ยังไม่มีไอเดียค้าง", "No pending ideas")}{canEdit ? t(" — กด ＋ เพิ่ม หรือลากการ์ดมาวางที่นี่", " — press ＋ Add or drop a card here") : ""}</div>}
       </div>
     </aside>
   );
