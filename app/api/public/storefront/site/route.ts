@@ -8,6 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { allowDraftPreview } from "@/lib/storefront-preview-access";
 import { normalizeBlocks } from "@/lib/website-blocks";
 import { normalizeTheme } from "@/lib/website-theme";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
@@ -49,7 +50,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const url = new URL(request.url);
   const shopSlug = (url.searchParams.get("shop") ?? "").trim();
   // preview=1 → ใช้ "ร่าง" ที่ยังไม่เผยแพร่ (หน้าตั้งค่าธีมใช้ดูผลก่อนกดเผยแพร่)
-  const preview = url.searchParams.get("preview") === "1";
+  // 🔑 ร่าง = ต้องมีรหัสพรีวิว/พนักงาน (lib/storefront-preview-access · ช่วงเปลี่ยนผ่านยังปล่อย + จด log)
+  const preview = url.searchParams.get("preview") === "1" && !!shopSlug && (await allowDraftPreview(request, shopSlug, "site"));
   if (!shopSlug) return json({ error: "ต้องระบุ shop" }, 400);
 
   const sb = supabaseAdmin();

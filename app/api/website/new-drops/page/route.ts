@@ -9,6 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const published = Array.isArray(row.layout) ? normalizeBlocks(row.layout) : null;
   return NextResponse.json({
-    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl },
+    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl, previewKey: siteUrl ? issuePreviewKey(s.slug) : null },
     drop: {
       id: row.id,
       title: row.title,

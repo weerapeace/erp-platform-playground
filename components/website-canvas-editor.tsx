@@ -40,6 +40,7 @@ import {
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
 import type { Selection } from "@/components/website-builder";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 
 /** เปิดป๊อปอัปพร้อมคำสั่งแรก (เช่น กด "รูป" ในแผงตัวจัดหน้า → เปิดมาที่หน้าต่างเลือกรูปเลย) */
 export interface CanvasEditorTarget {
@@ -60,6 +61,7 @@ export function CanvasEditor({
   blocks,
   blocksRef,
   previewOrigin,
+  previewKey,
   ctx,
   selection,
   onSelect,
@@ -79,6 +81,8 @@ export function CanvasEditor({
   blocksRef: MutableRefObject<Block[]>;
   /** origin ของเว็บร้าน (เช่น https://pixiedustie-store.vercel.app) */
   previewOrigin: string;
+  /** 🔑 รหัสพรีวิว (pk) — ผ่านหน้าปิดเว็บ */
+  previewKey?: string | null;
   ctx: SchemaFormContext;
   selection: Selection | null;
   onSelect: (s: Selection | null) => void;
@@ -501,7 +505,7 @@ export function CanvasEditor({
                 <iframe
                   ref={iframeRef}
                   title="แก้ผืนผ้าใบ"
-                  src={`${previewOrigin}/canvas-edit?preview=1&block=${encodeURIComponent(blockId)}`}
+                  src={withPreviewKey(`${previewOrigin}/canvas-edit?preview=1&block=${encodeURIComponent(blockId)}`, previewKey)}
                   className="border-0 bg-white rounded-lg shadow-sm"
                   style={{ width: base, height: (box.h - 24) / scale, transform: `scale(${scale})`, transformOrigin: "top left", display: "block" }}
                 />

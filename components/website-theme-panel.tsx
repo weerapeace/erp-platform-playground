@@ -70,6 +70,7 @@ import { HeaderOverPagesSettings } from "@/components/website-header-over-settin
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import type { ProductMaterialView } from "@/lib/website-theme";
 import type { OverPages } from "@/lib/website-header-over";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import type { CartConfig } from "@/lib/website-cart";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
@@ -204,7 +205,7 @@ const DEVICES: { k: Device; label: string; w: number; h: number; icon: string }[
 ];
 
 /** path พรีวิว + ?preview=1 (path มี ?query อยู่แล้ว เช่น หน้าขอบคุณ = ต่อด้วย &) */
-const withPreview = (path: string) => `${path}${path.includes("?") ? "&" : "?"}preview=1`;
+const withPreview = (path: string, pk: string | null) => withPreviewKey(`${path}${path.includes("?") ? "&" : "?"}preview=1`, pk);
 
 /** ระดับการย่อพรีวิว — "fit" = ย่อให้พอดีกล่อง (เหมือนแท็บจัดหน้าแรก) */
 type Zoom = "fit" | 0.5 | 0.75 | 1;
@@ -290,6 +291,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   /** ค่าที่บันทึกล่าสุด (ร่างถ้ามี ไม่มี = ที่เผยแพร่) — ใช้ตัดสินว่า "ยังไม่บันทึก" (เทียบกับ published = บันทึกร่างแล้วก็ยังฟ้องค้าง) */
   const [saved, setSaved] = useState<Theme | null>(null);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState<string | null>(null); // 🔑 รหัสพรีวิว (ผ่านหน้าปิดเว็บ)
   const [choices, setChoices] = useState<Choices | null>(null);
   const [lastVersion, setLastVersion] = useState<{ version_no: number; created_at: string } | null>(null);
   const [hadDraft, setHadDraft] = useState(false);
@@ -329,7 +331,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   // 🩺 โหลดสำเร็จแล้วเท่านั้นถึงเตือน "ไม่ขึ้นเว็บจริง" (โหลดพลาด = ไม่รู้ = ไม่เตือนมั่ว)
   const [pagesReady, setPagesReady] = useState(false);
   useEffect(() => {
-    fetch(`/api/public/storefront/page?shop=${encodeURIComponent(shopSlug)}&preview=1`)
+    apiFetch(`/api/public/storefront/page?shop=${encodeURIComponent(shopSlug)}&preview=1`)
       .then((r) => r.json())
       .then((j) => {
         setStorePages((j?.pages as { slug: string; title: string }[]) ?? []);
@@ -398,6 +400,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       setSaved(j.draft ?? j.published);
       setPublished(j.published);
       setSiteUrl(j.shop?.siteUrl ?? null);
+      setPreviewKey(j.shop?.previewKey ?? null);
       setChoices(j.choices ?? null);
       setLastVersion(j.lastVersion ?? null);
       setHadDraft(Boolean(j.hasDraft));
@@ -495,7 +498,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     const path = TAB_PREVIEW_PAGE[tab] === "product" ? (sampleProduct ? `/product/${sampleProduct}` : null) : TAB_PREVIEW_PAGE[tab] ?? null;
     if (!path) return;
     if (page !== path) setPage(path);
-    else if (siteUrl && iframeRef.current) iframeRef.current.src = `${siteUrl}${withPreview(path)}`;
+    else if (siteUrl && iframeRef.current) iframeRef.current.src = `${siteUrl}${withPreview(path, previewKey)}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, sampleProduct]);
 
@@ -827,7 +830,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const mobCount = mobileOverrideCount(mob);
 
   const dev = DEVICES.find((d) => d.k === device)!;
-  const previewSrcTh = siteUrl ? `${siteUrl}${withPreview(page)}` : null;
+  const previewSrcTh = siteUrl ? `${siteUrl}${withPreview(page, previewKey)}` : null;
   // 🌐 กำลังแก้ภาษาอังกฤษ → พรีวิวหน้าเว็บฉบับ /en (ลูกค้าภาษาอังกฤษเห็นแบบนี้)
   const previewSrc = previewSrcTh && contentLang === "en" ? previewInEnglish(previewSrcTh) : previewSrcTh;
   const scale = zoom === "fit" ? Math.min(1, Math.max(0.1, (boxW - 16) / dev.w)) : zoom;

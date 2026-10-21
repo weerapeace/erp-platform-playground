@@ -10,6 +10,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { normalizeFieldMap } from "@/lib/website-field-map";
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const siteUrl = rawDomain ? (rawDomain.startsWith("http") ? rawDomain : `https://${rawDomain}`) : null;
 
   return NextResponse.json({
-    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl },
+    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl, previewKey: siteUrl ? issuePreviewKey(s.slug) : null },
     published: normalizeTheme(s.theme),
     draft: hasDraft ? normalizeTheme(s.theme_draft) : null,
     hasDraft,

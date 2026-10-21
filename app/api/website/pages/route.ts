@@ -14,6 +14,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const row = p as Record<string, unknown>;
     return NextResponse.json({
-      shop: { id: s.id, name: s.name, slug: s.slug, siteUrl },
+      shop: { id: s.id, name: s.name, slug: s.slug, siteUrl, previewKey: siteUrl ? issuePreviewKey(s.slug) : null },
       page: {
         id: row.id,
         slug: row.slug,
@@ -110,7 +111,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .order("created_at");
 
   return NextResponse.json({
-    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl },
+    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl, previewKey: siteUrl ? issuePreviewKey(s.slug) : null },
     pages: ((pages ?? []) as Record<string, unknown>[]).map((p) => ({
       id: p.id,
       slug: p.slug,

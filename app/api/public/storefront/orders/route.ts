@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
+import { verifyPreviewKey } from "@/lib/storefront-preview-key";
 import { createStorefrontOrder, findStorefrontOrder } from "@/lib/website-orders";
 import { notifyOrderCustomer } from "@/lib/order-notify";
 import { customerLang } from "@/lib/customer-messages";
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ctx = await loadShop(slug);
   if (!ctx) return json({ ok: false, error: "ไม่พบร้าน" }, 404);
 
-  const result = await createStorefrontOrder(ctx.sb, ctx.shop, body);
+  // 🔑 ร้านปิดเว็บ: ทดลองสั่งได้เฉพาะจากลิงก์พรีวิวที่มีรหัส (body.pk · lib/storefront-preview-key)
+  const result = await createStorefrontOrder(ctx.sb, ctx.shop, body, { allowClosed: verifyPreviewKey(ctx.shop.slug, body.pk) });
   if (!result.ok) return json({ ok: false, error: result.error }, result.status);
   // ✉️ อีเมลยืนยันออเดอร์ (ภาษาของลูกค้า) — ทำหลังตอบหน้าเว็บแล้ว ลูกค้าไม่ต้องรอ · ไม่เปิด/ไม่มีอีเมล = ข้ามเงียบ
   const orderId = result.orderId;

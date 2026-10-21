@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
 import { WebsiteBuilder, type Selection } from "@/components/website-builder";
@@ -25,6 +26,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState<string | null>(null); // 🔑 รหัสพรีวิว (ผ่านหน้าปิดเว็บ)
   const [shopName, setShopName] = useState("");
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
   const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
@@ -62,6 +64,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
       const initial: Block[] = d.draft ?? d.published ?? [];
       setTitle(d.title ?? "");
       setSiteUrl(j.shop?.siteUrl ?? null);
+      setPreviewKey(j.shop?.previewKey ?? null);
       setShopName(j.shop?.name ?? "");
       setTypes(j.blockTypes ?? []);
       setCategories(j.categories ?? []);
@@ -222,7 +225,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังเปิดหน้าชุด…</div>;
 
-  const previewSrc = siteUrl ? `${siteUrl}/new/${encodeURIComponent(dropId)}?preview=1` : null;
+  const previewSrc = siteUrl ? withPreviewKey(`${siteUrl}/new/${encodeURIComponent(dropId)}?preview=1`, previewKey) : null;
   const issues = [...validateBlocks(blocks as never), ...dataIssues];
   const unpublished = !custom || hasDraft || dirty || !eq(blocks, publishedBlocks);
   return (

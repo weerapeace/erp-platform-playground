@@ -1447,6 +1447,7 @@ export function WebsiteBuilder({
           blocks={blocks}
           blocksRef={blocksRef}
           previewOrigin={new URL(previewSrc).origin}
+          previewKey={new URL(previewSrc).searchParams.get("pk")}
           ctx={formCtx}
           selection={selection}
           onSelect={onSelect}

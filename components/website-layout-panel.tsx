@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { useToast } from "@/components/toast";
 import { WebsiteBuilder, type Selection, type ChangeSummary } from "@/components/website-builder";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
@@ -44,6 +45,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   /** 🃏 การ์ดสินค้าของร้าน — Section ตารางสินค้าปิด "ใช้การ์ดตามค่ากลาง" แล้วก๊อปเป็นค่าเริ่ม */
   const [themeCard, setThemeCard] = useState<Record<string, unknown> | undefined>(undefined);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState<string | null>(null); // 🔑 รหัสพรีวิว (ผ่านหน้าปิดเว็บ)
   const [shopName, setShopName] = useState<string>("");
   const [neverSet, setNeverSet] = useState(false);
   const [hadDraft, setHadDraft] = useState(false);
@@ -78,6 +80,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       setCategories(j.categories ?? []);
       setThemeCard(j.themeCard ?? undefined);
       setSiteUrl(j.shop?.siteUrl ?? null);
+      setPreviewKey(j.shop?.previewKey ?? null);
       setShopName(j.shop?.name ?? "");
       setNeverSet(Boolean(j.neverSet));
       setHadDraft(Boolean(j.hasDraft));
@@ -234,7 +237,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
     setHadDraft(true);
   };
 
-  const previewSrc = siteUrl ? `${siteUrl}/?preview=1` : null;
+  const previewSrc = siteUrl ? withPreviewKey(`${siteUrl}/?preview=1`, previewKey) : null;
   const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;

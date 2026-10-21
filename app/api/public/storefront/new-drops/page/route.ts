@@ -8,6 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { allowDraftPreview } from "@/lib/storefront-preview-access";
 import { dropPageLayout } from "@/lib/website-drop-page";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const url = new URL(request.url);
   const slug = (url.searchParams.get("shop") ?? "").trim();
   const id = (url.searchParams.get("id") ?? "").trim();
-  const preview = url.searchParams.get("preview") === "1";
+  // 🔑 ร่าง = ต้องมีรหัสพรีวิว/พนักงาน (lib/storefront-preview-access · ช่วงเปลี่ยนผ่านยังปล่อย + จด log)
+  const preview = url.searchParams.get("preview") === "1" && !!slug && (await allowDraftPreview(request, slug, "new-drops"));
   if (!slug) return json({ error: "ต้องระบุ shop" }, 400);
   // /new/latest · /new/soon ไม่ใช่รหัสชุด → ไม่มีหน้าแต่งเอง
   if (!UUID_RE.test(id)) return json({ layout: null });

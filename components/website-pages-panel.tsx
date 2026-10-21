@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { WebsiteBuilder, type Selection } from "@/components/website-builder";
 import { summarizeChanges } from "@/components/website-layout-panel";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
@@ -54,6 +55,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   /** 🃏 การ์ดสินค้าของร้าน — Section ตารางสินค้าปิด "ใช้การ์ดตามค่ากลาง" แล้วก๊อปเป็นค่าเริ่ม */
   const [themeCard, setThemeCard] = useState<Record<string, unknown> | undefined>(undefined);
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState<string | null>(null); // 🔑 รหัสพรีวิว (ผ่านหน้าปิดเว็บ)
   const [shopName, setShopName] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
@@ -100,6 +102,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       setTypes(j.blockTypes ?? []);
       setCategories(j.categories ?? []);
       setSiteUrl(j.shop?.siteUrl ?? null);
+      setPreviewKey(j.shop?.previewKey ?? null);
       setShopName(j.shop?.name ?? "");
     } catch {
       toast.error("โหลดรายการหน้าไม่สำเร็จ");
@@ -358,7 +361,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   /* ── หน้าจอแก้ไขหน้าเดียว ── */
   if (editId) {
-    const previewSrc = siteUrl ? `${siteUrl}/${editSlug}?preview=1` : null;
+    const previewSrc = siteUrl ? withPreviewKey(`${siteUrl}/${editSlug}?preview=1`, previewKey) : null;
     const issues = [...validateBlocks(blocks as never, { helpPage: !!seo.help.trim() }), ...dataIssues];
     const metaDirty = editTitle !== savedMeta.title || !eq(seo, savedMeta.seo);
     const unpublished = hasDraft || dirty || metaDirty || !eq(blocks, publishedBlocks);

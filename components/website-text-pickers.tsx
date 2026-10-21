@@ -13,6 +13,7 @@
  *  - canvasFontOptions = ตัวเลือก CANVAS_FONTS (ฟอนต์หัวข้อ/เนื้อหาของธีม + ฟอนต์พิเศษ) สำหรับ FontSelect
  */
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api";
 import { CANVAS_FONTS } from "@/lib/website-canvas";
 import { GOOGLE_FONTS } from "@/lib/website-theme";
 import type { FontOption } from "@/components/font-select";
@@ -75,7 +76,7 @@ export function useShopTheme(shopSlug: string | null | undefined): { theme: Them
   useEffect(() => {
     if (!shopSlug) return;
     let alive = true;
-    fetch(`/api/public/storefront/site?shop=${encodeURIComponent(shopSlug)}&preview=1`)
+    apiFetch(`/api/public/storefront/site?shop=${encodeURIComponent(shopSlug)}&preview=1`)
       .then((r) => r.json())
       .then((j) => {
         if (!alive || !j?.theme) return;

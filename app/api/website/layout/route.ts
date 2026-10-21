@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const hasDraft = s.home_layout_draft != null;
 
   return NextResponse.json({
-    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl },
+    shop: { id: s.id, name: s.name, slug: s.slug, siteUrl, previewKey: siteUrl ? issuePreviewKey(s.slug) : null },
     // ยังไม่เคยตั้ง → ส่งโครงเริ่มต้นให้แก้ต่อได้เลย
     published: publishedRaw.length ? publishedRaw : defaultLayout(),
     neverSet: publishedRaw.length === 0,

@@ -7,6 +7,7 @@
  *   🧾 DesignsPanel    — แบบที่ลูกค้าบันทึก (DataTable กลาง: รหัส · วันที่ · ราคา · สถานะ · ปุ่มเปิดลิงก์ ?design=)
  */
 import { useEffect, useMemo, useState } from "react";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table";
 import { ConfirmDialog } from "@/components/modal";
@@ -170,7 +171,7 @@ export function EngravingPanel({ info, parts, onOpenSettings }: { info: BeltShop
 
 /* ───────────────────────── 🧾 แบบของลูกค้า ───────────────────────── */
 
-export function DesignsPanel({ shopId, parts, siteUrl, onTotal }: { shopId: string; parts: BeltPart[]; siteUrl: string | null; onTotal?: (n: number) => void }) {
+export function DesignsPanel({ shopId, parts, siteUrl, previewKey, onTotal }: { shopId: string; parts: BeltPart[]; siteUrl: string | null; previewKey?: string | null; onTotal?: (n: number) => void }) {
   const [rows, setRows] = useState<BeltDesign[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const byId = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
@@ -180,7 +181,7 @@ export function DesignsPanel({ shopId, parts, siteUrl, onTotal }: { shopId: stri
 
   const nameOf = (id: unknown) => (id ? byId.get(String(id))?.name_th ?? "—" : "—");
   const code = (d: BeltDesign) => d.id.slice(0, 8).toUpperCase();
-  const designUrl = (d: BeltDesign) => (siteUrl ? `${siteUrl}/belt-builder?design=${encodeURIComponent(code(d))}&preview=1` : null);
+  const designUrl = (d: BeltDesign) => (siteUrl ? withPreviewKey(`${siteUrl}/belt-builder?design=${encodeURIComponent(code(d))}&preview=1`, previewKey) : null);
 
   const columns = useMemo<ColumnDef<BeltDesign>[]>(() => [
     { id: "code", header: "รหัสแบบ", accessorFn: (d) => code(d), cell: ({ row }) => <span className="font-mono text-xs">{code(row.original)}</span>, size: 110 },
@@ -191,7 +192,7 @@ export function DesignsPanel({ shopId, parts, siteUrl, onTotal }: { shopId: stri
     { id: "status", header: "สถานะ", accessorKey: "status", cell: ({ getValue }) => { const v = String(getValue()); return <span className={`rounded-full px-2 py-0.5 text-[11px] ${v === "ordered" ? "bg-emerald-100 text-emerald-800" : v === "in_cart" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}>{DESIGN_STATUS_TH[v] ?? v}</span>; }, size: 110 },
     { id: "order_ref", header: "เลขใบสั่งขาย", accessorKey: "order_ref", cell: ({ getValue }) => String(getValue() ?? "") || "—", size: 120 },
     { id: "open", header: "", enableSorting: false, size: 90, cell: ({ row }) => { const u = designUrl(row.original); return u ? <a href={u} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-indigo-600 hover:underline">เปิดบนเว็บ ↗</a> : <span className="text-[11px] text-slate-400">ไม่มีโดเมน</span>; } },
-  ], [byId, siteUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [byId, siteUrl, previewKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-2">

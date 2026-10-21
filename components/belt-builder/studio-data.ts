@@ -26,7 +26,7 @@ export type BeltPart = {
   updated_at?: string;
 };
 
-export type BeltShop = { id: string; slug: string; name: string; site_url: string | null };
+export type BeltShop = { id: string; slug: string; name: string; site_url: string | null; /** 🔑 รหัสพรีวิว (lib/storefront-preview-key) */ preview_key?: string | null };
 
 /** ค่ากลุ่ม 🧵 ในข้อมูลร้าน (store_settings ผ่าน /api/website/settings) */
 export type BeltShopInfo = {

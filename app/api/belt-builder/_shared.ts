@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError, parseDupError } from "@/app/api/master-v2/[entity]/route";
@@ -209,6 +210,10 @@ export async function listShops(request: NextRequest): Promise<NextResponse> {
     const url = siteUrlFromDomain(d.domain);
     if (url && !siteByShop.has(d.shop_id)) siteByShop.set(d.shop_id, url);
   }
-  const rows = ((data ?? []) as { id: string }[]).map((s) => ({ ...s, site_url: siteByShop.get(s.id) ?? null }));
+  // 🔑 preview_key = รหัสพรีวิว (lib/storefront-preview-key) ให้ลิงก์ ?preview=1 ผ่านหน้าปิดเว็บได้
+  const rows = ((data ?? []) as { id: string; slug: string }[]).map((s) => {
+    const site = siteByShop.get(s.id) ?? null;
+    return { ...s, site_url: site, preview_key: site ? issuePreviewKey(s.slug) : null };
+  });
   return NextResponse.json({ data: rows, error: null });
 }

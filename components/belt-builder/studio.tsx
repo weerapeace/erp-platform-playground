@@ -13,6 +13,7 @@
  * API: /api/belt-builder/* (guardApi belt_builder.view/edit + writeAudit) + /api/website/settings (กลุ่ม 🧵) · กฎ lib/belt-builder.ts
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { useAuth } from "@/components/auth";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { ConfirmDialog, Drawer } from "@/components/modal";
@@ -198,7 +199,8 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
 
   // ── UI ──
   const siteUrl = shop?.site_url ?? null;
-  const previewUrl = siteUrl ? `${siteUrl}/belt-builder?preview=1` : null;
+  const previewKey = shop?.preview_key ?? null; // 🔑 ผ่านหน้าปิดเว็บ (lib/storefront-preview-key)
+  const previewUrl = siteUrl ? withPreviewKey(`${siteUrl}/belt-builder?preview=1`, previewKey) : null;
   const chip = (on: boolean, extra = "") => `rounded-full border px-3 py-1 text-xs transition ${on ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"} ${extra}`;
   const railBtn = (on: boolean) => `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${on ? "bg-indigo-50 font-medium text-indigo-800" : "text-slate-600 hover:bg-slate-100"}`;
 
@@ -356,7 +358,7 @@ export function BeltStudio({ shopId: shopIdProp, onShopChange, onOpenTables }: {
 
           {rail === "sizes" && <SizeRulesPanel shopId={shopId} canEdit={canEdit} />}
           {rail === "engraving" && <EngravingPanel info={info} parts={parts ?? []} onOpenSettings={() => setSettingsOpen(true)} />}
-          {rail === "designs" && <DesignsPanel shopId={shopId} parts={parts ?? []} siteUrl={siteUrl} onTotal={setDesignsTotal} />}
+          {rail === "designs" && <DesignsPanel shopId={shopId} parts={parts ?? []} siteUrl={siteUrl} previewKey={previewKey} onTotal={setDesignsTotal} />}
         </main>
       </div>
 
