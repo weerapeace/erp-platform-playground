@@ -1,0 +1,11 @@
+-- ============================================================
+-- R1 (audit แอปจัดการงาน 2026-10-21): ปิดสิทธิ์ "อ่านตรงจาก DB" ของตาราง china_app_settings
+-- ปัญหา: policy sel_china_app_settings (authenticated, SELECT, USING true) → ใครล็อกอินก็ยิง REST อ่าน
+--        line_config.token (โทเคนบอท LINE) ได้ = ส่งข้อความในนามบริษัทเข้าทุกกลุ่มได้
+-- ทำไมปิดได้: ผู้อ่านทุกตัวในระบบอยู่ฝั่ง server (supabaseAdmin 37 จุด + master-v2 สลับมาอ่านด้วย admin แล้ว
+--        ใน commit de430941 + Edge Function line-webhook / china-monthly-summary ใช้ service role)
+-- ผลหลังรัน: authenticated/anon อ่าน/เขียนตารางนี้ตรง ๆ ไม่ได้ (RLS เปิดอยู่ ไม่มี policy) · service role ใช้ได้ตามเดิม
+-- ⚠️ รันช่วงคนใช้น้อย (DDL ทำ API สะดุด ~10 วิ) · หลังรันต้องเปลี่ยนโทเคนใน LINE Developers Console (โทเคนเดิมถือว่ารั่วแล้ว)
+-- ย้อนกลับ: create policy sel_china_app_settings on public.china_app_settings for select to authenticated using (true);
+-- ============================================================
+drop policy if exists sel_china_app_settings on public.china_app_settings;
