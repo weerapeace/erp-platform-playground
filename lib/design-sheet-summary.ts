@@ -14,6 +14,8 @@ export type SummaryItem = {
   images: string[];
   /** true = แยก 1 แถวต่อรูป (เช่น กระเป๋า 3 ใบในงานเดียว) */
   split: boolean;
+  /** ชื่อสินค้าที่แก้เฉพาะในสรุปนี้ (ไม่เปลี่ยนชื่อใบงานจริง) · ไม่มี = ใช้ชื่อใบงาน · split = ชื่อหลักหน้าชื่อชิ้น */
+  title?: string;
   /** ชื่อที่โชว์ — split: ต่อรูป · ไม่ split: [0] = ชื่อแทนชื่อใบงาน (ว่าง = ใช้ชื่อใบงาน) */
   labels: string[];
   /** หมายเหตุ (โชว์ได้ทั้ง 2 ฉบับ) — split: ต่อรูป · ไม่ split: [0] */
@@ -77,6 +79,9 @@ export function visibleColumns(doc: Pick<SummaryDoc, "audience" | "columns">) {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isImageUrl = (u: unknown): u is string => typeof u === "string" && u.startsWith("/api/r2-image?key=") && u.length < 600;
 const clip = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+/** ข้อความหลายบรรทัด (หมายเหตุ) — เก็บการขึ้นบรรทัด · ตัดช่องว่างเกิน · ว่างติดกันเกิน 1 บรรทัดยุบเหลือ 1 */
+const clipMulti = (s: unknown, n: number) => String(s ?? "").replace(/\r\n?/g, "\n").split("\n")
+  .map((l) => l.replace(/[ \t]+/g, " ").trimEnd()).join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, n);
 
 export function normalizeSummaryDoc(raw: unknown): { value: SummaryDoc } | { error: string } {
   const r = (raw ?? {}) as Record<string, unknown>;
@@ -96,11 +101,16 @@ export function normalizeSummaryDoc(raw: unknown): { value: SummaryDoc } | { err
     if (!UUID_RE.test(sheet_id) || seen.has(sheet_id)) continue;
     seen.add(sheet_id);
     const images = Array.isArray(o.images) ? [...new Set(o.images.filter(isImageUrl))].slice(0, 12) : [];
-    const strs = (v: unknown, n: number) => (Array.isArray(v) ? v.slice(0, 12).map((s) => clip(s, n)) : []);
-    items.push({ sheet_id, images, split: o.split === true && images.length >= 2, labels: strs(o.labels, 120), notes: strs(o.notes, 300) });
+    const strs = (v: unknown, n: number, multi = false) => (Array.isArray(v) ? v.slice(0, 12).map((s) => (multi ? clipMulti(s, n) : clip(s, n))) : []);
+    const itemTitle = clip(o.title, 120);
+    items.push({
+      sheet_id, images, split: o.split === true && images.length >= 2,
+      ...(itemTitle ? { title: itemTitle } : {}),
+      labels: strs(o.labels, 120), notes: strs(o.notes, 1000, true),
+    });
   }
   if (items.length === 0) return { error: "ยังไม่มีใบงานในสรุป" };
-  return { value: { title, audience, columns, items, note: clip(r.note, 600) } };
+  return { value: { title, audience, columns, items, note: clipMulti(r.note, 1000) } };
 }
 
 // ---- แตกเป็นแถว ----
@@ -110,14 +120,15 @@ export function expandRows(doc: Pick<SummaryDoc, "items">, sheets: Map<string, S
   const rows: SummaryRow[] = [];
   for (const it of doc.items) {
     const sheet = sheets.get(it.sheet_id) ?? null;
-    const baseName = sheet?.name ?? "(ไม่พบใบงาน)";
+    // ชื่อสินค้า: ที่แก้ในสรุป (title) → ชื่อเดิมแบบเก่า (labels[0] ตอนไม่แยก) → ชื่อใบงาน
+    const baseName = (it.title ?? "").trim() || (!it.split ? (it.labels[0] ?? "").trim() : "") || sheet?.name || "(ไม่พบใบงาน)";
     if (it.split && it.images.length >= 2) {
       it.images.forEach((img, i) => {
         const label = (it.labels[i] ?? "").trim() || `ชิ้นที่ ${i + 1}`;
         rows.push({ key: `${it.sheet_id}:${i}`, sheet, sheetId: it.sheet_id, images: [img], title: `${baseName} — ${label}`, note: (it.notes[i] ?? "").trim() });
       });
     } else {
-      rows.push({ key: it.sheet_id, sheet, sheetId: it.sheet_id, images: it.images, title: (it.labels[0] ?? "").trim() || baseName, note: (it.notes[0] ?? "").trim() });
+      rows.push({ key: it.sheet_id, sheet, sheetId: it.sheet_id, images: it.images, title: baseName, note: (it.notes[0] ?? "").trim() });
     }
   }
   return rows;
@@ -155,9 +166,9 @@ export function renderSummaryBody(doc: SummaryDoc, sheets: Map<string, SummarySh
       case "brand": return s?.brand_name ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeColor(s.brand_color)};margin-right:5px;"></span>${esc(s.brand_name)}` : "—";
       case "status": return s ? `<span style="display:inline-block;white-space:nowrap;padding:2px 8px;border-radius:999px;font-size:11px;background:${safeColor(s.status_color)}1f;color:${safeColor(s.status_color)};">${esc(s.status_label)}</span>` : "—";
       case "deadline": return s?.deadline ? `<span style="white-space:nowrap;">${esc(thShort(s.deadline))}</span>` : "—";
-      case "row_note": return row.note ? esc(row.note) : "";
+      case "row_note": return row.note ? `<div style="white-space:pre-wrap;">${esc(row.note)}</div>` : "";
       case "stale": { if (!s) return "—"; const d = staleDays(s.updated_at); return d === 0 ? "วันนี้" : `${d} วัน`; }
-      case "sheet_note": return s?.note ? esc(s.note) : "";
+      case "sheet_note": return s?.note ? `<div style="white-space:pre-wrap;">${esc(s.note)}</div>` : "";
       case "detail": return s?.detail_excerpt ? esc(s.detail_excerpt) : "";
       default: return "";
     }

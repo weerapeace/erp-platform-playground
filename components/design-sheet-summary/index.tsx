@@ -11,7 +11,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPInput } from "@/components/form";
-import { SearchableSelect } from "@/components/searchable-select";
 import { PrintDocLinkButton } from "@/components/report";
 import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
@@ -30,6 +29,86 @@ import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route
 const PREF_KEY = "ds_summary_columns";
 const todayLabel = () => new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", timeZone: "Asia/Bangkok" });
 const emptyItem = (sheet_id: string): SummaryItem => ({ sheet_id, images: [], split: false, labels: [], notes: [] });
+
+/** แผงเลือกเพิ่มใบงานลงสรุป — มีรูป · ค้นหา · ติ๊กได้หลายใบ · เฉพาะใบที่ยังไม่ปิดและยังไม่อยู่ในสรุป */
+function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
+  meta: StatusMeta;
+  existing: Set<string>;
+  onAdd: (ids: string[]) => void;
+  onClose: () => void;
+}) {
+  const [list, setList] = useState<DesignSheetListItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { boxRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, []);
+  useEffect(() => {
+    let alive = true;
+    apiFetch("/api/design-sheets?limit=500&archived=0&sort_by=updated_at&sort_dir=desc")
+      .then(async (r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((j) => { if (alive) setList((j.data ?? []) as DesignSheetListItem[]); })
+      .catch(() => { if (alive) setError("โหลดรายการใบงานไม่สำเร็จ กรุณาลองใหม่"); });
+    return () => { alive = false; };
+  }, []);
+  const term = q.trim().toLowerCase();
+  const rows = (list ?? []).filter((s) => !meta.finished.has(s.status) && !existing.has(s.id)
+    && (!term || `${s.code} ${s.name} ${s.brand_name ?? ""}`.toLowerCase().includes(term)));
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  return (
+    <div ref={boxRef} className="mb-2 rounded-lg border border-teal-200 bg-teal-50/40 p-2">
+      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหาเลขที่ / ชื่องาน / แบรนด์..."
+        className="mb-2 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      <div className="max-h-72 space-y-1 overflow-auto">
+        {error ? (
+          <div className="py-4 text-center text-xs text-rose-600">⚠ {error}</div>
+        ) : list === null ? (
+          [0, 1, 2].map((i) => <div key={i} className="h-11 animate-pulse rounded-md bg-white" />)
+        ) : rows.length === 0 ? (
+          <div className="py-4 text-center text-xs text-slate-400">{term ? "ไม่พบใบงานที่ตรงคำค้น" : "ใบงานที่ยังไม่ปิดอยู่ในสรุปครบแล้ว"}</div>
+        ) : rows.map((s) => {
+          const on = picked.includes(s.id);
+          const color = meta.colorHex[s.status] ?? "#94a3b8";
+          const cover = withImageWidth(s.cover_url, 80);
+          return (
+            <button key={s.id} type="button" onClick={() => toggle(s.id)}
+              className={`flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left ${on ? "border-teal-500 bg-white ring-1 ring-teal-400" : "border-transparent bg-white hover:border-slate-200"}`}>
+              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${on ? "border-teal-600 bg-teal-600 text-white" : "border-slate-300"}`}>{on ? "✓" : ""}</span>
+              {cover
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={cover} alt="" loading="lazy" className="h-9 w-9 shrink-0 rounded border border-slate-100 bg-slate-50 object-cover" />
+                : <span className="h-9 w-9 shrink-0 rounded bg-slate-100" />}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-slate-800"><span className="font-mono text-[10px] text-slate-400">{s.code}</span> {s.name}</span>
+                <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+                  <span className="rounded-full px-1.5" style={{ color, backgroundColor: `${color}1a` }}>{meta.map[s.status]?.label ?? s.status}</span>
+                  {s.brand_name && <span className="truncate">{s.brand_name}</span>}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-2">
+        <span className="mr-auto text-[11px] text-slate-500">{picked.length ? `เลือกไว้ ${picked.length} ใบ` : "กดเพื่อเลือก (หลายใบได้)"}</span>
+        <button type="button" onClick={onClose} className="h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-600">ยกเลิก</button>
+        <button type="button" onClick={() => onAdd(picked)} disabled={picked.length === 0}
+          className="h-8 rounded-lg bg-teal-600 px-3 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-40">＋ เพิ่ม {picked.length || ""} ใบ</button>
+      </div>
+    </div>
+  );
+}
+
+/** หมายเหตุหลายบรรทัด (Enter = ขึ้นบรรทัดใหม่) — สูงตามจำนวนบรรทัด 2–6 · ลากขยายเองได้ */
+function NoteBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const lines = (value.match(/\n/g)?.length ?? 0) + 1;
+  return (
+    <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={Math.min(6, Math.max(2, lines))}
+      placeholder="หมายเหตุ (ถ้ามี) · กด Enter ขึ้นบรรทัดใหม่ได้"
+      className="w-full resize-y rounded-md border border-slate-200 px-2 py-1.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500" />
+  );
+}
 
 function toInfo(s: DesignSheetListItem, meta: StatusMeta): SummarySheetInfo {
   return {
@@ -62,7 +141,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [imgBusy, setImgBusy] = useState<"copy" | "download" | null>(null);
-  const [addOptions, setAddOptions] = useState<{ value: string; label: string; sub?: string }[] | null>(null);
+  const [addOpen, setAddOpen] = useState(false);   // แผงเลือกเพิ่มใบงาน
   const isNew = !savedId;
   const defaultsApplied = useRef<Set<string>>(new Set());
 
@@ -155,6 +234,18 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
     }
     return { ...it, images: [...it.images, url] };
   });
+  // ชื่อสินค้า: ยังไม่แก้ = โชว์ชื่อใบงาน (หรือชื่อแบบเก่า labels[0]) ในช่องให้แก้ต่อได้เลย · แก้แล้ว = item.title (ลบหมดได้ระหว่างพิมพ์)
+  const titleValue = (it: SummaryItem, s: SummarySheetInfo | undefined) =>
+    it.title !== undefined ? it.title : ((!it.split && it.labels[0]?.trim()) || s?.name || "");
+  const titleEdited = (it: SummaryItem, s: SummarySheetInfo | undefined) => {
+    const v = titleValue(it, s).trim();
+    return !!v && !!s && v !== s.name;
+  };
+  const setTitle = (sheetId: string, v: string) => editItem(sheetId, (it) => ({ ...it, title: v, labels: it.split ? it.labels : [] }));
+  const resetTitle = (sheetId: string) => editItem(sheetId, (it) => {
+    const { title: _drop, ...rest } = it; void _drop;
+    return { ...rest, labels: it.split ? it.labels : [] };
+  });
   const setSplit = (sheetId: string, split: boolean) => editItem(sheetId, (it) => ({ ...it, split, labels: [], notes: split ? [] : it.notes.slice(0, 1) }));
   const setText = (sheetId: string, field: "labels" | "notes", i: number, v: string) => editItem(sheetId, (it) => {
     const arr = [...it[field]]; while (arr.length <= i) arr.push(""); arr[i] = v; return { ...it, [field]: arr };
@@ -166,22 +257,23 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
   const removeItem = (sheetId: string) => edit((d) => ({ ...d, items: d.items.filter((it) => it.sheet_id !== sheetId) }));
   const toggleColumn = (key: string) => edit((d) => ({ ...d, columns: d.columns.includes(key) ? d.columns.filter((c) => c !== key) : [...d.columns, key] }));
 
-  // ＋ เพิ่มใบงาน (เฉพาะที่ยังไม่ปิด) — โหลดรายการตอนกดครั้งแรก
-  const loadAddOptions = async () => {
-    if (addOptions) return;
-    const j = await apiFetch("/api/design-sheets?limit=500&archived=0&sort_by=updated_at&sort_dir=desc").then((r) => r.json()).catch(() => ({ data: [] }));
-    setAddOptions(((j.data ?? []) as DesignSheetListItem[]).filter((s) => !meta.finished.has(s.status))
-      .map((s) => ({ value: s.id, label: `${s.code} ${s.name}`, sub: s.brand_name ?? undefined })));
-  };
-  const addSheet = (id: string) => {
-    if (!id || doc.items.some((it) => it.sheet_id === id)) return;
-    edit((d) => ({ ...d, items: [...d.items, emptyItem(id)] }));
-    loadSheets([id]).catch((e) => toast.error(e instanceof Error ? e.message : "โหลดข้อมูลใบงานไม่สำเร็จ"));
+  // ＋ เพิ่มใบงาน (ลืมใส่ตอนติ๊กบนบอร์ด) — เลือกได้หลายใบ เฉพาะที่ยังไม่ปิด
+  const addSheets = (ids: string[]) => {
+    const fresh = ids.filter((id) => !doc.items.some((it) => it.sheet_id === id));
+    if (fresh.length === 0) return;
+    edit((d) => ({ ...d, items: [...d.items, ...fresh.map(emptyItem)] }));
+    loadSheets(fresh).catch((e) => toast.error(e instanceof Error ? e.message : "โหลดข้อมูลใบงานไม่สำเร็จ"));
+    toast.success(`เพิ่ม ${fresh.length} ใบงานลงสรุปแล้ว`);
+    setAddOpen(false);
   };
 
   const save = async () => {
     if (saving || !canEdit) return;
-    const parsed = normalizeSummaryDoc(doc);
+    // ชื่อที่ไม่ได้เปลี่ยนจากชื่อใบงาน = ไม่เก็บ (เปลี่ยนชื่อใบงานทีหลัง สรุปตามชื่อใหม่)
+    const parsed = normalizeSummaryDoc({
+      ...doc,
+      items: doc.items.map((it) => (it.title !== undefined && it.title.trim() === sheets.get(it.sheet_id)?.name ? { ...it, title: "" } : it)),
+    });
     if ("error" in parsed) { setError(parsed.error); return; }
     setSaving(true); setError(null);
     try {
@@ -307,7 +399,16 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
             <div>
               <div className="mb-1 flex items-center justify-between gap-2">
                 <label className="text-xs font-medium text-slate-600">ใบงานในสรุป ({doc.items.length})</label>
+                {canEdit && (
+                  <button type="button" onClick={() => setAddOpen((o) => !o)}
+                    className={`h-7 rounded-lg border px-2.5 text-xs font-medium ${addOpen ? "border-slate-900 bg-slate-900 text-white" : "border-teal-300 bg-teal-50 text-teal-800 hover:bg-teal-100"}`}>
+                    {addOpen ? "✕ ปิดตัวเลือก" : "＋ เพิ่มใบงาน"}
+                  </button>
+                )}
               </div>
+              {addOpen && canEdit && (
+                <AddSheetsPanel meta={meta} existing={new Set(doc.items.map((it) => it.sheet_id))} onAdd={addSheets} onClose={() => setAddOpen(false)} />
+              )}
               {loading && doc.items.length === 0 ? (
                 <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-24 animate-pulse rounded-lg bg-slate-100" />)}</div>
               ) : (
@@ -363,40 +464,48 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
                           )}
                         </div>
 
+                        {/* ชื่อสินค้า — เติมชื่อใบงานไว้ให้ แก้ได้เลย (เฉพาะในสรุปนี้ ไม่เปลี่ยนชื่อใบงานจริง) */}
+                        <div className="mt-2">
+                          <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                            <span>ชื่อสินค้า{it.split ? " (ชื่อหลัก)" : ""} <span className="text-slate-400">· แก้เฉพาะในสรุปนี้ ชื่อใบงานจริงไม่เปลี่ยน</span></span>
+                            {titleEdited(it, s) && <button type="button" onClick={() => resetTitle(it.sheet_id)} className="shrink-0 text-blue-600 hover:underline">↺ ใช้ชื่อเดิม</button>}
+                          </div>
+                          <input value={titleValue(it, s)} onChange={(e) => setTitle(it.sheet_id, e.target.value)} placeholder={s?.name ?? "ชื่อสินค้า"}
+                            className="h-8 w-full rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        </div>
+
                         <label className={`mt-2 flex items-center gap-2 text-xs ${canSplit ? "cursor-pointer text-slate-700" : "text-slate-400"}`} title={canSplit ? "" : "เลือกรูปอย่างน้อย 2 รูปก่อน"}>
                           <input type="checkbox" checked={it.split} disabled={!canSplit} onChange={(e) => setSplit(it.sheet_id, e.target.checked)} className="h-4 w-4" />
                           แยกเป็นรายการตามรูป <span className="text-slate-400">(1 รูป = 1 แถว เช่น กระเป๋า 3 ใบในงานเดียว)</span>
                         </label>
 
                         {it.split ? (
-                          <div className="mt-2 space-y-1.5">
+                          <div className="mt-2 space-y-2">
                             {it.images.map((url, i) => (
-                              <div key={url} className="grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1.5">
+                              <div key={url} className="grid grid-cols-[28px_minmax(0,1fr)] gap-1.5">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img src={withImageWidth(url, 80) ?? url} alt="" className="h-7 w-7 rounded border border-slate-200 object-cover" />
-                                <input value={it.labels[i] ?? ""} onChange={(e) => setText(it.sheet_id, "labels", i, e.target.value)} placeholder={`ชื่อชิ้นที่ ${i + 1}`}
-                                  className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                                <input value={it.notes[i] ?? ""} onChange={(e) => setText(it.sheet_id, "notes", i, e.target.value)} placeholder="หมายเหตุ (ถ้ามี)"
-                                  className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                <div className="space-y-1">
+                                  <input value={it.labels[i] ?? ""} onChange={(e) => setText(it.sheet_id, "labels", i, e.target.value)} placeholder={`ชื่อชิ้นที่ ${i + 1} (ต่อท้ายชื่อหลัก)`}
+                                    className="h-8 w-full rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                  <NoteBox value={it.notes[i] ?? ""} onChange={(v) => setText(it.sheet_id, "notes", i, v)} />
+                                </div>
                               </div>
                             ))}
                           </div>
                         ) : (
-                          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
-                            <input value={it.labels[0] ?? ""} onChange={(e) => setText(it.sheet_id, "labels", 0, e.target.value)} placeholder={s ? `ชื่อที่โชว์ (เว้นว่าง = ${s.name})` : "ชื่อที่โชว์"}
-                              className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            <input value={it.notes[0] ?? ""} onChange={(e) => setText(it.sheet_id, "notes", 0, e.target.value)} placeholder="หมายเหตุ (ถ้ามี)"
-                              className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          <div className="mt-2">
+                            <NoteBox value={it.notes[0] ?? ""} onChange={(v) => setText(it.sheet_id, "notes", 0, v)} />
                           </div>
                         )}
                       </div>
                     );
                   })}
-                  {canEdit && (
-                    <div onFocusCapture={() => void loadAddOptions()} onMouseDownCapture={() => void loadAddOptions()}>
-                      <SearchableSelect value="" onChange={addSheet} placeholder="＋ เพิ่มใบงาน (เฉพาะที่ยังไม่ปิด)..."
-                        options={(addOptions ?? []).filter((o) => !doc.items.some((it) => it.sheet_id === o.value))} />
-                    </div>
+                  {canEdit && !addOpen && (
+                    <button type="button" onClick={() => setAddOpen(true)}
+                      className="w-full rounded-lg border border-dashed border-teal-300 bg-teal-50/40 py-2 text-xs font-medium text-teal-800 hover:bg-teal-50">
+                      ＋ เพิ่มใบงานลงสรุป (ลืมเลือกตอนติ๊กบนบอร์ด)
+                    </button>
                   )}
                 </div>
               )}
