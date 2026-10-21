@@ -75,8 +75,23 @@ export type CardGap = "sm" | "md" | "lg";
 export type CardImageFit = "cover" | "contain";
 /** จำนวนคอลัมน์ของกริดการ์ดต่อจอ */
 export interface CardColumns { desktop: number; tablet: number; mobile: number }
-/** แบบหน้าสินค้า (Style) — เก็บในธีม สลับกลับได้ ทุกแบรนด์ใช้ร่วมกัน */
-export type ProductLayout = "classic" | "showcase";
+/** แบบหน้าสินค้า (Style) — เก็บในธีม สลับกลับได้ ทุกแบรนด์ใช้ร่วมกัน
+ *  stack / columns / story (2026-10-21 · อ้างอิงเว็บแบรนด์หรู) = จัดวางใหม่ของชิ้นส่วนชุดเดียวกับโชว์เคส (ราคา-ตะกร้า · รายละเอียด · แบนเนอร์ · คุณอาจชอบ) */
+export type ProductLayout = "classic" | "showcase" | "stack" | "columns" | "story";
+/** Style ที่ใช้ชิ้นส่วน/ลำดับส่วนประกอบของโชว์เคส (ทุกแบบยกเว้นคลาสสิก) */
+export const SHOWCASE_FAMILY: ProductLayout[] = ["showcase", "stack", "columns", "story"];
+/** ของเสริมของ Style ใหม่ (stack/columns/story) — ค่าเริ่มเปิดทั้งหมด */
+export interface ProductExtras {
+  /** คอม: แถบชื่อ+ราคา+ใส่ตะกร้าลอยล่างจอ เมื่อเลื่อนผ่านปุ่มซื้อแล้ว (มือถือมีแถบลอยเสมอ) */
+  stickyBuy: boolean;
+  /** "ใส่คู่กับ" — สินค้าที่เกี่ยวข้อง 3 ชิ้นแรกในแผงข้อมูล / แถบของตัวเอง (แบบเรื่องราว) */
+  pairWith: boolean;
+  /** กดรูปดูเต็มจอ + ซูม */
+  lightbox: boolean;
+  /** แถบ/ตัวนับบอกว่าดูรูปที่เท่าไรแล้ว */
+  progress: boolean;
+}
+export const DEFAULT_PRODUCT_EXTRAS: ProductExtras = { stickyBuy: true, pairWith: true, lightbox: true, progress: true };
 export type ProductTitleStyle = "serif" | "display";
 export type ProductImageBg = "tint" | "surface" | "none";
 /** พื้นหลังหลังรูปสินค้า: preset = สีตามตัวเลือก (imageBg) · color = สีเดียวที่เลือกเอง · gradient = ไล่สี 2 สี · image = รูป (imageBgKey) */
@@ -1062,6 +1077,8 @@ export interface SiteTheme {
     mobile: ProductMobile;
     /** 🔠 ขนาดตัวอักษร (% ของปกติ) */
     fonts: ProductFonts;
+    /** ✨ ของเสริมของ Style ใหม่ (ภาพเรียงลง / 3 คอลัมน์ / เรื่องราว) */
+    extras: ProductExtras;
   };
 }
 
@@ -1541,7 +1558,7 @@ export const DEFAULT_THEME: SiteTheme = {
   checkout: { ...DEFAULT_CHECKOUT },
   page: { transition: "fade", smoothScroll: false },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, imageScale: 100, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover", infoLayout: "stack", priceWeight: 600, swatchPos: "below", swatchShape: "circle" },
-  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS } },
+  product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS }, extras: { ...DEFAULT_PRODUCT_EXTRAS } },
 };
 
 /** อ่านลำดับส่วนประกอบจาก DB ให้ครบทุกตัว ไม่ซ้ำ (ตัวที่หายไปต่อท้ายตามลำดับเริ่มต้น) */
@@ -1660,6 +1677,9 @@ export const CARD_PRESETS: { value: CardPreset; label: string; hint: string }[] 
 export const PRODUCT_LAYOUTS: { value: ProductLayout; label: string; hint: string }[] = [
   { value: "classic", label: "คลาสสิก", hint: "รูปซ้าย ข้อมูลขวา — แบบร้านค้าทั่วไป อ่านง่าย" },
   { value: "showcase", label: "โชว์เคส", hint: "ชื่อรุ่นตัวใหญ่ + รูปใหญ่กลางจอ ราคาซ้าย ตัวเลือกขวา — แบบแบรนด์บิวตี้/แฟชั่น" },
+  { value: "stack", label: "ภาพเรียงลง + แผงค้าง", hint: "รูปใหญ่เต็มจอเรียงลงมาฝั่งซ้าย ชื่อ/ราคา/ปุ่มซื้อค้างด้านขวา — แบบ Bottega Veneta, Celine" },
+  { value: "columns", label: "3 คอลัมน์", hint: "ซ้ายเรื่องราว+รายละเอียด กลางรูปเรียงลง ขวาราคา+ปุ่มซื้อ เรียบมาก — แบบ SSENSE, Acne Studios" },
+  { value: "story", label: "ภาพเต็มจอ + เรื่องราว", hint: "เปิดด้วยรูปเต็มจอ ชื่อรุ่นตัวใหญ่ → ข้อมูลสินค้า → งานคราฟต์/วัสดุ → ใส่คู่กับ — แบบ Jacquemus, Loewe" },
 ];
 export const PRODUCT_TITLE_STYLES: { value: ProductTitleStyle; label: string }[] = [
   { value: "serif", label: "ตัวเอียงแบบนิตยสาร (ชื่ออังกฤษ)" },
@@ -1908,7 +1928,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       swatchShape: pick(cd.swatchShape, ["circle", "square", "rounded"] as const, "circle"),
     },
     product: {
-      layout: pick(pd.layout, ["classic", "showcase"] as const, d.product.layout),
+      layout: pick(pd.layout, ["classic", "showcase", "stack", "columns", "story"] as const, d.product.layout),
       titleStyle: pick(pd.titleStyle, ["serif", "display"] as const, d.product.titleStyle),
       imageBg: pick(pd.imageBg, ["tint", "surface", "none"] as const, d.product.imageBg),
       imageBgKey: key(pd.imageBgKey),
@@ -1936,6 +1956,15 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       partBox: normalizePartBox(pd.partBox),
       mobile: normalizeMobile(pd.mobile, xIds),
       fonts: normalizeFonts(pd.fonts),
+      extras: (() => {
+        const x = (pd.extras && typeof pd.extras === "object" ? pd.extras : {}) as Record<string, unknown>;
+        return {
+          stickyBuy: x.stickyBuy !== false,
+          pairWith: x.pairWith !== false,
+          lightbox: x.lightbox !== false,
+          progress: x.progress !== false,
+        };
+      })(),
     },
   };
 }

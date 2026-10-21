@@ -23,7 +23,7 @@ import type { ListingConfig } from "@/lib/website-listing";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { newExtraBanner, extraBannerId, extraBannerSection, MAX_EXTRA_BANNERS, type ExtraBanner, type BannerPart, type ImagePlaceholder } from "@/lib/website-theme";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
-import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, cardImagePosition, type ProductParts, type ProductMobile, type ProductFonts } from "@/lib/website-theme";
+import { PART_CHOICES, resolveMobileProduct, mobileOverrideCount, normalizeMobile, cardImagePosition, SHOWCASE_FAMILY, type ProductParts, type ProductMobile, type ProductFonts, type ProductExtras } from "@/lib/website-theme";
 import { PathsLangBar, TranslateButton } from "@/components/translation-table";
 import { ContentLangProvider, LangInput } from "@/components/bilingual-field";
 import { previewInEnglish } from "@/lib/website-i18n";
@@ -69,6 +69,7 @@ import { CheckoutSettings, type CheckoutPayInfo } from "@/components/website-che
 import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
+import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
 import type { ProductMaterialView } from "@/lib/website-theme";
 import type { OverPages } from "@/lib/website-header-over";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
@@ -84,7 +85,7 @@ type MenuAlign = "left" | "center" | "right";
 type CardPreset = "flat" | "border" | "shadow" | "floating" | "minimal";
 type ImageRatio = "1:1" | "4:3" | "4:5" | "3:4" | "16:9";
 type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap" | "slide";
-type ProductLayout = "classic" | "showcase";
+type ProductLayout = "classic" | "showcase" | "stack" | "columns" | "story";
 type ProductTitleStyle = "serif" | "display";
 type ProductImageBg = "tint" | "surface" | "none";
 /** ส่วนประกอบหน้าสินค้า (รวมแบนเนอร์เพิ่ม banner:<id>) — ใช้ type กลางจาก lib */
@@ -129,7 +130,7 @@ interface Theme {
   /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
   page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
   card: import("@/lib/website-theme").SiteTheme["card"];
-  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; contentSources: ContentSource[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts };
+  product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; contentSources: ContentSource[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts; extras: ProductExtras };
 }
 
 interface Choices {
@@ -2000,6 +2001,55 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                               <div className="mt-auto h-4 w-2/3 rounded" style={{ background: theme.colors.brand }} />
                             </div>
                           </div>
+                        ) : p.value === "stack" ? (
+                          /* ภาพเรียงลงซ้าย (มีรูปถัดไปโผล่ใต้) + แผงข้อมูลค้างขวา */
+                          <div className="flex gap-2 h-full">
+                            <div className="w-3/5 flex flex-col gap-1 overflow-hidden">
+                              <div className="flex-[3] rounded-sm" style={{ background: theme.colors.surface, border: "1px solid #e5e7eb" }} />
+                              <div className="flex-1 rounded-sm" style={{ background: theme.colors.surface, border: "1px solid #e5e7eb" }} />
+                            </div>
+                            <div className="w-2/5 flex flex-col gap-1.5 pt-2">
+                              <div className="h-2.5 w-4/5 rounded bg-slate-300" />
+                              <div className="h-1.5 w-1/3 rounded bg-slate-400" />
+                              <div className="flex gap-0.5 mt-1">{[0, 1, 2].map((i) => <span key={i} className="w-2 h-2 rounded-full bg-slate-300" />)}</div>
+                              <div className="h-3.5 w-full rounded-sm bg-slate-800" />
+                              <div className="h-1 w-full rounded bg-slate-200" />
+                              <div className="h-1 w-full rounded bg-slate-200" />
+                            </div>
+                          </div>
+                        ) : p.value === "columns" ? (
+                          /* 3 คอลัมน์: ข้อความ · รูปเรียงลง · ปุ่มซื้อ */
+                          <div className="flex gap-2 h-full">
+                            <div className="w-1/4 flex flex-col gap-1 pt-2">
+                              <div className="h-1.5 w-full rounded bg-slate-400" />
+                              <div className="h-1 w-full rounded bg-slate-200" />
+                              <div className="h-1 w-4/5 rounded bg-slate-200" />
+                              <div className="h-1 w-3/5 rounded bg-slate-200" />
+                            </div>
+                            <div className="w-1/2 flex flex-col gap-1 overflow-hidden px-2" style={{ background: "#f4f4f2" }}>
+                              <div className="flex-[3] rounded-sm mt-1" style={{ background: theme.colors.surface, border: "1px solid #e5e7eb" }} />
+                              <div className="flex-1 rounded-sm" style={{ background: theme.colors.surface, border: "1px solid #e5e7eb" }} />
+                            </div>
+                            <div className="w-1/4 flex flex-col gap-1 pt-2">
+                              <div className="h-1.5 w-1/2 rounded bg-slate-400" />
+                              <div className="flex gap-0.5">{[0, 1, 2].map((i) => <span key={i} className="w-1.5 h-1.5 rounded-full bg-slate-300" />)}</div>
+                              <div className="h-3 w-full rounded-sm bg-slate-800 mt-1" />
+                            </div>
+                          </div>
+                        ) : p.value === "story" ? (
+                          /* รูปเต็มจอ + ชื่อรุ่นตัวใหญ่ทับ → แถบเรื่องราวสีเข้ม */
+                          <div className="flex flex-col gap-1 h-full">
+                            <div className="relative flex-[3] rounded-sm overflow-hidden" style={{ background: `color-mix(in srgb, ${theme.colors.brand} 14%, white)`, border: "1px solid #e5e7eb" }}>
+                              <span className="absolute left-1.5 bottom-1 font-serif italic text-[15px] leading-none text-slate-700">Arc</span>
+                            </div>
+                            <div className="flex-[2] flex gap-1">
+                              <div className="w-1/2 rounded-sm" style={{ background: theme.colors.surface, border: "1px solid #e5e7eb" }} />
+                              <div className="w-1/2 rounded-sm bg-slate-800 flex flex-col gap-1 p-1">
+                                <div className="h-1 w-2/3 rounded bg-slate-500" />
+                                <div className="h-1 w-full rounded bg-slate-600" />
+                              </div>
+                            </div>
+                          </div>
                         ) : (
                           <div className="relative h-full flex flex-col items-center">
                             <div className="h-3 w-1/3 rounded italic" style={{ background: theme.colors.brand }} />
@@ -2024,8 +2074,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
               <MaterialViewSetting value={theme.product.materialView} onChange={(materialView) => setProduct({ materialView })} brand={theme.colors.brand} />
 
-              {theme.product.layout === "showcase" && (
+              {SHOWCASE_FAMILY.includes(theme.product.layout) && theme.product.layout !== "showcase" && (
+                <ProductExtrasSetting value={theme.product.extras} onChange={(x) => setProduct({ extras: { ...theme.product.extras, ...x } })} layout={theme.product.layout} />
+              )}
+
+              {SHOWCASE_FAMILY.includes(theme.product.layout) && (
                 <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
+                  {theme.product.layout === "showcase" && (
                   <div>
                     <label className={labelCls}>แกลเลอรีรูปสินค้า</label>
                     <select className={inputCls} value={theme.product.galleryStyle} onChange={(e) => setProduct({ galleryStyle: e.target.value as ProductGalleryStyle })}>
@@ -2033,6 +2088,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </select>
                     <p className="text-[11px] text-slate-400 mt-1">{(choices.productGalleryStyles ?? []).find((o) => o.value === theme.product.galleryStyle)?.hint}</p>
                   </div>
+                  )}
                   <div>
                     <label className={labelCls}>รายละเอียดสินค้า</label>
                     <select
@@ -2173,7 +2229,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </div>
               )}
 
-              {theme.product.layout === "showcase" && (
+              {SHOWCASE_FAMILY.includes(theme.product.layout) && (
                 <div className="mt-4 pt-3 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-2">
                     <label className={labelCls} style={{ marginBottom: 0 }}>ลำดับส่วนประกอบ (ลากที่ ⠿ เพื่อสลับ · ⚙️ เลือกจับคู่ข้อมูล · 👁️ ซ่อน/แสดง)</label>
@@ -2312,7 +2368,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               )}
 
 
-              {theme.product.layout === "showcase" && (
+              {SHOWCASE_FAMILY.includes(theme.product.layout) && (
                 <div className="mt-4 pt-3 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-1">
                     <label className={labelCls} style={{ marginBottom: 0 }}>ชุดรายละเอียดสินค้า — หัวข้อที่โชว์ใต้ราคา (พับเก็บ/แท็บ ตามที่เลือกด้านบน)</label>
