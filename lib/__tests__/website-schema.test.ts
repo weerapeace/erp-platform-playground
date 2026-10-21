@@ -460,6 +460,12 @@ describe("🚶 รันเวย์ลุค (2026-10-21)", () => {
     const msgs = validateBlocks([b as unknown as Block]).map((x) => x.message).join(" ");
     expect(msgs).toMatch(/1 จุดกดยังไม่ได้เลือกสินค้า/);
   });
+
+  it("✂️ ปุ่มตัดพื้น (AI) เปิดเฉพาะรูปลุคของรันเวย์ — ช่องรูปอื่นยังไม่มี", () => {
+    expect(SECTION_SCHEMAS.runway.children!.fields.find((x) => x.key === "imageKey")?.removeBg).toBe(true);
+    const others = Object.values(SECTION_SCHEMAS).flatMap((sc) => [...sc.fields, ...(sc.children?.fields ?? [])].filter((x) => x.removeBg).map((x) => `${sc.type}.${x.key}`));
+    expect(others).toEqual(["runway.imageKey"]);
+  });
 });
 
 describe("🗂 ตารางสินค้า › แท็บตามรุ่นสินค้า (Parent SKU)", () => {

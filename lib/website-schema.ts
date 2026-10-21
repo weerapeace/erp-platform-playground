@@ -144,6 +144,8 @@ export interface FieldDef {
    * (ลุค 1 = pointImage เดิม) · จุดพี่น้องที่โชว์จาง ๆ = เฉพาะลุคเดียวกัน
    */
   pointLook?: string;
+  /** ช่องชนิด image: มีปุ่ม ✂️ ตัดพื้นด้วย AI ในเบราว์เซอร์ (lib/remove-bg · รูปคน) */
+  removeBg?: boolean;
   /** ชิ้นย่อย: โชว์ช่องนี้เฉพาะเมื่อ Section แม่มีค่าตามนี้ (เช่น { key: "mode", eq: "slides" }) */
   showIfParent?: ShowIf | ShowIf[];
   /**
@@ -2244,7 +2246,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       icon: "🚶",
       max: 30,
       fields: [
-        image("imageKey", "รูปลุค (เต็มตัว)", { required: true, requiredMessage: "ยังไม่ได้ใส่รูปลุค", hint: "แนะนำ PNG ตัดพื้น หรือพื้นเรียบสีเดียวกันทุกลุค · ถ่ายเต็มตัว มุมเดียวกัน แถวด้านหลังจะเรียงสวย" }),
+        image("imageKey", "รูปลุค (เต็มตัว)", {
+          required: true,
+          requiredMessage: "ยังไม่ได้ใส่รูปลุค",
+          removeBg: true,
+          hint: "รูปมีพื้นหลัง → กด ✂️ ตัดพื้น (AI) ได้เลย · ถ่ายเต็มตัว มุมเดียวกัน แถวด้านหลังจะเรียงสวย",
+        }),
         text("name", "ชื่อลุค (ถ้ามี)", { default: "", max: 60, placeholder: "เช่น Pink Metallic" }),
         f("products", "สินค้าในลุคนี้", "products", { max: 6, wide: true, hint: "โชว์ในแผงการ์ดข้างเวที · ♡ + ใส่ตะกร้าได้" }),
         // PNG แต่ละรูปขอบเหลือไม่เท่ากัน → ปรับรายลุคให้คนสูง/ยืนพื้นเท่ากัน (คูณกับค่าทั้ง Section)
