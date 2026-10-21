@@ -25,13 +25,6 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d: string | null) => { if (!d) return "—"; const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }); };
 const qtyKey = (q: number | null | undefined) => (q == null ? "" : String(q));
 
-/** กำไรรวมของขั้นจำนวนนั้น = กำไร/ชิ้น × จำนวน (เจ้าของขอ 2026-10-21 "อยากได้ เพิ่มทั้งหมด xx บาท") */
-function TotalMargin({ margin, qty }: { margin: number; qty: number | null | undefined }) {
-  if (qty == null || !Number.isFinite(margin)) return null;
-  const t = margin * qty;
-  return <div className={`text-[10px] tabular-nums whitespace-nowrap ${upDown(t)}`} title={`กำไรรวม = ${sgn(margin)}/ชิ้น × ${fmtInt(qty)} ชิ้น`}>รวม {sgn(t)} บาท</div>;
-}
-
 type Size = { key: string; label: string };
 type Batch = { batch: number; part: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
 
@@ -234,7 +227,6 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
                                   {sgn(margin)}{pct != null ? ` (${pct.toFixed(0)}%)` : ""}
                                 </div>
                               )}
-                              {margin != null && <TotalMargin margin={margin} qty={q.qty} />}
                               <div className="flex items-center justify-end gap-1 mt-0.5">
                                 {vs != null && <span className={`text-[10px] ${vs === 0 ? "text-slate-300" : "text-slate-500"}`} title={`ครั้งที่ ${prev?.batch} เสนอ ${fmtBaht(pOff)}`}>{vs === 0 ? "=" : sgn(vs)}</span>}
                                 {canEdit
@@ -291,6 +283,27 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
   const key = (s: string, qty: number | null) => `${s}|${qtyKey(qty)}`;
   const addQty = () => { const n = Number(newQty); if (!Number.isFinite(n) || n <= 0) { toast.error("ใส่จำนวนเป็นตัวเลขมากกว่า 0"); return; } if (qtys.some((q) => q === n)) { toast.error("มีขั้นจำนวนนี้แล้ว"); return; } setQtys((qs) => [...qs, n].sort((a, b) => (a == null ? 1 : b == null ? -1 : a - b))); setNewQty(""); };
   const fillFromCost = () => setCells((m) => { const n = { ...m }; for (const s of sizes) for (const qty of qtys) { const c = currentCost(s.key); if (c > 0 && !n[key(s.key, qty)]) n[key(s.key, qty)] = String(Math.round(c * 100) / 100); } return n; });
+  // ± บาท ทุกช่อง (เจ้าของขอ 2026-10-21: "+10 → 400 เป็น 410, 380 เป็น 390") — เฉพาะช่องที่ใส่ราคาแล้ว + ไซส์ที่ติ๊ก · ช่องว่างไม่แตะ
+  const [shift, setShift] = useState("");
+  const shiftAll = () => {
+    const d = Number(shift);
+    if (!shift.trim() || !Number.isFinite(d) || d === 0) { toast.error("ใส่จำนวนบาท เช่น 10 (บวก) หรือ -10 (ลด)"); return; }
+    const next = { ...cells }; let count = 0; const neg: string[] = [];
+    for (const s of sizes) {
+      if (!onSizes.includes(s.key)) continue;
+      for (const qty of qtys) {
+        const k = key(s.key, qty); const v = next[k]?.trim(); if (!v) continue;
+        const n = Number(v); if (!Number.isFinite(n)) continue;
+        const r = Math.round((n + d) * 100) / 100;
+        if (r < 0) neg.push(`${s.label} ${qty == null ? "" : `${fmtInt(qty)} ชิ้น`}`.trim());
+        next[k] = String(r); count++;
+      }
+    }
+    if (!count) { toast.error("ยังไม่มีช่องที่ใส่ราคา — ใส่ราคาก่อนแล้วค่อยปรับทุกช่อง"); return; }
+    if (neg.length) { toast.error(`ลดแล้วราคาติดลบ ${neg.length} ช่อง (${neg.slice(0, 3).join(", ")}${neg.length > 3 ? " …" : ""}) — ลองลดน้อยลง`); return; }   // ไม่เดาค่าแทน (ไม่ตัดเป็น 0 เอง)
+    setCells(next); setShift("");
+    toast.success(`ปรับราคาที่เสนอ ${count} ช่อง ${d > 0 ? "+" : "−"}${fmtBaht(Math.abs(d))} บาท`);
+  };
   const save = async () => {
     const list: { parent_code: string; qty: number | null; price: number | null; offered_price: number | null }[] = [];
     for (const s of sizes.filter((x) => onSizes.includes(x.key))) for (const qty of qtys) {
@@ -318,6 +331,13 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
         <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white">{QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="หมายเหตุ (เช่น ลูกค้าขอลด 5%)" className="h-7 flex-1 min-w-[10rem] px-2 text-xs border border-slate-200 rounded-md bg-white" />
         <button type="button" onClick={fillFromCost} className="h-7 px-2 text-xs border border-slate-200 bg-white rounded-md text-slate-600 hover:bg-slate-50" title="ช่องที่ยังว่าง ใส่ราคาเท่าตีราคาปัจจุบัน">เติมจากตีราคา</button>
+        <span className="inline-flex items-center gap-1 h-7 pl-2 pr-1 text-xs border border-slate-200 bg-white rounded-md text-slate-600" title="บวก/ลบราคาที่เสนอทุกช่องพร้อมกัน เช่น 10 → 400 เป็น 410 · -10 → 400 เป็น 390 (ช่องว่างไม่แตะ)">
+          ปรับทุกช่อง ±
+          <input type="number" step="any" value={shift} onChange={(e) => setShift(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") shiftAll(); }} placeholder="10 / -10" aria-label="ปรับราคาทุกช่อง (บาท)"
+            className="h-5 w-16 px-1 text-xs text-right border border-slate-200 rounded" />
+          บาท
+          <button type="button" onClick={shiftAll} className="h-5 px-1.5 text-[11px] rounded bg-blue-600 text-white hover:bg-blue-700">ใช้</button>
+        </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
@@ -350,7 +370,6 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
                         <input type="number" min={0} step="any" disabled={!on} value={v} onChange={(e) => setCells((m) => ({ ...m, [key(s.key, qty)]: e.target.value }))} placeholder="—"
                           className="h-8 w-24 px-1.5 text-sm text-right border border-blue-300 bg-white rounded-md font-medium text-blue-700 disabled:bg-slate-50" />
                         {margin != null && <div className={`text-[10px] tabular-nums ${upDown(margin)}`}>{sgn(margin)}{n ? ` (${((margin / n) * 100).toFixed(0)}%)` : ""}</div>}
-                        {margin != null && <TotalMargin margin={margin} qty={qty} />}
                       </td>
                     );
                   })}
@@ -362,7 +381,7 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
         </table>
       </div>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-blue-200 bg-blue-50/60">
-        <span className="text-[11px] text-slate-500">ช่องว่าง = ไม่เสนอขั้นนั้น · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน · "รวม" = กำไรทั้งขั้นจำนวน (กำไร/ชิ้น × จำนวน){costDirty ? " · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน" : ""}</span>
+        <span className="text-[11px] text-slate-500">ช่องว่าง = ไม่เสนอขั้นนั้น · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน{costDirty ? " · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน" : ""}</span>
         <div className="flex gap-1.5">
           <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">ยกเลิก</button>
           <button type="button" onClick={() => void save()} disabled={saving} className="h-8 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : `💾 บันทึกครั้งที่ ${nextBatch}`}</button>
