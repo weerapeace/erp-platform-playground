@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import type { ArrangePrintSpec, ArrangeBaseItem, ArrangePrintType, PrintTypeRow, ArrangeQtyUnit } from "./data";
 import { listPrintTypes, createPrintType, updatePrintType, deletePrintType } from "./data";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 // ป๊อปอัปรายละเอียด/แก้ไฟล์คลังกลาง (กดรูปในการ์ด) — dynamic กัน bundle asset-library ลากเข้า tasks
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
@@ -401,7 +402,7 @@ function PrintTypeRowEdit({ ty, onChanged, pushToast }: {
   const num = (v: string) => (v.trim() === "" ? null : Number(v));
   const inp = "h-8 border border-slate-200 rounded-md px-2 text-sm";
   const save = async () => { setBusy(true); try { await updatePrintType(ty.id, { code: f.code.trim(), name: f.name.trim() || f.code.trim(), default_w: num(f.w), default_h: num(f.h), unit: f.unit }); onChanged(); pushToast("success", t("บันทึกแล้ว", "Saved")); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
-  const del = async () => { if (!window.confirm(t(`ลบประเภท "${ty.code}"?`, `Delete type "${ty.code}"?`))) return; setBusy(true); try { await deletePrintType(ty.id); onChanged(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
+  const del = async () => { if (!(await askConfirm({ title: t(`ลบประเภท "${ty.code}"?`, `Delete type "${ty.code}"?`), variant: "danger" }))) return; setBusy(true); try { await deletePrintType(ty.id); onChanged(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <input value={f.code} onChange={(e) => setF((s) => ({ ...s, code: e.target.value }))} className={`w-20 ${inp}`} />

@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 type BrandRow = { id: string; name: string; color: string | null; folder_id: string; folder_name: string; folder_url: string };
 
@@ -33,7 +34,7 @@ export function BrandDriveFolders() {
     finally { setBusyId(null); }
   };
   const clear = async (b: BrandRow) => {
-    if (!window.confirm(t(`ล้างโฟลเดอร์ของแบรนด์ "${b.name}"?`, `Clear folder for "${b.name}"?`))) return;
+    if (!(await askConfirm({ title: t(`ล้างโฟลเดอร์ของแบรนด์ "${b.name}"?`, `Clear folder for "${b.name}"?`), variant: "danger" }))) return;
     setBusyId(b.id); setMsg(null);
     try { await apiFetch("/api/creative-tasks/brand-drive-folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: b.id, clear: true }) }); load(); }
     catch (e) { setMsg({ id: b.id, kind: "err", text: (e as Error).message }); }

@@ -12,6 +12,7 @@ import { ERPModal } from "@/components/modal";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions, platformLabel } from "./use-options";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import {
   CONTENT_STATUS_META, POST_TYPES, contentStatusLabel,
   listContent, createContent, updateContent,
@@ -60,7 +61,7 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast }: {
   };
 
   const detach = async (c: ContentItem) => {
-    if (!window.confirm(t(`ถอด "${c.title}" ออกจากงานนี้? (คอนเทนต์ไม่ถูกลบ)`, `Remove "${c.title}" from this task? (content is kept)`))) return;
+    if (!(await askConfirm({ title: t(`ถอด "${c.title}" ออกจากงานนี้? (คอนเทนต์ไม่ถูกลบ)`, `Remove "${c.title}" from this task? (content is kept)`), variant: "danger" }))) return;
     try { await updateContent(c.id, { task_id: null }); await load(); pushToast("info", t("ถอดออกจากงานแล้ว", "Removed from task")); }
     catch (e) { pushToast("error", (e as Error).message); }
   };

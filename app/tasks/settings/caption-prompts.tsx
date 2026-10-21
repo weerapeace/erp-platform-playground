@@ -9,6 +9,7 @@ import { apiFetch } from "@/lib/api";
 import { listBrands, type BrandOption } from "../data";
 import { useCreativeOptions } from "../use-options";
 import { useT } from "@/components/i18n";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 type Row = { id: string; brand_id: string | null; platform: string | null; prompt: string; updated_at: string };
 const ALL = "__all__";   // ค่าใน dropdown ที่หมายถึง "ทุก…" (= null ใน DB)
@@ -124,7 +125,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
   };
   const remove = async () => {
     if (!bId && !pKey) { showToast(t("ค่ากลางลบไม่ได้ — แก้ข้อความแทน", "Global default can't be deleted — edit it instead")); return; }
-    if (!window.confirm(t(`ลบ prompt ระดับ "${brandName(bId)} · ${platName(pKey)}" ? (จะกลับไปใช้ระดับที่กว้างกว่า)`, "Delete this level? (falls back to a broader level)"))) return;
+    if (!(await askConfirm({ title: t(`ลบ prompt ระดับ "${brandName(bId)} · ${platName(pKey)}" ? (จะกลับไปใช้ระดับที่กว้างกว่า)`, "Delete this level? (falls back to a broader level)"), variant: "danger" }))) return;
     setBusy(true);
     try {
       const q = new URLSearchParams(); if (bId) q.set("brand_id", bId); if (pKey) q.set("platform", pKey);

@@ -18,6 +18,8 @@ import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "../multi-user-picker";
 import { RichTextEditor } from "@/components/rich-text";
 import { CAMPAIGN_STATUS } from "./campaign-status";
+import { DrawerShell } from "@/components/modal";
+import { askText } from "@/components/modal/ask-dialog";
 // ย้ายค่าคงที่ไป ./campaign-status (ไฟล์เล็ก) — re-export ไว้ให้ที่ import เดิมยังใช้ได้
 export { CAMPAIGN_STATUS };
 
@@ -58,15 +60,14 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
   const copyLink = async () => {
     const url = `${window.location.origin}/tasks/campaigns/${campaignId}`;
     try { await navigator.clipboard.writeText(url); pushToast("success", t("คัดลอกลิงก์แล้ว", "Link copied")); }
-    catch { window.prompt(t("คัดลอกลิงก์นี้", "Copy this link"), url); }
+    catch { void askText({ title: t("คัดลอกลิงก์นี้", "Copy this link"), initial: url, confirmText: t("ปิด", "Close") }); }
   };
 
   const summaryItems = useMemo(() => detail ? Object.entries(detail.summary).sort((a, b) => b[1] - a[1]) : [], [detail]);
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <DrawerShell onClose={onClose} className="w-[600px]">
         {!detail ? (
           <div className="flex-1 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
         ) : (
@@ -164,7 +165,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
             </div>
           </>
         )}
-      </div>
+      </DrawerShell>
 
       {/* งานเต็มทับขึ้นมา — ปิดแล้วกลับมาที่รายละเอียดแคมเปญ (ย้อนกลับได้) */}
       {taskId && <TaskDetailDrawer taskId={taskId} onClose={() => setTaskId(null)} onChanged={load} onMove={moveTask} onDelete={removeTask} pushToast={pushToast} />}

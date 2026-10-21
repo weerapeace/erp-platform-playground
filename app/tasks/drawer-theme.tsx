@@ -12,6 +12,7 @@ import { uploadResizedImage } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
+import { useToast } from "@/components/toast";
 
 export type DrawerDensity = "compact" | "normal" | "spacious";
 export type DrawerGradient = { from: string; to: string } | null;
@@ -104,6 +105,7 @@ export function useDrawerTheme(which: "task" | "content") {
 // ปุ่ม 🎨 + popover ปรับธีม drawer
 export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTheme; update: (p: Partial<DrawerTheme>) => void; sections: { key: string; label: string }[] }) {
   const t = useT();
+  const toast = useToast();   // แจ้งผิดพลาดด้วย toast กลาง (เดิม alert ของเบราว์เซอร์)
   const [open, setOpen] = useState(false);
   const [bgBusy, setBgBusy] = useState(false);
   const [subBgBusy, setSubBgBusy] = useState(false);
@@ -121,14 +123,14 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
     if (!file) return;
     setBgBusy(true);
     try { const up = await uploadResizedImage(file, { folder: "drawer-bg", max: 1600 }); update({ bgImage: up.r2_key }); }
-    catch { alert(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
+    catch { toast.error(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
     finally { setBgBusy(false); }
   };
   const onPickSubCardBg = async (file: File | null | undefined) => {
     if (!file) return;
     setSubBgBusy(true);
     try { const up = await uploadResizedImage(file, { folder: "subcard-bg", max: 1600 }); update({ subCardBgImage: up.r2_key }); }
-    catch { alert(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
+    catch { toast.error(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
     finally { setSubBgBusy(false); }
   };
   return (

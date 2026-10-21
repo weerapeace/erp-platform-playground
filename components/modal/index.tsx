@@ -794,6 +794,62 @@ export function Drawer({
   );
 }
 
+// ---- DrawerShell — "โครง" drawer กลาง สำหรับ drawer ที่ออกแบบหัว/เนื้อหาเอง ----
+
+export interface DrawerShellProps {
+  /** ค่าเริ่ม true — ส่ง false = ไม่แสดง */
+  open?: boolean;
+  /** กดพื้นหลัง / Esc → เรียกตัวนี้ (ใส่ด่าน "ยังไม่บันทึก" ของตัวเองไว้ในนี้ได้) */
+  onClose: () => void;
+  /** ความกว้าง (px หรือ CSS) — เช่นจาก useDrawerResize · ไม่ส่ง = ใช้ความกว้างจาก className */
+  width?: number | string;
+  /** class เพิ่มให้แผง เช่น "w-[600px]" หรือสีพื้น */
+  className?: string;
+  /** style เพิ่มให้แผง (เช่น สีพื้นจากธีม) */
+  style?: React.CSSProperties;
+  closeOnBackdrop?: boolean;
+  closeOnEsc?: boolean;
+  children: React.ReactNode;
+}
+
+/**
+ * DrawerShell (ของกลาง) — แผงเลื่อนจากขวา "เฉพาะโครง": พื้นหลังมืด · portal ขึ้นบนสุด · Esc ปิด (เฉพาะชั้นบนสุด)
+ * · กด/ลากพื้นหลังแบบตั้งใจเท่านั้นถึงปิด · มือถือกว้างเต็มจอ — ส่วนหัว/เนื้อหา/ปุ่ม ให้ผู้ใช้วางเองทั้งหมด
+ * ใช้กับ drawer ที่มีดีไซน์หัวเฉพาะ (drawer งาน/คอนเทนต์/แคมเปญ ฯลฯ) แทนการเขียน `fixed inset-0` เองทุกไฟล์
+ * ถ้าหัว/ท้ายแบบมาตรฐานพอ → ใช้ <Drawer> (มีหัว ปุ่มปิด ลากขยาย จำขนาด ด่านยังไม่บันทึก ให้ครบ)
+ * Esc ตอนกำลังพิมพ์ในช่องกรอก = ไม่ปิด (กันพิมพ์หาย — ช่องนั้นใช้ Esc ยกเลิกของตัวเองได้)
+ */
+export function DrawerShell({ open = true, onClose, width, className = "", style, closeOnBackdrop = true, closeOnEsc = true, children }: DrawerShellProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  useRefreshOnClose(open);
+  const isTopEsc = useEscTop(open);
+  useEffect(() => {
+    if (!open || !closeOnEsc) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !isTopEsc()) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, closeOnEsc, onClose, isTopEsc]);
+  const backdropDismiss = useBackdropDismiss(closeOnBackdrop ? onClose : undefined);
+
+  if (!mounted || !open) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex">
+      <div className="absolute inset-0 bg-black/20" {...backdropDismiss} />
+      <div className={`relative ml-auto h-full max-w-[100vw] sm:max-w-[97vw] bg-white shadow-2xl flex flex-col border-l border-slate-200 ${className}`}
+        style={{ ...(width !== undefined ? { width } : {}), ...style }} onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ---- Approve/Reject Dialog ----
 
 export interface ApprovalDialogProps {

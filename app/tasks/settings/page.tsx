@@ -30,6 +30,7 @@ import { CaptionPromptsManager } from "./caption-prompts";
 import { ProductModeManager } from "../product-mode-settings";
 import { tr } from "@/lib/lang";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
@@ -307,7 +308,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
       await patchMeta(o, { icon_key: j.r2_key });
     } catch (e) { showToast((e as Error).message); } finally { setUploadingId(null); }
   };
-  const remove = async (o: Option) => { if (!window.confirm(`${t("ลบ", "Delete")} "${o.label}" ?`)) return; try { await deleteOption(o.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
+  const remove = async (o: Option) => { if (!(await askConfirm({ title: `${t("ลบ", "Delete")} "${o.label}" ?`, variant: "danger" }))) return; try { await deleteOption(o.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
   // ลากจัดลำดับ (ของกลาง) — เขียน sort_order = ตำแหน่งใหม่ เฉพาะแถวที่เปลี่ยน
   const reorder = async (from: number, to: number) => {
     const next = moveItem(opts, from, to);
@@ -401,7 +402,7 @@ function StatusManager({ showToast }: { showToast: (m: string) => void }) {
 
   const patch = async (id: string, p: Record<string, unknown>) => { try { await updateStatus(id, p); await load(); } catch (e) { showToast((e as Error).message); } };
   const add = async () => { if (!newLabel.trim()) return; try { await createStatus({ label: newLabel.trim(), color: newColor }); setNewLabel(""); await load(); showToast(t("เพิ่มสถานะแล้ว", "Status added")); } catch (e) { showToast((e as Error).message); } };
-  const remove = async (s: Status) => { if (!window.confirm(`${t("ลบสถานะ", "Delete status")} "${s.label}" ?`)) return; try { await deleteStatus(s.id!); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
+  const remove = async (s: Status) => { if (!(await askConfirm({ title: `${t("ลบสถานะ", "Delete status")} "${s.label}" ?`, variant: "danger" }))) return; try { await deleteStatus(s.id!); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
   // ลากจัดลำดับ (ของกลาง) — เขียน sort_order = ตำแหน่งใหม่ เฉพาะแถวที่เปลี่ยน
   const reorder = async (from: number, to: number) => {
     const next = moveItem(statuses, from, to);
@@ -590,7 +591,7 @@ function TeamManager({ showToast }: { showToast: (m: string) => void }) {
     setTeams((p) => p.map((x) => x.id === tm.id ? { ...x, member_ids, members: members.map((m) => ({ id: m.id, name: m.name })) } : x));
     try { await updateTeam(tm.id, { member_ids }); } catch (e) { showToast((e as Error).message); }
   };
-  const remove = async (tm: Team) => { if (!window.confirm(`${t("ลบทีม", "Delete team")} "${tm.name}" ?`)) return; try { await deleteTeam(tm.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
+  const remove = async (tm: Team) => { if (!(await askConfirm({ title: `${t("ลบทีม", "Delete team")} "${tm.name}" ?`, variant: "danger" }))) return; try { await deleteTeam(tm.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">

@@ -18,7 +18,7 @@ const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) =
 // drawer สินค้ากลาง — กด Parent SKU แล้วเปิดดูได้ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 import { ImageInput } from "@/components/image-input";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, DrawerShell } from "@/components/modal";
 import { PublishModal } from "./publish-modal";
 import { TeamFill } from "./team-picker";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
@@ -42,6 +42,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import { applyTaskTransition } from "./task-actions";
 import { StatusBadge, PriorityBadge } from "./task-badges";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
   getTask, updateTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
@@ -201,8 +202,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   if (!detail) {
     return (
       <>
-        <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-        <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center"><span className="text-slate-400">{t("กำลังโหลด...", "Loading...")}</span></div>
+        <DrawerShell onClose={onClose} width={drawerW} className="items-center justify-center"><span className="text-slate-400">{t("กำลังโหลด...", "Loading...")}</span></DrawerShell>
       </>
     );
   }
@@ -259,8 +259,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      {/* โครง drawer กลาง (พื้นหลัง/Esc ปิด/ขึ้นบนสุด) — หัว/เนื้อหาออกแบบเองข้างใน */}
+      <DrawerShell onClose={onClose} width={drawerW}>
         {/* แถบสีหลัก (ธีม) */}
         <div className="h-1 shrink-0" style={{ background: accentCss(dth) }} />
         {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
@@ -699,7 +699,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         {isAdmin && (
           <div className="border-t border-amber-100 bg-amber-50/50 px-6 py-2 shrink-0 flex items-center gap-2 flex-wrap">
             <span className="text-xs text-amber-700">🔧 admin · {t("ย้อน/ตั้งสถานะ", "Set status")}:</span>
-            <select value={d.status} disabled={busy} onChange={(e) => { const to = e.target.value; if (to && to !== d.status && window.confirm(`${t("เปลี่ยนสถานะเป็น", "Set status to")} "${statusMeta(to).label}"?`)) handleForceStatus(to); }} className="h-8 px-2 text-xs border border-amber-200 rounded-lg bg-white">
+            <select value={d.status} disabled={busy} onChange={async (e) => { const to = e.target.value; if (to && to !== d.status && (await askConfirm({ title: `${t("เปลี่ยนสถานะเป็น", "Set status to")} "${statusMeta(to).label}"?`, variant: "danger" }))) handleForceStatus(to); }} className="h-8 px-2 text-xs border border-amber-200 rounded-lg bg-white">
               {allStatuses.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
             <span className="text-[11px] text-amber-600">{t("(บังคับเปลี่ยน ข้ามกฎ workflow · บันทึกประวัติ)", "(force change, bypasses workflow · audited)")}</span>
@@ -725,7 +725,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             return <button key={a.to_key} disabled={busy} onClick={() => { if (a.to_key === "published") setPublishToKey(a.to_key); else handleMove(a.to_key); }} style={isPrimary ? { background: btnBg(dth) } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
           })}
         </div>
-      </div>
+      </DrawerShell>
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => { void load(); }} />}
       <ConfirmDialog open={!!linkDel} onClose={() => setLinkDel(null)} variant="danger"
         onConfirm={async () => { const x = linkDel; setLinkDel(null); if (!x) return; try { await deleteAttachment(d.id, x.id); await load(); pushToast("success", t("ลบลิงก์แล้ว", "Link removed")); } catch (e) { pushToast("error", (e as Error).message); } }}

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useSWRLite, mutateSWR } from "@/lib/swr-lite";
 import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from "@/lib/caption-template";
 import { StandaloneShell } from "@/components/standalone-shell";
-import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { ERPModal, ConfirmDialog, DrawerShell } from "@/components/modal";
 import { ERPInput, ERPTextarea, ERPDateTime24 } from "@/components/form";
 import { InfoHint } from "@/components/info-hint";
 import { SkuPicker, ParentSkuPicker, UserPicker } from "@/components/pickers";
@@ -53,6 +53,7 @@ import { ExtraProductsEditor, extrasFromDetail, extraToPayload, childToSkuValue,
 import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, orderedKeys, accentCss, btnBg, isCollapsed, toggleCollapsedList } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
+import { askConfirm, askText } from "@/components/modal/ask-dialog";
 
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -152,7 +153,7 @@ export function ContentPageView() {
 
   // สร้างแม่แบบคอนเทนต์เปล่า → เปิด drawer ให้กรอกแคปชั่น/แพลตฟอร์ม
   const createTpl = async () => {
-    const name = window.prompt(t("ชื่อแม่แบบคอนเทนต์", "Content template name"));
+    const name = (await askText({ title: t("ชื่อแม่แบบคอนเทนต์", "Content template name"), required: true }));
     if (!name?.trim()) return;
     try { const { id } = await createContent({ title: name.trim(), is_template: true }); await reloadTemplates(); setDetailId(id); pushToast("success", t("สร้างแม่แบบแล้ว", "Template created")); }
     catch (e) { pushToast("error", (e as Error).message); }
@@ -938,7 +939,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     finally { setDeleting(false); setConfirmDel(false); }
   };
 
-  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={requestClose} /><div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
+  if (!d) return (<DrawerShell onClose={requestClose} width={drawerW} className="items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</DrawerShell>);
 
   const contentPlatforms = d.platforms ?? [];
   const brandLabel = brands.find((b) => b.id === brandId)?.name ?? null;   // ชื่อแบรนด์ที่เลือกสด ๆ (ให้โมดอลตั้งค่าแคปชั่น/แฮชแท็กตามแบรนด์นี้)
@@ -972,8 +973,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={requestClose} />
-      <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      {/* โครง drawer กลาง (พื้นหลัง/Esc ปิด/ขึ้นบนสุด) — ด่าน "ยังไม่บันทึก" อยู่ใน requestClose */}
+      <DrawerShell onClose={requestClose} width={drawerW}>
         {/* หูจับขอบซ้าย — ลากปรับความกว้าง · ดับเบิลคลิก = กลับค่าเริ่มต้น */}
         {wideScreen && <div onMouseDown={startResize} onDoubleClick={resetWidth} title={t("ลากเพื่อปรับความกว้าง · ดับเบิลคลิก = ค่าเริ่มต้น", "Drag to resize · double-click to reset")}
           className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />}
@@ -1361,7 +1362,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           <button onClick={requestClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={saving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </div>
-      </div>
+      </DrawerShell>
 
       <ConfirmDialog open={!!platRemoveAsk} onClose={() => setPlatRemoveAsk(null)} variant="danger"
         onConfirm={() => { const p = platRemoveAsk; setPlatRemoveAsk(null); if (p && d) void applyPlatforms((d.platforms ?? []).filter((x) => x !== p)); }}
@@ -2126,7 +2127,7 @@ function HashtagLibraryModal({ brandId, onClose, pushToast }: { brandId: string 
     try { await createHashtag({ text: "#" + raw, brand_id: scope === "brand" ? brandId : null }); setNewText(""); await load(); pushToast("success", t("เพิ่มเข้าคลังแล้ว", "Added to library")); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
-  const remove = async (h: Hashtag) => { if (!window.confirm(`${t("ลบ", "Delete")} ${h.text}?`)) return; try { await deleteHashtag(h.id); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const remove = async (h: Hashtag) => { if (!(await askConfirm({ title: `${t("ลบ", "Delete")} ${h.text}?`, variant: "danger" }))) return; try { await deleteHashtag(h.id); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
   // ✏️ กดที่ข้อความเพื่อแก้ (พิมพ์ผิด) — Enter = บันทึก · Esc = ยกเลิก
   const [ed, setEd] = useState<{ id: string; text: string } | null>(null);
   const saveEd = async () => {
@@ -2302,7 +2303,7 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
   const setActiveLabel = (label: string) => setTemplates((ts) => ts.map((t, i) => i === activeIdx ? { ...t, label } : t));
   const insertVar = (v: string) => setActiveBody((active?.body ?? "") + v);
   const addTemplate = () => { setTemplates((ts) => [...ts, { key: `custom_${ts.length + 1}`, label: t("แม่แบบใหม่", "New Template"), body: "{caption}\n\n{hashtags}" }]); setActiveIdx(templates.length); };
-  const removeActive = () => { if (!active || !window.confirm(t(`ลบแม่แบบ "${active.label}" ?`, `Delete template "${active.label}"?`))) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
+  const removeActive = async () => { if (!active || !(await askConfirm({ title: t(`ลบแม่แบบ "${active.label}" ?`, `Delete template "${active.label}"?`), variant: "danger" }))) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
 
   // preview ตัวอย่าง (ใช้ข้อมูลสมมติ)
   const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้", link: "Shopee: https://shp.ee/xxx\nLazada: https://lzd.co/yyy" };

@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import type { WorkFlow, WorkFlowStep } from "@/app/api/work-flows/route";
 import { WorkFlowSteps } from "@/components/work-flow-widget";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 const KIND_OPTIONS = [
   { v: "module", get label() { return tr("📋 โมดูลในแอป", "📋 App module"); } },
@@ -121,7 +122,7 @@ export default function WorkFlowsGuidePage() {
       setStepModal(null); toast.success(t("บันทึกแล้ว", "Saved")); await load();
     } catch { toast.error(t("บันทึกไม่สำเร็จ", "Couldn't save")); }
   };
-  const delStep = async (id: string) => { if (!window.confirm(t("ลบขั้นตอนนี้?", "Delete this step?"))) return; await apiFetch(`/api/work-flows?target=step&id=${id}`, { method: "DELETE" }); await load(); };
+  const delStep = async (id: string) => { if (!(await askConfirm({ title: t("ลบขั้นตอนนี้?", "Delete this step?"), variant: "danger" }))) return; await apiFetch(`/api/work-flows?target=step&id=${id}`, { method: "DELETE" }); await load(); };
   const moveStep = async (idx: number, dir: -1 | 1) => {
     if (!cur) return; const a = cur.steps[idx], b = cur.steps[idx + dir]; if (!a || !b) return;
     const aNo = a.step_no, bNo = b.step_no;
@@ -139,7 +140,7 @@ export default function WorkFlowsGuidePage() {
       setFlowModal(null); toast.success(t("บันทึกแล้ว", "Saved")); await load();
     } catch { toast.error(t("บันทึกไม่สำเร็จ", "Couldn't save")); }
   };
-  const delFlow = async (f: WorkFlow) => { if (!window.confirm(t(`ลบงาน "${f.name}" และทุกขั้นตอน?`, `Delete job "${f.name}" and all its steps?`))) return; await apiFetch(`/api/work-flows?target=flow&id=${f.id}`, { method: "DELETE" }); setSel(""); await load(); };
+  const delFlow = async (f: WorkFlow) => { if (!(await askConfirm({ title: t(`ลบงาน "${f.name}" และทุกขั้นตอน?`, `Delete job "${f.name}" and all its steps?`), variant: "danger" }))) return; await apiFetch(`/api/work-flows?target=flow&id=${f.id}`, { method: "DELETE" }); setSel(""); await load(); };
 
   return (
     <div className="max-w-[1200px] mx-auto px-5 py-5">

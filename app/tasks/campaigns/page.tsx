@@ -20,6 +20,7 @@ import {
   type Campaign,
 } from "../data";
 import { listOptions, createOption, type Option } from "../use-options";
+import { askText } from "@/components/modal/ask-dialog";
 
 // drawer แคมเปญ (มีตัวพิมพ์ข้อความ + drawer งาน) โหลดเมื่อเปิดดูจริง
 const CampaignDrawer = dynamic(() => import("./campaign-drawer").then((m) => m.CampaignDrawer), { ssr: false });
@@ -64,7 +65,7 @@ export default function CampaignsPage() {
 
   // สร้างหมวดใหม่จากแถบย้าย (ไม่เลือกเข้าฟอร์ม) → คืน id
   const createCatQuick = async (): Promise<string | null> => {
-    const label = window.prompt(t("ชื่อหมวดใหม่", "New category name")) ?? "";
+    const label = (await askText({ title: t("ชื่อหมวดใหม่", "New category name"), required: true })) ?? "";
     if (!label.trim()) return null;
     try {
       const o = await createOption("campaign_category", label.trim());

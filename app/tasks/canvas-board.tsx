@@ -19,6 +19,7 @@ import {
   type CreativeTask, type CreativePriority,
 } from "./data";
 import { statusMeta, canTransitionTo, type Status } from "./use-statuses";
+import { useToast } from "@/components/toast";
 
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
@@ -87,6 +88,7 @@ export function CanvasBoard({
   startMaximized?: boolean;
 }) {
   const t = useT();
+  const toast = useToast();   // แจ้งผิดพลาดด้วย toast กลาง (เดิม alert ของเบราว์เซอร์)
   const FONTS = useMemo(() => [
     { label: t("ค่าเริ่มต้น", "Default"), value: FONTS_VALUES[0] },
     { label: t("ไม่มีหัว (Sans)", "Sans-serif"), value: FONTS_VALUES[1] },
@@ -206,7 +208,7 @@ export function CanvasBoard({
       if (!item) return;
       const file = item.getAsFile(); if (!file) return;
       e.preventDefault();
-      if (uploadDisabled) { alert(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
+      if (uploadDisabled) { toast.error(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
       setUploading(true);
       try {
         const ext = (file.type.split("/")[1] || "png").replace("+xml", "");
@@ -231,7 +233,7 @@ export function CanvasBoard({
         img.onerror = () => place(320, 220);
         img.src = url;
       } catch (err) {
-        alert(t("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + ((err as Error).message ?? err));
+        toast.error(t("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + ((err as Error).message ?? err));
       } finally { setUploading(false); }
     };
     window.addEventListener("paste", onPaste);

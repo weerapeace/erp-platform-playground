@@ -17,7 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { suppressUnload } from "@/lib/canvas-unload-guard";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, DrawerShell } from "@/components/modal";
 import { ERPInput, ERPDateTime24 } from "@/components/form";
 import { useAuth, usePermission } from "@/components/auth";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
@@ -1158,8 +1158,7 @@ function AssetCardDrawer({ data, onClose, pushToast }: { data: Record<string, un
   const copyPath = () => { if (!masterPath) return; navigator.clipboard?.writeText(masterPath).catch(() => {}); pushToast("info", t("คัดลอกที่อยู่ไฟล์แล้ว", "Path copied")); };
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[420px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <DrawerShell onClose={onClose} className="w-[420px]">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <h3 className="text-base font-semibold text-slate-900 truncate">🖼️ {t("รูปจากคลัง", "Library image")}</h3>
           <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
@@ -1178,7 +1177,7 @@ function AssetCardDrawer({ data, onClose, pushToast }: { data: Record<string, un
           {url && <a href={url} target="_blank" rel="noopener noreferrer" className="block text-sm text-slate-500 underline hover:text-slate-700">{t("เปิดรูปเต็มในแท็บใหม่", "Open full image in new tab")}</a>}
           <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-3">* {t("ข้อมูลนี้เป็น snapshot ณ ตอนวางการ์ดบนกระดาน", "This data is a snapshot from when the card was placed")}</p>
         </div>
-      </div>
+      </DrawerShell>
     </>
   );
 }
@@ -1193,8 +1192,7 @@ function SkuDrawer({ data, onClose }: { data: Record<string, unknown>; onClose: 
   const img = data.image_url ? String(data.image_url) : null;
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[420px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <DrawerShell onClose={onClose} className="w-[420px]">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-900 truncate">📦 {t("รายละเอียดสินค้า", "Product Details")}</h3>
@@ -1217,7 +1215,7 @@ function SkuDrawer({ data, onClose }: { data: Record<string, unknown>; onClose: 
           </div>
           <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-3">* {t("ข้อมูลนี้เป็น snapshot ณ ตอนวางการ์ดบนกระดาน", "This data is a snapshot from when the card was placed on the board")}</p>
         </div>
-      </div>
+      </DrawerShell>
     </>
   );
 }

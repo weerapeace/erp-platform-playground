@@ -19,6 +19,7 @@ import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-bo
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { TREND_CHECKLIST, TREND_HEAT, TREND_PLATFORMS, heatMeta, trendProgress, type TrendChecklist } from "@/lib/creative-trends-meta";
 import { getTrend, updateTrend, deleteTrend, listBrands, type TrendItem } from "../../data";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
@@ -91,7 +92,7 @@ export default function TrendBoardPage() {
 
   const archive = async () => {
     if (!id || !trend) return;
-    if (!window.confirm(t(`เก็บเทรนด์ "${trend.title}" เข้ากรุ? (กระดานยังอยู่ กู้คืนได้)`, `Archive "${trend.title}"? The board is kept.`))) return;
+    if (!(await askConfirm({ title: t(`เก็บเทรนด์ "${trend.title}" เข้ากรุ? (กระดานยังอยู่ กู้คืนได้)`, `Archive "${trend.title}"? The board is kept.`), variant: "danger" }))) return;
     try { await deleteTrend(id); window.location.href = "/tasks/trends"; }
     catch (e) { setErr((e as Error).message); }
   };

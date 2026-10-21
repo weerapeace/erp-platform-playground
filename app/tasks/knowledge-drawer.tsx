@@ -10,6 +10,8 @@ import { listKnowledge, createKnowledge, updateKnowledge, deleteKnowledge, type 
 import { RichTextEditor } from "@/components/rich-text";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useT } from "@/components/i18n";
+import { DrawerShell } from "@/components/modal";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 type ToastType = "success" | "error" | "info";
 
@@ -68,7 +70,7 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
   // ปิด drawer — ถ้ากำลังแก้และมีของค้าง บันทึกให้ก่อน (fire-and-forget)
   const handleClose = () => { if (editing && dirty) autoSaveRef.current(); onClose(); };
   const remove = async () => {
-    if (!active || !window.confirm(`${t("ลบหน้า","Delete page")} "${active.title}" ?`)) return;
+    if (!active || !(await askConfirm({ title: `${t("ลบหน้า","Delete page")} "${active.title}" ?`, variant: "danger" }))) return;
     setBusy(true);
     try { await deleteKnowledge(active.id); setActiveId(null); setEditing(false); await load(); pushToast("info", t("ลบแล้ว","Deleted")); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
@@ -76,8 +78,7 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={handleClose} />
-      <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <DrawerShell onClose={handleClose} width={drawerW}>
         {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
         <div onMouseDown={startResize} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
@@ -130,7 +131,7 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
             )}
           </div>
         </div>
-      </div>
+      </DrawerShell>
     </>
   );
 }

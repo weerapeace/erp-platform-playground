@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 type Info = { folder_id: string; name: string; url: string; configured: boolean; drive_configured: boolean; default_path: string };
 
@@ -30,7 +31,7 @@ export function DriveFolderSettings() {
   };
 
   const reset = async () => {
-    if (!window.confirm(t("กลับไปใช้โฟลเดอร์เริ่มต้น?", "Use the default folder?"))) return;
+    if (!(await askConfirm({ title: t("กลับไปใช้โฟลเดอร์เริ่มต้น?", "Use the default folder?"), variant: "danger" }))) return;
     setBusy(true); setMsg(null);
     try { await apiFetch("/api/creative-cover-folder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); setMsg({ kind: "ok", text: t("กลับไปใช้ค่าเริ่มต้นแล้ว ✓", "Reverted to default ✓") }); load(); }
     catch (e) { setMsg({ kind: "err", text: (e as Error).message }); }

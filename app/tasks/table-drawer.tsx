@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { computeGrid, indexToCol } from "@/lib/canvas-formula";
+import { DrawerShell } from "@/components/modal";
 
 type Toast = { type: "success" | "error" | "info"; message: string };
 type Grid = string[][];
@@ -88,8 +89,8 @@ export function TableDrawer({ tableId, onClose, onSaved, onDeleted, pushToast }:
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={() => (dirty ? undefined : onClose())} />
-      <div className="fixed right-0 top-0 h-full w-[820px] max-w-[98vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      {/* มีของยังไม่บันทึก → กดพื้นหลัง/Esc ไม่ปิด (กดปุ่มปิดเอง) */}
+      <DrawerShell onClose={() => (dirty ? undefined : onClose())} className="w-[820px]">
         <div className="h-1 shrink-0 bg-teal-500" />
         <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200 shrink-0 gap-3">
           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -162,7 +163,7 @@ export function TableDrawer({ tableId, onClose, onSaved, onDeleted, pushToast }:
           <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50">{saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
         </div>
-      </div>
+      </DrawerShell>
 
       {confirmDel && (
         <>

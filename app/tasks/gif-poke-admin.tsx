@@ -10,6 +10,7 @@ import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 type LibItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; is_active: boolean; sort_order: number; default_message: string | null };
 const src = (g: LibItem) => avatarSrc(g.gif_url || g.gif_key || null);
@@ -43,7 +44,7 @@ export function GifPokeAdmin({ open, onClose, onChanged }: { open: boolean; onCl
   };
 
   const del = async (id: string) => {
-    if (!confirm(t("ลบ GIF นี้ออกจากคลัง?", "Remove this GIF?"))) return;
+    if (!(await askConfirm({ title: t("ลบ GIF นี้ออกจากคลัง?", "Remove this GIF?"), variant: "danger" }))) return;
     dirty.current = true;
     setItems((prev) => prev.filter((it) => it.id !== id));
     await apiFetch(`/api/gif-poke/library?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => { /* noop */ });
