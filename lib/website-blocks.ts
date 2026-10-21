@@ -397,7 +397,11 @@ export interface LookbookBlock extends BlockBase {
   showTotal?: boolean;
   totalText?: string;
   /** 🎞 สไลด์: single = ลุคเดียว (เดิม) · slides = หลายลุค (imageKey = ลุค 1 · imageKey2–6) · joinPrev = ต่อสไลด์กับลุคบุ๊กก่อนหน้า */
-  mode?: "single" | "slides";
+  mode?: "single" | "slides" | "grid";
+  /** 🧱 grid = หลายลุควางเรียงกัน: คอลัมน์ (คอม) · ช่องว่าง · มือถือ (ปัด / เรียงลง / 2 คอลัมน์) */
+  gridCols?: "2" | "3";
+  gridGap?: "none" | "s" | "m" | "l";
+  gridMobile?: "swipe" | "stack" | "two";
   imageKey2?: string | null;
   imageKey3?: string | null;
   imageKey4?: string | null;

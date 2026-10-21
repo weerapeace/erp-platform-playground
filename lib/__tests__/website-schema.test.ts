@@ -324,4 +324,33 @@ describe("ลุคบุ๊กแบบสไลด์ (หลายลุค�
     const msgs = validateBlocks([b as unknown as Block]).map((x) => x.message).join(" ");
     expect(msgs).toMatch(/ลุค 3/);
   });
+
+  it("🧱 หลายลุควางเรียงกัน: คอลัมน์/ช่องว่าง/มือถือ เก็บได้ · ค่ามั่ว = ค่าเริ่ม · ลุคเก่าไม่เปลี่ยน", () => {
+    const b = norm({ mode: "grid", imageKey: "a/1.jpg", imageKey2: "a/2.jpg", imageKey3: "a/3.jpg", gridCols: "2", gridGap: "none", gridMobile: "two", spots: [{ code: ["A"], look: "3" }] });
+    expect(b).toMatchObject({ mode: "grid", imageKey3: "a/3.jpg", gridCols: "2", gridGap: "none", gridMobile: "two" });
+    expect(b.spots[0].look).toBe("3");
+    expect(norm({ mode: "grid", imageKey: "a/1.jpg", gridCols: "5", gridGap: "huge", gridMobile: "fly" })).toMatchObject({ gridCols: "3", gridGap: "s", gridMobile: "swipe" });
+    expect(norm({ imageKey: "a/b.jpg" })).toMatchObject({ mode: "single", gridCols: "3", gridGap: "s", gridMobile: "swipe" });
+    expect(blockSummary(norm({ mode: "grid", imageKey: "a/1.jpg", imageKey2: "a/2.jpg" }))).toMatch(/2 ลุค เรียงกัน/);
+    const msgs = validateBlocks([norm({ mode: "grid", imageKey: "a/1.jpg", spots: [{ code: ["A"], look: "2" }] }) as unknown as Block]).map((x) => x.message).join(" ");
+    expect(msgs).toMatch(/ลุค 2/);
+  });
+
+  it("🧱 เรียงกัน: ซ่อนรูปแบบ/แผงข้างรูป · โชว์ช่องคอลัมน์ + ขนาดการ์ดป๊อป + จุดเลือกลุค", () => {
+    const fields = SECTION_SCHEMAS.lookbook.fields;
+    const fd = (k: string) => fields.find((x) => x.key === k)!;
+    const grid = { mode: "grid", layout: "side" };
+    const single = { mode: "single", layout: "side" };
+    expect(matchShowIf(fd("layout"), grid)).toBe(false);
+    expect(matchShowIf(fd("sideMode"), grid)).toBe(false);
+    expect(matchShowIf(fd("imgWidth"), grid)).toBe(false);
+    expect(matchShowIf(fd("gridCols"), grid)).toBe(true);
+    expect(matchShowIf(fd("cardSize"), grid)).toBe(true);
+    expect(matchShowIf(fd("imageKey3"), grid)).toBe(true);
+    expect(matchShowIf(fd("layout"), single)).toBe(true);
+    expect(matchShowIf(fd("sideMode"), single)).toBe(true);
+    expect(matchShowIf(fd("gridCols"), single)).toBe(false);
+    expect(matchShowIf(fd("cardSize"), { mode: "single", layout: "pop" })).toBe(true);
+    expect(matchShowIf(fd("cardSize"), single)).toBe(false);
+  });
 });

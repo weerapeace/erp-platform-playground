@@ -1605,12 +1605,45 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         options: [
           { v: "single", l: "ลุคเดียว (แบบเดิม)" },
           { v: "slides", l: "หลายลุค — เลื่อนเป็นสไลด์" },
+          { v: "grid", l: "หลายลุค — วางเรียงกัน 2–3 คอลัมน์" },
         ],
-        hint: "หลายลุค = ใส่รูปลุค 2–6 แล้วเลือกว่าแต่ละจุดอยู่ลุคไหน · อยากแยกกล่องทีละลุคก็ได้: ติ๊ก \"ต่อเป็นสไลด์กับลุคบุ๊กก่อนหน้า\" ที่กล่องถัดไป",
+        hint: "หลายลุค = ใส่รูปลุค 2–6 แล้วเลือกว่าแต่ละจุดอยู่ลุคไหน · เรียงกัน = เห็นทุกลุคพร้อมกัน (กดจุด = การ์ดเด้งบนรูป) · อยากแยกกล่องทีละลุคก็ได้: ติ๊ก \"ต่อเป็นสไลด์กับลุคบุ๊กก่อนหน้า\" ที่กล่องถัดไป",
       }),
       image("imageKey", "รูปลุค", { required: true, requiredMessage: "ยังไม่ได้เลือกรูปลุค", hint: "รูปนายแบบ/ไลฟ์สไตล์ · โชว์เต็มรูปไม่ตัด · วางจุดในแต่ละ \"จุดบนรูป\" ด้านล่าง (หลายลุค = รูปลุค 1)" }),
-      ...[2, 3, 4, 5, 6].map((n) => image(`imageKey${n}`, `รูปลุค ${n}`, { showIf: { key: "mode", eq: "slides" }, hint: n === 2 ? "ว่าง = ไม่มีลุคนี้ (ข้ามไป)" : undefined })),
-      f("lookNames", "ชื่อลุค (บรรทัดละลุค เรียงตามลุค 1, 2, 3 …)", "list", { group: "media", max: 6, default: [], showIf: { key: "mode", eq: "slides" }, hint: "โชว์ใต้สไลด์ · ว่าง = ไม่มีชื่อ" }),
+      ...[2, 3, 4, 5, 6].map((n) => image(`imageKey${n}`, `รูปลุค ${n}`, { showIf: { key: "mode", eq: ["slides", "grid"] }, hint: n === 2 ? "ว่าง = ไม่มีลุคนี้ (ข้ามไป)" : undefined })),
+      f("lookNames", "ชื่อลุค (บรรทัดละลุค เรียงตามลุค 1, 2, 3 …)", "list", { group: "media", max: 6, default: [], showIf: { key: "mode", eq: ["slides", "grid"] }, hint: "โชว์ใต้สไลด์ / ใต้รูปแต่ละลุค · ว่าง = ไม่มีชื่อ" }),
+      // 🧱 หลายลุควางเรียงกัน (2026-10-21 · เจ้าของขอ "แบบ 2-3 column · 3 รูปต่อกัน")
+      f("gridCols", "เรียงกัน: จำนวนคอลัมน์ (จอคอม)", "select", {
+        group: "layout",
+        default: "3",
+        options: [
+          { v: "2", l: "2 คอลัมน์" },
+          { v: "3", l: "3 คอลัมน์" },
+        ],
+        showIf: { key: "mode", eq: "grid" },
+        hint: "ลุคเกินจำนวนคอลัมน์ = ขึ้นแถวใหม่ · รูปสัดส่วนเดียวกันเรียงสวยสุด",
+      }),
+      f("gridGap", "เรียงกัน: ช่องว่างระหว่างรูป", "select", {
+        group: "layout",
+        default: "s",
+        options: [
+          { v: "none", l: "ชิดกัน (รูปต่อกันพอดี)" },
+          { v: "s", l: "ห่างนิด" },
+          { v: "m", l: "ห่างปกติ" },
+          { v: "l", l: "ห่างมาก" },
+        ],
+        showIf: { key: "mode", eq: "grid" },
+      }),
+      f("gridMobile", "เรียงกัน: บนมือถือ", "select", {
+        group: "layout",
+        default: "swipe",
+        options: [
+          { v: "swipe", l: "ปัดดูทีละลุค (เห็นลุคถัดไปนิด ๆ)" },
+          { v: "stack", l: "เรียงลงทีละลุค" },
+          { v: "two", l: "2 คอลัมน์" },
+        ],
+        showIf: { key: "mode", eq: "grid" },
+      }),
       f("imgFrame", "มุมรูปลุค", "select", {
         group: "media",
         default: "rounded",
@@ -1619,7 +1652,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "rect", l: "เหลี่ยม" },
         ],
       }),
-      f("layout", "รูปแบบ", "select", { group: "layout", default: "side", wide: true, display: "tiles", options: LOOKBOOK_LAYOUTS }),
+      f("layout", "รูปแบบ", "select", { group: "layout", default: "side", wide: true, display: "tiles", options: LOOKBOOK_LAYOUTS, showIf: { key: "mode", eq: ["single", "slides"] } }),
       f("side", "รูปอยู่ด้าน", "select", {
         group: "layout",
         default: "left",
@@ -1627,7 +1660,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "left", l: "ซ้าย" },
           { v: "right", l: "ขวา" },
         ],
-        showIf: { key: "layout", eq: "side" },
+        showIf: [{ key: "layout", eq: "side" }, { key: "mode", eq: ["single", "slides"] }],
       }),
       f("joinPrev", "ต่อเป็นสไลด์กับลุคบุ๊กก่อนหน้า", "toggle", {
         group: "layout",
@@ -1664,7 +1697,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "list", l: "รายการสินค้าทั้งลุค" },
         ],
         wide: true,
-        showIf: { key: "layout", eq: "side" },
+        showIf: [{ key: "layout", eq: "side" }, { key: "mode", eq: ["single", "slides"] }],
         hint: "รายการ = เห็นทุกชิ้นในลุค (รวมสินค้าเพิ่มเติม) · กดจุดแล้วแถวนั้นไฮไลต์",
       }),
       f("imgWidth", "ความกว้างรูป : แผง", "select", {
@@ -1676,7 +1709,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "65", l: "รูปใหญ่" },
           { v: "70", l: "รูปใหญ่มาก" },
         ],
-        showIf: { key: "layout", eq: "side" },
+        showIf: [{ key: "layout", eq: "side" }, { key: "mode", eq: ["single", "slides"] }],
       }),
       f("dot", "หน้าตาจุด", "select", {
         group: "layout",
@@ -1755,7 +1788,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "m", l: "กลาง" },
           { v: "l", l: "ใหญ่" },
         ],
-        showIf: { key: "layout", eq: "pop" },
+        showIf: { key: "layout", eq: ["pop", "grid"], orKey: "mode" },
       }),
       f("cardRatio", "สัดส่วนรูปในการ์ด", "select", {
         group: "products",
@@ -1834,7 +1867,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         f("look", "อยู่ลุคที่", "select", {
           default: "1",
           options: ["1", "2", "3", "4", "5", "6"].map((v) => ({ v, l: `ลุค ${v}` })),
-          showIfParent: { key: "mode", eq: "slides" },
+          showIfParent: { key: "mode", eq: ["slides", "grid"] },
           hint: "จุดนี้อยู่บนรูปลุคไหน (ตั้งรูปลุคไว้ด้านบน)",
         }),
         f("pos", "ตำแหน่งบนรูป", "point", { pointImage: "imageKey", pointLook: "look", wide: true }),
@@ -1854,12 +1887,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       summary: (it) => (Array.isArray(it.code) && it.code.length ? `${it.code[0]}${it.code.length > 1 ? ` +${it.code.length - 1}` : ""}` : "ยังไม่เลือกสินค้า"),
     },
     summary: (b) =>
-      `${b.mode === "slides" ? `${[1, 2, 3, 4, 5, 6].filter((n) => (n === 1 ? b.imageKey : b[`imageKey${n}`])).length} ลุค · ` : ""}${b.joinPrev ? "ต่อสไลด์ · " : ""}${count(arr(b.spots).length, "จุด")}${Array.isArray(b.more) && b.more.length ? ` · +${b.more.length} สินค้าเพิ่มเติม` : ""}`,
+      `${b.mode === "slides" || b.mode === "grid" ? `${[1, 2, 3, 4, 5, 6].filter((n) => (n === 1 ? b.imageKey : b[`imageKey${n}`])).length} ลุค${b.mode === "grid" ? " เรียงกัน" : ""} · ` : ""}${b.joinPrev ? "ต่อสไลด์ · " : ""}${count(arr(b.spots).length, "จุด")}${Array.isArray(b.more) && b.more.length ? ` · +${b.more.length} สินค้าเพิ่มเติม` : ""}`,
     validate: (b, label) => {
       const out: Omit<ValidationIssue, "blockId">[] = [];
       if (arr(b.spots).some((x) => !(Array.isArray(x.code) && x.code.length))) out.push({ level: "warning", message: `${label}: บางจุดยังไม่เลือกสินค้า` });
       // หลายลุค: จุดที่อยู่ลุคซึ่งยังไม่มีรูป = ลูกค้าไม่เห็น
-      if (b.mode === "slides") {
+      if (b.mode === "slides" || b.mode === "grid") {
         const miss = [...new Set(arr(b.spots).map((x) => String(x.look ?? "1")).filter((n) => n !== "1" && !b[`imageKey${n}`]))];
         if (miss.length) out.push({ level: "warning", message: `${label}: มีจุดอยู่ลุค ${miss.join(", ")} แต่ยังไม่ได้ใส่รูปลุคนั้น` });
       }
