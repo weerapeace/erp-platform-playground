@@ -7,7 +7,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
-import { tr } from "@/lib/lang";
 import { STATUS_META, statusLabelFb, getCampaign, updateCampaign, deleteTask, listBrands, type CampaignDetail, type CreativeStatus, type CreativeTask, type BrandOption } from "../data";
 import { listOptions, type Option } from "../use-options";
 import { TaskDetailDrawer } from "../task-detail-drawer";
@@ -18,13 +17,9 @@ import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "../multi-user-picker";
 import { RichTextEditor } from "@/components/rich-text";
-
-export const CAMPAIGN_STATUS: { value: string; label: () => string; cls: string }[] = [
-  { value: "planning", label: () => tr("วางแผน", "Planning"), cls: "bg-sky-50 text-sky-700 border-sky-200" },
-  { value: "active",   label: () => tr("กำลังทำ", "Active"), cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  { value: "done",     label: () => tr("จบแล้ว", "Done"),  cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  { value: "cancelled",label: () => tr("ยกเลิก", "Cancelled"),  cls: "bg-slate-100 text-slate-400 border-slate-200" },
-];
+import { CAMPAIGN_STATUS } from "./campaign-status";
+// ย้ายค่าคงที่ไป ./campaign-status (ไฟล์เล็ก) — re-export ไว้ให้ที่ import เดิมยังใช้ได้
+export { CAMPAIGN_STATUS };
 
 type ToastType = "success" | "error" | "info";
 

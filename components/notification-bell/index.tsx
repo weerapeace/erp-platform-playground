@@ -56,8 +56,11 @@ export function NotificationBell() {
     if (!user) return;
     // perf: เลื่อน fetch แรก ไม่ให้แย่ง resource กับเนื้อหาหลักตอนเปิดหน้า (poll ตามรอบปกติหลังจากนั้น)
     const first = setTimeout(fetch_, 1500);
-    const t = setInterval(fetch_, POLL_MS);
-    return () => { clearTimeout(first); clearInterval(t); };
+    // ถามเฉพาะตอนแท็บเปิดอยู่ (เดิมถามทุก 30 วิ แม้แท็บซ่อน — รวมแล้วเกือบล้านครั้ง) · กลับมาที่แท็บ = ถามทันที
+    const t = setInterval(() => { if (document.visibilityState === "visible") void fetch_(); }, POLL_MS);
+    const onVisible = () => { if (document.visibilityState === "visible") void fetch_(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearTimeout(first); clearInterval(t); document.removeEventListener("visibilitychange", onVisible); };
   }, [user, fetch_]);
 
   // refresh เมื่อ user คลิกเปิด dropdown

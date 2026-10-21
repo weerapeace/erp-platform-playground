@@ -12,13 +12,17 @@ import { useT } from "@/components/i18n";
 import { useSWRLite, mutateSWR } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ConfirmDialog } from "@/components/modal";
-import { CAMPAIGN_STATUS, CampaignDrawer } from "./campaign-drawer";
+import dynamic from "next/dynamic";
+import { CAMPAIGN_STATUS } from "./campaign-status";
 import { CampaignCreateModal } from "./campaign-create-modal";
 import {
   listCampaigns, updateCampaign, deleteCampaign,
   type Campaign,
 } from "../data";
 import { listOptions, createOption, type Option } from "../use-options";
+
+// drawer แคมเปญ (มีตัวพิมพ์ข้อความ + drawer งาน) โหลดเมื่อเปิดดูจริง
+const CampaignDrawer = dynamic(() => import("./campaign-drawer").then((m) => m.CampaignDrawer), { ssr: false });
 
 const NO_CAT = "__none__";   // ตัวกรอง/กลุ่ม "ยังไม่จัดหมวด"
 

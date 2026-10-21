@@ -23,7 +23,7 @@ import { TaskTypeChip } from "./task-type-chip";
 import { isOverdue, updateTask, bulkUpdateTasks, PRIORITY_META, priorityLabel, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
-import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
+import { CAMPAIGN_STATUS } from "./campaigns/campaign-status";
 import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign, type KanbanView } from "./overview-customizer";
 import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
 import { GifPokeModal } from "./gif-poke-modal";

@@ -375,22 +375,26 @@ export function DesignDashboard() {
     setError(null);
 
     async function loadDashboard() {
-      const [listJson, statusJson, auditJson] = await Promise.all([
+      // ฟีดความเคลื่อนไหว (ประวัติ) โหลดแยก ไม่ให้หน้ารอ — ตารางประวัติใหญ่ ช้าได้ 1–3 วิ (เดิมรอพร้อมรายการใบงาน → ทั้งหน้าค้าง "กำลังโหลด")
+      void apiFetch("/api/audit-logs?entity_type=design_sheet&limit=40")
+        .then(async (response) => (response.ok ? (await response.json() as AuditResponse) : { data: [], total: 0, error: null }))
+        .catch(() => ({ data: [], total: 0, error: null } satisfies AuditResponse))
+        .then((auditJson) => {
+          if (!alive) return;
+          // กรอง canvas_update (ออโต้เซฟกระดานวาด) ออก ไม่ให้ถล่มฟีด แล้วเอา 6 เหตุการณ์ล่าสุดที่มีความหมาย
+          setAuditRows(Array.isArray(auditJson.data) ? auditJson.data.filter((r) => r.action !== "canvas_update").slice(0, 6) : []);
+        });
+      const [listJson, statusJson] = await Promise.all([
         apiFetch(`/api/design-sheets?limit=${DASHBOARD_LIMIT}&archived=0&sort_by=updated_at&sort_dir=desc`)
           .then((response) => readApi<ListResponse>(response, "โหลดใบงานไม่สำเร็จ")),
         apiFetch("/api/design-sheets/statuses")
           .then((response) => readApi<StatusResponse>(response, "โหลดสถานะไม่สำเร็จ")),
-        apiFetch("/api/audit-logs?entity_type=design_sheet&limit=40")
-          .then(async (response) => (response.ok ? (await response.json() as AuditResponse) : { data: [], total: 0, error: null }))
-          .catch(() => ({ data: [], total: 0, error: null } satisfies AuditResponse)),
       ]);
 
       if (!alive) return;
       setSheets(listJson.data);
       setTotal(listJson.total);
       setStatusRows(statusJson.data);
-      // กรอง canvas_update (ออโต้เซฟกระดานวาด) ออก ไม่ให้ถล่มฟีด แล้วเอา 6 เหตุการณ์ล่าสุดที่มีความหมาย
-      setAuditRows(Array.isArray(auditJson.data) ? auditJson.data.filter((r) => r.action !== "canvas_update").slice(0, 6) : []);
     }
 
     loadDashboard()

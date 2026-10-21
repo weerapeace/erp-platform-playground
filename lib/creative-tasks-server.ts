@@ -563,11 +563,13 @@ export async function taskAssigneesMap(admin: Admin, taskIds: string[]): Promise
   const ids = [...new Set(taskIds.map(String))];
   const byTask = new Map<string, Set<string>>();
   const add = (tid: string, uid: string) => { if (!tid || !uid) return; const s = byTask.get(tid) ?? new Set<string>(); s.add(uid); byTask.set(tid, s); };
-  // ตั้งเอง (explicit)
-  const { data: ex } = await admin.from("erp_creative_task_assignees").select("task_id, user_id").in("task_id", ids);
+  // ตั้งเอง (explicit) + งานย่อยของงานเหล่านั้น — อิสระต่อกัน ยิงพร้อมกัน (เดิมรอทีละอัน · ถูกเรียกทุกรอบ poll รายการงาน)
+  const [{ data: ex }, { data: subs }] = await Promise.all([
+    admin.from("erp_creative_task_assignees").select("task_id, user_id").in("task_id", ids),
+    admin.from("erp_creative_subtasks").select("id, task_id").in("task_id", ids),
+  ]);
   for (const r of (ex ?? []) as { task_id: string; user_id: string }[]) add(String(r.task_id), String(r.user_id));
   // คนเริ่มงานย่อย (subtask assignees ของงานนั้น)
-  const { data: subs } = await admin.from("erp_creative_subtasks").select("id, task_id").in("task_id", ids);
   const subToTask = new Map<string, string>();
   for (const s of (subs ?? []) as { id: string; task_id: string }[]) subToTask.set(String(s.id), String(s.task_id));
   const subIds = [...subToTask.keys()];

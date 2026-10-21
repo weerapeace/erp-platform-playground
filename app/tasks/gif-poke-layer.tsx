@@ -77,7 +77,8 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
       }).catch(() => { /* noop */ });
   }, [userId]);
 
-  useEffect(() => { load(); const id = setInterval(load, 90000); return () => clearInterval(id); }, [load]);
+  // ถามเฉพาะตอนแท็บเปิดอยู่ (แท็บซ่อน = ไม่ยิง) — ลดคำขอเปล่า
+  useEffect(() => { load(); const id = setInterval(() => { if (document.visibilityState === "visible") load(); }, 90000); return () => clearInterval(id); }, [load]);
 
   const shown = pokes.slice(0, MAX_ON_SCREEN);
   const queued = Math.max(0, pokes.length - shown.length);

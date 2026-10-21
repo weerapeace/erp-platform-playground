@@ -41,6 +41,7 @@ import { runBgJob } from "@/lib/bg-jobs";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal, useCreativeStatuses } from "./use-statuses";
 import { applyTaskTransition } from "./task-actions";
+import { StatusBadge, PriorityBadge } from "./task-badges";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
   getTask, updateTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
@@ -52,16 +53,8 @@ const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[])
 // ผู้รับผิดชอบ (หลายคน) จัดการแยกที่ MultiAssigneeField ในโหมดดู — ฟอร์มแก้ไขเต็มไม่มี assignee แล้ว (กันรีเซ็ตหลายคน)
 type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[] };
 
-export function StatusBadge({ status }: { status: string }) {
-  useT();   // subscribe ภาษา → ป้ายสถานะสลับตามภาษา
-  const m = statusMeta(status);
-  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
-}
-export function PriorityBadge({ priority }: { priority: CreativePriority }) {
-  useT();   // subscribe ภาษา → ป้ายสลับตามภาษา
-  const m = PRIORITY_META[priority] ?? PRIORITY_META.normal;
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}>{priorityLabel(priority)}</span>;
-}
+// ป้ายสถานะ/ความสำคัญ ย้ายไป ./task-badges (ไฟล์เล็ก) — re-export ไว้ให้ที่ import เดิมยังใช้ได้
+export { StatusBadge, PriorityBadge };
 
 // QuickField — คลิกที่ค่า → แก้ตรงนั้นทันที (เซฟอัตโนมัติ) · ไม่ active = แสดงค่าอ่านอย่างเดียว + ✎ ตอน hover
 function QuickField({ label, value, dot, highlight, active, onOpen, onClose, editor }: {

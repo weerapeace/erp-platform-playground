@@ -37,11 +37,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ])];
   if (!ids.length) return NextResponse.json({ data: [], error: null });
 
-  const { data, error } = await admin.from("erp_creative_subtasks")
-    .select("id, title, title_en, status, due_date, required_before_next, subtask_type, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority, cover_image_r2_key)")
-    .in("id", ids)
-    .not("status", "in", "(done,posted,approved,canceled)")
-    .order("due_date", { ascending: true });
+  // รายการงานย่อย + ทะเบียนชนิดงานย่อย (สี/ไอคอน) — อิสระต่อกัน ยิงพร้อมกัน (ถูกเรียกทุกรอบ poll)
+  const [{ data, error }, { data: subTypes }] = await Promise.all([
+    admin.from("erp_creative_subtasks")
+      .select("id, title, title_en, status, due_date, required_before_next, subtask_type, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority, cover_image_r2_key)")
+      .in("id", ids)
+      .not("status", "in", "(done,posted,approved,canceled)")
+      .order("due_date", { ascending: true }),
+    admin.from("erp_subtask_types").select("key, color, icon"),
+  ]);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 
   const rows = ((data ?? []) as Record<string, unknown>[]).filter((r) => {
@@ -61,7 +65,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }).filter((r) => r.task_active);
 
   // สี/ไอคอน ตามชนิดงานย่อย (จาก registry erp_subtask_types)
-  const { data: subTypes } = await admin.from("erp_subtask_types").select("key, color, icon");
   const typeMeta = new Map<string, { color: string | null; icon: string | null }>();
   for (const ty of ((subTypes ?? []) as { key: string; color: string | null; icon: string | null }[])) typeMeta.set(ty.key, { color: ty.color, icon: ty.icon });
   for (const r of rows) { const m = r.subtask_type ? typeMeta.get(r.subtask_type) : null; r.type_color = m?.color ?? null; r.type_icon = m?.icon ?? null; }

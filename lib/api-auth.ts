@@ -15,10 +15,11 @@
 import { NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
-// แคชผล erp_can ใน isolate (token+permission) อายุสั้น ~15วิ — ลดการยิง RPC ตรวจสิทธิ์ซ้ำทุก API call
+// แคชผล erp_can ใน isolate (token+permission) อายุสั้น ~60วิ — ลดการยิง RPC ตรวจสิทธิ์ซ้ำทุก API call
 // (1 หน้าเรียกหลาย endpoint ด้วยสิทธิ์เดิม → เดิมยิง erp_can ทุกครั้ง = หลายรอบ Supabase ที่โตเกียว)
+// 60วิ > รอบ poll ของหน้า (45วิ) → poll รอบถัดไปใช้ผลเดิมได้ · ผลข้างเคียง: เปลี่ยนสิทธิ์แล้วมีผลช้าสุด ~1 นาที
 const canCache = new Map<string, { at: number; ok: boolean }>();
-const CAN_TTL = 15000;
+const CAN_TTL = 60000;
 
 function deny(permission: string) {
   return NextResponse.json({ data: [], error: `ต้องเข้าสู่ระบบและมีสิทธิ์ใช้งาน (${permission})` }, { status: 401 });

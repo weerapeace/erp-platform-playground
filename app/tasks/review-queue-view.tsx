@@ -17,6 +17,7 @@ import { AssigneeStack } from "./assignee-avatar";
 import { listReviewQueue, updateSubtask, type ReviewQueueItem } from "./data";
 import { ReviseModal } from "./subtask-manager";
 import { useT } from "@/components/i18n";
+import { ConnectionError } from "@/components/connection-error";
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type Img = { r2_key: string; file_name: string | null };
@@ -58,7 +59,14 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
     setTimeout(() => setToasts((p) => p.filter((x) => x.id !== id)), 3500);
   }, []);
 
-  const load = useCallback(async () => { try { setItems(await listReviewQueue()); } catch (e) { pushToast("error", (e as Error).message); setItems([]); } }, [pushToast]);
+  // โหลดพลาด → โชว์หน้าเชื่อมต่อไม่ได้ + ปุ่มลองใหม่ (เดิมตั้งเป็นรายการว่าง → ขึ้น "ไม่มีงานรอตรวจ" ทั้งที่จริงโหลดไม่ได้)
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const load = useCallback(async () => {
+    try { setItems(await listReviewQueue()); setLoadFailed(false); }
+    catch (e) { pushToast("error", (e as Error).message); setLoadFailed(true); }
+  }, [pushToast]);
+  const retry = useCallback(async () => { setRetrying(true); try { await load(); } finally { setRetrying(false); } }, [load]);
   useEffect(() => { load(); }, [load]);
 
   // เปิดงาน → โหลดค่าเริ่มต้นลงสถานะที่แก้ได้
@@ -172,7 +180,8 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("ค้นหา เลขงาน/ชื่องาน/งานย่อย/แบรนด์…", "Search task/subtask/brand…")} className="h-9 px-3 text-sm border border-slate-200 rounded-lg w-72 max-w-full" />
         <span className="text-sm text-slate-400">{rows.length} {t("รายการ", "items")}</span>
       </div>
-      {items === null ? <div className="py-16 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+      {loadFailed && items === null ? <ConnectionError onRetry={() => void retry()} retrying={retrying} />
+        : items === null ? <div className="py-16 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
         : rows.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
             <div className="text-4xl mb-3">✅</div>

@@ -10,7 +10,7 @@ import { useT } from "@/components/i18n";
 import { isTerminal } from "./use-statuses";
 import { isOverdue, type CreativeTask, type SubtaskAssignee } from "./data";
 import { AssigneeAvatar } from "./assignee-avatar";
-import { StatusBadge } from "./task-detail-drawer";
+import { StatusBadge } from "./task-badges";
 
 type Row = { person: SubtaskAssignee; open: number; overdue: number; tasks: CreativeTask[] };
 

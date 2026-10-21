@@ -25,11 +25,8 @@ import {
 import { platformReadiness, type PlatReady } from "@/lib/content-readiness";
 import { loadCaptionTexts } from "../content/caption-assemble";
 import { copyText } from "@/components/copy-button";
-import { ContentDrawer } from "../content/content";
-import { ContentCreateModal, type ContentCreatePreset } from "../content/content-create-modal";
+import type { ContentCreatePreset } from "../content/content-create-modal";
 import { StoryQuickModal } from "./story-quick-modal";
-import { TaskDetailDrawer } from "../task-detail-drawer";
-import { CreateTaskModal } from "../create-task-modal";
 import { applyTaskTransition } from "../task-actions";
 import { statusMeta, statusLabel, isTerminal, useCreativeStatuses } from "../use-statuses";
 import { BrandStyleModal } from "./brand-style-modal";
@@ -47,6 +44,11 @@ import { refreshStatuses, bangkokDateKey, REFRESH_ALERT_STATES } from "@/lib/mar
 const ContentPlanView = dynamic(() => import("@/app/marketing/content-plan/view").then((m) => m.ContentPlanView), {
   ssr: false, loading: () => <div className="px-4 sm:px-8 py-5 space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 rounded-xl bg-slate-100 animate-pulse" />)}</div>,
 });
+// drawer/ป๊อปที่มีตัวพิมพ์ข้อความ (rich text) — โหลดเมื่อเปิดใช้จริง (เดิมลากโค้ดคอนเทนต์ ~2,400 บรรทัด + drawer งาน มาตอนเปิดหน้า)
+const ContentDrawer = dynamic(() => import("../content/content").then((m) => m.ContentDrawer), { ssr: false });
+const ContentCreateModal = dynamic(() => import("../content/content-create-modal").then((m) => m.ContentCreateModal), { ssr: false });
+const TaskDetailDrawer = dynamic(() => import("../task-detail-drawer").then((m) => m.TaskDetailDrawer), { ssr: false });
+const CreateTaskModal = dynamic(() => import("../create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type CalMode = "content" | "task" | "plan";
@@ -74,6 +76,18 @@ type CalEntry = {
 
 /** Story ที่ลงแผนไว้ก่อน ยังไม่ได้ใส่ไฟล์ (รูป/วิดีโอ/ลิงก์) → ขึ้นป้าย "ยังไม่มีไฟล์" ให้รู้ว่าต้องกลับมาใส่ */
 const storyNoFile = (e: CalEntry) => e.isStory && e.fileCount === 0;
+/**
+ * Story "โพสต์แล้ว" — คอนเทนต์ไม่มีสถานะชื่อ "posted" (มีแค่ ร่าง/พร้อม/ตั้งเวลา/เผยแพร่/ยกเลิก)
+ * การติ๊ก ☐ โพสต์แล้ว เก็บรายแพลตฟอร์มใน post_status → ถือว่าโพสต์แล้วเมื่อทุกแพลตฟอร์มที่เป็น Story ติ๊กครบ (หรือสถานะเผยแพร่)
+ * (เดิมเช็ก e.status === "posted" ซึ่งไม่มีจริง → ✓ ไม่เคยขึ้น)
+ */
+function storyPosted(e: CalEntry): boolean {
+  if (e.status === "published") return true;
+  const ps = e.postStatus ?? {};
+  const storyPlats = Object.entries(e.formats ?? {}).filter(([, f]) => f === "story").map(([p]) => p);
+  const targets = storyPlats.length ? storyPlats : Object.keys(ps);
+  return targets.length > 0 && targets.every((p) => ps[p] === "posted");
+}
 function NoFileBadge() {
   return (
     <span title="Story นี้ยังไม่มีไฟล์ — กดเปิด แล้วใส่ไฟล์ที่การ์ด 🖼 รูป/วิดีโอ (＋ เพิ่ม / จัดการ)"
@@ -572,7 +586,7 @@ export function ContentCalendarView() {
               <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: brandColor(e.brand_id) }} />
               <span className="truncate flex-1 min-w-0">📖 {e.title}</span>
               {storyNoFile(e) && <NoFileBadge />}
-              {e.status === "posted" && <span className="shrink-0 text-emerald-600">✓</span>}
+              {storyPosted(e) && <span className="shrink-0 text-emerald-600">✓</span>}
             </>
           ) : (
             <>
@@ -799,20 +813,20 @@ export function ContentCalendarView() {
                       const noFile = st.filter(storyNoFile).length;   // Story ที่ยังไม่มีไฟล์ (ลงแผนไว้ก่อน)
                       return (
                         <div className={`mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[10px] ${st.length ? "bg-pink-50 text-pink-700" : past ? "bg-rose-50 text-rose-400" : "bg-slate-50 text-slate-400"}`}
-                          title={st.length ? st.map((e) => `${e.brand_label ?? ""} ${e.title}${e.status === "posted" ? " ✓" : ""}${storyNoFile(e) ? ` (${t("ยังไม่มีไฟล์", "no file yet")})` : ""}`).join(" · ") : (past ? t("วันนี้ไม่ได้ทำ Story", "No story this day") : t("ยังไม่มี Story ของวันนี้", "No story yet"))}>
+                          title={st.length ? st.map((e) => `${e.brand_label ?? ""} ${e.title}${storyPosted(e) ? " ✓" : ""}${storyNoFile(e) ? ` (${t("ยังไม่มีไฟล์", "no file yet")})` : ""}`).join(" · ") : (past ? t("วันนี้ไม่ได้ทำ Story", "No story this day") : t("ยังไม่มี Story ของวันนี้", "No story yet"))}>
                           <span>📖</span>
                           {st.length ? (
                             <span className="flex items-center gap-0.5 flex-1 min-w-0">
                               {st.slice(0, 5).map((e) => (
                                 <button key={e.id} type="button" onClick={(ev) => { ev.stopPropagation(); setDetail({ kind: "content", id: e.id }); }} title={`${e.brand_label ?? ""} · ${e.title} · ${e.statusLabel}${storyNoFile(e) ? ` · ${t("ยังไม่มีไฟล์ — กดเพื่อใส่", "no file yet — click to add")}` : ""}`}
-                                  className={`h-3.5 min-w-3.5 px-0.5 rounded-full ring-1 ring-white text-[8px] leading-none text-white flex items-center justify-center ${e.status === "posted" ? "" : "opacity-60"}`} style={{ background: brandColor(e.brand_id) }}>
-                                  {e.status === "posted" ? "✓" : ""}
+                                  className={`h-3.5 min-w-3.5 px-0.5 rounded-full ring-1 ring-white text-[8px] leading-none text-white flex items-center justify-center ${storyPosted(e) ? "" : "opacity-60"}`} style={{ background: brandColor(e.brand_id) }}>
+                                  {storyPosted(e) ? "✓" : ""}
                                 </button>
                               ))}
                               {st.length > 5 && <span>+{st.length - 5}</span>}
                               {noFile > 0
                                 ? <span className="ml-auto truncate text-amber-600">{t("ยังไม่มีไฟล์", "No file yet")}{st.length > 1 ? ` ${noFile}` : ""}</span>
-                                : <span className="ml-auto truncate">{st.every((e) => e.status === "posted") ? t("โพสต์แล้ว", "Posted") : t(`${st.length} Story`, `${st.length} story`)}</span>}
+                                : <span className="ml-auto truncate">{st.every(storyPosted) ? t("โพสต์แล้ว", "Posted") : t(`${st.length} Story`, `${st.length} story`)}</span>}
                             </span>
                           ) : (
                             <span className="flex-1 truncate">{past ? t("ไม่มี Story", "No story") : t("ยังไม่มี Story", "No story yet")}</span>

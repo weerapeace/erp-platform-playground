@@ -24,13 +24,11 @@ import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design
 import { GifPokeLayer } from "../../gif-poke-layer";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
-import { CampaignDrawer, CAMPAIGN_STATUS } from "../campaign-drawer";
-import { CreateTaskModal, type CreatedTask } from "../../create-task-modal";
-import { TaskDetailDrawer } from "../../task-detail-drawer";
+import { CAMPAIGN_STATUS } from "../campaign-status";
+import type { CreatedTask } from "../../create-task-modal";
 import { applyTaskTransition } from "../../task-actions";
 import { useCreativeOptions } from "../../use-options";
 import { getCampaign, updateCampaign, deleteTask, createContent, getContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
-import { ContentDrawer } from "../../content/content";
 import { AssetPicker } from "@/components/asset-picker";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import type { AssetRow } from "@/app/api/assets/shared";
@@ -63,6 +61,11 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
   loading: () => <div className="h-[70vh] flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl">Loading canvas...</div>,
 });
 const KnowledgeDrawer = dynamic(() => import("../../knowledge-drawer").then((m) => m.KnowledgeDrawer), { ssr: false });
+// drawer/ป๊อปที่มีตัวพิมพ์ข้อความ (rich text) — โหลดเมื่อเปิดใช้จริง ไม่ถ่วงการเปิดหน้า
+const CampaignDrawer = dynamic(() => import("../campaign-drawer").then((m) => m.CampaignDrawer), { ssr: false });
+const CreateTaskModal = dynamic(() => import("../../create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
+const TaskDetailDrawer = dynamic(() => import("../../task-detail-drawer").then((m) => m.TaskDetailDrawer), { ssr: false });
+const ContentDrawer = dynamic(() => import("../../content/content").then((m) => m.ContentDrawer), { ssr: false });
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 // ป๊อปอัปใบงานออกแบบ = ของกลางตัวเดียวกับที่ Design Dashboard ใช้ (ดู/แก้/เปลี่ยนสถานะ/สร้างใหม่) — โหลดเฉพาะตอนใช้
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });

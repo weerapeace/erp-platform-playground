@@ -8,6 +8,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { HoverImage } from "@/components/hover-image";
@@ -18,16 +19,20 @@ import { useSWRLite } from "@/lib/swr-lite";
 import type { ColumnDef } from "@tanstack/react-table";
 import { OverviewKanban } from "./overview-kanban";
 import { KanbanSettings } from "./kanban-settings";
-import { CanvasBoard } from "./canvas-board";
 import { CalendarBoard } from "./calendar-board";
-import { WorkloadBoard } from "./workload-board";
-import { ReportBoard } from "./report-board";
-import { CreateTaskModal } from "./create-task-modal";
-import { QuickTaskModal } from "./quick-task-modal";
-import { WorkJobModal } from "../marketing/skus/work-job-modal";   // 🛠 งานชุดรุ่น (ป๊อปเดียวกับหน้า SKU การตลาด)
 import type { MarketingSkuLabel } from "@/lib/marketing/sku-list";
-import { KnowledgeDrawer } from "./knowledge-drawer";
-import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
+import { StatusBadge, PriorityBadge } from "./task-badges";
+
+// ⚡ ของหนักที่ไม่ต้องใช้ตอนเปิดหน้า (ป๊อป/drawer/กระดานที่เลือกดูทีหลัง) → โหลดเมื่อเปิดใช้จริง
+//    (เดิม import ตรง → หน้า /tasks โหลดโค้ด ~664KB เกือบ 3 เท่าหน้าทั่วไป · drawer ลากตัวพิมพ์ข้อความ ~150KB มาด้วย)
+const CanvasBoard = dynamic(() => import("./canvas-board").then((m) => m.CanvasBoard), { ssr: false });
+const WorkloadBoard = dynamic(() => import("./workload-board").then((m) => m.WorkloadBoard), { ssr: false });
+const ReportBoard = dynamic(() => import("./report-board").then((m) => m.ReportBoard), { ssr: false });
+const CreateTaskModal = dynamic(() => import("./create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
+const QuickTaskModal = dynamic(() => import("./quick-task-modal").then((m) => m.QuickTaskModal), { ssr: false });
+const WorkJobModal = dynamic(() => import("../marketing/skus/work-job-modal").then((m) => m.WorkJobModal), { ssr: false });   // 🛠 งานชุดรุ่น (ป๊อปเดียวกับหน้า SKU การตลาด)
+const KnowledgeDrawer = dynamic(() => import("./knowledge-drawer").then((m) => m.KnowledgeDrawer), { ssr: false });
+const TaskDetailDrawer = dynamic(() => import("./task-detail-drawer").then((m) => m.TaskDetailDrawer), { ssr: false });
 import { AssigneeStack } from "./assignee-avatar";
 import { apiFetch } from "@/lib/api";
 import { useNewParam } from "@/lib/open-param";
@@ -99,6 +104,13 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
   );
 }
 
+/** true ตั้งแต่ครั้งแรกที่ open เป็น true แล้วค้างไว้ — ใช้หน่วงโหลดโค้ดป๊อปจนกว่าจะเปิดใช้จริง */
+function useSeenOnce(open: boolean): boolean {
+  const seen = useRef(false);
+  if (open) seen.current = true;
+  return seen.current;
+}
+
 // ============================================================
 // Main page
 // ============================================================
@@ -123,6 +135,7 @@ export default function TasksPage() {
   // 🛠 งานชุดรุ่น (Clearance/ลงเว็บ) — สร้างที่นี่ได้ → ได้การ์ดงานใน Task Manager ผูกไว้ (ติ๊กรุ่นที่หน้า SKU การตลาด)
   const [jobOpen, setJobOpen] = useState(false);
   const [jobLabels, setJobLabels] = useState<MarketingSkuLabel[]>([]);
+  const createSeen = useSeenOnce(createOpen), quickSeen = useSeenOnce(quickOpen), jobSeen = useSeenOnce(jobOpen);
   const canJob = can("marketing.sku.manage" as Parameters<typeof can>[0]) && can("tasks.create" as Parameters<typeof can>[0]);
   const openJobCreate = async () => {
     setJobOpen(true);
@@ -148,9 +161,10 @@ export default function TasksPage() {
   }, []);
 
   // โหลดข้อมูลแบบ stale-while-revalidate (ของกลาง) — กลับเข้าหน้านี้ใหม่ = โชว์ทันที แล้วอัปเดตเงียบ
-  // poll ทุก 20 วิ (เฉพาะตอนเปิดแท็บ) → งานที่คนอื่น/เครื่องอื่นแก้ อัปเดตเองไม่ต้อง refresh
-  const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000, timeoutMs: 15000 });
-  const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks(), { refreshMs: 20000, timeoutMs: 15000 });
+  // poll ทุก 45 วิ (เฉพาะตอนเปิดแท็บ · กลับมาที่แท็บ = โหลดใหม่ทันที · มีคนแก้ในหน้านี้ = broadcast ให้ทุกจอทันที)
+  // (เดิม 20 วิ — แต่ละรอบต่อฐานข้อมูลหลายทอด ยิงซ้ำทั้งวันทุกเครื่อง เกินจำเป็น)
+  const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 45000, timeoutMs: 15000 });
+  const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks(), { refreshMs: 45000, timeoutMs: 15000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
   const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
@@ -206,7 +220,12 @@ export default function TasksPage() {
     })();
   }, []);
   // sweep แจ้งเตือน "ใกล้/เกินกำหนด" ให้ผู้รับผิดชอบ (lazy ตอนเปิดหน้า, กันซ้ำวันละครั้ง) — fire-and-forget
-  useEffect(() => { void apiFetch("/api/creative-tasks/reminders").catch(() => {}); }, []);
+  // เครื่องนี้ส่งไปแล้ววันนี้ (เวลาไทย) → ไม่ต้องยิงซ้ำทุกครั้งที่เปิดหน้า (server กันซ้ำอยู่แล้ว แต่เสียรอบเปล่า)
+  useEffect(() => {
+    const day = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+    try { if (localStorage.getItem("tasks:reminders-swept") === day) return; } catch { /* ไม่มี storage = ยิงตามเดิม */ }
+    void apiFetch("/api/creative-tasks/reminders").then((r) => { if (r.ok) { try { localStorage.setItem("tasks:reminders-swept", day); } catch { /* noop */ } } }).catch(() => {});
+  }, []);
   const saveTheme = useCallback((th: OverviewTheme) => {
     setOvTheme(th);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_overview_theme", value: th }) });
@@ -359,11 +378,12 @@ export default function TasksPage() {
       </div>
 
       {/* Create modal (ของกลาง — ใช้ร่วมกับ Campaign Canvas) */}
-      <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast} presetCampaign={createCampaign}
-        onCreated={async (newTask) => { pushToast("success", `${t("สร้างงาน", "Task created")} ${newTask.task_no}`); await reload(); }} />
+      {/* เปิดครั้งแรกค่อยโหลดโค้ดป๊อป (หลังจากนั้นค้างไว้ — ปิดแล้วเปิดใหม่ไม่ต้องโหลดซ้ำ) */}
+      {createSeen && <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast} presetCampaign={createCampaign}
+        onCreated={async (newTask) => { pushToast("success", `${t("สร้างงาน", "Task created")} ${newTask.task_no}`); await reload(); }} />}
 
       {/* 🛠 งานชุดรุ่น → สร้างงานแล้วส่งเข้า Task Manager ทันที (การ์ดผูกกัน · % ซิงก์เอง) → เปิดการ์ดให้ดู */}
-      {canJob && (
+      {canJob && jobSeen && (
         <WorkJobModal open={jobOpen} onClose={() => setJobOpen(false)} job={null} labels={jobLabels}
           onSaved={async (job) => {
             setJobOpen(false);
@@ -380,9 +400,9 @@ export default function TasksPage() {
           }} />
       )}
 
-      <QuickTaskModal open={quickOpen} onClose={() => setQuickOpen(false)} pushToast={pushToast}
+      {quickSeen && <QuickTaskModal open={quickOpen} onClose={() => setQuickOpen(false)} pushToast={pushToast}
         me={user ? ({ id: user.id, name: user.name } as UserPickerValue) : null}
-        onCreated={async () => { await reload(); }} />
+        onCreated={async () => { await reload(); }} />}
 
       {/* Detail drawer */}
       {detailId && (
