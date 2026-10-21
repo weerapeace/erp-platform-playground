@@ -40,6 +40,9 @@ import {
   CANVAS_MAX_HEIGHT,
   CANVAS_SFX_FADES,
   CANVAS_SFX_ZOOMS,
+  CANVAS_SCENE_INS,
+  CANVAS_SCENE_OUTS,
+  CANVAS_SCRUB_MAX_FRAMES,
   canvasItemPreset,
   canvasItemSummary,
   validateCanvas,
@@ -886,6 +889,17 @@ function canvasItemFields(): FieldDef[] {
     f("sfxZoom", "ตอนเลื่อนจอ: ซูม", "select", { group: "layout", default: "", options: CANVAS_SFX_ZOOMS }),
     f("sfxRotate", "ตอนเลื่อนจอ: หมุน (องศาต่อการเลื่อน 1 จอ)", "range", { group: "layout", default: 0, min: -90, numMax: 90, step: 5 }),
     f("sfxPin", "ตอนเลื่อนจอ: ค้างอยู่กับที่จนเลื่อนพ้นผืน", "toggle", { group: "layout", default: false, hint: "เหมาะกับหัวข้อตัวใหญ่ด้านหลัง · มือถือแบบเรียงอัตโนมัติจะไม่ค้าง" }),
+    /* 🎬 ในฉากค้าง (ผืนเปิด "ฉากค้าง") — ช่วงเป็น % ของฉาก · ภาพทีละเฟรมตั้งจากปุ่ม "เตรียมคลิปให้เลื่อนลื่น" (ไม่ต้องกรอก) */
+    f("scIn", "ในฉากค้าง: ท่าเข้า", "select", { group: "layout", default: "", options: CANVAS_SCENE_INS, hint: "สว่างทีละคำ = ข้อความ · ขยายเต็มจอ = รูป/คลิป · เล่นตามการเลื่อน = คลิป" }),
+    f("scFrom", "ในฉากค้าง: เข้าเริ่มที่ (%)", "range", { group: "layout", default: 0, min: 0, numMax: 99, showIf: { key: "scIn", eq: CANVAS_SCENE_INS.map((o) => o.v).filter(Boolean) } }),
+    f("scTo", "ในฉากค้าง: เข้าเสร็จที่ (%)", "range", { group: "layout", default: 30, min: 1, numMax: 100, showIf: { key: "scIn", eq: CANVAS_SCENE_INS.map((o) => o.v).filter(Boolean) } }),
+    f("scOut", "ในฉากค้าง: ท่าออก", "select", { group: "layout", default: "", options: CANVAS_SCENE_OUTS }),
+    f("scOutFrom", "ในฉากค้าง: ออกเริ่มที่ (%)", "range", { group: "layout", default: 85, min: 0, numMax: 99, showIf: { key: "scOut", eq: CANVAS_SCENE_OUTS.map((o) => o.v).filter(Boolean) } }),
+    f("scOutTo", "ในฉากค้าง: ออกหมดที่ (%)", "range", { group: "layout", default: 100, min: 1, numMax: 100, showIf: { key: "scOut", eq: CANVAS_SCENE_OUTS.map((o) => o.v).filter(Boolean) } }),
+    text("scrubKey", "ภาพทีละเฟรม (ระบบตั้งให้)", { group: "layout", default: "", max: 120, i18n: false, hidden: true }),
+    f("scrubCount", "จำนวนเฟรม (ระบบตั้งให้)", "number", { group: "layout", default: 0, min: 0, numMax: CANVAS_SCRUB_MAX_FRAMES, hidden: true }),
+    f("scrubExt", "ชนิดภาพเฟรม (ระบบตั้งให้)", "select", { group: "layout", default: "webp", options: [{ v: "webp", l: "webp" }, { v: "jpg", l: "jpg" }], hidden: true }),
+    text("scrubFor", "เตรียมเฟรมจากคลิป (ระบบตั้งให้)", { group: "layout", default: "", max: 300, i18n: false, hidden: true }),
     f("bleed", "ยืดเต็มความกว้างจอ", "toggle", { group: "layout", default: false, showIf: { key: "kind", eq: ["image", "shape", "video"] }, hint: "ซ้ายสุด–ขวาสุดของจอ ใช้แค่ตำแหน่งแนวตั้ง" }),
     text("group", "กลุ่ม (รหัส)", { group: "layout", default: "", max: 40, i18n: false, hint: "ชิ้นที่รหัสเดียวกัน = เลือก/ย้ายไปด้วยกัน (จับกลุ่มในพรีวิวแทนได้)" }),
 
@@ -1112,6 +1126,21 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         step: 10,
         hint: "หน่วยผืนมือถือ (กว้าง 400) · ลากแถบใต้ผืนในพรีวิวมือถือก็ได้",
         showIf: { key: "mobileMode", eq: "custom" },
+      }),
+      /* 🎬 ฉากค้าง (แบบเว็บ Apple · เว็บร้าน src/lib/canvas-scene.ts) — ท่าต่อชิ้นอยู่ที่ช่อง sc* ของชิ้น */
+      f("scene", "🎬 ฉากค้าง (แบบ Apple)", "toggle", {
+        group: "layout",
+        default: false,
+        hint: "ผืนค้างบนจอระหว่างเลื่อน แล้วชิ้นเล่นท่าทีละจังหวะ · มือถือแบบเรียงอัตโนมัติ = ไม่ค้าง (เลือกจัดเองบนมือถือถ้าอยากให้ค้าง) · ตั้งท่าต่อชิ้นในหน้าแก้เต็มจอ",
+      }),
+      f("sceneLen", "ความยาวฉาก (% ของความสูงจอ)", "range", {
+        group: "layout",
+        default: 200,
+        min: 50,
+        numMax: 800,
+        step: 10,
+        hint: "ต้องเลื่อนเท่านี้ฉากถึงจบ (200 = เลื่อน 2 จอ) · ยาว = ท่าช้าลง",
+        showIf: { key: "scene", eq: true },
       }),
     ],
     children: {
@@ -3009,6 +3038,13 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { key: "layout", eq: ["carousel", "spotlight"], orKey: "layoutMobile" },
           { key: "autoplay", eq: true },
         ],
+      }),
+      // 🎬 เลื่อนลงแล้วการ์ดวิ่งข้าง (แบบเว็บ Apple · เว็บร้าน RowScrollPin) — ใช้กับแบบเลื่อนข้าง
+      f("scrollRow", "🎬 เลื่อนลงแล้วการ์ดวิ่งข้าง (แบบ Apple)", "toggle", {
+        group: "layout",
+        default: false,
+        hint: "Section ค้างบนจอ แล้วการเลื่อนลงพาการ์ดวิ่งไปทางข้างจนสุดแถว ค่อยเลื่อนต่อ (เลื่อนย้อน = วิ่งกลับ) · เปิดแล้วไม่เลื่อนเอง · ลูกค้าที่ตั้งลดการเคลื่อนไหว = เลื่อนข้างแบบปกติ",
+        showIf: { key: "layout", eq: ["carousel"], orKey: "layoutMobile" },
       }),
       f("columns", "คอลัมน์ (ตารางบนคอม)", "number", { group: "layout", default: 4, min: 2, numMax: 5, hint: "แบบแท็บ: = การ์ดต่อแถวบนคอม ทั้งตารางและเลื่อนข้าง", showIf: { key: "layout", eq: ["grid", "rank", "tabs"] } }),
       f("side", "ตัวเด่น / แบนเนอร์ อยู่ด้าน", "select", {

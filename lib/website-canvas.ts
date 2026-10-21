@@ -220,6 +220,65 @@ export function canvasScrollClear<T extends Record<string, unknown> & { id: stri
   return items.map((it) => (!ids || ids.includes(it.id) ? { ...it, sfxSpeed: 0, sfxFade: "", sfxZoom: "", sfxRotate: 0, sfxPin: false } : it));
 }
 
+/**
+ * 🎬 ฉากค้าง (แบบเว็บ Apple · เว็บร้าน src/lib/canvas-scene.ts) — ผืน scene + sceneLen (% ความสูงจอที่ต้องเลื่อนให้จบฉาก)
+ * ชิ้น: scIn ท่าเข้าในช่วง scFrom–scTo % ของฉาก · scOut ท่าออกในช่วง scOutFrom–scOutTo %
+ * ⚠️ ค่าตรงกับ CANVAS_SCENE_INS / CANVAS_SCENE_OUTS ของเว็บร้าน
+ */
+export const CANVAS_SCENE_INS: FieldOption[] = [
+  { v: "", l: "อยู่ตั้งแต่ต้น" },
+  { v: "fade", l: "จางเข้า" },
+  { v: "up", l: "ลอยขึ้น" },
+  { v: "down", l: "ลงมาจากบน" },
+  { v: "left", l: "เลื่อนจากซ้าย" },
+  { v: "right", l: "เลื่อนจากขวา" },
+  { v: "zoom-in", l: "ขยายจากเล็ก" },
+  { v: "zoom-out", l: "หดจากใหญ่ยักษ์" },
+  { v: "blur", l: "เบลอเป็นชัด" },
+  { v: "words", l: "สว่างทีละคำ" },
+  { v: "fill", l: "ขยายเต็มจอ" },
+  { v: "scrub", l: "คลิปเล่นตามการเลื่อน" },
+];
+/** ท่าเข้าที่ใช้กับชิ้นชนิดนี้ได้ (สว่างทีละคำ = ข้อความ · ขยายเต็มจอ = รูป/คลิป · เล่นตามการเลื่อน = คลิป) */
+export const canvasSceneInsFor = (kind: string): FieldOption[] =>
+  CANVAS_SCENE_INS.filter((o) => (o.v === "words" ? kind === "text" : o.v === "fill" ? kind === "image" || kind === "video" : o.v === "scrub" ? kind === "video" : true));
+export const CANVAS_SCENE_OUTS: FieldOption[] = [
+  { v: "", l: "อยู่ถึงจบฉาก" },
+  { v: "fade", l: "จางออก" },
+  { v: "up", l: "ลอยขึ้นออก" },
+  { v: "down", l: "ลงออก" },
+  { v: "zoom", l: "ขยายแล้วจาง" },
+];
+/** ชิ้นนี้มีท่าในฉากค้างไหม */
+export const canvasHasSceneFx = (it: Record<string, unknown>): boolean => !!s(it.scIn) || !!s(it.scOut);
+/** ภาพทีละเฟรมของคลิปเล่นตามการเลื่อน: เก็บที่ R2 `storefront-scrub/<ชุด>/000.webp …` — ⚠️ รูปแบบตรงกับ scrubFrameKeys ของเว็บร้าน */
+export const CANVAS_SCRUB_PREFIX = "storefront-scrub";
+export const CANVAS_SCRUB_MAX_FRAMES = 120;
+
+/**
+ * 🎬 "จัดฉากให้ทั้งผืน" (จุดเริ่มแบบ Apple — ปรับต่อทีละชิ้นได้): ไล่ชิ้นบน→ล่าง ให้เข้าทีละจังหวะในช่วง 0–80% ของฉาก
+ * ข้อความตัวใหญ่ (≥ 72) = หดจากใหญ่ยักษ์ · ข้อความอื่น/ปุ่ม = จางเข้า · รูป/คลิป/ของตกแต่ง = ลอยขึ้น · ไม่มีท่าออก · ids ว่าง = ทุกชิ้น
+ */
+export function canvasScenePreset<T extends Record<string, unknown> & { id: string }>(items: T[], ids?: string[]): T[] {
+  const num = (v: unknown) => Number(v) || 0;
+  const pick = items.filter((it) => !ids || ids.includes(it.id)).sort((a, b) => num(a.y) - num(b.y) || num(a.x) - num(b.x));
+  const n = pick.length;
+  const step = n > 1 ? Math.min(20, 64 / (n - 1)) : 0;
+  const patch = new Map(
+    pick.map((it, i) => {
+      const from = Math.round(i * step);
+      const scIn = it.kind === "text" ? (num(it.size) >= 72 ? "zoom-out" : "fade") : it.kind === "button" ? "fade" : "up";
+      return [it.id, { scIn, scFrom: from, scTo: Math.min(100, from + 16), scOut: "", scOutFrom: 85, scOutTo: 100 }];
+    })
+  );
+  return items.map((it) => (patch.has(it.id) ? { ...it, ...patch.get(it.id) } : it));
+}
+
+/** ล้างท่าในฉากค้าง (ภาพทีละเฟรมที่เตรียมไว้ยังเก็บอยู่) · ids ว่าง = ทุกชิ้น */
+export function canvasSceneClear<T extends Record<string, unknown> & { id: string }>(items: T[], ids?: string[]): T[] {
+  return items.map((it) => (!ids || ids.includes(it.id) ? { ...it, scIn: "", scFrom: 0, scTo: 30, scOut: "", scOutFrom: 85, scOutTo: 100 } : it));
+}
+
 /** เส้นกรอบรอบรูป (เว้นระยะจากรูปได้ = กรอบลอย แบบเว็บสายวินเทจ) */
 export const CANVAS_BORDERS: FieldOption[] = [
   { v: "none", l: "ไม่มี" },
@@ -551,7 +610,7 @@ export function canvasItemSummary(it: Record<string, unknown>): string {
   const kind = (s(it.kind) || "text") as CanvasKind;
   const icon = CANVAS_KIND_ICON[kind] ?? "🧩";
   // 🌀 ขยับตามการเลื่อน · 🔍 กดแล้วขยาย — ต่อท้ายให้เห็นในต้นไม้ว่าชิ้นไหนมีลูกเล่น
-  const lock = `${canvasHasScrollFx(it) ? " 🌀" : ""}${(kind === "image" || kind === "video") && s(it.expand) ? " 🔍" : ""}${it.locked ? " 🔒" : ""}`;
+  const lock = `${canvasHasSceneFx(it) ? " 🎬" : ""}${canvasHasScrollFx(it) ? " 🌀" : ""}${(kind === "image" || kind === "video") && s(it.expand) ? " 🔍" : ""}${it.locked ? " 🔒" : ""}`;
   if (kind === "text") return `${icon} ${s(it.text).split("\n")[0].slice(0, 40) || "(ข้อความว่าง)"}${lock}`;
   if (kind === "button") return `${icon} ${s(it.label) || "(ปุ่มไม่มีข้อความ)"}${s(it.href) ? ` → ${s(it.href)}` : ""}${lock}`;
   const shop = Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : "";
@@ -566,6 +625,11 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
   const items = Array.isArray(b.items) ? (b.items as Record<string, unknown>[]).filter((it) => it.enabled !== false) : [];
   const height = Number(b.height) || 0;
   if (!items.length) out.push({ level: "warning", message: `${label}: ยังไม่มีชิ้นส่วนบนผืน` });
+  // 🎬 ฉากค้าง: ตั้งท่าไว้แต่ไม่ได้เปิด · เปิดแล้วไม่มีท่า · มือถือแบบเรียงอัตโนมัติไม่ค้าง
+  const sceneItems = items.filter(canvasHasSceneFx);
+  if (b.scene !== true && sceneItems.length) out.push({ level: "warning", message: `${label}: ตั้งท่าในฉากค้างไว้ ${sceneItems.length} ชิ้น แต่ผืนยังไม่ได้เปิด "🎬 ฉากค้าง" — ท่าเหล่านี้ยังไม่ทำงาน` });
+  if (b.scene === true && !sceneItems.length) out.push({ level: "warning", message: `${label}: เปิดฉากค้างแล้วแต่ยังไม่มีชิ้นไหนมีท่า — ผืนจะค้างเฉย ๆ (กด "จัดฉากให้ทั้งผืน" เป็นจุดเริ่มได้)` });
+  if (b.scene === true && b.mobileMode !== "custom") out.push({ level: "warning", message: `${label}: มือถือแบบเรียงอัตโนมัติจะไม่ค้าง (ชิ้นโชว์ท่าสุดท้าย) — อยากให้ค้างบนมือถือด้วย ให้เลือก "มือถือ: จัดเอง"` });
   items.forEach((it, i) => {
     const name = `${label} ชิ้นที่ ${i + 1} (${canvasItemSummary(it)})`;
     const kind = s(it.kind);
@@ -582,6 +646,11 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
       out.push({ level: "warning", message: `${name}: "ขยายเต็มจอแล้วไปหน้าที่ลิงก์ไว้" ต้องตั้ง "กดแล้วไปที่" เป็นหน้าในเว็บ (ไม่เปิดแท็บใหม่) — ตอนนี้กดแล้วจะไม่ขยาย` });
     if (media && it.expand === "story" && !s(it.expTitle) && !s(it.expText) && !(Array.isArray(it.products) && it.products.length) && !href)
       out.push({ level: "warning", message: `${name}: "ขยายครึ่งจอ + เรื่องราว" ยังไม่มีหัวข้อ/ข้อความ/สินค้า — ฝั่งขวาจะว่าง` });
+    if (b.scene === true && kind === "video" && it.scIn === "scrub") {
+      const ready = s(it.scrubKey) && Number(it.scrubCount) > 1;
+      if (!ready) out.push({ level: "warning", message: `${name}: คลิปเล่นตามการเลื่อนยังไม่ได้ "เตรียมให้เลื่อนลื่น" — บนมือถือบางรุ่นจะกระตุก` });
+      else if (s(it.scrubFor) && s(it.scrubFor) !== s(it.videoKey)) out.push({ level: "warning", message: `${name}: เปลี่ยนคลิปหลังเตรียมเฟรมแล้ว — กด "เตรียมใหม่" (ตอนนี้เว็บเลื่อนเวลาคลิปตรง ๆ แทน)` });
+    }
     const x = Number(it.x) || 0;
     const y = Number(it.y) || 0;
     const w = Number(it.w) || 0;

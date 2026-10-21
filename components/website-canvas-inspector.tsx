@@ -37,11 +37,17 @@ import {
   canvasMobileBox,
   canvasScrollClear,
   canvasScrollGallery,
+  canvasHasSceneFx,
+  canvasSceneClear,
+  canvasScenePreset,
+  canvasSceneInsFor,
+  CANVAS_SCENE_OUTS,
   canvasStagger,
 } from "@/lib/website-canvas";
 import { GRAD_DIRS, GRADIENT_PRESETS, type GradThemeHex } from "@/lib/website-gradient";
 import { GradientPicker } from "@/components/website-gradient-picker";
 import { CanvasBgPositioner } from "@/components/website-canvas-bg-position";
+import { CanvasScrubPrep } from "@/components/website-canvas-scrub";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
 // สีธีม/จุดสี/ฟอนต์ = ของกลาง (ใช้ร่วมกับแผง "🔤 ตัวอักษร" ของทุก Section)
 import { ColorSwatches, FontPickList, softOf, swatchesOf, type ThemeColors } from "@/components/website-text-pickers";
@@ -324,6 +330,39 @@ export function CanvasInspector({
             <p className="text-[10px] text-slate-500">
               ลองเลื่อนดู = เลื่อนพรีวิวขึ้น-ลงเพื่อดูของจริง (ระหว่างนี้ลากชิ้นไม่ได้) · ได้ผลดีกับผืนสูงหลายจอ วางรูปกระจายซ้าย-ขวา · ตัวหนังสือใหญ่ (≥ 72) จะค้างเป็นหัวข้อพื้นหลัง
             </p>
+          </div>
+          {/* 🎬 ฉากค้าง (แบบเว็บ Apple) ทั้งผืน */}
+          <div className="border-t border-violet-200 pt-2 space-y-1.5">
+            <H>🎬 ฉากค้าง (แบบเว็บ Apple)</H>
+            <button className={`${seg(block.scene === true)} w-full`} onClick={() => onPatchBlock({ scene: !block.scene })}>
+              {block.scene ? "🎬 เปิดฉากค้างอยู่ (กดเพื่อปิด)" : "🎬 เปิดฉากค้าง — ผืนค้างบนจอ ชิ้นเล่นท่าทีละจังหวะ"}
+            </button>
+            {block.scene === true && (
+              <>
+                <Slider label="ความยาวฉาก (ต้องเลื่อนกี่จอ)" value={Math.round((Number(block.sceneLen) || 200) / 10) / 10} min={0.5} max={8} step={0.5} unit=" จอ" onChange={(n) => onPatchBlock({ sceneLen: Math.round(n * 100) })} />
+                <button
+                  onClick={() => {
+                    onPatchBlock({ items: canvasScenePreset(items) });
+                    onScrollPreview?.(true);
+                  }}
+                  className="w-full rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100"
+                >
+                  🎬 จัดฉากให้ทั้งผืน (เข้าทีละจังหวะ บน→ล่าง)
+                </button>
+                <div className="flex gap-1.5">
+                  <button className={seg(scrollPreview)} onClick={() => onScrollPreview?.(!scrollPreview)}>
+                    {scrollPreview ? "⏸ หยุดลองเลื่อน" : "▶ ลองเลื่อนดู"}
+                  </button>
+                  <button className={seg(false)} disabled={!items.some(canvasHasSceneFx)} onClick={() => onPatchBlock({ items: canvasSceneClear(items) })}>
+                    ล้างท่าในฉาก
+                  </button>
+                </div>
+                {block.mobileMode !== "custom" && (
+                  <p className="rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800">มือถือแบบเรียงอัตโนมัติจะไม่ค้าง (เห็นท่าสุดท้าย) — อยากให้ค้างบนมือถือ เลือก &quot;✋ จัดเอง&quot; ในส่วนมือถือด้านล่าง</p>
+                )}
+                <p className="text-[10px] text-slate-500">ตั้งท่าทีละชิ้น: คลิกชิ้น → &quot;🎬 ในฉากค้าง&quot; · ระหว่างค้าง ผืนย่อให้พอดีความสูงจอ · เปิดฉากแล้ว &quot;ตอนเลื่อนจอ&quot; แบบเดิมของผืนนี้ไม่ทำงาน</p>
+              </>
+            )}
           </div>
         </div>
         <div>
@@ -849,6 +888,42 @@ export function CanvasInspector({
           <Chips options={canvasHoversFor(kind)} value={str("hover")} onPick={(v) => onPatchItem({ hover: v })} />
         </div>
         {str("anim") === "type" && <p className="text-[10px] text-violet-700">พิมพ์ทีละตัว: ความเร็ว = เร็ว/ปกติ/ช้า ด้านบน · ข้อความยาวเกิน 400 ตัวจะใช้ &quot;ค่อย ๆ ขึ้นมา&quot; แทน</p>}
+        {/* 🎬 ในฉากค้าง (ผืนเปิดฉากค้าง · เว็บร้าน lib/canvas-scene) */}
+        {block.scene === true ? (
+          <div className="border-t border-violet-200 pt-2 space-y-2">
+            <div className="flex items-center">
+              <span className="flex-1 text-[11px] font-semibold text-violet-800">🎬 ในฉากค้าง</span>
+              <button onClick={() => onScrollPreview?.(!scrollPreview)} className="text-[11px] text-violet-700 hover:underline">
+                {scrollPreview ? "⏸ หยุดลอง" : "▶ ลองเลื่อนดู"}
+              </button>
+            </div>
+            <div>
+              <H>ท่าเข้า</H>
+              <Chips options={canvasSceneInsFor(kind)} value={str("scIn")} onPick={(v) => onPatchItem(v === "scrub" ? { scIn: v, scFrom: 0, scTo: 100 } : { scIn: v })} />
+            </div>
+            {str("scIn") && (
+              <div className="grid grid-cols-2 gap-2">
+                <Slider label="เริ่มที่" value={num("scFrom", 0)} min={0} max={99} unit="%" onChange={(n) => onPatchItem({ scFrom: n, ...(n >= num("scTo", 30) ? { scTo: Math.min(100, n + 5) } : null) })} />
+                <Slider label="เสร็จที่" value={num("scTo", 30)} min={1} max={100} unit="%" onChange={(n) => onPatchItem({ scTo: Math.max(n, num("scFrom", 0) + 1) })} />
+              </div>
+            )}
+            {str("scIn") === "scrub" && <CanvasScrubPrep item={item} onPatch={onPatchItem} />}
+            {str("scIn") === "fill" && <p className="text-[10px] text-slate-500">ขยายจากที่วางไว้จนเต็มจอ · ข้อความที่อยู่ชั้นบนกว่าจะโผล่ทับรูปได้ (จัดชั้นด้านบน)</p>}
+            <div>
+              <H>ท่าออก</H>
+              <Chips options={CANVAS_SCENE_OUTS} value={str("scOut")} onPick={(v) => onPatchItem({ scOut: v })} />
+            </div>
+            {str("scOut") && (
+              <div className="grid grid-cols-2 gap-2">
+                <Slider label="เริ่มออกที่" value={num("scOutFrom", 85)} min={0} max={99} unit="%" onChange={(n) => onPatchItem({ scOutFrom: n, ...(n >= num("scOutTo", 100) ? { scOutTo: Math.min(100, n + 5) } : null) })} />
+                <Slider label="หายหมดที่" value={num("scOutTo", 100)} min={1} max={100} unit="%" onChange={(n) => onPatchItem({ scOutTo: Math.max(n, num("scOutFrom", 85) + 1) })} />
+              </div>
+            )}
+            <p className="text-[10px] text-slate-500">% = ช่วงของฉาก (0 = เริ่มค้าง · 100 = จบฉาก) · บนผืนที่จัดอยู่ ชิ้นอยู่ท่าสุดท้ายเสมอ (วางตามที่อยากให้จบ)</p>
+          </div>
+        ) : (
+          <p className="text-[10px] text-slate-500 border-t border-violet-200 pt-2">🎬 อยากได้ท่าแบบเว็บ Apple (ผืนค้างแล้วชิ้นเข้าทีละจังหวะ · สว่างทีละคำ · ขยายเต็มจอ · คลิปเล่นตามการเลื่อน) — เปิด &quot;ฉากค้าง&quot; ที่แผงทั้งผืน</p>
+        )}
         {/* 🌀 ขยับตามการเลื่อนจอ (เว็บร้าน lib/canvas-scroll) */}
         <div className="border-t border-violet-200 pt-2 space-y-2">
           <div className="flex items-center">

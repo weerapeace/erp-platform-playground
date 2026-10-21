@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { matchShowIf, SECTION_SCHEMAS, type FieldDef } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockTypesFor, safeTarget, type Block } from "../website-blocks";
-import { canvasItemPreset, canvasItemSummary, validateCanvas, CANVAS_SHAPE_LABEL, CANVAS_FRAME_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_BUTTON_PRESETS, fitImageBox, canvasImageKeys, CANVAS_MAX_HEIGHT, canvasHasScrollFx, canvasScrollGallery, canvasScrollClear } from "../website-canvas";
+import { canvasItemPreset, canvasItemSummary, validateCanvas, CANVAS_SHAPE_LABEL, CANVAS_FRAME_PRESETS, CANVAS_TEXT_PRESETS, CANVAS_BUTTON_PRESETS, fitImageBox, canvasImageKeys, CANVAS_MAX_HEIGHT, canvasHasScrollFx, canvasScrollGallery, canvasScrollClear, CANVAS_SCRUB_MAX_FRAMES, canvasSceneInsFor, canvasScenePreset, canvasSceneClear, canvasHasSceneFx } from "../website-canvas";
 import { productHref, productSlug, categoryHref, sectionHref, categoryKeyOf } from "../website-links";
 
 /**
@@ -548,5 +548,81 @@ describe("🌀 ขยับตามการเลื่อนจอ + 🔍 ก
     expect(msg({ expand: "full", href: "/shop" })).not.toMatch(/กดแล้วไปที่/);
     expect(msg({ expand: "story" })).toMatch(/ฝั่งขวาจะว่าง/);
     expect(msg({ expand: "story", expTitle: "หัวข้อ" })).not.toMatch(/ฝั่งขวาจะว่าง/);
+  });
+});
+
+describe("🎬 ฉากค้างแบบ Apple + ตารางสินค้าการ์ดวิ่งข้าง (2026-10-21)", () => {
+  const norm = (items: Record<string, unknown>[], extra: Record<string, unknown> = {}) =>
+    normalizeBlocks([{ id: "c1", type: "canvas", ...extra, items }])[0] as unknown as Record<string, unknown> & { items: Record<string, unknown>[] };
+
+  it("บันทึกแล้วค่าไม่หาย (ผืน scene/sceneLen · ชิ้น sc* · เฟรมที่ระบบตั้ง)", () => {
+    const blk = norm(
+      [
+        { id: "t", kind: "text", scIn: "words", scFrom: 10, scTo: 60, scOut: "fade", scOutFrom: 80, scOutTo: 95 },
+        { id: "v", kind: "video", videoKey: "a.mp4", scIn: "scrub", scFrom: 0, scTo: 100, scrubKey: "storefront-scrub/abc12345", scrubCount: 96, scrubExt: "webp", scrubFor: "a.mp4" },
+      ],
+      { scene: true, sceneLen: 300 }
+    );
+    expect(blk).toMatchObject({ scene: true, sceneLen: 300 });
+    expect(blk.items[0]).toMatchObject({ scIn: "words", scFrom: 10, scTo: 60, scOut: "fade", scOutFrom: 80, scOutTo: 95 });
+    expect(blk.items[1]).toMatchObject({ scIn: "scrub", scrubKey: "storefront-scrub/abc12345", scrubCount: 96, scrubExt: "webp", scrubFor: "a.mp4" });
+  });
+
+  it("ค่าแปลกตกเป็นค่าเริ่ม · ความยาวฉาก/เฟรมจำกัดช่วง", () => {
+    const blk = norm([{ id: "x", kind: "image", scIn: "teleport", scrubCount: 9999 }], { scene: "yes", sceneLen: 99999 });
+    expect(blk).toMatchObject({ scene: false, sceneLen: 800 });
+    expect(blk.items[0]).toMatchObject({ scIn: "", scrubCount: CANVAS_SCRUB_MAX_FRAMES });
+  });
+
+  it("ท่าเข้าต่อชนิด: สว่างทีละคำ = ข้อความ · ขยายเต็มจอ = รูป/คลิป · เล่นตามการเลื่อน = คลิป · ช่องระบบซ่อนในฟอร์ม", () => {
+    const vs = (k: string) => canvasSceneInsFor(k).map((o) => o.v);
+    expect(vs("text")).toContain("words");
+    expect(vs("text")).not.toContain("fill");
+    expect(vs("image")).toContain("fill");
+    expect(vs("image")).not.toContain("scrub");
+    expect(vs("video")).toEqual(expect.arrayContaining(["fill", "scrub"]));
+    const fd = (k: string) => SECTION_SCHEMAS.canvas.children!.fields.find((x) => x.key === k) as FieldDef;
+    expect(fd("scrubKey").hidden && fd("scrubCount").hidden && fd("scrubExt").hidden && fd("scrubFor").hidden).toBe(true);
+  });
+
+  it("จัดฉากให้ทั้งผืน: บน→ล่าง ไล่ช่วงทีละจังหวะ · หัวข้อใหญ่หดจากใหญ่ · รูปลอยขึ้น · ล้างได้", () => {
+    const items = [
+      { id: "img", kind: "image", y: 300 },
+      { id: "big", kind: "text", size: 96, y: 40 },
+      { id: "cap", kind: "text", size: 16, y: 200 },
+      { id: "btn", kind: "button", y: 600 },
+    ];
+    const by = Object.fromEntries(canvasScenePreset(items).map((x) => [x.id, x as Record<string, unknown>]));
+    expect(by.big).toMatchObject({ scIn: "zoom-out", scFrom: 0 });
+    expect(by.cap).toMatchObject({ scIn: "fade" });
+    expect(by.img).toMatchObject({ scIn: "up" });
+    expect(by.btn).toMatchObject({ scIn: "fade" });
+    expect(Number(by.cap.scFrom)).toBeGreaterThan(0);
+    expect(Number(by.img.scFrom)).toBeGreaterThan(Number(by.cap.scFrom));
+    expect(Number(by.btn.scTo)).toBeLessThanOrEqual(100);
+    expect(canvasSceneClear(canvasScenePreset(items)).some(canvasHasSceneFx)).toBe(false);
+    expect(canvasItemSummary({ kind: "text", text: "หัวข้อ", scIn: "zoom-out" })).toBe("🔤 หัวข้อ 🎬");
+  });
+
+  it("เตือน: ตั้งท่าแต่ไม่เปิดฉาก · เปิดฉากไม่มีท่า · มือถืออัตโนมัติไม่ค้าง · คลิปยังไม่เตรียม/เปลี่ยนคลิปหลังเตรียม", () => {
+    const msg = (b: Record<string, unknown>) => validateCanvas({ height: 700, ...b }, "ผืน").map((x) => x.message).join(" ");
+    const txt = { kind: "text", text: "ก", x: 10, y: 10, w: 100 };
+    expect(msg({ items: [{ ...txt, scIn: "fade" }] })).toMatch(/ยังไม่ได้เปิด "🎬 ฉากค้าง"/);
+    expect(msg({ scene: true, items: [txt] })).toMatch(/ยังไม่มีชิ้นไหนมีท่า/);
+    expect(msg({ scene: true, items: [{ ...txt, scIn: "fade" }] })).toMatch(/เรียงอัตโนมัติจะไม่ค้าง/);
+    expect(msg({ scene: true, mobileMode: "custom", items: [{ ...txt, scIn: "fade" }] })).not.toMatch(/เรียงอัตโนมัติ/);
+    const vid = { kind: "video", videoKey: "a.mp4", x: 10, y: 10, w: 100, scIn: "scrub" };
+    expect(msg({ scene: true, items: [vid] })).toMatch(/ยังไม่ได้ "เตรียมให้เลื่อนลื่น"/);
+    expect(msg({ scene: true, items: [{ ...vid, scrubKey: "storefront-scrub/x1234567", scrubCount: 48, scrubFor: "old.mp4" }] })).toMatch(/เปลี่ยนคลิปหลังเตรียมเฟรม/);
+    expect(msg({ scene: true, items: [{ ...vid, scrubKey: "storefront-scrub/x1234567", scrubCount: 48, scrubFor: "a.mp4" }] })).not.toMatch(/เตรียม/);
+  });
+
+  it("ตารางสินค้า: ช่อง scrollRow บันทึกได้ + โชว์เมื่อเลือกแบบเลื่อนข้าง (คอมหรือมือถือ)", () => {
+    const [p] = normalizeBlocks([{ id: "p", type: "products", layout: "carousel", scrollRow: true }]) as unknown as Record<string, unknown>[];
+    expect(p.scrollRow).toBe(true);
+    const fd = SECTION_SCHEMAS.products.fields.find((x) => x.key === "scrollRow") as FieldDef;
+    expect(matchShowIf(fd, { layout: "carousel" })).toBe(true);
+    expect(matchShowIf(fd, { layout: "grid", layoutMobile: "carousel" })).toBe(true);
+    expect(matchShowIf(fd, { layout: "grid", layoutMobile: "same" })).toBe(false);
   });
 });
