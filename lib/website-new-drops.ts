@@ -23,6 +23,11 @@ export interface NewDrop {
   endAt: string | null;
   /** ซ่อนสินค้าในชุดจากทั้งเว็บจนถึงเวลาเปิด */
   hideUntilStart: boolean;
+  /**
+   * 🖼 รูปแทรกในตารางสินค้าของชุดนี้ = ListingInsert ของกลางหน้ารายการสินค้า (ไฟล์นี้ pure — ทำความสะอาดด้วย
+   * normalizeListingInserts ที่ API ตอนรับเข้า/ส่งออก) · คอลัมน์ store_new_drops.inserts
+   */
+  inserts: unknown[];
 }
 
 /** ช่วง "ใหม่" ตั้งต้นของชุดใหม่ (วัน) */
@@ -82,7 +87,7 @@ const isoOrNull = (v: unknown) => {
 };
 
 /** ตรวจ + ทำความสะอาดค่าที่ส่งมาจากหน้าจัดการ (ไม่ผ่าน = บอกเหตุผลเป็นภาษาคน) */
-export function normalizeDropInput(raw: unknown): { ok: true; value: Omit<NewDrop, "id"> } | { ok: false; error: string } {
+export function normalizeDropInput(raw: unknown): { ok: true; value: Omit<NewDrop, "id" | "inserts"> & { inserts?: unknown[] } } | { ok: false; error: string } {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const title = str(r.title, 80);
   if (!title) return { ok: false, error: "ตั้งชื่อชุดก่อน (เช่น ชุดปลาย ต.ค.)" };
@@ -106,6 +111,8 @@ export function normalizeDropInput(raw: unknown): { ok: true; value: Omit<NewDro
       startAt,
       endAt,
       hideUntilStart: r.hideUntilStart !== false,
+      // ไม่ส่งรูปแทรกมา (หน้าจัดการรุ่นเก่า) = ไม่แตะของเดิม
+      ...(Array.isArray(r.inserts) ? { inserts: (r.inserts as unknown[]).filter((x) => x && typeof x === "object").slice(0, 20) } : {}),
     },
   };
 }
@@ -124,11 +131,12 @@ export function dropFromRow(r: Record<string, unknown>): NewDrop {
     startAt: String(r.start_at ?? ""),
     endAt: (r.end_at as string | null) ?? null,
     hideUntilStart: r.hide_until_start !== false,
+    inserts: Array.isArray(r.inserts) ? (r.inserts as unknown[]) : [],
   };
 }
 
-/** NewDrop (ไม่มี id) → คอลัมน์ในฐานข้อมูล */
-export function dropToRow(d: Omit<NewDrop, "id">): Record<string, unknown> {
+/** NewDrop (ไม่มี id) → คอลัมน์ในฐานข้อมูล · ไม่มี inserts = ไม่แตะคอลัมน์รูปแทรก */
+export function dropToRow(d: Omit<NewDrop, "id" | "inserts"> & { inserts?: unknown[] }): Record<string, unknown> {
   return {
     title: d.title,
     title_en: d.title_en || null,
@@ -140,5 +148,6 @@ export function dropToRow(d: Omit<NewDrop, "id">): Record<string, unknown> {
     start_at: d.startAt,
     end_at: d.endAt,
     hide_until_start: d.hideUntilStart,
+    ...(d.inserts ? { inserts: d.inserts } : {}),
   };
 }

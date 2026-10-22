@@ -38,3 +38,25 @@ describe("🆕 มาใหม่เป็นชุด", () => {
     expect(ok.ok && ok.value.hideUntilStart).toBe(true);
   });
 });
+
+describe("🖼 รูปแทรกรายชุด (2026-10-22)", () => {
+  const base = { title: "ROARs", startAt: "2026-10-17T03:00:00Z" };
+  it("ไม่ส่งรูปแทรกมา = ไม่แตะของเดิม (หน้าจัดการรุ่นเก่า) · ส่งมา = เก็บ (ไม่เกิน 20 ชิ้น · ทิ้งค่าที่ไม่ใช่ object)", async () => {
+    const { dropToRow, dropFromRow } = await import("../website-new-drops");
+    const a = normalizeDropInput(base);
+    expect(a.ok && "inserts" in a.value).toBe(false);
+    if (a.ok) expect("inserts" in dropToRow(a.value)).toBe(false);
+    const b = normalizeDropInput({ ...base, inserts: [{ id: "x" }, "bad", null, ...Array.from({ length: 30 }, (_, i) => ({ id: `i${i}` }))] });
+    expect(b.ok && b.value.inserts?.length).toBe(20);
+    if (b.ok) expect(dropToRow(b.value).inserts).toHaveLength(20);
+    expect(dropFromRow({ id: "d", inserts: null }).inserts).toEqual([]);
+  });
+  it("ทำความสะอาดด้วยของกลางหน้ารายการ: ค่าเพี้ยน = ค่าเริ่ม · ข้อความอังกฤษไม่หาย", async () => {
+    const { normalizeListingInserts } = await import("../website-listing");
+    const [x] = normalizeListingInserts([{ id: "ins-1", imageKey: "storefront-drops/a.jpg", after: 3, size: "2x2", link: "javascript:alert(1)", title: "New ROARs", title_en: "New ROARs EN", text_en: "Shop now", _i18n: { title: { h: "abc" } } }]);
+    expect(x).toMatchObject({ id: "ins-1", after: 3, size: "2x2", link: "", title: "New ROARs", title_en: "New ROARs EN", text_en: "Shop now", _i18n: { title: { h: "abc" } } });
+    const [y] = normalizeListingInserts([{ id: "ins-2", size: "huge", after: -5 }]);
+    expect(y).toMatchObject({ size: "2x1", after: 0, enabled: true });
+    expect("title_en" in y).toBe(false);
+  });
+});

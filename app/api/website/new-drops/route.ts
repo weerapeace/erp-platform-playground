@@ -14,12 +14,16 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { dropFromRow, dropToRow, normalizeDropInput } from "@/lib/website-new-drops";
+import { normalizeListingInserts } from "@/lib/website-listing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const COLS = "id, title, title_en, subtitle, subtitle_en, image_key, image_mobile_key, codes, start_at, end_at, hide_until_start";
+const COLS = "id, title, title_en, subtitle, subtitle_en, image_key, image_mobile_key, codes, start_at, end_at, hide_until_start, inserts";
+
+/** 🖼 รูปแทรกของชุด → ทำความสะอาดด้วยของกลางหน้ารายการสินค้า (ไม่ส่งมา = คงเดิม) */
+const cleanInserts = <T extends { inserts?: unknown[] }>(v: T): T => (v.inserts ? { ...v, inserts: normalizeListingInserts(v.inserts) } : v);
 
 async function shopIdOf(sb: ReturnType<typeof supabaseAdmin>, p: URLSearchParams): Promise<string | null> {
   const id = (p.get("shopId") ?? "").trim();
@@ -75,7 +79,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("store_new_drops")
-    .insert({ ...dropToRow(v.value), shop_id: shopId, created_by: who.name })
+    .insert({ ...dropToRow(cleanInserts(v.value)), shop_id: shopId, created_by: who.name })
     .select(COLS)
     .single();
   if (error || !data) return NextResponse.json({ error: "สร้างชุดไม่สำเร็จ" }, { status: 500 });
@@ -103,7 +107,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!before) return NextResponse.json({ error: "ไม่พบชุดนี้" }, { status: 404 });
   const { data, error } = await sb
     .from("store_new_drops")
-    .update({ ...dropToRow(v.value), updated_at: new Date().toISOString() })
+    .update({ ...dropToRow(cleanInserts(v.value)), updated_at: new Date().toISOString() })
     .eq("id", id)
     .select(COLS)
     .single();

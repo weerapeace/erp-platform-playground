@@ -28,6 +28,10 @@ export interface ListingInsert {
   link: string;
   title: string;
   text: string;
+  /** 🌐 ภาษาอังกฤษ (หน้า /en) + สถานะแปล (LangInput) — ไม่มี = ใช้ไทย */
+  title_en?: string;
+  text_en?: string;
+  _i18n?: Record<string, unknown>;
   textPos: ListingTextPos;
   textColor: "light" | "dark";
   /** สัดส่วนเมื่อรูปอยู่เต็มแถว (คอม) */
@@ -277,14 +281,14 @@ export const newListingInsert = (after = 4): ListingInsert => ({
   ratioMobile: "4:5",
 });
 
-export function normalizeListing(raw: unknown): ListingConfig {
-  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+/** 🖼 รูปแทรกในกริดสินค้า (ของกลาง — หน้ารายการสินค้า + ชุดมาใหม่รายชุด) → รายการที่ใช้ได้ · ค่าเพี้ยน = ค่าเริ่ม · id ซ้ำ/ไม่มี = ทิ้ง · สูงสุด MAX_LISTING_INSERTS */
+export function normalizeListingInserts(v: unknown): ListingInsert[] {
   const one = <T extends string>(v: unknown, allowed: readonly T[], fb: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fb);
   const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
   const key = (v: unknown) => (typeof v === "string" && KEY_RE.test(v) ? v : null);
   const seen = new Set<string>();
   const inserts: ListingInsert[] = [];
-  for (const x of Array.isArray(r.inserts) ? r.inserts : []) {
+  for (const x of Array.isArray(v) ? v : []) {
     if (!x || typeof x !== "object") continue;
     const o = x as Record<string, unknown>;
     const id = typeof o.id === "string" && /^[\w-]{1,40}$/.test(o.id) ? o.id : null;
@@ -305,6 +309,10 @@ export function normalizeListing(raw: unknown): ListingConfig {
       link: /^(\/|https?:\/\/)/i.test(link) ? link : "",
       title: str(o.title, 120),
       text: str(o.text, 300),
+      // 🌐 2 ภาษา: เก็บไว้ ไม่งั้นข้อความอังกฤษหายตอนบันทึก
+      ...(str(o.title_en, 120) ? { title_en: str(o.title_en, 120) } : {}),
+      ...(str(o.text_en, 300) ? { text_en: str(o.text_en, 300) } : {}),
+      ...(o._i18n && typeof o._i18n === "object" && !Array.isArray(o._i18n) ? { _i18n: o._i18n as Record<string, unknown> } : {}),
       textPos: one(o.textPos, ["bottom-left", "bottom-center", "center", "top-left"] as const, "bottom-left"),
       textColor: one(o.textColor, ["light", "dark"] as const, "light"),
       ratio: one(o.ratio, LISTING_RATIOS, "21:9"),
@@ -312,6 +320,12 @@ export function normalizeListing(raw: unknown): ListingConfig {
     });
     if (inserts.length >= MAX_LISTING_INSERTS) break;
   }
+  return inserts;
+}
+
+export function normalizeListing(raw: unknown): ListingConfig {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const inserts = normalizeListingInserts(r.inserts);
   return { inserts, colorFilter: r.colorFilter !== false, filterLayout: r.filterLayout === "top" ? "top" : "side", filterSidebar: r.filterSidebar === "collapsed" ? "collapsed" : "open", filters: normalizeShopFilters(r.filters, r.colorFilter === false), priceBreaks: normalizePriceBreaks(r.priceBreaks), sizeBreaks: normalizeSizeBreaks(r.sizeBreaks), newDays: Number.isFinite(Number(r.newDays)) && Number(r.newDays) >= 1 ? Math.min(365, Math.round(Number(r.newDays))) : 30, ...normalizeListingLayout(r) };
 }
 

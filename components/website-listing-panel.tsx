@@ -43,21 +43,6 @@ export function ListingPanel({
   /** ค่าต่อแถวของ "การ์ดสินค้า" ทั้งเว็บ (ตัวตั้งต่อแถวเฉพาะหน้านี้เริ่มจากค่านี้) */
   cardColumns?: { desktop: number; tablet: number; mobile: number };
 }) {
-  const list = value.inserts;
-  const set = (inserts: ListingInsert[]) => onChange({ ...value, inserts });
-  const patch = (id: string, p: Partial<ListingInsert>) => set(list.map((x) => (x.id === id ? { ...x, ...p } : x)));
-  const drag = useDragReorder((from, to) => set(moveItem(list, from, to)));
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [del, setDel] = useState<ListingInsert | null>(null);
-
-  const catLabel = (k: string) => categories.find((c) => c.key === k)?.label ?? k;
-  const summary = (x: ListingInsert) =>
-    [
-      x.after === 0 ? "ก่อนสินค้าชิ้นแรก" : `หลังสินค้าชิ้นที่ ${x.after}`,
-      LISTING_SIZES.find((s) => s.value === x.size)?.label.replace(/ \(.*\)$/, ""),
-      x.scope === "all" ? "ทุกหน้า" : x.scope === "shop" ? "เฉพาะหน้าทั้งหมด" : x.categories.map(catLabel).join(", ") || "ยังไม่เลือกหมวด",
-    ].join(" · ");
-
   return (
     <div className="space-y-3">
       {/* 📐 หัวหน้า · ต่อแถว · แบ่งหน้า · การเรียง */}
@@ -112,12 +97,64 @@ export function ListingPanel({
         <ShopFiltersEditor value={value} onChange={onChange} fields={fields} />
       </div>
 
-      <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
-        แทรกรูป (เช่น รูปนายแบบ/ไลฟ์สไตล์) ระหว่างการ์ดสินค้าในหน้า <b>สินค้าทั้งหมด</b> และหน้าหมวด · เพิ่มได้หลายรูป ลาก ⠿ เพื่อเรียง
-        <br />
-        กฎบนเว็บ: โชว์เฉพาะตอนลูกค้าเรียงแบบ &quot;แนะนำ&quot; และไม่ได้ค้นหา/กดตัวกรอง · ถ้าหมวดนั้นมีสินค้าน้อยกว่าลำดับที่ตั้ง รูปนั้นจะไม่โชว์ · ระบบดึงการ์ดมาเติมช่องว่างให้เอง (ไม่มีรูโหว่) · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว
-      </div>
+      {/* 🖼 รูปแทรกในกริดสินค้า — ของกลาง ListingInsertsEditor (ชุดมาใหม่รายชุดใช้ตัวเดียวกัน) */}
+      <ListingInsertsEditor list={value.inserts} onChange={(inserts) => onChange({ ...value, inserts })} categories={categories} products={products} linkCtx={linkCtx} />
+    </div>
+  );
+}
 
+/**
+ * 🖼 ตัวจัดรูปแทรกในกริดสินค้า (ของกลาง) — หน้ารายการสินค้า (ListingPanel) + ชุดมาใหม่รายชุด (website-new-drops-panel)
+ *   where "listing" = มีช่อง "โชว์ในหน้า" (ทุกหน้า/เฉพาะหน้าทั้งหมด/เลือกหมวด) · "drop" = ตารางสินค้าของชุดนั้น (ไม่มีช่องหน้า)
+ *   ค่า = ListingInsert[] (lib/website-listing) · เว็บร้านวาดด้วย ListingInsertTile
+ */
+export function ListingInsertsEditor({
+  list,
+  onChange,
+  categories,
+  products,
+  linkCtx,
+  where = "listing",
+}: {
+  list: ListingInsert[];
+  onChange: (inserts: ListingInsert[]) => void;
+  categories: { key: string; label: string; parent?: string | null }[];
+  products: { code: string; name: string }[];
+  linkCtx?: SchemaFormContext;
+  where?: "listing" | "drop";
+}) {
+  const set = (inserts: ListingInsert[]) => onChange(inserts);
+  const patch = (id: string, p: Partial<ListingInsert>) => set(list.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const drag = useDragReorder((from, to) => set(moveItem(list, from, to)));
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [del, setDel] = useState<ListingInsert | null>(null);
+
+  const catLabel = (k: string) => categories.find((c) => c.key === k)?.label ?? k;
+  const summary = (x: ListingInsert) =>
+    [
+      x.after === 0 ? "ก่อนสินค้าชิ้นแรก" : `หลังสินค้าชิ้นที่ ${x.after}`,
+      LISTING_SIZES.find((s) => s.value === x.size)?.label.replace(/ \(.*\)$/, ""),
+      where === "listing" ? (x.scope === "all" ? "ทุกหน้า" : x.scope === "shop" ? "เฉพาะหน้าทั้งหมด" : x.categories.map(catLabel).join(", ") || "ยังไม่เลือกหมวด") : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+  return (
+    <div className="space-y-3">
+      {where === "listing" ? (
+        <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
+          แทรกรูป (เช่น รูปนายแบบ/ไลฟ์สไตล์) ระหว่างการ์ดสินค้าในหน้า <b>สินค้าทั้งหมด</b> และหน้าหมวด · เพิ่มได้หลายรูป ลาก ⠿ เพื่อเรียง
+          <br />
+          กฎบนเว็บ: โชว์เฉพาะตอนลูกค้าเรียงแบบ &quot;แนะนำ&quot; และไม่ได้ค้นหา/กดตัวกรอง · ถ้าหมวดนั้นมีสินค้าน้อยกว่าลำดับที่ตั้ง รูปนั้นจะไม่โชว์ · ระบบดึงการ์ดมาเติมช่องว่างให้เอง (ไม่มีรูโหว่) · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว
+        </div>
+
+      ) : (
+        <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
+          แทรกรูป (เช่น รูปลุค/นายแบบของชุดนี้) ระหว่างการ์ดสินค้าในตารางของชุดนี้ — Section ชุดมาใหม่ + หน้า /new/&lt;ชุด&gt; · เพิ่มได้หลายรูป ลาก ⠿ เพื่อเรียง
+          <br />
+          ชุดมีสินค้าน้อยกว่าลำดับที่ตั้ง = รูปต่อท้ายสุด · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว · บันทึกชุดแล้วเว็บอัปเดตภายใน ~1 นาที
+        </div>
+      )}
       {list.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400">ยังไม่มีรูปแทรก — กด “＋ เพิ่มรูปแทรก” ด้านล่าง</div>
       )}
@@ -170,15 +207,17 @@ export function ListingPanel({
                       </select>
                       <p className="text-[10px] text-slate-400 mt-0.5">{LISTING_SIZES.find((o) => o.value === x.size)?.hint}</p>
                     </div>
+                    {where === "listing" && (
                     <div>
                       <label className={lbl}>โชว์ในหน้า</label>
                       <select className={inputCls} value={x.scope} onChange={(e) => patch(x.id, { scope: e.target.value as ListingInsert["scope"] })}>
                         {LISTING_SCOPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                     </div>
+                    )}
                   </div>
 
-                  {x.scope === "categories" && (
+                  {where === "listing" && x.scope === "categories" && (
                     <div className="flex flex-wrap gap-1.5">
                       {categories.length === 0 && <span className="text-[11px] text-slate-400">ร้านนี้ยังไม่มีหมวด (ตั้งที่แท็บ ⚙️ จับคู่ฟิลด์)</span>}
                       {categories.map((c) => {
@@ -289,7 +328,7 @@ export function ListingPanel({
           setDel(null);
         }}
         title="ลบรูปแทรกนี้?"
-        message={`ลบ "${del?.title || "รูปแทรก"}" ออกจากหน้ารายการสินค้า — ยังไม่หายจากเว็บจริงจนกว่าจะกดเผยแพร่ (ย้อนได้ด้วยปุ่มเลิกทำ)`}
+        message={where === "listing" ? `ลบ "${del?.title || "รูปแทรก"}" ออกจากหน้ารายการสินค้า — ยังไม่หายจากเว็บจริงจนกว่าจะกดเผยแพร่ (ย้อนได้ด้วยปุ่มเลิกทำ)` : `ลบ "${del?.title || "รูปแทรก"}" ออกจากชุดนี้ — ยังไม่หายจากเว็บจริงจนกว่าจะกดบันทึกชุด`}
         confirmText="ลบรูป"
         variant="danger"
       />

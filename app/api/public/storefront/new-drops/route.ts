@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { dropFromRow, dropStatus, orderDrops, type NewDrop } from "@/lib/website-new-drops";
+import { normalizeListingInserts } from "@/lib/website-listing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data } = await sb
     .from("store_new_drops")
-    .select("id, title, title_en, subtitle, subtitle_en, image_key, image_mobile_key, codes, start_at, end_at, hide_until_start")
+    .select("id, title, title_en, subtitle, subtitle_en, image_key, image_mobile_key, codes, start_at, end_at, hide_until_start, inserts")
     .eq("shop_id", s.id)
     .order("start_at", { ascending: false })
     .limit(60);
@@ -56,6 +57,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     endAt: d.endAt,
     status: dropStatus(d, now),
     codes: withCodes ? d.codes : [],
+    // 🖼 รูปแทรกในตารางสินค้าของชุด (เฉพาะชุดที่เปิดแล้ว · เปิดอยู่ + มีรูป) — เว็บร้านวาดด้วยของกลาง ListingInsertTile
+    inserts: withCodes ? normalizeListingInserts(d.inserts).filter((x) => x.enabled && x.imageKey) : [],
   });
   const { upcoming, started } = orderDrops(drops, now);
   return json({

@@ -5,6 +5,7 @@
  * เว็บร้าน: หน้า /new (ชุดล่าสุด + ชุดก่อน ๆ + "เร็ว ๆ นี้" นับถอยหลัง) · ป้าย "ใหม่" บนการ์ด · Section แหล่ง "ชุดมาใหม่ที่เปิดอยู่"
  * ข้อมูล: /api/website/new-drops (ตาราง store_new_drops) · กฎกลาง lib/website-new-drops
  * ของกลาง: ERPModal · ConfirmDialog · WebsiteProductPicker · MediaUploadField · ERPDateTime24 · 2 ภาษา (RecordLangBar + BilingualText)
+ *   · 🖼 รูปแทรกในตารางสินค้ารายชุด = ListingInsertsEditor (ตัวเดียวกับหน้ารายการสินค้า)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -16,6 +17,8 @@ import { ERPDateTime24 } from "@/components/form";
 import { BilingualText, ContentLangProvider, RecordLangBar } from "@/components/bilingual-field";
 import { DROP_DEFAULT_DAYS, DROP_MAX_CODES, DROP_STATUS_LABEL, dropStatus, orderDrops, type DropStatus, type NewDrop } from "@/lib/website-new-drops";
 import { DropPageBuilder } from "@/components/website-drop-page-builder";
+import { ListingInsertsEditor } from "@/components/website-listing-panel";
+import { normalizeListingInserts } from "@/lib/website-listing";
 
 const keyUrl = (key: string, w = 480) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 /** ISO ↔ เวลาไทย "YYYY-MM-DDTHH:mm" (ช่อง ERPDateTime24) */
@@ -41,7 +44,7 @@ type Draft = Omit<NewDrop, "id"> & { id?: string; _i18n?: unknown };
 const blank = (): Draft => {
   const start = new Date(Date.now() + 86400000);
   start.setUTCHours(3, 0, 0, 0); // 10:00 เวลาไทย พรุ่งนี้
-  return { title: "", title_en: "", subtitle: "", subtitle_en: "", imageKey: null, imageMobileKey: null, codes: [], startAt: start.toISOString(), endAt: new Date(start.getTime() + DROP_DEFAULT_DAYS * 86400000).toISOString(), hideUntilStart: true };
+  return { title: "", title_en: "", subtitle: "", subtitle_en: "", imageKey: null, imageMobileKey: null, codes: [], startAt: start.toISOString(), endAt: new Date(start.getTime() + DROP_DEFAULT_DAYS * 86400000).toISOString(), hideUntilStart: true, inserts: [] };
 };
 
 export function WebsiteNewDropsPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
@@ -296,6 +299,18 @@ export function WebsiteNewDropsPanel({ shopSlug, shopId }: { shopSlug: string; s
               <div className="grid gap-3 sm:grid-cols-2">
                 <MediaUploadField label="🖥 รูปปก คอม (16:9)" hint="แนะนำ 2560×1440 · โชว์หัวชุดในหน้า /new และการ์ด เร็ว ๆ นี้" value={e.imageKey ? { kind: "image", key: e.imageKey } : null} onChange={(m) => setEdit({ ...e, imageKey: m?.key ?? null })} allowVideo={false} folder="storefront-drops" previewRatio="16 / 9" />
                 <MediaUploadField label="📱 รูปปก มือถือ (4:5)" hint="แนะนำ 1080×1350 · ว่าง = ใช้ของคอม" value={e.imageMobileKey ? { kind: "image", key: e.imageMobileKey } : null} onChange={(m) => setEdit({ ...e, imageMobileKey: m?.key ?? null })} allowVideo={false} folder="storefront-drops" previewRatio="4 / 5" />
+              </div>
+
+              {/* 🖼 รูปแทรกในตารางสินค้าของชุดนี้ — ของกลางเดียวกับรูปแทรกหน้ารายการสินค้า (ListingInsertsEditor) */}
+              <div>
+                <span className="block text-[11px] font-medium text-slate-500 mb-1">🖼 รูปแทรกในตารางสินค้าของชุด (ไม่ใส่ก็ได้)</span>
+                <ListingInsertsEditor
+                  where="drop"
+                  list={normalizeListingInserts(e.inserts)}
+                  onChange={(inserts) => setEdit({ ...e, inserts })}
+                  categories={[]}
+                  products={e.codes.map((code) => ({ code, name: "" }))}
+                />
               </div>
             </div>
           </ContentLangProvider>
