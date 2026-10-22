@@ -183,7 +183,8 @@ describe("ตัวอักษรหัวข้อต่อ Section + มื�
 
   it("บล็อกเก่าไม่เคยตั้ง = ตามเดิมทุกช่อง (หน้าเว็บไม่เปลี่ยน)", () => {
     const st = styleOf(undefined);
-    expect(st.text).toEqual({ font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "", spacing: "auto", upper: false, italic: false });
+    expect(st.text).toEqual({ ...DEFAULT_BLOCK_STYLE.text });
+    expect(Object.values(st.text).every((v) => v === "auto" || v === "" || v === false)).toBe(true);
     expect(st.mobile).toMatchObject({ hSize: "auto", hideEyebrow: false, hideSub: false });
   });
 
@@ -579,5 +580,23 @@ describe("🃏 ชุดหน้าตาการ์ดสำเร็จร�
   it("ค่าเริ่ม = การ์ดเดิม (ราคาใต้ชื่อ · ราคาหนา · จุดสีกลมใต้ราคา)", () => {
     const [n] = normalizeBlocks([{ id: "p-card", type: "products" }]) as unknown as Record<string, unknown>[];
     expect([n.cardInfo, n.cardPriceWeight, n.cardSwatchPos, n.cardSwatchShape, n.cardNameUpper, n.cardLook]).toEqual(["stack", "600", "below", "circle", false, ""]);
+  });
+});
+
+describe("🔤 ตัวอักษรต่อ Section — ตัวเล็กเหนือหัวข้อ · เนื้อหา · ปุ่ม", () => {
+  it("ข้อมูลเดิม (มีแค่หัวข้อ) → ช่องใหม่ = ตามเดิมทุกช่อง", () => {
+    const [n] = normalizeBlocks([{ id: "t1", type: "cta", style: { text: { font: "Kanit", upper: true } } }]);
+    const tx = n.style.text;
+    expect([tx.font, tx.upper]).toEqual(["Kanit", true]);
+    expect([tx.eyeFont, tx.eyeSize, tx.eyeSpacing, tx.eyeCase, tx.bodyFont, tx.bodyColor, tx.bodySpacing, tx.bodyUpper, tx.btnFont, tx.btnCase, tx.btnSpacing]).toEqual(["auto", "auto", "auto", "auto", "auto", "auto", "auto", false, "auto", "auto", "auto"]);
+  });
+  it("ตั้งค่าได้ · ค่าแปลก = ตามเดิม · สีเองไม่มีรหัสสี = ตามเดิม", () => {
+    const [n] = normalizeBlocks([
+      { id: "t2", type: "cta", style: { text: { eyeFont: "Kanit", eyeSize: "l", eyeCase: "normal", bodyFont: "Comic Sans", bodyColor: "custom", bodyColorHex: "", bodyUpper: true, btnCase: "upper", btnSpacing: "wider" } } },
+      { id: "t3", type: "cta", style: { text: { bodyColor: "custom", bodyColorHex: "#AA3355" } } },
+    ]);
+    const tx = n.style.text;
+    expect([tx.eyeFont, tx.eyeSize, tx.eyeCase, tx.bodyFont, tx.bodyColor, tx.bodyUpper, tx.btnCase, tx.btnSpacing]).toEqual(["Kanit", "l", "normal", "auto", "auto", true, "upper", "wider"]);
+    expect([normalizeBlocks([{ id: "t3", type: "cta", style: { text: { bodyColor: "custom", bodyColorHex: "#AA3355" } } }])[0].style.text.bodyColorHex]).toEqual(["#aa3355"]);
   });
 });

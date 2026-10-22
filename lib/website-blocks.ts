@@ -160,8 +160,52 @@ export interface BlockText {
   spacing: TextSpacing;
   upper: boolean;
   italic: boolean;
+  /** ── ตัวเล็กเหนือหัวข้อ (.eyebrow) ── ฟอนต์ · ขนาด · ระยะตัวอักษร · ตัวพิมพ์ */
+  eyeFont: string;
+  eyeSize: EyeSize;
+  eyeSpacing: TextSpacing;
+  eyeCase: TextCase;
+  /** ── เนื้อหาใน Section (ชื่อการ์ด/ราคา/คำอธิบาย/คำโปรย) ── ฟอนต์ · สี · ระยะตัวอักษร · ตัวพิมพ์ใหญ่ */
+  bodyFont: string;
+  bodyColor: string;
+  bodyColorHex: string;
+  bodySpacing: TextSpacing;
+  bodyUpper: boolean;
+  /** ── ปุ่มใน Section (.btn) ── ฟอนต์ · ตัวพิมพ์ · ระยะตัวอักษร */
+  btnFont: string;
+  btnCase: TextCase;
+  btnSpacing: TextSpacing;
 }
-export const DEFAULT_BLOCK_TEXT: BlockText = { font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "", spacing: "auto", upper: false, italic: false };
+/** ตัวพิมพ์: auto = ตามเดิม · upper = ตัวพิมพ์ใหญ่ทั้งหมด · normal = ตามที่พิมพ์ (ปิดตัวพิมพ์ใหญ่ที่ธีมบังคับ) */
+export type TextCase = "auto" | "upper" | "normal";
+export const TEXT_CASES: readonly TextCase[] = ["auto", "upper", "normal"];
+/** ขนาดตัวเล็กเหนือหัวข้อ */
+export type EyeSize = "auto" | "s" | "m" | "l";
+export const EYE_SIZES: readonly EyeSize[] = ["auto", "s", "m", "l"];
+export const DEFAULT_BLOCK_TEXT: BlockText = {
+  font: "auto",
+  size: "auto",
+  weight: "auto",
+  color: "auto",
+  colorHex: "",
+  subColor: "auto",
+  subColorHex: "",
+  spacing: "auto",
+  upper: false,
+  italic: false,
+  eyeFont: "auto",
+  eyeSize: "auto",
+  eyeSpacing: "auto",
+  eyeCase: "auto",
+  bodyFont: "auto",
+  bodyColor: "auto",
+  bodyColorHex: "",
+  bodySpacing: "auto",
+  bodyUpper: false,
+  btnFont: "auto",
+  btnCase: "auto",
+  btnSpacing: "auto",
+};
 
 /** ลูกเล่น — โผล่ตอนเลื่อนถึง / ตอนชี้เมาส์ · "none" = ไม่มี (ค่าเริ่มต้น หน้าเว็บเหมือนเดิม) */
 export type MotionEntrance = "none" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom" | "pop" | "spin-in" | "blur";
@@ -1216,6 +1260,8 @@ export function sanitizeStyle(v: unknown): BlockStyle {
   const subColorHex = hex(tx.subColorHex);
   const color = pickOne(tx.color, TEXT_COLORS, "auto");
   const subColor = pickOne(tx.subColor, TEXT_COLORS, "auto");
+  const bodyColorHex = hex(tx.bodyColorHex);
+  const bodyColor = pickOne(tx.bodyColor, TEXT_COLORS, "auto");
   return {
     padTop: pickOne(o.padTop, BLOCK_SPACINGS, d.padTop),
     padBottom: pickOne(o.padBottom, BLOCK_SPACINGS, d.padBottom),
@@ -1247,6 +1293,18 @@ export function sanitizeStyle(v: unknown): BlockStyle {
       spacing: pickOne(tx.spacing, TEXT_SPACINGS, "auto"),
       upper: tx.upper === true,
       italic: tx.italic === true,
+      eyeFont: pickOne(tx.eyeFont, TEXT_FONTS, "auto"),
+      eyeSize: pickOne(tx.eyeSize, EYE_SIZES, "auto"),
+      eyeSpacing: pickOne(tx.eyeSpacing, TEXT_SPACINGS, "auto"),
+      eyeCase: pickOne(tx.eyeCase, TEXT_CASES, "auto"),
+      bodyFont: pickOne(tx.bodyFont, TEXT_FONTS, "auto"),
+      bodyColor: bodyColor === "custom" && !bodyColorHex ? "auto" : bodyColor,
+      bodyColorHex,
+      bodySpacing: pickOne(tx.bodySpacing, TEXT_SPACINGS, "auto"),
+      bodyUpper: tx.bodyUpper === true,
+      btnFont: pickOne(tx.btnFont, TEXT_FONTS, "auto"),
+      btnCase: pickOne(tx.btnCase, TEXT_CASES, "auto"),
+      btnSpacing: pickOne(tx.btnSpacing, TEXT_SPACINGS, "auto"),
     },
     motion: {
       entrance: pickOne(mo.entrance, MOTION_ENTRANCES, "none"),

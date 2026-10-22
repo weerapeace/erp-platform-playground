@@ -14,7 +14,7 @@ import { useWheelStep } from "@/components/wheel-select";
 import { ColorInput } from "@/components/color-picker";
 import { GradientPicker } from "@/components/website-gradient-picker";
 import { GRADIENT_PRESETS } from "@/lib/website-gradient";
-import { DEFAULT_BG_IMAGE, DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockBgImage, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type TextSpacing, type Visibility } from "@/lib/website-blocks";
+import { DEFAULT_BG_IMAGE, DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockBgImage, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type TextSpacing, type TextCase, type EyeSize, type Visibility } from "@/lib/website-blocks";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { RangeInput } from "@/components/range-input";
 import { CANVAS_WEIGHTS } from "@/lib/website-canvas";
@@ -151,6 +151,35 @@ const H_SIZE: { v: TextSize; l: string }[] = [
  * mode: "all" = หัวพับได้ + 3 แท็บ (แบบเดิม) · "style" = เฉพาะ ทุกจอ/มือถือ ไม่มีหัว · "motion" = เฉพาะลูกเล่น ไม่มีหัว
  * (ตัวจัดหน้าใหม่แยก "รูปลักษณ์" กับ "ลูกเล่น" เป็นแท็บของแผงขวาเอง จึงเรียกทีละโหมด)
  */
+/** ตัวเลือกระยะห่างตัวอักษร / ตัวพิมพ์ — ใช้ร่วมทุกส่วนในแท็บ 🔤 ตัวอักษร */
+const SPACING_OPTS: { v: TextSpacing; l: string }[] = [
+  { v: "auto", l: "ตามเดิม" },
+  { v: "tight", l: "ชิด" },
+  { v: "wide", l: "ห่าง" },
+  { v: "wider", l: "ห่างมาก" },
+];
+const CASE_OPTS: { v: TextCase; l: string }[] = [
+  { v: "auto", l: "ตามเดิม" },
+  { v: "upper", l: "ตัวพิมพ์ใหญ่" },
+  { v: "normal", l: "ตามที่พิมพ์" },
+];
+
+/** กลุ่มพับได้ในแท็บ 🔤 ตัวอักษร (• = ตั้งค่าไว้แล้ว) */
+function TextGroup({ title, touched, defaultOpen = false, children }: { title: string; touched: boolean; defaultOpen?: boolean; children: React.ReactNode }) {
+  return (
+    <details open={defaultOpen || touched} className="group rounded-lg border border-slate-200 bg-white">
+      <summary className="flex cursor-pointer select-none items-center justify-between px-3 py-2 text-xs font-medium text-slate-700">
+        <span>
+          {title}
+          {touched && <span className="ml-1 text-blue-600">•</span>}
+        </span>
+        <span className="text-slate-400 group-open:rotate-180 transition-transform">▾</span>
+      </summary>
+      <div className="space-y-3 border-t border-slate-100 px-3 py-3">{children}</div>
+    </details>
+  );
+}
+
 export function StylePanel({
   value,
   onChange,
@@ -197,7 +226,7 @@ export function StylePanel({
 
   const tabs = [
     { k: "all" as const, l: "🖥️ ทุกจอ" },
-    ...(hasHeading ? [{ k: "text" as const, l: `🔤 ตัวอักษร${textTouched ? " •" : ""}` }] : []),
+    { k: "text" as const, l: `🔤 ตัวอักษร${textTouched ? " •" : ""}` },
     { k: "mobile" as const, l: `📲 มือถือ${mobileTouched ? " •" : ""}` },
     { k: "motion" as const, l: `✨ ลูกเล่น${motionTouched ? " •" : ""}` },
   ].filter((t) => (mode === "style" ? t.k !== "motion" : mode === "motion" ? t.k === "motion" : true));
@@ -280,7 +309,9 @@ export function StylePanel({
             </div>
           ) : tab === "text" ? (
             <div className="space-y-3">
-              <p className="text-[11px] text-slate-400">มีผลกับหัวข้อใหญ่ · ตัวเล็กเหนือหัวข้อ · คำโปรยใต้หัวข้อ ของ Section นี้ (ไม่แตะชื่อสินค้า/การ์ด) · &quot;ตามเดิม&quot; = ตามธีมร้าน</p>
+              <p className="text-[11px] text-slate-400">ตั้งเฉพาะ Section นี้ · แบ่ง 4 ส่วน: หัวข้อใหญ่ · ตัวเล็กเหนือหัวข้อ · เนื้อหา (ชื่อการ์ด/ราคา/คำอธิบาย) · ปุ่ม · &quot;ตามเดิม&quot; = ตามธีมร้าน</p>
+              {hasHeading && (
+              <TextGroup title="หัวข้อใหญ่" touched={["font", "size", "weight", "color", "spacing", "upper", "italic"].some((k) => s.text[k as keyof BlockText] !== DEFAULT_BLOCK_TEXT[k as keyof BlockText])} defaultOpen>
               <Field label="ฟอนต์หัวข้อ">
                 <FontPickList value={s.text.font} onPick={(v) => setT({ font: v })} fontNames={fontNames} autoLabel="ตามเดิม (ฟอนต์หัวข้อของธีม)" />
               </Field>
@@ -314,9 +345,44 @@ export function StylePanel({
               <Field label="สีหัวข้อ">
                 <ColorSwatches theme={theme} value={s.text.color} hex={s.text.colorHex} autoLabel="ตามเดิม" onPick={(v, hex) => setT(v === "custom" ? { color: v, colorHex: hex ?? s.text.colorHex } : { color: v })} />
               </Field>
-              <Field label="สีตัวเล็กเหนือหัวข้อ + คำโปรย">
-                <ColorSwatches theme={theme} value={s.text.subColor} hex={s.text.subColorHex} autoLabel="ตามเดิม" onPick={(v, hex) => setT(v === "custom" ? { subColor: v, subColorHex: hex ?? s.text.subColorHex } : { subColor: v })} />
-              </Field>
+              </TextGroup>
+              )}
+              {hasHeading && (
+              <TextGroup title="ตัวเล็กเหนือหัวข้อ + คำโปรย" touched={["eyeFont", "eyeSize", "eyeSpacing", "eyeCase", "subColor"].some((k) => s.text[k as keyof BlockText] !== DEFAULT_BLOCK_TEXT[k as keyof BlockText])}>
+                <Field label="ฟอนต์ตัวเล็กเหนือหัวข้อ">
+                  <FontPickList value={s.text.eyeFont} onPick={(v) => setT({ eyeFont: v })} fontNames={fontNames} autoLabel="ตามเดิม (ฟอนต์เนื้อหาของธีม)" />
+                </Field>
+                <Field label="ขนาด">
+                  <Seg<EyeSize> wheel value={s.text.eyeSize} onChange={(v) => setT({ eyeSize: v })} options={[{ v: "auto", l: "ตามเดิม" }, { v: "s", l: "เล็ก" }, { v: "m", l: "กลาง" }, { v: "l", l: "ใหญ่" }]} />
+                </Field>
+                <Field label="ระยะห่างตัวอักษร"><Seg<TextSpacing> wheel value={s.text.eyeSpacing} onChange={(v) => setT({ eyeSpacing: v })} options={SPACING_OPTS} /></Field>
+                <Field label="ตัวพิมพ์"><Seg<TextCase> wheel value={s.text.eyeCase} onChange={(v) => setT({ eyeCase: v })} options={CASE_OPTS} /></Field>
+                <Field label="สีตัวเล็กเหนือหัวข้อ + คำโปรย">
+                  <ColorSwatches theme={theme} value={s.text.subColor} hex={s.text.subColorHex} autoLabel="ตามเดิม" onPick={(v, hex) => setT(v === "custom" ? { subColor: v, subColorHex: hex ?? s.text.subColorHex } : { subColor: v })} />
+                </Field>
+              </TextGroup>
+              )}
+              <TextGroup title="เนื้อหา (ชื่อการ์ด · ราคา · คำอธิบาย)" touched={["bodyFont", "bodyColor", "bodySpacing", "bodyUpper"].some((k) => s.text[k as keyof BlockText] !== DEFAULT_BLOCK_TEXT[k as keyof BlockText])}>
+                <Field label="ฟอนต์เนื้อหา">
+                  <FontPickList value={s.text.bodyFont} onPick={(v) => setT({ bodyFont: v })} fontNames={fontNames} autoLabel="ตามเดิม (ตามธีม)" />
+                </Field>
+                <Field label="ระยะห่างตัวอักษร"><Seg<TextSpacing> wheel value={s.text.bodySpacing} onChange={(v) => setT({ bodySpacing: v })} options={SPACING_OPTS} /></Field>
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+                  <input type="checkbox" checked={s.text.bodyUpper} onChange={(e) => setT({ bodyUpper: e.target.checked })} />
+                  ตัวพิมพ์ใหญ่ทั้งหมด (อังกฤษ)
+                </label>
+                <Field label="สีเนื้อหา">
+                  <ColorSwatches theme={theme} value={s.text.bodyColor} hex={s.text.bodyColorHex} autoLabel="ตามเดิม" onPick={(v, hex) => setT(v === "custom" ? { bodyColor: v, bodyColorHex: hex ?? s.text.bodyColorHex } : { bodyColor: v })} />
+                </Field>
+                <p className="text-[11px] text-slate-400">ขนาดชื่อการ์ด/ราคา ตั้งที่ ดีไซน์ → การ์ดสินค้า (หรือ 🃏 การ์ดในส่วนนี้)</p>
+              </TextGroup>
+              <TextGroup title="ปุ่ม" touched={["btnFont", "btnCase", "btnSpacing"].some((k) => s.text[k as keyof BlockText] !== DEFAULT_BLOCK_TEXT[k as keyof BlockText])}>
+                <Field label="ฟอนต์ปุ่ม">
+                  <FontPickList value={s.text.btnFont} onPick={(v) => setT({ btnFont: v })} fontNames={fontNames} autoLabel="ตามเดิม (ตามธีม)" />
+                </Field>
+                <Field label="ตัวพิมพ์"><Seg<TextCase> wheel value={s.text.btnCase} onChange={(v) => setT({ btnCase: v })} options={CASE_OPTS} /></Field>
+                <Field label="ระยะห่างตัวอักษร"><Seg<TextSpacing> wheel value={s.text.btnSpacing} onChange={(v) => setT({ btnSpacing: v })} options={SPACING_OPTS} /></Field>
+              </TextGroup>
               {textTouched && (
                 <button type="button" onClick={() => onChange({ ...s, text: { ...DEFAULT_BLOCK_TEXT } })} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">
                   คืนค่าตัวอักษรเป็นตามเดิม
