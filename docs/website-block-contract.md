@@ -179,7 +179,10 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - เว็บร้าน `components/home/SectionLayers.tsx` วาดเป็น **ลูก** ของตัวห่อ (ไม่ใช้ ::before/::after) · ตัวห่อได้ `data-layers` (relative + isolation + overflow clip) → เนื้อหา z 1 · ลาย/ขอบ/ตกแต่งหลัง z 0 · ตกแต่งหน้า z 2 · ทุกชั้น `pointer-events: none` (ลูกค้ากดของข้างใต้ได้)
   - กล่องเนื้อหา = `data-box` + ตัวแปร `--sec-box-*` ใส่พื้นให้ลูกที่เป็นเนื้อหา · ⚠️ ตัวเลือก CSS ของชั้นต้องยกเว้น `.sec-layer, link, style, script, .pv-grip`
   - ข้อความตกแต่งย่อตามจอ `calc(size * clamp(0.5px, 100vw/1200, 1px))`
-- ลากในพรีวิว (PreviewBridge โหมดแก้ไข): หาชิ้นจากกรอบเอง (ชิ้นหน้าก่อน/ชิ้นเล็กก่อน · ชิ้นหลังที่อยู่ใต้ลิงก์/ปุ่ม/รูป/การ์ด = ไม่แย่ง) → ส่ง `storefront-decor-change {blockId,id,x,y}` (ลาก) / `storefront-decor-select` (กด) · ERP ส่ง `storefront-decor-focus {blockId,id}` ตีกรอบชิ้นที่เลือก
+- แก้ในพรีวิว (เว็บร้าน `src/components/layout/preview-decor.ts` · PreviewBridge โหมดแก้ไข): หาชิ้นจากกรอบเอง (ชิ้นหน้าก่อน/ชิ้นเล็กก่อน · ชิ้นหลังที่อยู่ใต้ลิงก์/ปุ่ม/รูป/การ์ด = ไม่แย่ง)
+  - ลากตัวชิ้น = ย้าย · ชิ้นที่เลือกมีกรอบ+หูจับ (ชั้นลอย fixed ของพรีวิว ไม่ถูก Section ตัด): มุม 4 จุด = ย่อ/ขยายจากจุดกลาง (ข้อความ = size px · ลาย/รูป = w %) · ปุ่ม ↻ = หมุน (Shift ทีละ 15° · ใกล้ 0/±90/180 ดูดเข้า)
+  - ส่ง `storefront-decor-change {blockId,id, x+y | w | size | rotate}` / `storefront-decor-select` (กด) · ERP ส่ง `storefront-decor-focus {blockId,id}` = ชิ้นที่เลือก → กรอบ+หูจับ
+  - กรอบตามชิ้นด้วยเหตุการณ์ (ลาก/เลื่อน/ย่อจอ) + ทุก 250ms — ไม่ใช้ requestAnimationFrame (iframe ที่ย่อ/อยู่หลังบางทีไม่วาดเฟรม)
 
 ## 🖼 พื้นหลังรูปของ Section (style.bg = "image" · style.bgImg) — 2026-10-22 · ทุก Section
 - ERP `BlockStyle.bgImg` = `{ key, fit (cover|contain|repeat), pos (top|center|bottom), fx (none|zoom|pan|float|parallax), speed, dim 0–90, tone (dark|light), blur 0–20 }` · ไม่มีรูป = bg กลับเป็น "auto" ตอน normalize · เก็บไว้แม้สลับไปแบบอื่น (เหมือน bgGrad)

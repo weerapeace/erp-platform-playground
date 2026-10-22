@@ -513,7 +513,7 @@ export function WebsiteBuilder({
         return;
       }
       if ((d.type === "storefront-decor-select" || d.type === "storefront-decor-change") && d.blockId && typeof (d as { id?: unknown }).id === "string") {
-        // 🎀 กด/ลากของตกแต่งในพรีวิว → เลือก Section + เปิดแท็บตกแต่ง (ลาก = แก้ตำแหน่ง x/y เป็น % ของ Section)
+        // 🎀 กด/ลาก/ย่อขยาย/หมุนของตกแต่งในพรีวิว → เลือก Section + เปิดแท็บตกแต่ง + แก้ค่าที่ส่งมา (x/y/w เป็น % ของ Section · size px · rotate องศา)
         const id = (d as { id: string }).id;
         const blk = blocksRef.current.find((b) => b.id === d.blockId);
         if (!blk) return;
@@ -523,10 +523,16 @@ export function WebsiteBuilder({
         setDecorTabReq((n) => n + 1);
         if (d.type === "storefront-decor-change") {
           const st = (blk.style ?? {}) as Partial<BlockStyle>;
-          const p = d as { x?: unknown; y?: unknown };
-          const pos = (v: unknown) => Math.max(-20, Math.min(120, Math.round((Number(v) || 0) * 10) / 10));
-          if (Array.isArray(st.decor) && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
-            patchBlock(blk.id, { style: { ...st, decor: st.decor.map((it) => (it.id === id ? { ...it, x: pos(p.x), y: pos(p.y) } : it)) } });
+          const p = d as { x?: unknown; y?: unknown; w?: unknown; size?: unknown; rotate?: unknown };
+          const has = (v: unknown) => v != null && v !== "" && Number.isFinite(Number(v));
+          const fit = (v: unknown, lo: number, hi: number, dp = 10) => Math.max(lo, Math.min(hi, Math.round(Number(v) * dp) / dp));
+          const upd: Record<string, number> = {};
+          if (has(p.x) && has(p.y)) Object.assign(upd, { x: fit(p.x, -20, 120), y: fit(p.y, -20, 120) });
+          if (has(p.w)) upd.w = fit(p.w, 0.5, 100);
+          if (has(p.size)) upd.size = fit(p.size, 10, 240, 1);
+          if (has(p.rotate)) upd.rotate = fit(p.rotate, -180, 180, 1);
+          if (Array.isArray(st.decor) && Object.keys(upd).length)
+            patchBlock(blk.id, { style: { ...st, decor: st.decor.map((it) => (it.id === id ? { ...it, ...upd } : it)) } });
         }
         return;
       }
