@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-board-send";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -2011,6 +2012,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                         setCostDirty(true);
                         toast.success(`คัดลอกตีราคาจาก "${costTabLabel(source, generalLabel)}" มาแล้ว (${cloned.length} บรรทัด)`);
                       }} />
+                  )}
+                  {/* ล้างหมายเหตุทุกบรรทัดของแท็บที่ดูอยู่ (เช่น "อ้างอิง BOM: …" ที่ดึงมา) — โหมดแก้ไข: ค้างให้กด 💾 · โหมดดู: บันทึกทันที */}
+                  {canEdit && curLines.some((r) => (r.note ?? "").trim()) && (
+                    <button onClick={async () => {
+                      const n = curLines.filter((r) => (r.note ?? "").trim()).length;
+                      const ok = await askConfirm({ title: `ล้างหมายเหตุ ${n} บรรทัด ในแท็บ "${costTabLabel(costParent, generalLabel)}"?`,
+                        message: "ช่องหมายเหตุของทุกบรรทัดในแท็บนี้จะว่าง (วัสดุ/ขนาด/ราคา ไม่เปลี่ยน) — แท็บอื่นไม่โดน", confirmText: "ล้างหมายเหตุ", variant: "danger" });
+                      if (!ok) return;
+                      quickApply((rows) => rows.map((r) => (pkey(r.parent_code) === costParent && r.note ? { ...r, note: null } : r)));
+                      toast.success(fullEdit ? `ล้างหมายเหตุ ${n} บรรทัดแล้ว — กด 💾 บันทึกตีราคา` : `ล้างหมายเหตุ ${n} บรรทัดแล้ว`);
+                    }} title="ลบข้อความในช่องหมายเหตุของทุกบรรทัดในแท็บนี้"
+                      className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200">🧹 ล้างหมายเหตุ</button>
                   )}
                   {canEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="ดึงวัตถุดิบตีราคาจากใบงานออกแบบอื่น — เลือกแท็บต้นทาง + ติ๊กรายการได้"
                     className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📄 ดึงจากใบงานอื่น</button>}
