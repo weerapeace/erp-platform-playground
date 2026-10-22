@@ -782,8 +782,9 @@ export interface GalleryBlock extends BlockBase {
   stripColor?: string;
   stripHex?: string;
   stripPrice?: boolean;
-  /** รายรูป: code = รหัสรุ่นสินค้า (≤1) → รูปแรก/ชื่อ/ลิงก์ของสินค้า เมื่อไม่ได้ใส่เอง */
-  items: (ChildBase & { code?: string[]; imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];
+  /** รายรูป: code = รหัสรุ่นสินค้า (≤1) → รูปแรก/ชื่อ/ลิงก์ของสินค้า เมื่อไม่ได้ใส่เอง
+   *  media "video" = เล่นคลิป videoKey (วนเงียบ · imageKey = รูปปก) — แบบตารางเท่านั้น (แถวรูปลุคบุ๊กโชว์รูปปก) */
+  items: (ChildBase & { code?: string[]; media?: "image" | "video"; videoKey?: string | null; imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];
 }
 
 /** ปุ่มเดี่ยว — วางคั่นระหว่างเนื้อหาได้ทุกจุด */

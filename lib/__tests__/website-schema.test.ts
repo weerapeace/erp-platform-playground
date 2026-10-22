@@ -468,6 +468,28 @@ describe("🚶 รันเวย์ลุค (2026-10-21)", () => {
   });
 });
 
+describe("🎬 แกลเลอรี: รายชิ้นเป็นวิดีโอได้ (2026-10-22)", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "g", type: "gallery", ...b }])[0] as unknown as Record<string, unknown> & { items: Record<string, unknown>[] };
+  it("ค่าเริ่ม = รูป (ของเดิมไม่เปลี่ยน) · วิดีโอเก็บคลิป + รูปปก · ค่ามั่ว = รูป", () => {
+    const b = norm({ items: [{ imageKey: "a.jpg", alt: "a" }, { media: "video", videoKey: "storefront-hero/2026-10/x.mp4", imageKey: null }, { media: "gif" }] });
+    expect(b.items[0]).toMatchObject({ media: "image", videoKey: null, imageKey: "a.jpg" });
+    expect(b.items[1]).toMatchObject({ media: "video", videoKey: "storefront-hero/2026-10/x.mp4" });
+    expect(b.items[2]).toMatchObject({ media: "image" });
+    const kid = SECTION_SCHEMAS.gallery.children!;
+    expect(kid.summary(b.items[1])).toMatch(/🎬/);
+    expect(kid.summary({ media: "video", videoKey: null })).toMatch(/ยังไม่ใส่คลิป/);
+  });
+  it("วิดีโออย่างเดียว (ไม่มีรูป) = นับว่ามีของในแกลเลอรี · ช่องวิดีโอโชว์เฉพาะแบบตาราง · ช่องครอปซ่อนเมื่อเป็นวิดีโอ", () => {
+    const only = norm({ items: [{ media: "video", videoKey: "v/a.mp4", alt: "clip" }] });
+    expect(validateBlocks([only as unknown as Block]).filter((x) => x.level === "error")).toHaveLength(0);
+    const fd = (k: string) => SECTION_SCHEMAS.gallery.children!.fields.find((x) => x.key === k)!;
+    expect(matchShowIf({ ...fd("media"), showIf: fd("media").showIfParent }, { layout: "strip" })).toBe(false);
+    expect(matchShowIf({ ...fd("media"), showIf: fd("media").showIfParent }, { layout: "grid" })).toBe(true);
+    expect(matchShowIf(fd("crop"), { media: "video" })).toBe(false);
+    expect(matchShowIf(fd("crop"), {})).toBe(true);
+  });
+});
+
 describe("🗂 ตารางสินค้า › แท็บตามรุ่นสินค้า (Parent SKU)", () => {
   const roar = { id: "p-roar", type: "products", source: "skus", skus: ["ROAR01:sku-0cfd0cfd", "ROAR02:sku-3f45d491"], layout: "tabs" };
   it("Section แท็บเดิม (ไม่มี tabBy) = แท็บตามหมวด หน้าตาเดิม", () => {

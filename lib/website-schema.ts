@@ -1317,8 +1317,19 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           wide: true,
           hint: "เลือกสินค้า = ใช้รูปแรก + ชื่อ + ลิงก์ไปหน้าสินค้าให้เอง · ใส่รูป/หัวข้อ/ลิงก์ด้านล่างเอง = ใช้ของที่ใส่แทน",
         }),
-        image("imageKey", "รูป"),
-        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio" }),
+        // 🎬 รูป หรือ วิดีโอ (แบบตาราง) — วิดีโอเล่นวนเงียบ ๆ เฉพาะตอนเห็นบนจอ · รูปด้านล่าง = รูปปกตอนคลิปยังไม่เล่น
+        f("media", "ชนิด", "select", {
+          group: "media",
+          default: "image",
+          options: [
+            { v: "image", l: "🖼 รูป" },
+            { v: "video", l: "🎬 วิดีโอ" },
+          ],
+          showIfParent: GAL_GRID,
+        }),
+        f("videoKey", "คลิปวิดีโอ", "videoFile", { group: "media", default: null, showIf: { key: "media", eq: "video" }, showIfParent: GAL_GRID, hint: "เล่นวนเงียบ ๆ เฉพาะตอนเห็นบนจอ · MP4 แนวเดียวกับสัดส่วนรูปของ Section" }),
+        image("imageKey", "รูป", { hint: "ถ้าเป็นวิดีโอ = รูปปกตอนคลิปยังไม่เล่น (ไม่ใส่ก็ได้)" }),
+        f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio", showIf: { key: "media", eq: ["image", "", undefined] } }),
         text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200 }),
         text("title", "หัวข้อใต้รูป", { default: "", max: 120, wide: true, hint: "หน้าตา/ตำแหน่ง ตั้งที่ Section แกลเลอรี → ข้อความประกอบรูป" }),
         area("caption", "คำอธิบายใต้รูป", { default: "", max: 300 }),
@@ -1327,14 +1338,16 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       ],
       summary: (it) => {
         const code = Array.isArray(it.code) && it.code.length ? String(it.code[0]) : "";
-        if (!it.imageKey && !code) return "ยังไม่เลือกรูป";
-        return s(it.title) || s(it.caption) || s(it.alt) || (code ? `🛍 ${code}` : "รูป");
+        const video = it.media === "video";
+        if (video && !it.videoKey) return "🎬 ยังไม่ใส่คลิป";
+        if (!video && !it.imageKey && !code) return "ยังไม่เลือกรูป";
+        return `${video ? "🎬 " : ""}${s(it.title) || s(it.caption) || s(it.alt) || (code ? `🛍 ${code}` : video ? "วิดีโอ" : "รูป")}`;
       },
     },
     summary: (b) => `${b.layout === "strip" ? "แถวรูปลุคบุ๊ก · " : ""}${count(arr(b.items).length, "รูป")}`,
     validate: (b, label) => {
       const hasCode = (i: Record<string, unknown>) => Array.isArray(i.code) && i.code.length > 0;
-      const withImg = arr(b.items).filter((i) => i.imageKey || hasCode(i));
+      const withImg = arr(b.items).filter((i) => i.imageKey || hasCode(i) || (i.media === "video" && i.videoKey));
       if (!withImg.length) return [{ level: "error", message: `${label}: ยังไม่มีรูปในแกลเลอรี` }];
       // รูปจากสินค้า = ใช้ชื่อสินค้าเป็นคำบรรยายให้เอง
       return withImg.some((i) => !hasCode(i) && !s(i.alt)) ? [{ level: "warning", message: `${label}: บางรูปยังไม่มีคำบรรยาย (Alt)` }] : [];
