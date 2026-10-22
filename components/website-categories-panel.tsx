@@ -9,7 +9,7 @@
  *
  * เก็บที่ไหน: รายการหมวด = shops.field_map.categories (PUT /api/website/field-map — บันทึกเองหลังหยุดแก้)
  *             สินค้า↔หมวด = store_listings.web_categories (POST /api/website/listings action "setCategories" — บันทึกทันที + audit)
- * รหัสหมวด (ใช้ในลิงก์หน้าหมวด /c/<รหัส>) ตั้งตอนสร้างแล้วเปลี่ยนไม่ได้ — กันลิงก์/เมนูเดิมเสีย
+ * รหัสหมวด (ใช้ในลิงก์หน้าหมวด /c/<รหัส>) ตั้งตอนสร้าง · ✏️ เปลี่ยนลิงก์ = CategoryRenameModal (ระบบตามแก้สินค้า/เมนู/Section + ย้ายลิงก์เก่าให้เอง)
  * 📂 หมวดย่อย (2 ชั้น · lib/website-category-tree): ➕ หมวดย่อยใต้หมวดที่เลือก · ช่อง "อยู่ใต้หมวด" ย้ายแม่ · ลากเรียงในแม่เดิม
  *    สินค้าในหมวดย่อยนับรวมในหมวดแม่ (เว็บร้านโชว์ในหน้าหมวดแม่ด้วย)
  * ↪ ย้ายสินค้าข้ามหมวด: ลากการ์ดสินค้าไปวางบนหมวดทางซ้าย (Ctrl/Alt ค้าง = เพิ่มเข้าอีกหมวด) · ช่อง "↪ ย้ายไป…" ในการ์ด
@@ -29,6 +29,7 @@ import { TranslateButton } from "@/components/translation-table";
 import { BilingualText, ContentLangProvider, RecordLangBar } from "@/components/bilingual-field";
 import { pickText, type ContentLang } from "@/lib/content-i18n";
 import { CATEGORY_TEXT_KEYS } from "@/lib/website-field-map";
+import { CategoryRenameModal } from "@/components/website-category-rename-modal";
 
 /** ชนิดข้อมูลตอนลากการ์ดสินค้า (กันรับของที่ลากมาจากที่อื่น) */
 const DRAG_MIME = "application/x-erp-web-listings";
@@ -67,6 +68,8 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   // เปิดป๊อปสร้างหมวด: null = ปิด · "" = หมวดชั้นบน · รหัส = หมวดย่อยใต้หมวดนั้น
   const [newParent, setNewParent] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<WebCategoryDef | null>(null);
+  // ✏️ เปลี่ยนลิงก์หมวด (ป๊อป) — เก็บหมวดตอนเปิดไว้ทั้งก้อน
+  const [renameOf, setRenameOf] = useState<WebCategoryDef | null>(null);
   const [chooser, setChooser] = useState<null | "imageKey" | "bannerKey">(null);
   // ↪ ย้ายสินค้าข้ามหมวด: รุ่นที่ติ๊กไว้ · หมวดที่กำลังลากผ่าน (ไฮไลต์)
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -171,6 +174,23 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     } finally {
       setBusy(false);
     }
+  };
+
+  /* ── ✏️ เปลี่ยนลิงก์หมวด — server แก้ field_map เอง: บันทึกที่ค้างก่อนเปิด · เสร็จแล้วโหลดใหม่ (ไม่ให้รอบบันทึกถัดไปเขียนรหัสเก่าทับ) ── */
+  const openRename = async (c: WebCategoryDef) => {
+    if (dirty.current) await persist();
+    if (dirty.current) return toast.error("บันทึกหมวดที่แก้ค้างไว้ไม่สำเร็จ — ลองกด 💾 บันทึกก่อน");
+    setRenameOf(c);
+  };
+  const onRenamed = async (newKey: string, warning: string | null) => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = null;
+    dirty.current = false;
+    setRenameOf(null);
+    await load();
+    setSelKey(newKey);
+    if (warning) toast.error(warning);
+    else toast.success(`เปลี่ยนลิงก์เป็น /c/${newKey} แล้ว · ลิงก์เก่าพาไปหน้าใหม่อัตโนมัติ`);
   };
 
   const sel = cats.find((c) => c.key === selKey) ?? null;
@@ -514,7 +534,10 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
               </div>
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[11px] text-slate-400">
-                  ลิงก์หน้าหมวด: <code>/c/{sel.key}</code> (รหัสเปลี่ยนไม่ได้ — กันลิงก์เดิมเสีย)
+                  ลิงก์หน้าหมวด: <code>/c/{sel.key}</code>{" "}
+                  <button onClick={() => void openRename(sel)} className="ml-1 text-blue-600 hover:underline">
+                    ✏️ เปลี่ยนลิงก์
+                  </button>
                 </span>
                 <button onClick={() => setConfirmDel(sel)} className="text-xs text-red-600 hover:underline">
                   🗑 ลบหมวดนี้
@@ -702,6 +725,8 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         message={`สินค้า ${confirmDel ? directCount(confirmDel.key) : 0} รายการจะไม่อยู่ในหมวดนี้แล้ว (สินค้ายังอยู่บนเว็บ) · ลิงก์หน้าหมวด /c/${confirmDel?.key ?? ""} จะใช้ไม่ได้${confirmDel && childCategories(cats, confirmDel.key).length ? ` · หมวดย่อย ${childCategories(cats, confirmDel.key).length} หมวดจะกลายเป็นหมวดหลัก (ไม่ถูกลบ)` : ""}`}
         confirmText="ลบหมวด"
       />
+
+      <CategoryRenameModal cat={renameOf} cats={cats} shopId={shopId} onClose={() => setRenameOf(null)} onDone={(k, w) => void onRenamed(k, w)} />
     </div>
   );
 }
