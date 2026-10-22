@@ -113,6 +113,22 @@ export async function sendEmail(m: EmailMessage): Promise<EmailResult> {
   }
 }
 
+/** ตรวจการเชื่อมต่อโดยไม่ส่งอีเมล — Gmail = ลองเข้าสู่ระบบ SMTP · Resend = ตั้งครบถือว่าพร้อม (ไม่มีวิธีตรวจแบบไม่ส่ง) */
+export async function verifyEmailTransport(): Promise<{ ok: boolean; provider: EmailProvider | null; error?: string }> {
+  const provider = emailProvider();
+  if (!provider) return { ok: false, provider: null, error: "email-not-configured" };
+  if (provider === "resend") return { ok: true, provider };
+  try {
+    await (await gmail()).verify();
+    return { ok: true, provider };
+  } catch (e) {
+    console.error("[email:gmail] verify error", e instanceof Error ? e.message : e);
+    const error = errorCode(e);
+    if (error === "auth-failed") gmailTransport = null;
+    return { ok: false, provider, error };
+  }
+}
+
 /** ข้อความภาษาคนของรหัสข้อผิดพลาด (ใช้ร่วมทุกหน้าที่ส่งอีเมล) */
 export function emailErrorText(code: string): string {
   switch (code) {

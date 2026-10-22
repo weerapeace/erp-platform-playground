@@ -70,6 +70,18 @@ export default function EmailReportsPage() {
   };
 
   // ✉️ ส่งทดสอบถึงฉัน / 📤 ส่งเดี๋ยวนี้ (ทุกผู้รับ) — ผลลงประวัติการส่งเสมอ
+  // 🔌 ลองเข้าสู่ระบบ Gmail จริงโดยไม่ส่งอีเมล — ตรวจว่ารหัสผ่านสำหรับแอปใช้ได้
+  const [checking, setChecking] = useState(false);
+  const checkConnection = async () => {
+    setChecking(true);
+    try {
+      const j = await apiFetch("/api/admin/email-reports?check=1").then((r) => r.json());
+      if (j.email_check?.ok) toast.success("เชื่อมต่อระบบส่งอีเมลได้ ✅ — กด ✉️ ทดสอบ เพื่อลองส่งจริงเข้าอีเมลของคุณ");
+      else toast.error(j.email_check?.error || j.error || "เชื่อมต่อไม่สำเร็จ");
+    } catch { toast.error("ตรวจการเชื่อมต่อไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setChecking(false); }
+  };
+
   const send = async (r: EmailReport, mode: "test" | "now") => {
     setSending(`${r.id}:${mode}`);
     try {
@@ -114,7 +126,10 @@ export default function EmailReportsPage() {
         {!loading && (
           <div className={`rounded-xl border px-4 py-3 text-sm ${emailReady ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
             {emailReady
-              ? <>✅ <b>ระบบส่งอีเมลพร้อมแล้ว</b> — ส่งผ่าน {emailInfo.provider === "gmail" ? "Gmail" : "Resend (โดเมนบริษัท)"}{emailInfo.sender ? <> จาก <b>{emailInfo.sender}</b></> : null}</>
+              ? <>✅ <b>ระบบส่งอีเมลพร้อมแล้ว</b> — ส่งผ่าน {emailInfo.provider === "gmail" ? "Gmail" : "Resend (โดเมนบริษัท)"}{emailInfo.sender ? <> จาก <b>{emailInfo.sender}</b></> : null}
+                  <button type="button" onClick={() => void checkConnection()} disabled={checking}
+                    className="ml-2 inline-flex h-7 items-center rounded-md border border-emerald-300 bg-white px-2 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">
+                    {checking ? "กำลังตรวจ..." : "🔌 ตรวจการเชื่อมต่อ"}</button></>
               : <>⚠️ <b>ระบบส่งอีเมลยังไม่พร้อม</b> — ต้องตั้ง Gmail ที่จะใช้ส่งก่อน ทำตามคู่มือด้านล่าง (~5 นาที) · ระหว่างนี้ตั้งค่าและดูตัวอย่างอีเมลได้ตามปกติ</>}
             <div className="mt-1 text-xs opacity-80">
               {emailInfo.scheduler

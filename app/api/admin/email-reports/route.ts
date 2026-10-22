@@ -10,7 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { emailConfigured, emailProvider, emailSenderAddress } from "@/lib/email";
+import { emailConfigured, emailErrorText, emailProvider, emailSenderAddress, verifyEmailTransport } from "@/lib/email";
 import { normalizeReportInput, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 import { toEmailReport, requestActor } from "./shared";
 
@@ -39,11 +39,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       error: (r.error as string) ?? null, actor_name: (r.actor_name as string) ?? null,
     };
   });
-  // ช่องทางส่ง + ผู้ส่ง (โชว์ในกล่องสถานะ) · ตัวตั้งเวลา pg_cron ทำงานไหม
+  // ช่องทางส่ง + ผู้ส่ง (โชว์ในกล่องสถานะ) · ตัวตั้งเวลา pg_cron ทำงานไหม · ?check=1 = ลองเชื่อมต่อจริง (ไม่ส่งอีเมล)
   const { data: cronOk } = await admin.rpc("erp_email_reports_cron_active");
+  const check = new URL(request.url).searchParams.get("check") === "1" ? await verifyEmailTransport() : null;
   return NextResponse.json({
     data: reports, runs, email_ready: emailConfigured(), email_provider: emailProvider(), email_sender: emailSenderAddress(),
-    scheduler_active: cronOk === true, error: null,
+    scheduler_active: cronOk === true,
+    email_check: check ? { ok: check.ok, error: check.error ? emailErrorText(check.error) : null } : null,
+    error: null,
   });
 }
 

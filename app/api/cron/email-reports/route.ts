@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { isDue, nowTH, runEmailReport } from "@/lib/email-report/send";
 import { toEmailReport } from "../../admin/email-reports/shared";
+import { emailErrorText, emailSenderAddress, verifyEmailTransport } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,6 +34,11 @@ async function authorized(request: NextRequest): Promise<"cron" | "dry" | null> 
 async function handle(request: NextRequest): Promise<NextResponse> {
   const mode = await authorized(request);
   if (!mode) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  // ?check=1 = ตรวจการเชื่อมต่อระบบส่งอีเมลอย่างเดียว (ไม่ส่งอะไร) — ใช้ตรวจหลังตั้งค่า Gmail
+  if (new URL(request.url).searchParams.get("check") === "1") {
+    const v = await verifyEmailTransport();
+    return NextResponse.json({ ok: v.ok, check: true, provider: v.provider, sender: emailSenderAddress(), error: v.error ? emailErrorText(v.error) : null });
+  }
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("email_reports").select("*").eq("is_active", true).eq("is_enabled", true);
   if (error) return NextResponse.json({ ok: false, error: "โหลดรายงานไม่สำเร็จ" }, { status: 500 });
