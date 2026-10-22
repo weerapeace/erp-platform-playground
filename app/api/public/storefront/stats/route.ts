@@ -4,10 +4,11 @@
  * เว็บร้านรวมหลายตัวนับส่งทีเดียว (src/lib/site-stats.ts · sendBeacon) · ≤20 ตัวต่อครั้ง · กันยิงรัวต่อ IP
  * ไม่มี guardApi โดยเจตนา + CORS (เหมือน search-log) · ตัวนับที่ไม่รู้จักทิ้ง — lib/website-web-stats cleanStatEvents
  */
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { cleanStatEvents } from "@/lib/website-web-stats";
+import { maybeRunWebshopReminders } from "@/lib/webshop-reminders-db";
 
 export const dynamic = "force-dynamic";
 
@@ -42,5 +43,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!shop || shop.status !== "active") return json({ ok: false }, 404);
   const { error } = await sb.rpc("store_web_stat_bump" as never, { p_shop: shop.id, p_events: events } as never);
   if (error) console.error("[web-stats]", error.message);
+  // 🔔 รอบเตือนตะกร้าค้าง/ของถูกใจลดราคา — อาศัยจังหวะที่มีคนเข้าเว็บ (ห่างกัน ≥ 30 นาที/ร้าน · lib/webshop-reminders-db)
+  after(() => maybeRunWebshopReminders(sb, shop.id));
   return json({ ok: !error });
 }

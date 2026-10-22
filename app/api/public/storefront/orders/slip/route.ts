@@ -9,7 +9,8 @@
  * ปลอดภัยเพราะ: ต้องรู้ทั้งเลขที่ออเดอร์ + เบอร์โทร · ดูหัวไฟล์จริง · จำกัดขนาด/จำนวนต่อออเดอร์
  * · ระบบไม่เคย "ปฏิเสธ" เอง และ "ผ่าน" ได้ทางเดียวคือยอดตรง + เข้าบัญชีร้าน + ไม่ซ้ำ (lib/website-payments)
  */
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
+import { notifyStaffSlip } from "@/lib/webshop-line";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { readSiteInfo } from "@/lib/website-site-info";
@@ -62,5 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     autoVerify: info.slip_auto_verify,
   });
   if (!r.ok) return json({ ok: false, error: r.error, errorEn: r.errorEn }, r.status);
+  // 💳 ต้องให้คนตรวจ (ไม่ผ่านอัตโนมัติ) → แจ้งกลุ่ม LINE พนักงาน
+  if (r.paymentStatus === "verifying") after(() => notifyStaffSlip(sb, s.id, String(form.get("no") ?? "").trim().toUpperCase()));
   return json(r, 201);
 }

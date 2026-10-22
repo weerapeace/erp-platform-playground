@@ -6,7 +6,8 @@ import { sniffImage } from "@/lib/website-payments";
 import { r2DeleteObject, r2PutObject } from "@/lib/r2";
 import { writeAudit } from "@/lib/audit";
 import { readSiteInfo } from "@/lib/website-site-info";
-import { OPEN_RETURN_STATUSES, RETURN_MAX_IMAGES, RETURN_MOVES, returnDeadline, type ReturnInput, type ReturnStatus } from "@/lib/website-returns";
+import { OPEN_RETURN_STATUSES, RETURN_MAX_IMAGES, RETURN_MOVES, RETURN_STATUSES, returnDeadline, returnReasonLabel, type ReturnInput, type ReturnStatus } from "@/lib/website-returns";
+import { lineTextToMember, notifyStaffReturn } from "@/lib/webshop-line";
 
 type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
@@ -107,6 +108,7 @@ export async function submitReturn(
   }
   const id = (data as { id: string }).id;
   await writeAudit(sb, { action: "create", entityType: "store_return_requests", entityId: id, actorId: null, actorName: `ลูกค้า (ออเดอร์ ${d.orderNo})`, metadata: { shop_id: page.shopId, order_no: d.orderNo, kind: input.kind, reason: input.reason, items: items.length } });
+  await notifyStaffReturn(sb, page.shopId, d.orderNo, input.kind, returnReasonLabel(input.reason));
   return { ok: true, id };
 }
 
@@ -130,5 +132,14 @@ export async function decideReturn(
     .eq("status", row.status);
   if (error) return { ok: false, status: 500, error: "บันทึกไม่สำเร็จ" };
   await writeAudit(sb, { action: next === "rejected" ? "reject" : next === "approved" ? "approve" : "update", entityType: "store_return_requests", entityId: id, actorId: actor.id, actorName: actor.name, metadata: { shop_id: row.shop_id, order_id: row.order_id, from: row.status, to: next, note } });
+  // 💬 แจ้งลูกค้าทาง LINE (สมาชิกเข้าด้วย LINE + ร้านเปิด) — ข้อความสั้น + หมายเหตุร้าน
+  const { data: ord } = await sb.from("store_orders").select("order_no, customer_id, lang").eq("id", row.order_id).maybeSingle();
+  const oo = ord as { order_no: string; customer_id: string | null; lang: string | null } | null;
+  if (oo?.customer_id) {
+    const st = RETURN_STATUSES.find((s) => s.key === next);
+    const en = oo.lang === "en";
+    const head = en ? `Your ${row.kind === "exchange" ? "exchange" : "return"} request for order ${oo.order_no}: ${st?.en ?? next}` : `คำขอ${row.kind === "exchange" ? "เปลี่ยน" : "คืน"}สินค้า ออเดอร์ ${oo.order_no}: ${st?.label ?? next}`;
+    await lineTextToMember(sb, row.shop_id, oo.customer_id, note ? `${head}\n${note}` : head);
+  }
   return { ok: true };
 }

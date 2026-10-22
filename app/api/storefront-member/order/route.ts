@@ -9,6 +9,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { guardMember, storefrontJson } from "@/lib/storefront-internal";
 import { createStorefrontOrder } from "@/lib/website-orders";
 import { notifyOrderCustomer } from "@/lib/order-notify";
+import { notifyStaffNewOrder } from "@/lib/webshop-line";
 import { parseTracking, sendMetaPurchase } from "@/lib/meta-capi";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ✉️ อีเมลยืนยันออเดอร์ในภาษาของลูกค้า (ถ้าร้านเปิด) — หลังตอบแล้ว (lib/order-notify)
   const orderId = r.orderId;
   after(() => notifyOrderCustomer(g.sb, orderId, "placed").catch((e) => console.error("[member-order] notify placed", e)));
+  // 🛍 แจ้งกลุ่ม LINE พนักงาน
+  after(() => notifyStaffNewOrder(g.sb, orderId));
+  // 🛒 สั่งแล้ว = ล้างตะกร้าที่เก็บไว้เตือน (lib/webshop-reminders)
+  after(async () => {
+    await g.sb.from("store_member_carts").delete().eq("customer_id", g.member.id);
+  });
   // 📊 ยอดซื้อไป Meta จากเซิร์ฟเวอร์ (ลูกค้ายินยอมคุกกี้การตลาด + ร้านตั้งโทเค็น) · ทางนี้มาจากเซิร์ฟเวอร์เว็บร้าน = ไม่มี IP ลูกค้า
   const tracking = parseTracking((body as { tracking?: unknown }).tracking);
   after(() => sendMetaPurchase(g.sb, g.shop.id, orderId, tracking, null).catch((e) => console.error("[member-order] meta capi", e)));

@@ -13,7 +13,7 @@
 export type LineSlotKey =
   | "production" | "qc"
   | "purchase_request" | "purchase_order" | "goods_receipt"
-  | "creative" | "bills" | "transfers";
+  | "creative" | "bills" | "transfers" | "webshop";
 
 export type LineSlotDef = { key: LineSlotKey; label: string; icon: string };
 
@@ -26,7 +26,7 @@ export type LineSystemDef = {
   events: LineEventDef[];
 };
 
-/** ป้ายกลุ่มปลายทาง (8 ช่อง) */
+/** ป้ายกลุ่มปลายทาง (9 ช่อง) */
 export const LINE_SLOTS: Record<LineSlotKey, LineSlotDef> = {
   production:       { key: "production",       label: "กลุ่มผลิต (บอร์ดจ่ายงาน)", icon: "🏭" },
   qc:               { key: "qc",               label: "กลุ่ม QC (โกดัง)",         icon: "🔍" },
@@ -36,6 +36,7 @@ export const LINE_SLOTS: Record<LineSlotKey, LineSlotDef> = {
   creative:         { key: "creative",         label: "กลุ่มครีเอทีฟ",            icon: "🎨" },
   bills:            { key: "bills",            label: "กลุ่มบิลจีน",              icon: "🧾" },
   transfers:        { key: "transfers",        label: "กลุ่มโอนเงิน/เรต",         icon: "💱" },
+  webshop:          { key: "webshop",          label: "กลุ่มเว็บร้าน (ออเดอร์ออนไลน์)", icon: "🛍" },
 };
 
 /** ระบบ → กลุ่ม + เหตุการณ์ (เรียงตามที่ผู้บริหารเข้าใจง่าย) */
@@ -76,6 +77,14 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
       { key: "china_bill",     label: "แจ้งบิลจีน",      slot: "bills",     icon: "🧾" },
       { key: "transfer",       label: "แจ้งโอนเงิน",     slot: "transfers", icon: "💸" },
       { key: "rate",           label: "แจ้งเรตเงินหยวน", slot: "transfers", icon: "💱" },
+    ],
+  },
+  {
+    key: "webshop", label: "เว็บร้าน", icon: "🛍", slots: ["webshop"],
+    events: [
+      { key: "webshop_order",  label: "ออเดอร์เว็บใหม่",          slot: "webshop", icon: "🛒" },
+      { key: "webshop_slip",   label: "ลูกค้าแนบสลิป รอตรวจเงิน",  slot: "webshop", icon: "💳" },
+      { key: "webshop_return", label: "ลูกค้าขอคืน/เปลี่ยนสินค้า", slot: "webshop", icon: "↩️" },
     ],
   },
 ];

@@ -16,6 +16,7 @@ import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { AUTO_EMAIL_EVENTS, customerLang, orderEmail, type OrderEvent } from "@/lib/customer-messages";
 import { toOrderView, type ItemRow, type OrderRow } from "@/lib/website-orders";
 import { reviewUrl } from "@/lib/review-token";
+import { notifyOrderLine } from "@/lib/webshop-line";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -51,6 +52,8 @@ export async function notifyOrderCustomer(
   const info = await readSiteInfo(sb, row.shop_id);
 
   const result = (r: Omit<NotifyResult, "event" | "lang">): NotifyResult => ({ event, lang, ...r });
+  // 💬 LINE OA ของร้าน (อัตโนมัติเท่านั้น · สมาชิกเข้าด้วย LINE · ไม่ขึ้นกับอีเมล) — lib/webshop-line
+  if (!opts.force) await notifyOrderLine(sb, orderId, event);
   if (!opts.force && (!info.order_email_enabled || !AUTO_EMAIL_EVENTS.includes(event))) return result({ sent: false, reason: "off" });
   const to = (row.customer_email ?? "").trim();
   if (!to) return result({ sent: false, reason: "no-email" });

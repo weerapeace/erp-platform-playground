@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "returns" | "shippop" | "redirects";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "returns" | "shippop" | "notify" | "redirects";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -47,6 +47,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "preorder", label: "📦 สั่งจอง (พรีออเดอร์) + มัดจำ", hint: "สินค้าที่ตั้งสถานะสต็อก “พรีออเดอร์” ในแท็บสินค้าบนเว็บ · เปิดมัดจำแล้ว ออเดอร์ที่มีของพรีออเดอร์ต้องโอนพร้อมเพย์ (ไม่มีเก็บปลายทาง) จ่ายมัดจำก่อน ที่เหลือจ่ายก่อนจัดส่ง · ระบบตรวจสลิปตามยอดที่ต้องจ่ายแต่ละรอบ" },
   { key: "referral", label: "🎁 ชวนเพื่อน (โค้ดแนะนำ)", hint: "สมาชิกทุกคนได้โค้ดชวนเพื่อนของตัวเอง (หน้าบัญชี) · เพื่อนใช้โค้ดตอนสั่งครั้งแรก = ได้ส่วนลด · ออเดอร์ของเพื่อนสำเร็จ = คนชวนได้แต้ม (ต้องเปิดระบบแต้ม) · 1 เบอร์ใช้โค้ดชวนเพื่อนได้ครั้งเดียว ใช้โค้ดตัวเองไม่ได้" },
   { key: "returns", label: "↩️ ขอคืน/เปลี่ยนสินค้า", hint: "ลูกค้ากด “ขอคืน/เปลี่ยนสินค้า” จากหน้าตามออเดอร์ (ออเดอร์ที่ส่งแล้ว/สำเร็จ ภายในกี่วันหลังได้รับของ) เลือกชิ้น + เหตุผล + แนบรูป → ร้านตอบในแท็บ ↩️ คืน/เปลี่ยน · ระบบไม่คืนเงิน/ไม่ตัดสต็อกให้เอง" },
+  { key: "notify", label: "🔔 แจ้งลูกค้าอัตโนมัติ (LINE · ตะกร้าค้าง · ของที่ถูกใจลดราคา)", hint: "LINE = สมาชิกที่เข้าสู่ระบบด้วย LINE และแอดเพื่อน OA ร้านแล้ว (ต้องใส่กุญแจ OA ใน Vercel: LINE_OA_TOKEN_<รหัสร้าน>) · อีเมล = ต้องตั้ง RESEND_API_KEY + EMAIL_FROM · ตะกร้าค้าง/ของลดราคา ส่งเฉพาะสมาชิกที่ยินยอมรับข่าวสาร (PDPA) · กลุ่ม LINE พนักงานตั้งที่ ERP › ศูนย์ LINE › 🛍 เว็บร้าน" },
   { key: "shippop", label: "🚚 Shippop (จองขนส่ง · ใบปะหน้า · เลขพัสดุอัตโนมัติ)", hint: "จองขนส่งจากรายละเอียดออเดอร์ (ดูราคาหลายเจ้า → จอง → ได้เลขพัสดุ + ใบปะหน้า) · ขนส่งรับพัสดุแล้ว/ส่งถึง = เปลี่ยนสถานะออเดอร์ให้เอง · ยังไม่ใส่ API KEY ใน Vercel = โหมดจำลอง (ไม่เรียก Shippop จริง ไม่เสียเงิน)" },
   { key: "redirects", label: "🔀 ย้ายลิงก์เก่า (Redirect)", hint: "ลิงก์เก่าที่ลูกค้า/Google ยังเข้ามา (เช่น จากเว็บเดิม หรือสินค้าที่เปลี่ยนชื่อ) → พาไปหน้าใหม่อัตโนมัติ ไม่เจอหน้า 404 · Google ย้ายคะแนนตามไปด้วย (301)" },
   { key: "search", label: "🔍 ค้นหาสินค้า", hint: "ช่องค้นหาบนเว็บพิมพ์ผิดนิดหน่อยก็เจอ · ใส่คำที่หมายถึงสิ่งเดียวกันให้ค้นเจอทั้งคู่ · ด้านล่างมีรายการคำที่ลูกค้าค้นแล้วไม่เจอ (ไว้เติมคำ/เพิ่มสินค้า)" },
@@ -178,6 +179,13 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "returns_enabled", label: "เปิดให้ลูกค้าขอคืน/เปลี่ยนทางเว็บ", group: "returns", type: "bool", isPublic: true },
   { key: "returns_days", label: "ขอได้ภายในกี่วันหลังได้รับของ", hint: "1–90 · นับจากวันที่ตั้งออเดอร์เป็น “สำเร็จ” (ยังไม่ตั้ง = ประมาณวันสั่ง + 7 วัน)", group: "returns", type: "number", isPublic: true, placeholder: "14" },
   { key: "returns_note", label: "เงื่อนไขที่ลูกค้าเห็นตอนขอ", hint: "เช่น สินค้าต้องอยู่ในสภาพเดิม มีป้ายครบ · ค่าส่งกลับลูกค้าออก (ยกเว้นสินค้าชำรุด/ส่งผิด)", group: "returns", type: "text", isPublic: true, i18n: true },
+
+  // ─── 🔔 แจ้งลูกค้าอัตโนมัติ (lib/webshop-line · lib/webshop-reminders) ───
+  { key: "line_notify_enabled", label: "แจ้งสถานะออเดอร์ทาง LINE OA (สั่งแล้ว · จ่ายแล้ว · ส่งแล้วพร้อมเลขพัสดุ · สำเร็จ · ยกเลิก) + ผลขอคืน/เปลี่ยน", group: "notify", type: "bool", isPublic: false },
+  { key: "cart_reminder_enabled", label: "เตือนลืมของในตะกร้า (สมาชิก)", hint: "ใส่ของแล้วไม่สั่งเกินเวลาที่ตั้ง → ส่งอีเมล/LINE 1 ครั้ง · สมาชิกที่ยินยอมรับข่าวสารเท่านั้น", group: "notify", type: "bool", isPublic: true },
+  { key: "cart_reminder_hours", label: "เตือนหลังทิ้งตะกร้ากี่ชั่วโมง", hint: "2–72 · ค่าเริ่ม 6", group: "notify", type: "number", isPublic: false, placeholder: "6" },
+  { key: "wishlist_alert_enabled", label: "แจ้งเมื่อของที่ถูกใจลดราคา (สมาชิก)", hint: "ราคาลดลงจากตอนกดถูกใจ ≥ % ที่ตั้ง → ส่งอีเมล/LINE ครั้งเดียวต่อการลด · สมาชิกที่ยินยอมรับข่าวสารเท่านั้น", group: "notify", type: "bool", isPublic: false },
+  { key: "wishlist_alert_pct", label: "ลดอย่างน้อยกี่ % ถึงแจ้ง", hint: "1–90 · ค่าเริ่ม 5", group: "notify", type: "number", isPublic: false, placeholder: "5" },
 
   // ─── 🚚 Shippop (lib/shippop · /api/website/orders/shippop) — ไม่ส่งให้เว็บร้าน ───
   { key: "shippop_enabled", label: "เปิดปุ่มจองขนส่ง Shippop ในออเดอร์", hint: "", group: "shippop", type: "bool", isPublic: false },
@@ -369,6 +377,11 @@ export interface SiteInfo {
   returns_enabled: boolean;
   returns_days: number;
   returns_note: string;
+  line_notify_enabled: boolean;
+  cart_reminder_enabled: boolean;
+  cart_reminder_hours: number;
+  wishlist_alert_enabled: boolean;
+  wishlist_alert_pct: number;
   shippop_enabled: boolean;
   shippop_courier: string;
   shippop_box: string;
@@ -475,6 +488,11 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   returns_enabled: false,
   returns_days: 14,
   returns_note: "",
+  line_notify_enabled: false,
+  cart_reminder_enabled: false,
+  cart_reminder_hours: 6,
+  wishlist_alert_enabled: false,
+  wishlist_alert_pct: 5,
   shippop_enabled: false,
   shippop_courier: "FLE",
   shippop_box: "20x30x10",
@@ -559,7 +577,7 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     const v = m.get(f.key);
     const fb = d[f.key as keyof SiteInfo];
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
-    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") ? Math.max(0, Math.min(f.key.startsWith("referral_") ? 100000 : 10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "returns_days" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
+    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") ? Math.max(0, Math.min(f.key.startsWith("referral_") ? 100000 : 10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "returns_days" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "cart_reminder_hours" ? Math.max(2, Math.min(72, Math.round(toNum(v, fb as number)))) : f.key === "wishlist_alert_pct" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
     else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
     else if (f.key === "redirects") out[f.key] = cleanRedirects(v);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);

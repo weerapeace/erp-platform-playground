@@ -12,6 +12,7 @@
  * · จำกัด 50 รายการ/ออเดอร์ · ไม่คืนข้อมูลลูกค้าคนอื่น
  */
 import { NextRequest, NextResponse, after } from "next/server";
+import { notifyStaffNewOrder } from "@/lib/webshop-line";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { verifyPreviewKey } from "@/lib/storefront-preview-key";
@@ -79,6 +80,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ✉️ อีเมลยืนยันออเดอร์ (ภาษาของลูกค้า) — ทำหลังตอบหน้าเว็บแล้ว ลูกค้าไม่ต้องรอ · ไม่เปิด/ไม่มีอีเมล = ข้ามเงียบ
   const orderId = result.orderId;
   after(() => notifyOrderCustomer(ctx.sb, orderId, "placed").catch((e) => console.error("[orders] notify placed", e)));
+  // 🛍 แจ้งกลุ่ม LINE พนักงาน (ตั้งกลุ่มที่ศูนย์ LINE · ไม่ตั้ง = ไม่ส่ง)
+  after(() => notifyStaffNewOrder(ctx.sb, orderId));
   // 📊 ยอดซื้อไป Meta จากเซิร์ฟเวอร์ (ลูกค้ายินยอมคุกกี้การตลาด + ร้านตั้งโทเค็น · lib/meta-capi)
   const tracking = parseTracking(body.tracking);
   const ip = clientIp(request);

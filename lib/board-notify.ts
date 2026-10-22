@@ -23,6 +23,10 @@ function render(tpl: string, vars: Record<string, unknown>): string {
 
 // แม่แบบข้อความ LINE ต่อเหตุการณ์ (แก้เองได้ที่ line_config.templates[eventKey])
 const DEFAULT_TPL: Record<string, string> = {
+  // 🛍 เว็บร้าน (lib/webshop-line)
+  webshop_order: "🛒 ออเดอร์เว็บใหม่ · {shop}\n{order_no} · {total} · {payment}\n👤 {customer} · {items} ชิ้น\n🔗 {link}",
+  webshop_slip: "💳 ลูกค้าแนบสลิป รอตรวจเงิน · {shop}\n{order_no} · {amount}\n🔗 {link}",
+  webshop_return: "↩️ ลูกค้าขอ{kind}สินค้า · {shop}\n{order_no} · {reason}\n🔗 {link}",
   wo_dispatched: "📤 จ่ายงานใหม่ · {sku}\n{product_name}\n👷 {worker} · 🪑 {dept} · {qty} ชิ้น\n📅 กำหนด {due}\n🔗 {link}",
   qc_pending: "📥 มีงานรอ QC · {sku}\n{product_name}\n👷 {worker} · {qty} ชิ้น\n🔗 {link}",
   qc_defect: "⚠️ พบของเสีย · {sku}\n{product_name}\n❌ {reason} · {qty} ชิ้น · 👷 {worker}\n🔗 {link}",

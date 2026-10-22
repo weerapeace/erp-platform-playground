@@ -15,8 +15,9 @@
  * ⭐ เปลี่ยนสถานะออเดอร์ของสมาชิก = ปรับแต้มให้อัตโนมัติ (สำเร็จ = ได้แต้ม · ถอย/ยกเลิก = เรียกคืน · ยกเลิก = คืนแต้มที่ใช้) — lib/member-points-db
  * ของกลาง: lib/website-orders.ts · guardApi(products.view/edit) · writeAudit
  */
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { maybeRunWebshopReminders } from "@/lib/webshop-reminders-db";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
@@ -94,6 +95,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // 💬 ข้อมูลประกอบข้อความถึงลูกค้า (ปุ่มคัดลอก/ส่งอีเมล ในรายละเอียดออเดอร์)
   const [info, urls] = await Promise.all([readSiteInfo(sb, s.id), loadShopSiteUrls(sb, [s.id])]);
+  // 🔔 รอบเตือนตะกร้าค้าง/ของถูกใจลดราคา (ห่างกัน ≥ 30 นาที/ร้าน · lib/webshop-reminders-db)
+  after(() => maybeRunWebshopReminders(sb, s.id));
 
   return NextResponse.json({
     shop: s,
