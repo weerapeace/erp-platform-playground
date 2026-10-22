@@ -1008,6 +1008,10 @@ export interface GalleryBlock extends BlockBase {
   stripColor?: string;
   stripHex?: string;
   stripPrice?: boolean;
+  /** 🔁 แบบตาราง: รูปมากกว่าคอลัมน์ → แถวเดียว เปลี่ยนเองทุก rotateSec วิ (slide/one/all · ท่า rotateFx เฉพาะ one/all) */
+  rotate?: "off" | "slide" | "one" | "all";
+  rotateFx?: "fade" | "up" | "zoom";
+  rotateSec?: number;
   /** รายรูป: code = รหัสรุ่นสินค้า (≤1) → รูปแรก/ชื่อ/ลิงก์ของสินค้า เมื่อไม่ได้ใส่เอง
    *  media "video" = เล่นคลิป videoKey (วนเงียบ · imageKey = รูปปก) — แบบตารางเท่านั้น (แถวรูปลุคบุ๊กโชว์รูปปก) */
   items: (ChildBase & { code?: string[]; media?: "image" | "video"; videoKey?: string | null; imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];

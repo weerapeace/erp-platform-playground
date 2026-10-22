@@ -1321,6 +1321,30 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       }),
       f("fullBleed", "รูปเต็มความกว้างจอ", "toggle", { group: "layout", default: false, hint: "รูปยืดเต็มจอ (หัวข้อยังอยู่ในกรอบปกติ)" }),
       f("hoverZoom", "ชี้แล้วรูปขยายนิด ๆ", "toggle", { group: "layout", default: true, showIf: GAL_GRID }),
+      // 🔁 รูปมากกว่าจำนวนคอลัมน์ → โชว์แถวเดียว แล้วเปลี่ยนรูปเองทุก x วิ (เว็บร้าน GalleryRotator) · หยุดตอนชี้/เลื่อนพ้นจอ
+      f("rotate", "เปลี่ยนรูปเอง (รูปมากกว่าจำนวนคอลัมน์)", "select", {
+        group: "layout",
+        default: "off",
+        options: [
+          { v: "off", l: "ไม่เปลี่ยน — โชว์ทุกรูปเรียงหลายแถว (แบบเดิม)" },
+          { v: "slide", l: "เลื่อนเป็นสไลด์ — ไปทีละรูป วนต่อเนื่อง" },
+          { v: "one", l: "ทีละช่อง สลับกัน" },
+          { v: "all", l: "ทั้งแถวพร้อมกัน" },
+        ],
+        showIf: GAL_GRID,
+        hint: "โชว์แถวเดียว ที่เหลือหมุนเวียนเข้ามาเอง · ชี้เมาส์ค้าง/เลื่อนพ้นจอ = หยุด",
+      }),
+      f("rotateFx", "ท่าเปลี่ยนรูป", "select", {
+        group: "layout",
+        default: "fade",
+        options: [
+          { v: "fade", l: "จางเข้า" },
+          { v: "up", l: "เลื่อนขึ้น" },
+          { v: "zoom", l: "ซูมเข้า" },
+        ],
+        showIf: [GAL_GRID, { key: "rotate", eq: ["one", "all"] }],
+      }),
+      f("rotateSec", "เปลี่ยนทุก (วินาที)", "number", { group: "layout", default: 3, min: 2, numMax: 15, showIf: [GAL_GRID, { key: "rotate", eq: ["slide", "one", "all"] }] }),
       ...galleryStripFields(),
       ...imageCaptionFields({ showIf: GAL_GRID }),
     ],
@@ -1364,13 +1388,18 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         return `${video ? "🎬 " : ""}${s(it.title) || s(it.caption) || s(it.alt) || (code ? `🛍 ${code}` : video ? "วิดีโอ" : "รูป")}`;
       },
     },
-    summary: (b) => `${b.layout === "strip" ? "แถวรูปลุคบุ๊ก · " : ""}${count(arr(b.items).length, "รูป")}`,
+    summary: (b) => `${b.layout === "strip" ? "แถวรูปลุคบุ๊ก · " : b.rotate && b.rotate !== "off" ? `🔁 ทุก ${Number(b.rotateSec) || 3} วิ · ` : ""}${count(arr(b.items).length, "รูป")}`,
     validate: (b, label) => {
       const hasCode = (i: Record<string, unknown>) => Array.isArray(i.code) && i.code.length > 0;
       const withImg = arr(b.items).filter((i) => i.imageKey || hasCode(i) || (i.media === "video" && i.videoKey));
       if (!withImg.length) return [{ level: "error", message: `${label}: ยังไม่มีรูปในแกลเลอรี` }];
+      const out: Omit<ValidationIssue, "blockId">[] = [];
+      // เปลี่ยนรูปเอง แต่รูปไม่เกินจำนวนคอลัมน์ = ไม่มีรูปให้หมุนเวียน
+      if (b.layout !== "strip" && b.rotate && b.rotate !== "off" && withImg.length <= (Number(b.columns) || 3))
+        out.push({ level: "warning", message: `${label}: ตั้งเปลี่ยนรูปเองไว้ แต่มีรูปไม่เกินจำนวนคอลัมน์ (${withImg.length} รูป) — เพิ่มรูปอีกถึงจะหมุนเวียน` });
       // รูปจากสินค้า = ใช้ชื่อสินค้าเป็นคำบรรยายให้เอง
-      return withImg.some((i) => !hasCode(i) && !s(i.alt)) ? [{ level: "warning", message: `${label}: บางรูปยังไม่มีคำบรรยาย (Alt)` }] : [];
+      if (withImg.some((i) => !hasCode(i) && !s(i.alt))) out.push({ level: "warning", message: `${label}: บางรูปยังไม่มีคำบรรยาย (Alt)` });
+      return out;
     },
   },
 

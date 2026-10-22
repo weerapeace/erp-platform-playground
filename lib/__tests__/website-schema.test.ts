@@ -479,6 +479,28 @@ describe("🚶 รันเวย์ลุค (2026-10-21)", () => {
   });
 });
 
+describe("🔁 แกลเลอรี: เปลี่ยนรูปเองทุก x วิ (2026-10-22)", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "g", type: "gallery", ...b }])[0] as unknown as Record<string, unknown> & { items: Record<string, unknown>[] };
+  const imgs = (n: number) => Array.from({ length: n }, (_, i) => ({ imageKey: `a/${i}.jpg`, alt: `รูป ${i}` }));
+  it("ค่าเริ่ม = ไม่เปลี่ยน (แบบเดิม) · ค่ามั่ว = ไม่เปลี่ยน · วินาที 2–15", () => {
+    expect(norm({})).toMatchObject({ rotate: "off", rotateFx: "fade", rotateSec: 3 });
+    expect(norm({ rotate: "spin", rotateFx: "x", rotateSec: 99 })).toMatchObject({ rotate: "off", rotateFx: "fade", rotateSec: 15 });
+    expect(norm({ rotate: "slide", rotateSec: 1 })).toMatchObject({ rotate: "slide", rotateSec: 2 });
+  });
+  it("ช่องโชว์ตามแบบ (ท่าเฉพาะทีละช่อง/ทั้งแถว · แถวรูปลุคบุ๊กไม่มี) · สรุปบอกวินาที · เตือนรูปไม่เกินคอลัมน์", () => {
+    const fd = (k: string) => SECTION_SCHEMAS.gallery.fields.find((x) => x.key === k)!;
+    expect(matchShowIf(fd("rotate"), { layout: "strip" })).toBe(false);
+    expect(matchShowIf(fd("rotateFx"), { layout: "grid", rotate: "slide" })).toBe(false);
+    expect(matchShowIf(fd("rotateFx"), { layout: "grid", rotate: "one" })).toBe(true);
+    expect(matchShowIf(fd("rotateSec"), { layout: "grid", rotate: "off" })).toBe(false);
+    expect(blockSummary(norm({ rotate: "slide", rotateSec: 4, items: imgs(6) }))).toMatch(/ทุก 4 วิ/);
+    const few = validateBlocks([norm({ rotate: "slide", columns: 3, items: imgs(3) }) as unknown as Block]).map((x) => x.message).join(" ");
+    expect(few).toMatch(/ไม่เกินจำนวนคอลัมน์/);
+    const ok = validateBlocks([norm({ rotate: "slide", columns: 3, items: imgs(5) }) as unknown as Block]).map((x) => x.message).join(" ");
+    expect(ok).not.toMatch(/ไม่เกินจำนวนคอลัมน์/);
+  });
+});
+
 describe("🎬 แกลเลอรี: รายชิ้นเป็นวิดีโอได้ (2026-10-22)", () => {
   const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "g", type: "gallery", ...b }])[0] as unknown as Record<string, unknown> & { items: Record<string, unknown>[] };
   it("ค่าเริ่ม = รูป (ของเดิมไม่เปลี่ยน) · วิดีโอเก็บคลิป + รูปปก · ค่ามั่ว = รูป", () => {
