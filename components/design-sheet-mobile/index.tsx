@@ -26,6 +26,7 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 import { QuoteRounds } from "@/components/design-sheet-detail/quote-rounds";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
+import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 
 // ป๊อปอัปเต็ม (ของกลางเดิม) โหลดเฉพาะตอนกด "แก้ไขเต็ม"
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
@@ -56,6 +57,7 @@ type Sheet = {
   linked_skus: { id: string; code: string; name_th: string | null; color: string | null; image_key: string | null; is_active: boolean; parent_code: string | null; from_sheet: boolean }[];
   updated_at: string;
   cost_extra?: unknown;   // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย) — array หรือ map ต่อ Parent
+  cost_general_label?: string | null;   // ชื่อแท็บตีราคา "ทั่วไป" ที่ตั้งเอง
 };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -252,7 +254,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
       {list.map((k) => (
         <button key={k || "__general"} type="button" onClick={() => onPick(k)}
-          className={`h-7 shrink-0 rounded-full border px-2.5 text-[11px] font-medium ${value === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{k || "ทั่วไป"}</button>
+          className={`h-7 shrink-0 rounded-full border px-2.5 text-[11px] font-medium ${value === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{costTabLabel(k, generalLabelOf(sheet?.cost_general_label))}</button>
       ))}
     </div>
   );
@@ -304,7 +306,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     <div className="border-t border-slate-100 bg-slate-50/60 px-2 py-3">
       {sheet && (
         <QuoteRounds sheetId={sheet.id} quotes={quotes} compact
-          sizes={costParents.map((k) => ({ key: k, label: k || "ทั่วไป" }))} sizeLabel={(c) => (c == null ? "—" : c === "" ? "ทั่วไป" : c)}
+          sizes={costParents.map((k) => ({ key: k, label: costTabLabel(k, generalLabelOf(sheet?.cost_general_label)) }))} sizeLabel={(c) => (c == null ? "—" : costTabLabel(c, generalLabelOf(sheet?.cost_general_label)))}
           currentCost={costTotalFor} canEdit={canEdit} costDirty={false} saveCost={async () => true} onReload={reloadQuotes} />
       )}
     </div>

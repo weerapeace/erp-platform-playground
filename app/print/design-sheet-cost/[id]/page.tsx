@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { buildReportHtml, buildReportImageGridHtml } from "@/lib/template";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
+import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 
 const ALL = "__ALL__";
 const thaiDate = (iso: string | null | undefined) =>
@@ -25,7 +26,6 @@ const baht = (n: number | null | undefined) =>
 const num = (n: number | null | undefined, dp = 0) =>
   n != null ? Number(n).toLocaleString("th-TH", { maximumFractionDigits: dp }) : "—";
 const pkey = (s: string | null | undefined) => s ?? "";
-const parentLabel = (k: string) => (k === "" ? "ทั่วไป" : k);
 
 /** ราคาต่อ 1 ชิ้นของวัสดุนั้น = ยอดรวมบรรทัด ÷ จำนวนชิ้น (บรรทัดที่ไม่ได้นับเป็นชิ้น → "—") */
 const perPiece = (l: CostLine): number | null =>
@@ -133,6 +133,7 @@ export default function PrintDesignSheetCostPage() {
   const id = params.id as string;
 
   const [sheet, setSheet]       = useState<Sheet | null>(null);
+  const genLabel = generalLabelOf(sheet?.cost_general_label as string | null | undefined);   // ชื่อแท็บ "ทั่วไป" ที่ตั้งเองของใบ
   const [lines, setLines]       = useState<CostLine[]>([]);
   const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
   const [loading, setLoading]   = useState(true);
@@ -180,14 +181,14 @@ export default function PrintDesignSheetCostPage() {
     for (const l of lines) { const k = pkey(l.parent_code); counts.set(k, (counts.get(k) ?? 0) + 1); }
     return [...counts.entries()]
       .sort((a, b) => (a[0] === "" ? -1 : b[0] === "" ? 1 : a[0].localeCompare(b[0])))
-      .map(([key, count]) => ({ key, label: parentLabel(key), count }));
-  }, [lines]);
+      .map(([key, count]) => ({ key, label: costTabLabel(key, genLabel), count }));
+  }, [lines, genLabel]);
 
   const shownLines = useMemo(() => (sel === ALL ? lines : lines.filter((l) => pkey(l.parent_code) === sel)), [lines, sel]);
 
   const html = useMemo(() => {
     if (!sheet || !template) return "";
-    const sizeLabel = sel === ALL ? null : parentLabel(sel);
+    const sizeLabel = sel === ALL ? null : costTabLabel(sel, genLabel);
     const extras = extrasForParent(sheet.cost_extra, sel);
     // รูปที่เลือก → กริดรูปของกลาง (ตัวเดียวกับใบพิมพ์อื่น) · เรียงตามลำดับที่กดเลือก
     const items = picked.map((k) => images.find((im) => im.key === k)).filter(Boolean) as SheetImage[];
@@ -202,7 +203,7 @@ export default function PrintDesignSheetCostPage() {
     // เทมเพลตวางเองไหม ({{{images_html}}}) — ถ้าไม่ ให้ระบบแทรกท้ายเนื้อหาให้
     const tplPlaces = /images_html/.test(`${template.header_html}${template.body_html}${template.footer_html}`);
     return tplPlaces ? rendered : injectImages(rendered, block);
-  }, [sheet, shownLines, template, sel, picked, images, imgCols]);
+  }, [sheet, shownLines, template, sel, picked, images, imgCols, genLabel]);
 
   return (
     <div className="min-h-screen bg-slate-100">

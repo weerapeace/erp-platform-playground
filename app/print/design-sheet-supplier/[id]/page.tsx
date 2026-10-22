@@ -22,6 +22,7 @@ import {
   calcSupplierLine, sumSupplierLines, splitAmount, fmtBaht, fmtNum,
   DEFAULT_FREIGHT, DEFAULT_FX, type SupplierLine, type FreightRates, type ProfitSplit,
 } from "@/lib/supplier-quote";
+import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 
 const ALL = "__ALL__";
 const thaiDate = (iso: string | null | undefined) =>
@@ -87,6 +88,7 @@ export default function PrintSupplierQuotePage() {
   const canSeeCost = usePermission("products.cost.view");
 
   const [sheet, setSheet] = useState<Sheet | null>(null);
+  const genLabel = generalLabelOf(sheet?.cost_general_label as string | null | undefined);   // ชื่อแท็บ "ทั่วไป" ที่ตั้งเองของใบ
   const [lines, setLines] = useState<SupplierLine[]>([]);
   const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
   const [fx, setFx] = useState(DEFAULT_FX);
@@ -124,8 +126,8 @@ export default function PrintSupplierQuotePage() {
     const counts = new Map<string, number>();
     for (const l of lines) { const k = pkey(l.parent_code); counts.set(k, (counts.get(k) ?? 0) + 1); }
     return [...counts.entries()].sort((a, b) => (a[0] === "" ? -1 : b[0] === "" ? 1 : a[0].localeCompare(b[0])))
-      .map(([key, count]) => ({ key, label: key === "" ? "ทั่วไป" : key, count }));
-  }, [lines]);
+      .map(([key, count]) => ({ key, label: costTabLabel(key, genLabel), count }));
+  }, [lines, genLabel]);
   const shown = useMemo(() => (sel === ALL ? lines : lines.filter((l) => pkey(l.parent_code) === sel)), [lines, sel]);
 
   const html = useMemo(() => {
@@ -136,9 +138,9 @@ export default function PrintSupplierQuotePage() {
       { paper_size: template.paper_size, orientation: template.orientation,
         header_html: template.header_html, body_html: template.body_html,
         footer_html: template.footer_html, custom_css: template.custom_css },
-      buildData(sheet, shown, splits, fx, rates, sel === ALL ? null : (sel === "" ? "ทั่วไป" : sel)),
+      buildData(sheet, shown, splits, fx, rates, sel === ALL ? null : costTabLabel(sel, genLabel)),
     );
-  }, [sheet, shown, template, sel, fx, rates]);
+  }, [sheet, shown, template, sel, fx, rates, genLabel]);
 
   if (!canSeeCost) {
     return (

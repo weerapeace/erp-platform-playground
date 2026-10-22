@@ -27,11 +27,13 @@ import { BomToCostWizard, type BomPulledLine } from "./bom-to-cost-wizard";
 import { SupplierQuoteSection } from "./supplier-quote";
 import { ToQuotationModal, type PresetQuoteLine } from "@/app/master/design-sheets/to-quotation-modal";
 import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
+import { PullCostFromSheetModal } from "./pull-cost-modal";
+import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
 import { RichTextEditor } from "@/components/rich-text";
 import type { Attachment } from "@/app/api/attachments/route";
-import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import type { SkuPickerValue } from "@/components/pickers";
@@ -71,10 +73,11 @@ type FormState = {
   waiting_for: string;          // ⏳ รออะไรอยู่ (พิมพ์เอง · ว่าง = ไม่ได้รอ)
   parent_sku_codes: string[];   // ตั้งได้หลาย Parent SKU (รหัสจริง)
   parent_sku_drafts: string[];  // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
+  cost_general_label: string;   // ชื่อแท็บตีราคา "ทั่วไป" ที่ตั้งเอง (ว่าง = ทั่วไป) — บันทึกทันทีผ่านปุ่ม ✎ เปลี่ยนชื่อ
 };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 // วันที่สั่ง default = วันนี้ (แก้ได้)
-const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", appointment_date: "", drive_link: "", waiting_for: "", parent_sku_codes: [], parent_sku_drafts: [] });
+const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", appointment_date: "", drive_link: "", waiting_for: "", parent_sku_codes: [], parent_sku_drafts: [], cost_general_label: "" });
 
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
@@ -403,7 +406,7 @@ function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: s
           <div className="px-2.5 py-1 text-[10px] text-slate-400">คัดลอก<b>จาก</b>แท็บไหน (มาแทนที่แท็บนี้)</div>
           {sources.map((t) => {
             const n = lineCountOf?.(t.key) ?? 0;
-            const name = t.kind === "general" ? "ทั่วไป" : t.kind === "draft" ? `✎ ${t.label}` : t.label;
+            const name = t.kind === "draft" ? `✎ ${t.label}` : t.label;   // แท็บทั่วไป: label = ชื่อที่ตั้งเอง
             return (
               <button key={t.key || "__gen__"} type="button" disabled={n === 0}
                 onClick={() => { setOpen(false); onCopy(t.key); }}
@@ -416,76 +419,6 @@ function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: s
         </div>
       )}
     </div>
-  );
-}
-
-// โมดอล "คัดลอกตีราคาจากใบงานอื่น" — ค้นหาใบ → ดึงบรรทัดตีราคา(ทั่วไป)+ค่าใช้จ่าย มาใส่แท็บที่กำลังดู
-function CopyFromSheetModal({ open, excludeId, onClose, onApply }: {
-  open: boolean; excludeId: string | null; onClose: () => void;
-  onApply: (lines: CostLine[], extra: CostExtra[], label: string) => void;
-}) {
-  const [q, setQ] = useState("");
-  const [rows, setRows] = useState<DesignSheetListItem[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!open) { setQ(""); setRows(null); return; }
-    setLoading(true);
-    const t = setTimeout(() => {
-      apiFetch(`/api/design-sheets?limit=30${q ? `&search=${encodeURIComponent(q)}` : ""}`).then((r) => r.json())
-        .then((j) => setRows(((j.data ?? []) as DesignSheetListItem[]).filter((s) => s.id !== excludeId)))
-        .catch(() => setRows([])).finally(() => setLoading(false));
-    }, 250);
-    return () => clearTimeout(t);
-  }, [open, q, excludeId]);
-
-  const pick = async (s: DesignSheetListItem) => {
-    setBusyId(s.id);
-    try {
-      const [lr, dr] = await Promise.all([
-        apiFetch(`/api/design-sheets/${s.id}/cost-lines`).then((r) => r.json()),
-        apiFetch(`/api/design-sheets/${s.id}`).then((r) => r.json()),
-      ]);
-      const allLines = (lr.data ?? []) as CostLine[];
-      const genLines = allLines.filter((l) => !l.parent_code);   // เอาตีราคา "ทั่วไป" ก่อน · ไม่มีก็เอาทั้งหมด
-      const lines = genLines.length ? genLines : allLines;
-      // ค่าใช้จ่ายเพิ่ม: รองรับทั้ง object {parent:[...]} และ array เดิม → เอาของ "ทั่วไป" ([""]) หรือชุดแรกที่มี
-      const rawCe = (dr.data ?? {}).cost_extra;
-      const arrOf = (a: unknown): CostExtra[] => (Array.isArray(a) ? a : []).map((c) => ({ label: String((c as CostExtra)?.label ?? ""), amount: Number((c as CostExtra)?.amount) || 0 }));
-      let extra: CostExtra[] = [];
-      if (rawCe && !Array.isArray(rawCe) && typeof rawCe === "object") {
-        const m = rawCe as Record<string, unknown>;
-        extra = arrOf(m[""]).length ? arrOf(m[""]) : arrOf(Object.values(m).find((v) => Array.isArray(v) && (v as unknown[]).length));
-      } else extra = arrOf(rawCe);
-      extra = extra.filter((c) => c.label || c.amount);
-      onApply(lines, extra, `${s.code} ${s.name}`.trim());
-    } catch { /* ignore */ } finally { setBusyId(null); }
-  };
-
-  return (
-    <ERPModal open={open} onClose={onClose} size="lg" title="📄 คัดลอกตีราคาจากใบงานอื่น"
-      description="เลือกใบงานต้นทาง — ดึงบรรทัดตีราคา (ทั่วไป) + ค่าใช้จ่าย มาใส่แท็บที่กำลังดู (แทนที่ของเดิมในแท็บนี้)">
-      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเลขใบ / ชื่องาน..."
-        className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md mb-2" />
-      {loading ? <div className="py-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>
-        : !rows || rows.length === 0 ? <div className="py-8 text-center text-slate-300 text-sm">— ไม่พบใบงาน —</div>
-        : <div className="space-y-1 max-h-[50vh] overflow-auto">
-            {rows.map((s) => (
-              <div key={s.id} className="flex items-center gap-3 p-2 border border-slate-100 rounded-lg">
-                <div className="w-10 h-10 rounded bg-slate-50 overflow-hidden shrink-0 flex items-center justify-center">
-                  {s.cover_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={s.cover_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300">📦</span>}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-slate-800 truncate">{s.code} · {s.name}</div>
-                  <div className="text-[11px] text-slate-400">{s.brand_name ?? "—"}{s.has_cost ? " · ✅ มีตีราคา" : " · ยังไม่ตีราคา"}</div>
-                </div>
-                <button type="button" disabled={busyId === s.id || !s.has_cost} onClick={() => void pick(s)}
-                  className="h-8 px-3 text-xs rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-40 whitespace-nowrap">
-                  {busyId === s.id ? "..." : "⧉ คัดลอกมา"}</button>
-              </div>
-            ))}
-          </div>}
-    </ERPModal>
   );
 }
 
@@ -613,21 +546,23 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     for (const r of curLines) { const k = r.group_name || "ไม่ระบุชนิด"; m.set(k, (m.get(k) ?? 0) + (r.amount || 0)); }
     return [...m.entries()].map(([label, amount]) => ({ label, amount }));
   }, [curLines]);
+  // ชื่อแท็บ "ทั่วไป" ของใบนี้ (ตั้งเองได้ · ว่าง = ทั่วไป) — ของกลาง lib/design-sheet-cost-labels
+  const generalLabel = generalLabelOf(form?.cost_general_label);
   // แท็บ Parent ในแท็บตีราคา: ทั่วไป + รหัสจริง + ร่าง + parent_code ที่มีบรรทัดแต่หลุดจากลิสต์ (กันงานหาย)
   const costParentTabs = useMemo(() => {
     const codes = form?.parent_sku_codes ?? [];
     const drafts = form?.parent_sku_drafts ?? [];
-    const tabs: { key: string; label: string; kind: "general" | "code" | "draft" | "orphan" }[] = [{ key: "", label: "ทั่วไป", kind: "general" }];
+    const tabs: { key: string; label: string; kind: "general" | "code" | "draft" | "orphan" }[] = [{ key: "", label: generalLabel, kind: "general" }];
     for (const c of codes) tabs.push({ key: c, label: c, kind: "code" });
     for (const d of drafts) tabs.push({ key: d, label: d, kind: "draft" });
     for (const k of new Set(costLines.map((r) => pkey(r.parent_code)))) {
       if (k && !codes.includes(k) && !drafts.includes(k)) tabs.push({ key: k, label: k, kind: "orphan" });
     }
     return tabs;
-  }, [form?.parent_sku_codes, form?.parent_sku_drafts, costLines]);
+  }, [form?.parent_sku_codes, form?.parent_sku_drafts, costLines, generalLabel]);
   // ป้ายไซส์ของรอบเสนอราคา (null = รอบเก่าไม่ระบุ · "" = ทั่วไป)
   const quoteSizeLabel = (code: string | null) =>
-    code == null ? "—" : code === "" ? "ทั่วไป" : (costParentTabs.find((t) => t.key === code)?.label ?? code);
+    code == null ? "—" : code === "" ? generalLabel : (costParentTabs.find((t) => t.key === code)?.label ?? code);
 
   // ---- เฟส 5: ตั้ง Parent SKU + ตัวเช็ครหัส ----
   const [skuCheck, setSkuCheck] = useState<ParentSkuCheck | null>(null);
@@ -952,7 +887,24 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     finally { setVerBusy(false); }
   };
 
+  // ตั้งชื่อแท็บ "ทั่วไป" เอง — เก็บที่ใบงาน (cost_general_label) บันทึกทันที · คีย์แท็บยังเป็น "" → รอบเสนอราคา/เวอร์ชัน/สั่งร้านที่ผูกไว้ไม่กระทบ
+  const saveGeneralLabel = async (name: string): Promise<boolean> => {
+    if (!form?.id) return false;
+    const label = name.trim();
+    if (label && costParentTabs.some((t) => t.key !== "" && t.key === label)) { toast.error(`มีแท็บชื่อ "${label}" อยู่แล้ว — ตั้งชื่ออื่น`); return false; }
+    setVerBusy(true);
+    try {
+      const res = await apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cost_general_label: label || null }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setForm((f) => (f ? { ...f, cost_general_label: label } : f));
+      toast.success(label ? `ตั้งชื่อแท็บเป็น "${label}" แล้ว` : 'ใช้ชื่อ "ทั่วไป" ตามเดิมแล้ว');
+      return true;
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เปลี่ยนชื่อไม่สำเร็จ"); return false; }
+    finally { setVerBusy(false); }
+  };
   const doRename = async () => {
+    if (verRename === "") { if (await saveGeneralLabel(verRenameName)) setVerRename(null); return; }
     const from = verRename ?? ""; const to = verRenameName.trim();
     if (!to) { toast.error("ตั้งชื่อใหม่ก่อน"); return; }
     if (to === from) { setVerRename(null); return; }
@@ -1198,6 +1150,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         waiting_for: d.waiting_for ?? "",
         parent_sku_codes: pCodes,
         parent_sku_drafts: Array.isArray(d.parent_sku_drafts) ? (d.parent_sku_drafts as string[]) : [],
+        cost_general_label: d.cost_general_label ?? "",
       });
       setSkuInput("");
       // ค่าใช้จ่ายเพิ่ม: รองรับทั้ง array (เดิม → Parent ทั่วไป) และ object {parentKey: [...]} (ใหม่ แยก Parent)
@@ -2002,7 +1955,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     <button key={t.key || "__gen__"} onClick={() => setCostParent(t.key)}
                       title={t.kind === "draft" ? "ร่าง Parent" : t.kind === "orphan" ? "Parent นี้ถูกเอาออกจากใบแล้ว (ยังมีบรรทัดค้าง)" : undefined}
                       className={`h-7 px-2.5 text-xs rounded-md inline-flex items-center gap-1 border ${active ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"} ${t.kind === "draft" ? "border-dashed" : ""}`}>
-                      {t.kind === "general" ? "ทั่วไป" : t.kind === "draft" ? `✎ ${t.label}` : t.kind === "orphan" ? `⚠ ${t.label}` : t.label}
+                      {t.kind === "draft" ? `✎ ${t.label}` : t.kind === "orphan" ? `⚠ ${t.label}` : t.label}
                       {n > 0 && <span className={`text-[10px] rounded-full px-1 ${active ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{n}</span>}
                     </button>
                   );
@@ -2025,8 +1978,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <div className="contents space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[11px] text-slate-400 inline-flex items-center gap-1.5">
-                  กำลังตีราคาของ: <b className="text-slate-600">{costParent === "" ? "ทั่วไป" : costParent}</b>
+                  กำลังตีราคาของ: <b className="text-slate-600">{costTabLabel(costParent, generalLabel)}</b>
                   {/* เปลี่ยนชื่อ/ลบ ได้เฉพาะแท็บที่เป็น "ชื่อ" (เวอร์ชัน ✎ / orphan ⚠) — รหัส Parent จริงไปจัดการที่แท็บข้อมูลงาน */}
+                  {canEdit && costParent === "" && (
+                    <button onClick={() => { setVerRenameName(form.cost_general_label); setVerRename(""); }} disabled={verBusy}
+                      title="ตั้งชื่อแท็บนี้เอง (เปลี่ยนแค่ชื่อที่แสดง · ว่าง = ทั่วไป)" className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 hover:text-blue-700 disabled:opacity-50">✎ เปลี่ยนชื่อ</button>
+                  )}
                   {canEdit && costParent !== "" && (() => {
                     const kind = costParentTabs.find((t) => t.key === costParent)?.kind;
                     if (kind === "code") return <span className="text-[10px] text-slate-300" title="รหัส Parent SKU จริง — เพิ่ม/เอาออกที่แท็บ ข้อมูลงาน">(รหัสจริง)</span>;
@@ -2047,16 +2004,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       onCopy={(source) => {
                         // คัดลอก "จาก" source → "มาใส่" แท็บปัจจุบัน (costParent) แทนที่ของเดิมในแท็บนี้
                         const src = costLines.filter((r) => pkey(r.parent_code) === source);
-                        if (src.length === 0) { toast.info(`"${source === "" ? "ทั่วไป" : source}" ยังไม่มีบรรทัดให้คัดลอก`); return; }
+                        if (src.length === 0) { toast.info(`"${costTabLabel(source, generalLabel)}" ยังไม่มีบรรทัดให้คัดลอก`); return; }
                         const cloned = src.map((r, i) => recomputeRow({ ...r, key: `cp${Date.now()}_${i}`, parent_code: costParent || null }));
                         setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned]);
                         setCostExtraMap((m) => ({ ...m, [costParent]: (m[source] ?? []).map((c) => ({ ...c })) }));
                         setCostDirty(true);
-                        toast.success(`คัดลอกตีราคาจาก "${source === "" ? "ทั่วไป" : source}" มาแล้ว (${cloned.length} บรรทัด)`);
+                        toast.success(`คัดลอกตีราคาจาก "${costTabLabel(source, generalLabel)}" มาแล้ว (${cloned.length} บรรทัด)`);
                       }} />
                   )}
-                  {fullEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="คัดลอกตีราคาจากใบงานอื่น"
-                    className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📄 Copy จากใบอื่น</button>}
+                  {canEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="ดึงวัตถุดิบตีราคาจากใบงานออกแบบอื่น — เลือกแท็บต้นทาง + ติ๊กรายการได้"
+                    className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📄 ดึงจากใบงานอื่น</button>}
                   {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
                   {fullEdit && <button onClick={() => setBomPull(true)} title="ดึงชนิด/กว้าง/ยาว/จำนวน จากสูตร BOM มาตีราคา (วัสดุ+ราคาเลือกเอง)"
                     className="h-8 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">🧬⬇ ดึงจาก BOM</button>}
@@ -2200,9 +2157,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 addLabel="＋ เพิ่มวัตถุดิบ"
                 emptyText="ยังไม่มีวัตถุดิบในรายการตีราคา"
                 // โหมดดูอย่างเดียว: ให้กด "เพิ่มวัตถุดิบ" ได้เลย (เข้าโหมดแก้ไข + เพิ่มบรรทัดให้ในคลิกเดียว)
-                emptyAction={!fullEdit && canEdit ? (
-                  <button type="button" onClick={() => { setEditing(true); addCostRow(); }}
-                    className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">＋ เพิ่มวัตถุดิบ</button>
+                emptyAction={canEdit ? (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {!fullEdit && <button type="button" onClick={() => { setEditing(true); addCostRow(); }}
+                      className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">＋ เพิ่มวัตถุดิบ</button>}
+                    <button type="button" onClick={() => setCopyFromOpen(true)}
+                      className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 bg-white rounded-lg hover:bg-blue-50">📄 ดึงจากใบงานอื่น</button>
+                  </div>
                 ) : null}
                 onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}` })}
                 selectable={fullEdit}
@@ -2336,7 +2297,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {form?.id && (
         <CostVersionsModal open={versionsOpen} onClose={() => setVersionsOpen(false)} sheetId={form.id}
           initialA={versionsInit?.a ?? null} initialB={versionsInit?.b ?? null}
-          parentKey={versionsInit?.parent ?? costParent} parentLabel={(versionsInit?.parent ?? costParent) || "ทั่วไป"}
+          parentKey={versionsInit?.parent ?? costParent} parentLabel={costTabLabel(versionsInit?.parent ?? costParent, generalLabel)}
           currentLines={costLines as SnapLine[]} currentExtra={costExtraMap} canEdit={canEdit}
           onRestore={(lines: SnapLine[], extra: SnapExtra[]) => {
             // ใส่บรรทัดของเวอร์ชันนั้นแทนของ Parent ที่ดูอยู่ (ยังไม่ลง DB — ต้องกด 💾 บันทึกตีราคา)
@@ -2368,7 +2329,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
       {/* Wizard ดึงตีราคา (แท็บที่กำลังดู) → สร้างสูตร BOM (วัตถุดิบใส่ทีหลัง) */}
       <BomFromCostWizard open={bomWizard} onClose={() => setBomWizard(false)}
-        tabLabel={costParent === "" ? "ทั่วไป" : costParent}
+        tabLabel={costTabLabel(costParent, generalLabel)}
         lines={curLines.map((r) => ({
           item_name: r.item_name, group_name: r.group_name,
           width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces,
@@ -2388,7 +2349,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* Wizard คู่กลับ: ดึงโครงจาก BOM (ชนิด/กว้าง/ยาว/จำนวน) → ต่อท้ายบรรทัดตีราคาแท็บที่กำลังดู (วัสดุ+ราคาเลือกเอง) */}
       {form?.id && (
         <BomToCostWizard open={bomPull} onClose={() => setBomPull(false)} sheetId={form.id}
-          tabLabel={costParent === "" ? "ทั่วไป" : costParent}
+          tabLabel={costTabLabel(costParent, generalLabel)}
           onApply={(pulled: BomPulledLine[], srcLabel) => {
             if (pulled.length === 0) return;
             const rows = pulled.map((p, i) => recomputeRow({
@@ -2433,7 +2394,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   }
                   setCostExtraMap((m) => ({ ...m, [name]: (m[costParent] ?? []).map((c) => ({ ...c })) }));
                   setCostDirty(true);
-                  toast.success(`เพิ่มเวอร์ชัน "${name}" + คัดลอก ${src.length} บรรทัดจาก "${costParent === "" ? "ทั่วไป" : costParent}" แล้ว`);
+                  toast.success(`เพิ่มเวอร์ชัน "${name}" + คัดลอก ${src.length} บรรทัดจาก "${costTabLabel(costParent, generalLabel)}" แล้ว`);
                 } else {
                   setCostDirty(true);
                   toast.success(`เพิ่มเวอร์ชัน "${name}" แล้ว — เริ่มใส่วัตถุดิบได้เลย`);
@@ -2454,7 +2415,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-2">
             <input type="checkbox" checked={verCopy} onChange={(e) => setVerCopy(e.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" />
             <span className="text-[13px] leading-snug text-slate-700">
-              คัดลอกรายการจากแท็บ <b>{costParent === "" ? "ทั่วไป" : costParent}</b> มาตั้งต้น
+              คัดลอกรายการจากแท็บ <b>{costTabLabel(costParent, generalLabel)}</b> มาตั้งต้น
               <span className="block text-[11px] text-slate-400">
                 {costLines.filter((r) => pkey(r.parent_code) === costParent).length} บรรทัด + ค่าใช้จ่ายเพิ่ม — ก๊อปมาแล้วแก้ตัวเลขต่อได้เลย
               </span>
@@ -2468,8 +2429,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
       {/* เปลี่ยนชื่อเวอร์ชันตีราคา — เซิร์ฟเวอร์เปลี่ยน parent_code ให้ครบทุกตาราง (บันทึกทันที ไม่ต้องกดบันทึกตีราคาซ้ำ) */}
       <ERPModal open={verRename !== null} onClose={() => { if (!verBusy) setVerRename(null); }} size="sm"
-        title="✎ เปลี่ยนชื่อเวอร์ชัน"
-        description={`เปลี่ยนชื่อแท็บ "${verRename ?? ""}" — บรรทัดวัสดุ / ตีราคาสั่งจากร้าน / รอบเสนอราคา ของแท็บนี้จะย้ายตามชื่อใหม่ทั้งหมด`}
+        title={verRename === "" ? "✎ เปลี่ยนชื่อแท็บ" : "✎ เปลี่ยนชื่อเวอร์ชัน"}
+        description={verRename === ""
+          ? `ตั้งชื่อแท็บ "${generalLabel}" ใหม่ — เปลี่ยนแค่ชื่อที่แสดง (แท็บ / รอบเสนอราคา / ใบพิมพ์เห็นชื่อใหม่) · เว้นว่าง = กลับเป็น "ทั่วไป"`
+          : `เปลี่ยนชื่อแท็บ "${verRename ?? ""}" — บรรทัดวัสดุ / ตีราคาสั่งจากร้าน / รอบเสนอราคา ของแท็บนี้จะย้ายตามชื่อใหม่ทั้งหมด`}
         footer={
           <div className="flex w-full justify-end gap-2">
             <button onClick={() => setVerRename(null)} disabled={verBusy} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
@@ -2478,12 +2441,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           </div>
         }>
         <label className="block">
-          <span className="text-xs text-slate-500">ชื่อใหม่ *</span>
-          <input value={verRenameName} onChange={(e) => setVerRenameName(e.target.value)} autoFocus
+          <span className="text-xs text-slate-500">{verRename === "" ? "ชื่อแท็บ (ว่าง = ทั่วไป)" : "ชื่อใหม่ *"}</span>
+          <input value={verRenameName} placeholder={verRename === "" ? "ทั่วไป" : undefined} onChange={(e) => setVerRenameName(e.target.value)} autoFocus
             onKeyDown={(e) => { if (e.key === "Enter" && !verBusy) void doRename(); }}
             className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </label>
-        {(costDirty || supplierDirty) && (
+        {verRename !== "" && (costDirty || supplierDirty) && (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
             💡 มีข้อมูลที่ยังไม่บันทึก — ระบบจะ<b>บันทึกให้ก่อน</b>แล้วค่อยเปลี่ยนชื่อ
           </p>
@@ -2553,14 +2516,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* ป๊อปจัดการวัสดุตีราคา — CRUD ผ่าน API กลาง master-v2 (เหมือนหน้า /master/design-price-items) */}
       {/* คัดลอกตีราคาจากใบงานอื่น (ข้ามใบ) → มาใส่แท็บที่กำลังดู */}
       {form?.id && (
-        <CopyFromSheetModal open={copyFromOpen} excludeId={form.id} onClose={() => setCopyFromOpen(false)}
-          onApply={(srcLines, srcExtra, label) => {
-            if (srcLines.length === 0 && srcExtra.length === 0) { toast.info(`ใบ "${label}" ยังไม่มีตีราคาให้คัดลอก`); return; }
-            const cloned = srcLines.map((r, i) => recomputeRow({ ...(r as CostRow), id: undefined, key: `cx${Date.now()}_${i}`, parent_code: costParent || null }));
-            setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned]);
-            if (srcExtra.length) setCostExtraMap((m) => ({ ...m, [costParent]: srcExtra.map((c) => ({ ...c })) }));
+        <PullCostFromSheetModal open={copyFromOpen} excludeId={form.id} targetLabel={costTabLabel(costParent, generalLabel)} targetCount={curLines.length}
+          onClose={() => setCopyFromOpen(false)}
+          onApply={(srcLines, srcExtra, mode, label) => {
+            const stamp = Date.now();
+            // เป็นบรรทัดใหม่ของใบนี้: ไม่เอา id / ประวัติเปลี่ยนวัสดุ / การรับทราบราคา ของใบต้นทางมาด้วย
+            const cloned = srcLines.map((r, i) => recomputeRow({ ...(r as CostRow), id: undefined, key: `cx${stamp}_${i}`, parent_code: costParent || null, prev_item: null, price_ack: null }));
+            setCostLines((prev) => (mode === "replace" ? [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned] : [...prev, ...cloned]));
+            if (srcExtra) setCostExtraMap((m) => ({ ...m, [costParent]: srcExtra.map((c) => ({ ...c })) }));
+            if (!fullEdit) setEditing(true);   // ดึงมาแล้วตรวจ/แก้ต่อ แล้วกดบันทึกเอง (เหมือนปุ่ม ＋ เพิ่มวัตถุดิบ)
             setCostDirty(true); setCopyFromOpen(false);
-            toast.success(`คัดลอกตีราคาจากใบ "${label}" มาแล้ว (${cloned.length} บรรทัด)`);
+            toast.success(`ดึงจาก "${label}" มา ${cloned.length} บรรทัด${srcExtra ? " + ค่าใช้จ่ายเพิ่ม" : ""} — ตรวจแล้วกด 💾 บันทึกตีราคา`);
           }} />
       )}
 

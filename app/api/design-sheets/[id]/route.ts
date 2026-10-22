@@ -84,6 +84,7 @@ type PatchBody = {
   waiting_for?: string | null;    // ⏳ รออะไรอยู่ (พิมพ์เอง)
   cost_extra?: CostExtra[] | Record<string, CostExtra[]>;   // array (เดิม) หรือ object แยกตาม Parent (ข้อ 7)
   parent_sku_drafts?: string[];   // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
+  cost_general_label?: string | null;   // ชื่อแท็บตีราคา "ทั่วไป" ที่ตั้งเอง (ว่าง = ทั่วไป)
   profit_splits?: Record<string, { name?: string; type?: string; value?: number; on?: boolean }[]>;   // แบ่งกำไรทั้งใบ (ต่อแท็บ Parent)
 };
 
@@ -121,6 +122,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.drive_link !== undefined) patch.drive_link = body.drive_link?.trim() || null;
   if (body.waiting_for !== undefined) patch.waiting_for = String(body.waiting_for ?? "").trim().slice(0, 300) || null;
   if (body.is_active !== undefined)  patch.is_active = !!body.is_active;
+  if (body.cost_general_label !== undefined) patch.cost_general_label = String(body.cost_general_label ?? "").trim().slice(0, 120) || null;
   if (body.cost_extra !== undefined) {
     // ค่าใช้จ่ายเพิ่ม — array (เดิม) เก็บเป็น array · object (แยก Parent) เก็บเป็น object {parentKey: [...]}
     if (Array.isArray(body.cost_extra)) {
