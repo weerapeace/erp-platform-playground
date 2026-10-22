@@ -3,7 +3,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { isUuid } from "@/lib/marketing/sku-list";
-import { assigneesOf, cleanAssignees, cleanSteps, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
+import { assigneesOf, cleanAssignees, cleanEntryMode, cleanSteps, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
 import { actorOf, countWorkNotes, JOB_COLS, loadJob, loadJobItems, syncLinkedTask, toJob } from "@/lib/marketing/work-jobs-db";
 import { WORK_NOTE_ENTITY } from "@/lib/marketing/work-jobs";
 
@@ -65,6 +65,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     patch.status = b.status;
   }
   if ("note" in b) patch.note = String(b.note ?? "").trim().slice(0, 1000) || null;
+  if ("entry_mode" in b) patch.entry_mode = cleanEntryMode(b.entry_mode);   // 📝 กดการ์ดแล้วเข้าโหมดลงรายละเอียดไหน
   if (!Object.keys(patch).length) return NextResponse.json({ data: null, error: "ไม่มีอะไรให้แก้" }, { status: 400 });
 
   const admin = supabaseAdmin();

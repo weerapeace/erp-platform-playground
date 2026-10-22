@@ -4,7 +4,8 @@
  * ป๊อปสร้าง/แก้ "งาน" ของโหมดทำงาน (หน้า SKU การตลาด)
  *   ประเภทงาน (Clearance / ลงเว็บไซต์ / อื่น ๆ) → ได้ขั้นตอนตั้งต้นของแบบงาน แก้/เพิ่ม/ลบได้
  *   ผู้รับผิดชอบ (หลายคน/ทั้งทีม) + วันครบกำหนด (ระดับงาน) · ติดป้ายหลักอัตโนมัติตอนใส่รุ่น (Clearance = Clearance Products)
- * ของกลางที่ใช้: ERPModal · MultiUserPicker (ตัวเดียวกับงาน Creative) · DateInput · SearchableSelect
+ *   📝 เปิดสินค้าในโหมดลงรายละเอียด (entry_mode) — กดการ์ดในงานนี้แล้วป๊อปสินค้าเข้าโหมดนั้นเลย (งานลงเว็บ = ลงขายเว็บไซต์)
+ * ของกลางที่ใช้: ERPModal · MultiUserPicker (ตัวเดียวกับงาน Creative) · DateInput · SearchableSelect · useEntryModes
  */
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -16,8 +17,9 @@ import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { getLang } from "@/lib/lang";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { useEntryModes } from "@/components/entry-modes";
 import {
-  JOB_KINDS, kindInfo, kindDefaultName, kindLabel, kindSteps, nextStepKey, stepsFromLabels, MAX_JOB_NAME, MAX_STEPS, MAX_STEP_LABEL,
+  JOB_KINDS, defaultEntryMode, kindInfo, kindDefaultName, kindLabel, kindSteps, nextStepKey, stepsFromLabels, MAX_JOB_NAME, MAX_STEPS, MAX_STEP_LABEL,
   type WorkJob, type WorkJobKind, type WorkStep,
 } from "@/lib/marketing/work-jobs";
 
@@ -34,6 +36,8 @@ const suggestName = (k: WorkJobKind) => {
 type Form = {
   kind: WorkJobKind; name: string; steps: WorkStep[]; assignees: UserPickerValue[];
   due_date: string; auto_label_id: string; note: string;
+  /** key โหมดลงรายละเอียด ("" = เปิดหน้าปกติ) */
+  entry_mode: string;
 };
 
 export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }: {
@@ -56,9 +60,11 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
     kind: job.kind, name: job.name, steps: job.steps,
     assignees: (job.assignees ?? []).map((a) => ({ id: a.id, code: null, name: a.name })),
     due_date: job.due_date ?? "", auto_label_id: job.auto_label_id ?? "", note: job.note ?? "",
+    entry_mode: job.entry_mode ?? "",
   } : {
     kind: "clearance", name: suggestName("clearance"), steps: stepsFromLabels(kindSteps("clearance")),
     assignees: [], due_date: "", auto_label_id: defaultLabel("clearance"), note: "",
+    entry_mode: defaultEntryMode("clearance") ?? "",
   };
   const [form, setForm] = useState<Form>(initial);
   const [orig, setOrig] = useState<string>("");
@@ -86,8 +92,17 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
       name: !f.name.trim() || f.name === suggestName(f.kind) ? suggestName(k) : f.name,
       steps: sameSteps || f.steps.length === 0 ? stepsFromLabels(kindSteps(k)) : f.steps,
       auto_label_id: f.auto_label_id === defaultLabel(f.kind) ? defaultLabel(k) : f.auto_label_id,
+      entry_mode: f.entry_mode === (defaultEntryMode(f.kind) ?? "") ? (defaultEntryMode(k) ?? "") : f.entry_mode,
     };
   });
+  // โหมดลงรายละเอียดของ Parent SKU (ที่ตั้งไว้ / ชุดตั้งต้น) — ตัวเลือก "กดสินค้าแล้วเข้าโหมด"
+  const entryModes = useEntryModes("parent-skus-v2");
+  const modeOptions = useMemo(() => [
+    { value: "", label: t("— เปิดหน้าปกติ (ไม่เข้าโหมด) —", "— Normal view (no mode) —") },
+    ...(entryModes ?? []).map((m) => ({ value: m.key, label: m.label, badge: m.icon ?? undefined })),
+    ...(form.entry_mode && entryModes && !entryModes.some((m) => m.key === form.entry_mode)
+      ? [{ value: form.entry_mode, label: t(`(ไม่พบโหมด "${form.entry_mode}" — ถูกลบไปแล้ว)`, `(mode "${form.entry_mode}" not found — deleted)`) }] : []),
+  ], [entryModes, form.entry_mode, t]);
 
   const removedWithTicks = useMemo(() => {
     if (!job) return [] as string[];
@@ -109,6 +124,7 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
       name, steps, kind: form.kind,
       assignees: form.assignees.map((u) => ({ id: u.id, name: u.name })),
       due_date: form.due_date || null, auto_label_id: form.auto_label_id || null, note: form.note,
+      entry_mode: form.entry_mode || null,
       ...(job ? {} : { parent_sku_ids: presetIds ?? [] }),
     };
     setBusy(true); setErr(null);
@@ -172,6 +188,11 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
           <div>
             <div className={rowLabel}>{t("วันครบกำหนด", "Due date")}</div>
             <DateInput value={form.due_date} onChange={(v) => set("due_date", v)} placeholder={t("วว/ดด/ปปปป", "dd/mm/yyyy")} />
+          </div>
+          <div>
+            <div className={rowLabel}>📝 {t("กดสินค้าแล้วเปิดในโหมด", "Open products in entry mode")}</div>
+            <SearchableSelect value={form.entry_mode} options={modeOptions} onChange={(v) => set("entry_mode", v)} />
+            <p className="mt-1 text-xs text-slate-400">{t("กดการ์ดสินค้าในงานนี้ → ป๊อปสินค้าโชว์เฉพาะช่องที่ต้องลง + เตือนช่องที่ขาด", "Clicking a product in this job opens it showing only the fields to fill + missing warnings")}</p>
           </div>
         </div>
 

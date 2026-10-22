@@ -775,6 +775,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
       {/* 📦 drawer สินค้าตัวจริง (ทุกแท็บ) · ◀ ▶ ตามรายการที่เห็น · ปิด/แก้แล้วโหลดงานใหม่ (รหัส/ชื่อ/รูปอาจเปลี่ยน) */}
       {openParent && (
         <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParent} navIds={navIds}
+          entryMode={job?.entry_mode ?? null}
           onClose={() => { setOpenParent(null); if (job) void loadDetail(job.id, true); }}
           onChanged={() => { if (job) void loadDetail(job.id, true); }} />
       )}

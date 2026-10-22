@@ -52,7 +52,7 @@ import { RECORD_DETAIL_VIEWS } from "@/components/record-detail-views";
 import { CodeCheckMessages, useCodeCheck } from "@/components/code-check-hint";
 import { CODE_RULE_MODULES } from "@/lib/code-rules";
 // 📝 โหมดลงรายละเอียด (ของกลาง) — ปุ่มเลือกโหมด + หน้าจอในโหมด · ตั้งค่าโหมดโหลดเฉพาะตอนเปิด
-import { EntryModeMenu, EntryModePanel, fetchEntryModeStats, lastEntryMode, rememberEntryMode, type EntryModeField } from "@/components/entry-modes";
+import { EntryModeExitButton, EntryModeMenu, EntryModePanel, fetchEntryModeStats, lastEntryMode, rememberEntryMode, type EntryModeField } from "@/components/entry-modes";
 import { computeModeProgress, entryModeListHref, isModeIncomplete, modeAppliesTo, modeVisibleTo, resolveEntryModes, type EntryMode, type EntryModeStat } from "@/lib/entry-modes";
 const EntryModeSettings = dynamic(() => import("@/components/entry-modes/settings").then((m) => m.EntryModeSettings), { ssr: false });
 // ปุ่ม "📝 ความครบตามโหมด" หัวตาราง (นับทั้งระบบ + กรอง + รายงาน/พิมพ์) — โหลดเฉพาะหน้าที่มีโหมด
@@ -744,6 +744,7 @@ export type EmbeddedDrawer = {
   onChanged?: () => void;
   navIds?: string[];              // รายการ id สำหรับปุ่ม ◀ ก่อนหน้า / ถัดไป ▶
   startInEdit?: boolean;          // เปิดมาในโหมดแก้เลย (เช่นกดปุ่ม ✎ จากการ์ด)
+  entryMode?: string | null;      // 📝 เปิดแล้วเข้าโหมดลงรายละเอียดนี้เลย (key ของโหมด · เช่นงานในโหมดทำงาน)
 };
 
 export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig; embedded?: EmbeddedDrawer }) {
@@ -1502,7 +1503,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     if (!embedded || embeddedOpenedRef.current || registryLoading) return;
     embeddedOpenedRef.current = true;
     if (embedded.navIds) navRowsRef.current = embedded.navIds.map((id) => ({ id })) as Row[];
-    if (embedded.recordId) { setDrawerMode(embedded.startInEdit ? "edit" : "view"); openEdit({ id: embedded.recordId } as Row); }
+    if (embedded.recordId) {
+      setDrawerMode(embedded.startInEdit ? "edit" : "view"); openEdit({ id: embedded.recordId } as Row);
+      if (embedded.entryMode && !embedded.startInEdit) setActiveModeKey(embedded.entryMode);
+    }
     else openCreate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded, registryLoading]);
@@ -3167,6 +3171,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   systemStat={!activeMode || modeStatsErr ? undefined : (modeStats ? (modeStats.find((s) => s.key === activeMode.key) ?? undefined) : null)}
                   onShowList={showModeList} />
               )}
+              {modeBtn && activeMode && <EntryModeExitButton onExit={exitEntryMode} />}
               {aiBtn && (
                 <button type="button" onClick={() => setAiDetailOpen(true)}
                   title={tr("ให้ AI ดูรูปสินค้าแล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ (ไม่แตะช่องขนาด)", "Let AI look at the product images and write name / introduction / description in Thai and English (never touches size fields)")}
@@ -3312,7 +3317,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               imageCount={modeImageCount}
               translatable={(k) => canEdit && !!modeThSourceOf(k)}
               onTranslate={translateModeField}
-              onExit={exitEntryMode}
               onNextIncomplete={isRest && navRowsRef.current.length > 1 ? () => void nextIncompleteInMode() : undefined}
               scanning={modeScanning} />
           ) : null;
@@ -3776,7 +3780,7 @@ function prettifyModuleKey(k: string): string {
 export function MasterRecordDrawer({
   moduleKey, recordId, onClose, onChanged, startInEdit, createDefaults, createTitle,
   apiPath, apiBase, title, icon, mediaGallery, permissions, extraRowActions, cellRenderers, navIds,
-  formRenderers, fileAttachments,
+  formRenderers, fileAttachments, entryMode,
 }: {
   moduleKey: string;
   recordId: string | null;        // null = สร้างใหม่
@@ -3797,6 +3801,8 @@ export function MasterRecordDrawer({
   navIds?: string[];
   formRenderers?: MasterCRUDConfig["formRenderers"];
   fileAttachments?: MasterCRUDConfig["fileAttachments"];
+  /** 📝 เปิดแล้วเข้าโหมดลงรายละเอียดนี้เลย (key ของโหมด · ว่าง = หน้าปกติ) — ◀ ▶ ไปรุ่นอื่นยังอยู่ในโหมดเดิม */
+  entryMode?: string | null;
 }) {
   const { user } = useAuth();
   const actor = user?.name ?? user?.email ?? undefined;
@@ -3898,7 +3904,7 @@ export function MasterRecordDrawer({
     else onCloseRef.current();
   }, []);
 
-  return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose: handleClose, onChanged, startInEdit }} />;
+  return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose: handleClose, onChanged, startInEdit, entryMode }} />;
 }
 
 // ============================================================

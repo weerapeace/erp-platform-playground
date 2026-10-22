@@ -3,7 +3,24 @@ import {
   assigneeNames, assigneesOf, cleanAssignees, MAX_ASSIGNEES,
   cleanSteps, discountProblem, discountedPrice, dueState, itemProgress, jobProgress, newPriceRange,
   nextStepKey, snapshotBasePrice, stepsFromLabels, kindInfo, shortThaiDate,
+  cleanEntryMode, defaultEntryMode,
 } from "@/lib/marketing/work-jobs";
+
+describe("📝 กดสินค้าแล้วเข้าโหมดลงรายละเอียด", () => {
+  it("งานลงเว็บตั้งต้น = ลงขายเว็บไซต์ · งานอื่นไม่เข้าโหมด", () => {
+    expect(defaultEntryMode("website")).toBe("web");
+    expect(defaultEntryMode("clearance")).toBeNull();
+    expect(defaultEntryMode("custom")).toBeNull();
+  });
+  it("ค่าที่ส่งมาแปลก/ว่าง = ไม่ใช้โหมด", () => {
+    expect(cleanEntryMode(" marketplace ")).toBe("marketplace");
+    expect(cleanEntryMode("m1a2_b-3")).toBe("m1a2_b-3");
+    expect(cleanEntryMode("")).toBeNull();
+    expect(cleanEntryMode(null)).toBeNull();
+    expect(cleanEntryMode("web; drop table")).toBeNull();
+    expect(cleanEntryMode("x".repeat(41))).toBeNull();
+  });
+});
 
 describe("ราคา Clearance", () => {
   it("ลดเป็น % และเป็นบาท", () => {

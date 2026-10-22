@@ -42,6 +42,8 @@ export type WorkJob = {
   /** งานใน Task Manager ที่ผูกไว้ (null = ยังไม่ส่ง / งานนั้นถูกลบ) */
   creative_task_id: string | null;
   creative_task_no: string | null;
+  /** 📝 กดการ์ดสินค้าในงานนี้ → ป๊อปสินค้าเปิดแล้วเข้าโหมดลงรายละเอียดนี้เลย (key ของโหมด · null = หน้าปกติ) */
+  entry_mode: string | null;
   /** สรุป (คำนวณตอนโหลดรายการงาน) */
   item_count?: number;
   item_done?: number;
@@ -97,6 +99,14 @@ export const kindLabel = (k: WorkJobKind) => { const i = kindInfo(k); return tr(
 export const kindDefaultName = (k: WorkJobKind) => { const i = kindInfo(k); return tr(i.defaultName, i.defaultName_en); };
 export const kindSteps = (k: WorkJobKind) => { const i = kindInfo(k); return getLang() === "en" ? i.steps_en : i.steps; };
 export const isJobKind = (v: unknown): v is WorkJobKind => v === "clearance" || v === "website" || v === "custom";
+
+/** โหมดลงรายละเอียดตั้งต้นของงานแต่ละประเภท — งานลงเว็บ = "ลงขายเว็บไซต์" (key "web" ในชุดตั้งต้นของ Parent SKU) */
+export const defaultEntryMode = (k: WorkJobKind): string | null => (k === "website" ? "web" : null);
+/** ทำความสะอาด key โหมดที่ส่งมา (ว่าง/รูปแบบแปลก = ไม่ใช้โหมด) */
+export function cleanEntryMode(v: unknown): string | null {
+  const s = typeof v === "string" ? v.trim() : "";
+  return /^[a-zA-Z0-9_-]{1,40}$/.test(s) ? s : null;
+}
 
 export const MAX_STEPS = 20;
 export const MAX_STEP_LABEL = 60;

@@ -85,6 +85,11 @@
 - กดรุ่น (แถว/รูป/รหัส) = เปิด drawer สินค้าตัวจริง (MasterRecordDrawer · ◀ ▶ ตามรายการที่เห็น) · ปุ่ม 🛍 = drawer ตั้งค่าเว็บไซต์ทุกร้าน (ของกลาง `components/parent-web-drawer.tsx` ห่อ ParentWebListings)
 - ⊘ ขั้นตอนที่ "ไม่ต้องทำ" รายรุ่น: `marketing_work_job_items.step_skip` jsonb {key:{at,by}} (migration 202610230400) · ชิปเส้นประขีดฆ่า กดเพื่อกลับมาต้องทำ · ไม่นับในความคืบหน้า (itemProgress/jobProgress รับ skip · ข้ามทุกขั้น = เสร็จ) · ตั้งไม่ต้องทำ = เอาติ๊กขั้นนั้นออก · API PATCH items {item_ids, step_key, skip} + audit `marketing.work.skip` · แถบล่าง ⊘ ไม่ต้องทำ… / ↺ กลับมาต้องทำ…
 
+### 📝 กดการ์ดแล้วเข้าโหมดลงรายละเอียด (2026-10-22)
+- งานเลือกได้ว่า "กดสินค้าแล้วเปิดในโหมด" ไหน (ป๊อปสร้าง/แก้งาน · ตัวเลือกจาก `useEntryModes("parent-skus-v2")`) → `marketing_work_jobs.entry_mode` (migration 202610300400 · key ของโหมด · null = หน้าปกติ)
+- งานลงเว็บตั้งต้น = `web` (ลงขายเว็บไซต์ · `defaultEntryMode`) · งานอื่นไม่เข้าโหมด · ค่าแปลก ๆ ถูกตัดทิ้ง (`cleanEntryMode`)
+- work-mode ส่ง `entryMode={job.entry_mode}` ให้ `MasterRecordDrawer` → ป๊อปเปิดแล้วเข้าโหมดเลย · ◀ ▶ ไปรุ่นอื่นยังอยู่ในโหมด · ดู docs/entry-modes.md
+
 ### 📋 งานชุดรุ่น ↔ Task Manager (2026-10-19)
 - เจ้าของขอ "อยากให้เพิ่มงานนี้ที่ Task Manager ได้ด้วย" → เลือก **ทั้งสองอย่าง**:
   - หัวงานในโหมดทำงาน: **📋 ส่งเข้า Task Manager** → สร้างงาน Creative 1 ใบ (ชื่อ/ผู้รับผิดชอบ/กำหนดส่ง/แบรนด์หลัก/ลิงก์กลับ) ผูกด้วย `marketing_work_jobs.creative_task_id` (migration 202610230500 · on delete set null) · ผูกแล้วปุ่มกลายเป็นลิงก์ `CT-… ↗`

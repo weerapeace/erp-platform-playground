@@ -15,7 +15,7 @@ import {
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignees, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at, creative_task_id, creative_task:erp_creative_tasks!creative_task_id(task_no, is_active)";
+export const JOB_COLS = "id, name, kind, steps, auto_label_id, assignees, assignee_id, assignee_name, due_date, status, note, created_by_name, created_at, updated_at, creative_task_id, entry_mode, creative_task:erp_creative_tasks!creative_task_id(task_no, is_active)";
 const ITEM_COLS = "id, job_id, parent_sku_id, base_price_min, base_price_max, discount_value, discount_unit, step_done, step_skip, note, sort_order, issue_open, issue_at, issue_by";
 
 /** นับจดหมายเหตุ (ความคิดเห็นกลาง erp_comments ที่ยังไม่ลบ) ต่อ entity — ใช้ทำตัวเลข 📝 */
@@ -56,6 +56,7 @@ export function toJob(r: Record<string, unknown>): WorkJob {
     created_at: String(r.created_at ?? ""), updated_at: String(r.updated_at ?? ""),
     creative_task_id: linked ? String(r.creative_task_id) : null,
     creative_task_no: linked ? (ct?.task_no ?? null) : null,
+    entry_mode: (r.entry_mode as string | null) ?? null,
   };
 }
 

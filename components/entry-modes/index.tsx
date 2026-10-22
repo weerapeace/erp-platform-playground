@@ -10,7 +10,22 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
-import { IMAGES_KEY, type EntryMode, type EntryModeLevel, type EntryModeProgress, type EntryModeStat } from "@/lib/entry-modes";
+import { cachedJson } from "@/lib/client-cache";
+import { IMAGES_KEY, resolveEntryModes, type EntryMode, type EntryModeLevel, type EntryModeProgress, type EntryModeStat } from "@/lib/entry-modes";
+
+/** โหมดของโมดูล (ที่ตั้งไว้ หรือชุดตั้งต้น) — ไว้ทำตัวเลือก "เปิดในโหมด…" ที่อื่น เช่น งานในโหมดทำงาน · null = กำลังโหลด
+ *  ใช้ URL เดียวกับทะเบียนฟิลด์ของ drawer กลาง → แชร์ cache กัน */
+export function useEntryModes(moduleKey: string): EntryMode[] | null {
+  const [modes, setModes] = useState<EntryMode[] | null>(null);
+  useEffect(() => {
+    let off = false;
+    cachedJson<{ entry_modes?: unknown }>(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`)
+      .then((r) => { if (!off) setModes(resolveEntryModes(moduleKey, r.entry_modes)); })
+      .catch(() => { if (!off) setModes(resolveEntryModes(moduleKey, undefined)); });
+    return () => { off = true; };
+  }, [moduleKey]);
+  return modes;
+}
 
 /** โหลดสรุปทั้งระบบของโมดูล (ใช้ทั้งปุ่มหัวตารางและหน้าจอโหมดในป๊อป) */
 export async function fetchEntryModeStats(moduleKey: string): Promise<EntryModeStat[]> {
@@ -152,11 +167,21 @@ export function EntryModeMenu({
   );
 }
 
+/** ปุ่ม "✕ ออกจากโหมด" ข้างปุ่มโหมด (เห็นตลอดตอนอยู่ในโหมด — เจ้าของขอ 2026-10-22 "จะได้กดง่าย") */
+export function EntryModeExitButton({ onExit }: { onExit: () => void }) {
+  return (
+    <button type="button" onClick={onExit} title={tr("ออกจากโหมด กลับหน้าปกติ", "Exit mode — back to the normal view")}
+      className="h-8 px-2.5 text-[12.5px] font-medium rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-800 inline-flex items-center gap-1">
+      ✕ {tr("ออกจากโหมด", "Exit mode")}
+    </button>
+  );
+}
+
 // ───────────────────────── หน้าจอในโหมด ─────────────────────────
 // แบบ C: แถบบางบรรทัดเดียว (ความครบ + ช่องที่ขาด กดกระโดดไป) · ช่องจัดเป็นฟอร์ม 2 คอลัมน์เหมือนหน้าแก้ไข
 //   ช่องที่ขาด = กรอบแดง (ต้องมี) / เหลือง (แนะนำ) · ลงแล้ว = ✓ · คำแนะนำอยู่ในช่องว่าง + ⓘ (ชี้/แตะดูเต็ม)
 export function EntryModePanel({
-  mode, progress, fields, renderInput, imageCount, translatable, onTranslate, onExit, onNextIncomplete, scanning,
+  mode, progress, fields, renderInput, imageCount, translatable, onTranslate, onNextIncomplete, scanning,
 }: {
   mode: EntryMode;
   progress: EntryModeProgress;
@@ -167,7 +192,6 @@ export function EntryModePanel({
   imageCount: number | null;
   translatable?: (fieldKey: string) => boolean;
   onTranslate?: (fieldKey: string) => Promise<void>;
-  onExit: () => void;
   /** ไปรายการถัดไปที่ยังไม่ครบ (ไม่ส่ง = ไม่มีปุ่ม) */
   onNextIncomplete?: () => void;
   scanning?: boolean;
@@ -214,7 +238,7 @@ export function EntryModePanel({
 
   return (
     <div className="space-y-3">
-      {/* แถบบาง: ความครบ · ช่องที่ขาด (กดไปที่ช่อง) · ตัวถัดไปที่ยังไม่ครบ · ออก */}
+      {/* แถบบาง: ความครบ · ช่องที่ขาด (กดไปที่ช่อง) · ตัวถัดไปที่ยังไม่ครบ (ปุ่มออกจากโหมดอยู่ข้างปุ่มโหมดบนแถบบน — EntryModeExitButton) */}
       <div className="flex items-center gap-2 text-xs text-slate-500 min-h-7 flex-wrap">
         <div className="w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden shrink-0" title={`${progress.pct}%`}><div className={`h-full ${BAR[tone]} transition-all`} style={{ width: `${progress.pct}%` }} /></div>
         <span className="tabular-nums whitespace-nowrap">
@@ -241,8 +265,6 @@ export function EntryModePanel({
             {scanning ? tr("กำลังหา…", "Searching…") : tr("ถัดไปที่ยังไม่ครบ ▶", "Next incomplete ▶")}
           </button>
         )}
-        <button type="button" onClick={onExit} title={tr("ออกจากโหมด (กลับหน้าปกติ)", "Exit mode")}
-          className={`${onNextIncomplete ? "" : "ml-auto "}h-7 w-7 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100`}>✕</button>
       </div>
 
       {rows.length === 0 && (

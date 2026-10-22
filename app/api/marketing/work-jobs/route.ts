@@ -3,7 +3,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { cleanIds, isUuid } from "@/lib/marketing/sku-list";
-import { assigneesOf, cleanAssignees, cleanSteps, isJobKind, kindInfo, stepsFromLabels, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
+import { assigneesOf, cleanAssignees, cleanEntryMode, cleanSteps, defaultEntryMode, isJobKind, kindInfo, stepsFromLabels, MAX_JOB_NAME } from "@/lib/marketing/work-jobs";
 import { actorOf, addItemsToJob, JOB_COLS, loadJobs, toJob } from "@/lib/marketing/work-jobs-db";
 
 export const dynamic = "force-dynamic";
@@ -50,13 +50,14 @@ export async function POST(request: NextRequest) {
     assignee_id: assignees[0]?.id ?? null,
     assignee_name: assignees[0]?.name || null,
     due_date: due, note: String(b.note ?? "").trim().slice(0, 1000) || null,
+    entry_mode: "entry_mode" in b ? cleanEntryMode(b.entry_mode) : defaultEntryMode(kind),
     created_by: actor.id, created_by_name: actor.name, created_at: now, updated_at: now,
   }).select(JOB_COLS).single();
   if (error || !data) return NextResponse.json({ data: null, error: "สร้างงานไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
   const job = toJob(data as Record<string, unknown>);
   await writeAudit(admin, {
     action: "marketing.work.create", entityType: "marketing_work_jobs", entityId: job.id, actorId: actor.id, actorName: actor.name,
-    metadata: { name, kind, steps: steps.map((s) => s.label), assignees: job.assignees.map((a) => a.name), due_date: due, auto_label_id: job.auto_label_id },
+    metadata: { name, kind, steps: steps.map((s) => s.label), assignees: job.assignees.map((a) => a.name), due_date: due, auto_label_id: job.auto_label_id, entry_mode: job.entry_mode },
   });
 
   // ใส่รุ่นที่ติ๊กมาจากหน้าการ์ด/ตารางเลย
