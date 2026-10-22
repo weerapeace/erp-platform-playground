@@ -324,6 +324,22 @@ describe("สีไล่ (ของกลาง)", () => {
     expect(sanitizeStyle({ motion: { entrance: "pop" } }).motion.entrance).toBe("pop");
     expect(sanitizeStyle({ motion: { entrance: "explode" } }).motion.entrance).toBe("none");
   });
+  it("🖼 พื้นหลังรูปของ Section (2026-10-22): ไม่มีรูป = กลับเป็นค่าเริ่มต้น · ค่าเพี้ยนถูกตัด · เก็บรูปไว้แม้สลับไปแบบอื่น", async () => {
+    const { sanitizeStyle } = await import("../website-blocks");
+    expect(sanitizeStyle({ bg: "image" }).bg).toBe("auto");
+    expect(sanitizeStyle({ bg: "image", bgImg: { key: "" } }).bg).toBe("auto");
+    expect(sanitizeStyle({ bg: "image", bgImg: { key: "a b<script>" } }).bg).toBe("auto");
+    const s = sanitizeStyle({ bg: "image", bgImg: { key: "storefront-brand/a.jpg", fit: "x", pos: "bottom", fx: "zoom", speed: "slow", dim: 200, tone: "light", blur: -5 } });
+    expect(s).toMatchObject({ bg: "image", bgImg: { key: "storefront-brand/a.jpg", fit: "cover", pos: "bottom", fx: "zoom", speed: "slow", dim: 90, tone: "light", blur: 0 } });
+    expect(sanitizeStyle({ bg: "image", bgImg: { key: "a/b.png", fx: "explode" } }).bgImg).toMatchObject({ fx: "none", dim: 30, tone: "dark" });
+    expect(sanitizeStyle({ bg: "page", bgImg: { key: "a/b.png", fx: "parallax" } })).toMatchObject({ bg: "page", bgImg: { fx: "parallax" } });
+  });
+  it("🔤 หัวข้อ: ระยะห่างตัวอักษร · ตัวพิมพ์ใหญ่ · ตัวเอียง (ค่าเริ่ม = ตามเดิม)", async () => {
+    const { sanitizeStyle, DEFAULT_BLOCK_TEXT } = await import("../website-blocks");
+    expect(sanitizeStyle({}).text).toEqual(DEFAULT_BLOCK_TEXT);
+    expect(sanitizeStyle({ text: { spacing: "wider", upper: true, italic: true } }).text).toMatchObject({ spacing: "wider", upper: true, italic: true });
+    expect(sanitizeStyle({ text: { spacing: "huge", upper: "yes" } }).text).toMatchObject({ spacing: "auto", upper: false, italic: false });
+  });
 });
 
 /**

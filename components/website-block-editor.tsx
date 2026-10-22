@@ -14,7 +14,9 @@ import { useWheelStep } from "@/components/wheel-select";
 import { ColorInput } from "@/components/color-picker";
 import { GradientPicker } from "@/components/website-gradient-picker";
 import { GRADIENT_PRESETS } from "@/lib/website-gradient";
-import { DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type Visibility } from "@/lib/website-blocks";
+import { DEFAULT_BG_IMAGE, DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockBgImage, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type TextSpacing, type Visibility } from "@/lib/website-blocks";
+import { ImageUploadField } from "@/components/website-theme-media";
+import { RangeInput } from "@/components/range-input";
 import { CANVAS_WEIGHTS } from "@/lib/website-canvas";
 import { ColorSwatches, DEFAULT_FONT_NAMES, DEFAULT_THEME_COLORS, FontPickList, type ThemeColors, type ThemeFontNames } from "@/components/website-text-pickers";
 
@@ -184,6 +186,8 @@ export function StylePanel({
   };
   const set = (p: Partial<BlockStyle>) => onChange({ ...s, ...p });
   const setT = (p: Partial<BlockText>) => onChange({ ...s, text: { ...s.text, ...p } });
+  const img: BlockBgImage = { ...DEFAULT_BG_IMAGE, ...(s.bgImg ?? {}) };
+  const setImg = (p: Partial<BlockBgImage>) => set({ bg: "image", bgImg: { ...img, ...p } });
   const textTouched = JSON.stringify(s.text) !== JSON.stringify(DEFAULT_BLOCK_TEXT);
   const setM = (p: Partial<BlockStyle["mobile"]>) => onChange({ ...s, mobile: { ...s.mobile, ...p } });
   const setMo = (p: Partial<BlockMotion>) => onChange({ ...s, motion: { ...s.motion, ...p } });
@@ -284,6 +288,29 @@ export function StylePanel({
               <Field label="ความหนา">
                 <Seg wheel value={s.text.weight} onChange={(v) => setT({ weight: v })} options={[{ v: "auto", l: "ตามเดิม" }, ...CANVAS_WEIGHTS]} />
               </Field>
+              <Field label="ระยะห่างตัวอักษร">
+                <Seg<TextSpacing>
+                  wheel
+                  value={s.text.spacing}
+                  onChange={(v) => setT({ spacing: v })}
+                  options={[
+                    { v: "auto", l: "ตามเดิม" },
+                    { v: "tight", l: "ชิด" },
+                    { v: "wide", l: "ห่าง" },
+                    { v: "wider", l: "ห่างมาก" },
+                  ]}
+                />
+              </Field>
+              <div className="flex flex-wrap gap-4 text-xs text-slate-700">
+                <label className="inline-flex items-center gap-1.5">
+                  <input type="checkbox" checked={s.text.upper} onChange={(e) => setT({ upper: e.target.checked })} />
+                  ตัวพิมพ์ใหญ่ทั้งหมด (อังกฤษ)
+                </label>
+                <label className="inline-flex items-center gap-1.5">
+                  <input type="checkbox" checked={s.text.italic} onChange={(e) => setT({ italic: e.target.checked })} />
+                  ตัวเอียง
+                </label>
+              </div>
               <Field label="สีหัวข้อ">
                 <ColorSwatches theme={theme} value={s.text.color} hex={s.text.colorHex} autoLabel="ตามเดิม" onPick={(v, hex) => setT(v === "custom" ? { color: v, colorHex: hex ?? s.text.colorHex } : { color: v })} />
               </Field>
@@ -318,9 +345,87 @@ export function StylePanel({
                       { v: "ink", l: "เข้ม" },
                       { v: "custom", l: "เลือกเอง" },
                       { v: "gradient", l: "ไล่สี" },
+                      { v: "image", l: "รูปภาพ" },
                     ]}
                   />
                 </Field>
+                {s.bg === "image" && (
+                  <div className="mt-2 rounded-lg border border-slate-200 p-2.5 space-y-3">
+                    <ImageUploadField label="รูปพื้นหลัง" hint="แนวนอน กว้าง ≥ 1600px คมสุด" value={img.key} onChange={(k) => setImg({ key: k })} height={72} />
+                    {img.key ? (
+                      <>
+                        <Field label="วางรูป">
+                          <Seg
+                            value={img.fit}
+                            onChange={(v) => setImg({ fit: v })}
+                            options={[
+                              { v: "cover", l: "เต็มพื้นที่" },
+                              { v: "contain", l: "เห็นทั้งรูป" },
+                              { v: "repeat", l: "ปูซ้ำ (ลาย)" },
+                            ]}
+                          />
+                        </Field>
+                        <Field label="ให้เห็นส่วนไหนของรูป">
+                          <Seg
+                            value={img.pos}
+                            onChange={(v) => setImg({ pos: v })}
+                            options={[
+                              { v: "top", l: "บน" },
+                              { v: "center", l: "กลาง" },
+                              { v: "bottom", l: "ล่าง" },
+                            ]}
+                          />
+                        </Field>
+                        <Field label="ลูกเล่นของรูป">
+                          <Seg
+                            value={img.fx}
+                            onChange={(v) => setImg({ fx: v })}
+                            options={[
+                              { v: "none", l: "นิ่ง" },
+                              { v: "zoom", l: "ซูมช้า ๆ" },
+                              { v: "pan", l: "เลื่อนซ้าย-ขวา" },
+                              { v: "float", l: "ลอยขึ้นลง" },
+                              { v: "parallax", l: "เลื่อนจอแล้วรูปเลื่อนช้ากว่า" },
+                            ]}
+                          />
+                        </Field>
+                        {img.fx !== "none" && img.fx !== "parallax" && (
+                          <Field label="ความเร็ว">
+                            <Seg
+                              wheel
+                              value={img.speed}
+                              onChange={(v) => setImg({ speed: v })}
+                              options={[
+                                { v: "slow", l: "ช้า" },
+                                { v: "normal", l: "ปกติ" },
+                                { v: "fast", l: "เร็ว" },
+                              ]}
+                            />
+                          </Field>
+                        )}
+                        <Field label={`ทำให้รูปจาง: ${img.dim}%`}>
+                          <RangeInput value={img.dim} min={0} max={90} step={5} onChange={(v) => setImg({ dim: v })} />
+                        </Field>
+                        <Field label="จางด้วยสี">
+                          <Seg
+                            value={img.tone}
+                            onChange={(v) => setImg({ tone: v })}
+                            options={[
+                              { v: "dark", l: "ดำ (ตัวหนังสือขาว)" },
+                              { v: "light", l: "ขาว" },
+                            ]}
+                          />
+                        </Field>
+                        <Field label={`เบลอรูป: ${img.blur}px`}>
+                          <RangeInput value={img.blur} min={0} max={20} step={1} onChange={(v) => setImg({ blur: v })} />
+                        </Field>
+                        <p className="text-[11px] text-slate-400">ลูกค้าตั้งเครื่อง &quot;ลดการเคลื่อนไหว&quot; = รูปนิ่งเสมอ</p>
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-amber-600">ใส่รูปก่อน — ยังไม่ใส่รูป หน้าเว็บจะใช้พื้นหลังตามเดิม</p>
+                    )}
+                  </div>
+                )}
                 {s.bg === "gradient" && (
                   <div className="mt-2 rounded-lg border border-slate-200 p-2.5">
                     <GradientPicker value={s.bgGrad ?? null} onChange={(g) => set({ bg: "gradient", bgGrad: g })} />

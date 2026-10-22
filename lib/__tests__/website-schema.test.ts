@@ -183,7 +183,7 @@ describe("ตัวอักษรหัวข้อต่อ Section + มื�
 
   it("บล็อกเก่าไม่เคยตั้ง = ตามเดิมทุกช่อง (หน้าเว็บไม่เปลี่ยน)", () => {
     const st = styleOf(undefined);
-    expect(st.text).toEqual({ font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "" });
+    expect(st.text).toEqual({ font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "", spacing: "auto", upper: false, italic: false });
     expect(st.mobile).toMatchObject({ hSize: "auto", hideEyebrow: false, hideSub: false });
   });
 

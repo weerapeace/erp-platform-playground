@@ -88,12 +88,37 @@ export type BlockSpacing = "auto" | "none" | "sm" | "md" | "lg";
 export type BlockWidth = "auto" | "narrow" | "full";
 export type BlockAlign = "auto" | "left" | "center" | "right";
 /** พื้นหลัง — อิงสีจากธีมร้าน (เปลี่ยนธีมแล้วบล็อกเปลี่ยนตาม) */
-export type BlockBg = "auto" | "page" | "surface" | "brand" | "ink" | "custom" | "gradient";
+export type BlockBg = "auto" | "page" | "surface" | "brand" | "ink" | "custom" | "gradient" | "image";
 
 export const BLOCK_SPACINGS: readonly BlockSpacing[] = ["auto", "none", "sm", "md", "lg"];
 export const BLOCK_WIDTHS: readonly BlockWidth[] = ["auto", "narrow", "full"];
 export const BLOCK_ALIGNS: readonly BlockAlign[] = ["auto", "left", "center", "right"];
-export const BLOCK_BGS: readonly BlockBg[] = ["auto", "page", "surface", "brand", "ink", "custom", "gradient"];
+export const BLOCK_BGS: readonly BlockBg[] = ["auto", "page", "surface", "brand", "ink", "custom", "gradient", "image"];
+
+/**
+ * 🖼 พื้นหลังรูปของ Section (bg = "image") — เว็บร้านวาดเป็นชั้นหลังเนื้อหา (globals.css "พื้นหลังรูปของ Section")
+ * fx: zoom = ซูมเข้าออกช้า ๆ · pan = เลื่อนซ้ายขวา · float = ลอยขึ้นลง · parallax = เลื่อนจอแล้วรูปเลื่อนช้ากว่า
+ * dim + tone = สีทับให้รูปจาง (ดำ = ตัวหนังสือสีอ่อนเอง · ขาว) · blur = เบลอรูป (px)
+ */
+export type BgImageFit = "cover" | "contain" | "repeat";
+export type BgImagePos = "top" | "center" | "bottom";
+export type BgImageFx = "none" | "zoom" | "pan" | "float" | "parallax";
+export const BG_IMAGE_FITS: readonly BgImageFit[] = ["cover", "contain", "repeat"];
+export const BG_IMAGE_POSES: readonly BgImagePos[] = ["top", "center", "bottom"];
+export const BG_IMAGE_FXS: readonly BgImageFx[] = ["none", "zoom", "pan", "float", "parallax"];
+export interface BlockBgImage {
+  key: string | null;
+  fit: BgImageFit;
+  pos: BgImagePos;
+  fx: BgImageFx;
+  speed: "normal" | "slow" | "fast";
+  /** สีทับ 0–90 % */
+  dim: number;
+  tone: "dark" | "light";
+  /** เบลอ 0–20 px */
+  blur: number;
+}
+export const DEFAULT_BG_IMAGE: BlockBgImage = { key: null, fit: "cover", pos: "center", fx: "none", speed: "normal", dim: 30, tone: "dark", blur: 0 };
 
 /** ค่าที่ตั้งทับเฉพาะมือถือ — "auto" = ใช้ค่าเดียวกับคอม */
 export interface BlockStyleMobile {
@@ -118,6 +143,9 @@ export const TEXT_SIZES: readonly TextSize[] = ["auto", "s", "m", "l", "xl", "xx
 export const TEXT_FONTS: readonly string[] = ["auto", ...CANVAS_FONTS.map((o) => o.v)];
 export const TEXT_WEIGHTS: readonly string[] = ["auto", ...CANVAS_WEIGHTS.map((o) => o.v)];
 export const TEXT_COLORS: readonly string[] = ["auto", ...CANVAS_COLORS.map((o) => o.v)];
+/** ระยะห่างตัวอักษรหัวข้อ */
+export type TextSpacing = "auto" | "tight" | "wide" | "wider";
+export const TEXT_SPACINGS: readonly TextSpacing[] = ["auto", "tight", "wide", "wider"];
 export interface BlockText {
   font: string;
   size: TextSize;
@@ -128,8 +156,12 @@ export interface BlockText {
   /** สีตัวเล็กเหนือหัวข้อ + คำโปรยใต้หัวข้อ */
   subColor: string;
   subColorHex: string;
+  /** ระยะห่างตัวอักษร · ตัวพิมพ์ใหญ่ทั้งหมด (อังกฤษ) · ตัวเอียง — หัวข้อใหญ่เท่านั้น */
+  spacing: TextSpacing;
+  upper: boolean;
+  italic: boolean;
 }
-export const DEFAULT_BLOCK_TEXT: BlockText = { font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "" };
+export const DEFAULT_BLOCK_TEXT: BlockText = { font: "auto", size: "auto", weight: "auto", color: "auto", colorHex: "", subColor: "auto", subColorHex: "", spacing: "auto", upper: false, italic: false };
 
 /** ลูกเล่น — โผล่ตอนเลื่อนถึง / ตอนชี้เมาส์ · "none" = ไม่มี (ค่าเริ่มต้น หน้าเว็บเหมือนเดิม) */
 export type MotionEntrance = "none" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom" | "pop" | "spin-in" | "blur";
@@ -157,6 +189,8 @@ export interface BlockStyle {
   bgColor: string;
   /** ใช้เมื่อ bg = "gradient" (ของกลาง lib/website-gradient.ts) */
   bgGrad?: GradientValue;
+  /** ใช้เมื่อ bg = "image" — เก็บไว้แม้สลับไปแบบอื่น (สลับกลับได้ของเดิม) */
+  bgImg?: BlockBgImage;
   width: BlockWidth;
   align: BlockAlign;
   /** ตั้งทับเฉพาะจอมือถือ (< 768px) */
@@ -1147,6 +1181,24 @@ function sanitizeChildren(spec: ChildSpec, raw: unknown, parentId: string): Reco
   });
 }
 
+/** รูปพื้นหลังของ Section — ไม่ใช่ object = ไม่มี (undefined) · ค่าเพี้ยน = ค่าเริ่มต้น */
+function sanitizeBgImage(v: unknown): BlockBgImage | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  const d = DEFAULT_BG_IMAGE;
+  const n = (x: unknown, lo: number, hi: number, fb: number) => (typeof x === "number" && Number.isFinite(x) ? Math.min(hi, Math.max(lo, Math.round(x))) : fb);
+  return {
+    key: imgKey(o.key),
+    fit: pickOne(o.fit, BG_IMAGE_FITS, d.fit),
+    pos: pickOne(o.pos, BG_IMAGE_POSES, d.pos),
+    fx: pickOne(o.fx, BG_IMAGE_FXS, d.fx),
+    speed: pickOne(o.speed, MOTION_SPEEDS, d.speed),
+    dim: n(o.dim, 0, 90, d.dim),
+    tone: o.tone === "light" ? "light" : "dark",
+    blur: n(o.blur, 0, 20, d.blur),
+  };
+}
+
 /** หน้าตาของบล็อก — บล็อกเก่าที่ยังไม่มี style จะได้ค่าเริ่มต้นเสมอ (เว็บแสดงผลเหมือนเดิม) */
 export function sanitizeStyle(v: unknown): BlockStyle {
   const o = (v ?? {}) as Record<string, unknown>;
@@ -1154,6 +1206,7 @@ export function sanitizeStyle(v: unknown): BlockStyle {
   const bgColor = typeof o.bgColor === "string" && HEX6.test(o.bgColor.trim()) ? o.bgColor.trim().toLowerCase() : "";
   const bg = pickOne(o.bg, BLOCK_BGS, d.bg);
   const bgGrad = sanitizeGradient(o.bgGrad);
+  const bgImg = sanitizeBgImage(o.bgImg);
   const m = (o.mobile ?? {}) as Record<string, unknown>;
   const mo = (o.motion ?? {}) as Record<string, unknown>;
   const tx = (o.text ?? {}) as Record<string, unknown>;
@@ -1166,10 +1219,11 @@ export function sanitizeStyle(v: unknown): BlockStyle {
     padTop: pickOne(o.padTop, BLOCK_SPACINGS, d.padTop),
     padBottom: pickOne(o.padBottom, BLOCK_SPACINGS, d.padBottom),
     // เลือก "สีเอง"/"ไล่สี" แต่ยังไม่ได้ใส่สี → ถือว่าไม่ได้ตั้ง กันบล็อกกลายเป็นพื้นโปร่งแปลก ๆ
-    bg: (bg === "custom" && !bgColor) || (bg === "gradient" && !bgGrad) ? d.bg : bg,
+    bg: (bg === "custom" && !bgColor) || (bg === "gradient" && !bgGrad) || (bg === "image" && !bgImg?.key) ? d.bg : bg,
     bgColor,
-    // เก็บสีไล่ไว้แม้สลับไปแบบอื่น (สลับกลับมาแล้วได้ของเดิม)
+    // เก็บสีไล่/รูปพื้นหลังไว้แม้สลับไปแบบอื่น (สลับกลับมาแล้วได้ของเดิม)
     ...(bgGrad ? { bgGrad } : {}),
+    ...(bgImg ? { bgImg } : {}),
     width: pickOne(o.width, BLOCK_WIDTHS, d.width),
     align: pickOne(o.align, BLOCK_ALIGNS, d.align),
     mobile: {
@@ -1189,6 +1243,9 @@ export function sanitizeStyle(v: unknown): BlockStyle {
       colorHex,
       subColor: subColor === "custom" && !subColorHex ? "auto" : subColor,
       subColorHex,
+      spacing: pickOne(tx.spacing, TEXT_SPACINGS, "auto"),
+      upper: tx.upper === true,
+      italic: tx.italic === true,
     },
     motion: {
       entrance: pickOne(mo.entrance, MOTION_ENTRANCES, "none"),

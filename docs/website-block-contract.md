@@ -164,6 +164,15 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - เว็บร้าน `blockStyleAttrs` (src/lib/blocks.ts) → `data-h-font|data-h-size|data-h-weight|data-h-color|data-sub-color` + ตัวแปร `--sec-h-*` · มือถือ `data-h-size-m|data-hide-eyebrow-m|data-hide-sub-m`
   - CSS globals.css "ตัวอักษรหัวข้อต่อ Section": หัวข้อ = `h1/h2` ของ Section · ตัวเล็ก = `.eyebrow` · คำโปรย = `<p>` ถัดจากหัวข้อ → **Section ใหม่ต้องเขียนหัวข้อตามแบบนี้** ถึงจะปรับได้
   - ฟอนต์นอกธีม: `BlockFontLink` (block-registry.tsx) ใส่ `<link precedence>` ในตัวห่อ Section — React ยกขึ้น head + ไม่โหลดซ้ำ
+- เพิ่ม 2026-10-22: `text.spacing` (auto|tight|wide|wider) · `text.upper` (ตัวพิมพ์ใหญ่ทั้งหมด) · `text.italic` → `data-h-spacing|data-h-upper|data-h-italic` (หัวข้อใหญ่เท่านั้น)
+
+## 🖼 พื้นหลังรูปของ Section (style.bg = "image" · style.bgImg) — 2026-10-22 · ทุก Section
+- ERP `BlockStyle.bgImg` = `{ key, fit (cover|contain|repeat), pos (top|center|bottom), fx (none|zoom|pan|float|parallax), speed, dim 0–90, tone (dark|light), blur 0–20 }` · ไม่มีรูป = bg กลับเป็น "auto" ตอน normalize · เก็บไว้แม้สลับไปแบบอื่น (เหมือน bgGrad)
+- แผงตั้ง: แท็บ "🖥️ ทุกจอ" → พื้นหลังบล็อก "รูปภาพ" (ช่องรูปของกลาง `ImageUploadField` + `RangeInput`)
+- เว็บร้าน `blockStyleAttrs` → `data-bg-img` (+ `data-bg-fx`/`data-bg-fx-speed`/`data-bg-blur`/`data-bg-dark`) + ตัวแปร `--sec-bgimg|--sec-bg-pos|--sec-bg-size|--sec-bg-repeat|--sec-bg-dim|--sec-bg-dimc|--sec-bg-blur`
+  - CSS globals.css "พื้นหลังรูปของ Section": `::before` = รูป + ลูกเล่น · `::after` = สีทับ · ตัวห่อ `isolation: isolate; overflow: clip` (clip ไม่ทำ sticky ข้างในพัง) → **ห้ามใช้ ::before/::after ของตัวห่อ Section ทำอย่างอื่น**
+  - ทับดำ ≥ 35% → `data-bg-dark`: หัวข้อ/ตัวเล็ก/คำโปรย สีอ่อน (ตั้งสีเองในแผง 🔤 = ใช้สีที่ตั้ง) · การ์ดสินค้าไม่แตะ
+  - parallax = `animation-timeline: view()` (เบราว์เซอร์ที่ไม่รองรับ = รูปนิ่ง) · ลดการเคลื่อนไหว = นิ่งทุกแบบ
 
 ## ช่องชนิด crop (ส่วนที่เห็น/ซูมของรูป)
 - `f("crop", "...", "crop", { cropImage: "imageKey", cropRatio: "ratio" })` เก็บ `{ x, y, zoom }` — ฟอร์มวาดของกลาง `ImageCropBox` (components/image-crop-box.tsx · ลากกรอบ/คลิกรูป + ซูม) กรอบตามสัดส่วนใน Section แม่
