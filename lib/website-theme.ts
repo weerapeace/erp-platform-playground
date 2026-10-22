@@ -12,7 +12,7 @@ import { normalizeCart, DEFAULT_CART, type CartConfig } from "@/lib/website-cart
 import { normalizeCheckout, DEFAULT_CHECKOUT, type CheckoutConfig } from "@/lib/website-checkout";
 import { isGradStop } from "@/lib/website-gradient";
 import { normalizeProductLuxe, type ProductLuxe } from "@/lib/website-product-luxe";
-import { DEFAULT_HEADER_ICON_STYLE, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, normalizeBadgeShape, normalizeHeaderIconStyle, normalizeSitePage, normalizeSiteShape, type BadgeShape, type HeaderIconStyle, type SitePageDesign, type SiteShapeDesign } from "@/lib/website-site-design";
+import { DEFAULT_HEADER_ICON_STYLE, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, normalizeBadgeShape, normalizeHeaderIconStyle, normalizePageTransition, normalizeSitePage, normalizeSiteShape, type BadgeShape, type HeaderIconStyle, type PageTransition, type SitePageDesign, type SiteShapeDesign } from "@/lib/website-site-design";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
@@ -989,7 +989,7 @@ export interface SiteTheme {
   checkout: CheckoutConfig;
   /** ✨ การเคลื่อนไหวทั้งเว็บ: เปลี่ยนหน้า (จาง/เลื่อนขึ้น) + เลื่อนจอนุ่ม (ปิดเป็นค่าเริ่ม) — เว็บร้าน: app/template.tsx + SmoothScroll */
   /** + 🧱 ฐานหน้าตาทั้งเว็บ (ความโปร่ง/ความกว้าง/ผิวพื้น/มือถือ/รูปแบบราคา · lib/website-site-design) */
-  page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean } & SitePageDesign;
+  page: { transition: PageTransition; smoothScroll: boolean } & SitePageDesign;
   card: {
     preset: CardPreset;
     imageRatio: ImageRatio;
@@ -1906,7 +1906,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
     checkout: normalizeCheckout(r.checkout),
     page: (() => {
       const pg = (r.page ?? {}) as Record<string, unknown>;
-      return { transition: pick(pg.transition, ["none", "fade", "rise"] as const, "fade"), smoothScroll: pg.smoothScroll === true, ...normalizeSitePage(pg) };
+      return { transition: normalizePageTransition(pg.transition), smoothScroll: pg.smoothScroll === true, ...normalizeSitePage(pg) };
     })(),
     card: {
       preset: pick(cd.preset, ["flat", "border", "shadow", "floating", "minimal"] as const, d.card.preset),

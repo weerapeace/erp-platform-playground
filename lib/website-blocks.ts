@@ -207,12 +207,12 @@ export const DEFAULT_BLOCK_TEXT: BlockText = {
   btnSpacing: "auto",
 };
 
-/** ลูกเล่น — โผล่ตอนเลื่อนถึง / ตอนชี้เมาส์ · "none" = ไม่มี (ค่าเริ่มต้น หน้าเว็บเหมือนเดิม) */
-export type MotionEntrance = "none" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom" | "pop" | "spin-in" | "blur";
+/** ลูกเล่น — โผล่ตอนเลื่อนถึง / ตอนชี้เมาส์ · "none" = ตามค่าทั้งเว็บ (ธีม page.sectionMotion · ไม่ตั้ง = ไม่ขยับเหมือนเดิม) · "still" = ไม่ขยับแม้ตั้งค่าทั้งเว็บ */
+export type MotionEntrance = "none" | "still" | "fade-up" | "fade-in" | "slide-left" | "slide-right" | "zoom" | "pop" | "spin-in" | "blur";
 export type MotionHover = "none" | "lift" | "zoom" | "glow";
 export type MotionSpeed = "normal" | "slow" | "fast";
 /** ⚠️ CSS ของกลาง [data-motion] ที่เว็บร้าน globals.css — ผืนผ้าใบใช้ชุดเดียวกันต่อชิ้น (CANVAS_ENTRANCES) */
-export const MOTION_ENTRANCES: readonly MotionEntrance[] = ["none", "fade-up", "fade-in", "slide-left", "slide-right", "zoom", "pop", "spin-in", "blur"];
+export const MOTION_ENTRANCES: readonly MotionEntrance[] = ["none", "still", "fade-up", "fade-in", "slide-left", "slide-right", "zoom", "pop", "spin-in", "blur"];
 export const MOTION_HOVERS: readonly MotionHover[] = ["none", "lift", "zoom", "glow"];
 export const MOTION_SPEEDS: readonly MotionSpeed[] = ["normal", "slow", "fast"];
 export interface BlockMotion {

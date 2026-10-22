@@ -268,7 +268,8 @@ export function StylePanel({
                     value={s.motion.entrance}
                     onChange={(v) => setMo({ entrance: v })}
                     options={[
-                      { v: "none", l: "ไม่มี" },
+                      { v: "none", l: "ตามค่าทั้งเว็บ" },
+                      { v: "still", l: "ไม่ขยับ" },
                       { v: "fade-up", l: "ลอยขึ้น" },
                       { v: "fade-in", l: "จางเข้า" },
                       { v: "slide-left", l: "จากขวา" },
@@ -285,7 +286,7 @@ export function StylePanel({
                 <Seg wheel value={s.motion.speed} onChange={(v) => setMo({ speed: v })} options={[{ v: "fast", l: "เร็ว" }, { v: "normal", l: "ปกติ" }, { v: "slow", l: "ช้า" }]} />
               </Field>
               <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer self-end pb-2">
-                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={s.motion.stagger} disabled={s.motion.entrance === "none"} onChange={(e) => setMo({ stagger: e.target.checked })} />
+                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={s.motion.stagger} disabled={s.motion.entrance === "none" || s.motion.entrance === "still"} onChange={(e) => setMo({ stagger: e.target.checked })} />
                 การ์ด/ชิ้นย่อยโผล่ไล่กันทีละชิ้น
               </label>
               <div className="sm:col-span-2">

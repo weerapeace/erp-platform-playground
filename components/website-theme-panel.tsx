@@ -70,7 +70,7 @@ import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
-import { HeaderIconStyleSetting, SiteControlsSetting, SitePageSetting } from "@/components/website-site-design-setting";
+import { HeaderIconStyleSetting, SiteControlsSetting, SiteMotionSetting, SitePageSetting } from "@/components/website-site-design-setting";
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
 import type { ProductLuxe } from "@/lib/website-product-luxe";
 import type { ProductMaterialView } from "@/lib/website-theme";
@@ -2667,6 +2667,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   {([
                     ["fade", "จางเปลี่ยนหน้า", "หน้าเก่าจางออก หน้าใหม่จางเข้า (แนะนำ)"],
                     ["rise", "เลื่อนขึ้น", "หน้าใหม่ลอยขึ้นพร้อมจางเข้า ดูหรูขึ้น"],
+                    ["curtain", "ม่านสีแบรนด์", "ม่านสีหลักปาดขึ้นปิดจอ แล้วเปิดเป็นหน้าใหม่"],
+                    ["logo", "โลโก้วาบ", "จอเป็นสีพื้นพร้อมโลโก้กลางจอ แล้วเปิดหน้าใหม่"],
+                    ["zoom", "ซูมเข้า", "หน้าใหม่ซูมเข้าเบา ๆ พร้อมจาง"],
                     ["none", "ไม่มี", "เปลี่ยนหน้าทันที"],
                   ] as const).map(([v, l, d]) => (
                     <button
@@ -2686,6 +2689,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </label>
                 <p className="text-[11px] text-slate-400 mt-1">เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง</p>
               </div>
+              {/* ✨ ลูกเล่นทั้งเว็บ (ชุด 2): Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · แถบเลื่อนอ่าน · ปุ่มกลับขึ้นบน */}
+              <SiteMotionSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
               {/* 🧱 ฐานหน้าตาทั้งเว็บ (ชุด 1) — components/website-site-design-setting · เว็บร้าน src/lib/site-design-css.ts */}
               <SitePageSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
               <SiteControlsSetting value={theme.shape} onChange={(p) => setShape(p)} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />

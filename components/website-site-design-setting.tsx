@@ -13,12 +13,17 @@ import {
   MOBILE_SCALE_RANGE,
   TEXTURE_STRENGTH_RANGE,
   formatMoneyAs,
+  type BackToTop,
   type ButtonHover,
   type ButtonKind,
+  type CursorStyle,
   type HeaderIconStyle,
   type InputStyle,
+  type IntroStyle,
   type LinkHover,
+  type MotionSpeed,
   type PriceFormat,
+  type SectionEntrance,
   type SiteDensity,
   type SitePageDesign,
   type SiteShapeDesign,
@@ -328,6 +333,106 @@ export function HeaderIconStyleSetting({ value, onChange, ink }: { value: Header
           { v: "text", l: "ตัวหนังสือ", d: "จอคอมใช้คำแทนไอคอน · มือถือยังเป็นไอคอน", pv: <IconsPv style="text" ink={ink} /> },
         ]}
       />
+    </div>
+  );
+}
+
+/** ✨ ชุด 2 — ลูกเล่นทั้งเว็บ (theme.page: sectionMotion/… · intro · cursor · readProgress · backToTop) · เว็บร้าน BlockRenderer / IntroScreen / CustomCursor / ScrollAids */
+export function SiteMotionSetting({ value, onChange }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void }) {
+  const d = DEFAULT_SITE_PAGE;
+  return (
+    <div className={cardCls}>
+      <h3 className="text-sm font-semibold text-slate-800 mb-1">✨ ลูกเล่นทั้งเว็บ</h3>
+      <p className="text-xs text-slate-500 mb-3">ปิดทุกตัวเป็นค่าเริ่ม · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหวจะไม่เห็นลูกเล่นเหล่านี้</p>
+
+      <label className={labelCls}>
+        Section โผล่ตอนเลื่อนมาถึง (ค่าทั้งเว็บ)<Def show={value.sectionMotion === d.sectionMotion} />
+      </label>
+      <Choice<SectionEntrance>
+        value={value.sectionMotion}
+        onChange={(v) => onChange({ sectionMotion: v })}
+        options={[
+          { v: "none", l: "ไม่ขยับ", d: "แบบเดิม" },
+          { v: "fade-up", l: "ลอยขึ้น", d: "แนะนำ ดูเรียบหรู" },
+          { v: "fade-in", l: "จางเข้า" },
+          { v: "zoom", l: "ซูมเบา ๆ" },
+          { v: "blur", l: "เบลอเป็นชัด" },
+        ]}
+      />
+      {value.sectionMotion !== "none" && (
+        <div className="flex flex-wrap items-center gap-4 mt-2">
+          <Choice<MotionSpeed> value={value.sectionSpeed} onChange={(v) => onChange({ sectionSpeed: v })} options={[{ v: "fast", l: "เร็ว" }, { v: "normal", l: "ปกติ" }, { v: "slow", l: "ช้า นุ่ม" }]} />
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.sectionStagger} onChange={(e) => onChange({ sectionStagger: e.target.checked })} />
+            การ์ด/ชิ้นย่อยทยอยโผล่ทีละใบ
+          </label>
+        </div>
+      )}
+      <p className="text-[11px] text-slate-400 mt-1 mb-3">ใช้กับ Section ที่ลูกเล่นเป็น &quot;ตามค่าทั้งเว็บ&quot; (ค่าเดิมของทุก Section) · Section ที่เลือกลูกเล่นเองคงแบบของตัวเอง · Section แรกของหน้าโผล่ทันทีเสมอ · ไม่อยากให้ Section ไหนขยับ เลือก &quot;ไม่ขยับ&quot; ในแท็บลูกเล่นของ Section นั้น</p>
+
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>
+          หน้าโหลดแรก (ครั้งแรกที่ลูกค้าเข้าเว็บ)<Def show={value.intro === d.intro} />
+        </label>
+        <Choice<IntroStyle>
+          value={value.intro}
+          onChange={(v) => onChange({ intro: v })}
+          options={[
+            { v: "off", l: "ไม่มี", d: "แบบเดิม" },
+            { v: "logo", l: "โลโก้ค่อย ๆ ขึ้น", d: "แล้วจางเปิดเว็บ" },
+            { v: "line", l: "โลโก้ + เส้นโหลด", d: "เส้นบางวิ่งใต้โลโก้" },
+            { v: "curtain", l: "ม่านเข้มเปิดขึ้น", d: "ใช้โลโก้สำหรับพื้นเข้ม" },
+          ]}
+        />
+        <p className="text-[11px] text-slate-400 mt-1">ประมาณ 1.5 วินาที · ขึ้นครั้งเดียวต่อการเข้าเว็บ 1 รอบ · ไม่ขึ้นในพรีวิวนี้และไม่ขึ้นให้บอทค้นหา — ดูผลได้โดยเปิดเว็บจริงในหน้าต่างไม่ระบุตัวตน</p>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>
+          เคอร์เซอร์ (คอม)<Def show={value.cursor === d.cursor} />
+        </label>
+        <Choice<CursorStyle>
+          value={value.cursor}
+          onChange={(v) => onChange({ cursor: v })}
+          options={[
+            { v: "off", l: "ปกติ", d: "แบบเดิม" },
+            { v: "ring", l: "วงกลมตามเมาส์", d: "ลูกศรเดิมยังอยู่" },
+            { v: "dot", l: "จุด + วงแหวน", d: "ชี้ลิงก์/ปุ่มแล้วขยาย" },
+            { v: "view", l: "วงกลม + คำว่า ดู", d: "ชี้รูปสินค้าแล้วขึ้น ดู" },
+          ]}
+        />
+        <p className="text-[11px] text-slate-400 mt-1">เฉพาะคอมที่ใช้เมาส์ (มือถือ/แท็บเล็ตไม่มีผล) · ชี้ช่องกรอกข้อมูลแล้วกลับเป็นลูกศรปกติ</p>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-slate-100 grid gap-4 sm:grid-cols-2">
+        <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer self-start">
+          <input type="checkbox" className="w-4 h-4 mt-0.5 accent-blue-600" checked={value.readProgress} onChange={(e) => onChange({ readProgress: e.target.checked })} />
+          <span>
+            แถบบอกว่าเลื่อนอ่านถึงไหน
+            <span className="block text-[11px] text-slate-400">เส้นบางสีหลักบนสุดของจอ ยาวขึ้นตามที่เลื่อนลง</span>
+          </span>
+        </label>
+        <div>
+          <label className={labelCls}>
+            ปุ่มกลับขึ้นบน<Def show={value.backToTop === d.backToTop} />
+          </label>
+          <Choice<BackToTop>
+            value={value.backToTop}
+            onChange={(v) => onChange({ backToTop: v })}
+            options={[
+              { v: "off", l: "ไม่มี" },
+              { v: "circle", l: "วงกลม" },
+              { v: "ring", l: "วงกลม + วงแหวน", d: "บอกความคืบหน้า" },
+            ]}
+          />
+          {value.backToTop !== "off" && (
+            <div className="mt-2">
+              <Choice<"right" | "left"> value={value.backToTopSide} onChange={(v) => onChange({ backToTopSide: v })} options={[{ v: "right", l: "ขวา", d: "เหนือปุ่มแชท" }, { v: "left", l: "ซ้าย" }]} />
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 mt-1">โผล่เมื่อเลื่อนลงเกินเกือบ 1 จอ · ไม่โชว์หน้าชำระเงิน</p>
+        </div>
+      </div>
     </div>
   );
 }

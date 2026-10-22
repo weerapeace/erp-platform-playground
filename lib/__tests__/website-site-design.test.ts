@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { normalizeTheme, mergeTheme, themeFontNames } from "../website-theme";
-import { DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeSitePage, normalizeSiteShape } from "../website-site-design";
+import { DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
+import { sanitizeStyle, MOTION_ENTRANCES } from "../website-blocks";
 import { applyFullPreset, FULL_THEME_PRESETS } from "../website-theme-presets";
 
 /** 🧱 ฐานหน้าตาทั้งเว็บ (แท็บดีไซน์ ชุด 1) — มิเรอร์เว็บร้าน src/lib/site-design.ts · CSS ที่ src/lib/site-design-css.ts */
@@ -35,7 +36,7 @@ describe("ฐานหน้าตาทั้งเว็บ", () => {
     });
     const back = normalizeTheme(mergeTheme({}, t));
     expect(back.fonts).toEqual({ display: "Noto Serif Thai", body: "Sarabun", displayLatin: "Playfair Display", bodyLatin: "Inter" });
-    expect(back.page).toEqual({ transition: "rise", smoothScroll: false, density: "airy", width: "wide", texture: "grain", textureStrength: 55, mobileScale: 110, bigTap: true, priceFormat: "thb" });
+    expect(back.page).toEqual({ ...DEFAULT_SITE_PAGE, transition: "rise", smoothScroll: false, density: "airy", width: "wide", texture: "grain", textureStrength: 55, mobileScale: 110, bigTap: true, priceFormat: "thb" });
     expect(back.shape).toMatchObject({ button: "square", buttonKind: "under", buttonHover: "arrow", linkHover: "run", inputStyle: "filled" });
     expect(back.header.iconStyle).toBe("text");
     expect(back.card.autoBadges.shape).toBe("ribbon");
@@ -59,5 +60,34 @@ describe("ฐานหน้าตาทั้งเว็บ", () => {
     expect(formatMoneyAs(1290.5, "baht")).toBe("฿1,290.50");
     expect(formatMoneyAs(-50, "baht")).toBe("-฿50");
     expect(formatMoneyAs(0, "baht")).toBe("฿0");
+  });
+});
+
+/** ✨ ชุด 2 — ลูกเล่นทั้งเว็บ (theme.page) · เว็บร้าน BlockRenderer/LiveBlocks · IntroScreen · CustomCursor · ScrollAids · PageMotion */
+describe("ลูกเล่นทั้งเว็บ (ชุด 2)", () => {
+  it("ธีมเก่า = ปิดทุกตัว · เปลี่ยนหน้าแบบจางเหมือนเดิม", () => {
+    const p = normalizeTheme({}).page;
+    expect([p.sectionMotion, p.intro, p.cursor, p.readProgress, p.backToTop, p.transition]).toEqual(["none", "off", "off", false, "off", "fade"]);
+    expect(sectionMotionOf(p)).toBeNull();
+  });
+
+  it("เปลี่ยนหน้า 6 แบบ · ค่าเก่า none/fade/rise ยังได้ค่าเดิม · ค่าแปลก = จาง", () => {
+    for (const v of ["fade", "rise", "curtain", "logo", "zoom", "none"]) expect(normalizeTheme({ page: { transition: v } }).page.transition).toBe(v);
+    expect(normalizePageTransition("spin")).toBe("fade");
+  });
+
+  it("ค่าที่เลือกรอดการบันทึก · ค่ามั่ว = ค่าเริ่ม", () => {
+    const page = { sectionMotion: "fade-up", sectionSpeed: "slow", sectionStagger: true, intro: "line", cursor: "view", readProgress: true, backToTop: "ring", backToTopSide: "left", transition: "curtain" };
+    expect(normalizeTheme(mergeTheme({}, normalizeTheme({ page }))).page).toMatchObject(page);
+    expect(normalizeSitePage({ sectionMotion: "spin-in", intro: "video", cursor: "star", backToTop: "big", backToTopSide: "top", sectionSpeed: "x" })).toMatchObject({
+      sectionMotion: "none", intro: "off", cursor: "off", backToTop: "off", backToTopSide: "right", sectionSpeed: "normal",
+    });
+    expect(sectionMotionOf(normalizeSitePage(page))).toEqual({ entrance: "fade-up", speed: "slow", stagger: true });
+  });
+
+  it("Section: 'ตามค่าทั้งเว็บ' (none เดิม) กับ 'ไม่ขยับ' (still) แยกกัน และรอดการบันทึก", () => {
+    expect(MOTION_ENTRANCES).toContain("still");
+    expect(sanitizeStyle({ motion: { entrance: "still" } }).motion.entrance).toBe("still");
+    expect(sanitizeStyle({}).motion.entrance).toBe("none");
   });
 });
