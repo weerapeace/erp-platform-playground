@@ -177,6 +177,9 @@ export function WebsiteBuilder({
   const [fullscreen, setFullscreen] = useState(false);
   const [pane, setPane] = useState<Pane>("tree");
   const [propTab, setPropTab] = useState<PropTab>("content");
+  // 🎀 ของตกแต่งของ Section: ชิ้นที่เลือก (กดในพรีวิว/รายการ) · เลขเพิ่ม = ให้แผงรูปลักษณ์สลับไปแท็บตกแต่ง
+  const [decorSel, setDecorSel] = useState<string | null>(null);
+  const [decorTabReq, setDecorTabReq] = useState(0);
   const [showLib, setShowLib] = useState(false);
   // ⭐ บันทึก Section ที่เลือกเป็นแม่แบบ (ป๊อปตั้งชื่อ)
   const [tplSave, setTplSave] = useState<Block | null>(null);
@@ -509,6 +512,24 @@ export function WebsiteBuilder({
         document.getElementById(`blk-${d.childId ?? d.blockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
         return;
       }
+      if ((d.type === "storefront-decor-select" || d.type === "storefront-decor-change") && d.blockId && typeof (d as { id?: unknown }).id === "string") {
+        // 🎀 กด/ลากของตกแต่งในพรีวิว → เลือก Section + เปิดแท็บตกแต่ง (ลาก = แก้ตำแหน่ง x/y เป็น % ของ Section)
+        const id = (d as { id: string }).id;
+        const blk = blocksRef.current.find((b) => b.id === d.blockId);
+        if (!blk) return;
+        onSelect({ blockId: blk.id, childId: null });
+        setPropTab("style");
+        setDecorSel(id);
+        setDecorTabReq((n) => n + 1);
+        if (d.type === "storefront-decor-change") {
+          const st = (blk.style ?? {}) as Partial<BlockStyle>;
+          const p = d as { x?: unknown; y?: unknown };
+          const pos = (v: unknown) => Math.max(-20, Math.min(120, Math.round((Number(v) || 0) * 10) / 10));
+          if (Array.isArray(st.decor) && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
+            patchBlock(blk.id, { style: { ...st, decor: st.decor.map((it) => (it.id === id ? { ...it, x: pos(p.x), y: pos(p.y) } : it)) } });
+        }
+        return;
+      }
       if (d.type === "storefront-scroll") {
         lastScrollY.current = Number(d.y) || 0;
         return;
@@ -554,7 +575,12 @@ export function WebsiteBuilder({
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [onSelect, iframeRef, addSection, moveSectionTo, postLive]);
+  }, [onSelect, iframeRef, addSection, moveSectionTo, postLive, patchBlock]);
+
+  // 🎀 ชิ้นตกแต่งที่เลือก → พรีวิวตีกรอบให้เห็น (เฉพาะโหมดจัดหน้า)
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-decor-focus", blockId: selection?.blockId ?? null, id: decorSel }, "*");
+  }, [decorSel, selection?.blockId, iframeRef]);
 
   useEffect(() => {
     iframeRef.current?.contentWindow?.postMessage({ type: "storefront-select-block", blockId: selection?.blockId ?? null, childId: selection?.childId ?? null }, "*");
@@ -1414,7 +1440,18 @@ export function WebsiteBuilder({
         )}
         {propTab === "style" && (
           <div className="space-y-4">
-            <StylePanel value={styleOf(selBlock)} onChange={(style) => patchBlock(selBlock.id, { style })} mode="style" hasHeading={sectionHasHeading(selBlock.type)} theme={shopLook.theme} fontNames={shopLook.fontNames} />
+            <StylePanel
+              value={styleOf(selBlock)}
+              onChange={(style) => patchBlock(selBlock.id, { style })}
+              mode="style"
+              hasHeading={sectionHasHeading(selBlock.type)}
+              theme={shopLook.theme}
+              fontNames={shopLook.fontNames}
+              shopId={ctx.shopId}
+              decorSel={decorSel}
+              onDecorSel={setDecorSel}
+              decorTabReq={decorTabReq}
+            />
             {visibilityRow(selBlock.visibility, (k, val) => setVis(selBlock.id, k, val))}
             {abRow(selBlock)}
           </div>

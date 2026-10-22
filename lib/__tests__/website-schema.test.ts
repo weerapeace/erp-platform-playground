@@ -625,3 +625,45 @@ describe("🎨 พื้นหลังเพิ่ม — ลวดลาย ·
     expect(n.style.box).toEqual({ on: true, color: "white", colorHex: "", opacity: 40, radius: "xl", gap: "l", shadow: true, border: false });
   });
 });
+
+describe("✨ ของตกแต่งของ Section — ลาย/รูป/ข้อความ วางอิสระ", () => {
+  it("ไม่เคยตั้ง / ว่าง = ไม่มีช่อง (หน้าตาเดิม)", () => {
+    const [a, b] = normalizeBlocks([{ id: "d0", type: "cta" }, { id: "d00", type: "cta", style: { decor: [] } }]);
+    expect([a.style.decor, b.style.decor]).toEqual([undefined, undefined]);
+  });
+  it("ค่าเกินถูกตัด · ตำแหน่งทศนิยม 1 ตำแหน่ง · ลาย/ฟอนต์แปลก = ค่าเริ่ม", () => {
+    const [n] = normalizeBlocks([
+      {
+        id: "d1",
+        type: "cta",
+        style: {
+          decor: [
+            { id: "s1", kind: "shape", shape: "unicorn", x: 12.345, y: 999, w: 500, rotate: 400, opacity: 0, layer: "middle", anim: "explode", color: "custom", colorHex: "" },
+            { id: "t1", kind: "text", text: "  Sale!  ", font: "Comic Sans", size: 2, color: "custom", colorHex: "#AA3355", hideMobile: true, flip: true },
+          ],
+        },
+      },
+    ]);
+    const [s, t] = n.style.decor!;
+    expect([s.shape, s.x, s.y, s.w, s.rotate, s.opacity, s.layer, s.anim, s.color]).toEqual(["sparkle", 12.3, 120, 100, 180, 5, "back", "none", "auto"]);
+    expect([t.text, t.font, t.size, t.color, t.colorHex, t.hideMobile, t.flip, t.w]).toEqual(["Sale!", "display", 10, "custom", "#aa3355", true, true, 0]);
+  });
+  it("รูปไม่มีไฟล์ / ข้อความว่าง = ทิ้ง · สูงสุด 12 ชิ้น · id ซ้ำถูกแยก", () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: "x", kind: "shape", shape: "heart", x: i }));
+    const [n] = normalizeBlocks([
+      { id: "d2", type: "cta", style: { decor: [{ kind: "image", key: "" }, { kind: "image", key: "bad key!" }, { kind: "text", text: "   " }, ...many] } },
+    ]);
+    const d = n.style.decor!;
+    expect(d.length).toBe(12);
+    expect(new Set(d.map((x) => x.id)).size).toBe(12);
+    expect(d[0].ratio).toBe(0.9);
+  });
+  it("รูปจากคลังเก็บ key + สัดส่วน · newDecor ได้ค่าเริ่มตามชนิด", async () => {
+    const { newDecor } = await import("../website-blocks");
+    const [n] = normalizeBlocks([{ id: "d3", type: "cta", style: { decor: [{ id: "i1", kind: "image", key: "assets/bow.png", ratio: 0.5, w: 20 }] } }]);
+    expect([n.style.decor![0].key, n.style.decor![0].ratio, n.style.decor![0].w]).toEqual(["assets/bow.png", 0.5, 20]);
+    const sh = newDecor("shape", { shape: "line" });
+    const tx = newDecor("text");
+    expect([sh.ratio, sh.kind, tx.text, tx.font]).toEqual([0.04, "shape", "New!", "Parisienne"]);
+  });
+});

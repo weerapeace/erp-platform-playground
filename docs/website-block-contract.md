@@ -165,6 +165,21 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
   - CSS globals.css "ตัวอักษรหัวข้อต่อ Section": หัวข้อ = `h1/h2` ของ Section · ตัวเล็ก = `.eyebrow` · คำโปรย = `<p>` ถัดจากหัวข้อ → **Section ใหม่ต้องเขียนหัวข้อตามแบบนี้** ถึงจะปรับได้
   - ฟอนต์นอกธีม: `BlockFontLink` (block-registry.tsx) ใส่ `<link precedence>` ในตัวห่อ Section — React ยกขึ้น head + ไม่โหลดซ้ำ
 - เพิ่ม 2026-10-22: `text.spacing` (auto|tight|wide|wider) · `text.upper` (ตัวพิมพ์ใหญ่ทั้งหมด) · `text.italic` → `data-h-spacing|data-h-upper|data-h-italic` (หัวข้อใหญ่เท่านั้น)
+- เพิ่ม 2026-10-22 (ชุด ①): อีก 3 ส่วน — ค่าเริ่ม auto ทุกช่อง (= ไม่มี attr = หน้าเดิม) · แผง 🔤 แบ่งกลุ่มพับได้ (`TextGroup`)
+  - ตัวเล็กเหนือหัวข้อ `eyeFont|eyeSize (s/m/l)|eyeSpacing|eyeCase (upper/normal)` → `data-e-*` + `--sec-e-font` (เฉพาะ `.eyebrow`)
+  - เนื้อหา `bodyFont|bodyColor(+Hex)|bodySpacing|bodyUpper` → `data-b-*` + `--sec-b-font|--sec-b-color` = ทุกข้อความใน Section **ยกเว้น** h1/h2 · .eyebrow · .btn (รวมชื่อการ์ด h3 · ราคา .sf-price · คำอธิบาย) · สีไม่ทับคำโปรย (h1+p/h2+p) และราคาลด `.is-sale`
+  - ปุ่ม `btnFont|btnCase|btnSpacing` → `data-btn-*` + `--sec-btn-font` (เฉพาะ `.btn`)
+  - `blockFontHref` รวมฟอนต์ทุกส่วน (+ ข้อความตกแต่ง) เป็นลิงก์ Google Fonts เดียว
+
+## 🎨 พื้นหลังเพิ่ม + ✨ ของตกแต่งของ Section (style.pattern · edgeTop/edgeBottom · box · decor) — 2026-10-22 · ทุก Section
+- ไม่เคยตั้ง = ไม่มีช่อง (normalize เก็บเฉพาะที่เคยตั้ง) = หน้าเดิม · แผง: "🖥️ ทุกจอ" ใต้พื้นหลังบล็อก (`SectionBgExtras`) · แท็บ "🎀 ตกแต่ง" (`components/website-section-decor.tsx`)
+- `pattern {kind dots|lines|grid|checks|grain|waves, color, opacity 3–60, size s/m/l}` · `edgeTop/edgeBottom {shape wave|waves|curve|arch|tilt|zigzag, height 16–200 (มือถือ 60%), flip, color (auto = สีพื้นเว็บ)}` · `box {on, color (auto = สีพื้นการ์ด), opacity 40–100, radius, gap, shadow, border}`
+- `decor[]` สูงสุด 12 ชิ้น `{id, kind shape|image|text, shape (CANVAS_SHAPES), outline, key (r2), ratio สูง/กว้าง, text, font, size px คอม, color (auto = แบรนด์), x/y = จุดกลาง % ของ Section (ทศนิยม 1), w = % กว้าง, rotate, opacity 5–100, layer back|front, anim (= data-loop ของกลาง), hideMobile, flip}` · รูปไม่มี key / ข้อความว่าง = ทิ้งตอน normalize
+- เพิ่มชิ้น: `DecorLibrary` ตัวเดียวกับผืนผ้าใบ (ลายในตัว + ของร้าน: อัปโหลด / เลือกจากคลังไฟล์) · ข้อความ
+- เว็บร้าน `components/home/SectionLayers.tsx` วาดเป็น **ลูก** ของตัวห่อ (ไม่ใช้ ::before/::after) · ตัวห่อได้ `data-layers` (relative + isolation + overflow clip) → เนื้อหา z 1 · ลาย/ขอบ/ตกแต่งหลัง z 0 · ตกแต่งหน้า z 2 · ทุกชั้น `pointer-events: none` (ลูกค้ากดของข้างใต้ได้)
+  - กล่องเนื้อหา = `data-box` + ตัวแปร `--sec-box-*` ใส่พื้นให้ลูกที่เป็นเนื้อหา · ⚠️ ตัวเลือก CSS ของชั้นต้องยกเว้น `.sec-layer, link, style, script, .pv-grip`
+  - ข้อความตกแต่งย่อตามจอ `calc(size * clamp(0.5px, 100vw/1200, 1px))`
+- ลากในพรีวิว (PreviewBridge โหมดแก้ไข): หาชิ้นจากกรอบเอง (ชิ้นหน้าก่อน/ชิ้นเล็กก่อน · ชิ้นหลังที่อยู่ใต้ลิงก์/ปุ่ม/รูป/การ์ด = ไม่แย่ง) → ส่ง `storefront-decor-change {blockId,id,x,y}` (ลาก) / `storefront-decor-select` (กด) · ERP ส่ง `storefront-decor-focus {blockId,id}` ตีกรอบชิ้นที่เลือก
 
 ## 🖼 พื้นหลังรูปของ Section (style.bg = "image" · style.bgImg) — 2026-10-22 · ทุก Section
 - ERP `BlockStyle.bgImg` = `{ key, fit (cover|contain|repeat), pos (top|center|bottom), fx (none|zoom|pan|float|parallax), speed, dim 0–90, tone (dark|light), blur 0–20 }` · ไม่มีรูป = bg กลับเป็น "auto" ตอน normalize · เก็บไว้แม้สลับไปแบบอื่น (เหมือน bgGrad)

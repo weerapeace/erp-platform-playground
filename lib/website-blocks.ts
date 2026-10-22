@@ -25,7 +25,7 @@ import {
 import { sanitizeCustomHtml } from "@/lib/website-html";
 import { sanitizeTranslations } from "@/lib/website-i18n";
 import { sanitizeGradient, type GradientValue } from "@/lib/website-gradient";
-import { CANVAS_COLORS, CANVAS_FONTS, CANVAS_WEIGHTS } from "@/lib/website-canvas";
+import { CANVAS_COLORS, CANVAS_FONTS, CANVAS_SHAPES, CANVAS_WEIGHTS } from "@/lib/website-canvas";
 import { normalizeFrameShape } from "@/lib/website-frames";
 import { cleanExpId } from "@/lib/website-web-stats";
 
@@ -273,6 +273,84 @@ export const DEFAULT_PATTERN: BlockPattern = { kind: "none", color: "auto", colo
 export const DEFAULT_EDGE: BlockEdge = { shape: "none", height: 60, flip: false, color: "auto", colorHex: "" };
 export const DEFAULT_BOX: BlockBox = { on: false, color: "auto", colorHex: "", opacity: 100, radius: "l", gap: "m", shadow: false, border: false };
 
+/**
+ * ✨ ของตกแต่งของ Section (แผงรูปลักษณ์ → แท็บ "✨ ตกแต่ง") — วางอิสระ · ลากย้ายในพรีวิวได้
+ * ตำแหน่ง/ขนาด = % ของ Section (ทุกจอสัดส่วนเดิม) · เว็บร้านวาดที่ components/home/SectionLayers.tsx
+ */
+export const DECOR_MAX = 12;
+export const DECOR_KINDS = ["shape", "image", "text"] as const;
+export type DecorKind = (typeof DECOR_KINDS)[number];
+/** ขยับตลอดเวลา — ชื่อตรงกับ data-loop ของกลางในเว็บร้าน (globals.css) */
+export const DECOR_ANIMS = ["none", "float", "sway", "pulse", "spin", "twinkle", "bounce"] as const;
+export type DecorAnim = (typeof DECOR_ANIMS)[number];
+export const DECOR_LAYERS = ["back", "front"] as const;
+export type DecorLayer = (typeof DECOR_LAYERS)[number];
+/** สัดส่วน สูง/กว้าง เริ่มต้นของลายในตัว (ลายเส้น/แถบ = แบน) */
+export const DECOR_SHAPE_RATIO: Record<string, number> = { bow: 0.72, heart: 0.9, sparkle: 1, star: 0.96, flower: 1, pearls: 0.12, lace: 1.2, scallop: 0.12, wave: 0.12, line: 0.04, arch: 1.2, rect: 0.6, ellipse: 1 };
+export interface DecorItem {
+  id: string;
+  kind: DecorKind;
+  /** ลายในตัว (CANVAS_SHAPES) — kind = shape */
+  shape: string;
+  /** ลายแบบเส้นขอบ (ไม่ทึบ) */
+  outline: boolean;
+  /** รูปจากคลัง (r2 key) — kind = image */
+  key: string;
+  /** สัดส่วน สูง/กว้าง (รูป = ตามรูปจริง · ลาย = ปรับได้) */
+  ratio: number;
+  /** ข้อความ — kind = text */
+  text: string;
+  font: string;
+  /** ขนาดตัวอักษร px บนคอม (จอแคบย่อตามความกว้าง) */
+  size: number;
+  /** สีลาย/ข้อความ — "auto" = สีแบรนด์ */
+  color: string;
+  colorHex: string;
+  /** จุดกลางของชิ้น — % ของกว้าง/สูง Section (ทศนิยม 1 ตำแหน่ง) */
+  x: number;
+  y: number;
+  /** ความกว้าง % ของ Section (ลาย/รูป) */
+  w: number;
+  rotate: number;
+  /** ความทึบ % (5–100) */
+  opacity: number;
+  /** หลังเนื้อหา / หน้าเนื้อหา (หน้า = ทับสินค้า/ข้อความได้ แต่กดผ่านได้) */
+  layer: DecorLayer;
+  anim: DecorAnim;
+  hideMobile: boolean;
+  /** กลับซ้าย-ขวา */
+  flip: boolean;
+}
+export const DEFAULT_DECOR: Omit<DecorItem, "id" | "kind"> = {
+  shape: "sparkle",
+  outline: false,
+  key: "",
+  ratio: 1,
+  text: "",
+  font: "display",
+  size: 40,
+  color: "brand",
+  colorHex: "",
+  x: 50,
+  y: 50,
+  w: 8,
+  rotate: 0,
+  opacity: 100,
+  layer: "back",
+  anim: "none",
+  hideMobile: false,
+  flip: false,
+};
+/** ชิ้นใหม่ (n = ลำดับ ใช้เหลื่อมตำแหน่งไม่ให้ทับกันสนิท) */
+export function newDecor(kind: DecorKind, p: Partial<DecorItem> = {}, n = 0): DecorItem {
+  const off = (n % 5) * 6;
+  const base: DecorItem = { ...DEFAULT_DECOR, id: `dc-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, x: 20 + off, y: 30 + off };
+  if (kind === "shape") Object.assign(base, { ratio: DECOR_SHAPE_RATIO[p.shape ?? base.shape] ?? 1 });
+  if (kind === "image") Object.assign(base, { w: 14 });
+  if (kind === "text") Object.assign(base, { text: "New!", font: "Parisienne", w: 0 });
+  return { ...base, ...p };
+}
+
 /** หน้าตาของบล็อก — แยกจาก "เนื้อหา" ทุกชนิดบล็อกมีชุดนี้เหมือนกัน */
 export interface BlockStyle {
   padTop: BlockSpacing;
@@ -297,6 +375,8 @@ export interface BlockStyle {
   edgeTop?: BlockEdge;
   edgeBottom?: BlockEdge;
   box?: BlockBox;
+  /** ✨ ของตกแต่ง (ไม่มี/ว่าง = ไม่มี) */
+  decor?: DecorItem[];
 }
 
 export const DEFAULT_BLOCK_STYLE: BlockStyle = {
@@ -1330,6 +1410,59 @@ function sanitizeBox(v: unknown): BlockBox | undefined {
   };
 }
 
+const DECOR_SHAPES = CANVAS_SHAPES.map((o) => o.v);
+const DECOR_FONTS = ["display", "body", ...CANVAS_FONTS.map((o) => o.v).filter((f) => f !== "display" && f !== "body")];
+/** ตัวเลขทศนิยม 1 ตำแหน่ง (ตำแหน่ง/ขนาดเป็น % — ลากละเอียดได้) */
+const num1 = (v: unknown, fb: number, min: number, max: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n * 10) / 10)) : fb;
+};
+function sanitizeDecorItem(v: unknown, i: number): DecorItem | null {
+  if (!isObj(v)) return null;
+  const d = DEFAULT_DECOR;
+  const kind = pickOne(v.kind, DECOR_KINDS, "shape");
+  const key = imgKey(v.key) ?? "";
+  const text = str(v.text, "", 120).trim();
+  // รูปไม่มีไฟล์ / ข้อความว่าง = ไม่มีอะไรให้วาด → ทิ้ง
+  if ((kind === "image" && !key) || (kind === "text" && !text)) return null;
+  const shape = pickOne(v.shape, DECOR_SHAPES, d.shape);
+  const id = str(v.id, "", 40).replace(/[^\w-]/g, "");
+  return {
+    id: id || `dc-${i + 1}`,
+    kind,
+    shape,
+    outline: v.outline === true,
+    key,
+    ratio: num1(v.ratio, kind === "shape" ? DECOR_SHAPE_RATIO[shape] ?? 1 : 1, 0.02, 4),
+    text,
+    font: pickOne(v.font, DECOR_FONTS, d.font),
+    size: num(v.size, d.size, 10, 240),
+    ...colorPair(v.color, v.colorHex),
+    x: num1(v.x, d.x, -20, 120),
+    y: num1(v.y, d.y, -20, 120),
+    w: num1(v.w, kind === "text" ? 0 : d.w, 0, 100),
+    rotate: num(v.rotate, 0, -180, 180),
+    opacity: num(v.opacity, d.opacity, 5, 100),
+    layer: pickOne(v.layer, DECOR_LAYERS, d.layer),
+    anim: pickOne(v.anim, DECOR_ANIMS, d.anim),
+    hideMobile: v.hideMobile === true,
+    flip: v.flip === true,
+  };
+}
+function sanitizeDecor(v: unknown): DecorItem[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const seen = new Set<string>();
+  const out: DecorItem[] = [];
+  v.forEach((x, i) => {
+    const it = sanitizeDecorItem(x, i);
+    if (!it || out.length >= DECOR_MAX) return;
+    if (seen.has(it.id)) it.id = `${it.id}-${i + 1}`;
+    seen.add(it.id);
+    out.push(it);
+  });
+  return out.length ? out : undefined;
+}
+
 export function sanitizeStyle(v: unknown): BlockStyle {
   const o = (v ?? {}) as Record<string, unknown>;
   const d = DEFAULT_BLOCK_STYLE;
@@ -1402,6 +1535,7 @@ export function sanitizeStyle(v: unknown): BlockStyle {
     ...((e) => (e ? { edgeTop: e } : {}))(sanitizeEdge(o.edgeTop)),
     ...((e) => (e ? { edgeBottom: e } : {}))(sanitizeEdge(o.edgeBottom)),
     ...((b) => (b ? { box: b } : {}))(sanitizeBox(o.box)),
+    ...((dc) => (dc ? { decor: dc } : {}))(sanitizeDecor(o.decor)),
   };
 }
 

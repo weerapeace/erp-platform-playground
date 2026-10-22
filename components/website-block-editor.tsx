@@ -9,7 +9,8 @@
  *
  * ⚠️ ชนิดบล็อก/ค่าตั้งต้น มาจาก lib/website-blocks.ts + lib/website-schema.ts ที่เดียวเท่านั้น — ห้ามประกาศซ้ำที่นี่
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { SectionDecorPanel } from "@/components/website-section-decor";
 import { useWheelStep } from "@/components/wheel-select";
 import { ColorInput } from "@/components/color-picker";
 import { GradientPicker } from "@/components/website-gradient-picker";
@@ -281,6 +282,10 @@ export function StylePanel({
   theme = DEFAULT_THEME_COLORS,
   fontNames = DEFAULT_FONT_NAMES,
   onPlay,
+  shopId,
+  decorSel = null,
+  onDecorSel,
+  decorTabReq = 0,
 }: {
   value: BlockStyle;
   onChange: (s: BlockStyle) => void;
@@ -293,9 +298,19 @@ export function StylePanel({
   fontNames?: ThemeFontNames;
   /** แท็บลูกเล่น: ปุ่ม ▶ เล่นให้ดูอีกครั้งในพรีวิว (ไม่ส่ง = ไม่มีปุ่ม) — เลือกค่าแล้วพรีวิวเล่นให้เองอยู่แล้ว */
   onPlay?: () => void;
+  /** ✨ แท็บตกแต่ง: ร้าน (เปิดคลังของตกแต่ง) · ชิ้นที่เลือก (ตัวจัดหน้าคุม — กดในพรีวิวก็เลือกได้) · เลขเพิ่ม = สลับมาแท็บตกแต่ง */
+  shopId?: string;
+  decorSel?: string | null;
+  onDecorSel?: (id: string | null) => void;
+  decorTabReq?: number;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [tab, setTab] = useState<"all" | "text" | "mobile" | "motion">(mode === "motion" ? "motion" : "all");
+  const [tab, setTab] = useState<"all" | "text" | "mobile" | "motion" | "decor">(mode === "motion" ? "motion" : "all");
+  const [localDecorSel, setLocalDecorSel] = useState<string | null>(null);
+  // กดชิ้นตกแต่งในพรีวิว → ตัวจัดหน้าเพิ่มเลข → สลับมาแท็บตกแต่ง
+  useEffect(() => {
+    if (decorTabReq > 0 && mode !== "motion") setTab("decor");
+  }, [decorTabReq, mode]);
   const bare = mode !== "all";
   const showTab = tab === "motion" ? mode !== "style" : mode !== "motion";
   const s: BlockStyle = {
@@ -321,6 +336,7 @@ export function StylePanel({
     { k: "text" as const, l: `🔤 ตัวอักษร${textTouched ? " •" : ""}` },
     { k: "mobile" as const, l: `📲 มือถือ${mobileTouched ? " •" : ""}` },
     { k: "motion" as const, l: `✨ ลูกเล่น${motionTouched ? " •" : ""}` },
+    { k: "decor" as const, l: `🎀 ตกแต่ง${s.decor?.length ? ` (${s.decor.length})` : ""}` },
   ].filter((t) => (mode === "style" ? t.k !== "motion" : mode === "motion" ? t.k === "motion" : true));
   void showTab;
 
@@ -482,6 +498,16 @@ export function StylePanel({
                 </button>
               )}
             </div>
+          ) : tab === "decor" ? (
+            <SectionDecorPanel
+              value={s.decor ?? []}
+              onChange={(next) => set({ decor: next.length ? next : undefined })}
+              theme={theme}
+              fontNames={fontNames}
+              shopId={shopId}
+              selId={onDecorSel ? decorSel : localDecorSel}
+              onSel={onDecorSel ?? setLocalDecorSel}
+            />
           ) : tab === "all" ? (
             <div className="grid gap-3">
               <Field label="ระยะห่างด้านบน"><Seg wheel value={s.padTop} onChange={(v) => set({ padTop: v })} options={SPACE} /></Field>
