@@ -980,7 +980,7 @@ export function WebsiteCategorySorter({
                       title={`${nameOf(l)} · ${l.code}${l.erpCategory ? ` · หมวด ERP: ${l.erpCategory}` : ""}`}
                       className={`relative overflow-hidden rounded-lg border bg-white text-left transition ${on ? "border-blue-500 ring-2 ring-blue-300" : "border-slate-200 hover:border-slate-400"} ${l.published ? "" : "opacity-70"}`}
                     >
-                      <div className="aspect-square bg-slate-100">
+                      <div className="relative aspect-square bg-slate-100">
                         {key && (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -990,6 +990,12 @@ export function WebsiteCategorySorter({
                             className="pointer-events-none h-full w-full object-cover"
                             loading="lazy"
                           />
+                        )}
+                        {/* รหัสรุ่น (Parent SKU) — ดูว่าใบไหนรุ่นอะไรได้ทันที · ค้นหาด้วยรหัสได้ที่ช่องค้นหา */}
+                        {l.code && (
+                          <span className="pointer-events-none absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded bg-white/90 px-1 font-mono text-[10px] font-semibold text-slate-700 shadow-sm">
+                            {l.code}
+                          </span>
                         )}
                       </div>
                       {on && (
