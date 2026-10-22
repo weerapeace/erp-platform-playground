@@ -150,8 +150,9 @@ const thumb = (url: string, w: number) => (url.startsWith("/api/r2-image?") && !
 
 export const SUMMARY_FONT = "'Sarabun','Leelawadee UI','Segoe UI',Tahoma,Arial,sans-serif";
 
-/** เนื้อสรุป (div เดียว) — ใช้ทำรูป (ไม่ต้องมี <html>) */
-export function renderSummaryBody(doc: SummaryDoc, sheets: Map<string, SummarySheetInfo>, now = new Date()): string {
+/** เนื้อสรุป (div เดียว) — ใช้ทำรูป (ไม่ต้องมี <html>) · หัวเป็นตาราง (อีเมลไม่รองรับ flex) · absUrl = ทำลิงก์รูปเป็นลิงก์เต็ม (อีเมล) */
+export function renderSummaryBody(doc: SummaryDoc, sheets: Map<string, SummarySheetInfo>, now = new Date(), opts: { absUrl?: (u: string) => string } = {}): string {
+  const abs = opts.absUrl ?? ((u: string) => u);
   const cols = visibleColumns(doc);
   const rows = expandRows(doc, sheets);
   const customer = doc.audience === "customer";
@@ -178,8 +179,8 @@ export function renderSummaryBody(doc: SummaryDoc, sheets: Map<string, SummarySh
   const head = `<tr>${th("#", "width:28px;text-align:center;")}${imgCol ? th("รูป") : ""}${textCols.map((c) => th(c.label)).join("")}</tr>`;
   const body = rows.map((row, i) => {
     const imgs = row.images.length
-      ? row.images.map((u) => `<img src="${esc(thumb(u, row.images.length > 1 ? 160 : 240))}" alt="" style="width:${row.images.length > 1 ? 72 : 110}px;height:${row.images.length > 1 ? 72 : 110}px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;margin:0 4px 4px 0;vertical-align:top;background:#f8fafc;" />`).join("")
-      : `<div style="width:110px;height:110px;border-radius:6px;background:#f1f5f9;border:1px solid #e2e8f0;color:#94a3b8;font-size:11px;display:flex;align-items:center;justify-content:center;">ไม่มีรูป</div>`;
+      ? row.images.map((u) => `<img src="${esc(abs(thumb(u, row.images.length > 1 ? 160 : 240)))}" alt="" style="width:${row.images.length > 1 ? 72 : 110}px;height:${row.images.length > 1 ? 72 : 110}px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;margin:0 4px 4px 0;vertical-align:top;background:#f8fafc;" />`).join("")
+      : `<div style="width:110px;height:110px;line-height:110px;text-align:center;border-radius:6px;background:#f1f5f9;border:1px solid #e2e8f0;color:#94a3b8;font-size:11px;">ไม่มีรูป</div>`;
     const bg = i % 2 ? "background:#fcfcfd;" : "";
     return `<tr style="${bg}page-break-inside:avoid;break-inside:avoid;">
       <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:center;color:#94a3b8;font-size:12px;vertical-align:top;">${i + 1}</td>
@@ -190,18 +191,42 @@ export function renderSummaryBody(doc: SummaryDoc, sheets: Map<string, SummarySh
 
   const sheetCount = new Set(rows.map((r) => r.sheetId)).size;
   return `<div style="font-family:${SUMMARY_FONT};color:#0f172a;background:#ffffff;padding:24px;max-width:960px;box-sizing:border-box;">
-  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:12px;">
-    <div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-bottom:2px solid #0f172a;margin-bottom:12px;"><tr>
+    <td style="padding:0 12px 10px 0;vertical-align:bottom;">
       <div style="font-size:22px;font-weight:bold;line-height:1.3;">${esc(doc.title)}</div>
       <div style="font-size:13px;color:#64748b;margin-top:2px;">สรุปงานออกแบบ · ${rows.length} รายการ${sheetCount !== rows.length ? ` (จาก ${sheetCount} ใบงาน)` : ""}</div>
-    </div>
-    <div style="text-align:right;font-size:12px;color:#64748b;white-space:nowrap;">${esc(thDate(now))}${customer ? "" : `<div style="margin-top:2px;display:inline-block;padding:1px 8px;border-radius:999px;background:#f1f5f9;color:#475569;">${AUDIENCE_LABEL[doc.audience]}</div>`}</div>
-  </div>
+    </td>
+    <td style="padding:0 0 10px 0;vertical-align:bottom;text-align:right;font-size:12px;color:#64748b;white-space:nowrap;">${esc(thDate(now))}${customer ? "" : `<div style="margin-top:2px;display:inline-block;padding:1px 8px;border-radius:999px;background:#f1f5f9;color:#475569;">${AUDIENCE_LABEL[doc.audience]}</div>`}</td>
+  </tr></table>
   ${doc.note ? `<div style="font-size:13px;color:#334155;background:#f8fafc;border-radius:8px;padding:8px 12px;margin-bottom:12px;white-space:pre-wrap;">${esc(doc.note)}</div>` : ""}
   ${rows.length === 0
     ? `<div style="padding:32px;text-align:center;color:#94a3b8;font-size:14px;">ยังไม่มีรายการ</div>`
     : `<table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;">${head}${body}</table>`}
 </div>`;
+}
+
+/** อีเมลสรุปงาน — ข้อความจากผู้ส่ง (หลายบรรทัด) + สรุปชุดเดียวกับพิมพ์ (รูปเป็นลิงก์เต็ม) + ท้ายอีเมลบอกว่าใครส่ง/ตอบกลับได้ */
+export function renderSummaryEmail(doc: SummaryDoc, sheets: Map<string, SummarySheetInfo>, ctx: {
+  message: string; senderName: string | null; absUrl: (u: string) => string; now?: Date;
+}): { html: string; text: string } {
+  const now = ctx.now ?? new Date();
+  const msg = clipMulti(ctx.message, 2000);
+  const who = ctx.senderName ? esc(ctx.senderName) : "ทีมงาน";
+  const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(doc.title)}</title></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:${SUMMARY_FONT};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;"><tr><td align="center" style="padding:16px 8px;">
+<table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:100%;max-width:760px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;">
+  ${msg ? `<tr><td style="padding:20px 24px 4px 24px;font-size:14px;line-height:1.6;color:#0f172a;white-space:pre-wrap;">${esc(msg)}</td></tr>` : ""}
+  <tr><td>${renderSummaryBody(doc, sheets, now, { absUrl: ctx.absUrl })}</td></tr>
+  <tr><td style="padding:12px 24px 18px 24px;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;">ส่งโดย ${who} · กด "ตอบกลับ" อีเมลนี้เพื่อคุยกับผู้ส่งได้เลย</td></tr>
+</table></td></tr></table></body></html>`;
+  const rows = expandRows(doc, sheets);
+  const text = [
+    msg, msg ? "" : null, doc.title, `สรุปงานออกแบบ · ${rows.length} รายการ`, "",
+    ...rows.map((r, i) => `${i + 1}. ${r.title}${r.note ? `\n   ${r.note.replace(/\n/g, "\n   ")}` : ""}`),
+    "", `ส่งโดย ${ctx.senderName ?? "ทีมงาน"} · ตอบกลับอีเมลนี้ได้เลย`,
+  ].filter((l) => l !== null).join("\n");
+  return { html, text };
 }
 
 /** เอกสารเต็ม (มี <html>/<title> = ชื่อไฟล์ PDF) — ใช้ iframe ตัวอย่าง + พิมพ์ */

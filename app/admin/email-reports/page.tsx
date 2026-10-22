@@ -17,7 +17,7 @@ import {
   type EmailReport, type EmailReportRun,
 } from "@/lib/email-report/shared";
 import { ReportEditor, toInput } from "./report-editor";
-import { ResendGuide } from "./resend-guide";
+import { EmailSetupGuide } from "./email-setup-guide";
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok" });
 const GROUP_TEXT: Record<string, string> = { all: "ทุกแบรนด์", customer: "งานลูกค้า", own: "แบรนด์เรา" };
@@ -28,6 +28,9 @@ export default function EmailReportsPage() {
   const [reports, setReports] = useState<EmailReport[]>([]);
   const [runs, setRuns] = useState<EmailReportRun[]>([]);
   const [emailReady, setEmailReady] = useState(false);
+  const [emailInfo, setEmailInfo] = useState<{ provider: "resend" | "gmail" | null; sender: string | null; scheduler: boolean }>({ provider: null, sender: null, scheduler: false });
+  const [sending, setSending] = useState<string | null>(null);              // `${id}:test` / `${id}:now`
+  const [sendNowTarget, setSendNowTarget] = useState<EmailReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -43,6 +46,7 @@ export default function EmailReportsPage() {
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
       setReports(j.data as EmailReport[]); setRuns(j.runs as EmailReportRun[]); setEmailReady(!!j.email_ready);
+      setEmailInfo({ provider: j.email_provider ?? null, sender: j.email_sender ?? null, scheduler: !!j.scheduler_active });
     } catch (e) { setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่"); }
     finally { setLoading(false); }
   }, []);
@@ -63,6 +67,20 @@ export default function EmailReportsPage() {
       toast.success(r.is_enabled ? `ปิดรายงาน "${r.name}" แล้ว` : `เปิดรายงาน "${r.name}" แล้ว`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setToggling(null); }
+  };
+
+  // ✉️ ส่งทดสอบถึงฉัน / 📤 ส่งเดี๋ยวนี้ (ทุกผู้รับ) — ผลลงประวัติการส่งเสมอ
+  const send = async (r: EmailReport, mode: "test" | "now") => {
+    setSending(`${r.id}:${mode}`);
+    try {
+      const res = await apiFetch(`/api/admin/email-reports/${r.id}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }) });
+      const j = await res.json().catch(() => ({}));
+      const msg: string = j.result?.message || j.error || "ส่งไม่สำเร็จ";
+      if (res.ok && j.ok) toast.success(mode === "test" ? `ส่งทดสอบแล้ว — เช็กกล่องอีเมลของคุณ (${msg})` : msg);
+      else toast.error(msg);
+      if (j.result?.skipped?.length) toast.warning(`ข้ามผู้รับ: ${j.result.skipped.join(", ")}`);
+    } catch { toast.error("ส่งไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setSending(null); setSendNowTarget(null); void load(); }
   };
 
   const doDelete = async () => {
@@ -96,9 +114,13 @@ export default function EmailReportsPage() {
         {!loading && (
           <div className={`rounded-xl border px-4 py-3 text-sm ${emailReady ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
             {emailReady
-              ? <>✅ <b>ระบบส่งอีเมลพร้อมแล้ว</b> (ตั้งค่า Resend ครบ)</>
-              : <>⚠️ <b>ระบบส่งอีเมลยังไม่พร้อม</b> — ต้องตั้งบัญชีส่งเมล (Resend) ก่อน ทำตามคู่มือด้านล่างได้เลย · ระหว่างนี้ตั้งค่าและดูตัวอย่างอีเมลได้ตามปกติ</>}
-            <div className="mt-1 text-xs opacity-80">ℹ️ ตอนนี้ยังเป็นรอบ 1: ตั้งค่า + ดูตัวอย่างอย่างเดียว ยังไม่มีการส่งจริง — ปุ่มส่งทดสอบและการส่งตามเวลาจะตามมาในรอบ 2</div>
+              ? <>✅ <b>ระบบส่งอีเมลพร้อมแล้ว</b> — ส่งผ่าน {emailInfo.provider === "gmail" ? "Gmail" : "Resend (โดเมนบริษัท)"}{emailInfo.sender ? <> จาก <b>{emailInfo.sender}</b></> : null}</>
+              : <>⚠️ <b>ระบบส่งอีเมลยังไม่พร้อม</b> — ต้องตั้ง Gmail ที่จะใช้ส่งก่อน ทำตามคู่มือด้านล่าง (~5 นาที) · ระหว่างนี้ตั้งค่าและดูตัวอย่างอีเมลได้ตามปกติ</>}
+            <div className="mt-1 text-xs opacity-80">
+              {emailInfo.scheduler
+                ? "⏰ ตัวตั้งเวลาทำงานอยู่ — เช็กทุก 15 นาที ส่งตามวันและเวลาที่ตั้ง (ส่งได้ภายใน 2 ชม.หลังเวลาที่ตั้ง · วันละครั้ง)"
+                : "⏰ ตัวตั้งเวลายังไม่ทำงาน — ส่งทดสอบ / ส่งเดี๋ยวนี้ ใช้ได้ แต่ยังไม่ส่งเองตามเวลา"}
+            </div>
           </div>
         )}
 
@@ -141,6 +163,12 @@ export default function EmailReportsPage() {
                         className={`relative h-6 w-11 rounded-full transition ${r.is_enabled ? "bg-emerald-500" : "bg-slate-300"} disabled:opacity-50`}>
                         <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${r.is_enabled ? "left-[22px]" : "left-0.5"}`} />
                       </button>
+                      <button onClick={() => void send(r, "test")} disabled={!!sending} title="ส่งอีเมลนี้เข้าอีเมลของคุณคนเดียว (หัวเรื่องขึ้นต้น [ทดสอบ])"
+                        className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                        {sending === `${r.id}:test` ? "กำลังส่ง..." : "✉️ ทดสอบ"}</button>
+                      <button onClick={() => setSendNowTarget(r)} disabled={!!sending || r.recipients.length === 0} title={r.recipients.length ? "ส่งถึงผู้รับทุกคนเดี๋ยวนี้" : "ยังไม่มีผู้รับ"}
+                        className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                        {sending === `${r.id}:now` ? "กำลังส่ง..." : "📤 ส่งเดี๋ยวนี้"}</button>
                       <button onClick={() => openEditor(r)} className="h-8 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">✏️ แก้ไข / ดูตัวอย่าง</button>
                       <button onClick={() => setDeleteTarget(r)} title="ลบรายงานนี้" aria-label={`ลบ ${r.name}`} className="h-8 w-8 rounded-lg text-rose-500 hover:bg-rose-50">🗑</button>
                     </div>
@@ -181,7 +209,7 @@ export default function EmailReportsPage() {
           )}
         </section>
 
-        {!loading && <ResendGuide ready={emailReady} />}
+        {!loading && <EmailSetupGuide ready={emailReady} />}
       </div>
 
       <ReportEditor open={editorOpen} editing={editing} onClose={() => setEditorOpen(false)}
@@ -190,6 +218,10 @@ export default function EmailReportsPage() {
           setEditorOpen(false);
           toast.success(editing ? "บันทึกการแก้ไขแล้ว" : "เพิ่มรายงานแล้ว");
         }} />
+
+      <ConfirmDialog open={sendNowTarget !== null} onClose={() => setSendNowTarget(null)} onConfirm={() => { if (sendNowTarget) void send(sendNowTarget, "now"); }}
+        loading={!!sending} title="ส่งรายงานนี้เดี๋ยวนี้?" confirmText="📤 ส่งเลย"
+        message={<>ส่ง <b>{sendNowTarget?.name}</b> ถึงผู้รับทั้ง {sendNowTarget?.recipients.length ?? 0} คนทันที · ไม่กระทบรอบส่งตามเวลาของวันนี้</>} />
 
       <ConfirmDialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} onConfirm={() => void doDelete()} loading={deleting}
         variant="danger" title="ลบรายงานนี้?" confirmText="ลบรายงาน"

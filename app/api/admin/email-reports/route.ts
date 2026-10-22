@@ -10,7 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { emailConfigured } from "@/lib/email";
+import { emailConfigured, emailProvider, emailSenderAddress } from "@/lib/email";
 import { normalizeReportInput, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 import { toEmailReport, requestActor } from "./shared";
 
@@ -39,7 +39,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       error: (r.error as string) ?? null, actor_name: (r.actor_name as string) ?? null,
     };
   });
-  return NextResponse.json({ data: reports, runs, email_ready: emailConfigured(), error: null });
+  // ช่องทางส่ง + ผู้ส่ง (โชว์ในกล่องสถานะ) · ตัวตั้งเวลา pg_cron ทำงานไหม
+  const { data: cronOk } = await admin.rpc("erp_email_reports_cron_active");
+  return NextResponse.json({
+    data: reports, runs, email_ready: emailConfigured(), email_provider: emailProvider(), email_sender: emailSenderAddress(),
+    scheduler_active: cronOk === true, error: null,
+  });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

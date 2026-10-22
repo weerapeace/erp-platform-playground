@@ -21,6 +21,8 @@ import { withImageWidth } from "@/lib/r2-image";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { htmlToPngBlob } from "@/lib/html-to-png";
 import { canCopyImage, copyBlobToClipboard, downloadBlob } from "@/lib/image-clipboard";
+import { UserPicker } from "@/components/pickers";
+import { EMAIL_RE } from "@/lib/email-report/shared";
 import {
   AUDIENCE_LABEL, DEFAULT_SUMMARY_COLUMNS, SUMMARY_COLUMNS, normalizeSummaryDoc, renderSummaryBody, renderSummaryHtml,
   type SavedSummary, type SummaryAudience, type SummaryDoc, type SummaryItem, type SummarySheetInfo,
@@ -103,6 +105,101 @@ function AddSheetsPanel({ meta, existing, onAdd, onClose }: {
   );
 }
 
+type MailTo = { type: "user"; id: string; name: string; email: string | null } | { type: "email"; email: string };
+
+/** ✉️ แผงส่งสรุปทางอีเมล — ผู้รับ (คนในระบบ / พิมพ์อีเมล) · หัวเรื่อง · ข้อความ (หลายบรรทัด) → /api/design-sheet-summaries/send
+ *  ส่งแยกทีละคน · ผู้รับกดตอบกลับ = ถึงอีเมลคนที่กดส่ง · ใช้ค่าที่ตั้งอยู่ตอนนี้ (ยังไม่บันทึกก็ส่งได้) */
+function SendEmailPanel({ doc, summaryId, onSent }: { doc: SummaryDoc; summaryId: string | null; onSent: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const [to, setTo] = useState<MailTo[]>([]);
+  const [typed, setTyped] = useState("");
+  const [typedErr, setTypedErr] = useState<string | null>(null);
+  const [subject, setSubject] = useState<string | null>(null);   // null = ใช้ชื่อสรุป
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const label = (r: MailTo) => (r.type === "user" ? r.name || r.email || t("ผู้ใช้", "User") : r.email);
+
+  const addTyped = () => {
+    const email = typed.trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) { setTypedErr(t("อีเมลไม่ถูกต้อง เช่น name@gmail.com", "Invalid email, e.g. name@gmail.com")); return; }
+    if (to.some((r) => (r.type === "email" ? r.email : r.email?.toLowerCase()) === email)) { setTypedErr(t("มีอีเมลนี้แล้ว", "Already added")); return; }
+    setTo((l) => [...l, { type: "email", email }]); setTyped(""); setTypedErr(null);
+  };
+  const send = async () => {
+    if (busy) return;
+    if (typed.trim()) { setTypedErr(t("กด \"เพิ่ม\" อีเมลที่พิมพ์ไว้ก่อน", "Press \"Add\" for the typed email first")); return; }
+    if (to.length === 0) { setError(t("ใส่ผู้รับอย่างน้อย 1 คน", "Add at least 1 recipient")); return; }
+    setBusy(true); setError(null);
+    try {
+      const res = await apiFetch("/api/design-sheet-summaries/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doc, summary_id: summaryId, subject: subject ?? doc.title, message, recipients: to.map((r) => (r.type === "user" ? { type: "user", id: r.id } : r)) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) throw new Error(j.error || t("ส่งอีเมลไม่สำเร็จ", "Couldn't send the email"));
+      toast.success(t(`ส่งอีเมลแล้ว ${j.sent}/${j.total} คน`, `Email sent to ${j.sent}/${j.total}`));
+      if (j.failed?.length) toast.warning(t(`ส่งไม่ถึง: ${j.failed.map((f: { email: string }) => f.email).join(", ")}`, `Not delivered: ${j.failed.map((f: { email: string }) => f.email).join(", ")}`));
+      if (j.skipped?.length) toast.warning(t(`ข้าม: ${j.skipped.join(", ")}`, `Skipped: ${j.skipped.join(", ")}`));
+      onSent();
+    } catch (e) { setError(e instanceof Error ? e.message : t("ส่งอีเมลไม่สำเร็จ", "Couldn't send the email")); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mb-2 space-y-2 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
+      <div>
+        <div className="mb-1 text-xs font-medium text-slate-600">{t("ถึง", "To")} <span className="font-normal text-slate-400">{t("(ส่งแยกทีละคน ผู้รับไม่เห็นกัน)", "(sent one by one — recipients don't see each other)")}</span></div>
+        {to.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1.5">
+            {to.map((r, i) => {
+              const noEmail = r.type === "user" && !r.email;
+              return (
+                <span key={`${r.type}-${r.type === "user" ? r.id : r.email}`} className={`inline-flex items-center gap-1 rounded-full border py-0.5 pl-2 pr-1 text-xs ${noEmail ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-700"}`}>
+                  {r.type === "user" ? "👤" : "✉️"} {label(r)}{noEmail && t(" (ไม่มีอีเมล)", " (no email)")}
+                  <button type="button" onClick={() => setTo((l) => l.filter((_, x) => x !== i))} aria-label={t(`เอา ${label(r)} ออก`, `Remove ${label(r)}`)} className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200">✕</button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          <UserPicker value={null} placeholder={t("＋ เลือกคนในระบบ...", "＋ Pick a user...")}
+            onChange={(u) => { if (u && !to.some((r) => r.type === "user" && r.id === u.id)) setTo((l) => [...l, { type: "user", id: u.id, name: u.name, email: u.email ?? null }]); }} />
+          <div>
+            <div className="flex gap-1.5">
+              <input value={typed} onChange={(e) => { setTyped(e.target.value); setTypedErr(null); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTyped(); } }}
+                inputMode="email" placeholder={t("อีเมลลูกค้า เช่น name@gmail.com", "Customer email, e.g. name@gmail.com")}
+                className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <button type="button" onClick={addTyped} className="h-9 shrink-0 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">{t("เพิ่ม", "Add")}</button>
+            </div>
+            {typedErr && <p className="mt-1 text-xs text-rose-600">{typedErr}</p>}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div className="mb-1 text-xs font-medium text-slate-600">{t("หัวเรื่อง", "Subject")}</div>
+        <input value={subject ?? doc.title} onChange={(e) => setSubject(e.target.value)}
+          className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      <div>
+        <div className="mb-1 text-xs font-medium text-slate-600">{t("ข้อความถึงผู้รับ", "Message")} <span className="font-normal text-slate-400">{t("(ถ้ามี · อยู่เหนือสรุป)", "(optional · shown above the summary)")}</span></div>
+        <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3}
+          placeholder={t("เช่น เรียนคุณเต้ง แนบสรุปงานล่าสุดครับ ใบใหญ่เสร็จแล้ว รอคอนเฟิร์มสีใบเล็ก", "e.g. Hi, here is the latest summary of your order...")}
+          className="w-full resize-y rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-auto text-[11px] text-slate-500">{t("ผู้รับกด \"ตอบกลับ\" = ถึงอีเมลของคุณ · ส่งตามหน้าตาตัวอย่างด้านล่าง", "Replies go to your email · sends what the preview shows")}</span>
+        {error && <span className="text-xs text-rose-600">⚠ {error}</span>}
+        <button type="button" onClick={() => void send()} disabled={busy}
+          className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          {busy ? t("กำลังส่ง...", "Sending...") : t(`✉️ ส่งอีเมล${to.length ? ` (${to.length})` : ""}`, `✉️ Send${to.length ? ` (${to.length})` : ""}`)}</button>
+      </div>
+    </div>
+  );
+}
+
 /** หมายเหตุหลายบรรทัด (Enter = ขึ้นบรรทัดใหม่) — สูงตามจำนวนบรรทัด 2–6 · ลากขยายเองได้ */
 function NoteBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const t = useT();
@@ -146,6 +243,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [imgBusy, setImgBusy] = useState<"copy" | "download" | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);   // แผงส่งอีเมลสรุป
   const [addOpen, setAddOpen] = useState(false);   // แผงเลือกเพิ่มใบงาน
   const isNew = !savedId;
   const defaultsApplied = useRef<Set<string>>(new Set());
@@ -528,7 +626,15 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
               )}
               <button type="button" onClick={() => void downloadImage()} disabled={!!imgBusy || doc.items.length === 0} className={actBtn}>
                 {imgBusy === "download" ? t("กำลังทำรูป...", "Creating image...") : t("⬇ ดาวน์โหลดรูป", "⬇ Download image")}</button>
+              {canEdit && (
+                <button type="button" onClick={() => setEmailOpen((o) => !o)} disabled={doc.items.length === 0}
+                  className={`${actBtn} ${emailOpen ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-800" : ""}`}>
+                  {emailOpen ? t("✕ ปิดส่งอีเมล", "✕ Close email") : t("✉️ ส่งอีเมล", "✉️ Email")}</button>
+              )}
             </div>
+            {emailOpen && canEdit && (
+              <SendEmailPanel doc={doc} summaryId={savedId} onSent={() => setEmailOpen(false)} />
+            )}
             <iframe title={t("ตัวอย่างสรุปงาน", "Summary preview")} srcDoc={html} className="h-[600px] w-full rounded-lg border border-slate-200 bg-slate-100" />
             <p className="mt-1.5 text-[11px] text-slate-400">{t("พิมพ์ / PDF / รูป ใช้ค่าที่ตั้งอยู่ตอนนี้ได้เลย (ยังไม่บันทึกก็ได้) · คัดลอกรูปแล้ววางใน LINE ด้วย Ctrl+V", "Print / PDF / image use the current settings (no need to save first) · copy the image and paste it into LINE with Ctrl+V")}</p>
           </div>
