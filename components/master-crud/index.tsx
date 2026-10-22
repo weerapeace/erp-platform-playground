@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
-import { Drawer, ConfirmDialog } from "@/components/modal";
+import { Drawer, ConfirmDialog, ERPModal } from "@/components/modal";
 import { FooterSaveProvider, FooterSaveButton, FooterSaveRegistrar, useFooterSaveHost } from "@/components/footer-save";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
@@ -51,6 +51,10 @@ import type { StudioField } from "@/components/master-crud/studio-panel";
 import { RECORD_DETAIL_VIEWS } from "@/components/record-detail-views";
 import { CodeCheckMessages, useCodeCheck } from "@/components/code-check-hint";
 import { CODE_RULE_MODULES } from "@/lib/code-rules";
+// 📝 โหมดลงรายละเอียด (ของกลาง) — ปุ่มเลือกโหมด + หน้าจอในโหมด · ตั้งค่าโหมดโหลดเฉพาะตอนเปิด
+import { EntryModeMenu, EntryModePanel, lastEntryMode, rememberEntryMode, type EntryModeField } from "@/components/entry-modes";
+import { computeModeProgress, modeAppliesTo, modeVisibleTo, resolveEntryModes, type EntryMode } from "@/lib/entry-modes";
+const EntryModeSettings = dynamic(() => import("@/components/entry-modes/settings").then((m) => m.EntryModeSettings), { ssr: false });
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 // 🕘 ประวัติเวอร์ชันของสินค้า (Parent/SKU) — ดู/เทียบ/ย้อนกลับ (ของกลาง components/record-versions · lib/record-versions)
@@ -769,6 +773,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [registryLoading, setRegistryLoading] = useState(!!config.moduleKey);
   // กฎ section โชว์เฉพาะแท็ก (whitelist): sectionKey → tagId[]
   const [sectionTagRules, setSectionTagRules] = useState<Record<string, string[]>>({});
+  // 📝 โหมดลงรายละเอียดที่ตั้งไว้ (ดิบจาก erp_modules.config.entry_modes · undefined = ใช้ชุดตั้งต้นในโค้ด)
+  const [entryModesRaw, setEntryModesRaw] = useState<unknown>(undefined);
 
   useEffect(() => {
     if (!config.moduleKey) return;
@@ -777,7 +783,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     cachedJson<FieldRegistryV2Response>(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`)
       .then((res) => {
         if (res.error) console.error("Field Registry load error:", res.error);
-        else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); setPrimaryField(res.primary_field ?? null); }
+        else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); setPrimaryField(res.primary_field ?? null); setEntryModesRaw(res.entry_modes); }
       })
       .catch((e) => console.error("Field Registry load failed:", e))
       .finally(() => setRegistryLoading(false));
@@ -794,7 +800,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       const r = await apiFetch(url, { cache: "no-store" });
       const res = (await r.json()) as FieldRegistryV2Response;
       if (!res.error) {
-        setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); setPrimaryField(res.primary_field ?? null);
+        setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); setPrimaryField(res.primary_field ?? null); setEntryModesRaw(res.entry_modes);
         primeCache(url, res);   // อัปเดต cache ให้ตรงกับของใหม่
       }
     } finally {
@@ -1175,6 +1181,63 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedTemplate, sectionTagRules, familyKey]);
   const tplRequired = useCallback((f: FieldDef) => !!f.required || mergedTemplate.req.has(f.key), [mergedTemplate]);
+
+  // 📝 โหมดลงรายละเอียด (ของกลาง lib/entry-modes + components/entry-modes · docs/entry-modes.md)
+  //   เข้าโหมด → ฝั่งขวาของป๊อปโชว์เฉพาะช่องของโหมด + นับความครบ + เตือนช่องที่ขาด · แก้แล้วกดบันทึกที่แถบล่าง (เตือนอย่างเดียว ไม่กันบันทึก)
+  //   ช่องที่ประเภทสินค้าซ่อน / เงื่อนไขโชว์ไม่ผ่าน / ไม่มีสิทธิ์เห็น (ไม่อยู่ใน effectiveFields) → ไม่นับ
+  const [activeModeKey, setActiveModeKey] = useState<string | null>(null);
+  const [modeSettingsOpen, setModeSettingsOpen] = useState(false);
+  const [modeSettingsDirty, setModeSettingsDirty] = useState(false);
+  const [modeSaving, setModeSaving] = useState(false);
+  const [modeScanning, setModeScanning] = useState(false);
+  const [galleryCount, setGalleryCount] = useState<number | null>(null);   // จำนวนรูปในแกลเลอรี (เงื่อนไข "อย่างน้อย N รูป")
+  const [modeBadgeKey] = useState<string | null>(() => (config.moduleKey ? lastEntryMode(config.moduleKey) : null));
+  const canEditModes = !!config.moduleKey && can("admin.module_layout.edit");
+  const allEntryModes = useMemo(() => resolveEntryModes(config.moduleKey, entryModesRaw), [config.moduleKey, entryModesRaw]);
+  const entryModes = useMemo(
+    () => allEntryModes.filter((m) => modeVisibleTo(m, user?.role) && modeAppliesTo(m, selectedFamilyIds)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allEntryModes, user?.role, familyKey],
+  );
+  const fieldByKey = useMemo(() => new Map(effectiveFields.map((f) => [f.key, f])), [effectiveFields]);
+  // ช่องที่เลือกใส่โหมดได้ (หน้าตั้งค่า) — ช่องในฟอร์ม เว้น id
+  const modeSettingFields = useMemo<EntryModeField[]>(
+    () => effectiveFields.filter((f) => !f.hideInForm && f.key !== "id").map((f) => ({ key: f.key, label: f.label, type: f.type, helpText: f.helpText })),
+    [effectiveFields],
+  );
+  const modeSkip = useCallback((key: string) => {
+    const f = fieldByKey.get(key);
+    return !f || f.type === "one2many" || tplHidden(f) || !evaluateCondition(f.conditionRules, form);
+  }, [fieldByKey, tplHidden, form]);
+  const modeImageCount = config.mediaGallery ? galleryCount : null;
+  const modeProgressOf = useCallback(
+    (m: EntryMode) => computeModeProgress(m, form, { skip: modeSkip, imageCount: modeImageCount }),
+    [form, modeSkip, modeImageCount],
+  );
+  const activeMode = entryModes.find((m) => m.key === activeModeKey) ?? null;
+  const activeModeProgress = activeMode ? modeProgressOf(activeMode) : null;
+  useEffect(() => { if (!modalOpen) setActiveModeKey(null); }, [modalOpen]);
+  useEffect(() => { setGalleryCount(null); }, [editingId]);
+  // ช่องในโหมดที่แก้ค้าง (เทียบค่าตอนเปิด) — แท็ก/หลายรายการบันทึกผ่านปุ่มแท็กเดิม · ช่องคำนวณไม่มีให้บันทึก
+  const sameModeVal = (a: unknown, b: unknown) => a === b || JSON.stringify(a ?? "") === JSON.stringify(b ?? "");
+  const modeDirtyKeys = activeMode && drawerMode === "view" && editingId
+    ? activeMode.items.map((it) => it.field).filter((k) => {
+        const f = fieldByKey.get(k);
+        return !!f && !["many2many", "one2many", "computed"].includes(f.type) && !sameModeVal(form[k], baseSnapRef.current[k]);
+      })
+    : [];
+  // ออก/สลับโหมดตอนยังไม่บันทึก → ถามก่อน (undefined = ไม่มีป๊อป · null = ออกจากโหมด · key = สลับไปโหมดนั้น)
+  const [modeExitTarget, setModeExitTarget] = useState<string | null | undefined>(undefined);
+  const exitEntryMode = () => { if (modeDirtyKeys.length) setModeExitTarget(null); else setActiveModeKey(null); };
+  const discardModeAndGo = () => {
+    const target = modeExitTarget ?? null;
+    const back: Record<string, unknown> = {};
+    for (const k of modeDirtyKeys) back[k] = baseSnapRef.current[k];
+    setForm((p) => ({ ...p, ...back }));
+    setModeExitTarget(undefined);
+    setActiveModeKey(target);
+    if (target && config.moduleKey) rememberEntryMode(config.moduleKey, target);
+  };
 
   // archive (soft) — เก็บไว้เผื่อ flow อื่น
   const [archiveTarget, setArchiveTarget] = useState<Row | null>(null);
@@ -2099,6 +2162,81 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     }
   }, [editingId, effectiveFields, isRest, apiBase, config.apiPath, user?.name]);
 
+  // 📝 โหมดลงรายละเอียด: บันทึกช่องที่แก้ในโหมด (PATCH ครั้งเดียว + audit ที่ API) — ปุ่มบันทึกแถบล่าง
+  const saveModeChanges = async () => {
+    if (!modeDirtyKeys.length) return;
+    // แปลงชนิดค่าแบบเดียวกับปุ่มบันทึกปกติ (save) — ตัวเลข/ติ๊ก/ช่องว่าง → null
+    const patch: Record<string, unknown> = {};
+    for (const k of modeDirtyKeys) {
+      const f = fieldByKey.get(k);
+      if (!f || f.readonly) continue;
+      const v = form[k];
+      if (f.type === "number") patch[k] = v === "" || v == null ? null : isRest ? Number(v) : String(v);
+      else if (f.type === "boolean") patch[k] = isRest ? !!v : String(!!v);
+      else patch[k] = v === "" || v == null ? (isRest ? null : "") : v;
+    }
+    if (!Object.keys(patch).length) return;
+    setModeSaving(true);
+    try {
+      const err = await saveDetailPatch(patch);
+      if (err) { notify.error(err); return; }
+      // relation ที่เปลี่ยน → ล้างชื่อเก่าที่จำไว้ ให้หน้าดูหาชื่อใหม่เอง
+      const stale: Record<string, undefined> = {};
+      for (const k of modeDirtyKeys) {
+        if (fieldByKey.get(k)?.type !== "relation") continue;
+        const base = k.endsWith("_id") ? k.slice(0, -3) : k;
+        stale[`${base}_label`] = undefined; stale[`${base}_name`] = undefined;
+      }
+      if (Object.keys(stale).length) setForm((p) => ({ ...p, ...stale }));
+      setDirty(false);
+      flash(tr(`บันทึกแล้ว ${Object.keys(patch).length} ช่อง`, `Saved ${Object.keys(patch).length} field(s)`));
+    } finally { setModeSaving(false); }
+  };
+
+  // 📝 ปุ่ม "แปลจากไทย" ข้างช่องอังกฤษในโหมด — ใส่คำแปลลงช่อง (ยังไม่บันทึก ให้ตรวจก่อนกดบันทึก)
+  const modeThSourceOf = (enKey: string) =>
+    effectiveFields.find((f) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "") === enKey);
+  const translateModeField = async (enKey: string) => {
+    const th = modeThSourceOf(enKey);
+    const src = th ? String(form[th.key] ?? "").trim() : "";
+    if (!th || !src || PLACEHOLDER_TEXT.has(src)) { notify.error(tr(`ช่อง "${th?.label ?? "ภาษาไทย"}" ยังว่าง — ใส่ภาษาไทยก่อน`, `"${th?.label ?? "Thai"}" is empty — fill the Thai text first`)); return; }
+    try {
+      const res = await apiFetch("/api/ai/translate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: src.slice(0, 4000), to: "en" }),
+      });
+      const j = await res.json().catch(() => ({})) as { data?: { translated?: string }; translated?: string; error?: string };
+      const out = String(j?.data?.translated ?? j?.translated ?? "").trim();
+      if (!res.ok || j?.error || !out) { notify.error(j?.error || tr(`แปลไม่สำเร็จ (${res.status})`, `Translation failed (${res.status})`)); return; }
+      setForm((p) => ({ ...p, [enKey]: out }));
+      flash(tr("แปลแล้ว — ตรวจคำแล้วกดบันทึก", "Translated — check it, then press Save"));
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : tr("แปลไม่สำเร็จ", "Translation failed"));
+    }
+  };
+
+  // 📝 "ตัวถัดไปที่ยังไม่ครบ" — ไล่รายการถัดไปในลิสต์ที่เปิดอยู่ (เช็กเฉพาะช่องข้อมูล · รูป/แท็กต้องเปิดดูถึงรู้)
+  const nextIncompleteInMode = async () => {
+    if (!activeMode || modeScanning) return;
+    const list = navRowsRef.current;
+    const idx = list.findIndex((r) => String(r.id) === String(editingId));
+    setModeScanning(true);
+    try {
+      for (let i = idx + 1, n = 0; i < list.length && n < 60; i++, n++) {
+        const j = await apiFetch(`${apiBase}${config.apiPath}/${list[i].id}`).then((r) => r.json()).catch(() => null) as { data?: Record<string, unknown> } | null;
+        const row = j?.data;
+        if (!row) continue;
+        const p = computeModeProgress(activeMode, row, {
+          skip: (k) => { const f = fieldByKey.get(k); return !f || f.type === "one2many" || f.type === "many2many" || !evaluateCondition(f.conditionRules, row); },
+        });
+        if (p.missing.length === 0) continue;
+        if (footerSave.anyDirty) setPendingNav(list[i]); else openEdit(list[i]);
+        return;
+      }
+      flash(tr("รายการต่อจากนี้ลงครบแล้ว (หรือสุดรายการ)", "Everything after this one is complete (or end of list)"));
+    } finally { setModeScanning(false); }
+  };
+
   // ลบรูปปกในหน้า detail — ล้าง field + ย้ายไฟล์เข้าถังขยะ R2 (backend trash อัตโนมัติเมื่อ cover_image_r2_key ถูกล้าง)
   const [coverDeleteOpen, setCoverDeleteOpen] = useState(false);
   const deleteCover = useCallback(async () => {
@@ -2298,7 +2436,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     }
     : undefined;
 
-  const renderField = (f: FieldDef, maxSpan = 3) => {
+  /** bare = ไม่วาดหัวข้อ/คำอธิบาย (ผู้เรียกวาดเอง เช่น หน้าจอโหมดลงรายละเอียด) */
+  const renderField = (f: FieldDef, maxSpan = 3, bare = false) => {
     const v = form[f.key];
     const errs = fieldErrors[f.key];
     const hasErr = errs && errs.length > 0;
@@ -2353,14 +2492,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many" || pickerKind) ? "div" : "label";
     return (
       <FieldWrap key={f.key} style={{ gridColumn: `span ${gw12(f, maxSpan)}`, ...(highlight ? { background: hlColor, borderColor: hlColor } : {}) }} className={`block ${highlight ? "border rounded-lg p-2" : ""}`}>
-        <span className="text-xs font-medium text-slate-600" style={labelStyle}>
+        {!bare && <span className="text-xs font-medium text-slate-600" style={labelStyle}>
           {f.label}
           {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
           {f.readonly && f.type !== "one2many" && f.type !== "many2many" && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
           {fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}
           {f.labelAddon}
-        </span>
-        {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
+        </span>}
+        {!bare && f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
         {f.type === "computed" ? (
           <div className="min-h-9 mt-0.5 flex items-start gap-2 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-md">
             <span className={`flex-1 ${f.textCompute ? "whitespace-pre-wrap break-words" : "tabular-nums"}`}>
@@ -2913,6 +3052,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         <FooterSaveRegistrar slot={inlineM2mDirtyKeys.length || m2mSaving
           ? { label: inlineM2mLabel || tr("แท็ก", "Tags"), dirty: inlineM2mDirtyKeys.length > 0, saving: m2mSaving, onSave: saveInlineM2m }
           : null} />
+        {/* 📝 โหมดลงรายละเอียด — ช่องที่แก้ในโหมด บันทึกด้วยปุ่มแถบล่าง */}
+        <FooterSaveRegistrar slot={activeMode && drawerMode === "view" && editingId
+          ? { label: tr(`โหมด ${activeMode.label}`, `${activeMode.label} mode`), dirty: modeDirtyKeys.length > 0, saving: modeSaving, onSave: saveModeChanges }
+          : null} />
         {/* 🧩 หน้าดูเฉพาะโมดูล (เช่น 🧵 วัสดุ) — แทนแถบภาษา + แท็บฟิลด์ เฉพาะตอนดูระเบียนที่บันทึกแล้ว · key = รีเซ็ตสถานะเมื่อเลื่อนรายการ */}
         {customDetailView && drawerMode === "view" && editingId ? (
           <div key={String(editingId)}>
@@ -2926,7 +3069,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         {(() => {
           const pairFields = effectiveFields.filter((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_en);
           const aiBtn = !!config.aiProductDetail && !!editingId && canEdit;
-          if (pairFields.length === 0 && !aiBtn) return null;
+          const modeBtn = drawerMode === "view" && !!editingId && (entryModes.length > 0 || canEditModes);
+          if (pairFields.length === 0 && !aiBtn && !modeBtn) return null;
           const canTranslate = pairFields.some((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_translate !== false);
           return (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -2940,6 +3084,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </button>
                 ))}
               </div>
+              )}
+              {/* 📝 โหมดลงรายละเอียด — โชว์เฉพาะช่องที่งานนั้นต้องลง + เตือนช่องที่ขาด */}
+              {modeBtn && (
+                <EntryModeMenu modes={entryModes} progressOf={modeProgressOf} activeKey={activeMode?.key ?? null} badgeKey={modeBadgeKey}
+                  onPick={(k) => { if (k === activeMode?.key) return; if (modeDirtyKeys.length) setModeExitTarget(k); else { setActiveModeKey(k); if (config.moduleKey) rememberEntryMode(config.moduleKey, k); } }}
+                  onExit={() => exitEntryMode()}
+                  onSettings={canEditModes ? () => setModeSettingsOpen(true) : undefined} />
               )}
               {aiBtn && (
                 <button type="button" onClick={() => setAiDetailOpen(true)}
@@ -3075,6 +3226,21 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             key: t.key, label: t.label, icon: t.icon, inTab: t.inTab,
             node: t.render({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit }),
           }));
+          // 📝 อยู่ในโหมดลงรายละเอียด → ฝั่งรายละเอียดเปลี่ยนเป็นหน้าจอโหมด (ช่องกรอกจริงของฟอร์มกลาง · ไม่มีหัวข้อซ้ำ)
+          const modePanelEl = drawerMode === "view" && editingId && activeMode && activeModeProgress ? (
+            <EntryModePanel key={`${activeMode.key}:${editingId}`} mode={activeMode} progress={activeModeProgress}
+              fields={Object.fromEntries(activeMode.items.map((it) => {
+                const f = fieldByKey.get(it.field);
+                return [it.field, { key: it.field, label: f?.label ?? it.field, type: f?.type, helpText: f?.helpText } satisfies EntryModeField];
+              }))}
+              renderInput={(k) => { const f = fieldByKey.get(k); return f ? renderField({ ...f, readonly: !!f.readonly || !canEdit }, 1, true) : null; }}
+              imageCount={modeImageCount}
+              translatable={(k) => canEdit && !!modeThSourceOf(k)}
+              onTranslate={translateModeField}
+              onExit={exitEntryMode}
+              onNextIncomplete={isRest && navRowsRef.current.length > 1 ? () => void nextIncompleteInMode() : undefined}
+              scanning={modeScanning} />
+          ) : null;
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
           // (โมดูลที่มีรูปปก เช่น Parent SKU/SKU → ใช้เลย์เอาต์ "รูปซ้าย" ด้านล่างเสมอ)
@@ -3099,7 +3265,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {/* Layout คุมทุก field (รวม core) */}
                 {createHeaderEl}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
+                  ? (modePanelEl ?? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />)
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />}
               </div>
             );
@@ -3115,7 +3281,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 )}
                 {createHeaderEl}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
+                  ? (modePanelEl ?? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />)
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />}
               </div>
             );
@@ -3142,6 +3308,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     layout="gallery"
                     fallbackImageUrl={parentFallbackImg}
                     fallbackLabel={tr("รูปตัวอย่างจาก SKU ลูก", "Sample image from a child SKU")}
+                    onCountChange={setGalleryCount}
                   />
                 ) : (
                   <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
@@ -3194,6 +3361,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       layout={config.mediaGallery.layout ?? "grid"}
                       fallbackImageUrl={parentFallbackImg}
                       fallbackLabel={tr("รูปตัวอย่างจาก SKU ลูก", "Sample image from a child SKU")}
+                      onCountChange={setGalleryCount}
                     />
                   ) : (
                     <div className="text-xs text-slate-400 text-center py-3">
@@ -3239,7 +3407,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />
+                    ? (modePanelEl ?? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />)
                     : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} sectionAction={sectionAction} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">{tr("ไม่มีข้อมูลเพิ่มเติม", "No extra details")}</div>
@@ -3428,6 +3596,24 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         />
       )}
 
+      {/* 📝 ออก/สลับโหมดลงรายละเอียดตอนยังไม่บันทึก → ถามก่อน */}
+      <ConfirmDialog open={modeExitTarget !== undefined} onClose={() => setModeExitTarget(undefined)} onConfirm={discardModeAndGo}
+        title={tr("คุณมีข้อมูลที่ยังไม่ได้บันทึก", "You have unsaved changes")}
+        message={tr("ต้องการออกโดยไม่บันทึกหรือไม่? (ช่องที่แก้ในโหมดนี้จะกลับเป็นค่าเดิม)", "Leave without saving? (fields changed in this mode go back to their old values)")}
+        confirmText={tr("ออกโดยไม่บันทึก", "Leave without saving")} cancelText={tr("อยู่ต่อ", "Stay")} variant="danger" />
+
+      {/* 📝 ตั้งค่าโหมดลงรายละเอียด (แอดมิน) — เปิดจากปุ่มโหมดในป๊อปรายการ */}
+      {modeSettingsOpen && config.moduleKey && (
+        <ERPModal open onClose={() => { setModeSettingsOpen(false); setModeSettingsDirty(false); }} size="xl" storageKey="entry-mode-settings"
+          title={tr(`📝 ตั้งค่าโหมดลงรายละเอียด — ${config.title}`, `📝 Entry mode settings — ${config.title}`)}
+          description={tr("แต่ละโหมดเลือกได้ว่าต้องลงช่องไหน (ต้องมี/แนะนำ) + คำแนะนำของแต่ละช่อง", "Pick which fields each mode needs (required/recommended) + a tip per field")}
+          hasUnsavedChanges={modeSettingsDirty}>
+          <EntryModeSettings moduleKey={config.moduleKey} modes={allEntryModes} isDefault={!Array.isArray(entryModesRaw)}
+            fields={modeSettingFields} familyFilter={familyM2mFields.length > 0} canEdit={canEditModes} actor={user?.name}
+            onDirtyChange={setModeSettingsDirty} onSaved={() => void refreshRegistry()} />
+        </ERPModal>
+      )}
+
       {/* F11B: Studio v1 — drag-drop layout builder (full-screen) · portal ทับ drawer (z-200) กัน stacking-context บีบ z-60 ให้จมใต้ layout */}
       {studioOpen && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-[200]">
@@ -3485,6 +3671,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             }))}
           onClose={() => { setStudioOpen(false); void refreshRegistry(); }}
           onSaved={() => { setStudioOpen(false); void refreshRegistry(); }}
+          entryModesTab={config.moduleKey ? (
+            <EntryModeSettings moduleKey={config.moduleKey} modes={allEntryModes} isDefault={!Array.isArray(entryModesRaw)}
+              fields={modeSettingFields} familyFilter={familyM2mFields.length > 0} canEdit={canEditModes} actor={user?.name}
+              onSaved={() => void refreshRegistry()} />
+          ) : undefined}
         />
         </div>,
         document.body,

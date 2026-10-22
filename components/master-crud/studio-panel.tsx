@@ -90,7 +90,7 @@ const GROUP_META: Record<string, { label: string; icon: string; order: number }>
 };
 function gmeta(k: string) { return GROUP_META[k] ?? { label: k, icon: "📁", order: 99 }; }
 
-type Tab = "table" | "form" | "registry";
+type Tab = "table" | "form" | "registry" | "modes";
 // tab = ชื่อแท็บที่ section นี้อยู่ ("" = แท็บเดี่ยวของตัวเอง) → หลาย section ที่ tab เดียวกันอยู่แท็บเดียวกัน
 // extra = แท็บพิเศษจากโค้ด (config.extraTabs เช่น 🛍 เว็บไซต์) — key "x:<key>" · ไม่มีฟิลด์ · จัดได้แค่ตำแหน่ง/ซ่อน (hidden)
 type SectionDef = { key: string; label: string; icon: string; columns: number; tab?: string; extra?: boolean; hidden?: boolean };
@@ -193,7 +193,7 @@ function SamplePicker({ label, searchSample, onPick, onClear }: { label: string;
 }
 
 export function StudioPanel({
-  fields, moduleLabel, moduleKey, tableId, layout, onClose, sampleRows = [], searchSample, loadSample, extraTabs = [],
+  fields, moduleLabel, moduleKey, tableId, layout, onClose, sampleRows = [], searchSample, loadSample, extraTabs = [], entryModesTab,
 }: {
   fields:      StudioField[];
   /** แท็บพิเศษจากโค้ดของโมดูล (เช่น 🛍 เว็บไซต์ / 🏬 แพลตฟอร์ม) — โชว์เป็นแท็บล็อก 🔒 ลากย้ายตำแหน่ง/ซ่อนได้ */
@@ -207,6 +207,8 @@ export function StudioPanel({
   sampleRows?: Record<string, unknown>[];
   searchSample?: (q: string) => Promise<{ id: string; label: string }[]>;
   loadSample?:   (id: string) => Promise<Record<string, unknown> | null>;
+  /** แท็บ "📝 โหมดลงข้อมูล" (ตั้งค่าโหมดลงรายละเอียด · components/entry-modes/settings) — มีปุ่มบันทึกของตัวเอง */
+  entryModesTab?: React.ReactNode;
 }) {
   // group ที่ "รู้จัก" = อยู่ใน GROUP_META มาตรฐาน หรือใน layout (tab/section) ที่บันทึกไว้
   // group แปลก (orphan เช่น "รายละเอียดเข็มขัด") → แสดงรวมใต้กล่อง "อื่น ๆ" (ตรงกับฟอร์มจริง + หาเจอง่าย)
@@ -718,7 +720,7 @@ export function StudioPanel({
           </div>
           {/* Tabs */}
           <div className="ml-4 flex bg-slate-100 rounded-lg p-0.5">
-            {([["table","📊 ตาราง"],["form","📝 ฟอร์ม"], ...(moduleKey ? [["registry","🗂️ Field Registry"] as [Tab,string]] : [])] as [Tab,string][]).map(([t,l]) => (
+            {([["table","📊 ตาราง"],["form","📝 ฟอร์ม"], ...(moduleKey ? [["registry","🗂️ Field Registry"] as [Tab,string]] : []), ...(entryModesTab ? [["modes","✅ โหมดลงข้อมูล"] as [Tab,string]] : [])] as [Tab,string][]).map(([t,l]) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${tab===t?"bg-white shadow-sm font-medium text-slate-900":"text-slate-500 hover:text-slate-700"}`}>
                 {l}
@@ -749,8 +751,15 @@ export function StudioPanel({
         </div>
       )}
 
+      {/* แท็บโหมดลงข้อมูล — ตั้งว่าแต่ละโหมดต้องลงช่องไหน + คำแนะนำ (บันทึกแยกด้วยแถบล่างของแท็บเอง) */}
+      {tab === "modes" && entryModesTab && (
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-5xl mx-auto">{entryModesTab}</div>
+        </div>
+      )}
+
       {/* Body: ซ้าย = editor / ขวา = preview (DnD ครอบทั้งคู่ → ลากข้ามฝั่ง/แท็บ/คลังได้) */}
-      {tab !== "registry" && (
+      {tab !== "registry" && tab !== "modes" && (
       <DndContext sensors={sensors} collisionDetection={smartCollision} onDragEnd={onDragEnd}>
       <div className="flex-1 overflow-hidden flex">
         {/* ---- LEFT: editor ---- */}

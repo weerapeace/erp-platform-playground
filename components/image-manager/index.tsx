@@ -146,6 +146,7 @@ export function ImageManager({
   layout = "grid",
   fallbackImageUrl = null,
   fallbackLabel,
+  onCountChange,
 }: {
   entityType: string;
   entityId:   string;
@@ -161,6 +162,8 @@ export function ImageManager({
   /** รูปตัวอย่าง (read-only) โชว์เมื่อยังไม่มีรูปจริง เช่น Parent ยืมรูปจาก SKU ลูก */
   fallbackImageUrl?: string | null;
   fallbackLabel?: string;
+  /** แจ้งจำนวนรูปทุกครั้งที่โหลด/เพิ่ม/ลบ (เช่น โหมดลงรายละเอียดเช็ก "อย่างน้อย N รูป") */
+  onCountChange?: (imageCount: number) => void;
 }) {
   const [items,   setItems]   = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -194,6 +197,9 @@ export function ImageManager({
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const imageItems = items.filter((a) => isImage(a.content_type));
+  const onCountRef = useRef(onCountChange);
+  onCountRef.current = onCountChange;
+  useEffect(() => { if (!loading) onCountRef.current?.(imageItems.length); }, [loading, imageItems.length]);
   const [lightboxId, setLightboxId] = useState<string | null>(null);
   const lbIndex = imageItems.findIndex((a) => a.id === lightboxId);
   const lbImage = lbIndex >= 0 ? imageItems[lbIndex] : null;

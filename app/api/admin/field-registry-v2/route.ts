@@ -78,6 +78,8 @@ export type FieldRegistryV2Response = {
   quick_edit_fields?: string[] | null;
   /** ฟิลด์แสดงชื่อหลักของโมดูล (ปัก 🎯) — ใช้ทำป้ายระบุแถว/ชื่อเรื่อง (ของกลาง) */
   primary_field?: string | null;
+  /** โหมดลงรายละเอียดที่ตั้งไว้ (ดิบ — ผ่าน resolveEntryModes ก่อนใช้) · ไม่มี key = ใช้ชุดตั้งต้นในโค้ด */
+  entry_modes?: unknown;
   error:      string | null;
 };
 
@@ -105,7 +107,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
       { status: 404 }
     );
   }
-  const cfg = (mod.config ?? {}) as { layout?: FormLayout; section_tag_rules?: Record<string, string[]>; quick_edit_fields?: string[] };
+  const cfg = (mod.config ?? {}) as { layout?: FormLayout; section_tag_rules?: Record<string, string[]>; quick_edit_fields?: string[]; entry_modes?: unknown };
   const layout: FormLayout = cfg.layout ?? null;
   const sectionTagRules: Record<string, string[]> = cfg.section_tag_rules ?? {};
   const quickEditFields: string[] | null = Array.isArray(cfg.quick_edit_fields) && cfg.quick_edit_fields.length > 0 ? cfg.quick_edit_fields : null;
@@ -132,6 +134,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
     section_tag_rules: sectionTagRules,
     quick_edit_fields: quickEditFields,
     primary_field: (mod.primary_field as string | null) ?? null,
+    ...(cfg.entry_modes !== undefined ? { entry_modes: cfg.entry_modes } : {}),
     error: null,
   }, { headers: { "Cache-Control": "private, max-age=300" } });
 }

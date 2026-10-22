@@ -14,6 +14,7 @@ describe("Phase 1 security guards", () => {
     ["app/api/admin/schema/delete-field/route.ts", "admin.schema.delete_field"],
     ["app/api/admin/module-layout/route.ts", "admin.module_layout.edit"],
     ["app/api/admin/section-tag-rules/route.ts", "admin.module_layout.edit"],
+    ["app/api/admin/entry-modes/route.ts", "admin.module_layout.edit"],
     ["app/api/admin/field-registry-v2/[id]/route.ts", "admin.field_registry.edit"],
     ["app/api/admin/field-registry-v2/bulk/route.ts", "admin.field_registry.bulk_edit"],
     ["app/api/admin/upload/route.ts", "files.upload"],
