@@ -716,3 +716,46 @@ describe("📂 หมวดสินค้า — ชื่อเองราย
     expect([n.nameFont, n.nameSize, n.nameColor]).toEqual(["display", 250, "brand"]);
   });
 });
+
+describe("🎞️ การ์ดบนฉาก — แท็บ + ฉากผูกช่วงสินค้า + การ์ดกระจก", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "sc", type: "scene", ...b }])[0] as unknown as Record<string, unknown> & { scenes: Record<string, unknown>[] };
+  const msgs = (b: Record<string, unknown>) => validateBlocks([norm(b) as unknown as Block]).map((x) => x.message).join(" | ");
+
+  it("ค่าเริ่ม = 2 แท็บ (มาใหม่/ขายดี) · การ์ดกระจกฝ้า · รูปอัตโนมัติ", () => {
+    const b = norm({});
+    expect(b).toMatchObject({ tabs: "2", tab1Label: "มาใหม่", tab1Source: "new", tab2Label: "ขายดี", tab2Source: "best", tab3Source: "pick", card: "frost", cardTint: "light", imgMode: "auto", showHeart: true, height: "tall" });
+    expect(b.scenes).toEqual([]);
+  });
+
+  it("ฉาก: ค่ามั่ว = ค่าเริ่ม · ชิ้นที่เกินช่วงถูกบีบ · เกิน 12 ฉากถูกตัด", () => {
+    const b = norm({ card: "neon", cardOpacity: 500, scenes: Array.from({ length: 14 }, (_, i) => ({ kind: i ? "video" : "weird", from: i ? 99 : 0, tab: "9", imageKey: "a/s.jpg" })) });
+    expect(b.card).toBe("frost");
+    expect(b.cardOpacity).toBe(90);
+    expect(b.scenes.length).toBe(12);
+    expect(b.scenes[0]).toMatchObject({ kind: "image", from: 1, tab: "1" });
+    expect(b.scenes[1]).toMatchObject({ kind: "video", from: 24, videoKey: null });
+  });
+
+  it("เตือน: ไม่มีฉาก · ฉากไม่มีรูป/คลิป · เลือกเองแต่ไม่เลือกสินค้า · แท็บไม่มีฉาก", () => {
+    expect(msgs({})).toContain("ยังไม่มีฉากพื้นหลัง");
+    const m = msgs({ tabs: "2", tab2Source: "pick", scenes: [{ tab: "1", from: 1, kind: "video" }] });
+    expect(m).toContain("1 ฉากยังไม่ได้ใส่รูป/คลิป");
+    expect(m).toContain("แท็บ 2 ตั้ง \"เลือกเอง\"");
+    expect(m).toContain("แท็บ 2 ยังไม่มีฉาก");
+    expect(msgs({ tabs: "1", scenes: [{ from: 1, imageKey: "a/s.jpg" }] })).not.toMatch(/ฉาก/);
+  });
+
+  it("ช่องโชว์ตามเงื่อนไข: แท็บ 3 ซ่อนเมื่อมี 2 แท็บ · ช่องเลือกสินค้าเฉพาะ \"เลือกเอง\" · คลิปเฉพาะฉากวิดีโอ", () => {
+    const sch = SECTION_SCHEMAS.scene;
+    const fd = (k: string) => sch.fields.find((x) => x.key === k)!;
+    const v = norm({ tabs: "2", tab1Source: "pick" }) as Record<string, unknown>;
+    expect(matchShowIf(fd("tab3Label"), v)).toBe(false);
+    expect(matchShowIf(fd("tab2Label"), v)).toBe(true);
+    expect(matchShowIf(fd("tab1Products"), v)).toBe(true);
+    expect(matchShowIf(fd("tab1Count"), v)).toBe(false);
+    expect(matchShowIf(fd("tab2Count"), v)).toBe(true);
+    const vk = sch.children!.fields.find((x) => x.key === "videoKey")!;
+    expect(matchShowIf(vk, { kind: "image" })).toBe(false);
+    expect(matchShowIf(vk, { kind: "video" })).toBe(true);
+  });
+});

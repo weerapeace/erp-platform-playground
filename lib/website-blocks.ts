@@ -63,6 +63,7 @@ export type BlockType =
   | "countdown"
   | "lookbook"
   | "runway"
+  | "scene"
   | "logos"
   | "collections"
   | "fitcheck"
@@ -719,6 +720,48 @@ export interface RunwayBlock extends BlockBase {
     spot3Products: string[];
   })[];
 }
+/** 🎞️ การ์ดบนฉาก — พื้นหลังเต็มจอ (ฉากรูป/วิดีโอ) + แถวการ์ดสินค้ากระจกเลื่อนข้าง (เว็บร้าน SceneBody)
+ *  แท็บ 1–3 (tabNSource: new/best/pick) · scenes[].tab + from = เลื่อนการ์ดถึงชิ้นที่ from ของแท็บนั้น → เปลี่ยนฉาก */
+export type SceneTabSource = "new" | "best" | "pick";
+export interface SceneBlock extends BlockBase {
+  type: "scene";
+  title: string;
+  tabs: "1" | "2" | "3";
+  tab1Label: string;
+  tab1Source: SceneTabSource;
+  tab1Products: string[];
+  tab1Count: number;
+  tab2Label: string;
+  tab2Source: SceneTabSource;
+  tab2Products: string[];
+  tab2Count: number;
+  tab3Label: string;
+  tab3Source: SceneTabSource;
+  tab3Products: string[];
+  tab3Count: number;
+  card: "frost" | "liquid" | "solid";
+  cardTint: "light" | "dark" | "white";
+  cardOpacity: number;
+  cardBlur: number;
+  cardBorder: boolean;
+  cardRadius: number;
+  cardSize: "s" | "m" | "l";
+  /** auto = รูปตัดพื้น (PNG) ของรุ่น · ไม่มี = เว็บร้านลบพื้นเรียบขาว/เทาให้เอง · original = รูปเดิม */
+  imgMode: "auto" | "original";
+  showMeta: boolean;
+  showPrice: boolean;
+  showHeart: boolean;
+  height: "md" | "tall" | "screen";
+  dim: number;
+  scenes: (ChildBase & {
+    tab: "1" | "2" | "3";
+    from: number;
+    kind: "image" | "video";
+    videoKey: string | null;
+    imageKey: string | null;
+    pos: "top" | "center" | "bottom";
+  })[];
+}
 export interface LookbookBlock extends BlockBase {
   type: "lookbook";
   eyebrow: string;
@@ -1128,6 +1171,7 @@ export type Block =
   | DropBlock
   | LookbookBlock
   | RunwayBlock
+  | SceneBlock
   | LogosBlock
   | CollectionsBlock
   | FitCheckBlock

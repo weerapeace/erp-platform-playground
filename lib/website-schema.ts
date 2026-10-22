@@ -2490,6 +2490,152 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     },
   },
 
+  // 🎞️ การ์ดบนฉาก (2026-10-22) — เว็บร้าน: src/components/home/SceneBody.tsx
+  //   พื้นหลังเต็มจอ (รูป/วิดีโอ) + แถวการ์ดสินค้ากระจกเลื่อนข้าง · แท็บด้านบน (สูงสุด 3) แต่ละแท็บมีสินค้า + ฉากของตัวเอง
+  //   ฉาก = ชิ้นย่อย: อยู่แท็บไหน + เริ่มที่สินค้าชิ้นที่ → เลื่อนการ์ดถึงชิ้นนั้น พื้นหลังค่อย ๆ เปลี่ยน
+  scene: {
+    type: "scene",
+    meta: { label: "การ์ดบนฉาก (พื้นหลังรูป/วิดีโอ + การ์ดเลื่อน)", icon: "🎞️", hint: "พื้นหลังเต็มจอ + การ์ดสินค้ากระจกเลื่อนข้าง · เลื่อนถึงชิ้นที่ตั้งไว้ = เปลี่ยนฉาก", group: "สินค้า" },
+    fields: [
+      text("title", "หัวข้อ (ไม่ใส่ก็ได้)", { default: "", max: 80, placeholder: "เช่น Fall Edit", hint: "โชว์เหนือแท็บ" }),
+      f("tabs", "จำนวนแท็บด้านบน", "select", {
+        group: "products",
+        default: "2",
+        options: [
+          { v: "1", l: "1 (ไม่โชว์แท็บ)" },
+          { v: "2", l: "2 แท็บ" },
+          { v: "3", l: "3 แท็บ" },
+        ],
+        hint: "แต่ละแท็บมีสินค้าและฉากของตัวเอง (ฉาก → ช่อง \"อยู่แท็บ\")",
+      }),
+      ...([1, 2, 3] as const).flatMap((n) => {
+        const on: ShowIf = { key: "tabs", eq: n === 1 ? ["1", "2", "3"] : n === 2 ? ["2", "3"] : ["3"] };
+        return [
+          text(`tab${n}Label`, `แท็บ ${n}: ชื่อ`, { group: "products", default: n === 1 ? "มาใหม่" : n === 2 ? "ขายดี" : "เลือกเอง", max: 30, showIf: on }),
+          f(`tab${n}Source`, `แท็บ ${n}: สินค้า`, "select", {
+            group: "products",
+            default: n === 1 ? "new" : n === 2 ? "best" : "pick",
+            options: [
+              { v: "new", l: "มาใหม่ (ขึ้นร้านล่าสุด)" },
+              { v: "best", l: "ขายดี (อันดับขาย)" },
+              { v: "pick", l: "เลือกเอง" },
+            ],
+            showIf: on,
+          }),
+          f(`tab${n}Products`, `แท็บ ${n}: เลือกสินค้า`, "products", { group: "products", max: 24, wide: true, showIf: [on, { key: `tab${n}Source`, eq: "pick" }] }),
+          f(`tab${n}Count`, `แท็บ ${n}: จำนวนสินค้า`, "number", { group: "products", default: 12, min: 3, numMax: 24, showIf: [on, { key: `tab${n}Source`, eq: ["new", "best"] }] }),
+        ];
+      }),
+      // 🃏 การ์ดสินค้า
+      f("card", "แบบการ์ด", "select", {
+        group: "card",
+        default: "frost",
+        options: [
+          { v: "frost", l: "กระจกฝ้า" },
+          { v: "liquid", l: "Liquid Glass (กระจกใสมีประกาย)" },
+          { v: "solid", l: "ทึบ" },
+        ],
+      }),
+      f("cardTint", "สีกระจก", "select", {
+        group: "card",
+        default: "light",
+        options: [
+          { v: "light", l: "ขาว (ตัวหนังสือขาว · บนฉากเข้ม)" },
+          { v: "dark", l: "ดำ (ตัวหนังสือขาว)" },
+          { v: "white", l: "ขาวขุ่น (ตัวหนังสือดำ · บนฉากสว่าง)" },
+        ],
+      }),
+      f("cardOpacity", "ความขุ่นของการ์ด (%)", "range", { group: "card", default: 22, min: 0, numMax: 90, step: 2 }),
+      f("cardBlur", "ความเบลอหลังการ์ด", "range", { group: "card", default: 16, min: 0, numMax: 40, showIf: { key: "card", eq: ["frost", "liquid"] } }),
+      f("cardBorder", "เส้นขอบการ์ด", "toggle", { group: "card", default: true }),
+      f("cardRadius", "มุมการ์ด (มน)", "range", { group: "card", default: 8, min: 0, numMax: 32 }),
+      f("cardSize", "ขนาดการ์ด", "select", {
+        group: "card",
+        default: "m",
+        options: [
+          { v: "s", l: "เล็ก" },
+          { v: "m", l: "กลาง" },
+          { v: "l", l: "ใหญ่" },
+        ],
+      }),
+      f("imgMode", "รูปสินค้าบนการ์ด", "select", {
+        group: "card",
+        default: "auto",
+        options: [
+          { v: "auto", l: "อัตโนมัติ — รูปตัดพื้น (PNG) ของรุ่น · ไม่มี = ลบพื้นเรียบให้เอง" },
+          { v: "original", l: "รูปเดิม (มีพื้นหลัง)" },
+        ],
+        hint: "รูปตัดพื้น = ช่อง \"รูปตัดพื้น (PNG)\" ใน Parent SKU · ลบพื้นเรียบใช้ได้ดีกับรูปพื้นขาว/เทาเรียบ",
+      }),
+      f("showMeta", "โชว์ยี่ห้อ/หมวด", "toggle", { group: "card", default: true }),
+      f("showPrice", "โชว์ราคา", "toggle", { group: "card", default: true }),
+      f("showHeart", "ปุ่ม ♡ ถูกใจ", "toggle", { group: "card", default: true }),
+      // 🖼 เวที
+      f("height", "ความสูงเวที", "select", {
+        group: "layout",
+        default: "tall",
+        options: [
+          { v: "md", l: "ปกติ" },
+          { v: "tall", l: "สูง" },
+          { v: "screen", l: "เต็มจอ" },
+        ],
+      }),
+      f("dim", "ทำพื้นหลังมืดลง (%)", "range", { group: "layout", default: 12, min: 0, numMax: 70, step: 2, hint: "การ์ด/ตัวหนังสืออ่านง่ายขึ้น" }),
+    ],
+    children: {
+      key: "scenes",
+      label: "ฉากพื้นหลัง",
+      itemLabel: "ฉาก",
+      icon: "🎞️",
+      max: 12,
+      fields: [
+        f("tab", "อยู่แท็บ", "select", {
+          default: "1",
+          options: [
+            { v: "1", l: "แท็บ 1" },
+            { v: "2", l: "แท็บ 2" },
+            { v: "3", l: "แท็บ 3" },
+          ],
+          showIfParent: { key: "tabs", eq: ["2", "3"] },
+        }),
+        f("from", "เริ่มที่สินค้าชิ้นที่", "number", { default: 1, min: 1, numMax: 24, hint: "เลื่อนการ์ดถึงชิ้นนี้ = เปลี่ยนเป็นฉากนี้ · ฉากแรกของแท็บ = 1" }),
+        f("kind", "พื้นหลังเป็น", "select", {
+          default: "image",
+          options: [
+            { v: "image", l: "🖼 รูป" },
+            { v: "video", l: "🎬 วิดีโอ" },
+          ],
+        }),
+        f("videoKey", "คลิปวิดีโอ", "videoFile", { default: null, showIf: { key: "kind", eq: "video" }, hint: "เล่นวนเงียบ ๆ · แนวนอน 16:9" }),
+        image("imageKey", "รูป", { hint: "รูปฉาก (แนวนอน กว้าง ≥ 1920px) · วิดีโอ = รูปปกตอนคลิปยังโหลด" }),
+        f("pos", "ให้เห็นส่วนไหนของภาพ", "select", {
+          default: "center",
+          options: [
+            { v: "top", l: "บน" },
+            { v: "center", l: "กลาง" },
+            { v: "bottom", l: "ล่าง" },
+          ],
+        }),
+      ],
+      summary: (it) => `${it.kind === "video" ? "🎬" : "🖼"} แท็บ ${s(it.tab) || "1"} · ตั้งแต่ชิ้นที่ ${Number(it.from) || 1}${it.kind === "video" ? (it.videoKey ? "" : " · ยังไม่ใส่คลิป") : it.imageKey ? "" : " · ยังไม่ใส่รูป"}`,
+    },
+    summary: (b) => `${Number(b.tabs) > 1 ? `${b.tabs} แท็บ · ` : ""}${count(arr(b.scenes).length, "ฉาก")} · ${b.card === "liquid" ? "Liquid Glass" : b.card === "solid" ? "การ์ดทึบ" : "กระจกฝ้า"}`,
+    validate: (b, label) => {
+      const out: Omit<ValidationIssue, "blockId">[] = [];
+      const tabs = Number(b.tabs) || 1;
+      const scenes = arr(b.scenes).filter((x) => x.enabled !== false);
+      if (!scenes.length) out.push({ level: "warning", message: `${label}: ยังไม่มีฉากพื้นหลัง (เพิ่ม "ฉาก" ใส่รูปหรือวิดีโอ)` });
+      const noMedia = scenes.filter((x) => (x.kind === "video" ? !x.videoKey : !x.imageKey)).length;
+      if (noMedia) out.push({ level: "warning", message: `${label}: ${noMedia} ฉากยังไม่ได้ใส่รูป/คลิป` });
+      for (let n = 1; n <= tabs; n++) {
+        if (b[`tab${n}Source`] === "pick" && !(Array.isArray(b[`tab${n}Products`]) && (b[`tab${n}Products`] as unknown[]).length))
+          out.push({ level: "warning", message: `${label}: แท็บ ${n} ตั้ง "เลือกเอง" แต่ยังไม่ได้เลือกสินค้า` });
+        if (tabs > 1 && !scenes.some((x) => Number(x.tab || 1) === n)) out.push({ level: "warning", message: `${label}: แท็บ ${n} ยังไม่มีฉาก (จะใช้ฉากของแท็บ 1)` });
+      }
+      return out;
+    },
+  },
+
   // 📰 โลโก้สื่อ / พาร์ตเนอร์ (2026-10-15) — เว็บร้าน: src/components/home/LogosSection.tsx
   logos: {
     type: "logos",
