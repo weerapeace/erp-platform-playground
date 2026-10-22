@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanHref, cloneMegaBlock, DEFAULT_MENU_BEHAVIOR, inShowWindow, megaBlockLinks, megaHasContent, megaLinkIssue, megaPreset, newMegaBlock, newMegaLink, normalizeMegaPanel, normalizeMenuBehavior, pickMegaProducts } from "@/lib/website-mega-menu";
+import { cleanHref, cloneMegaBlock, DEFAULT_MENU_BEHAVIOR, inShowWindow, megaBlockLinks, megaHasContent, megaLinkIssue, megaPreset, megaSplitColumns, newMegaBlock, newMegaLink, normalizeMegaPanel, normalizeMenuBehavior, pickMegaProducts } from "@/lib/website-mega-menu";
 import { normalizeMenu } from "@/lib/website-theme";
 
 const cats = [
@@ -147,5 +147,24 @@ describe("แผงเมนูใหญ่ รอบ 2", () => {
     expect(normalizeMenuBehavior({ open: "click", delay: 150, dim: true, mobileStyle: "drill" })).toMatchObject({ open: "click", delay: 150, dim: true, mobileStyle: "drill", mobileCats: false });
     expect(normalizeMenuBehavior({ delay: 999, open: "x" })).toEqual(DEFAULT_MENU_BEHAVIOR);
     expect(normalizeMenu({ items: [] }).behavior).toEqual(DEFAULT_MENU_BEHAVIOR);
+  });
+});
+
+describe("แผงเมนูใหญ่: เลือกคอลัมน์ย่อยรายลิงก์ (2026-10-22)", () => {
+  const L = (label: string, col = 0) => ({ ...newMegaLink(label, "/shop"), col });
+  it("ค่าเริ่ม = อัตโนมัติ · ค่าเพี้ยนถูกตัด 0–3", () => {
+    expect(newMegaLink("a").col).toBe(0);
+    const p = normalizeMegaPanel({ blocks: [{ kind: "links", cols: 2, links: [{ label: "a", col: 2 }, { label: "b", col: 9 }, { label: "c", col: "x" }] }] })!;
+    expect(p.blocks[0].links.map((l) => l.col)).toEqual([2, 3, 0]);
+  });
+  it("ไม่มีใครเลือก = null (แบบเดิม) · ไม่แบ่ง = null", () => {
+    expect(megaSplitColumns([L("a"), L("b")], 2)).toBeNull();
+    expect(megaSplitColumns([L("a", 1)], 1)).toBeNull();
+  });
+  it("ลิงก์ที่เลือก = คอลัมน์นั้น · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า · เรียงตามลำดับเดิม · เกินจำนวนคอลัมน์ = คอลัมน์สุดท้าย", () => {
+    const cols = megaSplitColumns([L("ดูทั้งหมด", 1), L("มาใหม่", 1), L("HANDBAGS"), L("BAG CHARMS"), L("ITA BAGS", 2), L("WALLETS", 3)], 2)!;
+    expect(cols.map((c) => c.map((l) => l.label))).toEqual([["ดูทั้งหมด", "มาใหม่", "HANDBAGS"], ["BAG CHARMS", "ITA BAGS", "WALLETS"]]);
+    const bal = megaSplitColumns([L("a", 1), L("b"), L("c"), L("d")], 2)!;
+    expect(bal.map((c) => c.map((l) => l.label))).toEqual([["a", "c"], ["b", "d"]]);
   });
 });

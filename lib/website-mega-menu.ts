@@ -50,6 +50,8 @@ export interface MegaLink {
   /** ตั้งเวลาแสดง (เวลาไทย "YYYY-MM-DD" หรือ "YYYY-MM-DDTHH:mm" · ว่าง = ไม่จำกัด) */
   showFrom: string;
   showUntil: string;
+  /** คอลัมน์ย่อยที่ลิงก์นี้อยู่ เมื่อแบ่งคอลัมน์ (1-3) · 0 = อัตโนมัติ (ลงคอลัมน์ที่สั้นกว่า) */
+  col: number;
 }
 export interface MegaGroup {
   id: string;
@@ -271,7 +273,7 @@ const ICON_KEYS = new Set(MEGA_ICONS.map((i) => i.key));
 
 /* ───────── ตัวสร้างค่าใหม่ ───────── */
 const rid = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-export const newMegaLink = (label = "ลิงก์ใหม่", href = ""): MegaLink => ({ id: rid("l"), label, href, desc: "", icon: "", iconKey: null, color: "", imageKey: null, badge: "", hoverImageKey: null, bold: false, textColor: "", showFrom: "", showUntil: "" });
+export const newMegaLink = (label = "ลิงก์ใหม่", href = ""): MegaLink => ({ id: rid("l"), label, href, desc: "", icon: "", iconKey: null, color: "", imageKey: null, badge: "", hoverImageKey: null, bold: false, textColor: "", showFrom: "", showUntil: "", col: 0 });
 export const newMegaGroup = (label = "หัวข้อใหม่"): MegaGroup => ({ id: rid("g"), label, href: "", links: [] });
 export const newMegaCard = (title = "การ์ดใหม่", href = "", imageKey: string | null = null): MegaCard => ({ id: rid("c"), title, desc: "", href, imageKey });
 export const newMegaTab = (label = "แท็บใหม่", href = ""): MegaTab => ({ id: rid("t"), label, href, cards: [] });
@@ -452,6 +454,7 @@ function cleanLink(r: Record<string, unknown>, i: number): MegaLink | null {
     textColor: hex(r.textColor),
     showFrom: when(r.showFrom),
     showUntil: when(r.showUntil),
+    col: int(r.col, 0, 0, 3),
   };
 }
 const cleanLinks = (v: unknown, max: number) => arr(v, max).map(cleanLink).filter((x): x is MegaLink => !!x);
@@ -629,6 +632,25 @@ export interface MegaAutoData {
   tones: { key: string; name: string; hex: string }[];
 }
 /** รายการลิงก์ของกล่อง = ที่ใส่เอง (ตามเวลาแสดง) + อัตโนมัติต่อท้าย · count = จำนวนสินค้า (ถ้ารู้) */
+/**
+ * แบ่งลิงก์เป็นคอลัมน์ย่อยตามที่เลือก (ช่อง "คอลัมน์" ของแต่ละลิงก์)
+ *   ลิงก์ที่เลือกคอลัมน์ = อยู่คอลัมน์นั้น (เกินจำนวนคอลัมน์ = คอลัมน์สุดท้าย) · อัตโนมัติ (0) = ลงคอลัมน์ที่สั้นสุดตอนนั้น
+ *   ในแต่ละคอลัมน์เรียงตามลำดับเดิมของรายการ
+ * ไม่มีลิงก์ไหนเลือกคอลัมน์เลย = null → ใช้แบบเดิม (ไหลต่อกันเป็นคอลัมน์อัตโนมัติ)
+ */
+export function megaSplitColumns<T extends { col?: number }>(links: T[], cols: number): T[][] | null {
+  if (cols < 2 || !links.some((l) => (l.col ?? 0) > 0)) return null;
+  const size = Array.from({ length: cols }, () => 0);
+  for (const l of links) if ((l.col ?? 0) > 0) size[Math.min(cols, l.col ?? 1) - 1]++;
+  const at = links.map((l) => {
+    if ((l.col ?? 0) > 0) return Math.min(cols, l.col ?? 1) - 1;
+    const c = size.indexOf(Math.min(...size));
+    size[c]++;
+    return c;
+  });
+  return size.map((_, c) => links.filter((_, i) => at[i] === c));
+}
+
 export function megaBlockLinks(b: Pick<MegaBlock, "links" | "auto" | "autoMax">, data: MegaAutoData | null, now = Date.now()): (MegaLink & { count?: number })[] {
   const manual = b.links.filter((l) => inShowWindow(l.showFrom, l.showUntil, now)).map((l) => ({ ...l, label: megaLinkLabel(l, data?.labels) }));
   if (!b.auto || !data) return manual;

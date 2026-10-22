@@ -211,7 +211,7 @@ export function ShowWindowFields({ from, until, onChange }: { from: string; unti
 }
 
 /* ───────── รายการลิงก์ ───────── */
-function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, plainOnly = false }: { links: MegaLink[]; style: MegaLinkStyle; onChange: (links: MegaLink[]) => void; ctx: MegaEditorCtx; max?: number; plainOnly?: boolean }) {
+function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, plainOnly = false, cols = 1 }: { links: MegaLink[]; style: MegaLinkStyle; onChange: (links: MegaLink[]) => void; ctx: MegaEditorCtx; max?: number; plainOnly?: boolean; /** แบ่งคอลัมน์ย่อย (≥2 = แต่ละลิงก์เลือกคอลัมน์ได้) */ cols?: number }) {
   const drag = useDragReorder((from, to) => onChange(moveItem(links, from, to)));
   const [moreId, setMoreId] = useState<string | null>(null);
   const set = (id: string, p: Partial<MegaLink>) => onChange(links.map((l) => (l.id === id ? { ...l, ...p } : l)));
@@ -304,6 +304,22 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                 );
               })()}
               <IssueBadge href={l.href} />
+              {/* แบ่งคอลัมน์ย่อย: เลือกว่าลิงก์นี้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า (megaSplitColumns) */}
+              {cols > 1 && (
+                <select
+                  className={`${mini} w-[5.5rem] shrink-0 ${l.col ? "border-blue-300 text-blue-700" : "text-slate-500"}`}
+                  value={l.col > cols ? cols : l.col}
+                  onChange={(e) => set(l.id, { col: Number(e.target.value) })}
+                  title="ลิงก์นี้อยู่คอลัมน์ไหน (ตอนแบ่งคอลัมน์ย่อย)"
+                >
+                  <option value={0}>คอลัมน์: อัตโนมัติ</option>
+                  {Array.from({ length: cols }, (_, c) => (
+                    <option key={c} value={c + 1}>
+                      คอลัมน์ {c + 1}
+                    </option>
+                  ))}
+                </select>
+              )}
               <div className="w-36 shrink-0">
                 <LinkField value={l.href} onChange={(href) => set(l.id, { href })} ctx={ctx.link} />
               </div>
@@ -515,7 +531,12 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
             )}
           </div>
           {b.auto && <p className="text-[11px] text-slate-500">ลิงก์ที่ใส่เองด้านล่าง (ถ้ามี) จะขึ้นก่อนรายการอัตโนมัติ เช่น “ดูทั้งหมด” “มาใหม่”</p>}
-          <LinksEditor links={b.links} style={b.style} onChange={(links) => set({ links })} ctx={ctx} />
+          {b.cols > 1 && (
+            <p className="text-[11px] text-slate-500">
+              แบ่ง {b.cols} คอลัมน์: เลือกช่อง <b>“คอลัมน์”</b> ของแต่ละลิงก์ว่าให้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า{b.auto ? " (รายการ ⚡ อัตโนมัติก็เช่นกัน)" : ""} · ไม่เลือกเลยสักลิงก์ = เรียงต่อกันเองแบบเดิม
+            </p>
+          )}
+          <LinksEditor links={b.links} style={b.style} onChange={(links) => set({ links })} ctx={ctx} cols={b.cols} />
         </div>
       );
     }
