@@ -175,6 +175,20 @@ export async function loadUsageCounts(admin: Db, ids: string[]): Promise<Map<str
   return m;
 }
 
+/**
+ * จำนวนไฟล์ที่ยังใช้งาน (status=active) ต่อกลุ่ม — อัลบั้ม / แท็ก
+ * นับที่ฐานข้อมูลทีละกลุ่ม (count exact) ไม่ดึงแถวมานับเอง → ไม่โดนเพดาน 1,000 แถวของ PostgREST
+ * (เดิมดึงไฟล์ active ทั้งคลัง ~9.7k มาเทียบ → ได้แค่ 1,000 → อัลบั้มขึ้น (0) / แท็กนับขาด)
+ */
+export async function countActiveByGroup(admin: Db, mapTable: "asset_collection_map" | "asset_tag_map", groupCol: "collection_id" | "tag_id", groupIds: string[]): Promise<Map<string, number>> {
+  const entries = await Promise.all(groupIds.map(async (id) => {
+    const { count } = await admin.from(mapTable).select("asset_id, assets!inner(status)", { count: "exact", head: true })
+      .eq(groupCol, id).eq("assets.status", "active");
+    return [id, count ?? 0] as const;
+  }));
+  return new Map(entries);
+}
+
 /** ดึง 1 แถวพร้อม tags + usage_count */
 export async function rowOf(admin: Db, r: AssetDbRow): Promise<AssetRow> {
   const tags  = (await loadTags(admin, [r.id])).get(r.id) ?? [];

@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit, writeAuditFor } from "@/lib/audit";
-import { actorId } from "../shared";
+import { actorId, countActiveByGroup } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,9 +23,8 @@ export async function GET(request: NextRequest) {
   const { data: tags, error } = await admin.from("asset_tags").select("id, name, color").order("name");
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
-  const { data: maps } = await admin.from("asset_tag_map").select("tag_id");
-  const counts = new Map<string, number>();
-  for (const m of (maps ?? []) as { tag_id: string }[]) counts.set(m.tag_id, (counts.get(m.tag_id) ?? 0) + 1);
+  // จำนวนไฟล์ที่ยังใช้งานต่อแท็ก — นับที่ฐานข้อมูล (ของกลาง countActiveByGroup)
+  const counts = await countActiveByGroup(admin, "asset_tag_map", "tag_id", (tags ?? []).map((t) => (t as { id: string }).id));
 
   const out: AssetTag[] = (tags ?? []).map((t) => {
     const r = t as { id: string; name: string; color: string | null };

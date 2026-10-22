@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
-import { actorId } from "../shared";
+import { actorId, countActiveByGroup } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,13 +24,8 @@ export async function GET(request: NextRequest) {
     .select("id, name, description").order("sort_order").order("name");
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
-  // จำนวนไฟล์ active ต่ออัลบั้ม (asset อยู่ได้หลายอัลบั้ม → นับผ่าน map)
-  const { data: maps }    = await admin.from("asset_collection_map").select("asset_id, collection_id");
-  const { data: actives } = await admin.from("assets").select("id").eq("status", "active");
-  const activeSet = new Set((actives ?? []).map((a) => (a as { id: string }).id));
-  const counts = new Map<string, number>();
-  for (const m of (maps ?? []) as { asset_id: string; collection_id: string }[])
-    if (activeSet.has(m.asset_id)) counts.set(m.collection_id, (counts.get(m.collection_id) ?? 0) + 1);
+  // จำนวนไฟล์ active ต่ออัลบั้ม (asset อยู่ได้หลายอัลบั้ม → นับผ่าน map) — นับที่ฐานข้อมูล (ของกลาง countActiveByGroup)
+  const counts = await countActiveByGroup(admin, "asset_collection_map", "collection_id", (cols ?? []).map((c) => (c as { id: string }).id));
 
   const out: AssetCollection[] = (cols ?? []).map((c) => {
     const r = c as { id: string; name: string; description: string | null };
