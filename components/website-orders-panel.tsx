@@ -30,6 +30,8 @@ import { isReadyToPack } from "@/lib/website-fulfillment";
 import { canMove, needsConfirm, type StatusKind } from "@/lib/website-order-status";
 import { WebsiteCustomerProfile, type CustomerRef } from "@/components/website-customer-profile";
 import { sourceLabel } from "@/lib/website-web-stats";
+import { ShippopBox, ShippopBulkButton, type ShippopSettings } from "@/components/website-shippop-box";
+import type { ShippopInfo } from "@/lib/shippop";
 
 type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
 type Order = {
@@ -88,6 +90,8 @@ type Order = {
   /** 🧾 ลูกค้าขอใบกำกับภาษีเต็มรูป (lib/website-tax-invoice) · เลขที่ออกแล้ว */
   taxInvoice?: { kind: "person" | "company"; name: string; taxId: string; branch: string; address: string; email?: string } | null;
   taxInvoiceNo?: string | null;
+  /** 🚚 การจองขนส่ง Shippop (null = ยังไม่จอง) */
+  shippop?: ShippopInfo | null;
 };
 type Messaging = {
   shopName: string;
@@ -123,6 +127,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   const [messaging, setMessaging] = useState<Messaging | null>(null);
   const [slipMeta, setSlipMeta] = useState<SlipMeta | null>(null);
   const [slipAuto, setSlipAuto] = useState<{ enabled: boolean; configured: boolean; uploadEnabled: boolean } | null>(null);
+  const [shippop, setShippop] = useState<ShippopSettings>({ enabled: false, courier: "FLE", mode: "sim" });
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [trackOpen, setTrackOpen] = useState(false);
 
@@ -144,6 +149,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
       setMessaging(j.messaging ?? null);
       setSlipMeta(j.slipMeta ?? null);
       setSlipAuto(j.slipAuto ?? null);
+      if (j.shippop) setShippop(j.shippop);
     } catch {
       toast.error("โหลดออเดอร์ไม่สำเร็จ");
     } finally {
@@ -420,6 +426,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
         <a href={printHref([...sel])} target="_blank" rel="noopener" className="h-9 inline-flex items-center rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700">🖨 ใบปะหน้า + ใบแพ็ก</a>
         <button type="button" disabled={busy} onClick={() => void bulkStatus("preparing", "เปลี่ยนเป็นกำลังเตรียมของ")} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40">📦 กำลังเตรียมของ</button>
         <button type="button" onClick={() => setTrackOpen(true)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">🚚 ใส่เลขพัสดุ</button>
+        <ShippopBulkButton ids={[...sel]} settings={shippop} onDone={() => { setSel(new Set()); void load(); }} />
       </BulkActionBar>
       <BulkTrackingModal open={trackOpen} onClose={() => setTrackOpen(false)} orders={orders} onDone={() => { setSel(new Set()); void load(); }} />
       {/* 🔁 ยืนยันก่อนเปลี่ยนสถานะสำคัญ (ลูกค้าอาจได้อีเมลแจ้ง · บางสถานะย้อนไม่ได้) */}
@@ -640,6 +647,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                   </select>
                 </div>
               </div>
+              {/* 🚚 Shippop: จองขนส่ง → เลขพัสดุเติมให้ช่องด้านล่างเอง */}
+              <ShippopBox order={open} settings={shippop} onChanged={() => void load()} />
               {/* 🚚 เลขพัสดุ — ลูกค้าเห็นเลข + ปุ่มตามพัสดุ (หน้า ติดตามคำสั่งซื้อ / บัญชีสมาชิก / ข้อความ "จัดส่งแล้ว") */}
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">🚚 เลขพัสดุ (ลูกค้าเห็น + กดตามพัสดุได้)</label>

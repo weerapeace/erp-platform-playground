@@ -33,6 +33,7 @@ import { cleanCarrier, cleanTrackingNo } from "@/lib/parcel-tracking";
 import { slipsForOrders, slipVerifierConfigured, staffDecideSlip } from "@/lib/website-payments-server";
 import { AUTO_RESULT, SLIP_REJECT_REASONS, SLIP_STATUS } from "@/lib/website-payments";
 import { isReadyToPack } from "@/lib/website-fulfillment";
+import { shippopMode } from "@/lib/shippop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, shipping_method, shipping_method_label, shipping_box, cod_fee, discount, coupon_code, promos, deposit_amount, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier, source, tax_invoice, tax_invoice_no, tax_invoice_at"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, shipping_method, shipping_method_label, shipping_box, cod_fee, discount, coupon_code, promos, deposit_amount, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier, source, tax_invoice, tax_invoice_no, tax_invoice_at, shippop"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
@@ -114,6 +115,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     sender: { name: s.name, phone: info.contact_phone, address: info.contact_address },
     // 🤖 ตรวจสลิปอัตโนมัติ: ร้านเปิดไหม + มีรหัส EasySlip ใน env ไหม (ไม่บอกค่ารหัส)
     slipAuto: { enabled: info.slip_auto_verify, configured: slipVerifierConfigured(), uploadEnabled: info.slip_upload_enabled },
+    // 🚚 Shippop: ร้านเปิดไหม · ขนส่งประจำ · โหมด (ยังไม่มี API KEY = จำลอง)
+    shippop: { enabled: info.shippop_enabled, courier: info.shippop_courier, mode: shippopMode() },
     orders: rows.map((r) => {
       const items = itemsByOrder.get(r.id as string) ?? [];
       const row = r as unknown as Parameters<typeof toOrderView>[0];
@@ -133,6 +136,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         // 🧾 ขอใบกำกับภาษี + เลขที่ออกแล้ว (null = ยังไม่ออก)
         taxInvoice: (r.tax_invoice as Record<string, unknown> | null) ?? null,
         taxInvoiceNo: (r.tax_invoice_no as string | null) ?? null,
+        shippop: (r.shippop as Record<string, unknown> | null) ?? null,
         skuCodes: items.map((i) => i.sku_code).filter(Boolean),
         slips: slips.get(r.id as string) ?? [],
       };

@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "returns" | "redirects";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "returns" | "shippop" | "redirects";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -47,6 +47,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "preorder", label: "📦 สั่งจอง (พรีออเดอร์) + มัดจำ", hint: "สินค้าที่ตั้งสถานะสต็อก “พรีออเดอร์” ในแท็บสินค้าบนเว็บ · เปิดมัดจำแล้ว ออเดอร์ที่มีของพรีออเดอร์ต้องโอนพร้อมเพย์ (ไม่มีเก็บปลายทาง) จ่ายมัดจำก่อน ที่เหลือจ่ายก่อนจัดส่ง · ระบบตรวจสลิปตามยอดที่ต้องจ่ายแต่ละรอบ" },
   { key: "referral", label: "🎁 ชวนเพื่อน (โค้ดแนะนำ)", hint: "สมาชิกทุกคนได้โค้ดชวนเพื่อนของตัวเอง (หน้าบัญชี) · เพื่อนใช้โค้ดตอนสั่งครั้งแรก = ได้ส่วนลด · ออเดอร์ของเพื่อนสำเร็จ = คนชวนได้แต้ม (ต้องเปิดระบบแต้ม) · 1 เบอร์ใช้โค้ดชวนเพื่อนได้ครั้งเดียว ใช้โค้ดตัวเองไม่ได้" },
   { key: "returns", label: "↩️ ขอคืน/เปลี่ยนสินค้า", hint: "ลูกค้ากด “ขอคืน/เปลี่ยนสินค้า” จากหน้าตามออเดอร์ (ออเดอร์ที่ส่งแล้ว/สำเร็จ ภายในกี่วันหลังได้รับของ) เลือกชิ้น + เหตุผล + แนบรูป → ร้านตอบในแท็บ ↩️ คืน/เปลี่ยน · ระบบไม่คืนเงิน/ไม่ตัดสต็อกให้เอง" },
+  { key: "shippop", label: "🚚 Shippop (จองขนส่ง · ใบปะหน้า · เลขพัสดุอัตโนมัติ)", hint: "จองขนส่งจากรายละเอียดออเดอร์ (ดูราคาหลายเจ้า → จอง → ได้เลขพัสดุ + ใบปะหน้า) · ขนส่งรับพัสดุแล้ว/ส่งถึง = เปลี่ยนสถานะออเดอร์ให้เอง · ยังไม่ใส่ API KEY ใน Vercel = โหมดจำลอง (ไม่เรียก Shippop จริง ไม่เสียเงิน)" },
   { key: "redirects", label: "🔀 ย้ายลิงก์เก่า (Redirect)", hint: "ลิงก์เก่าที่ลูกค้า/Google ยังเข้ามา (เช่น จากเว็บเดิม หรือสินค้าที่เปลี่ยนชื่อ) → พาไปหน้าใหม่อัตโนมัติ ไม่เจอหน้า 404 · Google ย้ายคะแนนตามไปด้วย (301)" },
   { key: "search", label: "🔍 ค้นหาสินค้า", hint: "ช่องค้นหาบนเว็บพิมพ์ผิดนิดหน่อยก็เจอ · ใส่คำที่หมายถึงสิ่งเดียวกันให้ค้นเจอทั้งคู่ · ด้านล่างมีรายการคำที่ลูกค้าค้นแล้วไม่เจอ (ไว้เติมคำ/เพิ่มสินค้า)" },
 ];
@@ -177,6 +178,19 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "returns_enabled", label: "เปิดให้ลูกค้าขอคืน/เปลี่ยนทางเว็บ", group: "returns", type: "bool", isPublic: true },
   { key: "returns_days", label: "ขอได้ภายในกี่วันหลังได้รับของ", hint: "1–90 · นับจากวันที่ตั้งออเดอร์เป็น “สำเร็จ” (ยังไม่ตั้ง = ประมาณวันสั่ง + 7 วัน)", group: "returns", type: "number", isPublic: true, placeholder: "14" },
   { key: "returns_note", label: "เงื่อนไขที่ลูกค้าเห็นตอนขอ", hint: "เช่น สินค้าต้องอยู่ในสภาพเดิม มีป้ายครบ · ค่าส่งกลับลูกค้าออก (ยกเว้นสินค้าชำรุด/ส่งผิด)", group: "returns", type: "text", isPublic: true, i18n: true },
+
+  // ─── 🚚 Shippop (lib/shippop · /api/website/orders/shippop) — ไม่ส่งให้เว็บร้าน ───
+  { key: "shippop_enabled", label: "เปิดปุ่มจองขนส่ง Shippop ในออเดอร์", hint: "", group: "shippop", type: "bool", isPublic: false },
+  { key: "shippop_courier", label: "ขนส่งที่ใช้ประจำ (รหัส)", hint: "EMST = ไปรษณีย์ EMS · FLE = Flash · KRYX = KEX · JNTP = J&T · BEST · SPX · DHL (เปลี่ยนได้ทุกครั้งตอนจอง)", group: "shippop", type: "text", isPublic: false, placeholder: "FLE" },
+  { key: "shippop_box", label: "ขนาดกล่องปกติ (กว้างxยาวxสูง ซม.)", hint: "", group: "shippop", type: "text", isPublic: false, placeholder: "20x30x10" },
+  { key: "shippop_weight", label: "น้ำหนักต่อชิ้นโดยประมาณ (กรัม)", hint: "คูณจำนวนชิ้นในออเดอร์ · แก้ได้ตอนจอง", group: "shippop", type: "number", isPublic: false, placeholder: "500" },
+  { key: "shippop_from_name", label: "ผู้ส่ง: ชื่อ", hint: "", group: "shippop", type: "text", isPublic: false },
+  { key: "shippop_from_tel", label: "ผู้ส่ง: เบอร์โทร", hint: "", group: "shippop", type: "text", isPublic: false },
+  { key: "shippop_from_address", label: "ผู้ส่ง: บ้านเลขที่ / ถนน", hint: "", group: "shippop", type: "text", isPublic: false },
+  { key: "shippop_from_district", label: "ผู้ส่ง: ตำบล/แขวง", hint: "", group: "shippop", type: "text", isPublic: false },
+  { key: "shippop_from_state", label: "ผู้ส่ง: อำเภอ/เขต", hint: "", group: "shippop", type: "text", isPublic: false },
+  { key: "shippop_from_province", label: "ผู้ส่ง: จังหวัด", hint: "", group: "shippop", type: "text", isPublic: false },
+  { key: "shippop_from_postcode", label: "ผู้ส่ง: รหัสไปรษณีย์", hint: "", group: "shippop", type: "text", isPublic: false },
 
   // ─── 🔀 ย้ายลิงก์เก่า (เว็บร้าน not-found → redirect 301 · กติกา cleanRedirects) ───
   {
@@ -355,6 +369,17 @@ export interface SiteInfo {
   returns_enabled: boolean;
   returns_days: number;
   returns_note: string;
+  shippop_enabled: boolean;
+  shippop_courier: string;
+  shippop_box: string;
+  shippop_weight: number;
+  shippop_from_name: string;
+  shippop_from_tel: string;
+  shippop_from_address: string;
+  shippop_from_district: string;
+  shippop_from_state: string;
+  shippop_from_province: string;
+  shippop_from_postcode: string;
   referral_enabled: boolean;
   referral_friend_discount: number;
   referral_min_subtotal: number;
@@ -450,6 +475,17 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   returns_enabled: false,
   returns_days: 14,
   returns_note: "",
+  shippop_enabled: false,
+  shippop_courier: "FLE",
+  shippop_box: "20x30x10",
+  shippop_weight: 500,
+  shippop_from_name: "",
+  shippop_from_tel: "",
+  shippop_from_address: "",
+  shippop_from_district: "",
+  shippop_from_state: "",
+  shippop_from_province: "",
+  shippop_from_postcode: "",
   referral_enabled: false,
   referral_friend_discount: 100,
   referral_min_subtotal: 0,
