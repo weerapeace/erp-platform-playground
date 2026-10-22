@@ -74,6 +74,10 @@ export interface ThanksLook {
   /** emoji = 🎉 (เดิม) · image = รูปแบนเนอร์ · none = ไม่มี */
   top: "emoji" | "image" | "none";
   imageKey: string | null;
+  /** รูปแบนเนอร์จอมือถือ (ไม่ใส่ = ใช้รูปคอม) */
+  mobileImageKey: string | null;
+  /** กดแบนเนอร์แล้วไปที่ (/หน้าในเว็บ หรือ https:// · ว่าง = กดไม่ได้) — ผูกชุดรูปที่ตั้งลิงก์ = ใช้ลิงก์ของชุด */
+  link: string;
   /** โค้ดคูปองครั้งหน้า (จากแท็บคูปอง) — ERP ตรวจว่ายังใช้ได้ก่อนส่งให้เว็บ (หมดอายุ/ปิด = ไม่โชว์) */
   coupon: string;
   /** ปุ่มโซเชียลของร้าน (จากข้อมูลร้าน) */
@@ -194,7 +198,7 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   searchEmpty: "cats",
   cookie: { layout: "card", side: "left", icon: true, title: "", text: "" },
   notFound: { style: "plain", imageKey: null, title: "", text: "", search: false, products: false },
-  thanks: { top: "emoji", imageKey: null, coupon: "", follow: false, products: false },
+  thanks: { top: "emoji", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false },
   popup: { layout: "center", imageKey: null, trigger: "delay", again: "once" },
   share: { style: "photo", bg: "paper" },
   login: { layout: "center", imageKey: null, title: "", text: "" },
@@ -318,7 +322,8 @@ export function normalizeThanks(raw: unknown): ThanksLook {
   const r = obj(raw);
   const top = r.top === "image" || r.top === "none" ? r.top : "emoji";
   const coupon = typeof r.coupon === "string" ? r.coupon.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 32) : "";
-  return { top, imageKey: imgKey(r.imageKey), coupon, follow: r.follow === true, products: r.products === true };
+  const link = typeof r.link === "string" ? r.link.trim().slice(0, 500) : "";
+  return { top, imageKey: imgKey(r.imageKey), mobileImageKey: imgKey(r.mobileImageKey), link: /^(\/(?!\/)|https?:\/\/)/i.test(link) ? link : "", coupon, follow: r.follow === true, products: r.products === true };
 }
 export function normalizePopup(raw: unknown): PopupLook {
   const r = obj(raw);

@@ -26,6 +26,7 @@ import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch
 import { resolveThemeSchedules } from "@/lib/website-theme-schedule-db";
 import { applyCampaign } from "@/lib/website-theme-schedule";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { resolveForStorefront } from "@/lib/website-image-sets-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -133,7 +134,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 🔍 คำยอดนิยม (ค้นหาเต็มจอตอนยังไม่พิมพ์) — เฉพาะร้านที่เปิด page.searchEmpty · คำที่ร้านตั้ง + คำที่ลูกค้าค้นจริงบ่อยและหาเจอ
   const popularSearches = theme.page.searchEmpty !== "cats" ? mergePopularTerms(popularTermsOf(fullInfo.search_popular), await readSearchTerms(sb, s.id, 30)) : undefined;
 
-  return json({
+  const body = {
     shop: s.slug,
     shopName: s.name,
     active: s.status === "active",
@@ -199,5 +200,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         return en ? { ...t, name_en: en } : t;
       });
     })(),
-  });
+  };
+  // 🖼 ชุดรูปกลาง: ช่องรูปที่ผูกชุด (imgset/<id>) → รูปปัจจุบันของชุด (ตามเวลาที่ตั้ง) + รูปมือถือ/ลิงก์ของชุด · imageFocus = จุดสำคัญของรูป (lib/website-image-sets)
+  const resolved = await resolveForStorefront(sb, s.id, { layout: body.layout, theme: body.theme, collections: body.collections, info: body.info });
+  return json({ ...body, ...resolved.parts, ...(Object.keys(resolved.focus).length ? { imageFocus: resolved.focus } : {}) });
 }

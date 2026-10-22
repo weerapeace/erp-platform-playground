@@ -17,6 +17,9 @@
 
 import { NextRequest } from "next/server";
 import { isSafeR2Key, r2GetObject, r2GetRange } from "@/lib/r2";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { IMGSET_RE } from "@/lib/website-image-sets";
+import { imageSetKeyNow } from "@/lib/website-image-sets-db";
 
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 
@@ -104,6 +107,17 @@ export async function GET(request: NextRequest): Promise<Response> {
     return new Response(JSON.stringify({ error: "invalid key" }), {
       status: 400, headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // 🖼 ชุดรูปกลาง: ค่า imgset/<id> ที่หลุดมาถึงตรงนี้ (เช่น พรีวิวสดในตัวจัดหน้า) → ส่งต่อไปรูปปัจจุบันของชุด · แคชสั้น (รูปของชุดเปลี่ยนได้)
+  if (IMGSET_RE.test(key)) {
+    const sp = new URL(request.url).searchParams;
+    const real = await imageSetKeyNow(supabaseAdmin(), key, sp.get("m") === "1");
+    if (!real) return new Response(JSON.stringify({ error: "ไม่พบรูปของชุดนี้" }), { status: 404, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    const to = new URL(request.url);
+    to.searchParams.set("key", real);
+    to.searchParams.delete("m");
+    return new Response(null, { status: 302, headers: { Location: `${to.pathname}${to.search}`, "Cache-Control": "public, max-age=60", "CDN-Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
 
   if (VIDEO_KEY.test(key)) {

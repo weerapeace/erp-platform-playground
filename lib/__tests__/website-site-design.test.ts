@@ -138,7 +138,7 @@ describe("หน้าพิเศษ", () => {
   it("ธีมเก่า = หน้าตาเดิมทั้ง 5 หน้า", () => {
     const p = normalizeTheme({}).page;
     expect(p.notFound).toEqual({ style: "plain", imageKey: null, title: "", text: "", search: false, products: false });
-    expect(p.thanks).toEqual({ top: "emoji", imageKey: null, coupon: "", follow: false, products: false });
+    expect(p.thanks).toEqual({ top: "emoji", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false });
     expect(p.popup).toEqual({ layout: "center", imageKey: null, trigger: "delay", again: "once" });
     expect(p.share).toEqual({ style: "photo", bg: "paper" });
     expect(p.login).toEqual({ layout: "center", imageKey: null, title: "", text: "" });

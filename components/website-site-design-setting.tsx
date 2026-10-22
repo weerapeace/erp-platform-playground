@@ -8,6 +8,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { ImageInput } from "@/components/image-input";
+import { ImageUploadField } from "@/components/website-theme-media";
 import { RangeInput } from "@/components/range-input";
 import { LangInput } from "@/components/bilingual-field";
 import {
@@ -672,9 +673,16 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview }: { val
         <p className="text-xs text-slate-500 mb-3">หัวข้อ/ข้อความของหน้านี้ตั้งที่แท็บ 💳 หน้าชำระเงิน · ที่นี่เพิ่มของเสริม</p>
         <label className={labelCls}>ด้านบนการ์ด<Def show={th.top === "emoji"} /></label>
         <Choice<"emoji" | "image" | "none"> value={th.top} onChange={(v) => setTh({ top: v })} options={[{ v: "emoji", l: "อีโมจิ 🎉" }, { v: "image", l: "รูปแบนเนอร์" }, { v: "none", l: "ไม่มี" }]} />
+        {/* ช่องรูปของกลางเว็บ = มีปุ่ม 🔗 ใช้ชุดรูป (เปลี่ยนรูปทีเดียวหลายที่) */}
         {th.top === "image" && (
-          <div className="mt-2 max-w-xs">
-            <ImageInput value={th.imageKey} onChange={(k) => setTh({ imageKey: k ?? "" })} folder="website-pages" />
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <ImageUploadField label="รูปแบนเนอร์ (คอม)" hint="แนวนอน 3:1" value={th.imageKey} onChange={(k) => setTh({ imageKey: k })} height={80} />
+            <ImageUploadField label="รูปมือถือ" hint="ไม่ใส่ = ใช้รูปคอม" value={th.mobileImageKey} onChange={(k) => setTh({ mobileImageKey: k })} height={80} />
+            <div className="sm:col-span-2">
+              <p className="text-[11px] text-slate-500 mb-1">กดแบนเนอร์แล้วไปที่ (ว่าง = กดไม่ได้)</p>
+              <input className={inputCls} value={th.link} maxLength={500} placeholder="/c/new-arrival หรือ https://…" onChange={(e) => setTh({ link: e.target.value })} />
+              {th.link && !/^(\/(?!\/)|https?:\/\/)/i.test(th.link.trim()) && <p className="text-[11px] text-red-600 mt-1">ต้องขึ้นต้นด้วย / (หน้าในเว็บ) หรือ https://</p>}
+            </div>
           </div>
         )}
         <div className="mt-3">
@@ -722,7 +730,7 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview }: { val
         />
         <div className="mt-2 max-w-xs">
           <p className="text-[11px] text-slate-500 mb-1">รูปในป๊อปอัป (ไม่ใส่ = ไอคอน 🎁)</p>
-          <ImageInput value={pp.imageKey} onChange={(k) => setPp({ imageKey: k ?? "" })} folder="website-pages" />
+          <ImageUploadField label="รูปป๊อปอัป" value={pp.imageKey} onChange={(k) => setPp({ imageKey: k })} height={80} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 mt-3">
           <div>

@@ -3,12 +3,15 @@
 /**
  * ของกลางเล็ก ๆ — ช่องอัปโหลดรูปสำหรับหน้าตั้งค่าธีม (โลโก้ / favicon)
  * อัปผ่าน /api/admin/upload (R2) แล้วเก็บเป็น r2_key · แสดงผลผ่าน /api/r2-image
+ * 🖼 ในหน้าเว็บไซต์ของร้าน (มี ImageSetsContext) = มีปุ่ม "🔗 ใช้ชุดรูป" → เก็บค่า imgset/<id> (เปลี่ยนรูปของชุดทีเดียว ทุกที่ที่ผูกเปลี่ยนตาม)
  */
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { removeBackground, type RemoveBgStage } from "@/lib/remove-bg";
+import { ImageSetsContext } from "@/components/website-image-sets-context";
+import { imgSetIdOf, imgSetRef } from "@/lib/website-image-sets";
 
 // คลังรูปเป็นตัวใหญ่ — โหลดตอนกดเปิดเท่านั้น ไม่ถ่วงหน้าตั้งค่า
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
@@ -60,6 +63,11 @@ export function ImageUploadField({
     return () => ro.disconnect();
   }, [compact]);
   const small = compact ?? narrow;
+  // 🖼 ชุดรูปกลาง: ผูกอยู่ = โชว์รูปปัจจุบันของชุด + ป้ายชื่อชุด
+  const setsCtx = useContext(ImageSetsContext);
+  const setId = imgSetIdOf(value);
+  const linked = setId ? setsCtx?.sets.find((x) => x.id === setId) ?? null : null;
+  const [setOpen, setSetOpen] = useState(false);
 
   /** อัปเข้า R2 (+ ลงคลังกลางเอง) → คืน r2_key · ไม่สำเร็จ = null */
   const upload = async (file: File, okMsg = "อัปโหลดแล้ว"): Promise<string | null> => {
@@ -103,7 +111,7 @@ export function ImageUploadField({
   const canUndo = !!cut && cut.to === value;
   const working = busy || !!cutStage;
 
-  const url = keyUrl(value, 300);
+  const url = keyUrl(setId ? linked?.desk ?? linked?.mob ?? null : value, 300);
   const previewStyle = removeBg && value ? CHECKER : previewBg;
   const cutBtnLabel = cutStage ? CUT_STAGE[cutStage] : "✂️ ตัดพื้น (AI)";
 
@@ -120,6 +128,56 @@ export function ImageUploadField({
     />
   );
   const smallBtn = "h-7 px-2 rounded-md border border-slate-200 text-[11px] text-slate-700 bg-white whitespace-nowrap";
+  // 🔗 ผูก/เปลี่ยน/เลิกผูกชุดรูป (มีเฉพาะในหน้าเว็บไซต์ของร้าน)
+  const setBar = setsCtx && (
+    <div className="relative mb-1">
+      {setId ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] text-violet-800">
+          <span className="min-w-0 truncate font-medium">🔗 ชุดรูป: {linked ? linked.name : setsCtx.loaded ? "ชุดนี้ถูกลบแล้ว" : "…"}</span>
+          <button type="button" onClick={() => setSetOpen((v) => !v)} className="hover:underline">
+            เปลี่ยนชุด
+          </button>
+          <button type="button" onClick={() => onChange(linked?.desk ?? null)} className="hover:underline" title="ช่องนี้กลับไปใช้รูปของตัวเอง (เริ่มจากรูปปัจจุบันของชุด)">
+            เลิกผูก
+          </button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setSetOpen((v) => !v)} className="text-[11px] text-violet-700 hover:underline" title="เลือกชุดรูป — เปลี่ยนรูปของชุดทีเดียว ทุกที่ที่ผูกเปลี่ยนตาม (คอม + มือถือ)">
+          🔗 ใช้ชุดรูป
+        </button>
+      )}
+      {setOpen && (
+        <div className="absolute left-0 z-30 mt-1 max-h-64 w-64 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          {setsCtx.sets.length === 0 ? (
+            <p className="p-2 text-[11px] text-slate-500">ยังไม่มีชุดรูป — สร้างได้ที่แท็บ 🖼 ชุดรูป</p>
+          ) : (
+            setsCtx.sets.map((x) => {
+              const t = keyUrl(x.desk ?? x.mob, 120);
+              return (
+                <button
+                  key={x.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(imgSetRef(x.id));
+                    setSetOpen(false);
+                    toast.success(`ผูกชุด “${x.name}” แล้ว`);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-50 ${x.id === setId ? "bg-violet-50" : ""}`}
+                >
+                  <span className="flex h-8 w-12 shrink-0 items-center justify-center overflow-hidden rounded bg-slate-100">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    {t ? <img src={t} alt="" className="h-full w-full object-cover" /> : <span className="text-[9px] text-slate-400">ไม่มีรูป</span>}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{x.name}</span>
+                  {x.id === setId && <span className="text-violet-700">✓</span>}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div ref={boxRef} className="min-w-0">
@@ -127,6 +185,7 @@ export function ImageUploadField({
         {label}
         {hint && <span className="text-slate-400"> · {hint}</span>}
       </label>
+      {setBar}
 
       {small ? (
         /* แบบแคบ: รูปเต็มความกว้าง (กดที่รูป = เลือกจากคลัง) + ปุ่มเล็กใต้รูป */
@@ -157,7 +216,7 @@ export function ImageUploadField({
                 ✕
               </button>
             )}
-            {removeBg && value && (
+            {removeBg && value && !setId && (
               <button type="button" onClick={cutBackground} disabled={working} className={`${smallBtn} hover:border-violet-400 hover:text-violet-700 disabled:opacity-60`} title="ตัดพื้นหลังออกด้วย AI (รูปคน)">
                 {cutBtnLabel}
               </button>
@@ -198,7 +257,7 @@ export function ImageUploadField({
           >
             {busy ? "กำลังอัปโหลด…" : value ? "อัปโหลดรูปใหม่" : "อัปโหลดรูป"}
           </button>
-          {removeBg && value && (
+          {removeBg && value && !setId && (
             <button
               type="button"
               onClick={cutBackground}

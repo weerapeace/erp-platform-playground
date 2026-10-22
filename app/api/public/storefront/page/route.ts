@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { allowDraftPreview } from "@/lib/storefront-preview-access";
 import { normalizeBlocks } from "@/lib/website-blocks";
+import { resolveForStorefront } from "@/lib/website-image-sets-db";
 import { cleanPageMeta, pageLive } from "@/lib/website-help-center";
 
 const orUndef = (v: string) => v || undefined;
@@ -76,7 +77,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         ...(preview ? { status: p.status } : null),
       }))
       .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
-    return json({ posts });
+    // 🖼 รูปปกที่ผูกชุดรูป → รูปปัจจุบันของชุด
+    return json((await resolveForStorefront(sb, s.id, { posts })).parts);
   }
 
   // รายการหน้า (ไว้ทำเมนู) — help = กลุ่มศูนย์ช่วยเหลือ (เว็บร้านไม่เอาไปใส่เมนูหลัก · ท้ายเว็บคอลัมน์ "ศูนย์ช่วยเหลือ" ใช้)
@@ -139,7 +141,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
   }
 
-  return json({
+  const body = {
     slug: row.slug,
     title: row.title,
     title_en: orUndef(meta.name_en),
@@ -151,5 +153,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ...(row.page_type === "post"
       ? { post: { cover: meta.cover || null, excerpt: meta.excerpt || meta.description, excerpt_en: orUndef(meta.excerpt_en || meta.description_en), tags: meta.tags, author: meta.author || null, publishedAt: meta.publishAt || row.created_at } }
       : null),
-  });
+  };
+  // 🖼 ชุดรูปกลาง: ช่องรูปที่ผูกชุด → รูปปัจจุบันของชุด · imageFocus = จุดสำคัญของรูป (เว็บร้านรวมกับของทั้งเว็บ)
+  const resolved = await resolveForStorefront(sb, s.id, { layout: body.layout, post: "post" in body ? body.post : undefined });
+  return json({ ...body, ...resolved.parts, ...(Object.keys(resolved.focus).length ? { imageFocus: resolved.focus } : {}) });
 }
