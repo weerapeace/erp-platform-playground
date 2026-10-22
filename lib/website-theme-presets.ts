@@ -13,7 +13,8 @@ export interface FullThemePreset {
   label: string;
   hint: string;
   colors: BaseColors;
-  fonts: SiteTheme["fonts"];
+  /** ฟอนต์ไทย (ฟอนต์อังกฤษแยกถูกล้างเป็น "ใช้ฟอนต์เดียวกัน" ตอนกดใช้ชุด) */
+  fonts: Pick<SiteTheme["fonts"], "display" | "body">;
   radius: SiteTheme["radius"];
   shape: Partial<SiteTheme["shape"]>;
   card: Partial<SiteTheme["card"]>;
@@ -77,7 +78,7 @@ export function applyFullPreset<T extends Pick<SiteTheme, "colors" | "fonts" | "
   return {
     ...t,
     colors: { ...t.colors, ...FINE_COLOR_DEFAULTS, ...p.colors },
-    fonts: { ...p.fonts },
+    fonts: { ...t.fonts, displayLatin: "", bodyLatin: "", ...p.fonts },
     radius: p.radius,
     shape: { ...t.shape, ...p.shape },
     card: { ...t.card, ...p.card },

@@ -27,6 +27,10 @@ export function webFontOptions(first: FontOption[] = []): FontOption[] {
     ...GOOGLE_FONTS.map((f) => ({ value: f.name, label: f.name, family: `"${f.name}", sans-serif`, group: f.thai ? "ไทย + อังกฤษ" : "อังกฤษ (ตัวไทยใช้ฟอนต์สำรอง)" })),
   ];
 }
+/** 🔤 ตัวเลือก "ฟอนต์ตัวอังกฤษแยก" (ธีม fonts.displayLatin / bodyLatin) — เฉพาะฟอนต์อังกฤษ · "" = ใช้ฟอนต์เดียวกับตัวไทย */
+export function latinFontOptions(sameLabel: string): FontOption[] {
+  return [{ value: "", label: sameLabel }, ...GOOGLE_FONTS.filter((f) => !f.thai).map((f) => ({ value: f.name, label: f.name, family: `"${f.name}", sans-serif` }))];
+}
 /** ตัวเลือก FontSelect ของ CANVAS_FONTS (display/body = ฟอนต์ของธีมร้าน) */
 export function canvasFontOptions(fontNames: ThemeFontNames, autoLabel?: string): FontOption[] {
   return [

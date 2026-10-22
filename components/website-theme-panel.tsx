@@ -60,7 +60,7 @@ import { ColorPicker, ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { FontSelect } from "@/components/font-select";
 import { RangeInput } from "@/components/range-input";
-import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
+import { latinFontOptions, webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { HeaderCartSettings, HeaderSearchSettings } from "@/components/website-header-els";
 import { CartSettings } from "@/components/website-cart-settings";
@@ -70,6 +70,7 @@ import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
+import { HeaderIconStyleSetting, SiteControlsSetting, SitePageSetting } from "@/components/website-site-design-setting";
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
 import type { ProductLuxe } from "@/lib/website-product-luxe";
 import type { ProductMaterialView } from "@/lib/website-theme";
@@ -107,7 +108,7 @@ interface SampleItem { name: string; price: number; comparePrice: number | null;
 
 interface Theme {
   colors: import("@/lib/website-theme").SiteTheme["colors"];
-  fonts: { display: string; body: string };
+  fonts: import("@/lib/website-theme").SiteTheme["fonts"];
   radius: Radius;
   typography: Typography;
   shape: Shape;
@@ -121,7 +122,7 @@ interface Theme {
     height: number;
     placeholder: ImagePlaceholder;
   };
-  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; overPages: OverPages; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string }; cart: HeaderCart; search: HeaderSearch };
+  header: { height: number; sticky: boolean; bg: HeaderBg; menuAlign: MenuAlign; showCart: boolean; border: boolean; bgKind: "preset" | "custom"; bgColor: string; textColor: string; zones: HeaderZones; overHero: boolean; overPages: OverPages; hideOnScroll: boolean; mobileMenuSide: "left" | "right" | "top"; button: { text: string; href: string }; cart: HeaderCart; search: HeaderSearch; iconStyle: import("@/lib/website-site-design").HeaderIconStyle };
   menu: MenuConfig;
   footer: FooterConfig;
   listing: ListingConfig;
@@ -129,8 +130,8 @@ interface Theme {
   cart: CartConfig;
   /** 💳 ดีไซน์หน้าชำระเงิน (lib/website-checkout) */
   checkout: CheckoutConfig;
-  /** ✨ การเคลื่อนไหวทั้งเว็บ (lib/website-theme SiteTheme.page) */
-  page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
+  /** ✨ การเคลื่อนไหว + 🧱 ฐานหน้าตาทั้งเว็บ (lib/website-theme SiteTheme.page · lib/website-site-design) */
+  page: import("@/lib/website-theme").SiteTheme["page"];
   card: import("@/lib/website-theme").SiteTheme["card"];
   product: { layout: ProductLayout; titleStyle: ProductTitleStyle; imageBg: ProductImageBg; imageBgKey: string | null; imageBgKind: ProductImageBgKind; imageBgColor: string; imageBgGradient: ProductGradient; imageEffect: ProductImageEffect; imageFit: ProductImageFit; imageSize: number; showTabs: boolean; galleryStyle: ProductGalleryStyle; materialView: ProductMaterialView; detailsStyle: ProductDetailsStyle; detailsOpen: ProductDetailsOpen; detailItems: DetailItem[]; contentSources: ContentSource[]; sections: ProductSection[]; hidden: ProductSection[]; parts: ProductParts; partBox: Record<string, PartBox>; mobile: ProductMobile; fonts: ProductFonts; extras: ProductExtras; luxe: ProductLuxe };
 }
@@ -229,7 +230,7 @@ const PAGES = [
   { path: "/checkout?pv=thanks", label: "หน้าขอบคุณ (หลังสั่ง)" },
 ];
 
-const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Theme["fonts"]; radius: Radius } }[] = [
+const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Pick<Theme["fonts"], "display" | "body">; radius: Radius } }[] = [
   {
     name: "IG ส้มคลาสสิก",
     theme: {
@@ -692,6 +693,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (FINE_COLOR_KEYS.some((k) => theme.colors[k] !== base.colors[k])) out.push(FINE_COLOR_LABEL);
     if (theme.fonts.display !== base.fonts.display) out.push("ฟอนต์หัวข้อ");
     if (theme.fonts.body !== base.fonts.body) out.push("ฟอนต์เนื้อหา");
+    if (theme.fonts.displayLatin !== base.fonts.displayLatin || theme.fonts.bodyLatin !== base.fonts.bodyLatin) out.push("ฟอนต์อังกฤษ");
     if (theme.radius !== base.radius) out.push("ความมนขอบ");
     if (!eq(theme.typography, base.typography)) out.push("ตัวอักษร");
     if (!eq(theme.shape, base.shape)) out.push("รูปทรง");
@@ -710,8 +712,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (!eq(theme.product, base.product)) out.push("หน้าสินค้า");
     if (!eq(theme.cart, base.cart)) out.push("ตะกร้า");
     if (!eq(theme.checkout, base.checkout)) out.push("หน้าชำระเงิน");
-    // ✨ การเคลื่อนไหว (แท็บรูปทรง) — เดิมไม่ถูกนับ
-    if (!eq(theme.page, base.page)) out.push("การเคลื่อนไหว");
+    // ✨ การเคลื่อนไหว + 🧱 ทั้งเว็บ (แท็บรูปทรง) — เดิมไม่ถูกนับ
+    if (!eq(theme.page, base.page)) out.push("ทั้งเว็บ (รูปทรง)");
     return out;
   }, [theme, saved]);
 
@@ -893,7 +895,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     (k === "footer" && dirtyFields.includes("Footer")) ||
     (k === "card" && (dirtyFields.includes("การ์ดสินค้า") || dirtyFields.includes("รอรูปโหลด"))) ||
     (k === "listing" && dirtyFields.includes("หน้ารายการสินค้า")) ||
-    (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง") || dirtyFields.includes("การเคลื่อนไหว"))) ||
+    (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง") || dirtyFields.includes("ทั้งเว็บ (รูปทรง)"))) ||
     (k === "cart" && dirtyFields.includes("ตะกร้า")) ||
     (k === "checkout" && dirtyFields.includes("หน้าชำระเงิน")) ||
     ((k === "product" || k === "related") && dirtyFields.includes("หน้าสินค้า"));
@@ -1082,7 +1084,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <p className="text-[11px] text-slate-500 mb-3">เลือกแล้วปรับต่อได้ · ย้อนกลับได้ก่อนบันทึก</p>
                 <div className="flex flex-wrap gap-2">
                   {PRESETS.map((p) => (
-                    <button key={p.name} onClick={() => apply({ ...theme, ...p.theme, colors: { ...theme.colors, ...p.theme.colors } })} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500">
+                    <button key={p.name} onClick={() => apply({ ...theme, ...p.theme, colors: { ...theme.colors, ...p.theme.colors }, fonts: { ...theme.fonts, ...p.theme.fonts } })} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500">
                       <span className="flex gap-0.5">
                         {[p.theme.colors?.brand, p.theme.colors?.ink, p.theme.colors?.page].map((c, i) => (
                           <span key={i} style={{ background: c, width: 10, height: 10, borderRadius: 3, border: "1px solid rgba(0,0,0,.1)" }} />
@@ -1165,7 +1167,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <>
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-1">ฟอนต์หลัก</h3>
-                <p className="text-xs text-slate-500 mb-3">ฟอนต์หัวข้อใช้กับหัวข้อ/ชื่อสินค้า · ฟอนต์เนื้อหาใช้กับข้อความทั่วไป ปุ่ม เมนู · ฟอนต์อังกฤษ: ตัวไทยจะใช้ฟอนต์หลักแทน</p>
+                <p className="text-xs text-slate-500 mb-3">ฟอนต์หัวข้อใช้กับหัวข้อ/ชื่อสินค้า · ฟอนต์เนื้อหาใช้กับข้อความทั่วไป ปุ่ม เมนู · 🔤 ตั้ง &quot;ตัวอังกฤษ/ตัวเลข&quot; แยกได้: ตัวอังกฤษใช้ฟอนต์อังกฤษสวย ๆ ตัวไทยใช้ฟอนต์ไทยที่เลือก</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {(["display", "body"] as const).map((fk) => (
                     <div key={fk}>
@@ -1174,7 +1176,19 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                         <FontSelect value={theme.fonts[fk]} onChange={(v) => apply({ ...theme, fonts: { ...theme.fonts, [fk]: v } })} options={webFontOptions()} googleFonts={WEB_FONT_NAMES} sample="กขค งานหนัง Aa 123" />
                         <ResetBtn show={theme.fonts[fk] !== published.fonts[fk]} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, [fk]: published.fonts[fk] } })} />
                       </div>
-                      <p className="mt-1.5 text-base leading-snug" style={{ fontFamily: `"${theme.fonts[fk]}", ${fk === "display" ? `"${theme.fonts.body}",` : ""} sans-serif`, color: theme.colors.ink, fontWeight: fk === "display" ? 600 : 400 }}>
+                      {(() => {
+                        const lk = fk === "display" ? "displayLatin" : "bodyLatin";
+                        return (
+                          <>
+                            <label className={`${labelCls} mt-2`}>ตัวอังกฤษ/ตัวเลข</label>
+                            <div className="flex items-center gap-2">
+                              <FontSelect value={theme.fonts[lk]} onChange={(v) => apply({ ...theme, fonts: { ...theme.fonts, [lk]: v } })} options={latinFontOptions("ใช้ฟอนต์เดียวกัน (แบบเดิม)")} googleFonts={WEB_FONT_NAMES} sample="Premium Leather Aa 123" />
+                              <ResetBtn show={theme.fonts[lk] !== published.fonts[lk]} onClick={() => apply({ ...theme, fonts: { ...theme.fonts, [lk]: published.fonts[lk] } })} />
+                            </div>
+                          </>
+                        );
+                      })()}
+                      <p className="mt-1.5 text-base leading-snug" style={{ fontFamily: `${theme.fonts[fk === "display" ? "displayLatin" : "bodyLatin"] ? `"${theme.fonts[fk === "display" ? "displayLatin" : "bodyLatin"]}", ` : ""}"${theme.fonts[fk]}", ${fk === "display" ? `"${theme.fonts.body}",` : ""} sans-serif`, color: theme.colors.ink, fontWeight: fk === "display" ? 600 : 400 }}>
                         งานหนังคุณภาพ Premium leather 0123456789
                       </p>
                     </div>
@@ -1339,6 +1353,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 currentPath={page}
                 onPreview={setPage}
               />
+              <HeaderIconStyleSetting value={theme.header.iconStyle} onChange={(iconStyle) => setHeader({ iconStyle })} ink={theme.header.textColor || theme.colors.ink} />
               <p className="text-[11px] text-slate-400 mt-3">* รายการในเมนูตั้งที่แท็บ "เมนู" · ยังไม่ตั้ง = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้างเอง + ติดต่อ)</p>
             </div>
           )}
@@ -2671,6 +2686,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 </label>
                 <p className="text-[11px] text-slate-400 mt-1">เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง</p>
               </div>
+              {/* 🧱 ฐานหน้าตาทั้งเว็บ (ชุด 1) — components/website-site-design-setting · เว็บร้าน src/lib/site-design-css.ts */}
+              <SitePageSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
+              <SiteControlsSetting value={theme.shape} onChange={(p) => setShape(p)} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
               <div className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ (ค่ารวมทั้งเว็บ)</h3>
                 <div className="flex flex-wrap gap-2">
@@ -3454,8 +3472,11 @@ function CardExtras({ card, setCard }: { card: Theme["card"]; setCard: (p: Parti
           </label>
           <label className="flex items-center gap-1.5">รูปทรงป้าย
             <select className={mini} value={ab.shape} onChange={(e) => setAb({ shape: e.target.value as typeof ab.shape })}>
-              <option value="pill">มน</option>
+              <option value="pill">มน (แคปซูล)</option>
               <option value="square">เหลี่ยม</option>
+              <option value="ribbon">ริบบิ้นชิดขอบ</option>
+              <option value="corner">ชิดมุมการ์ด</option>
+              <option value="text">ตัวหนังสือล้วน</option>
             </select>
           </label>
         </div>

@@ -12,6 +12,7 @@ import { normalizeCart, DEFAULT_CART, type CartConfig } from "@/lib/website-cart
 import { normalizeCheckout, DEFAULT_CHECKOUT, type CheckoutConfig } from "@/lib/website-checkout";
 import { isGradStop } from "@/lib/website-gradient";
 import { normalizeProductLuxe, type ProductLuxe } from "@/lib/website-product-luxe";
+import { DEFAULT_HEADER_ICON_STYLE, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, normalizeBadgeShape, normalizeHeaderIconStyle, normalizeSitePage, normalizeSiteShape, type BadgeShape, type HeaderIconStyle, type SitePageDesign, type SiteShapeDesign } from "@/lib/website-site-design";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
@@ -30,7 +31,8 @@ export interface CardAutoBadges {
   new: boolean; newText: string; newDays: number; newColor: string;
   best: boolean; bestText: string; bestTop: number; bestColor: string;
   pos: "top-left" | "top-right";
-  shape: "pill" | "square";
+  /** 🧱 pill/square เดิม + ribbon/corner/text (lib/website-site-design) */
+  shape: BadgeShape;
 }
 export const DEFAULT_AUTO_BADGES: CardAutoBadges = {
   sale: false, saleText: "ลด {pct}%", saleMin: 5, saleColor: "#C62828",
@@ -49,7 +51,7 @@ export function normalizeAutoBadges(raw: unknown): CardAutoBadges {
     new: r.new === true, newText: txt(r.newText, d.newText), newDays: n(r.newDays, d.newDays, 1, 365), newColor: hex(r.newColor, d.newColor),
     best: r.best === true, bestText: txt(r.bestText, d.bestText), bestTop: n(r.bestTop, d.bestTop, 1, 50), bestColor: hex(r.bestColor, d.bestColor),
     pos: r.pos === "top-right" ? "top-right" : "top-left",
-    shape: r.shape === "square" ? "square" : "pill",
+    shape: normalizeBadgeShape(r.shape),
   };
 }
 export type CardHover = "none" | "lift" | "zoom" | "swap" | "lift-swap" | "slide";
@@ -921,7 +923,8 @@ export interface SiteTheme {
     stockLow: string;
     softPct: number;
   };
-  fonts: { display: string; body: string };
+  /** displayLatin / bodyLatin = ฟอนต์ตัวอังกฤษแยก ("" = ใช้ฟอนต์เดียวกัน) — ตัวไทยใช้ display / body */
+  fonts: { display: string; body: string; displayLatin: string; bodyLatin: string };
   radius: "sharp" | "soft" | "round";
   /** ตัวอักษร 6 บทบาท (แท็บ "ตัวอักษร") */
   typography: Typography;
@@ -973,6 +976,8 @@ export interface SiteTheme {
     cart: HeaderCart;
     /** 🔍 ⚙ ค้นหา */
     search: HeaderSearch;
+    /** 🧱 ชุดไอคอนหัวเว็บ (lib/website-site-design) */
+    iconStyle: HeaderIconStyle;
   };
   menu: MenuConfig;
   footer: FooterConfig;
@@ -983,7 +988,8 @@ export interface SiteTheme {
   /** 💳 ดีไซน์หน้าชำระเงิน + หน้าขอบคุณ (lib/website-checkout.ts) */
   checkout: CheckoutConfig;
   /** ✨ การเคลื่อนไหวทั้งเว็บ: เปลี่ยนหน้า (จาง/เลื่อนขึ้น) + เลื่อนจอนุ่ม (ปิดเป็นค่าเริ่ม) — เว็บร้าน: app/template.tsx + SmoothScroll */
-  page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean };
+  /** + 🧱 ฐานหน้าตาทั้งเว็บ (ความโปร่ง/ความกว้าง/ผิวพื้น/มือถือ/รูปแบบราคา · lib/website-site-design) */
+  page: { transition: "none" | "fade" | "rise"; smoothScroll: boolean } & SitePageDesign;
   card: {
     preset: CardPreset;
     imageRatio: ImageRatio;
@@ -1158,15 +1164,16 @@ export function normalizeTypography(raw: unknown): Typography {
   return out;
 }
 /** ชื่อฟอนต์ทั้งหมดที่ธีมใช้ (ฟอนต์หัวข้อ/เนื้อหา + ที่ตั้งเฉพาะบทบาท) → ไว้โหลด Google Fonts */
-export function themeFontNames(t: { fonts: { display: string; body: string }; typography: Typography }): string[] {
-  return [...new Set([t.fonts.display, t.fonts.body, ...Object.values(t.typography).map((r) => r.font)].filter(Boolean))];
+export function themeFontNames(t: { fonts: { display: string; body: string; displayLatin?: string; bodyLatin?: string }; typography: Typography }): string[] {
+  return [...new Set([t.fonts.display, t.fonts.body, t.fonts.displayLatin ?? "", t.fonts.bodyLatin ?? "", ...Object.values(t.typography).map((r) => r.font)].filter(Boolean))];
 }
 
 /* ───────── รูปทรง (แท็บ "รูปทรง") ───────── */
 export type ButtonShape = "pill" | "rounded" | "square";
 export type ButtonSize = "sm" | "md" | "lg";
 export type ShadowLevel = "none" | "soft" | "strong";
-export interface Shape {
+/** + ปุ่ม/ลิงก์/ช่องกรอกทั้งเว็บ (SiteShapeDesign · lib/website-site-design) */
+export interface Shape extends SiteShapeDesign {
   button: ButtonShape;
   buttonSize: ButtonSize;
   /** px · null = ตามความมนรวม */
@@ -1176,7 +1183,7 @@ export interface Shape {
   borderWidth: 1 | 2;
   shadow: ShadowLevel;
 }
-export const DEFAULT_SHAPE: Shape = { button: "pill", buttonSize: "md", cardRadius: null, imageRadius: null, inputRadius: null, borderWidth: 1, shadow: "soft" };
+export const DEFAULT_SHAPE: Shape = { button: "pill", buttonSize: "md", cardRadius: null, imageRadius: null, inputRadius: null, borderWidth: 1, shadow: "soft", ...DEFAULT_SITE_SHAPE };
 export const BUTTON_SHAPES: { value: ButtonShape; label: string }[] = [
   { value: "pill", label: "แคปซูล (มนสุด)" },
   { value: "rounded", label: "มนเล็กน้อย" },
@@ -1206,6 +1213,7 @@ export function normalizeShape(raw: unknown): Shape {
     inputRadius: px(r.inputRadius),
     borderWidth: r.borderWidth === 2 ? 2 : 1,
     shadow: oneOf(r.shadow, ["none", "soft", "strong"] as const, d.shadow),
+    ...normalizeSiteShape(r),
   };
 }
 
@@ -1547,7 +1555,7 @@ export const DEFAULT_THEME: SiteTheme = {
     muted: "#9BA1A9",
     ...FINE_COLOR_DEFAULTS,
   },
-  fonts: { display: "Kanit", body: "Noto Sans Thai" },
+  fonts: { display: "Kanit", body: "Noto Sans Thai", displayLatin: "", bodyLatin: "" },
   radius: "soft",
   typography: DEFAULT_TYPOGRAPHY(),
   shape: { ...DEFAULT_SHAPE },
@@ -1561,13 +1569,13 @@ export const DEFAULT_THEME: SiteTheme = {
     height: 34,
     placeholder: { ...DEFAULT_IMAGE_PLACEHOLDER },
   },
-  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, overPages: defaultOverPages(false), hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH } },
+  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, overPages: defaultOverPages(false), hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH }, iconStyle: DEFAULT_HEADER_ICON_STYLE },
   menu: { items: null, mobileItems: null, behavior: { ...DEFAULT_MENU_BEHAVIOR } },
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
   cart: { ...DEFAULT_CART },
   checkout: { ...DEFAULT_CHECKOUT },
-  page: { transition: "fade", smoothScroll: false },
+  page: { transition: "fade", smoothScroll: false, ...DEFAULT_SITE_PAGE },
   card: { preset: "flat", imageRatio: "4:5", titleLines: 2, showBadge: true, showStock: true, hover: "lift", showCompare: true, showSwatches: false, swatchMax: 5, swatchSwap: true, showColorCount: false, autoBadges: { ...DEFAULT_AUTO_BADGES }, imageBg: "", imagePad: null, imagePos: "center", imagePosX: 50, imagePosY: 50, imageScale: 100, nameUpper: false, nameWeight: 500, nameTracking: 0, priceFrom: false, categoryPos: "above", quickView: "none", showUnit: true, showCategory: true, quickAdd: "hover", align: "left", columns: { desktop: 4, tablet: 3, mobile: 2 }, gap: "md", nameSize: 100, priceSize: 100, imageFit: "cover", infoLayout: "stack", priceWeight: 600, swatchPos: "below", swatchShape: "circle" },
   product: { layout: "classic", titleStyle: "serif", imageBg: "tint", imageBgKey: null, imageBgKind: "preset", imageBgColor: "#F3F4F6", imageBgGradient: { from: "#FFFFFF", to: "#E5E7EB", angle: 180 }, imageEffect: "shadow", imageFit: "contain", imageSize: 86, showTabs: true, galleryStyle: "editorial", materialView: "page", detailsStyle: "accordion", detailsOpen: "first", detailItems: DEFAULT_DETAIL_ITEMS.map((d) => ({ ...d, fields: [...d.fields] })), contentSources: [], sections: [...PRODUCT_SECTION_ORDER], hidden: [], parts: normalizeParts(DEFAULT_PARTS), partBox: {}, mobile: normalizeMobile(null), fonts: { ...DEFAULT_FONTS }, extras: { ...DEFAULT_PRODUCT_EXTRAS }, luxe: normalizeProductLuxe(null) },
 };
@@ -1839,6 +1847,8 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
     fonts: {
       display: text(f.display, d.fonts.display),
       body: text(f.body, d.fonts.body),
+      displayLatin: text(f.displayLatin, ""),
+      bodyLatin: text(f.bodyLatin, ""),
     },
     radius: pick(r.radius, ["sharp", "soft", "round"] as const, d.radius),
     typography: normalizeTypography(r.typography),
@@ -1887,6 +1897,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       })(),
       cart: normalizeHeaderCart(h.cart),
       search: normalizeHeaderSearch(h.search),
+      iconStyle: normalizeHeaderIconStyle(h.iconStyle),
     },
     menu: normalizeMenu(r.menu),
     footer: normalizeFooter(r.footer),
@@ -1895,7 +1906,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
     checkout: normalizeCheckout(r.checkout),
     page: (() => {
       const pg = (r.page ?? {}) as Record<string, unknown>;
-      return { transition: pick(pg.transition, ["none", "fade", "rise"] as const, "fade"), smoothScroll: pg.smoothScroll === true };
+      return { transition: pick(pg.transition, ["none", "fade", "rise"] as const, "fade"), smoothScroll: pg.smoothScroll === true, ...normalizeSitePage(pg) };
     })(),
     card: {
       preset: pick(cd.preset, ["flat", "border", "shadow", "floating", "minimal"] as const, d.card.preset),
