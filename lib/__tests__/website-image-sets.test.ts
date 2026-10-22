@@ -20,7 +20,7 @@ const ID = "11111111-2222-4333-8444-555555555555";
 const T = (h: number) => Date.parse("2026-11-01T00:00:00Z") + h * 3_600_000;
 const iso = (h: number) => new Date(T(h)).toISOString();
 const v = (desk: string | null, mob: string | null = null, fx = 50, fy = 50) => ({ desk, mob, fx, fy, mfx: 50, mfy: 50 });
-const set = (p: Partial<ImageSet> = {}): ImageSet => ({ id: ID, name: "New Arrival", link: "", alt: "", cur: v("a/desk1.jpg", "a/mob1.jpg", 30, 20), queue: [], history: [], ...p });
+const set = (p: Partial<ImageSet> = {}): ImageSet => ({ id: ID, name: "New Arrival", link: "", alt: "", cur: v("a/desk1.jpg", "a/mob1.jpg", 30, 20), draft: null, queue: [], history: [], ...p });
 
 describe("ชุดรูป: ค่าที่ผูก", () => {
   it("imgset/<id> อ่านกลับเป็น id · ค่าอื่น = null", () => {
@@ -113,8 +113,8 @@ describe("ชุดรูป: ใช้อยู่ที่ไหน", () => {
       { label: "ดีไซน์", state: "draft", data: { page: { thanks: { imageKey: imgSetRef(ID) } } }, labelOf: (p) => (p[1] === "thanks" ? "หน้าขอบคุณ" : "") },
     ]);
     expect(uses).toEqual([
-      { setId: ID, where: "หน้าแรก › hero", state: "live" },
-      { setId: ID, where: "ดีไซน์ › หน้าขอบคุณ", state: "draft" },
+      { setId: ID, where: "หน้าแรก › hero", state: "live", path: "/" },
+      { setId: ID, where: "ดีไซน์ › หน้าขอบคุณ", state: "draft", path: "/" },
     ]);
   });
 });
@@ -132,5 +132,34 @@ describe("ชุดรูป: อ่าน DB (ฐานข้อมูลจำ
     expect(r.parts.theme.listing.inserts[0]).toEqual({ imageKey: "a/d.jpg", mobileImageKey: "a/m.jpg", link: "/c/new" });
     expect(r.focus).toEqual({ "a/d.jpg": { x: 40, y: 10 }, "a/m.jpg": { x: 50, y: 50 } });
     expect([await imageSetKeyNow(sb, imgSetRef(ID)), await imageSetKeyNow(sb, imgSetRef(ID), true), await imageSetKeyNow(sb, "a/x.jpg")]).toEqual(["a/d.jpg", "a/m.jpg", null]);
+  });
+});
+
+describe("ชุดรูป: ร่าง → ดูตัวอย่าง → ใช้รูปนี้", () => {
+  it("เว็บจริงใช้รูปบนเว็บ · พรีวิว (draft) เห็นร่าง", async () => {
+    const { resolveImageSets: r } = await import("../website-image-sets");
+    const sets = new Map([[ID, set({ draft: v("a/new.jpg", "a/new-m.jpg", 10, 90) })]]);
+    expect(r({ imageKey: imgSetRef(ID) }, sets).data.imageKey).toBe("a/desk1.jpg");
+    const pv = r({ imageKey: imgSetRef(ID), mobileImageKey: null }, sets, Date.now(), { draft: true });
+    expect(pv.data).toEqual({ imageKey: "a/new.jpg", mobileImageKey: "a/new-m.jpg" });
+    expect(pv.focus["a/new.jpg"]).toEqual({ x: 10, y: 90 });
+  });
+  it("ใช้รูปนี้: เปลี่ยนรูป = รูปเดิมเข้าประวัติ · แค่ขยับจุดสำคัญ = ไม่เข้าประวัติ · ไม่มีร่าง = null", async () => {
+    const { publishImageSetDraft } = await import("../website-image-sets");
+    const a = publishImageSetDraft(set({ draft: v("a/new.jpg") }))!;
+    expect([a.cur.desk, a.draft, a.history[0].desk]).toEqual(["a/new.jpg", null, "a/desk1.jpg"]);
+    const b = publishImageSetDraft(set({ draft: v("a/desk1.jpg", "a/mob1.jpg", 70, 70) }))!;
+    expect([b.cur.fx, b.history.length]).toEqual([70, 0]);
+    expect(publishImageSetDraft(set())).toBeNull();
+  });
+  it("แถวจาก DB: ร่างว่าง (ไม่มีรูป) = ไม่มีร่าง", () => {
+    expect(rowToImageSet({ id: ID, cur: {}, draft: { fx: 10 } }).draft).toBeNull();
+    expect(rowToImageSet({ id: ID, cur: {}, draft: { desk: "a/x.jpg" } }).draft?.desk).toBe("a/x.jpg");
+  });
+  it("รูปในผืนผ้าใบ (imageKey ไม่มีช่องมือถือคู่) → ส่ง mobileImageKey ไปด้วย · ลิงก์ของชุดทับ href ของชิ้น", () => {
+    const item = { id: "i1", kind: "image", imageKey: imgSetRef(ID), href: "" };
+    const r = resolveImageSets({ items: [item] }, new Map([[ID, set({ link: "/c/new" })]]));
+    expect(r.data.items[0]).toMatchObject({ imageKey: "a/desk1.jpg", mobileImageKey: "a/mob1.jpg", href: "/c/new" });
+    expect(resolveImageSets({ bgImageKey: imgSetRef(ID) }, new Map([[ID, set()]])).data).toEqual({ bgImageKey: "a/desk1.jpg" });
   });
 });

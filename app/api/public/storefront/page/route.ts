@@ -78,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }))
       .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
     // 🖼 รูปปกที่ผูกชุดรูป → รูปปัจจุบันของชุด
-    return json((await resolveForStorefront(sb, s.id, { posts })).parts);
+    return json((await resolveForStorefront(sb, s.id, { posts }, { draft: preview })).parts);
   }
 
   // รายการหน้า (ไว้ทำเมนู) — help = กลุ่มศูนย์ช่วยเหลือ (เว็บร้านไม่เอาไปใส่เมนูหลัก · ท้ายเว็บคอลัมน์ "ศูนย์ช่วยเหลือ" ใช้)
@@ -155,6 +155,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       : null),
   };
   // 🖼 ชุดรูปกลาง: ช่องรูปที่ผูกชุด → รูปปัจจุบันของชุด · imageFocus = จุดสำคัญของรูป (เว็บร้านรวมกับของทั้งเว็บ)
-  const resolved = await resolveForStorefront(sb, s.id, { layout: body.layout, post: "post" in body ? body.post : undefined });
+  const resolved = await resolveForStorefront(sb, s.id, { layout: body.layout, post: "post" in body ? body.post : undefined }, { draft: preview });
   return json({ ...body, ...resolved.parts, ...(Object.keys(resolved.focus).length ? { imageFocus: resolved.focus } : {}) });
 }

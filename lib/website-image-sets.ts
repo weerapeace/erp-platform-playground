@@ -8,6 +8,7 @@
  *   จุดสำคัญของรูป = แผนที่ focus {r2key: {x,y}} → เว็บร้าน LoadImg ใส่ object-position ให้เอง
  * กันพลาด: ค่า imgset/ ที่หลุดไปถึงเว็บร้าน → /api/r2-image ส่งต่อไปรูปปัจจุบันของชุด (คอม)
  * ⏰ ตั้งเวลา: queue [{at, until?}] — ถึงเวลา = ใช้รูปนั้น · มี until = ใช้ชั่วคราวแล้วกลับรูปเดิม · เว็บร้านแคช 60 วิ (ไม่ต้องมี cron)
+ * 📝 ร่าง: แก้รูป/จุดสำคัญในแท็บ = เก็บที่ draft (เว็บจริงยังเห็นรูปเดิม) · พรีวิว (?preview=1) เห็นร่าง · กด "ใช้รูปนี้" = ร่างขึ้นเว็บ (publishImageSetDraft)
  */
 
 /** ค่าในช่องรูปที่แปลว่า "ใช้ชุดรูปนี้" */
@@ -45,6 +46,8 @@ export interface ImageSet {
   /** คำอธิบายรูป (alt · ช่วย SEO) — เติมให้ที่ที่ยังไม่ได้ใส่เอง */
   alt: string;
   cur: ImageSetVersion;
+  /** 📝 ร่างที่ยังไม่ขึ้นเว็บ (พรีวิวเห็น · เว็บจริงยังใช้ cur/ตั้งเวลา) — null = ไม่มีร่าง */
+  draft: ImageSetVersion | null;
   queue: ImageSetScheduled[];
   history: ImageSetHistory[];
 }
@@ -105,6 +108,7 @@ export function rowToImageSet(r: Record<string, unknown>): ImageSet {
     link: cleanSetLink(r.link),
     alt: typeof r.alt === "string" ? r.alt.trim().slice(0, 160) : "",
     cur: cleanVersion(r.cur),
+    draft: ((d) => (d.desk || d.mob ? d : null))(cleanVersion(r.draft)),
     queue: queue.sort((a, b) => a.at.localeCompare(b.at)).slice(0, IMAGE_SET_QUEUE_MAX),
     history: history.slice(0, IMAGE_SET_HISTORY_MAX),
   };
@@ -144,6 +148,14 @@ export function settleImageSet(set: ImageSet, now = Date.now()): { set: ImageSet
   return { set: changed ? { ...out, queue: keep } : set, changed };
 }
 
+/** 📝 ใช้ร่างขึ้นเว็บ: เปลี่ยนรูป = รูปเดิมเข้าประวัติ · แค่ขยับจุดสำคัญ = ไม่นับเป็นประวัติ · ไม่มีร่าง = null */
+export function publishImageSetDraft(set: ImageSet, now = Date.now()): ImageSet | null {
+  const d = set.draft;
+  if (!d) return null;
+  const base = { ...set, draft: null };
+  return d.desk === set.cur.desk && d.mob === set.cur.mob ? { ...base, cur: d } : withNewCurrent(base, d, now);
+}
+
 /** ย้อนไปรูปก่อนหน้า (ประวัติตัวแรก) — รูปปัจจุบันเข้าประวัติแทน */
 export function undoImageSet(set: ImageSet, now = Date.now()): ImageSet | null {
   const [prev, ...rest] = set.history;
@@ -176,9 +188,11 @@ export interface FocusMap {
  * แทน "imgset/<id>" ทั้งก้อนข้อมูล (โครงหน้า/ธีม) ด้วยรูปปัจจุบันของชุด — คืนก้อนใหม่ (ของเดิมไม่ถูกแก้) + แผนที่จุดสำคัญ
  * ชุดที่ไม่มีแล้ว = ไม่มีรูป (null) · ลิงก์ของชุดทับลิงก์ของที่นั้น (เฉพาะชุดที่ตั้งลิงก์)
  */
-export function resolveImageSets<T>(data: T, sets: Map<string, ImageSet>, now = Date.now()): { data: T; focus: FocusMap; used: Set<string> } {
+export function resolveImageSets<T>(data: T, sets: Map<string, ImageSet>, now = Date.now(), opts: { draft?: boolean } = {}): { data: T; focus: FocusMap; used: Set<string> } {
   const focus: FocusMap = {};
   const used = new Set<string>();
+  // พรีวิว (draft) = เห็นร่างของชุดก่อนขึ้นเว็บ · เว็บจริง = รูปตามเวลาที่ตั้ง
+  const versionOf = (set: ImageSet) => (opts.draft && set.draft ? set.draft : effectiveVersion(set, now));
   // รายการรูปล้วน (เช่น รูปแกลเลอรี ["key", "imgset/…"]) = ใช้รูปคอมของชุด
   const inList = (s: string): string | null => {
     const id = imgSetIdOf(s);
@@ -186,7 +200,7 @@ export function resolveImageSets<T>(data: T, sets: Map<string, ImageSet>, now = 
     if (!id) return s;
     if (!set) return null;
     used.add(id);
-    const ver = effectiveVersion(set, now);
+    const ver = versionOf(set);
     if (ver.desk) focus[ver.desk] = { x: ver.fx, y: ver.fy };
     return ver.desk ?? ver.mob;
   };
@@ -205,10 +219,15 @@ export function resolveImageSets<T>(data: T, sets: Map<string, ImageSet>, now = 
         continue;
       }
       used.add(id);
-      const ver = effectiveVersion(set, now);
+      const ver = versionOf(set);
       const mobileField = isMobileField(k);
       out[k] = mobileField ? ver.mob ?? ver.desk : ver.desk ?? ver.mob;
-      if (!mobileField && ver.mob) for (const sib of mobileSiblings(k)) if (Object.prototype.hasOwnProperty.call(src, sib) && !imgSetIdOf(src[sib])) out[sib] = ver.mob;
+      if (!mobileField && ver.mob) {
+        const sibs = mobileSiblings(k).filter((sib) => Object.prototype.hasOwnProperty.call(src, sib));
+        for (const sib of sibs) if (!imgSetIdOf(src[sib])) out[sib] = ver.mob;
+        // ช่อง imageKey ที่ไม่มีช่องมือถือคู่ (เช่น รูปในผืนผ้าใบ) → ส่ง mobileImageKey ไปด้วย (ที่ที่ไม่รู้จักช่องนี้ = ไม่สนใจ)
+        if (!sibs.length && k === "imageKey") out.mobileImageKey = ver.mob;
+      }
       if (set.link) {
         for (const lk of LINK_KEYS) if (typeof src[lk] === "string") out[lk] = set.link;
         const lo = src.link;
@@ -231,10 +250,14 @@ export interface ImageSetUse {
   where: string;
   /** เผยแพร่แล้ว / ร่าง */
   state: "live" | "draft";
+  /** หน้าเว็บที่ต้องเปิดดูที่นี้ (ใช้ทำพรีวิว เช่น "/#s-<block>" · "/shop" · "/checkout?pv=thanks") */
+  path: string;
 }
 
 /** หาว่าชุดไหนถูกใช้ที่ไหน — docs = [{label, state, data}] · labelOf(path) แปลงตำแหน่งในก้อนข้อมูลเป็นป้าย */
-export function findImageSetUses(docs: { label: string; state: "live" | "draft"; data: unknown; labelOf?: (path: (string | number)[], root: unknown) => string }[]): ImageSetUse[] {
+export function findImageSetUses(
+  docs: { label: string; state: "live" | "draft"; data: unknown; labelOf?: (path: (string | number)[], root: unknown) => string; pathOf?: (path: (string | number)[], root: unknown) => string }[],
+): ImageSetUse[] {
   const out: ImageSetUse[] = [];
   const seen = new Set<string>();
   for (const doc of docs) {
@@ -247,7 +270,7 @@ export function findImageSetUses(docs: { label: string; state: "live" | "draft";
         const k = `${id}|${where}|${doc.state}`;
         if (!seen.has(k)) {
           seen.add(k);
-          out.push({ setId: id, where, state: doc.state });
+          out.push({ setId: id, where, state: doc.state, path: doc.pathOf ? doc.pathOf(path, doc.data) : "/" });
         }
         return;
       }

@@ -2,7 +2,7 @@
  * 🖼 ชุดรูปกลาง — /api/website/image-sets (ERP › เว็บไซต์ › 🖼 ชุดรูป)
  * GET    ?shop=<slug>[&lite=1]       → { sets, uses } (จัดคิวที่ถึงเวลาแล้วให้ก่อน · uses = ใช้อยู่ที่ไหนบ้าง จากหน้าแรก/หน้าเว็บ/ธีม ทั้งเผยแพร่+ร่าง)
  * POST   { shop, name }              → สร้างชุดใหม่ (ยังไม่มีรูป)
- * PATCH  { shop, id, action, ... }   → update {name?,link?,alt?,cur?} · schedule-add {entry} · schedule-remove {entryId} · undo
+ * PATCH  { shop, id, action, ... }   → update {name?,link?,alt?,cur?} · draft {version} (📝 ร่าง ยังไม่ขึ้นเว็บ) · publish (ร่าง → เว็บจริง) · discard · schedule-add {entry} · schedule-remove {entryId} · undo
  * DELETE ?shop=&id=                  → ลบ (ยังมีที่ใช้อยู่ = 409 บอกว่าใช้ที่ไหน)
  * สิทธิ์ products.view / products.edit · ทุกการแก้ = audit + สั่งเว็บร้านล้างแคช (ขึ้นเว็บจริงทันที)
  */
@@ -13,6 +13,7 @@ import { writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { IMAGE_SET_SELECT } from "@/lib/website-image-sets-db";
+import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import {
   IMAGE_SET_MAX,
   IMAGE_SET_QUEUE_MAX,
@@ -20,6 +21,7 @@ import {
   cleanSetLink,
   cleanVersion,
   findImageSetUses,
+  publishImageSetDraft,
   rowToImageSet,
   settleImageSet,
   undoImageSet,
@@ -35,6 +37,14 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, { status, 
 async function shopOf(sb: Admin, slug: string): Promise<{ id: string; slug: string } | null> {
   const { data } = await sb.from("shops").select("id, slug").eq("slug", slug.trim()).maybeSingle();
   return (data as { id: string; slug: string } | null) ?? null;
+}
+
+/** ลิงก์เว็บร้าน + รหัสพรีวิว (ปุ่ม 👁 ดูตัวอย่างทุกที่) — ยังไม่ผูกโดเมน = null */
+async function previewOf(sb: Admin, shop: { id: string; slug: string }) {
+  const { data } = await sb.from("shop_domains").select("domain").eq("shop_id", shop.id).limit(1).maybeSingle();
+  const raw = (data as { domain: string } | null)?.domain ?? null;
+  const siteUrl = raw ? (raw.startsWith("http") ? raw : `https://${raw}`).replace(/\/$/, "") : null;
+  return { siteUrl, previewKey: siteUrl ? issuePreviewKey(shop.slug) : null };
 }
 
 /** ตำแหน่งในธีม → ป้ายภาษาคน */
@@ -54,6 +64,18 @@ function themeLabel(path: (string | number)[]): string {
   if (a === "page" && typeof b === "string") return PAGE_LABEL[b] ?? `หน้าพิเศษ (${b})`;
   return THEME_LABEL[String(a)] ?? String(a ?? "");
 }
+/** ตำแหน่งในธีม → หน้าเว็บที่เห็นที่นั้น (เมนู/ป๊อปอัป = หน้าแรก) */
+function themePath(path: (string | number)[]): string {
+  const [a, b] = path;
+  if (a === "listing") return "/shop";
+  if (a === "page" && b === "thanks") return "/checkout?pv=thanks";
+  return "/";
+}
+/** Section ในโครงหน้า → ลิงก์เลื่อนไปที่ Section นั้น */
+const blockPath = (prefix: string) => (path: (string | number)[], root: unknown): string => {
+  const b = Array.isArray(root) && typeof path[0] === "number" ? (root[path[0]] as Record<string, unknown> | undefined) : undefined;
+  return typeof b?.id === "string" ? `${prefix}#s-${b.id}` : prefix;
+};
 function blockLabel(path: (string | number)[], root: unknown): string {
   const b = Array.isArray(root) && typeof path[0] === "number" ? (root[path[0]] as Record<string, unknown> | undefined) : undefined;
   if (!b) return "";
@@ -70,19 +92,20 @@ async function usesOf(sb: Admin, shopId: string) {
   ]);
   const s = (shop ?? {}) as Record<string, unknown>;
   const docs: Parameters<typeof findImageSetUses>[0] = [
-    { label: "หน้าแรก", state: "live", data: s.home_layout, labelOf: blockLabel },
-    { label: "หน้าแรก", state: "draft", data: s.home_layout_draft, labelOf: blockLabel },
-    { label: "ดีไซน์", state: "live", data: s.theme, labelOf: themeLabel },
-    { label: "ดีไซน์", state: "draft", data: s.theme_draft, labelOf: themeLabel },
+    { label: "หน้าแรก", state: "live", data: s.home_layout, labelOf: blockLabel, pathOf: blockPath("/") },
+    { label: "หน้าแรก", state: "draft", data: s.home_layout_draft, labelOf: blockLabel, pathOf: blockPath("/") },
+    { label: "ดีไซน์", state: "live", data: s.theme, labelOf: themeLabel, pathOf: themePath },
+    { label: "ดีไซน์", state: "draft", data: s.theme_draft, labelOf: themeLabel, pathOf: themePath },
   ];
   for (const p of (pages ?? []) as { title: string; slug: string; layout: unknown; draft_layout: unknown }[]) {
     const label = `หน้า “${p.title || p.slug}”`;
-    docs.push({ label, state: "live", data: p.layout, labelOf: blockLabel }, { label, state: "draft", data: p.draft_layout, labelOf: blockLabel });
+    const pathOf = blockPath(`/${encodeURIComponent(p.slug)}`);
+    docs.push({ label, state: "live", data: p.layout, labelOf: blockLabel, pathOf }, { label, state: "draft", data: p.draft_layout, labelOf: blockLabel, pathOf });
   }
   return findImageSetUses(docs);
 }
 
-const toRow = (s: ImageSet) => ({ name: s.name, link: s.link, alt: s.alt, cur: s.cur, queue: s.queue, history: s.history });
+const toRow = (s: ImageSet) => ({ name: s.name, link: s.link, alt: s.alt, cur: s.cur, draft: s.draft, queue: s.queue, history: s.history });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view");
@@ -101,7 +124,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   // lite=1 = แค่รายชื่อชุด (ปุ่ม 🔗 ชุดรูป ในช่องรูป) ไม่ต้องไล่หาว่าใช้ที่ไหน
   if (request.nextUrl.searchParams.get("lite") === "1") return json({ sets });
-  return json({ sets, uses: await usesOf(sb, shop.id) });
+  return json({ sets, uses: await usesOf(sb, shop.id), shop: await previewOf(sb, shop) });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -148,6 +171,17 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       // เปลี่ยนรูป = รูปเดิมเข้าประวัติ · แค่ขยับจุดสำคัญ (รูปเดิม) = ไม่นับเป็นประวัติ
       next = v.desk === next.cur.desk && v.mob === next.cur.mob ? { ...next, cur: v } : withNewCurrent(next, v);
     }
+  } else if (action === "draft") {
+    // 📝 แก้รูป/จุดสำคัญ = เก็บเป็นร่าง (เว็บจริงยังเห็นรูปเดิม) · ร่างเหมือนของบนเว็บทุกอย่าง = ไม่มีร่าง
+    const v = cleanVersion(body?.version);
+    const same = (Object.keys(v) as (keyof typeof v)[]).every((k) => v[k] === next.cur[k]);
+    next = { ...next, draft: same || (!v.desk && !v.mob) ? null : v };
+  } else if (action === "publish") {
+    const p = publishImageSetDraft(next);
+    if (!p) return json({ error: "ยังไม่มีร่างให้ใช้" }, 400);
+    next = p;
+  } else if (action === "discard") {
+    next = { ...next, draft: null };
   } else if (action === "schedule-add") {
     const e = cleanScheduled(body?.entry);
     if (!e) return json({ error: "ตั้งเวลาไม่ครบ — ต้องมีรูป (คอมหรือมือถือ) และวันเวลาที่เริ่มใช้" }, 400);
@@ -169,12 +203,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     .maybeSingle();
   if (error || !saved) return json({ error: "บันทึกไม่สำเร็จ กรุณาลองใหม่" }, 500);
   await writeAuditFor(request, sb, {
-    action: action === "undo" ? "revert" : "update",
+    action: action === "undo" ? "revert" : action === "publish" ? "publish" : "update",
     entityType: "store_image_sets",
     entityId: id,
     metadata: { shop_id: shop.id, name: next.name, op: action, from: before.cur, to: next.cur, link: next.link, queue: next.queue.length },
   });
-  const purged = await purgeStorefrontCache(sb, shop.id);
+  // ร่าง/ทิ้งร่าง = เว็บจริงไม่เปลี่ยน ไม่ต้องล้างแคช
+  const purged = action === "draft" || action === "discard" ? false : await purgeStorefrontCache(sb, shop.id);
   return json({ set: rowToImageSet(saved as Record<string, unknown>), purged });
 }
 

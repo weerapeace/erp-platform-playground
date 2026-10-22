@@ -6,7 +6,7 @@ import { effectiveVersion, imgSetIdOf, resolveImageSets, rowToImageSet, type Foc
 
 type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
-export const IMAGE_SET_SELECT = "id, name, link, alt, cur, queue, history, updated_at, updated_by_name";
+export const IMAGE_SET_SELECT = "id, name, link, alt, cur, draft, queue, history, updated_at, updated_by_name";
 
 /** ชุดรูปทั้งหมดของร้าน (เรียงตามชื่อ) */
 export async function readImageSets(sb: Admin, shopId: string): Promise<ImageSet[]> {
@@ -21,12 +21,12 @@ export function hasImageSetRef(data: unknown): boolean {
 
 /**
  * แทน imgset/ ในหลายก้อน (โครงหน้า · ธีม) ด้วยรูปปัจจุบันของชุด — อ่าน DB ครั้งเดียว · ไม่มีการผูกเลย = คืนของเดิม
- * focus = จุดสำคัญของรูปที่มาจากชุด (เว็บร้าน LoadImg ใส่ object-position)
+ * focus = จุดสำคัญของรูปที่มาจากชุด (เว็บร้าน LoadImg ใส่ object-position) · draft = พรีวิว (เห็นร่างของชุดก่อนขึ้นเว็บ)
  */
-export async function resolveForStorefront<T extends Record<string, unknown>>(sb: Admin, shopId: string, parts: T, now = Date.now()): Promise<{ parts: T; focus: FocusMap }> {
+export async function resolveForStorefront<T extends Record<string, unknown>>(sb: Admin, shopId: string, parts: T, opts: { draft?: boolean; now?: number } = {}): Promise<{ parts: T; focus: FocusMap }> {
   if (!hasImageSetRef(parts)) return { parts, focus: {} };
   const sets = new Map((await readImageSets(sb, shopId)).map((s) => [s.id, s]));
-  const r = resolveImageSets(parts, sets, now);
+  const r = resolveImageSets(parts, sets, opts.now ?? Date.now(), { draft: opts.draft });
   return { parts: r.data, focus: r.focus };
 }
 

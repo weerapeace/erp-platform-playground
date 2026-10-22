@@ -10,13 +10,15 @@
  *
  * ทั้งคู่คืนแค่ r2 key + ขนาดจริงของรูป → ตัวที่เรียกเป็นคนวางลงผืน (lib/website-canvas.ts fitImageBox)
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { AssetPicker } from "@/components/asset-picker";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { CANVAS_SHAPES } from "@/lib/website-canvas";
 import { CanvasShape } from "@/components/website-canvas-shapes";
+import { ImageSetsContext } from "@/components/website-image-sets-context";
+import { imgSetRef } from "@/lib/website-image-sets";
 
 export type PickedImage = { key: string; w: number; h: number; title?: string };
 
@@ -86,6 +88,9 @@ export function ImageChooser({
   const [busy, setBusy] = useState(false);
   const [libOpen, setLibOpen] = useState(false);
   const [showProducts, setShowProducts] = useState(false);
+  // 🔗 ชุดรูปกลาง (มีเฉพาะในหน้าเว็บไซต์ของร้าน) — เลือกชุด = รูปนี้เปลี่ยนตามชุด (คอม/มือถือ · ร่าง → ใช้รูปนี้)
+  const setsCtx = useContext(ImageSetsContext);
+  const [showSets, setShowSets] = useState(false);
   const [products, setProducts] = useState<{ code: string; name: string; images: string[]; categories: string[] }[] | null>(null);
   // กรองตามหมวด (ถ้าส่ง categoryKeys) — ปิดได้ด้วยปุ่ม "ดูสินค้าทั้งร้าน"
   const [onlyCat, setOnlyCat] = useState(true);
@@ -93,6 +98,7 @@ export function ImageChooser({
   useEffect(() => {
     if (!open) {
       setShowProducts(false);
+      setShowSets(false);
       setBusy(false);
     } else {
       setOnlyCat(true);
@@ -101,8 +107,9 @@ export function ImageChooser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const done = async (key: string, title?: string) => {
-    const size = await measureImage(key);
+  /** measureKey = รูปที่ใช้วัดสัดส่วน (ชุดรูป: วัดจากรูปคอมจริงของชุด ไม่ผ่านลิงก์ส่งต่อ) */
+  const done = async (key: string, title?: string, measureKey = key) => {
+    const size = await measureImage(measureKey);
     onPick({ key, ...size, title });
     onClose();
   };
@@ -137,7 +144,34 @@ export function ImageChooser({
   return (
     <>
       <ERPModal open={open && !libOpen} onClose={onClose} title={title} size="lg" defaultExpanded={false} resizable={false}>
-        {!showProducts ? (
+        {showSets && setsCtx ? (
+          <div className="space-y-3">
+            <button onClick={() => setShowSets(false)} className="text-xs text-slate-500 hover:text-blue-600">
+              ← กลับ
+            </button>
+            {setsCtx.sets.length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-400">ยังไม่มีชุดรูป — สร้างได้ที่แท็บ 🖼 ชุดรูป</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {setsCtx.sets.map((x) => {
+                  const k = x.desk ?? x.mob;
+                  return (
+                    <button key={x.id} type="button" disabled={busy || !k} title={k ? x.name : "ชุดนี้ยังไม่มีรูป"} onClick={() => k && void done(imgSetRef(x.id), x.name, k)} className="overflow-hidden rounded-lg border border-slate-200 text-left hover:border-blue-500 disabled:opacity-50">
+                      {k ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={imgUrl(k, 320)} alt={x.name} className="aspect-video w-full object-cover" loading="lazy" />
+                      ) : (
+                        <span className="flex aspect-video w-full items-center justify-center bg-slate-100 text-[11px] text-slate-400">ยังไม่มีรูป</span>
+                      )}
+                      <span className="block truncate px-2 py-1.5 text-xs text-slate-700">🔗 {x.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400">รูปนี้จะเปลี่ยนตามชุด — แก้รูปของชุดที่แท็บ 🖼 ชุดรูป ทีเดียวทุกที่ (มือถือใช้รูปมือถือของชุด)</p>
+          </div>
+        ) : !showProducts ? (
           <div className="space-y-2.5">
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onFile(e.target.files?.[0])} />
             <button className={optCls} disabled={busy} onClick={() => fileRef.current?.click()}>
@@ -154,6 +188,15 @@ export function ImageChooser({
                 <span className="block text-xs text-slate-500">รูปที่เคยอัปไว้ในระบบ</span>
               </span>
             </button>
+            {setsCtx && (
+              <button className={optCls} disabled={busy} onClick={() => setShowSets(true)}>
+                <span className="text-2xl">🔗</span>
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">ชุดรูป (เปลี่ยนทีเดียวหลายที่)</span>
+                  <span className="block text-xs text-slate-500">ผูกรูปนี้กับชุด เช่น New Arrival — เปลี่ยนรูปของชุดแล้วที่นี่เปลี่ยนตาม</span>
+                </span>
+              </button>
+            )}
             <button className={optCls} disabled={busy} onClick={openProducts}>
               <span className="text-2xl">🛍️</span>
               <span>

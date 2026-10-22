@@ -12,6 +12,8 @@ import { useToast } from "@/components/toast";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ImageSetsContext, notifyImageSetsChanged } from "@/components/website-image-sets-context";
 import { LinkTargetPicker } from "@/components/website-link-picker";
+import { ERPModal } from "@/components/modal";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { effectiveVersion, type ImageSet, type ImageSetUse, type ImageSetVersion } from "@/lib/website-image-sets";
 
 type SetRow = ImageSet & { updatedAt?: string | null; updatedBy?: string | null };
@@ -21,6 +23,12 @@ const btn = "rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-7
 const fmt = (iso: string) => new Date(iso).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" });
 /** "YYYY-MM-DDTHH:mm" ของ input datetime-local (เวลาเครื่อง) → ISO */
 const toIso = (local: string) => (local ? new Date(local).toISOString() : "");
+/** ลิงก์หน้าเว็บ + ?preview=1 (ก่อน #ส่วนของหน้า) */
+const withPreviewParam = (path: string) => {
+  const at = path.indexOf("#");
+  const base = at >= 0 ? path.slice(0, at) : path;
+  return `${base}${base.includes("?") ? "&" : "?"}preview=1${at >= 0 ? path.slice(at) : ""}`;
+};
 
 /** จุดสำคัญของรูป: คลิก/ลากบนรูป = ตั้งจุด · ใต้รูปเห็นตัวอย่างครอป 3 แบบ (กว้าง · สี่เหลี่ยม · แนวตั้ง) */
 function FocalPicker({ imageKey, x, y, onChange, label }: { imageKey: string | null; x: number; y: number; onChange: (x: number, y: number) => void; label: string }) {
@@ -99,14 +107,18 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
   const [newName, setNewName] = useState("");
   const [cats, setCats] = useState<{ key: string; label: string; parent?: string | null }[]>([]);
   const [draft, setDraft] = useState<{ at: string; until: string; v: ImageSetVersion } | null>(null);
+  // 👁 พรีวิวทุกที่ (เว็บจริง ?preview=1 = เห็นร่างของชุด)
+  const [site, setSite] = useState<{ siteUrl: string | null; previewKey: string | null }>({ siteUrl: null, previewKey: null });
+  const [pv, setPv] = useState<{ path: string; device: "desktop" | "mobile" } | null>(null);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/image-sets?shop=${encodeURIComponent(shopSlug)}`)
       .then((r) => r.json())
-      .then((j: { sets?: SetRow[]; uses?: ImageSetUse[]; error?: string }) => {
+      .then((j: { sets?: SetRow[]; uses?: ImageSetUse[]; shop?: { siteUrl: string | null; previewKey: string | null }; error?: string }) => {
         if (j.error) throw new Error(j.error);
         setSets(j.sets ?? []);
         setUses(j.uses ?? []);
+        if (j.shop) setSite(j.shop);
         setSelId((cur) => cur ?? j.sets?.[0]?.id ?? null);
       })
       .catch((e: Error) => {
@@ -145,7 +157,9 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
       setBusy(false);
     }
   };
-  const setCur = (p: Partial<ImageSetVersion>) => sel && void patch({ action: "update", cur: { ...sel.cur, ...p } });
+  // 📝 แก้รูป/จุดสำคัญ = เป็นร่างก่อน (เว็บจริงยังเห็นรูปเดิม) → ดูตัวอย่างทุกที่ → "ใช้รูปนี้"
+  const work = sel ? sel.draft ?? sel.cur : null;
+  const setWork = (p: Partial<ImageSetVersion>) => sel && work && void patch({ action: "draft", version: { ...work, ...p } }, "เก็บเป็นร่างแล้ว — กด “ใช้รูปนี้” เมื่อพร้อมขึ้นเว็บ");
 
   const create = async () => {
     const name = newName.trim();
@@ -186,7 +200,7 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
       <div className={card}>
         <h2 className="text-base font-semibold text-slate-800">🖼 ชุดรูปกลาง</h2>
         <p className="mt-1 text-xs text-slate-500">
-          เปลี่ยนรูปครั้งเดียว ทุกที่ที่ผูกชุดนี้เปลี่ยนตาม (คอม + มือถือ) — ผูกได้ที่ช่องรูปทุกช่องในแท็บ 🧱 หน้าแรก / 📄 หน้าเว็บ / 🎨 ดีไซน์ (กด <b>🔗 ใช้ชุดรูป</b> ใต้ชื่อช่อง) · แก้รูปที่นี่แล้วขึ้นเว็บจริงทันที ไม่ต้องกดเผยแพร่
+          เปลี่ยนรูปครั้งเดียว ทุกที่ที่ผูกชุดนี้เปลี่ยนตาม (คอม + มือถือ) — ผูกได้ที่ช่องรูปทุกช่องในแท็บ 🧱 หน้าแรก / 📄 หน้าเว็บ / 🎨 ดีไซน์ รวมรูปในผืนผ้าใบ (กด <b>🔗 ใช้ชุดรูป</b>) · แก้รูปที่นี่ = เป็นร่างก่อน → 👁 ดูตัวอย่างทุกที่ → ✅ ใช้รูปนี้ (ขึ้นเว็บทุกที่พร้อมกัน)
         </p>
       </div>
 
@@ -248,13 +262,47 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
                 </button>
               </div>
               {onSchedule && <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">⏰ ตอนนี้เว็บกำลังใช้รูปที่ตั้งเวลาไว้ (ถึง {onSchedule.until ? fmt(onSchedule.until) : "—"}) — หมดเวลาแล้วกลับเป็นรูปด้านล่าง</p>}
+              {/* 📝 ร่าง: เว็บจริงยังเห็นรูปเดิม จนกด "ใช้รูปนี้" */}
+              {sel.draft ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+                  <span className="text-xs font-semibold text-amber-800">📝 มีร่างที่ยังไม่ขึ้นเว็บ</span>
+                  <span className="flex items-center gap-1 text-[11px] text-amber-700">
+                    บนเว็บตอนนี้:
+                    {[sel.cur.desk, sel.cur.mob].map((k, i) => {
+                      const t = keyUrl(k, 120);
+                      return t ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={t} alt="" className="h-7 w-10 rounded border border-amber-200 object-cover" />
+                      ) : null;
+                    })}
+                  </span>
+                  <span className="ml-auto flex flex-wrap gap-1.5">
+                    <button type="button" onClick={() => setPv({ path: usesOf(sel.id)[0]?.path ?? "/", device: "desktop" })} className={btn}>
+                      👁 ดูตัวอย่างทุกที่
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => void patch({ action: "publish" }, "ใช้รูปนี้แล้ว — ขึ้นเว็บจริงทุกที่")} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
+                      ✅ ใช้รูปนี้ (ขึ้นเว็บ)
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => void patch({ action: "discard" }, "ทิ้งร่างแล้ว — กลับไปเป็นรูปบนเว็บ")} className={btn}>
+                      ทิ้งร่าง
+                    </button>
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                  <span>เปลี่ยนรูป/จุดสำคัญด้านล่าง = เก็บเป็นร่างก่อน · ดูตัวอย่างทุกที่ แล้วค่อยกด &quot;ใช้รูปนี้&quot;</span>
+                  <button type="button" onClick={() => setPv({ path: usesOf(sel.id)[0]?.path ?? "/", device: "desktop" })} className={`${btn} ml-auto`}>
+                    👁 ดูทุกที่ที่ใช้ชุดนี้
+                  </button>
+                </div>
+              )}
               <div>
-                <p className="mb-2 text-xs font-semibold text-slate-700">รูปตอนนี้</p>
-                <VersionImages v={sel.cur} onChange={setCur} />
+                <p className="mb-2 text-xs font-semibold text-slate-700">{sel.draft ? "📝 ร่าง (ยังไม่ขึ้นเว็บ)" : "รูปตอนนี้"}</p>
+                <VersionImages v={work!} onChange={setWork} />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <FocalPicker imageKey={sel.cur.desk} x={sel.cur.fx} y={sel.cur.fy} label="รูปคอม" onChange={(fx, fy) => setCur({ fx, fy })} />
-                <FocalPicker imageKey={sel.cur.mob} x={sel.cur.mfx} y={sel.cur.mfy} label="รูปมือถือ" onChange={(mfx, mfy) => setCur({ mfx, mfy })} />
+                <FocalPicker imageKey={work!.desk} x={work!.fx} y={work!.fy} label="รูปคอม" onChange={(fx, fy) => setWork({ fx, fy })} />
+                <FocalPicker imageKey={work!.mob} x={work!.mfx} y={work!.mfy} label="รูปมือถือ" onChange={(mfx, mfy) => setWork({ mfx, mfy })} />
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
@@ -370,19 +418,63 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
               ) : (
                 <ul className="space-y-1">
                   {usesOf(sel.id).map((u, i) => (
-                    <li key={i} className="flex items-center gap-2 text-xs text-slate-700">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${u.state === "live" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{u.state === "live" ? "เผยแพร่แล้ว" : "ร่าง"}</span>
-                      {u.where}
+                    <li key={i}>
+                      <button type="button" onClick={() => setPv({ path: u.path, device: "desktop" })} className="flex items-center gap-2 text-left text-xs text-slate-700 hover:text-blue-700" title="ดูตัวอย่างที่นี่">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] ${u.state === "live" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{u.state === "live" ? "เผยแพร่แล้ว" : "ร่าง"}</span>
+                        {u.where} <span className="text-slate-400">👁</span>
+                      </button>
                     </li>
                   ))}
                 </ul>
               )}
-              <p className="text-[11px] text-slate-400">ผูกในร่างแล้วต้องกดเผยแพร่ที่แท็บนั้นหนึ่งครั้ง · หลังจากนั้นเปลี่ยนรูปที่นี่ได้เลย ไม่ต้องเผยแพร่อีก</p>
+              <p className="text-[11px] text-slate-400">ผูกในร่างแล้วต้องกดเผยแพร่ที่แท็บนั้นหนึ่งครั้ง · หลังจากนั้นเปลี่ยนรูปที่นี่ (ร่าง → ใช้รูปนี้) ไม่ต้องเผยแพร่หน้านั้นอีก · กดรายการ = ดูตัวอย่างที่นั้น</p>
             </div>
             {now.desk === null && now.mob === null && <p className="text-[11px] text-amber-700">⚠️ ชุดนี้ยังไม่มีรูป — ที่ที่ผูกไว้จะไม่มีรูปจนกว่าจะใส่</p>}
           </div>
         )}
       </div>
+
+      {/* 👁 ดูตัวอย่างทุกที่ — เว็บจริงในโหมดพรีวิว (เห็นร่างของชุด · ลูกค้ายังเห็นรูปเดิม) */}
+      {pv && sel && (() => {
+        const places = [...new Map(usesOf(sel.id).map((u) => [u.path, u.where])).entries()];
+        if (!places.length) places.push(["/", "หน้าแรก"]);
+        const src = site.siteUrl ? `${site.siteUrl}${withPreviewKey(withPreviewParam(pv.path), site.previewKey)}` : null;
+        return (
+          <ERPModal open onClose={() => setPv(null)} title={`👁 ตัวอย่างชุด “${sel.name}”${sel.draft ? " (ร่าง)" : ""}`} size="xl" defaultExpanded>
+            {!src ? (
+              <p className="py-8 text-center text-sm text-slate-500">ร้านนี้ยังไม่ผูกโดเมน — ดูตัวอย่างไม่ได้</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {places.map(([path, where]) => (
+                    <button key={path} type="button" onClick={() => setPv({ ...pv, path })} className={`rounded-full border px-2.5 py-1 text-[11px] ${pv.path === path ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                      {where}
+                    </button>
+                  ))}
+                  <span className="ml-auto flex gap-1">
+                    {(["desktop", "mobile"] as const).map((d) => (
+                      <button key={d} type="button" onClick={() => setPv({ ...pv, device: d })} className={`rounded-lg border px-2.5 py-1 text-xs ${pv.device === d ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600"}`}>
+                        {d === "desktop" ? "🖥 คอม" : "📱 มือถือ"}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">{sel.draft ? "เห็นร่างของชุดนี้ — ลูกค้ายังเห็นรูปเดิมจนกว่าจะกด “ใช้รูปนี้”" : "ตอนนี้ไม่มีร่าง — เห็นรูปเดียวกับที่ลูกค้าเห็น"} · เมนู: ชี้เมนูเพื่อเปิด · ป๊อปอัป: รอให้ขึ้น</p>
+                <div className="flex justify-center rounded-lg bg-slate-100 p-2">
+                  <iframe key={src + pv.device} src={src} title="ตัวอย่าง" className="rounded border border-slate-200 bg-white" style={{ width: pv.device === "mobile" ? 390 : "100%", height: "68vh" }} />
+                </div>
+                {sel.draft && (
+                  <div className="flex justify-end gap-2">
+                    <button type="button" disabled={busy} onClick={async () => (await patch({ action: "publish" }, "ใช้รูปนี้แล้ว — ขึ้นเว็บจริงทุกที่")) && setPv(null)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
+                      ✅ ใช้รูปนี้ (ขึ้นเว็บ)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </ERPModal>
+        );
+      })()}
     </div>
   );
 }

@@ -203,6 +203,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     })(),
   };
   // 🖼 ชุดรูปกลาง: ช่องรูปที่ผูกชุด (imgset/<id>) → รูปปัจจุบันของชุด (ตามเวลาที่ตั้ง) + รูปมือถือ/ลิงก์ของชุด · imageFocus = จุดสำคัญของรูป (lib/website-image-sets)
-  const resolved = await resolveForStorefront(sb, s.id, { layout: body.layout, theme: body.theme, collections: body.collections, info: body.info });
+  const resolved = await resolveForStorefront(sb, s.id, { layout: body.layout, theme: body.theme, collections: body.collections, info: body.info }, { draft: preview });
   return json({ ...body, ...resolved.parts, ...(Object.keys(resolved.focus).length ? { imageFocus: resolved.focus } : {}) });
 }
