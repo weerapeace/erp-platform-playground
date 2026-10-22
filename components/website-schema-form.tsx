@@ -41,6 +41,8 @@ export interface SchemaFormContext {
   sections?: { id: string; label: string }[];
   /** 🃏 ค่าการ์ดสินค้าของร้านตอนนี้ (ธีม → การ์ดสินค้า) — ปิดสวิตช์ "ใช้การ์ดตามค่ากลางของร้าน" แล้วก๊อปมาเป็นค่าเริ่ม (FieldDef.copyShopCard) */
   themeCard?: Record<string, unknown>;
+  /** 🆕 กำลังจัดหน้าของชุดมาใหม่ชุดไหน (ตัวจัดหน้า /new/<ชุด>) — Section ชุดมาใหม่แก้รูปแทรกของชุดนี้ได้ (DropInsertsField) */
+  dropId?: string;
 }
 
 export const inputCls =

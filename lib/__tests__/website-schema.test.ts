@@ -759,3 +759,23 @@ describe("🎞️ การ์ดบนฉาก — แท็บ + ฉากผ
     expect(matchShowIf(vk, { kind: "video" })).toBe(true);
   });
 });
+
+describe("🆕 Section ชุดมาใหม่ — หัวชุด · คอลัมน์ · เรียง · การ์ดในส่วนนี้", () => {
+  const fields = SECTION_SCHEMAS.drop.fields;
+  const shown = (b: Record<string, unknown>) => fields.filter((x) => matchShowIf(x, b)).map((x) => x.key);
+  it("บล็อกเก่า = หน้าตาเดิม (โชว์วันที่/คำโปรย/ลิงก์ย้อนกลับ · คอลัมน์ตามร้าน · เรียงตามที่เลือก · การ์ดตามร้าน)", () => {
+    const [n] = normalizeBlocks([{ id: "d1", type: "drop" }]) as unknown as Record<string, unknown>[];
+    expect(n).toMatchObject({ showDate: true, showSub: true, backLink: true, columns: "auto", columnsMobile: "auto", sort: "default", soldOutLast: false, cardUseShop: true });
+  });
+  it("ปิดการ์ดตามร้าน → ช่องการ์ดโชว์ครบ (ไม่ติดเงื่อนไขแบบแสดงของตารางสินค้า)", () => {
+    const [n] = normalizeBlocks([{ id: "d2", type: "drop", cardUseShop: false }]) as unknown as Record<string, unknown>[];
+    const vis = shown(n);
+    for (const k of ["cardName", "cardBadge", "cardStock", "cardSwatches", "cardQuickAdd", "cardInfo"]) expect(vis).toContain(k);
+    expect(shown({ ...n, showProducts: false })).not.toContain("columns");
+    expect(shown({ ...n, banner: "none" })).not.toContain("showDate");
+  });
+  it("ค่าแปลก = ค่าเริ่ม", () => {
+    const [n] = normalizeBlocks([{ id: "d3", type: "drop", columns: "9", sort: "random", columnsMobile: "4" }]) as unknown as Record<string, unknown>[];
+    expect([n.columns, n.sort, n.columnsMobile]).toEqual(["auto", "default", "auto"]);
+  });
+});

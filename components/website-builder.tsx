@@ -38,6 +38,7 @@ import { cleanExpId } from "@/lib/website-web-stats";
 import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canvas-editor";
 import { ScenePngBoard } from "@/components/website-scene-png-board";
 import { ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
+import { DropInsertsField } from "@/components/website-drop-inserts-field";
 import { coverageOf, hasText, type ContentLang } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
 import { applySlotTranslations, collectTextSlots, previewInEnglish, slotSourceTexts, slotValueFrom, type TextSlot } from "@/lib/website-i18n";
@@ -1436,6 +1437,8 @@ export function WebsiteBuilder({
             {/* 🎞️ การ์ดบนฉาก: ช่องใหญ่ใส่ PNG รายสินค้าของแต่ละแท็บ (ไม่มี PNG = ไม่โชว์) */}
             {selBlock.type === "scene" && <ScenePngBoard block={selBlock as unknown as Record<string, unknown>} shopSlug={ctx.shopSlug} onSaved={reloadPreview} />}
             <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={formCtx} />
+            {/* 🆕 ชุดมาใหม่: รูปแทรกของชุด (ข้อมูลของชุด ไม่ใช่ของ Section — บันทึกแล้วโหลดพรีวิวใหม่) */}
+            {selBlock.type === "drop" && <DropInsertsField ctx={formCtx} which={String((selBlock as Record<string, unknown>).which ?? "this")} onSaved={reloadPreview} />}
             {selSchema.meta.manage && (
               <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-900">
                 <span className="min-w-0 flex-1">{selSchema.meta.manage.hint ?? "ข้อมูลของ Section นี้ตั้งค่าที่หน้าหลังบ้านแยก"}</span>

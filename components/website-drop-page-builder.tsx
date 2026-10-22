@@ -221,7 +221,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
     }
   };
 
-  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
+  const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard, dropId }), [shopSlug, shopId, shopName, categories, themeCard, dropId]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังเปิดหน้าชุด…</div>;
 

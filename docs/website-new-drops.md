@@ -49,6 +49,8 @@
 - API: `app/api/website/new-drops/page` (GET products.view · PUT/DELETE products.edit) · สาธารณะ `app/api/public/storefront/new-drops/page?shop=&id=[&preview=1]`
 - ของกลาง pure `lib/website-drop-page.ts` (`defaultDropPageBlocks`, `dropPageLayout`)
 - Section **🆕 ชุดมาใหม่** (`type: "drop"`) ใส่หน้าอื่นได้ด้วย: ชุดของหน้านี้ (นอกหน้าชุด = ชุดล่าสุด) / ชุดล่าสุดที่เปิด / ชุดที่กำลังจะเปิด · แบนเนอร์ ใหญ่/หัวข้อเล็ก/ไม่โชว์ · โชว์สินค้าเปิด/ปิด — เว็บร้านวาดฝั่งเซิร์ฟเวอร์ (`DropBlockView`)
+- เพิ่ม 2026-10-22 (ค่าเริ่ม = หน้าตาเดิม): หัวชุด `showDate` · `showSub` · `backLink` (ลิงก์ "← มาใหม่ทั้งหมด" ของหน้า /new/<ชุด> ที่จัดหน้าเอง — หน้าเว็บเช็กจาก Section drop ใดก็ได้ที่ปิด) · ตาราง `columns`/`columnsMobile` (auto = ตามการ์ดของร้าน) · `sort` default/price-asc/price-desc + `soldOutLast` (เว็บร้าน `sortDropItems`) · 🃏 การ์ดในส่วนนี้ (`GRID_CARD_FIELDS` = ชุดเดียวกับตารางสินค้า ตัดเงื่อนไขแบบแสดง · เว็บร้าน `cardOverrideOf` รับ `SectionCardFields`)
+- 🖼 รูปแทรกของชุดแก้จากแผง Section ได้ (`components/website-drop-inserts-field.tsx` · เฉพาะตัวจัดหน้าของชุด `ctx.dropId` + "ชุดของหน้านี้") — เจ้าของเลือก **เป็นของชุด** (store_new_drops.inserts ที่เดียวกับแท็บ 🆕) · PATCH ทั้งชุด + audit · บันทึกแล้วขึ้นเว็บทันที (ไม่ผ่านร่าง) แล้วโหลดพรีวิวใหม่
 
 ## ข้อจำกัด
 

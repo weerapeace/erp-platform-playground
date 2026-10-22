@@ -379,7 +379,16 @@ const PRODUCT_CARD_FIELDS: FieldDef[] = [
   }),
   cardToggle("cardNameUpper", "ชื่อตัวพิมพ์ใหญ่ (ชื่ออังกฤษ)", false, undefined, true),
 ];
-const text = (key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "text", { max: 160, ...extra });
+/** 🃏 การ์ดในส่วนนี้ ของ Section ที่เป็นตารางการ์ดเต็มอย่างเดียว (ชุดมาใหม่) — ไม่มีช่อง layout → ตัดเงื่อนไข "แบบการ์ดเต็ม" ออก */
+const GRID_CARD_FIELDS: FieldDef[] = PRODUCT_CARD_FIELDS.map((fd) => {
+  if (fd.showIf === fullCard) return { ...fd, showIf: undefined };
+  if (Array.isArray(fd.showIf)) {
+    const rest = fd.showIf.filter((c) => c !== fullCard);
+    return { ...fd, showIf: rest.length === 1 ? rest[0] : rest };
+  }
+  return fd;
+});
+const text =(key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "text", { max: 160, ...extra });
 const area = (key: string, label: string, extra: Partial<FieldDef> = {}) => f(key, label, "textarea", { max: 600, wide: true, ...extra });
 const link = (key: string, label: string, dText = "", dHref = "", extra: Partial<FieldDef> = {}) =>
   f(key, label, "link", { group: "action", default: { text: dText, href: dHref }, wide: true, ...extra });
@@ -1937,7 +1946,36 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "none", l: "ไม่โชว์ (เฉพาะสินค้า)" },
         ],
       }),
+      // 🏷 หัวชุด (2026-10-22) — ค่าเริ่ม = โชว์ทั้งหมด (หน้าตาเดิม)
+      f("showDate", "โชว์วันเวลาเปิดชุด", "toggle", { group: "layout", default: true, showIf: { key: "banner", eq: ["big", "small"] }, hint: "โชว์ข้างชื่อชุด (แบบหัวข้อเล็ก หรือชุดที่ไม่มีรูปปก)" }),
+      f("showSub", "โชว์คำโปรยใต้ชื่อชุด", "toggle", { group: "layout", default: true, showIf: { key: "banner", eq: ["big", "small"] }, hint: "คำโปรยตั้งที่แท็บ 🆕 มาใหม่ (รายชุด)" }),
+      f("backLink", "ลิงก์ \"← มาใหม่ทั้งหมด\" บนหน้าชุด", "toggle", { group: "layout", default: true, hint: "เฉพาะหน้า /new/<ชุด> ที่จัดหน้าเอง" }),
       f("showProducts", "โชว์สินค้าในชุด (เมื่อเปิดแล้ว)", "toggle", { group: "layout", default: true }),
+      // 🛍 ตารางสินค้าของชุด — คอลัมน์ · เรียง (ค่าเริ่ม = ตามการ์ดของร้าน / ตามที่เลือกในชุด = หน้าตาเดิม)
+      f("columns", "จำนวนคอลัมน์ (จอคอม)", "select", {
+        group: "layout",
+        default: "auto",
+        options: [{ v: "auto", l: "ตามการ์ดของร้าน" }, ...["2", "3", "4", "5", "6"].map((v) => ({ v, l: `${v} คอลัมน์` }))],
+        showIf: { key: "showProducts", eq: true },
+      }),
+      f("columnsMobile", "จำนวนคอลัมน์ (มือถือ)", "select", {
+        group: "layout",
+        default: "auto",
+        options: [{ v: "auto", l: "ตามการ์ดของร้าน" }, { v: "1", l: "1 คอลัมน์" }, { v: "2", l: "2 คอลัมน์" }, { v: "3", l: "3 คอลัมน์" }],
+        showIf: { key: "showProducts", eq: true },
+      }),
+      f("sort", "เรียงสินค้า", "select", {
+        group: "layout",
+        default: "default",
+        options: [
+          { v: "default", l: "ตามที่เลือกในชุด (เรียงที่แท็บ 🆕)" },
+          { v: "price-asc", l: "ราคาถูก → แพง" },
+          { v: "price-desc", l: "ราคาแพง → ถูก" },
+        ],
+        showIf: { key: "showProducts", eq: true },
+      }),
+      f("soldOutLast", "ของหมดไว้ท้ายสุด", "toggle", { group: "layout", default: false, showIf: { key: "showProducts", eq: true } }),
+      ...GRID_CARD_FIELDS,
     ],
     summary: (b) => ({ this: "ชุดของหน้านี้", latest: "ชุดล่าสุดที่เปิด", soon: "ชุดที่กำลังจะเปิด" } as Record<string, string>)[s(b.which)] ?? "ชุดของหน้านี้",
   },
