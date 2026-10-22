@@ -27,6 +27,7 @@ import {
   CANVAS_WEIGHTS,
   CANVAS_EXPANDS,
   CANVAS_MAX_HEIGHT,
+  CANVAS_WIDTHS,
   CANVAS_SFX_FADES,
   CANVAS_SFX_SPEED_PRESETS,
   CANVAS_SFX_ZOOMS,
@@ -254,6 +255,20 @@ export function CanvasInspector({
         <p className="text-sm font-semibold text-slate-800">ทั้งผืน</p>
         <p className="text-[11px] text-slate-500 -mt-2">คลิกชิ้นบนผืนเพื่อแก้ทีละชิ้น · คลิกที่ว่างเพื่อกลับมาตรงนี้</p>
         <Slider label="ความสูงผืน" value={Number(block.height) || 560} min={120} max={CANVAS_MAX_HEIGHT} step={10} onChange={(n) => onPatchBlock({ height: n })} />
+        <div>
+          <H>ความกว้างผืน (คอม)</H>
+          <div className="flex gap-1.5">
+            {CANVAS_WIDTHS.map((w) => {
+              const cur = CANVAS_WIDTHS.some((x) => x.v === block.width) ? block.width : "normal";
+              return (
+                <button key={w.v} type="button" title={w.l} className={seg(cur === w.v)} onClick={() => onPatchBlock({ width: w.v })}>
+                  {w.v === "normal" ? "ปกติ 1200" : w.v === "wide" ? "กว้าง 1600" : "↔️ เต็มจอ"}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[10px] text-slate-400">กว้างขึ้น = ทุกชิ้นขยายตามจอ ตำแหน่งที่จัดไว้ไม่เพี้ยน (จอใหญ่ตัวหนังสือใหญ่ตาม) · มือถือไม่มีผล</p>
+        </div>
         <div>
           <H>สีพื้นผืน (เต็มความกว้างจอ)</H>
           <div className="flex flex-wrap gap-1.5">

@@ -16,6 +16,17 @@ import type { FieldOption } from "@/lib/website-schema";
 
 /** ความกว้างผืนตอนออกแบบ (หน่วยของ x/y/w/h ทั้งหมด) */
 export const CANVAS_WIDTH = 1200;
+/**
+ * ↔️ ความกว้างผืนบนคอม (ช่อง width ของผืน) — ⚠️ ตรงกับเว็บร้าน (globals.css .cv-w-* · src/lib/canvas.ts)
+ * ผืนยังเป็น 1200 หน่วยเท่าเดิม: กว้างขึ้น = ทุกชิ้นขยายตามสัดส่วน ตำแหน่งที่จัดไว้ไม่เพี้ยน · มือถือไม่มีผล
+ */
+export const CANVAS_WIDTHS: (FieldOption & { maxPx: number })[] = [
+  { v: "normal", l: "ปกติ (ไม่เกิน 1200px)", maxPx: 1200 },
+  { v: "wide", l: "กว้าง (ไม่เกิน 1600px)", maxPx: 1600 },
+  { v: "full", l: "เต็มจอ", maxPx: Infinity },
+];
+/** กว้างสุดของผืนบนจอ (px) ตามช่อง width — ไม่รู้จัก = ปกติ */
+export const canvasMaxPx = (width: unknown): number => CANVAS_WIDTHS.find((w) => w.v === width)?.maxPx ?? CANVAS_WIDTH;
 /** ความกว้างผืนมือถือแบบจัดเอง (หน่วยของ mx/my/mw/mh/msize) — ⚠️ ตรงกับ CANVAS_MW ของเว็บร้าน */
 export const CANVAS_MOBILE_WIDTH = 400;
 
@@ -508,7 +519,7 @@ export function canvasBgPosFromWindow(win: { w: number; h: number }, left: numbe
 /* ─────────── แม่แบบผืน ─────────── */
 
 /** ช่องของผืนที่เก็บในแม่แบบ (ไม่รวม id/type/enabled/visibility ของ Section) */
-export const CANVAS_TEMPLATE_KEYS = ["height", "bgImageKey", "bgFit", "bgX", "bgY", "bgZoom", "bgMCustom", "bgMFit", "bgMX", "bgMY", "bgMZoom", "mobileAlign", "mobileMode", "mobileHeight", "style", "items"] as const;
+export const CANVAS_TEMPLATE_KEYS = ["height", "width", "bgImageKey", "bgFit", "bgX", "bgY", "bgZoom", "bgMCustom", "bgMFit", "bgMX", "bgMY", "bgMZoom", "mobileAlign", "mobileMode", "mobileHeight", "style", "items"] as const;
 
 /** เนื้อผืนสำหรับบันทึกเป็นแม่แบบ */
 export function canvasTemplateData(block: Record<string, unknown>): Record<string, unknown> {

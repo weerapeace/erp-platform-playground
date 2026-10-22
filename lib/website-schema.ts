@@ -38,6 +38,7 @@ import {
   CANVAS_WEIGHTS,
   CANVAS_EXPANDS,
   CANVAS_MAX_HEIGHT,
+  CANVAS_WIDTHS,
   CANVAS_SFX_FADES,
   CANVAS_SFX_ZOOMS,
   CANVAS_SCENE_INS,
@@ -1072,6 +1073,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         numMax: CANVAS_MAX_HEIGHT,
         step: 10,
         hint: "หน่วยเดียวกับตำแหน่งชิ้น (ผืนกว้าง 1200) · ลากแถบใต้ผืนในพรีวิวก็ได้",
+      }),
+      f("width", "ความกว้างผืน (คอม)", "select", {
+        group: "layout",
+        default: "normal",
+        options: CANVAS_WIDTHS.map(({ v, l }) => ({ v, l })),
+        hint: "กว้างขึ้น = ทุกชิ้นขยายตามจอ (ตำแหน่งที่จัดไว้ไม่เพี้ยน · จอใหญ่ตัวหนังสือใหญ่ตาม) · มือถือไม่มีผล",
       }),
       image("bgImageKey", "รูปพื้นหลังผืน", { hint: "เต็มความกว้างจอ · ไม่ใส่ = ใช้สีพื้นจากแท็บรูปลักษณ์" }),
       f("bgFit", "รูปพื้นหลัง: การวาง", "select", {

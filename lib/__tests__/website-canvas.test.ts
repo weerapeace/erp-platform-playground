@@ -626,3 +626,20 @@ describe("🎬 ฉากค้างแบบ Apple + ตารางสิน�
     expect(matchShowIf(fd, { layout: "grid", layoutMobile: "same" })).toBe(false);
   });
 });
+
+describe("ความกว้างผืน (ปกติ / กว้าง / เต็มจอ)", () => {
+  it("บันทึกผืน: เก็บค่าที่รู้จัก · ข้อมูลเก่า/ค่าแปลก = ปกติ", () => {
+    const [full] = normalizeBlocks([{ type: "canvas", width: "full", items: [] }]) as unknown as Record<string, unknown>[];
+    expect(full.width).toBe("full");
+    const [old] = normalizeBlocks([{ type: "canvas", items: [] }]) as unknown as Record<string, unknown>[];
+    expect(old.width).toBe("normal");
+    const [junk] = normalizeBlocks([{ type: "canvas", width: "huge", items: [] }]) as unknown as Record<string, unknown>[];
+    expect(junk.width).toBe("normal");
+  });
+
+  it("กว้างสุดบนจอ (px) · แม่แบบจำความกว้างด้วย", async () => {
+    const { canvasMaxPx, canvasTemplateData } = await import("../website-canvas");
+    expect([canvasMaxPx("normal"), canvasMaxPx("wide"), canvasMaxPx("full"), canvasMaxPx(undefined)]).toEqual([1200, 1600, Infinity, 1200]);
+    expect(canvasTemplateData({ height: 400, width: "full", items: [] }).width).toBe("full");
+  });
+});
