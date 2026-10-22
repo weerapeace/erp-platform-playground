@@ -20,7 +20,7 @@ import {
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
 import {
   categoryTree,
   categoryChoiceLabel,
@@ -41,7 +41,15 @@ import {
   removeFromNode,
   withSub,
   sameList,
+  addToTarget,
+  canAddTo,
+  crossFamily,
+  moveOut,
+  lacksSub,
+  shortcutTargets,
 } from "@/lib/website-category-sort";
+import { useUserPref } from "@/lib/use-user-pref";
+import { SearchPick } from "@/components/search-pick";
 import type {
   CategoryDef,
   Listing,
@@ -385,14 +393,20 @@ export function WebsiteCategorySorter({
   }, [rows, node]);
 
   const [q, setQ] = useState("");
+  // 🔃 เรียงในกอง (ต่อคน): ยังไม่มีหมวดย่อยขึ้นก่อน (ค่าเริ่ม) / ตามเดิม — เฉพาะหมวดที่มีหมวดย่อย
+  const [sortMode, setSortMode] = useUserPref<"nosub" | "default">("website_sorter_sort", "nosub", (v) => (v === "nosub" || v === "default" ? v : null));
   const items = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return listings.filter(
+    const list = listings.filter(
       (l) =>
         inNode(listOf.get(l.parentId) ?? [], node, cats) &&
         (!t || `${nameOf(l)} ${l.erpName} ${l.code}`.toLowerCase().includes(t)),
     );
-  }, [listings, listOf, node, cats, q]);
+    const main = node === NONE || nodeMain(node) ? null : mainOf(cats, node);
+    if (sortMode !== "nosub" || !main || !childCategories(cats, main).length) return list;
+    const lacks = (l: Listing) => (lacksSub(listOf.get(l.parentId) ?? [], main, cats) ? 0 : 1);
+    return [...list].sort((a, b) => lacks(a) - lacks(b));
+  }, [listings, listOf, node, cats, q, sortMode]);
 
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [last, setLast] = useState<number | null>(null);
@@ -425,8 +439,56 @@ export function WebsiteCategorySorter({
   const curMain = node === NONE ? null : (nodeMain(node) ?? mainOf(cats, node));
   const isSub = node !== NONE && !nodeMain(node) && mainOf(cats, node) !== node;
   const targets = useMemo(() => quickTargets(node, cats), [node, cats]);
+  // ⭐ หมวดโปรด (ต่อคน ต่อร้าน) — ปุ่มบนแถบต่อจากปลายทางปกติ (ปุ่มลัดเลขต่อกัน) · ปัก/ถอนจากช่องค้นหาหมวดอื่น
+  const [favRaw, setFavs] = useUserPref<string[]>(`website_sorter_favs_${shop.id}`, [], (v) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : null));
+  const favs = useMemo(() => favRaw.filter((k) => cats.some((c) => c.key === k)), [favRaw, cats]);
+  const favSet = useMemo(() => new Set(favs), [favs]);
+  const toggleFav = (k: string) => setFavs(favs.includes(k) ? favs.filter((x) => x !== k) : [...favs, k]);
+  const keyTargets = useMemo(() => shortcutTargets(targets, favs, node), [targets, favs, node]);
+  const favChips = keyTargets.slice(targets.length);
+  // ↪ ย้าย / ＋ เพิ่ม: ask = ถามทุกครั้ง · move / add = จำคำตอบไว้ (ต่อคน · เปลี่ยนที่ปุ่ม ⚙ บนแถบ)
+  const [pickMode, setPickMode] = useUserPref<"ask" | "move" | "add">("website_sorter_pick_mode", "ask", (v) => (v === "ask" || v === "move" || v === "add" ? v : null));
+  const [askFor, setAskFor] = useState<{ ids: string[]; target: string } | null>(null);
+  const [remember, setRemember] = useState(false);
+  const addTo = (ids: string[], target: string) => {
+    void change(
+      ids,
+      (list) => addToTarget(list, target, cats),
+      `เพิ่ม {n} ตัวเข้า ${labelOf(target)}`,
+      target,
+    );
+  };
   const move = (ids: string[], target: string) => {
     if (!ids.length || busy || target === node) return;
+    // มาจากกองยังไม่ได้จัด / ไปกองพิเศษ = ย้ายอย่างเดียว · ไม่งั้นถาม (หรือใช้คำตอบที่จำไว้)
+    if (canAddTo(node, target)) {
+      if (pickMode === "add") return addTo(ids, target);
+      if (pickMode === "move") return moveOutNow(ids, target);
+      setRemember(false);
+      setAskFor({ ids, target });
+      return;
+    }
+    moveNow(ids, target);
+  };
+  // ↪ ย้ายที่ผู้ใช้เลือกเอง = ออกจากที่อยู่ตอนนี้จริง (ข้ามตระกูล = ออกจากทั้งตระกูลเดิม · lib moveOut)
+  const moveOutNow = (ids: string[], target: string) => {
+    const from = node;
+    void change(
+      ids,
+      (list) => moveOut(list, from, target, cats),
+      `ย้าย {n} ตัวไป ${labelOf(target)}`,
+      target,
+    );
+  };
+  const answer = (how: "move" | "add") => {
+    const a = askFor;
+    setAskFor(null);
+    if (!a) return;
+    if (remember) setPickMode(how);
+    if (how === "add") addTo(a.ids, a.target);
+    else moveOutNow(a.ids, a.target);
+  };
+  const moveNow = (ids: string[], target: string) => {
     const from = node;
     void change(
       ids,
@@ -448,7 +510,7 @@ export function WebsiteCategorySorter({
 
   // ⌨️ เลข 1–9 = ย้ายไปชิปนั้น · Esc = ยกเลิกเลือก · Ctrl+Z = ย้อน (ไม่ทำงานตอนพิมพ์ในช่อง/มีหน้าต่างเปิดทับ)
   const [newCat, setNewCat] = useState<{ parent: string | null } | null>(null);
-  const blocked = paused || confirm1 || !!newCat;
+  const blocked = paused || confirm1 || !!newCat || !!askFor;
   useEffect(() => {
     if (blocked) return;
     const onKey = (e: KeyboardEvent) => {
@@ -474,11 +536,25 @@ export function WebsiteCategorySorter({
         Number.isInteger(n) &&
         n >= 1 &&
         n <= 9 &&
-        targets[n - 1] &&
+        keyTargets[n - 1] &&
         picked.length
       ) {
         e.preventDefault();
-        move(picked, targets[n - 1]);
+        move(picked, keyTargets[n - 1]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // ป๊อปถาม: M = ย้าย · A = เพิ่ม (Esc = ยกเลิก จัดการโดยป๊อปกลาง)
+  useEffect(() => {
+    if (!askFor) return;
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === "m" || k === "a") {
+        e.preventDefault();
+        answer(k === "m" ? "move" : "add");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -732,6 +808,27 @@ export function WebsiteCategorySorter({
                   · {items.length} ตัว
                 </span>
               </p>
+              {curMain && childCategories(cats, curMain).length > 0 && !nodeMain(node) && (
+                <>
+                  <label className="flex items-center gap-1 text-xs text-slate-500">
+                    เรียง
+                    <select value={sortMode} onChange={(e) => setSortMode(e.target.value === "default" ? "default" : "nosub")} className="h-7 rounded-lg border border-slate-200 px-1.5 text-xs">
+                      <option value="nosub">ยังไม่มีหมวดย่อยขึ้นก่อน</option>
+                      <option value="default">ตามเดิม</option>
+                    </select>
+                  </label>
+                  {(counts.get(nosubNode(curMain)) ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setNode(nosubNode(curMain))}
+                      title="ดูเฉพาะตัวที่ยังไม่มีหมวดย่อย"
+                      className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-800 hover:border-amber-500"
+                    >
+                      ⚠ ยังไม่มีหมวดย่อย {counts.get(nosubNode(curMain))}
+                    </button>
+                  )}
+                </>
+              )}
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -760,7 +857,7 @@ export function WebsiteCategorySorter({
                 <span className="mr-1 text-xs text-slate-600">
                   {picked.length ? (
                     <>
-                      ย้าย <b className="text-blue-700">{picked.length}</b>{" "}
+                      {node === NONE || pickMode === "move" ? "ย้าย" : pickMode === "add" ? "เพิ่ม" : "ย้าย/เพิ่ม"} <b className="text-blue-700">{picked.length}</b>{" "}
                       ตัวไป:
                     </>
                   ) : (
@@ -794,23 +891,47 @@ export function WebsiteCategorySorter({
                     ↩ ยังไม่มีหมวดย่อย
                   </button>
                 )}
-                <select
-                  value=""
-                  disabled={!picked.length || busy}
-                  onChange={(e) =>
-                    e.target.value && move(picked, e.target.value)
-                  }
-                  className={selectCls}
-                >
-                  <option value="">หมวดอื่น…</option>
-                  {treeRows
+                {/* ⭐ หมวดโปรด (ปุ่มลัดเลขต่อจากปลายทางปกติ) */}
+                {favChips.map((k, j) => {
+                  const i = targets.length + j;
+                  return (
+                    <button
+                      key={`fav-${k}`}
+                      type="button"
+                      disabled={!picked.length || busy}
+                      onClick={() => move(picked, k)}
+                      title="หมวดโปรด — ถอนได้ที่ ⭐ ในช่องค้นหาหมวดอื่น"
+                      className={`${chipCls} border-amber-300 bg-amber-50 text-amber-800 enabled:hover:border-amber-500`}
+                    >
+                      {i < 9 && <kbd className="rounded bg-white px-1 font-mono text-[10px] text-amber-700">{i + 1}</kbd>}⭐ {labelOf(k)}
+                    </button>
+                  );
+                })}
+                <SearchPick
+                  className="w-44"
+                  placeholder="หมวดอื่น… พิมพ์ค้นหา"
+                  disabled={busy}
+                  options={treeRows
                     .filter(({ cat }) => cat.key !== node)
-                    .map(({ cat }) => (
-                      <option key={cat.key} value={cat.key}>
-                        {categoryChoiceLabel(cat)}
-                      </option>
-                    ))}
-                </select>
+                    .map(({ cat }) => ({ value: cat.key, label: categoryChoiceLabel(cat), hint: cat.key, indent: !!cat.parent }))}
+                  starred={favSet}
+                  onToggleStar={toggleFav}
+                  onPick={(k) => {
+                    if (!picked.length) return toast.info("เลือกสินค้าก่อน แล้วค่อยเลือกหมวด");
+                    move(picked, k);
+                  }}
+                  emptyText="ไม่พบหมวด — กด + หมวดย่อยใหม่ ได้"
+                />
+                {node !== NONE && (
+                  <button
+                    type="button"
+                    onClick={() => setPickMode(pickMode === "ask" ? "move" : pickMode === "move" ? "add" : "ask")}
+                    title="เลือกหมวดแล้วจะทำอะไร — กดเพื่อสลับ: ถามทุกครั้ง → ย้ายเสมอ → เพิ่มเสมอ"
+                    className={`${chipCls} border-slate-300 bg-white text-slate-600 hover:border-slate-500`}
+                  >
+                    ⚙ {pickMode === "ask" ? "ถามย้าย/เพิ่ม" : pickMode === "move" ? "ย้ายเสมอ" : "เพิ่มเสมอ"}
+                  </button>
+                )}
                 {node !== NONE && (
                   <button
                     type="button"
@@ -890,11 +1011,16 @@ export function WebsiteCategorySorter({
                             ERP: {l.erpCategory || "—"}
                           </p>
                         ) : (
-                          extra.length > 0 && (
-                            <p className="mt-0.5 truncate text-[10px] text-blue-700">
-                              {extra.map(labelOf).join(" · ")}
-                            </p>
-                          )
+                          <>
+                            {curMain && !nodeMain(node) && lacksSub(list, curMain, cats) && (
+                              <p className="mt-0.5 truncate text-[10px] text-amber-700">⚠ ยังไม่มีหมวดย่อย</p>
+                            )}
+                            {extra.length > 0 && (
+                              <p className="mt-0.5 truncate text-[10px] text-blue-700">
+                                {extra.map(labelOf).join(" · ")}
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                     </button>
@@ -931,6 +1057,43 @@ export function WebsiteCategorySorter({
         confirmText="⚡ ใส่หมวด"
         loading={busy}
       />
+      <ERPModal
+        open={!!askFor}
+        onClose={() => setAskFor(null)}
+        title={askFor ? `ไปที่ "${labelOf(askFor.target)}" — ย้ายหรือเพิ่ม? (${askFor.ids.length} ตัว)` : ""}
+        size="sm"
+        resizable={false}
+      >
+        {askFor && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">สินค้าอยู่ได้หลายหมวด — เลือกว่าจะทำแบบไหน</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" autoFocus onClick={() => answer("move")} className="rounded-xl border border-slate-300 p-3 text-left hover:border-blue-500 hover:bg-blue-50">
+                <div className="text-sm font-semibold text-slate-800">
+                  ↪ ย้าย <kbd className="rounded bg-slate-100 px-1 font-mono text-[10px] text-slate-500">M</kbd>
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                  {crossFamily(node, askFor.target, cats)
+                    ? `ออกจาก ${labelOf(nodeMain(node) ?? mainOf(cats, node))} ไปอยู่ ${labelOf(askFor.target)} แทน`
+                    : mainOf(cats, askFor.target) !== askFor.target
+                      ? `เปลี่ยนหมวดย่อยเป็น ${labelOf(askFor.target)} (หมวดย่อยเดิมออก · ยังอยู่ ${labelOf(mainOf(cats, askFor.target))})`
+                      : `ออกจาก ${labelOf(node)} ไปอยู่ ${labelOf(askFor.target)} แทน`}
+                </div>
+              </button>
+              <button type="button" onClick={() => answer("add")} className="rounded-xl border border-slate-300 p-3 text-left hover:border-blue-500 hover:bg-blue-50">
+                <div className="text-sm font-semibold text-slate-800">
+                  ＋ เพิ่ม <kbd className="rounded bg-slate-100 px-1 font-mono text-[10px] text-slate-500">A</kbd>
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">คงหมวดเดิมไว้ + อยู่ใน {labelOf(askFor.target)} ด้วย</div>
+              </button>
+            </div>
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              จำคำตอบนี้ ไม่ต้องถามอีก (เปลี่ยนได้ที่ปุ่ม ⚙ บนแถบ)
+            </label>
+          </div>
+        )}
+      </ERPModal>
       {newCat && (
         <NewCategoryModal
           open

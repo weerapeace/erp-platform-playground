@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCat, groupByErp, guessWebCategory, inNode, isUnsorted, mainOf, moveToTarget, NONE, nosubNode, quickTargets, removeFromNode, sortedCats, withMain, withSub, withoutSubs, type SortCat } from "@/lib/website-category-sort";
+import { addCat, addToTarget, canAddTo, crossFamily, lacksSub, moveOut, shortcutTargets, groupByErp, guessWebCategory, inNode, isUnsorted, mainOf, moveToTarget, NONE, nosubNode, quickTargets, removeFromNode, sortedCats, withMain, withSub, withoutSubs, type SortCat } from "@/lib/website-category-sort";
 
 /** หมวดจริงของ Louis (ย่อ) */
 const CATS: SortCat[] = [
@@ -102,5 +102,68 @@ describe("ขั้น 2: กระดาน (กอง · ปลายทาง
     expect(sortedCats({ webCategories: null, categories: ["accessories"] })).toEqual([]);
     expect(sortedCats({ webCategories: ["bags"], categories: ["bags"] })).toEqual(["bags"]);
     expect(sortedCats({ webCategories: null, webCategory: "belts", categories: ["belts"] })).toEqual(["belts"]);
+  });
+});
+
+/** ↪ ย้าย / ＋ เพิ่ม — เจ้าของ: "มีหลายหมวดได้ เวลาเลือกหมวดอยากให้ถามว่าจะย้ายหรือจะเพิ่ม" */
+describe("addToTarget — เพิ่มเข้าหมวด (คงหมวดเดิม)", () => {
+  it("เพิ่มหมวดป้าย = ต่อท้าย หมวดหลักเดิมยังอยู่หน้า", () => {
+    expect(addToTarget(["belts", "belts-automatic-belts"], "men", CATS)).toEqual(["belts", "belts-automatic-belts", "men"]);
+    expect(addToTarget(["belts", "men"], "men", CATS)).toEqual(["belts", "men"]);
+  });
+  it("เพิ่มหมวดย่อยของแม่อื่น = ใส่แม่ด้วย (แม่ก่อนลูก) ไม่แตะหมวดเดิม", () => {
+    expect(addToTarget(["belts", "belts-automatic-belts"], "accessories-keychains", CATS)).toEqual(["belts", "belts-automatic-belts", "accessories", "accessories-keychains"]);
+  });
+  it("เพิ่มหมวดย่อยอีกอันในแม่เดียวกัน = อยู่ได้ 2 หมวดย่อย (ย้ายถึงจะตัดอันเดิม)", () => {
+    expect(addToTarget(["bags", "bags-tote-bags"], "bags-crossbody-bags", CATS)).toEqual(["bags", "bags-crossbody-bags", "bags-tote-bags"]);
+    expect(moveToTarget(["bags", "bags-tote-bags"], "bags-tote-bags", "bags-crossbody-bags", CATS)).toEqual(["bags", "bags-crossbody-bags"]);
+  });
+  it("หมวดหลัก (มีหมวดย่อย) = เพิ่มต่อท้าย ไม่แย่งหมวดหลัก · ย้าย = แทนหมวดหลักเดิม", () => {
+    expect(addToTarget(["belts", "belts-automatic-belts"], "wallets", CATS)).toEqual(["belts", "belts-automatic-belts", "wallets"]);
+    expect(moveToTarget(["belts", "belts-automatic-belts"], "belts", "wallets", CATS)).toEqual(["wallets"]);
+  });
+  it("กองพิเศษ = เพิ่มไม่ได้ (ไม่เปลี่ยน)", () => {
+    expect(addToTarget(["belts"], NONE, CATS)).toEqual(["belts"]);
+    expect(addToTarget(["belts", "belts-automatic-belts"], nosubNode("belts"), CATS)).toEqual(["belts", "belts-automatic-belts"]);
+  });
+  it("ถามได้เมื่อ: มาจากกองที่จัดแล้ว และปลายทางเป็นหมวดจริง", () => {
+    expect(canAddTo("belts", "men")).toBe(true);
+    expect(canAddTo(NONE, "men")).toBe(false);
+    expect(canAddTo("belts", NONE)).toBe(false);
+    expect(canAddTo("belts", nosubNode("belts"))).toBe(false);
+  });
+});
+
+describe("ยังไม่มีหมวดย่อย / หมวดโปรด", () => {
+  it("lacksSub — อยู่แม่ที่มีหมวดย่อยแต่ยังไม่ได้เลือกหมวดย่อย", () => {
+    expect(lacksSub(["belts"], "belts", CATS)).toBe(true);
+    expect(lacksSub(["belts", "belts-automatic-belts"], "belts", CATS)).toBe(false);
+    expect(lacksSub(["gifts"], "gifts", CATS)).toBe(false); // ไม่มีหมวดย่อยให้เลือก
+    expect(lacksSub(["wallets"], "belts", CATS)).toBe(false);
+  });
+  it("shortcutTargets — ปุ่มลัดต่อด้วยหมวดโปรดที่ไม่ซ้ำ ไม่รวมกองที่เปิดอยู่", () => {
+    expect(shortcutTargets(["belts-automatic-belts"], ["men", "belts-automatic-belts", "belts"], "belts")).toEqual(["belts-automatic-belts", "men"]);
+  });
+});
+
+describe("moveOut — ย้ายที่ผู้ใช้เลือกเอง (ออกจากที่เดิมจริง)", () => {
+  it("หมวดหลัก → หมวดป้าย = ออกจากทั้งตระกูลเดิม ป้ายขึ้นเป็นหมวดหลัก", () => {
+    expect(moveOut(["belts", "belts-automatic-belts"], "belts", "men", CATS)).toEqual(["men"]);
+    expect(crossFamily("belts", "men", CATS)).toBe(true);
+  });
+  it("จากหมวดย่อย → หมวดย่อยของแม่อื่น = ออกจากทั้งตระกูลเดิม · ป้ายอื่นคงไว้", () => {
+    expect(moveOut(["belts", "belts-automatic-belts", "men"], "belts-automatic-belts", "wallets-bifold-wallets", CATS)).toEqual(["wallets", "wallets-bifold-wallets", "men"]);
+  });
+  it("ในตระกูลเดียวกัน = กติกาเดิม (เปลี่ยนหมวดย่อย คงแม่)", () => {
+    expect(moveOut(["belts", "belts-automatic-belts", "men"], "belts", "belts-automatic-belts", CATS)).toEqual(["belts", "belts-automatic-belts", "men"]);
+    expect(crossFamily("belts-automatic-belts", "belts", CATS)).toBe(false);
+  });
+  it("ออกจากป้าย (ไม่ใช่หมวดหลัก) → ปลายทางต่อท้าย หมวดหลักเดิมคงไว้", () => {
+    expect(moveOut(["belts", "men"], "men", "gifts", CATS)).toEqual(["belts", "gifts"]);
+    expect(moveOut(["belts", "men"], "men", "wallets", CATS)).toEqual(["belts", "wallets"]);
+  });
+  it("กองยังไม่ได้จัด / ไปกองพิเศษ = กติกาเดิม", () => {
+    expect(moveOut([], NONE, "men", CATS)).toEqual(moveToTarget([], NONE, "men", CATS));
+    expect(moveOut(["belts", "belts-automatic-belts"], "belts-automatic-belts", nosubNode("belts"), CATS)).toEqual(["belts"]);
   });
 });

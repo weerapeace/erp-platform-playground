@@ -143,3 +143,59 @@ export function removeFromNode(list: string[], node: string, cats: SortCat[]): s
   const drop = new Set(m ? [m] : mainOf(cats, node) === node ? familyKeys(cats, node) : [node]);
   return list.filter((k) => !drop.has(k));
 }
+
+/* ───────── ย้าย / เพิ่ม (สินค้าอยู่ได้หลายหมวด) ───────── */
+
+/**
+ * "เพิ่ม" เข้าหมวด — คงหมวดเดิมทั้งหมด (หมวดหลักเดิมยังเป็นหมวดหลัก)
+ *   หมวดย่อย = ใส่แม่ด้วยถ้ายังไม่มี (แม่ก่อนลูก) · อยู่หมวดย่อยอื่นของแม่เดียวกันได้พร้อมกัน
+ *   หมวดชั้นบน = ต่อท้าย · กองพิเศษ (ยังไม่ได้จัด / ยังไม่มีหมวดย่อย) = ไม่เปลี่ยน (ใช้ "ย้าย")
+ */
+export function addToTarget(list: string[], target: string, cats: SortCat[]): string[] {
+  if (target === NONE || nodeMain(target)) return list;
+  const parent = mainOf(cats, target);
+  if (parent === target) return addCat(list, target);
+  if (!list.length) return [parent, target];
+  const out = list.includes(parent) ? [...list] : [...list, parent];
+  if (out.includes(target)) return out;
+  const i = out.indexOf(parent);
+  return [...out.slice(0, i + 1), target, ...out.slice(i + 1)];
+}
+
+/** ถาม "ย้าย / เพิ่ม" ได้ไหม — มาจากกองยังไม่ได้จัด หรือไปกองพิเศษ = ย้ายอย่างเดียว (เพิ่มกับย้ายได้ผลเท่ากัน/ไม่มีความหมาย) */
+export const canAddTo = (from: string, target: string): boolean => from !== NONE && target !== NONE && !nodeMain(target);
+
+/** สินค้าอยู่หมวดแม่นี้แต่ "ยังไม่มีหมวดย่อย" (เฉพาะแม่ที่มีหมวดย่อย) — ใช้เรียง/ป้ายบนการ์ด */
+export function lacksSub(list: string[], mainKey: string, cats: SortCat[]): boolean {
+  const subs = childCategories(cats, mainKey).map((c) => c.key);
+  return subs.length > 0 && list.includes(mainKey) && !list.some((k) => subs.includes(k));
+}
+
+/** ปุ่มลัดเลข 1–9 = ปลายทางปกติ ต่อด้วยหมวดโปรดที่ยังไม่ซ้ำ (ไม่รวมกองที่เปิดอยู่) */
+export function shortcutTargets(quick: string[], favs: string[], node: string): string[] {
+  return [...quick, ...favs.filter((k) => k !== node && !quick.includes(k))];
+}
+
+/**
+ * "ย้าย" ที่ผู้ใช้เลือกเอง (ป๊อปถาม / จำคำตอบ "ย้ายเสมอ") — ออกจากที่อยู่ตอนนี้จริง ๆ
+ *   ในตระกูลเดียวกัน (เช่น หมวดย่อย → หมวดย่อยของแม่เดียวกัน) = กติกาเดิม moveToTarget
+ *   ข้ามตระกูล = ออกจากทั้งตระกูลเดิม (แม่ + หมวดย่อย / ป้ายเดิม) แล้วเข้าปลายทาง
+ *     ตระกูลเดิมเป็นหมวดหลัก (ตัวแรก) → ปลายทางขึ้นเป็นหมวดหลักแทน · ไม่ใช่ → ต่อท้าย (หมวดหลักเดิมคงไว้)
+ *   (moveToTarget เดิมย้ายไป "หมวดป้าย" = เพิ่มป้าย ไม่ออกจากหมวดเดิม — ใช้กับกองยังไม่ได้จัด/ไม่ถาม)
+ */
+export function moveOut(list: string[], from: string, target: string, cats: SortCat[]): string[] {
+  if (from === NONE || target === NONE || nodeMain(target)) return moveToTarget(list, from, target, cats);
+  const fromMain = nodeMain(from) ?? mainOf(cats, from);
+  const targetMain = mainOf(cats, target);
+  if (fromMain === targetMain) return moveToTarget(list, from, target, cats);
+  const drop = new Set(familyKeys(cats, fromMain));
+  const wasMain = !!list[0] && drop.has(list[0]);
+  const rest = list.filter((k) => !drop.has(k));
+  if (!wasMain) return addToTarget(rest, target, cats);
+  const head = targetMain === target ? [target] : [targetMain, target];
+  return [...head, ...rest.filter((k) => !head.includes(k))];
+}
+
+/** ย้ายข้ามตระกูลไหม (ป๊อปบอกว่าจะออกจากหมวดไหน) */
+export const crossFamily = (from: string, target: string, cats: SortCat[]): boolean =>
+  from !== NONE && (nodeMain(from) ?? mainOf(cats, from)) !== mainOf(cats, target);
