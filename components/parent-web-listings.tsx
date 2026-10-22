@@ -639,7 +639,8 @@ export function ParentWebListings({
               >
                 {on ? "✓ " : ""}
                 {c.label}
-                {ref ? ` "${ref}"` : ""}
+                {/* ลบรหัส = รหัสแบบเดียวกันทุกตัว (PIX13 → PIX ทุกเลข · website-field-map removeCodes) */}
+                {ref ? (c.flag === "removeCode" && /^[A-Za-z]{2,}\d/.test(ref) ? ` "${ref.match(/^[A-Za-z]+/)![0]}…" ทุกตัว` : ` "${ref}"`) : ""}
               </button>
             );
           })}

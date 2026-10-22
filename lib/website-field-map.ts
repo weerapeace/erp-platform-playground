@@ -404,6 +404,17 @@ function removeTerm(text: string, term: string): string {
   return text.replace(new RegExp(`(?<![A-Za-z0-9])${escRe(t)}(?![A-Za-z0-9])`, "gi"), " ");
 }
 
+/**
+ * ลบรหัสสินค้า: รหัสของตัวเอง + รหัสแบบเดียวกันทุกตัว (ตัวอักษรนำหน้าเดียวกัน + ตัวเลขติดกัน เช่น PIX13 → ตัด PIX04 / PIX10-BELT ด้วย)
+ * เพราะชื่อใน ERP บางรุ่นติดรหัสของรุ่นอื่น (เช่น PIX13 ชื่อลงท้าย PIX14) · มีช่องว่างคั่นตัวเลข (เช่น "ROAR 2000s") = ไม่ใช่รหัส ไม่ตัด
+ */
+function removeCodes(text: string, code: string): string {
+  let out = removeTerm(text, code);
+  const prefix = /^[A-Za-z]{2,}(?=\d)/.exec(clean(code))?.[0];
+  if (prefix) out = out.replace(new RegExp(`(?<![A-Za-z0-9])${escRe(prefix)}\\d+(?:-[A-Za-z0-9]+)*(?![A-Za-z0-9])`, "gi"), " ");
+  return out;
+}
+
 /** เก็บกวาดหลังลบคำ: วงเล็บ/เครื่องหมายคำพูดที่ว่างเปล่า · ช่องว่างซ้อน · ขีด/จุดที่ค้างหัว-ท้าย */
 function tidyName(text: string): string {
   return text
@@ -411,7 +422,7 @@ function tidyName(text: string): string {
     .replace(/(['"])\s*\1|‘\s*’|“\s*”/g, " ")
     .replace(/\s+([,·|])/g, "$1")
     .replace(/\s{2,}/g, " ")
-    .replace(/^[\s\-–—:·|,/]+|[\s\-–—:·|,/]+$/g, "")
+    .replace(/^[\s\-–—:·|,/&+]+|[\s\-–—:·|,/&+]+$/g, "")
     .trim();
 }
 
@@ -451,7 +462,7 @@ function applyNameRule(map: FieldMap, parent: ParentRow, raw: string): string {
   else if (r.removeParenMarks) name = name.replace(/[()[\]]/g, " ");
   if (r.removeBrand && parent.brand_name) name = removeTerm(name, parent.brand_name);
   if (r.removeCollection && parent.collection_name) name = removeTerm(name, parent.collection_name);
-  if (r.removeCode && parent.code) name = removeTerm(name, parent.code);
+  if (r.removeCode && parent.code) name = removeCodes(name, parent.code);
   if (NAME_RULE_FLAGS.some((f) => r[f])) name = tidyName(name);
   return name || raw;
 }
