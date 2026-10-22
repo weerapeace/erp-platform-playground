@@ -33,6 +33,8 @@
 | `layout` | `icon` การ์ดไอคอน (แบบเดิม — บล็อกเก่าไม่เปลี่ยน) · `tile` รูปใหญ่ ชื่อทับรูป · `row` รูปเล็ก+ชื่อ เรียงแถวมีเส้นคั่น · `text` ตัวอักษร |
 | `cats` | หมวดที่โชว์ เรียงตามที่เลือก (ช่องชนิด `categories` ใน schema) — ว่าง = ทุกหมวด |
 | `catImg` | 🖼 รูปบนการ์ดรายหมวด เฉพาะ Section นี้ `{ รหัสหมวด: r2 key }` (ช่องซ่อนชนิด `categoryImages`) — ไม่มี = รูปหมวดจากแท็บ 📂 · เว็บร้าน CategoriesView ใช้แทน `imageKey` |
+| `catName` | ✏️ ชื่อบนการ์ดรายหมวด เฉพาะ Section นี้ `{ รหัสหมวด: ชื่อ }` (ช่องซ่อนชนิด `categoryNames` · ≤60 ตัว · ใช้ทั้ง 2 ภาษา) — ไม่มี = ชื่อหมวดเดิม (2026-10-22) |
+| `nameFont` `nameSize` `nameColor` `nameColorHex` | 🔤 หน้าตาชื่อหมวดทุกแบบแสดง — ค่าเริ่ม display (ฟอนต์หัวข้อธีม) · 100% · auto = หน้าตาเดิม · ขนาด = ห่อชื่อด้วย `<span font-size %>` (คลาสขนาด/จอมือถือเดิมยังทำงาน) · ฟอนต์นอกธีมโหลด `<link precedence>` ใน CategoriesView |
 | `columns` `ratio` `textPos` `cta` `tileText` `textStyle` `upper` `showAll` `allText` | ปรับตามแบบ (ดู `SECTION_SCHEMAS.categories`) |
 
 - ERP ช่อง "หมวดที่โชว์" = `components/website-categories-field.tsx` (2026-10-18 แบบ A ที่เจ้าของเลือก): แถวเฉพาะหมวดที่เลือก (รูปย่อ+ชื่อ) ลาก ⠿ เรียง · ✕ เอาออก (ล้างรูปของหมวดนั้นด้วย) · ＋ เลือกหมวด = ป๊อปติ๊กต้นไม้+ค้นหา · 🖼 = ตั้งรูปบนการ์ด: ⬆ อัปโหลด/ลากรูปมาวางที่แถว (เข้าคลังรูป) · คลังรูป (AssetPicker) · รูปสินค้าในหมวด (ImageChooser `initialView="products"` + `categoryKeys` · สลับดูทั้งร้านได้) · ↺ ใช้รูปหมวดเดิม · API layout/pages ส่ง `imageKey`/`icon` ของหมวดมาให้รูปย่อ

@@ -6,9 +6,10 @@
  * - แถวเฉพาะหมวดที่เลือก (รูปย่อ + ชื่อ) · ลาก ⠿ เรียงลำดับ · ✕ เอาออก · ＋ เลือกหมวด = ป๊อปติ๊กแบบต้นไม้ + ค้นหา
  * - 🖼 = กางตั้ง "รูปบนการ์ด" ของหมวดนั้น เฉพาะ Section นี้: ⬆ อัปโหลด (หรือลากรูปมาวางที่แถว) · คลังรูป ·
  *   รูปสินค้าในหมวด · ↺ ใช้รูปหมวดเดิม (รูปจากแท็บ 📂 หมวดหมู่)
+ * - ✏️ = แก้ "ชื่อที่โชว์" ของหมวดนั้น เฉพาะ Section นี้ (ว่าง = ชื่อจากแท็บ 📂 หมวดหมู่)
  * - ไม่เลือกเลย = ทุกหมวดหลัก (เหมือนเดิม)
- * เก็บ: <fieldKey> = รหัสหมวด[] (ช่องเดิม) · catImg = { รหัสหมวด: r2 key } (ช่องซ่อน categoryImages)
- *   → เว็บร้าน CategoriesView ใช้ catImg แทนรูปหมวด · เอาหมวดออก = ล้างรูปของหมวดนั้นด้วย
+ * เก็บ: <fieldKey> = รหัสหมวด[] (ช่องเดิม) · catImg = { รหัสหมวด: r2 key } (ช่องซ่อน categoryImages) · catName = { รหัสหมวด: ชื่อ } (categoryNames)
+ *   → เว็บร้าน CategoriesView ใช้ catImg/catName แทนรูป/ชื่อหมวด · เอาหมวดออก = ล้างรูป/ชื่อของหมวดนั้นด้วย
  * ของกลางที่ใช้: ERPModal · AssetPicker · ImageChooser (รูปสินค้าในหมวด) · useDragReorder · useFileDrop
  */
 import { useMemo, useRef, useState } from "react";
@@ -24,6 +25,7 @@ type Cat = { key: string; label: string; parent?: string | null; imageKey?: stri
 
 /** ช่องซ่อนที่เก็บรูปรายหมวด (ต้องตรงกับ schema Section categories) */
 const IMG_FIELD = "catImg";
+const NAME_FIELD = "catName";
 const imgUrl = (k: string, w = 120) => `/api/r2-image?key=${encodeURIComponent(k)}&w=${w}`;
 const btnCls = "w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left text-[11px] text-slate-700 hover:border-blue-400 disabled:opacity-50";
 
@@ -53,6 +55,12 @@ export function WebsiteCategoriesField({
     return (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, string>;
   };
   const imgs = imgsOf(item);
+  const namesOf = (it: Record<string, unknown>) => {
+    const v = it[NAME_FIELD];
+    return (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, string>;
+  };
+  const names = namesOf(item);
+  const [editKey, setEditKey] = useState<string | null>(null);
   const byKey = useMemo(() => new Map(categories.map((c) => [c.key, c])), [categories]);
   const tops = useMemo(() => topCategories(categories), [categories]);
 
@@ -68,7 +76,15 @@ export function WebsiteCategoriesField({
     // เอาหมวดออก = ล้างรูปที่ตั้งไว้ของหมวดนั้นด้วย (ไม่ให้ค้างในข้อมูล)
     const cur = imgsOf(itemRef.current);
     const keep = Object.fromEntries(Object.entries(cur).filter(([k]) => next.includes(k)));
-    onPatch({ [fieldKey]: next, [IMG_FIELD]: keep });
+    const keepNames = Object.fromEntries(Object.entries(namesOf(itemRef.current)).filter(([k]) => next.includes(k)));
+    onPatch({ [fieldKey]: next, [IMG_FIELD]: keep, [NAME_FIELD]: keepNames });
+  };
+  /** ชื่อที่โชว์ของหมวดนี้ใน Section นี้ (ว่าง = กลับไปใช้ชื่อหมวดเดิม) */
+  const setName = (key: string, name: string) => {
+    const n = { ...namesOf(itemRef.current) };
+    if (name.trim()) n[key] = name.slice(0, 60);
+    else delete n[key];
+    onPatch({ [NAME_FIELD]: n });
   };
   const setImg = (key: string, r2: string | null) => {
     const n = { ...imgsOf(itemRef.current) };
@@ -152,10 +168,42 @@ export function WebsiteCategoriesField({
                     )}
                   </span>
                   <span className="flex-1 min-w-0">
-                    <span className={`block truncate text-[13px] ${c ? "text-slate-800" : "text-red-600"}`}>{c ? c.label : `${k} (หมวดถูกลบแล้ว)`}</span>
-                    {c?.parent && <span className="block truncate text-[10px] text-slate-400">ใน {byKey.get(c.parent)?.label ?? c.parent}</span>}
+                    {c && editKey === k ? (
+                      <input
+                        autoFocus
+                        value={names[k] ?? ""}
+                        placeholder={c.label}
+                        maxLength={60}
+                        onChange={(e) => setName(k, e.target.value)}
+                        onBlur={() => setEditKey(null)}
+                        onKeyDown={(e) => (e.key === "Enter" || e.key === "Escape") && setEditKey(null)}
+                        className="w-full rounded border border-blue-400 px-1.5 py-0.5 text-[13px] focus:outline-none"
+                      />
+                    ) : (
+                      <span className={`block truncate text-[13px] ${c ? "text-slate-800" : "text-red-600"}`}>{c ? names[k] || c.label : `${k} (หมวดถูกลบแล้ว)`}</span>
+                    )}
+                    {c && names[k] && editKey !== k ? (
+                      <span className="block truncate text-[10px] text-slate-400">
+                        ชื่อเดิม: {c.label}{" "}
+                        <button type="button" onClick={() => setName(k, "")} className="text-blue-600 hover:underline">
+                          ↺ ใช้ชื่อเดิม
+                        </button>
+                      </span>
+                    ) : (
+                      c?.parent && <span className="block truncate text-[10px] text-slate-400">ใน {byKey.get(c.parent)?.label ?? c.parent}</span>
+                    )}
                   </span>
                   {own && <span className="shrink-0 rounded bg-violet-100 px-1.5 text-[10px] text-violet-700">รูปเอง</span>}
+                  {c && (
+                    <button
+                      type="button"
+                      onClick={() => setEditKey(editKey === k ? null : k)}
+                      title="แก้ชื่อที่โชว์ของหมวดนี้ (เฉพาะ Section นี้ · ว่าง = ชื่อเดิม)"
+                      className={`shrink-0 rounded-md px-1.5 py-0.5 text-sm ${names[k] ? "text-blue-600" : "text-slate-500"} hover:bg-slate-100`}
+                    >
+                      ✏️
+                    </button>
+                  )}
                   {c && (
                     <button
                       type="button"

@@ -75,6 +75,7 @@ export type FieldType =
   | "categories" // หลายหมวด เรียงตามที่เลือก (key[]) — ว่าง = ทุกหมวด
   | "videoFile" // ไฟล์วิดีโอที่อัปโหลดเอง (r2 key) — ช่องอัปโหลดคลิป (ไฟล์เล็กผ่าน ERP · ไฟล์ใหญ่ส่งตรงเข้า R2)
   | "categoryImages" // รูปแทนรายหมวด { รหัสหมวด: r2 key } — ตั้งในช่อง categories ของ Section เดียวกัน (ไม่วาดช่องแยก · ต้อง hidden)
+  | "categoryNames" // ชื่อแทนรายหมวด { รหัสหมวด: ชื่อ } — ตั้งในช่อง categories ของ Section เดียวกัน (✏️ ที่แถว · ต้อง hidden)
   | "productImages" // รูปรายรุ่น { รหัสรุ่น: r2 key } — ตั้งที่แถวของช่อง products ที่มี rowImages (ไม่วาดช่องแยก · ต้อง hidden)
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
   | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
@@ -2879,9 +2880,11 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         ],
         hint: "รูปของแต่ละหมวดตั้งที่แท็บ 📂 หมวดหมู่ (ไม่มีรูป = ใช้ไอคอน)",
       }),
-      f("cats", "หมวดที่โชว์", "categories", { group: "content", wide: true, hint: "ไม่เลือก = ทุกหมวดหลัก ตามลำดับในแท็บ 📂 หมวดหมู่ · ลาก ⠿ เรียงลำดับ · 🖼 = ตั้งรูปบนการ์ดเฉพาะ Section นี้ (ไม่ตั้ง = รูปหมวดจากแท็บ 📂)" }),
+      f("cats", "หมวดที่โชว์", "categories", { group: "content", wide: true, hint: "ไม่เลือก = ทุกหมวดหลัก ตามลำดับในแท็บ 📂 หมวดหมู่ · ลาก ⠿ เรียงลำดับ · ✏️ = แก้ชื่อที่โชว์ · 🖼 = ตั้งรูปบนการ์ด (ทั้งสองอย่างเฉพาะ Section นี้ · ไม่ตั้ง = ตามแท็บ 📂)" }),
       // รูปแทนรายหมวด (แก้ในช่อง "หมวดที่โชว์" ด้านบน) — หน้าร้านใช้แทน imageKey ของหมวด
       f("catImg", "รูปบนการ์ดรายหมวด", "categoryImages", { group: "content", hidden: true, default: {} }),
+      // ชื่อแทนรายหมวด (✏️ ในช่อง "หมวดที่โชว์") — หน้าร้านใช้แทนชื่อหมวด (ทั้ง 2 ภาษา) · ไม่ตั้ง = ชื่อจากแท็บ 📂
+      f("catName", "ชื่อบนการ์ดรายหมวด", "categoryNames", { group: "content", hidden: true, default: {} }),
       f("subs", "หมวดย่อยใต้การ์ด", "select", {
         group: "content",
         default: "none",
@@ -2959,6 +2962,11 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         showIf: { key: "layout", eq: "text" },
       }),
       f("upper", "ชื่อหมวดตัวพิมพ์ใหญ่ (อังกฤษ)", "toggle", { group: "layout", default: false }),
+      // 🔤 หน้าตาชื่อหมวด (ทุกแบบแสดง) — ค่าเริ่ม = ฟอนต์หัวข้อธีม · 100% · สีเดิม = หน้าตาเดิม
+      f("nameFont", "ฟอนต์ชื่อหมวด", "select", { group: "layout", default: "display", options: CANVAS_FONTS, display: "font" }),
+      f("nameSize", "ขนาดชื่อหมวด (%)", "range", { group: "layout", default: 100, min: 60, numMax: 250, step: 5, hint: "100 = ปกติ · มือถือย่อตามสัดส่วนเดิม" }),
+      f("nameColor", "สีชื่อหมวด", "select", { group: "layout", default: "auto", options: [{ v: "auto", l: "ตามเดิม (การ์ดรูปใหญ่ = ตาม \"สีตัวอักษรบนรูป\")" }, ...CANVAS_COLORS] }),
+      f("nameColorHex", "สีชื่อหมวด (เลือกเอง)", "color", { group: "layout", default: "", showIf: { key: "nameColor", eq: "custom" } }),
       f("showAll", "ปุ่ม \"ดูทั้งหมด\"", "toggle", { group: "action", default: true }),
       f("allText", "ข้อความปุ่มดูทั้งหมด", "text", { group: "action", default: "ดูทั้งหมด →", max: 40, showIf: { key: "showAll", eq: true } }),
     ],
@@ -3263,6 +3271,7 @@ export function defaultForType(t: FieldType): unknown {
     case "categories":
       return [];
     case "categoryImages":
+    case "categoryNames":
     case "productImages":
       return {};
     case "crop":

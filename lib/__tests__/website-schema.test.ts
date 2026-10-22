@@ -667,3 +667,20 @@ describe("✨ ของตกแต่งของ Section — ลาย/รู�
     expect([sh.ratio, sh.kind, tx.text, tx.font]).toEqual([0.04, "shape", "New!", "Parisienne"]);
   });
 });
+
+describe("📂 หมวดสินค้า — ชื่อเองรายหมวด + ฟอนต์/ขนาด/สีชื่อหมวด", () => {
+  it("ไม่ตั้ง = ชื่อเดิม · ฟอนต์หัวข้อธีม 100% สีเดิม (หน้าตาเดิม)", () => {
+    const [n] = normalizeBlocks([{ id: "c1", type: "categories" }]) as unknown as Record<string, unknown>[];
+    expect([n.catName, n.nameFont, n.nameSize, n.nameColor, n.nameColorHex]).toEqual([{}, "display", 100, "auto", ""]);
+  });
+  it("ชื่อว่าง/รหัสแปลกถูกทิ้ง · ยาวสุด 60 ตัว · ฟอนต์แปลก = ค่าเริ่ม", () => {
+    const [n] = normalizeBlocks([
+      { id: "c2", type: "categories", catName: { wallets: "Wallet & Purse", charms: "   ", "": "x", "bad key!": "y", bags: "A".repeat(80) }, nameFont: "Comic Sans", nameSize: 999, nameColor: "brand" },
+    ]) as unknown as Record<string, unknown>[];
+    const names = n.catName as Record<string, string>;
+    expect(names.wallets).toBe("Wallet & Purse");
+    expect(names.charms).toBeUndefined();
+    expect(names.bags.length).toBe(60);
+    expect([n.nameFont, n.nameSize, n.nameColor]).toEqual(["display", 250, "brand"]);
+  });
+});

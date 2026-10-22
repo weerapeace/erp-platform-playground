@@ -1310,6 +1310,19 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
     }
     case "skus":
       return Array.isArray(v) ? [...new Set(v.map((x) => skuRefStr(x)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
+    case "categoryNames": {
+      // { รหัสหมวด: ชื่อ } — ชื่อว่าง/รหัสใช้ไม่ได้ถูกตัดทิ้ง · ชื่อยาวสุด 60 ตัว · สูงสุด 80 หมวด
+      const out: Record<string, string> = {};
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 80)) {
+          const key = codeStr(k, 40).toLowerCase();
+          // ไม่ตัดช่องว่างหัว/ท้ายที่นี่ (กำลังพิมพ์อยู่ก็ผ่านตัวนี้ — เว็บร้าน trim ตอนโชว์)
+          const name = typeof x === "string" ? x.replace(/\s+/g, " ").slice(0, 60) : "";
+          if (key && name.trim()) out[key] = name;
+        }
+      }
+      return out;
+    }
     case "productImages": {
       // { รหัสรุ่น: r2 key } — รหัส/รูปที่ใช้ไม่ได้ถูกตัดทิ้ง · สูงสุด 24 รุ่น
       const out: Record<string, string> = {};
