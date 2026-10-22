@@ -109,6 +109,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
   const layoutSource = preview && s.home_layout_draft != null ? s.home_layout_draft : s.home_layout;
   const theme = normalizeTheme(themeSource);
+  // 🎟️ คูปองครั้งหน้าในหน้าขอบคุณ (theme.page.thanks.coupon) — ส่งเฉพาะโค้ดที่เปิดอยู่ ไม่หมดอายุ ไม่ครบจำนวน และใช้ได้ทุกคน
+  const thanksCoupon = await (async () => {
+    const code = theme.page.thanks.coupon;
+    if (!code) return null;
+    const cp = await loadCouponByCode(sb, s.id, code);
+    if (!cp || cp.membersOnly || cp.newCustomersOnly || cp.minTier || cp.referrerId) return null;
+    const ok = evaluateCoupon(cp, Math.max(cp.minSubtotal, 1000), await couponUsage(sb, cp));
+    return ok && ok.ok ? { code: cp.code, label: couponLabel(cp), endsAt: cp.endsAt } : null;
+  })();
   // 🔍 คำยอดนิยม (ค้นหาเต็มจอตอนยังไม่พิมพ์) — เฉพาะร้านที่เปิด page.searchEmpty · คำที่ร้านตั้ง + คำที่ลูกค้าค้นจริงบ่อยและหาเจอ
   const popularSearches = theme.page.searchEmpty !== "cats" ? mergePopularTerms(popularTermsOf(fullInfo.search_popular), await readSearchTerms(sb, s.id, 30)) : undefined;
 
@@ -119,6 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     preview,
     theme,
     ...(popularSearches ? { popularSearches } : {}),
+    ...(thanksCoupon ? { thanksCoupon } : {}),
     /** โครงหน้าแรก — [] = ยังไม่เคยตั้ง ให้เว็บใช้โครงเริ่มต้นของตัวเอง */
     // normalize ก่อนส่ง: เติม id ให้ Block ย่อยเหมือนที่ตัวจัดหน้าเห็น (บล็อกชนิดเก่าของร้านอื่นถูกเก็บไว้ทั้งก้อน)
     layout: normalizeBlocks(layoutSource),

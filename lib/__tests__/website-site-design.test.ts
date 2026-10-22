@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeTheme, mergeTheme, themeFontNames } from "../website-theme";
-import { DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeChatLook, normalizeCookieLook, normalizeMobileNav, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
+import { DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeChatLook, normalizeCookieLook, normalizeLogin, normalizeMobileNav, normalizeNotFound, normalizePopup, normalizeShare, normalizeThanks, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
 import { popularTermsOf } from "../website-site-info";
 import { mergePopularTerms } from "../website-search-terms";
 import { sanitizeStyle, MOTION_ENTRANCES } from "../website-blocks";
@@ -130,5 +130,39 @@ describe("มือถือและช่วยขาย (ชุด 3)", () =>
     ];
     expect(mergePopularTerms(["กระเป๋าสตางค์", "เข็มขัด"], stats)).toEqual(["กระเป๋าสตางค์", "เข็มขัด", "wallet"]);
     expect(mergePopularTerms([], [])).toEqual([]);
+  });
+});
+
+/** 📄 หน้าพิเศษ (ชุด 4) — 404 · ขอบคุณ · ป๊อปอัป · รูปแชร์ · เข้าสู่ระบบ */
+describe("หน้าพิเศษ", () => {
+  it("ธีมเก่า = หน้าตาเดิมทั้ง 5 หน้า", () => {
+    const p = normalizeTheme({}).page;
+    expect(p.notFound).toEqual({ style: "plain", imageKey: null, title: "", text: "", search: false, products: false });
+    expect(p.thanks).toEqual({ top: "emoji", imageKey: null, coupon: "", follow: false, products: false });
+    expect(p.popup).toEqual({ layout: "center", imageKey: null, trigger: "delay", again: "once" });
+    expect(p.share).toEqual({ style: "photo", bg: "paper" });
+    expect(p.login).toEqual({ layout: "center", imageKey: null, title: "", text: "" });
+    expect([p.notFound, p.thanks, p.popup, p.share, p.login]).toEqual([DEFAULT_SITE_PAGE.notFound, DEFAULT_SITE_PAGE.thanks, DEFAULT_SITE_PAGE.popup, DEFAULT_SITE_PAGE.share, DEFAULT_SITE_PAGE.login]);
+  });
+
+  it("ค่าที่เลือกรอดการบันทึก (รวมคำแปลอังกฤษ)", () => {
+    const page = {
+      notFound: { style: "big", imageKey: "website/404.jpg", title: "หลงทาง", title_en: "Lost", text: "ลองค้นหา", search: true, products: true },
+      thanks: { top: "image", imageKey: "website/thanks.png", coupon: "BACK10", follow: true, products: true },
+      popup: { layout: "split", imageKey: "website/pop.webp", trigger: "exit", again: "7d" },
+      share: { style: "card", bg: "ink" },
+      login: { layout: "cover", imageKey: "website/login.jpg", title: "ยินดีต้อนรับ", text: "สะสมแต้ม", text_en: "Earn points" },
+    };
+    const back = normalizeTheme(mergeTheme({}, normalizeTheme({ page })));
+    expect(back.page).toMatchObject(page);
+  });
+
+  it("ค่าแปลก/อันตราย = กลับเป็นแบบเดิม · คีย์รูปต้องเป็นคีย์ R2 ปลอดภัย · โค้ดคูปองตัวใหญ่", () => {
+    expect(normalizeNotFound({ style: "huge", imageKey: "../secret", search: "yes", title: "x".repeat(99) })).toMatchObject({ style: "plain", imageKey: null, search: false, title: "x".repeat(80) });
+    expect(normalizeNotFound({ imageKey: "https://evil.com/a.jpg" }).imageKey).toBeNull();
+    expect(normalizeThanks({ top: "gif", coupon: " back-10 ฿ ", follow: 1 })).toMatchObject({ top: "emoji", coupon: "BACK-10", follow: false });
+    expect(normalizePopup({ layout: "full", trigger: "click", again: "daily" })).toEqual({ layout: "center", imageKey: null, trigger: "delay", again: "once" });
+    expect(normalizeShare({ style: "video", bg: "red" })).toEqual({ style: "photo", bg: "paper" });
+    expect(normalizeLogin({ layout: "side", title_en: "   " })).toEqual({ layout: "center", imageKey: null, title: "", text: "" });
   });
 });

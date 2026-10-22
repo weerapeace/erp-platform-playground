@@ -5,7 +5,9 @@
  * ค่าเก็บที่ theme.page / theme.shape / theme.header.iconStyle (lib/website-site-design · มิเรอร์เว็บร้าน src/lib/site-design.ts)
  * เว็บร้านวาดเป็น CSS ที่ src/lib/site-design-css.ts · ค่าเริ่มต้นทุกตัว = หน้าตาเดิม
  */
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { apiFetch } from "@/lib/api";
+import { ImageInput } from "@/components/image-input";
 import { RangeInput } from "@/components/range-input";
 import { LangInput } from "@/components/bilingual-field";
 import {
@@ -568,6 +570,221 @@ export function SiteSalesSetting({ value, onChange }: { value: SitePageDesign; o
           </div>
         </div>
         <p className="text-[11px] text-slate-400 mt-1">ปุ่ม &quot;เฉพาะที่จำเป็น&quot; อยู่ข้างปุ่ม &quot;ยอมรับทั้งหมด&quot; เสมอทุกแบบ (PDPA ให้ปฏิเสธได้ง่ายเท่ายอมรับ) · แถบนี้โผล่เมื่อใส่รหัสวัดผลในแท็บ ข้อมูลร้าน › 📊 · ไม่ขึ้นในพรีวิว</p>
+      </div>
+    </div>
+  );
+}
+
+/** 📄 ชุด 4 — หน้าพิเศษ (theme.page: notFound · thanks · popup · share · login) · เว็บร้าน NotFoundView / ThanksExtras / PromoPopup / /api/og/product / LoginShell */
+export function SitePagesSetting({ value, onChange, shopSlug, onPreview }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void; shopSlug: string; onPreview: (path: string) => void }) {
+  const nf = value.notFound;
+  const setNf = (p: Partial<SitePageDesign["notFound"]>) => onChange({ notFound: { ...nf, ...p } });
+  const th = value.thanks;
+  const setTh = (p: Partial<SitePageDesign["thanks"]>) => onChange({ thanks: { ...th, ...p } });
+  const pp = value.popup;
+  const setPp = (p: Partial<SitePageDesign["popup"]>) => onChange({ popup: { ...pp, ...p } });
+  const sh = value.share;
+  const setSh = (p: Partial<SitePageDesign["share"]>) => onChange({ share: { ...sh, ...p } });
+  const lg = value.login;
+  const setLg = (p: Partial<SitePageDesign["login"]>) => onChange({ login: { ...lg, ...p } });
+  // 🎟️ คูปองที่ใช้เป็น "ของขวัญครั้งหน้า" ได้: เปิดอยู่ · ยังไม่หมดอายุ · ใช้ได้ทุกคน (ไม่ใช่เฉพาะลูกค้าใหม่/สมาชิก/ชวนเพื่อน)
+  const [coupons, setCoupons] = useState<{ code: string; note: string }[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiFetch(`/api/website/coupons?shop=${encodeURIComponent(shopSlug)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!alive) return;
+        const now = new Date().toISOString();
+        const list = (Array.isArray(j?.coupons) ? j.coupons : []) as Record<string, unknown>[];
+        setCoupons(
+          list
+            .filter((c) => c.active === true && !c.membersOnly && !c.newCustomersOnly && !c.minTier && !c.referrerId && (!c.endsAt || String(c.endsAt) >= now) && (c.usageLimit == null || Number(c.used ?? 0) < Number(c.usageLimit)))
+            .map((c) => ({ code: String(c.code ?? ""), note: String(c.note ?? "") }))
+            .filter((c) => c.code),
+        );
+      })
+      .catch(() => alive && setCoupons([]));
+    return () => {
+      alive = false;
+    };
+  }, [shopSlug]);
+  const pvBtn = (path: string, label: string) => (
+    <button type="button" onClick={() => onPreview(path)} className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:border-slate-500">
+      👁 {label}
+    </button>
+  );
+  return (
+    <div className="space-y-4">
+      {/* ── 404 ── */}
+      <div className={cardCls}>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-semibold text-slate-800">🧭 หน้า 404 (ไม่พบหน้า)</h3>
+          {pvBtn("/zz-page-not-found", "ดูในพรีวิว")}
+        </div>
+        <p className="text-xs text-slate-500 mb-3">หน้าที่ลูกค้าเห็นเมื่อกดลิงก์ที่ไม่มีแล้ว · ลิงก์ที่ตั้ง &quot;ย้ายลิงก์&quot; ไว้ (ข้อมูลร้าน › 🔀) ยังพาไปหน้าใหม่ก่อนเสมอ</p>
+        <Choice<"plain" | "image" | "big">
+          value={nf.style}
+          onChange={(v) => setNf({ style: v })}
+          options={[
+            { v: "plain", l: "ไอคอน + ข้อความ", d: "แบบเดิม" },
+            { v: "image", l: "รูปใหญ่ + ข้อความ", d: "ใช้รูปของร้าน" },
+            { v: "big", l: "ตัวเลข 404 ใหญ่", d: "แบบแบรนด์" },
+          ]}
+        />
+        {nf.style === "image" && (
+          <div className="mt-2 max-w-xs">
+            <ImageInput value={nf.imageKey} onChange={(k) => setNf({ imageKey: k ?? "" })} folder="website-pages" />
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2 mt-3">
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">หัวข้อ (ว่าง = &quot;ไม่พบหน้านี้&quot;)</p>
+            <LangInput className={inputCls} obj={nf} k="title" maxLength={80} placeholder="ไม่พบหน้านี้" onPatch={(p) => setNf(p)} />
+          </div>
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">ข้อความ (ว่าง = ข้อความตั้งต้น)</p>
+            <LangInput className={inputCls} obj={nf} k="text" maxLength={240} placeholder="ลิงก์อาจเปลี่ยนไปหรือหน้านี้ถูกย้ายแล้ว" onPatch={(p) => setNf(p)} />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-4 mt-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={nf.search} onChange={(e) => setNf({ search: e.target.checked })} />
+            ช่องค้นหาในหน้า
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={nf.products} onChange={(e) => setNf({ products: e.target.checked })} />
+            สินค้าแนะนำ 4 ชิ้น (แนะนำของร้าน → ขายดี → มาใหม่)
+          </label>
+        </div>
+      </div>
+
+      {/* ── หน้าขอบคุณ ── */}
+      <div className={cardCls}>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-semibold text-slate-800">🎉 หน้าขอบคุณหลังสั่งซื้อ</h3>
+          {pvBtn("/checkout?pv=thanks", "ดูในพรีวิว")}
+        </div>
+        <p className="text-xs text-slate-500 mb-3">หัวข้อ/ข้อความของหน้านี้ตั้งที่แท็บ 💳 หน้าชำระเงิน · ที่นี่เพิ่มของเสริม</p>
+        <label className={labelCls}>ด้านบนการ์ด<Def show={th.top === "emoji"} /></label>
+        <Choice<"emoji" | "image" | "none"> value={th.top} onChange={(v) => setTh({ top: v })} options={[{ v: "emoji", l: "อีโมจิ 🎉" }, { v: "image", l: "รูปแบนเนอร์" }, { v: "none", l: "ไม่มี" }]} />
+        {th.top === "image" && (
+          <div className="mt-2 max-w-xs">
+            <ImageInput value={th.imageKey} onChange={(k) => setTh({ imageKey: k ?? "" })} folder="website-pages" />
+          </div>
+        )}
+        <div className="mt-3">
+          <label className={labelCls}>🎟️ คูปองครั้งหน้า</label>
+          <select className={inputCls} value={th.coupon} onChange={(e) => setTh({ coupon: e.target.value })}>
+            <option value="">ไม่โชว์ (แบบเดิม)</option>
+            {th.coupon && !(coupons ?? []).some((c) => c.code === th.coupon) && <option value={th.coupon}>{th.coupon} (ตอนนี้ใช้ไม่ได้ — ลูกค้าจะไม่เห็น)</option>}
+            {(coupons ?? []).map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code}
+                {c.note ? ` · ${c.note}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-slate-400 mt-1">{coupons === null ? "กำลังโหลดคูปอง…" : coupons.length ? "เลือกได้เฉพาะคูปองที่เปิดอยู่ ยังไม่หมดอายุ และใช้ได้ทุกคน · คูปองปิด/หมดอายุ/ใช้ครบ ระบบซ่อนให้เอง" : "ยังไม่มีคูปองที่ใช้ได้ทุกคน — สร้างได้ที่แท็บ 🎟️ คูปอง"}</p>
+        </div>
+        <div className="flex flex-wrap gap-4 mt-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={th.follow} onChange={(e) => setTh({ follow: e.target.checked })} />
+            ❤️ ปุ่มติดตามโซเชียลของร้าน (จากข้อมูลร้าน)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={th.products} onChange={(e) => setTh({ products: e.target.checked })} />
+            ⭐ สินค้าแนะนำ 4 ชิ้นใต้การ์ด
+          </label>
+        </div>
+      </div>
+
+      {/* ── ป๊อปอัป ── */}
+      <div className={cardCls}>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-semibold text-slate-800">🎁 ป๊อปอัปรับส่วนลด</h3>
+          {pvBtn("/?pv=popup", "ดูตัวอย่าง")}
+        </div>
+        <p className="text-xs text-slate-500 mb-3">เปิด/โค้ด/ข้อความ/วินาที ตั้งที่แท็บ ข้อมูลร้าน › 🎁 · ที่นี่ตั้งหน้าตาและจังหวะ · ตัวอย่างในพรีวิวไม่ส่งอีเมลจริง</p>
+        <Choice<"center" | "split" | "sheet" | "corner">
+          value={pp.layout}
+          onChange={(v) => setPp({ layout: v })}
+          options={[
+            { v: "center", l: "กล่องกลางจอ", d: "แบบเดิม" },
+            { v: "split", l: "รูปซ้าย ข้อความขวา", d: "ต้องใส่รูป" },
+            { v: "sheet", l: "แผ่นเลื่อนจากล่าง", d: "เหมาะกับมือถือ" },
+            { v: "corner", l: "กล่องเล็กมุมขวาล่าง", d: "ไม่บังหน้าเว็บ" },
+          ]}
+        />
+        <div className="mt-2 max-w-xs">
+          <p className="text-[11px] text-slate-500 mb-1">รูปในป๊อปอัป (ไม่ใส่ = ไอคอน 🎁)</p>
+          <ImageInput value={pp.imageKey} onChange={(k) => setPp({ imageKey: k ?? "" })} folder="website-pages" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 mt-3">
+          <div>
+            <label className={labelCls}>โผล่เมื่อ<Def show={pp.trigger === "delay"} /></label>
+            <Choice<"delay" | "scroll" | "exit"> value={pp.trigger} onChange={(v) => setPp({ trigger: v })} options={[{ v: "delay", l: "หลังเข้าเว็บ X วิ" }, { v: "scroll", l: "เลื่อนถึงครึ่งหน้า" }, { v: "exit", l: "กำลังจะออก (คอม)" }]} />
+            <p className="text-[11px] text-slate-400 mt-1">&quot;กำลังจะออก&quot; = เมาส์ขยับออกนอกหน้าเว็บ · มือถือใช้ &quot;เลื่อนถึงครึ่งหน้า&quot; แทน</p>
+          </div>
+          <div>
+            <label className={labelCls}>โผล่ซ้ำ<Def show={pp.again === "once"} /></label>
+            <Choice<"once" | "7d"> value={pp.again} onChange={(v) => setPp({ again: v })} options={[{ v: "once", l: "ครั้งเดียว" }, { v: "7d", l: "ทุก 7 วัน ถ้ายังไม่รับโค้ด" }]} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── รูปตอนแชร์ ── */}
+      <div className={cardCls}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">🖼 รูปตอนแชร์ลิงก์สินค้า (Facebook · LINE)</h3>
+        <p className="text-xs text-slate-500 mb-3">แบบการ์ด/กรอบ = ระบบวาดรูปใหม่ให้สินค้าทุกตัวเอง · แอปแชทอาจจำรูปเก่าไว้สักพัก (ลิงก์ที่แชร์ใหม่ได้รูปใหม่)</p>
+        <Choice<"photo" | "card" | "frame">
+          value={sh.style}
+          onChange={(v) => setSh({ style: v })}
+          options={[
+            { v: "photo", l: "รูปสินค้ารูปแรก", d: "แบบเดิม" },
+            { v: "card", l: "การ์ด", d: "รูป + ชื่อ + ราคา + โลโก้" },
+            { v: "frame", l: "รูป + แถบโลโก้", d: "แถบโลโก้/ราคาด้านล่าง" },
+          ]}
+        />
+        {sh.style !== "photo" && (
+          <div className="mt-2">
+            <p className="text-[11px] text-slate-500 mb-1">สีพื้นการ์ด/แถบ</p>
+            <Choice<"paper" | "brand" | "ink"> value={sh.bg} onChange={(v) => setSh({ bg: v })} options={[{ v: "paper", l: "สีพื้นเว็บ" }, { v: "brand", l: "สีหลัก" }, { v: "ink", l: "เข้ม" }]} />
+          </div>
+        )}
+      </div>
+
+      {/* ── หน้าเข้าสู่ระบบ ── */}
+      <div className={cardCls}>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-semibold text-slate-800">👤 หน้าเข้าสู่ระบบ / สมัครสมาชิก</h3>
+          {pvBtn("/account/login", "ดูในพรีวิว")}
+        </div>
+        <p className="text-xs text-slate-500 mb-3">ลูกค้าเห็นเมื่อเปิดระบบสมาชิก (แท็บ 👥 สมาชิก)</p>
+        <Choice<"center" | "split" | "cover">
+          value={lg.layout}
+          onChange={(v) => setLg({ layout: v })}
+          options={[
+            { v: "center", l: "กล่องกลาง", d: "แบบเดิม" },
+            { v: "split", l: "รูปซ้าย ฟอร์มขวา" },
+            { v: "cover", l: "รูปพื้นหลังเต็มจอ" },
+          ]}
+        />
+        {lg.layout !== "center" && (
+          <div className="mt-2 max-w-xs">
+            <ImageInput value={lg.imageKey} onChange={(k) => setLg({ imageKey: k ?? "" })} folder="website-pages" />
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2 mt-3">
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">หัวข้อต้อนรับ (ว่าง = &quot;เข้าสู่ระบบ / สมัครสมาชิก&quot;)</p>
+            <LangInput className={inputCls} obj={lg} k="title" maxLength={80} placeholder="ยินดีต้อนรับสู่ …" onPatch={(p) => setLg(p)} />
+          </div>
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">ข้อความ (ว่าง = ข้อความตั้งต้น)</p>
+            <LangInput className={inputCls} obj={lg} k="text" maxLength={240} placeholder="สะสมแต้มทุกออเดอร์ · รับสิทธิ์ก่อนใคร" onPatch={(p) => setLg(p)} />
+          </div>
+        </div>
       </div>
     </div>
   );

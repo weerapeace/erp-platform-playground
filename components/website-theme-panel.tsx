@@ -70,7 +70,7 @@ import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
-import { HeaderIconStyleSetting, SiteControlsSetting, SiteMotionSetting, SitePageSetting, SiteSalesSetting } from "@/components/website-site-design-setting";
+import { HeaderIconStyleSetting, SiteControlsSetting, SiteMotionSetting, SitePageSetting, SitePagesSetting, SiteSalesSetting } from "@/components/website-site-design-setting";
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
 import type { ProductLuxe } from "@/lib/website-product-luxe";
 import type { ProductMaterialView } from "@/lib/website-theme";
@@ -174,7 +174,7 @@ const FINE_COLOR_KEYS = Object.keys(FINE_COLOR_DEFAULTS) as (keyof typeof FINE_C
 const FINE_COLOR_LABEL = "สีละเอียด";
 /** บทบาทตัวอักษร — ธีมเก่าที่ยังไม่มีบทบาทใหม่ (เช่น เมนูย่อย) = ค่าเริ่มต้น */
 const roleOf = (t: { typography: Partial<Typography> }, k: TextRoleKey): TextRole => t.typography[k] ?? defaultTextRole(k);
-type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "related" | "cart" | "checkout" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "related" | "cart" | "checkout" | "pages" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -190,6 +190,7 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "related", label: "🔗 แนะนำสินค้า" },
   { k: "cart", label: "🛒 ตะกร้า" },
   { k: "checkout", label: "💳 หน้าชำระเงิน" },
+  { k: "pages", label: "📄 หน้าพิเศษ" },
   { k: "shape", label: "รูปทรง" },
   { k: "history", label: "ประวัติ" },
 ];
@@ -216,7 +217,7 @@ const withPreview = (path: string, pk: string | null) => withPreviewKey(`${path}
 type Zoom = "fit" | 0.5 | 0.75 | 1;
 
 /** แท็บ → หน้าที่พรีวิว ("product" = สินค้าตัวอย่างของร้าน) · ไม่อยู่ในรายการ = อยู่หน้าเดิม */
-const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", related: "product", checkout: "/checkout" };
+const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", related: "product", checkout: "/checkout", pages: "/zz-page-not-found" };
 
 const PAGES = [
   { path: "/", label: "หน้าแรก" },
@@ -228,6 +229,9 @@ const PAGES = [
   { path: "/new", label: "มาใหม่" },
   { path: "/checkout", label: "หน้าชำระเงิน" },
   { path: "/checkout?pv=thanks", label: "หน้าขอบคุณ (หลังสั่ง)" },
+  { path: "/zz-page-not-found", label: "หน้า 404 (ไม่พบหน้า)" },
+  { path: "/?pv=popup", label: "ป๊อปอัปรับส่วนลด (ตัวอย่าง)" },
+  { path: "/account/login", label: "หน้าเข้าสู่ระบบ" },
 ];
 
 const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Pick<Theme["fonts"], "display" | "body">; radius: Radius } }[] = [
@@ -2809,6 +2813,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               </div>
             </>
           )}
+
+          {/* ── 📄 หน้าพิเศษ (ชุด 4): 404 · ขอบคุณ · ป๊อปอัป · รูปแชร์ · เข้าสู่ระบบ — components/website-site-design-setting ── */}
+          {tab === "pages" && <SitePagesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} shopSlug={shopSlug} onPreview={setPage} />}
 
           {/* ── ประวัติ ── */}
           {tab === "history" && (

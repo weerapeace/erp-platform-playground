@@ -59,6 +59,46 @@ export interface CookieLook {
 /** 💳 โลโก้ท้ายเว็บ: ป้ายตัวหนังสือ (เดิม) / โลโก้สี / โลโก้ขาวดำ */
 export type PayLogoStyle = "text" | "color" | "mono";
 export type ShipIcon = "thaipost" | "kerry" | "flash" | "jt" | "ninja" | "dhl";
+/** 📄 ชุด 4 — หน้าพิเศษ (ทุกตัวค่าเริ่ม = หน้าตาเดิม · ข้อความว่าง = ข้อความตั้งต้น · แปลอังกฤษได้ <key>_en) */
+export interface NotFoundLook {
+  /** plain = ไอคอน + ข้อความ (เดิม) · image = รูปใหญ่ + ข้อความ · big = ตัวเลข 404 ใหญ่แบบแบรนด์ */
+  style: "plain" | "image" | "big";
+  imageKey: string | null;
+  title: string;
+  text: string;
+  search: boolean;
+  /** สินค้าแนะนำ 4 ชิ้น (แนะนำของร้าน → ขายดี → มาใหม่) */
+  products: boolean;
+}
+export interface ThanksLook {
+  /** emoji = 🎉 (เดิม) · image = รูปแบนเนอร์ · none = ไม่มี */
+  top: "emoji" | "image" | "none";
+  imageKey: string | null;
+  /** โค้ดคูปองครั้งหน้า (จากแท็บคูปอง) — ERP ตรวจว่ายังใช้ได้ก่อนส่งให้เว็บ (หมดอายุ/ปิด = ไม่โชว์) */
+  coupon: string;
+  /** ปุ่มโซเชียลของร้าน (จากข้อมูลร้าน) */
+  follow: boolean;
+  products: boolean;
+}
+export interface PopupLook {
+  layout: "center" | "split" | "sheet" | "corner";
+  imageKey: string | null;
+  /** delay = หลังเข้าเว็บ X วิ (เดิม · ตั้งวินาทีที่ข้อมูลร้าน) · scroll = เลื่อนถึงครึ่งหน้า · exit = เมาส์ออกนอกหน้า (คอม · มือถือใช้ scroll แทน) */
+  trigger: "delay" | "scroll" | "exit";
+  /** once = ครั้งเดียว (เดิม) · 7d = ซ้ำทุก 7 วันถ้ายังไม่ได้รับโค้ด */
+  again: "once" | "7d";
+}
+export interface ShareLook {
+  /** photo = รูปสินค้ารูปแรก (เดิม) · card = รูป + ชื่อ + ราคา + โลโก้ · frame = รูป + แถบโลโก้ล่าง (เว็บร้าน /api/og/product) */
+  style: "photo" | "card" | "frame";
+  bg: "paper" | "brand" | "ink";
+}
+export interface LoginLook {
+  layout: "center" | "split" | "cover";
+  imageKey: string | null;
+  title: string;
+  text: string;
+}
 
 /** ส่วนที่อยู่ใน theme.page (รวมกับ transition / smoothScroll เดิม) */
 export interface SitePageDesign {
@@ -94,6 +134,12 @@ export interface SitePageDesign {
   chat: ChatLook;
   searchEmpty: SearchEmpty;
   cookie: CookieLook;
+  /** 📄 ชุด 4 */
+  notFound: NotFoundLook;
+  thanks: ThanksLook;
+  popup: PopupLook;
+  share: ShareLook;
+  login: LoginLook;
 }
 
 /** ส่วนที่อยู่ใน theme.shape (รวมกับรูปทรงปุ่ม/ขนาด/ขอบเดิม) */
@@ -115,6 +161,11 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   chat: { color: "brand", shape: "pill", where: "all" },
   searchEmpty: "cats",
   cookie: { layout: "card", side: "left", icon: true, title: "", text: "" },
+  notFound: { style: "plain", imageKey: null, title: "", text: "", search: false, products: false },
+  thanks: { top: "emoji", imageKey: null, coupon: "", follow: false, products: false },
+  popup: { layout: "center", imageKey: null, trigger: "delay", again: "once" },
+  share: { style: "photo", bg: "paper" },
+  login: { layout: "center", imageKey: null, title: "", text: "" },
 };
 export const DEFAULT_SITE_SHAPE: SiteShapeDesign = { buttonKind: "fill", buttonHover: "auto", linkHover: "auto", inputStyle: "box" };
 export const DEFAULT_HEADER_ICON_STYLE: HeaderIconStyle = "regular";
@@ -180,6 +231,11 @@ export function normalizeSitePage(raw: unknown): SitePageDesign {
     chat: normalizeChatLook(r.chat),
     searchEmpty: oneOf(r.searchEmpty, SEARCH_EMPTIES, d.searchEmpty),
     cookie: normalizeCookieLook(r.cookie),
+    notFound: normalizeNotFound(r.notFound),
+    thanks: normalizeThanks(r.thanks),
+    popup: normalizePopup(r.popup),
+    share: normalizeShare(r.share),
+    login: normalizeLogin(r.login),
   };
 }
 
@@ -208,6 +264,44 @@ export function normalizeCookieLook(raw: unknown): CookieLook {
 }
 
 export const normalizePayStyle = (v: unknown): PayLogoStyle => oneOf(v, PAY_LOGO_STYLES, "text");
+
+/** คีย์รูปใน R2 (เช่น website/abc.jpg) · อย่างอื่น = ไม่มีรูป */
+const imgKey = (v: unknown): string | null => (typeof v === "string" && /^[\w\-./]{3,300}$/.test(v) && !v.includes("..") ? v : null);
+/** คงคำแปลอังกฤษ <key>_en ของช่องข้อความ */
+function keepEn<T extends object>(out: T, r: Record<string, unknown>, keys: string[], max: number): T {
+  for (const k of keys) if (typeof r[`${k}_en`] === "string" && (r[`${k}_en`] as string).trim()) (out as Record<string, unknown>)[`${k}_en`] = txt(r[`${k}_en`], max);
+  return out;
+}
+
+export function normalizeNotFound(raw: unknown): NotFoundLook {
+  const r = obj(raw);
+  const s = r.style === "image" || r.style === "big" ? r.style : "plain";
+  return keepEn({ style: s, imageKey: imgKey(r.imageKey), title: txt(r.title, 80), text: txt(r.text, 240), search: r.search === true, products: r.products === true }, r, ["title", "text"], 240);
+}
+export function normalizeThanks(raw: unknown): ThanksLook {
+  const r = obj(raw);
+  const top = r.top === "image" || r.top === "none" ? r.top : "emoji";
+  const coupon = typeof r.coupon === "string" ? r.coupon.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 32) : "";
+  return { top, imageKey: imgKey(r.imageKey), coupon, follow: r.follow === true, products: r.products === true };
+}
+export function normalizePopup(raw: unknown): PopupLook {
+  const r = obj(raw);
+  return {
+    layout: r.layout === "split" || r.layout === "sheet" || r.layout === "corner" ? r.layout : "center",
+    imageKey: imgKey(r.imageKey),
+    trigger: r.trigger === "scroll" || r.trigger === "exit" ? r.trigger : "delay",
+    again: r.again === "7d" ? "7d" : "once",
+  };
+}
+export function normalizeShare(raw: unknown): ShareLook {
+  const r = obj(raw);
+  return { style: r.style === "card" || r.style === "frame" ? r.style : "photo", bg: r.bg === "brand" || r.bg === "ink" ? r.bg : "paper" };
+}
+export function normalizeLogin(raw: unknown): LoginLook {
+  const r = obj(raw);
+  const layout = r.layout === "split" || r.layout === "cover" ? r.layout : "center";
+  return keepEn({ layout, imageKey: imgKey(r.imageKey), title: txt(r.title, 80), text: txt(r.text, 240) }, r, ["title", "text"], 240);
+}
 export const normalizeShipIcons = (v: unknown): ShipIcon[] => (Array.isArray(v) ? [...new Set(v.filter((x): x is ShipIcon => (SHIP_ICONS as readonly unknown[]).includes(x)))] : []);
 
 /** ค่าเก่ามีแค่ none/fade/rise · ค่าแปลก = จาง (แบบเดิม) */
