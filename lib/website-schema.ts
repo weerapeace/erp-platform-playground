@@ -651,6 +651,25 @@ const galleryStripFields = (): FieldDef[] => {
       ...st,
       hint: "ขยายรอไว้ = ลูกค้าเห็นข้อความทันที และรู้ว่าชี้/แตะรูปได้ · แบบเลื่อนเอง = ไม่ขยายรอ",
     }),
+    // ▶ ขยายเองวน: ไม่มีใครชี้ → รูปถัดไปขยายเองทุก N วินาที (ไม่ใช้กับแบบเลื่อนเอง — แถววิ่งอยู่แล้ว)
+    f("stripCycle", "ขยายเองทีละรูป วนไปเรื่อย ๆ (ตอนไม่มีใครชี้)", "toggle", {
+      group: "layout",
+      default: false,
+      wide: true,
+      showIf: [GAL_STRIP, { key: "stripMove", eq: ["still", "drag"] }],
+      hint: "ชี้/แตะรูป = หยุดวน รูปที่ชี้ขยายแทน · เอาเมาส์ออกแล้ววนต่อจากรูปนั้น · เลื่อนพ้นจอ = หยุด · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว = ไม่วน",
+    }),
+    f("stripCycleSec", "เปลี่ยนรูปทุก", "select", {
+      group: "layout",
+      default: "3",
+      options: [
+        { v: "2", l: "2 วินาที" },
+        { v: "3", l: "3 วินาที" },
+        { v: "4", l: "4 วินาที" },
+        { v: "6", l: "6 วินาที" },
+      ],
+      showIf: [GAL_STRIP, { key: "stripMove", eq: ["still", "drag"] }, { key: "stripCycle", eq: true }],
+    }),
     f("stripFade", "ขอบซ้าย-ขวาค่อย ๆ จางหาย", "toggle", { group: "layout", default: true, ...st }),
     f("stripDim", "รูปอื่นตอนมีรูปขยาย", "select", {
       group: "layout",

@@ -254,6 +254,16 @@ describe("แกลเลอรี — แถวรูปลุคบุ๊ก (
     expect(shown({ ...g, stripCap: "none" })).not.toContain("stripFont");
   });
 
+  it("▶ ขยายเองวน: ค่าเริ่มปิด (หน้าตาเดิม) · ช่องวินาทีโชว์เมื่อเปิด · แบบเลื่อนเองไม่มีช่องนี้", () => {
+    const g = norm({ layout: "strip", items: [] });
+    expect([g.stripCycle, g.stripCycleSec]).toEqual([false, "3"]);
+    expect(shown(g)).toContain("stripCycle");
+    expect(shown(g)).not.toContain("stripCycleSec");
+    expect(shown({ ...g, stripCycle: true })).toContain("stripCycleSec");
+    expect(shown({ ...g, stripMove: "auto", stripCycle: true })).not.toEqual(expect.arrayContaining(["stripCycle"]));
+    expect(norm({ layout: "strip", stripCycle: true, stripCycleSec: "99", items: [] }).stripCycleSec).toBe("3");
+  });
+
   it("ค่ามั่ว/เกินช่วง = ค่าเริ่ม/ตัดเข้าช่วง", () => {
     const g = norm({ layout: "strip", stripEffect: "wobble", stripW: 9999, stripZoom: 10, stripMove: "<x>", items: [] });
     expect(g.stripEffect).toBe("soft");

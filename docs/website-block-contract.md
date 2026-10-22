@@ -122,6 +122,7 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ERP `lib/website-schema.ts` แกลเลอรี: `layout` grid (เดิม) / strip · ช่องตาราง (`columns` `gap` `hoverZoom` + ชุด cap*) ซ่อนเมื่อแถวรูป (`GAL_GRID`) · `galleryStripFields()`:
   `stripEffect` soft/bounce/bend (รูปข้าง ๆ เอียงรับ)/lens (รูปข้าง ๆ ใหญ่ตาม) · `stripW` `stripWMobile` (px รูปปกติ) · `stripZoom` (% ตอนขยาย) · `stripGap` (px) · `stripSpeed` ·
   `stripStart` middle (ค่าเริ่ม)/first/none · `stripFade` ขอบจาง · `stripDim` none/fade/gray · `stripMove` still/drag/auto + `stripAutoSpeed` · `stripMobile` tap/center ·
+  ▶ `stripCycle` (ค่าเริ่มปิด · 2026-10-22) + `stripCycleSec` 2/3/4/6 = ไม่มีใครชี้ → รูปถัดไปขยายเองวน (ไม่ใช้กับ move auto · ชี้/โฟกัส/ลาก = หยุด · ออกแล้วค้าง 1 รอบ วนต่อจากรูปนั้น · แตะจอพัก ≥6 วิ · พ้นจอ/แท็บซ่อน/ลดการเคลื่อนไหว = ไม่วน · แถวเกินจอเลื่อนตาม) ·
   ข้อความ (กลุ่ม caption): `stripCap` top/bottom/on/none · `stripNum` (01)/01/01 / 09/none · `stripAlign` · `stripFont` (mono + CANVAS_FONTS) · `stripTextSize` · `stripUpper` · `stripColor`+`stripHex` · `stripPrice`
 - รายรูป: `code` (products ≤ 1) = ใช้รูปแรก (parentImages ก่อน) / ชื่อ / ลิงก์หน้าสินค้า เมื่อไม่ได้ใส่เอง (ใช้ได้ทั้งแบบตาราง) · ตรวจก่อนเผยแพร่นับเป็นรูป ไม่เตือน Alt
 - สัดส่วนรูปใช้ช่อง `ratio` ร่วม (แถวรูป: "ตามรูปจริง" = 3:4) · ทรงกรอบ/เส้นกรอบชุดเดิม (FramedImage)
