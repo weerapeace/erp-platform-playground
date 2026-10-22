@@ -3163,7 +3163,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 <EntryModeMenu modes={entryModes} progressOf={modeProgressOf} activeKey={activeMode?.key ?? null} badgeKey={modeBadgeKey}
                   onPick={(k) => { if (k === activeMode?.key) return; if (modeDirtyKeys.length) setModeExitTarget(k); else { setActiveModeKey(k); if (config.moduleKey) rememberEntryMode(config.moduleKey, k); } }}
                   onExit={() => exitEntryMode()}
-                  onSettings={canEditModes ? () => setModeSettingsOpen(true) : undefined} />
+                  onSettings={canEditModes ? () => setModeSettingsOpen(true) : undefined}
+                  systemStat={!activeMode || modeStatsErr ? undefined : (modeStats ? (modeStats.find((s) => s.key === activeMode.key) ?? undefined) : null)}
+                  onShowList={showModeList} />
               )}
               {aiBtn && (
                 <button type="button" onClick={() => setAiDetailOpen(true)}
@@ -3306,15 +3308,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 const f = fieldByKey.get(it.field);
                 return [it.field, { key: it.field, label: f?.label ?? it.field, type: f?.type, helpText: f?.helpText } satisfies EntryModeField];
               }))}
-              renderInput={(k) => { const f = fieldByKey.get(k); return f ? renderField({ ...f, readonly: !!f.readonly || !canEdit }, 1, true) : null; }}
+              renderInput={(k, hint) => { const f = fieldByKey.get(k); return f ? renderField({ ...f, readonly: !!f.readonly || !canEdit, placeholder: hint || f.placeholder }, 1, true) : null; }}
               imageCount={modeImageCount}
               translatable={(k) => canEdit && !!modeThSourceOf(k)}
               onTranslate={translateModeField}
               onExit={exitEntryMode}
               onNextIncomplete={isRest && navRowsRef.current.length > 1 ? () => void nextIncompleteInMode() : undefined}
-              scanning={modeScanning}
-              systemStat={modeStatsErr ? undefined : (modeStats ? (modeStats.find((s) => s.key === activeMode.key) ?? undefined) : null)}
-              onShowList={showModeList} />
+              scanning={modeScanning} />
           ) : null;
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
