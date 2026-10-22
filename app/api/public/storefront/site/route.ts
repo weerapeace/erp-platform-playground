@@ -6,7 +6,7 @@
  *
  * ⚠️ ไม่มี guardApi โดยเจตนา + มี CORS
  */
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { allowDraftPreview } from "@/lib/storefront-preview-access";
 import { normalizeBlocks } from "@/lib/website-blocks";
@@ -23,6 +23,9 @@ import { couponLabel, evaluateCoupon } from "@/lib/website-coupons";
 import { couponUsage, loadCouponByCode } from "@/lib/website-coupons-db";
 import { buildBeltBuilderPayload } from "@/lib/belt-builder-public";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
+import { resolveThemeSchedules } from "@/lib/website-theme-schedule-db";
+import { applyCampaign } from "@/lib/website-theme-schedule";
+import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,6 +79,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     field_map: unknown;
   };
 
+  // ⏰🎪 ตั้งเวลาเผยแพร่ + ธีมแคมเปญ (lib/website-theme-schedule-db) — ถึงเวลา = เผยแพร่ตอนนี้ (เว็บร้านดึงทุก ~60 วิ) · แคมเปญที่ทำงานอยู่ = ทับหน้าตาด้านล่าง
+  const sched = await resolveThemeSchedules(sb, s.id);
+  if (sched.published) {
+    const { data: fresh } = await sb.from("shops").select("theme, theme_draft, home_layout, home_layout_draft").eq("id", s.id).maybeSingle();
+    if (fresh) Object.assign(s, fresh);
+    after(() => purgeStorefrontCache(sb, s.id));
+  }
+
   // ข้อมูลร้าน (คำโปรย/ติดต่อ/ค่าส่ง/ช่องทางจ่าย) — ส่งเฉพาะชุดสาธารณะ
   const fullInfo = await readSiteInfo(sb, s.id);
   const info: ReturnType<typeof publicSiteInfo> & { promo_label?: string } = publicSiteInfo(fullInfo);
@@ -108,7 +119,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
   const layoutSource = preview && s.home_layout_draft != null ? s.home_layout_draft : s.home_layout;
-  const theme = normalizeTheme(themeSource);
+  // 🎪 แคมเปญ: เว็บจริงเห็นหน้าตาแคมเปญ · พรีวิวร่างใน ERP = ธีมปกติ (หน้าดีไซน์มีปุ่มดูตัวอย่างแคมเปญเอง)
+  const theme = !preview && sched.campaign ? applyCampaign(normalizeTheme(themeSource), sched.campaign) : normalizeTheme(themeSource);
   // 🎟️ คูปองครั้งหน้าในหน้าขอบคุณ (theme.page.thanks.coupon) — ส่งเฉพาะโค้ดที่เปิดอยู่ ไม่หมดอายุ ไม่ครบจำนวน และใช้ได้ทุกคน
   const thanksCoupon = await (async () => {
     const code = theme.page.thanks.coupon;

@@ -14,6 +14,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { commonLabelEn } from "@/lib/content-i18n";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeTheme } from "@/lib/website-theme";
+import { loadProofCounts } from "@/lib/website-proof-db";
 import {
   normalizeFieldMap,
   resolveProduct,
@@ -81,11 +83,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: shop } = await sb
     .from("shops")
-    .select("id, name, slug, status, field_map")
+    .select("id, name, slug, status, field_map, theme")
     .eq("slug", shopSlug)
     .maybeSingle();
   if (!shop) return json({ error: "ไม่พบร้าน" }, 404);
-  const s = shop as { id: string; name: string; status: string; field_map: unknown };
+  const s = shop as { id: string; name: string; status: string; field_map: unknown; theme: unknown };
   if (s.status !== "active") return json({ shop: shopSlug, products: [] });
 
   const fieldMap = normalizeFieldMap(s.field_map);
@@ -155,6 +157,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // กฎชื่อของร้าน "ลบแบรนด์/คอลเลกชัน" ต้องรู้ชื่อแบรนด์/คอลเลกชันก่อน
   if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (parents ?? []) as ParentRow[]);
   const parentById = new Map(((parents ?? []) as ParentRow[]).map((p) => [p.id, p]));
+  // 👀🔥 ป้ายคนดู/ขายแล้ว (ธีมที่เผยแพร่ · theme.page.proof) — ส่งเฉพาะป้ายที่ร้านเปิด + ตัวเลขถึงขั้นต่ำ (lib/website-proof-db)
+  const proofCounts = await loadProofCounts(sb, s.id, normalizeTheme(s.theme).page.proof, new Map([...parentById.values()].map((p) => [p.id, p.code ?? ""])));
 
   const kidsByParent = new Map<string, ChildSku[]>();
   for (const k of (children ?? []) as (ChildSku & { parent_sku_id: string })[]) {
@@ -401,6 +405,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         collectionName: p.collection_id ? collName.get(p.collection_id) ?? null : null,
         /** อันดับขายดีบนเว็บ (1 = ขายดีสุด) — ไม่มี = ยังไม่เคยขาย */
         salesRank: salesRank.get(code.toUpperCase()) ?? null,
+        /** 👀🔥 { viewers: คนดูวันนี้, sold: ขายแล้ว } — มีเฉพาะป้ายที่ร้านเปิดและถึงขั้นต่ำ */
+        proof: proofCounts.get(code.toUpperCase()),
         /** ⭐ ดาวเฉลี่ย + จำนวนรีวิว (ยังไม่มีรีวิว/ร้านปิดรีวิว = ไม่ส่ง) */
         rating: ratings.get(code.toUpperCase()),
         /** 🛍 ซื้อคู่กันบ่อย (รหัสรุ่น · จากออเดอร์จริง · ยังไม่มี = ไม่ส่ง) */

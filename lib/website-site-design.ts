@@ -100,6 +100,35 @@ export interface LoginLook {
   text: string;
 }
 
+/** 🎄 ของตกแต่งเทศกาล (ชุด 5) — โปรยลงมา หรือ ห้อยใต้หัวเว็บ (lantern/flags) · none = ไม่มี (เดิม) */
+export type FestiveKind = "none" | "snow" | "petals" | "confetti" | "hearts" | "water" | "leaves" | "stars" | "lantern" | "flags";
+export const FESTIVE_KINDS: FestiveKind[] = ["none", "snow", "petals", "confetti", "hearts", "water", "leaves", "stars", "lantern", "flags"];
+/** แบบห้อยใต้หัวเว็บ (ไม่โปรย) */
+export const FESTIVE_HANGING: FestiveKind[] = ["lantern", "flags"];
+export interface FestiveLook {
+  kind: FestiveKind;
+  amount: "few" | "some" | "many";
+  /** home = หน้าแรกเท่านั้น · all = ทุกหน้า (ยกเว้นตะกร้า/ชำระเงิน เสมอ) */
+  where: "home" | "all";
+  /** โชว์บนมือถือด้วย */
+  mobile: boolean;
+}
+
+/** 👀 ป้ายคนดู / 🔥 ขายแล้ว (ชุด 5) — ตัวเลขจริงจาก ERP เท่านั้น · ต่ำกว่าขั้นต่ำ = ซ่อน */
+export interface ProofLook {
+  /** "วันนี้มี N คนดูสินค้านี้" (นับเครื่องไม่ซ้ำต่อวัน) */
+  viewers: boolean;
+  viewersMin: number;
+  /** "ขายแล้ว N ชิ้น" */
+  sold: boolean;
+  soldMin: number;
+  /** web = ออเดอร์บนเว็บ · all = เว็บ + ใบสั่งขาย ERP (ยืนยันแล้ว) */
+  soldSource: "web" | "all";
+  soldPeriod: "30d" | "all";
+  /** โชว์บนการ์ดสินค้าด้วย (ปกติ = หน้าสินค้าอย่างเดียว) */
+  onCard: boolean;
+}
+
 /** ส่วนที่อยู่ใน theme.page (รวมกับ transition / smoothScroll เดิม) */
 export interface SitePageDesign {
   /** ระยะห่างบน-ล่างของ Section ที่ใช้ระยะตามเดิม (Section ที่ตั้งระยะเองคงค่าที่ตั้ง) */
@@ -140,6 +169,9 @@ export interface SitePageDesign {
   popup: PopupLook;
   share: ShareLook;
   login: LoginLook;
+  /** 🎪 ชุด 5 */
+  festive: FestiveLook;
+  proof: ProofLook;
 }
 
 /** ส่วนที่อยู่ใน theme.shape (รวมกับรูปทรงปุ่ม/ขนาด/ขอบเดิม) */
@@ -166,6 +198,8 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   popup: { layout: "center", imageKey: null, trigger: "delay", again: "once" },
   share: { style: "photo", bg: "paper" },
   login: { layout: "center", imageKey: null, title: "", text: "" },
+  festive: { kind: "none", amount: "some", where: "home", mobile: true },
+  proof: { viewers: false, viewersMin: 5, sold: false, soldMin: 10, soldSource: "web", soldPeriod: "30d", onCard: false },
 };
 export const DEFAULT_SITE_SHAPE: SiteShapeDesign = { buttonKind: "fill", buttonHover: "auto", linkHover: "auto", inputStyle: "box" };
 export const DEFAULT_HEADER_ICON_STYLE: HeaderIconStyle = "regular";
@@ -236,6 +270,8 @@ export function normalizeSitePage(raw: unknown): SitePageDesign {
     popup: normalizePopup(r.popup),
     share: normalizeShare(r.share),
     login: normalizeLogin(r.login),
+    festive: normalizeFestive(r.festive),
+    proof: normalizeProof(r.proof),
   };
 }
 
@@ -301,6 +337,27 @@ export function normalizeLogin(raw: unknown): LoginLook {
   const r = obj(raw);
   const layout = r.layout === "split" || r.layout === "cover" ? r.layout : "center";
   return keepEn({ layout, imageKey: imgKey(r.imageKey), title: txt(r.title, 80), text: txt(r.text, 240) }, r, ["title", "text"], 240);
+}
+export function normalizeFestive(raw: unknown): FestiveLook {
+  const r = obj(raw);
+  return {
+    kind: oneOf(r.kind, FESTIVE_KINDS, "none"),
+    amount: r.amount === "few" || r.amount === "many" ? r.amount : "some",
+    where: r.where === "all" ? "all" : "home",
+    mobile: r.mobile !== false,
+  };
+}
+export function normalizeProof(raw: unknown): ProofLook {
+  const r = obj(raw);
+  return {
+    viewers: r.viewers === true,
+    viewersMin: clampInt(r.viewersMin, 1, 100, 5),
+    sold: r.sold === true,
+    soldMin: clampInt(r.soldMin, 1, 1000, 10),
+    soldSource: r.soldSource === "all" ? "all" : "web",
+    soldPeriod: r.soldPeriod === "all" ? "all" : "30d",
+    onCard: r.onCard === true,
+  };
 }
 export const normalizeShipIcons = (v: unknown): ShipIcon[] => (Array.isArray(v) ? [...new Set(v.filter((x): x is ShipIcon => (SHIP_ICONS as readonly unknown[]).includes(x)))] : []);
 

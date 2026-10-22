@@ -72,6 +72,7 @@ import { MaterialViewSetting } from "@/components/website-material-view-setting"
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
 import { HeaderIconStyleSetting, SiteControlsSetting, SiteMotionSetting, SitePageSetting, SitePagesSetting, SiteSalesSetting } from "@/components/website-site-design-setting";
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
+import { CampaignTab, ScheduleBanner, SchedulePublishModal, cancelSchedule, useThemeSchedules } from "@/components/website-theme-schedule";
 import type { ProductLuxe } from "@/lib/website-product-luxe";
 import type { ProductMaterialView } from "@/lib/website-theme";
 import type { OverPages } from "@/lib/website-header-over";
@@ -174,7 +175,7 @@ const FINE_COLOR_KEYS = Object.keys(FINE_COLOR_DEFAULTS) as (keyof typeof FINE_C
 const FINE_COLOR_LABEL = "สีละเอียด";
 /** บทบาทตัวอักษร — ธีมเก่าที่ยังไม่มีบทบาทใหม่ (เช่น เมนูย่อย) = ค่าเริ่มต้น */
 const roleOf = (t: { typography: Partial<Typography> }, k: TextRoleKey): TextRole => t.typography[k] ?? defaultTextRole(k);
-type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "related" | "cart" | "checkout" | "pages" | "shape" | "history";
+type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "related" | "cart" | "checkout" | "pages" | "campaign" | "shape" | "history";
 type Device = "desktop" | "tablet" | "mobile";
 
 const TABS: { k: TabKey; label: string }[] = [
@@ -191,6 +192,7 @@ const TABS: { k: TabKey; label: string }[] = [
   { k: "cart", label: "🛒 ตะกร้า" },
   { k: "checkout", label: "💳 หน้าชำระเงิน" },
   { k: "pages", label: "📄 หน้าพิเศษ" },
+  { k: "campaign", label: "🎪 แคมเปญ" },
   { k: "shape", label: "รูปทรง" },
   { k: "history", label: "ประวัติ" },
 ];
@@ -217,7 +219,7 @@ const withPreview = (path: string, pk: string | null) => withPreviewKey(`${path}
 type Zoom = "fit" | 0.5 | 0.75 | 1;
 
 /** แท็บ → หน้าที่พรีวิว ("product" = สินค้าตัวอย่างของร้าน) · ไม่อยู่ในรายการ = อยู่หน้าเดิม */
-const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", related: "product", checkout: "/checkout", pages: "/zz-page-not-found" };
+const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", related: "product", checkout: "/checkout", pages: "/zz-page-not-found", campaign: "/" };
 
 const PAGES = [
   { path: "/", label: "หน้าแรก" },
@@ -308,6 +310,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [tab, setTab] = useState<TabKey>("colors");
+  // ⏰🎪 ชุด 5: งานตั้งเวลา/แคมเปญ (components/website-theme-schedule) · campPreview = ดูตัวอย่างแคมเปญในพรีวิว (ไม่บันทึก)
+  const { list: schedules, reload: reloadSchedules } = useThemeSchedules(shopSlug);
+  const pendingSchedule = (schedules ?? []).find((s) => s.kind === "publish" && s.status === "pending") ?? null;
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [campPreview, setCampPreview] = useState<{ id: string; name: string; theme: unknown } | null>(null);
+  useEffect(() => {
+    if (tab !== "campaign") setCampPreview(null);
+  }, [tab]);
   // 🌐 ภาษาที่กำลังแก้ทั้งหน้าดีไซน์ (ไทย | EN) — ช่องข้อความ LangInput / Text สลับตาม · พรีวิวเป็นหน้า /en
   const [contentLang, setContentLang] = useState<ContentLang>("th");
   const [device, setDevice] = useState<Device>("desktop");
@@ -663,14 +673,15 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
-  // ส่งธีมเข้า iframe แบบสด
+  // ส่งธีมเข้า iframe แบบสด (กำลังดูตัวอย่างแคมเปญ = ส่งธีมแคมเปญแทน)
+  const shownTheme = campPreview?.theme ?? theme;
   useEffect(() => {
-    if (!theme) return;
+    if (!shownTheme) return;
     const t = setTimeout(() => {
-      iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme }, "*");
+      iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme: shownTheme }, "*");
     }, 120);
     return () => clearTimeout(t);
-  }, [theme]);
+  }, [shownTheme]);
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
@@ -680,13 +691,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       if ((e.data as { type?: string })?.type === "storefront-preview-ready" && cartPin.current) {
         iframeRef.current?.contentWindow?.postMessage({ type: "storefront-cart-pin", open: true }, "*");
       }
-      if ((e.data as { type?: string })?.type === "storefront-preview-ready" && theme) {
-        iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme }, "*");
+      if ((e.data as { type?: string })?.type === "storefront-preview-ready" && shownTheme) {
+        iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme: shownTheme }, "*");
       }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [theme]);
+  }, [shownTheme]);
 
   // ส่วนที่แก้แล้วยังไม่ได้บันทึก — เทียบกับที่บันทึกล่าสุด (ร่าง/เผยแพร่) ไม่ใช่กับที่เผยแพร่อยู่
   const dirtyFields = useMemo(() => {
@@ -2815,6 +2826,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           )}
 
           {/* ── 📄 หน้าพิเศษ (ชุด 4): 404 · ขอบคุณ · ป๊อปอัป · รูปแชร์ · เข้าสู่ระบบ — components/website-site-design-setting ── */}
+          {/* ── 🎪 แคมเปญ (ชุด 5): ตั้งเวลาเผยแพร่ · ธีมแคมเปญ · ของตกแต่ง · ป้ายคนดู/ขายแล้ว — components/website-theme-schedule ── */}
+          {tab === "campaign" && (
+            <CampaignTab
+              shopId={shopId}
+              theme={theme as unknown as import("@/lib/website-theme").SiteTheme}
+              schedules={schedules}
+              reload={reloadSchedules}
+              onSchedule={() => setScheduleOpen(true)}
+              onPage={(p) => apply({ ...theme, page: { ...theme.page, ...p } })}
+              onPreview={setCampPreview}
+              previewing={campPreview?.id ?? null}
+            />
+          )}
+
           {tab === "pages" && <SitePagesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} shopSlug={shopSlug} onPreview={setPage} />}
 
           {/* ── ประวัติ ── */}
@@ -2867,6 +2892,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <option value="0.75">75%</option>
               <option value="1">100%</option>
             </select>
+            {campPreview && (
+              <button type="button" onClick={() => setCampPreview(null)} className="px-2.5 py-1 rounded-lg border border-blue-400 bg-blue-50 text-xs text-blue-700" title="กลับไปดูธีมปกติ" data-camp-preview>
+                👁 ตัวอย่างแคมเปญ &quot;{campPreview.name}&quot; ✕
+              </button>
+            )}
             {previewSrc && <a href={previewSrc} target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↗</a>}
             <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
             <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px · {Math.round(scale * 100)}%</span>
@@ -2925,6 +2955,22 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         </div>
       </div>
 
+      {/* ⏰ ตั้งเวลาเผยแพร่ไว้ (ชุด 5) */}
+      <ScheduleBanner pending={tab === "campaign" ? null : pendingSchedule} onCancel={async (s) => (await cancelSchedule(s, toast)) && reloadSchedules()} />
+      <SchedulePublishModal
+        open={scheduleOpen}
+        onClose={() => setScheduleOpen(false)}
+        shopId={shopId}
+        theme={theme}
+        pending={pendingSchedule}
+        onDone={() => {
+          // ฝั่งเซิร์ฟเวอร์บันทึกชุดนี้เป็นร่างให้ด้วย
+          setSaved(theme);
+          setHadDraft(true);
+          reloadSchedules();
+        }}
+      />
+
       {/* ── แถบปุ่มล่าง ── */}
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
         <span className="text-xs text-slate-500">
@@ -2939,6 +2985,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           <button onClick={() => void discard()} disabled={!isDirty && !hadDraft} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40">ละทิ้งการเปลี่ยนแปลง</button>
           <button onClick={() => void save("draft")} disabled={busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50">
             {busy === "draft" ? "กำลังบันทึก…" : "บันทึกร่าง"}
+          </button>
+          <button onClick={() => setScheduleOpen(true)} disabled={busy !== null} title="ตั้งเวลาให้ระบบเผยแพร่เอง" className="px-3.5 py-2 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50" data-schedule-btn>
+            ⏰ ตั้งเวลา
           </button>
           <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
             {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}

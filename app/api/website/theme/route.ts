@@ -17,6 +17,7 @@ import { normalizeFieldMap } from "@/lib/website-field-map";
 import { loadParentWebFields, loadParentImageFields, PARENT_FIELD_GROUP_LABEL } from "@/lib/website-parent-fields";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { resolveThemeSchedules } from "@/lib/website-theme-schedule-db";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { shippingAutoPreview } from "@/lib/website-content-sources";
 import { dropStatus } from "@/lib/website-new-drops";
@@ -59,6 +60,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
 
   const s = shop as { id: string; name: string; slug: string; theme: unknown; theme_draft: unknown; field_map: unknown };
+  // ⏰ งานตั้งเวลาที่ถึงเวลาแล้ว → เผยแพร่ก่อนโชว์ (lib/website-theme-schedule-db)
+  if ((await resolveThemeSchedules(sb, s.id)).published) {
+    const { data: fresh } = await sb.from("shops").select("theme, theme_draft").eq("id", s.id).maybeSingle();
+    if (fresh) Object.assign(s, fresh);
+    await purgeStorefrontCache(sb, s.id);
+  }
 
   // รายการสินค้าบนเว็บ (รหัส+ชื่อ) ไว้ให้เลือก "ใช้กับรุ่นไหน" ในชุดรายละเอียดสินค้า
   const { data: listRows } = await sb.from("store_listings").select("parent_sku_id").eq("shop_id", s.id).limit(500);

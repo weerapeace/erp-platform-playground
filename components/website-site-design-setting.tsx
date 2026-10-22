@@ -13,6 +13,7 @@ import { LangInput } from "@/components/bilingual-field";
 import {
   DEFAULT_SITE_PAGE,
   DEFAULT_SITE_SHAPE,
+  FESTIVE_HANGING,
   MOBILE_NAV_ITEMS,
   MOBILE_NAV_MAX,
   MOBILE_SCALE_RANGE,
@@ -23,6 +24,8 @@ import {
   type ButtonKind,
   type CookieLayout,
   type CursorStyle,
+  type FestiveKind,
+  type FestiveLook,
   type HeaderIconStyle,
   type InputStyle,
   type IntroStyle,
@@ -30,6 +33,7 @@ import {
   type MobileNavItem,
   type MotionSpeed,
   type PriceFormat,
+  type ProofLook,
   type SearchEmpty,
   type SectionEntrance,
   type SiteDensity,
@@ -786,6 +790,105 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview }: { val
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const FESTIVE_CHOICES: { v: FestiveKind; l: string; d?: string }[] = [
+  { v: "none", l: "ไม่มี", d: "แบบเดิม" },
+  { v: "snow", l: "❄️ หิมะ", d: "คริสต์มาส/ปีใหม่" },
+  { v: "petals", l: "🌸 กลีบดอกไม้", d: "วาเลนไทน์/ฤดูใบไม้ผลิ" },
+  { v: "confetti", l: "🎊 กระดาษสี", d: "ฉลอง/เซลใหญ่" },
+  { v: "hearts", l: "❤️ หัวใจ", d: "วาเลนไทน์/วันแม่" },
+  { v: "water", l: "💧 หยดน้ำ", d: "สงกรานต์" },
+  { v: "leaves", l: "🍂 ใบไม้", d: "หน้าหนาว" },
+  { v: "stars", l: "✨ ประกาย", d: "เปิดตัวสินค้า" },
+  { v: "lantern", l: "🏮 โคมแดงห้อย", d: "ตรุษจีน · ห้อยใต้หัวเว็บ" },
+  { v: "flags", l: "🚩 ธงราวห้อย", d: "งานเทศกาล · ห้อยใต้หัวเว็บ" },
+];
+
+/** 🎄 ของตกแต่งเทศกาล (ชุด 5 · theme.page.festive) — เว็บร้าน components/layout/FestiveDecor */
+export function FestiveSetting({ value, onChange }: { value: FestiveLook; onChange: (v: FestiveLook) => void }) {
+  const set = (p: Partial<FestiveLook>) => onChange({ ...value, ...p });
+  const hanging = FESTIVE_HANGING.includes(value.kind);
+  return (
+    <div className="space-y-3">
+      <Choice<FestiveKind> value={value.kind} onChange={(kind) => set({ kind })} options={FESTIVE_CHOICES} />
+      {value.kind !== "none" && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>{hanging ? "จำนวนที่ห้อย" : "ปริมาณที่โปรย"}<Def show={value.amount === "some"} /></label>
+            <Choice<"few" | "some" | "many"> value={value.amount} onChange={(amount) => set({ amount })} options={[{ v: "few", l: "น้อย" }, { v: "some", l: "กลาง" }, { v: "many", l: "มาก" }]} />
+          </div>
+          <div>
+            <label className={labelCls}>โชว์ที่<Def show={value.where === "home"} /></label>
+            <Choice<"home" | "all"> value={value.where} onChange={(where) => set({ where })} options={[{ v: "home", l: "หน้าแรก" }, { v: "all", l: "ทุกหน้า" }]} />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer sm:col-span-2">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.mobile} onChange={(e) => set({ mobile: e.target.checked })} />
+            โชว์บนมือถือด้วย
+          </label>
+        </div>
+      )}
+      <p className="text-[11px] text-slate-400">ไม่บังปุ่ม (กดทะลุได้) · ไม่ขึ้นหน้าตะกร้า/ชำระเงิน · เครื่องที่ตั้ง &quot;ลดการเคลื่อนไหว&quot; ไม่เห็นของที่โปรย · แบบห้อยอยู่ใต้หัวเว็บ เลื่อนจอแล้วหายไปกับหน้า</p>
+    </div>
+  );
+}
+
+/** 👀 ป้ายคนดู / 🔥 ขายแล้ว (ชุด 5 · theme.page.proof) — ตัวเลขจริงจาก ERP (lib/website-proof-db) · เว็บร้าน ProofBadges */
+export function ProofSetting({ value, onChange }: { value: ProofLook; onChange: (v: ProofLook) => void }) {
+  const set = (p: Partial<ProofLook>) => onChange({ ...value, ...p });
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="flex items-center gap-2 text-sm text-slate-800 font-medium cursor-pointer">
+          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.viewers} onChange={(e) => set({ viewers: e.target.checked })} />
+          👀 ป้ายคนดู — &quot;วันนี้มี N คนดูสินค้านี้&quot;
+        </label>
+        <p className="text-[11px] text-slate-400 ml-6">นับ 1 เครื่องต่อสินค้าต่อวัน (เวลาไทย) · เริ่มนับตั้งแต่เปิดใช้ชุดนี้</p>
+        {value.viewers && (
+          <div className="ml-6 mt-2 max-w-sm">
+            <p className="text-[11px] text-slate-500 mb-1">โชว์เมื่อมีคนดูอย่างน้อย</p>
+            <RangeInput value={value.viewersMin} onChange={(n) => set({ viewersMin: n })} min={1} max={50} hardMax={100} unit=" คน" ariaLabel="ขั้นต่ำคนดู" />
+          </div>
+        )}
+      </div>
+      <div>
+        <label className="flex items-center gap-2 text-sm text-slate-800 font-medium cursor-pointer">
+          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.sold} onChange={(e) => set({ sold: e.target.checked })} />
+          🔥 ป้ายขายแล้ว — &quot;ขายแล้ว N ชิ้น&quot;
+        </label>
+        {value.sold && (
+          <div className="ml-6 mt-2 space-y-3">
+            <div className="max-w-sm">
+              <p className="text-[11px] text-slate-500 mb-1">โชว์เมื่อขายได้อย่างน้อย</p>
+              <RangeInput value={value.soldMin} onChange={(n) => set({ soldMin: n })} min={1} max={200} hardMax={1000} unit=" ชิ้น" ariaLabel="ขั้นต่ำยอดขาย" />
+            </div>
+            <div>
+              <p className="text-[11px] text-slate-500 mb-1">นับยอดจาก<Def show={value.soldSource === "web"} /></p>
+              <Choice<"web" | "all">
+                value={value.soldSource}
+                onChange={(soldSource) => set({ soldSource })}
+                options={[
+                  { v: "web", l: "ออเดอร์บนเว็บ", d: "ตรงกับที่ลูกค้าเห็นที่สุด" },
+                  { v: "all", l: "เว็บ + ใบสั่งขาย ERP", d: "รวมขายส่ง/OEM ตัวเลขอาจสูง" },
+                ]}
+              />
+            </div>
+            <div>
+              <p className="text-[11px] text-slate-500 mb-1">ช่วงเวลา<Def show={value.soldPeriod === "30d"} /></p>
+              <Choice<"30d" | "all"> value={value.soldPeriod} onChange={(soldPeriod) => set({ soldPeriod })} options={[{ v: "30d", l: "30 วันล่าสุด", d: "ขึ้นว่า \"ใน 30 วัน\"" }, { v: "all", l: "ทั้งหมด" }]} />
+            </div>
+          </div>
+        )}
+      </div>
+      {(value.viewers || value.sold) && (
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={value.onCard} onChange={(e) => set({ onCard: e.target.checked })} />
+          โชว์บนการ์ดสินค้าด้วย (ปกติ = หน้าสินค้าอย่างเดียว)
+        </label>
+      )}
+      <p className="text-[11px] text-slate-400">ตัวเลขจริงจากระบบเท่านั้น ไม่สุ่ม ไม่บวกเพิ่ม · ต่ำกว่าขั้นต่ำ = ป้ายซ่อนเอง · ตัวเลขอัปเดตทุก ~1 นาที · ในพรีวิว ถ้ายังไม่มีตัวเลขจริงจะโชว์ตัวเลข &quot;ตัวอย่าง&quot; ให้เห็นหน้าตา (ลูกค้าไม่เห็น)</p>
     </div>
   );
 }

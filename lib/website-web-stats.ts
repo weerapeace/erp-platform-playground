@@ -17,6 +17,7 @@ export const STAT_METRICS = {
   f_checkout: "รอบที่เริ่มชำระเงิน (มิติ = แหล่ง)",
   item_view: "ดูสินค้า (มิติ = รหัสรุ่น)",
   item_cart: "ใส่ตะกร้า (มิติ = รหัสรุ่น)",
+  item_viewer: "คนดูสินค้า 1 เครื่องต่อรุ่นต่อวัน (มิติ = รหัสรุ่น) — ป้าย 👀 คนดูวันนี้",
   ab_x: "เห็นกลุ่มทดสอบ (มิติ = exp|A)",
   ab_cart: "ใส่ตะกร้า ในกลุ่มทดสอบ",
   ab_checkout: "เริ่มชำระ ในกลุ่มทดสอบ",
@@ -71,7 +72,8 @@ function cleanDim(m: StatMetric, d: unknown): string | null {
       return p.startsWith("/") ? p.slice(0, 80) : null;
     }
     case "item_view":
-    case "item_cart": {
+    case "item_cart":
+    case "item_viewer": {
       const c = s.toUpperCase().replace(/[^A-Z0-9._-]/g, "").slice(0, 40);
       return c || null;
     }
