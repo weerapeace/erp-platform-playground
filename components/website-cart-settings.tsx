@@ -4,6 +4,7 @@
  * 🛒 ตั้งค่าดีไซน์ตะกร้า (แท็บ ดีไซน์ → 🛒 ตะกร้า) — ค่าใน theme.cart (lib/website-cart · มิเรอร์ storefront src/lib/cart-config.ts)
  * เว็บร้านวาดที่ components/cart/* — ลิ้นชักตะกร้า + หน้า /cart ใช้ตัววาดเดียวกัน
  * พรีวิว: ตอนอยู่แท็บนี้ หน้าตั้งค่าสั่งให้เว็บในพรีวิวเปิดตะกร้าค้างไว้ (ตะกร้าว่าง = ใส่สินค้าตัวอย่างให้ดู ไม่ใส่ตะกร้าจริง)
+ * 🧾 หน้าตะกร้าเต็มหน้า: แบบแยกรายการ · ปุ่มในลิ้นชัก · ติ๊กเลือกชิ้น · เปลี่ยนสี/ไซส์ · สลักชื่อ · ห่อ/การ์ดรายชิ้น (giftMode)
  */
 import { LangInput, LangTag } from "@/components/bilingual-field";
 import { useState, type ReactNode } from "react";
@@ -12,6 +13,8 @@ import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
   CART_IMAGE_SIZES,
+  CART_PAGE_BTNS,
+  CART_PAGE_LAYOUTS,
   CART_RECS_LAYOUTS,
   CART_RECS_POSITIONS,
   CART_RECS_SOURCES,
@@ -138,7 +141,33 @@ function IconInput({ value, onChange, label }: { value: string; onChange: (v: st
 }
 
 /** 🛍 ตั้งค่าสินค้าแนะนำ 1 ชุด */
-function RecsSetEditor({ value: r, onChange, shopSlug, index, onRemove, dragHandle }: { value: CartRecsSet; onChange: (v: CartRecsSet) => void; shopSlug: string; index: number; onRemove?: () => void; dragHandle?: ReactNode }) {
+/** หมวดเว็บของร้าน (ชิปเลือกหลายหมวด) */
+export type CartCatChoice = { key: string; label: string; parent?: string | null };
+function CatChips({ cats, value, onChange, empty }: { cats: CartCatChoice[]; value: string[]; onChange: (v: string[]) => void; empty: string }) {
+  if (!cats.length) return <p className="text-[11px] text-slate-400">ยังไม่มีหมวด — ตั้งที่แท็บ 📂 หมวดหมู่</p>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {cats.map((c) => {
+        const on = value.includes(c.key);
+        return (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => onChange(on ? value.filter((k) => k !== c.key) : [...value, c.key])}
+            className={`px-2.5 py-1 rounded-full border text-xs ${on ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+          >
+            {on ? "✓ " : ""}
+            {c.parent ? "↳ " : ""}
+            {c.label}
+          </button>
+        );
+      })}
+      {!value.length && <span className="text-[11px] text-slate-400 self-center">{empty}</span>}
+    </div>
+  );
+}
+
+function RecsSetEditor({ value: r, onChange, shopSlug, categories, index, onRemove, dragHandle }: { value: CartRecsSet; onChange: (v: CartRecsSet) => void; shopSlug: string; categories: CartCatChoice[]; index: number; onRemove?: () => void; dragHandle?: ReactNode }) {
   const set = (p: Partial<CartRecsSet>) => onChange({ ...r, ...p });
   const layouts = CART_RECS_LAYOUTS.map((o) => ({ v: o.value, l: o.label }));
   const hint = (v: string) => CART_RECS_LAYOUTS.find((o) => o.value === v)?.hint;
@@ -174,6 +203,17 @@ function RecsSetEditor({ value: r, onChange, shopSlug, index, onRemove, dragHand
             <span className={lbl}>เลือกสินค้าจาก</span>
             <Seg value={r.source} onChange={(source) => set({ source })} options={CART_RECS_SOURCES.map((o) => ({ v: o.value, l: o.label }))} />
             <p className="text-[11px] text-slate-500 mt-1">{CART_RECS_SOURCES.find((o) => o.value === r.source)?.hint}</p>
+          </div>
+          {r.source === "category" && (
+            <div>
+              <span className={lbl}>หมวดที่ดึงสินค้ามาแนะนำ</span>
+              <CatChips cats={categories} value={r.cats} onChange={(cats) => set({ cats })} empty="ยังไม่ได้เลือก = ไม่โชว์ชุดนี้" />
+            </div>
+          )}
+          <div>
+            <span className={lbl}>🎯 โชว์เฉพาะเมื่อในตะกร้ามีสินค้าหมวด… (ไม่เลือก = โชว์ทุกครั้ง)</span>
+            <CatChips cats={categories} value={r.ifCats} onChange={(ifCats) => set({ ifCats })} empty="ทุกตะกร้า" />
+            {r.ifCats.length > 0 && <p className="text-[11px] text-slate-500 mt-1">เช่น ในตะกร้ามีกระเป๋า → โชว์ “ของแต่งกระเป๋า” · ตะกร้าว่าง = ไม่โชว์ชุดนี้</p>}
           </div>
           {r.source === "manual" && (
             <div>
@@ -274,11 +314,14 @@ export function CartSettings({
   value: c,
   onChange,
   shopSlug,
+  categories = [],
   onPreviewPage,
 }: {
   value: CartConfig;
   onChange: (v: CartConfig) => void;
   shopSlug: string;
+  /** หมวดเว็บของร้าน (ชุดสินค้าแนะนำตามหมวด) */
+  categories?: CartCatChoice[];
   /** สั่งพรีวิวไปหน้า (เช่น /cart) */
   onPreviewPage?: (path: string) => void;
 }) {
@@ -391,6 +434,40 @@ export function CartSettings({
         </div>
       </Card>
 
+      {/* ── หน้าตะกร้าเต็มหน้า ── */}
+      <Card title="🧾 หน้าตะกร้าเต็มหน้า (/cart) + ตัวเลือกต่อชิ้น" hint="ค่าเริ่มต้น = แบบเดิม · ติ๊กเลือกชิ้น/เปลี่ยนสี/สลักชื่อ ใช้ได้ทั้งลิ้นชักและหน้า /cart">
+        <div>
+          <span className={lbl}>หน้าตาหน้า /cart</span>
+          <Seg value={c.pageLayout} onChange={(pageLayout) => set({ pageLayout })} options={CART_PAGE_LAYOUTS.map((o) => ({ v: o.value, l: o.label }))} />
+          <p className="text-[11px] text-slate-500 mt-1">
+            {CART_PAGE_LAYOUTS.find((o) => o.value === c.pageLayout)?.hint}
+            {onPreviewPage && (
+              <>
+                {" · "}
+                <button type="button" onClick={() => onPreviewPage("/cart")} className="text-blue-600 hover:underline">
+                  ดูในพรีวิว
+                </button>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <span className={lbl}>ปุ่มในลิ้นชักไปหน้านี้</span>
+            <Seg value={c.pageBtn} onChange={(pageBtn) => set({ pageBtn })} options={CART_PAGE_BTNS.map((o) => ({ v: o.value, l: o.label }))} />
+            <p className="text-[11px] text-slate-500 mt-1">อัตโนมัติ = ลิงก์เล็กเฉพาะตอนตั้ง “กดไอคอนตะกร้า → ไปหน้า /cart”</p>
+          </div>
+          {(c.pageBtn === "button" || c.pageBtn === "link") && <Text label="ข้อความปุ่ม (ว่าง = ดูตะกร้าเต็มหน้า)" obj={c} k="pageBtnText" onPatch={set} placeholder="ดูตะกร้าเต็มหน้า" max={40} />}
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Check label="☑ ติ๊กเลือกชิ้นที่จะชำระ" hint="ไม่ติ๊ก = ยังอยู่ในตะกร้า ไม่ไปหน้าชำระเงิน (ซื้อทีหลังได้) · มีปุ่มเลือกทั้งหมด" checked={c.select} onChange={(select) => set({ select })} />
+          <Check label="ป้ายหมวดเหนือชื่อสินค้า" hint="เช่น HANDBAGS · WALLETS (หมวดแรกของสินค้า)" checked={c.showCategory} onChange={(showCategory) => set({ showCategory })} />
+          <Check label="เปลี่ยนสี/ไซส์ในตะกร้า" hint="dropdown ในแถวสินค้า — ไม่ต้องลบแล้วใส่ใหม่ (โชว์เฉพาะสี/ไซส์ที่มีขาย)" checked={c.changeOption} onChange={(changeOption) => set({ changeOption })} />
+          <Check label="🔤 สลักชื่อในตะกร้า" hint="เฉพาะรุ่นที่เปิดปั๊มชื่อไว้ (แท็บ 🛍 เว็บไซต์ของรุ่น) — พิมพ์/แก้/เอาออกได้ในตะกร้า" checked={c.personalize} onChange={(personalize) => set({ personalize })} />
+          <Check label="ปุ่ม “เข้าสู่ระบบสมาชิก” ใต้ปุ่มสั่งซื้อ" hint="โชว์เฉพาะลูกค้าที่ยังไม่เข้าสู่ระบบ (ต้องเปิดระบบสมาชิก)" checked={c.memberBtn} onChange={(memberBtn) => set({ memberBtn })} />
+        </div>
+      </Card>
+
       {/* ── ตอนว่าง ── */}
       <Card title="🫙 ตอนตะกร้าว่าง" hint="เปิดสินค้าแนะนำไว้ → ตอนว่างก็โชว์สินค้าแนะนำให้ด้วย">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -429,6 +506,7 @@ export function CartSettings({
                 value={r}
                 index={i}
                 shopSlug={shopSlug}
+                categories={categories}
                 onChange={(v) => setSets(sets.map((x, j) => (j === i ? v : x)))}
                 onRemove={sets.length > 1 ? () => setSets(sets.filter((_, j) => j !== i)) : undefined}
                 dragHandle={sets.length > 1 ? <DragHandle {...setsDrag.handleProps(i)} /> : undefined}
@@ -478,6 +556,24 @@ export function CartSettings({
               {c.card && <Text label="ข้อความ (ว่าง = ชื่อบริการการ์ดในข้อมูลร้าน)" obj={c.labels} k="card" onPatch={(p) => set({ labels: { ...c.labels, ...p } })} placeholder="เขียนการ์ดอวยพร" max={60} />}
             </div>
           </div>
+          {(c.gift || c.card) && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+              <span className={lbl}>🎀 ห่อของขวัญ / 💌 การ์ด คิดแบบ</span>
+              <Seg
+                value={c.giftMode}
+                onChange={(giftMode) => set({ giftMode })}
+                options={[
+                  { v: "order", l: "ทั้งออเดอร์ (เดิม)" },
+                  { v: "item", l: "เลือกรายชิ้น" },
+                ]}
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                {c.giftMode === "item"
+                  ? "ลูกค้าเลือกห่อ/การ์ดทีละชิ้นในตะกร้า · ค่าห่อ × จำนวนชิ้น · การ์ด 1 ใบต่อรายการ (เขียนข้อความในแถวนั้น) · ใบออเดอร์บอกว่าชิ้นไหนห่อ/มีการ์ด"
+                  : "ติ๊กครั้งเดียวใช้กับทั้งออเดอร์ · เลือกลายการ์ด/ถึง-จาก ได้ตอนชำระเงิน"}
+              </p>
+            </div>
+          )}
           <div className="flex items-start gap-2">
             <IconInput label="ไอคอนหมายเหตุ" value={icon("note")} onChange={(v) => setIcon("note", v)} />
             <div className="flex-1 min-w-0 space-y-1.5">

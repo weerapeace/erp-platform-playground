@@ -33,7 +33,8 @@ import { sourceLabel } from "@/lib/website-web-stats";
 import { ShippopBox, ShippopBulkButton, type ShippopSettings } from "@/components/website-shippop-box";
 import type { ShippopInfo } from "@/lib/shippop";
 
-type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number };
+/** gift = 🎀 ห่อ/💌 การ์ด รายชิ้น (ดีไซน์ตะกร้า "เลือกรายชิ้น") */
+type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number; gift?: { wrap: boolean; card: boolean; message: string } };
 type Order = {
   id: string;
   orderNo: string;
@@ -576,13 +577,22 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 <h4 className="text-xs font-semibold text-slate-500 mb-1.5">รายการสินค้า</h4>
                 <ul className="divide-y divide-slate-100">
                   {open.items.map((i, idx) => (
-                    <li key={idx} className="py-1.5 flex justify-between gap-3">
-                      <span className="text-slate-700">
-                        {i.name}
-                        {i.variantLabel && <span className="text-slate-400"> ({i.variantLabel})</span>}
-                        <span className="text-slate-400"> ×{i.qty}</span>
-                      </span>
-                      <span className="text-slate-800 shrink-0">{money(i.lineTotal)}</span>
+                    <li key={idx} className="py-1.5">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-700">
+                          {i.name}
+                          {i.variantLabel && <span className="text-slate-400"> ({i.variantLabel})</span>}
+                          <span className="text-slate-400"> ×{i.qty}</span>
+                        </span>
+                        <span className="text-slate-800 shrink-0">{money(i.lineTotal)}</span>
+                      </div>
+                      {i.gift?.card && (
+                        <div className="mt-1 flex items-start gap-2 rounded-md bg-pink-50 px-2 py-1.5 text-xs text-pink-900">
+                          <span className="shrink-0">💌 การ์ดของชิ้นนี้</span>
+                          <span className="flex-1 whitespace-pre-line text-slate-800">{i.gift.message ? `“${i.gift.message}”` : <span className="text-slate-400">(ไม่ได้เขียนข้อความ)</span>}</span>
+                          {i.gift.message && <CopyButton value={i.gift.message} title="คัดลอกข้อความการ์ด" />}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

@@ -51,6 +51,7 @@ import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
 import { cleanAb, cleanSource } from "@/lib/website-web-stats";
 import { cleanTaxInvoice, type TaxInvoiceRequest } from "@/lib/website-tax-invoice";
+import { cleanItemGift, itemGiftLabel, priceItemGift, type ItemGift, type ItemGiftChoice } from "@/lib/website-item-gift";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -122,6 +123,8 @@ export interface PublicOrderItem {
   personalize?: { text?: unknown; style?: unknown; position?: unknown } | null;
   /** 🧵 เข็มขัดสั่งทำ (Belt Builder): id แบบใน belt_designs — ใช้แทน productId · ราคาเอาจากแบบที่บันทึกไว้ (คิดฝั่งเซิร์ฟเวอร์แล้ว) */
   beltDesignId?: string;
+  /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ดีไซน์ตะกร้า giftMode = item · lib/website-item-gift) */
+  gift?: ItemGiftChoice | null;
 }
 
 export interface PublicOrderInput {
@@ -152,6 +155,8 @@ export interface OrderLineView {
   unitPrice: number;
   qty: number;
   lineTotal: number;
+  /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ไม่มี = ไม่ส่ง) */
+  gift?: ItemGiftChoice;
 }
 
 export interface OrderView {
@@ -241,6 +246,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       option2Id: clean(o.option2Id, 60) || undefined,
       qty,
       personalize: o.personalize && typeof o.personalize === "object" ? (o.personalize as PublicOrderItem["personalize"]) : null,
+      gift: cleanItemGift(o.gift),
     });
   }
 
@@ -393,6 +399,8 @@ type LineInsert = {
   personalize: PersonalizeChoice | null;
   /** 🧵 แบบเข็มขัด (belt_designs.id) — รายการสินค้าปกติ = null */
   belt_design_id?: string | null;
+  /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ไม่มี = ไม่ใส่คีย์) */
+  gift?: ItemGift;
 };
 
 const pad = (n: number, len: number) => String(n).padStart(len, "0");
@@ -425,6 +433,11 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   if (input.paymentMethod === "promptpay" && !info.pay_promptpay) return { ok: false, error: "ร้านนี้ไม่รับโอนพร้อมเพย์", status: 400 };
 
   const fieldMap = normalizeFieldMap(shop.field_map);
+  // 🎀 ห่อ/💌 การ์ด รายชิ้น — รวมค่าบริการเข้า gift_fee / gift_card_fee ของออเดอร์
+  let itemWrapFee = 0;
+  let itemCardFee = 0;
+  let itemWrap = false;
+  let itemCard = false;
   const parentIds = [...new Set(input.items.filter((i) => !i.beltDesignId).map((i) => i.productId))];
   // 🧵 แบบเข็มขัดที่สั่ง: ต้องเป็นของร้านนี้ ยังไม่เคยสั่ง และมีราคา (ราคาคิดไว้ตอนบันทึกแบบ — lib/belt-builder-order)
   const beltIds = [...new Set(input.items.map((i) => i.beltDesignId).filter((x): x is string => !!x))];
@@ -531,6 +544,18 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       variant = [variant, personalizeLabel(personalize, cfg)].filter(Boolean).join(" · ");
       variantEn = [variantEn, personalizeLabel(personalize, cfg, "en")].filter(Boolean).join(" · ");
     }
+    // 🎀 ห่อ/💌 การ์ด รายชิ้น: ร้านต้องเปิดบริการ · ค่าห่อ × จำนวนชิ้น · การ์ด 1 ใบ/รายการ
+    const ig = priceItemGift(it.gift, it.qty, info, resolved.name);
+    if (!ig.ok) return { ok: false, error: ig.error, status: 409 };
+    if (ig.gift) {
+      const baseEn = variantEn ?? variant;
+      variant = [variant, itemGiftLabel(ig.gift)].filter(Boolean).join(" · ");
+      variantEn = [baseEn, itemGiftLabel(ig.gift, "en")].filter(Boolean).join(" · ");
+      itemWrapFee += ig.gift.wrapFee;
+      itemCardFee += ig.gift.cardFee;
+      itemWrap ||= ig.gift.wrap;
+      itemCard ||= ig.gift.card;
+    }
     const lineTotal = Math.round(price * it.qty * 100) / 100;
     subtotal += lineTotal;
     lines.push({
@@ -546,6 +571,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       unit_price: price,
       qty: it.qty,
       line_total: lineTotal,
+      ...(ig.gift ? { gift: ig.gift } : {}),
     });
     promoLines.push({ code: parent.code ?? "", categories: withParentCategories(fieldMap.categories, resolved.categories), unitPrice: price, qty: it.qty });
   }
@@ -579,8 +605,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const giftWrap = !!input.gift?.wrap;
   // 💌 การ์ดแยก: ไม่ห่อก็เขียนการ์ดได้ · ค่าการ์ดคิดจากที่ร้านตั้ง (ไม่เชื่อหน้าเว็บ)
   const cardOnly = !!input.gift?.addCard;
-  const giftFee = calcGiftFee(giftWrap, info);
-  const giftCardFee = calcCardFee(cardOnly, info);
+  const giftFee = Math.round((calcGiftFee(giftWrap, info) + itemWrapFee) * 100) / 100;
+  const giftCardFee = Math.round((calcCardFee(cardOnly, info) + itemCardFee) * 100) / 100;
   const msgOk = cardOnly || (giftWrap && info.gift_allow_message);
   const giftMessage = msgOk ? input.gift?.message ?? null : null;
   const giftHidePrice = (giftWrap || cardOnly) && info.gift_allow_hide_price && !!input.gift?.hidePrice;
@@ -658,7 +684,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         deposit_amount: depositAmount > 0 ? depositAmount : null,
         points_used: pointsUsed,
         points_discount: pointsDiscount,
-        gift_wrap: giftWrap,
+        gift_wrap: giftWrap || itemWrap,
         gift_fee: giftFee,
         gift_card_fee: giftCardFee,
         gift_message: giftMessage,
@@ -750,10 +776,10 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         pointsUsed,
         pointsDiscount,
         pointsEarned: 0,
-        giftWrap,
+        giftWrap: giftWrap || itemWrap,
         giftFee,
         giftCardFee,
-        giftCardOnly: cardOnly || (!giftWrap && !!(giftMessage || giftCard)),
+        giftCardOnly: cardOnly || itemCard || (!giftWrap && !!(giftMessage || giftCard)),
         giftMessage: giftMessage ?? "",
         giftHidePrice,
         giftCard,
@@ -833,6 +859,8 @@ export type ItemRow = {
   unit_price: number | string;
   qty: number;
   line_total: number | string;
+  /** 🎀 ห่อ/💌 การ์ด รายชิ้น (store_order_items.gift) */
+  gift?: unknown;
 };
 
 /** viewLang = ภาษาที่จะโชว์ชื่อสินค้า (ไม่ส่ง = ภาษาที่ลูกค้าใช้ตอนสั่ง) · พนักงาน = "th" เสมอ */
@@ -852,13 +880,17 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
       province: o.ship_province ?? "",
       postal: o.ship_postal ?? "",
     },
-    items: items.map((i) => ({
-      name: (show === "en" && i.name_en) || i.name,
-      variantLabel: (show === "en" && i.variant_label_en) || i.variant_label,
-      unitPrice: num(i.unit_price),
-      qty: i.qty,
-      lineTotal: num(i.line_total),
-    })),
+    items: items.map((i) => {
+      const gift = cleanItemGift(i.gift);
+      return {
+        name: (show === "en" && i.name_en) || i.name,
+        variantLabel: (show === "en" && i.variant_label_en) || i.variant_label,
+        unitPrice: num(i.unit_price),
+        qty: i.qty,
+        lineTotal: num(i.line_total),
+        ...(gift ? { gift } : {}),
+      };
+    }),
     subtotal: num(o.subtotal),
     shippingFee: num(o.shipping_fee),
     shippingMethod: o.shipping_method ? { id: o.shipping_method, label: o.shipping_method_label ?? o.shipping_method, box: o.shipping_box ?? null } : null,
@@ -874,7 +906,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     giftWrap: !!o.gift_wrap,
     giftFee: num(o.gift_fee),
     giftCardFee: num(o.gift_card_fee),
-    giftCardOnly: num(o.gift_card_fee) > 0 || (!o.gift_wrap && !!(o.gift_message || o.gift_card)),
+    giftCardOnly: num(o.gift_card_fee) > 0 || items.some((i) => cleanItemGift(i.gift)?.card) || (!o.gift_wrap && !!(o.gift_message || o.gift_card)),
     giftMessage: o.gift_message ?? "",
     giftHidePrice: !!o.gift_hide_price,
     giftCard: readOrderCard(o.gift_card),
@@ -906,7 +938,7 @@ export async function findStorefrontOrder(
   if (digits(row.customer_phone).slice(-9) !== ph.slice(-9)) return null;
 
   const [{ data: items }, info, { data: slips }] = await Promise.all([
-    sb.from("store_order_items").select("name, variant_label, name_en, variant_label_en, unit_price, qty, line_total").eq("order_id", row.id).order("id"),
+    sb.from("store_order_items").select("name, variant_label, name_en, variant_label_en, unit_price, qty, line_total, gift").eq("order_id", row.id).order("id"),
     readSiteInfo(sb, shopId),
     sb.from("store_payments").select("status, auto_result, reject_reason, slip_uploaded_at").eq("order_id", row.id).not("slip_path", "is", null).order("slip_uploaded_at", { ascending: false }).limit(1),
   ]);

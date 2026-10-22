@@ -2689,7 +2689,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {/* ── 🛒 ตะกร้า: หน้าตา · รายการ · ท้ายตะกร้า · สินค้าแนะนำ · ฟังก์ชันเพิ่ม (components/website-cart-settings) ── */}
           {/* ── 🔗 แนะนำสินค้า: สินค้าที่เกี่ยวข้อง (กฎหลายชั้น) + 👀 ดูล่าสุด (components/website-related-settings) ── */}
           {tab === "related" && <RelatedSettings product={theme.product} onChange={setProduct} shopSlug={shopSlug} />}
-          {tab === "cart" && <CartSettings value={theme.cart} onChange={(cart) => apply({ ...theme, cart })} shopSlug={shopSlug} onPreviewPage={setPage} />}
+          {tab === "cart" && <CartSettings value={theme.cart} onChange={(cart) => apply({ ...theme, cart })} shopSlug={shopSlug} categories={choices?.categories ?? []} onPreviewPage={setPage} />}
           {/* ── 💳 หน้าชำระเงิน: ข้อความ · ช่องกรอก · การจัดวาง · ช่องทางจ่าย · แถบความมั่นใจ · หน้าขอบคุณ (components/website-checkout-settings) ── */}
           {tab === "checkout" && <CheckoutSettings value={theme.checkout} onChange={(checkout) => apply({ ...theme, checkout })} payInfo={choices?.payInfo} onPreviewPage={setPage} />}
 

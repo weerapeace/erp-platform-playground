@@ -73,7 +73,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (ids.length) {
     const { data: items } = await sb
       .from("store_order_items")
-      .select("order_id, name, variant_label, name_en, variant_label_en, sku_code, unit_price, qty, line_total")
+      .select("order_id, name, variant_label, name_en, variant_label_en, sku_code, unit_price, qty, line_total, gift")
       .in("order_id", ids)
       .order("id");
     for (const it of (items ?? []) as Record<string, unknown>[]) {

@@ -5,7 +5,8 @@
  * ค่าเริ่มต้น = หน้าตาเดิมของตะกร้า (ลิ้นชักขวา · ปุ่มดำเนินการสั่งซื้อ · แถบส่งฟรี · ล้างตะกร้า) — ฟังก์ชันใหม่ปิดไว้
  */
 export type CartStyle = "drawer-right" | "drawer-left" | "modal";
-export type CartRecsSource = "auto" | "featured" | "manual";
+/** auto อัตโนมัติ · featured ที่ติ๊กแนะนำ · manual เลือกเอง · category สินค้าในหมวดที่เลือก (cats) */
+export type CartRecsSource = "auto" | "featured" | "manual" | "category";
 /** ตำแหน่งสินค้าแนะนำ: บนสุด · ต่อจากรายการสินค้า · ท้ายรายการ (เดิม) · ติดเหนือยอดรวม (เห็นตลอด) */
 export type CartRecsPos = "top" | "afterItems" | "bottom" | "footer";
 /** หน้าตาสินค้าแนะนำ: row เลื่อนข้าง · grid ตาราง · list แถวรายการ · addon ติ๊กเพิ่ม */
@@ -21,6 +22,10 @@ export interface CartRecsSet {
   title: string;
   source: CartRecsSource;
   codes: string[];
+  /** source = category: หมวดที่ดึงสินค้ามาแนะนำ (รหัสหมวดเว็บ) */
+  cats: string[];
+  /** 🎯 โชว์ชุดนี้เฉพาะเมื่อในตะกร้ามีสินค้าในหมวดเหล่านี้ (ว่าง = ไม่มีเงื่อนไข) — เช่น มีกระเป๋า → แนะนำของแต่งกระเป๋า */
+  ifCats: string[];
   limit: number;
   /** ยอดยังไม่ถึงส่งฟรี → ดันสินค้าที่ราคาพอดีขึ้นก่อน */
   freeShip: boolean;
@@ -61,6 +66,12 @@ export interface CartTrustItem {
   icon: string;
   text: string;
 }
+/** 🎀 ห่อของขวัญ/การ์ด: order = ทั้งออเดอร์ (เดิม) · item = เลือกรายชิ้นในตะกร้า (ค่าห่อ × จำนวนชิ้น · การ์ด 1 ใบ/รายการ) */
+export type CartGiftMode = "order" | "item";
+/** หน้า /cart: classic = แบบเดิม · split = แยกรายการ (ป้ายหมวด · ไอคอนท้ายแถว) + กล่องสรุปขวาแบบตาราง */
+export type CartPageLayout = "classic" | "split";
+/** ปุ่มไปหน้า /cart ในลิ้นชัก: auto = ลิงก์เล็กเฉพาะตอนตั้งกดไอคอนแล้วไปหน้าเต็ม (เดิม) · button ปุ่มเต็ม · link ลิงก์เล็กเสมอ · none ไม่มี */
+export type CartPageBtn = "auto" | "button" | "link" | "none";
 export interface CartConfig {
   /* ── หน้าตา ── */
   /** ลิ้นชักขวา (เดิม) · ลิ้นชักซ้าย · หน้าต่างกลางจอ */
@@ -70,6 +81,24 @@ export interface CartConfig {
   title: string;
   /** กดไอคอนตะกร้าที่หัวเว็บ: เปิดลิ้นชัก (เดิม) / ไปหน้า /cart */
   openMode: "drawer" | "page";
+  /* ── 🧾 หน้าตะกร้าเต็มหน้า (/cart) ── */
+  pageLayout: CartPageLayout;
+  /** ปุ่มในลิ้นชักพาไปหน้า /cart */
+  pageBtn: CartPageBtn;
+  /** ข้อความปุ่ม ("" = "ดูตะกร้าเต็มหน้า") */
+  pageBtnText: string;
+  /** ☑ ติ๊กเลือกชิ้นที่จะชำระ (ไม่ติ๊ก = ยังอยู่ในตะกร้า ไม่ไปหน้าชำระเงิน) */
+  select: boolean;
+  /** ป้ายหมวดเล็กเหนือชื่อสินค้า */
+  showCategory: boolean;
+  /** เปลี่ยนสี/ไซส์ในตะกร้าได้ (dropdown) */
+  changeOption: boolean;
+  /** 🔤 สลักชื่อในตะกร้า (เฉพาะรุ่นที่เปิดปั๊มชื่อไว้) */
+  personalize: boolean;
+  /** ปุ่ม "เข้าสู่ระบบสมาชิก" ใต้ปุ่มสั่งซื้อ (ต้องเปิดระบบสมาชิก · ยังไม่เข้าสู่ระบบเท่านั้น) */
+  memberBtn: boolean;
+  /** 🎀 ห่อของขวัญ/การ์ด ทั้งออเดอร์ / รายชิ้น */
+  giftMode: CartGiftMode;
   /* ── รายการสินค้า ── */
   imageSize: "sm" | "md" | "lg";
   imageShape: "rounded" | "square" | "circle";
@@ -146,6 +175,8 @@ export const DEFAULT_RECS_SET: CartRecsSet = {
   title: "คุณอาจชอบ",
   source: "auto",
   codes: [],
+  cats: [],
+  ifCats: [],
   limit: 6,
   freeShip: true,
   layout: "row",
@@ -168,6 +199,15 @@ export const DEFAULT_CART: CartConfig = {
   width: "md",
   title: "ตะกร้า",
   openMode: "drawer",
+  pageLayout: "classic",
+  pageBtn: "auto",
+  pageBtnText: "",
+  select: false,
+  showCategory: false,
+  changeOption: false,
+  personalize: false,
+  memberBtn: false,
+  giftMode: "order",
   imageSize: "md",
   imageShape: "rounded",
   imageFit: "cover",
@@ -244,6 +284,17 @@ export const CART_RECS_SOURCES: { value: CartRecsSource; label: string; hint: st
   { value: "auto", label: "อัตโนมัติ", hint: "หมวดเดียวกับของในตะกร้า + ที่ติ๊กแนะนำ/ขายดี (ไม่ซ้ำของในตะกร้า)" },
   { value: "featured", label: "เฉพาะที่ติ๊กแนะนำ", hint: "สินค้าที่ติ๊ก ⭐ แนะนำในหน้าสินค้าบนเว็บ" },
   { value: "manual", label: "เลือกเอง", hint: "เลือกรุ่นที่จะโชว์ (เรียงตามที่เลือก)" },
+  { value: "category", label: "ตามหมวด", hint: "สินค้าในหมวดที่เลือก (เช่น ของแต่งกระเป๋า) — แนะนำ/ขายดีขึ้นก่อน" },
+];
+export const CART_PAGE_LAYOUTS: { value: CartPageLayout; label: string; hint: string }[] = [
+  { value: "classic", label: "แบบเดิม", hint: "รายการซ้าย · ยอดรวมขวา" },
+  { value: "split", label: "แยกรายการ + สรุปขวา", hint: "ป้ายหมวด · ราคาชิดขวา · ไอคอนโปรด/ลบท้ายแถว · กล่องสรุปแบบตาราง" },
+];
+export const CART_PAGE_BTNS: { value: CartPageBtn; label: string }[] = [
+  { value: "auto", label: "อัตโนมัติ (เดิม)" },
+  { value: "button", label: "ปุ่มเต็ม" },
+  { value: "link", label: "ลิงก์เล็ก" },
+  { value: "none", label: "ไม่มี" },
 ];
 
 const one = <T extends string>(v: unknown, all: readonly T[], fb: T): T => (typeof v === "string" && (all as readonly string[]).includes(v) ? (v as T) : fb);
@@ -257,6 +308,9 @@ const int = (v: unknown, fb: number, lo: number, hi: number) => {
 const codesOf = (v: unknown) =>
   Array.isArray(v) ? [...new Set((v as unknown[]).map((c) => String(c ?? "").trim().toUpperCase()).filter((c) => /^[A-Z0-9._-]{1,40}$/.test(c)))].slice(0, 24) : [];
 const iconOf = (v: unknown, fb: string) => (typeof v === "string" ? v.trim().slice(0, 8) : fb);
+/** รหัสหมวดเว็บ (ตัวเล็ก ตัวเลข ขีด) ≤ 20 หมวด */
+const catsOf = (v: unknown) =>
+  Array.isArray(v) ? [...new Set((v as unknown[]).map((c) => String(c ?? "").trim().toLowerCase()).filter((c) => /^[a-z0-9-]{1,40}$/.test(c)))].slice(0, 20) : [];
 
 /** ชุดสินค้าแนะนำ 1 ชุด — ค่าแปลก/ไม่ได้ตั้ง = ค่าเริ่ม (หน้าตาเดิม) */
 export function normalizeRecsSet(raw: unknown, i = 0): CartRecsSet {
@@ -268,8 +322,10 @@ export function normalizeRecsSet(raw: unknown, i = 0): CartRecsSet {
     id,
     on: bool(r.on, d.on),
     title: str(r.title, d.title, 40).trim(),
-    source: one(r.source, ["auto", "featured", "manual"] as const, d.source),
+    source: one(r.source, ["auto", "featured", "manual", "category"] as const, d.source),
     codes: codesOf(r.codes),
+    cats: catsOf(r.cats),
+    ifCats: catsOf(r.ifCats),
     limit: int(r.limit, d.limit, 1, 12),
     freeShip: bool(r.freeShip, d.freeShip),
     layout: one(r.layout, L, d.layout),
@@ -328,6 +384,15 @@ export function normalizeCart(raw: unknown): CartConfig {
     width: one(r.width, ["sm", "md", "lg"] as const, d.width),
     title: str(r.title, d.title, 40).trim() || d.title,
     openMode: one(r.openMode, ["drawer", "page"] as const, d.openMode),
+    pageLayout: one(r.pageLayout, ["classic", "split"] as const, d.pageLayout),
+    pageBtn: one(r.pageBtn, ["auto", "button", "link", "none"] as const, d.pageBtn),
+    pageBtnText: str(r.pageBtnText, d.pageBtnText, 40).trim(),
+    select: bool(r.select, d.select),
+    showCategory: bool(r.showCategory, d.showCategory),
+    changeOption: bool(r.changeOption, d.changeOption),
+    personalize: bool(r.personalize, d.personalize),
+    memberBtn: bool(r.memberBtn, d.memberBtn),
+    giftMode: one(r.giftMode, ["order", "item"] as const, d.giftMode),
     imageSize: one(r.imageSize, ["sm", "md", "lg"] as const, d.imageSize),
     imageShape: one(r.imageShape, ["rounded", "square", "circle"] as const, d.imageShape),
     imageFit: one(r.imageFit, ["cover", "contain"] as const, d.imageFit),
@@ -377,10 +442,16 @@ export function normalizeCart(raw: unknown): CartConfig {
 }
 
 /** ชุดสินค้าแนะนำที่ต้องวาดตรงตำแหน่งนี้ (เปิดอยู่ · ตรงตำแหน่ง · ตรงสถานะตะกร้า) */
-export function recsAt(cfg: Pick<CartConfig, "recsSets">, place: CartRecsPlace, hasItems: boolean): CartRecsSet[] {
+export function recsAt(cfg: Pick<CartConfig, "recsSets">, place: CartRecsPlace, hasItems: boolean, cartCats?: string[]): CartRecsSet[] {
   // ตะกร้าว่าง: ไม่มีรายการ/ยอดรวม → "ต่อจากรายการ" กับ "ติดเหนือยอดรวม" ไปอยู่ท้ายรายการ
   const at = (x: CartRecsSet) => (!hasItems && (x.place === "afterItems" || x.place === "footer") ? "bottom" : x.place);
-  return cfg.recsSets.filter((x) => x.on && at(x) === place && (x.when === "always" || (x.when === "items" ? hasItems : !hasItems)));
+  return cfg.recsSets.filter((x) => x.on && at(x) === place && (x.when === "always" || (x.when === "items" ? hasItems : !hasItems)) && recsSetFits(x, cartCats));
+}
+
+/** 🎯 ชุดนี้เข้าเงื่อนไข "ในตะกร้ามีหมวด…" ไหม (ไม่ตั้งเงื่อนไข = ผ่าน · ไม่ส่งหมวดในตะกร้ามา = ผ่าน) — cartCats ควรรวมหมวดแม่แล้ว */
+export function recsSetFits(set: Pick<CartRecsSet, "ifCats">, cartCats?: string[]): boolean {
+  if (!set.ifCats.length || !cartCats) return true;
+  return set.ifCats.some((c) => cartCats.includes(c));
 }
 
 /** ข้อความส่งฟรี: แทน {amount} */
@@ -418,7 +489,12 @@ export interface RecProduct {
   salesRank?: number | null;
   stock?: string;
 }
-export function pickCartRecs<P extends RecProduct>(all: P[], inCart: string[], cfg: Pick<CartConfig, "recsSource" | "recsCodes" | "recsLimit" | "recsFreeShip">, remain = 0): P[] {
+export function pickCartRecs<P extends RecProduct>(
+  all: P[],
+  inCart: string[],
+  cfg: Pick<CartConfig, "recsSource" | "recsCodes" | "recsLimit" | "recsFreeShip"> & { recsCats?: string[] },
+  remain = 0
+): P[] {
   const cartSet = new Set(inCart);
   const pool = all.filter((p) => !cartSet.has(p.id) && p.price > 0 && p.stock !== "out");
   let list: P[];
@@ -427,6 +503,15 @@ export function pickCartRecs<P extends RecProduct>(all: P[], inCart: string[], c
     list = cfg.recsCodes.map((c) => byCode.get(c)).filter((p): p is P => !!p);
   } else if (cfg.recsSource === "featured") {
     list = pool.filter((p) => p.featured);
+  } else if (cfg.recsSource === "category") {
+    // ตามหมวด: แนะนำ/ขายดีขึ้นก่อน ที่เหลือลำดับเดิมของร้าน
+    const want = new Set(cfg.recsCats ?? []);
+    const score = (p: P) => (p.featured ? 2 : 0) + (p.salesRank != null ? 1 + 1 / (1 + p.salesRank) : 0);
+    list = pool
+      .filter((p) => (p.categories ?? [p.category ?? ""]).some((c) => want.has(c)))
+      .map((p, i) => ({ p, i, s: score(p) }))
+      .sort((a, b) => b.s - a.s || a.i - b.i)
+      .map((x) => x.p);
   } else {
     const cartCats = new Set(all.filter((p) => cartSet.has(p.id)).flatMap((p) => [p.category ?? "", ...(p.categories ?? [])]).filter(Boolean));
     const score = (p: P) =>
