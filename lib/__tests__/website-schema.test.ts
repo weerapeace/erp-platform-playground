@@ -723,7 +723,7 @@ describe("🎞️ การ์ดบนฉาก — แท็บ + ฉากผ
 
   it("ค่าเริ่ม = 2 แท็บ (มาใหม่/ขายดี) · การ์ดกระจกฝ้า · รูปอัตโนมัติ", () => {
     const b = norm({});
-    expect(b).toMatchObject({ tabs: "2", tab1Label: "มาใหม่", tab1Source: "new", tab2Label: "ขายดี", tab2Source: "best", tab3Source: "pick", card: "frost", cardTint: "light", imgMode: "auto", showHeart: true, height: "tall" });
+    expect(b).toMatchObject({ tabs: "2", tab1Label: "มาใหม่", tab1Source: "new", tab2Label: "ขายดี", tab2Source: "best", tab3Source: "pick", card: "frost", cardTint: "light", imgMode: "png", showHeart: true, height: "tall" });
     expect(b.scenes).toEqual([]);
   });
 

@@ -28,6 +28,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
+import { PngSlot } from "@/components/png-slot";
 import { ImageManager } from "@/components/image-manager";
 import { RecordFilesField } from "@/components/record-files";
 import { FieldCreatorModal } from "@/components/field-creator";
@@ -38,7 +39,7 @@ import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
-import { parentSkuExtraTabs } from "./parent-sku-extra-tabs";
+import { parentSkuExtraTabs, parentSkuPngSlots } from "./parent-sku-extra-tabs";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import { formatAmount, currencyLabel } from "@/lib/money";
@@ -598,6 +599,12 @@ export type MasterCRUDConfig = {
     /** เลย์เอาต์: grid (ค่าเริ่มต้น) หรือ gallery (รูปหลักใหญ่บน + รูปย่อยล่าง แบบ Design Sheet) */
     layout?: "grid" | "gallery";
   };
+  /**
+   * 🖼 ช่องใหญ่ใส่ PNG พื้นใส ในคอลัมน์ซ้ายใต้รูป (ของกลาง PngSlot) — เช่น "รูปตัดพื้น (PNG)" ของ Parent SKU
+   * field = คอลัมน์ r2 key (ไม่โชว์ซ้ำในฟอร์มขวา) · save = บันทึกเอง (ไม่ส่ง = PATCH ของกลาง) → คืนข้อความผิดพลาด/null
+   * ใส่/เปลี่ยน/เอาออกได้เลยในโหมดดู (กั้นด้วยสิทธิ์แก้) · โมดูลต้องมีรูปปก (cover_image_r2_key) ถึงมีคอลัมน์ซ้าย
+   */
+  sidePngSlots?: { field: string; label: string; hint?: string; save?: (recordId: string, key: string | null) => Promise<string | null> }[];
   /** ไฟล์แนบราย record (ของกลาง) — เก็บใน Supabase Storage · ลบ record ถาวร → ลบไฟล์ตามไปด้วย */
   fileAttachments?: {
     entityType?: string;
@@ -3200,8 +3207,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
         {/* F25: layout 2 คอลัมน์ — ซ้าย=รูป+core, ขวา=tabs (responsive: แคบ→ซ้อนบนล่าง) */}
         {(() => {
+          // ช่อง PNG ในคอลัมน์ซ้าย (sidePngSlots) โชว์เฉพาะโมดูลที่มีรูปปก (มีคอลัมน์ซ้าย) → ไม่ซ้ำในฟอร์มขวา
+          const sidePng = new Set(effectiveFields.some((f) => f.key === "cover_image_r2_key") ? (config.sidePngSlots ?? []).map((s) => s.field) : []);
           const baseVisible = effectiveFields.filter(f =>
-            !f.hideInForm && f.key !== "cover_image_r2_key" && evaluateCondition(f.conditionRules, form) && !tplHidden(f)
+            !f.hideInForm && f.key !== "cover_image_r2_key" && !sidePng.has(f.key) && evaluateCondition(f.conditionRules, form) && !tplHidden(f)
           );
           // สลับภาษา (ของกลาง): field ฝั่งไทยตั้ง ui_style.lang_en = ชื่อ field อังกฤษที่คู่กัน
           //   โหมด TH = ซ่อนช่องอังกฤษ · โหมด EN = ช่องอังกฤษ "มานั่งแทนที่" ช่องไทย (ยืมกลุ่ม/ลำดับ/ความกว้าง)
@@ -3399,6 +3408,29 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     {coverDeleteBtn}
                   </div>
                 )}
+
+                {/* 🖼 ช่องใหญ่ใส่ PNG พื้นใส (config.sidePngSlots เช่น "รูปตัดพื้น (PNG)" ของ Parent SKU) — ใส่/เปลี่ยน/เอาออกได้เลย ไม่ต้องกดแก้ไข
+                    ยังไม่บันทึกระเบียน = เก็บค่าในฟอร์ม (บันทึกพร้อมกันตอนกดบันทึก) */}
+                {(config.sidePngSlots ?? []).map((s) => (
+                  <div key={s.field} className="rounded-xl border border-slate-200 bg-white p-3">
+                    <PngSlot
+                      label={s.label}
+                      hint={s.hint}
+                      value={(form[s.field] as string) || null}
+                      readonly={!canEdit}
+                      onSave={async (key) => {
+                        if (!editingId) { updateForm({ [s.field]: key }); return null; }
+                        const err = s.save ? await s.save(String(editingId), key) : await saveDetailPatch({ [s.field]: key });
+                        if (!err && s.save) {
+                          setForm((p) => ({ ...p, [s.field]: key }));
+                          baseSnapRef.current = { ...baseSnapRef.current, [s.field]: key };
+                          setRows((prev) => prev.map((r) => (r.id === editingId ? ({ ...r, [s.field]: key } as Row) : r)));
+                        }
+                        return err;
+                      }}
+                    />
+                  </div>
+                ))}
 
                 {/* code + status — บอกว่ากำลังดูใบไหน (ข้อมูลหลักย้ายไปเป็นแท็บทางขวา) */}
                 <div>
@@ -3860,6 +3892,8 @@ export function MasterRecordDrawer({
         : undefined,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
       fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: tr("ไฟล์แนบ", "Attachments") } : undefined),
+      // Parent SKU → ช่องใหญ่ "รูปตัดพื้น (PNG)" ใต้รูปสินค้า (ชุดกลางเดียวกับหน้า /master/parent-skus)
+      sidePngSlots: moduleKey === "parent-skus-v2" ? parentSkuPngSlots() : undefined,
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
         ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />

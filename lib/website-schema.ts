@@ -2490,7 +2490,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     },
   },
 
-  // 🎞️ การ์ดบนฉาก (2026-10-22) — เว็บร้าน: src/components/home/SceneBody.tsx
+  // 🎞️ การ์ดบนฉาก (2026-10-22) — เว็บร้าน: src/components/home/SceneBody.tsx · กฎเลือกสินค้าของแท็บ lib/website-scene (มิเรอร์)
+  //   รูปการ์ด = PNG ของรุ่น (ไม่มี = ไม่โชว์ · เจ้าของขอไม่ตัดพื้นเอง) · แผงใส่ PNG รายสินค้า = components/website-scene-png-board (ตัวจัดหน้า)
   //   พื้นหลังเต็มจอ (รูป/วิดีโอ) + แถวการ์ดสินค้ากระจกเลื่อนข้าง · แท็บด้านบน (สูงสุด 3) แต่ละแท็บมีสินค้า + ฉากของตัวเอง
   //   ฉาก = ชิ้นย่อย: อยู่แท็บไหน + เริ่มที่สินค้าชิ้นที่ → เลื่อนการ์ดถึงชิ้นนั้น พื้นหลังค่อย ๆ เปลี่ยน
   scene: {
@@ -2560,12 +2561,12 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       }),
       f("imgMode", "รูปสินค้าบนการ์ด", "select", {
         group: "card",
-        default: "auto",
+        default: "png",
         options: [
-          { v: "auto", l: "อัตโนมัติ — รูปตัดพื้น (PNG) ของรุ่น · ไม่มี = ลบพื้นเรียบให้เอง" },
-          { v: "original", l: "รูปเดิม (มีพื้นหลัง)" },
+          { v: "png", l: "รูป PNG พื้นใส — สินค้าที่ไม่มี PNG ไม่โชว์" },
+          { v: "original", l: "รูปเดิมทุกตัว (มีพื้นหลัง)" },
         ],
-        hint: "รูปตัดพื้น = ช่อง \"รูปตัดพื้น (PNG)\" ใน Parent SKU · ลบพื้นเรียบใช้ได้ดีกับรูปพื้นขาว/เทาเรียบ",
+        hint: "ใส่ PNG ที่แผง \"🖼 รูป PNG ของสินค้า\" ด้านบน หรือช่อง \"รูปตัดพื้น (PNG)\" ใน Parent SKU (ที่เดียวกัน)",
       }),
       f("showMeta", "โชว์ยี่ห้อ/หมวด", "toggle", { group: "card", default: true }),
       f("showPrice", "โชว์ราคา", "toggle", { group: "card", default: true }),

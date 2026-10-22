@@ -8,7 +8,31 @@
  */
 import dynamic from "next/dynamic";
 import { tr } from "@/lib/lang";
+import { apiFetch } from "@/lib/api";
 import type { MasterCRUDConfig } from "./index";
+
+/**
+ * 🖼 ช่องใหญ่ "รูปตัดพื้น (PNG)" ในคอลัมน์ซ้ายของ Parent SKU (ชุดกลาง — หน้า /master/parent-skus + MasterRecordDrawer)
+ *   บันทึกผ่าน /api/website/product-png (สิทธิ์ + audit + ล้างแคชเว็บร้าน) — ที่เดียวกับแผง PNG ในตัวจัดหน้า (การ์ดบนฉาก)
+ */
+export function parentSkuPngSlots(): NonNullable<MasterCRUDConfig["sidePngSlots"]> {
+  return [
+    {
+      field: "png_image_r2_key",
+      label: tr("รูปตัดพื้น (PNG)", "Cut-out image (PNG)"),
+      hint: tr("พื้นใส · ใช้กับการ์ดบนฉากของเว็บร้าน (ไม่มี = สินค้านี้ไม่โชว์ใน Section นั้น)", "Transparent background · used by the website scene cards (none = not shown there)"),
+      save: async (parentId, key) => {
+        const res = await apiFetch("/api/website/product-png", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId, key }),
+        });
+        const j = await res.json().catch(() => ({}));
+        return !res.ok || j.error ? j.error || tr(`บันทึกไม่สำเร็จ (${res.status})`, `Save failed (${res.status})`) : null;
+      },
+    },
+  ];
+}
 
 const Parent360Overview = dynamic(() => import("@/components/parent-360-overview").then((m) => m.Parent360Overview), { ssr: false });
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });

@@ -746,8 +746,8 @@ export interface SceneBlock extends BlockBase {
   cardBorder: boolean;
   cardRadius: number;
   cardSize: "s" | "m" | "l";
-  /** auto = รูปตัดพื้น (PNG) ของรุ่น · ไม่มี = เว็บร้านลบพื้นเรียบขาว/เทาให้เอง · original = รูปเดิม */
-  imgMode: "auto" | "original";
+  /** png = เฉพาะสินค้าที่มี "รูปตัดพื้น (PNG)" ของรุ่น (ไม่มี = ไม่โชว์) · original = รูปเดิมทุกตัว */
+  imgMode: "png" | "original";
   showMeta: boolean;
   showPrice: boolean;
   showHeart: boolean;

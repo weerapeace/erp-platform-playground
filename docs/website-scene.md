@@ -17,12 +17,16 @@
 4. **การ์ดในส่วนนี้**: แบบการ์ด (กระจกฝ้า / Liquid Glass / ทึบ) · สีกระจก (ขาวใส ตัวหนังสือขาว / ดำใส / ขาวขุ่น ตัวหนังสือดำ) · ความขุ่น % · ความเบลอหลังการ์ด · เส้นขอบ · มุมมน · ขนาด · โชว์ยี่ห้อ/หมวด · ราคา · ปุ่ม ♡
 5. **การจัดวาง**: ความสูงเวที (ปกติ/สูง/เต็มจอ) · ทำพื้นหลังมืดลง % (ตัวหนังสืออ่านง่ายขึ้น)
 
-## รูปสินค้าพื้นใส
+## รูปสินค้า = PNG พื้นใสเท่านั้น (แก้ 2026-10-22 ตามเจ้าของ: "ไม่ตัดเอง · ไม่มี PNG ไม่โชว์")
 
-- **รูปตัดพื้น (PNG)** — ช่องรูปใหม่ของ Parent SKU (กลุ่มรูป ถัดจากรูปปก · คอลัมน์ `parent_skus_v2.png_image_r2_key` · ทะเบียนฟิลด์ชนิด image → ส่งเว็บร้านเป็น `imageFields.png_image_r2_key` อัตโนมัติ)
-- ไม่มี PNG = เว็บร้าน **ลบพื้นเรียบ (ขาว/เทา/สีเดียว) ของรูปสินค้าให้เองในเบราว์เซอร์** (ของกลาง `src/lib/bg-knockout.ts`: ไล่ลบจากขอบรูปเข้าหาสินค้า + ขอบนุ่ม · ทำทีละรูป · จำผล)
-  - พื้นไม่เรียบ (รูปบรรยากาศ/นางแบบ) = ใช้รูปเดิมเต็มกรอบมุมมน · เลือก "รูปเดิม" ได้ในช่อง "รูปสินค้าบนการ์ด"
-  - ⚠️ สินค้าสีขาว/เทาอ่อนบนพื้นขาว อาจถูกลบขอบไปบ้าง → ใส่ PNG ตัดพื้นให้รุ่นนั้น
+- **รูปตัดพื้น (PNG)** ของรุ่น — คอลัมน์ `parent_skus_v2.png_image_r2_key` (ทะเบียนฟิลด์ชนิด image → เว็บร้านได้ `imageFields.png_image_r2_key` อัตโนมัติ)
+- **ไม่มี PNG = สินค้านั้นไม่โชว์ในแท็บ** (แท็บที่ไม่เหลือสินค้า = ซ่อน · ไม่เหลือเลย = ลูกค้าไม่เห็น Section · พรีวิว ERP บอกว่าขาดรูป)
+  - ตัดจำนวนก่อนกรอง: แท็บ "มาใหม่ 12 ชิ้น" = 12 ชิ้นล่าสุด แล้วโชว์เฉพาะที่มี PNG (แผง ERP บอก "มี PNG 3/12" = เว็บโชว์ 3)
+  - ช่อง "รูปสินค้าบนการ์ด" = รูป PNG (ค่าเริ่ม) / รูปเดิมทุกตัว (มีพื้นหลัง เต็มกรอบมุมมน) · Section รุ่นแรกที่บันทึก `auto` = PNG
+- **ช่องใหญ่ใส่ PNG — 2 ที่ บันทึกลงที่เดียวกัน** (ของกลาง `components/png-slot.tsx` · พื้นตารางหมากรุกเห็นความใส · ลากวาง/คลิก/Ctrl+V · เปลี่ยน · เอาออก (ถามยืนยัน) · รับ PNG/WebP · ไม่มีพื้นใส = เตือน)
+  1. **ตัวจัดหน้า → Section นี้ → แผง "🖼 รูป PNG ของสินค้า"** (บนสุดแท็บเนื้อหา): สินค้าของทุกแท็บตามที่ตั้ง (กฎเดียวกับเว็บ `lib/website-scene` — มิเรอร์ storefront `src/lib/scene.ts`) · รูปจาง ๆ ในช่องว่าง = รู้ว่าเป็นสินค้าไหน · ใส่แล้วพรีวิวโหลดใหม่เอง
+  2. **Parent SKU → คอลัมน์ซ้ายใต้รูปสินค้า** (`config.sidePngSlots` ของ MasterCRUD · ชุดกลาง `parentSkuPngSlots()` ใช้ทั้งหน้า /master/parent-skus และ drawer ที่เปิดจากที่อื่น · ไม่ซ้ำในฟอร์มขวา) — ใส่ได้เลยไม่ต้องกด "แก้ไข"
+- บันทึก = `POST /api/website/product-png` { parentId, key } — สิทธิ์ `products.edit` + สิทธิ์ระดับฟิลด์ + audit (old/new) + ล้างแคชเว็บทุกร้าน (เห็นทันที) · อัปโหลดไฟล์ = `/api/admin/upload` (`files.upload` · ไม่แปลงไฟล์)
 
 ## พฤติกรรม (เว็บร้าน `SceneBody`)
 
@@ -34,5 +38,5 @@
 
 ## ไฟล์
 
-- ERP: `lib/website-schema.ts` (`scene`) · `lib/website-blocks.ts` (`SceneBlock`) · migration `202610300400_parent_png_image_field.sql`
-- เว็บร้าน: `src/components/home/SceneBody.tsx` + `SceneView.tsx` · `src/lib/bg-knockout.ts` · `src/lib/product-order.ts` (เรียงสินค้ากลาง — ตารางสินค้าใช้ร่วม) · CSS `.sc-*` ใน `globals.css`
+- ERP: `lib/website-schema.ts` (`scene`) · `lib/website-blocks.ts` (`SceneBlock`) · `lib/website-scene.ts` (กฎสินค้าของแท็บ · มิเรอร์) · `components/png-slot.tsx` · `components/website-scene-png-board.tsx` · `app/api/website/product-png` · `components/master-crud` (`sidePngSlots`) · migration `202610300400_parent_png_image_field.sql`
+- เว็บร้าน: `src/components/home/SceneBody.tsx` + `SceneView.tsx` · `src/lib/scene.ts` (มิเรอร์) · `src/lib/product-order.ts` (เรียงสินค้ากลาง — ตารางสินค้าใช้) · CSS `.sc-*` ใน `globals.css`

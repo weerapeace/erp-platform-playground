@@ -36,6 +36,7 @@ import { useCanvasBridge, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/
 import { previewReloadSig } from "@/lib/website-live-preview";
 import { cleanExpId } from "@/lib/website-web-stats";
 import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canvas-editor";
+import { ScenePngBoard } from "@/components/website-scene-png-board";
 import { ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
 import { coverageOf, hasText, type ContentLang } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
@@ -1432,6 +1433,8 @@ export function WebsiteBuilder({
                 mobileCustom={selBlock.mobileMode === "custom"}
               />
             )}
+            {/* 🎞️ การ์ดบนฉาก: ช่องใหญ่ใส่ PNG รายสินค้าของแต่ละแท็บ (ไม่มี PNG = ไม่โชว์) */}
+            {selBlock.type === "scene" && <ScenePngBoard block={selBlock as unknown as Record<string, unknown>} shopSlug={ctx.shopSlug} onSaved={reloadPreview} />}
             <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={formCtx} />
             {selSchema.meta.manage && (
               <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-900">

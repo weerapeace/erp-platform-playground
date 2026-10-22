@@ -15,7 +15,7 @@
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
-import { parentSkuExtraTabs } from "@/components/master-crud/parent-sku-extra-tabs";
+import { parentSkuExtraTabs, parentSkuPngSlots } from "@/components/master-crud/parent-sku-extra-tabs";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 
@@ -182,6 +182,8 @@ export default function ParentSKUsV2Page() {
     // แท็บ "📊 ภาพรวม" + "🛍 เว็บไซต์"
     // แท็บพิเศษชุดกลาง (ภาพรวม/เว็บไซต์/แพลตฟอร์ม/ปัญหา) — ชุดเดียวกับ drawer ที่เปิดจากที่อื่น · เรียง/ซ่อนได้ในตัวออกแบบหน้า
     extraTabs: parentSkuExtraTabs(),
+    // 🖼 ช่องใหญ่ "รูปตัดพื้น (PNG)" ใต้รูปสินค้า (การ์ดบนฉากของเว็บร้านใช้) — ชุดเดียวกับ drawer
+    sidePngSlots: parentSkuPngSlots(),
   }), [actor]);
   return (
     <>
