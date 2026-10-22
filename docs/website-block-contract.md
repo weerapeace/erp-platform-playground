@@ -232,3 +232,10 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 ## ผืนผ้าใบอิสระ (canvas)
 
 Section ที่วางชิ้นตำแหน่งอิสระ — สัญญาข้อมูล/การคุยสดกับพรีวิว อยู่ที่ `docs/website-canvas.md`
+
+## 📂 หมวดสินค้า: ตำแหน่งชื่อหมวด (การ์ดรูปใหญ่ · 2026-10-22)
+- `namePlace` on (ค่าเดิม) | above | below — นอกรูป = ชื่อ + ข้อความเล็ก (cta) อยู่เหนือ/ใต้รูป · การ์ดทั้งใบเป็นลิงก์เดียว (`.cat-card` · ชี้แล้วรูปยังขยายเหมือนเดิม) · สีตามหน้าเว็บ (ไม่ใช้ `tileText`)
+- บนรูป: `textPos` 9 จุด (`POS9_OPTIONS` ของกลาง · display "pos9" = ตาราง 3×3 ในแผง) — ค่าเดิม top-left / center / bottom-left ยังใช้ได้ · แถวบน = cta อยู่ขอบล่างการ์ด (หน้าตาเดิมของบนซ้าย) · แถวกลาง/ล่าง = cta ติดใต้ชื่อ · ทรงโค้ง = จัดกลางแนวนอนเสมอ
+- เลื่อนละเอียด `nameDx` / `nameDy` -30..30 (% ของการ์ด · translate กล่องข้อความทั้งก้อน) · นอกรูป `nameAlign` left|center|right + `nameGap` 0–40 px
+- ของกลางแผงใหม่: select display "seg" (ปุ่มเรียงแถว) และ "pos9" (ตาราง 3×3) ใน `components/website-schema-form.tsx` — ใช้กับช่องอื่นได้
+- เว็บร้าน `src/components/home/CategoriesView.tsx` (layout tile)

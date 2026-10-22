@@ -508,6 +508,50 @@ function SchemaFieldInner({
     case "select":
       // 🔤 ช่องฟอนต์ — เห็นหน้าตาฟอนต์จริงก่อนเลือก (ของกลาง FontSelect)
       if (fd.display === "font") return <SchemaFontField fd={fd} value={s} onChange={onChange} ctx={ctx} />;
+      // 🔘 ปุ่มเรียงแถว (display "seg") — ตัวเลือกน้อย เห็นครบในทีเดียว
+      if (fd.display === "seg")
+        return (
+          <Field label={fd.label} hint={fd.hint} wide={fd.wide}>
+            <div className="flex flex-wrap gap-1.5">
+              {(fd.options ?? []).map((o) => (
+                <button
+                  key={o.v}
+                  type="button"
+                  onClick={() => onChange(o.v)}
+                  title={o.hint ?? o.l}
+                  className={`flex-1 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs ${s === o.v ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"}`}
+                >
+                  {o.l}
+                </button>
+              ))}
+            </div>
+          </Field>
+        );
+      // 📍 ตาราง 3×3 (display "pos9") — กดจุดที่อยากให้อยู่ (options เรียงแถวบน→ล่าง ซ้าย→ขวา · POS9_OPTIONS)
+      if (fd.display === "pos9") {
+        const cur = (fd.options ?? []).find((o) => o.v === s);
+        return (
+          <Field label={`${fd.label}: ${cur?.l ?? ""}`} hint={fd.hint} wide={fd.wide}>
+            <div className="inline-grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+              {(fd.options ?? []).slice(0, 9).map((o) => {
+                const on = s === o.v;
+                return (
+                  <button
+                    key={o.v}
+                    type="button"
+                    onClick={() => onChange(o.v)}
+                    title={o.l}
+                    aria-label={o.l}
+                    className={`flex h-8 w-10 items-center justify-center rounded-md border ${on ? "border-blue-500 bg-blue-100" : "border-slate-200 bg-white hover:border-slate-400"}`}
+                  >
+                    <span className={`block rounded-full ${on ? "h-2.5 w-2.5 bg-blue-600" : "h-1.5 w-1.5 bg-slate-400"}`} />
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        );
+      }
       // 🎛️ ปุ่มรูปย่อ (display "tiles") — เห็นหน้าตาแต่ละแบบก่อนเลือก (เช่น รูปแบบการโชว์สินค้า)
       if (fd.display === "tiles")
         return (

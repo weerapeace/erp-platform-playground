@@ -108,8 +108,9 @@ export interface FieldDef {
   key: string;
   label: string;
   type: FieldType;
-  /** select: "tiles" = แสดงเป็นปุ่มรูปย่อให้กดเลือก (แทน dropdown) · "font" = ตัวเลือกฟอนต์เห็นหน้าตาจริง (FontSelect · options = CANVAS_FONTS) */
-  display?: "tiles" | "font";
+  /** select: "tiles" = แสดงเป็นปุ่มรูปย่อให้กดเลือก (แทน dropdown) · "font" = ตัวเลือกฟอนต์เห็นหน้าตาจริง (FontSelect · options = CANVAS_FONTS)
+   *  · "seg" = ปุ่มเรียงแถว (ตัวเลือกน้อย) · "pos9" = ตาราง 3×3 เลือกตำแหน่ง (options = POS9_OPTIONS เรียงแถวบน→ล่าง ซ้าย→ขวา) */
+  display?: "tiles" | "font" | "seg" | "pos9";
   group?: FieldGroup;
   hint?: string;
   placeholder?: string;
@@ -444,6 +445,21 @@ const VIDEO_TEXT_POS: FieldOption[] = [
 ];
 /** Section หมวดสินค้า: ช่องที่ใช้เฉพาะแบบ "การ์ดรูปใหญ่" */
 const TILE_ONLY: ShowIf = { key: "layout", eq: "tile" };
+/** 📍 ตำแหน่ง 9 จุด (บน/กลาง/ล่าง × ซ้าย/กลาง/ขวา) สำหรับ display "pos9" — "center" = กลางรูป (ค่าเดิม) · ⚠️ ลำดับ = ตาราง 3×3 */
+export const POS9_OPTIONS: FieldOption[] = [
+  { v: "top-left", l: "บนซ้าย" },
+  { v: "top-center", l: "บนกลาง" },
+  { v: "top-right", l: "บนขวา" },
+  { v: "middle-left", l: "กลางซ้าย" },
+  { v: "center", l: "กลางรูป" },
+  { v: "middle-right", l: "กลางขวา" },
+  { v: "bottom-left", l: "ล่างซ้าย" },
+  { v: "bottom-center", l: "ล่างกลาง" },
+  { v: "bottom-right", l: "ล่างขวา" },
+];
+/** 📂 หมวดสินค้า (การ์ดรูปใหญ่): ชื่ออยู่บนรูป / นอกรูป */
+const NAME_ON: ShowIf = { key: "namePlace", eq: "on" };
+const NAME_OUT: ShowIf = { key: "namePlace", eq: ["above", "below"] };
 const imageLookFields = (opts: { ratio: string; frame?: string; allowAuto?: boolean; ratioHint?: string; autoFrame?: string }): FieldDef[] => [
   f("ratio", "สัดส่วนรูป", "select", {
     group: "layout",
@@ -3004,16 +3020,41 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         hint: "100 = ปกติ · น้อยกว่า = รูปเล็กลง · มากกว่า = ขยาย",
         showIf: { key: "layout", eq: ["tile", "row", "icon"] },
       }),
+      // 📍 ชื่อหมวด: บนรูป (9 จุด + เลื่อนละเอียด) หรือ นอกรูป เหนือ/ใต้ (จัดซ้าย/กลาง/ขวา + ระยะห่าง) — ค่าเดิม = บนรูป บนซ้าย
+      f("namePlace", "ชื่อหมวดอยู่ที่ไหน", "select", {
+        group: "layout",
+        default: "on",
+        display: "seg",
+        options: [
+          { v: "on", l: "บนรูป" },
+          { v: "above", l: "เหนือรูป" },
+          { v: "below", l: "ใต้รูป" },
+        ],
+        hint: "เหนือ/ใต้รูป = ชื่อ (+ ข้อความเล็ก) อยู่นอกรูป ไม่บังรูป",
+        showIf: TILE_ONLY,
+      }),
       f("textPos", "ตำแหน่งชื่อบนรูป", "select", {
         group: "layout",
         default: "top-left",
-        options: [
-          { v: "top-left", l: "บนซ้าย" },
-          { v: "center", l: "กลางรูป" },
-          { v: "bottom-left", l: "ล่างซ้าย" },
-        ],
-        showIf: { key: "layout", eq: "tile" },
+        display: "pos9",
+        options: POS9_OPTIONS,
+        hint: "แถวบน = ข้อความเล็ก (SHOP NOW) อยู่ขอบล่างการ์ด · แถวกลาง/ล่าง = อยู่ติดใต้ชื่อ · ทรงโค้ง = จัดกึ่งกลางให้เอง",
+        showIf: [TILE_ONLY, NAME_ON],
       }),
+      f("nameDx", "เลื่อนชื่อ ซ้าย ↔ ขวา (%)", "range", { group: "layout", default: 0, min: -30, numMax: 30, step: 1, hint: "0 = ตรงตำแหน่งที่เลือก · ติดลบ = ไปซ้าย", showIf: [TILE_ONLY, NAME_ON] }),
+      f("nameDy", "เลื่อนชื่อ บน ↕ ล่าง (%)", "range", { group: "layout", default: 0, min: -30, numMax: 30, step: 1, hint: "ติดลบ = ขึ้น · บวก = ลง", showIf: [TILE_ONLY, NAME_ON] }),
+      f("nameAlign", "จัดชื่อ (นอกรูป)", "select", {
+        group: "layout",
+        default: "left",
+        display: "seg",
+        options: [
+          { v: "left", l: "ซ้าย" },
+          { v: "center", l: "กลาง" },
+          { v: "right", l: "ขวา" },
+        ],
+        showIf: [TILE_ONLY, NAME_OUT],
+      }),
+      f("nameGap", "ระยะห่างชื่อกับรูป (px)", "range", { group: "layout", default: 10, min: 0, numMax: 40, step: 2, showIf: [TILE_ONLY, NAME_OUT] }),
       f("cta", "ข้อความเล็กบนการ์ด", "text", { group: "content", default: "SHOP NOW", max: 30, hint: "ว่าง = ไม่มี", showIf: { key: "layout", eq: "tile" } }),
       f("tileText", "สีตัวอักษรบนรูป", "select", {
         group: "layout",
@@ -3022,7 +3063,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "dark", l: "เข้ม (รูปโทนอ่อน)" },
           { v: "light", l: "ขาว + เงาไล่ (รูปโทนเข้ม)" },
         ],
-        showIf: { key: "layout", eq: "tile" },
+        showIf: [TILE_ONLY, NAME_ON],
       }),
       f("textStyle", "แบบตัวอักษร", "select", {
         group: "layout",
