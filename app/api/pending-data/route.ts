@@ -1,6 +1,7 @@
 /**
  * รายงาน "รายการค้าง" (ข้อมูลที่ยังไม่ได้ใส่) — /api/pending-data
  *   GET   ?scope=purchasing|production  → รายการค้างแยกหัวข้อ
+ *   GET   ?scope=modes:<moduleKey>      → 📝 ยังลงไม่ครบโหมดลงรายละเอียด (1 หัวข้อ/โหมด · lib/entry-modes-server)
  *   PATCH { key, id, value, qty? }      → "ใส่ค่าเร็ว" กลับไปที่ต้นทางจริง (ราคา/ค่าแรง/เครดิต)
  *
  * ใช้ตอบคำถาม "อะไรยังรอใส่ข้อมูลอยู่บ้าง" ให้แดชบอร์ดจัดซื้อ/ผลิต
@@ -19,6 +20,9 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { getUserRole } from "@/lib/field-permissions";
+import { entryModeListHref, entryModeOpenHref, modeVisibleTo } from "@/lib/entry-modes";
+import { entryModeStats, loadEntryModeContext } from "@/lib/entry-modes-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -338,15 +342,53 @@ async function production(admin: ReturnType<typeof supabaseAdmin>): Promise<Pend
   return out;
 }
 
+// ---------- 📝 ยังลงไม่ครบโหมดลงรายละเอียด (scope = modes:<moduleKey>) — 1 หัวข้อต่อ 1 โหมด ----------
+//   ใช้กฎเดียวกับหน้าจอโหมดในป๊อป (lib/entry-modes-server) · ปุ่ม ↗ เปิดรายการนั้นแล้วเข้าโหมดเลย
+async function entryModeSections(admin: ReturnType<typeof supabaseAdmin>, moduleKey: string, role: string): Promise<PendingSection[]> {
+  const ctx = await loadEntryModeContext(admin, { moduleKey });
+  if (!ctx) throw new Error(`ไม่พบโมดูล ${moduleKey}`);
+  const modes = ctx.modes.filter((m) => modeVisibleTo(m, role));
+  const has = (c: string) => [...ctx.fields.values()].some((f) => f.column === c);
+  const labelCol = ["name_th", "name", "title", "display_name"].find(has) ?? null;
+  const extra = ["code", labelCol, has("cover_image_r2_key") ? "cover_image_r2_key" : null].filter((c): c is string => !!c && has(c));
+  const { stats, rows } = await entryModeStats(admin, ctx, modes, { withRows: extra });
+  return stats.map((st) => {
+    const mode = modes.find((m) => m.key === st.key)!;
+    const list = (rows.get(st.key) ?? []).sort((a, b) => s(a.row.code).localeCompare(s(b.row.code)));
+    const labelOf = (k: string) => st.byItem.find((x) => x.key === k)?.label ?? k;
+    const top = st.byItem.slice().sort((a, b) => b.missing - a.missing).slice(0, 4).map((x) => `${x.label} ${x.missing.toLocaleString()}`).join(" · ");
+    return {
+      key: `mode_${st.key}`,
+      title: `ยังลงไม่ครบโหมด ${mode.icon ? `${mode.icon} ` : ""}${st.label}`,
+      hint: `ยังขาดช่องที่ต้องมี ${st.incomplete.toLocaleString()} จาก ${st.total.toLocaleString()} ตัว${st.recOnly ? ` (อีก ${st.recOnly.toLocaleString()} ตัวขาดแค่ช่องแนะนำ — ไม่อยู่ในรายการนี้)` : ""}${top ? ` — ขาดมากสุด: ${top}` : ""}`,
+      fixHref: entryModeListHref(moduleKey, st.key), fixLabel: "ดูในตาราง",
+      count: st.incomplete,
+      columns: ["รหัส", "ชื่อ", "ยังขาด"],
+      blanks: ["ลงแล้ว ✓"],
+      rows: list.slice(0, MAX_ROWS).map(({ row, missing }) => ({
+        cells: [s(row.code), labelCol ? s(row[labelCol]) : "", missing.map((x) => `${x.level === "required" ? "" : "(แนะนำ) "}${labelOf(x.key)}`).join(", ")],
+        image: has("cover_image_r2_key") ? (s(row.cover_image_r2_key) || null) : null,
+        id: s(row.id),
+        openHref: entryModeOpenHref(moduleKey, st.key, s(row.id)),
+      })),
+      edit: null,
+      hasImage: has("cover_image_r2_key"),
+      truncated: list.length > MAX_ROWS,
+    } satisfies PendingSection;
+  });
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const scope = (new URL(request.url).searchParams.get("scope") ?? "").trim();
-  if (scope !== "purchasing" && scope !== "production") {
-    return NextResponse.json({ scope, sections: [], error: "scope ต้องเป็น purchasing หรือ production" }, { status: 400 });
+  const modeModule = scope.startsWith("modes:") ? scope.slice("modes:".length) : "";
+  if (scope !== "purchasing" && scope !== "production" && !modeModule) {
+    return NextResponse.json({ scope, sections: [], error: "scope ต้องเป็น purchasing / production / modes:<โมดูล>" }, { status: 400 });
   }
   const admin = supabaseAdmin();
   try {
-    const sections = scope === "purchasing" ? await purchasing(admin) : await production(admin);
+    const sections = modeModule ? await entryModeSections(admin, modeModule, await getUserRole(request))
+      : scope === "purchasing" ? await purchasing(admin) : await production(admin);
     return NextResponse.json({ scope, sections, error: null } satisfies PendingDataResponse);
   } catch (e) {
     return NextResponse.json({ scope, sections: [], error: e instanceof Error ? e.message : "โหลดไม่สำเร็จ" }, { status: 500 });

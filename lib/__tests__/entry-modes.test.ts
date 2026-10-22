@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  ENTRY_MODE_DEFAULTS, IMAGES_KEY, computeModeProgress, isValueFilled, modeAppliesTo, modeVisibleTo,
-  normalizeEntryModes, resolveEntryModes, type EntryMode,
+  ENTRY_MODE_DEFAULTS, IMAGES_KEY, computeModeProgress, entryModeListHref, entryModeOpenHref, isModeIncomplete, isValueFilled,
+  modeAppliesTo, modeVisibleTo, normalizeEntryModes, resolveEntryModes, type EntryMode,
 } from "@/lib/entry-modes";
 
 const mode: EntryMode = {
@@ -42,6 +42,22 @@ describe("entry modes — นับความครบ", () => {
     expect(p.done).toBe(2);
     expect(p.missing).toEqual([]);
     expect(p.pct).toBe(100);
+  });
+
+  it("ไม่ครบ = ขาดช่องต้องมี (ขาดแค่ช่องแนะนำ ถือว่าครบ) · โหมดไม่มีช่องต้องมี = ขาดอะไรก็ไม่ครบ", () => {
+    const req = computeModeProgress(mode, { name_th: "x", name_en: "y", fits: null }, { imageCount: 3 });
+    expect(req.missing.map((m) => m.key)).toEqual(["fits"]);
+    expect(isModeIncomplete(req)).toBe(false);
+    expect(isModeIncomplete(computeModeProgress(mode, { name_th: "x" }, { imageCount: 3 }))).toBe(true);
+    const recOnlyMode: EntryMode = { key: "r", label: "R", items: [{ field: "fits", level: "recommended" }] };
+    expect(isModeIncomplete(computeModeProgress(recOnlyMode, {}))).toBe(true);
+    expect(isModeIncomplete(computeModeProgress(recOnlyMode, { fits: ["phone"] }))).toBe(false);
+  });
+
+  it("ลิงก์ตารางกรอง / เปิดรายการแล้วเข้าโหมด", () => {
+    expect(entryModeListHref("parent-skus-v2", "web")).toBe("/master/parent-skus?mode_incomplete=web");
+    expect(entryModeOpenHref("parent-skus-v2", "web", "abc")).toBe("/master/parent-skus?open=abc&entry_mode=web");
+    expect(entryModeListHref("unknown", "web")).toBeNull();
   });
 
   it("สิทธิ์เห็นโหมด + ใช้กับประเภทสินค้า", () => {

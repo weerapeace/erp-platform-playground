@@ -38,6 +38,29 @@ export type EntryMode = {
 /** key พิเศษของเงื่อนไข "จำนวนรูป" ในรายการที่ขาด */
 export const IMAGES_KEY = "__images";
 
+/** สรุปทั้งระบบต่อโหมด (คำนวณฝั่งเซิร์ฟเวอร์ lib/entry-modes-server · GET /api/entry-modes/stats) */
+export type EntryModeStat = {
+  key: string; label: string; icon?: string;
+  /** total = รายการที่เปิดใช้อยู่ · incomplete = ยังขาดช่อง "ต้องมี" · recOnly = ช่องต้องมีครบแล้ว ขาดแค่ช่องแนะนำ */
+  total: number; incomplete: number; recOnly: number;
+  /** ขาดช่องไหนกี่ตัว (เรียงตามลำดับในโหมด · key = field_key หรือ __images) */
+  byItem: { key: string; label: string; level: EntryModeLevel; missing: number }[];
+};
+
+/** โมดูลที่มีแกลเลอรีรูปสินค้า (นับรูปฝั่งเซิร์ฟเวอร์ได้) → entity_type ของรูปใน erp_playground_attachments */
+export const ENTRY_MODE_IMAGE_ENTITY: Record<string, string> = { "parent-skus-v2": "parent_skus_v2", "skus-v2": "skus_v2" };
+/** หน้าตารางของโมดูล (ลิงก์ "ดูรายการที่ยังไม่ครบ" จากป๊อปที่เปิดจากที่อื่น / รายงาน) */
+export const ENTRY_MODE_LIST_HREF: Record<string, string> = { "parent-skus-v2": "/master/parent-skus", "skus-v2": "/master/skus" };
+/** ลิงก์หน้าตารางที่กรองเฉพาะ "ยังไม่ครบโหมดนี้" / ลิงก์เปิดรายการนั้นแล้วเข้าโหมดเลย */
+export function entryModeListHref(moduleKey: string, modeKey: string): string | null {
+  const base = ENTRY_MODE_LIST_HREF[moduleKey];
+  return base ? `${base}?mode_incomplete=${encodeURIComponent(modeKey)}` : null;
+}
+export function entryModeOpenHref(moduleKey: string, modeKey: string, id: string): string | null {
+  const base = ENTRY_MODE_LIST_HREF[moduleKey];
+  return base ? `${base}?open=${encodeURIComponent(id)}&entry_mode=${encodeURIComponent(modeKey)}` : null;
+}
+
 export type EntryModeMissing = { key: string; level: EntryModeLevel };
 
 export type EntryModeProgress = {
@@ -88,6 +111,14 @@ export function computeModeProgress(
   }
   const total = reqTotal + recTotal, done = reqDone + recDone;
   return { total, done, reqTotal, reqDone, recTotal, recDone, missing, counted, pct: total ? Math.round((done / total) * 100) : 100 };
+}
+
+/**
+ * รายการนี้ "ยังไม่ครบโหมด" ไหม — นับเฉพาะช่อง "ต้องมี" (ช่องแนะนำขาดได้ ไม่นับว่าไม่ครบ)
+ * โหมดที่ไม่มีช่องต้องมีเลย → ขาดอะไรก็ได้ = ไม่ครบ · ใช้ทุกที่: ตัวนับทั้งระบบ / ตัวกรองตาราง / รายงาน / ตัวถัดไปที่ยังไม่ครบ
+ */
+export function isModeIncomplete(p: EntryModeProgress): boolean {
+  return p.reqTotal > 0 ? p.reqDone < p.reqTotal : p.missing.length > 0;
 }
 
 /** โหมดนี้ผู้ใช้ role นี้เห็นไหม (admin เห็นเสมอ) */

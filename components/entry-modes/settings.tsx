@@ -20,7 +20,7 @@ const ROLE_OPTS: { key: string; label: string }[] = [
   { key: "staff", label: tr("พนักงาน", "Staff") },
   { key: "viewer", label: tr("ดูอย่างเดียว", "Viewer") },
 ];
-const NOT_PICKABLE = new Set(["one2many", "computed", "image"]);
+const NOT_PICKABLE = new Set(["one2many", "computed", "image", "related"]);
 
 export function EntryModeSettings({
   moduleKey, modes, isDefault, fields, familyFilter = false, canEdit, actor, onSaved, onDirtyChange,

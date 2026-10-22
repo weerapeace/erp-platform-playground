@@ -12,8 +12,8 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { PendingSection, PendingDataResponse } from "@/app/api/pending-data/route";
+import { pendingScopeLabel } from "@/components/pending-data-report";
 
-const SCOPE_LABEL: Record<string, string> = { purchasing: "จัดซื้อ", production: "ผลิต" };
 const fmt = (n: number) => n.toLocaleString("th-TH");
 const today = () => new Date().toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
 
@@ -86,7 +86,7 @@ function PendingDataPrintInner() {
 
       <div className="pd-doc">
         <header className="pd-header">
-          <h1>รายการค้าง — {SCOPE_LABEL[scope] ?? scope}</h1>
+          <h1>รายการค้าง — {pendingScopeLabel(scope)}</h1>
           <div className="pd-meta">
             <span>ข้อมูลที่ยังรอใส่ในระบบ · พิมพ์วันที่ {today()}</span>
             <span>รวม {fmt(total)} รายการ</span>

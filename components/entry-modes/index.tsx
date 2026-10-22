@@ -9,7 +9,16 @@
  */
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { tr } from "@/lib/lang";
-import { IMAGES_KEY, type EntryMode, type EntryModeLevel, type EntryModeProgress } from "@/lib/entry-modes";
+import { apiFetch } from "@/lib/api";
+import { IMAGES_KEY, type EntryMode, type EntryModeLevel, type EntryModeProgress, type EntryModeStat } from "@/lib/entry-modes";
+
+/** โหลดสรุปทั้งระบบของโมดูล (ใช้ทั้งปุ่มหัวตารางและหน้าจอโหมดในป๊อป) */
+export async function fetchEntryModeStats(moduleKey: string): Promise<EntryModeStat[]> {
+  const r = await apiFetch(`/api/entry-modes/stats?module=${encodeURIComponent(moduleKey)}`, { cache: "no-store" });
+  const j = await r.json().catch(() => ({})) as { modes?: EntryModeStat[]; error?: string | null };
+  if (!r.ok || j.error) throw new Error(j.error || tr(`นับไม่สำเร็จ (${r.status})`, `Couldn't count (${r.status})`));
+  return j.modes ?? [];
+}
 
 export type EntryModeField = { key: string; label: string; type?: string; helpText?: string };
 
@@ -99,7 +108,7 @@ export function EntryModeMenu({
 
 // ───────────────────────── หน้าจอในโหมด ─────────────────────────
 export function EntryModePanel({
-  mode, progress, fields, renderInput, imageCount, translatable, onTranslate, onExit, onNextIncomplete, scanning,
+  mode, progress, fields, renderInput, imageCount, translatable, onTranslate, onExit, onNextIncomplete, scanning, systemStat, onShowList,
 }: {
   mode: EntryMode;
   progress: EntryModeProgress;
@@ -114,6 +123,10 @@ export function EntryModePanel({
   /** ไปรายการถัดไปที่ยังไม่ครบ (ไม่ส่ง = ไม่มีปุ่ม) */
   onNextIncomplete?: () => void;
   scanning?: boolean;
+  /** ทั้งระบบ (เฉพาะที่เปิดใช้อยู่) — undefined = ไม่โชว์ · null = กำลังนับ */
+  systemStat?: EntryModeStat | null;
+  /** ไปดูรายการที่ยังไม่ครบโหมดนี้ในตาราง (ไม่ส่ง = ไม่มีลิงก์) */
+  onShowList?: () => void;
 }) {
   const [hideDone, setHideDone] = useState(() => lsGet("entry-mode:hide-done") === "1");
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -178,6 +191,18 @@ export function EntryModePanel({
           {progress.recTotal > 0 && <> · {tr("แนะนำ", "Recommended")} <b className="text-slate-800 tabular-nums">{progress.recDone}/{progress.recTotal}</b></>}
           {imageCount == null && (mode.imagesMin ?? 0) > 0 && <span className="text-slate-400"> · {tr("กำลังนับรูป…", "counting images…")}</span>}
         </div>
+        {systemStat !== undefined && (
+          <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-500 border-t border-blue-100 pt-2">
+            <span>🗂 {tr("ทั้งระบบ:", "All records:")}</span>
+            {systemStat === null ? <span className="text-slate-400">{tr("กำลังนับ…", "counting…")}</span>
+              : systemStat.incomplete === 0 ? <b className="text-emerald-700">{tr(`ครบทุกตัว (${systemStat.total.toLocaleString()})`, `all ${systemStat.total.toLocaleString()} complete`)}</b>
+              : <span>{tr("ยังขาดช่องที่ต้องมี", "missing required")} <b className="text-rose-700 tabular-nums">{systemStat.incomplete.toLocaleString()}</b> {tr(`จาก ${systemStat.total.toLocaleString()} ตัว`, `of ${systemStat.total.toLocaleString()}`)}</span>}
+            {systemStat && systemStat.recOnly > 0 && <span className="text-slate-400">{tr(`· ขาดแค่ช่องแนะนำ ${systemStat.recOnly.toLocaleString()} ตัว`, `· ${systemStat.recOnly.toLocaleString()} missing only recommended`)}</span>}
+            {onShowList && systemStat && systemStat.incomplete > 0 && (
+              <button type="button" onClick={onShowList} className="text-blue-700 hover:underline">{tr("ดูรายการในตาราง ↗", "Show them in the table ↗")}</button>
+            )}
+          </div>
+        )}
         {allDone ? (
           <div className="text-xs font-medium text-emerald-700">🎉 {tr("ลงครบทุกช่องของโหมดนี้แล้ว", "Every field in this mode is filled")}</div>
         ) : (

@@ -20,7 +20,12 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import type { PendingSection, PendingRow, PendingDataResponse } from "@/app/api/pending-data/route";
 import type { PriceSibling } from "@/app/api/pending-data/siblings/route";
 
-export type PendingScope = "purchasing" | "production";
+/** modes:<moduleKey> = 📝 ยังลงไม่ครบโหมดลงรายละเอียดของโมดูลนั้น (lib/entry-modes-server) */
+export type PendingScope = "purchasing" | "production" | `modes:${string}`;
+/** ชื่อรายงานตาม scope (ใช้ทั้งป๊อปและใบพิมพ์) */
+export function pendingScopeLabel(scope: string): string {
+  return scope === "purchasing" ? "จัดซื้อ" : scope === "production" ? "ผลิต" : scope.startsWith("modes:") ? "ข้อมูลที่ยังลงไม่ครบ (ตามโหมดลงรายละเอียด)" : scope;
+}
 
 const fmt = (n: number) => n.toLocaleString("th-TH");
 
@@ -380,7 +385,7 @@ export function PendingDataPanel({ scope, onTotal }: { scope: PendingScope; onTo
     let cancel = false;
     void (async () => {
       try {
-        const r = await apiFetch(`/api/pending-data?scope=${scope}`);
+        const r = await apiFetch(`/api/pending-data?scope=${encodeURIComponent(scope)}`);
         const j = (await r.json()) as PendingDataResponse;
         if (cancel) return;
         if (j.error) { setErr(j.error); setSecs([]); return; }
@@ -422,7 +427,7 @@ export function PendingDataButton({ scope, className }: { scope: PendingScope; c
     let cancel = false;
     void (async () => {
       try {
-        const r = await apiFetch(`/api/pending-data?scope=${scope}`);
+        const r = await apiFetch(`/api/pending-data?scope=${encodeURIComponent(scope)}`);
         const j = (await r.json()) as PendingDataResponse;
         if (!cancel && !j.error) setTotal(j.sections.reduce((s, x) => s + x.count, 0));
       } catch { /* เงียบไว้ — ปุ่มยังกดได้ */ }
@@ -442,9 +447,9 @@ export function PendingDataButton({ scope, className }: { scope: PendingScope; c
       </button>
 
       <ERPModal open={open} onClose={() => setOpen(false)} size="xl" storageKey={`pending-${scope}`}
-        title={`📋 รายการค้าง — ${scope === "purchasing" ? "จัดซื้อ" : "ผลิต"}`}
+        title={`📋 รายการค้าง — ${pendingScopeLabel(scope)}`}
         footer={<>
-          <a href={`/print/pending-data?scope=${scope}`} target="_blank" rel="noreferrer"
+          <a href={`/print/pending-data?scope=${encodeURIComponent(scope)}`} target="_blank" rel="noreferrer"
             className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🖨 พิมพ์ A4</a>
           <button onClick={() => setOpen(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
         </>}>

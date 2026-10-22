@@ -45,7 +45,7 @@ async function loadRestrictedMeta(admin: Admin, tableName: string): Promise<Rest
   return restricted;
 }
 
-async function getUserRole(request: NextRequest): Promise<string> {
+export async function getUserRole(request: NextRequest): Promise<string> {
   try {
     const { data } = await supabaseFromRequest(request).rpc("erp_current_user");
     const p = data as { role?: string | null } | null;

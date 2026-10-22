@@ -52,9 +52,11 @@ import { RECORD_DETAIL_VIEWS } from "@/components/record-detail-views";
 import { CodeCheckMessages, useCodeCheck } from "@/components/code-check-hint";
 import { CODE_RULE_MODULES } from "@/lib/code-rules";
 // 📝 โหมดลงรายละเอียด (ของกลาง) — ปุ่มเลือกโหมด + หน้าจอในโหมด · ตั้งค่าโหมดโหลดเฉพาะตอนเปิด
-import { EntryModeMenu, EntryModePanel, lastEntryMode, rememberEntryMode, type EntryModeField } from "@/components/entry-modes";
-import { computeModeProgress, modeAppliesTo, modeVisibleTo, resolveEntryModes, type EntryMode } from "@/lib/entry-modes";
+import { EntryModeMenu, EntryModePanel, fetchEntryModeStats, lastEntryMode, rememberEntryMode, type EntryModeField } from "@/components/entry-modes";
+import { computeModeProgress, entryModeListHref, isModeIncomplete, modeAppliesTo, modeVisibleTo, resolveEntryModes, type EntryMode, type EntryModeStat } from "@/lib/entry-modes";
 const EntryModeSettings = dynamic(() => import("@/components/entry-modes/settings").then((m) => m.EntryModeSettings), { ssr: false });
+// ปุ่ม "📝 ความครบตามโหมด" หัวตาราง (นับทั้งระบบ + กรอง + รายงาน/พิมพ์) — โหลดเฉพาะหน้าที่มีโหมด
+const EntryModeStatusButton = dynamic(() => import("@/components/entry-modes/status").then((m) => m.EntryModeStatusButton), { ssr: false });
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 // 🕘 ประวัติเวอร์ชันของสินค้า (Parent/SKU) — ดู/เทียบ/ย้อนกลับ (ของกลาง components/record-versions · lib/record-versions)
@@ -1216,7 +1218,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   );
   const activeMode = entryModes.find((m) => m.key === activeModeKey) ?? null;
   const activeModeProgress = activeMode ? modeProgressOf(activeMode) : null;
-  useEffect(() => { if (!modalOpen) setActiveModeKey(null); }, [modalOpen]);
+  // ทั้งระบบเหลือกี่ตัวที่ยังไม่ครบ (นับฝั่งเซิร์ฟเวอร์ · โหลดตอนเข้าโหมดครั้งแรกของป๊อปนี้ · บันทึกแล้วนับใหม่)
+  const [modeStats, setModeStats] = useState<EntryModeStat[] | null>(null);
+  const [modeStatsErr, setModeStatsErr] = useState(false);
+  const loadModeStats = useCallback(() => {
+    if (!config.moduleKey) return;
+    fetchEntryModeStats(config.moduleKey).then((s) => { setModeStats(s); setModeStatsErr(false); }).catch(() => setModeStatsErr(true));
+  }, [config.moduleKey]);
+  useEffect(() => { if (activeModeKey && !modeStats && !modeStatsErr) loadModeStats(); }, [activeModeKey, modeStats, modeStatsErr, loadModeStats]);
+  useEffect(() => { if (!modalOpen) { setActiveModeKey(null); autoModeOffRef.current = false; } }, [modalOpen]);
   useEffect(() => { setGalleryCount(null); }, [editingId]);
   // ช่องในโหมดที่แก้ค้าง (เทียบค่าตอนเปิด) — แท็ก/หลายรายการบันทึกผ่านปุ่มแท็กเดิม · ช่องคำนวณไม่มีให้บันทึก
   const sameModeVal = (a: unknown, b: unknown) => a === b || JSON.stringify(a ?? "") === JSON.stringify(b ?? "");
@@ -1228,7 +1238,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     : [];
   // ออก/สลับโหมดตอนยังไม่บันทึก → ถามก่อน (undefined = ไม่มีป๊อป · null = ออกจากโหมด · key = สลับไปโหมดนั้น)
   const [modeExitTarget, setModeExitTarget] = useState<string | null | undefined>(undefined);
-  const exitEntryMode = () => { if (modeDirtyKeys.length) setModeExitTarget(null); else setActiveModeKey(null); };
+  const exitEntryMode = () => { autoModeOffRef.current = true; if (modeDirtyKeys.length) setModeExitTarget(null); else setActiveModeKey(null); };
   const discardModeAndGo = () => {
     const target = modeExitTarget ?? null;
     const back: Record<string, unknown> = {};
@@ -1301,11 +1311,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // ตัวกรองจากลิงก์ (?flt=<json>) — เปิดหน้าแบบกรองไว้ล่วงหน้า เช่นจากปุ่ม "จัดการกลุ่ม"
   // ต่างจาก baseFilter ตรงที่ "ล้างได้" (ผู้ใช้กดล้างเพื่อดู/เพิ่มสมาชิกนอกกลุ่มได้)
   const [urlFilter, setUrlFilter] = useState<Record<string, unknown>>({});
+  // 📝 กรองเฉพาะ "ยังลงไม่ครบโหมด X" (?mode_incomplete=<โหมด>) — ฝั่ง API ตัดสินด้วยกฎเดียวกับป๊อป (lib/entry-modes-server)
+  const [modeFilter, setModeFilter] = useState<string | null>(null);
+  const modeFilterQs = modeFilter ? `&mode_incomplete=${encodeURIComponent(modeFilter)}` : "";
+  const autoModeOffRef = useRef(false);   // ผู้ใช้กดออกจากโหมดเองระหว่างกรอง → ไม่ดึงกลับเข้าโหมดอัตโนมัติ
 
   // ---- Fetch (client mode) ----
   const fetchList = useCallback(async () => {
     if (config.serverMode) { setLoading(false); return; }  // server mode ไม่โหลดทั้งก้อน
-    const url = buildListUrl(apiBase, config.apiPath, config.pageLimit, config.baseFilter, extraQueryString, urlFilter);
+    const url = buildListUrl(apiBase, config.apiPath, config.pageLimit, config.baseFilter, extraQueryString + modeFilterQs, urlFilter);
     // SWR-lite: ถ้าเคยโหลด url นี้แล้ว → โชว์ทันที ไม่ต้องรอ Tokyo (แล้วค่อยโหลดสดทับเบื้องหลัง)
     const cached = listRowCache.get(url);
     if (cached) { setRows(cached); setLoading(false); } else { setLoading(true); }
@@ -1322,7 +1336,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       setListCache(url, enriched);
     } catch (err) { if (!cached) setError(err instanceof Error ? err.message : tr("โหลดไม่ได้", "Couldn't load")); }
     finally { setLoading(false); }
-  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, extraQueryString, urlFilter, enrichRelated, ensureRelatedMaps]);
+  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, extraQueryString, modeFilterQs, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
@@ -1351,6 +1365,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       if (value == null || value === "") continue;
       qs.set(key, String(value));
     }
+    if (modeFilter) qs.set("mode_incomplete", modeFilter);
     const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
@@ -1358,7 +1373,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     const vis = visibleRelatedFieldsRef.current;
     await ensureRelatedMaps(raw, vis);
     return { rows: enrichRelated(raw, vis), total: (json.total as number) ?? 0 };
-  }, [apiBase, config.apiPath, config.baseFilter, config.extraQuery, urlFilter, enrichRelated, ensureRelatedMaps]);
+  }, [apiBase, config.apiPath, config.baseFilter, config.extraQuery, urlFilter, modeFilter, enrichRelated, ensureRelatedMaps]);
 
   // ของกลาง: ดึง "ตัวเลือกที่มีจริง" ของคอลัมน์ (พร้อมชื่อ relation) เพื่อทำ dropdown filter — ไม่ต้อง hardcode
   const fetchFilterOptions = useCallback(async (fieldKey: string): Promise<{ value: string; label: string }[]> => {
@@ -1474,7 +1489,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   };
   // เปิด record อัตโนมัติจาก ?open=<id> (เช่นกด "เปิดหน้าเต็ม" จาก popup relation / ผลจาก Global Search)
   // ของกลาง useOpenParam: อ่านจาก URL ตอน mount + ฟัง event ตอนอยู่หน้าเดิมแล้วมีคนสั่งเปิดใบอื่น
-  useOpenParam(canView, (id) => { setDrawerMode("view"); openEdit({ id } as Row); });
+  //   + ?entry_mode=<โหมด> (ลิงก์ ↗ จากรายงานข้อมูลค้าง) → เปิดแล้วเข้าโหมดลงรายละเอียดเลย
+  useOpenParam(canView, (id) => {
+    setDrawerMode("view"); openEdit({ id } as Row);
+    const em = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("entry_mode") : null;
+    if (em) setActiveModeKey(em);
+  });
 
   // โหมด embedded (drawer-only): เปิด record/สร้างใหม่ทันทีหลัง registry พร้อม + ป้อนรายการ nav
   const embeddedOpenedRef = useRef(false);
@@ -1520,6 +1540,45 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     }
     void refreshData();
   };
+
+  // 📝 ตัวกรอง "ยังลงไม่ครบโหมด" — อ่านจากลิงก์ ?mode_incomplete= ตอนเข้า · ตั้ง/ล้างแล้วเขียนกลับ URL (แชร์ลิงก์ได้)
+  useEffect(() => {
+    if (typeof window === "undefined" || embedded) return;
+    const mi = new URLSearchParams(window.location.search).get("mode_incomplete");
+    if (mi) setModeFilter(mi);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const modeFilterSkip = useRef(true);   // ไม่ยิงซ้ำตอนเริ่ม (โหลดครั้งแรกเห็น modeFilter อยู่แล้ว)
+  useEffect(() => {
+    if (modeFilterSkip.current) { modeFilterSkip.current = false; return; }
+    if (config.serverMode) void refreshData();   // client mode: fetchList เปลี่ยนแล้วโหลดใหม่เอง
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeFilter]);
+  const applyModeFilter = (key: string | null) => {
+    setModeFilter(key);
+    autoModeOffRef.current = false;
+    if (typeof window !== "undefined" && !embedded) {
+      const u = new URL(window.location.href);
+      if (key) u.searchParams.set("mode_incomplete", key); else u.searchParams.delete("mode_incomplete");
+      window.history.replaceState({}, "", u.toString());
+    }
+  };
+  // ลิงก์ "ดูรายการในตาราง" จากหน้าจอโหมด: อยู่หน้าตารางเอง = ปิดป๊อปแล้วกรอง · ป๊อปที่เปิดจากที่อื่น = ไปหน้าตารางของโมดูล
+  const showModeList = activeMode ? () => {
+    if (!embedded) {
+      if (footerSave.anyDirty) { notify.error(tr("บันทึกช่องที่แก้ก่อน แล้วค่อยไปดูรายการ", "Save your changes first, then open the list")); return; }
+      applyModeFilter(activeMode.key);
+      setModalOpen(false);
+      return;
+    }
+    const href = config.moduleKey ? entryModeListHref(config.moduleKey, activeMode.key) : null;
+    if (href) window.location.href = href;
+  } : undefined;
+  // กรองตามโหมดอยู่ แล้วเปิดรายการ → เข้าโหมดนั้นให้เลย (ถ้าผู้ใช้กดออกจากโหมดเอง ไม่ดึงกลับเข้าอีก)
+  useEffect(() => {
+    if (modalOpen && editingId && modeFilter && !activeModeKey && !autoModeOffRef.current) setActiveModeKey(modeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen, editingId, modeFilter]);
 
   // F11: เตือน unsaved เฉพาะโหมด edit ที่มีการแก้
   const tryClose = () => { if (drawerMode === "edit" && dirty) setConfirmDiscard(true); else setModalOpen(false); };
@@ -2190,6 +2249,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       if (Object.keys(stale).length) setForm((p) => ({ ...p, ...stale }));
       setDirty(false);
       flash(tr(`บันทึกแล้ว ${Object.keys(patch).length} ช่อง`, `Saved ${Object.keys(patch).length} field(s)`));
+      loadModeStats();
+      if (modeFilter) void refreshData();   // ตารางกำลังกรอง "ยังไม่ครบ" → ตัวที่เพิ่งครบหลุดจากรายการ
     } finally { setModeSaving(false); }
   };
 
@@ -2229,7 +2290,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         const p = computeModeProgress(activeMode, row, {
           skip: (k) => { const f = fieldByKey.get(k); return !f || f.type === "one2many" || f.type === "many2many" || !evaluateCondition(f.conditionRules, row); },
         });
-        if (p.missing.length === 0) continue;
+        if (!isModeIncomplete(p)) continue;   // ขาดแค่ช่องแนะนำ = ถือว่าครบ (กฎเดียวกับตัวนับทั้งระบบ)
         if (footerSave.anyDirty) setPendingNav(list[i]); else openEdit(list[i]);
         return;
       }
@@ -2813,6 +2874,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {config.headerActions?.()}
+            {/* 📝 ทั้งระบบเหลือกี่ตัวที่ยังไม่ครบแต่ละโหมด + กรองตาราง + รายงาน/พิมพ์ (โมดูลที่มีโหมดลงรายละเอียด) */}
+            {config.moduleKey && allEntryModes.some((m) => modeVisibleTo(m, user?.role)) && (
+              <EntryModeStatusButton moduleKey={config.moduleKey} activeFilter={modeFilter} onFilter={applyModeFilter} />
+            )}
             {/* เมนู "ปรับแต่ง" — ยุบปุ่ม admin (ออกแบบหน้า / Layout / เพิ่ม Field) ให้สะอาด */}
             {config.moduleKey && canEdit && (
               <div className="relative">
@@ -2917,6 +2982,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             onPick={setStatusFilter}
             moduleKey={config.moduleKey}
           />
+        )}
+
+        {modeFilter && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+            📝 {tr("กำลังแสดงเฉพาะรายการที่ยังลงไม่ครบโหมด", "Showing only records still incomplete for mode")}: <b>{allEntryModes.find((m) => m.key === modeFilter)?.label ?? modeFilter}</b>
+            <span className="text-xs text-blue-600">{tr("· กดเปิดรายการแล้วเข้าโหมดให้เลย · ลงครบแล้วจะหลุดจากรายการเอง", "· opening a record enters the mode · completed ones drop off")}</span>
+            <button onClick={() => applyModeFilter(null)} className="ml-auto text-xs font-medium px-2 py-1 rounded bg-white border border-blue-300 hover:bg-blue-100">{tr("✕ ดูทั้งหมด", "✕ Show all")}</button>
+          </div>
         )}
 
         {Object.keys(urlFilter).length > 0 && (
@@ -3239,7 +3312,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               onTranslate={translateModeField}
               onExit={exitEntryMode}
               onNextIncomplete={isRest && navRowsRef.current.length > 1 ? () => void nextIncompleteInMode() : undefined}
-              scanning={modeScanning} />
+              scanning={modeScanning}
+              systemStat={modeStatsErr ? undefined : (modeStats ? (modeStats.find((s) => s.key === activeMode.key) ?? undefined) : null)}
+              onShowList={showModeList} />
           ) : null;
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout

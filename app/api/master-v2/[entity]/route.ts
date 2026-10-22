@@ -18,6 +18,8 @@ import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 import { hasSecretFields, keepSecretsOnWrite, maskSecretRows } from "@/lib/settings-secrets";
+import { buildEntryModeEvaluator, entryModeColumns, loadEntryModeContext } from "@/lib/entry-modes-server";
+import { isModeIncomplete } from "@/lib/entry-modes";
 
 // อ่าน/เขียนสดเสมอ — ข้อมูล master + module config เปลี่ยน runtime, ห้าม cache
 export const dynamic = "force-dynamic";
@@ -641,6 +643,50 @@ async function _GET(
     const rows = await resolveRelationLabels(supabase, cfg, processed);
     const { hiddenCols } = await fieldAccessP;
     return NextResponse.json({ data: maskSecretRows(cfg.table, stripHidden(rows, hiddenCols)), total, error: null }, { headers: { "x-row-count": String(rows.length) } });
+  }
+
+  // ── 📝 กรอง "ยังลงไม่ครบโหมดลงรายละเอียด" (?mode_incomplete=<โหมด>) ──
+  //   ไล่ทุกแถวที่ตรงตัวกรอง/ค้นหา/เรียงเดิม (ดึงเฉพาะคอลัมน์ที่ใช้ตัดสิน) → ตัดสินด้วยกฎเดียวกับป๊อป (lib/entry-modes-server)
+  //   → แบ่งหน้าใน JS แล้วดึงแถวเต็มเฉพาะหน้านั้น (ไม่ส่ง id ยาว ๆ ใน URL) · นับเฉพาะที่เปิดใช้อยู่
+  const modeIncomplete = (searchParams.get("mode_incomplete") ?? "").trim();
+  if (modeIncomplete) {
+    const admin3 = supabaseAdmin();
+    const mctx = await loadEntryModeContext(admin3, { table: cfg.table });
+    const mode = mctx?.modes.find((m) => m.key === modeIncomplete);
+    if (!mctx || !mode) return NextResponse.json({ data: [], total: 0, error: "ไม่พบโหมดนี้" }, { status: 400 });
+    const evaluate = await buildEntryModeEvaluator(admin3, mctx, [mode]);
+    const orderCol = sortBy && SAFE_COL.test(sortBy) ? sortBy : (cfg.orderColumn ?? "updated_at");
+    const orderAsc = sortBy ? sortDir : false;
+    const scanCols = [...new Set([...entryModeColumns(mctx, [mode]), ...(SAFE_COL.test(orderCol) ? [orderCol] : [])])].join(",");
+    const matched: string[] = [];
+    try {
+      for (let from = 0; from < 50_000; from += 1000) {
+        let q = supabase.from(cfg.table).select(scanCols).order(orderCol, { ascending: orderAsc }).order("id").range(from, from + 999);
+        q = applyListFilters(q, { searchColumns: cfg.searchColumns, search, colFilters, softDeleteColumn: cfg.softDeleteColumn, includeInactive: false });
+        if (excludeIds.length) q = q.not("id", "in", `(${excludeIds.join(",")})`);
+        if (includeIds) q = q.in("id", includeIds);
+        const { data: part, error: scanErr } = await q;
+        if (scanErr) return NextResponse.json({ data: [], error: scanErr.message }, { status: 500 });
+        const rows = (part ?? []) as unknown as Record<string, unknown>[];
+        for (const r of rows) if (isModeIncomplete(evaluate(mode, r))) matched.push(String(r.id));
+        if (rows.length < 1000) break;
+      }
+    } catch (e) {
+      return NextResponse.json({ data: [], error: e instanceof Error ? e.message : "กรองไม่สำเร็จ" }, { status: 500 });
+    }
+    const pageIds = matched.slice(offset, offset + limit);
+    const fetched: Record<string, unknown>[] = [];
+    for (let i = 0; i < pageIds.length; i += 200) {
+      const { data: rowsData, error: fetchErr } = await supabase.from(cfg.table).select(selectCols).in("id", pageIds.slice(i, i + 200));
+      if (fetchErr) return NextResponse.json({ data: [], error: fetchErr.message }, { status: 500 });
+      fetched.push(...((rowsData ?? []) as unknown as Record<string, unknown>[]));
+    }
+    const order = new Map(pageIds.map((id, i) => [id, i]));
+    const ordered = fetched.sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
+    const processed = cfg.postProcess ? ordered.map(cfg.postProcess) : ordered;
+    const rows = await resolveRelationLabels(supabase, cfg, processed);
+    const { hiddenCols } = await fieldAccessP;
+    return NextResponse.json({ data: maskSecretRows(cfg.table, stripHidden(rows, hiddenCols)), total: matched.length, error: null }, { headers: { "x-row-count": String(rows.length) } });
   }
 
   const BATCH = 1000;
