@@ -34,7 +34,7 @@ import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
 import { pointsConfigFrom, tierPerkDiscount, validateRedeem } from "@/lib/member-points";
 import { memberTierNow, pointsBalance, redeemForOrder } from "@/lib/member-points-db";
-import { normalizeOrderCard, readOrderCard, type OrderGiftCard } from "@/lib/website-gift-cards";
+import { normalizeOrderCard, readOrderCard, wrapFeeFor, type OrderGiftCard } from "@/lib/website-gift-cards";
 import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { writeAudit } from "@/lib/audit";
 import { beltDesignLine, type BeltDesignRow } from "@/lib/belt-builder-order";
@@ -51,7 +51,7 @@ import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { withParentCategories } from "@/lib/website-category-tree";
 import { cleanAb, cleanSource } from "@/lib/website-web-stats";
 import { cleanTaxInvoice, type TaxInvoiceRequest } from "@/lib/website-tax-invoice";
-import { cleanItemGift, itemGiftLabel, priceItemGift, type ItemGift, type ItemGiftChoice } from "@/lib/website-item-gift";
+import { cleanItemGift, itemGiftLabel, priceItemGift, readItemGift, type ItemGift, type ItemGiftChoice } from "@/lib/website-item-gift";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -136,7 +136,7 @@ export interface PublicOrderInput {
   /** โค้ดส่วนลด (ตรวจ+คิดใหม่ฝั่งเซิร์ฟเวอร์เสมอ — lib/website-coupons) */
   couponCode?: string;
   /** 🎀 ห่อของขวัญ — ค่าห่อคิดจากที่ร้านตั้ง (calcGiftFee) ไม่เชื่อตัวเลขจากหน้าเว็บ */
-  gift?: { wrap: boolean; /** 💌 การ์ดอวยพรแยกจากห่อ (ร้านเปิด card_enabled) */ addCard?: boolean; message?: string; hidePrice?: boolean; card?: unknown };
+  gift?: { wrap: boolean; /** 💌 การ์ดอวยพรแยกจากห่อ (ร้านเปิด card_enabled) */ addCard?: boolean; message?: string; hidePrice?: boolean; card?: unknown; /** 🎀 id แบบห่อ (ร้านตั้งแบบห่อไว้) */ style?: string };
   /** 🌐 ภาษาที่ลูกค้าใช้ตอนสั่ง (หน้า /en = "en") → ข้อความแจ้งลูกค้า/หน้าตามออเดอร์ใช้ภาษานี้ */
   lang: CustomerLang;
   /** 🚚 วิธีจัดส่งที่ลูกค้าเลือก (id ใน store_settings.shipping_methods) — ไม่ส่ง = วิธีแรกที่ใช้ได้ (เว็บรุ่นเก่า) */
@@ -156,7 +156,7 @@ export interface OrderLineView {
   qty: number;
   lineTotal: number;
   /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ไม่มี = ไม่ส่ง) */
-  gift?: ItemGiftChoice;
+  gift?: ItemGift;
 }
 
 export interface OrderView {
@@ -193,6 +193,8 @@ export interface OrderView {
   giftCardOnly?: boolean;
   giftMessage?: string;
   giftHidePrice?: boolean;
+  /** 🎀 ชื่อแบบห่อที่เลือก (ทั้งออเดอร์) — ร้านไม่มีแบบห่อ = "" */
+  giftWrapStyle?: string;
   /** 🎴 การ์ด (ถึง/จาก/ลาย/ตัวหนังสือ) — ข้อความอยู่ giftMessage · ไม่มีการ์ด = null */
   giftCard?: OrderGiftCard | null;
   grandTotal: number;
@@ -274,7 +276,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
   const g = (r.gift ?? {}) as Record<string, unknown>;
   // 💌 การ์ดแยก (addCard) ส่งมาได้โดยไม่ห่อ
   const gift = g.wrap === true || g.addCard === true
-    ? { wrap: g.wrap === true, ...(g.addCard === true ? { addCard: true } : {}), message: String(g.message ?? "").replace(/\r/g, "").trim().slice(0, 300) || undefined, hidePrice: g.hidePrice === true, card: g.card && typeof g.card === "object" ? g.card : undefined }
+    ? { wrap: g.wrap === true, ...(g.addCard === true ? { addCard: true } : {}), message: String(g.message ?? "").replace(/\r/g, "").trim().slice(0, 300) || undefined, hidePrice: g.hidePrice === true, card: g.card && typeof g.card === "object" ? g.card : undefined, ...(g.wrap === true && typeof g.style === "string" && g.style ? { style: g.style.trim().toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 40) } : {}) }
     : undefined;
 
   return {
@@ -438,6 +440,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   let itemCardFee = 0;
   let itemWrap = false;
   let itemCard = false;
+  // 🎴 ตั้งค่าการ์ด + 🎀 แบบห่อของร้าน — โหลดครั้งเดียว เฉพาะออเดอร์ที่มีของขวัญ
+  const giftCfg = input.gift || input.items.some((i) => i.gift) ? await readGiftCards(sb, shop.id) : null;
   const parentIds = [...new Set(input.items.filter((i) => !i.beltDesignId).map((i) => i.productId))];
   // 🧵 แบบเข็มขัดที่สั่ง: ต้องเป็นของร้านนี้ ยังไม่เคยสั่ง และมีราคา (ราคาคิดไว้ตอนบันทึกแบบ — lib/belt-builder-order)
   const beltIds = [...new Set(input.items.map((i) => i.beltDesignId).filter((x): x is string => !!x))];
@@ -545,7 +549,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       variantEn = [variantEn, personalizeLabel(personalize, cfg, "en")].filter(Boolean).join(" · ");
     }
     // 🎀 ห่อ/💌 การ์ด รายชิ้น: ร้านต้องเปิดบริการ · ค่าห่อ × จำนวนชิ้น · การ์ด 1 ใบ/รายการ
-    const ig = priceItemGift(it.gift, it.qty, info, resolved.name);
+    const ig = priceItemGift(it.gift, it.qty, info, resolved.name, giftCfg);
     if (!ig.ok) return { ok: false, error: ig.error, status: 409 };
     if (ig.gift) {
       const baseEn = variantEn ?? variant;
@@ -605,7 +609,11 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const giftWrap = !!input.gift?.wrap;
   // 💌 การ์ดแยก: ไม่ห่อก็เขียนการ์ดได้ · ค่าการ์ดคิดจากที่ร้านตั้ง (ไม่เชื่อหน้าเว็บ)
   const cardOnly = !!input.gift?.addCard;
-  const giftFee = Math.round((calcGiftFee(giftWrap, info) + itemWrapFee) * 100) / 100;
+  // 🎀 แบบห่อ (ร้านตั้งไว้) = ราคาตามแบบ · ไม่มีแบบห่อ = ค่าห่อเดิม · แบบที่เลือกถูกปิด = บอกให้เลือกใหม่
+  const orderWrap = giftWrap ? wrapFeeFor(giftCfg, input.gift?.style, info.gift_fee) : null;
+  if (orderWrap && !orderWrap.ok) return { ok: false, error: orderWrap.error, status: 409 };
+  const giftWrapStyle = orderWrap?.ok ? orderWrap.style?.name ?? "" : "";
+  const giftFee = Math.round(((orderWrap?.ok ? orderWrap.fee : calcGiftFee(giftWrap, info)) + itemWrapFee) * 100) / 100;
   const giftCardFee = Math.round((calcCardFee(cardOnly, info) + itemCardFee) * 100) / 100;
   const msgOk = cardOnly || (giftWrap && info.gift_allow_message);
   const giftMessage = msgOk ? input.gift?.message ?? null : null;
@@ -613,7 +621,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   // 🎴 การ์ด: ตรวจความยาว/จำนวนบรรทัดตามที่ร้านตั้ง + ลาย/ตัวหนังสือต้องยังเปิดอยู่ (lib/website-gift-cards)
   let giftCard: OrderGiftCard | null = null;
   if (msgOk) {
-    const rc = normalizeOrderCard(input.gift?.card ?? null, await readGiftCards(sb, shop.id), giftMessage ?? "");
+    const rc = normalizeOrderCard(input.gift?.card ?? null, giftCfg ?? (await readGiftCards(sb, shop.id)), giftMessage ?? "");
     if (!rc.ok) return { ok: false, error: rc.error, status: 400 };
     giftCard = rc.card;
   }
@@ -685,6 +693,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         points_used: pointsUsed,
         points_discount: pointsDiscount,
         gift_wrap: giftWrap || itemWrap,
+        ...(giftWrapStyle ? { gift_wrap_style: giftWrapStyle } : {}),
         gift_fee: giftFee,
         gift_card_fee: giftCardFee,
         gift_message: giftMessage,
@@ -777,6 +786,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
         pointsDiscount,
         pointsEarned: 0,
         giftWrap: giftWrap || itemWrap,
+        giftWrapStyle,
         giftFee,
         giftCardFee,
         giftCardOnly: cardOnly || itemCard || (!giftWrap && !!(giftMessage || giftCard)),
@@ -842,6 +852,7 @@ export type OrderRow = {
   gift_card_fee?: number | string | null;
   gift_message?: string | null;
   gift_hide_price?: boolean | null;
+  gift_wrap_style?: string | null;
   gift_card?: unknown;
   grand_total: number | string;
   note: string | null;
@@ -881,7 +892,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
       postal: o.ship_postal ?? "",
     },
     items: items.map((i) => {
-      const gift = cleanItemGift(i.gift);
+      const gift = readItemGift(i.gift);
       return {
         name: (show === "en" && i.name_en) || i.name,
         variantLabel: (show === "en" && i.variant_label_en) || i.variant_label,
@@ -907,6 +918,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     giftFee: num(o.gift_fee),
     giftCardFee: num(o.gift_card_fee),
     giftCardOnly: num(o.gift_card_fee) > 0 || items.some((i) => cleanItemGift(i.gift)?.card) || (!o.gift_wrap && !!(o.gift_message || o.gift_card)),
+    giftWrapStyle: o.gift_wrap_style ?? "",
     giftMessage: o.gift_message ?? "",
     giftHidePrice: !!o.gift_hide_price,
     giftCard: readOrderCard(o.gift_card),

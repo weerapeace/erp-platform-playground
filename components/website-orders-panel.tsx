@@ -34,7 +34,7 @@ import { ShippopBox, ShippopBulkButton, type ShippopSettings } from "@/component
 import type { ShippopInfo } from "@/lib/shippop";
 
 /** gift = 🎀 ห่อ/💌 การ์ด รายชิ้น (ดีไซน์ตะกร้า "เลือกรายชิ้น") */
-type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number; gift?: { wrap: boolean; card: boolean; message: string } };
+type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number; gift?: { wrap: boolean; card: boolean; message: string; styleName?: string; cardInfo?: OrderGiftCard | null } };
 type Order = {
   id: string;
   orderNo: string;
@@ -66,6 +66,8 @@ type Order = {
   giftCardOnly?: boolean;
   giftMessage?: string;
   giftHidePrice?: boolean;
+  /** 🎀 แบบห่อที่เลือก (ทั้งออเดอร์) */
+  giftWrapStyle?: string;
   giftCard?: OrderGiftCard | null;
   isMember?: boolean;
   grandTotal: number;
@@ -257,7 +259,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
     }
   };
   // 🎴 การ์ดที่รอพิมพ์ (ในรายการที่โหลดอยู่) + ตั้งค่าการ์ดของร้าน (โหลดเมื่อเปิดออเดอร์ที่มีการ์ด — ไว้วาดพรีวิว)
-  const cardsWaiting = orders.filter((o) => o.giftCard && !o.giftCard.printedAt && o.status !== "cancelled").length;
+  // 🎴 การ์ดรอพิมพ์ = การ์ดทั้งออเดอร์ + การ์ดรายชิ้น ที่ยังไม่ได้พิมพ์
+  const cardsWaiting = orders.filter((o) => o.status !== "cancelled" && ((o.giftCard && !o.giftCard.printedAt) || o.items.some((i) => i.gift?.cardInfo && !i.gift.cardInfo.printedAt))).length;
   const [cardCfg, setCardCfg] = useState<GiftCardConfig | null>(null);
   useEffect(() => {
     if (!open?.giftCard || cardCfg) return;
@@ -537,7 +540,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 )}
                 {(open.giftWrap || open.giftCardOnly) && (
                   <div className="mt-2 rounded-lg border border-pink-200 bg-pink-50 px-2.5 py-2 text-xs text-pink-800 space-y-1">
-                    <p className="font-semibold">{open.giftWrap ? (open.giftCardOnly ? "🎀 ห่อเป็นของขวัญ + 💌 การ์ดอวยพร" : "🎀 ห่อเป็นของขวัญ") : "💌 ใส่การ์ดอวยพร (ไม่ห่อ)"}</p>
+                    <p className="font-semibold">{open.giftWrap ? (open.giftCardOnly ? "🎀 ห่อเป็นของขวัญ + 💌 การ์ดอวยพร" : "🎀 ห่อเป็นของขวัญ") : "💌 ใส่การ์ดอวยพร (ไม่ห่อ)"}{open.giftWrapStyle ? ` · แบบ ${open.giftWrapStyle}` : ""}</p>
                     {open.giftHidePrice && <p className="font-medium text-rose-700">⚠️ ห้ามใส่ใบเสร็จ/ป้ายราคาในกล่อง (ส่งถึงผู้รับเป็นของขวัญ)</p>}
                     {open.giftMessage ? (
                       <div className="flex items-start gap-1.5">
@@ -589,7 +592,15 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                       {i.gift?.card && (
                         <div className="mt-1 flex items-start gap-2 rounded-md bg-pink-50 px-2 py-1.5 text-xs text-pink-900">
                           <span className="shrink-0">💌 การ์ดของชิ้นนี้</span>
-                          <span className="flex-1 whitespace-pre-line text-slate-800">{i.gift.message ? `“${i.gift.message}”` : <span className="text-slate-400">(ไม่ได้เขียนข้อความ)</span>}</span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block whitespace-pre-line text-slate-800">{i.gift.message ? `“${i.gift.message}”` : <span className="text-slate-400">(ไม่ได้เขียนข้อความ)</span>}</span>
+                            {i.gift.cardInfo && (
+                              <span className="block text-[11px] text-pink-800/80">
+                                🎴 ถึง {i.gift.cardInfo.to || "—"} · จาก {i.gift.cardInfo.anon ? "ไม่ระบุชื่อ" : i.gift.cardInfo.from || "—"}
+                                {i.gift.cardInfo.printedAt ? " · พิมพ์แล้ว" : " · ยังไม่ได้พิมพ์"}
+                              </span>
+                            )}
+                          </span>
                           {i.gift.message && <CopyButton value={i.gift.message} title="คัดลอกข้อความการ์ด" />}
                         </div>
                       )}

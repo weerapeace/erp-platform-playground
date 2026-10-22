@@ -5,6 +5,7 @@
  * เว็บร้านวาดที่ components/cart/* — ลิ้นชักตะกร้า + หน้า /cart ใช้ตัววาดเดียวกัน
  * พรีวิว: ตอนอยู่แท็บนี้ หน้าตั้งค่าสั่งให้เว็บในพรีวิวเปิดตะกร้าค้างไว้ (ตะกร้าว่าง = ใส่สินค้าตัวอย่างให้ดู ไม่ใส่ตะกร้าจริง)
  * 🧾 หน้าตะกร้าเต็มหน้า: แบบแยกรายการ · ปุ่มในลิ้นชัก · ติ๊กเลือกชิ้น · เปลี่ยนสี/ไซส์ · สลักชื่อ · ห่อ/การ์ดรายชิ้น (giftMode)
+ * 🔗 เข้าชุดกับชิ้นนี้ (lineRelated) · 🗂 แท็บในชุดแนะนำ (ดูล่าสุด/รายการโปรด/ซื้อคู่กันบ่อย) · 🏷 ป้ายซื้อคู่ลดเพิ่ม
  */
 import { LangInput, LangTag } from "@/components/bilingual-field";
 import { useState, type ReactNode } from "react";
@@ -20,6 +21,7 @@ import {
   CART_RECS_SOURCES,
   CART_RECS_WHENS,
   CART_STYLES,
+  CART_TAB_LABELS,
   CART_WIDTHS,
   DEFAULT_CART_ICONS,
   DEFAULT_RECS_SET,
@@ -203,6 +205,27 @@ function RecsSetEditor({ value: r, onChange, shopSlug, categories, index, onRemo
             <span className={lbl}>เลือกสินค้าจาก</span>
             <Seg value={r.source} onChange={(source) => set({ source })} options={CART_RECS_SOURCES.map((o) => ({ v: o.value, l: o.label }))} />
             <p className="text-[11px] text-slate-500 mt-1">{CART_RECS_SOURCES.find((o) => o.value === r.source)?.hint}</p>
+          </div>
+          <div>
+            <span className={lbl}>🗂 แท็บเพิ่มในชุดนี้ (ลูกค้าสลับดูได้ · สูงสุด 3 · แท็บที่ไม่มีของซ่อนเอง)</span>
+            <div className="flex flex-wrap gap-1.5">
+              {CART_RECS_SOURCES.filter((o) => o.value !== r.source && o.value !== "manual" && o.value !== "category").map((o) => {
+                const on = r.tabs.includes(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => set({ tabs: on ? r.tabs.filter((x) => x !== o.value) : [...r.tabs, o.value].slice(0, 3) })}
+                    className={`px-2.5 py-1 rounded-full border text-xs ${on ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+                    title={o.hint}
+                  >
+                    {on ? "✓ " : "+ "}
+                    {CART_TAB_LABELS[o.value][0]}
+                  </button>
+                );
+              })}
+            </div>
+            {r.tabs.length > 0 && <p className="text-[11px] text-slate-500 mt-1">แท็บแรก = “{CART_TAB_LABELS[r.source][0]}” (ที่มาหลักด้านบน) แล้วตามด้วย {r.tabs.map((x) => CART_TAB_LABELS[x][0]).join(" · ")}</p>}
           </div>
           {r.source === "category" && (
             <div>
@@ -522,7 +545,24 @@ export function CartSettings({
               + เพิ่มชุดสินค้าแนะนำ
             </button>
           )}
+          <Check
+            label="🏷 ป้าย “ซื้อคู่ลดเพิ่ม” บนการ์ดสินค้าแนะนำ"
+            hint="ใส่ชิ้นนั้นแล้วโปรโมชันที่ตั้งไว้ (แท็บ 🏷 โปรโมชัน) ลดเพิ่มเท่าไร — ไม่มีโปรที่เข้าเงื่อนไข = ไม่ขึ้นป้าย"
+            checked={c.recsPromoBadge}
+            onChange={(recsPromoBadge) => set({ recsPromoBadge })}
+          />
         </div>
+      </Card>
+
+      <Card title="🔗 เข้าชุดกับชิ้นนี้ (ใต้แต่ละรายการ)" hint="ใช้ “สินค้าที่เกี่ยวข้อง” ที่ตั้งไว้รายรุ่น (แท็บ 🛍 ของรุ่น) ก่อน — ไม่ได้ตั้ง = กฎเดียวกับหน้าสินค้า (แท็บ 🔗 แนะนำสินค้า) · ไม่ซ้ำของในตะกร้า" on={c.lineRelated} onToggle={(lineRelated) => set({ lineRelated })}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Text label="หัวข้อ (ว่าง = เข้าชุดกับชิ้นนี้)" obj={c} k="lineRelatedTitle" onPatch={set} placeholder="เข้าชุดกับชิ้นนี้" max={40} />
+          <div>
+            <span className={lbl}>จำนวนต่อรายการ</span>
+            <Seg value={String(c.lineRelatedCount)} onChange={(v) => set({ lineRelatedCount: Number(v) })} options={["1", "2", "3", "4"].map((v) => ({ v, l: v }))} />
+          </div>
+        </div>
+        <Check label="โชว์ในลิ้นชักตะกร้าด้วย" hint="ปิด = หน้า /cart อย่างเดียว (ลิ้นชักแคบ รายการยาวขึ้น)" checked={c.lineRelatedDrawer} onChange={(lineRelatedDrawer) => set({ lineRelatedDrawer })} />
       </Card>
 
       {/* ── ฟังก์ชันเพิ่ม ── */}

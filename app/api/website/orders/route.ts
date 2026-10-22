@@ -58,7 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let q = sb
     .from("store_orders")
     .select(
-      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, shipping_method, shipping_method_label, shipping_box, cod_fee, discount, coupon_code, promos, deposit_amount, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier, source, tax_invoice, tax_invoice_no, tax_invoice_at, shippop"
+      "id, order_no, status, payment_method, payment_status, customer_name, customer_phone, customer_email, ship_address_line, ship_subdistrict, ship_district, ship_province, ship_postal, subtotal, shipping_fee, shipping_method, shipping_method_label, shipping_box, cod_fee, discount, coupon_code, promos, deposit_amount, points_used, points_discount, points_earned, gift_wrap, gift_fee, gift_card_fee, gift_message, gift_hide_price, gift_card, gift_wrap_style, customer_id, grand_total, note, created_at, erp_so_number, lang, tracking_no, tracking_carrier, source, tax_invoice, tax_invoice_no, tax_invoice_at, shippop"
     )
     .eq("shop_id", s.id)
     .order("created_at", { ascending: false })
@@ -304,9 +304,27 @@ async function markCardsPrinted(raw: { orderIds?: unknown; printed?: unknown }, 
   const printed = raw.printed !== false;
   const sb = supabaseAdmin();
   const { data } = await sb.from("store_orders").select("id, shop_id, order_no, gift_card").in("id", ids);
-  const rows = ((data ?? []) as { id: string; shop_id: string; order_no: string; gift_card: unknown }[]).filter((r) => r.gift_card && typeof r.gift_card === "object");
+  const all = (data ?? []) as { id: string; shop_id: string; order_no: string; gift_card: unknown }[];
+  const rows = all.filter((r) => r.gift_card && typeof r.gift_card === "object");
+  const itemOrders = new Set<string>();
   const at = new Date().toISOString();
   let done = 0;
+  // 🎴 การ์ดรายชิ้น (store_order_items.gift.cardInfo) — ติ๊ก/เอาติ๊กพร้อมการ์ดทั้งออเดอร์
+  const { data: its } = await sb.from("store_order_items").select("id, order_id, gift").in("order_id", ids).not("gift", "is", null);
+  for (const it of (its ?? []) as { id: string; order_id: string; gift: Record<string, unknown> | null }[]) {
+    const ci = it.gift?.cardInfo;
+    if (!it.gift || !ci || typeof ci !== "object") continue;
+    const gift = { ...it.gift, cardInfo: { ...(ci as Record<string, unknown>), printedAt: printed ? at : null, printedBy: printed ? actorName : null } };
+    const { error } = await sb.from("store_order_items").update({ gift }).eq("id", it.id);
+    if (!error) {
+      done++;
+      itemOrders.add(it.order_id);
+    }
+  }
+  // ออเดอร์ที่มีแต่การ์ดรายชิ้น — ลงประวัติด้วย (ออเดอร์ที่มีการ์ดทั้งออเดอร์ลงในรอบข้างล่าง)
+  for (const r of all.filter((x) => itemOrders.has(x.id) && !rows.includes(x))) {
+    await writeAudit(sb, { action: "update", entityType: "store_orders", entityId: r.id, actorId, actorName, metadata: { orderNo: r.order_no, shopId: r.shop_id, giftCardPrinted: printed, itemCards: true } });
+  }
   for (const r of rows) {
     const card = { ...(r.gift_card as Record<string, unknown>), printedAt: printed ? at : null, printedBy: printed ? actorName : null };
     const { error } = await sb.from("store_orders").update({ gift_card: card }).eq("id", r.id);

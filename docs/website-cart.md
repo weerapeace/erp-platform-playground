@@ -80,3 +80,19 @@
 **สินค้าแนะนำตามหมวด** — ชุดแนะนำ: ที่มา `category` + `cats` (หมวดที่ดึงสินค้า) · `ifCats` = โชว์เฉพาะเมื่อในตะกร้ามีสินค้าหมวดนี้ (`recsAt(cfg, place, hasItems, cartCats)` · หมวดแม่นับด้วย) · /api/cart-recs `&cats=`
 
 ตัวช่วยเว็บร้าน `src/lib/cart-lines.ts`: payItems/lineOn · itemGiftOn/itemGiftFees/itemGiftPayload (สูตรเดียวกับ ERP) · lineChoices/lineWith (รหัสบรรทัด `<สี>|<ไซส์>#pz:…`) · cartCategories
+
+## 🔗🎀🎴🗂🏷 รอบ 2 (2026-10-22) — เข้าชุด · แบบห่อ · การ์ดรายชิ้นเต็มรูป · แท็บแนะนำ · ป้ายซื้อคู่
+
+| ค่า | ทำอะไร |
+|---|---|
+| `lineRelated` + `lineRelatedCount` (1–4) + `lineRelatedTitle` + `lineRelatedDrawer` | 🔗 "เข้าชุดกับชิ้นนี้" ใต้แต่ละรายการ — เว็บร้าน `/api/cart-related` (buildRelatedPool/pickRelated ตัวเดียวกับหน้าสินค้า: เลือกเองรายรุ่นก่อน แล้วตามกฎ 🔗 แนะนำสินค้า) · ไม่ซ้ำของในตะกร้า · แถวละไม่ซ้ำกัน · หลายสี = ดูด่วน |
+| ชุดแนะนำ `tabs` + ที่มา `recent` / `wishlist` / `bought` | 🗂 แท็บสลับในชุดเดียว (ที่มาหลัก + ≤3) · ดูล่าสุด = localStorage `sf-recent` (ส่ง `&pick=` slug) · รายการโปรด = id จาก useWishlist (สมาชิก) · ซื้อคู่กันบ่อย = `boughtWith` ของของในตะกร้า · แท็บที่ไม่มีของซ่อนเอง |
+| `recsPromoBadge` | 🏷 ป้าย "ซื้อคู่ลดเพิ่ม ฿X" บนการ์ดแนะนำ — `usePromoGain` (promo-context): ใส่เพิ่ม 1 ชิ้นแล้วโปรตะกร้าลดเพิ่ม (หักส่วนลดของตัวมันเองเช่น flash) |
+
+**🎀 แบบห่อ** — ตั้งค่าการ์ด + แบบห่อ (ข้อมูลร้าน › 🎀 › ⚙) `GiftCardConfig.wraps` {id, name, nameEn, fee, imageKey, enabled} · ว่าง = ห่อแบบเดียวราคา gift_fee (เดิม)
+- ทั้งออเดอร์: เลือกในตะกร้า (CartExtras → handoff `giftStyle`) หรือหน้าชำระเงิน (GiftWrapBox · `WrapStylePicker` ของกลาง) → `gift.style` → ERP `wrapFeeFor` (แบบปิด/ไม่เลือก = 409) → `store_orders.gift_wrap_style` (ชื่อ ณ ตอนสั่ง · migration 202610300400)
+- รายชิ้น: `extras.wrapStyle` → `items[].gift.style` → ค่าห่อ = ราคาแบบ × ชิ้น · `styleName/styleNameEn` เก็บใน `store_order_items.gift` + ต่อท้ายป้าย "🎀 ห่อของขวัญ (แบบ)"
+- site API ส่ง `giftCards` เมื่อเปิดห่อหรือการ์ด (เดิม: ต้องเปิดเขียนข้อความ) · ส่งเฉพาะลาย/แบบห่อที่เปิด
+
+**🎴 การ์ดรายชิ้นเต็มรูป** — ตะกร้าใช้ `GiftCardWriter` ตัวเดียวกับหน้าชำระเงิน (โอกาส→ข้อความ · ลาย · ตัวหนังสือ · ถึง/จาก · ไม่ระบุชื่อ · พรีวิวการ์ดจริง) · `extras.card*` → `items[].gift.cardInfo` → ERP `normalizeOrderCard` ต่อรายการ (ลายปิดแล้ว = 400 บอกชื่อสินค้า) → `gift.cardInfo` (+ printedAt)
+- `/print/gift-cards` พิมพ์การ์ดรายชิ้นรวมกับการ์ดทั้งออเดอร์ (เปิดรวม = เฉพาะใบที่ยังไม่พิมพ์) · ติ๊กพิมพ์แล้วอัปเดต `store_order_items.gift.cardInfo.printedAt` ด้วย · แท็บออเดอร์: ถึง/จาก + สถานะพิมพ์ใต้รายการ · นับ "รอพิมพ์" รวมการ์ดรายชิ้น

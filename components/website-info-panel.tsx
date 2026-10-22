@@ -259,9 +259,9 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
               </div>
               {g.key === "gift" && (
                 <div className="mt-3 rounded-lg bg-pink-50 px-3 py-2 flex flex-wrap items-center gap-2">
-                  <p className="flex-1 min-w-[12rem] text-[11px] text-pink-800">🎴 การ์ดของขวัญ: ลายการ์ดของร้าน · ขนาด · โอกาส + ไอเดียข้อความ (ใช้เมื่อเปิด &quot;ให้ลูกค้าเขียนข้อความบนการ์ด&quot;)</p>
+                  <p className="flex-1 min-w-[12rem] text-[11px] text-pink-800">🎴 การ์ดของขวัญ: ลายการ์ดของร้าน · ขนาด · โอกาส + ไอเดียข้อความ (ใช้เมื่อเปิด &quot;ให้ลูกค้าเขียนข้อความบนการ์ด&quot;) · 🎀 แบบห่อหลายแบบ (ชื่อ/รูป/ราคา)</p>
                   <button type="button" onClick={() => setCardsOpen(true)} className="px-3 py-1.5 rounded-lg border border-pink-300 bg-white text-xs text-pink-700 hover:bg-pink-100">
-                    ⚙ ตั้งค่าการ์ด
+                    ⚙ ตั้งค่าการ์ด + แบบห่อ
                   </button>
                 </div>
               )}

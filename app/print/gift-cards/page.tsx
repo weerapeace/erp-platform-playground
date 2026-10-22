@@ -3,6 +3,7 @@
 /**
  * 🎴 พิมพ์การ์ดของขวัญจากออเดอร์เว็บร้าน — /print/gift-cards?shop=<slug>&ids=<orderId,...>
  *   ไม่ส่ง ids = ทุกออเดอร์ที่มีการ์ดและยังไม่ได้พิมพ์ (ไม่นับที่ยกเลิก)
+ *   การ์ดรายชิ้น (ดีไซน์ตะกร้า "เลือกรายชิ้น") = items[].gift.cardInfo — 1 ใบต่อรายการ พิมพ์รวมกับการ์ดทั้งออเดอร์
  *   แบบพิมพ์: A4 หลายใบ (มีเส้นประให้ตัด) · 1 ใบต่อแผ่น (กระดาษขนาดการ์ด)
  *   กดพิมพ์ = ติ๊ก "พิมพ์การ์ดแล้ว" ให้ทุกใบในชุด (กันพิมพ์ซ้ำ) · พิมพ์ไม่ออกกด "เอาติ๊กออก" ได้
  * ของกลาง: lib/website-gift-cards (ตัววาดการ์ด/จัดหน้า — ตัวเดียวกับพรีวิวในหน้าเว็บร้าน) · PrintFrame + printReportHtmlInNewWindow
@@ -24,7 +25,18 @@ import {
   type OrderGiftCard,
 } from "@/lib/website-gift-cards";
 
-type Order = { id: string; orderNo: string; status: string; giftWrap?: boolean; giftCardOnly?: boolean; giftMessage?: string; giftCard?: OrderGiftCard | null };
+type ItemCard = { message: string; cardInfo?: OrderGiftCard | null };
+type Order = { id: string; orderNo: string; status: string; giftWrap?: boolean; giftCardOnly?: boolean; giftMessage?: string; giftCard?: OrderGiftCard | null; items?: { gift?: ItemCard & { card?: boolean } }[] };
+/** การ์ดทุกใบของออเดอร์ (ทั้งออเดอร์ + รายชิ้น) · onlyUnprinted = เฉพาะที่ยังไม่ได้พิมพ์ */
+function cardsOf(o: Order, onlyUnprinted: boolean): { card: OrderGiftCard; message: string }[] {
+  const out: { card: OrderGiftCard; message: string }[] = [];
+  if ((o.giftWrap || o.giftCardOnly) && o.giftCard && !(onlyUnprinted && o.giftCard.printedAt)) out.push({ card: o.giftCard, message: o.giftMessage ?? "" });
+  for (const it of o.items ?? []) {
+    const c = it.gift?.card ? it.gift.cardInfo : null;
+    if (c && !(onlyUnprinted && c.printedAt)) out.push({ card: c, message: it.gift?.message ?? "" });
+  }
+  return out;
+}
 
 function Inner() {
   const sp = useSearchParams();
@@ -45,8 +57,8 @@ function Inner() {
         apiFetch(`/api/website/gift-cards?shop=${encodeURIComponent(shop)}`).then((r) => r.json()),
       ]);
       if (o.error || c.error) return setErr(o.error ?? c.error);
-      const all = ((o.orders ?? []) as Order[]).filter((x) => (x.giftWrap || x.giftCardOnly) && x.giftCard && x.status !== "cancelled");
-      setOrders(ids.length ? all.filter((x) => ids.includes(x.id)) : all.filter((x) => !x.giftCard?.printedAt));
+      const all = ((o.orders ?? []) as Order[]).filter((x) => x.status !== "cancelled" && cardsOf(x, false).length > 0);
+      setOrders(ids.length ? all.filter((x) => ids.includes(x.id)) : all.filter((x) => cardsOf(x, true).length > 0));
       setCfg(c.config as GiftCardConfig);
     } catch {
       setErr("โหลดข้อมูลไม่สำเร็จ");
@@ -59,13 +71,13 @@ function Inner() {
   const html = useMemo(() => {
     if (!cfg || !orders) return "";
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const cards = orders.map((o) => {
-      const card = o.giftCard!;
+    // เปิดจากออเดอร์ที่เลือก (ids) = พิมพ์ทุกใบของออเดอร์นั้น · รวมทุกออเดอร์ = เฉพาะใบที่ยังไม่ได้พิมพ์
+    const cards = orders.flatMap((o) => cardsOf(o, !ids.length)).map(({ card, message }) => {
       const d = cfg.designs.find((x) => x.id === card.design) ?? cfg.designs[0] ?? DEFAULT_GIFT_DESIGN;
       const img = r2ImageUrl(d.imageKey, 1600);
-      return giftCardHtml(cfg, d, { to: card.to, from: card.anon ? "" : card.from, message: o.giftMessage ?? "", font: card.font }, img ? origin + img : null);
+      return giftCardHtml(cfg, d, { to: card.to, from: card.anon ? "" : card.from, message, font: card.font }, img ? origin + img : null);
     });
-    return giftCardsPrintHtml(cfg, cards, mode, `การ์ดของขวัญ ${orders.length} ใบ`);
+    return giftCardsPrintHtml(cfg, cards, mode, `การ์ดของขวัญ ${cards.length} ใบ`);
   }, [cfg, orders, mode]);
 
   const mark = async (printed: boolean) => {
@@ -93,7 +105,7 @@ function Inner() {
           ← กลับ
         </button>
         <span className="text-sm text-slate-600">
-          🎴 การ์ดของขวัญ · {orders ? `${orders.length} ใบ` : "กำลังโหลด…"}
+          🎴 การ์ดของขวัญ · {orders ? `${orders.flatMap((o) => cardsOf(o, !ids.length)).length} ใบ · ${orders.length} ออเดอร์` : "กำลังโหลด…"}
           {cfg && ` · ขนาด ${cfg.size.w / 10} × ${cfg.size.h / 10} ซม.`}
         </span>
         <span className="inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden text-sm">

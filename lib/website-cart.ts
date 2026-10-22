@@ -5,8 +5,11 @@
  * ค่าเริ่มต้น = หน้าตาเดิมของตะกร้า (ลิ้นชักขวา · ปุ่มดำเนินการสั่งซื้อ · แถบส่งฟรี · ล้างตะกร้า) — ฟังก์ชันใหม่ปิดไว้
  */
 export type CartStyle = "drawer-right" | "drawer-left" | "modal";
-/** auto อัตโนมัติ · featured ที่ติ๊กแนะนำ · manual เลือกเอง · category สินค้าในหมวดที่เลือก (cats) */
-export type CartRecsSource = "auto" | "featured" | "manual" | "category";
+/**
+ * auto อัตโนมัติ · featured ที่ติ๊กแนะนำ · manual เลือกเอง · category สินค้าในหมวดที่เลือก (cats)
+ * recent ดูล่าสุด (เครื่องลูกค้า) · wishlist รายการโปรด (สมาชิก) · bought ซื้อคู่กันบ่อย (จากออเดอร์จริง)
+ */
+export type CartRecsSource = "auto" | "featured" | "manual" | "category" | "recent" | "wishlist" | "bought";
 /** ตำแหน่งสินค้าแนะนำ: บนสุด · ต่อจากรายการสินค้า · ท้ายรายการ (เดิม) · ติดเหนือยอดรวม (เห็นตลอด) */
 export type CartRecsPos = "top" | "afterItems" | "bottom" | "footer";
 /** หน้าตาสินค้าแนะนำ: row เลื่อนข้าง · grid ตาราง · list แถวรายการ · addon ติ๊กเพิ่ม */
@@ -26,6 +29,8 @@ export interface CartRecsSet {
   cats: string[];
   /** 🎯 โชว์ชุดนี้เฉพาะเมื่อในตะกร้ามีสินค้าในหมวดเหล่านี้ (ว่าง = ไม่มีเงื่อนไข) — เช่น มีกระเป๋า → แนะนำของแต่งกระเป๋า */
   ifCats: string[];
+  /** 🗂 แท็บเพิ่ม (ที่มาอื่นในชุดเดียวกัน) — มี = โชว์แท็บสลับ [source, ...tabs] · แท็บที่ไม่มีของ (เช่น ยังไม่เคยดู) ซ่อนเอง */
+  tabs: CartRecsSource[];
   limit: number;
   /** ยอดยังไม่ถึงส่งฟรี → ดันสินค้าที่ราคาพอดีขึ้นก่อน */
   freeShip: boolean;
@@ -99,6 +104,16 @@ export interface CartConfig {
   memberBtn: boolean;
   /** 🎀 ห่อของขวัญ/การ์ด ทั้งออเดอร์ / รายชิ้น */
   giftMode: CartGiftMode;
+  /** 🔗 "เข้าชุดกับชิ้นนี้" ใต้แต่ละรายการ (สินค้าเกี่ยวข้องที่ตั้งรายรุ่น → กฎหน้าสินค้า) */
+  lineRelated: boolean;
+  /** จำนวนต่อรายการ 1–4 */
+  lineRelatedCount: number;
+  /** หัวข้อ ("" = "เข้าชุดกับชิ้นนี้") */
+  lineRelatedTitle: string;
+  /** โชว์ในลิ้นชักด้วย (ปิด = หน้า /cart อย่างเดียว) */
+  lineRelatedDrawer: boolean;
+  /** 🏷 ป้าย "ซื้อคู่ลดเพิ่ม ฿X" บนการ์ดสินค้าแนะนำ (ใส่ชิ้นนี้แล้วโปรที่ตั้งไว้ลดเพิ่ม) */
+  recsPromoBadge: boolean;
   /* ── รายการสินค้า ── */
   imageSize: "sm" | "md" | "lg";
   imageShape: "rounded" | "square" | "circle";
@@ -177,6 +192,7 @@ export const DEFAULT_RECS_SET: CartRecsSet = {
   codes: [],
   cats: [],
   ifCats: [],
+  tabs: [],
   limit: 6,
   freeShip: true,
   layout: "row",
@@ -208,6 +224,11 @@ export const DEFAULT_CART: CartConfig = {
   personalize: false,
   memberBtn: false,
   giftMode: "order",
+  lineRelated: false,
+  lineRelatedCount: 3,
+  lineRelatedTitle: "",
+  lineRelatedDrawer: false,
+  recsPromoBadge: false,
   imageSize: "md",
   imageShape: "rounded",
   imageFit: "cover",
@@ -285,7 +306,20 @@ export const CART_RECS_SOURCES: { value: CartRecsSource; label: string; hint: st
   { value: "featured", label: "เฉพาะที่ติ๊กแนะนำ", hint: "สินค้าที่ติ๊ก ⭐ แนะนำในหน้าสินค้าบนเว็บ" },
   { value: "manual", label: "เลือกเอง", hint: "เลือกรุ่นที่จะโชว์ (เรียงตามที่เลือก)" },
   { value: "category", label: "ตามหมวด", hint: "สินค้าในหมวดที่เลือก (เช่น ของแต่งกระเป๋า) — แนะนำ/ขายดีขึ้นก่อน" },
+  { value: "recent", label: "ดูล่าสุด", hint: "สินค้าที่ลูกค้าคนนั้นเปิดดูแล้วยังไม่ได้ซื้อ (จำในเครื่องลูกค้า · ยังไม่เคยดู = ไม่โชว์)" },
+  { value: "wishlist", label: "รายการโปรด", hint: "สินค้าที่สมาชิกกด ♡ ไว้ (ต้องเปิดระบบสมาชิก · ยังไม่เข้าสู่ระบบ = ไม่โชว์)" },
+  { value: "bought", label: "ซื้อคู่กันบ่อย", hint: "จากออเดอร์จริงที่มีของในตะกร้า (ออเดอร์ยังน้อย = อาจว่าง)" },
 ];
+/** ชื่อแท็บเริ่มต้นของแต่ละที่มา (ไทย/อังกฤษ) */
+export const CART_TAB_LABELS: Record<CartRecsSource, [string, string]> = {
+  auto: ["แนะนำ", "For you"],
+  featured: ["แนะนำ", "Featured"],
+  manual: ["คัดมาให้", "Picks"],
+  category: ["ของเข้าชุด", "Add-ons"],
+  recent: ["ดูล่าสุด", "Recently viewed"],
+  wishlist: ["รายการโปรด", "Wishlist"],
+  bought: ["ซื้อคู่กันบ่อย", "Bought together"],
+};
 export const CART_PAGE_LAYOUTS: { value: CartPageLayout; label: string; hint: string }[] = [
   { value: "classic", label: "แบบเดิม", hint: "รายการซ้าย · ยอดรวมขวา" },
   { value: "split", label: "แยกรายการ + สรุปขวา", hint: "ป้ายหมวด · ราคาชิดขวา · ไอคอนโปรด/ลบท้ายแถว · กล่องสรุปแบบตาราง" },
@@ -312,6 +346,8 @@ const iconOf = (v: unknown, fb: string) => (typeof v === "string" ? v.trim().sli
 const catsOf = (v: unknown) =>
   Array.isArray(v) ? [...new Set((v as unknown[]).map((c) => String(c ?? "").trim().toLowerCase()).filter((c) => /^[a-z0-9-]{1,40}$/.test(c)))].slice(0, 20) : [];
 
+const SOURCES = ["auto", "featured", "manual", "category", "recent", "wishlist", "bought"] as const;
+
 /** ชุดสินค้าแนะนำ 1 ชุด — ค่าแปลก/ไม่ได้ตั้ง = ค่าเริ่ม (หน้าตาเดิม) */
 export function normalizeRecsSet(raw: unknown, i = 0): CartRecsSet {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -322,10 +358,11 @@ export function normalizeRecsSet(raw: unknown, i = 0): CartRecsSet {
     id,
     on: bool(r.on, d.on),
     title: str(r.title, d.title, 40).trim(),
-    source: one(r.source, ["auto", "featured", "manual", "category"] as const, d.source),
+    source: one(r.source, SOURCES, d.source),
     codes: codesOf(r.codes),
     cats: catsOf(r.cats),
     ifCats: catsOf(r.ifCats),
+    tabs: Array.isArray(r.tabs) ? [...new Set((r.tabs as unknown[]).filter((x): x is CartRecsSource => (SOURCES as readonly unknown[]).includes(x)))].filter((x) => x !== r.source).slice(0, 3) : [],
     limit: int(r.limit, d.limit, 1, 12),
     freeShip: bool(r.freeShip, d.freeShip),
     layout: one(r.layout, L, d.layout),
@@ -393,6 +430,11 @@ export function normalizeCart(raw: unknown): CartConfig {
     personalize: bool(r.personalize, d.personalize),
     memberBtn: bool(r.memberBtn, d.memberBtn),
     giftMode: one(r.giftMode, ["order", "item"] as const, d.giftMode),
+    lineRelated: bool(r.lineRelated, d.lineRelated),
+    lineRelatedCount: int(r.lineRelatedCount, d.lineRelatedCount, 1, 4),
+    lineRelatedTitle: str(r.lineRelatedTitle, d.lineRelatedTitle, 40).trim(),
+    lineRelatedDrawer: bool(r.lineRelatedDrawer, d.lineRelatedDrawer),
+    recsPromoBadge: bool(r.recsPromoBadge, d.recsPromoBadge),
     imageSize: one(r.imageSize, ["sm", "md", "lg"] as const, d.imageSize),
     imageShape: one(r.imageShape, ["rounded", "square", "circle"] as const, d.imageShape),
     imageFit: one(r.imageFit, ["cover", "contain"] as const, d.imageFit),
@@ -482,6 +524,9 @@ export function etaLine(cfg: Pick<CartConfig, "etaMin" | "etaMax" | "etaText">, 
 export interface RecProduct {
   id: string;
   code?: string;
+  slug?: string;
+  /** รหัสรุ่นที่ซื้อคู่กันบ่อย (ERP นับจากออเดอร์จริง) */
+  boughtWith?: string[];
   price: number;
   category?: string;
   categories?: string[];
@@ -492,7 +537,11 @@ export interface RecProduct {
 export function pickCartRecs<P extends RecProduct>(
   all: P[],
   inCart: string[],
-  cfg: Pick<CartConfig, "recsSource" | "recsCodes" | "recsLimit" | "recsFreeShip"> & { recsCats?: string[] },
+  cfg: Pick<CartConfig, "recsSource" | "recsCodes" | "recsLimit" | "recsFreeShip"> & {
+    recsCats?: string[];
+    /** ดูล่าสุด / รายการโปรด: id หรือ slug ตามลำดับที่ส่งมา (เครื่องลูกค้าส่งมาเอง) */
+    recsPick?: string[];
+  },
   remain = 0
 ): P[] {
   const cartSet = new Set(inCart);
@@ -503,6 +552,22 @@ export function pickCartRecs<P extends RecProduct>(
     list = cfg.recsCodes.map((c) => byCode.get(c)).filter((p): p is P => !!p);
   } else if (cfg.recsSource === "featured") {
     list = pool.filter((p) => p.featured);
+  } else if (cfg.recsSource === "recent" || cfg.recsSource === "wishlist") {
+    const byKey = new Map<string, P>();
+    for (const p of pool) {
+      byKey.set(p.id, p);
+      if (p.slug) byKey.set(p.slug, p);
+    }
+    list = [...new Set((cfg.recsPick ?? []).map((k) => byKey.get(k)).filter((p): p is P => !!p))];
+  } else if (cfg.recsSource === "bought") {
+    // ซื้อคู่กันบ่อย: รวมจากทุกชิ้นในตะกร้า — อยู่ต้นรายการของชิ้นไหน = คะแนนมาก
+    const score = new Map<string, number>();
+    for (const p of all) {
+      if (!cartSet.has(p.id)) continue;
+      (p.boughtWith ?? []).forEach((c, i) => score.set(c.toUpperCase(), (score.get(c.toUpperCase()) ?? 0) + Math.max(1, 12 - i)));
+    }
+    const sc = (p: P) => score.get(String(p.code ?? "").toUpperCase()) ?? 0;
+    list = pool.filter((p) => sc(p) > 0).sort((a, b) => sc(b) - sc(a));
   } else if (cfg.recsSource === "category") {
     // ตามหมวด: แนะนำ/ขายดีขึ้นก่อน ที่เหลือลำดับเดิมของร้าน
     const want = new Set(cfg.recsCats ?? []);

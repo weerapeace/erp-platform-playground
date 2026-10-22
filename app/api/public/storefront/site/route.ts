@@ -185,8 +185,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      * ตั้งใน ERP แท็บ 🏪 ข้อมูลร้าน → 🎴 ตั้งค่าการ์ด · ตัววาดต้องตรงกับ lib/website-gift-cards.ts giftCardHtml
      */
     giftCards:
-      (info.gift_enabled && info.gift_allow_message) || info.card_enabled // 💌 ขายการ์ดแยกก็ใช้ลายการ์ดชุดเดียวกัน
-        ? await readGiftCards(sb, s.id).then((c) => ({ ...c, designs: c.designs.filter((d) => d.enabled) }))
+      // 💌 ขายการ์ดแยกก็ใช้ลายการ์ดชุดเดียวกัน · 🎀 เปิดห่ออย่างเดียวก็ส่ง (แบบห่อ wraps)
+      info.gift_enabled || info.card_enabled
+        ? await readGiftCards(sb, s.id).then((c) => ({ ...c, designs: c.designs.filter((d) => d.enabled), wraps: c.wraps.filter((w) => w.enabled) }))
         : null,
     colorTones: await (async () => {
       const [{ data }, { data: dict }] = await Promise.all([

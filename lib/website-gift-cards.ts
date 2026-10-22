@@ -5,6 +5,7 @@
  * ตั้งค่าร้าน = store_settings key "gift_cards" (JSON ก้อนเดียว · lib/website-gift-cards-db.ts อ่าน/เขียน)
  *   ขนาดการ์ด (มม. · ปรับทีหลังได้) · ลายการ์ดของร้าน (รูปพื้นหลัง R2 + สีตัวหนังสือ + พื้นที่ข้อความ)
  *   โอกาส + ไอเดียข้อความ · ความยาวข้อความ · ให้ไม่ระบุผู้ส่งได้ไหม · แบบตัวหนังสือที่เปิด
+ *   🎀 แบบห่อ (wraps · ชื่อ/รูป/ราคา) — ว่าง = ห่อแบบเดียวราคา gift_fee ในข้อมูลร้าน (แบบเดิม)
  * การ์ดในออเดอร์ = store_orders.gift_card {design, font, occasion, to, from, anon, printedAt, printedBy} + ข้อความที่ gift_message
  *
  * ตัววาด giftCardHtml(): ขนาดทุกอย่างเป็น % / cqw (ตามความกว้างการ์ด) → HTML เดียวใช้ได้ทั้งพรีวิวเล็กบนจอและพิมพ์ขนาดจริง (มม.)
@@ -33,6 +34,18 @@ export interface GiftCardOccasion {
   messages: string[];
 }
 
+/** 🎀 แบบห่อของขวัญ — มีอย่างน้อย 1 แบบ = ลูกค้าเลือกแบบได้ · ราคาตามแบบ (แทน gift_fee) */
+export interface GiftWrapStyle {
+  id: string;
+  name: string;
+  /** ชื่อภาษาอังกฤษ (ว่าง = ใช้ชื่อไทย) */
+  nameEn: string;
+  /** บาท (0 = ฟรี) */
+  fee: number;
+  imageKey: string | null;
+  enabled: boolean;
+}
+
 export interface GiftCardConfig {
   size: { preset: GiftCardSizePreset; w: number; h: number };
   maxChars: number;
@@ -41,6 +54,7 @@ export interface GiftCardConfig {
   fonts: GiftFontKey[];
   designs: GiftCardDesign[];
   occasions: GiftCardOccasion[];
+  wraps: GiftWrapStyle[];
 }
 
 /** การ์ดในออเดอร์ (ข้อความอยู่ gift_message) */
@@ -114,6 +128,7 @@ export const DEFAULT_GIFT_CARDS: GiftCardConfig = {
     { id: "thanks", label: "ขอบคุณ", messages: ["ขอบคุณสำหรับทุกอย่างนะ เป็นกำลังใจให้เสมอ", "ของเล็ก ๆ แทนคำขอบคุณจากใจ"] },
     { id: "congrats", label: "ยินดีด้วย", messages: ["ยินดีด้วยกับความสำเร็จ ภูมิใจในตัวเธอมาก", "ยินดีด้วยกับงานใหม่ ขอให้ราบรื่นนะ"] },
   ],
+  wraps: [],
 };
 
 // ─── ทำความสะอาดค่าที่ตั้ง (ไม่เชื่อ JSON ที่ส่งมา) ───
@@ -191,6 +206,26 @@ export function normalizeGiftCards(raw: unknown): GiftCardConfig {
 
   const fonts = (Array.isArray(o.fonts) ? o.fonts : d.fonts).filter((f): f is GiftFontKey => GIFT_FONTS.some((g) => g.key === f));
 
+  const wseen = new Set<string>();
+  const wraps: GiftWrapStyle[] = [];
+  for (const [i, x] of (Array.isArray(o.wraps) ? o.wraps : []).slice(0, 8).entries()) {
+    const ww = (x ?? {}) as Record<string, unknown>;
+    const name = str(ww.name, 40);
+    if (!name) continue;
+    let id = idOf(ww.id, `w${i + 1}`);
+    while (wseen.has(id)) id = `${id}-${i}`;
+    wseen.add(id);
+    const fee = Number(ww.fee);
+    wraps.push({
+      id,
+      name,
+      nameEn: str(ww.nameEn, 40),
+      fee: Number.isFinite(fee) ? Math.max(0, Math.min(99999, Math.round(fee * 100) / 100)) : 0,
+      imageKey: typeof ww.imageKey === "string" && R2_KEY.test(ww.imageKey.trim()) ? ww.imageKey.trim().slice(0, 300) : null,
+      enabled: ww.enabled !== false,
+    });
+  }
+
   return {
     size,
     maxChars: clampInt(o.maxChars, d.maxChars, 30, 300),
@@ -199,10 +234,25 @@ export function normalizeGiftCards(raw: unknown): GiftCardConfig {
     fonts: fonts.length ? [...new Set(fonts)] : [...d.fonts],
     designs: designs.length ? designs : [{ ...DEFAULT_GIFT_DESIGN }],
     occasions: Array.isArray(o.occasions) ? occasions : structuredClone(d.occasions),
+    wraps,
   };
 }
 
 export const enabledDesigns = (cfg: GiftCardConfig) => cfg.designs.filter((d) => d.enabled);
+/** 🎀 แบบห่อที่เปิดอยู่ (ว่าง = ห่อแบบเดียว ราคา gift_fee) */
+export const enabledWraps = (cfg: Pick<GiftCardConfig, "wraps"> | null | undefined) => (cfg?.wraps ?? []).filter((w) => w.enabled);
+
+/**
+ * 🎀 ค่าห่อ 1 ชิ้นตามแบบที่เลือก (บาท) — ร้านมีแบบห่อ = ต้องเลือกแบบที่ยังเปิดอยู่ · ไม่มีแบบห่อ = gift_fee เดิม
+ * คืน error เมื่อแบบที่เลือกถูกปิด/ไม่มีแล้ว (ไม่เดาแบบให้)
+ */
+export function wrapFeeFor(cfg: Pick<GiftCardConfig, "wraps"> | null | undefined, styleId: string | null | undefined, giftFee: number): { ok: true; fee: number; style: GiftWrapStyle | null } | { ok: false; error: string } {
+  const list = enabledWraps(cfg);
+  if (!list.length) return { ok: true, fee: Math.max(0, Math.round(giftFee * 100) / 100), style: null };
+  const style = list.find((w) => w.id === styleId);
+  if (!style) return { ok: false, error: styleId ? "แบบห่อที่เลือกร้านปิดไปแล้ว — เลือกแบบห่อใหม่อีกครั้ง" : "เลือกแบบห่อของขวัญก่อน" };
+  return { ok: true, fee: style.fee, style };
+}
 
 // ─── ตรวจการ์ดที่ลูกค้าส่งมาตอนสั่ง (บอกว่าผิดอะไร ไม่เดาค่าให้) ───
 

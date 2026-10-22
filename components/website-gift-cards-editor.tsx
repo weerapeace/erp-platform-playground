@@ -3,6 +3,7 @@
  * 🎴 ตั้งค่าการ์ดของขวัญ (ป๊อป) — เปิดจากแท็บ 🏪 ข้อมูลร้าน กลุ่ม 🎀 ห่อของขวัญ
  *   ขนาดการ์ด (ปรับทีหลังได้) · ลายการ์ดของร้าน (อัปโหลดรูป + สีตัวหนังสือ + พื้นที่ข้อความ · ลากเรียง · เปิด/ปิด)
  *   โอกาส + ไอเดียข้อความ · ความยาวข้อความ · ไม่ระบุผู้ส่ง · แบบตัวหนังสือ — พรีวิวการ์ดจริงด้านขวา
+ *   🎀 แบบห่อ (ชื่อ/รูป/ราคา · เปิด/ปิด · ลากเรียง) — มีแบบห่อ = ลูกค้าเลือกแบบ ราคาตามแบบ (แทนค่าห่อในข้อมูลร้าน)
  * บันทึก = ขึ้นเว็บทันที (ไม่ต้องเผยแพร่)
  * ของกลาง: ERPModal/ConfirmDialog · useDragReorder · ImageUploadField · ColorInput · lib/website-gift-cards (ตัววาดเดียวกับเว็บร้าน/หน้าพิมพ์)
  */
@@ -24,6 +25,7 @@ import {
   type GiftCardConfig,
   type GiftCardDesign,
   type GiftFontKey,
+  type GiftWrapStyle,
 } from "@/lib/website-gift-cards";
 
 const inputCls = "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-400 bg-white";
@@ -72,6 +74,8 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
   const setDesign = (id: string, p: Partial<GiftCardDesign>) => setCfg((c) => (c ? { ...c, designs: c.designs.map((d) => (d.id === id ? { ...d, ...p } : d)) } : c));
   const dragD = useDragReorder((a, b) => setCfg((c) => (c ? { ...c, designs: moveItem(c.designs, a, b) } : c)));
   const dragO = useDragReorder((a, b) => setCfg((c) => (c ? { ...c, occasions: moveItem(c.occasions, a, b) } : c)));
+  const dragW = useDragReorder((a, b) => setCfg((c) => (c ? { ...c, wraps: moveItem(c.wraps, a, b) } : c)));
+  const setWrap = (id: string, p: Partial<GiftWrapStyle>) => setCfg((c) => (c ? { ...c, wraps: c.wraps.map((w) => (w.id === id ? { ...w, ...p } : w)) } : c));
 
   const pv = useMemo(() => cfg?.designs.find((d) => d.id === previewId) ?? cfg?.designs.find((d) => d.enabled) ?? cfg?.designs[0], [cfg, previewId]);
   const sample = cfg?.occasions[0]?.messages[0] ?? "สุขสันต์วันเกิดนะ ขอให้ปีนี้เป็นปีที่ดีที่สุด";
@@ -106,8 +110,8 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
     <ERPModal
       open={open}
       onClose={onClose}
-      title="🎴 ตั้งค่าการ์ดของขวัญ"
-      description="ลูกค้าที่ติ๊กห่อของขวัญจะเขียนการ์ดได้ตามนี้ — บันทึกแล้วขึ้นเว็บเลย"
+      title="🎴 ตั้งค่าการ์ด + 🎀 แบบห่อ"
+      description="ลูกค้าที่ติ๊กห่อของขวัญ/การ์ด จะเลือกแบบห่อและเขียนการ์ดได้ตามนี้ — บันทึกแล้วขึ้นเว็บเลย"
       size="xl"
       hasUnsavedChanges={dirty}
       footer={
@@ -214,6 +218,59 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
               </ul>
             </section>
 
+            {/* 🎀 แบบห่อ */}
+            <section>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-slate-800">🎀 แบบห่อของขวัญ</h4>
+                <button
+                  type="button"
+                  onClick={() => set({ wraps: [...cfg.wraps, { id: newId("w"), name: cfg.wraps.length ? `แบบ ${cfg.wraps.length + 1}` : "กระดาษคราฟท์", nameEn: "", fee: 0, imageKey: null, enabled: true }] })}
+                  disabled={cfg.wraps.length >= 8}
+                  className="text-xs text-blue-600 hover:underline disabled:opacity-40"
+                >
+                  + เพิ่มแบบห่อ
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 mb-2">
+                ไม่มีแบบห่อ = ห่อแบบเดียว ราคาตาม “ค่าห่อ” ในข้อมูลร้าน (แบบเดิม) · มีแบบห่อ = ลูกค้าเลือกแบบ และคิดราคาตามแบบ (0 = ฟรี) · ห่อรายชิ้นคิด × จำนวนชิ้น
+              </p>
+              {cfg.wraps.length > 0 && (
+                <ul className="space-y-1.5">
+                  {cfg.wraps.map((w, i) => (
+                    <li key={w.id} {...dragW.rowProps(i)} className={`rounded-lg border border-slate-200 bg-white px-2 py-2 ${dragW.rowCls(i)} ${w.enabled ? "" : "opacity-60"}`}>
+                      <div className="flex items-start gap-2">
+                        <DragHandle {...dragW.handleProps(i)} />
+                        <div className="w-24 shrink-0">
+                          <ImageUploadField label="" value={w.imageKey} onChange={(k) => setWrap(w.id, { imageKey: k })} height={56} />
+                        </div>
+                        <div className="flex-1 min-w-0 grid gap-1.5 sm:grid-cols-3">
+                          <div>
+                            <label className={lbl}>ชื่อแบบ</label>
+                            <input value={w.name} onChange={(e) => setWrap(w.id, { name: e.target.value.slice(0, 40) })} className={inputCls} placeholder="กล่องของขวัญ" />
+                          </div>
+                          <div>
+                            <label className={lbl}>ชื่ออังกฤษ (ไม่ใส่ = ใช้ชื่อไทย)</label>
+                            <input value={w.nameEn} onChange={(e) => setWrap(w.id, { nameEn: e.target.value.slice(0, 40) })} className={inputCls} placeholder="Gift box" />
+                          </div>
+                          <div>
+                            <label className={lbl}>ราคา (บาท · 0 = ฟรี)</label>
+                            <input type="number" min={0} value={w.fee} onChange={(e) => setWrap(w.id, { fee: Math.max(0, Number(e.target.value) || 0) })} className={inputCls} />
+                          </div>
+                        </div>
+                        <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer whitespace-nowrap mt-5">
+                          <input type="checkbox" checked={w.enabled} onChange={(e) => setWrap(w.id, { enabled: e.target.checked })} className="w-4 h-4 accent-blue-600" />
+                          เปิด
+                        </label>
+                        <button type="button" onClick={() => set({ wraps: cfg.wraps.filter((x) => x.id !== w.id) })} className="text-xs text-rose-500 px-1 mt-5" title="ลบแบบห่อนี้">
+                          🗑
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
             {/* โอกาส */}
             <section>
               <div className="flex items-center justify-between mb-2">
@@ -222,7 +279,7 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
                   + เพิ่มโอกาส
                 </button>
               </div>
-              <p className="text-[11px] text-slate-400 mb-2">ลูกค้ากดโอกาสแล้วระบบเติมข้อความแรกให้ · ไอเดียข้อความ 1 บรรทัด = 1 ข้อความ (ไม่เกิน 8)</p>
+              <p className="text-[11px] text-slate-400 mb-2">ลูกค้ากดโอกาสแล้วระบบเติมข้อความแรกให้ (ทั้งหน้าชำระเงินและการ์ดรายชิ้นในตะกร้า) · ไอเดียข้อความ 1 บรรทัด = 1 ข้อความ (ไม่เกิน 8)</p>
               <ul className="space-y-1.5">
                 {cfg.occasions.map((o, i) => (
                   <li key={o.id} {...dragO.rowProps(i)} className={`rounded-lg border border-slate-200 bg-white px-2 py-2 flex gap-2 ${dragO.rowCls(i)}`}>
