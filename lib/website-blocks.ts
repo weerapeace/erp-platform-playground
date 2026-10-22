@@ -224,6 +224,55 @@ export interface BlockMotion {
 }
 export const DEFAULT_MOTION: BlockMotion = { entrance: "none", stagger: false, hover: "none", speed: "normal" };
 
+/**
+ * 🎨 พื้นหลังเพิ่ม (แผงรูปลักษณ์ → ทุกจอ) — วาดเป็นชั้นของตัวเองใน Section (เว็บร้าน SectionLayers) ไม่ใช้ ::before/::after ของตัวห่อ
+ * ลวดลายทับพื้น · ขอบบน/ล่างเป็นรูปทรง (สี = สีของส่วนที่ติดกัน · ค่าเริ่ม = สีพื้นเว็บ) · กล่องเนื้อหามีพื้น
+ * ไม่เคยตั้ง = ไม่มีช่องนี้ใน style = หน้าตาเดิม
+ */
+export const PATTERN_KINDS = ["none", "dots", "lines", "grid", "checks", "grain", "waves"] as const;
+export type PatternKind = (typeof PATTERN_KINDS)[number];
+export const EDGE_SHAPES = ["none", "wave", "waves", "curve", "arch", "tilt", "zigzag"] as const;
+export type EdgeShape = (typeof EDGE_SHAPES)[number];
+export type LayerSize = "s" | "m" | "l";
+export const LAYER_SIZES: readonly LayerSize[] = ["s", "m", "l"];
+export const BOX_RADII = ["none", "s", "m", "l", "xl"] as const;
+export type BoxRadius = (typeof BOX_RADII)[number];
+export interface BlockPattern {
+  kind: PatternKind;
+  /** สีลาย — "auto" = สีตัวอักษรหลัก */
+  color: string;
+  colorHex: string;
+  /** ความเข้ม % (3–60) */
+  opacity: number;
+  size: LayerSize;
+}
+export interface BlockEdge {
+  shape: EdgeShape;
+  /** ความสูง px บนคอม (16–200 · มือถือย่อเหลือ 60%) */
+  height: number;
+  /** กลับซ้าย-ขวา */
+  flip: boolean;
+  /** สีส่วนที่ "ตัด" — "auto" = สีพื้นเว็บ (ให้ตรงกับ Section ข้าง ๆ) */
+  color: string;
+  colorHex: string;
+}
+export interface BlockBox {
+  on: boolean;
+  /** สีกล่อง — "auto" = สีพื้นการ์ด */
+  color: string;
+  colorHex: string;
+  /** ความทึบ % (40–100) */
+  opacity: number;
+  radius: BoxRadius;
+  /** ระยะกล่องจากขอบ Section */
+  gap: LayerSize;
+  shadow: boolean;
+  border: boolean;
+}
+export const DEFAULT_PATTERN: BlockPattern = { kind: "none", color: "auto", colorHex: "", opacity: 12, size: "m" };
+export const DEFAULT_EDGE: BlockEdge = { shape: "none", height: 60, flip: false, color: "auto", colorHex: "" };
+export const DEFAULT_BOX: BlockBox = { on: false, color: "auto", colorHex: "", opacity: 100, radius: "l", gap: "m", shadow: false, border: false };
+
 /** หน้าตาของบล็อก — แยกจาก "เนื้อหา" ทุกชนิดบล็อกมีชุดนี้เหมือนกัน */
 export interface BlockStyle {
   padTop: BlockSpacing;
@@ -243,6 +292,11 @@ export interface BlockStyle {
   motion: BlockMotion;
   /** ตัวอักษรหัวข้อ (แผง "🔤 ตัวอักษร") */
   text: BlockText;
+  /** 🎨 ลวดลายทับพื้น · ขอบบน/ล่าง · กล่องเนื้อหา (ไม่มี = ไม่ได้ตั้ง) */
+  pattern?: BlockPattern;
+  edgeTop?: BlockEdge;
+  edgeBottom?: BlockEdge;
+  box?: BlockBox;
 }
 
 export const DEFAULT_BLOCK_STYLE: BlockStyle = {
@@ -1245,6 +1299,37 @@ function sanitizeBgImage(v: unknown): BlockBgImage | undefined {
 }
 
 /** หน้าตาของบล็อก — บล็อกเก่าที่ยังไม่มี style จะได้ค่าเริ่มต้นเสมอ (เว็บแสดงผลเหมือนเดิม) */
+/** สี (ชื่อสีธีม/"custom"+hex/"auto") — สีเองไม่มีรหัส = auto */
+function colorPair(c: unknown, h: unknown): { color: string; colorHex: string } {
+  const colorHex = typeof h === "string" && HEX6.test(h.trim()) ? h.trim().toLowerCase() : "";
+  const color = pickOne(c, TEXT_COLORS, "auto");
+  return { color: color === "custom" && !colorHex ? "auto" : color, colorHex };
+}
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+function sanitizePattern(v: unknown): BlockPattern | undefined {
+  if (!isObj(v)) return undefined;
+  const d = DEFAULT_PATTERN;
+  return { kind: pickOne(v.kind, PATTERN_KINDS, d.kind), ...colorPair(v.color, v.colorHex), opacity: num(v.opacity, d.opacity, 3, 60), size: pickOne(v.size, LAYER_SIZES, d.size) };
+}
+function sanitizeEdge(v: unknown): BlockEdge | undefined {
+  if (!isObj(v)) return undefined;
+  const d = DEFAULT_EDGE;
+  return { shape: pickOne(v.shape, EDGE_SHAPES, d.shape), height: num(v.height, d.height, 16, 200), flip: v.flip === true, ...colorPair(v.color, v.colorHex) };
+}
+function sanitizeBox(v: unknown): BlockBox | undefined {
+  if (!isObj(v)) return undefined;
+  const d = DEFAULT_BOX;
+  return {
+    on: v.on === true,
+    ...colorPair(v.color, v.colorHex),
+    opacity: num(v.opacity, d.opacity, 40, 100),
+    radius: pickOne(v.radius, BOX_RADII, d.radius),
+    gap: pickOne(v.gap, LAYER_SIZES, d.gap),
+    shadow: v.shadow === true,
+    border: v.border === true,
+  };
+}
+
 export function sanitizeStyle(v: unknown): BlockStyle {
   const o = (v ?? {}) as Record<string, unknown>;
   const d = DEFAULT_BLOCK_STYLE;
@@ -1312,6 +1397,11 @@ export function sanitizeStyle(v: unknown): BlockStyle {
       hover: pickOne(mo.hover, MOTION_HOVERS, "none"),
       speed: pickOne(mo.speed, MOTION_SPEEDS, "normal"),
     },
+    // 🎨 ลวดลาย · ขอบบน/ล่าง · กล่องเนื้อหา — เก็บเฉพาะที่เคยตั้ง (ปิดแล้วค่าเดิมยังอยู่ เปิดใหม่ได้ของเดิม)
+    ...((p) => (p ? { pattern: p } : {}))(sanitizePattern(o.pattern)),
+    ...((e) => (e ? { edgeTop: e } : {}))(sanitizeEdge(o.edgeTop)),
+    ...((e) => (e ? { edgeBottom: e } : {}))(sanitizeEdge(o.edgeBottom)),
+    ...((b) => (b ? { box: b } : {}))(sanitizeBox(o.box)),
   };
 }
 

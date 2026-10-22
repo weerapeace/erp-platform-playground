@@ -14,7 +14,7 @@ import { useWheelStep } from "@/components/wheel-select";
 import { ColorInput } from "@/components/color-picker";
 import { GradientPicker } from "@/components/website-gradient-picker";
 import { GRADIENT_PRESETS } from "@/lib/website-gradient";
-import { DEFAULT_BG_IMAGE, DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockBgImage, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type TextSpacing, type TextCase, type EyeSize, type Visibility } from "@/lib/website-blocks";
+import { DEFAULT_BG_IMAGE, DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockBgImage, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type TextSpacing, type TextCase, type EyeSize, type Visibility, DEFAULT_PATTERN, DEFAULT_EDGE, DEFAULT_BOX, type BlockPattern, type BlockEdge, type BlockBox, type PatternKind, type EdgeShape, type LayerSize, type BoxRadius } from "@/lib/website-blocks";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { RangeInput } from "@/components/range-input";
 import { CANVAS_WEIGHTS } from "@/lib/website-canvas";
@@ -163,6 +163,98 @@ const CASE_OPTS: { v: TextCase; l: string }[] = [
   { v: "upper", l: "ตัวพิมพ์ใหญ่" },
   { v: "normal", l: "ตามที่พิมพ์" },
 ];
+
+/** 🎨 พื้นหลังเพิ่ม: ลวดลายทับพื้น · ขอบบน/ล่าง · กล่องเนื้อหา (เว็บร้านวาดที่ SectionLayers + CSS [data-box]) */
+const PATTERN_OPTS: { v: PatternKind; l: string }[] = [
+  { v: "none", l: "ไม่มี" },
+  { v: "dots", l: "จุด" },
+  { v: "lines", l: "เส้นทแยง" },
+  { v: "grid", l: "ตาราง" },
+  { v: "checks", l: "หมากรุก" },
+  { v: "grain", l: "เกรน" },
+  { v: "waves", l: "คลื่น" },
+];
+const EDGE_OPTS: { v: EdgeShape; l: string }[] = [
+  { v: "none", l: "ตรง (เดิม)" },
+  { v: "wave", l: "คลื่น" },
+  { v: "waves", l: "คลื่นนุ่ม" },
+  { v: "curve", l: "โค้งลง" },
+  { v: "arch", l: "โค้งขึ้น" },
+  { v: "tilt", l: "เฉียง" },
+  { v: "zigzag", l: "ฟันปลา" },
+];
+const SIZE_OPTS: { v: LayerSize; l: string }[] = [
+  { v: "s", l: "เล็ก" },
+  { v: "m", l: "กลาง" },
+  { v: "l", l: "ใหญ่" },
+];
+function SectionBgExtras({ s, set, theme }: { s: BlockStyle; set: (p: Partial<BlockStyle>) => void; theme: ThemeColors }) {
+  const pat = { ...DEFAULT_PATTERN, ...(s.pattern ?? {}) };
+  const box = { ...DEFAULT_BOX, ...(s.box ?? {}) };
+  const setPat = (p: Partial<BlockPattern>) => set({ pattern: { ...pat, ...p } });
+  const setBox = (p: Partial<BlockBox>) => set({ box: { ...box, ...p } });
+  const edge = (k: "edgeTop" | "edgeBottom") => {
+    const e = { ...DEFAULT_EDGE, ...(s[k] ?? {}) };
+    const setE = (p: Partial<BlockEdge>) => set({ [k]: { ...e, ...p } } as Partial<BlockStyle>);
+    return (
+      <TextGroup key={k} title={k === "edgeTop" ? "ขอบบนเป็นรูปทรง" : "ขอบล่างเป็นรูปทรง"} touched={e.shape !== "none"}>
+        <Field label="รูปทรง"><Seg<EdgeShape> wheel value={e.shape} onChange={(v) => setE({ shape: v })} options={EDGE_OPTS} /></Field>
+        {e.shape !== "none" && (
+          <>
+            <Field label={`ความสูง: ${e.height}px (มือถือย่อเหลือ 60%)`}><RangeInput value={e.height} min={16} max={200} step={4} onChange={(v) => setE({ height: v })} /></Field>
+            <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+              <input type="checkbox" checked={e.flip} onChange={(ev) => setE({ flip: ev.target.checked })} />
+              กลับซ้าย-ขวา
+            </label>
+            <Field label="สีส่วนที่ตัด (ให้ตรงกับ Section ที่ติดกัน)">
+              <ColorSwatches theme={theme} value={e.color} hex={e.colorHex} autoLabel="สีพื้นเว็บ (แนะนำ)" onPick={(v, hex) => setE(v === "custom" ? { color: v, colorHex: hex ?? e.colorHex } : { color: v })} />
+            </Field>
+          </>
+        )}
+      </TextGroup>
+    );
+  };
+  return (
+    <div className="space-y-2">
+      <TextGroup title="ลวดลายทับพื้น" touched={pat.kind !== "none"}>
+        <Field label="ลาย"><Seg<PatternKind> wheel value={pat.kind} onChange={(v) => setPat({ kind: v })} options={PATTERN_OPTS} /></Field>
+        {pat.kind !== "none" && (
+          <>
+            <Field label="สีลาย">
+              <ColorSwatches theme={theme} value={pat.color} hex={pat.colorHex} autoLabel="ตามเดิม (สีตัวอักษร)" onPick={(v, hex) => setPat(v === "custom" ? { color: v, colorHex: hex ?? pat.colorHex } : { color: v })} />
+            </Field>
+            <Field label={`ความเข้ม: ${pat.opacity}%`}><RangeInput value={pat.opacity} min={3} max={60} step={1} onChange={(v) => setPat({ opacity: v })} /></Field>
+            <Field label="ขนาดลาย"><Seg<LayerSize> value={pat.size} onChange={(v) => setPat({ size: v })} options={SIZE_OPTS} /></Field>
+          </>
+        )}
+      </TextGroup>
+      {edge("edgeTop")}
+      {edge("edgeBottom")}
+      <TextGroup title="กล่องเนื้อหามีพื้น" touched={box.on}>
+        <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+          <input type="checkbox" checked={box.on} onChange={(ev) => setBox({ on: ev.target.checked })} />
+          ใส่กล่องรอบเนื้อหา (พื้นหลัง Section ยังเห็นรอบ ๆ)
+        </label>
+        {box.on && (
+          <>
+            <Field label="สีกล่อง">
+              <ColorSwatches theme={theme} value={box.color} hex={box.colorHex} autoLabel="สีพื้นการ์ด" onPick={(v, hex) => setBox(v === "custom" ? { color: v, colorHex: hex ?? box.colorHex } : { color: v })} />
+            </Field>
+            <Field label={`ความทึบ: ${box.opacity}%`}><RangeInput value={box.opacity} min={40} max={100} step={5} onChange={(v) => setBox({ opacity: v })} /></Field>
+            <Field label="มุมโค้ง">
+              <Seg<BoxRadius> value={box.radius} onChange={(v) => setBox({ radius: v })} options={[{ v: "none", l: "เหลี่ยม" }, { v: "s", l: "นิด" }, { v: "m", l: "กลาง" }, { v: "l", l: "มาก" }, { v: "xl", l: "มากสุด" }]} />
+            </Field>
+            <Field label="ระยะกล่องจากขอบ"><Seg<LayerSize> value={box.gap} onChange={(v) => setBox({ gap: v })} options={SIZE_OPTS} /></Field>
+            <div className="flex flex-wrap gap-4 text-xs text-slate-700">
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={box.shadow} onChange={(ev) => setBox({ shadow: ev.target.checked })} />เงา</label>
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={box.border} onChange={(ev) => setBox({ border: ev.target.checked })} />เส้นขอบ</label>
+            </div>
+          </>
+        )}
+      </TextGroup>
+    </div>
+  );
+}
 
 /** กลุ่มพับได้ในแท็บ 🔤 ตัวอักษร (• = ตั้งค่าไว้แล้ว) */
 function TextGroup({ title, touched, defaultOpen = false, children }: { title: string; touched: boolean; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -505,6 +597,7 @@ export function StylePanel({
                   </div>
                 )}
               </div>
+              <SectionBgExtras s={s} set={set} theme={theme} />
             </div>
           ) : (
             <div className="grid gap-3">

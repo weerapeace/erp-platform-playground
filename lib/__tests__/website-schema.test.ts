@@ -600,3 +600,28 @@ describe("🔤 ตัวอักษรต่อ Section — ตัวเล็�
     expect([normalizeBlocks([{ id: "t3", type: "cta", style: { text: { bodyColor: "custom", bodyColorHex: "#AA3355" } } }])[0].style.text.bodyColorHex]).toEqual(["#aa3355"]);
   });
 });
+
+describe("🎨 พื้นหลังเพิ่ม — ลวดลาย · ขอบบน/ล่าง · กล่องเนื้อหา", () => {
+  it("ไม่เคยตั้ง = ไม่มีช่อง (หน้าตาเดิม)", () => {
+    const [n] = normalizeBlocks([{ id: "b1", type: "cta" }]);
+    expect([n.style.pattern, n.style.edgeTop, n.style.edgeBottom, n.style.box]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+  it("ตั้งค่าได้ · ค่าเกิน/แปลกถูกตัด · สีเองไม่มีรหัส = ตามเดิม", () => {
+    const [n] = normalizeBlocks([
+      {
+        id: "b2",
+        type: "cta",
+        style: {
+          pattern: { kind: "dots", color: "brand", opacity: 99, size: "xl" },
+          edgeTop: { shape: "wave", height: 5, flip: true, color: "custom", colorHex: "" },
+          edgeBottom: { shape: "blob", height: 80, color: "custom", colorHex: "#FFEEDD" },
+          box: { on: true, color: "white", opacity: 10, radius: "xl", gap: "l", shadow: true, border: "yes" },
+        },
+      },
+    ]);
+    expect(n.style.pattern).toEqual({ kind: "dots", color: "brand", colorHex: "", opacity: 60, size: "m" });
+    expect(n.style.edgeTop).toEqual({ shape: "wave", height: 16, flip: true, color: "auto", colorHex: "" });
+    expect(n.style.edgeBottom).toEqual({ shape: "none", height: 80, flip: false, color: "custom", colorHex: "#ffeedd" });
+    expect(n.style.box).toEqual({ on: true, color: "white", colorHex: "", opacity: 40, radius: "xl", gap: "l", shadow: true, border: false });
+  });
+});
