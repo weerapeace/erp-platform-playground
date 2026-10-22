@@ -989,8 +989,32 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         requiredMessage: "ยังไม่มีข้อความ",
       }),
       f("marquee", "ให้ข้อความวิ่งต่อเนื่อง (แทนการสลับทีละข้อความ)", "toggle", { group: "layout", default: false }),
+      // 🎨 สีแถบ + ⏳ นับถอยหลัง (ชุด 3 · เว็บร้าน AnnouncementBar) — ค่าเริ่ม = แถบเข้ม ไม่นับถอยหลัง (เหมือนเดิม)
+      f("bg", "สีแถบ", "select", {
+        group: "layout",
+        default: "ink",
+        options: [
+          { v: "ink", l: "เข้ม (แบบเดิม)" },
+          { v: "brand", l: "สีหลักของร้าน" },
+          { v: "sale", l: "แดงโปร (สีราคาลด)" },
+          { v: "custom", l: "เลือกสีเอง" },
+        ],
+      }),
+      f("bgColor", "สีแถบ (เลือกเอง)", "color", { group: "layout", default: "", showIf: { key: "bg", eq: "custom" } }),
+      f("countdown", "⏳ นับถอยหลังในแถบ (แทนข้อความประกาศจนกว่าจะครบเวลา)", "toggle", { default: false, wide: true }),
+      f("countdownAt", "นับถอยหลังถึง (เวลาไทย)", "datetime", { default: "", wide: true, showIf: { key: "countdown", eq: true } }),
+      text("countdownText", "ข้อความตอนนับ ({time} = เวลาที่เหลือ)", { default: "Flash Sale ลด 30% · จบใน {time}", max: 120, wide: true, showIf: { key: "countdown", eq: true }, placeholder: "เช่น โปร 11.11 จบใน {time}" }),
+      f("afterEnd", "ครบเวลาแล้ว", "select", {
+        default: "hide",
+        showIf: { key: "countdown", eq: true },
+        options: [
+          { v: "hide", l: "ซ่อนแถบ" },
+          { v: "text", l: "เปลี่ยนเป็นข้อความอื่น" },
+        ],
+      }),
+      text("afterText", "ข้อความหลังครบเวลา (ว่าง = กลับไปข้อความประกาศ)", { default: "", max: 120, wide: true, showIf: [{ key: "countdown", eq: true }, { key: "afterEnd", eq: "text" }] }),
     ],
-    summary: (b) => (b.messages as string[])?.filter(Boolean).join(" · ").slice(0, 70) || "ยังไม่มีข้อความ",
+    summary: (b) => String(b.countdown ? "⏳ " + String(b.countdownText ?? "").replace("{time}", "…") : ((b.messages as string[]) ?? []).filter(Boolean).join(" · ")).slice(0, 70) || "ยังไม่มีข้อความ",
   },
 
   hero: {

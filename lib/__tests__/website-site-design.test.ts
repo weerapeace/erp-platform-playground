@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { normalizeTheme, mergeTheme, themeFontNames } from "../website-theme";
-import { DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
+import { DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeChatLook, normalizeCookieLook, normalizeMobileNav, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
+import { popularTermsOf } from "../website-site-info";
+import { mergePopularTerms } from "../website-search-terms";
 import { sanitizeStyle, MOTION_ENTRANCES } from "../website-blocks";
 import { applyFullPreset, FULL_THEME_PRESETS } from "../website-theme-presets";
 
@@ -89,5 +91,44 @@ describe("ลูกเล่นทั้งเว็บ (ชุด 2)", () => {
     expect(MOTION_ENTRANCES).toContain("still");
     expect(sanitizeStyle({ motion: { entrance: "still" } }).motion.entrance).toBe("still");
     expect(sanitizeStyle({}).motion.entrance).toBe("none");
+  });
+});
+
+/** 📱 ชุด 3 — มือถือและช่วยขาย (theme.page · theme.footer · Section แถบประกาศ · คำยอดนิยม) */
+describe("มือถือและช่วยขาย (ชุด 3)", () => {
+  it("ธีมเก่า = หน้าตาเดิมทุกตัว", () => {
+    const t = normalizeTheme({});
+    expect(t.page.mobileNav).toEqual({ style: "off", items: ["home", "shop", "search", "wishlist", "cart"], hideOnScroll: false });
+    expect(t.page.chat).toEqual({ color: "brand", shape: "pill", where: "all" });
+    expect(t.page.searchEmpty).toBe("cats");
+    expect(t.page.cookie).toEqual({ layout: "card", side: "left", icon: true, title: "", text: "" });
+    expect([t.footer.paymentStyle, t.footer.shipping]).toEqual(["text", []]);
+  });
+
+  it("แถบล่าง: ปุ่ม 2–5 ไม่ซ้ำ · ค่ามั่วตัดทิ้ง · น้อยกว่า 2 = ชุดตั้งต้น", () => {
+    expect(normalizeMobileNav({ style: "label", items: ["cart", "cart", "chat", "x", "home", "search", "account", "shop"] }).items).toEqual(["cart", "chat", "home", "search", "account"]);
+    expect(normalizeMobileNav({ items: ["home"] }).items).toEqual(DEFAULT_SITE_PAGE.mobileNav.items);
+    expect(normalizeMobileNav({ style: "big" }).style).toBe("off");
+  });
+
+  it("ค่าที่เลือกรอดการบันทึก (รวมคำแปลอังกฤษของแถบคุกกี้)", () => {
+    const page = { mobileNav: { style: "icon", items: ["home", "categories", "chat", "cart"], hideOnScroll: true }, chat: { color: "line", shape: "round", where: "mobile" }, searchEmpty: "prods", cookie: { layout: "bar", side: "right", icon: false, title: "คุกกี้", title_en: "Cookies", text: "ข้อความ", text_en: "Text" } };
+    const back = normalizeTheme(mergeTheme({}, normalizeTheme({ page, footer: { paymentStyle: "color", shipping: ["kerry", "flash", "kerry", "ufo"] } })));
+    expect(back.page).toMatchObject(page);
+    expect([back.footer.paymentStyle, back.footer.shipping]).toEqual(["color", ["kerry", "flash"]]);
+    expect(normalizeCookieLook({ layout: "popup", title: "x".repeat(90) })).toMatchObject({ layout: "card", title: "x".repeat(60) });
+    expect(normalizeChatLook({ color: "pink", shape: "square", where: "tv" })).toEqual({ color: "brand", shape: "pill", where: "all" });
+  });
+
+  it("คำยอดนิยม: คำที่ร้านตั้งก่อน → ต่อด้วยคำที่ลูกค้าค้นจริง ≥ 3 ครั้งและหาเจอ · ไม่มีข้อมูล = เฉพาะคำที่ตั้ง", () => {
+    expect(popularTermsOf(" กระเป๋าสตางค์ \nเข็มขัด\nกระเป๋าสตางค์\n\n")).toEqual(["กระเป๋าสตางค์", "เข็มขัด"]);
+    const stats = [
+      { q: "wallet", hits: 9, lastResults: 4, lastDay: "2026-10-20" },
+      { q: "ร่ม", hits: 7, lastResults: 0, lastDay: "2026-10-20" },
+      { q: "เข็มขัด", hits: 5, lastResults: 3, lastDay: "2026-10-20" },
+      { q: "card", hits: 2, lastResults: 3, lastDay: "2026-10-20" },
+    ];
+    expect(mergePopularTerms(["กระเป๋าสตางค์", "เข็มขัด"], stats)).toEqual(["กระเป๋าสตางค์", "เข็มขัด", "wallet"]);
+    expect(mergePopularTerms([], [])).toEqual([]);
   });
 });

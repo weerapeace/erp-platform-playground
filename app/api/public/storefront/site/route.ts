@@ -13,7 +13,8 @@ import { normalizeBlocks } from "@/lib/website-blocks";
 import { normalizeTheme } from "@/lib/website-theme";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
 import { normalizeFieldMap } from "@/lib/website-field-map";
-import { readSiteInfo, publicSiteInfo } from "@/lib/website-site-info";
+import { readSiteInfo, publicSiteInfo, popularTermsOf } from "@/lib/website-site-info";
+import { mergePopularTerms, readSearchTerms } from "@/lib/website-search-terms";
 import { fitTargetOf, type FitTarget } from "@/lib/fit-check";
 import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { publicShipping, readShipping } from "@/lib/website-shipping-db";
@@ -107,13 +108,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const themeSource = preview && s.theme_draft != null ? s.theme_draft : s.theme;
   const layoutSource = preview && s.home_layout_draft != null ? s.home_layout_draft : s.home_layout;
+  const theme = normalizeTheme(themeSource);
+  // 🔍 คำยอดนิยม (ค้นหาเต็มจอตอนยังไม่พิมพ์) — เฉพาะร้านที่เปิด page.searchEmpty · คำที่ร้านตั้ง + คำที่ลูกค้าค้นจริงบ่อยและหาเจอ
+  const popularSearches = theme.page.searchEmpty !== "cats" ? mergePopularTerms(popularTermsOf(fullInfo.search_popular), await readSearchTerms(sb, s.id, 30)) : undefined;
 
   return json({
     shop: s.slug,
     shopName: s.name,
     active: s.status === "active",
     preview,
-    theme: normalizeTheme(themeSource),
+    theme,
+    ...(popularSearches ? { popularSearches } : {}),
     /** โครงหน้าแรก — [] = ยังไม่เคยตั้ง ให้เว็บใช้โครงเริ่มต้นของตัวเอง */
     // normalize ก่อนส่ง: เติม id ให้ Block ย่อยเหมือนที่ตัวจัดหน้าเห็น (บล็อกชนิดเก่าของร้านอื่นถูกเก็บไว้ทั้งก้อน)
     layout: normalizeBlocks(layoutSource),

@@ -3,7 +3,8 @@
  * ⚠️ มิเรอร์: ERP lib/website-site-design.ts ↔ เว็บร้าน src/lib/site-design.ts (แก้ฝั่งหนึ่งแล้วคัดลอกทั้งไฟล์ทับอีกฝั่ง)
  * ค่าเริ่มต้นทุกตัว = หน้าตาเดิมก่อนมีระบบนี้ · ตัววาด CSS อยู่ที่เว็บร้าน src/lib/site-design-css.ts
  *
- * ที่เก็บในธีม: theme.page (ความโปร่ง/ความกว้าง/ผิวพื้น/มือถือ/รูปแบบราคา + ✨ การเคลื่อนไหวชุด 2) · theme.shape (ปุ่ม/ลิงก์/ช่องกรอก)
+ * ที่เก็บในธีม: theme.page (ความโปร่ง/ความกว้าง/ผิวพื้น/มือถือ/รูปแบบราคา + ✨ การเคลื่อนไหวชุด 2 + 📱 มือถือและช่วยขายชุด 3) · theme.shape (ปุ่ม/ลิงก์/ช่องกรอก)
+ *               theme.footer.paymentStyle / shipping (โลโก้ท้ายเว็บ · normalizeFooter ของแต่ละ repo เรียก normalizePayStyle/normalizeShipIcons)
  *               theme.header.iconStyle (ชุดไอคอนหัวเว็บ) · theme.card.autoBadges.shape (ทรงป้ายบนการ์ด)
  */
 
@@ -25,6 +26,39 @@ export type PageTransition = "fade" | "rise" | "curtain" | "logo" | "zoom" | "no
 export type IntroStyle = "off" | "logo" | "line" | "curtain";
 export type CursorStyle = "off" | "ring" | "dot" | "view";
 export type BackToTop = "off" | "circle" | "ring";
+/** 📱 ชุด 3 — แถบเมนูล่างแบบแอป (มือถือ) */
+export type MobileNavStyle = "off" | "label" | "icon";
+export type MobileNavItem = "home" | "shop" | "categories" | "search" | "wishlist" | "cart" | "account" | "chat";
+export interface MobileNavConfig {
+  style: MobileNavStyle;
+  /** 2–5 ปุ่ม เรียงตามนี้ · ถูกใจ/บัญชี โชว์เมื่อเปิดระบบสมาชิก · แชท โชว์เมื่อเปิดปุ่มแชท */
+  items: MobileNavItem[];
+  /** เลื่อนลงซ่อน เลื่อนขึ้นโผล่ */
+  hideOnScroll: boolean;
+}
+export type ChatColor = "brand" | "line" | "ink" | "white";
+/** 💬 หน้าตาปุ่มแชทลอย (ช่องทางแชทตั้งที่ ERP ข้อมูลร้าน › 💬) */
+export interface ChatLook {
+  color: ChatColor;
+  shape: "pill" | "round";
+  where: "all" | "mobile" | "desktop";
+}
+/** 🔍 ค้นหาเต็มจอตอนยังไม่พิมพ์: หมวด (เดิม) / + คำยอดนิยม / + คำยอดนิยม + สินค้าแนะนำ */
+export type SearchEmpty = "cats" | "terms" | "prods";
+export type CookieLayout = "card" | "bar" | "center";
+/** 🍪 แถบขอความยินยอมคุกกี้ — ปุ่ม "เฉพาะที่จำเป็น" อยู่ข้างปุ่มยอมรับเสมอ (PDPA: ปฏิเสธต้องง่ายเท่ายอมรับ) */
+export interface CookieLook {
+  layout: CookieLayout;
+  /** การ์ด: มุมซ้าย/ขวา (จอคอม) */
+  side: "left" | "right";
+  icon: boolean;
+  /** ว่าง = ข้อความตั้งต้น · แปลอังกฤษได้ (<key>_en) */
+  title: string;
+  text: string;
+}
+/** 💳 โลโก้ท้ายเว็บ: ป้ายตัวหนังสือ (เดิม) / โลโก้สี / โลโก้ขาวดำ */
+export type PayLogoStyle = "text" | "color" | "mono";
+export type ShipIcon = "thaipost" | "kerry" | "flash" | "jt" | "ninja" | "dhl";
 
 /** ส่วนที่อยู่ใน theme.page (รวมกับ transition / smoothScroll เดิม) */
 export interface SitePageDesign {
@@ -55,6 +89,11 @@ export interface SitePageDesign {
   /** ⬆ ปุ่มกลับขึ้นบน (โผล่เมื่อเลื่อนลงเกินเกือบ 1 จอ) */
   backToTop: BackToTop;
   backToTopSide: "right" | "left";
+  /** 📱 ชุด 3 */
+  mobileNav: MobileNavConfig;
+  chat: ChatLook;
+  searchEmpty: SearchEmpty;
+  cookie: CookieLook;
 }
 
 /** ส่วนที่อยู่ใน theme.shape (รวมกับรูปทรงปุ่ม/ขนาด/ขอบเดิม) */
@@ -72,6 +111,10 @@ export interface SiteShapeDesign {
 export const DEFAULT_SITE_PAGE: SitePageDesign = {
   density: "normal", width: "normal", texture: "none", textureStrength: 40, mobileScale: 100, bigTap: false, priceFormat: "baht",
   sectionMotion: "none", sectionSpeed: "normal", sectionStagger: false, intro: "off", cursor: "off", readProgress: false, backToTop: "off", backToTopSide: "right",
+  mobileNav: { style: "off", items: ["home", "shop", "search", "wishlist", "cart"], hideOnScroll: false },
+  chat: { color: "brand", shape: "pill", where: "all" },
+  searchEmpty: "cats",
+  cookie: { layout: "card", side: "left", icon: true, title: "", text: "" },
 };
 export const DEFAULT_SITE_SHAPE: SiteShapeDesign = { buttonKind: "fill", buttonHover: "auto", linkHover: "auto", inputStyle: "box" };
 export const DEFAULT_HEADER_ICON_STYLE: HeaderIconStyle = "regular";
@@ -99,6 +142,14 @@ export const PAGE_TRANSITIONS: PageTransition[] = ["fade", "rise", "curtain", "l
 export const INTRO_STYLES: IntroStyle[] = ["off", "logo", "line", "curtain"];
 export const CURSOR_STYLES: CursorStyle[] = ["off", "ring", "dot", "view"];
 export const BACK_TO_TOPS: BackToTop[] = ["off", "circle", "ring"];
+export const MOBILE_NAV_STYLES: MobileNavStyle[] = ["off", "label", "icon"];
+export const MOBILE_NAV_ITEMS: MobileNavItem[] = ["home", "shop", "categories", "search", "wishlist", "cart", "account", "chat"];
+export const MOBILE_NAV_MAX = 5;
+export const CHAT_COLORS: ChatColor[] = ["brand", "line", "ink", "white"];
+export const SEARCH_EMPTIES: SearchEmpty[] = ["cats", "terms", "prods"];
+export const COOKIE_LAYOUTS: CookieLayout[] = ["card", "bar", "center"];
+export const PAY_LOGO_STYLES: PayLogoStyle[] = ["text", "color", "mono"];
+export const SHIP_ICONS: ShipIcon[] = ["thaipost", "kerry", "flash", "jt", "ninja", "dhl"];
 
 const oneOf = <T extends string>(v: unknown, ok: readonly T[], fb: T): T => (typeof v === "string" && (ok as readonly string[]).includes(v) ? (v as T) : fb);
 const clampInt = (v: unknown, lo: number, hi: number, fb: number): number => {
@@ -125,8 +176,39 @@ export function normalizeSitePage(raw: unknown): SitePageDesign {
     readProgress: r.readProgress === true,
     backToTop: oneOf(r.backToTop, BACK_TO_TOPS, d.backToTop),
     backToTopSide: r.backToTopSide === "left" ? "left" : "right",
+    mobileNav: normalizeMobileNav(r.mobileNav),
+    chat: normalizeChatLook(r.chat),
+    searchEmpty: oneOf(r.searchEmpty, SEARCH_EMPTIES, d.searchEmpty),
+    cookie: normalizeCookieLook(r.cookie),
   };
 }
+
+const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const txt = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+
+export function normalizeMobileNav(raw: unknown): MobileNavConfig {
+  const r = obj(raw);
+  const d = DEFAULT_SITE_PAGE.mobileNav;
+  const items = Array.isArray(r.items) ? [...new Set(r.items.filter((x): x is MobileNavItem => (MOBILE_NAV_ITEMS as readonly unknown[]).includes(x)))].slice(0, MOBILE_NAV_MAX) : [];
+  return { style: oneOf(r.style, MOBILE_NAV_STYLES, d.style), items: items.length >= 2 ? items : [...d.items], hideOnScroll: r.hideOnScroll === true };
+}
+
+export function normalizeChatLook(raw: unknown): ChatLook {
+  const r = obj(raw);
+  return { color: oneOf(r.color, CHAT_COLORS, "brand"), shape: r.shape === "round" ? "round" : "pill", where: r.where === "mobile" || r.where === "desktop" ? r.where : "all" };
+}
+
+export function normalizeCookieLook(raw: unknown): CookieLook {
+  const r = obj(raw);
+  // ⚠️ คงช่องแปล <key>_en ไว้ (ระบบแปลธีมทับทีหลัง) — เก็บเฉพาะ title_en / text_en
+  const out: CookieLook & Record<string, unknown> = { layout: oneOf(r.layout, COOKIE_LAYOUTS, "card"), side: r.side === "right" ? "right" : "left", icon: r.icon !== false, title: txt(r.title, 60), text: txt(r.text, 400) };
+  if (typeof r.title_en === "string" && r.title_en.trim()) out.title_en = txt(r.title_en, 60);
+  if (typeof r.text_en === "string" && r.text_en.trim()) out.text_en = txt(r.text_en, 400);
+  return out;
+}
+
+export const normalizePayStyle = (v: unknown): PayLogoStyle => oneOf(v, PAY_LOGO_STYLES, "text");
+export const normalizeShipIcons = (v: unknown): ShipIcon[] => (Array.isArray(v) ? [...new Set(v.filter((x): x is ShipIcon => (SHIP_ICONS as readonly unknown[]).includes(x)))] : []);
 
 /** ค่าเก่ามีแค่ none/fade/rise · ค่าแปลก = จาง (แบบเดิม) */
 export const normalizePageTransition = (v: unknown): PageTransition => oneOf(v, PAGE_TRANSITIONS, "fade");

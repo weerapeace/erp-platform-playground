@@ -7,22 +7,28 @@
  */
 import type { ReactNode } from "react";
 import { RangeInput } from "@/components/range-input";
+import { LangInput } from "@/components/bilingual-field";
 import {
   DEFAULT_SITE_PAGE,
   DEFAULT_SITE_SHAPE,
+  MOBILE_NAV_ITEMS,
+  MOBILE_NAV_MAX,
   MOBILE_SCALE_RANGE,
   TEXTURE_STRENGTH_RANGE,
   formatMoneyAs,
   type BackToTop,
   type ButtonHover,
   type ButtonKind,
+  type CookieLayout,
   type CursorStyle,
   type HeaderIconStyle,
   type InputStyle,
   type IntroStyle,
   type LinkHover,
+  type MobileNavItem,
   type MotionSpeed,
   type PriceFormat,
+  type SearchEmpty,
   type SectionEntrance,
   type SiteDensity,
   type SitePageDesign,
@@ -432,6 +438,136 @@ export function SiteMotionSetting({ value, onChange }: { value: SitePageDesign; 
           )}
           <p className="text-[11px] text-slate-400 mt-1">โผล่เมื่อเลื่อนลงเกินเกือบ 1 จอ · ไม่โชว์หน้าชำระเงิน</p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const NAV_LABEL: Record<MobileNavItem, string> = { home: "หน้าแรก", shop: "ร้านค้า", categories: "หมวด", search: "ค้นหา", wishlist: "ถูกใจ", cart: "ตะกร้า", account: "บัญชี", chat: "แชท" };
+const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm";
+
+/** 📱 ชุด 3 — มือถือและช่วยขาย (theme.page: mobileNav · chat · searchEmpty · cookie) · เว็บร้าน MobileNav / FloatingChat / SearchOverlay / Tracking */
+export function SiteSalesSetting({ value, onChange }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void }) {
+  const nav = value.mobileNav;
+  const setNav = (p: Partial<SitePageDesign["mobileNav"]>) => onChange({ mobileNav: { ...nav, ...p } });
+  const chat = value.chat;
+  const setChat = (p: Partial<SitePageDesign["chat"]>) => onChange({ chat: { ...chat, ...p } });
+  const ck = value.cookie;
+  const setCk = (p: Partial<SitePageDesign["cookie"]>) => onChange({ cookie: { ...ck, ...p } });
+  const toggleItem = (k: MobileNavItem) => {
+    const has = nav.items.includes(k);
+    if (has && nav.items.length <= 2) return;
+    if (!has && nav.items.length >= MOBILE_NAV_MAX) return;
+    // เรียงตามลำดับมาตรฐานเสมอ (หน้าแรก → … → แชท)
+    setNav({ items: MOBILE_NAV_ITEMS.filter((x) => (x === k ? !has : nav.items.includes(x))) });
+  };
+  return (
+    <div className={cardCls}>
+      <h3 className="text-sm font-semibold text-slate-800 mb-1">📱 มือถือและช่วยขาย</h3>
+      <p className="text-xs text-slate-500 mb-3">ค่าที่มีป้าย &quot;แบบเดิม&quot; คือหน้าตาตอนนี้ · ดูผลได้ในพรีวิวด้านขวา (เลือกจอมือถือ)</p>
+
+      <label className={labelCls}>
+        แถบเมนูล่างแบบแอป (มือถือ)<Def show={nav.style === "off"} />
+      </label>
+      <Choice<"off" | "label" | "icon">
+        value={nav.style}
+        onChange={(v) => setNav({ style: v })}
+        options={[
+          { v: "off", l: "ไม่มี", d: "แบบเดิม" },
+          { v: "label", l: "ไอคอน + คำ", d: "อ่านง่าย แนะนำ" },
+          { v: "icon", l: "ไอคอนอย่างเดียว", d: "เรียบ ประหยัดที่" },
+        ]}
+      />
+      {nav.style !== "off" && (
+        <div className="mt-2">
+          <p className="text-[11px] text-slate-500 mb-1.5">เลือกปุ่ม 2–{MOBILE_NAV_MAX} ปุ่ม (เรียงตามลำดับนี้)</p>
+          <div className="flex flex-wrap gap-2">
+            {MOBILE_NAV_ITEMS.map((k) => {
+              const on = nav.items.includes(k);
+              return (
+                <button key={k} type="button" onClick={() => toggleItem(k)} className={`px-3 py-1.5 rounded-full border text-xs transition ${on ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                  {on ? "✓ " : ""}
+                  {NAV_LABEL[k]}
+                </button>
+              );
+            })}
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mt-2">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={nav.hideOnScroll} onChange={(e) => setNav({ hideOnScroll: e.target.checked })} />
+            เลื่อนลงแล้วซ่อนแถบ (เลื่อนขึ้นโผล่)
+          </label>
+          <p className="text-[11px] text-slate-400 mt-1">ถูกใจ/บัญชี โชว์เมื่อเปิดระบบสมาชิก · แชท โชว์เมื่อเปิดปุ่มแชท (มีปุ่มแชทในแถบแล้ว ปุ่มแชทลอยบนมือถือจะซ่อนเอง) · ไม่โชว์ในหน้าสินค้า (มีแถบใส่ตะกร้าอยู่แล้ว) และหน้าชำระเงิน</p>
+        </div>
+      )}
+
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>💬 ปุ่มแชทลอย (ช่องทางแชทตั้งที่แท็บ ข้อมูลร้าน › 💬)</label>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">สีปุ่ม<Def show={chat.color === "brand"} /></p>
+            <Choice<"brand" | "line" | "ink" | "white"> value={chat.color} onChange={(v) => setChat({ color: v })} options={[{ v: "brand", l: "สีหลัก" }, { v: "line", l: "เขียว LINE" }, { v: "ink", l: "เข้ม" }, { v: "white", l: "ขาว" }]} />
+          </div>
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">ทรงปุ่ม<Def show={chat.shape === "pill"} /></p>
+            <Choice<"pill" | "round"> value={chat.shape} onChange={(v) => setChat({ shape: v })} options={[{ v: "pill", l: "แคปซูล + คำ" }, { v: "round", l: "วงกลมไอคอน" }]} />
+          </div>
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">แสดงที่<Def show={chat.where === "all"} /></p>
+            <Choice<"all" | "mobile" | "desktop"> value={chat.where} onChange={(v) => setChat({ where: v })} options={[{ v: "all", l: "ทุกจอ" }, { v: "mobile", l: "เฉพาะมือถือ" }, { v: "desktop", l: "เฉพาะคอม" }]} />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>
+          🔍 ค้นหาเต็มจอ — ตอนยังไม่พิมพ์<Def show={value.searchEmpty === "cats"} />
+        </label>
+        <Choice<SearchEmpty>
+          value={value.searchEmpty}
+          onChange={(v) => onChange({ searchEmpty: v })}
+          options={[
+            { v: "cats", l: "หมวดอย่างเดียว", d: "แบบเดิม" },
+            { v: "terms", l: "+ คำยอดนิยม", d: "กดแล้วค้นทันที" },
+            { v: "prods", l: "+ คำยอดนิยม + สินค้าแนะนำ", d: "แนะนำของร้าน → ขายดี → มาใหม่" },
+          ]}
+        />
+        <p className="text-[11px] text-slate-400 mt-1">คำยอดนิยม = คำที่ตั้งเองในแท็บ ข้อมูลร้าน › 🔍 ค้นหา + คำที่ลูกค้าค้นจริงบ่อย ๆ และหาเจอ (ระบบเติมให้เอง · ยังไม่มีข้อมูล = โชว์เฉพาะคำที่ตั้ง)</p>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-slate-100">
+        <label className={labelCls}>
+          🍪 แถบขอความยินยอมคุกกี้ (PDPA)<Def show={ck.layout === "card"} />
+        </label>
+        <Choice<CookieLayout>
+          value={ck.layout}
+          onChange={(v) => setCk({ layout: v })}
+          options={[
+            { v: "card", l: "การ์ดล่างจอ", d: "แบบเดิม" },
+            { v: "bar", l: "แถบเต็มความกว้าง", d: "ติดขอบล่าง" },
+            { v: "center", l: "กล่องกลางจอ", d: "พื้นหลังมืดลง" },
+          ]}
+        />
+        <div className="grid gap-3 sm:grid-cols-2 mt-2">
+          {ck.layout === "card" && (
+            <div>
+              <p className="text-[11px] text-slate-500 mb-1">มุม (จอคอม)</p>
+              <Choice<"left" | "right"> value={ck.side} onChange={(v) => setCk({ side: v })} options={[{ v: "left", l: "ซ้าย (เดิม)" }, { v: "right", l: "ขวา" }]} />
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer self-end pb-1">
+            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={ck.icon} onChange={(e) => setCk({ icon: e.target.checked })} />
+            มีรูปคุกกี้ 🍪 หน้าหัวข้อ
+          </label>
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">หัวข้อ (ว่าง = &quot;เว็บนี้ใช้คุกกี้&quot;)</p>
+            <LangInput className={inputCls} obj={ck} k="title" maxLength={60} placeholder="เว็บนี้ใช้คุกกี้" onPatch={(p) => setCk(p)} />
+          </div>
+          <div className="sm:col-span-2">
+            <p className="text-[11px] text-slate-500 mb-1">ข้อความ (ว่าง = ข้อความตั้งต้น)</p>
+            <LangInput className={inputCls} obj={ck} k="text" multiline rows={2} maxLength={400} placeholder="เราใช้คุกกี้ที่จำเป็นให้เว็บทำงาน และขออนุญาตใช้คุกกี้วัดผลและโฆษณา…" onPatch={(p) => setCk(p)} />
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-1">ปุ่ม &quot;เฉพาะที่จำเป็น&quot; อยู่ข้างปุ่ม &quot;ยอมรับทั้งหมด&quot; เสมอทุกแบบ (PDPA ให้ปฏิเสธได้ง่ายเท่ายอมรับ) · แถบนี้โผล่เมื่อใส่รหัสวัดผลในแท็บ ข้อมูลร้าน › 📊 · ไม่ขึ้นในพรีวิว</p>
       </div>
     </div>
   );

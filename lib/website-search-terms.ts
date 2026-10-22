@@ -39,6 +39,26 @@ export function aggregateTerms(rows: { q: string; day: string; hits: number; las
     .slice(0, opts.limit ?? 50);
 }
 
+/**
+ * 🔍 คำยอดนิยมของค้นหาเต็มจอ = คำที่ร้านตั้งก่อน แล้วต่อด้วยคำที่ลูกค้าค้นจริงบ่อย ๆ (≥ minHits ครั้งใน 30 วัน) และครั้งล่าสุดหาเจอ
+ * ตัดซ้ำไม่สนตัวพิมพ์ · รวมสูงสุด max คำ · ไม่มีข้อมูลจริง = เฉพาะคำที่ร้านตั้ง (ไม่ใส่คำปลอม)
+ */
+export function mergePopularTerms(owner: string[], stats: SearchTermStat[], opts: { max?: number; minHits?: number } = {}): string[] {
+  const max = opts.max ?? 10;
+  const minHits = opts.minHits ?? 3;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (w: string) => {
+    const k = w.trim().toLowerCase();
+    if (!k || seen.has(k) || out.length >= max) return;
+    seen.add(k);
+    out.push(w.trim());
+  };
+  owner.forEach(add);
+  stats.filter((s) => s.lastResults > 0 && s.hits >= minHits).forEach((s) => add(s.q));
+  return out;
+}
+
 export async function readSearchTerms(sb: Admin, shopId: string, days = 30, notFound = false): Promise<SearchTermStat[]> {
   const since = new Date(Date.now() - days * 864e5 + 7 * 3600e3).toISOString().slice(0, 10);
   const { data } = await sb.from("store_search_terms").select("q, day, hits, last_results").eq("shop_id", shopId).gte("day", since).limit(5000);

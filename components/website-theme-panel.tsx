@@ -33,7 +33,7 @@ import { TEXT_ROLE_DEFS, defaultTextRole, googleFontsHref, themeFontNames, BUTTO
 import { HEADER_EL_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type HeaderEl, type HeaderZones, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
 import { pageLinkIssue, helpColumnIssue, countLinkWarnings, type PageInfo, type LinkIssue } from "@/lib/website-link-health";
 import { CARD_LOOKS } from "@/lib/website-card-looks";
-import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, FOOTER_GAP_MAX, FOOTER_PAD_PX, PAYMENT_ICONS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
+import { FOOTER_COL_DEFS, FOOTER_BGS, FOOTER_SPACING_DEFAULTS, FOOTER_GAP_MAX, FOOTER_PAD_PX, PAYMENT_ICONS, SHIP_ICON_LABELS, newFooterColumn, type FooterConfig, type FooterColumn, type FooterColKind, type PaymentIcon } from "@/lib/website-theme";
 import { BANNER_LAYOUTS, textPosFor, fixTextPos, type BannerLayout, type BannerTextPos } from "@/lib/website-banners";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
@@ -70,7 +70,7 @@ import type { CheckoutConfig } from "@/lib/website-checkout";
 import { HeaderOverPagesSettings } from "@/components/website-header-over-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
-import { HeaderIconStyleSetting, SiteControlsSetting, SiteMotionSetting, SitePageSetting } from "@/components/website-site-design-setting";
+import { HeaderIconStyleSetting, SiteControlsSetting, SiteMotionSetting, SitePageSetting, SiteSalesSetting } from "@/components/website-site-design-setting";
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
 import type { ProductLuxe } from "@/lib/website-product-luxe";
 import type { ProductMaterialView } from "@/lib/website-theme";
@@ -1706,6 +1706,27 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                     </label>
                   ))}
                 </div>
+                <label className={labelCls}>หน้าตาโลโก้ชำระเงิน/ขนส่ง</label>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {([
+                    ["text", "ป้ายตัวหนังสือ (แบบเดิม)"],
+                    ["color", "โลโก้สี"],
+                    ["mono", "โลโก้ขาวดำ"],
+                  ] as const).map(([v, l]) => (
+                    <button key={v} type="button" onClick={() => setFooter({ paymentStyle: v })} className={`px-3 py-1.5 rounded-lg border text-xs transition ${theme.footer.paymentStyle === v ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                <label className={labelCls}>🚚 ขนส่งที่ใช้ (โชว์ต่อจากช่องทางชำระเงิน)</label>
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mb-3">
+                  {SHIP_ICON_LABELS.map((sh) => (
+                    <label key={sh.value} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                      <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={theme.footer.shipping.includes(sh.value)} onChange={(e) => setFooter({ shipping: e.target.checked ? [...theme.footer.shipping, sh.value] : theme.footer.shipping.filter((v) => v !== sh.value) })} />
+                      {sh.label}
+                    </label>
+                  ))}
+                </div>
                 <label className={labelCls}>ลิงก์แถวล่าง (เช่น นโยบายความเป็นส่วนตัว · เงื่อนไข)</label>
                 <MenuEditor items={theme.footer.bottomLinks} onChange={(bottomLinks) => setFooter({ bottomLinks })} choices={choices} pages={storePages} depth={1} />
                 <button type="button" className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:border-slate-500" onClick={() => setFooter({ bottomLinks: [...theme.footer.bottomLinks, newMenuItem("ลิงก์ใหม่", "page")] })}>+ เพิ่มลิงก์</button>
@@ -2691,6 +2712,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               </div>
               {/* ✨ ลูกเล่นทั้งเว็บ (ชุด 2): Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · แถบเลื่อนอ่าน · ปุ่มกลับขึ้นบน */}
               <SiteMotionSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
+              {/* 📱 มือถือและช่วยขาย (ชุด 3): แถบเมนูล่าง · ปุ่มแชท · ค้นหาตอนยังไม่พิมพ์ · แถบคุกกี้ */}
+              <SiteSalesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
               {/* 🧱 ฐานหน้าตาทั้งเว็บ (ชุด 1) — components/website-site-design-setting · เว็บร้าน src/lib/site-design-css.ts */}
               <SitePageSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
               <SiteControlsSetting value={theme.shape} onChange={(p) => setShape(p)} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />

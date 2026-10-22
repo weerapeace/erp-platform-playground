@@ -221,6 +221,15 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
     isPublic: true,
     placeholder: "กระเป๋าสตางค์, wallet, กระเป๋าเงิน\nเข็มขัด, belt",
   },
+  {
+    key: "search_popular",
+    label: "คำยอดนิยม (โชว์ในค้นหาเต็มจอตอนยังไม่พิมพ์)",
+    hint: "บรรทัดละ 1 คำ สูงสุด 10 คำ · กดแล้วค้นคำนั้นทันที · ระบบเติมคำที่ลูกค้าค้นจริงบ่อย ๆ และหาเจอต่อท้ายให้เอง · ต้องเปิด \"ตอนยังไม่พิมพ์\" ในแท็บดีไซน์ → รูปทรง → 📱 ก่อน",
+    group: "search",
+    type: "textarea",
+    isPublic: false,
+    placeholder: "กระเป๋าสตางค์\nเข็มขัดหนัง\nของขวัญ",
+  },
 ];
 
 /** ช่องความลับ (ไม่ส่งกลับไปหน้าจอ ERP แบบเต็ม — โชว์ SECRET_MASK แทน · บันทึกค่า mask = คงค่าเดิม) */
@@ -256,6 +265,20 @@ export function cleanTrackingId(key: string, v: unknown): string {
 }
 
 /** 🔍 คำพ้อง: บรรทัดละกลุ่ม คั่นด้วย , (รับ ، ; / ด้วย) · ตัดคำว่าง/ซ้ำ · กลุ่มต้องมี ≥2 คำ · สูงสุด 100 กลุ่ม (กติกาเดียวกับเว็บร้าน src/lib/search.ts parseSynonyms) */
+/** 🔍 คำยอดนิยมที่ร้านตั้ง: บรรทัดละคำ · ตัดซ้ำ (ไม่สนตัวพิมพ์) · คำละ ≤ 40 ตัว · สูงสุด 10 คำ */
+export function popularTermsOf(v: unknown): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of String(v ?? "").split(/\r?\n/)) {
+    const w = line.trim().replace(/\s+/g, " ").slice(0, 40);
+    if (!w || seen.has(w.toLowerCase())) continue;
+    seen.add(w.toLowerCase());
+    out.push(w);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
 export function cleanSynonyms(v: unknown): string {
   const lines: string[] = [];
   for (const line of String(v ?? "").split(/\r?\n/)) {
@@ -369,6 +392,7 @@ export interface SiteInfo {
   reviews_show_cards: boolean;
   reviews_request_email: boolean;
   search_synonyms: string;
+  search_popular: string;
   preorder_deposit_enabled: boolean;
   preorder_deposit_pct: number;
   preorder_note: string;
@@ -480,6 +504,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   reviews_show_cards: true,
   reviews_request_email: true,
   search_synonyms: "",
+  search_popular: "",
   preorder_deposit_enabled: false,
   preorder_deposit_pct: 30,
   preorder_note: "",
@@ -579,6 +604,7 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
     else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") ? Math.max(0, Math.min(f.key.startsWith("referral_") ? 100000 : 10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "returns_days" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "cart_reminder_hours" ? Math.max(2, Math.min(72, Math.round(toNum(v, fb as number)))) : f.key === "wishlist_alert_pct" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
     else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
+    else if (f.key === "search_popular") out[f.key] = popularTermsOf(v).join("\n");
     else if (f.key === "redirects") out[f.key] = cleanRedirects(v);
     else if (f.key === "order_prefix") out[f.key] = cleanOrderPrefix(v);
     else if (f.key === "promo_code") out[f.key] = normalizeCouponCode(v);

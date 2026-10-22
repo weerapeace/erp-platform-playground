@@ -481,6 +481,16 @@ export interface AnnouncementBlock extends BlockBase {
   messages: string[];
   /** วิ่งต่อเนื่องแทนสลับทีละข้อความ */
   marquee: boolean;
+  /** 🎨 สีแถบ (ink = เดิม) · ⏳ นับถอยหลัง (ชุด 3 · เว็บร้าน AnnouncementBar) */
+  bg?: "ink" | "brand" | "sale" | "custom";
+  bgColor?: string;
+  countdown?: boolean;
+  /** เวลาไทย "YYYY-MM-DDTHH:mm" */
+  countdownAt?: string;
+  /** {time} = ตรงที่เวลาโชว์ */
+  countdownText?: string;
+  afterEnd?: "hide" | "text";
+  afterText?: string;
 }
 
 export type HeroHeight = "auto" | "tall" | "full";

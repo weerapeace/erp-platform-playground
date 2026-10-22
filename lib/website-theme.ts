@@ -12,7 +12,7 @@ import { normalizeCart, DEFAULT_CART, type CartConfig } from "@/lib/website-cart
 import { normalizeCheckout, DEFAULT_CHECKOUT, type CheckoutConfig } from "@/lib/website-checkout";
 import { isGradStop } from "@/lib/website-gradient";
 import { normalizeProductLuxe, type ProductLuxe } from "@/lib/website-product-luxe";
-import { DEFAULT_HEADER_ICON_STYLE, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, normalizeBadgeShape, normalizeHeaderIconStyle, normalizePageTransition, normalizeSitePage, normalizeSiteShape, type BadgeShape, type HeaderIconStyle, type PageTransition, type SitePageDesign, type SiteShapeDesign } from "@/lib/website-site-design";
+import { DEFAULT_HEADER_ICON_STYLE, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, normalizeBadgeShape, normalizeHeaderIconStyle, normalizePageTransition, normalizePayStyle, normalizeShipIcons, normalizeSitePage, normalizeSiteShape, type BadgeShape, type HeaderIconStyle, type PageTransition, type PayLogoStyle, type ShipIcon, type SitePageDesign, type SiteShapeDesign } from "@/lib/website-site-design";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, normalizeHeaderCart, normalizeHeaderSearch, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, normalizeMegaPanel, normalizeMenuBehavior, type MegaPanel, type MenuBehavior } from "@/lib/website-mega-menu";
 import { carryTranslations } from "@/lib/content-i18n";
@@ -1380,6 +1380,9 @@ export interface FooterConfig {
   /** แถวล่าง */
   showCopyright: boolean;
   payments: PaymentIcon[];
+  /** 💳 โลโก้ท้ายเว็บ: text (เดิม) / color / mono · 🚚 ขนส่งที่ใช้ (lib/website-site-design · เว็บร้าน PayShipLogos) */
+  paymentStyle: PayLogoStyle;
+  shipping: ShipIcon[];
   bottomLinks: MenuItem[];
   align: "left" | "center";
   /* ── 2026-10-19 ตั้งละเอียดขึ้น (ค่าเริ่ม = หน้าตาเดิม) · เว็บร้านวาดที่ src/components/layout/Footer.tsx ── */
@@ -1464,9 +1467,18 @@ export const PAYMENT_ICONS: { value: PaymentIcon; label: string }[] = [
   { value: "shopee", label: "Shopee" },
   { value: "lazada", label: "Lazada" },
 ];
+/** 🚚 ขนส่งที่โชว์ท้ายเว็บได้ (ชื่อตรงกับเว็บร้าน PayShipLogos) */
+export const SHIP_ICON_LABELS: { value: ShipIcon; label: string }[] = [
+  { value: "thaipost", label: "ไปรษณีย์ไทย" },
+  { value: "kerry", label: "Kerry Express" },
+  { value: "flash", label: "Flash Express" },
+  { value: "jt", label: "J&T Express" },
+  { value: "ninja", label: "Ninja Van" },
+  { value: "dhl", label: "DHL" },
+];
 export const newFooterColumn = (kind: FooterColKind = "links"): FooterColumn => ({ id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, title: "", text: "", links: [], width: kind === "about" ? 2 : 1, stack: false, hidden: false });
 export const DEFAULT_FOOTER: FooterConfig = {
-  bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], bottomLinks: [], align: "left",
+  bg: "ink", bgColor: "#141517", textColor: "", columns: null, showCopyright: true, payments: [], paymentStyle: "text", shipping: [], bottomLinks: [], align: "left",
   logoShow: true, logoHeight: 40, logoVariant: "auto", logoChip: "auto", padY: "md", headingSize: "s", headingUpper: true, headingColor: "", headingFont: "", textFont: "",
   linkSize: "m", linkColor: "", linkHover: "", divider: true, bottomAlign: "auto", copyrightText: "", socialStyle: "pill", mobileCollapse: false, mobileCenter: false, gridCols: 4, mobileCols: 1,
   logoPlace: "auto", logoAlign: "auto", ...FOOTER_SPACING_DEFAULTS, colFit: "equal",
@@ -1508,6 +1520,8 @@ export function normalizeFooter(raw: unknown): FooterConfig {
     columns: cols,
     showCopyright: r.showCopyright !== false,
     payments: Array.isArray(r.payments) ? (r.payments.filter((v) => PAYMENT_ICONS.some((p) => p.value === v)) as PaymentIcon[]) : [],
+    paymentStyle: normalizePayStyle(r.paymentStyle),
+    shipping: normalizeShipIcons(r.shipping),
     bottomLinks: normalizeMenu({ items: r.bottomLinks }).items ?? [],
     align: oneOf(r.align, ["left", "center"] as const, d.align),
     logoShow: r.logoShow !== false,
