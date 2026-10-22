@@ -2,6 +2,7 @@
  * 🧩 ตั้งค่าชิ้นส่วนหัวเว็บ (⚙ ในแท็บ Header → ตำแหน่งชิ้นส่วน) — ตะกร้า · ค้นหา
  *   ⚠️ ไฟล์ไม่มี import → มิเรอร์ทั้งไฟล์ไป storefront src/lib/header-els.ts (แก้ที่นี่แล้วคัดลอก)
  * ค่าเริ่มต้น = หน้าตาเดิมของเว็บ (ไอคอนรถเข็น + ตัวเลขจำนวนชิ้น · ไอคอนแว่นขยาย)
+ *   ยกเว้นค้นหาบนแท็บเล็ต/มือถือ = ย้ายไปบนสุดในเมนู ☰ (เจ้าของขอ 2026-10-22 · ตั้งกลับเป็นไอคอนที่หัวเว็บได้ทีละร้าน)
  * โลโก้ใช้ค่าในแท็บโลโก้เดิม (theme.logo) · เมนูใช้ theme.menu
  */
 
@@ -19,6 +20,8 @@ export interface HeaderCart {
   size: number;
 }
 export type SearchStyle = "icon" | "iconText" | "box";
+/** แท็บเล็ต/มือถือ (จอแคบกว่า 1024px = มีปุ่มเมนู ☰): menu = ช่องค้นหาบนสุดในเมนู · header = ไอคอนที่หัวเว็บ */
+export type SearchMobile = "menu" | "header";
 export interface HeaderSearch {
   style: SearchStyle;
   /** คำข้างไอคอน (แบบไอคอน + คำ) */
@@ -28,10 +31,12 @@ export interface HeaderSearch {
   /** ความกว้างช่อง (แบบช่องค้นหา) */
   width: "sm" | "md" | "lg";
   size: number;
+  /** ที่อยู่ของค้นหาบนแท็บเล็ต/มือถือ */
+  mobile: SearchMobile;
 }
 
 export const DEFAULT_HEADER_CART: HeaderCart = { icon: "cart", label: "", badge: "count", badgeColor: "", size: 21 };
-export const DEFAULT_HEADER_SEARCH: HeaderSearch = { style: "icon", label: "ค้นหา", placeholder: "ค้นหาสินค้า…", width: "md", size: 20 };
+export const DEFAULT_HEADER_SEARCH: HeaderSearch = { style: "icon", label: "ค้นหา", placeholder: "ค้นหาสินค้า…", width: "md", size: 20, mobile: "menu" };
 
 export const CART_ICONS: { value: CartIcon; label: string }[] = [
   { value: "cart", label: "รถเข็น" },
@@ -48,6 +53,10 @@ export const SEARCH_STYLES: { value: SearchStyle; label: string }[] = [
   { value: "icon", label: "ไอคอน" },
   { value: "iconText", label: "ไอคอน + คำ" },
   { value: "box", label: "ช่องค้นหาในแถบ" },
+];
+export const SEARCH_MOBILE: { value: SearchMobile; label: string }[] = [
+  { value: "menu", label: "ย้ายไปในเมนู ☰" },
+  { value: "header", label: "ไอคอนที่หัวเว็บ" },
 ];
 export const SEARCH_WIDTHS: { value: HeaderSearch["width"]; label: string; px: number }[] = [
   { value: "sm", label: "แคบ", px: 160 },
@@ -93,5 +102,6 @@ export function normalizeHeaderSearch(raw: unknown): HeaderSearch {
     placeholder: str(r.placeholder, d.placeholder, 40) || d.placeholder,
     width: oneOf(r.width, ["sm", "md", "lg"] as const, d.width),
     size: size(r.size, d.size),
+    mobile: oneOf(r.mobile, SEARCH_MOBILE.map((x) => x.value), d.mobile),
   };
 }

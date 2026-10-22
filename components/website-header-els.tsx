@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { WheelSelect } from "@/components/wheel-select";
 import { Seg } from "@/components/website-block-editor";
 import { ColorInput } from "@/components/color-picker";
-import { CART_BADGES, CART_ICONS, HEADER_ICON_PATHS, ICON_SIZES, SEARCH_STYLES, SEARCH_WIDTHS, type CartIcon, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
+import { CART_BADGES, CART_ICONS, HEADER_ICON_PATHS, ICON_SIZES, SEARCH_MOBILE, SEARCH_STYLES, SEARCH_WIDTHS, type CartIcon, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 
 type ThemeLike = { colors: { brand: string; ink: string; page: string; surface: string; muted: string }; header: { bg: string; bgKind: string; bgColor: string; textColor: string } };
 
@@ -133,7 +133,14 @@ export function HeaderSearchSettings({ value, onChange, theme }: { value: Header
       <div>
         <span className={lbl}>หน้าตา</span>
         <Seg value={value.style} onChange={(v) => onChange({ style: v })} options={SEARCH_STYLES.map((o) => ({ v: o.value, l: o.label }))} />
-        <p className="mt-1 text-[11px] text-slate-400">กดแล้วเปิดหน้าค้นหาเต็มจอเหมือนเดิมทุกแบบ · มือถือแสดงเป็นไอคอนเสมอ (ที่แคบ)</p>
+        <p className="mt-1 text-[11px] text-slate-400">กดแล้วเปิดหน้าค้นหาเต็มจอเหมือนเดิมทุกแบบ · หน้าตานี้ใช้บนจอคอม</p>
+      </div>
+      <div>
+        <span className={lbl}>บนแท็บเล็ต / มือถือ</span>
+        <Seg value={value.mobile} onChange={(v) => onChange({ mobile: v })} options={SEARCH_MOBILE.map((o) => ({ v: o.value, l: o.label }))} />
+        <p className="mt-1 text-[11px] text-slate-400">
+          {value.mobile === "menu" ? "จอแคบกว่า 1024px (ที่มีปุ่มเมนู ☰): ไม่มีแว่นขยายที่หัวเว็บ · กดเมนูแล้วเจอช่องค้นหาบนสุด — หัวเว็บโล่งขึ้น" : "จอแคบกว่า 1024px: แสดงเป็นไอคอนแว่นขยายที่หัวเว็บ"}
+        </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {value.style === "iconText" && (
