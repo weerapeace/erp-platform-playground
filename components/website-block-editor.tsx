@@ -15,7 +15,7 @@ import { useWheelStep } from "@/components/wheel-select";
 import { ColorInput } from "@/components/color-picker";
 import { GradientPicker } from "@/components/website-gradient-picker";
 import { GRADIENT_PRESETS } from "@/lib/website-gradient";
-import { DEFAULT_BG_IMAGE, DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockBgImage, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type TextSpacing, type TextCase, type EyeSize, type Visibility, DEFAULT_PATTERN, DEFAULT_EDGE, DEFAULT_BOX, type BlockPattern, type BlockEdge, type BlockBox, type PatternKind, type EdgeShape, type LayerSize, type BoxRadius } from "@/lib/website-blocks";
+import { DEFAULT_BG_IMAGE, DEFAULT_BLOCK_STYLE, DEFAULT_BLOCK_TEXT, DEFAULT_MOTION, newBlock, type BlockBgImage, type BlockMotion, type BlockStyle, type BlockText, type BlockType, type TextSize, type TextSpacing, type TextCase, type EyeSize, type Visibility, DEFAULT_PATTERN, DEFAULT_EDGE, DEFAULT_BOX, type BlockPattern, type BlockEdge, type BlockBox, type PatternKind, type EdgeShape, type LayerSize, type BoxRadius, type DecorScreen } from "@/lib/website-blocks";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { RangeInput } from "@/components/range-input";
 import { CANVAS_WEIGHTS } from "@/lib/website-canvas";
@@ -286,6 +286,8 @@ export function StylePanel({
   decorSel = null,
   onDecorSel,
   decorTabReq = 0,
+  screen,
+  onScreen,
 }: {
   value: BlockStyle;
   onChange: (s: BlockStyle) => void;
@@ -303,6 +305,9 @@ export function StylePanel({
   decorSel?: string | null;
   onDecorSel?: (id: string | null) => void;
   decorTabReq?: number;
+  /** 📱 จอที่พรีวิวอยู่ (ของตกแต่งปรับแยก คอม/แท็บเล็ต/มือถือ) · onScreen = สลับจอพรีวิวจากแผง */
+  screen?: DecorScreen;
+  onScreen?: (s: DecorScreen) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [tab, setTab] = useState<"all" | "text" | "mobile" | "motion" | "decor">(mode === "motion" ? "motion" : "all");
@@ -507,6 +512,8 @@ export function StylePanel({
               shopId={shopId}
               selId={onDecorSel ? decorSel : localDecorSel}
               onSel={onDecorSel ?? setLocalDecorSel}
+              screen={screen}
+              onScreen={onScreen}
             />
           ) : tab === "all" ? (
             <div className="grid gap-3">

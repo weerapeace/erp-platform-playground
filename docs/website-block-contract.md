@@ -175,14 +175,19 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 ## 🎨 พื้นหลังเพิ่ม + ✨ ของตกแต่งของ Section (style.pattern · edgeTop/edgeBottom · box · decor) — 2026-10-22 · ทุก Section
 - ไม่เคยตั้ง = ไม่มีช่อง (normalize เก็บเฉพาะที่เคยตั้ง) = หน้าเดิม · แผง: "🖥️ ทุกจอ" ใต้พื้นหลังบล็อก (`SectionBgExtras`) · แท็บ "🎀 ตกแต่ง" (`components/website-section-decor.tsx`)
 - `pattern {kind dots|lines|grid|checks|grain|waves, color, opacity 3–60, size s/m/l}` · `edgeTop/edgeBottom {shape wave|waves|curve|arch|tilt|zigzag, height 16–200 (มือถือ 60%), flip, color (auto = สีพื้นเว็บ)}` · `box {on, color (auto = สีพื้นการ์ด), opacity 40–100, radius, gap, shadow, border}`
-- `decor[]` สูงสุด 12 ชิ้น `{id, kind shape|image|text, shape (CANVAS_SHAPES), outline, key (r2), ratio สูง/กว้าง, text, font, size px คอม, color (auto = แบรนด์), x/y = จุดกลาง % ของ Section (ทศนิยม 1), w = % กว้าง, rotate, opacity 5–100, layer back|front, anim (= data-loop ของกลาง), hideMobile, flip}` · รูปไม่มี key / ข้อความว่าง = ทิ้งตอน normalize
+- `decor[]` สูงสุด 12 ชิ้น `{id, kind shape|image|text, shape (CANVAS_SHAPES), outline, key (r2), ratio สูง/กว้าง, text, font, size px คอม, color (auto = แบรนด์), x/y = จุดกลาง % ของ Section (ทศนิยม 1), w = % กว้าง, rotate, opacity 5–100, layer back|front, anim (= data-loop ของกลาง), hideDesktop, hideTablet, hideMobile, tab, mob, flip}` · รูปไม่มี key / ข้อความว่าง = ทิ้งตอน normalize
+  - 📱 **ปรับแยกตามจอ (2026-10-22)**: คอม ≥ 1024 · แท็บเล็ต 768–1023 · มือถือ < 768 — `tab` / `mob` = `{x, y, w, size, rotate}` ของจอนั้น (null = ใช้ค่าคอม · ข้อมูลเก่าไม่มีช่อง = null) · `hideDesktop/hideTablet/hideMobile` = แสดงบนจอไหน
+  - ของกลาง ERP (lib/website-blocks): `decorPlaceOf(d, screen)` ค่าที่ใช้จริง · `patchDecorPlace` (จอเล็กแก้ครั้งแรก = เริ่มจากค่าคอม · คอมแก้ทีหลังไม่ลากจอที่ปรับแยกไป) · `resetDecorPlace` · `decorIsCustom` · `decorHideKey`
+  - แผง 🎀 ตกแต่ง: ปุ่มจอ 🖥️/📱/📲 (ตามจอพรีวิว — กดแล้วพรีวิวสลับจอตาม) · แถบตำแหน่ง/ขนาด/มุม แก้ของจอที่เลือก · "↩ กลับไปใช้ตามคอม" · "แสดงบน" 3 ช่อง
 - เพิ่มชิ้น: `DecorLibrary` ตัวเดียวกับผืนผ้าใบ (ลายในตัว + ของร้าน: อัปโหลด / เลือกจากคลังไฟล์) · ข้อความ
 - เว็บร้าน `components/home/SectionLayers.tsx` วาดเป็น **ลูก** ของตัวห่อ (ไม่ใช้ ::before/::after) · ตัวห่อได้ `data-layers` (relative + isolation + overflow clip) → เนื้อหา z 1 · ลาย/ขอบ/ตกแต่งหลัง z 0 · ตกแต่งหน้า z 2 · ทุกชั้น `pointer-events: none` (ลูกค้ากดของข้างใต้ได้)
   - กล่องเนื้อหา = `data-box` + ตัวแปร `--sec-box-*` ใส่พื้นให้ลูกที่เป็นเนื้อหา · ⚠️ ตัวเลือก CSS ของชั้นต้องยกเว้น `.sec-layer, link, style, script, .pv-grip`
-  - ข้อความตกแต่งย่อตามจอ `calc(size * clamp(0.5px, 100vw/1200, 1px))`
+  - ข้อความตกแต่งย่อตามจอ `calc(--dc-fs * clamp(0.5px, 100vw/1200, 1px))`
+  - ตำแหน่ง/ขนาด/มุม เป็นตัวแปรต่อจอบนชิ้น `--{d|t|m}{x|y|w|r|fs}` (จอที่ไม่ได้ปรับแยก = ค่าคอม) → globals.css `.sec-decor` เลือกชุดตาม media query · ซ่อน = `is-hide-d|t|m`
 - แก้ในพรีวิว (เว็บร้าน `src/components/layout/preview-decor.ts` · PreviewBridge โหมดแก้ไข): หาชิ้นจากกรอบเอง (ชิ้นหน้าก่อน/ชิ้นเล็กก่อน · ชิ้นหลังที่อยู่ใต้ลิงก์/ปุ่ม/รูป/การ์ด = ไม่แย่ง)
   - ลากตัวชิ้น = ย้าย · ชิ้นที่เลือกมีกรอบ+หูจับ (ชั้นลอย fixed ของพรีวิว ไม่ถูก Section ตัด): มุม 4 จุด = ย่อ/ขยายจากจุดกลาง (ข้อความ = size px · ลาย/รูป = w %) · ปุ่ม ↻ = หมุน (Shift ทีละ 15° · ใกล้ 0/±90/180 ดูดเข้า)
-  - ส่ง `storefront-decor-change {blockId,id, x+y | w | size | rotate}` / `storefront-decor-select` (กด) · ERP ส่ง `storefront-decor-focus {blockId,id}` = ชิ้นที่เลือก → กรอบ+หูจับ
+  - ลาก/ย่อ/หมุน แก้ตัวแปรของจอที่เห็นอยู่ (ความกว้างพรีวิว) · ส่ง `storefront-decor-change {blockId,id, device desktop|tablet|mobile, x+y | w | size | rotate}` → ERP แก้เฉพาะค่าของจอนั้น (`patchDecorPlace`)
+  - (เดิม) ส่ง `storefront-decor-change {blockId,id, x+y | w | size | rotate}` / `storefront-decor-select` (กด) · ERP ส่ง `storefront-decor-focus {blockId,id}` = ชิ้นที่เลือก → กรอบ+หูจับ
   - กรอบตามชิ้นด้วยเหตุการณ์ (ลาก/เลื่อน/ย่อจอ) + ทุก 250ms — ไม่ใช้ requestAnimationFrame (iframe ที่ย่อ/อยู่หลังบางทีไม่วาดเฟรม)
 
 ## 🖼 พื้นหลังรูปของ Section (style.bg = "image" · style.bgImg) — 2026-10-22 · ทุก Section

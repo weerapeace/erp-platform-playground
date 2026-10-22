@@ -25,7 +25,7 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, sectionHasHeading, type ChildSpec } from "@/lib/website-schema";
-import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, type BlockStyle, type BlockType, type ValidationIssue } from "@/lib/website-blocks";
+import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
@@ -531,8 +531,11 @@ export function WebsiteBuilder({
           if (has(p.w)) upd.w = fit(p.w, 0.5, 100);
           if (has(p.size)) upd.size = fit(p.size, 10, 240, 1);
           if (has(p.rotate)) upd.rotate = fit(p.rotate, -180, 180, 1);
+          // 📱 ลากบนจอไหน = แก้ของจอนั้น (เว็บร้านบอก device · แท็บเล็ต/มือถือแก้ครั้งแรก = เริ่มปรับแยกจากค่าคอม)
+          const dev = (d as { device?: unknown }).device;
+          const screen: DecorScreen = dev === "tablet" || dev === "mobile" ? dev : "desktop";
           if (Array.isArray(st.decor) && Object.keys(upd).length)
-            patchBlock(blk.id, { style: { ...st, decor: st.decor.map((it) => (it.id === id ? { ...it, ...upd } : it)) } });
+            patchBlock(blk.id, { style: { ...st, decor: st.decor.map((it) => (it.id === id ? patchDecorPlace(it, screen, upd) : it)) } });
         }
         return;
       }
@@ -1457,6 +1460,8 @@ export function WebsiteBuilder({
               decorSel={decorSel}
               onDecorSel={setDecorSel}
               decorTabReq={decorTabReq}
+              screen={device}
+              onScreen={setDevice}
             />
             {visibilityRow(selBlock.visibility, (k, val) => setVis(selBlock.id, k, val))}
             {abRow(selBlock)}

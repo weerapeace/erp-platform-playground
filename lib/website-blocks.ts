@@ -285,6 +285,19 @@ export const DECOR_ANIMS = ["none", "float", "sway", "pulse", "spin", "twinkle",
 export type DecorAnim = (typeof DECOR_ANIMS)[number];
 export const DECOR_LAYERS = ["back", "front"] as const;
 export type DecorLayer = (typeof DECOR_LAYERS)[number];
+/**
+ * 📱 จอที่ปรับแยกได้ — คอม ≥ 1024px · แท็บเล็ต 768–1023px · มือถือ < 768px (⚠️ ตรงกับ globals.css .sec-decor ของเว็บร้าน)
+ * แท็บเล็ต/มือถือ ยังไม่ปรับแยก (tab/mob = null) = ใช้ตำแหน่ง/ขนาด/มุมเดียวกับคอม
+ */
+export type DecorScreen = "desktop" | "tablet" | "mobile";
+/** ตำแหน่ง/ขนาด/มุม ของจอหนึ่ง (หน่วยเดียวกับช่องของคอม) */
+export interface DecorPlace {
+  x: number;
+  y: number;
+  w: number;
+  size: number;
+  rotate: number;
+}
 /** สัดส่วน สูง/กว้าง เริ่มต้นของลายในตัว (ลายเส้น/แถบ = แบน) */
 export const DECOR_SHAPE_RATIO: Record<string, number> = { bow: 0.72, heart: 0.9, sparkle: 1, star: 0.96, flower: 1, pearls: 0.12, lace: 1.2, scallop: 0.12, wave: 0.12, line: 0.04, arch: 1.2, rect: 0.6, ellipse: 1 };
 export interface DecorItem {
@@ -317,7 +330,13 @@ export interface DecorItem {
   /** หลังเนื้อหา / หน้าเนื้อหา (หน้า = ทับสินค้า/ข้อความได้ แต่กดผ่านได้) */
   layer: DecorLayer;
   anim: DecorAnim;
+  /** ซ่อนบนจอนั้น (คอม / แท็บเล็ต / มือถือ) */
+  hideDesktop: boolean;
+  hideTablet: boolean;
   hideMobile: boolean;
+  /** ตำแหน่ง/ขนาด/มุม ที่ปรับแยกของแท็บเล็ต / มือถือ — null = ใช้ค่าคอม */
+  tab: DecorPlace | null;
+  mob: DecorPlace | null;
   /** กลับซ้าย-ขวา */
   flip: boolean;
 }
@@ -338,9 +357,38 @@ export const DEFAULT_DECOR: Omit<DecorItem, "id" | "kind"> = {
   opacity: 100,
   layer: "back",
   anim: "none",
+  hideDesktop: false,
+  hideTablet: false,
   hideMobile: false,
+  tab: null,
+  mob: null,
   flip: false,
 };
+const placeKey = (s: DecorScreen) => (s === "tablet" ? "tab" : s === "mobile" ? "mob" : null);
+/** ตำแหน่ง/ขนาด/มุม ที่ใช้จริงบนจอนั้น (แท็บเล็ต/มือถือ ไม่ได้ปรับแยก = ค่าคอม) */
+export function decorPlaceOf(d: DecorItem, screen: DecorScreen): DecorPlace {
+  const k = placeKey(screen);
+  const own = k ? d[k] : null;
+  return own ?? { x: d.x, y: d.y, w: d.w, size: d.size, rotate: d.rotate };
+}
+/** จอนั้นปรับแยกจากคอมอยู่ไหม */
+export const decorIsCustom = (d: DecorItem, screen: DecorScreen): boolean => {
+  const k = placeKey(screen);
+  return !!(k && d[k]);
+};
+/** แก้ตำแหน่ง/ขนาด/มุม ของจอนั้น — คอม = ช่องหลัก · จอเล็กแก้ครั้งแรก = เริ่มปรับแยกจากค่าคอม (จออื่นไม่ขยับตาม) */
+export function patchDecorPlace(d: DecorItem, screen: DecorScreen, p: Partial<DecorPlace>): DecorItem {
+  const k = placeKey(screen);
+  if (!k) return { ...d, ...p };
+  return { ...d, [k]: { ...decorPlaceOf(d, screen), ...p } };
+}
+/** จอนั้นกลับไปใช้ค่าคอม */
+export function resetDecorPlace(d: DecorItem, screen: DecorScreen): DecorItem {
+  const k = placeKey(screen);
+  return k ? { ...d, [k]: null } : d;
+}
+/** ช่องซ่อนของจอนั้น */
+export const decorHideKey = (screen: DecorScreen) => (screen === "desktop" ? "hideDesktop" : screen === "tablet" ? "hideTablet" : "hideMobile") as "hideDesktop" | "hideTablet" | "hideMobile";
 /** ชิ้นใหม่ (n = ลำดับ ใช้เหลื่อมตำแหน่งไม่ให้ทับกันสนิท) */
 export function newDecor(kind: DecorKind, p: Partial<DecorItem> = {}, n = 0): DecorItem {
   const off = (n % 5) * 6;
@@ -1430,6 +1478,17 @@ const num1 = (v: unknown, fb: number, min: number, max: number) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n * 10) / 10)) : fb;
 };
+/** ตำแหน่งจอแท็บเล็ต/มือถือ (ไม่ใช่ object = ไม่ได้ปรับแยก) — ขอบเขตเดียวกับช่องของคอม */
+function sanitizeDecorPlace(v: unknown, kind: DecorKind, base: DecorPlace): DecorPlace | null {
+  if (!isObj(v)) return null;
+  return {
+    x: num1(v.x, base.x, -20, 120),
+    y: num1(v.y, base.y, -20, 120),
+    w: num1(v.w, base.w, 0, 100),
+    size: num(v.size, base.size, 10, 240),
+    rotate: num(v.rotate, base.rotate, -180, 180),
+  };
+}
 function sanitizeDecorItem(v: unknown, i: number): DecorItem | null {
   if (!isObj(v)) return null;
   const d = DEFAULT_DECOR;
@@ -1440,6 +1499,13 @@ function sanitizeDecorItem(v: unknown, i: number): DecorItem | null {
   if ((kind === "image" && !key) || (kind === "text" && !text)) return null;
   const shape = pickOne(v.shape, DECOR_SHAPES, d.shape);
   const id = str(v.id, "", 40).replace(/[^\w-]/g, "");
+  const base: DecorPlace = {
+    x: num1(v.x, d.x, -20, 120),
+    y: num1(v.y, d.y, -20, 120),
+    w: num1(v.w, kind === "text" ? 0 : d.w, 0, 100),
+    size: num(v.size, d.size, 10, 240),
+    rotate: num(v.rotate, 0, -180, 180),
+  };
   return {
     id: id || `dc-${i + 1}`,
     kind,
@@ -1449,16 +1515,20 @@ function sanitizeDecorItem(v: unknown, i: number): DecorItem | null {
     ratio: num1(v.ratio, kind === "shape" ? DECOR_SHAPE_RATIO[shape] ?? 1 : 1, 0.02, 4),
     text,
     font: pickOne(v.font, DECOR_FONTS, d.font),
-    size: num(v.size, d.size, 10, 240),
+    size: base.size,
     ...colorPair(v.color, v.colorHex),
-    x: num1(v.x, d.x, -20, 120),
-    y: num1(v.y, d.y, -20, 120),
-    w: num1(v.w, kind === "text" ? 0 : d.w, 0, 100),
-    rotate: num(v.rotate, 0, -180, 180),
+    x: base.x,
+    y: base.y,
+    w: base.w,
+    rotate: base.rotate,
     opacity: num(v.opacity, d.opacity, 5, 100),
     layer: pickOne(v.layer, DECOR_LAYERS, d.layer),
     anim: pickOne(v.anim, DECOR_ANIMS, d.anim),
+    hideDesktop: v.hideDesktop === true,
+    hideTablet: v.hideTablet === true,
     hideMobile: v.hideMobile === true,
+    tab: sanitizeDecorPlace(v.tab, kind, base),
+    mob: sanitizeDecorPlace(v.mob, kind, base),
     flip: v.flip === true,
   };
 }

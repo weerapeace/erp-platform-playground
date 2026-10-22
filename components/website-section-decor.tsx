@@ -15,7 +15,21 @@ import { RangeInput } from "@/components/range-input";
 import { Seg } from "@/components/website-block-editor";
 import { ColorSwatches, FontPickList, fontFamilyOf, swatchesOf, type ThemeColors, type ThemeFontNames } from "@/components/website-text-pickers";
 import { CANVAS_SHAPE_LABEL } from "@/lib/website-canvas";
-import { DECOR_MAX, DECOR_SHAPE_RATIO, newDecor, type DecorAnim, type DecorItem, type DecorLayer } from "@/lib/website-blocks";
+import {
+  DECOR_MAX,
+  DECOR_SHAPE_RATIO,
+  decorHideKey,
+  decorIsCustom,
+  decorPlaceOf,
+  newDecor,
+  patchDecorPlace,
+  resetDecorPlace,
+  type DecorAnim,
+  type DecorItem,
+  type DecorLayer,
+  type DecorPlace,
+  type DecorScreen,
+} from "@/lib/website-blocks";
 
 const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 /** ลายที่ยืด/หดสัดส่วนได้ (ลายไอคอน เช่น โบว์/หัวใจ คงรูปเสมอ) */
@@ -33,6 +47,14 @@ const LAYER_OPTS: { v: DecorLayer; l: string }[] = [
   { v: "back", l: "หลังเนื้อหา" },
   { v: "front", l: "หน้าเนื้อหา" },
 ];
+
+/** 📱 จอที่ปรับแยกได้ (ตรงกับปุ่มจอของพรีวิว) */
+const SCREENS: { v: DecorScreen; icon: string; l: string }[] = [
+  { v: "desktop", icon: "🖥️", l: "คอม" },
+  { v: "tablet", icon: "📱", l: "แท็บเล็ต" },
+  { v: "mobile", icon: "📲", l: "มือถือ" },
+];
+const screenName = (s: DecorScreen) => SCREENS.find((x) => x.v === s)?.l ?? "คอม";
 
 const imgUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 
@@ -67,6 +89,8 @@ export function SectionDecorPanel({
   shopId,
   selId,
   onSel,
+  screen: screenProp,
+  onScreen,
 }: {
   value: DecorItem[];
   onChange: (next: DecorItem[]) => void;
@@ -76,11 +100,20 @@ export function SectionDecorPanel({
   shopId?: string;
   selId: string | null;
   onSel: (id: string | null) => void;
+  /** 📱 จอที่กำลังแก้ตำแหน่ง/ขนาด (ตัวจัดหน้าส่งจอพรีวิวมา · ไม่ส่ง = แผงจำเอง) · onScreen = สลับจอพรีวิวตาม */
+  screen?: DecorScreen;
+  onScreen?: (s: DecorScreen) => void;
 }) {
   const [libOpen, setLibOpen] = useState(false);
   const [fontOpen, setFontOpen] = useState(false);
+  const [localScreen, setLocalScreen] = useState<DecorScreen>("desktop");
+  const screen = screenProp ?? localScreen;
+  const pickScreen = (s: DecorScreen) => (onScreen ? onScreen(s) : setLocalScreen(s));
   const full = value.length >= DECOR_MAX;
   const sel = value.find((d) => d.id === selId) ?? null;
+  // ตำแหน่ง/ขนาด/มุม ของจอที่กำลังแก้ (แท็บเล็ต/มือถือ ไม่ได้ปรับแยก = ค่าคอม)
+  const place = sel ? decorPlaceOf(sel, screen) : null;
+  const setPlace = (p: Partial<DecorPlace>) => sel && onChange(value.map((d) => (d.id === sel.id ? patchDecorPlace(d, screen, p) : d)));
 
   const add = (d: DecorItem) => {
     if (full) return;
@@ -92,7 +125,9 @@ export function SectionDecorPanel({
     onChange(value.filter((d) => d.id !== id));
     if (selId === id) onSel(null);
   };
-  const dup = (d: DecorItem) => add({ ...newDecor(d.kind), ...d, id: newDecor(d.kind).id, x: Math.min(100, d.x + 4), y: Math.min(100, d.y + 4) });
+  // ทำซ้ำ = เหลื่อมทุกจอ (ไม่ทับชิ้นเดิมสนิทบนจอที่ปรับแยกไว้)
+  const nudge = (p: DecorPlace | null) => (p ? { ...p, x: Math.min(100, p.x + 4), y: Math.min(100, p.y + 4) } : null);
+  const dup = (d: DecorItem) => add({ ...newDecor(d.kind), ...d, id: newDecor(d.kind).id, x: Math.min(100, d.x + 4), y: Math.min(100, d.y + 4), tab: nudge(d.tab), mob: nudge(d.mob) });
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
     if (j < 0 || j >= value.length) return;
@@ -142,7 +177,11 @@ export function SectionDecorPanel({
                 <span className="ml-1 text-[10px] text-slate-400">
                   {d.layer === "front" ? "· หน้าเนื้อหา" : ""}
                   {d.anim !== "none" ? ` · ${ANIM_OPTS.find((o) => o.v === d.anim)?.l}` : ""}
-                  {d.hideMobile ? " · ซ่อนมือถือ" : ""}
+                  {(() => {
+                    const hid = SCREENS.filter((s) => d[decorHideKey(s.v)]).map((s) => s.l);
+                    const own = SCREENS.filter((s) => s.v !== "desktop" && decorIsCustom(d, s.v)).map((s) => s.l);
+                    return `${hid.length ? ` · ซ่อน${hid.join("/")}` : ""}${own.length ? ` · ปรับแยก${own.join("/")}` : ""}`;
+                  })()}
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-slate-500" onClick={(e) => e.stopPropagation()}>
@@ -167,6 +206,36 @@ export function SectionDecorPanel({
       {sel && (
         <div className="space-y-3 rounded-lg border border-blue-200 bg-white p-3">
           <p className="text-xs font-semibold text-slate-700">แก้ชิ้นที่เลือก: {nameOf(sel)}</p>
+          {/* 📱 ตำแหน่ง/ขนาด/มุม แยกตามจอ — สลับแล้วพรีวิวสลับจอตาม */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-1.5">
+            <p className="text-[11px] font-medium text-slate-500">ตำแหน่ง / ขนาด / มุม ของจอ</p>
+            <div className="flex gap-1">
+              {SCREENS.map((s) => (
+                <button
+                  key={s.v}
+                  type="button"
+                  onClick={() => pickScreen(s.v)}
+                  className={`flex-1 rounded-md border px-1.5 py-1 text-[11px] ${screen === s.v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}
+                >
+                  {s.icon} {s.l}
+                  {s.v !== "desktop" && decorIsCustom(sel, s.v) && <span className="ml-1 text-[9px] text-emerald-600">● แยก</span>}
+                </button>
+              ))}
+            </div>
+            {screen === "desktop" ? (
+              <p className="text-[11px] text-slate-500">ค่าหลัก — แท็บเล็ต/มือถือที่ยังไม่ปรับแยกจะใช้ค่านี้ตาม</p>
+            ) : decorIsCustom(sel, screen) ? (
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="text-emerald-700">✓ {screenName(screen)}ปรับแยกแล้ว (แก้คอมแล้วจอนี้ไม่เปลี่ยนตาม)</span>
+                <button type="button" onClick={() => onChange(value.map((d) => (d.id === sel.id ? resetDecorPlace(d, screen) : d)))} className="text-blue-600 hover:underline">
+                  ↩ กลับไปใช้ตามคอม
+                </button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-500">ตอนนี้{screenName(screen)}ใช้ตามคอม — ลากในพรีวิว (จอ{screenName(screen)}) หรือเลื่อนแถบด้านล่าง = ปรับแยกให้จอนี้เลย</p>
+            )}
+            {sel[decorHideKey(screen)] && <p className="text-[11px] text-amber-700">⚠️ ชิ้นนี้ซ่อนบน{screenName(screen)}อยู่ — ในพรีวิวจอนี้จะไม่เห็น (เปิดได้ที่ &quot;แสดงบน&quot; ด้านล่าง)</p>}
+          </div>
           {sel.kind === "text" && (
             <>
               <div>
@@ -181,8 +250,8 @@ export function SectionDecorPanel({
                 {fontOpen && <FontPickList value={sel.font} onPick={(v) => patch(sel.id, { font: v })} fontNames={fontNames} sample={sel.text || "Aa ก ข"} />}
               </div>
               <div>
-                <label className={labelCls}>ขนาดตัวอักษร (บนคอม · จอแคบย่อตาม)</label>
-                <RangeInput value={sel.size} min={10} max={240} step={2} unit="px" onChange={(v) => patch(sel.id, { size: v })} />
+                <label className={labelCls}>ขนาดตัวอักษร · {screenName(screen)} (จอแคบกว่า 1200px ย่อตามความกว้างจอ)</label>
+                <RangeInput value={place!.size} min={10} max={240} step={2} unit="px" onChange={(v) => setPlace({ size: v })} />
               </div>
             </>
           )}
@@ -202,8 +271,8 @@ export function SectionDecorPanel({
           )}
           {sel.kind !== "text" && (
             <div>
-              <label className={labelCls}>ความกว้าง (% ของ Section)</label>
-              <RangeInput value={sel.w} min={1} max={80} step={0.5} hardMax={100} unit="%" onChange={(v) => patch(sel.id, { w: v })} />
+              <label className={labelCls}>ความกว้าง (% ของ Section) · {screenName(screen)}</label>
+              <RangeInput value={place!.w} min={1} max={80} step={0.5} hardMax={100} unit="%" onChange={(v) => setPlace({ w: v })} />
             </div>
           )}
           {sel.kind === "shape" && FREE_RATIO.includes(sel.shape) && (
@@ -217,16 +286,16 @@ export function SectionDecorPanel({
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className={labelCls}>ซ้าย ↔ ขวา</label>
-              <RangeInput value={sel.x} min={0} max={100} step={0.5} hardMin={-20} hardMax={120} unit="%" onChange={(v) => patch(sel.id, { x: v })} />
+              <label className={labelCls}>ซ้าย ↔ ขวา · {screenName(screen)}</label>
+              <RangeInput value={place!.x} min={0} max={100} step={0.5} hardMin={-20} hardMax={120} unit="%" onChange={(v) => setPlace({ x: v })} />
             </div>
             <div>
-              <label className={labelCls}>บน ↕ ล่าง</label>
-              <RangeInput value={sel.y} min={0} max={100} step={0.5} hardMin={-20} hardMax={120} unit="%" onChange={(v) => patch(sel.id, { y: v })} />
+              <label className={labelCls}>บน ↕ ล่าง · {screenName(screen)}</label>
+              <RangeInput value={place!.y} min={0} max={100} step={0.5} hardMin={-20} hardMax={120} unit="%" onChange={(v) => setPlace({ y: v })} />
             </div>
             <div>
-              <label className={labelCls}>หมุน</label>
-              <RangeInput value={sel.rotate} min={-180} max={180} step={1} unit="°" onChange={(v) => patch(sel.id, { rotate: v })} />
+              <label className={labelCls}>หมุน · {screenName(screen)}</label>
+              <RangeInput value={place!.rotate} min={-180} max={180} step={1} unit="°" onChange={(v) => setPlace({ rotate: v })} />
             </div>
             <div>
               <label className={labelCls}>ความทึบ</label>
@@ -247,10 +316,17 @@ export function SectionDecorPanel({
               <input type="checkbox" checked={sel.flip} onChange={(e) => patch(sel.id, { flip: e.target.checked })} />
               กลับซ้าย-ขวา
             </label>
-            <label className="inline-flex items-center gap-1.5">
-              <input type="checkbox" checked={sel.hideMobile} onChange={(e) => patch(sel.id, { hideMobile: e.target.checked })} />
-              ซ่อนบนมือถือ
-            </label>
+          </div>
+          <div>
+            <label className={labelCls}>แสดงบน</label>
+            <div className="flex flex-wrap gap-4 text-xs text-slate-700">
+              {SCREENS.map((s) => (
+                <label key={s.v} className="inline-flex items-center gap-1.5">
+                  <input type="checkbox" checked={!sel[decorHideKey(s.v)]} onChange={(e) => patch(sel.id, { [decorHideKey(s.v)]: !e.target.checked })} />
+                  {s.icon} {s.l}
+                </label>
+              ))}
+            </div>
           </div>
         </div>
       )}
