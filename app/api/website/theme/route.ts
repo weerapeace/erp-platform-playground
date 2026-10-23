@@ -15,7 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { loadParentWebFields, loadParentImageFields, PARENT_FIELD_GROUP_LABEL } from "@/lib/website-parent-fields";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { resolveThemeSchedules } from "@/lib/website-theme-schedule-db";
 import { readSiteInfo } from "@/lib/website-site-info";
@@ -222,5 +222,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const { error } = await sb.from("shops").update({ theme_draft: null }).eq("id", shopId);
   if (error) return NextResponse.json({ error: "ละทิ้งร่างไม่สำเร็จ" }, { status: 500 });
+  await writeAuditFor(request, sb, { action: "update", entityType: "shop_theme", entityId: shopId, metadata: { op: "discard_draft" } });
   return NextResponse.json({ ok: true });
 }

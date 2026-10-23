@@ -15,7 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, defaultLayout, blockTypesFor } from "@/lib/website-blocks";
 import { readShopBetas } from "@/lib/website-site-info";
@@ -150,5 +150,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const { error } = await sb.from("shops").update({ home_layout_draft: null }).eq("id", shopId);
   if (error) return NextResponse.json({ error: "ละทิ้งร่างไม่สำเร็จ" }, { status: 500 });
   await syncCanvasAssetUsages(sb, { module: "website_home", recordId: shopId, recordLabel: "หน้าแรกเว็บ (ร่าง)", field: "draft", blocks: [] });
+  await writeAuditFor(request, sb, { action: "update", entityType: "shop_home_layout", entityId: shopId, metadata: { op: "discard_draft" } });
   return NextResponse.json({ ok: true });
 }
