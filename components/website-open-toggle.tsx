@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
+import { askConfirm } from "@/components/modal/ask-dialog";
 
 export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
@@ -42,10 +43,12 @@ export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shop
 
   const toggle = async () => {
     const next = !closed;
-    const msg = next
-      ? "ปิดเว็บชั่วคราว?\n\nลูกค้าทั่วไปจะเห็นแค่หน้า \"เร็ว ๆ นี้\" (ทุกโดเมนของร้านนี้)\nคุณยังดูพรีวิวใน ERP ได้ตามปกติ"
-      : "เปิดเว็บให้ลูกค้าเข้าได้?";
-    if (!confirm(msg)) return;
+    const ok = await askConfirm(
+      next
+        ? { title: "ปิดเว็บชั่วคราว?", message: "ลูกค้าทั่วไปจะเห็นแค่หน้า \"เร็ว ๆ นี้\" (ทุกโดเมนของร้านนี้) · คุณยังดูพรีวิวใน ERP ได้ตามปกติ", variant: "danger", confirmText: "ปิดเว็บ" }
+        : { title: "เปิดเว็บให้ลูกค้าเข้าได้?", confirmText: "เปิดเว็บ" }
+    );
+    if (!ok) return;
     setBusy(true);
     try {
       const r = await apiFetch("/api/website/settings", {

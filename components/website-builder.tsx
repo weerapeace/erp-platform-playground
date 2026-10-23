@@ -28,6 +28,8 @@ import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, childPlacePatch, newC
 import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
+import { askConfirm } from "@/components/modal/ask-dialog";
+import { useToast } from "@/components/toast";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { useShopTheme } from "@/components/website-text-pickers";
 import { SaveSectionTemplateDialog, SectionTemplateGroup } from "@/components/website-section-templates";
@@ -220,6 +222,9 @@ export function WebsiteBuilder({
   blocksRef.current = blocks;
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+  /** ป๊อปถามยืนยันเปิดอยู่ → พักคีย์ลัดของตัวจัดหน้า */
+  const askingRef = useRef(false);
+  const toast = useToast();
 
   // ⚡ พรีวิวสด: เว็บร้านตอบ storefront-live-ready → ส่งโครงหน้าล่าสุดไปวาดทันทีทุกครั้งที่แก้ (ไม่ต้องรอบันทึกร่าง/โหลดหน้าใหม่)
   // บันทึกร่างแล้ว → โหลดพรีวิวใหม่ "เฉพาะสิ่งที่พรีวิวทำเองไม่ได้" (lib/website-live-preview.ts)
@@ -366,11 +371,17 @@ export function WebsiteBuilder({
   );
 
   const removeSection = useCallback(
-    (id: string) => {
-      const cur = blocksRef.current;
-      const b = cur.find((x) => x.id === id);
+    async (id: string) => {
+      const b = blocksRef.current.find((x) => x.id === id);
       const label = types.find((t) => t.type === b?.type)?.label ?? "บล็อก";
-      if (!confirm(`ลบ "${label}" ออกจากหน้า?`)) return;
+      // ระหว่างถาม ปิดคีย์ลัดของตัวจัดหน้า (Esc ยกเลิกป๊อป ≠ ออกจากเต็มจอ · Delete ซ้ำไม่เปิดป๊อปซ้อน)
+      // ปลดหลังจบการกดปุ่มนั้นทั้งหมด (setTimeout) — ป๊อปปิดก่อนที่ window จะได้ Esc ตัวเดียวกัน
+      askingRef.current = true;
+      const ok = await askConfirm({ title: `ลบ "${label}" ออกจากหน้า?`, variant: "danger", confirmText: "ลบ" }).finally(() =>
+        setTimeout(() => (askingRef.current = false), 0)
+      );
+      if (!ok) return;
+      const cur = blocksRef.current;
       onChange(cur.filter((x) => x.id !== id));
       if (selectionRef.current?.blockId === id) onSelect(null);
     },
@@ -621,6 +632,7 @@ export function WebsiteBuilder({
   /* ── คีย์ลัด ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (askingRef.current) return;
       if (e.key === "Escape") {
         if (fullscreen) setFullscreen(false);
         setMenu(null);
@@ -809,7 +821,7 @@ export function WebsiteBuilder({
     onSelect({ blockId: fresh[0].id });
     setShowAi(false);
     setAiJson("");
-    if (known.length < list.length) alert(`เพิ่ม ${fresh.length} Section แล้ว · ข้าม ${list.length - known.length} ก้อนที่ระบบไม่รู้จัก`);
+    if (known.length < list.length) toast.warning(`เพิ่ม ${fresh.length} Section แล้ว · ข้าม ${list.length - known.length} ก้อนที่ระบบไม่รู้จัก`);
   };
 
   /* ── คลัง Section ── */

@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
+import { askLeaveUnsaved } from "@/components/modal/ask-dialog";
 import { WebsiteBuilder, type Selection } from "@/components/website-builder";
 import { summarizeChanges } from "@/components/website-layout-panel";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
@@ -249,8 +250,8 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
           leading: (
             <>
               <button
-                onClick={() => {
-                  if (dirty && !confirm("มีการแก้ที่ยังไม่บันทึก ออกโดยไม่บันทึก?")) return;
+                onClick={async () => {
+                  if (dirty && !(await askLeaveUnsaved())) return;
                   onClose(changed);
                 }}
                 className="text-xs text-slate-500 hover:text-blue-600 mr-1"

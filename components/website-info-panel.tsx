@@ -12,6 +12,7 @@ import { MiniTable } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
 import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
 import { RestockCard } from "@/components/website-restock-panel";
 import { ContactInboxCard } from "@/components/website-contact-inbox";
@@ -450,7 +451,7 @@ function SubscribersCard({ shopSlug, defaultOpen = false }: { shopSlug: string; 
   }, [load]);
 
   const remove = async (s: Subscriber) => {
-    if (!confirm(`ลบ ${s.email} ออกจากรายชื่อรับข่าวสาร?`)) return;
+    if (!(await askConfirm({ title: `ลบ ${s.email} ออกจากรายชื่อรับข่าวสาร?`, variant: "danger", confirmText: "ลบ" }))) return;
     const r = await apiFetch(`/api/website/subscribers?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
     const j = await r.json();
     if (!j.ok) return toast.error(j.error ?? "ลบไม่สำเร็จ");

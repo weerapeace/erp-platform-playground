@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import { apiFetch } from "@/lib/api";
 import { SHIPPOP_COURIERS, courierLabel, shippopStatusLabel, type ShippopInfo } from "@/lib/shippop";
 
@@ -106,7 +107,7 @@ export function ShippopBox({ order, settings, onChanged }: { order: { id: string
           <div className="flex flex-wrap gap-2">
             <a href={`/print/shippop-labels?ids=${order.id}`} target="_blank" rel="noopener" className="inline-flex h-8 items-center rounded-md bg-teal-600 px-3 font-medium text-white hover:bg-teal-700">🖨 ใบปะหน้า</a>
             {!["shipping", "complete", "return"].includes(sp.status) && (
-              <button type="button" disabled={busy} onClick={() => confirm("ยกเลิกการจองขนส่งนี้? (ก่อนขนส่งเข้ารับเท่านั้น)") && void run({ action: "cancel", orderId: order.id }, "ยกเลิกการจองแล้ว")} className="h-8 rounded-md border border-rose-300 px-2.5 text-rose-700 hover:bg-rose-50 disabled:opacity-50">
+              <button type="button" disabled={busy} onClick={async () => { if (await askConfirm({ title: "ยกเลิกการจองขนส่งนี้?", message: "ทำได้ก่อนขนส่งเข้ารับพัสดุเท่านั้น", variant: "danger", confirmText: "ยกเลิกการจอง", cancelText: "ไม่ยกเลิก" })) void run({ action: "cancel", orderId: order.id }, "ยกเลิกการจองแล้ว"); }} className="h-8 rounded-md border border-rose-300 px-2.5 text-rose-700 hover:bg-rose-50 disabled:opacity-50">
                 ยกเลิกการจอง
               </button>
             )}

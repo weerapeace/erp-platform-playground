@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { useToast } from "@/components/toast";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import { WebsiteBuilder, type Selection, type ChangeSummary } from "@/components/website-builder";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
@@ -221,7 +222,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   };
 
   const discard = async () => {
-    if (!confirm("ละทิ้งการเปลี่ยนแปลงทั้งหมด?")) return;
+    if (!(await askConfirm({ title: "ละทิ้งการเปลี่ยนแปลงทั้งหมด?", message: "ร่างหน้าแรกจะหาย กลับไปใช้หน้าที่เผยแพร่อยู่", variant: "danger", confirmText: "ละทิ้ง" }))) return;
     try {
       await apiFetch(`/api/website/layout?shopId=${encodeURIComponent(shopId)}`, { method: "DELETE" });
     } catch {

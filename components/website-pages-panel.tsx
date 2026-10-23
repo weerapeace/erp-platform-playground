@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { askConfirm, askLeaveUnsaved } from "@/components/modal/ask-dialog";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { WebsiteBuilder, type Selection } from "@/components/website-builder";
 import { summarizeChanges } from "@/components/website-layout-panel";
@@ -294,7 +295,17 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   // 🧭 สร้างชุดศูนย์ช่วยเหลือ (หน้าที่ยังไม่มี · เป็นร่าง)
   const [creatingHelp, setCreatingHelp] = useState(false);
   const createHelpCenter = async () => {
-    if (!confirm("สร้างชุดศูนย์ช่วยเหลือ?\n\nจะสร้างหน้า: นโยบายความเป็นส่วนตัว · ข้อกำหนดและเงื่อนไข · คำถามที่พบบ่อย · ติดตามคำสั่งซื้อ · ติดต่อเรา · การจัดส่งและการคืนสินค้า (ไทย + อังกฤษ)\nหน้าที่มีอยู่แล้วจะไม่ถูกแตะ · ทุกหน้าเป็นร่าง ตรวจแล้วกดเผยแพร่เอง")) return;
+    const ok = await askConfirm({
+      title: "สร้างชุดศูนย์ช่วยเหลือ?",
+      message: (
+        <div className="space-y-1">
+          <p>จะสร้างหน้า: นโยบายความเป็นส่วนตัว · ข้อกำหนดและเงื่อนไข · คำถามที่พบบ่อย · ติดตามคำสั่งซื้อ · ติดต่อเรา · การจัดส่งและการคืนสินค้า (ไทย + อังกฤษ)</p>
+          <p>หน้าที่มีอยู่แล้วจะไม่ถูกแตะ · ทุกหน้าเป็นร่าง ตรวจแล้วกดเผยแพร่เอง</p>
+        </div>
+      ),
+      confirmText: "สร้าง",
+    });
+    if (!ok) return;
     setCreatingHelp(true);
     try {
       const r = await apiFetch("/api/website/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, template: "help-center" }) });
@@ -333,7 +344,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   };
 
   const removePage = async (p: PageRow) => {
-    if (!confirm(`ลบหน้า "${p.title}" (/${p.slug}) ถาวร?`)) return;
+    if (!(await askConfirm({ title: `ลบหน้า "${p.title}" (/${p.slug}) ถาวร?`, message: "ลบแล้วกู้คืนไม่ได้", variant: "danger", confirmText: "ลบถาวร" }))) return;
     try {
       const r = await apiFetch(`/api/website/pages?pageId=${encodeURIComponent(p.id)}`, { method: "DELETE" });
       const j = await r.json();
@@ -525,8 +536,8 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             leading: (
               <>
                 <button
-                  onClick={() => {
-                    if ((dirty || metaDirty) && !confirm("มีการแก้ที่ยังไม่บันทึก ออกโดยไม่บันทึก?")) return;
+                  onClick={async () => {
+                    if ((dirty || metaDirty) && !(await askLeaveUnsaved())) return;
                     setEditId(null);
                   }}
                   className="text-xs text-slate-500 hover:text-blue-600 mr-1"

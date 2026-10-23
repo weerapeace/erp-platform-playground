@@ -86,3 +86,14 @@ export function askConfirm(opts: Base): Promise<boolean> {
       message={opts.message ?? ""} variant={opts.variant} confirmText={opts.confirmText} cancelText={opts.cancelText} />
   ));
 }
+
+/** ถามก่อนออกจากหน้าที่ยังไม่บันทึก (ข้อความมาตรฐาน CLAUDE.md ข้อ 19) — true = ออกโดยไม่บันทึก */
+export function askLeaveUnsaved(): Promise<boolean> {
+  return askConfirm({
+    title: tr("ยังไม่ได้บันทึก", "Unsaved changes"),
+    message: tr("คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกโดยไม่บันทึกหรือไม่?", "You have unsaved changes. Leave without saving?"),
+    confirmText: tr("ออกโดยไม่บันทึก", "Leave without saving"),
+    cancelText: tr("อยู่ต่อ", "Stay"),
+    variant: "danger",
+  });
+}
