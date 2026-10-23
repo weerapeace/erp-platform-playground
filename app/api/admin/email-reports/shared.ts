@@ -14,6 +14,7 @@ export function toEmailReport(r: Record<string, unknown>): EmailReport {
     days: Array.isArray(r.days) ? (r.days as unknown[]).map(Number) : [],
     send_time: String(r.send_time ?? "08:00").slice(0, 5),
     recipients: Array.isArray(r.recipients) ? (r.recipients as EmailRecipient[]) : [],
+    email_enabled: r.email_enabled !== false,
     discord: normalizeReportDiscord(r.discord),
     popup: normalizeReportPopup(r.popup),
     skip_if_empty: r.skip_if_empty !== false,

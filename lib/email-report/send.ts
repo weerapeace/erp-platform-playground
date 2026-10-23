@@ -4,12 +4,14 @@
  * ขั้นตอน: หาอีเมลผู้รับ (ผู้ใช้ในระบบ = อีเมลล่าสุดจาก user_profiles · คนปิดบัญชี/ไม่มีอีเมล = ข้าม+จดไว้)
  *        → ประกอบรายงาน → ส่งทีละคน (ผู้รับไม่เห็นกัน) → ลงประวัติ email_report_runs + audit
  * ส่งตามเวลา: "จอง" วันนี้ก่อนส่ง (last_sent_on) → cron ซ้อนกันก็ไม่ส่งซ้ำ · ส่งไม่สำเร็จ = ไม่ลองซ้ำวันนั้น (ดูในประวัติ)
+ * ช่องทาง: สวิตช์รายรายงาน (email_enabled / discord.enabled) + สวิตช์ทั้งระบบ (erp_report_channels) · ส่งทดสอบ = ข้ามสวิตช์ทั้งระบบ (ส่งหาตัวเองคนเดียว)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { emailConfigured, emailDevEcho, emailErrorText, sendEmail } from "@/lib/email";
 import { writeAudit } from "@/lib/audit";
 import { buildReportEmail } from "@/lib/email-report/sources";
 import { sendReportToDiscord, type DiscordResult } from "@/lib/email-report/discord";
+import { loadReportChannels } from "@/lib/email-report/channels";
 import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -43,10 +45,20 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
     if (!claimed || claimed.length === 0) return { status: "skipped_empty", sent: 0, recipients: 0, items: 0, message: "วันนี้ส่งไปแล้ว", claimed: false };
   }
 
+  // ── ช่องทางรอบนี้ ──
+  const test = opts.trigger === "test";
+  const global = await loadReportChannels(admin);
+  const reportEmail = report.email_enabled !== false;
+  const reportDiscord = normalizeReportDiscord(report.discord).enabled;
+  const wantEmail = reportEmail && (test || global.email);
+  const wantDiscord = reportDiscord && (test || global.discord);
+
   // ── ผู้รับ ──
   const skipped: string[] = [];
   let emails: string[] = [];
-  if (opts.trigger === "test") {
+  if (!wantEmail) {
+    // ไม่ส่งอีเมลรอบนี้ (ปิดในรายงาน หรือปิดทั้งระบบ)
+  } else if (test) {
     if (opts.testTo) emails = [opts.testTo.toLowerCase()];
     else skipped.push("บัญชีของคุณยังไม่มีอีเมล");
   } else {
@@ -80,7 +92,14 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
     });
   };
 
-  const wantDiscord = normalizeReportDiscord(report.discord).enabled;
+  // ไม่มีช่องไหนให้ส่ง: รายงานป๊อปอย่างเดียว (ตามเวลา) = เงียบ ๆ · ถูกปิดทั้งระบบ = ลงประวัติให้เห็น
+  if (!wantEmail && !wantDiscord) {
+    const offGlobal = (reportEmail && !global.email) || (reportDiscord && !global.discord);
+    const message = offGlobal ? `ปิดช่องทาง${[reportEmail && !global.email ? "อีเมล" : "", reportDiscord && !global.discord ? "Discord" : ""].filter(Boolean).join(" / ")}ทั้งระบบอยู่ — ไม่ได้ส่ง` : "รายงานนี้ไม่ได้เปิดอีเมลหรือ Discord (ใช้แค่ป๊อป)";
+    if (offGlobal || opts.trigger === "manual") await log("channel_off", { error: message });
+    return { status: "channel_off", sent: 0, recipients: 0, items: 0, message, skipped };
+  }
+
   const emailReady = emailConfigured() || emailDevEcho();
   if (!emailReady && !wantDiscord) {
     const message = emailErrorText("email-not-configured");

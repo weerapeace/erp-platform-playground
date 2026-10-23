@@ -4,13 +4,14 @@
  * ใครเห็น (normalizeReportPopup):
  *   ตำแหน่ง/รายคนที่เลือก → เห็นทั้งป๊อป (งานของคุณ + ต้องตามวันนี้)
  *   ผู้รับผิดชอบข้อที่ค้าง (ถ้าเปิด assignees) → เห็นเฉพาะ "งานของคุณ"
- * เมื่อไหร่: วันส่งของรายงาน · ช่วงเวลา from–to (ไทย) · daily = กดรับทราบแล้ววันนั้นไม่เด้งอีก / every = ทุกครั้งที่เปิด ERP
+ * เมื่อไหร่: รายงานเปิดใช้อยู่ + สวิตช์ทั้งระบบ "ERP ป๊อป" เปิด · วันส่งของรายงาน · ช่วงเวลา from–to (ไทย) · daily = กดรับทราบแล้ววันนั้นไม่เด้งอีก / every = ทุกครั้งที่เปิด ERP
  * ที่เก็บรับทราบ: erp_popup_acks (ack / later) · หน้าจอ: components/work-popup
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildReport, SOURCE_CHECKLIST_MODULE } from "@/lib/email-report/sources";
 import { normalizeReportPopup, type EmailReport, type EmailReportPopup } from "@/lib/email-report/shared";
 import { nowTH } from "@/lib/email-report/send";
+import { loadReportChannels } from "@/lib/email-report/channels";
 import type { BuiltReport, ReportTone } from "@/lib/email-report/render";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -108,7 +109,9 @@ export async function activePopupsFor(admin: Admin, userId: string, opts: { repo
   const p = prof as { role?: string | null; active?: boolean | null } | null;
   if (!p || p.active === false) return [];
 
-  let q = admin.from("email_reports").select("id, name, source_key, filters, options, days, popup").eq("is_active", true).order("created_at", { ascending: true });
+  // สวิตช์ทั้งระบบ "ERP ป๊อป" ปิด = ไม่มีป๊อปเลย · รายงานต้อง "เปิดใช้" อยู่ (is_enabled)
+  if (!(await loadReportChannels(admin)).popup) return [];
+  let q = admin.from("email_reports").select("id, name, source_key, filters, options, days, popup").eq("is_active", true).eq("is_enabled", true).order("created_at", { ascending: true });
   if (opts.reportId) q = q.eq("id", opts.reportId);
   const { data } = await q;
   const n = nowTH(opts.now);

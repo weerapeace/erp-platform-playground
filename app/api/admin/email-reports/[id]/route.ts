@@ -19,6 +19,7 @@ const PERM = "admin.email_reports";
 const summary = (r: ReturnType<typeof toEmailReport>) => ({
   name: r.name, days: r.days, send_time: r.send_time, is_enabled: r.is_enabled, skip_if_empty: r.skip_if_empty,
   recipients: r.recipients.map((x) => (x.type === "user" ? x.name || x.email : x.email)), filters: r.filters, options: r.options,
+  channels: { email: r.email_enabled, discord: r.discord.enabled, popup: r.popup.enabled },
 });
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {

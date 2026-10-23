@@ -160,7 +160,9 @@ export function WorkPopupHost() {
   const [done, setDone] = useState<Set<string>>(new Set());
   const lastCheck = useRef(0);
   const uid = user?.id ?? null;
-  const skip = SKIP_PREFIX.some((p) => pathname.startsWith(p));
+  // หน้าที่ฝังในกรอบ (เช่น แท็บตั้งค่าแอป ?embed=1) ไม่เด้ง — ให้หน้าหลักเด้งที่เดียว ไม่ซ้อน 2 ป๊อป
+  const inFrame = typeof window !== "undefined" && window.self !== window.top;
+  const skip = inFrame || SKIP_PREFIX.some((p) => pathname.startsWith(p));
 
   const check = useCallback(async (reportId?: string) => {
     if (!uid) return;

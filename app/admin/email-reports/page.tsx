@@ -1,8 +1,9 @@
 "use client";
 
 // ============================================================
-// 📧 ส่งอีเมลรายงาน (ตั้งค่า) — รายงานอีเมลอัตโนมัติ: ส่งอะไร ถึงใคร วันไหน กี่โมง + ประวัติการส่ง + คู่มือ Resend
-// รอบ 1: ตั้งค่า + ดูตัวอย่าง (ยังไม่ส่งจริง) · รอบ 2: ส่งทดสอบ + ตัวตั้งเวลา (pg_cron)
+// 🔔 รายงานและแจ้งเตือนอัตโนมัติ (ตั้งค่า) — ส่งอะไร ทางไหน (Gmail / Discord / ป๊อปตอนเข้า ERP) ถึงใคร วันไหน กี่โมง + ประวัติ + คู่มือ
+// สวิตช์ช่องทาง 2 ชั้น: ทั้งระบบ (การ์ดบนสุด · erp_report_channels) + รายรายงาน (ป้ายในแถว) · 📄 คัดลอกรายงาน
+// เปิดได้ 2 ทาง: เมนู ⚙️ Settings ใหญ่ · แท็บใน ⚙️ ตั้งค่าแอปจัดการงาน/ออกแบบ (ฝังกรอบ ?embed=1 — components/app-settings-panel)
 // ของกลาง: ERPModal/ConfirmDialog · ป๊อปตั้งค่า ./report-editor · ข้อมูล/อีเมล lib/email-report · doc: docs/email-reports.md
 // ============================================================
 
@@ -13,8 +14,8 @@ import { usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import {
-  describeDays, sourceLabel, RUN_STATUS_LABEL, RUN_TRIGGER_LABEL,
-  type EmailReport, type EmailReportRun,
+  describeDays, sourceLabel, normalizeReportChannels, reportChannelOn, REPORT_CHANNELS, RUN_STATUS_LABEL, RUN_TRIGGER_LABEL,
+  type EmailReport, type EmailReportInput, type EmailReportRun, type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
 import { ReportEditor, toInput } from "./report-editor";
 import { EmailSetupGuide } from "./email-setup-guide";
@@ -42,6 +43,9 @@ export default function EmailReportsPage() {
   const [deleteTarget, setDeleteTarget] = useState<EmailReport | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [channels, setChannels] = useState<ReportChannels | null>(null);   // สวิตช์ทั้งระบบ
+  const [discordReady, setDiscordReady] = useState(false);
+  const [chanBusy, setChanBusy] = useState<ReportChannelKey | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -51,6 +55,7 @@ export default function EmailReportsPage() {
       if (!res.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
       setReports(j.data as EmailReport[]); setRuns(j.runs as EmailReportRun[]); setAcks((j.popup_acks ?? []) as PopupAck[]); setEmailReady(!!j.email_ready);
       setEmailInfo({ provider: j.email_provider ?? null, sender: j.email_sender ?? null, scheduler: !!j.scheduler_active });
+      setChannels(normalizeReportChannels(j.channels)); setDiscordReady(!!j.discord_ready);
     } catch (e) { setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่"); }
     finally { setLoading(false); }
   }, []);
@@ -58,19 +63,62 @@ export default function EmailReportsPage() {
 
   const openEditor = (r: EmailReport | null) => { setEditing(r); setEditorOpen(true); };
 
-  // สวิตช์เปิด/ปิด = บันทึกทั้งชุดผ่าน PATCH (กฎตรวจเดียวกับฟอร์ม เช่น ไม่มีผู้รับ = เปิดไม่ได้)
-  const toggle = async (r: EmailReport) => {
+  // แก้รายงานจากแถว (สวิตช์เปิดใช้ / ป้ายช่องทาง) = บันทึกทั้งชุดผ่าน PATCH (กฎตรวจเดียวกับฟอร์ม)
+  const patchReport = async (r: EmailReport, change: Partial<EmailReportInput>, okMsg: string) => {
     setToggling(r.id);
     try {
       const res = await apiFetch(`/api/admin/email-reports/${r.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...toInput(r), is_enabled: !r.is_enabled }),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...toInput(r), ...change }),
       });
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
       setReports((list) => list.map((x) => (x.id === r.id ? (j.data as EmailReport) : x)));
-      toast.success(r.is_enabled ? `ปิดรายงาน "${r.name}" แล้ว` : `เปิดรายงาน "${r.name}" แล้ว`);
+      toast.success(okMsg);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setToggling(null); }
+  };
+  const toggle = (r: EmailReport) => patchReport(r, { is_enabled: !r.is_enabled }, r.is_enabled ? `ปิดรายงาน "${r.name}" แล้ว` : `เปิดรายงาน "${r.name}" แล้ว`);
+
+  // ป้ายช่องทางในแถว = เปิด/ปิดช่องนั้นเฉพาะรายงานนี้ · ยังไม่ได้ตั้งค่าที่จำเป็น (ผู้รับ/ห้อง) = เปิดหน้าแก้ไขให้ตั้งก่อน
+  const toggleChannel = (r: EmailReport, k: ReportChannelKey) => {
+    const on = !reportChannelOn(r, k);
+    const label = REPORT_CHANNELS.find((c) => c.key === k)?.label ?? k;
+    if (on && k === "email" && r.recipients.length === 0) { toast.warning("ใส่ผู้รับอีเมลก่อน แล้วติ๊ก Gmail ในหน้าแก้ไข"); openEditor(r); return; }
+    if (on && k === "discord" && !r.discord.channel_id) { toast.warning("เลือกห้อง Discord ก่อน แล้วติ๊ก Discord ในหน้าแก้ไข"); openEditor(r); return; }
+    const change: Partial<EmailReportInput> = k === "email" ? { email_enabled: on } : k === "discord" ? { discord: { ...r.discord, enabled: on } } : { popup: { ...r.popup, enabled: on } };
+    void patchReport(r, change, `${on ? "เปิด" : "ปิด"} ${label} ของ "${r.name}" แล้ว`);
+  };
+
+  // 📄 คัดลอกรายงาน → สร้างใหม่แบบปิดไว้ก่อน แล้วเปิดหน้าแก้ไขให้ปรับ (เช่น ทำฉบับแยกแบรนด์)
+  const copyReport = async (r: EmailReport) => {
+    setToggling(r.id);
+    try {
+      const res = await apiFetch("/api/admin/email-reports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...toInput(r), name: `${r.name} (สำเนา)`.slice(0, 120), is_enabled: false }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "คัดลอกไม่สำเร็จ");
+      const copy = j.data as EmailReport;
+      setReports((list) => [...list, copy]);
+      toast.success("คัดลอกแล้ว — ปิดไว้ก่อน ปรับแล้วค่อยเปิดใช้");
+      openEditor(copy);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
+    finally { setToggling(null); }
+  };
+
+  // 🔌 สวิตช์ช่องทางทั้งระบบ
+  const setGlobal = async (k: ReportChannelKey, on: boolean) => {
+    setChanBusy(k);
+    try {
+      const res = await apiFetch("/api/admin/email-reports/channels", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [k]: on }) });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      setChannels(normalizeReportChannels(j.data));
+      const label = REPORT_CHANNELS.find((c) => c.key === k)?.label ?? k;
+      toast.success(on ? `เปิด ${label} ทั้งระบบแล้ว` : `ปิด ${label} ทั้งระบบแล้ว — ทุกรายงานหยุดใช้ช่องนี้`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setChanBusy(null); }
   };
 
   // ✉️ ส่งทดสอบถึงฉัน / 📤 ส่งเดี๋ยวนี้ (ทุกผู้รับ) — ผลลงประวัติการส่งเสมอ
@@ -113,34 +161,62 @@ export default function EmailReportsPage() {
     finally { setDeleting(false); }
   };
 
-  if (!canManage) return <PlaygroundShell><AccessDenied message="หน้านี้สำหรับผู้มีสิทธิ์ จัดการส่งอีเมลรายงาน" /></PlaygroundShell>;
+  if (!canManage) return <PlaygroundShell><AccessDenied message="หน้านี้สำหรับผู้มีสิทธิ์ จัดการรายงานและแจ้งเตือนอัตโนมัติ (admin.email_reports)" /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>
       <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-800">📧 ส่งอีเมลรายงาน</h1>
-            <p className="mt-0.5 text-sm text-slate-500">ตั้งว่ารายงานไหน ส่งถึงใคร วันไหน กี่โมง — ระบบส่งอีเมลให้เองตามเวลา</p>
+            <h1 className="text-2xl font-semibold text-slate-800">🔔 รายงานและแจ้งเตือนอัตโนมัติ</h1>
+            <p className="mt-0.5 text-sm text-slate-500">ตั้งว่ารายงานไหน ส่งทางไหน (Gmail / Discord / ป๊อปตอนเข้า ERP) ถึงใคร วันไหน กี่โมง — ระบบทำให้เองตามเวลา</p>
           </div>
           <button onClick={() => openEditor(null)} className="h-9 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800">＋ เพิ่มรายงาน</button>
         </div>
 
-        {/* สถานะระบบ */}
-        {!loading && (
-          <div className={`rounded-xl border px-4 py-3 text-sm ${emailReady ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-            {emailReady
-              ? <>✅ <b>ระบบส่งอีเมลพร้อมแล้ว</b> — ส่งผ่าน {emailInfo.provider === "gmail" ? "Gmail" : "Resend (โดเมนบริษัท)"}{emailInfo.sender ? <> จาก <b>{emailInfo.sender}</b></> : null}
-                  <button type="button" onClick={() => void checkConnection()} disabled={checking}
-                    className="ml-2 inline-flex h-7 items-center rounded-md border border-emerald-300 bg-white px-2 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">
-                    {checking ? "กำลังตรวจ..." : "🔌 ตรวจการเชื่อมต่อ"}</button></>
-              : <>⚠️ <b>ระบบส่งอีเมลยังไม่พร้อม</b> — ต้องตั้ง Gmail ที่จะใช้ส่งก่อน ทำตามคู่มือด้านล่าง (~5 นาที) · ระหว่างนี้ตั้งค่าและดูตัวอย่างอีเมลได้ตามปกติ</>}
-            <div className="mt-1 text-xs opacity-80">
+        {/* 🔌 ช่องทางทั้งระบบ — สถานะพร้อมใช้ + สวิตช์ (ปิด = ทุกรายงานหยุดใช้ช่องนั้น) */}
+        {!loading && channels && (
+          <section className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="text-sm font-semibold text-slate-800">ช่องทางทั้งระบบ <span className="font-normal text-slate-500">— ปิดตรงนี้ = ทุกรายงานหยุดใช้ช่องนั้นทันที (ส่งทดสอบยังได้)</span></div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              {REPORT_CHANNELS.map((c) => {
+                const on = channels[c.key];
+                const used = reports.filter((r) => reportChannelOn(r, c.key)).length;
+                const ackToday = new Set(acks.filter((a) => a.action === "ack").map((a) => a.name)).size;
+                const status = c.key === "email"
+                  ? (emailReady ? { ok: true, text: `พร้อมใช้ · ${emailInfo.provider === "gmail" ? "Gmail" : "Resend"}${emailInfo.sender ? ` ${emailInfo.sender}` : ""}` } : { ok: false, text: "ยังไม่ได้ตั้งระบบส่งอีเมล — ดูคู่มือด้านล่าง" })
+                  : c.key === "discord"
+                    ? (discordReady ? { ok: true, text: "บอทพร้อมใช้" } : { ok: false, text: "ยังไม่ได้ตั้งบอท — ดูคู่มือด้านล่าง" })
+                    : { ok: true, text: `พร้อมใช้ · วันนี้รับทราบ ${ackToday} คน` };
+                return (
+                  <div key={c.key} className={`rounded-xl border p-3 ${on ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-sm font-medium ${on ? "text-slate-800" : "text-slate-400"}`}>{c.icon} {c.label}</span>
+                      <button role="switch" aria-checked={on} aria-label={`${on ? "ปิด" : "เปิด"} ${c.label} ทั้งระบบ`} title={on ? "ปิดทั้งระบบ" : "เปิดทั้งระบบ"}
+                        onClick={() => void setGlobal(c.key, !on)} disabled={chanBusy === c.key}
+                        className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? "bg-emerald-500" : "bg-slate-300"} disabled:opacity-50`}>
+                        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
+                      </button>
+                    </div>
+                    <div className={`mt-1 text-xs ${!on ? "text-slate-500" : status.ok ? "text-emerald-700" : "text-amber-700"}`}>
+                      {!on ? "ปิดทั้งระบบอยู่ — ไม่ส่ง/ไม่เด้ง" : `${status.ok ? "✅" : "⚠️"} ${status.text}`}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">ใช้อยู่ {used} รายงาน</div>
+                    {c.key === "email" && emailReady && on && (
+                      <button type="button" onClick={() => void checkConnection()} disabled={checking}
+                        className="mt-2 inline-flex h-7 items-center rounded-md border border-emerald-300 bg-white px-2 text-xs font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">
+                        {checking ? "กำลังตรวจ..." : "🔌 ตรวจการเชื่อมต่อ"}</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
               {emailInfo.scheduler
                 ? "⏰ ตัวตั้งเวลาทำงานอยู่ — เช็กทุก 15 นาที ส่งตามวันและเวลาที่ตั้ง (ส่งได้ภายใน 2 ชม.หลังเวลาที่ตั้ง · วันละครั้ง)"
                 : "⏰ ตัวตั้งเวลายังไม่ทำงาน — ส่งทดสอบ / ส่งเดี๋ยวนี้ ใช้ได้ แต่ยังไม่ส่งเองตามเวลา"}
             </div>
-          </div>
+          </section>
         )}
 
         {/* รายการรายงาน */}
@@ -171,25 +247,44 @@ export default function EmailReportsPage() {
                         {sourceLabel(r.source_key)} · {GROUP_TEXT[r.filters.brand_group ?? "all"]}{r.filters.brand_ids?.length ? ` (${r.filters.brand_ids.length} แบรนด์)` : ""}
                         {" · "}<b className="font-medium text-slate-700">{describeDays(r.days)} · {r.send_time} น.</b>
                       </div>
-                      <div className="mt-0.5 text-xs text-slate-500">
-                        ผู้รับ: {names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` และอีก ${names.length - 3} คน` : ""}` : r.discord?.enabled ? "— (ส่ง Discord อย่างเดียว)" : r.popup?.enabled ? "— (ป๊อปตอนเข้า ERP อย่างเดียว)" : <span className="text-amber-700">ยังไม่มีผู้รับ</span>}
-                        {r.discord?.enabled && <span className="ml-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">💬 Discord #{r.discord.channel_name ?? "ห้อง"}</span>}
-                        {" · "}ส่งล่าสุด: {lastRun ? <>{fmtDateTime(lastRun.ran_at)} <span className={`rounded px-1.5 py-0.5 text-[10px] ${RUN_STATUS_LABEL[lastRun.status]?.cls ?? ""}`}>{RUN_STATUS_LABEL[lastRun.status]?.label ?? lastRun.status}</span></> : "ยังไม่เคยส่ง"}
+                      {/* ป้ายช่องทาง: กด = เปิด/ปิดเฉพาะรายงานนี้ */}
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {REPORT_CHANNELS.map((c) => {
+                          const on = reportChannelOn(r, c.key);
+                          const offAll = !!channels && !channels[c.key];
+                          const detail = c.key === "email" ? (names.length ? `${names.length} คน` : "ยังไม่มีผู้รับ")
+                            : c.key === "discord" ? (r.discord.channel_name ? `#${r.discord.channel_name}` : "ยังไม่เลือกห้อง")
+                            : `${r.popup.from}–${r.popup.to} น.${r.popup.frequency === "every" ? " ทุกครั้ง" : ""}`;
+                          const tip = c.key === "email" && names.length ? `ผู้รับ: ${names.join(", ")}` : "";
+                          return (
+                            <button key={c.key} type="button" onClick={() => toggleChannel(r, c.key)} disabled={toggling === r.id}
+                              title={`${tip ? `${tip}\n` : ""}${on ? "กดเพื่อปิด" : "กดเพื่อเปิด"} ${c.label} เฉพาะรายงานนี้${offAll ? " (ตอนนี้ปิดทั้งระบบอยู่)" : ""}`}
+                              className={`inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs transition disabled:opacity-50 ${
+                                !on ? "border border-dashed border-slate-300 text-slate-400 hover:bg-slate-50"
+                                : offAll ? "border border-slate-200 bg-slate-100 text-slate-500"
+                                : "border border-emerald-200 bg-emerald-50 font-medium text-emerald-800 hover:bg-emerald-100"}`}>
+                              {on ? "✓" : "＋"} {c.icon} {c.label}{on && <span className="font-normal opacity-80">· {detail}</span>}
+                              {on && offAll && <span className="font-normal text-amber-700">(ปิดทั้งระบบ)</span>}
+                            </button>
+                          );
+                        })}
                       </div>
-                      {r.popup?.enabled && (() => {
-                        const mine = acks.filter((a) => a.report_id === r.id);
-                        const ok = mine.filter((a) => a.action === "ack"); const later = mine.filter((a) => a.action === "later");
-                        return (
-                          <div className="mt-0.5 text-xs text-slate-500">
-                            <span className="mr-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">🔔 ป๊อป {r.popup.from}–{r.popup.to} น.{r.popup.frequency === "every" ? " ทุกครั้ง" : ""}</span>
-                            วันนี้: {ok.length ? <span title={ok.map((a) => a.name).join(", ")}>รับทราบ {ok.length} คน ({nameList(ok)})</span> : "ยังไม่มีใครรับทราบ"}
-                            {later.length > 0 && <span title={later.map((a) => a.name).join(", ")}> · ไว้ทีหลัง {later.length} คน ({nameList(later)})</span>}
-                          </div>
-                        );
-                      })()}
+                      <div className="mt-1 text-xs text-slate-500">
+                        ส่งล่าสุด: {lastRun ? <>{fmtDateTime(lastRun.ran_at)} <span className={`rounded px-1.5 py-0.5 text-[10px] ${RUN_STATUS_LABEL[lastRun.status]?.cls ?? ""}`}>{RUN_STATUS_LABEL[lastRun.status]?.label ?? lastRun.status}</span></> : "ยังไม่เคยส่ง"}
+                        {r.popup?.enabled && (() => {
+                          const mine = acks.filter((a) => a.report_id === r.id);
+                          const ok = mine.filter((a) => a.action === "ack"); const later = mine.filter((a) => a.action === "later");
+                          return (
+                            <>
+                              {" · "}🔔 ป๊อปวันนี้: {ok.length ? <span title={ok.map((a) => a.name).join(", ")}>รับทราบ {ok.length} คน ({nameList(ok)})</span> : "ยังไม่มีใครรับทราบ"}
+                              {later.length > 0 && <span title={later.map((a) => a.name).join(", ")}> · ไว้ทีหลัง {later.length} คน ({nameList(later)})</span>}
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      <button role="switch" aria-checked={r.is_enabled} aria-label={r.is_enabled ? "ปิดรายงานนี้" : "เปิดรายงานนี้"} title={r.is_enabled ? "ปิดการส่งอัตโนมัติ" : "เปิดการส่งอัตโนมัติ"}
+                      <button role="switch" aria-checked={r.is_enabled} aria-label={r.is_enabled ? "ปิดรายงานนี้" : "เปิดรายงานนี้"} title={r.is_enabled ? "ปิดรายงานนี้ (หยุดส่งตามเวลา + หยุดเด้งป๊อป)" : "เปิดใช้รายงานนี้"}
                         onClick={() => void toggle(r)} disabled={toggling === r.id}
                         className={`relative h-6 w-11 rounded-full transition ${r.is_enabled ? "bg-emerald-500" : "bg-slate-300"} disabled:opacity-50`}>
                         <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${r.is_enabled ? "left-[22px]" : "left-0.5"}`} />
@@ -197,10 +292,17 @@ export default function EmailReportsPage() {
                       <button onClick={() => void send(r, "test")} disabled={!!sending} title={`ส่งเข้าอีเมลของคุณคนเดียว (หัวเรื่องขึ้นต้น [ทดสอบ])${r.discord?.enabled ? " + DM ใน Discord ของคุณ (ต้องผูกบัญชี)" : ""}`}
                         className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                         {sending === `${r.id}:test` ? "กำลังส่ง..." : "✉️ ทดสอบ"}</button>
-                      <button onClick={() => setSendNowTarget(r)} disabled={!!sending || (r.recipients.length === 0 && !r.discord?.enabled)} title={r.recipients.length || r.discord?.enabled ? "ส่งถึงผู้รับทุกคน (และห้อง Discord) เดี๋ยวนี้" : "ยังไม่มีผู้รับ"}
-                        className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-                        {sending === `${r.id}:now` ? "กำลังส่ง..." : "📤 ส่งเดี๋ยวนี้"}</button>
+                      {(() => {
+                        const canSend = (r.email_enabled !== false && r.recipients.length > 0) || r.discord?.enabled;
+                        return (
+                          <button onClick={() => setSendNowTarget(r)} disabled={!!sending || !canSend} title={canSend ? "ส่งถึงผู้รับทุกคน (และห้อง Discord) เดี๋ยวนี้" : "ยังไม่ได้เปิด Gmail (มีผู้รับ) หรือ Discord"}
+                            className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                            {sending === `${r.id}:now` ? "กำลังส่ง..." : "📤 ส่งเดี๋ยวนี้"}</button>
+                        );
+                      })()}
                       <button onClick={() => openEditor(r)} className="h-8 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">✏️ แก้ไข / ดูตัวอย่าง</button>
+                      <button onClick={() => void copyReport(r)} disabled={toggling === r.id} title="คัดลอกเป็นรายงานใหม่ (ปิดไว้ก่อน) เช่น ทำฉบับแยกแบรนด์"
+                        className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">📄 คัดลอก</button>
                       <button onClick={() => setDeleteTarget(r)} title="ลบรายงานนี้" aria-label={`ลบ ${r.name}`} className="h-8 w-8 rounded-lg text-rose-500 hover:bg-rose-50">🗑</button>
                     </div>
                   </li>
@@ -244,7 +346,7 @@ export default function EmailReportsPage() {
         {!loading && <DiscordSetupGuide />}
       </div>
 
-      <ReportEditor open={editorOpen} editing={editing} onClose={() => setEditorOpen(false)}
+      <ReportEditor open={editorOpen} editing={editing} channels={channels} onClose={() => setEditorOpen(false)}
         onSaved={(saved) => {
           setReports((list) => (list.some((x) => x.id === saved.id) ? list.map((x) => (x.id === saved.id ? saved : x)) : [...list, saved]));
           setEditorOpen(false);
@@ -253,7 +355,12 @@ export default function EmailReportsPage() {
 
       <ConfirmDialog open={sendNowTarget !== null} onClose={() => setSendNowTarget(null)} onConfirm={() => { if (sendNowTarget) void send(sendNowTarget, "now"); }}
         loading={!!sending} title="ส่งรายงานนี้เดี๋ยวนี้?" confirmText="📤 ส่งเลย"
-        message={<>ส่ง <b>{sendNowTarget?.name}</b> ถึงผู้รับทั้ง {sendNowTarget?.recipients.length ?? 0} คน{sendNowTarget?.discord?.enabled ? <> และห้อง Discord <b>#{sendNowTarget.discord.channel_name ?? ""}</b></> : null} ทันที · ไม่กระทบรอบส่งตามเวลาของวันนี้</>} />
+        message={(() => {
+          const t = sendNowTarget;
+          const viaEmail = !!t && t.email_enabled !== false && t.recipients.length > 0 && channels?.email !== false;
+          const viaDiscord = !!t?.discord?.enabled && channels?.discord !== false;
+          return <>ส่ง <b>{t?.name}</b>{viaEmail ? <> ถึงผู้รับอีเมล {t?.recipients.length} คน</> : null}{viaEmail && viaDiscord ? " และ" : ""}{viaDiscord ? <> เข้าห้อง Discord <b>#{t?.discord.channel_name ?? ""}</b></> : null}{!viaEmail && !viaDiscord ? " — ช่องทางที่รายงานนี้ใช้ถูกปิดทั้งระบบอยู่ จะไม่ได้ส่ง" : " ทันที"} · ไม่กระทบรอบส่งตามเวลาของวันนี้</>;
+        })()} />
 
       <ConfirmDialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} onConfirm={() => void doDelete()} loading={deleting}
         variant="danger" title="ลบรายงานนี้?" confirmText="ลบรายงาน"

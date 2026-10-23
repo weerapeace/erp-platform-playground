@@ -4,11 +4,12 @@
  *   แท็บ 👁 ใครเห็นเมนูไหน: ติ๊กตำแหน่งต่อเมนู (ไม่ติ๊ก = ทุกคน) + 👤 รายคน (ให้เห็นเพิ่ม / ซ่อนจาก) + ดูแทนตำแหน่ง
  *     เก็บที่ erp_menu_items.audience (กฎ lib/menu-audience) · บันทึกแบบร่าง → 💾 · PATCH /api/menu (admin.users + ประวัติ)
  *     มีผลกับแถบเมนูแอปเดี่ยว · เมนูซ้าย · หน้ารวมแอป — "ซ่อน/โชว์" เท่านั้น กันเข้าจริงใช้สิทธิ์ตำแหน่ง
- *   แท็บ 🔧 ตั้งค่า<แอป>: หน้าตั้งค่าเฉพาะของแอปนั้น (ถ้ามี เช่น จัดการงาน → /tasks/settings) ฝังในกรอบ
+ *   แท็บ 🔧 ตั้งค่า<แอป>: หน้าตั้งค่าเฉพาะของแอปนั้น (ถ้ามี เช่น จัดการงาน → /tasks/settings + 🔔 รายงานและแจ้งเตือนอัตโนมัติ) ฝังในกรอบ · หลายแท็บได้
  */
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { cleanAudience, describeAudience, menuVisibleTo, type MenuAudience } from "@/lib/menu-audience";
 import type { UserPickerValue } from "@/components/pickers";
@@ -17,10 +18,14 @@ import { MultiUserPicker } from "@/app/tasks/multi-user-picker";
 export type AppSettingsMenuItem = { id: string; label: string; icon: string | null; href: string; permission_key: string | null; parent_id?: string | null; audience?: unknown };
 type Role = { key: string; label: string; active?: boolean };
 
-/** หน้าตั้งค่าเฉพาะของแต่ละแอป (ฝังในแท็บ 🔧) — เพิ่มแอปอื่นที่นี่ที่เดียว */
-export const APP_SETTINGS_PAGES: Record<string, { href: string; label: string }> = {
-  tasks: { href: "/tasks/settings", label: "ตั้งค่างาน" },
-  payroll: { href: "/payroll/settings", label: "ตั้งค่าเงินเดือน" },
+/** หน้าตั้งค่าเฉพาะของแต่ละแอป (ฝังเป็นแท็บ · หน้าต้องรองรับ ?embed=1 — PlaygroundShell ทำให้เอง) — เพิ่มแอปอื่นที่นี่ที่เดียว
+ *  perm = โชว์แท็บเฉพาะคนที่มีสิทธิ์นี้ (ไม่ใส่ = ทุกคนที่เปิด ⚙️ ได้) */
+type AppSettingsPage = { href: string; label: string; icon?: string; perm?: Permission };
+const REPORTS_PAGE: AppSettingsPage = { href: "/admin/email-reports", label: "รายงานและแจ้งเตือนอัตโนมัติ", icon: "🔔", perm: "admin.email_reports" };
+export const APP_SETTINGS_PAGES: Record<string, AppSettingsPage[]> = {
+  tasks: [{ href: "/tasks/settings", label: "ตั้งค่างาน" }, REPORTS_PAGE],
+  design: [REPORTS_PAGE],
+  payroll: [{ href: "/payroll/settings", label: "ตั้งค่าเงินเดือน" }],
 };
 
 const same = (a: MenuAudience | null, b: MenuAudience | null) => JSON.stringify(a) === JSON.stringify(b);
@@ -32,26 +37,27 @@ export function AppSettingsPanel({ appKey, appLabel, items, onSaved }: {
   /** บันทึกแล้ว — ให้แถบเมนูโหลดใหม่ */
   onSaved: () => void;
 }) {
-  const page = APP_SETTINGS_PAGES[appKey];
-  const [tab, setTab] = useState<"who" | "app">("who");
+  const { can } = useAuth();
+  const pages = (APP_SETTINGS_PAGES[appKey] ?? []).filter((p) => !p.perm || can(p.perm));
+  const [tab, setTab] = useState<"who" | string>("who");   // "who" หรือ href ของหน้าที่ฝัง
+  const page = pages.find((p) => p.href === tab) ?? null;
+  const tabCls = (on: boolean) => `-mb-px border-b-2 px-3 py-2 text-sm whitespace-nowrap ${on ? "border-violet-600 font-medium text-violet-700" : "border-transparent text-slate-500 hover:text-slate-800"}`;
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-slate-50">
       <div className="flex-shrink-0 border-b border-slate-200 bg-white px-4 pt-3">
         <h1 className="text-lg font-semibold text-slate-800">⚙️ ตั้งค่า {appLabel}</h1>
-        <div className="mt-2 flex items-end gap-1">
-          <button type="button" onClick={() => setTab("who")}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === "who" ? "border-violet-600 font-medium text-violet-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>👁 ใครเห็นเมนูไหน</button>
-          {page && (
-            <button type="button" onClick={() => setTab("app")}
-              className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === "app" ? "border-violet-600 font-medium text-violet-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>🔧 {page.label}</button>
-          )}
+        <div className="mt-2 flex flex-wrap items-end gap-1">
+          <button type="button" onClick={() => setTab("who")} className={tabCls(tab === "who")}>👁 ใครเห็นเมนูไหน</button>
+          {pages.map((p) => (
+            <button key={p.href} type="button" onClick={() => setTab(p.href)} className={tabCls(tab === p.href)}>{p.icon ?? "🔧"} {p.label}</button>
+          ))}
           <div className="ml-auto flex items-center gap-3 pb-2 text-xs">
             <a href={`/admin/menu`} target="_blank" rel="noopener" className="text-blue-600 hover:underline">จัดการเมนู/ไอคอน/ลำดับ ↗</a>
             <a href="/admin/role-board" target="_blank" rel="noopener" className="text-blue-600 hover:underline">สิทธิ์ตามตำแหน่ง ↗</a>
           </div>
         </div>
       </div>
-      {tab === "who" || !page
+      {!page
         ? <WhoSeesWhat items={items} onSaved={onSaved} />
         : <iframe key={page.href} src={`${page.href}?embed=1`} title={page.label} className="flex-1 w-full border-0 bg-white" />}
     </div>

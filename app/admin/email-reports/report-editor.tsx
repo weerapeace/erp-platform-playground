@@ -17,8 +17,9 @@ import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-s
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, sourceDef,
+  REPORT_CHANNELS, normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportPopup,
+  type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
@@ -28,7 +29,7 @@ export const emptyReportInput = (): EmailReportInput => ({
   name: "", source_key: EMAIL_REPORT_SOURCES[0].key,
   filters: { brand_group: "all", brand_ids: [], statuses: [] },
   options: normalizeReportOptions(EMAIL_REPORT_SOURCES[0].key, {}),
-  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], discord: normalizeReportDiscord({}), popup: normalizeReportPopup({}), skip_if_empty: true, is_enabled: false,
+  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], email_enabled: true, discord: normalizeReportDiscord({}), popup: normalizeReportPopup({}), skip_if_empty: true, is_enabled: false,
 });
 
 export function toInput(r: EmailReport): EmailReportInput {
@@ -36,7 +37,8 @@ export function toInput(r: EmailReport): EmailReportInput {
     name: r.name, source_key: r.source_key,
     filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [] },
     options: normalizeReportOptions(r.source_key, r.options),   // รายงานเก่า = เติมค่าเริ่มต้น (หน้าตาเดิม)
-    days: r.days, send_time: r.send_time, recipients: r.recipients, discord: normalizeReportDiscord(r.discord), popup: normalizeReportPopup(r.popup),
+    days: r.days, send_time: r.send_time, recipients: r.recipients, email_enabled: r.email_enabled !== false,
+    discord: normalizeReportDiscord(r.discord), popup: normalizeReportPopup(r.popup),
     skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
   };
 }
@@ -45,10 +47,12 @@ const GROUPS: { v: BrandGroupFilter; label: string }[] = [
   { v: "all", label: "ทุกแบรนด์" }, { v: "customer", label: "👤 งานลูกค้า" }, { v: "own", label: "🏷️ แบรนด์เรา" },
 ];
 
-export function ReportEditor({ open, editing, onClose, onSaved }: {
+export function ReportEditor({ open, editing, channels = null, onClose, onSaved }: {
   open: boolean;
   /** null = เพิ่มใหม่ */
   editing: EmailReport | null;
+  /** สวิตช์ช่องทางทั้งระบบ (การ์ดช่องที่ปิดทั้งระบบขึ้นเตือน) */
+  channels?: ReportChannels | null;
   onClose: () => void;
   onSaved: (r: EmailReport) => void;
 }) {
@@ -123,6 +127,7 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
   const setOptions = (p: Partial<EmailReportInput["options"]>) => set({ options: { ...form.options, ...p } });
   const setDiscord = (p: Partial<EmailReportDiscord>) => set({ discord: { ...form.discord, ...p } });
   const setPopup = (p: Partial<EmailReportPopup>) => set({ popup: { ...form.popup, ...p } });
+  const toggleChannel = (k: ReportChannelKey, on: boolean) => (k === "email" ? set({ email_enabled: on }) : k === "discord" ? setDiscord({ enabled: on }) : setPopup({ enabled: on }));
   const src = sourceDef(form.source_key);
   const opt = form.options;
   // ใส่ {คำ} ต่อท้ายหัวเรื่อง
@@ -200,8 +205,8 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
 
   return (
     <ERPModal open={open} onClose={onClose} size="xl" storageKey="email-report-editor" hasUnsavedChanges={dirty}
-      title={editing ? `แก้ไขรายงาน — ${editing.name}` : "เพิ่มรายงานอีเมล"}
-      description="ตั้งว่าจะส่งข้อมูลอะไร ถึงใคร วันไหน กี่โมง · ด้านขวาคือหน้าตาอีเมลจริงจากข้อมูลตอนนี้"
+      title={editing ? `แก้ไขรายงาน — ${editing.name}` : "เพิ่มรายงานอัตโนมัติ"}
+      description="ตั้งว่าจะส่งข้อมูลอะไร ทางไหน ถึงใคร วันไหน กี่โมง · ด้านขวาคือหน้าตาอีเมลจริงจากข้อมูลตอนนี้"
       footer={
         <div className="flex w-full flex-wrap items-center justify-end gap-2">
           {error && <span className="mr-auto text-sm text-rose-600">⚠ {error}</span>}
@@ -216,6 +221,27 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
           <div>
             <label className={label}>ชื่อรายงาน</label>
             <ERPInput value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="เช่น งานออกแบบที่ค้าง (ทุกแบรนด์)" />
+          </div>
+
+          {/* 🔌 ส่งทางไหน — ติ๊กช่องไหน ค่อยโชว์การตั้งค่าของช่องนั้นด้านล่าง · ปิดทั้งระบบ = ตั้งไว้ได้แต่ยังไม่ส่ง */}
+          <div>
+            <label className={label}>ส่งทางไหน <span className="font-normal text-slate-400">(เลือกได้หลายช่อง)</span></label>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {REPORT_CHANNELS.map((c) => {
+                const on = reportChannelOn(form, c.key);
+                return (
+                  <button key={c.key} type="button" aria-pressed={on} onClick={() => toggleChannel(c.key, !on)}
+                    className={`rounded-xl border p-2.5 text-left transition ${on ? "border-blue-500 bg-blue-50/60 ring-1 ring-blue-500" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${on ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white"}`}>{on ? "✓" : ""}</span>
+                      {c.icon} {c.label}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-slate-500">{c.hint}</div>
+                    {channels && !channels[c.key] && <div className="mt-1 text-[11px] text-amber-700">ปิดทั้งระบบอยู่ — ตั้งไว้ได้ แต่ยังไม่ส่ง</div>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div>
             <label className={label}>ข้อมูลที่ส่ง</label>
@@ -280,8 +306,10 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
             </div>
           </div>
 
-          <div>
-            <label className={label}>ผู้รับ <span className="font-normal text-slate-400">(ทุกคนได้อีเมลฉบับเดียวกัน)</span></label>
+          {/* ✉️ Gmail — ผู้รับ (โชว์เมื่อเลือกช่องอีเมล) */}
+          {form.email_enabled && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-3 text-sm">
+            <div className="mb-2 text-xs font-semibold text-slate-700">✉️ Gmail — ผู้รับ <span className="font-normal text-slate-400">(ทุกคนได้อีเมลฉบับเดียวกัน)</span></div>
             {form.recipients.length > 0 ? (
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {form.recipients.map((r, i) => {
@@ -311,15 +339,15 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
               </div>
             </div>
           </div>
+          )}
 
-          {/* 💬 ส่งเข้า Discord: ภาพรวม + รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ (ปุ่มติ๊ก) — lib/email-report/discord */}
-          <div className={`rounded-lg border p-3 text-sm ${discordOn ? "border-indigo-200 bg-indigo-50/30" : "border-slate-200"}`}>
-            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
-              <input type="checkbox" checked={discordOn} onChange={(e) => setDiscord({ enabled: e.target.checked })} className="h-4 w-4" />
-              💬 ส่งเข้า Discord ด้วย <span className="font-normal text-slate-400">(รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ พร้อมปุ่มติ๊ก)</span>
-            </label>
-            {discordOn && (
-              !dmeta ? <p className="mt-2 text-xs text-slate-400">กำลังโหลดห้อง Discord…</p>
+          {/* 💬 ส่งเข้า Discord: ภาพรวม + รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ (ปุ่มติ๊ก) — lib/email-report/discord · โชว์เมื่อเลือกช่อง Discord */}
+          {discordOn && (
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-3 text-sm">
+            <div className="text-xs font-semibold text-slate-700">
+              💬 Discord <span className="font-normal text-slate-400">(รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ พร้อมปุ่มติ๊ก)</span>
+            </div>
+            {!dmeta ? <p className="mt-2 text-xs text-slate-400">กำลังโหลดห้อง Discord…</p>
               : !dmeta.ready.bot ? <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">ยังไม่ได้ตั้งบอท Discord — ทำตาม "คู่มือตั้งบอท Discord" ในหน้านี้ก่อน (ตั้งค่าไว้ก่อนได้ แต่ยังส่งไม่ได้)</p>
               : (
                 <div className="mt-2 space-y-2">
@@ -359,9 +387,7 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
                   </div>
                   <p className="text-[11px] text-slate-400">ส่งทดสอบ = ส่งเข้า DM ของคุณ (ต้องผูกบัญชี Discord ที่เมนูบัญชีก่อน) · ส่งเดี๋ยวนี้/ตามเวลา = ส่งเข้าห้องที่เลือก</p>
                 </div>
-              )
-            )}
-            {discordOn && (
+              )}
               <div className="mt-2">
                 <button type="button" onClick={() => void showImage()} disabled={img.busy}
                   className="h-8 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
@@ -374,16 +400,15 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
                   </a>
                 )}
               </div>
-            )}
           </div>
+          )}
 
-          {/* 🔔 เด้งป๊อปตอนเข้า ERP — ข้อมูลชุดเดียวกับอีเมล · "งานของคุณ" ขึ้นก่อน — lib/email-report/popup + components/work-popup */}
-          <div className={`rounded-lg border p-3 text-sm ${popupOn ? "border-amber-200 bg-amber-50/30" : "border-slate-200"}`}>
-            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
-              <input type="checkbox" checked={popupOn} onChange={(e) => setPopup({ enabled: e.target.checked })} className="h-4 w-4" />
-              🔔 เด้งป๊อปตอนเข้า ERP <span className="font-normal text-slate-400">(ข้อมูลเดียวกับอีเมล · งานที่ใส่ชื่อคนนั้นขึ้นก่อน)</span>
-            </label>
-            {popupOn && (
+          {/* 🔔 เด้งป๊อปตอนเข้า ERP — ข้อมูลชุดเดียวกับอีเมล · "งานของคุณ" ขึ้นก่อน — lib/email-report/popup + components/work-popup · โชว์เมื่อเลือกช่อง ERP ป๊อป */}
+          {popupOn && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-3 text-sm">
+            <div className="text-xs font-semibold text-slate-700">
+              🔔 ERP ป๊อป — เด้งตอนเข้า ERP <span className="font-normal text-slate-400">(ข้อมูลเดียวกับอีเมล · งานที่ใส่ชื่อคนนั้นขึ้นก่อน)</span>
+            </div>
               <div className="mt-2 space-y-3">
                 <div>
                   <label className={label}>เด้งให้ตำแหน่ง <span className="font-normal text-slate-400">(เห็นทั้งป๊อป)</span></label>
@@ -456,8 +481,8 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
                   )}
                 </div>
               </div>
-            )}
           </div>
+          )}
 
           <div className="rounded-lg border border-slate-200 p-3 text-sm">
             <div className="mb-2 text-xs font-semibold text-slate-700">ตัวเลือก</div>
@@ -503,7 +528,7 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
               </label>
               <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-slate-700">
                 <input type="checkbox" checked={form.is_enabled} onChange={(e) => set({ is_enabled: e.target.checked })} className="h-4 w-4" />
-                เปิดส่งอัตโนมัติตามวันและเวลาด้านบน
+                เปิดใช้รายงานนี้ <span className="text-slate-400">(ส่งอัตโนมัติตามวัน-เวลาด้านบน + เด้งป๊อป)</span>
               </label>
             </div>
           </div>
