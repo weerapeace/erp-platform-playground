@@ -1,0 +1,106 @@
+import { describe, it, expect } from "vitest";
+import { SECTION_SCHEMAS, matchShowIf } from "../website-schema";
+import { normalizeBlocks, newBlock, validateBlocks, blockSummary, type Block } from "../website-blocks";
+
+/**
+ * 🖱️ ข้อความใหญ่ + รูปตามเมาส์ (hover-reveal) · 🎬 แกลเลอรีแบบแถบวิดีโอ (layout tabs) — 2026-10-23
+ * กันพลาด: Section ใหม่มีคำตั้งต้นให้เห็นหน้าตา · ค่ามั่ว = ค่าเริ่ม · ช่องโชว์ถูกแบบ · แกลเลอรีเดิมไม่เปลี่ยน
+ */
+type R = Record<string, unknown>;
+const norm = (b: R) => normalizeBlocks([b])[0] as unknown as R & { items: R[] };
+const msgs = (b: R) => validateBlocks([norm(b) as unknown as Block]).map((x) => x.message).join(" | ");
+
+describe("🖱️ ข้อความใหญ่ + รูปตามเมาส์", () => {
+  it("วาง Section ใหม่ = มีคำตั้งต้น 3 คำต่างกัน + ค่าเริ่มแบบตัวอย่าง", () => {
+    const b = newBlock("hover-reveal", 1) as unknown as R & { items: R[] };
+    expect(b.items.map((i) => i.text)).toEqual(["NEW ARRIVAL", "BEST SELLER", "OUR STORY"]);
+    expect(new Set(b.items.map((i) => i.id)).size).toBe(3);
+    expect(b).toMatchObject({ align: "center", font: "display", weight: "700", size: 128, sizeMobile: 52, upper: true, others: "fade", follow: "smooth", tilt: true, imgFx: "pop", layer: "front", ratio: "3:4" });
+    // ชิ้นที่กด "+ เพิ่ม" ยังเป็นชิ้นเปล่าแบบเดิม (starter ใช้เฉพาะตอนวาง Section)
+    expect(norm(b as R).items.length).toBe(3);
+    expect(blockSummary(b as R)).toContain("NEW ARRIVAL");
+  });
+
+  it("ค่ามั่ว = ค่าเริ่ม · ขนาดถูกบีบในช่วง · เกิน 12 คำถูกตัด · ลิงก์อันตรายถูกทิ้ง", () => {
+    const b = norm({ id: "h1", type: "hover-reveal", follow: "teleport", size: 9999, imgW: 5, others: "x", items: Array.from({ length: 15 }, (_, i) => ({ text: `W${i}`, href: i ? "/shop" : "javascript:alert(1)" })) });
+    expect(b.follow).toBe("smooth");
+    expect(b.size).toBe(260);
+    expect(b.imgW).toBe(160);
+    expect(b.others).toBe("fade");
+    expect(b.items.length).toBe(12);
+    expect(b.items[0].href).not.toContain("javascript");
+  });
+
+  it("เตือน: ไม่มีคำ = error · คำที่ไม่มีรูป = warning", () => {
+    expect(msgs({ id: "h2", type: "hover-reveal", items: [{ text: " " }] })).toContain("ยังไม่ได้ใส่คำ");
+    const m = msgs({ id: "h3", type: "hover-reveal", items: [{ text: "A", imageKey: "a/x.jpg" }, { text: "B" }] });
+    expect(m).toContain("1 คำยังไม่มีรูป");
+    expect(msgs({ id: "h4", type: "hover-reveal", items: [{ text: "A", imageKey: "a/x.jpg" }] })).not.toMatch(/คำ/);
+  });
+
+  it("ช่องโชว์ตามเงื่อนไข: สีเองเฉพาะ custom · เอียงเฉพาะแบบตามเมาส์", () => {
+    const fd = (k: string) => SECTION_SCHEMAS["hover-reveal"].fields.find((x) => x.key === k)!;
+    expect(matchShowIf(fd("hex"), { color: "ink" })).toBe(false);
+    expect(matchShowIf(fd("hex"), { color: "custom" })).toBe(true);
+    expect(matchShowIf(fd("tilt"), { follow: "fixed" })).toBe(false);
+    expect(matchShowIf(fd("tilt"), { follow: "snap" })).toBe(true);
+  });
+
+  it("รูปของคำเป็นช่องรูปกลาง (ผูกชุดรูปได้)", () => {
+    const img = SECTION_SCHEMAS["hover-reveal"].children!.fields.find((x) => x.key === "imageKey")!;
+    expect(img.type).toBe("image");
+    const b = norm({ id: "h5", type: "hover-reveal", items: [{ text: "A", imageKey: "imgset/0f8fad5b-d9cb-469f-a165-70867728950e" }] });
+    expect(b.items[0].imageKey).toBe("imgset/0f8fad5b-d9cb-469f-a165-70867728950e");
+  });
+});
+
+describe("🎬 แกลเลอรีแบบแถบวิดีโอ (layout tabs)", () => {
+  const sch = SECTION_SCHEMAS.gallery;
+  const shown = (b: R) => sch.fields.filter((x) => matchShowIf(x, b)).map((x) => x.key);
+  const child = (k: string) => sch.children!.fields.find((x) => x.key === k)!;
+
+  it("แกลเลอรีเดิม (ไม่ได้ตั้ง layout) = ตารางเหมือนเดิม · ไม่เห็นช่อง tabs*", () => {
+    const b = norm({ id: "g1", type: "gallery", items: [{ imageKey: "a/1.jpg" }] });
+    expect(b.layout).toBe("grid");
+    const keys = shown(b);
+    expect(keys.some((k) => k.startsWith("tabs"))).toBe(false);
+    expect(keys).toContain("columns");
+  });
+
+  it("เลือกแถบวิดีโอ = ค่าเริ่มแบบตัวอย่าง + เห็นช่อง tabs* ไม่เห็นช่องของตาราง/แถวรูป", () => {
+    const b = norm({ id: "g2", type: "gallery", layout: "tabs", items: [{ media: "video", videoKey: "v/1.mp4" }, { imageKey: "a/2.jpg" }] });
+    expect(b).toMatchObject({ layout: "tabs", tabsH: 560, tabsActive: 64, tabsSliver: "pixel", tabsCycle: true, tabsCycleSec: "6", tabsCap: "scramble", tabsCapPos: "below", tabsNum: true, tabsFont: "mono", tabsClick: "auto", tabsCursor: "[ VIEW FULLSCREEN ]", tabsMobile: "row" });
+    const keys = shown(b);
+    expect(keys).toEqual(expect.arrayContaining(["tabsH", "tabsActive", "tabsSliver", "tabsCycle", "tabsCycleSec", "tabsCap", "tabsCapPos", "tabsCursor"]));
+    expect(keys).not.toContain("columns");
+    expect(keys).not.toContain("stripW");
+    expect(keys).not.toContain("capPos");
+    expect(b.items[0]).toMatchObject({ media: "video", videoKey: "v/1.mp4" });
+  });
+
+  it("ชิ้นเป็นวิดีโอได้ทั้งตาราง + แถบวิดีโอ (แถวรูปลุคบุ๊กยังไม่ได้)", () => {
+    // เหมือนแผงตั้งค่า (website-schema-form): showIfParent เทียบกับค่าของ Section แม่
+    const byParent = (k: string, parent: R) => matchShowIf({ ...child(k), showIf: child(k).showIfParent }, parent);
+    expect(byParent("media", { layout: "tabs" })).toBe(true);
+    expect(byParent("media", { layout: "grid" })).toBe(true);
+    expect(byParent("media", {})).toBe(true);
+    expect(byParent("media", { layout: "strip" })).toBe(false);
+    expect(byParent("videoKey", { layout: "tabs" }) && matchShowIf(child("videoKey"), { media: "video" })).toBe(true);
+  });
+
+  it("ค่ามั่ว = ค่าเริ่ม · ช่วงถูกบีบ · ปิดวนแล้วไม่เห็นช่องวินาที · ไม่มีข้อความแล้วไม่เห็นตำแหน่งข้อความ", () => {
+    const b = norm({ id: "g3", type: "gallery", layout: "tabs", tabsActive: 300, tabsSliver: "glitch", tabsCycle: false, tabsCap: "none", items: [{ imageKey: "a/1.jpg" }] });
+    expect(b.tabsActive).toBe(86);
+    expect(b.tabsSliver).toBe("pixel");
+    const keys = shown(b);
+    expect(keys).not.toContain("tabsCycleSec");
+    expect(keys).not.toContain("tabsCapPos");
+  });
+
+  it("เตือน: แถบวิดีโอมีช่องเดียว · ไม่เตือนเรื่องเปลี่ยนรูปเองของตาราง", () => {
+    const m = msgs({ id: "g4", type: "gallery", layout: "tabs", rotate: "slide", items: [{ imageKey: "a/1.jpg", alt: "x" }] });
+    expect(m).toContain("แถบวิดีโอต้องมีอย่างน้อย 2 ช่อง");
+    expect(m).not.toContain("เปลี่ยนรูปเอง");
+    expect(blockSummary(norm({ id: "g5", type: "gallery", layout: "tabs", items: [{ imageKey: "a/1.jpg" }] }))).toContain("แถบวิดีโอ");
+  });
+});

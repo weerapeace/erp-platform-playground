@@ -64,6 +64,7 @@ export type BlockType =
   | "lookbook"
   | "runway"
   | "scene"
+  | "hover-reveal"
   | "logos"
   | "collections"
   | "fitcheck"
@@ -762,6 +763,32 @@ export interface SceneBlock extends BlockBase {
     pos: "top" | "center" | "bottom";
   })[];
 }
+/** 🖱️ ข้อความใหญ่ + รูปตามเมาส์ (เว็บร้าน HoverReveal) — คำใหญ่หลายบรรทัด ชี้คำไหน รูปของคำนั้นลอยตามเมาส์
+ *  มือถือ: แตะคำ = รูปขึ้น · แตะคำเดิมซ้ำ = ไปลิงก์ */
+export interface HoverRevealBlock extends BlockBase {
+  type: "hover-reveal";
+  eyebrow: string;
+  note: string;
+  align: "left" | "center" | "right";
+  font: string;
+  weight: string;
+  size: number;
+  sizeMobile: number;
+  upper: boolean;
+  lineGap: "tight" | "normal" | "loose";
+  color: string;
+  hex: string;
+  others: "fade" | "outline" | "none";
+  imgW: number;
+  imgWMobile: number;
+  ratio: "3:4" | "1:1" | "4:5" | "2:3" | "4:3" | "16:9";
+  radius: number;
+  follow: "smooth" | "snap" | "fixed";
+  tilt: boolean;
+  imgFx: "pop" | "fade" | "clip";
+  layer: "front" | "back";
+  items: (ChildBase & { text: string; tag: string; imageKey: string | null; alt: string; href: string })[];
+}
 export interface LookbookBlock extends BlockBase {
   type: "lookbook";
   eyebrow: string;
@@ -1038,8 +1065,27 @@ export interface GalleryBlock extends BlockBase {
   capCardBg?: string;
   capCardHex?: string;
   capMobile?: "all" | "title" | "none";
-  /** 🖼️ grid = ตาราง (แบบเดิม) · strip = แถวรูปลุคบุ๊ก ชี้แล้วขยาย (ช่อง strip* — galleryStripFields ใน website-schema) */
-  layout?: "grid" | "strip";
+  /** 🖼️ grid = ตาราง (แบบเดิม) · strip = แถวรูปลุคบุ๊ก ชี้แล้วขยาย (ช่อง strip* — galleryStripFields ใน website-schema)
+   *  tabs = แถบวิดีโอ: ช่องที่ชี้ขยายกว้าง (เล่นคลิป) ที่เหลือเป็นแถบบาง (ช่อง tabs* — galleryTabsFields) */
+  layout?: "grid" | "strip" | "tabs";
+  tabsH?: number;
+  tabsHMobile?: number;
+  tabsActive?: number;
+  tabsGap?: number;
+  tabsRadius?: number;
+  tabsSliver?: "pixel" | "blur" | "dim" | "normal";
+  tabsSpeed?: "fast" | "normal" | "slow";
+  tabsStart?: "first" | "middle";
+  tabsCycle?: boolean;
+  tabsCycleSec?: "4" | "6" | "8" | "10";
+  tabsMobile?: "row" | "column";
+  tabsClick?: "auto" | "full" | "link";
+  tabsCursor?: string;
+  tabsCap?: "scramble" | "plain" | "none";
+  tabsCapPos?: "below" | "on";
+  tabsNum?: boolean;
+  tabsFont?: string;
+  tabsUpper?: boolean;
   stripEffect?: "soft" | "bounce" | "bend" | "lens";
   stripW?: number;
   stripWMobile?: number;
@@ -1066,7 +1112,7 @@ export interface GalleryBlock extends BlockBase {
   rotateFx?: "fade" | "up" | "zoom";
   rotateSec?: number;
   /** รายรูป: code = รหัสรุ่นสินค้า (≤1) → รูปแรก/ชื่อ/ลิงก์ของสินค้า เมื่อไม่ได้ใส่เอง
-   *  media "video" = เล่นคลิป videoKey (วนเงียบ · imageKey = รูปปก) — แบบตารางเท่านั้น (แถวรูปลุคบุ๊กโชว์รูปปก) */
+   *  media "video" = เล่นคลิป videoKey (วนเงียบ · imageKey = รูปปก) — แบบตาราง + แถบวิดีโอ (แถวรูปลุคบุ๊กโชว์รูปปก) */
   items: (ChildBase & { code?: string[]; media?: "image" | "video"; videoKey?: string | null; imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];
 }
 
@@ -1172,6 +1218,7 @@ export type Block =
   | LookbookBlock
   | RunwayBlock
   | SceneBlock
+  | HoverRevealBlock
   | LogosBlock
   | CollectionsBlock
   | FitCheckBlock
@@ -1277,11 +1324,15 @@ export function newBlock(type: BlockType, seq: number, opts?: { uniqueId?: boole
   const base = { id, type, enabled: true, visibility: { ...ALL_VISIBLE }, style: structuredCloneSafe(DEFAULT_BLOCK_STYLE) };
   const body = defaultsFromFields(schema.fields);
   if (schema.children) {
-    const n = schema.children.min ?? (schema.children.key === "features" ? 0 : 1);
-    body[schema.children.key] = Array.from({ length: n }, (_, i) => ({
-      id: opts?.uniqueId ? newChildId(schema.children!.key) : `${id}-${schema.children!.key}-${i + 1}`,
+    const spec = schema.children;
+    // starter = ชิ้นตั้งต้นที่ต่างกันตอนวาง Section ใหม่ (เห็นหน้าตาทันที) · ไม่มี = ชิ้นเปล่าเท่าจำนวนขั้นต่ำ
+    const starter = spec.starter?.() ?? [];
+    const n = starter.length || (spec.min ?? (spec.key === "features" ? 0 : 1));
+    body[spec.key] = Array.from({ length: n }, (_, i) => ({
+      id: opts?.uniqueId ? newChildId(spec.key) : `${id}-${spec.key}-${i + 1}`,
       enabled: true,
-      ...blankChild(schema.children!),
+      ...blankChild(spec),
+      ...(starter[i] ?? {}),
     }));
   }
   return { ...base, ...body } as Block;

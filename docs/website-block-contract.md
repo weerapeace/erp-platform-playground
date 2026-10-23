@@ -134,6 +134,25 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
   - ลดการเคลื่อนไหว (prefers-reduced-motion) = ไม่มีแอนิเมชัน + ไม่เลื่อนเอง · รูปขอ srcset ตามขนาดตอนขยาย (ไม่เบลอ) + lazy
 - ทดสอบ: mock `C:/erp-local/sf-hoverlb-mock.mjs` (:3240) + preview "sf-hoverlb" (:3241) · e2e headless `<scratchpad>/cdp/e2e-strip.mjs` (23 ข้อ คอม/มือถือ/ลดการเคลื่อนไหว)
 
+## 🎬 แกลเลอรีแบบ "แถบวิดีโอ" (layout tabs) — เพิ่ม 2026-10-23 · อ้างอิงหน้า Featured work ที่ช่องเรียงเป็นแถบ
+- ใช้ทำอะไร: ช่องเรียงแถวเดียว · ชี้ (คอม) / แตะ (มือถือ) ช่องไหน ช่องนั้นขยายกว้าง + เล่นคลิป · ที่เหลือเป็นแถบบาง (ภาพแตกพิกเซล) · ข้อความสลับวิ่ง + ตัวนับ 01 / 07 · ป้ายติดเมาส์ "[ VIEW FULLSCREEN ]"
+- ทำไมเป็นแบบหนึ่งของแกลเลอรี (ไม่ใช่ Section ใหม่): ใช้ชิ้นเดิมทั้งหมด (รูป/🎬 วิดีโอ + รูปปก/หัวข้อ/คำอธิบาย/ลิงก์/ข้อความลิงก์/รูปจากสินค้า) — เปลี่ยนรูปแบบได้โดยไม่ต้องใส่ของใหม่
+- ERP `galleryTabsFields()` (โชว์เฉพาะ `GAL_TABS`): `tabsH` `tabsHMobile` (px) · `tabsActive` (% ช่องที่ขยาย 40–86) · `tabsGap` `tabsRadius` · `tabsSliver` pixel/blur/dim/normal · `tabsSpeed` ·
+  `tabsStart` first/middle · `tabsCycle` (ค่าเริ่มเปิด) + `tabsCycleSec` 4/6/8/10 · `tabsMobile` row/column · `tabsClick` auto (มีลิงก์ = ไป · ไม่มี = เต็มจอ)/full/link · `tabsCursor` ·
+  ข้อความ: `tabsCap` scramble/plain/none · `tabsCapPos` below/on · `tabsNum` · `tabsFont` (mono + CANVAS_FONTS) · `tabsUpper`
+- ชิ้นเป็นวิดีโอได้ทั้งตาราง + แถบวิดีโอ (`GAL_MEDIA` ใน showIfParent) · ตรวจก่อนเผยแพร่: แถบวิดีโอ < 2 ช่อง = เตือน · ไม่เตือนเรื่องเปลี่ยนรูปเองของตาราง
+- เว็บร้าน `src/components/home/GalleryTabs.tsx` (client) · CSS `.gt-*` ใน globals.css
+  - ขยาย = `flex-grow` ของช่อง (`--g` = act×(n−1)/(1−act) · ที่เหลือ 1) → ไม่วัดด้วย JS · มือถือ column = flex-basis 56px / `--gt-hm`
+  - คลิปเล่นเฉพาะช่องที่ขยาย (AutoLoopVideo กลาง `active`) · แถบบางที่มีรูปปก = รูป 24px `image-rendering: pixelated` · คลิปไม่มีรูปปก = เบลอแทน
+  - เปลี่ยนช่องเมื่อเมาส์ "ขยับจริง" (`movementX/Y`) — ช่องขยายแล้วมาอยู่ใต้เมาส์นิ่งไม่นับ (กันกะพริบ)
+  - กด: ของกลาง `useClickGuard` (window capture ก่อน NavProgress) — ยังไม่ขยาย = ขยายก่อน · ขยายอยู่ = เต็มจอ (Overlay viewer + video controls / ImageLightbox) หรือไปลิงก์
+  - วนเอง: setTimeout ต่อช่อง (เปลี่ยนช่อง = นับใหม่) · หยุดเมื่อชี้/แตะ (พัก ≥ 8 วิ)/เต็มจอ/พ้นจอ/แท็บซ่อน/ลดการเคลื่อนไหว · เส้นเวลา `.gt-prog`
+- ทดสอบ: mock `<scratchpad>/sf-hover-mock.mjs` (:3264) · e2e `<scratchpad>/cdp/hover-tabs-e2e.mjs` (44 ข้อ รวม Section ข้อความใหญ่) · ERP `lib/__tests__/website-hover-reveal-tabs.test.ts`
+
+## 🖱️ Section "ข้อความใหญ่ + รูปตามเมาส์" (hover-reveal) — เพิ่ม 2026-10-23 · ดู `docs/website-hover-reveal.md`
+- ชนิดใหม่: `HoverRevealBlock` (ERP lib/website-blocks) · schema `"hover-reveal"` · เว็บร้าน `HoverReveal.tsx` ใน PURE_REGISTRY (พรีวิวสด) · CSS `.hr-*`
+- ชิ้นตั้งต้นตอนวาง Section ใหม่ = `ChildSpec.starter` (ของกลางใหม่ · newBlock ใช้แทนชิ้นเปล่าเท่า min) — Section อื่นใช้ได้
+
 ## 🛍 ลุคบุ๊กกดซื้อได้ — ปรับเพิ่ม 2026-10-18 (ค่าเริ่มทุกช่อง = หน้าตาเดิม)
 - จุดละหลายสินค้า: `spots[].code` สูงสุด 6 (ตัวแรก = หลัก · การ์ดเลื่อนดู ‹ 1/3 ›) · `spots[].label` ป้ายข้างจุด (ว่าง = ชื่อสินค้า)
 - สินค้าเพิ่มเติมไม่มีจุด: `more` (รหัสรุ่น ≤ 12) → อยู่ใน "รายการทั้งลุค" (แผงข้างรูปแบบรายการ / รายการใต้รูป / มือถือแบบรายการ)

@@ -208,6 +208,8 @@ export interface ChildSpec {
   summary: (item: Record<string, unknown>) => string;
   /** ชิ้นใหม่ตอนกด "+ เพิ่ม" — ไม่ใส่ = ใช้ default ของ fields */
   blank?: () => Record<string, unknown>;
+  /** ชิ้นตั้งต้นตอนวาง Section ใหม่ (แต่ละชิ้นต่างกันได้ · ทับค่าของ blank) — ไม่ใส่ = ชิ้นเปล่าเท่า min */
+  starter?: () => Record<string, unknown>[];
 }
 
 export interface SectionMeta {
@@ -634,6 +636,8 @@ const imageCaptionFields = (opts: { showIf?: ShowIf } = {}): FieldDef[] => {
  */
 const GAL_GRID: ShowIf = { key: "layout", eq: ["grid", "", undefined] };
 const GAL_STRIP: ShowIf = { key: "layout", eq: "strip" };
+/** แบบที่ชิ้นเป็นวิดีโอได้ (ตาราง + แถบวิดีโอ) */
+const GAL_MEDIA: ShowIf = { key: "layout", eq: ["grid", "", undefined, "tabs"] };
 const galleryStripFields = (): FieldDef[] => {
   const st = { showIf: GAL_STRIP };
   const cap = { group: "caption" as FieldGroup };
@@ -794,6 +798,126 @@ const galleryStripFields = (): FieldDef[] => {
     f("stripColor", "สีข้อความ", "select", { ...cap, default: "auto", options: [{ v: "auto", l: "อัตโนมัติ (บนรูป = ขาว)" }, ...CANVAS_COLORS], showIf: capOn }),
     f("stripHex", "สีข้อความ (เลือกเอง)", "color", { ...cap, default: "", showIf: [...capOn, { key: "stripColor", eq: "custom" }] }),
     f("stripPrice", "โชว์ราคา (รูปที่เลือกจากสินค้า)", "toggle", { ...cap, default: false, showIf: capOn }),
+  ];
+};
+
+/**
+ * 🎬 แกลเลอรีแบบ "แถบวิดีโอ" (layout tabs · 2026-10-23 · อ้างอิงหน้า Featured work ที่ช่องเรียงเป็นแถบ ชี้ช่องไหนช่องนั้นขยาย)
+ *   ช่องที่ขยาย = กว้าง tabsActive% เล่นคลิป (ชิ้นที่ตั้งเป็นวิดีโอ) / โชว์รูป · ที่เหลือแบ่งกันเป็นแถบบาง (ภาพแตกพิกเซล/เบลอ/มืด)
+ *   ข้อความ = หัวข้อ/คำอธิบาย/ข้อความลิงก์ ของรูปนั้น (ตัวอักษรสลับวิ่งก่อนขึ้น) + ตัวนับ 01 / 07 · ป้ายติดเมาส์ "[ VIEW FULLSCREEN ]"
+ *   มือถือ: แตะแถบ = ขยาย · แตะช่องที่ขยายอยู่ = เปิดเต็มจอ / ไปลิงก์ · เว็บร้าน src/components/home/GalleryTabs.tsx
+ */
+const GAL_TABS: ShowIf = { key: "layout", eq: "tabs" };
+const galleryTabsFields = (): FieldDef[] => {
+  const st = { showIf: GAL_TABS };
+  const cap = { group: "caption" as FieldGroup };
+  const capOn: ShowIf[] = [GAL_TABS, { key: "tabsCap", eq: ["scramble", "plain"] }];
+  return [
+    f("tabsH", "ความสูง — จอคอม (px)", "range", { group: "layout", default: 560, min: 280, numMax: 900, step: 20, ...st }),
+    f("tabsHMobile", "ความสูง — มือถือ (px)", "range", { group: "layout", default: 420, min: 240, numMax: 720, step: 20, ...st }),
+    f("tabsActive", "ช่องที่ขยาย กว้าง (%)", "range", { group: "layout", default: 64, min: 40, numMax: 86, step: 2, ...st, hint: "ที่เหลือแบ่งกันเป็นแถบบาง ๆ" }),
+    f("tabsGap", "ระยะห่างระหว่างช่อง (px)", "range", { group: "layout", default: 6, min: 0, numMax: 24, step: 2, ...st }),
+    f("tabsRadius", "มุมมน (px)", "range", { group: "layout", default: 4, min: 0, numMax: 32, step: 2, ...st }),
+    f("tabsSliver", "แถบบางที่ยังไม่ถูกชี้", "select", {
+      group: "layout",
+      default: "pixel",
+      options: [
+        { v: "pixel", l: "ภาพแตกเป็นพิกเซล (แบบตัวอย่าง)" },
+        { v: "blur", l: "เบลอ" },
+        { v: "dim", l: "มืดลง" },
+        { v: "normal", l: "ภาพปกติ" },
+      ],
+      ...st,
+    }),
+    f("tabsSpeed", "ความไวตอนขยาย", "select", {
+      group: "layout",
+      default: "normal",
+      options: [
+        { v: "fast", l: "เร็ว" },
+        { v: "normal", l: "ปกติ" },
+        { v: "slow", l: "ช้า นุ่มนวล" },
+      ],
+      ...st,
+    }),
+    f("tabsStart", "ตอนยังไม่มีใครชี้ ขยายช่องไหนรอไว้", "select", {
+      group: "layout",
+      default: "first",
+      options: [
+        { v: "first", l: "ช่องแรก" },
+        { v: "middle", l: "ช่องกลาง" },
+      ],
+      ...st,
+    }),
+    f("tabsCycle", "เปลี่ยนช่องเองวนไปเรื่อย ๆ (ตอนไม่มีใครชี้)", "toggle", {
+      group: "layout",
+      default: true,
+      wide: true,
+      ...st,
+      hint: "ชี้/แตะ = หยุดวน · เลื่อนพ้นจอ = หยุด · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว = ไม่วน",
+    }),
+    f("tabsCycleSec", "เปลี่ยนช่องทุก", "select", {
+      group: "layout",
+      default: "6",
+      options: [
+        { v: "4", l: "4 วินาที" },
+        { v: "6", l: "6 วินาที" },
+        { v: "8", l: "8 วินาที" },
+        { v: "10", l: "10 วินาที" },
+      ],
+      showIf: [GAL_TABS, { key: "tabsCycle", eq: true }],
+    }),
+    f("tabsMobile", "มือถือ เรียงแบบไหน", "select", {
+      group: "layout",
+      default: "row",
+      options: [
+        { v: "row", l: "แถวนอนเหมือนจอคอม (แตะแถบ = ขยาย)" },
+        { v: "column", l: "เรียงแนวตั้ง — ช่องที่ขยายสูง ที่เหลือเป็นแถบเตี้ย" },
+      ],
+      wide: true,
+      ...st,
+    }),
+    f("tabsClick", "กดช่องที่ขยายอยู่", "select", {
+      group: "action",
+      default: "auto",
+      options: [
+        { v: "auto", l: "มีลิงก์ = ไปลิงก์ · ไม่มี = เปิดดูเต็มจอ" },
+        { v: "full", l: "เปิดดูเต็มจอเสมอ" },
+        { v: "link", l: "ไปลิงก์เท่านั้น (ไม่มีลิงก์ = กดไม่ได้)" },
+      ],
+      wide: true,
+      ...st,
+      hint: "ลิงก์ = ช่อง \"กดรูปแล้วไปที่\" ของแต่ละรูป · มือถือ: แตะแถบ = ขยายก่อน แตะซ้ำ = ทำตามนี้",
+    }),
+    text("tabsCursor", "ป้ายที่ติดเมาส์", { group: "action", default: "[ VIEW FULLSCREEN ]", max: 30, ...st, hint: "ว่าง = ไม่มีป้าย · ช่องที่ไปลิงก์ = ใช้ \"ข้อความลิงก์\" ของรูปนั้นแทน (ถ้าใส่ไว้)" }),
+    f("tabsCap", "ข้อความของช่องที่ขยาย", "select", {
+      ...cap,
+      default: "scramble",
+      options: [
+        { v: "scramble", l: "ตัวอักษรสลับวิ่งก่อนขึ้น (แบบตัวอย่าง)" },
+        { v: "plain", l: "ขึ้นธรรมดา" },
+        { v: "none", l: "ไม่มีข้อความ" },
+      ],
+      ...st,
+      hint: "หัวข้อ / คำอธิบาย ใส่ทีละรูป · รูปจากสินค้า = ใช้ชื่อสินค้าถ้าไม่ได้ใส่หัวข้อ",
+    }),
+    f("tabsCapPos", "ข้อความอยู่ตรงไหน", "select", {
+      ...cap,
+      default: "below",
+      options: [
+        { v: "below", l: "ใต้แถบ (แบบตัวอย่าง)" },
+        { v: "on", l: "บนช่องที่ขยาย (แถบมืดด้านล่าง)" },
+      ],
+      showIf: capOn,
+    }),
+    f("tabsNum", "ตัวนับ 01 / 07", "toggle", { ...cap, default: true, ...st }),
+    f("tabsFont", "ฟอนต์ข้อความ", "select", {
+      ...cap,
+      default: "mono",
+      options: [{ v: "mono", l: "ตัวพิมพ์ดีด (mono) — แบบตัวอย่าง" }, ...CANVAS_FONTS],
+      display: "font",
+      ...st,
+    }),
+    f("tabsUpper", "ตัวพิมพ์ใหญ่ทั้งหมด (อังกฤษ)", "toggle", { ...cap, default: true, ...st }),
   ];
 };
 
@@ -1352,8 +1476,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         options: [
           { v: "grid", l: "ตารางรูป (แบบเดิม)" },
           { v: "strip", l: "แถวรูปลุคบุ๊ก — ชี้แล้วรูปขยาย + ข้อความ" },
+          { v: "tabs", l: "แถบวิดีโอ — ช่องที่ชี้ขยายใหญ่ (เล่นคลิป) ที่เหลือเป็นแถบบาง" },
         ],
-        hint: "แถวรูป = รูปเล็กเรียงแถวกลางจอ ชี้/แตะรูปไหน รูปนั้นขยายพร้อมเลข (01) + ข้อความ กดแล้วไปลิงก์ · แนะนำสัดส่วนรูปแนวตั้ง 3:4 หรือ 2:3",
+        hint: "แถวรูป = รูปเล็กเรียงแถวกลางจอ ชี้/แตะรูปไหน รูปนั้นขยายพร้อมเลข (01) + ข้อความ กดแล้วไปลิงก์ · แนะนำสัดส่วนรูปแนวตั้ง 3:4 หรือ 2:3 · แถบวิดีโอ = ใส่ชิ้นเป็น 🎬 วิดีโอ (ใส่รูปปกด้วย = แถบบางคมสวย) 4–8 ช่องกำลังดี",
       }),
       f("columns", "จำนวนคอลัมน์ (จอคอม)", "number", { group: "layout", default: 3, min: 1, numMax: 6, showIf: GAL_GRID }),
       ...imageLookFields({ ratio: "1:1", allowAuto: true, ratioHint: "ตัดรูปเป็นสัดส่วนนี้ — เลือกส่วนที่เห็น/ซูมได้ทีละรูป (กดที่รูปในพรีวิว/ต้นไม้) · แถวรูป: ตามรูปจริง = 3:4" }),
@@ -1395,6 +1520,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       }),
       f("rotateSec", "เปลี่ยนทุก (วินาที)", "number", { group: "layout", default: 3, min: 2, numMax: 15, showIf: [GAL_GRID, { key: "rotate", eq: ["slide", "one", "all"] }] }),
       ...galleryStripFields(),
+      ...galleryTabsFields(),
       ...imageCaptionFields({ showIf: GAL_GRID }),
     ],
     children: {
@@ -1410,7 +1536,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           wide: true,
           hint: "เลือกสินค้า = ใช้รูปแรก + ชื่อ + ลิงก์ไปหน้าสินค้าให้เอง · ใส่รูป/หัวข้อ/ลิงก์ด้านล่างเอง = ใช้ของที่ใส่แทน",
         }),
-        // 🎬 รูป หรือ วิดีโอ (แบบตาราง) — วิดีโอเล่นวนเงียบ ๆ เฉพาะตอนเห็นบนจอ · รูปด้านล่าง = รูปปกตอนคลิปยังไม่เล่น
+        // 🎬 รูป หรือ วิดีโอ (แบบตาราง + แถบวิดีโอ) — วิดีโอเล่นวนเงียบ ๆ เฉพาะตอนเห็นบนจอ · รูปด้านล่าง = รูปปกตอนคลิปยังไม่เล่น
         f("media", "ชนิด", "select", {
           group: "media",
           default: "image",
@@ -1418,9 +1544,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
             { v: "image", l: "🖼 รูป" },
             { v: "video", l: "🎬 วิดีโอ" },
           ],
-          showIfParent: GAL_GRID,
+          showIfParent: GAL_MEDIA,
         }),
-        f("videoKey", "คลิปวิดีโอ", "videoFile", { group: "media", default: null, showIf: { key: "media", eq: "video" }, showIfParent: GAL_GRID, hint: "เล่นวนเงียบ ๆ เฉพาะตอนเห็นบนจอ · MP4 แนวเดียวกับสัดส่วนรูปของ Section" }),
+        f("videoKey", "คลิปวิดีโอ", "videoFile", { group: "media", default: null, showIf: { key: "media", eq: "video" }, showIfParent: GAL_MEDIA, hint: "เล่นวนเงียบ ๆ เฉพาะตอนเห็นบนจอ · แบบตาราง = MP4 แนวเดียวกับสัดส่วนรูปของ Section · แถบวิดีโอ = คลิปแนวนอน/แนวตั้งก็ได้ (ครอปให้เต็มช่อง)" }),
         image("imageKey", "รูป", { hint: "ถ้าเป็นวิดีโอ = รูปปกตอนคลิปยังไม่เล่น (ไม่ใส่ก็ได้)" }),
         f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "ratio", showIf: { key: "media", eq: ["image", "", undefined] } }),
         text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200 }),
@@ -1437,14 +1563,16 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         return `${video ? "🎬 " : ""}${s(it.title) || s(it.caption) || s(it.alt) || (code ? `🛍 ${code}` : video ? "วิดีโอ" : "รูป")}`;
       },
     },
-    summary: (b) => `${b.layout === "strip" ? "แถวรูปลุคบุ๊ก · " : b.rotate && b.rotate !== "off" ? `🔁 ทุก ${Number(b.rotateSec) || 3} วิ · ` : ""}${count(arr(b.items).length, "รูป")}`,
+    summary: (b) =>
+      `${b.layout === "strip" ? "แถวรูปลุคบุ๊ก · " : b.layout === "tabs" ? "🎬 แถบวิดีโอ · " : b.rotate && b.rotate !== "off" ? `🔁 ทุก ${Number(b.rotateSec) || 3} วิ · ` : ""}${count(arr(b.items).length, "รูป")}`,
     validate: (b, label) => {
       const hasCode = (i: Record<string, unknown>) => Array.isArray(i.code) && i.code.length > 0;
       const withImg = arr(b.items).filter((i) => i.imageKey || hasCode(i) || (i.media === "video" && i.videoKey));
       if (!withImg.length) return [{ level: "error", message: `${label}: ยังไม่มีรูปในแกลเลอรี` }];
       const out: Omit<ValidationIssue, "blockId">[] = [];
-      // เปลี่ยนรูปเอง แต่รูปไม่เกินจำนวนคอลัมน์ = ไม่มีรูปให้หมุนเวียน
-      if (b.layout !== "strip" && b.rotate && b.rotate !== "off" && withImg.length <= (Number(b.columns) || 3))
+      if (b.layout === "tabs" && withImg.length < 2) out.push({ level: "warning", message: `${label}: แถบวิดีโอต้องมีอย่างน้อย 2 ช่อง (ตอนนี้ ${withImg.length})` });
+      // เปลี่ยนรูปเอง แต่รูปไม่เกินจำนวนคอลัมน์ = ไม่มีรูปให้หมุนเวียน (แบบตารางเท่านั้น)
+      if (b.layout !== "strip" && b.layout !== "tabs" && b.rotate && b.rotate !== "off" && withImg.length <= (Number(b.columns) || 3))
         out.push({ level: "warning", message: `${label}: ตั้งเปลี่ยนรูปเองไว้ แต่มีรูปไม่เกินจำนวนคอลัมน์ (${withImg.length} รูป) — เพิ่มรูปอีกถึงจะหมุนเวียน` });
       // รูปจากสินค้า = ใช้ชื่อสินค้าเป็นคำบรรยายให้เอง
       if (withImg.some((i) => !hasCode(i) && !s(i.alt))) out.push({ level: "warning", message: `${label}: บางรูปยังไม่มีคำบรรยาย (Alt)` });
@@ -2672,6 +2800,127 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         if (tabs > 1 && !scenes.some((x) => Number(x.tab || 1) === n)) out.push({ level: "warning", message: `${label}: แท็บ ${n} ยังไม่มีฉาก (จะใช้ฉากของแท็บ 1)` });
       }
       return out;
+    },
+  },
+
+  // 🖱️ ข้อความใหญ่ + รูปตามเมาส์ (2026-10-23 · อ้างอิงหน้าเว็บแบรนด์ Gen Z ที่คำใหญ่ ชี้คำแล้วรูปลอยตามเมาส์)
+  //   เว็บร้าน: src/components/home/HoverReveal.tsx · คำ = ชิ้นย่อย (ข้อความ + รูป + ลิงก์) · รูปผูกชุดรูปได้ (ช่องรูปกลาง)
+  //   คอม: ชี้คำ → รูปของคำนั้นลอยตามเมาส์ (นุ่ม/ติดเมาส์/กลางจอ + เอียงตามทิศ) · คำอื่นจาง/เหลือแค่เส้นขอบ · กด = ไปลิงก์
+  //   มือถือ: แตะคำ = รูปขึ้น (ยังไม่ไปไหน) · แตะคำเดิมซ้ำ = ไปลิงก์ · แตะที่อื่น = รูปหาย
+  "hover-reveal": {
+    type: "hover-reveal",
+    meta: { label: "ข้อความใหญ่ + รูปตามเมาส์", icon: "🖱️", hint: "คำใหญ่หลายบรรทัด ชี้คำไหน รูปของคำนั้นลอยตามเมาส์ · มือถือแตะ = รูปขึ้น แตะซ้ำ = ไปลิงก์", group: "เนื้อหา" },
+    fields: [
+      text("eyebrow", "คำโปรยเล็กด้านบน", { default: "", max: 80, placeholder: "เช่น (EXPLORE)" }),
+      area("note", "ข้อความเล็กใต้คำ", { default: "", max: 300 }),
+      f("align", "จัดคำ", "select", {
+        group: "layout",
+        default: "center",
+        options: [
+          { v: "left", l: "ชิดซ้าย" },
+          { v: "center", l: "กึ่งกลาง" },
+          { v: "right", l: "ชิดขวา" },
+        ],
+      }),
+      f("font", "ฟอนต์คำ", "select", { group: "layout", default: "display", options: CANVAS_FONTS, display: "font" }),
+      f("weight", "ความหนา", "select", { group: "layout", default: "700", options: CANVAS_WEIGHTS }),
+      f("size", "ขนาดคำ — จอคอม (px)", "range", { group: "layout", default: 128, min: 40, numMax: 260, step: 4, hint: "จอเล็กลงย่อตามเอง ไม่ล้นจอ" }),
+      f("sizeMobile", "ขนาดคำ — มือถือ (px)", "range", { group: "layout", default: 52, min: 24, numMax: 120, step: 2 }),
+      f("upper", "ตัวพิมพ์ใหญ่ทั้งหมด (อังกฤษ)", "toggle", { group: "layout", default: true }),
+      f("lineGap", "ระยะบรรทัด", "select", {
+        group: "layout",
+        default: "tight",
+        options: [
+          { v: "tight", l: "ชิด (แบบตัวอย่าง)" },
+          { v: "normal", l: "ปกติ" },
+          { v: "loose", l: "ห่าง" },
+        ],
+      }),
+      f("color", "สีคำ", "select", { group: "layout", default: "ink", options: CANVAS_COLORS }),
+      f("hex", "สีคำ (เลือกเอง)", "color", { group: "layout", default: "", showIf: { key: "color", eq: "custom" } }),
+      f("others", "คำอื่นตอนชี้คำหนึ่ง", "select", {
+        group: "layout",
+        default: "fade",
+        options: [
+          { v: "fade", l: "จางลง (เด่นแค่คำที่ชี้)" },
+          { v: "outline", l: "เหลือแค่เส้นขอบตัวอักษร" },
+          { v: "none", l: "เหมือนเดิม" },
+        ],
+      }),
+      f("imgW", "ขนาดรูป — จอคอม (px)", "range", { group: "media", default: 320, min: 160, numMax: 600, step: 20, hint: "ความกว้างของรูปที่ลอยขึ้น" }),
+      f("imgWMobile", "ขนาดรูป — มือถือ (px)", "range", { group: "media", default: 200, min: 120, numMax: 320, step: 10 }),
+      f("ratio", "สัดส่วนรูป", "select", {
+        group: "media",
+        default: "3:4",
+        options: [
+          { v: "3:4", l: "3:4 แนวตั้ง" },
+          { v: "4:5", l: "4:5 แนวตั้งนิด ๆ" },
+          { v: "2:3", l: "2:3 แนวตั้งสูง" },
+          { v: "1:1", l: "1:1 จัตุรัส" },
+          { v: "4:3", l: "4:3 แนวนอน" },
+          { v: "16:9", l: "16:9 แนวนอนกว้าง" },
+        ],
+      }),
+      f("radius", "มุมมนของรูป (px)", "range", { group: "media", default: 6, min: 0, numMax: 40, step: 2 }),
+      f("follow", "รูปตามเมาส์แบบไหน", "select", {
+        group: "media",
+        default: "smooth",
+        options: [
+          { v: "smooth", l: "ลอยตามนุ่ม ๆ (แบบตัวอย่าง)" },
+          { v: "snap", l: "ติดเมาส์ทันที" },
+          { v: "fixed", l: "ขึ้นกลางจอ ไม่ตามเมาส์" },
+        ],
+      }),
+      f("tilt", "รูปเอียงตามทิศที่เลื่อนเมาส์", "toggle", { group: "media", default: true, showIf: { key: "follow", eq: ["smooth", "snap"] } }),
+      f("imgFx", "ท่าที่รูปโผล่", "select", {
+        group: "media",
+        default: "pop",
+        options: [
+          { v: "pop", l: "ขยายจากเล็ก" },
+          { v: "fade", l: "จางเข้า" },
+          { v: "clip", l: "เผยจากล่างขึ้นบน" },
+        ],
+      }),
+      f("layer", "รูปอยู่หน้าหรือหลังตัวหนังสือ", "select", {
+        group: "media",
+        default: "front",
+        options: [
+          { v: "front", l: "หน้าตัวหนังสือ (แบบตัวอย่าง)" },
+          { v: "back", l: "หลังตัวหนังสือ (ตัวหนังสือทับรูป)" },
+        ],
+      }),
+    ],
+    children: {
+      key: "items",
+      label: "คำ / บรรทัด",
+      itemLabel: "คำ",
+      icon: "🔤",
+      min: 1,
+      max: 12,
+      fields: [
+        text("text", "ข้อความ (1 บรรทัด)", { default: "", max: 60, wide: true, placeholder: "เช่น NEW ARRIVAL" }),
+        text("tag", "ป้ายเล็กข้างคำ", { default: "", max: 20, placeholder: "เช่น (12) หรือ NEW" }),
+        image("imageKey", "รูปที่ลอยขึ้นตอนชี้", { hint: "ผูก 🔗 ชุดรูปได้ — เปลี่ยนรูปที่แท็บชุดรูปแล้วที่นี่เปลี่ยนตาม" }),
+        text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200, placeholder: "ว่าง = ใช้ข้อความของคำ" }),
+        f("href", "กดคำแล้วไปที่", "target", { group: "action", default: "", wide: true, hint: "ว่าง = กดไม่ได้ (ชี้แล้วรูปขึ้นอย่างเดียว)" }),
+      ],
+      summary: (it) => `${s(it.text) || "คำ"}${it.imageKey ? "" : " · ยังไม่มีรูป"}`,
+      blank: () => ({ text: "NEW WORD", tag: "", imageKey: null, alt: "", href: "" }),
+      starter: () => [
+        { text: "NEW ARRIVAL", href: "/shop" },
+        { text: "BEST SELLER", href: "/shop" },
+        { text: "OUR STORY", href: "" },
+      ],
+    },
+    summary: (b) => {
+      const words = arr(b.items).filter((i) => i.enabled !== false && s(i.text));
+      return words.length ? `${words.length} คำ · ${words.map((i) => s(i.text)).slice(0, 3).join(" / ")}` : "ยังไม่มีคำ";
+    },
+    validate: (b, label) => {
+      const words = arr(b.items).filter((i) => i.enabled !== false && s(i.text));
+      if (!words.length) return [{ level: "error", message: `${label}: ยังไม่ได้ใส่คำ` }];
+      const noImg = words.filter((i) => !i.imageKey).length;
+      return noImg ? [{ level: "warning", message: `${label}: ${noImg} คำยังไม่มีรูป (ชี้แล้วจะไม่มีรูปขึ้น)` }] : [];
     },
   },
 
