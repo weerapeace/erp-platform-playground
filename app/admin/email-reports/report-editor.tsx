@@ -1,12 +1,14 @@
 "use client";
 
 // ============================================================
-// ป๊อปตั้งค่ารายงานอีเมล (เพิ่ม / แก้ไข) — ฟอร์มซ้าย + ตัวอย่างอีเมลจริงขวา (อัปเดตเองเมื่อเปลี่ยนตัวกรอง)
-// ใช้ของกลาง: ERPModal · ERPInput/ERPTextarea/ERPTime24 · UserPicker · FieldChipsPicker · กฎตรวจค่า normalizeReportInput (ตัวเดียวกับ API)
-// "โชว์อะไรในอีเมล" อ่านรายการที่เลือกได้จากแหล่งข้อมูล (EMAIL_REPORT_SOURCES) — ไม่มีรายการตายตัวในหน้านี้
+// ป๊อปตั้งค่ารายงานอัตโนมัติ (เพิ่ม / แก้ไข) — แบบ A "การ์ดสรุป กดแก้ทีละเรื่อง" (เจ้าของเลือก 2026-10-23)
+//   เปิดมาเห็นสรุป 4 เรื่อง: 1 ส่งอะไร · 2 ส่งทางไหน · 3 เมื่อไหร่ · 4 หน้าตา — กดเรื่องไหนกางเรื่องนั้น (ทีละเรื่อง)
+//   ตัวอย่าง (อีเมล / รูป Discord / ป๊อป ERP) อยู่ที่ปุ่ม 👁 ดูตัวอย่าง ท้ายป๊อป · ตัวเลือกละเอียดซ่อนใต้ "ตั้งค่าเพิ่มเติม"
+// ใช้ของกลาง: ERPModal · ERPInput/ERPTextarea/ERPTime24 · UserPicker · FieldChipsPicker · WorkPopupBody · กฎตรวจค่า normalizeReportInput (ตัวเดียวกับ API)
+// "โชว์อะไร" อ่านรายการที่เลือกได้จากแหล่งข้อมูล (EMAIL_REPORT_SOURCES) — ไม่มีรายการตายตัวในหน้านี้
 // ============================================================
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPInput, ERPTextarea, ERPTime24 } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
@@ -17,13 +19,15 @@ import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-s
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  REPORT_CHANNELS, normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceDef,
+  REPORT_CHANNELS, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportPopup,
   type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 type DiscordMeta = { ready: { bot: boolean; buttons: boolean; link: boolean }; channels: { id: string; name: string; guild: string }[]; roles: { id: string; name: string; guild: string }[]; error: string | null };
+type SectionKey = "what" | "how" | "when" | "look";
+type PreviewTab = "email" | "discord" | "popup";
 
 export const emptyReportInput = (): EmailReportInput => ({
   name: "", source_key: EMAIL_REPORT_SOURCES[0].key,
@@ -46,6 +50,36 @@ export function toInput(r: EmailReport): EmailReportInput {
 const GROUPS: { v: BrandGroupFilter; label: string }[] = [
   { v: "all", label: "ทุกแบรนด์" }, { v: "customer", label: "👤 งานลูกค้า" }, { v: "own", label: "🏷️ แบรนด์เรา" },
 ];
+const GROUP_TEXT: Record<BrandGroupFilter, string> = { all: "ทุกแบรนด์", customer: "งานลูกค้า", own: "แบรนด์เรา" };
+
+/** ข้อความ error จากกฎตรวจค่า → เรื่องที่ต้องกางให้ดู */
+function sectionOfError(msg: string): SectionKey | null {
+  if (/ผู้รับ|อีเมล|Discord|ห้อง|ป๊อป|ช่องทาง|ตำแหน่ง/.test(msg)) return "how";
+  if (/วัน|เวลา/.test(msg)) return "when";
+  if (/ข้อมูลที่จะส่ง/.test(msg)) return "what";
+  return null;
+}
+
+/** การ์ดสรุป 1 เรื่อง — ปิดอยู่ = โชว์สรุป + "แก้ ›" · เปิด = กางฟอร์มของเรื่องนั้น */
+function Section({ n, title, summary, warn, open, onToggle, children }: {
+  n: number; title: string; summary: ReactNode; warn?: string | null; open: boolean; onToggle: () => void; children: ReactNode;
+}) {
+  return (
+    <div className={`rounded-xl border bg-white transition ${open ? "border-blue-300 ring-1 ring-blue-200" : "border-slate-200"}`}>
+      <button type="button" onClick={onToggle} aria-expanded={open}
+        className="flex w-full items-start gap-3 rounded-xl px-4 py-3 text-left hover:bg-slate-50/70">
+        <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${open ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{n}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-slate-800">{title}</span>
+          {!open && <span className="mt-0.5 block text-xs text-slate-500">{summary}</span>}
+          {!open && warn && <span className="mt-1 block text-xs text-amber-700">⚠ {warn}</span>}
+        </span>
+        <span className="mt-0.5 shrink-0 text-xs font-medium text-blue-600">{open ? "เสร็จ ▴" : "แก้ ›"}</span>
+      </button>
+      {open && <div className="space-y-3 border-t border-slate-100 px-4 pb-4 pt-3">{children}</div>}
+    </div>
+  );
+}
 
 export function ReportEditor({ open, editing, channels = null, onClose, onSaved }: {
   open: boolean;
@@ -68,8 +102,19 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const previewSeq = useRef(0);
+  // แบบ A: เรื่องที่กางอยู่ (ทีละเรื่อง) · โหมดดูตัวอย่าง · ตั้งค่าเพิ่มเติมในเรื่องหน้าตา
+  const [sec, setSec] = useState<SectionKey | null>(null);
+  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  const [prevTab, setPrevTab] = useState<PreviewTab>("email");
+  const [more, setMore] = useState(false);
+  const toggleSec = (k: SectionKey) => setSec((s) => (s === k ? null : k));
 
-  useEffect(() => { if (open) { setForm(initial); setError(null); setExtEmail(""); setExtErr(null); } }, [open, initial]);
+  useEffect(() => {
+    if (!open) return;
+    setForm(initial); setError(null); setExtEmail(""); setExtErr(null);
+    setSec(editing ? null : "what"); setMode("edit"); setPrevTab("email"); setMore(false);   // เพิ่มใหม่ = กางเรื่องแรกให้เลย
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initial]);
   useEffect(() => {
     if (!open) return;
     apiFetch("/api/brands").then((r) => r.json()).then((j) => { if (Array.isArray(j.data)) setBrands(j.data as Brand[]); }).catch(() => {});
@@ -151,10 +196,11 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const brandIds = form.filters.brand_ids ?? [];
   const toggleBrand = (id: string) => setFilters({ brand_ids: brandIds.includes(id) ? brandIds.filter((x) => x !== id) : [...brandIds, id] });
 
-  // ตัวอย่างอีเมล: โหลดใหม่เองหลังหยุดแก้ 0.6 วิ (ไม่รวมผู้รับ — ไม่กระทบหน้าตาอีเมล)
+  // ตัวอย่างอีเมล: โหลดใหม่เองหลังหยุดแก้ 0.6 วิ — เฉพาะตอนดูตัวอย่าง หรือกางเรื่อง "หน้าตา" (ใช้ตัวเลข "มีข้อมูล x/y")
   const previewKey = JSON.stringify({ n: form.name, s: form.source_key, f: form.filters, o: form.options, d: form.days, t: form.send_time });
+  const wantPreview = open && (mode === "preview" || sec === "look");
   useEffect(() => {
-    if (!open) return;
+    if (!wantPreview) return;
     const seq = ++previewSeq.current;
     const timer = setTimeout(() => {
       setPreviewLoading(true); setPreviewErr(null);
@@ -166,7 +212,26 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, previewKey]);
+  }, [wantPreview, previewKey]);
+
+  // แท็บตัวอย่าง = ช่องทางที่เปิด (อีเมล = หน้าตารายงานหลักเสมอ) · เข้าแท็บไหนโหลดของแท็บนั้นเอง
+  const previewTabs: { key: PreviewTab; label: string }[] = [
+    { key: "email", label: form.email_enabled ? "✉️ อีเมล" : "📄 หน้าตารายงาน" },
+    ...(discordOn ? [{ key: "discord" as const, label: "💬 รูป Discord" }] : []),
+    ...(popupOn ? [{ key: "popup" as const, label: "🔔 ป๊อป ERP" }] : []),
+  ];
+  const curTab: PreviewTab = previewTabs.some((t) => t.key === prevTab) ? prevTab : "email";
+  useEffect(() => {
+    if (mode !== "preview") return;
+    if (curTab === "discord" && !img.url && !img.busy && !img.err) void showImage();
+    if (curTab === "popup" && !popPrev.data && !popPrev.busy && !popPrev.err) void showPopup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, curTab]);
+  const openPreview = () => {
+    if (img.url) URL.revokeObjectURL(img.url);
+    setImg({ url: null, busy: false, err: null }); setPopPrev({ data: null, busy: false, err: null });   // เข้าใหม่ = วาดจากค่าล่าสุด
+    setMode("preview");
+  };
 
   const addUser = (u: { id: string; name: string; email?: string | null } | null) => {
     if (!u) return;
@@ -185,7 +250,11 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const save = async () => {
     if (saving) return;
     const parsed = normalizeReportInput(form);           // กฎเดียวกับ API — เตือนก่อนยิง
-    if ("error" in parsed) { setError(parsed.error); return; }
+    if ("error" in parsed) {
+      setError(parsed.error);
+      const s = sectionOfError(parsed.error); if (s) { setMode("edit"); setSec(s); }   // กางเรื่องที่ต้องแก้ให้เลย
+      return;
+    }
     setSaving(true); setError(null);
     try {
       const res = await apiFetch(editing ? `/api/admin/email-reports/${editing.id}` : "/api/admin/email-reports", {
@@ -203,29 +272,161 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const chip = (on: boolean) => `h-8 rounded-lg border px-2.5 text-xs font-medium transition ${on ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
   const recipientLabel = (r: EmailRecipient) => (r.type === "user" ? r.name || r.email || "ผู้ใช้" : r.email);
 
+  // ── สรุปของแต่ละเรื่อง (โชว์ตอนพับ) ──
+  const brandNames = brands.filter((b) => brandIds.includes(b.id)).map((b) => b.name);
+  const whatSummary = [
+    src.label,
+    brandNames.length ? `แบรนด์ ${brandNames.slice(0, 3).join(", ")}${brandNames.length > 3 ? ` +${brandNames.length - 3}` : ""}` : GROUP_TEXT[form.filters.brand_group ?? "all"],
+    statuses.length ? `${statuses.length} สถานะ` : "ทุกสถานะที่ยังไม่ปิด",
+  ].join(" · ");
+  const howSummary = (
+    <span className="flex flex-wrap gap-1">
+      {REPORT_CHANNELS.map((c) => {
+        const on = reportChannelOn(form, c.key);
+        const detail = c.key === "email" ? `${form.recipients.length} คน`
+          : c.key === "discord" ? (form.discord.channel_name ? `#${form.discord.channel_name}` : "ยังไม่เลือกห้อง")
+          : `${form.popup.from}–${form.popup.to} น.`;
+        return (
+          <span key={c.key} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 ${on ? "bg-emerald-50 text-emerald-800" : "border border-dashed border-slate-300 text-slate-400"}`}>
+            {on ? "✓" : "－"} {c.icon} {c.label}{on && <span className="opacity-75">· {detail}</span>}
+            {on && channels && !channels[c.key] && <span className="text-amber-700">(ปิดทั้งระบบ)</span>}
+          </span>
+        );
+      })}
+    </span>
+  );
+  const howWarn = !form.email_enabled && !discordOn && !popupOn ? "ยังไม่ได้เลือกช่องทาง"
+    : form.email_enabled && form.recipients.length === 0 ? "Gmail ยังไม่มีผู้รับ"
+    : discordOn && !form.discord.channel_id ? "Discord ยังไม่เลือกห้อง" : null;
+  const whenSummary = `${form.days.length ? describeDays(form.days) : "ยังไม่เลือกวัน"} · ${form.send_time} น.${form.skip_if_empty ? " · ไม่มีงานค้างไม่ส่ง" : ""} · ${form.is_enabled ? "✅ เปิดใช้อยู่" : "⏸ ยังปิดอยู่"}`;
+  const fieldLabels = (opt.row_fields ?? []).map((k) => src.rowFields.find((f) => f.key === k)?.label).filter(Boolean) as string[];
+  const lookSummary = `ตัวเลขสรุป ${(opt.stats ?? []).length} อย่าง · ${fieldLabels.length ? `${fieldLabels.slice(0, 4).join(" ")}${fieldLabels.length > 4 ? ` +${fieldLabels.length - 4}` : ""}` : "โชว์แค่ชื่องาน"}${opt.only_flagged ? " · เฉพาะงานมีป้ายเตือน" : ""}`;
+
   return (
     <ERPModal open={open} onClose={onClose} size="xl" storageKey="email-report-editor" hasUnsavedChanges={dirty}
       title={editing ? `แก้ไขรายงาน — ${editing.name}` : "เพิ่มรายงานอัตโนมัติ"}
-      description="ตั้งว่าจะส่งข้อมูลอะไร ทางไหน ถึงใคร วันไหน กี่โมง · ด้านขวาคือหน้าตาอีเมลจริงจากข้อมูลตอนนี้"
+      description={mode === "preview" ? "หน้าตาจริงจากข้อมูลตอนนี้ (ยังไม่ส่ง)" : "สรุป 4 เรื่อง กดเรื่องไหนแก้เรื่องนั้น · ดูหน้าตาจริงที่ปุ่ม 👁 ดูตัวอย่าง"}
       footer={
         <div className="flex w-full flex-wrap items-center justify-end gap-2">
           {error && <span className="mr-auto text-sm text-rose-600">⚠ {error}</span>}
+          <button onClick={() => (mode === "preview" ? setMode("edit") : openPreview())} disabled={saving}
+            className={`h-9 rounded-lg border px-4 text-sm font-medium ${mode === "preview" ? "border-slate-300 text-slate-700 hover:bg-slate-50" : "border-blue-200 text-blue-700 hover:bg-blue-50"} ${error ? "" : "mr-auto"}`}>
+            {mode === "preview" ? "← กลับไปแก้" : "👁 ดูตัวอย่าง"}</button>
           <button onClick={onClose} disabled={saving} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
           <button onClick={() => void save()} disabled={saving} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             {saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
         </div>
       }>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        {/* ── ฟอร์ม ── */}
-        <div className="space-y-4">
+      {mode === "preview" ? (
+        /* ── 👁 ดูตัวอย่าง: แท็บตามช่องทางที่เปิด ── */
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-3 flex flex-wrap gap-1 border-b border-slate-200">
+            {previewTabs.map((t) => (
+              <button key={t.key} type="button" onClick={() => setPrevTab(t.key)}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm ${curTab === t.key ? "border-blue-600 font-medium text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{t.label}</button>
+            ))}
+          </div>
+          {curTab === "email" && (
+            <div>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                {preview ? <div className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600" title={preview.subject}>หัวเรื่อง: <b>{preview.subject}</b></div> : <span />}
+                <span className="shrink-0 text-[11px] text-slate-400">{previewLoading ? "กำลังโหลด..." : preview ? `พบ ${preview.total} งาน · โชว์ ${preview.shown}` : ""}</span>
+              </div>
+              {previewErr ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">⚠ {previewErr}</div>
+              ) : preview ? (
+                <iframe title="ตัวอย่างอีเมล" srcDoc={preview.html} sandbox="allow-popups allow-popups-to-escape-sandbox"
+                  className={`h-[65vh] min-h-[420px] w-full rounded-lg border border-slate-200 bg-slate-100 transition-opacity ${previewLoading ? "opacity-60" : ""}`} />
+              ) : (
+                <div className="flex h-[420px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">กำลังเตรียมตัวอย่าง...</div>
+              )}
+              <p className="mt-1.5 text-[11px] text-slate-400">รูปในอีเมลจริงจะโหลดจากระบบ · Gmail โชว์ทันที · Outlook บางเครื่องถามก่อนโหลดรูป</p>
+            </div>
+          )}
+          {curTab === "discord" && (
+            <div>
+              <button type="button" onClick={() => void showImage()} disabled={img.busy}
+                className="h-8 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+                {img.busy ? "กำลังวาดรูป…" : "↻ วาดรูปใหม่"}</button>
+              {img.err && <p className="mt-2 text-sm text-rose-600">⚠ {img.err}</p>}
+              {img.url && (
+                <a href={img.url} target="_blank" rel="noreferrer" title="เปิดรูปขนาดเต็ม" className="mt-2 block max-h-[65vh] overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img.url} alt="รูปรายงานที่จะส่งเข้า Discord" className="w-full" />
+                </a>
+              )}
+              <p className="mt-1.5 text-[11px] text-slate-400">รูปนี้ส่งเข้าห้อง Discord พร้อมการ์ดติ๊กเฉพาะใบที่มีของรอ</p>
+            </div>
+          )}
+          {curTab === "popup" && (
+            <div className="mx-auto max-w-2xl">
+              {popPrev.busy && <p className="text-sm text-slate-400">กำลังโหลดตัวอย่างป๊อป…</p>}
+              {popPrev.err && <p className="text-sm text-rose-600">⚠ {popPrev.err}</p>}
+              {popPrev.data && (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3 text-base font-semibold text-slate-800">🔔 {popPrev.data.heading}</div>
+                  <WorkPopupBody data={popPrev.data} preview />
+                </div>
+              )}
+              <p className="mt-2 text-[11px] text-slate-400">"งานของคุณ" = ข้อที่ใส่ชื่อคุณ · คนที่ไม่ได้อยู่ในตำแหน่งที่เลือกแต่มีงานใส่ชื่อ จะเห็นแค่ส่วน "งานของคุณ"</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ── แบบ A: ชื่อ + การ์ดสรุป 4 เรื่อง ── */
+        <div className="mx-auto max-w-3xl space-y-3">
           <div>
             <label className={label}>ชื่อรายงาน</label>
             <ERPInput value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="เช่น งานออกแบบที่ค้าง (ทุกแบรนด์)" />
           </div>
 
-          {/* 🔌 ส่งทางไหน — ติ๊กช่องไหน ค่อยโชว์การตั้งค่าของช่องนั้นด้านล่าง · ปิดทั้งระบบ = ตั้งไว้ได้แต่ยังไม่ส่ง */}
-          <div>
-            <label className={label}>ส่งทางไหน <span className="font-normal text-slate-400">(เลือกได้หลายช่อง)</span></label>
+          {/* 1 ส่งอะไร */}
+          <Section n={1} title="ส่งอะไร" summary={whatSummary} open={sec === "what"} onToggle={() => toggleSec("what")}>
+            <div>
+              <label className={label}>ข้อมูลที่ส่ง</label>
+              <select value={form.source_key} onChange={(e) => set({ source_key: e.target.value, options: normalizeReportOptions(e.target.value, form.options) })}
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {EMAIL_REPORT_SOURCES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-400">{EMAIL_REPORT_SOURCES.find((s) => s.key === form.source_key)?.description}</p>
+            </div>
+            <div>
+              <label className={label}>กลุ่มแบรนด์</label>
+              <div className="flex flex-wrap gap-1">
+                {GROUPS.map((g) => (
+                  <button key={g.v} type="button" onClick={() => setFilters({ brand_group: g.v, brand_ids: [] })} className={chip((form.filters.brand_group ?? "all") === g.v)}>{g.label}</button>
+                ))}
+              </div>
+            </div>
+            {groupBrands.length > 0 && (
+              <div>
+                <label className={label}>เฉพาะแบรนด์ <span className="font-normal text-slate-400">(ไม่เลือก = ทุกแบรนด์ในกลุ่ม)</span></label>
+                <div className="flex flex-wrap gap-1">
+                  {groupBrands.map((b) => (
+                    <button key={b.id} type="button" onClick={() => toggleBrand(b.id)} className={chip(brandIds.includes(b.id))}>
+                      <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: b.color && /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : "#94a3b8" }} />{b.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {pendingStatuses.length > 0 && (
+              <div>
+                <label className={label}>สถานะ <span className="font-normal text-slate-400">(ส่งเฉพาะงานที่ยังไม่ปิด)</span></label>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {pendingStatuses.map((s) => (
+                    <label key={s.key} className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-700">
+                      <input type="checkbox" checked={statuses.length === 0 || statuses.includes(s.key)} onChange={() => toggleStatus(s.key)} className="h-3.5 w-3.5" />
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />{s.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Section>
+
+          {/* 2 ส่งทางไหน — ติ๊กช่องไหน ค่อยโชว์การตั้งค่าช่องนั้น · ปิดทั้งระบบ = ตั้งไว้ได้แต่ยังไม่ส่ง */}
+          <Section n={2} title="ส่งทางไหน" summary={howSummary} warn={howWarn} open={sec === "how"} onToggle={() => toggleSec("how")}>
             <div className="grid gap-2 sm:grid-cols-3">
               {REPORT_CHANNELS.map((c) => {
                 const on = reportChannelOn(form, c.key);
@@ -242,174 +443,94 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 );
               })}
             </div>
-          </div>
-          <div>
-            <label className={label}>ข้อมูลที่ส่ง</label>
-            <select value={form.source_key} onChange={(e) => set({ source_key: e.target.value, options: normalizeReportOptions(e.target.value, form.options) })}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              {EMAIL_REPORT_SOURCES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-            <p className="mt-1 text-[11px] text-slate-400">{EMAIL_REPORT_SOURCES.find((s) => s.key === form.source_key)?.description}</p>
-          </div>
 
-          <div className="rounded-lg border border-slate-200 p-3">
-            <div className="mb-2 text-xs font-semibold text-slate-700">กรองเฉพาะ</div>
-            <label className={label}>กลุ่มแบรนด์</label>
-            <div className="flex flex-wrap gap-1">
-              {GROUPS.map((g) => (
-                <button key={g.v} type="button" onClick={() => setFilters({ brand_group: g.v, brand_ids: [] })} className={chip((form.filters.brand_group ?? "all") === g.v)}>{g.label}</button>
-              ))}
-            </div>
-            {groupBrands.length > 0 && (
-              <div className="mt-2">
-                <label className={label}>เฉพาะแบรนด์ <span className="font-normal text-slate-400">(ไม่เลือก = ทุกแบรนด์ในกลุ่ม)</span></label>
-                <div className="flex flex-wrap gap-1">
-                  {groupBrands.map((b) => (
-                    <button key={b.id} type="button" onClick={() => toggleBrand(b.id)} className={chip(brandIds.includes(b.id))}>
-                      <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: b.color && /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : "#94a3b8" }} />{b.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {pendingStatuses.length > 0 && (
-              <div className="mt-2">
-                <label className={label}>สถานะ <span className="font-normal text-slate-400">(ส่งเฉพาะงานที่ยังไม่ปิด)</span></label>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {pendingStatuses.map((s) => (
-                    <label key={s.key} className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-700">
-                      <input type="checkbox" checked={statuses.length === 0 || statuses.includes(s.key)} onChange={() => toggleStatus(s.key)} className="h-3.5 w-3.5" />
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />{s.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <div>
-              <label className={label}>วันส่ง</label>
-              <div className="flex flex-wrap gap-1">
-                {DAY_LABELS.map((d) => {
-                  const on = form.days.includes(d.n);
-                  return (
-                    <button key={d.n} type="button" title={d.full} onClick={() => set({ days: on ? form.days.filter((x) => x !== d.n) : [...form.days, d.n].sort((a, b) => a - b) })}
-                      className={`h-9 w-10 rounded-lg border text-xs font-medium ${on ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{d.short}</button>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <label className={label}>เวลา (ไทย)</label>
-              <ERPTime24 value={form.send_time} onChange={(v) => set({ send_time: v })} />
-            </div>
-          </div>
-
-          {/* ✉️ Gmail — ผู้รับ (โชว์เมื่อเลือกช่องอีเมล) */}
-          {form.email_enabled && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-3 text-sm">
-            <div className="mb-2 text-xs font-semibold text-slate-700">✉️ Gmail — ผู้รับ <span className="font-normal text-slate-400">(ทุกคนได้อีเมลฉบับเดียวกัน)</span></div>
-            {form.recipients.length > 0 ? (
-              <div className="mb-2 flex flex-wrap gap-1.5">
-                {form.recipients.map((r, i) => {
-                  const noEmail = r.type === "user" && !r.email;
-                  return (
-                    <span key={`${r.type}-${r.type === "user" ? r.id : r.email}`} title={r.type === "user" ? r.email ?? "ผู้ใช้นี้ยังไม่มีอีเมลในระบบ" : "อีเมลนอกระบบ"}
-                      className={`inline-flex items-center gap-1 rounded-full border py-0.5 pl-2 pr-1 text-xs ${noEmail ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
-                      {r.type === "user" ? "👤" : "✉️"} {recipientLabel(r)}{noEmail && " (ไม่มีอีเมล)"}
-                      <button type="button" onClick={() => removeRecipient(i)} aria-label={`เอา ${recipientLabel(r)} ออก`} className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700">✕</button>
-                    </span>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="mb-2 text-xs text-slate-400">ยังไม่มีผู้รับ — เลือกผู้ใช้ในระบบ หรือพิมพ์อีเมลนอกระบบ</p>
-            )}
-            <div className="grid gap-2 sm:grid-cols-2">
-              <UserPicker value={null} onChange={(u) => addUser(u)} placeholder="＋ เลือกผู้ใช้ในระบบ..." />
-              <div>
-                <div className="flex gap-1.5">
-                  <input value={extEmail} onChange={(e) => { setExtEmail(e.target.value); setExtErr(null); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addEmail(); } }}
-                    placeholder="อีเมลนอกระบบ เช่น partner@gmail.com" inputMode="email"
-                    className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <button type="button" onClick={addEmail} className="h-9 shrink-0 rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">เพิ่ม</button>
-                </div>
-                {extErr && <p className="mt-1 text-xs text-rose-600">{extErr}</p>}
-              </div>
-            </div>
-          </div>
-          )}
-
-          {/* 💬 ส่งเข้า Discord: ภาพรวม + รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ (ปุ่มติ๊ก) — lib/email-report/discord · โชว์เมื่อเลือกช่อง Discord */}
-          {discordOn && (
-          <div className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-3 text-sm">
-            <div className="text-xs font-semibold text-slate-700">
-              💬 Discord <span className="font-normal text-slate-400">(รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ พร้อมปุ่มติ๊ก)</span>
-            </div>
-            {!dmeta ? <p className="mt-2 text-xs text-slate-400">กำลังโหลดห้อง Discord…</p>
-              : !dmeta.ready.bot ? <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">ยังไม่ได้ตั้งบอท Discord — ทำตาม "คู่มือตั้งบอท Discord" ในหน้านี้ก่อน (ตั้งค่าไว้ก่อนได้ แต่ยังส่งไม่ได้)</p>
-              : (
-                <div className="mt-2 space-y-2">
-                  {dmeta.error && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{dmeta.error}</p>}
-                  {!dmeta.ready.buttons && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">ปุ่มติ๊กยังใช้ไม่ได้ (ยังไม่ได้ใส่ DISCORD_PUBLIC_KEY + ลิงก์รับปุ่ม) — การ์ดจะมีแค่ปุ่ม "เปิดใบงาน"</p>}
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div>
-                      <label className={label}>ห้อง</label>
-                      <select value={form.discord.channel_id ?? ""} onChange={(e) => { const c = dmeta.channels.find((x) => x.id === e.target.value); setDiscord({ channel_id: c?.id ?? null, channel_name: c?.name ?? null }); }}
-                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">— เลือกห้อง —</option>
-                        {form.discord.channel_id && !dmeta.channels.some((c) => c.id === form.discord.channel_id) && <option value={form.discord.channel_id}>#{form.discord.channel_name ?? form.discord.channel_id} (บอทมองไม่เห็นแล้ว)</option>}
-                        {dmeta.channels.map((c) => <option key={c.id} value={c.id}>#{c.name}{new Set(dmeta.channels.map((x) => x.guild)).size > 1 ? ` · ${c.guild}` : ""}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className={label}>แท็กบทบาท <span className="font-normal text-slate-400">(ไม่บังคับ)</span></label>
-                      <select value={form.discord.role_id ?? ""} onChange={(e) => { const r = dmeta.roles.find((x) => x.id === e.target.value); setDiscord({ role_id: r?.id ?? null, role_name: r?.name ?? null }); }}
-                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">— ไม่แท็ก —</option>
-                        {dmeta.roles.map((r) => <option key={r.id} value={r.id}>@{r.name}</option>)}
-                      </select>
-                    </div>
+            {/* ✉️ Gmail — ผู้รับ */}
+            {form.email_enabled && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-3 text-sm">
+                <div className="mb-2 text-xs font-semibold text-slate-700">✉️ Gmail — ผู้รับ <span className="font-normal text-slate-400">(ทุกคนได้อีเมลฉบับเดียวกัน)</span></div>
+                {form.recipients.length > 0 ? (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {form.recipients.map((r, i) => {
+                      const noEmail = r.type === "user" && !r.email;
+                      return (
+                        <span key={`${r.type}-${r.type === "user" ? r.id : r.email}`} title={r.type === "user" ? r.email ?? "ผู้ใช้นี้ยังไม่มีอีเมลในระบบ" : "อีเมลนอกระบบ"}
+                          className={`inline-flex items-center gap-1 rounded-full border py-0.5 pl-2 pr-1 text-xs ${noEmail ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-700"}`}>
+                          {r.type === "user" ? "👤" : "✉️"} {recipientLabel(r)}{noEmail && " (ไม่มีอีเมล)"}
+                          <button type="button" onClick={() => removeRecipient(i)} aria-label={`เอา ${recipientLabel(r)} ออก`} className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700">✕</button>
+                        </span>
+                      );
+                    })}
                   </div>
-                  {form.discord.role_id && (
-                    <div className="flex flex-wrap items-center gap-1 text-xs text-slate-600">แท็ก @{form.discord.role_name}
-                      {(["overdue", "always"] as const).map((m) => <button key={m} type="button" onClick={() => setDiscord({ mention: m })} className={chip(form.discord.mention === m)}>{DISCORD_MENTION_LABEL[m]}</button>)}
+                ) : (
+                  <p className="mb-2 text-xs text-slate-400">ยังไม่มีผู้รับ — เลือกผู้ใช้ในระบบ หรือพิมพ์อีเมลนอกระบบ</p>
+                )}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <UserPicker value={null} onChange={(u) => addUser(u)} placeholder="＋ เลือกผู้ใช้ในระบบ..." />
+                  <div>
+                    <div className="flex gap-1.5">
+                      <input value={extEmail} onChange={(e) => { setExtEmail(e.target.value); setExtErr(null); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addEmail(); } }}
+                        placeholder="อีเมลนอกระบบ เช่น partner@gmail.com" inputMode="email"
+                        className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <button type="button" onClick={addEmail} className="h-9 shrink-0 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">เพิ่ม</button>
+                    </div>
+                    {extErr && <p className="mt-1 text-xs text-rose-600">{extErr}</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 💬 Discord: รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ (ปุ่มติ๊ก) — lib/email-report/discord */}
+            {discordOn && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-3 text-sm">
+                <div className="text-xs font-semibold text-slate-700">💬 Discord <span className="font-normal text-slate-400">(รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ พร้อมปุ่มติ๊ก)</span></div>
+                {!dmeta ? <p className="mt-2 text-xs text-slate-400">กำลังโหลดห้อง Discord…</p>
+                  : !dmeta.ready.bot ? <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">ยังไม่ได้ตั้งบอท Discord — ทำตาม "คู่มือตั้งบอท Discord" ในหน้านี้ก่อน (ตั้งค่าไว้ก่อนได้ แต่ยังส่งไม่ได้)</p>
+                  : (
+                    <div className="mt-2 space-y-2">
+                      {dmeta.error && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{dmeta.error}</p>}
+                      {!dmeta.ready.buttons && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">ปุ่มติ๊กยังใช้ไม่ได้ (ยังไม่ได้ใส่ DISCORD_PUBLIC_KEY + ลิงก์รับปุ่ม) — การ์ดจะมีแค่ปุ่ม "เปิดใบงาน"</p>}
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div>
+                          <label className={label}>ห้อง</label>
+                          <select value={form.discord.channel_id ?? ""} onChange={(e) => { const c = dmeta.channels.find((x) => x.id === e.target.value); setDiscord({ channel_id: c?.id ?? null, channel_name: c?.name ?? null }); }}
+                            className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">— เลือกห้อง —</option>
+                            {form.discord.channel_id && !dmeta.channels.some((c) => c.id === form.discord.channel_id) && <option value={form.discord.channel_id}>#{form.discord.channel_name ?? form.discord.channel_id} (บอทมองไม่เห็นแล้ว)</option>}
+                            {dmeta.channels.map((c) => <option key={c.id} value={c.id}>#{c.name}{new Set(dmeta.channels.map((x) => x.guild)).size > 1 ? ` · ${c.guild}` : ""}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={label}>แท็กบทบาท <span className="font-normal text-slate-400">(ไม่บังคับ)</span></label>
+                          <select value={form.discord.role_id ?? ""} onChange={(e) => { const r = dmeta.roles.find((x) => x.id === e.target.value); setDiscord({ role_id: r?.id ?? null, role_name: r?.name ?? null }); }}
+                            className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">— ไม่แท็ก —</option>
+                            {dmeta.roles.map((r) => <option key={r.id} value={r.id}>@{r.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      {form.discord.role_id && (
+                        <div className="flex flex-wrap items-center gap-1 text-xs text-slate-600">แท็ก @{form.discord.role_name}
+                          {(["overdue", "always"] as const).map((m) => <button key={m} type="button" onClick={() => setDiscord({ mention: m })} className={chip(form.discord.mention === m)}>{DISCORD_MENTION_LABEL[m]}</button>)}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-700">
+                        <span className="inline-flex items-center gap-1">งานในรูป
+                          {[10, 15, 20].map((n) => <button key={n} type="button" onClick={() => setDiscord({ image_rows: n })} className={chip(form.discord.image_rows === n)}>{n}</button>)}
+                        </span>
+                        <label className="inline-flex items-center gap-1.5">การ์ด "ต้องติ๊ก" สูงสุด
+                          <input type="number" min={0} max={15} value={form.discord.max_cards} onChange={(e) => setDiscord({ max_cards: Number(e.target.value) })}
+                            className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> ใบ</label>
+                      </div>
+                      <p className="text-[11px] text-slate-400">ส่งทดสอบ = ส่งเข้า DM ของคุณ (ต้องผูกบัญชี Discord ที่เมนูบัญชีก่อน) · ส่งเดี๋ยวนี้/ตามเวลา = ส่งเข้าห้องที่เลือก</p>
                     </div>
                   )}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-700">
-                    <span className="inline-flex items-center gap-1">งานในรูป
-                      {[10, 15, 20].map((n) => <button key={n} type="button" onClick={() => setDiscord({ image_rows: n })} className={chip(form.discord.image_rows === n)}>{n}</button>)}
-                    </span>
-                    <label className="inline-flex items-center gap-1.5">การ์ด "ต้องติ๊ก" สูงสุด
-                      <input type="number" min={0} max={15} value={form.discord.max_cards} onChange={(e) => setDiscord({ max_cards: Number(e.target.value) })}
-                        className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> ใบ</label>
-                  </div>
-                  <p className="text-[11px] text-slate-400">ส่งทดสอบ = ส่งเข้า DM ของคุณ (ต้องผูกบัญชี Discord ที่เมนูบัญชีก่อน) · ส่งเดี๋ยวนี้/ตามเวลา = ส่งเข้าห้องที่เลือก</p>
-                </div>
-              )}
-              <div className="mt-2">
-                <button type="button" onClick={() => void showImage()} disabled={img.busy}
-                  className="h-8 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
-                  {img.busy ? "กำลังวาดรูป…" : img.url ? "↻ วาดรูปใหม่" : "👁 ดูรูปที่จะส่งเข้า Discord"}</button>
-                {img.err && <p className="mt-1 text-xs text-rose-600">⚠ {img.err}</p>}
-                {img.url && (
-                  <a href={img.url} target="_blank" rel="noreferrer" title="เปิดรูปขนาดเต็ม" className="mt-2 block max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img.url} alt="รูปรายงานที่จะส่งเข้า Discord" className="w-full" />
-                  </a>
-                )}
               </div>
-          </div>
-          )}
+            )}
 
-          {/* 🔔 เด้งป๊อปตอนเข้า ERP — ข้อมูลชุดเดียวกับอีเมล · "งานของคุณ" ขึ้นก่อน — lib/email-report/popup + components/work-popup · โชว์เมื่อเลือกช่อง ERP ป๊อป */}
-          {popupOn && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-3 text-sm">
-            <div className="text-xs font-semibold text-slate-700">
-              🔔 ERP ป๊อป — เด้งตอนเข้า ERP <span className="font-normal text-slate-400">(ข้อมูลเดียวกับอีเมล · งานที่ใส่ชื่อคนนั้นขึ้นก่อน)</span>
-            </div>
-              <div className="mt-2 space-y-3">
+            {/* 🔔 ป๊อปตอนเข้า ERP — "งานของคุณ" ขึ้นก่อน — lib/email-report/popup + components/work-popup */}
+            {popupOn && (
+              <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/30 p-3 text-sm">
+                <div className="text-xs font-semibold text-slate-700">🔔 ERP ป๊อป — เด้งตอนเข้า ERP <span className="font-normal text-slate-400">(งานที่ใส่ชื่อคนนั้นขึ้นก่อน)</span></div>
                 <div>
                   <label className={label}>เด้งให้ตำแหน่ง <span className="font-normal text-slate-400">(เห็นทั้งป๊อป)</span></label>
                   {!roles ? <p className="text-xs text-slate-400">กำลังโหลดตำแหน่ง…</p> : (
@@ -439,23 +560,21 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 </div>
                 <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-700">
                   <input type="checkbox" checked={form.popup.assignees} onChange={(e) => setPopup({ assignees: e.target.checked })} className="mt-0.5 h-4 w-4" />
-                  <span>ผู้รับผิดชอบข้อที่ค้างใน "รออะไรอยู่" เห็นป๊อปด้วย <span className="text-slate-400">— เห็นเฉพาะงานของตัวเอง แม้ไม่อยู่ในตำแหน่งที่เลือก (แนะนำ)</span></span>
+                  <span>ผู้รับผิดชอบข้อที่ค้างใน "รออะไรอยู่" เห็นป๊อปด้วย <span className="text-slate-400">— เห็นเฉพาะงานของตัวเอง (แนะนำ)</span></span>
                 </label>
-                <div className="space-y-3">
-                  <div>
-                    <label className={label}>ช่วงเวลาที่เด้ง (ไทย) <span className="font-normal text-slate-400">· วัน = วันส่งด้านบน</span></label>
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                      <ERPTime24 value={form.popup.from} onChange={(v) => setPopup({ from: v })} /> ถึง <ERPTime24 value={form.popup.to === "24:00" ? "23:59" : form.popup.to} onChange={(v) => setPopup({ to: v })} />
-                    </div>
+                <div>
+                  <label className={label}>ช่วงเวลาที่เด้ง (ไทย) <span className="font-normal text-slate-400">· วัน = วันส่งในเรื่องที่ 3</span></label>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                    <ERPTime24 value={form.popup.from} onChange={(v) => setPopup({ from: v })} /> ถึง <ERPTime24 value={form.popup.to === "24:00" ? "23:59" : form.popup.to} onChange={(v) => setPopup({ to: v })} />
                   </div>
-                  <div>
-                    <label className={label}>เด้งบ่อยแค่ไหน</label>
-                    <div className="flex flex-wrap gap-1">
-                      <button type="button" onClick={() => setPopup({ frequency: "daily" })} className={chip(form.popup.frequency === "daily")}>วันละครั้ง</button>
-                      <button type="button" onClick={() => setPopup({ frequency: "every" })} className={chip(form.popup.frequency === "every")}>ทุกครั้งที่เปิด ERP</button>
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-400">{form.popup.frequency === "daily" ? "กด \"รับทราบ\" แล้ววันนั้นไม่เด้งอีก · \"ไว้ทีหลัง\" = เด้งใหม่ตอนเปิด ERP ครั้งถัดไป" : "เด้งทุกครั้งที่เปิด ERP แท็บใหม่ในช่วงเวลานั้น"}</p>
+                </div>
+                <div>
+                  <label className={label}>เด้งบ่อยแค่ไหน</label>
+                  <div className="flex flex-wrap gap-1">
+                    <button type="button" onClick={() => setPopup({ frequency: "daily" })} className={chip(form.popup.frequency === "daily")}>วันละครั้ง</button>
+                    <button type="button" onClick={() => setPopup({ frequency: "every" })} className={chip(form.popup.frequency === "every")}>ทุกครั้งที่เปิด ERP</button>
                   </div>
+                  <p className="mt-1 text-[11px] text-slate-400">{form.popup.frequency === "daily" ? "กด \"รับทราบ\" แล้ววันนั้นไม่เด้งอีก · \"ไว้ทีหลัง\" = เด้งใหม่ตอนเปิด ERP ครั้งถัดไป" : "เด้งทุกครั้งที่เปิด ERP แท็บใหม่ในช่วงเวลานั้น"}</p>
                 </div>
                 <div className="space-y-1.5">
                   <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
@@ -467,87 +586,59 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                     ต้องกดปุ่ม (รับทราบ / ไว้ทีหลัง) — กดนอกกล่องแล้วไม่ปิด
                   </label>
                 </div>
-                <div>
-                  <button type="button" onClick={() => void showPopup()} disabled={popPrev.busy}
-                    className="h-8 rounded-lg border border-amber-300 bg-white px-3 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50">
-                    {popPrev.busy ? "กำลังโหลด…" : popPrev.data ? "↻ โหลดตัวอย่างใหม่" : "👁 ดูตัวอย่างป๊อป"}</button>
-                  {popPrev.err && <p className="mt-1 text-xs text-rose-600">⚠ {popPrev.err}</p>}
-                  {popPrev.data && (
-                    <div className="mt-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                      <div className="mb-2 text-sm font-semibold text-slate-800">🔔 {popPrev.data.heading}</div>
-                      <WorkPopupBody data={popPrev.data} preview />
-                      <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-400">ตัวอย่างจากข้อมูลจริงตอนนี้ · "งานของคุณ" = ข้อที่ใส่ชื่อคุณ · คนที่ไม่ได้อยู่ในตำแหน่งที่เลือกแต่มีงานใส่ชื่อ จะเห็นแค่ส่วน "งานของคุณ"</p>
-                    </div>
-                  )}
-                </div>
               </div>
-          </div>
-          )}
+            )}
+          </Section>
 
-          <div className="rounded-lg border border-slate-200 p-3 text-sm">
-            <div className="mb-2 text-xs font-semibold text-slate-700">ตัวเลือก</div>
-            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-              <div className="space-y-2 text-xs text-slate-700">
-                <label className="flex items-center gap-1.5">โชว์ในอีเมลสูงสุด
-                  <input type="number" min={5} max={100} value={opt.max_rows ?? 50} onChange={(e) => setOptions({ max_rows: Number(e.target.value) })}
-                    className="h-8 w-16 rounded-lg border border-slate-200 px-2 text-center text-sm" /> งาน</label>
-                <label className="flex items-center gap-1.5">เตือนสีส้มเมื่อไม่ขยับเกิน
-                  <input type="number" min={1} max={60} value={opt.stale_days ?? 7} onChange={(e) => setOptions({ stale_days: Number(e.target.value) })}
-                    className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> วัน</label>
-                <label className="flex items-center gap-1.5">เตือนใกล้กำหนดล่วงหน้า
-                  <input type="number" min={0} max={30} value={opt.due_soon_days ?? 3} onChange={(e) => setOptions({ due_soon_days: Number(e.target.value) })}
-                    className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> วัน</label>
+          {/* 3 เมื่อไหร่ */}
+          <Section n={3} title="เมื่อไหร่" summary={whenSummary} warn={form.days.length ? null : "ยังไม่ได้เลือกวัน"} open={sec === "when"} onToggle={() => toggleSec("when")}>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <div>
+                <label className={label}>วันส่ง</label>
+                <div className="flex flex-wrap gap-1">
+                  {DAY_LABELS.map((d) => {
+                    const on = form.days.includes(d.n);
+                    return (
+                      <button key={d.n} type="button" title={d.full} onClick={() => set({ days: on ? form.days.filter((x) => x !== d.n) : [...form.days, d.n].sort((a, b) => a - b) })}
+                        className={`h-9 w-10 rounded-lg border text-xs font-medium ${on ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{d.short}</button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="space-y-2">
-                <div>
-                  <label className={label}>จัดกลุ่มตาม</label>
-                  <div className="flex flex-wrap gap-1">
-                    {src.groupBy.map((c) => <button key={c.key} type="button" onClick={() => setOptions({ group_by: c.key })} className={chip((opt.group_by ?? src.groupBy[0]?.key) === c.key)}>{c.label}</button>)}
-                  </div>
-                </div>
-                <div>
-                  <label className={label}>เรียงงานตาม</label>
-                  <select value={opt.sort_by ?? src.sortBy[0]?.key} onChange={(e) => setOptions({ sort_by: e.target.value })}
-                    className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {src.sortBy.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={label}>ส่งงานไหนบ้าง</label>
-                  <div className="flex flex-wrap gap-1">
-                    <button type="button" onClick={() => setOptions({ only_flagged: false })} className={chip(!opt.only_flagged)}>ทุกงาน</button>
-                    <button type="button" onClick={() => setOptions({ only_flagged: true })} className={chip(!!opt.only_flagged)}>เฉพาะงานที่มีป้ายเตือน</button>
-                  </div>
-                </div>
+              <div>
+                <label className={label}>เวลา (ไทย)</label>
+                <ERPTime24 value={form.send_time} onChange={(v) => set({ send_time: v })} />
               </div>
             </div>
-            <div className="mt-3 border-t border-slate-100 pt-2">
+            <div className="space-y-1.5">
               <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
                 <input type="checkbox" checked={form.skip_if_empty} onChange={(e) => set({ skip_if_empty: e.target.checked })} className="h-4 w-4" />
                 วันที่ไม่มีงานค้าง ไม่ต้องส่ง
               </label>
-              <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
                 <input type="checkbox" checked={form.is_enabled} onChange={(e) => set({ is_enabled: e.target.checked })} className="h-4 w-4" />
-                เปิดใช้รายงานนี้ <span className="text-slate-400">(ส่งอัตโนมัติตามวัน-เวลาด้านบน + เด้งป๊อป)</span>
+                เปิดใช้รายงานนี้ <span className="text-slate-400">(ส่งอัตโนมัติตามวัน-เวลา + เด้งป๊อป)</span>
               </label>
             </div>
-          </div>
+          </Section>
 
-          <div className="rounded-lg border border-slate-200 p-3 text-sm">
-            <div className="mb-2 text-xs font-semibold text-slate-700">โชว์อะไรในอีเมล</div>
-            <label className={label}>ตัวเลขสรุปด้านบน <span className="font-normal text-slate-400">(กดเปิด/ปิด)</span></label>
-            <div className="flex flex-wrap gap-1">
-              {src.stats.map((c) => {
-                const on = (opt.stats ?? []).includes(c.key);
-                return (
-                  <button key={c.key} type="button" className={chip(on)}
-                    onClick={() => setOptions({ stats: on ? (opt.stats ?? []).filter((k) => k !== c.key) : src.stats.map((x) => x.key).filter((k) => k === c.key || (opt.stats ?? []).includes(k)) })}>
-                    {on ? "✓ " : ""}{c.label.replace("{stale_days}", String(opt.stale_days ?? 7))}
-                  </button>
-                );
-              })}
+          {/* 4 หน้าตา — หลัก: ตัวเลขสรุป + ข้อมูลของแต่ละงาน · ละเอียด: ซ่อนใต้ "ตั้งค่าเพิ่มเติม" */}
+          <Section n={4} title="หน้าตา" summary={lookSummary} open={sec === "look"} onToggle={() => toggleSec("look")}>
+            <div>
+              <label className={label}>ตัวเลขสรุปด้านบน <span className="font-normal text-slate-400">(กดเปิด/ปิด)</span></label>
+              <div className="flex flex-wrap gap-1">
+                {src.stats.map((c) => {
+                  const on = (opt.stats ?? []).includes(c.key);
+                  return (
+                    <button key={c.key} type="button" className={chip(on)}
+                      onClick={() => setOptions({ stats: on ? (opt.stats ?? []).filter((k) => k !== c.key) : src.stats.map((x) => x.key).filter((k) => k === c.key || (opt.stats ?? []).includes(k)) })}>
+                      {on ? "✓ " : ""}{c.label.replace("{stale_days}", String(opt.stale_days ?? 7))}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div className="mt-3">
+            <div>
               <label className={label}>ข้อมูลของแต่ละงาน <span className="font-normal text-slate-400">(เรียงตามลำดับที่เลือก · ชื่องานโชว์เสมอ)</span></label>
               <FieldChipsPicker compact showKeys={false}
                 value={opt.row_fields ?? []} onChange={(v) => setOptions({ row_fields: v })}
@@ -559,44 +650,65 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 description="ติ๊กตามลำดับที่อยากให้โชว์ (อยากสลับ ให้เอาออกแล้วติ๊กใหม่) · ตัวเลขด้านขวา = งานในรายงานนี้ที่มีข้อมูลช่องนั้นจริงตอนนี้"
                 addLabel="＋ เลือกข้อมูล…" searchPlaceholder="ค้นหาชื่อข้อมูล…" unit="อย่าง" emptyText="โชว์แค่ชื่องาน" />
             </div>
-            <div className="mt-3">
-              <label className={label}>หัวเรื่องอีเมล <span className="font-normal text-slate-400">(เว้นว่าง = แบบเดิม)</span></label>
-              <ERPInput value={opt.subject_template ?? ""} maxLength={SUBJECT_MAX} placeholder={src.defaultSubject}
-                onChange={(e) => setOptions({ subject_template: e.target.value })} />
-              <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-400">
-                ใส่คำ:
-                {[...src.subjectTokens, ...COMMON_SUBJECT_TOKENS].map((t) => (
-                  <button key={t.key} type="button" title={t.label} onClick={() => addToken(t.key)}
-                    className="rounded border border-slate-200 px-1.5 py-0.5 text-slate-600 hover:bg-slate-50">{`{${t.key}}`}</button>
-                ))}
+            <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more}
+              className="text-xs font-medium text-blue-600 hover:underline">{more ? "▾ ซ่อนตั้งค่าเพิ่มเติม" : "▸ ตั้งค่าเพิ่มเติม"} <span className="font-normal text-slate-400">(ส่งงานไหน · จัดกลุ่ม · เรียง · หัวเรื่อง · ข้อความเกริ่น)</span></button>
+            {more && (
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div>
+                  <label className={label}>ส่งงานไหนบ้าง</label>
+                  <div className="flex flex-wrap gap-1">
+                    <button type="button" onClick={() => setOptions({ only_flagged: false })} className={chip(!opt.only_flagged)}>ทุกงาน</button>
+                    <button type="button" onClick={() => setOptions({ only_flagged: true })} className={chip(!!opt.only_flagged)}>เฉพาะงานที่มีป้ายเตือน</button>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={label}>จัดกลุ่มตาม</label>
+                    <div className="flex flex-wrap gap-1">
+                      {src.groupBy.map((c) => <button key={c.key} type="button" onClick={() => setOptions({ group_by: c.key })} className={chip((opt.group_by ?? src.groupBy[0]?.key) === c.key)}>{c.label}</button>)}
+                    </div>
+                  </div>
+                  <div>
+                    <label className={label}>เรียงงานตาม</label>
+                    <select value={opt.sort_by ?? src.sortBy[0]?.key} onChange={(e) => setOptions({ sort_by: e.target.value })}
+                      className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {src.sortBy.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-700">
+                  <label className="flex items-center gap-1.5">โชว์สูงสุด
+                    <input type="number" min={5} max={100} value={opt.max_rows ?? 50} onChange={(e) => setOptions({ max_rows: Number(e.target.value) })}
+                      className="h-8 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center text-sm" /> งาน</label>
+                  <label className="flex items-center gap-1.5">เตือนส้มเมื่อไม่ขยับเกิน
+                    <input type="number" min={1} max={60} value={opt.stale_days ?? 7} onChange={(e) => setOptions({ stale_days: Number(e.target.value) })}
+                      className="h-8 w-14 rounded-lg border border-slate-200 bg-white px-2 text-center text-sm" /> วัน</label>
+                  <label className="flex items-center gap-1.5">เตือนใกล้กำหนดล่วงหน้า
+                    <input type="number" min={0} max={30} value={opt.due_soon_days ?? 3} onChange={(e) => setOptions({ due_soon_days: Number(e.target.value) })}
+                      className="h-8 w-14 rounded-lg border border-slate-200 bg-white px-2 text-center text-sm" /> วัน</label>
+                </div>
+                <div>
+                  <label className={label}>หัวเรื่องอีเมล <span className="font-normal text-slate-400">(เว้นว่าง = แบบเดิม)</span></label>
+                  <ERPInput value={opt.subject_template ?? ""} maxLength={SUBJECT_MAX} placeholder={src.defaultSubject}
+                    onChange={(e) => setOptions({ subject_template: e.target.value })} />
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-400">
+                    ใส่คำ:
+                    {[...src.subjectTokens, ...COMMON_SUBJECT_TOKENS].map((t) => (
+                      <button key={t.key} type="button" title={t.label} onClick={() => addToken(t.key)}
+                        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:bg-slate-50">{`{${t.key}}`}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>ข้อความเกริ่นบนสุด <span className="font-normal text-slate-400">(ไม่บังคับ)</span></label>
+                  <ERPTextarea rows={2} maxLength={INTRO_MAX} value={opt.intro ?? ""} placeholder="เช่น ฝากทีมเช็กงานที่ป้ายแดงก่อนเที่ยง"
+                    onChange={(e) => setOptions({ intro: e.target.value })} />
+                </div>
               </div>
-            </div>
-            <div className="mt-3">
-              <label className={label}>ข้อความเกริ่นบนสุด <span className="font-normal text-slate-400">(ไม่บังคับ)</span></label>
-              <ERPTextarea rows={2} maxLength={INTRO_MAX} value={opt.intro ?? ""} placeholder="เช่น ฝากทีมเช็กงานที่ป้ายแดงก่อนเที่ยง"
-                onChange={(e) => setOptions({ intro: e.target.value })} />
-            </div>
-          </div>
+            )}
+          </Section>
         </div>
-
-        {/* ── ตัวอย่างอีเมล (ข้อมูลจริงตอนนี้) ── */}
-        <div className="min-w-0 lg:sticky lg:top-0 lg:self-start">
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <div className="text-xs font-semibold text-slate-700">ตัวอย่างอีเมล</div>
-            <span className="text-[11px] text-slate-400">{previewLoading ? "กำลังโหลด..." : preview ? `พบ ${preview.total} งาน · โชว์ ${preview.shown}` : ""}</span>
-          </div>
-          {preview && <div className="mb-1.5 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600" title={preview.subject}>หัวเรื่อง: <b>{preview.subject}</b></div>}
-          {previewErr ? (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">⚠ {previewErr}</div>
-          ) : preview ? (
-            <iframe title="ตัวอย่างอีเมล" srcDoc={preview.html} sandbox="allow-popups allow-popups-to-escape-sandbox"
-              className={`h-[560px] w-full rounded-lg border border-slate-200 bg-slate-100 transition-opacity ${previewLoading ? "opacity-60" : ""}`} />
-          ) : (
-            <div className="flex h-[560px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">กำลังเตรียมตัวอย่าง...</div>
-          )}
-          <p className="mt-1.5 text-[11px] text-slate-400">รูปในอีเมลจริงจะโหลดจากระบบ · Gmail โชว์ทันที · Outlook บางเครื่องถามก่อนโหลดรูป</p>
-        </div>
-      </div>
+      )}
     </ERPModal>
   );
 }

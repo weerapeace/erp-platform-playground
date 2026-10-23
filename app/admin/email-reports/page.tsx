@@ -283,7 +283,7 @@ export default function EmailReportsPage() {
                         })()}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:shrink-0">
                       <button role="switch" aria-checked={r.is_enabled} aria-label={r.is_enabled ? "ปิดรายงานนี้" : "เปิดรายงานนี้"} title={r.is_enabled ? "ปิดรายงานนี้ (หยุดส่งตามเวลา + หยุดเด้งป๊อป)" : "เปิดใช้รายงานนี้"}
                         onClick={() => void toggle(r)} disabled={toggling === r.id}
                         className={`relative h-6 w-11 rounded-full transition ${r.is_enabled ? "bg-emerald-500" : "bg-slate-300"} disabled:opacity-50`}>
