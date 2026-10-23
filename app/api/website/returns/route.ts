@@ -10,6 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { decideReturn } from "@/lib/website-returns-server";
 import { RETURN_STATUSES, type ReturnStatus } from "@/lib/website-returns";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,9 +20,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const p = request.nextUrl.searchParams;
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id").eq("slug", (p.get("shop") ?? "").trim()).maybeSingle();
+  const shop = await shopBySlug(sb, p.get("shop"));
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
-  const shopId = (shop as { id: string }).id;
+  const shopId = shop.id;
   const status = p.get("status") ?? "pending";
   let q = sb
     .from("store_return_requests")

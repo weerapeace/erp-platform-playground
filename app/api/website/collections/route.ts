@@ -13,6 +13,7 @@ import { writeAudit } from "@/lib/audit";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { normalizeWebCollections } from "@/lib/website-collections";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const slug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, slug, field_map").eq("slug", slug).maybeSingle();
+  const shop = await shopBySlug<{ id: string; slug: string; field_map: unknown }>(sb, slug, "id, slug, field_map");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const s = shop as { id: string; slug: string; field_map: unknown };
 

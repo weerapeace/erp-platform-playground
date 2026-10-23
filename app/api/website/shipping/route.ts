@@ -17,6 +17,7 @@ import { readSiteInfo } from "@/lib/website-site-info";
 import { PARCEL_CARRIERS } from "@/lib/parcel-tracking";
 import { SHIPPING_AREAS, SUGGESTED_REMOTE_POSTALS, normalizeShipping } from "@/lib/website-shipping";
 import { readShipping, saveShipping } from "@/lib/website-shipping-db";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const slug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, name, slug").eq("slug", slug).maybeSingle();
+  const shop = await shopBySlug<{ id: string; name: string; slug: string }>(sb, slug, "id, name, slug");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const s = shop as { id: string; name: string; slug: string };
 

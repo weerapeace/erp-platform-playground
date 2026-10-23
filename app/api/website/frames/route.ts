@@ -15,6 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeFrameDef, type SavedFrame } from "@/lib/website-frames";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   let shopId: string | null = null;
   if (slug) {
-    const { data: shop } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
+    const shop = await shopBySlug(sb, slug);
     shopId = (shop as { id: string } | null)?.id ?? null;
   }
   let q = sb.from(TABLE).select("id, shop_id, name, def, updated_at").order("updated_at", { ascending: false }).limit(200);

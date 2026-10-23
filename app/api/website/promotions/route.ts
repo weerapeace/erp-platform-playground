@@ -12,6 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { promotionFromRow, sanitizePromotion, type Promotion } from "@/lib/website-promotions";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
+  const shop = await shopBySlug(sb, slug);
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const shopId = (shop as { id: string }).id;
   const { data, error } = await sb.from(TABLE).select("*").eq("shop_id", shopId).order("created_at", { ascending: false }).limit(200);

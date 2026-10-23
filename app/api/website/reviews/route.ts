@@ -11,6 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { moderateReview, type ModerateAction, type ReviewRow } from "@/lib/website-reviews-server";
 import type { ReviewStatus } from "@/lib/website-reviews";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const status = request.nextUrl.searchParams.get("status") ?? "pending";
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
+  const shop = await shopBySlug(sb, slug);
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const shopId = (shop as { id: string }).id;
   let q = sb.from("store_reviews").select("*").eq("shop_id", shopId).order("created_at", { ascending: false }).limit(300);

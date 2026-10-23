@@ -15,6 +15,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { dropFromRow, dropToRow, normalizeDropInput } from "@/lib/website-new-drops";
 import { normalizeListingInserts } from "@/lib/website-listing";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,7 +31,7 @@ async function shopIdOf(sb: ReturnType<typeof supabaseAdmin>, p: URLSearchParams
   if (UUID.test(id)) return id;
   const slug = (p.get("shop") ?? "").trim();
   if (!slug) return null;
-  const { data } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
+  const data = await shopBySlug(sb, slug);
   return (data as { id: string } | null)?.id ?? null;
 }
 

@@ -10,6 +10,7 @@ import { memberStats, readTiers } from "@/lib/member-points-db";
 import { tierFor } from "@/lib/member-points";
 import { phoneVariants, summarizeCustomer, type ProfileItemRow, type ProfileOrderRow } from "@/lib/website-customer-profile";
 import { ORDER_STATUSES, PAYMENT_STATUSES } from "@/lib/website-orders";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,9 +23,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const p = request.nextUrl.searchParams;
   const sb = supabaseAdmin();
-  const { data: shopRow } = await sb.from("shops").select("id").eq("slug", (p.get("shop") ?? "").trim()).maybeSingle();
+  const shopRow = await shopBySlug(sb, p.get("shop"));
   if (!shopRow) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
-  const shopId = (shopRow as { id: string }).id;
+  const shopId = shopRow.id;
 
   const MEMBER_SELECT = "id, name, email, phone, avatar_url, status, marketing_opt_in, created_at, last_login_at";
   let member: Member | null = null;

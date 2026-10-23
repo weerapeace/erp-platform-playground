@@ -15,6 +15,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { couponFromRow, couponToRow, sanitizeCouponInput } from "@/lib/website-coupons";
 import { couponUseCounts } from "@/lib/website-coupons-db";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
+  const shop = await shopBySlug(sb, slug);
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   // โค้ดชวนเพื่อนของสมาชิก (referrer_id) ไม่โชว์ในรายการคูปอง — มีคนละ 1 โค้ด จะรกตาราง (ตั้งค่าที่ 🏪 ข้อมูลร้าน › 🎁)
   const { data, error } = await sb.from(TABLE).select("*").eq("shop_id", (shop as { id: string }).id).is("referrer_id", null).order("created_at", { ascending: false });

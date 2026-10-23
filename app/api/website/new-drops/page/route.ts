@@ -20,6 +20,7 @@ import { syncCanvasAssetUsages } from "@/lib/website-canvas-usage";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { normalizeTheme } from "@/lib/website-theme";
 import { defaultDropPageBlocks } from "@/lib/website-drop-page";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!id) return NextResponse.json({ error: "ต้องระบุชุด" }, { status: 400 });
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, name, slug, field_map, theme").eq("slug", shopSlug).maybeSingle();
+  const shop = await shopBySlug<{ id: string; name: string; slug: string; field_map: unknown; theme: unknown }>(sb, shopSlug, "id, name, slug, field_map, theme");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const s = shop as unknown as { id: string; name: string; slug: string; field_map?: unknown; theme?: unknown };
 

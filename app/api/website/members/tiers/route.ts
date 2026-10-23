@@ -12,19 +12,15 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { sanitizeTiers, SUGGESTED_TIERS } from "@/lib/member-points";
 import { readTiers } from "@/lib/member-points-db";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
-
-async function shopBySlug(sb: ReturnType<typeof supabaseAdmin>, slug: string) {
-  const { data } = await sb.from("shops").select("id, slug").eq("slug", slug).maybeSingle();
-  return data as { id: string; slug: string } | null;
-}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view");
   if (denied) return denied;
   const sb = supabaseAdmin();
-  const shop = await shopBySlug(sb, (request.nextUrl.searchParams.get("shop") ?? "").trim());
+  const shop = await shopBySlug<{ id: string; slug: string }>(sb, request.nextUrl.searchParams.get("shop"), "id, slug");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   return NextResponse.json({ tiers: await readTiers(sb, shop.id), suggested: SUGGESTED_TIERS }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -34,7 +30,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { shop?: string; tiers?: unknown } | null;
   const sb = supabaseAdmin();
-  const shop = await shopBySlug(sb, String(body?.shop ?? "").trim());
+  const shop = await shopBySlug<{ id: string; slug: string }>(sb, body?.shop, "id, slug");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const v = sanitizeTiers(body?.tiers);
   if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });

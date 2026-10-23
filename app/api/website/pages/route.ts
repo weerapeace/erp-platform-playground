@@ -25,6 +25,7 @@ import { syncCanvasAssetUsages } from "@/lib/website-canvas-usage";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { normalizeTheme } from "@/lib/website-theme";
 import { cleanPageMeta, HELP_CENTER_PAGES, buildHelpPage } from "@/lib/website-help-center";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const sb = supabaseAdmin();
   // ธีมโหลดเฉพาะตอนเปิดหน้าเดียว (ใช้ค่าการ์ดของร้าน) — รายการหน้าไม่ต้องใช้
-  const { data: shop } = await sb.from("shops").select(pageId ? "id, name, slug, field_map, theme" : "id, name, slug, field_map").eq("slug", shopSlug).maybeSingle();
+  const shop = await shopBySlug<{ id: string; name: string; slug: string; field_map: unknown; theme: unknown }>(sb, shopSlug, pageId ? "id, name, slug, field_map, theme" : "id, name, slug, field_map");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const s = shop as unknown as { id: string; name: string; slug: string; field_map?: unknown; theme?: unknown };
   const categories = normalizeFieldMap(s.field_map).categories.map((c) => ({ key: c.key, label: c.label, parent: c.parent ?? null, imageKey: c.imageKey ?? null, icon: c.icon ?? "" }));

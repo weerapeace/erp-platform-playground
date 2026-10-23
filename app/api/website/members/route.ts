@@ -15,6 +15,7 @@ import { memberStats, readTiers } from "@/lib/member-points-db";
 import { tierFor } from "@/lib/member-points";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { lastOrderDates } from "@/lib/website-members-db";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
+  const shop = await shopBySlug(sb, slug);
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const shopId = (shop as { id: string }).id;
   const { data, error } = await sb

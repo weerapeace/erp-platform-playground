@@ -19,6 +19,7 @@ import { mergeTheme } from "@/lib/website-theme";
 import { normalizeBlocks } from "@/lib/website-blocks";
 import { cleanSavedThemeScope } from "@/lib/website-saved-themes";
 import { SCHEDULE_LIST_SELECT, SCHEDULE_TABLE, sanitizeCampaignInput, sanitizePublishInput, scheduleFromRow, type CampaignInput, type CampaignLook } from "@/lib/website-theme-schedule";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (denied) return denied;
   const slug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id").eq("slug", slug).maybeSingle();
+  const shop = await shopBySlug(sb, slug);
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const { data, error } = await sb
     .from(SCHEDULE_TABLE)

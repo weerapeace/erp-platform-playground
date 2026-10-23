@@ -35,6 +35,7 @@ import { slipsForOrders, slipVerifierConfigured, staffDecideSlip } from "@/lib/w
 import { AUTO_RESULT, SLIP_REJECT_REASONS, SLIP_STATUS } from "@/lib/website-payments";
 import { isReadyToPack } from "@/lib/website-fulfillment";
 import { shippopMode } from "@/lib/shippop";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const status = (url.searchParams.get("status") ?? "all").trim();
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, name, slug").eq("slug", shopSlug).maybeSingle();
+  const shop = await shopBySlug<{ id: string; name: string; slug: string }>(sb, shopSlug, "id, name, slug");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
   const s = shop as { id: string; name: string; slug: string };
 

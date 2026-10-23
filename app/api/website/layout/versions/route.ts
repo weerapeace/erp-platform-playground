@@ -10,6 +10,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeBlocks } from "@/lib/website-blocks";
 import { toWebVersion, VERSION_LIST_LIMIT, type WebVersionRow } from "@/lib/website-versions";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const shopSlug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
 
-  const { data: shop } = await sb.from("shops").select("id").eq("slug", shopSlug).maybeSingle();
+  const shop = await shopBySlug(sb, shopSlug);
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
 
   const { data } = await sb
