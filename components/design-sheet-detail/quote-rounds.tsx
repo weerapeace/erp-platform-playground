@@ -5,6 +5,7 @@
  * การ์ด = ครั้งที่ (batch) · วันที่ · สถานะรวม · หมายเหตุ · "ที่เปลี่ยนจากครั้งก่อน" (ต่อไซส์)
  * ข้างใน = ตารางไขว้: แถว = ไซส์ · คอลัมน์ = ขั้นจำนวน · ช่อง = ราคาที่เสนอ + กำไร/ชิ้น (+%) + สถานะช่อง + เทียบครั้งก่อน
  * เพิ่มครั้งใหม่ = ฟอร์มตารางไขว้กรอกทีเดียว (เตรียมไซส์/ขั้นจำนวนจากครั้งล่าสุดให้)
+ * ✏️ แก้ไขครั้งที่เสนอแล้ว = ฟอร์มเดียวกัน ใส่ค่าของการ์ดนั้นมาให้ → บันทึกเฉพาะที่เปลี่ยน (แก้/ลบ/เพิ่มช่อง · เปลี่ยนตัวเลขขั้นจำนวน)
  *
  * ข้อมูล: design_sheet_quotes (1 แถว = 1 ช่อง; batch = ครั้งที่) · API /quotes (ช่อง) + /quotes/batch (ทั้งครั้ง)
  * ของกลาง: ConfirmDialog · useToast · apiFetch
@@ -24,6 +25,7 @@ const costCls = (n: number) => (n > 0.004 ? "text-rose-600" : n < -0.004 ? "text
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d: string | null) => { if (!d) return "—"; const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }); };
 const qtyKey = (q: number | null | undefined) => (q == null ? "" : String(q));
+const byQty = (a: number | null, b: number | null) => (a == null ? 1 : b == null ? -1 : a - b);   // ไม่ระบุจำนวนไว้ท้าย
 
 type Size = { key: string; label: string };
 type Batch = { batch: number; part: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
@@ -49,6 +51,9 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
   const [editNote, setEditNote] = useState<{ batch: number; val: string } | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addFrom, setAddFrom] = useState<Batch | null>(null);   // 📋 คัดลอกครั้งไหนมาเป็นครั้งใหม่ (null = ครั้งล่าสุด)
+  const [editKey, setEditKey] = useState<string | null>(null);  // ✏️ การ์ดที่กำลังแก้ (`batch-part`) — เปิดได้ทีละใบ
+  const cardKey = (b: Batch) => `${b.batch}-${b.part}`;
+  const formOpen = addOpen || editKey !== null;
   const openV = onOpenVersions ?? (() => toast.warning("ดูรายละเอียดเทียบเวอร์ชันตีราคาได้ในหน้าเต็ม (คอมพิวเตอร์)"));
 
   // จัดกลุ่มเป็น "ครั้ง" (batch) — แถวเก่าที่ยังไม่มี batch ใช้วันที่แทน
@@ -113,13 +118,13 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
           <div className="text-xs text-slate-400">{compact ? "" : "1 ครั้ง = 1 การ์ด (หลายไซส์ × หลายขั้นจำนวน) · กดตัวเลขราคาเพื่อแก้ · สถานะตั้งได้ทั้งครั้งหรือรายช่อง"}</div>
           <div className="flex gap-1.5">
             {onSendToQuotation && <button type="button" onClick={onSendToQuotation} className="h-8 px-3 text-sm border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">🧾 ส่งไปใบเสนอราคา</button>}
-            <button type="button" onClick={() => { setAddFrom(null); setAddOpen(true); }} disabled={addOpen} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">＋ เสนอราคาครั้งที่ {Math.max(0, ...batches.map((x) => x.batch)) + 1}</button>
+            <button type="button" onClick={() => { setAddFrom(null); setAddOpen(true); }} disabled={formOpen} title={editKey ? "บันทึกหรือยกเลิกการแก้ไขก่อน" : undefined} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">＋ เสนอราคาครั้งที่ {Math.max(0, ...batches.map((x) => x.batch)) + 1}</button>
           </div>
         </div>
       )}
 
       {addOpen && (
-        <NewRoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={addFrom ?? batches.at(-1) ?? null} copiedFrom={addFrom?.batch ?? null}
+        <RoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={addFrom ?? batches.at(-1) ?? null} copiedFrom={addFrom?.batch ?? null}
           costDirty={costDirty} saveCost={saveCost} onClose={() => { setAddOpen(false); setAddFrom(null); }}
           onSaved={async (n) => { setAddOpen(false); setAddFrom(null); await onReload(); toast.success(`เสนอราคาครั้งที่ ${n} แล้ว`); }} />
       )}
@@ -132,6 +137,11 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
         const st = b.status === "mixed" ? null : (QUOTE_STATUS[b.status] ?? QUOTE_STATUS.pending);
         // "ที่เปลี่ยนจากครั้งก่อน" ต่อไซส์ (API คำนวณจากเวอร์ชันตีราคา) — เอาช่องแรกของแต่ละไซส์
         const changes = b.sizes.map((s) => ({ size: s, q: b.quotes.find((q) => (q.parent_code ?? "") === s) })).filter((x) => x.q?.changes || x.q?.cost_snapshot_id);
+        if (editKey === cardKey(b)) return (
+          <RoundEditor key={`edit-${cardKey(b)}`} sheetId={sheetId} nextBatch={b.batch} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={null} editing={b}
+            costDirty={costDirty} saveCost={saveCost} onClose={() => setEditKey(null)} onReload={onReload}
+            onSaved={async (n) => { setEditKey(null); await onReload(); toast.success(`บันทึกการแก้ไขครั้งที่ ${n} แล้ว`); }} />
+        );
         return (
           <div key={`${b.batch}-${b.part}`} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
             {/* หัวการ์ด: ครั้งที่ · วันที่ · สถานะรวม · หมายเหตุ · ลบ */}
@@ -158,7 +168,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
                   {b.note ? `📝 ${b.note}` : (canEdit ? <span className="text-slate-300">＋ หมายเหตุ</span> : null)}
                 </button>
               )}
-              {canEdit && <button type="button" onClick={() => { setAddFrom(b); setAddOpen(true); }} title="เปิดฟอร์มครั้งใหม่ โดยใส่ไซส์/ขั้นจำนวน/ราคาของครั้งนี้มาให้แก้ต่อ (ต่อรองรอบถัดไป)" className="h-7 px-2 text-xs border border-blue-200 rounded-md text-blue-700 bg-white hover:bg-blue-50">📋 คัดลอกเป็นครั้งใหม่</button>}
+              {canEdit && <button type="button" onClick={() => setEditKey(cardKey(b))} disabled={formOpen} title={formOpen ? "บันทึกหรือยกเลิกฟอร์มที่เปิดอยู่ก่อน" : "แก้ทั้งการ์ด: ราคา · ไซส์ · ขั้นจำนวน · วันที่ · สถานะ · หมายเหตุ"} className="h-7 px-2 text-xs border border-slate-300 rounded-md text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40">✏️ แก้ไข</button>}
+              {canEdit && <button type="button" onClick={() => { setAddFrom(b); setAddOpen(true); }} disabled={formOpen} title="เปิดฟอร์มครั้งใหม่ โดยใส่ไซส์/ขั้นจำนวน/ราคาของครั้งนี้มาให้แก้ต่อ (ต่อรองรอบถัดไป)" className="h-7 px-2 text-xs border border-blue-200 rounded-md text-blue-700 bg-white hover:bg-blue-50 disabled:opacity-40">📋 คัดลอกเป็นครั้งใหม่</button>}
               {canEdit && <button type="button" onClick={() => setDelBatch(b)} title="ลบทั้งครั้ง" className="h-7 px-2 text-xs border border-rose-200 rounded-md text-rose-500 hover:bg-rose-50">🗑 ลบครั้งนี้</button>}
             </div>
 
@@ -257,39 +268,67 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
   );
 }
 
-/** ฟอร์มเสนอราคาครั้งใหม่ — ตารางไขว้กรอกทีเดียว (ไซส์ × ขั้นจำนวน) · เตรียมค่าจากครั้งล่าสุด */
-function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, costDirty, saveCost, onClose, onSaved }: {
+/** ฟอร์มเสนอราคา — ตารางไขว้กรอกทีเดียว (ไซส์ × ขั้นจำนวน)
+ *  ครั้งใหม่: เตรียมค่าจากครั้งล่าสุด/ครั้งที่คัดลอก
+ *  แก้ไข (editing): ใส่ค่าของการ์ดนั้น → บันทึกเฉพาะที่เปลี่ยน ทีละช่อง (ช่องเดิมแก้ราคา/จำนวน · ล้างราคา/ปิดไซส์/เอาขั้นออก = ลบช่อง · ช่องใหม่ = เพิ่ม)
+ *  วันที่/สถานะ/หมายเหตุ แก้เฉพาะช่องของการ์ดนี้ (ข้อมูลเก่าที่ครั้งเดียวกันแยกเป็นหลาย "รายการ" จะไม่กระทบกัน) */
+function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, editing = null, costDirty, saveCost, onClose, onSaved, onReload }: {
   copiedFrom?: number | null;   // คัดลอกมาจากครั้งที่ (โชว์ที่หัวฟอร์ม)
+  editing?: Batch | null;       // ✏️ แก้ไขการ์ดนี้ (null = เสนอครั้งใหม่)
+  onReload?: () => Promise<void>;   // แก้ไขแล้วพลาดกลางทาง → โหลดของจริงมาโชว์
   sheetId: string; nextBatch: number; sizes: Size[]; sizeLabel: (code: string | null) => string; currentCost: (key: string) => number;
   last: Batch | null; costDirty: boolean; saveCost: () => Promise<boolean>; onClose: () => void; onSaved: (batch: number) => Promise<void>;
 }) {
   const toast = useToast();
-  const [date, setDate] = useState(todayStr());
-  const [status, setStatus] = useState("pending");
-  const [note, setNote] = useState("");
-  const [qtys, setQtys] = useState<(number | null)[]>(() => (last?.qtys.length ? last.qtys : [100, 200, 500, 1000]));
-  const [onSizes, setOnSizes] = useState<string[]>(() => (last?.sizes.length ? last.sizes.filter((s) => sizes.some((x) => x.key === s)) : sizes.map((s) => s.key)));
+  const src = editing ?? last;
+  // แก้ไข: ไซส์ที่การ์ดมีแต่แท็บตีราคาถูกเอาออกไปแล้ว ก็ยังต้องโชว์ (ไม่งั้นบันทึกแล้วช่องเดิมจะถูกลบ)
+  const rowSizes: Size[] = [...sizes, ...(editing?.sizes ?? []).filter((k) => !sizes.some((s) => s.key === k)).map((k) => ({ key: k, label: sizeLabel(k) }))];
+  const initQtys = src?.qtys.length ? src.qtys : [100, 200, 500, 1000];
+  const [date, setDate] = useState(editing ? editing.date ?? "" : todayStr());
+  const [status, setStatus] = useState<string>(editing?.status ?? "pending");
+  const [note, setNote] = useState(editing?.note ?? "");
+  const [qtys, setQtys] = useState<(number | null)[]>(() => initQtys);
+  // แก้ไข: ขั้นจำนวนในฟอร์ม → ขั้นจำนวนเดิมของช่อง (เปลี่ยนตัวเลขขั้นแล้ว ช่องเดิมยังเป็นช่องเดิม ไม่ลบสร้างใหม่)
+  const [origQty, setOrigQty] = useState<Record<string, number | null>>(() => Object.fromEntries((editing?.qtys ?? []).map((q) => [qtyKey(q), q])));
+  const [onSizes, setOnSizes] = useState<string[]>(() => (editing ? editing.sizes : last?.sizes.length ? last.sizes.filter((s) => sizes.some((x) => x.key === s)) : sizes.map((s) => s.key)));
   const [cells, setCells] = useState<Record<string, string>>(() => {
     const m: Record<string, string> = {};
-    for (const s of sizes) for (const qty of (last?.qtys.length ? last.qtys : [100, 200, 500, 1000])) {
-      const pq = last?.quotes.find((q) => (q.parent_code ?? "") === s.key && qtyKey(q.qty) === qtyKey(qty));
+    for (const s of rowSizes) for (const qty of initQtys) {
+      const pq = src?.quotes.find((q) => (q.parent_code ?? "") === s.key && qtyKey(q.qty) === qtyKey(qty));
       const v = pq ? (pq.offered_price ?? pq.price) : null;
       m[`${s.key}|${qtyKey(qty)}`] = v != null ? String(v) : "";
     }
     return m;
   });
   const [newQty, setNewQty] = useState("");
+  const [editQty, setEditQty] = useState<{ from: number | null; val: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const key = (s: string, qty: number | null) => `${s}|${qtyKey(qty)}`;
-  const addQty = () => { const n = Number(newQty); if (!Number.isFinite(n) || n <= 0) { toast.error("ใส่จำนวนเป็นตัวเลขมากกว่า 0"); return; } if (qtys.some((q) => q === n)) { toast.error("มีขั้นจำนวนนี้แล้ว"); return; } setQtys((qs) => [...qs, n].sort((a, b) => (a == null ? 1 : b == null ? -1 : a - b))); setNewQty(""); };
-  const fillFromCost = () => setCells((m) => { const n = { ...m }; for (const s of sizes) for (const qty of qtys) { const c = currentCost(s.key); if (c > 0 && !n[key(s.key, qty)]) n[key(s.key, qty)] = String(Math.round(c * 100) / 100); } return n; });
+  const addQty = () => { const n = Number(newQty); if (!Number.isFinite(n) || n <= 0) { toast.error("ใส่จำนวนเป็นตัวเลขมากกว่า 0"); return; } if (qtys.some((q) => q === n)) { toast.error("มีขั้นจำนวนนี้แล้ว"); return; } setQtys((qs) => [...qs, n].sort(byQty)); setNewQty(""); };
+  const removeQty = (qty: number | null) => {
+    setQtys((qs) => qs.filter((q) => q !== qty));
+    setOrigQty((o) => { const n = { ...o }; delete n[qtyKey(qty)]; return n; });
+  };
+  // กดตัวเลขขั้นจำนวนที่หัวตารางเพื่อแก้ (ราคาในคอลัมน์ย้ายตามไปด้วย) · เว้นว่าง = ไม่ระบุจำนวน
+  const renameQty = () => {
+    if (!editQty) return;
+    const { from, val } = editQty; setEditQty(null);
+    const t = val.trim(); const to = t === "" ? null : Number(t);
+    if (to !== null && (!Number.isFinite(to) || to <= 0)) { toast.error("ใส่จำนวนเป็นตัวเลขมากกว่า 0 (เว้นว่าง = ไม่ระบุจำนวน)"); return; }
+    if (qtyKey(to) === qtyKey(from)) return;
+    if (qtys.some((q) => qtyKey(q) === qtyKey(to))) { toast.error("มีขั้นจำนวนนี้แล้ว"); return; }
+    setQtys((qs) => qs.map((q) => (qtyKey(q) === qtyKey(from) ? to : q)).sort(byQty));
+    setCells((m) => { const n = { ...m }; for (const s of rowSizes) { const a = key(s.key, from); if (a in n) { n[key(s.key, to)] = n[a]; delete n[a]; } } return n; });
+    setOrigQty((o) => { const n = { ...o }; if (qtyKey(from) in n) { n[qtyKey(to)] = n[qtyKey(from)]; delete n[qtyKey(from)]; } return n; });
+  };
+  const fillFromCost = () => setCells((m) => { const n = { ...m }; for (const s of rowSizes) for (const qty of qtys) { const c = currentCost(s.key); if (c > 0 && !n[key(s.key, qty)]) n[key(s.key, qty)] = String(Math.round(c * 100) / 100); } return n; });
   // ± บาท ทุกช่อง (เจ้าของขอ 2026-10-21: "+10 → 400 เป็น 410, 380 เป็น 390") — เฉพาะช่องที่ใส่ราคาแล้ว + ไซส์ที่ติ๊ก · ช่องว่างไม่แตะ
   const [shift, setShift] = useState("");
   const shiftAll = () => {
     const d = Number(shift);
     if (!shift.trim() || !Number.isFinite(d) || d === 0) { toast.error("ใส่จำนวนบาท เช่น 10 (บวก) หรือ -10 (ลด)"); return; }
     const next = { ...cells }; let count = 0; const neg: string[] = [];
-    for (const s of sizes) {
+    for (const s of rowSizes) {
       if (!onSizes.includes(s.key)) continue;
       for (const qty of qtys) {
         const k = key(s.key, qty); const v = next[k]?.trim(); if (!v) continue;
@@ -304,7 +343,72 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
     setCells(next); setShift("");
     toast.success(`ปรับราคาที่เสนอ ${count} ช่อง ${d > 0 ? "+" : "−"}${fmtBaht(Math.abs(d))} บาท`);
   };
+  // ✏️ บันทึกการแก้ไข: เทียบกับช่องเดิมของการ์ด แล้วยิงเฉพาะที่เปลี่ยน (ทุก API มี audit อยู่แล้ว)
+  const saveEdit = async (b: Batch) => {
+    const priceOf = (s: string, qty: number | null): number | null => { const v = cells[key(s, qty)]?.trim(); return v ? Number(v) : null; };
+    for (const s of rowSizes) if (onSizes.includes(s.key)) for (const qty of qtys) {
+      const n = priceOf(s.key, qty);
+      if (n !== null && (!Number.isFinite(n) || n < 0)) { toast.error(`ราคา ${s.label} ${qty == null ? "" : `${fmtInt(qty)} ชิ้น`} ไม่ถูกต้อง`); return; }
+    }
+    const newDate = date || null; const newNote = note.trim() || null; const newStatus = status === "mixed" ? null : status;
+    // หัวการ์ดเปลี่ยนจากที่เห็นตอนเปิดฟอร์มไหม (ไม่เปลี่ยน = ไม่แตะค่าของแต่ละช่อง)
+    const dateChanged = newDate !== (b.date ?? null);
+    const noteChanged = newNote !== (b.note?.trim() || null);
+    const statusChanged = newStatus !== null && newStatus !== b.status;
+    const changes: { id: string; patch: Record<string, unknown> }[] = [];
+    const removes: DesignSheetQuote[] = [];
+    const kept = new Set<string>();
+    for (const q of b.quotes) {
+      const size = q.parent_code ?? "";
+      const ci = qtys.findIndex((c) => qtyKey(c) in origQty && qtyKey(origQty[qtyKey(c)]) === qtyKey(q.qty));   // คอลัมน์ที่ช่องนี้อยู่ตอนนี้
+      const col = ci >= 0 ? qtys[ci] : null;
+      const n = ci >= 0 && onSizes.includes(size) ? priceOf(size, col) : null;
+      if (n === null) { removes.push(q); continue; }
+      kept.add(key(size, col));
+      const patch: Record<string, unknown> = {};
+      if (n !== (q.offered_price ?? q.price)) patch.offered_price = n;
+      if (qtyKey(col) !== qtyKey(q.qty)) patch.qty = col;
+      if (dateChanged && newDate !== (q.quote_date ?? null)) patch.quote_date = newDate;
+      if (noteChanged && newNote !== (q.note?.trim() || null)) patch.note = newNote;
+      if (statusChanged && newStatus !== q.status) patch.status = newStatus;
+      if (Object.keys(patch).length) changes.push({ id: q.id, patch });
+    }
+    const adds: { parent_code: string; qty: number | null; offered: number }[] = [];
+    for (const s of rowSizes) {
+      if (!onSizes.includes(s.key)) continue;
+      for (const qty of qtys) {
+        const n = priceOf(s.key, qty);
+        if (n !== null && !kept.has(key(s.key, qty))) adds.push({ parent_code: s.key, qty, offered: n });
+      }
+    }
+    if (!changes.length && !removes.length && !adds.length) { toast.info("ไม่มีอะไรเปลี่ยน"); onClose(); return; }
+    if (removes.length === b.quotes.length && !adds.length) { toast.error("ล้างทุกช่องแล้ว — ถ้าจะลบทั้งครั้ง ใช้ปุ่ม 🗑 ลบครั้งนี้"); return; }
+    setSaving(true);
+    let done = 0;
+    try {
+      if (adds.length && costDirty && !(await saveCost())) return;   // ช่องใหม่ผูกกับเวอร์ชันตีราคาที่เห็นจริง
+      const call = async (path: string, init: RequestInit) => { const r = await apiFetch(path, init); const j = await r.json(); if (j.error) throw new Error(j.error); done++; };
+      const json = (body: unknown, method: string): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      await Promise.all([
+        ...removes.map((q) => call(`/api/design-sheets/${sheetId}/quotes/${q.id}`, { method: "DELETE" })),
+        ...changes.map((c) => call(`/api/design-sheets/${sheetId}/quotes/${c.id}`, json(c.patch, "PATCH"))),
+      ]);
+      for (const a of adds) {   // ทีละช่อง — API นับเลข round ต่อจากล่าสุด ยิงพร้อมกันจะชนกัน
+        const c = currentCost(a.parent_code);
+        await call(`/api/design-sheets/${sheetId}/quotes`, json({
+          quote_date: newDate ?? todayStr(), price: c > 0 ? Math.round(c * 100) / 100 : null, offered_price: a.offered, qty: a.qty,
+          status: newStatus ?? "pending", note: newNote, parent_code: a.parent_code, batch: b.batch,
+        }, "POST"));
+      }
+      await onSaved(b.batch);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "บันทึกไม่สำเร็จ";
+      if (done > 0) { toast.error(`${msg} — บันทึกไปแล้วบางส่วน (${done} รายการ) โหลดข้อมูลล่าสุดให้แล้ว`); await onReload?.(); onClose(); }
+      else toast.error(msg);
+    } finally { setSaving(false); }
+  };
   const save = async () => {
+    if (editing) return saveEdit(editing);
     const list: { parent_code: string; qty: number | null; price: number | null; offered_price: number | null }[] = [];
     for (const s of sizes.filter((x) => onSizes.includes(x.key))) for (const qty of qtys) {
       const v = cells[key(s.key, qty)]?.trim(); if (!v) continue;
@@ -325,10 +429,15 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
   return (
     <div className="rounded-xl border-2 border-blue-300 bg-blue-50/30 overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-blue-50 border-b border-blue-200">
-        <span className="h-7 px-2 rounded-lg bg-blue-600 text-white text-xs font-semibold flex items-center">＋ ครั้งที่ {nextBatch}</span>
+        <span className="h-7 px-2 rounded-lg bg-blue-600 text-white text-xs font-semibold flex items-center">
+          {editing ? `✏️ แก้ไขครั้งที่ ${editing.batch}${editing.part > 0 ? ` · รายการที่ ${editing.part + 1}` : ""}` : `＋ ครั้งที่ ${nextBatch}`}
+        </span>
         {copiedFrom != null && <span className="text-[11px] text-blue-700">คัดลอกจากครั้งที่ {copiedFrom} — แก้ราคาแล้วบันทึก</span>}
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white" />
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white">{QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+        <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white">
+          {editing?.status === "mixed" && <option value="mixed">◐ ผสม (คงตามรายช่อง)</option>}
+          {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="หมายเหตุ (เช่น ลูกค้าขอลด 5%)" className="h-7 flex-1 min-w-[10rem] px-2 text-xs border border-slate-200 rounded-md bg-white" />
         <button type="button" onClick={fillFromCost} className="h-7 px-2 text-xs border border-slate-200 bg-white rounded-md text-slate-600 hover:bg-slate-50" title="ช่องที่ยังว่าง ใส่ราคาเท่าตีราคาปัจจุบัน">เติมจากตีราคา</button>
         <span className="inline-flex items-center gap-1 h-7 pl-2 pr-1 text-xs border border-slate-200 bg-white rounded-md text-slate-600" title="บวก/ลบราคาที่เสนอทุกช่องพร้อมกัน เช่น 10 → 400 เป็น 410 · -10 → 400 เป็น 390 (ช่องว่างไม่แตะ)">
@@ -347,8 +456,14 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
               <th className="px-2 py-1.5 text-right font-medium w-28">ตีราคาปัจจุบัน</th>
               {qtys.map((qty) => (
                 <th key={qtyKey(qty)} className="px-2 py-1.5 text-right font-medium min-w-[7rem] text-blue-700">
-                  <span>{qty == null ? "ไม่ระบุ" : `${fmtInt(qty)} ชิ้น`}</span>
-                  {qtys.length > 1 && <button type="button" onClick={() => setQtys((qs) => qs.filter((q) => q !== qty))} className="ml-1 text-slate-300 hover:text-rose-500" title="เอาขั้นจำนวนนี้ออก">✕</button>}
+                  {editQty && qtyKey(editQty.from) === qtyKey(qty) ? (
+                    <input autoFocus type="number" min={1} value={editQty.val} onChange={(e) => setEditQty({ from: qty, val: e.target.value })}
+                      onBlur={renameQty} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditQty(null); }}
+                      placeholder="ไม่ระบุ" aria-label="จำนวนชิ้นของขั้นนี้" className="h-6 w-20 px-1 text-[11px] text-right border border-blue-400 rounded" />
+                  ) : (
+                    <button type="button" onClick={() => setEditQty({ from: qty, val: qty == null ? "" : String(qty) })} className="hover:underline" title="กดเพื่อแก้จำนวน (ราคาในคอลัมน์ย้ายตามไปด้วย)">{qty == null ? "ไม่ระบุ" : `${fmtInt(qty)} ชิ้น`}</button>
+                  )}
+                  {qtys.length > 1 && <button type="button" onClick={() => removeQty(qty)} className="ml-1 text-slate-300 hover:text-rose-500" title="เอาขั้นจำนวนนี้ออก">✕</button>}
                 </th>
               ))}
               <th className="px-2 py-1.5 text-left font-normal">
@@ -357,7 +472,7 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
             </tr>
           </thead>
           <tbody>
-            {sizes.map((s) => {
+            {rowSizes.map((s) => {
               const on = onSizes.includes(s.key); const cost = currentCost(s.key);
               return (
                 <tr key={s.key} className={`border-t border-blue-100 ${on ? "" : "opacity-40"}`}>
@@ -381,10 +496,12 @@ function NewRoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, las
         </table>
       </div>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-blue-200 bg-blue-50/60">
-        <span className="text-[11px] text-slate-500">ช่องว่าง = ไม่เสนอขั้นนั้น · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน{costDirty ? " · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน" : ""}</span>
+        <span className="text-[11px] text-slate-500">
+          {editing ? "ล้างราคา / ปิดไซส์ / เอาขั้นออก = ลบช่องนั้น · กดตัวเลขขั้นจำนวนที่หัวตารางเพื่อแก้" : "ช่องว่าง = ไม่เสนอขั้นนั้น"} · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน{costDirty ? " · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน" : ""}
+        </span>
         <div className="flex gap-1.5">
           <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-          <button type="button" onClick={() => void save()} disabled={saving} className="h-8 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : `💾 บันทึกครั้งที่ ${nextBatch}`}</button>
+          <button type="button" onClick={() => void save()} disabled={saving} className="h-8 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : editing ? "💾 บันทึกการแก้ไข" : `💾 บันทึกครั้งที่ ${nextBatch}`}</button>
         </div>
       </div>
     </div>
