@@ -38,26 +38,7 @@ export async function sendReportToDiscord(admin: Admin, report: Pick<EmailReport
     }
   } catch (e) { return fail(e instanceof DiscordError ? e.message : "เปิดห้อง Discord ไม่สำเร็จ"); }
 
-  // ── เช็กลิสต์ค้าง (การ์ด) ──
-  const records = cfg.max_cards > 0 ? (built.checklist?.records ?? []).slice(0, cfg.max_cards) : [];
-  const tasksBy = new Map<string, ChecklistTask[]>();
-  if (records.length && built.checklist) {
-    const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, status, resolved_by, assigned_to")
-      .eq("module_key", built.checklist.moduleKey).in("record_id", records.map((r) => r.id)).order("created_at", { ascending: true });
-    const rows = (data ?? []) as (ChecklistTask & { record_id: string; assigned_to: string | null })[];
-    const names = await userNames(admin, rows.map((t) => t.assigned_to));
-    for (const t of rows) (tasksBy.get(t.record_id) ?? tasksBy.set(t.record_id, []).get(t.record_id)!).push({ ...t, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null });
-  }
-  const cardRecords = records.filter((r) => (tasksBy.get(r.id) ?? []).length > 0);
-
-  // ── ข้อความ 1: ภาพรวม ──
-  const overdue = built.overdue ?? 0;
-  const mention = !test && !!cfg.role_id && (cfg.mention === "always" || (cfg.mention === "overdue" && overdue > 0));
-  const lines = [
-    `${test ? "🧪 ทดสอบ (เห็นคนเดียว) — " : ""}${mention ? `<@&${cfg.role_id}> ` : ""}**${opts.subject}**${overdue > 0 ? ` — เกินกำหนด ${overdue} งาน` : ""}`,
-    cardRecords.length ? `⏳ มีของรอ ${cardRecords.length} ใบ — ${ready.buttons ? "ติ๊กที่การ์ดด้านล่างได้เลย" : "เปิดใบงานเพื่อติ๊กในระบบ"}` : "",
-    built.viewAllLink ? `[${built.viewAllLabel} →](${built.viewAllLink})` : "",
-  ].filter(Boolean);
+  const { content, mention, cards: cardMsgs } = await composeDiscordReport(admin, cfg, built, { test, subject: opts.subject, buttons: ready.buttons });
   const files: DiscordFile[] = [];
   let image = false;
   if (built.total > 0) {
@@ -74,8 +55,8 @@ export async function sendReportToDiscord(admin: Admin, report: Pick<EmailReport
   let posted = 0;
   try {
     await discordSend(channelId, {
-      content: lines.join("\n").slice(0, 2000),
-      allowed_mentions: mention ? { roles: [cfg.role_id] } : { parse: [] },
+      content,
+      allowed_mentions: mention ? { roles: [cfg.role_id!] } : { parse: [] },
       ...(fallbackEmbed.length ? { embeds: fallbackEmbed } : {}),
     }, files);
     posted++;
@@ -83,12 +64,41 @@ export async function sendReportToDiscord(admin: Admin, report: Pick<EmailReport
 
   // ── การ์ดต้องติ๊ก (ทีละใบ) ──
   let cards = 0; let error: string | null = null;
-  for (const r of cardRecords) {
+  for (const msg of cardMsgs) {
     try {
-      const msg = checklistCardMessage({ title: r.title, url: r.link, description: r.description, thumbnail: r.imageUrl }, tasksBy.get(r.id) ?? [], ready.buttons);
       await discordSend(channelId, msg);
       posted++; cards++;
     } catch (e) { error = e instanceof DiscordError ? e.message : "ส่งการ์ดบางใบไม่สำเร็จ"; }
   }
   return { ok: !error, posted, cards, image, target, error };
+}
+
+/**
+ * ประกอบข้อความ Discord ของรายงาน (ไม่ส่ง) — ใช้ทั้งตอนส่งจริง และตัวอย่างในหน้าตั้งค่า (preview?format=discord)
+ * content = ข้อความ 1 (หัวเรื่อง · ของรอกี่ใบ · ลิงก์ดูทั้งหมด) · cards = การ์ดเฉพาะใบที่มีเช็กลิสต์ค้าง (สูงสุด max_cards)
+ */
+export async function composeDiscordReport(admin: Admin, cfg: ReturnType<typeof normalizeReportDiscord>, built: BuiltReport,
+  opts: { test: boolean; subject: string; buttons: boolean }) {
+  // ── เช็กลิสต์ค้าง (การ์ด) ──
+  const records = cfg.max_cards > 0 ? (built.checklist?.records ?? []).slice(0, cfg.max_cards) : [];
+  const tasksBy = new Map<string, ChecklistTask[]>();
+  if (records.length && built.checklist) {
+    const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, status, resolved_by, assigned_to")
+      .eq("module_key", built.checklist.moduleKey).in("record_id", records.map((r) => r.id)).order("created_at", { ascending: true });
+    const rows = (data ?? []) as (ChecklistTask & { record_id: string; assigned_to: string | null })[];
+    const names = await userNames(admin, rows.map((t) => t.assigned_to));
+    for (const t of rows) (tasksBy.get(t.record_id) ?? tasksBy.set(t.record_id, []).get(t.record_id)!).push({ ...t, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null });
+  }
+  const cardRecords = records.filter((r) => (tasksBy.get(r.id) ?? []).length > 0);
+
+  // ── ข้อความ 1: ภาพรวม ──
+  const overdue = built.overdue ?? 0;
+  const mention = !opts.test && !!cfg.role_id && (cfg.mention === "always" || (cfg.mention === "overdue" && overdue > 0));
+  const content = [
+    `${opts.test ? "🧪 ทดสอบ (เห็นคนเดียว) — " : ""}${mention ? `<@&${cfg.role_id}> ` : ""}**${opts.subject}**${overdue > 0 ? ` — เกินกำหนด ${overdue} งาน` : ""}`,
+    cardRecords.length ? `⏳ มีของรอ ${cardRecords.length} ใบ — ${opts.buttons ? "ติ๊กที่การ์ดด้านล่างได้เลย" : "เปิดใบงานเพื่อติ๊กในระบบ"}` : "",
+    built.viewAllLink ? `[${built.viewAllLabel} →](${built.viewAllLink})` : "",
+  ].filter(Boolean).join("\n").slice(0, 2000);
+  const cards = cardRecords.map((r) => checklistCardMessage({ title: r.title, url: r.link, description: r.description, thumbnail: r.imageUrl }, tasksBy.get(r.id) ?? [], opts.buttons));
+  return { content, mention, cards };
 }

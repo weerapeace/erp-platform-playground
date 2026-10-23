@@ -4,6 +4,7 @@
  * fill = จำนวนงานที่มีข้อมูลแต่ละช่องจริง (หน้าตั้งค่าโชว์ข้างชื่อช่องใน "โชว์อะไรในอีเมล")
  * ?format=png → รูปรายงานที่จะส่งเข้า Discord (image/png · จำนวนงานตาม discord.image_rows) — ดูได้แม้ยังไม่ตั้งบอท
  * ?format=popup → { data: WorkPopupPayload } ตัวอย่างป๊อปตอนเข้า ERP (lib/email-report/popup)
+ * ?format=discord → { content, cards, has_image, role_name, channel_name, ready } ข้อความ Discord ที่จะส่ง (composeDiscordReport) — หน้าตั้งค่าวาดเป็นหน้าแชทจำลอง
  * ไม่ตรวจผู้รับ/สวิตช์เปิด — ดูหน้าตาได้แม้ยังไม่ใส่ผู้รับ · สิทธิ์: admin.email_reports
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,6 +16,8 @@ import { normalizeReportDiscord, normalizeReportInput, normalizeReportPopup } fr
 import { buildReportEmail } from "@/lib/email-report/sources";
 import { renderReportPng } from "@/lib/email-report/image";
 import { buildPopupPayload } from "@/lib/email-report/popup";
+import { composeDiscordReport } from "@/lib/email-report/discord";
+import { discordReady } from "@/lib/discord";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,6 +36,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ data, error: null });
     }
     const { built, email } = await buildReportEmail(supabaseAdmin(), parsed.value);
+    // 💬 ตัวอย่างข้อความ Discord (ข้อความ 1 + การ์ดติ๊ก) — ตัวประกอบเดียวกับตอนส่งจริง · รูปดึงแยกที่ ?format=png
+    if (request.nextUrl.searchParams.get("format") === "discord") {
+      const cfg = normalizeReportDiscord(body?.discord);
+      const ready = discordReady();
+      const { content, cards } = await composeDiscordReport(supabaseAdmin(), cfg, built, { test: false, subject: email.subject, buttons: true });
+      return NextResponse.json({
+        content, cards, has_image: built.total > 0, role_name: cfg.role_name, channel_name: cfg.channel_name,
+        ready: { bot: ready.bot, buttons: ready.buttons }, error: null,
+      });
+    }
     if (request.nextUrl.searchParams.get("format") === "png") {
       try {
         const png = await renderReportPng(built, { reportName: parsed.value.name, maxRows: normalizeReportDiscord(body?.discord).image_rows });

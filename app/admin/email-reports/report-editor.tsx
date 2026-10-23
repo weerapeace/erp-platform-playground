@@ -14,6 +14,7 @@ import { ERPInput, ERPTextarea, ERPTime24 } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { WorkPopupBody } from "@/components/work-popup";
+import { DiscordChatPreview, type DiscordPreviewData } from "./discord-preview";
 import { apiFetch } from "@/lib/api";
 import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
@@ -214,24 +215,42 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantPreview, previewKey]);
 
-  // แท็บตัวอย่าง = ช่องทางที่เปิด (อีเมล = หน้าตารายงานหลักเสมอ) · เข้าแท็บไหนโหลดของแท็บนั้นเอง
-  const previewTabs: { key: PreviewTab; label: string }[] = [
-    { key: "email", label: form.email_enabled ? "✉️ อีเมล" : "📄 หน้าตารายงาน" },
-    ...(discordOn ? [{ key: "discord" as const, label: "💬 รูป Discord" }] : []),
-    ...(popupOn ? [{ key: "popup" as const, label: "🔔 ป๊อป ERP" }] : []),
+  // 💬 ตัวอย่างข้อความ Discord (ข้อความ 1 + การ์ดติ๊ก — ตัวประกอบเดียวกับตอนส่งจริง)
+  const [dprev, setDprev] = useState<{ data: DiscordPreviewData | null; busy: boolean; err: string | null }>({ data: null, busy: false, err: null });
+  const showDiscord = async () => {
+    setDprev((s) => ({ ...s, busy: true, err: null }));
+    try {
+      const r = await apiFetch("/api/admin/email-reports/preview?format=discord", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "โหลดตัวอย่าง Discord ไม่สำเร็จ");
+      setDprev({ data: j as DiscordPreviewData, busy: false, err: null });
+    } catch (e) { setDprev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่าง Discord ไม่สำเร็จ" }); }
+  };
+
+  // แท็บตัวอย่าง 3 ช่องทางเสมอ (ช่องที่ยังไม่เปิด = ดูก่อนตัดสินใจเปิดได้) · เข้าแท็บไหนโหลดของแท็บนั้นเอง
+  const previewTabs: { key: PreviewTab; label: string; on: boolean }[] = [
+    { key: "email", label: "✉️ อีเมล", on: form.email_enabled },
+    { key: "discord", label: "💬 Discord", on: discordOn },
+    { key: "popup", label: "🔔 ERP ป๊อป", on: popupOn },
   ];
-  const curTab: PreviewTab = previewTabs.some((t) => t.key === prevTab) ? prevTab : "email";
+  const curTab: PreviewTab = prevTab;
   useEffect(() => {
     if (mode !== "preview") return;
-    if (curTab === "discord" && !img.url && !img.busy && !img.err) void showImage();
+    if (curTab === "discord") {
+      if (!dprev.data && !dprev.busy && !dprev.err) void showDiscord();
+      if (!img.url && !img.busy && !img.err) void showImage();
+    }
     if (curTab === "popup" && !popPrev.data && !popPrev.busy && !popPrev.err) void showPopup();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, curTab]);
   const openPreview = () => {
     if (img.url) URL.revokeObjectURL(img.url);
-    setImg({ url: null, busy: false, err: null }); setPopPrev({ data: null, busy: false, err: null });   // เข้าใหม่ = วาดจากค่าล่าสุด
+    setImg({ url: null, busy: false, err: null }); setPopPrev({ data: null, busy: false, err: null }); setDprev({ data: null, busy: false, err: null });   // เข้าใหม่ = วาดจากค่าล่าสุด
     setMode("preview");
   };
+  const offNote = (on: boolean, what: string) => (on ? null : (
+    <p className="mb-2 rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-800">รายงานนี้ยังไม่ได้เปิด {what} — นี่คือหน้าตาถ้าเปิด (ติ๊กได้ที่เรื่อง 2 "ส่งทางไหน")</p>
+  ));
 
   const addUser = (u: { id: string; name: string; email?: string | null } | null) => {
     if (!u) return;
@@ -323,11 +342,14 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
           <div className="mb-3 flex flex-wrap gap-1 border-b border-slate-200">
             {previewTabs.map((t) => (
               <button key={t.key} type="button" onClick={() => setPrevTab(t.key)}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm ${curTab === t.key ? "border-blue-600 font-medium text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{t.label}</button>
+                className={`-mb-px border-b-2 px-3 py-2 text-sm ${curTab === t.key ? "border-blue-600 font-medium text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+                {t.label}{!t.on && <span className="ml-1 text-[10px] font-normal text-slate-400">(ยังไม่เปิด)</span>}
+              </button>
             ))}
           </div>
           {curTab === "email" && (
             <div>
+              {offNote(form.email_enabled, "Gmail")}
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 {preview ? <div className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600" title={preview.subject}>หัวเรื่อง: <b>{preview.subject}</b></div> : <span />}
                 <span className="shrink-0 text-[11px] text-slate-400">{previewLoading ? "กำลังโหลด..." : preview ? `พบ ${preview.total} งาน · โชว์ ${preview.shown}` : ""}</span>
@@ -344,28 +366,41 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             </div>
           )}
           {curTab === "discord" && (
-            <div>
-              <button type="button" onClick={() => void showImage()} disabled={img.busy}
-                className="h-8 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
-                {img.busy ? "กำลังวาดรูป…" : "↻ วาดรูปใหม่"}</button>
-              {img.err && <p className="mt-2 text-sm text-rose-600">⚠ {img.err}</p>}
-              {img.url && (
-                <a href={img.url} target="_blank" rel="noreferrer" title="เปิดรูปขนาดเต็ม" className="mt-2 block max-h-[65vh] overflow-y-auto rounded-lg border border-slate-200 bg-white">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.url} alt="รูปรายงานที่จะส่งเข้า Discord" className="w-full" />
-                </a>
-              )}
-              <p className="mt-1.5 text-[11px] text-slate-400">รูปนี้ส่งเข้าห้อง Discord พร้อมการ์ดติ๊กเฉพาะใบที่มีของรอ</p>
+            <div className="mx-auto max-w-3xl">
+              {offNote(discordOn, "Discord")}
+              {dprev.busy && !dprev.data && <p className="text-sm text-slate-400">กำลังประกอบข้อความ Discord…</p>}
+              {dprev.err && <p className="text-sm text-rose-600">⚠ {dprev.err}</p>}
+              {dprev.data && <DiscordChatPreview data={dprev.data} imageUrl={img.url} imageBusy={img.busy} imageErr={img.err} />}
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] text-slate-400">
+                  หน้าตาในห้อง Discord จากข้อมูลจริงตอนนี้ · ข้อความแรก = หัวเรื่อง + รูปรายงาน · ถัดไป = การ์ดเฉพาะใบที่มีของรอ พร้อมปุ่มติ๊ก
+                  {dprev.data && !dprev.data.ready.bot && " · ⚠ ยังไม่ได้ตั้งบอท (ดูคู่มือในหน้านี้)"}
+                  {dprev.data && dprev.data.ready.bot && !dprev.data.ready.buttons && " · ⚠ ปุ่มติ๊กยังใช้ไม่ได้จนกว่าจะตั้งลิงก์รับปุ่ม"}
+                </p>
+                {img.url && <a href={img.url} target="_blank" rel="noreferrer" className="text-xs font-medium text-indigo-700 hover:underline">เปิดรูปขนาดเต็ม ↗</a>}
+              </div>
             </div>
           )}
           {curTab === "popup" && (
             <div className="mx-auto max-w-2xl">
+              {offNote(popupOn, "ERP ป๊อป")}
               {popPrev.busy && <p className="text-sm text-slate-400">กำลังโหลดตัวอย่างป๊อป…</p>}
               {popPrev.err && <p className="text-sm text-rose-600">⚠ {popPrev.err}</p>}
               {popPrev.data && (
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="mb-3 text-base font-semibold text-slate-800">🔔 {popPrev.data.heading}</div>
-                  <WorkPopupBody data={popPrev.data} preview />
+                /* หน้าตาเหมือนป๊อปจริง (components/work-popup) — หัว + เนื้อ + ปุ่มท้าย (กดไม่ได้ในตัวอย่าง) */
+                <div className="rounded-2xl bg-slate-900/40 p-4 sm:p-6">
+                  <div className="overflow-hidden rounded-xl bg-white shadow-2xl">
+                    <div className="border-b border-slate-100 px-5 pb-3 pt-4">
+                      <div className="text-base font-semibold text-slate-900">🔔 {popPrev.data.heading}</div>
+                      <div className="mt-0.5 text-sm text-slate-500">{new Date(`${popPrev.data.date}T00:00:00Z`).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}</div>
+                    </div>
+                    <div className="max-h-[50vh] overflow-y-auto px-5 py-4"><WorkPopupBody data={popPrev.data} preview /></div>
+                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 px-5 py-3">
+                      {popPrev.data.view_all && <span className="mr-auto px-3 text-sm font-medium text-blue-700">ดูทั้งหมด →</span>}
+                      <span className="inline-flex h-9 items-center rounded-lg border border-slate-300 px-4 text-sm text-slate-600">ไว้ทีหลัง</span>
+                      <span className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white">✓ รับทราบ</span>
+                    </div>
+                  </div>
                 </div>
               )}
               <p className="mt-2 text-[11px] text-slate-400">"งานของคุณ" = ข้อที่ใส่ชื่อคุณ · คนที่ไม่ได้อยู่ในตำแหน่งที่เลือกแต่มีงานใส่ชื่อ จะเห็นแค่ส่วน "งานของคุณ"</p>
