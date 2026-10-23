@@ -1198,6 +1198,15 @@ export interface PersonalizeBlock extends BlockBase {
   source: "all" | "manual";
   codes: string[];
   buttonText: string;
+  /** หน้าตา: classic เดิม · studio A · showcase B · steps C · luxe D */
+  look?: "classic" | "studio" | "showcase" | "steps" | "luxe";
+  /** ของเสริม: ตัวนับตัวอักษร · ข้อความใต้ปุ่ม · ไอเดียชื่อ · วงซูมรอยปั๊ม */
+  showCount?: boolean;
+  showFree?: boolean;
+  freeNote?: string;
+  showIdeas?: boolean;
+  ideas?: string[];
+  zoom?: boolean;
 }
 
 /** แผนที่ร้าน — รับเฉพาะลิงก์ฝังของ Google Maps */
