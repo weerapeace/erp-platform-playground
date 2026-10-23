@@ -96,7 +96,7 @@ export function AccountMenu({ onDark = false, device }: { onDark?: boolean; devi
                 </button>
                 {installHint && <p className="mt-1 text-[11px] leading-snug text-slate-500 bg-slate-50 border border-slate-100 rounded-md px-2 py-1.5">{installHint}</p>}
                 <button type="button" onClick={() => { setOpen(false); setQrOpen(true); }}
-                  className="mt-1.5 w-full h-8 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50">📷 QR เปิด/ติดตั้งบนเครื่องอื่น</button>
+                  className="mt-1.5 w-full h-8 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50">📷 เปิด/ติดตั้งบนเครื่องอื่น (แท็บเล็ต · มือถือ · คอม)</button>
               </div>
             )}
 
@@ -117,16 +117,16 @@ export function AccountMenu({ onDark = false, device }: { onDark?: boolean; devi
 
       {/* QR เปิด/ติดตั้งบนเครื่องจริง — เลือกว่าเครื่องปลายทางเป็นแท็บเล็ตหรือมือถือ */}
       {device && (
-        <ERPModal open={qrOpen} onClose={() => setQrOpen(false)} title="📷 เปิดแอปนี้บนแท็บเล็ต / มือถือ" size="sm">
+        <ERPModal open={qrOpen} onClose={() => setQrOpen(false)} title="📷 เปิด / ติดตั้งแอปนี้บนแท็บเล็ต · มือถือ · คอม" size="sm">
           <div className="flex flex-col items-center gap-3">
             <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5">
-              {(["tablet", "phone"] as DeviceLayout[]).map((d) => (
+              {(["tablet", "phone", "desktop"] as DeviceLayout[]).map((d) => (
                 <button key={d} type="button" onClick={() => setQrLayout(d)}
-                  className={`h-8 rounded px-3 text-xs font-medium transition ${qrLayout === d ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{DEVICE_ICON[d]} {DEVICE_LABEL[d]}</button>
+                  className={`h-8 rounded px-3 text-xs font-medium transition ${qrLayout === d ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{DEVICE_ICON[d]} {d === "desktop" ? "คอม" : DEVICE_LABEL[d]}</button>
               ))}
             </div>
             <DeviceQrPanel layout={qrLayout} {...device.qr} className="w-full" />
-            <p className="text-[11px] text-slate-400 text-center leading-snug">สแกนด้วยกล้องของเครื่องปลายทาง (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)</p>
+            <p className="text-[11px] text-slate-400 text-center leading-snug">{qrLayout === "desktop" ? "เปิดลิงก์ใน Chrome / Edge ของคอมที่จะติดตั้ง (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)" : "สแกนด้วยกล้องของเครื่องปลายทาง (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)"}</p>
           </div>
         </ERPModal>
       )}

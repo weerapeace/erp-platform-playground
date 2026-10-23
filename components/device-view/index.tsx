@@ -159,9 +159,12 @@ export type DeviceQrOpts = {
   installGo?: string;    // path ที่จะเปิดหลังติดตั้ง (ไม่ส่ง = path ปัจจุบัน)
 };
 
-/** แผง QR + ลิงก์ (ของกลาง) — แท็บ 1: สแกนเปิดหน้านี้บนเครื่องจริง · แท็บ 2: สแกนเพื่อติดตั้งเป็นแอป (PWA) บนเครื่อง */
+/** แผง QR + ลิงก์ (ของกลาง) — แท็บ 1: สแกนเปิดหน้านี้บนเครื่องจริง · แท็บ 2: สแกนเพื่อติดตั้งเป็นแอป (PWA) บนเครื่อง
+ *  layout = "desktop" (คอม): ไม่มี QR (คอมไม่สแกน) → ปุ่มเปิดหน้าติดตั้งบนคอมเครื่องนี้ + คัดลอกลิงก์ไปเปิดบนคอมเครื่องอื่น · เปิดมาที่แท็บติดตั้งก่อน */
 export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, appKey: appKeyProp, appLabel, installGo }: { layout: DeviceLayout; className?: string } & DeviceQrOpts) {
-  const [tab, setTab] = useState<"open" | "install">("open");
+  const [tab, setTab] = useState<"open" | "install">(layout === "desktop" ? "install" : "open");
+  useEffect(() => { setTab(layout === "desktop" ? "install" : "open"); }, [layout]);
+  const isDesktop = layout === "desktop";
   const [openUrl, setOpenUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const { apps: foundApps, preferred: foundPreferred } = useAppsForCurrentPage();
@@ -188,12 +191,17 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
         ))}
       </div>
 
-      {tab === "open" ? (
+      {tab === "open" ? (isDesktop ? (
+        <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-3 py-4 text-[11px] leading-snug text-slate-500">
+          <div className="text-2xl mb-1">{DEVICE_ICON.desktop}</div>
+          คัดลอกลิงก์ด้านล่างไปเปิดบนคอมเครื่องอื่น<br />จะเปิดหน้านี้ในมุมมองจอคอม
+        </div>
+      ) : (
         <>
           <QrCode text={url} size={168} className="border border-slate-100" alt={`QR เปิดหน้านี้บน${DEVICE_LABEL[layout]}`} />
           <div className="text-[11px] leading-snug text-slate-500">สแกน QR ด้วยกล้อง{DEVICE_LABEL[layout]}<br />จะเปิดหน้านี้ในโหมด{DEVICE_LABEL[layout]}ทันที</div>
         </>
-      ) : apps.length === 0 ? (
+      )) : apps.length === 0 ? (
         <div className="flex h-[168px] w-[168px] items-center justify-center rounded-lg border border-dashed border-slate-200 p-3 text-[11px] leading-snug text-slate-400">
           หน้านี้ยังไม่อยู่ในแอปเดี่ยวใด<br />(ตั้งได้ที่ จัดการเมนู → ใส่หน้านี้ในแอป)
         </div>
@@ -209,14 +217,33 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
               ))}
             </div>
           )}
-          <QrCode text={url} size={168} className="border border-slate-100" alt={`QR ติดตั้งแอป ${app?.label ?? ""}`} />
-          <div className="text-left text-[11px] leading-snug text-slate-500">
-            <div className="mb-0.5 text-center font-semibold text-slate-700">ติดตั้งแอป &ldquo;{app?.label}&rdquo; บนเครื่อง</div>
-            1. สแกน QR → เปิดในเบราว์เซอร์{DEVICE_LABEL[layout]}<br />
-            2. กดปุ่ม <b>📲 ติดตั้งแอป</b> ที่หัวแอป<br />
-            &nbsp;&nbsp;&nbsp;(iPhone/iPad: ปุ่มแชร์ → &ldquo;เพิ่มไปยังหน้าจอโฮม&rdquo;)<br />
-            3. ไอคอนแอปโผล่บนหน้าจอ เปิดแล้วมาหน้านี้ได้เลย
-          </div>
+          {isDesktop ? (
+            <>
+              {/* คอม: เปิดหน้าแอปเดี่ยวในแท็บใหม่ แล้วกดติดตั้งที่นั่น (manifest ของแอปนั้น = ได้ไอคอนแอปนั้น ไม่ใช่ทั้งระบบ) */}
+              <button type="button" disabled={!url} onClick={() => { if (url) window.open(url, "_blank", "noopener"); }}
+                className="h-10 w-full rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40">
+                {DEVICE_ICON.desktop} เปิดหน้าติดตั้งบนคอมเครื่องนี้ ↗
+              </button>
+              <div className="text-left text-[11px] leading-snug text-slate-500">
+                <div className="mb-0.5 text-center font-semibold text-slate-700">ติดตั้งแอป &ldquo;{app?.label}&rdquo; บนคอม</div>
+                1. กดปุ่มด้านบน (คอมเครื่องอื่น: คัดลอกลิงก์ไปเปิดใน Chrome / Edge)<br />
+                2. กด <b>📲 ติดตั้งแอป</b> ที่หัวแอป หรือไอคอน <b>ติดตั้ง</b> ท้ายช่องที่อยู่เว็บ<br />
+                &nbsp;&nbsp;&nbsp;(ไม่เห็นปุ่ม: เมนู ⋮ → &ldquo;ติดตั้งแอป&rdquo; · Mac Safari: ไฟล์ → &ldquo;เพิ่มไปที่ Dock&rdquo;)<br />
+                3. ได้ไอคอนแอปบนเดสก์ท็อป / เมนู Start เปิดเป็นหน้าต่างแยก มาหน้านี้ได้เลย
+              </div>
+            </>
+          ) : (
+            <>
+              <QrCode text={url} size={168} className="border border-slate-100" alt={`QR ติดตั้งแอป ${app?.label ?? ""}`} />
+              <div className="text-left text-[11px] leading-snug text-slate-500">
+                <div className="mb-0.5 text-center font-semibold text-slate-700">ติดตั้งแอป &ldquo;{app?.label}&rdquo; บนเครื่อง</div>
+                1. สแกน QR → เปิดในเบราว์เซอร์{DEVICE_LABEL[layout]}<br />
+                2. กดปุ่ม <b>📲 ติดตั้งแอป</b> ที่หัวแอป<br />
+                &nbsp;&nbsp;&nbsp;(iPhone/iPad: ปุ่มแชร์ → &ldquo;เพิ่มไปยังหน้าจอโฮม&rdquo;)<br />
+                3. ไอคอนแอปโผล่บนหน้าจอ เปิดแล้วมาหน้านี้ได้เลย
+              </div>
+            </>
+          )}
         </>
       )}
 
