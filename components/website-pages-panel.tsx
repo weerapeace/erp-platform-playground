@@ -3,6 +3,7 @@
 /**
  * WebsitePagesPanel — แท็บ "📄 หน้าเว็บ" ในหน้า /website/<slug>
  * สร้าง/ลบหน้าใหม่ · จัด Section/Block ในแต่ละหน้าด้วยตัวจัดหน้า 3 แผงตัวเดียวกับหน้าแรก · ตั้ง SEO · ร่าง/เผยแพร่ · undo/redo
+ * ร่าง/เผยแพร่/บันทึกอัตโนมัติ/ย้อน = ของกลาง useDraftPublish (components/website-draft-publish)
  * ข้อมูล: /api/website/pages
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,7 +12,7 @@ import { useToast } from "@/components/toast";
 import { askConfirm, askLeaveUnsaved } from "@/components/modal/ask-dialog";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { WebsiteBuilder, type Selection } from "@/components/website-builder";
-import { summarizeChanges } from "@/components/website-layout-panel";
+import { useDraftPublish, summarizeChanges } from "@/components/website-draft-publish";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
@@ -99,22 +100,11 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [seo, setSeo] = useState<Meta>(EMPTY_META);
   // ค่าที่บันทึกแล้วของชื่อหน้า/ข้อมูลเสริม — เทียบเพื่อรู้ว่า "แก้ตั้งค่าหน้าแล้วยังไม่บันทึก"
   const [savedMeta, setSavedMeta] = useState<{ title: string; seo: Meta }>({ title: "", seo: EMPTY_META });
-  const [blocks, setBlocks] = useState<Block[]>([]);
-  const [savedBlocks, setSavedBlocks] = useState<Block[]>([]);
-  const [publishedBlocks, setPublishedBlocks] = useState<Block[]>([]);
-  const [hasDraft, setHasDraft] = useState(false);
-  const [savedAt, setSavedAt] = useState<Date | null>(null);
-  const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [checkOpen, setCheckOpen] = useState(false);
   // ✅ ตรวจก่อนเผยแพร่: ข้อมูลสินค้าของร้าน (ไม่มีราคา/รูป/หมวด)
   const dataIssues = useShopPublishIssues(shopSlug);
   const [showSeo, setShowSeo] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
-  const [previewVersion, setPreviewVersion] = useState(0);
-  const undoStack = useRef<Block[][]>([]);
-  const redoStack = useRef<Block[][]>([]);
-  const [, tick] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // สร้างหน้าใหม่
@@ -149,6 +139,22 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     void loadList();
   }, [loadList]);
 
+  // 🧰 ร่าง/เผยแพร่/บันทึกอัตโนมัติ/ย้อน = ของกลาง · บันทึกอัตโนมัติส่งแค่ Section · กดเอง = ส่งชื่อหน้า + SEO ไปด้วย
+  const dp = useDraftPublish<Block>({
+    active: editId !== null,
+    what: "หน้านี้",
+    save: async (blocks, mode, { auto }) => {
+      const body = auto ? { pageId: editId, blocks, mode } : { pageId: editId, blocks, seo, title: editTitle, mode };
+      const r = await apiFetch("/api/website/pages", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (j.ok && !auto) {
+        setSavedMeta({ title: editTitle, seo });
+        await loadList();
+      }
+      return j;
+    },
+  });
+
   const openPage = async (id: string) => {
     try {
       const r = await apiFetch(`/api/website/pages?shop=${encodeURIComponent(shopSlug)}&pageId=${encodeURIComponent(id)}`);
@@ -166,14 +172,8 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       const meta = { ...EMPTY_META, ...(p.seo ?? {}) };
       setSeo(meta);
       setSavedMeta({ title: p.title ?? "", seo: meta });
-      setBlocks(initial);
-      setSavedBlocks(initial);
-      setPublishedBlocks(p.published ?? []);
-      setHasDraft(Boolean(p.hasDraft));
-      setSavedAt(null);
+      dp.reset(initial, p.published ?? [], Boolean(p.hasDraft));
       setSelection(null);
-      undoStack.current = [];
-      redoStack.current = [];
       if (j.categories) setCategories(j.categories);
       if (j.themeCard) setThemeCard(j.themeCard);
     } catch {
@@ -191,82 +191,6 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (p) void openPage(p.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, pages]);
-
-  const apply = useCallback((next: Block[]) => {
-    setBlocks((prev) => {
-      undoStack.current = [...undoStack.current.slice(-49), prev];
-      redoStack.current = [];
-      return next;
-    });
-    tick((n) => n + 1);
-  }, []);
-  const undo = useCallback(() => {
-    const prev = undoStack.current.pop();
-    if (!prev) return;
-    setBlocks((cur) => {
-      redoStack.current = [...redoStack.current, cur];
-      return prev;
-    });
-    tick((n) => n + 1);
-  }, []);
-  const redo = useCallback(() => {
-    const next = redoStack.current.pop();
-    if (!next) return;
-    setBlocks((cur) => {
-      undoStack.current = [...undoStack.current, cur];
-      return next;
-    });
-    tick((n) => n + 1);
-  }, []);
-  useEffect(() => {
-    if (!editId) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
-      const el = e.target as HTMLElement;
-      if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return;
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [editId, undo, redo]);
-
-  const dirty = editId !== null && !eq(blocks, savedBlocks);
-
-  // บันทึกร่างเงียบ ๆ หลังหยุดแก้ 1.5 วิ → พรีวิวโหลดใหม่เอง (เหมือนแท็บหน้าแรก)
-  useEffect(() => {
-    if (!editId || !dirty || busy) return;
-    const t = setTimeout(async () => {
-      try {
-        const r = await apiFetch("/api/website/pages", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pageId: editId, blocks, mode: "draft" }),
-        });
-        const j = await r.json();
-        if (j.ok) {
-          setSavedBlocks(blocks);
-          setHasDraft(true);
-          setSavedAt(new Date());
-          setPreviewVersion((v) => v + 1);
-        }
-      } catch {
-        /* เงียบ — ผู้ใช้ยังกดบันทึกเองได้ */
-      }
-    }, 1500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blocks, editId, dirty, busy]);
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", h);
-    return () => window.removeEventListener("beforeunload", h);
-  }, [dirty]);
 
   const createPage = async () => {
     if (!newSlug.trim()) return;
@@ -360,46 +284,6 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     }
   };
 
-  const save = async (mode: "draft" | "publish", confirmed = false) => {
-    if (!editId) return;
-    // เผยแพร่ = เปิดป๊อป "ตรวจก่อนเผยแพร่" ก่อน (รายการที่ควรแก้ + ข้อมูลสินค้า) · กดยืนยันในป๊อปแล้วค่อยเผยแพร่จริง
-    if (mode === "publish" && !confirmed) {
-      setCheckOpen(true);
-      return;
-    }
-    setCheckOpen(false);
-    setBusy(mode);
-    try {
-      const r = await apiFetch("/api/website/pages", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId: editId, blocks, seo, title: editTitle, mode }),
-      });
-      const j = await r.json();
-      if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
-        return;
-      }
-      setSavedBlocks(blocks);
-      setSavedMeta({ title: editTitle, seo });
-      setSavedAt(new Date());
-      if (mode === "publish") {
-        setPublishedBlocks(blocks);
-        setHasDraft(false);
-        toast.success(j.purged ? "เผยแพร่หน้านี้แล้ว — เว็บจริงเปลี่ยนแล้ว รีเฟรชดูได้เลย" : "เผยแพร่หน้านี้แล้ว — เว็บจริงจะเปลี่ยนภายใน 1 นาที");
-        setPreviewVersion((v) => v + 1);
-      } else {
-        setHasDraft(true);
-        toast.success("บันทึกร่างแล้ว — เว็บจริงยังไม่เปลี่ยน");
-      }
-      await loadList();
-    } catch {
-      toast.error("เชื่อมต่อไม่ได้");
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
@@ -407,9 +291,9 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   /* ── หน้าจอแก้ไขหน้าเดียว ── */
   if (editId) {
     const previewSrc = siteUrl ? withPreviewKey(`${siteUrl}/${editType === "post" ? "blog/" : ""}${editSlug}?preview=1`, previewKey) : null;
-    const issues = [...validateBlocks(blocks as never, { helpPage: !!seo.help.trim() }), ...dataIssues];
+    const issues = [...validateBlocks(dp.blocks as never, { helpPage: !!seo.help.trim() }), ...dataIssues];
     const metaDirty = editTitle !== savedMeta.title || !eq(seo, savedMeta.seo);
-    const unpublished = hasDraft || dirty || metaDirty || !eq(blocks, publishedBlocks);
+    const unpublished = dp.unpublished || metaDirty;
     return (
       <div className="space-y-3">
         {showSeo && (
@@ -523,21 +407,21 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
         )}
 
         <WebsiteBuilder
-          blocks={blocks}
-          onChange={apply}
+          blocks={dp.blocks}
+          onChange={dp.apply}
           types={types}
           ctx={ctx}
           previewSrc={previewSrc}
           iframeRef={iframeRef}
           selection={selection}
           onSelect={setSelection}
-          previewVersion={previewVersion}
+          previewVersion={dp.previewVersion}
           toolbar={{
             leading: (
               <>
                 <button
                   onClick={async () => {
-                    if ((dirty || metaDirty) && !(await askLeaveUnsaved())) return;
+                    if ((dp.dirty || metaDirty) && !(await askLeaveUnsaved())) return;
                     setEditId(null);
                   }}
                   className="text-xs text-slate-500 hover:text-blue-600 mr-1"
@@ -552,30 +436,23 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
                 {seo.help && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="อยู่ในศูนย์ช่วยเหลือ">🧭 {seo.help}</span>}
               </>
             ),
+            ...dp.toolbar,
             dirty: unpublished,
-            statusNote: `${blocks.length} Section`,
-            savedText: savedAt ? `บันทึกร่าง ${savedAt.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}` : "",
-            saving: busy === "draft",
+            statusNote: `${dp.blocks.length} Section`,
+            saving: dp.busy === "draft",
             issues,
-            changes: summarizeChanges(blocks, publishedBlocks, types),
-            canUndo: undoStack.current.length > 0,
-            canRedo: redoStack.current.length > 0,
-            onUndo: undo,
-            onRedo: redo,
-            onSaveDraft: () => void save("draft"),
+            changes: summarizeChanges(dp.blocks, dp.published, types),
             onHistory: () => setShowVersions(true),
-            onPublish: () => void save("publish"),
             publishLabel: "เผยแพร่หน้านี้",
-            busy: busy === "publish",
           }}
         />
         <PublishCheckDialog
-          open={checkOpen}
-          onClose={() => setCheckOpen(false)}
-          onConfirm={() => void save("publish", true)}
+          open={dp.checkOpen}
+          onClose={dp.closeCheck}
+          onConfirm={() => void dp.publish()}
           issues={issues}
           what={` "${editTitle || "หน้านี้"}"`}
-          busy={busy === "publish"}
+          busy={dp.busy === "publish"}
           onGoBlock={(id) => setSelection({ blockId: id })}
         />
         <VersionHistoryDrawer<Block>
@@ -585,13 +462,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
           listUrl={`/api/website/pages/versions?pageId=${encodeURIComponent(editId)}`}
           restoreUrl="/api/website/pages/versions"
           restoreBody={(versionNo) => ({ pageId: editId, versionNo })}
-          onRestored={(restored) => {
-            // ฝั่งเซิร์ฟเวอร์บันทึกเป็นร่างแล้ว → ถือว่าบันทึกแล้ว (ไม่บันทึกซ้ำ) · ใส่ผ่าน apply() ให้กด ↶ ย้อนได้
-            apply(restored);
-            setSavedBlocks(restored);
-            setHasDraft(true);
-            setPreviewVersion((v) => v + 1);
-          }}
+          onRestored={dp.restored}
         />
       </div>
     );

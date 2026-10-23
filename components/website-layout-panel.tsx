@@ -4,7 +4,8 @@
  * WebsiteLayoutPanel — แท็บ "🧱 หน้าแรก" ในหน้า /website/<slug>
  *
  * ตัวจัดหน้า 3 แผง (components/website-builder.tsx): โครงหน้า · พรีวิวเว็บจริง · คุณสมบัติจาก Schema
- * ไฟล์นี้ดูแล "ข้อมูล": โหลด/บันทึกร่างอัตโนมัติ/เผยแพร่/ละทิ้ง/ประวัติเวอร์ชัน/undo-redo/ตรวจก่อนเผยแพร่
+ * ไฟล์นี้ดูแล "ข้อมูล": โหลด · ละทิ้ง · ประวัติเวอร์ชัน · ตรวจก่อนเผยแพร่
+ * ร่าง/เผยแพร่/บันทึกอัตโนมัติ/ย้อน = ของกลาง useDraftPublish (components/website-draft-publish — ใช้ร่วมหน้าเว็บ + หน้าชุดมาใหม่)
  *
  * ข้อมูล: /api/website/layout · /api/website/layout/versions
  */
@@ -14,33 +15,15 @@ import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { useToast } from "@/components/toast";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { WebsiteBuilder, type Selection, type ChangeSummary } from "@/components/website-builder";
+import { useDraftPublish, summarizeChanges } from "@/components/website-draft-publish";
 import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
 import { VersionHistoryDrawer } from "@/components/website-version-history";
 
-/** บันทึกร่างเงียบ ๆ หลังหยุดแก้ 1.5 วิ → พรีวิวโหลดใหม่เอง */
-const AUTOSAVE_MS = 1500;
-const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const timeStr = (d: Date) => d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-
-/** เทียบร่างกับที่เผยแพร่ → รายชื่อ Section ที่เพิ่ม/ลบ/แก้ (ใช้ร่วมแท็บหน้าเว็บ) */
-export function summarizeChanges(draft: Block[], live: Block[], types: BlockTypeInfo[]): ChangeSummary {
-  const label = (b: Block) => types.find((t) => t.type === b.type)?.label ?? b.type;
-  const liveMap = new Map(live.map((b) => [b.id, b]));
-  const draftIds = new Set(draft.map((b) => b.id));
-  return {
-    added: draft.filter((b) => !liveMap.has(b.id)).map(label),
-    removed: live.filter((b) => !draftIds.has(b.id)).map(label),
-    changed: draft.filter((b) => liveMap.has(b.id) && !eq(b, liveMap.get(b.id))).map(label),
-  };
-}
-
 export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
 
-  const [blocks, setBlocks] = useState<Block[]>([]);
-  const [published, setPublished] = useState<Block[]>([]);
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
   const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
   /** 🃏 การ์ดสินค้าของร้าน — Section ตารางสินค้าปิด "ใช้การ์ดตามค่ากลาง" แล้วก๊อปเป็นค่าเริ่ม */
@@ -49,22 +32,32 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   const [previewKey, setPreviewKey] = useState<string | null>(null); // 🔑 รหัสพรีวิว (ผ่านหน้าปิดเว็บ)
   const [shopName, setShopName] = useState<string>("");
   const [neverSet, setNeverSet] = useState(false);
-  const [hadDraft, setHadDraft] = useState(false);
 
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showVersions, setShowVersions] = useState(false);
-
   const [autoSave, setAutoSave] = useState(true);
-  const [savedAt, setSavedAt] = useState<Date | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [previewVersion, setPreviewVersion] = useState(0);
-
-  const undoStack = useRef<Block[][]>([]);
-  const redoStack = useRef<Block[][]>([]);
-  const [, tick] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // 🧰 ร่าง/เผยแพร่/บันทึกอัตโนมัติ/ย้อน = ของกลาง · ที่นี่บอกแค่ยิง API ยังไง
+  const dp = useDraftPublish<Block>({
+    autosave: autoSave,
+    // เตือนก่อนปิดเบราว์เซอร์ตลอดที่ยังมีร่างไม่ได้เผยแพร่ (เหมือนเดิม)
+    warnOnLeave: "unpublished",
+    save: async (blocks, mode, { auto }) => {
+      if (auto && !blocks.length) return { ok: false }; // ไม่บันทึกร่างเองตอนหน้าว่าง
+      const r = await apiFetch("/api/website/layout", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopId, blocks, mode }),
+      });
+      return r.json();
+    },
+    onSaved: (mode) => {
+      if (mode === "publish") setNeverSet(false);
+    },
+  });
+  const { reset } = dp;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,8 +68,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
         toast.error(j.error);
         return;
       }
-      setBlocks(j.draft ?? j.published ?? []);
-      setPublished(j.published ?? []);
+      reset(j.draft ?? j.published ?? [], j.published ?? [], Boolean(j.hasDraft));
       setTypes(j.blockTypes ?? []);
       setCategories(j.categories ?? []);
       setThemeCard(j.themeCard ?? undefined);
@@ -84,142 +76,23 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
       setPreviewKey(j.shop?.previewKey ?? null);
       setShopName(j.shop?.name ?? "");
       setNeverSet(Boolean(j.neverSet));
-      setHadDraft(Boolean(j.hasDraft));
-      undoStack.current = [];
-      redoStack.current = [];
     } catch {
       toast.error("โหลดโครงหน้าไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
-  }, [shopSlug, toast]);
+  }, [shopSlug, toast, reset]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const apply = useCallback((next: Block[]) => {
-    setBlocks((prev) => {
-      undoStack.current = [...undoStack.current.slice(-49), prev];
-      redoStack.current = [];
-      return next;
-    });
-    tick((n) => n + 1);
-  }, []);
-
-  const undo = useCallback(() => {
-    const prev = undoStack.current.pop();
-    if (!prev) return;
-    setBlocks((cur) => {
-      redoStack.current = [...redoStack.current, cur];
-      return prev;
-    });
-    tick((n) => n + 1);
-  }, []);
-
-  const redo = useCallback(() => {
-    const next = redoStack.current.pop();
-    if (!next) return;
-    setBlocks((cur) => {
-      undoStack.current = [...undoStack.current, cur];
-      return next;
-    });
-    tick((n) => n + 1);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
-      const el = e.target as HTMLElement;
-      if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable) return;
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
-
-  const isDirty = !eq(blocks, published) || hadDraft;
   // ✅ ตรวจก่อนเผยแพร่ = ปัญหาในหน้า (Section) + ข้อมูลสินค้าของร้าน (ไม่มีราคา/รูป/หมวด)
   const dataIssues = useShopPublishIssues(shopSlug);
-  const issues: ValidationIssue[] = useMemo(() => [...validateBlocks(blocks as never), ...dataIssues], [blocks, dataIssues]);
-  const [checkOpen, setCheckOpen] = useState(false);
+  const issues: ValidationIssue[] = useMemo(() => [...validateBlocks(dp.blocks as never), ...dataIssues], [dp.blocks, dataIssues]);
 
   // สรุปว่าร่างต่างจากที่เผยแพร่ตรงไหน (ชื่อ Section อ่านออก) — โชว์ตอนกดป้าย "ยังไม่เผยแพร่"
-  const changes: ChangeSummary = useMemo(() => summarizeChanges(blocks, published, types), [blocks, published, types]);
-
-  useEffect(() => {
-    if (!isDirty) return;
-    const h = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", h);
-    return () => window.removeEventListener("beforeunload", h);
-  }, [isDirty]);
-
-  const saveDraft = useCallback(
-    async (silent = false) => {
-      setSaving(true);
-      try {
-        const r = await apiFetch("/api/website/layout", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ shopId, blocks, mode: "draft" }),
-        });
-        const j = await r.json();
-        if (j.ok) {
-          setHadDraft(true);
-          setSavedAt(new Date());
-          setPreviewVersion((v) => v + 1);
-          if (!silent) toast.success("บันทึกร่างแล้ว — เว็บจริงยังไม่เปลี่ยน");
-        } else if (!silent) toast.error(j.error ?? "บันทึกไม่สำเร็จ");
-      } catch {
-        if (!silent) toast.error("เชื่อมต่อไม่ได้");
-      } finally {
-        setSaving(false);
-      }
-    },
-    [blocks, shopId, toast]
-  );
-
-  // บันทึกร่างอัตโนมัติเมื่อมีการเปลี่ยนแปลง (กันข้อมูลหายระหว่างแก้)
-  useEffect(() => {
-    if (!autoSave || loading || !blocks.length) return;
-    if (eq(blocks, published) && !hadDraft) return;
-    const t = setTimeout(() => void saveDraft(true), AUTOSAVE_MS);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blocks, autoSave, loading]);
-
-  const publish = async () => {
-    // ยืนยันผ่าน PublishCheckDialog แล้ว (โชว์รายการที่ควรแก้ก่อนกด)
-    setCheckOpen(false);
-    setBusy("publish");
-    try {
-      const r = await apiFetch("/api/website/layout", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, blocks, mode: "publish" }),
-      });
-      const j = await r.json();
-      if (!j.ok) {
-        toast.error(j.error ?? "เผยแพร่ไม่สำเร็จ");
-        return;
-      }
-      setPublished(j.blocks);
-      setBlocks(j.blocks);
-      setNeverSet(false);
-      setHadDraft(false);
-      toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version})${j.purged ? " — เว็บจริงเปลี่ยนแล้ว รีเฟรชดูได้เลย" : " — เว็บจริงจะเปลี่ยนภายใน 1 นาที"}`);
-      setPreviewVersion((v) => v + 1);
-    } catch {
-      toast.error("เชื่อมต่อไม่ได้");
-    } finally {
-      setBusy(null);
-    }
-  };
+  const changes: ChangeSummary = useMemo(() => summarizeChanges(dp.blocks, dp.published, types), [dp.blocks, dp.published, types]);
 
   const discard = async () => {
     if (!(await askConfirm({ title: "ละทิ้งการเปลี่ยนแปลงทั้งหมด?", message: "ร่างหน้าแรกจะหาย กลับไปใช้หน้าที่เผยแพร่อยู่", variant: "danger", confirmText: "ละทิ้ง" }))) return;
@@ -232,12 +105,6 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
     toast.info("ละทิ้งการเปลี่ยนแปลงแล้ว");
   };
 
-  // 🕘 ประวัติ = ของกลาง VersionHistoryDrawer (โหลด/ยืนยัน/กู้คืนเป็นร่าง) — ที่นี่แค่ใส่ผลลงร่าง
-  const onRestored = (restored: Block[]) => {
-    apply(restored);
-    setHadDraft(true);
-  };
-
   const previewSrc = siteUrl ? withPreviewKey(`${siteUrl}/?preview=1`, previewKey) : null;
   const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
 
@@ -246,43 +113,35 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
   return (
     <div className="space-y-3">
       <WebsiteBuilder
-        blocks={blocks}
-        onChange={apply}
+        blocks={dp.blocks}
+        onChange={dp.apply}
         types={types}
         ctx={ctx}
         previewSrc={previewSrc}
         iframeRef={iframeRef}
         selection={selection}
         onSelect={setSelection}
-        previewVersion={previewVersion}
+        previewVersion={dp.previewVersion}
         toolbar={{
-          dirty: isDirty,
-          statusNote: `${blocks.length} Section · เปิดใช้ ${blocks.filter((b) => b.enabled).length}${neverSet ? " · ยังไม่เคยจัดหน้า (โครงเริ่มต้น)" : ""}`,
-          savedText: savedAt ? `บันทึกร่าง ${timeStr(savedAt)}` : "",
-          saving,
+          ...dp.toolbar,
+          statusNote: `${dp.blocks.length} Section · เปิดใช้ ${dp.blocks.filter((b) => b.enabled).length}${neverSet ? " · ยังไม่เคยจัดหน้า (โครงเริ่มต้น)" : ""}`,
+          saving: dp.autosaving || dp.busy === "draft",
           issues,
           changes,
-          canUndo: undoStack.current.length > 0,
-          canRedo: redoStack.current.length > 0,
-          onUndo: undo,
-          onRedo: redo,
           autoSave,
           onAutoSave: setAutoSave,
           onHistory: () => setShowVersions(true),
           onDiscard: () => void discard(),
-          onSaveDraft: () => void saveDraft(false),
-          onPublish: () => setCheckOpen(true),
-          busy: busy === "publish",
         }}
       />
 
       <PublishCheckDialog
-        open={checkOpen}
-        onClose={() => setCheckOpen(false)}
-        onConfirm={() => void publish()}
+        open={dp.checkOpen}
+        onClose={dp.closeCheck}
+        onConfirm={() => void dp.publish()}
         issues={issues}
         what="หน้าแรก"
-        busy={busy === "publish"}
+        busy={dp.busy === "publish"}
         onGoBlock={(id) => setSelection({ blockId: id })}
       />
 
@@ -294,7 +153,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
         listUrl={`/api/website/layout/versions?shop=${encodeURIComponent(shopSlug)}`}
         restoreUrl="/api/website/layout/versions"
         restoreBody={(versionNo) => ({ shopId, versionNo })}
-        onRestored={onRestored}
+        onRestored={dp.restored}
       />
     </div>
   );
