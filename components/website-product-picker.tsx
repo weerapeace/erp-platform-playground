@@ -4,7 +4,7 @@
  * WebsiteProductPicker — เลือก "สินค้าที่อยู่บนเว็บร้านนี้" หลายรุ่น (เก็บเป็นรหัสรุ่น code[])
  *
  * ใช้ในบล็อก "ตารางสินค้า / คอลเลกชัน" (schema field type = products)
- * ดึงจาก /api/website/listings?shop= (สินค้าที่เพิ่มในแท็บ "สินค้าบนเว็บ" แล้ว) — ไม่ใช่ทั้ง ERP
+ * ดึงจาก /api/website/listings?shop= ผ่านตัวดึงกลาง lib/website-data (สินค้าที่เพิ่มในแท็บ "สินค้าบนเว็บ" แล้ว) — ไม่ใช่ทั้ง ERP
  * ป๊อปใช้ของกลาง ERPModal + MiniTable (เลือกหลายแถว) · ลำดับที่เลือก = ลำดับที่โชว์บนเว็บ
  * รายการที่เลือก = แถวมีรูปเล็ก + รหัส + ชื่อ · ลากหูจับ ⠿ เพื่อเรียง (ของกลาง useDragReorder) · ✕ เอาออก
  * รายการสินค้าบนเว็บโหลดครั้งเดียวต่อร้าน (แคชในหน้า) — หลายช่องในหน้าเดียวกันไม่ยิงซ้ำ
@@ -16,7 +16,7 @@ import { useToast } from "@/components/toast";
 import { AssetPicker } from "@/components/asset-picker";
 import { uploadToLibrary } from "@/components/website-canvas-media";
 import { loadSkus, type SkuRow } from "@/components/website-sku-picker";
-import { apiFetch } from "@/lib/api";
+import { loadWebListings } from "@/lib/website-data";
 import { ERPModal } from "@/components/modal";
 import { MiniTable } from "@/components/mini-table";
 import { keyUrl } from "@/components/website-theme-media";
@@ -34,19 +34,11 @@ type Listing = {
   mapped: { category?: string; name?: string; images?: string[] } | null;
 };
 
-/** สินค้าที่เผยแพร่ของร้าน — แคชต่อร้าน (โหลดใหม่เมื่อเปิดป๊อปเลือก) */
-const listingCache = new Map<string, Promise<Listing[]>>();
+/** สินค้าที่เผยแพร่ของร้าน — แคชต่อร้านที่ตัวดึงกลาง (โหลดใหม่เมื่อเปิดป๊อปเลือก) */
 function loadListings(shopSlug: string, fresh = false): Promise<Listing[]> {
-  if (fresh || !listingCache.has(shopSlug)) {
-    listingCache.set(
-      shopSlug,
-      apiFetch(`/api/website/listings?shop=${encodeURIComponent(shopSlug)}`)
-        .then((r) => r.json())
-        .then((j) => ((j.listings ?? []) as Listing[]).filter((l) => l.published))
-        .catch(() => [])
-    );
-  }
-  return listingCache.get(shopSlug)!;
+  return loadWebListings<Listing>(shopSlug, fresh)
+    .then((j) => (j.listings ?? []).filter((l) => l.published))
+    .catch(() => []);
 }
 
 /** 🖼 รูปรายรุ่น — images = { รหัสรุ่น: r2 key } · skus = "CODE:sku-xxx"[] · onSet(รหัส, null = กลับไปรูปปก) */

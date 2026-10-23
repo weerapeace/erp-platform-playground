@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 
 export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
@@ -18,9 +19,8 @@ export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shop
 
   const load = useCallback(async () => {
     try {
-      const r = await apiFetch(`/api/website/settings?shop=${encodeURIComponent(shopSlug)}`);
-      const j = await r.json();
-      if (j.info) setInfo(j.info as Record<string, unknown>);
+      const j = await loadWebSettings(shopSlug, true);
+      if (j.info) setInfo(j.info);
     } catch {
       /* ไม่โชว์ปุ่มถ้าโหลดไม่ได้ */
     }

@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { loadWebNewDrops } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
@@ -65,9 +66,8 @@ export function WebsiteNewDropsPanel({ shopSlug, shopId }: { shopSlug: string; s
 
   const load = useCallback(async () => {
     try {
-      const r = await apiFetch(`/api/website/new-drops?shop=${encodeURIComponent(shopSlug)}`);
-      const j = await r.json();
-      if (!r.ok) throw new Error(j?.error || "โหลดไม่สำเร็จ");
+      const j = await loadWebNewDrops<NewDrop, { custom: boolean; draft: boolean }>(shopSlug, true);
+      if (j.error) throw new Error(j.error);
       setDrops(j.drops ?? []);
       setPages(j.pages ?? {});
     } catch (e) {

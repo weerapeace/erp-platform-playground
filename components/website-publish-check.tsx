@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
-import { apiFetch } from "@/lib/api";
+import { loadWebListings } from "@/lib/website-data";
 import { listingIssues, shopPublishIssues } from "@/lib/website-listing-health";
 import type { ValidationIssue } from "@/lib/website-schema";
 
@@ -26,11 +26,10 @@ export function useShopPublishIssues(shopSlug: string): ValidationIssue[] {
   useEffect(() => {
     let alive = true;
     const load = () =>
-      apiFetch(`/api/website/listings?shop=${encodeURIComponent(shopSlug)}`)
-        .then((r) => r.json())
+      loadWebListings<ListingRow>(shopSlug, true)
         .then((j) => {
           if (!alive) return;
-          const rows = ((j.listings ?? []) as ListingRow[]).map((l) => ({
+          const rows = (j.listings ?? []).map((l) => ({
             code: l.code,
             published: l.published,
             issues: l.display ? listingIssues({ price: l.display.price, imageCount: l.display.imageCount, categories: l.categories ?? [], colors: l.display.colors ?? [], compartmentsMissing: l.display.compartmentsMissing }) : [],

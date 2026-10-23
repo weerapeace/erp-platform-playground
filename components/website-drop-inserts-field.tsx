@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { loadWebNewDrops } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { ListingInsertsEditor } from "@/components/website-listing-panel";
 import { normalizeListingInserts, type ListingInsert } from "@/lib/website-listing";
@@ -29,10 +30,9 @@ export function DropInsertsField({ ctx, which, onSaved }: { ctx: SchemaFormConte
     if (!dropId) return;
     setLoadErr(null);
     try {
-      const r = await apiFetch(`/api/website/new-drops?shopId=${encodeURIComponent(ctx.shopId)}`);
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "โหลดชุดไม่สำเร็จ");
-      const d = ((j.drops ?? []) as NewDrop[]).find((x) => x.id === dropId) ?? null;
+      const j = await loadWebNewDrops<NewDrop>(ctx.shopSlug, true);
+      if (j.error) throw new Error(j.error);
+      const d = (j.drops ?? []).find((x) => x.id === dropId) ?? null;
       if (!d) throw new Error("ไม่พบชุดนี้");
       setDrop(d);
       setList(normalizeListingInserts(d.inserts));
@@ -40,7 +40,7 @@ export function DropInsertsField({ ctx, which, onSaved }: { ctx: SchemaFormConte
     } catch (e) {
       setLoadErr((e as Error).message);
     }
-  }, [dropId, ctx.shopId]);
+  }, [dropId, ctx.shopSlug]);
   useEffect(() => {
     void load();
   }, [load]);

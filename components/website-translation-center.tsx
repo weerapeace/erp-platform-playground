@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { SaveBar, useReportUnsaved } from "@/components/save-bar";
 import { TranslationBar, TranslationChip } from "@/components/bilingual-field";
@@ -89,10 +90,10 @@ export function WebsiteTranslationCenter({ shopSlug }: { shopSlug: string }) {
     try {
       const [j, s] = await Promise.all([
         apiFetch(`/api/website/translations?shop=${encodeURIComponent(shopSlug)}`).then((r) => r.json()),
-        apiFetch(`/api/website/settings?shop=${encodeURIComponent(shopSlug)}`).then((r) => r.json()),
+        loadWebSettings<{ key: string; i18n?: boolean }>(shopSlug, true),
       ]);
       if (j.error) throw new Error(j.error);
-      const infoKeys = ((s.fields ?? []) as { key: string; i18n?: boolean }[]).filter((f) => f.i18n).map((f) => f.key);
+      const infoKeys = (s.fields ?? []).filter((f) => f.i18n).map((f) => f.key);
       const p = { ...(j as Payload), infoKeys };
       const list: Source[] = [
         { key: "layout", label: "หน้าแรก", icon: "🧱", group: "หน้าเว็บ", value: p.layout.draft ?? p.layout.published, adapter: blocksAdapter("layout") as CenterAdapter<unknown> },

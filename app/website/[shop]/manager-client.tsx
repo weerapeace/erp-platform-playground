@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { apiFetch } from "@/lib/api";
+import { loadWebListings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
 import { WebsiteCategoriesPanel } from "@/components/website-categories-panel";
@@ -75,8 +75,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
     async (slug?: string) => {
       setLoading((v) => v || !slug);
       try {
-        const r = await apiFetch(`/api/website/listings?shop=${encodeURIComponent(slug ?? "")}`);
-        const j = await r.json();
+        const j = await loadWebListings<Listing, ShopInfo, CategoryDef>(slug ?? "", true);
         setShop(j.shop ?? null);
         // API ตอบ notFound เมื่อ slug ที่ขอไม่มีจริง (ไม่เด้งไปร้านอื่นแล้ว)
         setNotFound(Boolean(j.notFound) || !j.shop);

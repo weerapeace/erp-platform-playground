@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf, categoryAlsoOf, newDropHref } from "@/lib/website-links";
-import { apiFetch } from "@/lib/api";
+import { loadWebNewDrops } from "@/lib/website-data";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
 
@@ -55,18 +55,11 @@ function loadStorePages(shopSlug: string) {
   return pagesCache.get(shopSlug)!;
 }
 
-/** 🆕 ชุดมาใหม่ของร้าน (รวมที่ยังไม่เปิด) → ลิงก์ไปหน้าชุดนั้น /new/<id> — แคชต่อร้านในหน้านี้ */
-const dropsCache = new Map<string, Promise<{ id: string; title: string }[]>>();
+/** 🆕 ชุดมาใหม่ของร้าน (รวมที่ยังไม่เปิด) → ลิงก์ไปหน้าชุดนั้น /new/<id> — แคชต่อร้านที่ตัวดึงกลาง (lib/website-data) */
 function loadNewDrops(shopSlug: string) {
-  if (!dropsCache.has(shopSlug))
-    dropsCache.set(
-      shopSlug,
-      apiFetch(`/api/website/new-drops?shop=${encodeURIComponent(shopSlug)}`)
-        .then((r) => r.json())
-        .then((j) => ((j?.drops as { id: string; title: string }[]) ?? []).filter((d) => d.id))
-        .catch(() => [])
-    );
-  return dropsCache.get(shopSlug)!;
+  return loadWebNewDrops<{ id: string; title: string }>(shopSlug)
+    .then((j) => (j.drops ?? []).filter((d) => d.id))
+    .catch(() => []);
 }
 
 export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value: string; onChange: (href: string) => void; ctx: SchemaFormContext; /** sm = ช่องเตี้ยตัวเล็ก (แผงตั้งค่าแน่น) */ size?: "sm" | "md" }) {

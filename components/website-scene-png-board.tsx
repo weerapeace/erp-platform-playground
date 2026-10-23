@@ -11,23 +11,17 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { loadStorefrontProducts } from "@/lib/website-data";
 import { PngSlot } from "@/components/png-slot";
 import { SCENE_TAB_DEFAULTS, sceneTabCandidates, sceneTabCount, scenePngOf, sceneTabSource, type SceneProductLike, type SceneTabN, type SceneTabsLike } from "@/lib/website-scene";
 
 type Item = SceneProductLike & { id: string; code: string; name: string; images?: string[] };
 
-const cache = new Map<string, Promise<Item[]>>();
+/** สินค้าหน้าร้าน — แคชต่อร้านที่ตัวดึงกลาง lib/website-data */
 function loadProducts(shopSlug: string, fresh = false): Promise<Item[]> {
-  if (fresh || !cache.has(shopSlug)) {
-    cache.set(
-      shopSlug,
-      fetch(`/api/public/storefront/products?shop=${encodeURIComponent(shopSlug)}`, { cache: "no-store" })
-        .then((r) => r.json())
-        .then((j) => (Array.isArray(j?.products) ? (j.products as Item[]) : []))
-        .catch(() => [])
-    );
-  }
-  return cache.get(shopSlug)!;
+  return loadStorefrontProducts<Item>(shopSlug, fresh)
+    .then((j) => (Array.isArray(j?.products) ? j.products : []))
+    .catch(() => []);
 }
 /** URL รูป PNG จาก API (/api/r2-image?key=…) → r2 key */
 function keyOf(url: string | null): string | null {

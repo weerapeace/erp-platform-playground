@@ -13,6 +13,7 @@ import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { ERPDateTime24 } from "@/components/form";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { loadWebListings } from "@/lib/website-data";
 import { isLive, promoBadge, PROMO_KINDS, type DiscountKind, type Promotion, type PromoKind, type PromoScope } from "@/lib/website-promotions";
 
 type Tier = { min: string; kind: DiscountKind; value: string };
@@ -113,11 +114,10 @@ export function WebsitePromotionsPanel({ shopSlug, shopId }: { shopSlug: string;
   const [cats, setCats] = useState<{ key: string; label: string }[]>([]);
 
   useEffect(() => {
-    apiFetch(`/api/website/listings?shop=${encodeURIComponent(shopSlug)}`)
-      .then((r) => r.json())
+    loadWebListings<{ code: string; erpName: string; published: boolean; display?: { name?: string } }, unknown, { key: string; label: string }>(shopSlug, true)
       .then((j) => {
-        setProducts(((j.listings ?? []) as { code: string; erpName: string; published: boolean; display?: { name?: string } }[]).filter((l) => l.published && l.code).map((l) => ({ code: l.code, name: l.display?.name || l.erpName })));
-        setCats(((j.categories ?? []) as { key: string; label: string }[]).map((c) => ({ key: c.key, label: c.label })));
+        setProducts((j.listings ?? []).filter((l) => l.published && l.code).map((l) => ({ code: l.code, name: l.display?.name || l.erpName })));
+        setCats((j.categories ?? []).map((c) => ({ key: c.key, label: c.label })));
       })
       .catch(() => undefined);
   }, [shopSlug]);

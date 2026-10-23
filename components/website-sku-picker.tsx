@@ -12,34 +12,27 @@ import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { MiniTable } from "@/components/mini-table";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { loadStorefrontProducts } from "@/lib/website-data";
 
 type WebOption = { id: string; label: string; image?: string | null; images?: string[] };
 /** API สาธารณะส่งตัวเลือกสีเป็น { label, items } (เว็บร้านแปลงเป็น options[] เอง) */
 type WebProduct = { code?: string; slug: string; name: string; images?: string[]; options?: { label?: string; items?: WebOption[] } | WebOption[] | null; category?: string; categories?: string[] };
 export type SkuRow = { ref: string; code: string; name: string; color: string; image: string | null; cat: string };
 
-/** SKU ที่เผยแพร่ของร้าน — แคชต่อร้าน (โหลดใหม่เมื่อเปิดป๊อปเลือก) */
-const cache = new Map<string, Promise<SkuRow[]>>();
+/** SKU ที่เผยแพร่ของร้าน — แคชต่อร้านที่ตัวดึงกลาง lib/website-data (โหลดใหม่เมื่อเปิดป๊อปเลือก) */
 export function loadSkus(shopSlug: string, fresh = false): Promise<SkuRow[]> {
-  if (fresh || !cache.has(shopSlug)) {
-    cache.set(
-      shopSlug,
-      fetch(`/api/public/storefront/products?shop=${encodeURIComponent(shopSlug)}`)
-        .then((r) => r.json())
-        .then((j) =>
-          ((j.products ?? []) as WebProduct[]).flatMap((p): SkuRow[] => {
-            const code = String(p.code ?? p.slug).toUpperCase();
-            // รหัสหมวด (ไว้ค้นหา เช่น พิมพ์ crossbody)
-            const cat = [p.category, ...(p.categories ?? [])].filter(Boolean).join(" ");
-            const opts = Array.isArray(p.options) ? p.options : p.options?.items ?? [];
-            if (!opts.length) return [{ ref: code, code, name: p.name, color: "", image: p.images?.[0] ?? null, cat }];
-            return opts.map((o) => ({ ref: `${code}:${o.id}`, code, name: p.name, color: o.label, image: o.images?.[0] ?? o.image ?? p.images?.[0] ?? null, cat }));
-          })
-        )
-        .catch(() => [])
-    );
-  }
-  return cache.get(shopSlug)!;
+  return loadStorefrontProducts<WebProduct>(shopSlug, fresh)
+    .then((j) =>
+      (j.products ?? []).flatMap((p): SkuRow[] => {
+        const code = String(p.code ?? p.slug).toUpperCase();
+        // รหัสหมวด (ไว้ค้นหา เช่น พิมพ์ crossbody)
+        const cat = [p.category, ...(p.categories ?? [])].filter(Boolean).join(" ");
+        const opts = Array.isArray(p.options) ? p.options : p.options?.items ?? [];
+        if (!opts.length) return [{ ref: code, code, name: p.name, color: "", image: p.images?.[0] ?? null, cat }];
+        return opts.map((o) => ({ ref: `${code}:${o.id}`, code, name: p.name, color: o.label, image: o.images?.[0] ?? o.image ?? p.images?.[0] ?? null, cat }));
+      })
+    )
+    .catch(() => []);
 }
 
 export function WebsiteSkuPicker({ shopSlug, value, max = 24, onChange }: { shopSlug: string; value: string[]; max?: number; onChange: (refs: string[]) => void }) {

@@ -15,6 +15,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { AssetPicker } from "@/components/asset-picker";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { loadStorefrontProducts } from "@/lib/website-data";
 import { CANVAS_SHAPES } from "@/lib/website-canvas";
 import { CanvasShape } from "@/components/website-canvas-shapes";
 import { ImageSetsContext } from "@/components/website-image-sets-context";
@@ -135,9 +136,8 @@ export function ImageChooser({
   const openProducts = () => {
     setShowProducts(true);
     if (products) return;
-    fetch(`/api/public/storefront/products?shop=${encodeURIComponent(shopSlug)}`)
-      .then((r) => r.json())
-      .then((j) => setProducts(((j?.products ?? []) as { code: string; name: string; images?: string[]; categories?: string[] }[]).map((p) => ({ code: p.code, name: p.name, images: p.images ?? [], categories: p.categories ?? [] }))))
+    loadStorefrontProducts<{ code: string; name: string; images?: string[]; categories?: string[] }>(shopSlug, true)
+      .then((j) => setProducts((j.products ?? []).map((p) => ({ code: p.code, name: p.name, images: p.images ?? [], categories: p.categories ?? [] }))))
       .catch(() => setProducts([]));
   };
 

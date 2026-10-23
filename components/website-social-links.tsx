@@ -8,6 +8,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 
@@ -42,8 +43,7 @@ export function SocialLinksModal({ open, onClose, shopSlug, shopId, onSaved }: {
     let alive = true;
     setLoading(true);
     setErr(null);
-    apiFetch(`/api/website/settings?shop=${encodeURIComponent(shopSlug)}`)
-      .then((r) => r.json())
+    loadWebSettings(shopSlug, true)
       .then((j) => {
         if (!alive) return;
         if (j.error) return setErr(j.error);

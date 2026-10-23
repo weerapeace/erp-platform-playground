@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
 import { apiFetch } from "@/lib/api";
+import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { GiftCardsEditor } from "@/components/website-gift-cards-editor";
 import { RestockCard } from "@/components/website-restock-panel";
@@ -64,8 +65,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await apiFetch(`/api/website/settings?shop=${encodeURIComponent(shopSlug)}`);
-      const j = await r.json();
+      const j = await loadWebSettings<FieldDef, GroupDef>(shopSlug, true);
       if (j.error) {
         toast.error(j.error);
         return;

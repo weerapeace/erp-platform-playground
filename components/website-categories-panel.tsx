@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { loadWebListings } from "@/lib/website-data";
 import { ImageChooser } from "@/components/website-canvas-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { cleanCategoryKey, type WebCategoryDef } from "@/lib/website-field-map";
@@ -82,7 +83,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     try {
       const [fm, ls] = await Promise.all([
         apiFetch(`/api/website/field-map?shop=${encodeURIComponent(shopSlug)}`).then((r) => r.json()),
-        apiFetch(`/api/website/listings?shop=${encodeURIComponent(shopSlug)}`).then((r) => r.json()),
+        loadWebListings<Listing>(shopSlug, true),
       ]);
       if (!fm?.fieldMap) throw new Error(fm?.error || "โหลดหมวดไม่สำเร็จ");
       setFieldMap(fm.fieldMap);
