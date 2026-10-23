@@ -158,3 +158,50 @@ describe("🎬 แกลเลอรีแบบแถบวิดีโอ (lay
     expect(blockSummary(norm({ id: "g5", type: "gallery", layout: "tabs", items: [{ imageKey: "a/1.jpg" }] }))).toContain("แถบวิดีโอ");
   });
 });
+
+describe("🗂 แถบวิดีโอ หน้าตาแฟ้มเอกสาร (tabsLook folder)", () => {
+  const sch = SECTION_SCHEMAS.gallery;
+  const shown = (b: R) => sch.fields.filter((x) => matchShowIf(x, b)).map((x) => x.key);
+  const child = (k: string) => sch.children!.fields.find((x) => x.key === k)!;
+  const byParent = (k: string, parent: R) => matchShowIf({ ...child(k), showIf: child(k).showIfParent }, parent);
+  const tabs = (b: R) => norm({ id: "f1", type: "gallery", layout: "tabs", items: [{ imageKey: "a/1.jpg" }, { imageKey: "a/2.jpg" }], ...b });
+
+  it("แถบวิดีโอเดิม = แบบเดิม (plain) · ไม่เห็นช่องแฟ้ม · ช่องเดิมครบ", () => {
+    const b = tabs({});
+    expect(b.tabsLook).toBe("plain");
+    const keys = shown(b);
+    expect(keys.some((k) => k.startsWith("folder") || k.startsWith("cover"))).toBe(false);
+    expect(keys).toEqual(expect.arrayContaining(["tabsActive", "tabsGap", "tabsRadius", "tabsSliver", "tabsMobile", "tabsNum", "tabsCapPos"]));
+  });
+
+  it("แฟ้ม: ค่าเริ่มแบบตัวอย่าง (แนวนอน · แฟ้มจริง · สลับซ้ายขวา · เส้นบาง · เงา 2 · มุม 14 · พาสเทล · โพลารอยด์ · ดึงขึ้น)", () => {
+    const b = tabs({ tabsLook: "folder" });
+    expect(b).toMatchObject({ folderDir: "h", folderShape: "real", folderPos: "alt", folderTex: "lines", folderShadow: 2, folderRadius: 14, folderPal: "pastel", folderLabel: "auto", folderMedia: "pol", folderPeek: 56, folderLift: true, folderCover: false, coverFont: "display", coverFont2: "Great Vibes", coverSize: 56, coverLogo: null });
+  });
+
+  it("แฟ้มแนวนอน = ซ่อนช่องของแถบ (กว้าง/แถบบาง/มือถือ/ตัวนับ) · แนวตั้ง = โชว์ (ยกเว้นระยะห่าง/มุมของแบบเดิม)", () => {
+    const h = shown(tabs({ tabsLook: "folder", folderDir: "h" }));
+    expect(h).toEqual(expect.arrayContaining(["folderDir", "folderShape", "folderPos", "folderTex", "folderShadow", "folderRadius", "folderPal", "folderLabel", "folderMedia", "folderPeek", "folderLift", "folderCover"]));
+    for (const k of ["tabsActive", "tabsSliver", "tabsMobile", "tabsNum", "tabsCapPos", "tabsGap", "tabsRadius"]) expect(h).not.toContain(k);
+    const v = shown(tabs({ tabsLook: "folder", folderDir: "v" }));
+    expect(v).toEqual(expect.arrayContaining(["tabsActive", "tabsSliver", "tabsNum"]));
+    expect(v).not.toContain("tabsMobile"); // มือถือเรียงแนวตั้ง = แบบเดิมเท่านั้น (แฟ้มใช้แนวนอนแทน)
+    expect(v).not.toContain("folderPeek");
+    expect(v).not.toContain("tabsGap");
+  });
+
+  it("แฟ้มปก: ช่องชื่อ/ฟอนต์/โลโก้ โชว์เมื่อเปิดแฟ้มปก · สีเองโชว์เมื่อเลือกสีเอง", () => {
+    expect(shown(tabs({ tabsLook: "folder" }))).not.toContain("coverTitle");
+    const c = shown(tabs({ tabsLook: "folder", folderCover: true, folderPal: "custom" }));
+    expect(c).toEqual(expect.arrayContaining(["coverTitle", "coverTitle2", "coverFont", "coverFont2", "coverSize", "coverLogo", "folderHex"]));
+  });
+
+  it("ค่ามั่ว = ค่าเริ่ม · ช่วงถูกบีบ · ชิ้นมีป้ายหูแฟ้ม + สีแฟ้มรายช่อง (โชว์เฉพาะหน้าตาแฟ้ม)", () => {
+    const b = tabs({ tabsLook: "folder", folderShape: "blob", folderShadow: 9, folderRadius: -4, folderPal: "neon", items: [{ imageKey: "a/1.jpg", tabLabel: "TO DO LIST", folderColor: "#EBCFD0" }] });
+    expect([b.folderShape, b.folderShadow, b.folderRadius, b.folderPal]).toEqual(["real", 3, 0, "pastel"]);
+    expect(b.items[0]).toMatchObject({ tabLabel: "TO DO LIST", folderColor: "#ebcfd0" });
+    expect(byParent("tabLabel", { layout: "tabs", tabsLook: "folder" })).toBe(true);
+    expect(byParent("tabLabel", { layout: "tabs", tabsLook: "plain" })).toBe(false);
+    expect(byParent("folderColor", { layout: "grid" })).toBe(false);
+  });
+});

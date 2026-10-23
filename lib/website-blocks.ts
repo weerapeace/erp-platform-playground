@@ -1090,6 +1090,27 @@ export interface GalleryBlock extends BlockBase {
   tabsNum?: boolean;
   tabsFont?: string;
   tabsUpper?: boolean;
+  /** 🗂 หน้าตาแฟ้มเอกสารของแถบวิดีโอ (galleryTabsFields) — plain = แบบเดิม */
+  tabsLook?: "plain" | "folder";
+  folderDir?: "h" | "v";
+  folderShape?: "real" | "round" | "slant" | "square";
+  folderPos?: "alt" | "stair" | "left";
+  folderTex?: "none" | "lines" | "dots" | "grid" | "diag";
+  folderShadow?: number;
+  folderRadius?: number;
+  folderPal?: "pastel" | "pink" | "mono" | "brand" | "custom";
+  folderHex?: string;
+  folderLabel?: "auto" | "sticker" | "plain";
+  folderMedia?: "pol" | "full";
+  folderPeek?: number;
+  folderLift?: boolean;
+  folderCover?: boolean;
+  coverTitle?: string;
+  coverTitle2?: string;
+  coverFont?: string;
+  coverFont2?: string;
+  coverSize?: number;
+  coverLogo?: string | null;
   stripEffect?: "soft" | "bounce" | "bend" | "lens";
   stripW?: number;
   stripWMobile?: number;
@@ -1117,7 +1138,7 @@ export interface GalleryBlock extends BlockBase {
   rotateSec?: number;
   /** รายรูป: code = รหัสรุ่นสินค้า (≤1) → รูปแรก/ชื่อ/ลิงก์ของสินค้า เมื่อไม่ได้ใส่เอง
    *  media "video" = เล่นคลิป videoKey (วนเงียบ · imageKey = รูปปก) — แบบตาราง + แถบวิดีโอ (แถวรูปลุคบุ๊กโชว์รูปปก) */
-  items: (ChildBase & { code?: string[]; media?: "image" | "video"; videoKey?: string | null; imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string })[];
+  items: (ChildBase & { code?: string[]; media?: "image" | "video"; videoKey?: string | null; imageKey: string | null; alt: string; title?: string; caption: string; href?: string; linkText?: string; tabLabel?: string; folderColor?: string })[];
 }
 
 /** ปุ่มเดี่ยว — วางคั่นระหว่างเนื้อหาได้ทุกจุด */

@@ -839,16 +839,118 @@ const galleryStripFields = (): FieldDef[] => {
  *   มือถือ: แตะแถบ = ขยาย · แตะช่องที่ขยายอยู่ = เปิดเต็มจอ / ไปลิงก์ · เว็บร้าน src/components/home/GalleryTabs.tsx
  */
 const GAL_TABS: ShowIf = { key: "layout", eq: "tabs" };
+/** 🗂 หน้าตาแฟ้มเอกสาร (tabsLook folder) · แบบเดิม = plain */
+const TABS_PLAIN: ShowIf = { key: "tabsLook", eq: ["plain", "", undefined] };
+const TABS_FOLDER: ShowIf = { key: "tabsLook", eq: "folder" };
+/** ช่องเรียงเป็นแถบข้างกัน = แบบเดิม หรือ แฟ้มแนวตั้ง (แฟ้มแนวนอนกางลงมาแทน ไม่ใช้ช่องพวกนี้) */
+const TABS_STRIP: ShowIf = { key: "tabsLook", eq: ["plain", "", undefined, "v"], orKey: "folderDir" };
+/** ชุดสีแฟ้ม (เว็บร้าน GalleryTabs FOLDER_PALETTES มิเรอร์) */
+export const FOLDER_PALETTES: FieldOption[] = [
+  { v: "pastel", l: "พาสเทล 3 สี (ครีม/ชมพู/ฟ้า)" },
+  { v: "pink", l: "ชมพูล้วน" },
+  { v: "mono", l: "ขาวเทา" },
+  { v: "brand", l: "ตามสีแบรนด์ (อ่อน)" },
+  { v: "custom", l: "สีเอง…" },
+];
 const galleryTabsFields = (): FieldDef[] => {
   const st = { showIf: GAL_TABS };
   const cap = { group: "caption" as FieldGroup };
   const capOn: ShowIf[] = [GAL_TABS, { key: "tabsCap", eq: ["scramble", "plain"] }];
+  const fo: ShowIf[] = [GAL_TABS, TABS_FOLDER];
+  const cover: ShowIf[] = [...fo, { key: "folderCover", eq: true }];
   return [
-    f("tabsH", "ความสูง — จอคอม (px)", "range", { group: "layout", default: 560, min: 280, numMax: 900, step: 20, ...st }),
+    // 🗂 หน้าตา: แบบเดิม (แถบ) / แฟ้มเอกสาร (2026-10-23) — ค่าเริ่ม = แบบเดิม (Section เก่าหน้าตาไม่เปลี่ยน)
+    f("tabsLook", "หน้าตา", "select", {
+      group: "layout",
+      default: "plain",
+      wide: true,
+      options: [
+        { v: "plain", l: "แบบเดิม — แถบเรียงกัน" },
+        { v: "folder", l: "🗂 แฟ้มเอกสาร — ขอบแฟ้ม + หูแฟ้มมีป้าย" },
+      ],
+      ...st,
+    }),
+    f("folderDir", "ทิศของแฟ้ม", "select", {
+      group: "layout",
+      default: "h",
+      options: [
+        { v: "h", l: "แนวนอน — แฟ้มซ้อนลงมา ชี้แล้วกางออก" },
+        { v: "v", l: "แนวตั้ง — แฟ้มเรียงข้างกัน ชี้แล้วขยาย" },
+      ],
+      showIf: fo,
+      hint: "แนวนอนเหมาะกับมือถือที่สุด",
+    }),
+    f("folderShape", "ทรงหูแฟ้ม", "select", {
+      group: "layout",
+      default: "real",
+      options: [
+        { v: "real", l: "แฟ้มจริง (โค้งเว้า)" },
+        { v: "round", l: "มน" },
+        { v: "slant", l: "เฉียง" },
+        { v: "square", l: "เหลี่ยม" },
+      ],
+      showIf: fo,
+    }),
+    f("folderPos", "ตำแหน่งหูแฟ้ม", "select", {
+      group: "layout",
+      default: "alt",
+      options: [
+        { v: "alt", l: "สลับซ้ายขวา" },
+        { v: "stair", l: "ขั้นบันได" },
+        { v: "left", l: "ชิดด้านเดียวกัน" },
+      ],
+      showIf: fo,
+    }),
+    f("folderTex", "ลายกระดาษ", "select", {
+      group: "layout",
+      default: "lines",
+      options: [
+        { v: "none", l: "ไม่มี (เรียบ)" },
+        { v: "lines", l: "เส้นบาง ๆ (แบบตัวอย่าง)" },
+        { v: "dots", l: "จุด" },
+        { v: "grid", l: "ตาราง" },
+        { v: "diag", l: "เส้นเฉียง" },
+      ],
+      showIf: fo,
+    }),
+    f("folderShadow", "เงาของแฟ้ม", "range", { group: "layout", default: 2, min: 0, numMax: 3, step: 1, showIf: fo, hint: "0 = ไม่มีเงา · 3 = เงาเข้ม" }),
+    f("folderRadius", "มุมมนของแฟ้ม (px)", "range", { group: "layout", default: 14, min: 0, numMax: 28, step: 2, showIf: fo }),
+    f("folderPal", "สีแฟ้ม", "select", { group: "layout", default: "pastel", options: FOLDER_PALETTES, showIf: fo, hint: "ตั้งสีแยกทีละแฟ้มได้ที่ชิ้นนั้น (ช่อง \"สีแฟ้มช่องนี้\")" }),
+    f("folderHex", "สีแฟ้ม (เลือกเอง)", "color", { group: "layout", default: "", showIf: [...fo, { key: "folderPal", eq: "custom" }] }),
+    f("folderLabel", "ป้ายบนหูแฟ้ม", "select", {
+      group: "layout",
+      default: "auto",
+      options: [
+        { v: "auto", l: "อัตโนมัติ (แนวตั้ง = สติกเกอร์ขาว · แนวนอน = ตัวหนังสือบนหู)" },
+        { v: "sticker", l: "สติกเกอร์ขาว" },
+        { v: "plain", l: "ตัวหนังสือบนหู" },
+      ],
+      showIf: fo,
+    }),
+    f("folderMedia", "รูป/คลิปในแฟ้ม", "select", {
+      group: "layout",
+      default: "pol",
+      options: [
+        { v: "pol", l: "โพลารอยด์ (กรอบขาวเอียง) + ข้อความ" },
+        { v: "full", l: "เต็มแฟ้ม" },
+      ],
+      showIf: fo,
+    }),
+    f("folderPeek", "ขอบแฟ้มที่หุบอยู่ (px)", "range", { group: "layout", default: 56, min: 32, numMax: 120, step: 4, showIf: [...fo, { key: "folderDir", eq: "h" }], hint: "แนวนอน: ความสูงของแฟ้มที่ยังไม่กาง" }),
+    f("folderLift", "ดึงแฟ้มขึ้นนิดหนึ่งตอนชี้", "toggle", { group: "layout", default: true, showIf: fo }),
+    // 📕 แฟ้มปก — แฟ้มแรกไม่มีคลิป มีชื่อใหญ่ 2 บรรทัด (ฟอนต์ตรง + ลายมือ) + โลโก้
+    f("folderCover", "แฟ้มปก (ชื่อใหญ่ + โลโก้ ก่อนแฟ้มแรก)", "toggle", { group: "content", default: false, wide: true, showIf: fo }),
+    text("coverTitle", "แฟ้มปก: ชื่อบรรทัด 1", { default: "", max: 40, placeholder: "เช่น social media", showIf: cover }),
+    text("coverTitle2", "แฟ้มปก: คำต่อท้าย (ฟอนต์ที่ 2)", { default: "", max: 40, placeholder: "เช่น designs", showIf: cover }),
+    f("coverFont", "แฟ้มปก: ฟอนต์บรรทัด 1", "select", { group: "content", default: "display", options: CANVAS_FONTS, display: "font", showIf: cover }),
+    f("coverFont2", "แฟ้มปก: ฟอนต์คำต่อท้าย", "select", { group: "content", default: "Great Vibes", options: CANVAS_FONTS, display: "font", showIf: cover }),
+    f("coverSize", "แฟ้มปก: ขนาดชื่อ (px)", "range", { group: "content", default: 56, min: 24, numMax: 120, step: 4, showIf: cover }),
+    image("coverLogo", "แฟ้มปก: โลโก้ (ไม่ใส่ก็ได้)", { showIf: cover }),
+    f("tabsH", "ความสูง — จอคอม (px)", "range", { group: "layout", default: 560, min: 280, numMax: 900, step: 20, ...st, hint: "แฟ้มแนวนอน = ความสูงของแฟ้มที่กางอยู่" }),
     f("tabsHMobile", "ความสูง — มือถือ (px)", "range", { group: "layout", default: 420, min: 240, numMax: 720, step: 20, ...st }),
-    f("tabsActive", "ช่องที่ขยาย กว้าง (%)", "range", { group: "layout", default: 64, min: 40, numMax: 86, step: 2, ...st, hint: "ที่เหลือแบ่งกันเป็นแถบบาง ๆ" }),
-    f("tabsGap", "ระยะห่างระหว่างช่อง (px)", "range", { group: "layout", default: 6, min: 0, numMax: 24, step: 2, ...st }),
-    f("tabsRadius", "มุมมน (px)", "range", { group: "layout", default: 4, min: 0, numMax: 32, step: 2, ...st }),
+    f("tabsActive", "ช่องที่ขยาย กว้าง (%)", "range", { group: "layout", default: 64, min: 40, numMax: 86, step: 2, showIf: [GAL_TABS, TABS_STRIP], hint: "ที่เหลือแบ่งกันเป็นแถบบาง ๆ" }),
+    f("tabsGap", "ระยะห่างระหว่างช่อง (px)", "range", { group: "layout", default: 6, min: 0, numMax: 24, step: 2, showIf: [GAL_TABS, TABS_PLAIN] }),
+    f("tabsRadius", "มุมมน (px)", "range", { group: "layout", default: 4, min: 0, numMax: 32, step: 2, showIf: [GAL_TABS, TABS_PLAIN] }),
     f("tabsSliver", "แถบบางที่ยังไม่ถูกชี้", "select", {
       group: "layout",
       default: "pixel",
@@ -858,7 +960,7 @@ const galleryTabsFields = (): FieldDef[] => {
         { v: "dim", l: "มืดลง" },
         { v: "normal", l: "ภาพปกติ" },
       ],
-      ...st,
+      showIf: [GAL_TABS, TABS_STRIP],
     }),
     f("tabsSpeed", "ความไวตอนขยาย", "select", {
       group: "layout",
@@ -905,7 +1007,7 @@ const galleryTabsFields = (): FieldDef[] => {
         { v: "column", l: "เรียงแนวตั้ง — ช่องที่ขยายสูง ที่เหลือเป็นแถบเตี้ย" },
       ],
       wide: true,
-      ...st,
+      showIf: [GAL_TABS, TABS_PLAIN],
     }),
     f("tabsClick", "กดช่องที่ขยายอยู่", "select", {
       group: "action",
@@ -938,9 +1040,9 @@ const galleryTabsFields = (): FieldDef[] => {
         { v: "below", l: "ใต้แถบ (แบบตัวอย่าง)" },
         { v: "on", l: "บนช่องที่ขยาย (แถบมืดด้านล่าง)" },
       ],
-      showIf: capOn,
+      showIf: [...capOn, TABS_STRIP],
     }),
-    f("tabsNum", "ตัวนับ 01 / 07", "toggle", { ...cap, default: true, ...st }),
+    f("tabsNum", "ตัวนับ 01 / 07", "toggle", { ...cap, default: true, showIf: [GAL_TABS, TABS_STRIP] }),
     f("tabsFont", "ฟอนต์ข้อความ", "select", {
       ...cap,
       default: "mono",
@@ -1585,6 +1687,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         area("caption", "คำอธิบายใต้รูป", { default: "", max: 300 }),
         f("href", "กดรูปแล้วไปที่", "target", { group: "action", default: "", hint: "ว่าง = กดไม่ได้" }),
         text("linkText", "ข้อความลิงก์ใต้รูป", { group: "action", default: "", max: 40, placeholder: "เช่น ดูสินค้า →", hint: "โชว์เมื่อตั้ง \"กดรูปแล้วไปที่\" แล้ว · ว่าง = ไม่มีลิงก์ใต้รูป" }),
+        // 🗂 แฟ้มเอกสาร (แถบวิดีโอ หน้าตาแฟ้ม): ป้ายบนหูแฟ้มแยกจากหัวข้อ + สีแฟ้มรายช่อง
+        text("tabLabel", "ป้ายบนหูแฟ้ม", { default: "", max: 30, placeholder: "ว่าง = ใช้หัวข้อ", showIfParent: [GAL_TABS, TABS_FOLDER] }),
+        f("folderColor", "สีแฟ้มช่องนี้", "color", { group: "layout", default: "", showIfParent: [GAL_TABS, TABS_FOLDER], hint: "ว่าง = ใช้ชุดสีของ Section" }),
       ],
       summary: (it) => {
         const code = Array.isArray(it.code) && it.code.length ? String(it.code[0]) : "";

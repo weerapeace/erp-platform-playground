@@ -148,6 +148,13 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
   - กด: ของกลาง `useClickGuard` (window capture ก่อน NavProgress) — ยังไม่ขยาย = ขยายก่อน · ขยายอยู่ = เต็มจอ (Overlay viewer + video controls / ImageLightbox) หรือไปลิงก์
   - วนเอง: setTimeout ต่อช่อง (เปลี่ยนช่อง = นับใหม่) · หยุดเมื่อชี้/แตะ (พัก ≥ 8 วิ)/เต็มจอ/พ้นจอ/แท็บซ่อน/ลดการเคลื่อนไหว · เส้นเวลา `.gt-prog`
 - ทดสอบ: mock `<scratchpad>/sf-hover-mock.mjs` (:3264) · e2e `<scratchpad>/cdp/hover-tabs-e2e.mjs` (44 ข้อ รวม Section ข้อความใหญ่) · ERP `lib/__tests__/website-hover-reveal-tabs.test.ts`
+- 🗂 **หน้าตาแฟ้มเอกสาร** (2026-10-23 · `tabsLook` plain/folder · ค่าเริ่ม plain = แบบเดิม):
+  - `folderDir` h (แฟ้มซ้อนลงมา ชี้แล้วกาง — `tabsH/tabsHMobile` = ความสูงแฟ้มที่กาง · `folderPeek` = ขอบแฟ้มที่หุบ) / v (แถบเดิม + ขอบแฟ้ม `--fsp-w` + หู `.gt-fbump` + ป้ายตั้ง)
+  - `folderShape` real (โค้งเว้า: ::before/::after radial-gradient) / round / slant (clip-path) / square · `folderPos` alt/stair/left · `folderTex` none/lines/dots/grid/diag (`.gt-paper`) · `folderShadow` 0-3 (drop-shadow) · `folderRadius`
+  - สี `folderPal` pastel/pink/mono/brand/custom(`folderHex`) — มิเรอร์ `FOLDER_PALETTES` ERP ↔ เว็บร้าน GalleryTabs · รายชิ้น `folderColor` · ป้าย `folderLabel` auto/sticker/plain + รายชิ้น `tabLabel` (ว่าง = หัวข้อ)
+  - `folderMedia` pol (โพลารอยด์เอียง + ข้อความ) / full · `folderLift` ดึงแฟ้มขึ้นตอนชี้ · แฟ้มปก `folderCover` + `coverTitle`/`coverTitle2` (2 ฟอนต์ `coverFont`/`coverFont2` โหลด Google Fonts เอง) + `coverSize` + `coverLogo` (ใช้สีแรกของชุด ชิ้นเริ่มสีถัดไป)
+  - ช่องที่ไม่เกี่ยวซ่อนเอง: `TABS_STRIP` (แบบเดิม/แฟ้มแนวตั้ง) · `TABS_PLAIN` (ระยะห่าง/มุม/มือถือแนวตั้ง) · แฟ้มแนวนอนไม่มีแถบข้อความ/ตัวนับใต้แถว (ข้อความอยู่ในแฟ้ม)
+  - e2e `<scratchpad>/cdp/folders-e2e.mjs` (26 ข้อ: แนวนอน/แนวตั้ง คอม + มือถือ)
 
 ## 🖱️ Section "ข้อความใหญ่ + รูปตามเมาส์" (hover-reveal) — เพิ่ม 2026-10-23 · ดู `docs/website-hover-reveal.md`
 - ชนิดใหม่: `HoverRevealBlock` (ERP lib/website-blocks) · schema `"hover-reveal"` · เว็บร้าน `HoverReveal.tsx` ใน PURE_REGISTRY (พรีวิวสด) · CSS `.hr-*`
