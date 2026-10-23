@@ -24,7 +24,7 @@
  *   ผืนผ้าใบอิสระ (canvas) คุยสดอีกชุด — ดู components/website-canvas-tools.tsx
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, newChildId, sectionHasHeading, type ChildSpec } from "@/lib/website-schema";
+import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, childPlacePatch, newChildId, sectionHasHeading, type ChildSpec } from "@/lib/website-schema";
 import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
@@ -539,6 +539,19 @@ export function WebsiteBuilder({
           if (Array.isArray(st.decor) && Object.keys(upd).length)
             patchBlock(blk.id, { style: { ...st, decor: st.decor.map((it) => (it.id === id ? patchDecorPlace(it, screen, upd) : it)) } });
         }
+        return;
+      }
+      if (d.type === "storefront-child-place" && d.blockId && d.childId) {
+        // ⬚ ลาก/ย่อขยายชิ้นในพรีวิว (เช่น กรอบล่องหนของ Section ข้อความใหญ่) → แก้ x/y/w/h (% ของ Section) ของชิ้นนั้น
+        //    ของกลาง: ใช้ได้กับชิ้นย่อยทุกชนิดที่มีช่อง x/y/w/h · บีบค่าตามช่วงของช่องใน schema
+        const blk = blocksRef.current.find((b) => b.id === d.blockId);
+        const c = blk && childrenOf(blk);
+        if (!blk || !c || !c.list.some((it) => it.id === d.childId)) return;
+        const upd = childPlacePatch(c.spec, d as unknown as Record<string, unknown>);
+        onSelect({ blockId: blk.id, childId: d.childId });
+        setPropTab("content");
+        setExpanded((s) => new Set(s).add(blk.id));
+        if (Object.keys(upd).length) patchBlock(blk.id, { [c.spec.key]: c.list.map((it) => (it.id === d.childId ? { ...it, ...upd } : it)) });
         return;
       }
       if (d.type === "storefront-scroll") {

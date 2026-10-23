@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SECTION_SCHEMAS, matchShowIf } from "../website-schema";
+import { SECTION_SCHEMAS, childPlacePatch, matchShowIf } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockSummary, type Block } from "../website-blocks";
 
 /**
@@ -21,13 +21,13 @@ describe("🖱️ ข้อความใหญ่ + รูปตามเม�
     expect(blockSummary(b as R)).toContain("NEW ARRIVAL");
   });
 
-  it("ค่ามั่ว = ค่าเริ่ม · ขนาดถูกบีบในช่วง · เกิน 12 คำถูกตัด · ลิงก์อันตรายถูกทิ้ง", () => {
-    const b = norm({ id: "h1", type: "hover-reveal", follow: "teleport", size: 9999, imgW: 5, others: "x", items: Array.from({ length: 15 }, (_, i) => ({ text: `W${i}`, href: i ? "/shop" : "javascript:alert(1)" })) });
+  it("ค่ามั่ว = ค่าเริ่ม · ขนาดถูกบีบในช่วง · เกิน 16 ชิ้นถูกตัด · ลิงก์อันตรายถูกทิ้ง", () => {
+    const b = norm({ id: "h1", type: "hover-reveal", follow: "teleport", size: 9999, imgW: 5, others: "x", items: Array.from({ length: 20 }, (_, i) => ({ text: `W${i}`, href: i ? "/shop" : "javascript:alert(1)" })) });
     expect(b.follow).toBe("smooth");
     expect(b.size).toBe(260);
     expect(b.imgW).toBe(160);
     expect(b.others).toBe("fade");
-    expect(b.items.length).toBe(12);
+    expect(b.items.length).toBe(16);
     expect(b.items[0].href).not.toContain("javascript");
   });
 
@@ -51,6 +51,47 @@ describe("🖱️ ข้อความใหญ่ + รูปตามเม�
     expect(img.type).toBe("image");
     const b = norm({ id: "h5", type: "hover-reveal", items: [{ text: "A", imageKey: "imgset/0f8fad5b-d9cb-469f-a165-70867728950e" }] });
     expect(b.items[0].imageKey).toBe("imgset/0f8fad5b-d9cb-469f-a165-70867728950e");
+  });
+});
+
+describe("⬚ กรอบล่องหน + 🖼 รูปตอนชี้พื้นหลัง (hover-reveal รอบ 2)", () => {
+  const sch = SECTION_SCHEMAS["hover-reveal"];
+  const child = (k: string) => sch.children!.fields.find((x) => x.key === k)!;
+
+  it("Section เดิม (ไม่มี kind) = คำทั้งหมด · ไม่มีรูปพื้นหลัง (หน้าตาเดิม)", () => {
+    const b = norm({ id: "z0", type: "hover-reveal", items: [{ text: "A", imageKey: "a/x.jpg" }] });
+    expect(b.items[0].kind).toBe("word");
+    expect(b.bgImageKey).toBeNull();
+    expect(b.bgHref).toBe("");
+  });
+
+  it("กรอบ: ค่าเริ่ม x/y/w/h · ค่าเกินช่วงถูกบีบ · ช่องข้อความซ่อน ช่องตำแหน่งโชว์", () => {
+    const b = norm({ id: "z1", type: "hover-reveal", items: [{ kind: "zone", imageKey: "a/z.jpg" }, { kind: "zone", x: -5, w: 500, h: 1 }] });
+    expect(b.items[0]).toMatchObject({ kind: "zone", x: 4, y: 8, w: 24, h: 30 });
+    expect(b.items[1]).toMatchObject({ x: 0, w: 100, h: 3 });
+    expect(matchShowIf(child("text"), { kind: "zone" })).toBe(false);
+    expect(matchShowIf(child("text"), { kind: "word" })).toBe(true);
+    expect(matchShowIf(child("x"), { kind: "zone" })).toBe(true);
+    expect(matchShowIf(child("x"), { kind: "word" })).toBe(false);
+  });
+
+  it("มีแต่กรอบ (ไม่มีคำ) ก็เผยแพร่ได้ · กรอบไม่มีรูป/ลิงก์ที่ว่างไม่มีรูป = เตือน", () => {
+    expect(msgs({ id: "z2", type: "hover-reveal", items: [{ kind: "zone", imageKey: "a/z.jpg" }] })).not.toMatch(/ยังไม่ได้ใส่/);
+    expect(msgs({ id: "z3", type: "hover-reveal", items: [] })).toContain("ยังไม่ได้ใส่คำหรือกรอบ");
+    const m = msgs({ id: "z4", type: "hover-reveal", bgHref: "/shop", items: [{ text: "A", imageKey: "a/x.jpg" }, { kind: "zone" }] });
+    expect(m).toContain("1 กรอบยังไม่มีรูป");
+    expect(m).toContain("ยังไม่มีรูปพื้นหลัง");
+  });
+
+  it("สรุป: นับคำ + กรอบ + รูปพื้นหลัง", () => {
+    const b = norm({ id: "z5", type: "hover-reveal", bgImageKey: "a/bg.jpg", items: [{ text: "A" }, { kind: "zone" }, { kind: "zone" }] });
+    expect(blockSummary(b)).toBe("1 คำ · A · 2 กรอบ · รูปพื้นหลัง");
+    expect(sch.children!.summary({ kind: "zone", alt: "กระเป๋า" })).toContain("⬚ กระเป๋า");
+  });
+
+  it("childPlacePatch (ลากในพรีวิว): รับเฉพาะช่องที่มี · บีบช่วง · ปัด 1 ตำแหน่ง · ค่ามั่วไม่แตะ", () => {
+    expect(childPlacePatch(sch.children!, { x: 12.345, y: -3, w: 140, h: "abc", z: 9 })).toEqual({ x: 12.3, y: 0, w: 100 });
+    expect(childPlacePatch(SECTION_SCHEMAS.faq.children!, { x: 10, y: 10 })).toEqual({});
   });
 });
 

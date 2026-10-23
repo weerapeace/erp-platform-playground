@@ -212,6 +212,21 @@ export interface ChildSpec {
   starter?: () => Record<string, unknown>[];
 }
 
+/**
+ * ⬚ ค่าตำแหน่ง/ขนาดที่ลากมาจากพรีวิว (storefront-child-place {x,y,w,h} = % ของ Section) → ค่าที่ใส่ลงชิ้นได้จริง
+ * รับเฉพาะช่องที่ชิ้นชนิดนั้นมี · บีบตามช่วง min/numMax ของช่อง · ปัด 1 ตำแหน่ง · ค่าที่ไม่ใช่ตัวเลข = ไม่แตะ
+ */
+export function childPlacePatch(spec: ChildSpec, p: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const k of ["x", "y", "w", "h"]) {
+    const fd = spec.fields.find((x) => x.key === k);
+    const raw = p[k];
+    const v = Number(raw);
+    if (fd && raw != null && raw !== "" && Number.isFinite(v)) out[k] = Math.max(fd.min ?? 0, Math.min(fd.numMax ?? 100, Math.round(v * 10) / 10));
+  }
+  return out;
+}
+
 export interface SectionMeta {
   label: string;
   icon: string;
@@ -2889,23 +2904,39 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "back", l: "หลังตัวหนังสือ (ตัวหนังสือทับรูป)" },
         ],
       }),
+      // 🖼 รูปตอนชี้พื้นหลัง (ที่ว่างที่ไม่ใช่คำ/กรอบ) — ไม่ใส่ = ชี้ที่ว่างแล้วไม่มีรูป (แบบเดิม)
+      image("bgImageKey", "รูปตอนชี้พื้นหลัง (ที่ว่าง)", { hint: "เมาส์อยู่ในที่ว่างของ Section (ไม่ได้ชี้คำ/ไม่อยู่ในกรอบ) = รูปนี้ลอยตาม · มือถือแตะที่ว่าง = รูปขึ้น · ผูก 🔗 ชุดรูปได้" }),
+      f("bgHref", "กดพื้นที่ว่างแล้วไปที่", "target", { group: "action", default: "", wide: true, hint: "ว่าง = กดไม่ได้ · มือถือ: แตะแรก = รูปขึ้น แตะซ้ำ = ไปลิงก์" }),
     ],
     children: {
       key: "items",
-      label: "คำ / บรรทัด",
+      label: "คำ / กรอบล่องหน",
       itemLabel: "คำ",
       icon: "🔤",
       min: 1,
-      max: 12,
+      max: 16,
       fields: [
-        text("text", "ข้อความ (1 บรรทัด)", { default: "", max: 60, wide: true, placeholder: "เช่น NEW ARRIVAL" }),
-        text("tag", "ป้ายเล็กข้างคำ", { default: "", max: 20, placeholder: "เช่น (12) หรือ NEW" }),
+        // ⬚ กรอบล่องหน (kind zone) — มองไม่เห็นบนเว็บจริง · เมาส์อยู่ในกรอบ = รูปของกรอบลอยตาม · ลาก/ย่อขยายในพรีวิวได้ (ส่ง storefront-child-place)
+        f("kind", "ชนิด", "select", {
+          default: "word",
+          options: [
+            { v: "word", l: "🔤 คำ / บรรทัด" },
+            { v: "zone", l: "⬚ กรอบล่องหน (วางตรงไหนก็ได้)" },
+          ],
+          hint: "กรอบล่องหน = ลูกค้ามองไม่เห็นกรอบ ชี้เข้าไปในกรอบแล้วรูปขึ้น · ในพรีวิวเห็นเส้นประ ลากย้าย/ลากมุมขวาล่างย่อขยายได้",
+        }),
+        text("text", "ข้อความ (1 บรรทัด)", { default: "", max: 60, wide: true, placeholder: "เช่น NEW ARRIVAL", showIf: { key: "kind", eq: ["word", "", undefined] } }),
+        text("tag", "ป้ายเล็กข้างคำ", { default: "", max: 20, placeholder: "เช่น (12) หรือ NEW", showIf: { key: "kind", eq: ["word", "", undefined] } }),
+        f("x", "กรอบ: ห่างจากซ้าย (%)", "range", { group: "layout", default: 4, min: 0, numMax: 95, step: 0.5, showIf: { key: "kind", eq: "zone" }, hint: "ลากกรอบในพรีวิวแทนได้" }),
+        f("y", "กรอบ: ห่างจากบน (%)", "range", { group: "layout", default: 8, min: 0, numMax: 95, step: 0.5, showIf: { key: "kind", eq: "zone" } }),
+        f("w", "กรอบ: กว้าง (%)", "range", { group: "layout", default: 24, min: 3, numMax: 100, step: 0.5, showIf: { key: "kind", eq: "zone" } }),
+        f("h", "กรอบ: สูง (%)", "range", { group: "layout", default: 30, min: 3, numMax: 100, step: 0.5, showIf: { key: "kind", eq: "zone" } }),
         image("imageKey", "รูปที่ลอยขึ้นตอนชี้", { hint: "ผูก 🔗 ชุดรูปได้ — เปลี่ยนรูปที่แท็บชุดรูปแล้วที่นี่เปลี่ยนตาม" }),
         text("alt", "คำบรรยายรูป (Alt)", { default: "", max: 200, placeholder: "ว่าง = ใช้ข้อความของคำ" }),
-        f("href", "กดคำแล้วไปที่", "target", { group: "action", default: "", wide: true, hint: "ว่าง = กดไม่ได้ (ชี้แล้วรูปขึ้นอย่างเดียว)" }),
+        f("href", "กดแล้วไปที่", "target", { group: "action", default: "", wide: true, hint: "ว่าง = กดไม่ได้ (ชี้แล้วรูปขึ้นอย่างเดียว)" }),
       ],
-      summary: (it) => `${s(it.text) || "คำ"}${it.imageKey ? "" : " · ยังไม่มีรูป"}`,
-      blank: () => ({ text: "NEW WORD", tag: "", imageKey: null, alt: "", href: "" }),
+      summary: (it) => `${it.kind === "zone" ? `⬚ ${s(it.alt) || "กรอบล่องหน"}` : s(it.text) || "คำ"}${it.imageKey ? "" : " · ยังไม่มีรูป"}`,
+      blank: () => ({ kind: "word", text: "NEW WORD", tag: "", imageKey: null, alt: "", href: "" }),
       starter: () => [
         { text: "NEW ARRIVAL", href: "/shop" },
         { text: "BEST SELLER", href: "/shop" },
@@ -2913,14 +2944,24 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       ],
     },
     summary: (b) => {
-      const words = arr(b.items).filter((i) => i.enabled !== false && s(i.text));
-      return words.length ? `${words.length} คำ · ${words.map((i) => s(i.text)).slice(0, 3).join(" / ")}` : "ยังไม่มีคำ";
+      const live = arr(b.items).filter((i) => i.enabled !== false);
+      const words = live.filter((i) => i.kind !== "zone" && s(i.text));
+      const zones = live.filter((i) => i.kind === "zone").length;
+      const parts = [words.length ? `${words.length} คำ · ${words.map((i) => s(i.text)).slice(0, 3).join(" / ")}` : "", zones ? `${zones} กรอบ` : "", b.bgImageKey ? "รูปพื้นหลัง" : ""].filter(Boolean);
+      return parts.length ? parts.join(" · ") : "ยังไม่มีคำ";
     },
     validate: (b, label) => {
-      const words = arr(b.items).filter((i) => i.enabled !== false && s(i.text));
-      if (!words.length) return [{ level: "error", message: `${label}: ยังไม่ได้ใส่คำ` }];
+      const live = arr(b.items).filter((i) => i.enabled !== false);
+      const words = live.filter((i) => i.kind !== "zone" && s(i.text));
+      const zones = live.filter((i) => i.kind === "zone");
+      if (!words.length && !zones.length) return [{ level: "error", message: `${label}: ยังไม่ได้ใส่คำหรือกรอบ` }];
+      const out: Omit<ValidationIssue, "blockId">[] = [];
       const noImg = words.filter((i) => !i.imageKey).length;
-      return noImg ? [{ level: "warning", message: `${label}: ${noImg} คำยังไม่มีรูป (ชี้แล้วจะไม่มีรูปขึ้น)` }] : [];
+      if (noImg) out.push({ level: "warning", message: `${label}: ${noImg} คำยังไม่มีรูป (ชี้แล้วจะไม่มีรูปขึ้น)` });
+      const zoneNoImg = zones.filter((i) => !i.imageKey).length;
+      if (zoneNoImg) out.push({ level: "warning", message: `${label}: ${zoneNoImg} กรอบยังไม่มีรูป (ชี้แล้วจะไม่มีรูปขึ้น)` });
+      if (b.bgHref && !b.bgImageKey) out.push({ level: "warning", message: `${label}: ตั้งลิงก์พื้นที่ว่างแล้ว แต่ยังไม่มีรูปพื้นหลัง (มือถือแตะครั้งเดียวไปลิงก์เลย)` });
+      return out;
     },
   },
 

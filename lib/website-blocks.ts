@@ -787,7 +787,11 @@ export interface HoverRevealBlock extends BlockBase {
   tilt: boolean;
   imgFx: "pop" | "fade" | "clip";
   layer: "front" | "back";
-  items: (ChildBase & { text: string; tag: string; imageKey: string | null; alt: string; href: string })[];
+  /** 🖼 รูปตอนชี้พื้นหลัง (ที่ว่างที่ไม่ใช่คำ/กรอบ) + ลิงก์ของพื้นที่ว่าง */
+  bgImageKey: string | null;
+  bgHref: string;
+  /** kind word = คำ/บรรทัด · zone = กรอบล่องหน (x y w h = % ของ Section · ลากในพรีวิว → storefront-child-place) */
+  items: (ChildBase & { kind: "word" | "zone"; text: string; tag: string; x: number; y: number; w: number; h: number; imageKey: string | null; alt: string; href: string })[];
 }
 export interface LookbookBlock extends BlockBase {
   type: "lookbook";
