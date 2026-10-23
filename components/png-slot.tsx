@@ -70,7 +70,7 @@ export function PngSlot({
   ghost?: string | null;
   /** ใต้ช่อง (เช่น รหัส + ชื่อสินค้า) */
   caption?: ReactNode;
-  /** lg = ช่องใหญ่ (หน้าสินค้า) · md = ช่องในตาราง (แผงหลายสินค้า) */
+  /** lg = ช่องในหน้าสินค้า (กว้าง 1/3 ของคอลัมน์ — เจ้าของขอย่อ 2026-10-23) · md = ช่องในตาราง (แผงหลายสินค้า) */
   size?: "lg" | "md";
   readonly?: boolean;
 }) {
@@ -81,7 +81,7 @@ export function PngSlot({
   const [askRemove, setAskRemove] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(readonly);
-  const url = pngSlotUrl(value, size === "lg" ? 640 : 320);
+  const url = pngSlotUrl(value, size === "lg" ? 480 : 320);
   const md = size === "md";
   const locked = !!readonly || !!busy;
 
@@ -155,7 +155,7 @@ export function PngSlot({
           const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/"));
           if (f) void handleFile(f);
         }}
-        className={`group relative aspect-square w-full overflow-hidden rounded-xl border-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-orange-200 ${
+        className={`group relative aspect-square ${md ? "w-full" : "w-1/3 min-w-[150px]"} overflow-hidden rounded-xl border-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-orange-200 ${
           over ? "border-orange-400" : value ? "border-slate-200" : "cursor-pointer border-dashed border-slate-300 hover:border-orange-300"
         }`}
         style={CHECKER}
