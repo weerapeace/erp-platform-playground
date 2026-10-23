@@ -3,20 +3,37 @@
 /**
  * PersonalizeEditor — ตั้งค่า "ปั๊มชื่อ" ของรุ่นในร้านหนึ่ง (ใช้ในแท็บ 🛍 เว็บไซต์ ของ Parent SKU)
  *   - เปิด/ปิด · จำนวนตัวอักษรสูงสุด · แบบที่อนุญาต (จม/เงิน/ทอง) · รูปฉาก
- *   - ตำแหน่ง 2 จุด (ตรงกลาง / มุมขวาล่าง): ลากข้อความบนรูปเพื่อวาง + ขนาด + เอียง · เปิด/ปิดแต่ละจุด
+ *   - ตำแหน่ง 2 จุด (ตรงกลาง / มุมขวาล่าง): ลากข้อความบนรูปเพื่อวาง + จัดชิดซ้าย/กลาง/ขวา + ขนาด + เอียง · เปิด/ปิดแต่ละจุด
+ *   - ตัวอักษร: ความห่าง · กลุ่มตัวที่ปั๊มได้ · เปลี่ยนเป็นตัวใหญ่อัตโนมัติ · ตัวพิเศษ (♥ ★ …)
  *   - พรีวิวเหมือนเว็บจริง (ฟอนต์ Times New Roman + เอฟเฟกต์เดียวกัน)
- * ของกลาง: lib/website-personalize.ts (ชนิดข้อมูล/ค่าเริ่มต้น/ตัวกรอง)
+ * ของกลาง: lib/website-personalize.ts (ชนิดข้อมูล/ค่าเริ่มต้น/ตัวกรอง/ตำแหน่งข้อความ)
  */
 import { useRef, useState } from "react";
-import { PERSONALIZE_STYLES, type PersonalizeConfig, type PersonalizePosition, type PersonalizeStyle } from "@/lib/website-personalize";
+import { RangeInput } from "@/components/range-input";
+import {
+  PERSONALIZE_ALIGNS,
+  PERSONALIZE_ALIGN_OFFSET,
+  PERSONALIZE_CHARSETS,
+  PERSONALIZE_STYLES,
+  cleanPersonalizeText,
+  parsePersonalizeSymbols,
+  personalizeSplitLast,
+  personalizeTextPlacement,
+  type PersonalizeAlign,
+  type PersonalizeConfig,
+  type PersonalizePosition,
+  type PersonalizeStyle,
+} from "@/lib/website-personalize";
 
 const keyUrl = (key: string, w = 900) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
+/** ชุดตัวพิเศษแนะนำ (มีในฟอนต์ทั่วไป) */
+const SYMBOL_PRESET = "♥ ★ ✦ ∞ ✿ ☺";
 
-/** เอฟเฟกต์ตัวอักษร (เหมือน storefront globals.css .pz-text) */
+/** เอฟเฟกต์ตัวอักษร (เหมือน storefront globals.css .pz-fx-*) */
 export const PZ_STYLE: Record<PersonalizeStyle, React.CSSProperties> = {
   emboss: { color: "rgba(20,10,0,0.42)", mixBlendMode: "multiply", textShadow: "1px 1px 0 rgba(255,255,255,0.45), -1px -1px 1px rgba(0,0,0,0.55)" },
-  silver: { color: "transparent", backgroundImage: "linear-gradient(170deg,#ffffff 0%,#b8bcc3 40%,#f2f3f5 55%,#8d9298 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.45))" },
-  gold: { color: "transparent", backgroundImage: "linear-gradient(170deg,#fff3c4 0%,#d9a520 40%,#fff5c9 55%,#9c7200 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.45))" },
+  silver: { color: "transparent", backgroundImage: "linear-gradient(180deg,#fdfdfd 0%,#c9ccd1 30%,#8e939a 48%,#eef0f2 58%,#a7abb1 78%,#6f747a 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.6))" },
+  gold: { color: "transparent", backgroundImage: "linear-gradient(180deg,#fff1b8 0%,#f0cf6a 20%,#b98a2c 44%,#f9e08f 54%,#d4a640 70%,#8f6519 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.65)) drop-shadow(0 0 1px rgba(255,214,120,0.35))" },
 };
 
 export function PersonalizeEditor({
@@ -35,13 +52,24 @@ export function PersonalizeEditor({
   const [preview, setPreview] = useState<PersonalizeStyle>(value.styles[0] ?? "emboss");
   const [active, setActive] = useState<PersonalizePosition["key"]>("center");
   const [sample, setSample] = useState("YOUR NAME");
+  const [symDraft, setSymDraft] = useState<string | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const textRefs = useRef<Partial<Record<PersonalizePosition["key"], HTMLDivElement | null>>>({});
   const [imgW, setImgW] = useState(600);
   const set = (p: Partial<PersonalizeConfig>) => onChange({ ...value, ...p });
   const setPos = (key: PersonalizePosition["key"], p: Partial<PersonalizePosition>) =>
     set({ positions: value.positions.map((x) => (x.key === key ? { ...x, ...p } : x)) });
   const imageKey = value.imageKey ?? fallbackImageKey;
-  const pos = value.positions.find((p) => p.key === active) ?? value.positions[0];
+  const shown = cleanPersonalizeText(sample, value) ?? "YOUR NAME";
+
+  /** เปลี่ยนการจัด → ขยับจุดยึดให้ข้อความตัวอย่างอยู่ที่เดิม (ไม่กระโดด) */
+  const setAlign = (p: PersonalizePosition, align: PersonalizeAlign) => {
+    const el = textRefs.current[p.key];
+    const stageW = stageRef.current?.clientWidth ?? 0;
+    const w = el && stageW ? (el.offsetWidth / stageW) * 100 : 0;
+    const x = Math.round(Math.min(100, Math.max(0, p.x + (PERSONALIZE_ALIGN_OFFSET[align] - PERSONALIZE_ALIGN_OFFSET[p.align]) * w)) * 10) / 10;
+    setPos(p.key, { align, x });
+  };
 
   // ลากข้อความบนรูป → x/y เป็น % ของรูป
   const dragging = useRef(false);
@@ -62,6 +90,7 @@ export function PersonalizeEditor({
   };
 
   const chip = (on: boolean) => `px-2.5 py-1 rounded-full border text-xs ${on ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
+  const [head, last] = personalizeSplitLast(shown);
 
   return (
     <div className="space-y-3">
@@ -115,33 +144,41 @@ export function PersonalizeEditor({
               {value.positions.filter((p) => p.enabled).map((p) => (
                 <div
                   key={p.key}
+                  ref={(el) => {
+                    textRefs.current[p.key] = el;
+                  }}
                   onPointerDown={(e) => { setActive(p.key); onDown(e); }}
                   onPointerMove={onMove}
                   onPointerUp={onUp}
                   title={`${p.label} — ลากเพื่อย้าย`}
-                  className={`absolute whitespace-nowrap cursor-move leading-none px-1 ${active === p.key ? "outline outline-1 outline-dashed outline-orange-400 rounded" : ""}`}
+                  className={`absolute whitespace-nowrap cursor-move leading-none ${active === p.key ? "outline outline-1 outline-dashed outline-orange-400 rounded" : ""}`}
                   style={{
-                    left: `${p.x}%`,
-                    top: `${p.y}%`,
-                    transform: `translate(-50%, -50%) rotate(${p.rotate}deg)`,
+                    ...personalizeTextPlacement(p),
+                    padding: "0.1em 0",
                     fontFamily: '"Times New Roman", Times, serif',
-                    letterSpacing: "0.08em",
+                    letterSpacing: `${value.letterSpacing}em`,
                     fontSize: `${(imgW * p.size) / 100}px`,
                     ...PZ_STYLE[preview],
                   }}
                 >
-                  {sample || "YOUR NAME"}
+                  {head}
+                  <span style={{ letterSpacing: 0 }}>{last}</span>
                 </div>
+              ))}
+              {/* จุดยึดของตำแหน่งที่กำลังแก้ (ข้อความเริ่ม/กลาง/จบที่จุดนี้ตามการจัด) */}
+              {value.positions.filter((p) => p.enabled && p.key === active).map((p) => (
+                <span key={`dot-${p.key}`} className="absolute w-2 h-2 -ml-1 -mt-1 rounded-full bg-orange-500 ring-2 ring-white pointer-events-none" style={{ left: `${p.x}%`, top: `${p.y}%` }} title="จุดยึด" />
               ))}
             </div>
             <div className="flex items-center gap-2 mt-1.5">
               <span className="text-[11px] text-slate-500">ข้อความตัวอย่าง</span>
-              <input value={sample} maxLength={value.maxChars} onChange={(e) => setSample(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+              <input value={sample} onChange={(e) => setSample(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs" />
             </div>
+            <p className="text-[11px] text-slate-400 mt-1">จุดสีส้ม = จุดยึดของตำแหน่งที่เลือก · ชิดขวา = ชื่อยาวขึ้นจะงอกไปทางซ้าย ปลายชื่ออยู่ที่จุดเสมอ</p>
           </div>
 
-          {/* ตำแหน่ง 2 จุด */}
           <div className="space-y-2">
+            {/* ตำแหน่ง 2 จุด */}
             {value.positions.map((p) => (
               <div key={p.key} className={`rounded-lg border p-2 space-y-1.5 ${active === p.key ? "border-orange-300 bg-orange-50/40" : "border-slate-200"}`} onClick={() => setActive(p.key)}>
                 <div className="flex items-center gap-2">
@@ -149,18 +186,61 @@ export function PersonalizeEditor({
                   <input value={p.label} onChange={(e) => setPos(p.key, { label: e.target.value })} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm" placeholder={p.key === "center" ? "ตรงกลาง" : "มุมขวาล่าง"} />
                   <span className="text-[11px] text-slate-400">x {p.x}% · y {p.y}%</span>
                 </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                  จัดข้อความ:
+                  {PERSONALIZE_ALIGNS.map((a) => (
+                    <button key={a.value} type="button" onClick={(e) => { e.stopPropagation(); setActive(p.key); setAlign(p, a.value); }} className={chip(p.align === a.value)}>{a.label}</button>
+                  ))}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <label className="text-[11px] text-slate-500">
-                    ขนาดตัวอักษร ({p.size}% ของความกว้างรูป)
-                    <input type="range" min={1} max={20} step={0.5} value={p.size} onChange={(e) => setPos(p.key, { size: Number(e.target.value) })} className="w-full" />
-                  </label>
-                  <label className="text-[11px] text-slate-500">
-                    เอียง ({p.rotate}°)
-                    <input type="range" min={-30} max={30} step={1} value={p.rotate} onChange={(e) => setPos(p.key, { rotate: Number(e.target.value) })} className="w-full" />
-                  </label>
+                  <RangeInput label={<span className="text-[11px] text-slate-500">ขนาดตัวอักษร (% ของความกว้างรูป)</span>} min={1} max={20} step={0.5} hardMax={30} unit="%" value={p.size} onChange={(v) => setPos(p.key, { size: v })} />
+                  <RangeInput label={<span className="text-[11px] text-slate-500">เอียง</span>} min={-30} max={30} step={1} hardMin={-45} hardMax={45} unit="°" value={p.rotate} onChange={(v) => setPos(p.key, { rotate: v })} />
                 </div>
               </div>
             ))}
+
+            {/* ตัวอักษร */}
+            <div className="rounded-lg border border-slate-200 p-2 space-y-2">
+              <p className="text-xs font-medium text-slate-700">ตัวอักษร</p>
+              <RangeInput label={<span className="text-[11px] text-slate-500">ความห่างตัวอักษร</span>} min={0} max={0.5} step={0.01} unit="em" value={value.letterSpacing} onChange={(v) => set({ letterSpacing: Math.min(0.5, Math.max(0, v)) })} />
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500">
+                ปั๊มได้:
+                {PERSONALIZE_CHARSETS.map((c) => {
+                  const on = value.charset[c.key];
+                  return (
+                    <button key={c.key} type="button" onClick={() => set({ charset: { ...value.charset, [c.key]: !on } })} className={chip(on)}>
+                      {on ? "✓ " : ""}{c.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                <input type="checkbox" className="w-4 h-4 accent-orange-500" checked={value.autoUpper} onChange={(e) => set({ autoUpper: e.target.checked })} />
+                เปลี่ยนเป็นตัวพิมพ์ใหญ่ให้อัตโนมัติ (ลูกค้าพิมพ์ ann → ANN)
+              </label>
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-slate-500">ตัวพิเศษ (ลูกค้ากดเลือกจากปุ่ม &quot;ตัวพิเศษ&quot;)</span>
+                  {!value.symbols.length && (
+                    <button type="button" onClick={() => set({ symbols: parsePersonalizeSymbols(SYMBOL_PRESET) })} className="text-[11px] text-orange-600 hover:underline">
+                      ใส่ชุดแนะนำ {SYMBOL_PRESET}
+                    </button>
+                  )}
+                </div>
+                <input
+                  value={symDraft ?? value.symbols.join(" ")}
+                  onChange={(e) => setSymDraft(e.target.value)}
+                  onBlur={() => {
+                    if (symDraft !== null) set({ symbols: parsePersonalizeSymbols(symDraft) });
+                    setSymDraft(null);
+                  }}
+                  placeholder="พิมพ์หรือวาง เช่น ♥ ★ ✦"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                  style={{ fontFamily: '"Times New Roman", Times, serif' }}
+                />
+                <p className="text-[11px] text-slate-400 mt-1">ตัวละ 1 ตัวอักษร · สูงสุด 24 ตัว · ใส่เฉพาะตัวที่โรงงานมีบล็อกปั๊ม · ตัวที่ไม่ได้ติ๊ก/ไม่ได้ใส่ ลูกค้าจะพิมพ์ไม่ได้และขึ้นเตือน</p>
+              </div>
+            </div>
             <p className="text-[11px] text-slate-400">ลากข้อความบนรูปซ้ายมือเพื่อวางตำแหน่ง · ลูกค้าจะเลือกได้เฉพาะจุดที่ติ๊กไว้ · ขนาดเป็น % ของรูป จะได้เท่ากันทุกจอ · รูปทุกสีของรุ่นนี้ควรถ่ายมุมเดียวกัน</p>
           </div>
         </div>

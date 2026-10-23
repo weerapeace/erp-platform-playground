@@ -1219,15 +1219,31 @@ export interface PersonalizeBlock extends BlockBase {
   source: "all" | "manual";
   codes: string[];
   buttonText: string;
-  /** หน้าตา: classic เดิม · studio A · showcase B · steps C · luxe D */
-  look?: "classic" | "studio" | "showcase" | "steps" | "luxe";
-  /** ของเสริม: ตัวนับตัวอักษร · ข้อความใต้ปุ่ม · ไอเดียชื่อ · วงซูมรอยปั๊ม */
+  /** หน้าตา: classic เดิม · studio A · showcase B (C/D เดิมเลิกใช้ → เว็บร้านแสดงเป็นแบบเดิม) */
+  look?: "classic" | "studio" | "showcase";
+  /** ของเสริม: ตัวนับตัวอักษร · ข้อความใต้ปุ่ม · ไอเดียชื่อ */
   showCount?: boolean;
   showFree?: boolean;
   freeNote?: string;
   showIdeas?: boolean;
   ideas?: string[];
+  /** การซูมรูป: off · hover ชี้แล้วซูม (มือถือแตะ) · circle วงซูมตรงจุดปั๊ม */
+  zoomMode?: "off" | "hover" | "circle";
+  /** @deprecated ใช้ zoomMode (true = circle) */
   zoom?: boolean;
+  /** A สตูดิโอ — ปรับละเอียด */
+  imgSide?: "left" | "right";
+  imgWidth?: number;
+  panelGap?: number;
+  inputStyle?: "line" | "box";
+  btnWidth?: "full" | "auto";
+  stepNums?: boolean;
+  liveBadge?: boolean;
+  stickyImg?: boolean;
+  labelColor?: string;
+  labelName?: string;
+  labelFinish?: string;
+  labelPosition?: string;
 }
 
 /** แผนที่ร้าน — รับเฉพาะลิงก์ฝังของ Google Maps */
