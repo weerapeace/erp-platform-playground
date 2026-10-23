@@ -133,7 +133,10 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
     picked.push({ g, items });
   }
   const shownIds = picked.flatMap((p) => p.items.map((e) => e.s.id));
-  const covers = show.has("cover") ? await designSheetCoverMap(admin, shownIds) : new Map<string, string>();
+  // ใบที่มีเช็กลิสต์ค้าง (ทั้งรายงาน ไม่ใช่แค่ที่โชว์) เรียงตามความด่วน → การ์ดพร้อมปุ่มติ๊กใน Discord
+  const checklistItems = list.filter((e) => waitingOf(e.s).length > 0).sort(byRank).slice(0, 25);
+  const coverIds = [...new Set([...(show.has("cover") ? shownIds : []), ...checklistItems.map((e) => e.s.id)])];
+  const covers = coverIds.length ? await designSheetCoverMap(admin, coverIds) : new Map<string, string>();
   const creatorIds = show.has("creator") ? [...new Set(picked.flatMap((p) => p.items.map((e) => e.s.created_by)).filter((x): x is string => !!x))] : [];
   const creators = new Map<string, string>();
   if (creatorIds.length) {
@@ -210,6 +213,20 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
     showImages: show.has("cover"),
     tokens: { "จำนวน": total, "เกินกำหนด": overdue, "ใกล้กำหนด": dueSoonCount, "ไม่ขยับ": staleCount },
     fieldFill,
+    overdue,
+    checklist: {
+      moduleKey: DESIGN_WAITING.moduleKey,
+      records: checklistItems.map(({ s, flag }) => {
+        const cover = covers.get(s.id) ?? null;
+        return {
+          id: s.id,
+          title: `${s.code} ${s.name}`,
+          description: `${s.brand?.name ?? "ไม่ระบุแบรนด์"} · ${statusLabel.get(s.status) ?? s.status} · ${flag.text}`,
+          imageUrl: cover ? absoluteUrl(withImageWidth(cover, 160)) : null,
+          link: absoluteUrl(`/master/design-dashboard?open=${encodeURIComponent(s.id)}`),
+        };
+      }),
+    },
   };
 };
 

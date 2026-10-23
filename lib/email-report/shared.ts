@@ -53,12 +53,47 @@ export type EmailReport = {
   days: number[];            // 1=จันทร์ … 7=อาทิตย์
   send_time: string;         // "HH:MM" เวลาไทย
   recipients: EmailRecipient[];
+  /** 💬 ส่งเข้า Discord ด้วย (normalizeReportDiscord) */
+  discord: EmailReportDiscord;
   skip_if_empty: boolean;
   is_enabled: boolean;
   last_sent_on: string | null;
   created_at: string;
   updated_at: string;
 };
+
+/** ส่งเข้าห้อง Discord: ข้อความภาพรวม + รูปรายงาน + การ์ดเฉพาะใบที่มีเช็กลิสต์ค้าง (ปุ่มติ๊ก) — docs/discord-setup.md */
+export type EmailReportDiscord = {
+  enabled: boolean;
+  channel_id: string | null;
+  channel_name: string | null;
+  /** แท็กบทบาท (เช่น @ทีมออกแบบ) */
+  role_id: string | null;
+  role_name: string | null;
+  /** แท็กเมื่อไหร่: มีงานเกินกำหนด / ทุกครั้ง / ไม่แท็ก */
+  mention: "overdue" | "always" | "never";
+  /** จำนวนงานในรูปรายงาน */
+  image_rows: number;
+  /** การ์ด "ต้องติ๊ก" สูงสุดกี่ใบ (0 = ไม่ส่งการ์ด) */
+  max_cards: number;
+};
+export const DISCORD_MENTION_LABEL: Record<EmailReportDiscord["mention"], string> = { overdue: "เมื่อมีงานเกินกำหนด", always: "ทุกครั้ง", never: "ไม่แท็ก" };
+const SNOWFLAKE = /^\d{15,25}$/;
+export function normalizeReportDiscord(raw: unknown): EmailReportDiscord {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const id = (v: unknown) => (typeof v === "string" && SNOWFLAKE.test(v) ? v : null);
+  const name = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 100) : null);
+  const clamp = (v: unknown, lo: number, hi: number, d: number) => { const n = Math.round(Number(v)); return v !== undefined && v !== null && v !== "" && Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  const channel_id = id(o.channel_id); const role_id = id(o.role_id);
+  return {
+    enabled: o.enabled === true && !!channel_id,
+    channel_id, channel_name: channel_id ? name(o.channel_name) : null,
+    role_id, role_name: role_id ? name(o.role_name) : null,
+    mention: o.mention === "always" || o.mention === "never" ? o.mention : "overdue",
+    image_rows: clamp(o.image_rows, 5, 25, 10),
+    max_cards: clamp(o.max_cards, 0, 15, 10),
+  };
+}
 
 export type EmailReportRun = {
   id: string;
@@ -75,7 +110,7 @@ export type EmailReportRun = {
 };
 
 /** ค่าที่ฟอร์มส่งมา (ยังไม่มี id/เวลา) */
-export type EmailReportInput = Pick<EmailReport, "name" | "source_key" | "filters" | "options" | "days" | "send_time" | "recipients" | "skip_if_empty" | "is_enabled">;
+export type EmailReportInput = Pick<EmailReport, "name" | "source_key" | "filters" | "options" | "days" | "send_time" | "recipients" | "discord" | "skip_if_empty" | "is_enabled">;
 
 // ---- แหล่งข้อมูล (เพิ่มรายงานแบบใหม่ = เพิ่มที่นี่ + ตัวดึงข้อมูลใน lib/email-report/sources.ts) ----
 // แต่ละแหล่งประกาศเองว่า "เลือกโชว์อะไรได้บ้าง" — หน้าตั้งค่าอ่านจากที่นี่ ส่วนที่ติ๊ก/ลำดับเก็บใน email_reports.options
@@ -208,8 +243,11 @@ export function normalizeReportInput(raw: unknown): { value: EmailReportInput } 
     }
   }
   if (recipients.length > 50) return { error: "ผู้รับมากเกินไป (ไม่เกิน 50 คน)" };
+  const rd = (r.discord ?? {}) as Record<string, unknown>;
+  if (rd.enabled === true && !SNOWFLAKE.test(String(rd.channel_id ?? ""))) return { error: "เลือกห้อง Discord ก่อน (หรือปิด Discord)" };
+  const discord = normalizeReportDiscord(rd);
   const is_enabled = r.is_enabled === true;
-  if (is_enabled && recipients.length === 0) return { error: "เปิดส่งอัตโนมัติไม่ได้ ยังไม่มีผู้รับ" };
+  if (is_enabled && recipients.length === 0 && !discord.enabled) return { error: "เปิดส่งอัตโนมัติไม่ได้ ยังไม่มีผู้รับ (ใส่อีเมล หรือเปิดส่งเข้า Discord)" };
 
   const f = (r.filters ?? {}) as Record<string, unknown>;
   const brand_group: BrandGroupFilter = f.brand_group === "customer" || f.brand_group === "own" ? f.brand_group : "all";
@@ -218,7 +256,7 @@ export function normalizeReportInput(raw: unknown): { value: EmailReportInput } 
 
   const options: EmailReportOptions = normalizeReportOptions(source_key, r.options);
 
-  return { value: { name, source_key, filters, options, days, send_time, recipients, skip_if_empty: r.skip_if_empty !== false, is_enabled } };
+  return { value: { name, source_key, filters, options, days, send_time, recipients, discord, skip_if_empty: r.skip_if_empty !== false, is_enabled } };
 }
 
 export const RUN_STATUS_LABEL: Record<EmailReportRun["status"], { label: string; cls: string }> = {

@@ -42,6 +42,13 @@ export type BuiltReport = {
   tokens: Record<string, string | number>;
   /** จำนวนงานที่มีข้อมูลแต่ละช่องจริง (โชว์ในหน้าตั้งค่า ช่วยตัดสินใจว่าจะโชว์ช่องไหน) */
   fieldFill?: Record<string, number>;
+  /** จำนวนงานเกินกำหนด (Discord ใช้ตัดสินว่าจะแท็กทีมไหม) */
+  overdue?: number;
+  /** เรคคอร์ดในรายงานที่มีเช็กลิสต์ค้าง (เรียงตามความด่วน) — Discord ทำเป็นการ์ดพร้อมปุ่มติ๊ก */
+  checklist?: {
+    moduleKey: string;
+    records: { id: string; title: string; description: string; imageUrl: string | null; link: string | null }[];
+  };
 };
 
 const TONE_COLOR: Record<ReportTone, string> = { danger: "#dc2626", warn: "#d97706", muted: "#64748b", good: "#059669" };

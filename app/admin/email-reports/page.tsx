@@ -18,6 +18,7 @@ import {
 } from "@/lib/email-report/shared";
 import { ReportEditor, toInput } from "./report-editor";
 import { EmailSetupGuide } from "./email-setup-guide";
+import { DiscordSetupGuide } from "./discord-setup-guide";
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok" });
 const GROUP_TEXT: Record<string, string> = { all: "ทุกแบรนด์", customer: "งานลูกค้า", own: "แบรนด์เรา" };
@@ -88,7 +89,7 @@ export default function EmailReportsPage() {
       const res = await apiFetch(`/api/admin/email-reports/${r.id}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }) });
       const j = await res.json().catch(() => ({}));
       const msg: string = j.result?.message || j.error || "ส่งไม่สำเร็จ";
-      if (res.ok && j.ok) toast.success(mode === "test" ? `ส่งทดสอบแล้ว — เช็กกล่องอีเมลของคุณ (${msg})` : msg);
+      if (res.ok && j.ok) toast.success(mode === "test" ? `ส่งทดสอบแล้ว — เช็กอีเมล${r.discord?.enabled ? " / DM ใน Discord" : ""}ของคุณ (${msg})` : msg);
       else toast.error(msg);
       if (j.result?.skipped?.length) toast.warning(`ข้ามผู้รับ: ${j.result.skipped.join(", ")}`);
     } catch { toast.error("ส่งไม่สำเร็จ กรุณาลองใหม่"); }
@@ -168,7 +169,8 @@ export default function EmailReportsPage() {
                         {" · "}<b className="font-medium text-slate-700">{describeDays(r.days)} · {r.send_time} น.</b>
                       </div>
                       <div className="mt-0.5 text-xs text-slate-500">
-                        ผู้รับ: {names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` และอีก ${names.length - 3} คน` : ""}` : <span className="text-amber-700">ยังไม่มีผู้รับ</span>}
+                        ผู้รับ: {names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` และอีก ${names.length - 3} คน` : ""}` : r.discord?.enabled ? "— (ส่ง Discord อย่างเดียว)" : <span className="text-amber-700">ยังไม่มีผู้รับ</span>}
+                        {r.discord?.enabled && <span className="ml-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">💬 Discord #{r.discord.channel_name ?? "ห้อง"}</span>}
                         {" · "}ส่งล่าสุด: {lastRun ? <>{fmtDateTime(lastRun.ran_at)} <span className={`rounded px-1.5 py-0.5 text-[10px] ${RUN_STATUS_LABEL[lastRun.status]?.cls ?? ""}`}>{RUN_STATUS_LABEL[lastRun.status]?.label ?? lastRun.status}</span></> : "ยังไม่เคยส่ง"}
                       </div>
                     </div>
@@ -178,10 +180,10 @@ export default function EmailReportsPage() {
                         className={`relative h-6 w-11 rounded-full transition ${r.is_enabled ? "bg-emerald-500" : "bg-slate-300"} disabled:opacity-50`}>
                         <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${r.is_enabled ? "left-[22px]" : "left-0.5"}`} />
                       </button>
-                      <button onClick={() => void send(r, "test")} disabled={!!sending} title="ส่งอีเมลนี้เข้าอีเมลของคุณคนเดียว (หัวเรื่องขึ้นต้น [ทดสอบ])"
+                      <button onClick={() => void send(r, "test")} disabled={!!sending} title={`ส่งเข้าอีเมลของคุณคนเดียว (หัวเรื่องขึ้นต้น [ทดสอบ])${r.discord?.enabled ? " + DM ใน Discord ของคุณ (ต้องผูกบัญชี)" : ""}`}
                         className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                         {sending === `${r.id}:test` ? "กำลังส่ง..." : "✉️ ทดสอบ"}</button>
-                      <button onClick={() => setSendNowTarget(r)} disabled={!!sending || r.recipients.length === 0} title={r.recipients.length ? "ส่งถึงผู้รับทุกคนเดี๋ยวนี้" : "ยังไม่มีผู้รับ"}
+                      <button onClick={() => setSendNowTarget(r)} disabled={!!sending || (r.recipients.length === 0 && !r.discord?.enabled)} title={r.recipients.length || r.discord?.enabled ? "ส่งถึงผู้รับทุกคน (และห้อง Discord) เดี๋ยวนี้" : "ยังไม่มีผู้รับ"}
                         className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                         {sending === `${r.id}:now` ? "กำลังส่ง..." : "📤 ส่งเดี๋ยวนี้"}</button>
                       <button onClick={() => openEditor(r)} className="h-8 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">✏️ แก้ไข / ดูตัวอย่าง</button>
@@ -225,6 +227,7 @@ export default function EmailReportsPage() {
         </section>
 
         {!loading && <EmailSetupGuide ready={emailReady} />}
+        {!loading && <DiscordSetupGuide />}
       </div>
 
       <ReportEditor open={editorOpen} editing={editing} onClose={() => setEditorOpen(false)}
@@ -236,7 +239,7 @@ export default function EmailReportsPage() {
 
       <ConfirmDialog open={sendNowTarget !== null} onClose={() => setSendNowTarget(null)} onConfirm={() => { if (sendNowTarget) void send(sendNowTarget, "now"); }}
         loading={!!sending} title="ส่งรายงานนี้เดี๋ยวนี้?" confirmText="📤 ส่งเลย"
-        message={<>ส่ง <b>{sendNowTarget?.name}</b> ถึงผู้รับทั้ง {sendNowTarget?.recipients.length ?? 0} คนทันที · ไม่กระทบรอบส่งตามเวลาของวันนี้</>} />
+        message={<>ส่ง <b>{sendNowTarget?.name}</b> ถึงผู้รับทั้ง {sendNowTarget?.recipients.length ?? 0} คน{sendNowTarget?.discord?.enabled ? <> และห้อง Discord <b>#{sendNowTarget.discord.channel_name ?? ""}</b></> : null} ทันที · ไม่กระทบรอบส่งตามเวลาของวันนี้</>} />
 
       <ConfirmDialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} onConfirm={() => void doDelete()} loading={deleting}
         variant="danger" title="ลบรายงานนี้?" confirmText="ลบรายงาน"

@@ -14,18 +14,19 @@ import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { apiFetch } from "@/lib/api";
 import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import {
-  COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  normalizeReportInput, normalizeReportOptions, sourceDef,
-  type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportInput,
+  COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
+  normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, sourceDef,
+  type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput,
 } from "@/lib/email-report/shared";
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
+type DiscordMeta = { ready: { bot: boolean; buttons: boolean; link: boolean }; channels: { id: string; name: string; guild: string }[]; roles: { id: string; name: string; guild: string }[]; error: string | null };
 
 export const emptyReportInput = (): EmailReportInput => ({
   name: "", source_key: EMAIL_REPORT_SOURCES[0].key,
   filters: { brand_group: "all", brand_ids: [], statuses: [] },
   options: normalizeReportOptions(EMAIL_REPORT_SOURCES[0].key, {}),
-  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], skip_if_empty: true, is_enabled: false,
+  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], discord: normalizeReportDiscord({}), skip_if_empty: true, is_enabled: false,
 });
 
 export function toInput(r: EmailReport): EmailReportInput {
@@ -33,7 +34,8 @@ export function toInput(r: EmailReport): EmailReportInput {
     name: r.name, source_key: r.source_key,
     filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [] },
     options: normalizeReportOptions(r.source_key, r.options),   // รายงานเก่า = เติมค่าเริ่มต้น (หน้าตาเดิม)
-    days: r.days, send_time: r.send_time, recipients: r.recipients, skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
+    days: r.days, send_time: r.send_time, recipients: r.recipients, discord: normalizeReportDiscord(r.discord),
+    skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
   };
 }
 
@@ -68,10 +70,20 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
     apiFetch("/api/design-sheets/statuses").then((r) => r.json()).then((j) => { if (Array.isArray(j.data)) setStatusRows(j.data as WfStatusRow[]); }).catch(() => {});
   }, [open]);
 
+  // 💬 Discord: ห้อง/บทบาทที่บอทเห็น (โหลดเมื่อเปิด Discord ในรายงานนี้)
+  const [dmeta, setDmeta] = useState<DiscordMeta | null>(null);
+  const discordOn = form.discord.enabled;
+  useEffect(() => {
+    if (!open || !discordOn || dmeta) return;
+    apiFetch("/api/admin/email-reports/discord").then((r) => r.json()).then((j) => setDmeta(j as DiscordMeta))
+      .catch(() => setDmeta({ ready: { bot: false, buttons: false, link: false }, channels: [], roles: [], error: "โหลดห้อง Discord ไม่สำเร็จ" }));
+  }, [open, discordOn, dmeta]);
+
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const set = (p: Partial<EmailReportInput>) => { setForm((f) => ({ ...f, ...p })); setError(null); };
   const setFilters = (p: Partial<EmailReportInput["filters"]>) => set({ filters: { ...form.filters, ...p } });
   const setOptions = (p: Partial<EmailReportInput["options"]>) => set({ options: { ...form.options, ...p } });
+  const setDiscord = (p: Partial<EmailReportDiscord>) => set({ discord: { ...form.discord, ...p } });
   const src = sourceDef(form.source_key);
   const opt = form.options;
   // ใส่ {คำ} ต่อท้ายหัวเรื่อง
@@ -259,6 +271,57 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
                 {extErr && <p className="mt-1 text-xs text-rose-600">{extErr}</p>}
               </div>
             </div>
+          </div>
+
+          {/* 💬 ส่งเข้า Discord: ภาพรวม + รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ (ปุ่มติ๊ก) — lib/email-report/discord */}
+          <div className={`rounded-lg border p-3 text-sm ${discordOn ? "border-indigo-200 bg-indigo-50/30" : "border-slate-200"}`}>
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
+              <input type="checkbox" checked={discordOn} onChange={(e) => setDiscord({ enabled: e.target.checked })} className="h-4 w-4" />
+              💬 ส่งเข้า Discord ด้วย <span className="font-normal text-slate-400">(รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ พร้อมปุ่มติ๊ก)</span>
+            </label>
+            {discordOn && (
+              !dmeta ? <p className="mt-2 text-xs text-slate-400">กำลังโหลดห้อง Discord…</p>
+              : !dmeta.ready.bot ? <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">ยังไม่ได้ตั้งบอท Discord — ทำตาม "คู่มือตั้งบอท Discord" ในหน้านี้ก่อน (ตั้งค่าไว้ก่อนได้ แต่ยังส่งไม่ได้)</p>
+              : (
+                <div className="mt-2 space-y-2">
+                  {dmeta.error && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{dmeta.error}</p>}
+                  {!dmeta.ready.buttons && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">ปุ่มติ๊กยังใช้ไม่ได้ (ยังไม่ได้ใส่ DISCORD_PUBLIC_KEY + ลิงก์รับปุ่ม) — การ์ดจะมีแค่ปุ่ม "เปิดใบงาน"</p>}
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className={label}>ห้อง</label>
+                      <select value={form.discord.channel_id ?? ""} onChange={(e) => { const c = dmeta.channels.find((x) => x.id === e.target.value); setDiscord({ channel_id: c?.id ?? null, channel_name: c?.name ?? null }); }}
+                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">— เลือกห้อง —</option>
+                        {form.discord.channel_id && !dmeta.channels.some((c) => c.id === form.discord.channel_id) && <option value={form.discord.channel_id}>#{form.discord.channel_name ?? form.discord.channel_id} (บอทมองไม่เห็นแล้ว)</option>}
+                        {dmeta.channels.map((c) => <option key={c.id} value={c.id}>#{c.name}{new Set(dmeta.channels.map((x) => x.guild)).size > 1 ? ` · ${c.guild}` : ""}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={label}>แท็กบทบาท <span className="font-normal text-slate-400">(ไม่บังคับ)</span></label>
+                      <select value={form.discord.role_id ?? ""} onChange={(e) => { const r = dmeta.roles.find((x) => x.id === e.target.value); setDiscord({ role_id: r?.id ?? null, role_name: r?.name ?? null }); }}
+                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">— ไม่แท็ก —</option>
+                        {dmeta.roles.map((r) => <option key={r.id} value={r.id}>@{r.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {form.discord.role_id && (
+                    <div className="flex flex-wrap items-center gap-1 text-xs text-slate-600">แท็ก @{form.discord.role_name}
+                      {(["overdue", "always"] as const).map((m) => <button key={m} type="button" onClick={() => setDiscord({ mention: m })} className={chip(form.discord.mention === m)}>{DISCORD_MENTION_LABEL[m]}</button>)}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-700">
+                    <span className="inline-flex items-center gap-1">งานในรูป
+                      {[10, 15, 20].map((n) => <button key={n} type="button" onClick={() => setDiscord({ image_rows: n })} className={chip(form.discord.image_rows === n)}>{n}</button>)}
+                    </span>
+                    <label className="inline-flex items-center gap-1.5">การ์ด "ต้องติ๊ก" สูงสุด
+                      <input type="number" min={0} max={15} value={form.discord.max_cards} onChange={(e) => setDiscord({ max_cards: Number(e.target.value) })}
+                        className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> ใบ</label>
+                  </div>
+                  <p className="text-[11px] text-slate-400">ส่งทดสอบ = ส่งเข้า DM ของคุณ (ต้องผูกบัญชี Discord ที่เมนูบัญชีก่อน) · ส่งเดี๋ยวนี้/ตามเวลา = ส่งเข้าห้องที่เลือก</p>
+                </div>
+              )
+            )}
           </div>
 
           <div className="rounded-lg border border-slate-200 p-3 text-sm">

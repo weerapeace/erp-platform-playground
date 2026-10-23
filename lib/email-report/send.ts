@@ -1,5 +1,6 @@
 /**
  * 📧 ส่งอีเมลรายงาน (ของกลาง · ฝั่งเซิร์ฟเวอร์) — ใช้ทั้ง ส่งทดสอบ / ส่งเดี๋ยวนี้ / ส่งตามเวลา (cron)
+ * + 💬 Discord (ถ้าเปิดไว้ในรายงาน) — ส่งในรอบเดียวกัน ลงประวัติแถวเดียว (detail.discord) · lib/email-report/discord
  * ขั้นตอน: หาอีเมลผู้รับ (ผู้ใช้ในระบบ = อีเมลล่าสุดจาก user_profiles · คนปิดบัญชี/ไม่มีอีเมล = ข้าม+จดไว้)
  *        → ประกอบรายงาน → ส่งทีละคน (ผู้รับไม่เห็นกัน) → ลงประวัติ email_report_runs + audit
  * ส่งตามเวลา: "จอง" วันนี้ก่อนส่ง (last_sent_on) → cron ซ้อนกันก็ไม่ส่งซ้ำ · ส่งไม่สำเร็จ = ไม่ลองซ้ำวันนั้น (ดูในประวัติ)
@@ -8,7 +9,8 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { emailConfigured, emailDevEcho, emailErrorText, sendEmail } from "@/lib/email";
 import { writeAudit } from "@/lib/audit";
 import { buildReportEmail } from "@/lib/email-report/sources";
-import type { EmailReport, EmailReportRun } from "@/lib/email-report/shared";
+import { sendReportToDiscord, type DiscordResult } from "@/lib/email-report/discord";
+import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Actor = { id: string | null; name: string | null };
@@ -78,7 +80,9 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
     });
   };
 
-  if (!emailConfigured() && !emailDevEcho()) {
+  const wantDiscord = normalizeReportDiscord(report.discord).enabled;
+  const emailReady = emailConfigured() || emailDevEcho();
+  if (!emailReady && !wantDiscord) {
     const message = emailErrorText("email-not-configured");
     await log("not_configured", { error: message });
     return { status: "not_configured", sent: 0, recipients: emails.length, items: 0, message, skipped };
@@ -98,22 +102,46 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
     await log("skipped_empty", { items: 0 });
     return { status: "skipped_empty", sent: 0, recipients: emails.length, items: 0, message: "วันนี้ไม่มีงานค้าง เลยไม่ส่ง", skipped };
   }
-  if (emails.length === 0) {
+  if (emails.length === 0 && !wantDiscord) {
     const message = skipped.length ? `ไม่มีผู้รับที่ส่งได้ (${skipped.join(", ")})` : "ยังไม่มีผู้รับ";
     await log("failed", { items, error: message });
     return { status: "failed", sent: 0, recipients: 0, items, message, skipped };
   }
 
+  // ── อีเมล ──
   const subject = opts.trigger === "test" ? `[ทดสอบ] ${built.email.subject}` : built.email.subject;
   const failed: { email: string; code: string }[] = [];
   let sent = 0;
-  for (const to of emails) {
-    const r = await sendEmail({ to, subject, html: built.email.html, text: built.email.text, fromName: "ERP รายงาน" });
-    if (r.ok) sent += 1; else failed.push({ email: to, code: r.error });
+  let emailError: string | null = null;
+  if (emails.length) {
+    if (!emailReady) emailError = emailErrorText("email-not-configured");
+    else {
+      for (const to of emails) {
+        const r = await sendEmail({ to, subject, html: built.email.html, text: built.email.text, fromName: "ERP รายงาน" });
+        if (r.ok) sent += 1; else failed.push({ email: to, code: r.error });
+      }
+      if (failed.length) emailError = `${emailErrorText(failed[0].code)}${failed.length > 1 ? ` (${failed.length} คน)` : ""}`;
+    }
   }
-  const status: EmailReportRun["status"] = failed.length === 0 ? "sent" : sent > 0 ? "partial" : "failed";
-  const error = failed.length ? `${emailErrorText(failed[0].code)}${failed.length > 1 ? ` (${failed.length} คน)` : ""}` : null;
-  await log(status, { items, sent, error, detail: { subject, failed } });
-  const message = status === "sent" ? `ส่งแล้ว ${sent} คน` : status === "partial" ? `ส่งได้ ${sent}/${emails.length} คน — ${error}` : error ?? "ส่งไม่สำเร็จ";
+
+  // ── Discord (ทดสอบ = DM หาคนกด) ──
+  let discord: DiscordResult | null = null;
+  if (wantDiscord) {
+    try { discord = await sendReportToDiscord(admin, report, built.built, { trigger: opts.trigger, actorId: opts.actor.id, subject: built.email.subject }); }
+    catch (e) { console.error("[email-report] discord", e); discord = { ok: false, posted: 0, cards: 0, image: false, target: "", error: "ส่งเข้า Discord ไม่สำเร็จ" }; }
+  }
+
+  // ── สรุปผลรวมทุกช่องทาง ──
+  const emailOk = emails.length === 0 || !emailError;
+  const discordOk = !discord || discord.ok;
+  const anyOk = sent > 0 || (!!discord && discord.posted > 0);
+  const status: EmailReportRun["status"] = emailOk && discordOk ? "sent" : anyOk ? "partial" : "failed";
+  const error = [emailError && (wantDiscord ? `อีเมล: ${emailError}` : emailError), discord?.error && `Discord: ${discord.error}`].filter(Boolean).join(" · ") || null;
+  await log(status, { items, sent, error, detail: { subject, failed, ...(discord ? { discord } : {}) } });
+  const said = [
+    emails.length ? (sent ? `อีเมล ${sent}${sent < emails.length ? `/${emails.length}` : ""} คน` : "อีเมลไม่สำเร็จ") : "",
+    discord ? (discord.posted ? `Discord ${discord.target} ${discord.posted} ข้อความ${discord.cards ? ` (การ์ดติ๊ก ${discord.cards} ใบ)` : ""}` : "Discord ไม่สำเร็จ") : "",
+  ].filter(Boolean).join(" · ");
+  const message = status === "sent" ? `ส่งแล้ว — ${said}` : status === "partial" ? `ส่งได้บางส่วน — ${said} — ${error}` : error ?? "ส่งไม่สำเร็จ";
   return { status, sent, recipients: emails.length, items, message, skipped };
 }
