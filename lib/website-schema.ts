@@ -47,6 +47,8 @@ import {
   canvasItemPreset,
   canvasItemSummary,
   validateCanvas,
+  validateCanvasFolders,
+  folderCanvasStarter,
 } from "@/lib/website-canvas";
 import { GRAD_DIRS } from "@/lib/website-gradient";
 import { CARD_LOOKS, cardLookToSection } from "@/lib/website-card-looks";
@@ -852,34 +854,18 @@ export const FOLDER_PALETTES: FieldOption[] = [
   { v: "brand", l: "ตามสีแบรนด์ (อ่อน)" },
   { v: "custom", l: "สีเอง…" },
 ];
-const galleryTabsFields = (): FieldDef[] => {
-  const st = { showIf: GAL_TABS };
-  const cap = { group: "caption" as FieldGroup };
-  const capOn: ShowIf[] = [GAL_TABS, { key: "tabsCap", eq: ["scramble", "plain"] }];
-  const fo: ShowIf[] = [GAL_TABS, TABS_FOLDER];
+/** 🗂 ผืนผ้าใบโหมดแฟ้มซ้อน */
+const FOLDER_ON: ShowIf = { key: "folderMode", eq: true };
+const FOLDER_COUNTS: FieldOption[] = ["2", "3", "4", "5", "6"].map((v) => ({ v, l: `${v} แฟ้ม` }));
+const FOLDER_NUMS: FieldOption[] = ["1", "2", "3", "4", "5", "6"].map((v) => ({ v, l: `แฟ้ม ${v}` }));
+
+/**
+ * 🗂 ช่องหน้าตาแฟ้ม (ของกลาง) — แกลเลอรีแถบวิดีโอแบบแฟ้ม + ผืนผ้าใบโหมดแฟ้มซ้อน (แฟ้มวางอิสระ) ใช้ชุดเดียวกัน (คีย์ folder* / cover*)
+ * เว็บร้านวาดด้วย CSS ชุดเดียว (.gt[data-look=folder] ใน globals.css)
+ */
+const folderLookFields = (fo: ShowIf[], opts: { peekIf?: ShowIf[]; labelAuto: string }): FieldDef[] => {
   const cover: ShowIf[] = [...fo, { key: "folderCover", eq: true }];
   return [
-    // 🗂 หน้าตา: แบบเดิม (แถบ) / แฟ้มเอกสาร (2026-10-23) — ค่าเริ่ม = แบบเดิม (Section เก่าหน้าตาไม่เปลี่ยน)
-    f("tabsLook", "หน้าตา", "select", {
-      group: "layout",
-      default: "plain",
-      wide: true,
-      options: [
-        { v: "plain", l: "แบบเดิม — แถบเรียงกัน" },
-        { v: "folder", l: "🗂 แฟ้มเอกสาร — ขอบแฟ้ม + หูแฟ้มมีป้าย" },
-      ],
-      ...st,
-    }),
-    f("folderDir", "ทิศของแฟ้ม", "select", {
-      group: "layout",
-      default: "h",
-      options: [
-        { v: "h", l: "แนวนอน — แฟ้มซ้อนลงมา ชี้แล้วกางออก" },
-        { v: "v", l: "แนวตั้ง — แฟ้มเรียงข้างกัน ชี้แล้วขยาย" },
-      ],
-      showIf: fo,
-      hint: "แนวนอนเหมาะกับมือถือที่สุด",
-    }),
     f("folderShape", "ทรงหูแฟ้ม", "select", {
       group: "layout",
       default: "real",
@@ -915,17 +901,56 @@ const galleryTabsFields = (): FieldDef[] => {
     }),
     f("folderShadow", "เงาของแฟ้ม", "range", { group: "layout", default: 2, min: 0, numMax: 3, step: 1, showIf: fo, hint: "0 = ไม่มีเงา · 3 = เงาเข้ม" }),
     f("folderRadius", "มุมมนของแฟ้ม (px)", "range", { group: "layout", default: 14, min: 0, numMax: 28, step: 2, showIf: fo }),
-    f("folderPal", "สีแฟ้ม", "select", { group: "layout", default: "pastel", options: FOLDER_PALETTES, showIf: fo, hint: "ตั้งสีแยกทีละแฟ้มได้ที่ชิ้นนั้น (ช่อง \"สีแฟ้มช่องนี้\")" }),
+    f("folderPal", "สีแฟ้ม", "select", { group: "layout", default: "pastel", options: FOLDER_PALETTES, showIf: fo, hint: "ตั้งสีแยกทีละแฟ้มได้ (ช่องสีของแฟ้มนั้น)" }),
     f("folderHex", "สีแฟ้ม (เลือกเอง)", "color", { group: "layout", default: "", showIf: [...fo, { key: "folderPal", eq: "custom" }] }),
     f("folderLabel", "ป้ายบนหูแฟ้ม", "select", {
       group: "layout",
       default: "auto",
       options: [
-        { v: "auto", l: "อัตโนมัติ (แนวตั้ง = สติกเกอร์ขาว · แนวนอน = ตัวหนังสือบนหู)" },
+        { v: "auto", l: opts.labelAuto },
         { v: "sticker", l: "สติกเกอร์ขาว" },
         { v: "plain", l: "ตัวหนังสือบนหู" },
       ],
       showIf: fo,
+    }),
+    f("folderPeek", "ขอบแฟ้มที่หุบอยู่ (px)", "range", { group: "layout", default: 56, min: 32, numMax: 120, step: 4, showIf: opts.peekIf ?? fo, hint: "ความสูงของแฟ้มที่ยังไม่กาง" }),
+    f("folderLift", "ดึงแฟ้มขึ้นนิดหนึ่งตอนชี้", "toggle", { group: "layout", default: true, showIf: fo }),
+    // 📕 แฟ้มปก — แฟ้มแรกไม่มีของ มีชื่อใหญ่ 2 บรรทัด (ฟอนต์ตรง + ลายมือ) + โลโก้
+    f("folderCover", "แฟ้มปก (ชื่อใหญ่ + โลโก้ ก่อนแฟ้มแรก)", "toggle", { group: "content", default: false, wide: true, showIf: fo }),
+    text("coverTitle", "แฟ้มปก: ชื่อบรรทัด 1", { default: "", max: 40, placeholder: "เช่น social media", showIf: cover }),
+    text("coverTitle2", "แฟ้มปก: คำต่อท้าย (ฟอนต์ที่ 2)", { default: "", max: 40, placeholder: "เช่น designs", showIf: cover }),
+    f("coverFont", "แฟ้มปก: ฟอนต์บรรทัด 1", "select", { group: "content", default: "display", options: CANVAS_FONTS, display: "font", showIf: cover }),
+    f("coverFont2", "แฟ้มปก: ฟอนต์คำต่อท้าย", "select", { group: "content", default: "Great Vibes", options: CANVAS_FONTS, display: "font", showIf: cover }),
+    f("coverSize", "แฟ้มปก: ขนาดชื่อ (px)", "range", { group: "content", default: 56, min: 24, numMax: 120, step: 4, showIf: cover }),
+    image("coverLogo", "แฟ้มปก: โลโก้ (ไม่ใส่ก็ได้)", { showIf: cover }),
+  ];
+};
+const galleryTabsFields = (): FieldDef[] => {
+  const st = { showIf: GAL_TABS };
+  const cap = { group: "caption" as FieldGroup };
+  const capOn: ShowIf[] = [GAL_TABS, { key: "tabsCap", eq: ["scramble", "plain"] }];
+  const fo: ShowIf[] = [GAL_TABS, TABS_FOLDER];
+  return [
+    // 🗂 หน้าตา: แบบเดิม (แถบ) / แฟ้มเอกสาร (2026-10-23) — ค่าเริ่ม = แบบเดิม (Section เก่าหน้าตาไม่เปลี่ยน)
+    f("tabsLook", "หน้าตา", "select", {
+      group: "layout",
+      default: "plain",
+      wide: true,
+      options: [
+        { v: "plain", l: "แบบเดิม — แถบเรียงกัน" },
+        { v: "folder", l: "🗂 แฟ้มเอกสาร — ขอบแฟ้ม + หูแฟ้มมีป้าย" },
+      ],
+      ...st,
+    }),
+    f("folderDir", "ทิศของแฟ้ม", "select", {
+      group: "layout",
+      default: "h",
+      options: [
+        { v: "h", l: "แนวนอน — แฟ้มซ้อนลงมา ชี้แล้วกางออก" },
+        { v: "v", l: "แนวตั้ง — แฟ้มเรียงข้างกัน ชี้แล้วขยาย" },
+      ],
+      showIf: fo,
+      hint: "แนวนอนเหมาะกับมือถือที่สุด",
     }),
     f("folderMedia", "รูป/คลิปในแฟ้ม", "select", {
       group: "layout",
@@ -936,16 +961,7 @@ const galleryTabsFields = (): FieldDef[] => {
       ],
       showIf: fo,
     }),
-    f("folderPeek", "ขอบแฟ้มที่หุบอยู่ (px)", "range", { group: "layout", default: 56, min: 32, numMax: 120, step: 4, showIf: [...fo, { key: "folderDir", eq: "h" }], hint: "แนวนอน: ความสูงของแฟ้มที่ยังไม่กาง" }),
-    f("folderLift", "ดึงแฟ้มขึ้นนิดหนึ่งตอนชี้", "toggle", { group: "layout", default: true, showIf: fo }),
-    // 📕 แฟ้มปก — แฟ้มแรกไม่มีคลิป มีชื่อใหญ่ 2 บรรทัด (ฟอนต์ตรง + ลายมือ) + โลโก้
-    f("folderCover", "แฟ้มปก (ชื่อใหญ่ + โลโก้ ก่อนแฟ้มแรก)", "toggle", { group: "content", default: false, wide: true, showIf: fo }),
-    text("coverTitle", "แฟ้มปก: ชื่อบรรทัด 1", { default: "", max: 40, placeholder: "เช่น social media", showIf: cover }),
-    text("coverTitle2", "แฟ้มปก: คำต่อท้าย (ฟอนต์ที่ 2)", { default: "", max: 40, placeholder: "เช่น designs", showIf: cover }),
-    f("coverFont", "แฟ้มปก: ฟอนต์บรรทัด 1", "select", { group: "content", default: "display", options: CANVAS_FONTS, display: "font", showIf: cover }),
-    f("coverFont2", "แฟ้มปก: ฟอนต์คำต่อท้าย", "select", { group: "content", default: "Great Vibes", options: CANVAS_FONTS, display: "font", showIf: cover }),
-    f("coverSize", "แฟ้มปก: ขนาดชื่อ (px)", "range", { group: "content", default: 56, min: 24, numMax: 120, step: 4, showIf: cover }),
-    image("coverLogo", "แฟ้มปก: โลโก้ (ไม่ใส่ก็ได้)", { showIf: cover }),
+    ...folderLookFields(fo, { peekIf: [...fo, { key: "folderDir", eq: "h" }], labelAuto: "อัตโนมัติ (แนวตั้ง = สติกเกอร์ขาว · แนวนอน = ตัวหนังสือบนหู)" }),
     f("tabsH", "ความสูง — จอคอม (px)", "range", { group: "layout", default: 560, min: 280, numMax: 900, step: 20, ...st, hint: "แฟ้มแนวนอน = ความสูงของแฟ้มที่กางอยู่" }),
     f("tabsHMobile", "ความสูง — มือถือ (px)", "range", { group: "layout", default: 420, min: 240, numMax: 720, step: 20, ...st }),
     f("tabsActive", "ช่องที่ขยาย กว้าง (%)", "range", { group: "layout", default: 64, min: 40, numMax: 86, step: 2, showIf: [GAL_TABS, TABS_STRIP], hint: "ที่เหลือแบ่งกันเป็นแถบบาง ๆ" }),
@@ -1081,6 +1097,7 @@ function canvasItemFields(): FieldDef[] {
   const framed = [isImage, { key: "border", eq: CANVAS_BORDERS_ON }];
   return [
     f("kind", "ชนิดชิ้น", "select", { default: "text", options: CANVAS_KINDS }),
+    f("folder", "อยู่แฟ้มที่", "select", { default: "1", options: FOLDER_NUMS, showIfParent: FOLDER_ON, hint: "ผืนแบบแฟ้มซ้อน: ย้ายชิ้นไปแฟ้มอื่นได้ที่นี่" }),
 
     /* ข้อความ */
     area("text", "ข้อความ", { default: "ข้อความ", max: 2000, showIf: isText, hint: "ดับเบิลคลิกข้อความในพรีวิวเพื่อพิมพ์แก้ตรงนั้นก็ได้" }),
@@ -1460,6 +1477,34 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         hint: "หน่วยผืนมือถือ (กว้าง 400) · ลากแถบใต้ผืนในพรีวิวมือถือก็ได้",
         showIf: { key: "mobileMode", eq: "custom" },
       }),
+      /* 🗂 แฟ้มซ้อน (แฟ้มวางอิสระ · 2026-10-23) — ผืนแบ่งเป็นแฟ้มซ้อนกัน แต่ละแฟ้มมีชิ้นของตัวเอง (ช่อง "อยู่แฟ้มที่" ของชิ้น)
+         เว็บร้าน src/components/home/CanvasFolders.tsx · หน้าตาแฟ้ม = ชุดเดียวกับแกลเลอรีแบบแฟ้ม (folderLookFields) · คลังมีการ์ด "🗂 แฟ้มวางอิสระ" (SECTION_PRESETS) */
+      f("folderMode", "🗂 แฟ้มซ้อน — แบ่งเป็นแฟ้ม แต่ละแฟ้มวางของอิสระ", "toggle", {
+        group: "layout",
+        default: false,
+        wide: true,
+        hint: "แฟ้มซ้อนกันลงมา ชี้/แตะแฟ้มไหน แฟ้มนั้นกางออก · ชิ้นอยู่แฟ้มไหน = ช่อง \"อยู่แฟ้มที่\" ของชิ้น (ชิ้นใหม่ลงแฟ้มที่เปิดอยู่ในพรีวิว) · ความสูงผืน = ความสูงแฟ้มที่กาง",
+      }),
+      f("folderCount", "จำนวนแฟ้ม", "select", { group: "layout", default: "3", options: FOLDER_COUNTS, showIf: FOLDER_ON }),
+      f("folderOpen", "เปิดแฟ้มเมื่อ", "select", {
+        group: "layout",
+        default: "hover",
+        options: [
+          { v: "hover", l: "ชี้เมาส์ (มือถือแตะ)" },
+          { v: "click", l: "กดหูแฟ้ม" },
+        ],
+        showIf: FOLDER_ON,
+        hint: "ตัวจัดหน้า: กดหูแฟ้มเพื่อสลับแฟ้มเสมอ",
+      }),
+      f("folderStart", "แฟ้มที่กางรอไว้", "select", { group: "layout", default: "1", options: FOLDER_NUMS, showIf: FOLDER_ON }),
+      ...([1, 2, 3, 4, 5, 6] as const).flatMap((n) => {
+        const on: ShowIf[] = [FOLDER_ON, { key: "folderCount", eq: FOLDER_COUNTS.map((o) => o.v).filter((v) => Number(v) >= n) }];
+        return [
+          text(`folder${n}Label`, `แฟ้ม ${n}: ป้ายบนหู`, { group: "layout", default: "", max: 30, placeholder: "เช่น TO DO LIST · ว่าง = เลขแฟ้ม", showIf: on }),
+          f(`folder${n}Color`, `แฟ้ม ${n}: สี`, "color", { group: "layout", default: "", showIf: on, hint: "ว่าง = ใช้ชุดสี" }),
+        ];
+      }),
+      ...folderLookFields([FOLDER_ON], { labelAuto: "อัตโนมัติ (ตัวหนังสือบนหู)" }),
       /* 🎬 ฉากค้าง (แบบเว็บ Apple · เว็บร้าน src/lib/canvas-scene.ts) — ท่าต่อชิ้นอยู่ที่ช่อง sc* ของชิ้น */
       f("scene", "🎬 ฉากค้าง (แบบ Apple)", "toggle", {
         group: "layout",
@@ -1487,7 +1532,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       fields: canvasItemFields(),
     },
     summary: (b) => `${arr(b.items).length} ชิ้น · สูง ${Number(b.height) || 0}`,
-    validate: (b, label) => validateCanvas(b, label),
+    validate: (b, label) => [...validateCanvas(b, label), ...validateCanvasFolders(b, label)],
   },
 
   "rich-text": {
@@ -3992,6 +4037,32 @@ export function sectionHasHeading(type: string): boolean {
   if (!sc) return false;
   return sc.fields.some((f) => f.key === "title") || !!sc.children?.fields.some((f) => f.key === "title");
 }
+
+/**
+ * ⭐ การ์ดสำเร็จรูปในคลัง Section (ของกลาง) — สร้างจากชนิดที่มีอยู่ + ค่าตั้งต้น (ไม่ใช่ชนิดใหม่ → เครื่องมือของชนิดนั้นใช้ได้ครบ)
+ * ตัวจัดหน้าโชว์ในกลุ่มเดียวกับชนิดนั้น เมื่อร้านใช้ชนิดนั้นได้ (เช่น ผืนผ้าใบ = เปิดสวิตช์ทดลองแล้ว)
+ */
+export interface SectionPreset {
+  id: string;
+  type: string;
+  label: string;
+  icon: string;
+  hint: string;
+  group: string;
+  /** ค่าที่ทับ Section ใหม่ (รวมชิ้นย่อย) — ผ่านตัวทำความสะอาดอีกชั้นตอนใส่ */
+  values: () => Record<string, unknown>;
+}
+export const SECTION_PRESETS: SectionPreset[] = [
+  {
+    id: "canvas-folders",
+    type: "canvas",
+    label: "แฟ้มวางอิสระ",
+    icon: "🗂",
+    hint: "แฟ้มซ้อนกัน แต่ละแฟ้มวางรูป วิดีโอ ข้อความ ของตกแต่งได้อิสระ — ลาก/ย่อ/หมุนในพรีวิว",
+    group: "พื้นฐาน",
+    values: folderCanvasStarter,
+  },
+];
 
 /** ลำดับกลุ่มในคลัง Section */
 export const SECTION_GROUP_ORDER = ["พื้นฐาน", "สินค้า", "เนื้อหา", "ขั้นสูง"];

@@ -364,6 +364,13 @@ export const CANVAS_SHAPES: FieldOption[] = [
   { v: "arch", l: "เส้นโค้งประตู" },
   { v: "rect", l: "บล็อกสี่เหลี่ยม" },
   { v: "ellipse", l: "วงกลม / วงรี" },
+  // ✂️ ของตกแต่งสำเร็จรูป (แฟ้มวางอิสระ 2026-10-23) — ⚠️ ลายต้องตรงกับเว็บร้าน CanvasShapes.tsx + components/website-canvas-shapes.tsx
+  { v: "clip", l: "📎 คลิปหนีบกระดาษ" },
+  { v: "binder", l: "คลิปดำหนีบเอกสาร" },
+  { v: "tape", l: "เทปกาว" },
+  { v: "note", l: "กระดาษโน้ต (มุมพับ)" },
+  { v: "badge", l: "สติกเกอร์ขอบหยัก" },
+  { v: "barcode", l: "บาร์โค้ด" },
 ];
 
 /** ชื่อลายแบบไม่มีสัญลักษณ์นำหน้า (สรุปในต้นไม้ใส่ไอคอนของชนิดให้อยู่แล้ว) */
@@ -678,4 +685,60 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
     }
   });
   return out;
+}
+
+
+/* ── 🗂 ผืนผ้าใบโหมดแฟ้มซ้อน (แฟ้มวางอิสระ · 2026-10-23) ── */
+
+/**
+ * ตรวจก่อนเผยแพร่ของผืนแบบแฟ้มซ้อน: แฟ้มที่ยังว่าง · ชิ้นที่อยู่แฟ้มเกินจำนวนแฟ้ม (ลดจำนวนแฟ้มแล้ว = ชิ้นนั้นไม่ขึ้นเว็บ)
+ */
+export function validateCanvasFolders(b: Record<string, unknown>, label: string): { level: "warning" | "error"; message: string }[] {
+  if (b.folderMode !== true) return [];
+  const count = Math.max(2, Math.min(6, Number(b.folderCount) || 3));
+  const items = (Array.isArray(b.items) ? (b.items as Record<string, unknown>[]) : []).filter((it) => it.enabled !== false);
+  const folderOf = (it: Record<string, unknown>) => Math.max(1, Number(it.folder) || 1);
+  const out: { level: "warning" | "error"; message: string }[] = [];
+  const empty = Array.from({ length: count }, (_, i) => i + 1).filter((n) => !items.some((it) => folderOf(it) === n));
+  if (empty.length) out.push({ level: "warning", message: `${label}: แฟ้ม ${empty.join(", ")} ยังว่าง (เปิดแฟ้มนั้นในพรีวิวแล้วเพิ่มรูป/ข้อความ)` });
+  const lost = items.filter((it) => folderOf(it) > count).length;
+  if (lost) out.push({ level: "warning", message: `${label}: ${lost} ชิ้นอยู่แฟ้มที่เกินจำนวนแฟ้ม (ไม่ขึ้นเว็บ) — เพิ่มจำนวนแฟ้ม หรือย้ายชิ้นไปแฟ้มอื่น` });
+  return out;
+}
+
+/**
+ * ⭐ ค่าตั้งต้นของการ์ด "🗂 แฟ้มวางอิสระ" ในคลัง Section — 3 แฟ้ม (ไดอารี่ / ลิสต์ / บล็อก) ตัวอย่างข้อความ + ของตกแต่งสำเร็จรูป
+ * ไม่มีรูปตัวอย่าง (เจ้าของใส่รูป/คลิปของร้านเอง) · ชิ้นที่ group ตรงกัน = ย้ายไปด้วยกัน
+ */
+export function folderCanvasStarter(): Record<string, unknown> {
+  const t = (folder: string, text: string, x: number, y: number, w: number, h: number, extra: Record<string, unknown> = {}) => ({
+    kind: "text", folder, text, font: "display", size: 44, weight: "500", lineHeight: 110, x, y, w, h, color: "ink", ...extra,
+  });
+  const sh = (folder: string, shape: string, x: number, y: number, w: number, h: number, extra: Record<string, unknown> = {}) => ({
+    kind: "shape", folder, shape, color: "ink", x, y, w, h, ...extra,
+  });
+  return {
+    folderMode: true,
+    folderCount: "3",
+    folder1Label: "GRATITUDE DIARY",
+    folder2Label: "TO DO LIST",
+    folder3Label: "LIFESTYLE BLOG",
+    height: 460,
+    items: [
+      t("1", "do a little,\ndo it daily", 80, 50, 620, 120, { size: 56 }),
+      t("1", "เพิ่มรูป / วิดีโอของร้านได้เลย — ลาก ย่อ หมุน ได้อิสระ", 80, 210, 560, 60, { font: "body", size: 20, weight: "400", color: "muted" }),
+      sh("1", "note", 820, 70, 260, 260, { color: "custom", colorHex: "#fac775", rotate: 4, group: "gnote" }),
+      t("1", "Writing is my way\nof creativity", 850, 130, 200, 90, { font: "Charm", size: 24, weight: "400", rotate: 4, group: "gnote" }),
+      sh("1", "clip", 930, 30, 44, 110, { rotate: 8, group: "gnote" }),
+      t("2", "TO DO LIST", 80, 60, 520, 70),
+      t("2", "☐ ถ่ายรูปสินค้าใหม่\n☐ อัปโหลดลงเว็บ\n☐ โพสต์โปรโมชัน", 80, 160, 460, 150, { font: "body", size: 24, weight: "400", lineHeight: 160 }),
+      sh("2", "tape", 640, 40, 170, 50, { color: "white", rotate: -6 }),
+      sh("2", "badge", 900, 90, 160, 160, { group: "gbadge" }),
+      t("2", "NEW", 900, 145, 160, 50, { color: "white", size: 34, align: "center", group: "gbadge" }),
+      t("3", "lifestyle blog", 80, 60, 640, 80, { font: "Great Vibes", size: 64, weight: "400" }),
+      t("3", "เรื่องเล่า แรงบันดาลใจ และไอเดียการแต่งตัวจากร้านเรา", 80, 170, 600, 70, { font: "body", size: 22, weight: "400" }),
+      sh("3", "barcode", 80, 300, 220, 70),
+      sh("3", "binder", 960, 20, 130, 104),
+    ],
+  };
 }

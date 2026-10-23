@@ -36,6 +36,24 @@ function laceEllipsePath(cx: number, cy: number, rx: number, ry: number, bump: n
   return d + " Z";
 }
 
+/** ✂️ จุดของสติกเกอร์ขอบหยัก (32 จุด) + แท่งบาร์โค้ด [x, กว้าง] — ของตกแต่งสำเร็จรูป */
+const NONE = "none";
+const BADGE_POINTS = Array.from({ length: 32 }, (_, i) => {
+  const a = (i / 32) * Math.PI * 2 - Math.PI / 2;
+  const r = i % 2 ? 42 : 49;
+  return `${(50 + r * Math.cos(a)).toFixed(1)},${(50 + r * Math.sin(a)).toFixed(1)}`;
+}).join(" ");
+const BARCODE_BARS: [number, number][] = (() => {
+  const ws = [3, 1, 2, 1, 1, 3, 1, 2, 2, 1, 3, 1, 1, 2, 1, 3, 2, 1, 1, 2, 3, 1, 2, 1, 1, 3, 1, 2];
+  const out: [number, number][] = [];
+  let x = 2;
+  ws.forEach((w, i) => {
+    if (i % 2 === 0) out.push([x, w * 1.6]);
+    x += w * 1.6 + 0.9;
+  });
+  return out.filter(([bx, bw]) => bx + bw <= 98);
+})();
+
 /* ── ลายไอคอน (viewBox คงที่) ── */
 const ICONS: Record<string, { vb: [number, number]; body: (fill: string, stroke: string, sw: number) => React.ReactNode }> = {
   bow: {
@@ -80,6 +98,53 @@ const ICONS: Record<string, { vb: [number, number]; body: (fill: string, stroke:
         ))}
         <circle cx="50" cy="50" r="11" fill={fill === "none" ? "none" : "#fff"} fillOpacity={0.7} stroke={stroke === "none" ? fill : stroke} strokeWidth={Math.max(1, sw)} />
       </>
+    ),
+  },
+  // ✂️ ของตกแต่งสำเร็จรูป (แฟ้มวางอิสระ 2026-10-23) — คลิปหนีบ · คลิปดำ · เทปกาว · กระดาษโน้ต · สติกเกอร์ขอบหยัก · บาร์โค้ด
+  //    ⚠️ ลายชุดเดียวกันทั้งเว็บร้าน (src/components/home/CanvasShapes.tsx) และ ERP (components/website-canvas-shapes.tsx)
+  clip: {
+    vb: [40, 100],
+    body: (fill, stroke) => (
+      <path d="M26 30 V78 C26 88 14 88 14 78 V20 C14 6 34 6 34 20 V82 C34 98 6 98 6 82 V30" fill="none" stroke={fill === NONE ? stroke : fill} strokeWidth={4.5} strokeLinecap="round" strokeLinejoin="round" />
+    ),
+  },
+  binder: {
+    vb: [100, 80],
+    body: (fill, stroke, sw) => (
+      <>
+        <path d="M34 38 L22 6 Q50 0 78 6 L66 38" fill="none" stroke={fill === NONE ? stroke : fill} strokeOpacity={0.6} strokeWidth={4} strokeLinejoin="round" />
+        <path d="M10 36 H90 L84 74 Q50 80 16 74 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
+        {fill !== NONE && <path d="M17 44 H83" stroke="#fff" strokeOpacity={0.25} strokeWidth={3} />}
+      </>
+    ),
+  },
+  tape: {
+    vb: [120, 36],
+    body: (fill, stroke, sw) => (
+      <path d="M6 2 L114 2 L118 7 L114 12 L118 17 L114 22 L118 27 L114 34 L6 34 L2 29 L6 24 L2 19 L6 14 L2 9 Z" fill={fill} fillOpacity={0.6} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
+    ),
+  },
+  note: {
+    vb: [100, 100],
+    body: (fill, stroke, sw) => (
+      <>
+        <path d="M4 4 H96 V74 L74 96 H4 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
+        <path d="M96 74 H80 Q74 74 74 80 V96 Z" fill={fill === NONE ? NONE : "#000"} fillOpacity={0.14} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
+      </>
+    ),
+  },
+  badge: {
+    vb: [100, 100],
+    body: (fill, stroke, sw) => <polygon points={BADGE_POINTS} fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />,
+  },
+  barcode: {
+    vb: [100, 50],
+    body: (fill, stroke) => (
+      <g fill={fill === NONE ? stroke : fill}>
+        {BARCODE_BARS.map(([x, w]) => (
+          <rect key={x} x={x} y={2} width={w} height={46} />
+        ))}
+      </g>
     ),
   },
 };

@@ -991,7 +991,7 @@ export function CanvasInspector({
         </button>
         {advanced && (
           <div className="mt-3">
-            <SchemaForm fields={spec.fields} value={item} onChange={onPatchItem} ctx={ctx} />
+            <SchemaForm fields={spec.fields} value={item} onChange={onPatchItem} ctx={ctx} parent={block as unknown as Record<string, unknown>} />
           </div>
         )}
       </div>

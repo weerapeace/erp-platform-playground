@@ -24,7 +24,7 @@
  *   ผืนผ้าใบอิสระ (canvas) คุยสดอีกชุด — ดู components/website-canvas-tools.tsx
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, childPlacePatch, newChildId, newChildValues, sectionHasHeading, type ChildAddOption, type ChildSpec } from "@/lib/website-schema";
+import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, SECTION_PRESETS, childPlacePatch, newChildId, newChildValues, sectionHasHeading, type ChildAddOption, type ChildSpec, type SectionPreset } from "@/lib/website-schema";
 import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
@@ -407,12 +407,17 @@ export function WebsiteBuilder({
     patchBlock(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
   };
 
+  /** 🗂 ผืนแบบแฟ้มซ้อน: แฟ้มที่เปิดอยู่ในพรีวิว (เว็บร้านส่ง storefront-canvas-folder) → ชิ้นใหม่ลงแฟ้มนั้น */
+  const canvasFolderRef = useRef(new Map<string, string>());
+  const intoOpenFolder = (b: Block, item: ChildBlock): ChildBlock =>
+    b.type === "canvas" && b.folderMode === true ? { ...item, folder: canvasFolderRef.current.get(b.id) ?? String(b.folderStart ?? "1") } : item;
+
   /** option = ปุ่มเพิ่มแบบอื่นของ schema (ChildSpec.addOptions เช่น ＋ เพิ่มกรอบ) · ไม่ส่ง = ชิ้นเปล่าแบบเดิม */
   const addChild = (blockId: string, option?: ChildAddOption) => {
     const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
-    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...newChildValues(c.spec, option) };
+    const item: ChildBlock = intoOpenFolder(b, { id: newChildId(c.spec.key), enabled: true, ...newChildValues(c.spec, option) });
     patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
     setExpanded((s) => new Set(s).add(blockId));
     onSelect({ blockId, childId: item.id });
@@ -500,7 +505,7 @@ export function WebsiteBuilder({
     const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
-    patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
+    patchBlock(blockId, { [c.spec.key]: [...c.list, intoOpenFolder(b, item)] });
     setExpanded((x) => new Set(x).add(blockId));
     onSelect({ blockId, childId: item.id });
   };
@@ -551,6 +556,12 @@ export function WebsiteBuilder({
           if (Array.isArray(st.decor) && Object.keys(upd).length)
             patchBlock(blk.id, { style: { ...st, decor: st.decor.map((it) => (it.id === id ? patchDecorPlace(it, screen, upd) : it)) } });
         }
+        return;
+      }
+      if (d.type === "storefront-canvas-folder" && d.blockId) {
+        // 🗂 ผืนแบบแฟ้มซ้อน: เปิดแฟ้มไหนอยู่ในพรีวิว (ตัวจัดหน้า/ป๊อปแก้เต็มจอ) → ชิ้นใหม่ลงแฟ้มนั้น (intoOpenFolder)
+        const fo = String((d as { folder?: unknown }).folder ?? "");
+        if (/^[1-6]$/.test(fo)) canvasFolderRef.current.set(d.blockId, fo);
         return;
       }
       if (d.type === "storefront-child-place" && d.blockId && d.childId) {
@@ -838,6 +849,23 @@ export function WebsiteBuilder({
     const order = [...SECTION_GROUP_ORDER, ...[...map.keys()].filter((g) => !SECTION_GROUP_ORDER.includes(g))];
     return order.filter((g) => map.has(g)).map((g) => [g, map.get(g)!] as const);
   }, [types, libQuery]);
+  /** ⭐ การ์ดสำเร็จรูป (SECTION_PRESETS) ต่อกลุ่ม — โชว์เมื่อร้านใช้ชนิดนั้นได้ */
+  const presetsByGroup = useMemo(() => {
+    const q = libQuery.trim().toLowerCase();
+    const map = new Map<string, SectionPreset[]>();
+    for (const pr of SECTION_PRESETS) {
+      if (!allowedTypes.has(pr.type)) continue;
+      if (q && !pr.label.toLowerCase().includes(q) && !pr.hint.toLowerCase().includes(q) && !pr.id.includes(q)) continue;
+      map.set(pr.group, [...(map.get(pr.group) ?? []), pr]);
+    }
+    return map;
+  }, [allowedTypes, libQuery]);
+  /** กดการ์ดสำเร็จรูป = Section ชนิดนั้น + ค่าตั้งต้นของการ์ด (ผ่านตัวทำความสะอาด) ต่อท้ายหน้า */
+  const addPreset = (pr: SectionPreset) => {
+    const base = makeBlock(pr.type as BlockType, blocksRef.current.length + 1) as unknown as Record<string, unknown>;
+    const [b] = normalizeBlocks([{ ...base, ...pr.values() }]);
+    if (b) insertTemplate(b as unknown as Record<string, unknown>);
+  };
 
   /* ── สิ่งที่เลือก ── */
   const selBlock = selection ? blocks.find((b) => b.id === selection.blockId) ?? null : null;
@@ -1300,6 +1328,23 @@ export function WebsiteBuilder({
                           <span className="block text-[10px] text-slate-400 truncate">{t.hint}</span>
                         </span>
                       </div>
+                    ))}
+                    {presetsByGroup.get(group)?.map((pr) => (
+                      <button
+                        key={`preset-${pr.id}`}
+                        type="button"
+                        onClick={() => addPreset(pr)}
+                        title={`${pr.label} — ${pr.hint}\nกดเพื่อเพิ่มต่อท้าย (มีตัวอย่างให้แก้)`}
+                        className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-left hover:border-blue-400 hover:bg-blue-50/40"
+                      >
+                        <span className="text-base leading-none">{pr.icon}</span>
+                        <span className="min-w-0">
+                          <span className="block text-xs text-slate-800">
+                            {pr.label} <span className="ml-1 rounded bg-amber-100 px-1 text-[9px] text-amber-700">มีตัวอย่าง</span>
+                          </span>
+                          <span className="block text-[10px] text-slate-400 truncate">{pr.hint}</span>
+                        </span>
+                      </button>
                     ))}
                   </div>
                 </div>
