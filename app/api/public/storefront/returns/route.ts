@@ -11,21 +11,17 @@ import { overLimit } from "@/lib/rate-limit";
 import { verifyReviewToken } from "@/lib/review-token";
 import { returnPageData, submitReturn } from "@/lib/website-returns-server";
 import { cleanReturnInput, RETURN_MAX_IMAGES } from "@/lib/website-returns";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
 
 export const dynamic = "force-dynamic";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET, POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 const BAD_LINK = { error: "ลิงก์ใช้ไม่ได้หรือหมดอายุ — เปิดใหม่จากหน้าตามออเดอร์", errorEn: "This link is invalid or expired — open it again from the order tracking page." };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {

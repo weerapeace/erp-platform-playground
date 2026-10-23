@@ -7,19 +7,15 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { verifyPreviewKey } from "@/lib/storefront-preview-key";
+import { storefrontCors, corsPreflight } from "@/lib/storefront-cors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {

@@ -13,22 +13,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeContactInput } from "@/lib/website-contact";
 import { notifyEvent } from "@/lib/board-notify";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
+import { clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: Record<string, unknown>;
@@ -48,11 +46,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!v.ok) return json({ ok: false, error: v.error }, 400);
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, name, slug, status").eq("slug", slug).maybeSingle();
-  const s = shop as { id: string; name: string; slug: string; status: string } | null;
-  if (!s || s.status !== "active") return json({ ok: false, error: t("ไม่พบร้าน", "Shop not found") }, 404);
+  const s = await activeShopBySlug<{ id: string; name: string; slug: string }>(sb, slug, "id, name, slug");
+  if (!s) return json({ ok: false, error: t("ไม่พบร้าน", "Shop not found") }, 404);
 
-  const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || request.headers.get("x-real-ip") || "";
+  const ip = clientIp(request);
   const ipHash = ip ? createHash("sha256").update(`${s.id}:${ip}`).digest("hex").slice(0, 32) : null;
   const hourAgo = new Date(Date.now() - 3600_000).toISOString();
   const dayAgo = new Date(Date.now() - 86400_000).toISOString();

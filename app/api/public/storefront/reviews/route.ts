@@ -15,27 +15,23 @@ import { readSiteInfo } from "@/lib/website-site-info";
 import { verifyReviewToken } from "@/lib/review-token";
 import { orderReviewItems, publicReviews, submitReviews, type SubmitEntry } from "@/lib/website-reviews-server";
 import { cleanAuthor, cleanEntry, REVIEW_MAX_IMAGES } from "@/lib/website-reviews";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET, POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200, cache = "no-store") => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": cache } });
+const json = corsJson(CORS);
 
 async function loadShop(slug: string) {
   const sb = supabaseAdmin();
-  const { data } = await sb.from("shops").select("id, status").eq("slug", slug).maybeSingle();
-  const s = data as { id: string; status: string } | null;
-  if (!s || s.status !== "active") return null;
+  const s = await activeShopBySlug(sb, slug);
+  if (!s) return null;
   return { sb, shopId: s.id };
 }
 

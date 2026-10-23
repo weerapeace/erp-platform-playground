@@ -23,19 +23,16 @@ import { customerLang } from "@/lib/customer-messages";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { issueReviewToken } from "@/lib/review-token";
 import { REVIEWABLE_ORDER_STATUSES } from "@/lib/website-reviews";
+import { storefrontCors, corsPreflight } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET, POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
 const json = (body: unknown, status = 200) =>
@@ -43,9 +40,8 @@ const json = (body: unknown, status = 200) =>
 
 async function loadShop(slug: string) {
   const sb = supabaseAdmin();
-  const { data } = await sb.from("shops").select("id, slug, status, field_map").eq("slug", slug).maybeSingle();
-  const s = data as { id: string; slug: string; status: string; field_map: unknown } | null;
-  if (!s || s.status !== "active") return null;
+  const s = await activeShopBySlug<{ id: string; slug: string; field_map: unknown }>(sb, slug, "id, slug, field_map");
+  if (!s) return null;
   return { sb, shop: s };
 }
 

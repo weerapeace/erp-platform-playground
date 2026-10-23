@@ -10,20 +10,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { allowDraftPreview } from "@/lib/storefront-preview-access";
 import { dropPageLayout } from "@/lib/website-drop-page";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { shopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET");
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -37,9 +34,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!UUID_RE.test(id)) return json({ layout: null });
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, status").eq("slug", slug).maybeSingle();
-  if (!shop) return json({ error: "ไม่พบร้าน" }, 404);
-  const s = shop as { id: string; status: string };
+  const s = await shopBySlug<{ id: string; status: string }>(sb, slug, "id, status");
+  if (!s) return json({ error: "ไม่พบร้าน" }, 404);
   if (s.status !== "active" && !preview) return json({ layout: null });
 
   const { data } = await sb.from("store_new_drops").select("layout, draft_layout").eq("id", id).eq("shop_id", s.id).maybeSingle();

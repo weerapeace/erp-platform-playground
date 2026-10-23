@@ -7,21 +7,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { cleanSearchTerm } from "@/lib/website-search-terms";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const limited = await overLimit(request, [{ name: "search-log:ip", limit: 60, windowSec: 600 }]);
@@ -36,9 +33,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const q = cleanSearchTerm(body.q);
   if (!q) return json({ ok: true, skipped: true });
   const sb = supabaseAdmin();
-  const { data } = await sb.from("shops").select("id, status").eq("slug", String(body.shop ?? "").trim()).maybeSingle();
-  const shop = data as { id: string; status: string } | null;
-  if (!shop || shop.status !== "active") return json({ ok: false }, 404);
+  const shop = await activeShopBySlug(sb, body.shop);
+  if (!shop) return json({ ok: false }, 404);
   const results = Math.max(0, Math.min(100000, Math.round(Number(body.results) || 0)));
   const { error } = await sb.rpc("store_search_log" as never, { p_shop: shop.id, p_q: q, p_results: results } as never);
   if (error) console.error("[search-log]", error.message);

@@ -8,21 +8,18 @@ import { overLimit } from "@/lib/rate-limit";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { issueReviewToken } from "@/lib/review-token";
 import { findReviewableOrder } from "@/lib/website-reviews-server";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const limited = await overLimit(request, [{ name: "review-verify:ip", limit: 10, windowSec: 600 }]);
@@ -34,9 +31,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return json({ ok: false, error: "ข้อมูลไม่ถูกต้อง", errorEn: "Invalid request." }, 400);
   }
   const sb = supabaseAdmin();
-  const { data } = await sb.from("shops").select("id, status").eq("slug", String(body.shop ?? "").trim()).maybeSingle();
-  const shop = data as { id: string; status: string } | null;
-  if (!shop || shop.status !== "active") return json({ ok: false, error: "ไม่พบร้าน", errorEn: "Shop not found." }, 404);
+  const shop = await activeShopBySlug(sb, body.shop);
+  if (!shop) return json({ ok: false, error: "ไม่พบร้าน", errorEn: "Shop not found." }, 404);
   const info = await readSiteInfo(sb, shop.id);
   if (!info.reviews_enabled) return json({ ok: false, error: "ร้านนี้ยังไม่เปิดรีวิว", errorEn: "Reviews are not enabled for this shop." }, 403);
   const r = await findReviewableOrder(sb, shop.id, String(body.no ?? ""), String(body.phone ?? ""));

@@ -16,20 +16,17 @@ import { overLimit } from "@/lib/rate-limit";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { buildBeltBuilderPayload, ENGRAVING_FONTS, ENGRAVING_POSITIONS } from "@/lib/belt-builder-public";
 import { GENDERS, pickSizeRule, strapLengthCm, totalPrice, type Gender } from "@/lib/belt-builder";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET, POST");
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 /** ตัวอักษรที่สลักได้ (ชุดเดียวกับปั๊มชื่อ lib/website-personalize) */
 const ENGRAVE_ALLOWED_G = /[^A-Za-z0-9 &_\-.,/]/g;
@@ -37,9 +34,8 @@ const isUuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{
 
 async function loadShop(slug: string) {
   const sb = supabaseAdmin();
-  const { data } = await sb.from("shops").select("id, slug, status").eq("slug", slug).maybeSingle();
-  const s = data as { id: string; slug: string; status: string } | null;
-  if (!s || s.status !== "active") return null;
+  const s = await activeShopBySlug<{ id: string; slug: string }>(sb, slug, "id, slug");
+  if (!s) return null;
   return { sb, shop: s };
 }
 

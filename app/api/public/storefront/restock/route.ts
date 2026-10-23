@@ -12,23 +12,20 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { normalizeRestockInput } from "@/lib/website-restock";
 import { customerLang } from "@/lib/customer-messages";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("POST");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: { shop?: string; productId?: string; option?: string; contactType?: string; contact?: string; name?: string; lang?: string };
@@ -48,9 +45,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!v.ok) return json({ ok: false, error: v.error }, 400);
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, status").eq("slug", slug).maybeSingle();
-  const s = shop as { id: string; status: string } | null;
-  if (!s || s.status !== "active") return json({ ok: false, error: "ไม่พบร้าน" }, 404);
+  const s = await activeShopBySlug(sb, slug);
+  if (!s) return json({ ok: false, error: "ไม่พบร้าน" }, 404);
 
   const { data: listing } = await sb.from("store_listings").select("is_published, web_stock_status").eq("shop_id", s.id).eq("parent_sku_id", productId).maybeSingle();
   const l = listing as { is_published: boolean; web_stock_status: string | null } | null;

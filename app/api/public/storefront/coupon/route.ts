@@ -10,20 +10,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { checkCoupon } from "@/lib/website-coupons-db";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const CORS = storefrontCors("POST");
+const json = corsJson(CORS);
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -42,9 +39,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(subtotal >= 0) || subtotal > 10_000_000) return json({ ok: false, error: "ยอดสินค้าไม่ถูกต้อง" }, 400);
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, status").eq("slug", slug).maybeSingle();
-  const s = shop as { id: string; status: string } | null;
-  if (!s || s.status !== "active") return json({ ok: false, error: "ไม่พบร้าน" }, 404);
+  const s = await activeShopBySlug(sb, slug);
+  if (!s) return json({ ok: false, error: "ไม่พบร้าน" }, 404);
 
   const r = await checkCoupon(sb, s.id, body.code, subtotal, body.phone);
   if (!r.ok) return json({ ok: false, error: r.error });

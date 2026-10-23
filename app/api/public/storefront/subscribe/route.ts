@@ -9,22 +9,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // 🔒 กันยิงรัว (lib/rate-limit · audit 2026-10-21)
@@ -43,9 +40,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return json({ ok: false, error: "รูปแบบอีเมลไม่ถูกต้อง" }, 400);
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, status").eq("slug", slug).maybeSingle();
-  const s = shop as { id: string; status: string } | null;
-  if (!s || s.status !== "active") return json({ ok: false, error: "ไม่พบร้าน" }, 404);
+  const s = await activeShopBySlug(sb, slug);
+  if (!s) return json({ ok: false, error: "ไม่พบร้าน" }, 404);
 
   const { error } = await sb.from("store_subscribers").upsert({ shop_id: s.id, email, source }, { onConflict: "shop_id,email", ignoreDuplicates: true });
   if (error) {

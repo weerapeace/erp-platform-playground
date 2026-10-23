@@ -15,21 +15,18 @@ import { allowDraftPreview } from "@/lib/storefront-preview-access";
 import { normalizeBlocks } from "@/lib/website-blocks";
 import { resolveForStorefront } from "@/lib/website-image-sets-db";
 import { cleanPageMeta, pageLive } from "@/lib/website-help-center";
+import { storefrontCors, corsPreflight } from "@/lib/storefront-cors";
+import { shopBySlug } from "@/lib/website-shop";
 
 const orUndef = (v: string) => v || undefined;
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
 /**
@@ -51,9 +48,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!shopSlug) return json({ error: "ต้องระบุ shop" }, 400);
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, status").eq("slug", shopSlug).maybeSingle();
-  if (!shop) return json({ error: "ไม่พบร้าน" }, 404);
-  const s = shop as { id: string; status: string };
+  const s = await shopBySlug<{ id: string; status: string }>(sb, shopSlug, "id, status");
+  if (!s) return json({ error: "ไม่พบร้าน" }, 404);
   if (s.status !== "active") return json({ pages: [] });
 
   // 📝 รายการบทความ (บล็อก)

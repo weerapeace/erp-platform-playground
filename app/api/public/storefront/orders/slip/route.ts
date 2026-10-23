@@ -15,23 +15,20 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { submitSlip } from "@/lib/website-payments-server";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 30;
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // 🔒 กันยิงรัว (lib/rate-limit · audit 2026-10-21)
@@ -49,9 +46,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(file instanceof File)) return json({ ok: false, error: "ไม่พบไฟล์สลิป", errorEn: "No slip file received." }, 400);
 
   const sb = supabaseAdmin();
-  const { data: shop } = await sb.from("shops").select("id, status").eq("slug", slug).maybeSingle();
-  const s = shop as { id: string; status: string } | null;
-  if (!s || s.status !== "active") return json({ ok: false, error: "ไม่พบร้าน", errorEn: "Shop not found." }, 404);
+  const s = await activeShopBySlug(sb, slug);
+  if (!s) return json({ ok: false, error: "ไม่พบร้าน", errorEn: "Shop not found." }, 404);
 
   const info = await readSiteInfo(sb, s.id);
   const r = await submitSlip(sb, {

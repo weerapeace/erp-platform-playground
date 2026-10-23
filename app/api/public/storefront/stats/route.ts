@@ -9,21 +9,18 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { overLimit } from "@/lib/rate-limit";
 import { cleanStatEvents } from "@/lib/website-web-stats";
 import { maybeRunWebshopReminders } from "@/lib/webshop-reminders-db";
+import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
+import { activeShopBySlug } from "@/lib/website-shop";
 
 export const dynamic = "force-dynamic";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("POST");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
-const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { ...CORS, "Cache-Control": "no-store" } });
+const json = corsJson(CORS);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const limited = await overLimit(request, [{ name: "web-stats:ip", limit: 240, windowSec: 600 }]);
@@ -38,9 +35,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const events = cleanStatEvents(body.ev);
   if (!events.length) return json({ ok: true, skipped: true });
   const sb = supabaseAdmin();
-  const { data } = await sb.from("shops").select("id, status").eq("slug", String(body.shop ?? "").trim()).maybeSingle();
-  const shop = data as { id: string; status: string } | null;
-  if (!shop || shop.status !== "active") return json({ ok: false }, 404);
+  const shop = await activeShopBySlug(sb, body.shop);
+  if (!shop) return json({ ok: false }, 404);
   const { error } = await sb.rpc("store_web_stat_bump" as never, { p_shop: shop.id, p_events: events } as never);
   if (error) console.error("[web-stats]", error.message);
   // 🔔 รอบเตือนตะกร้าค้าง/ของถูกใจลดราคา — อาศัยจังหวะที่มีคนเข้าเว็บ (ห่างกัน ≥ 30 นาที/ร้าน · lib/webshop-reminders-db)

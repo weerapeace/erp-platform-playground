@@ -48,20 +48,16 @@ import { withParentCategories } from "@/lib/website-category-tree";
 import { findMaterialLinks, MATERIAL_SELECT, type MaterialRow } from "@/lib/product-materials";
 import { cleanListingSeo, cleanRelatedCodes } from "@/lib/website-listing-patch";
 import { ratingSummaries } from "@/lib/website-reviews-server";
+import { storefrontCors, corsPreflight } from "@/lib/storefront-cors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // อ่านอย่างเดียว + เป็นข้อมูลที่ตั้งใจเผยแพร่อยู่แล้ว → อนุญาตทุกโดเมน แต่ห้ามส่ง cookie/credential
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+const CORS = storefrontCors("GET");
 
 export async function OPTIONS(): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return corsPreflight(CORS);
 }
 
 const json = (body: unknown, status = 200) =>
