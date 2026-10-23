@@ -375,7 +375,8 @@ export function ERPModal({
     return () => document.removeEventListener("keydown", handler);
   }, [open, handleClose]);
 
-  const backdropDismiss = useBackdropDismiss(closeOnBackdrop && !hasUnsavedChanges ? onClose : handleClose);
+  // closeOnBackdrop=false = กดนอกกล่องไม่ปิดจริง (เดิมยังปิดได้ถ้าไม่มีข้อมูลค้าง) — ป๊อปยืนยันอันตราย/ป๊อปที่ต้องกดปุ่ม · ปุ่ม ✕ / Esc ยังปิดได้
+  const backdropDismiss = useBackdropDismiss(!closeOnBackdrop ? undefined : hasUnsavedChanges ? handleClose : onClose);
 
   if (!mounted || !open) return null;
 

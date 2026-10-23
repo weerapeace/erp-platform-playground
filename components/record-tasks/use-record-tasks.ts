@@ -44,12 +44,13 @@ export function useRecordTasks({ moduleKey, recordId = null, recordType = null, 
 
   useEffect(() => { if (enabled) void load(); }, [enabled, load]);
 
-  const add = async (title: string): Promise<boolean> => {
+  /** เพิ่มข้อ (ใส่ผู้รับผิดชอบพร้อมกันได้ — กระดิ่งเด้งบอกคนนั้น) */
+  const add = async (title: string, assignee: { id: string; name: string } | null = null): Promise<boolean> => {
     const t = title.trim(); if (!t) return false;
     try {
       const j = await apiFetch("/api/record-tasks", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ module_key: moduleKey, record_id: recordId, record_type: recordType, title: t, actor: user?.name }),
+        body: JSON.stringify({ module_key: moduleKey, record_id: recordId, record_type: recordType, title: t, actor: user?.name, assigned_to: assignee?.id ?? null }),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       update((p) => [...p, j.data as RecordTask]);
@@ -77,13 +78,23 @@ export function useRecordTasks({ moduleKey, recordId = null, recordType = null, 
     } catch { update((p) => p.map((x) => (x.id === it.id ? it : x))); toast.error("แก้ข้อความไม่สำเร็จ"); }
   };
 
+  /** เปลี่ยนผู้รับผิดชอบ (null = ไม่ระบุ) — คนใหม่ได้กระดิ่งเด้งบอก */
+  const assign = async (it: RecordTask, who: { id: string; name: string } | null) => {
+    if ((who?.id ?? null) === (it.assigned_to ?? null)) return;
+    update((p) => p.map((x) => (x.id === it.id ? { ...x, assigned_to: who?.id ?? null, assigned_name: who?.name ?? null } : x)));
+    try {
+      const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assigned_to: who?.id ?? null, actor: user?.name }) });
+      if (!r.ok) throw new Error();
+    } catch { update((p) => p.map((x) => (x.id === it.id ? it : x))); toast.error("เปลี่ยนผู้รับผิดชอบไม่สำเร็จ"); }
+  };
+
   const remove = async (it: RecordTask) => {
     update((p) => p.filter((x) => x.id !== it.id));
     try { const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "DELETE" }); if (!r.ok) throw new Error(); }
     catch { toast.error("ลบไม่สำเร็จ"); void load(); }
   };
 
-  return { items, loading, loaded, load, add, toggle, rename, remove };
+  return { items, loading, loaded, load, add, toggle, rename, assign, remove };
 }
 
 /** "เมื่อสักครู่ / 5 นาทีที่แล้ว / 23 ต.ค." */

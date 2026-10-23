@@ -11,12 +11,14 @@ import { ERPModal } from "@/components/modal";
 import { ERPInput, ERPTextarea, ERPTime24 } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
+import { WorkPopupBody } from "@/components/work-popup";
 import { apiFetch } from "@/lib/api";
 import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, sourceDef,
-  type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput,
+  normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, sourceDef,
+  type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportPopup,
 } from "@/lib/email-report/shared";
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
@@ -26,7 +28,7 @@ export const emptyReportInput = (): EmailReportInput => ({
   name: "", source_key: EMAIL_REPORT_SOURCES[0].key,
   filters: { brand_group: "all", brand_ids: [], statuses: [] },
   options: normalizeReportOptions(EMAIL_REPORT_SOURCES[0].key, {}),
-  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], discord: normalizeReportDiscord({}), skip_if_empty: true, is_enabled: false,
+  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], discord: normalizeReportDiscord({}), popup: normalizeReportPopup({}), skip_if_empty: true, is_enabled: false,
 });
 
 export function toInput(r: EmailReport): EmailReportInput {
@@ -34,7 +36,7 @@ export function toInput(r: EmailReport): EmailReportInput {
     name: r.name, source_key: r.source_key,
     filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [] },
     options: normalizeReportOptions(r.source_key, r.options),   // รายงานเก่า = เติมค่าเริ่มต้น (หน้าตาเดิม)
-    days: r.days, send_time: r.send_time, recipients: r.recipients, discord: normalizeReportDiscord(r.discord),
+    days: r.days, send_time: r.send_time, recipients: r.recipients, discord: normalizeReportDiscord(r.discord), popup: normalizeReportPopup(r.popup),
     skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
   };
 }
@@ -96,11 +98,31 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
     } catch (e) { setImg({ url: null, busy: false, err: e instanceof Error ? e.message : "วาดรูปไม่สำเร็จ" }); }
   };
 
+  // 🔔 ป๊อปตอนเข้า ERP: ตำแหน่ง (โหลดเมื่อเปิดใช้) + ตัวอย่างป๊อป (ข้อมูลจริงตอนนี้)
+  const popupOn = form.popup.enabled;
+  const [roles, setRoles] = useState<{ key: string; label: string; user_count: number }[] | null>(null);
+  useEffect(() => {
+    if (!open || !popupOn || roles) return;
+    apiFetch("/api/admin/roles").then((r) => r.json()).then((j) => setRoles(Array.isArray(j.roles) ? j.roles : [])).catch(() => setRoles([]));
+  }, [open, popupOn, roles]);
+  const [popPrev, setPopPrev] = useState<{ data: WorkPopupPayload | null; busy: boolean; err: string | null }>({ data: null, busy: false, err: null });
+  useEffect(() => { if (!open) setPopPrev({ data: null, busy: false, err: null }); }, [open]);
+  const showPopup = async () => {
+    setPopPrev((s) => ({ ...s, busy: true, err: null }));
+    try {
+      const r = await apiFetch("/api/admin/email-reports/preview?format=popup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "โหลดตัวอย่างป๊อปไม่สำเร็จ");
+      setPopPrev({ data: j.data as WorkPopupPayload, busy: false, err: null });
+    } catch (e) { setPopPrev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่างป๊อปไม่สำเร็จ" }); }
+  };
+
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const set = (p: Partial<EmailReportInput>) => { setForm((f) => ({ ...f, ...p })); setError(null); };
   const setFilters = (p: Partial<EmailReportInput["filters"]>) => set({ filters: { ...form.filters, ...p } });
   const setOptions = (p: Partial<EmailReportInput["options"]>) => set({ options: { ...form.options, ...p } });
   const setDiscord = (p: Partial<EmailReportDiscord>) => set({ discord: { ...form.discord, ...p } });
+  const setPopup = (p: Partial<EmailReportPopup>) => set({ popup: { ...form.popup, ...p } });
   const src = sourceDef(form.source_key);
   const opt = form.options;
   // ใส่ {คำ} ต่อท้ายหัวเรื่อง
@@ -351,6 +373,88 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
                     <img src={img.url} alt="รูปรายงานที่จะส่งเข้า Discord" className="w-full" />
                   </a>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* 🔔 เด้งป๊อปตอนเข้า ERP — ข้อมูลชุดเดียวกับอีเมล · "งานของคุณ" ขึ้นก่อน — lib/email-report/popup + components/work-popup */}
+          <div className={`rounded-lg border p-3 text-sm ${popupOn ? "border-amber-200 bg-amber-50/30" : "border-slate-200"}`}>
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-700">
+              <input type="checkbox" checked={popupOn} onChange={(e) => setPopup({ enabled: e.target.checked })} className="h-4 w-4" />
+              🔔 เด้งป๊อปตอนเข้า ERP <span className="font-normal text-slate-400">(ข้อมูลเดียวกับอีเมล · งานที่ใส่ชื่อคนนั้นขึ้นก่อน)</span>
+            </label>
+            {popupOn && (
+              <div className="mt-2 space-y-3">
+                <div>
+                  <label className={label}>เด้งให้ตำแหน่ง <span className="font-normal text-slate-400">(เห็นทั้งป๊อป)</span></label>
+                  {!roles ? <p className="text-xs text-slate-400">กำลังโหลดตำแหน่ง…</p> : (
+                    <div className="flex flex-wrap gap-1">
+                      {roles.map((r) => {
+                        const on = form.popup.roles.includes(r.key);
+                        return <button key={r.key} type="button" onClick={() => setPopup({ roles: on ? form.popup.roles.filter((k) => k !== r.key) : [...form.popup.roles, r.key] })}
+                          className={chip(on)}>{on ? "✓ " : ""}{r.label} <span className={on ? "text-white/70" : "text-slate-400"}>{r.user_count} คน</span></button>;
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className={label}>เพิ่มรายคน <span className="font-normal text-slate-400">(เห็นทั้งป๊อป)</span></label>
+                  {form.popup.users.length > 0 && (
+                    <div className="mb-1.5 flex flex-wrap gap-1.5">
+                      {form.popup.users.map((u) => (
+                        <span key={u.id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white py-0.5 pl-2 pr-1 text-xs text-slate-700">👤 {u.name || "ผู้ใช้"}
+                          <button type="button" onClick={() => setPopup({ users: form.popup.users.filter((x) => x.id !== u.id) })} aria-label={`เอา ${u.name} ออก`}
+                            className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700">✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <UserPicker value={null} placeholder="＋ เลือกผู้ใช้..."
+                    onChange={(u) => { if (u && !form.popup.users.some((x) => x.id === u.id)) setPopup({ users: [...form.popup.users, { id: u.id, name: u.name }] }); }} />
+                </div>
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-700">
+                  <input type="checkbox" checked={form.popup.assignees} onChange={(e) => setPopup({ assignees: e.target.checked })} className="mt-0.5 h-4 w-4" />
+                  <span>ผู้รับผิดชอบข้อที่ค้างใน "รออะไรอยู่" เห็นป๊อปด้วย <span className="text-slate-400">— เห็นเฉพาะงานของตัวเอง แม้ไม่อยู่ในตำแหน่งที่เลือก (แนะนำ)</span></span>
+                </label>
+                <div className="space-y-3">
+                  <div>
+                    <label className={label}>ช่วงเวลาที่เด้ง (ไทย) <span className="font-normal text-slate-400">· วัน = วันส่งด้านบน</span></label>
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                      <ERPTime24 value={form.popup.from} onChange={(v) => setPopup({ from: v })} /> ถึง <ERPTime24 value={form.popup.to === "24:00" ? "23:59" : form.popup.to} onChange={(v) => setPopup({ to: v })} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={label}>เด้งบ่อยแค่ไหน</label>
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" onClick={() => setPopup({ frequency: "daily" })} className={chip(form.popup.frequency === "daily")}>วันละครั้ง</button>
+                      <button type="button" onClick={() => setPopup({ frequency: "every" })} className={chip(form.popup.frequency === "every")}>ทุกครั้งที่เปิด ERP</button>
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">{form.popup.frequency === "daily" ? "กด \"รับทราบ\" แล้ววันนั้นไม่เด้งอีก · \"ไว้ทีหลัง\" = เด้งใหม่ตอนเปิด ERP ครั้งถัดไป" : "เด้งทุกครั้งที่เปิด ERP แท็บใหม่ในช่วงเวลานั้น"}</p>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                    <input type="checkbox" checked={form.popup.only_alert} onChange={(e) => setPopup({ only_alert: e.target.checked })} className="h-4 w-4" />
+                    เด้งเฉพาะวันที่มีงานเกิน/ใกล้กำหนด หรือมีของรอ
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                    <input type="checkbox" checked={form.popup.require_ack} onChange={(e) => setPopup({ require_ack: e.target.checked })} className="h-4 w-4" />
+                    ต้องกดปุ่ม (รับทราบ / ไว้ทีหลัง) — กดนอกกล่องแล้วไม่ปิด
+                  </label>
+                </div>
+                <div>
+                  <button type="button" onClick={() => void showPopup()} disabled={popPrev.busy}
+                    className="h-8 rounded-lg border border-amber-300 bg-white px-3 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50">
+                    {popPrev.busy ? "กำลังโหลด…" : popPrev.data ? "↻ โหลดตัวอย่างใหม่" : "👁 ดูตัวอย่างป๊อป"}</button>
+                  {popPrev.err && <p className="mt-1 text-xs text-rose-600">⚠ {popPrev.err}</p>}
+                  {popPrev.data && (
+                    <div className="mt-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <div className="mb-2 text-sm font-semibold text-slate-800">🔔 {popPrev.data.heading}</div>
+                      <WorkPopupBody data={popPrev.data} preview />
+                      <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-400">ตัวอย่างจากข้อมูลจริงตอนนี้ · "งานของคุณ" = ข้อที่ใส่ชื่อคุณ · คนที่ไม่ได้อยู่ในตำแหน่งที่เลือกแต่มีงานใส่ชื่อ จะเห็นแค่ส่วน "งานของคุณ"</p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

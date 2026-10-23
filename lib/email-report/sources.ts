@@ -12,6 +12,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { absoluteUrl } from "@/lib/app-url";
 import { loadChecklistSummaries } from "@/lib/record-tasks-server";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
+import { taskWithWho } from "@/lib/record-tasks";
 import { describeDays, normalizeReportOptions, type EmailReportFilters, type EmailReportInput, type ResolvedReportOptions } from "@/lib/email-report/shared";
 import { renderReportEmail, type BuiltReport, type ReportPart, type ReportRow, type ReportSection, type ReportStat, type ReportTone } from "@/lib/email-report/render";
 
@@ -135,7 +136,11 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
   const shownIds = picked.flatMap((p) => p.items.map((e) => e.s.id));
   // ใบที่มีเช็กลิสต์ค้าง (ทั้งรายงาน ไม่ใช่แค่ที่โชว์) เรียงตามความด่วน → การ์ดพร้อมปุ่มติ๊กใน Discord
   const checklistItems = list.filter((e) => waitingOf(e.s).length > 0).sort(byRank).slice(0, 25);
-  const coverIds = [...new Set([...(show.has("cover") ? shownIds : []), ...checklistItems.map((e) => e.s.id)])];
+  // 🔔 ป๊อปตอนเข้า ERP: เรียงตามความด่วนเสมอ (ไม่ขึ้นกับ "เรียงงานตาม" ของอีเมล) เกิน/ใกล้กำหนด → มีของรอ → ไม่ขยับนานสุด
+  const isUrgent = (e: Item) => e.daysLeft !== null && e.daysLeft <= dueSoon;
+  const urgency = (e: Item): [number, number] => (isUrgent(e) ? [0, e.daysLeft!] : waitingOf(e.s).length ? [1, -e.stale] : [2, -e.stale]);
+  const popupList = [...list].sort((a, b) => { const x = urgency(a), y = urgency(b); return x[0] - y[0] || x[1] - y[1]; }).slice(0, 300);
+  const coverIds = [...new Set([...(show.has("cover") ? shownIds : []), ...checklistItems.map((e) => e.s.id), ...popupList.slice(0, 10).map((e) => e.s.id)])];
   const covers = coverIds.length ? await designSheetCoverMap(admin, coverIds) : new Map<string, string>();
   const creatorIds = show.has("creator") ? [...new Set(picked.flatMap((p) => p.items.map((e) => e.s.created_by)).filter((x): x is string => !!x))] : [];
   const creators = new Map<string, string>();
@@ -154,7 +159,8 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
       else if (k === "order_date" && s.order_date) parts.push({ kind: "meta", text: `สั่ง ${thShort(s.order_date)}` });
       else if (k === "creator" && s.created_by && creators.get(s.created_by)) parts.push({ kind: "meta", text: `โดย ${creators.get(s.created_by)}` });
       else if (k === "waiting_for") {
-        const w = waitingOf(s).map((x) => oneLine(x, 60)).filter((x): x is string => !!x);
+        const who = waiting.get(s.id)?.who ?? [];
+        const w = waitingOf(s).map((x, i) => { const t = oneLine(x, 60); return t ? taskWithWho(t, who[i], " — ") : null; }).filter((x): x is string => !!x);
         if (w.length) parts.push({ kind: "tag", text: `รอ: ${w.slice(0, 3).join(" · ")}${w.length > 3 ? ` +${w.length - 3}` : ""}` });
       }
       else if (k === "note") { const t = oneLine(s.note, 90); if (t) parts.push({ kind: "note", text: t }); }
@@ -227,19 +233,39 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
         };
       }),
     },
+    popup: {
+      viewAllPath: "/master/design-dashboard",
+      items: popupList.map((e) => {
+        const cover = covers.get(e.s.id) ?? null;
+        const who = waiting.get(e.s.id)?.who ?? [];
+        return {
+          id: e.s.id, title: e.s.name, code: e.s.code, path: `/master/design-dashboard?open=${encodeURIComponent(e.s.id)}`,
+          imageUrl: cover ? withImageWidth(cover, 160) : null, flag: e.flag, urgent: isUrgent(e), overdue: e.daysLeft !== null && e.daysLeft < 0,
+          waiting: waitingOf(e.s).map((t, i) => taskWithWho(oneLine(t, 60) ?? t, who[i], " — ")),
+        };
+      }),
+    },
   };
 };
+
+/** แหล่งข้อมูลไหนมีเช็กลิสต์ "รออะไรอยู่" (ป๊อปเช็กก่อนว่าคนนี้มีงานค้างไหม ก่อนประกอบรายงานทั้งก้อน) */
+export const SOURCE_CHECKLIST_MODULE: Record<string, string> = { design_sheets_pending: DESIGN_WAITING.moduleKey };
 
 const SOURCES: Record<string, SourceFn> = {
   design_sheets_pending: designSheetsPending,
 };
 
-/** ประกอบรายงาน + แปลงเป็นอีเมล (ใช้ทั้ง "ดูตัวอย่าง" และการส่งจริง) · options จาก DB ผ่านการเติมค่าเริ่มต้นก่อนเสมอ */
-export async function buildReportEmail(admin: Admin, report: Pick<EmailReportInput, "name" | "source_key" | "filters" | "options" | "days" | "send_time">, now = new Date()) {
+/** ประกอบรายงาน (ข้อมูลล้วน ไม่ทำอีเมล) — ป๊อปตอนเข้า ERP ใช้ตัวนี้ */
+export async function buildReport(admin: Admin, report: Pick<EmailReportInput, "source_key" | "filters" | "options">): Promise<BuiltReport> {
   const fn = SOURCES[report.source_key];
   if (!fn) throw new Error(`ไม่รู้จักแหล่งข้อมูล ${report.source_key}`);
+  return fn(admin, report.filters ?? {}, normalizeReportOptions(report.source_key, report.options));
+}
+
+/** ประกอบรายงาน + แปลงเป็นอีเมล (ใช้ทั้ง "ดูตัวอย่าง" และการส่งจริง) · options จาก DB ผ่านการเติมค่าเริ่มต้นก่อนเสมอ */
+export async function buildReportEmail(admin: Admin, report: Pick<EmailReportInput, "name" | "source_key" | "filters" | "options" | "days" | "send_time">, now = new Date()) {
   const options = normalizeReportOptions(report.source_key, report.options);
-  const built = await fn(admin, report.filters ?? {}, options);
+  const built = await buildReport(admin, report);
   const email = renderReportEmail(built, {
     reportName: report.name,
     scheduleLabel: `${describeDays(report.days)} · ${report.send_time} น.`,

@@ -133,7 +133,10 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
             {has("waiting") && waiting.length > 0 && (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12.5px] leading-snug text-amber-800">
                 <span className="font-semibold">⏳ {t("รออยู่", "Waiting")}</span>
-                <ul className="mt-0.5 space-y-0.5">{waiting.slice(0, 6).map((w, i) => <li key={i}>☐ {w}</li>)}</ul>
+                <ul className="mt-0.5 space-y-0.5">{waiting.slice(0, 6).map((w, i) => {
+                  const who = sheet.waiting_items?.who?.[i];
+                  return <li key={i}>☐ {w}{who && <span className="text-amber-600"> — {who}</span>}</li>;
+                })}</ul>
                 {waiting.length > 6 && <div className="text-[11px] text-amber-600">+{waiting.length - 6} {t("ข้อ", "more")}</div>}
               </div>
             )}

@@ -22,12 +22,15 @@ import { DiscordSetupGuide } from "./discord-setup-guide";
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok" });
 const GROUP_TEXT: Record<string, string> = { all: "ทุกแบรนด์", customer: "งานลูกค้า", own: "แบรนด์เรา" };
+type PopupAck = { report_id: string; action: "ack" | "later"; acked_at: string; name: string };
+const nameList = (xs: PopupAck[]) => `${xs.slice(0, 4).map((a) => a.name).join(", ")}${xs.length > 4 ? ` +${xs.length - 4}` : ""}`;
 
 export default function EmailReportsPage() {
   const canManage = usePermission("admin.email_reports");
   const toast = useToast();
   const [reports, setReports] = useState<EmailReport[]>([]);
   const [runs, setRuns] = useState<EmailReportRun[]>([]);
+  const [acks, setAcks] = useState<PopupAck[]>([]);
   const [emailReady, setEmailReady] = useState(false);
   const [emailInfo, setEmailInfo] = useState<{ provider: "resend" | "gmail" | null; sender: string | null; scheduler: boolean }>({ provider: null, sender: null, scheduler: false });
   const [sending, setSending] = useState<string | null>(null);              // `${id}:test` / `${id}:now`
@@ -46,7 +49,7 @@ export default function EmailReportsPage() {
       const res = await apiFetch("/api/admin/email-reports");
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
-      setReports(j.data as EmailReport[]); setRuns(j.runs as EmailReportRun[]); setEmailReady(!!j.email_ready);
+      setReports(j.data as EmailReport[]); setRuns(j.runs as EmailReportRun[]); setAcks((j.popup_acks ?? []) as PopupAck[]); setEmailReady(!!j.email_ready);
       setEmailInfo({ provider: j.email_provider ?? null, sender: j.email_sender ?? null, scheduler: !!j.scheduler_active });
     } catch (e) { setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่"); }
     finally { setLoading(false); }
@@ -169,10 +172,21 @@ export default function EmailReportsPage() {
                         {" · "}<b className="font-medium text-slate-700">{describeDays(r.days)} · {r.send_time} น.</b>
                       </div>
                       <div className="mt-0.5 text-xs text-slate-500">
-                        ผู้รับ: {names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` และอีก ${names.length - 3} คน` : ""}` : r.discord?.enabled ? "— (ส่ง Discord อย่างเดียว)" : <span className="text-amber-700">ยังไม่มีผู้รับ</span>}
+                        ผู้รับ: {names.length ? `${names.slice(0, 3).join(", ")}${names.length > 3 ? ` และอีก ${names.length - 3} คน` : ""}` : r.discord?.enabled ? "— (ส่ง Discord อย่างเดียว)" : r.popup?.enabled ? "— (ป๊อปตอนเข้า ERP อย่างเดียว)" : <span className="text-amber-700">ยังไม่มีผู้รับ</span>}
                         {r.discord?.enabled && <span className="ml-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">💬 Discord #{r.discord.channel_name ?? "ห้อง"}</span>}
                         {" · "}ส่งล่าสุด: {lastRun ? <>{fmtDateTime(lastRun.ran_at)} <span className={`rounded px-1.5 py-0.5 text-[10px] ${RUN_STATUS_LABEL[lastRun.status]?.cls ?? ""}`}>{RUN_STATUS_LABEL[lastRun.status]?.label ?? lastRun.status}</span></> : "ยังไม่เคยส่ง"}
                       </div>
+                      {r.popup?.enabled && (() => {
+                        const mine = acks.filter((a) => a.report_id === r.id);
+                        const ok = mine.filter((a) => a.action === "ack"); const later = mine.filter((a) => a.action === "later");
+                        return (
+                          <div className="mt-0.5 text-xs text-slate-500">
+                            <span className="mr-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">🔔 ป๊อป {r.popup.from}–{r.popup.to} น.{r.popup.frequency === "every" ? " ทุกครั้ง" : ""}</span>
+                            วันนี้: {ok.length ? <span title={ok.map((a) => a.name).join(", ")}>รับทราบ {ok.length} คน ({nameList(ok)})</span> : "ยังไม่มีใครรับทราบ"}
+                            {later.length > 0 && <span title={later.map((a) => a.name).join(", ")}> · ไว้ทีหลัง {later.length} คน ({nameList(later)})</span>}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button role="switch" aria-checked={r.is_enabled} aria-label={r.is_enabled ? "ปิดรายงานนี้" : "เปิดรายงานนี้"} title={r.is_enabled ? "ปิดการส่งอัตโนมัติ" : "เปิดการส่งอัตโนมัติ"}

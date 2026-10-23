@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/toast";
 import { LanguageProvider } from "@/components/i18n";
 import { NavProgress } from "@/components/nav-progress";
 import { BackgroundTasksHost } from "@/components/background-tasks-host";
+import { WorkPopupHost } from "@/components/work-popup";
 import { BRAND } from "@/components/brand";
 
 export const metadata: Metadata = {
@@ -43,7 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="th">
       <body className="bg-slate-50 text-slate-900 antialiased">
         <NavProgress />
-        <AuthProvider><LanguageProvider><ToastProvider>{children}</ToastProvider></LanguageProvider></AuthProvider>
+        <AuthProvider><LanguageProvider><ToastProvider>{children}<WorkPopupHost /></ToastProvider></LanguageProvider></AuthProvider>
         <BackgroundTasksHost />
       </body>
     </html>

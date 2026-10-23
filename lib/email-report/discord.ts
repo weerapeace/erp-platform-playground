@@ -9,6 +9,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { DiscordError, discordDmChannel, discordReady, discordSend, type DiscordFile } from "@/lib/discord";
 import { checklistCardMessage, type ChecklistTask } from "@/lib/discord-checklist";
 import { renderReportPng } from "@/lib/email-report/image";
+import { userNames } from "@/lib/record-tasks-server";
 import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 import type { BuiltReport } from "@/lib/email-report/render";
 
@@ -41,9 +42,11 @@ export async function sendReportToDiscord(admin: Admin, report: Pick<EmailReport
   const records = cfg.max_cards > 0 ? (built.checklist?.records ?? []).slice(0, cfg.max_cards) : [];
   const tasksBy = new Map<string, ChecklistTask[]>();
   if (records.length && built.checklist) {
-    const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, status, resolved_by")
+    const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, status, resolved_by, assigned_to")
       .eq("module_key", built.checklist.moduleKey).in("record_id", records.map((r) => r.id)).order("created_at", { ascending: true });
-    for (const t of (data ?? []) as (ChecklistTask & { record_id: string })[]) (tasksBy.get(t.record_id) ?? tasksBy.set(t.record_id, []).get(t.record_id)!).push(t);
+    const rows = (data ?? []) as (ChecklistTask & { record_id: string; assigned_to: string | null })[];
+    const names = await userNames(admin, rows.map((t) => t.assigned_to));
+    for (const t of rows) (tasksBy.get(t.record_id) ?? tasksBy.set(t.record_id, []).get(t.record_id)!).push({ ...t, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null });
   }
   const cardRecords = records.filter((r) => (tasksBy.get(r.id) ?? []).length > 0);
 

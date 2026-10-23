@@ -13,6 +13,7 @@ import { DiscordError, discordEditOriginal, discordFollowup, discordVerify } fro
 import { checklistCardUpdate, type ChecklistTask } from "@/lib/discord-checklist";
 import { isTaskDone } from "@/lib/record-tasks";
 import { absoluteUrl } from "@/lib/app-url";
+import { userNames } from "@/lib/record-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -62,12 +63,18 @@ async function toggleTask(i: Interaction, taskId: string, discordUserId: string)
     return;
   }
   const userId = (link as { user_id: string }).user_id;
-  // 2) สิทธิ์ (กฎเดียวกับ erp_can — ฟังก์ชันใน DB)
-  const [{ data: can }, { data: prof }] = await Promise.all([
+  // 2) สิทธิ์ (กฎเดียวกับ erp_can — ฟังก์ชันใน DB) · ผู้รับผิดชอบติ๊กข้อของตัวเองได้เสมอ (กฎเดียวกับ PATCH /api/record-tasks/[id])
+  const [{ data: can }, { data: prof }, { data: task }] = await Promise.all([
     admin.rpc("erp_can_user", { p_user: userId, p_permission: "products.edit" }),
     admin.from("user_profiles").select("display_name, username, email").eq("id", userId).maybeSingle(),
+    admin.from("erp_record_tasks").select("id, module_key, record_id, title, status, assigned_to").eq("id", taskId).maybeSingle(),
   ]);
-  if (can !== true) {
+  if (!task) {
+    await discordFollowup(i.token, { content: "ข้อนี้ถูกลบไปแล้วในระบบ", flags: EPHEMERAL });
+    return;
+  }
+  const t = task as { id: string; module_key: string; record_id: string; title: string; status: string; assigned_to: string | null };
+  if (can !== true && t.assigned_to !== userId) {
     await discordFollowup(i.token, { content: "บัญชี ERP ของคุณไม่มีสิทธิ์แก้ใบงาน (products.edit) — ติดต่อแอดมิน", flags: EPHEMERAL });
     return;
   }
@@ -75,12 +82,6 @@ async function toggleTask(i: Interaction, taskId: string, discordUserId: string)
   const name = p.display_name || p.username || p.email || "ผู้ใช้";
 
   // 3) สลับสถานะ
-  const { data: task } = await admin.from("erp_record_tasks").select("id, module_key, record_id, title, status").eq("id", taskId).maybeSingle();
-  if (!task) {
-    await discordFollowup(i.token, { content: "ข้อนี้ถูกลบไปแล้วในระบบ", flags: EPHEMERAL });
-    return;
-  }
-  const t = task as { id: string; module_key: string; record_id: string; title: string; status: string };
   const next = isTaskDone(t.status) ? "open" : "resolved";
   const patch = { status: next, resolved_at: next === "resolved" ? new Date().toISOString() : null, resolved_by: next === "resolved" ? name : null };
   const { error } = await admin.from("erp_record_tasks").update(patch).eq("id", t.id);
@@ -88,10 +89,12 @@ async function toggleTask(i: Interaction, taskId: string, discordUserId: string)
   await writeAudit(admin, { action: "update", entityType: "record_task", entityId: t.id, actorId: userId, actorName: `${name} (Discord)`, metadata: { ...patch, title: t.title, via: "discord" } });
 
   // 4) แก้การ์ดเดิมให้เป็นสถานะล่าสุด (ทุกข้อของเรคคอร์ดนี้)
-  const { data: all } = await admin.from("erp_record_tasks").select("id, title, status, resolved_by")
+  const { data: all } = await admin.from("erp_record_tasks").select("id, title, status, resolved_by, assigned_to")
     .eq("module_key", t.module_key).eq("record_id", t.record_id).order("created_at", { ascending: true });
+  const rows = (all ?? []) as (ChecklistTask & { assigned_to: string | null })[];
+  const names = await userNames(admin, rows.map((r) => r.assigned_to));
   try {
-    await discordEditOriginal(i.token, checklistCardUpdate(i.message?.embeds?.[0], (all ?? []) as ChecklistTask[]));
+    await discordEditOriginal(i.token, checklistCardUpdate(i.message?.embeds?.[0], rows.map((r) => ({ ...r, assigned_name: r.assigned_to ? names.get(r.assigned_to) ?? null : null }))));
   } catch (e) {
     if (!(e instanceof DiscordError)) throw e;
     console.error("[discord] edit card", e.message);

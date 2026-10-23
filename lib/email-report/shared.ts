@@ -55,6 +55,8 @@ export type EmailReport = {
   recipients: EmailRecipient[];
   /** 💬 ส่งเข้า Discord ด้วย (normalizeReportDiscord) */
   discord: EmailReportDiscord;
+  /** 🔔 เด้งป๊อปตอนเข้า ERP (normalizeReportPopup) */
+  popup: EmailReportPopup;
   skip_if_empty: boolean;
   is_enabled: boolean;
   last_sent_on: string | null;
@@ -79,6 +81,44 @@ export type EmailReportDiscord = {
 };
 export const DISCORD_MENTION_LABEL: Record<EmailReportDiscord["mention"], string> = { overdue: "เมื่อมีงานเกินกำหนด", always: "ทุกครั้ง", never: "ไม่แท็ก" };
 const SNOWFLAKE = /^\d{15,25}$/;
+
+/** เด้งป๊อปตอนเข้า ERP — เนื้อหาจากรายงานเดียวกัน · "งานของคุณ" (ข้อที่ใส่ชื่อคนนั้น) ขึ้นก่อน — lib/email-report/popup */
+export type EmailReportPopup = {
+  enabled: boolean;
+  /** ตำแหน่ง (erp_roles.key) ที่เห็นป๊อป */
+  roles: string[];
+  /** รายคนเพิ่ม */
+  users: { id: string; name: string }[];
+  /** ช่วงเวลาที่เด้ง (เวลาไทย "HH:MM") · วัน = วันส่งของรายงาน */
+  from: string;
+  to: string;
+  /** daily = วันละครั้ง (กดรับทราบแล้ววันนั้นไม่เด้งอีก) · every = ทุกครั้งที่เปิด ERP */
+  frequency: "daily" | "every";
+  /** เด้งเฉพาะวันที่มีงานด่วน / ใกล้ครบ / ของรอ */
+  only_alert: boolean;
+  /** ต้องกด "รับทราบ" (กดนอกกล่องปิดไม่ได้) */
+  require_ack: boolean;
+  /** ผู้รับผิดชอบข้อที่ค้างเห็นป๊อป (เฉพาะงานของตัวเอง) แม้ไม่อยู่ในตำแหน่งที่เลือก */
+  assignees: boolean;
+};
+const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
+export function normalizeReportPopup(raw: unknown): EmailReportPopup {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const hm = (v: unknown, d: string) => { const s = String(v ?? "").slice(0, 5); return HM.test(s) || s === "24:00" ? s : d; };
+  const roles = Array.isArray(o.roles) ? [...new Set(o.roles.filter((k): k is string => typeof k === "string" && /^[A-Za-z0-9_]{1,40}$/.test(k)))].slice(0, 20) : [];
+  const users: { id: string; name: string }[] = [];
+  for (const x of Array.isArray(o.users) ? o.users : []) {
+    const u = (x ?? {}) as Record<string, unknown>;
+    if (typeof u.id === "string" && /^[0-9a-f-]{36}$/i.test(u.id) && !users.some((y) => y.id === u.id)) users.push({ id: u.id, name: String(u.name ?? "").slice(0, 120) });
+  }
+  const from = hm(o.from, "08:00"); let to = hm(o.to, "12:00");
+  if (to <= from) to = "24:00";
+  return {
+    enabled: o.enabled === true, roles, users: users.slice(0, 50), from, to,
+    frequency: o.frequency === "every" ? "every" : "daily",
+    only_alert: o.only_alert !== false, require_ack: o.require_ack !== false, assignees: o.assignees !== false,
+  };
+}
 export function normalizeReportDiscord(raw: unknown): EmailReportDiscord {
   const o = (raw ?? {}) as Record<string, unknown>;
   const id = (v: unknown) => (typeof v === "string" && SNOWFLAKE.test(v) ? v : null);
@@ -110,7 +150,7 @@ export type EmailReportRun = {
 };
 
 /** ค่าที่ฟอร์มส่งมา (ยังไม่มี id/เวลา) */
-export type EmailReportInput = Pick<EmailReport, "name" | "source_key" | "filters" | "options" | "days" | "send_time" | "recipients" | "discord" | "skip_if_empty" | "is_enabled">;
+export type EmailReportInput = Pick<EmailReport, "name" | "source_key" | "filters" | "options" | "days" | "send_time" | "recipients" | "discord" | "popup" | "skip_if_empty" | "is_enabled">;
 
 // ---- แหล่งข้อมูล (เพิ่มรายงานแบบใหม่ = เพิ่มที่นี่ + ตัวดึงข้อมูลใน lib/email-report/sources.ts) ----
 // แต่ละแหล่งประกาศเองว่า "เลือกโชว์อะไรได้บ้าง" — หน้าตั้งค่าอ่านจากที่นี่ ส่วนที่ติ๊ก/ลำดับเก็บใน email_reports.options
@@ -256,7 +296,10 @@ export function normalizeReportInput(raw: unknown): { value: EmailReportInput } 
 
   const options: EmailReportOptions = normalizeReportOptions(source_key, r.options);
 
-  return { value: { name, source_key, filters, options, days, send_time, recipients, discord, skip_if_empty: r.skip_if_empty !== false, is_enabled } };
+  const popup = normalizeReportPopup(r.popup);
+  if (popup.enabled && !popup.roles.length && !popup.users.length && !popup.assignees) return { error: "เปิดป๊อปแล้ว เลือกด้วยว่าจะเด้งให้ใคร (ตำแหน่ง / รายคน / ผู้รับผิดชอบ)" };
+
+  return { value: { name, source_key, filters, options, days, send_time, recipients, discord, popup, skip_if_empty: r.skip_if_empty !== false, is_enabled } };
 }
 
 export const RUN_STATUS_LABEL: Record<EmailReportRun["status"], { label: string; cls: string }> = {

@@ -2,15 +2,17 @@
 
 /**
  * เช็กลิสต์กลางแบบฝัง (ของกลาง) — ใช้ hook useRecordTasks ตัวเดียวกับ RecordTasksButton
- *   <RecordChecklist .../>     = ในฟอร์ม: ติ๊ก / กดข้อความเพื่อแก้ / ✕ ลบ / เพิ่ม + ปุ่มลัด "ใช้บ่อย" + พับข้อที่เสร็จ
- *   <RecordChecklistChip .../> = แถบเหลืองบนการ์ด "⏳ ข้อแรก +N" → กดแล้วเด้งกล่องติ๊ก/เพิ่ม (ไม่เปิดเรคคอร์ด · ไม่ลากการ์ด)
+ *   <RecordChecklist .../>     = ในฟอร์ม: ติ๊ก / กดข้อความเพื่อแก้ / ✕ ลบ / 👤 ผู้รับผิดชอบรายข้อ / เพิ่ม + ปุ่มลัด "ใช้บ่อย" + พับข้อที่เสร็จ
+ *   <RecordChecklistChip .../> = แถบเหลืองบนการ์ด "⏳ ข้อแรก · ชื่อคน +N" → กดแล้วเด้งกล่องติ๊ก/เพิ่ม (ไม่เปิดเรคคอร์ด · ไม่ลากการ์ด)
  * ค่าที่ใช้บ่อย = ค่ากลาง erp_lookups ชนิด presetType (⚙️ ข้างปุ่มลัด เปิดป๊อปแก้/ลากเรียง)
+ * ผู้รับผิดชอบ = ของกลาง UserPicker (เฉพาะคนที่ยังทำงานอยู่) · ใส่ชื่อแล้วกระดิ่งเด้งบอกคนนั้น + เห็นใน "งานของคุณ" ของป๊อปตอนเข้า ERP
  * ใช้แล้วที่: ใบงานออกแบบ "⏳ รออะไรอยู่" (lib/design-sheet-waiting) · doc: docs/record-tasks.md
  */
 import { useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { LookupValuesEditor, useLookupNames } from "@/components/lookup-values-editor";
-import { isTaskDone, summarizeTasks, type ChecklistSummary } from "@/lib/record-tasks";
+import { UserPicker } from "@/components/pickers";
+import { isTaskDone, summarizeTasks, taskWithWho, type ChecklistSummary } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { relTime, useRecordTasks } from "./use-record-tasks";
 
@@ -26,16 +28,43 @@ type Common = {
 const tickCls = (done: boolean) =>
   `mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] leading-none ${done ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300 bg-white text-transparent hover:border-emerald-400"}`;
 
+const AV_COLORS = ["#7F77DD", "#1D9E75", "#D85A30", "#378ADD", "#D4537E", "#639922", "#BA7517"];
+const avColor = (name: string) => AV_COLORS[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % AV_COLORS.length];
+
+/** ชิปผู้รับผิดชอบ — มีชื่อ = วงกลมตัวแรก + ชื่อ · ไม่มี = เส้นประ "👤 ใคร" */
+export function WhoChip({ name, onClick, compact = false }: { name: string | null | undefined; onClick?: () => void; compact?: boolean }) {
+  const cls = `inline-flex shrink-0 items-center gap-1 rounded-full border text-[11px] whitespace-nowrap ${compact ? "h-5" : "h-6"} ${onClick ? "cursor-pointer hover:bg-slate-50" : "cursor-default"}`;
+  const inner = name
+    ? <><span className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold text-white" style={{ backgroundColor: avColor(name) }}>{[...name][0]}</span><span className="max-w-[7rem] truncate pr-1.5 text-slate-700">{name}</span></>
+    : <span className="px-1.5 text-slate-400">👤 ใคร</span>;
+  return onClick
+    ? <button type="button" onClick={onClick} title={name ? `ผู้รับผิดชอบ: ${name} (กดเพื่อเปลี่ยน)` : "ใส่ผู้รับผิดชอบ"} className={`${cls} ${name ? "border-slate-200 pl-0.5" : "border-dashed border-slate-300"}`}>{inner}</button>
+    : <span className={`${cls} ${name ? "border-slate-200 pl-0.5" : "border-dashed border-slate-300"}`}>{inner}</span>;
+}
+
+/** เลือกผู้รับผิดชอบแบบเปิดในแถว (ไม่ซ้อน popover กับรายการของ UserPicker) */
+function WhoPicker({ onPick, onCancel, allowNone }: { onPick: (u: { id: string; name: string } | null) => void; onCancel: () => void; allowNone: boolean }) {
+  return (
+    <div className="ml-6 mt-1 flex flex-wrap items-center gap-1.5 rounded-md bg-slate-50 p-1.5">
+      <div className="min-w-[12rem] flex-1"><UserPicker value={null} onChange={(u) => { if (u) onPick({ id: u.id, name: u.name }); }} placeholder="พิมพ์ชื่อคนรับผิดชอบ…" /></div>
+      {allowNone && <button type="button" onClick={() => onPick(null)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-100">ไม่ระบุ</button>}
+      <button type="button" onClick={onCancel} className="h-8 rounded-md px-2 text-xs text-slate-500 hover:text-slate-800">ยกเลิก</button>
+    </div>
+  );
+}
+
 export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdit, onChange, presetType = null, label = null,
-  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย" }: Common & {
+  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true }: Common & {
   /** ชนิดค่ากลางของปุ่มลัด (null = ไม่มีปุ่มลัด) */
   presetType?: string | null;
   label?: ReactNode;
   emptyText?: string;
   placeholder?: string;
   presetTitle?: string;
+  /** ใส่ผู้รับผิดชอบรายข้อได้ */
+  assignable?: boolean;
 }) {
-  const { items, loading, loaded, add, toggle, rename, remove } = useRecordTasks({
+  const { items, loading, loaded, add, toggle, rename, assign, remove } = useRecordTasks({
     moduleKey, recordId, recordType, onChange: onChange ? (list) => onChange(summarizeTasks(list)) : undefined,
   });
   const presets = useLookupNames(presetType);
@@ -45,6 +74,8 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [presetOpen, setPresetOpen] = useState(false);
+  const [pickFor, setPickFor] = useState<string | null>(null);   // id ข้อที่กำลังเลือกคน · "new" = ข้อที่กำลังจะเพิ่ม
+  const [newWho, setNewWho] = useState<{ id: string; name: string } | null>(null);
 
   const openItems = items.filter((t) => !isTaskDone(t.status));
   const doneItems = items.filter((t) => isTaskDone(t.status));
@@ -53,9 +84,9 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
   const submit = async (t: string) => {
     if (!t.trim()) { setErr(true); return; }
     setBusy(true);
-    const ok = await add(t);
+    const ok = await add(t, newWho);
     setBusy(false);
-    if (ok && t === text) setText("");
+    if (ok) { if (t === text) setText(""); setNewWho(null); if (pickFor === "new") setPickFor(null); }
   };
   const commitEdit = () => { const e = editing; setEditing(null); if (e) { const it = items.find((x) => x.id === e.id); if (it) void rename(it, e.text); } };
 
@@ -63,7 +94,8 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
     const done = isTaskDone(it.status);
     const meta = (done ? ["✓", [it.resolved_by, relTime(it.resolved_at)].filter(Boolean).join(" · ")] : [[it.created_by, relTime(it.created_at)].filter(Boolean).join(" · ")]).join(" ");
     return (
-      <div key={it.id} className="group flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-slate-50">
+      <div key={it.id}>
+      <div className="group flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-slate-50">
         <button type="button" onClick={() => canEdit && void toggle(it)} disabled={!canEdit} className={tickCls(done)}
           title={done ? "ทำเครื่องหมายว่ายังรอ" : "ติ๊กว่าเสร็จ"} aria-label={done ? `ยกเลิกติ๊ก ${it.title}` : `ติ๊กเสร็จ ${it.title}`}>✓</button>
         <div className="min-w-0 flex-1">
@@ -77,11 +109,14 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
               className={`block w-full break-words text-left text-sm disabled:cursor-default ${done ? "text-slate-400 line-through" : "text-slate-700"}`}>{it.title}</button>
           )}
         </div>
-        <span className="mt-0.5 shrink-0 whitespace-nowrap text-[10px] text-slate-400">{meta}</span>
+        {assignable && (it.assigned_name || canEdit) && <WhoChip name={it.assigned_name} onClick={canEdit ? () => setPickFor(pickFor === it.id ? null : it.id) : undefined} />}
+        <span className="mt-0.5 hidden shrink-0 whitespace-nowrap text-[10px] text-slate-400 sm:inline">{meta}</span>
         {canEdit && (
           <button type="button" onClick={() => void remove(it)} title="ลบ" aria-label={`ลบ ${it.title}`}
             className="mt-0.5 shrink-0 px-0.5 text-xs text-slate-300 opacity-0 hover:text-rose-500 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100">✕</button>
         )}
+      </div>
+      {pickFor === it.id && <WhoPicker allowNone={!!it.assigned_to} onCancel={() => setPickFor(null)} onPick={(u) => { setPickFor(null); void assign(it, u); }} />}
       </div>
     );
   };
@@ -103,9 +138,11 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
               onChange={(e) => { setText(e.target.value); setErr(false); }}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(text); } }}
               className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            {assignable && <span className="flex items-center"><WhoChip name={newWho?.name} onClick={() => setPickFor(pickFor === "new" ? null : "new")} /></span>}
             <button type="button" onClick={() => void submit(text)} disabled={busy} className="h-8 shrink-0 rounded-md border border-slate-300 px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">เพิ่ม</button>
           </div>
         )}
+        {pickFor === "new" && <WhoPicker allowNone={!!newWho} onCancel={() => setPickFor(null)} onPick={(u) => { setNewWho(u); setPickFor(null); }} />}
         {err && <p className="px-2 pt-1 text-xs text-rose-600">พิมพ์ข้อความก่อน</p>}
         {canEdit && presetType && (
           <div className="flex flex-wrap items-center gap-1 px-1 pb-0.5 pt-1.5">
@@ -149,7 +186,7 @@ export function RecordChecklistChip({ moduleKey, recordType = null, recordId, ca
         title="กดเพื่อติ๊ก / เพิ่มสิ่งที่รอ"
         className="mt-1 inline-flex max-w-full items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 hover:bg-amber-100">
         <span className="shrink-0">⏳</span>
-        <span className="truncate">{summary.open[0] ?? "ไม่มีอะไรรอแล้ว"}</span>
+        <span className="truncate">{summary.open[0] ? taskWithWho(summary.open[0], summary.who?.[0]) : "ไม่มีอะไรรอแล้ว"}</span>
         {summary.open.length > 1 && <span className="shrink-0 font-semibold">+{summary.open.length - 1}</span>}
       </button>
       <FloatingDropdown anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} minWidth={240} maxWidth={320}>
@@ -180,6 +217,7 @@ function ChipPanel({ moduleKey, recordType, recordId, canEdit, onChange }: Commo
                 <button type="button" disabled={!canEdit} className={tickCls(done)} aria-label={done ? `ยกเลิกติ๊ก ${it.title}` : `ติ๊กเสร็จ ${it.title}`}
                   onClick={() => { setTouched((s) => new Set(s).add(it.id)); void toggle(it); }}>✓</button>
                 <span className={`min-w-0 flex-1 break-words ${done ? "text-slate-400 line-through" : "text-slate-700"}`}>{it.title}</span>
+                {it.assigned_name && <WhoChip name={it.assigned_name} compact />}
               </label>
             );
           })}
