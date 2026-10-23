@@ -210,6 +210,22 @@ export interface ChildSpec {
   blank?: () => Record<string, unknown>;
   /** ชิ้นตั้งต้นตอนวาง Section ใหม่ (แต่ละชิ้นต่างกันได้ · ทับค่าของ blank) — ไม่ใส่ = ชิ้นเปล่าเท่า min */
   starter?: () => Record<string, unknown>[];
+  /** ➕ ปุ่มเพิ่มแบบอื่นข้างปุ่ม "+ เพิ่ม<itemLabel>" (เช่น ＋ เพิ่มกรอบ) — preset ทับค่าของ blank · ใช้ ChildAddOption */
+  addOptions?: ChildAddOption[];
+  /** ป้ายต่อชิ้นตามชนิดของชิ้น (หัวแผงตั้งค่า "<ป้าย>: <สรุป>") — ไม่ใส่ = itemLabel ทุกชิ้น */
+  itemLabelOf?: (item: Record<string, unknown>) => string;
+}
+
+/** ปุ่มเพิ่มชิ้นย่อยอีกแบบ — label = ชื่อสิ่งที่เพิ่ม (ปุ่มโชว์ "+ เพิ่ม<label>") · preset = ค่าที่ทับชิ้นเปล่า */
+export interface ChildAddOption {
+  label: string;
+  icon?: string;
+  preset: () => Record<string, unknown>;
+}
+
+/** ชิ้นใหม่ตอนกดปุ่มเพิ่ม: ชิ้นเปล่าตาม schema + preset ของปุ่ม (ถ้ามี) */
+export function newChildValues(spec: ChildSpec, option?: ChildAddOption): Record<string, unknown> {
+  return { ...blankChild(spec), ...(option ? option.preset() : {}) };
 }
 
 /**
@@ -2937,6 +2953,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       ],
       summary: (it) => `${it.kind === "zone" ? `⬚ ${s(it.alt) || "กรอบล่องหน"}` : s(it.text) || "คำ"}${it.imageKey ? "" : " · ยังไม่มีรูป"}`,
       blank: () => ({ kind: "word", text: "NEW WORD", tag: "", imageKey: null, alt: "", href: "" }),
+      // ＋ เพิ่มกรอบ = กรอบล่องหนกลาง Section (เห็นทันทีในพรีวิว แล้วลากไปวาง) — ปุ่มหลัก "+ เพิ่มคำ" ยังเพิ่มคำเหมือนเดิม
+      addOptions: [{ label: "กรอบล่องหน", icon: "⬚", preset: () => ({ kind: "zone", text: "", x: 38, y: 35, w: 24, h: 30 }) }],
+      itemLabelOf: (it) => (it.kind === "zone" ? "กรอบล่องหน" : "คำ"),
       starter: () => [
         { text: "NEW ARRIVAL", href: "/shop" },
         { text: "BEST SELLER", href: "/shop" },

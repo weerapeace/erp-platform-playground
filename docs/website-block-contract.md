@@ -152,6 +152,8 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 ## 🖱️ Section "ข้อความใหญ่ + รูปตามเมาส์" (hover-reveal) — เพิ่ม 2026-10-23 · ดู `docs/website-hover-reveal.md`
 - ชนิดใหม่: `HoverRevealBlock` (ERP lib/website-blocks) · schema `"hover-reveal"` · เว็บร้าน `HoverReveal.tsx` ใน PURE_REGISTRY (พรีวิวสด) · CSS `.hr-*`
 - ชิ้นตั้งต้นตอนวาง Section ใหม่ = `ChildSpec.starter` (ของกลางใหม่ · newBlock ใช้แทนชิ้นเปล่าเท่า min) — Section อื่นใช้ได้
+- ปุ่มเพิ่มแบบอื่น = `ChildSpec.addOptions` [{label, icon, preset}] → ตัวจัดหน้าโชว์ "+ เพิ่ม<label>" ข้างปุ่มหลัก (ต้นไม้ + แผงขวา) · ชิ้นใหม่ = `newChildValues(spec, option)` · หัวแผงตามชนิด = `ChildSpec.itemLabelOf` — Section อื่นที่มีชิ้นหลายชนิดใช้ได้
+- ลาก/ย่อขยายชิ้นในพรีวิว = ข้อความ `storefront-child-place {blockId, childId, x, y, w, h}` → `childPlacePatch(spec, payload)` (รับเฉพาะช่องที่ชิ้นมี · บีบตาม schema)
 
 ## 🛍 ลุคบุ๊กกดซื้อได้ — ปรับเพิ่ม 2026-10-18 (ค่าเริ่มทุกช่อง = หน้าตาเดิม)
 - จุดละหลายสินค้า: `spots[].code` สูงสุด 6 (ตัวแรก = หลัก · การ์ดเลื่อนดู ‹ 1/3 ›) · `spots[].label` ป้ายข้างจุด (ว่าง = ชื่อสินค้า)

@@ -24,7 +24,7 @@
  *   ผืนผ้าใบอิสระ (canvas) คุยสดอีกชุด — ดู components/website-canvas-tools.tsx
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, blankChild, childPlacePatch, newChildId, sectionHasHeading, type ChildSpec } from "@/lib/website-schema";
+import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, childPlacePatch, newChildId, newChildValues, sectionHasHeading, type ChildAddOption, type ChildSpec } from "@/lib/website-schema";
 import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
@@ -407,11 +407,12 @@ export function WebsiteBuilder({
     patchBlock(id, { visibility: { ...ALL_VISIBLE, ...b.visibility, [key]: value } });
   };
 
-  const addChild = (blockId: string) => {
+  /** option = ปุ่มเพิ่มแบบอื่นของ schema (ChildSpec.addOptions เช่น ＋ เพิ่มกรอบ) · ไม่ส่ง = ชิ้นเปล่าแบบเดิม */
+  const addChild = (blockId: string, option?: ChildAddOption) => {
     const b = blocksRef.current.find((x) => x.id === blockId);
     const c = b && childrenOf(b);
     if (!b || !c || c.list.length >= c.spec.max) return;
-    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...blankChild(c.spec) };
+    const item: ChildBlock = { id: newChildId(c.spec.key), enabled: true, ...newChildValues(c.spec, option) };
     patchBlock(blockId, { [c.spec.key]: [...c.list, item] });
     setExpanded((s) => new Set(s).add(blockId));
     onSelect({ blockId, childId: item.id });
@@ -1240,10 +1241,15 @@ export function WebsiteBuilder({
                   <ul className="pb-1 space-y-0.5">
                     {c.list.map((it, idx) => childRow(b, c, it, idx))}
                     {drag?.kind === "child" && drag.blockId === b.id && childOver?.blockId === b.id && childOver.idx === c.list.length && <li className="h-1 rounded bg-blue-500 ml-7 mr-1" />}
-                    <li className="ml-7">
+                    <li className="ml-7 flex flex-wrap gap-x-3">
                       <button onClick={() => addChild(b.id)} disabled={c.list.length >= c.spec.max} className="text-[10px] text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">
                         + เพิ่ม{c.spec.itemLabel} ({c.list.length}/{c.spec.max})
                       </button>
+                      {c.spec.addOptions?.map((o) => (
+                        <button key={o.label} onClick={() => addChild(b.id, o)} disabled={c.list.length >= c.spec.max} className="text-[10px] text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">
+                          + {o.icon ? `${o.icon} ` : ""}เพิ่ม{o.label}
+                        </button>
+                      ))}
                     </li>
                   </ul>
                 )}
@@ -1408,7 +1414,7 @@ export function WebsiteBuilder({
         <button onClick={() => onSelect({ blockId: selBlock.id })} className="text-[11px] text-slate-500 hover:text-blue-600">← {selSchema.meta.icon} {selSchema.meta.label}</button>
         <div className="flex items-center gap-1 mt-0.5">
           <span className="text-base">{selSchema.children!.icon}</span>
-          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate">{selSchema.children!.itemLabel}: {selSchema.children!.summary(selChild) || "—"}</span>
+          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate">{selSchema.children!.itemLabelOf?.(selChild) ?? selSchema.children!.itemLabel}: {selSchema.children!.summary(selChild) || "—"}</span>
           <button onClick={() => patchChild(selBlock.id, selChild.id, { enabled: selChild.enabled === false })} title={selChild.enabled === false ? "แสดง" : "ซ่อน"} className={iconBtn}>{selChild.enabled === false ? "🚫" : "👁️"}</button>
           <button onClick={() => duplicateChild(selBlock.id, selChild.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
           <button onClick={() => removeChild(selBlock.id, selChild.id)} title="ลบ (Delete)" className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
@@ -1474,6 +1480,11 @@ export function WebsiteBuilder({
               <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
                 {selSchema.children.icon} {selSchema.children.label}: {childrenOf(selBlock)?.list.length ?? 0} รายการ — แก้ทีละชิ้นจากต้นไม้ทางซ้าย (กด ▸)
                 <button onClick={() => addChild(selBlock.id)} className="ml-2 text-blue-600 hover:underline">+ เพิ่ม{selSchema.children.itemLabel}</button>
+                {selSchema.children.addOptions?.map((o) => (
+                  <button key={o.label} onClick={() => addChild(selBlock.id, o)} className="ml-2 text-blue-600 hover:underline">
+                    + {o.icon ? `${o.icon} ` : ""}เพิ่ม{o.label}
+                  </button>
+                ))}
               </div>
             )}
           </div>

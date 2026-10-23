@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SECTION_SCHEMAS, childPlacePatch, matchShowIf } from "../website-schema";
+import { SECTION_SCHEMAS, childPlacePatch, matchShowIf, newChildValues } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockSummary, type Block } from "../website-blocks";
 
 /**
@@ -87,6 +87,19 @@ describe("⬚ กรอบล่องหน + 🖼 รูปตอนชี้�
     const b = norm({ id: "z5", type: "hover-reveal", bgImageKey: "a/bg.jpg", items: [{ text: "A" }, { kind: "zone" }, { kind: "zone" }] });
     expect(blockSummary(b)).toBe("1 คำ · A · 2 กรอบ · รูปพื้นหลัง");
     expect(sch.children!.summary({ kind: "zone", alt: "กระเป๋า" })).toContain("⬚ กระเป๋า");
+  });
+
+  it("＋ เพิ่มกรอบ: ปุ่มเพิ่มแบบอื่นของ schema → ชิ้นใหม่เป็นกรอบกลาง Section · ปุ่มหลักยังเป็นคำ", () => {
+    const spec = sch.children!;
+    expect(spec.addOptions?.map((o) => o.label)).toEqual(["กรอบล่องหน"]);
+    const zone = newChildValues(spec, spec.addOptions![0]);
+    expect(zone).toMatchObject({ kind: "zone", text: "", x: 38, y: 35, w: 24, h: 30, imageKey: null, href: "" });
+    expect(newChildValues(spec)).toMatchObject({ kind: "word", text: "NEW WORD" });
+    // ผ่านการทำความสะอาดแล้วค่ายังอยู่ครบ (บันทึกได้)
+    const b = norm({ id: "z6", type: "hover-reveal", items: [{ id: "n1", ...zone }] });
+    expect(b.items[0]).toMatchObject({ kind: "zone", x: 38, y: 35, w: 24, h: 30 });
+    expect(SECTION_SCHEMAS.faq.children!.addOptions).toBeUndefined();
+    expect([spec.itemLabelOf!(zone), spec.itemLabelOf!({ kind: "word" })]).toEqual(["กรอบล่องหน", "คำ"]);
   });
 
   it("childPlacePatch (ลากในพรีวิว): รับเฉพาะช่องที่มี · บีบช่วง · ปัด 1 ตำแหน่ง · ค่ามั่วไม่แตะ", () => {
