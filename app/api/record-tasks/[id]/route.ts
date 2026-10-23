@@ -23,7 +23,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const actor = body.actor ?? user.email ?? "system";
 
   const patch: Record<string, unknown> = {};
-  if (typeof body.title === "string") { const t = body.title.trim(); if (!t) return NextResponse.json({ error: "ชื่อว่างไม่ได้" }, { status: 400 }); patch.title = t; }
+  if (typeof body.title === "string") { const t = body.title.trim().slice(0, 300); if (!t) return NextResponse.json({ error: "ชื่อว่างไม่ได้" }, { status: 400 }); patch.title = t; }
   if (typeof body.status === "string") {
     // ค่าใน DB ถูกจำกัดด้วย check constraint: open/in_progress/resolved/ignored/archived → "เสร็จ" = resolved
     const st = body.status === "resolved" || body.status === "done" ? "resolved" : "open";
@@ -48,9 +48,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
 
   const admin = supabaseAdmin();
-  const { error } = await admin.from("erp_record_tasks").delete().eq("id", id);
+  const { data: gone, error } = await admin.from("erp_record_tasks").delete().eq("id", id).select("module_key, record_id, title, status");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await writeAudit(admin, { action: "delete", entityType: "record_task", entityId: id, actorId: user.id, actorName: user.email ?? "system", metadata: {} });
+  // เก็บข้อความที่ลบไว้ในประวัติ (ลบแล้วเรียกคืนไม่ได้)
+  await writeAudit(admin, { action: "delete", entityType: "record_task", entityId: id, actorId: user.id, actorName: user.email ?? "system", metadata: (gone?.[0] as Record<string, unknown> | undefined) ?? {} });
   return NextResponse.json({ ok: true, error: null });
 }

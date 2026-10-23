@@ -7,86 +7,36 @@
  * ใช้: <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
  *   - ไม่ส่ง recordId = เช็คลิสต์ "ส่วนกลางของหน้า/โมดูล" (ทีมเห็นร่วมกัน)
  *   - ส่ง recordId = เช็คลิสต์เฉพาะเรคคอร์ดนั้น
+ * แบบฝังในฟอร์ม / แถบบนการ์ด = ./checklist (RecordChecklist / RecordChecklistChip) — ใช้ hook ตัวเดียวกัน
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Drawer } from "@/components/modal";
-import { useToast } from "@/components/toast";
-import { useAuth } from "@/components/auth";
-import { apiFetch } from "@/lib/api";
 import type { RecordTask } from "@/app/api/record-tasks/route";
+import { relTime, useRecordTasks } from "./use-record-tasks";
 
-const relTime = (iso: string) => {
-  const d = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (d < 60) return "เมื่อสักครู่";
-  if (d < 3600) return `${Math.floor(d / 60)} นาทีที่แล้ว`;
-  if (d < 86400) return `${Math.floor(d / 3600)} ชม.ที่แล้ว`;
-  return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
-};
+export { useRecordTasks } from "./use-record-tasks";
+export { RecordChecklist, RecordChecklistChip } from "./checklist";
 
 export function RecordTasksButton({ moduleKey, recordId = null, label = "📝 รายการงาน", title = "📝 รายการงาน / โน้ต", canEdit = true }: {
   moduleKey: string; recordId?: string | null; label?: string; title?: string; canEdit?: boolean;
 }) {
-  const toast = useToast();
-  const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<RecordTask[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { items, loading, load, add: addTask, toggle, rename, remove: del } = useRecordTasks({ moduleKey, recordId });   // โหลดครั้งแรกเพื่อโชว์ตัวเลขค้างบนปุ่ม
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const qs = new URLSearchParams({ module_key: moduleKey });
-      if (recordId) qs.set("record_id", recordId);
-      const j = await apiFetch(`/api/record-tasks?${qs}`).then((r) => r.json());
-      if (!j.error) setItems((j.data ?? []) as RecordTask[]);
-    } catch { /* ignore */ } finally { setLoading(false); }
-  }, [moduleKey, recordId]);
-
-  useEffect(() => { void load(); }, [load]);              // โหลดครั้งแรกเพื่อโชว์ตัวเลขค้างบนปุ่ม
   useEffect(() => { if (open) void load(); }, [open, load]);
 
   const add = async () => {
-    const t = text.trim(); if (!t) return;
+    if (!text.trim()) return;
     setBusy(true);
-    try {
-      const j = await apiFetch("/api/record-tasks", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ module_key: moduleKey, record_id: recordId, title: t, actor: user?.name }),
-      }).then((r) => r.json());
-      if (j.error) throw new Error(j.error);
-      setText(""); setItems((p) => [...p, j.data as RecordTask]);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); } finally { setBusy(false); }
-  };
-
-  const toggle = async (it: RecordTask) => {
-    const next = it.status === "resolved" ? "open" : "resolved";   // "เสร็จ" = resolved (ตาม check constraint ของตาราง)
-    setItems((p) => p.map((x) => x.id === it.id ? { ...x, status: next } : x));   // optimistic
-    try {
-      const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next, actor: user?.name }) });
-      if (!r.ok) throw new Error();
-    } catch { setItems((p) => p.map((x) => x.id === it.id ? { ...x, status: it.status } : x)); toast.error("อัปเดตไม่สำเร็จ"); }
+    if (await addTask(text)) setText("");
+    setBusy(false);
   };
 
   // แก้ข้อความ: กด ✏️ → พิมพ์ → Enter (ข้อความยาวต้องเห็นครบ จึงไม่ใช้ InlineEdit ที่ตัดข้อความบรรทัดเดียว) — ว่างเปล่า = ไม่บันทึก
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const commitEdit = () => { const e = editing; setEditing(null); if (e) { const it = items.find((x) => x.id === e.id); if (it) void rename(it, e.text); } };
-  const rename = async (it: RecordTask, title: string) => {
-    const t = title.trim();
-    if (!t || t === it.title) return;
-    setItems((p) => p.map((x) => x.id === it.id ? { ...x, title: t } : x));   // optimistic
-    try {
-      const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: t, actor: user?.name }) });
-      if (!r.ok) throw new Error();
-    } catch { setItems((p) => p.map((x) => x.id === it.id ? { ...x, title: it.title } : x)); toast.error("แก้ข้อความไม่สำเร็จ"); }
-  };
-
-  const del = async (it: RecordTask) => {
-    setItems((p) => p.filter((x) => x.id !== it.id));
-    try { const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "DELETE" }); if (!r.ok) throw new Error(); }
-    catch { toast.error("ลบไม่สำเร็จ"); void load(); }
-  };
 
   const openItems = items.filter((t) => t.status !== "resolved");
   const doneItems = items.filter((t) => t.status === "resolved");

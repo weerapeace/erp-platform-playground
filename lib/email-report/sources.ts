@@ -10,6 +10,8 @@ import { designSheetCoverMap } from "@/lib/design-sheet-covers";
 import { excerpt } from "@/lib/design-sheet-summary-server";
 import { withImageWidth } from "@/lib/r2-image";
 import { absoluteUrl } from "@/lib/app-url";
+import { loadChecklistSummaries } from "@/lib/record-tasks-server";
+import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { describeDays, normalizeReportOptions, type EmailReportFilters, type EmailReportInput, type ResolvedReportOptions } from "@/lib/email-report/shared";
 import { renderReportEmail, type BuiltReport, type ReportPart, type ReportRow, type ReportSection, type ReportStat, type ReportTone } from "@/lib/email-report/render";
 
@@ -48,13 +50,13 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
   type Brand = { name?: string | null; color?: string | null; is_customer_job?: boolean | null };
   type Sheet = {
     id: string; code: string; name: string; status: string; deadline: string | null; order_date: string | null; note: string | null;
-    detail: string | null; waiting_for: string | null; created_by: string | null; created_at: string; updated_at: string;
+    detail: string | null; created_by: string | null; created_at: string; updated_at: string;
     brand_id: string | null; brand: Brand | null;
   };
   let sheets: Sheet[] = [];
   if (wanted.length > 0) {
     let q = admin.from("design_sheets")
-      .select("id, code, name, status, deadline, order_date, note, detail, waiting_for, created_by, created_at, updated_at, brand_id, brand:brands!brand_id(name, color, is_customer_job)")
+      .select("id, code, name, status, deadline, order_date, note, detail, created_by, created_at, updated_at, brand_id, brand:brands!brand_id(name, color, is_customer_job)")
       .not("is_active", "is", false)          // ห้ามใช้ .neq(false) — ตัดแถว null ทิ้ง
       .in("status", wanted.map(([k]) => k))
       .limit(2000);
@@ -69,6 +71,9 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
     const wantOwn = filters.brand_group === "own";
     sheets = sheets.filter((s) => isOwnBrandJob(s.brand_id ? s.brand : null) === wantOwn);
   }
+  // ⏳ รออะไรอยู่ = เช็กลิสต์กลาง (ข้อที่ยังไม่เสร็จ) — ดึงครั้งเดียวทุกใบ
+  const waiting = await loadChecklistSummaries(admin, DESIGN_WAITING.moduleKey, sheets.map((s) => s.id));
+  const waitingOf = (s: Sheet) => waiting.get(s.id)?.open ?? [];
 
   // คำนวณป้าย + ค่าที่ใช้เรียง
   const enriched = sheets.map((s) => {
@@ -145,7 +150,10 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
       else if (k === "deadline") parts.push({ kind: "meta", text: s.deadline ? `กำหนดส่ง ${thShort(s.deadline)}` : "ไม่มีกำหนดส่ง" });
       else if (k === "order_date" && s.order_date) parts.push({ kind: "meta", text: `สั่ง ${thShort(s.order_date)}` });
       else if (k === "creator" && s.created_by && creators.get(s.created_by)) parts.push({ kind: "meta", text: `โดย ${creators.get(s.created_by)}` });
-      else if (k === "waiting_for") { const t = oneLine(s.waiting_for, 90); if (t) parts.push({ kind: "tag", text: `รอ: ${t}` }); }
+      else if (k === "waiting_for") {
+        const w = waitingOf(s).map((x) => oneLine(x, 60)).filter((x): x is string => !!x);
+        if (w.length) parts.push({ kind: "tag", text: `รอ: ${w.slice(0, 3).join(" · ")}${w.length > 3 ? ` +${w.length - 3}` : ""}` });
+      }
       else if (k === "note") { const t = oneLine(s.note, 90); if (t) parts.push({ kind: "note", text: t }); }
       else if (k === "detail") { const t = excerpt(s.detail, 120); if (t) parts.push({ kind: "small", text: t }); }
     }
@@ -187,7 +195,7 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
   const count = (fn: (s: Sheet) => unknown) => list.filter((e) => !!fn(e.s)).length;
   const fieldFill: Record<string, number> = {
     brand: count((s) => s.brand_id), deadline: count((s) => s.deadline), order_date: count((s) => s.order_date),
-    creator: count((s) => s.created_by), waiting_for: count((s) => oneLine(s.waiting_for, 1)), note: count((s) => oneLine(s.note, 1)),
+    creator: count((s) => s.created_by), waiting_for: count((s) => waitingOf(s).length), note: count((s) => oneLine(s.note, 1)),
     detail: count((s) => excerpt(s.detail, 1)),
   };
 

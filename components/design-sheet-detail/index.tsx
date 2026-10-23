@@ -18,7 +18,8 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { RecordPeekLink } from "@/components/pickers/record-peek-link";
-import { RecordTasksButton } from "@/components/record-tasks";
+import { RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
+import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
 import { SkuWizard } from "@/app/master/design-sheets/sku-wizard";
@@ -71,14 +72,14 @@ type FormState = {
   id: string | null; code: string;
   name: string; brand_id: string; detail: string; note: string;
   status: string; order_date: string; deadline: string; appointment_date: string; drive_link: string;
-  waiting_for: string;          // ⏳ รออะไรอยู่ (พิมพ์เอง · ว่าง = ไม่ได้รอ)
+  // ⏳ รออะไรอยู่ = เช็กลิสต์กลาง (RecordChecklist · บันทึกทีละข้อ) ไม่อยู่ในฟอร์มนี้แล้ว — ช่อง waiting_for เดิมเลิกใช้ (2026-10-23)
   parent_sku_codes: string[];   // ตั้งได้หลาย Parent SKU (รหัสจริง)
   parent_sku_drafts: string[];  // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
   cost_general_label: string;   // ชื่อแท็บตีราคา "ทั่วไป" ที่ตั้งเอง (ว่าง = ทั่วไป) — บันทึกทันทีผ่านปุ่ม ✎ เปลี่ยนชื่อ
 };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 // วันที่สั่ง default = วันนี้ (แก้ได้)
-const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", appointment_date: "", drive_link: "", waiting_for: "", parent_sku_codes: [], parent_sku_drafts: [], cost_general_label: "" });
+const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", appointment_date: "", drive_link: "", parent_sku_codes: [], parent_sku_drafts: [], cost_general_label: "" });
 
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
@@ -1148,7 +1149,6 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         id: d.id, code: d.code ?? "", name: d.name ?? "", brand_id: d.brand_id ?? "",
         detail: d.detail ?? "", note: d.note ?? "", status: d.status ?? "design",
         order_date: d.order_date ?? "", deadline: d.deadline ?? "", appointment_date: d.appointment_date ?? "", drive_link: d.drive_link ?? "",
-        waiting_for: d.waiting_for ?? "",
         parent_sku_codes: pCodes,
         parent_sku_drafts: Array.isArray(d.parent_sku_drafts) ? (d.parent_sku_drafts as string[]) : [],
         cost_general_label: d.cost_general_label ?? "",
@@ -1219,7 +1219,6 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     const payload = {
       name: form.name.trim(), brand_id: form.brand_id || null, detail: form.detail || null, note: form.note || null,
       status: form.status, order_date: form.order_date || null, deadline: form.deadline || null, appointment_date: form.appointment_date || null, drive_link: form.drive_link || null,
-      waiting_for: form.waiting_for.trim() || null,
       parent_sku_codes: parentCodes,
       parent_sku_drafts: form.parent_sku_drafts,
     };
@@ -1762,13 +1761,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 <input type="date" value={form.appointment_date} onChange={(e) => patch({ appointment_date: e.target.value })} disabled={!canEdit}
                   className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
               </label>
-              {/* ⏳ รออะไรอยู่ (พิมพ์เอง) — โชว์ในกล่อง hover ของ Design Dashboard (เปิด/ปิดได้ที่ ⚙️ ตั้งค่า Hover) */}
-              <label className="block col-span-2">
-                <span className="text-[11px] text-slate-500">⏳ รออะไรอยู่</span>
-                <input value={form.waiting_for} onChange={(e) => patch({ waiting_for: e.target.value })} disabled={!canEdit} maxLength={300} data-waiting-for
-                  placeholder="เช่น รอลูกค้าส่งโลโก้ / รอตัวอย่างผ้า / รอโรงงานตีราคา (ว่าง = ไม่ได้รออะไร)"
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-              </label>
+              {/* ⏳ รออะไรอยู่ = เช็กลิสต์กลาง (บันทึกทันทีทีละข้อ ไม่ต้องกดบันทึกใบงาน) — โชว์บนการ์ด + กล่อง hover ของ Design Dashboard */}
+              <div className="col-span-2">
+                {form.id ? (
+                  <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={form.id} canEdit={canEdit}
+                    presetType={DESIGN_WAITING.presetType} label="⏳ รออะไรอยู่" emptyText="ไม่มีอะไรรอ" />
+                ) : (
+                  <>
+                    <span className="text-[11px] text-slate-500">⏳ รออะไรอยู่</span>
+                    <div className="mt-0.5 rounded-lg border border-dashed border-slate-200 px-2 py-1.5 text-xs text-slate-400">บันทึกใบงานก่อน แล้วค่อยเพิ่มสิ่งที่รอเป็นข้อ ๆ</div>
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">

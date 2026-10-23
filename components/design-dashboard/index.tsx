@@ -16,6 +16,7 @@ import { usePermission } from "@/components/auth";
 import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-board-send";
 import { SummaryListMenu } from "@/components/design-sheet-summary/list-menu";
 import { RecordTasksButton } from "@/components/record-tasks";
+import type { ChecklistSummary } from "@/lib/record-tasks";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
@@ -438,7 +439,9 @@ export function DesignDashboard() {
   }
 
   // การ์ดใบงาน (ของกลางในโมดูล ./dashboard-cards) — แกลเลอรี/บอร์ด ใช้ค่าร่วมชุดเดียวกัน
-  const cardProps = { statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme };
+  // ⏳ ติ๊ก "รออะไรอยู่" บนการ์ด → อัปเดตสรุปของใบนั้นในรายการทันที (ไม่ต้องโหลดทั้งหน้า)
+  const onWaitingChange = (id: string, s: ChecklistSummary) => setSheets((items) => items.map((it) => (it.id === id ? { ...it, waiting_items: s } : it)));
+  const cardProps = { statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting: canEdit, onWaitingChange };
   const renderGalleryCard = (sheet: DesignSheetListItem) => <GalleryCard key={sheet.id} sheet={sheet} {...cardProps} />;
   const renderBoardCard = (sheet: DesignSheetListItem) => (
     <BoardCard key={sheet.id} sheet={sheet} {...cardProps} draggingSheetId={draggingSheetId} movingSheetId={movingSheetId} cardSize={cardSize} isDesktop={isDesktop}

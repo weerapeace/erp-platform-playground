@@ -25,6 +25,8 @@ import { useToast } from "@/components/toast";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 import { QuoteRounds } from "@/components/design-sheet-detail/quote-rounds";
+import { RecordChecklist } from "@/components/record-tasks";
+import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 
@@ -385,13 +387,10 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       <div className={`${sectionCls} grid grid-cols-2 gap-x-3 gap-y-2 text-sm`}>
         <div><div className="text-[11px] text-slate-400">วันที่สั่ง</div><div className="text-slate-800">{fmtDate(sheet.order_date)}</div></div>
         <div><div className="text-[11px] text-slate-400">นัดลูกค้า</div><div className="text-slate-800">{fmtDate(sheet.appointment_date)}</div></div>
+        {/* ⏳ รออะไรอยู่ = เช็กลิสต์กลาง ชุดเดียวกับหน้าคอม (บันทึกทีละข้อทันที) */}
         <div className="col-span-2">
-          <div className="text-[11px] text-slate-400">⏳ รออะไรอยู่</div>
-          {canEdit ? (
-            <input key={`${sheet.id}:${sheet.waiting_for ?? ""}`} defaultValue={sheet.waiting_for ?? ""} maxLength={300} placeholder="เช่น รอลูกค้าส่งโลโก้ (ว่าง = ไม่ได้รอ)"
-              onBlur={(e) => { const v = e.target.value.trim(); if (v !== (sheet.waiting_for ?? "")) void patchField({ waiting_for: v || null }, "รออะไรอยู่"); }}
-              className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm" />
-          ) : <div className={sheet.waiting_for ? "text-amber-700" : "text-slate-400"}>{sheet.waiting_for || "—"}</div>}
+          <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={sheet.id} canEdit={canEdit}
+            presetType={DESIGN_WAITING.presetType} label="⏳ รออะไรอยู่" />
         </div>
         <div className="col-span-2">
           <div className="text-[11px] text-slate-400">Parent SKU</div>

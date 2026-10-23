@@ -113,7 +113,7 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
         const anyStep = sheet.has_cost || sheet.has_quote || sheet.parent_count > 0;
         const detail = (sheet.detail_excerpt ?? "").trim();
         const note = (sheet.note ?? "").trim();
-        const waiting = (sheet.waiting_for ?? "").trim();
+        const waiting = sheet.waiting_items?.open ?? [];   // ⏳ ข้อที่ยังไม่เสร็จของเช็กลิสต์
         const quote = sheet.quote_latest ?? null;
         const priced = (quote?.cells ?? []).filter((c): c is typeof c & { price: number } => c.price != null);
         const comments = sheet.comments_latest ?? [];
@@ -130,10 +130,12 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
               </div>
             )}
             {has("name") && <p className="text-[15px] font-semibold leading-snug text-slate-900">{sheet.name}</p>}
-            {has("waiting") && waiting && (
-              <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12.5px] leading-snug text-amber-800">
-                <span className="font-semibold">⏳ {t("รออยู่", "Waiting")}:</span> {waiting}
-              </p>
+            {has("waiting") && waiting.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12.5px] leading-snug text-amber-800">
+                <span className="font-semibold">⏳ {t("รออยู่", "Waiting")}</span>
+                <ul className="mt-0.5 space-y-0.5">{waiting.slice(0, 6).map((w, i) => <li key={i}>☐ {w}</li>)}</ul>
+                {waiting.length > 6 && <div className="text-[11px] text-amber-600">+{waiting.length - 6} {t("ข้อ", "more")}</div>}
+              </div>
             )}
             {has("brand") && (
               <HoverRow label={t("แบรนด์", "Brand")}>

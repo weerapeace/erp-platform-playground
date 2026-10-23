@@ -53,7 +53,7 @@
 | `sort_by` | `urgent` (เกิน/ใกล้กำหนด → ไม่ขยับนาน) / `stale` / `deadline` / `newest` | urgent |
 | `only_flagged` | ส่งเฉพาะงานที่มีป้ายแดง/ส้ม (หัวอีเมลเป็น "ที่ต้องตาม") | false |
 | `stats` | ตัวเลขสรุปด้านบน `total` `overdue` `due_soon` `stale` `fresh` + `by_status` (แถบนับแยกสถานะ) · `[]` = ไม่มีกล่องตัวเลข | total, overdue, stale |
-| `row_fields` | ข้อมูลของแต่ละงาน **เรียงตามลำดับ**: `cover` `code` `brand` `status` `deadline` `order_date` `creator` `waiting_for` `note` `detail` `flag` `open` (ชื่องานโชว์เสมอ) | cover, code, brand, deadline, note, flag, open |
+| `row_fields` | ข้อมูลของแต่ละงาน **เรียงตามลำดับ**: `cover` `code` `brand` `status` `deadline` `order_date` `creator` `waiting_for` (= ข้อที่ยังไม่เสร็จของเช็กลิสต์ ⏳ รออะไรอยู่ · docs/record-tasks.md) `note` `detail` `flag` `open` (ชื่องานโชว์เสมอ) | cover, code, brand, deadline, note, flag, open |
 | `subject_template` | หัวเรื่องตั้งเอง ใส่ `{จำนวน}` `{เกินกำหนด}` `{ใกล้กำหนด}` `{ไม่ขยับ}` `{วันที่}` `{ชื่อรายงาน}` · ว่าง = แบบเดิม · ตัดขึ้นบรรทัดทิ้ง (กันแทรกหัวอีเมล) · ≤150 | "" |
 | `intro` | ข้อความเกริ่นบนสุด (ขึ้นบรรทัดได้ · ≤500 · escape ทุกตัว) | "" |
 

@@ -22,10 +22,11 @@ export type RecordTask = {
   id: string; module_key: string; record_type: string | null; record_id: string | null;
   title: string; description: string | null; status: string; priority: string | null;
   assigned_to: string | null; created_by: string | null; due_at: string | null;
+  resolved_by: string | null; resolved_at: string | null;   // ใครติ๊กเสร็จ · เมื่อไหร่
   created_at: string; updated_at: string;
 };
 
-const COLS = "id, module_key, record_type, record_id, title, description, status, priority, assigned_to, created_by, due_at, created_at, updated_at";
+const COLS = "id, module_key, record_type, record_id, title, description, status, priority, assigned_to, created_by, due_at, resolved_by, resolved_at, created_at, updated_at";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
@@ -52,9 +53,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: { module_key?: string; record_id?: string | null; record_type?: string | null; title?: string; actor?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const moduleKey = (body.module_key ?? "").trim();
-  const title = (body.title ?? "").trim();
+  const title = (body.title ?? "").trim().slice(0, 300);
   if (!moduleKey || !SAFE.test(moduleKey)) return NextResponse.json({ error: "invalid module_key" }, { status: 400 });
   if (!title) return NextResponse.json({ error: "กรุณาใส่ชื่อรายการ" }, { status: 400 });
+  if (body.record_type && !SAFE.test(body.record_type)) return NextResponse.json({ error: "invalid record_type" }, { status: 400 });
 
   const actor = body.actor ?? user.email ?? "system";
   const admin = supabaseAdmin();
@@ -64,6 +66,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }).select(COLS).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await writeAudit(admin, { action: "create", entityType: "record_task", entityId: data.id as string, actorId: user.id, actorName: actor, metadata: { module_key: moduleKey, title } });
+  await writeAudit(admin, { action: "create", entityType: "record_task", entityId: data.id as string, actorId: user.id, actorName: actor, metadata: { module_key: moduleKey, record_id: body.record_id ?? null, title } });
   return NextResponse.json({ data, error: null });
 }

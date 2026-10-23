@@ -8,6 +8,17 @@ import { useT } from "@/components/i18n";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { SheetHoverWrap, type SheetHoverPref } from "./sheet-hover";
 import { CardDeadline, CoverPreview, NoPickVeil, PickBadge, deadlineLabel, deadlineTone, safeColor, sheetCoverUrl, sheetIsOwn } from "./dashboard-helpers";
+import { RecordChecklistChip } from "@/components/record-tasks";
+import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
+import type { ChecklistSummary } from "@/lib/record-tasks";
+
+/** ⏳ แถบรออะไรอยู่บนการ์ด (กดติ๊ก/เพิ่มได้เลย) — ไม่มีรายการ = ไม่โชว์ */
+function WaitingChip({ sheet, canEdit, onWaitingChange }: { sheet: DesignSheetListItem; canEdit: boolean; onWaitingChange?: (id: string, s: ChecklistSummary) => void }) {
+  return (
+    <RecordChecklistChip moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={sheet.id}
+      summary={sheet.waiting_items} canEdit={canEdit} onChange={(s) => onWaitingChange?.(sheet.id, s)} />
+  );
+}
 
 export type SheetCardProps = {
   sheet: DesignSheetListItem;
@@ -21,6 +32,10 @@ export type SheetCardProps = {
   hoverPref: SheetHoverPref;
   hoverOn: boolean;
   brandTheme: BrandTheme;
+  /** ติ๊ก/เพิ่ม "รออะไรอยู่" จากการ์ดได้ไหม (สิทธิ์แก้ใบงาน) */
+  canEditWaiting: boolean;
+  /** ติ๊กบนการ์ดแล้ว → อัปเดตสรุปของใบนั้นในรายการ */
+  onWaitingChange?: (id: string, s: ChecklistSummary) => void;
 };
 export type BoardCardProps = SheetCardProps & {
   draggingSheetId: string | null;
@@ -33,7 +48,7 @@ export type BoardCardProps = SheetCardProps & {
 };
 
 // การ์ดแบบแกลเลอรี (รูปเต็มใบ) — ใช้ทั้งมุมมองแกลเลอรี และบอร์ดมือถือ (แท็บสถานะ)
-export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme }: SheetCardProps) {
+export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange }: SheetCardProps) {
   const t = useT();
   const brandColor = safeColor(sheet.brand_color);
   const coverUrl = sheetCoverUrl(sheet);
@@ -84,6 +99,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
             {st.label}
           </span>
         )}
+        {!pickMode && <WaitingChip sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />}
         <div className="mt-auto flex items-center justify-between gap-1.5 pt-0.5">
           <span className="truncate text-[10px] text-slate-400">{sheet.brand_name ?? t("ไม่ระบุ", "None")}</span>
           <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
@@ -104,7 +120,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
 // การ์ดบนบอร์ด (ลากเปลี่ยนสถานะได้บนจอคอม) — 2 ขนาดตาม cardSize:
 //   compact = รูปจัตุรัส + ชื่อ + เลขที่/กำหนดส่ง (ไม่มีกล่องโน้ตสูงคงที่แบบเดิม — โน้ตเป็น 📝 ชี้ดูได้)
 //   row     = รูปจิ๋ว 40px ซ้าย + ชื่อ/เลขที่/กำหนดส่ง ขวา (เห็นงานเยอะสุดต่อจอ · ชี้รูปแล้วขยายได้)
-export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, draggingSheetId, movingSheetId, cardSize, isDesktop, handleCardDragStart, setDraggingSheetId, setDropTargetStatus }: BoardCardProps) {
+export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange, draggingSheetId, movingSheetId, cardSize, isDesktop, handleCardDragStart, setDraggingSheetId, setDropTargetStatus }: BoardCardProps) {
   const t = useT();
   const brandColor = safeColor(sheet.brand_color);
   const coverUrl = sheetCoverUrl(sheet);
@@ -160,6 +176,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
             <span className="truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
             <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
           </div>
+          {!pickMode && <WaitingChip sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />}
         </div>
       ) : (
         <>
@@ -169,6 +186,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
             <span className="min-w-0 truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
             <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
           </div>
+          {!pickMode && <WaitingChip sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />}
           {tags}
         </>
       )}
