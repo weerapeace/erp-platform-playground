@@ -10,11 +10,12 @@
  *   <FieldChipsPicker value={keys} onChange={setKeys} fields={[{ key, label, group? }]} groups={{ core: "ข้อมูลหลัก" }} />
  * ใช้กับรายการอื่นที่ไม่ใช่ฟิลด์ก็ได้ (เช่น หมวดบนเว็บ): addLabel/searchPlaceholder/unit · showKeys={false} · icon ต่อรายการ
  *   markFirst="หลัก" = ตัวแรกมี ★ + ในป๊อปกด ★ ตั้งตัวไหนเป็นตัวแรกได้ (หมวดหลัก)
+ *   hint ต่อรายการ = ข้อความเล็กด้านขวาในป๊อป (เช่น "มีข้อมูล 1/54") แทน key · ไม่โชว์บนชิป
  */
 import { useState } from "react";
 import { ERPModal } from "@/components/modal";
 
-export interface PickableField { key: string; label: string; group?: string; icon?: string }
+export interface PickableField { key: string; label: string; group?: string; icon?: string; hint?: string }
 
 export function FieldChipsPicker({
   value,
@@ -157,7 +158,8 @@ export function FieldChipsPicker({
                             ★{value[0] === f.key ? ` ${markFirst}` : ""}
                           </button>
                         )}
-                        {showKeys && <span className="ml-auto text-[10px] text-slate-300 font-mono truncate max-w-[40%]">{f.key}</span>}
+                        {f.hint ? <span className={`${markFirst && on ? "" : "ml-auto "}shrink-0 text-[11px] text-slate-400`}>{f.hint}</span>
+                          : showKeys && <span className="ml-auto text-[10px] text-slate-300 font-mono truncate max-w-[40%]">{f.key}</span>}
                       </label>
                     );
                   })}

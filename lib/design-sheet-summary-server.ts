@@ -8,7 +8,8 @@ import type { SummarySheetInfo } from "@/lib/design-sheet-summary";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-const excerpt = (html: string | null | undefined, max = 160): string | null => {
+/** ตัด HTML ของ "รายละเอียดงาน" → ข้อความสั้น (ใช้ทั้งสรุปงานและอีเมลรายงาน) */
+export const excerpt = (html: string | null | undefined, max = 160): string | null => {
   if (!html) return null;
   const t = html.replace(/<(br|\/p|\/div|\/li|\/h[1-6])>/gi, " ").replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')

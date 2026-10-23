@@ -2,17 +2,20 @@
 
 // ============================================================
 // ป๊อปตั้งค่ารายงานอีเมล (เพิ่ม / แก้ไข) — ฟอร์มซ้าย + ตัวอย่างอีเมลจริงขวา (อัปเดตเองเมื่อเปลี่ยนตัวกรอง)
-// ใช้ของกลาง: ERPModal · ERPInput/ERPTime24 · UserPicker · กฎตรวจค่า normalizeReportInput (ตัวเดียวกับ API)
+// ใช้ของกลาง: ERPModal · ERPInput/ERPTextarea/ERPTime24 · UserPicker · FieldChipsPicker · กฎตรวจค่า normalizeReportInput (ตัวเดียวกับ API)
+// "โชว์อะไรในอีเมล" อ่านรายการที่เลือกได้จากแหล่งข้อมูล (EMAIL_REPORT_SOURCES) — ไม่มีรายการตายตัวในหน้านี้
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
-import { ERPInput, ERPTime24 } from "@/components/form";
+import { ERPInput, ERPTextarea, ERPTime24 } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
+import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { apiFetch } from "@/lib/api";
 import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import {
-  DAY_LABELS, DEFAULT_DAYS, EMAIL_RE, EMAIL_REPORT_SOURCES, normalizeReportInput,
+  COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
+  normalizeReportInput, normalizeReportOptions, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportInput,
 } from "@/lib/email-report/shared";
 
@@ -21,7 +24,7 @@ type Brand = { id: string; name: string; color: string | null; is_customer_job?:
 export const emptyReportInput = (): EmailReportInput => ({
   name: "", source_key: EMAIL_REPORT_SOURCES[0].key,
   filters: { brand_group: "all", brand_ids: [], statuses: [] },
-  options: { max_rows: 50, stale_days: 7 },
+  options: normalizeReportOptions(EMAIL_REPORT_SOURCES[0].key, {}),
   days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], skip_if_empty: true, is_enabled: false,
 });
 
@@ -29,7 +32,7 @@ export function toInput(r: EmailReport): EmailReportInput {
   return {
     name: r.name, source_key: r.source_key,
     filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [] },
-    options: { max_rows: r.options.max_rows ?? 50, stale_days: r.options.stale_days ?? 7 },
+    options: normalizeReportOptions(r.source_key, r.options),   // รายงานเก่า = เติมค่าเริ่มต้น (หน้าตาเดิม)
     days: r.days, send_time: r.send_time, recipients: r.recipients, skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
   };
 }
@@ -53,7 +56,7 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
   const [extErr, setExtErr] = useState<string | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
-  const [preview, setPreview] = useState<{ subject: string; html: string; total: number; shown: number } | null>(null);
+  const [preview, setPreview] = useState<{ subject: string; html: string; total: number; shown: number; fill?: Record<string, number> } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const previewSeq = useRef(0);
@@ -69,6 +72,13 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
   const set = (p: Partial<EmailReportInput>) => { setForm((f) => ({ ...f, ...p })); setError(null); };
   const setFilters = (p: Partial<EmailReportInput["filters"]>) => set({ filters: { ...form.filters, ...p } });
   const setOptions = (p: Partial<EmailReportInput["options"]>) => set({ options: { ...form.options, ...p } });
+  const src = sourceDef(form.source_key);
+  const opt = form.options;
+  // ใส่ {คำ} ต่อท้ายหัวเรื่อง
+  const addToken = (key: string) => {
+    const base = (opt.subject_template ?? "").trim();
+    setOptions({ subject_template: `${base ? `${base} ` : ""}{${key}}`.slice(0, SUBJECT_MAX) });
+  };
 
   // สถานะที่ยังไม่ปิด (ตัวเลือกกรอง) — ไม่ติ๊กเลย = ทุกสถานะ
   const pendingStatuses = useMemo(() => {
@@ -158,7 +168,7 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
           </div>
           <div>
             <label className={label}>ข้อมูลที่ส่ง</label>
-            <select value={form.source_key} onChange={(e) => set({ source_key: e.target.value })}
+            <select value={form.source_key} onChange={(e) => set({ source_key: e.target.value, options: normalizeReportOptions(e.target.value, form.options) })}
               className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               {EMAIL_REPORT_SOURCES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
@@ -253,22 +263,96 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
 
           <div className="rounded-lg border border-slate-200 p-3 text-sm">
             <div className="mb-2 text-xs font-semibold text-slate-700">ตัวเลือก</div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-700">
-              <label className="inline-flex items-center gap-1.5">โชว์ในอีเมลสูงสุด
-                <input type="number" min={5} max={100} value={form.options.max_rows ?? 50} onChange={(e) => setOptions({ max_rows: Number(e.target.value) })}
-                  className="h-8 w-16 rounded-lg border border-slate-200 px-2 text-center text-sm" /> งาน</label>
-              <label className="inline-flex items-center gap-1.5">เตือนสีส้มเมื่อไม่ขยับเกิน
-                <input type="number" min={1} max={60} value={form.options.stale_days ?? 7} onChange={(e) => setOptions({ stale_days: Number(e.target.value) })}
-                  className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> วัน</label>
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+              <div className="space-y-2 text-xs text-slate-700">
+                <label className="flex items-center gap-1.5">โชว์ในอีเมลสูงสุด
+                  <input type="number" min={5} max={100} value={opt.max_rows ?? 50} onChange={(e) => setOptions({ max_rows: Number(e.target.value) })}
+                    className="h-8 w-16 rounded-lg border border-slate-200 px-2 text-center text-sm" /> งาน</label>
+                <label className="flex items-center gap-1.5">เตือนสีส้มเมื่อไม่ขยับเกิน
+                  <input type="number" min={1} max={60} value={opt.stale_days ?? 7} onChange={(e) => setOptions({ stale_days: Number(e.target.value) })}
+                    className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> วัน</label>
+                <label className="flex items-center gap-1.5">เตือนใกล้กำหนดล่วงหน้า
+                  <input type="number" min={0} max={30} value={opt.due_soon_days ?? 3} onChange={(e) => setOptions({ due_soon_days: Number(e.target.value) })}
+                    className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> วัน</label>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <label className={label}>จัดกลุ่มตาม</label>
+                  <div className="flex flex-wrap gap-1">
+                    {src.groupBy.map((c) => <button key={c.key} type="button" onClick={() => setOptions({ group_by: c.key })} className={chip((opt.group_by ?? src.groupBy[0]?.key) === c.key)}>{c.label}</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>เรียงงานตาม</label>
+                  <select value={opt.sort_by ?? src.sortBy[0]?.key} onChange={(e) => setOptions({ sort_by: e.target.value })}
+                    className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {src.sortBy.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={label}>ส่งงานไหนบ้าง</label>
+                  <div className="flex flex-wrap gap-1">
+                    <button type="button" onClick={() => setOptions({ only_flagged: false })} className={chip(!opt.only_flagged)}>ทุกงาน</button>
+                    <button type="button" onClick={() => setOptions({ only_flagged: true })} className={chip(!!opt.only_flagged)}>เฉพาะงานที่มีป้ายเตือน</button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-slate-700">
-              <input type="checkbox" checked={form.skip_if_empty} onChange={(e) => set({ skip_if_empty: e.target.checked })} className="h-4 w-4" />
-              วันที่ไม่มีงานค้าง ไม่ต้องส่ง
-            </label>
-            <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-slate-700">
-              <input type="checkbox" checked={form.is_enabled} onChange={(e) => set({ is_enabled: e.target.checked })} className="h-4 w-4" />
-              เปิดส่งอัตโนมัติตามวันและเวลาด้านบน
-            </label>
+            <div className="mt-3 border-t border-slate-100 pt-2">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                <input type="checkbox" checked={form.skip_if_empty} onChange={(e) => set({ skip_if_empty: e.target.checked })} className="h-4 w-4" />
+                วันที่ไม่มีงานค้าง ไม่ต้องส่ง
+              </label>
+              <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                <input type="checkbox" checked={form.is_enabled} onChange={(e) => set({ is_enabled: e.target.checked })} className="h-4 w-4" />
+                เปิดส่งอัตโนมัติตามวันและเวลาด้านบน
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 p-3 text-sm">
+            <div className="mb-2 text-xs font-semibold text-slate-700">โชว์อะไรในอีเมล</div>
+            <label className={label}>ตัวเลขสรุปด้านบน <span className="font-normal text-slate-400">(กดเปิด/ปิด)</span></label>
+            <div className="flex flex-wrap gap-1">
+              {src.stats.map((c) => {
+                const on = (opt.stats ?? []).includes(c.key);
+                return (
+                  <button key={c.key} type="button" className={chip(on)}
+                    onClick={() => setOptions({ stats: on ? (opt.stats ?? []).filter((k) => k !== c.key) : src.stats.map((x) => x.key).filter((k) => k === c.key || (opt.stats ?? []).includes(k)) })}>
+                    {on ? "✓ " : ""}{c.label.replace("{stale_days}", String(opt.stale_days ?? 7))}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3">
+              <label className={label}>ข้อมูลของแต่ละงาน <span className="font-normal text-slate-400">(เรียงตามลำดับที่เลือก · ชื่องานโชว์เสมอ)</span></label>
+              <FieldChipsPicker compact showKeys={false}
+                value={opt.row_fields ?? []} onChange={(v) => setOptions({ row_fields: v })}
+                fields={src.rowFields.map((c) => ({
+                  key: c.key, label: c.label,
+                  hint: preview?.fill && preview.fill[c.key] !== undefined ? `มีข้อมูล ${preview.fill[c.key]}/${preview.total}` : undefined,
+                }))}
+                title="เลือกข้อมูลที่จะโชว์ในแต่ละงาน"
+                description="ติ๊กตามลำดับที่อยากให้โชว์ (อยากสลับ ให้เอาออกแล้วติ๊กใหม่) · ตัวเลขด้านขวา = งานในรายงานนี้ที่มีข้อมูลช่องนั้นจริงตอนนี้"
+                addLabel="＋ เลือกข้อมูล…" searchPlaceholder="ค้นหาชื่อข้อมูล…" unit="อย่าง" emptyText="โชว์แค่ชื่องาน" />
+            </div>
+            <div className="mt-3">
+              <label className={label}>หัวเรื่องอีเมล <span className="font-normal text-slate-400">(เว้นว่าง = แบบเดิม)</span></label>
+              <ERPInput value={opt.subject_template ?? ""} maxLength={SUBJECT_MAX} placeholder={src.defaultSubject}
+                onChange={(e) => setOptions({ subject_template: e.target.value })} />
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-400">
+                ใส่คำ:
+                {[...src.subjectTokens, ...COMMON_SUBJECT_TOKENS].map((t) => (
+                  <button key={t.key} type="button" title={t.label} onClick={() => addToken(t.key)}
+                    className="rounded border border-slate-200 px-1.5 py-0.5 text-slate-600 hover:bg-slate-50">{`{${t.key}}`}</button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className={label}>ข้อความเกริ่นบนสุด <span className="font-normal text-slate-400">(ไม่บังคับ)</span></label>
+              <ERPTextarea rows={2} maxLength={INTRO_MAX} value={opt.intro ?? ""} placeholder="เช่น ฝากทีมเช็กงานที่ป้ายแดงก่อนเที่ยง"
+                onChange={(e) => setOptions({ intro: e.target.value })} />
+            </div>
           </div>
         </div>
 

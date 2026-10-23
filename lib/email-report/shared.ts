@@ -24,7 +24,25 @@ export type EmailReportOptions = {
   max_rows?: number;
   /** ไม่ขยับเกินกี่วัน = เตือนสีส้ม */
   stale_days?: number;
+  /** เหลือไม่เกินกี่วันถึงกำหนด = ป้าย "ใกล้กำหนด" */
+  due_soon_days?: number;
+  /** จัดกลุ่มตาม (key จาก groupBy ของแหล่งข้อมูล) */
+  group_by?: string;
+  /** เรียงงานตาม (key จาก sortBy ของแหล่งข้อมูล) */
+  sort_by?: string;
+  /** ส่งเฉพาะงานที่มีป้ายเตือน (เกิน/ใกล้กำหนด/ไม่ขยับนาน) */
+  only_flagged?: boolean;
+  /** ตัวเลขสรุปด้านบน (key จาก stats ของแหล่งข้อมูล · เรียงตามรายการของแหล่งข้อมูล) */
+  stats?: string[];
+  /** ข้อมูลของแต่ละงาน เรียงตามลำดับที่เลือก (key จาก rowFields ของแหล่งข้อมูล) */
+  row_fields?: string[];
+  /** หัวเรื่องอีเมล (ว่าง = แบบเดิม) ใส่ {จำนวน} {วันที่} ฯลฯ ได้ */
+  subject_template?: string;
+  /** ข้อความเกริ่นบนสุดของอีเมล (ไม่บังคับ) */
+  intro?: string;
 };
+/** ตัวเลือกที่เติมค่าเริ่มต้นครบแล้ว (ใช้ตอนประกอบอีเมล) */
+export type ResolvedReportOptions = Required<EmailReportOptions>;
 
 export type EmailReport = {
   id: string;
@@ -60,10 +78,84 @@ export type EmailReportRun = {
 export type EmailReportInput = Pick<EmailReport, "name" | "source_key" | "filters" | "options" | "days" | "send_time" | "recipients" | "skip_if_empty" | "is_enabled">;
 
 // ---- แหล่งข้อมูล (เพิ่มรายงานแบบใหม่ = เพิ่มที่นี่ + ตัวดึงข้อมูลใน lib/email-report/sources.ts) ----
-export const EMAIL_REPORT_SOURCES: { key: string; label: string; description: string }[] = [
-  { key: "design_sheets_pending", label: "ใบงานออกแบบที่ค้าง", description: "ใบงานที่ยังไม่ถึงสถานะปิดงาน แยกตามสถานะ พร้อมรูปปก" },
+// แต่ละแหล่งประกาศเองว่า "เลือกโชว์อะไรได้บ้าง" — หน้าตั้งค่าอ่านจากที่นี่ ส่วนที่ติ๊ก/ลำดับเก็บใน email_reports.options
+export type ReportChoice = { key: string; label: string };
+export type EmailReportSourceDef = {
+  key: string;
+  label: string;
+  description: string;
+  /** ข้อมูลของแต่ละงานที่เลือกโชว์ได้ (ชื่องานโชว์เสมอ ไม่อยู่ในรายการ) */
+  rowFields: ReportChoice[];
+  defaultRowFields: string[];
+  /** ตัวเลขสรุปด้านบน · {stale_days} ในชื่อ = ค่าที่ตั้ง */
+  stats: ReportChoice[];
+  defaultStats: string[];
+  /** ตัวแรก = ค่าเริ่มต้น */
+  groupBy: ReportChoice[];
+  sortBy: ReportChoice[];
+  /** คำที่ใส่ในหัวเรื่องได้ {key} (นอกจาก {วันที่} {ชื่อรายงาน} ที่ใช้ได้ทุกแหล่ง) */
+  subjectTokens: ReportChoice[];
+  /** หัวเรื่องแบบเดิม (โชว์เป็นตัวอย่างในช่อง · ว่าง = ใช้แบบนี้) */
+  defaultSubject: string;
+};
+
+export const EMAIL_REPORT_SOURCES: EmailReportSourceDef[] = [
+  {
+    key: "design_sheets_pending", label: "ใบงานออกแบบที่ค้าง", description: "ใบงานที่ยังไม่ถึงสถานะปิดงาน แยกตามสถานะ พร้อมรูปปก",
+    rowFields: [
+      { key: "cover", label: "รูปปก" }, { key: "code", label: "รหัสใบงาน" }, { key: "brand", label: "แบรนด์" },
+      { key: "status", label: "สถานะ" }, { key: "deadline", label: "กำหนดส่ง" }, { key: "order_date", label: "วันที่สั่ง" },
+      { key: "creator", label: "ผู้สร้างใบงาน" }, { key: "waiting_for", label: "รออะไรอยู่" }, { key: "note", label: "โน้ต" },
+      { key: "detail", label: "รายละเอียดสั้น" }, { key: "flag", label: "ป้ายเตือน (เกิน/ใกล้กำหนด/ไม่ขยับ)" }, { key: "open", label: "ปุ่ม \"เปิดใบงาน\"" },
+    ],
+    defaultRowFields: ["cover", "code", "brand", "deadline", "note", "flag", "open"],
+    stats: [
+      { key: "total", label: "ค้างทั้งหมด" }, { key: "overdue", label: "เกินกำหนด" }, { key: "due_soon", label: "ใกล้กำหนด" },
+      { key: "stale", label: "ไม่ขยับเกิน {stale_days} วัน" }, { key: "fresh", label: "อัปเดตวันนี้" }, { key: "by_status", label: "แยกตามสถานะ" },
+    ],
+    defaultStats: ["total", "overdue", "stale"],
+    groupBy: [{ key: "status", label: "สถานะ" }, { key: "brand", label: "แบรนด์" }, { key: "none", label: "ไม่จัดกลุ่ม" }],
+    sortBy: [
+      { key: "urgent", label: "ด่วนก่อน (เกิน/ใกล้กำหนด → ไม่ขยับนาน)" }, { key: "stale", label: "ไม่ขยับนานสุดก่อน" },
+      { key: "deadline", label: "กำหนดส่งใกล้สุดก่อน" }, { key: "newest", label: "ใบงานใหม่สุดก่อน" },
+    ],
+    subjectTokens: [
+      { key: "จำนวน", label: "จำนวนงาน" }, { key: "เกินกำหนด", label: "เกินกำหนดกี่งาน" },
+      { key: "ใกล้กำหนด", label: "ใกล้กำหนดกี่งาน" }, { key: "ไม่ขยับ", label: "ไม่ขยับนานกี่งาน" },
+    ],
+    defaultSubject: "งานออกแบบที่ค้าง {จำนวน} งาน · {วันที่}",
+  },
 ];
 export const sourceLabel = (key: string) => EMAIL_REPORT_SOURCES.find((s) => s.key === key)?.label ?? key;
+export const sourceDef = (key: string): EmailReportSourceDef => EMAIL_REPORT_SOURCES.find((s) => s.key === key) ?? EMAIL_REPORT_SOURCES[0];
+/** คำในหัวเรื่องที่ใช้ได้ทุกแหล่ง */
+export const COMMON_SUBJECT_TOKENS: ReportChoice[] = [{ key: "วันที่", label: "วันที่ส่ง" }, { key: "ชื่อรายงาน", label: "ชื่อรายงาน" }];
+export const SUBJECT_MAX = 150;
+export const INTRO_MAX = 500;
+
+/** เติมค่าเริ่มต้น + ตัดค่าที่แหล่งข้อมูลไม่รู้จัก — ใช้ทั้งตอนบันทึก (ฟอร์ม/API) และตอนประกอบอีเมลจากค่าใน DB
+ *  รายงานเก่าที่มีแค่ max_rows/stale_days → ได้หน้าตาเดิมทุกอย่าง */
+export function normalizeReportOptions(sourceKey: string, raw: unknown): ResolvedReportOptions {
+  const src = sourceDef(sourceKey);
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const clamp = (v: unknown, lo: number, hi: number, d: number) => { const n = Math.round(Number(v)); return v !== undefined && v !== null && v !== "" && Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  const one = (v: unknown, list: ReportChoice[]) => (typeof v === "string" && list.some((c) => c.key === v) ? v : list[0]?.key ?? "");
+  const known = (v: unknown, list: ReportChoice[]) => [...new Set((v as unknown[]).filter((k): k is string => typeof k === "string" && list.some((c) => c.key === k)))];
+  const statsPicked = Array.isArray(o.stats) ? known(o.stats, src.stats) : src.defaultStats;
+  return {
+    max_rows: clamp(o.max_rows, 5, 100, 50),
+    stale_days: clamp(o.stale_days, 1, 60, 7),
+    due_soon_days: clamp(o.due_soon_days, 0, 30, 3),
+    group_by: one(o.group_by, src.groupBy),
+    sort_by: one(o.sort_by, src.sortBy),
+    only_flagged: o.only_flagged === true,
+    stats: src.stats.map((c) => c.key).filter((k) => statsPicked.includes(k)),   // เรียงตามรายการของแหล่งข้อมูล
+    row_fields: Array.isArray(o.row_fields) ? known(o.row_fields, src.rowFields) : [...src.defaultRowFields],
+    // หัวเรื่องห้ามมีขึ้นบรรทัด (กันแทรกหัวอีเมล) · ข้อความเกริ่นขึ้นบรรทัดได้
+    subject_template: String(o.subject_template ?? "").replace(/[\u0000-\u001F\u007F]+/g, " ").replace(/\s+/g, " ").trim().slice(0, SUBJECT_MAX),
+    intro: String(o.intro ?? "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, "").replace(/\n{3,}/g, "\n\n").trim().slice(0, INTRO_MAX),
+  };
+}
 
 // ---- วัน / เวลา ----
 export const DAY_LABELS: { n: number; short: string; full: string }[] = [
@@ -124,9 +216,7 @@ export function normalizeReportInput(raw: unknown): { value: EmailReportInput } 
   const strList = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((s): s is string => typeof s === "string" && !!s))].slice(0, 100) : []);
   const filters: EmailReportFilters = { brand_group, brand_ids: strList(f.brand_ids), statuses: strList(f.statuses) };
 
-  const o = (r.options ?? {}) as Record<string, unknown>;
-  const clamp = (v: unknown, lo: number, hi: number, d: number) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
-  const options: EmailReportOptions = { max_rows: clamp(o.max_rows, 5, 100, 50), stale_days: clamp(o.stale_days, 1, 60, 7) };
+  const options: EmailReportOptions = normalizeReportOptions(source_key, r.options);
 
   return { value: { name, source_key, filters, options, days, send_time, recipients, skip_if_empty: r.skip_if_empty !== false, is_enabled } };
 }

@@ -7,28 +7,41 @@
 
 export type ReportTone = "danger" | "warn" | "muted" | "good";
 
+/** ข้อมูลรองของแถว เรียงตามที่ผู้ตั้งค่าเลือก · meta ที่อยู่ติดกันรวมเป็นบรรทัดเดียวคั่นด้วย " · "
+ *  meta = บรรทัดเทา (แบรนด์ · กำหนดส่ง) · note = กล่องเหลือง 📝 · tag = ป้ายฟ้า ⏳ · small = ข้อความเล็กจาง */
+export type ReportPart = { kind: "meta" | "note" | "tag" | "small"; text: string };
 export type ReportRow = {
   id: string;
   imageUrl: string | null;
   title: string;
   code?: string | null;
-  meta?: string | null;          // บรรทัดรอง เช่น "Good Goods · กำหนดส่ง 18 ต.ค."
-  note?: string | null;          // โน้ตสั้น
+  parts: ReportPart[];
   flag?: { text: string; tone: ReportTone } | null;   // ป้ายขวา เช่น "เกิน 3 วัน" / "ไม่ขยับ 14 วัน"
   link: string | null;
+  /** ปุ่มขวา เช่น "เปิดใบงาน" (null = ไม่โชว์ปุ่ม แต่กดชื่อ/รูปยังเปิดได้) */
+  linkLabel?: string | null;
 };
-export type ReportSection = { key: string; label: string; color: string; total: number; rows: ReportRow[] };
+/** label ว่าง = ไม่มีหัวกลุ่ม (ไม่จัดกลุ่ม) */
+export type ReportSection = { key: string; label: string; color: string | null; total: number; rows: ReportRow[] };
 export type ReportStat = { label: string; value: number; tone?: ReportTone };
 export type BuiltReport = {
   heading: string;               // หัวในอีเมล เช่น "งานออกแบบที่ค้างอยู่"
-  subjectCore: string;           // ใช้ในหัวเรื่อง เช่น "งานออกแบบที่ค้าง 48 งาน"
+  subjectCore: string;           // ใช้ในหัวเรื่องแบบเดิม เช่น "งานออกแบบที่ค้าง 48 งาน"
   total: number;                 // ทั้งหมดที่ตรงตัวกรอง
   shown: number;                 // ที่โชว์ในอีเมล (≤ max_rows)
   stats: ReportStat[];
+  /** แถบนับแยกกลุ่มใต้ตัวเลขสรุป เช่น แยกตามสถานะ (ไม่ใส่ = ไม่โชว์) */
+  breakdown?: { label: string; color: string | null; count: number }[];
+  /** โชว์ช่องรูปหน้าแถวไหม */
+  showImages: boolean;
   sections: ReportSection[];
   viewAllLink: string | null;
   viewAllLabel: string;
   emptyText: string;             // ข้อความตอนไม่มีงาน
+  /** ค่าสำหรับ {คำ} ในหัวเรื่องที่ตั้งเอง */
+  tokens: Record<string, string | number>;
+  /** จำนวนงานที่มีข้อมูลแต่ละช่องจริง (โชว์ในหน้าตั้งค่า ช่วยตัดสินใจว่าจะโชว์ช่องไหน) */
+  fieldFill?: Record<string, number>;
 };
 
 const TONE_COLOR: Record<ReportTone, string> = { danger: "#dc2626", warn: "#d97706", muted: "#64748b", good: "#059669" };
@@ -44,15 +57,51 @@ export function thaiDateLabel(now: Date, style: "long" | "short" = "long"): stri
     : { weekday: "short", day: "numeric", month: "short", timeZone: "Asia/Bangkok" });
 }
 
+/** หัวเรื่องที่ตั้งเอง: แทน {คำ} ด้วยค่าจริง (คำที่ไม่รู้จักคงไว้) · ตัดขึ้นบรรทัดทิ้ง กันแทรกหัวอีเมล */
+export function fillSubject(template: string, tokens: Record<string, string | number>): string {
+  return template
+    .replace(/\{([^{}]{1,30})\}/g, (m, k: string) => {
+      const v = tokens[k.trim()];
+      return v === undefined ? m : typeof v === "number" ? v.toLocaleString("th-TH") : v;
+    })
+    .replace(/[\u0000-\u001F\u007F]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** ข้อมูลรองของแถว → HTML (meta ติดกันรวมบรรทัดเดียว) */
+function partsHtml(parts: ReportPart[]): string {
+  const out: string[] = [];
+  let meta: string[] = [];
+  const flush = () => { if (meta.length) { out.push(`<div style="font-size:12px;color:#64748b;margin-top:2px;">${meta.map(esc).join(" · ")}</div>`); meta = []; } };
+  for (const p of parts) {
+    if (p.kind === "meta") { meta.push(p.text); continue; }
+    flush();
+    if (p.kind === "note") out.push(`<div style="font-size:12px;color:#92400e;background:#fffbeb;border-radius:4px;padding:3px 6px;margin-top:4px;">📝 ${esc(p.text)}</div>`);
+    else if (p.kind === "tag") out.push(`<div style="margin-top:4px;"><span style="display:inline-block;font-size:12px;color:#1d4ed8;background:#eff6ff;border-radius:4px;padding:2px 6px;">⏳ ${esc(p.text)}</span></div>`);
+    else out.push(`<div style="font-size:12px;color:#94a3b8;margin-top:2px;">${esc(p.text)}</div>`);
+  }
+  flush();
+  return out.join("");
+}
+
 export function renderReportEmail(r: BuiltReport, ctx: {
   reportName: string;
   scheduleLabel: string;         // เช่น "จ–ส · 08:00 น."
   manageUrl: string | null;      // ลิงก์หน้า "ส่งอีเมลรายงาน"
+  /** หัวเรื่องที่ตั้งเอง (ว่าง = แบบเดิม) */
+  subjectTemplate?: string;
+  /** ข้อความเกริ่นบนสุด */
+  intro?: string;
   now?: Date;
 }): { subject: string; html: string; text: string } {
   const now = ctx.now ?? new Date();
-  const subject = `${r.subjectCore} · ${thaiDateLabel(now, "short")}`;
+  const defaultSubject = `${r.subjectCore} · ${thaiDateLabel(now, "short")}`;
+  const custom = ctx.subjectTemplate?.trim()
+    ? fillSubject(ctx.subjectTemplate, { ...r.tokens, "วันที่": thaiDateLabel(now, "short"), "ชื่อรายงาน": ctx.reportName })
+    : "";
+  const subject = custom || defaultSubject;
+  const intro = (ctx.intro ?? "").trim();
   const font = "font-family:'Sarabun','Leelawadee UI','Segoe UI',Tahoma,Arial,sans-serif;";
+  const hasRight = r.sections.some((s) => s.rows.some((x) => x.flag || x.linkLabel));
 
   const statCells = r.stats.map((s) => `
     <td width="${Math.floor(100 / Math.max(1, r.stats.length))}%" style="padding:4px;">
@@ -69,26 +118,38 @@ export function renderReportEmail(r: BuiltReport, ctx: {
       ? `<img src="${esc(img)}" width="56" height="56" alt="" style="display:block;width:56px;height:56px;border-radius:6px;border:1px solid #e2e8f0;object-fit:cover;background:#f1f5f9;">`
       : `<div style="width:56px;height:56px;border-radius:6px;background:#f1f5f9;border:1px solid #e2e8f0;"></div>`;
     const title = `${row.code ? `<span style="color:#94a3b8;font-size:12px;">${esc(row.code)}</span> ` : ""}${esc(row.title)}`;
+    // ไม่โชว์รูป → ช่องซ้ายเหลือแค่ระยะขอบ (คงตาราง 3 ช่องไว้ให้หัวกลุ่ม colspan=3 ตรงกันทุกโปรแกรมอีเมล)
+    const left = r.showImages
+      ? `<td width="68" valign="top" style="padding:8px 0 8px 16px;border-bottom:1px solid #f1f5f9;">${link ? `<a href="${esc(link)}" style="text-decoration:none;">${thumb}</a>` : thumb}</td>`
+      : `<td width="8" style="padding:0;border-bottom:1px solid #f1f5f9;"></td>`;
+    const linkLabel = link && row.linkLabel ? row.linkLabel : null;
     return `
       <tr>
-        <td width="68" valign="top" style="padding:8px 0 8px 16px;border-bottom:1px solid #f1f5f9;">${link ? `<a href="${esc(link)}" style="text-decoration:none;">${thumb}</a>` : thumb}</td>
+        ${left}
         <td valign="top" style="padding:8px 8px;border-bottom:1px solid #f1f5f9;">
           <div style="font-size:14px;font-weight:bold;color:#0f172a;line-height:1.35;">${link ? `<a href="${esc(link)}" style="color:#0f172a;text-decoration:none;">${title}</a>` : title}</div>
-          ${row.meta ? `<div style="font-size:12px;color:#64748b;margin-top:2px;">${esc(row.meta)}</div>` : ""}
-          ${row.note ? `<div style="font-size:12px;color:#92400e;background:#fffbeb;border-radius:4px;padding:3px 6px;margin-top:4px;">📝 ${esc(row.note)}</div>` : ""}
+          ${partsHtml(row.parts)}
         </td>
-        <td width="110" valign="top" align="right" style="padding:8px 16px 8px 0;border-bottom:1px solid #f1f5f9;white-space:nowrap;">
+        <td width="${hasRight ? 110 : 8}" valign="top" align="right" style="padding:8px ${hasRight ? 16 : 0}px 8px 0;border-bottom:1px solid #f1f5f9;white-space:nowrap;">
           ${row.flag ? `<div style="font-size:12px;color:${TONE_COLOR[row.flag.tone]};">${esc(row.flag.text)}</div>` : ""}
-          ${link ? `<a href="${esc(link)}" style="display:inline-block;margin-top:4px;font-size:12px;color:#2563eb;text-decoration:none;">เปิดใบงาน →</a>` : ""}
+          ${linkLabel ? `<a href="${esc(link)}" style="display:inline-block;margin-top:4px;font-size:12px;color:#2563eb;text-decoration:none;">${esc(linkLabel)} →</a>` : ""}
         </td>
       </tr>`;
   };
 
   const sectionsHtml = r.sections.filter((s) => s.rows.length > 0).map((s) => `
-    <tr><td colspan="3" style="padding:8px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:bold;color:#334155;">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeColor(s.color)};margin-right:6px;"></span>${esc(s.label)} · ${s.total.toLocaleString("th-TH")} งาน${s.total > s.rows.length ? ` <span style="font-weight:normal;color:#94a3b8;">(โชว์ ${s.rows.length})</span>` : ""}
-    </td></tr>
+    ${s.label ? `<tr><td colspan="3" style="padding:8px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:bold;color:#334155;">
+      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeColor(s.color ?? "")};margin-right:6px;"></span>${esc(s.label)} · ${s.total.toLocaleString("th-TH")} งาน${s.total > s.rows.length ? ` <span style="font-weight:normal;color:#94a3b8;">(โชว์ ${s.rows.length})</span>` : ""}
+    </td></tr>` : `<tr><td colspan="3" style="border-top:1px solid #e2e8f0;font-size:0;line-height:0;">&nbsp;</td></tr>`}
     ${s.rows.map(rowHtml).join("")}`).join("");
+
+  const breakdown = (r.breakdown ?? []).filter((b) => b.count > 0);
+  const breakdownHtml = breakdown.length ? `
+  <tr><td colspan="3" style="padding:0 16px 12px 16px;font-size:12px;color:#64748b;">
+    ${breakdown.map((b) => `<span style="display:inline-block;margin-right:12px;white-space:nowrap;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeColor(b.color ?? "")};margin-right:4px;"></span>${esc(b.label)} ${b.count.toLocaleString("th-TH")}</span>`).join("")}
+  </td></tr>` : "";
+  const introHtml = intro ? `
+    <div style="font-size:14px;color:#334155;background:#f8fafc;border-left:3px solid #2563eb;padding:8px 10px;margin-top:10px;">${esc(intro).replace(/\n/g, "<br>")}</div>` : "";
 
   const viewAll = safeUrl(r.viewAllLink);
   const manage = safeUrl(ctx.manageUrl);
@@ -102,9 +163,9 @@ export function renderReportEmail(r: BuiltReport, ctx: {
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;${font}">
   <tr><td colspan="3" style="padding:18px 16px 6px 16px;">
     <div style="font-size:20px;font-weight:bold;color:#0f172a;">${esc(r.heading)}</div>
-    <div style="font-size:13px;color:#64748b;margin-top:2px;">${esc(ctx.reportName)} · ${esc(thaiDateLabel(now))}</div>
+    <div style="font-size:13px;color:#64748b;margin-top:2px;">${esc(ctx.reportName)} · ${esc(thaiDateLabel(now))}</div>${introHtml}
   </td></tr>
-  <tr><td colspan="3" style="padding:6px 12px 14px 12px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${statCells}</tr></table></td></tr>
+  ${r.stats.length ? `<tr><td colspan="3" style="padding:6px 12px 14px 12px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${statCells}</tr></table></td></tr>` : `<tr><td colspan="3" style="padding:0 0 8px 0;font-size:0;line-height:0;">&nbsp;</td></tr>`}${breakdownHtml}
   ${r.total === 0
     ? `<tr><td colspan="3" style="padding:24px 16px;text-align:center;font-size:14px;color:#059669;border-top:1px solid #e2e8f0;">${esc(r.emptyText)}</td></tr>`
     : sectionsHtml}
@@ -118,12 +179,20 @@ export function renderReportEmail(r: BuiltReport, ctx: {
 </td></tr></table>
 </body></html>`;
 
-  const lines: string[] = [r.heading, `${ctx.reportName} · ${thaiDateLabel(now)}`, "", r.stats.map((s) => `${s.label}: ${s.value}`).join(" · "), ""];
+  const lines: string[] = [r.heading, `${ctx.reportName} · ${thaiDateLabel(now)}`, ""];
+  if (intro) lines.push(intro, "");
+  if (r.stats.length) lines.push(r.stats.map((s) => `${s.label}: ${s.value}`).join(" · "));
+  if (breakdown.length) lines.push(breakdown.map((b) => `${b.label} ${b.count}`).join(" · "));
+  lines.push("");
   if (r.total === 0) lines.push(r.emptyText);
   for (const s of r.sections) {
     if (s.rows.length === 0) continue;
-    lines.push(`■ ${s.label} (${s.total} งาน)`);
-    for (const row of s.rows) lines.push(`- ${row.code ? `${row.code} ` : ""}${row.title}${row.flag ? ` [${row.flag.text}]` : ""}${row.link ? ` ${row.link}` : ""}`);
+    if (s.label) lines.push(`■ ${s.label} (${s.total} งาน)`);
+    for (const row of s.rows) {
+      lines.push(`- ${row.code ? `${row.code} ` : ""}${row.title}${row.flag ? ` [${row.flag.text}]` : ""}${row.link ? ` ${row.link}` : ""}`);
+      const sub = row.parts.map((p) => (p.kind === "note" ? `📝 ${p.text}` : p.kind === "tag" ? `⏳ ${p.text}` : p.text));
+      if (sub.length) lines.push(`  ${sub.join(" · ")}`);
+    }
     lines.push("");
   }
   if (r.total > r.shown) lines.push(`แสดง ${r.shown} จาก ${r.total} งาน`);
