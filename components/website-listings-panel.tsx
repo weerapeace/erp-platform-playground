@@ -27,6 +27,7 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { listingIssues, type ListingIssue } from "@/lib/website-listing-health";
 import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
 import { WebsiteListingsMassEdit } from "@/components/website-listings-mass-edit";
+import { webForm } from "@/lib/website-form-styles";
 
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 // ⚠️ ต้อง dynamic — master-crud import relation-multi อยู่ (import ตรงจะวนกัน) ดู memory unify_drawer
@@ -99,8 +100,7 @@ type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit";
 const VIEWS = ["list", "grid", "sort"] as const;
 
 const baht = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH")}`;
-const inputCls =
-  "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
+const inputCls = webForm.input;
 const keyUrl = (key: string, w = 120) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 
 /** ชื่อ/ราคาที่โชว์ในรายการ = ที่ลูกค้าเห็นจริง (เดิมโชว์ชื่อดิบ ERP + ราคา Parent ซึ่งเป็น ฿0) */

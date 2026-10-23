@@ -23,6 +23,7 @@ import {
   type ShippingConfig,
   type ShippingMethod,
 } from "@/lib/website-shipping";
+import { webForm } from "@/lib/website-form-styles";
 
 type Meta = {
   carriers: { key: string; label: string }[];
@@ -200,7 +201,7 @@ function MethodCard({ m, meta, first, last, onChange, onUp, onDown, onDelete }: 
   onChange: (p: Partial<ShippingMethod>) => void; onUp: () => void; onDown: () => void; onDelete: () => void;
 }) {
   const field = "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm";
-  const lbl = "block text-[11px] font-medium text-slate-500 mb-1";
+  const lbl = webForm.label;
   const tiers = m.fee.kind === "tiers" ? m.fee.tiers : null;
   return (
     <section className={`rounded-xl border p-3 space-y-3 ${m.enabled ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-75"}`} data-method={m.id}>

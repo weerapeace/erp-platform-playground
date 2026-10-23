@@ -30,11 +30,12 @@ import {
   thaiLocalToIso,
   type ThemeSchedule,
 } from "@/lib/website-theme-schedule";
+import { webForm } from "@/lib/website-form-styles";
 
 const API = "/api/website/theme/schedules";
-const cardCls = "rounded-2xl border border-slate-200 bg-white p-4";
-const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm";
-const labelCls = "block text-xs font-medium text-slate-600 mb-1.5";
+const cardCls = webForm.cardRoomy;
+const inputCls = webForm.inputBasic;
+const labelCls = webForm.labelRoomy;
 
 const FESTIVE_NAME: Record<string, string> = { snow: "❄️ หิมะ", petals: "🌸 กลีบดอกไม้", confetti: "🎊 กระดาษสี", hearts: "❤️ หัวใจ", water: "💧 หยดน้ำ", leaves: "🍂 ใบไม้", stars: "✨ ประกาย", lantern: "🏮 โคมแดง", flags: "🚩 ธงราว" };
 const STATE_CLS: Record<string, string> = { active: "bg-emerald-50 text-emerald-700", upcoming: "bg-blue-50 text-blue-700", ended: "bg-slate-100 text-slate-500", cancelled: "bg-slate-100 text-slate-400" };

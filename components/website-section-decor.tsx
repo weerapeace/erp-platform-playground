@@ -30,8 +30,9 @@ import {
   type DecorPlace,
   type DecorScreen,
 } from "@/lib/website-blocks";
+import { webForm } from "@/lib/website-form-styles";
 
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
+const labelCls = webForm.label;
 /** ลายที่ยืด/หดสัดส่วนได้ (ลายไอคอน เช่น โบว์/หัวใจ คงรูปเสมอ) */
 const FREE_RATIO = ["pearls", "lace", "scallop", "wave", "line", "arch", "rect", "ellipse"];
 const ANIM_OPTS: { v: DecorAnim; l: string }[] = [

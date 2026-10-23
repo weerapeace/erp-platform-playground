@@ -43,11 +43,12 @@ import {
   type SiteTexture,
   type SiteWidth,
 } from "@/lib/website-site-design";
+import { webForm } from "@/lib/website-form-styles";
 
 type Colors = { brand: string; ink: string; page: string; onBrand: string };
 
-const cardCls = "rounded-2xl border border-slate-200 bg-white p-4";
-const labelCls = "block text-xs font-medium text-slate-600 mb-1.5";
+const cardCls = webForm.cardRoomy;
+const labelCls = webForm.labelRoomy;
 
 /** ปุ่มตัวเลือกแบบมีชื่อ + คำอธิบาย + ภาพตัวอย่างเล็ก (เหมือนตัวเลือกการเปลี่ยนหน้า) */
 function Choice<T extends string>({ value, options, onChange }: { value: T; onChange: (v: T) => void; options: { v: T; l: string; d?: string; pv?: ReactNode }[] }) {
@@ -451,7 +452,7 @@ export function SiteMotionSetting({ value, onChange }: { value: SitePageDesign; 
 }
 
 const NAV_LABEL: Record<MobileNavItem, string> = { home: "หน้าแรก", shop: "ร้านค้า", categories: "หมวด", search: "ค้นหา", wishlist: "ถูกใจ", cart: "ตะกร้า", account: "บัญชี", chat: "แชท" };
-const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm";
+const inputCls = webForm.inputBasic;
 
 /** 📱 ชุด 3 — มือถือและช่วยขาย (theme.page: mobileNav · chat · searchEmpty · cookie) · เว็บร้าน MobileNav / FloatingChat / SearchOverlay / Tracking */
 export function SiteSalesSetting({ value, onChange }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void }) {

@@ -16,6 +16,7 @@ import { DateInput } from "@/components/date-input";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { couponLabel, normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
+import { webForm } from "@/lib/website-form-styles";
 
 type Row = StoreCoupon & { used: number };
 
@@ -55,8 +56,8 @@ function statusOf(c: Row): { label: string; cls: string } {
   return { label: "ใช้ได้", cls: "bg-emerald-50 text-emerald-700" };
 }
 
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
-const inputCls = "w-full h-9 rounded-lg border border-slate-200 px-3 text-sm";
+const labelCls = webForm.label;
+const inputCls = webForm.inputH9;
 
 export function WebsiteCouponsPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();

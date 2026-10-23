@@ -20,6 +20,7 @@ import { ScrollTabs } from "@/components/scroll-tabs";
 import { BilingualText, ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
 import { coverageOf, needsTranslation, readMeta, translationPatch, translationStatus } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
+import { webForm } from "@/lib/website-form-styles";
 
 type FieldDef = {
   key: string;
@@ -35,10 +36,9 @@ type FieldDef = {
 type GroupDef = { key: string; label: string; hint: string };
 type Info = Record<string, unknown>;
 
-const inputCls =
-  "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
-const cardCls = "rounded-xl border border-slate-200 bg-white p-4";
+const inputCls = webForm.input;
+const labelCls = webForm.label;
+const cardCls = webForm.card;
 
 /** แท็บรายชื่อ (ไม่ใช่ช่องตั้งค่า) — ต่อท้ายแท็บหมวดข้อมูลร้าน */
 const LIST_TABS = [

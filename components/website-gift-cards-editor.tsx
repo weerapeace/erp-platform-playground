@@ -27,9 +27,10 @@ import {
   type GiftFontKey,
   type GiftWrapStyle,
 } from "@/lib/website-gift-cards";
+import { webForm } from "@/lib/website-form-styles";
 
-const inputCls = "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-400 bg-white";
-const lbl = "block text-[11px] text-slate-500 mb-1";
+const inputCls = webForm.inputPlain;
+const lbl = webForm.labelPlain;
 const seg = (on: boolean) => `px-2.5 py-1 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
 const newId = (p: string) => `${p}${Date.now().toString(36).slice(-5)}`;
 

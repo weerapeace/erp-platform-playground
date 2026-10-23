@@ -13,6 +13,7 @@
  * คำนวณด้วย canvasBgWindow (lib/website-canvas.ts) — สูตรเดียวกับเว็บร้าน (object-position + scale รอบจุดเดียวกัน)
  */
 import { ImageCropBox } from "@/components/image-crop-box";
+import { RangeInput } from "@/components/range-input";
 import { CANVAS_BG_DEFAULT, CANVAS_BG_REF_PHONE, CANVAS_BG_REF_WIDTH, CANVAS_MAX_HEIGHT, CANVAS_MOBILE_WIDTH, CANVAS_WIDTH, canvasMaxPx } from "@/lib/website-canvas";
 
 export interface CanvasBgPos {
@@ -51,16 +52,9 @@ function toPatch(block: Record<string, unknown>, device: Device, p: Partial<Canv
   return { bgMCustom: true, bgMFit: v.fit, bgMX: v.x, bgMY: v.y, bgMZoom: v.zoom };
 }
 
+/** แถบเลื่อน + ช่องพิมพ์ตัวเลข (ของกลาง RangeInput แบบซ้อน · พิมพ์ได้ในช่วงเดียวกับแถบ) */
 function Range({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange: (n: number) => void }) {
-  return (
-    <label className="block">
-      <span className="flex items-center justify-between text-[11px] text-slate-500">
-        {label}
-        <span className="tabular-nums">{value}%</span>
-      </span>
-      <input type="range" className="w-full accent-blue-600" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </label>
-  );
+  return <RangeInput label={<span className="text-[11px] text-slate-500">{label}</span>} value={value} min={min} max={max} step={step} unit="%" ariaLabel={label} onChange={onChange} />;
 }
 
 export function CanvasBgPositioner({

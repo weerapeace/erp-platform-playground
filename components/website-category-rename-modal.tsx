@@ -9,10 +9,11 @@ import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { cleanCategoryKey, type WebCategoryDef } from "@/lib/website-field-map";
+import { webForm } from "@/lib/website-form-styles";
 
 type Preview = { summary: { label: string; count: number; unit: string }[]; redirect: string } | { error: string };
 
-const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none";
+const inputCls = webForm.inputRoomy;
 
 export function CategoryRenameModal({
   cat,

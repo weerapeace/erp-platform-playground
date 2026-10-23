@@ -20,6 +20,7 @@ import { ImageUploadField } from "@/components/website-theme-media";
 import { RangeInput } from "@/components/range-input";
 import { CANVAS_WEIGHTS } from "@/lib/website-canvas";
 import { ColorSwatches, DEFAULT_FONT_NAMES, DEFAULT_THEME_COLORS, FontPickList, type ThemeColors, type ThemeFontNames } from "@/components/website-text-pickers";
+import { webForm } from "@/lib/website-form-styles";
 
 export type { BlockType, Visibility };
 
@@ -60,7 +61,7 @@ export function visibilityLabel(v?: Visibility): string {
   return hidden.length ? `ซ่อนบน ${hidden.join("/")}` : "";
 }
 
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
+const labelCls = webForm.label;
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

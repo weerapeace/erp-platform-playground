@@ -10,8 +10,9 @@
 import { RangeInput } from "@/components/range-input";
 import { ColorPicker } from "@/components/color-picker";
 import { LUXE_CHOICES, LUXE_MEDIA_WIDTH, LUXE_TRUST_MAX, type ProductLuxe } from "@/lib/website-product-luxe";
+import { webForm } from "@/lib/website-form-styles";
 
-const lbl = "block text-[11px] text-slate-500 mb-1";
+const lbl = webForm.labelPlain;
 const sel = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white";
 const inp = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm";
 

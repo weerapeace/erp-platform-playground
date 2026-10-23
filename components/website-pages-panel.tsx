@@ -17,6 +17,7 @@ import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-p
 import { VersionHistoryDrawer } from "@/components/website-version-history";
 import { ERPDateTime24 } from "@/components/form";
 import { ImageUploadField } from "@/components/website-theme-media";
+import { webForm } from "@/lib/website-form-styles";
 
 type PageRow = {
   id: string;
@@ -58,9 +59,8 @@ const isoToLocal = (iso: string) => (iso ? new Date(new Date(iso).getTime() + 7 
 const localToIso = (v: string) => (v ? new Date(`${v}:00+07:00`).toISOString() : "");
 const thWhen = (iso: string) => new Date(iso).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 
-const inputCls =
-  "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
+const inputCls = webForm.input;
+const labelCls = webForm.label;
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** แบ่งรายการหน้า: หน้าทั่วไปก่อน แล้วตามด้วยกลุ่มศูนย์ช่วยเหลือ (ลำดับในกลุ่ม = sort_order ที่ API เรียงมาแล้ว) */

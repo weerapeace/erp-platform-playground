@@ -11,10 +11,11 @@ import { WheelSelect } from "@/components/wheel-select";
 import { Seg } from "@/components/website-block-editor";
 import { ColorInput } from "@/components/color-picker";
 import { CART_BADGES, CART_ICONS, HEADER_ICON_PATHS, ICON_SIZES, SEARCH_MOBILE, SEARCH_STYLES, SEARCH_WIDTHS, type CartIcon, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
+import { webForm } from "@/lib/website-form-styles";
 
 type ThemeLike = { colors: { brand: string; ink: string; page: string; surface: string; muted: string }; header: { bg: string; bgKind: string; bgColor: string; textColor: string } };
 
-const lbl = "block text-[11px] font-medium text-slate-500 mb-1";
+const lbl = webForm.label;
 const input = "w-full h-8 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-400";
 
 export function HeaderIcon({ name, size = 20 }: { name: CartIcon | "search"; size?: number }) {

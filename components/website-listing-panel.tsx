@@ -19,9 +19,10 @@ import {
   LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
   newListingInsert, type ListingConfig, type ListingInsert,
 } from "@/lib/website-listing";
+import { webForm } from "@/lib/website-form-styles";
 
-const inputCls = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-800 outline-none focus:border-blue-400 bg-white";
-const lbl = "block text-[11px] text-slate-500 mb-1";
+const inputCls = webForm.inputXs;
+const lbl = webForm.labelPlain;
 
 export function ListingPanel({
   value,

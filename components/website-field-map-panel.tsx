@@ -23,6 +23,7 @@ import { WebsiteTagCategoryRules } from "@/components/website-tag-category-rules
 import { SaveBar } from "@/components/save-bar";
 import { ERPModal } from "@/components/modal";
 import { FloatingDropdown } from "@/components/floating-dropdown";
+import { webForm } from "@/lib/website-form-styles";
 
 /** รหัสหมวดตั้งเองได้แล้ว ไม่ใช่รายการตายตัว (ให้ตรงกับ lib/website-field-map.ts) */
 type WebCategory = string;
@@ -51,10 +52,9 @@ type CategoryDef = { key: string; label: string; icon: string; blurb: string; pa
 /** สินค้าบนเว็บร้านนี้: ทั้งหมด / ที่ยังไม่ได้จัดหมวดเอง (= ใช้กฎจับคู่หมวด ERP) */
 type ListingStats = { total: number; auto: number };
 
-const inputCls =
-  "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
-const cardCls = "rounded-xl border border-slate-200 bg-white p-4";
+const inputCls = webForm.input;
+const labelCls = webForm.label;
+const cardCls = webForm.card;
 
 export function WebsiteFieldMapPanel({
   shopSlug,

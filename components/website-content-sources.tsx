@@ -31,9 +31,9 @@ import {
   type ContentSource,
   type ShippingAutoKey,
 } from "@/lib/website-content-sources";
+import { webForm } from "@/lib/website-form-styles";
 
-const inputCls =
-  "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
+const inputCls = webForm.input;
 const groupCls = "text-[11px] font-semibold text-slate-400 uppercase tracking-wide px-1 mb-1";
 
 export interface ContentSourcesModalProps {

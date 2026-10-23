@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { loadWebListings } from "@/lib/website-data";
 import { isLive, promoBadge, PROMO_KINDS, type DiscountKind, type Promotion, type PromoKind, type PromoScope } from "@/lib/website-promotions";
+import { webForm } from "@/lib/website-form-styles";
 
 type Tier = { min: string; kind: DiscountKind; value: string };
 type Form = {
@@ -48,8 +49,8 @@ const toIso = (local: string) => (local ? `${local}:00+07:00` : "");
 const thWhen = (iso: string | null) => (iso ? new Date(iso).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }) : "");
 const money = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
 
-const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
-const inputCls = "w-full h-9 rounded-lg border border-slate-200 px-3 text-sm";
+const labelCls = webForm.label;
+const inputCls = webForm.inputH9;
 
 function statusOf(p: Promotion): { label: string; cls: string } {
   const now = Date.now();

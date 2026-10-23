@@ -61,6 +61,7 @@ import {
   type MegaTemplate,
   type MenuTemplate,
 } from "@/lib/website-mega-menu";
+import { webForm } from "@/lib/website-form-styles";
 
 export interface MegaEditorCtx {
   link: SchemaFormContext;
@@ -76,8 +77,8 @@ export interface MegaEditorCtx {
 }
 
 const API = "/api/website/menu-templates";
-const mini = "h-7 rounded-lg border border-slate-200 text-[11px] px-1.5 bg-white text-slate-700";
-const lbl = "block text-[11px] text-slate-500 mb-1";
+const mini = webForm.mini;
+const lbl = webForm.labelPlain;
 const KIND_ICON: Record<MegaBlockKind, string> = { links: "☰", groups: "⋮☰", products: "🛍", feature: "🖼", cards: "🗂" };
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 

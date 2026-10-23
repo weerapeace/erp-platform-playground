@@ -17,6 +17,7 @@ import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { VideoThumb } from "@/components/video-thumb";
 import { CustomFrameGrid } from "@/components/website-frame-builder";
+import { RangeInput } from "@/components/range-input";
 import {
   CANVAS_BUTTON_VARIANTS,
   CANVAS_FRAME_PRESETS,
@@ -92,19 +93,9 @@ const seg = (on: boolean) => `flex-1 px-2 py-1.5 text-xs rounded-md border ${on 
 
 const Swatches = ColorSwatches;
 
+/** แถบเลื่อน + ช่องพิมพ์ตัวเลข (ของกลาง RangeInput แบบซ้อน · พิมพ์ได้ในช่วงเดียวกับแถบ) */
 function Slider({ label, value, min, max, step = 1, unit = "", onChange }: { label: string; value: number; min: number; max: number; step?: number; unit?: string; onChange: (n: number) => void }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between">
-        <H>{label}</H>
-        <span className="text-[11px] text-slate-500 tabular-nums">
-          {value}
-          {unit}
-        </span>
-      </div>
-      <input type="range" className="w-full accent-blue-600" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </div>
-  );
+  return <RangeInput label={<H>{label}</H>} value={value} min={min} max={max} step={step} unit={unit.trim() || undefined} ariaLabel={label} onChange={onChange} />;
 }
 
 const framePreview = (key: string): React.CSSProperties => {

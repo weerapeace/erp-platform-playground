@@ -28,6 +28,7 @@ import { WebsiteCategoriesField } from "@/components/website-categories-field";
 import { WebsiteVideoField } from "@/components/website-video-field";
 import { ImageSizeNote } from "@/components/image-size-note";
 import { RangeInput } from "@/components/range-input";
+import { webForm } from "@/lib/website-form-styles";
 
 export interface SchemaFormContext {
   shopSlug: string;
@@ -45,9 +46,8 @@ export interface SchemaFormContext {
   dropId?: string;
 }
 
-export const inputCls =
-  "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400";
-export const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
+const inputCls = webForm.input;
+const labelCls = webForm.label;
 
 const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout", "caption", "card"];
 

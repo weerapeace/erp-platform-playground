@@ -15,10 +15,11 @@ import { Seg } from "@/components/website-block-editor";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { RELATED_RULES, legacySourceOf, type ProductParts, type ProductSection, type RelatedRule, type SiteTheme } from "@/lib/website-theme";
+import { webForm } from "@/lib/website-form-styles";
 
 type Product = SiteTheme["product"];
 
-const lbl = "block text-[11px] font-medium text-slate-500 mb-1";
+const lbl = webForm.label;
 const RELATED_COUNTS = [2, 3, 4, 6, 8];
 const RECENT_COUNTS = [2, 3, 4, 6, 8, 10, 12];
 

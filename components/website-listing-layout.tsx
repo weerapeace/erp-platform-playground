@@ -11,9 +11,10 @@ import {
   LISTING_PAGINGS, LISTING_PAGE_SIZES, LISTING_SORTS, LISTING_SOLD_OUT, listingColumnsFrom,
   type ListingColumns, type ListingConfig, type ListingHeader, type ListingSort,
 } from "@/lib/website-listing";
+import { webForm } from "@/lib/website-form-styles";
 
-const inputCls = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-800 outline-none focus:border-blue-400 bg-white";
-const lbl = "block text-[11px] text-slate-500 mb-1";
+const inputCls = webForm.inputXs;
+const lbl = webForm.labelPlain;
 const box = "rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2";
 
 /** กริดจิ๋วโชว์จำนวนช่องต่อแถว */

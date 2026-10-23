@@ -16,12 +16,13 @@ import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { CopyButton } from "@/components/copy-button";
 import { slugifyCollection, type WebCollection } from "@/lib/website-collections";
 import { SaveBar } from "@/components/save-bar";
+import { webForm } from "@/lib/website-form-styles";
 
 type Item = { id: string; name: string; count: number; published: number; imageKey: string | null };
 type Row = WebCollection & { name: string; count: number; published: number; imageKey: string | null };
 
-const inputCls = "w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-400 bg-white";
-const lbl = "block text-[11px] text-slate-500 mb-1";
+const inputCls = webForm.inputPlain;
+const lbl = webForm.labelPlain;
 
 const blank = (it: Item): WebCollection => ({
   id: it.id,

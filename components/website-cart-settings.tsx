@@ -34,8 +34,9 @@ import {
   type CartRecsSet,
   type CartStyle,
 } from "@/lib/website-cart";
+import { webForm } from "@/lib/website-form-styles";
 
-const lbl = "block text-[11px] font-medium text-slate-500 mb-1";
+const lbl = webForm.label;
 const input = "w-full h-8 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-400";
 const card = "rounded-xl border border-slate-200 bg-white p-4 space-y-3";
 

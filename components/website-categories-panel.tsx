@@ -31,6 +31,7 @@ import { BilingualText, ContentLangProvider, RecordLangBar } from "@/components/
 import { pickText, type ContentLang } from "@/lib/content-i18n";
 import { CATEGORY_TEXT_KEYS } from "@/lib/website-field-map";
 import { CategoryRenameModal } from "@/components/website-category-rename-modal";
+import { webForm } from "@/lib/website-form-styles";
 
 /** ชนิดข้อมูลตอนลากการ์ดสินค้า (กันรับของที่ลากมาจากที่อื่น) */
 const DRAG_MIME = "application/x-erp-web-listings";
@@ -50,7 +51,7 @@ type Listing = {
 const img = (key: string | null | undefined, w = 200) => (key ? `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}` : null);
 const thumbOf = (l: Listing) => l.webImages[0] || l.mapped?.images?.[0] || l.erpImageKey || null;
 const nameOf = (l: Listing) => l.webName || l.mapped?.name || l.erpName;
-const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none";
+const inputCls = webForm.inputRoomy;
 const labelCls = "block text-xs font-medium text-slate-600 mb-1";
 
 export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
