@@ -79,6 +79,23 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
       .catch(() => setDmeta({ ready: { bot: false, buttons: false, link: false }, channels: [], roles: [], error: "โหลดห้อง Discord ไม่สำเร็จ" }));
   }, [open, discordOn, dmeta]);
 
+  // 👁 รูปรายงานที่จะส่งเข้า Discord (วาดบนเซิร์ฟเวอร์จริง · ดูได้แม้ยังไม่ตั้งบอท)
+  const [img, setImg] = useState<{ url: string | null; busy: boolean; err: string | null }>({ url: null, busy: false, err: null });
+  useEffect(() => () => { if (img.url) URL.revokeObjectURL(img.url); }, [img.url]);
+  useEffect(() => { if (!open) setImg((s) => ({ ...s, url: null, err: null })); }, [open]);
+  const showImage = async () => {
+    setImg((s) => ({ ...s, busy: true, err: null }));
+    try {
+      const r = await apiFetch("/api/admin/email-reports/preview?format=png", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      if (!r.ok || !(r.headers.get("content-type") ?? "").startsWith("image/")) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || "วาดรูปไม่สำเร็จ");
+      }
+      const url = URL.createObjectURL(await r.blob());
+      setImg({ url, busy: false, err: null });
+    } catch (e) { setImg({ url: null, busy: false, err: e instanceof Error ? e.message : "วาดรูปไม่สำเร็จ" }); }
+  };
+
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const set = (p: Partial<EmailReportInput>) => { setForm((f) => ({ ...f, ...p })); setError(null); };
   const setFilters = (p: Partial<EmailReportInput["filters"]>) => set({ filters: { ...form.filters, ...p } });
@@ -321,6 +338,20 @@ export function ReportEditor({ open, editing, onClose, onSaved }: {
                   <p className="text-[11px] text-slate-400">ส่งทดสอบ = ส่งเข้า DM ของคุณ (ต้องผูกบัญชี Discord ที่เมนูบัญชีก่อน) · ส่งเดี๋ยวนี้/ตามเวลา = ส่งเข้าห้องที่เลือก</p>
                 </div>
               )
+            )}
+            {discordOn && (
+              <div className="mt-2">
+                <button type="button" onClick={() => void showImage()} disabled={img.busy}
+                  className="h-8 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+                  {img.busy ? "กำลังวาดรูป…" : img.url ? "↻ วาดรูปใหม่" : "👁 ดูรูปที่จะส่งเข้า Discord"}</button>
+                {img.err && <p className="mt-1 text-xs text-rose-600">⚠ {img.err}</p>}
+                {img.url && (
+                  <a href={img.url} target="_blank" rel="noreferrer" title="เปิดรูปขนาดเต็ม" className="mt-2 block max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.url} alt="รูปรายงานที่จะส่งเข้า Discord" className="w-full" />
+                  </a>
+                )}
+              </div>
             )}
           </div>
 
