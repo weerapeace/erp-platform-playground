@@ -1633,6 +1633,7 @@ export function WebsiteBuilder({
           ctx={formCtx}
           previewSrc={shownSrc}
           frameRef={studioFrameRef}
+          reloadKey={nonce}
           devices={DEVICES.filter((d) => d.k !== "tablet")}
           contentTop={contentTopOf(selBlock)}
           contentBottom={contentBottomOf(selBlock)}

@@ -44,6 +44,7 @@ export function SectionStudio({
   motionChanged,
   items,
   onPickItem,
+  reloadKey = 0,
 }: {
   open: boolean;
   onClose: () => void;
@@ -69,6 +70,8 @@ export function SectionStudio({
   /** รายการย่อยของ Section (ถ้ามี) — กดแล้วไปแก้ชิ้นนั้นในแผงขวา */
   items?: { label: string; icon: string; list: { id: string; label: string }[] };
   onPickItem?: (id: string) => void;
+  /** เลขโหลดพรีวิวหลักใหม่ — เปลี่ยน = พรีวิวหน้าใหญ่โหลดใหม่ตาม (Section ที่เซิร์ฟเวอร์ต้องดึงข้อมูลใหม่หลังบันทึกร่าง) */
+  reloadKey?: number;
 }) {
   const value = block as Record<string, unknown>;
   const visible = useMemo(() => visibleFields(schema.fields, value), [schema.fields, value]);
@@ -78,6 +81,11 @@ export function SectionStudio({
   const [q, setQ] = useState("");
   const [dev, setDev] = useState(devices[0]?.k ?? "desktop");
   const [nonce, setNonce] = useState(0);
+  // พรีวิวหลักโหลดใหม่ (บันทึกร่างแล้วมี Section ที่ต้องดึงข้อมูลใหม่ / กด ↻) → หน้าใหญ่โหลดตาม
+  const firstReload = useRef(reloadKey);
+  useEffect(() => {
+    if (reloadKey !== firstReload.current) setNonce((n) => n + 1);
+  }, [reloadKey]);
 
   // หมวดที่เลือกหายไป (ช่องถูกซ่อนตามค่า) → กลับหมวดแรก
   useEffect(() => {
