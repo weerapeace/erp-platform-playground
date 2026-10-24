@@ -1322,7 +1322,8 @@ export function ParentWebListings({
           {data.shops
             .filter((s) => s.listed)
             .map((s) => (
-              <div key={s.shopId} className="rounded-xl border border-slate-200 overflow-hidden">
+              // overflow-clip (ไม่ใช่ hidden) — ตัดมุมโค้งได้เหมือนเดิม แต่ไม่ทำให้ของ sticky ข้างใน (รูปพรีวิวปั๊มชื่อ) เลื่อนหลุด
+              <div key={s.shopId} className="rounded-xl border border-slate-200 overflow-clip">
                 {/* หัวการ์ด: ชื่อร้าน + สถานะ + ยอดขาย + ลิงก์ (สวิตช์ขึ้นเว็บ/แนะนำ อยู่ในแท็บ ขายบนเว็บ) */}
                 <div className="flex items-center gap-x-2 gap-y-1 bg-slate-50 px-3 py-1.5 border-b border-slate-200 flex-wrap">
                   <span className="text-sm font-medium text-slate-800">{s.shopName}</span>

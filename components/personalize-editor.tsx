@@ -14,9 +14,11 @@
  *        ใช้ร่วมทุกสี (แท็บสี = ดูรูปมุมเดียวกันของสีนั้น + เอฟเฟกต์ของสีนั้น) · หรือจำกัด "โชว์กับสี" = ใช้รูปของฉากตรง ๆ เฉพาะสีที่เลือก
  *   - 📐 มุมมองต่อตำแหน่ง (เอียงแนวนอน/แนวตั้ง · ยืด/บีบ) — รูปที่ถ่ายเฉียง ให้รอยปั๊มเอียงตามผิวกระเป๋า
  * วาดรอยปั๊ม: components/personalize-stamp (ของกลาง ใช้กับหน้าออเดอร์ด้วย)
+ *   - 📌 จอคอม: คอลัมน์รูปค้างที่ตอนเลื่อนแผงขวา (sticky — กล่องที่ห่อห้ามมี overflow-hidden ดู memory sticky_overflow_gotcha)
+ *   - 🔍 ซูมรูป: กรอบดูรูปสูงไม่เกิน 55% ของจอ (พอดี = เห็นทั้งรูป) · 150–400% เลื่อนดูในกรอบ · 🎯 ไปที่จุดปั๊ม · ลากวางได้ทุกระดับซูม
  * ของกลาง: lib/website-personalize.ts (ชนิดข้อมูล/ค่าเริ่มต้น/ตัวกรอง/ตำแหน่งข้อความ)
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RangeInput } from "@/components/range-input";
 import { ColorInput } from "@/components/color-picker";
 import { askConfirm } from "@/components/modal/ask-dialog";
@@ -200,6 +202,26 @@ export function PersonalizeEditor({
   };
   const textRefs = useRef<Partial<Record<PersonalizePosition["key"], HTMLDivElement | null>>>({});
   const [imgW, setImgW] = useState(600);
+  // 🔍 ซูม: กรอบดูรูป (viewport) สูงไม่เกิน 55% ของจอ · พอดี = รูปทั้งใบในกรอบ · ซูม = รูปกว้างขึ้น เลื่อนดูในกรอบ
+  const ZOOMS = [1, 1.5, 2, 3, 4];
+  const [zoom, setZoom] = useState(1);
+  const [ratio, setRatio] = useState(0);
+  const [viewBox, setViewBox] = useState({ w: 0, maxH: 480 });
+  const viewRef = useRef<HTMLDivElement | null>(null);
+  const viewRo = useRef<ResizeObserver | null>(null);
+  const setView = useCallback((el: HTMLDivElement | null) => {
+    viewRef.current = el;
+    viewRo.current?.disconnect();
+    viewRo.current = null;
+    if (!el) return;
+    const measure = () => setViewBox({ w: el.clientWidth, maxH: Math.round(window.innerHeight * 0.55) });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    viewRo.current = ro;
+    measure();
+  }, []);
+  const fitW = ratio && viewBox.w ? Math.min(viewBox.w, viewBox.maxH / ratio) : 0;
+  const stageW = fitW ? Math.round(fitW * zoom) : 0;
   const set = (p: Partial<PersonalizeConfig>) => onChange({ ...value, ...p });
   /** ตำแหน่ง: เปิด/ปิด + ชื่อ = ใช้ร่วมทุกสี (ค่าหลัก) · x/y/ขนาด/เอียง/จัดชิด = ของแท็บที่เปิด (สีที่แยกค่า หรือค่าหลัก) */
   const setPos = (key: PersonalizePosition["key"], p: Partial<PersonalizePosition>) => {
@@ -255,6 +277,19 @@ export function PersonalizeEditor({
     dragging.current = false;
   };
 
+  const centerOnStamp = () => {
+    const v = viewRef.current;
+    const st = stageRef.current;
+    const p = stagePositions.find((x) => x.enabled && x.key === active) ?? stagePositions.find((x) => x.enabled);
+    if (!v || !st || !p) return;
+    v.scrollTo({ left: Math.max(0, st.offsetLeft + (st.clientWidth * p.x) / 100 - v.clientWidth / 2), top: Math.max(0, st.offsetTop + (st.clientHeight * p.y) / 100 - v.clientHeight / 2), behavior: "smooth" });
+  };
+  useEffect(() => {
+    if (zoom <= 1) return;
+    const id = window.setTimeout(centerOnStamp, 40);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom]);
   const chip = (on: boolean) => `px-2.5 py-1 rounded-full border text-xs ${on ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
   const [head, last] = personalizeSplitLast(shown);
 
@@ -343,8 +378,8 @@ export function PersonalizeEditor({
 
       {value.enabled && (
         <div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-3">
-          {/* พรีวิว + ลากวางตำแหน่ง */}
-          <div>
+          {/* พรีวิว + ลากวางตำแหน่ง — 📌 จอคอมค้างที่ตอนเลื่อนแผงขวา */}
+          <div className="lg:sticky lg:top-0 lg:self-start lg:z-10 lg:bg-white">
             {/* 🖼 ฉากพรีวิว — ฉากหลัก + รูปมุมอื่นที่ลูกค้ากดดูรอยปั๊มได้ */}
             <div className="flex items-center gap-1.5 flex-wrap mb-1.5 text-[11px] text-slate-500">
               ฉากพรีวิว:
@@ -415,10 +450,20 @@ export function PersonalizeEditor({
                 ))}
               </div>
             </div>
-            <div ref={setStage} className="relative rounded-xl overflow-hidden bg-slate-100 select-none" style={{ touchAction: "none" }}>
+            {/* 🔍 กรอบดูรูป (เลื่อนดูได้ตอนซูม) → รูป + ข้อความลากได้ */}
+            <div ref={setView} className="relative rounded-xl overflow-auto overscroll-contain bg-slate-100" style={{ maxHeight: viewBox.maxH }}>
+            <div ref={setStage} className="relative select-none mx-auto" style={{ touchAction: "none", width: stageW ? `${stageW}px` : "100%" }}>
               {imageKey ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={keyUrl(imageKey)} alt="" className="block w-full h-auto pointer-events-none" onLoad={(e) => setImgW(e.currentTarget.clientWidth)} />
+                <img
+                  src={keyUrl(imageKey)}
+                  alt=""
+                  className="block w-full h-auto pointer-events-none"
+                  onLoad={(e) => {
+                    setImgW(e.currentTarget.clientWidth);
+                    if (e.currentTarget.naturalWidth) setRatio(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth);
+                  }}
+                />
               ) : (
                 <div className="aspect-square flex items-center justify-center text-sm text-slate-400">ยังไม่มีรูปสินค้า</div>
               )}
@@ -438,7 +483,7 @@ export function PersonalizeEditor({
                     padding: "0.1em 0",
                     fontFamily: '"Times New Roman", Times, serif',
                     letterSpacing: `${value.letterSpacing}em`,
-                    fontSize: `${(imgW * p.size) / 100}px`,
+                    fontSize: `${((stageSize.w || imgW) * p.size) / 100}px`,
                     ...(svgStamp ? { color: "transparent" } : PZ_STYLE[preview]),
                   }}
                 >
@@ -454,6 +499,27 @@ export function PersonalizeEditor({
               {stagePositions.filter((p) => p.enabled && p.key === active).map((p) => (
                 <span key={`dot-${p.key}`} className="absolute w-2 h-2 -ml-1 -mt-1 rounded-full bg-orange-500 ring-2 ring-white pointer-events-none" style={{ left: `${p.x}%`, top: `${p.y}%` }} title="จุดยึด" />
               ))}
+            </div>
+            </div>
+            {/* 🔍 ซูม */}
+            <div className="flex items-center gap-1 flex-wrap mt-1.5 text-[11px] text-slate-500">
+              🔍 ซูม:
+              <button type="button" onClick={() => setZoom((z) => ZOOMS[Math.max(0, ZOOMS.indexOf(z) - 1)])} disabled={zoom <= 1} className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 hover:border-slate-400 disabled:opacity-30" aria-label="ซูมออก">
+                −
+              </button>
+              {ZOOMS.map((z) => (
+                <button key={z} type="button" onClick={() => setZoom(z)} className={chip(zoom === z)}>
+                  {z === 1 ? "พอดี" : `${z * 100}%`}
+                </button>
+              ))}
+              <button type="button" onClick={() => setZoom((z) => ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + 1)])} disabled={zoom >= ZOOMS[ZOOMS.length - 1]} className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 hover:border-slate-400 disabled:opacity-30" aria-label="ซูมเข้า">
+                +
+              </button>
+              {zoom > 1 && (
+                <button type="button" onClick={centerOnStamp} className="ml-1 text-orange-600 hover:underline">
+                  🎯 ไปที่จุดปั๊ม
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-2 mt-1.5">
               <span className="text-[11px] text-slate-500">ข้อความตัวอย่าง</span>
