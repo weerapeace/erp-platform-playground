@@ -1,9 +1,9 @@
 "use client";
 
 // ============================================================
-// ป๊อปตั้งค่ารายงานอัตโนมัติ (เพิ่ม / แก้ไข) — แบบ A "การ์ดสรุป กดแก้ทีละเรื่อง" (เจ้าของเลือก 2026-10-23)
-//   เปิดมาเห็นสรุป 4 เรื่อง: 1 ส่งอะไร · 2 ส่งทางไหน · 3 เมื่อไหร่ · 4 หน้าตา — กดเรื่องไหนกางเรื่องนั้น (ทีละเรื่อง)
-//   ตัวอย่าง (อีเมล / รูป Discord / ป๊อป ERP) อยู่ที่ปุ่ม 👁 ดูตัวอย่าง ท้ายป๊อป · ตัวเลือกละเอียดซ่อนใต้ "ตั้งค่าเพิ่มเติม"
+// ป๊อปตั้งค่ารายงานอัตโนมัติ (เพิ่ม / แก้ไข) — 2 ฝั่ง (เจ้าของสั่ง 2026-10-24 "แบบเดิม แบ่ง 2 ฝั่ง แต่ดูง่ายขึ้น")
+//   ซ้าย: การ์ดสรุป 4 เรื่อง 1 ส่งอะไร · 2 ส่งทางไหน · 3 เมื่อไหร่ · 4 หน้าตา — กดเรื่องไหนกางเรื่องนั้น (ทีละเรื่อง) · ตัวเลือกละเอียดซ่อนใต้ "ตั้งค่าเพิ่มเติม"
+//   ขวา: 👁 ตัวอย่าง 3 แท็บเสมอ (อีเมล / Discord หน้าแชทจำลอง / ERP ป๊อป) อัปเดตเองหลังหยุดแก้ · มือถือ = อยู่ใต้ฟอร์ม
 // ใช้ของกลาง: ERPModal · ERPInput/ERPTextarea/ERPTime24 · UserPicker · FieldChipsPicker · WorkPopupBody · กฎตรวจค่า normalizeReportInput (ตัวเดียวกับ API)
 // "โชว์อะไร" อ่านรายการที่เลือกได้จากแหล่งข้อมูล (EMAIL_REPORT_SOURCES) — ไม่มีรายการตายตัวในหน้านี้
 // ============================================================
@@ -103,17 +103,18 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const previewSeq = useRef(0);
-  // แบบ A: เรื่องที่กางอยู่ (ทีละเรื่อง) · โหมดดูตัวอย่าง · ตั้งค่าเพิ่มเติมในเรื่องหน้าตา
+  // ซ้าย: เรื่องที่กางอยู่ (ทีละเรื่อง) + ตั้งค่าเพิ่มเติมในเรื่องหน้าตา · ขวา: แท็บตัวอย่าง
   const [sec, setSec] = useState<SectionKey | null>(null);
-  const [mode, setMode] = useState<"edit" | "preview">("edit");
   const [prevTab, setPrevTab] = useState<PreviewTab>("email");
+  const previewRef = useRef<HTMLDivElement>(null);
+  const seqRef = useRef({ d: 0, i: 0, p: 0 });   // กันผลตัวอย่างเก่าทับของใหม่ (แก้เร็ว ๆ)
   const [more, setMore] = useState(false);
   const toggleSec = (k: SectionKey) => setSec((s) => (s === k ? null : k));
 
   useEffect(() => {
     if (!open) return;
     setForm(initial); setError(null); setExtEmail(""); setExtErr(null);
-    setSec(editing ? null : "what"); setMode("edit"); setPrevTab("email"); setMore(false);   // เพิ่มใหม่ = กางเรื่องแรกให้เลย
+    setSec(editing ? null : "what"); setPrevTab("email"); setMore(false);   // เพิ่มใหม่ = กางเรื่องแรกให้เลย
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial]);
   useEffect(() => {
@@ -136,6 +137,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   useEffect(() => () => { if (img.url) URL.revokeObjectURL(img.url); }, [img.url]);
   useEffect(() => { if (!open) setImg((s) => ({ ...s, url: null, err: null })); }, [open]);
   const showImage = async () => {
+    const seq = ++seqRef.current.i;
     setImg((s) => ({ ...s, busy: true, err: null }));
     try {
       const r = await apiFetch("/api/admin/email-reports/preview?format=png", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
@@ -144,8 +146,8 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
         throw new Error(j.error || "วาดรูปไม่สำเร็จ");
       }
       const url = URL.createObjectURL(await r.blob());
-      setImg({ url, busy: false, err: null });
-    } catch (e) { setImg({ url: null, busy: false, err: e instanceof Error ? e.message : "วาดรูปไม่สำเร็จ" }); }
+      if (seq === seqRef.current.i) setImg({ url, busy: false, err: null }); else URL.revokeObjectURL(url);
+    } catch (e) { if (seq === seqRef.current.i) setImg({ url: null, busy: false, err: e instanceof Error ? e.message : "วาดรูปไม่สำเร็จ" }); }
   };
 
   // 🔔 ป๊อปตอนเข้า ERP: ตำแหน่ง (โหลดเมื่อเปิดใช้) + ตัวอย่างป๊อป (ข้อมูลจริงตอนนี้)
@@ -158,13 +160,14 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const [popPrev, setPopPrev] = useState<{ data: WorkPopupPayload | null; busy: boolean; err: string | null }>({ data: null, busy: false, err: null });
   useEffect(() => { if (!open) setPopPrev({ data: null, busy: false, err: null }); }, [open]);
   const showPopup = async () => {
+    const seq = ++seqRef.current.p;
     setPopPrev((s) => ({ ...s, busy: true, err: null }));
     try {
       const r = await apiFetch("/api/admin/email-reports/preview?format=popup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "โหลดตัวอย่างป๊อปไม่สำเร็จ");
-      setPopPrev({ data: j.data as WorkPopupPayload, busy: false, err: null });
-    } catch (e) { setPopPrev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่างป๊อปไม่สำเร็จ" }); }
+      if (seq === seqRef.current.p) setPopPrev({ data: j.data as WorkPopupPayload, busy: false, err: null });
+    } catch (e) { if (seq === seqRef.current.p) setPopPrev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่างป๊อปไม่สำเร็จ" }); }
   };
 
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
@@ -197,9 +200,9 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const brandIds = form.filters.brand_ids ?? [];
   const toggleBrand = (id: string) => setFilters({ brand_ids: brandIds.includes(id) ? brandIds.filter((x) => x !== id) : [...brandIds, id] });
 
-  // ตัวอย่างอีเมล: โหลดใหม่เองหลังหยุดแก้ 0.6 วิ — เฉพาะตอนดูตัวอย่าง หรือกางเรื่อง "หน้าตา" (ใช้ตัวเลข "มีข้อมูล x/y")
+  // ตัวอย่างอีเมล: โหลดใหม่เองหลังหยุดแก้ 0.6 วิ (ใช้ทั้งแท็บอีเมล และตัวเลข "มีข้อมูล x/y" ในเรื่องหน้าตา)
   const previewKey = JSON.stringify({ n: form.name, s: form.source_key, f: form.filters, o: form.options, d: form.days, t: form.send_time });
-  const wantPreview = open && (mode === "preview" || sec === "look");
+  const wantPreview = open;
   useEffect(() => {
     if (!wantPreview) return;
     const seq = ++previewSeq.current;
@@ -218,36 +221,38 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   // 💬 ตัวอย่างข้อความ Discord (ข้อความ 1 + การ์ดติ๊ก — ตัวประกอบเดียวกับตอนส่งจริง)
   const [dprev, setDprev] = useState<{ data: DiscordPreviewData | null; busy: boolean; err: string | null }>({ data: null, busy: false, err: null });
   const showDiscord = async () => {
-    setDprev((s) => ({ ...s, busy: true, err: null }));
+    const seq = ++seqRef.current.d;
+    setDprev((s) => ({ ...s, busy: true, err: null }));   // ของเดิมค้างไว้ระหว่างโหลด (ไม่กระพริบ)
     try {
       const r = await apiFetch("/api/admin/email-reports/preview?format=discord", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "โหลดตัวอย่าง Discord ไม่สำเร็จ");
-      setDprev({ data: j as DiscordPreviewData, busy: false, err: null });
-    } catch (e) { setDprev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่าง Discord ไม่สำเร็จ" }); }
+      if (seq === seqRef.current.d) setDprev({ data: j as DiscordPreviewData, busy: false, err: null });
+    } catch (e) { if (seq === seqRef.current.d) setDprev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่าง Discord ไม่สำเร็จ" }); }
   };
 
-  // แท็บตัวอย่าง 3 ช่องทางเสมอ (ช่องที่ยังไม่เปิด = ดูก่อนตัดสินใจเปิดได้) · เข้าแท็บไหนโหลดของแท็บนั้นเอง
+  // แท็บตัวอย่าง 3 ช่องทางเสมอ (ช่องที่ยังไม่เปิด = ดูก่อนตัดสินใจเปิดได้)
+  // แท็บที่เปิดอยู่อัปเดตเองหลังหยุดแก้ 0.7 วิ (Discord = ข้อความ + รูป · ป๊อป = เนื้อป๊อป)
   const previewTabs: { key: PreviewTab; label: string; on: boolean }[] = [
     { key: "email", label: "✉️ อีเมล", on: form.email_enabled },
     { key: "discord", label: "💬 Discord", on: discordOn },
     { key: "popup", label: "🔔 ERP ป๊อป", on: popupOn },
   ];
   const curTab: PreviewTab = prevTab;
+  const discordKey = JSON.stringify([previewKey, form.discord]);
+  const popupKey = JSON.stringify([previewKey, form.popup]);
   useEffect(() => {
-    if (mode !== "preview") return;
-    if (curTab === "discord") {
-      if (!dprev.data && !dprev.busy && !dprev.err) void showDiscord();
-      if (!img.url && !img.busy && !img.err) void showImage();
-    }
-    if (curTab === "popup" && !popPrev.data && !popPrev.busy && !popPrev.err) void showPopup();
+    if (!open || curTab !== "discord") return;
+    const t = setTimeout(() => { void showDiscord(); void showImage(); }, 700);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, curTab]);
-  const openPreview = () => {
-    if (img.url) URL.revokeObjectURL(img.url);
-    setImg({ url: null, busy: false, err: null }); setPopPrev({ data: null, busy: false, err: null }); setDprev({ data: null, busy: false, err: null });   // เข้าใหม่ = วาดจากค่าล่าสุด
-    setMode("preview");
-  };
+  }, [open, curTab, discordKey]);
+  useEffect(() => {
+    if (!open || curTab !== "popup") return;
+    const t = setTimeout(() => void showPopup(), 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, curTab, popupKey]);
   const offNote = (on: boolean, what: string) => (on ? null : (
     <p className="mb-2 rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-800">รายงานนี้ยังไม่ได้เปิด {what} — นี่คือหน้าตาถ้าเปิด (ติ๊กได้ที่เรื่อง 2 "ส่งทางไหน")</p>
   ));
@@ -271,7 +276,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     const parsed = normalizeReportInput(form);           // กฎเดียวกับ API — เตือนก่อนยิง
     if ("error" in parsed) {
       setError(parsed.error);
-      const s = sectionOfError(parsed.error); if (s) { setMode("edit"); setSec(s); }   // กางเรื่องที่ต้องแก้ให้เลย
+      const s = sectionOfError(parsed.error); if (s) setSec(s);   // กางเรื่องที่ต้องแก้ให้เลย
       return;
     }
     setSaving(true); setError(null);
@@ -324,21 +329,25 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   return (
     <ERPModal open={open} onClose={onClose} size="xl" storageKey="email-report-editor" hasUnsavedChanges={dirty}
       title={editing ? `แก้ไขรายงาน — ${editing.name}` : "เพิ่มรายงานอัตโนมัติ"}
-      description={mode === "preview" ? "หน้าตาจริงจากข้อมูลตอนนี้ (ยังไม่ส่ง)" : "สรุป 4 เรื่อง กดเรื่องไหนแก้เรื่องนั้น · ดูหน้าตาจริงที่ปุ่ม 👁 ดูตัวอย่าง"}
+      description="ซ้าย = ตั้งค่า 4 เรื่อง (กดเรื่องไหนแก้เรื่องนั้น) · ขวา = หน้าตาจริงจากข้อมูลตอนนี้ อัปเดตเองเมื่อแก้"
       footer={
         <div className="flex w-full flex-wrap items-center justify-end gap-2">
           {error && <span className="mr-auto text-sm text-rose-600">⚠ {error}</span>}
-          <button onClick={() => (mode === "preview" ? setMode("edit") : openPreview())} disabled={saving}
-            className={`h-9 rounded-lg border px-4 text-sm font-medium ${mode === "preview" ? "border-slate-300 text-slate-700 hover:bg-slate-50" : "border-blue-200 text-blue-700 hover:bg-blue-50"} ${error ? "" : "mr-auto"}`}>
-            {mode === "preview" ? "← กลับไปแก้" : "👁 ดูตัวอย่าง"}</button>
+          {/* มือถือ: ตัวอย่างอยู่ใต้ฟอร์ม — ปุ่มเลื่อนลงไปดู */}
+          <button type="button" onClick={() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className={`h-9 rounded-lg border border-blue-200 px-3 text-sm font-medium text-blue-700 hover:bg-blue-50 lg:hidden ${error ? "" : "mr-auto"}`}>👁 ตัวอย่าง ↓</button>
           <button onClick={onClose} disabled={saving} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
           <button onClick={() => void save()} disabled={saving} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             {saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
         </div>
       }>
-      {mode === "preview" ? (
-        /* ── 👁 ดูตัวอย่าง: แท็บตามช่องทางที่เปิด ── */
-        <div className="mx-auto max-w-4xl">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+        {/* ── ขวา: 👁 ตัวอย่าง 3 แท็บ (ข้อมูลจริงตอนนี้ · อัปเดตเองเมื่อแก้) — มือถืออยู่ใต้ฟอร์ม (order) ── */}
+        <div ref={previewRef} className="order-2 min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-3 lg:sticky lg:top-0 lg:self-start">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold text-slate-800">👁 ตัวอย่าง <span className="font-normal text-slate-400">(ข้อมูลจริงตอนนี้ · ยังไม่ส่ง)</span></span>
+            {(previewLoading || dprev.busy || img.busy || popPrev.busy) && <span className="text-[11px] text-slate-400">กำลังอัปเดต…</span>}
+          </div>
           <div className="mb-3 flex flex-wrap gap-1 border-b border-slate-200">
             {previewTabs.map((t) => (
               <button key={t.key} type="button" onClick={() => setPrevTab(t.key)}
@@ -358,7 +367,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">⚠ {previewErr}</div>
               ) : preview ? (
                 <iframe title="ตัวอย่างอีเมล" srcDoc={preview.html} sandbox="allow-popups allow-popups-to-escape-sandbox"
-                  className={`h-[65vh] min-h-[420px] w-full rounded-lg border border-slate-200 bg-slate-100 transition-opacity ${previewLoading ? "opacity-60" : ""}`} />
+                  className={`h-[calc(100vh-20rem)] min-h-[420px] w-full rounded-lg border border-slate-200 bg-slate-100 transition-opacity ${previewLoading ? "opacity-60" : ""}`} />
               ) : (
                 <div className="flex h-[420px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">กำลังเตรียมตัวอย่าง...</div>
               )}
@@ -407,9 +416,9 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             </div>
           )}
         </div>
-      ) : (
-        /* ── แบบ A: ชื่อ + การ์ดสรุป 4 เรื่อง ── */
-        <div className="mx-auto max-w-3xl space-y-3">
+
+        {/* ── ซ้าย: ชื่อ + การ์ดสรุป 4 เรื่อง (กดเรื่องไหนกางเรื่องนั้น) ── */}
+        <div className="order-1 min-w-0 space-y-3">
           <div>
             <label className={label}>ชื่อรายงาน</label>
             <ERPInput value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="เช่น งานออกแบบที่ค้าง (ทุกแบรนด์)" />
@@ -743,7 +752,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             )}
           </Section>
         </div>
-      )}
+      </div>
     </ERPModal>
   );
 }
