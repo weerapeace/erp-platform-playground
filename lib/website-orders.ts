@@ -29,7 +29,7 @@ import {
 } from "@/lib/website-field-map";
 import { baseColor, baseColorEn, cleanVariantOff, variantValue } from "@/lib/website-size-options";
 import { calcCardFee, calcGiftFee, orderPrefixFor, readSiteInfo, type SiteInfo } from "@/lib/website-site-info";
-import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, type PersonalizeChoice } from "@/lib/website-personalize";
+import { normalizePersonalize, normalizePersonalizeChoice, personalizeLabel, personalizeSnapshot, readOrderPersonalize, type OrderPersonalize, type PersonalizeChoice, type PersonalizePreviewSnap } from "@/lib/website-personalize";
 import { normalizeCouponCode, type StoreCoupon } from "@/lib/website-coupons";
 import { checkCoupon } from "@/lib/website-coupons-db";
 import { pointsConfigFrom, tierPerkDiscount, validateRedeem } from "@/lib/member-points";
@@ -157,6 +157,8 @@ export interface OrderLineView {
   lineTotal: number;
   /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ไม่มี = ไม่ส่ง) */
   gift?: ItemGift;
+  /** 🔤 ปั๊มชื่อ + 📸 ภาพรอยปั๊ม ณ ตอนสั่ง (ไม่มี = ไม่ส่ง) */
+  personalize?: OrderPersonalize;
 }
 
 export interface OrderView {
@@ -398,7 +400,8 @@ type LineInsert = {
   unit_price: number;
   qty: number;
   line_total: number;
-  personalize: PersonalizeChoice | null;
+  /** 🔤 ปั๊มชื่อ + 📸 ภาพรอยปั๊ม ณ ตอนสั่ง (ฝ่ายผลิตดูในหน้าออเดอร์/ใบแพ็ก) */
+  personalize: (PersonalizeChoice & { preview?: PersonalizePreviewSnap | null }) | null;
   /** 🧵 แบบเข็มขัด (belt_designs.id) — รายการสินค้าปกติ = null */
   belt_design_id?: string | null;
   /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ไม่มี = ไม่ใส่คีย์) */
@@ -540,13 +543,24 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     let variant = custom ?? picked.variantLabel;
     let variantEn = custom ? customOptionLabelEn(listing, it.optionId) || enOf(custom) : picked.variantParts.length ? picked.variantParts.map((p, i) => (i === 0 && picked.colorEn) || enOf(p)).join(" / ") : null;
     // 🔤 ปั๊มชื่อ: ยอมเฉพาะรุ่นที่เปิดไว้ และข้อความ/แบบ/ตำแหน่งต้องผ่านตัวกรอง
-    let personalize: PersonalizeChoice | null = null;
+    let personalize: LineInsert["personalize"] = null;
     if (it.personalize) {
       const cfg = (listing as { web_personalize?: unknown } | null)?.web_personalize ? normalizePersonalize((listing as { web_personalize?: unknown }).web_personalize) : null;
-      personalize = normalizePersonalizeChoice(it.personalize, cfg);
-      if (!personalize) return { ok: false, error: `สินค้า ${resolved.name} ปั๊มชื่อไม่ได้ หรือข้อความไม่ถูกต้อง`, status: 409 };
-      variant = [variant, personalizeLabel(personalize, cfg)].filter(Boolean).join(" · ");
-      variantEn = [variantEn, personalizeLabel(personalize, cfg, "en")].filter(Boolean).join(" · ");
+      const choice = normalizePersonalizeChoice(it.personalize, cfg);
+      if (!choice || !cfg) return { ok: false, error: `สินค้า ${resolved.name} ปั๊มชื่อไม่ได้ หรือข้อความไม่ถูกต้อง`, status: 409 };
+      variant = [variant, personalizeLabel(choice, cfg)].filter(Boolean).join(" · ");
+      variantEn = [variantEn, personalizeLabel(choice, cfg, "en")].filter(Boolean).join(" · ");
+      // 📸 ภาพรอยปั๊มที่ลูกค้าเห็น (คิดฝั่งเซิร์ฟเวอร์): รูปฉากหลักของสีที่สั่ง + ตำแหน่ง/มุมมอง/เอฟเฟกต์ของสีนั้น
+      const optItems = resolved.options?.items ?? [];
+      const opt = optItems.find((o) => o.id === it.optionId);
+      const imgsOf = (o: { image?: string | null; images?: string[] }) => (o.images?.length ? o.images : o.image ? [o.image] : []);
+      const ovKey =
+        Object.keys(cfg.colorOverrides).find((k) => {
+          const kid = kids.find((x) => x.id === k);
+          return !!kid && !!opt && baseColor(kid as unknown as Parameters<typeof baseColor>[0]) === opt.label;
+        }) ?? (picked.sku && cfg.colorOverrides[picked.sku.id] ? picked.sku.id : null);
+      const preview = personalizeSnapshot(cfg, choice, { colorImages: opt ? imgsOf(opt) : [], allColorImages: optItems.flatMap(imgsOf), overrideKey: ovKey, fallbackImageKey: resolved.images[0] ?? null });
+      personalize = preview ? { ...choice, preview } : choice;
     }
     // 🎀 ห่อ/💌 การ์ด รายชิ้น: ร้านต้องเปิดบริการ · ค่าห่อ × จำนวนชิ้น · การ์ด 1 ใบ/รายการ
     const ig = priceItemGift(it.gift, it.qty, info, resolved.name, giftCfg);
@@ -872,6 +886,8 @@ export type ItemRow = {
   line_total: number | string;
   /** 🎀 ห่อ/💌 การ์ด รายชิ้น (store_order_items.gift) */
   gift?: unknown;
+  /** 🔤 ปั๊มชื่อ (store_order_items.personalize — มีภาพ ณ ตอนสั่งในออเดอร์ใหม่) */
+  personalize?: unknown;
 };
 
 /** viewLang = ภาษาที่จะโชว์ชื่อสินค้า (ไม่ส่ง = ภาษาที่ลูกค้าใช้ตอนสั่ง) · พนักงาน = "th" เสมอ */
@@ -893,6 +909,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
     },
     items: items.map((i) => {
       const gift = readItemGift(i.gift);
+      const personalize = readOrderPersonalize(i.personalize);
       return {
         name: (show === "en" && i.name_en) || i.name,
         variantLabel: (show === "en" && i.variant_label_en) || i.variant_label,
@@ -900,6 +917,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
         qty: i.qty,
         lineTotal: num(i.line_total),
         ...(gift ? { gift } : {}),
+        ...(personalize ? { personalize } : {}),
       };
     }),
     subtotal: num(o.subtotal),

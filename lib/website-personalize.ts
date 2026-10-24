@@ -8,7 +8,9 @@
  *   - ตัวที่ปั๊มได้ตั้งต่อรุ่น (charset + ตัวพิเศษ symbols) — ตัวกรองเดียวกันทั้งตอนพิมพ์ (เว็บร้าน) และตอนสั่ง (ERP ตรวจซ้ำ)
  *     storefront มิเรอร์ใน src/lib/personalize.ts
  *   - ฟอนต์ Times New Roman ตายตัว (ตามที่เจ้าของร้านกำหนด) · นับความยาวเป็น "ตัว" (♥ = 1 ตัว)
- *   - 🖼 ฉากพรีวิวเพิ่ม (scenes) = รูปมุมอื่นที่ลูกค้าเห็นรอยปั๊มด้วย · แต่ละฉากตั้งตำแหน่งเอง + เลือกว่าตำแหน่งไหนโชว์ในฉากนั้น
+ *   - 🖼 ฉากพรีวิวเพิ่ม (scenes) = รูปมุมอื่นที่ลูกค้าเห็นรอยปั๊มด้วย · แต่ละฉากตั้งตำแหน่งเอง + เลือกว่าตำแหน่งไหนโชว์ในฉากนั้น · จำกัดสีได้ (colors)
+ *   - 📐 มุมมองต่อตำแหน่ง (skewX/skewY/scaleX/scaleY) — รูปที่ถ่ายเฉียง รอยปั๊มเอียง/บีบตามผิวกระเป๋า
+ *   - 📸 personalizeSnapshot = ภาพรอยปั๊ม ณ ตอนสั่ง (เก็บในออเดอร์) — ฝ่ายผลิตเห็นภาพเดียวกับลูกค้า แม้แก้ค่าตั้งทีหลัง
  */
 export type PersonalizeStyle = "emboss" | "silver" | "gold";
 export type PersonalizePositionKey = "center" | "right";
@@ -24,7 +26,19 @@ export interface PersonalizePosition {
   size: number;
   rotate: number;
   align: PersonalizeAlign;
+  /** 📐 มุมมอง: เอียงแนวนอน/แนวตั้ง (องศา) · ยืด/บีบแนวนอน/แนวตั้ง (% · 100 = เท่าเดิม) */
+  skewX: number;
+  skewY: number;
+  scaleX: number;
+  scaleY: number;
 }
+/** 📐 ช่วงค่ามุมมอง [ต่ำสุด, สูงสุด, ค่าเริ่ม] */
+export const PERSONALIZE_PERSPECTIVE: Record<"skewX" | "skewY" | "scaleX" | "scaleY", [number, number, number]> = {
+  skewX: [-45, 45, 0],
+  skewY: [-45, 45, 0],
+  scaleX: [30, 160, 100],
+  scaleY: [30, 160, 100],
+};
 /** กลุ่มตัวอักษรที่ปั๊มได้ (ตามบล็อกตัวปั๊มที่โรงงานมี) */
 export interface PersonalizeCharset {
   upper: boolean;
@@ -441,7 +455,9 @@ export function personalizeFoilFilter(fx: PersonalizeFoilFx, fontPx: number): st
  * สีที่ "ตั้งค่าแยก" = ใช้ตำแหน่ง (x/y/ขนาด/เอียง/จัดชิด) + เอฟเฟกต์ (จม/เงิน/ทอง) ของสีนั้นแทนค่าหลัก
  * สีที่ไม่ได้แยก = ใช้ค่าหลัก · ค่าที่ใช้ร่วมทุกสี: เปิด/ปิดตำแหน่ง · ชื่อตำแหน่ง · จำนวนตัวอักษร · ตัวที่ปั๊มได้ · ตัวพิเศษ · แบบที่ให้เลือก
  * ERP เก็บด้วยรหัส SKU ลูก · เว็บร้านได้คีย์เป็นรหัสตัวเลือกสี ("sku-" + 8 ตัวแรก) จาก products API */
-export type PersonalizeColorPos = Pick<PersonalizePosition, "key" | "x" | "y" | "size" | "rotate" | "align">;
+export type PersonalizeColorPos = Pick<PersonalizePosition, "key" | "x" | "y" | "size" | "rotate" | "align" | "skewX" | "skewY" | "scaleX" | "scaleY">;
+/** พิกัด + มุมมองของตำแหน่ง (ไม่รวมชื่อ/เปิดปิด) */
+export const personalizeGeo = (p: PersonalizeColorPos): PersonalizeColorPos => ({ key: p.key, x: p.x, y: p.y, size: p.size, rotate: p.rotate, align: p.align, skewX: p.skewX, skewY: p.skewY, scaleX: p.scaleX, scaleY: p.scaleY });
 export interface PersonalizeColorOverride {
   positions: PersonalizeColorPos[];
   embossFx: PersonalizeEmbossFx;
@@ -475,6 +491,7 @@ export function normalizeColorOverrides(raw: unknown): Record<string, Personaliz
         size: n(p.size, 1, 30, 5),
         rotate: n(p.rotate, -45, 45, 0),
         align: (typeof p.align === "string" && ALIGN_SET.has(p.align) ? p.align : "center") as PersonalizeAlign,
+        ...normPerspective(p),
       });
     }
     out[key] = { positions, embossFx: normalizeEmbossFx(r.embossFx), foilFx: normalizeFoilFxPair(r.foilFx) };
@@ -485,7 +502,7 @@ export function normalizeColorOverrides(raw: unknown): Record<string, Personaliz
 /** เริ่มค่าแยกของสีจากค่าหลัก (ติ๊ก "ตั้งค่าแยกสำหรับสีนี้") */
 export function makeColorOverride(cfg: Pick<PersonalizeConfig, "positions" | "embossFx" | "foilFx">): PersonalizeColorOverride {
   return {
-    positions: cfg.positions.map((p) => ({ key: p.key, x: p.x, y: p.y, size: p.size, rotate: p.rotate, align: p.align })),
+    positions: cfg.positions.map(personalizeGeo),
     embossFx: { ...cfg.embossFx },
     foilFx: {
       silver: { ...cfg.foilFx.silver, stops: cfg.foilFx.silver.stops.map((s) => ({ ...s })) },
@@ -501,7 +518,7 @@ export function applyColorOverride<C extends Pick<PersonalizeConfig, "positions"
     ...cfg,
     positions: cfg.positions.map((p) => {
       const o = ov.positions.find((x) => x.key === p.key);
-      return o ? { ...p, x: o.x, y: o.y, size: o.size, rotate: o.rotate, align: o.align } : p;
+      return o ? { ...p, ...personalizeGeo(o) } : p;
     }),
     embossFx: ov.embossFx,
     foilFx: ov.foilFx,
@@ -520,6 +537,8 @@ export interface PersonalizeScene {
   label: string;
   imageKey: string;
   positions: PersonalizeScenePos[];
+  /** 🎨 โชว์เฉพาะสีเหล่านี้ (id SKU ลูก · เว็บได้เป็นรหัสตัวเลือกสี) — ว่าง = ทุกสี (สลับรูปมุมเดียวกันให้เอง) · จำกัดสี = ใช้รูปนี้ตรง ๆ */
+  colors: string[];
 }
 export const PERSONALIZE_MAX_SCENES = 8;
 
@@ -529,8 +548,8 @@ export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   styles: ["emboss", "silver", "gold"],
   imageKey: null,
   positions: [
-    { key: "center", label: "ตรงกลาง", enabled: true, x: 50, y: 52, size: 5, rotate: 0, align: "center" },
-    { key: "right", label: "มุมขวาล่าง", enabled: true, x: 80, y: 74, size: 4.5, rotate: 0, align: "right" },
+    { key: "center", label: "ตรงกลาง", enabled: true, x: 50, y: 52, size: 5, rotate: 0, align: "center", skewX: 0, skewY: 0, scaleX: 100, scaleY: 100 },
+    { key: "right", label: "มุมขวาล่าง", enabled: true, x: 80, y: 74, size: 4.5, rotate: 0, align: "right", skewX: 0, skewY: 0, scaleX: 100, scaleY: 100 },
   ],
   letterSpacing: 0.08,
   charset: { upper: true, lower: true, digits: true, space: true, punct: true },
@@ -548,6 +567,12 @@ const num = (v: unknown, fb: number, lo: number, hi: number) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 10) / 10)) : fb;
 };
+
+/** 📐 อ่านค่ามุมมอง (ไม่มี/ผิด = ค่าเริ่ม: ไม่เอียง ไม่ยืด) */
+function normPerspective(q: Record<string, unknown>): Pick<PersonalizePosition, "skewX" | "skewY" | "scaleX" | "scaleY"> {
+  const g = (k: keyof typeof PERSONALIZE_PERSPECTIVE) => num(q[k], PERSONALIZE_PERSPECTIVE[k][2], PERSONALIZE_PERSPECTIVE[k][0], PERSONALIZE_PERSPECTIVE[k][1]);
+  return { skewX: g("skewX"), skewY: g("skewY"), scaleX: g("scaleX"), scaleY: g("scaleY") };
+}
 
 const SCENE_ID_RE = /^[\w-]{1,24}$/;
 /** อ่านฉากพรีวิวจาก DB (ไม่มีรูป/รหัสซ้ำ = ตัดทิ้ง · สูงสุด 8 ฉาก · ตำแหน่งที่ขาด = ค่าเริ่มแต่ไม่โชว์) */
@@ -576,8 +601,10 @@ export function normalizeScenes(raw: unknown): PersonalizeScene[] {
           size: num(q.size, d.size, 1, 30),
           rotate: num(q.rotate, d.rotate, -45, 45),
           align: (typeof q.align === "string" && ALIGNS.has(q.align) ? q.align : d.align) as PersonalizeAlign,
+          ...normPerspective(q),
         };
       }),
+      colors: Array.isArray(r.colors) ? [...new Set(r.colors.filter((c): c is string => typeof c === "string" && /^[\w-]{1,64}$/.test(c)))].slice(0, PERSONALIZE_MAX_COLOR_OVERRIDES) : [],
     });
   }
   return out;
@@ -589,7 +616,8 @@ export function makeScene(cfg: Pick<PersonalizeConfig, "positions">, imageKey: s
     id: `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
     label: "",
     imageKey,
-    positions: cfg.positions.map((p) => ({ key: p.key, show: p.enabled, x: p.x, y: p.y, size: p.size, rotate: p.rotate, align: p.align })),
+    positions: cfg.positions.map((p) => ({ ...personalizeGeo(p), show: p.enabled })),
+    colors: [],
   };
 }
 
@@ -635,6 +663,7 @@ export function normalizePersonalize(raw: unknown): PersonalizeConfig {
       size: num(q.size, d.size, 1, 30),
       rotate: num(q.rotate, d.rotate, -45, 45),
       align: (typeof q.align === "string" && ALIGNS.has(q.align) ? q.align : p ? "center" : d.align) as PersonalizeAlign,
+      ...normPerspective(q),
     };
   });
   const cs = (r.charset && typeof r.charset === "object" ? r.charset : {}) as Record<string, unknown>;
@@ -659,10 +688,90 @@ export function normalizePersonalize(raw: unknown): PersonalizeConfig {
   };
 }
 
-/** ตำแหน่งข้อความบนรูป: จุดยึด x/y + การจัด → transform (หมุนรอบจุดยึด) — ใช้ทั้งพรีวิว ERP และเว็บร้าน */
-export function personalizeTextPlacement(p: Pick<PersonalizePosition, "x" | "y" | "rotate" | "align">): { left: string; top: string; transform: string; transformOrigin: string } {
+type Perspective = Partial<Pick<PersonalizePosition, "skewX" | "skewY" | "scaleX" | "scaleY">>;
+/** ตำแหน่งข้อความบนรูป: จุดยึด x/y + การจัด → transform (หมุน + เอียง/ยืดรอบจุดยึด) — ใช้ทั้งพรีวิว ERP และเว็บร้าน */
+export function personalizeTextPlacement(p: Pick<PersonalizePosition, "x" | "y" | "rotate" | "align"> & Perspective): { left: string; top: string; transform: string; transformOrigin: string } {
   const off = PERSONALIZE_ALIGN_OFFSET[p.align] ?? 0.5;
-  return { left: `${p.x}%`, top: `${p.y}%`, transform: `translate(${-off * 100}%, -50%) rotate(${p.rotate}deg)`, transformOrigin: `${off * 100}% 50%` };
+  const persp = `${p.skewX ? ` skewX(${p.skewX}deg)` : ""}${p.skewY ? ` skewY(${p.skewY}deg)` : ""}${(p.scaleX ?? 100) !== 100 || (p.scaleY ?? 100) !== 100 ? ` scale(${(p.scaleX ?? 100) / 100}, ${(p.scaleY ?? 100) / 100})` : ""}`;
+  return { left: `${p.x}%`, top: `${p.y}%`, transform: `translate(${-off * 100}%, -50%) rotate(${p.rotate}deg)${persp}`, transformOrigin: `${off * 100}% 50%` };
+}
+
+/** transform ของ SVG text ที่จุดยึด (x, y เป็น px) — หมุน + เอียง/ยืดรอบจุดยึด · ไม่มีอะไรเลย = undefined */
+export function personalizeSvgTransform(p: Pick<PersonalizePosition, "rotate"> & Perspective, x: number, y: number): string | undefined {
+  const sx = p.scaleX ?? 100;
+  const sy = p.scaleY ?? 100;
+  if (!p.rotate && !p.skewX && !p.skewY && sx === 100 && sy === 100) return undefined;
+  const parts = [`translate(${x} ${y})`];
+  if (p.rotate) parts.push(`rotate(${p.rotate})`);
+  if (p.skewX) parts.push(`skewX(${p.skewX})`);
+  if (p.skewY) parts.push(`skewY(${p.skewY})`);
+  if (sx !== 100 || sy !== 100) parts.push(`scale(${sx / 100} ${sy / 100})`);
+  parts.push(`translate(${-x} ${-y})`);
+  return parts.join(" ");
+}
+
+/* ── 📸 ภาพรอยปั๊ม ณ ตอนสั่ง (store_order_items.personalize.preview) ──
+ * คิดฝั่งเซิร์ฟเวอร์ตอนรับออเดอร์ (ไม่เชื่อหน้าเว็บ): รูปฉากหลักของสีที่สั่ง + ตำแหน่ง/มุมมองที่ใช้จริง (ค่าแยกตามสีถ้ามี) + เอฟเฟกต์ของแบบที่เลือก
+ * เก็บค่าไว้ทั้งก้อน → แก้ค่าตั้งทีหลัง ภาพในออเดอร์เดิมไม่เปลี่ยน */
+export interface PersonalizePreviewSnap {
+  imageKey: string;
+  pos: PersonalizeColorPos;
+  letterSpacing: number;
+  embossFx?: PersonalizeEmbossFx;
+  foilFx?: PersonalizeFoilFx;
+}
+export function personalizeSnapshot(
+  cfg: PersonalizeConfig,
+  choice: PersonalizeChoice,
+  opts: { colorImages: string[]; allColorImages: string[]; overrideKey?: string | null; fallbackImageKey?: string | null },
+): PersonalizePreviewSnap | null {
+  const eff = applyColorOverride(cfg, opts.overrideKey ? cfg.colorOverrides[opts.overrideKey] : undefined);
+  const pos = eff.positions.find((p) => p.enabled && p.key === choice.position);
+  if (!pos) return null;
+  // รูปฉากตั้งเป็นรูปของสี (หรือไม่ได้เลือก) = รูปของสีที่สั่ง · ไม่งั้น = รูปที่ตั้งไว้ (เหมือน personalizeForOption ฝั่งเว็บร้าน)
+  const colorImg = opts.colorImages[0];
+  const sceneIsColorShot = !cfg.imageKey || opts.allColorImages.includes(cfg.imageKey);
+  const imageKey = colorImg && sceneIsColorShot ? colorImg : cfg.imageKey ?? colorImg ?? opts.fallbackImageKey ?? null;
+  if (!imageKey) return null;
+  return {
+    imageKey,
+    pos: personalizeGeo(pos),
+    letterSpacing: eff.letterSpacing,
+    ...(choice.style === "emboss" ? { embossFx: eff.embossFx } : { foilFx: eff.foilFx[choice.style] }),
+  };
+}
+/** ปั๊มชื่อของรายการในออเดอร์ (store_order_items.personalize) — ข้อความ/แบบ/ตำแหน่ง + ภาพ ณ ตอนสั่ง (ออเดอร์เก่า = ไม่มีภาพ) */
+export type OrderPersonalize = PersonalizeChoice & { preview: PersonalizePreviewSnap | null };
+export function readOrderPersonalize(raw: unknown): OrderPersonalize | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.text !== "string" || !r.text) return null;
+  const style = (PERSONALIZE_STYLES.some((x) => x.value === r.style) ? r.style : "emboss") as PersonalizeStyle;
+  return { text: r.text, style, position: r.position === "right" ? "right" : "center", preview: readPersonalizePreview(r.preview, style) };
+}
+
+/** อ่านภาพรอยปั๊มจากออเดอร์ (ข้อมูลเก่าไม่มี = null) */
+export function readPersonalizePreview(raw: unknown, style: PersonalizeStyle): PersonalizePreviewSnap | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.imageKey !== "string" || !KEY_RE.test(r.imageKey) || !r.pos || typeof r.pos !== "object") return null;
+  const q = r.pos as Record<string, unknown>;
+  const key = q.key === "right" ? "right" : "center";
+  const ls = Number(r.letterSpacing);
+  return {
+    imageKey: r.imageKey,
+    pos: {
+      key,
+      x: num(q.x, 50, 0, 100),
+      y: num(q.y, 50, 0, 100),
+      size: num(q.size, 5, 1, 30),
+      rotate: num(q.rotate, 0, -45, 45),
+      align: (typeof q.align === "string" && ALIGNS.has(q.align) ? q.align : "center") as PersonalizeAlign,
+      ...normPerspective(q),
+    },
+    letterSpacing: Number.isFinite(ls) ? Math.min(0.5, Math.max(0, ls)) : DEFAULT_PERSONALIZE.letterSpacing,
+    ...(style === "emboss" ? { embossFx: normalizeEmbossFx(r.embossFx) } : { foilFx: normalizeFoilFx(r.foilFx, style) }),
+  };
 }
 
 /** แยกตัวสุดท้ายออก (ไม่ใส่ความห่างหลังตัวสุดท้าย → ชิดซ้าย/ขวาตรงจุดพอดี) */

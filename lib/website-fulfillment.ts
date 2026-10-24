@@ -5,7 +5,9 @@
  *   - parseTrackingPaste : วางเลขพัสดุหลายบรรทัด (จากไฟล์ขนส่ง/Excel) → จับคู่กับเลขออเดอร์
  *   - fulfillmentPrintHtml : ใบปะหน้า (ผู้ส่ง/ผู้รับ/COD/วิธีส่ง/กล่อง) + ใบแพ็ก (รายการสินค้า) พร้อมพิมพ์
  * ใช้ที่: components/website-orders-panel (ตัวกรอง 📦 พร้อมแพ็ก · ใส่เลขพัสดุหลายใบ) · app/print/web-orders
+ *   - ใบแพ็ก: รายการที่ปั๊มชื่อ = รูปรอยปั๊ม ณ ตอนสั่ง (pzPreviewHtml) ให้ฝ่ายผลิตเห็นภาพเดียวกับลูกค้า
  */
+import { personalizeTextPlacement, type OrderPersonalize } from "@/lib/website-personalize";
 
 export type PackOrder = {
   id: string;
@@ -16,7 +18,7 @@ export type PackOrder = {
   customerName: string;
   customerPhone: string;
   ship: { addressLine: string; subdistrict: string; district: string; province: string; postal: string };
-  items: { name: string; variantLabel: string | null; qty: number; lineTotal: number }[];
+  items: { name: string; variantLabel: string | null; qty: number; lineTotal: number; personalize?: OrderPersonalize | null }[];
   skuCodes?: string[];
   grandTotal: number;
   note?: string;
@@ -69,6 +71,23 @@ export function parseTrackingPaste(text: string, orders: Pick<PackOrder, "id" | 
   return out;
 }
 
+/** 📸 รูปรอยปั๊ม ณ ตอนสั่ง (ใบแพ็ก) — ข้อความ HTML ทับรูป ขนาดตามกรอบ (cqw) · สีทึบ (เงิน/ทอง = สีกลางของไล่สี) */
+function pzPreviewHtml(pz: OrderPersonalize): string {
+  const sn = pz.preview;
+  if (!sn) return "";
+  const pl = personalizeTextPlacement(sn.pos);
+  const foil = sn.foilFx;
+  // ไล่สี → สีกลางค่อนเข้ม (เรียงตามความสว่าง) อ่านออกบนกระดาษ
+  const lum = (hex: string) => {
+    const n = parseInt(hex.replace("#", "").padEnd(6, "0").slice(0, 6), 16) || 0;
+    return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  };
+  const byLum = foil ? [...foil.stops].sort((a, b) => lum(a.color) - lum(b.color)) : [];
+  const color = !foil ? "rgba(0,0,0,.6)" : foil.mode === "solid" ? foil.solid : byLum[Math.floor((byLum.length - 1) / 2)]?.color ?? "#a68a3a";
+  const css = `position:absolute;left:${pl.left};top:${pl.top};transform:${pl.transform};transform-origin:${pl.transformOrigin};white-space:nowrap;line-height:1;font-family:'Times New Roman',Times,serif;font-size:${sn.pos.size}cqw;letter-spacing:${sn.letterSpacing}em;color:${color}`;
+  return `<div class="pzp"><img src="/api/r2-image?key=${encodeURIComponent(sn.imageKey)}&w=600" alt=""><div style="${esc(css)}">${esc(pz.text)}</div></div>`;
+}
+
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const money = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
 const addr = (s: PackOrder["ship"]) => [s.addressLine, s.subdistrict, s.district, s.province].filter(Boolean).join(" ");
@@ -105,13 +124,14 @@ export function fulfillmentPrintHtml(orders: PackOrder[], sender: Sender, kind: 
   const packing = (o: PackOrder) => `<div class="pack">
       <div class="ph"><b>ใบแพ็กสินค้า</b> ${esc(o.orderNo)} · ${esc(new Date(o.createdAt).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }))}${o.shippingMethod?.box ? ` · ใช้กล่อง <b>${esc(o.shippingMethod.box)}</b>` : ""}</div>
       <table><thead><tr><th style="width:2.2em">✓</th><th>สินค้า</th><th style="width:4em;text-align:right">จำนวน</th></tr></thead><tbody>
-      ${o.items.map((i) => `<tr><td><span class="box"></span></td><td>${esc(i.name)}${i.variantLabel ? ` <span class="v">(${esc(i.variantLabel)})</span>` : ""}</td><td style="text-align:right"><b>${i.qty}</b></td></tr>`).join("")}
+      ${o.items.map((i) => `<tr><td><span class="box"></span></td><td>${esc(i.name)}${i.variantLabel ? ` <span class="v">(${esc(i.variantLabel)})</span>` : ""}${i.personalize?.preview ? pzPreviewHtml(i.personalize) : ""}</td><td style="text-align:right"><b>${i.qty}</b></td></tr>`).join("")}
       </tbody></table>
       <div class="sum">รวม ${o.items.reduce((a, i) => a + i.qty, 0)} ชิ้น${o.skuCodes?.length ? ` · ${esc(o.skuCodes.join(", "))}` : ""}</div>
       ${o.giftWrap ? `<div class="warn">🎀 ห่อของขวัญ${o.giftHidePrice ? " · ห้ามใส่ใบเสร็จ/ป้ายราคาในกล่อง" : ""}${o.giftMessage ? `<br>การ์ด: “${esc(o.giftMessage)}”` : ""}</div>` : ""}
       ${o.note ? `<div class="note">หมายเหตุ: ${esc(o.note)}</div>` : ""}
     </div>`;
   const css = `@page{size:A4;margin:8mm}*{box-sizing:border-box}body{margin:0;font-family:"Sarabun","Noto Sans Thai",sans-serif;color:#111;font-size:12pt}
+.pzp{position:relative;width:42mm;margin:1mm 0;border:1px solid #ccc;border-radius:2mm;overflow:hidden;container-type:inline-size}.pzp img{display:block;width:100%}
 .page{page-break-after:always;break-after:page}.page:last-child{page-break-after:auto;break-after:auto}
 .label{border:2px solid #111;border-radius:6px;padding:4mm;display:flex;flex-direction:column;gap:3mm;height:136mm}
 .from{font-size:10pt;color:#333;border-bottom:1px dashed #999;padding-bottom:2mm}

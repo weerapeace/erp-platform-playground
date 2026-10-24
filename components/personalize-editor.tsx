@@ -11,13 +11,16 @@
  *        / เงิน · ทอง (สีเดียว/ไล่สี 2–6 ระดับ + Bevel & Emboss · Drop Shadow · Inner Shadow) — พรีวิวด้วย SVG ตัวเดียวกับเว็บร้าน
  *   - พรีวิวเหมือนเว็บจริง (ฟอนต์ Times New Roman + เอฟเฟกต์เดียวกัน)
  *   - 🖼 แท็บฉากพรีวิว: ⭐ ฉากหลัก / ฉากเพิ่ม (รูปมุมอื่น สูงสุด 8) — ฉากเพิ่มมีรูป · ชื่อ · ตำแหน่งของตัวเอง (ลากบนรูป) · ติ๊กว่าตำแหน่งไหนเห็นในฉากนั้น
- *        ใช้ร่วมทุกสี (แท็บสี = ดูรูปมุมเดียวกันของสีนั้น + เอฟเฟกต์ของสีนั้น)
+ *        ใช้ร่วมทุกสี (แท็บสี = ดูรูปมุมเดียวกันของสีนั้น + เอฟเฟกต์ของสีนั้น) · หรือจำกัด "โชว์กับสี" = ใช้รูปของฉากตรง ๆ เฉพาะสีที่เลือก
+ *   - 📐 มุมมองต่อตำแหน่ง (เอียงแนวนอน/แนวตั้ง · ยืด/บีบ) — รูปที่ถ่ายเฉียง ให้รอยปั๊มเอียงตามผิวกระเป๋า
+ * วาดรอยปั๊ม: components/personalize-stamp (ของกลาง ใช้กับหน้าออเดอร์ด้วย)
  * ของกลาง: lib/website-personalize.ts (ชนิดข้อมูล/ค่าเริ่มต้น/ตัวกรอง/ตำแหน่งข้อความ)
  */
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { RangeInput } from "@/components/range-input";
 import { ColorInput } from "@/components/color-picker";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { PersonalizeStampSvg } from "@/components/personalize-stamp";
 import {
   PERSONALIZE_ALIGNS,
   PERSONALIZE_ALIGN_OFFSET,
@@ -30,14 +33,13 @@ import {
   FOIL_MAX_STOPS,
   FOIL_PRESETS,
   PERSONALIZE_MAX_SCENES,
+  PERSONALIZE_PERSPECTIVE,
   applyColorOverride,
   cleanPersonalizeText,
   makeColorOverride,
   makeScene,
-  personalizeEmbossFilter,
+  personalizeGeo,
   personalizeFoilCss,
-  personalizeFoilFilter,
-  personalizeFoilGradientEnds,
   parsePersonalizeSymbols,
   personalizeSplitLast,
   personalizeTextPlacement,
@@ -140,7 +142,6 @@ export function PersonalizeEditor({
     roRef.current = ro;
     measure();
   }, []);
-  const fxId = `pzfx-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   // 🎨 แท็บสี: null = ค่าหลัก · ov = ค่าแยกของสีนั้น (ไม่มี = ใช้ค่าหลัก → ล็อกช่อง) · eff = ค่าที่ใช้จริงของแท็บนี้
   const [colorTab, setColorTab] = useState<string | null>(null);
   const tabColor = colors.find((c) => c.id === colorTab) ?? null;
@@ -171,7 +172,7 @@ export function PersonalizeEditor({
   const stagePositions: PersonalizePosition[] = scene
     ? eff.positions.map((p) => {
         const sp = scene.positions.find((x) => x.key === p.key);
-        return sp ? { ...p, x: sp.x, y: sp.y, size: sp.size, rotate: sp.rotate, align: sp.align, enabled: p.enabled && sp.show } : { ...p, enabled: false };
+        return sp ? { ...p, ...personalizeGeo(sp), enabled: p.enabled && sp.show } : { ...p, enabled: false };
       })
     : eff.positions;
   const setScene = (p: Partial<PersonalizeScene>) => {
@@ -211,7 +212,13 @@ export function PersonalizeEditor({
   };
   // ฉากเพิ่ม + แท็บสี = รูปลำดับเดียวกันของสีนั้น (เหมือนที่เว็บร้านสลับให้ลูกค้า)
   const imagesOf = (c: (typeof colors)[number]) => ({ images: c.images?.length ? c.images : c.imageKey ? [c.imageKey] : [] });
-  const imageKey = scene ? sameAngleImage(scene.imageKey, colors.map(imagesOf), tabColor ? imagesOf(tabColor) : null) : (tabColor?.imageKey ?? value.imageKey ?? fallbackImageKey);
+  const imageKey = scene
+    ? scene.colors.length
+      ? scene.imageKey
+      : sameAngleImage(scene.imageKey, colors.map(imagesOf), tabColor ? imagesOf(tabColor) : null)
+    : (tabColor?.imageKey ?? value.imageKey ?? fallbackImageKey);
+  /** ฉากนี้โชว์กับสีของแท็บที่เปิดไหม (ไม่ได้เลือกสี/ไม่จำกัดสี = โชว์) */
+  const sceneForTab = (sc: PersonalizeScene) => !tabColor || !sc.colors.length || sc.colors.includes(tabColor.id);
   const shown = cleanPersonalizeText(sample, value) ?? "YOUR NAME";
 
   /** เปลี่ยนการจัด → ขยับจุดยึดให้ข้อความตัวอย่างอยู่ที่เดิม (ไม่กระโดด) */
@@ -339,10 +346,17 @@ export function PersonalizeEditor({
                 ⭐ ฉากหลัก
               </button>
               {value.scenes.map((sc, i) => (
-                <button key={sc.id} type="button" onClick={() => setSceneId(sc.id)} className={`${chip(scene?.id === sc.id)} inline-flex items-center gap-1.5`}>
+                <button
+                  key={sc.id}
+                  type="button"
+                  onClick={() => setSceneId(sc.id)}
+                  className={`${chip(scene?.id === sc.id)} inline-flex items-center gap-1.5 ${sceneForTab(sc) ? "" : "opacity-40"}`}
+                  title={sceneForTab(sc) ? undefined : `ฉากนี้ไม่โชว์กับสี "${tabColor?.label}"`}
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={keyUrl(sc.imageKey, 80)} alt="" className="w-4 h-4 rounded object-cover" />
                   {sc.label || `ฉาก ${i + 2}`}
+                  {sc.colors.length > 0 && <span className="rounded-full bg-sky-100 px-1.5 text-[10px] text-sky-700">{sc.colors.length} สี</span>}
                 </button>
               ))}
               {value.scenes.length < PERSONALIZE_MAX_SCENES && imageOptions.length > 0 && (
@@ -357,6 +371,24 @@ export function PersonalizeEditor({
                 <button type="button" onClick={removeScene} className="text-[11px] text-red-600 hover:underline">
                   ลบฉากนี้
                 </button>
+              </div>
+            )}
+            {scene && colors.length > 1 && (
+              <div className="flex items-center gap-1 flex-wrap mb-1.5 text-[11px] text-slate-500">
+                🎨 โชว์กับสี:
+                <button type="button" onClick={() => setScene({ colors: [] })} className={chip(!scene.colors.length)} title="ทุกสี — เว็บสลับเป็นรูปมุมเดียวกันของสีที่ลูกค้าเลือกให้เอง">
+                  ทุกสี
+                </button>
+                {colors.map((c) => {
+                  const on = scene.colors.includes(c.id);
+                  return (
+                    <button key={c.id} type="button" onClick={() => setScene({ colors: on ? scene.colors.filter((x) => x !== c.id) : [...scene.colors, c.id] })} className={chip(on)}>
+                      {on ? "✓ " : ""}
+                      {c.label}
+                    </button>
+                  );
+                })}
+                <span className="text-slate-400">{scene.colors.length ? "· เลือกสีแล้ว = ใช้รูปนี้ตรง ๆ เฉพาะสีที่เลือก" : "· ทุกสี = สลับรูปมุมเดียวกันตามสี"}</span>
               </div>
             )}
             <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
@@ -408,52 +440,9 @@ export function PersonalizeEditor({
                   <span style={{ letterSpacing: 0 }}>{last}</span>
                 </div>
               ))}
-              {/* 🎚 วาดด้วย SVG ตัวเดียวกับเว็บร้าน — พิมพ์จม (personalizeEmbossFilter) · เงิน/ทอง (สี + personalizeFoilFilter) */}
+              {/* 🎚 วาดด้วย SVG ตัวเดียวกับเว็บร้าน (ของกลาง components/personalize-stamp) — พิมพ์จม · เงิน/ทอง · มุมมอง */}
               {svgStamp && (
-                <svg className="absolute left-0 top-0 pointer-events-none overflow-visible" width={stageSize.w} height={stageSize.h} viewBox={`0 0 ${stageSize.w} ${stageSize.h}`} aria-hidden>
-                  {stagePositions.filter((p) => p.enabled).map((p) => {
-                    const fontPx = (stageSize.w * p.size) / 100;
-                    const x = (stageSize.w * p.x) / 100;
-                    const y = (stageSize.h * p.y) / 100;
-                    return (
-                      <g key={p.key}>
-                        <defs>
-                          <filter
-                            id={`${fxId}-${p.key}`}
-                            x="-30%"
-                            y="-60%"
-                            width="160%"
-                            height="220%"
-                            colorInterpolationFilters="sRGB"
-                            dangerouslySetInnerHTML={{ __html: previewFoil ? personalizeFoilFilter(previewFoil, fontPx) : personalizeEmbossFilter(eff.embossFx, fontPx) }}
-                          />
-                          {previewFoil?.mode === "gradient" && (
-                            <linearGradient id={`${fxId}-g-${p.key}`} {...personalizeFoilGradientEnds(previewFoil.gradAngle)}>
-                              {[...previewFoil.stops].sort((a, b) => a.pos - b.pos).map((st, i) => (
-                                <stop key={i} offset={`${st.pos}%`} stopColor={st.color} />
-                              ))}
-                            </linearGradient>
-                          )}
-                        </defs>
-                        <text
-                          x={x}
-                          y={y}
-                          textAnchor={p.align === "left" ? "start" : p.align === "right" ? "end" : "middle"}
-                          dominantBaseline="central"
-                          transform={p.rotate ? `rotate(${p.rotate} ${x} ${y})` : undefined}
-                          fontFamily='"Times New Roman", Times, serif'
-                          fontSize={fontPx}
-                          letterSpacing={`${value.letterSpacing}em`}
-                          fill={!previewFoil ? "#000" : previewFoil.mode === "solid" ? previewFoil.solid : `url(#${fxId}-g-${p.key})`}
-                          filter={`url(#${fxId}-${p.key})`}
-                        >
-                          {head}
-                          <tspan letterSpacing="0">{last}</tspan>
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
+                <PersonalizeStampSvg w={stageSize.w} h={stageSize.h} positions={stagePositions.filter((p) => p.enabled)} text={shown} letterSpacing={value.letterSpacing} embossFx={eff.embossFx} foil={previewFoil} />
               )}
               {/* จุดยึดของตำแหน่งที่กำลังแก้ (ข้อความเริ่ม/กลาง/จบที่จุดนี้ตามการจัด) */}
               {stagePositions.filter((p) => p.enabled && p.key === active).map((p) => (
@@ -491,6 +480,23 @@ export function PersonalizeEditor({
                   <RangeInput label={<span className="text-[11px] text-slate-500">ขนาดตัวอักษร (% ของความกว้างรูป)</span>} min={1} max={20} step={0.5} hardMax={30} unit="%" value={p.size} onChange={(v) => setPos(p.key, { size: v })} />
                   <RangeInput label={<span className="text-[11px] text-slate-500">เอียง</span>} min={-30} max={30} step={1} hardMin={-45} hardMax={45} unit="°" value={p.rotate} onChange={(v) => setPos(p.key, { rotate: v })} />
                 </div>
+                {/* 📐 มุมมอง — รูปถ่ายเฉียง/วางเอียง: รอยปั๊มเอียง + บีบตามผิวกระเป๋า */}
+                <details className="rounded-md border border-slate-100 px-2 py-1" open={!!(p.skewX || p.skewY || p.scaleX !== 100 || p.scaleY !== 100)}>
+                  <summary className="cursor-pointer text-[11px] text-slate-500 flex items-center justify-between gap-2">
+                    <span>📐 มุมมอง (รูปถ่ายเฉียง){p.skewX || p.skewY || p.scaleX !== 100 || p.scaleY !== 100 ? <span className="ml-1 rounded-full bg-sky-100 px-1.5 text-[10px] text-sky-700">ปรับแล้ว</span> : null}</span>
+                    {(p.skewX || p.skewY || p.scaleX !== 100 || p.scaleY !== 100) && (
+                      <button type="button" onClick={(e) => { e.preventDefault(); setPos(p.key, { skewX: 0, skewY: 0, scaleX: 100, scaleY: 100 }); }} className="text-[11px] text-orange-600 hover:underline">
+                        ↺ ไม่เอียง
+                      </button>
+                    )}
+                  </summary>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <RangeInput label={<span className="text-[11px] text-slate-500">เอียงแนวนอน</span>} min={PERSONALIZE_PERSPECTIVE.skewX[0]} max={PERSONALIZE_PERSPECTIVE.skewX[1]} step={1} unit="°" value={p.skewX} onChange={(v) => setPos(p.key, { skewX: Math.round(v) })} />
+                    <RangeInput label={<span className="text-[11px] text-slate-500">เอียงแนวตั้ง</span>} min={PERSONALIZE_PERSPECTIVE.skewY[0]} max={PERSONALIZE_PERSPECTIVE.skewY[1]} step={1} unit="°" value={p.skewY} onChange={(v) => setPos(p.key, { skewY: Math.round(v) })} />
+                    <RangeInput label={<span className="text-[11px] text-slate-500">ความกว้าง (บีบ/ยืด)</span>} min={PERSONALIZE_PERSPECTIVE.scaleX[0]} max={PERSONALIZE_PERSPECTIVE.scaleX[1]} step={1} unit="%" value={p.scaleX} onChange={(v) => setPos(p.key, { scaleX: Math.round(v) })} />
+                    <RangeInput label={<span className="text-[11px] text-slate-500">ความสูง (บีบ/ยืด)</span>} min={PERSONALIZE_PERSPECTIVE.scaleY[0]} max={PERSONALIZE_PERSPECTIVE.scaleY[1]} step={1} unit="%" value={p.scaleY} onChange={(v) => setPos(p.key, { scaleY: Math.round(v) })} />
+                  </div>
+                </details>
               </div>
               );
             })}

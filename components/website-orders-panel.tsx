@@ -19,6 +19,8 @@ import { useToast } from "@/components/toast";
 import { MiniTable } from "@/components/mini-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { CopyButton } from "@/components/copy-button";
+import { PersonalizeOrderPreview } from "@/components/personalize-stamp";
+import type { OrderPersonalize } from "@/lib/website-personalize";
 import { GiftCardPreview } from "@/components/website-gift-cards-editor";
 import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type OrderGiftCard } from "@/lib/website-gift-cards";
 import { CUSTOMER_LANG_LABEL, ORDER_EVENTS, currentOrderEvent, orderMessage, type OrderEvent } from "@/lib/customer-messages";
@@ -34,7 +36,7 @@ import { ShippopBox, ShippopBulkButton, type ShippopSettings } from "@/component
 import type { ShippopInfo } from "@/lib/shippop";
 
 /** gift = 🎀 ห่อ/💌 การ์ด รายชิ้น (ดีไซน์ตะกร้า "เลือกรายชิ้น") */
-type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number; gift?: { wrap: boolean; card: boolean; message: string; styleName?: string; cardInfo?: OrderGiftCard | null } };
+type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number; gift?: { wrap: boolean; card: boolean; message: string; styleName?: string; cardInfo?: OrderGiftCard | null }; personalize?: OrderPersonalize };
 type Order = {
   id: string;
   orderNo: string;
@@ -589,6 +591,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                         </span>
                         <span className="text-slate-800 shrink-0">{money(i.lineTotal)}</span>
                       </div>
+                      {i.personalize && <PersonalizeOrderPreview pz={i.personalize} />}
                       {i.gift?.card && (
                         <div className="mt-1 flex items-start gap-2 rounded-md bg-pink-50 px-2 py-1.5 text-xs text-pink-900">
                           <span className="shrink-0">💌 การ์ดของชิ้นนี้</span>
