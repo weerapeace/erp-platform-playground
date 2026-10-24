@@ -25,6 +25,7 @@ import { ImageGallery, HoverZoomImage, ImageInput } from "@/components/image-inp
 import { TagGroupFilter } from "@/components/tag-filter";
 import { DupOrderBadge, DupOrderList, type OpenOrder } from "./dup-order";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
+import { MoShortageList, useMoShortage, shortMos, ceil2 } from "@/components/mo-shortage-picker";
 import type { MoListItem } from "@/app/api/mo/route";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
@@ -1376,7 +1377,7 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
 const MO_CLOSED = new Set(["completed", "done", "closed", "cancelled", "canceled"]);
 
 // MoReasonPicker — เลือกใบสั่งผลิตที่ "ยังเปิดอยู่" (เลือกได้หลายใบ m2m) เป็นเหตุผลขอซื้อ (ดึงจาก /api/mo, กรองสถานะปิดฝั่ง client)
-function MoReasonPicker({ value, onPick }: { value: { no: string; label: string }[]; onPick: (v: { no: string; label: string }[]) => void }) {
+function MoReasonPicker({ value, onPick, emptyLabel }: { value: { no: string; label: string }[]; onPick: (v: { no: string; label: string }[]) => void; emptyLabel?: string }) {
   const isSel = (no: string) => value.some((s) => s.no === no);
   const toggle = (m: MoListItem) => {
     const label = `${m.mo_no}${m.product_sku ? ` · ${m.product_sku}` : ""}${m.product_name ? ` (${m.product_name})` : ""}`;
@@ -1427,7 +1428,7 @@ function MoReasonPicker({ value, onPick }: { value: { no: string; label: string 
       )}
       <button type="button" onClick={() => setOpen(o => !o)}
         className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
-        + {value.length ? "เพิ่มใบสั่งผลิตอีก" : "เลือกใบสั่งผลิต (ที่ยังเปิดอยู่)"}
+        + {value.length ? "เพิ่มใบสั่งผลิตอีก" : (emptyLabel ?? "เลือกใบสั่งผลิต (ที่ยังเปิดอยู่)")}
       </button>
       {open && rect && typeof document !== "undefined" && createPortal(
         (() => {
@@ -1483,6 +1484,23 @@ function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, o
   const [urgent, setUrgent] = useState(false);     // ⚡ ส่งด่วน
   const [useDate, setUseDate] = useState("");       // วันที่ใช้งาน (ไม่บังคับ)
   const s = card.sku!;
+  // ใบสั่งผลิตที่ยังไม่ได้ขอซื้อสินค้าตัวนี้ (ของกลาง) → ติ๊กเป็นเหตุผล + เติมจำนวนเท่าที่ขาด
+  const shortage = useMoShortage(s.code);
+  const shortList = useMemo(() => shortMos(shortage.row), [shortage.row]);
+  const shortNos = useMemo(() => new Set(shortList.map((m) => m.mo_no)), [shortList]);
+  const shortTotal = ceil2(shortList.reduce((n, m) => n + m.needed, 0));
+  const shortUnit = shortage.row?.uom || s.uom;
+  const modeTouched = useRef(false);
+  // มีใบงานรอของตัวนี้ → เปิดแท็บ "ใบสั่งผลิต" ให้เลย (ถ้าผู้ใช้ยังไม่ได้กดเลือกแท็บเอง)
+  useEffect(() => { if (shortList.length > 0 && !modeTouched.current) setReasonMode("mo"); }, [shortList.length]);
+  const pickMode = (m: "reason" | "mo") => { modeTouched.current = true; setReasonMode(m); };
+  const pickedInList = moPicks.some((p) => shortNos.has(p.no));
+  // ยอดขาดรวมของใบที่เลือกอยู่ในรายการ (ไว้เตือนถ้าจำนวนไม่ตรง)
+  const pickedShort = ceil2(shortList.filter((m) => moPicks.some((p) => p.no === m.mo_no)).reduce((n, m) => n + m.needed, 0));
+  const qtyHint = !pickedInList || reasonMode !== "mo" ? null
+    : qty < pickedShort - 0.0001 ? { warn: true, text: `น้อยกว่าที่ใบงานขาดอยู่ ${(Math.round((pickedShort - qty) * 100) / 100).toLocaleString()} ${shortUnit}` }
+    : qty > pickedShort + 0.0001 ? { warn: false, text: `เกินที่ใบงานขาด ${(Math.round((qty - pickedShort) * 100) / 100).toLocaleString()} ${shortUnit} (เผื่อสต๊อก)` }
+    : null;
   // บังคับเลือกเหตุผลก่อนเพิ่มลงตะกร้า
   const reasonValid = reasonMode === "reason" ? !!reasonText : moPicks.length > 0;
   const buildReason = (): ReasonPick => {
@@ -1536,16 +1554,22 @@ function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, o
       <div className="mt-4 space-y-3">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({s.uom})</label>
-          {/* ปุ่ม −/+ ตัวใหญ่ (กดง่ายบนมือถือ ไม่ต้องพิมพ์) + แป้นตัวเลขเมื่อพิมพ์ */}
+          {/* ปุ่ม −/+ ตัวใหญ่ (กดง่ายบนมือถือ ไม่ต้องพิมพ์) + แป้นตัวเลขเมื่อพิมพ์ · ป้ายหน่วยในช่อง */}
           <div className="flex items-stretch gap-2">
             <button type="button" aria-label="ลดจำนวน" onClick={() => setQty(q => Math.max(0, Math.round(((Number(q) || 0) - 1) * 100) / 100))}
               className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">−</button>
-            <input type="number" inputMode="decimal" value={qty} min={0} step="any"
-              onFocus={e => e.target.select()} onChange={e => setQty(Number(e.target.value))}
-              className="flex-1 min-w-0 h-11 px-2 text-center text-lg font-medium border border-slate-200 rounded-md tabular-nums" />
+            <div className="relative flex-1 min-w-0">
+              <input type="number" inputMode="decimal" value={qty} min={0} step="any"
+                onFocus={e => e.target.select()} onChange={e => setQty(Number(e.target.value))}
+                className="w-full h-11 px-20 text-center text-lg font-medium border border-slate-200 rounded-md tabular-nums" />
+              {s.uom && (
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 max-w-[4.5rem] truncate text-xs font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded px-2 py-0.5">{s.uom}</span>
+              )}
+            </div>
             <button type="button" aria-label="เพิ่มจำนวน" onClick={() => setQty(q => Math.round(((Number(q) || 0) + 1) * 100) / 100)}
               className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">+</button>
           </div>
+          {qtyHint && <p className={`mt-1 text-[11px] ${qtyHint.warn ? "text-amber-600" : "text-slate-500"}`}>{qtyHint.text}</p>}
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ (ถ้ามี)</label>
@@ -1568,19 +1592,39 @@ function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, o
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">เหตุผลที่ขอซื้อ <span className="text-rose-500">*</span></label>
           <div className="grid grid-cols-2 gap-1 mb-2 text-xs">
-            <button type="button" onClick={() => setReasonMode("reason")}
+            <button type="button" onClick={() => pickMode("reason")}
               className={`py-1.5 rounded-md border transition-colors ${reasonMode === "reason" ? "bg-blue-600 text-white border-blue-600" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>📋 เหตุผล</button>
-            <button type="button" onClick={() => setReasonMode("mo")}
-              className={`py-1.5 rounded-md border transition-colors ${reasonMode === "mo" ? "bg-blue-600 text-white border-blue-600" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>🏭 ใบสั่งผลิต</button>
+            <button type="button" onClick={() => pickMode("mo")}
+              className={`py-1.5 rounded-md border transition-colors ${reasonMode === "mo" ? "bg-blue-600 text-white border-blue-600" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+              🏭 ใบสั่งผลิต
+              {shortList.length > 0 && <span className={`ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded ${reasonMode === "mo" ? "bg-white/25 text-white" : "bg-rose-50 text-rose-600"}`}>ขาด {shortList.length} ใบ</span>}
+            </button>
           </div>
           {reasonMode === "reason" ? (
-            // ของกลาง RelationPicker (lookup_type=pr_reason) — มี "+ สร้างใหม่" ในตัว · เก็บเป็นข้อความ (name)
-            <RelationPicker value={reasonId}
-              onChange={(id, opt) => { setReasonId(id); setReasonText(opt?.label ?? ""); }}
-              config={{ target_table: "erp_lookups", target_label_field: "name", lookup_type: "pr_reason" }}
-              placeholder="เลือกเหตุผล (พิมพ์เพื่อเพิ่มใหม่)" required hasError={!reasonText} />
+            <>
+              {/* เตือน: มีใบงานรอของตัวนี้อยู่ (กันเลือกเหตุผลอื่นทั้งที่ควรผูกใบงาน) */}
+              {shortList.length > 0 && (
+                <div className="mb-2 flex items-center gap-2 text-[11px] bg-amber-50 text-amber-700 border border-amber-200 rounded-md px-2 py-1.5">
+                  <span className="min-w-0">⚠️ มี {shortList.length} ใบงานยังไม่ได้ขอซื้อตัวนี้ รวมขาด {shortTotal.toLocaleString()} {shortUnit}</span>
+                  <button type="button" onClick={() => pickMode("mo")} className="ml-auto shrink-0 font-medium underline">ดูใบงาน</button>
+                </div>
+              )}
+              {/* ของกลาง RelationPicker (lookup_type=pr_reason) — มี "+ สร้างใหม่" ในตัว · เก็บเป็นข้อความ (name) */}
+              <RelationPicker value={reasonId}
+                onChange={(id, opt) => { setReasonId(id); setReasonText(opt?.label ?? ""); }}
+                config={{ target_table: "erp_lookups", target_label_field: "name", lookup_type: "pr_reason" }}
+                placeholder="เลือกเหตุผล (พิมพ์เพื่อเพิ่มใหม่)" required hasError={!reasonText} />
+            </>
           ) : (
-            <MoReasonPicker value={moPicks} onPick={setMoPicks} />
+            <div className="space-y-2">
+              {/* ของกลาง: ใบงานที่ยังขาดสินค้าตัวนี้ — ติ๊ก = ผูกเป็นเหตุผล + เติมจำนวนเท่าที่ขาด */}
+              <MoShortageList shortage={shortage} uom={s.uom} value={moPicks}
+                onChange={(picks, total) => { setMoPicks(picks); setQty(total); }} />
+              {/* ใบอื่นที่ไม่ได้ใช้ตัวนี้ในสูตร (เลือกเองได้เหมือนเดิม) — ส่งเฉพาะใบนอกรายการ ไม่ให้ชิปซ้ำกับที่ติ๊ก */}
+              <MoReasonPicker value={moPicks.filter((p) => !shortNos.has(p.no))}
+                onPick={(v) => setMoPicks([...moPicks.filter((p) => shortNos.has(p.no)), ...v])}
+                emptyLabel={shortList.length > 0 ? "เลือกใบสั่งผลิตอื่น (นอกรายการข้างบน)" : undefined} />
+            </div>
           )}
           {!reasonValid && <p className="mt-1 text-[11px] text-rose-500">* ต้องเลือกเหตุผลก่อนจึงเพิ่มลงตะกร้าได้</p>}
         </div>

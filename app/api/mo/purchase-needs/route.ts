@@ -1,6 +1,7 @@
 /**
  * รวมวัตถุดิบที่ "ต้องขอซื้อ/เตรียม" จากทุกใบสั่งผลิต (active) — /api/mo/purchase-needs
  * GET → จัดกลุ่มตามวัตถุดิบ: รวมที่ยังต้องซื้อ (ทุกใบ) + รายใบที่ต้องใช้
+ * GET ?code=<รหัสวัตถุดิบ> → เฉพาะตัวนั้น (ป๊อป "เพิ่มลงใบขอซื้อ" โชว์ใบงานที่ยังขาด) + covered_mos = ใบที่ขอซื้อครบแล้ว
  *   ต้องซื้อต่อใบ = (qty_per × จำนวนสั่ง − ของที่มี) หรือค่า override − ที่ขอซื้อไปแล้ว
  *   แต่ละใบแนบ summary_id/on_hand/is_ready (แก้ "เตรียมแล้ว+จำนวนที่มี" ได้) + รูปวัตถุดิบ + รูป SKU ของ MO
  * ของกลาง: guardApi(products.view) + supabaseAdmin
@@ -9,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { prLineCodeResolver } from "@/lib/pr-line-code";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,10 +18,13 @@ export const revalidate = 0;
 export type PurchaseNeedMo = {
   mo_no: string; mo_id: string; product_label: string; product_image: string | null; due_date: string | null;
   needed: number; summary_id: string | null; on_hand: number; is_ready: boolean; qty_per: number; mo_qty: number;
+  requested: number;   // ขอซื้อไปแล้วบางส่วน (needed = ส่วนที่ยังเหลือ)
 };
+// ใบที่ขอซื้อครบแล้ว ไม่ต้องขอซ้ำ (มีเฉพาะโหมด ?code=)
+export type PurchaseNeedCoveredMo = { mo_no: string; product_label: string; requested: number };
 export type PurchaseNeedRow = {
   component_sku: string | null; component_name: string | null; component_image: string | null; material_type: string | null; uom: string | null;
-  total_remaining: number; total_requested: number; mos: PurchaseNeedMo[];
+  total_remaining: number; total_requested: number; mos: PurchaseNeedMo[]; covered_mos: PurchaseNeedCoveredMo[];
 };
 
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -29,6 +34,7 @@ type Row = Record<string, unknown>;
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
+  const onlyCode = new URL(request.url).searchParams.get("code")?.trim() || null;
 
   const { data: mos } = await admin.from("manufacturing_orders")
     .select("id, mo_no, qty, product_sku, product_name, due_date")
@@ -41,21 +47,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ⚠️ ทั้ง 2 ชุดนี้จำนวนแถวโตตามจำนวนใบสั่งผลิต → ต้องไล่ทีละหน้า ไม่งั้นโดนตัดที่ 1,000 แถวเงียบ ๆ
   //    (ของจริงตอนแก้: วัตถุดิบ 1,981 แถว → เดิมหาย 981 แถว = ใบที่เพิ่งสร้าง 80 ใบไม่โผล่ในหน้านี้เลย)
   const [sums, prs] = await Promise.all([
-    fetchAllPages<Row>((from, to) => admin.from("mo_material_summary")
-      .select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready")
-      .in("mo_no", moNos).eq("is_active", true)
-      .order("mo_no", { ascending: true }).range(from, to)),
+    fetchAllPages<Row>((from, to) => {
+      let q = admin.from("mo_material_summary")
+        .select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready")
+        .in("mo_no", moNos).eq("is_active", true);
+      if (onlyCode) q = q.eq("component_sku", onlyCode);
+      return q.order("mo_no", { ascending: true }).range(from, to);
+    }),
     // m2m: ใบขอซื้อที่ผูก MO ใด ๆ ในชุดนี้
     fetchAllPages<Row>((from, to) => admin.from("purchase_requests_v2")
-      .select("item_name, qty, source_mo_nos").overlaps("source_mo_nos", moNos)
+      .select("item_name, item_sku_id, qty, source_mo_nos").overlaps("source_mo_nos", moNos)
       .eq("is_active", true).not("status", "in", "(rejected,cancelled)")
       .order("id", { ascending: true }).range(from, to)),
   ]);
 
   // รูปสินค้า (cover SKU, fallback Parent) — ดึงครั้งเดียวสำหรับทั้งวัตถุดิบและสินค้าของ MO
   const imgCodes = new Set<string>();
-  for (const m of moList) if (m.product_sku) imgCodes.add(String(m.product_sku));
-  for (const s of (sums ?? []) as Record<string, unknown>[]) if (s.component_sku) imgCodes.add(String(s.component_sku));
+  for (const s of (sums ?? []) as Record<string, unknown>[]) {
+    const sku = moById.get(String(s.mo_no))?.product_sku;   // เฉพาะใบที่มีวัตถุดิบในชุดนี้ (โหมด ?code= ไม่ต้องดึงรูปทุกใบ)
+    if (sku) imgCodes.add(String(sku));
+    if (s.component_sku) imgCodes.add(String(s.component_sku));
+  }
   const imgMap = new Map<string, string>();
   if (imgCodes.size) {
     // แบ่งเป็นชุดละ 300 (กันทั้ง URL ยาวเกิน และผลลัพธ์โดนตัดที่ 1,000 แถวเมื่อ SKU เยอะ)
@@ -78,9 +90,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ขอซื้อไปแล้ว ต่อ (ใบ, รหัสวัตถุดิบ)
   const requested = new Map<string, number>();   // key = mo_no|code
   const moNoSet = new Set(moNos);
+  const prCode = await prLineCodeResolver(admin, (prs ?? []) as Row[]);
   for (const p of (prs ?? []) as Record<string, unknown>[]) {
-    const m = /^\[([^\]]+)\]/.exec(String(p.item_name ?? ""));
-    const code = m ? m[1] : String(p.item_name ?? "");
+    const code = prCode(p);
     if (!code) continue;
     // 1 ใบขอซื้ออาจผูกหลายใบสั่งผลิต → นับ "ขอแล้ว" ให้ทุก MO ที่ผูก (ของใช้ร่วมกัน m2m)
     const nos = Array.isArray(p.source_mo_nos) ? (p.source_mo_nos as string[]) : [];
@@ -104,19 +116,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const want = stored != null && Math.round(stored * 10000) !== Math.round(base * 10000) ? stored : base;   // override ถ้ามี
     const got = requested.get(`${moNo}|${code ?? ""}`) ?? 0;
     const remaining = Math.max(0, r4(want - got));
-    if (remaining <= 0.0001) continue;
+    const covered = remaining <= 0.0001;
+    if (covered && !(onlyCode && got > 0)) continue;   // โหมด ?code= เก็บใบที่ขอครบแล้วไว้โชว์ว่า "ไม่ต้องขอซ้ำ"
 
+    const productLabel = `${mo.product_sku ?? ""}`.trim() || String(mo.product_name ?? "");
     const gkey = code ?? `nm:${String(s.component_name ?? "")}`;
     let g = groups.get(gkey);
-    if (!g) { g = { component_sku: code, component_name: (s.component_name as string) ?? null, component_image: imgOf(code), material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, total_remaining: 0, total_requested: 0, mos: [] }; groups.set(gkey, g); }
+    if (!g) { g = { component_sku: code, component_name: (s.component_name as string) ?? null, component_image: imgOf(code), material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, total_remaining: 0, total_requested: 0, mos: [], covered_mos: [] }; groups.set(gkey, g); }
+    if (covered) { g.covered_mos.push({ mo_no: moNo, product_label: productLabel, requested: r4(got) }); continue; }
     g.total_remaining = r4(g.total_remaining + remaining);
     g.total_requested = r4(g.total_requested + got);
     g.mos.push({
       mo_no: moNo, mo_id: String(mo.id),
-      product_label: `${mo.product_sku ?? ""}`.trim() || String(mo.product_name ?? ""),
+      product_label: productLabel,
       product_image: imgOf(mo.product_sku as string | null),
       due_date: (mo.due_date as string) ?? null, needed: remaining,
       summary_id: s.id ? String(s.id) : null, on_hand: onHand, is_ready: !!s.is_ready, qty_per: qtyPer, mo_qty: moQty,
+      requested: r4(got),
     });
   }
 

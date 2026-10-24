@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { explodeBom, fabricModeOf } from "../shared";
+import { prLineCodeResolver } from "@/lib/pr-line-code";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +30,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
     supabase.from("mo_material_summary").select("*").eq("mo_no", moNo).eq("is_active", true)
       .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
-    supabaseAdmin().from("purchase_requests_v2").select("item_name, qty, status")
+    supabaseAdmin().from("purchase_requests_v2").select("item_name, item_sku_id, qty, status")
       .contains("source_mo_nos", [moNo]).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),   // m2m: เช็กทุกใบที่ผูก MO นี้
     productSku
       ? supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).eq("is_active", true).maybeSingle()
@@ -39,9 +40,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
   // สถานะ "ขอซื้อแล้ว" — รวมจำนวนจากใบขอซื้อ (PR v2) ที่ผูกใบสั่งผลิตนี้
   const requested: Record<string, number> = {};
-  for (const p of (prRes.data ?? []) as { item_name: string | null; qty: number | null }[]) {
-    const m = /^\[([^\]]+)\]/.exec(p.item_name ?? "");
-    const code = m ? m[1] : (p.item_name ?? "");
+  const prRows = (prRes.data ?? []) as { item_name: string | null; item_sku_id: string | null; qty: number | null }[];
+  const prCode = await prLineCodeResolver(supabaseAdmin(), prRows);
+  for (const p of prRows) {
+    const code = prCode(p);
     if (!code) continue;
     requested[code] = (requested[code] ?? 0) + (Number(p.qty) || 0);
   }
