@@ -194,6 +194,15 @@ export function matchShowIf(fd: FieldDef, value: Record<string, unknown>): boole
   return conds.every((c) => hit(c, c.key) || (!!c.orKey && hit(c, c.orKey)));
 }
 
+/** ช่องนี้ "แก้จากค่าเริ่มแล้ว" ไหม (จุดส้มในหน้าใหญ่ · คืนค่าเริ่มต้นรายหมวด)
+ *  ยังไม่เคยตั้ง (undefined) = ค่าเริ่ม · ค่าว่าง/false/[] เทียบเท่ากัน */
+export function fieldChanged(fd: FieldDef, value: Record<string, unknown>): boolean {
+  const v = value[fd.key];
+  if (v === undefined) return false;
+  const norm = (x: unknown) => (x == null || x === "" || x === false || (Array.isArray(x) && !x.length) ? null : x);
+  return JSON.stringify(norm(v)) !== JSON.stringify(norm(fd.default));
+}
+
 /** Block ย่อยใน Section (เก็บเป็น array ในฟิลด์ `key` ของ Section) */
 export interface ChildSpec {
   /** ชื่อฟิลด์ที่เก็บ array เช่น "items", "cards", "slides" */

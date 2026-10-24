@@ -24,7 +24,7 @@
  *   ผืนผ้าใบอิสระ (canvas) คุยสดอีกชุด — ดู components/website-canvas-tools.tsx
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, SECTION_PRESETS, childPlacePatch, newChildId, newChildValues, sectionHasHeading, type ChildAddOption, type ChildSpec, type SectionPreset } from "@/lib/website-schema";
+import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, SECTION_PRESETS, childPlacePatch, matchShowIf, newChildId, newChildValues, sectionHasHeading, type ChildAddOption, type ChildSpec, type SectionPreset } from "@/lib/website-schema";
 import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
@@ -38,6 +38,7 @@ import { useCanvasBridge, reorderLayer, CanvasAddBar, CanvasItemTools } from "@/
 import { previewReloadSig } from "@/lib/website-live-preview";
 import { cleanExpId } from "@/lib/website-web-stats";
 import { CanvasEditor, type CanvasEditorTarget } from "@/components/website-canvas-editor";
+import { SectionStudio, STUDIO_SUGGEST_FIELDS } from "@/components/website-section-studio";
 import { ScenePngBoard } from "@/components/website-scene-png-board";
 import { ContentLangProvider, TranslationBar } from "@/components/bilingual-field";
 import { DropInsertsField } from "@/components/website-drop-inserts-field";
@@ -181,6 +182,11 @@ export function WebsiteBuilder({
   const [fullscreen, setFullscreen] = useState(false);
   const [pane, setPane] = useState<Pane>("tree");
   const [propTab, setPropTab] = useState<PropTab>("content");
+  // 🗖 แก้ Section แบบหน้าใหญ่ (components/website-section-studio) — iframe ของหน้าใหญ่แยกข้อความจากพรีวิวหลัก
+  const [studio, setStudio] = useState(false);
+  const studioRef = useRef(false);
+  studioRef.current = studio;
+  const studioFrameRef = useRef<HTMLIFrameElement>(null);
   // 🎀 ของตกแต่งของ Section: ชิ้นที่เลือก (กดในพรีวิว/รายการ) · เลขเพิ่ม = ให้แผงรูปลักษณ์สลับไปแท็บตกแต่ง
   const [decorSel, setDecorSel] = useState<string | null>(null);
   const [decorTabReq, setDecorTabReq] = useState(0);
@@ -522,6 +528,8 @@ export function WebsiteBuilder({
   /* ── พรีวิว ↔ ตัวจัดหน้า ── */
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
+      // พรีวิวในหน้าใหญ่คุยกับ SectionStudio เอง (ไม่ให้ไปทับสถานะพรีวิวหลัก เช่น ตำแหน่งเลื่อน/สถานะโหลด)
+      if (e.source && e.source === studioFrameRef.current?.contentWindow) return;
       const d = e.data as { type?: string; blockId?: string; childId?: string; y?: number; data?: string; beforeId?: string | null } | null;
       if (!d?.type) return;
       if (d.type === "storefront-block-click" && d.blockId) {
@@ -644,7 +652,7 @@ export function WebsiteBuilder({
   /* ── คีย์ลัด ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (askingRef.current) return;
+      if (askingRef.current || studioRef.current) return;
       if (e.key === "Escape") {
         if (fullscreen) setFullscreen(false);
         setMenu(null);
@@ -1443,6 +1451,68 @@ export function WebsiteBuilder({
     );
   };
 
+  /* ชิ้นส่วนของแผงขวา (ใช้ร่วม: แท็บแผงขวา + หน้าใหญ่ SectionStudio) */
+  const contentTopOf = (b: Block) => (
+    <>
+      {txBar(selSlots, b.id)}
+      {b.type === "canvas" && (
+        <CanvasAddBar
+          onOpen={(action) => setCanvasEditor({ blockId: b.id, action })}
+          count={childrenOf(b)?.list.length ?? 0}
+          max={SECTION_SCHEMAS[b.type]?.children?.max ?? 60}
+          mobileCustom={b.mobileMode === "custom"}
+        />
+      )}
+      {/* 🎞️ การ์ดบนฉาก: ช่องใหญ่ใส่ PNG รายสินค้าของแต่ละแท็บ (ไม่มี PNG = ไม่โชว์) */}
+      {b.type === "scene" && <ScenePngBoard block={b as unknown as Record<string, unknown>} shopSlug={ctx.shopSlug} onSaved={reloadPreview} />}
+    </>
+  );
+  const contentBottomOf = (b: Block) => {
+    const sch = SECTION_SCHEMAS[b.type];
+    return (
+      <>
+        {/* 🆕 ชุดมาใหม่: รูปแทรกของชุด (ข้อมูลของชุด ไม่ใช่ของ Section — บันทึกแล้วโหลดพรีวิวใหม่) */}
+        {b.type === "drop" && <DropInsertsField ctx={formCtx} which={String((b as Record<string, unknown>).which ?? "this")} onSaved={reloadPreview} />}
+        {sch?.meta.manage && (
+          <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-900">
+            <span className="min-w-0 flex-1">{sch.meta.manage.hint ?? "ข้อมูลของ Section นี้ตั้งค่าที่หน้าหลังบ้านแยก"}</span>
+            <a href={sch.meta.manage.href} target="_blank" rel="noreferrer" className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700">{sch.meta.manage.label}</a>
+          </div>
+        )}
+      </>
+    );
+  };
+  const styleBodyOf = (b: Block) => (
+    <div className="space-y-4">
+      <StylePanel
+        value={styleOf(b)}
+        onChange={(style) => patchBlock(b.id, { style })}
+        mode="style"
+        hasHeading={sectionHasHeading(b.type)}
+        theme={shopLook.theme}
+        fontNames={shopLook.fontNames}
+        shopId={ctx.shopId}
+        decorSel={decorSel}
+        onDecorSel={setDecorSel}
+        decorTabReq={decorTabReq}
+        screen={device}
+        onScreen={setDevice}
+      />
+      {visibilityRow(b.visibility, (k, val) => setVis(b.id, k, val))}
+      {abRow(b)}
+    </div>
+  );
+  const motionBodyOf = (b: Block) => (
+    <StylePanel
+      value={styleOf(b)}
+      onChange={(style) => patchBlock(b.id, { style })}
+      mode="motion"
+      onPlay={() => iframeRef.current?.contentWindow?.postMessage({ type: "storefront-motion-play", blockId: b.id }, "*")}
+    />
+  );
+  /** ช่องที่โชว์อยู่ของ Section — เยอะ = ปุ่มหน้าใหญ่เด่นขึ้น */
+  const selFieldCount = selBlock && selSchema ? selSchema.fields.filter((fd) => !fd.hidden && matchShowIf(fd, selBlock as unknown as Record<string, unknown>)).length : 0;
+
   const props = !selBlock ? (
     <div className="h-full flex flex-col items-center justify-center text-center text-sm text-slate-400 px-6 gap-1">
       <span className="text-3xl">👆</span>
@@ -1486,6 +1556,13 @@ export function WebsiteBuilder({
         <div className="flex items-center gap-1">
           <span className="text-base">{selSchema.meta.icon}</span>
           <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate" title={selSchema.meta.hint}>{selSchema.meta.label}</span>
+          <button
+            onClick={() => setStudio(true)}
+            title={`แก้แบบหน้าใหญ่ — เห็นทุกช่องเรียงเป็นหมวด + ค้นหา + พรีวิวสด (${selFieldCount} ช่อง)`}
+            className={`${iconBtn} ${selFieldCount >= STUDIO_SUGGEST_FIELDS ? "!border-blue-300 !bg-blue-50 !text-blue-700" : ""}`}
+          >
+            ⤢
+          </button>
           <button onClick={() => patchBlock(selBlock.id, { enabled: !selBlock.enabled })} title={selBlock.enabled ? "ซ่อน Section" : "แสดง Section"} className={iconBtn}>{selBlock.enabled ? "👁️" : "🚫"}</button>
           <button onClick={() => duplicateSection(selBlock.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
           <button onClick={() => setTplSave(selBlock)} title="บันทึกเป็นแม่แบบ (ใช้ซ้ำกับหน้าอื่น/ร้านอื่น)" className={iconBtn}>💾</button>
@@ -1501,26 +1578,9 @@ export function WebsiteBuilder({
       <div className="flex-1 overflow-y-auto p-3">
         {propTab === "content" && (
           <div className="space-y-4">
-            {txBar(selSlots, selBlock.id)}
-            {selBlock.type === "canvas" && (
-              <CanvasAddBar
-                onOpen={(action) => setCanvasEditor({ blockId: selBlock.id, action })}
-                count={childrenOf(selBlock)?.list.length ?? 0}
-                max={selSchema.children?.max ?? 60}
-                mobileCustom={selBlock.mobileMode === "custom"}
-              />
-            )}
-            {/* 🎞️ การ์ดบนฉาก: ช่องใหญ่ใส่ PNG รายสินค้าของแต่ละแท็บ (ไม่มี PNG = ไม่โชว์) */}
-            {selBlock.type === "scene" && <ScenePngBoard block={selBlock as unknown as Record<string, unknown>} shopSlug={ctx.shopSlug} onSaved={reloadPreview} />}
+            {contentTopOf(selBlock)}
             <SchemaForm fields={selSchema.fields} value={selBlock} onChange={(p) => patchBlock(selBlock.id, p)} ctx={formCtx} />
-            {/* 🆕 ชุดมาใหม่: รูปแทรกของชุด (ข้อมูลของชุด ไม่ใช่ของ Section — บันทึกแล้วโหลดพรีวิวใหม่) */}
-            {selBlock.type === "drop" && <DropInsertsField ctx={formCtx} which={String((selBlock as Record<string, unknown>).which ?? "this")} onSaved={reloadPreview} />}
-            {selSchema.meta.manage && (
-              <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-900">
-                <span className="min-w-0 flex-1">{selSchema.meta.manage.hint ?? "ข้อมูลของ Section นี้ตั้งค่าที่หน้าหลังบ้านแยก"}</span>
-                <a href={selSchema.meta.manage.href} target="_blank" rel="noreferrer" className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700">{selSchema.meta.manage.label}</a>
-              </div>
-            )}
+            {contentBottomOf(selBlock)}
             {selSchema.children && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
                 {selSchema.children.icon} {selSchema.children.label}: {childrenOf(selBlock)?.list.length ?? 0} รายการ — แก้ทีละชิ้นจากต้นไม้ทางซ้าย (กด ▸)
@@ -1534,34 +1594,8 @@ export function WebsiteBuilder({
             )}
           </div>
         )}
-        {propTab === "style" && (
-          <div className="space-y-4">
-            <StylePanel
-              value={styleOf(selBlock)}
-              onChange={(style) => patchBlock(selBlock.id, { style })}
-              mode="style"
-              hasHeading={sectionHasHeading(selBlock.type)}
-              theme={shopLook.theme}
-              fontNames={shopLook.fontNames}
-              shopId={ctx.shopId}
-              decorSel={decorSel}
-              onDecorSel={setDecorSel}
-              decorTabReq={decorTabReq}
-              screen={device}
-              onScreen={setDevice}
-            />
-            {visibilityRow(selBlock.visibility, (k, val) => setVis(selBlock.id, k, val))}
-            {abRow(selBlock)}
-          </div>
-        )}
-        {propTab === "motion" && (
-          <StylePanel
-            value={styleOf(selBlock)}
-            onChange={(style) => patchBlock(selBlock.id, { style })}
-            mode="motion"
-            onPlay={() => iframeRef.current?.contentWindow?.postMessage({ type: "storefront-motion-play", blockId: selBlock.id }, "*")}
-          />
-        )}
+        {propTab === "style" && styleBodyOf(selBlock)}
+        {propTab === "motion" && motionBodyOf(selBlock)}
       </div>
     </div>
   );
@@ -1586,6 +1620,42 @@ export function WebsiteBuilder({
           <aside className={`${pane === "props" ? "" : "hidden"} lg:block min-w-0 rounded-xl border border-slate-200 bg-white overflow-hidden`} style={{ height: previewHeight }}>{props}</aside>
         </div>
       </div>
+
+      {/* 🗖 หน้าใหญ่ของ Section ที่เลือก (ปิดเองเมื่อไปเลือกชิ้นย่อย/ไม่ได้เลือก) */}
+      {selBlock && selSchema && !selChild && studio && (
+        <SectionStudio
+          open
+          onClose={() => setStudio(false)}
+          schema={selSchema}
+          block={selBlock as unknown as Record<string, unknown> & { id: string }}
+          blocks={blocks}
+          onPatch={(p) => patchBlock(selBlock.id, p)}
+          ctx={formCtx}
+          previewSrc={shownSrc}
+          frameRef={studioFrameRef}
+          devices={DEVICES.filter((d) => d.k !== "tablet")}
+          contentTop={contentTopOf(selBlock)}
+          contentBottom={contentBottomOf(selBlock)}
+          styleBody={styleBodyOf(selBlock)}
+          motionBody={motionBodyOf(selBlock)}
+          styleChanged={styleTouched(styleOf(selBlock))}
+          motionChanged={motionTouched(styleOf(selBlock))}
+          items={
+            selSchema.children
+              ? {
+                  label: selSchema.children.label,
+                  icon: selSchema.children.icon,
+                  list: (childrenOf(selBlock)?.list ?? []).map((it) => ({ id: it.id, label: selSchema.children!.summary(it) || selSchema.children!.itemLabel })),
+                }
+              : undefined
+          }
+          onPickItem={(id) => {
+            setStudio(false);
+            setExpanded((x) => new Set(x).add(selBlock.id));
+            onSelect({ blockId: selBlock.id, childId: id });
+          }}
+        />
+      )}
 
       {/* ป้ายลอยตามเมาส์ตอนลาก */}
       {drag && (

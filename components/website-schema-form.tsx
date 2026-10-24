@@ -49,7 +49,11 @@ export interface SchemaFormContext {
 const inputCls = webForm.input;
 const labelCls = webForm.label;
 
-const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout", "caption", "card"];
+/** ลำดับหมวดของช่อง (ฟอร์มนี้ + เมนูหมวดของหน้าใหญ่ website-section-studio) */
+export const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout", "caption", "card"];
+/** จุดส้มมุมขวาบนของช่องที่แก้แล้ว (หน้าใหญ่) — ตัวห่อ display:contents ไม่กระทบกริด 2 คอลัมน์ · ใช้ได้กับช่องทุกชนิด */
+const MARK_CLS =
+  "contents [&>*]:relative [&>*]:after:absolute [&>*]:after:right-0 [&>*]:after:top-0.5 [&>*]:after:h-1.5 [&>*]:after:w-1.5 [&>*]:after:rounded-full [&>*]:after:bg-orange-500 [&>*]:after:content-['']";
 
 /**
  * ภาพร่างเล็ก ๆ ของตัวเลือกแบบปุ่มรูปย่อ (FieldOption.sketch) — กล่องเทา ๆ บอกการจัดวางคร่าว ๆ
@@ -695,6 +699,7 @@ export function SchemaForm({
   ctx,
   compact = false,
   parent,
+  marks,
 }: {
   fields: FieldDef[];
   value: Record<string, unknown>;
@@ -704,6 +709,8 @@ export function SchemaForm({
   parent?: Record<string, unknown>;
   /** ชิ้นย่อย: ไม่แยกหัวกลุ่ม */
   compact?: boolean;
+  /** key ของช่องที่ขึ้นจุดส้ม "แก้แล้ว" (หน้าใหญ่) */
+  marks?: Set<string>;
 }) {
   // showIfParent = ช่องของชิ้นย่อยที่โชว์ตามค่าของ Section แม่ (เช่น "อยู่ลุคที่" เฉพาะลุคบุ๊กแบบหลายลุค)
   const visible = useMemo(
@@ -729,9 +736,15 @@ export function SchemaForm({
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">{FIELD_GROUP_LABEL[g]}</p>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
-            {list.map((fd) => (
-              <SchemaField key={fd.key} fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} onPatch={onChange} ctx={ctx} item={value} parent={parent} />
-            ))}
+            {list.map((fd) =>
+              marks?.has(fd.key) ? (
+                <div key={fd.key} className={MARK_CLS} title="แก้จากค่าเริ่มแล้ว">
+                  <SchemaField fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} onPatch={onChange} ctx={ctx} item={value} parent={parent} />
+                </div>
+              ) : (
+                <SchemaField key={fd.key} fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} onPatch={onChange} ctx={ctx} item={value} parent={parent} />
+              ),
+            )}
           </div>
         </section>
       ))}
