@@ -10,11 +10,14 @@
  *   - 🎚 เอฟเฟกต์ตัวอักษรแบบ Photoshop แยกแท็บ พิมพ์จม (Bevel & Emboss · Inner Shadow · Outer Glow)
  *        / เงิน · ทอง (สีเดียว/ไล่สี 2–6 ระดับ + Bevel & Emboss · Drop Shadow · Inner Shadow) — พรีวิวด้วย SVG ตัวเดียวกับเว็บร้าน
  *   - พรีวิวเหมือนเว็บจริง (ฟอนต์ Times New Roman + เอฟเฟกต์เดียวกัน)
+ *   - 🖼 แท็บฉากพรีวิว: ⭐ ฉากหลัก / ฉากเพิ่ม (รูปมุมอื่น สูงสุด 8) — ฉากเพิ่มมีรูป · ชื่อ · ตำแหน่งของตัวเอง (ลากบนรูป) · ติ๊กว่าตำแหน่งไหนเห็นในฉากนั้น
+ *        ใช้ร่วมทุกสี (แท็บสี = ดูรูปมุมเดียวกันของสีนั้น + เอฟเฟกต์ของสีนั้น)
  * ของกลาง: lib/website-personalize.ts (ชนิดข้อมูล/ค่าเริ่มต้น/ตัวกรอง/ตำแหน่งข้อความ)
  */
 import { useCallback, useId, useRef, useState } from "react";
 import { RangeInput } from "@/components/range-input";
 import { ColorInput } from "@/components/color-picker";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import {
   PERSONALIZE_ALIGNS,
   PERSONALIZE_ALIGN_OFFSET,
@@ -26,9 +29,11 @@ import {
   FOIL_FX_RANGE,
   FOIL_MAX_STOPS,
   FOIL_PRESETS,
+  PERSONALIZE_MAX_SCENES,
   applyColorOverride,
   cleanPersonalizeText,
   makeColorOverride,
+  makeScene,
   personalizeEmbossFilter,
   personalizeFoilCss,
   personalizeFoilFilter,
@@ -36,12 +41,14 @@ import {
   parsePersonalizeSymbols,
   personalizeSplitLast,
   personalizeTextPlacement,
+  sameAngleImage,
   type PersonalizeAlign,
   type PersonalizeConfig,
   type PersonalizeEmbossFx,
   type PersonalizeFoilFx,
   type PersonalizeFoilStyle,
   type PersonalizePosition,
+  type PersonalizeScene,
   type PersonalizeStyle,
 } from "@/lib/website-personalize";
 
@@ -111,8 +118,8 @@ export function PersonalizeEditor({
   imageOptions: { key: string; label: string }[];
   /** รูปที่เว็บจะใช้เมื่อไม่ได้เลือก (รูปแรกของสินค้า) */
   fallbackImageKey: string | null;
-  /** 🎨 สีของรุ่น (SKU ลูก) — id = คีย์ค่าแยกตามสี · imageKey = รูปที่เว็บใช้ตอนเลือกสีนั้น */
-  colors?: { id: string; label: string; imageKey: string | null }[];
+  /** 🎨 สีของรุ่น (SKU ลูก) — id = คีย์ค่าแยกตามสี · imageKey = รูปที่เว็บใช้ตอนเลือกสีนั้น · images = รูปทั้งหมดของสี (ฉากเพิ่มใช้รูปลำดับเดียวกัน) */
+  colors?: { id: string; label: string; imageKey: string | null; images?: string[] }[];
 }) {
   const [preview, setPreview] = useState<PersonalizeStyle>(value.styles[0] ?? "emboss");
   const [active, setActive] = useState<PersonalizePosition["key"]>("center");
@@ -155,12 +162,45 @@ export function PersonalizeEditor({
     else set({ foilFx });
   };
   const previewFoil = preview === "emboss" ? null : eff.foilFx[preview];
+  // 🖼 ฉากพรีวิว: null = ฉากหลัก · ฉากเพิ่ม = ตำแหน่งของฉากนั้น (ใช้ร่วมทุกสี → ไม่ล็อกตามแท็บสี)
+  const [sceneId, setSceneId] = useState<string | null>(null);
+  const scene = value.scenes.find((x) => x.id === sceneId) ?? null;
+  const sceneNo = scene ? value.scenes.indexOf(scene) + 2 : 1;
+  const posLocked = !scene && locked;
+  /** ตำแหน่งที่วาด/แก้: ฉากหลัก = ค่าของแท็บสี · ฉากเพิ่ม = ค่าของฉาก (เห็น = เปิดในค่าหลัก + ติ๊กโชว์ในฉาก) */
+  const stagePositions: PersonalizePosition[] = scene
+    ? eff.positions.map((p) => {
+        const sp = scene.positions.find((x) => x.key === p.key);
+        return sp ? { ...p, x: sp.x, y: sp.y, size: sp.size, rotate: sp.rotate, align: sp.align, enabled: p.enabled && sp.show } : { ...p, enabled: false };
+      })
+    : eff.positions;
+  const setScene = (p: Partial<PersonalizeScene>) => {
+    if (scene) set({ scenes: value.scenes.map((x) => (x.id === scene.id ? { ...x, ...p } : x)) });
+  };
+  const addScene = () => {
+    const used = new Set([value.imageKey ?? fallbackImageKey, ...value.scenes.map((x) => x.imageKey)]);
+    const img = imageOptions.find((o) => !used.has(o.key))?.key ?? imageOptions[0]?.key;
+    if (!img || value.scenes.length >= PERSONALIZE_MAX_SCENES) return;
+    const sc = makeScene(value, img);
+    set({ scenes: [...value.scenes, sc] });
+    setSceneId(sc.id);
+  };
+  const removeScene = async () => {
+    if (!scene) return;
+    if (!(await askConfirm({ title: `ลบ "${scene.label || `ฉาก ${sceneNo}`}"?`, message: "ตำแหน่งที่ตั้งไว้ในฉากนี้จะหายไป (มีผลเมื่อกดบันทึก)", variant: "danger", confirmText: "ลบฉาก" }))) return;
+    set({ scenes: value.scenes.filter((x) => x.id !== scene.id) });
+    setSceneId(null);
+  };
   const textRefs = useRef<Partial<Record<PersonalizePosition["key"], HTMLDivElement | null>>>({});
   const [imgW, setImgW] = useState(600);
   const set = (p: Partial<PersonalizeConfig>) => onChange({ ...value, ...p });
   /** ตำแหน่ง: เปิด/ปิด + ชื่อ = ใช้ร่วมทุกสี (ค่าหลัก) · x/y/ขนาด/เอียง/จัดชิด = ของแท็บที่เปิด (สีที่แยกค่า หรือค่าหลัก) */
   const setPos = (key: PersonalizePosition["key"], p: Partial<PersonalizePosition>) => {
     const { enabled, label, ...geo } = p;
+    if (scene) {
+      setScene({ positions: scene.positions.map((x) => (x.key === key ? { ...x, ...geo, ...(enabled !== undefined ? { show: enabled } : {}) } : x)) });
+      return;
+    }
     if (enabled !== undefined || label !== undefined) {
       if (tabColor) return;
       set({ positions: value.positions.map((x) => (x.key === key ? { ...x, ...(enabled !== undefined ? { enabled } : {}), ...(label !== undefined ? { label } : {}) } : x)) });
@@ -169,7 +209,9 @@ export function PersonalizeEditor({
     if (tabColor && ov) setOv({ positions: ov.positions.map((x) => (x.key === key ? { ...x, ...geo } : x)) });
     else if (!tabColor) set({ positions: value.positions.map((x) => (x.key === key ? { ...x, ...geo } : x)) });
   };
-  const imageKey = tabColor?.imageKey ?? value.imageKey ?? fallbackImageKey;
+  // ฉากเพิ่ม + แท็บสี = รูปลำดับเดียวกันของสีนั้น (เหมือนที่เว็บร้านสลับให้ลูกค้า)
+  const imagesOf = (c: (typeof colors)[number]) => ({ images: c.images?.length ? c.images : c.imageKey ? [c.imageKey] : [] });
+  const imageKey = scene ? sameAngleImage(scene.imageKey, colors.map(imagesOf), tabColor ? imagesOf(tabColor) : null) : (tabColor?.imageKey ?? value.imageKey ?? fallbackImageKey);
   const shown = cleanPersonalizeText(sample, value) ?? "YOUR NAME";
 
   /** เปลี่ยนการจัด → ขยับจุดยึดให้ข้อความตัวอย่างอยู่ที่เดิม (ไม่กระโดด) */
@@ -184,7 +226,7 @@ export function PersonalizeEditor({
   // ลากข้อความบนรูป → x/y เป็น % ของรูป
   const dragging = useRef(false);
   const onDown = (e: React.PointerEvent) => {
-    if (locked) return;
+    if (posLocked) return;
     dragging.current = true;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -290,11 +332,45 @@ export function PersonalizeEditor({
         <div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-3">
           {/* พรีวิว + ลากวางตำแหน่ง */}
           <div>
+            {/* 🖼 ฉากพรีวิว — ฉากหลัก + รูปมุมอื่นที่ลูกค้ากดดูรอยปั๊มได้ */}
+            <div className="flex items-center gap-1.5 flex-wrap mb-1.5 text-[11px] text-slate-500">
+              ฉากพรีวิว:
+              <button type="button" onClick={() => setSceneId(null)} className={chip(!scene)}>
+                ⭐ ฉากหลัก
+              </button>
+              {value.scenes.map((sc, i) => (
+                <button key={sc.id} type="button" onClick={() => setSceneId(sc.id)} className={`${chip(scene?.id === sc.id)} inline-flex items-center gap-1.5`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={keyUrl(sc.imageKey, 80)} alt="" className="w-4 h-4 rounded object-cover" />
+                  {sc.label || `ฉาก ${i + 2}`}
+                </button>
+              ))}
+              {value.scenes.length < PERSONALIZE_MAX_SCENES && imageOptions.length > 0 && (
+                <button type="button" onClick={addScene} className="text-orange-600 hover:underline" title="เพิ่มรูปมุมอื่นให้ลูกค้าดูรอยปั๊ม (ตั้งตำแหน่งแยกต่อรูป)">
+                  + เพิ่มฉาก
+                </button>
+              )}
+            </div>
+            {scene && (
+              <div className="flex items-center gap-2 mb-1.5">
+                <input value={scene.label} onChange={(e) => setScene({ label: e.target.value.slice(0, 40) })} placeholder={`ชื่อฉาก เช่น มุมข้าง (ว่าง = ฉาก ${sceneNo})`} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                <button type="button" onClick={removeScene} className="text-[11px] text-red-600 hover:underline">
+                  ลบฉากนี้
+                </button>
+              </div>
+            )}
             <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+              {scene ? (
+                <select value={scene.imageKey} onChange={(e) => e.target.value && setScene({ imageKey: e.target.value })} className="rounded-lg border border-slate-300 px-2 py-1 text-xs max-w-[60%]">
+                  {!imageOptions.some((o) => o.key === scene.imageKey) && <option value={scene.imageKey}>รูปที่เลือกไว้ (ไม่อยู่ในรายการแล้ว)</option>}
+                  {imageOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              ) : (
               <select value={value.imageKey ?? ""} onChange={(e) => set({ imageKey: e.target.value || null })} className="rounded-lg border border-slate-300 px-2 py-1 text-xs max-w-[60%]">
                 <option value="">รูปฉาก: รูปแรกของสินค้า (อัตโนมัติ)</option>
                 {imageOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
               </select>
+              )}
               <div className="flex items-center gap-1">
                 {PERSONALIZE_STYLES.filter((s) => value.styles.includes(s.value)).map((s) => (
                   <button key={s.value} type="button" onClick={() => setPreview(s.value)} className={chip(preview === s.value)}>{s.label}</button>
@@ -308,7 +384,7 @@ export function PersonalizeEditor({
               ) : (
                 <div className="aspect-square flex items-center justify-center text-sm text-slate-400">ยังไม่มีรูปสินค้า</div>
               )}
-              {eff.positions.filter((p) => p.enabled).map((p) => (
+              {stagePositions.filter((p) => p.enabled).map((p) => (
                 <div
                   key={p.key}
                   ref={(el) => {
@@ -335,7 +411,7 @@ export function PersonalizeEditor({
               {/* 🎚 วาดด้วย SVG ตัวเดียวกับเว็บร้าน — พิมพ์จม (personalizeEmbossFilter) · เงิน/ทอง (สี + personalizeFoilFilter) */}
               {svgStamp && (
                 <svg className="absolute left-0 top-0 pointer-events-none overflow-visible" width={stageSize.w} height={stageSize.h} viewBox={`0 0 ${stageSize.w} ${stageSize.h}`} aria-hidden>
-                  {eff.positions.filter((p) => p.enabled).map((p) => {
+                  {stagePositions.filter((p) => p.enabled).map((p) => {
                     const fontPx = (stageSize.w * p.size) / 100;
                     const x = (stageSize.w * p.x) / 100;
                     const y = (stageSize.h * p.y) / 100;
@@ -380,7 +456,7 @@ export function PersonalizeEditor({
                 </svg>
               )}
               {/* จุดยึดของตำแหน่งที่กำลังแก้ (ข้อความเริ่ม/กลาง/จบที่จุดนี้ตามการจัด) */}
-              {eff.positions.filter((p) => p.enabled && p.key === active).map((p) => (
+              {stagePositions.filter((p) => p.enabled && p.key === active).map((p) => (
                 <span key={`dot-${p.key}`} className="absolute w-2 h-2 -ml-1 -mt-1 rounded-full bg-orange-500 ring-2 ring-white pointer-events-none" style={{ left: `${p.x}%`, top: `${p.y}%` }} title="จุดยึด" />
               ))}
             </div>
@@ -389,16 +465,20 @@ export function PersonalizeEditor({
               <input value={sample} onChange={(e) => setSample(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs" />
             </div>
             <p className="text-[11px] text-slate-400 mt-1">จุดสีส้ม = จุดยึดของตำแหน่งที่เลือก · ชิดขวา = ชื่อยาวขึ้นจะงอกไปทางซ้าย ปลายชื่ออยู่ที่จุดเสมอ</p>
+            {scene && <p className="text-[11px] text-sky-600 mt-1">🖼 ฉากนี้ใช้ร่วมทุกสี — เว็บสลับเป็นรูปมุมเดียวกันของสีที่ลูกค้าเลือกให้เอง · เอฟเฟกต์ใช้ของค่าหลัก/ค่าแยกสี · ตำแหน่งที่ไม่ติ๊ก &quot;โชว์ในฉากนี้&quot; = ฉากนี้เป็นรูปเปล่า</p>}
           </div>
 
           <div className="space-y-2">
             {/* ตำแหน่ง 2 จุด — แท็บสีที่ยังไม่แยกค่า = ล็อก (ดูค่าหลัก) · เปิด/ปิด + ชื่อ แก้ที่ค่าหลักเท่านั้น */}
-            <fieldset disabled={locked} className={`space-y-2 ${locked ? "opacity-60" : ""}`}>
-            {eff.positions.map((p) => (
+            <fieldset disabled={posLocked} className={`space-y-2 ${posLocked ? "opacity-60" : ""}`}>
+            {stagePositions.filter((p) => !scene || value.positions.find((m) => m.key === p.key)?.enabled).map((p) => {
+              const shown = scene ? !!scene.positions.find((x) => x.key === p.key)?.show : p.enabled;
+              return (
               <div key={p.key} className={`rounded-lg border p-2 space-y-1.5 ${active === p.key ? "border-orange-300 bg-orange-50/40" : "border-slate-200"}`} onClick={() => setActive(p.key)}>
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" className="w-4 h-4 accent-orange-500" checked={p.enabled} disabled={!!tabColor} onChange={(e) => setPos(p.key, { enabled: e.target.checked })} title={tabColor ? "เปิด/ปิดตำแหน่ง แก้ที่แท็บค่าหลัก (ใช้ร่วมทุกสี)" : "ให้ลูกค้าเลือกตำแหน่งนี้ได้"} />
-                  <input value={p.label} disabled={!!tabColor} onChange={(e) => setPos(p.key, { label: e.target.value })} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50" placeholder={p.key === "center" ? "ตรงกลาง" : "มุมขวาล่าง"} />
+                  <input type="checkbox" className="w-4 h-4 accent-orange-500" checked={shown} disabled={!scene && !!tabColor} onChange={(e) => setPos(p.key, { enabled: e.target.checked })} title={scene ? "โชว์รอยปั๊มตำแหน่งนี้ในฉากนี้ (ไม่เห็นในรูปนี้ = เอาติ๊กออก)" : tabColor ? "เปิด/ปิดตำแหน่ง แก้ที่แท็บค่าหลัก (ใช้ร่วมทุกสี)" : "ให้ลูกค้าเลือกตำแหน่งนี้ได้"} />
+                  <input value={p.label} disabled={!!tabColor || !!scene} onChange={(e) => setPos(p.key, { label: e.target.value })} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50" placeholder={p.key === "center" ? "ตรงกลาง" : "มุมขวาล่าง"} />
+                  {scene && <span className="text-[11px] text-sky-600 whitespace-nowrap">{shown ? "โชว์ในฉากนี้" : "ไม่โชว์ในฉากนี้"}</span>}
                   <span className="text-[11px] text-slate-400">x {p.x}% · y {p.y}%</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
@@ -412,7 +492,8 @@ export function PersonalizeEditor({
                   <RangeInput label={<span className="text-[11px] text-slate-500">เอียง</span>} min={-30} max={30} step={1} hardMin={-45} hardMax={45} unit="°" value={p.rotate} onChange={(v) => setPos(p.key, { rotate: v })} />
                 </div>
               </div>
-            ))}
+              );
+            })}
             </fieldset>
 
             {/* ตัวอักษร — ใช้ร่วมทุกสี (แก้ที่แท็บค่าหลัก) */}

@@ -8,6 +8,7 @@
  *   - ตัวที่ปั๊มได้ตั้งต่อรุ่น (charset + ตัวพิเศษ symbols) — ตัวกรองเดียวกันทั้งตอนพิมพ์ (เว็บร้าน) และตอนสั่ง (ERP ตรวจซ้ำ)
  *     storefront มิเรอร์ใน src/lib/personalize.ts
  *   - ฟอนต์ Times New Roman ตายตัว (ตามที่เจ้าของร้านกำหนด) · นับความยาวเป็น "ตัว" (♥ = 1 ตัว)
+ *   - 🖼 ฉากพรีวิวเพิ่ม (scenes) = รูปมุมอื่นที่ลูกค้าเห็นรอยปั๊มด้วย · แต่ละฉากตั้งตำแหน่งเอง + เลือกว่าตำแหน่งไหนโชว์ในฉากนั้น
  */
 export type PersonalizeStyle = "emboss" | "silver" | "gold";
 export type PersonalizePositionKey = "center" | "right";
@@ -52,6 +53,8 @@ export interface PersonalizeConfig {
   foilFx: Record<PersonalizeFoilStyle, PersonalizeFoilFx>;
   /** 🎨 ค่าแยกตามสี (คีย์ = id SKU ลูก) — ไม่มี = ใช้ค่าหลัก */
   colorOverrides: Record<string, PersonalizeColorOverride>;
+  /** 🖼 ฉากพรีวิวเพิ่ม (นอกจากฉากหลัก imageKey) — ลูกค้ากดดูรอยปั๊มบนรูปมุมอื่น */
+  scenes: PersonalizeScene[];
 }
 export interface PersonalizeChoice {
   text: string;
@@ -505,6 +508,21 @@ export function applyColorOverride<C extends Pick<PersonalizeConfig, "positions"
   };
 }
 
+/* ── 🖼 ฉากพรีวิวเพิ่ม (ตั้งต่อรุ่น) ──
+ * ฉาก = รูป 1 รูป + ตำแหน่งปั๊มของรูปนั้น (x/y/ขนาด/เอียง/จัดชิด) + show = ตำแหน่งนั้นเห็นในรูปนี้ไหม (ไม่เห็น = โชว์รูปเปล่า)
+ * ใช้ร่วมทุกสี: เว็บร้านเปลี่ยนรูปเป็น "รูปลำดับเดียวกัน" ของสีที่ลูกค้าเลือกให้เอง (รูปทุกสีถ่ายมุมเดียวกัน) · เอฟเฟกต์ = ค่าหลัก/ค่าแยกของสี */
+export interface PersonalizeScenePos extends PersonalizeColorPos {
+  show: boolean;
+}
+export interface PersonalizeScene {
+  id: string;
+  /** ชื่อฉาก (เช่น มุมข้าง) — ว่างได้ */
+  label: string;
+  imageKey: string;
+  positions: PersonalizeScenePos[];
+}
+export const PERSONALIZE_MAX_SCENES = 8;
+
 export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   enabled: false,
   maxChars: 10,
@@ -521,6 +539,7 @@ export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   embossFx: DEFAULT_EMBOSS_FX,
   foilFx: DEFAULT_FOIL_FX,
   colorOverrides: {},
+  scenes: [],
 };
 
 const KEY_RE = /^[\w\-./%()]+$/;
@@ -529,6 +548,60 @@ const num = (v: unknown, fb: number, lo: number, hi: number) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 10) / 10)) : fb;
 };
+
+const SCENE_ID_RE = /^[\w-]{1,24}$/;
+/** อ่านฉากพรีวิวจาก DB (ไม่มีรูป/รหัสซ้ำ = ตัดทิ้ง · สูงสุด 8 ฉาก · ตำแหน่งที่ขาด = ค่าเริ่มแต่ไม่โชว์) */
+export function normalizeScenes(raw: unknown): PersonalizeScene[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PersonalizeScene[] = [];
+  for (const v of raw) {
+    if (out.length >= PERSONALIZE_MAX_SCENES) break;
+    if (!v || typeof v !== "object") continue;
+    const r = v as Record<string, unknown>;
+    if (typeof r.id !== "string" || !SCENE_ID_RE.test(r.id) || out.some((x) => x.id === r.id)) continue;
+    if (typeof r.imageKey !== "string" || !KEY_RE.test(r.imageKey)) continue;
+    const rawPos = Array.isArray(r.positions) ? (r.positions as Record<string, unknown>[]) : [];
+    out.push({
+      id: r.id,
+      label: typeof r.label === "string" ? r.label.trim().slice(0, 40) : "",
+      imageKey: r.imageKey,
+      positions: DEFAULT_PERSONALIZE.positions.map((d) => {
+        const p = rawPos.find((x) => x && typeof x === "object" && x.key === d.key);
+        const q = p ?? {};
+        return {
+          key: d.key,
+          show: !!p && q.show !== false,
+          x: num(q.x, d.x, 0, 100),
+          y: num(q.y, d.y, 0, 100),
+          size: num(q.size, d.size, 1, 30),
+          rotate: num(q.rotate, d.rotate, -45, 45),
+          align: (typeof q.align === "string" && ALIGNS.has(q.align) ? q.align : d.align) as PersonalizeAlign,
+        };
+      }),
+    });
+  }
+  return out;
+}
+
+/** ฉากใหม่: ตั้งตำแหน่งเริ่มจากฉากหลัก (ตำแหน่งที่เปิดอยู่ = โชว์) แล้วค่อยลากปรับบนรูปใหม่ */
+export function makeScene(cfg: Pick<PersonalizeConfig, "positions">, imageKey: string): PersonalizeScene {
+  return {
+    id: `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+    label: "",
+    imageKey,
+    positions: cfg.positions.map((p) => ({ key: p.key, show: p.enabled, x: p.x, y: p.y, size: p.size, rotate: p.rotate, align: p.align })),
+  };
+}
+
+/** รูป "มุมเดียวกัน" ของสีอื่น: รูปนี้เป็นรูปลำดับที่ i ของสีใด → ใช้รูปลำดับที่ i ของสีที่เลือก (ไม่มี/ไม่ใช่รูปของสี = รูปเดิม) */
+export function sameAngleImage<T extends string>(img: T, colors: { images: T[] }[], target: { images: T[] } | null | undefined): T {
+  if (!target) return img;
+  for (const c of colors) {
+    const i = c.images.indexOf(img);
+    if (i >= 0) return target.images[i] ?? img;
+  }
+  return img;
+}
 
 /** ตัวพิเศษจากช่องที่แอดมินพิมพ์/วาง (ติดกันหรือเว้นวรรคก็ได้) → รายการตัวละ 1 ตัวอักษร ไม่ซ้ำ · ตัด A–Z a–z 0–9 (อยู่ในกลุ่มตัวอักษรอยู่แล้ว) และตัวควบคุม */
 export function parsePersonalizeSymbols(raw: unknown): string[] {
@@ -582,6 +655,7 @@ export function normalizePersonalize(raw: unknown): PersonalizeConfig {
     embossFx: normalizeEmbossFx(r.embossFx),
     foilFx: normalizeFoilFxPair(r.foilFx),
     colorOverrides: normalizeColorOverrides(r.colorOverrides),
+    scenes: normalizeScenes(r.scenes),
   };
 }
 

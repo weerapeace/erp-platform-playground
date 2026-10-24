@@ -1090,7 +1090,7 @@ export function ParentWebListings({
                 imageOptions={imageOptionsOf(s)}
                 fallbackImageKey={s.webImages[0] ?? data.variants[0]?.erpImageKey ?? null}
                 // 🎨 สีของรุ่น (ค่าแยกตามสี) — รูป = รูปเว็บรายสีที่เลือกไว้ / แกลเลอรี / ปก SKU (ลำดับเดียวกับที่เว็บใช้ตอนเลือกสี)
-                colors={data.variants.map((v) => ({ id: v.id, label: v.label || v.code, imageKey: s.webSkuImages[v.id]?.[0] ?? v.gallery[0] ?? v.erpImageKey }))}
+                colors={data.variants.map((v) => ({ id: v.id, label: v.label || v.code, imageKey: s.webSkuImages[v.id]?.[0] ?? v.gallery[0] ?? v.erpImageKey, images: s.webSkuImages[v.id] ?? v.gallery }))}
               />
               <p className="text-[11px] text-slate-400 mt-2">
                 ลูกค้าจะพิมพ์ข้อความ เลือกแบบ และเลือกตำแหน่งได้ในหน้าสินค้า (ชิ้นส่วน &quot;ปั๊มชื่อ&quot; ในส่วนราคา-ตะกร้า) และในบล็อก &quot;ปั๊มชื่อ&quot; ของตัวจัดหน้า · กด &quot;บันทึก&quot; ด้านล่างเพื่อใช้งาน

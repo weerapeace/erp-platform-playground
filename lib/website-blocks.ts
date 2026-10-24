@@ -1229,6 +1229,8 @@ export interface PersonalizeBlock extends BlockBase {
   ideas?: string[];
   /** การซูมรูป: off · hover ชี้แล้วซูม (มือถือแตะ) · circle วงซูมตรงจุดปั๊ม */
   zoomMode?: "off" | "hover" | "circle";
+  /** 🖼 แกลเลอรีใต้พรีวิว (รูปของสีที่เลือก + ฉากพรีวิวเพิ่ม) — ไม่ตั้ง = เปิด */
+  showGallery?: boolean;
   /** @deprecated ใช้ zoomMode (true = circle) */
   zoom?: boolean;
   /** A สตูดิโอ — ปรับละเอียด */

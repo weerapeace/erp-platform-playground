@@ -263,6 +263,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             ...pz,
             imageUrl: imageUrl(pz.imageKey ?? r.images[0] ?? p.cover_image_r2_key ?? ""),
             positions: pz.positions.filter((x) => x.enabled),
+            // 🖼 ฉากพรีวิวเพิ่ม: รูป → URL (เว็บร้านสลับเป็นรูปมุมเดียวกันของสีที่เลือกเอง) · ตำแหน่งที่ไม่โชว์ = ตัดทิ้ง
+            scenes: pz.scenes.map((sc) => ({ id: sc.id, label: sc.label, imageUrl: imageUrl(sc.imageKey), positions: sc.positions.filter((x) => x.show) })),
             colorOverrides: (() => {
               const optIdByColor = new Map((r.options?.items ?? []).map((it) => [it.label, it.id]));
               return Object.fromEntries(

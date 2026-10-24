@@ -3614,6 +3614,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       text("freeNote", "ข้อความใต้ปุ่ม", { group: "layout", default: "ปั๊มฟรี · ทำเสร็จใน 2–3 วันทำการ", max: 80, wide: true, showIf: { key: "showFree", eq: true } }),
       f("showIdeas", "ไอเดียชื่อ (กดแล้วเติมให้)", "toggle", { group: "layout", default: false }),
       f("ideas", "ไอเดียชื่อ (บรรทัดละ 1)", "list", { group: "layout", default: ["LOVE", "MOM", "A.K."], max: 8, showIf: { key: "showIdeas", eq: true }, hint: "ตัวอักษรที่ปั๊มไม่ได้ (เช่น ภาษาไทย) จะถูกตัดออก · ยาวเกินที่รุ่นนั้นรับ = ไม่โชว์" }),
+      f("showGallery", "แกลเลอรีรูปใต้พรีวิว", "toggle", { group: "layout", default: true, hint: "รูปอื่นของสีที่เลือก (เหมือนหน้าสินค้า) + ฉากพรีวิวมุมอื่นที่ตั้งไว้ในแท็บเว็บไซต์ของรุ่น" }),
       f("zoomMode", "การซูมรูป", "select", {
         group: "layout",
         default: "off",
