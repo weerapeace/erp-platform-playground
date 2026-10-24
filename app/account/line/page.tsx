@@ -4,9 +4,11 @@
 // ผูกบัญชี LINE เข้ากับ "ผู้ใช้ของฉัน" — เพื่ออนุมัติงานผ่านหน้าเล็กใน LINE
 // (user อาจไม่ใช่พนักงาน · ผูกที่ระดับ user โดยตรง)
 // ต้องตั้ง env NEXT_PUBLIC_LINE_LIFF_ID · ต้องล็อกอิน ERP อยู่
+// ⚠️ เรียก API ด้วย apiFetch (แนบ token) — ล็อกอิน ERP อยู่ใน localStorage ไม่ใช่ cookie · fetch ธรรมดา = เซิร์ฟเวอร์คิดว่ายังไม่ล็อกอิน
 // ============================================================
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
 
 type LiffSdk = { init: (o: { liffId: string }) => Promise<void>; isLoggedIn: () => boolean; login: (o?: { redirectUri?: string }) => void; getIDToken: () => string | null };
 const getLiff = () => (typeof window !== "undefined" ? (window as unknown as { liff?: LiffSdk }).liff : undefined);
@@ -27,12 +29,17 @@ export default function AccountLinePage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [needLogin, setNeedLogin] = useState(false);
 
-  const loadStatus = useCallback(async () => {
-    try { const j = await fetch("/api/account/line-link").then((r) => r.json()); if (j.error) setErr(j.error); else setLinked(!!j.linked); }
-    catch { setErr("โหลดสถานะไม่สำเร็จ"); }
+  const loadStatus = useCallback(async (): Promise<boolean | null> => {
+    try {
+      const r = await apiFetch("/api/account/line-link");
+      if (r.status === 401) { setNeedLogin(true); return null; }
+      const j = await r.json();
+      if (j.error) { setErr(j.error); return null; }
+      setLinked(!!j.linked); return !!j.linked;
+    } catch { setErr("โหลดสถานะไม่สำเร็จ"); return null; }
   }, []);
-  useEffect(() => { void loadStatus(); }, [loadStatus]);
 
   const link = async () => {
     setErr(""); setMsg(""); setBusy(true);
@@ -46,17 +53,29 @@ export default function AccountLinePage() {
       if (!lf.isLoggedIn()) { lf.login({ redirectUri: window.location.href }); return; }
       const tk = lf.getIDToken();
       if (!tk) throw new Error("อ่าน LINE ID token ไม่ได้");
-      const r = await fetch("/api/account/line-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id_token: tk }) });
+      const r = await apiFetch("/api/account/line-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id_token: tk }) });
       const j = await r.json();
+      if (r.status === 401 && j.error === "ต้องเข้าสู่ระบบ") { setNeedLogin(true); return; }
       if (!r.ok || j.error) { setErr(j.error || "ผูกไม่สำเร็จ"); return; }
       setMsg("ผูกบัญชี LINE สำเร็จ ✓ ตอนนี้กดอนุมัติงานผ่าน LINE ได้แล้ว"); setLinked(true);
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
 
+  // เปิดหน้า: โหลดสถานะ · กลับมาจากหน้าล็อกอิน LINE (มี code/liffClientId ใน URL) และยังไม่ผูก = ผูกต่อให้เลย ไม่ต้องกดซ้ำ
+  const autoRan = useRef(false);
+  useEffect(() => {
+    void (async () => {
+      const isLinked = await loadStatus();
+      const q = new URLSearchParams(window.location.search);
+      if (isLinked === false && !autoRan.current && (q.has("liffClientId") || q.has("code"))) { autoRan.current = true; await link(); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadStatus]);
+
   const unlink = async () => {
     if (!window.confirm("ยกเลิกการผูก LINE?")) return;
     setBusy(true); setErr(""); setMsg("");
-    try { const r = await fetch("/api/account/line-link", { method: "DELETE" }); const j = await r.json(); if (!r.ok || j.error) setErr(j.error || "ยกเลิกไม่สำเร็จ"); else { setLinked(false); setMsg("ยกเลิกการผูกแล้ว"); } }
+    try { const r = await apiFetch("/api/account/line-link", { method: "DELETE" }); const j = await r.json(); if (!r.ok || j.error) setErr(j.error || "ยกเลิกไม่สำเร็จ"); else { setLinked(false); setMsg("ยกเลิกการผูกแล้ว"); } }
     catch { setErr("ยกเลิกไม่สำเร็จ"); } finally { setBusy(false); }
   };
 
@@ -71,7 +90,9 @@ export default function AccountLinePage() {
         {msg && <p className="mt-4 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{msg}</p>}
 
         <div className="mt-5">
-          {linked === null ? <p className="text-slate-400 text-sm">กำลังโหลด...</p>
+          {needLogin ? (
+            <a href={`/login?next=${encodeURIComponent("/account/line")}`} className="block h-12 w-full rounded-xl bg-slate-900 text-center text-sm font-bold leading-[3rem] text-white hover:bg-slate-800">เข้าสู่ระบบ ERP ก่อน</a>
+          ) : linked === null ? <p className="text-slate-400 text-sm">{err ? "" : "กำลังโหลด..."}</p>
             : linked ? (
               <div className="space-y-3">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">✓ ผูกบัญชี LINE แล้ว</div>
