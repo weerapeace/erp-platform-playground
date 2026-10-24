@@ -6,18 +6,22 @@
  *   <RecordChecklistChip .../> = บนการ์ด: ข้อที่รอเป็นช่องติ๊กได้เลย (สูงสุด 3 ข้อ) + ⋯ เด้งกล่องดูทั้งหมด/เพิ่ม (ไม่เปิดเรคคอร์ด · ไม่ลากการ์ด)
  * ค่าที่ใช้บ่อย = ค่ากลาง erp_lookups ชนิด presetType (⚙️ ข้างปุ่มลัด เปิดป๊อปแก้/ลากเรียง)
  * ผู้รับผิดชอบ = ของกลาง UserPicker (เฉพาะคนที่ยังทำงานอยู่) · ใส่ชื่อแล้วกระดิ่งเด้งบอกคนนั้น + เห็นใน "งานของคุณ" ของป๊อปตอนเข้า ERP
+ * ลิงก์ต่อข้อ (🔗 · หลายลิงก์ + ชื่อกำกับไม่บังคับ) — ค่าที่ใช้บ่อยที่เปิดสวิตช์ 🔗 ไว้ (เช่น "ซื้อของ") กดแล้วเปิดช่องวางลิงก์ให้เลย
  * ใช้แล้วที่: ใบงานออกแบบ "⏳ รออะไรอยู่" (lib/design-sheet-waiting) · doc: docs/record-tasks.md
  */
-import { useRef, useState, type ReactNode, type SyntheticEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 import { FloatingDropdown } from "@/components/floating-dropdown";
-import { LookupValuesEditor, useLookupNames } from "@/components/lookup-values-editor";
+import { LookupValuesEditor, useLookupRows, type LookupFlag } from "@/components/lookup-values-editor";
 import { UserPicker } from "@/components/pickers";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { isTaskDone, summarizeTasks, taskWithWho, type ChecklistSummary } from "@/lib/record-tasks";
+import { isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, summarizeTasks, taskWithWho, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { relTime, useRecordTasks } from "./use-record-tasks";
+import { TaskLinkList, TaskLinksButton } from "./task-links";
+
+export { TaskLinkList, TaskLinksButton };
 
 type Common = {
   moduleKey: string;
@@ -56,6 +60,45 @@ function WhoPicker({ onPick, onCancel, allowNone }: { onPick: (u: { id: string; 
   );
 }
 
+/** สวิตช์ในป๊อปตั้งค่าปุ่มลัด: ค่านี้กดแล้วเปิดช่องลิงก์ให้เอง (metadata.links ของค่ากลาง) */
+const PRESET_FLAGS: LookupFlag[] = [{ key: "links", label: "🔗", title: "กดปุ่มนี้แล้วเปิดช่องวางลิงก์ให้เลย (เช่น ซื้อของ)" }];
+
+/** ช่องเพิ่มลิงก์ใต้ข้อ — วางลิงก์ + ชื่อกำกับ (ไม่บังคับ) · Enter = เพิ่ม · ไม่ใช่ลิงก์/ซ้ำ = เตือน ไม่บันทึก */
+function LinkAdder({ existing, onAdd, onClose }: { existing: TaskLink[]; onAdd: (l: TaskLink) => Promise<boolean>; onClose: () => void }) {
+  const [url, setUrl] = useState("");
+  const [label, setLabel] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const full = existing.length >= MAX_TASK_LINKS;
+  const submit = async () => {
+    const u = parseTaskLinkUrl(url);
+    if (!u) { setErr(url.trim() ? "ลิงก์ไม่ถูกต้อง — วางลิงก์ที่ขึ้นต้นด้วย https://" : "วางลิงก์ก่อน"); return; }
+    if (existing.some((l) => l.url === u)) { setErr("มีลิงก์นี้แล้ว"); return; }
+    setBusy(true);
+    const ok = await onAdd({ url: u, label: label.trim() || null });
+    setBusy(false);
+    if (ok) { setUrl(""); setLabel(""); }
+  };
+  const onKey = (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } if (e.key === "Escape") onClose(); };
+  return (
+    <div className="ml-6 mt-1 rounded-md bg-slate-50 p-1.5">
+      {full ? <div className="px-1 text-xs text-slate-500">ใส่ลิงก์ครบ {MAX_TASK_LINKS} อันแล้ว — เอาอันเดิมออกก่อน</div> : (
+        <div className="flex flex-wrap gap-1.5">
+          <input autoFocus value={url} onChange={(e) => { setUrl(e.target.value); setErr(null); }} onKeyDown={onKey} disabled={busy}
+            placeholder="วางลิงก์ร้าน แล้วกด Enter" aria-label="ลิงก์"
+            className="h-8 min-w-[12rem] flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input value={label} maxLength={60} onChange={(e) => setLabel(e.target.value)} onKeyDown={onKey} disabled={busy}
+            placeholder="ชื่อ (ไม่บังคับ)" aria-label="ชื่อกำกับลิงก์"
+            className="h-8 w-36 rounded-md border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <button type="button" onClick={() => void submit()} disabled={busy} className="h-8 rounded-md border border-slate-300 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50">＋ ลิงก์</button>
+          <button type="button" onClick={onClose} className="h-8 rounded-md px-2 text-xs text-slate-500 hover:text-slate-800">เสร็จ</button>
+        </div>
+      )}
+      {err && <p className="px-1 pt-1 text-xs text-rose-600">{err}</p>}
+    </div>
+  );
+}
+
 export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdit, onChange, presetType = null, label = null,
   emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true }: Common & {
   /** ชนิดค่ากลางของปุ่มลัด (null = ไม่มีปุ่มลัด) */
@@ -67,10 +110,13 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
   /** ใส่ผู้รับผิดชอบรายข้อได้ */
   assignable?: boolean;
 }) {
-  const { items, loading, loaded, add, toggle, rename, assign, remove } = useRecordTasks({
+  const { items, loading, loaded, add, toggle, rename, assign, setLinks, remove } = useRecordTasks({
     moduleKey, recordId, recordType, onChange: onChange ? (list) => onChange(summarizeTasks(list)) : undefined,
   });
-  const presets = useLookupNames(presetType);
+  const presetRows = useLookupRows(presetType);
+  const presets = presetRows.map((r) => r.name);
+  const linkPresets = new Set(presetRows.filter((r) => r.metadata.links).map((r) => r.name.trim()));   // ค่าที่เปิดช่องลิงก์ให้เอง
+  const [linkFor, setLinkFor] = useState<string | null>(null);   // id ข้อที่เปิดช่องเพิ่มลิงก์อยู่
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(false);
@@ -87,9 +133,12 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
   const submit = async (t: string) => {
     if (!t.trim()) { setErr(true); return; }
     setBusy(true);
-    const ok = await add(t, newWho);
+    const created = await add(t, newWho);
     setBusy(false);
-    if (ok) { if (t === text) setText(""); setNewWho(null); if (pickFor === "new") setPickFor(null); }
+    if (created) {
+      if (t === text) setText(""); setNewWho(null); if (pickFor === "new") setPickFor(null);
+      if (linkPresets.has(created.title.trim())) setLinkFor(created.id);   // เช่น "ซื้อของ" → เปิดช่องวางลิงก์ให้เลย
+    }
   };
   const commitEdit = () => { const e = editing; setEditing(null); if (e) { const it = items.find((x) => x.id === e.id); if (it) void rename(it, e.text); } };
 
@@ -111,7 +160,15 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
             <button type="button" disabled={!canEdit} onClick={() => setEditing({ id: it.id, text: it.title })} title={canEdit ? "กดเพื่อแก้" : undefined}
               className={`block w-full break-words text-left text-sm disabled:cursor-default ${done ? "text-slate-400 line-through" : "text-slate-700"}`}>{it.title}</button>
           )}
+          <TaskLinkList links={it.links} className="mt-0.5" onRemove={canEdit ? (url) => void setLinks(it, (it.links ?? []).filter((l) => l.url !== url)) : undefined} />
         </div>
+        {canEdit && (
+          <button type="button" onClick={() => setLinkFor(linkFor === it.id ? null : it.id)} aria-pressed={linkFor === it.id}
+            title={it.links?.length ? `ลิงก์ ${it.links.length} อัน — กดเพื่อเพิ่ม` : "ใส่ลิงก์ (เช่น ร้านที่จะซื้อ)"}
+            className={`inline-flex h-6 shrink-0 items-center rounded-full border px-1.5 text-[11px] ${it.links?.length ? "border-slate-200 text-blue-700 hover:bg-blue-50" : "border-dashed border-slate-300 text-slate-400 opacity-0 hover:text-slate-600 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"} ${linkFor === it.id ? "!opacity-100 bg-blue-50" : ""}`}>
+            🔗{it.links?.length ? ` ${it.links.length}` : ""}
+          </button>
+        )}
         {assignable && (it.assigned_name || canEdit) && <WhoChip name={it.assigned_name} onClick={canEdit ? () => setPickFor(pickFor === it.id ? null : it.id) : undefined} />}
         <span className="mt-0.5 hidden shrink-0 whitespace-nowrap text-[10px] text-slate-400 sm:inline">{meta}</span>
         {canEdit && (
@@ -120,6 +177,7 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
         )}
       </div>
       {pickFor === it.id && <WhoPicker allowNone={!!it.assigned_to} onCancel={() => setPickFor(null)} onPick={(u) => { setPickFor(null); void assign(it, u); }} />}
+      {linkFor === it.id && canEdit && <LinkAdder existing={it.links ?? []} onClose={() => setLinkFor(null)} onAdd={(l) => setLinks(it, [...(it.links ?? []), l])} />}
       </div>
     );
   };
@@ -167,7 +225,8 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
           </div>
         )}
       </div>
-      {presetType && <LookupValuesEditor lookupType={presetType} open={presetOpen} onClose={() => setPresetOpen(false)} title={presetTitle} />}
+      {presetType && <LookupValuesEditor lookupType={presetType} open={presetOpen} onClose={() => setPresetOpen(false)} title={presetTitle} flags={PRESET_FLAGS}
+        description="เพิ่ม · กดชื่อเพื่อแก้ · ลากเรียงลำดับ · 🔗 = กดแล้วเปิดช่องวางลิงก์ให้เลย · ใช้ร่วมกันทั้งทีม" />}
     </div>
   );
 }
@@ -176,7 +235,7 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
  *  สรุปมี ids (API รายการรุ่นใหม่) = ติ๊กบนการ์ดได้เลยทีละข้อ (สูงสุด CHIP_ROWS ข้อ · ติ๊กแล้วขีดฆ่า กดซ้ำ = ยกเลิก) + ปุ่ม ⋯ เปิดกล่องดูทั้งหมด/เพิ่ม
  *  ติ๊กได้ = canEdit หรือเป็นผู้รับผิดชอบข้อนั้น (กฎเดียวกับ PATCH /api/record-tasks/[id]) */
 const CHIP_ROWS = 3;
-type ChipRow = { id: string; title: string; who: string | null; aid: string | null };
+type ChipRow = { id: string; title: string; who: string | null; aid: string | null; links: TaskLink[] };
 export function RecordChecklistChip({ moduleKey, recordType = null, recordId, canEdit, onChange, summary }: Common & {
   /** สรุปจาก API รายการ (ไม่ต้องยิงทีละการ์ด) */
   summary: ChecklistSummary | null | undefined;
@@ -191,7 +250,7 @@ export function RecordChecklistChip({ moduleKey, recordType = null, recordId, ca
   // กันคลิก/พิมพ์ในแถบและกล่อง (portal) ไหลไปเปิดการ์ด / ลากการ์ด
   const stop = (e: SyntheticEvent) => e.stopPropagation();
   const rows: ChipRow[] | null = summary.ids && summary.ids.length === summary.open.length
-    ? summary.open.map((title, i) => ({ id: summary.ids![i], title, who: summary.who?.[i] ?? null, aid: summary.aids?.[i] ?? null }))
+    ? summary.open.map((title, i) => ({ id: summary.ids![i], title, who: summary.who?.[i] ?? null, aid: summary.aids?.[i] ?? null, links: summary.links?.[i] ?? [] }))
     : null;
 
   // ── ติ๊กตรงบนการ์ด ──
@@ -207,24 +266,29 @@ export function RecordChecklistChip({ moduleKey, recordType = null, recordId, ca
         const idx = rows.findIndex((x) => x.id === r.id);
         if (done) {
           setDoneLocal((d) => [...d.filter((x) => x.id !== r.id), r]);
-          if (idx >= 0) onChange?.({ open: summary.open.filter((_, i) => i !== idx), who: summary.who?.filter((_, i) => i !== idx), ids: summary.ids!.filter((_, i) => i !== idx), aids: summary.aids?.filter((_, i) => i !== idx), done: summary.done + 1 });
+          if (idx >= 0) onChange?.({ open: summary.open.filter((_, i) => i !== idx), who: summary.who?.filter((_, i) => i !== idx), ids: summary.ids!.filter((_, i) => i !== idx), aids: summary.aids?.filter((_, i) => i !== idx), links: summary.links?.filter((_, i) => i !== idx), done: summary.done + 1 });
         } else {
           setDoneLocal((d) => d.filter((x) => x.id !== r.id));
-          onChange?.({ open: [...summary.open, r.title], who: [...(summary.who ?? summary.open.map(() => null)), r.who], ids: [...summary.ids!, r.id], aids: [...(summary.aids ?? summary.open.map(() => null)), r.aid], done: Math.max(0, summary.done - 1) });
+          onChange?.({ open: [...summary.open, r.title], who: [...(summary.who ?? summary.open.map(() => null)), r.who], ids: [...summary.ids!, r.id], aids: [...(summary.aids ?? summary.open.map(() => null)), r.aid],
+            links: summary.links || r.links.length ? [...(summary.links ?? summary.open.map(() => [])), r.links] : undefined, done: Math.max(0, summary.done - 1) });
         }
       } catch { toast.error("ติ๊กไม่สำเร็จ ลองใหม่อีกครั้ง"); }
       finally { setBusy(null); }
     };
     const rowBtn = (r: ChipRow, done: boolean) => {
       const can = canTick(r);
+      // ปุ่มติ๊กกับปุ่มลิงก์แยกกัน (ห้ามซ้อนปุ่มในปุ่ม) · ลิงก์โชว์เฉพาะข้อที่ยังรอ
       return (
-        <button key={r.id} type="button" draggable={false} onDragStart={(e) => e.preventDefault()} disabled={!can || busy === r.id}
-          onClick={() => void setStatus(r, !done)}
-          title={can ? (done ? "กดเพื่อยกเลิกติ๊ก" : "ติ๊กเมื่อเสร็จ") : "ติ๊กได้เฉพาะคนที่แก้ใบงานได้ / ผู้รับผิดชอบข้อนี้"}
-          className={`flex w-full min-w-0 items-start gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[11px] transition ${done ? "bg-emerald-50 text-slate-400" : "bg-amber-50 text-amber-900"} ${can ? "hover:bg-amber-100" : "cursor-default"} ${busy === r.id ? "opacity-60" : ""}`}>
-          <span className={tickCls(done)}>✓</span>
-          <span className={`min-w-0 flex-1 truncate ${done ? "line-through" : ""}`}>{r.title}{r.who && <span className={done ? "" : "text-amber-700/70"}> · {r.who}</span>}</span>
-        </button>
+        <span key={r.id} className={`flex w-full min-w-0 items-start rounded-md ${done ? "bg-emerald-50" : "bg-amber-50"}`}>
+          <button type="button" draggable={false} onDragStart={(e) => e.preventDefault()} disabled={!can || busy === r.id}
+            onClick={() => void setStatus(r, !done)}
+            title={can ? (done ? "กดเพื่อยกเลิกติ๊ก" : "ติ๊กเมื่อเสร็จ") : "ติ๊กได้เฉพาะคนที่แก้ใบงานได้ / ผู้รับผิดชอบข้อนี้"}
+            className={`flex min-w-0 flex-1 items-start gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[11px] transition ${done ? "text-slate-400" : "text-amber-900"} ${can ? "hover:bg-amber-100" : "cursor-default"} ${busy === r.id ? "opacity-60" : ""}`}>
+            <span className={tickCls(done)}>✓</span>
+            <span className={`min-w-0 flex-1 truncate ${done ? "line-through" : ""}`}>{r.title}{r.who && <span className={done ? "" : "text-amber-700/70"}> · {r.who}</span>}</span>
+          </button>
+          {!done && <TaskLinksButton links={r.links} />}
+        </span>
       );
     };
     return (
@@ -281,7 +345,7 @@ function ChipPanel({ moduleKey, recordType, recordId, canEdit, onChange }: Commo
               <label key={it.id} className={`flex items-start gap-2 rounded-md px-1 py-1 text-sm ${canEdit ? "cursor-pointer hover:bg-slate-50" : ""}`}>
                 <button type="button" disabled={!canEdit} className={tickCls(done)} aria-label={done ? `ยกเลิกติ๊ก ${it.title}` : `ติ๊กเสร็จ ${it.title}`}
                   onClick={() => { setTouched((s) => new Set(s).add(it.id)); void toggle(it); }}>✓</button>
-                <span className={`min-w-0 flex-1 break-words ${done ? "text-slate-400 line-through" : "text-slate-700"}`}>{it.title}</span>
+                <span className={`min-w-0 flex-1 break-words ${done ? "text-slate-400 line-through" : "text-slate-700"}`}>{it.title}<TaskLinkList links={it.links} className="mt-0.5" /></span>
                 {it.assigned_name && <WhoChip name={it.assigned_name} compact />}
               </label>
             );

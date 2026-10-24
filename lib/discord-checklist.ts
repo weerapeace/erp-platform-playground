@@ -5,11 +5,12 @@
  * เพิ่มข้อจาก Discord (ส่ง add = เรคคอร์ดไหน + ค่าที่ใช้บ่อย):
  *   ปุ่ม "＋ พิมพ์เพิ่ม" custom_id "rta:<module>:<record>" → เด้งกล่องพิมพ์ (modal "rtm:…": หลายบรรทัด = หลายข้อ + ผู้รับผิดชอบ)
  *   เมนู "ค่าที่ใช้บ่อย" custom_id "rtp:<module>:<record>" → เลือกแล้วเพิ่มทันที (ซ่อนค่าที่มีค้างอยู่แล้ว)
+ * ลิงก์ของข้อที่ยังรอ (เช่น ร้านที่จะซื้อของ) = ช่อง "🔗 ลิงก์" ในการ์ด กดเปิดได้เลย
  */
-import { isTaskDone, taskWithWho } from "@/lib/record-tasks";
+import { isTaskDone, linkLabel, taskWithWho, type TaskLink } from "@/lib/record-tasks";
 
 /** assigned_name = ชื่อผู้รับผิดชอบ (โชว์บนปุ่ม "☐ รอหาผ้า · ฝน") */
-export type ChecklistTask = { id: string; title: string; status: string; resolved_by?: string | null; assigned_name?: string | null };
+export type ChecklistTask = { id: string; title: string; status: string; resolved_by?: string | null; assigned_name?: string | null; links?: TaskLink[] };
 export type ChecklistCardBase = { title: string; url: string | null; description: string; thumbnail: string | null };
 /** เปิดให้เพิ่มข้อจาก Discord: เช็กลิสต์ชนิดไหน · เรคคอร์ดไหน · ค่าที่ใช้บ่อย */
 export type ChecklistAdd = { moduleKey: string; recordId: string; presets: string[] };
@@ -39,6 +40,20 @@ export function checklistAddModal(moduleKey: string, recordId: string, code: str
       { type: 1, components: [{ type: 4, custom_id: "who", style: 1, label: "ผู้รับผิดชอบ (ไม่บังคับ)", required: false, max_length: 60, placeholder: "พิมพ์ชื่อในระบบ เช่น ฝน" }] },
     ],
   };
+}
+
+/** markdown ลิงก์ของ Discord — กันวงเล็บในชื่อ/ลิงก์ทำให้ลิงก์ขาด */
+const mdLink = (l: TaskLink) => `[${clip(linkLabel(l).replace(/[[\]]/g, ""), 40)}](${l.url.replace(/\(/g, "%28").replace(/\)/g, "%29")})`;
+
+/** ช่อง "🔗 ลิงก์" — เฉพาะข้อที่ยังรอและมีลิงก์ (ไม่มี = null) */
+function linksField(tasks: ChecklistTask[]): { name: string; value: string } | null {
+  const lines: string[] = [];
+  for (const t of tasks.filter((x) => !isTaskDone(x.status) && x.links?.length)) {
+    const line = `**${clip(t.title, 60)}**: ${t.links!.map(mdLink).join(" · ")}`;
+    if ([...lines, line].join("\n").length > 1000) break;
+    lines.push(line);
+  }
+  return lines.length ? { name: "🔗 ลิงก์", value: lines.join("\n") } : null;
 }
 
 /** ช่องสถานะในการ์ด — ไม่มีปุ่มติ๊ก (ยังไม่ตั้งลิงก์รับปุ่ม) = เขียนข้อที่ค้างไว้ในการ์ดแทน */
@@ -88,7 +103,7 @@ export function checklistComponents(tasks: ChecklistTask[], openUrl: string | nu
 export function checklistCardMessage(base: ChecklistCardBase, tasks: ChecklistTask[], interactive: boolean, add?: ChecklistAdd | null) {
   const s = statusField(tasks, interactive);
   const embed: Embed = {
-    title: clip(base.title, 256), description: clip(base.description, 1500), color: s.color, fields: [s.field],
+    title: clip(base.title, 256), description: clip(base.description, 1500), color: s.color, fields: [s.field, ...(linksField(tasks) ? [linksField(tasks)!] : [])],
     ...(base.url ? { url: base.url } : {}), ...(base.thumbnail ? { thumbnail: { url: base.thumbnail } } : {}),
   };
   return { embeds: [embed], components: checklistComponents(tasks, base.url, interactive, add), allowed_mentions: { parse: [] as string[] } };
@@ -101,7 +116,7 @@ export function checklistCardUpdate(oldEmbed: Embed | undefined, tasks: Checklis
   // เอาเฉพาะช่องที่เราตั้งเอง (การ์ดที่ Discord ส่งกลับมีช่องอ่านอย่างเดียวปน เช่น proxy_url)
   const embed: Embed = {
     ...(o.title ? { title: o.title } : {}), ...(o.url ? { url: o.url } : {}), ...(o.description ? { description: o.description } : {}),
-    ...(o.thumbnail?.url ? { thumbnail: { url: o.thumbnail.url } } : {}), color: s.color, fields: [s.field],
+    ...(o.thumbnail?.url ? { thumbnail: { url: o.thumbnail.url } } : {}), color: s.color, fields: [s.field, ...(linksField(tasks) ? [linksField(tasks)!] : [])],
   };
   return { embeds: [embed], components: checklistComponents(tasks, o.url ?? null, true, add) };
 }

@@ -10,6 +10,7 @@ import { DiscordError, discordDmChannel, discordReady, discordSend, type Discord
 import { checklistCardMessage, type ChecklistTask } from "@/lib/discord-checklist";
 import { renderReportPng } from "@/lib/email-report/image";
 import { loadChecklistPresets, userNames } from "@/lib/record-tasks-server";
+import { linksOf } from "@/lib/record-tasks";
 import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 import type { BuiltReport } from "@/lib/email-report/render";
 
@@ -83,11 +84,11 @@ export async function composeDiscordReport(admin: Admin, cfg: ReturnType<typeof 
   const records = cfg.max_cards > 0 ? (built.checklist?.records ?? []).slice(0, cfg.max_cards) : [];
   const tasksBy = new Map<string, ChecklistTask[]>();
   if (records.length && built.checklist) {
-    const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, status, resolved_by, assigned_to")
+    const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, status, resolved_by, assigned_to, metadata")
       .eq("module_key", built.checklist.moduleKey).in("record_id", records.map((r) => r.id)).order("created_at", { ascending: true });
-    const rows = (data ?? []) as (ChecklistTask & { record_id: string; assigned_to: string | null })[];
+    const rows = (data ?? []) as (ChecklistTask & { record_id: string; assigned_to: string | null; metadata: unknown })[];
     const names = await userNames(admin, rows.map((t) => t.assigned_to));
-    for (const t of rows) (tasksBy.get(t.record_id) ?? tasksBy.set(t.record_id, []).get(t.record_id)!).push({ ...t, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null });
+    for (const t of rows) (tasksBy.get(t.record_id) ?? tasksBy.set(t.record_id, []).get(t.record_id)!).push({ id: t.id, title: t.title, status: t.status, resolved_by: t.resolved_by, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null, links: linksOf(t.metadata) });
   }
   const cardRecords = records.filter((r) => (tasksBy.get(r.id) ?? []).length > 0);
   // ＋ พิมพ์เพิ่ม / เมนูค่าที่ใช้บ่อย บนการ์ด (เฉพาะตอนปุ่มใช้ได้)

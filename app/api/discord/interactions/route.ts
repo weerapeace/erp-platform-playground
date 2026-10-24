@@ -15,7 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { DiscordError, discordEditOriginal, discordFollowup, discordVerify } from "@/lib/discord";
 import { checklistAddModal, checklistCardUpdate, parseChecklistCustomId, type ChecklistTask } from "@/lib/discord-checklist";
-import { isTaskDone } from "@/lib/record-tasks";
+import { isTaskDone, linksOf } from "@/lib/record-tasks";
 import { absoluteUrl } from "@/lib/app-url";
 import { createRecordTasks, findUserByName, isKnownChecklist, loadChecklistPresets, userNames } from "@/lib/record-tasks-server";
 
@@ -107,14 +107,14 @@ const canEditSheets = async (admin: Admin, userId: string) =>
 /** แก้การ์ดเดิมให้เป็นสถานะล่าสุด (ทุกข้อของเรคคอร์ดนี้ + ปุ่มพิมพ์เพิ่ม/ค่าที่ใช้บ่อย) */
 async function rerenderCard(admin: Admin, i: Interaction, moduleKey: string, recordId: string) {
   const [{ data: all }, presets] = await Promise.all([
-    admin.from("erp_record_tasks").select("id, title, status, resolved_by, assigned_to").eq("module_key", moduleKey).eq("record_id", recordId).order("created_at", { ascending: true }),
+    admin.from("erp_record_tasks").select("id, title, status, resolved_by, assigned_to, metadata").eq("module_key", moduleKey).eq("record_id", recordId).order("created_at", { ascending: true }),
     loadChecklistPresets(admin, moduleKey),
   ]);
-  const rows = (all ?? []) as (ChecklistTask & { assigned_to: string | null })[];
+  const rows = (all ?? []) as (ChecklistTask & { assigned_to: string | null; metadata: unknown })[];
   const names = await userNames(admin, rows.map((r) => r.assigned_to));
   try {
     await discordEditOriginal(i.token, checklistCardUpdate(i.message?.embeds?.[0],
-      rows.map((r) => ({ ...r, assigned_name: r.assigned_to ? names.get(r.assigned_to) ?? null : null })),
+      rows.map((r) => ({ id: r.id, title: r.title, status: r.status, resolved_by: r.resolved_by, assigned_name: r.assigned_to ? names.get(r.assigned_to) ?? null : null, links: linksOf(r.metadata) })),
       isKnownChecklist(moduleKey) ? { moduleKey, recordId, presets } : null));
   } catch (e) {
     if (!(e instanceof DiscordError)) throw e;

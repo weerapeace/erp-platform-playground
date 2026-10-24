@@ -11,6 +11,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildReport, SOURCE_CHECKLIST_MODULE } from "@/lib/email-report/sources";
 import { normalizeReportPopup, type EmailReport, type EmailReportPopup, type PopupFieldKey } from "@/lib/email-report/shared";
 import { userNames } from "@/lib/record-tasks-server";
+import { linksOf, type TaskLink } from "@/lib/record-tasks";
 import { nowTH } from "@/lib/email-report/send";
 import { loadReportChannels } from "@/lib/email-report/channels";
 import type { BuiltReport, ReportTone } from "@/lib/email-report/render";
@@ -19,7 +20,8 @@ type Admin = ReturnType<typeof supabaseAdmin>;
 
 export type WorkPopupFlag = { text: string; tone: ReportTone };
 /** ข้อในเช็กลิสต์ "รออะไรอยู่" (ติ๊กในป๊อปได้ถ้า can_tick_all หรือ mine) */
-export type WorkPopupTask = { id: string; title: string; who: string | null; mine: boolean };
+/** links = ลิงก์ของข้อ (เช่น ร้านที่จะซื้อของ) */
+export type WorkPopupTask = { id: string; title: string; who: string | null; mine: boolean; links?: TaskLink[] };
 /** 1 ใบงานในป๊อป — ช่องไหนโชว์ ดูที่ payload.fields */
 export type WorkPopupItem = {
   id: string; title: string; code: string | null; path: string; imageUrl: string | null; flag: WorkPopupFlag;
@@ -78,13 +80,13 @@ async function myOpenTasks(admin: Admin, moduleKey: string, userId: string, reco
 async function openTasksOf(admin: Admin, moduleKey: string, recordIds: string[], userId: string) {
   const by = new Map<string, WorkPopupTask[]>();
   if (!recordIds.length) return by;
-  const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, assigned_to").eq("module_key", moduleKey).eq("status", "open")
+  const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, assigned_to, metadata").eq("module_key", moduleKey).eq("status", "open")
     .in("record_id", recordIds).order("created_at", { ascending: true }).limit(1000);
-  const rows = (data ?? []) as { id: string; record_id: string; title: string; assigned_to: string | null }[];
+  const rows = (data ?? []) as { id: string; record_id: string; title: string; assigned_to: string | null; metadata: unknown }[];
   const names = await userNames(admin, rows.map((t) => t.assigned_to));
   for (const t of rows) {
     (by.get(t.record_id) ?? by.set(t.record_id, []).get(t.record_id)!)
-      .push({ id: t.id, title: t.title, who: t.assigned_to ? names.get(t.assigned_to) ?? null : null, mine: !!userId && t.assigned_to === userId });
+      .push({ id: t.id, title: t.title, who: t.assigned_to ? names.get(t.assigned_to) ?? null : null, mine: !!userId && t.assigned_to === userId, links: linksOf(t.metadata) });
   }
   return by;
 }

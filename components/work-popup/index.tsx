@@ -14,6 +14,7 @@ import { ERPModal } from "@/components/modal";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { TaskLinkList } from "@/components/record-tasks/task-links";
 import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
 
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง
@@ -70,6 +71,7 @@ function ItemCard({ it, fields, tasks, canTick, onTick, onOpen, done, strong }: 
                     <input type="checkbox" checked={ok} disabled={!can} onChange={(e) => onTick?.(t.id, e.target.checked)} className={`h-4 w-4 accent-indigo-600 ${!can && onTick ? "opacity-40" : ""}`} />
                     <span>⏳ {t.title}{fields.has("who") && t.who && <span className="text-slate-400"> — {t.who}</span>}</span>
                   </label>
+                  {!ok && <TaskLinkList links={t.links} className="ml-6 mt-0.5" />}
                 </li>
               );
             })}

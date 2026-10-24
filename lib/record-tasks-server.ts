@@ -7,7 +7,8 @@
  * doc: docs/record-tasks.md
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { summarizeTasks, type ChecklistSummary } from "@/lib/record-tasks";
+import { linksOf, summarizeTasks, type ChecklistSummary } from "@/lib/record-tasks";
+import type { RecordTask } from "@/app/api/record-tasks/route";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { writeAudit } from "@/lib/audit";
 
@@ -27,23 +28,30 @@ export async function userNames(admin: Admin, ids: (string | null | undefined)[]
   return out;
 }
 
+/** แถวจากตาราง → ที่ส่งให้หน้าเว็บ (API รายการ/เพิ่ม/แก้) — metadata ไม่ส่งออกไปทั้งก้อน ส่งแค่ links */
+export function toRecordTask(r: RecordTask & { metadata?: unknown }, names: Map<string, string>): RecordTask {
+  const { metadata, ...rest } = r;
+  return { ...rest, assigned_name: r.assigned_to ? names.get(r.assigned_to) ?? null : null, links: linksOf(metadata) };
+}
+
 /** record_id → สรุป (ไม่มีรายการเลย = ไม่มีใน Map) */
 export async function loadChecklistSummaries(admin: Admin, moduleKey: string, recordIds: string[]): Promise<Map<string, ChecklistSummary>> {
   const out = new Map<string, ChecklistSummary>();
   const ids = [...new Set(recordIds)].filter(Boolean);
   if (!ids.length) return out;
-  const by = new Map<string, { id: string; title: string; status: string; assigned_to: string | null }[]>();
+  type Row = { id: string; record_id: string; title: string; status: string; assigned_to: string | null; metadata: unknown };
+  const by = new Map<string, Row[]>();
   for (let i = 0; i < ids.length; i += 150) {   // .in() ยาวเกินจะชนเพดานความยาว URL
-    const { data, error } = await admin.from("erp_record_tasks").select("id, record_id, title, status, assigned_to")
+    const { data, error } = await admin.from("erp_record_tasks").select("id, record_id, title, status, assigned_to, metadata")
       .eq("module_key", moduleKey).in("record_id", ids.slice(i, i + 150))
       .order("created_at", { ascending: true }).limit(5000);
     if (error) throw new Error(error.message);
-    for (const r of (data ?? []) as { id: string; record_id: string; title: string; status: string; assigned_to: string | null }[]) {
+    for (const r of (data ?? []) as Row[]) {
       (by.get(r.record_id) ?? by.set(r.record_id, []).get(r.record_id)!).push(r);
     }
   }
   const names = await userNames(admin, [...by.values()].flat().map((t) => t.assigned_to));
-  for (const [id, items] of by) out.set(id, summarizeTasks(items.map((t) => ({ ...t, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null }))));
+  for (const [id, items] of by) out.set(id, summarizeTasks(items.map((t) => ({ ...t, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null, links: linksOf(t.metadata) }))));
   return out;
 }
 

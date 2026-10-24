@@ -4,12 +4,14 @@
  * HTML แบบตาราง + style ในบรรทัด (อีเมลส่วนใหญ่ไม่อ่าน <style>/CSS ภายนอก) กว้างสุด 600px อ่านบนมือถือได้
  * รูปต้องเป็นลิงก์เต็ม (https://…) เปิดได้โดยไม่ต้อง login — Gmail โชว์ทันที · Outlook บางเครื่องถามก่อนโหลดรูป
  */
+import { linkLabel, type TaskLink } from "@/lib/record-tasks";
 
 export type ReportTone = "danger" | "warn" | "muted" | "good";
 
 /** ข้อมูลรองของแถว เรียงตามที่ผู้ตั้งค่าเลือก · meta ที่อยู่ติดกันรวมเป็นบรรทัดเดียวคั่นด้วย " · "
- *  meta = บรรทัดเทา (แบรนด์ · กำหนดส่ง) · note = กล่องเหลือง 📝 · tag = ป้ายฟ้า ⏳ · small = ข้อความเล็กจาง */
-export type ReportPart = { kind: "meta" | "note" | "tag" | "small"; text: string };
+ *  meta = บรรทัดเทา (แบรนด์ · กำหนดส่ง) · note = กล่องเหลือง 📝 · tag = ป้ายฟ้า ⏳ · small = ข้อความเล็กจาง
+ *  links = 🔗 ลิงก์ของข้อที่รอ (เช่น ร้านที่จะซื้อของ) — HTML กดได้ · ข้อความล้วน/รูปใช้ text */
+export type ReportPart = { kind: "meta" | "note" | "tag" | "small" | "links"; text: string; links?: { title: string; links: TaskLink[] }[] };
 export type ReportRow = {
   id: string;
   imageUrl: string | null;
@@ -91,6 +93,10 @@ function partsHtml(parts: ReportPart[]): string {
     if (p.kind === "meta") { meta.push(p.text); continue; }
     flush();
     if (p.kind === "note") out.push(`<div style="font-size:12px;color:#92400e;background:#fffbeb;border-radius:4px;padding:3px 6px;margin-top:4px;">📝 ${esc(p.text)}</div>`);
+    else if (p.kind === "links") {
+      const a = (l: TaskLink) => `<a href="${esc(l.url)}" style="color:#1d4ed8;text-decoration:underline;">${esc(linkLabel(l))}</a>`;
+      out.push(`<div style="font-size:12px;color:#475569;margin-top:3px;">🔗 ${(p.links ?? []).map((g) => `${esc(g.title)}: ${g.links.map(a).join(" · ")}`).join(" &nbsp;|&nbsp; ")}</div>`);
+    }
     else if (p.kind === "tag") out.push(`<div style="margin-top:4px;"><span style="display:inline-block;font-size:12px;color:#1d4ed8;background:#eff6ff;border-radius:4px;padding:2px 6px;">⏳ ${esc(p.text)}</span></div>`);
     else out.push(`<div style="font-size:12px;color:#94a3b8;margin-top:2px;">${esc(p.text)}</div>`);
   }
@@ -205,7 +211,7 @@ export function renderReportEmail(r: BuiltReport, ctx: {
     if (s.label) lines.push(`■ ${s.label} (${s.total} งาน)`);
     for (const row of s.rows) {
       lines.push(`- ${row.code ? `${row.code} ` : ""}${row.title}${row.flag ? ` [${row.flag.text}]` : ""}${row.link ? ` ${row.link}` : ""}`);
-      const sub = row.parts.map((p) => (p.kind === "note" ? `📝 ${p.text}` : p.kind === "tag" ? `⏳ ${p.text}` : p.text));
+      const sub = row.parts.map((p) => (p.kind === "note" ? `📝 ${p.text}` : p.kind === "tag" ? `⏳ ${p.text}` : p.kind === "links" ? `🔗 ${p.text}` : p.text));
       if (sub.length) lines.push(`  ${sub.join(" · ")}`);
     }
     lines.push("");

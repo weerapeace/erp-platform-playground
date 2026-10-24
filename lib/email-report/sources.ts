@@ -12,7 +12,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { absoluteUrl } from "@/lib/app-url";
 import { loadChecklistSummaries } from "@/lib/record-tasks-server";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
-import { taskWithWho } from "@/lib/record-tasks";
+import { linkLabel, taskWithWho } from "@/lib/record-tasks";
 import { describeDays, normalizeReportOptions, type EmailReportFilters, type EmailReportInput, type ResolvedReportOptions } from "@/lib/email-report/shared";
 import { renderReportEmail, type BuiltReport, type ReportPart, type ReportRow, type ReportSection, type ReportStat, type ReportTone } from "@/lib/email-report/render";
 
@@ -162,6 +162,10 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
         const who = waiting.get(s.id)?.who ?? [];
         const w = waitingOf(s).map((x, i) => { const t = oneLine(x, 60); return t ? taskWithWho(t, who[i], " — ") : null; }).filter((x): x is string => !!x);
         if (w.length) parts.push({ kind: "tag", text: `รอ: ${w.slice(0, 3).join(" · ")}${w.length > 3 ? ` +${w.length - 3}` : ""}` });
+        // ลิงก์ของข้อที่รอ (เช่น ร้านที่จะซื้อของ) — กดเปิดจากอีเมลได้เลย
+        const lk = waiting.get(s.id)?.links ?? [];
+        const groups = waitingOf(s).map((t, i) => ({ title: oneLine(t, 40) ?? t, links: lk[i] ?? [] })).filter((g) => g.links.length);
+        if (groups.length) parts.push({ kind: "links", links: groups, text: groups.map((g) => `${g.title}: ${g.links.map((l) => `${linkLabel(l)} ${l.url}`).join(", ")}`).join(" | ") });
       }
       else if (k === "note") { const t = oneLine(s.note, 90); if (t) parts.push({ kind: "note", text: t }); }
       else if (k === "detail") { const t = excerpt(s.detail, 120); if (t) parts.push({ kind: "small", text: t }); }

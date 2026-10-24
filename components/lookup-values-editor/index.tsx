@@ -3,7 +3,9 @@
 /**
  * ค่ากลาง (erp_lookups) แบบเล็ก — ใช้/แก้ได้จากหน้างานเลย ไม่ต้องไปหน้า ตั้งค่า → ค่ากลาง (ของกลาง)
  *   useLookupNames(type)  = ชื่อค่าที่เปิดใช้ เรียงตามลำดับ (แคชร่วมทั้งหน้า · แก้ในป๊อปแล้วทุกที่อัปเดตเอง)
- *   <LookupValuesEditor lookupType open onClose title /> = ป๊อปเพิ่ม / แก้ชื่อ / เอาออก / ลากเรียง
+ *   useLookupRows(type)   = แบบเต็ม (มี metadata ไว้อ่านสวิตช์ เช่น metadata.links)
+ *   <LookupValuesEditor lookupType open onClose title flags? /> = ป๊อปเพิ่ม / แก้ชื่อ / เอาออก / ลากเรียง
+ *      flags = สวิตช์ต่อค่า เก็บใน metadata (เช่น 🔗 "เปิดช่องลิงก์ให้เอง") — ตั้งได้เองไม่ต้องแก้โค้ด
  * ใช้กับ: ปุ่มลัด "ค่าที่ใช้บ่อย" ของเช็กลิสต์ (components/record-tasks/checklist)
  * API กลาง /api/lookups (+ /[id]) · เอาออก = ปิดใช้ (is_active=false) เรียกคืนได้ที่หน้าค่ากลาง
  */
@@ -13,7 +15,10 @@ import { useToast } from "@/components/toast";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { apiFetch } from "@/lib/api";
 
-type Row = { id: string; name: string; sort_order: number };
+export type LookupRow = { id: string; name: string; sort_order: number; metadata: Record<string, unknown> };
+type Row = LookupRow;
+/** สวิตช์ต่อค่า (true/false ใน metadata[key]) */
+export type LookupFlag = { key: string; label: string; title: string };
 
 // แคชร่วมต่อชนิด — หลายช่องในหน้าเดียวยิงครั้งเดียว · แก้แล้วแจ้งทุกช่อง
 const cache = new Map<string, Row[]>();
@@ -21,13 +26,17 @@ const listeners = new Map<string, Set<() => void>>();
 async function fetchRows(type: string): Promise<Row[]> {
   const j = await apiFetch(`/api/lookups?type=${encodeURIComponent(type)}&limit=200`).then((r) => r.json());
   if (j.error) throw new Error(j.error);
-  return ((j.data ?? []) as Row[]).map((r) => ({ id: r.id, name: r.name, sort_order: r.sort_order }));
+  return ((j.data ?? []) as Row[]).map((r) => ({ id: r.id, name: r.name, sort_order: r.sort_order, metadata: r.metadata && typeof r.metadata === "object" ? r.metadata : {} }));
 }
 export function refreshLookup(type: string) {
   fetchRows(type).then((rows) => { cache.set(type, rows); listeners.get(type)?.forEach((f) => f()); }).catch(() => {});
 }
 
 export function useLookupNames(type: string | null | undefined): string[] {
+  return useLookupRows(type).map((r) => r.name);
+}
+
+export function useLookupRows(type: string | null | undefined): LookupRow[] {
   const [, force] = useState(0);
   useEffect(() => {
     if (!type) return;
@@ -38,11 +47,11 @@ export function useLookupNames(type: string | null | undefined): string[] {
     if (!cache.has(type)) { cache.set(type, []); refreshLookup(type); }
     return () => { set.delete(f); };
   }, [type]);
-  return type ? (cache.get(type) ?? []).map((r) => r.name) : [];
+  return type ? (cache.get(type) ?? []) : [];
 }
 
-export function LookupValuesEditor({ lookupType, open, onClose, title = "ค่าที่ใช้บ่อย", description = "เพิ่ม · กดชื่อเพื่อแก้ · ลากเรียงลำดับ · ใช้ร่วมกันทั้งทีม" }: {
-  lookupType: string; open: boolean; onClose: () => void; title?: string; description?: string;
+export function LookupValuesEditor({ lookupType, open, onClose, title = "ค่าที่ใช้บ่อย", description = "เพิ่ม · กดชื่อเพื่อแก้ · ลากเรียงลำดับ · ใช้ร่วมกันทั้งทีม", flags = [] }: {
+  lookupType: string; open: boolean; onClose: () => void; title?: string; description?: string; flags?: LookupFlag[];
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<Row[]>([]);
@@ -94,6 +103,12 @@ export function LookupValuesEditor({ lookupType, open, onClose, title = "ค่�
     try { await call(`/api/lookups/${row.id}`, { method: "PATCH", body: JSON.stringify({ name }) }); refreshLookup(lookupType); }
     catch { toast.error("แก้ชื่อไม่สำเร็จ"); void load(); }
   };
+  const toggleFlag = async (row: Row, key: string) => {
+    const metadata = { ...row.metadata, [key]: !row.metadata[key] };
+    setRows((p) => p.map((r) => (r.id === row.id ? { ...r, metadata } : r)));
+    try { await call(`/api/lookups/${row.id}`, { method: "PATCH", body: JSON.stringify({ metadata }) }); refreshLookup(lookupType); }
+    catch { toast.error("บันทึกไม่สำเร็จ"); void load(); }
+  };
   const remove = async (row: Row) => {
     setRows((p) => p.filter((r) => r.id !== row.id));
     try { await call(`/api/lookups/${row.id}`, { method: "DELETE" }); refreshLookup(lookupType); }
@@ -126,6 +141,13 @@ export function LookupValuesEditor({ lookupType, open, onClose, title = "ค่�
                 ) : (
                   <button type="button" onClick={() => setEditing({ id: r.id, name: r.name })} title="กดเพื่อแก้ชื่อ" className="min-w-0 flex-1 truncate text-left text-sm text-slate-700">{r.name}</button>
                 )}
+                {flags.map((f) => {
+                  const on = !!r.metadata[f.key];
+                  return (
+                    <button key={f.key} type="button" onClick={() => void toggleFlag(r, f.key)} aria-pressed={on} title={`${f.title} — ${on ? "เปิดอยู่ (กดเพื่อปิด)" : "ปิดอยู่ (กดเพื่อเปิด)"}`}
+                      className={`shrink-0 rounded-full border px-1.5 text-[11px] ${on ? "border-blue-400 bg-blue-50 text-blue-700" : "border-dashed border-slate-300 text-slate-400 hover:text-slate-600"}`}>{f.label}</button>
+                  );
+                })}
                 <button type="button" onClick={() => void remove(r)} title="เอาออกจากปุ่มลัด (เรียกคืนได้ที่หน้าค่ากลาง)" aria-label={`เอา ${r.name} ออก`}
                   className="shrink-0 px-1 text-xs text-slate-300 opacity-0 hover:text-rose-500 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100">✕</button>
               </div>

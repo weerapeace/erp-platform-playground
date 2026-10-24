@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { isTaskDone } from "@/lib/record-tasks";
+import { isTaskDone, type TaskLink } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 
 export function useRecordTasks({ moduleKey, recordId = null, recordType = null, enabled = true, onChange }: {
@@ -44,9 +44,9 @@ export function useRecordTasks({ moduleKey, recordId = null, recordType = null, 
 
   useEffect(() => { if (enabled) void load(); }, [enabled, load]);
 
-  /** เพิ่มข้อ (ใส่ผู้รับผิดชอบพร้อมกันได้ — กระดิ่งเด้งบอกคนนั้น) */
-  const add = async (title: string, assignee: { id: string; name: string } | null = null): Promise<boolean> => {
-    const t = title.trim(); if (!t) return false;
+  /** เพิ่มข้อ (ใส่ผู้รับผิดชอบพร้อมกันได้ — กระดิ่งเด้งบอกคนนั้น) · คืนข้อที่สร้าง (null = ไม่สำเร็จ) */
+  const add = async (title: string, assignee: { id: string; name: string } | null = null): Promise<RecordTask | null> => {
+    const t = title.trim(); if (!t) return null;
     try {
       const j = await apiFetch("/api/record-tasks", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -54,8 +54,8 @@ export function useRecordTasks({ moduleKey, recordId = null, recordType = null, 
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       update((p) => [...p, j.data as RecordTask]);
-      return true;
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); return false; }
+      return j.data as RecordTask;
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); return null; }
   };
 
   const toggle = async (it: RecordTask) => {
@@ -88,13 +88,24 @@ export function useRecordTasks({ moduleKey, recordId = null, recordType = null, 
     } catch { update((p) => p.map((x) => (x.id === it.id ? it : x))); toast.error("เปลี่ยนผู้รับผิดชอบไม่สำเร็จ"); }
   };
 
+  /** ลิงก์ทั้งชุดของข้อ (เพิ่ม/ลบลิงก์ = ส่งชุดใหม่ทั้งชุด · API ทำความสะอาดซ้ำ) */
+  const setLinks = async (it: RecordTask, links: TaskLink[]): Promise<boolean> => {
+    update((p) => p.map((x) => (x.id === it.id ? { ...x, links } : x)));
+    try {
+      const j = await apiFetch(`/api/record-tasks/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ links, actor: user?.name }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      update((p) => p.map((x) => (x.id === it.id ? { ...x, links: (j.data as RecordTask).links ?? links } : x)));
+      return true;
+    } catch (e) { update((p) => p.map((x) => (x.id === it.id ? it : x))); toast.error(e instanceof Error ? e.message : "บันทึกลิงก์ไม่สำเร็จ"); return false; }
+  };
+
   const remove = async (it: RecordTask) => {
     update((p) => p.filter((x) => x.id !== it.id));
     try { const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "DELETE" }); if (!r.ok) throw new Error(); }
     catch { toast.error("ลบไม่สำเร็จ"); void load(); }
   };
 
-  return { items, loading, loaded, load, add, toggle, rename, assign, remove };
+  return { items, loading, loaded, load, add, toggle, rename, assign, setLinks, remove };
 }
 
 /** "เมื่อสักครู่ / 5 นาทีที่แล้ว / 23 ต.ค." */
