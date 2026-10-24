@@ -70,6 +70,13 @@ export default function CountPage() {
     setCounted(init);
   }, []);
 
+  // ลิงก์ /inventory/count?id=<รอบนับ> → เปิดรอบนั้นทันที (เช่นมาจาก 🔄 ซิงค์สต๊อก "ใช้เป็นยอดตั้งต้น")
+  useEffect(() => {
+    if (!canView) return;
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (id) void openSession(id);
+  }, [canView, openSession]);
+
   const openNew = async () => {
     if (!openWh) { setError("เลือกคลังก่อน"); return; }
     setOpening(true); setError(null);

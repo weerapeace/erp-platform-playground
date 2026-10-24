@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ sessions, error: null });
 }
 
-// POST { action: open | save | apply | scan | add_line | add_needed | delete_line | cancel | reopen }
+// POST { action: open | save | apply | scan | add_line | add_needed | import_lines | delete_line | cancel | reopen }
 export async function POST(request: NextRequest) {
   let body: Record<string, unknown>;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -204,6 +204,75 @@ export async function POST(request: NextRequest) {
     }).then(() => {}, () => {});
 
     return NextResponse.json({ added: rows.length, skipped: skuList.length - rows.length, not_in_sku: codes.length - skuList.length, error: null });
+  }
+
+  // เติมยอดนับจากรายการ (ของกลาง — เช่นยอดตั้งต้นจากไฟล์ BigSeller ในหน้า 🔄 ซิงค์สต๊อก)
+  // body { count_id, lines: [{ product_id, counted_qty }], source? } · มีในรอบแล้ว = ทับยอดนับ · ยังไม่มี = เพิ่มแถว
+  // ยังไม่ปรับสต๊อก — ผู้ใช้ตรวจแล้วกด "ยืนยันปรับสต๊อก" ในหน้านับเอง (ต้องมีสิทธิ์ stock.adjust)
+  if (action === "import_lines") {
+    const denied = await guardApi(request, "stock.view"); if (denied) return denied;
+    const count_id = body.count_id as string | undefined;
+    if (!count_id) return NextResponse.json({ error: "ไม่พบรอบนับ" }, { status: 400 });
+    const locked = await lockedReason(admin, count_id);
+    if (locked) return NextResponse.json({ error: locked }, { status: 400 });
+
+    // รวมยอดของ SKU เดียวกัน · ตัดแถวที่ยอดไม่ใช่ตัวเลข/ติดลบ
+    const want = new Map<string, number>();
+    for (const l of (Array.isArray(body.lines) ? body.lines : []) as { product_id?: unknown; counted_qty?: unknown }[]) {
+      const pid = typeof l.product_id === "string" ? l.product_id : "";
+      const q = Number(l.counted_qty);
+      if (!pid || !isFinite(q) || q < 0) continue;
+      want.set(pid, (want.get(pid) ?? 0) + q);
+    }
+    if (want.size === 0) return NextResponse.json({ error: "ไม่มีรายการที่มียอดให้เติม" }, { status: 400 });
+    if (want.size > 10000) return NextResponse.json({ error: "เติมได้สูงสุด 10,000 รายการต่อครั้ง" }, { status: 400 });
+
+    const { data: c } = await admin.from("erp_stock_counts").select("warehouse_id").eq("id", count_id).maybeSingle();
+    const whId = (c as { warehouse_id?: string } | null)?.warehouse_id ?? null;
+    const ids = [...want.keys()];
+
+    const skus = new Map<string, { code: string; name_th: string | null }>();
+    const bal = new Map<string, number>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const part = ids.slice(i, i + 200);
+      const [{ data: s }, b] = await Promise.all([
+        admin.from("skus_v2").select("id, code, name_th").in("id", part),
+        whId ? admin.from("erp_playground_stock_balances").select("product_id, qty_on_hand").eq("warehouse_id", whId).in("product_id", part) : Promise.resolve({ data: [] }),
+      ]);
+      for (const r of (s ?? []) as { id: string; code: string; name_th: string | null }[]) skus.set(r.id, r);
+      for (const r of (b.data ?? []) as { product_id: string; qty_on_hand: number }[]) bal.set(r.product_id, Number(r.qty_on_hand) || 0);
+    }
+
+    const existing = await fetchAllPages<{ id: string; product_id: string }>((from, to) =>
+      admin.from("erp_stock_count_lines").select("id, product_id").eq("count_id", count_id).order("id", { ascending: true }).range(from, to));
+    const lineOf = new Map(existing.map((e) => [String(e.product_id), String(e.id)]));
+
+    let updated = 0, added = 0;
+    const notFound = ids.filter((id) => !skus.has(id)).length;
+    const fresh: Record<string, unknown>[] = [];
+    for (const [pid, qty] of want) {
+      const sku = skus.get(pid);
+      if (!sku) continue;
+      const lineId = lineOf.get(pid);
+      if (lineId) {
+        const { error } = await admin.from("erp_stock_count_lines").update({ counted_qty: qty }).eq("id", lineId);
+        if (!error) updated++;
+      } else {
+        fresh.push({ count_id, product_id: pid, product_sku: sku.code, product_name: sku.name_th ?? sku.code, system_qty: bal.get(pid) ?? 0, counted_qty: qty });
+      }
+    }
+    for (let i = 0; i < fresh.length; i += 500) {
+      const { error } = await admin.from("erp_stock_count_lines").insert(fresh.slice(i, i + 500));
+      if (error) return NextResponse.json({ error: `เติมรายการไม่สำเร็จ (เติมไปแล้ว ${added + updated} รายการ)` }, { status: 500 });
+      added += Math.min(500, fresh.length - i);
+    }
+
+    await writeAudit(admin, {
+      action: "count_import_lines", entityType: "erp_stock_counts", entityId: count_id,
+      actorId: user?.id ?? null, actorName: actor,
+      metadata: { source: typeof body.source === "string" ? body.source : null, added, updated, not_found: notFound },
+    });
+    return NextResponse.json({ added, updated, not_found: notFound, error: null });
   }
 
   // ลบรายการออกจากรอบนับ (เช่นสแกน/เพิ่มผิด)
