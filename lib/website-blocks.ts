@@ -26,7 +26,7 @@ import { sanitizeCustomHtml } from "@/lib/website-html";
 import { sanitizeTranslations } from "@/lib/website-i18n";
 import { sanitizeGradient, type GradientValue } from "@/lib/website-gradient";
 import { CANVAS_COLORS, CANVAS_FONTS, CANVAS_SHAPES, CANVAS_WEIGHTS } from "@/lib/website-canvas";
-import { normalizeFrameShape } from "@/lib/website-frames";
+import { normalizeFrameShape, normalizePatternSlots, normalizeShopPattern, SHOP_PATTERN_MODES, type ShopPattern, type ShopPatternMode } from "@/lib/website-frames";
 import { cleanExpId } from "@/lib/website-web-stats";
 
 export type { ValidationIssue };
@@ -341,6 +341,16 @@ export interface DecorItem {
   mob: DecorPlace | null;
   /** กลับซ้าย-ขวา */
   flip: boolean;
+  /** 🎨 ลายของร้าน (SVG ที่อัป · คัดลอกมาที่ชิ้น) — มี = วาดลายนี้แทนลายในตัว · สีพื้น = color · ไม่เติมพื้น = outline */
+  pattern: ShopPattern | null;
+  patMode: ShopPatternMode;
+  /** สีเส้น ("none" = ไม่มีเส้นเพิ่ม) */
+  lineColor: string;
+  lineColorHex: string;
+  /** ความหนาเส้น (หน่วย: ความกว้างชิ้น = 100) — ลายในตัวแบบเส้นขอบ + ลายของร้าน */
+  strokeWidth: number;
+  /** สีใหม่ของแต่ละสีในไฟล์ (โหมดแยกตามสี · "" = สีเดิม) */
+  patSlots: string[];
 }
 export const DEFAULT_DECOR: Omit<DecorItem, "id" | "kind"> = {
   shape: "sparkle",
@@ -365,6 +375,12 @@ export const DEFAULT_DECOR: Omit<DecorItem, "id" | "kind"> = {
   tab: null,
   mob: null,
   flip: false,
+  pattern: null,
+  patMode: "orig",
+  lineColor: "none",
+  lineColorHex: "",
+  strokeWidth: 2,
+  patSlots: [],
 };
 const placeKey = (s: DecorScreen) => (s === "tablet" ? "tab" : s === "mobile" ? "mob" : null);
 /** ตำแหน่ง/ขนาด/มุม ที่ใช้จริงบนจอนั้น (แท็บเล็ต/มือถือ ไม่ได้ปรับแยก = ค่าคอม) */
@@ -1499,6 +1515,10 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return imgKey(v);
     case "frameShape":
       return normalizeFrameShape(v);
+    case "shopPattern":
+      return normalizeShopPattern(v);
+    case "patternSlots":
+      return normalizePatternSlots(v);
     case "link":
       return linkVal(v, fb as CtaLink);
     case "color":
@@ -1615,6 +1635,12 @@ function colorPair(c: unknown, h: unknown): { color: string; colorHex: string } 
   const color = pickOne(c, TEXT_COLORS, "auto");
   return { color: color === "custom" && !colorHex ? "auto" : color, colorHex };
 }
+/** สีเส้นของ 🎨 ลายของร้าน: "none" = ไม่มีเส้น · สีธีม · custom + สีเอง (custom ไม่มีสี = ไม่มีเส้น) */
+function linePair(c: unknown, h: unknown): { lineColor: string; lineColorHex: string } {
+  const lineColorHex = typeof h === "string" && HEX6.test(h.trim()) ? h.trim().toLowerCase() : "";
+  const lineColor = pickOne(c, ["none", ...CANVAS_COLORS.map((o) => o.v)], "none");
+  return { lineColor: lineColor === "custom" && !lineColorHex ? "none" : lineColor, lineColorHex };
+}
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 function sanitizePattern(v: unknown): BlockPattern | undefined {
   if (!isObj(v)) return undefined;
@@ -1667,6 +1693,7 @@ function sanitizeDecorItem(v: unknown, i: number): DecorItem | null {
   // รูปไม่มีไฟล์ / ข้อความว่าง = ไม่มีอะไรให้วาด → ทิ้ง
   if ((kind === "image" && !key) || (kind === "text" && !text)) return null;
   const shape = pickOne(v.shape, DECOR_SHAPES, d.shape);
+  const pattern = kind === "shape" ? normalizeShopPattern(v.pattern) : null;
   const id = str(v.id, "", 40).replace(/[^\w-]/g, "");
   const base: DecorPlace = {
     x: num1(v.x, d.x, -20, 120),
@@ -1699,6 +1726,11 @@ function sanitizeDecorItem(v: unknown, i: number): DecorItem | null {
     tab: sanitizeDecorPlace(v.tab, kind, base),
     mob: sanitizeDecorPlace(v.mob, kind, base),
     flip: v.flip === true,
+    pattern,
+    patMode: pattern ? pickOne(v.patMode, SHOP_PATTERN_MODES, d.patMode) : d.patMode,
+    ...linePair(v.lineColor, v.lineColorHex),
+    strokeWidth: num1(v.strokeWidth, d.strokeWidth, 0.5, 24),
+    patSlots: pattern ? normalizePatternSlots(v.patSlots) : [],
   };
 }
 function sanitizeDecor(v: unknown): DecorItem[] | undefined {

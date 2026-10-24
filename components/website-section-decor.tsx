@@ -11,6 +11,8 @@
 import { useState } from "react";
 import { DecorLibrary } from "@/components/website-canvas-media";
 import { CanvasShape } from "@/components/website-canvas-shapes";
+import { ShopPatternBox, ShopPatternControls, patternInsert } from "@/components/website-shop-pattern";
+import { shopPatternRatio } from "@/lib/website-frames";
 import { RangeInput } from "@/components/range-input";
 import { Seg } from "@/components/website-block-editor";
 import { ColorSwatches, FontPickList, fontFamilyOf, swatchesOf, type ThemeColors, type ThemeFontNames } from "@/components/website-text-pickers";
@@ -76,11 +78,13 @@ function Thumb({ d, theme, fontNames }: { d: DecorItem; theme: ThemeColors; font
         {d.text}
       </span>
     );
+  if (d.pattern) return <ShopPatternBox it={d} theme={theme} w={100} h={100 * d.ratio} />;
   const r = Math.min(1.4, Math.max(0.08, d.ratio));
-  return <CanvasShape it={{ shape: d.shape, w: 60, h: 60 * r, outline: d.outline, strokeWidth: 2 }} color={color} />;
+  return <CanvasShape it={{ shape: d.shape, w: 60, h: 60 * r, outline: d.outline, strokeWidth: (d.strokeWidth || 2) * 0.6 }} color={color} />;
 }
 
-const nameOf = (d: DecorItem) => (d.kind === "image" ? "รูป" : d.kind === "text" ? `“${d.text}”` : CANVAS_SHAPE_LABEL[d.shape] ?? "ลาย");
+const nameOf = (d: DecorItem) =>
+  d.kind === "image" ? "รูป" : d.kind === "text" ? `“${d.text}”` : d.pattern ? `🎨 ${d.pattern.name || "ลายของร้าน"}` : CANVAS_SHAPE_LABEL[d.shape] ?? "ลาย";
 
 export function SectionDecorPanel({
   value,
@@ -256,18 +260,27 @@ export function SectionDecorPanel({
               </div>
             </>
           )}
-          {sel.kind !== "image" && (
+          {sel.kind === "shape" && sel.pattern && (
+            <ShopPatternControls it={sel} theme={theme} onPatch={(p) => patch(sel.id, p as Partial<DecorItem>)} boxW={100} boxH={100 * sel.ratio} minWidth={0.5} widthStep={0.5} />
+          )}
+          {sel.kind !== "image" && !sel.pattern && (
             <div>
               <label className={labelCls}>สี</label>
               <ColorSwatches theme={theme} value={sel.color === "auto" ? "brand" : sel.color} hex={sel.colorHex} onPick={(v, hex) => patch(sel.id, v === "custom" ? { color: v, colorHex: hex ?? sel.colorHex } : { color: v })} />
             </div>
           )}
-          {sel.kind === "shape" && (
+          {sel.kind === "shape" && !sel.pattern && (
             <div className="flex flex-wrap items-center gap-4 text-xs text-slate-700">
               <label className="inline-flex items-center gap-1.5">
                 <input type="checkbox" checked={sel.outline} onChange={(e) => patch(sel.id, { outline: e.target.checked })} />
                 แบบเส้นขอบ (ไม่ทึบ)
               </label>
+            </div>
+          )}
+          {sel.kind === "shape" && !sel.pattern && sel.outline && (
+            <div>
+              <label className={labelCls}>ความหนาเส้น</label>
+              <RangeInput value={sel.strokeWidth} min={0.5} max={12} step={0.5} hardMax={24} unit="px" onChange={(v) => patch(sel.id, { strokeWidth: v })} />
             </div>
           )}
           {sel.kind !== "text" && (
@@ -340,6 +353,7 @@ export function SectionDecorPanel({
           color={theme.brand}
           onPickShape={(shape) => add(newDecor("shape", { shape, outline: shape === "rect" || shape === "ellipse" || shape === "arch" }, value.length))}
           onPickSticker={(img) => add(newDecor("image", { key: img.key, ratio: img.w > 0 && img.h > 0 ? Math.round((img.h / img.w) * 100) / 100 : 1 }, value.length))}
+          onPickPattern={(pattern) => add(newDecor("shape", { ...patternInsert(pattern, 100, 0.5), ratio: shopPatternRatio(pattern), w: 14 }, value.length))}
         />
       )}
     </div>

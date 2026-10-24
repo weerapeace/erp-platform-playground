@@ -5,6 +5,29 @@
  * ⚠️ สำเนาจากเว็บร้าน src/components/home/CanvasShapes.tsx (CanvasShape) — แก้ลายที่นั่นแล้วต้องคัดลอกมาที่นี่ด้วย
  */
 import type React from "react";
+import { shopPatternPaint, type ShopPattern, type ShopPatternLook } from "@/lib/website-frames";
+
+/** 🎨 ลายของร้าน 1 ชิ้น — เต็มกล่อง (คงสัดส่วนของลาย) · look = สีที่แปลงเป็นค่าจริงแล้ว (สำเนาจากเว็บร้าน CanvasShapes.tsx ShopPatternArt) */
+export function ShopPatternArt({ pattern, look }: { pattern: ShopPattern; look: ShopPatternLook }) {
+  const paint = shopPatternPaint(pattern, look);
+  return (
+    <svg aria-hidden className="cv-shape" style={{ display: "block", width: "100%", height: "100%", overflow: "visible" }} viewBox={pattern.vb.join(" ")} preserveAspectRatio="xMidYMid meet">
+      {pattern.parts.map((pt, i) => (
+        <path
+          key={i}
+          d={pt.d}
+          transform={pt.t}
+          fillRule={pt.rule}
+          style={{ fill: paint[i].fill, stroke: paint[i].stroke }}
+          strokeWidth={paint[i].width || undefined}
+          strokeLinecap={pt.lc}
+          strokeLinejoin={pt.lj}
+          opacity={paint[i].opacity}
+        />
+      ))}
+    </svg>
+  );
+}
 
 export interface ShapeSpec {
   shape: string;

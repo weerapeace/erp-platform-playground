@@ -5,6 +5,8 @@
  *
  * ImageChooser   : อัปโหลดจากเครื่อง (เก็บเข้าคลังไฟล์กลางให้) · เลือกจากคลังรูป (AssetPicker) · รูปสินค้าของร้าน
  * DecorLibrary   : ลายในตัว (SVG สีตามธีม) + ของร้าน (อัลบั้ม "ของตกแต่งเว็บ · <ร้าน>" ในคลังไฟล์กลาง — แยกต่อร้าน)
+ *                  🎨 ลายของร้าน = ไฟล์ SVG ในอัลบั้มเดียวกัน (มี onPickPattern) → วางเป็นลายที่เปลี่ยนสีพื้น/สีเส้น/ความหนาได้
+ *                  (lib/svg-frame-import loadShopPattern · ใช้ไม่ได้ เช่น มีแต่รูปฝัง = วางเป็นรูปให้แทน)
  *                  เพิ่ม = อัปโหลด หรือ 📁 เลือกจากคลังไฟล์ (ใส่ไฟล์เดิมเข้าอัลบั้มนี้ — ไม่ก๊อปไฟล์ ไม่ย้ายออกจากอัลบั้มเดิม)
  *                  ✕ = เอาออกจากอัลบั้มนี้เท่านั้น (ไฟล์ยังอยู่ในคลังไฟล์ — กันไฟล์ที่ใช้ที่อื่นหายไปด้วย)
  *
@@ -20,6 +22,8 @@ import { CANVAS_SHAPES } from "@/lib/website-canvas";
 import { CanvasShape } from "@/components/website-canvas-shapes";
 import { ImageSetsContext } from "@/components/website-image-sets-context";
 import { imgSetRef } from "@/lib/website-image-sets";
+import { loadShopPattern } from "@/lib/svg-frame-import";
+import type { ShopPattern } from "@/lib/website-frames";
 
 export type PickedImage = { key: string; w: number; h: number; title?: string };
 
@@ -267,7 +271,8 @@ export function ImageChooser({
 
 /* ─────────── คลังของตกแต่ง ─────────── */
 
-type Sticker = { id: string; key: string; title: string };
+type Sticker = { id: string; key: string; title: string; svg: boolean };
+const isSvgAsset = (a: { content_type?: string | null; ext?: string | null; r2_key?: string | null }) => a.content_type === "image/svg+xml" || /^svg$/i.test(a.ext ?? "") || /\.svg$/i.test(a.r2_key ?? "");
 
 export function DecorLibrary({
   open,
@@ -276,6 +281,7 @@ export function DecorLibrary({
   color,
   onPickShape,
   onPickSticker,
+  onPickPattern,
   kind = "decor",
 }: {
   open: boolean;
@@ -285,6 +291,8 @@ export function DecorLibrary({
   color: string;
   onPickShape?: (shape: string) => void;
   onPickSticker: (img: PickedImage) => void;
+  /** 🎨 ลายของร้าน (ไฟล์ SVG ในอัลบั้ม) → วางเป็นลายที่เปลี่ยนสีได้ · ไม่ส่ง = SVG วางเป็นรูปเหมือนไฟล์อื่น */
+  onPickPattern?: (pattern: ShopPattern) => void;
   /** decor = คลังของตกแต่ง (มีลายในตัว) · frame = กรอบรูปของร้าน (PNG วางทับรูป) — อัลบั้มแยกกันต่อร้าน */
   kind?: "decor" | "frame";
 }) {
@@ -292,7 +300,9 @@ export function DecorLibrary({
   const noun = isFrame ? "กรอบ" : "ของตกแต่ง";
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const svgRef = useRef<HTMLInputElement>(null);
   const [albumId, setAlbumId] = useState<string | null>(null);
+  const [readingSvg, setReadingSvg] = useState<string | null>(null);
   const [stickers, setStickers] = useState<Sticker[] | null>(null);
   const [uploading, setUploading] = useState(0);
   const [confirmDel, setConfirmDel] = useState<Sticker | null>(null);
@@ -303,7 +313,7 @@ export function DecorLibrary({
   const load = useCallback(async (aid: string) => {
     const r = await apiFetch(`/api/assets?collection_id=${encodeURIComponent(aid)}&type=image&source=all&limit=200`);
     const j = await r.json().catch(() => ({}));
-    setStickers(((j?.data ?? []) as { id: string; r2_key: string; title: string }[]).map((a) => ({ id: a.id, key: a.r2_key, title: a.title })));
+    setStickers(((j?.data ?? []) as { id: string; r2_key: string; title: string; content_type?: string | null; ext?: string | null }[]).map((a) => ({ id: a.id, key: a.r2_key, title: a.title, svg: isSvgAsset(a) })));
   }, []);
 
   // เปิดครั้งแรก → หา/สร้างอัลบั้มของร้าน แล้วโหลดรายการ
@@ -334,23 +344,28 @@ export function DecorLibrary({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, shopId]);
 
-  const onFiles = async (files: FileList | null) => {
+  /** อัปโหลดเข้าอัลบั้มของร้าน · onlySvg = ปุ่มของ 🎨 ลายของร้าน (อัปชิ้นเดียว = วางลงเลย) */
+  const onFiles = async (files: FileList | null, onlySvg = false) => {
     if (!files?.length || !albumId) return;
-    const list = [...files].filter((f) => f.type.startsWith("image/"));
+    const svgFile = (f: File) => f.type === "image/svg+xml" || /\.svg$/i.test(f.name);
+    const list = [...files].filter((f) => (onlySvg ? svgFile(f) : f.type.startsWith("image/")));
+    if (onlySvg && list.length < files.length) toast.warning("ลายของร้านรับเฉพาะไฟล์ SVG — ไฟล์อื่นอัปที่ \"ของร้าน\" ด้านบน");
     setUploading(list.length);
-    let ok = 0;
+    const done: Sticker[] = [];
     for (const f of list) {
       try {
-        await uploadToLibrary(f, albumId);
-        ok++;
+        const up = await uploadToLibrary(f, albumId);
+        done.push({ id: "", key: up.key, title: up.title, svg: svgFile(f) });
       } catch (e) {
         toast.error(`${f.name}: ${(e as Error).message}`);
       }
       setUploading((n) => n - 1);
     }
     if (fileRef.current) fileRef.current.value = "";
-    if (ok) toast.success(`เพิ่ม${noun} ${ok} ชิ้นแล้ว`);
+    if (svgRef.current) svgRef.current.value = "";
     await load(albumId);
+    if (onlySvg && done.length === 1) await pickSticker(done[0]);
+    else if (done.length) toast.success(`เพิ่ม${onlySvg ? "ลายของร้าน" : noun} ${done.length} ชิ้นแล้ว`);
   };
 
   /** 📁 เลือกจากคลังไฟล์ → ใส่เข้าอัลบั้มของร้าน (ไฟล์เดิม ไม่ก๊อป) · เลือกชิ้นเดียว = วางลงผืนเลย */
@@ -364,7 +379,7 @@ export function DecorLibrary({
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error || `เพิ่ม${noun}ไม่สำเร็จ`);
       await load(albumId);
-      if (list.length === 1) await pickSticker({ id: list[0].id, key: String(list[0].r2_key), title: String(list[0].title ?? "") });
+      if (list.length === 1) await pickSticker({ id: list[0].id, key: String(list[0].r2_key), title: String(list[0].title ?? ""), svg: isSvgAsset(list[0] as { r2_key?: string | null }) });
       else toast.success(`เพิ่ม${noun} ${list.length} ชิ้นแล้ว — กดเลือกชิ้นที่จะวาง`);
     } catch (e) {
       toast.error((e as Error).message);
@@ -396,6 +411,19 @@ export function DecorLibrary({
   };
 
   const pickSticker = async (s: Sticker) => {
+    // 🎨 SVG = ลายที่เปลี่ยนสีได้ (อ่านไฟล์ ทำความสะอาด เก็บสีเดิม) · ใช้ไม่ได้ = วางเป็นรูปแทน
+    if (s.svg && onPickPattern) {
+      setReadingSvg(s.key);
+      const res = await loadShopPattern(s.key, s.title);
+      setReadingSvg(null);
+      if (res.pattern) {
+        for (const w of res.warnings) toast.warning(w);
+        onPickPattern(res.pattern);
+        onClose();
+        return;
+      }
+      toast.warning(`${res.error ?? "ใช้เป็นลายของร้านไม่ได้"} — วางเป็นรูปให้แทน (เปลี่ยนสีไม่ได้)`);
+    }
     const size = await measureImage(s.key);
     onPickSticker({ key: s.key, ...size, title: s.title });
     onClose();
@@ -422,7 +450,7 @@ export function DecorLibrary({
               <p className="text-xs text-slate-400 py-4">กำลังโหลด…</p>
             ) : (
               <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                {stickers.map((s) => (
+                {stickers.filter((s) => !(onPickPattern && s.svg)).map((s) => (
                   <div key={s.id} className="group relative">
                     <button title={s.title} onClick={() => void pickSticker(s)} className="w-full aspect-square rounded-lg border border-slate-200 bg-[repeating-conic-gradient(#f8fafc_0_25%,#fff_0_50%)] bg-[length:16px_16px] p-2 hover:border-blue-500">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -444,6 +472,49 @@ export function DecorLibrary({
                 : 'แนะนำ PNG พื้นใส (เช่น โบว์ ดอกไม้ สติกเกอร์ของแบรนด์) · ไฟล์อยู่ในคลังไฟล์ อัลบั้ม "ของตกแต่งเว็บ" ของร้านนี้'}
             </p>
           </section>
+
+          {!isFrame && onPickPattern && (
+            <section>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="flex-1 text-sm font-semibold text-slate-800">
+                  🎨 ลายของร้าน <span className="font-normal text-xs text-slate-400">(ไฟล์ SVG · เปลี่ยนสีพื้น สีเส้น ความหนาเส้นได้หลังวาง)</span>
+                </p>
+                <input ref={svgRef} type="file" accept=".svg,image/svg+xml" multiple className="hidden" onChange={(e) => void onFiles(e.target.files, true)} />
+                <button disabled={!albumId || uploading > 0} onClick={() => svgRef.current?.click()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:border-blue-500 disabled:opacity-50">
+                  {uploading > 0 ? `กำลังอัปโหลด… (${uploading})` : "⬆️ อัป SVG"}
+                </button>
+              </div>
+              {stickers === null ? (
+                <p className="text-xs text-slate-400 py-4">กำลังโหลด…</p>
+              ) : (
+                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                  {stickers.filter((s) => s.svg).map((s) => (
+                    <div key={s.id} className="group relative">
+                      <button
+                        title={`${s.title} — กดเพื่อวาง (เปลี่ยนสีได้)`}
+                        disabled={!!readingSvg}
+                        onClick={() => void pickSticker(s)}
+                        className="w-full aspect-square rounded-lg border border-slate-200 bg-[repeating-conic-gradient(#f8fafc_0_25%,#fff_0_50%)] bg-[length:16px_16px] p-2 hover:border-blue-500 disabled:opacity-60"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={imgUrl(s.key, 200)} alt={s.title} className="w-full h-full object-contain" loading="lazy" />
+                        {readingSvg === s.key && <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/70 text-[11px] text-slate-600">กำลังอ่านไฟล์…</span>}
+                      </button>
+                      <button title="เอาออก" onClick={() => setConfirmDel(s)} className="absolute -top-1.5 -right-1.5 hidden group-hover:flex w-5 h-5 items-center justify-center rounded-full bg-white border border-slate-300 text-[11px] text-red-600 shadow-sm">
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button onClick={() => svgRef.current?.click()} disabled={!albumId} className="aspect-square rounded-lg border-2 border-dashed border-slate-300 text-slate-400 text-xs hover:border-blue-400 hover:text-blue-500 disabled:opacity-50" title="อัปไฟล์ SVG">
+                    + SVG
+                  </button>
+                </div>
+              )}
+              <p className="mt-2 text-[11px] text-slate-400">
+                ส่งออกเป็น SVG จาก Illustrator / Figma / Canva · ต้องเป็นรูปทรงล้วน (ตัวหนังสือแปลงเป็นเส้นก่อน · รูปถ่ายที่ฝังจะถูกตัดออก) · ระบบตัดสคริปต์/ลิงก์แฝงในไฟล์ทิ้งให้ · ไฟล์อยู่ในอัลบั้ม &quot;ของตกแต่งเว็บ&quot; ของร้านนี้
+              </p>
+            </section>
+          )}
 
           {!isFrame && onPickShape && (
           <section>

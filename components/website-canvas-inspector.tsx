@@ -13,6 +13,7 @@ import { useState, type ReactNode } from "react";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasShape } from "@/components/website-canvas-shapes";
+import { ShopPatternControls, type PatternFields } from "@/components/website-shop-pattern";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { VideoThumb } from "@/components/video-thumb";
@@ -816,7 +817,9 @@ export function CanvasInspector({
         </>
       )}
 
-      {kind === "shape" && (
+      {kind === "shape" && !!item.pattern && <ShopPatternControls it={item as PatternFields} theme={theme} onPatch={onPatchItem} boxW={num("w", 100)} boxH={num("h", 100)} />}
+
+      {kind === "shape" && !item.pattern && (
         <>
           <div>
             <H>ลาย</H>

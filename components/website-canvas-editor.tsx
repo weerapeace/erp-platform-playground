@@ -18,6 +18,7 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasInspector, type CanvasAlign, type CanvasMultiAction } from "@/components/website-canvas-inspector";
 import { usePreviewFonts, useShopTheme } from "@/components/website-text-pickers";
 import { ImageChooser, DecorLibrary, type PickedImage } from "@/components/website-canvas-media";
+import { patternInsert } from "@/components/website-shop-pattern";
 import dynamic from "next/dynamic";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { CanvasTemplates } from "@/components/website-canvas-templates";
@@ -620,6 +621,11 @@ export function CanvasEditor({
           })
         }
         onPickSticker={(img) => addImage(img, true)}
+        onPickPattern={(pattern) => {
+          // 🎨 ลายของร้าน: ขนาดตามสัดส่วนของลาย (ด้านยาว 220) · สีเดิมของไฟล์ · ซ่อนบนมือถือเหมือนลายในตัว
+          const { w, h } = fitImageBox(pattern.vb[2], pattern.vb[3], 220, 220);
+          addItem("shape", { ...patternInsert(pattern, w), w, h, hideMobile: true });
+        }}
       />
       <DecorLibrary
         kind="frame"

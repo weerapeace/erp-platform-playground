@@ -83,9 +83,18 @@ export type FieldType =
   | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
   | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
   | "point" // จุดบนรูป { x, y } เป็น % — คลิกบนรูปเพื่อวาง · ต้องตั้ง pointImage
-  | "frameShape"; // 🖼 ทรงกรอบที่อัปเอง { vb, parts } (เส้นทาง SVG ที่ผ่านตัวกรอง · lib/website-frames) — ตั้งผ่านตัวสร้างกรอบ (hidden)
+  | "frameShape" // 🖼 ทรงกรอบที่อัปเอง { vb, parts } (เส้นทาง SVG ที่ผ่านตัวกรอง · lib/website-frames) — ตั้งผ่านตัวสร้างกรอบ (hidden)
+  | "shopPattern" // 🎨 ลายของร้าน { name, vb, parts+สี } (จาก SVG ที่อัป · lib/website-frames normalizeShopPattern) — ตั้งผ่านคลังของตกแต่ง (hidden)
+  | "patternSlots"; // 🎨 สีใหม่ของแต่ละสีในไฟล์ ["" | สีธีม | #rrggbb] (โหมดแยกตามสี · hidden — แผงลายของร้านตั้งให้)
 
 export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "caption" | "card";
+
+/** 🎨 ลายของร้าน: เปลี่ยนสีแบบไหน (⚠️ ตรงกับ SHOP_PATTERN_MODES ใน lib/website-frames) */
+export const PATTERN_MODE_OPTIONS: FieldOption[] = [
+  { v: "orig", l: "สีเดิมของไฟล์" },
+  { v: "one", l: "สีเดียวทั้งลาย" },
+  { v: "slot", l: "แยกตามสีในไฟล์" },
+];
 
 export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
   content: "เนื้อหา",
@@ -1103,6 +1112,8 @@ function canvasItemFields(): FieldDef[] {
   const isMedia = { key: "kind", eq: ["image", "video"] };
   const typed = { key: "kind", eq: ["text", "button"] };
   const colored = { key: "kind", eq: ["text", "button", "shape"] };
+  /** ของตกแต่งที่เป็นลายในตัว (ไม่ใช่ 🎨 ลายของร้าน — ลายของร้านตั้งสี/เส้นที่แผงลายของร้านแทน) */
+  const noPattern = { key: "pattern", eq: [null, undefined] };
   const framed = [isImage, { key: "border", eq: CANVAS_BORDERS_ON }];
   return [
     f("kind", "ชนิดชิ้น", "select", { default: "text", options: CANVAS_KINDS }),
@@ -1131,14 +1142,14 @@ function canvasItemFields(): FieldDef[] {
       showIf: isText,
     }),
     /* สี (ข้อความ / ปุ่ม / ของตกแต่ง) */
-    f("color", "สี", "select", { default: "ink", options: CANVAS_COLORS, showIf: colored, hint: "สีตามธีม = เปลี่ยนธีมแล้วเปลี่ยนตาม" }),
-    f("colorHex", "สีเอง", "color", { default: "", showIf: [colored, { key: "color", eq: "custom" }] }),
+    f("color", "สี", "select", { default: "ink", options: CANVAS_COLORS, showIf: [colored, noPattern], hint: "สีตามธีม = เปลี่ยนธีมแล้วเปลี่ยนตาม" }),
+    f("colorHex", "สีเอง", "color", { default: "", showIf: [colored, noPattern, { key: "color", eq: "custom" }] }),
     f("bg", "พื้นหลังข้อความ (แถบ)", "select", { default: "none", options: CANVAS_TEXT_BGS, showIf: isText }),
     f("bgHex", "พื้นหลังสีเอง", "color", { default: "", showIf: [isText, { key: "bg", eq: "custom" }] }),
     /* สีไล่ (ข้อความ/ของตกแต่ง): ทิศ + สีที่ 2 (สีแรก = ช่อง "สี") */
-    f("grad", "ไล่สี", "select", { default: "", options: [{ v: "", l: "ไม่ไล่ (สีเดียว)" }, ...GRAD_DIRS], showIf: { key: "kind", eq: ["text", "shape"] } }),
-    f("color2", "สีปลาย (ไล่สี)", "select", { default: "brandSoft", options: CANVAS_COLORS, showIf: [{ key: "kind", eq: ["text", "shape"] }, { key: "grad", eq: GRAD_DIRS.map((d) => d.v) }] }),
-    f("color2Hex", "สีปลายเอง", "color", { default: "", showIf: [{ key: "kind", eq: ["text", "shape"] }, { key: "color2", eq: "custom" }] }),
+    f("grad", "ไล่สี", "select", { default: "", options: [{ v: "", l: "ไม่ไล่ (สีเดียว)" }, ...GRAD_DIRS], showIf: [{ key: "kind", eq: ["text", "shape"] }, noPattern] }),
+    f("color2", "สีปลาย (ไล่สี)", "select", { default: "brandSoft", options: CANVAS_COLORS, showIf: [{ key: "kind", eq: ["text", "shape"] }, noPattern, { key: "grad", eq: GRAD_DIRS.map((d) => d.v) }] }),
+    f("color2Hex", "สีปลายเอง", "color", { default: "", showIf: [{ key: "kind", eq: ["text", "shape"] }, noPattern, { key: "color2", eq: "custom" }] }),
 
     /* รูป */
     image("imageKey", "รูป", { showIf: isImage, hint: "PNG พื้นใสก็ได้ (เช่น สติกเกอร์/โลโก้)" }),
@@ -1174,9 +1185,16 @@ function canvasItemFields(): FieldDef[] {
     f("flipV", "พลิกบน-ล่าง", "toggle", { group: "media", default: false, showIf: { key: "kind", eq: ["image", "shape", "video"] } }),
 
     /* ของตกแต่ง */
-    f("shape", "ลาย", "select", { default: "bow", options: CANVAS_SHAPES, showIf: isShape }),
-    f("outline", "แบบเส้น (ไม่ทึบ)", "toggle", { default: false, showIf: isShape }),
-    f("strokeWidth", "ความหนาเส้น", "number", { default: 2, min: 1, numMax: 24, showIf: isShape }),
+    f("shape", "ลาย", "select", { default: "bow", options: CANVAS_SHAPES, showIf: [isShape, noPattern] }),
+    f("outline", "แบบเส้น (ไม่ทึบ)", "toggle", { default: false, showIf: [isShape, noPattern] }),
+    f("strokeWidth", "ความหนาเส้น", "number", { default: 2, min: 1, numMax: 24, showIf: [isShape, noPattern] }),
+    /* 🎨 ลายของร้าน (SVG ที่อัป · คัดลอกลายมาที่ชิ้น) — ตั้งสี/เส้นที่แผงลายของร้าน (components/website-shop-pattern) จึงซ่อนในฟอร์ม
+       สีพื้น = ช่อง color/colorHex · ไม่เติมพื้น = outline · ความหนาเส้น = strokeWidth (หน่วยผืน) */
+    f("pattern", "ลายของร้าน", "shopPattern", { default: null, hidden: true }),
+    f("patMode", "สีของลาย", "select", { default: "orig", options: PATTERN_MODE_OPTIONS, hidden: true }),
+    f("lineColor", "สีเส้น", "select", { default: "none", options: [{ v: "none", l: "ไม่มีเส้น" }, ...CANVAS_COLORS], hidden: true }),
+    f("lineColorHex", "สีเส้นเอง", "color", { default: "", hidden: true }),
+    f("patSlots", "สีแยกตามสีในไฟล์", "patternSlots", { default: [], hidden: true }),
 
     /* 🛍 สินค้าในรูป/คลิป (2026-10-21 · ลุคบุ๊กแบบวางอิสระ) — กดชิ้นบนเว็บ = การ์ดสินค้าเด้ง (ชนะ "กดแล้วไปที่") */
     f("products", "สินค้าในรูปนี้ (กดรูปแล้วการ์ดสินค้าเด้ง)", "products", { group: "action", max: CANVAS_SHOP_MAX, wide: true, showIf: isMedia, hint: "หลายตัว = การ์ดเลื่อนดูได้ ‹ 1/3 › · มีสินค้า = กดรูปแล้วการ์ดเด้ง (ไม่ไปลิงก์)" }),
@@ -4121,7 +4139,10 @@ export function defaultForType(t: FieldType): unknown {
     case "image":
     case "videoFile":
     case "frameShape":
+    case "shopPattern":
       return null;
+    case "patternSlots":
+      return [];
     case "link":
       return { text: "", href: "" };
     case "list":

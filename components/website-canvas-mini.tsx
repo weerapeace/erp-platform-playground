@@ -8,6 +8,7 @@
  */
 import type { CSSProperties } from "react";
 import { CanvasShape } from "@/components/website-canvas-shapes";
+import { ShopPatternBox } from "@/components/website-shop-pattern";
 import { swatchesOf, softOf, type ThemeColors } from "@/components/website-canvas-inspector";
 import { CANVAS_WIDTH, canvasFrameMask } from "@/lib/website-canvas";
 import { frameShapeMaskCss, normalizeFrameShape } from "@/lib/website-frames";
@@ -121,7 +122,11 @@ export function CanvasMiniPreview({
           const color = colorOf(theme, it.color, it.colorHex);
           return (
             <div key={String(it.id ?? i)} style={{ ...box, transform: `${box.transform ?? ""} scale(${it.flipH ? -1 : 1}, ${it.flipV ? -1 : 1})`.trim() }}>
-              <CanvasShape it={{ shape: String(it.shape ?? "bow"), w: num(it.w, 100), h: num(it.h, 40), outline: it.outline === true, strokeWidth: num(it.strokeWidth, 2) }} color={color} />
+              {it.pattern ? (
+                <ShopPatternBox it={it} theme={theme} w={num(it.w, 100)} h={num(it.h, 40)} />
+              ) : (
+                <CanvasShape it={{ shape: String(it.shape ?? "bow"), w: num(it.w, 100), h: num(it.h, 40), outline: it.outline === true, strokeWidth: num(it.strokeWidth, 2) }} color={color} />
+              )}
             </div>
           );
         }

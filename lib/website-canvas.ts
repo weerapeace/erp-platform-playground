@@ -634,6 +634,9 @@ export function canvasItemSummary(it: Record<string, unknown>): string {
   const shop = Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : "";
   if (kind === "image") return `${icon} ${s(it.alt) || (it.imageKey ? "รูป" : "(ยังไม่ใส่รูป)")}${shop}${lock}`;
   if (kind === "video") return `${icon} ${it.videoKey ? "วิดีโอ" : "(ยังไม่ใส่คลิป)"}${shop}${lock}`;
+  // 🎨 ลายของร้าน (SVG ที่อัป) — ชื่อไฟล์
+  const pat = it.pattern && typeof it.pattern === "object" ? (it.pattern as { name?: unknown }) : null;
+  if (pat) return `🎨 ${s(pat.name) || "ลายของร้าน"}${lock}`;
   return `${icon} ${CANVAS_SHAPE_LABEL[s(it.shape)] ?? "ของตกแต่ง"}${lock}`;
 }
 
