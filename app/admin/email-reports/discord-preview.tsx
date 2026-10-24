@@ -9,7 +9,8 @@
 import type { ReactNode } from "react";
 
 type Embed = { title?: string; url?: string; description?: string; color?: number; thumbnail?: { url: string }; fields?: { name: string; value: string }[] };
-type Button = { type: number; style: number; label: string; url?: string; custom_id?: string };
+/** ปุ่ม (type 2) หรือเมนูเลือก (type 3 · placeholder) */
+type Button = { type: number; style?: number; label?: string; url?: string; custom_id?: string; placeholder?: string };
 export type DiscordCardMsg = { embeds?: Embed[]; components?: { type: number; components: Button[] }[] };
 export type DiscordPreviewData = { content: string; cards: DiscordCardMsg[]; has_image: boolean; role_name: string | null; channel_name: string | null; ready: { bot: boolean; buttons: boolean } };
 
@@ -70,8 +71,12 @@ function Card({ msg }: { msg: DiscordCardMsg }) {
       )}
       {(msg.components ?? []).map((row, i) => (
         <div key={i} className="flex flex-wrap gap-1.5">
-          {row.components.map((b, j) => (
-            <span key={j} className={`inline-flex h-8 items-center gap-1 rounded px-3 text-[13px] font-medium text-white ${b.style === 3 ? "bg-[#248046]" : "bg-[#4e5058]"}`}>
+          {row.components.map((b, j) => b.type === 3 ? (
+            <span key={j} className="flex h-9 w-full max-w-[520px] items-center justify-between rounded bg-[#1e1f22] px-3 text-[13px] text-[#949ba4]">
+              {b.placeholder ?? "เลือก…"}<span>▾</span>
+            </span>
+          ) : (
+            <span key={j} className={`inline-flex h-8 items-center gap-1 rounded px-3 text-[13px] font-medium text-white ${b.style === 3 ? "bg-[#248046]" : b.style === 1 ? "bg-[#5865f2]" : "bg-[#4e5058]"}`}>
               {b.label}{b.style === 5 && <span className="opacity-70">↗</span>}
             </span>
           ))}

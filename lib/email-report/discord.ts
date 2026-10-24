@@ -9,7 +9,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { DiscordError, discordDmChannel, discordReady, discordSend, type DiscordFile } from "@/lib/discord";
 import { checklistCardMessage, type ChecklistTask } from "@/lib/discord-checklist";
 import { renderReportPng } from "@/lib/email-report/image";
-import { userNames } from "@/lib/record-tasks-server";
+import { loadChecklistPresets, userNames } from "@/lib/record-tasks-server";
 import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 import type { BuiltReport } from "@/lib/email-report/render";
 
@@ -90,6 +90,8 @@ export async function composeDiscordReport(admin: Admin, cfg: ReturnType<typeof 
     for (const t of rows) (tasksBy.get(t.record_id) ?? tasksBy.set(t.record_id, []).get(t.record_id)!).push({ ...t, assigned_name: t.assigned_to ? names.get(t.assigned_to) ?? null : null });
   }
   const cardRecords = records.filter((r) => (tasksBy.get(r.id) ?? []).length > 0);
+  // ＋ พิมพ์เพิ่ม / เมนูค่าที่ใช้บ่อย บนการ์ด (เฉพาะตอนปุ่มใช้ได้)
+  const presets = opts.buttons && built.checklist && cardRecords.length ? await loadChecklistPresets(admin, built.checklist.moduleKey) : [];
 
   // ── ข้อความ 1: ภาพรวม ──
   const overdue = built.overdue ?? 0;
@@ -99,6 +101,7 @@ export async function composeDiscordReport(admin: Admin, cfg: ReturnType<typeof 
     cardRecords.length ? `⏳ มีของรอ ${cardRecords.length} ใบ — ${opts.buttons ? "ติ๊กที่การ์ดด้านล่างได้เลย" : "เปิดใบงานเพื่อติ๊กในระบบ"}` : "",
     built.viewAllLink ? `[${built.viewAllLabel} →](${built.viewAllLink})` : "",
   ].filter(Boolean).join("\n").slice(0, 2000);
-  const cards = cardRecords.map((r) => checklistCardMessage({ title: r.title, url: r.link, description: r.description, thumbnail: r.imageUrl }, tasksBy.get(r.id) ?? [], opts.buttons));
+  const cards = cardRecords.map((r) => checklistCardMessage({ title: r.title, url: r.link, description: r.description, thumbnail: r.imageUrl }, tasksBy.get(r.id) ?? [], opts.buttons,
+    built.checklist ? { moduleKey: built.checklist.moduleKey, recordId: r.id, presets } : null));
   return { content, mention, cards };
 }
