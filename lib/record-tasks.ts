@@ -67,3 +67,10 @@ export function summarizeTasks(items: { id?: string; title: string; status: stri
 
 /** "รอหาผ้า · ฝน" — ข้อความ + ชื่อผู้รับผิดชอบ (ถ้ามี) */
 export const taskWithWho = (title: string, who: string | null | undefined, sep = " · ") => (who ? `${title}${sep}${who}` : title);
+
+/** "ซื้อของ - ของเล่น, ผ้าสีครีม" — ข้อความข้อ + ชื่อกำกับของลิงก์ (ลิงก์ไม่มีชื่อกำกับ = ไม่ต่อท้าย)
+ *  ใช้ในที่แคบที่ไม่ได้โชว์รายการลิงก์เต็ม: แถวบนการ์ด · ปุ่ม Discord · อีเมล */
+export function taskTitleWithLinks(title: string, links?: TaskLink[] | null): string {
+  const names = [...new Set((links ?? []).map((l) => l.label?.trim() ?? "").filter(Boolean))];
+  return names.length ? `${title} - ${names.join(", ")}` : title;
+}

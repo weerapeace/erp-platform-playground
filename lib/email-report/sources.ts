@@ -12,7 +12,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { absoluteUrl } from "@/lib/app-url";
 import { loadChecklistSummaries } from "@/lib/record-tasks-server";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
-import { linkLabel, taskWithWho } from "@/lib/record-tasks";
+import { linkLabel, taskTitleWithLinks, taskWithWho } from "@/lib/record-tasks";
 import { describeDays, normalizeReportOptions, type EmailReportFilters, type EmailReportInput, type ResolvedReportOptions } from "@/lib/email-report/shared";
 import { renderReportEmail, type BuiltReport, type ReportPart, type ReportRow, type ReportSection, type ReportStat, type ReportTone } from "@/lib/email-report/render";
 
@@ -160,10 +160,11 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
       else if (k === "creator" && s.created_by && creators.get(s.created_by)) parts.push({ kind: "meta", text: `โดย ${creators.get(s.created_by)}` });
       else if (k === "waiting_for") {
         const who = waiting.get(s.id)?.who ?? [];
-        const w = waitingOf(s).map((x, i) => { const t = oneLine(x, 60); return t ? taskWithWho(t, who[i], " — ") : null; }).filter((x): x is string => !!x);
+        const lk = waiting.get(s.id)?.links ?? [];
+        // "ซื้อของ - ของเล่น" = ข้อความ + ชื่อกำกับลิงก์ (taskTitleWithLinks)
+        const w = waitingOf(s).map((x, i) => { const t = oneLine(taskTitleWithLinks(x, lk[i]), 60); return t ? taskWithWho(t, who[i], " — ") : null; }).filter((x): x is string => !!x);
         if (w.length) parts.push({ kind: "tag", text: `รอ: ${w.slice(0, 3).join(" · ")}${w.length > 3 ? ` +${w.length - 3}` : ""}` });
         // ลิงก์ของข้อที่รอ (เช่น ร้านที่จะซื้อของ) — กดเปิดจากอีเมลได้เลย
-        const lk = waiting.get(s.id)?.links ?? [];
         const groups = waitingOf(s).map((t, i) => ({ title: oneLine(t, 40) ?? t, links: lk[i] ?? [] })).filter((g) => g.links.length);
         if (groups.length) parts.push({ kind: "links", links: groups, text: groups.map((g) => `${g.title}: ${g.links.map((l) => `${linkLabel(l)} ${l.url}`).join(", ")}`).join(" | ") });
       }
@@ -242,10 +243,11 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
       items: popupList.map((e) => {
         const cover = covers.get(e.s.id) ?? null;
         const who = waiting.get(e.s.id)?.who ?? [];
+        const lk = waiting.get(e.s.id)?.links ?? [];
         return {
           id: e.s.id, title: e.s.name, code: e.s.code, path: `/master/design-dashboard?open=${encodeURIComponent(e.s.id)}`,
           imageUrl: cover ? withImageWidth(cover, 160) : null, flag: e.flag, urgent: isUrgent(e), overdue: e.daysLeft !== null && e.daysLeft < 0,
-          waiting: waitingOf(e.s).map((t, i) => taskWithWho(oneLine(t, 60) ?? t, who[i], " — ")),
+          waiting: waitingOf(e.s).map((t, i) => { const x = taskTitleWithLinks(t, lk[i]); return taskWithWho(oneLine(x, 60) ?? x, who[i], " — "); }),
           brand: e.s.brand?.name ?? (e.s.brand_id ? null : "ไม่ระบุแบรนด์"), status: statusLabel.get(e.s.status) ?? e.s.status,
           due: e.s.deadline ? `กำหนดส่ง ${thShort(e.s.deadline)}` : "ไม่มีกำหนดส่ง", note: oneLine(e.s.note, 90),
         };

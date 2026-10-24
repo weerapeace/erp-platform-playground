@@ -16,7 +16,7 @@ import { UserPicker } from "@/components/pickers";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, summarizeTasks, taskWithWho, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
+import { isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, summarizeTasks, taskTitleWithLinks, taskWithWho, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { relTime, useRecordTasks } from "./use-record-tasks";
 import { TaskLinkList, TaskLinksButton } from "./task-links";
@@ -285,7 +285,7 @@ export function RecordChecklistChip({ moduleKey, recordType = null, recordId, ca
             title={can ? (done ? "กดเพื่อยกเลิกติ๊ก" : "ติ๊กเมื่อเสร็จ") : "ติ๊กได้เฉพาะคนที่แก้ใบงานได้ / ผู้รับผิดชอบข้อนี้"}
             className={`flex min-w-0 flex-1 items-start gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[11px] transition ${done ? "text-slate-400" : "text-amber-900"} ${can ? "hover:bg-amber-100" : "cursor-default"} ${busy === r.id ? "opacity-60" : ""}`}>
             <span className={tickCls(done)}>✓</span>
-            <span className={`min-w-0 flex-1 truncate ${done ? "line-through" : ""}`}>{r.title}{r.who && <span className={done ? "" : "text-amber-700/70"}> · {r.who}</span>}</span>
+            <span className={`min-w-0 flex-1 truncate ${done ? "line-through" : ""}`} title={taskTitleWithLinks(r.title, r.links)}>{taskTitleWithLinks(r.title, r.links)}{r.who && <span className={done ? "" : "text-amber-700/70"}> · {r.who}</span>}</span>
           </button>
           {!done && <TaskLinksButton links={r.links} />}
         </span>

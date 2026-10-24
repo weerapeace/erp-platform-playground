@@ -7,7 +7,7 @@
  *   เมนู "ค่าที่ใช้บ่อย" custom_id "rtp:<module>:<record>" → เลือกแล้วเพิ่มทันที (ซ่อนค่าที่มีค้างอยู่แล้ว)
  * ลิงก์ของข้อที่ยังรอ (เช่น ร้านที่จะซื้อของ) = ช่อง "🔗 ลิงก์" ในการ์ด กดเปิดได้เลย
  */
-import { isTaskDone, linkLabel, taskWithWho, type TaskLink } from "@/lib/record-tasks";
+import { isTaskDone, linkLabel, taskTitleWithLinks, taskWithWho, type TaskLink } from "@/lib/record-tasks";
 
 /** assigned_name = ชื่อผู้รับผิดชอบ (โชว์บนปุ่ม "☐ รอหาผ้า · ฝน") */
 export type ChecklistTask = { id: string; title: string; status: string; resolved_by?: string | null; assigned_name?: string | null; links?: TaskLink[] };
@@ -61,7 +61,7 @@ function statusField(tasks: ChecklistTask[], interactive: boolean) {
   const open = tasks.filter((t) => !isTaskDone(t.status));
   const done = tasks.filter((t) => isTaskDone(t.status));
   const lines = [
-    ...(interactive ? [] : open.map((t) => `☐ ${taskWithWho(t.title, t.assigned_name, " — ")}`)),
+    ...(interactive ? [] : open.map((t) => `☐ ${taskWithWho(taskTitleWithLinks(t.title, t.links), t.assigned_name, " — ")}`)),
     ...done.slice(-6).map((t) => `✓ ${t.title}${t.resolved_by ? ` — ${t.resolved_by}` : ""}`),
   ];
   return {
@@ -82,7 +82,7 @@ export function checklistComponents(tasks: ChecklistTask[], openUrl: string | nu
   const ordered = [...tasks.filter((t) => !isTaskDone(t.status)), ...tasks.filter((t) => isTaskDone(t.status))].slice(0, maxTick);
   const buttons = interactive ? ordered.map((t) => {
     const done = isTaskDone(t.status);
-    return { type: 2, style: done ? 3 : 2, label: clip(`${done ? "✓" : "☐"} ${taskWithWho(t.title, t.assigned_name)}`, 80), custom_id: `rt:${t.id}` };
+    return { type: 2, style: done ? 3 : 2, label: clip(`${done ? "✓" : "☐"} ${taskWithWho(taskTitleWithLinks(t.title, t.links), t.assigned_name)}`, 80), custom_id: `rt:${t.id}` };
   }) : [];
   const rows: { type: 1; components: Record<string, unknown>[] }[] = [];
   for (let i = 0; i < buttons.length; i += 5) rows.push({ type: 1, components: buttons.slice(i, i + 5) });
