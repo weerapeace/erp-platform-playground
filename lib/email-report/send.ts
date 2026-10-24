@@ -50,7 +50,9 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
   const global = await loadReportChannels(admin);
   const reportEmail = report.email_enabled !== false;
   const reportDiscord = normalizeReportDiscord(report.discord).enabled;
-  const wantEmail = reportEmail && (test || global.email);
+  // ติ๊ก Gmail ไว้แต่ยังไม่มีผู้รับ (รายงานป๊อปอย่างเดียว) = ไม่นับเป็นช่องอีเมล — ไม่ลง "ไม่สำเร็จ" ทุกวัน · ส่งทดสอบยังส่งหาตัวเองได้
+  const noRecipients = reportEmail && report.recipients.length === 0;
+  const wantEmail = reportEmail && (test || (global.email && !noRecipients));
   const wantDiscord = reportDiscord && (test || global.discord);
 
   // ── ผู้รับ ──
@@ -95,7 +97,8 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
   // ไม่มีช่องไหนให้ส่ง: รายงานป๊อปอย่างเดียว (ตามเวลา) = เงียบ ๆ · ถูกปิดทั้งระบบ = ลงประวัติให้เห็น
   if (!wantEmail && !wantDiscord) {
     const offGlobal = (reportEmail && !global.email) || (reportDiscord && !global.discord);
-    const message = offGlobal ? `ปิดช่องทาง${[reportEmail && !global.email ? "อีเมล" : "", reportDiscord && !global.discord ? "Discord" : ""].filter(Boolean).join(" / ")}ทั้งระบบอยู่ — ไม่ได้ส่ง` : "รายงานนี้ไม่ได้เปิดอีเมลหรือ Discord (ใช้แค่ป๊อป)";
+    const message = offGlobal ? `ปิดช่องทาง${[reportEmail && !global.email ? "อีเมล" : "", reportDiscord && !global.discord ? "Discord" : ""].filter(Boolean).join(" / ")}ทั้งระบบอยู่ — ไม่ได้ส่ง`
+      : noRecipients ? "ยังไม่มีผู้รับอีเมล และไม่ได้เปิด Discord (ใช้แค่ป๊อป)" : "รายงานนี้ไม่ได้เปิดอีเมลหรือ Discord (ใช้แค่ป๊อป)";
     if (offGlobal || opts.trigger === "manual") await log("channel_off", { error: message });
     return { status: "channel_off", sent: 0, recipients: 0, items: 0, message, skipped };
   }
