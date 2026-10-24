@@ -6,6 +6,7 @@
  * patternInsert   : ค่าเริ่มของชิ้นที่วางใหม่ (สีเดิมของไฟล์ · ความหนาเส้นตามไฟล์)
  * ShopPatternBox  : วาดลายตามค่าที่ตั้ง (รายการ / ตัวอย่างในแผง)
  * ShopPatternControls : แผงตั้งค่า — สีเดิมของไฟล์ · สีเดียวทั้งลาย (สีพื้น/สีเส้น/ความหนา) · แยกตามสีในไฟล์
+ * FillLineControls : สีพื้น + สีเส้น + ความหนาเส้น — ใช้ร่วม: ลายในตัว (ผืนผ้าใบ/Section) + ลายของร้านโหมดสีเดียว (lib/website-canvas fillLineView/fillLinePick)
  * ข้อมูลที่ชิ้น: pattern · patMode · color/colorHex (สีพื้น) · outline (ไม่เติมพื้น) · lineColor/lineColorHex · strokeWidth · patSlots
  * เว็บร้านวาดด้วย ShopPatternArt (src/components/home/CanvasShapes.tsx) + ตัวคำนวณสีเดียวกัน (lib/frames ↔ ERP lib/website-frames)
  */
@@ -15,6 +16,7 @@ import { RangeInput } from "@/components/range-input";
 import { ShopPatternArt } from "@/components/website-canvas-shapes";
 import { ColorSwatches, swatchesOf, type ThemeColors } from "@/components/website-text-pickers";
 import { PATTERN_MODE_OPTIONS } from "@/lib/website-schema";
+import { fillLinePick, fillLineView } from "@/lib/website-canvas";
 import {
   normalizePatternSlots,
   normalizeShopPattern,
@@ -59,6 +61,48 @@ export function ShopPatternBox({ it, theme, w, h }: { it: PatternFields; theme: 
 
 const H = ({ children }: { children: ReactNode }) => <p className="text-[11px] font-semibold text-slate-600 mb-1">{children}</p>;
 
+/**
+ * 🎨 สีพื้น + สีเส้น + ความหนาเส้น (ของกลาง) — ∅ สีพื้น = ไม่เติมพื้น · ∅ สีเส้น = ไม่มีเส้น
+ *   ไม่ปล่อยให้ชิ้นหาย: พื้น ∅ ตอนไม่มีเส้น = ย้ายสีไปเป็นเส้น · เส้น ∅ ตอนไม่มีพื้น = กลับเป็นทึบ
+ *   forceWidth = มีส่วนที่เป็นเส้นอยู่แล้ว (เช่น ลายของร้านที่มีชิ้นเส้นล้วน) โชว์ความหนาเสมอ
+ */
+export function FillLineControls({
+  it,
+  theme,
+  onPatch,
+  minWidth = 1,
+  widthStep = 1,
+  forceWidth = false,
+}: {
+  it: PatternFields;
+  theme: ThemeColors;
+  onPatch: (p: Record<string, unknown>) => void;
+  minWidth?: number;
+  widthStep?: number;
+  forceWidth?: boolean;
+}) {
+  const v = fillLineView(it);
+  const sw = Number(it.strokeWidth) > 0 ? Number(it.strokeWidth) : 2;
+  return (
+    <>
+      <div>
+        <H>สีพื้น</H>
+        <ColorSwatches theme={theme} allowNone value={v.fill} hex={v.fillHex} onPick={(c, hex) => onPatch(fillLinePick(it, "fill", c, hex))} />
+      </div>
+      <div>
+        <H>สีเส้น</H>
+        <ColorSwatches theme={theme} allowNone value={v.line} hex={v.lineHex} onPick={(c, hex) => onPatch(fillLinePick(it, "line", c, hex))} />
+      </div>
+      {(forceWidth || v.line !== "none") && (
+        <div>
+          <H>ความหนาเส้น</H>
+          <RangeInput value={sw} min={minWidth} max={24} step={widthStep} unit="px" onChange={(n) => onPatch({ strokeWidth: n })} />
+        </div>
+      )}
+    </>
+  );
+}
+
 /** ค่าสีของช่อง (สีธีม / #rrggbb) → ค่าของปุ่มสี */
 const swatchVal = (s: string) => (!s ? "" : s.startsWith("#") ? "custom" : s);
 
@@ -87,12 +131,11 @@ export function ShopPatternControls({
   const mode: ShopPatternMode = it.patMode === "one" || it.patMode === "slot" ? it.patMode : "orig";
   const modes = PATTERN_MODE_OPTIONS.filter((o) => o.v !== "slot" || colors.length > 1) as { v: ShopPatternMode; l: string }[];
   const str = (v: unknown, fb = "") => (typeof v === "string" ? v : fb);
-  const color = str(it.color, "brand");
   const lineColor = str(it.lineColor, "none");
   const sw = Number(it.strokeWidth) > 0 ? Number(it.strokeWidth) : 2;
   const slots = normalizePatternSlots(it.patSlots);
   const lineOnly = pattern.parts.some((p) => !p.f);
-  const showWidth = mode === "one" ? lineColor !== "none" || it.outline === true || lineOnly : mode === "slot" && lineColor !== "none";
+  const showWidth = mode === "slot" && lineColor !== "none";
   const setSlot = (i: number, v: string) => {
     const next = [...slots];
     while (next.length <= i) next.push("");
@@ -130,21 +173,7 @@ export function ShopPatternControls({
 
       {mode === "orig" && <p className="text-[11px] text-slate-500">ใช้สีตามไฟล์ที่ออกแบบมา — อยากเปลี่ยนสี เลือก &quot;สีเดียวทั้งลาย&quot; หรือ &quot;แยกตามสีในไฟล์&quot;</p>}
 
-      {mode === "one" && (
-        <>
-          <div>
-            <H>สีพื้น</H>
-            <ColorSwatches
-              theme={theme}
-              allowNone
-              value={it.outline === true ? "none" : color === "auto" ? "brand" : color}
-              hex={str(it.colorHex)}
-              onPick={(v, hex) => onPatch(v === "none" ? { outline: true } : v === "custom" ? { outline: false, color: v, colorHex: hex ?? str(it.colorHex) } : { outline: false, color: v })}
-            />
-          </div>
-          {lineRow("สีเส้น")}
-        </>
-      )}
+      {mode === "one" && <FillLineControls it={it} theme={theme} onPatch={onPatch} minWidth={minWidth} widthStep={widthStep} forceWidth={lineOnly} />}
 
       {mode === "slot" && (
         <>

@@ -33,6 +33,7 @@ import {
   CANVAS_SHOP_MAX,
   CANVAS_LOOPS,
   CANVAS_SHAPES,
+  canvasShapeHasLine,
   CANVAS_SPEEDS,
   CANVAS_TEXT_BGS,
   CANVAS_WEIGHTS,
@@ -1193,8 +1194,9 @@ function canvasItemFields(): FieldDef[] {
        สีพื้น = ช่อง color/colorHex · ไม่เติมพื้น = outline · ความหนาเส้น = strokeWidth (หน่วยผืน) */
     f("pattern", "ลายของร้าน", "shopPattern", { default: null, hidden: true }),
     f("patMode", "สีของลาย", "select", { default: "orig", options: PATTERN_MODE_OPTIONS, hidden: true }),
-    f("lineColor", "สีเส้น", "select", { default: "none", options: [{ v: "none", l: "ไม่มีเส้น" }, ...CANVAS_COLORS], hidden: true }),
-    f("lineColorHex", "สีเส้นเอง", "color", { default: "", hidden: true }),
+    // สีเส้นแยก — ลายของร้านตั้งที่แผงลายของร้าน (ซ่อน) · ลายในตัวที่มีพื้น (canvasShapeHasLine) ตั้งที่ฟอร์มนี้ได้ด้วย (2026-10-24)
+    f("lineColor", "สีเส้น", "select", { default: "none", options: [{ v: "none", l: "ไม่มีเส้น" }, ...CANVAS_COLORS], showIf: [isShape, noPattern, { key: "shape", eq: CANVAS_SHAPES.map((o) => o.v).filter(canvasShapeHasLine) }] }),
+    f("lineColorHex", "สีเส้นเอง", "color", { default: "", showIf: [isShape, noPattern, { key: "lineColor", eq: "custom" }] }),
     f("patSlots", "สีแยกตามสีในไฟล์", "patternSlots", { default: [], hidden: true }),
 
     /* 🛍 สินค้าในรูป/คลิป (2026-10-21 · ลุคบุ๊กแบบวางอิสระ) — กดชิ้นบนเว็บ = การ์ดสินค้าเด้ง (ชนะ "กดแล้วไปที่") */

@@ -12,7 +12,41 @@ import {
 } from "../website-frames";
 import { SECTION_SCHEMAS, matchShowIf } from "../website-schema";
 import { normalizeBlocks, newDecor } from "../website-blocks";
-import { canvasItemSummary } from "../website-canvas";
+import { canvasItemSummary, canvasShapeHasLine, fillLinePick, fillLineView } from "../website-canvas";
+
+describe("🎨 ลายในตัว: สีพื้น + สีเส้นแยกกัน (2026-10-24)", () => {
+  it("ลายที่มีพื้น = แยกสีเส้นได้ · ลายเส้นล้วน / สีเดียว = สีเดียว", () => {
+    for (const s of ["bow", "heart", "star", "flower", "rect", "ellipse", "arch", "pearls", "scallop", "note", "badge", "tape", "binder"]) expect(canvasShapeHasLine(s)).toBe(true);
+    for (const s of ["line", "wave", "lace", "clip", "barcode"]) expect(canvasShapeHasLine(s)).toBe(false);
+  });
+  it("สีที่เห็นจริง: ทึบ = พื้นสีลาย ไม่มีเส้น · แบบเส้นรุ่นเก่า = เส้นสีลาย · auto = แบรนด์", () => {
+    expect(fillLineView({ color: "ink", outline: false })).toMatchObject({ fill: "ink", line: "none" });
+    expect(fillLineView({ color: "custom", colorHex: "#123456", outline: true, lineColor: "none" })).toMatchObject({ fill: "none", line: "custom", lineHex: "#123456" });
+    expect(fillLineView({ color: "auto" })).toMatchObject({ fill: "brand" });
+    expect(fillLineView({ color: "ink", lineColor: "brand", outline: false })).toMatchObject({ fill: "ink", line: "brand" });
+  });
+  it("พื้น ∅: ไม่มีเส้น = ย้ายสีไปเป็นเส้น (ไม่หาย) · มีเส้นแล้ว = เอาพื้นออกอย่างเดียว", () => {
+    expect(fillLinePick({ color: "ink", outline: false, lineColor: "none" }, "fill", "none")).toEqual({ outline: true, lineColor: "ink", lineColorHex: "" });
+    expect(fillLinePick({ color: "ink", outline: false, lineColor: "brand" }, "fill", "none")).toEqual({ outline: true });
+  });
+  it("เลือกสีพื้น: ทั่วไป = เปลี่ยนสีพื้น · แบบเส้นรุ่นเก่า = เส้นที่เห็นยังอยู่ · สีเอง = เก็บ hex", () => {
+    expect(fillLinePick({ color: "ink", outline: false }, "fill", "brand")).toEqual({ outline: false, color: "brand" });
+    expect(fillLinePick({ color: "ink", outline: true, lineColor: "none" }, "fill", "brand")).toEqual({ outline: false, color: "brand", lineColor: "ink", lineColorHex: "" });
+    expect(fillLinePick({ color: "ink" }, "fill", "custom", "#abcdef")).toEqual({ outline: false, color: "custom", colorHex: "#abcdef" });
+  });
+  it("สีเส้น ∅: มีพื้น = เอาเส้นออก · ไม่มีพื้น = กลับเป็นทึบด้วยสีเส้นเดิม (ไม่หาย)", () => {
+    expect(fillLinePick({ color: "ink", outline: false, lineColor: "brand" }, "line", "none")).toEqual({ lineColor: "none" });
+    expect(fillLinePick({ color: "ink", outline: true, lineColor: "custom", lineColorHex: "#ff0000" }, "line", "none")).toEqual({ lineColor: "none", outline: false, color: "custom", colorHex: "#ff0000" });
+    expect(fillLinePick({ color: "ink" }, "line", "custom", "#00ff00")).toEqual({ lineColor: "custom", lineColorHex: "#00ff00" });
+  });
+  it("ข้อมูล: ลายในตัวในผืนผ้าใบ + Section เก็บสีเส้นได้ · ของเดิมไม่มีเส้น (หน้าตาเดิม)", () => {
+    const [c] = (normalizeBlocks([{ id: "c", type: "canvas", items: [{ kind: "shape", shape: "heart", lineColor: "brand", strokeWidth: 3 }] } as never])[0] as unknown as { items: Record<string, unknown>[] }).items;
+    expect(c).toMatchObject({ shape: "heart", lineColor: "brand", strokeWidth: 3, pattern: null });
+    const dec = (normalizeBlocks([{ id: "x", type: "rich-text", style: { decor: [{ id: "a", kind: "shape", shape: "star", lineColor: "custom", lineColorHex: "#ABCDEF" }, { id: "b", kind: "shape", shape: "star", lineColor: "custom" }] } } as never])[0] as unknown as { style: { decor: Record<string, unknown>[] } }).style.decor;
+    expect(dec[0]).toMatchObject({ lineColor: "custom", lineColorHex: "#abcdef" });
+    expect(dec[1]).toMatchObject({ lineColor: "none" });
+  });
+});
 
 /**
  * 🎨 ลายของร้าน (SVG ที่ร้านอัป · เปลี่ยนสีได้) — 2026-10-24

@@ -125,7 +125,7 @@ export function CanvasMiniPreview({
               {it.pattern ? (
                 <ShopPatternBox it={it} theme={theme} w={num(it.w, 100)} h={num(it.h, 40)} />
               ) : (
-                <CanvasShape it={{ shape: String(it.shape ?? "bow"), w: num(it.w, 100), h: num(it.h, 40), outline: it.outline === true, strokeWidth: num(it.strokeWidth, 2) }} color={color} />
+                <CanvasShape it={{ shape: String(it.shape ?? "bow"), w: num(it.w, 100), h: num(it.h, 40), outline: it.outline === true, strokeWidth: num(it.strokeWidth, 2) }} color={color} line={it.lineColor && it.lineColor !== "none" ? colorOf(theme, it.lineColor, it.lineColorHex) : null} />
               )}
             </div>
           );

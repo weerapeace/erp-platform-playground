@@ -13,7 +13,7 @@ import { useState, type ReactNode } from "react";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { CanvasShape } from "@/components/website-canvas-shapes";
-import { ShopPatternControls, type PatternFields } from "@/components/website-shop-pattern";
+import { FillLineControls, ShopPatternControls, type PatternFields } from "@/components/website-shop-pattern";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { VideoThumb } from "@/components/video-thumb";
@@ -46,6 +46,8 @@ import {
   canvasSceneInsFor,
   CANVAS_SCENE_OUTS,
   canvasStagger,
+  canvasShapeHasLine,
+  CANVAS_LINE_ONLY_SHAPES,
 } from "@/lib/website-canvas";
 import { GRAD_DIRS, GRADIENT_PRESETS, type GradThemeHex } from "@/lib/website-gradient";
 import { GradientPicker } from "@/components/website-gradient-picker";
@@ -831,16 +833,17 @@ export function CanvasInspector({
               ))}
             </div>
           </div>
-          <div>
-            <H>สี</H>
-            <Swatches theme={theme} value={str("color")} hex={str("colorHex")} onPick={colorPick("color", "colorHex")} />
-          </div>
+          {/* 🎨 สีพื้น + สีเส้น + ความหนา (ของกลาง FillLineControls) · ลายเส้นล้วน/สีเดียว = สีเดียว */}
+          {canvasShapeHasLine(str("shape")) ? (
+            <FillLineControls it={item as PatternFields} theme={theme} onPatch={onPatchItem} />
+          ) : (
+            <div>
+              <H>สี</H>
+              <Swatches theme={theme} value={str("color")} hex={str("colorHex")} onPick={colorPick("color", "colorHex")} />
+            </div>
+          )}
           {gradRow}
-          <div className="flex gap-1.5">
-            <button className={seg(item.outline !== true)} onClick={() => onPatchItem({ outline: false })}>ทึบ</button>
-            <button className={seg(item.outline === true)} onClick={() => onPatchItem({ outline: true })}>เส้น</button>
-          </div>
-          {(item.outline === true || ["line", "wave", "lace"].includes(str("shape"))) && (
+          {CANVAS_LINE_ONLY_SHAPES.includes(str("shape")) && (
             <Slider label="ความหนาเส้น" value={num("strokeWidth", 2)} min={1} max={16} onChange={(n) => onPatchItem({ strokeWidth: n })} />
           )}
         </>

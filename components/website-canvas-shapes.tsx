@@ -173,9 +173,9 @@ const ICONS: Record<string, { vb: [number, number]; body: (fill: string, stroke:
 };
 
 /**
- * ของตกแต่ง 1 ชิ้น — เต็มกล่องของชิ้น
+ * ของตกแต่ง 1 ชิ้น — เต็มกล่องของชิ้น · line = สีเส้นแยก (ไม่มี = แบบเดิม: แบบเส้นใช้สีของลาย)
  */
-export function CanvasShape({ it, color }: { it: ShapeSpec; color: string }) {
+export function CanvasShape({ it, color, line = null }: { it: ShapeSpec; color: string; line?: string | null }) {
   const { w, h } = it;
   const sw = it.strokeWidth;
   const icon = ICONS[it.shape];
@@ -184,16 +184,16 @@ export function CanvasShape({ it, color }: { it: ShapeSpec; color: string }) {
     // เส้นขอบในหน่วยของ viewBox ไอคอน (ให้หนาเท่ากับหน่วยผืน)
     const k = Math.min(w / vw, h / vh) || 1;
     const fill = it.outline ? "none" : color;
-    const stroke = it.outline ? color : "none";
+    const stroke = line ?? (it.outline ? color : "none");
     return (
       <svg aria-hidden className="cv-shape" style={{ display: "block", width: "100%", height: "100%", overflow: "visible" }} viewBox={`0 0 ${vw} ${vh}`} preserveAspectRatio="xMidYMid meet">
-        {icon.body(fill, stroke, it.outline ? sw / k : 0)}
+        {icon.body(fill, stroke, stroke === "none" ? 0 : sw / k)}
       </svg>
     );
   }
 
   const fill = it.outline ? "none" : color;
-  const stroke = it.outline ? color : "none";
+  const stroke = line ?? (it.outline ? color : "none");
   let body: React.ReactNode = null;
   switch (it.shape) {
     case "rect":
@@ -240,7 +240,7 @@ export function CanvasShape({ it, color }: { it: ShapeSpec; color: string }) {
             const cy = horiz ? h / 2 : c;
             return (
               <g key={i}>
-                <circle cx={cx} cy={cy} r={r} fill={fill === "none" ? "none" : color} stroke={it.outline ? color : "none"} strokeWidth={sw} />
+                <circle cx={cx} cy={cy} r={r} fill={fill === "none" ? "none" : color} stroke={stroke} strokeWidth={sw} />
                 {!it.outline && <circle cx={cx - r * 0.32} cy={cy - r * 0.32} r={r * 0.28} fill="#fff" fillOpacity={0.6} />}
               </g>
             );
@@ -272,7 +272,7 @@ export function CanvasShape({ it, color }: { it: ShapeSpec; color: string }) {
     case "arch": {
       const rx = Math.max(0, w / 2 - sw / 2);
       const ry = Math.min(rx, Math.max(0, h - sw));
-      body = <path d={`M${sw / 2} ${h} V${r2(sw / 2 + ry)} A${r2(rx)} ${r2(ry)} 0 0 1 ${r2(w - sw / 2)} ${r2(sw / 2 + ry)} V${h}`} fill={fill} stroke={it.outline ? color : "none"} strokeWidth={sw} />;
+      body = <path d={`M${sw / 2} ${h} V${r2(sw / 2 + ry)} A${r2(rx)} ${r2(ry)} 0 0 1 ${r2(w - sw / 2)} ${r2(sw / 2 + ry)} V${h}`} fill={fill} stroke={stroke} strokeWidth={sw} />;
       break;
     }
   }

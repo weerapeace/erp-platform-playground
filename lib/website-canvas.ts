@@ -377,6 +377,49 @@ export const CANVAS_SHAPES: FieldOption[] = [
 export const CANVAS_SHAPE_LABEL: Record<string, string> = Object.fromEntries(CANVAS_SHAPES.map((o) => [o.v, o.l.replace(/^[^\p{L}]+/u, "")]));
 
 /**
+ * 🎨 สีพื้น / สีเส้น ของลายในตัว (2026-10-24 · แบบเดียวกับลายของร้าน)
+ *   เส้นล้วน = สีเดียว + ความหนา (ไม่มีพื้นให้เติม) · สีเดียว = ทึบสีเดียว ไม่มีเส้น · ที่เหลือ = สีพื้น + สีเส้น + ความหนาแยกกัน
+ *   ⚠️ ตัววาดเว็บร้าน CanvasShapes.tsx (CanvasShape line) ไม่ใช้สีเส้นกับลาย 2 กลุ่มแรกเช่นกัน
+ */
+export const CANVAS_LINE_ONLY_SHAPES = ["line", "wave", "lace"];
+export const CANVAS_ONE_COLOR_SHAPES = ["clip", "barcode"];
+export const canvasShapeHasLine = (shape: string) => !CANVAS_LINE_ONLY_SHAPES.includes(shape) && !CANVAS_ONE_COLOR_SHAPES.includes(shape);
+
+type FillLineFields = { color?: unknown; colorHex?: unknown; outline?: unknown; lineColor?: unknown; lineColorHex?: unknown };
+const strOf = (v: unknown, fb = "") => (typeof v === "string" ? v : fb);
+
+/**
+ * สีพื้น/สีเส้นที่ "เห็นจริง" ของชิ้น (แผงตั้งค่าโชว์ตามนี้)
+ *   แบบเส้นรุ่นเก่า (ไม่เติมพื้น + ยังไม่ตั้งสีเส้น) = เส้นใช้สีของลาย → โชว์เป็นสีเส้น · "auto" = สีแบรนด์
+ */
+export function fillLineView(it: FillLineFields): { fill: string; fillHex: string; line: string; lineHex: string } {
+  const color = strOf(it.color, "brand");
+  const fill = color === "auto" ? "brand" : color;
+  const noFill = it.outline === true;
+  const lc = strOf(it.lineColor, "none") || "none";
+  const legacy = lc === "none" && noFill;
+  return { fill: noFill ? "none" : fill, fillHex: strOf(it.colorHex), line: legacy ? fill : lc, lineHex: legacy ? strOf(it.colorHex) : strOf(it.lineColorHex) };
+}
+
+/**
+ * กดเลือกสีพื้น/สีเส้น → ค่าที่ต้องเขียน (ไม่ปล่อยให้ชิ้นหายเพราะไม่มีทั้งพื้นและเส้น)
+ *   พื้น ∅ ตอนไม่มีเส้น = ย้ายสีไปเป็นเส้น (เห็นเป็นลายเส้นสีเดิม) · เส้น ∅ ตอนไม่มีพื้น = กลับเป็นทึบด้วยสีเส้นเดิม
+ *   v = สีธีม / "custom" (+hex) / "none"
+ */
+export function fillLinePick(it: FillLineFields, which: "fill" | "line", v: string, hex?: string): Record<string, unknown> {
+  const cur = fillLineView(it);
+  const realLine = strOf(it.lineColor, "none") || "none";
+  if (which === "fill") {
+    if (v === "none") return realLine === "none" ? { outline: true, lineColor: cur.fill === "none" ? cur.line : cur.fill, lineColorHex: cur.fill === "none" ? cur.lineHex : cur.fillHex } : { outline: true };
+    // เคยเป็นแบบเส้นรุ่นเก่า → เส้นที่เห็นอยู่ยังอยู่ (ตั้งเป็นสีเส้นจริง)
+    const keepLine = it.outline === true && realLine === "none" ? { lineColor: cur.line, lineColorHex: cur.lineHex } : {};
+    return v === "custom" ? { outline: false, color: v, colorHex: hex ?? cur.fillHex, ...keepLine } : { outline: false, color: v, ...keepLine };
+  }
+  if (v === "none") return it.outline === true ? { lineColor: "none", outline: false, ...(cur.line !== "none" ? { color: cur.line, colorHex: cur.lineHex } : {}) } : { lineColor: "none" };
+  return v === "custom" ? { lineColor: v, lineColorHex: hex ?? cur.lineHex } : { lineColor: v };
+}
+
+/**
  * ชิ้นใหม่ตอนกด "เพิ่ม" (ตำแหน่งเหลื่อมกันตามลำดับ จะได้ไม่ทับกันสนิท)
  * ค่าที่ไม่ได้ใส่ตรงนี้ = default ของช่องใน schema
  */
