@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SECTION_PRESETS, SECTION_SCHEMAS, matchShowIf } from "../website-schema";
-import { normalizeBlocks, newBlock, validateBlocks, type Block } from "../website-blocks";
+import { normalizeBlocks, newBlock, newDecor, validateBlocks, type Block } from "../website-blocks";
 import { CANVAS_SHAPES, folderCanvasStarter, validateCanvasFolders } from "../website-canvas";
 
 /**
@@ -70,5 +70,18 @@ describe("🗂 ผืนผ้าใบแฟ้มซ้อน", () => {
   it("แกลเลอรีแบบแฟ้มยังได้ช่องหน้าตาแฟ้มครบหลังย้ายไปของกลาง (folderLookFields)", () => {
     const g = SECTION_SCHEMAS.gallery.fields.map((x) => x.key);
     for (const k of ["folderDir", "folderMedia", "folderShape", "folderPos", "folderTex", "folderShadow", "folderRadius", "folderPal", "folderHex", "folderLabel", "folderPeek", "folderLift", "folderCover", "coverTitle", "coverLogo"]) expect(g).toContain(k);
+  });
+});
+
+describe("🎀 ของตกแต่ง Section: ชิ้นใหม่อยู่หน้าเนื้อหา (2026-10-24)", () => {
+  it("เพิ่มชิ้นใหม่ = หน้าเนื้อหา · ลายสำเร็จรูปได้สัดส่วนตามลาย", () => {
+    expect(newDecor("shape", { shape: "star" }).layer).toBe("front");
+    expect(newDecor("text").layer).toBe("front");
+    expect(newDecor("shape", { shape: "clip" }).ratio).toBe(2.5);
+    expect(newDecor("shape", { shape: "tape" }).ratio).toBe(0.3);
+  });
+  it("ชิ้นเก่าที่บันทึกไว้ไม่มีค่าชั้น = หลังเนื้อหาเหมือนเดิม (หน้าตาเดิมไม่เปลี่ยน)", () => {
+    const [b] = normalizeBlocks([{ id: "x", type: "rich-text", style: { decor: [{ id: "d1", kind: "shape", shape: "star" }] } }]) as unknown as { style: { decor: { layer: string }[] } }[];
+    expect(b.style.decor[0].layer).toBe("back");
   });
 });

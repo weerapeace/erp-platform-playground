@@ -301,7 +301,7 @@ export interface DecorPlace {
   rotate: number;
 }
 /** สัดส่วน สูง/กว้าง เริ่มต้นของลายในตัว (ลายเส้น/แถบ = แบน) */
-export const DECOR_SHAPE_RATIO: Record<string, number> = { bow: 0.72, heart: 0.9, sparkle: 1, star: 0.96, flower: 1, pearls: 0.12, lace: 1.2, scallop: 0.12, wave: 0.12, line: 0.04, arch: 1.2, rect: 0.6, ellipse: 1 };
+export const DECOR_SHAPE_RATIO: Record<string, number> = { bow: 0.72, heart: 0.9, sparkle: 1, star: 0.96, flower: 1, pearls: 0.12, lace: 1.2, scallop: 0.12, wave: 0.12, line: 0.04, arch: 1.2, rect: 0.6, ellipse: 1, clip: 2.5, binder: 0.8, tape: 0.3, note: 1, badge: 1, barcode: 0.5 };
 export interface DecorItem {
   id: string;
   kind: DecorKind;
@@ -394,7 +394,8 @@ export const decorHideKey = (screen: DecorScreen) => (screen === "desktop" ? "hi
 /** ชิ้นใหม่ (n = ลำดับ ใช้เหลื่อมตำแหน่งไม่ให้ทับกันสนิท) */
 export function newDecor(kind: DecorKind, p: Partial<DecorItem> = {}, n = 0): DecorItem {
   const off = (n % 5) * 6;
-  const base: DecorItem = { ...DEFAULT_DECOR, id: `dc-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, x: 20 + off, y: 30 + off };
+  // ชิ้นใหม่ = อยู่หน้าเนื้อหา (เห็นทันที ไม่จมหลังรูป/วิดีโอ) — ชิ้นเก่าที่ไม่มีค่า layer ยังเป็นหลังเนื้อหาตาม DEFAULT_DECOR (หน้าตาเดิมไม่เปลี่ยน)
+  const base: DecorItem = { ...DEFAULT_DECOR, id: `dc-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind, x: 20 + off, y: 30 + off, layer: "front" };
   if (kind === "shape") Object.assign(base, { ratio: DECOR_SHAPE_RATIO[p.shape ?? base.shape] ?? 1 });
   if (kind === "image") Object.assign(base, { w: 14 });
   if (kind === "text") Object.assign(base, { text: "New!", font: "Parisienne", w: 0 });
