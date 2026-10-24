@@ -455,6 +455,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [saving, setSaving] = useState(false);
   const [loadingForm, setLoadingForm] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
+  const [createMore, setCreateMore] = useState(false);   // ฟอร์มสร้างใหม่ (แบบสั้น): กาง "ใส่ข้อมูลอื่น" แล้วหรือยัง
   const [archiveTarget, setArchiveTarget] = useState<DesignSheetListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [hardDelTarget, setHardDelTarget] = useState<{ id: string; code: string; name: string } | null>(null);
@@ -1129,7 +1130,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   }, []);
 
-  const openCreate = () => { setEditing(true); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
+  const openCreate = () => { setEditing(true); setCreateMore(false); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
@@ -1501,6 +1502,238 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     </div>
   );
 
+  // ── ช่องในแท็บ "ข้อมูลงาน" (ชิ้นเดียวกัน) — ฟอร์มเต็ม (เปิดใบเดิม) กับฟอร์มสั้นตอนสร้างใหม่ หยิบไปจัดวางคนละแบบ ──
+  const fld = !form ? null : {
+    code: (
+      <div>
+        <span className="text-[11px] text-slate-500">เลขที่</span>
+        <div className="h-8 mt-0.5 px-2 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500">
+          {form.id ? <code>{form.code}</code> : "ออกอัตโนมัติตอนบันทึก"}</div>
+      </div>
+    ),
+    status: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">สถานะ</span>
+        <select value={form.status} onChange={(e) => patch({ status: e.target.value })} disabled={!canEdit}
+          className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
+          {/* แบรนด์เรา (ไม่ได้ติ๊ก 👤 งานลูกค้า) = ไม่มีสถานะ "เฉพาะงานลูกค้า" (กฎกลาง statusOptsFor) */}
+          {statusOptsFor(wfMeta, isOwnBrandJob(brands.find((b) => b.id === form.brand_id)), form.status).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          {/* สถานะเดิมของใบนี้ที่ถูกลบออกจาก workflow แล้ว — ยังโชว์ให้เลือกค้างไว้ได้ ไม่พัง */}
+          {form.status && !wfMeta.map[form.status] && <option value={form.status}>{form.status} (สถานะเก่า)</option>}
+        </select>
+      </label>
+    ),
+    name: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">ชื่องาน *</span>
+        {/* สร้างใหม่: ช่องใหญ่ขึ้น + เคอร์เซอร์รออยู่เลย (ช่องแรกที่ต้องกรอก) */}
+        <input value={form.name} onChange={(e) => patch({ name: e.target.value })} disabled={!fullEdit} placeholder="เช่น กระเป๋าผ้าแคนวาสรุ่นใหม่" autoFocus={!form.id}
+          className={`w-full mt-0.5 px-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 ${form.id ? "h-8 text-sm" : "h-10 text-base"}`} />
+      </label>
+    ),
+    brand: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">แบรนด์</span>
+        <div className="flex gap-1.5 mt-0.5">
+          <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit}
+            className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
+            <option value="">— ไม่ระบุ —</option>
+            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          {fullEdit && <button type="button" title="เพิ่มแบรนด์ใหม่"
+            onClick={() => { setNewBrandName(""); setNewBrandColor("#3b82f6"); setBrandModal(true); }}
+            className="h-8 w-8 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600">＋</button>}
+        </div>
+      </label>
+    ),
+    orderDate: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">วันที่สั่ง</span>
+        <input type="date" value={form.order_date} onChange={(e) => patch({ order_date: e.target.value })} disabled={!fullEdit}
+          className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+      </label>
+    ),
+    deadline: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">{form.id ? "Deadline" : "ส่งงานภายใน (Deadline)"}</span>
+        <input type="date" value={form.deadline} onChange={(e) => patch({ deadline: e.target.value })} disabled={!canEdit}
+          className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+      </label>
+    ),
+    appointment: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">วันนัด / วันได้ตัวอย่าง</span>
+        <input type="date" value={form.appointment_date} onChange={(e) => patch({ appointment_date: e.target.value })} disabled={!canEdit}
+          className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+      </label>
+    ),
+    // ⏳ รออะไรอยู่ = เช็กลิสต์กลาง (บันทึกทันทีทีละข้อ ไม่ต้องกดบันทึกใบงาน) — โชว์บนการ์ด + กล่อง hover ของ Design Dashboard · ต้องมีเลขใบก่อน
+    waiting: form.id ? (
+      <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={form.id} canEdit={canEdit}
+        presetType={DESIGN_WAITING.presetType} label="⏳ รออะไรอยู่" emptyText="ไม่มีอะไรรอ" />
+    ) : null,
+    drive: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">ลิงก์ไฟล์งาน (Google Drive)</span>
+        <div className="flex gap-1.5 mt-0.5">
+          <input value={form.drive_link} onChange={(e) => patch({ drive_link: e.target.value })} disabled={!canEdit} placeholder="https://drive.google.com/..."
+            className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+          {form.drive_link && <a href={form.drive_link} target="_blank" rel="noreferrer"
+            className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">↗ เปิด</a>}
+        </div>
+      </label>
+    ),
+    /* เฟส 5: ตั้ง Parent SKU ได้หลายตัว (chips) + เช็ครหัสสด (ซ้ำ=แดง ห้ามเพิ่ม · ข้ามเลข=เตือนแต่เพิ่มได้)
+        ช่องนี้ (และร่าง Parent) เป็น "ช่อง quick" = เพิ่ม/เอาออกได้ในโหมดดูเลย ไม่ต้องกด ✏️ แก้ไขก่อน
+        (เดิมผูก fullEdit → โหมดดูเห็นแค่หัวข้อเปล่า ๆ ไม่มีช่องให้พิมพ์ เจ้าของแจ้งว่า "ใช้ไม่ได้") · มีผลจริงตอนกดบันทึก */
+    parent: (
+      <div className="block">
+        <span className="text-[11px] text-slate-500">Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)</span>
+        {form.parent_sku_codes.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {form.parent_sku_codes.map((c) => {
+              const pid = parentRefs[c];
+              return (
+                <span key={c} className="inline-flex items-center gap-1">
+                  {pid
+                    ? <RecordPeekLink moduleKey="parent-skus-v2" recordId={pid} label={c} />
+                    : <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-mono text-blue-700">{c}</span>}
+                  {canEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {canEdit && (
+          <div className="flex gap-1 mt-1">
+            <input value={skuInput} onChange={(e) => setSkuInput(e.target.value.toUpperCase())}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentCode(); } }}
+              placeholder="เช่น CTL085 แล้วกด Enter"
+              className={`flex-1 h-8 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 ${
+                skuCheck?.exists ? "border-rose-400 bg-rose-50 focus:ring-rose-400"
+                : skuCheck?.skipped ? "border-amber-300 focus:ring-amber-400"
+                : "border-slate-200 focus:ring-blue-500"}`} />
+            <button type="button" onClick={addParentCode} disabled={!skuInput.trim() || skuCheck?.exists}
+              className="h-8 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">＋ เพิ่ม</button>
+          </div>
+        )}
+        <div className="mt-0.5 text-[11px] min-h-[14px]">
+          {skuChecking ? <span className="text-slate-300">กำลังเช็ครหัส...</span>
+            : !skuInput.trim() ? null
+            : skuCheck?.exists ? <span className="text-rose-600 font-medium">✕ รหัสนี้มีอยู่แล้ว — เพิ่มไม่ได้</span>
+            : skuCheck?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ {skuCheck.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)</span>
+            : skuCheck?.latest ? <span className="text-slate-400">✓ ใช้ได้ · ล่าสุดที่ตั้ง: <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · ถัดไป: <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · เลขสูงสุด: {skuCheck.max_code}</> : null}</span>
+            : skuCheck ? <span className="text-emerald-600">✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้</span> : null}
+        </div>
+        {/* SKU ที่เชื่อมกับใบงานนี้ — ตัวที่สร้างจากใบนี้ (เขียว) + พี่น้องใต้ Parent เดียวกัน (เทา) · คลิกเปิดดู SKU */}
+        {linkedSkus.length > 0 && (
+          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2">
+            <div className="mb-1 text-[11px] font-medium text-emerald-800">
+              🏷️ SKU ที่เชื่อม {linkedSkus.filter((s) => s.from_sheet).length} ตัว
+              {linkedSkus.some((s) => !s.from_sheet) && (
+                <span className="font-normal text-slate-500"> · ใต้ Parent เดียวกันอีก {linkedSkus.filter((s) => !s.from_sheet).length} ตัว</span>
+              )}
+            </div>
+            <div className="max-h-40 space-y-1 overflow-auto">
+              {linkedSkus.map((s) => (
+                <div key={s.id} title={s.from_sheet ? "สร้างจากใบงานนี้" : `อยู่ใต้ Parent ${s.parent_code ?? ""} (ไม่ได้สร้างจากใบนี้)`}
+                  className={`flex items-center gap-1.5 rounded border bg-white px-1.5 py-1 ${s.from_sheet ? "border-emerald-200" : "border-slate-200 opacity-70"}`}>
+                  {s.image_key
+                    ? <ImageThumbnail url={`/api/r2-image?key=${encodeURIComponent(s.image_key)}`} size={22} />
+                    : <span className="inline-block h-[22px] w-[22px] shrink-0 rounded bg-slate-100" />}
+                  <RecordPeekLink moduleKey="skus-v2" recordId={s.id} label={s.code} />
+                  <span className="truncate text-[11px] text-slate-500">{s.color || s.name_th || ""}</span>
+                  <span className="ml-auto shrink-0 text-[11px] tabular-nums text-slate-500">
+                    {s.standard_price != null ? s.standard_price.toLocaleString("th-TH") : ""}
+                  </span>
+                  {!s.is_active && <span className="shrink-0 text-[10px] text-slate-400">ปิดใช้</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ข้อ 6: ร่าง Parent (ชื่อก่อน ยังไม่ใส่รหัสจริง) — ใช้ตั้งชื่อแบบที่จะทำ แล้วค่อยสร้างรหัสจริงทีหลัง */}
+        <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
+          <span className="text-[11px] text-slate-500">ร่าง Parent (ยังไม่มีรหัส) — เช่น &quot;พวงกุญแจ มะพร้าว&quot;</span>
+          {form.parent_sku_drafts.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {form.parent_sku_drafts.map((d) => (
+                <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 border border-dashed border-amber-300 text-amber-700 rounded">
+                  ✎ {d}
+                  {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
+                </span>
+              ))}
+            </div>
+          )}
+          {canEdit && (
+            <div className="flex gap-1 mt-1">
+              <input value={draftInput} onChange={(e) => setDraftInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentDraft(); } }}
+                placeholder="เช่น พวงกุญแจ มะพร้าว แล้วกด Enter"
+                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+              <button type="button" onClick={addParentDraft} disabled={!draftInput.trim()}
+                className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40">＋ ร่าง</button>
+            </div>
+          )}
+        </div>
+      </div>
+    ),
+    detail: (
+      <div className="block">
+        <span className="text-[11px] text-slate-500">รายละเอียดงาน</span>
+        <div className="mt-0.5">
+          <RichTextEditor value={form.detail} onChange={(html) => patch({ detail: html })} editable={canEdit}
+            onUploadImage={form.id ? uploadDetailImage : undefined} minHeight={form.id ? 150 : 120} />
+          {!form.id && <p className="text-[10px] text-slate-400 mt-0.5">บันทึกใบงานก่อน แล้วจะวางรูปในรายละเอียดได้</p>}
+        </div>
+      </div>
+    ),
+    note: (
+      <label className="block">
+        <span className="text-[11px] text-slate-500">Note</span>
+        <textarea rows={2} value={form.note} onChange={(e) => patch({ note: e.target.value })} disabled={!canEdit}
+          className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+      </label>
+    ),
+  };
+
+  // ── ฟอร์มสร้างใบงานใหม่ (แบบสั้น · เจ้าของเลือก 2026-10-24): รูป + ชื่องาน + แบรนด์ + ส่งงานภายใน + รายละเอียด
+  //    ช่องที่เหลือพับไว้ใต้ "＋ ใส่ข้อมูลอื่น" · บันทึกแล้วกลายเป็นฟอร์มเต็ม (แท็บ/รออะไรอยู่/Comment/ตีราคา) เหมือนเดิม
+  //    บันทึกไม่ผ่าน → กางให้เองด้วย (เผื่อปัญหาอยู่ในช่องที่พับไว้)
+  const createMoreFilled = !form ? 0 : [form.appointment_date, form.drive_link.trim(), form.note.trim()].filter(Boolean).length
+    + form.parent_sku_codes.length + form.parent_sku_drafts.length;
+  const createOpenMore = createMore || !!formErr;
+  const createLayout = !form || !fld ? null : (
+    <div className="mx-auto w-full max-w-2xl space-y-3">
+      {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
+      <div>
+        <span className="text-[11px] text-slate-500">รูปภาพงานออกแบบ</span>
+        <div className="mt-0.5">{imageSection}</div>
+      </div>
+      {fld.name}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{fld.brand}{fld.deadline}</div>
+      {fld.detail}
+      <div>
+        <button type="button" onClick={() => setCreateMore((v) => !v)} aria-expanded={createOpenMore}
+          className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800">
+          <span className="inline-block w-3 text-center">{createOpenMore ? "−" : "＋"}</span>
+          {createOpenMore ? "ซ่อนข้อมูลอื่น" : "ใส่ข้อมูลอื่น"}
+          <span className="text-xs text-slate-400">(สถานะ · วันสั่ง · วันนัด · Drive · Parent SKU · Note)</span>
+          {!createOpenMore && createMoreFilled > 0 && <span className="rounded-full bg-blue-50 px-1.5 text-[11px] text-blue-700">ใส่แล้ว {createMoreFilled}</span>}
+        </button>
+        {createOpenMore && (
+          <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">{fld.status}{fld.orderDate}{fld.appointment}</div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{fld.drive}{fld.parent}</div>
+            {fld.note}
+          </div>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-400">บันทึกแล้วจะเพิ่ม ⏳ รออะไรอยู่ · Comment ลูกค้า · ตีราคา · เสนอราคา ได้</p>
+    </div>
+  );
+
   if (!canView) return <AccessDenied />;
 
   return (
@@ -1685,7 +1918,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           )}
           {canEdit && modalTab === "info" && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>}
         </>}>
-        {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && (
+        {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && !form.id ? createLayout : form && (
           <div className="flex flex-col lg:flex-row gap-4">
             {/* ซ้าย: รูปภาพงานออกแบบ — เห็นตลอดทุกแท็บ */}
             <div className="lg:w-[300px] lg:shrink-0">
@@ -1707,195 +1940,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               </div>
             )}
 
-            {modalTab === "info" && <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className="text-[11px] text-slate-500">เลขที่</span>
-                <div className="h-8 mt-0.5 px-2 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500">
-                  {form.id ? <code>{form.code}</code> : "ออกอัตโนมัติตอนบันทึก"}</div>
-              </div>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">สถานะ</span>
-                <select value={form.status} onChange={(e) => patch({ status: e.target.value })} disabled={!canEdit}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
-                  {/* แบรนด์เรา (ไม่ได้ติ๊ก 👤 งานลูกค้า) = ไม่มีสถานะ "เฉพาะงานลูกค้า" (กฎกลาง statusOptsFor) */}
-                  {statusOptsFor(wfMeta, isOwnBrandJob(brands.find((b) => b.id === form.brand_id)), form.status).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  {/* สถานะเดิมของใบนี้ที่ถูกลบออกจาก workflow แล้ว — ยังโชว์ให้เลือกค้างไว้ได้ ไม่พัง */}
-                  {form.status && !wfMeta.map[form.status] && <option value={form.status}>{form.status} (สถานะเก่า)</option>}
-                </select>
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="text-[11px] text-slate-500">ชื่องาน *</span>
-              <input value={form.name} onChange={(e) => patch({ name: e.target.value })} disabled={!fullEdit} placeholder="เช่น กระเป๋าผ้าแคนวาสรุ่นใหม่"
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-            </label>
-
+            {modalTab === "info" && fld && <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">{fld.code}{fld.status}</div>
+            {fld.name}
             <div className="grid grid-cols-3 gap-2">
-              <label className="block">
-                <span className="text-[11px] text-slate-500">แบรนด์</span>
-                <div className="flex gap-1.5 mt-0.5">
-                  <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit}
-                    className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
-                    <option value="">— ไม่ระบุ —</option>
-                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                  {fullEdit && <button type="button" title="เพิ่มแบรนด์ใหม่"
-                    onClick={() => { setNewBrandName(""); setNewBrandColor("#3b82f6"); setBrandModal(true); }}
-                    className="h-8 w-8 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600">＋</button>}
-                </div>
-              </label>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">วันที่สั่ง</span>
-                <input type="date" value={form.order_date} onChange={(e) => patch({ order_date: e.target.value })} disabled={!fullEdit}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-              </label>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">Deadline</span>
-                <input type="date" value={form.deadline} onChange={(e) => patch({ deadline: e.target.value })} disabled={!canEdit}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-              </label>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">วันนัด / วันได้ตัวอย่าง</span>
-                <input type="date" value={form.appointment_date} onChange={(e) => patch({ appointment_date: e.target.value })} disabled={!canEdit}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-              </label>
-              {/* ⏳ รออะไรอยู่ = เช็กลิสต์กลาง (บันทึกทันทีทีละข้อ ไม่ต้องกดบันทึกใบงาน) — โชว์บนการ์ด + กล่อง hover ของ Design Dashboard */}
-              <div className="col-span-2">
-                {form.id ? (
-                  <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={form.id} canEdit={canEdit}
-                    presetType={DESIGN_WAITING.presetType} label="⏳ รออะไรอยู่" emptyText="ไม่มีอะไรรอ" />
-                ) : (
-                  <>
-                    <span className="text-[11px] text-slate-500">⏳ รออะไรอยู่</span>
-                    <div className="mt-0.5 rounded-lg border border-dashed border-slate-200 px-2 py-1.5 text-xs text-slate-400">บันทึกใบงานก่อน แล้วค่อยเพิ่มสิ่งที่รอเป็นข้อ ๆ</div>
-                  </>
-                )}
-              </div>
+              {fld.brand}{fld.orderDate}{fld.deadline}{fld.appointment}
+              <div className="col-span-2">{fld.waiting}</div>
             </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <label className="block">
-                <span className="text-[11px] text-slate-500">ลิงก์ไฟล์งาน (Google Drive)</span>
-                <div className="flex gap-1.5 mt-0.5">
-                  <input value={form.drive_link} onChange={(e) => patch({ drive_link: e.target.value })} disabled={!canEdit} placeholder="https://drive.google.com/..."
-                    className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-                  {form.drive_link && <a href={form.drive_link} target="_blank" rel="noreferrer"
-                    className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">↗ เปิด</a>}
-                </div>
-              </label>
-              {/* เฟส 5: ตั้ง Parent SKU ได้หลายตัว (chips) + เช็ครหัสสด (ซ้ำ=แดง ห้ามเพิ่ม · ข้ามเลข=เตือนแต่เพิ่มได้)
-                  ช่องนี้ (และร่าง Parent) เป็น "ช่อง quick" = เพิ่ม/เอาออกได้ในโหมดดูเลย ไม่ต้องกด ✏️ แก้ไขก่อน
-                  (เดิมผูก fullEdit → โหมดดูเห็นแค่หัวข้อเปล่า ๆ ไม่มีช่องให้พิมพ์ เจ้าของแจ้งว่า "ใช้ไม่ได้") · มีผลจริงตอนกดบันทึก */}
-              <div className="block">
-                <span className="text-[11px] text-slate-500">Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)</span>
-                {form.parent_sku_codes.length > 0 && (
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    {form.parent_sku_codes.map((c) => {
-                      const pid = parentRefs[c];
-                      return (
-                        <span key={c} className="inline-flex items-center gap-1">
-                          {pid
-                            ? <RecordPeekLink moduleKey="parent-skus-v2" recordId={pid} label={c} />
-                            : <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-mono text-blue-700">{c}</span>}
-                          {canEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-                {canEdit && (
-                  <div className="flex gap-1 mt-1">
-                    <input value={skuInput} onChange={(e) => setSkuInput(e.target.value.toUpperCase())}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentCode(); } }}
-                      placeholder="เช่น CTL085 แล้วกด Enter"
-                      className={`flex-1 h-8 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 ${
-                        skuCheck?.exists ? "border-rose-400 bg-rose-50 focus:ring-rose-400"
-                        : skuCheck?.skipped ? "border-amber-300 focus:ring-amber-400"
-                        : "border-slate-200 focus:ring-blue-500"}`} />
-                    <button type="button" onClick={addParentCode} disabled={!skuInput.trim() || skuCheck?.exists}
-                      className="h-8 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">＋ เพิ่ม</button>
-                  </div>
-                )}
-                <div className="mt-0.5 text-[11px] min-h-[14px]">
-                  {skuChecking ? <span className="text-slate-300">กำลังเช็ครหัส...</span>
-                    : !skuInput.trim() ? null
-                    : skuCheck?.exists ? <span className="text-rose-600 font-medium">✕ รหัสนี้มีอยู่แล้ว — เพิ่มไม่ได้</span>
-                    : skuCheck?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ {skuCheck.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)</span>
-                    : skuCheck?.latest ? <span className="text-slate-400">✓ ใช้ได้ · ล่าสุดที่ตั้ง: <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · ถัดไป: <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · เลขสูงสุด: {skuCheck.max_code}</> : null}</span>
-                    : skuCheck ? <span className="text-emerald-600">✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้</span> : null}
-                </div>
-                {/* SKU ที่เชื่อมกับใบงานนี้ — ตัวที่สร้างจากใบนี้ (เขียว) + พี่น้องใต้ Parent เดียวกัน (เทา) · คลิกเปิดดู SKU */}
-                {linkedSkus.length > 0 && (
-                  <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2">
-                    <div className="mb-1 text-[11px] font-medium text-emerald-800">
-                      🏷️ SKU ที่เชื่อม {linkedSkus.filter((s) => s.from_sheet).length} ตัว
-                      {linkedSkus.some((s) => !s.from_sheet) && (
-                        <span className="font-normal text-slate-500"> · ใต้ Parent เดียวกันอีก {linkedSkus.filter((s) => !s.from_sheet).length} ตัว</span>
-                      )}
-                    </div>
-                    <div className="max-h-40 space-y-1 overflow-auto">
-                      {linkedSkus.map((s) => (
-                        <div key={s.id} title={s.from_sheet ? "สร้างจากใบงานนี้" : `อยู่ใต้ Parent ${s.parent_code ?? ""} (ไม่ได้สร้างจากใบนี้)`}
-                          className={`flex items-center gap-1.5 rounded border bg-white px-1.5 py-1 ${s.from_sheet ? "border-emerald-200" : "border-slate-200 opacity-70"}`}>
-                          {s.image_key
-                            ? <ImageThumbnail url={`/api/r2-image?key=${encodeURIComponent(s.image_key)}`} size={22} />
-                            : <span className="inline-block h-[22px] w-[22px] shrink-0 rounded bg-slate-100" />}
-                          <RecordPeekLink moduleKey="skus-v2" recordId={s.id} label={s.code} />
-                          <span className="truncate text-[11px] text-slate-500">{s.color || s.name_th || ""}</span>
-                          <span className="ml-auto shrink-0 text-[11px] tabular-nums text-slate-500">
-                            {s.standard_price != null ? s.standard_price.toLocaleString("th-TH") : ""}
-                          </span>
-                          {!s.is_active && <span className="shrink-0 text-[10px] text-slate-400">ปิดใช้</span>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ข้อ 6: ร่าง Parent (ชื่อก่อน ยังไม่ใส่รหัสจริง) — ใช้ตั้งชื่อแบบที่จะทำ แล้วค่อยสร้างรหัสจริงทีหลัง */}
-                <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
-                  <span className="text-[11px] text-slate-500">ร่าง Parent (ยังไม่มีรหัส) — เช่น &quot;พวงกุญแจ มะพร้าว&quot;</span>
-                  {form.parent_sku_drafts.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {form.parent_sku_drafts.map((d) => (
-                        <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 border border-dashed border-amber-300 text-amber-700 rounded">
-                          ✎ {d}
-                          {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {canEdit && (
-                    <div className="flex gap-1 mt-1">
-                      <input value={draftInput} onChange={(e) => setDraftInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentDraft(); } }}
-                        placeholder="เช่น พวงกุญแจ มะพร้าว แล้วกด Enter"
-                        className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
-                      <button type="button" onClick={addParentDraft} disabled={!draftInput.trim()}
-                        className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40">＋ ร่าง</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="block">
-              <span className="text-[11px] text-slate-500">รายละเอียดงาน</span>
-              <div className="mt-0.5">
-                <RichTextEditor value={form.detail} onChange={(html) => patch({ detail: html })} editable={canEdit}
-                  onUploadImage={form.id ? uploadDetailImage : undefined} minHeight={150} />
-                {!form.id && <p className="text-[10px] text-slate-400 mt-0.5">บันทึกใบงานก่อน แล้วจะวางรูปในรายละเอียดได้</p>}
-              </div>
-            </div>
-
-            <label className="block">
-              <span className="text-[11px] text-slate-500">Note</span>
-              <textarea rows={2} value={form.note} onChange={(e) => patch({ note: e.target.value })} disabled={!canEdit}
-                className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-            </label>
-
+            <div className="grid grid-cols-2 gap-2">{fld.drive}{fld.parent}</div>
+            {fld.detail}
+            {fld.note}
             </div>}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}

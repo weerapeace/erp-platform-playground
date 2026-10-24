@@ -8,7 +8,7 @@ import { BrandSlot } from "@/components/brand-theme/slots";
 import type { BoardColumn, StatusColumn } from "./dashboard-helpers";
 import { useT } from "@/components/i18n";
 
-export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGalleryCard, isDesktop, isPhone, dropTargetStatus, handleColumnDragOver, handleColumnDragLeave, handleColumnDrop, brandTheme, toggleHiddenCol, expandedCols, setExpandedCols, phoneCol, setPhoneStatus }: {
+export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGalleryCard, isDesktop, isPhone, dropTargetStatus, handleColumnDragOver, handleColumnDragLeave, handleColumnDrop, brandTheme, toggleHiddenCol, expandedCols, setExpandedCols, phoneCol, setPhoneStatus, stickyTop = null }: {
   boardColumns: BoardColumn[];
   cardSize: "compact" | "row";
   renderBoardCard: (sheet: DesignSheetListItem) => ReactNode;
@@ -25,6 +25,8 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
   setExpandedCols: Dispatch<SetStateAction<Set<string>>>;
   phoneCol: BoardColumn | null;
   setPhoneStatus: (key: string) => void;
+  /** หัวคอลัมน์ติดใต้หัวหน้าที่ติดบน (px · ของกลาง sticky-header) — null = ใต้แถบเมนูแอปตามเดิม */
+  stickyTop?: number | null;
 }) {
   const t = useT();
   const colRefs = useRef<Record<string, HTMLDivElement | null>>({});   // คอลัมน์สถานะ (โหมดแท็บเล็ต: กดชิปสถานะแล้วเลื่อนไปคอลัมน์นั้น)
@@ -97,7 +99,7 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
                   ...(isPhone ? { width: "86%" } : isDesktop ? {} : { width: 300 }),
                 }}
               >
-                <div data-gg-column-header className={`${isDesktop ? "sticky top-16 z-10" : ""} mb-3 rounded-lg border px-2 py-2 text-center shadow-sm`} style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%), #ffffff` }}>
+                <div data-gg-column-header className={`${isDesktop ? `sticky z-10 ${stickyTop == null ? "top-16" : ""}` : ""} mb-3 rounded-lg border px-2 py-2 text-center shadow-sm`} style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%), #ffffff`, ...(isDesktop && stickyTop != null ? { top: stickyTop + 8 } : {}) }}>
                   <BrandSlot theme={brandTheme} id={wfIconSlotId(column.key)} w={96} size="w-7 h-7" className="absolute left-1 top-1" />
                   {isDesktop && (
                     <button type="button" onClick={() => toggleHiddenCol(column.key)} title={t(`ซ่อนคอลัมน์ "${column.label}" (เปิดกลับได้ที่ปุ่ม 👁)`, `Hide column "${column.label}" (bring it back with the 👁 button)`)}

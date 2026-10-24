@@ -22,6 +22,7 @@ import { BrandSlot } from "@/components/brand-theme/slots";
 import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
 import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
+import { useStickyHeader } from "@/components/sticky-header";
 import { type ListResponse, type StatusResponse, type AuditResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, LoadingCard } from "./dashboard-helpers";
 import { BoardCard, GalleryCard } from "./dashboard-cards";
 import { BrandBar } from "./brand-bar";
@@ -74,6 +75,8 @@ export function DesignDashboard() {
   const isPhone = layout === "phone";
   const [moreOpen, setMoreOpen] = useState(false);                     // มือถือ: เมนู ⋯ รวมปุ่มรอง (กลับ/รีเฟรช/ธีม/จัดการสถานะ/ส่งขึ้นกระดาน/ตั้งค่าแบรนด์)
   const moreAnchorRef = useRef<HTMLDivElement>(null);
+  // 📌 หัวหน้าติดบนตอนเลื่อน (ของกลาง sticky-header · เจ้าของขอ 2026-10-24) — จอคอม/แท็บเล็ต เหลือแถบบาง ชื่อหน้า + ปุ่ม · มือถือ ติดทั้งหัว
+  const sticky = useStickyHeader({ watch: layout });
   const [phoneStatus, setPhoneStatus] = useState<string | null>(null); // มือถือ: บอร์ดเป็น "แท็บสถานะ" ทีละสถานะ (ไม่ใช่คอลัมน์เรียงข้าง)
   const galleryStyle = useMemo(() => (
     // แกลเลอรีบนมือถือ = 2 ต่อแถว · แท็บเล็ต = ไม่เกิน 4 (การ์ดไม่จิ๋วเกินอ่าน) · จอคอม = ตามที่ผู้ใช้เลือก
@@ -456,7 +459,8 @@ export function DesignDashboard() {
       <div className={`mx-auto w-full max-w-screen-2xl ${isPhone ? "px-3 py-3" : isDesktop ? "px-6 py-5" : "px-4 py-4"}`}>
         {isPhone ? (
           /* ── หัวแบบมือถือ: ชื่อหน้า + สรุปสั้น · ขวา = สลับจอ + เมนู ⋯ (ปุ่มรองทั้งหมดอยู่ในเมนู · ปุ่ม ＋ เป็นปุ่มลอยมุมล่าง) ── */
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div ref={sticky.headerRef} style={sticky.style}
+            className={`relative z-[15] -mx-3 -mt-1.5 mb-1.5 flex items-center justify-between gap-2 px-3 py-1.5 ${sticky.stuck ? "border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur" : ""}`}>
             <div className="flex min-w-0 items-center gap-2">
               <BrandSlot theme={brandTheme} id="header_left" className="shrink-0" />
               <div className="min-w-0">
@@ -487,10 +491,18 @@ export function DesignDashboard() {
             </div>
           </div>
         ) : (
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex items-start gap-2">
-            <BrandSlot theme={brandTheme} id="header_left" className="shrink-0 mt-1" />
-            <div className="min-w-0">
+        /* หัวทั้งก้อน sticky แบบเหลือแค่แถบล่าง (ปุ่ม) — ป้าย/คำอธิบายเลื่อนหายไปเอง · ตอนติด: ซ่อนข้อความเดิม (ยังกินที่เท่าเดิม ไม่กระตุก) แล้วโชว์ชื่อหน้าแบบย่อแทน */
+        <div ref={sticky.headerRef} style={sticky.style}
+          className={`relative z-[15] -mt-2 mb-2 flex flex-wrap items-end justify-between gap-3 pb-2 pt-2 ${isDesktop ? "-mx-6 px-6" : "-mx-4 px-4"} ${sticky.stuck ? "border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur" : ""}`}>
+          <div className="relative min-w-0 flex items-start gap-2">
+            {sticky.stuck && (
+              <div className="absolute inset-x-0 bottom-0 flex h-9 min-w-0 items-center gap-2">
+                <span className="truncate text-base font-semibold text-slate-900">{t("แผนที่ภารกิจงานออกแบบ", "Design mission map")}</span>
+                <span className="shrink-0 truncate text-xs text-slate-400">{scopeLabel} · {activeJobs} {t("งานเดินอยู่", "active")}{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} {t("ใกล้ครบ", "due soon")}</span></> : null}</span>
+              </div>
+            )}
+            <BrandSlot theme={brandTheme} id="header_left" className={`shrink-0 mt-1 ${sticky.stuck ? "invisible" : ""}`} />
+            <div className={`min-w-0 ${sticky.stuck ? "invisible" : ""}`}>
             <div data-gg-live-badge className="mb-2 inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm">
               <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.8)]" />
               Live design sheets dashboard
@@ -501,7 +513,7 @@ export function DesignDashboard() {
             </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div ref={sticky.keepRef} className="flex flex-wrap items-center gap-2">
             <BrandSlot theme={brandTheme} id="header_right" className="shrink-0" />
             {/* สลับรูปแบบจอ (ของกลาง): 🖥️ จอคอม / 📟 แท็บเล็ต / 📱 มือถือ — เลือกแบบเล็กกว่าจอจริงจะได้กรอบพรีวิว + QR สแกนเปิดบนเครื่อง */}
             <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact={!isDesktop} />
@@ -695,7 +707,7 @@ export function DesignDashboard() {
                 </div>
               ) : (
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
-                <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} toggleHiddenCol={toggleHiddenCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} />
+                <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} toggleHiddenCol={toggleHiddenCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={sticky.below} />
               )}
             </section>
 

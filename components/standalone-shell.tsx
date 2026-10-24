@@ -90,7 +90,7 @@ export function StandaloneShell({
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
       {/* หัวบาร์ปกติ (sticky) — ดันเนื้อหาลง ไม่ลอยทับแถบเครื่องมือกระดาน */}
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200">{headerInner}</header>
+      <header data-shell-topbar className="sticky top-0 z-30 bg-white border-b border-slate-200">{headerInner}</header>
 
       {/* Content */}
       <main className="flex-1 flex flex-col">{children}</main>
