@@ -1244,6 +1244,13 @@ export interface PersonalizeBlock extends BlockBase {
   labelName?: string;
   labelFinish?: string;
   labelPosition?: string;
+  /** 🧭 ตัวเลือกรุ่น: หน้าตา (auto = ตามหน้าตา Section) · ชื่อที่แสดง · ของเสริม */
+  pickerStyle?: "auto" | "cards" | "rows" | "pills" | "strip";
+  pickerName?: "collection" | "code" | "name";
+  pickerPrice?: boolean;
+  pickerCode?: boolean;
+  pickerDots?: boolean;
+  pickerTagline?: boolean;
 }
 
 /** แผนที่ร้าน — รับเฉพาะลิงก์ฝังของ Google Maps */

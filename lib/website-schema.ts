@@ -3557,6 +3557,33 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       }),
       f("codes", "เลือกสินค้า", "products", { group: "products", default: [], max: 24, wide: true, showIf: { key: "source", eq: "manual" } }),
       f("buttonText", "ข้อความปุ่ม", "text", { group: "products", default: "ใส่ตะกร้า", max: 40 }),
+      // 🧭 ตัวเลือกรุ่น (มีตั้งแต่ 2 รุ่น) — เว็บร้าน components/home/PersonalizeLooks PzProducts
+      f("pickerStyle", "หน้าตาตัวเลือกรุ่น", "select", {
+        group: "products",
+        default: "auto",
+        wide: true,
+        options: [
+          { v: "auto", l: "ตามหน้าตา Section (A = การ์ด · B = ปุ่ม · แบบเดิม = ตารางรูปเดิม)" },
+          { v: "cards", l: "A · การ์ดคอลเลกชัน — รูปใหญ่ ชื่อเด่น" },
+          { v: "rows", l: "B · แถวรายการ — มีวงกลมเลือก ราคาชิดขวา" },
+          { v: "pills", l: "C · ปุ่มเม็ดยา — กะทัดรัด" },
+          { v: "strip", l: "D · แถบเลื่อน — ปัดซ้าย-ขวา (หลายรุ่น)" },
+        ],
+        hint: "โชว์เมื่อ Section มีสินค้าให้เลือกตั้งแต่ 2 รุ่น",
+      }),
+      f("pickerName", "ชื่อรุ่นที่แสดง", "select", {
+        group: "products",
+        default: "collection",
+        options: [
+          { v: "collection", l: "ชื่อคอลเลกชัน (ไม่มี = ชื่อสินค้า)" },
+          { v: "code", l: "รหัสรุ่น" },
+          { v: "name", l: "ชื่อสินค้า" },
+        ],
+      }),
+      f("pickerPrice", "ตัวเลือกรุ่น: ราคา", "toggle", { group: "products", default: true }),
+      f("pickerCode", "ตัวเลือกรุ่น: รหัสรุ่นตัวเล็ก", "toggle", { group: "products", default: true }),
+      f("pickerDots", "ตัวเลือกรุ่น: จุดสีที่มี", "toggle", { group: "products", default: true }),
+      f("pickerTagline", "ตัวเลือกรุ่น: คำโปรยสั้น", "toggle", { group: "products", default: true, hint: "ข้อความในเครื่องหมายคำพูด “…” ช่วงต้นของคำอธิบายสินค้า (ไม่มี = บรรทัดแรก)" }),
       // 🎨 หน้าตา 3 แบบ (เว็บร้าน components/home/PersonalizeBlockClient) — ข้อมูลปั๊มชื่อชุดเดียวกัน
       f("look", "หน้าตา", "select", {
         group: "layout",
