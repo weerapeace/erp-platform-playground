@@ -30,13 +30,13 @@ export async function loadChecklistSummaries(admin: Admin, moduleKey: string, re
   const out = new Map<string, ChecklistSummary>();
   const ids = [...new Set(recordIds)].filter(Boolean);
   if (!ids.length) return out;
-  const by = new Map<string, { title: string; status: string; assigned_to: string | null }[]>();
+  const by = new Map<string, { id: string; title: string; status: string; assigned_to: string | null }[]>();
   for (let i = 0; i < ids.length; i += 150) {   // .in() ยาวเกินจะชนเพดานความยาว URL
-    const { data, error } = await admin.from("erp_record_tasks").select("record_id, title, status, assigned_to")
+    const { data, error } = await admin.from("erp_record_tasks").select("id, record_id, title, status, assigned_to")
       .eq("module_key", moduleKey).in("record_id", ids.slice(i, i + 150))
       .order("created_at", { ascending: true }).limit(5000);
     if (error) throw new Error(error.message);
-    for (const r of (data ?? []) as { record_id: string; title: string; status: string; assigned_to: string | null }[]) {
+    for (const r of (data ?? []) as { id: string; record_id: string; title: string; status: string; assigned_to: string | null }[]) {
       (by.get(r.record_id) ?? by.set(r.record_id, []).get(r.record_id)!).push(r);
     }
   }
