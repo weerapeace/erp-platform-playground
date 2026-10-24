@@ -106,7 +106,7 @@ export const PERSONALIZE_MAX_SYMBOLS = 24;
 export const PERSONALIZE_ALIGN_OFFSET: Record<PersonalizeAlign, number> = { left: 0, center: 0.5, right: 1 };
 
 /* ── 🎚 เอฟเฟกต์ "พิมพ์จม" แบบ Photoshop Layer Style (ตั้งต่อรุ่น) ──
- * Bevel & Emboss (ขอบนูน/ยุบ) · Inner Shadow (เงาในร่อง) · Outer Glow (ขอบเข้มรอบตัว) · Fill (เนื้อตัวอักษร)
+ * Bevel & Emboss (ขอบนูน/ยุบ) · Inner Shadow (เงาในร่อง) · Outer Glow (ขอบเข้มรอบตัว) · Drop Shadow (เงาตกกระทบ) · Fill (เนื้อตัวอักษร)
  * ค่า px อ้างอิงตัวอักษรสูง 100px แล้วย่อ/ขยายตามขนาดจริงบนรูป · วาดด้วย SVG filter (personalizeEmbossFilter)
  * ค่าเริ่ม = ค่าที่เจ้าของร้านตั้งใน Photoshop (2026-10-24) */
 export interface PersonalizeEmbossFx {
@@ -128,6 +128,12 @@ export interface PersonalizeEmbossFx {
   glowOpacity: number;
   glowSpread: number;
   glowSize: number;
+  /** Drop Shadow — เงาตกกระทบใต้ตัวอักษร (ทิศตามมุมแสงเดียวกัน · Layer Knocks Out = ไม่ทับในตัวอักษร) */
+  drop: boolean;
+  dropOpacity: number;
+  dropDistance: number;
+  dropSpread: number;
+  dropSize: number;
   fill: number;
 }
 export const DEFAULT_EMBOSS_FX: PersonalizeEmbossFx = {
@@ -148,10 +154,15 @@ export const DEFAULT_EMBOSS_FX: PersonalizeEmbossFx = {
   glowOpacity: 61,
   glowSpread: 5,
   glowSize: 5,
+  drop: true,
+  dropOpacity: 82,
+  dropDistance: 2,
+  dropSpread: 10,
+  dropSize: 0,
   fill: 0,
 };
 /** ช่วงค่าของช่องตัวเลข [ต่ำสุด, สูงสุด] */
-export const EMBOSS_FX_RANGE: Record<Exclude<keyof PersonalizeEmbossFx, "bevel" | "dir" | "inner" | "glow">, [number, number]> = {
+export const EMBOSS_FX_RANGE: Record<Exclude<keyof PersonalizeEmbossFx, "bevel" | "dir" | "inner" | "glow" | "drop">, [number, number]> = {
   depth: [0, 300],
   size: [0, 50],
   soften: [0, 16],
@@ -165,6 +176,10 @@ export const EMBOSS_FX_RANGE: Record<Exclude<keyof PersonalizeEmbossFx, "bevel" 
   glowOpacity: [0, 100],
   glowSpread: [0, 100],
   glowSize: [0, 100],
+  dropOpacity: [0, 100],
+  dropDistance: [0, 100],
+  dropSpread: [0, 100],
+  dropSize: [0, 100],
   fill: [0, 100],
 };
 
@@ -176,7 +191,7 @@ export function normalizeEmbossFx(raw: unknown): PersonalizeEmbossFx {
     const n = Number(r[k]);
     if (r[k] != null && r[k] !== "" && Number.isFinite(n)) out[k] = Math.min(hi, Math.max(lo, Math.round(n)));
   }
-  for (const k of ["bevel", "inner", "glow"] as const) if (typeof r[k] === "boolean") out[k] = r[k] as boolean;
+  for (const k of ["bevel", "inner", "glow", "drop"] as const) if (typeof r[k] === "boolean") out[k] = r[k] as boolean;
   if (r.dir === "up" || r.dir === "down") out.dir = r.dir;
   return out;
 }
@@ -198,6 +213,20 @@ export function personalizeEmbossFilter(fx: PersonalizeEmbossFx, fontPx: number)
   const soft = Math.max(0.01, fx.soften * sc * 0.6 + fx.size * sc * 0.3);
   const parts: string[] = [];
   const merge: string[] = [];
+  // Drop Shadow (ชั้นล่างสุด): รูปตัวอักษร → ขยาย (Spread) + เบลอ (Size) → เลื่อนไปทางตรงข้ามแสง (Distance) → ตัดส่วนที่อยู่ใต้ตัวอักษรออก (Layer Knocks Out)
+  if (fx.drop && fx.dropOpacity > 0) {
+    const dr = (fx.dropSize * sc * fx.dropSpread) / 100;
+    const db = (fx.dropSize * sc * (1 - fx.dropSpread / 100)) / 2;
+    parts.push(
+      dr > 0.01 ? `<feMorphology in="SourceAlpha" operator="dilate" radius="${f(dr)}" result="ds1"/>` : `<feOffset in="SourceAlpha" dx="0" dy="0" result="ds1"/>`,
+      `<feGaussianBlur in="ds1" stdDeviation="${f(Math.max(0.01, db))}" result="ds2"/>`,
+      `<feOffset in="ds2" dx="${f(-lx * fx.dropDistance * sc)}" dy="${f(-ly * fx.dropDistance * sc)}" result="ds3"/>`,
+      `<feFlood flood-color="#000" flood-opacity="${f(fx.dropOpacity / 100)}"/>`,
+      `<feComposite in2="ds3" operator="in" result="ds4"/>`,
+      `<feComposite in="ds4" in2="SourceAlpha" operator="out" result="ds"/>`,
+    );
+    merge.push("ds");
+  }
   if (fx.glow) {
     parts.push(
       `<feMorphology in="SourceAlpha" operator="dilate" radius="${f((fx.glowSize * sc * fx.glowSpread) / 100)}" result="og1"/>`,

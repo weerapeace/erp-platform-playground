@@ -67,7 +67,7 @@ export const PZ_STYLE: Record<PersonalizeStyle, React.CSSProperties> = {
 
 type FxNum = keyof typeof EMBOSS_FX_RANGE;
 /** ช่องตัวเลขของเอฟเฟกต์พิมพ์จม แบ่งตามชั้นของ Photoshop */
-const FX_LAYERS: { key: "bevel" | "inner" | "glow" | null; title: string; th: string; rows: [FxNum, string, string][] }[] = [
+const FX_LAYERS: { key: "bevel" | "inner" | "glow" | "drop" | null; title: string; th: string; rows: [FxNum, string, string][] }[] = [
   {
     key: "bevel",
     title: "Bevel & Emboss",
@@ -84,6 +84,12 @@ const FX_LAYERS: { key: "bevel" | "inner" | "glow" | null; title: string; th: st
   },
   { key: "inner", title: "Inner Shadow", th: "เงาในร่อง", rows: [["innerOpacity", "ความเข้ม (Opacity)", "%"], ["innerDistance", "ระยะ (Distance)", "px"], ["innerSize", "ขนาด (Size)", "px"]] },
   { key: "glow", title: "Outer Glow", th: "ขอบเข้มรอบตัว", rows: [["glowOpacity", "ความเข้ม (Opacity)", "%"], ["glowSpread", "กระจาย (Spread)", "%"], ["glowSize", "ขนาด (Size)", "px"]] },
+  {
+    key: "drop",
+    title: "Drop Shadow",
+    th: "เงาตกกระทบ (มุมแสงเดียวกับ Bevel)",
+    rows: [["dropOpacity", "ความเข้ม (Opacity)", "%"], ["dropDistance", "ระยะ (Distance)", "px"], ["dropSpread", "กระจาย (Spread)", "%"], ["dropSize", "ความฟุ้ง (Size)", "px"]],
+  },
   { key: null, title: "Fill", th: "เนื้อตัวอักษร", rows: [["fill", "ความทึบ (Fill)", "%"]] },
 ];
 
@@ -552,7 +558,7 @@ export function PersonalizeEditor({
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium text-slate-700">🎚 เอฟเฟกต์ตัวอักษร <span className="font-normal text-slate-400">(แบบ Photoshop · ตั้งต่อรุ่น)</span></p>
                   {preview === "emboss" ? (
-                    <button type="button" onClick={() => setFx({ ...DEFAULT_EMBOSS_FX })} className="text-[11px] text-orange-600 hover:underline" title="ค่าที่ตั้งใน Photoshop (Depth 136 · Angle 119 · Inner Shadow 18/12/21 · Outer Glow 61/5/5)">
+                    <button type="button" onClick={() => setFx({ ...DEFAULT_EMBOSS_FX })} className="text-[11px] text-orange-600 hover:underline" title="ค่าที่ตั้งใน Photoshop (Depth 136 · Angle 119 · Inner Shadow 18/12/21 · Outer Glow 61/5/5 · Drop Shadow 82/2/10/0)">
                       ↺ กลับค่า Photoshop
                     </button>
                   ) : (
