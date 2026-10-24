@@ -46,6 +46,8 @@ export interface PersonalizeConfig {
   autoUpper: boolean;
   /** ตัวพิเศษ (ตัวละ 1 ตัวอักษร เช่น ♥ ★) — ลูกค้ากดเลือกจากปุ่ม "ตัวพิเศษ" */
   symbols: string[];
+  /** 🎚 เอฟเฟกต์ "พิมพ์จม" แบบ Photoshop (ตั้งต่อรุ่น) */
+  embossFx: PersonalizeEmbossFx;
 }
 export interface PersonalizeChoice {
   text: string;
@@ -82,6 +84,141 @@ export const PERSONALIZE_MAX_SYMBOLS = 24;
 /** ตำแหน่ง x ของจุดยึดเทียบกับความกว้างข้อความ (ใช้ขยับจุดตอนเปลี่ยนการจัด ไม่ให้ตัวหนังสือกระโดด) */
 export const PERSONALIZE_ALIGN_OFFSET: Record<PersonalizeAlign, number> = { left: 0, center: 0.5, right: 1 };
 
+/* ── 🎚 เอฟเฟกต์ "พิมพ์จม" แบบ Photoshop Layer Style (ตั้งต่อรุ่น) ──
+ * Bevel & Emboss (ขอบนูน/ยุบ) · Inner Shadow (เงาในร่อง) · Outer Glow (ขอบเข้มรอบตัว) · Fill (เนื้อตัวอักษร)
+ * ค่า px อ้างอิงตัวอักษรสูง 100px แล้วย่อ/ขยายตามขนาดจริงบนรูป · วาดด้วย SVG filter (personalizeEmbossFilter)
+ * ค่าเริ่ม = ค่าที่เจ้าของร้านตั้งใน Photoshop (2026-10-24) */
+export interface PersonalizeEmbossFx {
+  bevel: boolean;
+  /** down = ยุบลง (เงาด้านแสง · ไฮไลต์ด้านตรงข้าม) · up = นูนขึ้น */
+  dir: "up" | "down";
+  depth: number;
+  size: number;
+  soften: number;
+  angle: number;
+  altitude: number;
+  highlight: number;
+  shadow: number;
+  inner: boolean;
+  innerOpacity: number;
+  innerDistance: number;
+  innerSize: number;
+  glow: boolean;
+  glowOpacity: number;
+  glowSpread: number;
+  glowSize: number;
+  fill: number;
+}
+export const DEFAULT_EMBOSS_FX: PersonalizeEmbossFx = {
+  bevel: true,
+  dir: "down",
+  depth: 136,
+  size: 0,
+  soften: 0,
+  angle: 119,
+  altitude: 30,
+  highlight: 42,
+  shadow: 85,
+  inner: true,
+  innerOpacity: 18,
+  innerDistance: 12,
+  innerSize: 21,
+  glow: true,
+  glowOpacity: 61,
+  glowSpread: 5,
+  glowSize: 5,
+  fill: 0,
+};
+/** ช่วงค่าของช่องตัวเลข [ต่ำสุด, สูงสุด] */
+export const EMBOSS_FX_RANGE: Record<Exclude<keyof PersonalizeEmbossFx, "bevel" | "dir" | "inner" | "glow">, [number, number]> = {
+  depth: [0, 300],
+  size: [0, 50],
+  soften: [0, 16],
+  angle: [0, 360],
+  altitude: [0, 90],
+  highlight: [0, 100],
+  shadow: [0, 100],
+  innerOpacity: [0, 100],
+  innerDistance: [0, 100],
+  innerSize: [0, 100],
+  glowOpacity: [0, 100],
+  glowSpread: [0, 100],
+  glowSize: [0, 100],
+  fill: [0, 100],
+};
+
+/** อ่านค่าเอฟเฟกต์จาก DB (ไม่มี/ผิด = ค่าเริ่ม) */
+export function normalizeEmbossFx(raw: unknown): PersonalizeEmbossFx {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const out = { ...DEFAULT_EMBOSS_FX };
+  for (const [k, [lo, hi]] of Object.entries(EMBOSS_FX_RANGE) as [keyof typeof EMBOSS_FX_RANGE, [number, number]][]) {
+    const n = Number(r[k]);
+    if (r[k] != null && r[k] !== "" && Number.isFinite(n)) out[k] = Math.min(hi, Math.max(lo, Math.round(n)));
+  }
+  for (const k of ["bevel", "inner", "glow"] as const) if (typeof r[k] === "boolean") out[k] = r[k] as boolean;
+  if (r.dir === "up" || r.dir === "down") out.dir = r.dir;
+  return out;
+}
+
+/** ชั้นของ SVG filter (ใส่ใน <filter> ที่ตั้งขอบเขตเอง) — fontPx = ขนาดตัวอักษรจริง (px) · ตัวเลขล้วน ไม่มีข้อความจากผู้ใช้ */
+export function personalizeEmbossFilter(fx: PersonalizeEmbossFx, fontPx: number): string {
+  const sc = Math.max(0.05, fontPx / 100);
+  const f = (n: number) => (Math.round(n * 100) / 100).toString();
+  const a = (fx.angle * Math.PI) / 180;
+  const lx = Math.cos(a);
+  const ly = -Math.sin(a);
+  // แสงต่ำ (altitude น้อย) = ขอบเข้มชัดกว่า · ความลึก = ทั้งความหนาขอบและความเข้ม
+  const k = 0.4 + 0.6 * Math.cos((fx.altitude * Math.PI) / 180);
+  const dep = Math.min(1.6, fx.depth / 100);
+  const d = Math.max(0.6, (1 + fx.size * 0.5) * (fx.depth / 100) * sc * 1.4);
+  const sign = fx.dir === "down" ? 1 : -1;
+  const bx = -lx * d * sign;
+  const by = -ly * d * sign;
+  const soft = Math.max(0.01, fx.soften * sc * 0.6 + fx.size * sc * 0.3);
+  const parts: string[] = [];
+  const merge: string[] = [];
+  if (fx.glow) {
+    parts.push(
+      `<feMorphology in="SourceAlpha" operator="dilate" radius="${f((fx.glowSize * sc * fx.glowSpread) / 100)}" result="og1"/>`,
+      `<feGaussianBlur in="og1" stdDeviation="${f(Math.max(0.01, (fx.glowSize * sc * (1 - fx.glowSpread / 100)) / 2))}" result="og2"/>`,
+      `<feFlood flood-color="#000" flood-opacity="${f(fx.glowOpacity / 100)}"/>`,
+      `<feComposite in2="og2" operator="in" result="og3"/>`,
+      `<feComposite in="og3" in2="SourceAlpha" operator="out" result="og"/>`,
+    );
+    merge.push("og");
+  }
+  if (fx.fill > 0) {
+    parts.push(`<feFlood flood-color="#000" flood-opacity="${f(fx.fill / 100)}"/>`, `<feComposite in2="SourceAlpha" operator="in" result="fl"/>`);
+    merge.push("fl");
+  }
+  if (fx.inner) {
+    parts.push(
+      `<feOffset in="SourceAlpha" dx="${f(-lx * fx.innerDistance * sc)}" dy="${f(-ly * fx.innerDistance * sc)}" result="is1"/>`,
+      `<feGaussianBlur in="is1" stdDeviation="${f(Math.max(0.01, (fx.innerSize * sc) / 2))}" result="is2"/>`,
+      `<feComposite in="SourceAlpha" in2="is2" operator="out" result="is3"/>`,
+      `<feFlood flood-color="#000" flood-opacity="${f(fx.innerOpacity / 100)}"/>`,
+      `<feComposite in2="is3" operator="in" result="is"/>`,
+    );
+    merge.push("is");
+  }
+  if (fx.bevel) {
+    parts.push(
+      `<feOffset in="SourceAlpha" dx="${f(bx)}" dy="${f(by)}" result="b1"/>`,
+      `<feComposite in="SourceAlpha" in2="b1" operator="out" result="b2"/>`,
+      `<feGaussianBlur in="b2" stdDeviation="${f(soft)}" result="b3"/>`,
+      `<feFlood flood-color="#2a2a2a" flood-opacity="${f(Math.min(1, (fx.shadow / 100) * k * dep))}"/>`,
+      `<feComposite in2="b3" operator="in" result="bs"/>`,
+      `<feOffset in="SourceAlpha" dx="${f(-bx)}" dy="${f(-by)}" result="h1"/>`,
+      `<feComposite in="SourceAlpha" in2="h1" operator="out" result="h2"/>`,
+      `<feGaussianBlur in="h2" stdDeviation="${f(soft)}" result="h3"/>`,
+      `<feFlood flood-color="#fff" flood-opacity="${f(Math.min(1, (fx.highlight / 100) * k * dep))}"/>`,
+      `<feComposite in2="h3" operator="in" result="bh"/>`,
+    );
+    merge.push("bs", "bh");
+  }
+  return `${parts.join("")}<feMerge>${merge.map((m) => `<feMergeNode in="${m}"/>`).join("")}</feMerge>`;
+}
+
 export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   enabled: false,
   maxChars: 10,
@@ -95,6 +232,7 @@ export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   charset: { upper: true, lower: true, digits: true, space: true, punct: true },
   autoUpper: false,
   symbols: [],
+  embossFx: DEFAULT_EMBOSS_FX,
 };
 
 const KEY_RE = /^[\w\-./%()]+$/;
@@ -153,6 +291,7 @@ export function normalizePersonalize(raw: unknown): PersonalizeConfig {
     charset,
     autoUpper: r.autoUpper === true,
     symbols: parsePersonalizeSymbols(r.symbols),
+    embossFx: normalizeEmbossFx(r.embossFx),
   };
 }
 
