@@ -9,7 +9,8 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildReport, SOURCE_CHECKLIST_MODULE } from "@/lib/email-report/sources";
-import { normalizeReportPopup, type EmailReport, type EmailReportPopup } from "@/lib/email-report/shared";
+import { normalizeReportPopup, type EmailReport, type EmailReportPopup, type PopupFieldKey } from "@/lib/email-report/shared";
+import { userNames } from "@/lib/record-tasks-server";
 import { nowTH } from "@/lib/email-report/send";
 import { loadReportChannels } from "@/lib/email-report/channels";
 import type { BuiltReport, ReportTone } from "@/lib/email-report/render";
@@ -17,9 +18,16 @@ import type { BuiltReport, ReportTone } from "@/lib/email-report/render";
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 export type WorkPopupFlag = { text: string; tone: ReportTone };
-/** งานของคุณ: 1 ใบ + ข้อที่ค้างซึ่งใส่ชื่อคุณ (ติ๊กเสร็จในป๊อปได้) */
-export type WorkPopupMine = { id: string; title: string; code: string | null; path: string; imageUrl: string | null; flag: WorkPopupFlag; tasks: { id: string; title: string }[] };
-export type WorkPopupItem = { id: string; title: string; code: string | null; path: string; imageUrl: string | null; flag: WorkPopupFlag; waiting: string[] };
+/** ข้อในเช็กลิสต์ "รออะไรอยู่" (ติ๊กในป๊อปได้ถ้า can_tick_all หรือ mine) */
+export type WorkPopupTask = { id: string; title: string; who: string | null; mine: boolean };
+/** 1 ใบงานในป๊อป — ช่องไหนโชว์ ดูที่ payload.fields */
+export type WorkPopupItem = {
+  id: string; title: string; code: string | null; path: string; imageUrl: string | null; flag: WorkPopupFlag;
+  brand: string | null; status: string | null; due: string | null; note: string | null;
+  tasks: WorkPopupTask[];
+};
+/** งานของคุณ: ใบที่มีข้อค้างใส่ชื่อคุณ (tasks = เฉพาะข้อของคุณ) */
+export type WorkPopupMine = WorkPopupItem;
 export type WorkPopupPayload = {
   report_id: string;
   heading: string;
@@ -27,6 +35,11 @@ export type WorkPopupPayload = {
   audience: "all" | "mine";
   require_ack: boolean;
   date: string;
+  /** โชว์อะไรในแต่ละงาน · ตัวเลขสรุปด้านบน (normalizeReportPopup) */
+  fields: PopupFieldKey[];
+  show_stats: boolean;
+  /** คนนี้ติ๊กของรอได้ทุกข้อไหม (ตั้ง "ทุกคนที่แก้ใบงานได้" + มีสิทธิ์ products.edit) — ไม่ได้ = ติ๊กได้เฉพาะข้อของตัวเอง */
+  can_tick_all: boolean;
   stats: { total: number; overdue: number; due_soon: number; waiting: number };
   mine: WorkPopupMine[];
   /** ต้องตามวันนี้ (เกิน/ใกล้กำหนด แล้วตามด้วยใบที่มีของรอ) — ไม่ซ้ำกับงานของคุณ · ปิด only_alert = ทุกงานเรียงด่วนก่อน */
@@ -37,7 +50,6 @@ export type WorkPopupPayload = {
   view_all: string | null;
 };
 
-const URGENT_MAX = 8;
 const BUILD_TTL = 60_000;   // คนเข้า ERP พร้อมกันตอนเช้า → ประกอบรายงานครั้งเดียวต่อนาที
 const buildCache = new Map<string, { at: number; built: BuiltReport }>();
 
@@ -62,6 +74,21 @@ async function myOpenTasks(admin: Admin, moduleKey: string, userId: string, reco
   return by;
 }
 
+/** ข้อค้างทุกข้อของใบที่จะโชว์ (record_id → ข้อ + ชื่อผู้รับผิดชอบ) — ใช้ทั้ง "งานของคุณ" และช่องติ๊กใน "ต้องตามวันนี้" */
+async function openTasksOf(admin: Admin, moduleKey: string, recordIds: string[], userId: string) {
+  const by = new Map<string, WorkPopupTask[]>();
+  if (!recordIds.length) return by;
+  const { data } = await admin.from("erp_record_tasks").select("id, record_id, title, assigned_to").eq("module_key", moduleKey).eq("status", "open")
+    .in("record_id", recordIds).order("created_at", { ascending: true }).limit(1000);
+  const rows = (data ?? []) as { id: string; record_id: string; title: string; assigned_to: string | null }[];
+  const names = await userNames(admin, rows.map((t) => t.assigned_to));
+  for (const t of rows) {
+    (by.get(t.record_id) ?? by.set(t.record_id, []).get(t.record_id)!)
+      .push({ id: t.id, title: t.title, who: t.assigned_to ? names.get(t.assigned_to) ?? null : null, mine: !!userId && t.assigned_to === userId });
+  }
+  return by;
+}
+
 const inWindow = (cfg: EmailReportPopup, hm: string) => hm >= cfg.from && hm < cfg.to;
 
 /** ประกอบเนื้อหาป๊อปของรายงานหนึ่ง สำหรับผู้ใช้หนึ่งคน (null = ไม่ต้องเด้ง) */
@@ -71,11 +98,20 @@ export async function buildPopupPayload(admin: Admin, report: Pick<EmailReport, 
   const built = await cachedBuild(admin, report, !!opts.fresh);
   const items = built.popup?.items ?? [];
   const moduleKey = built.checklist?.moduleKey ?? SOURCE_CHECKLIST_MODULE[report.source_key];
-  const mineBy = moduleKey && items.length ? await myOpenTasks(admin, moduleKey, userId, items.map((i) => i.id)) : new Map<string, { id: string; title: string }[]>();
-  const mine: WorkPopupMine[] = items.filter((i) => mineBy.has(i.id))
-    .map((i) => ({ id: i.id, title: i.title, code: i.code, path: i.path, imageUrl: i.imageUrl, flag: i.flag, tasks: mineBy.get(i.id)! }));
+  const [tasksBy, canEdit] = await Promise.all([
+    moduleKey ? openTasksOf(admin, moduleKey, items.map((i) => i.id), userId) : Promise.resolve(new Map<string, WorkPopupTask[]>()),
+    cfg.tick === "edit" && userId ? admin.rpc("erp_can_user", { p_user: userId, p_permission: "products.edit" }).then((r) => r.data === true, () => false) : Promise.resolve(false),
+  ]);
+  const toItem = (i: (typeof items)[number], tasks: WorkPopupTask[]): WorkPopupItem => ({
+    id: i.id, title: i.title, code: i.code, path: i.path, imageUrl: i.imageUrl, flag: i.flag,
+    brand: i.brand ?? null, status: i.status ?? null, due: i.due ?? null, note: i.note ?? null, tasks,
+  });
+  const mineIds = new Set(items.filter((i) => (tasksBy.get(i.id) ?? []).some((t) => t.mine)).map((i) => i.id));
+  // "งานของคุณ" แยกขึ้นก่อน (ปิดได้ — ผู้รับผิดชอบที่เห็นเฉพาะงานตัวเองยังเห็นเสมอ)
+  const splitMine = audience === "mine" || cfg.show_mine;
+  const mine: WorkPopupMine[] = splitMine ? items.filter((i) => mineIds.has(i.id)).map((i) => toItem(i, (tasksBy.get(i.id) ?? []).filter((t) => t.mine))) : [];
 
-  const follow = items.filter((i) => (i.urgent || i.waiting.length > 0) && !mineBy.has(i.id));
+  const follow = items.filter((i) => (i.urgent || i.waiting.length > 0) && !(splitMine && mineIds.has(i.id)));
   const stats = {
     total: built.total,
     overdue: items.filter((i) => i.overdue).length,
@@ -86,15 +122,13 @@ export async function buildPopupPayload(admin: Admin, report: Pick<EmailReport, 
     if (audience === "mine" && mine.length === 0) return null;
     if (audience === "all" && (cfg.only_alert ? follow.length + mine.length === 0 : built.total === 0)) return null;
   }
-  const urgent = audience === "all"
-    ? (cfg.only_alert ? follow : items.filter((i) => !mineBy.has(i.id))).slice(0, URGENT_MAX)
-      .map((i) => ({ id: i.id, title: i.title, code: i.code, path: i.path, imageUrl: i.imageUrl, flag: i.flag, waiting: i.waiting }))
-    : [];
-  const pool = audience === "all" ? (cfg.only_alert ? follow.length : items.length - mine.length) : 0;
+  const pool = audience === "all" ? (cfg.only_alert ? follow : items.filter((i) => !(splitMine && mineIds.has(i.id)))) : [];
+  const urgent = pool.slice(0, cfg.max_items).map((i) => toItem(i, tasksBy.get(i.id) ?? []));
   return {
     report_id: report.id, heading: built.heading, audience, require_ack: cfg.require_ack, date: nowTH().date,
+    fields: cfg.fields, show_stats: cfg.show_stats, can_tick_all: canEdit,
     stats, mine, urgent, urgent_label: cfg.only_alert ? "🔥 ต้องตามวันนี้" : "📋 งานค้าง (ด่วนก่อน)",
-    more: Math.max(0, pool - urgent.length), view_all: built.popup?.viewAllPath ?? null,
+    more: Math.max(0, pool.length - urgent.length), view_all: built.popup?.viewAllPath ?? null,
   };
 }
 

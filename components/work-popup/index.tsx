@@ -14,7 +14,7 @@ import { ERPModal } from "@/components/modal";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import type { WorkPopupFlag, WorkPopupPayload } from "@/lib/email-report/popup";
+import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
 
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง
 const SKIP_PREFIX = ["/login", "/auth", "/print/", "/a/", "/s/", "/offer/", "/employee-line"];
@@ -39,7 +39,48 @@ function Thumb({ src }: { src: string | null }) {
     : <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed border-slate-200 text-slate-300">🎨</div>;
 }
 
-/** เนื้อในป๊อป (ไม่มีกรอบ) — ใช้ทั้งป๊อปจริงและตัวอย่างในหน้าตั้งค่า */
+/** 1 ใบงานในป๊อป — โชว์ตามช่องที่เลือก (data.fields) · ของรอ = ช่องติ๊ก (ติ๊กไม่ได้ = จางพร้อมบอกเหตุผล) */
+function ItemCard({ it, fields, tasks, canTick, onTick, onOpen, done, strong }: {
+  it: WorkPopupItem; fields: Set<string>; tasks: WorkPopupTask[];
+  canTick: (t: WorkPopupTask) => boolean; onTick?: (taskId: string, done: boolean) => void; onOpen?: (path: string) => void;
+  done?: Set<string>; strong?: boolean;
+}) {
+  const meta = [fields.has("brand") ? it.brand : null, fields.has("status") ? it.status : null, fields.has("due") ? it.due : null].filter(Boolean);
+  return (
+    <div className="flex gap-2.5">
+      {fields.has("img") && <Thumb src={it.imageUrl} />}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+          <button type="button" disabled={!onOpen} onClick={() => onOpen?.(it.path)} className="min-w-0 text-left hover:underline disabled:hover:no-underline">
+            <span className={`text-sm text-slate-800 ${strong ? "font-medium" : ""}`}>{fields.has("code") && it.code && <span className="mr-1 text-slate-400">{it.code}</span>}{it.title}</span>
+          </button>
+          {fields.has("flag") && <span className={`shrink-0 text-xs ${TONE[it.flag.tone]}`}>{it.flag.text}</span>}
+        </div>
+        {meta.length > 0 && <div className="text-xs text-slate-500">{meta.join(" · ")}</div>}
+        {fields.has("note") && it.note && <div className="mt-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">📝 {it.note}</div>}
+        {tasks.length > 0 && (
+          <ul className="mt-1 space-y-0.5">
+            {tasks.map((t) => {
+              const ok = !!done?.has(t.id);
+              const can = !!onTick && canTick(t);
+              return (
+                <li key={t.id}>
+                  <label title={onTick && !can ? "ติ๊กได้เฉพาะผู้รับผิดชอบข้อนี้ / คนที่แก้ใบงานได้" : undefined}
+                    className={`inline-flex items-center gap-2 text-sm ${can ? "cursor-pointer" : ""} ${ok ? "text-slate-400 line-through" : "text-slate-700"}`}>
+                    <input type="checkbox" checked={ok} disabled={!can} onChange={(e) => onTick?.(t.id, e.target.checked)} className={`h-4 w-4 accent-indigo-600 ${!can && onTick ? "opacity-40" : ""}`} />
+                    <span>⏳ {t.title}{fields.has("who") && t.who && <span className="text-slate-400"> — {t.who}</span>}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** เนื้อในป๊อป (ไม่มีกรอบ) — ใช้ทั้งป๊อปจริงและตัวอย่างในหน้าตั้งค่า (preview = ติ๊กไม่ได้) */
 export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
   data: WorkPopupPayload;
   onOpen?: (path: string) => void;
@@ -48,13 +89,12 @@ export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
   preview?: boolean;
 }) {
   const s = data.stats;
-  const link = (path: string, children: React.ReactNode, cls = "") => (
-    <button type="button" disabled={!onOpen} onClick={() => onOpen?.(path)} className={`min-w-0 text-left hover:underline disabled:hover:no-underline ${cls}`}>{children}</button>
-  );
+  const fields = new Set<string>(data.fields ?? []);
+  const canTick = (t: WorkPopupTask) => t.mine || data.can_tick_all;
   const mineOpen = data.mine.reduce((n, m) => n + m.tasks.filter((t) => !done?.has(t.id)).length, 0);
   return (
     <div className="space-y-4">
-      {data.audience === "all" && (
+      {data.audience === "all" && data.show_stats !== false && (
         <div className="flex flex-wrap gap-1.5 text-xs">
           {s.overdue > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-1 font-medium text-rose-700">เกินกำหนด {s.overdue}</span>}
           {s.due_soon > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">ใกล้กำหนด {s.due_soon}</span>}
@@ -63,33 +103,14 @@ export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
         </div>
       )}
 
-      {/* 👤 งานของคุณ — ขึ้นก่อนเสมอ */}
+      {/* 👤 งานของคุณ — ขึ้นก่อน · ข้อของคุณติ๊กได้เสมอ */}
       {data.mine.length > 0 && (
         <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
           <h3 className="mb-2 text-sm font-semibold text-indigo-900">👤 งานของคุณ <span className="font-normal text-indigo-700">({mineOpen > 0 ? `เหลือ ${mineOpen} ข้อ` : "ครบแล้ว 🎉"})</span></h3>
           <div className="space-y-2">
             {data.mine.map((m) => (
-              <div key={m.id} className="flex gap-2.5 rounded-lg bg-white p-2 shadow-sm">
-                <Thumb src={m.imageUrl} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                    {link(m.path, <span className="text-sm font-medium text-slate-800">{m.code && <span className="mr-1 text-slate-400">{m.code}</span>}{m.title}</span>)}
-                    <span className={`shrink-0 text-xs ${TONE[m.flag.tone]}`}>{m.flag.text}</span>
-                  </div>
-                  <ul className="mt-1 space-y-0.5">
-                    {m.tasks.map((t) => {
-                      const ok = !!done?.has(t.id);
-                      return (
-                        <li key={t.id}>
-                          <label className={`inline-flex items-center gap-2 text-sm ${onTick ? "cursor-pointer" : ""} ${ok ? "text-slate-400 line-through" : "text-slate-700"}`}>
-                            <input type="checkbox" checked={ok} disabled={!onTick} onChange={(e) => onTick?.(t.id, e.target.checked)} className="h-4 w-4 accent-indigo-600" />
-                            {t.title}
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
+              <div key={m.id} className="rounded-lg bg-white p-2 shadow-sm">
+                <ItemCard it={m} fields={fields} tasks={m.tasks} canTick={() => true} onTick={onTick} onOpen={onOpen} done={done} strong />
               </div>
             ))}
           </div>
@@ -97,26 +118,14 @@ export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
         </section>
       )}
 
-      {/* 🔥 ต้องตามวันนี้ (หรือทุกงานเรียงด่วนก่อน — urgent_label) */}
+      {/* 🔥 ต้องตามวันนี้ (หรือทุกงานเรียงด่วนก่อน — urgent_label) · ของรอติ๊กได้ตามสิทธิ์ (can_tick_all / ข้อของตัวเอง) */}
       {data.audience === "all" && data.urgent.length > 0 && (
         <section>
           <h3 className="mb-1.5 text-sm font-semibold text-slate-800">{data.urgent_label}</h3>
-          <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+          <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
             {data.urgent.map((u) => (
-              <div key={u.id} className="flex gap-2.5 p-2">
-                <Thumb src={u.imageUrl} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                    {link(u.path, <span className="text-sm text-slate-800">{u.code && <span className="mr-1 text-slate-400">{u.code}</span>}{u.title}</span>)}
-                    <span className={`shrink-0 text-xs ${TONE[u.flag.tone]}`}>{u.flag.text}</span>
-                  </div>
-                  {u.waiting.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {u.waiting.slice(0, 3).map((w, i) => <span key={i} className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">⏳ {w}</span>)}
-                      {u.waiting.length > 3 && <span className="text-[11px] text-slate-400">+{u.waiting.length - 3}</span>}
-                    </div>
-                  )}
-                </div>
+              <div key={u.id} className="p-2">
+                <ItemCard it={u} fields={fields} tasks={fields.has("wait") ? u.tasks : []} canTick={canTick} onTick={onTick} onOpen={onOpen} done={done} />
               </div>
             ))}
           </div>
@@ -133,6 +142,7 @@ export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
     </div>
   );
 }
+
 
 /** อ่าน ?popup=<id> (ลิงก์จากกระดิ่ง) — แยกเป็นตัวลูกใน Suspense ตามกฎ useSearchParams ของ Next */
 function PopupParam({ onParam }: { onParam: (id: string) => void }) {

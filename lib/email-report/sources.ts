@@ -242,6 +242,8 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
           id: e.s.id, title: e.s.name, code: e.s.code, path: `/master/design-dashboard?open=${encodeURIComponent(e.s.id)}`,
           imageUrl: cover ? withImageWidth(cover, 160) : null, flag: e.flag, urgent: isUrgent(e), overdue: e.daysLeft !== null && e.daysLeft < 0,
           waiting: waitingOf(e.s).map((t, i) => taskWithWho(oneLine(t, 60) ?? t, who[i], " — ")),
+          brand: e.s.brand?.name ?? (e.s.brand_id ? null : "ไม่ระบุแบรนด์"), status: statusLabel.get(e.s.status) ?? e.s.status,
+          due: e.s.deadline ? `กำหนดส่ง ${thShort(e.s.deadline)}` : "ไม่มีกำหนดส่ง", note: oneLine(e.s.note, 90),
         };
       }),
     },

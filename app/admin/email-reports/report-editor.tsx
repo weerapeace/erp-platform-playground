@@ -20,7 +20,7 @@ import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-s
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  REPORT_CHANNELS, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceDef,
+  POPUP_FIELDS, POPUP_MAX_CHOICES, REPORT_CHANNELS, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportPopup,
   type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
@@ -128,7 +128,8 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const discordOn = form.discord.enabled;
   useEffect(() => {
     if (!open || !discordOn || dmeta) return;
-    apiFetch("/api/admin/email-reports/discord").then((r) => r.json()).then((j) => setDmeta(j as DiscordMeta))
+    apiFetch("/api/admin/email-reports/discord").then((r) => r.json())
+      .then((j) => setDmeta(j?.ready && Array.isArray(j.channels) ? (j as DiscordMeta) : { ready: { bot: false, buttons: false, link: false }, channels: [], roles: [], error: j?.error || "โหลดห้อง Discord ไม่สำเร็จ" }))
       .catch(() => setDmeta({ ready: { bot: false, buttons: false, link: false }, channels: [], roles: [], error: "โหลดห้อง Discord ไม่สำเร็จ" }));
   }, [open, discordOn, dmeta]);
 
@@ -172,10 +173,11 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
 
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const set = (p: Partial<EmailReportInput>) => { setForm((f) => ({ ...f, ...p })); setError(null); };
-  const setFilters = (p: Partial<EmailReportInput["filters"]>) => set({ filters: { ...form.filters, ...p } });
-  const setOptions = (p: Partial<EmailReportInput["options"]>) => set({ options: { ...form.options, ...p } });
-  const setDiscord = (p: Partial<EmailReportDiscord>) => set({ discord: { ...form.discord, ...p } });
-  const setPopup = (p: Partial<EmailReportPopup>) => set({ popup: { ...form.popup, ...p } });
+  // อัปเดตจากค่าล่าสุดเสมอ (กดหลายปุ่มติดกันเร็ว ๆ ไม่ทับกัน)
+  const setFilters = (p: Partial<EmailReportInput["filters"]>) => { setForm((f) => ({ ...f, filters: { ...f.filters, ...p } })); setError(null); };
+  const setOptions = (p: Partial<EmailReportInput["options"]>) => { setForm((f) => ({ ...f, options: { ...f.options, ...p } })); setError(null); };
+  const setDiscord = (p: Partial<EmailReportDiscord>) => { setForm((f) => ({ ...f, discord: { ...f.discord, ...p } })); setError(null); };
+  const setPopup = (p: Partial<EmailReportPopup>) => { setForm((f) => ({ ...f, popup: { ...f.popup, ...p } })); setError(null); };
   const toggleChannel = (k: ReportChannelKey, on: boolean) => (k === "email" ? set({ email_enabled: on }) : k === "discord" ? setDiscord({ enabled: on }) : setPopup({ enabled: on }));
   const src = sourceDef(form.source_key);
   const opt = form.options;
@@ -629,6 +631,41 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                     <input type="checkbox" checked={form.popup.require_ack} onChange={(e) => setPopup({ require_ack: e.target.checked })} className="h-4 w-4" />
                     ต้องกดปุ่ม (รับทราบ / ไว้ทีหลัง) — กดนอกกล่องแล้วไม่ปิด
                   </label>
+                </div>
+                {/* หน้าตาป๊อป — เลือกโชว์อะไร · ใครติ๊กของรอได้ · สูงสุดกี่งาน (ดูผลในแท็บ 🔔 ERP ป๊อป ด้านขวา) */}
+                <div className="space-y-2 border-t border-amber-200/70 pt-3">
+                  <div>
+                    <label className={label}>โชว์อะไรในแต่ละงาน <span className="font-normal text-slate-400">(กดเปิด/ปิด · ดูผลในแท็บ 🔔 ERP ป๊อป)</span></label>
+                    <div className="flex flex-wrap gap-1">
+                      {POPUP_FIELDS.map((f) => {
+                        const on = form.popup.fields.includes(f.key);
+                        return <button key={f.key} type="button" onClick={() => setPopup({ fields: on ? form.popup.fields.filter((k) => k !== f.key) : POPUP_FIELDS.map((x) => x.key).filter((k) => k === f.key || form.popup.fields.includes(k)) })}
+                          className={chip(on)}>{on ? "✓ " : ""}{f.label}</button>;
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <label className={label}>ด้านบนป๊อป</label>
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" onClick={() => setPopup({ show_stats: !form.popup.show_stats })} className={chip(form.popup.show_stats)}>{form.popup.show_stats ? "✓ " : ""}ตัวเลขสรุป</button>
+                      <button type="button" onClick={() => setPopup({ show_mine: !form.popup.show_mine })} className={chip(form.popup.show_mine)}>{form.popup.show_mine ? "✓ " : ""}งานของคุณ (ขึ้นก่อน)</button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className={label}>ใครติ๊กของรอในป๊อปได้</label>
+                      <div className="flex flex-wrap gap-1">
+                        <button type="button" onClick={() => setPopup({ tick: "edit" })} className={chip(form.popup.tick === "edit")}>ทุกคนที่แก้ใบงานได้</button>
+                        <button type="button" onClick={() => setPopup({ tick: "own" })} className={chip(form.popup.tick === "own")}>เฉพาะผู้รับผิดชอบข้อนั้น</button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className={label}>โชว์ "ต้องตามวันนี้" สูงสุด</label>
+                      <div className="flex flex-wrap gap-1">
+                        {POPUP_MAX_CHOICES.map((n) => <button key={n} type="button" onClick={() => setPopup({ max_items: n })} className={chip(form.popup.max_items === n)}>{n} งาน</button>)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

@@ -52,10 +52,11 @@ export type BuiltReport = {
   /** 🔔 ป๊อปตอนเข้า ERP (lib/email-report/popup): ทุกงานในรายงาน เรียงตามความด่วน · path = ลิงก์ในระบบ (ไม่ใช่ลิงก์เต็ม) */
   popup?: { viewAllPath: string; items: PopupSourceItem[] };
 };
-/** urgent = เกินกำหนด/ใกล้กำหนด · waiting = ข้อเช็กลิสต์ที่ค้าง (มีชื่อผู้รับผิดชอบต่อท้าย) */
+/** urgent = เกินกำหนด/ใกล้กำหนด · waiting = ข้อเช็กลิสต์ที่ค้าง (มีชื่อผู้รับผิดชอบต่อท้าย) · brand/status/due/note = ข้อมูลที่เลือกโชว์ได้ในป๊อป */
 export type PopupSourceItem = {
   id: string; title: string; code: string | null; path: string; imageUrl: string | null;
   flag: { text: string; tone: ReportTone }; urgent: boolean; overdue: boolean; waiting: string[];
+  brand: string | null; status: string | null; due: string | null; note: string | null;
 };
 
 const TONE_COLOR: Record<ReportTone, string> = { danger: "#dc2626", warn: "#d97706", muted: "#64748b", good: "#059669" };

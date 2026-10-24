@@ -118,7 +118,25 @@ export type EmailReportPopup = {
   require_ack: boolean;
   /** ผู้รับผิดชอบข้อที่ค้างเห็นป๊อป (เฉพาะงานของตัวเอง) แม้ไม่อยู่ในตำแหน่งที่เลือก */
   assignees: boolean;
+  /** โชว์อะไรในแต่ละงาน (POPUP_FIELDS · เรียงตามรายการกลาง) */
+  fields: PopupFieldKey[];
+  /** ด้านบนป๊อป: ตัวเลขสรุป · แยก "งานของคุณ" ขึ้นก่อน */
+  show_stats: boolean;
+  show_mine: boolean;
+  /** ใครติ๊กของรอในป๊อปได้: edit = ทุกคนที่แก้ใบงานได้ (products.edit) · own = เฉพาะผู้รับผิดชอบข้อนั้น */
+  tick: "edit" | "own";
+  /** โชว์ "ต้องตามวันนี้" สูงสุดกี่งาน */
+  max_items: number;
 };
+/** ข้อมูลที่เลือกโชว์ได้ในแต่ละงานของป๊อป — ค่าเริ่มต้นตามที่เจ้าของเลือก (2026-10-24) */
+export const POPUP_FIELDS = [
+  { key: "img", label: "รูปปก" }, { key: "code", label: "รหัสใบงาน" }, { key: "brand", label: "แบรนด์" }, { key: "status", label: "สถานะ" },
+  { key: "due", label: "กำหนดส่ง" }, { key: "flag", label: "ป้ายเตือน" }, { key: "wait", label: "ของรอ (ติ๊กได้)" }, { key: "who", label: "ชื่อผู้รับผิดชอบ" },
+  { key: "note", label: "โน้ต" },
+] as const;
+export type PopupFieldKey = (typeof POPUP_FIELDS)[number]["key"];
+export const DEFAULT_POPUP_FIELDS: PopupFieldKey[] = ["img", "code", "flag", "wait", "who"];
+export const POPUP_MAX_CHOICES = [5, 8, 12];
 const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 export function normalizeReportPopup(raw: unknown): EmailReportPopup {
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -131,10 +149,16 @@ export function normalizeReportPopup(raw: unknown): EmailReportPopup {
   }
   const from = hm(o.from, "08:00"); let to = hm(o.to, "12:00");
   if (to <= from) to = "24:00";
+  const known = POPUP_FIELDS.map((f) => f.key as PopupFieldKey);
+  const fields = Array.isArray(o.fields) ? known.filter((k) => (o.fields as unknown[]).includes(k)) : DEFAULT_POPUP_FIELDS;   // เรียงตามรายการกลาง
+  const max = Math.round(Number(o.max_items));
   return {
     enabled: o.enabled === true, roles, users: users.slice(0, 50), from, to,
     frequency: o.frequency === "every" ? "every" : "daily",
     only_alert: o.only_alert !== false, require_ack: o.require_ack !== false, assignees: o.assignees !== false,
+    fields, show_stats: o.show_stats !== false, show_mine: o.show_mine !== false,
+    tick: o.tick === "own" ? "own" : "edit",
+    max_items: Number.isFinite(max) && max >= 1 ? Math.min(20, max) : 8,
   };
 }
 export function normalizeReportDiscord(raw: unknown): EmailReportDiscord {

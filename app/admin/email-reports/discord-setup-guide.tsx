@@ -23,7 +23,8 @@ type Meta = { ready: { bot: boolean; buttons: boolean; link: boolean }; invite_u
 
 export function DiscordSetupGuide() {
   const [meta, setMeta] = useState<Meta | null>(null);
-  useEffect(() => { apiFetch("/api/admin/email-reports/discord").then((r) => r.json()).then((j) => setMeta(j as Meta)).catch(() => {}); }, []);
+  // API ตอบ error (ไม่มี ready/channels) = ไม่โชว์สถานะ แทนที่จะทำทั้งหน้าพัง
+  useEffect(() => { apiFetch("/api/admin/email-reports/discord").then((r) => r.json()).then((j) => { if (j?.ready && Array.isArray(j.channels)) setMeta(j as Meta); }).catch(() => {}); }, []);
   const origin = typeof window !== "undefined" ? window.location.origin : "https://erp-platform-playground.vercel.app";
   const allReady = !!meta && meta.ready.bot && meta.ready.buttons && meta.ready.link && meta.channels.length > 0;
   const tick = (ok: boolean | undefined) => (ok ? <span className="text-emerald-600">✓</span> : <span className="text-slate-300">○</span>);
