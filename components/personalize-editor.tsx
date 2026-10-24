@@ -5,27 +5,38 @@
  *   - เปิด/ปิด · จำนวนตัวอักษรสูงสุด · แบบที่อนุญาต (จม/เงิน/ทอง) · รูปฉาก
  *   - ตำแหน่ง 2 จุด (ตรงกลาง / มุมขวาล่าง): ลากข้อความบนรูปเพื่อวาง + จัดชิดซ้าย/กลาง/ขวา + ขนาด + เอียง · เปิด/ปิดแต่ละจุด
  *   - ตัวอักษร: ความห่าง · กลุ่มตัวที่ปั๊มได้ · เปลี่ยนเป็นตัวใหญ่อัตโนมัติ · ตัวพิเศษ (♥ ★ …)
- *   - 🎚 เอฟเฟกต์พิมพ์จมแบบ Photoshop (Bevel & Emboss · Inner Shadow · Outer Glow) — พรีวิวด้วย SVG filter ตัวเดียวกับเว็บร้าน
+ *   - 🎚 เอฟเฟกต์ตัวอักษรแบบ Photoshop แยกแท็บ พิมพ์จม (Bevel & Emboss · Inner Shadow · Outer Glow)
+ *        / เงิน · ทอง (สีเดียว/ไล่สี 2–6 ระดับ + Bevel & Emboss · Drop Shadow · Inner Shadow) — พรีวิวด้วย SVG ตัวเดียวกับเว็บร้าน
  *   - พรีวิวเหมือนเว็บจริง (ฟอนต์ Times New Roman + เอฟเฟกต์เดียวกัน)
  * ของกลาง: lib/website-personalize.ts (ชนิดข้อมูล/ค่าเริ่มต้น/ตัวกรอง/ตำแหน่งข้อความ)
  */
 import { useCallback, useId, useRef, useState } from "react";
 import { RangeInput } from "@/components/range-input";
+import { ColorInput } from "@/components/color-picker";
 import {
   PERSONALIZE_ALIGNS,
   PERSONALIZE_ALIGN_OFFSET,
   PERSONALIZE_CHARSETS,
   PERSONALIZE_STYLES,
   DEFAULT_EMBOSS_FX,
+  DEFAULT_FOIL_FX,
   EMBOSS_FX_RANGE,
+  FOIL_FX_RANGE,
+  FOIL_MAX_STOPS,
+  FOIL_PRESETS,
   cleanPersonalizeText,
   personalizeEmbossFilter,
+  personalizeFoilCss,
+  personalizeFoilFilter,
+  personalizeFoilGradientEnds,
   parsePersonalizeSymbols,
   personalizeSplitLast,
   personalizeTextPlacement,
   type PersonalizeAlign,
   type PersonalizeConfig,
   type PersonalizeEmbossFx,
+  type PersonalizeFoilFx,
+  type PersonalizeFoilStyle,
   type PersonalizePosition,
   type PersonalizeStyle,
 } from "@/lib/website-personalize";
@@ -63,6 +74,26 @@ const FX_LAYERS: { key: "bevel" | "inner" | "glow" | null; title: string; th: st
   { key: null, title: "Fill", th: "เนื้อตัวอักษร", rows: [["fill", "ความทึบ (Fill)", "%"]] },
 ];
 
+type FoilNum = keyof typeof FOIL_FX_RANGE;
+/** ชั้นเอฟเฟกต์ของเงิน/ทอง (ชื่อตาม Photoshop + คำไทย) */
+const FOIL_LAYERS: { key: "bevel" | "drop" | "inner"; title: string; th: string; rows: [FoilNum, string, string][] }[] = [
+  {
+    key: "bevel",
+    title: "Bevel & Emboss",
+    th: "ขอบนูน",
+    rows: [
+      ["depth", "ความลึก (Depth)", "%"],
+      ["size", "ขนาด (Size)", "px"],
+      ["angle", "มุมแสง (Angle)", "°"],
+      ["altitude", "ความสูงแสง (Altitude)", "°"],
+      ["highlight", "ไฮไลต์ (Highlight)", "%"],
+      ["shadow", "เงาขอบ (Shadow)", "%"],
+    ],
+  },
+  { key: "drop", title: "Drop Shadow", th: "เงาใต้ตัวอักษร", rows: [["dropOpacity", "ความเข้ม (Opacity)", "%"], ["dropDistance", "ระยะ (Distance)", "px"], ["dropSize", "ความฟุ้ง (Size)", "px"]] },
+  { key: "inner", title: "Inner Shadow", th: "เงาด้านใน", rows: [["innerOpacity", "ความเข้ม (Opacity)", "%"], ["innerDistance", "ระยะ (Distance)", "px"], ["innerSize", "ขนาด (Size)", "px"]] },
+];
+
 export function PersonalizeEditor({
   value,
   onChange,
@@ -97,7 +128,9 @@ export function PersonalizeEditor({
   }, []);
   const fxId = `pzfx-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const setFx = (p: Partial<PersonalizeEmbossFx>) => set({ embossFx: { ...value.embossFx, ...p } });
-  const svgEmboss = preview === "emboss" && stageSize.w > 0 && stageSize.h > 0;
+  const svgStamp = stageSize.w > 0 && stageSize.h > 0;
+  const setFoil = (style: PersonalizeFoilStyle, p: Partial<PersonalizeFoilFx>) => set({ foilFx: { ...value.foilFx, [style]: { ...value.foilFx[style], ...p } } });
+  const previewFoil = preview === "emboss" ? null : value.foilFx[preview];
   const textRefs = useRef<Partial<Record<PersonalizePosition["key"], HTMLDivElement | null>>>({});
   const [imgW, setImgW] = useState(600);
   const set = (p: Partial<PersonalizeConfig>) => onChange({ ...value, ...p });
@@ -202,15 +235,15 @@ export function PersonalizeEditor({
                     fontFamily: '"Times New Roman", Times, serif',
                     letterSpacing: `${value.letterSpacing}em`,
                     fontSize: `${(imgW * p.size) / 100}px`,
-                    ...(svgEmboss ? { color: "transparent" } : PZ_STYLE[preview]),
+                    ...(svgStamp ? { color: "transparent" } : PZ_STYLE[preview]),
                   }}
                 >
                   {head}
                   <span style={{ letterSpacing: 0 }}>{last}</span>
                 </div>
               ))}
-              {/* 🎚 พิมพ์จม: วาดด้วย SVG filter ตัวเดียวกับเว็บร้าน (personalizeEmbossFilter) */}
-              {svgEmboss && (
+              {/* 🎚 วาดด้วย SVG ตัวเดียวกับเว็บร้าน — พิมพ์จม (personalizeEmbossFilter) · เงิน/ทอง (สี + personalizeFoilFilter) */}
+              {svgStamp && (
                 <svg className="absolute left-0 top-0 pointer-events-none overflow-visible" width={stageSize.w} height={stageSize.h} viewBox={`0 0 ${stageSize.w} ${stageSize.h}`} aria-hidden>
                   {value.positions.filter((p) => p.enabled).map((p) => {
                     const fontPx = (stageSize.w * p.size) / 100;
@@ -219,7 +252,22 @@ export function PersonalizeEditor({
                     return (
                       <g key={p.key}>
                         <defs>
-                          <filter id={`${fxId}-${p.key}`} x="-30%" y="-60%" width="160%" height="220%" colorInterpolationFilters="sRGB" dangerouslySetInnerHTML={{ __html: personalizeEmbossFilter(value.embossFx, fontPx) }} />
+                          <filter
+                            id={`${fxId}-${p.key}`}
+                            x="-30%"
+                            y="-60%"
+                            width="160%"
+                            height="220%"
+                            colorInterpolationFilters="sRGB"
+                            dangerouslySetInnerHTML={{ __html: previewFoil ? personalizeFoilFilter(previewFoil, fontPx) : personalizeEmbossFilter(value.embossFx, fontPx) }}
+                          />
+                          {previewFoil?.mode === "gradient" && (
+                            <linearGradient id={`${fxId}-g-${p.key}`} {...personalizeFoilGradientEnds(previewFoil.gradAngle)}>
+                              {[...previewFoil.stops].sort((a, b) => a.pos - b.pos).map((st, i) => (
+                                <stop key={i} offset={`${st.pos}%`} stopColor={st.color} />
+                              ))}
+                            </linearGradient>
+                          )}
                         </defs>
                         <text
                           x={x}
@@ -230,7 +278,7 @@ export function PersonalizeEditor({
                           fontFamily='"Times New Roman", Times, serif'
                           fontSize={fontPx}
                           letterSpacing={`${value.letterSpacing}em`}
-                          fill="#000"
+                          fill={!previewFoil ? "#000" : previewFoil.mode === "solid" ? previewFoil.solid : `url(#${fxId}-g-${p.key})`}
                           filter={`url(#${fxId}-${p.key})`}
                         >
                           {head}
@@ -318,15 +366,30 @@ export function PersonalizeEditor({
               </div>
             </div>
 
-            {/* 🎚 เอฟเฟกต์พิมพ์จม (แบบ Photoshop Layer Style) */}
-            {value.styles.includes("emboss") && (
-              <div className="rounded-lg border border-slate-200 p-2 space-y-2" onFocusCapture={() => setPreview("emboss")} onPointerDownCapture={() => setPreview("emboss")}>
+            {/* 🎚 เอฟเฟกต์ตัวอักษร (แบบ Photoshop Layer Style) — แท็บตามแบบที่เปิด · เลือกแท็บ = พรีวิวซ้ายเป็นแบบนั้น */}
+            {value.styles.length > 0 && (
+              <div className="rounded-lg border border-slate-200 p-2 space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-slate-700">🎚 เอฟเฟกต์พิมพ์จม <span className="font-normal text-slate-400">(แบบ Photoshop)</span></p>
-                  <button type="button" onClick={() => set({ embossFx: { ...DEFAULT_EMBOSS_FX } })} className="text-[11px] text-orange-600 hover:underline" title="ค่าที่ตั้งใน Photoshop (Depth 136 · Angle 119 · Inner Shadow 18/12/21 · Outer Glow 61/5/5)">
-                    ↺ กลับค่า Photoshop
-                  </button>
+                  <p className="text-xs font-medium text-slate-700">🎚 เอฟเฟกต์ตัวอักษร <span className="font-normal text-slate-400">(แบบ Photoshop · ตั้งต่อรุ่น)</span></p>
+                  {preview === "emboss" ? (
+                    <button type="button" onClick={() => set({ embossFx: { ...DEFAULT_EMBOSS_FX } })} className="text-[11px] text-orange-600 hover:underline" title="ค่าที่ตั้งใน Photoshop (Depth 136 · Angle 119 · Inner Shadow 18/12/21 · Outer Glow 61/5/5)">
+                      ↺ กลับค่า Photoshop
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setFoil(preview, { ...DEFAULT_FOIL_FX[preview], stops: DEFAULT_FOIL_FX[preview].stops.map((x) => ({ ...x })) })} className="text-[11px] text-orange-600 hover:underline">
+                      ↺ ค่าเริ่มต้น{preview === "gold" ? "ทอง" : "เงิน"}
+                    </button>
+                  )}
                 </div>
+                <div className="flex items-center gap-1">
+                  {PERSONALIZE_STYLES.filter((x) => value.styles.includes(x.value)).map((x) => (
+                    <button key={x.value} type="button" onClick={() => setPreview(x.value)} className={chip(preview === x.value)}>
+                      {x.label}
+                    </button>
+                  ))}
+                </div>
+                {preview === "emboss" ? (
+                <>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                   ทิศ (Direction):
                   {(["down", "up"] as const).map((d) => (
@@ -362,6 +425,114 @@ export function PersonalizeEditor({
                     </div>
                   );
                 })}
+                </>
+                ) : (
+                  previewFoil && (
+                    <>
+                      {/* สีตัวอักษร: สีเดียว / ไล่สี */}
+                      <div className="rounded-md border border-slate-200 px-2 py-1.5 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium text-slate-700">สีตัวอักษร <span className="font-normal text-slate-400">· Color / Gradient Overlay</span></span>
+                          <div className="flex gap-1">
+                            {(["solid", "gradient"] as const).map((m) => (
+                              <button key={m} type="button" onClick={() => setFoil(preview, { mode: m })} className={chip(previewFoil.mode === m)}>
+                                {m === "solid" ? "สีเดียว" : "ไล่สี"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="h-4 rounded" style={{ backgroundImage: personalizeFoilCss(previewFoil) }} aria-hidden />
+                        {previewFoil.mode === "solid" ? (
+                          <ColorInput value={previewFoil.solid} onChange={(v) => setFoil(preview, { solid: v })} />
+                        ) : (
+                          <>
+                            {previewFoil.stops.map((st, i) => (
+                              <div key={i} className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_24px] items-end gap-2">
+                                <ColorInput value={st.color} onChange={(v) => setFoil(preview, { stops: previewFoil.stops.map((x, j) => (j === i ? { ...x, color: v } : x)) })} />
+                                <RangeInput
+                                  label={<span className="text-[11px] text-slate-500">ระดับที่ {i + 1}</span>}
+                                  min={0}
+                                  max={100}
+                                  step={1}
+                                  unit="%"
+                                  value={st.pos}
+                                  onChange={(v) => setFoil(preview, { stops: previewFoil.stops.map((x, j) => (j === i ? { ...x, pos: Math.round(Math.min(100, Math.max(0, v))) } : x)) })}
+                                />
+                                <button
+                                  type="button"
+                                  disabled={previewFoil.stops.length <= 2}
+                                  onClick={() => setFoil(preview, { stops: previewFoil.stops.filter((_, j) => j !== i) })}
+                                  className="h-7 rounded border border-slate-200 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 disabled:opacity-30"
+                                  title="ลบระดับสีนี้"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                disabled={previewFoil.stops.length >= FOIL_MAX_STOPS}
+                                onClick={() => setFoil(preview, { stops: [...previewFoil.stops, { color: "#ffffff", pos: 100 }] })}
+                                className="text-[11px] text-orange-600 hover:underline disabled:opacity-40"
+                              >
+                                + เพิ่มระดับสี (สูงสุด {FOIL_MAX_STOPS})
+                              </button>
+                            </div>
+                            <RangeInput label={<span className="text-[11px] text-slate-500">มุมไล่สี (90 = บนลงล่าง)</span>} min={0} max={180} step={1} unit="°" value={previewFoil.gradAngle} onChange={(v) => setFoil(preview, { gradAngle: Math.round(Math.min(180, Math.max(0, v))) })} />
+                          </>
+                        )}
+                        <div className="flex items-center gap-1 flex-wrap text-[11px] text-slate-500">
+                          ชุดสำเร็จรูป:
+                          {FOIL_PRESETS[preview].map((p) => (
+                            <button key={p.name} type="button" onClick={() => setFoil(preview, { mode: "gradient", stops: p.stops.map((x) => ({ ...x })) })} className={chip(false)}>
+                              <span className="inline-block w-3 h-3 rounded-full align-[-2px] mr-1" style={{ backgroundImage: personalizeFoilCss({ ...previewFoil, mode: "gradient", stops: p.stops }) }} />
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {/* นูน / เงา */}
+                      {FOIL_LAYERS.map((layer) => {
+                        const on = previewFoil[layer.key];
+                        return (
+                          <div key={layer.title} className={`rounded-md border px-2 py-1.5 ${on ? "border-slate-200" : "border-dashed border-slate-200 opacity-60"}`}>
+                            <label className="flex items-center gap-2 text-[11px] font-medium text-slate-700">
+                              <input type="checkbox" className="w-3.5 h-3.5 accent-orange-500" checked={on} onChange={(e) => setFoil(preview, { [layer.key]: e.target.checked })} />
+                              {layer.title} <span className="font-normal text-slate-400">· {layer.th}</span>
+                            </label>
+                            {on && layer.key === "bevel" && (
+                              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1">
+                                ทิศ:
+                                {(["up", "down"] as const).map((d) => (
+                                  <button key={d} type="button" onClick={() => setFoil(preview, { dir: d })} className={chip(previewFoil.dir === d)}>
+                                    {d === "up" ? "Up · นูนขึ้น" : "Down · ยุบลง"}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            {on && (
+                              <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-1">
+                                {layer.rows.map(([k, label, unit]) => (
+                                  <RangeInput
+                                    key={k}
+                                    label={<span className="text-[11px] text-slate-500">{label}</span>}
+                                    min={FOIL_FX_RANGE[k][0]}
+                                    max={FOIL_FX_RANGE[k][1]}
+                                    step={1}
+                                    unit={unit}
+                                    value={previewFoil[k]}
+                                    onChange={(v) => setFoil(preview, { [k]: Math.round(Math.min(FOIL_FX_RANGE[k][1], Math.max(FOIL_FX_RANGE[k][0], v))) })}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </>
+                  )
+                )}
                 <p className="text-[11px] text-slate-400">ค่า px อ้างอิงตัวอักษรสูง 100px แล้วย่อ/ขยายตามขนาดจริงบนรูป · ตั้งต่อรุ่น (หนังแต่ละสี/ผิวจูนต่างกันได้) · ปรับแล้วพรีวิวซ้ายเปลี่ยนทันที</p>
               </div>
             )}

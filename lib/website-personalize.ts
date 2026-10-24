@@ -48,6 +48,8 @@ export interface PersonalizeConfig {
   symbols: string[];
   /** 🎚 เอฟเฟกต์ "พิมพ์จม" แบบ Photoshop (ตั้งต่อรุ่น) */
   embossFx: PersonalizeEmbossFx;
+  /** ✨ สี (สีเดียว/ไล่สี) + นูน/เงา ของพิมพ์เงิน/ทอง (ตั้งต่อรุ่น) */
+  foilFx: Record<PersonalizeFoilStyle, PersonalizeFoilFx>;
 }
 export interface PersonalizeChoice {
   text: string;
@@ -219,6 +221,217 @@ export function personalizeEmbossFilter(fx: PersonalizeEmbossFx, fontPx: number)
   return `${parts.join("")}<feMerge>${merge.map((m) => `<feMergeNode in="${m}"/>`).join("")}</feMerge>`;
 }
 
+/* ── ✨ พิมพ์เงิน/ทอง: สี (สีเดียว/ไล่สี 2–6 ระดับ) + นูน/เงาแบบ Photoshop (ตั้งต่อรุ่น) ──
+ * ไล่สี = linearGradient ใน SVG (มุม 90 = บนลงล่าง) · เอฟเฟกต์ = personalizeFoilFilter (Bevel & Emboss · Drop Shadow · Inner Shadow)
+ * ค่าเริ่ม = หน้าตาเดิมของเว็บ (ไล่สีฟอยล์เดิม + เงาบาง ๆ ใต้ตัวอักษร) — ร้านเปิดนูน/ปรับสีเองได้ */
+export interface PersonalizeFoilStop {
+  color: string;
+  /** ตำแหน่ง 0–100 (%) */
+  pos: number;
+}
+export interface PersonalizeFoilFx {
+  mode: "solid" | "gradient";
+  solid: string;
+  stops: PersonalizeFoilStop[];
+  /** มุมไล่สี 0–180° (0 = ซ้าย→ขวา · 90 = บน→ล่าง) */
+  gradAngle: number;
+  bevel: boolean;
+  dir: "up" | "down";
+  depth: number;
+  size: number;
+  angle: number;
+  altitude: number;
+  highlight: number;
+  shadow: number;
+  drop: boolean;
+  dropOpacity: number;
+  dropDistance: number;
+  dropSize: number;
+  inner: boolean;
+  innerOpacity: number;
+  innerDistance: number;
+  innerSize: number;
+}
+export type PersonalizeFoilStyle = "silver" | "gold";
+const FOIL_FX_BASE = {
+  gradAngle: 90,
+  bevel: false,
+  dir: "up" as const,
+  depth: 90,
+  size: 2,
+  angle: 119,
+  altitude: 30,
+  highlight: 55,
+  shadow: 45,
+  drop: true,
+  dropOpacity: 60,
+  dropDistance: 4,
+  dropSize: 2,
+  inner: false,
+  innerOpacity: 25,
+  innerDistance: 3,
+  innerSize: 4,
+};
+export const DEFAULT_FOIL_FX: Record<PersonalizeFoilStyle, PersonalizeFoilFx> = {
+  gold: {
+    ...FOIL_FX_BASE,
+    mode: "gradient",
+    solid: "#e8cf80",
+    stops: [
+      { color: "#fff1b8", pos: 0 },
+      { color: "#f0cf6a", pos: 20 },
+      { color: "#b98a2c", pos: 44 },
+      { color: "#f9e08f", pos: 54 },
+      { color: "#d4a640", pos: 70 },
+      { color: "#8f6519", pos: 100 },
+    ],
+  },
+  silver: {
+    ...FOIL_FX_BASE,
+    mode: "gradient",
+    solid: "#d9dce1",
+    stops: [
+      { color: "#fdfdfd", pos: 0 },
+      { color: "#c9ccd1", pos: 30 },
+      { color: "#8e939a", pos: 48 },
+      { color: "#eef0f2", pos: 58 },
+      { color: "#a7abb1", pos: 78 },
+      { color: "#6f747a", pos: 100 },
+    ],
+  },
+};
+/** ชุดสีสำเร็จรูป (ชื่อ · ระดับสี) — หลังบ้านกดใช้ได้ */
+export const FOIL_PRESETS: Record<PersonalizeFoilStyle, { name: string; stops: PersonalizeFoilStop[] }[]> = {
+  gold: [
+    { name: "ทองฟอยล์เงา (เดิม)", stops: DEFAULT_FOIL_FX.gold.stops },
+    { name: "ทองอ่อน", stops: [{ color: "#fbefb8", pos: 0 }, { color: "#ecd384", pos: 45 }, { color: "#c9a24e", pos: 100 }] },
+    { name: "ทองเข้ม", stops: [{ color: "#f6dc8c", pos: 0 }, { color: "#c9971d", pos: 55 }, { color: "#8a6516", pos: 100 }] },
+    { name: "ทองชมพู", stops: [{ color: "#f8dccc", pos: 0 }, { color: "#e3b39a", pos: 50 }, { color: "#b67c63", pos: 100 }] },
+  ],
+  silver: [
+    { name: "เงินฟอยล์ (เดิม)", stops: DEFAULT_FOIL_FX.silver.stops },
+    { name: "เงินเงา", stops: [{ color: "#ffffff", pos: 0 }, { color: "#d9dce1", pos: 45 }, { color: "#9aa0a8", pos: 100 }] },
+    { name: "เงินด้าน", stops: [{ color: "#e6e8eb", pos: 0 }, { color: "#b9bdc3", pos: 100 }] },
+  ],
+};
+export const FOIL_FX_RANGE: Record<
+  "gradAngle" | "depth" | "size" | "angle" | "altitude" | "highlight" | "shadow" | "dropOpacity" | "dropDistance" | "dropSize" | "innerOpacity" | "innerDistance" | "innerSize",
+  [number, number]
+> = {
+  gradAngle: [0, 180],
+  depth: [0, 300],
+  size: [0, 50],
+  angle: [0, 360],
+  altitude: [0, 90],
+  highlight: [0, 100],
+  shadow: [0, 100],
+  dropOpacity: [0, 100],
+  dropDistance: [0, 100],
+  dropSize: [0, 100],
+  innerOpacity: [0, 100],
+  innerDistance: [0, 100],
+  innerSize: [0, 100],
+};
+export const FOIL_MAX_STOPS = 6;
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+/** อ่านค่าสี/เอฟเฟกต์ของเงินหรือทองจาก DB (ไม่มี/ผิด = ค่าเริ่ม) */
+export function normalizeFoilFx(raw: unknown, style: PersonalizeFoilStyle): PersonalizeFoilFx {
+  const d = DEFAULT_FOIL_FX[style];
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const out: PersonalizeFoilFx = { ...d, stops: d.stops.map((s) => ({ ...s })) };
+  for (const [k, [lo, hi]] of Object.entries(FOIL_FX_RANGE) as [keyof typeof FOIL_FX_RANGE, [number, number]][]) {
+    const n = Number(r[k]);
+    if (r[k] != null && r[k] !== "" && Number.isFinite(n)) out[k] = Math.min(hi, Math.max(lo, Math.round(n)));
+  }
+  for (const k of ["bevel", "drop", "inner"] as const) if (typeof r[k] === "boolean") out[k] = r[k] as boolean;
+  if (r.dir === "up" || r.dir === "down") out.dir = r.dir;
+  if (r.mode === "solid" || r.mode === "gradient") out.mode = r.mode;
+  if (typeof r.solid === "string" && HEX_RE.test(r.solid)) out.solid = r.solid.toLowerCase();
+  if (Array.isArray(r.stops)) {
+    const stops = (r.stops as Record<string, unknown>[])
+      .filter((s) => s && typeof s.color === "string" && HEX_RE.test(s.color) && Number.isFinite(Number(s.pos)))
+      .map((s) => ({ color: String(s.color).toLowerCase(), pos: Math.min(100, Math.max(0, Math.round(Number(s.pos)))) }))
+      .sort((a, b) => a.pos - b.pos)
+      .slice(0, FOIL_MAX_STOPS);
+    if (stops.length >= 2) out.stops = stops;
+  }
+  return out;
+}
+
+/** ค่าเงิน+ทอง ทั้งคู่ */
+export function normalizeFoilFxPair(raw: unknown): Record<PersonalizeFoilStyle, PersonalizeFoilFx> {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { silver: normalizeFoilFx(r.silver, "silver"), gold: normalizeFoilFx(r.gold, "gold") };
+}
+
+/** ปลายเส้นไล่สี (% ของกรอบตัวอักษร) จากมุม — ใช้กับ <linearGradient x1 y1 x2 y2> */
+export function personalizeFoilGradientEnds(angle: number): { x1: string; y1: string; x2: string; y2: string } {
+  const a = (angle * Math.PI) / 180;
+  const p = (n: number) => `${Math.round(n * 10) / 10}%`;
+  return { x1: p(50 - Math.cos(a) * 50), y1: p(50 - Math.sin(a) * 50), x2: p(50 + Math.cos(a) * 50), y2: p(50 + Math.sin(a) * 50) };
+}
+
+/** สีเป็น CSS background-image (สีเดียว = ไล่สีสีเดียวกัน) — ปุ่มเลือกแบบ · ตัวอักษรแบบสำรองก่อนวาด SVG */
+export function personalizeFoilCss(fx: PersonalizeFoilFx): string {
+  if (fx.mode === "solid") return `linear-gradient(${fx.solid}, ${fx.solid})`;
+  return `linear-gradient(${fx.gradAngle + 90}deg, ${fx.stops.map((s) => `${s.color} ${s.pos}%`).join(", ")})`;
+}
+
+/** ชั้นของ SVG filter ของเงิน/ทอง (ตัวอักษรสีจริง = SourceGraphic + เงา/นูน) — fontPx = ขนาดจริง (px) · ตัวเลขล้วน */
+export function personalizeFoilFilter(fx: PersonalizeFoilFx, fontPx: number): string {
+  const sc = Math.max(0.05, fontPx / 100);
+  const f = (n: number) => (Math.round(n * 100) / 100).toString();
+  const a = (fx.angle * Math.PI) / 180;
+  const lx = Math.cos(a);
+  const ly = -Math.sin(a);
+  const k = 0.4 + 0.6 * Math.cos((fx.altitude * Math.PI) / 180);
+  const dep = Math.min(1.6, fx.depth / 100);
+  const parts: string[] = [];
+  const merge: string[] = [];
+  if (fx.drop) {
+    parts.push(
+      `<feOffset in="SourceAlpha" dx="${f(-lx * fx.dropDistance * sc)}" dy="${f(-ly * fx.dropDistance * sc)}" result="ds1"/>`,
+      `<feGaussianBlur in="ds1" stdDeviation="${f(Math.max(0.01, (fx.dropSize * sc) / 2))}" result="ds2"/>`,
+      `<feFlood flood-color="#000" flood-opacity="${f(fx.dropOpacity / 100)}"/>`,
+      `<feComposite in2="ds2" operator="in" result="ds"/>`,
+    );
+    merge.push("ds");
+  }
+  merge.push("SourceGraphic");
+  if (fx.inner) {
+    parts.push(
+      `<feOffset in="SourceAlpha" dx="${f(-lx * fx.innerDistance * sc)}" dy="${f(-ly * fx.innerDistance * sc)}" result="is1"/>`,
+      `<feGaussianBlur in="is1" stdDeviation="${f(Math.max(0.01, (fx.innerSize * sc) / 2))}" result="is2"/>`,
+      `<feComposite in="SourceAlpha" in2="is2" operator="out" result="is3"/>`,
+      `<feFlood flood-color="#000" flood-opacity="${f(fx.innerOpacity / 100)}"/>`,
+      `<feComposite in2="is3" operator="in" result="is"/>`,
+    );
+    merge.push("is");
+  }
+  if (fx.bevel) {
+    const d = Math.max(0.6, (1 + fx.size * 0.5) * dep * sc * 1.2);
+    const sign = fx.dir === "down" ? 1 : -1;
+    const bx = -lx * d * sign;
+    const by = -ly * d * sign;
+    const soft = Math.max(0.01, fx.size * sc * 0.4);
+    parts.push(
+      `<feOffset in="SourceAlpha" dx="${f(bx)}" dy="${f(by)}" result="b1"/>`,
+      `<feComposite in="SourceAlpha" in2="b1" operator="out" result="b2"/>`,
+      `<feGaussianBlur in="b2" stdDeviation="${f(soft)}" result="b3"/>`,
+      `<feFlood flood-color="#3a2a10" flood-opacity="${f(Math.min(1, (fx.shadow / 100) * k * dep))}"/>`,
+      `<feComposite in2="b3" operator="in" result="bs"/>`,
+      `<feOffset in="SourceAlpha" dx="${f(-bx)}" dy="${f(-by)}" result="h1"/>`,
+      `<feComposite in="SourceAlpha" in2="h1" operator="out" result="h2"/>`,
+      `<feGaussianBlur in="h2" stdDeviation="${f(soft)}" result="h3"/>`,
+      `<feFlood flood-color="#fff" flood-opacity="${f(Math.min(1, (fx.highlight / 100) * k * dep))}"/>`,
+      `<feComposite in2="h3" operator="in" result="bh"/>`,
+    );
+    merge.push("bs", "bh");
+  }
+  return `${parts.join("")}<feMerge>${merge.map((m) => `<feMergeNode in="${m}"/>`).join("")}</feMerge>`;
+}
+
 export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   enabled: false,
   maxChars: 10,
@@ -233,6 +446,7 @@ export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   autoUpper: false,
   symbols: [],
   embossFx: DEFAULT_EMBOSS_FX,
+  foilFx: DEFAULT_FOIL_FX,
 };
 
 const KEY_RE = /^[\w\-./%()]+$/;
@@ -292,6 +506,7 @@ export function normalizePersonalize(raw: unknown): PersonalizeConfig {
     autoUpper: r.autoUpper === true,
     symbols: parsePersonalizeSymbols(r.symbols),
     embossFx: normalizeEmbossFx(r.embossFx),
+    foilFx: normalizeFoilFxPair(r.foilFx),
   };
 }
 
