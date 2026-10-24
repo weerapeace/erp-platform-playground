@@ -6,6 +6,8 @@
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
+// ⚠️ ต้องเรียก API ด้วย apiFetch (แนบ token) — ล็อกอิน ERP อยู่ใน localStorage ไม่ใช่ cookie · fetch ธรรมดา/ลิงก์ <a href> = เซิร์ฟเวอร์คิดว่ายังไม่ล็อกอิน
 
 const ERR: Record<string, string> = {
   "not-ready": "ระบบยังไม่ได้ตั้งค่าบอท Discord — แจ้งแอดมิน",
@@ -25,7 +27,7 @@ export default function AccountDiscordPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch("/api/account/discord-link");
+      const r = await apiFetch("/api/account/discord-link");
       if (r.status === 401) { setNeedLogin(true); return; }
       const j = await r.json();
       if (j.error) setErr((e) => e || j.error); else setState(j);
@@ -42,8 +44,20 @@ export default function AccountDiscordPage() {
   const unlink = async () => {
     if (!window.confirm("ยกเลิกการผูก Discord? (กดติ๊กในแชทไม่ได้จนกว่าจะผูกใหม่)")) return;
     setBusy(true); setErr(""); setMsg("");
-    try { const r = await fetch("/api/account/discord-link", { method: "DELETE" }); const j = await r.json(); if (!r.ok || j.error) setErr(j.error || "ยกเลิกไม่สำเร็จ"); else { setMsg("ยกเลิกการผูกแล้ว"); await load(); } }
+    try { const r = await apiFetch("/api/account/discord-link", { method: "DELETE" }); const j = await r.json(); if (!r.ok || j.error) setErr(j.error || "ยกเลิกไม่สำเร็จ"); else { setMsg("ยกเลิกการผูกแล้ว"); await load(); } }
     catch { setErr("ยกเลิกไม่สำเร็จ"); } finally { setBusy(false); }
+  };
+  // เริ่มผูก: ขอลิงก์ยืนยันของ Discord ผ่าน API (แนบ token) แล้วพาไปหน้า Discord
+  const startLink = async () => {
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const r = await apiFetch("/api/account/discord-link/start?json=1");
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 401) { setNeedLogin(true); return; }
+      if (!r.ok || !j.url) { setErr(j.error || "เริ่มผูกบัญชีไม่สำเร็จ ลองใหม่อีกครั้ง"); return; }
+      window.location.href = j.url as string;
+    } catch { setErr("เริ่มผูกบัญชีไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -61,13 +75,13 @@ export default function AccountDiscordPage() {
             : state.linked ? (
               <div className="space-y-3">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">✓ ผูกกับ Discord <b>{state.discord_username ?? ""}</b> แล้ว</div>
-                <a href="/api/account/discord-link/start" className="block h-10 w-full rounded-xl border border-slate-200 text-center text-sm font-medium leading-10 text-slate-600 hover:bg-slate-50">ผูกกับบัญชี Discord อื่นแทน</a>
+                <button onClick={() => void startLink()} disabled={busy} className="h-10 w-full rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">ผูกกับบัญชี Discord อื่นแทน</button>
                 <button onClick={() => void unlink()} disabled={busy} className="h-10 w-full rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">{busy ? "..." : "ยกเลิกการผูก"}</button>
               </div>
             ) : !state.ready.link ? (
               <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">ระบบยังไม่ได้ตั้งค่าบอท Discord — แจ้งแอดมินให้ตั้งตามคู่มือก่อน</p>
             ) : (
-              <a href="/api/account/discord-link/start" className="block h-12 w-full rounded-xl bg-[#5865f2] text-center text-sm font-bold leading-[3rem] text-white hover:bg-[#4752c4]">🔗 ผูกบัญชี Discord</a>
+              <button onClick={() => void startLink()} disabled={busy} className="h-12 w-full rounded-xl bg-[#5865f2] text-sm font-bold text-white hover:bg-[#4752c4] disabled:opacity-60">{busy ? "กำลังพาไปหน้า Discord…" : "🔗 ผูกบัญชี Discord"}</button>
             )}
         </div>
         <p className="mt-4 text-[11px] text-slate-400">Discord จะถามยืนยัน — ระบบขอแค่ "รู้ว่าคุณคือใคร" ไม่อ่านแชทหรือส่งข้อความแทนคุณ</p>
