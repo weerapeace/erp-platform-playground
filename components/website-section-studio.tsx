@@ -6,21 +6,30 @@
  *   ซ้าย = หมวด (ตาม field.group ของ schema + รูปลักษณ์ + ลูกเล่น + รายการย่อย) บอกจำนวนช่อง · จุดส้ม = หมวดที่แก้แล้ว
  *   กลาง = ฟอร์มกลาง SchemaForm เฉพาะหมวดที่เลือก (2 คอลัมน์) · ค้นหาช่องข้ามหมวด · จุดส้มรายช่อง · คืนค่าเริ่มต้นหมวดนี้
  *   ขวา = พรีวิวสดของหน้า (iframe ตัวที่ 2 เลื่อนไปที่ Section นี้ · คอม/มือถือ) — ส่งโครงหน้าแบบ storefront-blocks-live เหมือนพรีวิวหลัก
+ *          ลากเส้นแบ่งปรับความกว้างพรีวิว (จำต่อคน lib/modal-layout-pref · ดับเบิลคลิก = ค่าเริ่ม) · ปุ่ม ⇔ กว้างสุด/คืนค่า
  *
  * ค่าเปลี่ยนสดเหมือนแผงขวา (onPatch ตัวเดียวกัน) · ไม่มีปุ่มบันทึกแยก — บันทึกร่าง/เผยแพร่ที่แถบบนของตัวจัดหน้าเหมือนเดิม
  * ไฟล์นี้ "ไม่รู้" ว่า Section มีช่องอะไร — อ่านจาก schema เหมือนแผงขวา · ของเฉพาะตัวจัดหน้า (รูปลักษณ์/ลูกเล่น/แถบแปล) ส่งมาเป็น ReactNode
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { GROUP_ORDER, SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { FIELD_GROUP_LABEL, fieldChanged, matchShowIf, type FieldDef, type FieldGroup, type SectionSchema } from "@/lib/website-schema";
+import { getLayoutPref, setLayoutPref } from "@/lib/modal-layout-pref";
 
 type Nav = FieldGroup | "style" | "motion" | "items";
 type StudioDevice = { k: string; w: number; h: number; icon: string; label: string };
 
 /** Section ที่มีช่องเยอะ (ปุ่ม ⤢ เด่นขึ้น) */
 export const STUDIO_SUGGEST_FIELDS = 15;
+/** ความกว้างพรีวิวที่ลากไว้ (จำต่อคน ทุกเครื่อง) */
+const PV_PREF = "website-studio-preview";
+const PV_MIN = 280;
+/** กว้างคอลัมน์หมวด + ช่องตั้งค่าขั้นต่ำ + เส้นแบ่ง (px) — พรีวิวกว้างได้สูงสุดเท่าที่เหลือ */
+const NAV_W = 180;
+const FIELDS_MIN = 320;
+const SPLIT_W = 14;
 
 const visibleFields = (fields: FieldDef[], value: Record<string, unknown>) => fields.filter((fd) => !fd.hidden && matchShowIf(fd, value));
 const hay = (fd: FieldDef) => [fd.label, fd.hint ?? "", ...(fd.options ?? []).map((o) => o.l)].join(" ").toLowerCase();
@@ -104,16 +113,19 @@ export function SectionStudio({
   };
 
   /* ── พรีวิวสด (iframe ตัวที่ 2) ── */
-  const boxRef = useRef<HTMLDivElement>(null);
+  // วัดกรอบพรีวิวตอนกรอบโผล่จริง (ERPModal วาดเนื้อหลัง mount — effect ธรรมดาเจอกรอบว่าง แล้วพรีวิวค้างย่อ 27%)
   const [box, setBox] = useState({ w: 400, h: 600 });
-  useEffect(() => {
-    const el = boxRef.current;
-    if (!open || !el) return;
-    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
+  const roRef = useRef<ResizeObserver | null>(null);
+  const boxRef = useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect();
+    roRef.current = null;
+    if (!el) return;
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setBox({ w: el.clientWidth, h: el.clientHeight });
-    return () => ro.disconnect();
-  }, [open]);
+    roRef.current = ro;
+    measure();
+  }, []);
   const device = devices.find((d) => d.k === dev) ?? devices[0];
   const scale = device ? Math.min(1, (box.w - 16) / device.w) : 1;
   const liveRef = useRef(false);
@@ -161,6 +173,19 @@ export function SectionStudio({
     return () => window.clearTimeout(t);
   }, [dev, scale, open, blockId, frameRef]);
 
+  /* ── ความกว้างพรีวิว (ลากเส้นแบ่ง) ── */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [pvW, setPvW] = useState<number | null>(() => getLayoutPref(PV_PREF)?.w ?? null);   // null = ค่าเริ่ม 38%
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef(false);   // อ่านใน pointermove ได้ทันที (state อัปเดตไม่ทันระหว่างลากเร็ว)
+  const maxPv = () => Math.max(PV_MIN, (gridRef.current?.clientWidth ?? 1200) - NAV_W - FIELDS_MIN - SPLIT_W);
+  const fitPv = (w: number) => Math.round(Math.max(PV_MIN, Math.min(maxPv(), w)));
+  const savePv = (w: number | null) => {
+    setPvW(w);
+    setLayoutPref(PV_PREF, w == null ? null : { w });
+  };
+  const isMaxPv = pvW != null && pvW >= maxPv() - 4;
+
   const navBtn = (k: Nav, label: string, count: number | null, changed: number | boolean) => (
     <button
       key={k}
@@ -192,7 +217,11 @@ export function SectionStudio({
       defaultExpanded
       storageKey="website-section-studio"
     >
-      <div className="grid h-full min-h-[480px] gap-3 grid-cols-1 lg:grid-cols-[180px_minmax(0,1fr)_minmax(320px,38%)]">
+      <div
+        ref={gridRef}
+        className="grid h-full min-h-[480px] gap-3 lg:gap-x-0 grid-cols-1 lg:grid-cols-[180px_minmax(320px,1fr)_14px_var(--pv-w)]"
+        style={{ ["--pv-w" as string]: pvW != null ? `min(${pvW}px, calc(100% - ${NAV_W + FIELDS_MIN + SPLIT_W}px))` : "minmax(320px,38%)" }}
+      >
         {/* ซ้าย: หมวด */}
         <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-y-auto lg:border-r lg:border-slate-200 lg:pr-3">
           <input
@@ -209,7 +238,7 @@ export function SectionStudio({
         </nav>
 
         {/* กลาง: ช่องตั้งค่า */}
-        <div className="min-w-0 overflow-y-auto pr-1">
+        <div className="min-w-0 overflow-y-auto pr-1 lg:pl-3">
           <div className="space-y-4">
             {contentTop}
             {query ? (
@@ -248,11 +277,53 @@ export function SectionStudio({
           </div>
         </div>
 
+        {/* เส้นแบ่ง: ลากปรับความกว้างพรีวิว · ดับเบิลคลิก = ค่าเริ่ม */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="ปรับความกว้างพรีวิว"
+          title="ลากเพื่อปรับความกว้างพรีวิว · ดับเบิลคลิก = ค่าเริ่ม"
+          className="group hidden lg:flex cursor-col-resize select-none items-center justify-center"
+          style={{ touchAction: "none" }}
+          onPointerDown={(e) => {
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              /* ไม่มี pointer จริง (เช่น สคริปต์) — ลากต่อได้ตามเดิม */
+            }
+            dragRef.current = true;
+            setDragging(true);
+          }}
+          onPointerMove={(e) => {
+            if (!dragRef.current || !gridRef.current) return;
+            setPvW(fitPv(gridRef.current.getBoundingClientRect().right - e.clientX - SPLIT_W / 2));
+          }}
+          onPointerUp={(e) => {
+            if (!dragRef.current || !gridRef.current) return;
+            dragRef.current = false;
+            setDragging(false);
+            savePv(fitPv(gridRef.current.getBoundingClientRect().right - e.clientX - SPLIT_W / 2));
+          }}
+          onDoubleClick={() => savePv(null)}
+        >
+          <span className={`h-16 w-1 rounded-full transition-colors ${dragging ? "bg-blue-500" : "bg-slate-200 group-hover:bg-blue-400"}`} />
+        </div>
+
         {/* ขวา: พรีวิวสด */}
         <div className="flex min-h-[360px] min-w-0 flex-col">
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-xs text-slate-500">พรีวิวสด</span>
+            <span className="text-xs text-slate-500">
+              พรีวิวสด <span className="text-slate-400">· {Math.round(scale * 100)}%</span>
+            </span>
             <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => savePv(isMaxPv ? null : fitPv(Number.MAX_SAFE_INTEGER))}
+                title={isMaxPv ? "คืนความกว้างพรีวิวเริ่มต้น" : "พรีวิวกว้างสุด (ช่องตั้งค่าแคบลง) — หรือลากเส้นแบ่งเอง"}
+                className={`hidden lg:inline-flex h-7 items-center rounded-md px-2 text-xs ${isMaxPv ? "bg-blue-600 text-white" : "border border-slate-200 text-slate-600 hover:border-slate-400"}`}
+              >
+                ⇔
+              </button>
               {devices.map((d) => (
                 <button key={d.k} type="button" onClick={() => setDev(d.k)} title={d.label} className={`h-7 rounded-md px-2 text-xs ${dev === d.k ? "bg-slate-900 text-white" : "border border-slate-200 text-slate-600 hover:border-slate-400"}`}>
                   {d.icon}
@@ -271,7 +342,7 @@ export function SectionStudio({
                   src={`${previewSrc}&_r=studio${nonce}`}
                   title="พรีวิว Section"
                   className="block border-0 bg-white"
-                  style={{ width: device.w, height: box.h / scale, transform: `scale(${scale})`, transformOrigin: "top left" }}
+                  style={{ width: device.w, height: box.h / scale, transform: `scale(${scale})`, transformOrigin: "top left", pointerEvents: dragging ? "none" : undefined }}
                 />
               </div>
             ) : (
