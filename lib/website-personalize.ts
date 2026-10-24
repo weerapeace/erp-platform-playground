@@ -50,6 +50,8 @@ export interface PersonalizeConfig {
   embossFx: PersonalizeEmbossFx;
   /** ✨ สี (สีเดียว/ไล่สี) + นูน/เงา ของพิมพ์เงิน/ทอง (ตั้งต่อรุ่น) */
   foilFx: Record<PersonalizeFoilStyle, PersonalizeFoilFx>;
+  /** 🎨 ค่าแยกตามสี (คีย์ = id SKU ลูก) — ไม่มี = ใช้ค่าหลัก */
+  colorOverrides: Record<string, PersonalizeColorOverride>;
 }
 export interface PersonalizeChoice {
   text: string;
@@ -432,6 +434,77 @@ export function personalizeFoilFilter(fx: PersonalizeFoilFx, fontPx: number): st
   return `${parts.join("")}<feMerge>${merge.map((m) => `<feMergeNode in="${m}"/>`).join("")}</feMerge>`;
 }
 
+/* ── 🎨 ค่าแยกตามสี (ตั้งต่อรุ่น) ──
+ * สีที่ "ตั้งค่าแยก" = ใช้ตำแหน่ง (x/y/ขนาด/เอียง/จัดชิด) + เอฟเฟกต์ (จม/เงิน/ทอง) ของสีนั้นแทนค่าหลัก
+ * สีที่ไม่ได้แยก = ใช้ค่าหลัก · ค่าที่ใช้ร่วมทุกสี: เปิด/ปิดตำแหน่ง · ชื่อตำแหน่ง · จำนวนตัวอักษร · ตัวที่ปั๊มได้ · ตัวพิเศษ · แบบที่ให้เลือก
+ * ERP เก็บด้วยรหัส SKU ลูก · เว็บร้านได้คีย์เป็นรหัสตัวเลือกสี ("sku-" + 8 ตัวแรก) จาก products API */
+export type PersonalizeColorPos = Pick<PersonalizePosition, "key" | "x" | "y" | "size" | "rotate" | "align">;
+export interface PersonalizeColorOverride {
+  positions: PersonalizeColorPos[];
+  embossFx: PersonalizeEmbossFx;
+  foilFx: Record<PersonalizeFoilStyle, PersonalizeFoilFx>;
+}
+export const PERSONALIZE_MAX_COLOR_OVERRIDES = 40;
+const COLOR_KEY_RE = /^[\w-]{1,64}$/;
+const ALIGN_SET = new Set<string>(["left", "center", "right"]);
+
+/** อ่านค่าแยกตามสีจาก DB (คีย์ผิด/เกิน = ตัดทิ้ง · ช่องที่ขาด = ค่าเริ่ม) */
+export function normalizeColorOverrides(raw: unknown): Record<string, PersonalizeColorOverride> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, PersonalizeColorOverride> = {};
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!COLOR_KEY_RE.test(key) || !v || typeof v !== "object") continue;
+    if (Object.keys(out).length >= PERSONALIZE_MAX_COLOR_OVERRIDES) break;
+    const r = v as Record<string, unknown>;
+    const rawPos = Array.isArray(r.positions) ? (r.positions as Record<string, unknown>[]) : [];
+    const positions: PersonalizeColorPos[] = [];
+    for (const k of ["center", "right"] as const) {
+      const p = rawPos.find((x) => x && typeof x === "object" && x.key === k);
+      if (!p) continue;
+      const n = (val: unknown, lo: number, hi: number, fb: number) => {
+        const x = Number(val);
+        return Number.isFinite(x) ? Math.min(hi, Math.max(lo, Math.round(x * 10) / 10)) : fb;
+      };
+      positions.push({
+        key: k,
+        x: n(p.x, 0, 100, 50),
+        y: n(p.y, 0, 100, 50),
+        size: n(p.size, 1, 30, 5),
+        rotate: n(p.rotate, -45, 45, 0),
+        align: (typeof p.align === "string" && ALIGN_SET.has(p.align) ? p.align : "center") as PersonalizeAlign,
+      });
+    }
+    out[key] = { positions, embossFx: normalizeEmbossFx(r.embossFx), foilFx: normalizeFoilFxPair(r.foilFx) };
+  }
+  return out;
+}
+
+/** เริ่มค่าแยกของสีจากค่าหลัก (ติ๊ก "ตั้งค่าแยกสำหรับสีนี้") */
+export function makeColorOverride(cfg: Pick<PersonalizeConfig, "positions" | "embossFx" | "foilFx">): PersonalizeColorOverride {
+  return {
+    positions: cfg.positions.map((p) => ({ key: p.key, x: p.x, y: p.y, size: p.size, rotate: p.rotate, align: p.align })),
+    embossFx: { ...cfg.embossFx },
+    foilFx: {
+      silver: { ...cfg.foilFx.silver, stops: cfg.foilFx.silver.stops.map((s) => ({ ...s })) },
+      gold: { ...cfg.foilFx.gold, stops: cfg.foilFx.gold.stops.map((s) => ({ ...s })) },
+    },
+  };
+}
+
+/** ค่าที่ใช้จริงของสีหนึ่ง = ค่าหลัก + ค่าแยกของสีนั้น (ไม่มีค่าแยก = ค่าหลักเดิม) */
+export function applyColorOverride<C extends Pick<PersonalizeConfig, "positions" | "embossFx" | "foilFx">>(cfg: C, ov: PersonalizeColorOverride | undefined): C {
+  if (!ov) return cfg;
+  return {
+    ...cfg,
+    positions: cfg.positions.map((p) => {
+      const o = ov.positions.find((x) => x.key === p.key);
+      return o ? { ...p, x: o.x, y: o.y, size: o.size, rotate: o.rotate, align: o.align } : p;
+    }),
+    embossFx: ov.embossFx,
+    foilFx: ov.foilFx,
+  };
+}
+
 export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   enabled: false,
   maxChars: 10,
@@ -447,6 +520,7 @@ export const DEFAULT_PERSONALIZE: PersonalizeConfig = {
   symbols: [],
   embossFx: DEFAULT_EMBOSS_FX,
   foilFx: DEFAULT_FOIL_FX,
+  colorOverrides: {},
 };
 
 const KEY_RE = /^[\w\-./%()]+$/;
@@ -507,6 +581,7 @@ export function normalizePersonalize(raw: unknown): PersonalizeConfig {
     symbols: parsePersonalizeSymbols(r.symbols),
     embossFx: normalizeEmbossFx(r.embossFx),
     foilFx: normalizeFoilFxPair(r.foilFx),
+    colorOverrides: normalizeColorOverrides(r.colorOverrides),
   };
 }
 

@@ -29,6 +29,7 @@ import {
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
+import { baseColor } from "@/lib/website-size-options";
 import { productDimensions, bilingualDimensions, fitLabels, type FitItem, type DimensionRow } from "@/lib/product-fits";
 import { fitNames, fitTargetOf, parseCompartments, withFitLines, type FitTarget } from "@/lib/fit-check";
 import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
@@ -255,9 +256,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const liveDrop = dropLive.get(code.toUpperCase());
       const detailOverrides = cleanDetailOverrides(l.web_details);
       // 🔤 ปั๊มชื่อ: ส่งเฉพาะรุ่นที่เปิดไว้ (รูปฉาก → URL · ไม่ได้เลือก = รูปแรกของสินค้า)
+      // 🎨 ค่าแยกตามสี: คีย์ id SKU ลูก → รหัสตัวเลือกสีที่เว็บใช้ (options.items[].id ของสีเดียวกัน — สีเดียวมีหลาย SKU ไซส์ได้)
       const pz = l.web_personalize ? normalizePersonalize(l.web_personalize) : null;
       const personalize = pz?.enabled
-        ? { ...pz, imageUrl: imageUrl(pz.imageKey ?? r.images[0] ?? p.cover_image_r2_key ?? ""), positions: pz.positions.filter((x) => x.enabled) }
+        ? {
+            ...pz,
+            imageUrl: imageUrl(pz.imageKey ?? r.images[0] ?? p.cover_image_r2_key ?? ""),
+            positions: pz.positions.filter((x) => x.enabled),
+            colorOverrides: (() => {
+              const optIdByColor = new Map((r.options?.items ?? []).map((it) => [it.label, it.id]));
+              return Object.fromEntries(
+                Object.entries(pz.colorOverrides).map(([skuId, o]) => {
+                  const kid = kids.find((k) => k.id === skuId);
+                  return [(kid && optIdByColor.get(baseColor(kid as unknown as Parameters<typeof baseColor>[0]))) ?? `sku-${skuId.slice(0, 8)}`, o];
+                }),
+              );
+            })(),
+          }
         : null;
       const attrs = productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues);
       return {

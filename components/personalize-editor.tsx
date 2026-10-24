@@ -5,6 +5,8 @@
  *   - เปิด/ปิด · จำนวนตัวอักษรสูงสุด · แบบที่อนุญาต (จม/เงิน/ทอง) · รูปฉาก
  *   - ตำแหน่ง 2 จุด (ตรงกลาง / มุมขวาล่าง): ลากข้อความบนรูปเพื่อวาง + จัดชิดซ้าย/กลาง/ขวา + ขนาด + เอียง · เปิด/ปิดแต่ละจุด
  *   - ตัวอักษร: ความห่าง · กลุ่มตัวที่ปั๊มได้ · เปลี่ยนเป็นตัวใหญ่อัตโนมัติ · ตัวพิเศษ (♥ ★ …)
+ *   - 🎨 แท็บ ⭐ ค่าหลัก (ทุกสี) / รายสี: ติ๊ก "ตั้งค่าแยกสำหรับสีนี้" = ตำแหน่ง (x/y/ขนาด/เอียง/จัดชิด) + เอฟเฟกต์ ของสีนั้นเอง
+ *        ไม่ติ๊ก = ใช้ค่าหลัก · ค่าที่ใช้ร่วม (เปิด/ปิดตำแหน่ง · ชื่อตำแหน่ง · ตัวอักษร) แก้ที่แท็บค่าหลักเท่านั้น
  *   - 🎚 เอฟเฟกต์ตัวอักษรแบบ Photoshop แยกแท็บ พิมพ์จม (Bevel & Emboss · Inner Shadow · Outer Glow)
  *        / เงิน · ทอง (สีเดียว/ไล่สี 2–6 ระดับ + Bevel & Emboss · Drop Shadow · Inner Shadow) — พรีวิวด้วย SVG ตัวเดียวกับเว็บร้าน
  *   - พรีวิวเหมือนเว็บจริง (ฟอนต์ Times New Roman + เอฟเฟกต์เดียวกัน)
@@ -24,7 +26,9 @@ import {
   FOIL_FX_RANGE,
   FOIL_MAX_STOPS,
   FOIL_PRESETS,
+  applyColorOverride,
   cleanPersonalizeText,
+  makeColorOverride,
   personalizeEmbossFilter,
   personalizeFoilCss,
   personalizeFoilFilter,
@@ -99,6 +103,7 @@ export function PersonalizeEditor({
   onChange,
   imageOptions,
   fallbackImageKey,
+  colors = [],
 }: {
   value: PersonalizeConfig;
   onChange: (next: PersonalizeConfig) => void;
@@ -106,6 +111,8 @@ export function PersonalizeEditor({
   imageOptions: { key: string; label: string }[];
   /** รูปที่เว็บจะใช้เมื่อไม่ได้เลือก (รูปแรกของสินค้า) */
   fallbackImageKey: string | null;
+  /** 🎨 สีของรุ่น (SKU ลูก) — id = คีย์ค่าแยกตามสี · imageKey = รูปที่เว็บใช้ตอนเลือกสีนั้น */
+  colors?: { id: string; label: string; imageKey: string | null }[];
 }) {
   const [preview, setPreview] = useState<PersonalizeStyle>(value.styles[0] ?? "emboss");
   const [active, setActive] = useState<PersonalizePosition["key"]>("center");
@@ -127,16 +134,42 @@ export function PersonalizeEditor({
     measure();
   }, []);
   const fxId = `pzfx-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
-  const setFx = (p: Partial<PersonalizeEmbossFx>) => set({ embossFx: { ...value.embossFx, ...p } });
+  // 🎨 แท็บสี: null = ค่าหลัก · ov = ค่าแยกของสีนั้น (ไม่มี = ใช้ค่าหลัก → ล็อกช่อง) · eff = ค่าที่ใช้จริงของแท็บนี้
+  const [colorTab, setColorTab] = useState<string | null>(null);
+  const tabColor = colors.find((c) => c.id === colorTab) ?? null;
+  const ov = tabColor ? value.colorOverrides[tabColor.id] : undefined;
+  const locked = !!tabColor && !ov;
+  const eff = applyColorOverride(value, ov);
+  const setOv = (p: Partial<NonNullable<typeof ov>>) => {
+    if (!tabColor || !ov) return;
+    set({ colorOverrides: { ...value.colorOverrides, [tabColor.id]: { ...ov, ...p } } });
+  };
+  const setFx = (p: Partial<PersonalizeEmbossFx>) => {
+    if (tabColor) setOv({ embossFx: { ...eff.embossFx, ...p } });
+    else set({ embossFx: { ...value.embossFx, ...p } });
+  };
   const svgStamp = stageSize.w > 0 && stageSize.h > 0;
-  const setFoil = (style: PersonalizeFoilStyle, p: Partial<PersonalizeFoilFx>) => set({ foilFx: { ...value.foilFx, [style]: { ...value.foilFx[style], ...p } } });
-  const previewFoil = preview === "emboss" ? null : value.foilFx[preview];
+  const setFoil = (style: PersonalizeFoilStyle, p: Partial<PersonalizeFoilFx>) => {
+    const foilFx = { ...eff.foilFx, [style]: { ...eff.foilFx[style], ...p } };
+    if (tabColor) setOv({ foilFx });
+    else set({ foilFx });
+  };
+  const previewFoil = preview === "emboss" ? null : eff.foilFx[preview];
   const textRefs = useRef<Partial<Record<PersonalizePosition["key"], HTMLDivElement | null>>>({});
   const [imgW, setImgW] = useState(600);
   const set = (p: Partial<PersonalizeConfig>) => onChange({ ...value, ...p });
-  const setPos = (key: PersonalizePosition["key"], p: Partial<PersonalizePosition>) =>
-    set({ positions: value.positions.map((x) => (x.key === key ? { ...x, ...p } : x)) });
-  const imageKey = value.imageKey ?? fallbackImageKey;
+  /** ตำแหน่ง: เปิด/ปิด + ชื่อ = ใช้ร่วมทุกสี (ค่าหลัก) · x/y/ขนาด/เอียง/จัดชิด = ของแท็บที่เปิด (สีที่แยกค่า หรือค่าหลัก) */
+  const setPos = (key: PersonalizePosition["key"], p: Partial<PersonalizePosition>) => {
+    const { enabled, label, ...geo } = p;
+    if (enabled !== undefined || label !== undefined) {
+      if (tabColor) return;
+      set({ positions: value.positions.map((x) => (x.key === key ? { ...x, ...(enabled !== undefined ? { enabled } : {}), ...(label !== undefined ? { label } : {}) } : x)) });
+    }
+    if (!Object.keys(geo).length || locked) return;
+    if (tabColor && ov) setOv({ positions: ov.positions.map((x) => (x.key === key ? { ...x, ...geo } : x)) });
+    else if (!tabColor) set({ positions: value.positions.map((x) => (x.key === key ? { ...x, ...geo } : x)) });
+  };
+  const imageKey = tabColor?.imageKey ?? value.imageKey ?? fallbackImageKey;
   const shown = cleanPersonalizeText(sample, value) ?? "YOUR NAME";
 
   /** เปลี่ยนการจัด → ขยับจุดยึดให้ข้อความตัวอย่างอยู่ที่เดิม (ไม่กระโดด) */
@@ -151,6 +184,7 @@ export function PersonalizeEditor({
   // ลากข้อความบนรูป → x/y เป็น % ของรูป
   const dragging = useRef(false);
   const onDown = (e: React.PointerEvent) => {
+    if (locked) return;
     dragging.current = true;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -196,6 +230,62 @@ export function PersonalizeEditor({
         </div>
       </div>
 
+      {/* 🎨 แท็บ ค่าหลัก / รายสี */}
+      {value.enabled && colors.length > 1 && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-2 space-y-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button type="button" onClick={() => setColorTab(null)} className={chip(!tabColor)}>
+              ⭐ ค่าหลัก (ทุกสี)
+            </button>
+            {colors.map((c) => (
+              <button key={c.id} type="button" onClick={() => setColorTab(c.id)} className={`${chip(colorTab === c.id)} inline-flex items-center gap-1.5`}>
+                {c.imageKey && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={keyUrl(c.imageKey, 80)} alt="" className="w-4 h-4 rounded-full object-cover" />
+                )}
+                {c.label}
+                {value.colorOverrides[c.id] && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-700">แยก</span>}
+              </button>
+            ))}
+          </div>
+          {tabColor ? (
+            <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+              <label className="flex items-center gap-2 text-slate-700">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-orange-500"
+                  checked={!!ov}
+                  onChange={(e) => {
+                    const next = { ...value.colorOverrides };
+                    if (e.target.checked) next[tabColor.id] = makeColorOverride(value);
+                    else delete next[tabColor.id];
+                    set({ colorOverrides: next });
+                  }}
+                />
+                ตั้งค่าแยกสำหรับสี &quot;{tabColor.label}&quot; <span className="text-slate-400">(ตำแหน่ง + เอฟเฟกต์)</span>
+              </label>
+              {ov ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = { ...value.colorOverrides };
+                    delete next[tabColor.id];
+                    set({ colorOverrides: next });
+                  }}
+                  className="text-[11px] text-orange-600 hover:underline"
+                >
+                  ↺ กลับไปใช้ค่าหลัก
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-400">ตอนนี้ = ตามค่าหลัก (แก้ค่าหลักแล้วสีนี้เปลี่ยนตาม)</span>
+              )}
+            </div>
+          ) : (
+            <p className="text-[11px] text-slate-400">ค่าหลักใช้กับทุกสีที่ไม่ได้ตั้งแยก · กดแท็บสีเพื่อดูบนรูปของสีนั้น หรือตั้งค่าแยกเฉพาะสี</p>
+          )}
+        </div>
+      )}
+
       {value.enabled && (
         <div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-3">
           {/* พรีวิว + ลากวางตำแหน่ง */}
@@ -218,7 +308,7 @@ export function PersonalizeEditor({
               ) : (
                 <div className="aspect-square flex items-center justify-center text-sm text-slate-400">ยังไม่มีรูปสินค้า</div>
               )}
-              {value.positions.filter((p) => p.enabled).map((p) => (
+              {eff.positions.filter((p) => p.enabled).map((p) => (
                 <div
                   key={p.key}
                   ref={(el) => {
@@ -245,7 +335,7 @@ export function PersonalizeEditor({
               {/* 🎚 วาดด้วย SVG ตัวเดียวกับเว็บร้าน — พิมพ์จม (personalizeEmbossFilter) · เงิน/ทอง (สี + personalizeFoilFilter) */}
               {svgStamp && (
                 <svg className="absolute left-0 top-0 pointer-events-none overflow-visible" width={stageSize.w} height={stageSize.h} viewBox={`0 0 ${stageSize.w} ${stageSize.h}`} aria-hidden>
-                  {value.positions.filter((p) => p.enabled).map((p) => {
+                  {eff.positions.filter((p) => p.enabled).map((p) => {
                     const fontPx = (stageSize.w * p.size) / 100;
                     const x = (stageSize.w * p.x) / 100;
                     const y = (stageSize.h * p.y) / 100;
@@ -259,7 +349,7 @@ export function PersonalizeEditor({
                             width="160%"
                             height="220%"
                             colorInterpolationFilters="sRGB"
-                            dangerouslySetInnerHTML={{ __html: previewFoil ? personalizeFoilFilter(previewFoil, fontPx) : personalizeEmbossFilter(value.embossFx, fontPx) }}
+                            dangerouslySetInnerHTML={{ __html: previewFoil ? personalizeFoilFilter(previewFoil, fontPx) : personalizeEmbossFilter(eff.embossFx, fontPx) }}
                           />
                           {previewFoil?.mode === "gradient" && (
                             <linearGradient id={`${fxId}-g-${p.key}`} {...personalizeFoilGradientEnds(previewFoil.gradAngle)}>
@@ -290,7 +380,7 @@ export function PersonalizeEditor({
                 </svg>
               )}
               {/* จุดยึดของตำแหน่งที่กำลังแก้ (ข้อความเริ่ม/กลาง/จบที่จุดนี้ตามการจัด) */}
-              {value.positions.filter((p) => p.enabled && p.key === active).map((p) => (
+              {eff.positions.filter((p) => p.enabled && p.key === active).map((p) => (
                 <span key={`dot-${p.key}`} className="absolute w-2 h-2 -ml-1 -mt-1 rounded-full bg-orange-500 ring-2 ring-white pointer-events-none" style={{ left: `${p.x}%`, top: `${p.y}%` }} title="จุดยึด" />
               ))}
             </div>
@@ -302,12 +392,13 @@ export function PersonalizeEditor({
           </div>
 
           <div className="space-y-2">
-            {/* ตำแหน่ง 2 จุด */}
-            {value.positions.map((p) => (
+            {/* ตำแหน่ง 2 จุด — แท็บสีที่ยังไม่แยกค่า = ล็อก (ดูค่าหลัก) · เปิด/ปิด + ชื่อ แก้ที่ค่าหลักเท่านั้น */}
+            <fieldset disabled={locked} className={`space-y-2 ${locked ? "opacity-60" : ""}`}>
+            {eff.positions.map((p) => (
               <div key={p.key} className={`rounded-lg border p-2 space-y-1.5 ${active === p.key ? "border-orange-300 bg-orange-50/40" : "border-slate-200"}`} onClick={() => setActive(p.key)}>
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" className="w-4 h-4 accent-orange-500" checked={p.enabled} onChange={(e) => setPos(p.key, { enabled: e.target.checked })} title="ให้ลูกค้าเลือกตำแหน่งนี้ได้" />
-                  <input value={p.label} onChange={(e) => setPos(p.key, { label: e.target.value })} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm" placeholder={p.key === "center" ? "ตรงกลาง" : "มุมขวาล่าง"} />
+                  <input type="checkbox" className="w-4 h-4 accent-orange-500" checked={p.enabled} disabled={!!tabColor} onChange={(e) => setPos(p.key, { enabled: e.target.checked })} title={tabColor ? "เปิด/ปิดตำแหน่ง แก้ที่แท็บค่าหลัก (ใช้ร่วมทุกสี)" : "ให้ลูกค้าเลือกตำแหน่งนี้ได้"} />
+                  <input value={p.label} disabled={!!tabColor} onChange={(e) => setPos(p.key, { label: e.target.value })} className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50" placeholder={p.key === "center" ? "ตรงกลาง" : "มุมขวาล่าง"} />
                   <span className="text-[11px] text-slate-400">x {p.x}% · y {p.y}%</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
@@ -322,9 +413,10 @@ export function PersonalizeEditor({
                 </div>
               </div>
             ))}
+            </fieldset>
 
-            {/* ตัวอักษร */}
-            <div className="rounded-lg border border-slate-200 p-2 space-y-2">
+            {/* ตัวอักษร — ใช้ร่วมทุกสี (แก้ที่แท็บค่าหลัก) */}
+            <fieldset disabled={!!tabColor} className={`rounded-lg border border-slate-200 p-2 space-y-2 ${tabColor ? "opacity-60" : ""}`}>
               <p className="text-xs font-medium text-slate-700">ตัวอักษร</p>
               <RangeInput label={<span className="text-[11px] text-slate-500">ความห่างตัวอักษร</span>} min={0} max={0.5} step={0.01} unit="em" value={value.letterSpacing} onChange={(v) => set({ letterSpacing: Math.min(0.5, Math.max(0, v)) })} />
               <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500">
@@ -364,15 +456,16 @@ export function PersonalizeEditor({
                 />
                 <p className="text-[11px] text-slate-400 mt-1">ตัวละ 1 ตัวอักษร · สูงสุด 24 ตัว · ใส่เฉพาะตัวที่โรงงานมีบล็อกปั๊ม · ตัวที่ไม่ได้ติ๊ก/ไม่ได้ใส่ ลูกค้าจะพิมพ์ไม่ได้และขึ้นเตือน</p>
               </div>
-            </div>
+              {tabColor && <p className="text-[11px] text-slate-400">ตัวอักษรใช้ร่วมทุกสี — แก้ที่แท็บ ⭐ ค่าหลัก</p>}
+            </fieldset>
 
             {/* 🎚 เอฟเฟกต์ตัวอักษร (แบบ Photoshop Layer Style) — แท็บตามแบบที่เปิด · เลือกแท็บ = พรีวิวซ้ายเป็นแบบนั้น */}
             {value.styles.length > 0 && (
-              <div className="rounded-lg border border-slate-200 p-2 space-y-2">
+              <fieldset disabled={locked} className={`rounded-lg border border-slate-200 p-2 space-y-2 ${locked ? "opacity-60" : ""}`}>
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium text-slate-700">🎚 เอฟเฟกต์ตัวอักษร <span className="font-normal text-slate-400">(แบบ Photoshop · ตั้งต่อรุ่น)</span></p>
                   {preview === "emboss" ? (
-                    <button type="button" onClick={() => set({ embossFx: { ...DEFAULT_EMBOSS_FX } })} className="text-[11px] text-orange-600 hover:underline" title="ค่าที่ตั้งใน Photoshop (Depth 136 · Angle 119 · Inner Shadow 18/12/21 · Outer Glow 61/5/5)">
+                    <button type="button" onClick={() => setFx({ ...DEFAULT_EMBOSS_FX })} className="text-[11px] text-orange-600 hover:underline" title="ค่าที่ตั้งใน Photoshop (Depth 136 · Angle 119 · Inner Shadow 18/12/21 · Outer Glow 61/5/5)">
                       ↺ กลับค่า Photoshop
                     </button>
                   ) : (
@@ -393,13 +486,13 @@ export function PersonalizeEditor({
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                   ทิศ (Direction):
                   {(["down", "up"] as const).map((d) => (
-                    <button key={d} type="button" onClick={() => setFx({ dir: d })} className={chip(value.embossFx.dir === d)}>
+                    <button key={d} type="button" onClick={() => setFx({ dir: d })} className={chip(eff.embossFx.dir === d)}>
                       {d === "down" ? "Down · ยุบลง" : "Up · นูนขึ้น"}
                     </button>
                   ))}
                 </div>
                 {FX_LAYERS.map((layer) => {
-                  const on = layer.key ? value.embossFx[layer.key] : true;
+                  const on = layer.key ? eff.embossFx[layer.key] : true;
                   return (
                     <div key={layer.title} className={`rounded-md border px-2 py-1.5 ${on ? "border-slate-200" : "border-dashed border-slate-200 opacity-60"}`}>
                       <label className="flex items-center gap-2 text-[11px] font-medium text-slate-700">
@@ -416,7 +509,7 @@ export function PersonalizeEditor({
                               max={EMBOSS_FX_RANGE[k][1]}
                               step={1}
                               unit={unit}
-                              value={value.embossFx[k]}
+                              value={eff.embossFx[k]}
                               onChange={(v) => setFx({ [k]: Math.round(Math.min(EMBOSS_FX_RANGE[k][1], Math.max(EMBOSS_FX_RANGE[k][0], v))) })}
                             />
                           ))}
@@ -533,8 +626,8 @@ export function PersonalizeEditor({
                     </>
                   )
                 )}
-                <p className="text-[11px] text-slate-400">ค่า px อ้างอิงตัวอักษรสูง 100px แล้วย่อ/ขยายตามขนาดจริงบนรูป · ตั้งต่อรุ่น (หนังแต่ละสี/ผิวจูนต่างกันได้) · ปรับแล้วพรีวิวซ้ายเปลี่ยนทันที</p>
-              </div>
+                <p className="text-[11px] text-slate-400">ค่า px อ้างอิงตัวอักษรสูง 100px แล้วย่อ/ขยายตามขนาดจริงบนรูป · ตั้งต่อรุ่น/แยกตามสีได้ (แท็บสีด้านบน) · ปรับแล้วพรีวิวซ้ายเปลี่ยนทันที</p>
+              </fieldset>
             )}
             <p className="text-[11px] text-slate-400">ลากข้อความบนรูปซ้ายมือเพื่อวางตำแหน่ง · ลูกค้าจะเลือกได้เฉพาะจุดที่ติ๊กไว้ · ขนาดเป็น % ของรูป จะได้เท่ากันทุกจอ · รูปทุกสีของรุ่นนี้ควรถ่ายมุมเดียวกัน</p>
           </div>
