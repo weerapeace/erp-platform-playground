@@ -14,6 +14,7 @@
  * หน้าที่มีแถบบันทึกของตัวเองอยู่แล้ว (เช่น ดีไซน์) ใช้ useReportUnsaved(dirty) แจ้ง guard อย่างเดียวได้
  */
 import { createContext, useCallback, useContext, useEffect, useId, useRef, type ReactNode } from "react";
+import { useLang, useT } from "@/components/i18n";
 
 /* ── UnsavedGuard: หน้าแม่รู้ว่ามีแท็บไหนยังไม่บันทึก ── */
 type Register = (id: string, dirty: boolean) => void;
@@ -49,7 +50,7 @@ export function useReportUnsaved(dirty: boolean) {
   }, [dirty]);
 }
 
-const hhmm = (d: Date) => d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+const hhmm = (d: Date, lang: string) => d.toLocaleTimeString(lang === "en" ? "en-GB" : "th-TH", { hour: "2-digit", minute: "2-digit" });
 
 export function SaveBar({
   dirty,
@@ -60,7 +61,7 @@ export function SaveBar({
   error,
   savedAt,
   note,
-  saveLabel = "💾 บันทึก",
+  saveLabel,
   extra,
 }: {
   /** มีของที่ยังไม่บันทึก (auto = แก้แล้วรอบันทึก) */
@@ -81,29 +82,31 @@ export function SaveBar({
   extra?: ReactNode;
 }) {
   useReportUnsaved(dirty || !!error);
+  const t = useT();
+  const { lang } = useLang();
   const auto = mode === "auto";
   const status = saving ? (
-    <span className="text-slate-500">กำลังบันทึก…</span>
+    <span className="text-slate-500">{t("กำลังบันทึก…", "Saving…")}</span>
   ) : error ? (
-    <span className="text-red-600">⚠ บันทึกไม่สำเร็จ — {error}</span>
+    <span className="text-red-600">⚠ {t("บันทึกไม่สำเร็จ", "Save failed")} — {error}</span>
   ) : dirty ? (
-    <span className="text-amber-700 font-medium">{auto ? "มีการแก้ไข — กำลังจะบันทึกอัตโนมัติ" : "มีการแก้ไขที่ยังไม่บันทึก"}</span>
+    <span className="text-amber-700 font-medium">{auto ? t("มีการแก้ไข — กำลังจะบันทึกอัตโนมัติ", "Changed — saving automatically soon") : t("มีการแก้ไขที่ยังไม่บันทึก", "You have unsaved changes")}</span>
   ) : (
     <span className="text-emerald-700">
-      ✓ {auto ? "บันทึกอัตโนมัติแล้ว" : "บันทึกแล้ว"}
-      {savedAt ? ` ${hhmm(savedAt)}` : ""}
+      ✓ {auto ? t("บันทึกอัตโนมัติแล้ว", "Saved automatically") : t("บันทึกแล้ว", "Saved")}
+      {savedAt ? ` ${hhmm(savedAt, lang)}` : ""}
     </span>
   );
   const canSave = (dirty || !!error) && !saving;
   return (
-    <div className="sticky bottom-0 z-20 mt-4 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm" role="region" aria-label="บันทึก">
+    <div className="sticky bottom-0 z-20 mt-4 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm" role="region" aria-label={t("บันทึก", "Save")}>
       <span className="text-xs">{status}</span>
       {note && <span className="text-[11px] text-slate-400">{note}</span>}
       <div className="ml-auto flex items-center gap-2">
         {extra}
         {onDiscard && !auto && (
           <button type="button" onClick={onDiscard} disabled={!dirty || saving} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40">
-            ละทิ้งการเปลี่ยนแปลง
+            {t("ละทิ้งการเปลี่ยนแปลง", "Discard changes")}
           </button>
         )}
         <button
@@ -112,7 +115,7 @@ export function SaveBar({
           disabled={!canSave}
           className={`px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-40 ${canSave ? "bg-blue-600 text-white hover:bg-blue-700" : "border border-slate-200 text-slate-500"}`}
         >
-          {saving ? "กำลังบันทึก…" : auto ? (error ? "↻ ลองบันทึกอีกครั้ง" : "💾 บันทึกเดี๋ยวนี้") : saveLabel}
+          {saving ? t("กำลังบันทึก…", "Saving…") : auto ? (error ? t("↻ ลองบันทึกอีกครั้ง", "↻ Try saving again") : t("💾 บันทึกเดี๋ยวนี้", "💾 Save now")) : (saveLabel ?? t("💾 บันทึก", "💾 Save"))}
         </button>
       </div>
     </div>

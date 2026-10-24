@@ -14,9 +14,9 @@ export type PrintType = { id: string; code: string; name: string; default_w: num
 const SEL = "id, code, name, default_w, default_h, unit, drive_subpath, sort_order";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  // อ่านได้ทั้งคนใช้คลัง (assets.view) และคนสร้างงานเรียงพิมพ์ (tasks.view) — เป็น lookup กลาง
-  if (!(await apiCan(request, "assets.view")) && !(await apiCan(request, "tasks.view")))
-    return NextResponse.json({ data: [], error: "ต้องเข้าสู่ระบบและมีสิทธิ์ใช้งาน (assets.view หรือ tasks.view)" }, { status: 401 });
+  // อ่านได้ทั้งคนใช้คลัง (assets.view) คนสร้างงานเรียงพิมพ์ (tasks.view) และคนจัดเรียงงานพิมพ์ (nesting.view) — เป็น lookup กลาง
+  if (!(await apiCan(request, "assets.view")) && !(await apiCan(request, "tasks.view")) && !(await apiCan(request, "nesting.view")))
+    return NextResponse.json({ data: [], error: "ต้องเข้าสู่ระบบและมีสิทธิ์ใช้งาน (assets.view หรือ tasks.view หรือ nesting.view)" }, { status: 401 });
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_print_types")
     .select(SEL)
