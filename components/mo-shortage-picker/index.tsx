@@ -9,9 +9,11 @@
  *
  * ข้อมูลจาก /api/mo/purchase-needs?code= (ต้องซื้อ − ขอซื้อไปแล้ว ต่อใบ · ใบที่ขอครบแล้วแยกเป็น covered_mos)
  * ติ๊กใบงาน → ส่งรายการใบที่เลือก + ยอดขาดรวม (ปัดขึ้น 2 ตำแหน่ง กันซื้อขาด) กลับไปให้หน้าที่ใช้
+ * ของกลางที่ใช้: apiFetch · HoverImage (รูปสินค้าของใบงาน)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { HoverImage } from "@/components/hover-image";
 import type { PurchaseNeedRow, PurchaseNeedMo } from "@/app/api/mo/purchase-needs/route";
 
 export type MoPick = { no: string; label: string };
@@ -103,6 +105,8 @@ export function MoShortageList({ shortage, uom, value, onChange }: {
                 <button key={m.mo_no} type="button" onClick={() => toggle(m.mo_no)}
                   className={`w-full text-left px-2.5 py-2 flex items-center gap-2.5 hover:bg-slate-50 ${on ? "bg-blue-50/60" : ""}`}>
                   <span className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold ${on ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
+                  {/* รูปสินค้าของใบงาน — ชี้เมาส์ดูรูปใหญ่ · แตะรูป = เต็มจอ (ไม่ติ๊กแถว) */}
+                  <HoverImage url={m.product_image} size={36} previewSize={224} alt={m.product_label} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-slate-700">{m.mo_no}</span>
                     <span className="block text-xs text-slate-500 truncate">
