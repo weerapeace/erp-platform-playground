@@ -1507,6 +1507,12 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
       return safeTarget(v);
     case "number":
     case "range":
+      if (fd.decimals) {
+        // ทศนิยม (เช่น วินาที 0.3) — ตัดเข้าช่วง + ปัดตามจำนวนตำแหน่ง
+        const n = Number(v);
+        const p = 10 ** Math.min(3, fd.decimals);
+        return Number.isFinite(n) ? Math.round(Math.max(fd.min ?? 0, Math.min(fd.numMax ?? 999999, n)) * p) / p : (fb as number);
+      }
       return num(v, fb as number, fd.min ?? 0, fd.numMax ?? 999999);
     case "select":
       return pickOne(v, (fd.options ?? []).map((o) => o.v), fb as string);
@@ -1549,6 +1555,18 @@ export function sanitizeField(fd: FieldDef, v: unknown): unknown {
     }
     case "skus":
       return Array.isArray(v) ? [...new Set(v.map((x) => skuRefStr(x)).filter(Boolean))].slice(0, fd.max ?? 24) : [];
+    case "categoryImageLists": {
+      // { รหัสหมวด: r2 key[] } — รูปวนรายหมวด · หมวดละไม่เกิน 8 รูป (ไม่ซ้ำ) · สูงสุด 80 หมวด
+      const out: Record<string, string[]> = {};
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 80)) {
+          const key = codeStr(k, 40).toLowerCase();
+          const list = [...new Set((Array.isArray(x) ? x : []).map(imgKey).filter((s): s is string => !!s))].slice(0, 8);
+          if (key && list.length) out[key] = list;
+        }
+      }
+      return out;
+    }
     case "categoryNames": {
       // { รหัสหมวด: ชื่อ } — ชื่อว่าง/รหัสใช้ไม่ได้ถูกตัดทิ้ง · ชื่อยาวสุด 60 ตัว · สูงสุด 80 หมวด
       const out: Record<string, string> = {};

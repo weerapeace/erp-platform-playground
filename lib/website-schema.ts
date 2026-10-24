@@ -80,6 +80,7 @@ export type FieldType =
   | "categoryImages" // รูปแทนรายหมวด { รหัสหมวด: r2 key } — ตั้งในช่อง categories ของ Section เดียวกัน (ไม่วาดช่องแยก · ต้อง hidden)
   | "categoryNames" // ชื่อแทนรายหมวด { รหัสหมวด: ชื่อ } — ตั้งในช่อง categories ของ Section เดียวกัน (✏️ ที่แถว · ต้อง hidden)
   | "productImages" // รูปรายรุ่น { รหัสรุ่น: r2 key } — ตั้งที่แถวของช่อง products ที่มี rowImages (ไม่วาดช่องแยก · ต้อง hidden)
+  | "categoryImageLists" // รูปวนรายหมวด { รหัสหมวด: r2 key[] } — ตั้งในช่อง categories ของ Section เดียวกัน (🔁 ที่แถว · ต้อง hidden)
   | "crop" // ส่วนที่เห็นของรูปในกรอบ { x, y, zoom } — ลากกรอบ/ซูม (ImageCropBox) · ต้องตั้ง cropImage (+ cropRatio)
   | "code" // HTML+CSS ที่วางเอง (ล้างด้วย lib/website-html.ts)
   | "datetime" // วันเวลา (เวลาไทย) เก็บ "YYYY-MM-DDTHH:mm" — ช่องกลาง ERPDateTime24
@@ -135,6 +136,8 @@ export interface FieldDef {
   min?: number;
   numMax?: number;
   step?: number;
+  /** ตัวเลข/แถบเลื่อน: ทศนิยมกี่ตำแหน่ง (ไม่ตั้ง = จำนวนเต็ม) เช่น วินาที 0.3 */
+  decimals?: number;
   options?: FieldOption[];
   /** ช่องกว้างเต็มแถว (ค่าเริ่มต้น = ครึ่งแถวสำหรับ text/select/number) */
   wide?: boolean;
@@ -3712,11 +3715,13 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         ],
         hint: "รูปของแต่ละหมวดตั้งที่แท็บ 📂 หมวดหมู่ (ไม่มีรูป = ใช้ไอคอน)",
       }),
-      f("cats", "หมวดที่โชว์", "categories", { group: "content", wide: true, hint: "ไม่เลือก = ทุกหมวดหลัก ตามลำดับในแท็บ 📂 หมวดหมู่ · ลาก ⠿ เรียงลำดับ · ✏️ = แก้ชื่อที่โชว์ · 🖼 = ตั้งรูปบนการ์ด (ทั้งสองอย่างเฉพาะ Section นี้ · ไม่ตั้ง = ตามแท็บ 📂)" }),
+      f("cats", "หมวดที่โชว์", "categories", { group: "content", wide: true, hint: "ไม่เลือก = ทุกหมวดหลัก ตามลำดับในแท็บ 📂 หมวดหมู่ · ลาก ⠿ เรียงลำดับ · ✏️ = แก้ชื่อที่โชว์ · 🖼 = ตั้งรูปบนการ์ด + รูปที่วนเมื่อเอาเมาส์วาง (เฉพาะ Section นี้ · ไม่ตั้ง = ตามแท็บ 📂)" }),
       // รูปแทนรายหมวด (แก้ในช่อง "หมวดที่โชว์" ด้านบน) — หน้าร้านใช้แทน imageKey ของหมวด
       f("catImg", "รูปบนการ์ดรายหมวด", "categoryImages", { group: "content", hidden: true, default: {} }),
       // ชื่อแทนรายหมวด (✏️ ในช่อง "หมวดที่โชว์") — หน้าร้านใช้แทนชื่อหมวด (ทั้ง 2 ภาษา) · ไม่ตั้ง = ชื่อจากแท็บ 📂
       f("catName", "ชื่อบนการ์ดรายหมวด", "categoryNames", { group: "content", hidden: true, default: {} }),
+      // 🔁 รูปที่วนเมื่อเอาเมาส์วาง รายหมวด (🖼 ในช่อง "หมวดที่โชว์" · เปิด "เปลี่ยนรูปเมื่อเอาเมาส์วาง" ก่อน) — ไม่ตั้ง = รูปสินค้าในหมวด
+      f("cycleImg", "รูปวนรายหมวด", "categoryImageLists", { group: "content", hidden: true, default: {} }),
       f("subs", "หมวดย่อยใต้การ์ด", "select", {
         group: "content",
         default: "none",
@@ -3763,6 +3768,39 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         step: 5,
         hint: "100 = ปกติ · น้อยกว่า = รูปเล็กลง · มากกว่า = ขยาย",
         showIf: { key: "layout", eq: ["tile", "row", "icon"] },
+      }),
+      // 🔁 การ์ดรูปใหญ่: เอาเมาส์วางแล้วรูปเปลี่ยนไปเรื่อย ๆ (เจ้าของขอ 2026-10-24 · ดู widget แล้วเลือก ซูมเข้า 0.3 วิ)
+      //   รูปวนรายหมวด = cycleImg (🔁 ในช่อง "หมวดที่โชว์") · ไม่ตั้ง = รูปสินค้าในหมวด 4 รูปแรก · เว็บร้าน: CatCycle
+      f("cycle", "🔁 เปลี่ยนรูปเมื่อเอาเมาส์วาง", "toggle", {
+        group: "layout",
+        default: false,
+        showIf: TILE_ONLY,
+        hint: "รูปที่วนของแต่ละหมวด ตั้งที่ 🖼 ในช่อง \"หมวดที่โชว์\" · ไม่ตั้ง = รูปสินค้าในหมวด 4 รูปแรก",
+      }),
+      f("cycleFx", "เอฟเฟกต์ตอนเปลี่ยนรูป", "select", {
+        group: "layout",
+        default: "in",
+        display: "seg",
+        options: [
+          { v: "in", l: "ซูมเข้า" },
+          { v: "out", l: "ซูมออก" },
+          { v: "fade", l: "จางเฉย ๆ" },
+          { v: "slide", l: "เลื่อน" },
+        ],
+        hint: "ซูมต่อเนื่องตลอดที่เอาเมาส์วาง (รูปใหม่ซูมต่อจากรูปก่อน ไม่สะดุด)",
+        showIf: [TILE_ONLY, { key: "cycle", eq: true }],
+      }),
+      f("cycleSec", "เปลี่ยนรูปทุก (วินาที)", "range", { group: "layout", default: 0.3, min: 0.2, numMax: 4, step: 0.1, decimals: 1, showIf: [TILE_ONLY, { key: "cycle", eq: true }] }),
+      f("cycleReset", "เอาเมาส์ออก = กลับรูปแรก", "toggle", { group: "layout", default: true, hint: "ปิด = ค้างรูปล่าสุดไว้", showIf: [TILE_ONLY, { key: "cycle", eq: true }] }),
+      f("cycleMobile", "บนมือถือ (ไม่มีเมาส์)", "select", {
+        group: "layout",
+        default: "off",
+        options: [
+          { v: "off", l: "ไม่วน (รูปเดียว)" },
+          { v: "view", l: "วนเองตอนการ์ดอยู่บนจอ" },
+        ],
+        hint: "มือถือวนช้าสุด 1 วิ/รูป (เร็วกว่านี้ลายตา)",
+        showIf: [TILE_ONLY, { key: "cycle", eq: true }],
       }),
       // 📍 ชื่อหมวด: บนรูป (9 จุด + เลื่อนละเอียด) หรือ นอกรูป เหนือ/ใต้ (จัดซ้าย/กลาง/ขวา + ระยะห่าง) — ค่าเดิม = บนรูป บนซ้าย
       f("namePlace", "ชื่อหมวดอยู่ที่ไหน", "select", {
@@ -4202,6 +4240,7 @@ export function defaultForType(t: FieldType): unknown {
       return [];
     case "categoryImages":
     case "categoryNames":
+    case "categoryImageLists":
     case "productImages":
       return {};
     case "crop":

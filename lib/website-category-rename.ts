@@ -16,7 +16,7 @@ const VALUE_KEYS = new Set(["category", "also"]);
 /** ช่องที่เป็นรายการรหัสหมวด */
 const LIST_KEYS = new Set(["cats", "tabCats", "categories"]);
 /** ช่องที่ชื่อข้างในเป็นรหัสหมวด (ค่า = รูป/ชื่อแทนของหมวดนั้น) */
-const MAP_KEYS = new Set(["catImg", "catName"]);
+const MAP_KEYS = new Set(["catImg", "catName", "cycleImg"]);
 
 /** ปัญหาของรหัสใหม่ (null = ใช้ได้) */
 export function renameProblem(cats: { key: string }[], from: string, toRaw: string): string | null {

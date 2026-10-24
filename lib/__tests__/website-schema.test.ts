@@ -779,3 +779,32 @@ describe("🆕 Section ชุดมาใหม่ — หัวชุด · ค
     expect([n.columns, n.sort, n.columnsMobile]).toEqual(["auto", "default", "auto"]);
   });
 });
+
+describe("📂 หมวดสินค้า — 🔁 เปลี่ยนรูปเมื่อเอาเมาส์วาง", () => {
+  const norm = (b: Record<string, unknown>) => normalizeBlocks([{ id: "c", type: "categories", ...b }])[0] as unknown as Record<string, unknown>;
+  it("Section เดิม = ปิด (หน้าตาเดิม) · ค่าเริ่ม ซูมเข้า 0.3 วิ เอาเมาส์ออกกลับรูปแรก มือถือไม่วน", () => {
+    expect(norm({ layout: "tile" })).toMatchObject({ cycle: false, cycleFx: "in", cycleSec: 0.3, cycleReset: true, cycleMobile: "off", cycleImg: {} });
+  });
+  it("วินาทีเก็บทศนิยม 1 ตำแหน่ง · ตัดเข้าช่วง 0.2–4 · ค่ามั่ว = ค่าเริ่ม", () => {
+    expect(norm({ cycleSec: 0.25 }).cycleSec).toBe(0.3);
+    expect(norm({ cycleSec: 0.1 }).cycleSec).toBe(0.2);
+    expect(norm({ cycleSec: 9 }).cycleSec).toBe(4);
+    expect(norm({ cycleSec: "x" }).cycleSec).toBe(0.3);
+    expect(norm({ cycleFx: "spin" }).cycleFx).toBe("in");
+  });
+  it("รูปวนรายหมวด: ไม่ซ้ำ · หมวดละไม่เกิน 8 · รหัส/รูปมั่วถูกทิ้ง · ว่าง = ไม่เก็บ", () => {
+    const many = Array.from({ length: 12 }, (_, i) => `lib/${i}.jpg`);
+    const v = norm({ cycleImg: { Bags: ["lib/a.jpg", "lib/a.jpg", "lib/b.jpg"], belts: many, "": ["x.jpg"], empty: [], bad: "nope" } }).cycleImg as Record<string, string[]>;
+    expect(v.bags).toEqual(["lib/a.jpg", "lib/b.jpg"]);
+    expect(v.belts).toHaveLength(8);
+    expect(Object.keys(v).sort()).toEqual(["bags", "belts"]);
+  });
+  it("ช่องตั้งค่าโชว์เฉพาะการ์ดรูปใหญ่ + เปิดเปลี่ยนรูป", () => {
+    const fd = (k: string) => SECTION_SCHEMAS.categories.fields.find((x) => x.key === k)!;
+    expect(matchShowIf(fd("cycle"), { layout: "icon" })).toBe(false);
+    expect(matchShowIf(fd("cycle"), { layout: "tile" })).toBe(true);
+    expect(matchShowIf(fd("cycleSec"), { layout: "tile", cycle: false })).toBe(false);
+    expect(matchShowIf(fd("cycleSec"), { layout: "tile", cycle: true })).toBe(true);
+    expect(fd("cycleImg").hidden).toBe(true);
+  });
+});

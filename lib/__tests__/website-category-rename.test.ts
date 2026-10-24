@@ -70,6 +70,11 @@ describe("renameCategoryRefs", () => {
     const r = renameCategoryRefs({ catImg: { accessories: "old.jpg", wallets: "new.jpg" } }, "accessories", "wallets");
     expect(r.value.catImg).toEqual({ wallets: "new.jpg" });
   });
+  it("🔁 รูปวนรายหมวด (cycleImg) ย้ายตามรหัสใหม่", () => {
+    const r = renameCategoryRefs({ cycleImg: { accessories: ["a.jpg", "b.jpg"], bags: ["c.jpg"] } }, "accessories", "wallets");
+    expect(r.value.cycleImg).toEqual({ wallets: ["a.jpg", "b.jpg"], bags: ["c.jpg"] });
+    expect(r.hits).toBe(1);
+  });
 });
 
 describe("renameKeyInFieldMap", () => {
