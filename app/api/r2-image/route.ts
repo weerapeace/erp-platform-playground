@@ -76,6 +76,9 @@ async function videoResponse(key: string, range: string | null): Promise<Respons
   });
 }
 
+/** ขนาดไฟล์ — ไม่รู้ขนาด (0) = ไม่ใส่หัวนี้ (ใส่ 0 = เบราว์เซอร์ได้ไฟล์ว่าง · เคยทำ SVG หาย 2026-10-24) */
+const lengthHeader = (size: number): Record<string, string> => (size > 0 ? { "Content-Length": String(size) } : {});
+
 const CACHE_HEADERS = {
   "Cache-Control":     "public, max-age=3600, stale-while-revalidate=86400",
   "CDN-Cache-Control": "public, max-age=86400",
@@ -191,7 +194,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           const freshType = fresh.httpMetadata?.contentType ?? ct0;
           const res = new Response(fresh.body, {
             status: 200,
-            headers: { "Content-Type": freshType, "Content-Length": String(fresh.size), ...CACHE_HEADERS, ...activeTypeHeaders(freshType) },
+            headers: { "Content-Type": freshType, ...lengthHeader(fresh.size), ...CACHE_HEADERS, ...activeTypeHeaders(freshType) },
           });
           if (edge) { try { edge.waitUntil(edge.cache.put(request, res.clone())); } catch { /* noop */ } }
           return res;
@@ -224,7 +227,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       status: 200,
       headers: {
         "Content-Type":   ct0,
-        "Content-Length": String(obj.size),
+        ...lengthHeader(obj.size),
         ...CACHE_HEADERS,
         ...activeTypeHeaders(ct0),
       },

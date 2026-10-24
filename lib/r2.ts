@@ -72,11 +72,15 @@ function makeS3Bucket(bucketName: string): R2BucketLike | null {
       const res = await client.fetch(urlFor(key), { method: "GET" });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`R2(S3) get ${res.status}`);
-      return {
-        body: res.body as ReadableStream,
-        httpMetadata: { contentType: res.headers.get("content-type") ?? undefined },
-        size: Number(res.headers.get("content-length") ?? 0),
-      };
+      const httpMetadata = { contentType: res.headers.get("content-type") ?? undefined };
+      const len = res.headers.get("content-length");
+      // ไฟล์ตัวอักษร (SVG ฯลฯ) R2 ส่งแบบบีบอัด/ไม่บอกขนาด → เดิมนับได้ 0 → /api/r2-image ส่ง Content-Length: 0 = ไฟล์ว่าง (เจอ 2026-10-24)
+      //   ไม่บอกขนาด = อ่านทั้งไฟล์มานับเอง (ไฟล์พวกนี้เล็ก · วิดีโอ/รูปใหญ่มี content-length เสมอ)
+      if (len === null) {
+        const buf = new Uint8Array(await res.arrayBuffer());
+        return { body: new Response(buf).body as ReadableStream, httpMetadata, size: buf.byteLength };
+      }
+      return { body: res.body as ReadableStream, httpMetadata, size: Number(len) };
     },
     async put(key: string, value: ArrayBuffer | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown> {
       const bodyAb: ArrayBuffer = value instanceof ArrayBuffer ? value : await new Response(value).arrayBuffer();
