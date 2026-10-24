@@ -50,7 +50,7 @@ const inputCls = webForm.input;
 const labelCls = webForm.label;
 
 /** ลำดับหมวดของช่อง (ฟอร์มนี้ + เมนูหมวดของหน้าใหญ่ website-section-studio) */
-export const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "layout", "caption", "card"];
+export const GROUP_ORDER: FieldGroup[] = ["content", "media", "action", "products", "grid", "layout", "caption", "card"];
 /** จุดส้มมุมขวาบนของช่องที่แก้แล้ว (หน้าใหญ่) — ตัวห่อ display:contents ไม่กระทบกริด 2 คอลัมน์ · ใช้ได้กับช่องทุกชนิด */
 const MARK_CLS =
   "contents [&>*]:relative [&>*]:after:absolute [&>*]:after:right-0 [&>*]:after:top-0.5 [&>*]:after:h-1.5 [&>*]:after:w-1.5 [&>*]:after:rounded-full [&>*]:after:bg-orange-500 [&>*]:after:content-['']";

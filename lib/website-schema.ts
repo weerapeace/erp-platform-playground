@@ -87,7 +87,7 @@ export type FieldType =
   | "shopPattern" // 🎨 ลายของร้าน { name, vb, parts+สี } (จาก SVG ที่อัป · lib/website-frames normalizeShopPattern) — ตั้งผ่านคลังของตกแต่ง (hidden)
   | "patternSlots"; // 🎨 สีใหม่ของแต่ละสีในไฟล์ ["" | สีธีม | #rrggbb] (โหมดแยกตามสี · hidden — แผงลายของร้านตั้งให้)
 
-export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "caption" | "card";
+export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "grid" | "caption" | "card";
 
 /** 🎨 ลายของร้าน: เปลี่ยนสีแบบไหน (⚠️ ตรงกับ SHOP_PATTERN_MODES ใน lib/website-frames) */
 export const PATTERN_MODE_OPTIONS: FieldOption[] = [
@@ -102,6 +102,7 @@ export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
   action: "ปุ่ม / ลิงก์",
   layout: "การจัดวาง",
   products: "สินค้า",
+  grid: "🗂 ตารางสินค้าด้านบน",
   caption: "ข้อความประกอบรูป",
   card: "🃏 การ์ดในส่วนนี้",
 };
@@ -3572,8 +3573,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "all", l: "ทุกรุ่นที่เปิดปั๊มชื่อไว้ (ตั้งในแท็บเว็บไซต์ของ Parent SKU)" },
           { v: "manual", l: "เลือกเองทีละรุ่น (เฉพาะรุ่นที่เปิดปั๊มชื่อ)" },
         ],
+        showIf: { key: "pickerStyle", eq: ["auto", "cards", "rows", "pills", "strip", "", undefined] },
       }),
-      f("codes", "เลือกสินค้า", "products", { group: "products", default: [], max: 24, wide: true, showIf: { key: "source", eq: "manual" } }),
+      f("codes", "เลือกสินค้า", "products", { group: "products", default: [], max: 24, wide: true, showIf: [{ key: "source", eq: "manual" }, { key: "pickerStyle", eq: ["auto", "cards", "rows", "pills", "strip", "", undefined] }] }),
       f("buttonText", "ข้อความปุ่ม", "text", { group: "products", default: "ใส่ตะกร้า", max: 40 }),
       // 🧭 ตัวเลือกรุ่น (มีตั้งแต่ 2 รุ่น) — เว็บร้าน components/home/PersonalizeLooks PzProducts
       f("pickerStyle", "หน้าตาตัวเลือกรุ่น", "select", {
@@ -3586,22 +3588,24 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "rows", l: "B · แถวรายการ — มีวงกลมเลือก ราคาชิดขวา" },
           { v: "pills", l: "C · ปุ่มเม็ดยา — กะทัดรัด" },
           { v: "strip", l: "D · แถบเลื่อน — ปัดซ้าย-ขวา (หลายรุ่น)" },
+          { v: "grid", l: "🗂 ตารางสินค้าด้านบน — ตั้งค่าเหมือน Section ตารางสินค้าทุกช่อง · กดการ์ด = เลือกรุ่นแล้วเลื่อนลงมาปั๊ม" },
         ],
-        hint: "โชว์เมื่อ Section มีสินค้าให้เลือกตั้งแต่ 2 รุ่น",
+        hint: "แบบ A–D โชว์เมื่อมีสินค้าตั้งแต่ 2 รุ่น · ตารางสินค้า: ตั้งต่อในหมวด 🗂 ตารางสินค้าด้านบน (สินค้าที่ปั๊มชื่อไม่ได้จะไม่ขึ้น)",
       }),
       f("pickerName", "ชื่อรุ่นที่แสดง", "select", {
         group: "products",
         default: "collection",
+        showIf: { key: "pickerStyle", eq: ["auto", "cards", "rows", "pills", "strip", "", undefined] },
         options: [
           { v: "collection", l: "ชื่อคอลเลกชัน (ไม่มี = ชื่อสินค้า)" },
           { v: "code", l: "รหัสรุ่น" },
           { v: "name", l: "ชื่อสินค้า" },
         ],
       }),
-      f("pickerPrice", "ตัวเลือกรุ่น: ราคา", "toggle", { group: "products", default: true }),
-      f("pickerCode", "ตัวเลือกรุ่น: รหัสรุ่นตัวเล็ก", "toggle", { group: "products", default: true }),
-      f("pickerDots", "ตัวเลือกรุ่น: จุดสีที่มี", "toggle", { group: "products", default: true }),
-      f("pickerTagline", "ตัวเลือกรุ่น: คำโปรยสั้น", "toggle", { group: "products", default: true, hint: "ข้อความในเครื่องหมายคำพูด “…” ช่วงต้นของคำอธิบายสินค้า (ไม่มี = บรรทัดแรก)" }),
+      f("pickerPrice", "ตัวเลือกรุ่น: ราคา", "toggle", { group: "products", default: true, showIf: { key: "pickerStyle", eq: ["auto", "cards", "rows", "pills", "strip", "", undefined] } }),
+      f("pickerCode", "ตัวเลือกรุ่น: รหัสรุ่นตัวเล็ก", "toggle", { group: "products", default: true, showIf: { key: "pickerStyle", eq: ["auto", "cards", "rows", "pills", "strip", "", undefined] } }),
+      f("pickerDots", "ตัวเลือกรุ่น: จุดสีที่มี", "toggle", { group: "products", default: true, showIf: { key: "pickerStyle", eq: ["auto", "cards", "rows", "pills", "strip", "", undefined] } }),
+      f("pickerTagline", "ตัวเลือกรุ่น: คำโปรยสั้น", "toggle", { group: "products", default: true, showIf: { key: "pickerStyle", eq: ["auto", "cards", "rows", "pills", "strip", "", undefined] }, hint: "ข้อความในเครื่องหมายคำพูด “…” ช่วงต้นของคำอธิบายสินค้า (ไม่มี = บรรทัดแรก)" }),
       // 🎨 หน้าตา 3 แบบ (เว็บร้าน components/home/PersonalizeBlockClient) — ข้อมูลปั๊มชื่อชุดเดียวกัน
       f("look", "หน้าตา", "select", {
         group: "layout",
@@ -4079,6 +4083,50 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     },
   },
 };
+
+/* ── 🗂 Section ปั๊มชื่อ → ตารางสินค้าด้านบน ──
+ * ช่องตั้งค่า = ชุดเดียวกับ Section ตารางสินค้า (ไม่รวมหัวข้อ/ปุ่มดูทั้งหมด) สร้างอัตโนมัติ คีย์ขึ้นต้น "pg_"
+ * → ตารางสินค้าได้ตัวเลือกใหม่เมื่อไหร่ Section ปั๊มชื่อได้ตามเอง · โชว์เมื่อ pickerStyle = grid
+ * แหล่ง "✦ ทุกรุ่นที่ปั๊มชื่อได้" (ค่าเริ่ม) · แหล่งอื่น = ตัดรุ่นที่ปั๊มชื่อไม่ได้ทิ้งเอง (เว็บร้าน personalize-look pzGridBlockOf) */
+export const PZ_GRID_PREFIX = "pg_";
+const PZ_GRID_ON: ShowIf = { key: "pickerStyle", eq: "grid" };
+const pzKey = (k: string) => PZ_GRID_PREFIX + k;
+const pzUnprefix = (b: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(b).filter(([k]) => k.startsWith(PZ_GRID_PREFIX)).map(([k, v]) => [k.slice(PZ_GRID_PREFIX.length), v]));
+function pzGridField(fd: FieldDef, defaults: Map<string, unknown>): FieldDef {
+  const cond = (c: ShowIf): ShowIf => {
+    // เงื่อนไขที่อ้างแหล่งสินค้าแบบรายการ (เช่น การ์ดแยก SKU) → แหล่งใหม่ "personalize" ใช้ได้ด้วย
+    let eq: unknown = c.key === "source" && Array.isArray(c.eq) && (c.eq as unknown[]).includes("all") ? [...(c.eq as unknown[]), "personalize"] : c.eq;
+    // เพิ่งสลับมาใช้ตาราง = ช่อง pg_ ยังไม่มีค่า → ถือเป็นค่าเริ่มของช่องนั้น (ไม่งั้นช่องที่ควรโชว์จะซ่อนจนกว่าจะเลือกเอง)
+    const d = defaults.get(c.key);
+    if (d !== undefined && (Array.isArray(eq) ? (eq as unknown[]).includes(d) : eq === d)) eq = [...(Array.isArray(eq) ? (eq as unknown[]) : [eq]), undefined];
+    return { key: pzKey(c.key), eq, ...(c.orKey ? { orKey: pzKey(c.orKey) } : {}) };
+  };
+  const own = fd.showIf ? (Array.isArray(fd.showIf) ? fd.showIf : [fd.showIf]).map(cond) : [];
+  const out: FieldDef = { ...fd, key: pzKey(fd.key), group: fd.group === "card" ? "card" : "grid", showIf: [PZ_GRID_ON, ...own] };
+  if (fd.rowImages) out.rowImages = { images: pzKey(fd.rowImages.images), skus: pzKey(fd.rowImages.skus) };
+  if (fd.presets) out.presets = Object.fromEntries(Object.entries(fd.presets).map(([v, patch]) => [v, Object.fromEntries(Object.entries(patch).map(([k, x]) => [pzKey(k), x]))]));
+  if (fd.copyShopCard) {
+    const copy = fd.copyShopCard;
+    out.copyShopCard = (card, item) => Object.fromEntries(Object.entries(copy(card, pzUnprefix(item))).map(([k, x]) => [pzKey(k), x]));
+  }
+  if (fd.key === "source") {
+    out.default = "personalize";
+    out.label = "ดึงสินค้าจาก";
+    out.hint = "แหล่งอื่น = ขึ้นเฉพาะรุ่นที่เปิดปั๊มชื่อไว้ (รุ่นที่ปั๊มไม่ได้ตัดทิ้งเอง)";
+    out.options = [{ v: "personalize", l: "✦ ทุกรุ่นที่ปั๊มชื่อได้" }, ...(fd.options ?? [])];
+  }
+  return out;
+}
+{
+  const head = new Set([...headFields({ eyebrow: "", title: "", subtitle: true }).map((x) => x.key), "more"]);
+  const pz = SECTION_SCHEMAS.personalize;
+  const products = SECTION_SCHEMAS.products;
+  const defaults = new Map<string, unknown>([...products.fields.map((fd) => [fd.key, fd.default] as const), ["source", "personalize"]]);
+  pz.fields.push(...products.fields.filter((fd) => !head.has(fd.key)).map((fd) => pzGridField(fd, defaults)));
+  const own = pz.validate;
+  pz.validate = (b, label) => [...(own ? own(b, label) : []), ...(s(b.pickerStyle) === "grid" && products.validate ? products.validate(pzUnprefix(b), `${label} › ตารางสินค้า`) : [])];
+}
 
 export const SECTION_TYPES = Object.keys(SECTION_SCHEMAS);
 

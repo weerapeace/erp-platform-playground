@@ -1264,7 +1264,9 @@ export interface PersonalizeBlock extends BlockBase {
   labelFinish?: string;
   labelPosition?: string;
   /** 🧭 ตัวเลือกรุ่น: หน้าตา (auto = ตามหน้าตา Section) · ชื่อที่แสดง · ของเสริม */
-  pickerStyle?: "auto" | "cards" | "rows" | "pills" | "strip";
+  pickerStyle?: "auto" | "cards" | "rows" | "pills" | "strip" | "grid";
+  /** 🗂 pickerStyle = grid: ค่าตั้งของตารางสินค้าด้านบน (ชุดเดียวกับ Section ตารางสินค้า · คีย์ขึ้นต้น pg_) */
+  [gridKey: `pg_${string}`]: unknown;
   pickerName?: "collection" | "code" | "name";
   pickerPrice?: boolean;
   pickerCode?: boolean;
