@@ -29,6 +29,9 @@ import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, pat
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { keyFromUrl } from "@/components/website-canvas-media";
+import { loadStorefrontProducts } from "@/lib/website-data";
+import { galleryFoldersToCanvas, isGalleryFolders, type FolderProduct } from "@/lib/website-folder-convert";
 import { useToast } from "@/components/toast";
 import { SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { useShopTheme } from "@/components/website-text-pickers";
@@ -875,6 +878,48 @@ export function WebsiteBuilder({
     if (b) insertTemplate(b as unknown as Record<string, unknown>);
   };
 
+  /**
+   * 🗂 แกลเลอรีแบบแฟ้ม → แฟ้มวางอิสระ (lib/website-folder-convert) — วางแทนที่ Section เดิมตรงตำแหน่งเดิม (↶ ย้อนกลับได้)
+   *   หัวข้อ Section เดิม → Section ข้อความด้านบน · รูปลักษณ์ (รวมของตกแต่ง Section) ติดไปด้วย
+   */
+  const convertToFolders = async (b: Block) => {
+    const g = b as unknown as Record<string, unknown>;
+    const ok = await askConfirm({
+      title: "แปลงเป็น 🗂 แฟ้มวางอิสระ?",
+      message:
+        "รูป/คลิป หัวข้อ คำอธิบาย ลิงก์ ป้ายบนหู สีแฟ้ม และหน้าตาแฟ้มทั้งหมด ย้ายไปครบ — จากนั้นแต่ละแฟ้มเพิ่มข้อความ รูป วิดีโอ ปุ่ม ของตกแต่ง ได้อิสระ · Section แกลเลอรีเดิมถูกแทนที่ (กด ↶ ย้อนกลับได้ · ยังไม่ขึ้นเว็บจนกว่าจะเผยแพร่)",
+      confirmText: "แปลงเลย",
+    });
+    if (!ok) return;
+    // ช่องที่ใช้รูปจากสินค้า (ไม่ได้ใส่รูปเอง) → หารูปแรก/ชื่อ/ลิงก์ของสินค้า
+    let products: FolderProduct[] = [];
+    const items = Array.isArray(g.items) ? (g.items as Record<string, unknown>[]) : [];
+    if (items.some((it) => Array.isArray(it.code) && it.code.length && !it.imageKey)) {
+      try {
+        // รูปแรกแบบเดียวกับหน้าเว็บ (เว็บร้าน gallery-items: รูปรุ่นก่อน แล้วค่อยรูปสินค้า)
+        const j = await loadStorefrontProducts<{ code: string; name?: string; slug?: string; images?: string[]; parentImages?: string[] }>(ctx.shopSlug);
+        products = (j.products ?? []).map((p) => ({ code: p.code, name: p.name, slug: p.slug, imageKey: [...(p.parentImages ?? []), ...(p.images ?? [])].map(keyFromUrl).find(Boolean) ?? null }));
+      } catch {
+        /* หาไม่ได้ = ช่องนั้นถูกข้ามพร้อมคำเตือน */
+      }
+    }
+    const res = galleryFoldersToCanvas(g, products);
+    const cur = blocksRef.current;
+    const at = cur.findIndex((x) => x.id === b.id);
+    if (at < 0) return;
+    const seq = cur.length + 1;
+    const [canvas] = normalizeBlocks([{ ...(makeBlock("canvas", seq) as unknown as Record<string, unknown>), ...res.canvas, style: g.style, visibility: g.visibility, enabled: g.enabled !== false }]);
+    const heading = res.heading ? normalizeBlocks([{ ...(makeBlock("rich-text", seq + 1) as unknown as Record<string, unknown>), ...res.heading }])[0] : null;
+    if (!canvas) return;
+    const fresh = canvas as unknown as Block;
+    onChange([...cur.slice(0, at), ...(heading ? [heading as unknown as Block] : []), fresh, ...cur.slice(at + 1)]);
+    onSelect({ blockId: fresh.id });
+    setPropTab("content");
+    setExpanded((x) => new Set(x).add(fresh.id));
+    toast.success(`แปลงเป็นแฟ้มวางอิสระแล้ว (${res.folders} แฟ้ม) — กด "✏️ แก้แบบเต็มจอ" แล้วเปิดแฟ้มไหน ของใหม่ลงแฟ้มนั้น`);
+    for (const w of res.warnings) toast.warning(w);
+  };
+
   /* ── สิ่งที่เลือก ── */
   const selBlock = selection ? blocks.find((b) => b.id === selection.blockId) ?? null : null;
   const selChild = selBlock && selection?.childId ? childrenOf(selBlock)?.list.find((it) => it.id === selection.childId) ?? null : null;
@@ -1462,6 +1507,23 @@ export function WebsiteBuilder({
           max={SECTION_SCHEMAS[b.type]?.children?.max ?? 60}
           mobileCustom={b.mobileMode === "custom"}
         />
+      )}
+      {/* 🗂 แกลเลอรีแบบแฟ้ม → แฟ้มวางอิสระ (ใส่ข้อความ/รูป/วิดีโอรายแฟ้ม) */}
+      {isGalleryFolders(b as unknown as Record<string, unknown>) && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
+          <p className="text-xs leading-relaxed text-slate-700">
+            <b>🗂 อยากใส่ข้อความ / รูป / วิดีโอ เพิ่มในแต่ละแฟ้ม?</b> แปลงเป็น &quot;แฟ้มวางอิสระ&quot; — ของเดิมย้ายไปครบ แล้วของที่เพิ่มอยู่ในแฟ้มของมัน (ปิดแฟ้ม = ซ่อนไปด้วย)
+          </p>
+          <button
+            type="button"
+            disabled={!allowedTypes.has("canvas")}
+            onClick={() => void convertToFolders(b)}
+            className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            🗂 แปลงเป็นแฟ้มวางอิสระ
+          </button>
+          {!allowedTypes.has("canvas") && <p className="text-[11px] text-amber-700">ร้านนี้ยังไม่ได้เปิดใช้ &quot;ผืนผ้าใบอิสระ&quot; (ต้องเปิดก่อนถึงแปลงได้)</p>}
+        </div>
       )}
       {/* 🎞️ การ์ดบนฉาก: ช่องใหญ่ใส่ PNG รายสินค้าของแต่ละแท็บ (ไม่มี PNG = ไม่โชว์) */}
       {b.type === "scene" && <ScenePngBoard block={b as unknown as Record<string, unknown>} shopSlug={ctx.shopSlug} onSaved={reloadPreview} />}

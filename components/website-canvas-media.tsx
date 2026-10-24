@@ -52,7 +52,8 @@ export async function uploadToLibrary(file: File, collectionId?: string): Promis
   return { key: j.data.r2_key as string, title: String(j.data.title ?? file.name) };
 }
 
-const keyFromUrl = (u: string): string | null => {
+/** ลิงก์รูปของคลัง (/api/r2-image?key=…) → r2 key */
+export const keyFromUrl = (u: string): string | null => {
   try {
     return new URL(u, "http://x").searchParams.get("key");
   } catch {
