@@ -43,3 +43,9 @@ export function formatDateTime(value: unknown): string {
 export function todayBangkok(now: Date = new Date()): string {
   return new Date(now.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
+
+/** วันที่ "YYYY-MM-DD" บวก/ลบ n วัน (นับทุกวันตามปฏิทิน) — คิดแบบ UTC ล้วน จึงไม่เพี้ยนตามเขตเวลาเครื่อง */
+export function addDaysYmd(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}

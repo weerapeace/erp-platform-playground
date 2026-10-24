@@ -15,7 +15,8 @@ import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-bo
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { formatDate } from "@/lib/date";
+import { formatDate, todayBangkok, addDaysYmd } from "@/lib/date";
+import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { RecordPeekLink } from "@/components/pickers/record-peek-link";
 import { RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
@@ -77,7 +78,10 @@ type FormState = {
   parent_sku_drafts: string[];  // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
   cost_general_label: string;   // ชื่อแท็บตีราคา "ทั่วไป" ที่ตั้งเอง (ว่าง = ทั่วไป) — บันทึกทันทีผ่านปุ่ม ✎ เปลี่ยนชื่อ
 };
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// วันนี้ตามเวลาไทย (เดิม toISOString = วันสากล → ก่อน 7 โมงเช้าได้ "เมื่อวาน")
+const todayStr = () => todayBangkok();
+const DEADLINE_QUICK = [1, 3, 7] as const;   // ปุ่มลัด "ส่งงานภายใน" ตอนสร้างใหม่ — วันนี้ +N วัน (นับทุกวัน)
+const RECENT_BRAND_CHIPS = 3;                 // ปุ่มแบรนด์ที่ใช้ล่าสุด (จำต่อคน ในเครื่อง · lib/recent-picks)
 // วันที่สั่ง default = วันนี้ (แก้ได้)
 const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", appointment_date: "", drive_link: "", parent_sku_codes: [], parent_sku_drafts: [], cost_general_label: "" });
 
@@ -456,6 +460,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [loadingForm, setLoadingForm] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [createMore, setCreateMore] = useState(false);   // ฟอร์มสร้างใหม่ (แบบสั้น): กาง "ใส่ข้อมูลอื่น" แล้วหรือยัง
+  const [recentBrandIds, setRecentBrandIds] = useState<string[]>([]);   // แบรนด์ที่คนนี้ใช้สร้างใบงานล่าสุด (อ่านตอนเปิดฟอร์มสร้าง)
   const [archiveTarget, setArchiveTarget] = useState<DesignSheetListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [hardDelTarget, setHardDelTarget] = useState<{ id: string; code: string; name: string } | null>(null);
@@ -1130,7 +1135,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   }, []);
 
-  const openCreate = () => { setEditing(true); setCreateMore(false); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
+  const openCreate = () => { setEditing(true); setCreateMore(false); setRecentBrandIds(loadRecent<{ id: string }>(RECENT_KEYS.designBrands).map((b) => b.id)); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
@@ -1252,6 +1257,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         }
         // สร้างเสร็จ → ค้างป๊อปอัพไว้ (กลายเป็นโหมดแก้) ให้แนบรูป/comment ต่อได้เลย
         toast.success(`สร้างใบงานแล้ว: ${j.code}`);
+        if (form.brand_id) pushRecent(RECENT_KEYS.designBrands, { id: form.brand_id });   // ปุ่มแบรนด์ล่าสุดครั้งหน้า
         patch({ id: j.id, code: j.code });
         onCreated?.({ id: String(j.id), code: String(j.code ?? "") });   // เช่น กระดานแคมเปญ → วางการ์ดใบงานที่เพิ่งสร้าง
       }
@@ -1531,21 +1537,49 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           className={`w-full mt-0.5 px-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 ${form.id ? "h-8 text-sm" : "h-10 text-base"}`} />
       </label>
     ),
-    brand: (
-      <label className="block">
-        <span className="text-[11px] text-slate-500">แบรนด์</span>
-        <div className="flex gap-1.5 mt-0.5">
-          <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit}
-            className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
-            <option value="">— ไม่ระบุ —</option>
-            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          {fullEdit && <button type="button" title="เพิ่มแบรนด์ใหม่"
-            onClick={() => { setNewBrandName(""); setNewBrandColor("#3b82f6"); setBrandModal(true); }}
-            className="h-8 w-8 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600">＋</button>}
+    brand: (() => {
+      // สร้างใหม่: ปุ่มแบรนด์ที่คนนี้ใช้ล่าสุด 3 อัน (กดทีเดียว · กดซ้ำ = เอาออก) + ช่องเลือก "อื่น ๆ" สำหรับแบรนด์ที่เหลือ
+      const chips = form.id ? [] : recentBrandIds.map((id) => brands.find((b) => b.id === id)).filter((b): b is Brand => !!b).slice(0, RECENT_BRAND_CHIPS);
+      const onChip = chips.some((b) => b.id === form.brand_id);
+      const addBtn = fullEdit && <button type="button" title="เพิ่มแบรนด์ใหม่"
+        onClick={() => { setNewBrandName(""); setNewBrandColor("#3b82f6"); setBrandModal(true); }}
+        className="h-8 w-8 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600">＋</button>;
+      if (!chips.length) return (
+        <label className="block">
+          <span className="text-[11px] text-slate-500">แบรนด์</span>
+          <div className="flex gap-1.5 mt-0.5">
+            <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit}
+              className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
+              <option value="">— ไม่ระบุ —</option>
+              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            {addBtn}
+          </div>
+        </label>
+      );
+      return (
+        <div>
+          <span className="text-[11px] text-slate-500">แบรนด์</span>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            {chips.map((b) => {
+              const on = form.brand_id === b.id;
+              return (
+                <button key={b.id} type="button" aria-pressed={on} disabled={!fullEdit} onClick={() => patch({ brand_id: on ? "" : b.id })}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm ${on ? "border-blue-500 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: b.color ?? "#94a3b8" }} />{b.name}
+                </button>
+              );
+            })}
+            <select value={onChip ? "" : form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit} aria-label="แบรนด์อื่น"
+              className={`h-8 min-w-0 max-w-[12rem] rounded-lg border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 ${!onChip && form.brand_id ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500"}`}>
+              <option value="">อื่น ๆ…</option>
+              {brands.filter((b) => !chips.some((c) => c.id === b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            {addBtn}
+          </div>
         </div>
-      </label>
-    ),
+      );
+    })(),
     orderDate: (
       <label className="block">
         <span className="text-[11px] text-slate-500">วันที่สั่ง</span>
@@ -1553,12 +1587,30 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
       </label>
     ),
-    deadline: (
+    deadline: form.id ? (
       <label className="block">
-        <span className="text-[11px] text-slate-500">{form.id ? "Deadline" : "ส่งงานภายใน (Deadline)"}</span>
+        <span className="text-[11px] text-slate-500">Deadline</span>
         <input type="date" value={form.deadline} onChange={(e) => patch({ deadline: e.target.value })} disabled={!canEdit}
           className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
       </label>
+    ) : (
+      // สร้างใหม่: ปุ่มลัด วันนี้ +1 / +3 / +7 วัน (นับทุกวันตามปฏิทิน · กดซ้ำ = เอาออก) หรือเลือกวันเองในปฏิทิน
+      <div>
+        <span className="text-[11px] text-slate-500">ส่งงานภายใน (Deadline)</span>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+          {DEADLINE_QUICK.map((n) => {
+            const v = addDaysYmd(todayStr(), n);
+            const on = form.deadline === v;
+            return (
+              <button key={n} type="button" aria-pressed={on} disabled={!canEdit} onClick={() => patch({ deadline: on ? "" : v })} title={formatDate(v)}
+                className={`h-8 rounded-full border px-3 text-sm tabular-nums ${on ? "border-blue-500 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>+{n} วัน</button>
+            );
+          })}
+          <input type="date" value={form.deadline} onChange={(e) => patch({ deadline: e.target.value })} disabled={!canEdit} aria-label="วันส่งงาน"
+            className="h-8 w-40 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+        </div>
+        <p className="mt-0.5 text-[11px] text-slate-400">นับจากวันนี้ ({formatDate(todayStr())}) · เลือกวันเองในปฏิทินก็ได้</p>
+      </div>
     ),
     appointment: (
       <label className="block">
@@ -1712,7 +1764,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         <div className="mt-0.5">{imageSection}</div>
       </div>
       {fld.name}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{fld.brand}{fld.deadline}</div>
+      {fld.brand}
+      {fld.deadline}
       {fld.detail}
       <div>
         <button type="button" onClick={() => setCreateMore((v) => !v)} aria-expanded={createOpenMore}
@@ -1876,7 +1929,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       </div>
       )}
 
-      <ERPModal open={form !== null} onClose={requestClose} size="xl"
+      {/* สร้างใหม่ = ป๊อปขนาดปกติ ไม่เต็มจอ (ฟอร์มสั้น · เจ้าของขอ 2026-10-24 · ยังกด ⤢ ขยายเองได้) · เปิดใบเดิม = ใหญ่ตามเดิม */}
+      <ERPModal open={form !== null} onClose={requestClose} size={form?.id ? "xl" : "lg"} defaultExpanded={form?.id ? undefined : false}
         title={form?.id ? `ใบงานออกแบบ: ${form.code}` : "สร้างใบงานออกแบบใหม่"}
         footer={<>
           {form?.id && (
