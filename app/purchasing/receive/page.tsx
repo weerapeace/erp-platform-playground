@@ -14,11 +14,10 @@ import { useBackdropDismiss, ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
-import { FileInput } from "@/components/file-input";
 import { useCardLayout, CardLayoutEditor, type CardField } from "@/components/card-layout";
-import { ReceiveLineFields, receiveCaseType } from "@/components/receive-line-modal";
+import { ReceiveLineFields } from "@/components/receive-line-modal";
+import { useReceiveCart, groupReceiveByPo, ReceiveCartMeta, ReceiveAttachBox, ReceiveCartRows } from "@/components/receive-line-modal/receive-cart";
 import { WarehousePicker } from "@/components/pickers";
-import type { WarehousePickerValue } from "@/components/pickers";
 import { Pager } from "@/components/pager";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { HoverPreview } from "@/components/hover-image";
@@ -117,11 +116,9 @@ export default function ReceiveGoodsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [shortDialog, setShortDialog] = useState<{ base: PayloadLine[]; shortIds: string[]; shortNames: string[] } | null>(null);
 
-  // ไฟล์แนบ (บังคับทั้งคู่)
-  const [receiptKey, setReceiptKey] = useState<string | null>(null);
-  const [billKey, setBillKey] = useState<string | null>(null);
-  const [recvWh, setRecvWh] = useState<WarehousePickerValue | null>(null);   // คลังปลายทางที่รับเข้า (default คลังหลัก)
-  const attachReady = !!receiptKey && !!billKey;
+  // ตะกร้ารับของ (ของกลาง) — วันที่รับ · ผู้รับ · คลังปลายทาง (WH-RAW) · ใบรับของ + บิล (บังคับ) · บันทึกแยกตามใบสั่งซื้อ
+  // ตัวเดียวกับโหมดรับของหน้าสั่งซื้อ (/purchasing/orders) — ใช้ทั้งป๊อปตะกร้า + แท็บตามใบสั่งซื้อ
+  const rc = useReceiveCart();
 
   // แท็บ B — สินค้าที่รอเข้า
   const [pend, setPend] = useState<PendItem[]>([]);
@@ -129,11 +126,6 @@ export default function ReceiveGoodsPage() {
   const [pendQ, setPendQ] = useState("");
   const [pendLoading, setPendLoading] = useState(false);
   const [pendView, setPendView] = useState<"card" | "table">("table");
-  // ฟอร์มตะกร้ารับของ — วันที่รับ + ผู้รับ + แนบเอกสาร (ย้ายมาจากด้านบน)
-  const [recvDate, setRecvDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [recvBy, setRecvBy] = useState("");
-  // ผู้รับ = คนที่ login อยู่ (เติมให้เลย แก้ได้ถ้ารับแทนคนอื่น)
-  useEffect(() => { if (user?.name) setRecvBy((v) => v || user.name); }, [user?.name]);
   const [activeShop, setActiveShop] = useState<string | null>(null);   // list ร้านด้านซ้าย (แท็บรอเข้า/รับครบ)
   const [shopDrawerOpen, setShopDrawerOpen] = useState(false);          // จอ < xl: รายชื่อร้านเป็นลิ้นชัก
   const [activeMo, setActiveMo] = useState<string | null>(null);       // filter ตามใบสั่งผลิต (MO)
@@ -260,12 +252,6 @@ export default function ReceiveGoodsPage() {
   // โหลดทุกแท็บ — แท็บ PO ใช้ข้อมูล pending นับ "รายการรอรับ" บนการ์ดใบ PO
   useEffect(() => { void loadPending(tab === "done" ? "done" : "pending"); }, [tab, loadPending]);
 
-  // default คลังปลายทาง = โซนวัตถุดิบ (WH-RAW) — ของจาก PO เข้าวัตถุดิบ (เลือกโซนอื่นได้)
-  useEffect(() => {
-    apiFetch("/api/master/warehouses?limit=50").then((r) => r.json())
-      .then((j) => { const m = ((j.data ?? []) as WarehousePickerValue[]).find((w) => w.code === "WH-RAW"); if (m) setRecvWh(m); })
-      .catch(() => {});
-  }, []);
   // สลับแท็บ → ล้างร้านที่เลือกไว้ (รายชื่อร้านของแต่ละแท็บไม่เหมือนกัน)
   useEffect(() => { setActiveShop(null); setActiveMo(null); setSelectedIds(new Set()); }, [tab]);
 
@@ -524,16 +510,9 @@ export default function ReceiveGoodsPage() {
     finally { setQtySaving(false); }
   };
 
-  // ---- ยิง API (1 PO) ----
-  const postReceive = async (poIdArg: string, payloadLines: PayloadLine[]) => {
-    const res = await apiFetch("/api/purchasing/receive", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ po_id: poIdArg, warehouse_id: recvWh?.id ?? null, receive_date: recvDate, receiver: recvBy.trim() || user?.name, lines: payloadLines, receipt_doc_r2_key: receiptKey, bill_doc_r2_key: billKey }),
-    });
-    return res.json();
-  };
-
-  const resetAfterSave = () => { setReceiptKey(null); setBillKey(null); };
+  // ---- ยิง API (1 PO) — ของกลาง (วันที่/ผู้รับ/คลัง/ไฟล์แนบ ของตะกร้า) ----
+  const postReceive = rc.postOne;
+  const resetAfterSave = rc.resetAttach;
 
   // แท็บ A: บันทึก
   const doSubmit = async (payloadLines: PayloadLine[]) => {
@@ -549,7 +528,7 @@ export default function ReceiveGoodsPage() {
 
   const onSave = () => {
     setErr(null);
-    if (!attachReady) { setErr("ต้องแนบ ใบรับของ + บิล ให้ครบก่อนบันทึก"); return; }
+    if (!rc.attachReady) { setErr("ต้องแนบ ใบรับของ + บิล ให้ครบก่อนบันทึก"); return; }
     const base: PayloadLine[] = [];
     const shortIds: string[] = [];
     const shortNames: string[] = [];
@@ -574,53 +553,19 @@ export default function ReceiveGoodsPage() {
     void doSubmit(payload);
   };
 
-  // แท็บ B: บันทึก (จัดกลุ่มตาม PO → ยิงทีละใบ)
+  // แท็บ B: บันทึกตะกร้า — ของกลาง (จัดกลุ่มตาม PO → ยิงทีละใบ · สูตรเคส receiveCaseType)
   // รับครบ/เกิน = full · รับไม่ครบ + เลือกปิดบิล = partial_close · รับไม่ครบ (ค่าเริ่มต้น) = partial_wait
-  // บันทึกเฉพาะรายการที่มองเห็น (shownPend) — กันเผลอรับของที่ถูกซ่อนด้วยตัวกรองร้าน/คำค้น
   const savePending = async () => {
     setErr(null);
-    if (!attachReady) { setErr("ต้องแนบ ใบรับของ + บิล ให้ครบก่อนบันทึก"); return; }
-    const byPo = new Map<string, PayloadLine[]>();
-    for (const it of cartItems) {
-      const inp = pendInputs[it.id];
-      const recv = num(inp?.recv);
-      const def = num(inp?.def);
-      if (recv <= 0 && def <= 0) continue;
-      const caseType = receiveCaseType(recv, it.remaining, inp?.close);   // สูตรกลาง (ตัวเดียวกับป๊อปรับของจากการ์ดใบสั่งผลิต)
-      const arr = byPo.get(it.po_id) ?? [];
-      arr.push({ po_line_id: it.id, qty_received: recv, qty_defective: def, case_type: caseType });
-      byPo.set(it.po_id, arr);
-    }
-    if (byPo.size === 0) { setErr("กรอกจำนวนรับอย่างน้อย 1 รายการ"); return; }
-    setSaving(true);
-    try {
-      const results: string[] = [];
-      for (const [pid, payload] of byPo) {
-        const j = await postReceive(pid, payload);
-        if (j.error) { setErr(`PO ${pos.find(p => p.id === pid)?.po_no ?? pid}: ${j.error}`); setSaving(false); return; }
-        results.push(j.gr_no);
-      }
-      setDone(`✅ รับสินค้าสำเร็จ ${results.length} ใบรับ (${byPo.size} ใบสั่งซื้อ): ${results.join(", ")}`); setDoneGrs(results.map(String));
-      setMassRecv(null); setSelectedIds(new Set());
-      resetAfterSave();
-      await loadPending(doneMode ? "done" : "pending");
-    } catch (e) { setErr(String(e)); }
-    finally { setSaving(false); }
+    const r = await rc.save(cartItems, pendInputs);
+    if (!r || r.grNos.length === 0) return;   // ไม่ผ่าน/ใบแรกล้มเหลว → error โชว์ในป๊อปตะกร้า
+    setDone(`✅ รับสินค้าสำเร็จ ${r.grNos.length} ใบรับ (${r.savedPoIds.length} ใบสั่งซื้อ): ${r.grNos.join(", ")}`); setDoneGrs(r.grNos);
+    setMassRecv(null); setSelectedIds(new Set());
+    if (r.failed) { setErr(r.failed); rc.setErr(null); }
+    await loadPending(doneMode ? "done" : "pending");
   };
 
   const dialogDismiss = useBackdropDismiss(() => setShortDialog(null));
-
-  // กล่องแนบไฟล์ (ใช้ร่วม 2 แท็บ)
-  const attachBox = (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
-      <div className="text-sm font-semibold text-slate-700 mb-2">📎 เอกสารแนบ (บังคับ) <span className="text-xs font-normal text-slate-400">— รูปถ่ายหรือ PDF</span></div>
-      <div className="grid grid-cols-2 gap-3">
-        {/* ใบส่งของจากขนส่ง (Delivery Bill) แนบตรงนี้ → ตอนออกใบสำคัญรับ จัดซื้อกด "อ่านด้วย AI" ได้เลย (รหัสขนส่ง EK- + น้ำหนัก/คิวรายกล่อง) */}
-        <FileInput label="📄 ใบรับของ / ใบส่งของขนส่ง" value={receiptKey} onChange={setReceiptKey} folder="goods-receipts" required hasError={!receiptKey && !!err} />
-        <FileInput label="🧾 บิล / ใบเสร็จ" value={billKey} onChange={setBillKey} folder="goods-receipts" required hasError={!billKey && !!err} />
-      </div>
-    </div>
-  );
 
   // แถบแบ่งหน้า (ของกลาง) = ต่อหน้า 50/100/200 + Pager · โชว์บน+ล่าง ตอน "ไม่จัดกลุ่ม"
   const pendPagerBar = (!isGrouped && !pendLoading && shownPend.length > 0) ? (
@@ -643,7 +588,7 @@ export default function ReceiveGoodsPage() {
         {/* คลังปลายทางที่รับเข้า (ของดีจะบวกสต๊อกเข้าคลังนี้) */}
         <div className="mb-4 flex items-center gap-2">
           <span className="text-sm text-slate-600">📥 รับเข้าคลัง:</span>
-          <div className="w-64"><WarehousePicker value={recvWh} onChange={setRecvWh} /></div>
+          <div className="w-64"><WarehousePicker value={rc.wh} onChange={rc.setWh} /></div>
           <span className="text-[11px] text-slate-400">ของดีจะบวกสต๊อกเข้าคลังนี้</span>
         </div>
 
@@ -1042,7 +987,7 @@ export default function ReceiveGoodsPage() {
             {!doneMode && cartCount > 0 && (
               <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mt-4 flex items-center justify-between gap-3 flex-wrap sticky bottom-2 shadow-sm">
                 <span className="text-sm text-blue-800 font-medium">🧺 ในตะกร้า {cartCount} รายการ</span>
-                <button onClick={() => setMassRecv(cartItems)} disabled={saving}
+                <button onClick={() => setMassRecv(cartItems)} disabled={saving || rc.saving}
                   className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
                   🧺 เปิดตะกร้า / บันทึกรับของ ({cartCount}) →
                 </button>
@@ -1062,12 +1007,12 @@ export default function ReceiveGoodsPage() {
           description={`🏪 ${selectedPo?.seller_name ?? ""} · กรอกจำนวนที่รับจริง แนบใบรับ/บิล แล้วบันทึก`}
           footer={<>
             <button onClick={() => { setPoId(""); setLines([]); }} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ปิด</button>
-            <button onClick={onSave} disabled={saving || !attachReady || loading || lines.length === 0} title={!attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
+            <button onClick={onSave} disabled={saving || !rc.attachReady || loading || lines.length === 0} title={!rc.attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
               className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
               {saving ? "กำลังบันทึก…" : "บันทึกรับสินค้า →"}
             </button>
           </>}>
-          {attachBox}
+          <ReceiveAttachBox cart={rc} invalid={!!err} />
           {loading ? (
             <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
           ) : lines.length === 0 ? (
@@ -1258,86 +1203,23 @@ export default function ReceiveGoodsPage() {
         // ตะกร้า = รายการที่ติ๊กมา + รายการที่ใส่จำนวนค้างไว้ก่อนหน้า (ให้เห็นครบทุกอย่างที่จะถูกบันทึก)
         const tickIds = new Set(massRecv.map((m) => m.id));
         const list = [...massRecv.map((m) => pend.find((p) => p.id === m.id) ?? m), ...cartItems.filter((c) => !tickIds.has(c.id))];
-        const poCount = new Set(list.filter((it) => num(pendInputs[it.id]?.recv) > 0 || num(pendInputs[it.id]?.def) > 0).map((it) => it.po_id)).size;
+        const poCount = groupReceiveByPo(list, pendInputs).size;
         return (
-        <ERPModal open onClose={() => !saving && setMassRecv(null)} size="xl" storageKey="recv-mass"
+        <ERPModal open onClose={() => !rc.saving && setMassRecv(null)} size="xl" storageKey="recv-mass"
           title={`🧺 ตะกร้ารับของ ${list.length} รายการ`}
           description="ใส่จำนวนที่รับจริง → วันที่รับ + ผู้รับ + แนบใบรับ/บิล → กดบันทึกรับสินค้า จบในหน้านี้"
           footer={<>
-            <span className="mr-auto text-[11px] text-slate-400">{cartCount > 0 ? `จะออกใบรับ ${poCount} ใบ (แยกตามใบสั่งซื้อ)` : "ยังไม่ได้ใส่จำนวน"}{!attachReady && cartCount > 0 ? " · ต้องแนบใบรับของ + บิลก่อน" : ""}</span>
-            <button onClick={() => setMassRecv(null)} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ปิด (เก็บจำนวนไว้)</button>
-            <button onClick={() => void savePending()} disabled={saving || !attachReady || cartCount === 0} title={!attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
-              className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{saving ? "กำลังบันทึก…" : `✓ บันทึกรับสินค้า (${cartCount})`}</button>
+            <span className="mr-auto text-[11px] text-slate-400">{cartCount > 0 ? `จะออกใบรับ ${poCount} ใบ (แยกตามใบสั่งซื้อ)` : "ยังไม่ได้ใส่จำนวน"}{!rc.attachReady && cartCount > 0 ? " · ต้องแนบใบรับของ + บิลก่อน" : ""}</span>
+            <button onClick={() => setMassRecv(null)} disabled={rc.saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ปิด (เก็บจำนวนไว้)</button>
+            <button onClick={() => void savePending()} disabled={rc.saving || !rc.attachReady || cartCount === 0} title={!rc.attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
+              className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{rc.saving ? "กำลังบันทึก…" : `✓ บันทึกรับสินค้า (${cartCount})`}</button>
           </>}>
-          {/* วันที่รับ + ผู้รับ (คนที่ login) + คลังปลายทาง */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">📅 วันที่รับของ</label>
-              <input type="date" value={recvDate} onChange={(e) => setRecvDate(e.target.value)} className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">👤 ผู้รับ</label>
-              <input value={recvBy} onChange={(e) => setRecvBy(e.target.value)} placeholder={user?.name ?? "ชื่อผู้รับ"} className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">📥 รับเข้าคลัง</label>
-              <WarehousePicker value={recvWh} onChange={setRecvWh} />
-            </div>
-          </div>
-          {attachBox}
-          {err && <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">⚠️ {err}</div>}
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <button onClick={() => setPendInputs((p) => { const n = { ...p }; for (const it of list) n[it.id] = { ...(n[it.id] ?? { def: "0" }), recv: String(it.remaining) }; return n; })}
-              className="h-8 px-3 text-xs font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">✓ รับครบทุกตัว</button>
-            <button onClick={() => setPendInputs((p) => { const n = { ...p }; for (const it of list) n[it.id] = { recv: "0", def: "0" }; return n; })}
-              className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">ล้างจำนวน</button>
-            <span className="text-[11px] text-slate-400">รับไม่ครบ = ค่าเริ่มต้น &quot;รอรับเพิ่ม&quot; · เปลี่ยนเป็น &quot;ปิดบิล&quot; ได้ทีละรายการ</span>
-          </div>
-          <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 max-h-[46vh] overflow-y-auto">
-            {list.map((it) => {
-              const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
-              const recv = num(inp.recv);
-              const short = recv > 0 && recv < it.remaining;
-              const over = recv > it.remaining;
-              return (
-                <div key={it.id} className={`flex items-center gap-3 px-3 py-2 flex-wrap sm:flex-nowrap ${recv > 0 || num(inp.def) > 0 ? "bg-blue-50/40" : ""}`}>
-                  <HoverPreview url={it.image_url} previewW={240}>
-                    <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
-                      {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
-                    </div>
-                  </HoverPreview>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-slate-800 truncate" title={it.item_name}>{stripCode(it.item_name)}</div>
-                    <div className="text-[11px] text-slate-400 truncate">{it.code ? `${it.code} · ` : ""}{it.seller_name} · {it.po_no}</div>
-                  </div>
-                  {/* สั่ง / คงเหลือ — วางติดช่องรับ จะได้เห็นว่าสั่งไปเท่าไหร่ตอนกรอก */}
-                  <div className="shrink-0 text-right leading-tight w-32">
-                    <div className="text-[11px] text-slate-400">สั่ง <b className="text-slate-600 tabular-nums">{it.qty.toLocaleString()}</b>{it.qty_received > 0 && <span className="text-emerald-600"> · รับแล้ว {it.qty_received.toLocaleString()}</span>}</div>
-                    <div className="text-xs text-slate-500">คงเหลือ <b className="text-blue-700 tabular-nums text-sm">{it.remaining.toLocaleString()}</b> <span className="text-[10px] text-slate-400">{it.uom}</span></div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] text-slate-400">รับ</span>
-                    <input type="number" inputMode="decimal" step="any" min={0} value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })} onFocus={(e) => e.target.select()}
-                      className={`w-20 h-9 px-2 text-sm text-center border rounded-md tabular-nums ${short || over ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
-                    <button onClick={() => setPendInput(it.id, { recv: String(it.remaining) })} title={`รับครบ ${it.remaining.toLocaleString()}`} className="h-9 px-2 text-xs rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">ครบ</button>
-                    <span className="text-[10px] text-slate-400 ml-1">เสีย</span>
-                    <input type="number" inputMode="decimal" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })} onFocus={(e) => e.target.select()}
-                      className="w-16 h-9 px-2 text-sm text-center border border-slate-200 rounded-md tabular-nums" />
-                    {short && (
-                      <select value={inp.close ? "close" : "wait"} onChange={(e) => setPendInput(it.id, { close: e.target.value === "close" })} className="h-9 px-1.5 text-xs border border-amber-300 bg-amber-50 rounded-md">
-                        <option value="wait">🟡 รอรับเพิ่ม</option>
-                        <option value="close">🔴 ปิดบิล</option>
-                      </select>
-                    )}
-                    {over && <span className="text-[10px] text-amber-600">⚠ เกิน</span>}
-                    <button onClick={() => { setPendInput(it.id, { recv: "0", def: "0" }); setMassRecv((m) => (m ? m.filter((x) => x.id !== it.id) : m)); setSelectedIds((s) => { const n = new Set(s); n.delete(it.id); return n; }); }}
-                      title="เอาออกจากตะกร้า" className="w-7 h-7 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50">✕</button>
-                  </div>
-                </div>
-              );
-            })}
-            {list.length === 0 && <div className="py-8 text-center text-xs text-slate-300">— ตะกร้าว่าง —</div>}
-          </div>
+          {/* ของกลาง (ตัวเดียวกับโหมดรับของหน้าสั่งซื้อ): วันที่รับ + ผู้รับ + คลัง · แนบใบรับ/บิล · รายการกรอกรับ/เสีย */}
+          <div className="mb-3"><ReceiveCartMeta cart={rc} /></div>
+          <ReceiveAttachBox cart={rc} />
+          {rc.err && <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">⚠️ {rc.err}</div>}
+          <ReceiveCartRows items={list} inputs={pendInputs} onInput={setPendInput}
+            onRemove={(it) => { setPendInput(it.id, { recv: "0", def: "0" }); setMassRecv((m) => (m ? m.filter((x) => x.id !== it.id) : m)); setSelectedIds((s) => { const n = new Set(s); n.delete(it.id); return n; }); }} />
         </ERPModal>
         ); })()}
 

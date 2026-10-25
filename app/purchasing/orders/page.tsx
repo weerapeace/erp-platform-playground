@@ -20,6 +20,7 @@ import { SkuShopSelect } from "@/components/sku-shop-select";
 import { SortTh, sortRows, type SortState } from "@/components/sort-th";
 import nextDynamic from "next/dynamic";
 import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./approval";
+import { ReceiveMode } from "./receive-mode";
 import { PieceworkFromPoModal, type PieceFromPoInit } from "../piecework-from-po-modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
@@ -54,7 +55,7 @@ const noShop = (r: Row) => !r.seller_name || r.seller_name === "—" || r.seller
 // ตัด [code] นำหน้าชื่อสินค้าออก (code โชว์เป็น chip ข้างล่างอยู่แล้ว) — ถ้าตัดแล้วว่างให้คงชื่อเดิมไว้
 const stripCode = (name: string) => name?.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
 type CartView = "table" | "card";
-const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate", CART_KEY = "po_create_cart", SORT_KEY = "po_create_sort";
+const MODE_KEY = "po_create_mode", VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate", CART_KEY = "po_create_cart", SORT_KEY = "po_create_sort";
 type SortKey = "date" | "name" | "qty" | "price";
 type CreatedPO = { id: string; po_no: string; seller_name: string; currency: string; grand_total: number; line_count: number };
 type ShareItem = { name: string; code: string; qty: number; uom: string };
@@ -88,6 +89,7 @@ export default function PurchaseOrdersPage() {
   const [busy, setBusy] = useState(false);
 
   const [view, setView] = useState<"table" | "card">("card");
+  const [mode, setMode] = useState<"order" | "recv">("order");   // 📝 สั่งซื้อ / 📥 รับของ (ของที่ออก PO แล้ว ยังรับไม่ครบ)
   const [mainTab, setMainTab] = useState<"shop" | "mo">("shop");
   const [cols, setCols] = useState(4);
   const [cart, setCart] = useState<Record<string, CartLine>>({});
@@ -149,6 +151,10 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "card") setView(v);
+    // โหมด: ?mode=recv (ลิงก์ตรง) → ค่าที่จำไว้
+    const qm = new URLSearchParams(window.location.search).get("mode");
+    const m = qm === "recv" || qm === "order" ? qm : localStorage.getItem(MODE_KEY);
+    if (m === "recv" || m === "order") setMode(m);
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 12) setCols(c);
     const r = Number(localStorage.getItem(RATE_KEY)); if (r > 0) setRate(r);
     const sk = localStorage.getItem(SORT_KEY); if (sk === "date" || sk === "name" || sk === "qty" || sk === "price") setSortKey(sk);
@@ -177,6 +183,7 @@ export default function PurchaseOrdersPage() {
   }, [rows, loading, error, cart, toast]);
 
   const changeView = (v: "table" | "card") => { setView(v); localStorage.setItem(VIEW_KEY, v); };
+  const changeMode = (m: "order" | "recv") => { setMode(m); localStorage.setItem(MODE_KEY, m); setShopDrawerOpen(false); setCartSheetOpen(false); };
   const changeCols = (n: number) => { setCols(n); localStorage.setItem(COLS_KEY, String(n)); };
   const changeRate = (n: number) => { setRate(n); if (n > 0) localStorage.setItem(RATE_KEY, String(n)); };
   const changeSort = (s: SortKey) => { setSortKey(s); localStorage.setItem(SORT_KEY, s); };
@@ -406,11 +413,33 @@ export default function PurchaseOrdersPage() {
       <div className="p-5">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
-            <h1 className="text-xl font-bold text-slate-900">🛒 สั่งซื้อ — ออกใบสั่งซื้อจากรายการขอซื้อ</h1>
-            <p className="text-sm text-slate-500 mt-0.5">เลือกรายการ → สร้างใบสั่งซื้อ (ระบบแยกใบตามร้านให้อัตโนมัติ • 1 ใบ/ร้าน)</p>
+            {mode === "recv" ? (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">📥 รับของ — รับสินค้าตามใบสั่งซื้อที่ยังรับไม่ครบ</h1>
+                <p className="text-sm text-slate-500 mt-0.5">กดการ์ด = ใส่ตะกร้ารับ (ค่าเริ่มต้นรับครบ) → แนบใบรับของ + บิล → บันทึก (ออกใบรับแยกตามใบสั่งซื้อให้อัตโนมัติ)</p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-xl font-bold text-slate-900">🛒 สั่งซื้อ — ออกใบสั่งซื้อจากรายการขอซื้อ</h1>
+                <p className="text-sm text-slate-500 mt-0.5">เลือกรายการ → สร้างใบสั่งซื้อ (ระบบแยกใบตามร้านให้อัตโนมัติ • 1 ใบ/ร้าน)</p>
+              </>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            {view === "card" && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* สลับโหมด สั่งซื้อ / รับของ — กติการับของเดียวกับหน้ารับสินค้า (ตะกร้ารับของกลาง) */}
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+              <button onClick={() => changeMode("order")} className={`h-9 px-3 ${mode === "order" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📝 สั่งซื้อ</button>
+              <button onClick={() => changeMode("recv")} className={`h-9 px-3 border-l border-slate-200 ${mode === "recv" ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📥 รับของ</button>
+            </div>
+            {mode === "recv" && (
+              <>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
+                  <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                </label>
+                <a href="/purchasing/receive" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center whitespace-nowrap">📦 หน้ารับสินค้า</a>
+              </>
+            )}
+            {mode === "order" && view === "card" && (
               <>
                 <label className="flex items-center gap-1.5 text-xs text-slate-500">เรียงตาม
                   <select value={sortKey} onChange={(e) => changeSort(e.target.value as SortKey)} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
@@ -427,11 +456,13 @@ export default function PurchaseOrdersPage() {
                   className={`h-9 px-3 text-sm font-medium rounded-lg border ${selectMode ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>☑️ เลือกหลายชิ้น</button>
               </>
             )}
+            {mode === "order" && <>
             <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
               <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
               <button onClick={() => changeView("table")} className={`h-9 px-3 border-l border-slate-200 ${view === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
             </div>
             <button onClick={() => setRejectedOpen(true)} className="h-9 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center whitespace-nowrap">🚫 รายการไม่อนุมัติ</button>
+            </>}
             <a href="/m/purchase-orders-v2" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 ดูใบสั่งซื้อ</a>
           </div>
         </div>
@@ -439,7 +470,10 @@ export default function PurchaseOrdersPage() {
         {/* ป๊อปแท็บ "รายการไม่อนุมัติ" + กู้คืน — โหลดใหม่หน้าหลักเมื่อกู้คืน */}
         <RejectedPanel open={rejectedOpen} onClose={() => setRejectedOpen(false)} onChanged={fetchRows} />
 
-        {view === "table" && (
+        {/* 📥 โหมดรับของ — การ์ดรอรับ + ตะกร้ารับของกลาง (ไฟล์ receive-mode.tsx) */}
+        {mode === "recv" && <ReceiveMode cols={cols} isChineseShop={isChineseShop} />}
+
+        {mode === "order" && view === "table" && (
           <DataTable<Row>
             data={rows} columns={COLUMNS} loading={loading} error={error ?? undefined} onRetry={fetchRows}
             emptyMessage="ไม่มีรายการรอสั่งซื้อ" searchPlaceholder="ค้นหา ร้าน / สินค้า / รหัส..."
@@ -453,7 +487,7 @@ export default function PurchaseOrdersPage() {
           />
         )}
 
-        {view === "card" && (
+        {mode === "order" && view === "card" && (
           loading ? <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลด…</div>
           : error ? <div className="text-center text-red-500 py-16 text-sm">⚠ {error} <button onClick={fetchRows} className="underline ml-2">ลองใหม่</button></div>
           : rows.length === 0 ? <div className="text-center text-slate-300 py-16">ไม่มีรายการรอสั่งซื้อ</div>
@@ -751,10 +785,10 @@ export default function PurchaseOrdersPage() {
         )}
 
         {/* จอ < xl: ฉากหลังมืดตอนเปิดลิ้นชัก/ตะกร้า + ปุ่มตะกร้าลอย (เฉพาะมุมมองการ์ด) */}
-        {view === "card" && (shopDrawerOpen || cartSheetOpen) && (
+        {mode === "order" && view === "card" && (shopDrawerOpen || cartSheetOpen) && (
           <div className="xl:hidden fixed inset-0 z-30 bg-black/40" onClick={() => { setShopDrawerOpen(false); setCartSheetOpen(false); }} />
         )}
-        {view === "card" && !cartSheetOpen && (
+        {mode === "order" && view === "card" && !cartSheetOpen && (
           <button onClick={() => setCartSheetOpen(true)}
             className="xl:hidden fixed bottom-5 right-5 z-30 h-14 pl-4 pr-5 rounded-full bg-blue-600 text-white shadow-lg flex items-center gap-2 active:scale-95 transition-transform">
             <span className="relative flex items-center">

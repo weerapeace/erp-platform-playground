@@ -13,7 +13,8 @@
  *
  *   <ReceiveLineModal line={{ po_id, po_no, po_line_id, name, code, uom, qty, qty_received }} onClose onSaved />
  *
- * ใช้ที่: ReceiveLineFields → ป๊อปรายบรรทัดหน้ารับของ · ReceiveLineModal → การ์ดวัตถุดิบ แท็บใบสั่งผลิต (/purchasing)
+ * ใช้ที่: ReceiveLineFields → ป๊อปรายบรรทัดหน้ารับของ + โหมดรับของหน้าสั่งซื้อ · ReceiveLineModal → การ์ดวัตถุดิบ แท็บใบสั่งผลิต (/purchasing)
+ * รับหลายรายการพร้อมกัน (ตะกร้า + แนบเอกสารครั้งเดียว) → ./receive-cart (useReceiveCart · ReceiveCartRows …)
  * สูตรเคสเดียวกันทุกที่: รับ ≥ คงเหลือ = full · รับไม่ครบ + ปิดบิล = partial_close · รับไม่ครบ = partial_wait (receiveCaseType)
  */
 import { useEffect, useState } from "react";
