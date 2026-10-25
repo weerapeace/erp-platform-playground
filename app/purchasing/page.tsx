@@ -31,6 +31,7 @@ import { HoverImage } from "@/components/hover-image";
 import type { MoMaterialStatus, MoMaterialStatusResult, MatStatus, MatPurchaseLink } from "@/app/api/mo/material-status/route";
 import { PoDetailModal } from "@/components/po-detail-modal";
 import { ReceiveLineModal, type ReceiveLine } from "@/components/receive-line-modal";
+import { StockMovementHistory } from "@/components/stock-movement-history";
 import type { MoListItem } from "@/app/api/mo/route";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
@@ -168,6 +169,8 @@ export default function PurchasingShopPage() {
   const canEditMat = usePermission("products.edit");
   const canStock = usePermission("stock.adjust");                          // นับสต๊อก/ใส่จำนวนปัจจุบัน (ผู้จัดซื้อได้สิทธิ์นี้แล้ว)
   const [stockCount, setStockCount] = useState<MoMaterialStatus | null>(null);   // วัตถุดิบที่กำลังนับสต๊อก (ป๊อป)
+  const canStockView = usePermission("stock.view");
+  const [stockHist, setStockHist] = useState<MoMaterialStatus | null>(null);     // วัตถุดิบที่กำลังดูความเคลื่อนไหวสต๊อก
   const [poView, setPoView] = useState<string | null>(null);              // po_id ที่เปิดดูใบสั่งซื้อ (จากการ์ดวัตถุดิบ)
   const [recvLine, setRecvLine] = useState<ReceiveLine | null>(null);     // บรรทัด PO ที่กำลังรับของ
 
@@ -1069,6 +1072,7 @@ export default function PurchasingShopPage() {
                             onAdd={() => setMoMatQty({ code: it.code, name: it.name, image: it.image, type: it.type, uom: it.uom, needed: it.remaining })}
                             onHave={(v) => void setHave(it, v)}
                             canStock={canStock} onCount={() => setStockCount(it)}
+                            canStockView={canStockView} onHistory={() => setStockHist(it)}
                             onOpenPo={(poId) => setPoView(poId)}
                             onReceive={(l) => l.po_id && l.po_line_id && setRecvLine({
                               po_id: l.po_id, po_no: l.po_no ?? "", po_line_id: l.po_line_id, seller_name: l.seller_name,
@@ -1411,6 +1415,11 @@ export default function PurchasingShopPage() {
         <ReceiveLineModal line={recvLine} onClose={() => setRecvLine(null)}
           onSaved={() => { setRecvLine(null); setMoStatusTick(t => t + 1); void refreshMoNeeds(); }} />
       )}
+      {/* ป้ายสต๊อกบนการ์ด → ความเคลื่อนไหวสต๊อก (ของกลาง) · ปุ่มนับในป๊อป → เปิดป๊อปนับต่อเลย */}
+      {stockHist?.code && (
+        <StockMovementHistory code={stockHist.code} warehouseCode="WH-RAW" onClose={() => setStockHist(null)}
+          onCount={canStock ? () => { const it = stockHist; setStockHist(null); setStockCount(it); } : undefined} />
+      )}
       {/* การ์ดวัตถุดิบ → 🔢 นับสต๊อก (ใส่จำนวนปัจจุบัน) → ใช้ของในสต๊อกกับใบนี้ได้เลย */}
       {stockCount && moSel && (
         <StockCountDialog it={stockCount} moNo={moSel.mo_no} onClose={() => setStockCount(null)}
@@ -1736,10 +1745,12 @@ function StockCountDialog({ it, moNo, onClose, onSaved }: { it: MoMaterialStatus
 // การ์ดวัตถุดิบ 1 ตัวใน BOM (แท็บใบสั่งผลิต ระดับ 2) — ป้ายสถานะการซื้อ + ✓ มีของแล้ว / ยกเลิก
 const fmtQty = (n: number) => (Math.round(n * 1000) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const fmtEta = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null);
-function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount, onOpenPo, onReceive }: {
+function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount, canStockView, onHistory, onOpenPo, onReceive }: {
   it: MoMaterialStatus; inCart: number; canEdit: boolean; busy: boolean; onAdd: () => void; onHave: (have: boolean) => void;
   /** มีสิทธิ์นับสต๊อก (stock.adjust) → โชว์ปุ่ม 🔢 นับ */
   canStock: boolean; onCount: () => void;
+  /** มีสิทธิ์ดูสต๊อก (stock.view) → ป้ายสต๊อกกดดูความเคลื่อนไหวได้ */
+  canStockView: boolean; onHistory: () => void;
   /** กดเลข PO → เปิดใบสั่งซื้อ (ของกลาง PoDetailModal) */
   onOpenPo: (poId: string) => void;
   /** กด 📥 รับ → ป๊อปรับของ (ของกลาง ReceiveLineModal) */
@@ -1810,17 +1821,30 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount
         {it.status === "have" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ มีของแล้ว")}
         {it.status === "ready" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ เตรียมแล้ว")}
         {it.status === "skip" && tag("bg-slate-50 text-slate-500 border-slate-200", "ไม่ต้องซื้อ")}
-        {/* ป้ายสต๊อกคลังวัตถุดิบ: ยังไม่เคยนับ / ในระบบ X (ยังไม่นับ) / นับแล้ว X · วันที่ (+ พร้อมใช้ ถ้าแบ่งให้ใบอื่นไปแล้ว) */}
+        {/* ป้ายสต๊อกคลังวัตถุดิบ: ยังไม่เคยนับ / ในระบบ X (ยังไม่นับ) / นับแล้ว X · วันที่ (+ พร้อมใช้ ถ้าแบ่งให้ใบอื่นไปแล้ว)
+            กดได้ (มีสิทธิ์ดูสต๊อก) → ป๊อปความเคลื่อนไหวสต๊อก (ของกลาง StockMovementHistory) */}
         {it.stock && it.status !== "ready" && it.status !== "skip" && (() => {
           const s = it.stock;
           const when = s.counted_at ? new Date(s.counted_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null;
           const avail = s.available ?? 0;
           const enough = isBuy ? avail >= it.remaining - 0.0001 && avail > 0 : avail > 0;
-          if (s.counted_at) return tag(enough ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200",
-            `📦 นับแล้ว ${fmtQty(s.on_hand ?? s.counted_qty ?? 0)} ${u} · ${when}`,
-            s.reserved_other > 0 ? `พร้อมใช้ ${fmtQty(avail)} (แบ่งให้ใบอื่น ${fmtQty(s.reserved_other)})` : null);
-          if (s.on_hand != null) return tag("bg-amber-50 text-amber-700 border-amber-200", `📦 ในระบบ ${fmtQty(s.on_hand)} ${u} · ยังไม่เคยนับ`);
-          return tag("bg-slate-50 text-slate-500 border-slate-200", "📦 สต๊อก: ยังไม่เคยนับ");
+          const [cls, text, sub] = s.counted_at
+            ? [enough ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200",
+               `📦 นับแล้ว ${fmtQty(s.on_hand ?? s.counted_qty ?? 0)} ${u} · ${when}`,
+               s.reserved_other > 0 ? `พร้อมใช้ ${fmtQty(avail)} (แบ่งให้ใบอื่น ${fmtQty(s.reserved_other)})` : null]
+            : s.on_hand != null
+              ? ["bg-amber-50 text-amber-700 border-amber-200", `📦 ในระบบ ${fmtQty(s.on_hand)} ${u} · ยังไม่เคยนับ`, null]
+              : ["bg-slate-50 text-slate-500 border-slate-200", "📦 สต๊อก: ยังไม่เคยนับ", null];
+          if (!canStockView || !it.code) return tag(cls, text, sub);
+          return (
+            <div className="mt-1.5">
+              <button type="button" onClick={(e) => { e.stopPropagation(); onHistory(); }} title="กดดูความเคลื่อนไหวสต๊อก"
+                className={`inline-flex items-center gap-0.5 max-w-full text-[11px] font-medium px-1.5 py-0.5 rounded border hover:brightness-95 ${cls}`}>
+                <span className="truncate">{text}</span><span className="shrink-0 opacity-70">›</span>
+              </button>
+              {sub && <div className="text-[11px] text-slate-400 truncate mt-0.5" title={sub}>{sub}</div>}
+            </div>
+          );
         })()}
         {(canEdit || canStock) && isBuy && (
           <div className="mt-auto pt-2 flex gap-1.5">
