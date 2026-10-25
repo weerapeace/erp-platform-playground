@@ -166,6 +166,8 @@ export default function PurchasingShopPage() {
   const [haveBusy, setHaveBusy] = useState<string | null>(null);   // summary_id ที่กำลังบันทึก "มีของแล้ว"
   const haveUndo = useRef(new Map<string, { on_hand: number; stored: number | null }>());   // ค่าเดิมก่อนกด (ไว้ยกเลิก)
   const canEditMat = usePermission("products.edit");
+  const canStock = usePermission("stock.adjust");                          // นับสต๊อก/ใส่จำนวนปัจจุบัน (ผู้จัดซื้อได้สิทธิ์นี้แล้ว)
+  const [stockCount, setStockCount] = useState<MoMaterialStatus | null>(null);   // วัตถุดิบที่กำลังนับสต๊อก (ป๊อป)
   const [poView, setPoView] = useState<string | null>(null);              // po_id ที่เปิดดูใบสั่งซื้อ (จากการ์ดวัตถุดิบ)
   const [recvLine, setRecvLine] = useState<ReceiveLine | null>(null);     // บรรทัด PO ที่กำลังรับของ
 
@@ -1027,6 +1029,16 @@ export default function PurchasingShopPage() {
                     <div className="text-sm font-semibold text-slate-800 truncate">{moSel.product_label} <span className="font-mono text-xs text-slate-400">· {moSel.mo_no}</span></div>
                     <div className="text-[11px] text-slate-400">วัตถุดิบทั้งหมดใน BOM {items.length || "…"} รายการ{moSel.due_date ? ` · กำหนดส่ง ${moSel.due_date}` : ""}</div>
                   </div>
+                  {/* ความคืบหน้าการนับสต๊อกจริงของใบนี้ (เริ่มระบบสต๊อกจากหน้านี้ได้ทีละตัว) */}
+                  {items.length > 0 && (() => {
+                    const withCode = items.filter(m => m.stock);
+                    const counted = withCode.filter(m => m.stock?.counted_at).length;
+                    return withCode.length > 0 && (
+                      <span className={`ml-auto shrink-0 text-[11px] font-medium px-2 py-1 rounded-md border ${counted === withCode.length ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}>
+                        📦 นับสต๊อกแล้ว {counted}/{withCode.length} วัตถุดิบในใบนี้
+                      </span>
+                    );
+                  })()}
                 </div>
                 {moStatusErr && (
                   <div className="text-sm text-rose-600 py-8 text-center">โหลดวัตถุดิบของใบนี้ไม่สำเร็จ <button onClick={() => setMoStatusTick(t => t + 1)} className="underline">ลองใหม่</button></div>
@@ -1056,6 +1068,7 @@ export default function PurchasingShopPage() {
                           <MoBomCard key={it.summary_id} it={it} inCart={inCartQty(it.code)} canEdit={canEditMat} busy={haveBusy === it.summary_id}
                             onAdd={() => setMoMatQty({ code: it.code, name: it.name, image: it.image, type: it.type, uom: it.uom, needed: it.remaining })}
                             onHave={(v) => void setHave(it, v)}
+                            canStock={canStock} onCount={() => setStockCount(it)}
                             onOpenPo={(poId) => setPoView(poId)}
                             onReceive={(l) => l.po_id && l.po_line_id && setRecvLine({
                               po_id: l.po_id, po_no: l.po_no ?? "", po_line_id: l.po_line_id, seller_name: l.seller_name,
@@ -1398,6 +1411,11 @@ export default function PurchasingShopPage() {
         <ReceiveLineModal line={recvLine} onClose={() => setRecvLine(null)}
           onSaved={() => { setRecvLine(null); setMoStatusTick(t => t + 1); void refreshMoNeeds(); }} />
       )}
+      {/* การ์ดวัตถุดิบ → 🔢 นับสต๊อก (ใส่จำนวนปัจจุบัน) → ใช้ของในสต๊อกกับใบนี้ได้เลย */}
+      {stockCount && moSel && (
+        <StockCountDialog it={stockCount} moNo={moSel.mo_no} onClose={() => setStockCount(null)}
+          onSaved={() => { setStockCount(null); setMoStatusTick(t => t + 1); void refreshMoNeeds(); }} />
+      )}
 
       {/* Group variation modal — ดึง SKU ของกลุ่มมาเลือก + ค้นหา + จัดการกลุ่ม */}
       {sel && (() => {
@@ -1636,11 +1654,92 @@ function MoGroupBuyDialog({ title, mos, needs, cart, onClose, onAdd }: { title: 
   );
 }
 
+// ป๊อป "นับสต๊อก · ใส่จำนวนปัจจุบัน" (การ์ดวัตถุดิบ แท็บใบสั่งผลิต) — เริ่มระบบสต๊อกจากหน้านี้ได้ทีละตัว
+//   1) ตั้งยอดคลังวัตถุดิบ (WH-RAW) = ที่นับได้ ผ่าน /api/inventory/quick-count (เครื่องยนต์สต๊อกกลาง + audit)
+//   2) ถ้าพร้อมใช้ (นับได้ − แบ่งให้ใบอื่นที่ยังไม่จ่ายงาน) → "ใช้ของในสต๊อกกับใบนี้" ผ่านสมุดแบ่งของ /api/mo/material-allocations (source=stock)
+//      → "มีอยู่" ของใบนี้เพิ่ม · ต้องซื้อลด · ใบอื่นจะเห็นพร้อมใช้ลดลงตาม (กันใช้ของก้อนเดียวซ้ำ)
+function StockCountDialog({ it, moNo, onClose, onSaved }: { it: MoMaterialStatus; moNo: string; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const s = it.stock;
+  const u = it.uom ?? "";
+  const [val, setVal] = useState("");
+  const [useIt, setUseIt] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const counted = val === "" ? null : Number(val);
+  const reservedOther = s?.reserved_other ?? 0;
+  const avail = counted == null || !isFinite(counted) ? null : Math.max(0, counted - reservedOther);
+  const useQty = it.status === "buy" && avail != null ? ceil2(Math.min(avail, it.remaining)) : 0;
+  const when = s?.counted_at ? new Date(s.counted_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : null;
+  const save = async () => {
+    setErr(null);
+    if (counted == null || !isFinite(counted) || counted < 0) { setErr("ใส่จำนวนที่นับได้ก่อน (นับแล้วไม่มีเลย ใส่ 0)"); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/inventory/quick-count", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: it.code, counted, warehouse_code: "WH-RAW", ref_label: `นับจากหน้าขอซื้อ · ${moNo}` }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setErr(j.error ?? "บันทึกยอดสต๊อกไม่สำเร็จ"); return; }
+      if (useIt && useQty > 0) {
+        const today = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+        const r2 = await apiFetch("/api/mo/material-allocations", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: [{ summary_id: it.summary_id, qty: useQty }], source: "stock", ref_type: "stock_count", ref_label: `ของในสต๊อก WH-RAW (นับ ${today})` }) });
+        const j2 = await r2.json().catch(() => ({}));
+        if (!r2.ok || j2.error) toast.warning(`บันทึกยอดสต๊อกแล้ว แต่ใช้กับใบนี้ไม่สำเร็จ: ${j2.error ?? "ลองกดอีกครั้ง"}`);
+        else toast.success(`นับแล้ว ${fmtQty(counted)} ${u} · ใช้กับ ${moNo} ${fmtQty(useQty)} ${u}`);
+      } else toast.success(`บันทึกยอดสต๊อกแล้ว ${fmtQty(counted)} ${u}`);
+      onSaved();
+    } catch { setErr("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setSaving(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="sm" storageKey="mo-stock-count" title="นับสต๊อก · ใส่จำนวนปัจจุบัน"
+      footer={<>
+        <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={() => void save()} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{saving ? "กำลังบันทึก…" : "บันทึกยอดสต๊อก"}</button>
+      </>}>
+      <div className="text-sm font-medium text-slate-800">{it.name}</div>
+      {it.code && <div className="text-[11px] font-mono text-slate-400">{it.code}</div>}
+      <div className="grid grid-cols-2 gap-3 mt-3 text-xs">
+        <div><div className="text-slate-500">คลัง</div><div className="text-sm text-slate-700 mt-0.5">WH-RAW คลังวัตถุดิบ</div></div>
+        <div>
+          <div className="text-slate-500">ระบบมีอยู่</div>
+          <div className="text-sm text-slate-700 mt-0.5 tabular-nums">{s?.on_hand == null ? <span className="text-slate-400">— ยังไม่มียอด</span> : `${fmtQty(s.on_hand)} ${u}`}</div>
+        </div>
+      </div>
+      {s?.on_hand != null && s.on_hand < 0 && <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">ยอดติดลบเพราะจ่ายงานไปก่อนเคยนับ — นับครั้งนี้จะตั้งยอดใหม่ให้ตรงของจริง</div>}
+      <div className="mt-2 text-[11px] text-slate-400">{when ? `นับล่าสุด ${when}${s?.counted_by ? ` · ${s.counted_by}` : ""}` : "ยังไม่เคยนับ"}{reservedOther > 0 ? ` · แบ่งให้ใบงานอื่นที่ยังไม่จ่ายงานแล้ว ${fmtQty(reservedOther)} ${u}` : ""}</div>
+      <label className="block text-xs font-medium text-slate-600 mt-3 mb-1">นับได้จริงตอนนี้</label>
+      <div className="relative">
+        <input type="number" inputMode="decimal" min={0} step="any" autoFocus value={val} placeholder="0" onFocus={(e) => e.target.select()}
+          onChange={(e) => { setVal(e.target.value); setErr(null); }}
+          className="w-full h-11 px-16 text-center text-lg font-medium border border-slate-200 rounded-md tabular-nums" />
+        {u && <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 max-w-[4.5rem] truncate text-xs font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded px-2 py-0.5">{u}</span>}
+      </div>
+      {counted != null && reservedOther > 0 && counted < reservedOther && (
+        <div className="mt-2 text-[11px] text-rose-600">⚠ นับได้น้อยกว่าที่แบ่งให้ใบงานอื่นไว้แล้ว ({fmtQty(reservedOther)} {u}) — เช็กของอีกครั้ง</div>
+      )}
+      {useQty > 0 && (
+        <label className="mt-3 flex items-start gap-2 text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-md px-2.5 py-2">
+          <input type="checkbox" checked={useIt} onChange={(e) => setUseIt(e.target.checked)} className="mt-0.5 rounded border-emerald-300" />
+          <span>
+            ใช้ของในสต๊อกกับใบนี้ <b>{fmtQty(useQty)} {u}</b>
+            {useQty < it.remaining - 0.0001 ? ` · ยังขาดอีก ${fmtQty(it.remaining - useQty)} ${u} (ต้องซื้อเพิ่ม)` : " → ย้ายไป \"มีของแล้ว\""}
+          </span>
+        </label>
+      )}
+      {err && <div className="mt-3 text-sm text-rose-600">{err}</div>}
+    </ERPModal>
+  );
+}
+
 // การ์ดวัตถุดิบ 1 ตัวใน BOM (แท็บใบสั่งผลิต ระดับ 2) — ป้ายสถานะการซื้อ + ✓ มีของแล้ว / ยกเลิก
 const fmtQty = (n: number) => (Math.round(n * 1000) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const fmtEta = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null);
-function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, onOpenPo, onReceive }: {
+function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount, onOpenPo, onReceive }: {
   it: MoMaterialStatus; inCart: number; canEdit: boolean; busy: boolean; onAdd: () => void; onHave: (have: boolean) => void;
+  /** มีสิทธิ์นับสต๊อก (stock.adjust) → โชว์ปุ่ม 🔢 นับ */
+  canStock: boolean; onCount: () => void;
   /** กดเลข PO → เปิดใบสั่งซื้อ (ของกลาง PoDetailModal) */
   onOpenPo: (poId: string) => void;
   /** กด 📥 รับ → ป๊อปรับของ (ของกลาง ReceiveLineModal) */
@@ -1711,12 +1810,30 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, onOpenPo, onRecei
         {it.status === "have" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ มีของแล้ว")}
         {it.status === "ready" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ เตรียมแล้ว")}
         {it.status === "skip" && tag("bg-slate-50 text-slate-500 border-slate-200", "ไม่ต้องซื้อ")}
-        {canEdit && isBuy && (
-          <div className="mt-auto pt-2">
-            <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); onHave(true); }}
-              className="w-full h-8 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50 disabled:opacity-50">
-              {busy ? "กำลังบันทึก…" : "✓ มีของแล้ว"}
-            </button>
+        {/* ป้ายสต๊อกคลังวัตถุดิบ: ยังไม่เคยนับ / ในระบบ X (ยังไม่นับ) / นับแล้ว X · วันที่ (+ พร้อมใช้ ถ้าแบ่งให้ใบอื่นไปแล้ว) */}
+        {it.stock && it.status !== "ready" && it.status !== "skip" && (() => {
+          const s = it.stock;
+          const when = s.counted_at ? new Date(s.counted_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null;
+          const avail = s.available ?? 0;
+          const enough = isBuy ? avail >= it.remaining - 0.0001 && avail > 0 : avail > 0;
+          if (s.counted_at) return tag(enough ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200",
+            `📦 นับแล้ว ${fmtQty(s.on_hand ?? s.counted_qty ?? 0)} ${u} · ${when}`,
+            s.reserved_other > 0 ? `พร้อมใช้ ${fmtQty(avail)} (แบ่งให้ใบอื่น ${fmtQty(s.reserved_other)})` : null);
+          if (s.on_hand != null) return tag("bg-amber-50 text-amber-700 border-amber-200", `📦 ในระบบ ${fmtQty(s.on_hand)} ${u} · ยังไม่เคยนับ`);
+          return tag("bg-slate-50 text-slate-500 border-slate-200", "📦 สต๊อก: ยังไม่เคยนับ");
+        })()}
+        {(canEdit || canStock) && isBuy && (
+          <div className="mt-auto pt-2 flex gap-1.5">
+            {canEdit && (
+              <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); onHave(true); }}
+                className="flex-1 min-w-0 h-8 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50 disabled:opacity-50">
+                {busy ? "กำลังบันทึก…" : "✓ มีของแล้ว"}
+              </button>
+            )}
+            {canStock && it.code && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); onCount(); }} title="นับสต๊อก / ใส่จำนวนปัจจุบันในคลังวัตถุดิบ"
+                className={`${canEdit ? "shrink-0 px-2" : "flex-1"} h-8 text-xs font-medium text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50`}>🔢 นับ</button>
+            )}
           </div>
         )}
         {canEdit && it.status === "have" && (
