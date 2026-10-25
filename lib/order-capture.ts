@@ -578,13 +578,21 @@ export async function finalizeStaleSets(admin: Admin): Promise<void> {
 
 // ---------------------------------------------------------------- เสนอ PO ที่น่าจะใช่
 
-/** ตัดช่องว่าง/เครื่องหมาย แล้วเทียบคู่ตัวอักษร (ใช้ได้กับไทย/จีนที่ไม่มีเว้นวรรค) */
+/**
+ * ตัดช่องว่าง/เครื่องหมาย + วรรณยุกต์ไทย แล้วเทียบคู่ตัวอักษร (ใช้ได้กับไทย/จีนที่ไม่มีเว้นวรรค)
+ * ตัดวรรณยุกต์เพราะสะกดต่างกันบ่อย เช่น "ไนลอน" (AI แปล) กับ "ไนล่อน" (ชื่อใน PO)
+ */
 function bigrams(s: string): Map<string, number> {
-  const t = s.toLowerCase().replace(/[\s\[\]().,#*×x\-_/:;'"]+/g, "");
+  const t = s.toLowerCase().replace(/[็-๎]/g, "").replace(/[\s\[\]().,#*×x\-_/:;'"【】]+/g, "");
   const m = new Map<string, number>();
   for (let i = 0; i < t.length - 1; i++) { const g = t.slice(i, i + 2); m.set(g, (m.get(g) ?? 0) + 1); }
   return m;
 }
+/**
+ * ความใกล้เคียงของชื่อ 0..1 — เอาค่ามากกว่าระหว่าง
+ *   Dice (ทั้งสองชื่อคล้ายกันทั้งก้อน) กับ overlap (ชื่อสั้นใน PO อยู่ในข้อความยาวที่ AI อ่าน — เช่น ชื่อ+ตัวเลือก+คำแปล)
+ * overlap ใช้เฉพาะเมื่อชื่อที่สั้นกว่ายาวพอ (≥ 6 คู่ตัวอักษร) กันคำสั้น ๆ อย่าง "เทป" ไปตรงกับทุกอย่าง
+ */
 export function nameSimilarity(a: string, b: string): number {
   const A = bigrams(a), B = bigrams(b);
   let sa = 0, sb = 0, inter = 0;
@@ -592,7 +600,9 @@ export function nameSimilarity(a: string, b: string): number {
   B.forEach((v) => { sb += v; });
   if (!sa || !sb) return 0;
   A.forEach((v, g) => { inter += Math.min(v, B.get(g) ?? 0); });
-  return (2 * inter) / (sa + sb);
+  const dice = (2 * inter) / (sa + sb);
+  const short = Math.min(sa, sb);
+  return short >= 6 ? Math.max(dice, 0.85 * (inter / short)) : dice;
 }
 
 const OPEN_PO_STATUS = ["draft", "purchase", "partial"];
@@ -638,7 +648,7 @@ function mapItemsToLines(items: CaptureItem[], lines: PoLineLite[]): { mapping: 
       let s = 0;
       if (it.sku_id && l.item_sku_id && it.sku_id === l.item_sku_id) s += 3;
       const sim = Math.max(nameSimilarity(`${it.name_th} ${it.option}`, l.item_name), it.sku_name ? nameSimilarity(it.sku_name, l.item_name) : 0);
-      if (sim >= 0.3) s += 2 * sim;
+      if (sim >= 0.35) s += 2 * sim;
       if (s > 0 && it.qty && Math.abs(it.qty - l.qty) < 0.001) s += 1;
       if (s > 0 && it.unit_price && l.price_est && Math.abs(it.unit_price - l.price_est) <= Math.max(0.01, l.price_est * 0.02)) s += 0.5;
       if (s >= 0.8 && (!best || s > best.s)) best = { id: l.id, s };
