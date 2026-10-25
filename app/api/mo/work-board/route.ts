@@ -92,7 +92,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const [{ data: depts }, { data: wos }, { data: mos }] = await Promise.all([
     admin.from("departments").select("id, name, status, note, show_note, display_order, show_on_board").order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true }),
     admin.from("mo_work_orders").select("*").eq("is_active", true).order("created_at", { ascending: true }).limit(2000),
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, order_date, due_date, internal_due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, size_breakdown").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, order_date, created_at, due_date, internal_due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, size_breakdown").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
   ]);
 
   const departments = (depts ?? []).filter((d: Record<string, unknown>) => !d.status || d.status === "active")
@@ -176,6 +176,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // 📦 due_date = นัดส่งลูกค้า · 🪑 internal_due_date = กำหนดส่งงานภายใน (ตั้งได้ตั้งแต่ยังไม่จ่ายงาน)
       internal_due_date: (m.internal_due_date as string) ?? null,
       order_date: (m.order_date as string) ?? null,     // วันที่เปิดใบสั่งผลิต — ใช้เรียงในใบพิมพ์
+      created_at: (m.created_at as string) ?? null,     // เวลาที่สร้างใบในระบบ (มีครบทุกใบ ต่างจาก order_date ที่กรอกไว้แค่บางใบ)
       prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null,
       // ธง "งานเร่ง/สำคัญ" ที่ผู้บริหารติดไว้ในแท็บ 👔 แผนผู้บริหาร (0=ปกติ 1=สำคัญ 2=เร่งด่วน)
       priority: Number(m.priority) || 0, priority_note: (m.priority_note as string) ?? null,

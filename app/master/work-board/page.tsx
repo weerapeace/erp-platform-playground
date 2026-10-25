@@ -16,6 +16,7 @@ import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
+import { formatDateTime } from "@/lib/date";
 import { InlineEdit } from "@/components/inline-edit";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
@@ -77,6 +78,7 @@ type PendingMO = {
   // ธงลำดับความสำคัญที่ผู้บริหารติดไว้ (แท็บ 👔 แผนผู้บริหาร) — 0=ปกติ 1=สำคัญ 2=เร่งด่วน
   priority?: number; priority_note?: string | null;
   has_sizes?: boolean;   // ใบนี้แบ่งจำนวนตามไซส์ → แก้จำนวนรวมตรง ๆ ไม่ได้
+  created_at?: string | null;   // เวลาที่สร้างใบงานในระบบ — โชว์หัวป๊อปเช็กลิสต์
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
@@ -1971,6 +1973,15 @@ function WorkBoardPageInner() {
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
+                {checklistMO.created_at && (() => {
+                  const days = Math.max(0, Math.floor((Date.now() - new Date(checklistMO.created_at).getTime()) / 86400000));
+                  return (
+                    <span className="ml-auto shrink-0 text-[11px] text-slate-500 whitespace-nowrap" title="วันเวลาที่สร้างใบงานนี้ในระบบ">
+                      🗓 สร้างใบงาน <b className="font-medium text-slate-700 tabular-nums">{formatDateTime(checklistMO.created_at)}</b>
+                      <span className="text-slate-400"> · {days === 0 ? "วันนี้" : `${fmt(days)} วันที่แล้ว`}</span>
+                    </span>
+                  );
+                })()}
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
               {/* จำนวนสั่งผลิต — ปกติ "อ่านอย่างเดียว" ต้องกด ✏️ ก่อนถึงแก้ได้
