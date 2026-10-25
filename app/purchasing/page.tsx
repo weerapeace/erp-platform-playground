@@ -33,6 +33,8 @@ import { PoDetailModal } from "@/components/po-detail-modal";
 import { ReceiveLineModal, type ReceiveLine } from "@/components/receive-line-modal";
 import { StockMovementHistory } from "@/components/stock-movement-history";
 import type { MoListItem } from "@/app/api/mo/route";
+import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
+import { useUserPref } from "@/lib/use-user-pref";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
@@ -50,12 +52,33 @@ type Source = "sku" | "group" | "favorite" | "frequent" | "tags" | "mo";
 type MoMat = { code: string | null; name: string | null; image: string | null; type: string | null; uom: string | null; needed: number };
 // 1 ใบสั่งผลิต + วัตถุดิบที่ยังต้องซื้อของใบนั้น
 type MoEntry = { mo_no: string; mo_id: string; product_label: string; product_image: string | null; due_date: string | null; brand: string | null; parent_code: string | null; mats: MoMat[] };
-// แท็บ "ใบสั่งผลิต" ระดับ 1: จัดเรียง / จัดกลุ่ม (จำค่าต่อเครื่อง)
-type MoSort = "old" | "new" | "few" | "many" | "sku";
+// แท็บ "ใบสั่งผลิต" ระดับ 1: จัดเรียง / จัดกลุ่ม / แบรนด์ / กลุ่มที่พับ — จำค่าต่อคน ตามไปทุกเครื่อง (ของกลาง useUserPref)
+type MoSort = "old" | "new" | "few" | "pct" | "many" | "sku";
 type MoGroup = "none" | "brand" | "parent";
-const MO_SORTS: [MoSort, string][] = [["old", "เลขใบ เก่า → ใหม่"], ["new", "เลขใบ ใหม่ → เก่า"], ["few", "ใกล้ครบก่อน (ต้องซื้อน้อยสุด)"], ["many", "ต้องซื้อมากสุดก่อน"], ["sku", "รหัสรุ่น A → Z"]];
+const MO_SORTS: [MoSort, string][] = [["old", "เลขใบ เก่า → ใหม่"], ["new", "เลขใบ ใหม่ → เก่า"], ["few", "ใกล้ครบก่อน (ต้องซื้อน้อยสุด)"], ["pct", "คืบหน้ามากสุดก่อน (%)"], ["many", "ต้องซื้อมากสุดก่อน"], ["sku", "รหัสรุ่น A → Z"]];
 const MO_GROUPS: [MoGroup, string][] = [["none", "ไม่จัดกลุ่ม"], ["brand", "แบรนด์"], ["parent", "รุ่น (ตัวแม่)"]];
-const MO_SORT_KEY = "pr_mo_sort", MO_GROUP_KEY = "pr_mo_group";
+type MoListPrefs = { sort: MoSort; group: MoGroup; brand: string; folded: { brand: string[]; parent: string[] } };
+const MO_PREFS_KEY = "pr_mo_list";
+const MO_PREFS_DEFAULT: MoListPrefs = { sort: "old", group: "none", brand: "", folded: { brand: [], parent: [] } };
+const parseMoPrefs = (v: unknown): MoListPrefs | null => {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const f = (o.folded ?? {}) as Record<string, unknown>;
+  const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
+  return {
+    sort: MO_SORTS.some(([k]) => k === o.sort) ? (o.sort as MoSort) : "old",
+    group: MO_GROUPS.some(([k]) => k === o.group) ? (o.group as MoGroup) : "none",
+    brand: typeof o.brand === "string" ? o.brand : "",
+    folded: { brand: strs(f.brand), parent: strs(f.parent) },
+  };
+};
+// "ใกล้ครบ" = เหลือต้องซื้อไม่เกินนี้ + ทำไปแล้วบางส่วน (ขอ/สั่ง/มีของ อย่างน้อย 1 วัตถุดิบ)
+//   กันใบที่สูตรมีแค่ 1–2 วัตถุดิบแต่ยังไม่ได้ทำอะไรเลย (ของจริง 23 จาก 31 ใบ)
+const MO_NEAR_MAX = 2;
+// แถบความคืบหน้าวัตถุดิบ — สี/ชื่อชุดเดียวทั้งการ์ดรายการใบ (ระดับ 1) และหัวใบที่เปิดอยู่ (ระดับ 2)
+const MO_SEGS: [string, string][] = [["bg-rose-500", "ต้องซื้อ"], ["bg-amber-400", "ขอแล้ว รออนุมัติ"], ["bg-blue-500", "สั่งซื้อแล้ว (มี PO)"], ["bg-emerald-500", "มีของ / ได้ของแล้ว"]];
+const progCounts = (p: MoProgress) => [p.buy, p.requested, p.ordered, p.done];
+const progPct = (p: MoProgress | undefined) => (p && p.total > 0 ? Math.round(((p.total - p.buy) / p.total) * 100) : 0);
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
 // relation = field ที่เป็น FK → ต้องโชว์ "ชื่อ" จากตารางปลายทาง แต่กรองด้วย id
@@ -155,9 +178,19 @@ export default function PurchasingShopPage() {
   const [moNeeds, setMoNeeds] = useState<PurchaseNeedRow[] | null>(null);
   const [moLoading, setMoLoading] = useState(false);
   const [moSel, setMoSel] = useState<MoEntry | null>(null);   // null = โชว์รายการใบ · มีค่า = โชว์วัตถุดิบของใบนั้น
-  const [moSort, setMoSort] = useState<MoSort>("old");
-  const [moGroup, setMoGroup] = useState<MoGroup>("none");
-  const [moFolded, setMoFolded] = useState<Set<string>>(new Set());   // กลุ่มที่พับเก็บ
+  // จำค่าต่อคน (ข้ามเครื่อง): เรียง / จัดกลุ่ม / ชิปแบรนด์ / กลุ่มที่พับ (แยกตามโหมดจัดกลุ่ม)
+  const [moPrefs, setMoPrefs] = useUserPref<MoListPrefs>(MO_PREFS_KEY, MO_PREFS_DEFAULT, parseMoPrefs);
+  const { sort: moSort, group: moGroup, brand: moBrand } = moPrefs;
+  const moFolded = useMemo(() => new Set(moGroup === "none" ? [] : moPrefs.folded[moGroup]), [moPrefs, moGroup]);   // กลุ่มที่พับเก็บ
+  const toggleMoFold = (title: string) => {
+    if (moGroup === "none") return;
+    const cur = moPrefs.folded[moGroup];
+    setMoPrefs({ ...moPrefs, folded: { ...moPrefs.folded, [moGroup]: cur.includes(title) ? cur.filter(t => t !== title) : [...cur, title] } });
+  };
+  const [moNear, setMoNear] = useState(false);   // ชิป "ใกล้ครบ" (ไม่จำ — กรองชั่วคราว)
+  const [moNone, setMoNone] = useState(false);   // ชิป "ยังไม่ได้สั่งอะไรเลย"
+  // ความคืบหน้าวัตถุดิบทุกใบ (แถบสีบนการ์ด) — โหลดครั้งเดียวจาก /api/mo/material-progress (กติกาเดียวกับระดับ 2)
+  const [moProg, setMoProg] = useState<MoProgressResult | null>(null);
   const [moGroupBuy, setMoGroupBuy] = useState<{ title: string; mos: MoEntry[] } | null>(null);   // ป๊อปซื้อรวมทั้งกลุ่ม
   const [moMatQty, setMoMatQty] = useState<MoMat | null>(null);   // วัตถุดิบที่กำลังใส่จำนวน (popup)
   // ระดับ 2: วัตถุดิบ "ทุกตัว" ใน BOM ของใบที่เลือก + สถานะขอซื้อ/สั่งซื้อ (ของกลาง /api/mo/material-status)
@@ -281,8 +314,6 @@ export default function PurchasingShopPage() {
     if (typeof window === "undefined") return;
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 10) setCols(c);
     const sk = localStorage.getItem(SORT_KEY); if (sk && SORTS.some(s => s.key === sk)) setSortKey(sk);
-    const ms = localStorage.getItem(MO_SORT_KEY); if (ms && MO_SORTS.some(([k]) => k === ms)) setMoSort(ms as MoSort);
-    const mg = localStorage.getItem(MO_GROUP_KEY); if (mg && MO_GROUPS.some(([k]) => k === mg)) setMoGroup(mg as MoGroup);
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
     // perf: ใช้ค่าที่ cache ไว้ทันที → grid รอบแรกถูกต้อง (ซ่อนแท็กห้ามขอซื้อ + label ประเทศ) โดยไม่รอ network 4s
     try { const h = JSON.parse(localStorage.getItem(HIDE_KEY) ?? "[]"); if (Array.isArray(h) && h.length) setHiddenTagIds(h); } catch { /* ignore */ }
@@ -320,6 +351,14 @@ export default function PurchasingShopPage() {
       .catch(() => setMoNeeds([]))
       .finally(() => setMoLoading(false));
   }, [source, moNeeds]);
+  // แถบความคืบหน้าทุกใบ — โหลดคู่กัน (ไม่สำเร็จ = การ์ดไม่มีแถบ แต่ยังใช้งานได้ปกติ)
+  const loadMoProg = () => apiFetch("/api/mo/material-progress").then(r => r.json())
+    .then(j => { if (j.data) setMoProg(j.data as MoProgressResult); else setMoProg((p) => p ?? {}); })
+    .catch(() => setMoProg((p) => p ?? {}));
+  useEffect(() => {
+    if (source !== "mo" || moProg !== null) return;
+    void loadMoProg();
+  }, [source, moProg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // จัดกลุ่มวัตถุดิบที่ต้องซื้อ → ต่อ 1 ใบสั่งผลิต (โชว์เฉพาะที่ยัง "ต้องซื้อ" remaining>0 มาจาก API อยู่แล้ว)
   // ตัดที่ติ๊ก "เตรียมแล้ว" ออก (ของอยู่หน้างานแล้ว ไม่ต้องซื้อ — ตรงกับระดับ 2 ที่ย้ายไปกลุ่ม "มีของแล้ว")
@@ -351,8 +390,11 @@ export default function PurchasingShopPage() {
     return () => { alive = false; };
   }, [moSelNo, moStatusTick]);
   // รีเฟรชรายการใบ (ระดับ 1) แบบไม่ล้างจอ
-  const refreshMoNeeds = () => apiFetch("/api/mo/purchase-needs").then(r => r.json())
-    .then(j => setMoNeeds((j.data ?? []) as PurchaseNeedRow[])).catch(() => { /* คงของเดิม */ });
+  const refreshMoNeeds = () => Promise.all([
+    apiFetch("/api/mo/purchase-needs").then(r => r.json())
+      .then(j => setMoNeeds((j.data ?? []) as PurchaseNeedRow[])).catch(() => { /* คงของเดิม */ }),
+    loadMoProg(),
+  ]);
 
   // ✓ มีของแล้ว — บันทึก "มีอยู่" = ที่ต้องใช้ (ช่องเดียวกับบอร์ดจ่ายงาน/ความพร้อมวัตถุดิบ) + ล้างค่า override ต้องซื้อ → หลุดจากรายการต้องซื้อ
   // ยกเลิก = คืนค่าเดิมถ้ากดในรอบนี้ ไม่งั้นตั้ง "มีอยู่" = 0 · API กลางเช็กสิทธิ์ products.edit + บันทึก audit
@@ -753,6 +795,8 @@ export default function PurchasingShopPage() {
       if (j.error) throw new Error(j.error);
       setDone(`${j.created} ใบ`); setCart([]);
       toast.success(`สร้างใบขอซื้อ ${j.created} ใบแล้ว`);
+      // แท็บใบสั่งผลิตเคยโหลดแล้ว → รีเฟรชยอดต้องซื้อ + แถบความคืบหน้า (ใบที่เพิ่งขอขยับเป็น "ขอแล้ว" ทันที)
+      if (moNeeds !== null) { void refreshMoNeeds(); setMoStatusTick(t => t + 1); }
     } catch (e) { toast.error("สร้างใบขอซื้อไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -932,15 +976,35 @@ export default function PurchasingShopPage() {
             if (moList.length === 0 && !moSel) return <div className="text-center text-slate-300 py-16">ไม่มีวัตถุดิบที่ต้องซื้อจากใบสั่งผลิต 🎉</div>;
             // ----- ระดับ 1: เลือกใบสั่งผลิต -----
             if (!moSel) {
-              const list = moList
-                .filter(g => !ql || g.mo_no.toLowerCase().includes(ql) || g.product_label.toLowerCase().includes(ql)
-                  || (g.brand ?? "").toLowerCase().includes(ql) || (g.parent_code ?? "").toLowerCase().includes(ql))
+              // ความคืบหน้าต่อใบ (กติกาเดียวกับระดับ 2) — ยังโหลดไม่เสร็จ = ใช้จำนวนวัตถุดิบที่ต้องซื้อเดิมไปก่อน
+              const progOf = (g: MoEntry) => moProg?.[g.mo_no];
+              const buyOf = (g: MoEntry) => progOf(g)?.buy ?? g.mats.length;
+              const startedOf = (g: MoEntry) => (progOf(g)?.linked ?? 0) > 0;   // มีใบขอซื้อผูกแล้วอย่างน้อย 1 วัตถุดิบ
+              const isNear = (g: MoEntry) => { const p = progOf(g); return !!p && p.buy <= MO_NEAR_MAX && p.buy < p.total; };
+              const brandOf = (g: MoEntry) => g.brand || "(ไม่มีแบรนด์)";
+              // ค้นหา → ชิปแบรนด์ (นับจากผลค้นหา) → ชิปด่วน (นับจากผลค้นหา + แบรนด์ที่เลือก)
+              const searched = moList.filter(g => !ql || g.mo_no.toLowerCase().includes(ql) || g.product_label.toLowerCase().includes(ql)
+                || (g.brand ?? "").toLowerCase().includes(ql) || (g.parent_code ?? "").toLowerCase().includes(ql));
+              const brandCount = new Map<string, number>();
+              for (const g of searched) brandCount.set(brandOf(g), (brandCount.get(brandOf(g)) ?? 0) + 1);
+              if (moBrand && !brandCount.has(moBrand)) brandCount.set(moBrand, 0);   // แบรนด์ที่จำไว้แต่ตอนนี้ไม่มีใบ — ยังโชว์ให้กดออกได้
+              const brands = [...brandCount].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+              const byBrand = moBrand ? searched.filter(g => brandOf(g) === moBrand) : searched;
+              const nearCount = byBrand.filter(isNear).length, noneCount = byBrand.filter(g => !startedOf(g)).length;
+              const list = byBrand
+                .filter(g => (!moNear || isNear(g)) && (!moNone || !startedOf(g)))
                 .sort((a, b) =>
                   moSort === "new" ? b.mo_no.localeCompare(a.mo_no)
-                  : moSort === "few" ? a.mats.length - b.mats.length || a.mo_no.localeCompare(b.mo_no)
-                  : moSort === "many" ? b.mats.length - a.mats.length || a.mo_no.localeCompare(b.mo_no)
+                  : moSort === "few" ? buyOf(a) - buyOf(b) || a.mo_no.localeCompare(b.mo_no)
+                  : moSort === "pct" ? progPct(progOf(b)) - progPct(progOf(a)) || buyOf(a) - buyOf(b) || a.mo_no.localeCompare(b.mo_no)
+                  : moSort === "many" ? buyOf(b) - buyOf(a) || a.mo_no.localeCompare(b.mo_no)
                   : moSort === "sku" ? a.product_label.localeCompare(b.product_label) || a.mo_no.localeCompare(b.mo_no)
                   : a.mo_no.localeCompare(b.mo_no));
+              const sumProg = (mos: MoEntry[]) => mos.reduce<MoProgress>((s, g) => {
+                const p = progOf(g);
+                return p ? { total: s.total + p.total, buy: s.buy + p.buy, requested: s.requested + p.requested, ordered: s.ordered + p.ordered, done: s.done + p.done, linked: s.linked + p.linked } : s;
+              }, { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0 });
+              const chip = (on: boolean) => `h-7 px-2.5 text-xs rounded-full border transition-colors ${on ? "bg-rose-50 border-rose-300 text-rose-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`;
               // จัดกลุ่ม: แบรนด์ / รุ่น (ตัวแม่) — กลุ่มใหญ่ขึ้นก่อน · ในกลุ่มเรียงตามที่เลือก
               const groups: [string, MoEntry[]][] = moGroup === "none" ? [["", list]] : (() => {
                 const m = new Map<string, MoEntry[]>();
@@ -961,7 +1025,20 @@ export default function PurchasingShopPage() {
                     <div className="font-medium text-slate-800 text-[13px] leading-snug line-clamp-2" title={g.product_label}>{g.product_label}</div>
                     <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{g.mo_no}</div>
                     {g.due_date && <div className="text-[11px] text-slate-400 mt-0.5">📅 กำหนดส่ง {g.due_date}</div>}
-                    <div className="text-sm font-semibold text-rose-600 mt-1">🛒 ต้องซื้อ {g.mats.length} วัตถุดิบ</div>
+                    {(() => {
+                      const p = progOf(g);
+                      return (
+                        <>
+                          <div className="text-sm font-semibold text-rose-600 mt-1">🛒 ต้องซื้อ {buyOf(g)}{p && <span className="text-xs font-normal text-slate-400"> / {p.total}</span>} วัตถุดิบ</div>
+                          {p && (
+                            <>
+                              <MoProgressBar counts={progCounts(p)} className="h-1.5 mt-1.5" />
+                              <div className="text-[11px] text-slate-500 mt-1">{p.linked === 0 ? (progPct(p) > 0 ? `มีของแล้ว ${progPct(p)}% · ยังไม่ได้สั่ง` : "ยังไม่ได้สั่งอะไรเลย") : `ไปแล้ว ${progPct(p)}%`}</div>
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </button>
               );
@@ -975,30 +1052,55 @@ export default function PurchasingShopPage() {
                   <div className="flex items-center gap-3 flex-wrap mb-3">
                     <p className="text-sm text-slate-500 mr-auto">เลือกใบสั่งผลิต <b className="text-slate-700">{list.length}</b> ใบ — กดเพื่อดูวัตถุดิบที่ต้องซื้อ</p>
                     <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดเรียง
-                      <select value={moSort} onChange={(e) => { const v = e.target.value as MoSort; setMoSort(v); try { localStorage.setItem(MO_SORT_KEY, v); } catch { /* ignore */ } }}
+                      <select value={moSort} onChange={(e) => setMoPrefs({ ...moPrefs, sort: e.target.value as MoSort })}
                         className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
                         {MO_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                       </select>
                     </label>
                     <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดกลุ่ม
-                      <select value={moGroup} onChange={(e) => { const v = e.target.value as MoGroup; setMoGroup(v); setMoFolded(new Set()); try { localStorage.setItem(MO_GROUP_KEY, v); } catch { /* ignore */ } }}
+                      <select value={moGroup} onChange={(e) => setMoPrefs({ ...moPrefs, group: e.target.value as MoGroup })}
                         className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
                         {MO_GROUPS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                       </select>
                     </label>
                   </div>
-                  {list.length === 0 && <div className="text-center text-slate-300 py-16">ไม่พบใบสั่งผลิตที่ตรงกับ “{q}”</div>}
+                  {/* ชิปกรองด่วน: แบรนด์ (จำค่าต่อคน) · ใกล้ครบ / ยังไม่ได้สั่งอะไรเลย (เลือกได้ทีละอัน ไม่จำ) */}
+                  <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                    <span className="text-xs text-slate-400 mr-0.5">แบรนด์</span>
+                    <button type="button" onClick={() => setMoPrefs({ ...moPrefs, brand: "" })} className={chip(!moBrand)}>ทั้งหมด <b>{searched.length}</b></button>
+                    {brands.map(([b, n]) => (
+                      <button key={b} type="button" onClick={() => setMoPrefs({ ...moPrefs, brand: b })} className={chip(moBrand === b)}>{b} <b>{n}</b></button>
+                    ))}
+                    <span className="text-xs text-slate-400 ml-2 mr-0.5">ด่วน</span>
+                    <button type="button" onClick={() => { setMoNear(v => !v); setMoNone(false); }} className={chip(moNear)}
+                      title={`เหลือต้องซื้อไม่เกิน ${MO_NEAR_MAX} วัตถุดิบ และทำไปแล้วบางส่วน (ขอ/สั่ง/มีของ)`}>🏁 ใกล้ครบ (ต้องซื้อ ≤ {MO_NEAR_MAX}) <b>{moProg ? nearCount : "…"}</b></button>
+                    <button type="button" onClick={() => { setMoNone(v => !v); setMoNear(false); }} className={chip(moNone)}
+                      title="ยังไม่มีใบขอซื้อผูกเลยสักวัตถุดิบ">⭕ ยังไม่ได้สั่งอะไรเลย <b>{moProg ? noneCount : "…"}</b></button>
+                  </div>
+                  {moProg && Object.keys(moProg).length > 0 && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-[11px] text-slate-500">
+                      {MO_SEGS.map(([cls, label]) => <span key={label} className="inline-flex items-center gap-1.5"><span className={`w-2 h-2 rounded-sm ${cls}`} />{label}</span>)}
+                    </div>
+                  )}
+                  {list.length === 0 && <div className="text-center text-slate-300 py-16">{q.trim() ? `ไม่พบใบสั่งผลิตที่ตรงกับ “${q}”` : "ไม่มีใบสั่งผลิตที่ตรงกับตัวกรองที่เลือก"}</div>}
                   {moGroup === "none" ? grid(list) : groups.map(([title, mos]) => {
                     const folded = moFolded.has(title);
+                    const gp = sumProg(mos);
                     return (
                       <div key={title} className="mb-4">
-                        {/* หัวกลุ่ม: กดพับ/กาง · จำนวนใบ · วัตถุดิบที่ต้องซื้อรวม (ไม่นับซ้ำ) · 🛒 ซื้อรวมทั้งกลุ่ม */}
-                        <div role="button" tabIndex={0} onClick={() => setMoFolded((s) => { const n = new Set(s); if (n.has(title)) n.delete(title); else n.add(title); return n; })}
-                          onKeyDown={(e) => { if (e.key === "Enter") setMoFolded((s) => { const n = new Set(s); if (n.has(title)) n.delete(title); else n.add(title); return n; }); }}
+                        {/* หัวกลุ่ม: กดพับ/กาง (จำค่าต่อคน) · จำนวนใบ · แถบรวมทั้งกลุ่ม · วัตถุดิบที่ต้องซื้อรวม (ไม่นับซ้ำ) · 🛒 ซื้อรวมทั้งกลุ่ม */}
+                        <div role="button" tabIndex={0} onClick={() => toggleMoFold(title)}
+                          onKeyDown={(e) => { if (e.key === "Enter") toggleMoFold(title); }}
                           className="flex items-center gap-2 flex-wrap px-3 py-2 mb-2 bg-white border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 select-none">
                           <span className="text-slate-400 w-4">{folded ? "▸" : "▾"}</span>
                           <span className="text-sm font-semibold text-slate-800">{title}</span>
                           <span className="text-xs text-slate-500">{mos.length} ใบ</span>
+                          {gp.total > 0 && (
+                            <span className="inline-flex items-center gap-1.5" title={`ทั้งกลุ่มไปแล้ว ${progPct(gp)}% (${gp.total - gp.buy}/${gp.total} บรรทัดวัตถุดิบ)`}>
+                              <MoProgressBar counts={progCounts(gp)} className="h-1.5 w-20 sm:w-32" />
+                              <span className="text-[11px] text-slate-500">{progPct(gp)}%</span>
+                            </span>
+                          )}
                           <span className="text-[11px] font-medium bg-rose-50 text-rose-600 border border-rose-100 rounded px-1.5 py-0.5">ต้องซื้อรวม {matCount(mos)} รายการ</span>
                           <button type="button" onClick={(e) => { e.stopPropagation(); setMoGroupBuy({ title, mos }); }}
                             className="ml-auto h-8 px-3 text-xs font-medium border border-rose-200 text-rose-700 bg-rose-50 rounded-md hover:bg-rose-100">🛒 ซื้อรวมทั้งกลุ่ม</button>
@@ -1014,10 +1116,7 @@ export default function PurchasingShopPage() {
             const items = (moStatus?.mo_no === moSel.mo_no ? moStatus.items : []);
             const shownItems = items.filter(m => !ql || (m.code ?? "").toLowerCase().includes(ql) || (m.name ?? "").toLowerCase().includes(ql));
             const cnt = (sts: MatStatus[]) => items.filter(m => sts.includes(m.status)).length;
-            const bar: [string, string, number][] = [
-              ["bg-rose-500", "ต้องซื้อ", cnt(["buy"])], ["bg-amber-400", "ขอแล้ว รออนุมัติ", cnt(["requested"])],
-              ["bg-blue-500", "สั่งซื้อแล้ว (มี PO)", cnt(["ordered"])], ["bg-emerald-500", "มีของ / ได้ของแล้ว", cnt(["received", "have", "ready", "skip"])],
-            ];
+            const barCounts = [cnt(["buy"]), cnt(["requested"]), cnt(["ordered"]), cnt(["received", "have", "ready", "skip"])];   // ลำดับเดียวกับ MO_SEGS
             const inCartQty = (code: string | null) => cart.filter(l => code && l.skuRef === code && (l.sourceMoNos ?? []).includes(moSel.mo_no)).reduce((n, l) => n + l.qty, 0);
             const groups: { title: string; hint: string; sts: MatStatus[] }[] = [
               { title: "🛒 ต้องซื้อ", hint: "กดการ์ดเพื่อใส่จำนวนแล้วเพิ่มลงตะกร้า", sts: ["buy"] },
@@ -1050,11 +1149,9 @@ export default function PurchasingShopPage() {
                 {items.length > 0 && (
                   <div className="mb-4">
                     {/* ภาพรวมทั้งใบ: กี่ตัวต้องซื้อ / รออนุมัติ / สั่งแล้ว / ได้ของแล้ว */}
-                    <div className="flex h-2 rounded-full overflow-hidden bg-slate-100">
-                      {bar.map(([cls, label, n]) => n > 0 && <div key={label} className={cls} style={{ width: `${(n / items.length) * 100}%` }} title={`${label} ${n}`} />)}
-                    </div>
+                    <MoProgressBar counts={barCounts} className="h-2" />
                     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-slate-500">
-                      {bar.map(([cls, label, n]) => <span key={label} className="inline-flex items-center gap-1.5"><span className={`w-2 h-2 rounded-sm ${cls}`} />{label} <b className="text-slate-700">{n}</b></span>)}
+                      {MO_SEGS.map(([cls, label], i) => <span key={label} className="inline-flex items-center gap-1.5"><span className={`w-2 h-2 rounded-sm ${cls}`} />{label} <b className="text-slate-700">{barCounts[i]}</b></span>)}
                     </div>
                   </div>
                 )}
@@ -1739,6 +1836,16 @@ function StockCountDialog({ it, moNo, onClose, onSaved }: { it: MoMaterialStatus
       )}
       {err && <div className="mt-3 text-sm text-rose-600">{err}</div>}
     </ERPModal>
+  );
+}
+
+// แถบสีความคืบหน้า (ต้องซื้อ / ขอแล้ว / สั่งแล้ว / มีของ) — counts เรียงตาม MO_SEGS · ใช้ทั้งการ์ดใบ หัวกลุ่ม และหัวใบระดับ 2
+function MoProgressBar({ counts, className }: { counts: number[]; className: string }) {
+  const total = counts.reduce((a, b) => a + b, 0);
+  return (
+    <div className={`flex rounded-full overflow-hidden bg-slate-100 ${className}`}>
+      {total > 0 && counts.map((n, i) => n > 0 && <div key={MO_SEGS[i][1]} className={MO_SEGS[i][0]} style={{ width: `${(n / total) * 100}%` }} title={`${MO_SEGS[i][1]} ${n}`} />)}
+    </div>
   );
 }
 
