@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
 import { formatDateTime } from "@/lib/date";
 import { MoProgressCell, MoShortMaterials } from "@/components/mo-material-progress";
+import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
 import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
 import { InlineEdit } from "@/components/inline-edit";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
@@ -1294,6 +1295,11 @@ function WorkBoardPageInner() {
 
   // เปิดเช็กลิสต์งานจาก URL (?mo=<id>) — ใช้ตอนกดการ์ดจากหน้า Dashboard ผลิต (เปิด modal ตัวจริงตัวเดียวกัน)
   const searchParams = useSearchParams();
+  // ?view=table — เปิดมุมมองที่ระบุตรง ๆ (กรอบพรีวิว iPad / ลิงก์ QR) · เปลี่ยนชั่วคราว ไม่ทับมุมมองเริ่มต้นที่ผู้ใช้ตั้ง ⭐
+  useEffect(() => {
+    const v = searchParams.get("view");
+    if (v === "board" || v === "canvas" || v === "table" || v === "shop" || v === "purchase" || v === "calendar" || v === "labor" || v === "exec") setViewMode(v);
+  }, [searchParams, setViewMode]);
   // โหมด "เช็กลิสต์อย่างเดียว": หน้าอื่นฝังหน้านี้ใน iframe (?embed=1&mo=<id> — ของกลาง lib/mo-checklist-embed)
   // → เช็กลิสต์เต็มกรอบ ไม่โชว์บอร์ด · ปิด/ลบแล้วแจ้งหน้าแม่ให้ถอยกลับเอง
   const popupOnly = searchParams.get("embed") === "1" && !!searchParams.get("mo");
@@ -3186,6 +3192,7 @@ const stageOf = (m: PendingMO, p: MoProgress | undefined): MoStage => {
 const stageOrder = (name: string) => Object.values(STAGE_META).find(([label]) => label === name)?.[1] ?? 99;
 /** ราคาขายต่ำกว่านี้ (฿0 / ฿1) = น่าจะยังไม่ได้ตั้งจริง → ขึ้นเตือน + ไม่นับรวมในยอดมูลค่า */
 const PRICE_MIN = 10;
+const NO_BRAND = "— ไม่ระบุแบรนด์ —";   // หัวกลุ่มของใบที่สินค้าไม่ผูกแบรนด์ (ไว้ท้ายสุดตอนจัดกลุ่มตามแบรนด์)
 /** คอลัมน์ที่โชว์ตั้งต้น — จอคอม (ซ่อน 4 ตัวใหม่ไว้ก่อน) / iPad (เท่าที่จำเป็น) · ผู้ใช้เปลี่ยนเองได้ที่ปุ่ม ▥ คอลัมน์ */
 const PEND_HIDDEN_PC = new Set(["eta", "brand", "prio", "issues"]);
 const PEND_SHOWN_IPAD = new Set(["img", "prod", "qty", "buy", "stage", "due", "value"]);
@@ -3344,6 +3351,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     mq.addEventListener("change", onTurn);
     return () => mq.removeEventListener("change", onTurn);
   }, [touch, setDev]);
+  // หน้าในกรอบพรีวิว (iframe) กดสลับมุมมอง → ค่าในเครื่องเปลี่ยน → หน้านอกเปลี่ยนตาม (storage event ข้าม iframe โดเมนเดียวกัน)
+  useEffect(() => {
+    const onStore = (e: StorageEvent) => { if (e.key === "wb_table_device" && (e.newValue === "pc" || e.newValue === "ipadL" || e.newValue === "ipadP")) setDevState(e.newValue); };
+    window.addEventListener("storage", onStore);
+    return () => window.removeEventListener("storage", onStore);
+  }, []);
+  // บนคอม: เลือกโหมด iPad = เปิด "ของจริง" ในกรอบ iPad ขนาดจริง (โหลดหน้านี้ใน iframe) · บน iPad จริง / หน้าที่อยู่ในกรอบแล้ว = เรนเดอร์ตรง ๆ
+  const canPreview = useCanPreviewDevice();
+  const framePreview = touch && canPreview;
 
   // ── ราคาขาย/มูลค่า — ราคาชุดเดียวกับแผนผู้บริหาร (skus_v2.list_price) · โหลดเฉพาะคนที่มีสิทธิ์
   const [priceByMo, setPriceByMo] = useState<Map<string, { price: number; oem: boolean }> | null>(null);
@@ -3554,8 +3570,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const groupNameOf = useCallback((moNo: string) => moGroups.find((g) => g.mo_nos.includes(moNo))?.name ?? null, [moGroups]);
   const GroupCell = ({ moNo }: { moNo: string }) => { const g = groupNameOf(moNo); return g ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{g}</span> : <span className="text-slate-300">—</span>; };
   // โหมดจัดกลุ่ม (เลือกได้): ไม่จัด / ตามกลุ่ม / ตามความพร้อม(รอจ่าย) หรือ ตามสถานะ(จ่ายแล้ว)
-  const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage">("none");
-  const lastGroupRef = useRef<"group" | "ready" | "stage">("stage");   // กดปุ่มจัดกลุ่มในตารางเปิดกลับ = ใช้แบบล่าสุด
+  const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage" | "brand">("none");
+  const lastGroupRef = useRef<"group" | "ready" | "stage" | "brand">("stage");   // กดปุ่มจัดกลุ่มในตารางเปิดกลับ = ใช้แบบล่าสุด
   const [woGroup, setWoGroup] = useState<"none" | "group" | "status">("none");
   const grpSelectCls = "h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600";
 
@@ -3735,7 +3751,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       ? ["ยังไม่ตั้งราคา", priceByMo ? `${fmt(pending.filter((m) => !priceOk(m)).length)} ใบ` : "…", `ราคา ฿0 / ต่ำกว่า ฿${PRICE_MIN} / ว่าง`]
       : ["รอซื้อของ", prog ? `${fmt(pending.filter((m) => stageOf(m, prog[m.mo_no]) === "buy").length)} ใบ` : "…", "ยังมีของต้องซื้อหรือรออนุมัติ"],
   ];
-  const pickGroup = (g: "none" | "group" | "ready" | "stage") => { setPendGroup(g); if (g !== "none") lastGroupRef.current = g; };
+  const pickGroup = (g: "none" | "group" | "ready" | "stage" | "brand") => { setPendGroup(g); if (g !== "none") lastGroupRef.current = g; };
   const devBtn = (v: "pc" | "ipadL" | "ipadP", label: string, tip: string) => (
     <button type="button" onClick={() => setDev(v)} title={tip}
       className={`h-8 px-2.5 text-sm ${dev === v ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
@@ -3765,6 +3781,25 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 whitespace-nowrap">ยังไม่ใส่</span> },
     { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (w) => (WO_STATUS[w.status]?.label ?? w.status), sortLabel: "สถานะ", cell: (w) => { const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched; return <span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span>; } },
   ];
+
+  if (framePreview) {
+    const sz = dev === "ipadP" ? IPAD_SIZE.portrait : IPAD_SIZE.landscape;
+    const openUrl = `${window.location.origin}/master/work-board?view=table`;
+    return (
+      <div className="space-y-3 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-sm text-slate-600">📱 ดูแบบ iPad ของจริง — หน้าจริงขนาดเท่าเครื่อง กดใช้งานในกรอบได้เลย · สแกน QR ด้านขวาเพื่อเปิดบน iPad</p>
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden divide-x divide-slate-200" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
+            {devBtn("pc", "💻 คอม", "กลับมุมมองจอคอม")}
+            {devBtn("ipadL", "📱 iPad แนวนอน", "ตารางแถวใหญ่ กดง่าย")}
+            {devBtn("ipadP", "📱 iPad แนวตั้ง", "1 ใบ = 1 การ์ด")}
+          </div>
+        </div>
+        <DeviceIframePreview src="/master/work-board?view=table" width={sz.w} height={sz.h}
+          label={dev === "ipadP" ? "📱 iPad แนวตั้ง" : "📱 iPad แนวนอน"} qr={{ openUrl }} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
@@ -3811,9 +3846,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </button>
           {dev === "pc" && <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
             className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>}
-          <select value={pendGroup} onChange={(e) => pickGroup(e.target.value as "none" | "group" | "ready" | "stage")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+          <select value={pendGroup} onChange={(e) => pickGroup(e.target.value as "none" | "group" | "ready" | "stage" | "brand")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
             <option value="stage">จัดกลุ่มตามขั้นตอน</option>
+            <option value="brand">จัดกลุ่มตามแบรนด์</option>
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="ready">จัดกลุ่มตามความพร้อม</option>
           </select>
@@ -3828,9 +3864,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         searchValue={tableSearch} onSearchChange={setTableSearch}
         groupBy={pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —"
           : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")
-          : pendGroup === "stage" ? (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][0] : undefined}
-        groupOrder={pendGroup === "stage" ? stageOrder : undefined}
-        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : "จัดกลุ่มตามความพร้อม"}
+          : pendGroup === "stage" ? (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][0]
+          : pendGroup === "brand" ? (m) => (m.brand ? `${m.brand}${m.brand_oem ? " · OEM" : ""}` : NO_BRAND) : undefined}
+        groupOrder={pendGroup === "stage" ? stageOrder : pendGroup === "brand" ? (g) => (g === NO_BRAND ? 1 : 0) : undefined}
+        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : pendGroup === "brand" ? "จัดกลุ่มตามแบรนด์" : "จัดกลุ่มตามความพร้อม"}
         grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
         groupExtra={groupSum}
         footnote={`${touch ? "แตะ" : "กด"}${dev === "ipadP" ? "การ์ด" : "แถว"} = กางดูของที่ยังไม่ครบ · 📋 = เปิดเช็กลิสต์เต็ม · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}`}

@@ -10,6 +10,8 @@
  * - <DeviceModeToggle>       : ปุ่มสลับ 🖥️ / 📟 / 📱 (กดตัวที่เลือกอยู่ซ้ำ = กลับเป็นอัตโนมัติ)
  * - <DevicePreviewFrame>     : กรอบจำลองขนาดเครื่อง (ตอนเลือกดูแบบมือถือ/แท็บเล็ตบนจอที่กว้างกว่า)
  *                              + แผง QR "สแกนเพื่อเปิดหน้านี้บนเครื่องจริง"
+ * - <DeviceIframePreview>    : พรีวิว "ของจริง" — โหลดหน้าใน iframe ขนาดเครื่องจริง (เช่น IPAD_SIZE) แล้วย่อให้พอดีจอ
+ *                              (useCanPreviewDevice / isInIframe กันครอบซ้ำ และไม่จำลองบนเครื่องจอสัมผัสจริง)
  *
  * วิธีใช้ในหน้า:
  *   const viewport = useViewportLayout();
@@ -281,6 +283,64 @@ export function DevicePreviewFrame({ layout, viewport, children, onExitPreview, 
             {DEVICE_ICON[viewport]} กลับมุมมอง{DEVICE_LABEL[viewport]}
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// พรีวิว "ของจริง" ในกรอบเครื่อง — โหลดหน้า (src) ใน iframe ขนาดเท่าเครื่องจริง แล้วย่อทั้งกรอบให้พอดีจอ
+//   ต่างจาก DevicePreviewFrame (ครอบ children ในหน้าเดียวกัน): ใน iframe เบรกพอยต์ / เมนู / แถบหัว ของทั้งหน้า
+//   ทำงานเหมือนเปิดบนเครื่องนั้นจริง 100% และกดใช้งานในกรอบได้เลย
+//   ⚠️ หน้าที่ถูกโหลดในกรอบต้องไม่ครอบกรอบซ้ำ — เช็กด้วย isInIframe()
+// ============================================================
+
+/** ขนาดจอ iPad (Air / 10.9–11") ตามที่ Safari เห็นจริง */
+export const IPAD_SIZE = { landscape: { w: 1180, h: 820 }, portrait: { w: 820, h: 1180 } } as const;
+
+/** หน้านี้ถูกเปิดอยู่ใน iframe (กรอบพรีวิว / เชลล์แอป / ป๊อปฝัง) หรือไม่ */
+export function isInIframe(): boolean {
+  if (typeof window === "undefined") return false;
+  try { return window.self !== window.top; } catch { return true; }
+}
+
+/** เครื่องนี้สมควรโชว์กรอบพรีวิวไหม — ไม่ใช่จอสัมผัส (iPad จริงไม่ต้องจำลอง) และไม่ได้อยู่ในกรอบอยู่แล้ว */
+export function useCanPreviewDevice(): boolean {
+  const [ok, setOk] = useState(false);
+  useEffect(() => { setOk(!isInIframe() && !window.matchMedia("(pointer: coarse)").matches); }, []);
+  return ok;
+}
+
+export function DeviceIframePreview({ src, width, height, label, qr }: { src: string; width: number; height: number; label: string; qr?: DeviceQrOpts }) {
+  const BEZEL = 20;   // ขอบเครื่อง 10px × 2
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    if (!box) return;
+    const fit = () => {
+      const availW = box.clientWidth - 8;
+      const availH = Math.max(360, window.innerHeight - Math.max(0, box.getBoundingClientRect().top) - 40);
+      setScale(Math.min(1, availW / (width + BEZEL), availH / (height + BEZEL)));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    window.addEventListener("resize", fit);
+    return () => { ro.disconnect(); window.removeEventListener("resize", fit); };
+  }, [box, width, height]);
+  return (
+    <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center">
+      <div ref={setBox} className="flex w-full min-w-0 flex-1 flex-col items-center">
+        <div className="mb-1.5 text-[11px] text-slate-500">{label} · {width}×{height}px{scale < 0.995 ? ` · ย่อเหลือ ${Math.round(scale * 100)}% ให้พอดีจอ` : ""}</div>
+        <div style={{ width: (width + BEZEL) * scale, height: (height + BEZEL) * scale }}>
+          <div className="origin-top-left overflow-hidden rounded-[1.75rem] border-[10px] border-slate-900 bg-white shadow-2xl"
+            style={{ width: width + BEZEL, height: height + BEZEL, transform: `scale(${scale})` }} data-device-frame="iframe">
+            <iframe src={src} title={label} className="block bg-white" style={{ width, height, border: 0 }} />
+          </div>
+        </div>
+      </div>
+      <div className="flex w-[232px] shrink-0 flex-col gap-2 lg:sticky lg:top-20">
+        <DeviceQrPanel layout="tablet" {...qr} />
       </div>
     </div>
   );
