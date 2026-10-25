@@ -34,6 +34,7 @@ import { ReceiveLineModal, type ReceiveLine } from "@/components/receive-line-mo
 import { StockMovementHistory } from "@/components/stock-movement-history";
 import type { MoListItem } from "@/app/api/mo/route";
 import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
+import { MO_SEGS, moProgCounts as progCounts, MoProgressBar } from "@/components/mo-material-progress";
 import { useUserPref } from "@/lib/use-user-pref";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
@@ -75,9 +76,7 @@ const parseMoPrefs = (v: unknown): MoListPrefs | null => {
 // "ใกล้ครบ" = เหลือต้องซื้อไม่เกินนี้ + ทำไปแล้วบางส่วน (ขอ/สั่ง/มีของ อย่างน้อย 1 วัตถุดิบ)
 //   กันใบที่สูตรมีแค่ 1–2 วัตถุดิบแต่ยังไม่ได้ทำอะไรเลย (ของจริง 23 จาก 31 ใบ)
 const MO_NEAR_MAX = 2;
-// แถบความคืบหน้าวัตถุดิบ — สี/ชื่อชุดเดียวทั้งการ์ดรายการใบ (ระดับ 1) และหัวใบที่เปิดอยู่ (ระดับ 2)
-const MO_SEGS: [string, string][] = [["bg-rose-500", "ต้องซื้อ"], ["bg-amber-400", "ขอแล้ว รออนุมัติ"], ["bg-blue-500", "สั่งซื้อแล้ว (มี PO)"], ["bg-emerald-500", "มีของ / ได้ของแล้ว"]];
-const progCounts = (p: MoProgress) => [p.buy, p.requested, p.ordered, p.done];
+// แถบความคืบหน้าวัตถุดิบ (MO_SEGS / progCounts / MoProgressBar) = ของกลาง components/mo-material-progress
 const progPct = (p: MoProgress | undefined) => (p && p.total > 0 ? Math.round(((p.total - p.buy) / p.total) * 100) : 0);
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
@@ -1836,16 +1835,6 @@ function StockCountDialog({ it, moNo, onClose, onSaved }: { it: MoMaterialStatus
       )}
       {err && <div className="mt-3 text-sm text-rose-600">{err}</div>}
     </ERPModal>
-  );
-}
-
-// แถบสีความคืบหน้า (ต้องซื้อ / ขอแล้ว / สั่งแล้ว / มีของ) — counts เรียงตาม MO_SEGS · ใช้ทั้งการ์ดใบ หัวกลุ่ม และหัวใบระดับ 2
-function MoProgressBar({ counts, className }: { counts: number[]; className: string }) {
-  const total = counts.reduce((a, b) => a + b, 0);
-  return (
-    <div className={`flex rounded-full overflow-hidden bg-slate-100 ${className}`}>
-      {total > 0 && counts.map((n, i) => n > 0 && <div key={MO_SEGS[i][1]} className={MO_SEGS[i][0]} style={{ width: `${(n / total) * 100}%` }} title={`${MO_SEGS[i][1]} ${n}`} />)}
-    </div>
   );
 }
 

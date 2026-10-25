@@ -17,6 +17,8 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
 import { formatDateTime } from "@/lib/date";
+import { MoProgressCell, MoShortMaterials } from "@/components/mo-material-progress";
+import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
 import { InlineEdit } from "@/components/inline-edit";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
@@ -3166,6 +3168,64 @@ const DueCell = ({ d }: { d: string | null }) => (
   <span className="text-[12px] whitespace-nowrap">📅 {dueDateText(d)} <span className={daysLeftClass(d)}>· {daysLeftText(d)}</span></span>
 );
 
+// ---- ขั้นตอนของใบรอจ่าย (ตาราง) — ซื้อของ → เตรียม/ตัด → พร้อมจ่าย · ใช้จัดกลุ่ม + เรียง ----
+// p = ความคืบหน้าการซื้อจาก /api/mo/material-progress (ไม่มี = ใบยังไม่มีสูตร หรือยังโหลดไม่เสร็จ)
+type MoStage = "buy" | "wait" | "prep" | "ready" | "nobom";
+const STAGE_META: Record<MoStage, [string, number]> = {
+  buy: ["🛒 รอซื้อของ", 1], wait: ["🚚 รอของเข้า", 2], prep: ["✂️ รอเตรียม/ตัด", 3], ready: ["✅ พร้อมจ่าย", 4], nobom: ["❔ ยังไม่มีสูตร (BOM)", 5],
+};
+const stageOf = (m: PendingMO, p: MoProgress | undefined): MoStage => {
+  if (!m.has_bom && !p) return "nobom";
+  if (p && p.buy + p.requested > 0) return "buy";
+  if (p && p.ordered > 0) return "wait";
+  if (m.has_bom ? (m.prep_ready < m.prep_total || m.cut_ready < m.cut_total) : !m.ready) return "prep";
+  return "ready";
+};
+const stageOrder = (name: string) => Object.values(STAGE_META).find(([label]) => label === name)?.[1] ?? 99;
+
+const PrepBar = ({ label, a, b }: { label: string; a: number; b: number }) => {
+  const pct = b > 0 ? Math.min(100, Math.round((a / b) * 100)) : 100;
+  return (
+    <div className="flex items-center gap-1.5 text-[10px]">
+      <span className="w-7 shrink-0 text-slate-400">{label}</span>
+      <span className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><span className={`block h-full ${pct >= 100 ? "bg-emerald-500" : "bg-amber-400"}`} style={{ width: `${pct}%` }} /></span>
+      <span className="w-9 shrink-0 text-right tabular-nums text-slate-500">{b > 0 ? `${a}/${b}` : "—"}</span>
+    </div>
+  );
+};
+
+/** จุดขั้นตอน ซื้อ → เตรียม → ตัด → จ่าย → รับคืน · เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน · เส้นประ = ไม่มีข้อมูล */
+function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefined; received: number }) {
+  type S = "done" | "part" | "todo" | "na";
+  const lv = (a: number, b: number): S => (a >= b ? "done" : a > 0 ? "part" : "todo");
+  const steps: [string, S, string][] = [
+    ["ซื้อ", p ? (p.buy + p.requested + p.ordered === 0 ? "done" : p.total - p.buy > 0 ? "part" : "todo") : "na",
+      p ? `ซื้อของ: ต้องซื้อ ${p.buy} · รออนุมัติ ${p.requested} · รอของ ${p.ordered} · ครบ ${p.done}/${p.total}` : "ซื้อของ: ใบนี้ยังไม่มีสูตร"],
+    ["เตรียม", m.has_bom ? lv(m.prep_ready, m.prep_total) : m.prep_done ? "done" : "todo", m.has_bom ? `เตรียมแล้ว ${m.prep_ready}/${m.prep_total}` : "เตรียมของ"],
+    ["ตัด", m.has_bom ? lv(m.cut_ready, m.cut_total) : m.cut_done ? "done" : "todo", m.has_bom ? (m.cut_total > 0 ? `ตัดแล้ว ${m.cut_ready}/${m.cut_total}` : "ไม่มีชิ้นต้องตัด") : "ตัด"],
+    ["จ่าย", m.remaining <= 0.0001 ? "done" : m.dispatched > 0 ? "part" : "todo", `จ่ายงานแล้ว ${fmt(m.dispatched)}/${fmt(m.qty)}`],
+    ["รับคืน", received > 0 && received >= (m.qty || 0) - 0.0001 ? "done" : received > 0 ? "part" : "todo", `รับงานคืนแล้ว ${fmt(received)}/${fmt(m.qty)}`],
+  ];
+  const cur = steps.findIndex(([, s]) => s === "todo" || s === "part");
+  return (
+    <div className="flex">
+      {steps.map(([label, s, tip], i) => {
+        const dot = s === "done" ? "bg-emerald-500"
+          : s === "na" ? "border border-dashed border-slate-300"
+          : i === cur ? `border-2 border-amber-500 ${s === "part" ? "bg-amber-200" : ""}`
+          : s === "part" ? "border-2 border-blue-400 bg-blue-100" : "border border-slate-300";
+        const txt = s === "done" ? "text-emerald-600" : i === cur ? "text-amber-600 font-medium" : "text-slate-400";
+        return (
+          <span key={label} title={tip} className="flex flex-col items-center gap-0.5 w-[2.3rem] shrink-0">
+            <span className={`h-2.5 w-2.5 rounded-full box-border ${dot}`} />
+            <span className={`text-[10px] leading-none ${txt}`}>{label}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOpenMO, onOpenWO, onReload }: {
   pending: PendingMO[]; workOrders: WorkOrder[];
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
@@ -3227,9 +3287,33 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   useEffect(() => { void loadQcQueue(); }, [loadQcQueue]);
   const [dueSaving, setDueSaving] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
-  // คลิกแถว/ชื่อ: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → เปิดรายละเอียด
+  // คลิกแถว: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → กาง/พับ ดูของที่ยังไม่ครบ
+  //   (เปิดเช็กลิสต์เต็ม = ปุ่ม 📋 ท้ายชื่อสินค้า หรือปุ่มในแถวที่กางออก)
   const toggleSel = useCallback((id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
-  const onPendRow = useCallback((m: PendingMO) => { if (sel.size > 0) toggleSel(m.id); else onOpenMO(m); }, [sel.size, toggleSel, onOpenMO]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExp = useCallback((id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
+  const onPendRow = useCallback((m: PendingMO) => { if (sel.size > 0) toggleSel(m.id); else toggleExp(m.id); }, [sel.size, toggleSel, toggleExp]);
+  // ช่อง "ซื้อของ" + จุดขั้นตอน — ความคืบหน้าการซื้อทุกใบในคำขอเดียว (กติกาเดียวกับหน้าขอซื้อ → ตัวเลขตรงกัน)
+  const [prog, setProg] = useState<MoProgressResult | null>(null);
+  const pendKey = pending.map((m) => m.mo_no).join(",");
+  useEffect(() => {
+    let cancel = false;
+    void (async () => {
+      try { const r = await apiFetch("/api/mo/material-progress"); const j = await r.json(); if (!cancel) setProg((j.data ?? {}) as MoProgressResult); }
+      catch { if (!cancel) setProg((p) => p ?? {}); }
+    })();
+    return () => { cancel = true; };
+  }, [pendKey]);
+  // รับงานคืนแล้วเท่าไหร่ต่อใบ (รวมจากใบจ่ายงานทุกใบของใบสั่งผลิตนั้น)
+  const recvByMo = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const w of workOrders) m.set(w.mo_no, (m.get(w.mo_no) ?? 0) + (Number(w.received_qty) || 0));
+    return m;
+  }, [workOrders]);
+  // รูปเล็ก/ใหญ่ — จำต่อคน (ข้ามเครื่อง)
+  const imgPref = useViewPref("wb_table_img", ["s", "l"] as const, "s");
+  const imgBig = imgPref.view === "l";
+  const toggleImg = () => { const v = imgBig ? "s" : "l"; imgPref.setView(v); void imgPref.saveDefault(v); };
   const applyDue = useCallback(async () => {
     const ids = pending.filter((m) => sel.has(m.id)).map((m) => m.id);
     if (!ids.length) return;
@@ -3407,30 +3491,57 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const groupNameOf = useCallback((moNo: string) => moGroups.find((g) => g.mo_nos.includes(moNo))?.name ?? null, [moGroups]);
   const GroupCell = ({ moNo }: { moNo: string }) => { const g = groupNameOf(moNo); return g ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{g}</span> : <span className="text-slate-300">—</span>; };
   // โหมดจัดกลุ่ม (เลือกได้): ไม่จัด / ตามกลุ่ม / ตามความพร้อม(รอจ่าย) หรือ ตามสถานะ(จ่ายแล้ว)
-  const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready">("none");
+  const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage">("none");
   const [woGroup, setWoGroup] = useState<"none" | "group" | "status">("none");
   const grpSelectCls = "h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600";
 
   const pendCols: MiniColumn<PendingMO>[] = [
-    { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (m) => <ProdCell url={m.image_url} sku={m.product_sku} name={m.product_name} /> },
-    { key: "mo", header: "ใบสั่งผลิต", width: "9rem", sortValue: (m) => m.mo_no, sortLabel: "เลขใบสั่งผลิต", cell: (m) => <span className="font-mono text-[11px] text-slate-500">{m.mo_no}</span> },
-    { key: "group", header: "กลุ่ม", width: "minmax(7rem,1fr)", sortValue: (m) => groupNameOf(m.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (m) => <GroupCell moNo={m.mo_no} /> },
-    { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (m) => m.qty, sortLabel: "จำนวน", cell: (m) => <span className="tabular-nums">{fmt(m.qty)}</span> },
-    { key: "disp", header: "จ่ายแล้ว", width: "5rem", align: "right", cell: (m) => <span className="tabular-nums text-slate-500">{fmt(m.dispatched)}</span> },
-    { key: "rem", header: "เหลือ", width: "4.5rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "เหลือ", cell: (m) => <span className="tabular-nums font-semibold text-rose-600">{fmt(m.remaining)}</span> },
-    // ดับเบิลคลิกที่ช่องวัน = แก้ได้เลย (คลิกครั้งเดียวยังเป็นเปิดรายละเอียด/ติ๊กเลือกเหมือนเดิม)
-    { key: "due", header: "📦 ส่งลูกค้า", width: "minmax(9.5rem,1fr)", sortValue: (m) => m.due_date ?? "9999", sortLabel: "กำหนดส่งลูกค้า",
-      cell: (m) => <span className="flex items-center gap-1">
-        <InlineEdit type="date" trigger="dblclick" compact width="9rem" disabled={!canEdit} value={m.due_date ?? ""} placeholder="— ยังไม่กำหนด —"
-          onSave={(v) => void saveMoDate(m.id, "due", v)} />
-        {m.due_date && <span className={`text-[10px] ${daysLeftClass(m.due_date)}`}>{daysLeftText(m.due_date)}</span>}
-      </span> },
-    { key: "due_int", header: "🪑 ส่งภายใน", width: "minmax(9.5rem,1fr)", sortValue: (m) => m.internal_due_date ?? "9999", sortLabel: "กำหนดส่งภายใน",
-      cell: (m) => <span className="flex items-center gap-1">
-        <InlineEdit type="date" trigger="dblclick" compact width="9rem" disabled={!canEdit} value={m.internal_due_date ?? ""} placeholder="— ยังไม่กำหนด —"
-          onSave={(v) => void saveMoDate(m.id, "internal", v)} />
-        {m.internal_due_date && <span className={`text-[10px] ${daysLeftClass(m.internal_due_date)}`}>{daysLeftText(m.internal_due_date)}</span>}
-      </span> },
+    { key: "img", header: "รูป", width: imgBig ? "4.25rem" : "2.5rem", cell: (m) => <HoverImage url={m.image_url} size={imgBig ? 64 : 36} previewSize={256} /> },
+    { key: "prod", header: "สินค้า / ใบสั่งผลิต", width: "minmax(11rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า",
+      cell: (m) => (
+        <div className="flex items-start gap-1.5 min-w-0">
+          <span className="mt-0.5 shrink-0 text-[10px] text-slate-400">{expanded.has(m.id) ? "▾" : "▸"}</span>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-slate-800 truncate">{m.product_sku}</div>
+            {m.product_name && m.product_name !== m.product_sku && <div className="text-[11px] text-slate-400 truncate">{m.product_name}</div>}
+            <div className="font-mono text-[10px] text-slate-400">{m.mo_no}</div>
+          </div>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="เปิดเช็กลิสต์เตรียม/ตัด"
+            className="shrink-0 text-slate-300 hover:text-blue-600">📋</button>
+        </div>
+      ) },
+    { key: "created", header: "สร้างเมื่อ", width: "6rem", sortValue: (m) => m.created_at ?? "", sortLabel: "วันที่สร้างใบ",
+      cell: (m) => { if (!m.created_at) return <span className="text-slate-300">—</span>;
+        const d = Math.max(0, Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000));
+        return <div className="leading-tight"><div className="text-[12px] text-slate-600 tabular-nums">{formatDateTime(m.created_at).slice(0, 10)}</div>
+          <div className={`text-[10px] ${d > 60 ? "text-rose-500" : "text-slate-400"}`}>{d === 0 ? "วันนี้" : `${fmt(d)} วันที่แล้ว`}</div></div>; } },
+    { key: "qty", header: "เหลือ / ทั้งหมด", width: "6rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "จำนวนเหลือ",
+      cell: (m) => <div className="leading-tight">
+        <div className="tabular-nums whitespace-nowrap"><b className="text-rose-600">{fmt(m.remaining)}</b><span className="text-[11px] text-slate-400"> / {fmt(m.qty)}</span></div>
+        <div className="text-[10px] text-slate-400 whitespace-nowrap">{m.dispatched > 0 ? `จ่ายแล้ว ${fmt(m.dispatched)}` : "ยังไม่จ่าย"}</div>
+      </div> },
+    { key: "prep", header: "เตรียม / ตัด", width: "7.5rem", sortValue: (m) => (m.prep_total > 0 ? m.prep_ready / m.prep_total : -1), sortLabel: "ความคืบหน้าเตรียม",
+      cell: (m) => m.has_bom
+        ? <div className="space-y-1"><PrepBar label="เตรียม" a={m.prep_ready} b={m.prep_total} /><PrepBar label="ตัด" a={m.cut_ready} b={m.cut_total} /></div>
+        : <span className="text-[11px] text-slate-400">{m.ready ? "พร้อม ✓" : "— ไม่มีสูตร —"}</span> },
+    { key: "buy", header: "🛒 ซื้อของ", width: "minmax(8.5rem,1fr)", sortLabel: "ของที่ยังต้องซื้อ",
+      sortValue: (m) => { const p = prog?.[m.mo_no]; return p ? p.buy * 10000 + p.requested * 100 + p.ordered : -1; },
+      cell: (m) => <MoProgressCell p={prog?.[m.mo_no]} loading={prog === null} /> },
+    { key: "stage", header: "ขั้นตอน", width: "11.75rem", sortLabel: "ขั้นตอน", sortValue: (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][1],
+      cell: (m) => <MoStepDots m={m} p={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0} /> },
+    // ดับเบิลคลิกที่วัน = แก้ได้เลย (คลิกครั้งเดียว = กาง/พับแถว หรือติ๊กเลือกเหมือนเดิม)
+    { key: "due", header: "กำหนดส่ง", width: "11rem", sortLabel: "กำหนดส่ง (วันที่ใกล้สุด)",
+      sortValue: (m) => [m.due_date, m.internal_due_date].filter((d): d is string => !!d).sort()[0] ?? "9999",
+      cell: (m) => <div className="space-y-0.5">
+        {([["due", "📦", m.due_date, "ลูกค้า"], ["internal", "🪑", m.internal_due_date, "ภายใน"]] as const).map(([f, ic, v, lb]) => (
+          <span key={f} className="flex items-center gap-1" title={`ส่ง${lb} — ดับเบิลคลิกเพื่อแก้`}>
+            <span className="w-4 shrink-0 text-[11px]">{ic}</span>
+            <InlineEdit type="date" trigger="dblclick" compact width="7.25rem" disabled={!canEdit} value={v ?? ""} placeholder="— ยังไม่กำหนด —"
+              onSave={(x) => void saveMoDate(m.id, f, x)} />
+            {v && <span className={`text-[10px] whitespace-nowrap ${daysLeftClass(v)}`}>{daysLeftText(v)}</span>}
+          </span>
+        ))}
+      </div> },
     // ค่าแรง/ชิ้น — ดับเบิลคลิกแก้ได้ (บันทึกเป็นยอดรวมของใบให้อัตโนมัติ)
     { key: "rate", header: "💰 ค่าแรง/ชิ้น", width: "8.5rem", align: "right", sortValue: (m) => rateOf(m), sortLabel: "ค่าแรง/ชิ้น",
       cell: (m) => { const r = rateOf(m); return (
@@ -3440,8 +3551,18 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
             onSave={(v) => void saveMoRate(m, v)} />
           {r > 0 && <span className="text-[10px] text-slate-400 whitespace-nowrap">= ฿{fmt(Math.round(r * (m.qty || 0) * 100) / 100)}</span>}
         </span> ); } },
-    { key: "ready", header: "พร้อม", width: "6.5rem", align: "center", sortValue: (m) => (m.ready ? 0 : 1), sortLabel: "ความพร้อม", cell: (m) => m.ready ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span> },
+    { key: "group", header: "กลุ่ม", width: "minmax(6rem,0.8fr)", sortValue: (m) => groupNameOf(m.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (m) => <GroupCell moNo={m.mo_no} /> },
   ];
+  // แถวที่กางออก = ของที่ยังไม่ครบของใบนั้น (ของกลาง MoShortMaterials) + ปุ่มไปเช็กลิสต์เต็ม
+  const renderPendDetail = (m: PendingMO) => (
+    <div className="flex flex-col lg:flex-row gap-3">
+      <div className="flex-1 min-w-0"><MoShortMaterials moNo={m.mo_no} /></div>
+      <div className="lg:w-56 shrink-0 space-y-1.5">
+        <button type="button" onClick={() => onOpenMO(m)} className="w-full h-8 px-3 text-xs font-medium rounded-lg bg-slate-800 text-white hover:bg-slate-700">📋 เปิดเช็กลิสต์เตรียม/ตัด</button>
+        <p className="text-[11px] text-slate-400 leading-snug">ขอซื้อ · รับของ · ติ๊กเตรียม/ตัด ทำต่อได้ในเช็กลิสต์ (แท็บวัตถุดิบ และแท็บของซื้อ)</p>
+      </div>
+    </div>
+  );
 
   const woCols: MiniColumn<WorkOrder>[] = [
     { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (w) => w.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (w) => <ProdCell url={w.image_url} sku={w.product_sku} name={w.product_name} /> },
@@ -3473,11 +3594,19 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
       <MiniTable
         key={`pend-${pendGroup}`}
         rows={pending} rowKey={(m) => m.id} columns={pendCols} onRowClick={onPendRow}
+        expandedKeys={expanded} renderExpanded={renderPendDetail}
         title="📥 รอจ่าย" countUnit="ใบ"
         selectable selected={sel} onSelectedChange={setSel}
         actions={<div className="flex items-center gap-2">
-          <select value={pendGroup} onChange={(e) => setPendGroup(e.target.value as "none" | "group" | "ready")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+          <button type="button" onClick={() => setPendGroup((g) => (g === "stage" ? "none" : "stage"))} title="จัดกลุ่มตามขั้นตอน: รอซื้อของ → รอของเข้า → รอเตรียม/ตัด → พร้อมจ่าย"
+            className={`h-8 px-3 text-sm rounded-lg border ${pendGroup === "stage" ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+            🪜 จัดกลุ่มตามขั้นตอน{pendGroup === "stage" ? " ✓" : ""}
+          </button>
+          <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
+            className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>
+          <select value={pendGroup} onChange={(e) => setPendGroup(e.target.value as "none" | "group" | "ready" | "stage")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
+            <option value="stage">จัดกลุ่มตามขั้นตอน</option>
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="ready">จัดกลุ่มตามความพร้อม</option>
           </select>
@@ -3495,8 +3624,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
         searchPlaceholder="ค้นหา สินค้า / เลขใบสั่งผลิต — ค้นทั้ง 2 ตาราง"
         searchValue={tableSearch} onSearchChange={setTableSearch}
-        groupBy={pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —" : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม") : undefined}
-        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามความพร้อม"} defaultGrouped={pendGroup !== "none"}
+        groupBy={pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —"
+          : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")
+          : pendGroup === "stage" ? (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][0] : undefined}
+        groupOrder={pendGroup === "stage" ? stageOrder : undefined}
+        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : "จัดกลุ่มตามความพร้อม"} defaultGrouped={pendGroup !== "none"}
+        footnote="กดแถว = กางดูของที่ยังไม่ครบ · 📋 = เปิดเช็กลิสต์เต็ม · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน (ชี้ที่จุดเพื่อดูตัวเลข)"
         emptyText="ไม่มีงานรอจ่าย"
       />
       {assignOpen && <AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); onReload?.(); }} />}

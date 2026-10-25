@@ -21,6 +21,7 @@
  *     groupBy={(r) => r.type}                         // เปิดปุ่มจัดกลุ่ม
  *     selectable selected={sel} onSelectedChange={setSel}
  *     actions={<button>...</button>}
+ *     expandedKeys={open} renderExpanded={(r) => <Detail r={r} />}   // กางแถว (ผู้เรียกคุมว่ากางแถวไหน)
  *   />
  */
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -64,6 +65,11 @@ export type MiniTableProps<T> = {
   // คลิกแถว (เช่น เปิดรายละเอียด)
   onRowClick?: (row: T) => void;
 
+  // กางแถว — แถวที่ key อยู่ใน expandedKeys จะโชว์ renderExpanded(row) เต็มความกว้างใต้แถว
+  //   ผู้เรียกคุมเองว่ากางแถวไหน (เช่น onRowClick สลับ key เข้า/ออก) · ไม่ใส่ = ตารางเหมือนเดิมทุกอย่าง
+  expandedKeys?: Set<string>;
+  renderExpanded?: (row: T) => ReactNode;
+
   // ส่วนหัว
   title?: ReactNode;
   actions?: ReactNode;                  // มุมขวาบน เช่น ปุ่มสร้าง
@@ -90,7 +96,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange,
     groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder,
-    selectable, selected, onSelectedChange, onRowClick,
+    selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, maxHeightClass = "", className = "", footnote,
@@ -219,9 +225,10 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const Row = (r: T, idx: number) => {
     const k = rowKey(r);
     const on = sel.has(k);
-    return (
-      <div key={k} onClick={onRowClick ? () => onRowClick(r) : undefined}
-        className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
+    const open = !!renderExpanded && !!expandedKeys?.has(k);
+    const line = (
+      <div key={open ? undefined : k} onClick={onRowClick ? () => onRowClick(r) : undefined}
+        className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
         style={{ gridTemplateColumns: tmpl }}>
         {selectable && (
           <span className="flex justify-center" onClick={(e) => e.stopPropagation()}>
@@ -229,6 +236,13 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
           </span>
         )}
         {columns.map((c) => <div key={c.key} className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)}`}>{c.cell(r)}</div>)}
+      </div>
+    );
+    if (!open) return line;
+    return (
+      <div key={k}>
+        {line}
+        <div className="px-3 pb-3 pt-1 bg-blue-50/30" style={{ paddingLeft: selectable ? "3.25rem" : undefined }}>{renderExpanded!(r)}</div>
       </div>
     );
   };
@@ -280,7 +294,8 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       ) : shown === 0 ? (
         <div className="text-center py-16 text-slate-300">{noMatchText ? noMatchText(q) : t(`ไม่พบรายการที่ตรงกับ “${q}”`, `Nothing matches “${q}”`)}</div>
       ) : (
-        <div className="border border-slate-200 rounded-xl overflow-hidden">
+        // overflow-x-auto (ไม่ใช่ hidden) — คอลัมน์เยอะเกินจอ = เลื่อนซ้าย-ขวาได้ แทนที่จะโดนตัดหายเงียบ ๆ
+        <div className="border border-slate-200 rounded-xl overflow-x-auto">
           {HeaderCell}
           {groups.map((g, gi) => {
             const gKeys = g.rows.map(rowKey);
