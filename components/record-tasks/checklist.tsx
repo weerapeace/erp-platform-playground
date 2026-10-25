@@ -12,7 +12,7 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { LookupValuesEditor, useLookupRows, type LookupFlag } from "@/components/lookup-values-editor";
-import { UserPicker } from "@/components/pickers";
+import { UserPicker, useRecentUsers } from "@/components/pickers";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
@@ -39,20 +39,30 @@ const AV_COLORS = ["#7F77DD", "#1D9E75", "#D85A30", "#378ADD", "#D4537E", "#6399
 const avColor = (name: string) => AV_COLORS[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % AV_COLORS.length];
 
 /** ชิปผู้รับผิดชอบ — มีชื่อ = วงกลมตัวแรก + ชื่อ · ไม่มี = เส้นประ "👤 ใคร" */
-export function WhoChip({ name, onClick, compact = false }: { name: string | null | undefined; onClick?: () => void; compact?: boolean }) {
+export function WhoChip({ name, onClick, compact = false, title }: { name: string | null | undefined; onClick?: () => void; compact?: boolean; title?: string }) {
   const cls = `inline-flex shrink-0 items-center gap-1 rounded-full border text-[11px] whitespace-nowrap ${compact ? "h-5" : "h-6"} ${onClick ? "cursor-pointer hover:bg-slate-50" : "cursor-default"}`;
   const inner = name
     ? <><span className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold text-white" style={{ backgroundColor: avColor(name) }}>{[...name][0]}</span><span className="max-w-[7rem] truncate pr-1.5 text-slate-700">{name}</span></>
     : <span className="px-1.5 text-slate-400">👤 ใคร</span>;
   return onClick
-    ? <button type="button" onClick={onClick} title={name ? `ผู้รับผิดชอบ: ${name} (กดเพื่อเปลี่ยน)` : "ใส่ผู้รับผิดชอบ"} className={`${cls} ${name ? "border-slate-200 pl-0.5" : "border-dashed border-slate-300"}`}>{inner}</button>
+    ? <button type="button" onClick={onClick} title={title ?? (name ? `ผู้รับผิดชอบ: ${name} (กดเพื่อเปลี่ยน)` : "ใส่ผู้รับผิดชอบ")} className={`${cls} ${name ? "border-slate-200 pl-0.5" : "border-dashed border-slate-300"}`}>{inner}</button>
     : <span className={`${cls} ${name ? "border-slate-200 pl-0.5" : "border-dashed border-slate-300"}`}>{inner}</span>;
 }
 
-/** เลือกผู้รับผิดชอบแบบเปิดในแถว (ไม่ซ้อน popover กับรายการของ UserPicker) */
+/** เลือกผู้รับผิดชอบแบบเปิดในแถว (ไม่ซ้อน popover กับรายการของ UserPicker)
+ *  3 คนที่เลือกล่าสุด = ปุ่มลัดกดได้เลย ไม่ต้องพิมพ์ (ของกลาง useRecentUsers · ประวัติเดียวกับ UserPicker) */
 function WhoPicker({ onPick, onCancel, allowNone }: { onPick: (u: { id: string; name: string } | null) => void; onCancel: () => void; allowNone: boolean }) {
+  const { recent, remember } = useRecentUsers(3);
   return (
     <div className="ml-6 mt-1 flex flex-wrap items-center gap-1.5 rounded-md bg-slate-50 p-1.5">
+      {recent.length > 0 && (
+        <div className="flex w-full flex-wrap items-center gap-1">
+          <span className="text-[11px] text-slate-400">ล่าสุด:</span>
+          {recent.map((u) => (
+            <WhoChip key={u.id} name={u.name} title={`เลือก ${u.name}`} onClick={() => { remember(u); onPick({ id: u.id, name: u.name }); }} />
+          ))}
+        </div>
+      )}
       <div className="min-w-[12rem] flex-1"><UserPicker value={null} onChange={(u) => { if (u) onPick({ id: u.id, name: u.name }); }} placeholder="พิมพ์ชื่อคนรับผิดชอบ…" /></div>
       {allowNone && <button type="button" onClick={() => onPick(null)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-100">ไม่ระบุ</button>}
       <button type="button" onClick={onCancel} className="h-8 rounded-md px-2 text-xs text-slate-500 hover:text-slate-800">ยกเลิก</button>

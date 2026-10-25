@@ -13,6 +13,8 @@ import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { QUOTE_STATUS } from "@/lib/design-sheets-meta";
+import { withNewDefaults } from "@/lib/hover-fields";
+import { taskTitleWithLinks } from "@/lib/record-tasks";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { HoverCardWrap, HoverFieldsPicker, HoverRow, type HoverFieldDef } from "@/components/hover-card";
 import { useT } from "@/components/i18n";
@@ -45,6 +47,8 @@ export const DEFAULT_SHEET_HOVER_FIELDS: SheetHoverField[] = ["image", "name", "
 
 const PREF_KEY = "design_dashboard_hover";
 type Pref = { on: boolean; fields: SheetHoverField[] | null };
+/** หัวข้อรุ่นแรก (ก่อน 2026-10-20 16:19) — ค่าที่บันทึกตอนยังไม่มี seen ถือว่าเห็นแค่นี้ → หัวข้อใหม่ในค่าเริ่มต้น (เช่น ⏳ รออะไรอยู่) โผล่ให้เอง */
+const FIRST_FIELDS: SheetHoverField[] = ["image", "name", "code", "status", "brand", "jobType", "orderDate", "deadline", "steps", "detail", "note", "updated"];
 
 /** ค่าตั้ง "ชี้ที่การ์ด" ต่อคน (โหลด/บันทึก user_ui_prefs) */
 export function useSheetHoverPref() {
@@ -55,14 +59,16 @@ export function useSheetHoverPref() {
         const v = j?.value;
         if (!v || typeof v !== "object") return;
         const known = new Set(SHEET_HOVER_FIELDS.map((f) => f.key));
-        const fields = Array.isArray(v.fields) ? (v.fields as unknown[]).map(String).filter((k): k is SheetHoverField => known.has(k as SheetHoverField)) : null;
-        setPref({ on: v.on !== false, fields });
+        const saved = Array.isArray(v.fields) ? (v.fields as unknown[]).map(String).filter((k): k is SheetHoverField => known.has(k as SheetHoverField)) : null;
+        const seen = Array.isArray(v.seen) ? (v.seen as unknown[]).map(String) : FIRST_FIELDS;
+        setPref({ on: v.on !== false, fields: saved ? withNewDefaults(saved, seen, DEFAULT_SHEET_HOVER_FIELDS) : null });
       })
       .catch(() => {});
   }, []);
   const save = (next: Pref) => {
     setPref(next);
-    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: PREF_KEY, value: next }) }).catch(() => {});
+    const value = { ...next, seen: SHEET_HOVER_FIELDS.map((f) => f.key) };   // หัวข้อที่มีตอนบันทึก (ไว้รู้ว่าหัวข้อไหนเพิ่มมาทีหลัง)
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: PREF_KEY, value }) }).catch(() => {});
   };
   return {
     on: pref.on,
@@ -133,9 +139,15 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
             {has("waiting") && waiting.length > 0 && (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12.5px] leading-snug text-amber-800">
                 <span className="font-semibold">⏳ {t("รออยู่", "Waiting")}</span>
+                {/* ช่องติ๊กหน้าตาเดียวกับบนการ์ด (กล่อง Hover กดไม่ได้ — ติ๊กที่การ์ด) */}
                 <ul className="mt-0.5 space-y-0.5">{waiting.slice(0, 6).map((w, i) => {
                   const who = sheet.waiting_items?.who?.[i];
-                  return <li key={i}>☐ {w}{who && <span className="text-amber-600"> — {who}</span>}</li>;
+                  return (
+                    <li key={i} className="flex items-start gap-1.5">
+                      <span aria-hidden className="mt-0.5 h-4 w-4 shrink-0 rounded border border-slate-300 bg-white" />
+                      <span className="min-w-0 flex-1">{taskTitleWithLinks(w, sheet.waiting_items?.links?.[i] ?? [])}{who && <span className="text-amber-600"> — {who}</span>}</span>
+                    </li>
+                  );
                 })}</ul>
                 {waiting.length > 6 && <div className="text-[11px] text-amber-600">+{waiting.length - 6} {t("ข้อ", "more")}</div>}
               </div>

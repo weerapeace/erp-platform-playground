@@ -314,10 +314,11 @@ export const EmployeePicker = createMasterPicker<EmployeePickerValue>({
 
 // UserPicker — เลือก "user จริง" (user_profiles คนที่ login ได้) — ของกลางสำหรับมอบหมายงาน
 export type UserPickerValue = MasterValue & { email?: string | null; role?: string | null };
+const USER_RECENT_KEY = "erp-recent-users";
 export const UserPicker = createMasterPicker<UserPickerValue>({
   apiPath:    "creative-users",
   listEndpoint: "/api/creative-users",
-  storageKey: "erp-recent-users",
+  storageKey: USER_RECENT_KEY,
   label:      "ผู้ใช้",
   emptyLabel: "ไม่พบผู้ใช้ (คนที่ login ได้)",
   searchPlaceholder: "ค้นหา ชื่อ / อีเมล...",
@@ -327,6 +328,31 @@ export const UserPicker = createMasterPicker<UserPickerValue>({
   verifyRecent: true,   // คนที่ปิดบัญชี/ลาออกแล้ว ไม่โผล่ใน "เคยใช้ล่าสุด/ปักหมุด"
   secondaryRender: v => v.email ? <span>{v.email}{v.role ? <span> · {v.role}</span> : null}</span> : null,
 });
+
+/**
+ * คนที่เพิ่งเลือกล่าสุด (ประวัติเดียวกับ UserPicker) — ทำปุ่มลัด "กดเลือกได้เลย ไม่ต้องพิมพ์"
+ * ตรวจกับเซิร์ฟเวอร์ก่อน (ตัดคนที่ลาออก/ปิดบัญชี) · ตรวจไม่ได้ = โชว์ตามที่จำไว้
+ * remember(u) = เลื่อนคนนั้นขึ้นบนสุด (เรียกตอนกดปุ่มลัด · เลือกผ่าน UserPicker จำให้เองอยู่แล้ว)
+ */
+export function useRecentUsers(limit = 3) {
+  const [recent, setRecent] = useState<UserPickerValue[]>([]);
+  useEffect(() => {
+    const saved = loadRecent<UserPickerValue>(USER_RECENT_KEY).filter((v) => v?.id && v.name);
+    if (!saved.length) return;
+    setRecent(saved.slice(0, limit));
+    let alive = true;
+    apiFetch(`/api/creative-users?ids=${encodeURIComponent(saved.map((v) => v.id).join(","))}`)
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok || json.error || !Array.isArray(json.data)) throw new Error("verify failed");
+        if (alive) setRecent(keepOnlyPicks<UserPickerValue>(USER_RECENT_KEY, json.data as UserPickerValue[]).recent.slice(0, limit));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [limit]);
+  const remember = useCallback((u: UserPickerValue) => { pushRecent(USER_RECENT_KEY, u); }, []);
+  return { recent, remember };
+}
 
 export type WarehousePickerValue = MasterValue & {
   branch?: string | null; manager_name?: string | null;

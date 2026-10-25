@@ -837,7 +837,7 @@ export function SupplierPicker({ value, onChange, placeholder = "เลือก
 // re-export จาก ./master ที่ใช้ factory pattern
 export {
   CustomerPicker, EmployeePicker, UserPicker, WarehousePicker,
-  DepartmentPicker, UnitPicker, TaxPicker,
+  DepartmentPicker, UnitPicker, TaxPicker, useRecentUsers,
 } from "./master";
 export { RecordPeekLink } from "./record-peek-link";
 export type {
