@@ -208,7 +208,7 @@ export type MenuRow = {
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
-export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean };
+export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean; default_href?: string | null };
 
 // หมวดเมนู (ไอคอน/ลำดับ ต่อแอป) — จาก /api/menu/sections
 export type MenuSectionRow = { app_key: string; name: string; icon: string | null; icon_url: string | null; sort_order: number };
@@ -484,7 +484,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   }, []);
 
 
-  // หน้าแรกของโมดูลใหญ่ (App) = เมนูย่อยตัวบนสุดของหมวดนั้น (ตามลำดับใน /admin/menu)
+  // หน้าแรกของโมดูลใหญ่ (App) = "หน้าแรก" ที่ตั้งใน ⚙️ ตั้งค่าแอป (erp_app_groups.default_href — ตัวเดียวกับแอปเดี่ยว /app/<key>)
+  //   → ไม่ได้ตั้ง/ผู้ใช้ไม่เห็นเมนูนั้น = เมนูย่อยตัวบนสุดของหมวด (ตามลำดับใน /admin/menu)
+  //   เดิมไม่อ่าน default_href → กด "จัดซื้อ" เด้งไป SKUs (Master Data) เพราะลำดับ 10 เท่ากับแดชบอร์ด
   const firstHrefForApp = (key: string): string | null => {
     if (!menuRows) return null;
     const its = menuRows
@@ -492,6 +494,8 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0]))
         && menuVisibleTo(r.audience, user))
       .sort((a, b) => a.sort_order - b.sort_order);
+    const home = appGroups.find((a) => a.key === key)?.default_href;
+    if (home && its.some((r) => r.href === home)) return home;
     // หน้า default ของบางแอป (override ลำดับเมนู) — เช่น เปิด "ผลิต" ให้ไปใบสั่งผลิต (MO) ก่อน
     const pref = APP_DEFAULT_HREF[key];
     if (pref && its.some((r) => r.href === pref)) return pref;
