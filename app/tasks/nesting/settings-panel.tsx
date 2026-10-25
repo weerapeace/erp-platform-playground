@@ -91,13 +91,23 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
 
       <div>
         <span className="mb-1 block text-xs text-slate-500">{t("จำนวนชิ้น", "Quantity")}</span>
-        <Seg value={s.fill ? "fill" : "qty"} options={[["qty", t("ตามจำนวนที่ใส่", "Exact count")], ["fill", t("เติมให้เต็มแผ่น", "Fill the sheet")]]}
+        <Seg value={s.fill ? "fill" : "qty"} options={[["qty", t("ตามจำนวนที่ใส่", "Exact count")], ["fill", t("ตามจำนวน + เติมที่ว่าง (%)", "Exact + fill gaps (%)")]]}
           onChange={(v) => onChange({ fill: v === "fill" })} />
+        {s.fill && (
+          <div className="mt-1 text-[11px] text-slate-500">
+            {t("ทุกแผ่นได้ตามจำนวนที่ใส่ก่อน แล้วเติมที่ว่างด้วยลายตาม % ที่ใส่ในการ์ดลาย (รวม 100%) · หัวงานบอกจำนวนที่เติมเป็น (+N)",
+              "Every sheet gets the exact quantities first, then the gaps are filled by the % set on each artwork card (total 100%) · the header shows extras as (+N)")}
+          </div>
+        )}
         {s.fill && roll && (
-          <div className="mt-2">
-            <Field label={t(`แผ่นม้วน: เติมถึงความยาว (${u})`, `Roll: fill up to (${u})`)}>
-              <NumInput className={inputCls} value={len(s.fill_length_mm)} onChange={(v) => onChange({ fill_length_mm: fromLen(v) ?? 0 })} />
-            </Field>
+          <div className="mt-2 space-y-2">
+            <Seg value={s.fill_roll} options={[["used", t("เติมช่องว่าง ไม่ยืดม้วน", "Fill gaps, keep length")], ["length", t("เติมถึงความยาว", "Fill up to a length")]]}
+              onChange={(v) => onChange({ fill_roll: v })} />
+            {s.fill_roll === "length" && (
+              <Field label={t(`แผ่นม้วน: เติมถึงความยาว (${u})`, `Roll: fill up to (${u})`)}>
+                <NumInput className={inputCls} value={len(s.fill_length_mm)} onChange={(v) => onChange({ fill_length_mm: fromLen(v) ?? 0 })} />
+              </Field>
+            )}
           </div>
         )}
       </div>

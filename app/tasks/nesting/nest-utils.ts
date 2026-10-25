@@ -24,12 +24,16 @@ export const SETTINGS_DEFAULTS = {
   rotate: [0, 90, 180, 270] as number[] | null, rotate_step: null as number | null,
   cut_contour: false, cut_offset_mm: 1, alpha_threshold: 10, default_dpi: 300, min_dpi: 150,
   time_limit_s: 60, resample_to_dpi: 1200, min_line_mm: 0.1, fill: false, fill_length_mm: 1000,
+  fill_roll: "used" as "used" | "length",   // แผ่นม้วน + เติม: เติมช่องว่างไม่ยืดม้วน / เติมถึงความยาว
   layout: "nest" as "nest" | "rows", rows_new_row: true, header: true, header_text: true, unit: "cm" as Unit,
 };
 export type Settings = typeof SETTINGS_DEFAULTS;
 
 export function readSettings(raw: Record<string, unknown> | null | undefined): Settings {
-  return { ...SETTINGS_DEFAULTS, ...(raw ?? {}) } as Settings;
+  const s = { ...SETTINGS_DEFAULTS, ...(raw ?? {}) } as Settings;
+  // งานเก่า (ก่อนมีตัวเลือกนี้) ม้วน + เติม = เติมถึงความยาวเสมอ → คงแบบเดิม
+  if (raw && raw.fill_roll === undefined && raw.fill) s.fill_roll = "length";
+  return s;
 }
 
 export const unitScale = (u: Unit) => (u === "cm" ? 10 : 1);

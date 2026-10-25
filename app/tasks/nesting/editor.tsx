@@ -19,7 +19,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
-import { HELPER_SPLIT_VERSION, helperApi, helperDownload, helperLink, versionAtLeast, type SplitResult } from "@/lib/nesting-helper";
+import { HELPER_ROWS_VERSION, HELPER_SPLIT_VERSION, helperApi, helperDownload, helperLink, versionAtLeast, type SplitResult } from "@/lib/nesting-helper";
 import type { AssetDetail, AssetRow, AssetSize } from "@/app/api/assets/shared";
 import {
   ROTATE_LOCK_ANGLES, createNestingJob, getAssetSplits, getNestingJob, listPrintTypes, saveAssetSplit, toMm, updateNestingJob,
@@ -63,7 +63,7 @@ function makeDraft(name: string, status: NestingStatus, printTypeId: string | nu
 /** สิ่งที่มีผลกับผลจัดเรียง (เปลี่ยนแล้วผลบนจอ "เก่า") — ไม่รวมข้อความหัวงาน/หน่วยที่แสดง */
 function nestSnapshot(settings: Settings, items: NestingItem[]): string {
   const { header_text: _h, unit: _u, ...rest } = settings;
-  return JSON.stringify({ rest, items: items.map((i) => [i.file?.sha, i.title, i.size, i.qty, i.fill_pct, i.lock ?? null]) });
+  return JSON.stringify({ rest, items: items.map((i) => [i.file?.sha, i.title, i.size, i.qty, i.fill_pct, i.lock ?? null, !!i.rows]) });
 }
 
 const stem = (name: string) => name.replace(/\.[^.]+$/, "");
@@ -345,7 +345,14 @@ export function NestingEditor({ id }: { id: string }) {
     if (!items.length) return t("เพิ่มลายก่อน (เลือกจากคลังหรือลากไฟล์ PNG)", "Add artwork first (pick from the library or drop PNG files)");
     if (!(settings.sheet_width_mm > 0)) return t("ใส่ความกว้างแผ่นก่อน", "Enter the sheet width first");
     if (settings.sheet_height_mm != null && !(settings.sheet_height_mm > 0)) return t("ใส่ความยาวแผ่นก่อน", "Enter the sheet length first");
-    if (settings.fill && settings.sheet_height_mm == null && !(settings.fill_length_mm > 0)) return t("แผ่นม้วน + เติมเต็ม: ใส่ความยาวที่จะเติมก่อน", "Roll + fill: enter the fill length first");
+    const rollFill = settings.fill && settings.sheet_height_mm == null;
+    if (rollFill && settings.fill_roll === "length" && !(settings.fill_length_mm > 0)) return t("แผ่นม้วน + เติมเต็ม: ใส่ความยาวที่จะเติมก่อน", "Roll + fill: enter the fill length first");
+    if (rollFill && settings.fill_roll === "used" && !items.some((it) => it.qty > 0))
+      return t("เติมช่องว่างไม่ยืดม้วน: ต้องมีลายที่ใส่จำนวนอย่างน้อย 1 ชิ้น (หรือเลือก “เติมถึงความยาว”)", "Fill gaps without lengthening the roll: at least one artwork needs a quantity of 1 or more (or choose “Fill up to a length”)");
+    const rowsVer = helper.state === "ready" && versionAtLeast(helper.version, HELPER_ROWS_VERSION);
+    if ((items.some((it) => it.rows) || (rollFill && settings.fill_roll === "used")) && !rowsVer)
+      return t(`เรียงเป็นแถวรายลาย / เติมช่องว่างไม่ยืดม้วน ต้องใช้ตัวช่วย v${HELPER_ROWS_VERSION} ขึ้นไป — คลิกขวาไอคอนกรรไกรข้างนาฬิกา → “ตรวจหาเวอร์ชันใหม่”`,
+        `Per-artwork rows / filling gaps without lengthening the roll need helper v${HELPER_ROWS_VERSION} or later — right-click the scissors icon next to the clock → “Check for updates”`);
     for (const it of items) {
       const sha = it.file?.sha;
       if (!sha || missing[sha]) return t(`"${it.title}" ยังไม่มีไฟล์พิมพ์ในเครื่องนี้ — ลาก PNG ตัวจริงมาใส่`, `"${it.title}" has no print file on this computer — drop the real PNG on it`);
@@ -368,12 +375,14 @@ export function NestingEditor({ id }: { id: string }) {
     const err = validate();
     if (err) { toast("error", err); return; }
     const body = {
-      settings: { ...settings, job_name: name.trim(), resample_to_dpi: settings.resample_to_dpi || null },
+      settings: { ...settings, job_name: name.trim(), resample_to_dpi: settings.resample_to_dpi || null,
+        fill_length_mm: settings.fill_roll === "used" && settings.sheet_height_mm == null ? null : settings.fill_length_mm },
       items: items.map((it) => ({
         sha: it.file!.sha, name: `${it.title || stem(it.file!.name)}.png`, qty: it.qty,
         size: { mode: it.size.mode, value: it.size.mode === "natural" ? null : it.size.value },
         fill_pct: settings.fill ? it.fill_pct : 0,
         lock_box: !!it.lock?.box, rotate: it.lock ? ROTATE_LOCK_ANGLES[it.lock.rotate] : null,
+        rows: settings.layout !== "rows" && !!it.rows,   // ไม่ได้ล็อกการหมุน = ตัวช่วยเลือก 0° / 90° ให้เอง
       })),
     };
     try {

@@ -27,6 +27,7 @@ export type NestingItem = {
   file: { name: string; sha: string } | null;       // ไฟล์ PNG จริงที่ลากในเครื่อง (sha = รหัสไฟล์ในตัวช่วย)
   lock?: NestingLock | null;         // ล็อกลาย (เฉพาะงานนี้)
   piece?: NestingPiece | null;       // ชิ้นที่แยกมาจากภาพเดียวกัน (กดรวมกลับได้)
+  rows?: boolean;                    // เรียงเป็นแถวเฉพาะลายนี้ (ตรงแนว ทั้งลายหันทางเดียว · ลายอื่นแทรกที่ว่าง)
 };
 
 /** มุมหมุนของลายที่ล็อก: ตามแผ่น / ห้ามหมุน / แนวนอน (0°,180°) / แนวนอน-ตั้ง (4 ทิศ) */
@@ -99,6 +100,7 @@ export function cleanItems(v: unknown): NestingItem[] | null {
       file: sha ? { name: String(f?.name ?? "").slice(0, 200), sha } : null,
       lock: cleanLock(o.lock),
       piece: cleanPiece(o.piece),
+      rows: o.rows === true,
     };
   });
 }

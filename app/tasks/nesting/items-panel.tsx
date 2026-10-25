@@ -213,6 +213,14 @@ export function ItemsPanel({
                   <input type="checkbox" checked={!!it.lock} onChange={(e) => patch(it.key, { lock: e.target.checked ? { box: true, rotate: "quad" } : null })} />
                   🔒 {t("ล็อกลายนี้", "Lock this artwork")}
                 </label>
+                {settings.layout !== "rows" && (
+                  <button type="button" onClick={() => patch(it.key, { rows: !it.rows })}
+                    title={t("เรียงลายนี้เป็นแถวตรงแนวที่ต้นแผ่น (ทั้งลายหันทางเดียว · หมุน 90° ได้ถ้าได้มากกว่า) ลายอื่นแทรกที่ว่างที่เหลือ — ตัดง่าย",
+                      "Lay this artwork out in straight rows at the start of the sheet (all facing one way · turned 90° if more fit); other artwork fills the rest — easy to cut")}
+                    className={`rounded border px-2 py-0.5 ${it.rows ? "border-violet-400 bg-violet-100 font-semibold text-violet-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
+                    ▤ {t("เรียงเป็นแถว", "Rows")}
+                  </button>
+                )}
                 {!it.piece && it.file && !miss && info && !info.error && (
                   <button type="button" onClick={() => onSplit(it.key)} disabled={!canSplit || busy}
                     title={canSplit ? t("ภาพเดียวมีหลายส่วน (เช่น ช้าง + ตัวหนังสือ) → แยกเป็นหลายชิ้น", "One image with several parts (e.g. elephant + text) → split into pieces")
