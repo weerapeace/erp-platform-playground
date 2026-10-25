@@ -6,7 +6,7 @@
  * GET  ?po_lines=<po_id>   → บรรทัดของ PO ใบนั้น (ใช้จับคู่รายการตอนเลือก PO เอง)
  * GET  ?po_search=<คำค้น>  → ค้น PO ที่ยังค้าง (ร่าง/รอรับของ)
  * GET  ?po_id=<po_id>      → คำสั่งซื้อที่ผูกกับ PO ใบนั้น (แถบ "หลักฐานคำสั่งซื้อ" ใน PoDetailModal)
- * GET  ?line_setup=1       → (แอดมิน) กลุ่มไลน์ที่ตั้งไว้ + กลุ่มล่าสุดที่บอทเห็น พร้อมชื่อกลุ่ม
+ * GET  ?line_setup=1       → (แอดมิน) กลุ่มไลน์ที่บอทอยู่แล้วทั้งหมด พร้อมชื่อ/จำนวนคน/ใช้ทำอะไรอยู่ (เลือกใช้ได้ทันที)
  * POST (multipart: images) → อัปรูปเอง (สำรองตอนไลน์มีปัญหา / ทดสอบ) → AI อ่าน → คืนใบใหม่
  * PATCH { id, fields?, action?: confirm|reject|restore|reread, confirm?, reason? }
  *
@@ -19,8 +19,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import {
-  CAPTURE_COLUMNS, CAPTURE_TABLE, ORDER_CAPTURE_SLOT, confirmCapture, finalizeStaleSets, findDuplicate, loadCapture, loadPoLines,
-  normalizeRow, normOrderNo, processCapture, putCaptureImage, searchOpenPos, suggestPurchaseOrders,
+  CAPTURE_COLUMNS, CAPTURE_TABLE, confirmCapture, finalizeStaleSets, findDuplicate, loadCapture, loadPoLines,
+  loadLineGroupSetup, normalizeRow, normOrderNo, processCapture, putCaptureImage, searchOpenPos, suggestPurchaseOrders,
   type CaptureItem, type ConfirmInput,
 } from "@/lib/order-capture";
 
@@ -83,29 +83,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ rows: await searchOpenPos(admin, str(sp.get("po_search"))), error: null });
   }
 
-  // ---- สถานะกลุ่มไลน์ (แอดมิน) — ชื่อกลุ่มที่ตั้งไว้ + กลุ่มล่าสุดที่บอทเห็น ให้กด "ใช้กลุ่มนี้" ได้ไม่ต้องเดา id ----
+  // ---- สถานะกลุ่มไลน์ (แอดมิน) — กลุ่มที่บอทอยู่แล้วทั้งหมด (ชื่อจริง + ใช้ทำอะไรอยู่) ให้กด "ใช้กลุ่มนี้" ได้ทันที ----
   if (sp.has("line_setup")) {
     const deniedAdmin = await guardApi(request, "admin.users"); if (deniedAdmin) return deniedAdmin;
-    const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = ((row as Rec | null)?.sval ?? {}) as Rec;
-    const token = str(cfg.token);
-    const groupName = async (gid: string): Promise<string | null> => {
-      if (!gid || !token) return null;
-      try {
-        const r = await fetch(`https://api.line.me/v2/bot/group/${encodeURIComponent(gid)}/summary`, { headers: { Authorization: `Bearer ${token}` } });
-        return r.ok ? str(((await r.json()) as Rec).groupName) || null : null;
-      } catch { return null; }
-    };
-    const current = str((cfg.groups as Rec | undefined)?.[ORDER_CAPTURE_SLOT]);
-    const captured = str(cfg.group_id);
-    return NextResponse.json({
-      has_token: !!token,
-      has_secret: !!(process.env.LINE_CHANNEL_SECRET || cfg.channel_secret),
-      current, current_name: await groupName(current),
-      captured, captured_name: captured && captured !== current ? await groupName(captured) : null,
-      captured_at: cfg.group_captured_at ?? null,
-      error: null,
-    });
+    return NextResponse.json({ ...(await loadLineGroupSetup(admin)), error: null });
   }
 
   // ---- คำสั่งซื้อที่ผูกกับ PO ----

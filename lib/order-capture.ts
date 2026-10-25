@@ -10,6 +10,8 @@
  *   - ผล AI เป็นแค่ "ร่าง" ห้ามเอาไปแตะ PO จนกว่าคนกดยืนยัน
  *   - ยืนยันว่ารูปมาจากไลน์จริงด้วยการ "ดึงรูปจากไลน์ด้วยโทเคนบอทเรา" — ข้อความปลอมดึงรูปไม่ได้ = ไม่บันทึก
  *   - ไม่ให้ AI ถอดชื่อ/ที่อยู่/เบอร์ผู้รับ (รูปต้นฉบับยังมีอยู่ → ดูได้เฉพาะคนมีสิทธิ์ po.view)
+ *   - ใช้กลุ่มที่คุยงานอยู่แล้วได้: รูปจากไลน์ที่ AI บอกว่า "ไม่ใช่คำสั่งซื้อ" → บอทไม่ตอบ + ตีตกให้เอง (กู้คืนได้)
+ *     (อัปรูปเองจากหน้าเว็บไม่ตีตกอัตโนมัติ — คนอัปตั้งใจส่งมาเอง)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2PutObject } from "@/lib/r2";
@@ -19,6 +21,7 @@ import { writeAudit } from "@/lib/audit";
 import { shopNameSimilarity } from "@/lib/partner-match";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 import { createManualPo } from "@/lib/po-manual";
+import { LINE_SLOTS } from "@/lib/line-registry";
 import {
   PLATFORM_LABEL, curSym, fieldLabel, isCNY,
   type CaptureItem, type CapturePlatform, type CaptureRow, type CaptureStatus, type PoLineLite, type PoSuggestion,
@@ -415,9 +418,27 @@ export async function mergeImageSet(admin: Admin, setId: string, total: number, 
   return String(primary.id);
 }
 
+/** AI บอกชัดว่า "ไม่ใช่หน้าคำสั่งซื้อ" และอ่านไม่ได้อะไรเลย (ไม่มีเลขที่ ไม่มีรายการ) — ใช้กับรูปจากไลน์เท่านั้น */
+export const isNotOrderImage = (cap: Pick<CaptureRow, "ai_is_order" | "order_no" | "items">) =>
+  cap.ai_is_order === false && !cap.order_no && cap.items.length === 0;
+
+/** ตีตกอัตโนมัติ (รูปที่ไม่ใช่คำสั่งซื้อ) — กู้คืนได้ที่แท็บ "ตีตก" */
+export async function autoRejectNotOrder(admin: Admin, id: string): Promise<void> {
+  const now = new Date().toISOString();
+  await admin.from(CAPTURE_TABLE).update({
+    status: "rejected", rejected_by: "AI", rejected_at: now, reject_reason: "AI: ไม่ใช่หน้าคำสั่งซื้อ", updated_at: now,
+  }).eq("id", id).eq("status", "pending");
+  await writeAudit(admin, {
+    action: "reject", entityType: CAPTURE_TABLE, entityId: id, actorId: null, actorName: "AI",
+    metadata: { actor: "AI", reason: "not_order", auto: true },
+  });
+}
+
 async function finishAndReply(admin: Admin, token: string, id: string, replyToken: string | undefined): Promise<void> {
   const cap = await processCapture(admin, id);
   if (!cap) return;
+  // รูปที่ไม่ใช่คำสั่งซื้อ (รูปสินค้า/รูปคุยงานในกลุ่มที่ใช้ร่วมกัน) → บอทเงียบ + ย้ายไป "ตีตก" ให้เอง ไม่ให้แชท/กล่องรก
+  if (isNotOrderImage(cap)) { await autoRejectNotOrder(admin, id); return; }
   const dup = cap.dup_of ? await loadCapture(admin, cap.dup_of) : null;
   await lineReply(token, replyToken, buildReplyText(cap, dup));
 }
@@ -682,4 +703,69 @@ export async function confirmCapture(admin: Admin, cap: CaptureRow, input: Confi
     metadata: { mode: input.mode, po_id: poId, po_no: poNo, order_no: cap.order_no, platform: cap.platform, warnings },
   });
   return { ok: true, po_id: poId, po_no: poNo, warnings };
+}
+
+// ---------------------------------------------------------------- ตั้งกลุ่มไลน์ (หน้าแอดมิน)
+
+/** กลุ่มที่ปกติมีรูปอื่นเยอะ — ถ้าใช้รับรูปคำสั่งซื้อ AI จะอ่านทุกรูป (เตือนในหน้าตั้งค่า) */
+const IMAGE_HEAVY_SLOTS = ["bills", "transfers", "creative", "qc", "production"];
+
+export type KnownLineGroup = {
+  id: string; name: string | null; members: number | null;
+  /** บอทยังอยู่ในกลุ่มไหม (ถามไลน์ไม่ได้ = ออกจากกลุ่มแล้ว/ไม่ใช่กลุ่ม) */
+  reachable: boolean;
+  /** ตอนนี้กลุ่มนี้ใช้กับระบบไหนอยู่ (ป้ายไทย) */
+  uses: string[];
+  /** กลุ่มที่มีรูปอื่นเยอะ (บิล/สลิป/งานออกแบบ/QC) */
+  busy_images: boolean;
+  is_current: boolean; is_captured: boolean;
+};
+
+/**
+ * กลุ่มไลน์ที่ระบบรู้จัก = กลุ่มของทุกระบบใน line_config.groups + กลุ่มล่าสุดที่บอทเห็น
+ * ถามชื่อ/จำนวนคนจากไลน์ (อ่านอย่างเดียว ไม่ส่งข้อความ) ให้แอดมินกด "ใช้กลุ่มนี้" ได้ทันที
+ */
+export async function loadLineGroupSetup(admin: Admin) {
+  const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
+  const cfg = ((row as Rec | null)?.sval ?? {}) as Rec;
+  const token = str(cfg.token);
+  const current = str((cfg.groups as Rec | undefined)?.[ORDER_CAPTURE_SLOT]);
+  const captured = str(cfg.group_id);
+
+  const slotsOf = new Map<string, string[]>();
+  for (const [slot, gid] of Object.entries((cfg.groups ?? {}) as Rec)) {
+    const g = str(gid); if (!g || slot === ORDER_CAPTURE_SLOT) continue;
+    slotsOf.set(g, [...(slotsOf.get(g) ?? []), slot]);
+  }
+  for (const g of [current, captured]) if (g && !slotsOf.has(g)) slotsOf.set(g, []);
+  const lineGet = async (path: string): Promise<Rec | null> => {
+    if (!token) return null;
+    try {
+      const res = await fetch(`https://api.line.me/v2/bot/${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      return res.ok ? ((await res.json()) as Rec) : null;
+    } catch { return null; }
+  };
+  const groups: KnownLineGroup[] = await Promise.all([...slotsOf.entries()].map(async ([gid, slots]) => {
+    const [sum, cnt] = await Promise.all([lineGet(`group/${encodeURIComponent(gid)}/summary`), lineGet(`group/${encodeURIComponent(gid)}/members/count`)]);
+    return {
+      id: gid,
+      name: sum ? str(sum.groupName) || null : null,
+      members: cnt ? Number(cnt.count) || null : null,
+      reachable: !!sum,
+      uses: slots.map((s) => (LINE_SLOTS as Record<string, { label: string }>)[s]?.label ?? s),
+      busy_images: slots.some((s) => IMAGE_HEAVY_SLOTS.includes(s)),
+      is_current: gid === current,
+      is_captured: gid === captured,
+    };
+  }));
+  // กลุ่มที่ใช้อยู่ก่อน → กลุ่มที่ใช้กับระบบอื่น (ไม่ใช่กลุ่มรูปเยอะ) → กลุ่มอื่น → กลุ่มรูปเยอะไว้ท้าย
+  const rank = (g: KnownLineGroup) => (g.is_current ? 0 : g.busy_images ? 3 : g.uses.length ? 1 : 2);
+  groups.sort((x, y) => rank(x) - rank(y));
+  return {
+    has_token: !!token,
+    has_secret: !!(process.env.LINE_CHANNEL_SECRET || cfg.channel_secret),
+    current, current_name: groups.find((g) => g.is_current)?.name ?? null,
+    captured, captured_at: (cfg.group_captured_at as string | undefined) ?? null,
+    groups,
+  };
 }

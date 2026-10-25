@@ -5,7 +5,7 @@
  *
  * - แท็บสถานะ: รอตรวจ / ยืนยันแล้ว / ตีตก / ทั้งหมด + ค้นหา (ร้าน เลขคำสั่งซื้อ คนส่ง เลขพัสดุ)
  * - 📤 อัปรูปเอง (หรือกด Ctrl+V วางรูป) = สำรองตอนไลน์มีปัญหา / ใช้ทดสอบ — วิ่งเส้นเดียวกับรูปจากไลน์
- * - แอดมินเห็นแถบตั้งกลุ่มไลน์ (กด "ใช้กลุ่มนี้" ได้เลยจากชื่อกลุ่มที่บอทเพิ่งเห็น) + เปิดศูนย์จัดการ LINE กลาง
+ * - แอดมินเห็นแถบตั้งกลุ่มไลน์ (./line-group-setup — เลือกกลุ่มที่บอทอยู่แล้วได้ทันที) + เปิดศูนย์จัดการ LINE กลาง
  * - ลิงก์ตรงถึงใบ: ?open=<id> (บอทส่งลิงก์นี้ในไลน์)
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,14 +19,10 @@ import { useOpenParam } from "@/lib/open-param";
 import { shrinkImageToFit } from "@/lib/image-resize";
 import { PLATFORM_LABEL, curSym, type CaptureRow } from "@/lib/order-capture-shared";
 import { CaptureModal } from "./capture-modal";
+import { LineGroupSetup } from "./line-group-setup";
 
 type Row = CaptureRow & { po_no: string | null };
 type Tab = "pending" | "confirmed" | "rejected" | "all";
-type LineSetup = {
-  has_token: boolean; has_secret: boolean;
-  current: string; current_name: string | null;
-  captured: string; captured_name: string | null; captured_at: string | null;
-};
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "pending", label: "รอตรวจ" },
@@ -58,7 +54,7 @@ export function LineOrdersInbox() {
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [setup, setSetup] = useState<LineSetup | null>(null);
+  const [setupKey, setSetupKey] = useState(0);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const reqId = useRef(0);
@@ -96,29 +92,6 @@ export function LineOrdersInbox() {
     const t = setTimeout(() => void load(false), 5000);
     return () => clearTimeout(t);
   }, [hasProcessing, rows, load]);
-
-  const loadSetup = useCallback(async () => {
-    if (!isAdmin) return;
-    try {
-      const r = await apiFetch("/api/purchasing/line-orders?line_setup=1");
-      const j = await r.json();
-      if (r.ok && !j.error) setSetup(j as LineSetup);
-    } catch { /* แถบตั้งค่าไม่ขึ้นก็ใช้หน้าได้ */ }
-  }, [isAdmin]);
-  useEffect(() => { void loadSetup(); }, [loadSetup]);
-
-  const applyCapturedGroup = async () => {
-    if (!setup?.captured) return;
-    try {
-      const r = await apiFetch("/api/admin/line-console", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slot: "purchase_capture", group_id: setup.captured }),
-      });
-      const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || "ตั้งกลุ่มไม่สำเร็จ");
-      toast.success(`ตั้งกลุ่ม "${setup.captured_name ?? setup.captured}" แล้ว — ส่งรูปในกลุ่มนี้ได้เลย`);
-      void loadSetup();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้งกลุ่มไม่สำเร็จ"); }
-  };
 
   // ---- อัปรูปเอง / วางรูป ----
   const upload = useCallback(async (files: File[]) => {
@@ -187,37 +160,8 @@ export function LineOrdersInbox() {
         </div>
       </div>
 
-      {/* แถบตั้งกลุ่มไลน์ — แอดมินเท่านั้น */}
-      {isAdmin && setup && (
-        setup.current ? (
-          <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>✅ กลุ่มไลน์ส่งรูป: <b>{setup.current_name ?? "ตั้งแล้ว"}</b> — ส่งรูปคำสั่งซื้อในกลุ่มนี้ได้เลย บอทจะตอบกลับให้</span>
-            {!setup.has_secret && <span className="text-amber-700">🔐 ยังไม่ได้ใส่รหัสลับบอท (แนะนำ) — ใส่ได้ที่ ⚙️ ตั้งค่าไลน์</span>}
-          </div>
-        ) : (
-          <div className="text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1.5">
-            <div className="font-semibold text-amber-900">ยังไม่ได้ตั้งกลุ่มไลน์สำหรับส่งรูป</div>
-            <ol className="list-decimal pl-5 text-amber-900/90 text-[13px] space-y-0.5">
-              <li>สร้างกลุ่มไลน์ใหม่ (เช่น &quot;ส่งรูปคำสั่งซื้อ&quot;) แล้วเชิญบอท &quot;พนักงานลงบิลจีนลูก้า&quot; เข้ากลุ่ม</li>
-              <li>พิมพ์อะไรก็ได้ในกลุ่มนั้น 1 ครั้ง แล้วกด 🔄 ด้านล่าง</li>
-              <li>เห็นชื่อกลุ่มถูกแล้ว กด &quot;ใช้กลุ่มนี้&quot;</li>
-              <li>ใน LINE Official Account Manager ปิด &quot;ข้อความตอบกลับอัตโนมัติ&quot; (ไม่งั้นไลน์ตอบข้อความสำเร็จรูปซ้อน)</li>
-            </ol>
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {setup.captured ? (
-                <>
-                  <span className="text-[13px] text-slate-700">กลุ่มล่าสุดที่บอทเห็น: <b>{setup.captured_name ?? setup.captured}</b>
-                    {setup.captured_at && <span className="text-slate-400"> · {when(setup.captured_at)}</span>}</span>
-                  <button onClick={() => void applyCapturedGroup()}
-                    className="h-8 px-3 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700">ใช้กลุ่มนี้</button>
-                </>
-              ) : <span className="text-[13px] text-slate-500">บอทยังไม่เห็นกลุ่มใหม่</span>}
-              <button onClick={() => void loadSetup()} className="h-8 px-2.5 rounded-lg border border-amber-300 bg-white text-xs text-amber-800 hover:bg-amber-100">🔄 รีเฟรช</button>
-              {!setup.has_token && <span className="text-xs text-rose-600">ยังไม่มีโทเคนบอท — ตั้งที่ ⚙️ ตั้งค่าไลน์ก่อน</span>}
-            </div>
-          </div>
-        )
-      )}
+      {/* แถบตั้งกลุ่มไลน์ — แอดมินเท่านั้น (เลือกกลุ่มที่บอทอยู่แล้วได้ทันที) */}
+      {isAdmin && <LineGroupSetup reloadKey={setupKey} onOpenConsole={() => setConsoleOpen(true)} />}
 
       {/* แท็บ + ค้นหา */}
       <div className="flex flex-wrap items-center gap-2">
@@ -260,7 +204,7 @@ export function LineOrdersInbox() {
         <CaptureModal id={openId} canEdit={canEdit} onClose={() => setOpenId(null)} onOpen={setOpenId}
           onChanged={() => void load(false)} />
       )}
-      {isAdmin && <LineConsole open={consoleOpen} onClose={() => { setConsoleOpen(false); void loadSetup(); }} />}
+      {isAdmin && <LineConsole open={consoleOpen} onClose={() => { setConsoleOpen(false); setSetupKey((k) => k + 1); }} />}
     </div>
   );
 }
@@ -293,12 +237,14 @@ function CaptureCard({ r, onOpen }: { r: Row; onOpen: () => void }) {
         <div className="text-[11px] text-slate-400 truncate">{r.source === "upload" ? "📤 " : "💬 "}{r.sender_name || "—"} · {when(r.created_at)}</div>
         <div className="flex flex-wrap gap-1">
           {r.dup_of && r.status !== "rejected" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700">⚠️ เลขซ้ำ</span>}
-          {r.ai_is_order === false && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">🤔 ไม่ใช่คำสั่งซื้อ?</span>}
+          {r.ai_is_order === false && r.status !== "rejected" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">🤔 ไม่ใช่คำสั่งซื้อ?</span>}
           {r.ai_error && r.status === "pending" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">⚠️ ต้องตรวจเอง</span>}
           {r.status === "confirmed" && (r.po_no
             ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">🔗 {r.po_no}</span>
             : <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">✓ ไม่ผูก PO</span>)}
-          {r.status === "rejected" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">ตีตก</span>}
+          {r.status === "rejected" && (r.rejected_by === "AI"
+            ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" title="บอทไม่ได้ตอบในไลน์ · ถ้าเป็นคำสั่งซื้อจริงให้เปิดแล้วกดกู้คืน">🤖 AI ตีตก: ไม่ใช่คำสั่งซื้อ</span>
+            : <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">ตีตก</span>)}
         </div>
       </div>
     </button>
