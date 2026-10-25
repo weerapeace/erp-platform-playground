@@ -131,13 +131,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, count, error } = await query;
   if (error) return NextResponse.json({ error: "โหลดรายการไม่สำเร็จ: " + error.message }, { status: 500 });
 
-  // นับแต่ละแท็บ (ตารางเล็ก — ดึงแค่คอลัมน์สถานะ)
-  const { data: all } = await admin.from(CAPTURE_TABLE).select("status").neq("status", "collecting").limit(20000);
-  const counts: Record<string, number> = { pending: 0, confirmed: 0, rejected: 0, all: 0 };
-  for (const r of (all ?? []) as Rec[]) {
-    const s = r.status === "processing" ? "pending" : String(r.status);
-    counts[s] = (counts[s] ?? 0) + 1; counts.all++;
-  }
+  // นับแต่ละแท็บด้วย count (ไม่ดึงแถว — กันเพดาน 1,000 แถวของ PostgREST ทำตัวเลขเพี้ยนเมื่อข้อมูลเยอะ)
+  const countOf = async (statuses: string[]) => {
+    const { count: c } = await admin.from(CAPTURE_TABLE).select("id", { count: "exact", head: true }).in("status", statuses);
+    return c ?? 0;
+  };
+  const [cPending, cConfirmed, cRejected] = await Promise.all([countOf(["pending", "processing"]), countOf(["confirmed"]), countOf(["rejected"])]);
+  const counts: Record<string, number> = { pending: cPending, confirmed: cConfirmed, rejected: cRejected, all: cPending + cConfirmed + cRejected };
 
   // PO ที่ผูก → เลขที่ (โชว์บนการ์ด)
   const rows = ((data ?? []) as unknown as Rec[]).map(normalizeRow);

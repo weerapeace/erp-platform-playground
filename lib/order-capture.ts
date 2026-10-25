@@ -356,7 +356,8 @@ async function handleOne(admin: Admin, token: string, ev: LineEvent): Promise<vo
   const msgId = str(ev.message?.id);
   const groupId = str(ev.source?.groupId);
   // ไลน์ส่งซ้ำ (redelivery) — รูปนี้บันทึกไปแล้ว ไม่ทำซ้ำ
-  const { data: seen } = await admin.from(CAPTURE_TABLE).select("id").contains("line_message_ids", [msgId]).limit(1);
+  // jsonb ต้องส่งเป็น JSON (`cs.["…"]`) — .contains() กับ array จะส่งรูปแบบ array ของ Postgres ที่ jsonb อ่านไม่ได้
+  const { data: seen } = await admin.from(CAPTURE_TABLE).select("id").filter("line_message_ids", "cs", JSON.stringify([msgId])).limit(1);
   if ((seen ?? []).length > 0) return;
 
   const img = await fetchLineImage(token, msgId);
@@ -396,7 +397,7 @@ async function handleOne(admin: Admin, token: string, ev: LineEvent): Promise<vo
  * รวมรูปชุดเดียวกันเป็นใบเดียว — คืน id ใบหลักให้ "ตัวที่รวมได้" เท่านั้น (อีกตัวที่มาพร้อมกันได้ null)
  * force = รวมเท่าที่มี แม้ยังไม่ครบ (ใช้กับชุดที่รอนานเกิน)
  */
-async function mergeImageSet(admin: Admin, setId: string, total: number, force = false): Promise<string | null> {
+export async function mergeImageSet(admin: Admin, setId: string, total: number, force = false): Promise<string | null> {
   const { data } = await admin.from(CAPTURE_TABLE)
     .select("id, status, image_set_index, image_keys, line_message_ids").eq("image_set_id", setId);
   const rows = ((data ?? []) as Rec[]).filter((r) => r.status === "collecting");
@@ -472,10 +473,13 @@ const PLATFORM_SELLER: Partial<Record<CapturePlatform, RegExp>> = {
 export async function loadPoLines(admin: Admin, poIds: string[]): Promise<Map<string, PoLineLite[]>> {
   const out = new Map<string, PoLineLite[]>();
   if (poIds.length === 0) return out;
-  const { data } = await admin.from("purchase_order_lines_v2")
+  // แบ่งทีละ 100 ใบ — กัน URL ยาวเกิน และกันเพดาน 1,000 แถวต่อคำขอของ PostgREST ตัดบรรทัดทิ้งเงียบ ๆ
+  const chunks: string[][] = [];
+  for (let i = 0; i < poIds.length; i += 100) chunks.push(poIds.slice(i, i + 100));
+  const results = await Promise.all(chunks.map((ids) => admin.from("purchase_order_lines_v2")
     .select("id, po_id, item_name, qty, price_est, item_sku_id, qty_received, is_active, sort_order")
-    .in("po_id", poIds).order("sort_order", { ascending: true });
-  for (const l of (data ?? []) as Rec[]) {
+    .in("po_id", ids).order("sort_order", { ascending: true }).limit(5000)));
+  for (const l of results.flatMap((r) => (r.data ?? []) as Rec[])) {
     if (l.is_active === false) continue;
     const arr = out.get(String(l.po_id)) ?? [];
     arr.push({
