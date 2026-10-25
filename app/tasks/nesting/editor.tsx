@@ -15,7 +15,7 @@ import { useAuth } from "@/components/auth";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { AssetPicker } from "@/components/asset-picker";
 import { SaveBar } from "@/components/save-bar";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
@@ -33,6 +33,7 @@ import { SettingsPanel, sheetFromPrintType } from "./settings-panel";
 import { SheetView, rotated90, type HelperPart, type Placed } from "./sheet-view";
 import { PublishModal } from "./publish-modal";
 import { SplitModal } from "./split-modal";
+import { JobSummary } from "./job-summary";
 
 // การ์ดในคลังไฟล์ (ของกลาง) — โหลดเมื่อกดดูเท่านั้น (คลังไฟล์ตัวใหญ่ ไม่ให้หน้าจัดเรียงช้า)
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
@@ -115,6 +116,7 @@ export function NestingEditor({ id }: { id: string }) {
   const [pub, setPub] = useState<Pub>({ asset_id: null, drive_folder_url: null, published_at: null });   // ส่งเข้าคลังแล้ว (ไม่นับเป็นการแก้งาน)
   const [publishOpen, setPublishOpen] = useState(false);
   const [cardOpen, setCardOpen] = useState(false);
+  const [itemsBig, setItemsBig] = useState(false);   // หน้าต่างใหญ่จัดการลาย (ตารางแถวละลาย)
   const nameRef = useRef<HTMLInputElement>(null);
 
   const draft = useMemo(() => makeDraft(name, status, printTypeId, settings, items, result), [name, status, printTypeId, settings, items, result]);
@@ -650,9 +652,11 @@ export function NestingEditor({ id }: { id: string }) {
               onPrintType={(pt) => { setPrintTypeId(pt?.id ?? null); if (pt) patchSettings(sheetFromPrintType(pt)); }} />
           </section>
           <section className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="mb-3 text-sm font-semibold text-slate-800">
-              {t("ลายที่จะจัด", "Artwork to nest")} <span className="font-normal text-slate-400">
-                · {t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}{settings.fill ? t(" + เติม", " + fill") : ""}</span>
+            <h3 className="mb-3 flex items-start gap-2 text-sm font-semibold text-slate-800">
+              <span className="flex-1">{t("ลายที่จะจัด", "Artwork to nest")} <span className="font-normal text-slate-400">
+                · {t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}{settings.fill ? t(" + เติม", " + fill") : ""}</span></span>
+              <button type="button" onClick={() => setItemsBig(true)} title={t("เปิดหน้าต่างใหญ่ จัดการลายเป็นตาราง (ค้นหา · ลากสลับลำดับ)", "Open a large window to manage artwork as a table (search · drag to reorder)")}
+                className="shrink-0 rounded border border-slate-300 px-2 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50">⤢ {t("ขยาย", "Expand")}</button>
             </h3>
             <ItemsPanel items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
               busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
@@ -700,6 +704,11 @@ export function NestingEditor({ id }: { id: string }) {
               </div>
             ))}
           </div>
+
+          {summary && !stale && !run?.running && sheets && parts.length > 0 && (
+            <JobSummary parts={parts} titles={(run?.keys ?? []).map((k) => items.find((x) => x.key === k)?.title ?? "")}
+              perPart={summary.per_part ?? []} sheets={sheets} unit={u} />
+          )}
 
           {run?.running && (
             <div className="flex items-center gap-3 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm text-violet-800">
@@ -800,6 +809,14 @@ export function NestingEditor({ id }: { id: string }) {
             ? t("มีชิ้นที่ชิดเกินระยะหรือเลยขอบแผ่น — งานจริงอาจชนกันหรือพิมพ์ตกขอบ", "Some pieces are too close or over the sheet edge — the print may overlap or run off the edge") : null} />
       )}
       {cardOpen && pub.asset_id && <AssetDetailPopup assetId={pub.asset_id} onClose={() => setCardOpen(false)} />}
+      <ERPModal open={itemsBig} onClose={() => setItemsBig(false)} size="xl" defaultExpanded
+        title={`⤢ ${t("จัดการลายที่จะจัด", "Manage artwork to nest")} · ${t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}`}
+        description={t("แก้ได้ทุกช่องเหมือนการ์ด · ลาก ⠿ เพื่อสลับลำดับ · ลากไฟล์ PNG มาวางที่แถวเพื่อใส่ไฟล์", "Edit everything as on the cards · drag ⠿ to reorder · drop a PNG on a row to attach it")}
+        footer={<div className="flex justify-end"><button type="button" onClick={() => setItemsBig(false)} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700">{t("เสร็จ", "Done")}</button></div>}>
+        <ItemsPanel variant="table" items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
+          busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
+          canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack} />
+      </ERPModal>
       {splitItem && splitInfo && (
         <SplitModal open onClose={() => setSplitKey(null)} item={splitItem} info={splitInfo} scale={scaleOf(splitItem, splitInfo)}
           initial={splitInitial} saved={!!savedSplit} canRemember={!!splitItem.asset_id && canRun} unit={settings.unit}
