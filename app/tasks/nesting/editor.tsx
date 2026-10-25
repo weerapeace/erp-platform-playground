@@ -490,7 +490,17 @@ export function NestingEditor({ id }: { id: string }) {
     return () => document.removeEventListener("keydown", onKey);
   });
 
-  const [confirm, setConfirm] = useState<null | { kind: "reset" } | { kind: "export"; what: "pdf" | "eps" | "report" | "folder" }>(null);
+  const [confirm, setConfirm] = useState<null | { kind: "reset" } | { kind: "nest" } | { kind: "export"; what: "pdf" | "eps" | "report" | "folder" }>(null);
+
+  /** สรุปก่อนยืนยันจัดเรียง (กดจากหน้าต่างจัดการรูป) */
+  const nestConfirmText = () => {
+    const pcs = items.reduce((a, i) => a + i.qty, 0);
+    const sheet = settings.sheet_height_mm == null
+      ? t(`แผ่นม้วนกว้าง ${fmtLen(settings.sheet_width_mm, settings.unit, lang)}`, `roll ${fmtLen(settings.sheet_width_mm, settings.unit, lang)} wide`)
+      : t(`แผ่น ${fmtLen(settings.sheet_width_mm, settings.unit, lang)} × ${fmtLen(settings.sheet_height_mm, settings.unit, lang)}`, `sheet ${fmtLen(settings.sheet_width_mm, settings.unit, lang)} × ${fmtLen(settings.sheet_height_mm, settings.unit, lang)}`);
+    const what = t(`${items.length} รูป · ${pcs} ชิ้น${settings.fill ? " + เติมที่ว่าง" : ""} · ${sheet}`, `${items.length} images · ${pcs} pcs${settings.fill ? " + fill gaps" : ""} · ${sheet}`);
+    return run ? `${what} — ${t("ผลจัดเรียงเดิมบนจอ (รวมที่ลากแก้เอง) จะถูกแทนที่", "the current result on screen (including pieces you moved) will be replaced")}` : what;
+  };
 
   const doExport = async (what: "pdf" | "eps" | "report" | "folder") => {
     const r = runRef.current;
@@ -826,7 +836,7 @@ export function NestingEditor({ id }: { id: string }) {
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setItemsBig(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">{t("เสร็จ", "Done")}</button>
             {canRun && (   // ปิดหน้าต่างแล้วจัดเรียงเลย (ผลขึ้นในหน้าหลัก)
-              <button type="button" onClick={() => { setItemsBig(false); void startNest(); }} disabled={!!run?.running || !!busy}
+              <button type="button" onClick={() => setConfirm({ kind: "nest" })} disabled={!!run?.running || !!busy}
                 className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
                 {run?.running ? t("กำลังจัดเรียง…", "Nesting…") : run ? t("จัดเรียงใหม่", "Nest again") : t("จัดเรียง", "Nest")}
               </button>
@@ -850,11 +860,14 @@ export function NestingEditor({ id }: { id: string }) {
         open={!!confirm}
         onClose={() => setConfirm(null)}
         variant={confirm?.kind === "reset" ? "danger" : "default"}
-        title={confirm?.kind === "reset" ? t("คืนค่าที่ระบบจัด", "Reset to computed layout") : t("มีชิ้นที่ชิดเกินหรือเลยขอบ", "Some pieces are too close or over the edge")}
+        title={confirm?.kind === "reset" ? t("คืนค่าที่ระบบจัด", "Reset to computed layout")
+          : confirm?.kind === "nest" ? (run ? t("จัดเรียงใหม่เลยไหม?", "Nest again now?") : t("เริ่มจัดเรียงเลยไหม?", "Start nesting now?"))
+          : t("มีชิ้นที่ชิดเกินหรือเลยขอบ", "Some pieces are too close or over the edge")}
         message={confirm?.kind === "reset"
           ? t("ตำแหน่งที่ลากแก้เองทั้งหมดจะถูกยกเลิก กลับไปใช้ผลที่ระบบจัดให้", "Every piece you moved by hand goes back to the computed layout")
+          : confirm?.kind === "nest" ? nestConfirmText()
           : t("ถ้าส่งออกตอนนี้ งานจริงอาจชนกันหรือพิมพ์ตกขอบ ต้องการส่งออกต่อหรือไม่?", "If you export now, pieces may overlap or print off the edge. Export anyway?")}
-        confirmText={confirm?.kind === "reset" ? t("คืนค่า", "Reset") : t("ส่งออกต่อ", "Export anyway")}
+        confirmText={confirm?.kind === "reset" ? t("คืนค่า", "Reset") : confirm?.kind === "nest" ? (run ? t("จัดเรียงใหม่", "Nest again") : t("จัดเรียง", "Nest")) : t("ส่งออกต่อ", "Export anyway")}
         cancelText={t("ยกเลิก", "Cancel")}
         onConfirm={() => {
           const c = confirm;
@@ -862,6 +875,9 @@ export function NestingEditor({ id }: { id: string }) {
           if (c?.kind === "reset") {
             setRun((prev) => prev?.base ? { ...prev, edit: structuredClone(prev.base), check: null } : prev);
             requestCheck(0);
+          } else if (c?.kind === "nest") {   // จากหน้าต่างจัดการรูป: ปิดหน้าต่างแล้วจัดเรียง (ผลขึ้นหน้าหลัก)
+            setItemsBig(false);
+            void startNest();
           } else if (c?.kind === "export") void doExport(c.what);
         }}
       />
