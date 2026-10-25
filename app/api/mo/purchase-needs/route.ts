@@ -19,6 +19,8 @@ export type PurchaseNeedMo = {
   mo_no: string; mo_id: string; product_label: string; product_image: string | null; due_date: string | null;
   needed: number; summary_id: string | null; on_hand: number; is_ready: boolean; qty_per: number; mo_qty: number;
   requested: number;   // ขอซื้อไปแล้วบางส่วน (needed = ส่วนที่ยังเหลือ)
+  brand: string | null;         // แบรนด์ของสินค้าที่ผลิต (ผ่าน Parent SKU) — หน้าขอซื้อใช้จัดกลุ่ม
+  parent_code: string | null;   // รหัสรุ่น (Parent SKU) — จัดกลุ่ม "รุ่น" + ซื้อรวมทั้งรุ่น
 };
 // ใบที่ขอซื้อครบแล้ว ไม่ต้องขอซ้ำ (มีเฉพาะโหมด ?code=)
 export type PurchaseNeedCoveredMo = { mo_no: string; product_label: string; requested: number };
@@ -69,19 +71,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (s.component_sku) imgCodes.add(String(s.component_sku));
   }
   const imgMap = new Map<string, string>();
+  const famMap = new Map<string, { brand: string | null; parent_code: string | null }>();   // SKU → แบรนด์/รุ่น (ดึงพร้อมรูปในคำขอเดียว)
   if (imgCodes.size) {
     // แบ่งเป็นชุดละ 300 (กันทั้ง URL ยาวเกิน และผลลัพธ์โดนตัดที่ 1,000 แถวเมื่อ SKU เยอะ)
     const codeList = [...imgCodes];
     const chunks: string[][] = [];
     for (let i = 0; i < codeList.length; i += 300) chunks.push(codeList.slice(i, i + 300));
     const results = await Promise.all(chunks.map((c) =>
-      admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", c).eq("is_active", true)));
+      admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( code, cover_image_r2_key, brands ( name ) )").in("code", c).eq("is_active", true)));
     for (const { data: skus } of results) {
       for (const sk of (skus ?? []) as Record<string, unknown>[]) {
         const parRel = sk.parent_skus_v2;
-        const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;
+        const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { code?: string | null; cover_image_r2_key?: string | null; brands?: unknown } | null;
         const key = (sk.cover_image_r2_key as string | null) || par?.cover_image_r2_key || "";
         if (key) imgMap.set(String(sk.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
+        const br = (Array.isArray(par?.brands) ? par?.brands[0] : par?.brands) as { name?: string | null } | null | undefined;
+        famMap.set(String(sk.code), { brand: br?.name ?? null, parent_code: par?.code ?? null });
       }
     }
   }
@@ -133,6 +138,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       due_date: (mo.due_date as string) ?? null, needed: remaining,
       summary_id: s.id ? String(s.id) : null, on_hand: onHand, is_ready: !!s.is_ready, qty_per: qtyPer, mo_qty: moQty,
       requested: r4(got),
+      brand: famMap.get(String(mo.product_sku ?? ""))?.brand ?? null,
+      parent_code: famMap.get(String(mo.product_sku ?? ""))?.parent_code ?? null,
     });
   }
 
