@@ -1428,6 +1428,8 @@ function WorkBoardPageInner() {
           {canEdit && <button onClick={() => setMoCreateOpen(true)} title="เปิดใบสั่งผลิตใหม่ (สร้างเสร็จการ์ดจะโผล่ในช่องรอจ่ายทันที)"
             className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">＋ สร้างใบสั่งผลิต</button>}
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
+          {/* ปิดงาน/ยกเลิก/ตั้งวันกำหนด ทีละหลายใบ — หน้าแยก (ตารางกลาง + แถบล่าง) */}
+          <a href="/master/mo-backlog" title="ปิดงาน · ยกเลิก · ตั้งวันกำหนด ใบสั่งผลิตที่ค้างอยู่ ทีละหลายใบ" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🧹 จัดการใบค้าง</a>
           <div className="relative">
             <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์รายงาน ▾</button>
             {printOpen && (() => {

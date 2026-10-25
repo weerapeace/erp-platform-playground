@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
+import { BulkActionBar } from "@/components/bulk-action-bar";
 import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR, invalidateSWR } from "@/lib/swr-lite";
@@ -238,6 +239,8 @@ export type BulkAction<T> = {
   label: string;
   onClick: (rows: T[]) => void;
   variant?: "default" | "danger";
+  /** true = กดแล้วไม่ล้างที่ติ๊กไว้ (เช่น เปิดป๊อปยืนยันก่อน — กดยกเลิกแล้วยังเลือกไว้เหมือนเดิม) */
+  keepSelection?: boolean;
 };
 
 /** field ที่แก้แบบ bulk ได้ (ตาม CLAUDE.md §18 — เฉพาะ field ที่อนุญาต) */
@@ -292,6 +295,15 @@ export interface DataTableProps<T extends Record<string, unknown>> {
   views?: DataTableView[];
   rowActions?: RowAction<T>[];
   bulkActions?: BulkAction<T>[];
+  /**
+   * ตำแหน่งแถบคำสั่งหลายรายการ — "top" (ค่าเดิม: แถบฟ้าเหนือตาราง) · "bottom" = ของกลาง BulkActionBar ลอยติดขอบล่างจอ
+   * (bottom มีลิงก์ "เลือกทั้งหมด N ที่ตรงตัวกรอง" ในโหมดข้อมูลฝั่งหน้าจอด้วย)
+   */
+  bulkBarPosition?: "top" | "bottom";
+  /** หน่วยนับบนแถบล่าง เช่น "ใบ" (ค่าเริ่ม "รายการ") */
+  bulkUnit?: string;
+  /** เปลี่ยนค่า = ล้างแถวที่ติ๊กไว้ (เช่น หลังทำคำสั่งหลายรายการสำเร็จแล้ว) */
+  selectionResetKey?: number;
   /** แสดง checkbox เลือกแถวเสมอ (แม้ไม่มี bulk action) — ใช้เลือกเพื่อ export ในหน้าอ่านอย่างเดียว */
   selectable?: boolean;
   pageSize?: number;
@@ -473,6 +485,9 @@ export function DataTable<T extends Record<string, unknown>>({
   views = [],
   rowActions = [],
   bulkActions = [],
+  bulkBarPosition = "top",
+  bulkUnit,
+  selectionResetKey = 0,
   selectable = false,
   pageSize: initialPageSize = 10,
   onRetry,
@@ -691,6 +706,8 @@ export function DataTable<T extends Record<string, unknown>>({
   const [columnFilters,    setColumnFilters]    = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection,     setRowSelection]     = useState<RowSelectionState>({});
+  // หน้าที่เรียกสั่งล้างที่ติ๊กไว้ (เช่น หลังคำสั่งหลายรายการสำเร็จ — แถวเดิมอาจหายจากรายการไปแล้ว)
+  useEffect(() => { if (selectionResetKey) setRowSelection({}); }, [selectionResetKey]);
   const [columnSizing,     setColumnSizing]     = useState<ColumnSizingState>({});  // resize
   const [columnOrder,      setColumnOrder]       = useState<ColumnOrderState>([]);   // reorder
   const [columnPinning,    setColumnPinning]     = useState<ColumnPinningState>({ left: [], right: [] });
@@ -1896,8 +1913,8 @@ export function DataTable<T extends Record<string, unknown>>({
         </div>
       )}
 
-      {/* Bulk Action Bar */}
-      {selectedCount > 0 && (
+      {/* Bulk Action Bar (แถบบน — ค่าเดิม · bulkBarPosition="bottom" ใช้ BulkActionBar ท้ายตารางแทน) */}
+      {selectedCount > 0 && bulkBarPosition !== "bottom" && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border-b border-blue-200">
           <span className="text-sm font-medium text-blue-700">เลือกแล้ว {selectedCount} รายการ</span>
           <div className="flex items-center gap-2">
@@ -1914,7 +1931,7 @@ export function DataTable<T extends Record<string, unknown>>({
               </button>
             )}
             {bulkActions.map((action, i) => (
-              <button key={i} onClick={() => { action.onClick(selectedRows); setRowSelection({}); }}
+              <button key={i} onClick={() => { action.onClick(selectedRows); if (!action.keepSelection) setRowSelection({}); }}
                 className={`h-7 px-3 text-xs font-medium rounded-md border transition-colors ${
                   action.variant === "danger"
                     ? "bg-white border-red-200 text-red-600 hover:bg-red-50"
@@ -2328,6 +2345,28 @@ export function DataTable<T extends Record<string, unknown>>({
           </div>
         </>,
         document.body
+      )}
+
+      {/* Bulk Action Bar แบบลอยขอบล่างจอ (ของกลาง BulkActionBar) — เปิดด้วย bulkBarPosition="bottom" */}
+      {bulkBarPosition === "bottom" && (
+        <BulkActionBar count={selectedCount} unit={bulkUnit} onClear={() => setRowSelection({})}
+          extra={!isServer && selectedCount < filteredData.length ? (
+            <button type="button" className="underline hover:text-white"
+              onClick={() => setRowSelection(Object.fromEntries(table.getFilteredRowModel().rows.map((r) => [r.id, true])))}>
+              เลือกทั้งหมด {filteredData.length.toLocaleString("th-TH")} {bulkUnit ?? "รายการ"}ที่ตรงตัวกรอง
+            </button>
+          ) : undefined}>
+          {bulkEditFields.length > 0 && onBulkEdit && (
+            <button type="button" onClick={() => setBulkEditOpen(true)}
+              className="h-8 px-3 text-sm font-medium rounded-lg bg-white/10 text-white hover:bg-white/20">✏️ แก้รายการที่เลือก</button>
+          )}
+          {bulkActions.map((action, i) => (
+            <button key={i} type="button" onClick={() => { action.onClick(selectedRows); if (!action.keepSelection) setRowSelection({}); }}
+              className={`h-8 px-3 text-sm font-medium rounded-lg text-white ${action.variant === "danger" ? "bg-rose-600 hover:bg-rose-500" : "bg-white/10 hover:bg-white/20"}`}>
+              {action.label}
+            </button>
+          ))}
+        </BulkActionBar>
       )}
 
       {/* Bulk Edit Modal */}
