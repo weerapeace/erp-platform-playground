@@ -55,6 +55,8 @@ export type MiniTableProps<T> = {
    *  เช่นบอร์ดจ่ายงาน: พิมพ์ครั้งเดียว กรองทั้งตาราง "รอจ่าย" และ "จ่ายแล้ว" */
   searchValue?: string;
   onSearchChange?: (v: string) => void;
+  /** ซ่อนช่องค้นหาของตาราง (ยังกรองตาม searchValue อยู่) — ใช้เมื่อหน้ามีช่องค้นหาร่วมอันเดียวอยู่ด้านบนแล้ว */
+  hideSearch?: boolean;
 
   // จัดกลุ่ม — ใส่ฟังก์ชันคืนชื่อกลุ่ม จึงจะมีปุ่มจัดกลุ่ม
   groupBy?: (row: T) => string;
@@ -110,7 +112,7 @@ type Dir = "asc" | "desc";
 
 export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
-    rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange,
+    rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange, hideSearch,
     groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra,
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded,
     title, actions, countUnit: countUnitProp,
@@ -305,9 +307,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         </div>
       )}
 
-      {(searchText || sortable.length > 0 || groupBy) && total > 0 && (
+      {((searchText && !hideSearch) || sortable.length > 0 || groupBy) && total > 0 && (
         <div className="flex items-center gap-2 mb-2 flex-wrap">
-          {searchText && (
+          {searchText && !hideSearch && (
             <div className="relative">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={searchPlaceholder}
