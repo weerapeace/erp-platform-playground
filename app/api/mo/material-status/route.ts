@@ -4,7 +4,9 @@
  *   ยอดต้องซื้อ = สูตรเดียวกับ /api/mo/purchase-needs (qty_per × จำนวนสั่ง − มีอยู่ หรือค่า override − ขอซื้อแล้ว)
  *   ขอซื้อแล้ว = ใบขอซื้อที่ผูกใบงานนี้ (m2m source_mo_nos) จับรหัสด้วย lib/pr-line-code
  *   สั่งแล้ว   = ใบขอซื้อที่ออก PO แล้ว — PO ร่างนับว่าสั่งแล้ว (เจ้าของตัดสิน 2026-10-25)
- *   รับแล้ว    = บรรทัด PO ที่ผูกใบขอซื้อนั้น รับครบ
+ *   รับแล้ว    = บรรทัด PO ที่ผูกใบขอซื้อนั้นจบหมด (รับครบ/ปิดยอด) และได้ของพอ
+ *   ปิดยอดแต่ของขาด → ส่วนที่ขาดกลับไป "ต้องซื้อ" (นับเท่าที่รับจริง)
+ *   links[] มี po_id/po_line_id/สถานะรับ → การ์ดกดดู PO + รับของได้ (ReceiveLineModal)
  * ของกลาง: guardApi(products.view) + supabaseAdmin + prLineCodeResolver
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -19,7 +21,11 @@ export const revalidate = 0;
 export type MatStatus = "buy" | "requested" | "ordered" | "received" | "have" | "ready" | "skip";
 export type MatPurchaseLink = {
   pr_no: string | null; pr_status: string; qty: number;
-  po_no: string | null; po_status: string | null; expected_date: string | null; qty_received: number;
+  po_id: string | null; po_no: string | null; po_status: string | null; expected_date: string | null; seller_name: string | null;
+  /** บรรทัด PO ที่ออกจากใบขอซื้อนี้ (ไว้เปิดป๊อปรับของ) — null = ยังไม่ออก PO */
+  po_line_id: string | null; line_qty: number; qty_received: number; qty_defective: number; line_status: string | null;
+  /** บรรทัดจบแล้ว (รับครบ / ปิดยอด / ยกเลิก) — ไม่รอของเพิ่ม */
+  line_closed: boolean;
 };
 export type MoMaterialStatus = {
   summary_id: string; code: string | null; name: string | null; image: string | null; type: string | null; uom: string | null;
@@ -31,6 +37,7 @@ export type MoMaterialStatusResult = { mo_no: string; mo_qty: number; items: MoM
 
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const EPS = 0.0001;
+const LINE_CLOSED = ["received", "short_closed", "closed_short", "cancelled"];   // ชุดเดียวกับ /api/purchasing/cancel-line
 type Row = Record<string, unknown>;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -59,21 +66,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const poIds = [...new Set(prRows.map((p) => p.po_id).filter(Boolean).map(String))];
   const prIds = prRows.map((p) => String(p.id));
   const [{ data: pos }, { data: poLines }, prCode] = await Promise.all([
-    poIds.length ? admin.from("purchase_orders_v2").select("id, po_no, status, expected_date").in("id", poIds) : Promise.resolve({ data: [] as Row[] }),
-    prIds.length ? admin.from("purchase_order_lines_v2").select("pr_id, qty_received").in("pr_id", prIds).eq("is_active", true) : Promise.resolve({ data: [] as Row[] }),
+    poIds.length ? admin.from("purchase_orders_v2").select("id, po_no, status, expected_date, seller_name").in("id", poIds) : Promise.resolve({ data: [] as Row[] }),
+    prIds.length ? admin.from("purchase_order_lines_v2").select("id, pr_id, qty, qty_received, qty_defective, line_status").in("pr_id", prIds).eq("is_active", true) : Promise.resolve({ data: [] as Row[] }),
     prLineCodeResolver(admin, prRows),
   ]);
   const poById = new Map(((pos ?? []) as Row[]).map((p) => [String(p.id), p]));
-  const recvByPr = new Map<string, number>();
-  for (const l of (poLines ?? []) as Row[]) recvByPr.set(String(l.pr_id), (recvByPr.get(String(l.pr_id)) ?? 0) + (Number(l.qty_received) || 0));
+  const lineByPr = new Map<string, Row>();
+  for (const l of (poLines ?? []) as Row[]) if (!lineByPr.has(String(l.pr_id))) lineByPr.set(String(l.pr_id), l);
   const linksByCode = new Map<string, MatPurchaseLink[]>();
   for (const p of prRows) {
     const code = prCode(p); if (!code) continue;
     const po = p.po_id ? poById.get(String(p.po_id)) : undefined;
+    const ln = lineByPr.get(String(p.id));
+    const lineStatus = ln ? String(ln.line_status ?? "") : null;
+    const lineQty = Number(ln?.qty) || 0;
+    const rec = r4(Number(ln?.qty_received) || 0);
     const link: MatPurchaseLink = {
       pr_no: (p.pr_no as string) ?? null, pr_status: String(p.status ?? ""), qty: Number(p.qty) || 0,
-      po_no: (po?.po_no as string) ?? null, po_status: (po?.status as string) ?? null, expected_date: (po?.expected_date as string) ?? null,
-      qty_received: r4(recvByPr.get(String(p.id)) ?? 0),
+      po_id: p.po_id ? String(p.po_id) : null, po_no: (po?.po_no as string) ?? null, po_status: (po?.status as string) ?? null,
+      expected_date: (po?.expected_date as string) ?? null, seller_name: (po?.seller_name as string) ?? null,
+      po_line_id: ln ? String(ln.id) : null, line_qty: lineQty, qty_received: rec, qty_defective: r4(Number(ln?.qty_defective) || 0),
+      line_status: lineStatus, line_closed: !!ln && (LINE_CLOSED.includes(lineStatus ?? "") || (lineQty > 0 && rec >= lineQty - EPS)),
     };
     linksByCode.set(code, [...(linksByCode.get(code) ?? []), link]);
   }
@@ -100,7 +113,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const stored = s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null;
     const want = stored != null && Math.round(stored * 10000) !== Math.round(base * 10000) ? stored : base;   // override ถ้ามี (เหมือน purchase-needs)
     const links = code ? linksByCode.get(code) ?? [] : [];
-    const requested = r4(links.reduce((n, l) => n + l.qty, 0));
+    // ยอดที่ "ขอ/สั่ง/ได้แล้ว" ต่อใบขอซื้อ: บรรทัด PO จบแล้ว (ปิดยอด/ยกเลิก) = นับเท่าที่รับจริง ส่วนที่ขาดถือว่าไม่มาแล้ว → กลับไป "ต้องซื้อ"
+    //   ยังค้างรับ = จำนวนในบรรทัด PO (แก้ได้ที่หน้ารับของ) · ยังไม่ออก PO = จำนวนในใบขอซื้อ
+    const effQty = (l: MatPurchaseLink) => (l.po_line_id ? (l.line_closed ? l.qty_received : Math.max(l.line_qty, l.qty_received)) : l.qty);
+    const requested = r4(links.reduce((n, l) => n + effQty(l), 0));
     const received = r4(links.reduce((n, l) => n + l.qty_received, 0));
     const remaining = Math.max(0, r4(want - requested));
     const isReady = !!s.is_ready;
@@ -108,7 +124,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       isReady ? "ready"                                                     // เตรียมแล้ว = ของอยู่หน้างาน ไม่ต้องซื้อ
       : remaining > EPS ? "buy"
       : links.length === 0 ? (required > 0 && onHand >= required - EPS ? "have" : "skip")
-      : requested > 0 && received >= requested - EPS ? "received"
+      : links.every((l) => l.line_closed) ? "received"                     // ทุกบรรทัด PO จบแล้ว + ได้ของพอ
       : links.some((l) => l.po_no || l.pr_status === "rfq_created") ? "ordered"
       : "requested";
     return {

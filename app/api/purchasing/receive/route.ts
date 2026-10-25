@@ -7,6 +7,7 @@
  *   lines: [{ po_line_id, qty_received, qty_defective?, case_type }]
  * }
  * case_type: full | partial_close | partial_wait | full_defective
+ * ต้องส่ง receipt_doc_r2_key + bill_doc_r2_key เสมอ ยกเว้น source: "scan" (หน้าสแกน QR)
  *
  * ผล:
  *  - สร้างเอกสาร GR (หัว + รายการ) เก็บประวัติการรับครั้งนี้
@@ -40,8 +41,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { po_id?: string; warehouse_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown; receipt_doc_r2_key?: string; bill_doc_r2_key?: string };
+  let body: { po_id?: string; warehouse_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown; receipt_doc_r2_key?: string; bill_doc_r2_key?: string; source?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  // กติกากลาง: ต้องแนบ ใบรับของ + บิล ทุกครั้ง (หน้ารับของ / การ์ดแท็บใบสั่งผลิต / ช่องทางใหม่ในอนาคต)
+  // ยกเว้นหน้าสแกน QR (source=scan) — เจ้าของตัดสิน 2026-10-25 ให้รับหน้างานได้โดยไม่ต้องแนบ
+  if (body.source !== "scan" && (!body.receipt_doc_r2_key || !body.bill_doc_r2_key)) {
+    return NextResponse.json({ error: "ต้องแนบ ใบรับของ + บิล ให้ครบก่อนบันทึก" }, { status: 400 });
+  }
 
   const poId = body.po_id;
   const inLines = Array.isArray(body.lines) ? (body.lines as InLine[]) : [];

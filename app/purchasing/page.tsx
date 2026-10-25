@@ -27,7 +27,9 @@ import { TagGroupFilter } from "@/components/tag-filter";
 import { DupOrderBadge, DupOrderList, type OpenOrder } from "./dup-order";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
 import { MoShortageList, useMoShortage, shortMos, ceil2, type MoPick } from "@/components/mo-shortage-picker";
-import type { MoMaterialStatus, MoMaterialStatusResult, MatStatus } from "@/app/api/mo/material-status/route";
+import type { MoMaterialStatus, MoMaterialStatusResult, MatStatus, MatPurchaseLink } from "@/app/api/mo/material-status/route";
+import { PoDetailModal } from "@/components/po-detail-modal";
+import { ReceiveLineModal, type ReceiveLine } from "@/components/receive-line-modal";
 import type { MoListItem } from "@/app/api/mo/route";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
@@ -153,6 +155,8 @@ export default function PurchasingShopPage() {
   const [haveBusy, setHaveBusy] = useState<string | null>(null);   // summary_id ที่กำลังบันทึก "มีของแล้ว"
   const haveUndo = useRef(new Map<string, { on_hand: number; stored: number | null }>());   // ค่าเดิมก่อนกด (ไว้ยกเลิก)
   const canEditMat = usePermission("products.edit");
+  const [poView, setPoView] = useState<string | null>(null);              // po_id ที่เปิดดูใบสั่งซื้อ (จากการ์ดวัตถุดิบ)
+  const [recvLine, setRecvLine] = useState<ReceiveLine | null>(null);     // บรรทัด PO ที่กำลังรับของ
 
   // cart + save
   const [cart, setCart] = useState<Line[]>([]);
@@ -984,7 +988,13 @@ export default function PurchasingShopPage() {
                         {list.map(it => (
                           <MoBomCard key={it.summary_id} it={it} inCart={inCartQty(it.code)} canEdit={canEditMat} busy={haveBusy === it.summary_id}
                             onAdd={() => setMoMatQty({ code: it.code, name: it.name, image: it.image, type: it.type, uom: it.uom, needed: it.remaining })}
-                            onHave={(v) => void setHave(it, v)} />
+                            onHave={(v) => void setHave(it, v)}
+                            onOpenPo={(poId) => setPoView(poId)}
+                            onReceive={(l) => l.po_id && l.po_line_id && setRecvLine({
+                              po_id: l.po_id, po_no: l.po_no ?? "", po_line_id: l.po_line_id, seller_name: l.seller_name,
+                              name: it.code ? `[${it.code}] ${it.name ?? ""}`.trim() : (it.name ?? "วัตถุดิบ"), code: it.code, uom: it.uom ?? "",
+                              qty: l.line_qty, qty_received: l.qty_received, qty_defective: l.qty_defective,
+                            })} />
                         ))}
                       </div>
                     </div>
@@ -1309,6 +1319,13 @@ export default function PurchasingShopPage() {
           others={(moNeeds ?? []).find(r => moMatQty.code && r.component_sku === moMatQty.code) ?? null}
           onClose={() => setMoMatQty(null)} onAdd={(qty, extra) => addMoMaterial(moMatQty, qty, extra)} />
       )}
+      {/* การ์ดวัตถุดิบ → ดูใบสั่งซื้อ (ของกลางเดียวกับหน้ารายการ PO) */}
+      {poView && <PoDetailModal poId={poView} onClose={() => setPoView(null)} onSaved={() => setMoStatusTick(t => t + 1)} />}
+      {/* การ์ดวัตถุดิบ → รับของ (ของกลาง กติกาเดียวกับหน้ารับของ) → รับแล้วรีเฟรชสถานะทั้งใบ */}
+      {recvLine && (
+        <ReceiveLineModal line={recvLine} onClose={() => setRecvLine(null)}
+          onSaved={() => { setRecvLine(null); setMoStatusTick(t => t + 1); void refreshMoNeeds(); }} />
+      )}
 
       {/* Group variation modal — ดึง SKU ของกลุ่มมาเลือก + ค้นหา + จัดการกลุ่ม */}
       {sel && (() => {
@@ -1478,12 +1495,26 @@ function MoMatQtyDialog({ mat, moNo, productLabel, others, onClose, onAdd }: { m
 // การ์ดวัตถุดิบ 1 ตัวใน BOM (แท็บใบสั่งผลิต ระดับ 2) — ป้ายสถานะการซื้อ + ✓ มีของแล้ว / ยกเลิก
 const fmtQty = (n: number) => (Math.round(n * 1000) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const fmtEta = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null);
-function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave }: { it: MoMaterialStatus; inCart: number; canEdit: boolean; busy: boolean; onAdd: () => void; onHave: (have: boolean) => void }) {
+function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, onOpenPo, onReceive }: {
+  it: MoMaterialStatus; inCart: number; canEdit: boolean; busy: boolean; onAdd: () => void; onHave: (have: boolean) => void;
+  /** กดเลข PO → เปิดใบสั่งซื้อ (ของกลาง PoDetailModal) */
+  onOpenPo: (poId: string) => void;
+  /** กด 📥 รับ → ป๊อปรับของ (ของกลาง ReceiveLineModal) */
+  onReceive: (link: MatPurchaseLink) => void;
+}) {
   const isBuy = it.status === "buy";
   const u = it.uom ?? "";
   const prNos = [...new Set(it.links.map((l) => l.pr_no).filter(Boolean))].join(", ");
-  const poNos = [...new Set(it.links.map((l) => l.po_no).filter(Boolean))].join(", ");
+  const poLinks = it.links.filter((l) => l.po_id && l.po_no);
   const eta = fmtEta(it.links.map((l) => l.expected_date).filter(Boolean).sort()[0] ?? null);
+  // สถานะรับของต่อบรรทัด PO: ยังไม่รับ / รับแล้วบางส่วน / รับครบ / ปิดยอด (ขาด)
+  const recvInfo = (l: MatPurchaseLink): [string, string] => {
+    if (!l.po_line_id) return ["text-slate-400", "ยังไม่มีบรรทัดรับ"];
+    const rq = `${fmtQty(l.qty_received)}/${fmtQty(l.line_qty)}`;
+    if (l.line_closed) return l.qty_received >= l.line_qty - 0.0001 ? ["text-emerald-600", `✓ รับครบ ${rq}`] : ["text-orange-600", `ปิดยอด · รับ ${rq}`];
+    if (l.qty_received > 0) return ["text-amber-600", `รับแล้ว ${rq} · ค้าง ${fmtQty(Math.max(0, l.line_qty - l.qty_received))}`];
+    return ["text-slate-500", `ยังไม่รับ ${rq}`];
+  };
   const tag = (cls: string, text: string, sub?: string | null) => (
     <div className="mt-1.5">
       <span className={`inline-block max-w-full truncate text-[11px] font-medium px-1.5 py-0.5 rounded border ${cls}`}>{text}</span>
@@ -1509,8 +1540,30 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave }: { it: MoMateria
           </>
         )}
         {it.status === "requested" && tag("bg-amber-50 text-amber-700 border-amber-200", "🕒 ขอแล้ว · รออนุมัติ", prNos || null)}
-        {it.status === "ordered" && tag("bg-blue-50 text-blue-700 border-blue-200", `📄 สั่งแล้ว${eta ? ` · ถึง ${eta}` : ""}`, poNos || prNos || null)}
-        {it.status === "received" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "📦 รับของแล้ว", poNos || null)}
+        {it.status === "ordered" && tag("bg-blue-50 text-blue-700 border-blue-200", `📄 สั่งแล้ว${eta ? ` · ถึง ${eta}` : ""}`, poLinks.length ? null : prNos || null)}
+        {it.status === "received" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "📦 รับของแล้ว")}
+        {/* ใบสั่งซื้อที่ผูกวัตถุดิบนี้: กดเลข PO ดูใบ · สถานะรับ · 📥 รับของจากตรงนี้ (กติกาเดียวกับหน้ารับของ) */}
+        {poLinks.length > 0 && it.status !== "ready" && it.status !== "have" && (
+          <div className="mt-1.5 space-y-1">
+            {poLinks.map((l) => {
+              const [cls, text] = recvInfo(l);
+              const canRecv = canEdit && !!l.po_line_id && !l.line_closed;
+              return (
+                <div key={l.po_line_id ?? l.pr_no ?? l.po_no} className="flex items-start gap-1.5">
+                  <div className="min-w-0 flex-1">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); onOpenPo(l.po_id as string); }}
+                      className="text-[11px] font-mono text-blue-600 hover:underline truncate max-w-full" title="ดูใบสั่งซื้อ">{l.po_no} ›</button>
+                    <div className={`text-[11px] ${cls}`}>{text}</div>
+                  </div>
+                  {canRecv && (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); onReceive(l); }}
+                      className="shrink-0 h-7 px-2 text-[11px] font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50">📥 รับ</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         {it.status === "have" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ มีของแล้ว")}
         {it.status === "ready" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ เตรียมแล้ว")}
         {it.status === "skip" && tag("bg-slate-50 text-slate-500 border-slate-200", "ไม่ต้องซื้อ")}

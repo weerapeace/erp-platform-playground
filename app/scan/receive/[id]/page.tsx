@@ -73,6 +73,7 @@ export default function ScanReceivePage() {
           po_id: po.id,
           receiver: receiver.trim() || user?.name || null,
           note: "รับของจากการสแกน QR",
+          source: "scan",   // หน้าสแกนรับได้โดยไม่ต้องแนบใบรับ/บิล (API บังคับแนบทุกช่องทางอื่น)
           lines: openLines.map((l) => ({
             po_line_id: l.id,
             qty_received: l.qty - l.received,
