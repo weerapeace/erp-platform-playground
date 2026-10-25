@@ -18,17 +18,21 @@ export function useUserPref<T>(key: string, fallback: T, parse: (raw: unknown) =
   const touched = useRef(false); // ผู้ใช้เปลี่ยนเองแล้ว = ค่าจากเซิร์ฟเวอร์ที่มาทีหลังไม่ทับ
   const parseRef = useRef(parse);
   parseRef.current = parse;
+  const fallbackRef = useRef(fallback);
+  fallbackRef.current = fallback;
 
   useEffect(() => {
     let cancel = false;
     touched.current = false;
+    // เปลี่ยน key ระหว่างใช้งาน (เช่น คอม ↔ iPad) แล้ว key ใหม่ไม่มีค่าในเครื่อง = กลับเป็นค่าตั้งต้น (ไม่ใช่ค้างค่าของ key เดิม)
+    let local: T | null = null;
     try {
       const raw = localStorage.getItem(lsKey);
-      const v = raw == null ? null : parseRef.current(JSON.parse(raw));
-      if (v !== null) setValueState(v);
+      local = raw == null ? null : parseRef.current(JSON.parse(raw));
     } catch {
       /* ignore */
     }
+    setValueState(local !== null ? local : fallbackRef.current);
     apiFetch(`/api/user-prefs?key=${encodeURIComponent(key)}`)
       .then((r) => r.json())
       .then((j) => {

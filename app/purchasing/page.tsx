@@ -1001,8 +1001,9 @@ export default function PurchasingShopPage() {
                   : a.mo_no.localeCompare(b.mo_no));
               const sumProg = (mos: MoEntry[]) => mos.reduce<MoProgress>((s, g) => {
                 const p = progOf(g);
-                return p ? { total: s.total + p.total, buy: s.buy + p.buy, requested: s.requested + p.requested, ordered: s.ordered + p.ordered, done: s.done + p.done, linked: s.linked + p.linked } : s;
-              }, { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0 });
+                return p ? { total: s.total + p.total, buy: s.buy + p.buy, requested: s.requested + p.requested, ordered: s.ordered + p.ordered, done: s.done + p.done, linked: s.linked + p.linked,
+                  eta: p.eta && (!s.eta || p.eta > s.eta) ? p.eta : s.eta, eta_unknown: s.eta_unknown + p.eta_unknown } : s;
+              }, { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0, eta: null, eta_unknown: 0 });
               const chip = (on: boolean) => `h-7 px-2.5 text-xs rounded-full border transition-colors ${on ? "bg-rose-50 border-rose-300 text-rose-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`;
               // จัดกลุ่ม: แบรนด์ / รุ่น (ตัวแม่) — กลุ่มใหญ่ขึ้นก่อน · ในกลุ่มเรียงตามที่เลือก
               const groups: [string, MoEntry[]][] = moGroup === "none" ? [["", list]] : (() => {

@@ -127,7 +127,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const noData = { data: [] as Record<string, unknown>[] };
 
   // ── ยิง query รอบสองพร้อมกัน (เดิมยิงทีละตัว 5-6 รอบ = waterfall) ──
-  const [info, extraMoRes, lrRes, pcsRes, sumsRes, matsRes] = await Promise.all([
+  const [info, extraMoRes, lrRes, pcsRes, sumsRes, matsRes, issRes] = await Promise.all([
     skuInfoMap(admin, allSkus),
     missingMoNos.length ? admin.from("manufacturing_orders").select("id, mo_no").in("mo_no", missingMoNos) : Promise.resolve(noData),
     bomCodes.length ? admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true) : Promise.resolve(noData),
@@ -135,7 +135,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // ⚠️ ต้องไล่ทีละหน้า — วัตถุดิบของใบที่รอจ่ายรวมกันเกิน 1,000 แถว (ดู fetchAllByMo)
     fetchAllByMo(admin, "mo_material_summary", "mo_no, is_ready", pendingMoNos),
     fetchAllByMo(admin, "mo_materials", "mo_no, material_type, cut_block_code, cut_length, pieces, cut_done", pendingMoNos),
+    // ปัญหาที่แจ้งไว้ของใบรอจ่าย (ชุดเดียวกับแท็บ "ปัญหา" ในเช็กลิสต์ = defect_logs.source_job) — นับไปโชว์ในตาราง
+    pendingMoNos.length ? admin.from("defect_logs").select("source_job").in("source_job", pendingMoNos).eq("is_active", true).limit(5000) : Promise.resolve(noData),
   ]);
+  const issueCount = new Map<string, number>();
+  for (const d of (issRes.data ?? []) as Record<string, unknown>[]) issueCount.set(String(d.source_job), (issueCount.get(String(d.source_job)) ?? 0) + 1);
 
   for (const m of (extraMoRes.data ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));
   const centralRateByBom = new Map<string, number>();
@@ -182,6 +186,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       priority: Number(m.priority) || 0, priority_note: (m.priority_note as string) ?? null,
       // ใบที่แบ่งจำนวนตามไซส์ → จำนวนรวมมาจากผลบวกไซส์ แก้จำนวนตรง ๆ ไม่ได้ (ต้องแก้ที่หน้าใบสั่งผลิต)
       has_sizes: Array.isArray(m.size_breakdown) && (m.size_breakdown as unknown[]).length > 0,
+      issue_count: issueCount.get(String(m.mo_no)) ?? 0,   // นับเฉพาะใบรอจ่าย (ใบที่จ่ายครบแล้ว = 0)
       ...inf, labor: laborOfMo(String(m.mo_no)), central_rate: centralRateOf(String(m.mo_no)) };
   });
   const pending = allMos.filter((m) => m.remaining > 0.0001);   // การ์ดโซน "รอจ่าย" = ยังจ่ายไม่ครบ

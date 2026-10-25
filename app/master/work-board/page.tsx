@@ -52,7 +52,7 @@ import { RequestInboxButton } from "@/components/request-inbox";
 import { MoCreateModal } from "@/components/mo-create";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
-import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { MiniTable, ColumnChooser, useColumnPrefs, type MiniColumn } from "@/components/mini-table";
 import { HoverImage } from "@/components/hover-image";
 import { SearchableSelect } from "@/components/searchable-select";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
@@ -81,6 +81,8 @@ type PendingMO = {
   priority?: number; priority_note?: string | null;
   has_sizes?: boolean;   // ใบนี้แบ่งจำนวนตามไซส์ → แก้จำนวนรวมตรง ๆ ไม่ได้
   created_at?: string | null;   // เวลาที่สร้างใบงานในระบบ — โชว์หัวป๊อปเช็กลิสต์
+  brand_oem?: boolean;          // แบรนด์รับจ้างผลิต (OEM)
+  issue_count?: number;         // ปัญหาที่แจ้งไว้ (เฉพาะใบรอจ่าย)
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
@@ -1560,7 +1562,7 @@ function WorkBoardPageInner() {
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders}
-          departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch}
+          departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch} canSeeMoney={isAdmin}
           onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
         <div className="space-y-3">
@@ -3182,6 +3184,11 @@ const stageOf = (m: PendingMO, p: MoProgress | undefined): MoStage => {
   return "ready";
 };
 const stageOrder = (name: string) => Object.values(STAGE_META).find(([label]) => label === name)?.[1] ?? 99;
+/** ราคาขายต่ำกว่านี้ (฿0 / ฿1) = น่าจะยังไม่ได้ตั้งจริง → ขึ้นเตือน + ไม่นับรวมในยอดมูลค่า */
+const PRICE_MIN = 10;
+/** คอลัมน์ที่โชว์ตั้งต้น — จอคอม (ซ่อน 4 ตัวใหม่ไว้ก่อน) / iPad (เท่าที่จำเป็น) · ผู้ใช้เปลี่ยนเองได้ที่ปุ่ม ▥ คอลัมน์ */
+const PEND_HIDDEN_PC = new Set(["eta", "brand", "prio", "issues"]);
+const PEND_SHOWN_IPAD = new Set(["img", "prod", "qty", "buy", "stage", "due", "value"]);
 
 const PrepBar = ({ label, a, b }: { label: string; a: number; b: number }) => {
   const pct = b > 0 ? Math.min(100, Math.round((a / b) * 100)) : 100;
@@ -3226,9 +3233,11 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
   );
 }
 
-function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOpenMO, onOpenWO, onReload }: {
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, onOpenMO, onOpenWO, onReload }: {
   pending: PendingMO[]; workOrders: WorkOrder[];
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
+  /** เห็นราคาขาย/มูลค่า = คนที่ดูแผนผู้บริหารได้ (API ราคาล็อกสิทธิ์ admin.users ที่เซิร์ฟเวอร์อีกชั้น) */
+  canSeeMoney: boolean;
   onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void; onReload?: () => void;
 }) {
   const toast = useToast();
@@ -3314,6 +3323,60 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const imgPref = useViewPref("wb_table_img", ["s", "l"] as const, "s");
   const imgBig = imgPref.view === "l";
   const toggleImg = () => { const v = imgBig ? "s" : "l"; imgPref.setView(v); void imgPref.saveDefault(v); };
+
+  // ── มุมมองอุปกรณ์: 💻 คอม · 📱 iPad แนวนอน (ตารางแถวใหญ่) · 📱 iPad แนวตั้ง (การ์ด) — จำ "ต่อเครื่อง" (คนเดียวใช้คอม+iPad คนละแบบได้)
+  //   iPad แนวนอนกว้างเกิน 1024px ระบบเดาจากความกว้างไม่ได้ → ให้เลือกเอง · อยู่โหมด iPad แล้วหมุนเครื่อง = สลับแนวให้เอง
+  const [dev, setDevState] = useState<"pc" | "ipadL" | "ipadP">("pc");
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("wb_table_device");
+      if (v === "pc" || v === "ipadL" || v === "ipadP") setDevState(v);
+      // ยังไม่เคยเลือก + เครื่องจอสัมผัส (iPad) → เปิดโหมด iPad ตามแนวเครื่องให้ก่อน (ยังไม่จำ จนกว่าจะกดเลือกเอง)
+      else if (window.matchMedia("(pointer: coarse)").matches) setDevState(window.matchMedia("(orientation: portrait)").matches ? "ipadP" : "ipadL");
+    } catch { /* ignore */ }
+  }, []);
+  const setDev = useCallback((v: "pc" | "ipadL" | "ipadP") => { setDevState(v); try { localStorage.setItem("wb_table_device", v); } catch { /* ignore */ } }, []);
+  const touch = dev !== "pc";
+  useEffect(() => {
+    if (!touch) return;
+    const mq = window.matchMedia("(orientation: portrait)");
+    const onTurn = () => setDev(mq.matches ? "ipadP" : "ipadL");
+    mq.addEventListener("change", onTurn);
+    return () => mq.removeEventListener("change", onTurn);
+  }, [touch, setDev]);
+
+  // ── ราคาขาย/มูลค่า — ราคาชุดเดียวกับแผนผู้บริหาร (skus_v2.list_price) · โหลดเฉพาะคนที่มีสิทธิ์
+  const [priceByMo, setPriceByMo] = useState<Map<string, { price: number; oem: boolean }> | null>(null);
+  useEffect(() => {
+    if (!canSeeMoney) return;
+    let cancel = false;
+    void (async () => {
+      try {
+        const r = await apiFetch("/api/mo/exec-plan"); const j = await r.json();
+        if (!cancel) setPriceByMo(new Map(((j.rows ?? []) as ExecRow[]).map((x) => [x.mo_no, { price: Number(x.list_price) || 0, oem: !!x.brand_oem }])));
+      } catch { if (!cancel) setPriceByMo(new Map()); }
+    })();
+    return () => { cancel = true; };
+  }, [canSeeMoney, pendKey]);
+  const priceOf = (m: PendingMO) => priceByMo?.get(m.mo_no)?.price ?? 0;
+  const priceOk = (m: PendingMO) => priceOf(m) >= PRICE_MIN;
+  const valueOf = (m: PendingMO, part: "all" | "rem") => (priceOk(m) ? priceOf(m) * (part === "all" ? m.qty : m.remaining) : 0);
+
+  // ── ปุ่มกรองด่วน (กรองก่อนส่งเข้าตาราง)
+  const today = todayLocal();
+  const isLate = (m: PendingMO) => [m.due_date, m.internal_due_date].some((d) => !!d && d.slice(0, 10) < today);
+  const isShort = (m: PendingMO) => { const p = prog?.[m.mo_no]; return !!p && p.buy + p.requested + p.ordered > 0; };
+  const quickFilters: [string, string, (m: PendingMO) => boolean][] = [
+    ["all", "ทั้งหมด", () => true],
+    ["late", "⏰ เกินกำหนด", isLate],
+    ["short", "🛒 ของยังไม่ครบ", isShort],
+    ["ready", "✅ พร้อมจ่าย", (m) => stageOf(m, prog?.[m.mo_no]) === "ready"],
+    ...(canSeeMoney ? [["noprice", "🏷 ยังไม่ตั้งราคา", (m: PendingMO) => priceByMo !== null && !priceOk(m)] as [string, string, (m: PendingMO) => boolean]] : []),
+    ["rush", "🔥 งานเร่ง", (m) => (m.priority ?? 0) > 0],
+  ];
+  const [qf, setQf] = useState("all");
+  const qfFn = quickFilters.find(([k]) => k === qf)?.[2] ?? (() => true);
+  const pendShown = pending.filter(qfFn);
   const applyDue = useCallback(async () => {
     const ids = pending.filter((m) => sel.has(m.id)).map((m) => m.id);
     if (!ids.length) return;
@@ -3492,58 +3555,96 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
   const GroupCell = ({ moNo }: { moNo: string }) => { const g = groupNameOf(moNo); return g ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{g}</span> : <span className="text-slate-300">—</span>; };
   // โหมดจัดกลุ่ม (เลือกได้): ไม่จัด / ตามกลุ่ม / ตามความพร้อม(รอจ่าย) หรือ ตามสถานะ(จ่ายแล้ว)
   const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage">("none");
+  const lastGroupRef = useRef<"group" | "ready" | "stage">("stage");   // กดปุ่มจัดกลุ่มในตารางเปิดกลับ = ใช้แบบล่าสุด
   const [woGroup, setWoGroup] = useState<"none" | "group" | "status">("none");
   const grpSelectCls = "h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600";
 
+  const imgPx = touch ? 56 : imgBig ? 64 : 36;
+  const prioIcon = (m: PendingMO) => ((m.priority ?? 0) >= 2 ? "🔥 " : (m.priority ?? 0) === 1 ? "⭐ " : "");
+  const dueText = (d: string | null | undefined) => d
+    ? <><span className="tabular-nums">{dueDateText(d.slice(0, 10))}</span> <span className={daysLeftClass(d)}>{daysLeftText(d)}</span></>
+    : <span className="text-slate-300">— ยังไม่กำหนด —</span>;
+  const priceWarn = (m: PendingMO) => (priceOf(m) <= 0 ? "ยังไม่ตั้งราคา" : `ราคา ฿${fmt(priceOf(m))} ผิดปกติ?`);
+  const valueCell = (m: PendingMO) => {
+    if (!priceByMo) return <span className="text-[11px] text-slate-300">กำลังโหลด…</span>;
+    if (!priceOk(m)) return <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap" title="ไม่นับรวมในยอดมูลค่า — ตั้งราคาขายที่หน้าสินค้า (Sale Price)">{priceWarn(m)}</span>;
+    return <div className="leading-tight text-right">
+      <div className="tabular-nums font-semibold text-slate-700 whitespace-nowrap">฿{fmt(valueOf(m, "all"))}</div>
+      {m.dispatched > 0 && <div className="text-[10px] text-slate-400 whitespace-nowrap">ค้างจ่าย ฿{fmt(valueOf(m, "rem"))}</div>}
+    </div>;
+  };
+  const hid = (k: string) => (touch ? !PEND_SHOWN_IPAD.has(k) : PEND_HIDDEN_PC.has(k));
   const pendCols: MiniColumn<PendingMO>[] = [
-    { key: "img", header: "รูป", width: imgBig ? "4.25rem" : "2.5rem", cell: (m) => <HoverImage url={m.image_url} size={imgBig ? 64 : 36} previewSize={256} /> },
-    { key: "prod", header: "สินค้า / ใบสั่งผลิต", width: "minmax(11rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า",
+    { key: "img", header: "รูป", group: "พื้นฐาน", locked: true, width: imgPx > 40 ? `${imgPx / 16 + 0.25}rem` : "2.5rem", cell: (m) => <HoverImage url={m.image_url} size={imgPx} previewSize={256} /> },
+    { key: "prod", header: "สินค้า / ใบสั่งผลิต", group: "พื้นฐาน", locked: true, width: "minmax(11rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า",
       cell: (m) => (
         <div className="flex items-start gap-1.5 min-w-0">
           <span className="mt-0.5 shrink-0 text-[10px] text-slate-400">{expanded.has(m.id) ? "▾" : "▸"}</span>
           <div className="min-w-0 flex-1">
-            <div className="font-semibold text-slate-800 truncate">{m.product_sku}</div>
+            <div className={`font-semibold text-slate-800 truncate ${touch ? "text-[15px]" : ""}`} title={m.priority_note ?? undefined}>{prioIcon(m)}{m.product_sku}</div>
             {m.product_name && m.product_name !== m.product_sku && <div className="text-[11px] text-slate-400 truncate">{m.product_name}</div>}
             <div className="font-mono text-[10px] text-slate-400">{m.mo_no}</div>
           </div>
           <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="เปิดเช็กลิสต์เตรียม/ตัด"
-            className="shrink-0 text-slate-300 hover:text-blue-600">📋</button>
+            className={`shrink-0 text-slate-300 hover:text-blue-600 ${touch ? "text-lg px-1" : ""}`}>📋</button>
         </div>
       ) },
-    { key: "created", header: "สร้างเมื่อ", width: "6rem", sortValue: (m) => m.created_at ?? "", sortLabel: "วันที่สร้างใบ",
+    { key: "created", header: "สร้างเมื่อ", group: "พื้นฐาน", defaultHidden: hid("created"), width: "6rem", sortValue: (m) => m.created_at ?? "", sortLabel: "วันที่สร้างใบ",
       cell: (m) => { if (!m.created_at) return <span className="text-slate-300">—</span>;
         const d = Math.max(0, Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000));
         return <div className="leading-tight"><div className="text-[12px] text-slate-600 tabular-nums">{formatDateTime(m.created_at).slice(0, 10)}</div>
           <div className={`text-[10px] ${d > 60 ? "text-rose-500" : "text-slate-400"}`}>{d === 0 ? "วันนี้" : `${fmt(d)} วันที่แล้ว`}</div></div>; } },
-    { key: "qty", header: "เหลือ / ทั้งหมด", width: "6rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "จำนวนเหลือ",
+    { key: "qty", header: "เหลือ / ทั้งหมด", group: "พื้นฐาน", defaultHidden: hid("qty"), width: "6rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "จำนวนเหลือ",
       cell: (m) => <div className="leading-tight">
-        <div className="tabular-nums whitespace-nowrap"><b className="text-rose-600">{fmt(m.remaining)}</b><span className="text-[11px] text-slate-400"> / {fmt(m.qty)}</span></div>
+        <div className="tabular-nums whitespace-nowrap"><b className={`text-rose-600 ${touch ? "text-base" : ""}`}>{fmt(m.remaining)}</b><span className="text-[11px] text-slate-400"> / {fmt(m.qty)}</span></div>
         <div className="text-[10px] text-slate-400 whitespace-nowrap">{m.dispatched > 0 ? `จ่ายแล้ว ${fmt(m.dispatched)}` : "ยังไม่จ่าย"}</div>
       </div> },
-    { key: "prep", header: "เตรียม / ตัด", width: "7.5rem", sortValue: (m) => (m.prep_total > 0 ? m.prep_ready / m.prep_total : -1), sortLabel: "ความคืบหน้าเตรียม",
+    { key: "prep", header: "เตรียม / ตัด", group: "ผลิต", defaultHidden: hid("prep"), width: "7.5rem", sortValue: (m) => (m.prep_total > 0 ? m.prep_ready / m.prep_total : -1), sortLabel: "ความคืบหน้าเตรียม",
       cell: (m) => m.has_bom
         ? <div className="space-y-1"><PrepBar label="เตรียม" a={m.prep_ready} b={m.prep_total} /><PrepBar label="ตัด" a={m.cut_ready} b={m.cut_total} /></div>
         : <span className="text-[11px] text-slate-400">{m.ready ? "พร้อม ✓" : "— ไม่มีสูตร —"}</span> },
-    { key: "buy", header: "🛒 ซื้อของ", width: "minmax(8.5rem,1fr)", sortLabel: "ของที่ยังต้องซื้อ",
+    { key: "buy", header: "🛒 ซื้อของ", group: "ซื้อของ", defaultHidden: hid("buy"), width: "minmax(8.5rem,1fr)", sortLabel: "ของที่ยังต้องซื้อ",
       sortValue: (m) => { const p = prog?.[m.mo_no]; return p ? p.buy * 10000 + p.requested * 100 + p.ordered : -1; },
       cell: (m) => <MoProgressCell p={prog?.[m.mo_no]} loading={prog === null} /> },
-    { key: "stage", header: "ขั้นตอน", width: "11.75rem", sortLabel: "ขั้นตอน", sortValue: (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][1],
+    // ของครบประมาณ = วันของถึงช้าสุดของรายการที่สั่งแล้ว (ยังมีต้องซื้อ/รออนุมัติ = ยังบอกวันไม่ได้)
+    { key: "eta", header: "📅 ของครบประมาณ", label: "ของครบประมาณ", group: "ซื้อของ", isNew: true, defaultHidden: hid("eta"), width: "8rem", sortLabel: "วันของครบ",
+      sortValue: (m) => { const p = prog?.[m.mo_no]; return !p ? "9999" : p.buy + p.requested > 0 ? "8888" : p.ordered === 0 ? "0000" : p.eta ?? "7777"; },
+      cell: (m) => { const p = prog?.[m.mo_no];
+        if (!p) return <span className="text-slate-300">—</span>;
+        if (p.buy + p.requested > 0) return <span className="text-[11px] text-rose-600">ยังสั่งไม่ครบ</span>;
+        if (p.ordered === 0) return <span className="text-[11px] text-emerald-600">✓ ครบแล้ว</span>;
+        return <div className="leading-tight text-[12px]">
+          {p.eta ? <div className="whitespace-nowrap">{dueText(p.eta)}</div> : <div className="text-[11px] text-slate-400">PO ยังไม่ระบุวัน</div>}
+          {p.eta && p.eta_unknown > 0 && <div className="text-[10px] text-slate-400">+{p.eta_unknown} รายการไม่ระบุวัน</div>}
+        </div>; } },
+    { key: "stage", header: "ขั้นตอน", group: "ผลิต", defaultHidden: hid("stage"), width: touch ? "13rem" : "11.75rem", sortLabel: "ขั้นตอน", sortValue: (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][1],
       cell: (m) => <MoStepDots m={m} p={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0} /> },
-    // ดับเบิลคลิกที่วัน = แก้ได้เลย (คลิกครั้งเดียว = กาง/พับแถว หรือติ๊กเลือกเหมือนเดิม)
-    { key: "due", header: "กำหนดส่ง", width: "11rem", sortLabel: "กำหนดส่ง (วันที่ใกล้สุด)",
+    // จอคอม: ดับเบิลคลิกที่วัน = แก้ได้เลย · iPad: อ่านอย่างเดียว (แก้ในเช็กลิสต์ — แตะสองครั้งบนทัชจะไปซูมหน้าแทน)
+    { key: "due", header: "กำหนดส่ง", group: "อื่น ๆ", defaultHidden: hid("due"), width: "11rem", sortLabel: "กำหนดส่ง (วันที่ใกล้สุด)",
       sortValue: (m) => [m.due_date, m.internal_due_date].filter((d): d is string => !!d).sort()[0] ?? "9999",
       cell: (m) => <div className="space-y-0.5">
         {([["due", "📦", m.due_date, "ลูกค้า"], ["internal", "🪑", m.internal_due_date, "ภายใน"]] as const).map(([f, ic, v, lb]) => (
-          <span key={f} className="flex items-center gap-1" title={`ส่ง${lb} — ดับเบิลคลิกเพื่อแก้`}>
+          <span key={f} className="flex items-center gap-1 text-[12px]" title={touch ? `ส่ง${lb}` : `ส่ง${lb} — ดับเบิลคลิกเพื่อแก้`}>
             <span className="w-4 shrink-0 text-[11px]">{ic}</span>
-            <InlineEdit type="date" trigger="dblclick" compact width="7.25rem" disabled={!canEdit} value={v ?? ""} placeholder="— ยังไม่กำหนด —"
-              onSave={(x) => void saveMoDate(m.id, f, x)} />
-            {v && <span className={`text-[10px] whitespace-nowrap ${daysLeftClass(v)}`}>{daysLeftText(v)}</span>}
+            {touch ? <span className="whitespace-nowrap">{dueText(v)}</span> : <>
+              <InlineEdit type="date" trigger="dblclick" compact width="7.25rem" disabled={!canEdit} value={v ?? ""} placeholder="— ยังไม่กำหนด —"
+                onSave={(x) => void saveMoDate(m.id, f, x)} />
+              {v && <span className={`text-[10px] whitespace-nowrap ${daysLeftClass(v)}`}>{daysLeftText(v)}</span>}
+            </>}
           </span>
         ))}
       </div> },
+    ...(canSeeMoney ? [
+      { key: "price", header: "🏷 ราคาขาย/ชิ้น", label: "ราคาขาย/ชิ้น", group: "เงิน", isNew: true, defaultHidden: hid("price"), width: "7rem", align: "right",
+        sortLabel: "ราคาขาย", sortValue: (m: PendingMO) => priceOf(m),
+        cell: (m: PendingMO) => !priceByMo ? <span className="text-[11px] text-slate-300">…</span>
+          : !priceOk(m) ? <span className="text-[10px] text-amber-700">{priceOf(m) <= 0 ? "ยังไม่ตั้ง" : `฿${fmt(priceOf(m))} ผิดปกติ?`}</span>
+          : <div className="leading-tight text-right"><div className="tabular-nums whitespace-nowrap">฿{fmt(priceOf(m))}</div>{priceByMo.get(m.mo_no)?.oem && <div className="text-[10px] text-slate-400">OEM</div>}</div> },
+      { key: "value", header: "💵 มูลค่ารวม", label: "มูลค่ารวม (จำนวน × ราคา)", group: "เงิน", isNew: true, defaultHidden: hid("value"), width: "7.5rem", align: "right",
+        sortLabel: "มูลค่ารวม", sortValue: (m: PendingMO) => (priceOk(m) ? valueOf(m, "all") : -1), cell: valueCell },
+    ] as MiniColumn<PendingMO>[] : []),
     // ค่าแรง/ชิ้น — ดับเบิลคลิกแก้ได้ (บันทึกเป็นยอดรวมของใบให้อัตโนมัติ)
-    { key: "rate", header: "💰 ค่าแรง/ชิ้น", width: "8.5rem", align: "right", sortValue: (m) => rateOf(m), sortLabel: "ค่าแรง/ชิ้น",
+    { key: "rate", header: "💰 ค่าแรง/ชิ้น", label: "ค่าแรง/ชิ้น", group: "เงิน", defaultHidden: hid("rate"), width: "8.5rem", align: "right", sortValue: (m) => rateOf(m), sortLabel: "ค่าแรง/ชิ้น",
       cell: (m) => { const r = rateOf(m); return (
         <span className="flex items-center justify-end gap-1">
           <InlineEdit type="number" trigger="dblclick" compact align="right" width="5rem" disabled={!canEdit}
@@ -3551,17 +3652,93 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
             onSave={(v) => void saveMoRate(m, v)} />
           {r > 0 && <span className="text-[10px] text-slate-400 whitespace-nowrap">= ฿{fmt(Math.round(r * (m.qty || 0) * 100) / 100)}</span>}
         </span> ); } },
-    { key: "group", header: "กลุ่ม", width: "minmax(6rem,0.8fr)", sortValue: (m) => groupNameOf(m.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (m) => <GroupCell moNo={m.mo_no} /> },
+    { key: "brand", header: "แบรนด์", group: "อื่น ๆ", isNew: true, defaultHidden: hid("brand"), width: "minmax(7rem,0.8fr)", sortValue: (m) => m.brand ?? "~", sortLabel: "แบรนด์",
+      cell: (m) => m.brand
+        ? <span className="flex items-center gap-1.5 min-w-0 text-[12px] text-slate-600"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: m.brand_color || "#cbd5e1" }} /><span className="truncate">{m.brand}</span>{m.brand_oem && <span className="shrink-0 text-[10px] text-slate-400">OEM</span>}</span>
+        : <span className="text-slate-300">—</span> },
+    { key: "prio", header: "งานเร่ง", group: "อื่น ๆ", isNew: true, defaultHidden: hid("prio"), width: "6rem", sortValue: (m) => -(m.priority ?? 0), sortLabel: "งานเร่งก่อน",
+      cell: (m) => (m.priority ?? 0) >= 2 ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 whitespace-nowrap" title={m.priority_note ?? ""}>🔥 เร่งด่วน</span>
+        : (m.priority ?? 0) === 1 ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap" title={m.priority_note ?? ""}>⭐ สำคัญ</span>
+        : <span className="text-slate-300">—</span> },
+    { key: "issues", header: "ปัญหา", group: "อื่น ๆ", isNew: true, defaultHidden: hid("issues"), width: "5.5rem", sortValue: (m) => -(m.issue_count ?? 0), sortLabel: "ปัญหามากก่อน",
+      cell: (m) => (m.issue_count ?? 0) > 0 ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 whitespace-nowrap">⚠️ {m.issue_count} เรื่อง</span> : <span className="text-slate-300">—</span> },
+    { key: "group", header: "กลุ่ม", group: "อื่น ๆ", defaultHidden: hid("group"), width: "minmax(6rem,0.8fr)", sortValue: (m) => groupNameOf(m.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (m) => <GroupCell moNo={m.mo_no} /> },
   ];
-  // แถวที่กางออก = ของที่ยังไม่ครบของใบนั้น (ของกลาง MoShortMaterials) + ปุ่มไปเช็กลิสต์เต็ม
+  // จำคอลัมน์ที่เลือก "ต่อคน" แยกจอคอม / iPad (การ์ดแนวตั้งหน้าตาตายตัว ไม่ใช้ตัวเลือกคอลัมน์)
+  const pendColPrefs = useColumnPrefs(touch ? "wb_table_cols_ipad" : "wb_table_cols_pc", pendCols);
+
+  // จ่ายงาน (ป๊อปเดิมของตาราง) — ค่าแรงตั้งต้น = ราคากลางในสูตรของสินค้านั้น (ไม่มีก็ถอดจากค่าแรงที่วางแผนไว้) แก้รายใบได้
+  const openDispatchFor = (ids: Set<string>) => {
+    const init: Record<string, string> = {};
+    for (const m of pending.filter((x) => ids.has(x.id))) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
+    setDispRateBy(init); setDispRate(""); setDispDate2(todayLocal()); setDispOpen(true); setDispMsg("");
+  };
+  // แถวที่กางออก = ของที่ยังไม่ครบของใบนั้น (ของกลาง MoShortMaterials) + ปุ่มไปเช็กลิสต์ (iPad: ปุ่มใหญ่ + จ่ายงานใบนี้)
   const renderPendDetail = (m: PendingMO) => (
     <div className="flex flex-col lg:flex-row gap-3">
       <div className="flex-1 min-w-0"><MoShortMaterials moNo={m.mo_no} /></div>
-      <div className="lg:w-56 shrink-0 space-y-1.5">
-        <button type="button" onClick={() => onOpenMO(m)} className="w-full h-8 px-3 text-xs font-medium rounded-lg bg-slate-800 text-white hover:bg-slate-700">📋 เปิดเช็กลิสต์เตรียม/ตัด</button>
-        <p className="text-[11px] text-slate-400 leading-snug">ขอซื้อ · รับของ · ติ๊กเตรียม/ตัด ทำต่อได้ในเช็กลิสต์ (แท็บวัตถุดิบ และแท็บของซื้อ)</p>
+      <div className={`${touch ? "lg:w-64" : "lg:w-56"} shrink-0 space-y-2`}>
+        <button type="button" onClick={() => onOpenMO(m)} className={`w-full ${touch ? "h-11 text-sm" : "h-8 text-xs"} px-3 font-medium rounded-lg bg-slate-800 text-white hover:bg-slate-700`}>📋 เปิดเช็กลิสต์เตรียม/ตัด</button>
+        {touch && canEdit && m.remaining > 0 && (
+          <button type="button" onClick={() => { const ids = new Set([m.id]); setSel(ids); openDispatchFor(ids); }}
+            className="w-full h-11 px-3 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">🚚 จ่ายงานใบนี้ ({fmt(m.remaining)} ชิ้น)</button>
+        )}
+        <p className="text-[11px] text-slate-400 leading-snug">ขอซื้อ · รับของ · ติ๊กเตรียม/ตัด · แก้วันส่ง ทำต่อได้ในเช็กลิสต์ (แท็บวัตถุดิบ และแท็บของซื้อ)</p>
       </div>
     </div>
+  );
+  // iPad แนวตั้ง — 1 ใบ = 1 การ์ด
+  const renderPendCard = (m: PendingMO) => (
+    <div className="flex gap-3">
+      <HoverImage url={m.image_url} size={72} previewSize={256} />
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-semibold text-[15px] text-slate-800 truncate" title={m.priority_note ?? undefined}>{prioIcon(m)}{m.product_sku}</div>
+            {m.product_name && m.product_name !== m.product_sku && <div className="text-[12px] text-slate-400 truncate">{m.product_name}</div>}
+            <div className="font-mono text-[10px] text-slate-400">{m.mo_no}{m.created_at ? ` · สร้าง ${formatDateTime(m.created_at).slice(0, 10)}` : ""}</div>
+          </div>
+          <div className="shrink-0 text-right leading-tight">
+            <div className="tabular-nums whitespace-nowrap"><b className="text-base text-rose-600">{fmt(m.remaining)}</b><span className="text-[11px] text-slate-400"> / {fmt(m.qty)}</span></div>
+            <div className="text-[10px] text-slate-400">{m.dispatched > 0 ? `จ่ายแล้ว ${fmt(m.dispatched)}` : "ยังไม่จ่าย"}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="w-44"><MoProgressCell p={prog?.[m.mo_no]} loading={prog === null} /></div>
+          <MoStepDots m={m} p={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0} />
+        </div>
+        <div className="flex items-end justify-between gap-2 flex-wrap text-[12px]">
+          <div className="space-y-0.5">
+            <div className="whitespace-nowrap">📦 ลูกค้า {dueText(m.due_date)}</div>
+            <div className="whitespace-nowrap">🪑 ภายใน {dueText(m.internal_due_date)}</div>
+          </div>
+          {canSeeMoney && valueCell(m)}
+        </div>
+      </div>
+    </div>
+  );
+  // ยอดท้ายหัวกลุ่ม — จำนวนเหลือ (+ มูลค่าค้างจ่าย สำหรับคนที่เห็นเงิน)
+  const groupSum = (rows: PendingMO[]) => {
+    const rem = rows.reduce((s, m) => s + (m.remaining || 0), 0);
+    if (!canSeeMoney || !priceByMo) return `เหลือ ${fmt(rem)} ชิ้น`;
+    const val = rows.reduce((s, m) => s + valueOf(m, "rem"), 0);
+    const bad = rows.filter((m) => !priceOk(m)).length;
+    return `เหลือ ${fmt(rem)} ชิ้น · มูลค่าค้างจ่าย ฿${fmt(val)}${bad ? ` (ไม่นับ ${bad} ใบที่ราคายังไม่ถูกต้อง)` : ""}`;
+  };
+  // หัวตาราง: แถบสรุป (คิดจากใบที่กรองอยู่)
+  const sumCards: [string, string, string][] = [
+    ["รอจ่าย", `${fmt(pendShown.length)} ใบ`, qf === "all" ? `เหลือ ${fmt(pendShown.reduce((s, m) => s + m.remaining, 0))} ชิ้น` : `จาก ${fmt(pending.length)} ใบ`],
+    ...(canSeeMoney ? [["มูลค่าค้างจ่าย", priceByMo ? `฿${fmt(pendShown.reduce((s, m) => s + valueOf(m, "rem"), 0))}` : "…",
+      priceByMo ? `ไม่นับ ${fmt(pendShown.filter((m) => !priceOk(m)).length)} ใบที่ราคายังไม่ถูกต้อง` : "กำลังโหลดราคา"] as [string, string, string]] : []),
+    ["เกินกำหนด", `${fmt(pending.filter(isLate).length)} ใบ`, "เลยวันส่งลูกค้าหรือวันส่งภายใน"],
+    canSeeMoney
+      ? ["ยังไม่ตั้งราคา", priceByMo ? `${fmt(pending.filter((m) => !priceOk(m)).length)} ใบ` : "…", `ราคา ฿0 / ต่ำกว่า ฿${PRICE_MIN} / ว่าง`]
+      : ["รอซื้อของ", prog ? `${fmt(pending.filter((m) => stageOf(m, prog[m.mo_no]) === "buy").length)} ใบ` : "…", "ยังมีของต้องซื้อหรือรออนุมัติ"],
+  ];
+  const pickGroup = (g: "none" | "group" | "ready" | "stage") => { setPendGroup(g); if (g !== "none") lastGroupRef.current = g; };
+  const devBtn = (v: "pc" | "ipadL" | "ipadP", label: string, tip: string) => (
+    <button type="button" onClick={() => setDev(v)} title={tip}
+      className={`h-8 px-2.5 text-sm ${dev === v ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
   );
 
   const woCols: MiniColumn<WorkOrder>[] = [
@@ -3591,20 +3768,50 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
 
   return (
     <div className="space-y-5 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
+      {/* แถบสรุป + ปุ่มกรองด่วน (ตัวเลขสรุปคิดจากใบที่กรองอยู่) */}
+      <div className="space-y-2">
+        <div className={`grid gap-2 ${sumCards.length > 3 ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3"}`}>
+          {sumCards.map(([label, val, sub]) => (
+            <div key={label} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <div className="text-[11px] text-slate-500">{label}</div>
+              <div className={`${touch ? "text-xl" : "text-lg"} font-bold text-slate-800 tabular-nums leading-tight`}>{val}</div>
+              <div className="text-[10px] text-slate-400 truncate" title={sub}>{sub}</div>
+            </div>
+          ))}
+        </div>
+        <div className={`flex items-center gap-1.5 ${touch ? "overflow-x-auto pb-1" : "flex-wrap"}`}>
+          {quickFilters.map(([k, label, fn]) => {
+            const n = k === "all" ? pending.length : pending.filter(fn).length;
+            return (
+              <button key={k} type="button" onClick={() => setQf(k)}
+                className={`shrink-0 ${touch ? "h-10 px-4" : "h-8 px-3"} text-sm rounded-full border ${qf === k ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                {label} <span className={qf === k ? "text-white/70" : "text-slate-400"}>{fmt(n)}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <MiniTable
-        key={`pend-${pendGroup}`}
-        rows={pending} rowKey={(m) => m.id} columns={pendCols} onRowClick={onPendRow}
+        rows={pendShown} rowKey={(m) => m.id} columns={dev === "ipadP" ? pendCols : pendColPrefs.visible} onRowClick={onPendRow}
         expandedKeys={expanded} renderExpanded={renderPendDetail}
+        touch={touch} layout={dev === "ipadP" ? "cards" : "table"} renderCard={renderPendCard}
         title="📥 รอจ่าย" countUnit="ใบ"
         selectable selected={sel} onSelectedChange={setSel}
-        actions={<div className="flex items-center gap-2">
-          <button type="button" onClick={() => setPendGroup((g) => (g === "stage" ? "none" : "stage"))} title="จัดกลุ่มตามขั้นตอน: รอซื้อของ → รอของเข้า → รอเตรียม/ตัด → พร้อมจ่าย"
+        actions={<div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden divide-x divide-slate-200" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
+            {devBtn("pc", "💻 คอม", "มุมมองจอคอม")}
+            {devBtn("ipadL", "📱 iPad แนวนอน", "ตารางแถวใหญ่ กดง่าย")}
+            {devBtn("ipadP", "📱 iPad แนวตั้ง", "1 ใบ = 1 การ์ด")}
+          </div>
+          {dev !== "ipadP" && <ColumnChooser state={pendColPrefs}
+            note={`จำแยกกันระหว่างจอคอมกับ iPad · ${canSeeMoney ? "ราคาขาย/มูลค่าเห็นเฉพาะคนที่ดูแผนผู้บริหารได้" : "ช่องราคาขาย/มูลค่าเห็นเฉพาะผู้บริหาร"}`} />}
+          <button type="button" onClick={() => pickGroup(pendGroup === "stage" ? "none" : "stage")} title="จัดกลุ่มตามขั้นตอน: รอซื้อของ → รอของเข้า → รอเตรียม/ตัด → พร้อมจ่าย"
             className={`h-8 px-3 text-sm rounded-lg border ${pendGroup === "stage" ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
             🪜 จัดกลุ่มตามขั้นตอน{pendGroup === "stage" ? " ✓" : ""}
           </button>
-          <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
-            className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>
-          <select value={pendGroup} onChange={(e) => setPendGroup(e.target.value as "none" | "group" | "ready" | "stage")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+          {dev === "pc" && <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
+            className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>}
+          <select value={pendGroup} onChange={(e) => pickGroup(e.target.value as "none" | "group" | "ready" | "stage")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
             <option value="stage">จัดกลุ่มตามขั้นตอน</option>
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
@@ -3613,12 +3820,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
           {selMoNos.length > 0 && <>
             <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>
             <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้วันกำหนด ({selMoNos.length})</button>
-            {canEdit && <button onClick={() => {
-              // ค่าแรงตั้งต้น = ราคากลางในสูตรของสินค้านั้น (ไม่มีก็ถอดจากค่าแรงที่วางแผนไว้) — แก้รายใบได้
-              const init: Record<string, string> = {};
-              for (const m of pending.filter((x) => sel.has(x.id))) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
-              setDispRateBy(init); setDispRate(""); setDispDate2(todayLocal()); setDispOpen(true); setDispMsg("");
-            }} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🚚 จ่ายงาน ({selMoNos.length})</button>}
+            {canEdit && <button onClick={() => openDispatchFor(sel)} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🚚 จ่ายงาน ({selMoNos.length})</button>}
           </>}
         </div>}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
@@ -3628,8 +3830,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
           : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")
           : pendGroup === "stage" ? (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][0] : undefined}
         groupOrder={pendGroup === "stage" ? stageOrder : undefined}
-        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : "จัดกลุ่มตามความพร้อม"} defaultGrouped={pendGroup !== "none"}
-        footnote="กดแถว = กางดูของที่ยังไม่ครบ · 📋 = เปิดเช็กลิสต์เต็ม · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน (ชี้ที่จุดเพื่อดูตัวเลข)"
+        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : "จัดกลุ่มตามความพร้อม"}
+        grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
+        groupExtra={groupSum}
+        footnote={`${touch ? "แตะ" : "กด"}${dev === "ipadP" ? "การ์ด" : "แถว"} = กางดูของที่ยังไม่ครบ · 📋 = เปิดเช็กลิสต์เต็ม · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}`}
         emptyText="ไม่มีงานรอจ่าย"
       />
       {assignOpen && <AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); onReload?.(); }} />}
@@ -3766,7 +3970,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
       })()}
       <MiniTable
         key={`wo-${woGroup}`}
-        rows={wos} rowKey={(w) => w.id} columns={woCols}
+        rows={wos} rowKey={(w) => w.id} columns={woCols} touch={touch}
         onRowClick={(w) => { if (woSel.size > 0) setWoSel((prev) => { const n = new Set(prev); n.has(w.id) ? n.delete(w.id) : n.add(w.id); return n; }); else onOpenWO(w); }}
         title="🛠 จ่ายแล้ว — กำลังผลิต" countUnit="ใบ"
         selectable selected={woSel} onSelectedChange={setWoSel}
@@ -3791,7 +3995,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, onOp
       {/* 📥 รับเข้า QC — งานที่ช่างส่งมาแล้ว รอดึงเข้าชั้น (คิวเดียวกับหน้าโกดัง QC) จัดการจบในหน้าเดียว */}
       {qcSectionOn && (
         <MiniTable
-          rows={qQueue} rowKey={(q) => q.wo_id}
+          rows={qQueue} rowKey={(q) => q.wo_id} touch={touch}
           columns={[
             { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (q) => q.sku ?? "", sortLabel: "ชื่อสินค้า", cell: (q) => <ProdCell url={q.image_key ? `/api/r2-image?key=${encodeURIComponent(q.image_key)}` : null} sku={q.sku} name={q.name} /> },
             { key: "mo", header: "ใบสั่งผลิต", width: "9rem", sortValue: (q) => q.mo_no ?? "", sortLabel: "เลขใบสั่งผลิต", cell: (q) => <span className="font-mono text-[11px] text-slate-500">{q.mo_no ?? "—"}</span> },

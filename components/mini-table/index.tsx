@@ -35,6 +35,12 @@ export type MiniColumn<T> = {
   width?: string;                       // grid track เช่น "6rem" | "1fr" | "1.5fr"
   sortValue?: (row: T) => string | number | null | undefined;   // ใส่เพื่อให้คอลัมน์นี้ "เรียงได้"
   sortLabel?: string;                   // ป้ายในเมนูเรียงลำดับ (ไม่ใส่ = ใช้ header ถ้าเป็น string)
+  // ใช้กับตัวเลือกคอลัมน์ (useColumnPrefs / ColumnChooser) — ไม่ใช้ก็ไม่ต้องใส่
+  label?: string;                       // ชื่อในเมนูเลือกคอลัมน์ (ไม่ใส่ = header ถ้าเป็นข้อความ)
+  group?: string;                       // หมวดในเมนู
+  locked?: boolean;                     // ซ่อนไม่ได้
+  defaultHidden?: boolean;              // ซ่อนไว้ก่อน (ผู้ใช้เปิดเองได้)
+  isNew?: boolean;                      // ป้าย "ใหม่" ในเมนู
 };
 
 export type MiniTableProps<T> = {
@@ -56,6 +62,11 @@ export type MiniTableProps<T> = {
   defaultGrouped?: boolean;
   /** ลำดับกลุ่ม (ไม่ใส่ = เรียงตามชื่อ) — คืนเลขน้อยขึ้นก่อน เช่น ตามลำดับป้าย, "ไม่มีป้าย" ไว้ท้าย */
   groupOrder?: (groupName: string) => number;
+  /** คุมเปิด/ปิดจัดกลุ่มจากข้างนอก (ใส่คู่ onGroupedChange) — ปุ่มจัดกลุ่มในตารางกับปุ่มข้างนอกจะตรงกันเสมอ */
+  grouped?: boolean;
+  onGroupedChange?: (v: boolean) => void;
+  /** ข้อความท้ายหัวกลุ่ม เช่น ยอดรวมของกลุ่ม */
+  groupExtra?: (rows: T[]) => ReactNode;
 
   // เลือกหลายแถว (controlled)
   selectable?: boolean;
@@ -81,6 +92,11 @@ export type MiniTableProps<T> = {
 
   // หน้าตา
   dense?: boolean;
+  /** แถวสูง + ช่องติ๊กใหญ่ สำหรับจอสัมผัส (iPad) */
+  touch?: boolean;
+  /** "cards" = 1 แถว = 1 การ์ด (ใช้ renderCard) ยังค้นหา/เรียง/จัดกลุ่ม/เลือก/กางได้เหมือนตาราง — เช่น iPad แนวตั้ง */
+  layout?: "table" | "cards";
+  renderCard?: (row: T) => ReactNode;
   maxHeightClass?: string;              // เช่น "max-h-[calc(100vh-210px)]"
   className?: string;
   footnote?: ReactNode;
@@ -95,11 +111,11 @@ type Dir = "asc" | "desc";
 export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange,
-    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder,
+    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra,
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
-    dense, maxHeightClass = "", className = "", footnote,
+    dense, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
     resizable, storageKey,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
@@ -116,7 +132,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const setQ = (v: string) => { if (onSearchChange) onSearchChange(v); else setQInner(v); };
   const [sortKey, setSortKey] = useState<string>("");   // "" = ลำดับเดิม
   const [dir, setDir] = useState<Dir>("asc");
-  const [grouped, setGrouped] = useState(defaultGrouped);
+  const [groupedInner, setGroupedInner] = useState(defaultGrouped);
+  const grouped = groupedProp ?? groupedInner;
+  const setGrouped = (v: boolean) => { if (onGroupedChange) onGroupedChange(v); else setGroupedInner(v); };
 
   // ความกว้างที่ผู้ใช้ลากปรับ (px ต่อ key) — โหลด/บันทึกจาก localStorage ถ้ามี storageKey
   const [widths, setWidths] = useState<Record<string, number>>({});
@@ -192,14 +210,16 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   // grid template — เพิ่มช่อง checkbox นำหน้าถ้าเลือกได้ · คอลัมน์ที่ลากปรับแล้วใช้ px
   const colTrack = (c: MiniColumn<T>) => (resizable && widths[c.key] != null ? `${widths[c.key]}px` : (c.width ?? "1fr"));
   const tmpl = (selectable ? "2.25rem " : "") + columns.map(colTrack).join(" ");
-  const padY = dense ? "py-1.5" : "py-2";
+  const padY = touch ? "py-3" : dense ? "py-1.5" : "py-2";
+  const boxCls = touch ? "w-5 h-5 accent-rose-600" : "w-4 h-4 accent-rose-600";
+  const cards = layout === "cards" && !!renderCard;
   const alignCls = (a?: string) => (a === "right" ? "text-right justify-end" : a === "center" ? "text-center justify-center" : "");
 
   const HeaderCell = (
     <div className="grid gap-2 px-3 py-2 bg-slate-100 text-[11px] font-semibold text-slate-600" style={{ gridTemplateColumns: tmpl }}>
       {selectable && (
         <span className="flex justify-center">
-          <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className="w-4 h-4 accent-rose-600" />
+          <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} />
         </span>
       )}
       {columns.map((c) => {
@@ -232,7 +252,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         style={{ gridTemplateColumns: tmpl }}>
         {selectable && (
           <span className="flex justify-center" onClick={(e) => e.stopPropagation()}>
-            <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className="w-4 h-4 accent-rose-600" />
+            <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
           </span>
         )}
         {columns.map((c) => <div key={c.key} className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)}`}>{c.cell(r)}</div>)}
@@ -246,6 +266,33 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       </div>
     );
   };
+
+  // โหมดการ์ด — 1 แถว = 1 การ์ด (เนื้อการ์ดมาจาก renderCard) · แตะการ์ด = onRowClick · ช่องติ๊กมุมซ้ายบน
+  const Card = (r: T) => {
+    const k = rowKey(r);
+    const on = sel.has(k);
+    const open = !!renderExpanded && !!expandedKeys?.has(k);
+    return (
+      <div key={k} onClick={onRowClick ? () => onRowClick(r) : undefined}
+        className={`relative rounded-xl border p-3 ${on ? "border-rose-300 bg-rose-50/40" : open ? "border-blue-300 bg-white" : "border-slate-200 bg-white"} ${onRowClick ? "cursor-pointer active:bg-blue-50/40" : ""}`}>
+        {selectable && (
+          <span className="absolute top-3 left-3 z-10" onClick={(e) => e.stopPropagation()}>
+            <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
+          </span>
+        )}
+        <div className={selectable ? "pl-8" : ""}>{renderCard!(r)}</div>
+        {open && <div className="mt-3 pt-3 border-t border-slate-100 cursor-default" onClick={(e) => e.stopPropagation()}>{renderExpanded!(r)}</div>}
+      </div>
+    );
+  };
+  const GroupHead = ({ g, gSel, gKeys }: { g: { name: string; rows: T[] }; gSel: boolean; gKeys: string[] }) => (
+    <div className={`flex items-center gap-2 px-3 ${touch ? "py-2" : "py-1.5"} bg-slate-50 border-y border-slate-100 ${cards ? "rounded-lg border-x" : ""}`}>
+      {selectable && <input type="checkbox" checked={gSel} onChange={() => setKeys(gKeys, !gSel)} className={touch ? boxCls : "w-3.5 h-3.5 accent-rose-600"} />}
+      <span className="text-xs font-semibold text-slate-600">{g.name}</span>
+      <span className="text-[10px] text-slate-400">({g.rows.length})</span>
+      {groupExtra && <span className="ml-auto text-[11px] text-slate-500">{groupExtra(g.rows)}</span>}
+    </div>
+  );
 
   const total = rows.length, shown = sorted.length;
 
@@ -279,7 +326,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
             </>
           )}
           {groupBy && (
-            <button onClick={() => setGrouped((g) => !g)} className={`h-8 px-3 text-sm rounded-lg border ${grouped ? "bg-rose-50 border-rose-200 text-rose-600" : "bg-white border-slate-200 text-slate-500"}`}>
+            <button onClick={() => setGrouped(!grouped)} className={`h-8 px-3 text-sm rounded-lg border ${grouped ? "bg-rose-50 border-rose-200 text-rose-600" : "bg-white border-slate-200 text-slate-500"}`}>
               {grouped ? `▦ ${groupLabel}` : t("▤ ไม่จัดกลุ่ม", "▤ No grouping")}
             </button>
           )}
@@ -293,23 +340,35 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         <div className="text-center py-16 text-slate-300">{emptyText}</div>
       ) : shown === 0 ? (
         <div className="text-center py-16 text-slate-300">{noMatchText ? noMatchText(q) : t(`ไม่พบรายการที่ตรงกับ “${q}”`, `Nothing matches “${q}”`)}</div>
+      ) : cards ? (
+        <div className="space-y-2">
+          {selectable && (
+            <label className="inline-flex items-center gap-2 px-1 text-xs text-slate-500">
+              <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} /> {t("เลือกทั้งหมด", "Select all")}
+            </label>
+          )}
+          {groups.map((g) => {
+            const gKeys = g.rows.map(rowKey);
+            const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
+            return (
+              <div key={g.name || "_all"} className="space-y-2">
+                {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
+                {g.rows.map((r) => Card(r))}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         // overflow-x-auto (ไม่ใช่ hidden) — คอลัมน์เยอะเกินจอ = เลื่อนซ้าย-ขวาได้ แทนที่จะโดนตัดหายเงียบ ๆ
         <div className="border border-slate-200 rounded-xl overflow-x-auto">
           {HeaderCell}
           {groups.map((g, gi) => {
             const gKeys = g.rows.map(rowKey);
-            const gSel = selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
+            const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
             let offset = 0; for (let i = 0; i < gi; i++) offset += groups[i].rows.length;
             return (
               <div key={g.name || "_all"}>
-                {groupBy && grouped && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border-y border-slate-100">
-                    {selectable && <input type="checkbox" checked={!!gSel} onChange={() => setKeys(gKeys, !gSel)} className="w-3.5 h-3.5 accent-rose-600" />}
-                    <span className="text-xs font-semibold text-slate-600">{g.name}</span>
-                    <span className="text-[10px] text-slate-400">({g.rows.length})</span>
-                  </div>
-                )}
+                {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
                 <div className="divide-y divide-slate-50">{g.rows.map((r, i) => Row(r, offset + i))}</div>
               </div>
             );
@@ -322,3 +381,5 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
 }
 
 const EMPTY: Set<string> = new Set();
+
+export { useColumnPrefs, ColumnChooser, type ColumnPrefsState } from "./column-chooser";

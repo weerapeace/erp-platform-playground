@@ -22,6 +22,9 @@ export type MoProgress = {
   ordered: number;     // สั่งแล้ว (มี PO — PO ร่างนับด้วย)
   done: number;        // มีของ / ได้ของแล้ว / เตรียมแล้ว / ไม่ต้องซื้อ
   linked: number;      // บรรทัดที่มีใบขอซื้อผูกแล้ว
+  /** ของที่สั่งแล้วจะถึงครบประมาณวันไหน = วันของถึงช้าสุดของบรรทัด "สั่งแล้ว" (null = ไม่มีของรอ หรือ PO ไม่ได้ใส่วัน) */
+  eta: string | null;
+  eta_unknown: number; // บรรทัด "สั่งแล้ว" ที่ PO ยังไม่ระบุวันของถึง
 };
 /** mo_no → ความคืบหน้า (ใบที่ไม่มี BOM ไม่อยู่ในผลลัพธ์) */
 export type MoProgressResult = Record<string, MoProgress>;
@@ -55,11 +58,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const code = (s.component_sku as string) ?? null;
     const links = code ? linksByKey.get(linkKey(moNo, code)) ?? [] : [];
     const { status } = computeMatStatus(s, qtyByMo.get(moNo) ?? 0, links);
-    const p = data[moNo] ?? (data[moNo] = { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0 });
+    const p = data[moNo] ?? (data[moNo] = { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0, eta: null, eta_unknown: 0 });
     p.total += 1;
     if (status === "buy") p.buy += 1;
     else if (status === "requested") p.requested += 1;
-    else if (status === "ordered") p.ordered += 1;
+    else if (status === "ordered") {
+      p.ordered += 1;
+      const d = links.filter((l) => l.po_id && !l.line_closed).map((l) => l.expected_date).filter((x): x is string => !!x).sort().pop() ?? null;
+      if (!d) p.eta_unknown += 1;
+      else if (!p.eta || d > p.eta) p.eta = d;
+    }
     else p.done += 1;
     if (links.length > 0) p.linked += 1;
   }
