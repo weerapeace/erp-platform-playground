@@ -822,7 +822,17 @@ export function NestingEditor({ id }: { id: string }) {
       <ERPModal open={itemsBig} onClose={() => setItemsBig(false)} size="xl" defaultExpanded
         title={`🖼 ${t("จัดการรูป", "Manage images")} · ${t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}`}
         description={t("แก้ได้ทุกช่องเหมือนการ์ด · ลาก ⠿ เพื่อสลับลำดับ · ลากไฟล์ PNG มาวางที่แถวเพื่อใส่ไฟล์", "Edit everything as on the cards · drag ⠿ to reorder · drop a PNG on a row to attach it")}
-        footer={<div className="flex justify-end"><button type="button" onClick={() => setItemsBig(false)} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700">{t("เสร็จ", "Done")}</button></div>}>
+        footer={
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setItemsBig(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">{t("เสร็จ", "Done")}</button>
+            {canRun && (   // ปิดหน้าต่างแล้วจัดเรียงเลย (ผลขึ้นในหน้าหลัก)
+              <button type="button" onClick={() => { setItemsBig(false); void startNest(); }} disabled={!!run?.running || !!busy}
+                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
+                {run?.running ? t("กำลังจัดเรียง…", "Nesting…") : run ? t("จัดเรียงใหม่", "Nest again") : t("จัดเรียง", "Nest")}
+              </button>
+            )}
+          </div>
+        }>
         <ItemsPanel variant="table" items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
           busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
           canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack} />
