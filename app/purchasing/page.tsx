@@ -20,6 +20,7 @@ import { SkuTagBrowser } from "@/components/sku-tag-browser";
 import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { useBackClose } from "@/lib/use-back-close";
 import { RelationPicker } from "@/components/relation-picker";
 import { ImageGallery, HoverZoomImage, ImageInput } from "@/components/image-input";
 import { TagGroupFilter } from "@/components/tag-filter";
@@ -310,6 +311,10 @@ export default function PurchasingShopPage() {
     }
     return [...map.values()].sort((a, b) => a.mo_no.localeCompare(b.mo_no));
   }, [moNeeds]);
+
+  // ปุ่มย้อนกลับของเบราว์เซอร์/ปัดขวาบนมือถือ ตอนเปิดใบงานอยู่ = กลับรายการใบสั่งผลิต (ไม่หลุดออกจากหน้าขอซื้อ)
+  // ของกลาง useBackClose — ป๊อปใส่จำนวน (ถ้าเปิดค้าง) ปิดตามไปด้วย ไม่ให้ค้างเด้งขึ้นตอนเปิดใบถัดไป
+  useBackClose(!!moSel, () => { setMoSel(null); setMoMatQty(null); setQ(""); }, "mo-detail");
 
   // ระดับ 2: โหลดสถานะวัตถุดิบทั้ง BOM ของใบที่เลือก (เปลี่ยนใบ = ล้างของเก่า · กดซ้ำ/บันทึก = โหลดทับเงียบ ๆ)
   const moSelNo = moSel?.mo_no ?? null;
@@ -1430,24 +1435,9 @@ function MoMatQtyDialog({ mat, moNo, productLabel, others, onClose, onAdd }: { m
           <div className="text-xs text-rose-600 mt-1">ต้องซื้อ <b>{mat.needed.toLocaleString()}</b> {mat.uom ?? ""}</div>
         </div>
       </div>
-      {hasOthers && (
-        <div className="mt-4 space-y-1.5">
-          <label className="block text-xs font-medium text-slate-600">ซื้อให้ใบงานไหนบ้าง</label>
-          {/* ใบที่เปิดอยู่ — ติ๊กไว้เสมอ */}
-          <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-md border border-blue-200 bg-blue-50/60">
-            <span className="shrink-0 w-4 h-4 rounded border bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-blue-800">{moNo} <span className="text-[11px] font-normal">(ใบที่เปิดอยู่)</span></span>
-              <span className="block text-xs text-blue-700 truncate">{productLabel}</span>
-            </span>
-            <span className="text-sm font-semibold text-blue-800 tabular-nums shrink-0">{mat.needed.toLocaleString()} {mat.uom ?? ""}</span>
-          </div>
-          <MoShortageList shortage={shortage} uom={mat.uom ?? ""} value={picks} excludeMo={moNo} sameSku={productLabel}
-            onChange={(p, total) => { setPicks(p); setQty(ceil2(mat.needed + total)); }} />
-        </div>
-      )}
-      <div className="mt-4">
-        <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน</label>
+      {/* จำนวน + ตัวอย่างบรรทัด อยู่บนสุด (เหนือรายการใบงาน) — ติ๊กใบข้างล่างแล้วเห็นยอดเปลี่ยนทันที ไม่ต้องเลื่อนหา */}
+      <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+        <label className="block text-xs font-medium text-blue-800 mb-1">จำนวนที่จะขอซื้อ</label>
         <div className="flex items-stretch gap-2">
           <button type="button" aria-label="ลดจำนวน" onClick={() => setQty(q => Math.max(0, Math.round(((Number(q) || 0) - 1) * 100) / 100))}
             className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">−</button>
@@ -1460,13 +1450,27 @@ function MoMatQtyDialog({ mat, moNo, productLabel, others, onClose, onAdd }: { m
           <button type="button" aria-label="เพิ่มจำนวน" onClick={() => setQty(q => Math.round(((Number(q) || 0) + 1) * 100) / 100)}
             className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">+</button>
         </div>
-      </div>
-      {/* ตัวอย่างบรรทัดที่จะลงตะกร้า/ใบขอซื้อ — บอกเลข MO ครบทุกใบ */}
-      <div className="mt-3 rounded-md bg-slate-50 border border-slate-100 px-3 py-2">
-        <div className="text-[11px] text-slate-400">จะขึ้นในตะกร้า / ใบขอซื้อเป็น</div>
+        {/* ตัวอย่างบรรทัดที่จะลงตะกร้า/ใบขอซื้อ — บอกเลข MO ครบทุกใบ */}
+        <div className="mt-2 text-[11px] text-slate-400">จะขึ้นในตะกร้า / ใบขอซื้อเป็น</div>
         <div className="text-sm font-medium text-slate-700 truncate">{label} · {qty.toLocaleString()} {mat.uom ?? ""}</div>
         <div className="text-xs text-indigo-600">🔖 ใบสั่งผลิต {nos.join(", ")}{nos.length > 1 ? ` (${nos.length} ใบ)` : ""}</div>
       </div>
+      {hasOthers && (
+        <div className="mt-4 space-y-1.5">
+          <label className="block text-xs font-medium text-slate-600">ซื้อให้ใบงานไหนบ้าง</label>
+          {/* ใบที่เปิดอยู่ — ติ๊กไว้เสมอ */}
+          <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-md border border-slate-200 bg-slate-50">
+            <span className="shrink-0 w-4 h-4 rounded border bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-slate-700">{moNo} <span className="text-[11px] font-normal text-slate-500">(ใบที่เปิดอยู่)</span></span>
+              <span className="block text-xs text-slate-500 truncate">{productLabel}</span>
+            </span>
+            <span className="text-sm font-semibold text-slate-700 tabular-nums shrink-0">{mat.needed.toLocaleString()} {mat.uom ?? ""}</span>
+          </div>
+          <MoShortageList shortage={shortage} uom={mat.uom ?? ""} value={picks} excludeMo={moNo} sameSku={productLabel}
+            onChange={(p, total) => { setPicks(p); setQty(ceil2(mat.needed + total)); }} />
+        </div>
+      )}
     </ERPModal>
   );
 }
