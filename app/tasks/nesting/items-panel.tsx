@@ -9,7 +9,7 @@ import { useT, useLang } from "@/components/i18n";
 import { useFileDrop } from "@/components/file-drop";
 import { helperFileUrl } from "@/lib/nesting-helper";
 import type { AssetSize } from "@/app/api/assets/shared";
-import { toMm, type NestingItem } from "./data";
+import { toMm, type NestingItem, type RotateLock } from "./data";
 import {
   fmt, fmtLen, natural, newKey, safeThicknessPx, sizeOf, switchMode, thinFraction, toUnit, unitScale,
   type FileInfo, type Settings,
@@ -19,9 +19,11 @@ import { NumInput } from "./num-input";
 export type AssetPreview = { url: string | null; sizes: AssetSize[] };
 
 const MODES = ["natural", "width", "height", "scale", "max"] as const;
+const ROTATES: RotateLock[] = ["sheet", "none", "flip", "quad"];
 
 export function ItemsPanel({
   items, infos, missing, previews, settings, resultByKey, busy, onChange, onAttach, onAddFiles, onPickLibrary,
+  canSplit, onSplit, onMergeBack,
 }: {
   items: NestingItem[];
   infos: Record<string, FileInfo>;
@@ -34,6 +36,9 @@ export function ItemsPanel({
   onAttach: (key: string, file: File) => void;
   onAddFiles: (files: File[]) => void;
   onPickLibrary: () => void;
+  canSplit: boolean;                       // ตัวช่วยรุ่นนี้แยกชิ้นได้ (v1.3.0+)
+  onSplit: (key: string) => void;
+  onMergeBack: (key: string) => void;
 }) {
   const t = useT();
   const { lang } = useLang();
@@ -51,6 +56,8 @@ export function ItemsPanel({
   const patch = (key: string, p: Partial<NestingItem>) => onChange(items.map((it) => (it.key === key ? { ...it, ...p } : it)));
   const modeLabel = (m: (typeof MODES)[number]) =>
     ({ natural: t("จริง", "Actual"), width: t("กว้าง", "Width"), height: t("สูง", "Height"), scale: "%", max: t("ยาวสุด", "Longest") })[m];
+  const rotateLabel = (r: RotateLock) =>
+    ({ sheet: t("ตามแผ่น", "Sheet setting"), none: t("ห้ามหมุน", "No rotation"), flip: t("แนวนอน 0°/180°", "Horizontal 0°/180°"), quad: t("แนวนอน/ตั้ง", "Horizontal/vertical") })[r];
   const totalPct = Math.round(items.reduce((a, it) => a + (it.fill_pct || 0), 0) * 100) / 100;
   const evenSplit = () => {
     const n = items.length;
@@ -129,7 +136,7 @@ export function ItemsPanel({
                   </div>
                 </div>
                 <button type="button" title={t("คัดลอก — ลายเดียวกันอีกขนาด/อีกจำนวน", "Duplicate — the same artwork at another size or quantity")}
-                  onClick={() => { const i = items.indexOf(it); onChange([...items.slice(0, i + 1), { ...it, key: newKey() }, ...items.slice(i + 1)]); }}
+                  onClick={() => { const i = items.indexOf(it); onChange([...items.slice(0, i + 1), { ...it, key: newKey(), piece: null }, ...items.slice(i + 1)]); }}
                   className="rounded px-1.5 text-xs text-slate-500 hover:bg-slate-100">⧉</button>
                 <button type="button" title={t("เอาลายนี้ออก", "Remove this artwork")} aria-label={t("เอาลายนี้ออก", "Remove this artwork")}
                   onClick={() => onChange(items.filter((x) => x.key !== it.key))}
@@ -141,7 +148,8 @@ export function ItemsPanel({
                   <span className="truncate text-slate-600" title={it.file.name}>📄 {it.file.name}</span>
                 ) : (
                   <span className="text-amber-700">
-                    {miss ? t(`ไฟล์ ${it.file?.name} ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์เดิมมาใหม่`, `File ${it.file?.name} is not on this computer — drop it again`)
+                    {miss && it.piece ? t(`ชิ้นนี้ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์ต้นฉบับ ${it.piece.source.name} มาใหม่ (แยกชิ้นให้เอง)`, `This piece is not on this computer — drop the original ${it.piece.source.name} again (it splits automatically)`)
+                      : miss ? t(`ไฟล์ ${it.file?.name} ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์เดิมมาใหม่`, `File ${it.file?.name} is not on this computer — drop it again`)
                       : t("ยังไม่มีไฟล์พิมพ์ — ลาก PNG ตัวจริงมาวางที่การ์ดนี้", "No print file yet — drop the real PNG onto this card")}
                   </span>
                 )}
@@ -199,6 +207,48 @@ export function ItemsPanel({
                   </>
                 )}
               </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                <label className="flex items-center gap-1 text-slate-600"
+                  title={t("ล็อก = ห้ามชิ้นอื่นแทรกในช่องว่างของลายนี้ / จำกัดมุมหมุนเฉพาะลายนี้", "Lock = keep other pieces out of this artwork's gaps / limit its rotation")}>
+                  <input type="checkbox" checked={!!it.lock} onChange={(e) => patch(it.key, { lock: e.target.checked ? { box: true, rotate: "quad" } : null })} />
+                  🔒 {t("ล็อกลายนี้", "Lock this artwork")}
+                </label>
+                {!it.piece && it.file && !miss && info && !info.error && (
+                  <button type="button" onClick={() => onSplit(it.key)} disabled={!canSplit || busy}
+                    title={canSplit ? t("ภาพเดียวมีหลายส่วน (เช่น ช้าง + ตัวหนังสือ) → แยกเป็นหลายชิ้น", "One image with several parts (e.g. elephant + text) → split into pieces")
+                      : t("ต้องอัปเดตตัวช่วยเป็น v1.3.0 ก่อน (คลิกขวาไอคอนกรรไกร → ตรวจหาเวอร์ชันใหม่)", "Update the helper to v1.3.0 first (right-click the scissors icon → Check for updates)")}
+                    className="rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                    ✂️ {t("แยกชิ้น", "Split pieces")}
+                  </button>
+                )}
+              </div>
+              {it.lock && (
+                <div className="mt-1 space-y-1 rounded-md bg-slate-50 px-2 py-1.5 text-xs">
+                  <label className="flex items-center gap-1 text-slate-700">
+                    <input type="checkbox" checked={it.lock.box} onChange={(e) => patch(it.key, { lock: { ...it.lock!, box: e.target.checked } })} />
+                    {t("ห้ามชิ้นอื่นเข้ามาในช่องว่าง (จองเป็นกรอบสี่เหลี่ยม)", "Keep other pieces out of the gaps (reserve a rectangle)")}
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-slate-500">{t("การหมุน", "Rotation")}</span>
+                    {ROTATES.map((r) => (
+                      <button key={r} type="button" onClick={() => patch(it.key, { lock: { ...it.lock!, rotate: r } })}
+                        className={`rounded border px-1.5 py-0.5 text-[11px] ${it.lock!.rotate === r ? "border-violet-400 bg-violet-100 font-semibold text-violet-700" : "border-slate-300 bg-white text-slate-600"}`}>
+                        {rotateLabel(r)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {it.piece && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
+                  <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">
+                    ✂️ {t(`ชิ้น ${it.piece.index + 1}/${it.piece.count} ของ ${it.piece.parent.title}`, `Piece ${it.piece.index + 1}/${it.piece.count} of ${it.piece.parent.title}`)}
+                  </span>
+                  <button type="button" onClick={() => onMergeBack(it.key)} disabled={busy} className="text-slate-500 underline disabled:opacity-50">
+                    {t("รวมกลับเป็นภาพเดียว", "Merge back into one image")}
+                  </button>
+                </div>
+              )}
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {chips(it, info).map((c, k) => <span key={k} title={c.title} className={`rounded px-1.5 py-0.5 text-[11px] ${c.cls}`}>{c.text}</span>)}
               </div>

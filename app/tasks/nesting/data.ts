@@ -5,9 +5,25 @@
  * ตัวคำนวณ (ตัวช่วยในเครื่อง) อยู่ที่ lib/nesting-helper.ts
  */
 import { apiFetch } from "@/lib/api";
-import type { NestingItem, NestingJobRow, NestingResult, NestingStatus } from "@/app/api/nesting-jobs/shared";
+import type {
+  NestingItem, NestingJobRow, NestingLock, NestingPiece, NestingResult, NestingStatus, RotateLock, SplitParams,
+} from "@/app/api/nesting-jobs/shared";
 
-export type { NestingItem, NestingJobRow, NestingResult, NestingStatus };
+export type { NestingItem, NestingJobRow, NestingLock, NestingPiece, NestingResult, NestingStatus, RotateLock, SplitParams };
+
+/** มุมหมุนของลายที่ล็อก → รายการมุมที่ส่งให้ตัวช่วย (ตามแผ่น = ไม่ส่ง) */
+export const ROTATE_LOCK_ANGLES: Record<RotateLock, number[] | null> = { sheet: null, none: [0], flip: [0, 180], quad: [0, 90, 180, 270] };
+
+/** ค่าแยกชิ้นที่จำไว้กับลายในคลัง (เฉพาะลายที่ตั้งไว้) */
+export async function getAssetSplits(ids: string[]): Promise<Record<string, SplitParams>> {
+  if (!ids.length) return {};
+  return json<Record<string, SplitParams>>(await apiFetch(`/api/nesting-jobs/asset-split?ids=${ids.join(",")}`));
+}
+
+/** จำ/เลิกจำ การแยกชิ้นกับลายในคลัง (split = null = เลิกแยก) */
+export async function saveAssetSplit(assetId: string, split: SplitParams | null): Promise<void> {
+  await json(await apiFetch("/api/nesting-jobs/asset-split", { method: "PUT", body: JSON.stringify({ asset_id: assetId, split }) }));
+}
 
 export type PrintType = { id: string; code: string; name: string; default_w: number | null; default_h: number | null; unit: string };
 

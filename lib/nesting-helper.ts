@@ -15,6 +15,16 @@ export const HELPER_URL = process.env.NEXT_PUBLIC_NESTING_HELPER_URL || "http://
 export const HELPER_MIN_VERSION = "1.1.0";
 /** ส่งไฟล์ขึ้น Drive เองจากเครื่อง (ปุ่ม "ส่งเข้าคลังงานพิมพ์") ได้ตั้งแต่รุ่นนี้ */
 export const HELPER_DRIVE_VERSION = "1.2.0";
+/** ล็อกลาย (กันช่องว่าง/มุมหมุนเฉพาะลาย) + แยกชิ้นในภาพ ได้ตั้งแต่รุ่นนี้ */
+export const HELPER_SPLIT_VERSION = "1.3.0";
+
+/** ผลแยกชิ้นจากตัวช่วย (POST /api/files/<sha>/split) — box = pixel ในกรอบเนื้องาน · auto = เลขกลุ่มอัตโนมัติที่รวมกัน */
+export type SplitGroup = { index: number; auto: number[]; color: string; box: [number, number, number, number]; w_mm: number; h_mm: number };
+export type SplitPiece = {
+  index: number; sha: string; name: string; w_mm: number; h_mm: number; error?: string;
+  canvas_px: [number, number]; dpi: [number, number]; trim_box: [number, number, number, number];
+};
+export type SplitResult = { sha: string; gap_mm: number; natural_mm: [number, number]; groups: SplitGroup[]; overlay?: string; pieces?: SplitPiece[] };
 export const HELPER_INSTALL_PATH = "Z:\\Assets\\[99] Programs\\Nesting Helper";
 
 export type Lang = "th" | "en";

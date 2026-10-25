@@ -25,6 +25,21 @@ export type NestingItem = {
   qty: number;
   fill_pct: number;                  // โหมดเติมเต็มแผ่น: สัดส่วนจำนวนชิ้นที่เติม (%)
   file: { name: string; sha: string } | null;       // ไฟล์ PNG จริงที่ลากในเครื่อง (sha = รหัสไฟล์ในตัวช่วย)
+  lock?: NestingLock | null;         // ล็อกลาย (เฉพาะงานนี้)
+  piece?: NestingPiece | null;       // ชิ้นที่แยกมาจากภาพเดียวกัน (กดรวมกลับได้)
+};
+
+/** มุมหมุนของลายที่ล็อก: ตามแผ่น / ห้ามหมุน / แนวนอน (0°,180°) / แนวนอน-ตั้ง (4 ทิศ) */
+export const ROTATE_LOCKS = ["sheet", "none", "flip", "quad"] as const;
+export type RotateLock = (typeof ROTATE_LOCKS)[number];
+export type NestingLock = { box: boolean; rotate: RotateLock };
+
+/** ค่าแยกชิ้น (จำไว้กับลายในคลัง assets.nest_split ด้วย) — gap = รวมส่วนที่ห่างกันไม่เกินกี่ mm · joins = คู่กลุ่มที่สั่งรวมเอง */
+export type SplitParams = { gap_mm: number; joins: [number, number][] };
+export type NestingPiece = SplitParams & {
+  source: { name: string; sha: string };            // ภาพต้นฉบับ (ลากไฟล์นี้ใหม่ = สร้างชิ้นใหม่ได้ตรงเดิม)
+  index: number; count: number;
+  parent: { title: string; size: { mode: SizeMode; value: number | null }; qty: number };   // ไว้รวมกลับเป็นภาพเดียว
 };
 
 export type NestingResult = {
@@ -82,8 +97,49 @@ export function cleanItems(v: unknown): NestingItem[] | null {
       qty: Math.max(0, Math.floor(num(o.qty) ?? 0)),
       fill_pct: Math.min(100, Math.max(0, num(o.fill_pct) ?? 0)),
       file: sha ? { name: String(f?.name ?? "").slice(0, 200), sha } : null,
+      lock: cleanLock(o.lock),
+      piece: cleanPiece(o.piece),
     };
   });
+}
+
+function cleanSize(v: unknown): { mode: SizeMode; value: number | null } {
+  const s = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const mode = (SIZE_MODES as readonly string[]).includes(String(s.mode)) ? (s.mode as SizeMode) : "natural";
+  return { mode, value: mode === "natural" ? null : num(s.value) };
+}
+
+function cleanLock(v: unknown): NestingLock | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const rotate = (ROTATE_LOCKS as readonly string[]).includes(String(o.rotate)) ? (o.rotate as RotateLock) : "sheet";
+  return { box: !!o.box, rotate };
+}
+
+export function cleanSplit(v: unknown): SplitParams | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const gap = num(o.gap_mm);
+  if (gap == null || gap < 0 || gap > 50) return null;
+  const joins = (Array.isArray(o.joins) ? o.joins : []).slice(0, 100)
+    .map((p) => (Array.isArray(p) ? [Math.floor(Number(p[0])), Math.floor(Number(p[1]))] : null))
+    .filter((p): p is [number, number] => !!p && p.every((x) => Number.isInteger(x) && x >= 0 && x < 1000));
+  return { gap_mm: gap, joins };
+}
+
+function cleanPiece(v: unknown): NestingPiece | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const split = cleanSplit(o);
+  const src = (o.source && typeof o.source === "object" ? o.source : {}) as Record<string, unknown>;
+  const par = (o.parent && typeof o.parent === "object" ? o.parent : {}) as Record<string, unknown>;
+  if (!split || typeof src.sha !== "string" || !SHA.test(src.sha)) return null;
+  return {
+    ...split,
+    source: { name: String(src.name ?? "").slice(0, 200), sha: src.sha },
+    index: Math.max(0, Math.floor(num(o.index) ?? 0)), count: Math.max(1, Math.floor(num(o.count) ?? 1)),
+    parent: { title: String(par.title ?? "").slice(0, 200), size: cleanSize(par.size), qty: Math.max(0, Math.floor(num(par.qty) ?? 0)) },
+  };
 }
 
 export function cleanResult(v: unknown): NestingResult | null {

@@ -19,19 +19,20 @@ import { ConfirmDialog } from "@/components/modal";
 import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
-import { helperApi, helperDownload, helperLink } from "@/lib/nesting-helper";
+import { HELPER_SPLIT_VERSION, helperApi, helperDownload, helperLink, versionAtLeast, type SplitResult } from "@/lib/nesting-helper";
 import type { AssetDetail, AssetRow, AssetSize } from "@/app/api/assets/shared";
 import {
-  createNestingJob, getNestingJob, listPrintTypes, toMm, updateNestingJob,
-  type JobDraft, type NestingItem, type NestingJobRow, type NestingResult, type NestingStatus, type PrintType, type PublishResult,
+  ROTATE_LOCK_ANGLES, createNestingJob, getAssetSplits, getNestingJob, listPrintTypes, saveAssetSplit, toMm, updateNestingJob,
+  type JobDraft, type NestingItem, type NestingJobRow, type NestingResult, type NestingStatus, type PrintType, type PublishResult, type SplitParams,
 } from "./data";
 import { HelperChip, HelperSetupCard, useHelperStatus } from "./helper-status";
 import { ItemsPanel, type AssetPreview } from "./items-panel";
 import { STATUS_STYLE } from "./list-view";
-import { SETTINGS_DEFAULTS, fmt, fmtLen, newKey, readSettings, type FileInfo, type Settings, type Unit } from "./nest-utils";
+import { SETTINGS_DEFAULTS, fmt, fmtLen, natural, newKey, readSettings, sizeOf, type FileInfo, type Settings, type Unit } from "./nest-utils";
 import { SettingsPanel, sheetFromPrintType } from "./settings-panel";
 import { SheetView, rotated90, type HelperPart, type Placed } from "./sheet-view";
 import { PublishModal } from "./publish-modal";
+import { SplitModal } from "./split-modal";
 
 // การ์ดในคลังไฟล์ (ของกลาง) — โหลดเมื่อกดดูเท่านั้น (คลังไฟล์ตัวใหญ่ ไม่ให้หน้าจัดเรียงช้า)
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
@@ -62,7 +63,7 @@ function makeDraft(name: string, status: NestingStatus, printTypeId: string | nu
 /** สิ่งที่มีผลกับผลจัดเรียง (เปลี่ยนแล้วผลบนจอ "เก่า") — ไม่รวมข้อความหัวงาน/หน่วยที่แสดง */
 function nestSnapshot(settings: Settings, items: NestingItem[]): string {
   const { header_text: _h, unit: _u, ...rest } = settings;
-  return JSON.stringify({ rest, items: items.map((i) => [i.file?.sha, i.title, i.size, i.qty, i.fill_pct]) });
+  return JSON.stringify({ rest, items: items.map((i) => [i.file?.sha, i.title, i.size, i.qty, i.fill_pct, i.lock ?? null]) });
 }
 
 const stem = (name: string) => name.replace(/\.[^.]+$/, "");
@@ -79,6 +80,13 @@ function assetSizeOf(it: NestingItem, sizes: AssetSize[]): AssetSize | null {
 
 type Pub = { asset_id: string | null; drive_folder_url: string | null; published_at: string | null };
 
+const DEFAULT_SPLIT: SplitParams = { gap_mm: 3, joins: [] };
+/** ขนาดที่จะพิมพ์ ÷ ขนาดจริงของภาพ (ชิ้นที่แยกได้ = ขนาดเท่าเดิมในภาพ) */
+const scaleOf = (it: NestingItem, info: FileInfo) => { const sz = sizeOf(it, info); return sz ? sz.w / natural(info).w : 1; };
+/** การ์ดชิ้นที่แยกมาจากภาพเดียวกัน (ภาพต้นฉบับ + ชื่องานเดิม) */
+const sameSplit = (a: NestingItem, b: NestingItem) =>
+  !!a.piece && !!b.piece && a.piece.source.sha === b.piece.source.sha && a.piece.parent.title === b.piece.parent.title;
+
 export function NestingEditor({ id }: { id: string }) {
   const t = useT();
   const { lang } = useLang();
@@ -87,6 +95,7 @@ export function NestingEditor({ id }: { id: string }) {
   const { status: helper, recheck } = useHelperStatus();
   const ready = helper.state === "ready";
   const canRun = can("nesting.run");
+  const canSplit = helper.state === "ready" && versionAtLeast(helper.version, HELPER_SPLIT_VERSION);   // ล็อกลาย + แยกชิ้น (ตัวช่วย v1.3.0+)
 
   // ---------------------------------------------------------------- งาน (เก็บใน ERP)
   const [jobId, setJobId] = useState<string | null>(id === "new" ? null : id);
@@ -160,6 +169,15 @@ export function NestingEditor({ id }: { id: string }) {
     }
   }, [items, ready, lang]);
 
+  const [splits, setSplits] = useState<Record<string, SplitParams>>({});
+  const askedSplits = useRef(new Set<string>());
+  useEffect(() => {
+    const ids = [...new Set(items.map((i) => i.asset_id).filter((x): x is string => !!x && !askedSplits.current.has(x)))];
+    if (!ids.length) return;
+    for (const x of ids) askedSplits.current.add(x);
+    getAssetSplits(ids).then((m) => setSplits((cur) => ({ ...cur, ...m }))).catch(() => { /* อ่านไม่ได้ = ไม่แยกอัตโนมัติ */ });
+  }, [items]);
+
   const uploadToHelper = async (files: File[]): Promise<FileInfo[]> => {
     const fd = new FormData();
     for (const f of files) fd.append("files", f, f.name);
@@ -183,13 +201,95 @@ export function NestingEditor({ id }: { id: string }) {
     return true;
   };
 
+  /** ผลแยกชิ้นจากตัวช่วย → การ์ดชิ้นละใบ (ขนาดเท่าเดิมในภาพ · จำนวน/ล็อกตามการ์ดเดิม) */
+  const makePieces = (src: NestingItem, srcInfo: FileInfo, res: SplitResult, params: SplitParams, qtys?: number[], keep?: NestingItem[]): NestingItem[] => {
+    const pieces = res.pieces ?? [];
+    const s = scaleOf(src, srcInfo);
+    const n = pieces.length;
+    setInfos((m) => ({ ...m, ...Object.fromEntries(pieces.map((pc) => [pc.sha, pc as unknown as FileInfo])) }));
+    setMissing((m) => { const x = { ...m }; for (const pc of pieces) delete x[pc.sha]; return x; });
+    for (const pc of pieces) askedFiles.current.add(pc.sha);
+    return pieces.map((pc, k): NestingItem => ({
+      key: newKey(), asset_id: src.asset_id, title: `${src.title} · ${k + 1}`,
+      size: src.size.mode === "natural" ? { mode: "natural", value: null } : { mode: "width", value: round2(pc.w_mm * s) },
+      qty: qtys?.[k] ?? src.qty, fill_pct: settings.fill ? round2((src.fill_pct || 0) / n) : 0,
+      file: { name: pc.name, sha: pc.sha }, lock: keep ? keep[k]?.lock ?? null : src.lock ?? null,
+      piece: { ...params, source: src.file!, index: k, count: n, parent: { title: src.title, size: src.size, qty: src.qty } },
+    }));
+  };
+  /** การ์ดภาพเดิม (ก่อนแยก) จากการ์ดชิ้นใดชิ้นหนึ่ง */
+  const parentOf = (it: NestingItem, group: NestingItem[], file = it.piece!.source): NestingItem => ({
+    key: newKey(), asset_id: it.asset_id, title: it.piece!.parent.title, size: it.piece!.parent.size, qty: it.piece!.parent.qty,
+    fill_pct: round2(group.reduce((a, x) => a + (x.fill_pct || 0), 0)), file, lock: it.lock ?? null, piece: null,
+  });
+  const replaceGroup = (group: NestingItem[], next: NestingItem[]) => {
+    const keys = new Set(group.map((g) => g.key));
+    setItems((list) => list.flatMap((x) => (x.key === group[0].key ? next : keys.has(x.key) ? [] : [x])));
+  };
+
   const attachFile = (key: string, file: File) => {
     if (needHelper()) return;
     void withBusy(t("กำลังอ่านและตรวจไฟล์…", "Reading and checking the file…"), async () => {
       const [info] = await uploadToHelper([file]);
       if (!info) return;
-      setItems((list) => list.map((it) => (it.key === key ? { ...it, file: { name: file.name, sha: info.sha }, title: it.title || stem(file.name) } : it)));
+      const it = items.find((x) => x.key === key);
+      const nf = { name: file.name, sha: info.sha };
+      const group = it?.piece ? items.filter((x) => sameSplit(x, it)).sort((a, b) => a.piece!.index - b.piece!.index) : it ? [it] : [];
+      const params: SplitParams | undefined = it?.piece ? { gap_mm: it.piece.gap_mm, joins: it.piece.joins } : it?.asset_id ? splits[it.asset_id] : undefined;
+      if (it && params && !info.error) {
+        // การ์ดชิ้น = ลากไฟล์ต้นฉบับมาใหม่ → แยกใหม่ตามค่าเดิม (ได้ชิ้นเดิมทุกครั้ง) · การ์ดจากคลังที่จำการแยกไว้ = แยกให้เอง
+        const src: NestingItem = it.piece ? { ...parentOf(it, group, nf), key: it.key } : { ...it, file: nf, title: it.title || stem(file.name) };
+        try {
+          if (!canSplit) throw new Error(t("ตัวช่วยต้องเป็น v1.3.0 ขึ้นไป", "The helper must be v1.3.0 or later"));
+          const res = await helperApi<SplitResult>(`/api/files/${info.sha}/split`, lang, { method: "POST", body: { ...params, apply: true, name: file.name } });
+          const same = it.piece && group.length === (res.pieces?.length ?? 0);
+          replaceGroup(group, makePieces(src, info, res, params, same ? group.map((g) => g.qty) : undefined, same ? group : undefined));   // ชิ้นเดิมครบ = คงจำนวน/ล็อกรายชิ้น
+          toast("success", it.piece ? t("สร้างชิ้นที่แยกไว้ใหม่จากไฟล์ต้นฉบับแล้ว", "Rebuilt the split pieces from the original file")
+            : t(`แยกเป็น ${res.pieces?.length ?? 0} ชิ้นตามที่จำไว้กับลายนี้ — กด “รวมกลับเป็นภาพเดียว” ได้`, `Split into ${res.pieces?.length ?? 0} pieces as remembered for this artwork — you can merge them back`));
+          return;
+        } catch (e) {
+          toast("warning", t(`แยกชิ้นตามที่จำไว้ไม่ได้ — ใช้ทั้งภาพแทน (${(e as Error).message})`, `Couldn't split as remembered — using the whole image (${(e as Error).message})`));
+          if (it.piece) { replaceGroup(group, [src]); return; }
+        }
+      }
+      setItems((list) => list.map((x) => (x.key === key ? { ...x, file: nf, title: x.title || stem(file.name) } : x)));
     });
+  };
+
+  // ---------------------------------------------------------------- แยกชิ้น (หน้าต่าง) / รวมกลับ
+  const [splitKey, setSplitKey] = useState<string | null>(null);
+  const splitItem = splitKey ? items.find((x) => x.key === splitKey) ?? null : null;
+  const splitInfo = splitItem?.file ? infos[splitItem.file.sha] : undefined;
+  const savedSplit = splitItem?.asset_id ? splits[splitItem.asset_id] : undefined;
+  const splitInitial = useMemo(() => savedSplit ?? DEFAULT_SPLIT, [savedSplit]);
+
+  const applySplit = async (key: string, res: SplitResult, params: SplitParams, qtys: number[], remember: boolean) => {
+    const it = items.find((x) => x.key === key);
+    const info = it?.file ? infos[it.file.sha] : undefined;
+    if (!it || !info) return;
+    const pieces = makePieces(it, info, res, params, qtys);
+    replaceGroup([it], pieces);
+    setSplitKey(null);
+    let saved = false;
+    if (remember && it.asset_id) {
+      try { await saveAssetSplit(it.asset_id, params); setSplits((m) => ({ ...m, [it.asset_id!]: params })); saved = true; }
+      catch (e) { toast("error", t(`แยกแล้ว แต่จำไว้กับลายในคลังไม่ได้: ${(e as Error).message}`, `Split done, but couldn't remember it in the library: ${(e as Error).message}`)); }
+    }
+    toast("success", saved ? t(`แยกเป็น ${pieces.length} ชิ้นแล้ว · จำไว้กับลายในคลังแล้ว`, `Split into ${pieces.length} pieces · remembered in the library`)
+      : t(`แยกเป็น ${pieces.length} ชิ้นแล้ว`, `Split into ${pieces.length} pieces`));
+  };
+  const forgetSplit = async (assetId: string) => {
+    try {
+      await saveAssetSplit(assetId, null);
+      setSplits((m) => { const x = { ...m }; delete x[assetId]; return x; });
+      toast("success", t("เลิกจำการแยกของลายนี้แล้ว", "This artwork's split is no longer remembered"));
+    } catch (e) { toast("error", (e as Error).message); }
+  };
+  const mergeBack = (key: string) => {
+    const it = items.find((x) => x.key === key);
+    if (!it?.piece) return;
+    const group = items.filter((x) => sameSplit(x, it));
+    replaceGroup(group, [parentOf(it, group)]);
   };
 
   const addFiles = (files: File[]) => {
@@ -253,6 +353,9 @@ export function NestingEditor({ id }: { id: string }) {
       if (it.size.mode !== "natural" && !(Number(it.size.value) > 0)) return t(`"${it.title}" ยังไม่ได้ใส่ขนาด`, `"${it.title}" has no size yet`);
       if (!settings.fill && it.qty < 1) return t(`"${it.title}" จำนวนต้องอย่างน้อย 1`, `"${it.title}" needs a quantity of at least 1`);
     }
+    if (items.some((it) => it.lock) && !canSplit)
+      return t(`ล็อกลายต้องใช้ตัวช่วย v${HELPER_SPLIT_VERSION} ขึ้นไป — คลิกขวาไอคอนกรรไกรข้างนาฬิกา → “ตรวจหาเวอร์ชันใหม่”`,
+        `Locking needs helper v${HELPER_SPLIT_VERSION} or later — right-click the scissors icon next to the clock → “Check for updates”`);
     if (settings.fill) {
       const total = items.reduce((a, it) => a + (it.fill_pct || 0), 0);
       if (Math.abs(total - 100) > 0.01) return t(`เปอร์เซ็นต์ที่เติมรวมกันต้องได้ 100% (ตอนนี้ ${Math.round(total * 100) / 100}%)`, `Fill percentages must add up to 100% (now ${Math.round(total * 100) / 100}%)`);
@@ -270,6 +373,7 @@ export function NestingEditor({ id }: { id: string }) {
         sha: it.file!.sha, name: `${it.title || stem(it.file!.name)}.png`, qty: it.qty,
         size: { mode: it.size.mode, value: it.size.mode === "natural" ? null : it.size.value },
         fill_pct: settings.fill ? it.fill_pct : 0,
+        lock_box: !!it.lock?.box, rotate: it.lock ? ROTATE_LOCK_ANGLES[it.lock.rotate] : null,
       })),
     };
     try {
@@ -449,18 +553,26 @@ export function NestingEditor({ id }: { id: string }) {
       label: sheetsInfo.length > 1 ? `แผ่น ${i + 1}` : "ขนาดแผ่น", w: round2(sh.width_mm / 10), h: round2(sh.height_mm / 10), unit: "cm",
     }));
     const merged = new Map<string, { asset_id: string; title: string; url: string | null; size: AssetSize | null; qty: number }>();
-    (run?.keys ?? []).forEach((k, i) => {
-      const it = items.find((x) => x.key === k);
-      const r = summary?.per_part?.[i];
-      if (!it?.asset_id || !r) return;
-      const qty = r.exact + r.filled;
-      if (qty <= 0) return;
+    const add = (it: NestingItem, qty: number) => {
+      if (!it.asset_id || qty <= 0) return;
       const size = assetSizeOf(it, previews[it.asset_id]?.sizes ?? []);
       const mk = `${it.asset_id}|${JSON.stringify(size)}`;
       const cur = merged.get(mk);
       if (cur) cur.qty += qty;
       else merged.set(mk, { asset_id: it.asset_id, title: it.title, url: previews[it.asset_id]?.url ?? null, size, qty });
+    };
+    const sets = new Map<string, { it: NestingItem; qty: number }>();
+    (run?.keys ?? []).forEach((k, i) => {
+      const it = items.find((x) => x.key === k);
+      const r = summary?.per_part?.[i];
+      if (!it?.asset_id || !r) return;
+      const qty = r.exact + r.filled;
+      if (!it.piece) { add(it, qty); return; }
+      const sk = `${it.piece.source.sha}|${it.piece.parent.title}`;
+      const cur = sets.get(sk);
+      sets.set(sk, { it: { ...it, title: it.piece.parent.title, size: it.piece.parent.size }, qty: cur ? Math.min(cur.qty, qty) : qty });
     });
+    for (const { it, qty } of sets.values()) add(it, qty);
     return { sizes, print_items: [...merged.values()] };
   };
   const onPublished = (r: PublishResult) => {
@@ -534,7 +646,8 @@ export function NestingEditor({ id }: { id: string }) {
                 · {t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}{settings.fill ? t(" + เติม", " + fill") : ""}</span>
             </h3>
             <ItemsPanel items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
-              busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)} />
+              busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
+              canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack} />
           </section>
           {canRun && (
             <div className="sticky bottom-2 rounded-xl border border-slate-200 bg-white p-3">
@@ -678,6 +791,12 @@ export function NestingEditor({ id }: { id: string }) {
             ? t("มีชิ้นที่ชิดเกินระยะหรือเลยขอบแผ่น — งานจริงอาจชนกันหรือพิมพ์ตกขอบ", "Some pieces are too close or over the sheet edge — the print may overlap or run off the edge") : null} />
       )}
       {cardOpen && pub.asset_id && <AssetDetailPopup assetId={pub.asset_id} onClose={() => setCardOpen(false)} />}
+      {splitItem && splitInfo && (
+        <SplitModal open onClose={() => setSplitKey(null)} item={splitItem} info={splitInfo} scale={scaleOf(splitItem, splitInfo)}
+          initial={splitInitial} saved={!!savedSplit} canRemember={!!splitItem.asset_id && canRun} unit={settings.unit}
+          onApply={(res, params, qtys, remember) => applySplit(splitItem.key, res, params, qtys, remember)}
+          onForget={() => forgetSplit(splitItem.asset_id!)} />
+      )}
       <AssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} multiple typeFilter="image" defaultSource="artwork"
         title={t("เลือกลายจากคลัง Artwork", "Pick artwork from the library")}
         onSelect={(assets) => { addFromLibrary(assets); setPickerOpen(false); }} />
