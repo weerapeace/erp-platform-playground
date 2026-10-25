@@ -36,9 +36,11 @@ export type NestingJobRow = {
   print_type: { code: string; name: string } | null;
   settings: Record<string, unknown>; items: NestingItem[]; result: NestingResult | null;
   created_by_name: string | null; updated_by_name: string | null; created_at: string; updated_at: string;
+  // ส่งเข้าคลังงานพิมพ์แล้ว (เฟส 3) — การ์ดในคลังไฟล์ + โฟลเดอร์ Drive + เวลาส่งล่าสุด
+  asset_id: string | null; drive_folder_url: string | null; published_at: string | null;
 };
 
-export const SELECT = "id, name, status, print_type_id, settings, items, result, created_by_name, updated_by_name, created_at, updated_at, print_type:erp_print_types(code, name)";
+export const SELECT = "id, name, status, print_type_id, settings, items, result, created_by_name, updated_by_name, created_at, updated_at, asset_id, drive_folder_url, published_at, print_type:erp_print_types(code, name)";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{16}$/;
@@ -110,5 +112,7 @@ export function toJob(r: Record<string, unknown>): NestingJobRow {
     result: r.result ? cleanResult(r.result) : null,
     created_by_name: (r.created_by_name as string | null) ?? null, updated_by_name: (r.updated_by_name as string | null) ?? null,
     created_at: String(r.created_at), updated_at: String(r.updated_at),
+    asset_id: (r.asset_id as string | null) ?? null, drive_folder_url: (r.drive_folder_url as string | null) ?? null,
+    published_at: (r.published_at as string | null) ?? null,
   };
 }

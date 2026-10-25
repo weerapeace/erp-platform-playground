@@ -13,6 +13,8 @@
 // เปลี่ยนได้ตอนทดสอบในเครื่องนักพัฒนา (NEXT_PUBLIC_NESTING_HELPER_URL) — เว็บจริงใช้ 8765 เสมอ
 export const HELPER_URL = process.env.NEXT_PUBLIC_NESTING_HELPER_URL || "http://127.0.0.1:8765";
 export const HELPER_MIN_VERSION = "1.1.0";
+/** ส่งไฟล์ขึ้น Drive เองจากเครื่อง (ปุ่ม "ส่งเข้าคลังงานพิมพ์") ได้ตั้งแต่รุ่นนี้ */
+export const HELPER_DRIVE_VERSION = "1.2.0";
 export const HELPER_INSTALL_PATH = "Z:\\Assets\\[99] Programs\\Nesting Helper";
 
 export type Lang = "th" | "en";
@@ -80,6 +82,25 @@ export const helperFileUrl = (sha: string, kind: "thumb" | "view") => `${HELPER_
 
 /** ลิงก์หน้ารายงาน (เปิดในแท็บใหม่) */
 export const helperLink = (path: string, lang: Lang) => `${HELPER_URL}${path}${path.includes("?") ? "&" : "?"}lang=${lang}`;
+
+/** ความคืบหน้าการส่งไฟล์ขึ้น Drive (ตัวช่วยส่งเองเบื้องหลัง — หน้าเว็บถามทุก ~1 วินาที) */
+export type DrivePush = {
+  state: "running" | "done" | "error"; error: string | null; sent: number; total: number;
+  files: { file: string; size: number; sent: number; id: string | null; error: string | null }[];
+};
+
+/** ไฟล์ผลลัพธ์ในตัวช่วย (เช่นรูปตัวอย่าง preview_01.png) → File ไว้อัปต่อ */
+export async function helperFile(path: string, lang: Lang, name: string): Promise<File> {
+  let res: Response;
+  try { res = await fetch(`${HELPER_URL}${path}`, { cache: "no-store", headers: { "X-Lang": lang } }); } catch { throw new Error(UNREACHABLE[lang]); }
+  if (!res.ok) {
+    let msg = `(${res.status})`;
+    try { const j = await res.json(); if (typeof j.error === "string") msg = j.error; } catch { /* ไม่ใช่ JSON */ }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type || "application/octet-stream" });
+}
 
 /** ดาวน์โหลดไฟล์จากตัวช่วย (PDF/EPS/zip) ตั้งชื่อตามที่ตัวช่วยบอก — ผิดพลาด = throw (หน้าไม่หลุดไปหน้า error) */
 export async function helperDownload(path: string, lang: Lang): Promise<string> {

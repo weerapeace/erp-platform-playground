@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useT, useLang } from "@/components/i18n";
 import { useAuth } from "@/components/auth";
 import { StandaloneShell } from "@/components/standalone-shell";
@@ -19,10 +20,10 @@ import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import { helperApi, helperDownload, helperLink } from "@/lib/nesting-helper";
-import type { AssetDetail, AssetRow } from "@/app/api/assets/shared";
+import type { AssetDetail, AssetRow, AssetSize } from "@/app/api/assets/shared";
 import {
   createNestingJob, getNestingJob, listPrintTypes, toMm, updateNestingJob,
-  type JobDraft, type NestingItem, type NestingJobRow, type NestingResult, type NestingStatus, type PrintType,
+  type JobDraft, type NestingItem, type NestingJobRow, type NestingResult, type NestingStatus, type PrintType, type PublishResult,
 } from "./data";
 import { HelperChip, HelperSetupCard, useHelperStatus } from "./helper-status";
 import { ItemsPanel, type AssetPreview } from "./items-panel";
@@ -30,6 +31,10 @@ import { STATUS_STYLE } from "./list-view";
 import { SETTINGS_DEFAULTS, fmt, fmtLen, newKey, readSettings, type FileInfo, type Settings, type Unit } from "./nest-utils";
 import { SettingsPanel, sheetFromPrintType } from "./settings-panel";
 import { SheetView, rotated90, type HelperPart, type Placed } from "./sheet-view";
+import { PublishModal } from "./publish-modal";
+
+// การ์ดในคลังไฟล์ (ของกลาง) — โหลดเมื่อกดดูเท่านั้น (คลังไฟล์ตัวใหญ่ ไม่ให้หน้าจัดเรียงช้า)
+const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
 
 type Summary = {
   used_length_mm: number; utilization: number; saving: number | null; placed: number; total: number;
@@ -61,6 +66,18 @@ function nestSnapshot(settings: Settings, items: NestingItem[]): string {
 }
 
 const stem = (name: string) => name.replace(/\.[^.]+$/, "");
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** ขนาดลายในงาน → ไซส์ของลายในคลัง (ตรงกับที่เลือกจาก dropdown ได้ป้ายชื่อเดิม) · ไม่ตรง = สร้างจากขนาดจริง (cm) */
+function assetSizeOf(it: NestingItem, sizes: AssetSize[]): AssetSize | null {
+  const v = it.size.value;
+  if ((it.size.mode !== "width" && it.size.mode !== "height") || !v) return null;
+  const hit = sizes.find((z) => z.unit !== "px" && Math.abs(toMm((it.size.mode === "width" ? z.w : z.h) ?? -1, z.unit) - v) < 0.05);
+  if (hit) return hit;
+  return it.size.mode === "width" ? { label: "", w: round2(v / 10), h: null, unit: "cm" } : { label: "", w: null, h: round2(v / 10), unit: "cm" };
+}
+
+type Pub = { asset_id: string | null; drive_folder_url: string | null; published_at: string | null };
 
 export function NestingEditor({ id }: { id: string }) {
   const t = useT();
@@ -86,6 +103,9 @@ export function NestingEditor({ id }: { id: string }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [printTypes, setPrintTypes] = useState<PrintType[]>([]);
+  const [pub, setPub] = useState<Pub>({ asset_id: null, drive_folder_url: null, published_at: null });   // ส่งเข้าคลังแล้ว (ไม่นับเป็นการแก้งาน)
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [cardOpen, setCardOpen] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   const draft = useMemo(() => makeDraft(name, status, printTypeId, settings, items, result), [name, status, printTypeId, settings, items, result]);
@@ -95,6 +115,7 @@ export function NestingEditor({ id }: { id: string }) {
     const s = readSettings(job.settings);
     setName(job.name); setStatus(job.status); setPrintTypeId(job.print_type_id); setSettings(s); setItems(job.items); setResult(job.result);
     setSavedSnap(JSON.stringify(makeDraft(job.name, job.status, job.print_type_id, s, job.items, job.result)));
+    setPub({ asset_id: job.asset_id, drive_folder_url: job.drive_folder_url, published_at: job.published_at });
   }, []);
 
   useEffect(() => { listPrintTypes().then(setPrintTypes).catch(() => setPrintTypes([])); }, []);
@@ -371,19 +392,33 @@ export function NestingEditor({ id }: { id: string }) {
   };
 
   // ---------------------------------------------------------------- บันทึกงานลง ERP
+  const persist = async (): Promise<string> => {
+    const job = jobId ? await updateNestingJob(jobId, draft) : await createNestingJob(draft);
+    setSavedSnap(JSON.stringify(draft));
+    setSavedAt(new Date());
+    if (!jobId) {
+      setJobId(job.id);
+      window.history.replaceState(null, "", `/tasks/nesting/${job.id}`);  // เปลี่ยน URL โดยไม่โหลดหน้าใหม่ (ผลจัดเรียงบนจอไม่หาย)
+    }
+    return job.id;
+  };
   const save = async () => {
     if (!name.trim()) { setSaveError(t("ใส่ชื่องานก่อนบันทึก", "Enter a job name before saving")); nameRef.current?.focus(); return; }
     setSaving(true); setSaveError(null);
     try {
-      const job = jobId ? await updateNestingJob(jobId, draft) : await createNestingJob(draft);
-      setSavedSnap(JSON.stringify(draft));
-      setSavedAt(new Date());
+      await persist();
       toast("success", t("บันทึกงานแล้ว", "Job saved"));
-      if (!jobId) {
-        setJobId(job.id);
-        window.history.replaceState(null, "", `/tasks/nesting/${job.id}`);  // เปลี่ยน URL โดยไม่โหลดหน้าใหม่ (ผลจัดเรียงบนจอไม่หาย)
-      }
     } catch (e) { setSaveError((e as Error).message); } finally { setSaving(false); }
+  };
+  /** ก่อนส่งเข้าคลัง: งานต้องอยู่ใน ERP ล่าสุด (ชื่องาน = ชื่อโฟลเดอร์บน Drive) */
+  const ensureSaved = async (): Promise<string | null> => {
+    if (!name.trim()) {
+      toast("error", t("ใส่ชื่องานก่อนส่ง — ชื่องานจะเป็นชื่อโฟลเดอร์บน Drive", "Enter a job name first — it becomes the folder name on Drive"));
+      nameRef.current?.focus();
+      return null;
+    }
+    if (jobId && !dirty) return jobId;
+    try { return await persist(); } catch (e) { toast("error", (e as Error).message); return null; }
   };
   const discard = () => {
     const d = JSON.parse(savedSnap) as JobDraft;
@@ -407,6 +442,35 @@ export function NestingEditor({ id }: { id: string }) {
     });
     return out;
   }, [summary, stale, run, t]);
+
+  const buildMeta = () => {
+    const sheetsInfo = summary?.sheets ?? [];
+    const sizes: AssetSize[] = sheetsInfo.map((sh, i) => ({
+      label: sheetsInfo.length > 1 ? `แผ่น ${i + 1}` : "ขนาดแผ่น", w: round2(sh.width_mm / 10), h: round2(sh.height_mm / 10), unit: "cm",
+    }));
+    const merged = new Map<string, { asset_id: string; title: string; url: string | null; size: AssetSize | null; qty: number }>();
+    (run?.keys ?? []).forEach((k, i) => {
+      const it = items.find((x) => x.key === k);
+      const r = summary?.per_part?.[i];
+      if (!it?.asset_id || !r) return;
+      const qty = r.exact + r.filled;
+      if (qty <= 0) return;
+      const size = assetSizeOf(it, previews[it.asset_id]?.sizes ?? []);
+      const mk = `${it.asset_id}|${JSON.stringify(size)}`;
+      const cur = merged.get(mk);
+      if (cur) cur.qty += qty;
+      else merged.set(mk, { asset_id: it.asset_id, title: it.title, url: previews[it.asset_id]?.url ?? null, size, qty });
+    });
+    return { sizes, print_items: [...merged.values()] };
+  };
+  const onPublished = (r: PublishResult) => {
+    applyJob(r.job);
+    setPublishOpen(false);
+    toast("success", r.created
+      ? t("ส่งเข้าคลังงานพิมพ์แล้ว — สร้างการ์ดใหม่ในคลังไฟล์", "Sent to the print library — a new card was created in the file library")
+      : t(`ส่งใหม่แล้ว — อัปเดตการ์ดเดิม${r.replaced ? ` · ย้ายไฟล์เก่า ${r.replaced} ไฟล์ลงถังขยะ Drive` : ""}`,
+        `Sent again — the same card was updated${r.replaced ? ` · ${r.replaced} old file(s) moved to the Drive trash` : ""}`));
+  };
 
   const progressText = (() => {
     const p = run?.job?.progress;
@@ -443,6 +507,17 @@ export function NestingEditor({ id }: { id: string }) {
               className={`px-2.5 py-1.5 ${u === x ? "bg-violet-100 font-semibold text-violet-700" : "text-slate-600"}`}>{x}</button>
           ))}
         </div>
+        {pub.published_at && (
+          <span className="inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">
+            ✓ {t(`ส่งเข้าคลังแล้ว ${new Date(pub.published_at).toLocaleDateString("th-TH")}`, `In the print library since ${new Date(pub.published_at).toLocaleDateString("en-GB")}`)}
+            {pub.asset_id && can("assets.view") && (
+              <button type="button" onClick={() => setCardOpen(true)} className="font-medium underline">{t("เปิดการ์ด", "Open card")}</button>
+            )}
+            {pub.drive_folder_url && (
+              <a href={pub.drive_folder_url} target="_blank" rel="noreferrer" className="font-medium underline">Drive ↗</a>
+            )}
+          </span>
+        )}
         <HelperChip status={helper} />
       </div>
 
@@ -566,6 +641,13 @@ export function NestingEditor({ id }: { id: string }) {
               <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={!done || !!busy} onClick={() => exportFiles("pdf")}
                   className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">{t("ดาวน์โหลด PDF", "Download PDF")}</button>
+                {canRun && (
+                  <button type="button" disabled={!done || !!busy || stale} onClick={() => setPublishOpen(true)}
+                    title={stale ? t("ค่าตั้งเปลี่ยนหลังจัดเรียง — จัดเรียงใหม่ก่อนส่ง", "Settings changed after nesting — nest again before sending") : undefined}
+                    className="rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50">
+                    📤 {pub.published_at ? t("ส่งเข้าคลังใหม่", "Send to library again") : t("ส่งเข้าคลังงานพิมพ์", "Send to print library")}
+                  </button>
+                )}
                 <button type="button" disabled={!done || !!busy} onClick={() => exportFiles("eps")} className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-50">EPS</button>
                 <button type="button" disabled={!done || !!busy} onClick={() => exportFiles("report")} className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-50">{t("รายงาน", "Report")}</button>
                 <button type="button" disabled={!done || !!busy} onClick={() => exportFiles("folder")} className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-50">{t("เปิดโฟลเดอร์ไฟล์", "Open output folder")}</button>
@@ -588,6 +670,14 @@ export function NestingEditor({ id }: { id: string }) {
         </main>
       </div>
 
+      {run && sheets && (
+        <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} jobName={name} printTypes={printTypes}
+          defaultPrintTypeId={printTypeId} helperVersion={helper.state === "ready" ? helper.version : null} hid={run.hid} sheets={sheets}
+          headerText={settings.header_text} publishedAt={pub.published_at} ensureSaved={ensureSaved} buildMeta={buildMeta} onPublished={onPublished}
+          warn={check && (check.close.length || check.outside.length)
+            ? t("มีชิ้นที่ชิดเกินระยะหรือเลยขอบแผ่น — งานจริงอาจชนกันหรือพิมพ์ตกขอบ", "Some pieces are too close or over the sheet edge — the print may overlap or run off the edge") : null} />
+      )}
+      {cardOpen && pub.asset_id && <AssetDetailPopup assetId={pub.asset_id} onClose={() => setCardOpen(false)} />}
       <AssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} multiple typeFilter="image" defaultSource="artwork"
         title={t("เลือกลายจากคลัง Artwork", "Pick artwork from the library")}
         onSelect={(assets) => { addFromLibrary(assets); setPickerOpen(false); }} />

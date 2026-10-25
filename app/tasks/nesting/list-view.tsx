@@ -84,6 +84,21 @@ export function NestingListView() {
         return <span className={`rounded-md px-2 py-0.5 text-xs ${st.cls}`}>{lang === "en" ? st.en : st.th}</span>;
       },
     },
+    {
+      id: "published_at", accessorKey: "published_at", header: t("ส่งเข้าคลังงานพิมพ์", "In print library"), size: 150,
+      cell: ({ row }) => {
+        const r = row.original;
+        if (!r.published_at) return <span className="text-slate-300">—</span>;
+        return (
+          <span className="text-emerald-700">
+            ✓ {new Date(r.published_at).toLocaleDateString(lang === "en" ? "en-GB" : "th-TH", { dateStyle: "medium" })}
+            {r.drive_folder_url && (
+              <a href={r.drive_folder_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="ml-2 text-xs underline">Drive ↗</a>
+            )}
+          </span>
+        );
+      },
+    },
     { id: "updated_by_name", accessorKey: "updated_by_name", header: t("แก้ล่าสุดโดย", "Last edited by"), size: 140 },
     {
       id: "updated_at", accessorKey: "updated_at", header: t("แก้ล่าสุด", "Last edited"), size: 150,
