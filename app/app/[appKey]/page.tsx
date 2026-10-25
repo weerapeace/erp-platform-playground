@@ -23,6 +23,8 @@ import { getSearchScope } from "@/lib/search-scopes";
 import { useSearchHotkey } from "@/lib/search-hotkey";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, type DeviceLayout } from "@/components/device-view";
 import { menuVisibleTo } from "@/lib/menu-audience";
+import { applyAppOverrides, menuPlace, moreLabelOf } from "@/lib/app-menu-layout";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 
 // ⚙️ ตั้งค่าแอป (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป · โหลดเมื่อกดครั้งแรก
 const AppSettingsPanel = dynamic(() => import("@/components/app-settings-panel").then((m) => m.AppSettingsPanel), { ssr: false });
@@ -30,7 +32,7 @@ const MasterPage = dynamic(() => import("@/components/master-page").then((m) => 
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
 });
 
-type MenuItem = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null; parent_id?: string | null; section?: string; audience?: unknown };
+type MenuItem = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null; parent_id?: string | null; section?: string; audience?: unknown; app_overrides?: unknown };
 // ไอคอนเมนู: รูปอัปโหลด (icon_url) > อิโมจิ
 function MItemIcon({ it, cls }: { it: MenuItem; cls: string }) {
   if (it.icon_url) {
@@ -39,7 +41,7 @@ function MItemIcon({ it, cls }: { it: MenuItem; cls: string }) {
   }
   return <span className={`text-xl flex-shrink-0`}>{it.icon ?? "•"}</span>;
 }
-type AppGroup = { key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; default_href: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null };
+type AppGroup = { id?: string; menu_more_label?: string | null; key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; default_href: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null };
 // ไอคอนแอป: รูปอัปโหลด (icon_url) > emoji
 function AppIcon({ app, size = 22 }: { app: AppGroup | null; size?: number }) {
   if (app?.icon_url) {
@@ -65,6 +67,9 @@ export default function StandaloneApp() {
   const [loaded, setLoaded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);   // เปิด drawer เมนูของแอป (☰ iPad / "เพิ่มเติม" มือถือ)
   const [openMenu, setOpenMenu] = useState<string | null>(null);   // เมนูแม่ที่กำลังกาง dropdown (แถบบน จอกว้าง)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);          // ปุ่มรวมเมนู "เพิ่มเติม ▾" (แถบบน จอกว้าง)
+  const moreBtnRef = useRef<HTMLSpanElement>(null);
+  const closeMoreMenu = useCallback(() => setMoreMenuOpen(false), []);
   const initedRef = useRef(false);   // ตั้งหน้าเริ่มต้น (default landing) แค่ครั้งแรก
   const [deepSrc, setDeepSrc] = useState<string | null>(null);   // หน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก)
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -80,18 +85,21 @@ export default function StandaloneApp() {
   useEffect(() => {
     let alive = true;
     Promise.all([
-      apiFetch("/api/menu/apps").then((r) => r.json()),
+      apiFetch(menuRev ? `/api/menu/apps?_=${menuRev}` : "/api/menu/apps").then((r) => r.json()),
       apiFetch(menuRev ? `/api/menu?_=${menuRev}` : "/api/menu").then((r) => r.json()),
     ]).then(([aj, mj]) => {
       if (!alive) return;
       const ag = (aj.data ?? []).find((x: AppGroup) => x.key === appKey) ?? null;
       setApp(ag);
-      setAllItems(((mj.data ?? []) as MenuItem[]).filter((m) => m.is_active && m.show_in_sidebar && (m.app_keys ?? []).includes(appKey)).sort((a, b) => a.sort_order - b.sort_order));
-      const its = ((mj.data ?? []) as MenuItem[])
-        .filter((m) => m.is_active && m.show_in_sidebar && (m.app_keys ?? []).includes(appKey)
+      // เมนูของแอปนี้ เรียง/ตั้งชื่อตามที่แอปนี้ตั้งไว้ (↕️ จัดเรียง/ซ่อนเมนู — lib/app-menu-layout)
+      const appRows = applyAppOverrides(((mj.data ?? []) as MenuItem[]).filter((m) => m.is_active && m.show_in_sidebar && (m.app_keys ?? []).includes(appKey)), appKey);
+      setAllItems(appRows);
+      // ซ่อนในแอปนี้ → ตัดออก (เมนูย่อยของเมนูที่ซ่อนหายตาม)
+      const hiddenIds = new Set(appRows.filter((m) => menuPlace(m, appKey) === "hidden").map((m) => m.id));
+      const its = appRows
+        .filter((m) => !hiddenIds.has(m.id) && !(m.parent_id && hiddenIds.has(m.parent_id))
           && (!m.permission_key || can(m.permission_key as Parameters<typeof can>[0]))
-          && menuVisibleTo(m.audience, user))   // 👁 ใครเห็นเมนูไหน (ตั้งที่ ⚙️ ตั้งค่า)
-        .sort((a, b) => a.sort_order - b.sort_order);
+          && menuVisibleTo(m.audience, user));   // 👁 ใครเห็นเมนูไหน (ตั้งที่ ⚙️ ตั้งค่า)
       setItems(its);
       // ครั้งแรกครั้งเดียว: คืนหน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก) ไม่งั้นใช้ default landing
       if (!initedRef.current) {
@@ -185,9 +193,14 @@ export default function StandaloneApp() {
   const isMasterItem = !!cur && cur.href.startsWith("/m/");
   const moduleKey = isMasterItem ? cur!.href.replace(/^\/m\//, "").split("?")[0] : null;
 
-  // แถบล่าง (มือถือ): เกิน 5 เมนูหลัก → โชว์ 4 ตัวแรก + ปุ่ม "เพิ่มเติม" เปิด drawer เลือกที่เหลือ
-  const hasMore = topLevel.length > 5;
-  const barItems = hasMore ? topLevel.slice(0, 4) : topLevel.slice(0, 5);
+  // ↕️ เมนูบนแถบ vs รวมในปุ่ม "เพิ่มเติม ▾" (ตั้งที่ ⚙️ → จัดเรียง/ซ่อนเมนู — lib/app-menu-layout)
+  const barTop = topLevel.filter((it) => menuPlace(it, appKey) !== "more");
+  const moreTop = topLevel.filter((it) => menuPlace(it, appKey) === "more");
+  const moreLabel = moreLabelOf(app);
+  const inMoreActive = moreTop.some((it) => isParentActive(it));   // หน้าที่เปิดอยู่เป็นเมนูในปุ่มรวม → ไฮไลต์ปุ่ม + บอกชื่อหน้า
+  // แถบล่าง (มือถือ): เมนูบนแถบก่อน · เกิน 5 หรือมีเมนูที่รวมไว้ → 4 ตัวแรก + ปุ่ม "เพิ่มเติม" เปิด drawer เลือกที่เหลือ
+  const hasMore = barTop.length > 5 || moreTop.length > 0;
+  const barItems = hasMore ? barTop.slice(0, 4) : barTop.slice(0, 5);
   const barCols = barItems.length + (hasMore ? 1 : 0);
   // เมนูที่กำลังเปิดอยู่ในแถบล่างไหม (นับลูกของเมนูแม่ด้วย) — ไม่งั้น highlight ปุ่มเพิ่มเติม
   const onBar = barItems.some((it) => it.id === activeId || kidsOf(it.id).some((k) => k.id === activeId));
@@ -220,7 +233,7 @@ export default function StandaloneApp() {
           {/* เมนูเป็นแท็บบนแถบ (จอกว้าง) — เลื่อนได้ถ้าเยอะ · เมนูแม่กดเปิด dropdown */}
           {topLevel.length > 0 && (
             <nav data-appmenu className="hidden md:flex items-center gap-0.5 ml-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
-              {topLevel.map((it) => {
+              {barTop.map((it) => {
                 const kids = kidsOf(it.id);
                 if (kids.length === 0) {
                   return (
@@ -239,6 +252,17 @@ export default function StandaloneApp() {
                   </button>
                 );
               })}
+              {/* ⋯ ปุ่มรวมเมนูที่ไม่ค่อยใช้ — กดแล้วเป็นรายการ (dropdown กลาง ลอยพ้นแถบที่เลื่อนได้) */}
+              {moreTop.length > 0 && (
+                <span ref={moreBtnRef} className="shrink-0 inline-flex">
+                  <button onClick={() => { setOpenMenu(null); setMoreMenuOpen((v) => !v); }} title={`เมนูที่รวมไว้ใน “${moreLabel}”`}
+                    className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-sm whitespace-nowrap transition-colors ${moreMenuOpen || inMoreActive ? "bg-white/25 font-semibold" : "text-white/85 hover:bg-white/12"}`}>
+                    <span className="text-base leading-none">⋯</span> {moreLabel}
+                    {inMoreActive && cur && <span className="font-normal text-white/80 max-w-[160px] truncate">· {cur.label}</span>}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`transition-transform ${moreMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
+                  </button>
+                </span>
+              )}
               {/* ⚙️ ตั้งค่าแอปนี้ (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป */}
               {canAdmin && (
                 <button onClick={() => { setOpenMenu(null); setSettingsOn(true); }} title="ตั้งค่าแอปนี้ — ใครเห็นเมนูไหน"
@@ -294,12 +318,35 @@ export default function StandaloneApp() {
             </div>
           );
         })()}
+
+        {/* รายการในปุ่มรวมเมนู "เพิ่มเติม ▾" — เมนูแม่โชว์เป็นหัวข้อ + ลูกเรียงใต้ */}
+        <FloatingDropdown anchorRef={moreBtnRef} open={moreMenuOpen && moreTop.length > 0} onClose={closeMoreMenu} minWidth={220} maxWidth={360}>
+          <div data-appmenu className="max-h-[70vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 text-slate-700 shadow-xl">
+            {moreTop.map((it) => {
+              const kids = kidsOf(it.id);
+              const entry = (m: MenuItem, sub = false) => (
+                <button key={m.id} onClick={() => { setMoreMenuOpen(false); gotoItem(m); }}
+                  className={`w-full flex items-center gap-2.5 ${sub ? "pl-6" : "px-2"} pr-2 py-1.5 rounded-lg text-sm text-left transition-colors ${activeId === m.id ? "bg-blue-50 text-blue-700 font-medium" : "hover:bg-slate-50"}`}>
+                  <MItemIcon it={m} cls="w-4 h-4" /> <span className="truncate">{m.label}</span>
+                </button>
+              );
+              if (!kids.length) return entry(it);
+              return (
+                <div key={it.id} className="pt-1">
+                  <div className="px-2 py-1 text-[11px] font-semibold text-slate-400 flex items-center gap-1.5"><MItemIcon it={it} cls="w-3.5 h-3.5" /> {it.label}</div>
+                  {kids.map((k) => entry(k, true))}
+                </div>
+              );
+            })}
+          </div>
+        </FloatingDropdown>
       </header>
 
       {/* เนื้อหาเต็มกว้าง */}
       <main className="flex-1 min-w-0 flex flex-col min-h-0">
         {showSettings ? (
           <AppSettingsPanel appKey={appKey} appLabel={app?.label ?? appKey} items={allItems}
+            appId={app?.id} moreLabel={app?.menu_more_label} defaultHref={app?.default_href}
             onSaved={() => setMenuRev((n) => n + 1)} />
         ) : (() => {
           const content = (<>
@@ -355,7 +402,7 @@ export default function StandaloneApp() {
             <button onClick={() => setMoreOpen(true)}
               className={`py-2.5 flex flex-col items-center gap-0.5 text-xs ${!onBar ? "text-blue-700 font-semibold" : "text-slate-400"}`}>
               <span className="text-xl">☰</span>
-              <span className="truncate max-w-[72px]">เพิ่มเติม</span>
+              <span className="truncate max-w-[72px]">{moreLabel}</span>
             </button>
           )}
         </nav>
@@ -374,9 +421,12 @@ export default function StandaloneApp() {
               <button onClick={closeDrawer} aria-label="ปิด" className="text-slate-400 text-xl leading-none px-2">✕</button>
             </div>
 
-            {/* เนื้อหา — รายการเมนูของแอปนี้ (เมนูแม่โชว์เป็นหัวข้อ + ลูกย่อหน้าเข้า) */}
+            {/* เนื้อหา — รายการเมนูของแอปนี้ (เมนูแม่โชว์เป็นหัวข้อ + ลูกย่อหน้าเข้า) · เมนูที่รวมไว้อยู่ใต้หัวข้อ "เพิ่มเติม" */}
             <div className="flex-1 overflow-y-auto p-2">
-              {topLevel.map((it) => {
+              {[...barTop, ...(moreTop.length ? [null] : []), ...moreTop].map((it) => {
+                if (!it) return (
+                  <div key="__more" className="mt-2 border-t border-slate-100 px-3 pt-3 pb-1 text-xs font-semibold text-slate-400">⋯ {moreLabel}</div>
+                );
                 const kids = kidsOf(it.id);
                 if (kids.length === 0) return (
                   <button key={it.id} onClick={() => gotoItem(it)}

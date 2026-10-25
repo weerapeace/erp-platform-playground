@@ -4,6 +4,7 @@
  *   แท็บ 👁 ใครเห็นเมนูไหน: ติ๊กตำแหน่งต่อเมนู (ไม่ติ๊ก = ทุกคน) + 👤 รายคน (ให้เห็นเพิ่ม / ซ่อนจาก) + ดูแทนตำแหน่ง
  *     เก็บที่ erp_menu_items.audience (กฎ lib/menu-audience) · บันทึกแบบร่าง → 💾 · PATCH /api/menu (admin.users + ประวัติ)
  *     มีผลกับแถบเมนูแอปเดี่ยว · เมนูซ้าย · หน้ารวมแอป — "ซ่อน/โชว์" เท่านั้น กันเข้าจริงใช้สิทธิ์ตำแหน่ง
+ *   แท็บ ↕️ จัดเรียง / ซ่อนเมนู: ลากเรียง · บนแถบ / รวมในปุ่ม "เพิ่มเติม ▾" / ซ่อน · ชื่อปุ่มรวมเมนู (./menu-layout · กฎ lib/app-menu-layout)
  *   แท็บ 🔧 ตั้งค่า<แอป>: หน้าตั้งค่าเฉพาะของแอปนั้น (ถ้ามี เช่น จัดการงาน → /tasks/settings + 🔔 รายงานและแจ้งเตือนอัตโนมัติ) ฝังในกรอบ · หลายแท็บได้
  */
 import { useEffect, useMemo, useState } from "react";
@@ -14,8 +15,9 @@ import { apiFetch } from "@/lib/api";
 import { cleanAudience, describeAudience, menuVisibleTo, type MenuAudience } from "@/lib/menu-audience";
 import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "@/app/tasks/multi-user-picker";
+import { MenuLayoutTab } from "./menu-layout";
 
-export type AppSettingsMenuItem = { id: string; label: string; icon: string | null; href: string; permission_key: string | null; parent_id?: string | null; audience?: unknown };
+export type AppSettingsMenuItem = { id: string; label: string; icon: string | null; href: string; permission_key: string | null; parent_id?: string | null; audience?: unknown; sort_order: number; app_overrides?: unknown };
 type Role = { key: string; label: string; active?: boolean };
 
 /** หน้าตั้งค่าเฉพาะของแต่ละแอป (ฝังเป็นแท็บ · หน้าต้องรองรับ ?embed=1 — PlaygroundShell ทำให้เอง) — เพิ่มแอปอื่นที่นี่ที่เดียว
@@ -30,16 +32,18 @@ export const APP_SETTINGS_PAGES: Record<string, AppSettingsPage[]> = {
 
 const same = (a: MenuAudience | null, b: MenuAudience | null) => JSON.stringify(a) === JSON.stringify(b);
 
-export function AppSettingsPanel({ appKey, appLabel, items, onSaved }: {
+export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHref, items, onSaved }: {
   appKey: string; appLabel: string;
-  /** เมนูทั้งหมดของแอปนี้ (ไม่กรองตามคนดู) */
+  /** erp_app_groups.id / menu_more_label / default_href — ใช้ในแท็บจัดเรียง/ซ่อนเมนู */
+  appId?: string | null; moreLabel?: string | null; defaultHref?: string | null;
+  /** เมนูทั้งหมดของแอปนี้ (ไม่กรองตามคนดู) เรียงตามลำดับของแอป */
   items: AppSettingsMenuItem[];
   /** บันทึกแล้ว — ให้แถบเมนูโหลดใหม่ */
   onSaved: () => void;
 }) {
   const { can } = useAuth();
   const pages = (APP_SETTINGS_PAGES[appKey] ?? []).filter((p) => !p.perm || can(p.perm));
-  const [tab, setTab] = useState<"who" | string>("who");   // "who" หรือ href ของหน้าที่ฝัง
+  const [tab, setTab] = useState<"who" | "layout" | string>("who");   // "who" / "layout" หรือ href ของหน้าที่ฝัง
   const page = pages.find((p) => p.href === tab) ?? null;
   const tabCls = (on: boolean) => `-mb-px border-b-2 px-3 py-2 text-sm whitespace-nowrap ${on ? "border-violet-600 font-medium text-violet-700" : "border-transparent text-slate-500 hover:text-slate-800"}`;
   return (
@@ -48,6 +52,7 @@ export function AppSettingsPanel({ appKey, appLabel, items, onSaved }: {
         <h1 className="text-lg font-semibold text-slate-800">⚙️ ตั้งค่า {appLabel}</h1>
         <div className="mt-2 flex flex-wrap items-end gap-1">
           <button type="button" onClick={() => setTab("who")} className={tabCls(tab === "who")}>👁 ใครเห็นเมนูไหน</button>
+          <button type="button" onClick={() => setTab("layout")} className={tabCls(tab === "layout")}>↕️ จัดเรียง / ซ่อนเมนู</button>
           {pages.map((p) => (
             <button key={p.href} type="button" onClick={() => setTab(p.href)} className={tabCls(tab === p.href)}>{p.icon ?? "🔧"} {p.label}</button>
           ))}
@@ -57,9 +62,11 @@ export function AppSettingsPanel({ appKey, appLabel, items, onSaved }: {
           </div>
         </div>
       </div>
-      {!page
-        ? <WhoSeesWhat items={items} onSaved={onSaved} />
-        : <iframe key={page.href} src={`${page.href}?embed=1`} title={page.label} className="flex-1 w-full border-0 bg-white" />}
+      {page
+        ? <iframe key={page.href} src={`${page.href}?embed=1`} title={page.label} className="flex-1 w-full border-0 bg-white" />
+        : tab === "layout"
+          ? <MenuLayoutTab appKey={appKey} appId={appId} moreLabel={moreLabel} defaultHref={defaultHref} items={items} onSaved={onSaved} />
+          : <WhoSeesWhat items={items} onSaved={onSaved} />}
     </div>
   );
 }

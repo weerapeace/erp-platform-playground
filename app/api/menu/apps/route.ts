@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,8 +45,20 @@ export async function PATCH(request: NextRequest) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id || !body.patch) return NextResponse.json({ error: "ต้องมี id + patch" }, { status: 400 });
   const { id: _d, ...patch } = body.patch as Record<string, unknown>; void _d;
+  if ("menu_more_label" in patch) patch.menu_more_label = String(patch.menu_more_label ?? "").trim().slice(0, 40) || null;   // ว่าง = "เพิ่มเติม"
+  const { data: before } = await supabaseAdmin().from("erp_app_groups").select("*").eq("id", body.id).maybeSingle();
   const { data, error } = await supabaseAdmin().from("erp_app_groups").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", body.id).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ประวัติ: ช่องที่เปลี่ยนจริง (ตั้งค่าแอป = ตั้งค่ากลาง ต้อง audit)
+  const prev = (before ?? {}) as Record<string, unknown>;
+  const changes = Object.fromEntries(Object.keys(patch).filter((k) => JSON.stringify(prev[k] ?? null) !== JSON.stringify(patch[k] ?? null)).map((k) => [k, { from: prev[k] ?? null, to: patch[k] ?? null }]));
+  if (Object.keys(changes).length) {
+    const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+    await writeAudit(supabaseAdmin(), {
+      action: "menu_app.update", entityType: "erp_app_groups", entityId: body.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { key: prev.key ?? null, label: prev.label ?? null, changes },
+    });
+  }
   // ล็อกแอป (ตั้ง permission_key) → สร้างสิทธิ์ "เข้าแอป" ให้อัตโนมัติถ้ายังไม่มี (กันตั้งสิทธิ์ role แล้วขึ้น "ไม่พบ permission")
   const pk = typeof patch.permission_key === "string" ? patch.permission_key.trim() : "";
   if (pk) {

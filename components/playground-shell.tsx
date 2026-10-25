@@ -23,6 +23,7 @@ import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { DevicePreviewButton } from "@/components/device-preview";
 import { cachedGetJson } from "@/lib/shell-cache";
 import { menuVisibleTo } from "@/lib/menu-audience";
+import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
 // เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
@@ -199,7 +200,7 @@ export type MenuRow = {
   permission_key: string | null; is_active: boolean;
   app_keys?: string[];   // โมดูลใหญ่ (App) ที่เมนูนี้สังกัด — many-to-many
   /** ชื่อหมวด/ป้าย/ลำดับ เฉพาะแอป — เมนูเดียวกันโผล่หลายแอปแต่จัดหมวดต่างกัน (เช่น "สั่งซื้อ" อยู่หมวด "เงินออก" ในแอปการเงิน) */
-  app_overrides?: Record<string, { section?: string; label?: string; sort?: number }>;
+  app_overrides?: Record<string, AppMenuOverride>;   // + place (more/hidden) = จัดเรียง/ซ่อนต่อแอป — lib/app-menu-layout
   module_key?: string | null;   // โมดูลที่เมนูนี้ผูก (สำหรับหมวด ⚙ ตั้งค่า) — ตั้งที่ /admin/menu
   parent_id?: string | null;   // เมนูแม่ — ถ้ามี เมนูนี้เป็นลูกโผล่ใน dropdown ของแม่ (null = เมนูหลัก)
   search_keywords?: string[];  // คำค้นเพิ่ม/คำพ้อง สำหรับ Global Search (เช่น "ค่าส่ง" → ร้านขนส่ง/เรทค่าส่ง) — ตั้งที่ /admin/menu
@@ -492,7 +493,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     const its = menuRows
       .filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(key)
         && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0]))
-        && menuVisibleTo(r.audience, user))
+        && menuVisibleTo(r.audience, user) && menuPlace(r, key) !== "hidden")
       .sort((a, b) => a.sort_order - b.sort_order);
     const home = appGroups.find((a) => a.key === key)?.default_href;
     if (home && its.some((r) => r.href === home)) return home;
@@ -546,7 +547,10 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     let rows = fromRegistry ? menuRows!.filter((r) => r.is_active && r.show_in_sidebar && menuVisibleTo(r.audience, user)) : null;   // 👁 ใครเห็นเมนูไหน
     // กรองตามโมดูลใหญ่ (App) ที่เลือก — ถ้ามี App + เลือกอยู่
     if (rows && activeApp && appGroups.length > 0) {
-      rows = rows.filter((r) => (r.app_keys ?? []).includes(activeApp))
+      rows = rows.filter((r) => (r.app_keys ?? []).includes(activeApp));
+      // ↕️ ซ่อนในแอปนี้ (⚙️ ตั้งค่าแอป → จัดเรียง/ซ่อนเมนู — lib/app-menu-layout) · เมนูย่อยของเมนูที่ซ่อนหายตาม
+      const hid = new Set(rows.filter((r) => menuPlace(r, activeApp) === "hidden").map((r) => r.id));
+      rows = rows.filter((r) => !hid.has(r.id) && !(r.parent_id && hid.has(r.parent_id)))
         // ใช้ชื่อหมวด/ป้าย/ลำดับที่แอปนี้กำหนดเอง (erp_menu_items.app_overrides) ถ้ามี
         .map((r) => {
           const ov = r.app_overrides?.[activeApp];
