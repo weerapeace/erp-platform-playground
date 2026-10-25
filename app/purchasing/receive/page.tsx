@@ -16,7 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { FileInput } from "@/components/file-input";
 import { useCardLayout, CardLayoutEditor, type CardField } from "@/components/card-layout";
-import { MaterialDemandPanel } from "@/components/material-demand-panel";
+import { ReceiveLineFields, receiveCaseType } from "@/components/receive-line-modal";
 import { WarehousePicker } from "@/components/pickers";
 import type { WarehousePickerValue } from "@/components/pickers";
 import { Pager } from "@/components/pager";
@@ -586,8 +586,7 @@ export default function ReceiveGoodsPage() {
       const recv = num(inp?.recv);
       const def = num(inp?.def);
       if (recv <= 0 && def <= 0) continue;
-      const isShort = recv < it.remaining;
-      const caseType = !isShort ? "full" : (inp?.close ? "partial_close" : "partial_wait");
+      const caseType = receiveCaseType(recv, it.remaining, inp?.close);   // สูตรกลาง (ตัวเดียวกับป๊อปรับของจากการ์ดใบสั่งผลิต)
       const arr = byPo.get(it.po_id) ?? [];
       arr.push({ po_line_id: it.id, qty_received: recv, qty_defective: def, case_type: caseType });
       byPo.set(it.po_id, arr);
@@ -1209,9 +1208,6 @@ export default function ReceiveGoodsPage() {
         const b = etaBadge(it.days_remaining);
         const pb = payBadge(it);
         const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
-        const recv = num(inp.recv), def = num(inp.def);
-        const short = recv > 0 && recv < it.remaining;
-        const over = recv > it.remaining;
         return (
           <ERPModal open onClose={() => !marking && setQtyEdit(null)} size="md" storageKey="recv-track"
             title="รับของ / สถานะ / ประวัติ"
@@ -1243,48 +1239,10 @@ export default function ReceiveGoodsPage() {
               </div>
             </div>
 
-            {/* กรอกจำนวนรับ (รอบนี้) */}
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">รับครั้งนี้ ({it.uom})</label>
-                {/* ปุ่ม −/+ ตัวใหญ่ + แป้นตัวเลข (กดง่ายบนมือถือ ไม่ต้องพิมพ์) */}
-                <div className="flex items-stretch gap-1.5">
-                  <button type="button" aria-label="ลด" onClick={() => setPendInput(it.id, { recv: String(Math.max(0, Math.round((num(inp.recv) - 1) * 100) / 100)) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">−</button>
-                  <input type="number" inputMode="decimal" step="any" min={0} autoFocus value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })} onFocus={(e) => e.target.select()}
-                    className={`flex-1 min-w-0 h-11 px-2 text-lg text-center border rounded-md ${short || over ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
-                  <button type="button" aria-label="เพิ่ม" onClick={() => setPendInput(it.id, { recv: String(Math.round((num(inp.recv) + 1) * 100) / 100) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">+</button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">เสีย / ผิด ({it.uom})</label>
-                <div className="flex items-stretch gap-1.5">
-                  <button type="button" aria-label="ลด" onClick={() => setPendInput(it.id, { def: String(Math.max(0, Math.round((num(inp.def) - 1) * 100) / 100)) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">−</button>
-                  <input type="number" inputMode="decimal" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })} onFocus={(e) => e.target.select()}
-                    className="flex-1 min-w-0 h-11 px-2 text-lg text-center border border-slate-200 rounded-md" />
-                  <button type="button" aria-label="เพิ่ม" onClick={() => setPendInput(it.id, { def: String(Math.round((num(inp.def) + 1) * 100) / 100) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">+</button>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <button onClick={() => setPendInput(it.id, { recv: String(it.remaining) })} className="h-8 px-3 text-xs font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">รับครบ ({it.remaining.toLocaleString()})</button>
-              {over && <span className="text-[11px] text-amber-600">⚠ รับเกินจำนวนคงเหลือ</span>}
-            </div>
-            {short && (
-              <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50/60">
-                <div className="text-xs font-medium text-amber-800 mb-2">รับไม่ครบ (ขาด {(it.remaining - recv).toLocaleString()} {it.uom}) — จะจัดการส่วนที่ขาดอย่างไร?</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setPendInput(it.id, { close: false })} className={`text-left px-3 py-2 rounded-lg border text-xs ${!inp.close ? "border-amber-400 bg-white ring-1 ring-amber-200" : "border-slate-200 bg-white hover:border-amber-300"}`}>
-                    <div className="font-medium text-slate-800">🟡 รอรับเพิ่ม</div><div className="text-[11px] text-slate-500 mt-0.5">ส่วนที่เหลือยังค้างรับต่อ</div>
-                  </button>
-                  <button onClick={() => setPendInput(it.id, { close: true })} className={`text-left px-3 py-2 rounded-lg border text-xs ${inp.close ? "border-orange-400 bg-white ring-1 ring-orange-200" : "border-slate-200 bg-white hover:border-orange-300"}`}>
-                    <div className="font-medium text-slate-800">🔴 ปิดบิล (จบยอด)</div><div className="text-[11px] text-slate-500 mt-0.5">ไม่รอของที่ขาดแล้ว</div>
-                  </button>
-                </div>
-              </div>
-            )}
-            {/* ของกลาง: ใบงานที่รอวัตถุดิบนี้ · พอไหม · แบ่งเข้าใบงาน (เฟส 2) · ไม่พอกดขอซื้อ */}
-            <MaterialDemandPanel code={it.code} uom={it.uom} incomingQty={recv}
-              allocatable refType="po_line" refId={it.id} refLabel={it.po_no} />
+            {/* ของกลาง ReceiveLineFields: กรอกรับ/เสีย · รับครบ · เตือนรับเกิน · รับไม่ครบ (รอรับเพิ่ม/ปิดบิล) · ใบงานที่รอของนี้
+                ตัวเดียวกับป๊อปรับของจากการ์ดแท็บใบสั่งผลิต — ค่าที่กรอกเข้าตะกร้ารับหลายรายการ (pendInputs) เหมือนเดิม */}
+            <ReceiveLineFields remaining={it.remaining} uom={it.uom} code={it.code} poLineId={it.id} poNo={it.po_no}
+              value={inp} onChange={(patch) => setPendInput(it.id, patch)} autoFocus />
 
             <div className="mt-2 text-[11px] text-slate-400">ใส่จำนวนแล้วกด <b>ปิด</b> → เลือกรายการอื่นต่อได้ → กด <b>✓ ยืนยันรับของ</b> ด้านล่าง (ใส่วันที่ + แนบใบรับ/บิล + ผู้รับ)</div>
             <div className="mt-3 pt-3 border-t border-slate-100">
