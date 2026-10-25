@@ -29,6 +29,7 @@ import { useAuth, usePermission } from "@/components/auth";
 import { computePoTotals } from "@/lib/po-total";
 import type { PoDetail } from "@/app/api/purchasing/po-detail/route";
 import { CompanySelect, CompanyTag, useCompanies } from "@/components/company-filter";
+import { PoOrderEvidence } from "./order-evidence";
 
 const baht = (n: number | null | undefined) => `฿${Math.round(Number(n ?? 0)).toLocaleString("th-TH")}`;
 const thDate = (iso: string | null | undefined) =>
@@ -413,7 +414,9 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                 ))}
             </div>
           </div>
-          {d.note && <div className="text-xs text-slate-500 px-1">📝 {d.note}</div>}
+          {d.note && <div className="text-xs text-slate-500 px-1 whitespace-pre-line">📝 {d.note}</div>}
+          {/* รูปหน้าคำสั่งซื้อ Shopee/Taobao ที่ยืนยันผูกกับใบนี้ (จาก "คำสั่งซื้อจากไลน์") */}
+          <PoOrderEvidence poId={poId} />
           <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">
             {d.lines.length === 0 ? <div className="p-4 text-center text-sm text-slate-400">ไม่มีรายการสินค้า</div>
               : d.lines.map((l, i) => (

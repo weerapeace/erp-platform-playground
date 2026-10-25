@@ -42,6 +42,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const s of LINE_ALL_SLOTS) groups[s] = cfg.groups?.[s] ?? "";
   return NextResponse.json({
     has_token: !!cfg.token, token_hint: tokenHint(cfg.token),
+    // Channel secret = ใช้ตรวจลายเซ็นว่าข้อความมาจาก LINE จริง (ตั้งใน env LINE_CHANNEL_SECRET ก็ได้)
+    has_secret: !!(process.env.LINE_CHANNEL_SECRET || cfg.channel_secret),
+    secret_hint: process.env.LINE_CHANNEL_SECRET ? "ตั้งใน env" : tokenHint(typeof cfg.channel_secret === "string" ? cfg.channel_secret : ""),
     captured: cfg.group_id ?? "", captured_at: cfg.group_captured_at ?? null,
     groups, disabled_events: cfg.disabled_events ?? {},
     systems: LINE_SYSTEMS, slots: LINE_SLOTS,
@@ -54,7 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
 
-  let body: { slot?: string; group_id?: string; clear?: boolean; test?: boolean; event?: string; enabled?: boolean; token?: string };
+  let body: { slot?: string; group_id?: string; clear?: boolean; test?: boolean; event?: string; enabled?: boolean; token?: string; channel_secret?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const { id, cfg } = await readCfg(admin);
   const save = async (next: LineCfg) => {
@@ -73,6 +76,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await save({ ...cfg, token: tk });
     await audit({ field: "token", token_hint: tokenHint(tk) });   // ไม่ลงโทเคนเต็มใน audit
     return NextResponse.json({ ok: true, has_token: true, token_hint: tokenHint(tk), error: null });
+  }
+
+  // ---- ตั้ง/ล้าง Channel secret (ส่งค่าว่าง = ล้าง → เลิกตรวจลายเซ็น) ----
+  if (typeof body.channel_secret === "string") {
+    const sec = body.channel_secret.trim();
+    if (sec && !/^[0-9a-f]{32}$/i.test(sec)) return NextResponse.json({ error: "Channel secret ต้องเป็นตัวอักษร 0-9 a-f ยาว 32 ตัว (ก๊อปจาก LINE Developers แท็บ Basic settings)" }, { status: 400 });
+    const next: LineCfg = { ...cfg };
+    if (sec) next.channel_secret = sec; else delete next.channel_secret;
+    await save(next);
+    await audit({ field: "channel_secret", cleared: !sec, secret_hint: tokenHint(sec) });   // ไม่ลงค่าเต็มใน audit
+    return NextResponse.json({ ok: true, has_secret: !!sec, error: null });
   }
 
   // ---- เปิด/ปิดแจ้งเตือนต่อเหตุการณ์ ----

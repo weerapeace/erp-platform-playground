@@ -1,0 +1,681 @@
+/**
+ * ของกลาง — "คำสั่งซื้อจากไลน์" (กล่องพัก purchase_order_captures)
+ *
+ * เส้นทาง: พนักงานซื้อของจาก Shopee/Taobao เสร็จ → แคปหน้าคำสั่งซื้อส่งเข้า "กลุ่มส่งรูปคำสั่งซื้อ" (slot purchase_capture)
+ *   → webhook บอทเดิม (/api/china-pay/line-webhook) ส่งรูปมาที่นี่ → เก็บรูปลง R2 → AI อ่าน → พักในกล่อง (สถานะ "รอตรวจ")
+ *   → บอทตอบกลับในกลุ่ม (reply = ฟรี ไม่นับโควตา push 300/เดือน) พร้อมลิงก์ไปตรวจ
+ *   → คนตรวจ/แก้ แล้วกดยืนยันที่ /purchasing/line-orders (ผูก PO เดิม / เปิด PO ใหม่ / เก็บไว้ก่อน)
+ *
+ * กติกาสำคัญ:
+ *   - ผล AI เป็นแค่ "ร่าง" ห้ามเอาไปแตะ PO จนกว่าคนกดยืนยัน
+ *   - ยืนยันว่ารูปมาจากไลน์จริงด้วยการ "ดึงรูปจากไลน์ด้วยโทเคนบอทเรา" — ข้อความปลอมดึงรูปไม่ได้ = ไม่บันทึก
+ *   - ไม่ให้ AI ถอดชื่อ/ที่อยู่/เบอร์ผู้รับ (รูปต้นฉบับยังมีอยู่ → ดูได้เฉพาะคนมีสิทธิ์ po.view)
+ */
+import type { supabaseAdmin } from "@/lib/supabase-admin";
+import { r2PutObject } from "@/lib/r2";
+import { chatJson, imagesToDataUrls, openAiKey } from "@/lib/ai-caption";
+import { appBaseUrl } from "@/lib/app-url";
+import { writeAudit } from "@/lib/audit";
+import { shopNameSimilarity } from "@/lib/partner-match";
+import { computePoTotals, sumActiveLines } from "@/lib/po-total";
+import { createManualPo } from "@/lib/po-manual";
+import {
+  PLATFORM_LABEL, curSym, fieldLabel, isCNY,
+  type CaptureItem, type CapturePlatform, type CaptureRow, type CaptureStatus, type PoLineLite, type PoSuggestion,
+} from "@/lib/order-capture-shared";
+
+export type { CaptureItem, CapturePlatform, CaptureRow, CaptureStatus, PoLineLite, PoSuggestion };
+
+type Admin = ReturnType<typeof supabaseAdmin>;
+type Rec = Record<string, unknown>;
+
+export const CAPTURE_TABLE = "purchase_order_captures";
+/** slot กลุ่มไลน์ใน line_config.groups (ตั้งได้ที่ LINE console / หน้าคำสั่งซื้อจากไลน์) */
+export const ORDER_CAPTURE_SLOT = "purchase_capture";
+/** โมเดลอ่านรูป — อ่านตัวหนังสือจีน/ไทยตัวเล็กในหน้าจอมือถือได้ดี ราคาถูก (เปลี่ยนได้ด้วย env) */
+export const ORDER_AI_MODEL = (process.env.OPENAI_ORDER_MODEL || "gpt-4.1-mini").trim();
+/** รูปชุดเดียวกัน (ส่งหลายรูปพร้อมกัน) รอครบได้นานเท่านี้ — เกินแล้วรวมเท่าที่มี */
+const SET_WAIT_MS = 3 * 60 * 1000;
+
+/** คอลัมน์ที่ส่งไปหน้าจอ (ไม่รวม ai_raw ที่ยาว) */
+export const CAPTURE_COLUMNS = [
+  "id", "source", "status", "platform", "shop_name", "order_no", "order_no_norm", "order_date", "currency", "items",
+  "shipping_fee", "discount", "total_paid", "tracking_no", "note", "image_keys", "ai_confidence", "ai_unreadable",
+  "ai_is_order", "ai_notes", "ai_error", "ai_model", "ai_read_at", "dup_of", "sender_line_user_id", "sender_name",
+  "line_group_id", "image_set_id", "po_id", "po_mode", "confirmed_by", "confirmed_at", "rejected_by", "rejected_at",
+  "reject_reason", "created_by", "created_at", "updated_at",
+].join(", ");
+
+// ---------------------------------------------------------------- ตัวช่วยเล็ก ๆ
+
+const str = (v: unknown) => String(v ?? "").trim();
+const numOrNull = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(String(v).replace(/[^0-9.\-]/g, ""));
+  return isFinite(n) ? Math.round(n * 100) / 100 : null;
+};
+const r2d = (n: number) => Math.round(n * 100) / 100;
+
+const PLATFORMS = Object.keys(PLATFORM_LABEL) as CapturePlatform[];
+/** สกุลตั้งต้นของแพลตฟอร์ม (ถ้า AI ไม่บอก) */
+const defaultCurrency = (p: CapturePlatform | null) => (p === "taobao" || p === "1688" ? "RMB" : "THB");
+const money = (n: number | null, c: unknown) =>
+  n === null ? "—" : `${curSym(c)}${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
+
+/** เลขคำสั่งซื้อแบบตัดช่องว่าง/ขีด/ตัวพิมพ์เล็ก — ไว้เทียบซ้ำ (สั้นกว่า 6 ตัว = ไม่น่าเชื่อ ไม่ใช้เทียบ) */
+export function normOrderNo(v: unknown): string | null {
+  const s = str(v).toUpperCase().replace(/[^0-9A-Z]/g, "");
+  return s.length >= 6 ? s : null;
+}
+
+/** ลิงก์เปิดใบนี้ในหน้า ERP (ใช้ในข้อความตอบกลับไลน์) */
+export const captureLink = (id: string) => `${appBaseUrl()}/purchasing/line-orders?open=${encodeURIComponent(id)}`;
+
+export function normalizeRow(r: Rec): CaptureRow {
+  const arr = (v: unknown) => (Array.isArray(v) ? v : []);
+  return {
+    ...(r as unknown as CaptureRow),
+    items: arr(r.items) as CaptureItem[],
+    image_keys: arr(r.image_keys).map(String),
+    ai_unreadable: arr(r.ai_unreadable).map(String),
+    shipping_fee: numOrNull(r.shipping_fee),
+    discount: numOrNull(r.discount),
+    total_paid: numOrNull(r.total_paid),
+    ai_confidence: numOrNull(r.ai_confidence),
+  };
+}
+
+export async function loadCapture(admin: Admin, id: string): Promise<CaptureRow | null> {
+  const { data } = await admin.from(CAPTURE_TABLE).select(CAPTURE_COLUMNS).eq("id", id).maybeSingle();
+  return data ? normalizeRow(data as unknown as Rec) : null;
+}
+
+// ---------------------------------------------------------------- AI อ่านรูป
+
+const AI_SYSTEM = [
+  "คุณคือผู้ช่วยฝ่ายจัดซื้อ อ่านภาพหน้าจอ \"คำสั่งซื้อที่ซื้อแล้ว\" จากแอป Shopee / Taobao / 1688 / Lazada / TikTok Shop",
+  "(อาจมีหลายภาพของคำสั่งซื้อเดียวกัน ให้รวมข้อมูลจากทุกภาพ) แล้วตอบเป็น JSON อย่างเดียว ตามโครงนี้:",
+  "{",
+  '  "is_order": true/false  — ภาพนี้เป็นหน้าคำสั่งซื้อ/รายละเอียดคำสั่งซื้อ/หน้าติดตามพัสดุของคำสั่งซื้อจริงไหม,',
+  '  "platform": "taobao" | "shopee" | "1688" | "lazada" | "tiktok" | "other",',
+  '  "shop_name": "ชื่อร้านตามที่เห็น (ภาษาเดิม)",',
+  '  "order_no": "เลขคำสั่งซื้อ (Taobao: 订单编号 ตัวเลขยาว ~19 หลัก · Shopee: หมายเลขคำสั่งซื้อ/Order ID) ไม่เห็น = \\"\\"",',
+  '  "order_date": "YYYY-MM-DD วันที่สั่ง/ชำระเงิน ไม่เห็น = \\"\\"",',
+  '  "currency": "RMB" ถ้าราคาเป็น ¥/元 · "THB" ถ้าเป็น ฿/บาท,',
+  '  "items": [{ "name": "ชื่อสินค้าตามภาพ", "name_th": "แปลชื่อเป็นไทยให้ครบใจความ — ต้องคงรูปทรง ขนาด/ตัวเลข เบอร์ รุ่น วัสดุ ไว้ทุกตัว (ชื่อเดิมเป็นไทยอยู่แล้ว = ใช้ชื่อเดิม)", "option": "ตัวเลือก (สี/ขนาด/规格) ตามภาพ แปลไทยในวงเล็บ", "qty": จำนวน, "unit_price": ราคาต่อชิ้นที่จ่ายจริง, "line_total": ยอดรวมของบรรทัด }],',
+  '  "shipping_fee": ค่าส่ง (运费) เป็นตัวเลข · ส่งฟรี = 0 · ไม่เห็น = null,',
+  '  "discount": ส่วนลดรวมเป็นตัวเลขบวก · ไม่เห็น = null,',
+  '  "total_paid": ยอดที่จ่ายจริงทั้งคำสั่งซื้อ (实付款 / ยอดชำระทั้งหมด) · ไม่เห็น = null,',
+  '  "tracking_no": "เลขพัสดุ (运单号/快递单号/หมายเลขติดตามพัสดุ) ไม่เห็น = \\"\\"",',
+  '  "confidence": 0-100 ความมั่นใจโดยรวมว่าอ่านถูก,',
+  '  "unreadable": ["ชื่อช่องที่อ่านไม่ชัดหรือไม่เห็นในภาพ เช่น shipping_fee, order_no"],',
+  '  "notes": "หมายเหตุสั้น ๆ ภาษาไทย ถ้ามีอะไรผิดปกติ (เช่น ภาพถูกตัด / มีหลายคำสั่งซื้อในภาพเดียว)"',
+  "}",
+  "กฎ: ห้ามเดาตัวเลข — ไม่เห็นชัดให้ใส่ null แล้วใส่ชื่อช่องใน unreadable · ตัวเลขเป็นตัวเลขล้วน ไม่มีสัญลักษณ์เงินหรือคอมมา",
+  "· ห้ามใส่ชื่อผู้รับ ที่อยู่ หรือเบอร์โทร ลงในคำตอบ · ถ้าภาพไม่ใช่คำสั่งซื้อ ให้ is_order=false และช่องอื่นว่าง",
+].join("\n");
+
+export type AiOrderResult = {
+  is_order: boolean;
+  platform: CapturePlatform | null;
+  shop_name: string;
+  order_no: string;
+  order_date: string | null;
+  currency: string;
+  items: CaptureItem[];
+  shipping_fee: number | null;
+  discount: number | null;
+  total_paid: number | null;
+  tracking_no: string;
+  confidence: number | null;
+  unreadable: string[];
+  notes: string;
+};
+
+/** ทำผล AI ให้อยู่ในรูปที่ปลอดภัย (AI ตอบอะไรแปลก ๆ มาก็ไม่พัง) */
+export function sanitizeAiOrder(raw: Rec): AiOrderResult {
+  const p = str(raw.platform).toLowerCase();
+  const platform = (PLATFORMS as string[]).includes(p) ? (p as CapturePlatform) : (p ? "other" : null);
+  const curRaw = str(raw.currency).toUpperCase();
+  const currency = isCNY(curRaw) ? "RMB" : curRaw === "THB" ? "THB" : defaultCurrency(platform);
+  const items: CaptureItem[] = (Array.isArray(raw.items) ? raw.items : []).map((x) => {
+    const it = (x ?? {}) as Rec;
+    const qty = numOrNull(it.qty);
+    let unit = numOrNull(it.unit_price);
+    const total = numOrNull(it.line_total);
+    if (unit === null && total !== null && qty) unit = r2d(total / qty);
+    return {
+      name: str(it.name).slice(0, 300),
+      name_th: str(it.name_th).slice(0, 300),
+      option: str(it.option).slice(0, 200),
+      qty: qty && qty > 0 ? qty : 1,
+      unit_price: unit,
+      line_total: total ?? (unit !== null && qty ? r2d(unit * qty) : null),
+    };
+  }).filter((it) => it.name || it.name_th).slice(0, 50);
+  const date = str(raw.order_date);
+  const conf = numOrNull(raw.confidence);
+  return {
+    is_order: raw.is_order !== false,
+    platform,
+    shop_name: str(raw.shop_name).slice(0, 200),
+    order_no: str(raw.order_no).slice(0, 60),
+    order_date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    currency,
+    items,
+    shipping_fee: numOrNull(raw.shipping_fee),
+    discount: numOrNull(raw.discount),
+    total_paid: numOrNull(raw.total_paid),
+    tracking_no: str(raw.tracking_no).slice(0, 60),
+    confidence: conf === null ? null : Math.max(0, Math.min(100, conf)),
+    unreadable: (Array.isArray(raw.unreadable) ? raw.unreadable : []).map(str).filter(Boolean).slice(0, 20),
+    notes: str(raw.notes).slice(0, 500),
+  };
+}
+
+/** ส่งรูป (data URL) ให้ AI อ่าน — detail "high" เพราะตัวหนังสือในหน้าจอมือถือเล็ก */
+export async function readOrderWithAi(dataUrls: string[]): Promise<{ result: AiOrderResult; raw: Rec }> {
+  const content: unknown[] = [
+    { type: "text", text: `ภาพหน้าจอคำสั่งซื้อ ${dataUrls.length} ภาพ` },
+    ...dataUrls.map((url) => ({ type: "image_url", image_url: { url, detail: "high" } })),
+  ];
+  const raw = await chatJson(AI_SYSTEM, content, 1500, ORDER_AI_MODEL);
+  return { result: sanitizeAiOrder(raw), raw };
+}
+
+// ---------------------------------------------------------------- ซ้ำ
+
+/** ใบอื่นที่เลขคำสั่งซื้อเดียวกัน (ไม่นับใบที่ตีตก) — ใบเก่าสุดมาก่อน */
+export async function findDuplicate(admin: Admin, id: string, orderNoNorm: string | null): Promise<CaptureRow | null> {
+  if (!orderNoNorm) return null;
+  const { data } = await admin.from(CAPTURE_TABLE).select(CAPTURE_COLUMNS)
+    .eq("order_no_norm", orderNoNorm).neq("id", id).neq("status", "rejected")
+    .order("created_at", { ascending: true }).limit(1);
+  const row = (data ?? [])[0];
+  return row ? normalizeRow(row as unknown as Rec) : null;
+}
+
+/** ให้ AI อ่านรูปของใบนี้ แล้วบันทึกผลเป็น "รอตรวจ" — ใช้ทั้งตอนรับจากไลน์ / อัปรูปเอง / กดอ่านใหม่ */
+export async function processCapture(admin: Admin, id: string, actorName = "line-bot"): Promise<CaptureRow | null> {
+  const cap = await loadCapture(admin, id);
+  if (!cap) return null;
+  const done = async (patch: Rec) => {
+    await admin.from(CAPTURE_TABLE).update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+    return loadCapture(admin, id);
+  };
+  if (!openAiKey()) return done({ status: "pending", ai_error: "ยังไม่ได้ตั้งค่า AI (OPENAI_API_KEY) — กรอกข้อมูลเองได้" });
+  if (cap.image_keys.length === 0) return done({ status: "pending", ai_error: "ไม่มีรูปให้อ่าน" });
+
+  try {
+    const urls = await imagesToDataUrls(cap.image_keys);
+    if (urls.length === 0) return done({ status: "pending", ai_error: "เปิดรูปจากที่เก็บไม่ได้ — ลองกดให้ AI อ่านใหม่" });
+    const { result, raw } = await readOrderWithAi(urls);
+    const norm = normOrderNo(result.order_no);
+    const dup = await findDuplicate(admin, id, norm);
+    const row = await done({
+      status: "pending",
+      platform: result.platform,
+      shop_name: result.shop_name || null,
+      order_no: result.order_no || null,
+      order_no_norm: norm,
+      order_date: result.order_date,
+      currency: result.currency,
+      items: result.items,
+      shipping_fee: result.shipping_fee,
+      discount: result.discount,
+      total_paid: result.total_paid,
+      tracking_no: result.tracking_no || null,
+      ai_confidence: result.confidence,
+      ai_unreadable: result.unreadable,
+      ai_is_order: result.is_order,
+      ai_notes: result.notes || null,
+      ai_error: null,
+      ai_model: ORDER_AI_MODEL,
+      ai_raw: raw,
+      ai_read_at: new Date().toISOString(),
+      dup_of: dup?.id ?? null,
+    });
+    // มีค่าใช้จ่าย → ลง audit ทุกครั้ง (นับค่า AI ได้ภายหลัง)
+    await writeAudit(admin, {
+      action: "ai_order_read", entityType: CAPTURE_TABLE, entityId: id, actorId: null, actorName,
+      metadata: { actor: actorName, images: urls.length, model: ORDER_AI_MODEL, platform: result.platform, items: result.items.length },
+    });
+    return row;
+  } catch (e) {
+    return done({ status: "pending", ai_error: String((e as Error)?.message ?? e).slice(0, 300) });
+  }
+}
+
+// ---------------------------------------------------------------- LINE
+
+type LineCfg = { token?: string; groups?: Record<string, string> } & Rec;
+export type LineEvent = {
+  type?: string;
+  replyToken?: string;
+  timestamp?: number;
+  deliveryContext?: { isRedelivery?: boolean };
+  source?: { type?: string; groupId?: string; roomId?: string; userId?: string };
+  message?: { id?: string; type?: string; imageSet?: { id?: string; index?: number; total?: number } };
+};
+
+/** เหตุการณ์ "รูปในกลุ่มส่งรูปคำสั่งซื้อ" เท่านั้น — กลุ่มอื่น (บิลจีน/ขอซื้อ ฯลฯ) ไม่ยุ่ง */
+export function pickOrderImageEvents(cfg: LineCfg, events: LineEvent[]): LineEvent[] {
+  const gid = str(cfg.groups?.[ORDER_CAPTURE_SLOT]);
+  if (!gid || !str(cfg.token)) return [];
+  return events.filter((e) =>
+    e.type === "message" && e.message?.type === "image" && e.source?.groupId === gid && /^\d{5,30}$/.test(str(e.message?.id)));
+}
+
+async function lineReply(token: string, replyToken: string | undefined, text: string): Promise<void> {
+  if (!replyToken) return;
+  try {
+    await fetch("https://api.line.me/v2/bot/message/reply", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ replyToken, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
+    });
+  } catch { /* ตอบไม่ได้ก็ไม่เป็นไร — ข้อมูลอยู่ใน ERP แล้ว */ }
+}
+
+async function lineMemberName(token: string, groupId: string, userId: string | undefined): Promise<string | null> {
+  if (!userId) return null;
+  try {
+    const r = await fetch(`https://api.line.me/v2/bot/group/${encodeURIComponent(groupId)}/member/${encodeURIComponent(userId)}`,
+      { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { displayName?: string };
+    return str(j.displayName) || null;
+  } catch { return null; }
+}
+
+/** ดึงไฟล์รูปจากไลน์ — ทำหน้าที่ยืนยันด้วยว่าข้อความมีอยู่จริง (id ปลอม = ไลน์ตอบ 404) */
+async function fetchLineImage(token: string, messageId: string): Promise<{ bytes: Uint8Array; type: string } | null> {
+  try {
+    const r = await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`,
+      { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    const type = (r.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
+    if (!type.startsWith("image/")) return null;
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > 15 * 1024 * 1024) return null;
+    return { bytes: buf, type };
+  } catch { return null; }
+}
+
+const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+
+/** อัปรูปคำสั่งซื้อขึ้น R2 — ชื่อไฟล์สุ่ม เดาไม่ได้ */
+export async function putCaptureImage(bytes: Uint8Array, type: string): Promise<string> {
+  const ym = new Date().toISOString().slice(0, 7);
+  const key = `line-orders/${ym}/${crypto.randomUUID()}.${EXT[type] ?? "jpg"}`;
+  await r2PutObject(key, bytes, type);
+  return key;
+}
+
+/** ข้อความตอบกลับในไลน์ (ข้อความเดียว) */
+export function buildReplyText(cap: CaptureRow, dup: CaptureRow | null): string {
+  const link = captureLink(cap.id);
+  if (cap.ai_error && !cap.order_no && cap.items.length === 0) {
+    return `📥 รับรูปแล้ว แต่ AI อ่านไม่สำเร็จ\nเปิดตรวจ/กรอกเองใน ERP 👉 ${link}`;
+  }
+  if (cap.ai_is_order === false) {
+    return `🤔 รูปนี้ไม่เหมือนหน้าคำสั่งซื้อ\nถ้าใช่ เปิดตรวจใน ERP 👉 ${link}`;
+  }
+  const lines: string[] = [];
+  lines.push(`📥 รับรูปคำสั่งซื้อแล้ว${cap.platform ? ` (${PLATFORM_LABEL[cap.platform]})` : ""}`);
+  if (cap.shop_name) lines.push(`ร้าน: ${cap.shop_name}`);
+  if (cap.order_no) lines.push(`เลขที่: ${cap.order_no}`);
+  const extra = cap.shipping_fee !== null ? ` (ค่าส่ง ${money(cap.shipping_fee, cap.currency)})` : "";
+  lines.push(`${cap.items.length} รายการ · ยอดจ่าย ${money(cap.total_paid, cap.currency)}${extra}`);
+  for (const it of cap.items.slice(0, 5)) {
+    lines.push(`• ${it.name_th || it.name}${it.option ? ` [${it.option}]` : ""} ×${it.qty}`);
+  }
+  if (cap.items.length > 5) lines.push(`• …อีก ${cap.items.length - 5} รายการ`);
+  if (dup) {
+    const when = new Date(dup.created_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+    lines.push(`⚠️ เลขนี้ส่งมาแล้วเมื่อ ${when}${dup.sender_name ? ` (${dup.sender_name})` : ""} — อาจเป็นรูปซ้ำ`);
+  }
+  if (cap.ai_unreadable.length) lines.push(`⚠️ AI อ่านไม่ชัด: ${cap.ai_unreadable.map(fieldLabel).join(", ")}`);
+  lines.push(`ตรวจ/ยืนยันใน ERP 👉 ${link}`);
+  return lines.join("\n");
+}
+
+/**
+ * รับรูปจากไลน์ทีละเหตุการณ์ (เรียกจาก webhook ใน after() — ตอบ 200 ให้ไลน์ไปก่อนแล้ว)
+ * ส่งหลายรูปพร้อมกัน (imageSet) = รวมเป็นใบเดียว · AI อ่านเมื่อรูปครบชุด
+ */
+export async function handleOrderImageEvents(admin: Admin, cfg: LineCfg, events: LineEvent[]): Promise<void> {
+  const token = str(cfg.token);
+  for (const ev of events) {
+    try { await handleOne(admin, token, ev); }
+    catch (e) { console.error("[order-capture] handle event", e); }
+  }
+}
+
+async function handleOne(admin: Admin, token: string, ev: LineEvent): Promise<void> {
+  const msgId = str(ev.message?.id);
+  const groupId = str(ev.source?.groupId);
+  // ไลน์ส่งซ้ำ (redelivery) — รูปนี้บันทึกไปแล้ว ไม่ทำซ้ำ
+  const { data: seen } = await admin.from(CAPTURE_TABLE).select("id").contains("line_message_ids", [msgId]).limit(1);
+  if ((seen ?? []).length > 0) return;
+
+  const img = await fetchLineImage(token, msgId);
+  if (!img) return;   // ดึงไม่ได้ = ข้อความปลอม/หมดอายุ → ไม่บันทึก
+  const key = await putCaptureImage(img.bytes, img.type);
+  const sender = await lineMemberName(token, groupId, ev.source?.userId);
+
+  const set = ev.message?.imageSet;
+  const total = Math.max(1, Math.min(20, Number(set?.total) || 1));
+  const setId = total > 1 ? str(set?.id) || null : null;
+  const base = {
+    source: "line",
+    image_keys: [key],
+    sender_line_user_id: ev.source?.userId ?? null,
+    sender_name: sender,
+    line_group_id: groupId,
+    line_message_ids: [msgId],
+    created_by: sender ?? "line",
+  };
+
+  if (!setId) {
+    const { data: ins } = await admin.from(CAPTURE_TABLE).insert({ ...base, status: "processing" }).select("id").single();
+    if (!ins) return;
+    await finishAndReply(admin, token, String((ins as Rec).id), ev.replyToken);
+    return;
+  }
+
+  // รูปชุด — เก็บทีละรูปก่อน ครบเมื่อไหร่ค่อยรวมเป็นใบเดียวแล้วอ่าน
+  await admin.from(CAPTURE_TABLE).insert({
+    ...base, status: "collecting", image_set_id: setId, image_set_index: Number(set?.index) || 1, image_set_total: total,
+  });
+  const primaryId = await mergeImageSet(admin, setId, total);
+  if (primaryId) await finishAndReply(admin, token, primaryId, ev.replyToken);
+}
+
+/**
+ * รวมรูปชุดเดียวกันเป็นใบเดียว — คืน id ใบหลักให้ "ตัวที่รวมได้" เท่านั้น (อีกตัวที่มาพร้อมกันได้ null)
+ * force = รวมเท่าที่มี แม้ยังไม่ครบ (ใช้กับชุดที่รอนานเกิน)
+ */
+async function mergeImageSet(admin: Admin, setId: string, total: number, force = false): Promise<string | null> {
+  const { data } = await admin.from(CAPTURE_TABLE)
+    .select("id, status, image_set_index, image_keys, line_message_ids").eq("image_set_id", setId);
+  const rows = ((data ?? []) as Rec[]).filter((r) => r.status === "collecting");
+  if (rows.length === 0 || (!force && rows.length < total)) return null;
+  rows.sort((a, b) => Number(a.image_set_index ?? 0) - Number(b.image_set_index ?? 0));
+  const primary = rows[0];
+  const keys = rows.flatMap((r) => (Array.isArray(r.image_keys) ? r.image_keys : []).map(String));
+  const ids = rows.flatMap((r) => (Array.isArray(r.line_message_ids) ? r.line_message_ids : []).map(String));
+  // จองใบหลักแบบมีเงื่อนไข (status ยังเป็น collecting) — ถ้าอีกตัวจองไปแล้วจะได้ 0 แถว
+  const { data: claimed } = await admin.from(CAPTURE_TABLE)
+    .update({ status: "processing", image_keys: keys, line_message_ids: ids, updated_at: new Date().toISOString() })
+    .eq("id", String(primary.id)).eq("status", "collecting").select("id").maybeSingle();
+  if (!claimed) return null;
+  await admin.from(CAPTURE_TABLE).delete().eq("image_set_id", setId).eq("status", "collecting").neq("id", String(primary.id));
+  return String(primary.id);
+}
+
+async function finishAndReply(admin: Admin, token: string, id: string, replyToken: string | undefined): Promise<void> {
+  const cap = await processCapture(admin, id);
+  if (!cap) return;
+  const dup = cap.dup_of ? await loadCapture(admin, cap.dup_of) : null;
+  await lineReply(token, replyToken, buildReplyText(cap, dup));
+}
+
+/**
+ * รูปชุดที่รอครบนานเกินไป (เช่นรูปหนึ่งดึงไม่ได้) → รวมเท่าที่มีให้เป็น "รอตรวจ" (ไม่อ่าน AI ตรงนี้ ให้คนกดอ่านใหม่)
+ * เรียกตอนเปิดหน้ารายการ — ไม่ต้องมีตัวตั้งเวลา
+ */
+export async function finalizeStaleSets(admin: Admin): Promise<void> {
+  const before = new Date(Date.now() - SET_WAIT_MS).toISOString();
+  const { data } = await admin.from(CAPTURE_TABLE).select("image_set_id, image_set_total")
+    .eq("status", "collecting").lt("created_at", before).limit(50);
+  const sets = new Map<string, number>();
+  for (const r of (data ?? []) as Rec[]) if (r.image_set_id) sets.set(String(r.image_set_id), Number(r.image_set_total) || 1);
+  for (const [setId, total] of sets) {
+    const id = await mergeImageSet(admin, setId, total, true);
+    if (id) await admin.from(CAPTURE_TABLE).update({ status: "pending", ai_error: "รูปชุดนี้มาไม่ครบ — กด \"ให้ AI อ่านใหม่\"" }).eq("id", id);
+  }
+  // ใบที่ค้าง "กำลังอ่าน" นานเกิน (เครื่องดับกลางทาง) → ให้กลับมาเป็นรอตรวจ
+  await admin.from(CAPTURE_TABLE).update({ status: "pending", ai_error: "AI อ่านไม่เสร็จ — กด \"ให้ AI อ่านใหม่\"" })
+    .eq("status", "processing").lt("updated_at", before);
+}
+
+// ---------------------------------------------------------------- เสนอ PO ที่น่าจะใช่
+
+/** ตัดช่องว่าง/เครื่องหมาย แล้วเทียบคู่ตัวอักษร (ใช้ได้กับไทย/จีนที่ไม่มีเว้นวรรค) */
+function bigrams(s: string): Map<string, number> {
+  const t = s.toLowerCase().replace(/[\s\[\]().,#*×x\-_/:;'"]+/g, "");
+  const m = new Map<string, number>();
+  for (let i = 0; i < t.length - 1; i++) { const g = t.slice(i, i + 2); m.set(g, (m.get(g) ?? 0) + 1); }
+  return m;
+}
+export function nameSimilarity(a: string, b: string): number {
+  const A = bigrams(a), B = bigrams(b);
+  let sa = 0, sb = 0, inter = 0;
+  A.forEach((v) => { sa += v; });
+  B.forEach((v) => { sb += v; });
+  if (!sa || !sb) return 0;
+  A.forEach((v, g) => { inter += Math.min(v, B.get(g) ?? 0); });
+  return (2 * inter) / (sa + sb);
+}
+
+const OPEN_PO_STATUS = ["draft", "purchase", "partial"];
+const PLATFORM_SELLER: Partial<Record<CapturePlatform, RegExp>> = {
+  taobao: /tao\s*bao|taobao|เถาเป่า|淘宝/i,
+  "1688": /1688/,
+  shopee: /shopee|ช้อปปี้/i,
+  lazada: /lazada|ลาซาด้า/i,
+  tiktok: /tiktok|ติ๊กต็อก/i,
+};
+
+/** โหลดบรรทัด PO (ที่ยังใช้งาน) ของหลายใบ */
+export async function loadPoLines(admin: Admin, poIds: string[]): Promise<Map<string, PoLineLite[]>> {
+  const out = new Map<string, PoLineLite[]>();
+  if (poIds.length === 0) return out;
+  const { data } = await admin.from("purchase_order_lines_v2")
+    .select("id, po_id, item_name, qty, price_est, item_sku_id, qty_received, is_active, sort_order")
+    .in("po_id", poIds).order("sort_order", { ascending: true });
+  for (const l of (data ?? []) as Rec[]) {
+    if (l.is_active === false) continue;
+    const arr = out.get(String(l.po_id)) ?? [];
+    arr.push({
+      id: String(l.id), item_name: str(l.item_name), qty: Number(l.qty) || 0, price_est: Number(l.price_est) || 0,
+      item_sku_id: (l.item_sku_id as string) ?? null, qty_received: Number(l.qty_received) || 0,
+    });
+    out.set(String(l.po_id), arr);
+  }
+  return out;
+}
+
+/** จับคู่รายการในรูปกับบรรทัด PO แบบดีที่สุด (บรรทัดละ 1 รายการ) — คืน [mapping, คะแนนรวม, จำนวนที่ตรง] */
+function mapItemsToLines(items: CaptureItem[], lines: PoLineLite[]): { mapping: (string | null)[]; score: number; hits: number } {
+  const used = new Set<string>();
+  const mapping: (string | null)[] = [];
+  let score = 0, hits = 0;
+  for (const it of items) {
+    let best: { id: string; s: number } | null = null;
+    for (const l of lines) {
+      if (used.has(l.id)) continue;
+      let s = 0;
+      if (it.sku_id && l.item_sku_id && it.sku_id === l.item_sku_id) s += 3;
+      const sim = Math.max(nameSimilarity(`${it.name_th} ${it.option}`, l.item_name), it.sku_name ? nameSimilarity(it.sku_name, l.item_name) : 0);
+      if (sim >= 0.3) s += 2 * sim;
+      if (s > 0 && it.qty && Math.abs(it.qty - l.qty) < 0.001) s += 1;
+      if (s > 0 && it.unit_price && l.price_est && Math.abs(it.unit_price - l.price_est) <= Math.max(0.01, l.price_est * 0.02)) s += 0.5;
+      if (s >= 0.8 && (!best || s > best.s)) best = { id: l.id, s };
+    }
+    mapping.push(best?.id ?? null);
+    if (best) { used.add(best.id); score += best.s; hits++; }
+  }
+  return { mapping, score, hits };
+}
+
+/** หา PO ที่ยังค้าง (ร่าง/รอรับของ) ที่น่าจะเป็นใบเดียวกับคำสั่งซื้อนี้ — ให้คนเลือกยืนยัน ไม่ผูกเอง */
+export async function suggestPurchaseOrders(admin: Admin, cap: CaptureRow, limit = 3): Promise<PoSuggestion[]> {
+  const since = new Date(Date.now() - 150 * 86400000).toISOString();
+  const { data } = await admin.from("purchase_orders_v2")
+    .select("id, po_no, seller_name, status, currency, order_date, grand_total, created_at")
+    .eq("is_active", true).in("status", OPEN_PO_STATUS).gte("created_at", since)
+    .order("created_at", { ascending: false }).limit(400);
+  const pos = (data ?? []) as Rec[];
+  if (pos.length === 0) return [];
+  const linesBy = await loadPoLines(admin, pos.map((p) => String(p.id)));
+  const sellerRe = cap.platform ? PLATFORM_SELLER[cap.platform] : undefined;
+
+  const scored: PoSuggestion[] = [];
+  for (const p of pos) {
+    const lines = linesBy.get(String(p.id)) ?? [];
+    const reasons: string[] = [];
+    let score = 0;
+    const seller = str(p.seller_name);
+    if (sellerRe && sellerRe.test(seller)) { score += 1.5; reasons.push(`ร้าน "${seller}"`); }
+    else if (cap.shop_name && shopNameSimilarity(seller, cap.shop_name) >= 0.7) { score += 2.5; reasons.push(`ชื่อร้านตรง "${seller}"`); }
+    const m = mapItemsToLines(cap.items, lines);
+    if (m.hits > 0) { score += m.score; reasons.push(`สินค้าตรง ${m.hits}/${cap.items.length} รายการ`); }
+    if (m.hits === 0) continue;   // ไม่มีสินค้าตรงเลย = ไม่เสนอ (กันเสนอมั่ว)
+    if (cap.currency && isCNY(cap.currency) === isCNY(p.currency)) score += 0.3;
+    else if (cap.currency) reasons.push("⚠ สกุลเงินไม่ตรงกับใบ");
+    scored.push({
+      id: String(p.id), po_no: str(p.po_no), seller_name: seller, status: str(p.status), currency: str(p.currency),
+      order_date: (p.order_date as string) ?? null, grand_total: Number(p.grand_total) || 0,
+      score: r2d(score), reasons, lines, mapping: m.mapping,
+    });
+  }
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+/** ค้น PO ที่ยังค้างด้วยเลขที่/ชื่อร้าน (ให้เลือกเองเมื่อระบบเสนอไม่ตรง) */
+export async function searchOpenPos(admin: Admin, q: string): Promise<{ id: string; po_no: string; seller_name: string; status: string; currency: string; order_date: string | null; grand_total: number }[]> {
+  const term = q.replace(/[%,()]/g, " ").trim();
+  let query = admin.from("purchase_orders_v2")
+    .select("id, po_no, seller_name, status, currency, order_date, grand_total")
+    .eq("is_active", true).in("status", OPEN_PO_STATUS).order("created_at", { ascending: false }).limit(20);
+  if (term) query = query.or(`po_no.ilike.%${term}%,seller_name.ilike.%${term}%`);
+  const { data } = await query;
+  return ((data ?? []) as Rec[]).map((p) => ({
+    id: String(p.id), po_no: str(p.po_no), seller_name: str(p.seller_name), status: str(p.status),
+    currency: str(p.currency), order_date: (p.order_date as string) ?? null, grand_total: Number(p.grand_total) || 0,
+  }));
+}
+
+// ---------------------------------------------------------------- ยืนยัน
+
+export type ConfirmInput = {
+  mode: "link" | "new" | "none";
+  po_id?: string | null;
+  /** ผูก PO เดิม: ใส่ราคาจริงจากรูปลงบรรทัดที่จับคู่ */
+  update_prices?: boolean;
+  /** เปิด PO ใหม่: ชื่อร้านในใบ (ว่าง = ตามแพลตฟอร์ม เช่น Taobao) */
+  seller_name?: string;
+  /** ยืนยันแม้เลขคำสั่งซื้อซ้ำกับใบที่ยืนยันไปแล้ว */
+  force?: boolean;
+};
+export type ConfirmResult =
+  | { ok: true; po_id: string | null; po_no: string | null; warnings: string[] }
+  | { ok: false; status: number; error: string };
+
+const itemLabel = (it: CaptureItem) => {
+  const base = it.sku_name || it.name_th || it.name;
+  return it.option && !it.sku_name ? `${base} (${it.option})` : base;
+};
+const unitPrice = (it: CaptureItem) =>
+  it.unit_price !== null && it.unit_price !== undefined ? it.unit_price : (it.line_total !== null && it.qty ? r2d(it.line_total / it.qty) : 0);
+
+/** ข้อความอ้างอิงคำสั่งซื้อที่ต่อท้ายหมายเหตุ PO (ค้นหาเจอจากหน้ารายการ PO) */
+const orderRef = (cap: CaptureRow) =>
+  `🧾 ${cap.platform ? PLATFORM_LABEL[cap.platform] : "คำสั่งซื้อ"}${cap.order_no ? ` #${cap.order_no}` : ""}${cap.shop_name ? ` · ${cap.shop_name}` : ""}`;
+
+export async function confirmCapture(admin: Admin, cap: CaptureRow, input: ConfirmInput, actor: { id: string; name: string }): Promise<ConfirmResult> {
+  if (cap.status !== "pending") return { ok: false, status: 400, error: "ใบนี้ไม่ได้อยู่ในสถานะรอตรวจ" };
+  if (cap.items.length === 0 && input.mode !== "none") return { ok: false, status: 400, error: "ยังไม่มีรายการสินค้า — เพิ่มรายการก่อน หรือเลือก \"เก็บไว้ก่อน\"" };
+
+  // เลขคำสั่งซื้อซ้ำกับใบที่ยืนยันไปแล้ว = น่าจะซื้อซ้ำ/ส่งซ้ำ → กันไว้ก่อน (ยืนยันซ้ำได้ถ้าตั้งใจ)
+  if (cap.order_no_norm && !input.force) {
+    const { data: dups } = await admin.from(CAPTURE_TABLE).select("id, po_id, confirmed_at")
+      .eq("order_no_norm", cap.order_no_norm).eq("status", "confirmed").neq("id", cap.id).limit(1);
+    if ((dups ?? []).length > 0) return { ok: false, status: 409, error: "เลขคำสั่งซื้อนี้ยืนยันไปแล้วในอีกใบ — ถ้าตั้งใจจริงให้กดยืนยันซ้ำอีกครั้ง" };
+  }
+
+  const warnings: string[] = [];
+  let poId: string | null = null;
+  let poNo: string | null = null;
+
+  if (input.mode === "new") {
+    const seller = str(input.seller_name) || (cap.platform && cap.platform !== "other" ? PLATFORM_LABEL[cap.platform] : "") || str(cap.shop_name);
+    const res = await createManualPo(admin, {
+      seller_name: seller,
+      currency: isCNY(cap.currency) ? "RMB" : "THB",
+      order_date: cap.order_date ?? undefined,
+      note: [orderRef(cap), cap.shipping_fee ? `ค่าส่ง ${money(cap.shipping_fee, cap.currency)}` : "", cap.tracking_no ? `พัสดุ ${cap.tracking_no}` : ""].filter(Boolean).join(" · "),
+      lines: cap.items.map((it) => ({ item_sku_id: it.sku_id ?? null, item_name: itemLabel(it), qty: it.qty, price: unitPrice(it) })),
+    }, actor, { source: "line_capture", capture_id: cap.id });
+    if (!res.ok) return res;
+    poId = res.id; poNo = res.po_no;
+  }
+
+  if (input.mode === "link") {
+    const id = str(input.po_id);
+    if (!id) return { ok: false, status: 400, error: "ยังไม่ได้เลือกใบสั่งซื้อ" };
+    const { data: po } = await admin.from("purchase_orders_v2")
+      .select("id, po_no, currency, vat_rate, vat_included, note, is_active").eq("id", id).maybeSingle();
+    const p = po as Rec | null;
+    if (!p || p.is_active === false) return { ok: false, status: 404, error: "ไม่พบใบสั่งซื้อนี้" };
+    poId = String(p.id); poNo = str(p.po_no);
+    const linesBy = await loadPoLines(admin, [poId]);
+    const lines = linesBy.get(poId) ?? [];
+    const lineIds = new Set(lines.map((l) => l.id));
+    const sameCur = !cap.currency || isCNY(cap.currency) === isCNY(p.currency);
+    if (input.update_prices && !sameCur) warnings.push("สกุลเงินในรูปไม่ตรงกับใบสั่งซื้อ — ไม่ได้ใส่ราคาให้ (แก้ในใบเอง)");
+
+    let changed = 0;
+    let added = 0;
+    let sort = lines.length;
+    for (const it of cap.items) {
+      const target = str(it.po_line_id);
+      const price = unitPrice(it);
+      if (target === "new") {
+        const { error } = await admin.from("purchase_order_lines_v2").insert({
+          po_id: poId, item_sku_id: it.sku_id ?? null, item_name: itemLabel(it), qty: it.qty,
+          price_est: sameCur ? price : 0, line_total: sameCur ? r2d(price * it.qty) : 0,
+          currency: str(p.currency) || null, note: `จาก${orderRef(cap)}`, sort_order: sort++,
+        });
+        if (error) warnings.push(`เพิ่ม "${itemLabel(it)}" ไม่สำเร็จ: ${error.message}`); else added++;
+        continue;
+      }
+      if (!target || !lineIds.has(target)) continue;
+      const line = lines.find((l) => l.id === target)!;
+      if (Math.abs(line.qty - it.qty) > 0.001) warnings.push(`"${line.item_name}" ในใบสั่ง ${line.qty} แต่ซื้อจริง ${it.qty} — จำนวนในใบไม่ได้เปลี่ยน`);
+      if (input.update_prices && sameCur && price > 0) {
+        const upd: Rec = { price_est: price, line_total: r2d(line.qty * price) };
+        if (it.sku_id && !line.item_sku_id) upd.item_sku_id = it.sku_id;
+        const { error } = await admin.from("purchase_order_lines_v2").update(upd).eq("id", target);
+        if (error) warnings.push(`ใส่ราคา "${line.item_name}" ไม่สำเร็จ: ${error.message}`); else changed++;
+      }
+    }
+
+    // ยอดใบใหม่ (ของกลาง lib/po-total) + ต่อท้ายหมายเหตุให้รู้ว่ามาจากคำสั่งซื้อไหน
+    const patch: Rec = {};
+    if (changed > 0 || added > 0) {
+      const { data: nowLines } = await admin.from("purchase_order_lines_v2").select("line_total, is_active").eq("po_id", poId);
+      patch.grand_total = computePoTotals(sumActiveLines((nowLines ?? []) as Rec[] as { line_total: number }[]), Number(p.vat_rate) || 0, !!p.vat_included).total;
+    }
+    const ref = orderRef(cap);
+    const note = str(p.note);
+    if (!note.includes(cap.order_no || ref)) patch.note = note ? `${note}\n${ref}` : ref;
+    if (Object.keys(patch).length) await admin.from("purchase_orders_v2").update(patch).eq("id", poId);
+    await writeAudit(admin, {
+      action: "update", entityType: "purchase_orders_v2", entityId: poId, actorId: actor.id, actorName: actor.name,
+      metadata: { po_no: poNo, source: "line_capture", capture_id: cap.id, order_no: cap.order_no, prices_updated: changed, lines_added: added },
+    });
+  }
+
+  const now = new Date().toISOString();
+  await admin.from(CAPTURE_TABLE).update({
+    status: "confirmed", po_id: poId, po_mode: input.mode, confirmed_by: actor.name, confirmed_at: now, updated_at: now,
+  }).eq("id", cap.id);
+  await writeAudit(admin, {
+    action: "confirm", entityType: CAPTURE_TABLE, entityId: cap.id, actorId: actor.id, actorName: actor.name,
+    metadata: { mode: input.mode, po_id: poId, po_no: poNo, order_no: cap.order_no, platform: cap.platform, warnings },
+  });
+  return { ok: true, po_id: poId, po_no: poNo, warnings };
+}

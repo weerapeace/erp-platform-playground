@@ -12,7 +12,7 @@
 
 export type LineSlotKey =
   | "production" | "qc"
-  | "purchase_request" | "purchase_order" | "goods_receipt"
+  | "purchase_request" | "purchase_order" | "goods_receipt" | "purchase_capture"
   | "creative" | "bills" | "transfers" | "webshop";
 
 export type LineSlotDef = { key: LineSlotKey; label: string; icon: string };
@@ -26,14 +26,15 @@ export type LineSystemDef = {
   events: LineEventDef[];
 };
 
-/** ป้ายกลุ่มปลายทาง (9 ช่อง) */
+/** ป้ายกลุ่มปลายทาง (10 ช่อง) — purchase_capture เป็นกลุ่ม "รับเข้า" (ส่งรูปคำสั่งซื้อให้ AI อ่าน) ไม่ใช่กลุ่มแจ้งเตือน */
 export const LINE_SLOTS: Record<LineSlotKey, LineSlotDef> = {
   production:       { key: "production",       label: "กลุ่มผลิต (บอร์ดจ่ายงาน)", icon: "🏭" },
   qc:               { key: "qc",               label: "กลุ่ม QC (โกดัง)",         icon: "🔍" },
   purchase_request: { key: "purchase_request", label: "กลุ่มขอซื้อ",              icon: "🛒" },
   purchase_order:   { key: "purchase_order",   label: "กลุ่มใบสั่งซื้อ",          icon: "📦" },
   goods_receipt:    { key: "goods_receipt",    label: "กลุ่มรับของ",              icon: "📥" },
-  creative:         { key: "creative",         label: "กลุ่มครีเอทีฟ",            icon: "🎨" },
+  purchase_capture: { key: "purchase_capture", label: "กลุ่มส่งรูปคำสั่งซื้อ (AI อ่าน)", icon: "💬" },
+  creative:        { key: "creative",         label: "กลุ่มครีเอทีฟ",            icon: "🎨" },
   bills:            { key: "bills",            label: "กลุ่มบิลจีน",              icon: "🧾" },
   transfers:        { key: "transfers",        label: "กลุ่มโอนเงิน/เรต",         icon: "💱" },
   webshop:          { key: "webshop",          label: "กลุ่มเว็บร้าน (ออเดอร์ออนไลน์)", icon: "🛍" },
@@ -59,7 +60,7 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
   },
   {
     key: "purchasing", label: "จัดซื้อ", icon: "🛒",
-    slots: ["purchase_request", "purchase_order", "goods_receipt"],
+    slots: ["purchase_request", "purchase_order", "goods_receipt", "purchase_capture"],
     events: [
       { key: "pr_created",     label: "มีใบขอซื้อใหม่",   slot: "purchase_request", icon: "🛒" },
       { key: "pr_rejected",    label: "ใบขอซื้อไม่อนุมัติ", slot: "purchase_request", icon: "❌" },

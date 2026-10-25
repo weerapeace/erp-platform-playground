@@ -13,6 +13,7 @@ import type { LineSystemDef, LineSlotDef, LineSlotKey } from "@/lib/line-registr
 
 type ConsoleData = {
   has_token: boolean; token_hint: string;
+  has_secret: boolean; secret_hint: string;
   captured: string; captured_at: string | null;
   groups: Record<string, string>;
   disabled_events: Record<string, boolean>;
@@ -28,12 +29,13 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
   const [paste, setPaste] = useState<Record<string, string>>({});
   const [editToken, setEditToken] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
+  const [secretInput, setSecretInput] = useState("");
 
   const load = useCallback(async () => {
     try {
       const r = await apiFetch("/api/admin/line-console"); const j = await r.json();
       if (j.error) throw new Error(j.error);
-      setData(j as ConsoleData); setPaste({}); setEditToken(false); setTokenInput("");
+      setData(j as ConsoleData); setPaste({}); setEditToken(false); setTokenInput(""); setSecretInput("");
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
   }, [toast]);
   useEffect(() => { if (open) void load(); }, [open, load]);
@@ -88,6 +90,25 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
                   className="h-8 px-2 text-xs border border-slate-200 rounded-lg flex-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
                 <button disabled={busy || !tokenInput.trim()} onClick={() => post({ token: tokenInput }, "บันทึกโทเคนแล้ว")}
                   className="h-8 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">บันทึก</button>
+              </div>
+            )}
+            {/* Channel secret — ตรวจลายเซ็นว่าข้อความมาจาก LINE จริง (ไม่ใส่ก็ใช้ได้ แต่ใส่แล้วปลอดภัยกว่า) */}
+            <div className="text-[11px] text-slate-500 mt-1.5">
+              🔐 รหัสลับบอท (Channel secret): {data.has_secret ? <span className="text-emerald-700">ตั้งแล้ว ({data.secret_hint}) — ตรวจลายเซ็นทุกข้อความ</span> : <span className="text-amber-700">ยังไม่ตั้ง (แนะนำให้ใส่)</span>}
+            </div>
+            {editToken && (
+              <div className="mt-1.5 space-y-1">
+                <div className="flex items-center gap-2">
+                  <input type="password" value={secretInput} onChange={(e) => setSecretInput(e.target.value)} placeholder="วาง Channel secret (LINE Developers → Basic settings)"
+                    className="h-8 px-2 text-xs border border-slate-200 rounded-lg flex-1 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                  <button disabled={busy || !secretInput.trim()} onClick={() => post({ channel_secret: secretInput }, "บันทึกรหัสลับแล้ว")}
+                    className="h-8 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">บันทึก</button>
+                  {data.has_secret && data.secret_hint !== "ตั้งใน env" && (
+                    <button disabled={busy} onClick={() => post({ channel_secret: "" }, "ล้างรหัสลับแล้ว")}
+                      className="h-8 px-2.5 text-xs rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">ล้าง</button>
+                  )}
+                </div>
+                <div className="text-[10px] text-amber-700">⚠ ใส่ผิด = บอทจะไม่รับข้อความเลย · ใส่แล้วลองส่งรูปทดสอบในกลุ่ม 1 รูป</div>
               </div>
             )}
           </div>
