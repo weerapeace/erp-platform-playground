@@ -38,6 +38,11 @@ describe("mergeListingImages", () => {
     expect(patch.webHero?.sku?.[S1]).toEqual({ desktop: { kind: "image", key: "sh", posterKey: null }, mobile: null });
     expect(files).toBe(2);
   });
+  it("Hero วิดีโอ", () => {
+    const { patch } = mergeListingImages(cur, { parentId: "p", hero: { desktop: { key: "new.mp4", kind: "video" } }, skuHero: { [S2]: { mobile: { key: "m.mp4", kind: "video" } } } }, ok, "append");
+    expect(patch.webHero?.desktop).toEqual({ kind: "video", key: "new.mp4", posterKey: null });
+    expect(patch.webHero?.sku?.[S2]?.mobile).toEqual({ kind: "video", key: "m.mp4", posterKey: null });
+  });
   it("สี/คีย์ที่ไม่ถูกต้อง = ไม่ลง", () => {
     const { patch, files } = mergeListingImages(cur, { parentId: "p", skus: { [OTHER]: ["x"] }, skuHero: { [OTHER]: { desktop: "y" } }, gallery: ["bad key with space"], hero: { desktop: "<x>" } }, ok, "append");
     expect(files).toBe(0);

@@ -63,6 +63,35 @@ describe("matchImagePath", () => {
   });
 });
 
+describe("วิดีโอ = Hero เสมอ", () => {
+  it("รุ่น/สี · _m = มือถือ", () => {
+    expect(matchImagePath("JEAN08.mp4", parents).target).toEqual({ kind: "hero", slot: "desktop" });
+    expect(matchImagePath("JEAN08_m.mp4", parents).target).toEqual({ kind: "hero", slot: "mobile" });
+    expect(matchImagePath("JEAN08_hero_m.webm", parents).target).toEqual({ kind: "hero", slot: "mobile" });
+    expect(matchImagePath("JEAN08-01_1.MOV", parents).target).toEqual({ kind: "skuHero", skuId: S1, slot: "desktop" });
+    expect(matchImagePath("JEAN08-02/mobile.mp4", parents).target).toEqual({ kind: "skuHero", skuId: S2, slot: "mobile" });
+    // รูปชื่อ _m ยังเป็นรูปบนเว็บ (เฉพาะวิดีโอที่ _m = มือถือ)
+    expect(matchImagePath("JEAN08_m.jpg", parents).target).toEqual({ kind: "gallery" });
+  });
+  it("วิดีโอที่ถูกย้ายไปช่องรูป = ลงไม่ได้ · ไฟล์ใหญ่เกิน = ลงไม่ได้", () => {
+    const { files } = planImageUpload(
+      [
+        { id: "1", name: "a.mp4", parentId: "p-jean", target: { kind: "gallery" }, order: 0, video: true },
+        { id: "2", name: "b.mp4", parentId: "p-jean", target: { kind: "hero", slot: "desktop" }, order: 0, video: true, invalid: "ใหญ่เกิน" },
+        { id: "3", name: "c.mp4", parentId: "p-jean", target: { kind: "hero", slot: "desktop" }, order: 0, video: true },
+      ],
+      parents,
+      "append",
+    );
+    expect(files.map((f) => f.plan)).toEqual(["invalid", "invalid", "upload"]);
+    expect(files[1].note).toBe("ใหญ่เกิน");
+  });
+  it("buildMassItems บอกว่าเป็นวิดีโอ", () => {
+    const { dests } = planImageUpload([{ id: "v", name: "JEAN08.mp4", parentId: "p-jean", target: { kind: "hero", slot: "desktop" }, order: 0, video: true }], parents, "append");
+    expect(buildMassItems(dests, (id) => `k${id}`, (id) => id === "v")).toEqual([{ parentId: "p-jean", hero: { desktop: { key: "kv", kind: "video" } } }]);
+  });
+});
+
 describe("planImageUpload", () => {
   const f = (id: string, path: string, extra: Partial<PlanFileIn> = {}): PlanFileIn => {
     const m = matchImagePath(path, parents);

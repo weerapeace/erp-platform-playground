@@ -21,7 +21,7 @@ import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
 import { mergeListingImages } from "@/lib/website-image-merge";
 import { variantOf, baseColor } from "@/lib/website-size-options";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
-import { MAX_WEB_IMAGES, type CatalogParent, type HeroSlot, type MassImageItem } from "@/lib/website-image-match";
+import { MAX_WEB_IMAGES, type CatalogParent, type HeroPick, type HeroSlot, type MassImageItem } from "@/lib/website-image-match";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -145,8 +145,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         parentId: typeof o.parentId === "string" ? o.parentId : "",
         gallery: Array.isArray(o.gallery) ? (o.gallery as string[]) : undefined,
         skus: obj<Record<string, string[]>>(o.skus),
-        hero: obj<Partial<Record<HeroSlot, string>>>(o.hero),
-        skuHero: obj<Record<string, Partial<Record<HeroSlot, string>>>>(o.skuHero),
+        hero: obj<Partial<Record<HeroSlot, HeroPick>>>(o.hero),
+        skuHero: obj<Record<string, Partial<Record<HeroSlot, HeroPick>>>>(o.skuHero),
       };
     })
     .filter((it) => UUID.test(it.parentId));

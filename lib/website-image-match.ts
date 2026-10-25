@@ -8,6 +8,7 @@
  *   JEAN08-01.jpg · JEAN08-01 (3).jpg  → รูปสี JEAN08-01 (SKU ไซส์ เช่น JEAN08-01-L = สีเดียวกัน)
  *   JEAN08_hero.jpg / JEAN08_hero_m.jpg → Hero คอม / Hero มือถือ ของรุ่น
  *   JEAN08-01_hero.jpg                  → Hero ของสีนั้น
+ *   🎬 วิดีโอ (mp4/webm/mov) = Hero เสมอ: JEAN08.mp4 → Hero คอม · JEAN08_m.mp4 / JEAN08_hero_m.mp4 → Hero มือถือ (สีก็ได้)
  *   โฟลเดอร์ JEAN08/ หรือ JEAN08-01/    → ไฟล์ข้างในเข้าที่นั้น (ชื่อไฟล์ไม่มีรหัสก็ได้ เช่น JEAN08-01/2.jpg)
  *
  * กันพลาด: JEAN08-03.jpg แต่รุ่นนี้ไม่มีสี -03 → ไม่เดาว่าเป็นรูปบนเว็บ ให้คนเลือกเอง (status "pick" + เดารุ่นไว้ให้)
@@ -103,10 +104,15 @@ function findCode(name: string, index: CodeRef[]): { ref: CodeRef; rest: string 
 const HERO_RE = new RegExp(`(^|[^a-z])hero(?![a-z])`, "i");
 const HERO_M_RE = new RegExp(`hero${SEP}*(m|mb|mobile)(?![a-z])|มือถือ`, "i");
 
-/** อ่านส่วนท้ายชื่อ: Hero? มือถือ? เลขลำดับ */
-export function parseSuffix(rest: string): { hero: HeroSlot | null; order: number } {
+const MOBILE_RE = /(^|[^a-z])(m|mb|mobile)(?![a-z])|มือถือ/i;
+
+/** 🎬 ไฟล์วิดีโอ (ดูจากนามสกุล — ชนิดที่เบราว์เซอร์บอกบางเครื่องว่าง) */
+export const isVideoName = (name: string) => /\.(mp4|m4v|webm|mov)$/i.test(name);
+
+/** อ่านส่วนท้ายชื่อ: Hero? มือถือ? เลขลำดับ · video = วิดีโอเป็น Hero เสมอ (_m / _hero_m = มือถือ) */
+export function parseSuffix(rest: string, video = false): { hero: HeroSlot | null; order: number } {
   const r = rest.trim();
-  const hero = HERO_RE.test(r) ? (HERO_M_RE.test(r) ? "mobile" : "desktop") : null;
+  const hero = HERO_RE.test(r) ? (HERO_M_RE.test(r) ? "mobile" : "desktop") : video ? (MOBILE_RE.test(r) ? "mobile" : "desktop") : null;
   const m = r.match(/(\d+)\D*$/);
   return { hero, order: m ? Number(m[1]) : 0 };
 }
@@ -132,7 +138,7 @@ export function matchImagePath(path: string, parents: CatalogParent[], index = b
       }
     }
   }
-  const { hero, order } = parseSuffix(rest);
+  const { hero, order } = parseSuffix(rest, isVideoName(path));
   if (!hit) {
     const c = codeLike(base) ?? folders.map(codeLike).find(Boolean) ?? null;
     return { parentId: null, target: null, order, status: "pick", reason: c ? `ไม่พบรหัส ${c} ในร้านนี้` : "ชื่อไฟล์ไม่มีรหัสสินค้า" };
@@ -164,8 +170,12 @@ export interface PlanFileIn {
   order: number;
   /** เลือก "ข้ามไฟล์นี้" เอง */
   skip?: boolean;
+  /** 🎬 วิดีโอ — ลงได้เฉพาะช่อง Hero */
+  video?: boolean;
+  /** ลงไม่ได้ (เช่น ไฟล์ใหญ่เกิน) — ข้อความบอกเหตุผล */
+  invalid?: string;
 }
-export type PlanFileStatus = "upload" | "skip" | "over" | "dupHero" | "unmatched";
+export type PlanFileStatus = "upload" | "skip" | "over" | "dupHero" | "unmatched" | "invalid";
 export interface PlanFile extends PlanFileIn {
   plan: PlanFileStatus;
   note?: string;
@@ -194,7 +204,9 @@ export function planImageUpload(files: PlanFileIn[], parents: CatalogParent[], m
   const out = new Map<string, PlanFile>();
   for (const f of files) {
     if (f.skip) out.set(f.id, { ...f, plan: "skip" });
+    else if (f.invalid) out.set(f.id, { ...f, plan: "invalid", note: f.invalid });
     else if (!f.parentId || !f.target || !byParent.has(f.parentId)) out.set(f.id, { ...f, plan: "unmatched" });
+    else if (f.video && f.target.kind !== "hero" && f.target.kind !== "skuHero") out.set(f.id, { ...f, plan: "invalid", note: "วิดีโอลงได้เฉพาะช่อง Hero — เลือก Hero คอม/มือถือ" });
     else {
       const k = targetKey(f.parentId, f.target);
       const g = groups.get(k) ?? { parentId: f.parentId, target: f.target, items: [] };
@@ -227,7 +239,7 @@ export function planImageUpload(files: PlanFileIn[], parents: CatalogParent[], m
     const take = sorted.slice(0, room);
     for (const f of take) out.set(f.id, { ...f, plan: "upload" });
     for (const f of sorted.slice(room)) {
-      out.set(f.id, isHero ? { ...f, plan: "dupHero", note: "Hero มีได้ช่องละ 1 รูป — ใช้ไฟล์แรก" } : { ...f, plan: "over", note: `เกิน ${limit} รูป — ไม่ลง` });
+      out.set(f.id, isHero ? { ...f, plan: "dupHero", note: "Hero มีได้ช่องละ 1 ไฟล์ — ใช้ไฟล์แรก" } : { ...f, plan: "over", note: `เกิน ${limit} รูป — ไม่ลง` });
     }
     if (take.length) {
       dests.push({ key, parentId: g.parentId, target: t, fileIds: take.map((f) => f.id), existing, total: isHero ? 1 : (mode === "replace" ? 0 : existing) + take.length, replaces, limit });
@@ -236,25 +248,30 @@ export function planImageUpload(files: PlanFileIn[], parents: CatalogParent[], m
   return { files: files.map((f) => out.get(f.id)!), dests };
 }
 
+/** ไฟล์ของช่อง Hero: key (รูป) หรือ { key, kind } (บอกว่าเป็นวิดีโอ) */
+export type HeroPick = string | { key: string; kind: "image" | "video" };
+
 /** รวมผลแผน → คำขอบันทึกต่อรุ่น (key ของไฟล์ที่อัปเสร็จแล้ว) */
 export interface MassImageItem {
   parentId: string;
   gallery?: string[];
   skus?: Record<string, string[]>;
-  hero?: Partial<Record<HeroSlot, string>>;
-  skuHero?: Record<string, Partial<Record<HeroSlot, string>>>;
+  hero?: Partial<Record<HeroSlot, HeroPick>>;
+  skuHero?: Record<string, Partial<Record<HeroSlot, HeroPick>>>;
 }
-export function buildMassItems(dests: PlanDest[], keyOf: (fileId: string) => string | null): MassImageItem[] {
+export function buildMassItems(dests: PlanDest[], keyOf: (fileId: string) => string | null, isVideo: (fileId: string) => boolean = () => false): MassImageItem[] {
   const items = new Map<string, MassImageItem>();
   for (const d of dests) {
-    const keys = d.fileIds.map(keyOf).filter((k): k is string => !!k);
+    const ids = d.fileIds.filter((id) => !!keyOf(id));
+    const keys = ids.map((id) => keyOf(id) as string);
     if (!keys.length) continue;
     const it = items.get(d.parentId) ?? { parentId: d.parentId };
     const t = d.target;
+    const heroPick: HeroPick = isVideo(ids[0]) ? { key: keys[0], kind: "video" } : keys[0];
     if (t.kind === "gallery") it.gallery = keys;
     else if (t.kind === "sku") it.skus = { ...(it.skus ?? {}), [t.skuId]: keys };
-    else if (t.kind === "hero") it.hero = { ...(it.hero ?? {}), [t.slot]: keys[0] };
-    else it.skuHero = { ...(it.skuHero ?? {}), [t.skuId]: { ...(it.skuHero?.[t.skuId] ?? {}), [t.slot]: keys[0] } };
+    else if (t.kind === "hero") it.hero = { ...(it.hero ?? {}), [t.slot]: heroPick };
+    else it.skuHero = { ...(it.skuHero ?? {}), [t.skuId]: { ...(it.skuHero?.[t.skuId] ?? {}), [t.slot]: heroPick } };
     items.set(d.parentId, it);
   }
   return [...items.values()];

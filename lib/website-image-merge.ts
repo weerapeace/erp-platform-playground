@@ -1,7 +1,7 @@
 /**
  * 📸 ลงรูปเว็บทีละมาก — รวม "รูปใหม่" เข้ากับรูปเดิมของ 1 แถว store_listings (ฝั่ง API · pure ไม่แตะ DB)
  * ใช้ที่ /api/website/listings/images POST (อ่านแถวล่าสุดใน DB ก่อนแล้วค่อยรวม — ไม่ทับของที่คนอื่นเพิ่งแก้)
- *   ต่อท้าย = เดิม + ใหม่ (ไม่ซ้ำ · ตัดเพดาน 12/8) · แทนที่ = ใหม่ทั้งช่อง · Hero ช่องละ 1 รูป (ใหม่แทนเดิม)
+ *   ต่อท้าย = เดิม + ใหม่ (ไม่ซ้ำ · ตัดเพดาน 12/8) · แทนที่ = ใหม่ทั้งช่อง · Hero ช่องละ 1 ไฟล์ รูปหรือวิดีโอ (ใหม่แทนเดิม)
  *   ช่องที่ไม่มีรูปใหม่ = ไม่แตะ · สีที่ไม่ใช่ของรุ่นนี้ (okSkuIds) = ไม่ลง
  * ผลลัพธ์ส่งต่อให้ listingPatchToRow (ตัวกรองช่องรูปชุดเดียวกับตัวตั้งค่าเว็บของสินค้า)
  */
@@ -21,7 +21,7 @@ export interface MergedImages {
 }
 
 const keysOf = (v: unknown, max: number) => (Array.isArray(v) ? v.filter((k): k is string => typeof k === "string" && LISTING_KEY_RE.test(k)) : []).slice(0, max);
-const media = (key: string): HeroMedia => ({ kind: "image", key, posterKey: null });
+const media = (key: string, kind: "image" | "video"): HeroMedia => ({ kind, key, posterKey: null });
 
 export function mergeListingImages(cur: ListingImageCols, it: MassImageItem, okSkuIds: Set<string>, mode: MassMode): MergedImages {
   const patch: MergedImages["patch"] = {};
@@ -46,7 +46,15 @@ export function mergeListingImages(cur: ListingImageCols, it: MassImageItem, okS
     }
     patch.webSkuImages = next;
   }
-  const slotKeys = (v: unknown) => Object.entries((v && typeof v === "object" ? v : {}) as Record<string, unknown>).filter(([s, k]) => (s === "desktop" || s === "mobile") && typeof k === "string" && LISTING_KEY_RE.test(k)) as [HeroSlot, string][];
+  // ช่อง Hero: "key" = รูป · { key, kind:"video" } = วิดีโอ (ลงทีละมากได้ทั้งคู่)
+  const slotKeys = (v: unknown): [HeroSlot, string, "image" | "video"][] =>
+    Object.entries((v && typeof v === "object" ? v : {}) as Record<string, unknown>).flatMap(([s, raw]) => {
+      if (s !== "desktop" && s !== "mobile") return [];
+      const o = raw && typeof raw === "object" ? (raw as { key?: unknown; kind?: unknown }) : null;
+      const key = o ? o.key : raw;
+      if (typeof key !== "string" || !LISTING_KEY_RE.test(key)) return [];
+      return [[s, key, o?.kind === "video" ? "video" : "image"]];
+    });
   const heroSlots = slotKeys(it.hero);
   const skuHero = Object.entries(it.skuHero ?? {})
     .filter(([id]) => okSkuIds.has(id))
@@ -54,12 +62,12 @@ export function mergeListingImages(cur: ListingImageCols, it: MassImageItem, okS
     .filter(([, s]) => s.length);
   if (heroSlots.length || skuHero.length) {
     const h: ProductHero = normalizeHero(cur.web_hero) ?? { desktop: null, mobile: null };
-    for (const [slot, key] of heroSlots) h[slot] = media(key);
+    for (const [slot, key, kind] of heroSlots) h[slot] = media(key, kind);
     if (skuHero.length) {
       const sku = { ...(h.sku ?? {}) };
       for (const [id, slots] of skuHero) {
         const one = { ...(sku[id] ?? { desktop: null, mobile: null }) };
-        for (const [slot, key] of slots) one[slot] = media(key);
+        for (const [slot, key, kind] of slots) one[slot] = media(key, kind);
         sku[id] = one;
       }
       h.sku = sku;

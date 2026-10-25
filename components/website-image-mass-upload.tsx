@@ -4,10 +4,11 @@
  * --------------------------------------------------------------------------
  * 1) ลากทั้งโฟลเดอร์/หลายไฟล์ (หรือกดเลือก) → จับคู่ชื่อไฟล์กับรหัสรุ่น/สี (ของกลาง lib/website-image-match)
  *      JEAN08_1.jpg = รูปบนเว็บ · JEAN08-01_2.jpg = รูปสี · JEAN08_hero(.jpg / _m) = Hero คอม/มือถือ · โฟลเดอร์ชื่อรหัสก็ได้
+ *      🎬 วิดีโอ (mp4/webm/mov) = Hero เสมอ: JEAN08.mp4 = คอม · JEAN08_m.mp4 = มือถือ (≤ 200 MB · ไฟล์ > 4 MB ส่งตรงเข้า R2)
  * 2) ตรวจก่อนลง: แยกตามสินค้า → ช่อง → รูปใหม่ตามลำดับ · ไฟล์ที่ต้องดู (ไม่พบรหัส/สีไม่มี/เกินเพดาน/Hero ซ้ำ/ข้ามเอง) เลือกช่องเองได้
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
- * 3) กดลงรูป → ย่อ ≤ 2000px + อัป R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
- * ของกลาง: ERPModal · useFileDrop(folders) · uploadResizedImage · toast
+ * 3) กดลงรูป → รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
+ * ของกลาง: ERPModal · useFileDrop(folders) · uploadResizedImage · uploadMediaFile · toast
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -15,10 +16,13 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { useFileDrop, FileDropHint, filePathOf } from "@/components/file-drop";
 import { uploadResizedImage } from "@/components/image-attach";
+import { uploadMediaFile, MediaUploadError } from "@/lib/media-upload";
+import { BIG_VIDEO_MAX_BYTES, fileMb } from "@/lib/media-upload-limits";
 import {
   MAX_MASS_FILES,
   buildCodeIndex,
   buildMassItems,
+  isVideoName,
   matchImagePath,
   planImageUpload,
   targetLabel,
@@ -36,11 +40,15 @@ type Item = {
   path: string;
   url: string;
   match: ImageMatch;
+  /** 🎬 วิดีโอ (ลงได้เฉพาะ Hero) */
+  video: boolean;
+  /** ลงไม่ได้ เช่น ไฟล์ใหญ่เกิน */
+  invalid?: string;
   /** เลือกช่องเอง (ทับผลจับคู่) · "skip" = ข้ามไฟล์นี้ */
   manual?: { parentId: string; target: ImageTarget | null } | "skip";
 };
 type Phase = "pick" | "uploading" | "saving" | "done";
-type Result = { uploaded: number; uploadFailed: string[]; updated: number; failed: number; skippedShops: number };
+type Result = { uploaded: number; uploadFailed: { name: string; why: string }[]; updated: number; failed: number; skippedShops: number };
 
 const CONFIRM_OVER = 20;
 const UPLOAD_CONCURRENCY = 3;
@@ -51,6 +59,8 @@ const decT = (v: string): ImageTarget | null => {
   if (v === "g") return { kind: "gallery" };
   if (v.startsWith("s:")) return { kind: "sku", skuId: v.slice(2) };
   if (v === "h:desktop" || v === "h:mobile") return { kind: "hero", slot: v.slice(2) as "desktop" | "mobile" };
+  const sh = v.match(/^sh:([0-9a-f-]{36}):(desktop|mobile)$/i);
+  if (sh) return { kind: "skuHero", skuId: sh[1], slot: sh[2] as "desktop" | "mobile" };
   return null;
 };
 
@@ -77,6 +87,8 @@ export function WebsiteImageMassUpload({
   const [typed, setTyped] = useState("");
   const [phase, setPhase] = useState<Phase>("pick");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  /** วิดีโอไฟล์ใหญ่ที่กำลังส่ง (%) · null = ไม่มี */
+  const [videoPct, setVideoPct] = useState<number | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -137,24 +149,28 @@ export function WebsiteImageMassUpload({
 
   const addFiles = (raw: File[]) => {
     if (!catalog || phase !== "pick") return;
-    const imgs = raw.filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|webp|gif)$/i.test(f.name));
-    if (!imgs.length) return toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp)");
+    const isVid = (f: File) => f.type.startsWith("video/") || isVideoName(f.name);
+    const imgs = raw.filter((f) => isVid(f) || f.type.startsWith("image/") || /\.(jpe?g|png|webp|gif)$/i.test(f.name));
+    if (!imgs.length) return toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)");
+    if (imgs.some((f) => /\.mov$/i.test(f.name) || f.type === "video/quicktime")) toast.warning("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)");
     const have = new Set(itemsRef.current.map((it) => `${it.path}|${it.file.size}`));
     const fresh = imgs.filter((f) => !have.has(`${filePathOf(f)}|${f.size}`));
     const room = MAX_MASS_FILES - itemsRef.current.length;
     if (fresh.length > room) toast.warning(`ลงได้ครั้งละไม่เกิน ${MAX_MASS_FILES} ไฟล์ — รับ ${Math.max(0, room)} ไฟล์แรก`);
     const next = fresh.slice(0, Math.max(0, room)).map((file) => {
       const path = filePathOf(file);
-      return { id: `f${++seq.current}`, file, path, url: URL.createObjectURL(file), match: matchOf(path) } as Item;
+      const video = isVid(file);
+      const invalid = video && file.size > BIG_VIDEO_MAX_BYTES ? `วิดีโอใหญ่เกิน ${fileMb(BIG_VIDEO_MAX_BYTES)} (${fileMb(file.size)}) — ตัดคลิปให้สั้นลง/ลดความละเอียด` : undefined;
+      return { id: `f${++seq.current}`, file, path, url: URL.createObjectURL(file), match: matchOf(path), video, invalid } as Item;
     });
     if (next.length) setItems((xs) => [...xs, ...next]);
   };
 
   const drop = useFileDrop((files) => addFiles(files), {
-    accept: "image/",
+    accept: ["image/", "video/"],
     folders: true,
     disabled: phase !== "pick" || !catalog,
-    onReject: () => toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp)"),
+    onReject: () => toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)"),
     onBusy: () => toast.info(catalog ? "กำลังอัปโหลดอยู่ รอสักครู่" : "กำลังโหลดรายการสินค้า รอสักครู่"),
   });
 
@@ -162,9 +178,10 @@ export function WebsiteImageMassUpload({
   const plan = useMemo(() => {
     const ins = items.map((it) => {
       const m = it.manual;
-      if (m === "skip") return { id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order: it.match.order, skip: true };
-      if (m) return { id: it.id, name: it.path, parentId: m.parentId, target: m.target, order: it.match.order };
-      return { id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order: it.match.order };
+      const base = { video: it.video, invalid: it.invalid };
+      if (m === "skip") return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order: it.match.order, skip: true };
+      if (m) return { ...base, id: it.id, name: it.path, parentId: m.parentId, target: m.target, order: it.match.order };
+      return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order: it.match.order };
     });
     return planImageUpload(ins, parents, mode);
   }, [items, parents, mode]);
@@ -193,7 +210,7 @@ export function WebsiteImageMassUpload({
     setPhase("uploading");
     setProgress({ done: 0, total: uploadIds.length });
     const keys = new Map<string, string>();
-    const failedNames: string[] = [];
+    const failedNames: { name: string; why: string }[] = [];
     let next = 0;
     let done = 0;
     const worker = async () => {
@@ -202,15 +219,20 @@ export function WebsiteImageMassUpload({
         const it = itemById.get(id);
         if (!it) continue;
         try {
-          keys.set(id, (await uploadResizedImage(it.file, { folder: "storefront-products", max: 2000 })).r2_key);
-        } catch {
-          failedNames.push(it.path);
+          if (it.video) {
+            // วิดีโอ: ตัวอัปกลางตัวเดียวกับช่อง Hero ทีละตัว (≤ 4 MB ผ่าน ERP · ใหญ่กว่านั้นส่งตรงเข้า R2 มีแถบ %)
+            keys.set(id, await uploadMediaFile(it.file, { folder: "storefront-hero", onProgress: (pct) => setVideoPct(pct) }));
+            setVideoPct(null);
+          } else keys.set(id, (await uploadResizedImage(it.file, { folder: "storefront-products", max: 2000 })).r2_key);
+        } catch (e) {
+          setVideoPct(null);
+          failedNames.push({ name: it.path, why: e instanceof MediaUploadError || e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ" });
         }
         setProgress({ done: ++done, total: uploadIds.length });
       }
     };
     await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker));
-    const massItems = buildMassItems(plan.dests, (id) => keys.get(id) ?? null);
+    const massItems = buildMassItems(plan.dests, (id) => keys.get(id) ?? null, (id) => !!itemById.get(id)?.video);
     if (!massItems.length) {
       setPhase("pick");
       return setErr("อัปโหลดรูปไม่สำเร็จเลย — ตรวจการเชื่อมต่อแล้วลองใหม่");
@@ -250,8 +272,15 @@ export function WebsiteImageMassUpload({
     if (!it) return null;
     return (
       <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={it.path}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={it.url} alt="" loading="lazy" decoding="async" className="h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-100" />
+        {it.video ? (
+          <>
+            <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-800" />
+            <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] leading-4 text-white">🎬 {fileMb(it.file.size)}</span>
+          </>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={it.url} alt="" loading="lazy" decoding="async" className="h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-100" />
+        )}
         <p className="mt-0.5 truncate text-[10px] text-slate-500">{it.path.split("/").pop()}</p>
         {opts.onSkip && phase === "pick" && (
           <button type="button" onClick={opts.onSkip} aria-label={`ข้าม ${it.path}`} title="ไม่ลงไฟล์นี้" className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] text-white group-hover:flex">
@@ -272,7 +301,7 @@ export function WebsiteImageMassUpload({
             ลงรูป {result.uploaded} ไฟล์ · อัปเดต {result.updated} รายการ{result.failed ? ` · ไม่สำเร็จ ${result.failed}` : ""}
           </span>
         ) : busy ? (
-          <span className="text-slate-600">{phase === "saving" ? "กำลังบันทึกลงเว็บ…" : `กำลังอัปโหลด ${progress.done}/${progress.total}`}</span>
+          <span className="text-slate-600">{phase === "saving" ? "กำลังบันทึกลงเว็บ…" : `กำลังอัปโหลด ${progress.done}/${progress.total}${videoPct !== null ? ` · วิดีโอ ${videoPct}%` : ""}`}</span>
         ) : (
           <span className="text-slate-500">{uploadIds.length ? `จะลง ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า${alsoShops.size ? ` (+ร้านอื่น ${alsoShops.size})` : ""}` : "ยังไม่มีรูปที่จะลง"}</span>
         )}
@@ -352,9 +381,11 @@ export function WebsiteImageMassUpload({
                   <code className="rounded bg-white px-1">JEAN08_hero.jpg</code> → Hero คอม · <code className="rounded bg-white px-1">JEAN08_hero_m.jpg</code> → Hero มือถือ ·{" "}
                   <code className="rounded bg-white px-1">JEAN08-01_hero.jpg</code> → Hero ของสีนั้น
                   <br />
+                  🎬 วิดีโอ (mp4) = Hero อัตโนมัติ: <code className="rounded bg-white px-1">JEAN08.mp4</code> → คอม · <code className="rounded bg-white px-1">JEAN08_m.mp4</code> → มือถือ · ≤ 200 MB (แนะนำ ≤ 15 MB · 6–10 วินาที)
+                  <br />
                   หรือแยกโฟลเดอร์ชื่อ <code className="rounded bg-white px-1">JEAN08/</code> · <code className="rounded bg-white px-1">JEAN08-01/</code> ก็ได้ · เลขท้าย _1 _2 (2) = ลำดับรูป · ครั้งละ ≤ {MAX_MASS_FILES} ไฟล์
                 </p>
-                <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+                <input ref={fileRef} type="file" accept="image/*,video/mp4,video/webm,.mp4,.m4v,.webm,.mov" multiple hidden onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
                 <input ref={dirRef} type="file" multiple hidden {...{ webkitdirectory: "" }} onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
               </div>
             )}
@@ -366,6 +397,7 @@ export function WebsiteImageMassUpload({
                   <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-emerald-700">จะลง {countOf("upload")}</span>
                   {countOf("unmatched") > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-amber-800">ต้องเลือกเอง {countOf("unmatched")}</span>}
                   {countOf("over") + countOf("dupHero") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">เกิน/ซ้ำ {countOf("over") + countOf("dupHero")}</span>}
+                  {countOf("invalid") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">ลงไม่ได้ {countOf("invalid")}</span>}
                   {countOf("skip") > 0 && <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-600">ข้าม {countOf("skip")}</span>}
                   <span className="ml-auto text-slate-400">
                     {items.length} ไฟล์ · {touched.length} สินค้า
@@ -457,14 +489,23 @@ export function WebsiteImageMassUpload({
                                   aria-label="เลือกช่องรูป"
                                 >
                                   <option value="">— ช่องรูป —</option>
-                                  <option value="g">รูปบนเว็บ</option>
-                                  {p.skus.map((s) => (
-                                    <option key={s.id} value={`s:${s.id}`}>
-                                      {targetLabel({ kind: "sku", skuId: s.id }, p)}
-                                    </option>
-                                  ))}
+                                  {!it.video && <option value="g">รูปบนเว็บ</option>}
+                                  {!it.video &&
+                                    p.skus.map((s) => (
+                                      <option key={s.id} value={`s:${s.id}`}>
+                                        {targetLabel({ kind: "sku", skuId: s.id }, p)}
+                                      </option>
+                                    ))}
                                   <option value="h:desktop">Hero คอม</option>
                                   <option value="h:mobile">Hero มือถือ</option>
+                                  {it.video &&
+                                    p.skus.flatMap((s) =>
+                                      (["desktop", "mobile"] as const).map((slot) => (
+                                        <option key={`${s.id}:${slot}`} value={`sh:${s.id}:${slot}`}>
+                                          {targetLabel({ kind: "skuHero", skuId: s.id, slot }, p)}
+                                        </option>
+                                      ))
+                                    )}
                                 </select>
                               )}
                               {f.plan !== "skip" && (
@@ -515,7 +556,7 @@ export function WebsiteImageMassUpload({
                   <p className={`mt-2 text-[11px] ${mode === "replace" ? "text-rose-600" : "text-slate-500"}`}>
                     {mode === "replace"
                       ? `โหมดแทนที่: รูปเดิมของช่องที่มีรูปใหม่จะถูกเอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง · ช่องอื่นไม่แตะ)${touched.length > CONFIRM_OVER ? " · เกิน 20 สินค้าต้องพิมพ์ CONFIRM" : ""}`
-                      : "รูปย่อเหลือกว้าง ≤ 2000px อัตโนมัติ · ไฟล์ที่ข้ามจะไม่อัปโหลด · Hero มีช่องละ 1 รูป (ไฟล์ใหม่แทนของเดิม) · บันทึกประวัติว่าใครลงรูปอะไร"}
+                      : "รูปย่อเหลือกว้าง ≤ 2000px อัตโนมัติ · ไฟล์ที่ข้ามจะไม่อัปโหลด · Hero มีช่องละ 1 ไฟล์ รูปหรือวิดีโอ (ไฟล์ใหม่แทนของเดิม) · บันทึกประวัติว่าใครลงรูปอะไร"}
                   </p>
                   {busy && (
                     <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
@@ -534,7 +575,7 @@ export function WebsiteImageMassUpload({
                     {result.failed > 0 && <p className="mt-1 text-xs text-rose-700">บันทึกไม่สำเร็จ {result.failed} รายการ — ลองลงชุดนั้นใหม่อีกครั้ง</p>}
                     {result.uploadFailed.length > 0 && (
                       <p className="mt-1 text-xs text-rose-700">
-                        อัปโหลดไม่สำเร็จ {result.uploadFailed.length} ไฟล์: {result.uploadFailed.slice(0, 8).join(", ")}
+                        อัปโหลดไม่สำเร็จ {result.uploadFailed.length} ไฟล์: {result.uploadFailed.slice(0, 8).map((f) => `${f.name} (${f.why})`).join(" · ")}
                         {result.uploadFailed.length > 8 ? " …" : ""}
                       </p>
                     )}
@@ -545,7 +586,7 @@ export function WebsiteImageMassUpload({
 
             {items.length === 0 && (
               <p className="text-[11px] text-slate-400">
-                ช่องที่ลงได้: รูปบนเว็บ (≤ 12 รูป/สินค้า) · รูปสี (≤ 8 รูป/สี) · Hero คอม/มือถือ ของสินค้าและของแต่ละสี — ช่องที่ไม่มีรูปใหม่ = ไม่แตะ
+                ช่องที่ลงได้: รูปบนเว็บ (≤ 12 รูป/สินค้า) · รูปสี (≤ 8 รูป/สี) · Hero คอม/มือถือ ของสินค้าและของแต่ละสี (รูปหรือวิดีโอ) — ช่องที่ไม่มีรูปใหม่ = ไม่แตะ
                 {catalog.parents.length ? ` · ตัวอย่างรหัสในร้าน: ${parents.slice(0, 3).map((p) => p.code).join(", ")}` : ""}
               </p>
             )}
