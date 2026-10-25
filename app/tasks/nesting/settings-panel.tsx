@@ -95,8 +95,8 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
           onChange={(v) => onChange({ fill: v === "fill" })} />
         {s.fill && (
           <div className="mt-1 text-[11px] text-slate-500">
-            {t("ทุกแผ่นได้ตามจำนวนที่ใส่ก่อน แล้วเติมที่ว่างด้วยลายตาม % ที่ใส่ในการ์ดลาย (รวม 100%) · หัวงานบอกจำนวนที่เติมเป็น (+N)",
-              "Every sheet gets the exact quantities first, then the gaps are filled by the % set on each artwork card (total 100%) · the header shows extras as (+N)")}
+            {t("ทุกแผ่นได้ตามจำนวนที่ใส่ก่อน แล้วเติมที่ว่างตาม % ในการ์ดลาย (ไม่ใส่ = แบ่งเท่า ๆ กัน · พิมพ์ลายไหน ลายอื่นแบ่งที่เหลือให้เอง) · หัวงานบอกจำนวนที่เติมเป็น (+N)",
+              "Every sheet gets the exact quantities first, then the gaps are filled by the % on each artwork card (none typed = shared equally · type one and the others share the rest) · the header shows extras as (+N)")}
           </div>
         )}
         {s.fill && roll && (

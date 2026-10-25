@@ -28,7 +28,7 @@ import {
 import { HelperChip, HelperSetupCard, useHelperStatus } from "./helper-status";
 import { ItemsPanel, type AssetPreview } from "./items-panel";
 import { STATUS_STYLE } from "./list-view";
-import { SETTINGS_DEFAULTS, fmt, fmtLen, natural, newKey, readSettings, sizeOf, type FileInfo, type Settings, type Unit } from "./nest-utils";
+import { SETTINGS_DEFAULTS, fmt, fmtLen, natural, newKey, readSettings, rebalanceFill, sizeOf, type FileInfo, type Settings, type Unit } from "./nest-utils";
 import { SettingsPanel, sheetFromPrintType } from "./settings-panel";
 import { SheetView, rotated90, type HelperPart, type Placed } from "./sheet-view";
 import { PublishModal } from "./publish-modal";
@@ -124,12 +124,19 @@ export function NestingEditor({ id }: { id: string }) {
 
   const applyJob = useCallback((job: NestingJobRow) => {
     const s = readSettings(job.settings);
-    setName(job.name); setStatus(job.status); setPrintTypeId(job.print_type_id); setSettings(s); setItems(job.items); setResult(job.result);
-    setSavedSnap(JSON.stringify(makeDraft(job.name, job.status, job.print_type_id, s, job.items, job.result)));
+    let its = job.items;
+    if (!s.fill_auto) {   // งานเก่า (ก่อนมีระบบแบ่งที่เหลือ): % ที่ใส่ไว้ = พิมพ์เอง คงไว้ทั้งหมด
+      its = its.map((i) => ({ ...i, fill_pin: (i.fill_pct || 0) > 0 }));
+      s.fill_auto = true;
+    }
+    setName(job.name); setStatus(job.status); setPrintTypeId(job.print_type_id); setSettings(s); setItems(its); setResult(job.result);
+    setSavedSnap(JSON.stringify(makeDraft(job.name, job.status, job.print_type_id, s, its, job.result)));
     setPub({ asset_id: job.asset_id, drive_folder_url: job.drive_folder_url, published_at: job.published_at });
   }, []);
 
   useEffect(() => { listPrintTypes().then(setPrintTypes).catch(() => setPrintTypes([])); }, []);
+  // โหมดเติม: ลายที่ไม่ได้พิมพ์ % เอง แบ่งที่เหลือให้เองทันที (เพิ่ม/ลบ/แยกลาย ก็แบ่งใหม่ให้)
+  useEffect(() => { if (settings.fill) setItems((list) => rebalanceFill(list)); }, [items, settings.fill]);
   const load = useCallback(async () => {
     if (id === "new") return;
     setLoading(true); setLoadError(undefined);
@@ -655,8 +662,6 @@ export function NestingEditor({ id }: { id: string }) {
             <h3 className="mb-3 flex items-start gap-2 text-sm font-semibold text-slate-800">
               <span className="flex-1">{t("ลายที่จะจัด", "Artwork to nest")} <span className="font-normal text-slate-400">
                 · {t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}{settings.fill ? t(" + เติม", " + fill") : ""}</span></span>
-              <button type="button" onClick={() => setItemsBig(true)} title={t("เปิดหน้าต่างใหญ่ จัดการลายเป็นตาราง (ค้นหา · ลากสลับลำดับ)", "Open a large window to manage artwork as a table (search · drag to reorder)")}
-                className="shrink-0 rounded border border-slate-300 px-2 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50">⤢ {t("ขยาย", "Expand")}</button>
             </h3>
             <ItemsPanel items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
               busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
@@ -664,6 +669,11 @@ export function NestingEditor({ id }: { id: string }) {
           </section>
           {canRun && (
             <div className="sticky bottom-2 rounded-xl border border-slate-200 bg-white p-3">
+              <button type="button" onClick={() => setItemsBig(true)} disabled={!!busy}
+                title={t("เปิดหน้าต่างใหญ่ จัดการรูปเป็นตาราง (ค้นหา · ลากสลับลำดับ · แก้ทุกช่อง)", "Open a large window to manage images as a table (search · drag to reorder · edit everything)")}
+                className="mb-2 w-full rounded-lg border border-violet-300 bg-violet-50 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-60">
+                🖼 {t("จัดการรูป", "Manage images")}
+              </button>
               <button type="button" onClick={() => void startNest()} disabled={!!run?.running || !!busy}
                 className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
                 {run?.running ? t("กำลังจัดเรียง…", "Nesting…") : run ? t("จัดเรียงใหม่", "Nest again") : t("จัดเรียง", "Nest")}
@@ -810,7 +820,7 @@ export function NestingEditor({ id }: { id: string }) {
       )}
       {cardOpen && pub.asset_id && <AssetDetailPopup assetId={pub.asset_id} onClose={() => setCardOpen(false)} />}
       <ERPModal open={itemsBig} onClose={() => setItemsBig(false)} size="xl" defaultExpanded
-        title={`⤢ ${t("จัดการลายที่จะจัด", "Manage artwork to nest")} · ${t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}`}
+        title={`🖼 ${t("จัดการรูป", "Manage images")} · ${t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}`}
         description={t("แก้ได้ทุกช่องเหมือนการ์ด · ลาก ⠿ เพื่อสลับลำดับ · ลากไฟล์ PNG มาวางที่แถวเพื่อใส่ไฟล์", "Edit everything as on the cards · drag ⠿ to reorder · drop a PNG on a row to attach it")}
         footer={<div className="flex justify-end"><button type="button" onClick={() => setItemsBig(false)} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700">{t("เสร็จ", "Done")}</button></div>}>
         <ItemsPanel variant="table" items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}

@@ -24,6 +24,7 @@ export type NestingItem = {
   size: { mode: SizeMode; value: number | null };   // value = mm (หรือ % เมื่อ mode=scale)
   qty: number;
   fill_pct: number;                  // โหมดเติมเต็มแผ่น: สัดส่วนจำนวนชิ้นที่เติม (%)
+  fill_pin?: boolean;                // พิมพ์ % เอง (คงไว้) — ไม่ปักหมุด = ระบบแบ่งที่เหลือให้
   file: { name: string; sha: string } | null;       // ไฟล์ PNG จริงที่ลากในเครื่อง (sha = รหัสไฟล์ในตัวช่วย)
   lock?: NestingLock | null;         // ล็อกลาย (เฉพาะงานนี้)
   piece?: NestingPiece | null;       // ชิ้นที่แยกมาจากภาพเดียวกัน (กดรวมกลับได้)
@@ -101,6 +102,7 @@ export function cleanItems(v: unknown): NestingItem[] | null {
       lock: cleanLock(o.lock),
       piece: cleanPiece(o.piece),
       rows: o.rows === true,
+      fill_pin: o.fill_pin === true,
     };
   });
 }

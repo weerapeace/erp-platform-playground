@@ -27,7 +27,7 @@ const MODES = ["natural", "width", "height", "scale", "max"] as const;
 const ROTATES: RotateLock[] = ["sheet", "none", "flip", "quad"];
 // ตารางใหญ่: ⠿ · รูป · ชื่อ/ไฟล์ · ขนาด · จำนวน(+เติม) · ล็อก · แถว/แยก · สถานะ · ปุ่ม
 const TABLE_COLS = (fill: boolean) =>
-  `28px 64px minmax(220px,1.4fr) 330px ${fill ? "180px" : "90px"} 200px 150px minmax(170px,1fr) 64px`;
+  `28px 64px minmax(220px,1.4fr) 330px ${fill ? "205px" : "90px"} 200px 150px minmax(170px,1fr) 64px`;
 
 export function ItemsPanel({
   items, infos, missing, previews, settings, resultByKey, busy, onChange, onAttach, onAddFiles, onPickLibrary,
@@ -70,9 +70,10 @@ export function ItemsPanel({
   const rotateLabel = (r: RotateLock) =>
     ({ sheet: t("ตามแผ่น", "Sheet setting"), none: t("ห้ามหมุน", "No rotation"), flip: t("แนวนอน 0°/180°", "Horizontal 0°/180°"), quad: t("แนวนอน/ตั้ง", "Horizontal/vertical") })[r];
   const totalPct = Math.round(items.reduce((a, it) => a + (it.fill_pct || 0), 0) * 100) / 100;
+  // แบ่งเท่ากัน = เลิกปักหมุดทุกลาย แล้วให้หน้าจัดเรียงแบ่งให้ (rebalanceFill ใน editor)
   const evenSplit = () => {
     const n = items.length;
-    onChange(items.map((it, i) => ({ ...it, fill_pct: Math.floor(100 / n) + (i < 100 % n ? 1 : 0) })));
+    onChange(items.map((it, i) => ({ ...it, fill_pin: false, fill_pct: Math.floor(100 / n) + (i < 100 % n ? 1 : 0) })));
   };
   const browse = (key: string | null) => { target.current = key; fileInput.current?.click(); };
 
@@ -195,9 +196,17 @@ export function ItemsPanel({
       {fill && (
         <>
           {labels ? <span className="text-slate-500">{t("เติมที่เหลือ", "Fill share")}</span> : <span className="text-slate-400">+</span>}
-          <NumInput className="h-7 w-14 rounded border border-slate-300 px-1" value={String(it.fill_pct ?? 0)}
-            onChange={(v) => patch(it.key, { fill_pct: Math.min(100, Math.max(0, v ?? 0)) })} />
+          <span className="relative" title={it.fill_pin ? t("พิมพ์เอง — คงค่านี้ไว้", "Typed by you — kept as is") : t("ระบบแบ่งที่เหลือให้อัตโนมัติ — พิมพ์เพื่อกำหนดเอง", "Shared out automatically — type to set it yourself")}>
+            <NumInput className={`h-7 w-14 rounded border px-1 ${it.fill_pin ? "border-violet-400 font-semibold text-slate-800" : "border-slate-300 text-slate-500"}`}
+              value={String(it.fill_pct ?? 0)}
+              onChange={(v) => patch(it.key, { fill_pct: Math.min(100, Math.max(0, v ?? 0)), fill_pin: true })} />
+          </span>
           <span className="text-slate-400">%</span>
+          {it.fill_pin && (
+            <button type="button" onClick={() => patch(it.key, { fill_pin: false })}
+              title={t("พิมพ์เอง (คงไว้) — กดเพื่อให้ระบบแบ่งให้แทน", "Typed by you (kept) — click to let the system share it out")}
+              aria-label={t("เลิกปักหมุด % นี้", "Unpin this %")} className="rounded px-0.5 text-[13px] leading-none hover:bg-violet-50">📌</button>
+          )}
         </>
       )}
     </div>
@@ -285,7 +294,7 @@ export function ItemsPanel({
   const shown = q ? items.filter((it) => `${it.title} ${it.file?.name ?? ""}`.toLowerCase().includes(q)) : items;
   const table = (
     <div className="mt-3 overflow-x-auto">
-      <div className="min-w-[1270px]">
+      <div className="min-w-[1300px]">
         <div className="grid items-center gap-2 border-b border-slate-200 px-2 pb-1.5 text-[11px] font-medium text-slate-500" style={{ gridTemplateColumns: TABLE_COLS(fill) }}>
           <span />
           <span />
@@ -380,6 +389,7 @@ export function ItemsPanel({
           <button type="button" onClick={evenSplit} className="rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50">
             {t("แบ่งเท่ากัน", "Split evenly")}
           </button>
+          <span className="text-[11px] text-slate-400">{t("พิมพ์ % ลายไหน = 📌 คงไว้ · ลายอื่นแบ่งที่เหลือให้เอง", "Type a % on any artwork = 📌 kept · the others share the rest automatically")}</span>
         </div>
       )}
     </div>

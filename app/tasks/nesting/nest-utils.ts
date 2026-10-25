@@ -23,9 +23,11 @@ export const SETTINGS_DEFAULTS = {
   sheet_width_mm: 580, sheet_height_mm: null as number | null, margin_mm: 5, spacing_mm: 3,
   rotate: [0, 90, 180, 270] as number[] | null, rotate_step: null as number | null,
   cut_contour: false, cut_offset_mm: 1, alpha_threshold: 10, default_dpi: 300, min_dpi: 150,
-  time_limit_s: 60, resample_to_dpi: 1200, min_line_mm: 0.1, fill: false, fill_length_mm: 1000,
+  // ค่าเริ่มของงานใหม่ (เจ้าของกำหนด 2026-10-25): ตามจำนวน + เติมที่ว่าง · แทรกให้ประหยัด · ไม่พิมพ์หัวงาน · 4 ทิศ · ไม่มีเส้นตัด
+  time_limit_s: 60, resample_to_dpi: 1200, min_line_mm: 0.1, fill: true, fill_length_mm: 1000,
   fill_roll: "used" as "used" | "length",   // แผ่นม้วน + เติม: เติมช่องว่างไม่ยืดม้วน / เติมถึงความยาว
-  layout: "nest" as "nest" | "rows", rows_new_row: true, header: true, header_text: true, unit: "cm" as Unit,
+  layout: "nest" as "nest" | "rows", rows_new_row: true, header: false, header_text: true, unit: "cm" as Unit,
+  fill_auto: true,   // % เติม: ลายที่ไม่ได้พิมพ์เอง แบ่งที่เหลือให้เองทันที (งานเก่าก่อนมีระบบนี้ = false จนเปิดครั้งแรก)
 };
 export type Settings = typeof SETTINGS_DEFAULTS;
 
@@ -33,7 +35,32 @@ export function readSettings(raw: Record<string, unknown> | null | undefined): S
   const s = { ...SETTINGS_DEFAULTS, ...(raw ?? {}) } as Settings;
   // งานเก่า (ก่อนมีตัวเลือกนี้) ม้วน + เติม = เติมถึงความยาวเสมอ → คงแบบเดิม
   if (raw && raw.fill_roll === undefined && raw.fill) s.fill_roll = "length";
+  if (raw && raw.fill_auto === undefined) s.fill_auto = false;
   return s;
+}
+
+/**
+ * % เติมของแต่ละลาย: ลายที่พิมพ์เอง (fill_pin) คงไว้ · ลายอื่นแบ่ง "ที่เหลือ" เท่า ๆ กัน (ละเอียด 0.01%)
+ * เช่น รูป 1 พิมพ์ 50 → รูป 2–3 ได้ 25, 25 · พิมพ์เองรวมเกิน 100 = ลายอื่นได้ 0 (ป้ายรวมขึ้นแดงให้เห็น)
+ */
+export function rebalanceFill(items: NestingItem[]): NestingItem[] {
+  const free = items.filter((it) => !it.fill_pin);
+  if (!free.length) return items;
+  const pinned = items.reduce((a, it) => a + (it.fill_pin ? it.fill_pct || 0 : 0), 0);
+  const rest = Math.max(0, Math.round((100 - pinned) * 100) / 100);
+  const unit = Number.isInteger(rest) ? 1 : 0.01;   // ที่เหลือเป็นเลขเต็ม = แบ่งเป็นเลขเต็ม (34/33/33) ไม่งั้นละเอียด 0.01
+  const cents = Math.round(rest / unit);
+  const base = Math.floor(cents / free.length), extra = cents % free.length;
+  let k = 0;
+  let changed = false;
+  const next = items.map((it) => {
+    if (it.fill_pin) return it;
+    const v = Math.round((base + (k++ < extra ? 1 : 0)) * unit * 100) / 100;
+    if (Math.abs((it.fill_pct || 0) - v) < 1e-9) return it;
+    changed = true;
+    return { ...it, fill_pct: v };
+  });
+  return changed ? next : items;
 }
 
 export const unitScale = (u: Unit) => (u === "cm" ? 10 : 1);
