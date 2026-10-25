@@ -88,7 +88,7 @@ type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number;
 // ---- โหลด+แปลงวัตถุดิบของใบสั่งผลิต (ใช้ทั้งตอนเปิดป๊อป และตอนกด "อัพเดตตาม BOM") ----
 // mo = ค่าจริงจากฐานข้อมูลของใบนั้น (จำนวน/วันกำหนด/มีไซส์ไหม) — เอาไว้ sync ป๊อปให้ตรงเสมอ
 type ClMats = { rows: MatRow[]; cutRows: CutRow[]; summary: MoMatSummary[]; materials: MoMatPreview[]; requested: Record<string, number>; sizeQty: Record<string, number>;
-  mo: { qty: number; due_date: string | null; internal_due_date: string | null; status: string | null; has_sizes: boolean } };
+  mo: { qty: number; due_date: string | null; internal_due_date: string | null; status: string | null; has_sizes: boolean; created_at: string | null } };
 async function fetchClMats(moId: string): Promise<ClMats> {
   const res = await apiFetch(`/api/mo/${moId}`); const j = await res.json();
   const summary = (j?.data?.summary ?? []) as Record<string, unknown>[];
@@ -140,6 +140,7 @@ async function fetchClMats(moId: string): Promise<ClMats> {
       internal_due_date: (head.internal_due_date as string) ?? null,
       status: (head.status as string) ?? null,
       has_sizes: Array.isArray(head.size_breakdown) && (head.size_breakdown as unknown[]).length > 0,
+      created_at: (head.created_at as string) ?? null,
     } };
 }
 // dispatchedMos = ใบที่จ่ายงานครบแล้ว (ไม่ใช่การ์ดรอจ่าย) — ยังต้องส่งลูกค้า ปฏิทินเลยต้องเห็น
@@ -920,10 +921,12 @@ function WorkBoardPageInner() {
           setChecklistMO((m) => {
             if (!m || m.id !== checklistMO.id) return m;
             const same = m.qty === d.mo.qty && (m.due_date ?? null) === d.mo.due_date
-              && (m.internal_due_date ?? null) === d.mo.internal_due_date && !!m.has_sizes === d.mo.has_sizes;
+              && (m.internal_due_date ?? null) === d.mo.internal_due_date && !!m.has_sizes === d.mo.has_sizes
+              && (m.created_at ?? null) === d.mo.created_at;
             if (same) return m;
+            // created_at: บางทางเปิดป๊อปด้วยข้อมูลที่ประกอบเอง (ไม่มีวันที่สร้าง) → เติมจากใบจริงตรงนี้
             return { ...m, qty: d.mo.qty, remaining: Math.max(0, d.mo.qty - (m.dispatched || 0)),
-              due_date: d.mo.due_date, internal_due_date: d.mo.internal_due_date, has_sizes: d.mo.has_sizes };
+              due_date: d.mo.due_date, internal_due_date: d.mo.internal_due_date, has_sizes: d.mo.has_sizes, created_at: d.mo.created_at };
           });
           setMoQty(String(d.mo.qty));
           setMoDue((d.mo.due_date ?? "").slice(0, 10));
