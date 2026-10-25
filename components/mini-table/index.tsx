@@ -94,6 +94,10 @@ export type MiniTableProps<T> = {
 
   // หน้าตา
   dense?: boolean;
+  /** แถวสลับสี (ค่าเริ่มต้น เปิด) */
+  zebra?: boolean;
+  /** ซ่อนแถบเครื่องมือเหนือตาราง (เรียง / จัดกลุ่ม) — ยังเรียง/จัดกลุ่มตามค่าที่ส่งมาได้ */
+  hideToolbar?: boolean;
   /** แถวสูง + ช่องติ๊กใหญ่ สำหรับจอสัมผัส (iPad) */
   touch?: boolean;
   /** "cards" = 1 แถว = 1 การ์ด (ใช้ renderCard) ยังค้นหา/เรียง/จัดกลุ่ม/เลือก/กางได้เหมือนตาราง — เช่น iPad แนวตั้ง */
@@ -117,7 +121,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
-    dense, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
+    dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
     resizable, storageKey,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
@@ -250,7 +254,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const open = !!renderExpanded && !!expandedKeys?.has(k);
     const line = (
       <div key={open ? undefined : k} onClick={onRowClick ? () => onRowClick(r) : undefined}
-        className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
+        className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : zebra && idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
         style={{ gridTemplateColumns: tmpl }}>
         {selectable && (
           <span className="flex justify-center" onClick={(e) => e.stopPropagation()}>
@@ -307,7 +311,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         </div>
       )}
 
-      {((searchText && !hideSearch) || sortable.length > 0 || groupBy) && total > 0 && (
+      {!hideToolbar && ((searchText && !hideSearch) || sortable.length > 0 || groupBy) && total > 0 && (
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           {searchText && !hideSearch && (
             <div className="relative">

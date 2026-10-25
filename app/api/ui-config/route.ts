@@ -3,6 +3,7 @@
  * GET ?key=production_game → { value }
  * PATCH { key, value } → บันทึก (merge ทับทั้งก้อน)
  * ของกลาง: guardApi + supabaseAdmin · ตาราง ui_config(key, value jsonb) · PATCH บันทึก audit (setting_change)
+ * key ขึ้นต้น "admin_" = ค่ากลางที่แอดมินเท่านั้นแก้ได้ (เช่น admin_wb_table_presets ชุดหน้าตาตารางบอร์ด) — อ่านได้ตามปกติ
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -27,6 +28,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const key = (body.key ?? "").trim();
   if (!key) return NextResponse.json({ error: "ต้องระบุ key" }, { status: 400 });
+  if (key.startsWith("admin_")) { const adminDenied = await guardApi(request, "admin.users"); if (adminDenied) return adminDenied; }
   const admin = supabaseAdmin();
   const { error } = await admin.from("ui_config")
     .upsert({ key, value: body.value ?? {}, updated_at: new Date().toISOString() }, { onConflict: "key" });

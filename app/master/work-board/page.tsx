@@ -19,6 +19,8 @@ import { apiSave } from "@/lib/save-toast";
 import { formatDateTime } from "@/lib/date";
 import { MoProgressCell, MoShortMaterials } from "@/components/mo-material-progress";
 import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
+import { useTableDisplay } from "./table-display";
+import { TableDisplayPanel } from "./table-display-panel";
 import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
 import { InlineEdit } from "@/components/inline-edit";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
@@ -3193,6 +3195,40 @@ const stageOrder = (name: string) => Object.values(STAGE_META).find(([label]) =>
 /** ราคาขายต่ำกว่านี้ (฿0 / ฿1) = น่าจะยังไม่ได้ตั้งจริง → ขึ้นเตือน + ไม่นับรวมในยอดมูลค่า */
 const PRICE_MIN = 10;
 const NO_BRAND = "— ไม่ระบุแบรนด์ —";   // หัวกลุ่มของใบที่สินค้าไม่ผูกแบรนด์ (ไว้ท้ายสุดตอนจัดกลุ่มตามแบรนด์)
+/** จำนวนวันจาก "YYYY-MM-DD" ถึง "YYYY-MM-DD" (คิดแบบ UTC ล้วน ไม่เพี้ยนตามเขตเวลา) — บวก = to อยู่หลัง from */
+const ymdDiff = (from: string, to: string) => {
+  const [y1, m1, d1] = from.split("-").map(Number), [y2, m2, d2] = to.split("-").map(Number);
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+};
+/** ช่อง "ขั้นตอน" แบบคำพูด / ป้ายสี (ชุดหน้าตาโหมดง่าย) — late = เลยกำหนดกี่วัน */
+function StageText({ m, p, late, pill }: { m: PendingMO; p: MoProgress | undefined; late: number; pill?: boolean }) {
+  const st = stageOf(m, p);
+  const [label] = STAGE_META[st];
+  const tone = st === "buy" ? "rose" : st === "wait" ? "blue" : st === "prep" ? "amber" : st === "ready" ? "emerald" : "slate";
+  const toneCls: Record<string, string> = { rose: "bg-rose-50 text-rose-700", blue: "bg-blue-50 text-blue-700", amber: "bg-amber-50 text-amber-700", emerald: "bg-emerald-50 text-emerald-700", slate: "bg-slate-100 text-slate-600" };
+  const txtCls: Record<string, string> = { rose: "text-rose-700", blue: "text-blue-700", amber: "text-amber-700", emerald: "text-emerald-700", slate: "text-slate-500" };
+  const detail = st === "buy" && p ? `ต้องซื้อ ${p.buy}${p.requested ? ` · รออนุมัติ ${p.requested}` : ""}`
+    : st === "wait" && p ? `รอของ ${p.ordered} อย่าง`
+    : st === "prep" && m.has_bom ? `เตรียม ${m.prep_ready}/${m.prep_total} · ตัด ${m.cut_ready}/${m.cut_total}`
+    : st === "nobom" ? "ต้องทำสูตรวัตถุดิบก่อน" : "";
+  if (pill) return <span className={`inline-block text-[12px] px-2.5 py-0.5 rounded-full whitespace-nowrap ${toneCls[tone]}`}>{label}</span>;
+  return (
+    <div className="leading-tight">
+      <div className={`font-semibold whitespace-nowrap ${txtCls[tone]}`}>{label}</div>
+      {detail && <div className="text-[11px] text-slate-500 whitespace-nowrap">{detail}</div>}
+      {late > 0 && <div className="text-[11px] font-medium text-rose-600 whitespace-nowrap">⚠️ เลยกำหนด {fmt(late)} วัน</div>}
+    </div>
+  );
+}
+/** ช่อง "ซื้อของ" แบบคำพูด */
+function BuyText({ p, loading }: { p: MoProgress | undefined; loading: boolean }) {
+  if (loading) return <span className="text-[11px] text-slate-300">กำลังโหลด…</span>;
+  if (!p || p.total === 0) return <span className="text-[12px] text-slate-400">— ยังไม่มีสูตร —</span>;
+  if (p.buy > 0) return <span className="text-rose-600 font-medium whitespace-nowrap">ต้องซื้อ {p.buy} อย่าง</span>;
+  if (p.requested > 0) return <span className="text-amber-600 font-medium whitespace-nowrap">รออนุมัติ {p.requested} อย่าง</span>;
+  if (p.ordered > 0) return <span className="text-blue-600 font-medium whitespace-nowrap">รอของ {p.ordered} อย่าง</span>;
+  return <span className="text-emerald-700 font-medium whitespace-nowrap">✓ ของครบ</span>;
+}
 /** คอลัมน์ที่โชว์ตั้งต้น — จอคอม (ซ่อน 4 ตัวใหม่ไว้ก่อน) / iPad (เท่าที่จำเป็น) · ผู้ใช้เปลี่ยนเองได้ที่ปุ่ม ▥ คอลัมน์ */
 const PEND_HIDDEN_PC = new Set(["eta", "brand", "prio", "issues"]);
 const PEND_SHOWN_IPAD = new Set(["img", "prod", "qty", "buy", "stage", "due", "value"]);
@@ -3248,6 +3284,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void; onReload?: () => void;
 }) {
   const toast = useToast();
+  // ── หน้าตาตาราง: ชุด ปกติ / 👓 โหมดง่าย / กำหนดเอง (ดู ./table-display) · canSeeMoney = แอดมิน → แก้ชุดกลางได้
+  const disp = useTableDisplay(canSeeMoney);
+  const dc = disp.cfg;
+  const [panelOpen, setPanelOpen] = useState(false);
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
   // คำค้นร่วมของทั้ง 2 ตาราง — พิมพ์ที่ไหนก็กรองทั้ง "รอจ่าย" และ "จ่ายแล้ว" (เดิมต่างคนต่างค้น หาของที่จ่ายไปแล้วไม่เจอ)
@@ -3308,7 +3348,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const toggleSel = useCallback((id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExp = useCallback((id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
-  const onPendRow = useCallback((m: PendingMO) => { if (sel.size > 0) toggleSel(m.id); else toggleExp(m.id); }, [sel.size, toggleSel, toggleExp]);
+  // ชุดหน้าตาปิด "แตะแถวกาง" → แตะแถว = เปิดเช็กลิสต์ (แบบเดิม)
+  const onPendRow = useCallback((m: PendingMO) => { if (sel.size > 0) toggleSel(m.id); else if (dc.expand) toggleExp(m.id); else onOpenMO(m); }, [sel.size, toggleSel, toggleExp, dc.expand, onOpenMO]);
   // ช่อง "ซื้อของ" + จุดขั้นตอน — ความคืบหน้าการซื้อทุกใบในคำขอเดียว (กติกาเดียวกับหน้าขอซื้อ → ตัวเลขตรงกัน)
   const [prog, setProg] = useState<MoProgressResult | null>(null);
   const pendKey = pending.map((m) => m.mo_no).join(",");
@@ -3391,8 +3432,23 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     ["rush", "🔥 งานเร่ง", (m) => (m.priority ?? 0) > 0],
   ];
   const [qf, setQf] = useState("all");
-  const qfFn = quickFilters.find(([k]) => k === qf)?.[2] ?? (() => true);
-  const pendShown = pending.filter(qfFn);
+  // ปุ่มกรองที่ชุดหน้าตาซ่อนไว้ = ไม่ให้ค้างกรองอยู่โดยมองไม่เห็นปุ่ม
+  const chipOn = (k: string) => dc.show.chips && dc.chips[k] !== false;
+  const qfEff = qf !== "all" && chipOn(qf) ? qf : "all";
+  const qfFn = quickFilters.find(([k]) => k === qfEff)?.[2] ?? (() => true);
+  // ลำดับตอนเปิดตามชุดหน้าตา (กดเรียงที่หัวตารางเองได้ทับ)
+  const lateDays = (m: PendingMO) => Math.max(0, ...[m.due_date, m.internal_due_date].filter((d): d is string => !!d).map((d) => ymdDiff(d.slice(0, 10), today)));
+  const nearDue = (m: PendingMO) => [m.due_date, m.internal_due_date].filter((d): d is string => !!d).sort()[0] ?? "9999";
+  const pendShown = (() => {
+    const rows = pending.filter(qfFn);
+    if (dc.sortDef === "urgent") return [...rows].sort((a, b) => lateDays(b) - lateDays(a) || (b.priority ?? 0) - (a.priority ?? 0)
+      || STAGE_META[stageOf(a, prog?.[a.mo_no])][1] - STAGE_META[stageOf(b, prog?.[b.mo_no])][1] || nearDue(a).localeCompare(nearDue(b)));
+    if (dc.sortDef === "old") return [...rows].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+    if (dc.sortDef === "value" && canSeeMoney) return [...rows].sort((a, b) => valueOf(b, "all") - valueOf(a, "all"));
+    return rows;
+  })();
+  // ปิดช่องติ๊กในชุดหน้าตา → ล้างที่เลือกค้างไว้ (ปุ่มทำหลายใบจะได้ไม่โผล่)
+  useEffect(() => { if (!dc.check) { setSel(new Set()); setWoSel(new Set()); setQSel(new Set()); } }, [dc.check]);
   const applyDue = useCallback(async () => {
     const ids = pending.filter((m) => sel.has(m.id)).map((m) => m.id);
     if (!ids.length) return;
@@ -3572,10 +3628,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // โหมดจัดกลุ่ม (เลือกได้): ไม่จัด / ตามกลุ่ม / ตามความพร้อม(รอจ่าย) หรือ ตามสถานะ(จ่ายแล้ว)
   const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage" | "brand">("none");
   const lastGroupRef = useRef<"group" | "ready" | "stage" | "brand">("stage");   // กดปุ่มจัดกลุ่มในตารางเปิดกลับ = ใช้แบบล่าสุด
+  // ชุดหน้าตาซ่อนปุ่มจัดกลุ่ม/เรียง → เลิกจัดกลุ่ม (ไม่งั้นค้างจัดกลุ่มอยู่โดยไม่มีปุ่มให้ยกเลิก)
+  useEffect(() => { if (!dc.show.tools) { setPendGroup("none"); setWoGroup("none"); } }, [dc.show.tools]);
   const [woGroup, setWoGroup] = useState<"none" | "group" | "status">("none");
   const grpSelectCls = "h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600";
 
-  const imgPx = touch ? 56 : imgBig ? 64 : 36;
+  const imgPx = dc.img === "l" ? 72 : dc.img === "m" ? 52 : touch ? 56 : imgBig ? 64 : 36;   // รูป: ชุดหน้าตา (กลาง/ใหญ่) หรือเล็กตามโหมดเครื่อง/ปุ่ม 🖼
   const prioIcon = (m: PendingMO) => ((m.priority ?? 0) >= 2 ? "🔥 " : (m.priority ?? 0) === 1 ? "⭐ " : "");
   const dueText = (d: string | null | undefined) => d
     ? <><span className="tabular-nums">{dueDateText(d.slice(0, 10))}</span> <span className={daysLeftClass(d)}>{daysLeftText(d)}</span></>
@@ -3621,7 +3679,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         : <span className="text-[11px] text-slate-400">{m.ready ? "พร้อม ✓" : "— ไม่มีสูตร —"}</span> },
     { key: "buy", header: "🛒 ซื้อของ", group: "ซื้อของ", defaultHidden: hid("buy"), width: "minmax(8.5rem,1fr)", sortLabel: "ของที่ยังต้องซื้อ",
       sortValue: (m) => { const p = prog?.[m.mo_no]; return p ? p.buy * 10000 + p.requested * 100 + p.ordered : -1; },
-      cell: (m) => <MoProgressCell p={prog?.[m.mo_no]} loading={prog === null} /> },
+      cell: (m) => dc.buy === "words" ? <BuyText p={prog?.[m.mo_no]} loading={prog === null} /> : <MoProgressCell p={prog?.[m.mo_no]} loading={prog === null} /> },
     // ของครบประมาณ = วันของถึงช้าสุดของรายการที่สั่งแล้ว (ยังมีต้องซื้อ/รออนุมัติ = ยังบอกวันไม่ได้)
     { key: "eta", header: "📅 ของครบประมาณ", label: "ของครบประมาณ", group: "ซื้อของ", isNew: true, defaultHidden: hid("eta"), width: "8rem", sortLabel: "วันของครบ",
       sortValue: (m) => { const p = prog?.[m.mo_no]; return !p ? "9999" : p.buy + p.requested > 0 ? "8888" : p.ordered === 0 ? "0000" : p.eta ?? "7777"; },
@@ -3634,18 +3692,23 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           {p.eta && p.eta_unknown > 0 && <div className="text-[10px] text-slate-400">+{p.eta_unknown} รายการไม่ระบุวัน</div>}
         </div>; } },
     { key: "stage", header: "ขั้นตอน", group: "ผลิต", defaultHidden: hid("stage"), width: touch ? "13rem" : "11.75rem", sortLabel: "ขั้นตอน", sortValue: (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][1],
-      cell: (m) => <MoStepDots m={m} p={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0} /> },
-    // จอคอม: ดับเบิลคลิกที่วัน = แก้ได้เลย · iPad: อ่านอย่างเดียว (แก้ในเช็กลิสต์ — แตะสองครั้งบนทัชจะไปซูมหน้าแทน)
+      cell: (m) => dc.stage === "dots" ? <MoStepDots m={m} p={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0} />
+        : <StageText m={m} p={prog?.[m.mo_no]} late={lateDays(m)} pill={dc.stage === "pill"} /> },
+    // จอคอม: ดับเบิลคลิกที่วัน = แก้ได้เลย · iPad / ชุดหน้าตาปิด "แก้ในตาราง": อ่านอย่างเดียว (แก้ในเช็กลิสต์)
     { key: "due", header: "กำหนดส่ง", group: "อื่น ๆ", defaultHidden: hid("due"), width: "11rem", sortLabel: "กำหนดส่ง (วันที่ใกล้สุด)",
       sortValue: (m) => [m.due_date, m.internal_due_date].filter((d): d is string => !!d).sort()[0] ?? "9999",
       cell: (m) => <div className="space-y-0.5">
         {([["due", "📦", m.due_date, "ลูกค้า"], ["internal", "🪑", m.internal_due_date, "ภายใน"]] as const).map(([f, ic, v, lb]) => (
-          <span key={f} className="flex items-center gap-1 text-[12px]" title={touch ? `ส่ง${lb}` : `ส่ง${lb} — ดับเบิลคลิกเพื่อแก้`}>
+          <span key={f} className="flex items-center gap-1 text-[12px]" title={touch || !dc.edit ? `ส่ง${lb}` : `ส่ง${lb} — ดับเบิลคลิกเพื่อแก้`}>
             <span className="w-4 shrink-0 text-[11px]">{ic}</span>
-            {touch ? <span className="whitespace-nowrap">{dueText(v)}</span> : <>
+            {touch || !dc.edit ? <span className="whitespace-nowrap">{
+              !v || dc.due === "both" ? dueText(v)
+                : dc.due === "date" ? <span className="tabular-nums">{dueDateText(v.slice(0, 10))}</span>
+                : <span className={daysLeftClass(v)}>{daysLeftText(v)}</span>
+            }</span> : <>
               <InlineEdit type="date" trigger="dblclick" compact width="7.25rem" disabled={!canEdit} value={v ?? ""} placeholder="— ยังไม่กำหนด —"
                 onSave={(x) => void saveMoDate(m.id, f, x)} />
-              {v && <span className={`text-[10px] whitespace-nowrap ${daysLeftClass(v)}`}>{daysLeftText(v)}</span>}
+              {v && dc.due !== "date" && <span className={`text-[10px] whitespace-nowrap ${daysLeftClass(v)}`}>{daysLeftText(v)}</span>}
             </>}
           </span>
         ))}
@@ -3663,7 +3726,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     { key: "rate", header: "💰 ค่าแรง/ชิ้น", label: "ค่าแรง/ชิ้น", group: "เงิน", defaultHidden: hid("rate"), width: "8.5rem", align: "right", sortValue: (m) => rateOf(m), sortLabel: "ค่าแรง/ชิ้น",
       cell: (m) => { const r = rateOf(m); return (
         <span className="flex items-center justify-end gap-1">
-          <InlineEdit type="number" trigger="dblclick" compact align="right" width="5rem" disabled={!canEdit}
+          <InlineEdit type="number" trigger="dblclick" compact align="right" width="5rem" disabled={!canEdit || !dc.edit}
             value={r > 0 ? r : ""} placeholder="— ใส่ —" className="text-slate-600"
             onSave={(v) => void saveMoRate(m, v)} />
           {r > 0 && <span className="text-[10px] text-slate-400 whitespace-nowrap">= ฿{fmt(Math.round(r * (m.qty || 0) * 100) / 100)}</span>}
@@ -3682,6 +3745,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   ];
   // จำคอลัมน์ที่เลือก "ต่อคน" แยกจอคอม / iPad (การ์ดแนวตั้งหน้าตาตายตัว ไม่ใช้ตัวเลือกคอลัมน์)
   const pendColPrefs = useColumnPrefs(touch ? "wb_table_cols_ipad" : "wb_table_cols_pc", pendCols);
+  // คอลัมน์ที่โชว์จริง: ชุดหน้าตากำหนดไว้ (เรียงตามชุด) หรือ ▥ คอลัมน์ของแต่ละคน · ชื่อสินค้าต้องมีเสมอ · ช่องเงินไม่มีสิทธิ์ = ไม่มีใน pendCols อยู่แล้ว
+  const pendColsShown = (() => {
+    const base = dc.cols ? dc.cols.map((k) => pendCols.find((c) => c.key === k)).filter((c): c is MiniColumn<PendingMO> => !!c) : pendColPrefs.visible;
+    const withProd = base.some((c) => c.key === "prod") ? base : [...pendCols.filter((c) => c.key === "prod"), ...base];
+    return withProd.filter((c) => dc.img !== "0" || c.key !== "img");
+  })();
 
   // จ่ายงาน (ป๊อปเดิมของตาราง) — ค่าแรงตั้งต้น = ราคากลางในสูตรของสินค้านั้น (ไม่มีก็ถอดจากค่าแรงที่วางแผนไว้) แก้รายใบได้
   const openDispatchFor = (ids: Set<string>) => {
@@ -3798,7 +3867,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
 
   // ── 3 แท็บ: 📥 รอจ่าย · 🛠 กำลังผลิต · ✅ รอ QC รับเข้า — จำแท็บล่าสุด "ต่อคน" (ตามไปทุกเครื่อง)
   const tabPref = useViewPref("wb_table_tab", ["pend", "wip", "qc"] as const, "pend");
-  const tab = tabPref.view === "qc" && !qcSectionOn ? "pend" : tabPref.view;
+  // แท็บที่ชุดหน้าตาซ่อนไว้ / ไม่มีสิทธิ์ QC → ไปแท็บแรกที่ยังโชว์
+  const tabVisible = (t: "pend" | "wip" | "qc") => dc.tabs[t] && (t !== "qc" || qcSectionOn);
+  const tab = tabVisible(tabPref.view) ? tabPref.view : ((["pend", "wip", "qc"] as const).find(tabVisible) ?? "pend");
   const pickTab = (t: "pend" | "wip" | "qc") => { tabPref.setView(t); void tabPref.saveDefault(t); };
   // ค้นหาร่วม 3 แท็บ — คำเดียวกรองทุกตาราง · ตัวเลขบนแท็บ = จำนวนที่ค้นเจอในแท็บนั้น (กติกาเดียวกับช่องค้นของตาราง)
   const pendText = (m: PendingMO) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`;
@@ -3806,11 +3877,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const qcText = (q: QcQueueRow) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""}`;
   const qq = tableSearch.trim().toLowerCase();
   const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
-  const tabCards: ["pend" | "wip" | "qc", string, string, number, number, string][] = [
+  const tabCards = ([
     ["pend", "📥", "รอจ่าย", pendShown.filter((m) => hit(pendText(m))).length, pending.length, "ยังไม่ได้จ่ายให้โต๊ะ/ช่าง"],
     ["wip", "🛠", "กำลังผลิต", wos.filter((w) => hit(woText(w))).length, wos.length, "จ่ายแล้ว รอช่างส่งคืน"],
-    ...(qcSectionOn ? [["qc", "✅", "รอ QC รับเข้า", qQueue.filter((q) => hit(qcText(q))).length, qQueue.length, "ช่างส่งแล้ว รอตรวจ/เข้าชั้น"] as ["pend" | "wip" | "qc", string, string, number, number, string]] : []),
-  ];
+    ["qc", "✅", "รอ QC รับเข้า", qQueue.filter((q) => hit(qcText(q))).length, qQueue.length, "ช่างส่งแล้ว รอตรวจ/เข้าชั้น"],
+  ] as ["pend" | "wip" | "qc", string, string, number, number, string][]).filter(([k]) => tabVisible(k));
   // แถบสรุปของแท็บ "กำลังผลิต" / "รอ QC"
   const wipCards: [string, string, string][] = [
     ["กำลังผลิต", `${fmt(wos.length)} ใบ`, `จ่ายไปแล้ว ${fmt(wos.reduce((s, w) => s + (Number(w.qty) || 0), 0))} ชิ้น`],
@@ -3825,8 +3896,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     ["รอนานสุด", qQueue.length ? `${fmt(Math.max(...qcWait))} วัน` : "—", "นับจากวันที่ช่างส่ง"],
     ["ช่างส่งวันนี้", `${fmt(qQueue.filter((q) => (q.received_at ?? "").slice(0, 10) === today).length)} ใบ`, today],
   ];
-  const SumRow = ({ cards }: { cards: [string, string, string][] }) => (
-    <div className={`grid gap-2 ${cards.length > 3 ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3"}`}>
+  // keys[i] = ชื่อช่องของ cards[i] ใช้ซ่อน/โชว์ตามชุดหน้าตา (dc.cards)
+  const SumRow = ({ cards: all, keys }: { cards: [string, string, string][]; keys: string[] }) => {
+    const cards = all.filter((_, i) => dc.cards[keys[i]] !== false);
+    if (!dc.show.cards || cards.length === 0) return null;
+    return (
+    <div className={`grid gap-2 ${cards.length > 3 ? "grid-cols-2 md:grid-cols-4" : cards.length === 3 ? "grid-cols-3" : cards.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
       {cards.map(([label, val, sub]) => (
         <div key={label} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
           <div className="text-[11px] text-slate-500">{label}</div>
@@ -3835,7 +3910,21 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         </div>
       ))}
     </div>
-  );
+    );
+  };
+  const pendCardKeys = canSeeMoney ? ["pend.count", "pend.value", "pend.late", "pend.noprice"] : ["pend.count", "pend.late", "pend.buy"];
+  const wipCardKeys = ["wip.count", "wip.left", "wip.late", "wip.nolabor"];
+  const qcCardKeys = ["qc.count", "qc.qty", "qc.oldest", "qc.today"];
+  // ตัวเลือกในแผงตั้งค่าหน้าตา
+  const panelCardGroups: [string, [string, string][]][] = [
+    ["รอจ่าย", [["pend.count", "รอจ่าย"], ...(canSeeMoney ? [["pend.value", "มูลค่าค้างจ่าย"], ["pend.noprice", "ยังไม่ตั้งราคา"]] as [string, string][] : []), ["pend.late", "เกินกำหนด"], ["pend.buy", "รอซื้อของ (คนที่ไม่เห็นราคา)"]]],
+    ["กำลังผลิต", [["wip.count", "กำลังผลิต"], ["wip.left", "ค้างส่งคืน"], ["wip.late", "เลยกำหนดเสร็จ"], ["wip.nolabor", "ยังไม่ใส่ค่าแรง"]]],
+    ["รอ QC", [["qc.count", "รอรับเข้า"], ["qc.qty", "ชิ้นรอตรวจ"], ["qc.oldest", "รอนานสุด"], ["qc.today", "ช่างส่งวันนี้"]]],
+  ];
+  const panelColOptions: [string, string][] = pendCols.map((c) => [c.key, c.label ?? (typeof c.header === "string" ? c.header : c.key)]);
+  const panelChips: [string, string][] = quickFilters.filter(([k]) => k !== "all").map(([k, l]) => [k, l]);
+  const presetName = disp.preset === "simple" ? "👓 โหมดง่าย" : disp.preset === "custom" ? "✏️ กำหนดเอง" : "ปกติ";
+  const zoomStyle = dc.scale !== 100 ? { zoom: dc.scale / 100 } : undefined;   // ขยายทั้งส่วน (ตัวหนังสือ ปุ่ม รูป) — ป๊อปอัปอยู่นอกส่วนนี้ ไม่ถูกขยาย
 
   if (framePreview) {
     const sz = dev === "ipadP" ? IPAD_SIZE.portrait : IPAD_SIZE.landscape;
@@ -3858,22 +3947,36 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
 
   return (
     <div className="space-y-4 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
-      {/* ค้นหาร่วม 3 แท็บ + มุมมองอุปกรณ์ */}
+      {/* 🎛 แผงตั้งค่าหน้าตา (ไม่ถูกขยายตามขนาดทั้งหน้า — ปุ่มในแผงขนาดคงที่) */}
+      {panelOpen && (
+        <TableDisplayPanel d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
+          cardGroups={panelCardGroups} chipOptions={panelChips} onClose={() => setPanelOpen(false)} />
+      )}
+      <div className="space-y-4" style={zoomStyle}>
+      {/* ค้นหาร่วม 3 แท็บ + มุมมองอุปกรณ์ + 🎛 หน้าตา (ปุ่มนี้โชว์เสมอ — กันซ่อนทุกอย่างแล้วกลับไม่ได้) */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[16rem]">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">🔍</span>
-          <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="ค้นหาทั้ง 3 แท็บ — สินค้า / เลขใบสั่งผลิต / ใบจ่ายงาน / โต๊ะ / ช่าง"
-            className={`w-full ${touch ? "h-11 text-base" : "h-9 text-sm"} pl-9 pr-9 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300`} />
-          {tableSearch && <button type="button" onClick={() => setTableSearch("")} title="ล้างคำค้น" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">✕</button>}
-        </div>
-        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden divide-x divide-slate-200" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
-          {devBtn("pc", "💻 คอม", "มุมมองจอคอม")}
-          {devBtn("ipadL", "📱 iPad แนวนอน", "ตารางแถวใหญ่ กดง่าย")}
-          {devBtn("ipadP", "📱 iPad แนวตั้ง", "1 ใบ = 1 การ์ด")}
-        </div>
+        {dc.show.search ? (
+          <div className="relative flex-1 min-w-[16rem]">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">🔍</span>
+            <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="ค้นหาทั้ง 3 แท็บ — สินค้า / เลขใบสั่งผลิต / ใบจ่ายงาน / โต๊ะ / ช่าง"
+              className={`w-full ${touch ? "h-11 text-base" : "h-9 text-sm"} pl-9 pr-9 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300`} />
+            {tableSearch && <button type="button" onClick={() => setTableSearch("")} title="ล้างคำค้น" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">✕</button>}
+          </div>
+        ) : <div className="flex-1" />}
+        {dc.show.dev && (
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden divide-x divide-slate-200" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
+            {devBtn("pc", "💻 คอม", "มุมมองจอคอม")}
+            {devBtn("ipadL", "📱 iPad แนวนอน", "ตารางแถวใหญ่ กดง่าย")}
+            {devBtn("ipadP", "📱 iPad แนวตั้ง", "1 ใบ = 1 การ์ด")}
+          </div>
+        )}
+        <button type="button" onClick={() => setPanelOpen((v) => !v)} title="ตั้งค่าหน้าตาตาราง / เลือกชุด ปกติ · โหมดง่าย · กำหนดเอง"
+          className={`h-9 px-3 text-sm rounded-lg border whitespace-nowrap ${panelOpen ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+          🎛 หน้าตา: {presetName}
+        </button>
       </div>
       {/* แท็บการ์ดใหญ่ — ตัวเลข = จำนวนใบ (ตอนค้นหา = จำนวนที่ค้นเจอในแท็บนั้น) */}
-      <div className={`grid gap-2 ${tabCards.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+      {dc.show.tabs && <div className={`grid gap-2 ${tabCards.length === 3 ? "grid-cols-3" : tabCards.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
         {tabCards.map(([k, icon, label, found, total, sub]) => {
           const on = tab === k;
           return (
@@ -3890,37 +3993,39 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             </button>
           );
         })}
-      </div>
+      </div>}
       {tab === "pend" && (<>
       {/* แถบสรุป + ปุ่มกรองด่วน (ตัวเลขสรุปคิดจากใบที่กรองอยู่) */}
       <div className="space-y-2">
-        {SumRow({ cards: sumCards })}
-        <div className={`flex items-center gap-1.5 ${touch ? "overflow-x-auto pb-1" : "flex-wrap"}`}>
-          {quickFilters.map(([k, label, fn]) => {
+        {SumRow({ cards: sumCards, keys: pendCardKeys })}
+        {dc.show.chips && <div className={`flex items-center gap-1.5 ${touch ? "overflow-x-auto pb-1" : "flex-wrap"}`}>
+          {quickFilters.filter(([k]) => k === "all" || chipOn(k)).map(([k, label, fn]) => {
             const n = k === "all" ? pending.length : pending.filter(fn).length;
             return (
               <button key={k} type="button" onClick={() => setQf(k)}
-                className={`shrink-0 ${touch ? "h-10 px-4" : "h-8 px-3"} text-sm rounded-full border ${qf === k ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                {label} <span className={qf === k ? "text-white/70" : "text-slate-400"}>{fmt(n)}</span>
+                className={`shrink-0 ${touch ? "h-10 px-4" : "h-8 px-3"} text-sm rounded-full border ${qfEff === k ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                {label} <span className={qfEff === k ? "text-white/70" : "text-slate-400"}>{fmt(n)}</span>
               </button>
             );
           })}
-        </div>
+        </div>}
       </div>
       <MiniTable
-        rows={pendShown} rowKey={(m) => m.id} columns={dev === "ipadP" ? pendCols : pendColPrefs.visible} onRowClick={onPendRow}
-        expandedKeys={expanded} renderExpanded={renderPendDetail}
-        touch={touch} layout={dev === "ipadP" ? "cards" : "table"} renderCard={renderPendCard}
+        rows={pendShown} rowKey={(m) => m.id} columns={dev === "ipadP" ? pendCols : pendColsShown} onRowClick={onPendRow}
+        expandedKeys={expanded} renderExpanded={dc.expand ? renderPendDetail : undefined}
+        touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
+        layout={dev === "ipadP" ? "cards" : "table"} renderCard={renderPendCard}
         countUnit="ใบ"
-        selectable selected={sel} onSelectedChange={setSel}
+        selectable={dc.check} selected={sel} onSelectedChange={setSel}
         actions={<div className="flex items-center gap-2 flex-wrap">
-          {dev !== "ipadP" && <ColumnChooser state={pendColPrefs}
+          {dev !== "ipadP" && dc.show.colBtn && !dc.cols && <ColumnChooser state={pendColPrefs}
             note={`จำแยกกันระหว่างจอคอมกับ iPad · ${canSeeMoney ? "ราคาขาย/มูลค่าเห็นเฉพาะคนที่ดูแผนผู้บริหารได้" : "ช่องราคาขาย/มูลค่าเห็นเฉพาะผู้บริหาร"}`} />}
+          {dc.show.tools && <>
           <button type="button" onClick={() => pickGroup(pendGroup === "stage" ? "none" : "stage")} title="จัดกลุ่มตามขั้นตอน: รอซื้อของ → รอของเข้า → รอเตรียม/ตัด → พร้อมจ่าย"
             className={`h-8 px-3 text-sm rounded-lg border ${pendGroup === "stage" ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
             🪜 จัดกลุ่มตามขั้นตอน{pendGroup === "stage" ? " ✓" : ""}
           </button>
-          {dev === "pc" && <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
+          {dev === "pc" && dc.img === "s" && <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
             className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>}
           <select value={pendGroup} onChange={(e) => pickGroup(e.target.value as "none" | "group" | "ready" | "stage" | "brand")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
@@ -3929,6 +4034,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="ready">จัดกลุ่มตามความพร้อม</option>
           </select>
+          </>}
           {selMoNos.length > 0 && <>
             <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>
             <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้วันกำหนด ({selMoNos.length})</button>
@@ -3945,11 +4051,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : pendGroup === "brand" ? "จัดกลุ่มตามแบรนด์" : "จัดกลุ่มตามความพร้อม"}
         grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
         groupExtra={groupSum}
-        footnote={`${touch ? "แตะ" : "กด"}${dev === "ipadP" ? "การ์ด" : "แถว"} = กางดูของที่ยังไม่ครบ · 📋 = เปิดเช็กลิสต์เต็ม · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}`}
+        footnote={dc.show.foot ? `${touch ? "แตะ" : "กด"}${dev === "ipadP" ? "การ์ด" : "แถว"} = ${dc.expand ? "กางดูของที่ยังไม่ครบ" : "เปิดเช็กลิสต์"} · 📋 = เปิดเช็กลิสต์เต็ม${dc.stage === "dots" ? ` · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}` : ""}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}` : undefined}
         emptyText="ไม่มีงานรอจ่าย"
-        noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอจ่าย${qf !== "all" ? " (มีปุ่มกรองด่วนเปิดอยู่)" : ""}`}
+        noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอจ่าย${qfEff !== "all" ? " (มีปุ่มกรองด่วนเปิดอยู่)" : ""}`}
       />
       </>)}
+      </div>
       {assignOpen &&<AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); onReload?.(); }} />}
       {dueOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setDueOpen(false)}>
@@ -4082,21 +4189,22 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </ERPModal>
         );
       })()}
-      {tab === "wip" && (<>
-      {SumRow({ cards: wipCards })}
+      {tab === "wip" && (<div className="space-y-4" style={zoomStyle}>
+      {SumRow({ cards: wipCards, keys: wipCardKeys })}
       <MiniTable
         key={`wo-${woGroup}`}
-        rows={wos} rowKey={(w) => w.id} columns={woColPrefs.visible} touch={touch}
+        rows={wos} rowKey={(w) => w.id} columns={woColPrefs.visible}
+        touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
         onRowClick={(w) => { if (woSel.size > 0) setWoSel((prev) => { const n = new Set(prev); n.has(w.id) ? n.delete(w.id) : n.add(w.id); return n; }); else onOpenWO(w); }}
         countUnit="ใบ"
-        selectable selected={woSel} onSelectedChange={setWoSel}
+        selectable={dc.check} selected={woSel} onSelectedChange={setWoSel}
         actions={<div className="flex items-center gap-2 flex-wrap">
-          <ColumnChooser state={woColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />
-          <select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+          {dc.show.colBtn && <ColumnChooser state={woColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />}
+          {dc.show.tools && <select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="status">จัดกลุ่มตามสถานะ</option>
-          </select>
+          </select>}
           {selWos.length > 0 && (<>
             {canEdit && <button onClick={openQc} title="ส่งงานที่ติ๊กไว้เข้า QC (ลงวันที่ย้อนหลังได้)" className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">📤 ส่งงาน QC ({selWos.length})</button>}
             <button onClick={() => setWoLaborOpen(true)} className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">💰 ใส่ค่าแรง ({selWos.length})</button>
@@ -4109,17 +4217,18 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         emptyText="ยังไม่มีงานที่จ่าย"
         noMatchText={(q) => `ไม่พบ “${q}” ในแท็บกำลังผลิต`}
       />
-      </>)}
+      </div>)}
       {/* ✅ รอ QC รับเข้า — งานที่ช่างส่งมาแล้ว รอดึงเข้าชั้น (คิวเดียวกับหน้าโกดัง QC) จัดการจบในหน้าเดียว */}
-      {tab === "qc" && qcSectionOn && (<>
-        {SumRow({ cards: qcCards })}
+      {tab === "qc" && qcSectionOn && (<div className="space-y-4" style={zoomStyle}>
+        {SumRow({ cards: qcCards, keys: qcCardKeys })}
         <MiniTable
-          rows={qQueue} rowKey={(q) => q.wo_id} touch={touch}
+          rows={qQueue} rowKey={(q) => q.wo_id}
+          touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
           columns={qcColPrefs.visible}
           countUnit="ใบ"
-          selectable selected={qSel} onSelectedChange={setQSel}
+          selectable={dc.check} selected={qSel} onSelectedChange={setQSel}
           actions={<div className="flex items-center gap-2 flex-wrap">
-            <ColumnChooser state={qcColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />
+            {dc.show.colBtn && <ColumnChooser state={qcColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />}
             {qSel.size > 0 && canEdit && (
               <button onClick={openRecv} className="h-8 px-3 text-sm font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700">📥 รับเข้าชั้น ({qSel.size})</button>
             )}
@@ -4130,7 +4239,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           emptyText="ไม่มีงานรอรับเข้า QC"
           noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอ QC`}
         />
-      </>)}
+      </div>)}
 
       {/* ป๊อปรับเข้าชั้น QC (หลายใบ) */}
       {(() => {
