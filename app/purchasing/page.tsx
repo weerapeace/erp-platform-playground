@@ -25,7 +25,8 @@ import { ImageGallery, HoverZoomImage, ImageInput } from "@/components/image-inp
 import { TagGroupFilter } from "@/components/tag-filter";
 import { DupOrderBadge, DupOrderList, type OpenOrder } from "./dup-order";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
-import { MoShortageList, useMoShortage, shortMos, ceil2 } from "@/components/mo-shortage-picker";
+import { MoShortageList, useMoShortage, shortMos, ceil2, type MoPick } from "@/components/mo-shortage-picker";
+import type { MoMaterialStatus, MoMaterialStatusResult, MatStatus } from "@/app/api/mo/material-status/route";
 import type { MoListItem } from "@/app/api/mo/route";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
@@ -144,6 +145,13 @@ export default function PurchasingShopPage() {
   const [moLoading, setMoLoading] = useState(false);
   const [moSel, setMoSel] = useState<MoEntry | null>(null);   // null = โชว์รายการใบ · มีค่า = โชว์วัตถุดิบของใบนั้น
   const [moMatQty, setMoMatQty] = useState<MoMat | null>(null);   // วัตถุดิบที่กำลังใส่จำนวน (popup)
+  // ระดับ 2: วัตถุดิบ "ทุกตัว" ใน BOM ของใบที่เลือก + สถานะขอซื้อ/สั่งซื้อ (ของกลาง /api/mo/material-status)
+  const [moStatus, setMoStatus] = useState<MoMaterialStatusResult | null>(null);
+  const [moStatusErr, setMoStatusErr] = useState(false);
+  const [moStatusTick, setMoStatusTick] = useState(0);
+  const [haveBusy, setHaveBusy] = useState<string | null>(null);   // summary_id ที่กำลังบันทึก "มีของแล้ว"
+  const haveUndo = useRef(new Map<string, { on_hand: number; stored: number | null }>());   // ค่าเดิมก่อนกด (ไว้ยกเลิก)
+  const canEditMat = usePermission("products.edit");
 
   // cart + save
   const [cart, setCart] = useState<Line[]>([]);
@@ -291,9 +299,11 @@ export default function PurchasingShopPage() {
   }, [source, moNeeds]);
 
   // จัดกลุ่มวัตถุดิบที่ต้องซื้อ → ต่อ 1 ใบสั่งผลิต (โชว์เฉพาะที่ยัง "ต้องซื้อ" remaining>0 มาจาก API อยู่แล้ว)
+  // ตัดที่ติ๊ก "เตรียมแล้ว" ออก (ของอยู่หน้างานแล้ว ไม่ต้องซื้อ — ตรงกับระดับ 2 ที่ย้ายไปกลุ่ม "มีของแล้ว")
   const moList = useMemo<MoEntry[]>(() => {
     const map = new Map<string, MoEntry>();
     for (const r of moNeeds ?? []) for (const m of r.mos) {
+      if (m.is_ready) continue;
       let g = map.get(m.mo_no);
       if (!g) { g = { mo_no: m.mo_no, mo_id: m.mo_id, product_label: m.product_label, product_image: m.product_image, due_date: m.due_date, mats: [] }; map.set(m.mo_no, g); }
       g.mats.push({ code: r.component_sku, name: r.component_name, image: r.component_image, type: r.material_type, uom: r.uom, needed: m.needed });
@@ -301,16 +311,55 @@ export default function PurchasingShopPage() {
     return [...map.values()].sort((a, b) => a.mo_no.localeCompare(b.mo_no));
   }, [moNeeds]);
 
-  // เพิ่มวัตถุดิบของใบสั่งผลิตเข้าตะกร้า — ผูก source_mo_no เพื่อให้บอร์ดเด้งสถานะ "ขอแล้ว" + item_name = [รหัส] ชื่อ
-  const addMoMaterial = (mat: MoMat, qty: number) => {
+  // ระดับ 2: โหลดสถานะวัตถุดิบทั้ง BOM ของใบที่เลือก (เปลี่ยนใบ = ล้างของเก่า · กดซ้ำ/บันทึก = โหลดทับเงียบ ๆ)
+  const moSelNo = moSel?.mo_no ?? null;
+  useEffect(() => {
+    setMoStatus((prev) => (prev?.mo_no === moSelNo ? prev : null));
+    setMoStatusErr(false);
+    if (!moSelNo) return;
+    let alive = true;
+    apiFetch(`/api/mo/material-status?mo_no=${encodeURIComponent(moSelNo)}`).then(r => r.json())
+      .then(j => { if (!alive) return; if (j.data) setMoStatus(j.data as MoMaterialStatusResult); else setMoStatusErr(true); })
+      .catch(() => { if (alive) setMoStatusErr(true); });
+    return () => { alive = false; };
+  }, [moSelNo, moStatusTick]);
+  // รีเฟรชรายการใบ (ระดับ 1) แบบไม่ล้างจอ
+  const refreshMoNeeds = () => apiFetch("/api/mo/purchase-needs").then(r => r.json())
+    .then(j => setMoNeeds((j.data ?? []) as PurchaseNeedRow[])).catch(() => { /* คงของเดิม */ });
+
+  // ✓ มีของแล้ว — บันทึก "มีอยู่" = ที่ต้องใช้ (ช่องเดียวกับบอร์ดจ่ายงาน/ความพร้อมวัตถุดิบ) + ล้างค่า override ต้องซื้อ → หลุดจากรายการต้องซื้อ
+  // ยกเลิก = คืนค่าเดิมถ้ากดในรอบนี้ ไม่งั้นตั้ง "มีอยู่" = 0 · API กลางเช็กสิทธิ์ products.edit + บันทึก audit
+  const setHave = async (it: MoMaterialStatus, have: boolean) => {
+    const prev = haveUndo.current.get(it.summary_id);
+    const body = have
+      ? { id: it.summary_id, on_hand_qty: it.required, purchase_override: null }
+      : { id: it.summary_id, on_hand_qty: prev?.on_hand ?? 0, purchase_override: prev ? prev.stored : null };
+    setHaveBusy(it.summary_id);
+    try {
+      const res = await apiFetch("/api/mo/material", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      if (have) haveUndo.current.set(it.summary_id, { on_hand: it.on_hand, stored: it.to_purchase_stored });
+      else haveUndo.current.delete(it.summary_id);
+      toast.success(have ? `บันทึกแล้ว: มี ${it.name ?? it.code} แล้ว` : `ยกเลิก "มีของแล้ว" ของ ${it.name ?? it.code}`);
+      setMoStatusTick(t => t + 1);
+      void refreshMoNeeds();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally { setHaveBusy(null); }
+  };
+
+  // เพิ่มวัตถุดิบของใบสั่งผลิตเข้าตะกร้า — ผูก source_mo_nos ทุกใบที่เลือก (บอร์ดเด้ง "ขอแล้ว" ทุกใบ) + item_name = [รหัส] ชื่อ
+  const addMoMaterial = (mat: MoMat, qty: number, extra: MoPick[] = []) => {
     if (!moSel || qty <= 0) return;
     const label = mat.code ? `[${mat.code}] ${mat.name ?? ""}`.trim() : (mat.name ?? "วัตถุดิบ");
+    const nos = [moSel.mo_no, ...extra.map((p) => p.no).filter((n) => n !== moSel.mo_no)];
     setCart(p => [...p, {
       label, qty, uom: mat.uom ?? "", seller: "—", price: 0, currency: "THB",
-      image: null, variationId: null, skuRef: mat.code, skuId: null, note: `จากใบสั่งผลิต ${moSel.mo_no}`,
-      reason: `ใบสั่งผลิต ${moSel.mo_no}`,
+      image: null, variationId: null, skuRef: mat.code, skuId: null, note: `จากใบสั่งผลิต ${nos.join(", ")}`,
+      reason: `ใบสั่งผลิต ${nos.join(", ")}`,
       usedForId: null, usedForLabel: moSel.product_label, urgent: false, useDate: moSel.due_date || null,
-      sourceMoNo: moSel.mo_no, sourceMoNos: [moSel.mo_no],
+      sourceMoNo: moSel.mo_no, sourceMoNos: nos,
     }]);
     setMoMatQty(null);
     toast.success(`เพิ่ม ${label} ลงตะกร้าแล้ว`);
@@ -852,8 +901,8 @@ export default function PurchasingShopPage() {
           {/* แท็บ "ใบสั่งผลิต": เลือกใบ → โชว์วัตถุดิบที่ต้องซื้อของใบนั้นเป็นการ์ด */}
           {source === "mo" && (() => {
             const ql = q.trim().toLowerCase();
-            if (moNeeds === null) return <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลดใบสั่งผลิต…</div>;
-            if (moList.length === 0) return <div className="text-center text-slate-300 py-16">ไม่มีวัตถุดิบที่ต้องซื้อจากใบสั่งผลิต 🎉</div>;
+            if (moNeeds === null && !moSel) return <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลดใบสั่งผลิต…</div>;
+            if (moList.length === 0 && !moSel) return <div className="text-center text-slate-300 py-16">ไม่มีวัตถุดิบที่ต้องซื้อจากใบสั่งผลิต 🎉</div>;
             // ----- ระดับ 1: เลือกใบสั่งผลิต -----
             if (!moSel) {
               const list = moList.filter(g => !ql || g.mo_no.toLowerCase().includes(ql) || g.product_label.toLowerCase().includes(ql));
@@ -880,34 +929,62 @@ export default function PurchasingShopPage() {
                 </>
               );
             }
-            // ----- ระดับ 2: วัตถุดิบของใบที่เลือก -----
-            const mats = moSel.mats.filter(m => !ql || (m.code ?? "").toLowerCase().includes(ql) || (m.name ?? "").toLowerCase().includes(ql));
+            // ----- ระดับ 2: วัตถุดิบ "ทุกตัว" ใน BOM ของใบที่เลือก — ต้องซื้อ (บน) → ขอ/สั่งแล้ว → มีของ/ได้ของแล้ว (ล่าง) -----
+            const items = (moStatus?.mo_no === moSel.mo_no ? moStatus.items : []);
+            const shownItems = items.filter(m => !ql || (m.code ?? "").toLowerCase().includes(ql) || (m.name ?? "").toLowerCase().includes(ql));
+            const cnt = (sts: MatStatus[]) => items.filter(m => sts.includes(m.status)).length;
+            const bar: [string, string, number][] = [
+              ["bg-rose-500", "ต้องซื้อ", cnt(["buy"])], ["bg-amber-400", "ขอแล้ว รออนุมัติ", cnt(["requested"])],
+              ["bg-blue-500", "สั่งซื้อแล้ว (มี PO)", cnt(["ordered"])], ["bg-emerald-500", "มีของ / ได้ของแล้ว", cnt(["received", "have", "ready", "skip"])],
+            ];
+            const inCartQty = (code: string | null) => cart.filter(l => code && l.skuRef === code && (l.sourceMoNos ?? []).includes(moSel.mo_no)).reduce((n, l) => n + l.qty, 0);
+            const groups: { title: string; hint: string; sts: MatStatus[] }[] = [
+              { title: "🛒 ต้องซื้อ", hint: "กดการ์ดเพื่อใส่จำนวนแล้วเพิ่มลงตะกร้า", sts: ["buy"] },
+              { title: "🚚 ขอซื้อ / สั่งซื้อแล้ว", hint: "รอของเข้า", sts: ["requested", "ordered"] },
+              { title: "✅ มีของ / ได้ของแล้ว", hint: "", sts: ["received", "have", "ready", "skip"] },
+            ];
             return (
               <>
                 <div className="flex items-center gap-3 mb-3">
                   <button onClick={() => { setMoSel(null); setQ(""); }} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex-shrink-0">← ใบสั่งผลิตอื่น</button>
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-slate-800 truncate">{moSel.product_label} <span className="font-mono text-xs text-slate-400">· {moSel.mo_no}</span></div>
-                    <div className="text-[11px] text-slate-400">กดการ์ดวัตถุดิบเพื่อใส่จำนวนแล้วเพิ่มลงตะกร้า{moSel.due_date ? ` · กำหนดส่ง ${moSel.due_date}` : ""}</div>
+                    <div className="text-[11px] text-slate-400">วัตถุดิบทั้งหมดใน BOM {items.length || "…"} รายการ{moSel.due_date ? ` · กำหนดส่ง ${moSel.due_date}` : ""}</div>
                   </div>
                 </div>
-                <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
-                  {mats.map((m, idx) => (
-                    <button key={`${m.code ?? m.name}:${idx}`} onClick={() => setMoMatQty(m)}
-                      className="text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-rose-300 hover:shadow-md transition-all">
-                      <div className="aspect-square bg-slate-50 flex items-center justify-center">
-                        {m.image ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={m.image} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
+                {moStatusErr && (
+                  <div className="text-sm text-rose-600 py-8 text-center">โหลดวัตถุดิบของใบนี้ไม่สำเร็จ <button onClick={() => setMoStatusTick(t => t + 1)} className="underline">ลองใหม่</button></div>
+                )}
+                {!moStatusErr && !moStatus && <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลดวัตถุดิบและสถานะการซื้อ…</div>}
+                {items.length > 0 && (
+                  <div className="mb-4">
+                    {/* ภาพรวมทั้งใบ: กี่ตัวต้องซื้อ / รออนุมัติ / สั่งแล้ว / ได้ของแล้ว */}
+                    <div className="flex h-2 rounded-full overflow-hidden bg-slate-100">
+                      {bar.map(([cls, label, n]) => n > 0 && <div key={label} className={cls} style={{ width: `${(n / items.length) * 100}%` }} title={`${label} ${n}`} />)}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-slate-500">
+                      {bar.map(([cls, label, n]) => <span key={label} className="inline-flex items-center gap-1.5"><span className={`w-2 h-2 rounded-sm ${cls}`} />{label} <b className="text-slate-700">{n}</b></span>)}
+                    </div>
+                  </div>
+                )}
+                {moStatus && items.length === 0 && <div className="text-center text-slate-300 py-16">ใบนี้ยังไม่มีสูตรวัตถุดิบ (BOM)</div>}
+                {items.length > 0 && shownItems.length === 0 && <div className="text-center text-slate-300 py-16">ไม่พบวัตถุดิบที่ตรงกับ “{q}”</div>}
+                {groups.map(g => {
+                  const list = shownItems.filter(m => g.sts.includes(m.status));
+                  if (list.length === 0) return null;
+                  return (
+                    <div key={g.title} className="mb-5">
+                      <div className="text-sm font-semibold text-slate-700 mb-2">{g.title} <span className="text-xs font-normal text-slate-400">{list.length} รายการ{g.hint ? ` · ${g.hint}` : ""}</span></div>
+                      <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                        {list.map(it => (
+                          <MoBomCard key={it.summary_id} it={it} inCart={inCartQty(it.code)} canEdit={canEditMat} busy={haveBusy === it.summary_id}
+                            onAdd={() => setMoMatQty({ code: it.code, name: it.name, image: it.image, type: it.type, uom: it.uom, needed: it.remaining })}
+                            onHave={(v) => void setHave(it, v)} />
+                        ))}
                       </div>
-                      <div className="p-3">
-                        <div className="font-medium text-slate-800 text-[13px] leading-snug line-clamp-2" title={m.name ?? ""}>{m.name}</div>
-                        {m.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{m.code}</div>}
-                        {m.type && <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">{m.type}</div>}
-                        <div className="text-sm font-semibold text-rose-600 mt-1">ต้องซื้อ {m.needed.toLocaleString()}<span className="text-xs font-normal text-slate-400"> {m.uom ?? ""}</span></div>
-                      </div>
-                    </button>
-                  ))}
-                  {mats.length === 0 && <div className="col-span-full text-center text-slate-300 py-16">ไม่พบวัตถุดิบที่ตรงกับ “{q}”</div>}
-                </div>
+                    </div>
+                  );
+                })}
               </>
             );
           })()}
@@ -1224,7 +1301,8 @@ export default function PurchasingShopPage() {
       {/* ใส่จำนวนวัตถุดิบจากใบสั่งผลิต (เริ่มที่ "จำนวนที่ต้องซื้อ") → เพิ่มลงตะกร้า */}
       {moMatQty && moSel && (
         <MoMatQtyDialog mat={moMatQty} moNo={moSel.mo_no} productLabel={moSel.product_label}
-          onClose={() => setMoMatQty(null)} onAdd={(qty) => addMoMaterial(moMatQty, qty)} />
+          others={(moNeeds ?? []).find(r => moMatQty.code && r.component_sku === moMatQty.code) ?? null}
+          onClose={() => setMoMatQty(null)} onAdd={(qty, extra) => addMoMaterial(moMatQty, qty, extra)} />
       )}
 
       {/* Group variation modal — ดึง SKU ของกลุ่มมาเลือก + ค้นหา + จัดการกลุ่ม */}
@@ -1327,14 +1405,19 @@ export default function PurchasingShopPage() {
 }
 
 // ป๊อปใส่จำนวนวัตถุดิบจากใบสั่งผลิต — เริ่มที่ "จำนวนที่ต้องซื้อ" + ปุ่ม −/+ (กดง่ายบนมือถือ)
-function MoMatQtyDialog({ mat, moNo, productLabel, onClose, onAdd }: { mat: MoMat; moNo: string; productLabel: string; onClose: () => void; onAdd: (qty: number) => void }) {
-  const [qty, setQty] = useState(() => mat.needed > 0 ? mat.needed : 1);
+// + ถามถึงใบงานอื่นที่ต้องซื้อวัตถุดิบตัวเดียวกัน (ของกลาง MoShortageList — รุ่นเดียวกันขึ้นก่อน, เตือนสูตรผิดปกติ) → ซื้อรวมในบรรทัดเดียว ผูกทุกใบ
+function MoMatQtyDialog({ mat, moNo, productLabel, others, onClose, onAdd }: { mat: MoMat; moNo: string; productLabel: string; others: PurchaseNeedRow | null; onClose: () => void; onAdd: (qty: number, extra: MoPick[]) => void }) {
+  const [qty, setQty] = useState(() => mat.needed > 0 ? ceil2(mat.needed) : 1);
+  const [picks, setPicks] = useState<MoPick[]>([]);
   const label = mat.code ? `[${mat.code}] ${mat.name ?? ""}`.trim() : (mat.name ?? "วัตถุดิบ");
+  const shortage = useMemo(() => ({ row: others, loading: false, error: false, reload: () => { /* ข้อมูลมาจากหน้าแล้ว */ } }), [others]);
+  const nos = [moNo, ...picks.map((p) => p.no)];
+  const hasOthers = !!others && others.mos.some((m) => m.mo_no !== moNo);
   return (
-    <ERPModal open onClose={onClose} size="sm" storageKey="mo-mat-qty" title="เพิ่มวัตถุดิบลงใบขอซื้อ"
+    <ERPModal open onClose={onClose} size={hasOthers ? "md" : "sm"} storageKey="mo-mat-qty" title="เพิ่มวัตถุดิบลงใบขอซื้อ"
       footer={<>
         <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-        <button onClick={() => onAdd(qty)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
+        <button onClick={() => onAdd(qty, picks)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
       </>}>
       <div className="flex gap-3 mt-1">
         <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -1347,19 +1430,100 @@ function MoMatQtyDialog({ mat, moNo, productLabel, onClose, onAdd }: { mat: MoMa
           <div className="text-xs text-rose-600 mt-1">ต้องซื้อ <b>{mat.needed.toLocaleString()}</b> {mat.uom ?? ""}</div>
         </div>
       </div>
+      {hasOthers && (
+        <div className="mt-4 space-y-1.5">
+          <label className="block text-xs font-medium text-slate-600">ซื้อให้ใบงานไหนบ้าง</label>
+          {/* ใบที่เปิดอยู่ — ติ๊กไว้เสมอ */}
+          <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-md border border-blue-200 bg-blue-50/60">
+            <span className="shrink-0 w-4 h-4 rounded border bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-blue-800">{moNo} <span className="text-[11px] font-normal">(ใบที่เปิดอยู่)</span></span>
+              <span className="block text-xs text-blue-700 truncate">{productLabel}</span>
+            </span>
+            <span className="text-sm font-semibold text-blue-800 tabular-nums shrink-0">{mat.needed.toLocaleString()} {mat.uom ?? ""}</span>
+          </div>
+          <MoShortageList shortage={shortage} uom={mat.uom ?? ""} value={picks} excludeMo={moNo} sameSku={productLabel}
+            onChange={(p, total) => { setPicks(p); setQty(ceil2(mat.needed + total)); }} />
+        </div>
+      )}
       <div className="mt-4">
-        <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({mat.uom ?? ""})</label>
+        <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน</label>
         <div className="flex items-stretch gap-2">
           <button type="button" aria-label="ลดจำนวน" onClick={() => setQty(q => Math.max(0, Math.round(((Number(q) || 0) - 1) * 100) / 100))}
             className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">−</button>
-          <input type="number" inputMode="decimal" value={qty} min={0} step="any"
-            onFocus={e => e.target.select()} onChange={e => setQty(Number(e.target.value))}
-            className="flex-1 min-w-0 h-11 px-2 text-center text-lg font-medium border border-slate-200 rounded-md tabular-nums" />
+          <div className="relative flex-1 min-w-0">
+            <input type="number" inputMode="decimal" value={qty} min={0} step="any"
+              onFocus={e => e.target.select()} onChange={e => setQty(Number(e.target.value))}
+              className="w-full h-11 px-20 text-center text-lg font-medium border border-slate-200 rounded-md tabular-nums" />
+            {mat.uom && <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 max-w-[4.5rem] truncate text-xs font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded px-2 py-0.5">{mat.uom}</span>}
+          </div>
           <button type="button" aria-label="เพิ่มจำนวน" onClick={() => setQty(q => Math.round(((Number(q) || 0) + 1) * 100) / 100)}
             className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">+</button>
         </div>
       </div>
+      {/* ตัวอย่างบรรทัดที่จะลงตะกร้า/ใบขอซื้อ — บอกเลข MO ครบทุกใบ */}
+      <div className="mt-3 rounded-md bg-slate-50 border border-slate-100 px-3 py-2">
+        <div className="text-[11px] text-slate-400">จะขึ้นในตะกร้า / ใบขอซื้อเป็น</div>
+        <div className="text-sm font-medium text-slate-700 truncate">{label} · {qty.toLocaleString()} {mat.uom ?? ""}</div>
+        <div className="text-xs text-indigo-600">🔖 ใบสั่งผลิต {nos.join(", ")}{nos.length > 1 ? ` (${nos.length} ใบ)` : ""}</div>
+      </div>
     </ERPModal>
+  );
+}
+
+// การ์ดวัตถุดิบ 1 ตัวใน BOM (แท็บใบสั่งผลิต ระดับ 2) — ป้ายสถานะการซื้อ + ✓ มีของแล้ว / ยกเลิก
+const fmtQty = (n: number) => (Math.round(n * 1000) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
+const fmtEta = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null);
+function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave }: { it: MoMaterialStatus; inCart: number; canEdit: boolean; busy: boolean; onAdd: () => void; onHave: (have: boolean) => void }) {
+  const isBuy = it.status === "buy";
+  const u = it.uom ?? "";
+  const prNos = [...new Set(it.links.map((l) => l.pr_no).filter(Boolean))].join(", ");
+  const poNos = [...new Set(it.links.map((l) => l.po_no).filter(Boolean))].join(", ");
+  const eta = fmtEta(it.links.map((l) => l.expected_date).filter(Boolean).sort()[0] ?? null);
+  const tag = (cls: string, text: string, sub?: string | null) => (
+    <div className="mt-1.5">
+      <span className={`inline-block max-w-full truncate text-[11px] font-medium px-1.5 py-0.5 rounded border ${cls}`}>{text}</span>
+      {sub && <div className="text-[11px] text-slate-400 font-mono truncate mt-0.5" title={sub}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div role={isBuy ? "button" : undefined} tabIndex={isBuy ? 0 : undefined}
+      onClick={isBuy ? onAdd : undefined} onKeyDown={isBuy ? (e) => { if (e.key === "Enter") onAdd(); } : undefined}
+      className={`text-left bg-white border rounded-xl overflow-hidden flex flex-col ${isBuy ? "border-slate-200 cursor-pointer hover:border-rose-300 hover:shadow-md transition-all" : "border-slate-100"}`}>
+      <div className={`aspect-square bg-slate-50 flex items-center justify-center ${isBuy ? "" : "opacity-60"}`}>
+        {it.image ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
+      </div>
+      <div className="p-3 flex-1 flex flex-col">
+        <div className={`font-medium text-[13px] leading-snug line-clamp-2 ${isBuy ? "text-slate-800" : "text-slate-500"}`} title={it.name ?? ""}>{it.name}</div>
+        {it.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate self-start">{it.code}</div>}
+        <div className="text-xs text-slate-400 mt-0.5">ใช้ {fmtQty(it.required)} {u}{it.on_hand > 0 && it.status === "buy" ? ` · มีอยู่ ${fmtQty(it.on_hand)}` : ""}</div>
+        {isBuy && (
+          <>
+            <div className="text-sm font-semibold text-rose-600 mt-1">ต้องซื้อ {fmtQty(it.remaining)}<span className="text-xs font-normal text-slate-400"> {u}</span></div>
+            {it.requested > 0 && tag("bg-amber-50 text-amber-700 border-amber-200", `ขอแล้ว ${fmtQty(it.requested)} · ยังขาด ${fmtQty(it.remaining)}`, prNos || null)}
+            {inCart > 0 && tag("bg-blue-50 text-blue-700 border-blue-200", `🛒 อยู่ในตะกร้า ${fmtQty(inCart)} ${u}`)}
+          </>
+        )}
+        {it.status === "requested" && tag("bg-amber-50 text-amber-700 border-amber-200", "🕒 ขอแล้ว · รออนุมัติ", prNos || null)}
+        {it.status === "ordered" && tag("bg-blue-50 text-blue-700 border-blue-200", `📄 สั่งแล้ว${eta ? ` · ถึง ${eta}` : ""}`, poNos || prNos || null)}
+        {it.status === "received" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "📦 รับของแล้ว", poNos || null)}
+        {it.status === "have" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ มีของแล้ว")}
+        {it.status === "ready" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ เตรียมแล้ว")}
+        {it.status === "skip" && tag("bg-slate-50 text-slate-500 border-slate-200", "ไม่ต้องซื้อ")}
+        {canEdit && isBuy && (
+          <div className="mt-auto pt-2">
+            <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); onHave(true); }}
+              className="w-full h-8 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50 disabled:opacity-50">
+              {busy ? "กำลังบันทึก…" : "✓ มีของแล้ว"}
+            </button>
+          </div>
+        )}
+        {canEdit && it.status === "have" && (
+          <button type="button" disabled={busy} onClick={() => onHave(false)}
+            className="mt-2 self-start text-xs text-blue-600 hover:underline disabled:opacity-50">{busy ? "กำลังบันทึก…" : "ยกเลิก (ยังไม่มีของ)"}</button>
+        )}
+      </div>
+    </div>
   );
 }
 
