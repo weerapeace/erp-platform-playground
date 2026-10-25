@@ -162,12 +162,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const capId = String((ins as Rec).id);
   await writeAudit(admin, { action: "create", entityType: CAPTURE_TABLE, entityId: capId, actorId: user.id, actorName: user.name, metadata: { source: "upload", images: keys.length } });
 
-  const item = await processCapture(admin, capId, user.name);
-  return NextResponse.json({ item, error: null });
+  // อัปรูปหน้ารายการที่มีหลายคำสั่งซื้อ = แยกเป็นหลายใบเหมือนรูปจากไลน์
+  const { row: item, extra } = await processCapture(admin, capId, user.name, true);
+  return NextResponse.json({ item, extra_count: extra.length, error: null });
 }
 
-/** รายการสินค้าที่หน้าจอส่งมา → รูปที่ปลอดภัย */
-function cleanItems(v: unknown): CaptureItem[] {
+/** รายการสินค้าที่หน้าจอส่งมา → รูปที่ปลอดภัย · เลือกจากใบสั่งผลิต (มีแค่รหัส) → หา id สินค้าจากรหัสให้ */
+async function cleanItems(admin: ReturnType<typeof supabaseAdmin>, v: unknown): Promise<CaptureItem[]> {
+  const items = cleanItemsSync(v);
+  const codes = [...new Set(items.filter((it) => !it.sku_id && it.sku_code).map((it) => it.sku_code as string))];
+  if (codes.length) {
+    const { data } = await admin.from("skus_v2").select("id, code, name_th").in("code", codes);
+    const byCode = new Map(((data ?? []) as Rec[]).map((s) => [str(s.code), s]));
+    for (const it of items) {
+      const s = !it.sku_id && it.sku_code ? byCode.get(it.sku_code) : undefined;
+      if (s) { it.sku_id = str(s.id); it.sku_name = it.sku_name || str(s.name_th) || null; }
+    }
+  }
+  return items;
+}
+function cleanItemsSync(v: unknown): CaptureItem[] {
   return (Array.isArray(v) ? v : []).slice(0, 80).map((x) => {
     const it = (x ?? {}) as Rec;
     const qty = numOrNull(it.qty);
@@ -181,6 +195,7 @@ function cleanItems(v: unknown): CaptureItem[] {
       sku_id: UUID.test(str(it.sku_id)) ? str(it.sku_id) : null,
       sku_code: str(it.sku_code) || null,
       sku_name: str(it.sku_name) || null,
+      mo_no: /^MO-[\w-]{4,30}$/i.test(str(it.mo_no)) ? str(it.mo_no).toUpperCase() : null,
       po_line_id: str(it.po_line_id) === "new" ? "new" : (UUID.test(str(it.po_line_id)) ? str(it.po_line_id) : null),
     };
   }).filter((it) => it.name || it.name_th || it.sku_name);
@@ -209,7 +224,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const patch: Rec = {};
     for (const k of allowed) {
       if (!(k in f)) continue;
-      if (k === "items") patch.items = cleanItems(f.items);
+      if (k === "items") patch.items = await cleanItems(admin, f.items);
       else if (["shipping_fee", "discount", "total_paid"].includes(k)) patch[k] = numOrNull(f[k]);
       else if (k === "order_date") patch.order_date = /^\d{4}-\d{2}-\d{2}$/.test(str(f.order_date)) ? str(f.order_date) : null;
       else if (k === "currency") patch.currency = ["RMB", "YUAN", "CNY"].includes(str(f.currency).toUpperCase()) ? "RMB" : "THB";
@@ -248,7 +263,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   } else if (action === "reread") {
     if (cap.status !== "pending") return NextResponse.json({ error: "ให้ AI อ่านใหม่ได้เฉพาะใบที่รอตรวจ" }, { status: 400 });
     await admin.from(CAPTURE_TABLE).update({ status: "processing", updated_at: new Date().toISOString() }).eq("id", id);
-    await processCapture(admin, id, user.name);
+    await processCapture(admin, id, user.name, false);   // อ่านใหม่ = ไม่แยกใบเพิ่ม (กันใบซ้ำ)
   } else if (action) {
     return NextResponse.json({ error: "คำสั่งไม่ถูกต้อง" }, { status: 400 });
   }

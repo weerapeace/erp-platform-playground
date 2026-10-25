@@ -20,6 +20,8 @@ export type CaptureItem = {
   sku_id?: string | null;
   sku_code?: string | null;
   sku_name?: string | null;
+  /** ซื้อให้ใบสั่งผลิตไหน (เลือกจาก BOM ด้วย MoBomPicker) — จดไว้ที่บรรทัด PO ว่า "จากใบสั่งผลิต MO-…" */
+  mo_no?: string | null;
   /** ตอนยืนยันแบบผูก PO เดิม: บรรทัด PO ที่ตรงกัน · "new" = เพิ่มเป็นบรรทัดใหม่ · ว่าง = ไม่ผูก */
   po_line_id?: string | null;
 };

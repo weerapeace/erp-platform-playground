@@ -12,6 +12,8 @@
  *   - ไม่ให้ AI ถอดชื่อ/ที่อยู่/เบอร์ผู้รับ (รูปต้นฉบับยังมีอยู่ → ดูได้เฉพาะคนมีสิทธิ์ po.view)
  *   - ใช้กลุ่มที่คุยงานอยู่แล้วได้: รูปจากไลน์ที่ AI บอกว่า "ไม่ใช่คำสั่งซื้อ" → บอทไม่ตอบ + ตีตกให้เอง (กู้คืนได้)
  *     (อัปรูปเองจากหน้าเว็บไม่ตีตกอัตโนมัติ — คนอัปตั้งใจส่งมาเอง)
+ *   - 1 รูปมีหลายคำสั่งซื้อได้ (แคปหน้ารายการ Taobao/Shopee — เจอจริงในรูปแรกของเจ้าของ 3 ร้าน) → แยก 1 ใบต่อ 1 คำสั่งซื้อ
+ *     หน้ารายการไม่มีเลขคำสั่งซื้อ → เตือนซ้ำด้วย ร้าน+วันที่+ยอดจ่าย แทน · ให้ AI รู้ "วันนี้" กันเดาปีผิด
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2PutObject } from "@/lib/r2";
@@ -95,31 +97,40 @@ export async function loadCapture(admin: Admin, id: string): Promise<CaptureRow 
 
 // ---------------------------------------------------------------- AI อ่านรูป
 
-const AI_SYSTEM = [
-  "คุณคือผู้ช่วยฝ่ายจัดซื้อ อ่านภาพหน้าจอ \"คำสั่งซื้อที่ซื้อแล้ว\" จากแอป Shopee / Taobao / 1688 / Lazada / TikTok Shop",
-  "(อาจมีหลายภาพของคำสั่งซื้อเดียวกัน ให้รวมข้อมูลจากทุกภาพ) แล้วตอบเป็น JSON อย่างเดียว ตามโครงนี้:",
-  "{",
-  '  "is_order": true/false  — ภาพนี้เป็นหน้าคำสั่งซื้อ/รายละเอียดคำสั่งซื้อ/หน้าติดตามพัสดุของคำสั่งซื้อจริงไหม,',
-  '  "platform": "taobao" | "shopee" | "1688" | "lazada" | "tiktok" | "other",',
-  '  "shop_name": "ชื่อร้านตามที่เห็น (ภาษาเดิม)",',
-  '  "order_no": "เลขคำสั่งซื้อ (Taobao: 订单编号 ตัวเลขยาว ~19 หลัก · Shopee: หมายเลขคำสั่งซื้อ/Order ID) ไม่เห็น = \\"\\"",',
-  '  "order_date": "YYYY-MM-DD วันที่สั่ง/ชำระเงิน ไม่เห็น = \\"\\"",',
-  '  "currency": "RMB" ถ้าราคาเป็น ¥/元 · "THB" ถ้าเป็น ฿/บาท,',
-  '  "items": [{ "name": "ชื่อสินค้าตามภาพ", "name_th": "แปลชื่อเป็นไทยให้ครบใจความ — ต้องคงรูปทรง ขนาด/ตัวเลข เบอร์ รุ่น วัสดุ ไว้ทุกตัว (ชื่อเดิมเป็นไทยอยู่แล้ว = ใช้ชื่อเดิม)", "option": "ตัวเลือก (สี/ขนาด/规格) ตามภาพ แปลไทยในวงเล็บ", "qty": จำนวน, "unit_price": ราคาต่อชิ้นที่จ่ายจริง, "line_total": ยอดรวมของบรรทัด }],',
-  '  "shipping_fee": ค่าส่ง (运费) เป็นตัวเลข · ส่งฟรี = 0 · ไม่เห็น = null,',
-  '  "discount": ส่วนลดรวมเป็นตัวเลขบวก · ไม่เห็น = null,',
-  '  "total_paid": ยอดที่จ่ายจริงทั้งคำสั่งซื้อ (实付款 / ยอดชำระทั้งหมด) · ไม่เห็น = null,',
-  '  "tracking_no": "เลขพัสดุ (运单号/快递单号/หมายเลขติดตามพัสดุ) ไม่เห็น = \\"\\"",',
-  '  "confidence": 0-100 ความมั่นใจโดยรวมว่าอ่านถูก,',
-  '  "unreadable": ["ชื่อช่องที่อ่านไม่ชัดหรือไม่เห็นในภาพ เช่น shipping_fee, order_no"],',
-  '  "notes": "หมายเหตุสั้น ๆ ภาษาไทย ถ้ามีอะไรผิดปกติ (เช่น ภาพถูกตัด / มีหลายคำสั่งซื้อในภาพเดียว)"',
-  "}",
-  "กฎ: ห้ามเดาตัวเลข — ไม่เห็นชัดให้ใส่ null แล้วใส่ชื่อช่องใน unreadable · ตัวเลขเป็นตัวเลขล้วน ไม่มีสัญลักษณ์เงินหรือคอมมา",
-  "· ห้ามใส่ชื่อผู้รับ ที่อยู่ หรือเบอร์โทร ลงในคำตอบ · ถ้าภาพไม่ใช่คำสั่งซื้อ ให้ is_order=false และช่องอื่นว่าง",
-].join("\n");
+/** วันนี้ตามเวลาไทย (YYYY-MM-DD) — ให้ AI เติมปีเองได้ถูกเมื่อภาพเห็นแค่ "10.25" */
+export const todayBangkok = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+
+function aiSystem(today: string): string {
+  return [
+    "คุณคือผู้ช่วยฝ่ายจัดซื้อ อ่านภาพหน้าจอ \"คำสั่งซื้อที่ซื้อแล้ว\" จากแอป Shopee / Taobao / 1688 / Lazada / TikTok Shop แล้วตอบเป็น JSON อย่างเดียว ตามโครงนี้:",
+    "{",
+    '  "is_order": true/false — ภาพเป็นหน้าคำสั่งซื้อ / รายการคำสั่งซื้อ / รายละเอียดคำสั่งซื้อ / หน้าติดตามพัสดุ จริงไหม,',
+    '  "orders": [ {',
+    '    "platform": "taobao" | "shopee" | "1688" | "lazada" | "tiktok" | "other",',
+    '    "shop_name": "ชื่อร้านตามที่เห็น (ภาษาเดิม)",',
+    '    "order_no": "เลขคำสั่งซื้อ (Taobao: 订单编号 ตัวเลขยาว ~19 หลัก · Shopee: หมายเลขคำสั่งซื้อ/Order ID) ไม่เห็น = \\"\\"",',
+    '    "order_date": "YYYY-MM-DD วันที่สั่ง/ชำระเงิน ไม่เห็น = \\"\\"",',
+    '    "currency": "RMB" ถ้าราคาเป็น ¥/元 · "THB" ถ้าเป็น ฿/บาท,',
+    '    "items": [{ "name": "ชื่อสินค้าตามภาพ", "name_th": "แปลชื่อเป็นไทยให้ครบใจความ — ต้องคงรูปทรง ขนาด/ตัวเลข เบอร์ รุ่น วัสดุ ไว้ทุกตัว (ชื่อเดิมเป็นไทยอยู่แล้ว = ใช้ชื่อเดิม)", "option": "ตัวเลือก (สี/ขนาด/规格) ตามภาพ แปลไทยในวงเล็บ — สีให้แปลเป็นชื่อสี เช่น 咖啡 = สีน้ำตาลกาแฟ", "qty": จำนวน, "unit_price": ราคาต่อชิ้นที่จ่ายจริง, "line_total": ยอดรวมของบรรทัด }],',
+    '    "shipping_fee": ค่าส่ง (运费 / 含运费¥2 = 2) เป็นตัวเลข · ส่งฟรี = 0 · ไม่เห็น = null,',
+    '    "discount": ส่วนลดรวมเป็นตัวเลขบวก · ไม่เห็น = null,',
+    '    "total_paid": ยอดที่จ่ายจริงของคำสั่งซื้อนั้น (实付款 / ยอดชำระทั้งหมด) · ไม่เห็น = null,',
+    '    "tracking_no": "เลขพัสดุ (运单号/快递单号/หมายเลขติดตามพัสดุ) ไม่เห็น = \\"\\"",',
+    '    "confidence": 0-100 ความมั่นใจว่าอ่านคำสั่งซื้อนี้ถูก,',
+    '    "unreadable": ["ชื่อช่องที่อ่านไม่ชัดหรือไม่เห็นในภาพ เช่น shipping_fee, order_no"],',
+    '    "notes": "หมายเหตุสั้น ๆ ภาษาไทย ถ้ามีอะไรผิดปกติ (เช่น กล่องถูกตัดครึ่ง)"',
+    "  } ]",
+    "}",
+    "กฎ:",
+    "· 1 คำสั่งซื้อ = 1 รายการใน orders · หน้า \"รายการคำสั่งซื้อ\" (Taobao 我的订单/待发货/待收货 · Shopee การซื้อของฉัน) มักมีหลายคำสั่งซื้อ: แต่ละกล่องร้าน = 1 คำสั่งซื้อ ต้องใส่ให้ครบทุกกล่องที่เห็นราคา",
+    "· หลายภาพที่เป็นคำสั่งซื้อเดียวกัน (เช่น หน้ารายละเอียดที่แคปต่อกัน) ให้รวมเป็นรายการเดียว",
+    `· วันนี้คือ ${today} (เวลาไทย) — ถ้าภาพเห็นแค่ เดือน.วัน (เช่น 10.25 หรือ 10月25日) ให้ใช้ปีของวันนี้ ถ้าได้วันในอนาคตให้ใช้ปีก่อนหน้า`,
+    "· ห้ามเดาตัวเลข — ไม่เห็นชัดให้ใส่ null แล้วใส่ชื่อช่องใน unreadable · ตัวเลขเป็นตัวเลขล้วน ไม่มีสัญลักษณ์เงินหรือคอมมา",
+    "· ห้ามใส่ชื่อผู้รับ ที่อยู่ หรือเบอร์โทร ลงในคำตอบ · ถ้าภาพไม่ใช่คำสั่งซื้อ ให้ is_order=false และ orders เป็น []",
+  ].join("\n");
+}
 
 export type AiOrderResult = {
-  is_order: boolean;
   platform: CapturePlatform | null;
   shop_name: string;
   order_no: string;
@@ -134,9 +145,19 @@ export type AiOrderResult = {
   unreadable: string[];
   notes: string;
 };
+export type AiReadResult = { is_order: boolean; orders: AiOrderResult[] };
 
-/** ทำผล AI ให้อยู่ในรูปที่ปลอดภัย (AI ตอบอะไรแปลก ๆ มาก็ไม่พัง) */
-export function sanitizeAiOrder(raw: Rec): AiOrderResult {
+/** วันที่ที่ AI ให้มาอยู่ในอนาคต (มักเพราะเดาปีผิด) → ถอยไป 1 ปี */
+function fixFutureDate(date: string | null, today: string): string | null {
+  if (!date) return null;
+  const limit = new Date(`${today}T00:00:00Z`).getTime() + 2 * 86400000;
+  const t = new Date(`${date}T00:00:00Z`).getTime();
+  if (!isFinite(t) || t <= limit) return date;
+  return `${Number(date.slice(0, 4)) - 1}${date.slice(4)}`;
+}
+
+/** ทำคำสั่งซื้อ 1 รายการที่ AI ตอบให้อยู่ในรูปที่ปลอดภัย (AI ตอบอะไรแปลก ๆ มาก็ไม่พัง) */
+export function sanitizeAiOrder(raw: Rec, today = todayBangkok()): AiOrderResult {
   const p = str(raw.platform).toLowerCase();
   const platform = (PLATFORMS as string[]).includes(p) ? (p as CapturePlatform) : (p ? "other" : null);
   const curRaw = str(raw.currency).toUpperCase();
@@ -159,11 +180,10 @@ export function sanitizeAiOrder(raw: Rec): AiOrderResult {
   const date = str(raw.order_date);
   const conf = numOrNull(raw.confidence);
   return {
-    is_order: raw.is_order !== false,
     platform,
     shop_name: str(raw.shop_name).slice(0, 200),
     order_no: str(raw.order_no).slice(0, 60),
-    order_date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+    order_date: fixFutureDate(/^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null, today),
     currency,
     items,
     shipping_fee: numOrNull(raw.shipping_fee),
@@ -176,35 +196,95 @@ export function sanitizeAiOrder(raw: Rec): AiOrderResult {
   };
 }
 
+/** ผล AI ทั้งรูป → หลายคำสั่งซื้อ (รองรับคำตอบแบบเก่าที่เป็นคำสั่งซื้อเดียวไม่มี orders ด้วย) */
+export function sanitizeAiResult(raw: Rec, today = todayBangkok()): AiReadResult {
+  const list = Array.isArray(raw.orders) ? (raw.orders as Rec[]) : (raw.shop_name || raw.items ? [raw] : []);
+  const orders = list.map((o) => sanitizeAiOrder((o ?? {}) as Rec, today))
+    .filter((o) => o.items.length > 0 || o.order_no || o.total_paid !== null)
+    .slice(0, 20);
+  return { is_order: raw.is_order !== false && orders.length > 0, orders };
+}
+
 /** ส่งรูป (data URL) ให้ AI อ่าน — detail "high" เพราะตัวหนังสือในหน้าจอมือถือเล็ก */
-export async function readOrderWithAi(dataUrls: string[]): Promise<{ result: AiOrderResult; raw: Rec }> {
+export async function readOrdersWithAi(dataUrls: string[]): Promise<{ result: AiReadResult; raw: Rec }> {
+  const today = todayBangkok();
   const content: unknown[] = [
     { type: "text", text: `ภาพหน้าจอคำสั่งซื้อ ${dataUrls.length} ภาพ` },
     ...dataUrls.map((url) => ({ type: "image_url", image_url: { url, detail: "high" } })),
   ];
-  const raw = await chatJson(AI_SYSTEM, content, 1500, ORDER_AI_MODEL);
-  return { result: sanitizeAiOrder(raw), raw };
+  const raw = await chatJson(aiSystem(today), content, 3000, ORDER_AI_MODEL);
+  return { result: sanitizeAiResult(raw, today), raw };
 }
 
 // ---------------------------------------------------------------- ซ้ำ
 
-/** ใบอื่นที่เลขคำสั่งซื้อเดียวกัน (ไม่นับใบที่ตีตก) — ใบเก่าสุดมาก่อน */
-export async function findDuplicate(admin: Admin, id: string, orderNoNorm: string | null): Promise<CaptureRow | null> {
-  if (!orderNoNorm) return null;
-  const { data } = await admin.from(CAPTURE_TABLE).select(CAPTURE_COLUMNS)
-    .eq("order_no_norm", orderNoNorm).neq("id", id).neq("status", "rejected")
-    .order("created_at", { ascending: true }).limit(1);
+/**
+ * ใบอื่นที่น่าจะเป็นคำสั่งซื้อเดียวกัน (ไม่นับใบที่ตีตก) — ใบเก่าสุดมาก่อน
+ *   มีเลขคำสั่งซื้อ = เทียบเลข · ไม่มีเลข (เช่น แคปหน้ารายการ) = เทียบ ร้าน + วันที่ + ยอดจ่าย ตรงกันทั้ง 3 อย่าง
+ */
+export async function findDuplicate(
+  admin: Admin, id: string, orderNoNorm: string | null,
+  fallback?: { shop_name: string | null; order_date: string | null; total_paid: number | null },
+): Promise<CaptureRow | null> {
+  let q = admin.from(CAPTURE_TABLE).select(CAPTURE_COLUMNS).neq("id", id).neq("status", "rejected").neq("status", "collecting");
+  if (orderNoNorm) q = q.eq("order_no_norm", orderNoNorm);
+  else if (fallback?.shop_name && fallback.order_date && fallback.total_paid !== null) {
+    q = q.eq("shop_name", fallback.shop_name).eq("order_date", fallback.order_date).eq("total_paid", fallback.total_paid);
+  } else return null;
+  const { data } = await q.order("created_at", { ascending: true }).limit(1);
   const row = (data ?? [])[0];
   return row ? normalizeRow(row as unknown as Rec) : null;
 }
 
-/** ให้ AI อ่านรูปของใบนี้ แล้วบันทึกผลเป็น "รอตรวจ" — ใช้ทั้งตอนรับจากไลน์ / อัปรูปเอง / กดอ่านใหม่ */
-export async function processCapture(admin: Admin, id: string, actorName = "line-bot"): Promise<CaptureRow | null> {
+/** ผล AI 1 คำสั่งซื้อ → ช่องที่บันทึกลงใบ */
+function orderFields(o: AiOrderResult): Rec {
+  return {
+    platform: o.platform,
+    shop_name: o.shop_name || null,
+    order_no: o.order_no || null,
+    order_no_norm: normOrderNo(o.order_no),
+    order_date: o.order_date,
+    currency: o.currency,
+    items: o.items,
+    shipping_fee: o.shipping_fee,
+    discount: o.discount,
+    total_paid: o.total_paid,
+    tracking_no: o.tracking_no || null,
+    ai_confidence: o.confidence,
+    ai_unreadable: o.unreadable,
+  };
+}
+
+/** ตอนอ่านใหม่ใบที่เคยแยกมาจากรูปหลายคำสั่งซื้อ → เลือกคำสั่งซื้อที่เป็น "ของใบนี้" (ร้านเดิม > ลำดับเดิม > อันแรก) */
+function pickOwnOrder(cap: CaptureRow, orders: AiOrderResult[], prevIndex: number | null): AiOrderResult | null {
+  if (orders.length === 0) return null;
+  if (cap.shop_name) {
+    const byShop = orders.find((o) => o.shop_name && shopNameSimilarity(o.shop_name, cap.shop_name) >= 0.7);
+    if (byShop) return byShop;
+  }
+  if (prevIndex !== null && orders[prevIndex]) return orders[prevIndex];
+  return orders[0];
+}
+
+export type ProcessResult = {
+  /** ใบนี้ (หลังอ่าน) */
+  row: CaptureRow | null;
+  /** ใบที่แยกเพิ่มจากรูปเดียวกัน (รูปมีหลายคำสั่งซื้อ) */
+  extra: CaptureRow[];
+};
+
+/**
+ * ให้ AI อ่านรูปของใบนี้ แล้วบันทึกผลเป็น "รอตรวจ" — ใช้ทั้งตอนรับจากไลน์ / อัปรูปเอง / กดอ่านใหม่
+ * split = true (อ่านครั้งแรก): รูปมีหลายคำสั่งซื้อ (แคปหน้ารายการ) → แยกเป็น 1 ใบต่อ 1 คำสั่งซื้อ (ใช้รูปเดียวกัน)
+ * split = false (กดอ่านใหม่): ไม่สร้างใบเพิ่ม — อัปเดตเฉพาะคำสั่งซื้อที่เป็นของใบนี้
+ */
+export async function processCapture(admin: Admin, id: string, actorName = "line-bot", split = false): Promise<ProcessResult> {
   const cap = await loadCapture(admin, id);
-  if (!cap) return null;
-  const done = async (patch: Rec) => {
-    await admin.from(CAPTURE_TABLE).update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
-    return loadCapture(admin, id);
+  if (!cap) return { row: null, extra: [] };
+  const now = () => new Date().toISOString();
+  const done = async (patch: Rec): Promise<ProcessResult> => {
+    await admin.from(CAPTURE_TABLE).update({ ...patch, updated_at: now() }).eq("id", id);
+    return { row: await loadCapture(admin, id), extra: [] };
   };
   if (!openAiKey()) return done({ status: "pending", ai_error: "ยังไม่ได้ตั้งค่า AI (OPENAI_API_KEY) — กรอกข้อมูลเองได้" });
   if (cap.image_keys.length === 0) return done({ status: "pending", ai_error: "ไม่มีรูปให้อ่าน" });
@@ -212,38 +292,52 @@ export async function processCapture(admin: Admin, id: string, actorName = "line
   try {
     const urls = await imagesToDataUrls(cap.image_keys);
     if (urls.length === 0) return done({ status: "pending", ai_error: "เปิดรูปจากที่เก็บไม่ได้ — ลองกดให้ AI อ่านใหม่" });
-    const { result, raw } = await readOrderWithAi(urls);
-    const norm = normOrderNo(result.order_no);
-    const dup = await findDuplicate(admin, id, norm);
-    const row = await done({
-      status: "pending",
-      platform: result.platform,
-      shop_name: result.shop_name || null,
-      order_no: result.order_no || null,
-      order_no_norm: norm,
-      order_date: result.order_date,
-      currency: result.currency,
-      items: result.items,
-      shipping_fee: result.shipping_fee,
-      discount: result.discount,
-      total_paid: result.total_paid,
-      tracking_no: result.tracking_no || null,
-      ai_confidence: result.confidence,
-      ai_unreadable: result.unreadable,
-      ai_is_order: result.is_order,
-      ai_notes: result.notes || null,
-      ai_error: null,
-      ai_model: ORDER_AI_MODEL,
-      ai_raw: raw,
-      ai_read_at: new Date().toISOString(),
-      dup_of: dup?.id ?? null,
-    });
+    const { result, raw } = await readOrdersWithAi(urls);
     // มีค่าใช้จ่าย → ลง audit ทุกครั้ง (นับค่า AI ได้ภายหลัง)
     await writeAudit(admin, {
       action: "ai_order_read", entityType: CAPTURE_TABLE, entityId: id, actorId: null, actorName,
-      metadata: { actor: actorName, images: urls.length, model: ORDER_AI_MODEL, platform: result.platform, items: result.items.length },
+      metadata: { actor: actorName, images: urls.length, model: ORDER_AI_MODEL, orders: result.orders.length, platform: result.orders[0]?.platform ?? null },
     });
-    return row;
+    const base: Rec = { status: "pending", ai_is_order: result.is_order, ai_error: null, ai_model: ORDER_AI_MODEL, ai_read_at: now() };
+
+    if (!result.is_order || result.orders.length === 0) {
+      return done({ ...base, ai_raw: raw, ai_notes: str(raw.notes) || null, items: [], order_no: null, order_no_norm: null, dup_of: null });
+    }
+
+    const prevSplit = ((cap as unknown as { ai_raw?: Rec }).ai_raw?._split ?? null) as { index?: number } | null;
+    const orders = split ? result.orders : [pickOwnOrder(cap, result.orders, prevSplit?.index ?? null)!];
+    const total = orders.length;
+    const note = (i: number, o: AiOrderResult) =>
+      [total > 1 ? `รูปนี้มี ${total} คำสั่งซื้อ — ใบนี้คือใบที่ ${i + 1}/${total}` : "", o.notes].filter(Boolean).join(" · ") || null;
+
+    // ใบนี้ = คำสั่งซื้อแรก
+    const first = orders[0];
+    const firstDup = await findDuplicate(admin, id, normOrderNo(first.order_no), first);
+    const res = await done({
+      ...base, ...orderFields(first), ai_notes: note(0, first), dup_of: firstDup?.id ?? null,
+      ai_raw: { ...raw, _split: total > 1 ? { index: 0, total } : (prevSplit ?? undefined) },
+    });
+
+    // คำสั่งซื้อที่เหลือในรูปเดียวกัน → ใบใหม่ใบละคำสั่งซื้อ (รูป/คนส่ง/กลุ่มเดียวกัน)
+    const extra: CaptureRow[] = [];
+    for (let i = 1; i < total; i++) {
+      const o = orders[i];
+      const { data: ins } = await admin.from(CAPTURE_TABLE).insert({
+        source: cap.source, status: "processing", image_keys: cap.image_keys,
+        sender_line_user_id: cap.sender_line_user_id, sender_name: cap.sender_name, line_group_id: cap.line_group_id,
+        line_message_ids: (cap as unknown as { line_message_ids?: unknown }).line_message_ids ?? [], created_by: cap.created_by,
+      }).select("id").single();
+      if (!ins) continue;
+      const newId = String((ins as Rec).id);
+      const dup = await findDuplicate(admin, newId, normOrderNo(o.order_no), o);
+      await admin.from(CAPTURE_TABLE).update({
+        ...base, ...orderFields(o), ai_notes: note(i, o), dup_of: dup?.id ?? null,
+        ai_raw: { _split: { index: i, total }, from: id }, updated_at: now(),
+      }).eq("id", newId);
+      const row = await loadCapture(admin, newId);
+      if (row) extra.push(row);
+    }
+    return { row: res.row, extra };
   } catch (e) {
     return done({ status: "pending", ai_error: String((e as Error)?.message ?? e).slice(0, 300) });
   }
@@ -315,9 +409,23 @@ export async function putCaptureImage(bytes: Uint8Array, type: string): Promise<
   return key;
 }
 
-/** ข้อความตอบกลับในไลน์ (ข้อความเดียว) */
-export function buildReplyText(cap: CaptureRow, dup: CaptureRow | null): string {
+/** ข้อความตอบกลับในไลน์ (ข้อความเดียวเสมอ) — caps = ทุกใบที่ได้จากรูปนี้ (รูปหน้ารายการอาจมีหลายคำสั่งซื้อ) */
+export function buildReplyText(caps: CaptureRow[], dups: Map<string, CaptureRow>): string {
+  const cap = caps[0];
+  if (caps.length > 1) {
+    const lines: string[] = [`📥 รับรูปแล้ว — เจอ ${caps.length} คำสั่งซื้อ${cap.platform ? ` (${PLATFORM_LABEL[cap.platform]})` : ""} แยกเป็น ${caps.length} ใบ`];
+    caps.slice(0, 8).forEach((c, i) => {
+      const ship = c.shipping_fee ? ` · ค่าส่ง ${money(c.shipping_fee, c.currency)}` : "";
+      const first = c.items[0] ? ` · ${c.items[0].name_th || c.items[0].name}${c.items.length > 1 ? ` +${c.items.length - 1}` : ""}` : "";
+      lines.push(`${i + 1}) ${c.shop_name || "ไม่รู้ร้าน"} · ${money(c.total_paid, c.currency)}${ship}${first}${dups.has(c.id) ? " ⚠️ อาจซ้ำ" : ""}`);
+    });
+    if (caps.length > 8) lines.push(`…อีก ${caps.length - 8} ใบ`);
+    if (caps.every((c) => !c.order_no)) lines.push("ℹ️ หน้ารายการไม่มีเลขคำสั่งซื้อ — ถ้าต้องการเลขให้แคปหน้ารายละเอียดเพิ่ม");
+    lines.push(`ตรวจ/ยืนยันใน ERP 👉 ${appBaseUrl()}/purchasing/line-orders`);
+    return lines.join("\n");
+  }
   const link = captureLink(cap.id);
+  const dup = dups.get(cap.id) ?? null;
   if (cap.ai_error && !cap.order_no && cap.items.length === 0) {
     return `📥 รับรูปแล้ว แต่ AI อ่านไม่สำเร็จ\nเปิดตรวจ/กรอกเองใน ERP 👉 ${link}`;
   }
@@ -336,7 +444,7 @@ export function buildReplyText(cap: CaptureRow, dup: CaptureRow | null): string 
   if (cap.items.length > 5) lines.push(`• …อีก ${cap.items.length - 5} รายการ`);
   if (dup) {
     const when = new Date(dup.created_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
-    lines.push(`⚠️ เลขนี้ส่งมาแล้วเมื่อ ${when}${dup.sender_name ? ` (${dup.sender_name})` : ""} — อาจเป็นรูปซ้ำ`);
+    lines.push(`⚠️ คำสั่งซื้อนี้ส่งมาแล้วเมื่อ ${when}${dup.sender_name ? ` (${dup.sender_name})` : ""} — อาจเป็นรูปซ้ำ`);
   }
   if (cap.ai_unreadable.length) lines.push(`⚠️ AI อ่านไม่ชัด: ${cap.ai_unreadable.map(fieldLabel).join(", ")}`);
   lines.push(`ตรวจ/ยืนยันใน ERP 👉 ${link}`);
@@ -435,12 +543,18 @@ export async function autoRejectNotOrder(admin: Admin, id: string): Promise<void
 }
 
 async function finishAndReply(admin: Admin, token: string, id: string, replyToken: string | undefined): Promise<void> {
-  const cap = await processCapture(admin, id);
+  const { row: cap, extra } = await processCapture(admin, id, "line-bot", true);
   if (!cap) return;
   // รูปที่ไม่ใช่คำสั่งซื้อ (รูปสินค้า/รูปคุยงานในกลุ่มที่ใช้ร่วมกัน) → บอทเงียบ + ย้ายไป "ตีตก" ให้เอง ไม่ให้แชท/กล่องรก
-  if (isNotOrderImage(cap)) { await autoRejectNotOrder(admin, id); return; }
-  const dup = cap.dup_of ? await loadCapture(admin, cap.dup_of) : null;
-  await lineReply(token, replyToken, buildReplyText(cap, dup));
+  if (extra.length === 0 && isNotOrderImage(cap)) { await autoRejectNotOrder(admin, id); return; }
+  const caps = [cap, ...extra];
+  const dups = new Map<string, CaptureRow>();
+  for (const c of caps) {
+    if (!c.dup_of) continue;
+    const d = await loadCapture(admin, c.dup_of);
+    if (d) dups.set(c.id, d);
+  }
+  await lineReply(token, replyToken, buildReplyText(caps, dups));
 }
 
 /**
@@ -632,7 +746,7 @@ export async function confirmCapture(admin: Admin, cap: CaptureRow, input: Confi
       currency: isCNY(cap.currency) ? "RMB" : "THB",
       order_date: cap.order_date ?? undefined,
       note: [orderRef(cap), cap.shipping_fee ? `ค่าส่ง ${money(cap.shipping_fee, cap.currency)}` : "", cap.tracking_no ? `พัสดุ ${cap.tracking_no}` : ""].filter(Boolean).join(" · "),
-      lines: cap.items.map((it) => ({ item_sku_id: it.sku_id ?? null, item_name: itemLabel(it), qty: it.qty, price: unitPrice(it) })),
+      lines: cap.items.map((it) => ({ item_sku_id: it.sku_id ?? null, item_name: itemLabel(it), qty: it.qty, price: unitPrice(it), note: it.mo_no ? `จากใบสั่งผลิต ${it.mo_no}` : null })),
     }, actor, { source: "line_capture", capture_id: cap.id });
     if (!res.ok) return res;
     poId = res.id; poNo = res.po_no;
@@ -662,7 +776,7 @@ export async function confirmCapture(admin: Admin, cap: CaptureRow, input: Confi
         const { error } = await admin.from("purchase_order_lines_v2").insert({
           po_id: poId, item_sku_id: it.sku_id ?? null, item_name: itemLabel(it), qty: it.qty,
           price_est: sameCur ? price : 0, line_total: sameCur ? r2d(price * it.qty) : 0,
-          currency: str(p.currency) || null, note: `จาก${orderRef(cap)}`, sort_order: sort++,
+          currency: str(p.currency) || null, note: [it.mo_no ? `จากใบสั่งผลิต ${it.mo_no}` : "", `จาก${orderRef(cap)}`].filter(Boolean).join(" · "), sort_order: sort++,
         });
         if (error) warnings.push(`เพิ่ม "${itemLabel(it)}" ไม่สำเร็จ: ${error.message}`); else added++;
         continue;

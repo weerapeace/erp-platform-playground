@@ -15,6 +15,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SkuPicker } from "@/components/pickers";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { PoDetailModal } from "@/components/po-detail-modal";
+import { MoBomPicker } from "@/components/mo-bom-picker";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -81,6 +82,8 @@ export function CaptureModal({ id, canEdit, onClose, onOpen, onChanged }: {
   const [dupConfirm, setDupConfirm] = useState<string | null>(null);
   const [rereadAsk, setRereadAsk] = useState(false);
   const [poOpen, setPoOpen] = useState<string | null>(null);
+  /** รายการที่กำลังเลือกวัตถุดิบจากใบสั่งผลิต (index) */
+  const [bomFor, setBomFor] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setLoadErr(null);
@@ -350,14 +353,27 @@ export function CaptureModal({ id, canEdit, onClose, onOpen, onChanged }: {
                         </div>
                         <div className="grid sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 items-center">
                           <input value={it.option} disabled={!editableAll} onChange={(e) => setItem(i, { option: e.target.value })} className={inp + " text-xs"} placeholder="ตัวเลือก (สี/ขนาด)" />
-                          <div className={editableAll ? "" : "pointer-events-none opacity-80"}>
-                            <SkuPicker
-                              value={it.sku_id ? { id: it.sku_id, code: it.sku_code ?? "", name: it.sku_name ?? "" } : null}
-                              onChange={(p) => setItem(i, p ? { sku_id: p.id, sku_code: p.code, sku_name: p.name } : { sku_id: null, sku_code: null, sku_name: null })}
-                              placeholder="จับคู่สินค้าในคลัง (ไม่บังคับ)"
-                            />
+                          <div className={`flex gap-1.5 items-center ${editableAll ? "" : "pointer-events-none opacity-80"}`}>
+                            <div className="flex-1 min-w-0">
+                              <SkuPicker
+                                // เลือกจากใบสั่งผลิตได้แค่รหัส (id เติมให้ตอนบันทึก) → โชว์รหัส/ชื่อไปก่อน
+                                value={it.sku_id || it.sku_code ? { id: it.sku_id ?? it.sku_code ?? "", code: it.sku_code ?? "", name: it.sku_name ?? "" } : null}
+                                onChange={(p) => setItem(i, p ? { sku_id: p.id, sku_code: p.code, sku_name: p.name } : { sku_id: null, sku_code: null, sku_name: null, mo_no: null })}
+                                placeholder="จับคู่สินค้าในคลัง (ไม่บังคับ)"
+                              />
+                            </div>
+                            {editableAll && (
+                              <button type="button" onClick={() => setBomFor(i)} title="เลือกวัตถุดิบจากใบสั่งผลิต (BOM)"
+                                className="h-8 px-2 rounded-md border border-slate-200 bg-white text-xs text-slate-700 hover:bg-slate-50 shrink-0">🏭 จากใบสั่งผลิต</button>
+                            )}
                           </div>
                         </div>
+                        {it.mo_no && (
+                          <div className="flex items-center gap-1.5 text-[11px]">
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">🏭 ซื้อให้ {it.mo_no}</span>
+                            {editableAll && <button type="button" onClick={() => setItem(i, { mo_no: null })} className="text-slate-400 hover:text-rose-600" title="เอาใบสั่งผลิตออก">✕</button>}
+                          </div>
+                        )}
                         {it.name && it.name !== it.name_th && <div className="text-[11px] text-slate-400 truncate" title={it.name}>ตามรูป: {it.name}</div>}
                         {mode === "link" && pick && pending && (
                           <select value={it.po_line_id ?? ""} onChange={(e) => setItem(i, { po_line_id: e.target.value || null })}
@@ -507,6 +523,13 @@ export function CaptureModal({ id, canEdit, onClose, onOpen, onChanged }: {
         title="ให้ AI อ่านใหม่?" confirmText="อ่านใหม่"
         message="ที่แก้ไว้ (ยังไม่บันทึก) จะถูกแทนด้วยผลที่ AI อ่านใหม่" />
       {poOpen && <PoDetailModal poId={poOpen} onClose={() => setPoOpen(null)} />}
+      <MoBomPicker open={bomFor !== null} onClose={() => setBomFor(null)}
+        hint={bomFor !== null && draft?.items[bomFor] ? (draft.items[bomFor].name_th || draft.items[bomFor].name) : undefined}
+        onPick={(p) => {
+          if (bomFor === null) return;
+          setItem(bomFor, { sku_id: null, sku_code: p.code, sku_name: p.name, mo_no: p.mo_no });
+          toast.success(`จับคู่กับ ${p.code ?? p.name ?? "วัตถุดิบ"} ของ ${p.mo_no} แล้ว — กดบันทึก/ยืนยันเพื่อเก็บ`);
+        }} />
     </>
   );
 }

@@ -108,7 +108,8 @@ export function LineOrdersInbox() {
       const r = await apiFetch("/api/purchasing/line-orders", { method: "POST", body: fd });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
-      toast.success("อัปรูปแล้ว — AI อ่านเสร็จแล้ว ตรวจได้เลย");
+      const n = 1 + (Number(j.extra_count) || 0);
+      toast.success(n > 1 ? `อัปรูปแล้ว — เจอ ${n} คำสั่งซื้อ แยกเป็น ${n} ใบ ตรวจได้เลย` : "อัปรูปแล้ว — AI อ่านเสร็จแล้ว ตรวจได้เลย");
       if (tab !== "pending") setTab("pending"); else void load(false);
       if (j.item?.id) setOpenId(j.item.id);
     } catch (e) {
