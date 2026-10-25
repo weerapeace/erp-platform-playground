@@ -1,6 +1,7 @@
 /**
  * ใบสำคัญรับ (ใบซื้อ) — purchase_vouchers_v2
  *   GET  /api/purchasing/vouchers?pending=1        → ใบรับ GR ที่ยังไม่ออกใบสำคัญ (คิวงานของจัดซื้อ)
+ *        &include_backfill=1 → รวมใบรับย้อนหลัง (เคลียร์ของค้างเก่า) ด้วย — ปกติซ่อนกันคิวรก · ทุกแถวมี receipt_batch_no (เลือกทั้งชุด)
  *   GET  /api/purchasing/vouchers?status=draft|confirmed|cancelled|all → รายการใบสำคัญ
  *   POST /api/purchasing/vouchers { gr_ids: [] }   → สร้างใบร่างจาก GR (ดึงราคา/คิว/กก./เรทให้)
  * สิทธิ์: อ่าน = products.cost.view (มีราคาซื้อ) · เขียน = products.edit
@@ -25,10 +26,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sp = request.nextUrl.searchParams;
 
   if (sp.get("pending") === "1") {
-    // ใบรับที่ยังไม่ผูกใบสำคัญ — ล่าสุดก่อน
-    const { data: grs, error } = await admin.from("goods_receipts_v2")
-      .select("id, gr_no, po_id, po_no, seller_name, receive_date, receiver, status, receipt_doc_r2_key, bill_doc_r2_key, created_at")
-      .is("voucher_id", null).not("is_active", "is", false).order("receive_date", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+    // ใบรับที่ยังไม่ผูกใบสำคัญ — ล่าสุดก่อน · ใบรับย้อนหลังซ่อนไว้ (ของเก่าเป็นร้อยใบ) เว้นแต่ขอ include_backfill=1
+    let gq = admin.from("goods_receipts_v2")
+      .select("id, gr_no, po_id, po_no, seller_name, receive_date, receiver, status, receipt_doc_r2_key, bill_doc_r2_key, created_at, receipt_batch_no, is_backfill")
+      .is("voucher_id", null).not("is_active", "is", false);
+    if (sp.get("include_backfill") !== "1") gq = gq.not("is_backfill", "is", true);
+    const { data: grs, error } = await gq.order("receive_date", { ascending: false }).order("created_at", { ascending: false }).limit(500);
     if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
     const rows = (grs ?? []) as Row[];
     const ids = rows.map((g) => String(g.id));
@@ -48,8 +51,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       receive_date: g.receive_date ?? null, receiver: g.receiver ?? "", line_count: cnt.get(String(g.id)) ?? 0,
       currency: curMap.get(String(g.po_id ?? "")) ?? "THB",
       receipt_doc_r2_key: g.receipt_doc_r2_key ?? null, bill_doc_r2_key: g.bill_doc_r2_key ?? null,
+      receipt_batch_no: (g.receipt_batch_no as string) ?? null, is_backfill: g.is_backfill === true,
     })).filter((g) => g.line_count > 0);
-    return NextResponse.json({ data, error: null });
+    // นับใบรับย้อนหลังที่ซ่อนไว้ (ปุ่ม "แสดงใบรับย้อนหลัง (N)")
+    let backfillHidden = 0;
+    if (sp.get("include_backfill") !== "1") {
+      const { count } = await admin.from("goods_receipts_v2").select("id", { count: "exact", head: true }).is("voucher_id", null).not("is_active", "is", false).eq("is_backfill", true);
+      backfillHidden = count ?? 0;
+    }
+    return NextResponse.json({ data, backfill_hidden: backfillHidden, error: null });
   }
 
   const status = sp.get("status") ?? "all";

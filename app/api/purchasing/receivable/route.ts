@@ -1,6 +1,7 @@
 /**
  * GET /api/purchasing/receivable            → สินค้าที่รอเข้า (ยังรับไม่ครบ + ยังไม่ปิดยอด)
  * GET /api/purchasing/receivable?mode=done  → รายการที่ปิดแล้ว (รับครบ / ปิดยอดขาด) ไว้ดู/แก้
+ * GET /api/purchasing/receivable?insights=1 → + raw_balance / linked_sku / dup_of (เครื่องมือเคลียร์ของค้างเก่า)
  * join skus_v2 (รหัส + รูปปก) + supplier_items (ลีดไทม์ร้านหลัก) เพื่อโชว์การ์ดรับของ
  * คำนวณ "วันคาดการณ์ของเข้า": ① PO.expected_date ถ้ามี → ② order_date + lead_time → ③ null
  * ใช้ในหน้า "รับสินค้าเข้า" แท็บ "สินค้าที่รอเข้า" + "รับครบแล้ว"
@@ -179,7 +180,34 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ship_before_pay: shipBefore,
       duration_days: shipStart ? dayDiff(shipStart, t) : null,   // ค้างมากี่วัน (ตั้งแต่เริ่มนับ)
     };
-  }).filter(Boolean);
+  }).filter(Boolean) as Record<string, unknown>[];
+
+  // ?insights=1 (เครื่องมือเคลียร์ของค้างเก่า) — หลักฐานช่วยตัดสินว่า "ของมาแล้วหรือยัง"
+  //  raw_balance = ยอดคลังวัตถุดิบ WH-RAW ตอนนี้ (ติดลบ = ถูกเบิกไปใช้แล้วทั้งที่ไม่เคยรับ → ของน่าจะมาแล้ว)
+  //  linked_sku  = บรรทัดผูก SKU จริง (ไม่ผูก = รับได้แต่ไม่บวกสต๊อก)
+  //  dup_of      = น่าจะซ้ำ: ร้าน+วันสั่ง+สินค้าเดียวกัน มีทั้งใบเลขแบบเก่า (P00xxx ย้ายมา) และใบเลขใหม่ (PO-…) → ชี้ใบเก่าที่ซ้ำ
+  if (request.nextUrl.searchParams.get("insights") === "1") {
+    const { data: rawWh } = await admin.from("erp_playground_warehouses").select("id").eq("code", "WH-RAW").maybeSingle();
+    const rawId = (rawWh as { id?: string } | null)?.id ?? null;
+    const balMap = new Map<string, number>();
+    if (rawId) {
+      for (let i = 0; i < skuIds.length; i += 300) {
+        const { data: bs } = await admin.from("erp_playground_stock_balances").select("product_id, qty_on_hand").eq("warehouse_id", rawId).in("product_id", skuIds.slice(i, i + 300));
+        for (const b of (bs ?? []) as Record<string, unknown>[]) balMap.set(String(b.product_id), num(b.qty_on_hand));
+      }
+    }
+    const linked = new Set(lines.filter((l) => l.item_sku_id).map((l) => String(l.id)));
+    const keyOf = (r: Record<string, unknown>) => `${r.seller_name}|${r.order_date ?? ""}|${r.item_sku_id ?? String(r.item_name ?? "").replace(/^\s*\[[^\]]*\]\s*/, "").trim().toLowerCase()}`;
+    const oldPoOf = new Map<string, string>();   // key → เลขใบแบบเก่าในกลุ่ม
+    for (const r of rows) { const no = String(r.po_no ?? ""); if (no && !no.startsWith("PO-")) { const k = keyOf(r); if (!oldPoOf.has(k)) oldPoOf.set(k, no); } }
+    for (const r of rows) {
+      const sid = r.item_sku_id ? String(r.item_sku_id) : null;
+      r.raw_balance = sid && balMap.has(sid) ? balMap.get(sid)! : null;
+      r.linked_sku = linked.has(String(r.id));
+      const no = String(r.po_no ?? "");
+      r.dup_of = no.startsWith("PO-") ? (oldPoOf.get(keyOf(r)) ?? null) : null;
+    }
+  }
 
   return NextResponse.json({ data: rows, error: null });
   } catch (e) {

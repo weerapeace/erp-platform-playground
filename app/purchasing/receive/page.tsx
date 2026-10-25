@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { useCardLayout, CardLayoutEditor, type CardField } from "@/components/card-layout";
 import { ReceiveLineFields } from "@/components/receive-line-modal";
+import { ReceiveBackfillModal } from "@/components/receive-line-modal/backfill-modal";
 import { useReceiveCart, groupReceiveByPo, ReceiveCartMeta, ReceiveAttachBox, ReceiveCartRows } from "@/components/receive-line-modal/receive-cart";
 import { WarehousePicker } from "@/components/pickers";
 import { Pager } from "@/components/pager";
@@ -113,12 +114,15 @@ export default function ReceiveGoodsPage() {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [doneGrs, setDoneGrs] = useState<string[]>([]);   // เลขใบรับที่เพิ่งสร้าง → ปุ่มพิมพ์ใบรับ
+  const [doneBatch, setDoneBatch] = useState<string | null>(null);   // เลขชุดรับ (ตะกร้าหลายใบสั่งซื้อ) → ปุ่มพิมพ์รวมทั้งชุด
   const [err, setErr] = useState<string | null>(null);
   const [shortDialog, setShortDialog] = useState<{ base: PayloadLine[]; shortIds: string[]; shortNames: string[] } | null>(null);
 
   // ตะกร้ารับของ (ของกลาง) — วันที่รับ · ผู้รับ · คลังปลายทาง (WH-RAW) · ใบรับของ + บิล (บังคับ) · บันทึกแยกตามใบสั่งซื้อ
   // ตัวเดียวกับโหมดรับของหน้าสั่งซื้อ (/purchasing/orders) — ใช้ทั้งป๊อปตะกร้า + แท็บตามใบสั่งซื้อ
   const rc = useReceiveCart();
+  const canBackfill = usePermission("po.receive_backfill");   // 🧹 เคลียร์ของค้างเก่า (รับย้อนหลังไม่ต้องแนบ · ใส่เหตุผล)
+  const [backfillOpen, setBackfillOpen] = useState(false);
 
   // แท็บ B — สินค้าที่รอเข้า
   const [pend, setPend] = useState<PendItem[]>([]);
@@ -520,7 +524,7 @@ export default function ReceiveGoodsPage() {
     try {
       const j = await postReceive(poId, payloadLines);
       if (j.error) { setErr(j.error); return; }
-      setDone(`✅ รับสินค้าสำเร็จ — เลขที่ ${j.gr_no} · สถานะ PO: ${j.po_status}`); setDoneGrs([String(j.gr_no)]);
+      setDone(`✅ รับสินค้าสำเร็จ — เลขที่ ${j.gr_no} · สถานะ PO: ${j.po_status}`); setDoneGrs([String(j.gr_no)]); setDoneBatch(null);
       setPoId(""); setLines([]); setInputs({}); setShortDialog(null); resetAfterSave();
     } catch (e) { setErr(String(e)); }
     finally { setSaving(false); }
@@ -559,7 +563,7 @@ export default function ReceiveGoodsPage() {
     setErr(null);
     const r = await rc.save(cartItems, pendInputs);
     if (!r || r.grNos.length === 0) return;   // ไม่ผ่าน/ใบแรกล้มเหลว → error โชว์ในป๊อปตะกร้า
-    setDone(`✅ รับสินค้าสำเร็จ ${r.grNos.length} ใบรับ (${r.savedPoIds.length} ใบสั่งซื้อ): ${r.grNos.join(", ")}`); setDoneGrs(r.grNos);
+    setDone(`✅ รับสินค้าสำเร็จ ${r.grNos.length} ใบรับ (${r.savedPoIds.length} ใบสั่งซื้อ)${r.batchNo ? ` · ชุด ${r.batchNo}` : ""}: ${r.grNos.join(", ")}`); setDoneGrs(r.grNos); setDoneBatch(r.batchNo);
     setMassRecv(null); setSelectedIds(new Set());
     if (r.failed) { setErr(r.failed); rc.setErr(null); }
     await loadPending(doneMode ? "done" : "pending");
@@ -599,11 +603,20 @@ export default function ReceiveGoodsPage() {
           <button onClick={() => { setTab("po"); setDone(null); }} className={`px-4 py-2 transition-colors ${tab === "po" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>📋 ตามใบสั่งซื้อ</button>
           <button onClick={() => { setTab("done"); setDone(null); }} className={`px-4 py-2 transition-colors ${tab === "done" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>✅ รับครบแล้ว</button>
         </div>
+        {canBackfill && (
+          <button onClick={() => setBackfillOpen(true)} title="ของค้างรับเก่า: รับย้อนหลัง (ไม่ต้องแนบเอกสาร ใส่เหตุผล) / ยกเลิก"
+            className="ml-2 mb-4 align-top px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🧹 เคลียร์ของค้างเก่า</button>
+        )}
+        {backfillOpen && <ReceiveBackfillModal onClose={() => setBackfillOpen(false)} onDone={() => void loadPending(doneMode ? "done" : "pending")} />}
 
         {done && (
           <div className="mb-4 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 flex items-center gap-2 flex-wrap">
             <span>{done}</span>
             {/* ลงผิด? เปิดใบรับเพื่อแก้/ลบได้ทันที · พิมพ์ใบรับ (ไม่มีราคา) · ราคา/ค่าส่งไปทำที่ใบสำคัญรับ (จัดซื้อ) */}
+            {doneBatch && (
+              <a href={`/print/goods-receipt/${encodeURIComponent(doneBatch)}`} target="_blank" rel="noreferrer"
+                className="h-7 px-2.5 inline-flex items-center text-xs font-medium rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50">🖨 พิมพ์รวมทั้งชุด {doneBatch}</a>
+            )}
             {doneGrs.map((no) => (
               <Fragment key={no}>
                 <button type="button" onClick={() => setGrOpen(no)}

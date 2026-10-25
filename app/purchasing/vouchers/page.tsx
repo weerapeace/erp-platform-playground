@@ -23,7 +23,7 @@ import { SupplierWizard } from "@/components/supplier-wizard";
 import { fmtMoney, curSymbol } from "@/lib/landed-cost";
 import { GrDetailModal } from "@/components/gr-detail-modal";
 
-type PendingGr = { id: string; gr_no: string; po_id: string | null; po_no: string; seller_name: string; receive_date: string | null; receiver: string; line_count: number; currency: string };
+type PendingGr = { id: string; gr_no: string; po_id: string | null; po_no: string; seller_name: string; receive_date: string | null; receiver: string; line_count: number; currency: string; receipt_batch_no: string | null; is_backfill: boolean };
 type VoucherRow = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; line_count: number; gr_nos: string[]; po_nos: string[]; ship_method: string };
 
 const STATUS_BADGE: Record<string, { text: string; cls: string }> = {
@@ -43,6 +43,8 @@ export default function PurchaseVouchersPage() {
   const [vouchers, setVouchers] = useState<VoucherRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBackfill, setShowBackfill] = useState(false);   // รวมใบรับย้อนหลัง (เคลียร์ของค้างเก่า) — ปกติซ่อนกันคิวรก
+  const [backfillHidden, setBackfillHidden] = useState(0);
   const [creating, setCreating] = useState(false);
   const [vStatus, setVStatus] = useState<"all" | "draft" | "confirmed" | "cancelled">("all");
   const [detailGr, setDetailGr] = useState<PendingGr | null>(null);   // ป๊อปรายละเอียดใบรับ (ของกลาง GrDetailModal)
@@ -80,20 +82,29 @@ export default function PurchaseVouchersPage() {
     setLoading(true);
     try {
       const [p, v] = await Promise.all([
-        apiFetch("/api/purchasing/vouchers?pending=1").then((r) => r.json()),
+        apiFetch(`/api/purchasing/vouchers?pending=1${showBackfill ? "&include_backfill=1" : ""}`).then((r) => r.json()),
         apiFetch(`/api/purchasing/vouchers?status=${vStatus}`).then((r) => r.json()),
       ]);
       setPending((p.data ?? []) as PendingGr[]);
+      setBackfillHidden(Number(p.backfill_hidden ?? 0));
       setVouchers((v.data ?? []) as VoucherRow[]);
     } catch { toast.error("โหลดข้อมูลไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [vStatus, toast]);
+  }, [vStatus, toast, showBackfill]);
   useEffect(() => { if (canView) void load(); }, [load, canView]);
 
   const selRows = useMemo(() => pending.filter((g) => selected.has(g.id)), [pending, selected]);
   const selCurrencies = useMemo(() => [...new Set(selRows.map((g) => g.currency))], [selRows]);
   const selSellers = useMemo(() => [...new Set(selRows.map((g) => g.seller_name))], [selRows]);
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // ชุดรับของ: กดป้ายเลขชุด → เลือกทุกใบรับในชุดที่สกุลเงินเดียวกับใบที่กด (ใบสำคัญ 1 ใบ = สกุลเดียว)
+  const selectBatch = (g: PendingGr) => {
+    if (!g.receipt_batch_no) return;
+    const same = pending.filter((x) => x.receipt_batch_no === g.receipt_batch_no && x.currency === g.currency);
+    const other = pending.filter((x) => x.receipt_batch_no === g.receipt_batch_no && x.currency !== g.currency).length;
+    setSelected(new Set(same.map((x) => x.id)));
+    if (other > 0) toast.info(`เลือก ${same.length} ใบรับ (${curSymbol(g.currency)}) · อีก ${other} ใบในชุดเป็นสกุลอื่น ต้องออกใบสำคัญแยก`);
+  };
 
   // สร้างใบสำคัญจากใบรับที่ติ๊ก (หรือส่ง ids มาเจาะจง เช่น จากป๊อปรายละเอียด = ใบเดียว)
   const createVoucher = async (ids?: string[]) => {
@@ -141,7 +152,16 @@ export default function PurchaseVouchersPage() {
   };
 
   const pendingCols = useMemo<MiniColumn<PendingGr>[]>(() => [
-    { key: "gr_no", header: "เลขใบรับ", width: "9rem", sortValue: (g) => g.gr_no, cell: (g) => <span className="font-mono text-sm font-semibold text-slate-800">{g.gr_no}</span> },
+    { key: "gr_no", header: "เลขใบรับ", width: "9rem", sortValue: (g) => g.gr_no, cell: (g) => (
+      <span className="inline-flex flex-col leading-tight">
+        <span className="font-mono text-sm font-semibold text-slate-800">{g.gr_no}</span>
+        {g.is_backfill && <span className="text-[10px] text-amber-700" title="รับย้อนหลัง (เคลียร์ของค้างเก่า) — ไม่มีเอกสารแนบ">↩ ย้อนหลัง</span>}
+      </span>
+    ) },
+    { key: "batch", header: "ชุดรับ", width: "8.5rem", sortValue: (g) => g.receipt_batch_no ?? "", cell: (g) => g.receipt_batch_no ? (
+      <button onClick={(e) => { e.stopPropagation(); selectBatch(g); }} title="เลือกทุกใบรับในชุดนี้ (สกุลเดียวกัน)"
+        className="text-[11px] font-mono px-1.5 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">📦 {g.receipt_batch_no}</button>
+    ) : <span className="text-slate-300 text-xs">—</span> },
     { key: "po_no", header: "ใบสั่งซื้อ", width: "9rem", sortValue: (g) => g.po_no, cell: (g) => <span className="font-mono text-xs text-slate-500">{g.po_no}</span> },
     { key: "seller", header: "ร้าน", width: "1.6fr", sortValue: (g) => g.seller_name, cell: (g) => <span className="block truncate" title={g.seller_name}>🏪 {g.seller_name}</span> },
     { key: "date", header: "วันที่รับ", width: "8.5rem", align: "center", sortValue: (g) => g.receive_date ?? "", cell: (g) => (
@@ -161,7 +181,7 @@ export default function PurchaseVouchersPage() {
           className="text-xs text-slate-500 hover:text-blue-600 border border-slate-200 rounded-md px-2 h-7 inline-flex items-center hover:bg-slate-50">🖨</a>
       </div>
     ) },
-  ], [canEdit]);
+  ], [canEdit, pending]);   // selectBatch อ่าน pending
 
   const voucherCols = useMemo<MiniColumn<VoucherRow>[]>(() => [
     { key: "pv", header: "เลขที่", width: "9rem", sortValue: (v) => v.pv_no ?? "", cell: (v) => v.pv_no ? <span className="font-mono text-sm font-semibold text-slate-800">{v.pv_no}</span> : <span className="text-xs text-slate-400">— ร่าง —</span> },
@@ -218,8 +238,14 @@ export default function PurchaseVouchersPage() {
                 selectable selected={selected} onSelectedChange={setSelected}
                 onRowClick={(g) => toggleSel(g.id)}
                 title="ใบรับที่ยังไม่ออกใบสำคัญ" countUnit="ใบ" emptyText="— ไม่มีใบรับค้างออกใบสำคัญ —"
-                footnote="ติ๊กใบรับของร้านเดียวกัน (ชิปเมนต์เดียวกัน) แล้วกด ออกใบสำคัญรับ — ค่าส่งที่มาเป็นก้อนจะเฉลี่ยลงทุกรายการในใบ"
+                footnote="ติ๊กใบรับของร้านเดียวกัน (ชิปเมนต์เดียวกัน) แล้วกด ออกใบสำคัญรับ — กดป้าย 📦 เลขชุด = เลือกทั้งชุด · ค่าส่งที่มาเป็นก้อนจะเฉลี่ยลงทุกรายการในใบ"
                 resizable storageKey="pv-pending" />
+            )}
+            {(backfillHidden > 0 || showBackfill) && (
+              <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+                <input type="checkbox" checked={showBackfill} onChange={(e) => setShowBackfill(e.target.checked)} className="rounded border-slate-300" />
+                แสดงใบรับย้อนหลัง (เคลียร์ของค้างเก่า){!showBackfill && ` · ซ่อนอยู่ ${backfillHidden} ใบ`}
+              </label>
             )}
           </>
         ) : (

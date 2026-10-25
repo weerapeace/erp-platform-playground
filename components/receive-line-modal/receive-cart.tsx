@@ -5,6 +5,7 @@
  *
  * useReceiveCart()    = ฟอร์มตะกร้า: วันที่รับ · ผู้รับ (คนที่ login) · คลัง (WH-RAW) · ใบรับของ + บิล (บังคับ)
  *                       save()   → ยิง /api/purchasing/receive แยกตามใบสั่งซื้อ (1 ใบสั่งซื้อ = 1 ใบรับ GR)
+ *                                  หลายใบสั่งซื้อในครั้งเดียว = "ชุดรับของ" เลขเดียว (RB-…) → พิมพ์รวม /print/goods-receipt/RB-… · ใบสำคัญเลือกทั้งชุด · แจ้งไลน์ครั้งเดียว
  *                       postOne() → รับทีละใบ (แท็บ "ตามใบสั่งซื้อ" หน้ารับสินค้า)
  * <ReceiveCartMeta>   = ช่องวันที่รับ / ผู้รับ / รับเข้าคลัง
  * <ReceiveAttachBox>  = กล่องแนบใบรับของ + บิล
@@ -31,9 +32,11 @@ export type ReceiveCartItem = {
   qty: number; qty_received: number; remaining: number;
 };
 export type ReceivePostLine = { po_line_id: string; qty_received: number; qty_defective: number; case_type: string };
-export type ReceivePostResult = { gr_no?: string; po_status?: string; stock_warnings?: string[]; error?: string };
-/** ผลบันทึกตะกร้า — failed = ข้อความของใบที่ล้มเหลว (ใบก่อนหน้าที่บันทึกแล้วอยู่ใน grNos) */
-export type ReceiveSaveResult = { grNos: string[]; savedPoIds: string[]; failed: string | null };
+export type ReceivePostResult = { gr_no?: string; po_status?: string; stock_warnings?: string[]; receipt_batch_no?: string | null; error?: string };
+/** ส่งต่อเรื่องชุดรับของ: newBatch = ใบแรกขอเลขชุด · batchNo = ใบถัดไป · batchLast = ใบสุดท้าย (แจ้งไลน์ครั้งเดียวทั้งชุด) */
+export type ReceiveBatchOpts = { newBatch?: boolean; batchNo?: string | null; batchLast?: boolean };
+/** ผลบันทึกตะกร้า — failed = ข้อความของใบที่ล้มเหลว (ใบก่อนหน้าที่บันทึกแล้วอยู่ใน grNos) · batchNo = เลขชุดรับ (หลายใบสั่งซื้อ) */
+export type ReceiveSaveResult = { grNos: string[]; savedPoIds: string[]; failed: string | null; batchNo: string | null };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 /** วันนี้ตามเวลาเครื่อง (ไม่ใช้ toISOString — เวลาไทยตอนเช้ามืดจะได้วันของเมื่อวาน) */
@@ -78,10 +81,11 @@ export function useReceiveCart() {
   const resetAttach = useCallback(() => { setReceiptKey(null); setBillKey(null); }, []);
 
   /** รับของ 1 ใบสั่งซื้อ (ใช้วันที่/ผู้รับ/คลัง/ไฟล์แนบของตะกร้านี้) */
-  const postOne = useCallback(async (poId: string, lines: ReceivePostLine[]): Promise<ReceivePostResult> => {
+  const postOne = useCallback(async (poId: string, lines: ReceivePostLine[], batch?: ReceiveBatchOpts): Promise<ReceivePostResult> => {
     const res = await apiFetch("/api/purchasing/receive", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ po_id: poId, warehouse_id: wh?.id ?? null, receive_date: date, receiver: receiver.trim() || user?.name, lines, receipt_doc_r2_key: receiptKey, bill_doc_r2_key: billKey }),
+      body: JSON.stringify({ po_id: poId, warehouse_id: wh?.id ?? null, receive_date: date, receiver: receiver.trim() || user?.name, lines, receipt_doc_r2_key: receiptKey, bill_doc_r2_key: billKey,
+        new_batch: batch?.newBatch || undefined, receipt_batch_no: batch?.batchNo || undefined, batch_last: batch?.batchLast || undefined }),
     });
     const j = (await res.json().catch(() => ({}))) as ReceivePostResult;
     if (!res.ok && !j.error) j.error = `HTTP ${res.status}`;
@@ -98,10 +102,17 @@ export function useReceiveCart() {
     setSaving(true);
     const grNos: string[] = [], savedPoIds: string[] = [];
     let failed: string | null = null;
+    // หลายใบสั่งซื้อ = ชุดรับของ: ใบแรกขอเลขชุด แล้วใบถัดไปใช้เลขเดิม (ออกเลขไม่ได้ = รับต่อแบบไม่มีชุด)
+    const multi = byPo.size > 1;
+    let batchNo: string | null = null;
     try {
-      for (const [poId, g] of byPo) {
-        const j = await postOne(poId, g.lines);
+      const entries = [...byPo];
+      for (let i = 0; i < entries.length; i++) {
+        const [poId, g] = entries[i];
+        const opts: ReceiveBatchOpts | undefined = !multi ? undefined : i === 0 ? { newBatch: true } : { batchNo, batchLast: i === entries.length - 1 };
+        const j = await postOne(poId, g.lines, opts);
         if (j.error || !j.gr_no) { failed = `${g.po_no}: ${j.error ?? "บันทึกรับของไม่สำเร็จ"}`; break; }
+        if (i === 0 && multi) batchNo = j.receipt_batch_no ?? null;
         grNos.push(String(j.gr_no)); savedPoIds.push(poId);
       }
     } catch (e) { failed = String((e as Error)?.message ?? e); }
@@ -110,7 +121,7 @@ export function useReceiveCart() {
       failed = grNos.length ? `บันทึกแล้ว ${grNos.length} ใบ (${grNos.join(", ")}) แต่ใบ ${failed}` : failed;
       setErr(failed);   // ไฟล์แนบเก็บไว้ ให้กดบันทึกใบที่เหลือต่อได้
     } else resetAttach();
-    return { grNos, savedPoIds, failed };
+    return { grNos, savedPoIds, failed, batchNo };
   }, [attachReady, postOne, resetAttach]);
 
   return { date, setDate, receiver, setReceiver, wh, setWh, receiptKey, setReceiptKey, billKey, setBillKey, attachReady, saving, err, setErr, resetAttach, postOne, save, user };

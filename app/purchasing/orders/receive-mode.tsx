@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { ReceiveLineFields, type ReceiveInput } from "@/components/receive-line-modal";
 import { useReceiveCart, groupReceiveByPo, ReceiveCartMeta, ReceiveAttachBox, ReceiveCartRows, type ReceiveCartItem } from "@/components/receive-line-modal/receive-cart";
+import { ReceiveBackfillModal } from "@/components/receive-line-modal/backfill-modal";
 import { PoDetailModal } from "@/components/po-detail-modal";
 import { GrDetailModal } from "@/components/gr-detail-modal";
 import { apiFetch } from "@/lib/api";
@@ -45,6 +46,8 @@ function ageBadge(days: number | null): { text: string; cls: string } | null {
 export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseShop: (name: string, currency: string) => boolean }) {
   const toast = useToast();
   const canReceive = usePermission("products.edit");   // สิทธิ์เดียวกับ API รับของ
+  const canBackfill = usePermission("po.receive_backfill");   // 🧹 เคลียร์ของค้างเก่า (รับย้อนหลังไม่ต้องแนบ)
+  const [backfillOpen, setBackfillOpen] = useState(false);
   const rc = useReceiveCart();
   const [items, setItems] = useState<RecvItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +62,7 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
   const [poView, setPoView] = useState<string | null>(null);
   const [grOpen, setGrOpen] = useState<string | null>(null);
   const [doneGrs, setDoneGrs] = useState<string[]>([]);
+  const [doneBatch, setDoneBatch] = useState<string | null>(null);   // เลขชุดรับ (หลายใบสั่งซื้อในครั้งเดียว)
   const [shopDrawerOpen, setShopDrawerOpen] = useState(false);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
 
@@ -147,8 +151,8 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
   const save = async () => {
     const r = await rc.save(cartList, cart);
     if (!r || r.grNos.length === 0) return;
-    toast.success(`รับของแล้ว ${r.grNos.length} ใบรับ · ${r.grNos.join(", ")}`);
-    setDoneGrs(r.grNos);
+    toast.success(`รับของแล้ว ${r.grNos.length} ใบรับ${r.batchNo ? ` · ชุด ${r.batchNo}` : ""} · ${r.grNos.join(", ")}`);
+    setDoneGrs(r.grNos); setDoneBatch(r.batchNo);
     const saved = new Set(r.savedPoIds);
     setCart((c) => { const n = { ...c }; for (const id of Object.keys(n)) if (saved.has(byId.get(id)?.po_id ?? "")) delete n[id]; return n; });
     if (!r.failed) setCartSheetOpen(false);
@@ -201,11 +205,13 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
                 <option value="name">ชื่อสินค้า</option>
                 <option value="remaining">รอรับมากสุดก่อน</option>
               </select>
+              {canBackfill && <button onClick={() => setBackfillOpen(true)} title="ของค้างรับเก่า: รับย้อนหลัง (ไม่ต้องแนบเอกสาร ใส่เหตุผล) / ยกเลิก" className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 shrink-0 whitespace-nowrap">🧹 เคลียร์ของค้างเก่า</button>}
             </div>
 
             {doneGrs.length > 0 && (
               <div className="px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 flex items-center gap-2 flex-wrap">
-                <span>✅ รับสินค้าแล้ว {doneGrs.length} ใบรับ</span>
+                <span>✅ รับสินค้าแล้ว {doneGrs.length} ใบรับ{doneBatch ? ` · ชุด ${doneBatch}` : ""}</span>
+                {doneBatch && <a href={`/print/goods-receipt/${encodeURIComponent(doneBatch)}`} target="_blank" rel="noreferrer" className="h-7 px-2.5 inline-flex items-center text-xs font-medium rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50">🖨 พิมพ์รวมทั้งชุด</a>}
                 {doneGrs.map((no) => (
                   <Fragment key={no}>
                     <button type="button" onClick={() => setGrOpen(no)} className="h-7 px-2.5 inline-flex items-center text-xs rounded-md border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100">✎ ดู / แก้ใบรับ {no}</button>
@@ -349,6 +355,7 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
           </ERPModal>
         );
       })()}
+      {backfillOpen && <ReceiveBackfillModal onClose={() => setBackfillOpen(false)} onDone={() => void load()} />}
       {poView && <PoDetailModal poId={poView} onClose={() => setPoView(null)} onSaved={() => void load()} />}
       {grOpen && <GrDetailModal grId={grOpen} onClose={() => setGrOpen(null)} onSaved={() => void load()} />}
     </>

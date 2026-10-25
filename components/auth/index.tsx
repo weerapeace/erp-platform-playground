@@ -43,7 +43,7 @@ export type Permission =
   | "qt.view" | "qt.create" | "qt.edit" | "qt.send" | "qt.accept" | "qt.reject" | "qt.cancel"
   | "cn.view" | "cn.create" | "cn.cancel"
   | "stock.view" | "stock.create" | "stock.adjust"
-  | "po.view" | "po.create" | "po.edit" | "po.confirm" | "po.receive" | "po.complete" | "po.cancel"
+  | "po.view" | "po.create" | "po.edit" | "po.confirm" | "po.receive" | "po.complete" | "po.cancel" | "po.receive_backfill"
   | "attachments.view" | "attachments.upload" | "attachments.delete"
   | "files.upload" | "files.delete"
   | "accounting.view" | "accounting.manage" | "accounting.post"
@@ -103,7 +103,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
     "cn.view", "cn.create", "cn.cancel",
     "stock.view", "stock.create", "stock.adjust",
-    "po.view", "po.create", "po.edit", "po.confirm", "po.receive", "po.complete", "po.cancel",
+    "po.view", "po.create", "po.edit", "po.confirm", "po.receive", "po.complete", "po.cancel", "po.receive_backfill",
     "attachments.view", "attachments.upload", "attachments.delete",
     "files.upload", "files.delete",
     "accounting.view", "accounting.manage", "accounting.post",
@@ -127,7 +127,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "units.view", "units.create", "taxes.view", "taxes.create",
     "attachments.view", "attachments.upload", "attachments.delete",
     "accounting.view", "accounting.manage", "accounting.post",
-    "admin.audit_log",
+    "admin.audit_log", "po.receive_backfill",
     // คืนจาก 6895c54d
     "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts", "platform_orders.view", "platform_orders.manage", "work_board.dispatch", "production.piecework", "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair", "task_template.view", "task_template.create", "task_template.edit", "task_template.delete", "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],

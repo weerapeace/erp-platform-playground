@@ -3,6 +3,7 @@
 /**
  * พิมพ์ "ใบรับสินค้า" — /print/goods-receipt/<id หรือ เลข GR>
  *   ใบของคนรับของ: รายการ + จำนวน สั่ง/รับ/เสีย ไม่มีราคา · เทมเพลตจากระบบพิมพ์กลาง (entity gr) ไม่มีใน DB = ใช้ค่าเริ่มต้น
+ *   /print/goods-receipt/RB-… = พิมพ์รวมทั้ง "ชุดรับของ" เป็นใบเดียว (รายการเรียงตามใบสั่งซื้อ · ชื่อสินค้านำหน้าด้วยเลข PO)
  */
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -12,6 +13,7 @@ import { docFileName } from "@/lib/print-filename";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import { DEFAULT_GR_TEMPLATE } from "@/lib/report-designer";
 import type { GrDetail } from "@/app/api/purchasing/goods-receipt/[id]/route";
+import type { ReceiptBatch } from "@/app/api/purchasing/receipt-batch/route";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
 const thaiDate = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -21,6 +23,20 @@ const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim()
 
 type Tpl = ReportTemplate;
 const defaultTpl = (): Tpl => ({ paper_size: "A4", orientation: "portrait", ...DEFAULT_GR_TEMPLATE });
+const isBatchNo = (s: string) => /^RB-/i.test(s);
+/** รวมใบรับทั้งชุดเป็นใบเดียว (ใช้เทมเพลตใบรับเดิม) — เลข = เลขชุด · PO = ช่วงเลข · รายการนำหน้าด้วยเลข PO */
+function mergeBatch(batch: ReceiptBatch, grs: GrDetail[]): GrDetail {
+  const first = grs[0];
+  const poNos = grs.map((g) => g.po_no).filter(Boolean);
+  const sellers = [...new Set(grs.map((g) => g.seller_name).filter(Boolean))];
+  return {
+    ...first, gr_no: batch.batch_no, voucher_id: null, pv_no: null,
+    po_no: poNos.length <= 3 ? poNos.join(", ") : `${poNos[0]} … ${poNos[poNos.length - 1]} (${poNos.length} ใบ)`,
+    seller_name: sellers.join(", "),
+    note: `ชุดรับของ ${grs.length} ใบรับ: ${grs.map((g) => g.gr_no).join(", ")}${first.note ? ` · ${first.note}` : ""}`,
+    lines: grs.flatMap((g) => g.lines.map((l) => ({ ...l, item_name: `${g.po_no} · ${stripCode(l.item_name)}` }))),
+  };
+}
 
 export default function PrintGoodsReceiptPage() {
   const params = useParams();
@@ -36,8 +52,17 @@ export default function PrintGoodsReceiptPage() {
     let cancelled = false;
     void (async () => {
       try {
+        const loadGr = async (): Promise<{ data?: GrDetail; error?: string }> => {
+          if (!isBatchNo(id)) return apiFetch(`/api/purchasing/goods-receipt/${encodeURIComponent(id)}`).then((r) => r.json());
+          // ชุดรับของ → โหลดทุกใบรับในชุด แล้วรวมเป็นใบเดียว
+          const b = (await apiFetch(`/api/purchasing/receipt-batch?no=${encodeURIComponent(id)}`).then((r) => r.json())) as { data?: ReceiptBatch | null; error?: string };
+          if (!b.data) return { error: b.error ?? "ไม่พบชุดรับ" };
+          const all = await Promise.all(b.data.grs.map((g) => apiFetch(`/api/purchasing/goods-receipt/${g.id}`).then((r) => r.json()) as Promise<{ data?: GrDetail }>));
+          const grs = all.map((x) => x.data).filter(Boolean) as GrDetail[];
+          return grs.length ? { data: mergeBatch(b.data, grs) } : { error: "โหลดใบรับในชุดไม่สำเร็จ" };
+        };
         const [d, tplRes] = await Promise.all([
-          apiFetch(`/api/purchasing/goods-receipt/${encodeURIComponent(id)}`).then((r) => r.json()) as Promise<{ data?: GrDetail; error?: string }>,
+          loadGr(),
           apiFetch("/api/admin/report-templates?entity_type=gr").then((r) => r.json()).catch(() => ({ data: [] })) as Promise<ReportTemplatesResponse>,
         ]);
         if (cancelled) return;
@@ -52,7 +77,7 @@ export default function PrintGoodsReceiptPage() {
     return () => { cancelled = true; };
   }, [id]);
 
-  const fileName = docFileName("ใบรับสินค้า", gr?.gr_no);
+  const fileName = docFileName(isBatchNo(id) ? "ใบรับสินค้า-ชุด" : "ใบรับสินค้า", gr?.gr_no);
   const html = useMemo(() => {
     if (!gr || !template) return "";
     const totalReceived = gr.lines.reduce((a, l) => a + l.qty_received, 0);

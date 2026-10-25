@@ -8,6 +8,9 @@
  * }
  * case_type: full | partial_close | partial_wait | full_defective
  * ต้องส่ง receipt_doc_r2_key + bill_doc_r2_key เสมอ ยกเว้น source: "scan" (หน้าสแกน QR)
+ *   และ source: "backfill" (รับย้อนหลัง/เคลียร์ของค้างเก่า) — ต้องมีสิทธิ์ po.receive_backfill + reason · skip_stock=true ไม่บวกสต๊อก · ไม่แจ้งไลน์
+ * ชุดรับของ (ตะกร้าเดียว หลายใบสั่งซื้อ): ใบแรกส่ง new_batch=true → ได้ receipt_batch_no กลับ · ใบถัดไปส่ง receipt_batch_no เดิม
+ *   batch_last=true ที่ใบสุดท้าย → แจ้งไลน์ครั้งเดียวทั้งชุด (ใบอื่นในชุดไม่แจ้ง ประหยัดโควตาไลน์)
  *
  * ผล:
  *  - สร้างเอกสาร GR (หัว + รายการ) เก็บประวัติการรับครั้งนี้
@@ -41,12 +44,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { po_id?: string; warehouse_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown; receipt_doc_r2_key?: string; bill_doc_r2_key?: string; source?: string };
+  let body: { po_id?: string; warehouse_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown; receipt_doc_r2_key?: string; bill_doc_r2_key?: string; source?: string;
+    reason?: string; skip_stock?: boolean; new_batch?: boolean; receipt_batch_no?: string; batch_last?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
+  // รับย้อนหลัง (เคลียร์ของค้างเก่า) — เจ้าของอนุมัติ 2026-10-25: ไม่บังคับแนบ แต่ต้องมีสิทธิ์เฉพาะ + บังคับเหตุผล (เก็บลง note + audit)
+  const backfill = body.source === "backfill";
+  const reason = String(body.reason ?? "").trim();
+  if (backfill) {
+    const noPerm = await guardApi(request, "po.receive_backfill"); if (noPerm) return noPerm;
+    if (reason.length < 3) return NextResponse.json({ error: "ต้องใส่เหตุผลการรับย้อนหลัง" }, { status: 400 });
+  }
+
   // กติกากลาง: ต้องแนบ ใบรับของ + บิล ทุกครั้ง (หน้ารับของ / การ์ดแท็บใบสั่งผลิต / ช่องทางใหม่ในอนาคต)
-  // ยกเว้นหน้าสแกน QR (source=scan) — เจ้าของตัดสิน 2026-10-25 ให้รับหน้างานได้โดยไม่ต้องแนบ
-  if (body.source !== "scan" && (!body.receipt_doc_r2_key || !body.bill_doc_r2_key)) {
+  // ยกเว้นหน้าสแกน QR (source=scan) — เจ้าของตัดสิน 2026-10-25 ให้รับหน้างานได้โดยไม่ต้องแนบ · และรับย้อนหลัง (backfill) ด้านบน
+  if (body.source !== "scan" && !backfill && (!body.receipt_doc_r2_key || !body.bill_doc_r2_key)) {
     return NextResponse.json({ error: "ต้องแนบ ใบรับของ + บิล ให้ครบก่อนบันทึก" }, { status: 400 });
   }
 
@@ -77,10 +89,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (numErr || !grNo) return NextResponse.json({ error: "ออกเลขใบรับไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
   const receiveDate = body.receive_date || now.toISOString().slice(0, 10);
 
+  // เลขชุดรับของ: ใบแรกของตะกร้าขอเลขใหม่ (เลขกลาง 'rb') · ใบถัดไปส่งเลขเดิมมา · ออกเลขไม่ได้ = รับต่อได้ (แค่ไม่มีชุด)
+  let batchNo: string | null = null;
+  if (body.new_batch) {
+    const { data: rb, error: rbErr } = await admin.rpc("erp_next_number", { p_key: "rb" });
+    if (rbErr || !rb) console.error("[receive] ออกเลขชุดรับไม่สำเร็จ:", rbErr?.message); else batchNo = String(rb);
+  } else if (typeof body.receipt_batch_no === "string" && /^RB-[\w-]{1,30}$/.test(body.receipt_batch_no)) {
+    batchNo = body.receipt_batch_no;
+  }
+  const note = backfill ? `รับย้อนหลัง (ไม่มีเอกสาร): ${reason}${body.note ? ` · ${body.note}` : ""}` : (body.note ?? null);
+
   // 1) หัว GR
   const { data: gr, error: grErr } = await admin
     .from("goods_receipts_v2")
-    .insert({ gr_no: grNo, po_id: poId, po_no: po.po_no, seller_name: po.seller_name, receive_date: receiveDate, receiver: body.receiver ?? actor, note: body.note ?? null, status: "done", receipt_doc_r2_key: body.receipt_doc_r2_key ?? null, bill_doc_r2_key: body.bill_doc_r2_key ?? null })
+    .insert({ gr_no: grNo, po_id: poId, po_no: po.po_no, seller_name: po.seller_name, receive_date: receiveDate, receiver: body.receiver ?? actor, note, status: "done", receipt_doc_r2_key: body.receipt_doc_r2_key ?? null, bill_doc_r2_key: body.bill_doc_r2_key ?? null, receipt_batch_no: batchNo, is_backfill: backfill })
     .select("id").single();
   if (grErr || !gr) return NextResponse.json({ error: "สร้างใบรับไม่สำเร็จ: " + (grErr?.message ?? "") }, { status: 500 });
 
@@ -130,7 +152,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   let stockedLines = 0;
   const stockWarnings: string[] = [];
-  if (!toWarehouseId) {
+  const skipStock = backfill && body.skip_stock === true;   // รับย้อนหลังเลือก "ไม่บวกสต๊อก" ได้ (ของใช้ไปแล้ว/นับใหม่ทีหลัง)
+  if (skipStock) {
+    // ไม่บวกสต๊อก — ตั้งใจ ไม่ใช่ข้อผิดพลาด
+  } else if (!toWarehouseId) {
     stockWarnings.push("ไม่พบคลังปลายทาง (WH-RAW) — ยังไม่ได้บวกสต๊อก");
   } else {
     // ต้นทุน: ราคาซื้อจาก PO (price_est เฉพาะสกุลบาท) ก่อน → ไม่มี ใช้ต้นทุนมาตรฐาน (skus_v2.standard_price)
@@ -171,15 +196,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     entityId:   gr.id,
     actorId:    user.id,
     actorName:  actor,
-    metadata:   { gr_no: grNo, po_no: po.po_no, lines: grLines.length, po_status: poStatus, stocked_lines: stockedLines },
+    metadata:   { gr_no: grNo, po_no: po.po_no, lines: grLines.length, po_status: poStatus, stocked_lines: stockedLines,
+                  ...(batchNo ? { receipt_batch_no: batchNo } : {}), ...(backfill ? { backfill: true, reason, skip_stock: skipStock } : {}) },
   });
 
   // ---- เตือนไลน์: "รับของเข้า" → กลุ่มรับของ (fallback กลุ่มขอซื้อ) · best-effort ----
+  // รับย้อนหลัง = ไม่แจ้ง (ของเก่า กันไลน์ท่วม) · ชุดรับของ = แจ้งครั้งเดียวที่ใบสุดท้ายของชุด (สรุปทั้งชุด)
   try {
-    const statusTh = poStatus === "received" ? "รับครบแล้ว ✅" : poStatus === "partial" ? "รับบางส่วน (ยังไม่ครบ)" : "รับแล้ว";
-    const lineText = `📥 รับของเข้าแล้ว · ${grNo}\nPO ${po.po_no} · ${po.seller_name}\nรับ ${grLines.length} รายการ · เข้าสต๊อก ${stockedLines} รายการ\nสถานะใบสั่งซื้อ: ${statusTh}\nผู้รับ: ${body.receiver ?? actor}`;
-    await pushLineText(admin, ["goods_receipt", "purchase_request"], lineText, "goods_received");
+    if (backfill || (batchNo && !body.batch_last)) { /* ข้าม */ }
+    else if (batchNo) {
+      const { data: bgr } = await admin.from("goods_receipts_v2").select("id, po_no, seller_name").eq("receipt_batch_no", batchNo).not("is_active", "is", false);
+      const bRows = (bgr ?? []) as { id: string; po_no: string | null; seller_name: string | null }[];
+      const { count } = bRows.length ? await admin.from("goods_receipt_lines_v2").select("id", { count: "exact", head: true }).in("gr_id", bRows.map((r) => r.id)) : { count: 0 };
+      const sellers = [...new Set(bRows.map((r) => r.seller_name).filter(Boolean))].join(", ");
+      const lineText = `📥 รับของเข้าแล้ว · ชุด ${batchNo}\n${sellers}\n${bRows.length} ใบสั่งซื้อ · ${count ?? 0} รายการ\nPO: ${bRows.map((r) => r.po_no).filter(Boolean).join(", ")}\nผู้รับ: ${body.receiver ?? actor}`;
+      await pushLineText(admin, ["goods_receipt", "purchase_request"], lineText, "goods_received");
+    } else {
+      const statusTh = poStatus === "received" ? "รับครบแล้ว ✅" : poStatus === "partial" ? "รับบางส่วน (ยังไม่ครบ)" : "รับแล้ว";
+      const lineText = `📥 รับของเข้าแล้ว · ${grNo}\nPO ${po.po_no} · ${po.seller_name}\nรับ ${grLines.length} รายการ · เข้าสต๊อก ${stockedLines} รายการ\nสถานะใบสั่งซื้อ: ${statusTh}\nผู้รับ: ${body.receiver ?? actor}`;
+      await pushLineText(admin, ["goods_receipt", "purchase_request"], lineText, "goods_received");
+    }
   } catch (e) { console.warn("[receive] LINE notify failed:", e); }
 
-  return NextResponse.json({ ok: true, gr_no: grNo, po_status: poStatus, line_count: grLines.length, stocked_lines: stockedLines, stock_warnings: stockWarnings, error: null });
+  return NextResponse.json({ ok: true, gr_no: grNo, po_status: poStatus, line_count: grLines.length, stocked_lines: stockedLines, stock_warnings: stockWarnings, receipt_batch_no: batchNo, error: null });
 }
