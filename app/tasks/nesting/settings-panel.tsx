@@ -6,8 +6,9 @@
  */
 import { useT } from "@/components/i18n";
 import { toMm, type PrintType } from "./data";
-import { toUnit, unitScale, type Settings } from "./nest-utils";
+import { unitScale, type Settings } from "./nest-utils";
 import { NumInput } from "./num-input";
+import { StepInput } from "@/components/step-input";
 
 type Rot = "none" | "flip" | "four" | "step";
 
@@ -44,8 +45,11 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
   const t = useT();
   const s = settings;
   const u = s.unit;
-  const len = (mm: number | null | undefined) => toUnit(mm, u);
   const fromLen = (v: number | null) => (v == null ? null : v * unitScale(u));
+  // ช่องความยาว: ปุ่ม −/+ · ลูกกลิ้ง · ↑↓ ทีละ 1 mm (Shift = 1 cm) — เจ้าของขอ
+  const lenNum = (mm: number | null | undefined) => (mm == null ? null : +(mm / unitScale(u)).toFixed(4));
+  const mmStep = 1 / unitScale(u);
+  const stepCls = "h-8 w-full";
   const roll = s.sheet_height_mm == null;
   const rot = rotModeOf(s);
 
@@ -69,7 +73,7 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
 
       <div className="grid grid-cols-2 gap-2">
         <Field label={t(`กว้าง (${u})`, `Width (${u})`)}>
-          <NumInput className={inputCls} value={len(s.sheet_width_mm)} onChange={(v) => onChange({ sheet_width_mm: fromLen(v) ?? 0 })} />
+          <StepInput className={stepCls} value={lenNum(s.sheet_width_mm)} step={mmStep} min={0} onChange={(v) => onChange({ sheet_width_mm: fromLen(v) ?? 0 })} />
         </Field>
         <div>
           <span className="mb-1 block text-xs text-slate-500">{t("ความยาว", "Length")}</span>
@@ -78,14 +82,14 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
         </div>
         {!roll && (
           <Field label={t(`ยาวแผ่น (${u})`, `Sheet length (${u})`)}>
-            <NumInput className={inputCls} value={len(s.sheet_height_mm)} onChange={(v) => onChange({ sheet_height_mm: fromLen(v) ?? 0 })} />
+            <StepInput className={stepCls} value={lenNum(s.sheet_height_mm)} step={mmStep} min={0} onChange={(v) => onChange({ sheet_height_mm: fromLen(v) ?? 0 })} />
           </Field>
         )}
         <Field label={t(`ระยะห่างระหว่างชิ้น (${u})`, `Spacing (${u})`)}>
-          <NumInput className={inputCls} value={len(s.spacing_mm)} onChange={(v) => onChange({ spacing_mm: fromLen(v) ?? 0 })} />
+          <StepInput className={stepCls} value={lenNum(s.spacing_mm)} step={mmStep} min={0} onChange={(v) => onChange({ spacing_mm: fromLen(v) ?? 0 })} />
         </Field>
         <Field label={t(`ขอบแผ่น (${u})`, `Margin (${u})`)}>
-          <NumInput className={inputCls} value={len(s.margin_mm)} onChange={(v) => onChange({ margin_mm: fromLen(v) ?? 0 })} />
+          <StepInput className={stepCls} value={lenNum(s.margin_mm)} step={mmStep} min={0} onChange={(v) => onChange({ margin_mm: fromLen(v) ?? 0 })} />
         </Field>
       </div>
 
@@ -105,7 +109,7 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
               onChange={(v) => onChange({ fill_roll: v })} />
             {s.fill_roll === "length" && (
               <Field label={t(`แผ่นม้วน: เติมถึงความยาว (${u})`, `Roll: fill up to (${u})`)}>
-                <NumInput className={inputCls} value={len(s.fill_length_mm)} onChange={(v) => onChange({ fill_length_mm: fromLen(v) ?? 0 })} />
+                <StepInput className={stepCls} value={lenNum(s.fill_length_mm)} step={mmStep} min={0} onChange={(v) => onChange({ fill_length_mm: fromLen(v) ?? 0 })} />
               </Field>
             )}
           </div>
@@ -137,7 +141,7 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
         {rot === "step" && (
           <label className="mt-1.5 flex items-center gap-2 text-xs text-slate-600">
             {t("หมุนได้ทุก", "Rotate every")}
-            <NumInput className="h-7 w-14 rounded border border-slate-300 px-1" integer value={String(s.rotate_step ?? 15)}
+            <StepInput className="h-7 w-28" integer step={1} min={1} max={360} value={s.rotate_step ?? 15}
               onChange={(v) => onChange({ rotate_step: v && v > 0 ? v : 15 })} />
             {t("องศา", "degrees")}
           </label>
@@ -152,7 +156,7 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
         {s.cut_contour && (
           <label className="flex items-center gap-1">
             {t("ห่างจากภาพ", "Offset")}
-            <NumInput className="h-7 w-14 rounded border border-slate-300 px-1" value={len(s.cut_offset_mm)} onChange={(v) => onChange({ cut_offset_mm: fromLen(v) ?? 0 })} />
+            <StepInput className="h-7 w-28" value={lenNum(s.cut_offset_mm)} step={mmStep} min={0} onChange={(v) => onChange({ cut_offset_mm: fromLen(v) ?? 0 })} />
             {u}
           </label>
         )}
