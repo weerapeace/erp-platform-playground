@@ -13,6 +13,7 @@
  * - accept = ขึ้นต้นชนิดไฟล์ (เช่น "image/" หรือ ["image/", "video/"]) · ไม่มีไฟล์ที่รับได้เลย = เรียก onReject
  * - ช่องซ้อนกัน (เช่น ช่อง Hero อยู่ในแถวสีที่ลากวางได้) = ช่องในสุดรับไป ช่องนอกไม่รับซ้ำ (ดู defaultPrevented)
  * - disabled = ไม่รับ (เช่น กำลังอัปโหลดอยู่) — ไม่ไฮไลต์ · วางแล้วเรียก onBusy ถ้ามี (ไว้บอก "รอสักครู่")
+ * - folders = ลากทั้งโฟลเดอร์ได้ (ไล่ไฟล์ทุกชั้น) · path "โฟลเดอร์/ชื่อไฟล์" อ่านด้วย filePathOf(file) — ใช้ที่ 📸 ลงรูปเว็บทีละมาก
  * ไม่ทำ: อัปโหลดเอง (ส่งไฟล์ให้ callback ของหน้า — หน้าใช้ uploadResizedImage/ช่องทางเดิมของมัน)
  */
 import { useRef, useState, type DragEvent } from "react";
@@ -20,9 +21,43 @@ import { typeFromName } from "@/lib/media-upload-limits";
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
+// 📁 ลากทั้งโฟลเดอร์ (opts.folders) — เบราว์เซอร์ไม่ใส่ path ให้ไฟล์ที่ได้จากการลากโฟลเดอร์ → จดไว้เอง
+const dropPaths = new WeakMap<File, string>();
+/** path ของไฟล์ "โฟลเดอร์/…/ชื่อไฟล์" (ลากโฟลเดอร์ หรือ input webkitdirectory) · ไฟล์เดี่ยว = ชื่อไฟล์ */
+export const filePathOf = (f: File): string => dropPaths.get(f) || f.webkitRelativePath || f.name;
+
+type FsEntry = { isFile: boolean; isDirectory: boolean; name: string; fullPath: string };
+type FsFileEntry = FsEntry & { file: (ok: (f: File) => void, err: (e: unknown) => void) => void };
+type FsDirEntry = FsEntry & { createReader: () => { readEntries: (ok: (es: FsEntry[]) => void, err: (e: unknown) => void) => void } };
+
+/** อ่านไฟล์ทั้งหมดใต้รายการที่ลากมา (ไล่โฟลเดอร์ย่อย · readEntries ได้ทีละ ≤100 ต้องวนจนหมด) — ข้ามไฟล์ซ่อน (.DS_Store ฯลฯ) */
+async function readEntries(entries: FsEntry[], limit = 2000): Promise<File[]> {
+  const out: File[] = [];
+  const walk = async (e: FsEntry): Promise<void> => {
+    if (out.length >= limit || e.name.startsWith(".")) return;
+    if (e.isFile) {
+      const f = await new Promise<File | null>((ok) => (e as FsFileEntry).file(ok, () => ok(null)));
+      if (f) {
+        dropPaths.set(f, e.fullPath.replace(/^\/+/, ""));
+        out.push(f);
+      }
+    } else if (e.isDirectory) {
+      const reader = (e as FsDirEntry).createReader();
+      for (;;) {
+        const batch = await new Promise<FsEntry[]>((ok) => reader.readEntries(ok, () => ok([])));
+        if (!batch.length) break;
+        for (const c of batch) await walk(c);
+      }
+    }
+  };
+  for (const e of entries) await walk(e);
+  return out;
+}
+
 export function useFileDrop(
   onFiles: (files: File[], key: string) => void,
-  opts: { accept?: string | string[]; disabled?: boolean; onReject?: () => void; onBusy?: () => void } = {}
+  /** folders = ลากทั้งโฟลเดอร์ได้ (ไล่ไฟล์ข้างในทุกชั้น · path อ่านด้วย filePathOf) */
+  opts: { accept?: string | string[]; disabled?: boolean; onReject?: () => void; onBusy?: () => void; folders?: boolean } = {}
 ) {
   const [over, setOver] = useState<string | null>(null);
   const overRef = useRef<string | null>(null);
@@ -68,6 +103,20 @@ export function useFileDrop(
       setOverKey(null);
       if (opts.disabled) {
         opts.onBusy?.();
+        return;
+      }
+      // รายการต้องหยิบตอนนี้เลย (หลังจบ event เบราว์เซอร์ล้างทิ้ง) แล้วค่อยไล่อ่านโฟลเดอร์
+      const entries = opts.folders
+        ? Array.from(e.dataTransfer.items ?? [])
+            .map((it) => (it.kind === "file" ? (it.webkitGetAsEntry?.() as FsEntry | null) : null))
+            .filter((x): x is FsEntry => !!x)
+        : [];
+      if (entries.some((x) => x.isDirectory)) {
+        void readEntries(entries).then((all) => {
+          const files = all.filter(accepts);
+          if (files.length) onFiles(files, key);
+          else opts.onReject?.();
+        });
         return;
       }
       const files = Array.from(e.dataTransfer.files).filter(accepts);

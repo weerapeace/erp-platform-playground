@@ -7,6 +7,7 @@
  * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด/🗂 จัดหมวด (จำต่อคนด้วย useViewPref)
  * - 🗂 จัดหมวด = components/website-category-sorter (ขั้น 1 ใส่หมวดหลักจากหมวด ERP · ขั้น 2 กระดานจัดหมวดย่อย) — ทั้งร้าน ไม่สนตัวกรอง
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
+ * - 📸 ลงรูปทีละมาก (หัวตาราง = ทั้งร้าน · แถบล่าง = เฉพาะที่ติ๊ก) → components/website-image-mass-upload
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
  * - กดการ์ด/แถว/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
  *     แท็บ ขายบนเว็บ · รูป สี และรูปเปิด · ปั๊มชื่อ/แบนเนอร์/รายละเอียด · ต้องแก้ · ◀ ▶ เลื่อนตามรายการที่เห็น · 💾 บันทึกแถบล่าง
@@ -27,6 +28,7 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { listingIssues, type ListingIssue } from "@/lib/website-listing-health";
 import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
 import { WebsiteListingsMassEdit } from "@/components/website-listings-mass-edit";
+import { WebsiteImageMassUpload } from "@/components/website-image-mass-upload";
 import { webForm } from "@/lib/website-form-styles";
 
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
@@ -171,6 +173,8 @@ export function WebsiteListingsPanel({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [massOpen, setMassOpen] = useState(false);
+  // 📸 ลงรูปเว็บทีละมาก — null = ปิด · [] = ทั้งร้าน · [ids] = เฉพาะที่ติ๊ก
+  const [imgMass, setImgMass] = useState<string[] | null>(null);
   // ปุ่มลัดในแถบล่าง → เปิดป๊อปแก้หลายรายการพร้อมช่องที่ตั้งไว้ (เช่น 📂 ย้ายหมวด)
   const [massPreset, setMassPreset] = useState<{ field: "categories"; categories: { mode: "move"; keys: string[]; from?: string } } | null>(null);
   const [removing, setRemoving] = useState<Listing | null>(null);
@@ -358,13 +362,27 @@ export function WebsiteListingsPanel({
             );
           })}
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
-        >
-          + เพิ่มสินค้าเข้าเว็บ
-        </button>
+        <div className="flex items-center gap-2">
+          {listings.length > 0 && (
+            <button
+              onClick={() => setImgMass([])}
+              title="ลากโฟลเดอร์รูปมาวาง — จับคู่ชื่อไฟล์กับรหัสสินค้า/สีให้อัตโนมัติ"
+              className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
+            >
+              📸 ลงรูปทีละมาก
+            </button>
+          )}
+          <button
+            onClick={() => setShowAdd(true)}
+            className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+          >
+            + เพิ่มสินค้าเข้าเว็บ
+          </button>
+        </div>
       </div>
+
+      {/* 📸 ลงรูปเว็บทีละมาก — จับคู่ชื่อไฟล์/โฟลเดอร์ → รูปบนเว็บ/รูปสี/Hero (components/website-image-mass-upload) */}
+      <WebsiteImageMassUpload open={imgMass !== null} onClose={() => setImgMass(null)} shop={shop} scopeIds={imgMass} onDone={reload} />
 
       {/* ➕ ป๊อปเพิ่มสินค้า: แท็บ 🎯 SKU การตลาด / ☰ รายการสินค้า · ติ๊กหลายรุ่น · ค่าเริ่มต้นซ่อนไว้ก่อน */}
       <WebsiteAddProductsModal open={showAdd} onClose={() => setShowAdd(false)} shop={shop} onAdded={reload} />
@@ -616,6 +634,9 @@ export function WebsiteListingsPanel({
         </button>
         <button disabled={bulkBusy || !categories.length} onClick={() => { setMassPreset({ field: "categories", categories: { mode: "move", keys: [] } }); setMassOpen(true); }} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
           📂 ย้ายหมวด
+        </button>
+        <button disabled={bulkBusy} onClick={() => setImgMass([...sel])} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
+          📸 ลงรูป
         </button>
         <button disabled={bulkBusy} onClick={() => { setMassPreset(null); setMassOpen(true); }} className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-medium hover:bg-slate-100 disabled:opacity-50">
           ✏️ แก้หลายรายการ
