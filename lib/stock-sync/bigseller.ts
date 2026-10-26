@@ -81,9 +81,14 @@ export function isComboType(v: unknown): boolean {
 /** คีย์รวมยอด = รหัสตัวใหญ่ ไม่มีช่องว่างหัวท้าย (ตรงกับกติกาจับคู่ของฐานข้อมูล) */
 export const codeKey = (code: string) => code.trim().toUpperCase();
 
+const maxN = (a: number | null, b: number | null) => (a == null ? b : b == null ? a : Math.max(a, b));
+const sumN = (list: (number | null)[]) => list.some((n) => n != null) ? list.reduce<number>((s, n) => s + (n ?? 0), 0) : null;
+
 /**
  * ทำแถวจากไฟล์ให้พร้อมบันทึก
- * - รหัสเดียวกันหลายแถว (หลายคลัง) → รวมยอด · ถ้าระบุ warehouse = เอาเฉพาะคลังนั้น
+ * - รหัสเดียวกัน "ต่างคลัง" → รวมยอด · ถ้าระบุ warehouse = เอาเฉพาะคลังนั้น
+ * - รหัสเดียวกัน "คลังเดียวกัน/ไม่ระบุคลัง" = ของกองเดียวกันที่โผล่ซ้ำ → ไม่บวก ใช้ยอดที่มากกว่า
+ *   (ไฟล์ Online Products: สินค้าเดียวลงขาย 2 หน้า → SKU เดียวโผล่ 2 แถว ยอดเท่ากันเพราะ BigSeller ส่งยอดเดียวกันไปทั้งคู่)
  * - ไม่มีรหัส / ไม่มีตัวเลขเลยทั้ง 2 ช่อง / ยอดติดลบ → ข้าม พร้อมเหตุผล
  */
 export function normalizeBigSellerRows(
@@ -92,6 +97,7 @@ export function normalizeBigSellerRows(
 ): { items: BigSellerItem[]; skipped: BigSellerSkip[] } {
   const onlyWh = str(opts.warehouse).toLowerCase();
   const byKey = new Map<string, BigSellerItem>();
+  const perWh = new Map<string, Map<string, { available: number | null; onHand: number | null }>>();
   const skipped: BigSellerSkip[] = [];
 
   rows.forEach((r, i) => {
@@ -111,22 +117,33 @@ export function normalizeBigSellerRows(
     if ((available ?? 0) < 0 || (onHand ?? 0) < 0) { skipped.push({ row: rowNo, code, reason: "จำนวนติดลบ" }); return; }
 
     const key = codeKey(code);
+    const whs = perWh.get(key) ?? new Map<string, { available: number | null; onHand: number | null }>();
+    perWh.set(key, whs);
+    const whKey = wh.toLowerCase();
+    const prev = whs.get(whKey);
+    whs.set(whKey, prev
+      ? { available: maxN(prev.available, available), onHand: maxN(prev.onHand, onHand) }
+      : { available, onHand });
+
     const cur = byKey.get(key);
     if (!cur) {
       byKey.set(key, {
-        code, name: str(r.name) || null, available, onHand,
+        code, name: str(r.name) || null, available: null, onHand: null,
         isCombo: isComboType(r.sku_type), warehouses: wh ? [wh] : [], rows: [rowNo],
       });
       return;
     }
-    cur.available = available == null ? cur.available : (cur.available ?? 0) + available;
-    cur.onHand = onHand == null ? cur.onHand : (cur.onHand ?? 0) + onHand;
     cur.isCombo = cur.isCombo || isComboType(r.sku_type);
     if (!cur.name) cur.name = str(r.name) || null;
     if (wh && !cur.warehouses.includes(wh)) cur.warehouses.push(wh);
     cur.rows.push(rowNo);
   });
 
+  for (const [key, it] of byKey) {
+    const list = [...(perWh.get(key)?.values() ?? [])];
+    it.available = sumN(list.map((x) => x.available));
+    it.onHand = sumN(list.map((x) => x.onHand));
+  }
   return { items: [...byKey.values()], skipped };
 }
 

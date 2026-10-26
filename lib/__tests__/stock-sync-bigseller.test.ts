@@ -55,6 +55,23 @@ describe("normalizeBigSellerRows", () => {
     expect(items.find((x) => x.code === "IG-B02")).toMatchObject({ available: 1000, onHand: null });
   });
 
+  it("รหัสเดียวกันโผล่ซ้ำในคลังเดียวกัน/ไม่ระบุคลัง (ลงขาย 2 หน้า) → ไม่บวกซ้ำ ใช้ยอดที่มากกว่า", () => {
+    const { items } = normalizeBigSellerRows([
+      { merchant_sku: "DH-11/19MM#N", qty_on_hand: 100 },
+      { merchant_sku: "DH-11/19MM#N", qty_on_hand: 100 },
+      { merchant_sku: "IG-A01", qty_on_hand: 3, warehouse: "คลังหลัก" },
+      { merchant_sku: "IG-A01", qty_on_hand: 5, warehouse: "คลังหลัก" },
+      { merchant_sku: "IG-A01", qty_on_hand: 2, warehouse: "คลังสอง" },
+    ]);
+    expect(items.find((i) => i.code === "DH-11/19MM#N")).toMatchObject({ onHand: 100, rows: [2, 3] });
+    expect(items.find((i) => i.code === "IG-A01")).toMatchObject({ onHand: 7, warehouses: ["คลังหลัก", "คลังสอง"] });
+  });
+
+  it("หัวตารางไฟล์ Online Products ของ BigSeller เดาคอลัมน์ได้", () => {
+    const m = autoMapHeaders(["ชื่อเล่นร้านค้า", "ชื่อสินค้า", "Item ID", "Parent SKU", "ตัวเลือก", "ID ตัวเลือก", "SKU", "สต็อก", "ราคา"], BIGSELLER_IMPORT_SCHEMA.fields);
+    expect(m).toEqual({ merchant_sku: "SKU", name: "ชื่อสินค้า", qty_on_hand: "สต็อก" });
+  });
+
   it("เลือกเฉพาะคลังเดียวได้", () => {
     const { items, skipped } = normalizeBigSellerRows([
       { merchant_sku: "IG-A01", qty_available: 3, warehouse: "คลังหลัก" },
