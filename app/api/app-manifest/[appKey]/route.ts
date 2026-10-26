@@ -7,9 +7,15 @@
  * - สาธารณะ (ไม่ต้อง auth) — เบราว์เซอร์/OS ต้องดึง manifest + ไอคอนได้ตอนติดตั้ง
  * - ไอคอนรูปจริงเก็บใน R2 (erp_app_groups.icon_url = r2_key) เสิร์ฟผ่าน /api/r2-image
  * - ไม่มีไอคอน/สี → ใช้ค่า default (ไอคอนรวมของระบบ)
+ * - แอปเดี่ยวที่มีหน้าของตัวเอง (lib/app-branding STANDALONE_APPS เช่น notify) → ชื่อ/ที่อยู่จากทะเบียน
+ *   ไอคอนจาก /api/app-icon/<key> (เปลี่ยนได้ด้วย AppIconEditButton)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { STANDALONE_APPS, appIconUrl } from "@/lib/app-branding";
+import { getAppBranding } from "@/lib/app-branding-server";
+
+const MANIFEST_HEADERS = { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "public, max-age=60" };
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,6 +39,28 @@ export async function GET(
   const { appKey } = await params;
   if (!appKey || !/^[a-z][a-z0-9_-]{0,30}$/.test(appKey)) {
     return NextResponse.json({ error: "invalid appKey" }, { status: 400 });
+  }
+
+  const standalone = STANDALONE_APPS[appKey];
+  if (standalone) {
+    const { version } = await getAppBranding(supabaseAdmin(), appKey);
+    return new NextResponse(JSON.stringify({
+      id: standalone.startUrl,
+      name: standalone.name,
+      short_name: standalone.shortName,
+      description: standalone.description,
+      start_url: standalone.startUrl,
+      scope: standalone.scope,
+      display: "standalone",
+      orientation: "portrait",
+      background_color: "#f8fafc",
+      theme_color: standalone.themeColor,
+      icons: [
+        { src: appIconUrl(appKey, 192, version), sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: appIconUrl(appKey, 512, version), sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: `${appIconUrl(appKey, 512, version)}&m=1`, sizes: "512x512", type: "image/png", purpose: "maskable" },
+      ],
+    }), { status: 200, headers: MANIFEST_HEADERS });
   }
 
   const { data: app } = await supabaseAdmin()

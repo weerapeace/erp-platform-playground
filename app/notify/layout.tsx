@@ -1,8 +1,8 @@
 /**
  * Layout ของแอปเดี่ยว "แจ้งเตือน ERP" (/notify) — ติดตั้งลงหน้าจอโฮมได้ + รับแจ้งเตือนเด้ง (Web Push)
- * - manifest แยก (/notify.webmanifest · scope "/" เพื่อให้หน้า login/หน้าเรื่องที่เปิด อยู่ในแอปเดียวกัน ไม่เด้งออกเบราว์เซอร์)
+ * - manifest แยก (/api/app-manifest/notify · scope "/" เพื่อให้หน้า login/หน้าเรื่องที่เปิด อยู่ในแอปเดียวกัน ไม่เด้งออกเบราว์เซอร์)
  *   ⚠️ ตั้งใน page.tsx (ตั้งที่นี่จะโดน manifest กลางทับ — ดูหมายเหตุใน page.tsx)
- * - ไอคอน: app/notify/icon.png + apple-icon.png (ทับไอคอนกลางเฉพาะหน้านี้)
+ * - ไอคอน: app/notify/icon.tsx + apple-icon.tsx ดึงไอคอนที่ตั้งไว้ (ของกลาง lib/app-branding · เปลี่ยนได้ที่ปุ่ม ✏️)
  * - เป็นข้อมูลส่วนตัวของผู้ใช้แต่ละคน (กระดิ่งของตัวเอง) → ไม่ผูกล็อกแอป/ไม่ต้องสิทธิ์พิเศษ แค่ล็อกอิน
  */
 import type { Metadata, Viewport } from "next";

@@ -20,6 +20,8 @@ import { relTime } from "@/components/notification-bell";
 import { isStandalone, useWebPush } from "@/components/web-push";
 import { useViewportLayout } from "@/components/device-view";
 import { QrCode } from "@/components/qr-code";
+import { AppIconEditButton, useAppBranding } from "@/components/app-icon-editor";
+import { appIconUrl } from "@/lib/app-branding";
 import { PUSH_CATEGORIES, pushCategoryIcon } from "@/lib/push-categories";
 import type { Notification, NotificationsResponse } from "@/app/api/notifications/route";
 
@@ -37,13 +39,14 @@ function withEmbed(url: string): string {
 export function NotifyApp() {
   const { user, ready } = useAuth();
   const router = useRouter();
+  const brand = useAppBranding("notify");
   if (!ready) return <Screen><LoadingState /></Screen>;
   if (!user) {
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/notify-icon-192.png" alt="" className="w-20 h-20 rounded-2xl" />
+          <img src={appIconUrl("notify", 192, brand.version)} alt="" className="w-20 h-20 rounded-[22%]" />
           <div>
             <h1 className="text-lg font-semibold text-slate-800">แจ้งเตือน ERP</h1>
             <p className="text-sm text-slate-500 mt-1">เข้าสู่ระบบเพื่อดูแจ้งเตือนของคุณ และรับแจ้งเตือนเด้งเข้ามือถือ</p>
@@ -85,14 +88,16 @@ function Screen({ children }: { children: React.ReactNode }) {
 /** QR สแกนด้วยกล้องมือถือ → เปิด /notify บนมือถือ → ติดตั้งลงหน้าจอ (ใช้ QrCode ของกลาง + ไอคอนแอปกลาง QR) */
 function InstallQrCard() {
   const [url, setUrl] = useState("");
+  const brand = useAppBranding("notify");
   useEffect(() => { setUrl(`${window.location.origin}/notify`); }, []);
   return (
     <aside className="w-72 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 text-center sticky top-6">
       <h2 className="text-base font-semibold text-slate-800">📱 ติดตั้งบนมือถือ</h2>
       <p className="text-xs text-slate-500 mt-1">สแกนด้วย <b>กล้องมือถือ</b> แล้วเปิดลิงก์</p>
       <div className="flex justify-center my-4">
-        <QrCode text={url || null} size={200} logo="/notify-icon-192.png" alt="QR เปิดแอปแจ้งเตือนบนมือถือ" className="border border-slate-100" />
+        <QrCode text={url || null} size={200} logo={appIconUrl("notify", 192, brand.version)} alt="QR เปิดแอปแจ้งเตือนบนมือถือ" className="border border-slate-100" />
       </div>
+      <AppIconEditButton appKey="notify" branding={brand} className="mb-3" />
       <ol className="text-left text-xs text-slate-600 space-y-1.5 list-decimal pl-4">
         <li><b>Android:</b> เปิดด้วย Chrome → ล็อกอิน → ⚙️ → “ติดตั้งแอป”</li>
         <li><b>iPhone:</b> เปิดด้วย Safari → แชร์ (▢↑) → “เพิ่มไปยังหน้าจอโฮม” → เปิดจากไอคอน → ล็อกอินด้วยรหัสผ่าน/PIN</li>
@@ -317,6 +322,7 @@ type PushApi = ReturnType<typeof useWebPush>;
 function Settings({ push, onBack }: { push: PushApi; onBack: () => void }) {
   const toast = useToast();
   const pwa = usePwaInstall();
+  const brand = useAppBranding("notify");
   const [testing, setTesting] = useState(false);
 
   const enable = async () => {
@@ -410,6 +416,19 @@ function Settings({ push, onBack }: { push: PushApi; onBack: () => void }) {
               if (r === "ios") toast.info(IOS_INSTALL_HINT);
               else if (r === "unsupported") toast.info(UNSUPPORTED_INSTALL_HINT);
             }} className="h-10 px-4 rounded-lg border border-blue-200 text-blue-700 text-sm font-medium">📲 ติดตั้งแอป “แจ้งเตือน”</button>
+          </section>
+        )}
+
+        {/* ไอคอนแอป (เฉพาะคนมีสิทธิ์จัดการแอป) */}
+        {brand.canEdit && (
+          <section className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={appIconUrl("notify", 96, brand.version)} alt="" className="w-12 h-12 rounded-[22%] border border-slate-100" />
+            <div className="flex-1 min-w-0">
+              <h2 className="text-sm font-semibold text-slate-700">ไอคอนแอป</h2>
+              <p className="text-xs text-slate-500">{brand.custom ? "ใช้ไอคอนที่ตั้งเอง" : "ใช้ไอคอนตั้งต้น"} · เปลี่ยนแล้วมีผลทุกคน</p>
+            </div>
+            <AppIconEditButton appKey="notify" branding={brand} label="✏️ เปลี่ยน" />
           </section>
         )}
 

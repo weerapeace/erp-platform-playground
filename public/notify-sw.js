@@ -14,7 +14,7 @@ self.addEventListener("push", (event) => {
   const title = d.title || "แจ้งเตือนใหม่";
   const options = {
     body: d.body || "",
-    icon: "/notify-icon-192.png",
+    icon: "/api/app-icon/notify?s=192",   // ไอคอนแอปที่ตั้งไว้ (ของกลาง lib/app-branding)
     badge: "/notify-badge-96.png",
     tag: d.id || "erp-summary",
     renotify: true,

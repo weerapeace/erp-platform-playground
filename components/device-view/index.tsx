@@ -117,7 +117,7 @@ export function DeviceModeToggle({ mode, viewport, onChange, compact = false, cl
 }
 
 /** iconSrc = รูปไอคอนที่เครื่องจะได้จริงตอนติดตั้ง (กติกาเดียวกับ /api/app-manifest + layout ของ /app/<key>) · customIcon = แอปตั้งไอคอนเองแล้ว */
-type AppLite = { key: string; label: string; icon: string | null; iconSrc: string; customIcon: boolean };
+export type AppLite = { key: string; label: string; icon: string | null; iconSrc: string; customIcon: boolean };
 const SAFE_ICON_KEY = /^[a-zA-Z0-9._/-]+$/;
 /** ไอคอนแอปที่ใช้ติดตั้ง: รูปที่อัปโหลด (R2) ถ้ามี ไม่งั้นไอคอนรวมของระบบ */
 export function appIconSrc(iconUrl: string | null | undefined): string {
@@ -159,7 +159,7 @@ export function useAppsForCurrentPage(): { apps: AppLite[]; preferred: string | 
 }
 
 /** ตัวอย่าง "ไอคอนบนหน้าจอหลังติดตั้ง" — รูป/ชื่อเดียวกับที่เครื่องได้จริง (ชื่อยาวเกิน 12 ตัว Android ตัดเหลือ 12) */
-function HomeIconPreview({ app }: { app: AppLite }) {
+export function HomeIconPreview({ app }: { app: AppLite }) {
   const shortName = app.label.length > 12 ? app.label.slice(0, 12) : app.label;
   const ghost = <span className="h-11 w-11 rounded-[22%] bg-white/60" aria-hidden />;
   return (
