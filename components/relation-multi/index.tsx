@@ -1108,8 +1108,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const canImageMode = !!imageField && !!entityType && !!moduleKey;
   const imageMode = canImageMode && viewPref.view === "images";
   const canDropBoard = canImageMode && (canEditRows || (["skus_v2", "parent_skus_v2"].includes(entityType) && can("products.edit" as Parameters<typeof can>[0])));
-  // 📂 จัดรูปหลายโฟลเดอร์ — เฉพาะ SKU ลูกของ Parent SKU (ลิงก์ด้วย id) · ปุ่มหัวตาราง + ช่องโยนหลายรูปในโหมดรูปภาพ
-  const routerParentId = entityType === "skus_v2" && matchField === "id" && recordId && canDropBoard ? recordId : null;
+  // 📂 จัดรูปหลายโฟลเดอร์ — เฉพาะ SKU ลูกของ Parent SKU (ลิงก์ parent_sku_id ด้วย id — Partners ก็มีตาราง SKU แต่ลิงก์ seller_partner_id = ไม่โชว์)
+  const routerParentId = entityType === "skus_v2" && config.target_fk_column === "parent_sku_id" && matchField === "id" && recordId && canDropBoard ? recordId : null;
   const [router, setRouter] = useState<{ open: boolean; files: File[] | null } | null>(null);
   const [editCell, setEditCell] = useState<{ rowId: string; field: string } | null>(null);
   const [editVal, setEditVal] = useState("");
