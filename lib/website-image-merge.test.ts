@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeListingImages } from "./website-image-merge";
+import { applyImageSlots, mergeListingImages } from "./website-image-merge";
 
 const S1 = "11111111-1111-1111-1111-111111111111";
 const S2 = "22222222-2222-2222-2222-222222222222";
@@ -52,5 +52,26 @@ describe("mergeListingImages", () => {
     const { patch } = mergeListingImages({ web_images: null, web_sku_images: null, web_hero: null }, { parentId: "p", gallery: ["n1"], hero: { desktop: "h" } }, ok, "append");
     expect(patch.webImages).toEqual(["n1"]);
     expect(patch.webHero).toEqual({ desktop: { kind: "image", key: "h", posterKey: null }, mobile: null });
+  });
+});
+
+describe("applyImageSlots (แท็บรูปภาพ — ตั้งทั้งช่อง)", () => {
+  it("แทนทั้งช่อง · [] = ล้าง · ช่องอื่นไม่แตะ", () => {
+    const { patch, slots } = applyImageSlots(cur, { parentId: "p", gallery: ["g2", "g1"], skus: { [S1]: [], [S2]: ["n1"] } }, ok);
+    expect(patch.webImages).toEqual(["g2", "g1"]);
+    expect(patch.webSkuImages).toEqual({ [S2]: ["n1"] });
+    expect(patch.webHero).toBeUndefined();
+    expect(slots).toBe(3);
+  });
+  it("Hero: null = เอาออก · วิดีโอ · สีที่ว่างทั้งคู่ = ลบสีนั้น", () => {
+    const withSku = { ...cur, web_hero: { desktop: null, mobile: null, sku: { [S1]: { desktop: { kind: "image", key: "a", posterKey: null }, mobile: null } } } };
+    const { patch } = applyImageSlots(withSku, { parentId: "p", hero: { mobile: { key: "m.mp4", kind: "video" } }, skuHero: { [S1]: { desktop: null }, [OTHER]: { desktop: "x" } } }, ok);
+    expect(patch.webHero?.mobile).toEqual({ kind: "video", key: "m.mp4", posterKey: null });
+    expect(patch.webHero?.sku).toEqual({});
+  });
+  it("ค่าไม่ถูกต้อง = ไม่แตะช่องนั้น", () => {
+    const { patch, slots } = applyImageSlots(cur, { parentId: "p", hero: { desktop: "<bad>" } }, ok);
+    expect(slots).toBe(0);
+    expect(patch.webHero?.desktop).toEqual({ kind: "video", key: "old.mp4", posterKey: "p.jpg" });
   });
 });

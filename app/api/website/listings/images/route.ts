@@ -4,7 +4,8 @@
  *
  * GET  ?shopId=<id>  → แผนที่รูปของทั้งร้าน: ทุกรุ่น (รหัส · รูปบนเว็บ · Hero) + สี (รหัส · ชื่อสี · รูปสี · Hero สี · รหัส SKU ไซส์)
  *                      + ร้านอื่นที่มีรุ่นเดียวกัน (ไว้ติ๊ก "ลงที่ร้านอื่นด้วย")
- * POST { shopIds:[ร้านหลัก, ...ร้านอื่น], mode:"append"|"replace", items:[{ parentId, gallery?, skus?, hero?, skuHero? }] }
+ * POST { shopIds:[ร้านหลัก, ...ร้านอื่น], mode:"append"|"replace"|"set", items:[{ parentId, gallery?, skus?, hero?, skuHero? }] }
+ *      set = ตั้งทั้งช่องตามที่ส่ง (แท็บ 🖼 รูปภาพ ของ ▦ แก้ไขทีละมาก · [] = ล้างช่อง · Hero null = เอาออก) — applyImageSlots
  *      → รวมกับรูปเดิม "ตอนบันทึก" (อ่านค่าล่าสุดใน DB — ไม่ทับของที่คนอื่นเพิ่งแก้) · ต่อท้าย = เดิม + ใหม่ (ตัดเพดาน 12/8) · แทนที่ = ใหม่ทั้งช่อง
  *        Hero ช่องละ 1 รูปเสมอ (ไฟล์ใหม่แทนของเดิม) · ช่องที่ไม่มีรูปใหม่ = ไม่แตะ · รุ่นที่ไม่อยู่ในร้านนั้น = ข้าม (บอกกลับ)
  *      → คืน changes [{ shopId, parentId, before, after }] ไว้ให้ "ย้อนทั้งชุด"
@@ -21,7 +22,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { listingPatchToRow, toKeyList, LISTING_KEY_RE } from "@/lib/website-listing-patch";
 import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
-import { mergeListingImages } from "@/lib/website-image-merge";
+import { applyImageSlots, mergeListingImages, type ImageSlotsSet } from "@/lib/website-image-merge";
 import { baseColor, colorGroups } from "@/lib/website-size-options";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { MAX_WEB_IMAGES, type CatalogParent, type HeroPick, type HeroSlot, type MassImageItem } from "@/lib/website-image-match";
@@ -125,7 +126,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if ((b as { action?: unknown }).action === "undo") return undoChanges((b as { changes?: unknown }).changes, user);
   const shopIds = Array.isArray(b.shopIds) ? [...new Set(b.shopIds.filter((s): s is string => typeof s === "string" && UUID.test(s)))].slice(0, 10) : [];
-  const mode = b.mode === "replace" ? "replace" : "append";
+  // set = แท็บ 🖼 รูปภาพของ ▦ แก้ไขทีละมาก: ตั้งทั้งช่องตามที่เห็น (ลบ/เรียง/ล้างได้) · append/replace = 📸 ลงรูปทีละมาก
+  const mode = b.mode === "replace" ? "replace" : b.mode === "set" ? "set" : "append";
   const items: MassImageItem[] = (Array.isArray(b.items) ? b.items : [])
     .slice(0, 500)
     .map((raw) => {
@@ -163,7 +165,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         skipped.push({ shopId, parentId: it.parentId, reason: "รุ่นนี้ไม่อยู่ในร้านนี้" });
         continue;
       }
-      const { patch, files } = mergeListingImages(r, it, kidOk.get(it.parentId) ?? new Set<string>(), mode);
+      const okIds = kidOk.get(it.parentId) ?? new Set<string>();
+      const { patch, files } =
+        mode === "set" ? (({ patch: p, slots }) => ({ patch: p, files: slots }))(applyImageSlots(r, it as ImageSlotsSet, okIds)) : mergeListingImages(r, it, okIds, mode);
       if (!files) continue;
       jobs.push({
         shopId,

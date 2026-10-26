@@ -8,10 +8,11 @@
  *   ⚠️ ห้ามฝังรายการช่องในไฟล์นี้ — เพิ่มช่องที่ทะเบียน → ขึ้นในตัวเลือกช่องเอง · สิทธิ์เห็น/แก้ + ฟิลด์ลับ ตามทะเบียน (lib/registry-fields)
  *   - ตัวเลือกช่อง = FieldChipsPicker (ของกลาง) · พับเก็บได้ · จำช่องที่เลือก + พับ/กาง ต่อคน (useUserPref)
  *   - วางจาก Excel ได้ทีละหลายช่อง (lib/grid-edit) · ⤓ = ใช้ค่าแถวแรกทั้งคอลัมน์ · ช่องที่เปลี่ยน = สีเหลือง · ผิด = สีแดง
+ * 🖼 แท็บรูปภาพ = components/website-listings-image-grid (Hero/รูปบนเว็บ/รูปสี ของหลายสินค้า · ลาก/เรียง/ย้าย/คลัง/รูป ERP) — กดบันทึกปุ่มเดียวกัน
  * บันทึกครั้งเดียว: ช่องเว็บ → POST /api/website/listings/grid (audit + ล้างแคชเว็บ) · ช่อง ERP → PATCH /api/master-v2/<module>/<id> ตัวกลางเดิม
  *   เกิน 20 แถวต้องพิมพ์ CONFIRM · สรุปสำเร็จ/ไม่สำเร็จรายแถว
  */
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { apiFetch } from "@/lib/api";
 import { cachedJson } from "@/lib/client-cache";
 import { useToast } from "@/components/toast";
@@ -30,6 +31,8 @@ import { coerceCell, erpWriteValue, parseClipboardGrid, sameCell, type GridKind,
 import { listingIssues } from "@/lib/website-listing-health";
 import { PARENT_FIELD_GROUP_LABEL } from "@/lib/website-parent-fields";
 import type { CategoryDef, Listing, ShopInfo } from "@/components/website-listings-panel";
+import { WebsiteListingsImageGrid, type ImageGridHandle } from "@/components/website-listings-image-grid";
+import { WebsiteImageMassUpload } from "@/components/website-image-mass-upload";
 
 type Level = "product" | "color";
 type Source = "web" | "parent" | "sku";
@@ -102,6 +105,12 @@ export function WebsiteListingsGridEdit({
   const [saving, setSaving] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ ok: number; failed: { label: string; error: string }[] } | null>(null);
+  // แท็บ ▦ ข้อมูล / 🖼 รูปภาพ · รูปที่แก้ค้าง (นับช่อง) · โหลดแผนที่รูปใหม่ · ป๊อปลงทั้งโฟลเดอร์
+  const [tab, setTab] = useState<"data" | "images">("data");
+  const imgRef = useRef<ImageGridHandle>(null);
+  const [imgDirty, setImgDirty] = useState(0);
+  const [imgReload, setImgReload] = useState(0);
+  const [folderOpen, setFolderOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useUserPref<boolean>("website_grid_picker_open", true, (v) => (typeof v === "boolean" ? v : null));
   const parseIds = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : null);
   const [prodCols, setProdCols] = useUserPref<string[]>("website_grid_cols_product", [], parseIds);
@@ -259,6 +268,14 @@ export function WebsiteListingsGridEdit({
     return rows.filter((r) => (!scope || scope.has(r.parentId)) && (!onlyFix || fixSet.has(r.parentId)) && (!ql || r.code.toLowerCase().includes(ql) || r.name.toLowerCase().includes(ql)));
   }, [rows, scope, onlyFix, fixSet, q]);
   const page = visible.slice(0, limit);
+  // แท็บรูปภาพใช้ตัวกรองชุดเดียวกัน (ติ๊กไว้ · เฉพาะที่ต้องแก้ · ค้นหา)
+  const imgRowFilter = useCallback(
+    (r: { parentId: string; code: string; name: string }) => {
+      const ql = q.trim().toLowerCase();
+      return (!scope || scope.has(r.parentId)) && (!onlyFix || fixSet.has(r.parentId)) && (!ql || r.code.toLowerCase().includes(ql) || r.name.toLowerCase().includes(ql));
+    },
+    [q, scope, onlyFix, fixSet],
+  );
 
   // ---- โหลด/โหลดเพิ่ม: ระดับที่เปิด + คอลัมน์ ERP ที่เลือก (ที่โหลดไว้แล้วไม่โหลดซ้ำ) ----
   const needP = level === "product" ? shownCols.filter((c) => c.source === "parent").map((c) => c.column as string) : [];
@@ -319,7 +336,8 @@ export function WebsiteListingsGridEdit({
 
   const dirtyCells = Object.values(draft).reduce((n, lv) => n + Object.values(lv).reduce((m, one) => m + Object.keys(one).length, 0), 0);
   const dirtyRows = Object.values(draft).reduce((n, lv) => n + Object.keys(lv).length, 0);
-  const needConfirm = dirtyRows > CONFIRM_OVER;
+  const totalDirty = dirtyCells + imgDirty;
+  const needConfirm = dirtyRows + imgDirty > CONFIRM_OVER;
 
   // ---- วางจาก Excel / เติมทั้งคอลัมน์ ----
   const onPaste = (e: ClipboardEvent<HTMLTableSectionElement>) => {
@@ -399,7 +417,7 @@ export function WebsiteListingsGridEdit({
       setErrors(errs);
       return setErr(`มี ${Object.keys(errs).length} ช่องที่ต้องแก้ก่อนบันทึก (ช่องสีแดง — ชี้เพื่อดูเหตุผล)`);
     }
-    if (needConfirm && typed !== "CONFIRM") return setErr(`แก้ ${dirtyRows} แถวพร้อมกัน — พิมพ์ CONFIRM ก่อนบันทึก`);
+    if (needConfirm && typed !== "CONFIRM") return setErr(`แก้ ${dirtyRows + imgDirty} รายการพร้อมกัน — พิมพ์ CONFIRM ก่อนบันทึก`);
 
     const failed: { label: string; error: string }[] = [];
     let ok = 0;
@@ -447,6 +465,13 @@ export function WebsiteListingsGridEdit({
       }
     };
     await Promise.all(Array.from({ length: SAVE_CONCURRENCY }, worker));
+    // 🖼 รูปที่แก้ในแท็บรูปภาพ
+    if (imgRef.current?.dirty()) {
+      setSaving("กำลังบันทึกรูป…");
+      const ir = await imgRef.current.save();
+      ok += ir.ok;
+      failed.push(...ir.failed);
+    }
     setSaving(null);
 
     // ล้างช่องที่บันทึกแล้ว (แถวที่พลาดคงไว้ให้แก้ต่อ)
@@ -572,17 +597,17 @@ export function WebsiteListingsGridEdit({
             บันทึกแล้ว {result.ok} รายการ{result.failed.length ? ` · ไม่สำเร็จ ${result.failed.length}: ${result.failed.slice(0, 4).map((f) => `${f.label} (${f.error})`).join(" · ")}` : " — เว็บเปลี่ยนตามทันที"}
           </span>
         ) : (
-          <span className="text-slate-500">{dirtyCells ? `แก้ ${dirtyCells} ช่อง · ${dirtyRows} แถว — ช่องสีเหลือง = ยังไม่บันทึก` : "ยังไม่ได้แก้อะไร"}</span>
+          <span className="text-slate-500">{totalDirty ? `แก้${dirtyCells ? ` ข้อมูล ${dirtyCells} ช่อง (${dirtyRows} แถว)` : ""}${imgDirty ? ` รูป ${imgDirty} ช่อง` : ""} — ช่องสีเหลือง = ยังไม่บันทึก` : "ยังไม่ได้แก้อะไร"}</span>
         )}
       </div>
       {needConfirm && !busy && <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="พิมพ์ CONFIRM" className="h-9 w-36 rounded-lg border border-rose-300 px-2 font-mono text-sm" />}
-      {dirtyCells > 0 && !busy && (
-        <button type="button" onClick={() => { setDraft({ product: {}, color: {} }); setErrors({}); setErr(null); }} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">
+      {totalDirty > 0 && !busy && (
+        <button type="button" onClick={() => { setDraft({ product: {}, color: {} }); imgRef.current?.discard(); setErrors({}); setErr(null); }} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">
           ยกเลิกที่แก้
         </button>
       )}
-      <button type="button" onClick={() => void save()} disabled={busy || !dirtyCells || (needConfirm && typed !== "CONFIRM")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-        {busy ? "กำลังบันทึก…" : dirtyCells ? `บันทึก ${dirtyCells} ช่อง` : "บันทึก"}
+      <button type="button" onClick={() => void save()} disabled={busy || !totalDirty || (needConfirm && typed !== "CONFIRM")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
+        {busy ? "กำลังบันทึก…" : totalDirty ? `บันทึก ${totalDirty} ช่อง` : "บันทึก"}
       </button>
     </div>
   );
@@ -595,7 +620,7 @@ export function WebsiteListingsGridEdit({
       title={`▦ แก้ไขทีละมาก — ${shop.name}`}
       description={scope ? `เฉพาะ ${scope.size} รายการที่ติ๊กไว้ · ช่องจากทะเบียนฟิลด์กลาง` : "แก้ได้ทุกแถว ค่าต่างกันได้ · ช่องจากทะเบียนฟิลด์กลาง · วางจาก Excel ได้"}
       size="xl"
-      hasUnsavedChanges={dirtyCells > 0}
+      hasUnsavedChanges={totalDirty > 0}
       closeOnBackdrop={false}
       footer={footer}
     >
@@ -616,6 +641,30 @@ export function WebsiteListingsGridEdit({
           </label>
         </div>
 
+        {/* แท็บ */}
+        <div className="flex gap-1 border-b border-slate-200">
+          {([["data", "▦ ข้อมูล", dirtyCells], ["images", "🖼 รูปภาพ", imgDirty]] as const).map(([k, label, n]) => (
+            <button key={k} type="button" onClick={() => setTab(k)} className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === k ? "border-blue-600 font-medium text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+              {label}
+              {n > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">{n}</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* 🖼 รูปภาพ — คงไว้ตลอด (ซ่อนเมื่ออยู่แท็บข้อมูล) ไม่ให้รูปที่แก้ค้างหาย */}
+        <div className={tab === "images" ? "" : "hidden"}>
+          <WebsiteListingsImageGrid
+            ref={imgRef}
+            shopId={shop.id}
+            level={level}
+            listings={listings}
+            rowFilter={imgRowFilter}
+            onDirtyChange={setImgDirty}
+            onOpenFolderUpload={() => setFolderOpen(true)}
+            reloadKey={imgReload}
+          />
+        </div>
+        {tab === "data" && (<>
         {/* ตัวเลือกช่อง (พับได้ · จำต่อคน) */}
         <div className="rounded-xl border border-slate-200 bg-slate-50/60">
           <button type="button" onClick={() => setPickerOpen(!pickerOpen)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700">
@@ -726,6 +775,11 @@ export function WebsiteListingsGridEdit({
           วางจาก Excel ได้ทีละหลายช่อง (คลิกช่องเริ่มแล้ว Ctrl+V) · ⤓ ที่หัวคอลัมน์ = ใช้ค่าแถวแรกกับทุกแถวที่เห็น · ช่องเว็บว่าง = ใช้ค่าอัตโนมัติ (ตัวจาง) · ช่อง 📦/🎨 แก้ที่ ERP จริง ทุกร้าน/ทุกหน้าเห็นค่าใหม่ ·
           บันทึกประวัติทุกช่อง
         </p>
+        </>)}
+        {/* 📁 ลงทั้งโฟลเดอร์ (ระบบ 📸 ลงรูปทีละมากเดิม) → เสร็จแล้วโหลดแผนที่รูปใหม่ */}
+        {folderOpen && (
+          <WebsiteImageMassUpload open onClose={() => setFolderOpen(false)} shop={shop} scopeIds={scopeIds} onDone={async () => { setImgReload((n) => n + 1); await onDone(); }} />
+        )}
       </div>
     </ERPModal>
   );
